@@ -337,7 +337,8 @@ async def _wait_for_element(
 
 
 # JS that extracts all visible tweets and their current metrics.
-# Returns a JSON string of [{tweet_id, username, content, time, replies, reposts, likes, views}].
+# Returns a JSON string of [{tweet_id, username, content, article_url, time, replies, reposts, likes, views}].
+# article_url is non-empty when the tweet is an X Article (long-form post) with no tweetText.
 # Uses optional chaining (?.) throughout to avoid TypeError when elements are absent.
 _EXTRACT_TWEETS_JS = r"""
 (function() {
@@ -355,7 +356,6 @@ _EXTRACT_TWEETS_JS = r"""
     else if (u === '亿') n *= 1e8;
     return Math.round(n);
   }
-  // reply/like: aria-label has the count ("5 Replies"), analytics: only "View analytics"
   function actionCount(el, testId) {
     var btn = el.querySelector('[data-testid="' + testId + '"]');
     if (!btn) return 0;
@@ -364,26 +364,19 @@ _EXTRACT_TWEETS_JS = r"""
     if (n > 0) return n;
     return parseCount(btn.innerText || btn.textContent || '');
   }
-  // Views: X uses different DOM across languages. Check aria-labels for the count.
-  // Chinese X uses "5124 次查看。查看帖子分析" or combined "N 次观看" in a group label.
   function viewCount(el) {
     var allEls = el.querySelectorAll('[aria-label]');
     for (var i = 0; i < allEls.length; i++) {
       var lbl = allEls[i].getAttribute('aria-label') || '';
-      // Chinese: "5124 次查看。查看帖子分析"
       var m = lbl.match(/^([\d,\.]+[KkMmBb]?)\s*次查看/);
       if (m) return parseCount(m[1]);
-      // English: "5124 Views. View post analytics"
       m = lbl.match(/^([\d,\.]+[KkMmBb]?)\s+[Vv]iews?\./);
       if (m) return parseCount(m[1]);
-      // Combined group label: "14 回复、13 次转帖、56 喜欢、90 书签、5124 次观看"
       m = lbl.match(/([\d,\.]+[KkMmBb]?)\s*次观看/);
       if (m) return parseCount(m[1]);
-      // English combined: "5124 views"
       m = lbl.match(/([\d,\.]+[KkMmBb]?)\s+[Vv]iews?(?:[,、]|$)/);
       if (m) return parseCount(m[1]);
     }
-    // Fallback: analytics button innerText (English X)
     var btn = el.querySelector('[data-testid="analytics"]');
     if (btn) {
       var spans = btn.querySelectorAll('span');
@@ -393,6 +386,25 @@ _EXTRACT_TWEETS_JS = r"""
       }
     }
     return 0;
+  }
+  // Detect X Article card and return its URL.
+  // X Articles appear as cards linking to /i/article/ or /i/notes/ with no tweetText.
+  function articleUrl(el) {
+    var links = el.querySelectorAll('a[href]');
+    for (var i = 0; i < links.length; i++) {
+      var href = links[i].href || '';
+      if (/\/i\/article\/|\/i\/notes\//.test(href)) return href;
+    }
+    // Fallback: card wrapper with a link that is NOT an external site card
+    var card = el.querySelector('[data-testid="card.wrapper"] a[href]');
+    if (card) {
+      var h = card.href || '';
+      // Only treat as article if the link is within x.com
+      if (/^https?:\/\/(www\.)?(x|twitter)\.com\//.test(h) && h.includes('/status/') === false) {
+        return h;
+      }
+    }
+    return '';
   }
   var results = [];
   document.querySelectorAll('[data-testid="tweet"]').forEach(function(el) {
@@ -408,10 +420,13 @@ _EXTRACT_TWEETS_JS = r"""
         username = parts[parts.length - 1] || '';
       }
       var timeEl = el.querySelector('time');
+      var content = el.querySelector('[data-testid="tweetText"]')?.innerText || '';
+      var artUrl = content ? '' : articleUrl(el);
       results.push({
         tweet_id: m[1],
         username: username,
-        content: el.querySelector('[data-testid="tweetText"]')?.innerText || '',
+        content: content,
+        article_url: artUrl,
         time: timeEl ? timeEl.getAttribute('datetime') : '',
         replies: actionCount(el, 'reply'),
         reposts: actionCount(el, 'retweet'),
@@ -423,6 +438,72 @@ _EXTRACT_TWEETS_JS = r"""
   return JSON.stringify(results);
 })()
 """
+
+# JS to extract full content from an X Article page (x.com/i/article/... or /i/notes/...).
+_EXTRACT_ARTICLE_JS = r"""
+(function() {
+  // Title: X Articles use a prominent heading
+  var title = '';
+  var titleEl = document.querySelector(
+    '[data-testid="article-title"] span, ' +
+    '[data-testid="article-header"] h1, ' +
+    'article h1, h1[role="heading"]'
+  );
+  if (titleEl) title = titleEl.innerText.trim();
+
+  // Body: collect all text nodes in the article content area
+  var body = '';
+  var bodyEl = document.querySelector(
+    '[data-testid="article-body"], ' +
+    '[data-testid="article-content"], ' +
+    'article [role="article"], ' +
+    'div[data-contents="true"]'
+  );
+  if (bodyEl) {
+    body = bodyEl.innerText.trim();
+  } else {
+    // Fallback: grab all paragraphs inside the main article region
+    var paras = document.querySelectorAll('article p, [role="article"] p, main p');
+    body = Array.from(paras)
+      .map(function(p) { return p.innerText.trim(); })
+      .filter(Boolean)
+      .join('\n\n');
+  }
+
+  var combined = [title, body].filter(Boolean).join('\n\n');
+  return JSON.stringify({ title: title, body: combined });
+})()
+"""
+
+
+# ── Article content fetcher ───────────────────────────────────────────────────
+
+async def _fetch_article_content(
+    client: httpx.AsyncClient,
+    base: str,
+    headers: dict,
+    user_id: str,
+    article_url: str,
+) -> str:
+    """Open an X Article URL in a new tab and extract the full article text."""
+    tab_id = ""
+    try:
+        tab_id = await _create_tab(client, base, headers, user_id, article_url)
+        # Articles take a moment to render their content
+        await _asyncio.sleep(3)
+        raw = await _evaluate(client, base, tab_id, user_id, _EXTRACT_ARTICLE_JS)
+        if raw:
+            data = json.loads(raw)
+            return (data.get("body") or "").strip()
+    except Exception as e:
+        print(f"[x] article fetch failed for {article_url}: {e}")
+    finally:
+        if tab_id:
+            try:
+                await client.delete(f"{base}/tabs/{tab_id}", headers=headers)
+            except Exception:
+                pass
+    return ""
 
 
 # ── Parsing helpers ───────────────────────────────────────────────────────────
@@ -659,7 +740,15 @@ async def _collect_x_timeline_inner(db: AsyncSession) -> dict:
 
                 uname = (t.get("username") or "").lower()
                 content = t.get("content") or ""
+                art_url = t.get("article_url") or ""
                 af = known_followers.get(uname, 0)
+
+                # X Article: tweetText is empty; fetch full content from article page
+                if not content and art_url:
+                    print(f"[x] fetching X article content for tweet {tid}: {art_url}")
+                    content = await _fetch_article_content(client, base, headers, user_id, art_url)
+                    if content:
+                        print(f"[x] article fetched: {len(content)} chars")
 
                 # Upsert post; if author_followers later becomes known, update it
                 stmt = _si(XPost).values(
@@ -749,6 +838,21 @@ async def _collect_x_timeline_inner(db: AsyncSession) -> dict:
                         )
                         print(f"[x] metrics @{post.username}/{post.tweet_id}: "
                               f"🔁{match.get('reposts',0)} ♥{match.get('likes',0)} 👁{match.get('views',0)}")
+
+                        # Backfill article content if the post was stored empty
+                        art_url = match.get("article_url") or ""
+                        if not post.content and art_url:
+                            print(f"[x] backfilling article content for {post.tweet_id}")
+                            art_content = await _fetch_article_content(
+                                client, base, headers, user_id, art_url
+                            )
+                            if art_content:
+                                await db.execute(
+                                    _update(XPost)
+                                    .where(XPost.tweet_id == post.tweet_id)
+                                    .values(content=art_content)
+                                )
+                                print(f"[x] article backfilled: {len(art_content)} chars")
                 except Exception as e:
                     print(f"[x] metrics refresh failed for {post.tweet_id}: {e}")
 
