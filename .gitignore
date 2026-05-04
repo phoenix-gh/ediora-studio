@@ -1,0 +1,38 @@
+# ── Python ──────────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# ── Database & secrets ──────────────────────────────────
+*.db
+*.sqlite
+*.sqlite3
+backend/.env
+.env
+.env.local
+.env.*.local
+
+# ── Backend runtime artifacts ───────────────────────────
+backend/avatars/
+backend/uploads/
+
+# ── Node / pnpm ─────────────────────────────────────────
+node_modules/
+.pnpm-store/
+wemedia-studio/node_modules/
+wemedia-studio/.next/
+wemedia-studio/out/
+wemedia-studio/.turbo/
+wemedia-studio/tsconfig.tsbuildinfo
+
+# ── System ──────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+*.log
