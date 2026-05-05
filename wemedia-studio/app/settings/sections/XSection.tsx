@@ -54,8 +54,6 @@ export function XSection({ settings, onSaved }: { settings: AppSettings | null; 
 
   // action states
   const [saving, setSaving]               = useState(false)
-  const [vncLoading, setVncLoading]       = useState(false)
-  const [importLoading, setImportLoading] = useState(false)
   const [timelineLoading, setTimelineLoading] = useState(false)
 
   async function handleSave() {
@@ -136,46 +134,16 @@ export function XSection({ settings, onSaved }: { settings: AppSettings | null; 
 
       {/* ── 登录 / 会话 ────────────────────────────────────────── */}
       <Sub title="登录 &amp; 会话">
-        {/* VNC login flow */}
+        {/* Login shortcut */}
         <div className="flex items-center gap-3 p-3 rounded-lg bg-zinc-50 dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-700">
           <div className="flex-1 min-w-0">
-            <p className="text-xs font-medium text-zinc-700 dark:text-zinc-300">VNC 登录流程</p>
-            <p className="text-[11px] text-zinc-400 mt-0.5">先「打开登录页」→ VNC 界面手动登录 → 再「导入登录状态」</p>
+            <p className="text-xs font-medium text-zinc-700 dark:text-zinc-300">打开 X 登录</p>
+            <p className="text-[11px] text-zinc-400 mt-0.5">在浏览器完成登录后，从 DevTools 复制 Cookie 粘贴到下方</p>
           </div>
-          <div className="flex gap-2 flex-shrink-0">
-            <Button type="button" variant="outline" size="sm" disabled={vncLoading} className="text-xs gap-1.5"
-              onClick={async () => {
-                setVncLoading(true)
-                try {
-                  const res = await fetch(`${API}/x/open-login`, { method: 'POST' })
-                  const data = await res.json()
-                  if (data.ok) {
-                    window.open(data.novnc_url || novncUrl, '_blank')
-                    toast.success('已在 camofox 中打开登录页，请在 VNC 窗口完成登录')
-                  } else toast.error(`打开失败：${data.error}`)
-                } catch (e) { toast.error(`请求失败：${e}`) }
-                finally { setVncLoading(false) }
-              }}>
-              {vncLoading && <Loader2 className="w-3 h-3 animate-spin" />}
-              打开登录页
-            </Button>
-            <Button type="button" size="sm" disabled={importLoading} className="text-xs gap-1.5"
-              onClick={async () => {
-                setImportLoading(true)
-                try {
-                  const res = await fetch(`${API}/x/import-session`, { method: 'POST' })
-                  const data = await res.json()
-                  if (data.ok) {
-                    toast.success(`已导入 ${data.cookie_count} 个 Cookie`)
-                    window.location.reload()
-                  } else toast.error(`导入失败：${data.error}`)
-                } catch (e) { toast.error(`请求失败：${e}`) }
-                finally { setImportLoading(false) }
-              }}>
-              {importLoading && <Loader2 className="w-3 h-3 animate-spin" />}
-              导入登录状态
-            </Button>
-          </div>
+          <Button type="button" variant="outline" size="sm" className="text-xs gap-1.5 flex-shrink-0"
+            onClick={() => window.open('https://x.com/i/flow/login', '_blank')}>
+            打开登录页
+          </Button>
         </div>
 
         {/* Open timeline */}

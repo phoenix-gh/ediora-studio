@@ -29,8 +29,14 @@ const STATUS_DOT: Record<string, string> = {
 }
 
 function formatTime(iso: string) {
-  const d = new Date(iso)
-  return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  // Backend returns naive UTC strings (no Z / +00:00); append Z so JS parses as UTC
+  const utc = /Z|[+-]\d{2}:\d{2}$/.test(iso) ? iso : iso + 'Z'
+  const d = new Date(utc)
+  return d.toLocaleString('zh-CN', {
+    month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+    hour12: false,
+  })
 }
 
 export function LogsSection() {
@@ -91,7 +97,7 @@ export function LogsSection() {
                   )}
                   onClick={() => log.detail && setExpanded(expanded === log.id ? null : log.id)}
                 >
-                  <span className="text-zinc-600 flex-shrink-0 tabular-nums w-16">{formatTime(log.created_at)}</span>
+                  <span className="text-zinc-600 flex-shrink-0 tabular-nums w-28">{formatTime(log.created_at)}</span>
                   <span className={cn('flex-shrink-0 w-14 text-center', JOB_COLOR[log.job] ?? 'text-zinc-400')}>
                     {JOB_LABEL[log.job] ?? log.job}
                   </span>

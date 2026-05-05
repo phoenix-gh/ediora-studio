@@ -96,7 +96,8 @@ function formatCount(n: number): string {
 }
 
 function formatRelTime(iso: string): string {
-  const diff = (Date.now() - new Date(iso).getTime()) / 1000
+  const utc = /Z|[+-]\d{2}:\d{2}$/.test(iso) ? iso : iso + 'Z'
+  const diff = (Date.now() - new Date(utc).getTime()) / 1000
   if (diff < 60) return `${Math.round(diff)}s 前`
   if (diff < 3600) return `${Math.round(diff / 60)}m 前`
   if (diff < 86400) return `${Math.round(diff / 3600)}h 前`
@@ -247,6 +248,7 @@ export function XPostsPanel({ initialPosts }: { initialPosts: XPost[] }) {
                       </span>
                     )}
                     <span className="text-[10px] text-zinc-400">{formatRelTime(post.published_at)}</span>
+                    <span className="text-[10px] text-zinc-500">· 收录 {formatRelTime(post.collected_at)}</span>
                     {post.is_viral && (
                       <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-orange-100 dark:bg-orange-950/50 text-orange-600 dark:text-orange-400 text-[10px] font-medium">
                         <Flame className="w-2.5 h-2.5" />

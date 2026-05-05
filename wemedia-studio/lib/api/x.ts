@@ -27,6 +27,7 @@ export interface XPost {
   content: string
   url: string
   published_at: string
+  collected_at: string
   author_followers: number
   latest_replies: number
   latest_reposts: number

@@ -311,6 +311,57 @@ async def import_session_from_camofox() -> dict:
 import asyncio as _asyncio
 
 
+# JS that prevents video/audio playback.
+# DNS blocks video.twimg.com so downloads are already stopped at network level.
+# Here we only need to silence playback — do NOT remove src or call load(),
+# as those trigger React error events that break X's timeline lazy-loading.
+_DISABLE_VIDEO_JS = r"""
+(function() {
+  function muteMedia(node) {
+    if (!node || node.nodeType !== 1) return;
+    var targets = (node.tagName === 'VIDEO' || node.tagName === 'AUDIO') ? [node] : [];
+    if (node.querySelectorAll) {
+      node.querySelectorAll('video,audio').forEach(function(el) { targets.push(el); });
+    }
+    targets.forEach(function(m) {
+      m.muted = true;
+      try { m.pause(); } catch(e) {}
+    });
+  }
+
+  HTMLMediaElement.prototype.play = function() { this.muted = true; return Promise.resolve(); };
+
+  muteMedia(document.documentElement);
+
+  if (!window.__mediaObserverActive) {
+    window.__mediaObserverActive = true;
+    new MutationObserver(function(muts) {
+      muts.forEach(function(mut) { mut.addedNodes.forEach(muteMedia); });
+    }).observe(document.documentElement, {childList: true, subtree: true});
+  }
+})()
+"""
+
+# Same lightweight version for repeated calls during scrolling.
+_KILL_MEDIA_JS = _DISABLE_VIDEO_JS
+
+
+async def _suppress_media(client: httpx.AsyncClient, base: str, tab_id: str, user_id: str):
+    """Block video/audio downloads in a tab. Sets up observer + kills existing elements."""
+    try:
+        await _evaluate(client, base, tab_id, user_id, _DISABLE_VIDEO_JS)
+    except Exception:
+        pass
+
+
+async def _kill_media(client: httpx.AsyncClient, base: str, tab_id: str, user_id: str):
+    """Kill currently-present media elements (fast, no observer re-setup)."""
+    try:
+        await _evaluate(client, base, tab_id, user_id, _KILL_MEDIA_JS)
+    except Exception:
+        pass
+
+
 async def _wait_for_element(
     client: httpx.AsyncClient,
     base: str,
@@ -419,12 +470,27 @@ _EXTRACT_TWEETS_JS = r"""
         var parts = userLink.href.replace(/\/$/, '').split('/');
         username = parts[parts.length - 1] || '';
       }
+      // Display name: first span inside User-Name block (before @handle)
+      var nameBlock = el.querySelector('[data-testid="User-Name"]');
+      var displayName = '';
+      if (nameBlock) {
+        var spans = nameBlock.querySelectorAll('span');
+        for (var si = 0; si < spans.length; si++) {
+          var st = (spans[si].innerText || spans[si].textContent || '').trim();
+          if (st && !st.startsWith('@')) { displayName = st; break; }
+        }
+      }
+      // Avatar URL
+      var avatarImg = el.querySelector('img[src*="profile_images"]');
+      var avatarUrl = avatarImg ? avatarImg.src : '';
       var timeEl = el.querySelector('time');
       var content = el.querySelector('[data-testid="tweetText"]')?.innerText || '';
       var artUrl = content ? '' : articleUrl(el);
       results.push({
         tweet_id: m[1],
         username: username,
+        display_name: displayName,
+        avatar_url: avatarUrl,
         content: content,
         article_url: artUrl,
         time: timeEl ? timeEl.getAttribute('datetime') : '',
@@ -489,7 +555,7 @@ async def _fetch_article_content(
     tab_id = ""
     try:
         tab_id = await _create_tab(client, base, headers, user_id, article_url)
-        # Articles take a moment to render their content
+        await _suppress_media(client, base, tab_id, user_id)
         await _asyncio.sleep(3)
         raw = await _evaluate(client, base, tab_id, user_id, _EXTRACT_ARTICLE_JS)
         if raw:
@@ -669,9 +735,12 @@ async def _collect_x_timeline_inner(db: AsyncSession) -> dict:
             # All raw tweet dicts collected this run (deduplicated by tweet_id)
             seen_tweets: dict[str, dict] = {}
 
+            await _suppress_media(client, base, tab_id, user_id)
+
             # Force a hard reload to ensure fresh timeline content (not cached)
             await _evaluate(client, base, tab_id, user_id, "window.location.reload()")
             await _asyncio.sleep(3)
+            await _suppress_media(client, base, tab_id, user_id)
 
             # Wait until tweets are present in the DOM (up to 15 s)
             loaded = await _wait_for_element(
@@ -679,6 +748,13 @@ async def _collect_x_timeline_inner(db: AsyncSession) -> dict:
             )
             if not loaded:
                 await _asyncio.sleep(3)  # fallback grace period
+            if not loaded:
+                page_title = await _evaluate(client, base, tab_id, user_id, "document.title")
+                page_url   = await _evaluate(client, base, tab_id, user_id, "location.href")
+                tweet_count = await _evaluate(client, base, tab_id, user_id,
+                    "document.querySelectorAll('[data-testid=\"tweet\"]').length")
+                print(f"[x] warn: tweets not ready — title={page_title!r} url={page_url!r} dom_tweets={tweet_count}")
+            await _kill_media(client, base, tab_id, user_id)
 
             # Scroll and collect
             for scroll_i in range(timeline_scrolls):
@@ -707,20 +783,26 @@ async def _collect_x_timeline_inner(db: AsyncSession) -> dict:
                 for u in _extract_usernames(snap):
                     usernames.add(u)
 
-                await _scroll(client, base, tab_id, headers)
-                # Wait for new content to load after scroll
-                await _asyncio.sleep(2)
+                # Scroll to bottom via JS — more reliable than camofox scroll API
+                # for triggering X's IntersectionObserver infinite-load sentinel.
+                await _evaluate(client, base, tab_id, user_id,
+                    "window.scrollTo(0, document.body.scrollHeight)")
+                await _asyncio.sleep(3)
+                await _kill_media(client, base, tab_id, user_id)
 
             print(f"[x] found {len(usernames)} unique usernames, {len(seen_tweets)} tweets total")
 
             # ── Store recent posts + metrics ───────────────────────────────
-            # Pre-load follower counts for post authors already in the candidate DB
+            # Pre-load existing candidate rows so we can (a) use their follower
+            # counts and (b) skip re-inserting candidates we already know.
             post_authors = {(t.get("username") or "").lower() for t in seen_tweets.values() if t.get("username")}
             known_followers: dict[str, int] = {}
+            known_candidates: set[str] = set()
             for uname in post_authors:
                 row = await db.get(XBloggerCandidate, uname)
                 if row:
                     known_followers[uname] = row.followers
+                    known_candidates.add(uname)
 
             cutoff = now.timestamp() - post_window_hours * 3600
             skipped_old = 0
@@ -776,6 +858,29 @@ async def _collect_x_timeline_inner(db: AsyncSession) -> dict:
                           f"♥{t.get('likes',0)} 👁{t.get('views',0)}"
                           + (" 🔥viral" if viral else ""))
 
+                # Register author as candidate inline — no separate profile visit needed.
+                if uname and uname not in known_candidates:
+                    display_name = (t.get("display_name") or "").strip() or uname
+                    avatar_url   = (t.get("avatar_url") or "").strip() or f"https://unavatar.io/x/{uname}"
+                    await db.execute(
+                        _si(XBloggerCandidate).values(
+                            username=uname,
+                            display_name=display_name,
+                            avatar_url=avatar_url,
+                            followers=af,
+                            bio="",
+                            profile_url=f"https://x.com/{uname}",
+                            status="candidate",
+                            added_at=now,
+                            last_seen_at=now,
+                        ).on_conflict_do_update(
+                            index_elements=["username"],
+                            set_={"last_seen_at": now, "display_name": display_name,
+                                  "avatar_url": avatar_url},
+                        )
+                    )
+                    known_candidates.add(uname)
+
                 # Always record metrics snapshot for recent posts
                 await db.execute(
                     _si(XPostMetrics).values(
@@ -810,6 +915,7 @@ async def _collect_x_timeline_inner(db: AsyncSession) -> dict:
                     post_tab = await _create_tab(
                         client, base, headers, user_id, post.url
                     )
+                    await _suppress_media(client, base, post_tab, user_id)
                     loaded = await _wait_for_element(
                         client, base, post_tab, user_id,
                         '[data-testid="tweet"]', timeout=12, min_count=1
@@ -855,96 +961,6 @@ async def _collect_x_timeline_inner(db: AsyncSession) -> dict:
                                 print(f"[x] article backfilled: {len(art_content)} chars")
                 except Exception as e:
                     print(f"[x] metrics refresh failed for {post.tweet_id}: {e}")
-
-            await db.commit()
-
-            # ── Discover new blogger candidates ────────────────────────────
-            _rows = await db.execute(_select(XBloggerCandidate.username))
-            known: set[str] = set(_rows.scalars().all())
-
-            for username in usernames:
-                if username in known:
-                    continue
-
-                checked += 1
-                prof_snap = ""
-                try:
-                    prof_tab = await _create_tab(
-                        client, base, headers, user_id, f"https://x.com/{username}"
-                    )
-                    loaded = await _wait_for_element(
-                        client, base, prof_tab, user_id,
-                        '[data-testid="UserName"]', timeout=12
-                    )
-                    if not loaded:
-                        await _asyncio.sleep(3)
-                    try:
-                        prof_snap = await _snapshot(client, base, prof_tab, headers, user_id)
-                    except Exception:
-                        prof_tab = await _create_tab(
-                            client, base, headers, user_id, f"https://x.com/{username}"
-                        )
-                        await _wait_for_element(
-                            client, base, prof_tab, user_id,
-                            '[data-testid="UserName"]', timeout=12
-                        )
-                        prof_snap = await _snapshot(client, base, prof_tab, headers, user_id)
-
-                    prof_bio = await _evaluate(
-                        client, base, prof_tab, user_id,
-                        "document.querySelector('[data-testid=\"UserDescription\"]')?.innerText || ''"
-                    )
-                    prof_display = await _evaluate(
-                        client, base, prof_tab, user_id,
-                        "(document.querySelector('[data-testid=\"UserName\"] span:first-child')"
-                        " || document.querySelector('h1[role=\"heading\"] span:first-child')"
-                        " || document.querySelector('h2[role=\"heading\"] span:first-child'))"
-                        "?.innerText || ''"
-                    )
-                    prof_avatar = await _evaluate(
-                        client, base, prof_tab, user_id,
-                        "document.querySelector('[data-testid=\"UserAvatar-Container-" + username + "\"] img,"
-                        " [data-testid^=\"UserAvatar-Container\"] img')?.src || ''"
-                    )
-                    await client.delete(f"{base}/tabs/{prof_tab}", headers=headers)
-                except Exception as e:
-                    print(f"[x] profile fetch failed for @{username}: {e}")
-                    continue
-
-                followers = _parse_followers(prof_snap)
-                if followers is None:
-                    print(f"[x] could not parse followers for @{username}")
-                    continue
-
-                print(f"[x] @{username} followers={followers}")
-
-                # Backfill author_followers on any posts by this user that we collected
-                # this run (useful when user wasn't in candidates DB yet)
-                await db.execute(
-                    _update(XPost)
-                    .where(XPost.username == username)
-                    .where(XPost.author_followers == 0)
-                    .values(author_followers=followers)
-                )
-
-                if followers >= threshold:
-                    display_name = prof_display.strip() or _parse_display_name(prof_snap, username)
-                    avatar_url = prof_avatar.strip() or f"https://unavatar.io/x/{username}"
-                    await db.execute(
-                        _sqlite_insert(XBloggerCandidate).values(
-                            username=username,
-                            display_name=display_name,
-                            avatar_url=avatar_url,
-                            followers=followers,
-                            bio=prof_bio,
-                            profile_url=f"https://x.com/{username}",
-                            status="candidate",
-                            added_at=now,
-                            last_seen_at=now,
-                        ).on_conflict_do_nothing(index_elements=["username"])
-                    )
-                    new_candidates += 1
-                    print(f"[x] added candidate @{username} ({followers:,} followers)")
 
             await db.commit()
 

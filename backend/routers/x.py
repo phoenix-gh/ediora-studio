@@ -154,6 +154,7 @@ class PostWithMetrics(BaseModel):
     content: str
     url: str
     published_at: datetime
+    collected_at: datetime
     author_followers: int
     latest_replies: int
     latest_reposts: int
@@ -202,6 +203,7 @@ async def list_posts(
             content=post.content,
             url=post.url,
             published_at=post.published_at,
+            collected_at=post.collected_at,
             author_followers=af,
             latest_replies=latest.replies if latest else 0,
             latest_reposts=latest.reposts if latest else 0,
