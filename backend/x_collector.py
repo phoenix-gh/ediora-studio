@@ -154,26 +154,35 @@ async def _search_tweets(query: str, api_key: str, count: int = 20) -> list[dict
 
 
 async def _get_user_info(username: str, api_key: str) -> dict | None:
-    """Fetch profile info for a username. Returns normalised dict or None."""
-    try:
-        data = await _api_get(
-            "/twitter/user/info",
-            {"userName": username},
-            api_key,
-        )
-        user = data.get("data") or data.get("user") or data
-        if not isinstance(user, dict):
+    """Fetch profile info for a username. Returns normalised dict or None.
+
+    Response: {"status": "success", "data": {"userName": ..., "description": ..., ...}}
+    Retries once on 429 after a short back-off.
+    """
+    for attempt in range(2):
+        try:
+            data = await _api_get("/twitter/user/info", {"userName": username}, api_key)
+            user = data.get("data") or {}
+            if not isinstance(user, dict) or not user.get("userName"):
+                return None
+            return {
+                "username": user["userName"].lower(),
+                "display_name": (user.get("name") or username)[:100],
+                "avatar_url": (user.get("profilePicture") or f"https://unavatar.io/x/{username}"),
+                "followers": int(user.get("followers") or 0),
+                "bio": (user.get("description") or "")[:400],
+            }
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 429 and attempt == 0:
+                print(f"[x] user info 429 for @{username}, retrying in 3s")
+                await _asyncio.sleep(3)
+            else:
+                print(f"[x] user info HTTP error for @{username}: {e.response.status_code}")
+                return None
+        except Exception as e:
+            print(f"[x] user info error for @{username}: {e}")
             return None
-        return {
-            "username": (user.get("userName") or user.get("screen_name") or username).lower(),
-            "display_name": (user.get("name") or username)[:100],
-            "avatar_url": user.get("avatar") or user.get("profile_image_url") or f"https://unavatar.io/x/{username}",
-            "followers": int(user.get("followers") or user.get("followers_count") or 0),
-            "bio": (user.get("description") or "")[:400],
-        }
-    except Exception as e:
-        print(f"[x] user info error for @{username}: {e}")
-        return None
+    return None
 
 
 # ── Main collection function ──────────────────────────────────────────────────
@@ -261,13 +270,21 @@ async def _collect_inner(db: AsyncSession) -> dict:
         # ── Upsert candidate ──────────────────────────────────────────────────
         if uname not in known_candidates:
             if followers >= threshold:
+                # Fetch accurate profile (bio / avatar) from user info endpoint
+                await _asyncio.sleep(0.5)
+                info = await _get_user_info(uname, api_key)
+                display_name = (info and info["display_name"]) or t["display_name"]
+                avatar_url   = (info and info["avatar_url"])   or t["avatar_url"]
+                bio          = (info and info["bio"])          or t["bio"]
+                actual_followers = (info and info["followers"]) or followers
+
                 await db.execute(
                     _sqlite_insert(XBloggerCandidate).values(
                         username=uname,
-                        display_name=t["display_name"],
-                        avatar_url=t["avatar_url"],
-                        followers=followers,
-                        bio=t["bio"],
+                        display_name=display_name,
+                        avatar_url=avatar_url,
+                        followers=actual_followers,
+                        bio=bio,
                         profile_url=f"https://x.com/{uname}",
                         status="candidate",
                         added_at=now,
@@ -276,9 +293,10 @@ async def _collect_inner(db: AsyncSession) -> dict:
                         index_elements=["username"],
                         set_={
                             "last_seen_at": now,
-                            "display_name": t["display_name"],
-                            "avatar_url": t["avatar_url"],
-                            "followers": followers,
+                            "display_name": display_name,
+                            "avatar_url": avatar_url,
+                            "followers": actual_followers,
+                            "bio": bio,
                         },
                     )
                 )
