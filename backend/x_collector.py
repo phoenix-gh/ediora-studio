@@ -137,11 +137,15 @@ async def _fetch_user_tweets(username: str, api_key: str, count: int = 20) -> li
 
 
 async def _search_tweets(query: str, api_key: str, count: int = 20) -> list[dict]:
-    """Search tweets using twitterapi.io advanced_search (GET)."""
+    """Search tweets using twitterapi.io advanced_search (GET).
+
+    Uses queryType=Top so results are ranked by engagement, giving reliable
+    view counts. queryType=Latest returns just-posted tweets with 0 views.
+    """
     try:
         data = await _api_get(
             "/twitter/tweet/advanced_search",
-            {"query": query, "queryType": "Latest", "count": count},
+            {"query": query, "queryType": "Top", "count": count},
             api_key,
         )
         return _extract_tweets_from_response(data)
@@ -208,30 +212,37 @@ async def _collect_inner(db: AsyncSession) -> dict:
                 "error": "twitterapi.io API Key 未配置，请在设置 → X 中填写"}
 
     threshold = max(0, int(cfg.get("x_follower_threshold", 5000)))
-    post_window_hours = max(1, int(cfg.get("x_post_window_hours", 4)))
     search_queries = [
         q.strip() for q in cfg.get("x_search_queries", "").split(",") if q.strip()
     ]
-
     now = datetime.now(timezone.utc)
-    cutoff = now - timedelta(hours=post_window_hours)
+    # "2h ago" formatted for Twitter's since: operator
+    since_dt = now - timedelta(hours=2)
+    since_str = since_dt.strftime("%Y-%m-%d_%H:%M:%S_UTC")
+    # Suffix appended to every keyword search query
+    SEARCH_SUFFIXES = f"since:{since_str} -filter:retweets"
+    MIN_VIEWS = 1000  # post-fetch view filter (for search results only)
 
     # ── Load following accounts ───────────────────────────────────────────────
     following_rows = (await db.execute(
         _select(XBloggerCandidate).where(XBloggerCandidate.status == "following")
     )).scalars().all()
     following_names = [r.username for r in following_rows]
+    following_set = set(following_names)
 
     # ── Collect raw tweets ────────────────────────────────────────────────────
     raw_tweets: list[dict] = []
 
+    # Following accounts: pull their recent timeline, no engagement filter
     for uname in following_names:
         tweets = await _fetch_user_tweets(uname, api_key, count=20)
         print(f"[x] @{uname}: got {len(tweets)} tweets")
         raw_tweets.extend(tweets)
 
+    # Keyword search: restrict to last 2h, exclude retweets
     for q in search_queries:
-        tweets = await _search_tweets(q, api_key, count=20)
+        full_query = f"{q} {SEARCH_SUFFIXES}"
+        tweets = await _search_tweets(full_query, api_key, count=20)
         print(f"[x] search {q!r}: got {len(tweets)} tweets")
         raw_tweets.extend(tweets)
 
@@ -242,7 +253,13 @@ async def _collect_inner(db: AsyncSession) -> dict:
         if parsed and parsed["tweet_id"] not in seen:
             seen[parsed["tweet_id"]] = parsed
 
-    print(f"[x] total unique tweets: {len(seen)}")
+    # Keep search-result tweets with views >= MIN_VIEWS (following-account tweets always kept)
+    before = len(seen)
+    seen = {
+        tid: t for tid, t in seen.items()
+        if t["username"] in following_set or t["views"] >= MIN_VIEWS
+    }
+    print(f"[x] unique: {before} → {len(seen)} after view≥{MIN_VIEWS} filter")
 
     # ── Pre-load known candidates ─────────────────────────────────────────────
     all_usernames = {t["username"] for t in seen.values()}
@@ -254,16 +271,9 @@ async def _collect_inner(db: AsyncSession) -> dict:
 
     new_candidates = 0
     new_posts = 0
-    skipped_old = 0
 
     for tid, t in seen.items():
         pub_at = t["published_at"]
-
-        # Filter by post window
-        if pub_at < cutoff:
-            skipped_old += 1
-            continue
-
         uname = t["username"]
         followers = t["followers"]
 
@@ -342,7 +352,7 @@ async def _collect_inner(db: AsyncSession) -> dict:
         )
 
     await db.commit()
-    print(f"[x] done: {new_posts} new posts, {new_candidates} new candidates, {skipped_old} skipped (old)")
+    print(f"[x] done: {new_posts} new posts, {new_candidates} new candidates")
 
     return {
         "new_candidates": new_candidates,
