@@ -44,57 +44,39 @@ async def _api_get(path: str, params: dict, api_key: str) -> dict:
         return r.json()
 
 
-async def _api_post(path: str, body: dict, api_key: str) -> dict:
-    async with httpx.AsyncClient(timeout=20) as client:
-        r = await client.post(
-            f"{TWITTERAPI_BASE}{path}",
-            json=body,
-            headers={"X-API-Key": api_key},
-        )
-        r.raise_for_status()
-        return r.json()
-
-
 # ── Response parsers ──────────────────────────────────────────────────────────
 
 def _parse_tweet(raw: dict) -> dict | None:
     """
     Normalise a twitterapi.io tweet object to our internal format.
 
-    Expected shape (either top-level or nested under 'tweet'):
+    Actual API shape:
       {
-        "id": "...",
-        "text": "...",
-        "createdAt": "Tue May 06 10:00:00 +0000 2025",
+        "id": "...", "text": "...",
+        "createdAt": "Wed May 06 10:00:00 +0000 2026",
+        "retweetCount": 0, "replyCount": 0, "likeCount": 0,
+        "quoteCount": 0, "viewCount": 0,
         "author": {
           "userName": "...", "name": "...",
-          "followers": 1234, "avatar": "...", "description": "..."
-        },
-        "publicMetrics": {
-          "retweetCount": 0, "replyCount": 0,
-          "likeCount": 0, "quoteCount": 0, "viewCount": 0
+          "followers": 1234, "profilePicture": "...", "description": "..."
         }
       }
     """
-    t = raw.get("tweet") or raw  # some endpoints wrap in {"tweet": {...}}
+    t = raw.get("tweet") or raw
     if not isinstance(t, dict):
         return None
 
-    tid = str(t.get("id") or t.get("rest_id") or "").strip()
+    tid = str(t.get("id") or "").strip()
     if not tid:
         return None
 
-    author = t.get("author") or t.get("user") or {}
+    author = t.get("author") or {}
     username = (author.get("userName") or author.get("screen_name") or "").lower().strip()
     if not username:
         return None
 
-    metrics = t.get("publicMetrics") or t.get("public_metrics") or {}
-
     created_str = t.get("createdAt") or t.get("created_at") or ""
-    pub_at: datetime
     try:
-        # Twitter date: "Tue May 06 10:00:00 +0000 2025"
         pub_at = datetime.strptime(created_str, "%a %b %d %H:%M:%S %z %Y")
     except Exception:
         try:
@@ -106,15 +88,16 @@ def _parse_tweet(raw: dict) -> dict | None:
         "tweet_id": tid,
         "username": username,
         "display_name": (author.get("name") or username).strip()[:100],
-        "avatar_url": author.get("avatar") or author.get("profile_image_url") or f"https://unavatar.io/x/{username}",
-        "followers": int(author.get("followers") or author.get("followers_count") or 0),
+        "avatar_url": (author.get("profilePicture") or author.get("profile_image_url")
+                       or f"https://unavatar.io/x/{username}"),
+        "followers": int(author.get("followers") or 0),
         "bio": (author.get("description") or "")[:400],
         "content": (t.get("text") or "").strip(),
         "published_at": pub_at,
-        "replies": int(metrics.get("replyCount") or metrics.get("reply_count") or 0),
-        "reposts": int(metrics.get("retweetCount") or metrics.get("retweet_count") or 0),
-        "likes": int(metrics.get("likeCount") or metrics.get("like_count") or 0),
-        "views": int(metrics.get("viewCount") or metrics.get("view_count") or 0),
+        "replies": int(t.get("replyCount") or 0),
+        "reposts": int(t.get("retweetCount") or 0),
+        "likes": int(t.get("likeCount") or 0),
+        "views": int(t.get("viewCount") or 0),
         "url": t.get("url") or f"https://x.com/{username}/status/{tid}",
     }
 
@@ -154,9 +137,9 @@ async def _fetch_user_tweets(username: str, api_key: str, count: int = 20) -> li
 
 
 async def _search_tweets(query: str, api_key: str, count: int = 20) -> list[dict]:
-    """Search tweets using twitterapi.io advanced search."""
+    """Search tweets using twitterapi.io advanced_search (GET)."""
     try:
-        data = await _api_post(
+        data = await _api_get(
             "/twitter/tweet/advanced_search",
             {"query": query, "queryType": "Latest", "count": count},
             api_key,
