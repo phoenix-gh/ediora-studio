@@ -221,8 +221,6 @@ async def _collect_inner(db: AsyncSession) -> dict:
     since_str = since_dt.strftime("%Y-%m-%d_%H:%M:%S_UTC")
     # Suffix appended to every keyword search query
     SEARCH_SUFFIXES = f"since:{since_str} -filter:retweets"
-    MIN_VIEWS = 1000  # post-fetch view filter (for search results only)
-
     # ── Load following accounts ───────────────────────────────────────────────
     following_rows = (await db.execute(
         _select(XBloggerCandidate).where(XBloggerCandidate.status == "following")
@@ -253,13 +251,7 @@ async def _collect_inner(db: AsyncSession) -> dict:
         if parsed and parsed["tweet_id"] not in seen:
             seen[parsed["tweet_id"]] = parsed
 
-    # Keep search-result tweets with views >= MIN_VIEWS (following-account tweets always kept)
-    before = len(seen)
-    seen = {
-        tid: t for tid, t in seen.items()
-        if t["username"] in following_set or t["views"] >= MIN_VIEWS
-    }
-    print(f"[x] unique: {before} → {len(seen)} after view≥{MIN_VIEWS} filter")
+    print(f"[x] unique tweets: {len(seen)}")
 
     # ── Pre-load known candidates ─────────────────────────────────────────────
     all_usernames = {t["username"] for t in seen.values()}
