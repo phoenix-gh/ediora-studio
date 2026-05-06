@@ -29,12 +29,15 @@ export interface AppSettings {
   camofox_api_key_set: boolean
   camofox_user_id: string
   camofox_novnc_url: string
+  x_collect_enabled: boolean
   x_cookies_set: boolean
   x_collect_interval_minutes: number
   x_follower_threshold: number
   x_post_window_hours: number
   x_post_lookback_hours: number
   x_timeline_scrolls: number
+  twitterapi_io_key_set: boolean
+  x_search_queries: string
   arxiv_categories: string
   arxiv_collect_interval_hours: number
   providers: ProviderInfo[]
@@ -58,12 +61,15 @@ export interface SettingsUpdate {
   camofox_api_key?: string
   camofox_user_id?: string
   camofox_novnc_url?: string
+  x_collect_enabled?: boolean
   x_cookies?: string
   x_collect_interval_minutes?: number
   x_follower_threshold?: number
   x_post_window_hours?: number
   x_post_lookback_hours?: number
   x_timeline_scrolls?: number
+  twitterapi_io_key?: string
+  x_search_queries?: string
   arxiv_categories?: string
   arxiv_collect_interval_hours?: number
 }
