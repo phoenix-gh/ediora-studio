@@ -5,6 +5,12 @@ export interface XCandidate {
   display_name: string
   avatar_url: string
   followers: number
+  following_count: number
+  tweet_count: number
+  favourites_count: number
+  location: string
+  join_date: string
+  hot_post_count: number
   bio: string
   profile_url: string
   status: string
@@ -29,11 +35,13 @@ export interface XPost {
   published_at: string
   collected_at: string
   author_followers: number
+  source: string
   latest_replies: number
   latest_reposts: number
   latest_likes: number
   latest_views: number
   is_viral: boolean
+  category: string
   metrics_history: XMetricsPoint[]
 }
 
@@ -60,4 +68,12 @@ export async function triggerXCollect(): Promise<{ ok: boolean; message: string 
 
 export async function getXPosts(hours = 24): Promise<XPost[]> {
   return apiFetch<XPost[]>(`/x/posts?hours=${hours}`)
+}
+
+export async function triggerTl1UsersCollect(maxPages = 100): Promise<{ ok: boolean; message: string }> {
+  return apiFetch(`/x/collect-tl1-users?max_pages=${maxPages}`, { method: 'POST' })
+}
+
+export async function triggerClassifyPosts(batchSize = 20): Promise<{ ok: boolean; message: string }> {
+  return apiFetch(`/x/classify-posts?batch_size=${batchSize}`, { method: 'POST' })
 }

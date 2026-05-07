@@ -1,12 +1,12 @@
 'use client'
 
-import { useState, useMemo, useCallback } from 'react'
-import { AtSign, RefreshCw, Trash2, ExternalLink, Users, Loader2, CheckCircle, XCircle, Clock, TrendingUp } from 'lucide-react'
+import { useState, useMemo, useCallback, useEffect } from 'react'
+import { AtSign, RefreshCw, Trash2, ExternalLink, Users, Loader2, CheckCircle, XCircle, Clock, TrendingUp, PauseCircle, PlayCircle } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { XCandidate, XPost, getXCandidates, updateXCandidate, deleteXCandidate, triggerXCollect } from '@/lib/api/x'
+import { XCandidate, XPost, getXCandidates, updateXCandidate, deleteXCandidate, triggerXCollect, triggerTl1UsersCollect } from '@/lib/api/x'
 import { XPostsPanel } from './XPostsPanel'
 
 type StatusFilter = 'all' | 'candidate' | 'following' | 'rejected'
@@ -65,8 +65,11 @@ export function XClient({
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
   const [search, setSearch] = useState('')
   const [collecting, setCollecting] = useState(false)
+  const [crawling, setCrawling] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [updatingRow, setUpdatingRow] = useState<string | null>(null)
+  const [autoRefresh, setAutoRefresh] = useState(true)
+  const [countdown, setCountdown] = useState(30)
 
   const filtered = useMemo(() => {
     let list = candidates
@@ -93,6 +96,21 @@ export function XClient({
       setRefreshing(false)
     }
   }, [])
+
+  useEffect(() => {
+    if (!autoRefresh || tab !== 'candidates') return
+    setCountdown(30)
+    const tick = setInterval(() => {
+      setCountdown(c => {
+        if (c <= 1) {
+          refresh()
+          return 30
+        }
+        return c - 1
+      })
+    }, 1000)
+    return () => clearInterval(tick)
+  }, [autoRefresh, tab, refresh])
 
   const handleCollect = useCallback(async () => {
     setCollecting(true)
@@ -155,6 +173,19 @@ export function XClient({
         <div className="flex items-center gap-2">
           {tab === 'candidates' && (
             <>
+              <button
+                onClick={() => setAutoRefresh(v => !v)}
+                className={cn(
+                  'flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs border transition-colors',
+                  autoRefresh
+                    ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-400'
+                    : 'border-zinc-200 dark:border-zinc-700 text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'
+                )}
+              >
+                {autoRefresh
+                  ? <><PauseCircle className="w-3.5 h-3.5" />自动刷新 {countdown}s</>
+                  : <><PlayCircle className="w-3.5 h-3.5" />自动刷新</>}
+              </button>
               <Button variant="outline" size="sm" onClick={refresh} disabled={refreshing}>
                 <RefreshCw className={cn('w-3.5 h-3.5 mr-1.5', refreshing && 'animate-spin')} />
                 刷新
@@ -164,6 +195,22 @@ export function XClient({
                   ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
                   : <Users className="w-3.5 h-3.5 mr-1.5" />}
                 采集时间线
+              </Button>
+              <Button variant="outline" size="sm" disabled={crawling} onClick={async () => {
+                setCrawling(true)
+                try {
+                  const res = await triggerTl1UsersCollect(100)
+                  toast.success(res.message || 'tl1 博主抓取已启动，预计需要 30-50 分钟')
+                } catch (e) {
+                  toast.error(`启动失败：${e}`)
+                } finally {
+                  setCrawling(false)
+                }
+              }}>
+                {crawling
+                  ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                  : <TrendingUp className="w-3.5 h-3.5 mr-1.5" />}
+                抓取 tl1 博主
               </Button>
             </>
           )}
@@ -241,16 +288,20 @@ export function XClient({
           <p className="text-xs mt-1">点击「采集时间线」开始发现优质账户</p>
         </div>
       ) : (
-        <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 overflow-hidden">
-          <table className="w-full text-sm">
+        <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 overflow-x-auto">
+          <table className="w-full text-sm whitespace-nowrap">
             <thead>
-              <tr className="border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900">
-                <th className="text-left px-4 py-3 font-medium text-zinc-500 dark:text-zinc-400 w-48">账户</th>
-                <th className="text-left px-4 py-3 font-medium text-zinc-500 dark:text-zinc-400">简介</th>
-                <th className="text-right px-4 py-3 font-medium text-zinc-500 dark:text-zinc-400 w-24">粉丝数</th>
-                <th className="text-center px-4 py-3 font-medium text-zinc-500 dark:text-zinc-400 w-24">状态</th>
-                <th className="text-center px-4 py-3 font-medium text-zinc-500 dark:text-zinc-400 w-28">操作</th>
-                <th className="text-right px-4 py-3 font-medium text-zinc-500 dark:text-zinc-400 w-16">发现</th>
+              <tr className="border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900 text-xs font-medium text-zinc-500 dark:text-zinc-400">
+                <th className="text-left px-4 py-3 w-44 min-w-[176px]">博主</th>
+                <th className="text-right px-3 py-3">粉丝</th>
+                <th className="text-right px-3 py-3">热帖</th>
+                <th className="text-right px-3 py-3">推文</th>
+                <th className="text-right px-3 py-3">关注</th>
+                <th className="text-right px-3 py-3">给赞</th>
+                <th className="text-left px-3 py-3">位置</th>
+                <th className="text-left px-3 py-3">加入</th>
+                <th className="text-center px-3 py-3">状态</th>
+                <th className="text-center px-3 py-3">操作</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
@@ -262,39 +313,37 @@ export function XClient({
                     updatingRow === c.username && 'opacity-50 pointer-events-none'
                   )}
                 >
-                  {/* Account */}
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-2.5">
+                  {/* 博主 — fixed width, truncate */}
+                  <td className="px-4 py-2.5 w-44 min-w-[176px] max-w-[176px]">
+                    <div className="flex items-center gap-2">
                       <AvatarCell name={c.display_name} username={c.username} />
-                      <div className="min-w-0">
-                        <div className="font-medium text-zinc-900 dark:text-zinc-100 truncate">{c.display_name}</div>
+                      <div className="min-w-0 flex-1">
+                        <div className="font-medium text-zinc-900 dark:text-zinc-100 truncate text-xs leading-tight" title={c.display_name}>
+                          {c.display_name || c.username}
+                        </div>
                         <a
                           href={c.profile_url}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="text-xs text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 flex items-center gap-0.5"
+                          className="text-[11px] text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 flex items-center gap-0.5 truncate"
                         >
                           @{c.username}
-                          <ExternalLink className="w-2.5 h-2.5" />
+                          <ExternalLink className="w-2.5 h-2.5 flex-shrink-0" />
                         </a>
                       </div>
                     </div>
                   </td>
 
-                  {/* Bio */}
-                  <td className="px-4 py-3 text-zinc-500 dark:text-zinc-400 max-w-xs">
-                    <p className="line-clamp-2 text-xs leading-relaxed">{c.bio || '—'}</p>
-                  </td>
+                  <td className="px-3 py-2.5 text-right text-xs font-semibold text-zinc-800 dark:text-zinc-200">{formatFollowers(c.followers)}</td>
+                  <td className="px-3 py-2.5 text-right text-xs text-zinc-600 dark:text-zinc-400">{c.hot_post_count || '—'}</td>
+                  <td className="px-3 py-2.5 text-right text-xs text-zinc-600 dark:text-zinc-400">{formatFollowers(c.tweet_count)}</td>
+                  <td className="px-3 py-2.5 text-right text-xs text-zinc-600 dark:text-zinc-400">{formatFollowers(c.following_count)}</td>
+                  <td className="px-3 py-2.5 text-right text-xs text-zinc-600 dark:text-zinc-400">{formatFollowers(c.favourites_count)}</td>
+                  <td className="px-3 py-2.5 text-xs text-zinc-500 dark:text-zinc-400 max-w-[100px] truncate" title={c.location}>{c.location || '—'}</td>
+                  <td className="px-3 py-2.5 text-xs text-zinc-400">{c.join_date ? c.join_date.slice(0, 4) : '—'}</td>
 
-                  {/* Followers */}
-                  <td className="px-4 py-3 text-right">
-                    <span className="font-semibold text-zinc-900 dark:text-zinc-100">
-                      {formatFollowers(c.followers)}
-                    </span>
-                  </td>
-
-                  {/* Status badge */}
-                  <td className="px-4 py-3 text-center">
+                  {/* Status */}
+                  <td className="px-3 py-2.5 text-center">
                     <span className={cn(
                       'inline-flex items-center px-2 py-0.5 rounded-full text-xs border',
                       STATUS_STYLE[c.status] ?? STATUS_STYLE.candidate
@@ -304,48 +353,31 @@ export function XClient({
                   </td>
 
                   {/* Actions */}
-                  <td className="px-4 py-3">
+                  <td className="px-3 py-2.5">
                     <div className="flex items-center justify-center gap-1">
                       {c.status !== 'following' && (
-                        <button
-                          onClick={() => handleStatusChange(c.username, 'following')}
-                          title="标记为已关注"
-                          className="p-1 rounded text-zinc-400 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950 transition-colors"
-                        >
-                          <CheckCircle className="w-4 h-4" />
+                        <button onClick={() => handleStatusChange(c.username, 'following')} title="标记为已关注"
+                          className="p-1 rounded text-zinc-400 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950 transition-colors">
+                          <CheckCircle className="w-3.5 h-3.5" />
                         </button>
                       )}
                       {c.status !== 'rejected' && (
-                        <button
-                          onClick={() => handleStatusChange(c.username, 'rejected')}
-                          title="忽略此账户"
-                          className="p-1 rounded text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
-                        >
-                          <XCircle className="w-4 h-4" />
+                        <button onClick={() => handleStatusChange(c.username, 'rejected')} title="忽略"
+                          className="p-1 rounded text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors">
+                          <XCircle className="w-3.5 h-3.5" />
                         </button>
                       )}
                       {c.status !== 'candidate' && (
-                        <button
-                          onClick={() => handleStatusChange(c.username, 'candidate')}
-                          title="重新放入候选"
-                          className="p-1 rounded text-zinc-400 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950 transition-colors"
-                        >
-                          <Clock className="w-4 h-4" />
+                        <button onClick={() => handleStatusChange(c.username, 'candidate')} title="重新放入候选"
+                          className="p-1 rounded text-zinc-400 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950 transition-colors">
+                          <Clock className="w-3.5 h-3.5" />
                         </button>
                       )}
-                      <button
-                        onClick={() => handleDelete(c.username)}
-                        title="删除"
-                        className="p-1 rounded text-zinc-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950 transition-colors"
-                      >
-                        <Trash2 className="w-4 h-4" />
+                      <button onClick={() => handleDelete(c.username)} title="删除"
+                        className="p-1 rounded text-zinc-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950 transition-colors">
+                        <Trash2 className="w-3.5 h-3.5" />
                       </button>
                     </div>
-                  </td>
-
-                  {/* Added date */}
-                  <td className="px-4 py-3 text-right text-xs text-zinc-400">
-                    {formatDate(c.added_at)}
                   </td>
                 </tr>
               ))}

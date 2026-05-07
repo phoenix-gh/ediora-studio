@@ -1,9 +1,9 @@
 export const dynamic = 'force-dynamic'
 
-import { getHotspots } from '@/lib/api/hotspots'
+import { getKeywords } from '@/lib/api/keywords'
 import { HotspotsClient } from './HotspotsClient'
 
 export default async function HotspotsPage() {
-  const hotspots = await getHotspots()
-  return <HotspotsClient hotspots={hotspots} />
+  const keywords = await getKeywords()
+  return <HotspotsClient initialKeywords={keywords} />
 }

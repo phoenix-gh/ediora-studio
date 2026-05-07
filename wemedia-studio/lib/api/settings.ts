@@ -37,7 +37,13 @@ export interface AppSettings {
   x_post_lookback_hours: number
   x_timeline_scrolls: number
   twitterapi_io_key_set: boolean
+  twitterapi_io_collect_enabled: boolean
   x_search_queries: string
+  tl1_collect_enabled: boolean
+  tl1_collect_interval_seconds: number
+  tl1_trending_hours: number
+  x_post_classify_enabled: boolean
+  x_post_classify_prompt: string
   arxiv_categories: string
   arxiv_collect_interval_hours: number
   providers: ProviderInfo[]
@@ -69,7 +75,13 @@ export interface SettingsUpdate {
   x_post_lookback_hours?: number
   x_timeline_scrolls?: number
   twitterapi_io_key?: string
+  twitterapi_io_collect_enabled?: boolean
   x_search_queries?: string
+  tl1_collect_enabled?: boolean
+  tl1_collect_interval_seconds?: number
+  tl1_trending_hours?: number
+  x_post_classify_enabled?: boolean
+  x_post_classify_prompt?: string
   arxiv_categories?: string
   arxiv_collect_interval_hours?: number
 }

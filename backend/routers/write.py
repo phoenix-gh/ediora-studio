@@ -110,6 +110,15 @@ async def create_draft(body: ArticleDraftCreate, db: AsyncSession = Depends(get_
     return obj
 
 
+@router.delete("/drafts/{draft_id}", status_code=204)
+async def delete_draft(draft_id: int, db: AsyncSession = Depends(get_db)):
+    obj = await db.get(ArticleDraft, draft_id)
+    if not obj:
+        raise HTTPException(404, "draft not found")
+    await db.delete(obj)
+    await db.commit()
+
+
 @router.patch("/drafts/{draft_id}", response_model=ArticleDraftRecordOut)
 async def update_draft(draft_id: int, body: ArticleDraftUpdate, db: AsyncSession = Depends(get_db)):
     obj = await db.get(ArticleDraft, draft_id)

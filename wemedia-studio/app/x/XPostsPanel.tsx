@@ -1,11 +1,317 @@
 'use client'
 
-import { useState, useCallback, useMemo } from 'react'
-import { RefreshCw, MessageCircle, Heart, Eye, Repeat2, ExternalLink, TrendingUp, Loader2, Flame, Users } from 'lucide-react'
+import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
+import { RefreshCw, MessageCircle, Heart, Eye, Repeat2, ExternalLink, TrendingUp, Loader2, Flame, Users, PauseCircle, PlayCircle, Lightbulb, X as XIcon, PenLine, Check, BookMarked } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { XPost, XMetricsPoint, getXPosts } from '@/lib/api/x'
+
+const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000/api'
+
+// ── Inspire modal ──────────────────────────────────────────────────────────────
+
+function InspirationModal({
+  post,
+  onClose,
+}: {
+  post: XPost
+  onClose: () => void
+}) {
+  const [loading, setLoading] = useState(true)
+  const [analysis, setAnalysis] = useState('')
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    setAnalysis('')
+    setError('')
+    fetch(`${API}/x/posts/${post.tweet_id}/inspire`, { method: 'POST' })
+      .then(r => r.json())
+      .then(data => {
+        if (cancelled) return
+        if (data.ok) setAnalysis(data.analysis)
+        else setError(data.detail || '分析失败')
+      })
+      .catch(e => { if (!cancelled) setError(String(e)) })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [post.tweet_id])
+
+  // Close on Escape
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [onClose])
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
+      <div
+        className="relative z-10 w-full max-w-2xl max-h-[80vh] flex flex-col rounded-2xl bg-white dark:bg-zinc-900 shadow-2xl border border-zinc-200 dark:border-zinc-700"
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-start gap-3 p-5 border-b border-zinc-100 dark:border-zinc-800 flex-shrink-0">
+          <div className="w-8 h-8 rounded-full bg-amber-100 dark:bg-amber-950/60 flex items-center justify-center flex-shrink-0">
+            <Lightbulb className="w-4 h-4 text-amber-500" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">内容灵感分析</p>
+            <p className="text-[11px] text-zinc-400 mt-0.5 line-clamp-1">
+              {post.display_name || `@${post.username}`} · {post.content.slice(0, 60)}{post.content.length > 60 ? '…' : ''}
+            </p>
+          </div>
+          <button onClick={onClose} className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 flex-shrink-0">
+            <XIcon className="w-4 h-4" />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto p-5">
+          {loading ? (
+            <div className="flex flex-col items-center justify-center py-16 text-zinc-400 gap-3">
+              <Loader2 className="w-6 h-6 animate-spin text-amber-400" />
+              <p className="text-sm">正在分析帖子内容…</p>
+            </div>
+          ) : error ? (
+            <div className="text-sm text-red-500 bg-red-50 dark:bg-red-950/30 rounded-lg p-4">{error}</div>
+          ) : (
+            <MarkdownLike text={analysis} />
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function MarkdownLike({ text }: { text: string }) {
+  const lines = text.split('\n')
+  return (
+    <div className="space-y-1 text-sm text-zinc-700 dark:text-zinc-300 leading-relaxed">
+      {lines.map((line, i) => {
+        if (line.startsWith('## ')) {
+          return (
+            <h3 key={i} className="text-base font-semibold text-zinc-900 dark:text-zinc-100 mt-5 mb-2 first:mt-0">
+              {line.slice(3)}
+            </h3>
+          )
+        }
+        if (line.startsWith('### ')) {
+          return <h4 key={i} className="font-semibold text-zinc-800 dark:text-zinc-200 mt-3 mb-1">{line.slice(4)}</h4>
+        }
+        // Bold: **text**
+        const parts = line.split(/(\*\*[^*]+\*\*)/)
+        const rendered = parts.map((part, j) =>
+          part.startsWith('**') && part.endsWith('**')
+            ? <strong key={j} className="font-semibold text-zinc-900 dark:text-zinc-100">{part.slice(2, -2)}</strong>
+            : part
+        )
+        if (line.startsWith('- ') || line.match(/^\d+\./)) {
+          return <p key={i} className="pl-3 border-l-2 border-amber-300 dark:border-amber-700 py-0.5">{rendered}</p>
+        }
+        if (!line.trim()) return <div key={i} className="h-1" />
+        return <p key={i}>{rendered}</p>
+      })}
+    </div>
+  )
+}
+
+// ── Create article modal ───────────────────────────────────────────────────────
+
+type CreateMode = 'secondary' | 'rewrite'
+
+function CreateModal({ post, onClose }: { post: XPost; onClose: () => void }) {
+  const [mode, setMode] = useState<CreateMode>('secondary')
+  const [extraPrompt, setExtraPrompt] = useState('')
+  const [generating, setGenerating] = useState(false)
+  const [title, setTitle] = useState('')
+  const [content, setContent] = useState('')
+  const [error, setError] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape' && !generating) onClose() }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [onClose, generating])
+
+  async function handleGenerate() {
+    setGenerating(true)
+    setError('')
+    setContent('')
+    setTitle('')
+    setSaved(false)
+    try {
+      const res = await fetch(`${API}/x/posts/${post.tweet_id}/create-article`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode, extra_prompt: extraPrompt }),
+      })
+      const data = await res.json()
+      if (data.ok) {
+        setTitle(data.title)
+        setContent(data.content)
+      } else {
+        setError(data.detail || '生成失败')
+      }
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setGenerating(false)
+    }
+  }
+
+  async function handleSaveDraft() {
+    setSaving(true)
+    try {
+      const res = await fetch(`${API}/x/save-draft`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, content, source_tweet_id: post.tweet_id }),
+      })
+      const data = await res.json()
+      if (data.ok) {
+        setSaved(true)
+        toast.success(`已加入草稿箱：${data.title}`)
+      } else {
+        toast.error('保存失败')
+      }
+    } catch {
+      toast.error('保存失败')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const hasResult = Boolean(content)
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => !generating && onClose()}>
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
+      <div
+        className="relative z-10 w-full max-w-3xl max-h-[90vh] flex flex-col rounded-2xl bg-white dark:bg-zinc-900 shadow-2xl border border-zinc-200 dark:border-zinc-700"
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center gap-3 px-5 py-4 border-b border-zinc-100 dark:border-zinc-800 flex-shrink-0">
+          <div className="w-7 h-7 rounded-full bg-indigo-100 dark:bg-indigo-950/60 flex items-center justify-center">
+            <PenLine className="w-3.5 h-3.5 text-indigo-500" />
+          </div>
+          <span className="font-semibold text-sm text-zinc-900 dark:text-zinc-100">基于帖子创作</span>
+          <span className="text-xs text-zinc-400 truncate flex-1">
+            {post.content.slice(0, 50)}{post.content.length > 50 ? '…' : ''}
+          </span>
+          <button onClick={onClose} disabled={generating} className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 disabled:opacity-30">
+            <XIcon className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto">
+          {/* Controls (always visible at top) */}
+          <div className="p-5 space-y-4 border-b border-zinc-100 dark:border-zinc-800">
+            {/* Mode selector */}
+            <div className="flex gap-2">
+              {([['secondary', '二创', '以此为灵感，独立原创'], ['rewrite', '改写', '保留核心观点，扩展细节']] as const).map(([key, label, desc]) => (
+                <button
+                  key={key}
+                  type="button"
+                  disabled={generating}
+                  onClick={() => setMode(key)}
+                  className={cn(
+                    'flex-1 rounded-xl border px-4 py-3 text-left transition-all disabled:opacity-50',
+                    mode === key
+                      ? 'border-indigo-400 bg-indigo-50 dark:bg-indigo-950/40 dark:border-indigo-600'
+                      : 'border-zinc-200 dark:border-zinc-700 hover:border-zinc-300 dark:hover:border-zinc-600'
+                  )}
+                >
+                  <p className={cn('text-sm font-medium', mode === key ? 'text-indigo-700 dark:text-indigo-300' : 'text-zinc-700 dark:text-zinc-300')}>{label}</p>
+                  <p className="text-[11px] text-zinc-400 mt-0.5">{desc}</p>
+                </button>
+              ))}
+            </div>
+
+            {/* Extra prompt */}
+            <div className="space-y-1.5">
+              <label className="text-xs text-zinc-500">追加提示词（可选）</label>
+              <textarea
+                value={extraPrompt}
+                onChange={e => setExtraPrompt(e.target.value)}
+                disabled={generating}
+                placeholder="例：风格轻松幽默；重点讲技术细节；面向初学者；不超过500字…"
+                rows={2}
+                className="w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 py-2 text-sm text-zinc-800 dark:text-zinc-200 placeholder:text-zinc-400 focus:outline-none focus:ring-1 focus:ring-indigo-400 resize-none disabled:opacity-50"
+              />
+            </div>
+
+            <Button onClick={handleGenerate} disabled={generating} size="sm" className="gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white border-0">
+              {generating
+                ? <><Loader2 className="w-3.5 h-3.5 animate-spin" />生成中…</>
+                : <><PenLine className="w-3.5 h-3.5" />{hasResult ? '重新生成' : '开始生成'}</>}
+            </Button>
+          </div>
+
+          {/* Result area */}
+          {error && (
+            <div className="mx-5 mt-4 text-sm text-red-500 bg-red-50 dark:bg-red-950/30 rounded-lg p-4">{error}</div>
+          )}
+
+          {generating && !content && (
+            <div className="flex flex-col items-center justify-center py-16 text-zinc-400 gap-3">
+              <Loader2 className="w-6 h-6 animate-spin text-indigo-400" />
+              <p className="text-sm">正在创作中，请稍候…</p>
+            </div>
+          )}
+
+          {hasResult && (
+            <div className="p-5 space-y-3">
+              <div className="space-y-1.5">
+                <label className="text-xs text-zinc-500">标题</label>
+                <input
+                  value={title}
+                  onChange={e => setTitle(e.target.value)}
+                  className="w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 py-2 text-sm font-medium text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-indigo-400"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs text-zinc-500">正文（可编辑）</label>
+                <textarea
+                  value={content}
+                  onChange={e => setContent(e.target.value)}
+                  rows={14}
+                  className="w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-transparent px-3 py-2 text-sm text-zinc-800 dark:text-zinc-200 font-mono focus:outline-none focus:ring-1 focus:ring-indigo-400 resize-y"
+                />
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        {hasResult && (
+          <div className="flex items-center gap-3 px-5 py-3 border-t border-zinc-100 dark:border-zinc-800 flex-shrink-0 bg-zinc-50 dark:bg-zinc-800/50 rounded-b-2xl">
+            <span className="text-xs text-zinc-400 flex-1">审核内容后可加入草稿箱</span>
+            <Button
+              onClick={handleSaveDraft}
+              disabled={saving || saved}
+              size="sm"
+              variant={saved ? 'outline' : 'default'}
+              className={cn('gap-1.5', saved && 'text-emerald-600 border-emerald-300 dark:border-emerald-700')}
+            >
+              {saved
+                ? <><Check className="w-3.5 h-3.5" />已加入草稿箱</>
+                : saving
+                  ? <><Loader2 className="w-3.5 h-3.5 animate-spin" />保存中…</>
+                  : <><BookMarked className="w-3.5 h-3.5" />加入草稿箱</>}
+            </Button>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
 
 // ── Sparkline ──────────────────────────────────────────────────────────────────
 
@@ -110,28 +416,58 @@ const HOURS_OPTIONS = [2, 6, 12, 24] as const
 type PostFilter = 'all' | 'viral'
 const VIRAL_RATIO = 1.5
 
+const AUTO_REFRESH_SEC = 30
+
 export function XPostsPanel({ initialPosts }: { initialPosts: XPost[] }) {
   const [posts, setPosts] = useState<XPost[]>(initialPosts)
   const [hours, setHours] = useState<number>(24)
   const [filter, setFilter] = useState<PostFilter>('all')
   const [refreshing, setRefreshing] = useState(false)
+  const [autoRefresh, setAutoRefresh] = useState(() => {
+    if (typeof window === 'undefined') return true
+    return localStorage.getItem('x_posts_auto_refresh') !== '0'
+  })
+  const [countdown, setCountdown] = useState(AUTO_REFRESH_SEC)
+  const [inspirePost, setInspirePost] = useState<XPost | null>(null)
+  const [createPost, setCreatePost] = useState<XPost | null>(null)
+  const hoursRef = useRef(hours)
+  hoursRef.current = hours
 
-  const refresh = useCallback(async (h = hours) => {
+  const refresh = useCallback(async (h?: number) => {
     setRefreshing(true)
     try {
-      const fresh = await getXPosts(h)
+      const fresh = await getXPosts(h ?? hoursRef.current)
       setPosts(fresh)
     } catch {
       toast.error('刷新失败')
     } finally {
       setRefreshing(false)
     }
-  }, [hours])
+  }, [])
 
   const handleHours = (h: number) => {
     setHours(h)
     refresh(h)
   }
+
+  // Auto-refresh every 30s
+  useEffect(() => {
+    if (!autoRefresh) return
+    setCountdown(AUTO_REFRESH_SEC)
+    const tick = setInterval(() => {
+      setCountdown(c => {
+        if (c <= 1) {
+          refresh()
+          return AUTO_REFRESH_SEC
+        }
+        return c - 1
+      })
+    }, 1000)
+    return () => clearInterval(tick)
+  }, [autoRefresh, refresh])
+
+  const [page, setPage] = useState(1)
+  const PAGE_SIZE = 10
 
   const viralCount = useMemo(() => posts.filter(p => p.is_viral).length, [posts])
 
@@ -140,6 +476,12 @@ export function XPostsPanel({ initialPosts }: { initialPosts: XPost[] }) {
     const base = filter === 'viral' ? posts.filter(p => p.is_viral) : posts
     return [...base].sort((a, b) => b.latest_views - a.latest_views)
   }, [posts, filter])
+
+  const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE))
+  const paginated = sorted.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
+
+  // Reset to page 1 when filter/hours/data changes
+  useEffect(() => { setPage(1) }, [filter, hours, posts])
 
   return (
     <div className="space-y-4">
@@ -193,10 +535,29 @@ export function XPostsPanel({ initialPosts }: { initialPosts: XPost[] }) {
         </div>
 
         <span className="text-xs text-zinc-400">浏览量 &gt; 粉丝数 × {VIRAL_RATIO} 视为超粉丝浏览</span>
-        <Button variant="outline" size="sm" onClick={() => refresh()} disabled={refreshing} className="ml-auto">
-          <RefreshCw className={cn('w-3.5 h-3.5 mr-1.5', refreshing && 'animate-spin')} />
-          刷新
-        </Button>
+        <div className="ml-auto flex items-center gap-2">
+          <button
+            onClick={() => setAutoRefresh(v => {
+              const next = !v
+              localStorage.setItem('x_posts_auto_refresh', next ? '1' : '0')
+              return next
+            })}
+            className={cn(
+              'flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs border transition-colors',
+              autoRefresh
+                ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-400'
+                : 'border-zinc-200 dark:border-zinc-700 text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'
+            )}
+          >
+            {autoRefresh
+              ? <><PauseCircle className="w-3.5 h-3.5" />自动刷新 {countdown}s</>
+              : <><PlayCircle className="w-3.5 h-3.5" />自动刷新</>}
+          </button>
+          <Button variant="outline" size="sm" onClick={() => refresh()} disabled={refreshing}>
+            <RefreshCw className={cn('w-3.5 h-3.5 mr-1.5', refreshing && 'animate-spin')} />
+            刷新
+          </Button>
+        </div>
       </div>
 
       {/* Post list */}
@@ -216,7 +577,7 @@ export function XPostsPanel({ initialPosts }: { initialPosts: XPost[] }) {
         </div>
       ) : (
         <div className="space-y-2">
-          {sorted.map(post => {
+          {paginated.map(post => {
             const repliesHistory  = post.metrics_history.map(m => m.replies)
             const repostsHistory  = post.metrics_history.map(m => m.reposts)
             const likesHistory    = post.metrics_history.map(m => m.likes)
@@ -266,14 +627,54 @@ export function XPostsPanel({ initialPosts }: { initialPosts: XPost[] }) {
                         {post.metrics_history.length} 次记录
                       </span>
                     )}
-                    <a
-                      href={post.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="ml-auto text-zinc-300 hover:text-zinc-500 transition-colors flex-shrink-0"
-                    >
-                      <ExternalLink className="w-3.5 h-3.5" />
-                    </a>
+                    <span className={cn(
+                      'text-[10px] px-1.5 py-0.5 rounded font-mono',
+                      post.source === 'tl1'
+                        ? 'bg-violet-100 text-violet-600 dark:bg-violet-950/50 dark:text-violet-400'
+                        : post.source === 'camofox'
+                          ? 'bg-amber-100 text-amber-600 dark:bg-amber-950/50 dark:text-amber-400'
+                          : 'bg-sky-100 text-sky-600 dark:bg-sky-950/50 dark:text-sky-400'
+                    )}>
+                      {post.source === 'tl1' ? 'tl1' : post.source === 'camofox' ? 'camofox' : 'API'}
+                    </span>
+                    {post.category && (
+                      <span className={cn(
+                        'text-[10px] px-1.5 py-0.5 rounded-full font-medium',
+                        post.category === '通告'
+                          ? 'bg-rose-100 text-rose-600 dark:bg-rose-950/50 dark:text-rose-400'
+                          : post.category === '科普'
+                            ? 'bg-cyan-100 text-cyan-600 dark:bg-cyan-950/50 dark:text-cyan-400'
+                            : post.category === '教程'
+                              ? 'bg-emerald-100 text-emerald-600 dark:bg-emerald-950/50 dark:text-emerald-400'
+                              : 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400'
+                      )}>
+                        {post.category}
+                      </span>
+                    )}
+                    <div className="ml-auto flex items-center gap-2 flex-shrink-0">
+                      <button
+                        onClick={() => setInspirePost(post)}
+                        title="内容灵感分析"
+                        className="text-zinc-300 hover:text-amber-500 transition-colors"
+                      >
+                        <Lightbulb className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        onClick={() => setCreatePost(post)}
+                        title="基于帖子创作"
+                        className="text-zinc-300 hover:text-indigo-500 transition-colors"
+                      >
+                        <PenLine className="w-3.5 h-3.5" />
+                      </button>
+                      <a
+                        href={post.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-zinc-300 hover:text-zinc-500 transition-colors"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" />
+                      </a>
+                    </div>
                   </div>
                   <p className="text-sm text-zinc-700 dark:text-zinc-300 line-clamp-3 leading-relaxed">
                     {post.content || <span className="italic text-zinc-400">（无文字内容）</span>}
@@ -314,6 +715,62 @@ export function XPostsPanel({ initialPosts }: { initialPosts: XPost[] }) {
               </div>
             )
           })}
+        </div>
+      )}
+
+      {/* Inspiration modal */}
+      {inspirePost && (
+        <InspirationModal post={inspirePost} onClose={() => setInspirePost(null)} />
+      )}
+
+      {/* Create article modal */}
+      {createPost && (
+        <CreateModal post={createPost} onClose={() => setCreatePost(null)} />
+      )}
+
+      {/* Pagination */}
+      {sorted.length > 0 && totalPages > 1 && (
+        <div className="flex items-center justify-center gap-1 pt-2">
+          <button
+            onClick={() => setPage(p => Math.max(1, p - 1))}
+            disabled={page === 1}
+            className="px-3 py-1.5 rounded-lg text-sm border border-zinc-200 dark:border-zinc-700 text-zinc-500 hover:text-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 dark:hover:text-zinc-100 disabled:opacity-30 disabled:pointer-events-none transition-colors"
+          >
+            ‹
+          </button>
+          {Array.from({ length: totalPages }, (_, i) => i + 1)
+            .filter(p => p === 1 || p === totalPages || Math.abs(p - page) <= 2)
+            .reduce<(number | '…')[]>((acc, p, i, arr) => {
+              if (i > 0 && p - (arr[i - 1] as number) > 1) acc.push('…')
+              acc.push(p)
+              return acc
+            }, [])
+            .map((p, i) =>
+              p === '…' ? (
+                <span key={`ellipsis-${i}`} className="px-2 text-zinc-400 text-sm">…</span>
+              ) : (
+                <button
+                  key={p}
+                  onClick={() => setPage(p as number)}
+                  className={cn(
+                    'min-w-[32px] px-2 py-1.5 rounded-lg text-sm border transition-colors',
+                    page === p
+                      ? 'bg-zinc-900 text-white border-zinc-900 dark:bg-zinc-100 dark:text-zinc-900 dark:border-zinc-100'
+                      : 'border-zinc-200 dark:border-zinc-700 text-zinc-500 hover:text-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 dark:hover:text-zinc-100'
+                  )}
+                >
+                  {p}
+                </button>
+              )
+            )}
+          <button
+            onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+            disabled={page === totalPages}
+            className="px-3 py-1.5 rounded-lg text-sm border border-zinc-200 dark:border-zinc-700 text-zinc-500 hover:text-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 dark:hover:text-zinc-100 disabled:opacity-30 disabled:pointer-events-none transition-colors"
+          >
+            ›
+          </button>
+          <span className="ml-2 text-xs text-zinc-400">{sorted.length} 条 · 第 {page}/{totalPages} 页</span>
         </div>
       )}
     </div>

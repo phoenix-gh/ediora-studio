@@ -323,6 +323,7 @@ async def _collect_inner(db: AsyncSession) -> dict:
             published_at=pub_at,
             collected_at=now,
             author_followers=followers,
+            source="twitterapi",
         ).on_conflict_do_update(
             index_elements=["tweet_id"],
             set_={"author_followers": followers},
@@ -350,6 +351,253 @@ async def _collect_inner(db: AsyncSession) -> dict:
         "new_candidates": new_candidates,
         "checked": len(following_names),
         "new_posts": new_posts,
+        "error": None,
+    }
+
+
+# ── tl1.com trending collector ────────────────────────────────────────────────
+
+TL1_BASE = "https://www.tl1.com"
+
+
+async def fetch_tl1_trending(db: AsyncSession, hours: int = 1, page_size: int = 50) -> dict:
+    """Fetch trending posts from tl1.com and save to DB."""
+    import time as _time
+
+    cfg = await _cfg()
+    follower_threshold = max(0, int(cfg.get("x_follower_threshold", 5000)))
+    now = datetime.now(timezone.utc)
+    ts = int(_time.time() * 1000)
+
+    async with httpx.AsyncClient(timeout=20) as client:
+        resp = await client.get(
+            f"{TL1_BASE}/api/trending",
+            params={"page": 1, "pageSize": page_size, "t": ts, "hours": hours},
+            headers={"Referer": "https://www.tl1.com/"},
+        )
+        resp.raise_for_status()
+    data = resp.json()
+    items = data.get("items") or []
+
+    new_posts = 0
+    new_candidates = 0
+
+    for item in items:
+        tid = str(item.get("tweetId") or "").strip()
+        if not tid:
+            continue
+
+        handle = (item.get("authorHandle") or "").lower().strip()
+        display = (item.get("displayName") or handle).strip()[:100]
+        content = (item.get("content") or "").strip()
+        followers = int(item.get("followersCount") or 0)
+        stats = item.get("currentStats") or {}
+        views = int(stats.get("viewCount") or 0)
+        likes = int(stats.get("likeCount") or 0)
+        reposts = int(stats.get("retweetCount") or 0)
+        replies = int(stats.get("replyCount") or 0)
+        url = f"https://x.com/{handle}/status/{tid}"
+
+        pub_raw = item.get("publishTime") or ""
+        try:
+            pub_at = datetime.fromisoformat(pub_raw.replace("Z", "+00:00"))
+        except Exception:
+            pub_at = now
+
+        # ── Upsert blogger candidate ──────────────────────────────────────────
+        if handle and followers >= follower_threshold:
+            existing = await db.get(XBloggerCandidate, handle)
+            if existing:
+                existing.last_seen_at = now
+                if followers > 0:
+                    existing.followers = followers
+                if display and not existing.display_name:
+                    existing.display_name = display
+            else:
+                await db.execute(
+                    _sqlite_insert(XBloggerCandidate).values(
+                        username=handle,
+                        display_name=display,
+                        avatar_url="",
+                        followers=followers,
+                        bio="",
+                        profile_url=f"https://x.com/{handle}",
+                        status="candidate",
+                        added_at=now,
+                        last_seen_at=now,
+                    ).on_conflict_do_nothing()
+                )
+                new_candidates += 1
+
+        # ── Upsert post ───────────────────────────────────────────────────────
+        stmt = _sqlite_insert(XPost).values(
+            tweet_id=tid,
+            username=handle,
+            content=content,
+            url=url,
+            published_at=pub_at,
+            collected_at=now,
+            author_followers=followers,
+            source="tl1",
+        ).on_conflict_do_update(
+            index_elements=["tweet_id"],
+            set_={"author_followers": followers},
+        )
+        res = await db.execute(stmt)
+        if res.rowcount:
+            new_posts += 1
+
+        # ── Append metrics snapshot ───────────────────────────────────────────
+        await db.execute(
+            _sqlite_insert(XPostMetrics).values(
+                tweet_id=tid,
+                replies=replies,
+                reposts=reposts,
+                likes=likes,
+                views=views,
+                collected_at=now,
+            )
+        )
+
+    await db.commit()
+    print(f"[tl1] done: {new_posts} new posts, {new_candidates} new candidates from {len(items)} items")
+    return {
+        "total": len(items),
+        "new_posts": new_posts,
+        "new_candidates": new_candidates,
+        "hours": hours,
+        "error": None,
+    }
+
+
+# ── tl1.com users collector ───────────────────────────────────────────────────
+
+import asyncio as _asyncio
+import random as _random
+
+TL1_USERS_URL = f"{TL1_BASE}/api/users"
+TL1_USERS_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+    "Referer": "https://www.tl1.com/",
+}
+
+
+async def fetch_tl1_users(
+    max_pages: int = 100,
+    page_size: int = 30,
+    sort: str = "_delta.followersCount",
+    dir: str = "desc",
+    progress_cb=None,
+) -> dict:
+    """
+    Crawl tl1.com /api/users up to max_pages pages, save to x_blogger_candidates.
+    Random 10-30s delay between pages.
+    progress_cb(page, total_pages, upserted) called after each page if provided.
+    """
+    cfg = await _cfg()
+    follower_threshold = max(0, int(cfg.get("x_follower_threshold", 0)))
+    now = datetime.now(timezone.utc)
+
+    total_upserted = 0
+    total_fetched = 0
+
+    async with httpx.AsyncClient(timeout=20, headers=TL1_USERS_HEADERS) as client:
+        for page in range(1, max_pages + 1):
+            try:
+                resp = await client.get(TL1_USERS_URL, params={
+                    "page": page,
+                    "pageSize": page_size,
+                    "sort": sort,
+                    "dir": dir,
+                })
+                resp.raise_for_status()
+                data = resp.json()
+            except Exception as e:
+                print(f"[tl1-users] page {page} error: {e}")
+                break
+
+            items = data.get("items") or []
+            if not items:
+                print(f"[tl1-users] page {page} empty, stopping")
+                break
+
+            total_fetched += len(items)
+
+            from database import SessionLocal
+            async with SessionLocal() as db:
+                page_upserted = 0
+                for u in items:
+                    handle = (u.get("handle") or "").lower().strip()
+                    if not handle:
+                        continue
+                    followers = int(u.get("followersCount") or 0)
+                    if followers < follower_threshold:
+                        continue
+
+                    display = (u.get("displayName") or handle).strip()[:100]
+                    bio = (u.get("bio") or "")[:400]
+                    avatar = u.get("profileImageUrl") or ""
+                    profile_url = f"https://x.com/{handle}"
+                    following = int(u.get("followingCount") or 0)
+                    tweets = int(u.get("statusesCount") or 0)
+                    favourites = int(u.get("favouritesCount") or 0)
+                    location = (u.get("location") or "")[:100]
+                    join_date = (u.get("joinDate") or "")[:32]
+
+                    existing = await db.get(XBloggerCandidate, handle)
+                    if existing:
+                        existing.followers = followers
+                        existing.following_count = following
+                        existing.tweet_count = tweets
+                        existing.favourites_count = favourites
+                        existing.last_seen_at = now
+                        if display:
+                            existing.display_name = display
+                        if bio:
+                            existing.bio = bio
+                        if avatar:
+                            existing.avatar_url = avatar
+                        if location:
+                            existing.location = location
+                        if join_date:
+                            existing.join_date = join_date
+                    else:
+                        await db.execute(
+                            _sqlite_insert(XBloggerCandidate).values(
+                                username=handle,
+                                display_name=display,
+                                avatar_url=avatar,
+                                followers=followers,
+                                following_count=following,
+                                tweet_count=tweets,
+                                favourites_count=favourites,
+                                location=location,
+                                join_date=join_date,
+                                bio=bio,
+                                profile_url=profile_url,
+                                status="candidate",
+                                added_at=now,
+                                last_seen_at=now,
+                            ).on_conflict_do_nothing()
+                        )
+                        page_upserted += 1
+
+                await db.commit()
+                total_upserted += page_upserted
+
+            print(f"[tl1-users] page {page}/{max_pages} — {len(items)} users, +{page_upserted} new")
+
+            if progress_cb:
+                await progress_cb(page, max_pages, total_upserted)
+
+            if page < max_pages and items:
+                delay = _random.uniform(10, 30)
+                await _asyncio.sleep(delay)
+
+    return {
+        "pages_fetched": min(max_pages, page if items else page - 1),
+        "total_fetched": total_fetched,
+        "total_upserted": total_upserted,
         "error": None,
     }
 

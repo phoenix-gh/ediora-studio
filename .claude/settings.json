@@ -1,0 +1,5 @@
+{
+  "env": {
+    "PATH": "/home/violet/miniconda3/envs/wems/bin:/home/violet/miniconda3/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+  }
+}

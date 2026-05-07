@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { LayoutDashboard, Lightbulb, Rss, TrendingUp, Star, Settings, BarChart2, PenLine, GitFork, AtSign, Compass, FileText } from 'lucide-react'
+import { LayoutDashboard, Lightbulb, Rss, TrendingUp, Star, Settings, BarChart2, PenLine, GitFork, AtSign, Compass, FileText, BookMarked } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const navItems = [
@@ -10,6 +10,7 @@ const navItems = [
   { href: '/directions', label: '内容方向', icon: Compass },
   { href: '/topics', label: '选题决策流', icon: Lightbulb },
   { href: '/write', label: '撰写文章', icon: PenLine },
+  { href: '/drafts', label: '草稿箱', icon: BookMarked },
   { href: '/following', label: '关注动态', icon: Rss },
   { href: '/hotspots', label: '热点雷达', icon: TrendingUp },
   { href: '/economic', label: '经济动态', icon: BarChart2 },

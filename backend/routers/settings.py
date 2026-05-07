@@ -48,7 +48,13 @@ class SettingsOut(BaseModel):
     x_post_lookback_hours: int
     x_timeline_scrolls: int
     twitterapi_io_key_set: bool
+    twitterapi_io_collect_enabled: bool
     x_search_queries: str
+    tl1_collect_enabled: bool
+    tl1_collect_interval_seconds: int
+    tl1_trending_hours: int
+    x_post_classify_enabled: bool
+    x_post_classify_prompt: str
     arxiv_categories: str
     arxiv_collect_interval_hours: int
     providers: list[ProviderInfo]
@@ -80,7 +86,13 @@ class SettingsUpdate(BaseModel):
     x_post_lookback_hours: Optional[int] = None
     x_timeline_scrolls: Optional[int] = None
     twitterapi_io_key: Optional[str] = None
+    twitterapi_io_collect_enabled: Optional[bool] = None
     x_search_queries: Optional[str] = None
+    tl1_collect_enabled: Optional[bool] = None
+    tl1_collect_interval_seconds: Optional[int] = None
+    tl1_trending_hours: Optional[int] = None
+    x_post_classify_enabled: Optional[bool] = None
+    x_post_classify_prompt: Optional[str] = None
     arxiv_categories: Optional[str] = None
     arxiv_collect_interval_hours: Optional[int] = None
 
@@ -127,7 +139,13 @@ def _build_out(cfg: dict) -> SettingsOut:
         x_post_lookback_hours=max(1, int(cfg.get("x_post_lookback_hours", 24))),
         x_timeline_scrolls=max(1, int(cfg.get("x_timeline_scrolls", 5))),
         twitterapi_io_key_set=bool(cfg.get("twitterapi_io_key", "")),
+        twitterapi_io_collect_enabled=cfg.get("twitterapi_io_collect_enabled", "1") == "1",
         x_search_queries=cfg.get("x_search_queries", ""),
+        tl1_collect_enabled=cfg.get("tl1_collect_enabled", "1") == "1",
+        tl1_collect_interval_seconds=max(10, int(cfg.get("tl1_collect_interval_seconds", 30))),
+        tl1_trending_hours=max(1, min(24, int(cfg.get("tl1_trending_hours", 2)))),
+        x_post_classify_enabled=cfg.get("x_post_classify_enabled", "1") == "1",
+        x_post_classify_prompt=cfg.get("x_post_classify_prompt", ""),
         arxiv_categories=cfg.get("arxiv_categories", "cs.AI,cs.CL,cs.CV,cs.LG"),
         arxiv_collect_interval_hours=max(1, int(cfg.get("arxiv_collect_interval_hours", 6))),
         providers=[
@@ -223,8 +241,20 @@ async def update_settings(body: SettingsUpdate, request: Request):
         updates["x_timeline_scrolls"] = str(max(1, min(20, body.x_timeline_scrolls)))
     if body.twitterapi_io_key is not None:
         updates["twitterapi_io_key"] = body.twitterapi_io_key
+    if body.twitterapi_io_collect_enabled is not None:
+        updates["twitterapi_io_collect_enabled"] = "1" if body.twitterapi_io_collect_enabled else "0"
     if body.x_search_queries is not None:
         updates["x_search_queries"] = body.x_search_queries
+    if body.tl1_collect_enabled is not None:
+        updates["tl1_collect_enabled"] = "1" if body.tl1_collect_enabled else "0"
+    if body.tl1_collect_interval_seconds is not None:
+        updates["tl1_collect_interval_seconds"] = str(max(10, body.tl1_collect_interval_seconds))
+    if body.tl1_trending_hours is not None:
+        updates["tl1_trending_hours"] = str(max(1, min(24, body.tl1_trending_hours)))
+    if body.x_post_classify_enabled is not None:
+        updates["x_post_classify_enabled"] = "1" if body.x_post_classify_enabled else "0"
+    if body.x_post_classify_prompt is not None:
+        updates["x_post_classify_prompt"] = body.x_post_classify_prompt
     if body.arxiv_categories is not None:
         updates["arxiv_categories"] = body.arxiv_categories
     if body.arxiv_collect_interval_hours is not None:
@@ -233,7 +263,7 @@ async def update_settings(body: SettingsUpdate, request: Request):
         await set_config(updates)
 
     # Reschedule jobs if intervals changed
-    interval_keys = {"collect_interval_minutes", "github_interval_minutes"}
+    interval_keys = {"collect_interval_minutes", "github_interval_minutes", "tl1_collect_interval_seconds"}
     if interval_keys & set(updates):
         cfg = await get_config()
         try:
@@ -245,6 +275,10 @@ async def update_settings(body: SettingsUpdate, request: Request):
             sched.reschedule_job(
                 "github_collect", trigger="interval",
                 minutes=max(1, int(cfg.get("github_interval_minutes", 1))),
+            )
+            sched.reschedule_job(
+                "tl1_collect", trigger="interval",
+                seconds=max(10, int(cfg.get("tl1_collect_interval_seconds", 30))),
             )
         except Exception as e:
             print(f"[settings] reschedule failed: {e}")

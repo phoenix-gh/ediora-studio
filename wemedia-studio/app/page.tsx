@@ -1,7 +1,7 @@
 import Link from 'next/link'
-import { ArrowRight, Flame, Sparkles, TrendingUp, TrendingDown, Minus, BarChart2, ExternalLink } from 'lucide-react'
+import { ArrowRight, Flame, Sparkles, TrendingUp, TrendingDown, Minus, BarChart2, ExternalLink, Tag } from 'lucide-react'
 import { getRecommendedTopics } from '@/lib/api/topics'
-import { getHotspots } from '@/lib/api/hotspots'
+import { getKeywords, getWordCloud } from '@/lib/api/keywords'
 import { getUrgentPosts } from '@/lib/api/accounts'
 import { getEconomicItems } from '@/lib/api/economic'
 import { mockAccounts } from '@/mock/accounts'
@@ -9,6 +9,7 @@ import { UrgencyBadge } from '@/components/features/UrgencyBadge'
 import { ScoreStars } from '@/components/features/ScoreStars'
 import { MiniSparkline } from '@/components/features/MiniSparkline'
 import { GenerateButton } from '@/components/features/GenerateButton'
+import { WordCloud } from '@/components/features/WordCloud'
 import { cn } from '@/lib/utils'
 
 export const dynamic = 'force-dynamic'
@@ -25,15 +26,6 @@ function formatNumber(n: number) {
   return n >= 10000 ? `${(n / 10000).toFixed(1)}w` : n.toLocaleString()
 }
 
-const TrendIcon = ({ trend }: { trend: string }) => {
-  if (trend === 'rising') return <TrendingUp className="w-3.5 h-3.5 text-red-500" />
-  if (trend === 'declining') return <TrendingDown className="w-3.5 h-3.5 text-zinc-400" />
-  return <Minus className="w-3.5 h-3.5 text-amber-500" />
-}
-
-const trendLabel: Record<string, string> = { rising: '上升', peak: '峰值', declining: '下降' }
-const trendColor: Record<string, string> = { rising: 'text-red-500', peak: 'text-amber-500', declining: 'text-zinc-400' }
-
 const impactColor: Record<string, string> = {
   positive: 'text-emerald-600 dark:text-emerald-400',
   negative: 'text-red-500 dark:text-red-400',
@@ -41,15 +33,24 @@ const impactColor: Record<string, string> = {
 }
 const impactLabel: Record<string, string> = { positive: '↑ 利好', negative: '↓ 利空', neutral: '→ 中性' }
 
+const trendIcon = {
+  rising: <TrendingUp className="w-3 h-3 text-red-500" />,
+  stable: <Minus className="w-3 h-3 text-zinc-400" />,
+  declining: <TrendingDown className="w-3 h-3 text-zinc-400" />,
+}
+const trendColor = { rising: 'text-red-500', stable: 'text-zinc-400', declining: 'text-zinc-400' }
+
 export default async function Dashboard() {
-  const [recommended, hotspots, urgentPosts, economicItems] = await Promise.all([
+  const [recommended, keywords, wordCloudData, urgentPosts, economicItems] = await Promise.all([
     getRecommendedTopics(5),
-    getHotspots(10),
+    getKeywords(),
+    getWordCloud(24, 60),
     getUrgentPosts(5),
     getEconomicItems({ }),
   ])
 
   const today = new Date().toLocaleDateString('zh-CN', { month: 'long', day: 'numeric', weekday: 'long' })
+  const topKeywords = keywords.slice(0, 10)
 
   return (
     <div className="px-8 py-8">
@@ -111,6 +112,20 @@ export default async function Dashboard() {
                 ))}
               </div>
             )}
+          </section>
+
+          {/* 24h 词云 */}
+          <section>
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <Tag className="w-4 h-4 text-violet-500" />
+                <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">24h 词云</h2>
+                <span className="text-xs text-zinc-400">过去 24 小时采集内容高频词</span>
+              </div>
+            </div>
+            <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-4">
+              <WordCloud words={wordCloudData} />
+            </div>
           </section>
 
           {/* 关注号动态 */}
@@ -211,26 +226,26 @@ export default async function Dashboard() {
           </section>
         </div>
 
-        {/* 热点雷达 */}
+        {/* 关键词热度 */}
         <aside>
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
               <TrendingUp className="w-4 h-4 text-rose-500" />
-              <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">热点雷达</h2>
+              <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">关键词热度</h2>
               <span className="text-xs text-zinc-400">Top 10</span>
             </div>
             <Link href="/hotspots" className="flex items-center gap-1 text-xs text-zinc-400 hover:text-zinc-600 transition-colors">
-              查看全部 <ArrowRight className="w-3 h-3" />
+              管理 <ArrowRight className="w-3 h-3" />
             </Link>
           </div>
-          {hotspots.length === 0 ? (
+          {topKeywords.length === 0 ? (
             <div className="bg-zinc-50 dark:bg-zinc-900/50 border border-dashed border-zinc-200 dark:border-zinc-800 rounded-xl p-6 text-center text-zinc-400 text-xs">
-              暂无热点数据
+              暂无关键词 · <Link href="/hotspots" className="text-indigo-400 hover:underline">去添加</Link>
             </div>
           ) : (
             <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl divide-y divide-zinc-100 dark:divide-zinc-800">
-              {hotspots.map((h, i) => (
-                <div key={h.id} className="flex items-center gap-3 px-4 py-3 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors">
+              {topKeywords.map((kw, i) => (
+                <div key={kw.id} className="flex items-center gap-3 px-4 py-3 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors">
                   <span className={cn(
                     'text-xs font-bold tabular-nums w-4 text-center flex-shrink-0',
                     i < 3 ? 'text-rose-500' : 'text-zinc-400'
@@ -238,18 +253,16 @@ export default async function Dashboard() {
                     {i + 1}
                   </span>
                   <div className="flex-1 min-w-0">
-                    <p className="text-xs font-medium text-zinc-800 dark:text-zinc-200 truncate">{h.title}</p>
+                    <p className="text-xs font-medium text-zinc-800 dark:text-zinc-200 truncate">{kw.term}</p>
                     <div className="flex items-center gap-1.5 mt-0.5">
-                      <TrendIcon trend={h.trend} />
-                      <span className={cn('text-[10px]', trendColor[h.trend])}>{trendLabel[h.trend]}</span>
-                      <span className="text-[10px] text-zinc-400">{h.platforms.slice(0, 2).join(' · ')}</span>
+                      {trendIcon[kw.trend]}
+                      <span className={cn('text-[10px]', trendColor[kw.trend])}>
+                        {kw.mention_count_24h} 提及
+                      </span>
                     </div>
                   </div>
-                  <div className="flex items-center gap-1.5 flex-shrink-0">
-                    <div className="w-[40px]">
-                      <MiniSparkline data={h.trendData.slice(-12)} height={16} color={i < 3 ? '#f43f5e' : '#a1a1aa'} />
-                    </div>
-                    <span className="text-xs font-medium text-zinc-500 tabular-nums w-6 text-right">{h.heat}</span>
+                  <div className="flex-shrink-0">
+                    <div className="text-xs font-medium text-zinc-500 tabular-nums">{kw.heat}</div>
                   </div>
                 </div>
               ))}

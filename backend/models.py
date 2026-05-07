@@ -225,6 +225,11 @@ class XBloggerCandidate(Base):
     display_name: Mapped[str] = mapped_column(String, default="")
     avatar_url: Mapped[str] = mapped_column(String, default="")
     followers: Mapped[int] = mapped_column(Integer, default=0)
+    following_count: Mapped[int] = mapped_column(Integer, default=0)
+    tweet_count: Mapped[int] = mapped_column(Integer, default=0)
+    favourites_count: Mapped[int] = mapped_column(Integer, default=0)
+    location: Mapped[str] = mapped_column(String, default="")
+    join_date: Mapped[str] = mapped_column(String, default="")
     bio: Mapped[str] = mapped_column(Text, default="")
     profile_url: Mapped[str] = mapped_column(String, default="")
     status: Mapped[str] = mapped_column(String, default="candidate", index=True)  # candidate/following/rejected
@@ -242,6 +247,8 @@ class XPost(Base):
     published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     author_followers: Mapped[int] = mapped_column(Integer, default=0)
+    source: Mapped[str] = mapped_column(String, default="twitterapi")
+    category: Mapped[str] = mapped_column(String, default="")
 
 
 class XPostMetrics(Base):
@@ -306,3 +313,31 @@ class CollectLog(Base):
     message: Mapped[str] = mapped_column(Text, default="")
     detail: Mapped[str] = mapped_column(Text, default="")                 # extra context (errors etc)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, index=True)
+
+
+class Keyword(Base):
+    __tablename__ = "keywords"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    term: Mapped[str] = mapped_column(String, nullable=False, unique=True)
+    category: Mapped[str] = mapped_column(String, default="")
+    source: Mapped[str] = mapped_column(String, default="auto")  # auto/manual/llm
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    blocked: Mapped[bool] = mapped_column(Boolean, default=False)  # user-deleted → never re-add
+    heat: Mapped[int] = mapped_column(Integer, default=0)
+    mention_count_24h: Mapped[int] = mapped_column(Integer, default=0)
+    platforms: Mapped[list] = mapped_column(JSON, default=list)
+    trend: Mapped[str] = mapped_column(String, default="stable")  # rising/stable/declining
+    last_computed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+
+class KeywordSnapshot(Base):
+    __tablename__ = "keyword_snapshots"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    keyword_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    heat: Mapped[int] = mapped_column(Integer, default=0)
+    mention_count: Mapped[int] = mapped_column(Integer, default=0)
+    engagement_score: Mapped[float] = mapped_column(Float, default=0.0)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, index=True)
