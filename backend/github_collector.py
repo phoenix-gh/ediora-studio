@@ -40,51 +40,101 @@ def _api_headers(token: str) -> dict:
 
 
 async def collect_trending(db: AsyncSession) -> int:
-    """Fetch GitHub trending repos via gtrending library (scrapes github.com/trending)."""
-    import asyncio
-    from gtrending import fetch_repos
+    """Fetch GitHub trending repos by scraping github.com/trending directly."""
+    import re
 
     today = datetime.now(timezone.utc).date().isoformat()
     count = 0
-    loop = asyncio.get_event_loop()
+    errors = []
 
     for period in ("daily", "weekly"):
+        url = f"https://github.com/trending?since={period}"
         try:
-            repos = await loop.run_in_executor(None, lambda p=period: fetch_repos(since=p))
+            async with httpx.AsyncClient(timeout=20, follow_redirects=True,
+                                         headers={"User-Agent": "WeMediaStudio/1.0"}) as client:
+                resp = await client.get(url)
+                resp.raise_for_status()
+                html = resp.text
         except Exception as e:
-            print(f"[github] trending/{period} fetch failed: {e}")
+            errors.append(f"{period}: fetch failed — {e}")
             continue
 
-        if not repos:
-            print(f"[github] trending/{period} returned 0 repos")
+        # Parse trending repos from the page HTML
+        # Each repo article: <article class="Box-row"> with h2 > a containing owner/repo
+        articles = re.split(r'<article[^>]*class="[^"]*Box-row[^"]*"[^>]*>', html)[1:]
+
+        if not articles:
+            errors.append(f"{period}: no repos found in HTML")
             continue
 
-        for r in repos[:30]:
-            owner = r.get("author", "")
-            repo_name = r.get("name", "")
-            if not owner or not repo_name:
+        repos = []
+        for article in articles:
+            # owner/repo from <h2> link: href="/owner/repo"
+            h2_match = re.search(r'<h2[^>]*>.*?<a[^>]*href="/([^/"]+)/([^/"]+)"', article, re.DOTALL)
+            if not h2_match:
                 continue
+            owner, repo_name = h2_match.group(1), h2_match.group(2)
 
-            tid = hashlib.md5(f"{owner}/{repo_name}:{period}:{today}".encode()).hexdigest()[:16]
-            if await db.get(GithubTrendingRepo, tid):
-                continue
+            # Description from <p class="col-9 ...">
+            desc_match = re.search(r'<p\s+class="[^"]*col-9[^"]*"[^>]*>\s*(.*?)\s*</p>', article, re.DOTALL)
+            desc = re.sub(r'<[^>]+>', '', desc_match.group(1)).strip() if desc_match else ""
 
+            # Language
+            lang_match = re.search(r'itemprop="programmingLanguage"[^>]*>([^<]+)<', article)
+            lang = lang_match.group(1).strip() if lang_match else ""
+
+            # Stars / forks from the trailing text: "123 stars" "45 forks"
+            stars_match = re.search(r'(\d[\d,]*)\s+stars', article)
+            stars = int(stars_match.group(1).replace(",", "")) if stars_match else 0
+
+            forks_match = re.search(r'(\d[\d,]*)\s+forks', article)
+            forks = int(forks_match.group(1).replace(",", "")) if forks_match else 0
+
+            # Stars gained today/this week
+            gained_match = re.search(r'(\d[\d,]*)\s+stars?\s+(today|this week|this month)', article)
+            stars_gained = int(gained_match.group(1).replace(",", "")) if gained_match else 0
+
+            repos.append({
+                "owner": owner,
+                "repo": repo_name,
+                "description": desc.strip()[:500],
+                "language": lang,
+                "stars": stars,
+                "stars_gained": stars_gained,
+                "forks": forks,
+                "url": f"https://github.com/{owner}/{repo_name}",
+            })
+
+        # Delete today's existing snapshot
+        from sqlalchemy import delete
+        await db.execute(
+            delete(GithubTrendingRepo).where(
+                GithubTrendingRepo.period == period,
+                GithubTrendingRepo.trending_date == today,
+            )
+        )
+
+        for i, r in enumerate(repos[:30]):
+            tid = hashlib.md5(f"{r['owner']}/{r['repo']}:{period}:{today}".encode()).hexdigest()[:16]
             db.add(GithubTrendingRepo(
                 id=tid,
-                owner=owner,
-                repo=repo_name,
-                description=(r.get("description") or "").strip()[:500],
-                language=r.get("language") or "",
-                stars=r.get("stars", 0),
-                stars_gained=r.get("currentPeriodStars", 0),
-                forks=r.get("forks", 0),
+                owner=r["owner"],
+                repo=r["repo"],
+                description=r["description"],
+                language=r["language"],
+                stars=r["stars"],
+                stars_gained=r["stars_gained"],
+                forks=r["forks"],
                 period=period,
+                position=i + 1,
                 trending_date=today,
-                url=r.get("url") or f"https://github.com/{owner}/{repo_name}",
+                url=r["url"],
             ))
             count += 1
 
     await db.commit()
+    if errors and count == 0:
+        raise RuntimeError("; ".join(errors))
     return count
 
 

@@ -9,6 +9,28 @@ import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 
 const CATEGORIES = ['全部', 'cs.AI', 'cs.CL', 'cs.CV', 'cs.LG', 'cs.RO', 'stat.ML']
+
+const CATEGORY_CN: Record<string, string> = {
+  'cs.AI': '人工智能', 'cs.CL': '计算语言学', 'cs.CV': '计算机视觉',
+  'cs.LG': '机器学习', 'cs.RO': '机器人学', 'stat.ML': '统计机器学习',
+  'cs.HC': '人机交互', 'cs.IR': '信息检索', 'cs.NE': '神经进化计算',
+  'cs.SE': '软件工程', 'cs.CR': '密码与安全', 'cs.DB': '数据库',
+  'cs.DC': '分布式计算', 'cs.DS': '数据结构', 'cs.GT': '博弈论',
+  'cs.MA': '多智能体', 'cs.MM': '多媒体', 'cs.NI': '网络架构',
+  'cs.OS': '操作系统', 'cs.PL': '编程语言', 'cs.CY': '计算与社会',
+  'cs.CE': '计算工程', 'cs.CG': '计算几何', 'cs.GR': '计算机图形学',
+  'cs.IT': '信息论', 'cs.SI': '社交网络', 'cs.SC': '符号计算',
+  'cs.NA': '数值分析', 'cs.PF': '性能分析', 'cs.AR': '体系结构',
+  'eess.AS': '音频处理', 'eess.IV': '图像与视频', 'eess.SP': '信号处理',
+  'eess.SY': '系统控制', 'math.OC': '优化与控制', 'math.ST': '统计理论',
+  'physics.comp-ph': '计算物理', 'q-bio.QM': '定量方法', 'q-bio.NC': '神经科学',
+  'q-fin.ST': '统计金融', 'stat.AP': '应用统计', 'stat.ME': '统计方法',
+}
+
+function catLabel(code: string) {
+  const cn = CATEGORY_CN[code]
+  return cn ? `${code} / ${cn}` : code
+}
 const DAYS_OPTIONS = [1, 3, 7, 14, 30]
 
 function PaperCard({ paper }: { paper: Paper }) {
@@ -19,8 +41,9 @@ function PaperCard({ paper }: { paper: Paper }) {
   const date = new Date(paper.submitted_at).toLocaleDateString('zh-CN', {
     month: 'short', day: 'numeric',
   })
-  const abstract = paper.abstract.replace(/\s+/g, ' ').trim()
-  const shortAbstract = abstract.length > 200 ? abstract.slice(0, 200) + '…' : abstract
+  const titleCn = paper.title_cn || paper.title
+  const abstractCn = (paper.abstract_cn || paper.abstract || '').replace(/\s+/g, ' ').trim()
+  const shortAbstractCn = abstractCn.length > 200 ? abstractCn.slice(0, 200) + '…' : abstractCn
 
   return (
     <div className="border border-zinc-200 dark:border-zinc-800 rounded-lg p-4 hover:border-zinc-300 dark:hover:border-zinc-700 transition-colors">
@@ -32,7 +55,7 @@ function PaperCard({ paper }: { paper: Paper }) {
             rel="noopener noreferrer"
             className="text-sm font-medium text-zinc-900 dark:text-zinc-100 hover:text-indigo-600 dark:hover:text-indigo-400 line-clamp-2 leading-snug"
           >
-            {paper.title}
+            {titleCn}
           </a>
           <div className="flex items-center gap-2 mt-1.5 flex-wrap">
             <span className="text-[11px] text-zinc-400">{date}</span>
@@ -41,7 +64,7 @@ function PaperCard({ paper }: { paper: Paper }) {
           <div className="flex gap-1 mt-2 flex-wrap">
             {paper.categories.slice(0, 5).map(cat => (
               <span key={cat} className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-indigo-50 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300">
-                {cat}
+                {catLabel(cat)}
               </span>
             ))}
           </div>
@@ -70,12 +93,12 @@ function PaperCard({ paper }: { paper: Paper }) {
         </div>
       </div>
 
-      {abstract && (
+      {abstractCn && (
         <div className="mt-2.5">
-          <p className="text-[12px] text-zinc-500 dark:text-zinc-400 leading-relaxed">
-            {expanded ? abstract : shortAbstract}
+          <p className="text-[12px] text-zinc-600 dark:text-zinc-400 leading-relaxed">
+            {expanded ? abstractCn : shortAbstractCn}
           </p>
-          {abstract.length > 200 && (
+          {abstractCn.length > 200 && (
             <button
               onClick={() => setExpanded(v => !v)}
               className="mt-1 flex items-center gap-0.5 text-[11px] text-zinc-400 hover:text-zinc-600 transition-colors"
@@ -137,7 +160,9 @@ export function PapersClient({ initialPapers }: { initialPapers: Paper[] }) {
       const q = search.toLowerCase()
       list = list.filter(p =>
         p.title.toLowerCase().includes(q) ||
+        p.title_cn.toLowerCase().includes(q) ||
         p.abstract.toLowerCase().includes(q) ||
+        p.abstract_cn.toLowerCase().includes(q) ||
         p.authors.some(a => a.toLowerCase().includes(q))
       )
     }
@@ -193,7 +218,7 @@ export function PapersClient({ initialPapers }: { initialPapers: Paper[] }) {
                     : 'text-zinc-500 hover:text-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-800'
                 )}
               >
-                {cat}
+                {cat === '全部' ? cat : catLabel(cat)}
               </button>
             ))}
           </div>

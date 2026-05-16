@@ -424,6 +424,105 @@ class ProductHuntPost(Base):
     collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
 
 
+class V2exSubscription(Base):
+    __tablename__ = "v2ex_subscriptions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    kind: Mapped[str] = mapped_column(String, nullable=False, index=True)  # node | user | tab | all
+    key: Mapped[str] = mapped_column(String, default="")                   # node slug / username / tab id
+    label: Mapped[str] = mapped_column(String, nullable=False)             # display label
+    group: Mapped[str] = mapped_column(String, default="未分组")
+    muted: Mapped[bool] = mapped_column(Boolean, default=False)
+    last_collected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+
+class V2exTopic(Base):
+    __tablename__ = "v2ex_topics"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)              # f"{subscription_id}:{topic_id}"
+    subscription_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    topic_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String, default="")
+    content: Mapped[str] = mapped_column(Text, default="")
+    url: Mapped[str] = mapped_column(String, default="")
+    author: Mapped[str] = mapped_column(String, default="")
+    author_url: Mapped[str] = mapped_column(String, default="")
+    replies: Mapped[int] = mapped_column(Integer, default=0)
+    published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+
+class KrArticle(Base):
+    __tablename__ = "kr_articles"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)              # itemId for hot, MD5 of url for RSS
+    feed_type: Mapped[str] = mapped_column(String, nullable=False, index=True)  # hot | article | newsflash
+    title: Mapped[str] = mapped_column(String, default="")
+    url: Mapped[str] = mapped_column(String, default="")
+    image_url: Mapped[str] = mapped_column(String, default="")
+    summary: Mapped[str] = mapped_column(Text, default="")
+    content: Mapped[str] = mapped_column(Text, default="")                 # full HTML body
+    author: Mapped[str] = mapped_column(String, default="")
+    stat_text: Mapped[str] = mapped_column(String, default="")             # e.g. "203点赞"
+    stat_read: Mapped[int] = mapped_column(Integer, default=0)
+    stat_like: Mapped[int] = mapped_column(Integer, default=0)
+    stat_comment: Mapped[int] = mapped_column(Integer, default=0)
+    rank: Mapped[int] = mapped_column(Integer, default=0)                  # 0 = no longer in hot list
+    published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+
+class JuejinArticle(Base):
+    __tablename__ = "juejin_articles"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)              # article_id from Juejin
+    category: Mapped[str] = mapped_column(String, nullable=False, index=True)  # hot | backend | frontend | ai | android | ios | tool | life | read
+    title: Mapped[str] = mapped_column(String, default="")
+    url: Mapped[str] = mapped_column(String, default="")
+    cover_url: Mapped[str] = mapped_column(String, default="")
+    brief: Mapped[str] = mapped_column(Text, default="")                   # brief_content
+    content: Mapped[str] = mapped_column(Text, default="")                 # full HTML body (lazy-fetched)
+    author: Mapped[str] = mapped_column(String, default="")
+    author_avatar: Mapped[str] = mapped_column(String, default="")
+    tags: Mapped[str] = mapped_column(String, default="")                  # comma-joined tag names
+    view_count: Mapped[int] = mapped_column(Integer, default=0)
+    digg_count: Mapped[int] = mapped_column(Integer, default=0)            # 点赞
+    comment_count: Mapped[int] = mapped_column(Integer, default=0)
+    collect_count: Mapped[int] = mapped_column(Integer, default=0)         # 收藏
+    hot_rank: Mapped[int] = mapped_column(Integer, default=0)              # ordering within latest fetch; 0 = stale
+    published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+
+class WechatAccount(Base):
+    __tablename__ = "wechat_accounts"
+
+    biz: Mapped[str] = mapped_column(String, primary_key=True)  # __biz value
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    avatar_url: Mapped[str] = mapped_column(String, default="")
+    description: Mapped[str] = mapped_column(Text, default="")
+    note: Mapped[str] = mapped_column(Text, default="")
+    group: Mapped[str] = mapped_column(String, default="未分组")
+    muted: Mapped[bool] = mapped_column(Boolean, default=False)
+    last_collected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+
+class WechatArticle(Base):
+    __tablename__ = "wechat_articles"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)  # MD5 of URL
+    biz: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    account_name: Mapped[str] = mapped_column(String, default="")
+    title: Mapped[str] = mapped_column(String, default="")
+    url: Mapped[str] = mapped_column(String, default="")
+    cover_url: Mapped[str] = mapped_column(String, default="")
+    digest: Mapped[str] = mapped_column(Text, default="")
+    published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+
 class YoutubeChannel(Base):
     __tablename__ = "youtube_channels"
 

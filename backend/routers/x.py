@@ -36,23 +36,45 @@ class CandidateUpdate(BaseModel):
     status: Optional[str] = None   # candidate / following / rejected
 
 
-@router.get("/candidates", response_model=list[CandidateOut])
+class CandidateListOut(BaseModel):
+    candidates: list[CandidateOut]
+    total: int
+    status_counts: dict[str, int] = {}
+
+
+@router.get("/candidates", response_model=CandidateListOut)
 async def list_candidates(
     status: Optional[str] = Query(None),
-    limit: int = Query(100, le=500),
+    limit: int = Query(50, le=200),
+    offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ):
+    from sqlalchemy import func
+
+    # Status counts (always all statuses, unfiltered by query param)
+    count_rows = (await db.execute(
+        select(XBloggerCandidate.status, func.count(XBloggerCandidate.username))
+        .group_by(XBloggerCandidate.status)
+    )).all()
+    status_counts: dict[str, int] = {r.status: r[1] for r in count_rows}  # type: ignore[index]
+
+    # Base query for total count
+    base_q = select(XBloggerCandidate)
+    if status:
+        base_q = base_q.where(XBloggerCandidate.status == status)
+    total = (await db.execute(select(func.count()).select_from(base_q.subquery()))).scalar() or 0
+
+    # Paginated query
     q = (
         select(XBloggerCandidate)
         .order_by(desc(XBloggerCandidate.followers))
-        .limit(limit)
+        .limit(limit).offset(offset)
     )
     if status:
         q = q.where(XBloggerCandidate.status == status)
     rows = (await db.execute(q)).scalars().all()
 
     # Batch hot-post counts
-    from sqlalchemy import func
     usernames = [r.username for r in rows]
     count_rows = (await db.execute(
         select(XPost.username, func.count(XPost.tweet_id).label("cnt"))
@@ -61,18 +83,22 @@ async def list_candidates(
     )).all()
     hot_counts = {r.username: r.cnt for r in count_rows}
 
-    return [
-        CandidateOut(
-            **{c: getattr(r, c) for c in [
-                "username", "display_name", "avatar_url", "followers",
-                "following_count", "tweet_count", "favourites_count",
-                "location", "join_date", "bio", "profile_url", "status",
-                "added_at", "last_seen_at",
-            ]},
-            hot_post_count=hot_counts.get(r.username, 0),
-        )
-        for r in rows
-    ]
+    return CandidateListOut(
+        candidates=[
+            CandidateOut(
+                **{c: getattr(r, c) for c in [
+                    "username", "display_name", "avatar_url", "followers",
+                    "following_count", "tweet_count", "favourites_count",
+                    "location", "join_date", "bio", "profile_url", "status",
+                    "added_at", "last_seen_at",
+                ]},
+                hot_post_count=hot_counts.get(r.username, 0),
+            )
+            for r in rows
+        ],
+        total=total,
+        status_counts=status_counts,
+    )
 
 
 @router.patch("/candidates/{username}", response_model=CandidateOut)

@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
-import { RefreshCw, MessageCircle, Heart, Eye, Repeat2, ExternalLink, TrendingUp, Loader2, Flame, Users, PauseCircle, PlayCircle, Lightbulb, X as XIcon, PenLine, Check, BookMarked } from 'lucide-react'
+import { RefreshCw, MessageCircle, Heart, Eye, Repeat2, ExternalLink, TrendingUp, Loader2, Flame, Users, PauseCircle, PlayCircle, Lightbulb, X as XIcon, PenLine, Check, BookMarked, ChevronLeft, ChevronRight } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -414,7 +414,16 @@ function formatRelTime(iso: string): string {
 
 const HOURS_OPTIONS = [2, 6, 12, 24] as const
 type PostFilter = 'all' | 'viral'
+type SortKey = 'views' | 'time' | 'replies' | 'likes' | 'reposts'
 const VIRAL_RATIO = 1.5
+
+const SORT_OPTIONS: { key: SortKey; label: string }[] = [
+  { key: 'time',    label: '时间' },
+  { key: 'views',   label: '阅读' },
+  { key: 'replies', label: '回复' },
+  { key: 'likes',   label: '点赞' },
+  { key: 'reposts', label: '转发' },
+]
 
 const AUTO_REFRESH_SEC = 30
 
@@ -428,6 +437,7 @@ export function XPostsPanel({ initialPosts }: { initialPosts: XPost[] }) {
     return localStorage.getItem('x_posts_auto_refresh') !== '0'
   })
   const [countdown, setCountdown] = useState(AUTO_REFRESH_SEC)
+  const [sortBy, setSortBy] = useState<SortKey>('views')
   const [inspirePost, setInspirePost] = useState<XPost | null>(null)
   const [createPost, setCreatePost] = useState<XPost | null>(null)
   const hoursRef = useRef(hours)
@@ -467,21 +477,27 @@ export function XPostsPanel({ initialPosts }: { initialPosts: XPost[] }) {
   }, [autoRefresh, refresh])
 
   const [page, setPage] = useState(1)
-  const PAGE_SIZE = 10
+  const PAGE_SIZE = 20
 
   const viralCount = useMemo(() => posts.filter(p => p.is_viral).length, [posts])
 
-  // Sort by views desc so hottest posts float up
   const sorted = useMemo(() => {
     const base = filter === 'viral' ? posts.filter(p => p.is_viral) : posts
-    return [...base].sort((a, b) => b.latest_views - a.latest_views)
-  }, [posts, filter])
+    return [...base].sort((a, b) => {
+      switch (sortBy) {
+        case 'time':    return new Date(b.published_at).getTime() - new Date(a.published_at).getTime()
+        case 'replies': return b.latest_replies - a.latest_replies
+        case 'likes':   return b.latest_likes - a.latest_likes
+        case 'reposts': return b.latest_reposts - a.latest_reposts
+        default:        return b.latest_views - a.latest_views
+      }
+    })
+  }, [posts, filter, sortBy])
 
   const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE))
   const paginated = sorted.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
 
-  // Reset to page 1 when filter/hours/data changes
-  useEffect(() => { setPage(1) }, [filter, hours, posts])
+  useEffect(() => { setPage(1) }, [filter, hours, posts, sortBy])
 
   return (
     <div className="space-y-4">
@@ -532,6 +548,27 @@ export function XPostsPanel({ initialPosts }: { initialPosts: XPost[] }) {
             超粉丝浏览
             <span className="ml-1 text-xs opacity-60">{viralCount}</span>
           </button>
+        </div>
+
+        {/* Sort */}
+        <div className="flex items-center gap-1.5">
+          <span className="text-xs text-zinc-400">排序</span>
+          <div className="flex rounded-lg border border-zinc-200 dark:border-zinc-700 overflow-hidden text-sm">
+            {SORT_OPTIONS.map(({ key, label }) => (
+              <button
+                key={key}
+                onClick={() => setSortBy(key)}
+                className={cn(
+                  'px-3 py-1.5 transition-colors',
+                  sortBy === key
+                    ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900'
+                    : 'text-zinc-500 hover:text-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 dark:hover:text-zinc-100'
+                )}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
 
         <span className="text-xs text-zinc-400">浏览量 &gt; 粉丝数 × {VIRAL_RATIO} 视为超粉丝浏览</span>
@@ -730,47 +767,32 @@ export function XPostsPanel({ initialPosts }: { initialPosts: XPost[] }) {
 
       {/* Pagination */}
       {sorted.length > 0 && totalPages > 1 && (
-        <div className="flex items-center justify-center gap-1 pt-2">
-          <button
-            onClick={() => setPage(p => Math.max(1, p - 1))}
-            disabled={page === 1}
-            className="px-3 py-1.5 rounded-lg text-sm border border-zinc-200 dark:border-zinc-700 text-zinc-500 hover:text-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 dark:hover:text-zinc-100 disabled:opacity-30 disabled:pointer-events-none transition-colors"
-          >
-            ‹
-          </button>
-          {Array.from({ length: totalPages }, (_, i) => i + 1)
-            .filter(p => p === 1 || p === totalPages || Math.abs(p - page) <= 2)
-            .reduce<(number | '…')[]>((acc, p, i, arr) => {
-              if (i > 0 && p - (arr[i - 1] as number) > 1) acc.push('…')
-              acc.push(p)
-              return acc
-            }, [])
-            .map((p, i) =>
-              p === '…' ? (
-                <span key={`ellipsis-${i}`} className="px-2 text-zinc-400 text-sm">…</span>
-              ) : (
-                <button
-                  key={p}
-                  onClick={() => setPage(p as number)}
-                  className={cn(
-                    'min-w-[32px] px-2 py-1.5 rounded-lg text-sm border transition-colors',
-                    page === p
-                      ? 'bg-zinc-900 text-white border-zinc-900 dark:bg-zinc-100 dark:text-zinc-900 dark:border-zinc-100'
-                      : 'border-zinc-200 dark:border-zinc-700 text-zinc-500 hover:text-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 dark:hover:text-zinc-100'
-                  )}
-                >
-                  {p}
-                </button>
-              )
-            )}
-          <button
-            onClick={() => setPage(p => Math.min(totalPages, p + 1))}
-            disabled={page === totalPages}
-            className="px-3 py-1.5 rounded-lg text-sm border border-zinc-200 dark:border-zinc-700 text-zinc-500 hover:text-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 dark:hover:text-zinc-100 disabled:opacity-30 disabled:pointer-events-none transition-colors"
-          >
-            ›
-          </button>
-          <span className="ml-2 text-xs text-zinc-400">{sorted.length} 条 · 第 {page}/{totalPages} 页</span>
+        <div className="flex items-center justify-between pt-2">
+          <span className="text-xs text-zinc-400">
+            共 {sorted.length} 条，第 {page}/{totalPages} 页
+          </span>
+          <div className="flex items-center gap-1">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setPage(p => Math.max(1, p - 1))}
+              disabled={page === 1}
+              className="h-7 text-xs gap-1"
+            >
+              <ChevronLeft className="w-3.5 h-3.5" />
+              上一页
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+              disabled={page === totalPages}
+              className="h-7 text-xs gap-1"
+            >
+              下一页
+              <ChevronRight className="w-3.5 h-3.5" />
+            </Button>
+          </div>
         </div>
       )}
     </div>

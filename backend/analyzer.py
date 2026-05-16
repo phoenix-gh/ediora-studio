@@ -1,6 +1,6 @@
 """
 Post-collection analysis pipeline:
-  collect_all → analyze_topics + analyze_hotspots + analyze_economic
+  collect_all → analyze_topics + analyze_hotspots
 """
 import hashlib
 import random
@@ -8,7 +8,7 @@ from datetime import datetime, timezone, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, desc
 
-from models import Post, Account, Topic, Hotspot, EconomicItem
+from models import Post, Account, Topic, Hotspot
 from topic_clustering import cluster_items, upsert_topic_cluster
 import llm
 
@@ -167,81 +167,8 @@ async def analyze_hotspots(db: AsyncSession) -> int:
     return count
 
 
-async def analyze_economic(db: AsyncSession) -> int:
-    """Summarize economic news from financial-tagged accounts."""
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
-    today = datetime.now(timezone.utc).date().isoformat()
-
-    # Prefer accounts in economic groups; fall back to all accounts
-    eco_groups = ["财经", "经济", "金融", "宏观", "财联社", "证券"]
-    rows = (
-        await db.execute(
-            select(Post, Account)
-            .join(Account, Post.account_id == Account.id)
-            .where(
-                and_(
-                    Post.collected_at >= cutoff,
-                    Account.group.in_(eco_groups),
-                )
-            )
-            .order_by(Post.published_at.desc())
-            .limit(40)
-        )
-    ).all()
-
-    if not rows:
-        rows = (
-            await db.execute(
-                select(Post, Account)
-                .join(Account, Post.account_id == Account.id)
-                .where(Post.collected_at >= cutoff)
-                .order_by(Post.published_at.desc())
-                .limit(40)
-            )
-        ).all()
-
-    if not rows:
-        return 0
-
-    posts_info = [
-        {
-            "account": acc.name,
-            "content": f"{post.title}\n\n{post.content}".strip() if post.title else post.content,
-        }
-        for post, acc in rows
-    ]
-
-    items = await llm.generate_economic_items(posts_info)
-    count = 0
-
-    for item in items:
-        title = item.get("title", "").strip()
-        if not title:
-            continue
-        item_id = _make_id(title + today)
-        if await db.get(EconomicItem, item_id):
-            continue
-
-        db.add(
-            EconomicItem(
-                id=item_id,
-                title=title,
-                summary=item.get("summary", ""),
-                category=item.get("category", "宏观经济"),
-                impact=item.get("impact", "neutral"),
-                impact_level=item.get("impact_level", "medium"),
-                published_at=datetime.now(timezone.utc),
-            )
-        )
-        count += 1
-
-    await db.commit()
-    return count
-
-
 async def run_full_analysis(db: AsyncSession) -> dict:
-    """Run all three analysis pipelines and return counts."""
+    """Run analysis pipelines and return counts."""
     t = await analyze_topics(db)
     h = await analyze_hotspots(db)
-    e = await analyze_economic(db)
-    return {"new_topics": t, "new_hotspots": h, "new_economic": e}
+    return {"new_topics": t, "new_hotspots": h}

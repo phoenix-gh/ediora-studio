@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { LayoutDashboard, TrendingUp, Star, Settings, GitFork, AtSign, FileText, BookMarked, Tag, Quote, PlaySquare, Rocket } from 'lucide-react'
+import { LayoutDashboard, TrendingUp, Star, Settings, GitFork, AtSign, FileText, BookMarked, Tag, Quote, PlaySquare, Rocket, MessageSquare, Globe, Flame, Gem } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const navItems = [
@@ -14,6 +14,10 @@ const navItems = [
   { href: '/github', label: 'GitHub 雷达', icon: GitFork },
   { href: '/papers', label: '论文追踪', icon: FileText },
   { href: '/youtube', label: 'YouTube 订阅', icon: PlaySquare },
+  { href: '/wechat', label: '公众号订阅', icon: MessageSquare },
+  { href: '/v2ex', label: 'V2EX 订阅', icon: Globe },
+  { href: '/kr', label: '36 氪热度', icon: Flame },
+  { href: '/juejin', label: '掘金热度', icon: Gem },
   { href: '/producthunt', label: 'Product Hunt', icon: Rocket },
   { href: '/x', label: 'X 博主候选', icon: AtSign },
   { href: '/starred', label: '已收藏', icon: Star, disabled: true },

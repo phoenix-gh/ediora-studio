@@ -4,6 +4,8 @@ export interface Paper {
   arxiv_id: string
   title: string
   abstract: string
+  title_cn: string
+  abstract_cn: string
   authors: string[]
   categories: string[]
   primary_category: string

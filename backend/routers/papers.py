@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, BackgroundTasks
 from sqlalchemy import select, desc
 from datetime import datetime, timezone, timedelta
 from pydantic import BaseModel
@@ -13,6 +13,8 @@ class PaperOut(BaseModel):
     arxiv_id: str
     title: str
     abstract: str
+    title_cn: str = ""
+    abstract_cn: str = ""
     authors: list[str]
     categories: list[str]
     primary_category: str
@@ -53,3 +55,13 @@ async def collect_papers_manual():
     async with SessionLocal() as db:
         result = await collect_papers(db)
     return result
+
+
+@router.post("/translate")
+async def translate_papers_manual(background_tasks: BackgroundTasks):
+    async def _run():
+        from paper_collector import translate_all_papers
+        async with SessionLocal() as db:
+            await translate_all_papers(db)
+    background_tasks.add_task(_run)
+    return {"ok": True, "message": "翻译任务已启动"}

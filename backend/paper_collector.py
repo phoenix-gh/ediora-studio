@@ -120,4 +120,74 @@ async def collect_papers(db: AsyncSession, categories: list[str] | None = None) 
             except Exception:
                 pass
 
-    return {"new_papers": new_count, "errors": errors}
+    translated = 0
+
+    # Translate untranslated papers
+    if new_count > 0:
+        translated = await _translate_untagged(db)
+
+    return {"new_papers": new_count, "translated": translated, "errors": errors}
+
+
+async def _translate_untagged(db: AsyncSession, batch_size: int = 5) -> int:
+    """Translate untranslated papers (empty title_cn) using LLM, in batches."""
+    from sqlalchemy import select, or_
+
+    total = 0
+    consecutive_failures = 0
+    while True:
+        rows = (
+            await db.execute(
+                select(Paper)
+                .where(or_(Paper.title_cn == "", Paper.title_cn.is_(None)))
+                .order_by(Paper.collected_at.desc())
+                .limit(batch_size)
+            )
+        ).scalars().all()
+
+        if not rows:
+            break
+
+        papers_in = [
+            {"arxiv_id": p.arxiv_id, "title": p.title, "abstract": p.abstract}
+            for p in rows
+        ]
+
+        import llm
+        translated = await llm.translate_papers(papers_in)
+        if not translated:
+            consecutive_failures += 1
+            if consecutive_failures >= 3:
+                break
+            import asyncio
+            await asyncio.sleep(3)
+            continue
+        consecutive_failures = 0
+
+        by_id = {t["arxiv_id"]: t for t in translated if t.get("arxiv_id")}
+        count = 0
+        for p in rows:
+            t = by_id.get(p.arxiv_id)
+            if t and t.get("title_cn"):
+                p.title_cn = t["title_cn"]
+                p.abstract_cn = t.get("abstract_cn", "")
+                count += 1
+
+        try:
+            await db.commit()
+        except Exception:
+            import asyncio
+            await asyncio.sleep(2)
+            try:
+                await db.commit()
+            except Exception:
+                pass  # skip this batch on persistent failure
+        total += count
+
+    return total
+
+
+async def translate_all_papers(db: AsyncSession) -> dict:
+    """Translate all untranslated papers. Called from API."""
+    count = await _translate_untagged(db)
+    return {"translated": count}

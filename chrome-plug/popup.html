@@ -5,29 +5,59 @@
   <style>
     body {
       width: 200px;
-      padding: 15px;
+      padding: 14px;
       font-family: sans-serif;
       background-color: #15202b;
       color: white;
     }
-    h3 { font-size: 16px; margin: 0 0 10px 0; color: #1d9bf0; }
-    p { font-size: 12px; color: #8899a6; line-height: 1.4; }
-    .status {
+    h3 { font-size: 15px; margin: 0 0 8px 0; color: #1d9bf0; }
+    p  { font-size: 11px; color: #8899a6; margin: 0 0 12px 0; line-height: 1.4; }
+    .row {
       display: flex;
       align-items: center;
-      gap: 8px;
-      font-size: 13px;
-      margin-top: 10px;
+      justify-content: space-between;
+      padding: 10px 0;
+      border-top: 1px solid #38444d;
     }
-    .dot { width: 8px; height: 8px; background: #00ba7c; border-radius: 50%; }
+    .label { font-size: 13px; color: #e7e9ea; }
+    .switch { position: relative; width: 40px; height: 22px; }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .slider {
+      position: absolute;
+      cursor: pointer;
+      inset: 0;
+      background: #38444d;
+      border-radius: 22px;
+      transition: .2s;
+    }
+    .slider:before {
+      content: "";
+      position: absolute;
+      height: 18px; width: 18px;
+      left: 2px; bottom: 2px;
+      background: white;
+      border-radius: 50%;
+      transition: .2s;
+    }
+    input:checked + .slider { background: #1d9bf0; }
+    input:checked + .slider:before { transform: translateX(18px); }
+    .hint { font-size: 11px; color: #8899a6; margin-top: 10px; border-top: 1px solid #38444d; padding-top: 10px; }
   </style>
 </head>
 <body>
   <h3>X-AI Helper</h3>
-  <p>自动点击与内容分析插件已在后台运行。</p>
-  <div class="status">
-    <div class="dot"></div>
-    <span>控制台已注入页面</span>
+  <p>工具条已注入页面右侧边缘。</p>
+
+  <div class="row">
+    <span class="label">自动浏览</span>
+    <label class="switch">
+      <input type="checkbox" id="autoBrowseToggle">
+      <span class="slider"></span>
+    </label>
   </div>
+
+  <p class="hint">📌 存线索 &nbsp; 💬 存金句 &nbsp; ✨ 提炼成文<br>悬停图标查看功能说明</p>
+
+  <script src="popup.js"></script>
 </body>
 </html>

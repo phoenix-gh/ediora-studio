@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from database import init_db, SessionLocal
 from collector import collect_all
-from routers import accounts, hotspots, collect, settings, github, x, avatars, papers, personas, keywords, upload, drafts, content_topics, quotes, synthesize, youtube, producthunt
+from routers import accounts, hotspots, collect, settings, github, x, avatars, papers, personas, keywords, upload, drafts, content_topics, quotes, synthesize, youtube, producthunt, wechat, v2ex, kr, juejin
 
 scheduler = AsyncIOScheduler()
 
@@ -45,6 +45,9 @@ async def scheduled_collect_and_analyze():
 _last_trending_ts: float = 0.0
 _last_x_ts: float = 0.0
 _last_papers_ts: float = 0.0
+_last_v2ex_ts: float = 0.0
+_last_kr_ts: float = 0.0
+_last_juejin_ts: float = 0.0
 
 async def scheduled_github():
     """Collect GitHub issues for all due repos + refresh trending."""
@@ -118,6 +121,86 @@ async def scheduled_papers():
             await log("papers", "ok", f"论文采集完成，新增 {result['new_papers']} 篇")
     except Exception as e:
         await log("papers", "error", "论文采集异常", str(e))
+
+
+
+async def scheduled_v2ex():
+    """Collect V2EX subscriptions at configured interval."""
+    import time
+    global _last_v2ex_ts
+    from logger import log
+    try:
+        from config import get_config
+        cfg = await get_config()
+        interval_min = max(5, int(cfg.get("v2ex_collect_interval_minutes", 30)))
+        if (time.monotonic() - _last_v2ex_ts) < interval_min * 60:
+            return
+        from v2ex_collector import collect_all as v2ex_collect_all
+        async with SessionLocal() as db:
+            result = await v2ex_collect_all(db)
+        _last_v2ex_ts = time.monotonic()
+        if result["errors"]:
+            await log("v2ex", "warn", f"V2EX 采集完成，新增 {result['new_topics']} 条",
+                      "; ".join(result["errors"]))
+        elif result["new_topics"]:
+            await log("v2ex", "ok", f"V2EX 采集完成，新增 {result['new_topics']} 条")
+    except Exception as e:
+        await log("v2ex", "error", "V2EX 采集异常", str(e))
+
+
+async def scheduled_kr():
+    """Collect 36Kr hot list + RSS feeds at configured interval."""
+    import time
+    global _last_kr_ts
+    from logger import log
+    try:
+        from config import get_config
+        cfg = await get_config()
+        interval_min = max(5, int(cfg.get("kr_collect_interval_minutes", 30)))
+        if (time.monotonic() - _last_kr_ts) < interval_min * 60:
+            return
+        from kr_collector import collect_all as kr_collect_all
+        async with SessionLocal() as db:
+            result = await kr_collect_all(db)
+        _last_kr_ts = time.monotonic()
+        per = result.get("per_feed", {})
+        if result["errors"]:
+            await log("36kr", "warn",
+                      f"36 氪采集完成：新增 {result['new_articles']} 条",
+                      "; ".join(result["errors"]))
+        elif result["new_articles"]:
+            await log("36kr", "ok",
+                      f"36 氪采集：热榜 +{per.get('hot', 0)}  "
+                      f"最新 +{per.get('article', 0)}  快讯 +{per.get('newsflash', 0)}")
+    except Exception as e:
+        await log("36kr", "error", "36 氪采集异常", str(e))
+
+
+async def scheduled_juejin():
+    """Collect Juejin hot list + per-category feeds at configured interval."""
+    import time
+    global _last_juejin_ts
+    from logger import log
+    try:
+        from config import get_config
+        cfg = await get_config()
+        interval_min = max(5, int(cfg.get("juejin_collect_interval_minutes", 30)))
+        if (time.monotonic() - _last_juejin_ts) < interval_min * 60:
+            return
+        from juejin_collector import collect_all as juejin_collect_all, CATEGORIES, FEED_TYPES
+        async with SessionLocal() as db:
+            result = await juejin_collect_all(db)
+        _last_juejin_ts = time.monotonic()
+        per = result.get("per_category", {})
+        if result["errors"]:
+            await log("juejin", "warn",
+                      f"掘金采集完成：新增 {result['new_articles']} 条",
+                      "; ".join(result["errors"]))
+        elif result["new_articles"]:
+            summary = "  ".join(f"{CATEGORIES[k][1]} +{per.get(k, 0)}" for k in FEED_TYPES)
+            await log("juejin", "ok", f"掘金采集：{summary}")
+    except Exception as e:
+        await log("juejin", "error", "掘金采集异常", str(e))
 
 
 async def scheduled_tl1_users():
@@ -228,6 +311,9 @@ async def lifespan(app: FastAPI):
     scheduler.add_job(scheduled_tl1, "interval", seconds=tl1_sec, id="tl1_collect")
     scheduler.add_job(scheduled_tl1_users, "cron", hour=0, minute=0, id="tl1_users_collect")
     scheduler.add_job(scheduled_classify_posts, "interval", minutes=5, id="x_classify")
+    scheduler.add_job(scheduled_v2ex, "interval", minutes=10, id="v2ex_collect")
+    scheduler.add_job(scheduled_kr, "interval", minutes=10, id="kr_collect")
+    scheduler.add_job(scheduled_juejin, "interval", minutes=10, id="juejin_collect")
     scheduler.start()
     app.state.scheduler = scheduler
     yield
@@ -274,6 +360,10 @@ app.include_router(quotes.router)
 app.include_router(synthesize.router)
 app.include_router(youtube.router, prefix="/api")
 app.include_router(producthunt.router, prefix="/api")
+app.include_router(wechat.router, prefix="/api")
+app.include_router(v2ex.router, prefix="/api")
+app.include_router(kr.router, prefix="/api")
+app.include_router(juejin.router, prefix="/api")
 
 # MCP server — Streamable HTTP transport for AI agents.
 # Register the ASGI handler directly at /mcp so it doesn't shadow other routes.

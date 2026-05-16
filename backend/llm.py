@@ -11,6 +11,80 @@ import openai
 from config import get_config, effective_model, effective_base_url
 
 
+async def _named_session_chat(
+    message: str,
+    conversation: str,
+    instructions: str = "",
+    max_tokens: int = 3000,
+) -> str:
+    """Use OpenAI Responses API (/v1/responses) with a named conversation.
+    Reads base_url / api_key / model from system config — no extra settings needed."""
+    cfg = await get_config()
+    api_key = cfg.get("llm_api_key", "")
+    model = effective_model(cfg)
+    base_url = effective_base_url(cfg)
+
+    if not api_key:
+        raise RuntimeError("LLM API key not configured")
+
+    kwargs: dict = {"api_key": api_key}
+    if base_url:
+        kwargs["base_url"] = base_url
+
+    client = openai.AsyncOpenAI(**kwargs)
+    resp = await client.responses.create(
+        model=model,
+        input=message,
+        instructions=instructions or openai.NOT_GIVEN,
+        store=True,
+        extra_body={"conversation": conversation},
+    )
+    # extract assistant text from output array
+    for item in resp.output:
+        if getattr(item, "type", None) == "message":
+            for part in getattr(item, "content", []):
+                if getattr(part, "type", None) == "output_text":
+                    return part.text
+    return resp.output_text if hasattr(resp, "output_text") else ""
+
+
+async def _chat(messages: list[dict], system: str = "", max_tokens: int = 2048) -> str:
+    """Multi-turn chat. messages = [{role, content}, ...]"""
+    cfg = await get_config()
+    provider = cfg.get("llm_provider", "anthropic")
+    api_key = cfg.get("llm_api_key", "")
+    model = effective_model(cfg)
+    base_url = effective_base_url(cfg)
+
+    if not api_key:
+        raise RuntimeError("LLM API key not configured — please set it in Settings")
+
+    if provider == "anthropic" and not base_url:
+        client = anthropic.AsyncAnthropic(api_key=api_key)
+        kwargs: dict = {"model": model, "max_tokens": max_tokens, "messages": messages}
+        if system:
+            kwargs["system"] = system
+        msg = await client.messages.create(**kwargs)
+        return msg.content[0].text
+    else:
+        oai_kwargs: dict = {"api_key": api_key}
+        if base_url:
+            oai_kwargs["base_url"] = base_url
+        client = openai.AsyncOpenAI(**oai_kwargs)
+        resp = await client.responses.create(
+            model=model,
+            input=messages,
+            instructions=system or openai.NOT_GIVEN,
+            store=False,
+        )
+        for item in resp.output:
+            if getattr(item, "type", None) == "message":
+                for part in getattr(item, "content", []):
+                    if getattr(part, "type", None) == "output_text":
+                        return part.text
+        return getattr(resp, "output_text", "")
+
+
 async def _call(prompt: str, max_tokens: int = 2048) -> str:
     cfg = await get_config()
     provider = cfg.get("llm_provider", "anthropic")
@@ -21,7 +95,7 @@ async def _call(prompt: str, max_tokens: int = 2048) -> str:
     if not api_key:
         raise RuntimeError("LLM API key not configured — please set it in Settings")
 
-    # Anthropic uses its own SDK; everything else is OpenAI-compatible
+    # Anthropic uses its own SDK; everything else goes through Responses API (stateless)
     if provider == "anthropic" and not base_url:
         client = anthropic.AsyncAnthropic(api_key=api_key)
         msg = await client.messages.create(
@@ -35,12 +109,17 @@ async def _call(prompt: str, max_tokens: int = 2048) -> str:
         if base_url:
             kwargs["base_url"] = base_url
         client = openai.AsyncOpenAI(**kwargs)
-        resp = await client.chat.completions.create(
+        resp = await client.responses.create(
             model=model,
-            max_tokens=max_tokens,
-            messages=[{"role": "user", "content": prompt}],
+            input=prompt,
+            store=False,
         )
-        return resp.choices[0].message.content or ""
+        for item in resp.output:
+            if getattr(item, "type", None) == "message":
+                for part in getattr(item, "content", []):
+                    if getattr(part, "type", None) == "output_text":
+                        return part.text
+        return getattr(resp, "output_text", "")
 
 
 def _extract_json_array(text: str) -> list:
@@ -115,37 +194,6 @@ async def generate_hotspots_from_posts(posts_info: list[dict]) -> list[dict]:
         return _extract_json_array(await _call(prompt))
     except Exception as e:
         print(f"[llm] generate_hotspots error: {e}")
-        return []
-
-
-async def generate_economic_items(posts_info: list[dict]) -> list[dict]:
-    if not posts_info:
-        return []
-
-    posts_text = "\n\n".join(
-        f"来源: {p['account']}\n内容: {p['content'][:300]}"
-        for p in posts_info[:30]
-    )
-
-    prompt = f"""你是一个财经经济分析AI。
-从以下财经资讯中提炼关键经济动态。
-
-内容:
-{posts_text}
-
-请以JSON数组格式输出3-8条经济动态，每条包含:
-- title: 标题（15字以内）
-- summary: 摘要（1-2句话）
-- category: 从["宏观经济","股市行情","汇率外汇","大宗商品","科技产业","政策法规"]选一个
-- impact: "positive"/"negative"/"neutral"
-- impact_level: "high"/"medium"/"low"
-
-只输出JSON数组。"""
-
-    try:
-        return _extract_json_array(await _call(prompt))
-    except Exception as e:
-        print(f"[llm] generate_economic error: {e}")
         return []
 
 
@@ -273,3 +321,60 @@ async def generate_article_draft(
     except Exception as e:
         print(f"[llm] generate_article error: {e}")
         return ""
+
+
+async def translate_papers(papers: list[dict]) -> list[dict]:
+    """Batch translate paper titles and abstracts to Chinese.
+    Input: [{arxiv_id, title, abstract}, ...]
+    Output: [{arxiv_id, title_cn, abstract_cn}, ...]
+    """
+    if not papers:
+        return []
+
+    items_text = "\n\n".join(
+        f"[{p['arxiv_id']}]\nTitle: {p['title']}\nAbstract: {p['abstract'][:800]}"
+        for p in papers
+    )
+
+    prompt = f"""将以下英文学术论文的标题和摘要翻译成中文。使用以下分隔格式输出，每篇论文之间用 --- 分隔：
+
+--- 论文分隔符 ---
+
+[ARXIV_ID] 论文ID（原文照抄）
+[TITLE_CN] 中文标题（简洁准确，保留技术术语）
+[ABSTRACT_CN] 中文摘要（完整流畅，专业术语准确）
+
+--- 论文分隔符 ---
+
+论文列表：
+{items_text}
+
+只输出上述格式，不要其他说明文字。"""
+
+    try:
+        raw = await _call(prompt, max_tokens=8000)
+        return _parse_translation_output(raw)
+    except Exception as e:
+        print(f"[llm] translate_papers error: {e}")
+        return []
+
+
+def _parse_translation_output(raw: str) -> list[dict]:
+    """Parse delimiter-based translation output into list of dicts."""
+    import re
+    results = []
+    # Split by paper delimiter
+    blocks = re.split(r'-{3,}\s*(?:论文分隔符\s*)?-{0,}', raw)
+    for block in blocks:
+        block = block.strip()
+        if not block:
+            continue
+        item: dict = {}
+        for field in ("arxiv_id", "title_cn", "abstract_cn"):
+            m = re.search(rf'\[{field.upper()}\]\s*(.+?)(?=\[(?:ARXIV_ID|TITLE_CN|ABSTRACT_CN)\]|---|\Z)', block, re.DOTALL)
+            if m:
+                val = m.group(1).strip()
+                item[field] = val
+        if item.get("arxiv_id") and item.get("title_cn"):
+            results.append(item)
+    return results

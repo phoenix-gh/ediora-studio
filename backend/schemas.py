@@ -182,22 +182,9 @@ class CollectResult(BaseModel):
     error: Optional[str] = None
 
 
-class EconomicItemOut(BaseModel):
-    id: str
-    title: str
-    summary: str
-    category: str
-    impact: str
-    impact_level: str
-    published_at: datetime
-
-    model_config = {"from_attributes": True}
-
-
 class GenerateResult(BaseModel):
     new_topics: int = 0
     new_hotspots: int = 0
-    new_economic: int = 0
     message: str = ""
 
 
@@ -226,6 +213,68 @@ class WriterPersonaOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+# ── ContentTopic ──────────────────────────────────────────────────────────────
+
+class ContentTopicCreate(BaseModel):
+    title: str
+    description: str = ""
+    parent_id: Optional[int] = None
+    priority: int = 3
+
+
+class ContentTopicUpdate(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    parent_id: Optional[int] = None
+    priority: Optional[int] = None
+    status: Optional[str] = None
+
+
+class TopicSourceCreate(BaseModel):
+    topic_id: int
+    url: str = ""
+    title: str = ""
+    content: str = ""
+    note: str = ""
+    platform: str = "manual"
+    draft_id: Optional[int] = None
+
+
+class TopicSourceOut(BaseModel):
+    id: int
+    topic_id: int
+    url: str
+    title: str
+    content: str = ""
+    note: str
+    platform: str
+    draft_id: Optional[int] = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class ContentTopicOut(BaseModel):
+    id: int
+    title: str
+    description: str
+    parent_id: Optional[int] = None
+    priority: int
+    status: str
+    created_at: datetime
+    updated_at: datetime
+    sources: list[TopicSourceOut] = []
+    children: list["ContentTopicOut"] = []
+    draft_count: int = 0
+
+    model_config = {"from_attributes": True}
+
+
+ContentTopicOut.model_rebuild()
+
+
+# ── ArticleDraft ───────────────────────────────────────────────────────────────
+
 class ArticleDraftRequest(BaseModel):
     topic_id: str
     persona_id: Optional[int] = None
@@ -235,28 +284,52 @@ class ArticleDraftOut(BaseModel):
     id: Optional[int] = None
     topic_id: str
     title: str = ""
-    draft: str
+    draft: str = ""
     content: str = ""
     status: str = "drafting"
+    draft_type: str = "article"
+    linked_draft_id: Optional[int] = None
     persona_id: Optional[int] = None
+    series_id: Optional[int] = None
+    series_order: int = 0
+    content_topic_id: Optional[int] = None
+    sources: list = []
     version: int = 1
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
+    model_config = {"from_attributes": True}
+
 
 class ArticleDraftCreate(BaseModel):
-    topic_id: str
+    topic_id: str = "manual"
     title: str = ""
     content: str = ""
     status: str = "drafting"
+    draft_type: str = "article"
+    linked_draft_id: Optional[int] = None
     persona_id: Optional[int] = None
+    content_topic_id: Optional[int] = None
+    sources: list = []
+
+
+class DraftSourceItem(BaseModel):
+    url: str
+    title: str = ""
+    note: str = ""
 
 
 class ArticleDraftUpdate(BaseModel):
     title: Optional[str] = None
     content: Optional[str] = None
     status: Optional[str] = None
+    draft_type: Optional[str] = None
+    linked_draft_id: Optional[int] = None
     persona_id: Optional[int] = None
+    series_id: Optional[int] = None
+    series_order: Optional[int] = None
+    content_topic_id: Optional[int] = None
+    sources: Optional[list[DraftSourceItem]] = None
 
 
 class ArticleDraftRecordOut(BaseModel):
@@ -266,11 +339,37 @@ class ArticleDraftRecordOut(BaseModel):
     content: str
     status: str
     persona_id: Optional[int] = None
+    series_id: Optional[int] = None
+    series_order: int = 0
     version: int
+    sources: list = []
     created_at: datetime
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class ArticleSeriesOut(BaseModel):
+    id: int
+    name: str
+    description: str
+    sort_order: int
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class ArticleSeriesCreate(BaseModel):
+    name: str
+    description: str = ""
+    sort_order: int = 0
+
+
+class ArticleSeriesUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    sort_order: Optional[int] = None
 
 
 class GithubRepoCreate(BaseModel):
@@ -357,5 +456,41 @@ class GithubTrendingRepoOut(BaseModel):
     period: str
     trending_date: str
     url: str
+
+    model_config = {"from_attributes": True}
+
+
+# ── Quote ──────────────────────────────────────────────────────────────────────
+
+class QuoteCreate(BaseModel):
+    text: str
+    author: str = ""
+    source: str = ""
+    source_url: str = ""
+    scene_tags: list[str] = []
+    content_topic_id: Optional[int] = None
+    platform: str = "manual"
+
+
+class QuoteUpdate(BaseModel):
+    text: Optional[str] = None
+    author: Optional[str] = None
+    source: Optional[str] = None
+    source_url: Optional[str] = None
+    scene_tags: Optional[list[str]] = None
+    content_topic_id: Optional[int] = None
+
+
+class QuoteOut(BaseModel):
+    id: int
+    text: str
+    author: str
+    source: str
+    source_url: str
+    scene_tags: list[str]
+    content_topic_id: Optional[int] = None
+    platform: str
+    created_at: datetime
+    updated_at: datetime
 
     model_config = {"from_attributes": True}

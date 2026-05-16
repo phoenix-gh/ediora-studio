@@ -193,7 +193,7 @@ async def list_trending(
                 GithubTrendingRepo.period == period,
                 GithubTrendingRepo.trending_date == latest,
             )
-            .order_by(desc(GithubTrendingRepo.stars_gained))
+            .order_by(GithubTrendingRepo.position)
         )
     ).scalars().all()
     return rows

@@ -40,17 +40,6 @@ export interface FollowedAccount {
   muted: boolean
 }
 
-export interface Post {
-  id: string
-  accountId: string
-  title: string
-  content: string
-  url: string
-  publishedAt: string
-  metrics: { likes: number; reposts: number; comments: number }
-  isAbnormallyPopular: boolean
-}
-
 export interface Hotspot {
   id: string
   title: string
@@ -65,20 +54,9 @@ export interface Hotspot {
 export type TopicStatus = Topic['status']
 export type UrgencyLevel = Topic['urgency']
 
-export interface EconomicItem {
-  id: string
-  title: string
-  summary: string
-  category: string
-  impact: 'positive' | 'negative' | 'neutral'
-  impact_level: 'high' | 'medium' | 'low'
-  published_at: string
-}
-
 export interface GenerateResult {
   new_topics: number
   new_hotspots: number
-  new_economic: number
   message: string
 }
 
