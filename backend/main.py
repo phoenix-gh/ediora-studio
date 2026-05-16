@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from database import init_db, SessionLocal
 from collector import collect_all
-from routers import accounts, posts, topics, hotspots, collect, economic, write, settings, github, x, avatars, directions, papers, personas, keywords, upload
+from routers import accounts, hotspots, collect, settings, github, x, avatars, papers, personas, keywords, upload, drafts, content_topics, quotes, synthesize, youtube, producthunt
 
 scheduler = AsyncIOScheduler()
 
@@ -37,7 +37,7 @@ async def scheduled_collect_and_analyze():
         async with SessionLocal() as db:
             result = await run_full_analysis(db)
         await log("analyze", "ok",
-                  f"选题 +{result['new_topics']}  热点 +{result['new_hotspots']}  经济 +{result['new_economic']}")
+                  f"选题 +{result['new_topics']}  热点 +{result['new_hotspots']}")
     except Exception as e:
         await log("analyze", "error", "AI 分析异常", str(e))
 
@@ -59,19 +59,32 @@ async def scheduled_github():
         do_trending = (time.monotonic() - _last_trending_ts) >= trending_hours * 3600
 
         trending_new = 0
+        trending_error = ""
         async with SessionLocal() as db:
             if do_trending:
-                trending_new = await collect_trending(db)
-                _last_trending_ts = time.monotonic()
+                try:
+                    trending_new = await collect_trending(db)
+                    _last_trending_ts = time.monotonic()
+                except Exception as te:
+                    trending_error = str(te)
+                    _last_trending_ts = time.monotonic()  # avoid tight retry loop
             repo_results = await collect_all_repos(db)
 
         issue_new = sum(r["new_issues"] for r in repo_results)
         release_new = sum(r.get("new_releases", 0) for r in repo_results)
         errors = [r for r in repo_results if r.get("error")]
-        detail = "; ".join(f'{r["repo_id"]}: {r["error"]}' for r in errors) if errors else ""
-        msg = f"趋势 +{trending_new}  Issues +{issue_new}  Releases +{release_new}"
+        detail_parts = []
+        if trending_error:
+            detail_parts.append(f"trending: {trending_error}")
         if errors:
-            msg += f"  ({len(errors)} 个仓库失败)"
+            detail_parts.extend(f'{r["repo_id"]}: {r["error"]}' for r in errors)
+        detail = "; ".join(detail_parts)
+        msg = f"趋势 +{trending_new}  Issues +{issue_new}  Releases +{release_new}"
+        if trending_error or errors:
+            if trending_error:
+                msg += "  (趋势抓取失败)"
+            if errors:
+                msg += f"  ({len(errors)} 个仓库失败)"
             await log("github", "warn", msg, detail)
         else:
             await log("github", "ok", msg)
@@ -221,31 +234,52 @@ async def lifespan(app: FastAPI):
     scheduler.shutdown()
 
 
-app = FastAPI(title="WeMedia Studio API", lifespan=lifespan)
+from mcp_server import mcp
+
+# Initialize the MCP streamable HTTP app (creates _session_manager internally)
+_mcp_http_app = mcp.streamable_http_app()
+_mcp_session_manager = mcp._session_manager
+
+_original_lifespan = lifespan
+
+@asynccontextmanager
+async def lifespan_with_mcp(app: FastAPI):
+    async with _mcp_session_manager.run():
+        async with _original_lifespan(app):
+            yield
+
+app = FastAPI(title="WeMedia Studio API", lifespan=lifespan_with_mcp)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3001", "http://localhost:3000"],
+    allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 app.include_router(accounts.router, prefix="/api")
-app.include_router(posts.router, prefix="/api")
-app.include_router(topics.router, prefix="/api")
 app.include_router(hotspots.router, prefix="/api")
 app.include_router(collect.router, prefix="/api")
-app.include_router(economic.router, prefix="/api")
-app.include_router(write.router, prefix="/api")
 app.include_router(settings.router, prefix="/api")
 app.include_router(github.router, prefix="/api")
 app.include_router(x.router, prefix="/api")
 app.include_router(avatars.router, prefix="/api")
-app.include_router(directions.router, prefix="/api")
 app.include_router(papers.router, prefix="/api")
 app.include_router(personas.router, prefix="/api")
 app.include_router(keywords.router, prefix="/api")
 app.include_router(upload.router, prefix="/api")
+app.include_router(drafts.router, prefix="/api")
+app.include_router(content_topics.router)
+app.include_router(quotes.router)
+app.include_router(synthesize.router)
+app.include_router(youtube.router, prefix="/api")
+app.include_router(producthunt.router, prefix="/api")
+
+# MCP server — Streamable HTTP transport for AI agents.
+# Register the ASGI handler directly at /mcp so it doesn't shadow other routes.
+# _mcp_session_manager.run() is started in lifespan_with_mcp above.
+_mcp_handler = _mcp_http_app.routes[0].endpoint
+app.add_route("/mcp", _mcp_handler, methods=["GET", "POST", "DELETE"])
 
 # Serve uploaded files at /api/uploads/{filename}
 from fastapi.staticfiles import StaticFiles

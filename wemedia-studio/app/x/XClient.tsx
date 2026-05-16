@@ -1,13 +1,15 @@
 'use client'
 
 import { useState, useMemo, useCallback, useEffect } from 'react'
-import { AtSign, RefreshCw, Trash2, ExternalLink, Users, Loader2, CheckCircle, XCircle, Clock, TrendingUp, PauseCircle, PlayCircle } from 'lucide-react'
+import { AtSign, RefreshCw, Trash2, ExternalLink, Users, Loader2, CheckCircle, XCircle, Clock, TrendingUp, PauseCircle, PlayCircle, ChevronLeft, ChevronRight } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { XCandidate, XPost, getXCandidates, updateXCandidate, deleteXCandidate, triggerXCollect, triggerTl1UsersCollect } from '@/lib/api/x'
 import { XPostsPanel } from './XPostsPanel'
+
+const PAGE_SIZE = 20
 
 type StatusFilter = 'all' | 'candidate' | 'following' | 'rejected'
 
@@ -54,14 +56,21 @@ function formatDate(iso: string) {
 
 export function XClient({
   initialCandidates,
+  initialTotal,
+  initialStatusCounts,
   initialPosts,
 }: {
   initialCandidates: XCandidate[]
+  initialTotal: number
+  initialStatusCounts: Record<string, number>
   initialPosts: XPost[]
 }) {
 
   const [tab, setTab] = useState<'candidates' | 'posts'>('candidates')
   const [candidates, setCandidates] = useState<XCandidate[]>(initialCandidates)
+  const [totalCount, setTotalCount] = useState(initialTotal)
+  const [statusCounts, setStatusCounts] = useState<Record<string, number>>(initialStatusCounts)
+  const [page, setPage] = useState(0)
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
   const [search, setSearch] = useState('')
   const [collecting, setCollecting] = useState(false)
@@ -72,30 +81,32 @@ export function XClient({
   const [countdown, setCountdown] = useState(30)
 
   const filtered = useMemo(() => {
-    let list = candidates
-    if (statusFilter !== 'all') list = list.filter(c => c.status === statusFilter)
-    if (search.trim()) {
-      const q = search.toLowerCase()
-      list = list.filter(c =>
-        c.username.toLowerCase().includes(q) ||
-        c.display_name.toLowerCase().includes(q) ||
-        c.bio.toLowerCase().includes(q)
-      )
-    }
-    return list.sort((a, b) => b.followers - a.followers)
-  }, [candidates, statusFilter, search])
+    if (!search.trim()) return candidates
+    const q = search.toLowerCase()
+    return candidates.filter(c =>
+      c.username.toLowerCase().includes(q) ||
+      c.display_name.toLowerCase().includes(q) ||
+      c.bio.toLowerCase().includes(q)
+    )
+  }, [candidates, search])
 
-  const refresh = useCallback(async () => {
+  const fetchPage = useCallback(async (pageNum: number, status?: string) => {
     setRefreshing(true)
     try {
-      const fresh = await getXCandidates(undefined, 200)
-      setCandidates(fresh)
+      const data = await getXCandidates(status, PAGE_SIZE, pageNum * PAGE_SIZE)
+      setCandidates(data.candidates)
+      setTotalCount(data.total)
+      setStatusCounts(data.status_counts)
     } catch {
-      toast.error('刷新失败')
+      toast.error('加载失败')
     } finally {
       setRefreshing(false)
     }
   }, [])
+
+  const refresh = useCallback(async () => {
+    await fetchPage(page, statusFilter !== 'all' ? statusFilter : undefined)
+  }, [fetchPage, page, statusFilter])
 
   useEffect(() => {
     if (!autoRefresh || tab !== 'candidates') return
@@ -128,34 +139,38 @@ export function XClient({
   const handleStatusChange = useCallback(async (username: string, newStatus: string) => {
     setUpdatingRow(username)
     try {
-      const updated = await updateXCandidate(username, newStatus)
-      setCandidates(prev => prev.map(c => c.username === username ? updated : c))
+      await updateXCandidate(username, newStatus)
+      // Refresh current page — status change may move candidate out of filter
+      await fetchPage(page, statusFilter !== 'all' ? statusFilter : undefined)
     } catch {
       toast.error('更新状态失败')
     } finally {
       setUpdatingRow(null)
     }
-  }, [])
+  }, [fetchPage, page, statusFilter])
 
   const handleDelete = useCallback(async (username: string) => {
     setUpdatingRow(username)
     try {
       await deleteXCandidate(username)
-      setCandidates(prev => prev.filter(c => c.username !== username))
+      // If last item on page, go back one page
+      const targetPage = candidates.length === 1 && page > 0 ? page - 1 : page
+      setPage(targetPage)
+      await fetchPage(targetPage, statusFilter !== 'all' ? statusFilter : undefined)
       toast.success(`已删除 @${username}`)
     } catch {
       toast.error('删除失败')
     } finally {
       setUpdatingRow(null)
     }
-  }, [])
+  }, [fetchPage, page, statusFilter, candidates.length])
 
   const counts = useMemo(() => ({
-    all: candidates.length,
-    candidate: candidates.filter(c => c.status === 'candidate').length,
-    following: candidates.filter(c => c.status === 'following').length,
-    rejected: candidates.filter(c => c.status === 'rejected').length,
-  }), [candidates])
+    all: totalCount,
+    candidate: statusCounts['candidate'] ?? 0,
+    following: statusCounts['following'] ?? 0,
+    rejected: statusCounts['rejected'] ?? 0,
+  }), [totalCount, statusCounts])
 
   return (
     <div className="p-6 max-w-7xl mx-auto space-y-5">
@@ -230,7 +245,7 @@ export function XClient({
         >
           <Users className="w-3.5 h-3.5" />
           博主候选库
-          <span className="text-xs opacity-60">{candidates.length}</span>
+          <span className="text-xs opacity-60">{totalCount}</span>
         </button>
         <button
           onClick={() => setTab('posts')}
@@ -259,7 +274,7 @@ export function XClient({
           {(['all', 'candidate', 'following', 'rejected'] as StatusFilter[]).map(s => (
             <button
               key={s}
-              onClick={() => setStatusFilter(s)}
+              onClick={() => { setStatusFilter(s); setPage(0); fetchPage(0, s === 'all' ? undefined : s) }}
               className={cn(
                 'px-3 py-1.5 transition-colors',
                 statusFilter === s
@@ -383,6 +398,37 @@ export function XClient({
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* Pagination */}
+      {totalCount > PAGE_SIZE && (
+        <div className="flex items-center justify-between pt-2">
+          <span className="text-xs text-zinc-400">
+            共 {totalCount} 条，第 {page + 1}/{Math.ceil(totalCount / PAGE_SIZE)} 页
+          </span>
+          <div className="flex items-center gap-1">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => { const prev = page - 1; setPage(prev); fetchPage(prev, statusFilter !== 'all' ? statusFilter : undefined) }}
+              disabled={page === 0 || refreshing}
+              className="h-7 text-xs gap-1"
+            >
+              <ChevronLeft className="w-3.5 h-3.5" />
+              上一页
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => { const nextPg = page + 1; setPage(nextPg); fetchPage(nextPg, statusFilter !== 'all' ? statusFilter : undefined) }}
+              disabled={(page + 1) * PAGE_SIZE >= totalCount || refreshing}
+              className="h-7 text-xs gap-1"
+            >
+              下一页
+              <ChevronRight className="w-3.5 h-3.5" />
+            </Button>
+          </div>
         </div>
       )}
       </>}

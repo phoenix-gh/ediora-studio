@@ -45,10 +45,16 @@ export interface XPost {
   metrics_history: XMetricsPoint[]
 }
 
-export async function getXCandidates(status?: string, limit = 200): Promise<XCandidate[]> {
-  const params = new URLSearchParams({ limit: String(limit) })
+export interface XCandidateList {
+  candidates: XCandidate[]
+  total: number
+  status_counts: Record<string, number>
+}
+
+export async function getXCandidates(status?: string, limit = 50, offset = 0): Promise<XCandidateList> {
+  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) })
   if (status) params.set('status', status)
-  return apiFetch<XCandidate[]>(`/x/candidates?${params}`)
+  return apiFetch<XCandidateList>(`/x/candidates?${params}`)
 }
 
 export async function updateXCandidate(username: string, status: string): Promise<XCandidate> {

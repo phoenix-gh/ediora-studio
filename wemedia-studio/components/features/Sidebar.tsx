@@ -2,20 +2,19 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { LayoutDashboard, Lightbulb, Rss, TrendingUp, Star, Settings, BarChart2, PenLine, GitFork, AtSign, Compass, FileText, BookMarked } from 'lucide-react'
+import { LayoutDashboard, TrendingUp, Star, Settings, GitFork, AtSign, FileText, BookMarked, Tag, Quote, PlaySquare, Rocket } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const navItems = [
   { href: '/', label: '今日工作台', icon: LayoutDashboard },
-  { href: '/directions', label: '内容方向', icon: Compass },
-  { href: '/topics', label: '选题决策流', icon: Lightbulb },
-  { href: '/write', label: '撰写文章', icon: PenLine },
-  { href: '/drafts', label: '草稿箱', icon: BookMarked },
-  { href: '/following', label: '关注动态', icon: Rss },
+{ href: '/drafts', label: '草稿箱', icon: BookMarked },
+  { href: '/topics', label: '选题库', icon: Tag },
+  { href: '/quotes', label: '金句库', icon: Quote },
   { href: '/hotspots', label: '热点雷达', icon: TrendingUp },
-  { href: '/economic', label: '经济动态', icon: BarChart2 },
   { href: '/github', label: 'GitHub 雷达', icon: GitFork },
   { href: '/papers', label: '论文追踪', icon: FileText },
+  { href: '/youtube', label: 'YouTube 订阅', icon: PlaySquare },
+  { href: '/producthunt', label: 'Product Hunt', icon: Rocket },
   { href: '/x', label: 'X 博主候选', icon: AtSign },
   { href: '/starred', label: '已收藏', icon: Star, disabled: true },
 ]

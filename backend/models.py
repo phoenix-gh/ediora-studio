@@ -177,6 +177,7 @@ class GithubTrendingRepo(Base):
     stars_gained: Mapped[int] = mapped_column(Integer, default=0)
     forks: Mapped[int] = mapped_column(Integer, default=0)
     period: Mapped[str] = mapped_column(String, default="daily")  # daily/weekly
+    position: Mapped[int] = mapped_column(Integer, default=0)  # 1-indexed rank on trending page
     trending_date: Mapped[str] = mapped_column(String, nullable=False, index=True)
     url: Mapped[str] = mapped_column(String, default="")
 
@@ -204,18 +205,6 @@ class AppSetting(Base):
     value: Mapped[str] = mapped_column(Text, default="")
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
 
-
-class EconomicItem(Base):
-    __tablename__ = "economic_items"
-
-    id: Mapped[str] = mapped_column(String, primary_key=True)
-    title: Mapped[str] = mapped_column(String, nullable=False)
-    summary: Mapped[str] = mapped_column(Text, default="")
-    category: Mapped[str] = mapped_column(String, default="宏观经济", index=True)
-    impact: Mapped[str] = mapped_column(String, default="neutral")   # positive/negative/neutral
-    impact_level: Mapped[str] = mapped_column(String, default="medium")  # high/medium/low
-    published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, index=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
 
 
 class XBloggerCandidate(Base):
@@ -270,6 +259,8 @@ class Paper(Base):
     arxiv_id: Mapped[str] = mapped_column(String, primary_key=True)
     title: Mapped[str] = mapped_column(String, nullable=False)
     abstract: Mapped[str] = mapped_column(Text, default="")
+    title_cn: Mapped[str] = mapped_column(String, default="")
+    abstract_cn: Mapped[str] = mapped_column(Text, default="")
     authors: Mapped[list] = mapped_column(JSON, default=list)
     categories: Mapped[list] = mapped_column(JSON, default=list)
     primary_category: Mapped[str] = mapped_column(String, default="", index=True)
@@ -290,18 +281,76 @@ class WriterPersona(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
 
 
+class ArticleSeries(Base):
+    __tablename__ = "article_series"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    description: Mapped[str] = mapped_column(Text, default="")
+    sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+
+
+class ContentTopic(Base):
+    """User-managed content topics (tree, max 3 levels)."""
+    __tablename__ = "content_topics"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    title: Mapped[str] = mapped_column(String, nullable=False)
+    description: Mapped[str] = mapped_column(Text, default="")
+    parent_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    priority: Mapped[int] = mapped_column(Integer, default=3)   # 1=highest 5=lowest
+    status: Mapped[str] = mapped_column(String, default="active", index=True)  # active/archived
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+
+
+class TopicSource(Base):
+    """Reference links / clues attached to a ContentTopic."""
+    __tablename__ = "topic_sources"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    topic_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    url: Mapped[str] = mapped_column(String, default="")
+    title: Mapped[str] = mapped_column(String, default="")
+    content: Mapped[str] = mapped_column(Text, default="")   # body text of the source
+    note: Mapped[str] = mapped_column(Text, default="")
+    platform: Mapped[str] = mapped_column(String, default="manual")  # x/github/wechat/manual/self
+    draft_id: Mapped[int | None] = mapped_column(Integer, nullable=True)  # set when source = own published draft
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+
 class ArticleDraft(Base):
     __tablename__ = "article_drafts"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     topic_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    content_topic_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     title: Mapped[str] = mapped_column(String, default="")
     content: Mapped[str] = mapped_column(Text, default="")
     status: Mapped[str] = mapped_column(String, default="drafting", index=True)
+    draft_type: Mapped[str] = mapped_column(String, default="article")  # article | script
+    linked_draft_id: Mapped[int | None] = mapped_column(Integer, nullable=True)  # sibling draft of different type
     persona_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    series_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    series_order: Mapped[int] = mapped_column(Integer, default=0)
     version: Mapped[int] = mapped_column(Integer, default=1)
+    sources: Mapped[list] = mapped_column(JSON, default=list)  # [{url, title, note}]
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+
+
+class DraftChatLog(Base):
+    """Per-session chat history for draft editing."""
+    __tablename__ = "draft_chat_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    draft_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    session_name: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    role: Mapped[str] = mapped_column(String, nullable=False)   # user | assistant
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, index=True)
 
 
 class CollectLog(Base):
@@ -332,6 +381,22 @@ class Keyword(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
 
 
+class Quote(Base):
+    """金句库 — cross-topic reusable quotes."""
+    __tablename__ = "quotes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    author: Mapped[str] = mapped_column(String, default="")
+    source: Mapped[str] = mapped_column(String, default="")
+    source_url: Mapped[str] = mapped_column(String, default="")
+    scene_tags: Mapped[list] = mapped_column(JSON, default=list)   # opener/closer/argument/twist/resonance/warning
+    content_topic_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    platform: Mapped[str] = mapped_column(String, default="manual")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+
+
 class KeywordSnapshot(Base):
     __tablename__ = "keyword_snapshots"
 
@@ -341,3 +406,50 @@ class KeywordSnapshot(Base):
     mention_count: Mapped[int] = mapped_column(Integer, default=0)
     engagement_score: Mapped[float] = mapped_column(Float, default=0.0)
     recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, index=True)
+
+
+class ProductHuntPost(Base):
+    __tablename__ = "producthunt_posts"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)       # MD5 of URL
+    title: Mapped[str] = mapped_column(String, default="")           # product name
+    tagline: Mapped[str] = mapped_column(String, default="")         # short tagline
+    url: Mapped[str] = mapped_column(String, default="")
+    thumbnail_url: Mapped[str] = mapped_column(String, default="")
+    images: Mapped[list] = mapped_column(JSON, default=list)  # all product screenshots
+    description: Mapped[str] = mapped_column(Text, default="")
+    topics: Mapped[list] = mapped_column(JSON, default=list)
+    votes: Mapped[int] = mapped_column(Integer, default=0)
+    published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+
+class YoutubeChannel(Base):
+    __tablename__ = "youtube_channels"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)   # channel_id
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    avatar_url: Mapped[str] = mapped_column(String, default="")
+    description: Mapped[str] = mapped_column(Text, default="")
+    description_cn: Mapped[str] = mapped_column(Text, default="")
+    note: Mapped[str] = mapped_column(Text, default="")
+    group: Mapped[str] = mapped_column(String, default="未分组")
+    muted: Mapped[bool] = mapped_column(Boolean, default=False)
+    last_collected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+
+class YoutubeVideo(Base):
+    __tablename__ = "youtube_videos"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)   # video_id
+    channel_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    channel_name: Mapped[str] = mapped_column(String, default="")
+    title: Mapped[str] = mapped_column(String, default="")
+    url: Mapped[str] = mapped_column(String, default="")
+    thumbnail_url: Mapped[str] = mapped_column(String, default="")
+    description: Mapped[str] = mapped_column(Text, default="")
+    views: Mapped[int] = mapped_column(Integer, default=0)
+    published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)

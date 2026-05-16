@@ -1,13 +1,47 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
-import { BookMarked, Trash2, Save, RefreshCw, FileText, Clock, ChevronRight, Loader2 } from 'lucide-react'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import {
+  BookMarked, Trash2, Save, RefreshCw, FileText, Clock,
+  ChevronRight, Loader2, Plus, X,
+  Link2, ExternalLink, ChevronDown, MessageSquare, Send, CheckCheck,
+  Layers,
+} from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
-import { Draft, DraftUpdate, DRAFT_STATUSES, getDrafts, updateDraft, deleteDraft } from '@/lib/api/drafts'
+import {
+  Draft, DraftSource, DraftUpdate, ChatMessage, DRAFT_STATUSES, DRAFT_TYPES,
+  getDrafts, updateDraft, deleteDraft, createDraft, chatWithDraft,
+} from '@/lib/api/drafts'
+import { ContentTopic, getTopics, flattenTopics, flattenTopicsWithDepth } from '@/lib/api/content-topics'
 import { MarkdownEditor } from './MarkdownEditor'
 import '@uiw/react-md-editor/markdown-editor.css'
+
+// ── Types ──────────────────────────────────────────────────────────────────────
+
+interface DraftGroup {
+  root: Draft          // article (linked_draft_id === null) or orphan variant
+  variants: Draft[]    // platform versions pointing to root
+}
+
+function buildGroups(drafts: Draft[]): DraftGroup[] {
+  const roots = drafts.filter(d => d.linked_draft_id === null)
+  const rootIds = new Set(roots.map(d => d.id))
+  const groups: DraftGroup[] = roots.map(root => ({
+    root,
+    variants: drafts.filter(d => d.linked_draft_id === root.id),
+  }))
+  // Orphaned variants whose root was deleted
+  drafts.filter(d => d.linked_draft_id !== null && !rootIds.has(d.linked_draft_id!)).forEach(o => {
+    if (!groups.some(g => g.root.id === o.id || g.variants.some(v => v.id === o.id))) {
+      groups.push({ root: o, variants: [] })
+    }
+  })
+  return groups
+}
+
+// ── Helpers ────────────────────────────────────────────────────────────────────
 
 const STATUS_STYLES: Record<string, string> = {
   drafting:  'bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400',
@@ -21,6 +55,10 @@ function statusLabel(v: string) {
   return DRAFT_STATUSES.find(s => s.value === v)?.label ?? v
 }
 
+function typeInfo(v: string) {
+  return DRAFT_TYPES.find(t => t.value === v) ?? DRAFT_TYPES[0]
+}
+
 function formatDate(iso: string) {
   const d = new Date(iso)
   const now = new Date()
@@ -31,42 +69,127 @@ function formatDate(iso: string) {
   return d.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })
 }
 
-function sourceLabel(topic_id: string) {
-  if (topic_id === 'x') return 'X 帖子创作'
-  return '选题生成'
-}
+// ── Main Component ─────────────────────────────────────────────────────────────
 
-export function DraftsClient({ initialDrafts }: { initialDrafts: Draft[] }) {
+export function DraftsClient({
+  initialDrafts,
+  initialTopics,
+  initialDraftId,
+  initialChatOpen = false,
+}: {
+  initialDrafts: Draft[]
+  initialTopics: ContentTopic[]
+  initialDraftId?: number
+  initialChatOpen?: boolean
+}) {
   const [drafts, setDrafts] = useState<Draft[]>(initialDrafts)
-  const [selected, setSelected] = useState<Draft | null>(initialDrafts[0] ?? null)
-  const [filterStatus, setFilterStatus] = useState<string>('all')
+  const [topicList, setTopicList] = useState<ContentTopic[]>(initialTopics)
 
-  // Editor state — synced from selected
+  // Group state
+  const groups = buildGroups(drafts)
+  const findGroupForDraft = (draftId: number) =>
+    groups.find(g => g.root.id === draftId || g.variants.some(v => v.id === draftId)) ?? null
+
+  const initialDraft = initialDraftId
+    ? (initialDrafts.find(d => d.id === initialDraftId) ?? initialDrafts[0] ?? null)
+    : (initialDrafts[0] ?? null)
+  const initialGroup = initialDraft ? (buildGroups(initialDrafts).find(g => g.root.id === initialDraft.id || g.variants.some(v => v.id === initialDraft.id)) ?? null) : null
+
+  const [selectedGroup, setSelectedGroup] = useState<DraftGroup | null>(initialGroup)
+  const [selected, setSelected] = useState<Draft | null>(initialDraft)
+
+  const [filterStatus, setFilterStatus] = useState<string>('all')
+  const [filterTopicId, setFilterTopicId] = useState<string>('all')
+
+  // Editor state
   const [editTitle, setEditTitle] = useState(selected?.title ?? '')
   const [editContent, setEditContent] = useState(selected?.content ?? '')
   const [editStatus, setEditStatus] = useState(selected?.status ?? 'drafting')
+  const [editContentTopicId, setEditContentTopicId] = useState<number | null>(selected?.content_topic_id ?? null)
+  const [editSources, setEditSources] = useState<DraftSource[]>(selected?.sources ?? [])
+  const [sourcesOpen, setSourcesOpen] = useState(false)
+  const [newSourceUrl, setNewSourceUrl] = useState('')
+  const [newSourceTitle, setNewSourceTitle] = useState('')
+  const [newSourceNote, setNewSourceNote] = useState('')
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [refreshing, setRefreshing] = useState(false)
-  const [deleting, setDeleting] = useState(false)
 
-  // When selected changes, reset editor
+  // Chat state
+  const [chatOpen, setChatOpen] = useState(initialChatOpen)
+  const [chatHistory, setChatHistory] = useState<ChatMessage[]>([])
+  const [chatSessionName, setChatSessionName] = useState<string | null>(null)
+  const [chatInput, setChatInput] = useState('')
+  const [chatLoading, setChatLoading] = useState(false)
+  const [pendingContent, setPendingContent] = useState<string | null>(null)
+  const chatEndRef = useRef<HTMLDivElement>(null)
+  const [refreshing, setRefreshing] = useState(false)
+  const [creating, setCreating] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const [creatingVariant, setCreatingVariant] = useState(false)
+  const [adaptMenuOpen, setAdaptMenuOpen] = useState(false)
+
+  // Sync editor when active draft changes
   useEffect(() => {
     if (!selected) return
     setEditTitle(selected.title)
     setEditContent(selected.content)
     setEditStatus(selected.status)
+    setEditContentTopicId(selected.content_topic_id ?? null)
+    setEditSources(selected.sources ?? [])
+    setNewSourceUrl(''); setNewSourceTitle(''); setNewSourceNote('')
+    setChatHistory([])
+    setChatSessionName(null)
+    setPendingContent(null)
     setDirty(false)
   }, [selected?.id])
 
-  const filtered = drafts.filter(d => filterStatus === 'all' || d.status === filterStatus)
+  useEffect(() => { getTopics().then(t => setTopicList(t)).catch(() => {}) }, [])
 
-  const handleSelect = useCallback((d: Draft) => {
-    if (dirty) {
-      if (!confirm('有未保存的修改，确定切换？')) return
+  // Close adapt dropdown on outside click
+  useEffect(() => {
+    if (!adaptMenuOpen) return
+    const handler = (e: MouseEvent) => {
+      if (!(e.target as HTMLElement).closest('[data-adapt-menu]')) setAdaptMenuOpen(false)
     }
-    setSelected(d)
-  }, [dirty])
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [adaptMenuOpen])
+
+  // Ctrl/Cmd + S
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); if (dirty) handleSave() }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [dirty, editTitle, editContent, editStatus, editContentTopicId])
+
+  // ── Filtering ──────────────────────────────────────────────────────────────
+
+  const filteredGroups = groups.filter(g => {
+    const root = g.root
+    if (filterStatus !== 'all' && root.status !== filterStatus) return false
+    if (filterTopicId !== 'all') {
+      const tid = filterTopicId === 'none' ? null : Number(filterTopicId)
+      if (root.content_topic_id !== tid) return false
+    }
+    return true
+  })
+
+  // ── Handlers ───────────────────────────────────────────────────────────────
+
+  function handleSelectGroup(group: DraftGroup) {
+    if (dirty && !confirm('有未保存的修改，确定切换？')) return
+    setSelectedGroup(group)
+    // Default to 'article' type, else first available
+    const article = [group.root, ...group.variants].find(d => d.draft_type === 'article')
+    setSelected(article ?? group.root)
+  }
+
+  function handleSelectVariant(draft: Draft) {
+    if (dirty && !confirm('有未保存的修改，确定切换？')) return
+    setSelected(draft)
+  }
 
   async function handleSave() {
     if (!selected) return
@@ -76,6 +199,8 @@ export function DraftsClient({ initialDrafts }: { initialDrafts: Draft[] }) {
       if (editTitle !== selected.title) body.title = editTitle
       if (editContent !== selected.content) body.content = editContent
       if (editStatus !== selected.status) body.status = editStatus
+      if (editContentTopicId !== (selected.content_topic_id ?? null)) body.content_topic_id = editContentTopicId
+      if (JSON.stringify(editSources) !== JSON.stringify(selected.sources ?? [])) body.sources = editSources
       const updated = await updateDraft(selected.id, body)
       setDrafts(ds => ds.map(d => d.id === updated.id ? updated : d))
       setSelected(updated)
@@ -90,18 +215,50 @@ export function DraftsClient({ initialDrafts }: { initialDrafts: Draft[] }) {
 
   async function handleDelete() {
     if (!selected) return
-    if (!confirm(`确定删除「${selected.title}」？此操作不可恢复。`)) return
+    if (!confirm(`确定删除「${selected.title || typeInfo(selected.draft_type).label + '稿'}」？此操作不可恢复。`)) return
     setDeleting(true)
     try {
       await deleteDraft(selected.id)
-      const next = drafts.filter(d => d.id !== selected.id)
-      setDrafts(next)
-      setSelected(next[0] ?? null)
+      const nextDrafts = drafts.filter(d => d.id !== selected.id)
+      setDrafts(nextDrafts)
+      // Rebuild groups and find next selection
+      const nextGroups = buildGroups(nextDrafts)
+      if (selectedGroup) {
+        const refreshedGroup = nextGroups.find(g => g.root.id === selectedGroup.root.id)
+        if (refreshedGroup) {
+          setSelectedGroup(refreshedGroup)
+          const remaining = [refreshedGroup.root, ...refreshedGroup.variants]
+          setSelected(remaining[0] ?? null)
+        } else {
+          setSelectedGroup(nextGroups[0] ?? null)
+          setSelected(nextGroups[0]?.root ?? null)
+        }
+      }
       toast.success('已删除')
     } catch {
       toast.error('删除失败')
     } finally {
       setDeleting(false)
+    }
+  }
+
+  async function handleCreateDraft() {
+    setCreating(true)
+    try {
+      const draft = await createDraft({ title: '', content: '', draft_type: 'article', status: 'drafting' })
+      const fresh = await getDrafts()
+      setDrafts(fresh)
+      const freshGroups = buildGroups(fresh)
+      const newGroup = freshGroups.find(g => g.root.id === draft.id)
+      if (newGroup) {
+        setSelectedGroup(newGroup)
+        setSelected(draft)
+      }
+      toast.success('已新建草稿')
+    } catch {
+      toast.error('新建失败')
+    } finally {
+      setCreating(false)
     }
   }
 
@@ -121,169 +278,478 @@ export function DraftsClient({ initialDrafts }: { initialDrafts: Draft[] }) {
     }
   }
 
-  // Ctrl/Cmd + S to save
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
-        e.preventDefault()
-        if (dirty) handleSave()
+  async function handleCreateVariant(targetType: string) {
+    if (!selected || !selectedGroup) return
+    setAdaptMenuOpen(false)
+    setCreatingVariant(true)
+    const typeLabel = typeInfo(targetType).label
+    const rootId = selected.linked_draft_id ?? selected.id
+    try {
+      const variant = await createDraft({
+        topic_id: selected.topic_id,
+        title: selected.title,
+        content: articleDraft?.content ?? selected.content ?? '',
+        draft_type: targetType,
+        linked_draft_id: rootId,
+        content_topic_id: selected.content_topic_id,
+        sources: selected.sources,
+      })
+      const fresh = await getDrafts()
+      setDrafts(fresh)
+      const freshGroups = buildGroups(fresh)
+      const newGroup = freshGroups.find(g => g.root.id === rootId) ?? freshGroups.find(g => g.root.id === variant.id)
+      if (newGroup) {
+        setSelectedGroup(newGroup)
+        const newVariant = fresh.find(d => d.id === variant.id)
+        if (newVariant) { setSelected(newVariant); setChatOpen(true) }
       }
+      toast.success(`已创建${typeLabel}版本`)
+    } catch {
+      toast.error('创建失败')
+    } finally {
+      setCreatingVariant(false)
     }
-    window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
-  }, [dirty, editTitle, editContent, editStatus])
+  }
+
+  async function handleChatSend() {
+    if (!selected || !chatInput.trim() || chatLoading) return
+    const userMsg: ChatMessage = { role: 'user', content: chatInput.trim() }
+    setChatHistory(h => [...h, userMsg])
+    setChatInput('')
+    setChatLoading(true)
+    setPendingContent(null)
+    try {
+      const res = await chatWithDraft(selected.id, userMsg.content, {
+        sessionName: chatSessionName ?? undefined,
+        history: chatHistory,
+      })
+      if (res.session_name && !chatSessionName) setChatSessionName(res.session_name)
+      setChatHistory(h => [...h, { role: 'assistant', content: res.reply }])
+      if (res.updated_content) setPendingContent(res.updated_content)
+      setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50)
+    } catch {
+      toast.error('AI 回复失败')
+    } finally {
+      setChatLoading(false)
+    }
+  }
+
+  function handleNewChatSession() {
+    setChatHistory([])
+    setPendingContent(null)
+    setChatSessionName(`wms-draft-${selected?.id}-${Date.now()}`)
+    toast.success('已开启新对话')
+  }
+
+  // Existing types in the current group — article always first
+  const groupDrafts = selectedGroup
+    ? [selectedGroup.root, ...selectedGroup.variants].sort((a, b) => {
+        if (a.draft_type === 'article') return -1
+        if (b.draft_type === 'article') return 1
+        return 0
+      })
+    : []
+  const articleDraft = groupDrafts.find(d => d.draft_type === 'article')
+  const existingTypes = new Set(groupDrafts.map(d => d.draft_type))
+  const availableTypes = DRAFT_TYPES.filter(t => !existingTypes.has(t.value))
 
   return (
-    <div className="flex h-screen overflow-hidden">
-      {/* ── Left: Draft list ──────────────────────────────── */}
+    <div className="flex h-full overflow-hidden">
+
+      {/* ── Left sidebar ───────────────────────────────────── */}
       <aside className="w-72 flex-shrink-0 border-r border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 flex flex-col">
         {/* Header */}
         <div className="px-4 py-4 border-b border-zinc-100 dark:border-zinc-800 flex items-center gap-2">
           <BookMarked className="w-4 h-4 text-indigo-500" />
           <span className="font-semibold text-sm text-zinc-900 dark:text-zinc-100">草稿箱</span>
-          <span className="ml-auto text-xs text-zinc-400">{drafts.length} 篇</span>
+          <span className="ml-auto text-xs text-zinc-400">{groups.length} 篇</span>
+          <button
+            onClick={handleCreateDraft}
+            disabled={creating}
+            title="新建草稿"
+            className="text-zinc-400 hover:text-indigo-500 dark:hover:text-indigo-400 disabled:opacity-40 transition-colors"
+          >
+            {creating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+          </button>
           <button onClick={handleRefresh} disabled={refreshing} className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 disabled:opacity-40">
             <RefreshCw className={cn('w-3.5 h-3.5', refreshing && 'animate-spin')} />
           </button>
         </div>
 
-        {/* Status filter */}
-        <div className="px-3 py-2 border-b border-zinc-100 dark:border-zinc-800 flex gap-1 flex-wrap">
-          <button
-            onClick={() => setFilterStatus('all')}
-            className={cn('text-[11px] px-2 py-0.5 rounded-full transition-colors',
-              filterStatus === 'all'
-                ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900'
-                : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200'
-            )}
-          >全部</button>
-          {DRAFT_STATUSES.map(s => (
-            <button
-              key={s.value}
-              onClick={() => setFilterStatus(s.value)}
-              className={cn('text-[11px] px-2 py-0.5 rounded-full transition-colors',
-                filterStatus === s.value
-                  ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900'
-                  : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200'
-              )}
-            >{s.label}</button>
-          ))}
+        {/* Filters */}
+        <div className="px-3 py-2 border-b border-zinc-100 dark:border-zinc-800 flex gap-2">
+          <select
+            value={filterTopicId}
+            onChange={e => setFilterTopicId(e.target.value)}
+            className="flex-1 text-xs px-2 py-1.5 border border-zinc-200 dark:border-zinc-700 rounded-md bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 outline-none focus:border-indigo-400 cursor-pointer min-w-0 truncate"
+          >
+            <option value="all">全部主题</option>
+            <option value="none">无主题</option>
+            {flattenTopicsWithDepth(topicList).map(({ topic, label }) => (
+              <option key={topic.id} value={String(topic.id)}>{label}</option>
+            ))}
+          </select>
+          <select
+            value={filterStatus}
+            onChange={e => setFilterStatus(e.target.value)}
+            className="text-xs px-2 py-1.5 border border-zinc-200 dark:border-zinc-700 rounded-md bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 outline-none focus:border-indigo-400 cursor-pointer"
+          >
+            <option value="all">全部状态</option>
+            {DRAFT_STATUSES.map(s => (
+              <option key={s.value} value={s.value}>{s.label}</option>
+            ))}
+          </select>
         </div>
 
-        {/* List */}
+        {/* Group list */}
         <div className="flex-1 overflow-y-auto">
-          {filtered.length === 0 ? (
+          {filteredGroups.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-40 text-zinc-400 gap-2">
               <FileText className="w-8 h-8 opacity-30" />
               <p className="text-xs">暂无草稿</p>
+              <button
+                onClick={handleCreateDraft}
+                disabled={creating}
+                className="flex items-center gap-1 text-xs text-indigo-500 hover:text-indigo-600 disabled:opacity-40 transition-colors"
+              >
+                {creating ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}
+                新建草稿
+              </button>
             </div>
           ) : (
-            filtered.map(d => (
-              <button
-                key={d.id}
-                onClick={() => handleSelect(d)}
-                className={cn(
-                  'w-full text-left px-4 py-3 border-b border-zinc-100 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-900 transition-colors group',
-                  selected?.id === d.id && 'bg-indigo-50 dark:bg-indigo-950/30 border-l-2 border-l-indigo-400'
-                )}
-              >
-                <div className="flex items-start gap-2">
-                  <div className="flex-1 min-w-0">
-                    <p className={cn(
-                      'text-xs font-medium truncate',
-                      selected?.id === d.id ? 'text-indigo-700 dark:text-indigo-300' : 'text-zinc-800 dark:text-zinc-200'
-                    )}>
-                      {d.title || '（无标题）'}
-                    </p>
-                    <p className="text-[10px] text-zinc-400 mt-0.5 line-clamp-2 leading-relaxed">
-                      {d.content.replace(/#+\s*/g, '').slice(0, 60)}…
-                    </p>
-                    <div className="flex items-center gap-1.5 mt-1.5">
-                      <span className={cn('text-[10px] px-1.5 py-0.5 rounded-full font-medium', STATUS_STYLES[d.status])}>
-                        {statusLabel(d.status)}
+            filteredGroups.map(group => {
+              const isActive = selectedGroup?.root.id === group.root.id
+              const topicName = flattenTopicsWithDepth(topicList).find(({ topic }) => topic.id === group.root.content_topic_id)?.topic.title
+              const allInGroup = [group.root, ...group.variants]
+              return (
+                <button
+                  key={group.root.id}
+                  onClick={() => handleSelectGroup(group)}
+                  className={cn(
+                    'w-full text-left px-4 py-3 border-b border-zinc-100 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-900 transition-colors group',
+                    isActive && 'bg-indigo-50 dark:bg-indigo-950/30 border-l-2 border-l-indigo-400'
+                  )}
+                >
+                  <div className="flex items-start gap-2">
+                    <div className="flex-1 min-w-0">
+                      {topicName && (
+                        <p className="text-[10px] text-indigo-400 mb-0.5 truncate">
+                          {topicName}
+                        </p>
+                      )}
+                      <p className={cn('text-xs font-medium truncate', isActive ? 'text-indigo-700 dark:text-indigo-300' : 'text-zinc-800 dark:text-zinc-200')}>
+                        {group.root.title || '（无标题）'}
+                      </p>
+                      <p className="text-[10px] text-zinc-400 mt-0.5 line-clamp-1 leading-relaxed">
+                        {group.root.content.replace(/#+\s*/g, '').slice(0, 50) || '空内容'}
+                      </p>
+                      {/* Platform badges row */}
+                      <div className="flex items-center gap-1 mt-1.5 flex-wrap">
+                        <span className={cn('text-[10px] px-1.5 py-0.5 rounded-full font-medium', STATUS_STYLES[group.root.status])}>
+                          {statusLabel(group.root.status)}
+                        </span>
+                        {allInGroup.map(d => {
+                          const t = typeInfo(d.draft_type)
+                          return (
+                            <span key={d.id} className={cn('text-[10px] px-1.5 py-0.5 rounded-full font-medium', t.badge, isActive && selected?.id === d.id && 'ring-1 ring-offset-0 ring-current')}>
+                              {t.label}
+                            </span>
+                          )
+                        })}
+                      </div>
+                    </div>
+                    <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                      <span className="text-[10px] text-zinc-400 flex items-center gap-0.5">
+                        <Clock className="w-2.5 h-2.5" />{formatDate(group.root.updated_at)}
                       </span>
-                      <span className="text-[10px] text-zinc-400">{sourceLabel(d.topic_id)}</span>
+                      <ChevronRight className={cn('w-3 h-3 text-zinc-300 group-hover:text-zinc-400 transition-colors', isActive && 'text-indigo-400')} />
                     </div>
                   </div>
-                  <div className="flex flex-col items-end gap-1 flex-shrink-0">
-                    <span className="text-[10px] text-zinc-400 flex items-center gap-0.5">
-                      <Clock className="w-2.5 h-2.5" />{formatDate(d.updated_at)}
-                    </span>
-                    <ChevronRight className={cn('w-3 h-3 text-zinc-300 group-hover:text-zinc-400 transition-colors', selected?.id === d.id && 'text-indigo-400')} />
-                  </div>
-                </div>
-              </button>
-            ))
+                </button>
+              )
+            })
           )}
         </div>
       </aside>
 
-      {/* ── Right: Editor ─────────────────────────────────── */}
-      {selected ? (
-        <div className="flex-1 flex flex-col overflow-hidden bg-white dark:bg-zinc-950">
-          {/* Toolbar */}
-          <div className="flex items-center gap-3 px-6 py-3 border-b border-zinc-100 dark:border-zinc-800 flex-shrink-0">
-            {/* Status selector */}
-            <select
-              value={editStatus}
-              onChange={e => { setEditStatus(e.target.value); setDirty(true) }}
-              className={cn(
-                'text-xs px-2 py-1 rounded-full font-medium border-0 cursor-pointer focus:outline-none focus:ring-1 focus:ring-indigo-400',
-                STATUS_STYLES[editStatus]
+      {/* ── Right: Editor + Chat ──────────────────────────── */}
+      {selected && selectedGroup ? (
+        <div className="flex-1 flex overflow-hidden bg-white dark:bg-zinc-950">
+          {/* Editor column */}
+          <div className="flex-1 flex flex-col overflow-hidden min-w-0">
+
+            {/* Type tabs — article as main version, platforms as adaptations */}
+            <div className="flex items-center gap-1.5 px-4 py-2 border-b border-zinc-100 dark:border-zinc-800 flex-shrink-0 bg-zinc-50 dark:bg-zinc-900">
+              {groupDrafts.map((d, i) => {
+                const t = typeInfo(d.draft_type)
+                const isArticle = d.draft_type === 'article'
+                const isTab = selected.id === d.id
+                return (
+                  <button
+                    key={d.id}
+                    onClick={() => handleSelectVariant(d)}
+                    className={cn(
+                      'text-xs px-3 py-1 rounded-full font-medium transition-colors flex items-center gap-1',
+                      isTab
+                        ? t.badge + ' ring-1 ring-current'
+                        : 'text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800'
+                    )}
+                  >
+                    {t.label}
+                    {isArticle && <span className="text-[9px] opacity-60 font-normal">主版本</span>}
+                  </button>
+                )
+              })}
+              {/* Add new platform adaptation */}
+              {availableTypes.length > 0 && (
+                <div className="relative" data-adapt-menu>
+                  <button
+                    onClick={() => setAdaptMenuOpen(v => !v)}
+                    disabled={creatingVariant}
+                    className="flex items-center gap-1 text-[11px] text-zinc-400 hover:text-indigo-500 px-2 py-1 rounded-full hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors disabled:opacity-40"
+                  >
+                    {creatingVariant ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}
+                    适配平台
+                  </button>
+                  {adaptMenuOpen && (
+                    <div className="absolute left-0 top-full mt-1 z-50 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg shadow-lg py-1 min-w-[120px]">
+                      {availableTypes.map(t => (
+                        <button
+                          key={t.value}
+                          onClick={() => handleCreateVariant(t.value)}
+                          className="w-full text-left px-3 py-1.5 text-xs hover:bg-zinc-50 dark:hover:bg-zinc-800 flex items-center gap-2"
+                        >
+                          <span className={cn('px-1.5 py-0.5 rounded-full font-medium text-[10px]', t.badge)}>{t.label}</span>
+                          <span className="text-[10px] text-zinc-400">适配</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
               )}
-            >
-              {DRAFT_STATUSES.map(s => (
-                <option key={s.value} value={s.value}>{s.label}</option>
-              ))}
-            </select>
+            </div>
 
-            <span className="text-[11px] text-zinc-400">
-              v{selected.version} · 更新于 {formatDate(selected.updated_at)}
-              {selected.topic_id === 'x' && ' · X 帖子创作'}
-            </span>
-
-            <div className="ml-auto flex items-center gap-2">
-              {dirty && <span className="text-[11px] text-amber-500">有未保存修改</span>}
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleDelete}
-                disabled={deleting}
-                className="gap-1.5 text-red-500 hover:text-red-600 hover:border-red-300 dark:hover:border-red-700"
+            {/* Toolbar */}
+            <div className="flex items-center gap-3 px-6 py-3 border-b border-zinc-100 dark:border-zinc-800 flex-shrink-0">
+              <select
+                value={editStatus}
+                onChange={e => { setEditStatus(e.target.value); setDirty(true) }}
+                className={cn('text-xs px-2 py-1 rounded-full font-medium border-0 cursor-pointer focus:outline-none focus:ring-1 focus:ring-indigo-400', STATUS_STYLES[editStatus])}
               >
-                {deleting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
-                删除
-              </Button>
-              <Button size="sm" onClick={handleSave} disabled={saving || !dirty} className="gap-1.5">
-                {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
-                保存
-              </Button>
+                {DRAFT_STATUSES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+              </select>
+
+              <select
+                value={editContentTopicId ?? ''}
+                onChange={e => { setEditContentTopicId(e.target.value ? Number(e.target.value) : null); setDirty(true) }}
+                className="text-xs px-2 py-1 rounded-full border border-zinc-200 dark:border-zinc-700 bg-transparent cursor-pointer focus:outline-none focus:ring-1 focus:ring-indigo-400 text-zinc-600 dark:text-zinc-400 max-w-[160px] truncate"
+                title="关联主题"
+              >
+                <option value="">无主题</option>
+                {flattenTopicsWithDepth(topicList).map(({ topic, label }) => (
+                  <option key={topic.id} value={topic.id}>{label}</option>
+                ))}
+              </select>
+
+              <span className="text-[11px] text-zinc-400">
+                v{selected.version} · 更新于 {formatDate(selected.updated_at)}
+              </span>
+
+              <div className="ml-auto flex items-center gap-2">
+                {dirty && <span className="text-[11px] text-amber-500">有未保存修改</span>}
+                <Button
+                  variant="outline" size="sm"
+                  onClick={() => setChatOpen(v => !v)}
+                  className={cn('gap-1.5', chatOpen && 'bg-violet-50 border-violet-300 text-violet-600 dark:bg-violet-950/30 dark:border-violet-700 dark:text-violet-400')}
+                >
+                  <MessageSquare className="w-3.5 h-3.5" />
+                  AI 润色
+                </Button>
+                <Button
+                  variant="outline" size="sm"
+                  onClick={handleDelete}
+                  disabled={deleting}
+                  className="gap-1.5 text-red-500 hover:text-red-600 hover:border-red-300 dark:hover:border-red-700"
+                >
+                  {deleting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                  删除
+                </Button>
+                <Button size="sm" onClick={handleSave} disabled={saving || !dirty} className="gap-1.5">
+                  {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                  保存
+                </Button>
+              </div>
+            </div>
+
+            {/* Title */}
+            <div className="px-6 pt-4 pb-2 flex-shrink-0 border-b border-zinc-100 dark:border-zinc-800">
+              {selected.draft_type !== 'article' && selected.linked_draft_id !== null && (
+                <div className="flex items-center gap-1.5 mb-2 text-[11px] text-zinc-400">
+                  <Layers className="w-3 h-3" />
+                  基于文章主版本的{typeInfo(selected.draft_type).label}适配副本
+                </div>
+              )}
+              <input
+                value={editTitle}
+                onChange={e => { setEditTitle(e.target.value); setDirty(true) }}
+                placeholder="标题…"
+                className="w-full text-xl font-bold text-zinc-900 dark:text-zinc-100 bg-transparent border-0 outline-none placeholder:text-zinc-300 dark:placeholder:text-zinc-700"
+              />
+            </div>
+
+            {/* Sources panel */}
+            <div className="flex-shrink-0 border-b border-zinc-100 dark:border-zinc-800">
+              <button
+                onClick={() => setSourcesOpen(v => !v)}
+                className="w-full flex items-center gap-2 px-6 py-2 text-left hover:bg-zinc-50 dark:hover:bg-zinc-900 transition-colors"
+              >
+                <Link2 className="w-3.5 h-3.5 text-zinc-400" />
+                <span className="text-xs text-zinc-500 dark:text-zinc-400 flex-1">
+                  灵感来源
+                  {editSources.length > 0 && (
+                    <span className="ml-1.5 bg-indigo-100 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400 text-[10px] px-1.5 py-0.5 rounded-full font-medium">
+                      {editSources.length}
+                    </span>
+                  )}
+                </span>
+                <ChevronDown className={cn('w-3 h-3 text-zinc-400 transition-transform', sourcesOpen && 'rotate-180')} />
+              </button>
+
+              {sourcesOpen && (
+                <div className="px-6 pb-3 space-y-2">
+                  {editSources.map((s, i) => (
+                    <div key={i} className="flex items-start gap-2 group text-xs">
+                      <ExternalLink className="w-3 h-3 text-indigo-400 flex-shrink-0 mt-0.5" />
+                      <div className="flex-1 min-w-0">
+                        <a href={s.url} target="_blank" rel="noopener noreferrer"
+                          className="text-indigo-500 hover:text-indigo-700 dark:hover:text-indigo-300 hover:underline truncate block max-w-xs">
+                          {s.title || s.url}
+                        </a>
+                        {s.note && <p className="text-zinc-400 mt-0.5 text-[11px]">{s.note}</p>}
+                      </div>
+                      <button onClick={() => { setEditSources(src => src.filter((_, j) => j !== i)); setDirty(true) }}
+                        className="opacity-0 group-hover:opacity-100 text-zinc-400 hover:text-red-500 transition-opacity flex-shrink-0">
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  ))}
+                  <div className="pt-1 border-t border-zinc-100 dark:border-zinc-800 space-y-1.5">
+                    <input value={newSourceUrl} onChange={e => setNewSourceUrl(e.target.value)} placeholder="来源 URL…"
+                      className="w-full text-xs px-2 py-1.5 border border-zinc-200 dark:border-zinc-700 rounded bg-transparent outline-none focus:border-indigo-400 text-zinc-800 dark:text-zinc-200 placeholder:text-zinc-400" />
+                    <div className="flex gap-1.5">
+                      <input value={newSourceTitle} onChange={e => setNewSourceTitle(e.target.value)} placeholder="标题（可选）"
+                        className="flex-1 text-xs px-2 py-1.5 border border-zinc-200 dark:border-zinc-700 rounded bg-transparent outline-none focus:border-indigo-400 text-zinc-800 dark:text-zinc-200 placeholder:text-zinc-400" />
+                      <input value={newSourceNote} onChange={e => setNewSourceNote(e.target.value)} placeholder="备注（可选）"
+                        className="flex-1 text-xs px-2 py-1.5 border border-zinc-200 dark:border-zinc-700 rounded bg-transparent outline-none focus:border-indigo-400 text-zinc-800 dark:text-zinc-200 placeholder:text-zinc-400" />
+                      <button
+                        onClick={() => {
+                          const url = newSourceUrl.trim()
+                          if (!url) return
+                          setEditSources(src => [...src, { url, title: newSourceTitle.trim(), note: newSourceNote.trim() }])
+                          setNewSourceUrl(''); setNewSourceTitle(''); setNewSourceNote('')
+                          setDirty(true)
+                        }}
+                        disabled={!newSourceUrl.trim()}
+                        className="px-2.5 py-1.5 bg-indigo-500 hover:bg-indigo-600 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded text-xs font-medium transition-colors flex items-center gap-1"
+                      >
+                        <Plus className="w-3 h-3" />添加
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Content editor */}
+            <div className="flex-1 overflow-hidden">
+              <MarkdownEditor
+                value={editContent}
+                onChange={v => { setEditContent(v); setDirty(true) }}
+              />
             </div>
           </div>
 
-          {/* Title */}
-          <div className="px-6 pt-4 pb-2 flex-shrink-0 border-b border-zinc-100 dark:border-zinc-800">
-            <input
-              value={editTitle}
-              onChange={e => { setEditTitle(e.target.value); setDirty(true) }}
-              placeholder="文章标题…"
-              className="w-full text-xl font-bold text-zinc-900 dark:text-zinc-100 bg-transparent border-0 outline-none placeholder:text-zinc-300 dark:placeholder:text-zinc-700"
-            />
-          </div>
+          {/* ── Chat panel ──────────────────────────────────── */}
+          {chatOpen && (
+            <div className="w-80 flex-shrink-0 border-l border-zinc-200 dark:border-zinc-800 flex flex-col bg-white dark:bg-zinc-950">
+              <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-100 dark:border-zinc-800 flex-shrink-0">
+                <div className="flex items-center gap-2 min-w-0">
+                  <MessageSquare className="w-3.5 h-3.5 text-violet-500 flex-shrink-0" />
+                  <span className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">AI 润色助手</span>
+                  <span className={cn('text-[10px] px-1.5 py-0.5 rounded-full font-medium', typeInfo(selected.draft_type).badge)}>
+                    {typeInfo(selected.draft_type).label}
+                  </span>
+                </div>
+                <button onClick={handleNewChatSession} className="text-[10px] text-zinc-400 hover:text-violet-500 dark:hover:text-violet-400 flex-shrink-0 transition-colors">
+                  新对话
+                </button>
+              </div>
 
-          {/* Content — Markdown editor */}
-          <div className="flex-1 overflow-hidden">
-            <MarkdownEditor
-              value={editContent}
-              onChange={v => { setEditContent(v); setDirty(true) }}
-            />
-          </div>
+              <div className="flex-1 overflow-y-auto px-3 py-3 space-y-3">
+                {chatHistory.length === 0 && (
+                  <div className="text-center text-zinc-400 text-xs py-6 space-y-2">
+                    <MessageSquare className="w-7 h-7 mx-auto opacity-30" />
+                    <p>可以说：</p>
+                    <div className="space-y-1">
+                      {['帮我润色开头', '把语气改得更有力', '压缩到 500 字', '帮我补充一个结尾'].map(s => (
+                        <button key={s} onClick={() => setChatInput(s)} className="block w-full text-left px-2 py-1 rounded hover:bg-zinc-50 dark:hover:bg-zinc-900 transition-colors">{s}</button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {chatHistory.map((m, i) => (
+                  <div key={i} className={cn('flex', m.role === 'user' ? 'justify-end' : 'justify-start')}>
+                    <div className={cn('max-w-[90%] rounded-xl px-3 py-2 text-xs leading-relaxed whitespace-pre-wrap',
+                      m.role === 'user' ? 'bg-violet-500 text-white rounded-br-sm' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-200 rounded-bl-sm')}>
+                      {m.content}
+                    </div>
+                  </div>
+                ))}
+                {chatLoading && (
+                  <div className="flex justify-start">
+                    <div className="bg-zinc-100 dark:bg-zinc-800 rounded-xl rounded-bl-sm px-3 py-2">
+                      <Loader2 className="w-3.5 h-3.5 animate-spin text-zinc-400" />
+                    </div>
+                  </div>
+                )}
+                {pendingContent && (
+                  <div className="rounded-lg border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/30 p-2.5 space-y-2">
+                    <p className="text-[11px] text-emerald-700 dark:text-emerald-400 font-medium">AI 已生成修改版本</p>
+                    <Button size="sm" className="w-full gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs h-7"
+                      onClick={() => { setEditContent(pendingContent); setDirty(true); setPendingContent(null); toast.success('已应用修改，记得保存') }}>
+                      <CheckCheck className="w-3.5 h-3.5" />应用到草稿
+                    </Button>
+                    <button onClick={() => setPendingContent(null)} className="text-[10px] text-zinc-400 hover:text-zinc-600 w-full text-center">忽略</button>
+                  </div>
+                )}
+                <div ref={chatEndRef} />
+              </div>
+
+              <div className="flex-shrink-0 border-t border-zinc-100 dark:border-zinc-800 p-3">
+                <div className="flex gap-2">
+                  <textarea
+                    value={chatInput}
+                    onChange={e => setChatInput(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleChatSend() } }}
+                    placeholder="输入修改需求… (Enter 发送)"
+                    rows={2}
+                    className="flex-1 text-xs px-2 py-1.5 border border-zinc-200 dark:border-zinc-700 rounded-lg bg-transparent outline-none focus:border-violet-400 resize-none text-zinc-800 dark:text-zinc-200 placeholder:text-zinc-400"
+                  />
+                  <button onClick={handleChatSend} disabled={!chatInput.trim() || chatLoading}
+                    className="self-end p-2 rounded-lg bg-violet-500 hover:bg-violet-600 disabled:opacity-40 disabled:cursor-not-allowed text-white transition-colors">
+                    <Send className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+                <p className="text-[10px] text-zinc-400 mt-1.5">Shift+Enter 换行</p>
+              </div>
+            </div>
+          )}
         </div>
       ) : (
         <div className="flex-1 flex flex-col items-center justify-center text-zinc-400 gap-3">
           <BookMarked className="w-12 h-12 opacity-20" />
           <p className="text-sm">选择一篇草稿开始编辑</p>
-          <p className="text-xs text-zinc-300">从 X 帖子创作的文章会自动进入草稿箱</p>
+          <p className="text-xs text-zinc-300">从选题库线索创作后会自动进入草稿箱</p>
         </div>
       )}
     </div>
