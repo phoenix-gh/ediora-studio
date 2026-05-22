@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useMemo, useEffect, useRef, useCallback } from 'react'
-import { Flame, RefreshCw, Search, ExternalLink, ThumbsUp, Eye, MessageSquare, Star } from 'lucide-react'
+import { useState, useMemo, useEffect, useCallback } from 'react'
+import { Flame, RefreshCw, Search, ThumbsUp, Eye, MessageSquare, Star } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   JuejinArticle,
@@ -14,126 +14,123 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
-import { ArticleReaderModal, ArticleReaderPanel, ReaderMeta } from '@/components/features/ArticleReader'
+import { ResponsiveArticleReader, ReaderMeta } from '@/components/features/ArticleReader'
 import { useMediaQuery } from '@/lib/use-media-query'
+import { fmtRelTime, fmtNum } from '@/lib/format'
+import { useInfiniteScroll } from '@/lib/use-infinite-scroll'
+import { AddToTopicPopover } from '@/components/features/AddToTopicPopover'
+import { PushToStudioPopover } from '@/components/features/PushToStudioPopover'
 
 const PAGE_SIZE = 30
 
-function fmtRelTime(iso: string) {
-  const diff = (Date.now() - new Date(iso).getTime()) / 1000
-  if (diff < 60) return '刚刚'
-  if (diff < 3600) return `${Math.floor(diff / 60)} 分钟前`
-  if (diff < 86400) return `${Math.floor(diff / 3600)} 小时前`
-  if (diff < 86400 * 7) return `${Math.floor(diff / 86400)} 天前`
-  return new Date(iso).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })
-}
+// ── Card (shared layout) ───────────────────────────────────────────────────────
 
-function fmtNum(n: number) {
-  if (n >= 10000) return `${(n / 10000).toFixed(1)}w`
-  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`
-  return String(n)
-}
-
-// ── Hot Card: ranked layout with cover ─────────────────────────────────────────
-
-function HotCard({ article, onOpen }: { article: JuejinArticle; onOpen: () => void }) {
+function JuejinCard({
+  article,
+  rank,
+  onOpen,
+}: {
+  article: JuejinArticle
+  rank?: number
+  onOpen: () => void
+}) {
   const tags = article.tags ? article.tags.split(',').filter(Boolean).slice(0, 3) : []
-  return (
-    <button
-      type="button"
-      onClick={onOpen}
-      className="group w-full text-left flex gap-3 py-3 px-2 -mx-2 rounded-lg border-b border-zinc-100 dark:border-zinc-800 last:border-0 hover:bg-zinc-50 dark:hover:bg-zinc-900/50 transition-colors"
-    >
-      <span className={cn(
-        'flex-shrink-0 w-6 text-center text-sm font-semibold pt-0.5',
-        article.hot_rank <= 3 ? 'text-blue-500' : 'text-zinc-400',
-      )}>
-        {article.hot_rank}
-      </span>
+  const isTopRank = rank != null && rank <= 3
 
-      {article.cover_url && (
-        <div className="flex-shrink-0 w-24 h-16 rounded-lg overflow-hidden bg-zinc-100 dark:bg-zinc-800">
-          <img src={article.cover_url} alt=""
-            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={onOpen}
+      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen() } }}
+      className="group relative w-full text-left flex gap-4 py-4 px-3 -mx-3 rounded-xl border-b border-zinc-100 dark:border-zinc-900 last:border-0 hover:bg-zinc-50/70 dark:hover:bg-zinc-900/40 transition-colors cursor-pointer"
+    >
+      {/* Rank badge (outside the cover-aligned column) */}
+      {rank != null && (
+        <div className="flex-shrink-0 flex flex-col items-center pt-1 w-7">
+          <span className={cn(
+            'text-base font-bold tabular-nums leading-none',
+            isTopRank ? 'text-blue-500' : 'text-zinc-300 dark:text-zinc-600',
+          )}>
+            {rank}
+          </span>
         </div>
       )}
 
-      <div className="flex-1 min-w-0">
-        <p className="text-[13px] font-medium text-zinc-900 dark:text-zinc-100 line-clamp-2 leading-snug
-                      group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
-          {article.title}
-        </p>
-        <div className="mt-1.5 flex items-center gap-3 text-[11px] text-zinc-400 flex-wrap">
-          {article.author && (
-            <span className="text-zinc-500 truncate max-w-[120px]">{article.author}</span>
-          )}
-          {article.view_count > 0 && (
-            <span className="flex items-center gap-0.5"><Eye className="w-3 h-3" />{fmtNum(article.view_count)}</span>
-          )}
-          {article.digg_count > 0 && (
-            <span className="flex items-center gap-0.5"><ThumbsUp className="w-3 h-3" />{fmtNum(article.digg_count)}</span>
-          )}
-          {article.comment_count > 0 && (
-            <span className="flex items-center gap-0.5"><MessageSquare className="w-3 h-3" />{fmtNum(article.comment_count)}</span>
-          )}
-          {article.collect_count > 0 && (
-            <span className="flex items-center gap-0.5"><Star className="w-3 h-3" />{fmtNum(article.collect_count)}</span>
-          )}
-          {tags.length > 0 && tags.map(t => (
-            <span key={t} className="px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-500 text-[10px]">{t}</span>
-          ))}
-          <span className="ml-auto">{fmtRelTime(article.published_at)}</span>
-        </div>
-      </div>
-    </button>
-  )
-}
-
-// ── Article Card (per-category, no rank number) ─────────────────────────────────
-
-function ArticleCard({ article, onOpen }: { article: JuejinArticle; onOpen: () => void }) {
-  const tags = article.tags ? article.tags.split(',').filter(Boolean).slice(0, 3) : []
-  return (
-    <button
-      type="button"
-      onClick={onOpen}
-      className="group w-full text-left flex gap-3 py-3 px-2 -mx-2 rounded-lg border-b border-zinc-100 dark:border-zinc-800 last:border-0 hover:bg-zinc-50 dark:hover:bg-zinc-900/50 transition-colors"
-    >
-      {article.cover_url && (
-        <div className="flex-shrink-0 w-24 h-16 rounded-lg overflow-hidden bg-zinc-100 dark:bg-zinc-800">
-          <img src={article.cover_url} alt=""
-            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
-        </div>
-      )}
-      <div className="flex-1 min-w-0">
-        <p className="text-[13px] font-medium text-zinc-900 dark:text-zinc-100 line-clamp-2 leading-snug
-                      group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
-          {article.title}
-        </p>
-        {article.brief && (
-          <p className="mt-1 text-[11px] text-zinc-400 line-clamp-1">{article.brief}</p>
+      {/* Cover (always reserves space; falls back to placeholder when missing) */}
+      <div className="flex-shrink-0 w-28 h-20 rounded-lg overflow-hidden bg-zinc-100 dark:bg-zinc-800/60 ring-1 ring-zinc-200/60 dark:ring-zinc-800 flex items-center justify-center">
+        {article.cover_url ? (
+          <img
+            src={article.cover_url}
+            alt=""
+            className="w-full h-full object-cover group-hover:scale-[1.03] transition-transform duration-300"
+          />
+        ) : (
+          <Flame className="w-6 h-6 text-zinc-300 dark:text-zinc-700" />
         )}
-        <div className="mt-1.5 flex items-center gap-2 text-[11px] text-zinc-400 flex-wrap">
+      </div>
+
+      {/* Right side: title / meta / stats+actions — distributes to cover height */}
+      <div className="flex-1 min-w-0 flex flex-col justify-between py-0.5">
+        <h3 className="text-[14px] font-semibold text-zinc-900 dark:text-zinc-100 truncate leading-snug
+                       group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">
+          {article.title}
+        </h3>
+
+        <div className="flex items-center gap-2 text-[11px] text-zinc-400 dark:text-zinc-500 flex-wrap min-w-0">
+          <span>{fmtRelTime(article.published_at)}</span>
           {article.author && (
             <>
-              <span className="text-zinc-500 truncate max-w-[120px]">{article.author}</span>
-              <span>·</span>
+              <span className="text-zinc-300 dark:text-zinc-700">·</span>
+              <span className="text-zinc-600 dark:text-zinc-300 font-medium truncate max-w-[140px]">
+                {article.author}
+              </span>
             </>
           )}
-          {article.view_count > 0 && (
-            <span className="flex items-center gap-0.5"><Eye className="w-3 h-3" />{fmtNum(article.view_count)}</span>
+          {tags.length > 0 && (
+            <>
+              <span className="text-zinc-300 dark:text-zinc-700">·</span>
+              <div className="flex items-center gap-1 flex-wrap">
+                {tags.map(t => (
+                  <span
+                    key={t}
+                    className="px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 text-[10px] leading-none"
+                  >
+                    {t}
+                  </span>
+                ))}
+              </div>
+            </>
           )}
-          {article.digg_count > 0 && (
-            <span className="flex items-center gap-0.5"><ThumbsUp className="w-3 h-3" />{fmtNum(article.digg_count)}</span>
-          )}
-          <span>{fmtRelTime(article.published_at)}</span>
-          {tags.map(t => (
-            <span key={t} className="px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-500 text-[10px]">{t}</span>
-          ))}
-          <ExternalLink className="w-3 h-3 ml-1 opacity-0 group-hover:opacity-60 transition-opacity" />
+        </div>
+
+        {/* Last line: stats + action icon */}
+        <div className="flex items-center">
+          <div className="flex items-center gap-2.5 text-[11px] text-zinc-400 dark:text-zinc-500">
+            {article.view_count > 0 && (
+              <span className="flex items-center gap-1"><Eye className="w-3.5 h-3.5" />{fmtNum(article.view_count)}</span>
+            )}
+            {article.digg_count > 0 && (
+              <span className="flex items-center gap-1"><ThumbsUp className="w-3.5 h-3.5" />{fmtNum(article.digg_count)}</span>
+            )}
+            {article.comment_count > 0 && (
+              <span className="flex items-center gap-1"><MessageSquare className="w-3.5 h-3.5" />{fmtNum(article.comment_count)}</span>
+            )}
+            {article.collect_count > 0 && (
+              <span className="flex items-center gap-1"><Star className="w-3.5 h-3.5" />{fmtNum(article.collect_count)}</span>
+            )}
+          </div>
+          <div className="ml-auto flex items-center gap-0.5">
+            <AddToTopicPopover
+              url={article.url}
+              title={article.title}
+              summary={article.brief ?? ''}
+              platform="juejin"
+            />
+          </div>
         </div>
       </div>
-    </button>
+    </div>
   )
 }
 
@@ -151,8 +148,6 @@ export function JuejinClient({
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(false)
   const [collecting, setCollecting] = useState(false)
-  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE)
-  const sentinelRef = useRef<HTMLDivElement>(null)
 
   // Reader state — switches between right-side panel (wide screens) and modal
   const useSidePanel = useMediaQuery('(min-width: 1280px)')
@@ -205,7 +200,7 @@ export function JuejinClient({
         search: search || undefined,
       })
       setArticles(prev => ({ ...prev, [cat]: data }))
-      setVisibleCount(PAGE_SIZE)
+      resetScroll()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : '加载失败')
     } finally {
@@ -247,19 +242,11 @@ export function JuejinClient({
     return list.filter(a => a.title.toLowerCase().includes(q))
   }, [list, search])
 
+  const { visibleCount, sentinelRef, hasMore, reset: resetScroll } = useInfiniteScroll({
+    totalCount: filtered.length,
+    pageSize: PAGE_SIZE,
+  })
   const visible = filtered.slice(0, visibleCount)
-  const hasMore = visibleCount < filtered.length
-
-  useEffect(() => {
-    const el = sentinelRef.current
-    if (!el) return
-    const obs = new IntersectionObserver(
-      ([entry]) => { if (entry.isIntersecting && hasMore) setVisibleCount(c => c + PAGE_SIZE) },
-      { rootMargin: '200px' },
-    )
-    obs.observe(el)
-    return () => obs.disconnect()
-  }, [hasMore])
 
   const currentLabel = categories.find(c => c.key === activeCategory)?.label || '热榜'
 
@@ -286,7 +273,7 @@ export function JuejinClient({
                 <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-400" />
                 <Input
                   value={search}
-                  onChange={e => { setSearch(e.target.value); setVisibleCount(PAGE_SIZE) }}
+                  onChange={e => { setSearch(e.target.value); resetScroll() }}
                   placeholder="搜索标题"
                   className="h-8 text-xs pl-8 w-44"
                 />
@@ -306,7 +293,7 @@ export function JuejinClient({
               return (
                 <button
                   key={c.key}
-                  onClick={() => { setActiveCategory(c.key); setVisibleCount(PAGE_SIZE) }}
+                  onClick={() => { setActiveCategory(c.key); resetScroll() }}
                   className={cn(
                     'flex-shrink-0 px-3 py-1 rounded-full text-xs transition-colors',
                     active
@@ -334,9 +321,12 @@ export function JuejinClient({
             <>
               <div className={useSidePanel ? '' : 'max-w-3xl'}>
                 {visible.map(a => (
-                  activeCategory === 'hot'
-                    ? <HotCard key={a.id} article={a} onOpen={() => openReader(a)} />
-                    : <ArticleCard key={a.id} article={a} onOpen={() => openReader(a)} />
+                  <JuejinCard
+                    key={a.id}
+                    article={a}
+                    rank={activeCategory === 'hot' ? a.hot_rank : undefined}
+                    onOpen={() => openReader(a)}
+                  />
                 ))}
               </div>
               <div ref={sentinelRef} className="py-4">
@@ -347,27 +337,23 @@ export function JuejinClient({
         </div>
       </div>
 
-      {/* Side panel on wide screens */}
-      {useSidePanel && (
-        <ArticleReaderPanel
-          open={readerOpen}
-          onClose={() => setReaderOpen(false)}
-          meta={readerMeta}
-          loading={readerLoading}
-          accent="blue"
-        />
-      )}
-
-      {/* Modal on narrow screens */}
-      {!useSidePanel && (
-        <ArticleReaderModal
-          open={readerOpen}
-          onClose={() => setReaderOpen(false)}
-          meta={readerMeta}
-          loading={readerLoading}
-          accent="blue"
-        />
-      )}
+      <ResponsiveArticleReader
+        asPanel={useSidePanel}
+        open={readerOpen}
+        onClose={() => setReaderOpen(false)}
+        meta={readerMeta}
+        loading={readerLoading}
+        accent="blue"
+        headerActions={readerMeta && (
+          <PushToStudioPopover
+            url={readerMeta.url}
+            title={readerMeta.title}
+            content={readerMeta.content}
+            platform="juejin"
+            label="推送到工作室"
+          />
+        )}
+      />
     </div>
   )
 }

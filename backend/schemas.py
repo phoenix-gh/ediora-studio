@@ -1,6 +1,60 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from datetime import datetime
 from typing import Optional
+
+
+class PublishAccountCreate(BaseModel):
+    id: str
+    name: str
+    platform: str = "wechat"
+    positioning: str = ""
+    audience: str = ""
+    tone: str = ""
+    topic_focus: list[str] = Field(default_factory=list)
+    taboo: list[str] = Field(default_factory=list)
+    word_range: dict = Field(default_factory=dict)
+    image_style: str = ""
+    cover_style: dict = Field(default_factory=dict)
+    voice_samples: list[str] = Field(default_factory=list)
+    style_rules: list[str] = Field(default_factory=list)
+    is_active: bool = True
+
+
+class PublishAccountOut(BaseModel):
+    id: str
+    name: str
+    platform: str
+    positioning: str
+    audience: str
+    tone: str
+    topic_focus: list[str]
+    taboo: list[str]
+    word_range: dict
+    image_style: str
+    cover_style: dict
+    voice_samples: list[str]
+    style_rules: list[str]
+    is_active: bool
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class PublishAccountUpdate(BaseModel):
+    name: Optional[str] = None
+    platform: Optional[str] = None
+    positioning: Optional[str] = None
+    audience: Optional[str] = None
+    tone: Optional[str] = None
+    topic_focus: Optional[list[str]] = None
+    taboo: Optional[list[str]] = None
+    word_range: Optional[dict] = None
+    image_style: Optional[str] = None
+    cover_style: Optional[dict] = None
+    voice_samples: Optional[list[str]] = None
+    style_rules: Optional[list[str]] = None
+    is_active: Optional[bool] = None
+
 
 class AccountCreate(BaseModel):
     id: str
@@ -155,27 +209,6 @@ class TopicCreate(BaseModel):
     recommend_reason: str = ""
     trend_data: list = []
 
-class HotspotOut(BaseModel):
-    id: str
-    title: str
-    trend: str
-    platforms: list
-    heat: int
-    trend_data: list
-    category: str
-    first_seen_at: datetime
-
-    model_config = {"from_attributes": True}
-
-class HotspotCreate(BaseModel):
-    id: str
-    title: str
-    trend: str = "rising"
-    platforms: list = []
-    heat: int = 0
-    trend_data: list = []
-    category: str = "人工智能"
-
 class CollectResult(BaseModel):
     account_id: str
     new_posts: int
@@ -184,7 +217,6 @@ class CollectResult(BaseModel):
 
 class GenerateResult(BaseModel):
     new_topics: int = 0
-    new_hotspots: int = 0
     message: str = ""
 
 
@@ -192,6 +224,7 @@ class WriterPersonaCreate(BaseModel):
     name: str
     description: str = ""
     prompt: str
+    model: str = ""
     is_default: bool = False
 
 
@@ -199,6 +232,7 @@ class WriterPersonaUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     prompt: Optional[str] = None
+    model: Optional[str] = None
     is_default: Optional[bool] = None
 
 
@@ -207,6 +241,7 @@ class WriterPersonaOut(BaseModel):
     name: str
     description: str
     prompt: str
+    model: str
     is_default: bool
     created_at: datetime
 

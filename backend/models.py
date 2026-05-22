@@ -19,6 +19,27 @@ class Account(Base):
     rsshub_path: Mapped[str] = mapped_column(String, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
 
+
+class PublishAccount(Base):
+    """运营的对外发布账号（公众号 / X / 视频号等）。承载账号定位画像，供 agent 在策划-写作-审核全链路读取。"""
+    __tablename__ = "publish_accounts"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    platform: Mapped[str] = mapped_column(String, default="wechat")
+    positioning: Mapped[str] = mapped_column(Text, default="")
+    audience: Mapped[str] = mapped_column(Text, default="")
+    tone: Mapped[str] = mapped_column(String, default="")
+    topic_focus: Mapped[list] = mapped_column(JSON, default=list)
+    taboo: Mapped[list] = mapped_column(JSON, default=list)
+    word_range: Mapped[dict] = mapped_column(JSON, default=dict)
+    image_style: Mapped[str] = mapped_column(Text, default="")
+    cover_style: Mapped[dict] = mapped_column(JSON, default=dict)
+    voice_samples: Mapped[list] = mapped_column(JSON, default=list)
+    style_rules: Mapped[list] = mapped_column(JSON, default=list)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
 class Post(Base):
     __tablename__ = "posts"
 
@@ -100,20 +121,6 @@ class TopicCluster(Base):
     first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
-
-
-class Hotspot(Base):
-    __tablename__ = "hotspots"
-
-    id: Mapped[str] = mapped_column(String, primary_key=True)
-    title: Mapped[str] = mapped_column(String, nullable=False)
-    trend: Mapped[str] = mapped_column(String, default="rising")
-    platforms: Mapped[list] = mapped_column(JSON, default=list)
-    heat: Mapped[int] = mapped_column(Integer, default=0)
-    trend_data: Mapped[list] = mapped_column(JSON, default=list)
-    category: Mapped[str] = mapped_column(String, default="人工智能")
-    first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
 
 
@@ -277,6 +284,7 @@ class WriterPersona(Base):
     name: Mapped[str] = mapped_column(String, nullable=False)
     description: Mapped[str] = mapped_column(String, default="")
     prompt: Mapped[str] = mapped_column(Text, nullable=False)
+    model: Mapped[str] = mapped_column(String, default="")
     is_default: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
 
@@ -341,6 +349,20 @@ class ArticleDraft(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
 
 
+class DraftImage(Base):
+    """Images attached to a draft group, keyed by the root (article) draft ID."""
+    __tablename__ = "draft_images"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    root_draft_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    filename: Mapped[str] = mapped_column(String, nullable=False)        # stored filename in uploads/
+    original_name: Mapped[str] = mapped_column(String, default="")
+    url: Mapped[str] = mapped_column(String, nullable=False)             # /api/uploads/{filename}
+    size_bytes: Mapped[int] = mapped_column(Integer, default=0)
+    mime_type: Mapped[str] = mapped_column(String, default="image/jpeg")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, index=True)
+
+
 class DraftChatLog(Base):
     """Per-session chat history for draft editing."""
     __tablename__ = "draft_chat_logs"
@@ -364,23 +386,6 @@ class CollectLog(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, index=True)
 
 
-class Keyword(Base):
-    __tablename__ = "keywords"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    term: Mapped[str] = mapped_column(String, nullable=False, unique=True)
-    category: Mapped[str] = mapped_column(String, default="")
-    source: Mapped[str] = mapped_column(String, default="auto")  # auto/manual/llm
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
-    blocked: Mapped[bool] = mapped_column(Boolean, default=False)  # user-deleted → never re-add
-    heat: Mapped[int] = mapped_column(Integer, default=0)
-    mention_count_24h: Mapped[int] = mapped_column(Integer, default=0)
-    platforms: Mapped[list] = mapped_column(JSON, default=list)
-    trend: Mapped[str] = mapped_column(String, default="stable")  # rising/stable/declining
-    last_computed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
-
-
 class Quote(Base):
     """金句库 — cross-topic reusable quotes."""
     __tablename__ = "quotes"
@@ -395,17 +400,6 @@ class Quote(Base):
     platform: Mapped[str] = mapped_column(String, default="manual")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
-
-
-class KeywordSnapshot(Base):
-    __tablename__ = "keyword_snapshots"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    keyword_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
-    heat: Mapped[int] = mapped_column(Integer, default=0)
-    mention_count: Mapped[int] = mapped_column(Integer, default=0)
-    engagement_score: Mapped[float] = mapped_column(Float, default=0.0)
-    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, index=True)
 
 
 class ProductHuntPost(Base):
@@ -498,7 +492,9 @@ class JuejinArticle(Base):
 class WechatAccount(Base):
     __tablename__ = "wechat_accounts"
 
-    biz: Mapped[str] = mapped_column(String, primary_key=True)  # __biz value
+    # biz here equals the mp.weixin.qq.com backend `fakeid` (same base64 token as the
+    # `__biz` URL parameter of public article pages — they're interchangeable).
+    biz: Mapped[str] = mapped_column(String, primary_key=True)
     name: Mapped[str] = mapped_column(String, nullable=False)
     avatar_url: Mapped[str] = mapped_column(String, default="")
     description: Mapped[str] = mapped_column(Text, default="")
@@ -507,6 +503,21 @@ class WechatAccount(Base):
     muted: Mapped[bool] = mapped_column(Boolean, default=False)
     last_collected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+
+class WechatCredential(Base):
+    """Single-row login credential for mp.weixin.qq.com backend (token + cookies).
+    Obtained via QR-code scan login; required for searchbiz / appmsgpublish APIs.
+    """
+    __tablename__ = "wechat_credentials"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    token: Mapped[str] = mapped_column(String, default="")
+    cookie: Mapped[str] = mapped_column(Text, default="")           # full Cookie header
+    nickname: Mapped[str] = mapped_column(String, default="")       # logged-in account nick
+    avatar: Mapped[str] = mapped_column(String, default="")
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, default=None)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
 
 
 class WechatArticle(Base):
@@ -519,6 +530,7 @@ class WechatArticle(Base):
     url: Mapped[str] = mapped_column(String, default="")
     cover_url: Mapped[str] = mapped_column(String, default="")
     digest: Mapped[str] = mapped_column(Text, default="")
+    content: Mapped[str] = mapped_column(Text, default="")     # rich_media_content HTML (lazy)
     published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
 

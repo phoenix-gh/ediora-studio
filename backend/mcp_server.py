@@ -4,11 +4,23 @@ Exposes key data as tools for AI agents via Streamable HTTP transport.
 Mount at /mcp in main.py: app.mount("/mcp", mcp.streamable_http_app())
 """
 
+import base64
+import mimetypes
+import os
+import uuid
 from datetime import datetime, timezone, timedelta
+from pathlib import Path
 from typing import Optional
 from mcp.server.fastmcp import FastMCP
 from sqlalchemy import select, desc
 from database import SessionLocal
+
+_UPLOADS_DIR = Path(__file__).parent / "uploads"
+_UPLOADS_DIR.mkdir(exist_ok=True)
+
+# Base URL for constructing publicly accessible image URLs.
+# Override with WMS_BASE_URL env var when running behind a reverse proxy.
+_BASE_URL = os.getenv("WMS_BASE_URL", "http://localhost:8000")
 
 mcp = FastMCP("WeMedia Studio")
 
@@ -21,6 +33,36 @@ def _fmt_dt(dt: Optional[datetime]) -> str:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     return dt.isoformat()
+
+
+async def _register_draft_image(
+    draft_id: int,
+    filename: str,
+    original_name: str,
+    url: str,
+    size_bytes: int,
+    mime_type: str,
+) -> int:
+    """Attach an uploaded file to a draft's image library. Returns the DraftImage ID."""
+    from models import ArticleDraft, DraftImage
+
+    async with SessionLocal() as db:
+        draft = await db.get(ArticleDraft, draft_id)
+        if draft is None:
+            raise ValueError(f"Draft {draft_id} not found")
+        root_id = draft.linked_draft_id if draft.linked_draft_id else draft.id
+        img = DraftImage(
+            root_draft_id=root_id,
+            filename=filename,
+            original_name=original_name,
+            url=url,
+            size_bytes=size_bytes,
+            mime_type=mime_type,
+        )
+        db.add(img)
+        await db.commit()
+        await db.refresh(img)
+        return img.id
 
 
 # ── tools ─────────────────────────────────────────────────────────────────────
@@ -100,45 +142,6 @@ async def get_trending_posts(
 
         results.sort(key=lambda x: x["latest_views"], reverse=True)
         return results[:limit]
-
-
-@mcp.tool()
-async def get_hotspots(
-    limit: int = 20,
-    category: Optional[str] = None,
-) -> list[dict]:
-    """
-    Return trending hotspots detected by WeMedia Studio's LLM analyzer.
-
-    Args:
-        limit: Maximum number of hotspots to return (max 50).
-        category: Filter by category, e.g. "人工智能", "经济", "科技".
-
-    Returns hotspots sorted by heat score descending.
-    Each item includes: id, title, trend, category, heat, platforms, first_seen_at.
-    """
-    from models import Hotspot
-
-    limit = max(1, min(limit, 50))
-
-    async with SessionLocal() as db:
-        q = select(Hotspot).order_by(Hotspot.heat.desc()).limit(limit)
-        if category:
-            q = q.where(Hotspot.category == category)
-        rows = (await db.execute(q)).scalars().all()
-
-    return [
-        {
-            "id": h.id,
-            "title": h.title,
-            "trend": h.trend,
-            "category": h.category,
-            "heat": h.heat,
-            "platforms": h.platforms or [],
-            "first_seen_at": _fmt_dt(h.first_seen_at),
-        }
-        for h in rows
-    ]
 
 
 @mcp.tool()
@@ -639,6 +642,177 @@ async def save_quote(
 
 
 @mcp.tool()
+async def upload_image_from_url(
+    url: str,
+    filename_hint: str = "",
+    draft_id: Optional[int] = None,
+) -> dict:
+    """
+    Fetch an image from a remote URL and host it on WeMedia Studio's server.
+
+    Use this when you want to embed an externally hosted image in an article
+    but need a stable, locally served URL (e.g. the original host may block
+    hotlinking, or you want to ensure the image persists long-term).
+
+    Args:
+        url: The full URL of the image to fetch (http/https).
+        filename_hint: Optional original filename or slug used as the extension
+                       source when the Content-Type header is ambiguous.
+        draft_id: Optional draft ID. When provided, the image is registered in
+                  that draft's image library and will appear in the editor's
+                  image panel. All variants in the same group (X, 公众号, etc.)
+                  share the library — any member ID works.
+
+    Returns:
+        hosted_url: Absolute URL to serve the image from WeMedia Studio,
+                    e.g. "http://localhost:8000/api/uploads/abc123.jpg".
+                    Embed this directly in Markdown: ![alt](hosted_url)
+        filename: The stored filename (e.g. "abc123.jpg").
+        size_bytes: Size of the stored file in bytes.
+        content_type: Detected MIME type.
+        draft_image_id: ID of the DraftImage record (only present when draft_id was given).
+    """
+    import httpx
+
+    _ALLOWED = {"image/jpeg", "image/png", "image/gif", "image/webp", "image/svg+xml", "image/avif"}
+    _MAX = 10 * 1024 * 1024
+
+    async with httpx.AsyncClient(follow_redirects=True, timeout=20) as client:
+        try:
+            r = await client.get(url, headers={"User-Agent": "WeMediaStudio/1.0"})
+        except Exception as exc:
+            raise ValueError(f"Failed to fetch image: {exc}")
+
+    if r.status_code != 200:
+        raise ValueError(f"Remote server returned HTTP {r.status_code}")
+
+    ct = r.headers.get("content-type", "").split(";")[0].strip() or "image/jpeg"
+    if ct not in _ALLOWED:
+        raise ValueError(f"Unsupported content type: {ct} — allowed: {', '.join(_ALLOWED)}")
+
+    data = r.content
+    if len(data) > _MAX:
+        raise ValueError(f"Image too large ({len(data)} bytes, max 10 MB)")
+    if len(data) < 64:
+        raise ValueError("Response too small to be a valid image")
+
+    ext = mimetypes.guess_extension(ct) or ".jpg"
+    if ext in (".jpe", ".jpeg"):
+        ext = ".jpg"
+    # Prefer extension from hint if available
+    if filename_hint and "." in filename_hint:
+        hint_ext = "." + filename_hint.rsplit(".", 1)[-1].lower()
+        if hint_ext in (".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".avif"):
+            ext = ".jpg" if hint_ext == ".jpeg" else hint_ext
+
+    name = f"{uuid.uuid4().hex}{ext}"
+    dest = _UPLOADS_DIR / name
+    dest.write_bytes(data)
+
+    api_url = f"/api/uploads/{name}"
+    result: dict = {
+        "hosted_url": f"{_BASE_URL}{api_url}",
+        "filename": name,
+        "size_bytes": len(data),
+        "content_type": ct,
+    }
+    if draft_id is not None:
+        original = filename_hint or url.rsplit("/", 1)[-1] or name
+        img_id = await _register_draft_image(draft_id, name, original, api_url, len(data), ct)
+        result["draft_image_id"] = img_id
+
+    return result
+
+
+@mcp.tool()
+async def upload_image_from_base64(
+    data: str,
+    mime_type: str = "image/png",
+    filename_hint: str = "",
+    draft_id: Optional[int] = None,
+) -> dict:
+    """
+    Decode a base64-encoded image and host it on WeMedia Studio's server.
+
+    Use this when you have raw image bytes (e.g. generated images, screenshots,
+    or data-URI images) that you want to embed in an article.
+
+    Args:
+        data: Base64-encoded image bytes. May include a data-URI prefix
+              (e.g. "data:image/png;base64,iVBOR...") — the prefix is stripped
+              automatically.
+        mime_type: MIME type of the image, e.g. "image/png", "image/jpeg",
+                   "image/webp". Defaults to "image/png".
+        filename_hint: Optional filename/slug used only for the file extension.
+        draft_id: Optional draft ID. When provided, the image is registered in
+                  that draft's image library and will appear in the editor's
+                  image panel. All variants in the same group share the library.
+
+    Returns:
+        hosted_url: Absolute URL to serve the image, e.g.
+                    "http://localhost:8000/api/uploads/abc123.png".
+                    Embed this directly in Markdown: ![alt](hosted_url)
+        filename: The stored filename.
+        size_bytes: Size of the decoded image in bytes.
+        content_type: MIME type used.
+        draft_image_id: ID of the DraftImage record (only present when draft_id was given).
+    """
+    _ALLOWED = {"image/jpeg", "image/png", "image/gif", "image/webp", "image/svg+xml", "image/avif"}
+    _MAX = 10 * 1024 * 1024
+
+    # Strip data-URI prefix if present
+    if data.startswith("data:"):
+        if "," in data:
+            header, data = data.split(",", 1)
+            # Extract MIME from prefix if not explicitly overridden
+            if "image/" in header and mime_type == "image/png":
+                try:
+                    mime_type = header.split(":")[1].split(";")[0].strip()
+                except Exception:
+                    pass
+
+    ct = mime_type.split(";")[0].strip()
+    if ct not in _ALLOWED:
+        raise ValueError(f"Unsupported MIME type: {ct} — allowed: {', '.join(_ALLOWED)}")
+
+    try:
+        raw = base64.b64decode(data)
+    except Exception:
+        raise ValueError("Invalid base64 data")
+
+    if len(raw) > _MAX:
+        raise ValueError(f"Decoded image too large ({len(raw)} bytes, max 10 MB)")
+    if len(raw) < 64:
+        raise ValueError("Decoded data too small to be a valid image")
+
+    ext = mimetypes.guess_extension(ct) or ".png"
+    if ext in (".jpe", ".jpeg"):
+        ext = ".jpg"
+    if filename_hint and "." in filename_hint:
+        hint_ext = "." + filename_hint.rsplit(".", 1)[-1].lower()
+        if hint_ext in (".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".avif"):
+            ext = ".jpg" if hint_ext == ".jpeg" else hint_ext
+
+    name = f"{uuid.uuid4().hex}{ext}"
+    dest = _UPLOADS_DIR / name
+    dest.write_bytes(raw)
+
+    api_url = f"/api/uploads/{name}"
+    result: dict = {
+        "hosted_url": f"{_BASE_URL}{api_url}",
+        "filename": name,
+        "size_bytes": len(raw),
+        "content_type": ct,
+    }
+    if draft_id is not None:
+        original = filename_hint or name
+        img_id = await _register_draft_image(draft_id, name, original, api_url, len(raw), ct)
+        result["draft_image_id"] = img_id
+
+    return result
+
+
+@mcp.tool()
 async def save_draft(
     title: str,
     content: str,
@@ -676,3 +850,72 @@ async def save_draft(
         "status": obj.status,
         "created_at": _fmt_dt(obj.created_at),
     }
+
+
+# ── publish account profile ───────────────────────────────────────────────────
+
+@mcp.tool()
+async def list_publish_accounts() -> list[dict]:
+    """
+    Return all publish accounts (the user-operated outlets: 公众号 / X / 视频号 等).
+
+    Use this to discover which account_id values are available. To inspect a
+    specific account's full positioning profile, call get_account_profile(pub_id).
+    """
+    from models import PublishAccount
+
+    async with SessionLocal() as db:
+        rows = (await db.execute(
+            select(PublishAccount).order_by(
+                PublishAccount.is_active.desc(), PublishAccount.name
+            )
+        )).scalars().all()
+
+        return [
+            {
+                "id": acc.id,
+                "name": acc.name,
+                "platform": acc.platform,
+                "positioning": acc.positioning,
+                "is_active": acc.is_active,
+            }
+            for acc in rows
+        ]
+
+
+@mcp.tool()
+async def get_account_profile(pub_id: str) -> dict:
+    """
+    Return the full positioning profile of a publish account.
+
+    Every agent in the scout → editor → writer → critic pipeline MUST call
+    this as its first step, using the `account_id` carried in the kanban task
+    body/metadata. All downstream output (angle, brief, draft, scoring) must
+    align with the returned profile — tone, audience, topic_focus, taboo,
+    word_range, image_style.
+
+    Returns an empty dict with `error: "..."` if pub_id is unknown.
+    """
+    from models import PublishAccount
+
+    async with SessionLocal() as db:
+        acc = await db.get(PublishAccount, pub_id)
+        if acc is None:
+            return {"error": f"publish account '{pub_id}' not found"}
+
+        return {
+            "id": acc.id,
+            "name": acc.name,
+            "platform": acc.platform,
+            "positioning": acc.positioning,
+            "audience": acc.audience,
+            "tone": acc.tone,
+            "topic_focus": acc.topic_focus or [],
+            "taboo": acc.taboo or [],
+            "word_range": acc.word_range or {},
+            "image_style": acc.image_style,
+            "cover_style": acc.cover_style or {},
+            "voice_samples": acc.voice_samples or [],
+            "style_rules": acc.style_rules or [],
+            "is_active": acc.is_active,
+        }
