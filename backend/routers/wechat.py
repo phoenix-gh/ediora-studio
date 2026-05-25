@@ -365,6 +365,11 @@ async def accounts_unsubscribe(biz: str, db: AsyncSession = Depends(get_db)):
     acc = await db.get(WechatAccount, biz)
     if not acc:
         raise HTTPException(404, "未找到该订阅账号")
+    # Clean up the account's articles (no FK in the schema, so we delete by
+    # biz manually). Bulk delete to avoid pulling thousands of rows into
+    # memory just to drop them.
+    from sqlalchemy import delete as sa_delete
+    await db.execute(sa_delete(WechatArticle).where(WechatArticle.biz == biz))
     await db.delete(acc)
     await db.commit()
 
