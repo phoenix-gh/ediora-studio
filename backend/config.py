@@ -24,9 +24,6 @@ DEFAULTS: dict[str, str] = {
     "camofox_api_key": "",
     "camofox_user_id": "wemedia_x",         # userId for the X session
     "camofox_novnc_url": "http://localhost:6080/vnc.html",  # web VNC address
-    "x_cookies": "",                        # JSON string of cookie array
-    "x_collect_interval_minutes": "30",     # how often to refresh X timeline
-    "x_follower_threshold": "5000",         # min followers to enter candidate pool
     "x_post_window_hours": "24",           # collect posts published within this many hours
     "x_post_lookback_hours": "24",          # how many hours to keep refreshing post metrics
     "x_timeline_scrolls": "5",             # scroll rounds per collection run
