@@ -24,9 +24,6 @@ DEFAULTS: dict[str, str] = {
     "camofox_api_key": "",
     "camofox_user_id": "wemedia_x",         # userId for the X session
     "camofox_novnc_url": "http://localhost:6080/vnc.html",  # web VNC address
-    "x_post_window_hours": "24",           # collect posts published within this many hours
-    "x_post_lookback_hours": "24",          # how many hours to keep refreshing post metrics
-    "x_timeline_scrolls": "5",             # scroll rounds per collection run
 }
 
 # Provider presets: label + default base_url + hint for default model

@@ -40,9 +40,6 @@ class SettingsOut(BaseModel):
     camofox_api_key_set: bool
     camofox_user_id: str
     camofox_novnc_url: str
-    x_post_window_hours: int
-    x_post_lookback_hours: int
-    x_timeline_scrolls: int
     arxiv_categories: str
     arxiv_collect_interval_hours: int
     providers: list[ProviderInfo]
@@ -66,9 +63,6 @@ class SettingsUpdate(BaseModel):
     camofox_api_key: Optional[str] = None
     camofox_user_id: Optional[str] = None
     camofox_novnc_url: Optional[str] = None
-    x_post_window_hours: Optional[int] = None
-    x_post_lookback_hours: Optional[int] = None
-    x_timeline_scrolls: Optional[int] = None
     arxiv_categories: Optional[str] = None
     arxiv_collect_interval_hours: Optional[int] = None
 
@@ -107,9 +101,6 @@ def _build_out(cfg: dict) -> SettingsOut:
         camofox_api_key_set=bool(cfg.get("camofox_api_key", "")),
         camofox_user_id=cfg.get("camofox_user_id", "wemedia_x"),
         camofox_novnc_url=cfg.get("camofox_novnc_url", "http://localhost:6080/vnc.html"),
-        x_post_window_hours=max(1, int(cfg.get("x_post_window_hours", 4))),
-        x_post_lookback_hours=max(1, int(cfg.get("x_post_lookback_hours", 24))),
-        x_timeline_scrolls=max(1, int(cfg.get("x_timeline_scrolls", 5))),
         arxiv_categories=cfg.get("arxiv_categories", "cs.AI,cs.CL,cs.CV,cs.LG"),
         arxiv_collect_interval_hours=max(1, int(cfg.get("arxiv_collect_interval_hours", 6))),
         providers=[
@@ -189,12 +180,6 @@ async def update_settings(body: SettingsUpdate, request: Request):
         updates["camofox_user_id"] = body.camofox_user_id
     if body.camofox_novnc_url is not None:
         updates["camofox_novnc_url"] = body.camofox_novnc_url
-    if body.x_post_window_hours is not None:
-        updates["x_post_window_hours"] = str(max(1, body.x_post_window_hours))
-    if body.x_post_lookback_hours is not None:
-        updates["x_post_lookback_hours"] = str(max(1, body.x_post_lookback_hours))
-    if body.x_timeline_scrolls is not None:
-        updates["x_timeline_scrolls"] = str(max(1, min(20, body.x_timeline_scrolls)))
     if body.arxiv_categories is not None:
         updates["arxiv_categories"] = body.arxiv_categories
     if body.arxiv_collect_interval_hours is not None:
