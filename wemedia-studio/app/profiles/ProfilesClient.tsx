@@ -102,7 +102,14 @@ export function ProfilesClient() {
                 onChange={next => setDetail({ ...detail, ...next })}
               />
             )}
-            {tab === 'skills' && <SkillsPanel skills={detail.skills} />}
+            {tab === 'skills' && (
+              <SkillsPanel
+                profile={detail.name}
+                readonly={readonly}
+                skills={detail.skills}
+                onChange={next => setDetail({ ...detail, skills: next })}
+              />
+            )}
           </>
         )}
       </main>

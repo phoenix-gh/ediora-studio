@@ -210,6 +210,55 @@ def _remove_from_disabled_toolsets(profile_dir: Path, toolset: str) -> None:
         yaml_rt.dump(data, fh)
 
 
+def set_skills(name: str, skills: list[str], enabled: bool) -> None:
+    """Toggle a batch of skills on/off via narrow `skills.disabled` patch.
+
+    hermes has no non-interactive `skills enable/disable` CLI — `hermes
+    skills config` is interactive TUI only. So we surgically mutate the
+    `skills.disabled` list with ruamel.yaml. Verified empirically: hermes
+    treats any skill listed there as disabled (`hermes skills list` shows
+    Status=disabled).
+    """
+    if name == "default":
+        raise PermissionError("default profile is read-only")
+    _safe_name(name)
+    for s in skills:
+        if not _NAME_RE.match(s):
+            raise ValueError(f"invalid skill name: {s!r}")
+    pdir = _profile_dir(name)
+    if not pdir.exists():
+        raise FileNotFoundError(name)
+    cfg_path = pdir / "config.yaml"
+    if not cfg_path.exists():
+        raise FileNotFoundError(str(cfg_path))
+
+    from ruamel.yaml import YAML
+    yaml_rt = YAML()
+    yaml_rt.preserve_quotes = True
+    with cfg_path.open("r", encoding="utf-8") as fh:
+        data = yaml_rt.load(fh) or {}
+    skills_section = data.get("skills")
+    if not isinstance(skills_section, dict):
+        data["skills"] = {"disabled": []}
+        skills_section = data["skills"]
+    disabled = skills_section.get("disabled")
+    if not isinstance(disabled, list):
+        skills_section["disabled"] = []
+        disabled = skills_section["disabled"]
+
+    if enabled:
+        for s in skills:
+            while s in disabled:
+                disabled.remove(s)
+    else:
+        for s in skills:
+            if s not in disabled:
+                disabled.append(s)
+
+    with cfg_path.open("w", encoding="utf-8") as fh:
+        yaml_rt.dump(data, fh)
+
+
 def set_mcp_server(name: str, server: str, enabled: bool) -> None:
     if name == "default":
         raise PermissionError("default profile is read-only")

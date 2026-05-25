@@ -43,3 +43,9 @@ export const toggleMcp = (profile: string, name: string, enabled: boolean) =>
     method: 'POST',
     body: JSON.stringify({ name, enabled }),
   })
+
+export const toggleSkills = (profile: string, names: string[], enabled: boolean) =>
+  apiFetch<void>(`/profiles/${encodeURIComponent(profile)}/skills`, {
+    method: 'POST',
+    body: JSON.stringify({ names, enabled }),
+  })

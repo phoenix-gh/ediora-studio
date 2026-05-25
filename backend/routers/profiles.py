@@ -14,6 +14,11 @@ class ToggleBody(BaseModel):
     enabled: bool
 
 
+class SkillsToggleBody(BaseModel):
+    names: list[str]
+    enabled: bool
+
+
 @router.get("")
 def list_profiles():
     return {"profiles": pm.list_profiles()}
@@ -55,6 +60,19 @@ def post_toolset(name: str, body: ToggleBody):
         raise HTTPException(404, "profile not found")
     except RuntimeError as e:
         raise HTTPException(502, str(e))
+
+
+@router.post("/{name}/skills")
+def post_skills(name: str, body: SkillsToggleBody):
+    try:
+        pm.set_skills(name, body.names, body.enabled)
+        return {"ok": True}
+    except PermissionError as e:
+        raise HTTPException(403, str(e))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except FileNotFoundError:
+        raise HTTPException(404, "profile not found")
 
 
 @router.post("/{name}/mcp")

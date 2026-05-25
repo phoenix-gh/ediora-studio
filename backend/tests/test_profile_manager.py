@@ -65,6 +65,45 @@ def test_set_mcp_server_roundtrip(tmp_path, monkeypatch):
     assert mcp2["enabled"] is True
 
 
+def test_set_skills_batch_roundtrip(tmp_path, monkeypatch):
+    from profile_manager import set_skills, _profile_dir
+    home = _fixture_home(tmp_path)
+    monkeypatch.setenv("HERMES_HOME_ROOT", str(home))
+    pdir = _profile_dir("wms_writer")
+    # Seed a skill dir so _read_skills (indirectly tested) has something to find.
+    (pdir / "skills" / "alpha").mkdir(parents=True)
+    (pdir / "skills" / "alpha" / "SKILL.md").write_text("name: alpha\n")
+    (pdir / "skills" / "beta").mkdir(parents=True)
+    (pdir / "skills" / "beta" / "SKILL.md").write_text("name: beta\n")
+
+    set_skills("wms_writer", ["alpha", "beta"], enabled=False)
+    import yaml
+    with (pdir / "config.yaml").open() as f:
+        cfg = yaml.safe_load(f)
+    assert set(cfg["skills"]["disabled"]) == {"alpha", "beta"}
+
+    set_skills("wms_writer", ["alpha"], enabled=True)
+    with (pdir / "config.yaml").open() as f:
+        cfg2 = yaml.safe_load(f)
+    assert cfg2["skills"]["disabled"] == ["beta"]
+
+
+def test_set_skills_rejects_default(tmp_path, monkeypatch):
+    from profile_manager import set_skills
+    home = _fixture_home(tmp_path)
+    monkeypatch.setenv("HERMES_HOME_ROOT", str(home))
+    with pytest.raises(PermissionError):
+        set_skills("default", ["alpha"], enabled=False)
+
+
+def test_set_skills_validates_names(tmp_path, monkeypatch):
+    from profile_manager import set_skills
+    home = _fixture_home(tmp_path)
+    monkeypatch.setenv("HERMES_HOME_ROOT", str(home))
+    with pytest.raises(ValueError):
+        set_skills("wms_writer", ["bad/name"], enabled=False)
+
+
 def test_remove_from_disabled_toolsets(tmp_path, monkeypatch):
     from profile_manager import _remove_from_disabled_toolsets, _profile_dir
     home = _fixture_home(tmp_path)
