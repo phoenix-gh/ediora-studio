@@ -94,18 +94,21 @@ def get_profile_detail(name: str) -> dict[str, Any]:
     soul_path = pdir / "SOUL.md"
     soul = soul_path.read_text(encoding="utf-8") if soul_path.exists() else ""
 
-    enabled_toolsets = set(cfg.get("toolsets") or [])  # whitelist when set
-    disabled_toolsets = set((cfg.get("agent") or {}).get("disabled_toolsets") or [])
-    toolsets = []
-    for ts_name, label, emoji in KNOWN_TOOLSETS:
-        # Hermes semantics: a toolset is enabled if NOT in disabled_toolsets.
-        # The top-level `toolsets:` list selects activation packs, not per-tool gating.
-        toolsets.append({
+    # `hermes tools enable/disable <name>` writes the allowlist at
+    # `platform_toolsets.<platform>` (cli for our case). A toolset is enabled
+    # iff its name is in that list. `agent.disabled_toolsets` is a separate
+    # legacy override that also force-disables, so AND both for safety.
+    platform_enabled = set(((cfg.get("platform_toolsets") or {}).get("cli") or []))
+    force_disabled = set((cfg.get("agent") or {}).get("disabled_toolsets") or [])
+    toolsets = [
+        {
             "name": ts_name,
             "label": label,
             "emoji": emoji,
-            "enabled": ts_name not in disabled_toolsets,
-        })
+            "enabled": ts_name in platform_enabled and ts_name not in force_disabled,
+        }
+        for ts_name, label, emoji in KNOWN_TOOLSETS
+    ]
 
     mcp_cfg = cfg.get("mcp_servers") or {}
     mcp_servers = [

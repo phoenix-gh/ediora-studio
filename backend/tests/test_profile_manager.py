@@ -11,7 +11,8 @@ def _fixture_home(tmp_path: Path) -> Path:
     (home / "profiles" / "wms_writer" / "config.yaml").write_text(
         "model:\n  default: deepseek-v4-flash\n"
         "toolsets:\n  - hermes-cli\n"
-        "agent:\n  disabled_toolsets: [browser, web]\n"
+        "agent:\n  disabled_toolsets: [memory]\n"
+        "platform_toolsets:\n  cli: [skills, web]\n"
         "mcp_servers:\n  wemedia-studio:\n    url: http://localhost:8000/mcp\n"
         "skills:\n  disabled: []\n"
     )
@@ -34,12 +35,17 @@ def test_get_profile_detail_parses_toolsets_and_mcp(tmp_path, monkeypatch):
     monkeypatch.setenv("HERMES_HOME_ROOT", str(home))
     detail = get_profile_detail("wms_writer")
     assert detail["soul"] == "you are a writer\n"
-    # browser is in disabled_toolsets → enabled == False
-    browser = next(t for t in detail["toolsets"] if t["name"] == "browser")
-    assert browser["enabled"] is False
-    # 'skills' is enabled by default (not in disabled_toolsets, present in known list)
+    # `skills` and `web` are in platform_toolsets.cli → enabled
     skills_ts = next(t for t in detail["toolsets"] if t["name"] == "skills")
     assert skills_ts["enabled"] is True
+    web_ts = next(t for t in detail["toolsets"] if t["name"] == "web")
+    assert web_ts["enabled"] is True
+    # `browser` is NOT in platform_toolsets.cli → disabled
+    browser = next(t for t in detail["toolsets"] if t["name"] == "browser")
+    assert browser["enabled"] is False
+    # `memory` is in platform_toolsets.cli? no — also in agent.disabled_toolsets → disabled either way
+    memory = next(t for t in detail["toolsets"] if t["name"] == "memory")
+    assert memory["enabled"] is False
     mcp = detail["mcp_servers"]
     assert mcp[0]["name"] == "wemedia-studio"
     assert mcp[0]["enabled"] is True
