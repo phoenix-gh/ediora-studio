@@ -44,6 +44,21 @@ def test_get_profile_detail_parses_toolsets_and_mcp(tmp_path, monkeypatch):
     assert mcp[0]["name"] == "wemedia-studio"
     assert mcp[0]["enabled"] is True
 
+def test_set_mcp_server_roundtrip(tmp_path, monkeypatch):
+    from profile_manager import set_mcp_server, get_profile_detail
+    home = _fixture_home(tmp_path)
+    monkeypatch.setenv("HERMES_HOME_ROOT", str(home))
+    # set_mcp_server uses the YAML patch path (no hermes CLI), so this is CI-safe.
+    set_mcp_server("wms_writer", "wemedia-studio", False)
+    detail = get_profile_detail("wms_writer")
+    mcp = next(m for m in detail["mcp_servers"] if m["name"] == "wemedia-studio")
+    assert mcp["enabled"] is False
+    set_mcp_server("wms_writer", "wemedia-studio", True)
+    detail2 = get_profile_detail("wms_writer")
+    mcp2 = next(m for m in detail2["mcp_servers"] if m["name"] == "wemedia-studio")
+    assert mcp2["enabled"] is True
+
+
 def test_safe_name_rejects_traversal():
     assert _safe_name("wms_writer") == "wms_writer"
     with pytest.raises(ValueError):

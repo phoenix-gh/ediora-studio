@@ -189,9 +189,34 @@ def set_mcp_server(name: str, server: str, enabled: bool) -> None:
     pdir = _profile_dir(name)
     if not pdir.exists():
         raise FileNotFoundError(name)
-    # `hermes mcp enable/disable` toggles a server; verified manually in Task 4.
-    cmd = ["hermes", "mcp", "enable" if enabled else "disable", server]
-    env = {**os.environ, "HERMES_HOME": str(pdir)}
-    result = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=30)
-    if result.returncode != 0:
-        raise RuntimeError(f"hermes failed: {result.stderr.strip() or result.stdout.strip()}")
+    cfg_path = pdir / "config.yaml"
+    if not cfg_path.exists():
+        raise FileNotFoundError(str(cfg_path))
+
+    # NOTE: This is the ONE exception to "never write config.yaml ourselves".
+    # `hermes mcp` has no non-interactive enable/disable subcommand (only
+    # serve/add/remove/list/test/configure/login), and `configure` requires
+    # an interactive TTY. We therefore do a surgical ruamel.yaml round-trip
+    # that mutates ONLY `mcp_servers.<name>.disabled`, preserving every other
+    # key, comment, and formatting choice in the file. If hermes ever ships
+    # a CLI flag for this, swap the body back to a subprocess shellout.
+    from ruamel.yaml import YAML
+    yaml_rt = YAML()
+    yaml_rt.preserve_quotes = True
+    with cfg_path.open("r", encoding="utf-8") as fh:
+        data = yaml_rt.load(fh) or {}
+    servers = data.get("mcp_servers")
+    if not isinstance(servers, dict) or server not in servers:
+        raise KeyError(f"mcp server {server!r} not found in {cfg_path}")
+    entry = servers[server]
+    if entry is None:
+        servers[server] = {}
+        entry = servers[server]
+    if enabled:
+        # Remove the key entirely when re-enabling, to keep the file tidy.
+        if "disabled" in entry:
+            del entry["disabled"]
+    else:
+        entry["disabled"] = True
+    with cfg_path.open("w", encoding="utf-8") as fh:
+        yaml_rt.dump(data, fh)
