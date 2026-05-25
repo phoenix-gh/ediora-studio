@@ -10,6 +10,7 @@ import {
 } from '@/lib/api/profiles'
 import { SoulEditor } from './SoulEditor'
 import { ToolsPanel } from './ToolsPanel'
+import { SkillsPanel } from './SkillsPanel'
 // SkillsPanel is added in Task 6.
 
 export function ProfilesClient() {
@@ -101,9 +102,7 @@ export function ProfilesClient() {
                 onChange={next => setDetail({ ...detail, ...next })}
               />
             )}
-            {tab === 'skills' && (
-              <p className="text-muted-foreground">即将上线</p>
-            )}
+            {tab === 'skills' && <SkillsPanel skills={detail.skills} />}
           </>
         )}
       </main>
