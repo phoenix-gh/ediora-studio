@@ -5,6 +5,7 @@ helper unifies the repeated time.monotonic() interval pattern that previously
 lived as a global _last_X_ts per job.
 """
 from __future__ import annotations
+import asyncio
 import time
 from typing import Awaitable, Callable
 
@@ -205,8 +206,7 @@ async def scheduled_wechat():
                         return
                     errors.append("{0}: {1}".format(acc.name, e))
                 # gentle pacing across accounts
-                import asyncio as _aio
-                await _aio.sleep(2)
+                await asyncio.sleep(2)
             if errors:
                 await log("wechat", "warn",
                           "公众号采集：{0} 个账号，新增 {1} 篇，{2} 个失败".format(
@@ -242,6 +242,36 @@ async def scheduled_juejin():
         await log("juejin", "error", "掘金采集异常", str(e))
 
 
+async def scheduled_x_collect():
+    """Hourly: iterate all enabled XSubscription rows; per-source error isolation."""
+    from logger import log
+    from sqlalchemy import select
+    from models import XSubscription
+    from routers.x import _collect_one
+
+    try:
+        async with SessionLocal() as db:
+            rows = (await db.execute(
+                select(XSubscription).where(XSubscription.enabled == True)
+            )).scalars().all()
+            ok = 0
+            failed = 0
+            new_total = 0
+            for sub in rows:
+                try:
+                    new_total += await _collect_one(db, sub)
+                    ok += 1
+                except Exception as e:
+                    failed += 1
+                    await log("x", "error",
+                              f"订阅 {sub.label} 采集失败", str(e))
+                await asyncio.sleep(2)
+        await log("x", "ok",
+                  f"X 全量采集：{ok} 源成功 / {failed} 源失败，新增 {new_total} 帖")
+    except Exception as e:
+        await log("x", "error", "X 采集异常", str(e))
+
+
 def register_jobs(scheduler, cfg):
     collect_min = max(1, int(cfg.get("collect_interval_minutes", 15)))
     github_min  = max(1, int(cfg.get("github_interval_minutes", 1)))
@@ -253,6 +283,7 @@ def register_jobs(scheduler, cfg):
         (scheduled_kr,                  dict(trigger="interval", minutes=10,          id="kr_collect")),
         (scheduled_juejin,              dict(trigger="interval", minutes=10,          id="juejin_collect")),
         (scheduled_wechat,              dict(trigger="interval", minutes=15,          id="wechat_collect")),
+        (scheduled_x_collect,           dict(trigger="interval", hours=1,             id="x_collect_hourly")),
     ]
     for func, kwargs in jobs:
         scheduler.add_job(func, **kwargs)
