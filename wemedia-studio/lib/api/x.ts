@@ -1,76 +1,120 @@
 import { apiFetch } from './client'
 
-export interface XCandidate {
-  username: string
-  display_name: string
-  avatar_url: string
-  followers: number
-  following_count: number
-  tweet_count: number
-  favourites_count: number
-  location: string
-  join_date: string
-  hot_post_count: number
-  bio: string
-  profile_url: string
-  status: string
+// ── Types ────────────────────────────────────────────────────────────────────
+
+export interface XSubscription {
+  id: number
+  url: string
+  label: string
+  enabled: boolean
+  last_collected_at: string | null
+  last_error: string
   added_at: string
-  last_seen_at: string
+  post_count: number
 }
 
 export interface XPost {
   tweet_id: string
+  subscription_id: number
   username: string
   display_name: string
   content: string
   url: string
   published_at: string
   collected_at: string
-  author_followers: number
-  source: string
-  latest_replies: number
-  latest_reposts: number
-  latest_likes: number
-  latest_views: number
-  is_viral: boolean
-  category: string
+  replies: number
+  reposts: number
+  likes: number
+  views: number
 }
 
-export interface XCandidateList {
-  candidates: XCandidate[]
-  total: number
-  status_counts: Record<string, number>
+export interface XSearchPost {
+  tweet_id: string
+  username: string
+  display_name: string
+  content: string
+  url: string
+  published_at: string
+  replies: number
+  reposts: number
+  likes: number
+  views: number
 }
 
-export async function getXCandidates(status?: string, limit = 50, offset = 0): Promise<XCandidateList> {
-  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) })
-  if (status) params.set('status', status)
-  return apiFetch<XCandidateList>(`/x/candidates?${params}`)
+export interface XAuthStatus {
+  ready: boolean
+  hint: string
 }
 
-export async function updateXCandidate(username: string, status: string): Promise<XCandidate> {
-  return apiFetch<XCandidate>(`/x/candidates/${username}`, {
-    method: 'PATCH',
-    body: JSON.stringify({ status }),
+export interface XCollectResult {
+  ok: boolean
+  new_posts: number
+}
+
+export interface XCollectAllResult {
+  ok: boolean
+  checked: number
+  new_posts: number
+  failed: string[]
+}
+
+// ── Subscriptions CRUD ──────────────────────────────────────────────────────
+
+export async function listXSubscriptions(): Promise<XSubscription[]> {
+  return apiFetch<XSubscription[]>('/x/subscriptions')
+}
+
+export async function createXSubscription(url: string, label?: string): Promise<XSubscription> {
+  return apiFetch<XSubscription>('/x/subscriptions', {
+    method: 'POST',
+    body: JSON.stringify({ url, label }),
   })
 }
 
-export async function deleteXCandidate(username: string): Promise<void> {
-  await apiFetch(`/x/candidates/${username}`, { method: 'DELETE' })
+export async function patchXSubscription(
+  id: number,
+  body: Partial<Pick<XSubscription, 'enabled' | 'label'>>,
+): Promise<XSubscription> {
+  return apiFetch<XSubscription>(`/x/subscriptions/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  })
 }
 
-export async function triggerXCollect(): Promise<{ ok: boolean; message: string }> {
-  return apiFetch('/x/collect', { method: 'POST' })
+export async function deleteXSubscription(id: number): Promise<void> {
+  await apiFetch(`/x/subscriptions/${id}`, { method: 'DELETE' })
 }
 
-export async function getXPosts(hours = 24): Promise<XPost[]> {
-  return apiFetch<XPost[]>(`/x/posts?hours=${hours}`)
+// ── Collect / Posts / Search / Auth ──────────────────────────────────────────
+
+export async function collectXSubscription(id: number): Promise<XCollectResult> {
+  return apiFetch<XCollectResult>(`/x/subscriptions/${id}/collect`, { method: 'POST' })
 }
 
-export async function triggerTl1UsersCollect(maxPages = 100): Promise<{ ok: boolean; message: string }> {
-  return apiFetch(`/x/collect-tl1-users?max_pages=${maxPages}`, { method: 'POST' })
+export async function collectAllXSubscriptions(): Promise<XCollectAllResult> {
+  return apiFetch<XCollectAllResult>('/x/collect-all', { method: 'POST' })
 }
 
-export async function triggerClassifyPosts(batchSize = 20): Promise<{ ok: boolean; message: string }> {
-  return apiFetch(`/x/classify-posts?batch_size=${batchSize}`, { method: 'POST' })
+export interface ListXPostsParams {
+  subscription_id?: number
+  hours?: number
+  limit?: number
+  offset?: number
+}
+
+export async function listXPosts(params: ListXPostsParams = {}): Promise<XPost[]> {
+  const qs = new URLSearchParams()
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined && v !== null) qs.set(k, String(v))
+  }
+  const tail = qs.toString()
+  return apiFetch<XPost[]>(`/x/posts${tail ? '?' + tail : ''}`)
+}
+
+export async function searchX(q: string, limit = 20): Promise<XSearchPost[]> {
+  return apiFetch<XSearchPost[]>(`/x/search?q=${encodeURIComponent(q)}&limit=${limit}`)
+}
+
+export async function getXAuthStatus(): Promise<XAuthStatus> {
+  return apiFetch<XAuthStatus>('/x/auth-status')
 }
