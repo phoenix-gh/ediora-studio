@@ -117,3 +117,164 @@ async def delete_subscription(
     await db.delete(sub)
     await db.commit()
     return {"ok": True}
+
+
+# ─── Posts ───────────────────────────────────────────────────────────────────
+
+from datetime import timedelta
+
+from sqlalchemy.dialects.postgresql import insert as _pg_insert
+from sqlalchemy.dialects.sqlite import insert as _sl_insert
+
+
+class PostOut(BaseModel):
+    tweet_id: str
+    subscription_id: int
+    username: str
+    display_name: str
+    content: str
+    url: str
+    published_at: datetime
+    collected_at: datetime
+    replies: int
+    reposts: int
+    likes: int
+    views: int
+    model_config = {"from_attributes": True}
+
+
+@router.get("/posts", response_model=list[PostOut])
+async def list_posts(
+    subscription_id: Optional[int] = None,
+    hours: int = 168,
+    limit: int = 200,
+    offset: int = 0,
+    db: AsyncSession = Depends(get_db),
+):
+    hours = max(1, min(hours, 720))
+    limit = max(1, min(limit, 500))
+    since = datetime.now(timezone.utc) - timedelta(hours=hours)
+    q = (
+        select(XPost)
+        .where(XPost.published_at >= since)
+        .order_by(desc(XPost.published_at))
+        .limit(limit).offset(offset)
+    )
+    if subscription_id is not None:
+        q = q.where(XPost.subscription_id == subscription_id)
+    rows = (await db.execute(q)).scalars().all()
+    return rows
+
+
+# ─── Upsert helper ──────────────────────────────────────────────────────────
+
+def _upsert_post_stmt(db: AsyncSession, sub_id: int, p):
+    dialect = db.bind.dialect.name if db.bind else "postgresql"
+    insert_fn = _sl_insert if dialect == "sqlite" else _pg_insert
+    stmt = insert_fn(XPost).values(
+        tweet_id=p.tweet_id, subscription_id=sub_id,
+        username=p.username, display_name=p.display_name,
+        content=p.content, url=p.url,
+        published_at=p.published_at,
+        collected_at=datetime.now(timezone.utc),
+        replies=p.replies, reposts=p.reposts,
+        likes=p.likes, views=p.views,
+        raw_markdown=p.raw_markdown,
+    ).on_conflict_do_update(
+        index_elements=["tweet_id"],
+        set_={
+            "replies": p.replies, "reposts": p.reposts,
+            "likes": p.likes, "views": p.views,
+        },
+    )
+    return stmt
+
+
+# ─── Collect ────────────────────────────────────────────────────────────────
+
+from feedgrab_client import grab_timeline, search_x, auth_status
+
+
+async def _collect_one(db: AsyncSession, sub: XSubscription) -> int:
+    try:
+        posts = await grab_timeline(sub.url)
+    except Exception as e:
+        sub.last_error = str(e)[:500]
+        await db.commit()
+        raise
+    for p in posts:
+        await db.execute(_upsert_post_stmt(db, sub.id, p))
+    sub.last_collected_at = datetime.now(timezone.utc)
+    sub.last_error = ""
+    await db.commit()
+    return len(posts)
+
+
+@router.post("/subscriptions/{sub_id}/collect-sync")
+async def collect_one_sync(sub_id: int, db: AsyncSession = Depends(get_db)):
+    sub = await db.get(XSubscription, sub_id)
+    if not sub:
+        raise HTTPException(404, "订阅不存在")
+    try:
+        n = await _collect_one(db, sub)
+    except Exception as e:
+        raise HTTPException(502, str(e))
+    return {"ok": True, "new_posts": n}
+
+
+@router.post("/subscriptions/{sub_id}/collect")
+async def collect_one(sub_id: int, db: AsyncSession = Depends(get_db)):
+    """Reserved for future BG variant; currently same as collect-sync."""
+    return await collect_one_sync(sub_id, db)
+
+
+@router.post("/collect-all")
+async def collect_all(db: AsyncSession = Depends(get_db)):
+    rows = (await db.execute(
+        select(XSubscription).where(XSubscription.enabled == True)
+    )).scalars().all()
+    new_total = 0
+    failed: list[str] = []
+    for sub in rows:
+        try:
+            new_total += await _collect_one(db, sub)
+        except Exception as e:
+            failed.append(f"{sub.label}: {e}")
+    return {"ok": True, "checked": len(rows),
+            "new_posts": new_total, "failed": failed}
+
+
+# ─── Search & auth ───────────────────────────────────────────────────────────
+
+class SearchPostOut(BaseModel):
+    tweet_id: str
+    username: str
+    display_name: str
+    content: str
+    url: str
+    published_at: datetime
+    replies: int
+    reposts: int
+    likes: int
+    views: int
+
+
+@router.get("/search", response_model=list[SearchPostOut])
+async def search(q: str, limit: int = 20):
+    limit = max(1, min(limit, 50))
+    try:
+        posts = await search_x(q, limit=limit)
+    except Exception as e:
+        raise HTTPException(502, str(e))
+    return [
+        SearchPostOut(
+            tweet_id=p.tweet_id, username=p.username, display_name=p.display_name,
+            content=p.content, url=p.url, published_at=p.published_at,
+            replies=p.replies, reposts=p.reposts, likes=p.likes, views=p.views,
+        ) for p in posts
+    ]
+
+
+@router.get("/auth-status")
+async def get_auth_status():
+    return auth_status()

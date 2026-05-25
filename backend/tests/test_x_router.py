@@ -86,3 +86,147 @@ def test_delete_subscription(client):
 def test_delete_missing_returns_404(client):
     r = client.delete(f"{BASE}/999")
     assert r.status_code == 404
+
+
+from datetime import datetime, timezone
+from unittest.mock import patch, AsyncMock
+
+
+def _fake_post(tid="111", views=100):
+    from feedgrab_client import ParsedPost
+    return ParsedPost(
+        tweet_id=tid,
+        username="foo",
+        display_name="Foo",
+        content=f"body {tid}",
+        url=f"https://x.com/foo/status/{tid}",
+        published_at=datetime(2026, 5, 20, 10, 0, tzinfo=timezone.utc),
+        replies=1, reposts=2, likes=5, views=views,
+        raw_markdown="raw",
+    )
+
+
+def test_auth_status_endpoint(client):
+    r = client.get("/api/x/auth-status")
+    assert r.status_code == 200
+    body = r.json()
+    assert "ready" in body and "hint" in body
+    assert isinstance(body["ready"], bool)
+
+
+def test_search_returns_results(client):
+    with patch("routers.x.search_x",
+               new=AsyncMock(return_value=[_fake_post("111")])):
+        r = client.get("/api/x/search", params={"q": "hello"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert len(body) == 1
+    assert body[0]["tweet_id"] == "111"
+
+
+def test_search_requires_query(client):
+    r = client.get("/api/x/search")
+    # FastAPI returns 422 for missing required query param
+    assert r.status_code == 422
+
+
+def test_search_propagates_upstream_failure(client):
+    with patch("routers.x.search_x",
+               new=AsyncMock(side_effect=RuntimeError("no auth"))):
+        r = client.get("/api/x/search", params={"q": "hello"})
+    assert r.status_code == 502
+    assert "no auth" in r.json()["detail"]
+
+
+def test_collect_one_subscription(client):
+    sub = client.post(
+        "/api/x/subscriptions", json={"url": "https://x.com/foo"}).json()
+
+    with patch("routers.x.grab_timeline",
+               new=AsyncMock(return_value=[_fake_post("aaa"), _fake_post("bbb")])):
+        r = client.post(f"/api/x/subscriptions/{sub['id']}/collect-sync")
+
+    assert r.status_code == 200
+    assert r.json()["new_posts"] == 2
+
+    posts = client.get("/api/x/posts").json()
+    assert len(posts) == 2
+    assert {p["tweet_id"] for p in posts} == {"aaa", "bbb"}
+    assert all(p["subscription_id"] == sub["id"] for p in posts)
+
+
+def test_collect_one_records_error_on_failure(client):
+    sub = client.post(
+        "/api/x/subscriptions", json={"url": "https://x.com/foo"}).json()
+
+    with patch("routers.x.grab_timeline",
+               new=AsyncMock(side_effect=RuntimeError("boom"))):
+        r = client.post(f"/api/x/subscriptions/{sub['id']}/collect-sync")
+
+    assert r.status_code == 502
+
+    after = client.get("/api/x/subscriptions").json()[0]
+    assert after["last_error"] == "boom"
+
+
+def test_collect_all_iterates_enabled_only(client):
+    s1 = client.post(
+        "/api/x/subscriptions", json={"url": "https://x.com/a"}).json()
+    s2 = client.post(
+        "/api/x/subscriptions", json={"url": "https://x.com/b"}).json()
+    # disable s2
+    client.patch(f"/api/x/subscriptions/{s2['id']}",
+                 json={"enabled": False})
+
+    with patch("routers.x.grab_timeline",
+               new=AsyncMock(return_value=[_fake_post("111")])):
+        r = client.post("/api/x/collect-all")
+
+    assert r.status_code == 200
+    body = r.json()
+    assert body["checked"] == 1
+    assert body["new_posts"] == 1
+    assert body["failed"] == []
+
+
+def test_collect_all_isolates_per_source_failure(client):
+    s1 = client.post(
+        "/api/x/subscriptions", json={"url": "https://x.com/a"}).json()
+    s2 = client.post(
+        "/api/x/subscriptions", json={"url": "https://x.com/b"}).json()
+
+    call_count = {"n": 0}
+
+    async def flaky(url):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            raise RuntimeError("boom")
+        return [_fake_post("ok")]
+
+    with patch("routers.x.grab_timeline", side_effect=flaky):
+        r = client.post("/api/x/collect-all")
+
+    assert r.status_code == 200
+    body = r.json()
+    assert body["checked"] == 2
+    assert body["new_posts"] == 1
+    assert len(body["failed"]) == 1
+
+
+def test_posts_filter_by_subscription(client):
+    s1 = client.post(
+        "/api/x/subscriptions", json={"url": "https://x.com/a"}).json()
+    s2 = client.post(
+        "/api/x/subscriptions", json={"url": "https://x.com/b"}).json()
+
+    with patch("routers.x.grab_timeline",
+               new=AsyncMock(return_value=[_fake_post("111")])):
+        client.post(f"/api/x/subscriptions/{s1['id']}/collect-sync")
+    with patch("routers.x.grab_timeline",
+               new=AsyncMock(return_value=[_fake_post("222")])):
+        client.post(f"/api/x/subscriptions/{s2['id']}/collect-sync")
+
+    r = client.get(f"/api/x/posts?subscription_id={s1['id']}")
+    assert r.status_code == 200
+    posts = r.json()
+    assert {p["tweet_id"] for p in posts} == {"111"}
