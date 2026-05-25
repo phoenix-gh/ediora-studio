@@ -182,6 +182,33 @@ def set_toolset(name: str, toolset: str, enabled: bool) -> None:
     if result.returncode != 0:
         raise RuntimeError(f"hermes failed: {result.stderr.strip() or result.stdout.strip()}")
 
+    # `hermes tools enable` only adds to the platform allowlist; it does NOT
+    # remove the toolset from `agent.disabled_toolsets`, which acts as a
+    # force-disable override and keeps hermes treating the toolset as off.
+    # Narrowly patch that override out so the user's toggle matches reality.
+    if enabled:
+        _remove_from_disabled_toolsets(pdir, toolset)
+
+
+def _remove_from_disabled_toolsets(profile_dir: Path, toolset: str) -> None:
+    cfg_path = profile_dir / "config.yaml"
+    if not cfg_path.exists():
+        return
+    from ruamel.yaml import YAML
+    yaml_rt = YAML()
+    yaml_rt.preserve_quotes = True
+    with cfg_path.open("r", encoding="utf-8") as fh:
+        data = yaml_rt.load(fh) or {}
+    agent = data.get("agent")
+    if not isinstance(agent, dict):
+        return
+    lst = agent.get("disabled_toolsets")
+    if not isinstance(lst, list) or toolset not in lst:
+        return
+    lst.remove(toolset)
+    with cfg_path.open("w", encoding="utf-8") as fh:
+        yaml_rt.dump(data, fh)
+
 
 def set_mcp_server(name: str, server: str, enabled: bool) -> None:
     if name == "default":

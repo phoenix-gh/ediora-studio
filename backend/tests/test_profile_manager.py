@@ -65,6 +65,21 @@ def test_set_mcp_server_roundtrip(tmp_path, monkeypatch):
     assert mcp2["enabled"] is True
 
 
+def test_remove_from_disabled_toolsets(tmp_path, monkeypatch):
+    from profile_manager import _remove_from_disabled_toolsets, _profile_dir
+    home = _fixture_home(tmp_path)
+    monkeypatch.setenv("HERMES_HOME_ROOT", str(home))
+    pdir = _profile_dir("wms_writer")
+    # Fixture has agent.disabled_toolsets: [memory]; verify removal is a no-op
+    # for non-members and properly removes when present.
+    _remove_from_disabled_toolsets(pdir, "nonexistent")  # no-op, no raise
+    _remove_from_disabled_toolsets(pdir, "memory")
+    import yaml
+    with (pdir / "config.yaml").open() as f:
+        cfg = yaml.safe_load(f)
+    assert cfg["agent"]["disabled_toolsets"] == []
+
+
 def test_safe_name_rejects_traversal():
     assert _safe_name("wms_writer") == "wms_writer"
     with pytest.raises(ValueError):
