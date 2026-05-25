@@ -9,7 +9,8 @@ import {
   type ProfileDetail,
 } from '@/lib/api/profiles'
 import { SoulEditor } from './SoulEditor'
-// ToolsPanel + SkillsPanel are added in Tasks 5 & 6.
+import { ToolsPanel } from './ToolsPanel'
+// SkillsPanel is added in Task 6.
 
 export function ProfilesClient() {
   const [list, setList] = useState<ProfileSummary[]>([])
@@ -92,7 +93,13 @@ export function ProfilesClient() {
               />
             )}
             {tab === 'tools' && (
-              <p className="text-muted-foreground">即将上线</p>
+              <ToolsPanel
+                profile={detail.name}
+                readonly={readonly}
+                toolsets={detail.toolsets}
+                mcpServers={detail.mcp_servers}
+                onChange={next => setDetail({ ...detail, ...next })}
+              />
             )}
             {tab === 'skills' && (
               <p className="text-muted-foreground">即将上线</p>
