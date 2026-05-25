@@ -7,13 +7,11 @@ DATABASE_URL = os.getenv(
     "postgresql+asyncpg://postgres:123456@127.0.0.1:5432/wemedia",
 )
 
-engine = create_async_engine(
-    DATABASE_URL,
-    echo=False,
-    pool_pre_ping=True,
-    pool_size=10,
-    max_overflow=20,
-)
+_engine_kwargs: dict = dict(echo=False, pool_pre_ping=True)
+if not DATABASE_URL.startswith("sqlite"):
+    _engine_kwargs.update(pool_size=10, max_overflow=20)
+
+engine = create_async_engine(DATABASE_URL, **_engine_kwargs)
 SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
 class Base(DeclarativeBase):
