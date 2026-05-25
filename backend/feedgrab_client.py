@@ -122,3 +122,138 @@ def _tweet_dict_to_parsed_post(d: dict) -> Optional[ParsedPost]:
         views=views,
         raw_markdown=raw_markdown,
     )
+
+
+# ─── I/O layer ──────────────────────────────────────────────────────────────
+
+import asyncio  # noqa: E402
+import os  # noqa: E402
+import re  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+
+def _parse_screen_name(url: str) -> str:
+    """Extract screen_name from a profile URL like https://x.com/<username>."""
+    match = re.search(r"(?:x\.com|twitter\.com)/([a-zA-Z0-9_]{1,15})(?:/|$)", url)
+    if match:
+        return match.group(1)
+    raise ValueError(f"Cannot extract screen_name from URL: {url}")
+
+
+def _fetch_timeline_raw(url: str) -> list[dict]:
+    """Sync helper: fetch first page of a user's timeline as flat tweet dicts.
+
+    Approach: Option 4 — lower-level GraphQL paginator.
+    Uses feedgrab.fetchers.twitter_graphql directly:
+      fetch_user_by_screen_name → fetch_user_tweets_page →
+      parse_user_tweets_entries → extract_tweet_data
+    This returns the full extract_tweet_data dicts (id, text, author, likes, …)
+    without writing any Markdown files, unlike fetch_user_tweets() which only
+    returns a summary dict and the list_path JSON lacks text/metrics fields.
+
+    Wrapped by asyncio.to_thread in grab_timeline(); all feedgrab graphql
+    functions are synchronous, so no nested event-loop risk here.
+    """
+    from feedgrab.fetchers.twitter_graphql import (
+        fetch_user_by_screen_name,
+        fetch_user_tweets_page,
+        parse_user_tweets_entries,
+        extract_tweet_data,
+    )
+    from feedgrab.fetchers.twitter_cookies import load_twitter_cookies
+
+    cookies = load_twitter_cookies()
+    screen_name = _parse_screen_name(url)
+
+    user_info = fetch_user_by_screen_name(screen_name, cookies)
+    user_id = user_info.get("user_id", "")
+    if not user_id:
+        return []
+
+    response = fetch_user_tweets_page(user_id, cookies)
+    if not response:
+        return []
+
+    entries, _cursors = parse_user_tweets_entries(response)
+    tweets: list[dict] = []
+    for entry in entries:
+        td = extract_tweet_data(entry)
+        if td:
+            tweets.append(td)
+    return tweets
+
+
+def _fetch_search_raw(query: str, limit: int = 20) -> list[dict]:
+    """Sync helper: run feedgrab keyword search and return flat tweet dicts.
+
+    search_twitter_keyword is an async coroutine; we run it on a fresh loop
+    to avoid "event loop already running" errors when called from to_thread.
+    """
+    from feedgrab.fetchers.twitter_keyword_search import search_twitter_keyword
+
+    loop = asyncio.new_event_loop()
+    try:
+        result = loop.run_until_complete(
+            search_twitter_keyword(
+                keyword=query,
+                max_results=limit,
+                save_tweets=False,
+                skip_summary=True,
+            )
+        )
+    finally:
+        loop.close()
+    return list(result.get("tweets") or [])
+
+
+async def grab_timeline(url: str) -> list[ParsedPost]:
+    """Fetch the first page of a user's X/Twitter timeline as ParsedPost list."""
+    raw = await asyncio.to_thread(_fetch_timeline_raw, url)
+    out: list[ParsedPost] = []
+    for d in raw:
+        if not isinstance(d, dict):
+            continue
+        p = _tweet_dict_to_parsed_post(d)
+        if p:
+            out.append(p)
+    return out
+
+
+async def search_x(query: str, limit: int = 20) -> list[ParsedPost]:
+    """Search X/Twitter for `query` and return results as ParsedPost list."""
+    raw = await asyncio.to_thread(_fetch_search_raw, query, limit)
+    out: list[ParsedPost] = []
+    for d in raw:
+        if not isinstance(d, dict):
+            continue
+        p = _tweet_dict_to_parsed_post(d)
+        if p:
+            out.append(p)
+    return out
+
+
+def auth_status() -> dict:
+    """Return {ready, hint}. ready=True iff feedgrab has X session credentials.
+
+    Probes env vars first (fastest), then known session file locations.
+    """
+    if os.getenv("X_AUTH_TOKEN") and os.getenv("X_CT0"):
+        return {"ready": True, "hint": "via env vars X_AUTH_TOKEN / X_CT0"}
+
+    candidates = [
+        Path.cwd() / "sessions" / "x.json",
+        Path.cwd() / "sessions" / "twitter.json",
+        Path.home() / ".feedgrab" / "sessions" / "x.json",
+        Path.home() / ".feedgrab" / "sessions" / "twitter.json",
+    ]
+    for p in candidates:
+        try:
+            if p.exists():
+                return {"ready": True, "hint": f"via {p}"}
+        except OSError:
+            continue
+
+    return {
+        "ready": False,
+        "hint": "未登录。请在 backend 工作目录运行：feedgrab login twitter",
+    }
