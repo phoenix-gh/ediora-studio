@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional
 
-router = APIRouter(prefix="/api/x", tags=["synthesize"])
+router = APIRouter(prefix="/x", tags=["synthesize"])
 
 ANGLE_PROMPTS = {
     "tutorial": (

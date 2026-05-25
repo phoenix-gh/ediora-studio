@@ -349,6 +349,20 @@ class ArticleDraft(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
 
 
+class PipelineTask(Base):
+    """Links a studio pipeline run to its kanban task IDs and eventual draft."""
+    __tablename__ = "pipeline_tasks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    account_id: Mapped[str] = mapped_column(String, nullable=False)
+    title: Mapped[str] = mapped_column(String, default="")
+    source_url: Mapped[str] = mapped_column(String, default="")
+    draft_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    task_ids: Mapped[dict] = mapped_column(JSON, default=dict)  # {"scout": "t_xxx", "editor": "t_xxx", ...}
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+
+
 class DraftImage(Base):
     """Images attached to a draft group, keyed by the root (article) draft ID."""
     __tablename__ = "draft_images"

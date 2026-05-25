@@ -3,11 +3,15 @@
 import { useEffect, useRef, useState } from 'react'
 import { marked } from 'marked'
 import {
-  X, Copy, ExternalLink, Folder, GitBranch, Radar, Pencil, FileEdit, ScanSearch,
-  Clock, PlayCircle, CheckCircle2, AlertTriangle, ChevronRight, Unlock, Loader2, CheckSquare,
+  X, Copy, ExternalLink, Folder, GitBranch, Radar, Pencil, FileEdit,
+  Clock, PlayCircle, CheckCircle2, AlertTriangle, ChevronRight, Unlock, Loader2, CheckSquare, Trash2,
+  Terminal, Coins,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import { getStudioTaskDetail, unblockStudioTask, completeStudioTask, type TaskDetail } from '@/lib/api/studio'
+import {
+  getStudioTaskDetail, unblockStudioTask, completeStudioTask, deleteTask, getTaskLog, getTaskUsage,
+  type TaskDetail, type TaskComment, type TaskUsage,
+} from '@/lib/api/studio'
 import { cn } from '@/lib/utils'
 
 /* ── role & status mapping (mirror StudioClient) ──────────────────────── */
@@ -16,7 +20,6 @@ const ASSIGNEE_META: Record<string, { icon: React.ElementType; label: string; su
   wms_scout:  { icon: Radar,      label: 'SCOUT',  sub: '信号探子', bg: 'bg-amber-500',   text: 'text-amber-700 dark:text-amber-400',   soft: 'bg-amber-50 dark:bg-amber-950/40' },
   wms_editor: { icon: Pencil,     label: 'EDITOR', sub: '策划编辑', bg: 'bg-indigo-500',  text: 'text-indigo-700 dark:text-indigo-400', soft: 'bg-indigo-50 dark:bg-indigo-950/40' },
   wms_writer: { icon: FileEdit,   label: 'WRITER', sub: '撰稿',     bg: 'bg-emerald-500', text: 'text-emerald-700 dark:text-emerald-400', soft: 'bg-emerald-50 dark:bg-emerald-950/40' },
-  wms_critic: { icon: ScanSearch, label: 'CRITIC', sub: '终审编辑', bg: 'bg-rose-500',    text: 'text-rose-700 dark:text-rose-400',     soft: 'bg-rose-50 dark:bg-rose-950/40' },
 }
 
 const STATUS_META: Record<string, { label: string; chip: string; icon: React.ElementType }> = {
@@ -25,7 +28,7 @@ const STATUS_META: Record<string, { label: string; chip: string; icon: React.Ele
   ready:    { label: '待派',   chip: 'bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300',     icon: Clock },
   running:  { label: '进行中', chip: 'bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300',         icon: PlayCircle },
   blocked:  { label: '受阻',   chip: 'bg-rose-50 text-rose-700 dark:bg-rose-950/40 dark:text-rose-300',         icon: AlertTriangle },
-  review:   { label: '待终审', chip: 'bg-cyan-50 text-cyan-700 dark:bg-cyan-950/40 dark:text-cyan-300',         icon: AlertTriangle },
+  review:   { label: '评审中', chip: 'bg-cyan-50 text-cyan-700 dark:bg-cyan-950/40 dark:text-cyan-300',         icon: AlertTriangle },
   done:     { label: '已完成', chip: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300', icon: CheckCircle2 },
   archived: { label: '已归档', chip: 'bg-zinc-100 text-zinc-500 dark:bg-zinc-900 dark:text-zinc-500',           icon: Clock },
 }
@@ -87,16 +90,18 @@ export function TaskDrawer({
   open,
   onClose,
   onOpenTask,
+  onDeleted,
 }: {
   taskId: string | null
   open: boolean
   onClose: () => void
   onOpenTask?: (id: string) => void
+  onDeleted?: (id: string) => void
 }) {
   const [detail, setDetail] = useState<TaskDetail | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [actionBusy, setActionBusy] = useState<null | 'unblock' | 'complete'>(null)
+  const [actionBusy, setActionBusy] = useState<null | 'unblock' | 'complete' | 'delete'>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
 
   async function handleUnblock() {
@@ -111,6 +116,23 @@ export function TaskDrawer({
       setDetail(d)
     } catch (e) {
       toast.error('解锁失败：' + (e instanceof Error ? e.message : '未知错误'))
+    } finally {
+      setActionBusy(null)
+    }
+  }
+
+  async function handleDelete() {
+    if (!taskId) return
+    const title = detail?.task.title ?? taskId
+    if (!window.confirm(`归档并删除任务？\n\n「${title}」\n\n此操作不可撤销。`)) return
+    setActionBusy('delete')
+    try {
+      await deleteTask(taskId)
+      toast.success('任务已归档删除')
+      onDeleted?.(taskId)
+      onClose()
+    } catch (e) {
+      toast.error('删除失败：' + (e instanceof Error ? e.message : '未知错误'))
     } finally {
       setActionBusy(null)
     }
@@ -217,6 +239,16 @@ export function TaskDrawer({
                 </button>
               </>
             )}
+            {detail && (
+              <button
+                onClick={handleDelete}
+                disabled={actionBusy !== null}
+                className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded-md text-zinc-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 disabled:opacity-50 transition"
+                title="归档删除任务"
+              >
+                {actionBusy === 'delete' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+              </button>
+            )}
             <button
               onClick={onClose}
               className="p-1.5 rounded hover:bg-zinc-100 dark:hover:bg-zinc-900 text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100"
@@ -237,7 +269,7 @@ export function TaskDrawer({
               无法加载：{error}
             </p>
           )}
-          {detail && <DetailBody detail={detail} onOpenTask={onOpenTask} />}
+          {detail && <DetailBody detail={detail} taskId={taskId!} onOpenTask={onOpenTask} />}
         </div>
       </div>
     </div>
@@ -252,7 +284,19 @@ function extractFlow(body: string | null | undefined): string | null {
   return m ? m[1] : null
 }
 
-function DetailBody({ detail, onOpenTask }: { detail: TaskDetail; onOpenTask?: (id: string) => void }) {
+function fmtTokens(n: number): string {
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(2) + 'M'
+  if (n >= 1_000) return (n / 1_000).toFixed(1) + 'k'
+  return n.toString()
+}
+
+function fmtUsd(n: number): string {
+  if (n === 0) return '$0'
+  if (n < 0.01) return '$' + n.toFixed(4)
+  return '$' + n.toFixed(3)
+}
+
+function DetailBody({ detail, taskId, onOpenTask }: { detail: TaskDetail; taskId: string; onOpenTask?: (id: string) => void }) {
   const t = detail.task
   const meta = ASSIGNEE_META[t.assignee] ?? ASSIGNEE_META.wms_editor
   const RoleIcon = meta.icon
@@ -440,6 +484,12 @@ function DetailBody({ detail, onOpenTask }: { detail: TaskDetail; onOpenTask?: (
         </section>
       )}
 
+      {/* token usage */}
+      <UsageSection taskId={taskId} hasRuns={detail.runs.length > 0} />
+
+      {/* worker log (lazy) */}
+      <LogSection taskId={taskId} hasRuns={detail.runs.length > 0} />
+
       {/* events timeline */}
       {detail.events.length > 0 && (
         <section>
@@ -577,5 +627,135 @@ function CommentCard({ comment }: { comment: TaskComment }) {
   )
 }
 
-/* avoid unused-import warning when ExternalLink only used in future */
+/* ── usage section (auto-load on mount) ───────────────────────────────── */
+
+function UsageSection({ taskId, hasRuns }: { taskId: string; hasRuns: boolean }) {
+  const [usage, setUsage] = useState<TaskUsage | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!hasRuns) return
+    let cancelled = false
+    setLoading(true)
+    setErr(null)
+    setUsage(null)
+    getTaskUsage(taskId)
+      .then(u => { if (!cancelled) { setUsage(u); setLoading(false) } })
+      .catch(e => { if (!cancelled) { setErr(e instanceof Error ? e.message : String(e)); setLoading(false) } })
+    return () => { cancelled = true }
+  }, [taskId, hasRuns])
+
+  if (!hasRuns) return null
+
+  return (
+    <section>
+      <SectionHeader title="Token 消耗" />
+      {loading && <p className="text-[11px] text-zinc-400">加载中…</p>}
+      {err && <p className="text-[11px] text-rose-500">无法加载：{err}</p>}
+      {usage && (
+        <div className="space-y-2">
+          {/* totals */}
+          <div className="grid grid-cols-4 gap-2 text-xs">
+            <UsageStat label="输入" value={fmtTokens(usage.total_input)} accent="text-blue-600 dark:text-blue-400" />
+            <UsageStat label="输出" value={fmtTokens(usage.total_output)} accent="text-emerald-600 dark:text-emerald-400" />
+            <UsageStat label="缓存读" value={fmtTokens(usage.total_cache_read)} accent="text-zinc-500" />
+            <UsageStat label="花费" value={fmtUsd(usage.total_cost_usd)} accent="text-amber-600 dark:text-amber-400 font-mono" />
+          </div>
+          {/* per-run breakdown */}
+          {usage.runs.length > 1 && (
+            <details className="text-[11px]">
+              <summary className="cursor-pointer text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 select-none">
+                分 run 明细（{usage.runs.length}）
+              </summary>
+              <div className="mt-1.5 space-y-1">
+                {usage.runs.map((r, i) => (
+                  <div key={i} className="flex items-center gap-2 px-2 py-1 rounded border border-zinc-200 dark:border-zinc-800 font-mono text-[10px]">
+                    <span className="text-zinc-400 w-8">#{r.run_id ?? '?'}</span>
+                    <span className="text-zinc-500 truncate w-20">{r.profile ?? '—'}</span>
+                    <span className="text-blue-500">in {fmtTokens(r.input_tokens)}</span>
+                    <span className="text-emerald-500">out {fmtTokens(r.output_tokens)}</span>
+                    {r.cache_read_tokens > 0 && <span className="text-zinc-400">cache {fmtTokens(r.cache_read_tokens)}</span>}
+                    <span className="text-amber-600 dark:text-amber-400 ml-auto">
+                      {fmtUsd(r.actual_cost_usd ?? r.estimated_cost_usd ?? 0)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </details>
+          )}
+        </div>
+      )}
+    </section>
+  )
+}
+
+function UsageStat({ label, value, accent }: { label: string; value: string; accent?: string }) {
+  return (
+    <div className="rounded-md border border-zinc-200 dark:border-zinc-800 px-2 py-1.5 bg-zinc-50/40 dark:bg-zinc-900/30">
+      <div className="text-[9px] uppercase tracking-wider text-zinc-400 mb-0.5">{label}</div>
+      <div className={cn('text-sm font-medium tabular-nums', accent)}>{value}</div>
+    </div>
+  )
+}
+
+/* ── log section (lazy, click to load) ────────────────────────────────── */
+
+function LogSection({ taskId, hasRuns }: { taskId: string; hasRuns: boolean }) {
+  const [log, setLog] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+
+  async function load() {
+    setLoading(true)
+    setErr(null)
+    try {
+      const r = await getTaskLog(taskId)
+      setLog(r.log)
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  if (!hasRuns) return null
+
+  return (
+    <section>
+      <div className="flex items-center justify-between mb-2">
+        <h3 className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+          运行日志
+        </h3>
+        <div className="flex items-center gap-2">
+          {log !== null && (
+            <button
+              onClick={() => copyText(log, '已复制日志')}
+              className="text-[10px] text-zinc-400 hover:text-zinc-600 inline-flex items-center gap-1"
+            >
+              <Copy className="w-3 h-3" /> 复制
+            </button>
+          )}
+          <button
+            onClick={load}
+            disabled={loading}
+            className="text-[10px] text-zinc-500 hover:text-indigo-600 inline-flex items-center gap-1 disabled:opacity-50"
+          >
+            {loading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Terminal className="w-3 h-3" />}
+            {log !== null ? '刷新' : '加载日志'}
+          </button>
+        </div>
+      </div>
+      {err && <p className="text-[11px] text-rose-500">{err}</p>}
+      {log !== null && (
+        <pre className="max-h-80 overflow-y-auto rounded-md border border-zinc-200 dark:border-zinc-800 bg-zinc-950 text-zinc-200 px-3 py-2 text-[11px] leading-relaxed font-mono whitespace-pre-wrap">
+          {log || '(empty)'}
+        </pre>
+      )}
+    </section>
+  )
+}
+
+/* avoid unused-import warning when ExternalLink/Coins only used in future */
 void ExternalLink
+void Coins

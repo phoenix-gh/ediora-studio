@@ -270,21 +270,28 @@ class PostWithMetrics(BaseModel):
     latest_likes: int
     latest_views: int
     is_viral: bool
-    metrics_history: list[MetricsPoint]
 
 
 @router.get("/posts", response_model=list[PostWithMetrics])
 async def list_posts(
     hours: int = Query(24, le=168),
     username: Optional[str] = Query(None),
+    limit: int = Query(200, ge=1, le=500),
     db: AsyncSession = Depends(get_db),
 ):
-    """Return recent posts with full metrics history."""
+    """Return recent posts with the latest metrics snapshot only."""
     since = datetime.now(timezone.utc) - timedelta(hours=hours)
-    q = select(XPost).where(XPost.published_at >= since).order_by(desc(XPost.published_at))
+    q = (
+        select(XPost)
+        .where(XPost.published_at >= since)
+        .order_by(desc(XPost.published_at))
+        .limit(limit)
+    )
     if username:
         q = q.where(XPost.username == username.lstrip("@").lower())
     posts = (await db.execute(q)).scalars().all()
+    if not posts:
+        return []
 
     # Batch-fetch display names from candidates table
     usernames = list({p.username for p in posts})
@@ -294,15 +301,19 @@ async def list_posts(
     )).all()
     display_names = {r.username: r.display_name for r in name_rows}
 
+    # Batch-fetch the latest metrics row per tweet (Postgres DISTINCT ON)
+    tweet_ids = [p.tweet_id for p in posts]
+    latest_rows = (await db.execute(
+        select(XPostMetrics)
+        .where(XPostMetrics.tweet_id.in_(tweet_ids))
+        .order_by(XPostMetrics.tweet_id, desc(XPostMetrics.collected_at))
+        .distinct(XPostMetrics.tweet_id)
+    )).scalars().all()
+    latest_by_tweet = {m.tweet_id: m for m in latest_rows}
+
     result = []
     for post in posts:
-        metrics_rows = (await db.execute(
-            select(XPostMetrics)
-            .where(XPostMetrics.tweet_id == post.tweet_id)
-            .order_by(XPostMetrics.collected_at)
-        )).scalars().all()
-
-        latest = metrics_rows[-1] if metrics_rows else None
+        latest = latest_by_tweet.get(post.tweet_id)
         lv = latest.views if latest else 0
         af = post.author_followers
         result.append(PostWithMetrics(
@@ -321,7 +332,6 @@ async def list_posts(
             latest_likes=latest.likes if latest else 0,
             latest_views=lv,
             is_viral=bool(af > 0 and lv > af * VIRAL_RATIO),
-            metrics_history=[MetricsPoint.model_validate(m) for m in metrics_rows],
         ))
     return result
 

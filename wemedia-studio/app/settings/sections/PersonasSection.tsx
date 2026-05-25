@@ -19,10 +19,11 @@ interface EditState {
   name: string
   description: string
   prompt: string
+  model: string
   is_default: boolean
 }
 
-const EMPTY_EDIT: EditState = { name: '', description: '', prompt: '', is_default: false }
+const EMPTY_EDIT: EditState = { name: '', description: '', prompt: '', model: '', is_default: false }
 
 export function PersonasSection() {
   const [personas, setPersonas] = useState<WriterPersona[]>([])
@@ -42,7 +43,7 @@ export function PersonasSection() {
 
   function startEdit(p: WriterPersona) {
     setEditingId(p.id)
-    setForm({ name: p.name, description: p.description, prompt: p.prompt, is_default: p.is_default })
+    setForm({ name: p.name, description: p.description, prompt: p.prompt, model: p.model ?? '', is_default: p.is_default })
   }
 
   function cancelEdit() {
@@ -52,7 +53,7 @@ export function PersonasSection() {
 
   async function handleSave() {
     if (!form.name.trim() || !form.prompt.trim()) {
-      toast.error('名称和提示词不能为空')
+      toast.error('名称和创作指令不能为空')
       return
     }
     setSaving(true)
@@ -104,6 +105,11 @@ export function PersonasSection() {
                     {p.is_default && (
                       <span className="inline-flex items-center gap-0.5 text-[10px] text-amber-600 bg-amber-50 dark:bg-amber-950 dark:text-amber-400 px-1.5 py-0.5 rounded-full">
                         <Star className="w-2.5 h-2.5" /> 默认
+                      </span>
+                    )}
+                    {p.model && (
+                      <span className="text-[10px] text-indigo-600 bg-indigo-50 dark:bg-indigo-950 dark:text-indigo-400 px-1.5 py-0.5 rounded-full font-mono">
+                        {p.model}
                       </span>
                     )}
                   </div>
@@ -189,11 +195,21 @@ function PersonaForm({
         </div>
       </div>
       <div className="space-y-1">
-        <Label className="text-xs">提示词 *</Label>
+        <Label className="text-xs">模型</Label>
+        <Input
+          value={form.model}
+          onChange={e => setForm({ ...form, model: e.target.value })}
+          placeholder="留空则使用全局设置，例：gpt-4o / claude-opus-4-7"
+          className="h-8 text-sm font-mono"
+        />
+      </div>
+      <div className="space-y-1">
+        <Label className="text-xs">创作指令 *</Label>
+        <p className="text-[11px] text-zinc-400">描述写手风格、文章要求，作为创作指令（非系统提示词）随用户请求一起发送给模型</p>
         <textarea
           value={form.prompt}
           onChange={e => setForm({ ...form, prompt: e.target.value })}
-          placeholder="描述这个写手的风格、角色定位、文章要求…"
+          placeholder="例：你是一位专业的中文科技公众号作者，擅长深度分析。请撰写1500-2000字的原创文章，结构清晰，专业易读…"
           rows={6}
           className={cn(
             'w-full resize-none rounded-lg border border-zinc-200 dark:border-zinc-700',

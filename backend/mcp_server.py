@@ -4,7 +4,6 @@ Exposes key data as tools for AI agents via Streamable HTTP transport.
 Mount at /mcp in main.py: app.mount("/mcp", mcp.streamable_http_app())
 """
 
-import base64
 import mimetypes
 import os
 import uuid
@@ -725,88 +724,75 @@ async def upload_image_from_url(
 
 
 @mcp.tool()
-async def upload_image_from_base64(
-    data: str,
-    mime_type: str = "image/png",
+async def upload_image_from_path(
+    path: str,
     filename_hint: str = "",
     draft_id: Optional[int] = None,
 ) -> dict:
     """
-    Decode a base64-encoded image and host it on WeMedia Studio's server.
+    Read a local image file from disk and host it on WeMedia Studio's server.
 
-    Use this when you have raw image bytes (e.g. generated images, screenshots,
-    or data-URI images) that you want to embed in an article.
+    Use this (NOT upload_image_from_base64) when you have a locally generated
+    image file — for example after running the codex_imagegen skill. Reading
+    from disk avoids base64 encoding, which is error-prone for large files.
 
     Args:
-        data: Base64-encoded image bytes. May include a data-URI prefix
-              (e.g. "data:image/png;base64,iVBOR...") — the prefix is stripped
-              automatically.
-        mime_type: MIME type of the image, e.g. "image/png", "image/jpeg",
-                   "image/webp". Defaults to "image/png".
-        filename_hint: Optional filename/slug used only for the file extension.
+        path: Absolute path to the image file on the local filesystem.
+        filename_hint: Optional filename to record as the original name
+                       (e.g. "cover.png"). Defaults to the basename of path.
         draft_id: Optional draft ID. When provided, the image is registered in
                   that draft's image library and will appear in the editor's
-                  image panel. All variants in the same group share the library.
+                  image panel.
 
     Returns:
-        hosted_url: Absolute URL to serve the image, e.g.
-                    "http://localhost:8000/api/uploads/abc123.png".
-                    Embed this directly in Markdown: ![alt](hosted_url)
+        hosted_url: Absolute URL to serve the image from WeMedia Studio.
         filename: The stored filename.
-        size_bytes: Size of the decoded image in bytes.
-        content_type: MIME type used.
+        size_bytes: Size of the stored file in bytes.
+        content_type: Detected MIME type.
         draft_image_id: ID of the DraftImage record (only present when draft_id was given).
     """
+    import shutil as _shutil
+
     _ALLOWED = {"image/jpeg", "image/png", "image/gif", "image/webp", "image/svg+xml", "image/avif"}
     _MAX = 10 * 1024 * 1024
 
-    # Strip data-URI prefix if present
-    if data.startswith("data:"):
-        if "," in data:
-            header, data = data.split(",", 1)
-            # Extract MIME from prefix if not explicitly overridden
-            if "image/" in header and mime_type == "image/png":
-                try:
-                    mime_type = header.split(":")[1].split(";")[0].strip()
-                except Exception:
-                    pass
+    src = Path(path)
+    if not src.exists():
+        raise ValueError(f"File not found: {path}")
+    if not src.is_file():
+        raise ValueError(f"Not a regular file: {path}")
 
-    ct = mime_type.split(";")[0].strip()
+    size = src.stat().st_size
+    if size > _MAX:
+        raise ValueError(f"Image too large ({size} bytes, max 10 MB)")
+    if size < 64:
+        raise ValueError(f"File too small to be a valid image ({size} bytes): {path}")
+
+    ct, _ = mimetypes.guess_type(str(src))
+    if not ct:
+        ct = "image/png"
+    ct = ct.split(";")[0].strip()
     if ct not in _ALLOWED:
-        raise ValueError(f"Unsupported MIME type: {ct} — allowed: {', '.join(_ALLOWED)}")
+        raise ValueError(f"Unsupported file type: {ct} — allowed: {', '.join(_ALLOWED)}")
 
-    try:
-        raw = base64.b64decode(data)
-    except Exception:
-        raise ValueError("Invalid base64 data")
-
-    if len(raw) > _MAX:
-        raise ValueError(f"Decoded image too large ({len(raw)} bytes, max 10 MB)")
-    if len(raw) < 64:
-        raise ValueError("Decoded data too small to be a valid image")
-
-    ext = mimetypes.guess_extension(ct) or ".png"
+    ext = src.suffix.lower() or mimetypes.guess_extension(ct) or ".png"
     if ext in (".jpe", ".jpeg"):
         ext = ".jpg"
-    if filename_hint and "." in filename_hint:
-        hint_ext = "." + filename_hint.rsplit(".", 1)[-1].lower()
-        if hint_ext in (".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".avif"):
-            ext = ".jpg" if hint_ext == ".jpeg" else hint_ext
 
     name = f"{uuid.uuid4().hex}{ext}"
     dest = _UPLOADS_DIR / name
-    dest.write_bytes(raw)
+    _shutil.copy2(src, dest)
 
     api_url = f"/api/uploads/{name}"
+    original = filename_hint or src.name
     result: dict = {
         "hosted_url": f"{_BASE_URL}{api_url}",
         "filename": name,
-        "size_bytes": len(raw),
+        "size_bytes": size,
         "content_type": ct,
     }
     if draft_id is not None:
-        original = filename_hint or name
-        img_id = await _register_draft_image(draft_id, name, original, api_url, len(raw), ct)
+        img_id = await _register_draft_image(draft_id, name, original, api_url, size, ct)
         result["draft_image_id"] = img_id
 
     return result
@@ -818,6 +804,7 @@ async def save_draft(
     content: str,
     topic_id: str = "agent",
     status: str = "drafting",
+    pipeline_task_id: Optional[int] = None,
 ) -> dict:
     """
     Save a new article draft to WeMedia Studio's draft box.
@@ -828,10 +815,12 @@ async def save_draft(
         topic_id: Source identifier. Use "agent" for AI-agent-generated articles,
                   or a tweet_id / topic UUID when derived from a specific source.
         status: Initial status — "drafting" (default) or "review".
+        pipeline_task_id: Optional pipeline_task_id from the task body (links this
+                          draft to its pipeline run record for timeline tracking).
 
     Returns: id, title, status, created_at of the newly created draft.
     """
-    from models import ArticleDraft
+    from models import ArticleDraft, PipelineTask
 
     async with SessionLocal() as db:
         obj = ArticleDraft(
@@ -843,6 +832,12 @@ async def save_draft(
         db.add(obj)
         await db.commit()
         await db.refresh(obj)
+
+        if pipeline_task_id is not None:
+            pt = await db.get(PipelineTask, pipeline_task_id)
+            if pt is not None:
+                pt.draft_id = obj.id
+                await db.commit()
 
     return {
         "id": obj.id,
@@ -888,11 +883,11 @@ async def get_account_profile(pub_id: str) -> dict:
     """
     Return the full positioning profile of a publish account.
 
-    Every agent in the scout → editor → writer → critic pipeline MUST call
-    this as its first step, using the `account_id` carried in the kanban task
-    body/metadata. All downstream output (angle, brief, draft, scoring) must
-    align with the returned profile — tone, audience, topic_focus, taboo,
-    word_range, image_style.
+    Every agent in the scout → editor → writer → illustrator pipeline MUST
+    call this as its first step, using the `account_id` carried in the kanban
+    task body/metadata. All downstream output (angle, brief, draft, cover)
+    must align with the returned profile — tone, audience, topic_focus,
+    taboo, word_range, image_style.
 
     Returns an empty dict with `error: "..."` if pub_id is unknown.
     """

@@ -5,7 +5,8 @@ import { RefreshCw, MessageCircle, Heart, Eye, Repeat2, ExternalLink, TrendingUp
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
-import { XPost, XMetricsPoint, getXPosts } from '@/lib/api/x'
+import { XPost, getXPosts } from '@/lib/api/x'
+import { AddToTopicPopover } from '@/components/features/AddToTopicPopover'
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000/api'
 
@@ -313,84 +314,28 @@ function CreateModal({ post, onClose }: { post: XPost; onClose: () => void }) {
   )
 }
 
-// ── Sparkline ──────────────────────────────────────────────────────────────────
-
-function Sparkline({
-  data,
-  color = '#6366f1',
-  width = 64,
-  height = 22,
-}: {
-  data: number[]
-  color?: string
-  width?: number
-  height?: number
-}) {
-  if (data.length < 2) {
-    return <span className="inline-block w-[64px] h-[22px]" />
-  }
-  const min = Math.min(...data)
-  const max = Math.max(...data)
-  const range = max - min || 1
-  const pad = 2
-
-  const pts = data.map((v, i) => {
-    const x = pad + (i / (data.length - 1)) * (width - pad * 2)
-    const y = pad + ((max - v) / range) * (height - pad * 2)
-    return `${x},${y}`
-  })
-  const d = `M ${pts.join(' L ')}`
-
-  return (
-    <svg width={width} height={height} className="overflow-visible">
-      <path d={d} fill="none" stroke={color} strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />
-      {/* Highlight last point */}
-      <circle
-        cx={pts[pts.length - 1].split(',')[0]}
-        cy={pts[pts.length - 1].split(',')[1]}
-        r={2.5}
-        fill={color}
-      />
-    </svg>
-  )
-}
-
 // ── Metric cell ────────────────────────────────────────────────────────────────
 
 function MetricCell({
   icon: Icon,
   value,
-  history,
   color,
   label,
 }: {
   icon: React.ElementType
   value: number
-  history: number[]
   color: string
   label: string
 }) {
-  const trend = history.length >= 2
-    ? history[history.length - 1] - history[history.length - 2]
-    : 0
-
   return (
-    <div className="flex flex-col items-center gap-0.5 min-w-[72px]">
+    <div className="flex flex-col items-center gap-0.5 min-w-[56px]">
       <div className="flex items-center gap-1 text-zinc-500 dark:text-zinc-400">
-        <Icon className="w-3 h-3" />
+        <Icon className="w-3 h-3" style={{ color }} />
         <span className="text-[10px]">{label}</span>
       </div>
       <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
         {formatCount(value)}
       </span>
-      <div className="flex items-center gap-1">
-        <Sparkline data={history.length ? history : [value]} color={color} />
-        {trend !== 0 && (
-          <span className={cn('text-[9px] font-medium', trend > 0 ? 'text-emerald-500' : 'text-red-400')}>
-            {trend > 0 ? '+' : ''}{formatCount(trend)}
-          </span>
-        )}
-      </div>
     </div>
   )
 }
@@ -615,11 +560,6 @@ export function XPostsPanel({ initialPosts }: { initialPosts: XPost[] }) {
       ) : (
         <div className="space-y-2">
           {paginated.map(post => {
-            const repliesHistory  = post.metrics_history.map(m => m.replies)
-            const repostsHistory  = post.metrics_history.map(m => m.reposts)
-            const likesHistory    = post.metrics_history.map(m => m.likes)
-            const viewsHistory    = post.metrics_history.map(m => m.views)
-
             return (
               <div
                 key={post.tweet_id}
@@ -656,12 +596,6 @@ export function XPostsPanel({ initialPosts }: { initialPosts: XPost[] }) {
                             ×{(post.latest_views / post.author_followers).toFixed(1)}
                           </span>
                         )}
-                      </span>
-                    )}
-                    {post.metrics_history.length > 1 && (
-                      <span className="text-[10px] text-indigo-400 flex items-center gap-0.5">
-                        <TrendingUp className="w-2.5 h-2.5" />
-                        {post.metrics_history.length} 次记录
                       </span>
                     )}
                     <span className={cn(
@@ -711,6 +645,13 @@ export function XPostsPanel({ initialPosts }: { initialPosts: XPost[] }) {
                       >
                         <ExternalLink className="w-3.5 h-3.5" />
                       </a>
+                      <AddToTopicPopover
+                        url={post.url}
+                        title={`${post.display_name || post.username}: ${post.content.slice(0, 60)}`}
+                        summary={post.content.slice(0, 200)}
+                        platform="x"
+                        className="!w-6 !h-6"
+                      />
                     </div>
                   </div>
                   <p className="text-sm text-zinc-700 dark:text-zinc-300 line-clamp-3 leading-relaxed">
@@ -718,36 +659,12 @@ export function XPostsPanel({ initialPosts }: { initialPosts: XPost[] }) {
                   </p>
                 </div>
 
-                {/* Metrics with sparklines */}
-                <div className="flex items-center gap-5 flex-shrink-0 border-l border-zinc-100 dark:border-zinc-800 pl-4">
-                  <MetricCell
-                    icon={MessageCircle}
-                    value={post.latest_replies}
-                    history={repliesHistory}
-                    color="#8b5cf6"
-                    label="回复"
-                  />
-                  <MetricCell
-                    icon={Repeat2}
-                    value={post.latest_reposts}
-                    history={repostsHistory}
-                    color="#10b981"
-                    label="转发"
-                  />
-                  <MetricCell
-                    icon={Heart}
-                    value={post.latest_likes}
-                    history={likesHistory}
-                    color="#ec4899"
-                    label="点赞"
-                  />
-                  <MetricCell
-                    icon={Eye}
-                    value={post.latest_views}
-                    history={viewsHistory}
-                    color="#0ea5e9"
-                    label="阅读"
-                  />
+                {/* Latest metrics */}
+                <div className="flex items-center gap-4 flex-shrink-0 border-l border-zinc-100 dark:border-zinc-800 pl-4">
+                  <MetricCell icon={MessageCircle} value={post.latest_replies} color="#8b5cf6" label="回复" />
+                  <MetricCell icon={Repeat2} value={post.latest_reposts} color="#10b981" label="转发" />
+                  <MetricCell icon={Heart} value={post.latest_likes} color="#ec4899" label="点赞" />
+                  <MetricCell icon={Eye} value={post.latest_views} color="#0ea5e9" label="阅读" />
                 </div>
               </div>
             )

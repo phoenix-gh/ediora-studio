@@ -9,7 +9,7 @@ from schemas import (
     TopicSourceCreate, TopicSourceOut,
 )
 
-router = APIRouter(prefix="/api/content-topics", tags=["content-topics"])
+router = APIRouter(prefix="/content-topics", tags=["content-topics"])
 
 
 async def _build_tree(db: AsyncSession, roots: list[ContentTopic]) -> list[ContentTopicOut]:
@@ -129,6 +129,17 @@ async def add_source(topic_id: int, body: TopicSourceCreate, db: AsyncSession = 
         raise HTTPException(404, "Topic not found")
     source = TopicSource(**{**body.model_dump(), "topic_id": topic_id})
     db.add(source)
+
+    if body.draft_id is not None:
+        draft = await db.get(ArticleDraft, body.draft_id)
+        if not draft:
+            raise HTTPException(404, "Draft not found")
+        # Mirror into ArticleDraft.sources JSON so the draft view sees the clue.
+        # Reassign the list so SQLAlchemy detects the JSON mutation.
+        existing = list(draft.sources or [])
+        existing.append({"url": body.url, "title": body.title, "note": body.note})
+        draft.sources = existing
+
     await db.commit()
     await db.refresh(source)
     return source

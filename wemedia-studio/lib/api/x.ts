@@ -18,14 +18,6 @@ export interface XCandidate {
   last_seen_at: string
 }
 
-export interface XMetricsPoint {
-  collected_at: string
-  replies: number
-  reposts: number
-  likes: number
-  views: number
-}
-
 export interface XPost {
   tweet_id: string
   username: string
@@ -42,7 +34,6 @@ export interface XPost {
   latest_views: number
   is_viral: boolean
   category: string
-  metrics_history: XMetricsPoint[]
 }
 
 export interface XCandidateList {

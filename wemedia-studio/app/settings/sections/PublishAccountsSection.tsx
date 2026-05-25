@@ -16,13 +16,8 @@ import {
   updatePublishAccount,
   deletePublishAccount,
 } from '@/lib/api/publish-accounts'
-
-const COVER_TYPE_OPTS      = ['', 'hero', 'conceptual', 'typography', 'metaphor', 'scene', 'minimal']
-const COVER_PALETTE_OPTS   = ['', 'warm', 'elegant', 'cool', 'dark', 'earth', 'vivid', 'pastel', 'mono', 'retro', 'duotone', 'macaron']
-const COVER_RENDERING_OPTS = ['', 'flat-vector', 'hand-drawn', 'painterly', 'digital', 'pixel', 'chalk', 'screen-print']
-const COVER_TEXT_OPTS      = ['', 'none', 'title-only', 'title-subtitle', 'text-rich']
-const COVER_MOOD_OPTS      = ['', 'subtle', 'balanced', 'bold']
-const COVER_RATIO_OPTS     = ['', '16:9', '1:1', '2.35:1', '3:4', '4:3']
+import { CoverStyleEditor, buildCoverStyleFromEditor } from '@/components/features/CoverStyleEditor'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 
 interface EditState {
   id: string
@@ -128,17 +123,7 @@ function editToInput(form: EditState): PublishAccountInput | { error: string } {
 }
 
 function buildCoverStyle(form: EditState): CoverStyle {
-  const cs: CoverStyle = {}
-  const dims: (keyof CoverStyle)[] = ['type', 'palette', 'rendering', 'text', 'mood', 'aspect_ratio']
-  for (const k of dims) {
-    const v = form.cover_style[k]
-    if (typeof v === 'string' && v.trim()) (cs as Record<string, unknown>)[k] = v.trim()
-  }
-  const motifs = form.cover_motifs_text.split('\n').map(s => s.trim()).filter(Boolean)
-  if (motifs.length) cs.signature_motifs = motifs
-  const neg = form.cover_negative_text.split('\n').map(s => s.trim()).filter(Boolean)
-  if (neg.length) cs.negative = neg
-  return cs
+  return buildCoverStyleFromEditor(form.cover_style, form.cover_motifs_text, form.cover_negative_text)
 }
 
 export function PublishAccountsSection() {
@@ -234,7 +219,7 @@ export function PublishAccountsSection() {
   return (
     <div className="space-y-4">
       <p className="text-xs text-zinc-400 -mt-3">
-        发布账号即你运营的对外内容账号（公众号/X 等）。Hermes agent 链路（scout→editor→writer→critic）
+        发布账号即你运营的对外内容账号（公众号/X 等）。Hermes agent 链路（scout→editor→writer→illustrator）
         会按任务 metadata 的 <code className="font-mono text-zinc-500">account_id</code> 读取该账号画像，
         所有产出都贴合此处填写的定位/调性/受众/禁区。
       </p>
@@ -242,9 +227,7 @@ export function PublishAccountsSection() {
       <div className="space-y-2">
         {accounts.map(p => (
           <div key={p.id} className="border border-zinc-200 dark:border-zinc-800 rounded-xl overflow-hidden">
-            {editingId === p.id ? (
-              <AccountForm form={form} setForm={setForm} onSave={handleSave} onCancel={cancelEdit} saving={saving} isNew={false} />
-            ) : (
+            {(
               <div className="px-4 py-3 flex items-start gap-3">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1.5 mb-1 flex-wrap">
@@ -308,17 +291,32 @@ export function PublishAccountsSection() {
         ))}
       </div>
 
-      {editingId === 'new' && (
-        <div className="border border-indigo-200 dark:border-indigo-800 rounded-xl overflow-hidden">
-          <AccountForm form={form} setForm={setForm} onSave={handleSave} onCancel={cancelEdit} saving={saving} isNew />
-        </div>
-      )}
+      <Button variant="outline" size="sm" className="gap-1.5" onClick={startNew}>
+        <Plus className="w-3.5 h-3.5" /> 新增发布账号
+      </Button>
 
-      {editingId === null && (
-        <Button variant="outline" size="sm" className="gap-1.5" onClick={startNew}>
-          <Plus className="w-3.5 h-3.5" /> 新增发布账号
-        </Button>
-      )}
+      <Dialog
+        open={editingId !== null}
+        onOpenChange={o => { if (!o) cancelEdit() }}
+      >
+        <DialogContent
+          className="sm:max-w-3xl max-h-[90vh] overflow-y-auto"
+        >
+          <DialogHeader>
+            <DialogTitle>{editingId === 'new' ? '新增发布账号' : '编辑发布账号'}</DialogTitle>
+          </DialogHeader>
+          {editingId !== null && (
+            <AccountForm
+              form={form}
+              setForm={setForm}
+              onSave={handleSave}
+              onCancel={cancelEdit}
+              saving={saving}
+              isNew={editingId === 'new'}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
@@ -334,9 +332,7 @@ function AccountForm({
   isNew: boolean
 }) {
   return (
-    <div className="px-4 py-3 space-y-3 bg-zinc-50 dark:bg-zinc-900">
-      <p className="text-xs font-medium text-zinc-600 dark:text-zinc-400">{isNew ? '新增发布账号' : '编辑发布账号'}</p>
-
+    <div className="space-y-3">
       <div className="grid grid-cols-3 gap-3">
         <div className="space-y-1">
           <Label className="text-xs">ID {isNew ? '*' : '（不可改）'}</Label>
@@ -477,71 +473,14 @@ function AccountForm({
             填了之后 illustrator 直接照搬这套参数，不再凭 image_style 现场推断 —— 这是让同账号封面"看起来是一套的"关键。
             留空则回退到旧逻辑（按 image_style 翻译）。
           </p>
-
-          <div className="grid grid-cols-3 gap-3">
-            {([
-              ['type',         '类型 type'],
-              ['palette',      '配色 palette'],
-              ['rendering',    '渲染 rendering'],
-              ['text',         '文字 text'],
-              ['mood',         '气氛 mood'],
-              ['aspect_ratio', '长宽比 aspect'],
-            ] as const).map(([key, label]) => {
-              const opts = key === 'type' ? COVER_TYPE_OPTS
-                : key === 'palette' ? COVER_PALETTE_OPTS
-                : key === 'rendering' ? COVER_RENDERING_OPTS
-                : key === 'text' ? COVER_TEXT_OPTS
-                : key === 'mood' ? COVER_MOOD_OPTS
-                : COVER_RATIO_OPTS
-              return (
-                <div key={key} className="space-y-1">
-                  <Label className="text-xs">{label}</Label>
-                  <select
-                    value={form.cover_style[key] ?? ''}
-                    onChange={e => setForm({ ...form, cover_style: { ...form.cover_style, [key]: e.target.value } })}
-                    className="h-8 w-full rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-2 text-sm"
-                  >
-                    {opts.map(o => (
-                      <option key={o} value={o}>{o || '(未设)'}</option>
-                    ))}
-                  </select>
-                </div>
-              )
-            })}
-          </div>
-
-          <div className="space-y-1">
-            <Label className="text-xs">视觉签名（signature_motifs，一行一个）</Label>
-            <p className="text-[11px] text-zinc-400">
-              每张封面都要出现的元素 ── 让 X 张封面有共同的"长相"。例：固定 mascot、固定背景肌理、固定角落构件
-            </p>
-            <textarea
-              value={form.cover_motifs_text}
-              onChange={e => setForm({ ...form, cover_motifs_text: e.target.value })}
-              placeholder={'always include a small purple chunky lobster icon in lower-right corner\nthin 1px grid background, very subtle\ncream off-white base background #F5F0E6'}
-              rows={4}
-              className={cn(
-                'w-full resize-none rounded-lg border border-zinc-200 dark:border-zinc-700',
-                'bg-white dark:bg-zinc-800 px-3 py-2 text-sm',
-                'focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-400',
-              )}
-            />
-          </div>
-
-          <div className="space-y-1">
-            <Label className="text-xs">禁止元素（negative，一行一个）</Label>
-            <textarea
-              value={form.cover_negative_text}
-              onChange={e => setForm({ ...form, cover_negative_text: e.target.value })}
-              placeholder={'no realistic humans\nno stock photo feel\nno dark/moody atmosphere'}
-              rows={3}
-              className={cn(
-                'w-full resize-none rounded-lg border border-zinc-200 dark:border-zinc-700',
-                'bg-white dark:bg-zinc-800 px-3 py-2 text-sm',
-                'focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-400',
-              )}
-            />
-          </div>
+          <CoverStyleEditor
+            coverStyle={form.cover_style}
+            onCoverStyleChange={cs => setForm({ ...form, cover_style: cs })}
+            motifsText={form.cover_motifs_text}
+            onMotifsTextChange={t => setForm({ ...form, cover_motifs_text: t })}
+            negativeText={form.cover_negative_text}
+            onNegativeTextChange={t => setForm({ ...form, cover_negative_text: t })}
+          />
         </div>
       </details>
 
@@ -568,7 +507,7 @@ function AccountForm({
         <Label className="text-xs">账号专属硬规则（style_rules，一行一条）</Label>
         <p className="text-[11px] text-zinc-400">
           覆盖在 SOUL 通用反 AI 规则之上的账号级约束。比如"用第一人称""禁问句开头""每段 ≤ 3 行"。
-          writer 把它当硬约束，critic 把它当扣分依据。
+          writer 把它当硬约束逐条遵守。
         </p>
         <textarea
           value={form.style_rules_text}

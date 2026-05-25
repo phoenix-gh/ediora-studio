@@ -1,5 +1,6 @@
 'use client'
 
+import React, { forwardRef, useImperativeHandle } from 'react'
 import dynamic from 'next/dynamic'
 import { useCallback, useRef } from 'react'
 import { toast } from 'sonner'
@@ -37,14 +38,36 @@ function insertAtCursor(textarea: HTMLTextAreaElement, text: string) {
   return before + text + after
 }
 
+export interface MarkdownEditorHandle {
+  insert: (text: string) => void
+}
+
 interface Props {
   value: string
   onChange: (v: string) => void
   minHeight?: number
 }
 
-export function MarkdownEditor({ value, onChange, minHeight = 500 }: Props) {
+export const MarkdownEditor = forwardRef<MarkdownEditorHandle, Props>(
+function MarkdownEditor({ value, onChange, minHeight = 500 }, ref) {
   const containerRef = useRef<HTMLDivElement>(null)
+
+  useImperativeHandle(ref, () => ({
+    insert(text: string) {
+      const ta = containerRef.current?.querySelector('textarea')
+      if (ta) {
+        onChange(insertAtCursor(ta, text))
+        // Restore focus and move cursor after inserted text
+        requestAnimationFrame(() => {
+          const pos = (ta.selectionStart ?? 0) + text.length
+          ta.focus()
+          ta.setSelectionRange(pos, pos)
+        })
+      } else {
+        onChange(value + text)
+      }
+    },
+  }))
 
   // Handle paste events (images)
   const handlePaste = useCallback(async (e: React.ClipboardEvent) => {
@@ -95,6 +118,12 @@ export function MarkdownEditor({ value, onChange, minHeight = 500 }: Props) {
         height="100%"
         visibleDragbar={false}
         preview="live"
+        previewOptions={{
+          components: {
+            img: ({ src, alt, ...props }: React.ImgHTMLAttributes<HTMLImageElement>) =>
+              src ? <img src={src} alt={alt} {...props} /> : null,
+          },
+        }}
         extraCommands={[]}
         commands={[
           ...require('@uiw/react-md-editor').commands.getCommands(),
@@ -127,4 +156,4 @@ export function MarkdownEditor({ value, onChange, minHeight = 500 }: Props) {
       />
     </div>
   )
-}
+})

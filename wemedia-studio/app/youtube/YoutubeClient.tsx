@@ -1,7 +1,10 @@
 'use client'
 
-import { useState, useMemo, useCallback, useEffect, useRef } from 'react'
-import { PlaySquare, RefreshCw, Plus, Trash2, Volume2, VolumeX, ExternalLink, Search, Pencil, Check, X } from 'lucide-react'
+import { useState, useMemo, useCallback, useEffect } from 'react'
+import { PlaySquare, RefreshCw, Trash2, Volume2, VolumeX, ExternalLink, Search, Pencil, Check, X, Settings, Loader2, Eye } from 'lucide-react'
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
+} from '@/components/ui/dialog'
 import { toast } from 'sonner'
 import {
   YoutubeChannel, YoutubeVideo,
@@ -9,9 +12,11 @@ import {
   addYoutubeChannel, updateYoutubeChannel, deleteYoutubeChannel,
   collectYoutube, collectYoutubeChannel,
 } from '@/lib/api/youtube'
+import { AddToTopicPopover } from '@/components/features/AddToTopicPopover'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
+import { useInfiniteScroll } from '@/lib/use-infinite-scroll'
 
 const DAYS_OPTIONS = [7, 14, 30, 90]
 const PAGE_SIZE = 24
@@ -26,60 +31,119 @@ function fmtDate(iso: string) {
   return new Date(iso).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })
 }
 
-// ── Add Channel Dialog ─────────────────────────────────────────────────────────
+// ── Subscribe Dialog ──────────────────────────────────────────────────────────
 
-function AddChannelDialog({ onAdd }: { onAdd: (channelId: string, group: string) => Promise<void> }) {
-  const [open, setOpen] = useState(false)
+function SubscribeDialog({
+  open, onOpenChange, channels, onAdd, onMute, onDelete, onCollect,
+}: {
+  open: boolean
+  onOpenChange: (v: boolean) => void
+  channels: YoutubeChannel[]
+  onAdd: (channelId: string, group: string) => Promise<void>
+  onMute: (ch: YoutubeChannel) => Promise<void>
+  onDelete: (ch: YoutubeChannel) => Promise<void>
+  onCollect: (ch: YoutubeChannel) => Promise<void>
+}) {
   const [channelId, setChannelId] = useState('')
   const [group, setGroup] = useState('未分组')
-  const [loading, setLoading] = useState(false)
+  const [adding, setAdding] = useState(false)
+  const [actingId, setActingId] = useState<string | null>(null)
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     const id = channelId.trim()
     if (!id) return
-    setLoading(true)
+    setAdding(true)
     try {
       await onAdd(id, group)
       setChannelId('')
-      setGroup('未分组')
-      setOpen(false)
     } finally {
-      setLoading(false)
+      setAdding(false)
     }
   }
 
-  if (!open) {
-    return (
-      <Button size="sm" className="h-8 text-xs gap-1.5" onClick={() => setOpen(true)}>
-        <Plus className="w-3.5 h-3.5" />
-        订阅频道
-      </Button>
-    )
+  async function wrap(ch: YoutubeChannel, fn: (c: YoutubeChannel) => Promise<void>) {
+    setActingId(ch.id)
+    try { await fn(ch) } finally { setActingId(null) }
   }
 
   return (
-    <form onSubmit={handleSubmit} className="flex items-center gap-2 flex-wrap">
-      <Input
-        autoFocus
-        value={channelId}
-        onChange={e => setChannelId(e.target.value)}
-        placeholder="Channel ID (如 UCrWhQHtbphf5j0Xj9ELvXPQ)"
-        className="h-8 text-xs w-72"
-      />
-      <Input
-        value={group}
-        onChange={e => setGroup(e.target.value)}
-        placeholder="分组"
-        className="h-8 text-xs w-28"
-      />
-      <Button type="submit" size="sm" className="h-8 text-xs" disabled={loading || !channelId.trim()}>
-        {loading ? '添加中…' : '确认'}
-      </Button>
-      <Button type="button" size="sm" variant="ghost" className="h-8 text-xs" onClick={() => setOpen(false)}>
-        取消
-      </Button>
-    </form>
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>订阅管理 · YouTube</DialogTitle>
+          <DialogDescription>
+            添加 YouTube 频道（Channel ID 形如 UCxxxx），系统会定时拉取最新视频。
+          </DialogDescription>
+        </DialogHeader>
+
+        <form onSubmit={handleSubmit} className="flex items-center gap-2">
+          <Input value={channelId} onChange={e => setChannelId(e.target.value)}
+            placeholder="Channel ID，如 UCrWhQHtbphf5j0Xj9ELvXPQ"
+            className="h-8 text-xs flex-1" />
+          <Input value={group} onChange={e => setGroup(e.target.value)}
+            placeholder="分组" className="h-8 text-xs w-24" />
+          <Button type="submit" size="sm" className="h-8 text-xs"
+            disabled={adding || !channelId.trim()}>
+            {adding ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : '添加'}
+          </Button>
+        </form>
+
+        <div>
+          <div className="text-[11px] uppercase tracking-wider text-zinc-400 mb-1.5 px-0.5">
+            已订阅 · {channels.length}
+          </div>
+          {channels.length === 0 ? (
+            <div className="text-xs text-zinc-400 py-6 text-center border border-dashed rounded-md">
+              暂无订阅。输入 Channel ID 后点击「添加」。
+            </div>
+          ) : (
+            <div className="border border-zinc-200 dark:border-zinc-800 rounded-md max-h-72 overflow-y-auto">
+              {channels.map(c => (
+                <div key={c.id}
+                  className={cn(
+                    'flex items-center gap-2 px-2.5 py-1.5 border-b border-zinc-100 dark:border-zinc-800 last:border-0',
+                    c.muted && 'opacity-50'
+                  )}>
+                  {c.avatar_url ? (
+                    <img src={c.avatar_url} alt=""
+                      className="w-7 h-7 rounded-full object-cover flex-shrink-0" />
+                  ) : (
+                    <PlaySquare className="w-5 h-5 text-red-500 flex-shrink-0" />
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <div className="text-xs font-medium truncate">{c.name}</div>
+                    <div className="text-[11px] text-zinc-400 truncate">
+                      {c.group}
+                      {c.last_collected_at && <> · 最近 {new Date(c.last_collected_at).toLocaleString('zh-CN')}</>}
+                    </div>
+                  </div>
+                  <Button size="sm" variant="ghost" className="h-7 text-xs gap-1 px-2"
+                    disabled={actingId === c.id} onClick={() => wrap(c, onCollect)}>
+                    {actingId === c.id
+                      ? <Loader2 className="w-3 h-3 animate-spin" />
+                      : <RefreshCw className="w-3 h-3" />}
+                    同步
+                  </Button>
+                  <Button size="sm" variant="ghost" className="h-7 w-7 p-0"
+                    disabled={actingId === c.id}
+                    title={c.muted ? '取消静音' : '静音'}
+                    onClick={() => wrap(c, onMute)}>
+                    {c.muted ? <Volume2 className="w-3 h-3" /> : <VolumeX className="w-3 h-3" />}
+                  </Button>
+                  <Button size="sm" variant="ghost"
+                    className="h-7 w-7 p-0 text-red-400 hover:text-red-600"
+                    disabled={actingId === c.id}
+                    onClick={() => wrap(c, onDelete)}>
+                    <Trash2 className="w-3 h-3" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
   )
 }
 
@@ -289,37 +353,32 @@ function VideoCard({
   const channel = channels.find(c => c.id === video.channel_id)
 
   return (
-    <a
-      href={video.url}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="group flex flex-col rounded-xl overflow-hidden hover:bg-zinc-50 dark:hover:bg-zinc-900 transition-colors"
-    >
+    <div className="group flex flex-col rounded-xl overflow-hidden hover:bg-zinc-50 dark:hover:bg-zinc-900 transition-colors">
       {/* Thumbnail — 16:9 */}
-      <div className="relative w-full aspect-video rounded-xl overflow-hidden bg-zinc-100 dark:bg-zinc-800">
+      <a
+        href={video.url}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="relative block w-full aspect-video rounded-xl overflow-hidden bg-zinc-100 dark:bg-zinc-800"
+      >
         {video.thumbnail_url ? (
           <img
             src={video.thumbnail_url}
             alt=""
-            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+            className="w-full h-full object-cover group-hover:scale-[1.03] transition-transform duration-300"
           />
         ) : (
           <div className="w-full h-full flex items-center justify-center">
             <PlaySquare className="w-10 h-10 text-zinc-300" />
           </div>
         )}
-      </div>
+      </a>
 
       {/* Info row */}
-      <div className="flex gap-2.5 pt-2.5 px-0.5 pb-1">
-        {/* Channel avatar */}
+      <div className="flex gap-2.5 pt-2.5 px-0.5">
         <div className="flex-shrink-0 pt-0.5">
           {channel?.avatar_url ? (
-            <img
-              src={channel.avatar_url}
-              alt=""
-              className="w-8 h-8 rounded-full object-cover"
-            />
+            <img src={channel.avatar_url} alt="" className="w-8 h-8 rounded-full object-cover" />
           ) : (
             <div className="w-8 h-8 rounded-full bg-zinc-200 dark:bg-zinc-700 flex items-center justify-center">
               <PlaySquare className="w-4 h-4 text-zinc-400" />
@@ -327,23 +386,39 @@ function VideoCard({
           )}
         </div>
 
-        {/* Text */}
         <div className="min-w-0 flex-1">
-          <p className="text-[13px] font-medium text-zinc-900 dark:text-zinc-100 line-clamp-2 leading-snug">
+          <a
+            href={video.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="block text-[13px] font-medium text-zinc-900 dark:text-zinc-100 line-clamp-2 leading-snug hover:text-red-600 dark:hover:text-red-400 transition-colors"
+          >
             {video.title}
+          </a>
+          <p className="mt-1 text-[11px] text-zinc-500 dark:text-zinc-400 truncate">
+            {video.channel_name}
           </p>
-          <div className="mt-1 space-y-0.5">
-            <p className="text-[11px] text-zinc-500 dark:text-zinc-400 truncate">
-              {video.channel_name}
-            </p>
-            <p className="text-[11px] text-zinc-400">
-              {video.views > 0 && `${fmtViews(video.views)} 次观看 · `}
-              {fmtDate(video.published_at)}
-            </p>
-          </div>
         </div>
       </div>
-    </a>
+
+      {/* Footer: stats left · action right */}
+      <div className="flex items-center pt-1.5 px-0.5 pb-1">
+        <div className="flex items-center gap-2.5 text-[11px] text-zinc-400 dark:text-zinc-500">
+          {video.views > 0 && (
+            <span className="flex items-center gap-1"><Eye className="w-3.5 h-3.5" />{fmtViews(video.views)}</span>
+          )}
+          <span>{fmtDate(video.published_at)}</span>
+        </div>
+        <div className="ml-auto flex items-center gap-0.5">
+          <AddToTopicPopover
+            url={video.url}
+            title={video.title}
+            summary={video.channel_name ?? ''}
+            platform="youtube"
+          />
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -363,8 +438,7 @@ export function YoutubeClient({
   const [search, setSearch] = useState('')
   const [collecting, setCollecting] = useState(false)
   const [loading, setLoading] = useState(false)
-  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE)
-  const sentinelRef = useRef<HTMLDivElement>(null)
+  const [subsOpen, setSubsOpen] = useState(false)
 
   const selectedChannel = selectedChannelId
     ? channels.find(c => c.id === selectedChannelId) ?? null
@@ -382,7 +456,7 @@ export function YoutubeClient({
         search: search || undefined,
       })
       setVideos(data)
-      setVisibleCount(PAGE_SIZE)
+      resetScroll()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : '加载失败')
     } finally {
@@ -488,19 +562,11 @@ export function YoutubeClient({
     )
   }, [videos, search])
 
+  const { visibleCount, sentinelRef, hasMore, reset: resetScroll } = useInfiniteScroll({
+    totalCount: filtered.length,
+    pageSize: PAGE_SIZE,
+  })
   const visibleVideos = filtered.slice(0, visibleCount)
-  const hasMore = visibleCount < filtered.length
-
-  useEffect(() => {
-    const el = sentinelRef.current
-    if (!el) return
-    const observer = new IntersectionObserver(
-      ([entry]) => { if (entry.isIntersecting && hasMore) setVisibleCount(c => c + PAGE_SIZE) },
-      { rootMargin: '200px' },
-    )
-    observer.observe(el)
-    return () => observer.disconnect()
-  }, [hasMore])
 
   return (
     <div className="flex h-full">
@@ -545,7 +611,7 @@ export function YoutubeClient({
                 <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-400" />
                 <Input
                   value={search}
-                  onChange={e => { setSearch(e.target.value); setVisibleCount(PAGE_SIZE) }}
+                  onChange={e => { setSearch(e.target.value); resetScroll() }}
                   placeholder="搜索标题/频道"
                   className="h-8 text-xs pl-8 w-44"
                 />
@@ -560,7 +626,11 @@ export function YoutubeClient({
                 <RefreshCw className={cn('w-3.5 h-3.5', collecting && 'animate-spin')} />
                 {collecting ? '采集中…' : '立即采集'}
               </Button>
-              <AddChannelDialog onAdd={handleAdd} />
+              <Button size="sm" variant="outline" className="h-8 text-xs gap-1.5"
+                onClick={() => setSubsOpen(true)}>
+                <Settings className="w-3.5 h-3.5" />
+                订阅管理
+              </Button>
             </div>
           </div>
 
@@ -613,6 +683,16 @@ export function YoutubeClient({
           )}
         </div>
       </div>
+
+      <SubscribeDialog
+        open={subsOpen}
+        onOpenChange={setSubsOpen}
+        channels={channels}
+        onAdd={handleAdd}
+        onMute={handleMute}
+        onDelete={handleDelete}
+        onCollect={handleCollectChannel}
+      />
     </div>
   )
 }

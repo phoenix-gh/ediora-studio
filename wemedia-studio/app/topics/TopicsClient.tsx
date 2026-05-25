@@ -17,6 +17,7 @@ import {
   addSource, deleteSource,
 } from '@/lib/api/content-topics'
 import { createDraft, DRAFT_TYPES } from '@/lib/api/drafts'
+import { PushToStudioPopover } from '@/components/features/PushToStudioPopover'
 
 marked.setOptions({ breaks: true, gfm: true })
 
@@ -162,6 +163,21 @@ function SourceRow({ source, onDelete, onPreview, onCreateDraft, isActive, creat
         )}
       </div>
       <div className="flex items-center gap-0.5 flex-shrink-0">
+        {source.url && source.title && (
+          <div
+            onClick={e => e.stopPropagation()}
+            className="opacity-0 group-hover:opacity-100 transition-opacity"
+          >
+            <PushToStudioPopover
+              url={source.url}
+              title={source.title}
+              content={source.content || ''}
+              platform={source.platform}
+              summary={source.note || ''}
+              className="w-6 h-6"
+            />
+          </div>
+        )}
         <button
           onClick={e => { e.stopPropagation(); onCreateDraft(source, 'article') }}
           disabled={!!creating}

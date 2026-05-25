@@ -1,12 +1,14 @@
 'use client'
 
-import { useState, useMemo, useEffect, useRef } from 'react'
-import { ExternalLink, RefreshCw, Search, Rocket, ChevronLeft, ChevronRight } from 'lucide-react'
+import { useState, useMemo, useEffect } from 'react'
+import { RefreshCw, Search, Rocket, ChevronLeft, ChevronRight } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { ProductHuntPost, getProductHuntPosts, collectProductHunt } from '@/lib/api/producthunt'
+import { useInfiniteScroll } from '@/lib/use-infinite-scroll'
+import { AddToTopicPopover } from '@/components/features/AddToTopicPopover'
 
 const DAYS_OPTIONS = [1, 3, 7, 14, 30]
 const PAGE_SIZE = 24
@@ -91,22 +93,21 @@ function ImageCarousel({ images, title }: { images: string[]; title: string }) {
 
 function ProductCard({ post }: { post: ProductHuntPost }) {
   return (
-    <a
-      href={post.url}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="group flex flex-col rounded-xl border border-zinc-100 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-600 hover:shadow-md transition-all overflow-hidden bg-white dark:bg-zinc-900"
-    >
-      <ImageCarousel images={post.images?.length ? post.images : (post.thumbnail_url ? [post.thumbnail_url] : [])} title={post.title} />
+    <div className="group flex flex-col rounded-xl border border-zinc-100 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-600 hover:shadow-md transition-all overflow-hidden bg-white dark:bg-zinc-900">
+      <a href={post.url} target="_blank" rel="noopener noreferrer" className="block">
+        <ImageCarousel images={post.images?.length ? post.images : (post.thumbnail_url ? [post.thumbnail_url] : [])} title={post.title} />
+      </a>
 
       {/* Content */}
       <div className="flex flex-col flex-1 p-3 gap-1.5">
-        <div className="flex items-start justify-between gap-2">
-          <p className="text-[13px] font-semibold text-zinc-900 dark:text-zinc-100 line-clamp-1 leading-snug flex-1 min-w-0">
-            {post.title}
-          </p>
-          <ExternalLink className="w-3 h-3 text-zinc-300 group-hover:text-orange-400 flex-shrink-0 mt-0.5 transition-colors" />
-        </div>
+        <a
+          href={post.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-[13px] font-semibold text-zinc-900 dark:text-zinc-100 truncate leading-snug hover:text-orange-600 dark:hover:text-orange-400 transition-colors"
+        >
+          {post.title}
+        </a>
 
         {post.tagline && (
           <p className="text-[12px] text-zinc-500 dark:text-zinc-400 line-clamp-2 leading-relaxed">
@@ -114,20 +115,30 @@ function ProductCard({ post }: { post: ProductHuntPost }) {
           </p>
         )}
 
-        <div className="flex items-center gap-2 mt-auto pt-1.5">
-          {post.topics.length > 0 && (
-            <div className="flex gap-1 flex-wrap flex-1 min-w-0">
-              {post.topics.slice(0, 3).map(t => (
-                <span key={t} className="text-[10px] px-1.5 py-0.5 rounded-full bg-orange-50 dark:bg-orange-950/40 text-orange-600 dark:text-orange-400 font-medium truncate max-w-[80px]">
-                  {t}
-                </span>
-              ))}
-            </div>
-          )}
-          <span className="text-[11px] text-zinc-400 flex-shrink-0 ml-auto">{fmtDate(post.published_at)}</span>
+        {post.topics.length > 0 && (
+          <div className="flex gap-1 flex-wrap">
+            {post.topics.slice(0, 3).map(t => (
+              <span key={t} className="text-[10px] px-1.5 py-0.5 rounded-full bg-orange-50 dark:bg-orange-950/40 text-orange-600 dark:text-orange-400 font-medium truncate max-w-[80px]">
+                {t}
+              </span>
+            ))}
+          </div>
+        )}
+
+        {/* Footer: time left · action right */}
+        <div className="flex items-center mt-auto pt-1.5">
+          <span className="text-[11px] text-zinc-400">{fmtDate(post.published_at)}</span>
+          <div className="ml-auto flex items-center gap-0.5">
+            <AddToTopicPopover
+              url={post.url}
+              title={post.title}
+              summary={post.tagline ?? ''}
+              platform="producthunt"
+            />
+          </div>
         </div>
       </div>
-    </a>
+    </div>
   )
 }
 
@@ -139,8 +150,6 @@ export function ProductHuntClient({ initialPosts }: { initialPosts: ProductHuntP
   const [search, setSearch] = useState('')
   const [collecting, setCollecting] = useState(false)
   const [loading, setLoading] = useState(false)
-  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE)
-  const sentinelRef = useRef<HTMLDivElement>(null)
 
   const filtered = useMemo(() => {
     if (!search.trim()) return posts
@@ -152,26 +161,18 @@ export function ProductHuntClient({ initialPosts }: { initialPosts: ProductHuntP
     )
   }, [posts, search])
 
+  const { visibleCount, sentinelRef, hasMore, reset: resetScroll } = useInfiniteScroll({
+    totalCount: filtered.length,
+    pageSize: PAGE_SIZE,
+  })
   const visible = filtered.slice(0, visibleCount)
-  const hasMore = visibleCount < filtered.length
-
-  useEffect(() => {
-    const el = sentinelRef.current
-    if (!el) return
-    const obs = new IntersectionObserver(
-      ([entry]) => { if (entry.isIntersecting && hasMore) setVisibleCount(c => c + PAGE_SIZE) },
-      { rootMargin: '200px' },
-    )
-    obs.observe(el)
-    return () => obs.disconnect()
-  }, [hasMore])
 
   async function loadPosts(daysVal: number) {
     setLoading(true)
     try {
       const data = await getProductHuntPosts({ days: daysVal, limit: 200 })
       setPosts(data)
-      setVisibleCount(PAGE_SIZE)
+      resetScroll()
     } catch {
       toast.error('加载失败')
     } finally {
@@ -218,7 +219,7 @@ export function ProductHuntClient({ initialPosts }: { initialPosts: ProductHuntP
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-400" />
               <Input
                 value={search}
-                onChange={e => { setSearch(e.target.value); setVisibleCount(PAGE_SIZE) }}
+                onChange={e => { setSearch(e.target.value); resetScroll() }}
                 placeholder="搜索产品名、标签…"
                 className="h-8 text-xs pl-8 w-44"
               />

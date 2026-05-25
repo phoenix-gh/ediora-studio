@@ -16,7 +16,7 @@ export interface TaskBrief {
 export interface AgentState {
   name: string
   display_name: string
-  role: 'scout' | 'editor' | 'writer' | 'illustrator' | 'critic'
+  role: 'scout' | 'editor' | 'writer' | 'illustrator'
   accent: 'amber' | 'indigo' | 'emerald' | 'violet' | 'rose'
   status: AgentStatus
   current_task: TaskBrief | null
@@ -95,6 +95,14 @@ export async function getStudioTaskDetail(taskId: string): Promise<TaskDetail> {
   return apiFetch<TaskDetail>(`/studio/tasks/${encodeURIComponent(taskId)}`)
 }
 
+export async function getTaskLog(taskId: string): Promise<{ task_id: string; log: string }> {
+  return apiFetch(`/studio/tasks/${encodeURIComponent(taskId)}/log`)
+}
+
+export async function deleteTask(taskId: string): Promise<{ ok: boolean }> {
+  return apiFetch(`/studio/tasks/${encodeURIComponent(taskId)}`, { method: 'DELETE' })
+}
+
 export interface EnqueueIn {
   account_id: string
   title: string
@@ -116,10 +124,23 @@ export interface RegenerateCoverIn {
   draft_id: number
   account_id: string
   note?: string
+  cover_style?: Record<string, unknown>
 }
 
 export async function regenerateCover(body: RegenerateCoverIn): Promise<{ task_id: string }> {
   return apiFetch('/studio/regenerate-cover', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+}
+
+export interface RewriteDraftIn {
+  draft_id: number
+  note?: string
+}
+
+export async function rewriteDraft(body: RewriteDraftIn): Promise<{ task_id: string }> {
+  return apiFetch('/studio/rewrite-draft', {
     method: 'POST',
     body: JSON.stringify(body),
   })
@@ -153,4 +174,35 @@ export interface DraftTaskBrief {
 
 export async function getDraftTasks(draftId: number): Promise<{ draft_id: number; tasks: DraftTaskBrief[] }> {
   return apiFetch(`/studio/drafts/${draftId}/tasks`)
+}
+
+export interface RunUsage {
+  run_id: number | null
+  profile: string | null
+  started_at: number | null
+  outcome: string | null
+  session_id: string | null
+  input_tokens: number
+  output_tokens: number
+  cache_read_tokens: number
+  cache_write_tokens: number
+  reasoning_tokens: number
+  actual_cost_usd: number | null
+  estimated_cost_usd: number | null
+  model: string | null
+}
+
+export interface TaskUsage {
+  task_id: string
+  total_input: number
+  total_output: number
+  total_cache_read: number
+  total_cache_write: number
+  total_reasoning: number
+  total_cost_usd: number
+  runs: RunUsage[]
+}
+
+export async function getTaskUsage(taskId: string): Promise<TaskUsage> {
+  return apiFetch(`/studio/tasks/${encodeURIComponent(taskId)}/usage`)
 }

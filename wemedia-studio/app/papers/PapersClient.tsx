@@ -7,6 +7,7 @@ import { Paper, getPapers, collectPapers } from '@/lib/api/papers'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
+import { AddToTopicPopover } from '@/components/features/AddToTopicPopover'
 
 const CATEGORIES = ['全部', 'cs.AI', 'cs.CL', 'cs.CV', 'cs.LG', 'cs.RO', 'stat.ML']
 
@@ -90,6 +91,12 @@ function PaperCard({ paper }: { paper: Paper }) {
               <Download className="w-3.5 h-3.5" />
             </a>
           )}
+          <AddToTopicPopover
+            url={paper.arxiv_url}
+            title={titleCn}
+            summary={abstractCn.slice(0, 200)}
+            platform="papers"
+          />
         </div>
       </div>
 

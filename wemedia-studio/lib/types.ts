@@ -40,23 +40,11 @@ export interface FollowedAccount {
   muted: boolean
 }
 
-export interface Hotspot {
-  id: string
-  title: string
-  trend: 'rising' | 'peak' | 'declining'
-  platforms: string[]
-  heat: number
-  trendData: number[]
-  category: string
-  firstSeenAt: string
-}
-
 export type TopicStatus = Topic['status']
 export type UrgencyLevel = Topic['urgency']
 
 export interface GenerateResult {
   new_topics: number
-  new_hotspots: number
   message: string
 }
 

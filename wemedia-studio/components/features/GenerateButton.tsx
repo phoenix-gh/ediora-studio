@@ -15,11 +15,8 @@ export function GenerateButton() {
     setLoading(true)
     try {
       const res = await triggerFullAnalysis()
-      const total = res.new_topics + res.new_hotspots + res.new_economic
-      if (total > 0) {
-        toast.success(
-          `AI 分析完成：新增选题 ${res.new_topics} 个，热点 ${res.new_hotspots} 个，经济动态 ${res.new_economic} 条`
-        )
+      if (res.new_topics > 0) {
+        toast.success(`AI 分析完成：新增选题 ${res.new_topics} 个`)
         router.refresh()
       } else {
         toast('分析完成，暂无新内容（订阅账号可能尚未采集到数据）')

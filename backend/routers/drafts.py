@@ -1,11 +1,18 @@
-from fastapi import APIRouter, Depends, HTTPException
+import os
+import uuid
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
 from pydantic import BaseModel
 from typing import Optional
 
 from database import get_db
-from models import ArticleDraft, ArticleSeries
+from models import ArticleDraft, ArticleSeries, DraftImage
+
+_UPLOADS_DIR = os.path.join(os.path.dirname(__file__), "..", "uploads")
+_ALLOWED_MIME = {"image/jpeg", "image/png", "image/gif", "image/webp", "image/svg+xml", "image/avif"}
+_MAX_SIZE = 10 * 1024 * 1024
+_BASE_URL = os.getenv("WMS_BASE_URL", "http://localhost:8000")
 from schemas import ArticleDraftOut, ArticleDraftCreate, ArticleDraftUpdate, ArticleSeriesOut, ArticleSeriesCreate, ArticleSeriesUpdate
 
 
@@ -76,47 +83,50 @@ async def chat_with_draft(draft_id: int, body: DraftChatRequest, db: AsyncSessio
         "article": ("自媒体文章", ""),
         "x": (
             "X（推特）帖子",
-            "注意：X 帖子限 280 字符，语言简洁有力，善用换行增强节奏，可以写成线程（thread）形式。"
+            "X 帖子限 280 字符，语言简洁有力，善用换行增强节奏，可以写成线程（thread）形式。"
             "避免冗余，每句话都要有信息量，结尾可带一个开放性问题或观点引发互动。",
         ),
         "mp": (
             "微信公众号文章",
-            "注意：公众号文章读者在手机阅读，段落要短，多用小标题和列表，语言亲切但有深度。"
+            "公众号文章读者在手机阅读，段落要短，多用小标题和列表，语言亲切但有深度。"
             "开头要有钩子，结尾引导关注/转发。",
         ),
         "bili": (
             "哔哩哔哩视频稿",
-            "注意：这是 B 站视频脚本，语言口语化、有活力，可以加一些弹幕感的表达。"
+            "B 站视频脚本，语言口语化、有活力，可以加一些弹幕感的表达。"
             "开头要有强钩子留住观众，结尾引导三连（点赞投币收藏）。节奏明快，避免冗长铺垫。",
         ),
         "xhs": (
             "小红书笔记",
-            "注意：小红书笔记要「种草感」强，语言活泼口语化，多用 emoji，段落极短（1-3 句），"
+            "小红书笔记要「种草感」强，语言活泼口语化，多用 emoji，段落极短（1-3 句），"
             "用换行制造视觉层次。标题要有爆款感（数字/疑问/痛点），正文多用「！」增强感染力，"
             "结尾加 3-5 个话题标签（#xxx）。",
         ),
     }
     type_desc, type_hint = type_hints.get(draft_type, type_hints["article"])
 
-    instructions = (
+    context = (
         f"你是一位专业的中文内容创作助手，帮助用户修改和优化{type_desc}。\n"
-        f"{type_hint}\n\n"
-        f"当前正在编辑的内容：\n\n"
+        + (f"{type_hint}\n" if type_hint else "")
+        + f"\n当前草稿内容：\n"
         f"【标题】{obj.title or '（无标题）'}\n\n"
         f"【正文】\n{obj.content or '（空）'}\n\n"
         "你可以回答问题、给出修改建议、润色语言、调整结构，也可以直接重写段落或整篇内容。\n"
-        "如果用户要求对内容做修改，在回复末尾追加以下格式（只输出正文 Markdown，不含标题行）：\n"
-        "===UPDATED===\n(修改后完整正文)\n===END==="
+        "【规则】只要涉及对正文的实质性修改（润色、改写、扩写、压缩、调整结构等），"
+        "必须在回复末尾追加完整修改版本，格式如下（只输出正文 Markdown，不含标题行，不要省略任何段落）：\n"
+        "===UPDATED===\n(修改后完整正文)\n===END===\n"
+        "如果用户只是提问或你只给出建议而未实际改写，则不需要追加该标记。"
     )
+
+    full_message = f"{context}\n\n---\n\n用户请求：{body.message}"
 
     session_name = body.session_name or f"draft-edit-{draft_id}"
 
     try:
         from llm import _named_session_chat
         raw = await _named_session_chat(
-            message=body.message,
+            message=full_message,
             conversation=session_name,
-            instructions=instructions,
         )
     except Exception as e:
         raise HTTPException(500, f"LLM 调用失败: {e}")
@@ -132,11 +142,119 @@ async def chat_with_draft(draft_id: int, body: DraftChatRequest, db: AsyncSessio
     return DraftChatResponse(reply=reply, updated_content=updated_content, session_name=session_name)
 
 
+async def _resolve_root_id(draft_id: int, db: AsyncSession) -> int:
+    """Return the root draft ID for any draft in a group."""
+    obj = await db.get(ArticleDraft, draft_id)
+    if not obj:
+        raise HTTPException(404, "Draft not found")
+    return obj.linked_draft_id if obj.linked_draft_id else obj.id
+
+
+@router.get("/drafts/{draft_id}/images")
+async def list_draft_images(draft_id: int, db: AsyncSession = Depends(get_db)):
+    root_id = await _resolve_root_id(draft_id, db)
+    rows = (await db.execute(
+        select(DraftImage)
+        .where(DraftImage.root_draft_id == root_id)
+        .order_by(desc(DraftImage.created_at))
+    )).scalars().all()
+    return [
+        {
+            "id": img.id,
+            "filename": img.filename,
+            "original_name": img.original_name,
+            "url": img.url,
+            "hosted_url": f"{_BASE_URL}{img.url}",
+            "size_bytes": img.size_bytes,
+            "mime_type": img.mime_type,
+            "created_at": img.created_at.isoformat(),
+        }
+        for img in rows
+    ]
+
+
+@router.post("/drafts/{draft_id}/images", status_code=201)
+async def upload_draft_image(
+    draft_id: int,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+):
+    root_id = await _resolve_root_id(draft_id, db)
+
+    ct = file.content_type or "image/jpeg"
+    if ct not in _ALLOWED_MIME:
+        raise HTTPException(400, f"不支持的文件类型: {ct}")
+
+    data = await file.read()
+    if len(data) > _MAX_SIZE:
+        raise HTTPException(413, "文件超过 10MB 限制")
+
+    ext = (file.filename or "img").rsplit(".", 1)[-1].lower()
+    if ext in ("jpg", "jpeg"):
+        ext = "jpg"
+    filename = f"{uuid.uuid4().hex}.{ext}"
+    os.makedirs(_UPLOADS_DIR, exist_ok=True)
+    with open(os.path.join(_UPLOADS_DIR, filename), "wb") as f:
+        f.write(data)
+
+    url = f"/api/uploads/{filename}"
+    img = DraftImage(
+        root_draft_id=root_id,
+        filename=filename,
+        original_name=file.filename or "",
+        url=url,
+        size_bytes=len(data),
+        mime_type=ct,
+    )
+    db.add(img)
+    await db.commit()
+    await db.refresh(img)
+
+    return {
+        "id": img.id,
+        "filename": img.filename,
+        "original_name": img.original_name,
+        "url": img.url,
+        "hosted_url": f"{_BASE_URL}{img.url}",
+        "size_bytes": img.size_bytes,
+        "mime_type": img.mime_type,
+        "created_at": img.created_at.isoformat(),
+    }
+
+
+@router.delete("/drafts/{draft_id}/images/{image_id}", status_code=204)
+async def delete_draft_image(draft_id: int, image_id: int, db: AsyncSession = Depends(get_db)):
+    root_id = await _resolve_root_id(draft_id, db)
+    img = await db.get(DraftImage, image_id)
+    if not img or img.root_draft_id != root_id:
+        raise HTTPException(404, "Image not found")
+    # Remove file from disk
+    filepath = os.path.join(_UPLOADS_DIR, img.filename)
+    if os.path.isfile(filepath):
+        os.remove(filepath)
+    await db.delete(img)
+    await db.commit()
+
+
 @router.delete("/drafts/{draft_id}", status_code=204)
 async def delete_draft(draft_id: int, db: AsyncSession = Depends(get_db)):
     obj = await db.get(ArticleDraft, draft_id)
     if not obj:
         raise HTTPException(404, "Draft not found")
+    # Clean up images keyed on this draft. `root_draft_id == draft_id` only
+    # matches when this is the group root, so deleting a child (thread)
+    # draft leaves the root's images intact.
+    images = (await db.execute(
+        select(DraftImage).where(DraftImage.root_draft_id == draft_id)
+    )).scalars().all()
+    for img in images:
+        path = os.path.join(_UPLOADS_DIR, img.filename)
+        if os.path.isfile(path):
+            try:
+                os.remove(path)
+            except OSError:
+                pass  # best-effort: don't block the draft delete on filesystem hiccups
+        await db.delete(img)
     await db.delete(obj)
     await db.commit()
 

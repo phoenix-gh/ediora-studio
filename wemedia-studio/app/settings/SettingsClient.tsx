@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { Brain, Rss, GitFork, AtSign, ScrollText, FileText, PenLine } from 'lucide-react'
+import { Brain, Rss, GitFork, AtSign, ScrollText, FileText, PenLine, Megaphone } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { AppSettings } from '@/lib/api/settings'
 import { AISection }       from './sections/AISection'
@@ -11,8 +11,9 @@ import { XSection }        from './sections/XSection'
 import { ArxivSection }    from './sections/ArxivSection'
 import { LogsSection }     from './sections/LogsSection'
 import { PersonasSection } from './sections/PersonasSection'
+import { PublishAccountsSection } from './sections/PublishAccountsSection'
 
-type SectionId = 'ai' | 'collect' | 'github' | 'x' | 'arxiv' | 'personas' | 'logs'
+type SectionId = 'ai' | 'collect' | 'github' | 'x' | 'arxiv' | 'personas' | 'publish' | 'logs'
 
 const NAV: { id: SectionId; label: string; icon: React.ElementType; desc: string }[] = [
   { id: 'ai',       label: 'AI 大模型',   icon: Brain,     desc: '供应商 · API Key · 模型' },
@@ -21,6 +22,7 @@ const NAV: { id: SectionId; label: string; icon: React.ElementType; desc: string
   { id: 'x',        label: 'X / Twitter', icon: AtSign,    desc: 'camofox · Cookie · 帖子趋势' },
   { id: 'arxiv',    label: 'arXiv 论文',  icon: FileText,  desc: '采集分类 · 更新间隔' },
   { id: 'personas', label: '写手人设',    icon: PenLine,   desc: '提示词模板 · 公众号 / X / 小红书' },
+  { id: 'publish',  label: '发布账号',    icon: Megaphone, desc: '账号画像 · agent 流程复用' },
   { id: 'logs',     label: '系统日志',    icon: ScrollText, desc: '采集运行记录' },
 ]
 
@@ -31,6 +33,7 @@ const SECTION_TITLE: Record<SectionId, string> = {
   x:        'X / Twitter 采集',
   arxiv:    'arXiv 论文采集',
   personas: '写手人设',
+  publish:  '发布账号',
   logs:     '系统日志',
 }
 
@@ -78,6 +81,7 @@ export function SettingsClient({ initialSettings }: { initialSettings: AppSettin
           {active === 'x'        && <XSection       settings={settings} onSaved={setSettings} />}
           {active === 'arxiv'    && <ArxivSection   settings={settings} onSaved={setSettings} />}
           {active === 'personas' && <PersonasSection />}
+          {active === 'publish'  && <PublishAccountsSection />}
           {active === 'logs'     && <LogsSection />}
         </div>
       </main>

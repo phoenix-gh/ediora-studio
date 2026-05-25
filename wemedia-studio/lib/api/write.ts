@@ -65,10 +65,6 @@ export async function triggerGenerateTopics(): Promise<{ new_topics: number; mes
   return apiFetch('/topics/generate', { method: 'POST', next: { revalidate: 0 } as RequestInit['next'] })
 }
 
-export async function triggerGenerateHotspots(): Promise<{ new_hotspots: number; message: string }> {
-  return apiFetch('/hotspots/generate', { method: 'POST', next: { revalidate: 0 } as RequestInit['next'] })
-}
-
-export async function triggerFullAnalysis(): Promise<{ new_topics: number; new_hotspots: number; new_economic: number }> {
+export async function triggerFullAnalysis(): Promise<{ new_topics: number }> {
   return apiFetch('/analyze/all', { method: 'POST', next: { revalidate: 0 } as RequestInit['next'] })
 }

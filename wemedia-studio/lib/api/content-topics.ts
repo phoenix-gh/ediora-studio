@@ -48,6 +48,7 @@ export interface TopicSourceCreate {
   content?: string
   note?: string
   platform?: string
+  draft_id?: number | null
 }
 
 export const PLATFORMS = [

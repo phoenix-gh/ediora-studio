@@ -6,9 +6,12 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
   GitFork, TrendingUp, AlertCircle, Zap, Plus, RefreshCw,
-  Trash2, VolumeX, Star, ExternalLink, ChevronDown, Loader2,
-  Bug, Lightbulb, Gauge, MousePointer, BookOpen, Clock, Tag,
+  Trash2, VolumeX, Volume2, Star, ExternalLink, ChevronDown, Loader2,
+  Bug, Lightbulb, Gauge, MousePointer, BookOpen, Clock, Tag, Settings,
 } from 'lucide-react'
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
+} from '@/components/ui/dialog'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import {
@@ -16,6 +19,7 @@ import {
   collectOneRepo, collectOneRepoReleases, collectAllGithub, analyzePainPoints,
   getGithubIssues, getPainPoints, getTrendingRepos, getGithubReleases,
 } from '@/lib/api/github'
+import { AddToTopicPopover } from '@/components/features/AddToTopicPopover'
 
 type Tab = 'trending' | 'issues' | 'pain-points' | 'releases'
 
@@ -49,88 +53,155 @@ function formatRelative(iso: string) {
   return `${d} 天前`
 }
 
-// ── Add Repo Dialog ────────────────────────────────────────────────────────────
+// ── Subscribe Dialog ──────────────────────────────────────────────────────────
 
-function AddRepoDialog({ onAdded }: { onAdded: (r: GithubRepo) => void }) {
-  const [open, setOpen] = useState(false)
+function SubscribeDialog({
+  open, onOpenChange, repos, onAdded, onUpdated, onDeleted,
+}: {
+  open: boolean
+  onOpenChange: (v: boolean) => void
+  repos: GithubRepo[]
+  onAdded: (r: GithubRepo) => void
+  onUpdated: (r: GithubRepo) => void
+  onDeleted: (id: string) => void
+}) {
   const [input, setInput] = useState('')
   const [intervalMin, setIntervalMin] = useState('10')
   const [group, setGroup] = useState('未分组')
-  const [loading, setLoading] = useState(false)
-  const [status, setStatus] = useState('')
+  const [adding, setAdding] = useState(false)
+  const [actingId, setActingId] = useState<string | null>(null)
 
-  async function handleAdd() {
+  async function handleAdd(e?: React.FormEvent) {
+    e?.preventDefault()
     const parts = input.trim().replace(/^https?:\/\/github\.com\//, '').split('/')
     if (parts.length < 2 || !parts[0] || !parts[1]) {
       toast.error('格式：owner/repo 或完整 GitHub URL')
       return
     }
     const [owner, repo] = parts
-    setLoading(true)
-    setStatus('添加仓库中…')
+    setAdding(true)
     try {
       const added = await addGithubRepo(owner, repo, group, parseInt(intervalMin) || 10)
-      // Backend immediately kicks off collection in background — no need to call collect here
       onAdded(added)
       toast.success(`已添加 ${owner}/${repo}，后台采集中…`)
-      setOpen(false)
       setInput('')
-      setStatus('')
     } catch (e) {
       toast.error(`添加失败：${e}`)
-      setStatus('')
     } finally {
-      setLoading(false)
+      setAdding(false)
     }
   }
 
-  if (!open) return (
-    <Button size="sm" className="h-7 gap-1 text-xs w-full" onClick={() => setOpen(true)}>
-      <Plus className="w-3.5 h-3.5" />添加仓库
-    </Button>
-  )
+  async function handleSync(r: GithubRepo) {
+    setActingId(r.id)
+    try {
+      await collectOneRepo(r.owner, r.repo)
+      toast.success(`${r.id}：后台同步已启动`)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : '同步失败')
+    } finally {
+      setActingId(null)
+    }
+  }
+
+  async function handleToggleMute(r: GithubRepo) {
+    setActingId(r.id)
+    try {
+      const u = await updateGithubRepo(r.owner, r.repo, { muted: !r.muted })
+      onUpdated(u)
+    } catch {
+      toast.error('操作失败')
+    } finally {
+      setActingId(null)
+    }
+  }
+
+  async function handleDelete(r: GithubRepo) {
+    setActingId(r.id)
+    try {
+      await deleteGithubRepo(r.owner, r.repo)
+      onDeleted(r.id)
+      toast(`已移除 ${r.id}`)
+    } catch {
+      toast.error('删除失败')
+    } finally {
+      setActingId(null)
+    }
+  }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setOpen(false)}>
-      <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-5 w-80 shadow-xl" onClick={e => e.stopPropagation()}>
-        <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 mb-4">添加跟踪仓库</h3>
-        <div className="space-y-3">
-          <div>
-            <label className="text-xs text-zinc-500 mb-1 block">仓库</label>
-            <Input
-              value={input}
-              onChange={e => setInput(e.target.value)}
-              placeholder="owner/repo 或 GitHub URL"
-              className="h-8 text-sm"
-              onKeyDown={e => e.key === 'Enter' && handleAdd()}
-              autoFocus
-            />
-          </div>
-          <div className="flex gap-2">
-            <div className="flex-1">
-              <label className="text-xs text-zinc-500 mb-1 block">分组</label>
-              <Input value={group} onChange={e => setGroup(e.target.value)} placeholder="未分组" className="h-8 text-sm" />
-            </div>
-            <div className="w-28">
-              <label className="text-xs text-zinc-500 mb-1 block">采集间隔（分钟）</label>
-              <Input value={intervalMin} onChange={e => setIntervalMin(e.target.value)} className="h-8 text-sm" type="number" min="1" />
-            </div>
-          </div>
-        </div>
-        {status && (
-          <p className="mt-3 text-xs text-zinc-400 flex items-center gap-1.5">
-            {loading && <Loader2 className="w-3 h-3 animate-spin flex-shrink-0" />}
-            {status}
-          </p>
-        )}
-        <div className="flex gap-2 mt-4">
-          <Button size="sm" onClick={handleAdd} disabled={loading} className="flex-1 gap-1">
-            {loading && <Loader2 className="w-3.5 h-3.5 animate-spin" />}添加
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>订阅管理 · GitHub</DialogTitle>
+          <DialogDescription>
+            添加要追踪的仓库，系统会按设定间隔自动采集 Issues / Releases / 用户痛点。
+          </DialogDescription>
+        </DialogHeader>
+
+        <form onSubmit={handleAdd} className="flex items-center gap-2">
+          <Input value={input} onChange={e => setInput(e.target.value)}
+            placeholder="owner/repo 或 GitHub URL" className="h-8 text-xs flex-1" />
+          <Input value={group} onChange={e => setGroup(e.target.value)}
+            placeholder="未分组" className="h-8 text-xs w-24" />
+          <Input value={intervalMin} onChange={e => setIntervalMin(e.target.value)}
+            type="number" min="1" className="h-8 text-xs w-20" title="采集间隔（分钟）" />
+          <Button type="submit" size="sm" className="h-8 text-xs" disabled={adding || !input.trim()}>
+            {adding ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : '添加'}
           </Button>
-          <Button size="sm" variant="outline" onClick={() => setOpen(false)} disabled={loading}>取消</Button>
+        </form>
+
+        <div>
+          <div className="text-[11px] uppercase tracking-wider text-zinc-400 mb-1.5 px-0.5">
+            已订阅 · {repos.length}
+          </div>
+          {repos.length === 0 ? (
+            <div className="text-xs text-zinc-400 py-6 text-center border border-dashed rounded-md">
+              暂无追踪仓库。输入 owner/repo 后点击「添加」。
+            </div>
+          ) : (
+            <div className="border border-zinc-200 dark:border-zinc-800 rounded-md max-h-72 overflow-y-auto">
+              {repos.map(r => (
+                <div key={r.id}
+                  className={cn(
+                    'flex items-center gap-2 px-2.5 py-1.5 border-b border-zinc-100 dark:border-zinc-800 last:border-0',
+                    r.muted && 'opacity-50'
+                  )}>
+                  <GitFork className="w-4 h-4 text-zinc-400 flex-shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <div className="text-xs font-medium truncate">{r.id}</div>
+                    <div className="text-[11px] text-zinc-400 truncate">
+                      <Star className="w-2.5 h-2.5 inline -mt-0.5" /> {formatStars(r.stars)}
+                      {r.language && <> · {r.language}</>} · {r.collect_interval_minutes}m
+                      {r.last_collected_at && <> · 最近 {formatRelative(r.last_collected_at)}</>}
+                    </div>
+                  </div>
+                  <Button size="sm" variant="ghost" className="h-7 text-xs gap-1 px-2"
+                    disabled={actingId === r.id} onClick={() => handleSync(r)}>
+                    {actingId === r.id
+                      ? <Loader2 className="w-3 h-3 animate-spin" />
+                      : <RefreshCw className="w-3 h-3" />}
+                    同步
+                  </Button>
+                  <Button size="sm" variant="ghost" className="h-7 w-7 p-0"
+                    disabled={actingId === r.id}
+                    title={r.muted ? '取消静音' : '静音'}
+                    onClick={() => handleToggleMute(r)}>
+                    {r.muted ? <Volume2 className="w-3 h-3" /> : <VolumeX className="w-3 h-3" />}
+                  </Button>
+                  <Button size="sm" variant="ghost"
+                    className="h-7 w-7 p-0 text-red-400 hover:text-red-600"
+                    disabled={actingId === r.id}
+                    onClick={() => handleDelete(r)}>
+                    <Trash2 className="w-3 h-3" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   )
 }
 
@@ -229,6 +300,13 @@ function TrendingTab({ items }: { items: GithubTrendingRepo[] }) {
                     <TrendingUp className="w-3.5 h-3.5" />+{formatStars(r.stars_gained)}
                   </span>
                 )}
+                <AddToTopicPopover
+                  url={r.url}
+                  title={`${r.owner}/${r.repo}`}
+                  summary={r.description}
+                  platform="github"
+                  className="!w-6 !h-6"
+                />
               </div>
             </div>
           ))}
@@ -328,6 +406,13 @@ function IssuesTab({ repoId, issues: initial, onLoad }: { repoId: string; issues
                         {issue.title}
                       </a>
                       <span className="text-[10px] text-zinc-400 flex-shrink-0">#{issue.number}</span>
+                      <AddToTopicPopover
+                        url={issue.html_url}
+                        title={issue.title}
+                        summary={issue.body?.slice(0, 200) ?? ''}
+                        platform="github"
+                        className="!w-6 !h-6 flex-shrink-0"
+                      />
                     </div>
                     {issue.labels.length > 0 && (
                       <div className="flex flex-wrap items-center gap-1.5 mb-1.5">
@@ -611,6 +696,7 @@ export function GithubClient({ initialRepos, initialTrending, initialIssues, ini
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [tab, setTab] = useState<Tab>('trending')
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [subsOpen, setSubsOpen] = useState(false)
 
   const selected = repos.find(r => r.id === selectedId) ?? null
 
@@ -672,6 +758,10 @@ export function GithubClient({ initialRepos, initialTrending, initialIssues, ini
             <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">GitHub 雷达</h2>
             <p className="text-[11px] text-zinc-400">{repos.length} 个跟踪仓库</p>
           </div>
+          <Button size="sm" variant="outline" className="h-7 w-7 p-0"
+            title="订阅管理" onClick={() => setSubsOpen(true)}>
+            <Settings className="w-3.5 h-3.5" />
+          </Button>
         </div>
 
         <div className="flex-1 overflow-y-auto py-2">
@@ -755,13 +845,6 @@ export function GithubClient({ initialRepos, initialTrending, initialIssues, ini
           )}
         </div>
 
-        <div className="px-4 py-3 border-t border-zinc-100 dark:border-zinc-800">
-          <AddRepoDialog onAdded={(r) => {
-            setRepos(prev => [...prev, r])
-            setSelectedId(r.id)
-            setTab('releases')
-          }} />
-        </div>
       </aside>
 
       {/* Main content */}
@@ -832,6 +915,18 @@ export function GithubClient({ initialRepos, initialTrending, initialIssues, ini
           </div>
         )}
       </div>
+
+      <SubscribeDialog
+        open={subsOpen}
+        onOpenChange={setSubsOpen}
+        repos={repos}
+        onAdded={r => { setRepos(prev => [...prev, r]); setSelectedId(r.id); setTab('releases') }}
+        onUpdated={u => setRepos(prev => prev.map(r => r.id === u.id ? u : r))}
+        onDeleted={id => {
+          setRepos(prev => prev.filter(r => r.id !== id))
+          if (selectedId === id) { setSelectedId(null); setTab('trending') }
+        }}
+      />
     </div>
   )
 }

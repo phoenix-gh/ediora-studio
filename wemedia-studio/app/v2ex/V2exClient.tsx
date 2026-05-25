@@ -1,7 +1,10 @@
 'use client'
 
-import { useState, useMemo, useCallback, useEffect, useRef } from 'react'
-import { Hash, User, Layers, Globe, RefreshCw, Plus, Trash2, Volume2, VolumeX, ExternalLink, Search, MessageCircle, Loader2, X } from 'lucide-react'
+import { useState, useMemo, useCallback, useEffect } from 'react'
+import { Hash, User, Layers, Globe, RefreshCw, Trash2, Volume2, VolumeX, ExternalLink, Search, MessageCircle, Loader2, Settings } from 'lucide-react'
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
+} from '@/components/ui/dialog'
 import { toast } from 'sonner'
 import {
   V2exKind, V2exSubscription, V2exTopic, V2exPresets,
@@ -9,11 +12,14 @@ import {
   addV2exSubscription, updateV2exSubscription, deleteV2exSubscription,
   collectV2exAll, collectV2exSubscription,
 } from '@/lib/api/v2ex'
+import { AddToTopicPopover } from '@/components/features/AddToTopicPopover'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
-import { ArticleReaderModal, ArticleReaderPanel, ReaderMeta } from '@/components/features/ArticleReader'
+import { ResponsiveArticleReader, ReaderMeta } from '@/components/features/ArticleReader'
 import { useMediaQuery } from '@/lib/use-media-query'
+import { fmtRelTime } from '@/lib/format'
+import { useInfiniteScroll } from '@/lib/use-infinite-scroll'
 
 const KIND_META: Record<V2exKind, { label: string; icon: typeof Hash; color: string }> = {
   node: { label: '节点', icon: Hash, color: 'text-blue-500' },
@@ -25,34 +31,30 @@ const KIND_META: Record<V2exKind, { label: string; icon: typeof Hash; color: str
 const DAYS_OPTIONS = [3, 7, 14, 30]
 const PAGE_SIZE = 30
 
-function fmtRelTime(iso: string) {
-  const d = new Date(iso).getTime()
-  const diff = (Date.now() - d) / 1000
-  if (diff < 60) return '刚刚'
-  if (diff < 3600) return `${Math.floor(diff / 60)} 分钟前`
-  if (diff < 86400) return `${Math.floor(diff / 3600)} 小时前`
-  if (diff < 86400 * 30) return `${Math.floor(diff / 86400)} 天前`
-  return new Date(iso).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })
-}
-
 function stripHtml(html: string) {
   return html.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim()
 }
 
-// ── Add Subscription Dialog ────────────────────────────────────────────────────
+// ── Subscribe Dialog ──────────────────────────────────────────────────────────
 
-function AddSubDialog({
-  presets, onAdd,
+function SubscribeDialog({
+  open, onOpenChange, presets, subs, onAdd, onMute, onDelete, onCollect,
 }: {
+  open: boolean
+  onOpenChange: (v: boolean) => void
   presets: V2exPresets
+  subs: V2exSubscription[]
   onAdd: (body: { kind: V2exKind; key?: string; label?: string; group?: string }) => Promise<void>
+  onMute: (s: V2exSubscription) => Promise<void>
+  onDelete: (s: V2exSubscription) => Promise<void>
+  onCollect: (s: V2exSubscription) => Promise<void>
 }) {
-  const [open, setOpen] = useState(false)
   const [kind, setKind] = useState<V2exKind>('node')
   const [key, setKey] = useState('')
   const [label, setLabel] = useState('')
   const [group, setGroup] = useState('未分组')
-  const [loading, setLoading] = useState(false)
+  const [adding, setAdding] = useState(false)
+  const [actingId, setActingId] = useState<number | null>(null)
 
   const presetList = kind === 'tab' ? presets.tabs : kind === 'node' ? presets.nodes : []
   const placeholderMap: Record<V2exKind, string> = {
@@ -62,14 +64,10 @@ function AddSubDialog({
     all:  '无需填写',
   }
 
-  function reset() {
-    setKind('node'); setKey(''); setLabel(''); setGroup('未分组')
-  }
-
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (kind !== 'all' && !key.trim()) return
-    setLoading(true)
+    setAdding(true)
     try {
       await onAdd({
         kind,
@@ -77,109 +75,137 @@ function AddSubDialog({
         label: label.trim() || undefined,
         group,
       })
-      reset()
-      setOpen(false)
+      setKey(''); setLabel('')
     } finally {
-      setLoading(false)
+      setAdding(false)
     }
   }
 
-  if (!open) {
-    return (
-      <Button size="sm" className="h-8 text-xs gap-1.5" onClick={() => setOpen(true)}>
-        <Plus className="w-3.5 h-3.5" />
-        添加订阅
-      </Button>
-    )
+  async function wrap(s: V2exSubscription, fn: (x: V2exSubscription) => Promise<void>) {
+    setActingId(s.id)
+    try { await fn(s) } finally { setActingId(null) }
   }
 
   return (
-    <div className="absolute right-6 top-12 z-30 w-[360px] rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 shadow-lg p-4">
-      <form onSubmit={handleSubmit} className="space-y-3">
-        <div className="flex items-center justify-between">
-          <p className="text-sm font-medium text-zinc-700 dark:text-zinc-300">新建 V2EX 订阅</p>
-          <button type="button" onClick={() => setOpen(false)} className="text-zinc-400 hover:text-zinc-700">
-            <X className="w-4 h-4" />
-          </button>
-        </div>
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>订阅管理 · V2EX</DialogTitle>
+          <DialogDescription>
+            按节点、用户、Tab 或全站订阅，系统会定时拉取最新主题。
+          </DialogDescription>
+        </DialogHeader>
 
-        {/* Kind tabs */}
-        <div className="grid grid-cols-4 gap-1 p-0.5 bg-zinc-100 dark:bg-zinc-900 rounded-md">
-          {(Object.keys(KIND_META) as V2exKind[]).map(k => {
-            const Icon = KIND_META[k].icon
-            return (
-              <button
-                key={k}
-                type="button"
-                onClick={() => { setKind(k); setKey('') }}
-                className={cn(
-                  'flex items-center justify-center gap-1 px-2 py-1 text-xs rounded transition-colors',
-                  kind === k
-                    ? 'bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 font-medium shadow-sm'
-                    : 'text-zinc-500 hover:text-zinc-700'
-                )}
-              >
-                <Icon className={cn('w-3 h-3', kind === k && KIND_META[k].color)} />
-                {KIND_META[k].label}
-              </button>
-            )
-          })}
-        </div>
-
-        {kind !== 'all' && (
-          <div>
-            <Input
-              value={key}
-              onChange={e => setKey(e.target.value)}
-              placeholder={placeholderMap[kind]}
-              className="h-8 text-xs"
-              disabled={kind === 'tab'}
-            />
-            {presetList.length > 0 && (
-              <div className="mt-2 flex flex-wrap gap-1">
-                {presetList.map(p => (
-                  <button
-                    key={p.key}
-                    type="button"
-                    onClick={() => setKey(p.key)}
-                    className={cn(
-                      'px-2 py-0.5 rounded-full text-xs transition-colors',
-                      key === p.key
-                        ? 'bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 font-medium'
-                        : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 hover:bg-zinc-200 dark:hover:bg-zinc-700',
-                    )}
-                  >
-                    {p.label}
-                  </button>
-                ))}
-              </div>
-            )}
+        <form onSubmit={handleSubmit} className="space-y-2">
+          <div className="grid grid-cols-4 gap-1 p-0.5 bg-zinc-100 dark:bg-zinc-900 rounded-md">
+            {(Object.keys(KIND_META) as V2exKind[]).map(k => {
+              const Icon = KIND_META[k].icon
+              return (
+                <button
+                  key={k}
+                  type="button"
+                  onClick={() => { setKind(k); setKey('') }}
+                  className={cn(
+                    'flex items-center justify-center gap-1 px-2 py-1 text-xs rounded transition-colors',
+                    kind === k
+                      ? 'bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 font-medium shadow-sm'
+                      : 'text-zinc-500 hover:text-zinc-700'
+                  )}
+                >
+                  <Icon className={cn('w-3 h-3', kind === k && KIND_META[k].color)} />
+                  {KIND_META[k].label}
+                </button>
+              )
+            })}
           </div>
-        )}
 
-        <Input
-          value={label}
-          onChange={e => setLabel(e.target.value)}
-          placeholder="显示名（留空自动从 feed 标题取）"
-          className="h-8 text-xs"
-        />
-        <Input
-          value={group}
-          onChange={e => setGroup(e.target.value)}
-          placeholder="分组"
-          className="h-8 text-xs"
-        />
+          {kind !== 'all' && (
+            <div>
+              <Input value={key} onChange={e => setKey(e.target.value)}
+                placeholder={placeholderMap[kind]} className="h-8 text-xs"
+                disabled={kind === 'tab'} />
+              {presetList.length > 0 && (
+                <div className="mt-1.5 flex flex-wrap gap-1">
+                  {presetList.map(p => (
+                    <button key={p.key} type="button" onClick={() => setKey(p.key)}
+                      className={cn(
+                        'px-2 py-0.5 rounded-full text-xs transition-colors',
+                        key === p.key
+                          ? 'bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 font-medium'
+                          : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 hover:bg-zinc-200 dark:hover:bg-zinc-700',
+                      )}>
+                      {p.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
-        <div className="flex items-center gap-2 justify-end pt-1">
-          <Button type="button" variant="ghost" size="sm" className="h-8 text-xs" onClick={() => setOpen(false)}>
-            取消
-          </Button>
-          <Button type="submit" size="sm" className="h-8 text-xs" disabled={loading || (kind !== 'all' && !key.trim())}>
-            {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : '订阅'}
-          </Button>
+          <div className="flex items-center gap-2">
+            <Input value={label} onChange={e => setLabel(e.target.value)}
+              placeholder="显示名（留空自动取）" className="h-8 text-xs flex-1" />
+            <Input value={group} onChange={e => setGroup(e.target.value)}
+              placeholder="分组" className="h-8 text-xs w-24" />
+            <Button type="submit" size="sm" className="h-8 text-xs"
+              disabled={adding || (kind !== 'all' && !key.trim())}>
+              {adding ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : '添加'}
+            </Button>
+          </div>
+        </form>
+
+        <div>
+          <div className="text-[11px] uppercase tracking-wider text-zinc-400 mb-1.5 px-0.5">
+            已订阅 · {subs.length}
+          </div>
+          {subs.length === 0 ? (
+            <div className="text-xs text-zinc-400 py-6 text-center border border-dashed rounded-md">
+              暂无订阅。从上方选 kind + key 后点击「添加」。
+            </div>
+          ) : (
+            <div className="border border-zinc-200 dark:border-zinc-800 rounded-md max-h-60 overflow-y-auto">
+              {subs.map(s => {
+                const Icon = KIND_META[s.kind].icon
+                return (
+                  <div key={s.id}
+                    className={cn(
+                      'flex items-center gap-2 px-2.5 py-1.5 border-b border-zinc-100 dark:border-zinc-800 last:border-0',
+                      s.muted && 'opacity-50'
+                    )}>
+                    <Icon className={cn('w-4 h-4 flex-shrink-0', KIND_META[s.kind].color)} />
+                    <div className="flex-1 min-w-0">
+                      <div className="text-xs font-medium truncate">{s.label}</div>
+                      <div className="text-[11px] text-zinc-400 truncate">
+                        {KIND_META[s.kind].label}{s.key && ` · ${s.key}`} · {s.group}
+                      </div>
+                    </div>
+                    <Button size="sm" variant="ghost" className="h-7 text-xs gap-1 px-2"
+                      disabled={actingId === s.id} onClick={() => wrap(s, onCollect)}>
+                      {actingId === s.id
+                        ? <Loader2 className="w-3 h-3 animate-spin" />
+                        : <RefreshCw className="w-3 h-3" />}
+                      同步
+                    </Button>
+                    <Button size="sm" variant="ghost" className="h-7 w-7 p-0"
+                      disabled={actingId === s.id}
+                      title={s.muted ? '取消静音' : '静音'}
+                      onClick={() => wrap(s, onMute)}>
+                      {s.muted ? <Volume2 className="w-3 h-3" /> : <VolumeX className="w-3 h-3" />}
+                    </Button>
+                    <Button size="sm" variant="ghost"
+                      className="h-7 w-7 p-0 text-red-400 hover:text-red-600"
+                      disabled={actingId === s.id}
+                      onClick={() => wrap(s, onDelete)}>
+                      <Trash2 className="w-3 h-3" />
+                    </Button>
+                  </div>
+                )
+              })}
+            </div>
+          )}
         </div>
-      </form>
-    </div>
+      </DialogContent>
+    </Dialog>
   )
 }
 
@@ -280,10 +306,12 @@ function SubList({
 function TopicCard({ topic, onOpen }: { topic: V2exTopic; onOpen: () => void }) {
   const excerpt = stripHtml(topic.content).slice(0, 140)
   return (
-    <button
-      type="button"
+    <div
+      role="button"
+      tabIndex={0}
       onClick={onOpen}
-      className="w-full text-left block py-3 px-2 -mx-2 rounded-lg border-b border-zinc-100 dark:border-zinc-800 last:border-0 hover:bg-zinc-50 dark:hover:bg-zinc-900/50 transition-colors group"
+      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen() } }}
+      className="relative w-full text-left block py-3 px-2 -mx-2 rounded-lg border-b border-zinc-100 dark:border-zinc-800 last:border-0 hover:bg-zinc-50 dark:hover:bg-zinc-900/50 transition-colors group cursor-pointer"
     >
       <p className="text-[13px] font-medium text-zinc-900 dark:text-zinc-100 line-clamp-2 leading-snug
                     group-hover:text-blue-700 dark:group-hover:text-blue-400 transition-colors">
@@ -301,13 +329,33 @@ function TopicCard({ topic, onOpen }: { topic: V2exTopic; onOpen: () => void }) 
         )}
         <span>·</span>
         <span>{fmtRelTime(topic.published_at)}</span>
-        <span className="ml-auto flex items-center gap-1 text-zinc-400">
-          <MessageCircle className="w-3 h-3" />
-          {topic.replies}
-          <ExternalLink className="w-3 h-3 ml-1 opacity-0 group-hover:opacity-60 transition-opacity" />
-        </span>
       </div>
-    </button>
+
+      <div className="mt-2 flex items-center text-[11px] text-zinc-400">
+        <span className="flex items-center gap-1">
+          <MessageCircle className="w-3.5 h-3.5" />
+          {topic.replies}
+        </span>
+        <div className="ml-auto flex items-center gap-0.5">
+          <a
+            href={topic.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={e => e.stopPropagation()}
+            title="查看原帖"
+            className="inline-flex items-center justify-center w-7 h-7 rounded-md text-zinc-400 hover:text-blue-500 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+          >
+            <ExternalLink className="w-3.5 h-3.5" />
+          </a>
+          <AddToTopicPopover
+            url={topic.url}
+            title={topic.title}
+            summary={excerpt}
+            platform="v2ex"
+          />
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -327,10 +375,9 @@ export function V2exClient({
   const [search, setSearch] = useState('')
   const [collecting, setCollecting] = useState(false)
   const [loading, setLoading] = useState(false)
-  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE)
-  const sentinelRef = useRef<HTMLDivElement>(null)
   const [readerOpen, setReaderOpen] = useState(false)
   const [readerMeta, setReaderMeta] = useState<ReaderMeta | null>(null)
+  const [subsOpen, setSubsOpen] = useState(false)
   // V2EX already has external sidebar (224) + internal subs sidebar (224); needs a wider viewport before fitting a reader panel
   const useSidePanel = useMediaQuery('(min-width: 1440px)')
 
@@ -361,7 +408,7 @@ export function V2exClient({
         search: search || undefined,
       })
       setTopics(data)
-      setVisibleCount(PAGE_SIZE)
+      resetScroll()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : '加载失败')
     } finally {
@@ -453,19 +500,11 @@ export function V2exClient({
     return list
   }, [topics, search])
 
+  const { visibleCount, sentinelRef, hasMore, reset: resetScroll } = useInfiniteScroll({
+    totalCount: filtered.length,
+    pageSize: PAGE_SIZE,
+  })
   const visible = filtered.slice(0, visibleCount)
-  const hasMore = visibleCount < filtered.length
-
-  useEffect(() => {
-    const el = sentinelRef.current
-    if (!el) return
-    const obs = new IntersectionObserver(
-      ([entry]) => { if (entry.isIntersecting && hasMore) setVisibleCount(c => c + PAGE_SIZE) },
-      { rootMargin: '200px' },
-    )
-    obs.observe(el)
-    return () => obs.disconnect()
-  }, [hasMore])
 
   return (
     <div className="flex h-full">
@@ -513,7 +552,7 @@ export function V2exClient({
                 <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-400" />
                 <Input
                   value={search}
-                  onChange={e => { setSearch(e.target.value); setVisibleCount(PAGE_SIZE) }}
+                  onChange={e => { setSearch(e.target.value); resetScroll() }}
                   placeholder="搜索标题/作者"
                   className="h-8 text-xs pl-8 w-44"
                 />
@@ -528,7 +567,11 @@ export function V2exClient({
                 <RefreshCw className={cn('w-3.5 h-3.5', collecting && 'animate-spin')} />
                 {collecting ? '采集中…' : '立即采集'}
               </Button>
-              <AddSubDialog presets={presets} onAdd={handleAdd} />
+              <Button size="sm" variant="outline" className="h-8 text-xs gap-1.5"
+                onClick={() => setSubsOpen(true)}>
+                <Settings className="w-3.5 h-3.5" />
+                订阅管理
+              </Button>
             </div>
           </div>
 
@@ -574,23 +617,24 @@ export function V2exClient({
         </div>
       </div>
 
-      {useSidePanel && (
-        <ArticleReaderPanel
-          open={readerOpen}
-          onClose={() => setReaderOpen(false)}
-          meta={readerMeta}
-          accent="indigo"
-        />
-      )}
+      <ResponsiveArticleReader
+        asPanel={useSidePanel}
+        open={readerOpen}
+        onClose={() => setReaderOpen(false)}
+        meta={readerMeta}
+        accent="indigo"
+      />
 
-      {!useSidePanel && (
-        <ArticleReaderModal
-          open={readerOpen}
-          onClose={() => setReaderOpen(false)}
-          meta={readerMeta}
-          accent="indigo"
-        />
-      )}
+      <SubscribeDialog
+        open={subsOpen}
+        onOpenChange={setSubsOpen}
+        presets={presets}
+        subs={subs}
+        onAdd={handleAdd}
+        onMute={handleMute}
+        onDelete={handleDelete}
+        onCollect={handleCollect}
+      />
     </div>
   )
 }

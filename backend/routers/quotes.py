@@ -6,7 +6,7 @@ from database import get_db
 from models import Quote
 from schemas import QuoteCreate, QuoteUpdate, QuoteOut
 
-router = APIRouter(prefix="/api/quotes", tags=["quotes"])
+router = APIRouter(prefix="/quotes", tags=["quotes"])
 
 
 @router.get("", response_model=list[QuoteOut])

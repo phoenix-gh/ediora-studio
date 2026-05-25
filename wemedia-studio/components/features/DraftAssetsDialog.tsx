@@ -1,0 +1,402 @@
+"use client"
+
+import { useEffect, useRef, useState } from "react"
+import {
+  Link2, Images, Upload, X, Plus, Loader2, Sparkles, ImagePlus,
+  ExternalLink, ImageIcon,
+} from "lucide-react"
+import { toast } from "sonner"
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
+} from "@/components/ui/dialog"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { cn } from "@/lib/utils"
+import { DraftImage, DraftSource } from "@/lib/api/drafts"
+import { CoverStyle, listPublishAccounts, PublishAccount } from "@/lib/api/publish-accounts"
+import { regenerateCover } from "@/lib/api/studio"
+import { CoverStyleEditor, buildCoverStyleFromEditor } from "@/components/features/CoverStyleEditor"
+
+type Tab = "sources" | "images"
+
+interface Props {
+  open: boolean
+  onClose: () => void
+  initialTab?: Tab
+
+  draftId: number
+
+  sources: DraftSource[]
+  onSourcesChange: (next: DraftSource[]) => void
+
+  images: DraftImage[]
+  imagesLoading: boolean
+  uploading: boolean
+  onUpload: (files: FileList | null) => void
+  onDelete: (imageId: number) => void
+  onInsert: (img: DraftImage) => void
+  onRefreshImages: () => void
+}
+
+function isCover(img: DraftImage): boolean {
+  const name = (img.original_name || img.filename || "").toLowerCase()
+  return name.startsWith("cover")
+}
+
+export function DraftAssetsDialog({
+  open, onClose, initialTab = "sources",
+  draftId,
+  sources, onSourcesChange,
+  images, imagesLoading, uploading,
+  onUpload, onDelete, onInsert, onRefreshImages,
+}: Props) {
+  const [tab, setTab] = useState<Tab>(initialTab)
+
+  // Sources form state
+  const [newUrl, setNewUrl] = useState("")
+  const [newTitle, setNewTitle] = useState("")
+  const [newNote, setNewNote] = useState("")
+
+  // Image preview state
+  const [previewImg, setPreviewImg] = useState<DraftImage | null>(null)
+
+  // Cover regen state
+  const [regenOpen, setRegenOpen] = useState(false)
+  const [accounts, setAccounts] = useState<PublishAccount[] | null>(null)
+  const [accountId, setAccountId] = useState<string | null>(null)
+  const [regenNote, setRegenNote] = useState("")
+  const [regenBusy, setRegenBusy] = useState(false)
+  const [coverStyle, setCoverStyle] = useState<CoverStyle>({})
+  const [coverMotifsText, setCoverMotifsText] = useState("")
+  const [coverNegativeText, setCoverNegativeText] = useState("")
+
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => { if (open) setTab(initialTab) }, [open, initialTab])
+
+  useEffect(() => {
+    if (!regenOpen || accounts) return
+    listPublishAccounts()
+      .then(list => setAccounts(list.filter(a => a.is_active)))
+      .catch(() => toast.error("加载发布账号失败"))
+  }, [regenOpen, accounts])
+
+  useEffect(() => {
+    if (!accountId || !accounts) return
+    const acc = accounts.find(a => a.id === accountId)
+    const cs: CoverStyle = acc?.cover_style ?? {}
+    setCoverStyle({ type: cs.type, palette: cs.palette, rendering: cs.rendering, text: cs.text, mood: cs.mood, aspect_ratio: cs.aspect_ratio })
+    setCoverMotifsText((cs.signature_motifs ?? []).join('\n'))
+    setCoverNegativeText((cs.negative ?? []).join('\n'))
+  }, [accountId, accounts])
+
+  const cover = images.filter(isCover).sort((a, b) => b.id - a.id)[0]
+
+  // Auto-select first image (prefer cover) when images load or dialog opens
+  useEffect(() => {
+    if (images.length === 0) { setPreviewImg(null); return }
+    setPreviewImg(prev => {
+      if (prev && images.find(i => i.id === prev.id)) return prev
+      return cover ?? images[0]
+    })
+  }, [images, cover])
+
+  function addSource() {
+    const url = newUrl.trim()
+    if (!url) return
+    onSourcesChange([...sources, { url, title: newTitle.trim(), note: newNote.trim() }])
+    setNewUrl(""); setNewTitle(""); setNewNote("")
+  }
+
+  function removeSource(i: number) {
+    onSourcesChange(sources.filter((_, j) => j !== i))
+  }
+
+  async function handleRegen() {
+    if (!accountId) { toast.error("请选择发布账号"); return }
+    const builtCoverStyle = buildCoverStyleFromEditor(coverStyle, coverMotifsText, coverNegativeText)
+    setRegenBusy(true)
+    try {
+      const res = await regenerateCover({
+        draft_id: draftId,
+        account_id: accountId,
+        note: regenNote,
+        cover_style: Object.keys(builtCoverStyle).length ? builtCoverStyle : undefined,
+      })
+      toast.success(`已派 illustrator 重画 · ${res.task_id}`)
+      setRegenOpen(false)
+      setRegenNote("")
+      setTimeout(onRefreshImages, 3000)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "派单失败")
+    } finally {
+      setRegenBusy(false)
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={o => !o && onClose()}>
+      <DialogContent className="sm:max-w-3xl h-[80vh] overflow-hidden flex flex-col">
+        <DialogHeader>
+          <DialogTitle>素材</DialogTitle>
+          <DialogDescription className="text-xs">
+            灵感来源 · 图片素材 · 封面（命名以 <code className="bg-zinc-100 dark:bg-zinc-800 px-1 rounded">cover</code> 开头的图自动作为封面）
+          </DialogDescription>
+        </DialogHeader>
+
+        {/* Tabs */}
+        <div className="flex border-b border-zinc-200 dark:border-zinc-800 -mx-6 px-6">
+          {([
+            { key: "sources" as const, label: "灵感来源", icon: Link2, count: sources.length },
+            { key: "images"  as const, label: "图片素材", icon: Images, count: images.length },
+          ]).map(({ key, label, icon: Icon, count }) => (
+            <button
+              key={key}
+              onClick={() => setTab(key)}
+              className={cn(
+                "flex items-center gap-1.5 px-4 py-2 text-xs font-medium border-b-2 -mb-px transition-colors",
+                tab === key
+                  ? "border-indigo-500 text-indigo-600 dark:text-indigo-400"
+                  : "border-transparent text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200",
+              )}
+            >
+              <Icon className="w-3.5 h-3.5" />
+              {label}
+              {count > 0 && (
+                <span className={cn(
+                  "text-[10px] px-1.5 py-0.5 rounded-full font-medium",
+                  tab === key
+                    ? "bg-indigo-100 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400"
+                    : "bg-zinc-100 dark:bg-zinc-800 text-zinc-500",
+                )}>
+                  {count}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+
+        <div className="flex-1 overflow-y-auto -mx-6 px-6 py-3">
+          {tab === "sources" ? (
+            <div className="space-y-2">
+              {sources.length === 0 && (
+                <p className="text-center text-xs text-zinc-400 py-4">还没有添加任何来源</p>
+              )}
+              {sources.map((s, i) => (
+                <div key={i} className="flex items-start gap-2 group text-xs border border-zinc-100 dark:border-zinc-800 rounded-md px-2.5 py-2">
+                  <ExternalLink className="w-3 h-3 text-indigo-400 flex-shrink-0 mt-0.5" />
+                  <div className="flex-1 min-w-0">
+                    <a href={s.url} target="_blank" rel="noopener noreferrer"
+                      className="text-indigo-500 hover:text-indigo-700 dark:hover:text-indigo-300 hover:underline truncate block">
+                      {s.title || s.url}
+                    </a>
+                    {s.note && <p className="text-zinc-400 mt-0.5 text-[11px]">{s.note}</p>}
+                  </div>
+                  <button onClick={() => removeSource(i)}
+                    className="opacity-0 group-hover:opacity-100 text-zinc-400 hover:text-red-500 transition-opacity flex-shrink-0">
+                    <X className="w-3 h-3" />
+                  </button>
+                </div>
+              ))}
+              <div className="pt-2 border-t border-zinc-100 dark:border-zinc-800 space-y-1.5">
+                <Input value={newUrl} onChange={e => setNewUrl(e.target.value)}
+                  placeholder="来源 URL…" className="h-8 text-xs" />
+                <div className="flex gap-1.5">
+                  <Input value={newTitle} onChange={e => setNewTitle(e.target.value)}
+                    placeholder="标题（可选）" className="h-8 text-xs flex-1" />
+                  <Input value={newNote} onChange={e => setNewNote(e.target.value)}
+                    placeholder="备注（可选）" className="h-8 text-xs flex-1" />
+                  <Button size="sm" onClick={addSource} disabled={!newUrl.trim()} className="gap-1">
+                    <Plus className="w-3 h-3" />添加
+                  </Button>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {/* Large preview */}
+              <section>
+                <div className="flex items-center gap-2 mb-2">
+                  <ImagePlus className="w-3.5 h-3.5 text-emerald-500" />
+                  <span className="text-[11px] uppercase tracking-wider text-zinc-500 font-semibold">预览</span>
+                  {previewImg && isCover(previewImg) && (
+                    <span className="text-[10px] bg-emerald-100 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400 px-1.5 py-0.5 rounded-full font-medium">
+                      封面
+                    </span>
+                  )}
+                  <button
+                    onClick={() => setRegenOpen(v => !v)}
+                    className="ml-auto flex items-center gap-1 text-xs text-violet-600 hover:text-violet-700 dark:text-violet-400 dark:hover:text-violet-300 transition-colors"
+                  >
+                    <Sparkles className="w-3 h-3" />
+                    {cover ? "重生成封面" : "AI 生成封面"}
+                  </button>
+                </div>
+
+                {previewImg ? (
+                  <div className="relative w-full aspect-[16/9] rounded-md overflow-hidden bg-zinc-100 dark:bg-zinc-800 ring-1 ring-zinc-200 dark:ring-zinc-800">
+                    <img src={previewImg.hosted_url} alt={previewImg.original_name} className="w-full h-full object-contain" />
+                    <div className="absolute bottom-0 left-0 right-0 flex items-center justify-between px-2 py-1.5 bg-gradient-to-t from-black/60 to-transparent">
+                      <span className="text-white text-[10px] truncate max-w-[60%]">
+                        {previewImg.original_name || previewImg.filename}
+                      </span>
+                      <Button
+                        size="sm"
+                        className="h-6 text-[11px] px-2 gap-1 bg-white/20 hover:bg-white/30 text-white border-0 backdrop-blur-sm"
+                        onClick={() => { onInsert(previewImg); toast.success("已插入图片") }}
+                      >
+                        <ImageIcon className="w-3 h-3" />
+                        插入
+                      </Button>
+                    </div>
+                  </div>
+                ) : !imagesLoading ? (
+                  <p className="text-[11px] text-zinc-400 border border-dashed border-zinc-200 dark:border-zinc-800 rounded-md py-6 text-center">
+                    {cover ? "" : "还没有封面 · "}「AI 生成封面」让 illustrator 出一张，或上传以 cover 开头命名的图
+                  </p>
+                ) : null}
+
+                {regenOpen && (
+                  <div className="mt-2 p-3 border border-zinc-200 dark:border-zinc-800 rounded-md bg-zinc-50 dark:bg-zinc-900 space-y-2">
+                    <div className="text-xs font-medium text-zinc-700 dark:text-zinc-300">
+                      让 illustrator 按账号画像出一张
+                    </div>
+                    <div>
+                      <div className="text-xs font-medium text-zinc-500 mb-1.5">发布账号</div>
+                      <div className="max-h-32 overflow-y-auto border border-zinc-200 dark:border-zinc-800 rounded-md bg-white dark:bg-zinc-950">
+                        {accounts === null ? (
+                          <div className="p-3 text-center text-xs text-zinc-400 flex items-center justify-center gap-1">
+                            <Loader2 className="w-3 h-3 animate-spin" /> 加载中
+                          </div>
+                        ) : accounts.length === 0 ? (
+                          <div className="p-3 text-center text-xs text-zinc-400">
+                            暂无启用账号 · 去「设置 → 发布账号」配置
+                          </div>
+                        ) : accounts.map(a => (
+                          <button
+                            key={a.id}
+                            type="button"
+                            onClick={() => setAccountId(a.id)}
+                            className={cn(
+                              "w-full text-left px-2 py-1.5 text-xs hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors",
+                              accountId === a.id && "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300",
+                            )}
+                          >
+                            <div className="font-medium truncate">{a.name}</div>
+                            <div className="text-[10px] text-zinc-400 truncate">
+                              {a.platform} · {a.image_style || a.positioning || "（无画像描述）"}
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    {accountId && (
+                      <details className="rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900">
+                        <summary className="cursor-pointer select-none px-3 py-2 text-xs font-medium text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800">
+                          封面风格覆盖（cover_style）
+                        </summary>
+                        <div className="px-3 py-3 border-t border-zinc-200 dark:border-zinc-700">
+                          <CoverStyleEditor
+                            coverStyle={coverStyle}
+                            onCoverStyleChange={setCoverStyle}
+                            motifsText={coverMotifsText}
+                            onMotifsTextChange={setCoverMotifsText}
+                            negativeText={coverNegativeText}
+                            onNegativeTextChange={setCoverNegativeText}
+                          />
+                        </div>
+                      </details>
+                    )}
+                    <Input value={regenNote} onChange={e => setRegenNote(e.target.value)}
+                      placeholder="额外指令（如「换冷色调」「不要文字」）" className="h-8 text-xs" />
+                    <div className="flex justify-end gap-2">
+                      <Button variant="outline" size="sm" onClick={() => setRegenOpen(false)} disabled={regenBusy}>取消</Button>
+                      <Button size="sm" onClick={handleRegen} disabled={regenBusy || !accountId}>
+                        {regenBusy && <Loader2 className="w-3 h-3 animate-spin mr-1" />}
+                        派单
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </section>
+
+              {/* Image thumbnails */}
+              <section>
+                <div className="flex items-center gap-2 mb-2">
+                  <Images className="w-3.5 h-3.5 text-violet-500" />
+                  <span className="text-[11px] uppercase tracking-wider text-zinc-500 font-semibold">图片素材</span>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    className="hidden"
+                    onChange={e => onUpload(e.target.files)}
+                  />
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={uploading}
+                    className="ml-auto flex items-center gap-1 text-xs text-indigo-500 hover:text-indigo-600 disabled:opacity-40 transition-colors"
+                  >
+                    {uploading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3" />}
+                    上传
+                  </button>
+                  {imagesLoading && <Loader2 className="w-3 h-3 animate-spin text-zinc-400" />}
+                </div>
+
+                {images.length === 0 && !imagesLoading ? (
+                  <p className="text-[11px] text-zinc-400 py-3 text-center border border-dashed border-zinc-200 dark:border-zinc-800 rounded-md">
+                    暂无图片，上传后可插入编辑器
+                  </p>
+                ) : (
+                  <div className="grid grid-cols-5 gap-1.5">
+                    {images.map(img => {
+                      const selected = previewImg?.id === img.id
+                      return (
+                        <div key={img.id}
+                          className={cn(
+                            "group relative aspect-square rounded overflow-hidden bg-zinc-100 dark:bg-zinc-800 cursor-pointer border-2 transition-colors",
+                            isCover(img)
+                              ? selected ? "border-emerald-500" : "border-emerald-300"
+                              : selected ? "border-indigo-500" : "border-transparent hover:border-indigo-300",
+                          )}
+                          onClick={() => setPreviewImg(img)}
+                          title={img.original_name || img.filename}
+                        >
+                          <img src={img.hosted_url} alt={img.original_name} className="w-full h-full object-cover" />
+                          {isCover(img) && (
+                            <span className="absolute top-0.5 left-0.5 bg-emerald-500 text-white text-[9px] px-1 py-0.5 rounded font-medium">封</span>
+                          )}
+                          {/* Insert button */}
+                          <button
+                            onClick={e => { e.stopPropagation(); onInsert(img); toast.success("已插入图片") }}
+                            className="absolute bottom-0.5 right-0.5 opacity-0 group-hover:opacity-100 bg-indigo-600/90 hover:bg-indigo-700 text-white text-[9px] px-1.5 py-0.5 rounded font-medium transition-opacity leading-tight"
+                          >
+                            插入
+                          </button>
+                          {/* Delete button */}
+                          <button
+                            onClick={e => {
+                              e.stopPropagation()
+                              const name = img.original_name || img.filename
+                              if (!confirm(`删除「${name}」？此操作不可撤销。`)) return
+                              if (previewImg?.id === img.id) setPreviewImg(null)
+                              onDelete(img.id)
+                            }}
+                            className="absolute top-0.5 right-0.5 opacity-0 group-hover:opacity-100 bg-black/60 hover:bg-red-600/90 text-white rounded-full p-0.5 transition-colors transition-opacity"
+                          >
+                            <X className="w-2.5 h-2.5" />
+                          </button>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </section>
+            </div>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}

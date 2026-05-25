@@ -128,6 +128,34 @@ export async function deleteSeries(id: number): Promise<void> {
   await apiFetch(`/write/series/${id}`, { method: 'DELETE' })
 }
 
+export interface DraftImage {
+  id: number
+  filename: string
+  original_name: string
+  url: string
+  hosted_url: string
+  size_bytes: number
+  mime_type: string
+  created_at: string
+}
+
+export async function getDraftImages(draftId: number): Promise<DraftImage[]> {
+  return apiFetch<DraftImage[]>(`/write/drafts/${draftId}/images`)
+}
+
+export async function uploadDraftImage(draftId: number, file: File): Promise<DraftImage> {
+  const form = new FormData()
+  form.append('file', file)
+  return apiFetch<DraftImage>(`/write/drafts/${draftId}/images`, {
+    method: 'POST',
+    body: form,
+  })
+}
+
+export async function deleteDraftImage(draftId: number, imageId: number): Promise<void> {
+  await apiFetch(`/write/drafts/${draftId}/images/${imageId}`, { method: 'DELETE' })
+}
+
 export interface ChatMessage {
   role: 'user' | 'assistant'
   content: string

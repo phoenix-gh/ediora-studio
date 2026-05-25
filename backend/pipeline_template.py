@@ -1,0 +1,434 @@
+"""
+Pipeline templates — 把"流程"从 agent SOUL.md 里挪出来集中管理。
+
+Hermes-native 范式：流程 = 任务图结构，靠 dispatcher 跟 parent→child 自动驱动，
+不靠 agent 主动派下游。`/studio/enqueue` 按 flow 字段查这里的蓝图，循环建 N 个任务，
+前一棒做完 dispatcher 自动 promote 下一棒。
+
+关键约束：`hermes kanban create` 不支持 `--metadata`（task-level metadata 在 Hermes
+里只能由 worker `kanban_complete()` 写到 run 上）。所以：
+- 账号画像 / 流程参数 → 直接渲染进每个 task 的 body（markdown 形式）
+- 上游产出（draft_id / brief_md / cover_id）→ 上游 agent 完成时塞 run metadata，
+  下游通过 `worker_context.parents[0].metadata` 自动拿
+
+要改流程顺序、加棒、改 body，改这一个文件即可，不必动 SOUL.md。
+"""
+
+from __future__ import annotations
+
+import json
+import re
+from dataclasses import dataclass
+from typing import Any, Callable
+
+RenderCtx = dict[str, Any]
+
+def _normalize_material(text: str) -> str:
+    """Convert raw material (HTML / plain text / markdown) to clean markdown."""
+    if not text:
+        return ""
+    # Drop <script>/<style> blocks *with their contents* before markdownify
+    # (markdownify's strip= removes the tags but keeps inner text).
+    text = re.sub(r"<(script|style)\b[^>]*>.*?</\1>", "", text, flags=re.I | re.S)
+    from markdownify import markdownify as _md
+    out = _md(text, heading_style="ATX")
+    return re.sub(r"\n{3,}", "\n\n", out).strip()
+
+
+@dataclass
+class PipelineStep:
+    """单棒任务蓝图。enqueue 时按 ctx 渲染成真实 task。"""
+    role: str                              # 逻辑角色（scout/editor/writer/illustrator）
+    assignee: str                          # hermes profile（wms_scout/wms_editor/...）
+    title: Callable[[RenderCtx], str]      # 任务标题渲染
+    body: Callable[[RenderCtx], str]       # 任务 body（agent kanban_show 看到的内容）
+
+
+# ── 画像渲染（按角色只给各自需要的字段）────────────────────────────
+
+def _wr_str(p: dict[str, Any]) -> str:
+    wr = p.get("word_range") or {}
+    if isinstance(wr, dict):
+        return f"{wr.get('min', '?')}-{wr.get('max', '?')} 字"
+    return str(wr)
+
+
+def render_profile_scout(profile: dict[str, Any]) -> str:
+    """scout 只需校验选题是否踩禁区，只给 name/platform/topic_focus/taboo。"""
+    p = profile
+    lines = [
+        "## 账号选题约束",
+        f"- **name**: {p.get('name', '')}（{p.get('platform', '')}）",
+    ]
+    topic_focus = p.get("topic_focus") or []
+    if topic_focus:
+        lines.append("- **topic_focus**（选题范围，素材须落在此范围内）:")
+        for it in topic_focus:
+            lines.append(f"  - {it}")
+    taboo = p.get("taboo") or []
+    if taboo:
+        lines.append("- **taboo**（禁区，触碰即 block）:")
+        for it in taboo:
+            lines.append(f"  - {it}")
+    return "\n".join(lines)
+
+
+def render_profile_editor(profile: dict[str, Any]) -> str:
+    """editor 出 brief，需要定位/受众/字数/图风/语气/选题/禁区。"""
+    p = profile
+    lines = [
+        "## 账号画像（brief 须完全对齐）",
+        f"- **name**: {p.get('name', '')}（{p.get('platform', '')}）",
+        f"- **positioning**: {p.get('positioning', '') or '(未填)'}",
+        f"- **audience**: {p.get('audience', '') or '(未填)'}",
+        f"- **tone**: {p.get('tone', '') or '(未填)'}",
+        f"- **word_range**: {_wr_str(p)}",
+        f"- **image_style**: {p.get('image_style', '') or '(未填)'}",
+    ]
+    topic_focus = p.get("topic_focus") or []
+    if topic_focus:
+        lines.append("- **topic_focus**（选题范围）:")
+        for it in topic_focus:
+            lines.append(f"  - {it}")
+    taboo = p.get("taboo") or []
+    if taboo:
+        lines.append("- **taboo**（禁区）:")
+        for it in taboo:
+            lines.append(f"  - {it}")
+    return "\n".join(lines)
+
+
+def render_profile_writer(profile: dict[str, Any]) -> str:
+    """writer 写稿，需要语气/受众/字数/voice_samples/style_rules/taboo。"""
+    p = profile
+    lines = [
+        "## 账号写作约束",
+        f"- **name**: {p.get('name', '')}（{p.get('platform', '')}）",
+        f"- **tone**: {p.get('tone', '') or '(未填)'}",
+        f"- **audience**: {p.get('audience', '') or '(未填)'}",
+        f"- **word_range**: {_wr_str(p)}",
+    ]
+    taboo = p.get("taboo") or []
+    if taboo:
+        lines.append("- **taboo**（禁区，绝不能碰）:")
+        for it in taboo:
+            lines.append(f"  - {it}")
+    style_rules = p.get("style_rules") or []
+    if style_rules:
+        lines.append("- **style_rules**（账号级硬规则，逐条遵守，优先于通用反 AI 腔）:")
+        for it in style_rules:
+            lines.append(f"  - {it}")
+    voice_samples = p.get("voice_samples") or []
+    if voice_samples:
+        lines.append("- **voice_samples**（必读，模仿句长/口吻/节奏）:")
+        for i, vs in enumerate(voice_samples, 1):
+            lines.append(f"  {i}. > {vs}")
+    return "\n".join(lines)
+
+
+def _render_cover_style_override(override: dict | None) -> str:
+    """Render an optional per-task cover_style override block. Returns ''
+    when there's nothing to override (so the body template stays clean)."""
+    if not override:
+        return ""
+    return (
+        "\n## 用户本次覆盖的 cover_style 字段（仅列出与账号默认不同的，未列出的字段沿用上方账号默认）\n"
+        "```json\n"
+        + json.dumps(override, ensure_ascii=False, indent=2)
+        + "\n```"
+    )
+
+
+def render_profile_illustrator(profile: dict[str, Any]) -> str:
+    """illustrator 出封面，只需 image_style 和 cover_style。"""
+    p = profile
+    lines = [
+        "## 账号视觉约束",
+        f"- **name**: {p.get('name', '')}（{p.get('platform', '')}）",
+        f"- **image_style**: {p.get('image_style', '') or '(未填)'}",
+    ]
+    cover_style = p.get("cover_style") or {}
+    if cover_style:
+        lines.append("- **cover_style**（封面硬约束，逐字段执行）:")
+        lines.append("  ```json")
+        lines.append(f"  {json.dumps(cover_style, ensure_ascii=False, indent=2)}")
+        lines.append("  ```")
+    return "\n".join(lines)
+
+
+# 通用反 AI 腔约束 + 节奏要求 ── 注入 writer body（task-level 硬约束，
+# 比 SOUL.md 距离当下任务更近，命中率更稳）。账号级 style_rules 可以覆盖单条。
+WRITER_ANTI_AI_RULES_MD = """
+## 通用反 AI 腔（硬约束，账号 style_rules 可单条放行）
+下列词汇 / 句式**全文禁用**，一次都不要出现：
+
+- 套话：作为一个 AI、在这个数字化时代、综上所述、值得我们深思、毋庸置疑、不可否认、值得注意的是、众所周知、随着……的发展、在……的同时、与此同时
+- 商业黑话：赋能、打造、生态、闭环、抓手、底层逻辑、深度、维度、范式、本质上、底层、向上
+- 万能形容词：强大的、卓越的、前沿的、革命性的、颠覆性的、令人瞩目的、备受关注的
+- 三段平行结构：「首先……其次……最后」「一方面……另一方面」「不仅……而且……更」
+- 虚指连词收尾：不要以「因此」「所以」「总之」「由此可见」开新段
+
+## 节奏要求（硬性）
+- **句长参差**：相邻 3 句不允许长度都在 20-35 字区间；必须穿插 ≤12 字短句
+- **具体 > 抽象**：每 300 字至少 1 处具体细节（人名 / 数字 / 时间 / 地名 / 引语 / 场景动作）
+- **少用「的」**：单句「的」字 ≤ 2 个；3 个就重写
+- **首段钩子**：前 50 字必须是场景 / 反差 / 数字 / 反问之一；禁概括式开场（「近年来」「在 X 领域」）
+
+## 反模板结构（硬性）
+AI 写作最明显的特征之一是结构对称、篇幅均摊。以下全部禁止：
+
+- **禁对称大纲**：不要写「引言 → 4 层拆解 → 反方声音 → 建议」这类等深结构。真实文章里有的点只值一句话，有的值 600 字，深度天然不均。
+- **禁过渡归纳句**：段落之间不要用句子归纳上文或引出下文。不要写「以上说明了 X」「接下来看 Y」「这就是为什么 Z 很重要」。直接跳。
+- **禁归因总结**：不要写「X 解决了 Y 的痛点」「Z 的本质是 W」「这套机制让 A 得以 B」——这类句子是 AI 在帮读者"消化"，真实作者不这么干。
+- **禁均匀分配**：如果有 3 个论点，允许第 1 个占 60% 篇幅，第 2 个两句带过，第 3 个干脆砍掉。不要"每个都照顾到"。
+- **允许跳跃**：可以突然换话题不铺垫，可以提出问题不收口，可以同一个词连用两次不换同义词。真实写作有毛刺。
+
+## 段落长度强制不均（关键，单独自检）
+- 全文必须存在 ≥1 段 ≤ 40 字，且 ≥1 段 ≥ 250 字
+- 不允许相邻 3 段字数都落在 80-180 区间
+- brief 里有 N 个点，**不要写成 N 个等长段**——核心点占 ≥40%，次要点两句带过或砍掉
+
+## 禁互动话术结尾
+- 除非 voice_samples 出现过，否则禁：一键三连 / 点赞收藏 / 求关注 / 各位觉得有用 / 评论区聊聊 / 欢迎留言
+- 默认结尾留白，或写一个**具体的、下一步会做的动作**（"明天我会拿它扫 2019 年的标记"），不喊话
+
+## 强制具体化（在「具体 > 抽象」之上加权）
+- 全文至少 2 处第一人称当下动作 + 当下感受：「我点了 X，看到 Y，愣了一下」
+- 这类锚点散在中段，不能都堆在首尾
+
+## 增补禁词（一次都不准出现）
+- 值得一提的是、通用考量、一部分拼图、生长/长出来、并行拉取、跨书关联、主题聚类
+- 这一步用户看不到、但很重要 / 但同样重要 / 这是关键的一步
+- "覆盖了 X、Y、Z 三个场景"（标准 AI 总结句）
+""".strip()
+
+
+def _user_body_md(ctx: RenderCtx) -> str:
+    """渲染用户提交的原始素材块（scout 棒用）。"""
+    parts: list[str] = []
+    if ctx.get("summary"):
+        parts.append(ctx["summary"])
+    if ctx.get("content"):
+        content = _normalize_material(ctx["content"])
+        if ctx.get("content_truncated"):
+            content = content + "\n…(已截断)"
+        parts.append(content)
+    if ctx.get("note"):
+        parts.append(f"\n---\n用户备注：{ctx['note']}")
+    return "\n\n".join(parts) if parts else "(用户未附正文，仅链接)"
+
+
+# ── full：标准创作流程 editor → writer → illustrator ───────────────────
+# scout 已移除：素材由用户在 UI 上手动挑入，已经过人工筛选，不需要 agent 再做选题校验。
+# editor 直接读原始素材并抽取锚点（原 scout 的活），后续步骤不变。
+FULL_PIPELINE: list[PipelineStep] = [
+    PipelineStep(
+        role="editor",
+        assignee="wms_editor",
+        title=lambda c: f"策划：{c['title']}",
+        body=lambda c: f"""account_id: {c['account_id']}
+platform: {c.get('platform') or 'unknown'}
+source_url: {c.get('source_url') or ''}
+
+# {c['title']}
+
+{render_profile_editor(c['account_profile'])}
+
+## 原始素材（用户从 UI 手动挑入，已过人工筛选）
+{_user_body_md(c)}
+
+## 这棒任务（editor · 直接读原始素材，抽锚点 + 出 brief）
+先从原始素材里抽**具体锚点 ≥ 3 个**（任选：原文里的数字 / 人名 / 时间 / 地名 / 引语 / 动作场景）——
+下游 writer 靠这些锚点写"我看到 X 时 Y"，缺它就只能写 AI 味的概括。如需查原文链接可调 web 工具。
+
+**重要：brief 是给 writer 的素材清单，不是文章骨架。**
+writer 不会照搬 brief 的小节顺序逐节展开 —— 你也不要把 brief 写成"等比例 7 节"诱导他这么做。
+明确一个**核心点**，其余素材围绕它转或允许被砍。
+
+按上方画像写 brief，要点（不必都用，按需取舍）：
+
+- **angle**（核心角度，对齐 audience，≤ 30 字）
+- **core_point**（本文唯一最重要的点，写一句话；writer 必须把它当主线，篇幅 ≥40%）
+- **secondary_points**（次要点 ≤ 3 个，每个标注权重：keep / mention / drop_ok）
+- **必须出现的事实** 3-5 条（每条带原始链接 + 一个具体细节：数字 / 人名 / 时间 / 场景）
+- **反方/补充观点** ≥ 1 条
+- **候选锚点**（具体的、可第一人称代入的场景或动作，≥ 2 个，writer 拿来做"我看到 X"那种锚句）
+- **平台与字数**：用 word_range
+- **配图思路**：贴合 image_style
+- **候选标题** ≥ 3（语气贴 tone）
+- **候选金句**（list_quotes 挑 1-2，只作备选，writer 可不用）
+- **禁区提醒**（画像 taboo）
+
+**brief 写作禁忌：**
+- 不要写"开头—4 层拆解—结尾"这种对称大纲
+- 不要给 writer 列"每段写什么"的逐段提纲
+- 不要写"建议结构：…"——结构由 writer 现场决定
+
+完成时：
+- `kanban_complete(summary='brief 完成: <一句话角度>', metadata={{"topic_id": ..., "brief_md": "<完整 brief markdown>", "brief_chars": N, "core_point": "<一句话>"}})`
+""".strip(),
+    ),
+    PipelineStep(
+        role="writer",
+        assignee="wms_writer",
+        title=lambda c: f"写稿：{c['title']}",
+        body=lambda c: f"""account_id: {c['account_id']}
+pipeline_task_id: {c['pipeline_task_id']}
+
+# {c['title']}
+
+{render_profile_writer(c['account_profile'])}
+
+## Editor Brief
+从 `metadata['brief_md']` 读取完整 brief Markdown。
+从 `metadata['core_point']` 读取主线一句话（篇幅必须 ≥40%）。
+
+## 这棒任务（writer · 出初稿）
+**brief 是素材清单，不是骨架。** 不要把 brief 的小节顺序当大纲逐节展开。
+落笔前先决定：哪一个点是核心（用 core_point），其余点围着它转或直接丢掉（看 secondary_points 的 drop_ok 标记）。
+brief 里的"候选锚点"要至少用 2 个写成第一人称的当下动作 / 反应，散在中段，不要堆在首尾。
+
+按 brief + 上方画像写 Markdown 初稿：
+
+- **字数**：遵从画像 `word_range`（默认 1500-2200），整篇 Markdown，**不要拆 thread / 短帖串**
+- **句长 / 口吻 / 节奏**：严格贴 `voice_samples`，模仿其句长起伏
+- **硬约束**：逐条遵守 `style_rules`（账号级规则优先于下方通用反 AI 腔）
+- **避开** `taboo`（话题 / 词汇 / 立场）
+- **标题**：从 brief 候选挑或综合自创（贴 `tone`）
+- **使用技能**: humanizer
+- **写作习惯**: 逗号,句号全用半角, 句号后面偶尔会连续两三个空格.
+- **结构**：不要按 brief 的提纲"等比例翻译"成文章——brief 是素材清单，不是文章骨架。落笔前先决定哪一个点是核心，其余点围着它转或直接丢掉。拒绝每节等深等宽的对称结构。
+
+{WRITER_ANTI_AI_RULES_MD}
+
+## 工作流（硬性，省 turn）
+本任务**没有 file / code_execution / terminal 工具**，全部在 message 中完成：
+
+1. 在 message 里**一次性**写出完整 Markdown 终稿（不要落本地文件，不要 patch 迭代，不要先发初稿再修订）
+2. `save_draft(title, content, topic_id='agent', status='drafting', pipeline_task_id={c['pipeline_task_id']})` 拿 `draft_id`
+3. `kanban_complete(summary='<标题> 初稿 N 字', metadata={{"draft_id": ..., "wordcount": N}})`
+
+目标：从写稿到 complete **≤ 3 turn**。
+""".strip(),
+    ),
+    PipelineStep(
+        role="illustrator",
+        assignee="wms_illustrator",
+        title=lambda c: f"配图：{c['title']}",
+        body=lambda c: f"""account_id: {c['account_id']}
+
+# {c['title']}
+
+{render_profile_illustrator(c['account_profile'])}
+
+## 这棒任务（illustrator · 链路尾段，出封面即交付）
+`draft_id` 从 `worker_context.parents[0].metadata['draft_id']` 读取（writer 完成时写入）。
+用 `get_draft(<draft_id>)` 读正文 title + 前 1000 字定调。
+
+按上方 `cover_style`（若空回退 `image_style`）调 cover-image 技能：
+- 把 `cover_style.type / palette / rendering / text / mood / aspect_ratio` 灌进 prompt
+- `signature_motifs` 每条**逐字嵌入** prompt（账号视觉一致性的关键）
+- `negative` 每条加进 negative 段
+- 公众号 / X 都用 16:9，视频号 1:1
+
+调用 `baoyu-cover-image` 技能生成封面（技能内部 backend 固定为 codex_imagegen，禁用 image_generate）。
+失败时 `kanban_block(reason='封面生成失败: <err>')`。
+得到本地文件路径后，用 `upload_image_from_path(path=<本地路径>, filename_hint='cover.png', draft_id=<draft_id>)` 挂到 draft 图库。
+
+完成即整条链路交付：
+- **不要 `update_draft`**（draft 保持 writer 设置的 `drafting` 状态）
+- 用户在草稿箱手动复审
+- `kanban_complete(summary='封面已生成 <type/palette>，链路交付', metadata={{"draft_id": ..., "cover_url": ..., "cover_image_id": ...}})`
+""".strip(),
+    ),
+]
+
+
+# ── cover_only：仅重画封面（用户在草稿箱手动触发） ──────────────────
+COVER_ONLY_PIPELINE: list[PipelineStep] = [
+    PipelineStep(
+        role="illustrator",
+        assignee="wms_illustrator",
+        title=lambda c: f"重画封面：draft #{c['draft_id']}",
+        body=lambda c: f"""flow: cover_only
+run_id: {c.get('run_id') or 'manual'}
+draft_id: {c['draft_id']}
+account_id: {c['account_id']}
+
+{render_profile_illustrator(c['account_profile'])}
+
+## 这棒任务（单棒交付）
+用户从草稿箱手动触发的封面重生成。
+`get_draft({c['draft_id']})` 读 title + 前 1000 字定调。
+按上方 `cover_style`（含 `aspect_ratio`，若未指定默认 16:9）生成封面，filename=`cover_<timestamp>.png` 挂到 draft 图库。
+完成即交付（**不要** `update_draft`）。
+{_render_cover_style_override(c.get('cover_style_override'))}
+
+{f"用户备注：{c['note']}" if c.get('note') else ''}
+
+`kanban_complete(summary='封面已重生成', metadata={{"draft_id": {c['draft_id']}}})`
+""".strip(),
+    ),
+]
+
+
+# ── rewrite_only：用户在草稿箱手动触发，重写正文（继承原 editor brief 上下文）──
+REWRITE_ONLY_PIPELINE: list[PipelineStep] = [
+    PipelineStep(
+        role="writer",
+        assignee="wms_writer",
+        title=lambda c: f"重写：draft #{c['draft_id']}",
+        body=lambda c: f"""flow: rewrite_only
+draft_id: {c['draft_id']}
+account_id: {c['account_id']}
+
+# {c['title']}
+
+{render_profile_writer(c['account_profile'])}
+
+## Editor Brief（继承自上游 editor）
+从 `worker_context.parents[0].metadata` 读 `brief_md` + `core_point`（与首次撰写同源，brief 不变）。
+
+## 这棒任务（writer · 重写正文 → 覆盖原 draft）
+**用户从草稿箱手动触发重写**。已有 `draft_id={c['draft_id']}`，**不要 save_draft 新建**，
+写完直接 `update_draft` 覆盖原内容（topic_id / 关联关系都保留）。
+
+按 brief + 上方画像重写 Markdown：
+
+- **字数**：遵从画像 `word_range`（默认 1500-2200），整篇 Markdown，**不要拆 thread / 短帖串**
+- **句长 / 口吻 / 节奏**：严格贴 `voice_samples`
+- **硬约束**：逐条遵守 `style_rules`（账号级规则优先于下方通用反 AI 腔）
+- **避开** `taboo`
+- **使用技能**: humanizer
+- **写作习惯**: 逗号,句号全用半角, 句号后面偶尔会连续两三个空格.
+- **结构**：拒绝按 brief 等比例展开，拒绝对称结构。core_point 占 ≥40%。
+
+{WRITER_ANTI_AI_RULES_MD}
+
+{f"## 用户重写说明（必读）{chr(10)}{c['note']}" if c.get('note') else ''}
+
+## 工作流（硬性，省 turn）
+本任务**没有 file / code_execution / terminal 工具**，全部在 message 中完成：
+
+1. 在 message 里**一次性**写出完整 Markdown 终稿（不要落本地文件，不要 patch 迭代，不要先发初稿再修订）
+2. `update_draft(draft_id={c['draft_id']}, title='<新标题>', content='<新正文>', status='drafting')`
+3. `kanban_complete(summary='<标题> 重写 N 字', metadata={{"draft_id": {c['draft_id']}, "wordcount": N, "rewrite": True}})`
+
+目标：从写稿到 complete **≤ 3 turn**。
+""".strip(),
+    ),
+]
+
+
+PIPELINES: dict[str, list[PipelineStep]] = {
+    "full": FULL_PIPELINE,
+    "cover_only": COVER_ONLY_PIPELINE,
+    "rewrite_only": REWRITE_ONLY_PIPELINE,
+}
+
+
+def get_pipeline(flow: str) -> list[PipelineStep]:
+    """根据 flow 字段查询蓝图。"""
+    if flow not in PIPELINES:
+        raise ValueError(f"unknown flow '{flow}'; available: {sorted(PIPELINES)}")
+    return PIPELINES[flow]

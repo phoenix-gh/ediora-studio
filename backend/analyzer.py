@@ -1,6 +1,6 @@
 """
 Post-collection analysis pipeline:
-  collect_all → analyze_topics + analyze_hotspots
+  collect_all → analyze_topics
 """
 import hashlib
 import random
@@ -8,7 +8,7 @@ from datetime import datetime, timezone, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, desc
 
-from models import Post, Account, Topic, Hotspot
+from models import Post, Account, Topic
 from topic_clustering import cluster_items, upsert_topic_cluster
 import llm
 
@@ -117,58 +117,7 @@ async def analyze_topics(db: AsyncSession) -> int:
     return count
 
 
-async def analyze_hotspots(db: AsyncSession) -> int:
-    """Detect trending hotspots from recent posts via LLM."""
-    rows = await _recent_posts(db, hours=24, limit=60)
-    if not rows:
-        return 0
-
-    posts_info = [
-        {
-            "platform": acc.platform,
-            "content": f"{post.title}\n\n{post.content}".strip() if post.title else post.content,
-            "likes": post.likes,
-            "reposts": post.reposts,
-            "comments": post.comments,
-        }
-        for post, acc in rows
-    ]
-
-    hotspots = await llm.generate_hotspots_from_posts(posts_info)
-    count = 0
-    today = datetime.now(timezone.utc).date().isoformat()
-
-    for h in hotspots:
-        title = h.get("title", "").strip()
-        if not title:
-            continue
-        hid = _make_id(title + today)
-        heat = max(0, min(100, int(h.get("heat", 50))))
-        existing = await db.get(Hotspot, hid)
-        if existing:
-            existing.heat = heat
-            existing.trend = h.get("trend", "rising")
-            existing.updated_at = datetime.now(timezone.utc)
-        else:
-            db.add(
-                Hotspot(
-                    id=hid,
-                    title=title,
-                    trend=h.get("trend", "rising"),
-                    platforms=h.get("platforms", []),
-                    heat=heat,
-                    trend_data=_fake_trend(heat),
-                    category=h.get("category", "人工智能"),
-                )
-            )
-            count += 1
-
-    await db.commit()
-    return count
-
-
 async def run_full_analysis(db: AsyncSession) -> dict:
     """Run analysis pipelines and return counts."""
     t = await analyze_topics(db)
-    h = await analyze_hotspots(db)
-    return {"new_topics": t, "new_hotspots": h}
+    return {"new_topics": t}

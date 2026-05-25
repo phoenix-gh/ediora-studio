@@ -5,17 +5,25 @@ import {
   BookMarked, Trash2, Save, RefreshCw, FileText, Clock,
   ChevronRight, Loader2, Plus, X,
   Link2, ExternalLink, ChevronDown, MessageSquare, Send, CheckCheck,
-  Layers,
+  Layers, Images, Upload, GitBranch,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import {
-  Draft, DraftSource, DraftUpdate, ChatMessage, DRAFT_STATUSES, DRAFT_TYPES,
+  Dialog, DialogContent, DialogHeader, DialogTitle,
+  DialogDescription, DialogFooter,
+} from '@/components/ui/dialog'
+import {
+  Draft, DraftSource, DraftUpdate, ChatMessage, DraftImage,
+  DRAFT_STATUSES, DRAFT_TYPES,
   getDrafts, updateDraft, deleteDraft, createDraft, chatWithDraft,
+  getDraftImages, uploadDraftImage, deleteDraftImage,
 } from '@/lib/api/drafts'
 import { ContentTopic, getTopics, flattenTopics, flattenTopicsWithDepth } from '@/lib/api/content-topics'
-import { MarkdownEditor } from './MarkdownEditor'
+import { MarkdownEditor, MarkdownEditorHandle } from './MarkdownEditor'
+import { DraftAssetsDialog } from '@/components/features/DraftAssetsDialog'
+import { DraftTaskTimelineDialog } from '@/components/features/DraftTaskTimelineDialog'
 import '@uiw/react-md-editor/markdown-editor.css'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -107,40 +115,90 @@ export function DraftsClient({
   const [editStatus, setEditStatus] = useState(selected?.status ?? 'drafting')
   const [editContentTopicId, setEditContentTopicId] = useState<number | null>(selected?.content_topic_id ?? null)
   const [editSources, setEditSources] = useState<DraftSource[]>(selected?.sources ?? [])
-  const [sourcesOpen, setSourcesOpen] = useState(false)
-  const [newSourceUrl, setNewSourceUrl] = useState('')
-  const [newSourceTitle, setNewSourceTitle] = useState('')
-  const [newSourceNote, setNewSourceNote] = useState('')
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
 
   // Chat state
   const [chatOpen, setChatOpen] = useState(initialChatOpen)
+  const [timelineOpen, setTimelineOpen] = useState(false)
+  const [assetsOpen, setAssetsOpen] = useState(false)
+  const [assetsTab, setAssetsTab] = useState<'sources' | 'images'>('sources')
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([])
   const [chatSessionName, setChatSessionName] = useState<string | null>(null)
   const [chatInput, setChatInput] = useState('')
   const [chatLoading, setChatLoading] = useState(false)
   const [pendingContent, setPendingContent] = useState<string | null>(null)
   const chatEndRef = useRef<HTMLDivElement>(null)
+  const editorRef = useRef<MarkdownEditorHandle>(null)
+
+  // Image library state
+  const [images, setImages] = useState<DraftImage[]>([])
+  const [imagesLoading, setImagesLoading] = useState(false)
+  const [uploadingImage, setUploadingImage] = useState(false)
+  const imageInputRef = useRef<HTMLInputElement>(null)
+
   const [refreshing, setRefreshing] = useState(false)
   const [creating, setCreating] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [creatingVariant, setCreatingVariant] = useState(false)
   const [adaptMenuOpen, setAdaptMenuOpen] = useState(false)
 
+  // Confirm dialog
+  const [confirmDialog, setConfirmDialog] = useState<{
+    open: boolean
+    title: string
+    description: string
+    confirmLabel: string
+    danger: boolean
+    onConfirm: () => void
+  }>({ open: false, title: '', description: '', confirmLabel: '确定', danger: false, onConfirm: () => {} })
+
+  function openConfirm(opts: { title: string; description: string; confirmLabel?: string; danger?: boolean; onConfirm: () => void }) {
+    setConfirmDialog({ open: true, confirmLabel: '确定', danger: false, ...opts })
+  }
+  function closeConfirm() { setConfirmDialog(d => ({ ...d, open: false })) }
+
+  function chatStorageKey(draftId: number) { return `wms-chat-${draftId}` }
+
+  function saveChatToStorage(draftId: number, history: ChatMessage[], sessionName: string | null, pending: string | null) {
+    try {
+      localStorage.setItem(chatStorageKey(draftId), JSON.stringify({ history, sessionName, pending }))
+    } catch {}
+  }
+
+  function loadChatFromStorage(draftId: number): { history: ChatMessage[]; sessionName: string | null; pending: string | null } {
+    try {
+      const raw = localStorage.getItem(chatStorageKey(draftId))
+      if (raw) return JSON.parse(raw)
+    } catch {}
+    return { history: [], sessionName: null, pending: null }
+  }
+
   // Sync editor when active draft changes
+  const prevDraftIdRef = useRef<number | undefined>(undefined)
   useEffect(() => {
     if (!selected) return
+    // Persist current chat state before switching drafts
+    if (prevDraftIdRef.current !== undefined && prevDraftIdRef.current !== selected.id) {
+      saveChatToStorage(prevDraftIdRef.current, chatHistory, chatSessionName, pendingContent)
+    }
+    prevDraftIdRef.current = selected.id
     setEditTitle(selected.title)
     setEditContent(selected.content)
     setEditStatus(selected.status)
     setEditContentTopicId(selected.content_topic_id ?? null)
     setEditSources(selected.sources ?? [])
-    setNewSourceUrl(''); setNewSourceTitle(''); setNewSourceNote('')
-    setChatHistory([])
-    setChatSessionName(null)
-    setPendingContent(null)
+    // Restore persisted chat state for this draft
+    const saved = loadChatFromStorage(selected.id)
+    setChatHistory(saved.history)
+    setChatSessionName(saved.sessionName)
+    setPendingContent(saved.pending)
     setDirty(false)
+    // Load image library for this draft group
+    setImages([])
+    const rootId = selected.linked_draft_id ?? selected.id
+    setImagesLoading(true)
+    getDraftImages(rootId).then(setImages).catch(() => {}).finally(() => setImagesLoading(false))
   }, [selected?.id])
 
   useEffect(() => { getTopics().then(t => setTopicList(t)).catch(() => {}) }, [])
@@ -178,16 +236,37 @@ export function DraftsClient({
 
   // ── Handlers ───────────────────────────────────────────────────────────────
 
-  function handleSelectGroup(group: DraftGroup) {
-    if (dirty && !confirm('有未保存的修改，确定切换？')) return
+  function doSelectGroup(group: DraftGroup) {
     setSelectedGroup(group)
-    // Default to 'article' type, else first available
     const article = [group.root, ...group.variants].find(d => d.draft_type === 'article')
     setSelected(article ?? group.root)
   }
 
+  function handleSelectGroup(group: DraftGroup) {
+    if (dirty) {
+      openConfirm({
+        title: '有未保存的修改',
+        description: '切换草稿后当前修改将丢失，确定继续？',
+        confirmLabel: '放弃修改',
+        danger: true,
+        onConfirm: () => doSelectGroup(group),
+      })
+      return
+    }
+    doSelectGroup(group)
+  }
+
   function handleSelectVariant(draft: Draft) {
-    if (dirty && !confirm('有未保存的修改，确定切换？')) return
+    if (dirty) {
+      openConfirm({
+        title: '有未保存的修改',
+        description: '切换版本后当前修改将丢失，确定继续？',
+        confirmLabel: '放弃修改',
+        danger: true,
+        onConfirm: () => setSelected(draft),
+      })
+      return
+    }
     setSelected(draft)
   }
 
@@ -215,7 +294,17 @@ export function DraftsClient({
 
   async function handleDelete() {
     if (!selected) return
-    if (!confirm(`确定删除「${selected.title || typeInfo(selected.draft_type).label + '稿'}」？此操作不可恢复。`)) return
+    openConfirm({
+      title: '删除草稿',
+      description: `确定删除「${selected.title || typeInfo(selected.draft_type).label + '稿'}」？此操作不可恢复。`,
+      confirmLabel: '删除',
+      danger: true,
+      onConfirm: () => doDelete(),
+    })
+  }
+
+  async function doDelete() {
+    if (!selected) return
     setDeleting(true)
     try {
       await deleteDraft(selected.id)
@@ -314,7 +403,8 @@ export function DraftsClient({
   async function handleChatSend() {
     if (!selected || !chatInput.trim() || chatLoading) return
     const userMsg: ChatMessage = { role: 'user', content: chatInput.trim() }
-    setChatHistory(h => [...h, userMsg])
+    const nextHistory = [...chatHistory, userMsg]
+    setChatHistory(nextHistory)
     setChatInput('')
     setChatLoading(true)
     setPendingContent(null)
@@ -323,9 +413,14 @@ export function DraftsClient({
         sessionName: chatSessionName ?? undefined,
         history: chatHistory,
       })
+      const sessionName = res.session_name && !chatSessionName ? res.session_name : chatSessionName
       if (res.session_name && !chatSessionName) setChatSessionName(res.session_name)
-      setChatHistory(h => [...h, { role: 'assistant', content: res.reply }])
-      if (res.updated_content) setPendingContent(res.updated_content)
+      const assistantMsg: ChatMessage = { role: 'assistant', content: res.reply }
+      const finalHistory = [...nextHistory, assistantMsg]
+      setChatHistory(finalHistory)
+      const pending = res.updated_content ?? null
+      if (pending) setPendingContent(pending)
+      saveChatToStorage(selected.id, finalHistory, sessionName, pending)
       setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50)
     } catch {
       toast.error('AI 回复失败')
@@ -334,10 +429,52 @@ export function DraftsClient({
     }
   }
 
+  async function handleImageUpload(files: FileList | null) {
+    if (!selected || !files || files.length === 0) return
+    setUploadingImage(true)
+    try {
+      const uploaded: DraftImage[] = []
+      for (const file of Array.from(files)) {
+        const img = await uploadDraftImage(selected.id, file)
+        uploaded.push(img)
+      }
+      setImages(prev => [...uploaded, ...prev])
+      toast.success(`已上传 ${uploaded.length} 张图片`)
+    } catch {
+      toast.error('图片上传失败')
+    } finally {
+      setUploadingImage(false)
+      if (imageInputRef.current) imageInputRef.current.value = ''
+    }
+  }
+
+  async function handleImageDelete(imageId: number) {
+    if (!selected) return
+    try {
+      await deleteDraftImage(selected.id, imageId)
+      setImages(prev => prev.filter(img => img.id !== imageId))
+      toast.success('已删除')
+    } catch {
+      toast.error('删除失败')
+    }
+  }
+
+  function handleInsertImage(img: DraftImage) {
+    const markdown = `![${img.original_name || '图片'}](${img.hosted_url})`
+    if (editorRef.current) {
+      editorRef.current.insert(markdown)
+    } else {
+      setEditContent(v => v + '\n' + markdown)
+      setDirty(true)
+    }
+  }
+
   function handleNewChatSession() {
+    const newSession = `wms-draft-${selected?.id}-${Date.now()}`
     setChatHistory([])
     setPendingContent(null)
-    setChatSessionName(`wms-draft-${selected?.id}-${Date.now()}`)
+    setChatSessionName(newSession)
+    if (selected) saveChatToStorage(selected.id, [], newSession, null)
     toast.success('已开启新对话')
   }
 
@@ -559,11 +696,48 @@ export function DraftsClient({
                 {dirty && <span className="text-[11px] text-amber-500">有未保存修改</span>}
                 <Button
                   variant="outline" size="sm"
+                  onClick={() => { setAssetsTab('sources'); setAssetsOpen(true) }}
+                  className="gap-1.5"
+                  title="灵感来源 · 链接和备注"
+                >
+                  <Link2 className="w-3.5 h-3.5" />
+                  灵感
+                  {editSources.length > 0 && (
+                    <span className="text-[10px] bg-indigo-100 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400 px-1.5 py-0.5 rounded-full font-medium leading-none">
+                      {editSources.length}
+                    </span>
+                  )}
+                </Button>
+                <Button
+                  variant="outline" size="sm"
+                  onClick={() => { setAssetsTab('images'); setAssetsOpen(true) }}
+                  className="gap-1.5"
+                  title="图片素材 · 封面在这里管理"
+                >
+                  <Images className="w-3.5 h-3.5" />
+                  素材
+                  {images.length > 0 && (
+                    <span className="text-[10px] bg-violet-100 dark:bg-violet-950/50 text-violet-600 dark:text-violet-400 px-1.5 py-0.5 rounded-full font-medium leading-none">
+                      {images.length}
+                    </span>
+                  )}
+                </Button>
+                <Button
+                  variant="outline" size="sm"
+                  onClick={() => setTimelineOpen(true)}
+                  className="gap-1.5"
+                  title="查看 scout→editor→writer→illustrator 每棒的任务详情"
+                >
+                  <GitBranch className="w-3.5 h-3.5" />
+                  工作流
+                </Button>
+                <Button
+                  variant="outline" size="sm"
                   onClick={() => setChatOpen(v => !v)}
                   className={cn('gap-1.5', chatOpen && 'bg-violet-50 border-violet-300 text-violet-600 dark:bg-violet-950/30 dark:border-violet-700 dark:text-violet-400')}
                 >
                   <MessageSquare className="w-3.5 h-3.5" />
-                  AI 润色
+                  AI 写作
                 </Button>
                 <Button
                   variant="outline" size="sm"
@@ -587,6 +761,34 @@ export function DraftsClient({
                 <div className="flex items-center gap-1.5 mb-2 text-[11px] text-zinc-400">
                   <Layers className="w-3 h-3" />
                   基于文章主版本的{typeInfo(selected.draft_type).label}适配副本
+                  {articleDraft && (
+                    <button
+                      onClick={() => {
+                        if (!articleDraft) return
+                        const doSync = () => {
+                          setEditTitle(articleDraft.title)
+                          setEditContent(articleDraft.content)
+                          setDirty(true)
+                          toast.success('已同步主版本内容')
+                        }
+                        if (editContent) {
+                          openConfirm({
+                            title: '同步主版本内容',
+                            description: '当前内容将被主版本覆盖，确定继续？',
+                            confirmLabel: '覆盖同步',
+                            danger: false,
+                            onConfirm: doSync,
+                          })
+                        } else {
+                          doSync()
+                        }
+                      }}
+                      className="ml-auto flex items-center gap-1 text-[11px] text-indigo-400 hover:text-indigo-600 dark:hover:text-indigo-300 transition-colors"
+                    >
+                      <RefreshCw className="w-3 h-3" />
+                      同步主版本内容
+                    </button>
+                  )}
                 </div>
               )}
               <input
@@ -597,72 +799,11 @@ export function DraftsClient({
               />
             </div>
 
-            {/* Sources panel */}
-            <div className="flex-shrink-0 border-b border-zinc-100 dark:border-zinc-800">
-              <button
-                onClick={() => setSourcesOpen(v => !v)}
-                className="w-full flex items-center gap-2 px-6 py-2 text-left hover:bg-zinc-50 dark:hover:bg-zinc-900 transition-colors"
-              >
-                <Link2 className="w-3.5 h-3.5 text-zinc-400" />
-                <span className="text-xs text-zinc-500 dark:text-zinc-400 flex-1">
-                  灵感来源
-                  {editSources.length > 0 && (
-                    <span className="ml-1.5 bg-indigo-100 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400 text-[10px] px-1.5 py-0.5 rounded-full font-medium">
-                      {editSources.length}
-                    </span>
-                  )}
-                </span>
-                <ChevronDown className={cn('w-3 h-3 text-zinc-400 transition-transform', sourcesOpen && 'rotate-180')} />
-              </button>
-
-              {sourcesOpen && (
-                <div className="px-6 pb-3 space-y-2">
-                  {editSources.map((s, i) => (
-                    <div key={i} className="flex items-start gap-2 group text-xs">
-                      <ExternalLink className="w-3 h-3 text-indigo-400 flex-shrink-0 mt-0.5" />
-                      <div className="flex-1 min-w-0">
-                        <a href={s.url} target="_blank" rel="noopener noreferrer"
-                          className="text-indigo-500 hover:text-indigo-700 dark:hover:text-indigo-300 hover:underline truncate block max-w-xs">
-                          {s.title || s.url}
-                        </a>
-                        {s.note && <p className="text-zinc-400 mt-0.5 text-[11px]">{s.note}</p>}
-                      </div>
-                      <button onClick={() => { setEditSources(src => src.filter((_, j) => j !== i)); setDirty(true) }}
-                        className="opacity-0 group-hover:opacity-100 text-zinc-400 hover:text-red-500 transition-opacity flex-shrink-0">
-                        <X className="w-3 h-3" />
-                      </button>
-                    </div>
-                  ))}
-                  <div className="pt-1 border-t border-zinc-100 dark:border-zinc-800 space-y-1.5">
-                    <input value={newSourceUrl} onChange={e => setNewSourceUrl(e.target.value)} placeholder="来源 URL…"
-                      className="w-full text-xs px-2 py-1.5 border border-zinc-200 dark:border-zinc-700 rounded bg-transparent outline-none focus:border-indigo-400 text-zinc-800 dark:text-zinc-200 placeholder:text-zinc-400" />
-                    <div className="flex gap-1.5">
-                      <input value={newSourceTitle} onChange={e => setNewSourceTitle(e.target.value)} placeholder="标题（可选）"
-                        className="flex-1 text-xs px-2 py-1.5 border border-zinc-200 dark:border-zinc-700 rounded bg-transparent outline-none focus:border-indigo-400 text-zinc-800 dark:text-zinc-200 placeholder:text-zinc-400" />
-                      <input value={newSourceNote} onChange={e => setNewSourceNote(e.target.value)} placeholder="备注（可选）"
-                        className="flex-1 text-xs px-2 py-1.5 border border-zinc-200 dark:border-zinc-700 rounded bg-transparent outline-none focus:border-indigo-400 text-zinc-800 dark:text-zinc-200 placeholder:text-zinc-400" />
-                      <button
-                        onClick={() => {
-                          const url = newSourceUrl.trim()
-                          if (!url) return
-                          setEditSources(src => [...src, { url, title: newSourceTitle.trim(), note: newSourceNote.trim() }])
-                          setNewSourceUrl(''); setNewSourceTitle(''); setNewSourceNote('')
-                          setDirty(true)
-                        }}
-                        disabled={!newSourceUrl.trim()}
-                        className="px-2.5 py-1.5 bg-indigo-500 hover:bg-indigo-600 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded text-xs font-medium transition-colors flex items-center gap-1"
-                      >
-                        <Plus className="w-3 h-3" />添加
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
 
             {/* Content editor */}
             <div className="flex-1 overflow-hidden">
               <MarkdownEditor
+                ref={editorRef}
                 value={editContent}
                 onChange={v => { setEditContent(v); setDirty(true) }}
               />
@@ -675,7 +816,7 @@ export function DraftsClient({
               <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-100 dark:border-zinc-800 flex-shrink-0">
                 <div className="flex items-center gap-2 min-w-0">
                   <MessageSquare className="w-3.5 h-3.5 text-violet-500 flex-shrink-0" />
-                  <span className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">AI 润色助手</span>
+                  <span className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">AI 写作助手</span>
                   <span className={cn('text-[10px] px-1.5 py-0.5 rounded-full font-medium', typeInfo(selected.draft_type).badge)}>
                     {typeInfo(selected.draft_type).label}
                   </span>
@@ -698,11 +839,19 @@ export function DraftsClient({
                   </div>
                 )}
                 {chatHistory.map((m, i) => (
-                  <div key={i} className={cn('flex', m.role === 'user' ? 'justify-end' : 'justify-start')}>
+                  <div key={i} className={cn('flex flex-col', m.role === 'user' ? 'items-end' : 'items-start')}>
                     <div className={cn('max-w-[90%] rounded-xl px-3 py-2 text-xs leading-relaxed whitespace-pre-wrap',
                       m.role === 'user' ? 'bg-violet-500 text-white rounded-br-sm' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-200 rounded-bl-sm')}>
                       {m.content}
                     </div>
+                    {m.role === 'assistant' && (
+                      <button
+                        onClick={() => { setEditContent(m.content); setDirty(true); toast.success('已应用到草稿，记得保存') }}
+                        className="mt-1 text-[10px] text-zinc-400 hover:text-violet-500 dark:hover:text-violet-400 transition-colors px-1"
+                      >
+                        用作草稿
+                      </button>
+                    )}
                   </div>
                 ))}
                 {chatLoading && (
@@ -751,6 +900,54 @@ export function DraftsClient({
           <p className="text-sm">选择一篇草稿开始编辑</p>
           <p className="text-xs text-zinc-300">从选题库线索创作后会自动进入草稿箱</p>
         </div>
+      )}
+
+      {/* ── Confirm Dialog ──────────────────────────────────── */}
+      <Dialog open={confirmDialog.open} onOpenChange={open => { if (!open) closeConfirm() }}>
+        <DialogContent showCloseButton={false}>
+          <DialogHeader>
+            <DialogTitle>{confirmDialog.title}</DialogTitle>
+            <DialogDescription>{confirmDialog.description}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={closeConfirm}>取消</Button>
+            <Button
+              variant={confirmDialog.danger ? 'destructive' : 'default'}
+              onClick={() => { confirmDialog.onConfirm(); closeConfirm() }}
+            >
+              {confirmDialog.confirmLabel}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {selected && (
+        <>
+          <DraftTaskTimelineDialog
+            open={timelineOpen}
+            onClose={() => setTimelineOpen(false)}
+            draftId={selected.linked_draft_id ?? selected.id}
+            draftTitle={selected.title}
+          />
+          <DraftAssetsDialog
+            open={assetsOpen}
+            onClose={() => setAssetsOpen(false)}
+            initialTab={assetsTab}
+            draftId={selected.linked_draft_id ?? selected.id}
+            sources={editSources}
+            onSourcesChange={next => { setEditSources(next); setDirty(true) }}
+            images={images}
+            imagesLoading={imagesLoading}
+            uploading={uploadingImage}
+            onUpload={handleImageUpload}
+            onDelete={handleImageDelete}
+            onInsert={handleInsertImage}
+            onRefreshImages={() => {
+              const rootId = selected.linked_draft_id ?? selected.id
+              getDraftImages(rootId).then(setImages).catch(() => {})
+            }}
+          />
+        </>
       )}
     </div>
   )

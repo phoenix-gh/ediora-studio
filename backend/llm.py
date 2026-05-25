@@ -14,7 +14,6 @@ from config import get_config, effective_model, effective_base_url
 async def _named_session_chat(
     message: str,
     conversation: str,
-    instructions: str = "",
     max_tokens: int = 3000,
 ) -> str:
     """Use OpenAI Responses API (/v1/responses) with a named conversation.
@@ -35,7 +34,6 @@ async def _named_session_chat(
     resp = await client.responses.create(
         model=model,
         input=message,
-        instructions=instructions or openai.NOT_GIVEN,
         store=True,
         extra_body={"conversation": conversation},
     )
@@ -163,37 +161,6 @@ async def generate_topics_from_posts(posts_info: list[dict]) -> list[dict]:
         return _extract_json_array(await _call(prompt))
     except Exception as e:
         print(f"[llm] generate_topics error: {e}")
-        return []
-
-
-async def generate_hotspots_from_posts(posts_info: list[dict]) -> list[dict]:
-    if not posts_info:
-        return []
-
-    posts_text = "\n\n".join(
-        f"内容: {p['content'][:200]}\n互动: 点赞{p['likes']} 转发{p['reposts']}\n平台: {p['platform']}"
-        for p in posts_info[:40]
-    )
-
-    prompt = f"""你是一个中文自媒体热点分析AI。
-分析以下内容，识别当前正在发酵的热门话题。
-
-内容:
-{posts_text}
-
-请以JSON数组格式输出5-10个热点，每个包含:
-- title: 热点标题（10字以内）
-- trend: "rising"/"peak"/"declining"
-- heat: 热度0-100
-- category: 话题分类
-- platforms: 出现平台列表
-
-只输出JSON数组。"""
-
-    try:
-        return _extract_json_array(await _call(prompt))
-    except Exception as e:
-        print(f"[llm] generate_hotspots error: {e}")
         return []
 
 

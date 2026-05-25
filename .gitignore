@@ -18,10 +18,13 @@ backend/.env
 .env
 .env.local
 .env.*.local
+sessions/
+output/
 
 # ── Backend runtime artifacts ───────────────────────────
 backend/avatars/
 backend/uploads/
+backend/wechat_imgs/
 
 # ── Node / pnpm ─────────────────────────────────────────
 node_modules/
