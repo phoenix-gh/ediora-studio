@@ -168,3 +168,17 @@ or write `sessions/x.json` from stored credentials.
 - `UnifiedContent` is a clean dataclass — no subprocess required
 - Auth is injectable via env vars (`X_AUTH_TOKEN` / `X_CT0`) — no file-side config needed
 - No subprocess needed
+
+---
+
+## Timeline read approach
+
+**Choice: Option 4 — lower-level GraphQL paginator (`fetch_user_by_screen_name` +
+`fetch_user_tweets_page` + `parse_user_tweets_entries` + `extract_tweet_data`).**
+
+Rationale: `fetch_user_tweets()` only returns a summary dict + writes Markdown files;
+the `list_path` JSON uses a reduced status record shape (no `text`/`likes`/`views`).
+Going one level lower gives us the full `extract_tweet_data` dicts — the same flat
+shape used by keyword search — without writing any files. `UniversalReader.read()`
+wraps this but discards the tweet list entirely (returns a text summary `UnifiedContent`).
+The lower-level path is already well-tested in the feedgrab codebase itself.
