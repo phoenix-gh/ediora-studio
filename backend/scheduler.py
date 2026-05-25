@@ -242,98 +242,13 @@ async def scheduled_juejin():
         await log("juejin", "error", "掘金采集异常", str(e))
 
 
-async def scheduled_tl1_users():
-    from logger import log
-    try:
-        from x_collector import fetch_tl1_users
-        await log("tl1-users", "ok", "tl1 用户采集开始（最多 100 页）")
-        result = await fetch_tl1_users(max_pages=100)
-        if result.get("error"):
-            await log("tl1-users", "error", "tl1 用户采集异常", result["error"])
-        else:
-            await log("tl1-users", "ok",
-                      "tl1 用户采集完成：抓取 {0} 页 / {1} 人，新增候选 {2} 个".format(
-                          result["pages_fetched"], result["total_fetched"], result["total_upserted"]))
-    except Exception as e:
-        await log("tl1-users", "error", "tl1 用户采集异常", str(e))
-
-
-async def scheduled_tl1():
-    from logger import log
-    from config import get_config
-    try:
-        cfg = await get_config()
-        if cfg.get("tl1_collect_enabled", "1") == "0":
-            return
-        hours = max(1, min(24, int(cfg.get("tl1_trending_hours", 1))))
-        from x_collector import fetch_tl1_trending
-        async with SessionLocal() as db:
-            result = await fetch_tl1_trending(db, hours=hours)
-        if result.get("error"):
-            await log("tl1", "error", "tl1.com 采集异常", result["error"])
-        else:
-            await log("tl1", "ok",
-                      "tl1 热门采集：{0} 条，新增 {1} 篇，新候选 {2} 个".format(
-                          result["total"], result["new_posts"], result["new_candidates"]))
-    except Exception as e:
-        await log("tl1", "error", "tl1.com 采集异常", str(e))
-
-
-async def scheduled_classify_posts():
-    from logger import log
-    from config import get_config
-    try:
-        cfg = await get_config()
-        if cfg.get("x_post_classify_enabled", "1") == "0":
-            return
-        prompt = cfg.get("x_post_classify_prompt", "")
-        from post_classifier import classify_unclassified_posts
-        async with SessionLocal() as db:
-            result = await classify_unclassified_posts(db, prompt_template=prompt, batch_size=20)
-        if result["total"] > 0:
-            await log("x-classify", "ok",
-                      "帖子分类：{0}/{1} 条已分类".format(result["classified"], result["total"]))
-    except Exception as e:
-        await log("x-classify", "error", "帖子分类异常", str(e))
-
-
-async def scheduled_x():
-    from logger import log
-    from config import get_config
-    try:
-        cfg = await get_config()
-        minutes = max(1, int(cfg.get("x_collect_interval_minutes", 30)))
-        if not _should_run("x", minutes * 60):
-            return
-        if cfg.get("x_collect_enabled", "1") == "0":
-            return
-        if cfg.get("twitterapi_io_collect_enabled", "1") == "0":
-            return
-        if not cfg.get("x_cookies"):
-            return
-        from x_collector import collect_x_timeline
-        async with SessionLocal() as db:
-            result = await collect_x_timeline(db)
-        if result["error"]:
-            await log("x", "error", "X 采集异常", result["error"])
-        else:
-            await log("x", "ok", "检查 {0} 个账号，新增候选 {1} 个，新帖 {2} 条".format(result["checked"], result["new_candidates"], result.get("new_posts", 0)))
-    except Exception as e:
-        await log("x", "error", "X 采集异常", str(e))
-
-
 def register_jobs(scheduler, cfg):
     collect_min = max(1, int(cfg.get("collect_interval_minutes", 15)))
     github_min  = max(1, int(cfg.get("github_interval_minutes", 1)))
-    tl1_sec     = max(10, int(cfg.get("tl1_collect_interval_seconds", 30)))
     jobs = [
         (scheduled_collect_and_analyze, dict(trigger="interval", minutes=collect_min, id="collect_analyze")),
         (scheduled_github,              dict(trigger="interval", minutes=github_min,  id="github_collect")),
-        (scheduled_x,                   dict(trigger="interval", minutes=1,           id="x_collect")),
         (scheduled_papers,              dict(trigger="interval", minutes=30,          id="papers_collect")),
-        (scheduled_tl1,                 dict(trigger="interval", seconds=tl1_sec,     id="tl1_collect")),
-        (scheduled_tl1_users,           dict(trigger="cron",     hour=0, minute=0,    id="tl1_users_collect")),
-        (scheduled_classify_posts,      dict(trigger="interval", minutes=5,           id="x_classify")),
         (scheduled_v2ex,                dict(trigger="interval", minutes=10,          id="v2ex_collect")),
         (scheduled_kr,                  dict(trigger="interval", minutes=10,          id="kr_collect")),
         (scheduled_juejin,              dict(trigger="interval", minutes=10,          id="juejin_collect")),
