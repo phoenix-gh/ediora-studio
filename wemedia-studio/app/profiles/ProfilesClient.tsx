@@ -24,14 +24,16 @@ export function ProfilesClient() {
         const first = rows.find(p => !p.is_default) ?? rows[0]
         if (first) setSelected(first.name)
       })
-      .catch(e => toast.error(String(e)))
+      .catch(e => toast.error(e instanceof Error ? e.message : String(e)))
   }, [])
 
   useEffect(() => {
     if (!selected) return
+    let ignore = false
     getProfile(selected)
-      .then(setDetail)
-      .catch(e => toast.error(String(e)))
+      .then(d => { if (!ignore) setDetail(d) })
+      .catch(e => { if (!ignore) toast.error(e instanceof Error ? e.message : String(e)) })
+    return () => { ignore = true }
   }, [selected])
 
   const readonly = detail?.is_default ?? false
