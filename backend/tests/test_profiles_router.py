@@ -1,5 +1,3 @@
-import os
-from pathlib import Path
 from fastapi.testclient import TestClient
 import pytest
 
@@ -43,3 +41,15 @@ def test_write_soul_roundtrip(client):
     assert r.status_code == 200
     r2 = client.get("/api/profiles/wms_writer")
     assert r2.json()["soul"] == "new\n"
+
+def test_toolset_invalid_name_400(client):
+    r = client.post("/api/profiles/wms_writer/toolsets", json={"name": "bad/name", "enabled": True})
+    assert r.status_code == 400
+
+def test_mcp_invalid_name_400(client):
+    r = client.post("/api/profiles/wms_writer/mcp", json={"name": "bad/name", "enabled": False})
+    assert r.status_code == 400
+
+def test_toolset_default_readonly(client):
+    r = client.post("/api/profiles/default/toolsets", json={"name": "web", "enabled": True})
+    assert r.status_code == 403
