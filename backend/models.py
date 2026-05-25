@@ -214,50 +214,36 @@ class AppSetting(Base):
 
 
 
-class XBloggerCandidate(Base):
-    __tablename__ = "x_blogger_candidates"
+class XSubscription(Base):
+    """User-curated X subscription source. URL points to an X profile or list."""
+    __tablename__ = "x_subscriptions"
 
-    username: Mapped[str] = mapped_column(String, primary_key=True)   # without @
-    display_name: Mapped[str] = mapped_column(String, default="")
-    avatar_url: Mapped[str] = mapped_column(String, default="")
-    followers: Mapped[int] = mapped_column(Integer, default=0)
-    following_count: Mapped[int] = mapped_column(Integer, default=0)
-    tweet_count: Mapped[int] = mapped_column(Integer, default=0)
-    favourites_count: Mapped[int] = mapped_column(Integer, default=0)
-    location: Mapped[str] = mapped_column(String, default="")
-    join_date: Mapped[str] = mapped_column(String, default="")
-    bio: Mapped[str] = mapped_column(Text, default="")
-    profile_url: Mapped[str] = mapped_column(String, default="")
-    status: Mapped[str] = mapped_column(String, default="candidate", index=True)  # candidate/following/rejected
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    url: Mapped[str] = mapped_column(String, unique=True, nullable=False, index=True)
+    label: Mapped[str] = mapped_column(String, default="")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    last_collected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_error: Mapped[str] = mapped_column(String, default="")
     added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, index=True)
-    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
 
 
 class XPost(Base):
+    """Posts collected from subscribed X URLs via feedgrab."""
     __tablename__ = "x_posts"
 
     tweet_id: Mapped[str] = mapped_column(String, primary_key=True)
+    subscription_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     username: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    display_name: Mapped[str] = mapped_column(String, default="")
     content: Mapped[str] = mapped_column(Text, default="")
     url: Mapped[str] = mapped_column(String, default="")
     published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
-    author_followers: Mapped[int] = mapped_column(Integer, default=0)
-    source: Mapped[str] = mapped_column(String, default="twitterapi")
-    category: Mapped[str] = mapped_column(String, default="")
-
-
-class XPostMetrics(Base):
-    """One row per collection run per post — append-only trend history."""
-    __tablename__ = "x_post_metrics"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    tweet_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
     replies: Mapped[int] = mapped_column(Integer, default=0)
     reposts: Mapped[int] = mapped_column(Integer, default=0)
     likes: Mapped[int] = mapped_column(Integer, default=0)
     views: Mapped[int] = mapped_column(Integer, default=0)
-    collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, index=True)
+    raw_markdown: Mapped[str] = mapped_column(Text, default="")
 
 
 class Paper(Base):
