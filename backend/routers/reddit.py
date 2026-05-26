@@ -210,7 +210,7 @@ async def collect_all_endpoint(background_tasks: BackgroundTasks):
             await log("reddit", "warn",
                       f"Reddit 采集完成，新增 {result['new_posts']} 条",
                       "; ".join(result["errors"]))
-        elif result["new_posts"]:
+        else:
             await log("reddit", "ok", f"Reddit 采集完成，新增 {result['new_posts']} 条")
 
     background_tasks.add_task(_run)
