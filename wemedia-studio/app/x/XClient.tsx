@@ -117,6 +117,11 @@ export function XClient({
     return subs.find(s => s.id === selection.id) ?? null
   }, [selection, subs])
 
+  const totalPostCount = useMemo(
+    () => subs.reduce((sum, s) => sum + s.post_count, 0),
+    [subs],
+  )
+
   const headerTitle =
     selection.kind === 'all'    ? 'X 订阅 · 全部' :
     selection.kind === 'search' ? '实时搜索'      :
@@ -131,16 +136,18 @@ export function XClient({
         </div>
         <div className="flex-1 overflow-y-auto px-2 py-2">
           <SidebarRow
-            icon={Globe} iconColor="text-sky-500" label="全部订阅"
-            active={selection.kind === 'all'} onClick={() => setSelection({ kind: 'all' })}
-          />
-          <SidebarRow
             icon={Search} iconColor="text-emerald-500" label="实时搜索"
             active={selection.kind === 'search'} onClick={() => setSelection({ kind: 'search' })}
           />
           <div className="text-[11px] uppercase tracking-wider text-zinc-400 mt-3 mb-1 px-2">
             已订阅 · {subs.length}
           </div>
+          <SidebarRow
+            icon={Globe} iconColor="text-sky-500" label="全部"
+            badge={totalPostCount > 0 ? String(totalPostCount) : undefined}
+            active={selection.kind === 'all'}
+            onClick={() => setSelection({ kind: 'all' })}
+          />
           {subs.length === 0 ? (
             <p className="text-xs text-zinc-400 text-center mt-2 px-3">
               点右上角「订阅管理」添加
