@@ -100,6 +100,7 @@ AgentStatus = Literal["idle", "working", "waiting", "blocked"]
 class AgentState(BaseModel):
     name: str
     display_name: str
+    avatar_url: str = ""
     role: str
     accent: str
     status: AgentStatus
@@ -114,6 +115,7 @@ class BoardSnapshot(BaseModel):
     counts: dict[str, int]
     recent_tasks: list[TaskBrief]
     server_time: int
+    profiles: dict[str, dict] = {}  # name → {display_name, avatar_url}
 
 
 async def _fetch_task_detail(task_id: str) -> dict:
@@ -163,13 +165,30 @@ def _to_brief(task: dict) -> TaskBrief:
     )
 
 
+async def _load_profile_meta() -> dict[str, dict]:
+    """Read display_name + avatar_url from agent_profiles table. Returns empty
+    dict per profile if the table doesn't exist yet or a row is missing."""
+    try:
+        from database import SessionLocal
+        from models import AgentProfile
+        from sqlalchemy import select as sa_select
+        names = [a[0] for a in AGENTS]
+        async with SessionLocal() as db:
+            rows = (await db.execute(
+                sa_select(AgentProfile).where(AgentProfile.id.in_(names))
+            )).scalars().all()
+        return {r.id: {"display_name": r.display_name, "avatar_url": r.avatar_url} for r in rows}
+    except Exception:
+        return {}
+
+
 @router.get("/board", response_model=BoardSnapshot)
 async def get_board():
     now_ts = time.time()
     if _cache["data"] is not None and now_ts - float(_cache["at"]) < _CACHE_TTL_S:
         return _cache["data"]  # type: ignore[return-value]
 
-    tasks = await _fetch_board()
+    tasks, profile_meta = await asyncio.gather(_fetch_board(), _load_profile_meta())
 
     by_assignee: dict[str, list[dict]] = {}
     for t in tasks:
@@ -188,7 +207,7 @@ async def get_board():
     ).timestamp())
 
     agents: list[AgentState] = []
-    for name, display, role, accent in AGENTS:
+    for name, hardcoded_display, role, accent in AGENTS:
         owned = by_assignee.get(name, [])
 
         running = next((t for t in owned if t.get("status") == "running"), None)
@@ -219,9 +238,13 @@ async def get_board():
         if current and current.get("started_at"):
             elapsed = max(0, int(now_ts) - int(current["started_at"]))
 
+        meta = profile_meta.get(name, {})
+        display = meta.get("display_name") or hardcoded_display
+        avatar_url = meta.get("avatar_url") or ""
         agents.append(AgentState(
             name=name,
             display_name=display,
+            avatar_url=avatar_url,
             role=role,
             accent=accent,
             status=status,

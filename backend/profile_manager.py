@@ -259,6 +259,94 @@ def set_skills(name: str, skills: list[str], enabled: bool) -> None:
         yaml_rt.dump(data, fh)
 
 
+def create_profile_via_cli(
+    name: str,
+    *,
+    clone_from: str | None = None,
+    description: str = "",
+) -> None:
+    """Create a new hermes profile via `hermes profile create`.
+
+    `clone_from='default'` is treated as the active profile (hermes default).
+    Pass any other name to clone from that profile's config + SOUL.md.
+    """
+    name = _safe_name(name)
+    pdir = _profile_dir(name)
+    if pdir.exists():
+        raise ValueError(f"profile {name!r} already exists")
+    cmd = ["hermes", "profile", "create", name]
+    if clone_from:
+        _safe_name(clone_from)
+        if clone_from != "default":
+            cmd += ["--clone-from", clone_from]
+        else:
+            cmd += ["--clone"]
+    if description:
+        cmd += ["--description", description]
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+    if result.returncode != 0:
+        raise RuntimeError(f"hermes profile create failed: {result.stderr.strip() or result.stdout.strip()}")
+
+
+def delete_profile_via_cli(name: str) -> None:
+    if name == "default":
+        raise PermissionError("default profile is read-only")
+    name = _safe_name(name)
+    pdir = _profile_dir(name)
+    if not pdir.exists():
+        raise FileNotFoundError(name)
+    result = subprocess.run(
+        ["hermes", "profile", "delete", name, "-y"],
+        capture_output=True, text=True, timeout=60,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"hermes profile delete failed: {result.stderr.strip() or result.stdout.strip()}")
+
+
+def set_hermes_description(name: str, text: str) -> None:
+    """Sync description into hermes via `hermes profile describe --text`.
+
+    Kanban orchestrator reads this for role routing — keep them in sync with the
+    DB-stored description.
+    """
+    if name == "default":
+        raise PermissionError("default profile is read-only")
+    name = _safe_name(name)
+    result = subprocess.run(
+        ["hermes", "profile", "describe", name, "--text", text],
+        capture_output=True, text=True, timeout=30,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"hermes profile describe failed: {result.stderr.strip() or result.stdout.strip()}")
+
+
+def list_profile_names() -> list[str]:
+    """Names only — for cheap clone-source dropdowns."""
+    return [p["name"] for p in list_profiles()]
+
+
+CODEX_IMAGEGEN_SCRIPT = Path.home() / ".hermes" / "skills" / "custom" / "codex_imagegen" / "scripts" / "main.py"
+
+
+def generate_avatar_via_codex(prompt: str, out_path: Path) -> None:
+    """Invoke the codex_imagegen skill script to render an avatar PNG.
+
+    Square 1:1 aspect; caller decides where to put the file.
+    """
+    if not CODEX_IMAGEGEN_SCRIPT.exists():
+        raise RuntimeError(f"codex_imagegen skill not found at {CODEX_IMAGEGEN_SCRIPT}")
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    cmd = [
+        "python", str(CODEX_IMAGEGEN_SCRIPT),
+        "--image", str(out_path),
+        "--prompt", prompt,
+        "--aspect", "1:1",
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+    if result.returncode != 0 or not out_path.exists():
+        raise RuntimeError(f"codex_imagegen failed: {result.stderr.strip() or result.stdout.strip()}")
+
+
 def set_mcp_server(name: str, server: str, enabled: bool) -> None:
     if name == "default":
         raise PermissionError("default profile is read-only")

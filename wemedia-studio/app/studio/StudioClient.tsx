@@ -134,13 +134,33 @@ function fmtAgo(ts: number, now: number): string {
 
 /* ── tiny avatar ──────────────────────────────────────────────────────── */
 
-function AgentAvatar({ assignee, size = 28 }: { assignee: string; size?: number }) {
+const API_ROOT = (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000/api').replace(/\/api$/, '')
+
+function resolveUrl(url: string): string {
+  if (!url) return ''
+  if (url.startsWith('http')) return url
+  return `${API_ROOT}${url}`
+}
+
+function AgentAvatar({ assignee, avatarUrl = '', size = 28 }: { assignee: string; avatarUrl?: string; size?: number }) {
   const accent = ASSIGNEE_ACCENT[assignee] ?? 'indigo'
   const role = ASSIGNEE_ROLE[assignee] ?? 'editor'
   const Icon = ROLE_ICON[role]
+  const src = resolveUrl(avatarUrl)
+  if (src) {
+    return (
+      <img
+        src={src}
+        alt={assignee}
+        className="rounded-full object-cover shrink-0"
+        style={{ width: size, height: size }}
+        onError={e => { (e.target as HTMLImageElement).style.display = 'none' }}
+      />
+    )
+  }
   return (
     <span
-      className={cn('inline-flex items-center justify-center rounded-md text-white shrink-0', ACCENT_DOT[accent])}
+      className={cn('inline-flex items-center justify-center rounded-full text-white shrink-0', ACCENT_DOT[accent])}
       style={{ width: size, height: size }}
     >
       <Icon style={{ width: size * 0.5, height: size * 0.5 }} />
@@ -180,11 +200,12 @@ function KpiCard({
 
 /* ── task card (kanban) ───────────────────────────────────────────────── */
 
-function TaskCard({ task, now, onOpen, onDelete }: { task: TaskBrief; now: number; onOpen: (id: string) => void; onDelete: (id: string, title: string) => void }) {
+function TaskCard({ task, now, agents, onOpen, onDelete }: { task: TaskBrief; now: number; agents: AgentState[]; onOpen: (id: string) => void; onDelete: (id: string, title: string) => void }) {
   const accent = ASSIGNEE_ACCENT[task.assignee] ?? 'indigo'
   const role = ASSIGNEE_ROLE[task.assignee] ?? 'editor'
   const ts = task.completed_at ?? task.started_at ?? task.created_at
   const isRunning = task.status === 'running' && task.started_at
+  const agentMeta = agents.find(a => a.name === task.assignee)
 
   return (
     <div className="relative group">
@@ -208,9 +229,9 @@ function TaskCard({ task, now, onOpen, onDelete }: { task: TaskBrief; now: numbe
         {/* footer: avatar + name + date */}
         <div className="flex items-center justify-between text-[11px]">
           <div className="flex items-center gap-1.5 min-w-0">
-            <AgentAvatar assignee={task.assignee} size={18} />
+            <AgentAvatar assignee={task.assignee} avatarUrl={agentMeta?.avatar_url} size={18} />
             <span className="text-zinc-600 dark:text-zinc-400 truncate">
-              {ROLE_LABEL_EN[role]} Agent
+              {agentMeta?.display_name ?? ROLE_LABEL_EN[role]}
             </span>
           </div>
           <span className={cn('shrink-0 ml-2 tabular-nums', isRunning ? 'text-blue-600 font-medium' : 'text-zinc-400')}>
@@ -232,7 +253,7 @@ function TaskCard({ task, now, onOpen, onDelete }: { task: TaskBrief; now: numbe
 
 /* ── kanban column ────────────────────────────────────────────────────── */
 
-function KanbanColumn({ col, tasks, now, onOpen, onDelete }: { col: ColumnDef; tasks: TaskBrief[]; now: number; onOpen: (id: string) => void; onDelete: (id: string, title: string) => void }) {
+function KanbanColumn({ col, tasks, now, agents, onOpen, onDelete }: { col: ColumnDef; tasks: TaskBrief[]; now: number; agents: AgentState[]; onOpen: (id: string) => void; onDelete: (id: string, title: string) => void }) {
   return (
     <div className="flex flex-col bg-zinc-50 dark:bg-zinc-900/50 rounded-xl">
       {/* header */}
@@ -245,7 +266,7 @@ function KanbanColumn({ col, tasks, now, onOpen, onDelete }: { col: ColumnDef; t
       </div>
       {/* cards */}
       <div className="px-2 pb-2 space-y-2 min-h-[200px] max-h-[calc(100vh-360px)] overflow-y-auto">
-        {tasks.map(t => <TaskCard key={t.id} task={t} now={now} onOpen={onOpen} onDelete={onDelete} />)}
+        {tasks.map(t => <TaskCard key={t.id} task={t} now={now} agents={agents} onOpen={onOpen} onDelete={onDelete} />)}
         {/* "+ 新建任务" stub */}
         <button
           onClick={() => toast.info('「发布任务」入口将放到公众号/X 面板的文章上 — 选好素材再入队')}
@@ -264,13 +285,13 @@ function KanbanColumn({ col, tasks, now, onOpen, onDelete }: { col: ColumnDef; t
 function MemberRow({ agent }: { agent: AgentState }) {
   return (
     <div className="flex items-center gap-3 py-2">
-      <AgentAvatar assignee={agent.name} size={32} />
+      <AgentAvatar assignee={agent.name} avatarUrl={agent.avatar_url} size={32} />
       <div className="flex-1 min-w-0">
         <div className="text-[13px] font-medium text-zinc-800 dark:text-zinc-200 truncate">
-          {ROLE_LABEL_EN[agent.role]} Agent
-        </div>
-        <div className="text-[11px] text-zinc-500 dark:text-zinc-400 truncate">
           {agent.display_name}
+        </div>
+        <div className="text-[11px] text-zinc-500 dark:text-zinc-400 truncate font-mono">
+          {agent.name}
         </div>
       </div>
       <div className={cn(
@@ -286,9 +307,10 @@ function MemberRow({ agent }: { agent: AgentState }) {
 
 /* ── activity row ─────────────────────────────────────────────────────── */
 
-function ActivityRow({ task, now }: { task: TaskBrief; now: number }) {
+function ActivityRow({ task, now, agents }: { task: TaskBrief; now: number; agents: AgentState[] }) {
   const role = ASSIGNEE_ROLE[task.assignee] ?? 'editor'
   const ts = task.completed_at ?? task.started_at ?? task.created_at
+  const agentMeta = agents.find(a => a.name === task.assignee)
 
   let verb = '处理了'
   if (task.status === 'done') verb = '完成了'
@@ -298,10 +320,10 @@ function ActivityRow({ task, now }: { task: TaskBrief; now: number }) {
 
   return (
     <div className="flex items-start gap-2.5 py-2">
-      <AgentAvatar assignee={task.assignee} size={24} />
+      <AgentAvatar assignee={task.assignee} avatarUrl={agentMeta?.avatar_url} size={24} />
       <div className="flex-1 min-w-0">
         <div className="text-[12px] leading-snug text-zinc-700 dark:text-zinc-300">
-          <span className="font-medium">{ROLE_LABEL_EN[role]} Agent</span>
+          <span className="font-medium">{agentMeta?.display_name ?? ROLE_LABEL_EN[role]}</span>
           <span className="text-zinc-500 dark:text-zinc-400"> {verb} </span>
           <span className="text-zinc-600 dark:text-zinc-400 truncate inline-block max-w-[200px] align-bottom">
             「{task.title}」
@@ -491,7 +513,7 @@ export function StudioClient() {
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             {COLUMNS.map(col => (
-              <KanbanColumn key={col.key} col={col} tasks={grouped[col.key] ?? []} now={now} onOpen={setOpenTaskId} onDelete={handleDelete} />
+              <KanbanColumn key={col.key} col={col} tasks={grouped[col.key] ?? []} now={now} agents={agentsLive} onOpen={setOpenTaskId} onDelete={handleDelete} />
             ))}
           </div>
         </section>
@@ -524,7 +546,7 @@ export function StudioClient() {
               {activity.length === 0 ? (
                 <p className="text-xs text-zinc-400 italic py-4 text-center">还没有动态</p>
               ) : (
-                activity.map(t => <ActivityRow key={t.id} task={t} now={now} />)
+                activity.map(t => <ActivityRow key={t.id} task={t} now={now} agents={agentsLive} />)
               )}
             </div>
           </section>

@@ -90,7 +90,9 @@ async def add_subscription(
     background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
 ):
-    subreddit = body.subreddit.strip().lower().lstrip("r/")
+    subreddit = body.subreddit.strip().lower()
+    if subreddit.startswith("r/"):
+        subreddit = subreddit[2:]
     if not subreddit:
         raise HTTPException(400, "版块名不能为空")
 

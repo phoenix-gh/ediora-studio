@@ -1,7 +1,7 @@
-const BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000/api'
+export const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000/api'
 
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
+  const res = await fetch(`${API_BASE}${path}`, {
     ...init,
     headers: { 'Content-Type': 'application/json', ...init?.headers },
     cache: init?.cache ?? 'no-store',

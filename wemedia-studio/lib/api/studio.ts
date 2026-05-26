@@ -16,6 +16,7 @@ export interface TaskBrief {
 export interface AgentState {
   name: string
   display_name: string
+  avatar_url: string
   role: 'scout' | 'editor' | 'writer' | 'illustrator'
   accent: 'amber' | 'indigo' | 'emerald' | 'violet' | 'rose'
   status: AgentStatus
