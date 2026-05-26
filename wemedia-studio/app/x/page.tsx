@@ -1,19 +1,12 @@
-import { getXCandidates, getXPosts } from '@/lib/api/x'
-import { XClient } from './XClient'
-
 export const dynamic = 'force-dynamic'
 
+import { listXSubscriptions, listXPosts } from '@/lib/api/x'
+import { XClient } from './XClient'
+
 export default async function XPage() {
-  const [candidateData, posts] = await Promise.all([
-    getXCandidates(undefined, 20, 0).catch(() => ({ candidates: [], total: 0, status_counts: {} })),
-    getXPosts(24).catch(() => []),
+  const [subs, posts] = await Promise.all([
+    listXSubscriptions().catch(() => []),
+    listXPosts({ hours: 168 }).catch(() => []),
   ])
-  return (
-    <XClient
-      initialCandidates={candidateData.candidates}
-      initialTotal={candidateData.total}
-      initialStatusCounts={candidateData.status_counts}
-      initialPosts={posts}
-    />
-  )
+  return <XClient initialSubs={subs} initialPosts={posts} />
 }
