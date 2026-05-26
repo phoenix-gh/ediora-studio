@@ -247,12 +247,15 @@ def auth_status() -> dict:
     if os.getenv("X_AUTH_TOKEN") and os.getenv("X_CT0"):
         return {"ready": True, "hint": "via env vars X_AUTH_TOKEN / X_CT0"}
 
-    candidates = [
-        Path.cwd() / "sessions" / "x.json",
-        Path.cwd() / "sessions" / "twitter.json",
-        Path.home() / ".feedgrab" / "sessions" / "x.json",
-        Path.home() / ".feedgrab" / "sessions" / "twitter.json",
-    ]
+    # Use feedgrab's own dir resolver so we look exactly where feedgrab will
+    # look at call time (honors FEEDGRAB_DATA_DIR).
+    try:
+        from feedgrab.config import get_cookie_dir
+        data_dir = get_cookie_dir()
+    except Exception:
+        data_dir = Path.cwd() / "sessions"
+
+    candidates = [data_dir / "x.json", data_dir / "twitter.json"]
     for p in candidates:
         try:
             if p.exists():
@@ -262,5 +265,5 @@ def auth_status() -> dict:
 
     return {
         "ready": False,
-        "hint": "未登录。请在 backend 工作目录运行：feedgrab login twitter",
+        "hint": f"未登录。请运行：feedgrab login twitter（cookies 应在 {data_dir}）",
     }

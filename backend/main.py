@@ -1,5 +1,15 @@
 from contextlib import asynccontextmanager
 import os
+from pathlib import Path
+
+# Point feedgrab at the project-root sessions/ dir so cookies saved via
+# `feedgrab login twitter` (run from project root) are discovered no matter
+# where the backend is launched from. Must be set BEFORE any feedgrab import.
+os.environ.setdefault(
+    "FEEDGRAB_DATA_DIR",
+    str(Path(__file__).resolve().parent.parent / "sessions"),
+)
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
