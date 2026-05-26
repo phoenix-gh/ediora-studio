@@ -78,7 +78,7 @@ export function SettingsClient({ initialSettings }: { initialSettings: AppSettin
           {active === 'ai'       && <AISection      settings={settings} onSaved={setSettings} />}
           {active === 'collect'  && <CollectSection settings={settings} onSaved={setSettings} />}
           {active === 'github'   && <GitHubSection  settings={settings} onSaved={setSettings} />}
-          {active === 'x'        && <XSection       settings={settings} onSaved={setSettings} />}
+          {active === 'x'        && <XSection />}
           {active === 'arxiv'    && <ArxivSection   settings={settings} onSaved={setSettings} />}
           {active === 'personas' && <PersonasSection />}
           {active === 'publish'  && <PublishAccountsSection />}
