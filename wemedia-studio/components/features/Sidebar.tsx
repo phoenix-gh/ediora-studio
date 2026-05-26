@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
   LayoutDashboard, TrendingUp, Settings, GitFork, AtSign, FileText, BookMarked, Tag, Quote,
-  PlaySquare, Rocket, MessageSquare, Globe, Flame, Gem, Bot, UserCog,
+  PlaySquare, Rocket, MessageSquare, Globe, Flame, Gem, Bot, UserCog, Hash,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -44,6 +44,7 @@ const sections: NavSection[] = [
       { href: '/kr',        label: '36 氪',        icon: Flame },
       { href: '/juejin',    label: '掘金',         icon: Gem },
       { href: '/producthunt', label: 'Product Hunt', icon: Rocket },
+      { href: '/reddit',    label: 'Reddit',       icon: Hash },
       { href: '/x',         label: 'X',            icon: AtSign },
     ],
   },
