@@ -237,27 +237,45 @@ export function RedditClient({
     setSubs(s)
   }, [])
 
+  // Poll every 10s until last_collected_at changes (max 3 min), then reload posts.
+  function _pollUntilDone(before: { id: number; ts: string | null }[]) {
+    const deadline = Date.now() + 3 * 60 * 1000
+    const interval = setInterval(async () => {
+      if (Date.now() > deadline) { clearInterval(interval); setRefreshing(false); return }
+      const fresh = await getRedditSubscriptions().catch(() => null)
+      if (!fresh) return
+      setSubs(fresh)
+      const changed = before.some(b => {
+        const f = fresh.find(s => s.id === b.id)
+        return f && f.last_collected_at !== b.ts
+      })
+      if (changed) {
+        clearInterval(interval)
+        await reloadPosts()
+        setRefreshing(false)
+        toast.success('采集完成，帖子已更新')
+      }
+    }, 10000)
+  }
+
   async function handleRefreshAll() {
     setRefreshing(true)
     try {
       await collectRedditAll()
-      toast.success('采集任务已启动')
-      setTimeout(async () => {
-        await reloadSubs()
-        await reloadPosts()
-      }, 3000)
+      toast.info('采集任务已启动，Reddit 需要 1-2 分钟，完成后自动刷新…')
+      _pollUntilDone(subs.map(s => ({ id: s.id, ts: s.last_collected_at })))
     } catch {
       toast.error('采集失败')
-    } finally {
       setRefreshing(false)
     }
   }
 
   async function handleAdd(body: { subreddit: string; label?: string }) {
-    await addRedditSubscription(body)
+    const sub = await addRedditSubscription(body)
     await reloadSubs()
-    await reloadPosts()
-    toast.success(`已订阅 r/${body.subreddit}`)
+    toast.info(`已订阅 r/${body.subreddit}，采集中，需要 1-2 分钟…`)
+    setRefreshing(true)
+    _pollUntilDone([{ id: sub.id, ts: sub.last_collected_at }])
   }
 
   async function handleMute(s: RedditSubscription) {
@@ -276,11 +294,8 @@ export function RedditClient({
 
   async function handleCollect(s: RedditSubscription) {
     await collectRedditSubscription(s.id)
-    toast.success(`已触发 r/${s.subreddit} 采集`)
-    setTimeout(async () => {
-      await reloadSubs()
-      await reloadPosts()
-    }, 4000)
+    toast.info(`r/${s.subreddit} 采集中，需要 1-2 分钟，完成后自动刷新…`)
+    _pollUntilDone([{ id: s.id, ts: s.last_collected_at }])
   }
 
   const readerMeta: ReaderMeta | null = readerPost
