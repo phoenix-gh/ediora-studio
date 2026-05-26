@@ -1,35 +1,34 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import { RefreshCw, Loader2, Trash2 } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import {
+  Twitter, Search, RefreshCw, Loader2, Settings, Trash2, ExternalLink,
+  Globe, ListFilter, MessageSquare, Repeat2, Heart, Eye,
+} from 'lucide-react'
 import { toast } from 'sonner'
-import { cn } from '@/lib/utils'
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
+} from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
+import { cn } from '@/lib/utils'
+import { fmtRelTime } from '@/lib/format'
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
-
-import {
-  type XSubscription,
-  type XPost,
-  type XSearchPost,
-  listXSubscriptions,
-  createXSubscription,
-  patchXSubscription,
-  deleteXSubscription,
-  collectXSubscription,
-  collectAllXSubscriptions,
-  listXPosts,
-  searchX,
+  type XSubscription, type XPost, type XSearchPost,
+  listXSubscriptions, listXPosts, searchX,
+  createXSubscription, patchXSubscription, deleteXSubscription,
+  collectXSubscription, collectAllXSubscriptions,
 } from '@/lib/api/x'
 
-type TabKey = 'subs' | 'search'
+const HOURS_OPTIONS = [
+  { v: 24,  label: '24h' },
+  { v: 168, label: '7d'  },
+  { v: 720, label: '30d' },
+]
+
+type Selection = { kind: 'all' } | { kind: 'sub'; id: number } | { kind: 'search' }
+
 
 export function XClient({
   initialSubs,
@@ -38,399 +37,474 @@ export function XClient({
   initialSubs: XSubscription[]
   initialPosts: XPost[]
 }) {
-  const [tab, setTab] = useState<TabKey>('subs')
+  const [subs, setSubs] = useState<XSubscription[]>(initialSubs)
+  const [posts, setPosts] = useState<XPost[]>(initialPosts)
+  const [selection, setSelection] = useState<Selection>({ kind: 'all' })
+  const [hours, setHours] = useState<number>(168)
+  const [loadingFeed, setLoadingFeed] = useState(false)
+  const [collectingAll, setCollectingAll] = useState(false)
+  const [actingId, setActingId] = useState<number | null>(null)
+  const [subsOpen, setSubsOpen] = useState(false)
+
+  const reloadSubs = async () => setSubs(await listXSubscriptions().catch(() => []))
+
+  const reloadPosts = async (sel: Selection = selection, h: number = hours) => {
+    if (sel.kind === 'search') return
+    setLoadingFeed(true)
+    try {
+      setPosts(await listXPosts({
+        subscription_id: sel.kind === 'sub' ? sel.id : undefined,
+        hours: h,
+      }))
+    } catch {
+      // silent
+    } finally { setLoadingFeed(false) }
+  }
+
+  useEffect(() => { reloadPosts(selection, hours) }, [selection, hours])
+
+  const handleAdd = async (url: string) => {
+    await createXSubscription(url)
+    await Promise.all([reloadSubs(), reloadPosts()])
+    toast.success('订阅已添加')
+  }
+
+  const handleToggle = async (s: XSubscription) => {
+    await patchXSubscription(s.id, { enabled: !s.enabled })
+    await reloadSubs()
+  }
+
+  const handleDelete = async (s: XSubscription) => {
+    await deleteXSubscription(s.id)
+    if (selection.kind === 'sub' && selection.id === s.id) {
+      setSelection({ kind: 'all' })
+    }
+    await Promise.all([reloadSubs(), reloadPosts()])
+  }
+
+  const handleCollectOne = async (s: XSubscription) => {
+    setActingId(s.id)
+    try {
+      const r = await collectXSubscription(s.id)
+      toast.success(`@${s.label}：新增 ${r.new_posts} 帖`)
+      await Promise.all([reloadSubs(), reloadPosts()])
+    } catch (e) {
+      toast.error((e as Error).message || '采集失败')
+    } finally { setActingId(null) }
+  }
+
+  const handleCollectAll = async () => {
+    setCollectingAll(true)
+    try {
+      const r = await collectAllXSubscriptions()
+      toast.success(
+        `已采集 ${r.checked} 源，新增 ${r.new_posts} 帖`
+        + (r.failed.length ? `（${r.failed.length} 源失败）` : '')
+      )
+      await Promise.all([reloadSubs(), reloadPosts()])
+    } catch (e) {
+      toast.error((e as Error).message || '采集失败')
+    } finally { setCollectingAll(false) }
+  }
+
+  const selectedSub = useMemo(() => {
+    if (selection.kind !== 'sub') return null
+    return subs.find(s => s.id === selection.id) ?? null
+  }, [selection, subs])
+
+  const headerTitle =
+    selection.kind === 'all'    ? 'X 订阅 · 全部' :
+    selection.kind === 'search' ? '实时搜索'      :
+    selectedSub?.label || '订阅'
 
   return (
-    <div className="p-6 max-w-5xl mx-auto space-y-5">
-      {/* Tab bar */}
-      <div className="flex rounded-lg border border-zinc-200 dark:border-zinc-700 overflow-hidden text-sm w-fit">
-        {([
-          { key: 'subs', label: '订阅' },
-          { key: 'search', label: '实时搜索' },
-        ] as { key: TabKey; label: string }[]).map((t) => (
-          <button
-            key={t.key}
-            onClick={() => setTab(t.key)}
-            className={cn(
-              'flex items-center gap-1.5 px-4 py-2 transition-colors',
-              tab === t.key
-                ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900'
-                : 'text-zinc-500 hover:text-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 dark:hover:text-zinc-100',
-            )}
-          >
-            {t.label}
-          </button>
-        ))}
+    <div className="flex h-full">
+      {/* Sidebar */}
+      <div className="w-56 border-r border-zinc-200 dark:border-zinc-800 flex flex-col flex-shrink-0">
+        <div className="px-3 py-3 border-b border-zinc-100 dark:border-zinc-800">
+          <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider px-1">X 订阅</p>
+        </div>
+        <div className="flex-1 overflow-y-auto px-2 py-2">
+          <SidebarRow
+            icon={Globe} iconColor="text-sky-500" label="全部订阅"
+            active={selection.kind === 'all'} onClick={() => setSelection({ kind: 'all' })}
+          />
+          <SidebarRow
+            icon={Search} iconColor="text-emerald-500" label="实时搜索"
+            active={selection.kind === 'search'} onClick={() => setSelection({ kind: 'search' })}
+          />
+          <div className="text-[11px] uppercase tracking-wider text-zinc-400 mt-3 mb-1 px-2">
+            已订阅 · {subs.length}
+          </div>
+          {subs.length === 0 ? (
+            <p className="text-xs text-zinc-400 text-center mt-2 px-3">
+              点右上角「订阅管理」添加
+            </p>
+          ) : (
+            subs.map(s => (
+              <SidebarRow
+                key={s.id}
+                icon={Twitter}
+                iconColor={s.enabled ? 'text-sky-500' : 'text-zinc-400'}
+                label={s.label}
+                badge={s.post_count > 0 ? String(s.post_count) : undefined}
+                active={selection.kind === 'sub' && selection.id === s.id}
+                muted={!s.enabled}
+                hasError={!!s.last_error}
+                onClick={() => setSelection({ kind: 'sub', id: s.id })}
+              />
+            ))
+          )}
+        </div>
       </div>
 
-      {tab === 'subs' && (
-        <SubscriptionsTab initialSubs={initialSubs} initialPosts={initialPosts} />
-      )}
-      {tab === 'search' && <SearchTab />}
+      {/* Main */}
+      <div className="flex-1 flex flex-col min-w-0">
+        <div className="border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 px-6 py-3">
+          <div className="flex items-center justify-between gap-4 flex-wrap">
+            <div className="flex items-center gap-2 min-w-0">
+              <Twitter className="w-4 h-4 text-sky-500 shrink-0" />
+              <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300 truncate">
+                {headerTitle}
+              </span>
+              {selection.kind !== 'search' && (
+                <span className="text-xs text-zinc-400 bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 rounded-full shrink-0">
+                  {posts.length} 帖
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              {selection.kind !== 'search' && (
+                <Button variant="outline" size="sm" className="h-8 text-xs gap-1.5"
+                  onClick={handleCollectAll} disabled={collectingAll}>
+                  <RefreshCw className={cn('w-3.5 h-3.5', collectingAll && 'animate-spin')} />
+                  {collectingAll ? '采集中…' : '立即采集'}
+                </Button>
+              )}
+              <Button variant="outline" size="sm" className="h-8 text-xs gap-1.5"
+                onClick={() => setSubsOpen(true)}>
+                <Settings className="w-3.5 h-3.5" />
+                订阅管理
+              </Button>
+            </div>
+          </div>
+
+          {selection.kind !== 'search' && (
+            <div className="flex items-center gap-1 mt-2.5">
+              <span className="text-xs text-zinc-400 mr-1">最近</span>
+              {HOURS_OPTIONS.map(({ v, label }) => (
+                <button key={v}
+                  onClick={() => setHours(v)}
+                  className={cn(
+                    'text-xs px-2 py-0.5 rounded transition-colors',
+                    hours === v
+                      ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900'
+                      : 'text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800'
+                  )}
+                >{label}</button>
+              ))}
+              {selectedSub?.last_error && (
+                <span className="ml-3 text-xs text-red-500 truncate">
+                  ⚠ {selectedSub.last_error}
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="flex-1 overflow-y-auto px-6 py-4">
+          {selection.kind === 'search'
+            ? <SearchPanel />
+            : <FeedPanel posts={posts} loading={loadingFeed} subsCount={subs.length} />}
+        </div>
+      </div>
+
+      <SubscribeDialog
+        open={subsOpen}
+        onOpenChange={setSubsOpen}
+        subs={subs}
+        actingId={actingId}
+        onAdd={handleAdd}
+        onToggle={handleToggle}
+        onDelete={handleDelete}
+        onCollect={handleCollectOne}
+      />
     </div>
   )
 }
 
-function SearchTab() {
+
+// ── Sidebar row ──────────────────────────────────────────────────────────────
+
+function SidebarRow({
+  icon: Icon, iconColor, label, badge, active, muted, hasError, onClick,
+}: {
+  icon: typeof Twitter
+  iconColor: string
+  label: string
+  badge?: string
+  active?: boolean
+  muted?: boolean
+  hasError?: boolean
+  onClick: () => void
+}) {
+  return (
+    <button onClick={onClick} className={cn(
+      'w-full flex items-center gap-2 px-2 py-1.5 rounded text-left transition-colors mb-0.5',
+      active
+        ? 'bg-sky-50 dark:bg-sky-950/40 text-sky-700 dark:text-sky-300'
+        : 'hover:bg-zinc-50 dark:hover:bg-zinc-900',
+      muted && 'opacity-50',
+    )}>
+      <Icon className={cn('w-4 h-4 flex-shrink-0', iconColor)} />
+      <span className="text-xs font-medium truncate flex-1">{label}</span>
+      {hasError && <span className="w-1.5 h-1.5 rounded-full bg-red-500 flex-shrink-0" />}
+      {badge && (
+        <span className="text-[10px] text-zinc-400 bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded-full">
+          {badge}
+        </span>
+      )}
+    </button>
+  )
+}
+
+
+// ── Feed panel ───────────────────────────────────────────────────────────────
+
+function FeedPanel({
+  posts, loading, subsCount,
+}: {
+  posts: XPost[]
+  loading: boolean
+  subsCount: number
+}) {
+  if (loading && posts.length === 0) {
+    return <div className="flex items-center justify-center h-32 text-sm text-zinc-400">加载中…</div>
+  }
+  if (posts.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center h-48 gap-3 text-zinc-400">
+        <Twitter className="w-10 h-10 opacity-20 text-sky-500" />
+        <p className="text-sm">
+          {subsCount === 0 ? '点右上角「订阅管理」添加 X URL 开始' : '该范围暂无帖子，试试「立即采集」或换时间窗'}
+        </p>
+      </div>
+    )
+  }
+  return (
+    <div className="max-w-3xl space-y-2">
+      {posts.map(p => <PostCard key={p.tweet_id} post={p} />)}
+    </div>
+  )
+}
+
+
+// ── Search panel ─────────────────────────────────────────────────────────────
+
+function SearchPanel() {
   const [q, setQ] = useState('')
   const [loading, setLoading] = useState(false)
   const [results, setResults] = useState<XSearchPost[]>([])
-  const [error, setError] = useState<string>('')
+  const [error, setError] = useState('')
 
   const run = async () => {
     const trimmed = q.trim()
     if (!trimmed) return
-    setLoading(true)
-    setError('')
-    setResults([])
+    setLoading(true); setError(''); setResults([])
     try {
       setResults(await searchX(trimmed))
     } catch (e) {
       setError((e as Error).message || '搜索失败')
-    } finally {
-      setLoading(false)
-    }
+    } finally { setLoading(false) }
   }
 
   return (
-    <div className="space-y-4">
-      {/* hint */}
-      <p className="text-sm text-zinc-400 dark:text-zinc-500">
-        实时通过 feedgrab 查询 X，结果不会保存到数据库
-      </p>
-
-      {/* search input */}
+    <div className="max-w-3xl space-y-4">
+      <div className="flex items-center gap-2 text-xs text-zinc-400">
+        <ListFilter className="w-3.5 h-3.5" />
+        <span>实时通过 feedgrab 查询 X · 结果不入库</span>
+      </div>
       <div className="flex gap-2">
-        <Input
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          placeholder="输入关键词，例如：AI agent"
-          className="flex-1 h-8 text-sm"
-          onKeyDown={(e) => { if (e.key === 'Enter') run() }}
-        />
-        <Button size="sm" onClick={run} disabled={loading}>
-          {loading ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : null}
+        <div className="relative flex-1">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-400" />
+          <Input value={q} onChange={e => setQ(e.target.value)}
+            placeholder="输入关键词，例如：AI agent"
+            className="h-8 text-sm pl-8"
+            onKeyDown={e => { if (e.key === 'Enter') run() }}
+          />
+        </div>
+        <Button size="sm" className="h-8 text-xs gap-1.5" onClick={run} disabled={loading}>
+          {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5" />}
           搜索
         </Button>
       </div>
-
-      {/* error */}
       {error && (
-        <div className="rounded border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/30 p-3 text-sm text-red-600 dark:text-red-400">
+        <div className="rounded border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/30 px-3 py-2 text-xs text-red-600 dark:text-red-400">
           {error}
         </div>
       )}
-
-      {/* results */}
-      {results.length === 0 ? (
-        !loading && !error && (
-          <p className="text-sm text-zinc-400">还没有结果，输入关键词后搜索</p>
-        )
-      ) : (
-        <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 overflow-hidden">
-          <div className="px-4 py-2.5 bg-zinc-50 dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800">
-            <span className="text-xs text-zinc-400">结果 ({results.length})</span>
-          </div>
-          <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
-            {results.map((p) => (
-              <SearchResultCard key={p.tweet_id} post={p} />
-            ))}
-          </div>
+      {results.length > 0 && (
+        <div className="space-y-2">
+          <p className="text-xs text-zinc-400">{results.length} 条结果</p>
+          {results.map(p => <PostCard key={p.tweet_id} post={p} />)}
         </div>
+      )}
+      {!loading && !error && results.length === 0 && (
+        <p className="text-xs text-zinc-400">输入关键词后回车搜索</p>
       )}
     </div>
   )
 }
 
-function SearchResultCard({ post: p }: { post: XSearchPost }) {
+
+// ── Post card (works for XPost and XSearchPost — shared fields only) ─────────
+
+function PostCard({ post: p }: { post: XPost | XSearchPost }) {
   return (
-    <div className="px-4 py-3">
-      <div className="flex items-center justify-between mb-1">
-        <div className="text-sm">
-          <span className="font-medium text-zinc-800 dark:text-zinc-200">
+    <div className="border border-zinc-200 dark:border-zinc-800 rounded-lg px-4 py-3 hover:bg-zinc-50 dark:hover:bg-zinc-900/50 transition-colors">
+      <div className="flex items-center justify-between mb-1.5">
+        <div className="flex items-center gap-1.5 text-sm min-w-0">
+          <span className="font-medium text-zinc-800 dark:text-zinc-200 truncate">
             {p.display_name || p.username}
-          </span>{' '}
-          <span className="text-zinc-400">@{p.username}</span>
+          </span>
+          <span className="text-zinc-400 text-xs truncate">@{p.username}</span>
         </div>
-        <div className="text-xs text-zinc-400">
-          {new Date(p.published_at).toLocaleString()}
-        </div>
+        <a href={p.url} target="_blank" rel="noreferrer"
+          className="text-xs text-zinc-400 hover:text-sky-500 flex items-center gap-1 shrink-0"
+          title={new Date(p.published_at).toLocaleString()}>
+          {fmtRelTime(p.published_at)}
+          <ExternalLink className="w-3 h-3" />
+        </a>
       </div>
-      <p className="text-sm text-zinc-700 dark:text-zinc-300 whitespace-pre-wrap mb-1">
+      <p className="text-sm text-zinc-700 dark:text-zinc-300 whitespace-pre-wrap mb-2">
         {p.content}
       </p>
-      <div className="text-xs text-zinc-400">
-        浏览 {p.views.toLocaleString()} · 转发 {p.reposts} · 点赞 {p.likes} · 回复 {p.replies}
-        <a
-          href={p.url}
-          target="_blank"
-          rel="noreferrer"
-          className="ml-3 text-blue-500 hover:underline"
-        >
-          查看原推
-        </a>
+      <div className="flex items-center gap-4 text-xs text-zinc-400">
+        <span className="flex items-center gap-1"><Eye className="w-3 h-3" />{p.views.toLocaleString()}</span>
+        <span className="flex items-center gap-1"><Repeat2 className="w-3 h-3" />{p.reposts.toLocaleString()}</span>
+        <span className="flex items-center gap-1"><Heart className="w-3 h-3" />{p.likes.toLocaleString()}</span>
+        <span className="flex items-center gap-1"><MessageSquare className="w-3 h-3" />{p.replies.toLocaleString()}</span>
       </div>
     </div>
   )
 }
 
-function SubscriptionsTab({
-  initialSubs,
-  initialPosts,
+
+// ── Subscribe dialog ─────────────────────────────────────────────────────────
+
+function SubscribeDialog({
+  open, onOpenChange, subs, actingId,
+  onAdd, onToggle, onDelete, onCollect,
 }: {
-  initialSubs: XSubscription[]
-  initialPosts: XPost[]
+  open: boolean
+  onOpenChange: (v: boolean) => void
+  subs: XSubscription[]
+  actingId: number | null
+  onAdd: (url: string) => Promise<void>
+  onToggle: (s: XSubscription) => Promise<void>
+  onDelete: (s: XSubscription) => Promise<void>
+  onCollect: (s: XSubscription) => Promise<void>
 }) {
-  const [subs, setSubs] = useState<XSubscription[]>(initialSubs)
-  const [posts, setPosts] = useState<XPost[]>(initialPosts)
   const [url, setUrl] = useState('')
   const [adding, setAdding] = useState(false)
-  const [filterSub, setFilterSub] = useState<string>('all')
-  const [hours, setHours] = useState<string>('168')
-  const [loadingFeed, setLoadingFeed] = useState(false)
+  const [busyId, setBusyId] = useState<number | null>(null)
 
-  const reloadSubs = async () => {
-    setSubs(await listXSubscriptions().catch(() => []))
-  }
-
-  const reloadPosts = async (subId?: number, h?: number) => {
-    setLoadingFeed(true)
-    try {
-      setPosts(
-        await listXPosts({
-          subscription_id: subId,
-          hours: h,
-        }),
-      )
-    } catch {
-      // silent
-    } finally {
-      setLoadingFeed(false)
-    }
-  }
-
-  useEffect(() => {
-    const subId = filterSub === 'all' ? undefined : Number(filterSub)
-    reloadPosts(subId, Number(hours))
-  }, [filterSub, hours])
-
-  const add = async () => {
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault()
     const trimmed = url.trim()
     if (!trimmed) return
     setAdding(true)
     try {
-      await createXSubscription(trimmed)
+      await onAdd(trimmed)
       setUrl('')
-      await Promise.all([reloadSubs(), reloadPosts(undefined, Number(hours))])
-      toast.success('订阅已添加')
-    } catch (e) {
-      toast.error((e as Error).message || '添加失败')
-    } finally {
-      setAdding(false)
-    }
+    } catch (err) {
+      toast.error((err as Error).message || '添加失败')
+    } finally { setAdding(false) }
   }
 
-  const collectAll = async () => {
-    try {
-      const r = await collectAllXSubscriptions()
-      toast.success(
-        `已采集 ${r.checked} 源，新增 ${r.new_posts} 帖${r.failed.length ? `（${r.failed.length} 源失败）` : ''}`,
-      )
-      await Promise.all([reloadSubs(), reloadPosts(undefined, Number(hours))])
-    } catch (e) {
-      toast.error((e as Error).message || '采集失败')
-    }
-  }
-
-  const afterAction = async () => {
-    const subId = filterSub === 'all' ? undefined : Number(filterSub)
-    await Promise.all([reloadSubs(), reloadPosts(subId, Number(hours))])
+  const wrap = async (s: XSubscription, fn: (s: XSubscription) => Promise<void>) => {
+    setBusyId(s.id)
+    try { await fn(s) }
+    catch (err) { toast.error((err as Error).message || '操作失败') }
+    finally { setBusyId(null) }
   }
 
   return (
-    <div className="space-y-5">
-      {/* Add subscription */}
-      <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 p-4 space-y-3">
-        <h2 className="text-sm font-medium text-zinc-700 dark:text-zinc-300">添加订阅</h2>
-        <div className="flex gap-2">
-          <Input
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            placeholder="https://x.com/username  或  https://x.com/i/lists/{id}"
-            className="flex-1 h-8 text-sm"
-            onKeyDown={(e) => e.key === 'Enter' && add()}
-          />
-          <Button size="sm" onClick={add} disabled={adding}>
-            {adding ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : null}
-            添加
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-xl">
+        <DialogHeader>
+          <DialogTitle className="text-base">X 订阅管理</DialogTitle>
+          <DialogDescription className="text-xs">
+            个人主页（<code>https://x.com/&lt;username&gt;</code>）或 list
+            （<code>https://x.com/i/lists/&lt;id&gt;</code>）URL，定时按订阅采集
+          </DialogDescription>
+        </DialogHeader>
+
+        <form onSubmit={submit} className="flex items-center gap-2">
+          <Input value={url} onChange={e => setUrl(e.target.value)}
+            placeholder="https://x.com/elonmusk 或 https://x.com/i/lists/12345"
+            className="h-8 text-xs flex-1" />
+          <Button type="submit" size="sm" className="h-8 text-xs"
+            disabled={adding || !url.trim()}>
+            {adding ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : '添加'}
           </Button>
-        </div>
-      </div>
+        </form>
 
-      {/* Subscription list */}
-      <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 overflow-hidden">
-        <div className="flex items-center justify-between px-4 py-2.5 bg-zinc-50 dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800">
-          <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
-            订阅列表 ({subs.length})
-          </span>
-          <Button variant="outline" size="sm" onClick={collectAll}>
-            <RefreshCw className="w-3.5 h-3.5 mr-1.5" />
-            全部采集
-          </Button>
-        </div>
-        {subs.length === 0 ? (
-          <div className="py-12 text-center text-sm text-zinc-400">还没有订阅</div>
-        ) : (
-          <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
-            {subs.map((s) => (
-              <SubscriptionRow key={s.id} sub={s} onAfterAction={afterAction} />
-            ))}
+        <div>
+          <div className="text-[11px] uppercase tracking-wider text-zinc-400 mb-1.5 px-0.5">
+            已订阅 · {subs.length}
           </div>
-        )}
-      </div>
-
-      {/* Post feed */}
-      <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 overflow-hidden">
-        <div className="flex items-center justify-between px-4 py-2.5 bg-zinc-50 dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800">
-          <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
-            帖子流 ({posts.length}){loadingFeed ? ' · 加载中…' : ''}
-          </span>
-          <div className="flex gap-2">
-            <Select value={filterSub} onValueChange={(v) => setFilterSub(v ?? 'all')}>
-              <SelectTrigger size="sm" className="w-36">
-                <SelectValue placeholder="全部订阅" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">全部订阅</SelectItem>
-                {subs.map((s) => (
-                  <SelectItem key={s.id} value={String(s.id)}>
-                    {s.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select value={hours} onValueChange={(v) => setHours(v ?? '168')}>
-              <SelectTrigger size="sm" className="w-20">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="24">24h</SelectItem>
-                <SelectItem value="168">7d</SelectItem>
-                <SelectItem value="720">30d</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+          {subs.length === 0 ? (
+            <div className="text-xs text-zinc-400 py-6 text-center border border-dashed rounded-md">
+              暂无订阅
+            </div>
+          ) : (
+            <div className="border border-zinc-200 dark:border-zinc-800 rounded-md max-h-72 overflow-y-auto">
+              {subs.map(s => (
+                <div key={s.id} className={cn(
+                  'flex items-center gap-2 px-2.5 py-1.5 border-b border-zinc-100 dark:border-zinc-800 last:border-0',
+                  !s.enabled && 'opacity-50',
+                )}>
+                  <Twitter className={cn(
+                    'w-4 h-4 flex-shrink-0',
+                    s.enabled ? 'text-sky-500' : 'text-zinc-400',
+                  )} />
+                  <div className="flex-1 min-w-0">
+                    <div className="text-xs font-medium truncate">{s.label}</div>
+                    <div className="text-[11px] text-zinc-400 truncate">
+                      {s.post_count} 帖 · {s.last_collected_at
+                        ? fmtRelTime(s.last_collected_at) + ' 采集'
+                        : '未采集'}
+                      {s.last_error && (
+                        <span className="text-red-500 ml-1">⚠ {s.last_error}</span>
+                      )}
+                    </div>
+                  </div>
+                  <Switch checked={s.enabled} onCheckedChange={() => wrap(s, onToggle)}
+                    disabled={busyId === s.id} />
+                  <Button size="sm" variant="ghost" className="h-7 text-xs gap-1 px-2"
+                    disabled={busyId === s.id || actingId === s.id}
+                    onClick={() => wrap(s, onCollect)}>
+                    {actingId === s.id
+                      ? <Loader2 className="w-3 h-3 animate-spin" />
+                      : <RefreshCw className="w-3 h-3" />}
+                    采集
+                  </Button>
+                  <Button size="sm" variant="ghost"
+                    className="h-7 w-7 p-0 text-red-400 hover:text-red-600"
+                    disabled={busyId === s.id}
+                    onClick={async () => {
+                      if (!confirm(`删除订阅「${s.label}」？关联帖子也会被清掉。`)) return
+                      await wrap(s, onDelete)
+                    }}>
+                    <Trash2 className="w-3 h-3" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
-        {posts.length === 0 ? (
-          <div className="py-12 text-center text-sm text-zinc-400">暂无帖子</div>
-        ) : (
-          <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
-            {posts.map((p) => (
-              <PostCard key={p.tweet_id} post={p} />
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
-  )
-}
-
-function SubscriptionRow({
-  sub,
-  onAfterAction,
-}: {
-  sub: XSubscription
-  onAfterAction: () => Promise<void>
-}) {
-  const [busy, setBusy] = useState(false)
-
-  const handleCollect = async () => {
-    setBusy(true)
-    try {
-      const r = await collectXSubscription(sub.id)
-      toast.success(`新增 ${r.new_posts} 帖`)
-      await onAfterAction()
-    } catch (e) {
-      toast.error((e as Error).message || '采集失败')
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  const handleDelete = async () => {
-    if (!confirm(`删除订阅「${sub.label}」？关联帖子也会被清掉。`)) return
-    try {
-      await deleteXSubscription(sub.id)
-      await onAfterAction()
-    } catch (e) {
-      toast.error((e as Error).message || '删除失败')
-    }
-  }
-
-  const handleToggle = async (checked: boolean) => {
-    try {
-      await patchXSubscription(sub.id, { enabled: checked })
-      await onAfterAction()
-    } catch (e) {
-      toast.error((e as Error).message || '更新失败')
-    }
-  }
-
-  return (
-    <div className="flex gap-3 items-center px-4 py-3">
-      <div className="flex-1 min-w-0">
-        <div className="text-sm font-medium text-zinc-800 dark:text-zinc-200">{sub.label}</div>
-        <div className="text-xs text-zinc-400 truncate">{sub.url}</div>
-        {sub.last_error && (
-          <div className="text-xs text-red-500 mt-0.5">{sub.last_error}</div>
-        )}
-      </div>
-      <div className="text-xs text-zinc-400 text-right shrink-0 min-w-[100px]">
-        {sub.post_count} 帖<br />
-        {sub.last_collected_at
-          ? new Date(sub.last_collected_at).toLocaleString()
-          : '未采集'}
-      </div>
-      <Switch checked={sub.enabled} onCheckedChange={handleToggle} />
-      <Button size="sm" variant="outline" onClick={handleCollect} disabled={busy}>
-        {busy && <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />}
-        采集
-      </Button>
-      <Button size="sm" variant="outline" onClick={handleDelete} className="text-red-600 hover:text-red-700 border-red-200 hover:border-red-300 hover:bg-red-50 dark:border-red-900 dark:hover:bg-red-950">
-        <Trash2 className="w-3.5 h-3.5" />
-      </Button>
-    </div>
-  )
-}
-
-function PostCard({ post: p }: { post: XPost }) {
-  return (
-    <div className="px-4 py-3">
-      <div className="flex items-center justify-between mb-1">
-        <div className="text-sm">
-          <span className="font-medium text-zinc-800 dark:text-zinc-200">
-            {p.display_name || p.username}
-          </span>{' '}
-          <span className="text-zinc-400">@{p.username}</span>
-        </div>
-        <div className="text-xs text-zinc-400">
-          {new Date(p.published_at).toLocaleString()}
-        </div>
-      </div>
-      <p className="text-sm text-zinc-700 dark:text-zinc-300 whitespace-pre-wrap mb-1">
-        {p.content}
-      </p>
-      <div className="text-xs text-zinc-400">
-        浏览 {p.views.toLocaleString()} · 转发 {p.reposts} · 点赞 {p.likes} · 回复 {p.replies}
-        <a
-          href={p.url}
-          target="_blank"
-          rel="noreferrer"
-          className="ml-3 text-blue-500 hover:underline"
-        >
-          查看原推
-        </a>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   )
 }
