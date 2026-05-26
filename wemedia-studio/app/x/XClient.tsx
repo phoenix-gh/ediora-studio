@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { RefreshCw, Loader2, Trash2, Rss } from 'lucide-react'
+import { RefreshCw, Loader2, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -18,6 +18,7 @@ import {
 import {
   type XSubscription,
   type XPost,
+  type XSearchPost,
   listXSubscriptions,
   createXSubscription,
   patchXSubscription,
@@ -25,6 +26,7 @@ import {
   collectXSubscription,
   collectAllXSubscriptions,
   listXPosts,
+  searchX,
 } from '@/lib/api/x'
 
 type TabKey = 'subs' | 'search'
@@ -64,16 +66,110 @@ export function XClient({
       {tab === 'subs' && (
         <SubscriptionsTab initialSubs={initialSubs} initialPosts={initialPosts} />
       )}
-      {tab === 'search' && <SearchTabPlaceholder />}
+      {tab === 'search' && <SearchTab />}
     </div>
   )
 }
 
-function SearchTabPlaceholder() {
+function SearchTab() {
+  const [q, setQ] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [results, setResults] = useState<XSearchPost[]>([])
+  const [error, setError] = useState<string>('')
+
+  const run = async () => {
+    const trimmed = q.trim()
+    if (!trimmed) return
+    setLoading(true)
+    setError('')
+    setResults([])
+    try {
+      setResults(await searchX(trimmed))
+    } catch (e) {
+      setError((e as Error).message || '搜索失败')
+    } finally {
+      setLoading(false)
+    }
+  }
+
   return (
-    <div className="flex flex-col items-center justify-center py-20 text-zinc-400">
-      <Rss className="w-10 h-10 mb-3 opacity-30" />
-      <p className="text-sm">实时搜索功能即将上线（Task 12）</p>
+    <div className="space-y-4">
+      {/* hint */}
+      <p className="text-sm text-zinc-400 dark:text-zinc-500">
+        实时通过 feedgrab 查询 X，结果不会保存到数据库
+      </p>
+
+      {/* search input */}
+      <div className="flex gap-2">
+        <Input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="输入关键词，例如：AI agent"
+          className="flex-1 h-8 text-sm"
+          onKeyDown={(e) => { if (e.key === 'Enter') run() }}
+        />
+        <Button size="sm" onClick={run} disabled={loading}>
+          {loading ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : null}
+          搜索
+        </Button>
+      </div>
+
+      {/* error */}
+      {error && (
+        <div className="rounded border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/30 p-3 text-sm text-red-600 dark:text-red-400">
+          {error}
+        </div>
+      )}
+
+      {/* results */}
+      {results.length === 0 ? (
+        !loading && !error && (
+          <p className="text-sm text-zinc-400">还没有结果，输入关键词后搜索</p>
+        )
+      ) : (
+        <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 overflow-hidden">
+          <div className="px-4 py-2.5 bg-zinc-50 dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800">
+            <span className="text-xs text-zinc-400">结果 ({results.length})</span>
+          </div>
+          <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
+            {results.map((p) => (
+              <SearchResultCard key={p.tweet_id} post={p} />
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function SearchResultCard({ post: p }: { post: XSearchPost }) {
+  return (
+    <div className="px-4 py-3">
+      <div className="flex items-center justify-between mb-1">
+        <div className="text-sm">
+          <span className="font-medium text-zinc-800 dark:text-zinc-200">
+            {p.display_name || p.username}
+          </span>{' '}
+          <span className="text-zinc-400">@{p.username}</span>
+        </div>
+        <div className="text-xs text-zinc-400">
+          {new Date(p.published_at).toLocaleString()}
+        </div>
+      </div>
+      <p className="text-sm text-zinc-700 dark:text-zinc-300 whitespace-pre-wrap mb-1">
+        {p.content}
+      </p>
+      <div className="text-xs text-zinc-400">
+        浏览 {p.views.toLocaleString()} · 转发 {p.reposts} · 点赞 {p.likes} · 回复 {p.replies}
+        <a
+          href={p.url}
+          target="_blank"
+          rel="noreferrer"
+          className="ml-3 text-blue-500 hover:underline"
+        >
+          查看原推
+        </a>
+      </div>
     </div>
   )
 }
