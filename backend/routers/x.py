@@ -79,8 +79,19 @@ async def create_subscription(
     )).scalars().first()
     if existing:
         raise HTTPException(400, "该 URL 已订阅")
+
+    if body.label:
+        label = body.label
+    else:
+        # Best-effort live fetch of the real display name / list name.
+        from feedgrab_client import resolve_subscription_label
+        import asyncio
+        label = await asyncio.to_thread(resolve_subscription_label, url)
+        if not label:
+            label = _default_label(url)
+
     sub = XSubscription(
-        url=url, label=(body.label or _default_label(url)),
+        url=url, label=label,
         enabled=True, added_at=datetime.now(timezone.utc),
     )
     db.add(sub)

@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
   Bird, Search, RefreshCw, Loader2, Settings, Trash2, ExternalLink,
-  Globe, ListFilter, MessageSquare, Repeat2, Heart, Eye,
+  Globe, ListFilter, MessageSquare, Repeat2, Heart, Eye, Pencil, Check, X,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
@@ -71,6 +71,11 @@ export function XClient({
 
   const handleToggle = async (s: XSubscription) => {
     await patchXSubscription(s.id, { enabled: !s.enabled })
+    await reloadSubs()
+  }
+
+  const handleRename = async (s: XSubscription, label: string) => {
+    await patchXSubscription(s.id, { label })
     await reloadSubs()
   }
 
@@ -228,6 +233,7 @@ export function XClient({
         onToggle={handleToggle}
         onDelete={handleDelete}
         onCollect={handleCollectOne}
+        onRename={handleRename}
       />
     </div>
   )
@@ -362,28 +368,42 @@ function SearchPanel() {
 function PostCard({ post: p }: { post: XPost | XSearchPost }) {
   return (
     <div className="border border-zinc-200 dark:border-zinc-800 rounded-lg px-4 py-3 hover:bg-zinc-50 dark:hover:bg-zinc-900/50 transition-colors">
-      <div className="flex items-center justify-between mb-1.5">
-        <div className="flex items-center gap-1.5 text-sm min-w-0">
-          <span className="font-medium text-zinc-800 dark:text-zinc-200 truncate">
-            {p.display_name || p.username}
-          </span>
-          <span className="text-zinc-400 text-xs truncate">@{p.username}</span>
-        </div>
-        <a href={p.url} target="_blank" rel="noreferrer"
-          className="text-xs text-zinc-400 hover:text-sky-500 flex items-center gap-1 shrink-0"
-          title={new Date(p.published_at).toLocaleString()}>
-          {fmtRelTime(p.published_at)}
-          <ExternalLink className="w-3 h-3" />
+      <div className="flex items-start gap-3">
+        <a href={`https://x.com/${p.username}`} target="_blank" rel="noreferrer" className="shrink-0">
+          <img
+            src={`https://unavatar.io/x/${p.username}`}
+            alt={p.username}
+            loading="lazy"
+            referrerPolicy="no-referrer"
+            className="w-10 h-10 rounded-full bg-zinc-100 dark:bg-zinc-800 object-cover"
+            onError={e => { (e.currentTarget as HTMLImageElement).style.visibility = 'hidden' }}
+          />
         </a>
-      </div>
-      <p className="text-sm text-zinc-700 dark:text-zinc-300 whitespace-pre-wrap mb-2">
-        {p.content}
-      </p>
-      <div className="flex items-center gap-4 text-xs text-zinc-400">
-        <span className="flex items-center gap-1"><Eye className="w-3 h-3" />{p.views.toLocaleString()}</span>
-        <span className="flex items-center gap-1"><Repeat2 className="w-3 h-3" />{p.reposts.toLocaleString()}</span>
-        <span className="flex items-center gap-1"><Heart className="w-3 h-3" />{p.likes.toLocaleString()}</span>
-        <span className="flex items-center gap-1"><MessageSquare className="w-3 h-3" />{p.replies.toLocaleString()}</span>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center justify-between mb-1.5">
+            <div className="flex items-center gap-1.5 text-sm min-w-0">
+              <span className="font-medium text-zinc-800 dark:text-zinc-200 truncate">
+                {p.display_name || p.username}
+              </span>
+              <span className="text-zinc-400 text-xs truncate">@{p.username}</span>
+            </div>
+            <a href={p.url} target="_blank" rel="noreferrer"
+              className="text-xs text-zinc-400 hover:text-sky-500 flex items-center gap-1 shrink-0"
+              title={new Date(p.published_at).toLocaleString()}>
+              {fmtRelTime(p.published_at)}
+              <ExternalLink className="w-3 h-3" />
+            </a>
+          </div>
+          <p className="text-sm text-zinc-700 dark:text-zinc-300 whitespace-pre-wrap mb-2">
+            {p.content}
+          </p>
+          <div className="flex items-center gap-4 text-xs text-zinc-400">
+            <span className="flex items-center gap-1"><Eye className="w-3 h-3" />{p.views.toLocaleString()}</span>
+            <span className="flex items-center gap-1"><Repeat2 className="w-3 h-3" />{p.reposts.toLocaleString()}</span>
+            <span className="flex items-center gap-1"><Heart className="w-3 h-3" />{p.likes.toLocaleString()}</span>
+            <span className="flex items-center gap-1"><MessageSquare className="w-3 h-3" />{p.replies.toLocaleString()}</span>
+          </div>
+        </div>
       </div>
     </div>
   )
@@ -394,7 +414,7 @@ function PostCard({ post: p }: { post: XPost | XSearchPost }) {
 
 function SubscribeDialog({
   open, onOpenChange, subs, actingId,
-  onAdd, onToggle, onDelete, onCollect,
+  onAdd, onToggle, onDelete, onCollect, onRename,
 }: {
   open: boolean
   onOpenChange: (v: boolean) => void
@@ -404,10 +424,13 @@ function SubscribeDialog({
   onToggle: (s: XSubscription) => Promise<void>
   onDelete: (s: XSubscription) => Promise<void>
   onCollect: (s: XSubscription) => Promise<void>
+  onRename: (s: XSubscription, label: string) => Promise<void>
 }) {
   const [url, setUrl] = useState('')
   const [adding, setAdding] = useState(false)
   const [busyId, setBusyId] = useState<number | null>(null)
+  const [editingId, setEditingId] = useState<number | null>(null)
+  const [editValue, setEditValue] = useState('')
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -460,47 +483,90 @@ function SubscribeDialog({
             </div>
           ) : (
             <div className="border border-zinc-200 dark:border-zinc-800 rounded-md max-h-72 overflow-y-auto">
-              {subs.map(s => (
-                <div key={s.id} className={cn(
-                  'flex items-center gap-2 px-2.5 py-1.5 border-b border-zinc-100 dark:border-zinc-800 last:border-0',
-                  !s.enabled && 'opacity-50',
-                )}>
-                  <Bird className={cn(
-                    'w-4 h-4 flex-shrink-0',
-                    s.enabled ? 'text-sky-500' : 'text-zinc-400',
-                  )} />
-                  <div className="flex-1 min-w-0">
-                    <div className="text-xs font-medium truncate">{s.label}</div>
-                    <div className="text-[11px] text-zinc-400 truncate">
-                      {s.post_count} 帖 · {s.last_collected_at
-                        ? fmtRelTime(s.last_collected_at) + ' 采集'
-                        : '未采集'}
-                      {s.last_error && (
-                        <span className="text-red-500 ml-1">⚠ {s.last_error}</span>
+              {subs.map(s => {
+                const isEditing = editingId === s.id
+                const commitEdit = async () => {
+                  const next = editValue.trim()
+                  if (next && next !== s.label) {
+                    setBusyId(s.id)
+                    try { await onRename(s, next) }
+                    catch (err) { toast.error((err as Error).message || '改名失败') }
+                    finally { setBusyId(null) }
+                  }
+                  setEditingId(null)
+                }
+                return (
+                  <div key={s.id} className={cn(
+                    'flex items-center gap-2 px-2.5 py-1.5 border-b border-zinc-100 dark:border-zinc-800 last:border-0',
+                    !s.enabled && 'opacity-50',
+                  )}>
+                    <Bird className={cn(
+                      'w-4 h-4 flex-shrink-0',
+                      s.enabled ? 'text-sky-500' : 'text-zinc-400',
+                    )} />
+                    <div className="flex-1 min-w-0">
+                      {isEditing ? (
+                        <Input
+                          autoFocus
+                          value={editValue}
+                          onChange={e => setEditValue(e.target.value)}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter') commitEdit()
+                            if (e.key === 'Escape') setEditingId(null)
+                          }}
+                          className="h-6 text-xs px-1"
+                        />
+                      ) : (
+                        <div className="text-xs font-medium truncate">{s.label || '未命名'}</div>
                       )}
+                      <div className="text-[11px] text-zinc-400 truncate">
+                        {s.post_count} 帖 · {s.last_collected_at
+                          ? fmtRelTime(s.last_collected_at) + ' 采集'
+                          : '未采集'}
+                        {s.last_error && (
+                          <span className="text-red-500 ml-1">⚠ {s.last_error}</span>
+                        )}
+                      </div>
                     </div>
+                    {isEditing ? (
+                      <>
+                        <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-emerald-500"
+                          onClick={commitEdit}><Check className="w-3 h-3" /></Button>
+                        <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-zinc-400"
+                          onClick={() => setEditingId(null)}><X className="w-3 h-3" /></Button>
+                      </>
+                    ) : (
+                      <>
+                        <Button size="sm" variant="ghost" className="h-7 w-7 p-0"
+                          disabled={busyId === s.id}
+                          onClick={() => { setEditValue(s.label); setEditingId(s.id) }}
+                          title="重命名">
+                          <Pencil className="w-3 h-3" />
+                        </Button>
+                        <Switch checked={s.enabled} onCheckedChange={() => wrap(s, onToggle)}
+                          disabled={busyId === s.id} />
+                        <Button size="sm" variant="ghost" className="h-7 text-xs gap-1 px-2"
+                          disabled={busyId === s.id || actingId === s.id}
+                          onClick={() => wrap(s, onCollect)}>
+                          {actingId === s.id
+                            ? <Loader2 className="w-3 h-3 animate-spin" />
+                            : <RefreshCw className="w-3 h-3" />}
+                          采集
+                        </Button>
+                        <Button size="sm" variant="ghost"
+                          className="h-7 w-7 p-0 text-red-400 hover:text-red-600"
+                          disabled={busyId === s.id}
+                          onClick={async () => {
+                            if (!confirm(`删除订阅「${s.label}」？关联帖子也会被清掉。`)) return
+                            await wrap(s, onDelete)
+                          }}>
+                          <Trash2 className="w-3 h-3" />
+                        </Button>
+                      </>
+                    )}
                   </div>
-                  <Switch checked={s.enabled} onCheckedChange={() => wrap(s, onToggle)}
-                    disabled={busyId === s.id} />
-                  <Button size="sm" variant="ghost" className="h-7 text-xs gap-1 px-2"
-                    disabled={busyId === s.id || actingId === s.id}
-                    onClick={() => wrap(s, onCollect)}>
-                    {actingId === s.id
-                      ? <Loader2 className="w-3 h-3 animate-spin" />
-                      : <RefreshCw className="w-3 h-3" />}
-                    采集
-                  </Button>
-                  <Button size="sm" variant="ghost"
-                    className="h-7 w-7 p-0 text-red-400 hover:text-red-600"
-                    disabled={busyId === s.id}
-                    onClick={async () => {
-                      if (!confirm(`删除订阅「${s.label}」？关联帖子也会被清掉。`)) return
-                      await wrap(s, onDelete)
-                    }}>
-                    <Trash2 className="w-3 h-3" />
-                  </Button>
-                </div>
-              ))}
+                )
+              })}
             </div>
           )}
         </div>

@@ -141,6 +141,40 @@ _SYSTEM_HANDLES = {"i", "home", "explore", "search", "settings",
 _MAX_TIMELINE_PAGES = 10  # safety cap; ~10 × 20–40 = 200–400 tweets per collect
 
 
+def resolve_subscription_label(url: str) -> str:
+    """Best-effort: fetch the real display name / list name for a URL.
+
+    Falls back to `@<screen_name>` / `list-<id>` when cookies missing or
+    feedgrab returns empty. Network call — wrap in asyncio.to_thread when
+    invoked from async code.
+    """
+    try:
+        kind, ident = _detect_timeline_kind(url)
+    except ValueError:
+        return ""
+
+    fallback = ("list-" + ident) if kind == "list" else ("@" + ident)
+
+    try:
+        from feedgrab.fetchers.twitter_cookies import load_twitter_cookies
+        cookies = load_twitter_cookies()
+        if not (cookies.get("auth_token") and cookies.get("ct0")):
+            return fallback
+
+        if kind == "list":
+            from feedgrab.fetchers.twitter_list_tweets import fetch_list_by_rest_id
+            meta = fetch_list_by_rest_id(ident, cookies)
+            return (meta.get("name") or "").strip() or fallback
+
+        from feedgrab.fetchers.twitter_graphql import fetch_user_by_screen_name
+        meta = fetch_user_by_screen_name(ident, cookies)
+        name = (meta.get("name") or "").strip()
+        handle = (meta.get("screen_name") or ident).strip()
+        return name or f"@{handle}"
+    except Exception:
+        return fallback
+
+
 def _detect_timeline_kind(url: str) -> tuple[str, str]:
     """Return (kind, identifier).
 
