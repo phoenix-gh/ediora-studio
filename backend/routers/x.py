@@ -214,18 +214,19 @@ async def _compute_collect_cutoff(db: AsyncSession, sub_id: int) -> datetime:
 async def _collect_one(db: AsyncSession, sub: XSubscription) -> int:
     cutoff = await _compute_collect_cutoff(db, sub.id)
     try:
-        posts = await grab_timeline(sub.url)
+        # Cutoff is pushed into feedgrab's paginator so it stops fetching
+        # once it crosses the boundary — no after-the-fact filtering needed.
+        posts = await grab_timeline(sub.url, since=cutoff)
     except Exception as e:
         sub.last_error = str(e)[:500]
         await db.commit()
         raise
-    new_posts = [p for p in posts if p.published_at >= cutoff]
-    for p in new_posts:
+    for p in posts:
         await db.execute(_upsert_post_stmt(db, sub.id, p))
     sub.last_collected_at = datetime.now(timezone.utc)
     sub.last_error = ""
     await db.commit()
-    return len(new_posts)
+    return len(posts)
 
 
 @router.post("/subscriptions/{sub_id}/collect-sync")

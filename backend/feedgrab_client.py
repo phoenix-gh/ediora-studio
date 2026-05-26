@@ -132,57 +132,133 @@ import re  # noqa: E402
 from pathlib import Path  # noqa: E402
 
 
-def _parse_screen_name(url: str) -> str:
-    """Extract screen_name from a profile URL like https://x.com/<username>."""
-    match = re.search(r"(?:x\.com|twitter\.com)/([a-zA-Z0-9_]{1,15})(?:/|$)", url)
-    if match:
-        return match.group(1)
-    raise ValueError(f"Cannot extract screen_name from URL: {url}")
+_PROFILE_RE = re.compile(r"(?:x\.com|twitter\.com)/([a-zA-Z0-9_]{1,15})(?:/|$)")
+_LIST_RE = re.compile(r"(?:x\.com|twitter\.com)/i/lists/(\d+)")
+_SYSTEM_HANDLES = {"i", "home", "explore", "search", "settings",
+                   "notifications", "messages", "compose", "login",
+                   "signup", "tos", "privacy", "hashtag"}
+
+_MAX_TIMELINE_PAGES = 10  # safety cap; ~10 × 20–40 = 200–400 tweets per collect
 
 
-def _fetch_timeline_raw(url: str) -> list[dict]:
-    """Sync helper: fetch first page of a user's timeline as flat tweet dicts.
+def _detect_timeline_kind(url: str) -> tuple[str, str]:
+    """Return (kind, identifier).
 
-    Approach: Option 4 — lower-level GraphQL paginator.
-    Uses feedgrab.fetchers.twitter_graphql directly:
-      fetch_user_by_screen_name → fetch_user_tweets_page →
-      parse_user_tweets_entries → extract_tweet_data
-    This returns the full extract_tweet_data dicts (id, text, author, likes, …)
-    without writing any Markdown files, unlike fetch_user_tweets() which only
-    returns a summary dict and the list_path JSON lacks text/metrics fields.
+    kind == "list" → identifier is numeric list_id
+    kind == "user" → identifier is screen_name (no @)
+    """
+    m = _LIST_RE.search(url)
+    if m:
+        return "list", m.group(1)
+    m = _PROFILE_RE.search(url)
+    if m and m.group(1).lower() not in _SYSTEM_HANDLES:
+        return "user", m.group(1)
+    raise ValueError(f"Unsupported timeline URL (need profile or list): {url}")
+
+
+def _paginate(page_fetcher, resource_id: str, parse_entries, label: str,
+              since: Optional[datetime], max_pages: int) -> list[dict]:
+    """Shared pagination + cookie-rotation + early-stop loop.
+
+    Mirrors the structure feedgrab uses inside fetch_user_tweets /
+    fetch_list_tweets, minus disk writes / dedup index / thread expansion.
+    """
+    from feedgrab.fetchers.twitter_graphql import extract_tweet_data
+    from feedgrab.fetchers.twitter_cookies import fetch_with_cookie_rotation
+
+    tweets: list[dict] = []
+    cursor: Optional[str] = None
+
+    for _page in range(max_pages):
+        response, _rotated = fetch_with_cookie_rotation(
+            page_fetcher,
+            resource_id,
+            label=label,
+            cursor=cursor,
+        )
+        if not response:
+            break
+
+        entries, cursors = parse_entries(response)
+        if not entries:
+            break
+
+        reached_cutoff = False
+        for entry in entries:
+            td = extract_tweet_data(entry)
+            if not td:
+                continue
+            if since is not None:
+                pub = _parse_created_at(td.get("created_at", ""))
+                if pub < since:
+                    reached_cutoff = True
+                    continue
+            tweets.append(td)
+
+        if reached_cutoff:
+            break
+        cursor = (cursors or {}).get("bottom") if isinstance(cursors, dict) else None
+        if not cursor:
+            break
+
+    return tweets
+
+
+def _fetch_timeline_raw(url: str, since: Optional[datetime] = None) -> list[dict]:
+    """Sync helper: paginate either a user timeline or a list timeline,
+    return flat tweet dicts.
+
+    URL dispatch matches feedgrab's UniversalReader._detect_platform:
+        x.com/i/lists/{id}    → twitter_list_tweets path
+        x.com/<username>      → twitter_user_tweets path
+
+    Mirrors feedgrab's pagination + cookie-rotation + early-stop loop but
+    skips its disk side effects (no .md writes, no media download, no
+    dedup index, no historical-gap supplementary search).
+
+    Args:
+        url: profile URL or list URL
+        since: if provided, paginate until older tweets are encountered.
+               If None, fetch only the first page.
 
     Wrapped by asyncio.to_thread in grab_timeline(); all feedgrab graphql
     functions are synchronous, so no nested event-loop risk here.
     """
-    from feedgrab.fetchers.twitter_graphql import (
-        fetch_user_by_screen_name,
-        fetch_user_tweets_page,
-        parse_user_tweets_entries,
-        extract_tweet_data,
-    )
     from feedgrab.fetchers.twitter_cookies import load_twitter_cookies
 
     cookies = load_twitter_cookies()
     if not (cookies.get("auth_token") and cookies.get("ct0")):
         raise RuntimeError("X 未登录 — 请在 backend 工作目录运行：feedgrab login twitter")
-    screen_name = _parse_screen_name(url)
 
-    user_info = fetch_user_by_screen_name(screen_name, cookies)
+    kind, ident = _detect_timeline_kind(url)
+    max_pages = 1 if since is None else _MAX_TIMELINE_PAGES
+
+    if kind == "list":
+        from feedgrab.fetchers.twitter_list_tweets import (
+            fetch_list_tweets_page,
+        )
+        from feedgrab.fetchers.twitter_graphql import (
+            parse_list_tweets_entries,
+        )
+        return _paginate(
+            fetch_list_tweets_page, ident, parse_list_tweets_entries,
+            label="ListTweets", since=since, max_pages=max_pages,
+        )
+
+    # kind == "user"
+    from feedgrab.fetchers.twitter_graphql import (
+        fetch_user_by_screen_name,
+        fetch_user_tweets_page,
+        parse_user_tweets_entries,
+    )
+    user_info = fetch_user_by_screen_name(ident, cookies)
     user_id = user_info.get("user_id", "")
     if not user_id:
-        raise RuntimeError(f"无法解析 @{screen_name}（cookie 失效或账号不存在）")
-
-    response = fetch_user_tweets_page(user_id, cookies)
-    if not response:
-        return []
-
-    entries, _cursors = parse_user_tweets_entries(response)
-    tweets: list[dict] = []
-    for entry in entries:
-        td = extract_tweet_data(entry)
-        if td:
-            tweets.append(td)
-    return tweets
+        raise RuntimeError(f"无法解析 @{ident}（cookie 失效或账号不存在）")
+    return _paginate(
+        fetch_user_tweets_page, user_id, parse_user_tweets_entries,
+        label="UserTweets", since=since, max_pages=max_pages,
+    )
 
 
 def _fetch_search_raw(query: str, limit: int = 20) -> list[dict]:
@@ -213,9 +289,16 @@ def _fetch_search_raw(query: str, limit: int = 20) -> list[dict]:
     return list(result.get("tweets") or [])
 
 
-async def grab_timeline(url: str) -> list[ParsedPost]:
-    """Fetch the first page of a user's X/Twitter timeline as ParsedPost list."""
-    raw = await asyncio.to_thread(_fetch_timeline_raw, url)
+async def grab_timeline(
+    url: str, since: Optional[datetime] = None
+) -> list[ParsedPost]:
+    """Fetch a user's X/Twitter timeline as ParsedPost list.
+
+    If `since` is given, paginate until reaching tweets older than it (using
+    feedgrab's cursor pagination + cookie rotation). If None, only the first
+    page is returned (used by callers that don't have a cutoff).
+    """
+    raw = await asyncio.to_thread(_fetch_timeline_raw, url, since)
     out: list[ParsedPost] = []
     for d in raw:
         if not isinstance(d, dict):
