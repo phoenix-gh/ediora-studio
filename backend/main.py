@@ -1,5 +1,11 @@
 from contextlib import asynccontextmanager
 import os
+from dotenv import load_dotenv
+
+# Load backend/.env before any other import so feedgrab + downstream modules
+# see X_BOOKMARKS_ENABLED, WMS_DATABASE_URL, X_AUTH_TOKEN, etc.
+load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
