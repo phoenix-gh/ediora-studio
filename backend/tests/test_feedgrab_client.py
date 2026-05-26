@@ -130,3 +130,25 @@ def test_auth_status_no_creds(monkeypatch, tmp_path):
     s = auth_status()
     assert s["ready"] is False
     assert "feedgrab login twitter" in s["hint"]
+
+
+# --- auth guard inside fetch helpers ---
+
+def test_fetch_timeline_raw_raises_without_cookies():
+    """Without cookies, fail loudly so the UI surfaces a real error
+    instead of silently returning 0 posts."""
+    from feedgrab_client import _fetch_timeline_raw
+
+    with patch("feedgrab.fetchers.twitter_cookies.load_twitter_cookies",
+               return_value={}):
+        with pytest.raises(RuntimeError, match="未登录"):
+            _fetch_timeline_raw("https://x.com/foo")
+
+
+def test_fetch_search_raw_raises_without_cookies():
+    from feedgrab_client import _fetch_search_raw
+
+    with patch("feedgrab.fetchers.twitter_cookies.load_twitter_cookies",
+               return_value={}):
+        with pytest.raises(RuntimeError, match="未登录"):
+            _fetch_search_raw("hello")

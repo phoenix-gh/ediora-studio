@@ -163,12 +163,14 @@ def _fetch_timeline_raw(url: str) -> list[dict]:
     from feedgrab.fetchers.twitter_cookies import load_twitter_cookies
 
     cookies = load_twitter_cookies()
+    if not (cookies.get("auth_token") and cookies.get("ct0")):
+        raise RuntimeError("X 未登录 — 请在 backend 工作目录运行：feedgrab login twitter")
     screen_name = _parse_screen_name(url)
 
     user_info = fetch_user_by_screen_name(screen_name, cookies)
     user_id = user_info.get("user_id", "")
     if not user_id:
-        return []
+        raise RuntimeError(f"无法解析 @{screen_name}（cookie 失效或账号不存在）")
 
     response = fetch_user_tweets_page(user_id, cookies)
     if not response:
@@ -189,7 +191,12 @@ def _fetch_search_raw(query: str, limit: int = 20) -> list[dict]:
     search_twitter_keyword is an async coroutine; we run it on a fresh loop
     to avoid "event loop already running" errors when called from to_thread.
     """
+    from feedgrab.fetchers.twitter_cookies import load_twitter_cookies
     from feedgrab.fetchers.twitter_keyword_search import search_twitter_keyword
+
+    cookies = load_twitter_cookies()
+    if not (cookies.get("auth_token") and cookies.get("ct0")):
+        raise RuntimeError("X 未登录 — 请在 backend 工作目录运行：feedgrab login twitter")
 
     loop = asyncio.new_event_loop()
     try:
