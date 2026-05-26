@@ -88,19 +88,23 @@ def test_delete_missing_returns_404(client):
     assert r.status_code == 404
 
 
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from unittest.mock import patch, AsyncMock
 
 
-def _fake_post(tid="111", views=100):
+def _fake_post(tid="111", views=100, published_at=None):
     from feedgrab_client import ParsedPost
+    # Default to "now" so the post falls inside the 24h cutoff window
+    # used by _collect_one's first-time collect path.
+    if published_at is None:
+        published_at = datetime.now(timezone.utc) - timedelta(minutes=5)
     return ParsedPost(
         tweet_id=tid,
         username="foo",
         display_name="Foo",
         content=f"body {tid}",
         url=f"https://x.com/foo/status/{tid}",
-        published_at=datetime(2026, 5, 20, 10, 0, tzinfo=timezone.utc),
+        published_at=published_at,
         replies=1, reposts=2, likes=5, views=views,
         raw_markdown="raw",
     )
@@ -230,3 +234,61 @@ def test_posts_filter_by_subscription(client):
     assert r.status_code == 200
     posts = r.json()
     assert {p["tweet_id"] for p in posts} == {"111"}
+
+
+# ── Incremental collect cutoff ────────────────────────────────────────────────
+
+
+def test_collect_first_time_uses_24h_window(client):
+    """No posts yet → cutoff = now - 24h. Tweets older than 24h are dropped."""
+    sub = client.post(
+        "/api/x/subscriptions", json={"url": "https://x.com/foo"}).json()
+
+    now = datetime.now(timezone.utc)
+    fresh = _fake_post("fresh", published_at=now - timedelta(hours=2))
+    stale = _fake_post("stale", published_at=now - timedelta(hours=48))
+
+    with patch("routers.x.grab_timeline",
+               new=AsyncMock(return_value=[fresh, stale])):
+        r = client.post(f"/api/x/subscriptions/{sub['id']}/collect-sync")
+
+    assert r.status_code == 200
+    assert r.json()["new_posts"] == 1
+    posts = client.get("/api/x/posts").json()
+    assert {p["tweet_id"] for p in posts} == {"fresh"}
+
+
+def test_collect_incremental_uses_hour_aligned_cutoff(client):
+    """After a prior collect, cutoff = hour-aligned latest published_at.
+    Tweets at or after that hour boundary are kept; older ones are dropped.
+    """
+    sub = client.post(
+        "/api/x/subscriptions", json={"url": "https://x.com/foo"}).json()
+
+    now = datetime.now(timezone.utc)
+    seed_at = now - timedelta(hours=3, minutes=34)  # e.g. 13:26 if now=16:60
+    seed = _fake_post("seed", published_at=seed_at)
+
+    with patch("routers.x.grab_timeline",
+               new=AsyncMock(return_value=[seed])):
+        client.post(f"/api/x/subscriptions/{sub['id']}/collect-sync")
+
+    # Cutoff for the next run should be seed_at hour-aligned (e.g. 13:00).
+    # A tweet right before that hour boundary must be dropped; a tweet
+    # at/after must be kept.
+    hour_aligned = seed_at.replace(minute=0, second=0, microsecond=0)
+    before = _fake_post("before", published_at=hour_aligned - timedelta(seconds=1))
+    after  = _fake_post("after",  published_at=hour_aligned + timedelta(minutes=10))
+    newer  = _fake_post("newer",  published_at=now)
+
+    with patch("routers.x.grab_timeline",
+               new=AsyncMock(return_value=[before, after, newer])):
+        r = client.post(f"/api/x/subscriptions/{sub['id']}/collect-sync")
+
+    assert r.status_code == 200
+    # `after` + `newer` pass; `before` dropped. seed was re-included (>= cutoff)
+    # but is an upsert (same partial-hour re-coverage is the whole point).
+    assert r.json()["new_posts"] == 2
+
+    posts = client.get(f"/api/x/posts?subscription_id={sub['id']}&hours=720").json()
+    assert {p["tweet_id"] for p in posts} == {"seed", "after", "newer"}

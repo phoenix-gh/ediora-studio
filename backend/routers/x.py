@@ -195,19 +195,37 @@ def _upsert_post_stmt(db: AsyncSession, sub_id: int, p):
 from feedgrab_client import grab_timeline, search_x, auth_status
 
 
+async def _compute_collect_cutoff(db: AsyncSession, sub_id: int) -> datetime:
+    """First-time collect → last 24h. Subsequent collects → hour-aligned
+    timestamp of latest stored post (re-includes the partial hour so newer
+    tweets posted in the same hour as the previous run are not missed).
+    """
+    latest = (await db.execute(
+        select(func.max(XPost.published_at))
+        .where(XPost.subscription_id == sub_id)
+    )).scalar()
+    if latest is None:
+        return datetime.now(timezone.utc) - timedelta(hours=24)
+    if latest.tzinfo is None:
+        latest = latest.replace(tzinfo=timezone.utc)
+    return latest.replace(minute=0, second=0, microsecond=0)
+
+
 async def _collect_one(db: AsyncSession, sub: XSubscription) -> int:
+    cutoff = await _compute_collect_cutoff(db, sub.id)
     try:
         posts = await grab_timeline(sub.url)
     except Exception as e:
         sub.last_error = str(e)[:500]
         await db.commit()
         raise
-    for p in posts:
+    new_posts = [p for p in posts if p.published_at >= cutoff]
+    for p in new_posts:
         await db.execute(_upsert_post_stmt(db, sub.id, p))
     sub.last_collected_at = datetime.now(timezone.utc)
     sub.last_error = ""
     await db.commit()
-    return len(posts)
+    return len(new_posts)
 
 
 @router.post("/subscriptions/{sub_id}/collect-sync")
