@@ -566,3 +566,67 @@ class YoutubeVideo(Base):
     published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+
+class AgentProfile(Base):
+    """Hermes profile metadata + SOUL backup.
+
+    `id` mirrors the hermes profile folder name (e.g. `wms_writer`) and is the
+    stable agent identifier referenced by kanban / hooks / cron. Filesystem
+    state stays in `~/.hermes/profiles/<id>/`; this table stores presentation
+    metadata (display_name, avatar) and a durable copy of SOUL.md so a corrupt
+    config dir doesn't lose persona text.
+    """
+    __tablename__ = "agent_profiles"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    display_name: Mapped[str] = mapped_column(String, default="")
+    avatar_url: Mapped[str] = mapped_column(String, default="")
+    description: Mapped[str] = mapped_column(Text, default="")
+    soul: Mapped[str] = mapped_column(Text, default="")
+    soul_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+
+
+class ProfileSoulBackup(Base):
+    """Append-only history of SOUL.md edits keyed by profile_id."""
+    __tablename__ = "profile_soul_backups"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    profile_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    content: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, index=True)
+
+
+class RedditSubscription(Base):
+    __tablename__ = "reddit_subscriptions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    subreddit: Mapped[str] = mapped_column(String, nullable=False, unique=True)  # lower-cased
+    label: Mapped[str] = mapped_column(String, nullable=False)
+    group: Mapped[str] = mapped_column(String, default="未分组")
+    muted: Mapped[bool] = mapped_column(Boolean, default=False)
+    last_collected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+
+class RedditPost(Base):
+    __tablename__ = "reddit_posts"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)          # f"{subscription_id}:{post_id}"
+    post_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    subscription_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String, default="")
+    content: Mapped[str] = mapped_column(Text, default="")             # Markdown: body + top comments
+    url: Mapped[str] = mapped_column(String, default="")               # reddit permalink
+    linked_url: Mapped[str] = mapped_column(String, default="")        # external URL for link posts
+    author: Mapped[str] = mapped_column(String, default="")
+    subreddit: Mapped[str] = mapped_column(String, default="")
+    flair: Mapped[str] = mapped_column(String, default="")
+    score: Mapped[int] = mapped_column(Integer, default=0)
+    upvote_ratio: Mapped[float] = mapped_column(Float, default=0.0)
+    comment_count: Mapped[int] = mapped_column(Integer, default=0)
+    is_self: Mapped[bool] = mapped_column(Boolean, default=True)
+    published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
