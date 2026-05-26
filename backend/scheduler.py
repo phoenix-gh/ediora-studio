@@ -272,6 +272,27 @@ async def scheduled_x_collect():
         await log("x", "error", "X 采集异常", str(e))
 
 
+async def scheduled_reddit():
+    from logger import log
+    from config import get_config
+    try:
+        cfg = await get_config()
+        minutes = max(30, int(cfg.get("reddit_collect_interval_minutes", 60)))
+        if not _should_run("reddit", minutes * 60):
+            return
+        from reddit_collector import collect_all as reddit_collect_all
+        async with SessionLocal() as db:
+            result = await reddit_collect_all(db)
+        if result["errors"]:
+            await log("reddit", "warn",
+                      f"Reddit 采集完成，新增 {result['new_posts']} 条",
+                      "; ".join(result["errors"]))
+        else:
+            await log("reddit", "ok", f"Reddit 采集完成，新增 {result['new_posts']} 条")
+    except Exception as e:
+        await log("reddit", "error", "Reddit 采集异常", str(e))
+
+
 def register_jobs(scheduler, cfg):
     collect_min = max(1, int(cfg.get("collect_interval_minutes", 15)))
     github_min  = max(1, int(cfg.get("github_interval_minutes", 1)))
@@ -284,6 +305,7 @@ def register_jobs(scheduler, cfg):
         (scheduled_juejin,              dict(trigger="interval", minutes=10,          id="juejin_collect")),
         (scheduled_wechat,              dict(trigger="interval", minutes=15,          id="wechat_collect")),
         (scheduled_x_collect,           dict(trigger="interval", hours=1,             id="x_collect_hourly")),
+        (scheduled_reddit,              dict(trigger="interval", minutes=60,          id="reddit_collect")),
     ]
     for func, kwargs in jobs:
         scheduler.add_job(func, **kwargs)
