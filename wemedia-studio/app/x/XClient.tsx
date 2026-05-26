@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import {
-  Twitter, Search, RefreshCw, Loader2, Settings, Trash2, ExternalLink,
+  Bird, Search, RefreshCw, Loader2, Settings, Trash2, ExternalLink,
   Globe, ListFilter, MessageSquare, Repeat2, Heart, Eye,
 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -144,7 +144,7 @@ export function XClient({
             subs.map(s => (
               <SidebarRow
                 key={s.id}
-                icon={Twitter}
+                icon={Bird}
                 iconColor={s.enabled ? 'text-sky-500' : 'text-zinc-400'}
                 label={s.label}
                 badge={s.post_count > 0 ? String(s.post_count) : undefined}
@@ -163,7 +163,7 @@ export function XClient({
         <div className="border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 px-6 py-3">
           <div className="flex items-center justify-between gap-4 flex-wrap">
             <div className="flex items-center gap-2 min-w-0">
-              <Twitter className="w-4 h-4 text-sky-500 shrink-0" />
+              <Bird className="w-4 h-4 text-sky-500 shrink-0" />
               <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300 truncate">
                 {headerTitle}
               </span>
@@ -239,7 +239,7 @@ export function XClient({
 function SidebarRow({
   icon: Icon, iconColor, label, badge, active, muted, hasError, onClick,
 }: {
-  icon: typeof Twitter
+  icon: typeof Bird
   iconColor: string
   label: string
   badge?: string
@@ -284,7 +284,7 @@ function FeedPanel({
   if (posts.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center h-48 gap-3 text-zinc-400">
-        <Twitter className="w-10 h-10 opacity-20 text-sky-500" />
+        <Bird className="w-10 h-10 opacity-20 text-sky-500" />
         <p className="text-sm">
           {subsCount === 0 ? '点右上角「订阅管理」添加 X URL 开始' : '该范围暂无帖子，试试「立即采集」或换时间窗'}
         </p>
@@ -465,7 +465,7 @@ function SubscribeDialog({
                   'flex items-center gap-2 px-2.5 py-1.5 border-b border-zinc-100 dark:border-zinc-800 last:border-0',
                   !s.enabled && 'opacity-50',
                 )}>
-                  <Twitter className={cn(
+                  <Bird className={cn(
                     'w-4 h-4 flex-shrink-0',
                     s.enabled ? 'text-sky-500' : 'text-zinc-400',
                   )} />
