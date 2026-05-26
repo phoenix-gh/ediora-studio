@@ -26,6 +26,8 @@ export interface XPost {
   reposts: number
   likes: number
   views: number
+  author_avatar: string
+  cover_image: string
 }
 
 export interface XSearchPost {
@@ -39,6 +41,8 @@ export interface XSearchPost {
   reposts: number
   likes: number
   views: number
+  author_avatar: string
+  cover_image: string
 }
 
 export interface XAuthStatus {

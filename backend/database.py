@@ -25,10 +25,18 @@ async def init_db():
     from sqlalchemy import text
     async with engine.begin() as conn:
         # Drop legacy X tables (replaced by new schema). Dev DB only.
+        # NOTE: x_posts is no longer dropped here — we keep collected data
+        # across restarts and migrate the schema via ALTER TABLE below.
         await conn.execute(text("DROP TABLE IF EXISTS x_post_metrics CASCADE"))
         await conn.execute(text("DROP TABLE IF EXISTS x_blogger_candidates CASCADE"))
-        await conn.execute(text("DROP TABLE IF EXISTS x_posts CASCADE"))
         await conn.run_sync(Base.metadata.create_all)
+        # x_posts column additions (idempotent)
+        await conn.execute(text(
+            "ALTER TABLE x_posts ADD COLUMN IF NOT EXISTS author_avatar VARCHAR NOT NULL DEFAULT ''"
+        ))
+        await conn.execute(text(
+            "ALTER TABLE x_posts ADD COLUMN IF NOT EXISTS cover_image VARCHAR NOT NULL DEFAULT ''"
+        ))
         # Lightweight in-place migrations for columns added after the original
         # table creation. PostgreSQL only — ADD COLUMN IF NOT EXISTS is no-op
         # when the column is already present.

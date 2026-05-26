@@ -151,6 +151,8 @@ class PostOut(BaseModel):
     reposts: int
     likes: int
     views: int
+    author_avatar: str = ""
+    cover_image: str = ""
     model_config = {"from_attributes": True}
 
 
@@ -190,12 +192,15 @@ def _upsert_post_stmt(db: AsyncSession, sub_id: int, p):
         collected_at=datetime.now(timezone.utc),
         replies=p.replies, reposts=p.reposts,
         likes=p.likes, views=p.views,
+        author_avatar=p.author_avatar, cover_image=p.cover_image,
         raw_markdown=p.raw_markdown,
     ).on_conflict_do_update(
         index_elements=["tweet_id"],
         set_={
             "replies": p.replies, "reposts": p.reposts,
             "likes": p.likes, "views": p.views,
+            "author_avatar": p.author_avatar,
+            "cover_image": p.cover_image,
         },
     )
     return stmt
@@ -287,6 +292,8 @@ class SearchPostOut(BaseModel):
     reposts: int
     likes: int
     views: int
+    author_avatar: str = ""
+    cover_image: str = ""
 
 
 @router.get("/search", response_model=list[SearchPostOut])
@@ -301,6 +308,7 @@ async def search(q: str, limit: int = 20):
             tweet_id=p.tweet_id, username=p.username, display_name=p.display_name,
             content=p.content, url=p.url, published_at=p.published_at,
             replies=p.replies, reposts=p.reposts, likes=p.likes, views=p.views,
+            author_avatar=p.author_avatar, cover_image=p.cover_image,
         ) for p in posts
     ]
 

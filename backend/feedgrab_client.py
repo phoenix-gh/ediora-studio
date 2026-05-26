@@ -37,6 +37,8 @@ class ParsedPost:
     reposts: int = 0
     likes: int = 0
     views: int = 0
+    author_avatar: str = ""    # profile image URL from feedgrab's _raw_result
+    cover_image: str = ""      # first attached image (tweets with photos)
     raw_markdown: str = ""
 
 
@@ -90,6 +92,21 @@ def _render_markdown(d: dict) -> str:
     return "\n".join(lines)
 
 
+def _extract_author_avatar(d: dict) -> str:
+    """Pull profile image URL out of feedgrab's _raw_result. Empty if not present."""
+    try:
+        return (
+            d.get("_raw_result", {})
+             .get("core", {})
+             .get("user_results", {})
+             .get("result", {})
+             .get("avatar", {})
+             .get("image_url", "")
+        ) or ""
+    except (AttributeError, TypeError):
+        return ""
+
+
 def _tweet_dict_to_parsed_post(d: dict) -> Optional[ParsedPost]:
     """Convert a feedgrab tweet dict into ParsedPost. Returns None on missing id."""
     tweet_id = str(d.get("id", "") or "").strip()
@@ -107,6 +124,10 @@ def _tweet_dict_to_parsed_post(d: dict) -> Optional[ParsedPost]:
     likes = int(d.get("likes", 0) or 0)
     views = int(d.get("views", 0) or 0)
 
+    author_avatar = _extract_author_avatar(d)
+    images = d.get("images") or []
+    cover_image = images[0] if images and isinstance(images[0], str) else ""
+
     raw_markdown = _render_markdown(d)
 
     return ParsedPost(
@@ -120,6 +141,8 @@ def _tweet_dict_to_parsed_post(d: dict) -> Optional[ParsedPost]:
         reposts=reposts,
         likes=likes,
         views=views,
+        author_avatar=author_avatar,
+        cover_image=cover_image,
         raw_markdown=raw_markdown,
     )
 

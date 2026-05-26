@@ -243,6 +243,8 @@ class XPost(Base):
     reposts: Mapped[int] = mapped_column(Integer, default=0)
     likes: Mapped[int] = mapped_column(Integer, default=0)
     views: Mapped[int] = mapped_column(Integer, default=0)
+    author_avatar: Mapped[str] = mapped_column(String, default="")
+    cover_image: Mapped[str] = mapped_column(String, default="")
     raw_markdown: Mapped[str] = mapped_column(Text, default="")
 
 

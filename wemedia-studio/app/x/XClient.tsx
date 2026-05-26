@@ -366,12 +366,13 @@ function SearchPanel() {
 // ── Post card (works for XPost and XSearchPost — shared fields only) ─────────
 
 function PostCard({ post: p }: { post: XPost | XSearchPost }) {
+  const avatar = p.author_avatar || `https://unavatar.io/x/${p.username}`
   return (
     <div className="border border-zinc-200 dark:border-zinc-800 rounded-lg px-4 py-3 hover:bg-zinc-50 dark:hover:bg-zinc-900/50 transition-colors">
       <div className="flex items-start gap-3">
         <a href={`https://x.com/${p.username}`} target="_blank" rel="noreferrer" className="shrink-0">
           <img
-            src={`https://unavatar.io/x/${p.username}`}
+            src={avatar}
             alt={p.username}
             loading="lazy"
             referrerPolicy="no-referrer"
@@ -397,6 +398,19 @@ function PostCard({ post: p }: { post: XPost | XSearchPost }) {
           <p className="text-sm text-zinc-700 dark:text-zinc-300 whitespace-pre-wrap mb-2">
             {p.content}
           </p>
+          {p.cover_image && (
+            <a href={p.url} target="_blank" rel="noreferrer"
+              className="block mb-2 rounded-lg overflow-hidden border border-zinc-200 dark:border-zinc-800">
+              <img
+                src={p.cover_image}
+                alt=""
+                loading="lazy"
+                referrerPolicy="no-referrer"
+                className="w-full max-h-[420px] object-cover"
+                onError={e => { (e.currentTarget.parentElement as HTMLElement).style.display = 'none' }}
+              />
+            </a>
+          )}
           <div className="flex items-center gap-4 text-xs text-zinc-400">
             <span className="flex items-center gap-1"><Eye className="w-3 h-3" />{p.views.toLocaleString()}</span>
             <span className="flex items-center gap-1"><Repeat2 className="w-3 h-3" />{p.reposts.toLocaleString()}</span>
