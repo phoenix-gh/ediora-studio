@@ -16,18 +16,24 @@ import { generateTopics, enqueueTopics, TopicSuggestion } from '@/lib/api/topic-
 
 const DEFAULT_PROMPT = `你是资深自媒体策划，擅长从社交媒体热点中提炼有价值的创作选题。
 
-请根据以上内容，生成 10 条候选选题。
-要求：
-- type 有三种：
-  * "long"：1500-3000 字深度分析文章，约 4 条
-  * "short"：200-500 字 X 风格短帖，观点犀利，约 3 条
-  * "story"：5-6 句话的微故事，讲述身边人/事/有趣发现，像朋友圈短小有共鸣的瞬间，约 2 条
-  * "share"：发现类短帖，介绍 X 上看到的有趣项目/工具/资源，3-5 句话 + 一句核心价值，适合「今天发现个好东西」的语气，约 2 条
+请根据以上内容，严格按以下分布生成 10 条候选选题（每种类型数量必须达到）：
+
+【长文 long × 4】1500-3000 字，深度分析，有数据有观点
+
+【短文 short × 2】200-500 字，X 风格，一个核心观点，语气犀利
+
+【微故事 story × 2】只写 5-6 句话。讲一个发生在身边的真实瞬间——可以是朋友用了某个新工具的反应、同事对 AI 的困惑、自己踩坑的经历——有细节、有情绪，让人读完想转发
+
+【发现 share × 2】只写 3-5 句话 + 一句「为什么值得关注」。触发条件：帖子里出现 GitHub 项目、开源工具、产品发布、新 API、有趣网站时，必须生成 share 类选题。格式参考：「发现一个用 Cloudflare 做的自托管邮件系统……支持自定义域名……核心亮点是……值得关注的原因是……」
+
+注意：
+- 四种类型缺一不可，share 和 story 各必须有 2 条
 - source_posts 列出该选题参考的 1-3 条原帖摘要
 - 仅输出 JSON 数组，不要任何解释文字，格式：
 [{"title":"...","angle":"...","type":"long|short|story|share","source_posts":[{"username":"@xxx","content":"...","url":"..."}]}]`
 
-const PROMPT_STORAGE_KEY = 'wms_topic_generator_prompt'
+// v2 强制刷新旧缓存（旧 key 没有 share 类型定义）
+const PROMPT_STORAGE_KEY = 'wms_topic_generator_prompt_v2'
 
 interface PublishAccount {
   id: string
