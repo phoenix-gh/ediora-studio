@@ -9,7 +9,7 @@ export interface SourcePost {
 export interface TopicSuggestion {
   title: string
   angle: string
-  type: 'long' | 'short'
+  type: 'long' | 'short' | 'story' | 'share'
   source_posts: SourcePost[]
 }
 
@@ -21,6 +21,7 @@ export interface GenerateResponse {
 export interface EnqueueResponse {
   enqueued: number
   task_ids: string[]
+  pipeline_task_ids: number[]
 }
 
 export async function generateTopics(opts: {
@@ -39,11 +40,21 @@ export async function generateTopics(opts: {
 }
 
 export async function enqueueTopics(opts: {
-  account_id: string | null
+  account_id: string
   topics: TopicSuggestion[]
 }): Promise<EnqueueResponse> {
   return apiFetch<EnqueueResponse>('/topic-generator/enqueue', {
     method: 'POST',
     body: JSON.stringify(opts),
   })
+}
+
+export interface CachedTopicsResponse {
+  generated_at: string | null
+  topics: TopicSuggestion[]
+}
+
+export async function getCachedTopics(accountId?: string | null): Promise<CachedTopicsResponse> {
+  const qs = accountId ? `?account_id=${encodeURIComponent(accountId)}` : ''
+  return apiFetch<CachedTopicsResponse>(`/topic-generator/cached${qs}`)
 }
