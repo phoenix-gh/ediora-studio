@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
   LayoutDashboard, TrendingUp, Settings, GitFork, AtSign, FileText, BookMarked, Tag, Quote,
-  PlaySquare, Rocket, MessageSquare, Globe, Flame, Gem, Bot, UserCog, Hash,
+  PlaySquare, Rocket, MessageSquare, Globe, Flame, Gem, Bot, UserCog, Hash, Lightbulb,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -28,9 +28,10 @@ const sections: NavSection[] = [
   {
     title: '创作',
     items: [
-      { href: '/drafts',    label: '草稿箱',     icon: BookMarked },
-      { href: '/topics',    label: '选题库',     icon: Tag },
-      { href: '/quotes',    label: '金句库',     icon: Quote },
+      { href: '/drafts',       label: '草稿箱',   icon: BookMarked },
+      { href: '/topics',       label: '选题库',   icon: Tag },
+      { href: '/quotes',       label: '金句库',   icon: Quote },
+      { href: '/trend-topics', label: '热点选题', icon: Lightbulb },
     ],
   },
   {
