@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
 from hermes_kanban_client import HermesKanbanClient
-from models import XPost, PublishAccount
+from models import XPost, PublishAccount, TopicGeneratorCache, PipelineTask
 
 router = APIRouter(prefix="/topic-generator", tags=["topic-generator"])
 
@@ -58,14 +58,30 @@ class GenerateResponse(BaseModel):
     topics: list[TopicSuggestion]
 
 
+_WORD_RANGE: dict[str, str] = {
+    "long":  "1500-3000 字",
+    "short": "200-500 字",
+    "story": "5-6 句话",
+    "share": "3-5 句话",
+}
+
+_TYPE_LABEL: dict[str, str] = {
+    "long":  "长文",
+    "short": "短文",
+    "story": "微故事",
+    "share": "发现",
+}
+
+
 class EnqueueRequest(BaseModel):
-    account_id: Optional[str] = None
+    account_id: str
     topics: list[TopicSuggestion]
 
 
 class EnqueueResponse(BaseModel):
     enqueued: int
     task_ids: list[str]
+    pipeline_task_ids: list[int]
 
 
 @router.post("/generate", response_model=GenerateResponse)
@@ -137,7 +153,36 @@ async def generate_topics(body: GenerateRequest, db: AsyncSession = Depends(get_
     except Exception as e:
         raise HTTPException(500, f"选题结构解析失败: {e}")
 
+    # Upsert cache: one row per account_id (NULL for no account)
+    cache_key = body.account_id or None
+    existing = (await db.execute(
+        select(TopicGeneratorCache).where(TopicGeneratorCache.account_id == cache_key)
+    )).scalar_one_or_none()
+    topics_json = [t.model_dump() for t in topics]
+    if existing:
+        existing.topics = topics_json
+        existing.generated_at = datetime.now(timezone.utc)
+    else:
+        db.add(TopicGeneratorCache(account_id=cache_key, topics=topics_json))
+    await db.commit()
+
     return GenerateResponse(warning=warning, topics=topics)
+
+
+class CachedResponse(BaseModel):
+    generated_at: Optional[datetime] = None
+    topics: list[TopicSuggestion] = []
+
+
+@router.get("/cached", response_model=CachedResponse)
+async def get_cached_topics(account_id: Optional[str] = None, db: AsyncSession = Depends(get_db)):
+    cache_key = account_id or None
+    row = (await db.execute(
+        select(TopicGeneratorCache).where(TopicGeneratorCache.account_id == cache_key)
+    )).scalar_one_or_none()
+    if not row:
+        return CachedResponse()
+    return CachedResponse(generated_at=row.generated_at, topics=[TopicSuggestion(**t) for t in row.topics])
 
 
 def _extract_complete_objects(raw: str) -> list:
@@ -162,43 +207,87 @@ def _extract_complete_objects(raw: str) -> list:
 
 
 @router.post("/enqueue", response_model=EnqueueResponse)
-async def enqueue_topics(body: EnqueueRequest):
+async def enqueue_topics(body: EnqueueRequest, db: AsyncSession = Depends(get_db)):
+    from pipeline_template import get_pipeline
+
+    if not body.account_id or not body.account_id.strip():
+        raise HTTPException(400, "account_id 必填")
+
+    acc = await db.get(PublishAccount, body.account_id)
+    if acc is None:
+        raise HTTPException(400, f"account '{body.account_id}' not found")
+
+    account_profile = {
+        "name": acc.name,
+        "platform": acc.platform,
+        "positioning": acc.positioning,
+        "audience": acc.audience,
+        "tone": acc.tone,
+        "topic_focus": acc.topic_focus or [],
+        "taboo": acc.taboo or [],
+        "word_range": acc.word_range or {},
+        "image_style": acc.image_style,
+        "cover_style": acc.cover_style or {},
+        "voice_samples": acc.voice_samples or [],
+        "style_rules": acc.style_rules or [],
+    }
+
     kanban = HermesKanbanClient()
     task_ids: list[str] = []
+    pipeline_task_ids: list[int] = []
 
     for topic in body.topics:
-        if topic.type == "long":
-            word_range, content_type_label = "1500-3000 字", "长文"
-        elif topic.type == "story":
-            word_range, content_type_label = "5-6 句话", "微故事"
-        elif topic.type == "share":
-            word_range, content_type_label = "3-5 句话", "发现"
-        else:
-            word_range, content_type_label = "200-500 字", "短文"
-
-        sources_md = "\n".join(
-            f"- {p.username}: {p.content[:120]} [{p.url}]"
-            for p in topic.source_posts
+        pt = PipelineTask(
+            account_id=body.account_id,
+            title=topic.title,
+            source_url="",
+            task_ids={},
         )
+        db.add(pt)
+        await db.commit()
+        await db.refresh(pt)
 
-        task_body = (
-            f"**体裁**: {content_type_label}（{word_range}）\n"
-            f"**content_type**: {topic.type}\n"
-            f"**word_range**: {word_range}\n"
-            + (f"**account_id**: {body.account_id}\n" if body.account_id else "")
-            + f"\n**切入角度**: {topic.angle}\n"
-            f"\n**参考帖子**:\n{sources_md or '（无）'}\n"
-            f"\n**generated_by**: topic_generator"
-        )
+        ctx = {
+            "title": topic.title,
+            "account_id": body.account_id,
+            "account_profile": account_profile,
+            "content_type": topic.type,
+            "content_type_label": _TYPE_LABEL.get(topic.type, topic.type),
+            "word_range": _WORD_RANGE.get(topic.type, ""),
+            "angle": topic.angle,
+            "source_posts_md": "\n".join(
+                f"- {p.username}: {p.content[:120]} [{p.url}]"
+                for p in topic.source_posts
+            ) or "（无参考帖子）",
+            "pipeline_task_id": pt.id,
+            "draft_id": 0,
+        }
 
-        try:
-            tid = await kanban.create_task(
-                title=topic.title,
-                body=task_body,
-                assignee="wms_editor",
-            )
-            task_ids.append(tid)
-        except Exception as e:
-            raise HTTPException(500, f"入队失败: {e}")
+        flow = "topic_long" if topic.type == "long" else "topic_short"
+        steps = get_pipeline(flow)
 
-    return EnqueueResponse(enqueued=len(task_ids), task_ids=task_ids)
+        step_task_ids: list[str] = []
+        for step in steps:
+            try:
+                tid = await kanban.create_task(
+                    title=step.title(ctx),
+                    body=step.body(ctx),
+                    assignee=step.assignee,
+                    parents=[step_task_ids[-1]] if step_task_ids else None,
+                )
+            except Exception as e:
+                raise HTTPException(500, f"入队失败: {e}")
+            step_task_ids.append(tid)
+
+        task_ids_map = {steps[i].role: step_task_ids[i] for i in range(len(steps))}
+        pt.task_ids = task_ids_map
+        await db.commit()
+
+        task_ids.append(step_task_ids[0])
+        pipeline_task_ids.append(pt.id)
+
+    return EnqueueResponse(
+        enqueued=len(task_ids),
+        task_ids=task_ids,
+        pipeline_task_ids=pipeline_task_ids,
+    )

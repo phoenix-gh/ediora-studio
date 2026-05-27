@@ -121,32 +121,192 @@ def test_generate_warning_when_no_posts(monkeypatch, tmp_path):
     assert body["warning"] is not None
 
 
-def test_enqueue_topic(client, monkeypatch):
-    import hermes_kanban_client as hkc
+# ── helpers for enqueue tests ────────────────────────────────────────────────
 
-    created_ids = []
+ACCOUNT_ID = "acc_test_001"
+
+
+def _make_client_with_account(monkeypatch, tmp_path):
+    """Client fixture that seeds one PublishAccount."""
+    db_file = tmp_path / "test_acc.db"
+    monkeypatch.setenv("WMS_DATABASE_URL", f"sqlite+aiosqlite:///{db_file}")
+    monkeypatch.setenv("WMS_DISABLE_SCHEDULER", "1")
+
+    for mod in list(sys.modules):
+        if mod.startswith(("database", "models", "main", "routers", "config",
+                            "llm", "topic_generator")):
+            sys.modules.pop(mod, None)
+
+    from database import engine, Base
+    import models as _m
+
+    async def _setup():
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        from database import SessionLocal
+        async with SessionLocal() as db:
+            db.add(_m.PublishAccount(
+                id=ACCOUNT_ID,
+                name="测试账号",
+                platform="x",
+                word_range={"min": 1500, "max": 3000},
+            ))
+            await db.commit()
+
+    asyncio.new_event_loop().run_until_complete(_setup())
+
+    import llm as llm_mod
+
+    async def _fake_call(prompt, max_tokens=2048):
+        return "[]"
+
+    monkeypatch.setattr(llm_mod, "_call", _fake_call)
+
+    from main import app
+    return TestClient(app)
+
+
+def _fake_kanban(monkeypatch):
+    """Patch HermesKanbanClient.create_task; returns list of call records."""
+    import hermes_kanban_client as hkc
+    calls = []
+    _counter = {"n": 0}
 
     async def _fake_create(self, *, title, body, assignee, parents=None):
-        created_ids.append({"title": title, "assignee": assignee, "body": body})
-        return "task_001"
+        _counter["n"] += 1
+        calls.append({"title": title, "assignee": assignee, "parents": parents})
+        return f"t_{_counter['n']:03d}"
 
     monkeypatch.setattr(hkc.HermesKanbanClient, "create_task", _fake_create)
+    return calls
+
+
+# ── tests ────────────────────────────────────────────────────────────────────
+
+def test_enqueue_without_account_returns_400(monkeypatch, tmp_path):
+    c = _make_client_with_account(monkeypatch, tmp_path)
+    payload = {
+        "account_id": "",
+        "topics": [{"title": "T", "angle": "A", "type": "long", "source_posts": []}],
+    }
+    r = c.post("/api/topic-generator/enqueue", json=payload)
+    assert r.status_code == 400
+
+
+def test_enqueue_long_creates_three_tasks_with_parent_chain(monkeypatch, tmp_path):
+    c = _make_client_with_account(monkeypatch, tmp_path)
+    calls = _fake_kanban(monkeypatch)
 
     payload = {
-        "account_id": None,
-        "topics": [
-            {
-                "title": "AI 大模型趋势深度报告",
-                "angle": "从 GPT-4o 说起",
-                "type": "long",
-                "source_posts": [{"username": "@openai", "content": "...", "url": "https://x.com/1"}],
-            }
-        ],
+        "account_id": ACCOUNT_ID,
+        "topics": [{
+            "title": "AI 大模型趋势深度报告",
+            "angle": "GPT-4o 之后的工具链",
+            "type": "long",
+            "source_posts": [{"username": "@openai", "content": "...", "url": "https://x.com/1"}],
+        }],
     }
-    r = client.post("/api/topic-generator/enqueue", json=payload)
+    r = c.post("/api/topic-generator/enqueue", json=payload)
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["enqueued"] == 1
-    assert len(created_ids) == 1
-    assert created_ids[0]["assignee"] == "wms_editor"
-    assert "long" in created_ids[0]["body"]
+    assert len(body["task_ids"]) == 1
+    assert len(body["pipeline_task_ids"]) == 1
+
+    assert len(calls) == 3
+    assert calls[0]["assignee"] == "wms_editor"
+    assert calls[1]["assignee"] == "wms_writer"
+    assert calls[2]["assignee"] == "wms_illustrator"
+
+    assert calls[0]["parents"] is None
+    assert calls[1]["parents"] == ["t_001"]
+    assert calls[2]["parents"] == ["t_002"]
+
+
+def test_enqueue_story_creates_one_writer_task(monkeypatch, tmp_path):
+    c = _make_client_with_account(monkeypatch, tmp_path)
+    calls = _fake_kanban(monkeypatch)
+
+    payload = {
+        "account_id": ACCOUNT_ID,
+        "topics": [{
+            "title": "朋友用 AI 的那一刻",
+            "angle": "身边真实瞬间",
+            "type": "story",
+            "source_posts": [],
+        }],
+    }
+    r = c.post("/api/topic-generator/enqueue", json=payload)
+    assert r.status_code == 200, r.text
+    assert len(calls) == 1
+    assert calls[0]["assignee"] == "wms_writer"
+
+
+def test_enqueue_share_creates_one_writer_task(monkeypatch, tmp_path):
+    c = _make_client_with_account(monkeypatch, tmp_path)
+    calls = _fake_kanban(monkeypatch)
+
+    payload = {
+        "account_id": ACCOUNT_ID,
+        "topics": [{
+            "title": "发现一个开源邮件系统",
+            "angle": "Cloudflare 自托管邮件",
+            "type": "share",
+            "source_posts": [{"username": "@dev", "content": "cool tool", "url": "https://github.com/x"}],
+        }],
+    }
+    r = c.post("/api/topic-generator/enqueue", json=payload)
+    assert r.status_code == 200, r.text
+    assert len(calls) == 1
+    assert calls[0]["assignee"] == "wms_writer"
+
+
+def test_enqueue_short_creates_one_writer_task(monkeypatch, tmp_path):
+    c = _make_client_with_account(monkeypatch, tmp_path)
+    calls = _fake_kanban(monkeypatch)
+
+    payload = {
+        "account_id": ACCOUNT_ID,
+        "topics": [{
+            "title": "X 风格短评",
+            "angle": "一个核心观点",
+            "type": "short",
+            "source_posts": [],
+        }],
+    }
+    r = c.post("/api/topic-generator/enqueue", json=payload)
+    assert r.status_code == 200, r.text
+    assert len(calls) == 1
+    assert calls[0]["assignee"] == "wms_writer"
+
+
+def test_enqueue_multiple_topics_creates_independent_chains(monkeypatch, tmp_path):
+    c = _make_client_with_account(monkeypatch, tmp_path)
+    calls = _fake_kanban(monkeypatch)
+
+    payload = {
+        "account_id": ACCOUNT_ID,
+        "topics": [
+            {"title": "长文选题", "angle": "A", "type": "long", "source_posts": []},
+            {"title": "短文选题", "angle": "B", "type": "short", "source_posts": []},
+        ],
+    }
+    r = c.post("/api/topic-generator/enqueue", json=payload)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["enqueued"] == 2
+    assert len(body["task_ids"]) == 2
+    assert len(body["pipeline_task_ids"]) == 2
+    assert len(calls) == 4  # long=3 + short=1
+
+
+def test_enqueue_unknown_account_returns_400(monkeypatch, tmp_path):
+    c = _make_client_with_account(monkeypatch, tmp_path)
+    _fake_kanban(monkeypatch)
+
+    payload = {
+        "account_id": "nonexistent_account",
+        "topics": [{"title": "T", "angle": "A", "type": "long", "source_posts": []}],
+    }
+    r = c.post("/api/topic-generator/enqueue", json=payload)
+    assert r.status_code == 400
