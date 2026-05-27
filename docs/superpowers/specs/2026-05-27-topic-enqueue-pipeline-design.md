@@ -116,7 +116,7 @@ class EnqueueResponse(BaseModel):
 7. 收集首棒 task_id 和 pipeline_task_id 到 response
 ```
 
-使用与 `studio.py` 相同的 `_KANBAN_BOARD` env 和 `_kanban_create` 模式（可提取到共享模块，或直接复用 HermesKanbanClient.create_task）。
+直接使用 `HermesKanbanClient.create_task`（已封装 board env，无需额外处理）。
 
 ---
 

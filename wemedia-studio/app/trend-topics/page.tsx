@@ -2,6 +2,7 @@ export const dynamic = 'force-dynamic'
 
 import { TopicGeneratorClient } from './TopicGeneratorClient'
 import { apiFetch } from '@/lib/api/client'
+import { TopicSuggestion } from '@/lib/api/topic-generator'
 
 interface PublishAccount {
   id: string
@@ -10,7 +11,21 @@ interface PublishAccount {
   is_active: boolean
 }
 
+interface CachedTopicsResponse {
+  generated_at: string | null
+  topics: TopicSuggestion[]
+}
+
 export default async function TrendTopicsPage() {
-  const accounts = await apiFetch<PublishAccount[]>('/publish-accounts').catch(() => [])
-  return <TopicGeneratorClient accounts={accounts} />
+  const [accounts, cached] = await Promise.all([
+    apiFetch<PublishAccount[]>('/publish-accounts').catch(() => [] as PublishAccount[]),
+    apiFetch<CachedTopicsResponse>('/topic-generator/cached').catch(() => ({ generated_at: null, topics: [] })),
+  ])
+  return (
+    <TopicGeneratorClient
+      accounts={accounts}
+      initialTopics={cached.topics}
+      initialGeneratedAt={cached.generated_at}
+    />
+  )
 }
