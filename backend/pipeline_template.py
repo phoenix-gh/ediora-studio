@@ -420,10 +420,109 @@ account_id: {c['account_id']}
 ]
 
 
+# ── topic_long：热点选题完整链路 editor → writer → illustrator ─────────────
+# 与 FULL_PIPELINE 的差异：editor 接收 AI 给出的选题角度 + X source posts，
+# 而非用户提交的原始文章 URL + 正文。writer/illustrator 步骤完全复用 FULL_PIPELINE。
+
+def _render_source_posts_md(source_posts_md: str) -> str:
+    return source_posts_md or "（无参考帖子）"
+
+
+TOPIC_LONG_PIPELINE: list[PipelineStep] = [
+    PipelineStep(
+        role="editor",
+        assignee="wms_editor",
+        title=lambda c: f"策划：{c['title']}",
+        body=lambda c: f"""account_id: {c['account_id']}
+content_type: {c['content_type']}
+
+# {c['title']}
+
+{render_profile_editor(c['account_profile'])}
+
+## 角度（AI 给定，直接用）
+{c['angle']}
+
+## 体裁约束
+**类型**: {c['content_type_label']}（{c['word_range']}）
+
+## 热点选题来源（X 帖子）
+{_render_source_posts_md(c['source_posts_md'])}
+
+## 这棒任务（editor · 扩充锚点 + 出 brief）
+角度已由选题生成器给定，**不要重新推导角度**。
+你的职责是：
+1. 从 source posts 和网络搜索中提取 ≥ 3 个具体锚点（数字/人名/时间/地名/引语/场景动作）
+2. 按上方画像出 brief，格式：
+
+- **core_point**（本文唯一最重要的点，一句话；writer 必须把它当主线，篇幅 ≥40%）
+- **secondary_points**（次要点 ≤ 3 个，每个标注权重：keep / mention / drop_ok）
+- **必须出现的事实** 3-5 条（每条带原始链接 + 一个具体细节）
+- **候选锚点** ≥ 2 个（具体的、可第一人称代入的场景或动作）
+- **反方/补充观点** ≥ 1 条
+- **平台与字数**：{c['word_range']}
+- **候选标题** ≥ 3（语气贴 tone）
+- **禁区提醒**
+
+完成时：
+- `kanban_complete(summary='brief 完成: <一句话角度>', metadata={{"topic_id": ..., "brief_md": "<完整 brief markdown>", "brief_chars": N, "core_point": "<一句话>"}})`
+""".strip(),
+    ),
+    FULL_PIPELINE[1],  # writer — same ctx keys: account_id/title/account_profile/pipeline_task_id
+    FULL_PIPELINE[2],  # illustrator — same ctx keys
+]
+
+
+# ── topic_short：热点选题 writer 单棒（short / story / share） ──────────────
+def _topic_short_type_requirement(c: RenderCtx) -> str:
+    t = c['content_type']
+    if t == 'story':
+        return "只写 **5-6 句话**。讲一个发生在身边的真实瞬间——有细节、有情绪、让人想转发。不要超过 6 句。"
+    if t == 'share':
+        return "只写 **3-5 句话** + 一句「为什么值得关注」。格式参考：发现一个…支持…核心亮点是…值得关注的原因是…"
+    return "**200-500 字**，X 风格，一个核心观点，语气犀利。不要分节，不要标题，直接开写。"
+
+
+TOPIC_SHORT_PIPELINE: list[PipelineStep] = [
+    PipelineStep(
+        role="writer",
+        assignee="wms_writer",
+        title=lambda c: f"写稿：{c['title']}",
+        body=lambda c: f"""account_id: {c['account_id']}
+pipeline_task_id: {c['pipeline_task_id']}
+
+# {c['title']}
+
+{render_profile_writer(c['account_profile'])}
+
+## 体裁要求（硬约束）
+{_topic_short_type_requirement(c)}
+
+## 角度
+{c['angle']}
+
+## 参考帖子（X）
+{_render_source_posts_md(c['source_posts_md'])}
+
+## 工作流（硬性，省 turn）
+本任务**没有 file / code_execution / terminal 工具**，全部在 message 中完成：
+
+1. 在 message 里**一次性**写出完整文本终稿
+2. `save_draft(title='<本文标题>', content='<正文>', topic_id='agent', status='drafting', pipeline_task_id={c['pipeline_task_id']})` 拿 `draft_id`
+3. `kanban_complete(summary='<标题> {c['content_type_label']}完成', metadata={{"draft_id": ..., "wordcount": N}})`
+
+目标：从写稿到 complete **≤ 2 turn**。
+""".strip(),
+    ),
+]
+
+
 PIPELINES: dict[str, list[PipelineStep]] = {
     "full": FULL_PIPELINE,
     "cover_only": COVER_ONLY_PIPELINE,
     "rewrite_only": REWRITE_ONLY_PIPELINE,
+    "topic_long": TOPIC_LONG_PIPELINE,
+    "topic_short": TOPIC_SHORT_PIPELINE,
 }
 
 
