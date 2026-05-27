@@ -48,6 +48,14 @@ interface TopicCard extends TopicSuggestion {
   expanded: boolean
 }
 
+function formatRelativeTime(isoString: string): string {
+  const diff = Math.floor((Date.now() - new Date(isoString).getTime()) / 1000)
+  if (diff < 60) return '刚刚'
+  if (diff < 3600) return `${Math.floor(diff / 60)} 分钟前`
+  if (diff < 86400) return `${Math.floor(diff / 3600)} 小时前`
+  return `${Math.floor(diff / 86400)} 天前`
+}
+
 function typeBadge(type: string) {
   if (type === 'long')  return { label: '长文',   cls: 'bg-blue-600 text-white' }
   if (type === 'story') return { label: '微故事', cls: 'bg-amber-500 text-white' }
@@ -55,9 +63,18 @@ function typeBadge(type: string) {
   return { label: '短文', cls: 'bg-green-600 text-white' }
 }
 
-export function TopicGeneratorClient({ accounts }: { accounts: PublishAccount[] }) {
+interface Props {
+  accounts: PublishAccount[]
+  initialTopics?: TopicSuggestion[]
+  initialGeneratedAt?: string | null
+}
+
+export function TopicGeneratorClient({ accounts, initialTopics = [], initialGeneratedAt = null }: Props) {
   const [accountId, setAccountId] = useState<string>('__none__')
-  const [cards, setCards] = useState<TopicCard[]>([])
+  const [cards, setCards] = useState<TopicCard[]>(() =>
+    initialTopics.map(t => ({ ...t, checked: false, enqueued: false, expanded: false }))
+  )
+  const [generatedAt, setGeneratedAt] = useState<string | null>(initialGeneratedAt)
   const [generating, setGenerating] = useState(false)
   const [enqueueing, setEnqueueing] = useState(false)
   const [promptOpen, setPromptOpen] = useState(false)
@@ -89,9 +106,8 @@ export function TopicGeneratorClient({ accounts }: { accounts: PublishAccount[] 
         custom_prompt: customPrompt.trim() !== DEFAULT_PROMPT.trim() ? customPrompt : null,
       })
       if (res.warning) toast.warning(res.warning)
-      setCards(
-        res.topics.map(t => ({ ...t, checked: false, enqueued: false, expanded: false }))
-      )
+      setCards(res.topics.map(t => ({ ...t, checked: false, enqueued: false, expanded: false })))
+      setGeneratedAt(new Date().toISOString())
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : '生成失败')
     } finally {
@@ -111,14 +127,19 @@ export function TopicGeneratorClient({ accounts }: { accounts: PublishAccount[] 
 
   async function handleEnqueue() {
     const toEnqueue = cards.filter(c => c.checked && !c.enqueued)
-    if (!toEnqueue.length) return
+    if (!toEnqueue.length || accountId === '__none__') return
     setEnqueueing(true)
     try {
       const res = await enqueueTopics({
-        account_id: accountId === '__none__' ? null : accountId,
+        account_id: accountId,
         topics: toEnqueue,
       })
-      toast.success(`已入队 ${res.enqueued} 条选题`)
+      toast.success(`已入队 ${res.enqueued} 条选题`, {
+        action: {
+          label: '查看看板',
+          onClick: () => { window.location.href = '/studio' },
+        },
+      })
       const titles = new Set(toEnqueue.map(t => t.title))
       setCards(prev =>
         prev.map(c => (titles.has(c.title) ? { ...c, checked: false, enqueued: true } : c))
@@ -137,6 +158,11 @@ export function TopicGeneratorClient({ accounts }: { accounts: PublishAccount[] 
         <div className="flex items-center gap-3">
           <Lightbulb className="w-5 h-5 text-amber-500" />
           <h1 className="text-lg font-semibold">热点选题生成</h1>
+          {generatedAt && (
+            <span className="ml-auto text-xs text-zinc-400">
+              上次生成于 {formatRelativeTime(generatedAt)}
+            </span>
+          )}
         </div>
       </div>
 
@@ -272,10 +298,15 @@ export function TopicGeneratorClient({ accounts }: { accounts: PublishAccount[] 
       {/* Footer action bar */}
       {cards.length > 0 && (
         <div className="border-t border-zinc-200 dark:border-zinc-800 px-6 py-3 flex items-center justify-between">
-          <span className="text-sm text-zinc-500">已选 {selectedCount} 条</span>
+          <span className="text-sm text-zinc-500">
+            已选 {selectedCount} 条
+            {accountId === '__none__' && selectedCount > 0 && (
+              <span className="ml-2 text-amber-500 text-xs">请先选择账号再入队</span>
+            )}
+          </span>
           <Button
             onClick={handleEnqueue}
-            disabled={selectedCount === 0 || enqueueing}
+            disabled={selectedCount === 0 || enqueueing || accountId === '__none__'}
           >
             {enqueueing
               ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />入队中…</>
