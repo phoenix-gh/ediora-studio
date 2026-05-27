@@ -26,10 +26,15 @@ export interface EnqueueResponse {
 export async function generateTopics(opts: {
   account_id: string | null
   sources?: string[]
+  custom_prompt?: string | null
 }): Promise<GenerateResponse> {
   return apiFetch<GenerateResponse>('/topic-generator/generate', {
     method: 'POST',
-    body: JSON.stringify({ account_id: opts.account_id, sources: opts.sources ?? ['x'] }),
+    body: JSON.stringify({
+      account_id: opts.account_id,
+      sources: opts.sources ?? ['x'],
+      custom_prompt: opts.custom_prompt ?? null,
+    }),
   })
 }
 

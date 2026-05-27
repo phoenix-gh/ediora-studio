@@ -25,13 +25,29 @@ class SourcePost(BaseModel):
 class TopicSuggestion(BaseModel):
     title: str
     angle: str
-    type: str  # "long" | "short"
+    type: str  # "long" | "short" | "story"
     source_posts: list[SourcePost]
+
+
+DEFAULT_ANALYSIS_PROMPT = (
+    "你是资深自媒体策划，擅长从社交媒体热点中提炼有价值的创作选题。\n\n"
+    "请根据以上内容，生成 10 条候选选题。\n"
+    "要求：\n"
+    "- type 有三种：\n"
+    "  * \"long\"：1500-3000 字深度分析文章，约 4 条\n"
+    "  * \"short\"：200-500 字 X 风格短帖，观点犀利，约 3 条\n"
+    "  * \"story\"：400-600 字小故事/生活观察，讲述身边人/事/有趣发现，有温度有共鸣，约 3 条\n"
+    "- source_posts 列出该选题参考的 1-3 条原帖摘要\n"
+    "- 仅输出 JSON 数组，不要任何解释文字，格式：\n"
+    '[{"title":"...","angle":"...","type":"long|short|story",'
+    '"source_posts":[{"username":"@xxx","content":"...","url":"..."}]}]'
+)
 
 
 class GenerateRequest(BaseModel):
     account_id: Optional[str] = None
     sources: list[str] = ["x"]
+    custom_prompt: Optional[str] = None  # 用户自定义分析提示词，覆盖默认值
 
 
 class GenerateResponse(BaseModel):
@@ -85,18 +101,13 @@ async def generate_topics(body: GenerateRequest, db: AsyncSession = Depends(get_
         for idx, p in enumerate(posts)
     ) or "（暂无数据）"
 
+    analysis_instruction = (body.custom_prompt.strip() if body.custom_prompt and body.custom_prompt.strip()
+                            else DEFAULT_ANALYSIS_PROMPT)
+
     prompt = (
-        "你是资深自媒体策划，擅长从社交媒体热点中提炼有价值的创作选题。\n\n"
         f"【过去 24 小时 X 热门帖子】\n{posts_text}"
         f"{account_profile}\n\n"
-        "请根据以上内容，生成 10 条候选选题。\n"
-        "要求：\n"
-        "- type 只能是 \"long\"（1500-3000 字深度文章）或 \"short\"（200-500 字 X 风格短帖）\n"
-        "- 长短文各约 5 条，根据话题深度判断\n"
-        "- source_posts 列出该选题参考的 1-3 条原帖摘要\n"
-        "- 仅输出 JSON 数组，不要任何解释文字，格式：\n"
-        '[{"title":"...","angle":"...","type":"long|short",'
-        '"source_posts":[{"username":"@xxx","content":"...","url":"..."}]}]'
+        f"{analysis_instruction}"
     )
 
     try:
@@ -153,8 +164,12 @@ async def enqueue_topics(body: EnqueueRequest):
     task_ids: list[str] = []
 
     for topic in body.topics:
-        word_range = "1500-3000 字" if topic.type == "long" else "200-500 字"
-        content_type_label = "长文" if topic.type == "long" else "短文"
+        if topic.type == "long":
+            word_range, content_type_label = "1500-3000 字", "长文"
+        elif topic.type == "story":
+            word_range, content_type_label = "400-600 字", "小故事"
+        else:
+            word_range, content_type_label = "200-500 字", "短文"
 
         sources_md = "\n".join(
             f"- {p.username}: {p.content[:120]} [{p.url}]"
