@@ -93,7 +93,8 @@ async def _call(prompt: str, max_tokens: int = 2048) -> str:
     if not api_key:
         raise RuntimeError("LLM API key not configured — please set it in Settings")
 
-    # Anthropic uses its own SDK; everything else goes through Responses API (stateless)
+    # Anthropic uses its own SDK; everything else uses Chat Completions (/v1/chat/completions)
+    # which is the universal OpenAI-compatible standard supported by all third-party providers.
     if provider == "anthropic" and not base_url:
         client = anthropic.AsyncAnthropic(api_key=api_key)
         msg = await client.messages.create(
@@ -107,17 +108,12 @@ async def _call(prompt: str, max_tokens: int = 2048) -> str:
         if base_url:
             kwargs["base_url"] = base_url
         client = openai.AsyncOpenAI(**kwargs)
-        resp = await client.responses.create(
+        resp = await client.chat.completions.create(
             model=model,
-            input=prompt,
-            store=False,
+            max_tokens=max_tokens,
+            messages=[{"role": "user", "content": prompt}],
         )
-        for item in resp.output:
-            if getattr(item, "type", None) == "message":
-                for part in getattr(item, "content", []):
-                    if getattr(part, "type", None) == "output_text":
-                        return part.text
-        return getattr(resp, "output_text", "")
+        return resp.choices[0].message.content or ""
 
 
 def _extract_json_array(text: str) -> list:

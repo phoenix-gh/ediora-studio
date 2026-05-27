@@ -100,7 +100,7 @@ async def generate_topics(body: GenerateRequest, db: AsyncSession = Depends(get_
     )
 
     try:
-        raw = await _call(prompt, max_tokens=3000)
+        raw = await _call(prompt, max_tokens=6000)
     except Exception as e:
         raise HTTPException(500, f"LLM 调用失败: {e}")
 
@@ -108,15 +108,43 @@ async def generate_topics(body: GenerateRequest, db: AsyncSession = Depends(get_
     if raw.startswith("```"):
         raw = raw.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
 
+    # Try strict parse first; fall back to extracting complete objects if truncated
     try:
         data = json.loads(raw)
         if not isinstance(data, list):
             raise ValueError("not a list")
+    except json.JSONDecodeError:
+        data = _extract_complete_objects(raw)
+        if not data:
+            raise HTTPException(500, f"LLM 输出解析失败\n原始输出: {raw[:500]}")
+
+    try:
         topics = [TopicSuggestion(**item) for item in data[:10]]
     except Exception as e:
-        raise HTTPException(500, f"LLM 输出解析失败: {e}\n原始输出: {raw[:500]}")
+        raise HTTPException(500, f"选题结构解析失败: {e}")
 
     return GenerateResponse(warning=warning, topics=topics)
+
+
+def _extract_complete_objects(raw: str) -> list:
+    """Extract complete JSON objects from a potentially truncated array."""
+    results = []
+    depth = 0
+    start = None
+    for i, ch in enumerate(raw):
+        if ch == '{':
+            if depth == 0:
+                start = i
+            depth += 1
+        elif ch == '}':
+            depth -= 1
+            if depth == 0 and start is not None:
+                try:
+                    results.append(json.loads(raw[start:i+1]))
+                except json.JSONDecodeError:
+                    pass
+                start = None
+    return results
 
 
 @router.post("/enqueue", response_model=EnqueueResponse)
