@@ -21,10 +21,11 @@ const DEFAULT_PROMPT = `你是资深自媒体策划，擅长从社交媒体热�
 - type 有三种：
   * "long"：1500-3000 字深度分析文章，约 4 条
   * "short"：200-500 字 X 风格短帖，观点犀利，约 3 条
-  * "story"：5-6 句话的微故事，讲述身边人/事/有趣发现，像朋友圈短小有共鸣的瞬间，约 3 条
+  * "story"：5-6 句话的微故事，讲述身边人/事/有趣发现，像朋友圈短小有共鸣的瞬间，约 2 条
+  * "share"：发现类短帖，介绍 X 上看到的有趣项目/工具/资源，3-5 句话 + 一句核心价值，适合「今天发现个好东西」的语气，约 2 条
 - source_posts 列出该选题参考的 1-3 条原帖摘要
 - 仅输出 JSON 数组，不要任何解释文字，格式：
-[{"title":"...","angle":"...","type":"long|short|story","source_posts":[{"username":"@xxx","content":"...","url":"..."}]}]`
+[{"title":"...","angle":"...","type":"long|short|story|share","source_posts":[{"username":"@xxx","content":"...","url":"..."}]}]`
 
 const PROMPT_STORAGE_KEY = 'wms_topic_generator_prompt'
 
@@ -42,8 +43,9 @@ interface TopicCard extends TopicSuggestion {
 }
 
 function typeBadge(type: string) {
-  if (type === 'long') return { label: '长文', cls: 'bg-blue-600 text-white' }
-  if (type === 'story') return { label: '小故事', cls: 'bg-amber-500 text-white' }
+  if (type === 'long')  return { label: '长文',   cls: 'bg-blue-600 text-white' }
+  if (type === 'story') return { label: '微故事', cls: 'bg-amber-500 text-white' }
+  if (type === 'share') return { label: '发现',   cls: 'bg-purple-600 text-white' }
   return { label: '短文', cls: 'bg-green-600 text-white' }
 }
 

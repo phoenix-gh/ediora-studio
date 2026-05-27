@@ -36,10 +36,11 @@ DEFAULT_ANALYSIS_PROMPT = (
     "- type 有三种：\n"
     "  * \"long\"：1500-3000 字深度分析文章，约 4 条\n"
     "  * \"short\"：200-500 字 X 风格短帖，观点犀利，约 3 条\n"
-    "  * \"story\"：5-6 句话的微故事，讲述身边人/事/有趣发现，像朋友圈那种短小有共鸣的瞬间，约 3 条\n"
+    "  * \"story\"：5-6 句话的微故事，讲述身边人/事/有趣发现，像朋友圈那种短小有共鸣的瞬间，约 2 条\n"
+    "  * \"share\"：发现类短帖，介绍 X 上看到的有趣项目/工具/资源，3-5 句话 + 一句核心价值，适合「今天发现个好东西」的语气，约 2 条\n"
     "- source_posts 列出该选题参考的 1-3 条原帖摘要\n"
     "- 仅输出 JSON 数组，不要任何解释文字，格式：\n"
-    '[{"title":"...","angle":"...","type":"long|short|story",'
+    '[{"title":"...","angle":"...","type":"long|short|story|share",'
     '"source_posts":[{"username":"@xxx","content":"...","url":"..."}]}]'
 )
 
@@ -168,6 +169,8 @@ async def enqueue_topics(body: EnqueueRequest):
             word_range, content_type_label = "1500-3000 字", "长文"
         elif topic.type == "story":
             word_range, content_type_label = "5-6 句话", "微故事"
+        elif topic.type == "share":
+            word_range, content_type_label = "3-5 句话", "发现"
         else:
             word_range, content_type_label = "200-500 字", "短文"
 
