@@ -289,13 +289,14 @@ class ArticleSeries(Base):
 
 
 class ContentTopic(Base):
-    """User-managed content topics (tree, max 3 levels)."""
+    """User-managed content topics (flat, multi-tag)."""
     __tablename__ = "content_topics"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     title: Mapped[str] = mapped_column(String, nullable=False)
-    description: Mapped[str] = mapped_column(Text, default="")
-    parent_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    description: Mapped[str] = mapped_column(Text, default="")  # kept for migration rollback
+    brief: Mapped[str] = mapped_column(Text, default="")
+    parent_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)  # kept, unused after migration
     priority: Mapped[int] = mapped_column(Integer, default=3)   # 1=highest 5=lowest
     status: Mapped[str] = mapped_column(String, default="active", index=True)  # active/archived
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
@@ -315,6 +316,24 @@ class TopicSource(Base):
     platform: Mapped[str] = mapped_column(String, default="manual")  # x/github/wechat/manual/self
     draft_id: Mapped[int | None] = mapped_column(Integer, nullable=True)  # set when source = own published draft
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+
+class TopicTag(Base):
+    """Tags for grouping content topics (replaces tree hierarchy)."""
+    __tablename__ = "topic_tags"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    color: Mapped[str] = mapped_column(String, default="#6366f1")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+
+class ContentTopicTag(Base):
+    """Many-to-many join between ContentTopic and TopicTag."""
+    __tablename__ = "content_topic_tags"
+
+    topic_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tag_id: Mapped[int] = mapped_column(Integer, primary_key=True)
 
 
 class ArticleDraft(Base):
