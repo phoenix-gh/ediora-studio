@@ -245,17 +245,16 @@ async def list_content_topics(
     """
     List all user-managed content topics (选题库) as a flat list.
 
-    Each topic may have a parent_id — use it to reconstruct the tree
-    (max 3 levels deep). Topics are sorted by priority then created_at.
+    Topics are sorted by priority then created_at.
 
     Args:
         include_archived: Include archived topics (default False).
 
-    Returns a flat list. Each item includes: id, title, description,
-    parent_id, priority (1=highest), status, source_count, draft_count,
-    created_at.
+    Returns a flat list. Each item includes: id, title, brief,
+    tags (list of {id, name, color}), priority (1=highest), status,
+    source_count, draft_count, created_at.
     """
-    from models import ContentTopic, TopicSource, ArticleDraft
+    from models import ContentTopic, TopicSource, ArticleDraft, TopicTag, ContentTopicTag
     from sqlalchemy import func
 
     async with SessionLocal() as db:
@@ -278,12 +277,23 @@ async def list_content_topics(
             .group_by(ArticleDraft.content_topic_id)
         )).all()) if ids else {}
 
+        tag_rows = (await db.execute(
+            select(ContentTopicTag.topic_id, TopicTag.id, TopicTag.name, TopicTag.color)
+            .join(TopicTag, TopicTag.id == ContentTopicTag.tag_id)
+            .where(ContentTopicTag.topic_id.in_(ids))
+        )).all() if ids else []
+        tags_by_topic: dict[int, list[dict]] = {}
+        for row in tag_rows:
+            tags_by_topic.setdefault(row.topic_id, []).append(
+                {"id": row.id, "name": row.name, "color": row.color}
+            )
+
     return [
         {
             "id": t.id,
             "title": t.title,
-            "description": t.description or "",
-            "parent_id": t.parent_id,
+            "brief": t.brief or "",
+            "tags": tags_by_topic.get(t.id, []),
             "priority": t.priority,
             "status": t.status,
             "source_count": source_counts.get(t.id, 0),
@@ -297,17 +307,16 @@ async def list_content_topics(
 @mcp.tool()
 async def get_content_topic(topic_id: int) -> dict:
     """
-    Get a specific content topic with all its reference sources (线索).
+    Get a specific content topic with its sources, tags, and update history.
 
     Args:
-        topic_id: Integer ID of the topic (from list_content_topics).
+        topic_id: Integer ID of the topic (from list_content_topics or search_topics_by_keywords).
 
-    Returns: id, title, description, parent_id, priority, status,
-             created_at, and a "sources" list.
-    Each source includes: id, url, title, note, platform, created_at.
+    Returns: id, title, brief, tags, priority, status, created_at,
+             sources list, and updates list (most recent first).
     Raises an error if the topic is not found.
     """
-    from models import ContentTopic, TopicSource
+    from models import ContentTopic, TopicSource, TopicTag, ContentTopicTag, TopicUpdate
 
     async with SessionLocal() as db:
         topic = await db.get(ContentTopic, topic_id)
@@ -320,11 +329,24 @@ async def get_content_topic(topic_id: int) -> dict:
             .order_by(desc(TopicSource.created_at))
         )).scalars().all()
 
+        tag_rows = (await db.execute(
+            select(TopicTag)
+            .join(ContentTopicTag, ContentTopicTag.tag_id == TopicTag.id)
+            .where(ContentTopicTag.topic_id == topic_id)
+        )).scalars().all()
+
+        updates = (await db.execute(
+            select(TopicUpdate)
+            .where(TopicUpdate.topic_id == topic_id)
+            .order_by(desc(TopicUpdate.created_at))
+            .limit(20)
+        )).scalars().all()
+
     return {
         "id": topic.id,
         "title": topic.title,
-        "description": topic.description or "",
-        "parent_id": topic.parent_id,
+        "brief": topic.brief or "",
+        "tags": [{"id": t.id, "name": t.name, "color": t.color} for t in tag_rows],
         "priority": topic.priority,
         "status": topic.status,
         "created_at": _fmt_dt(topic.created_at),
@@ -339,56 +361,82 @@ async def get_content_topic(topic_id: int) -> dict:
             }
             for s in sources
         ],
+        "updates": [
+            {
+                "id": u.id,
+                "description": u.description,
+                "source_url": u.source_url or "",
+                "created_at": _fmt_dt(u.created_at),
+            }
+            for u in updates
+        ],
     }
 
 
 @mcp.tool()
 async def create_content_topic(
     title: str,
-    description: str = "",
-    parent_id: Optional[int] = None,
+    brief: str = "",
+    tags: Optional[list[str]] = None,
     priority: int = 3,
 ) -> dict:
     """
     Create a new content topic in the 选题库.
 
-    Topics support up to 3 levels of nesting via parent_id.
-    Use list_content_topics to find a suitable parent.
-
     Args:
         title: Topic name, e.g. "Claude 国内使用教程".
-        description: What problem this topic addresses (optional).
-        parent_id: ID of the parent topic for sub-topics (optional).
+        brief: Markdown brief describing the content angle and research scope (optional).
+        tags: List of tag names to attach (will be created if they don't exist).
         priority: 1 (highest) to 5 (lowest). Default 3.
 
-    Returns: id, title, parent_id, priority, status, created_at.
+    Returns: id, title, brief, tags, priority, status, created_at.
     """
-    from models import ContentTopic
+    from models import ContentTopic, TopicTag, ContentTopicTag
+    from sqlalchemy import func
+
+    _TAG_COLORS = ["#6366f1","#8b5cf6","#ec4899","#f59e0b","#10b981","#3b82f6","#ef4444","#14b8a6"]
+
+    async def _get_or_create_tag(db, name: str) -> TopicTag:
+        normalized = name.strip().lower()
+        existing = (await db.execute(
+            select(TopicTag).where(func.lower(TopicTag.name) == normalized)
+        )).scalar_one_or_none()
+        if existing:
+            return existing
+        color = _TAG_COLORS[sum(ord(c) for c in name) % len(_TAG_COLORS)]
+        tag = TopicTag(name=name.strip(), color=color)
+        db.add(tag)
+        await db.flush()
+        return tag
 
     async with SessionLocal() as db:
-        if parent_id is not None:
-            parent = await db.get(ContentTopic, parent_id)
-            if parent is None:
-                raise ValueError(f"Parent topic {parent_id} not found")
-            if parent.parent_id is not None:
-                grandparent = await db.get(ContentTopic, parent.parent_id)
-                if grandparent and grandparent.parent_id is not None:
-                    raise ValueError("Topics can only be nested 3 levels deep")
-
         obj = ContentTopic(
             title=title,
-            description=description,
-            parent_id=parent_id,
+            brief=brief,
             priority=max(1, min(5, priority)),
         )
         db.add(obj)
+        await db.flush()
+
+        for name in (tags or []):
+            if name.strip():
+                tag = await _get_or_create_tag(db, name)
+                db.add(ContentTopicTag(topic_id=obj.id, tag_id=tag.id))
+
         await db.commit()
         await db.refresh(obj)
+
+        tag_rows = (await db.execute(
+            select(TopicTag)
+            .join(ContentTopicTag, ContentTopicTag.tag_id == TopicTag.id)
+            .where(ContentTopicTag.topic_id == obj.id)
+        )).scalars().all()
 
     return {
         "id": obj.id,
         "title": obj.title,
-        "parent_id": obj.parent_id,
+        "brief": obj.brief or "",
+        "tags": [{"id": t.id, "name": t.name, "color": t.color} for t in tag_rows],
         "priority": obj.priority,
         "status": obj.status,
         "created_at": _fmt_dt(obj.created_at),
@@ -446,6 +494,189 @@ async def add_topic_source(
         "title": obj.title or "",
         "note": obj.note or "",
         "platform": obj.platform,
+        "created_at": _fmt_dt(obj.created_at),
+    }
+
+
+@mcp.tool()
+async def search_topics_by_keywords(keywords: list[str]) -> list[dict]:
+    """
+    Search existing content topics by keywords (full-text match on title + brief).
+
+    Use this as the first step in content-to-topic analysis to find candidate
+    topics before asking the LLM to judge similarity.
+
+    Args:
+        keywords: List of keywords extracted from the source article,
+                  e.g. ["AI", "创业", "一人公司"].
+
+    Returns up to 10 matching topics, each with: id, title, brief (first 200 chars), tags.
+    Returns empty list if no matches or keywords is empty.
+    """
+    from models import ContentTopic, TopicTag, ContentTopicTag
+
+    if not keywords:
+        return []
+
+    async with SessionLocal() as db:
+        topics = (await db.execute(
+            select(ContentTopic).where(ContentTopic.status == "active")
+        )).scalars().all()
+
+        matched = []
+        for t in topics:
+            haystack = (t.title + " " + (t.brief or "")).lower()
+            if any(kw.lower() in haystack for kw in keywords if kw.strip()):
+                matched.append(t)
+        matched = matched[:10]
+
+        if not matched:
+            return []
+
+        ids = [t.id for t in matched]
+        tag_rows = (await db.execute(
+            select(ContentTopicTag.topic_id, TopicTag.id, TopicTag.name, TopicTag.color)
+            .join(TopicTag, TopicTag.id == ContentTopicTag.tag_id)
+            .where(ContentTopicTag.topic_id.in_(ids))
+        )).all()
+        tags_by_topic: dict[int, list[dict]] = {}
+        for row in tag_rows:
+            tags_by_topic.setdefault(row.topic_id, []).append(
+                {"id": row.id, "name": row.name, "color": row.color}
+            )
+
+    return [
+        {
+            "id": t.id,
+            "title": t.title,
+            "brief": (t.brief or "")[:200],
+            "tags": tags_by_topic.get(t.id, []),
+        }
+        for t in matched
+    ]
+
+
+@mcp.tool()
+async def update_content_topic(
+    topic_id: int,
+    title: Optional[str] = None,
+    brief: Optional[str] = None,
+    tags: Optional[list[str]] = None,
+    priority: Optional[int] = None,
+) -> dict:
+    """
+    Update an existing content topic.
+
+    Args:
+        topic_id: ID of the topic to update (from list_content_topics or search_topics_by_keywords).
+        title: New title, or omit to leave unchanged.
+        brief: New full markdown brief, or omit to leave unchanged.
+        tags: New tag list (full replacement), or omit to leave unchanged.
+        priority: New priority 1-5, or omit to leave unchanged.
+
+    Returns: updated topic with id, title, brief, tags, priority, status, updated_at.
+    Raises an error if the topic is not found.
+    """
+    from models import ContentTopic, TopicTag, ContentTopicTag
+    from sqlalchemy import func, delete
+
+    _TAG_COLORS = ["#6366f1","#8b5cf6","#ec4899","#f59e0b","#10b981","#3b82f6","#ef4444","#14b8a6"]
+
+    async def _get_or_create_tag(db, name: str) -> TopicTag:
+        normalized = name.strip().lower()
+        existing = (await db.execute(
+            select(TopicTag).where(func.lower(TopicTag.name) == normalized)
+        )).scalar_one_or_none()
+        if existing:
+            return existing
+        color = _TAG_COLORS[sum(ord(c) for c in name) % len(_TAG_COLORS)]
+        tag = TopicTag(name=name.strip(), color=color)
+        db.add(tag)
+        await db.flush()
+        return tag
+
+    async with SessionLocal() as db:
+        obj = await db.get(ContentTopic, topic_id)
+        if obj is None:
+            raise ValueError(f"Topic {topic_id} not found")
+
+        if title is not None:
+            obj.title = title
+        if brief is not None:
+            obj.brief = brief
+        if priority is not None:
+            obj.priority = max(1, min(5, priority))
+
+        if tags is not None:
+            await db.execute(delete(ContentTopicTag).where(ContentTopicTag.topic_id == topic_id))
+            for name in tags:
+                if name.strip():
+                    tag = await _get_or_create_tag(db, name)
+                    db.add(ContentTopicTag(topic_id=topic_id, tag_id=tag.id))
+
+        await db.commit()
+        await db.refresh(obj)
+
+        tag_rows = (await db.execute(
+            select(TopicTag)
+            .join(ContentTopicTag, ContentTopicTag.tag_id == TopicTag.id)
+            .where(ContentTopicTag.topic_id == obj.id)
+        )).scalars().all()
+
+    return {
+        "id": obj.id,
+        "title": obj.title,
+        "brief": obj.brief or "",
+        "tags": [{"id": t.id, "name": t.name, "color": t.color} for t in tag_rows],
+        "priority": obj.priority,
+        "status": obj.status,
+        "updated_at": _fmt_dt(obj.updated_at),
+    }
+
+
+@mcp.tool()
+async def add_topic_update(
+    topic_id: int,
+    description: str,
+    source_url: str = "",
+) -> dict:
+    """
+    Record a changelog entry for a content topic.
+
+    Call this after every content-to-topic action — whether you updated,
+    created, or skipped. The description should explain what changed or why
+    you skipped, so the user can review the decision.
+
+    Args:
+        topic_id: ID of the affected topic.
+        description: Human-readable summary of what happened, e.g.
+                     "新增角度：产品化路径，补充了 2025 Q1 数据" or
+                     "无新增角度，已有选题覆盖相同切入点，跳过".
+        source_url: URL of the source article (optional).
+
+    Returns: id, topic_id, description, source_url, created_at.
+    """
+    from models import ContentTopic, TopicUpdate
+
+    async with SessionLocal() as db:
+        topic = await db.get(ContentTopic, topic_id)
+        if topic is None:
+            raise ValueError(f"Topic {topic_id} not found")
+
+        obj = TopicUpdate(
+            topic_id=topic_id,
+            description=description.strip(),
+            source_url=source_url.strip(),
+        )
+        db.add(obj)
+        await db.commit()
+        await db.refresh(obj)
+
+    return {
+        "id": obj.id,
+        "topic_id": obj.topic_id,
+        "description": obj.description,
+        "source_url": obj.source_url or "",
         "created_at": _fmt_dt(obj.created_at),
     }
 
