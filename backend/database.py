@@ -55,3 +55,15 @@ async def init_db():
         await conn.execute(text(
             "ALTER TABLE publish_accounts ADD COLUMN IF NOT EXISTS cover_style JSON NOT NULL DEFAULT '{}'::json"
         ))
+        # Topic library brief field (added in redesign; idempotent)
+        await conn.execute(text(
+            "ALTER TABLE content_topics ADD COLUMN IF NOT EXISTS brief TEXT NOT NULL DEFAULT ''"
+        ))
+        # Copy description → brief for existing rows that have no brief yet
+        await conn.execute(text(
+            "UPDATE content_topics SET brief = description WHERE brief = '' AND description <> ''"
+        ))
+        # Reset parent_id — tree hierarchy replaced by tag model
+        await conn.execute(text(
+            "UPDATE content_topics SET parent_id = NULL WHERE parent_id IS NOT NULL"
+        ))
