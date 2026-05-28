@@ -12,9 +12,10 @@ import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import {
-  ContentTopic, TopicTag, TopicSource, DraftSummary,
+  ContentTopic, TopicTag, TopicSource, DraftSummary, TopicUpdate,
   getTopics, getTags, createTopic, updateTopic, deleteTopic,
   addSource, deleteSource, getTopicDrafts, dispatchTopic,
+  analyzeTopic, getTopicUpdates,
   PLATFORMS,
 } from '@/lib/api/content-topics'
 import { createDraft } from '@/lib/api/drafts'
@@ -147,7 +148,7 @@ interface AddSourceForm {
   url: string; title: string; content: string; note: string; platform: string
 }
 
-type ActiveTab = 'brief' | 'sources' | 'drafts'
+type ActiveTab = 'brief' | 'sources' | 'drafts' | 'updates'
 
 export function TopicsClient({ initialTopics, initialTags }: {
   initialTopics: ContentTopic[]
@@ -197,6 +198,17 @@ export function TopicsClient({ initialTopics, initialTags }: {
   const [drafts, setDrafts] = useState<DraftSummary[]>([])
   const [loadingDrafts, setLoadingDrafts] = useState(false)
 
+  // Updates tab
+  const [topicUpdates, setTopicUpdates] = useState<TopicUpdate[]>([])
+  const [loadingUpdates, setLoadingUpdates] = useState(false)
+
+  // Analyze dialog
+  const [analyzeOpen, setAnalyzeOpen] = useState(false)
+  const [analyzeTab, setAnalyzeTab] = useState<'url' | 'text'>('url')
+  const [analyzeUrl, setAnalyzeUrl] = useState('')
+  const [analyzeText, setAnalyzeText] = useState('')
+  const [analyzeBusy, setAnalyzeBusy] = useState(false)
+
   // Deleting
   const [deleting, setDeleting] = useState(false)
 
@@ -229,6 +241,19 @@ export function TopicsClient({ initialTopics, initialTags }: {
       .catch(() => toast.error('加载产出失败'))
       .finally(() => setLoadingDrafts(false))
   }, [activeTab, selected?.id])
+
+  // Load updates when tab switches
+  useEffect(() => {
+    if (activeTab !== 'updates' || !selected) return
+    setLoadingUpdates(true)
+    getTopicUpdates(selected.id)
+      .then(setTopicUpdates)
+      .catch(() => toast.error('加载更新历史失败'))
+      .finally(() => setLoadingUpdates(false))
+  }, [activeTab, selected?.id])
+
+  // Reset updates when topic changes
+  useEffect(() => { setTopicUpdates([]) }, [selected?.id])
 
   // Derived: visible topics
   const visibleTopics = useMemo(() => {
@@ -263,6 +288,25 @@ export function TopicsClient({ initialTopics, initialTags }: {
       setAllTags(freshTags)
     } catch { toast.error('刷新失败') }
     finally { setRefreshing(false) }
+  }
+
+  async function handleAnalyze() {
+    const body = analyzeTab === 'url'
+      ? { url: analyzeUrl.trim() }
+      : { content: analyzeText.trim() }
+    if (!body.url && !body.content) return
+    setAnalyzeBusy(true)
+    try {
+      const res = await analyzeTopic(body)
+      toast.success('已派发给 Scout', {
+        description: `任务 ${res.task_id}`,
+        action: { label: '查看看板', onClick: () => router.push(res.kanban_url) },
+      })
+      setAnalyzeOpen(false)
+      setAnalyzeUrl('')
+      setAnalyzeText('')
+    } catch { toast.error('派发失败') }
+    finally { setAnalyzeBusy(false) }
   }
 
   function toggleFilterTag(name: string) {
@@ -460,6 +504,9 @@ export function TopicsClient({ initialTopics, initialTags }: {
               <button onClick={handleRefresh} disabled={refreshing} className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 disabled:opacity-40">
                 <RefreshCw className={cn('w-3.5 h-3.5', refreshing && 'animate-spin')} />
               </button>
+              <button onClick={() => setAnalyzeOpen(true)} className="text-zinc-400 hover:text-indigo-500 transition-colors" title="分析文章 → 整理选题">
+                <SendHorizonal className="w-3.5 h-3.5" />
+              </button>
               <button onClick={() => setShowNewForm(true)} className="text-zinc-400 hover:text-indigo-500 transition-colors">
                 <Plus className="w-3.5 h-3.5" />
               </button>
@@ -632,7 +679,7 @@ export function TopicsClient({ initialTopics, initialTags }: {
 
           {/* Tabs */}
           <div className="flex border-b border-zinc-100 dark:border-zinc-800 px-6 flex-shrink-0">
-            {(['brief', 'sources', 'drafts'] as ActiveTab[]).map(tab => (
+            {(['brief', 'sources', 'drafts', 'updates'] as ActiveTab[]).map(tab => (
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
@@ -643,7 +690,10 @@ export function TopicsClient({ initialTopics, initialTags }: {
                     : 'border-transparent text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'
                 )}
               >
-                {tab === 'brief' ? 'Brief' : tab === 'sources' ? `线索 (${selected.source_count})` : `产出 (${selected.draft_count})`}
+                {tab === 'brief' ? 'Brief'
+                  : tab === 'sources' ? `线索 (${selected.source_count})`
+                  : tab === 'drafts' ? `产出 (${selected.draft_count})`
+                  : '更新历史'}
               </button>
             ))}
           </div>
@@ -760,6 +810,44 @@ export function TopicsClient({ initialTopics, initialTags }: {
               </div>
             )}
 
+            {activeTab === 'updates' && (
+              <div className="flex-1 overflow-y-auto px-4 py-3">
+                {loadingUpdates ? (
+                  <div className="flex items-center justify-center h-40">
+                    <Loader2 className="w-6 h-6 animate-spin text-zinc-400" />
+                  </div>
+                ) : topicUpdates.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center h-40 text-zinc-400 gap-2">
+                    <RefreshCw className="w-8 h-8 opacity-20" />
+                    <p className="text-xs">暂无更新记录</p>
+                    <p className="text-[11px] text-zinc-300">Scout 分析文章后会在此记录变更</p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {topicUpdates.map(u => (
+                      <div key={u.id} className="rounded-lg border border-zinc-100 dark:border-zinc-800 p-3 space-y-1.5">
+                        <p className="text-[11px] text-zinc-400">
+                          {new Date(u.created_at).toLocaleString('zh-CN')}
+                        </p>
+                        <p className="text-sm text-zinc-700 dark:text-zinc-300">{u.description}</p>
+                        {u.source_url && (
+                          <a
+                            href={u.source_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-center gap-1 text-xs text-indigo-500 hover:underline break-all"
+                          >
+                            <ExternalLink className="w-3 h-3 flex-shrink-0" />
+                            {u.source_url}
+                          </a>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
             {activeTab === 'sources' && previewSource && (
               <SourcePreview source={previewSource} onClose={() => setPreviewSource(null)} />
             )}
@@ -772,6 +860,64 @@ export function TopicsClient({ initialTopics, initialTags }: {
           <button onClick={() => setShowNewForm(true)} className="text-xs text-indigo-500 hover:underline flex items-center gap-1">
             <Plus className="w-3.5 h-3.5" /> 新建第一个选题
           </button>
+        </div>
+      )}
+
+      {/* ── Analyze article modal ───────────────────────────── */}
+      {analyzeOpen && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={() => setAnalyzeOpen(false)}>
+          <div className="bg-white dark:bg-zinc-900 rounded-xl shadow-xl p-6 w-[520px] space-y-4" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center gap-2">
+              <SendHorizonal className="w-4 h-4 text-indigo-500" />
+              <h3 className="font-semibold text-zinc-900 dark:text-zinc-100">分析文章 → 整理选题</h3>
+            </div>
+            <p className="text-xs text-zinc-500">Scout 会分析文章，在选题库中查找相似选题，决定更新/跳过/新建，并在"更新历史"记录决策。</p>
+            <div className="flex gap-2">
+              {(['url', 'text'] as const).map(t => (
+                <button
+                  key={t}
+                  onClick={() => setAnalyzeTab(t)}
+                  className={cn(
+                    'text-xs px-3 py-1 rounded-full font-medium border transition-colors',
+                    analyzeTab === t
+                      ? 'bg-indigo-500 text-white border-indigo-500'
+                      : 'border-zinc-200 dark:border-zinc-700 text-zinc-500 hover:border-zinc-300'
+                  )}
+                >
+                  {t === 'url' ? 'URL' : '粘贴文本'}
+                </button>
+              ))}
+            </div>
+            {analyzeTab === 'url' ? (
+              <input
+                autoFocus
+                value={analyzeUrl}
+                onChange={e => setAnalyzeUrl(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') handleAnalyze() }}
+                placeholder="https://..."
+                className="w-full px-3 py-2 text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg bg-transparent outline-none focus:border-indigo-400"
+              />
+            ) : (
+              <textarea
+                autoFocus
+                value={analyzeText}
+                onChange={e => setAnalyzeText(e.target.value)}
+                placeholder="粘贴文章正文…"
+                rows={6}
+                className="w-full px-3 py-2 text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg bg-zinc-50 dark:bg-zinc-900 outline-none focus:border-indigo-400 resize-y"
+              />
+            )}
+            <div className="flex gap-2 justify-end pt-1">
+              <Button variant="outline" onClick={() => setAnalyzeOpen(false)} className="text-xs h-8">取消</Button>
+              <Button
+                onClick={handleAnalyze}
+                disabled={analyzeBusy || (analyzeTab === 'url' ? !analyzeUrl.trim() : !analyzeText.trim())}
+                className="text-xs h-8 gap-1"
+              >
+                {analyzeBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <SendHorizonal className="w-3.5 h-3.5" />} 派发给 Scout
+              </Button>
+            </div>
+          </div>
         </div>
       )}
 

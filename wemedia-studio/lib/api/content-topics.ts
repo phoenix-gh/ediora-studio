@@ -71,6 +71,24 @@ export interface DispatchResult {
   kanban_url: string
 }
 
+export interface TopicUpdate {
+  id: number
+  topic_id: number
+  source_url: string
+  description: string
+  created_at: string
+}
+
+export interface AnalyzeRequest {
+  url?: string
+  content?: string
+}
+
+export interface AnalyzeResult {
+  task_id: string
+  kanban_url: string
+}
+
 export const PLATFORMS = [
   { value: 'x',      label: 'X / Twitter' },
   { value: 'github', label: 'GitHub' },
@@ -125,6 +143,17 @@ export async function dispatchTopic(topicId: number): Promise<DispatchResult> {
   return apiFetch<DispatchResult>(`/content-topics/${topicId}/dispatch`, {
     method: 'POST',
   })
+}
+
+export async function analyzeTopic(body: AnalyzeRequest): Promise<AnalyzeResult> {
+  return apiFetch<AnalyzeResult>('/content-topics/analyze', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+}
+
+export async function getTopicUpdates(topicId: number): Promise<TopicUpdate[]> {
+  return apiFetch<TopicUpdate[]>(`/content-topics/${topicId}/updates`)
 }
 
 export async function addSource(topicId: number, body: Omit<TopicSourceCreate, 'topic_id'>): Promise<TopicSource> {
