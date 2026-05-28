@@ -250,17 +250,29 @@ class WriterPersonaOut(BaseModel):
 
 # ── ContentTopic ──────────────────────────────────────────────────────────────
 
+class TopicTagCreate(BaseModel):
+    name: str
+
+
+class TopicTagOut(BaseModel):
+    id: int
+    name: str
+    color: str
+
+    model_config = {"from_attributes": True}
+
+
 class ContentTopicCreate(BaseModel):
     title: str
-    description: str = ""
-    parent_id: Optional[int] = None
+    brief: str = ""
+    tags: list[str] = []
     priority: int = 3
 
 
 class ContentTopicUpdate(BaseModel):
     title: Optional[str] = None
-    description: Optional[str] = None
-    parent_id: Optional[int] = None
+    brief: Optional[str] = None
+    tags: Optional[list[str]] = None
     priority: Optional[int] = None
     status: Optional[str] = None
 
@@ -292,20 +304,33 @@ class TopicSourceOut(BaseModel):
 class ContentTopicOut(BaseModel):
     id: int
     title: str
-    description: str
-    parent_id: Optional[int] = None
+    brief: str
+    description: str  # legacy field, kept for backwards compat
     priority: int
     status: str
     created_at: datetime
     updated_at: datetime
+    tags: list[TopicTagOut] = []
     sources: list[TopicSourceOut] = []
-    children: list["ContentTopicOut"] = []
+    source_count: int = 0
     draft_count: int = 0
 
     model_config = {"from_attributes": True}
 
 
-ContentTopicOut.model_rebuild()
+class ArticleDraftSummary(BaseModel):
+    id: int
+    title: str
+    status: str
+    draft_type: str
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class DispatchResponse(BaseModel):
+    task_id: str
+    kanban_url: str
 
 
 # ── ArticleDraft ───────────────────────────────────────────────────────────────
