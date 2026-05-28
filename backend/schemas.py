@@ -333,6 +333,26 @@ class DispatchResponse(BaseModel):
     kanban_url: str
 
 
+class TopicUpdateOut(BaseModel):
+    id: int
+    topic_id: int
+    source_url: str
+    description: str
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class AnalyzeRequest(BaseModel):
+    url: Optional[str] = None
+    content: Optional[str] = None
+
+
+class AnalyzeResponse(BaseModel):
+    task_id: str
+    kanban_url: str
+
+
 # ── ArticleDraft ───────────────────────────────────────────────────────────────
 
 class ArticleDraftRequest(BaseModel):

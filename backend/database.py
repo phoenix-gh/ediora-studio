@@ -67,3 +67,13 @@ async def init_db():
         await conn.execute(text(
             "UPDATE content_topics SET parent_id = NULL WHERE parent_id IS NOT NULL"
         ))
+        # topic_updates table (content-to-topic agent changelog)
+        await conn.execute(text("""
+            CREATE TABLE IF NOT EXISTS topic_updates (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                topic_id INTEGER NOT NULL,
+                source_url TEXT NOT NULL DEFAULT '',
+                description TEXT NOT NULL,
+                created_at DATETIME NOT NULL DEFAULT (datetime('now'))
+            )
+        """))

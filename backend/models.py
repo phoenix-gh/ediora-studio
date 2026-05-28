@@ -336,6 +336,17 @@ class ContentTopicTag(Base):
     tag_id: Mapped[int] = mapped_column(Integer, primary_key=True)
 
 
+class TopicUpdate(Base):
+    """Changelog entry written by scout agent when processing a content-to-topic task."""
+    __tablename__ = "topic_updates"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    topic_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    source_url: Mapped[str] = mapped_column(Text, default="")
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+
 class ArticleDraft(Base):
     __tablename__ = "article_drafts"
 

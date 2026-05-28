@@ -3,12 +3,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, delete, update as sa_update
 
 from database import get_db
-from models import ContentTopic, TopicSource, TopicTag, ContentTopicTag, ArticleDraft
+from models import ContentTopic, TopicSource, TopicTag, ContentTopicTag, ArticleDraft, TopicUpdate
 from schemas import (
     ContentTopicCreate, ContentTopicUpdate, ContentTopicOut,
     TopicTagCreate, TopicTagOut,
     TopicSourceCreate, TopicSourceOut,
     ArticleDraftSummary, DispatchResponse,
+    TopicUpdateOut, AnalyzeRequest, AnalyzeResponse,
 )
 
 router = APIRouter(prefix="/content-topics", tags=["content-topics"])
@@ -115,6 +116,53 @@ async def delete_tag(tag_id: int, db: AsyncSession = Depends(get_db)):
     await db.execute(delete(ContentTopicTag).where(ContentTopicTag.tag_id == tag_id))
     await db.delete(tag)
     await db.commit()
+
+
+# ── Search (registered before /{topic_id} to avoid routing conflict) ──────────
+
+@router.get("/search", response_model=list[ContentTopicOut])
+async def search_topics(q: str = "", db: AsyncSession = Depends(get_db)):
+    if not q.strip():
+        return []
+    keywords = [k.strip() for k in q.replace(",", " ").split() if k.strip()]
+    rows = (await db.execute(
+        select(ContentTopic).where(ContentTopic.status == "active")
+    )).scalars().all()
+    matched = [t for t in rows if any(kw.lower() in (t.title + " " + t.brief).lower() for kw in keywords)]
+    return await _enrich_topics(db, matched[:10])
+
+
+# ── Analyze (dispatches to scout, registered before /{topic_id}) ──────────────
+
+@router.post("/analyze", response_model=AnalyzeResponse)
+async def analyze_article(body: AnalyzeRequest):
+    if not body.url and not body.content:
+        raise HTTPException(400, "url 或 content 至少提供一个")
+    parts = ["## 任务类型\ncontent-to-topic\n\n## 输入"]
+    if body.url:
+        parts.append(f"URL: {body.url}")
+    if body.content:
+        parts.append(f"内容:\n{body.content[:3000]}")
+    parts.append(
+        "\n## 指令\n"
+        "1. 读取文章，提取 3-5 个主题关键词\n"
+        "2. 调 search_topics_by_keywords 检索候选选题（传入关键词列表）\n"
+        "3. 判断相似度：\n"
+        "   - 相似且有新角度 → update_content_topic + add_topic_update（记录新增了什么）\n"
+        "   - 相似但无新内容 → add_topic_update（记录跳过原因，topic_id 取相似选题 id）\n"
+        "   - 无匹配 → create_content_topic + add_topic_update（记录新建原因）"
+    )
+    from hermes_kanban_client import HermesKanbanClient, HermesKanbanError
+    try:
+        kanban = HermesKanbanClient()
+        task_id = await kanban.create_task(
+            title="[选题整理] 文章分析",
+            body="\n".join(parts),
+            assignee="wms_scout",
+        )
+    except HermesKanbanError as e:
+        raise HTTPException(502, f"Hermes 不可用: {e}")
+    return AnalyzeResponse(task_id=task_id, kanban_url="/studio")
 
 
 # ── Topic endpoints ────────────────────────────────────────────────────────────
@@ -230,6 +278,21 @@ async def dispatch_topic(topic_id: int, db: AsyncSession = Depends(get_db)):
         raise HTTPException(502, f"Hermes 不可用: {e}")
 
     return DispatchResponse(task_id=task_id, kanban_url="/studio")
+
+
+# ── Topic updates (changelog written by scout) ────────────────────────────────
+
+@router.get("/{topic_id}/updates", response_model=list[TopicUpdateOut])
+async def list_topic_updates(topic_id: int, db: AsyncSession = Depends(get_db)):
+    obj = await db.get(ContentTopic, topic_id)
+    if not obj:
+        raise HTTPException(404, "Topic not found")
+    rows = (await db.execute(
+        select(TopicUpdate)
+        .where(TopicUpdate.topic_id == topic_id)
+        .order_by(TopicUpdate.created_at.desc())
+    )).scalars().all()
+    return rows
 
 
 # ── Sources (unchanged) ───────────────────────────────────────────────────────

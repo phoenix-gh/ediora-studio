@@ -212,3 +212,72 @@ def test_dispatch_creates_hermes_task(client, monkeypatch):
     data = dr.json()
     assert data["task_id"] == "mock-task-123"
     assert data["kanban_url"] == "/studio"
+
+
+# ── Search ────────────────────────────────────────────────────────────────────
+
+def test_search_returns_matches(client):
+    client.post("/api/content-topics", json={"title": "AI 创业案例", "brief": "调研 AI 一人公司", "tags": []})
+    client.post("/api/content-topics", json={"title": "健康饮食", "brief": "调研营养学", "tags": []})
+    r = client.get("/api/content-topics/search?q=AI")
+    assert r.status_code == 200
+    titles = [t["title"] for t in r.json()]
+    assert "AI 创业案例" in titles
+    assert "健康饮食" not in titles
+
+
+def test_search_empty_query_returns_empty(client):
+    r = client.get("/api/content-topics/search?q=")
+    assert r.status_code == 200
+    assert r.json() == []
+
+
+# ── Updates ───────────────────────────────────────────────────────────────────
+
+def test_list_updates_empty(client):
+    r = client.post("/api/content-topics", json={"title": "选题", "tags": []})
+    topic_id = r.json()["id"]
+    ur = client.get(f"/api/content-topics/{topic_id}/updates")
+    assert ur.status_code == 200
+    assert ur.json() == []
+
+
+def test_list_updates_returns_entries(client):
+    from database import SessionLocal
+    from models import TopicUpdate
+
+    r = client.post("/api/content-topics", json={"title": "选题", "tags": []})
+    topic_id = r.json()["id"]
+
+    async def _seed():
+        async with SessionLocal() as db:
+            db.add(TopicUpdate(topic_id=topic_id, description="新增角度：产品化路径", source_url="https://example.com"))
+            await db.commit()
+
+    asyncio.new_event_loop().run_until_complete(_seed())
+    ur = client.get(f"/api/content-topics/{topic_id}/updates")
+    assert ur.status_code == 200
+    assert len(ur.json()) == 1
+    assert ur.json()[0]["description"] == "新增角度：产品化路径"
+
+
+# ── Analyze ───────────────────────────────────────────────────────────────────
+
+def test_analyze_no_input_returns_400(client):
+    r = client.post("/api/content-topics/analyze", json={})
+    assert r.status_code == 400
+
+
+def test_analyze_dispatches_task(client, monkeypatch):
+    async def _mock_create_task(self, *, title, body, assignee, parents=None):
+        assert assignee == "wms_scout"
+        assert "content-to-topic" in body
+        return "mock-analyze-task-1"
+
+    from hermes_kanban_client import HermesKanbanClient
+    monkeypatch.setattr(HermesKanbanClient, "create_task", _mock_create_task)
+
+    r = client.post("/api/content-topics/analyze", json={"url": "https://example.com/article"})
+    assert r.status_code == 200
+    assert r.json()["task_id"] == "mock-analyze-task-1"
+    assert r.json()["kanban_url"] == "/studio"
