@@ -168,7 +168,7 @@ function QuoteForm({ initial, topics, onSave, onCancel, saving }: QuoteFormProps
           className="w-full px-3 py-2 border border-zinc-200 dark:border-zinc-700 rounded-lg bg-transparent outline-none focus:border-indigo-400 text-xs text-zinc-600 dark:text-zinc-400"
         >
           <option value="">不关联主题</option>
-          {flat.map(t => <option key={t.id} value={t.id}>{t.parent_id ? '  ' : ''}{t.title}</option>)}
+          {flat.map(t => <option key={t.id} value={t.id}>{t.title}</option>)}
         </select>
       )}
 

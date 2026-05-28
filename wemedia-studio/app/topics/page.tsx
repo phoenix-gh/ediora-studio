@@ -1,9 +1,9 @@
-import { getTopics } from '@/lib/api/content-topics'
+import { getTopics, getTags } from '@/lib/api/content-topics'
 import { TopicsClient } from './TopicsClient'
 
 export const dynamic = 'force-dynamic'
 
 export default async function TopicsPage() {
-  const topics = await getTopics()
-  return <TopicsClient initialTopics={topics} />
+  const [topics, allTags] = await Promise.all([getTopics(), getTags()])
+  return <TopicsClient initialTopics={topics} initialTags={allTags} />
 }

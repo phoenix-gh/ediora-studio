@@ -137,3 +137,19 @@ export async function addSource(topicId: number, body: Omit<TopicSourceCreate, '
 export async function deleteSource(topicId: number, sourceId: number): Promise<void> {
   await apiFetch(`/content-topics/${topicId}/sources/${sourceId}`, { method: 'DELETE' })
 }
+
+// ── Legacy helpers (topics are now flat; kept for call-site compatibility) ────
+
+export function flattenTopics(topics: ContentTopic[]): ContentTopic[] {
+  return topics
+}
+
+export interface FlatTopic {
+  topic: ContentTopic
+  depth: number
+  label: string
+}
+
+export function flattenTopicsWithDepth(topics: ContentTopic[]): FlatTopic[] {
+  return topics.map(t => ({ topic: t, depth: 0, label: t.title }))
+}
