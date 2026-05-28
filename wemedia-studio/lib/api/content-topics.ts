@@ -1,5 +1,11 @@
 import { apiFetch } from './client'
 
+export interface TopicTag {
+  id: number
+  name: string
+  color: string
+}
+
 export interface TopicSource {
   id: number
   topic_id: number
@@ -15,28 +21,29 @@ export interface TopicSource {
 export interface ContentTopic {
   id: number
   title: string
+  brief: string
   description: string
-  parent_id: number | null
   priority: number
   status: string
   created_at: string
   updated_at: string
+  tags: TopicTag[]
   sources: TopicSource[]
-  children: ContentTopic[]
+  source_count: number
   draft_count: number
 }
 
 export interface ContentTopicCreate {
   title: string
-  description?: string
-  parent_id?: number | null
+  brief?: string
+  tags?: string[]
   priority?: number
 }
 
 export interface ContentTopicUpdate {
   title?: string
-  description?: string
-  parent_id?: number | null
+  brief?: string
+  tags?: string[]
   priority?: number
   status?: string
 }
@@ -51,6 +58,19 @@ export interface TopicSourceCreate {
   draft_id?: number | null
 }
 
+export interface DraftSummary {
+  id: number
+  title: string
+  status: string
+  draft_type: string
+  created_at: string
+}
+
+export interface DispatchResult {
+  task_id: string
+  kanban_url: string
+}
+
 export const PLATFORMS = [
   { value: 'x',      label: 'X / Twitter' },
   { value: 'github', label: 'GitHub' },
@@ -59,8 +79,24 @@ export const PLATFORMS = [
   { value: 'self',   label: '自己发布' },
 ]
 
-export async function getTopics(): Promise<ContentTopic[]> {
-  return apiFetch<ContentTopic[]>('/content-topics')
+export async function getTopics(tags?: string[]): Promise<ContentTopic[]> {
+  const params = tags?.length ? `?tags=${tags.join(',')}` : ''
+  return apiFetch<ContentTopic[]>(`/content-topics${params}`)
+}
+
+export async function getTags(): Promise<TopicTag[]> {
+  return apiFetch<TopicTag[]>('/content-topics/tags')
+}
+
+export async function createTag(name: string): Promise<TopicTag> {
+  return apiFetch<TopicTag>('/content-topics/tags', {
+    method: 'POST',
+    body: JSON.stringify({ name }),
+  })
+}
+
+export async function deleteTag(id: number): Promise<void> {
+  await apiFetch(`/content-topics/tags/${id}`, { method: 'DELETE' })
 }
 
 export async function createTopic(body: ContentTopicCreate): Promise<ContentTopic> {
@@ -81,6 +117,16 @@ export async function deleteTopic(id: number): Promise<void> {
   await apiFetch(`/content-topics/${id}`, { method: 'DELETE' })
 }
 
+export async function getTopicDrafts(topicId: number): Promise<DraftSummary[]> {
+  return apiFetch<DraftSummary[]>(`/content-topics/${topicId}/drafts`)
+}
+
+export async function dispatchTopic(topicId: number): Promise<DispatchResult> {
+  return apiFetch<DispatchResult>(`/content-topics/${topicId}/dispatch`, {
+    method: 'POST',
+  })
+}
+
 export async function addSource(topicId: number, body: Omit<TopicSourceCreate, 'topic_id'>): Promise<TopicSource> {
   return apiFetch<TopicSource>(`/content-topics/${topicId}/sources`, {
     method: 'POST',
@@ -90,29 +136,4 @@ export async function addSource(topicId: number, body: Omit<TopicSourceCreate, '
 
 export async function deleteSource(topicId: number, sourceId: number): Promise<void> {
   await apiFetch(`/content-topics/${topicId}/sources/${sourceId}`, { method: 'DELETE' })
-}
-
-export function flattenTopics(topics: ContentTopic[]): ContentTopic[] {
-  const result: ContentTopic[] = []
-  for (const t of topics) {
-    result.push(t)
-    if (t.children.length) result.push(...flattenTopics(t.children))
-  }
-  return result
-}
-
-export interface FlatTopic {
-  topic: ContentTopic
-  depth: number
-  label: string   // indented display label
-}
-
-export function flattenTopicsWithDepth(topics: ContentTopic[], depth = 0): FlatTopic[] {
-  const result: FlatTopic[] = []
-  for (const t of topics) {
-    const prefix = depth === 0 ? '' : '　'.repeat(depth - 1) + '└ '
-    result.push({ topic: t, depth, label: prefix + t.title })
-    if (t.children.length) result.push(...flattenTopicsWithDepth(t.children, depth + 1))
-  }
-  return result
 }
