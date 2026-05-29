@@ -223,7 +223,7 @@ def test_enqueue_long_creates_three_tasks_with_parent_chain(monkeypatch, tmp_pat
     assert calls[2]["parents"] == ["t_002"]
 
 
-def test_enqueue_story_creates_one_writer_task(monkeypatch, tmp_path):
+def test_enqueue_story_creates_writer_and_illustrator(monkeypatch, tmp_path):
     c = _make_client_with_account(monkeypatch, tmp_path)
     calls = _fake_kanban(monkeypatch)
 
@@ -238,11 +238,13 @@ def test_enqueue_story_creates_one_writer_task(monkeypatch, tmp_path):
     }
     r = c.post("/api/topic-generator/enqueue", json=payload)
     assert r.status_code == 200, r.text
-    assert len(calls) == 1
+    assert len(calls) == 2
     assert calls[0]["assignee"] == "wms_writer"
+    assert calls[1]["assignee"] == "wms_illustrator"
+    assert calls[1]["parents"] == ["t_001"]
 
 
-def test_enqueue_share_creates_one_writer_task(monkeypatch, tmp_path):
+def test_enqueue_share_creates_writer_and_illustrator(monkeypatch, tmp_path):
     c = _make_client_with_account(monkeypatch, tmp_path)
     calls = _fake_kanban(monkeypatch)
 
@@ -257,11 +259,12 @@ def test_enqueue_share_creates_one_writer_task(monkeypatch, tmp_path):
     }
     r = c.post("/api/topic-generator/enqueue", json=payload)
     assert r.status_code == 200, r.text
-    assert len(calls) == 1
+    assert len(calls) == 2
     assert calls[0]["assignee"] == "wms_writer"
+    assert calls[1]["assignee"] == "wms_illustrator"
 
 
-def test_enqueue_short_creates_one_writer_task(monkeypatch, tmp_path):
+def test_enqueue_short_creates_writer_and_illustrator(monkeypatch, tmp_path):
     c = _make_client_with_account(monkeypatch, tmp_path)
     calls = _fake_kanban(monkeypatch)
 
@@ -276,8 +279,9 @@ def test_enqueue_short_creates_one_writer_task(monkeypatch, tmp_path):
     }
     r = c.post("/api/topic-generator/enqueue", json=payload)
     assert r.status_code == 200, r.text
-    assert len(calls) == 1
+    assert len(calls) == 2
     assert calls[0]["assignee"] == "wms_writer"
+    assert calls[1]["assignee"] == "wms_illustrator"
 
 
 def test_enqueue_multiple_topics_creates_independent_chains(monkeypatch, tmp_path):
@@ -297,7 +301,7 @@ def test_enqueue_multiple_topics_creates_independent_chains(monkeypatch, tmp_pat
     assert body["enqueued"] == 2
     assert len(body["task_ids"]) == 2
     assert len(body["pipeline_task_ids"]) == 2
-    assert len(calls) == 4  # long=3 + short=1
+    assert len(calls) == 5  # long=3 + short=2
 
 
 def test_enqueue_unknown_account_returns_400(monkeypatch, tmp_path):

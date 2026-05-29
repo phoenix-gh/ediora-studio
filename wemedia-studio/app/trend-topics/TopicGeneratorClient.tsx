@@ -12,6 +12,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from '@/components/ui/dialog'
 import { generateTopics, enqueueTopics, TopicSuggestion } from '@/lib/api/topic-generator'
 
 const DEFAULT_PROMPT = `你是资深自媒体策划，擅长从社交媒体热点中提炼有价值的创作选题。
@@ -79,6 +86,7 @@ export function TopicGeneratorClient({ accounts, initialTopics = [], initialGene
   const [enqueueing, setEnqueueing] = useState(false)
   const [promptOpen, setPromptOpen] = useState(false)
   const [customPrompt, setCustomPrompt] = useState(DEFAULT_PROMPT)
+  const [draftPrompt, setDraftPrompt] = useState(DEFAULT_PROMPT)
 
   useEffect(() => {
     const saved = localStorage.getItem(PROMPT_STORAGE_KEY)
@@ -90,9 +98,19 @@ export function TopicGeneratorClient({ accounts, initialTopics = [], initialGene
     localStorage.setItem(PROMPT_STORAGE_KEY, value)
   }
 
-  function resetPrompt() {
-    savePrompt(DEFAULT_PROMPT)
-    toast.success('已恢复默认提示词')
+  function openPromptDialog() {
+    setDraftPrompt(customPrompt)
+    setPromptOpen(true)
+  }
+
+  function saveAndClose() {
+    savePrompt(draftPrompt)
+    setPromptOpen(false)
+    toast.success('提示词已保存')
+  }
+
+  function resetDraft() {
+    setDraftPrompt(DEFAULT_PROMPT)
   }
 
   const selectedCount = cards.filter(c => c.checked && !c.enqueued).length
@@ -187,7 +205,7 @@ export function TopicGeneratorClient({ accounts, initialTopics = [], initialGene
             }
           </Button>
           <button
-            onClick={() => setPromptOpen(v => !v)}
+            onClick={openPromptDialog}
             className={`ml-auto flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md border transition-colors ${
               isCustomPrompt
                 ? 'border-amber-300 text-amber-600 bg-amber-50 dark:bg-amber-950/20'
@@ -197,32 +215,40 @@ export function TopicGeneratorClient({ accounts, initialTopics = [], initialGene
             <Settings2 className="w-3.5 h-3.5" />
             分析提示词
             {isCustomPrompt && <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />}
-            {promptOpen ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
           </button>
         </div>
-
-        {/* Prompt editor */}
-        {promptOpen && (
-          <div className="px-6 pb-4 border-t border-zinc-100 dark:border-zinc-800 pt-3">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs text-zinc-500">此提示词会替换默认的选题分析指令（帖子数据由系统自动注入，无需手动填写）</span>
-              <button
-                onClick={resetPrompt}
-                className="text-xs text-zinc-400 hover:text-zinc-600 underline underline-offset-2"
-              >
-                恢复默认
-              </button>
-            </div>
-            <textarea
-              value={customPrompt}
-              onChange={e => savePrompt(e.target.value)}
-              rows={10}
-              className="w-full text-xs font-mono rounded-md border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 px-3 py-2 text-zinc-700 dark:text-zinc-300 focus:outline-none focus:ring-1 focus:ring-indigo-400 resize-y"
-              spellCheck={false}
-            />
-          </div>
-        )}
       </div>
+
+      {/* Prompt editor dialog */}
+      <Dialog open={promptOpen} onOpenChange={setPromptOpen}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>编辑分析提示词</DialogTitle>
+          </DialogHeader>
+          <p className="text-xs text-zinc-500 -mt-1">
+            此提示词会替换默认的选题分析指令，帖子数据由系统自动注入，无需手动填写。
+          </p>
+          <textarea
+            value={draftPrompt}
+            onChange={e => setDraftPrompt(e.target.value)}
+            rows={14}
+            className="w-full text-xs font-mono rounded-md border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 px-3 py-2 text-zinc-700 dark:text-zinc-300 focus:outline-none focus:ring-1 focus:ring-indigo-400 resize-y"
+            spellCheck={false}
+          />
+          <DialogFooter className="sm:justify-between">
+            <button
+              onClick={resetDraft}
+              className="text-xs text-zinc-400 hover:text-zinc-600 underline underline-offset-2 self-center"
+            >
+              恢复默认
+            </button>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setPromptOpen(false)}>取消</Button>
+              <Button onClick={saveAndClose}>保存</Button>
+            </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Cards */}
       {cards.length === 0 ? (

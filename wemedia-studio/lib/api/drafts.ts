@@ -9,7 +9,7 @@ export interface DraftSource {
 export interface Draft {
   id: number
   topic_id: string
-  content_topic_id: number | null
+  writing_plan_id: number | null
   title: string
   content: string
   status: string
@@ -32,7 +32,7 @@ export interface DraftUpdate {
   linked_draft_id?: number | null
   series_id?: number | null
   series_order?: number
-  content_topic_id?: number | null
+  writing_plan_id?: number | null
   sources?: DraftSource[]
 }
 
@@ -80,7 +80,7 @@ export interface DraftCreate {
   status?: string
   draft_type?: string
   linked_draft_id?: number | null
-  content_topic_id?: number | null
+  writing_plan_id?: number | null
   sources?: DraftSource[]
 }
 

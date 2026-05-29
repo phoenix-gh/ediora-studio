@@ -8,11 +8,11 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
 import {
-  ContentTopic,
-  addSource,
+  WritingPlan,
+  addPlanSource,
   flattenTopicsWithDepth,
-  getTopics,
-} from "@/lib/api/content-topics"
+  getWritingPlans,
+} from "@/lib/api/writing-plans"
 import { Draft, getDrafts } from "@/lib/api/drafts"
 
 interface Props {
@@ -27,55 +27,55 @@ interface Props {
 export function AddToTopicPopover({ url, title, summary = "", platform, className, label }: Props) {
   const [open, setOpen] = useState(false)
   const [done, setDone] = useState(false)
-  const [topics, setTopics] = useState<ContentTopic[] | null>(null)
+  const [plans, setPlans] = useState<WritingPlan[] | null>(null)
   const [drafts, setDrafts] = useState<Draft[] | null>(null)
-  const [topicId, setTopicId] = useState<number | null>(null)
+  const [planId, setPlanId] = useState<number | null>(null)
   const [draftId, setDraftId] = useState<number | null>(null)
   const [note, setNote] = useState(summary)
   const [query, setQuery] = useState("")
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
-    if (!open || topics) return
+    if (!open || plans) return
     let cancelled = false
-    Promise.all([getTopics(), getDrafts()])
-      .then(([t, d]) => {
+    Promise.all([getWritingPlans(), getDrafts()])
+      .then(([p, d]) => {
         if (cancelled) return
-        setTopics(t)
+        setPlans(p)
         setDrafts(d.filter(x => x.status === "drafting"))
       })
-      .catch(() => toast.error("加载选题/草稿失败"))
+      .catch(() => toast.error("加载写作方案/草稿失败"))
     return () => { cancelled = true }
-  }, [open, topics])
+  }, [open, plans])
 
   // Reset note when summary changes (different content trigger)
   useEffect(() => { setNote(summary) }, [summary])
 
-  const flatTopics = useMemo(() => {
-    if (!topics) return []
-    const all = flattenTopicsWithDepth(topics).filter(t => t.topic.status === "active")
+  const flatPlans = useMemo(() => {
+    if (!plans) return []
+    const all = flattenTopicsWithDepth(plans).filter(t => t.plan.status === "active")
     if (!query.trim()) return all
     const q = query.trim().toLowerCase()
-    return all.filter(t => t.topic.title.toLowerCase().includes(q))
-  }, [topics, query])
+    return all.filter(t => t.plan.title.toLowerCase().includes(q))
+  }, [plans, query])
 
-  const topicDrafts = useMemo(() => {
-    if (!drafts || topicId == null) return []
-    return drafts.filter(d => d.content_topic_id === topicId)
-  }, [drafts, topicId])
+  const planDrafts = useMemo(() => {
+    if (!drafts || planId == null) return []
+    return drafts.filter(d => d.writing_plan_id === planId)
+  }, [drafts, planId])
 
   async function handleSubmit() {
-    if (!topicId) {
-      toast.error("请先选择选题")
+    if (!planId) {
+      toast.error("请先选择写作方案")
       return
     }
     setBusy(true)
     try {
-      await addSource(topicId, {
+      await addPlanSource(planId, {
         url, title, note, platform,
         draft_id: draftId ?? undefined,
       })
-      toast.success(draftId ? "已加到选题和草稿" : "已加到选题")
+      toast.success(draftId ? "已加到写作方案和草稿" : "已加到写作方案")
       setDone(true)
       setOpen(false)
     } catch (e) {
@@ -89,7 +89,7 @@ export function AddToTopicPopover({ url, title, summary = "", platform, classNam
     setOpen(o)
     if (o) {
       // Reset selection state each time the popover opens
-      setTopicId(null)
+      setPlanId(null)
       setDraftId(null)
       setQuery("")
     }
@@ -101,7 +101,7 @@ export function AddToTopicPopover({ url, title, summary = "", platform, classNam
         render={
           <button
             type="button"
-            title={done ? "已加为线索" : "加为选题线索"}
+            title={done ? "已加为线索" : "加为写作方案线索"}
             onClick={e => e.stopPropagation()}
             className={cn(
               "inline-flex items-center justify-center rounded-md text-zinc-400 hover:text-indigo-500 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors",
@@ -122,47 +122,47 @@ export function AddToTopicPopover({ url, title, summary = "", platform, classNam
       >
         <div className="space-y-3">
           <div>
-            <div className="text-xs font-medium text-zinc-500 mb-1.5">选题</div>
+            <div className="text-xs font-medium text-zinc-500 mb-1.5">写作方案</div>
             <Input
-              placeholder="搜索选题…"
+              placeholder="搜索写作方案…"
               value={query}
               onChange={e => setQuery(e.target.value)}
               className="h-8 text-xs mb-1.5"
             />
             <div className="max-h-40 overflow-y-auto border border-zinc-200 dark:border-zinc-800 rounded-md">
-              {topics === null ? (
+              {plans === null ? (
                 <div className="p-3 text-center text-xs text-zinc-400 flex items-center justify-center gap-1">
                   <Loader2 className="w-3 h-3 animate-spin" /> 加载中
                 </div>
-              ) : flatTopics.length === 0 ? (
-                <div className="p-3 text-center text-xs text-zinc-400">无匹配选题</div>
+              ) : flatPlans.length === 0 ? (
+                <div className="p-3 text-center text-xs text-zinc-400">无匹配写作方案</div>
               ) : (
-                flatTopics.map(({ topic, depth }) => (
+                flatPlans.map(({ plan, depth }) => (
                   <button
-                    key={topic.id}
+                    key={plan.id}
                     type="button"
-                    onClick={() => { setTopicId(topic.id); setDraftId(null) }}
+                    onClick={() => { setPlanId(plan.id); setDraftId(null) }}
                     className={cn(
                       "w-full text-left px-2 py-1.5 text-xs hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors truncate",
-                      topicId === topic.id && "bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400",
+                      planId === plan.id && "bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400",
                     )}
                     style={{ paddingLeft: `${8 + depth * 12}px` }}
                   >
-                    {topic.title}
+                    {plan.title}
                   </button>
                 ))
               )}
             </div>
           </div>
 
-          {topicId != null && (
+          {planId != null && (
             <div>
               <div className="text-xs font-medium text-zinc-500 mb-1.5">草稿（可选）</div>
               <div className="max-h-32 overflow-y-auto border border-zinc-200 dark:border-zinc-800 rounded-md">
-                {topicDrafts.length === 0 ? (
-                  <div className="p-2 text-center text-xs text-zinc-400">该选题下暂无进行中草稿</div>
+                {planDrafts.length === 0 ? (
+                  <div className="p-2 text-center text-xs text-zinc-400">该写作方案下暂无进行中草稿</div>
                 ) : (
-                  topicDrafts.map(d => (
+                  planDrafts.map(d => (
                     <button
                       key={d.id}
                       type="button"
@@ -202,7 +202,7 @@ export function AddToTopicPopover({ url, title, summary = "", platform, classNam
             <Button
               size="sm"
               onClick={handleSubmit}
-              disabled={busy || topicId == null}
+              disabled={busy || planId == null}
             >
               {busy && <Loader2 className="w-3 h-3 animate-spin mr-1" />}
               添加

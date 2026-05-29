@@ -31,7 +31,7 @@ class SynthesizeRequest(BaseModel):
     post: str                          # 原帖文字
     replies: list[str]                 # 评论列表（已由插件提取）
     angle: str = "tutorial"            # tutorial / opinion / resource
-    content_topic_id: Optional[int] = None
+    writing_plan_id: Optional[int] = None
     source_url: str = ""
 
 
@@ -78,7 +78,7 @@ async def synthesize_thread(body: SynthesizeRequest):
     async with SessionLocal() as db:
         draft = ArticleDraft(
             topic_id="synthesize",
-            content_topic_id=body.content_topic_id,
+            writing_plan_id=body.writing_plan_id,
             title=title,
             content=content,
             status="drafting",

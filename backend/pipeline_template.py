@@ -158,7 +158,11 @@ def render_profile_illustrator(profile: dict[str, Any]) -> str:
 
 # 通用反 AI 腔约束 + 节奏要求 ── 注入 writer body（task-level 硬约束，
 # 比 SOUL.md 距离当下任务更近，命中率更稳）。账号级 style_rules 可以覆盖单条。
-WRITER_ANTI_AI_RULES_MD = """
+#
+# 拆成两块：词汇 / 语气 / 节奏（与篇幅无关，长短文都适用）和结构规则（长短文不同）。
+# 长文沿用原有「段落长度强制不均（≥250 字段落）」等规则；短文案（如写作方案里的
+# 100-200 字短帖）必须作废这些长文结构规则，否则物理上无法满足。
+_WRITER_WORDING_RULES_MD = """
 ## 通用反 AI 腔（硬约束，账号 style_rules 可单条放行）
 下列词汇 / 句式**全文禁用**，一次都不要出现：
 
@@ -174,6 +178,17 @@ WRITER_ANTI_AI_RULES_MD = """
 - **少用「的」**：单句「的」字 ≤ 2 个；3 个就重写
 - **首段钩子**：前 50 字必须是场景 / 反差 / 数字 / 反问之一；禁概括式开场（「近年来」「在 X 领域」）
 
+## 禁互动话术结尾
+- 除非 voice_samples 出现过，否则禁：一键三连 / 点赞收藏 / 求关注 / 各位觉得有用 / 评论区聊聊 / 欢迎留言
+- 默认结尾留白，或写一个**具体的、下一步会做的动作**（"明天我会拿它扫 2019 年的标记"），不喊话
+
+## 增补禁词（一次都不准出现）
+- 值得一提的是、通用考量、一部分拼图、生长/长出来、并行拉取、跨书关联、主题聚类
+- 这一步用户看不到、但很重要 / 但同样重要 / 这是关键的一步
+- "覆盖了 X、Y、Z 三个场景"（标准 AI 总结句）
+""".strip()
+
+_WRITER_LONGFORM_STRUCTURE_MD = """
 ## 反模板结构（硬性）
 AI 写作最明显的特征之一是结构对称、篇幅均摊。以下全部禁止：
 
@@ -188,19 +203,68 @@ AI 写作最明显的特征之一是结构对称、篇幅均摊。以下全部�
 - 不允许相邻 3 段字数都落在 80-180 区间
 - brief 里有 N 个点，**不要写成 N 个等长段**——核心点占 ≥40%，次要点两句带过或砍掉
 
-## 禁互动话术结尾
-- 除非 voice_samples 出现过，否则禁：一键三连 / 点赞收藏 / 求关注 / 各位觉得有用 / 评论区聊聊 / 欢迎留言
-- 默认结尾留白，或写一个**具体的、下一步会做的动作**（"明天我会拿它扫 2019 年的标记"），不喊话
-
 ## 强制具体化（在「具体 > 抽象」之上加权）
 - 全文至少 2 处第一人称当下动作 + 当下感受：「我点了 X，看到 Y，愣了一下」
 - 这类锚点散在中段，不能都堆在首尾
-
-## 增补禁词（一次都不准出现）
-- 值得一提的是、通用考量、一部分拼图、生长/长出来、并行拉取、跨书关联、主题聚类
-- 这一步用户看不到、但很重要 / 但同样重要 / 这是关键的一步
-- "覆盖了 X、Y、Z 三个场景"（标准 AI 总结句）
 """.strip()
+
+
+def _writer_shortform_structure_md(max_chars: int) -> str:
+    return f"""
+## 短文案结构（硬性，最高优先级）
+本文是 **≤ {max_chars} 字的短文案**，上方「段落长度强制不均」「≥250 字段落」类长文结构规则**全部作废**。
+- **总字数严格 ≤ {max_chars} 字**：宁短勿长，超出即不合格；写完数一遍字数再交。
+- 不分小标题、不写引言/结语、不堆砌段落；一个核心案例 + 一句洞察收尾即可。
+- 至少 1 处具体细节（人名 / 数字 / 时间 / 引语），但不要为凑字数注水。
+""".strip()
+
+
+# 长文的完整反 AI 腔规则（词汇 + 长文结构）── 既有 full / topic_long 流程沿用。
+WRITER_ANTI_AI_RULES_MD = _WRITER_WORDING_RULES_MD + "\n\n" + _WRITER_LONGFORM_STRUCTURE_MD
+
+
+def _is_short_spec(spec: dict | None, threshold: int = 500) -> bool:
+    return bool(spec and spec.get("max") and spec["max"] <= threshold)
+
+
+def writer_word_directive_md(c: RenderCtx) -> str:
+    """writer body 的「字数」一行：方案给了字数就以方案为准，否则回退账号 word_range。"""
+    spec = c.get("word_spec")
+    if spec and spec.get("raw"):
+        return (f"严格 **{spec['raw']}**（写作方案硬规格，**超出即不合格**；"
+                f"忽略上方画像 word_range）")
+    return "遵从画像 `word_range`（默认 1500-2200）"
+
+
+def writer_rules_md(c: RenderCtx) -> str:
+    """按篇幅选反 AI 腔规则块：短文案用短结构，否则用长文结构。"""
+    spec = c.get("word_spec")
+    if _is_short_spec(spec):
+        return _WRITER_WORDING_RULES_MD + "\n\n" + _writer_shortform_structure_md(spec["max"])
+    return WRITER_ANTI_AI_RULES_MD
+
+
+_WORD_RANGE_RE = re.compile(r"(\d{2,4})\s*[-~–—至到]\s*(\d{2,4})\s*字")
+_WORD_BOUND_RE = re.compile(r"(?:不超过|最多|上限|≤|<=)?\s*(\d{2,4})\s*字(?:以内|以下|左右|上限)?")
+
+
+def parse_word_spec(text: str) -> dict | None:
+    """从写作方案 / brief 自由文本里解析字数规格。
+
+    支持「100-200字」「200字以内」「不超过 300 字」等写法。
+    返回 {min, max, raw}（min 可能为 None）；解析不到返回 None（writer 回退 word_range）。
+    """
+    if not text:
+        return None
+    m = _WORD_RANGE_RE.search(text)
+    if m:
+        lo, hi = sorted((int(m.group(1)), int(m.group(2))))
+        return {"min": lo, "max": hi, "raw": f"{lo}-{hi} 字"}
+    m = _WORD_BOUND_RE.search(text)
+    if m:
+        n = int(m.group(1))
+        return {"min": None, "max": n, "raw": f"{n} 字以内"}
+    return None
 
 
 def _user_body_md(ctx: RenderCtx) -> str:
@@ -290,7 +354,7 @@ brief 里的"候选锚点"要至少用 2 个写成第一人称的当下动作 / 
 
 按 brief + 上方画像写 Markdown 初稿：
 
-- **字数**：遵从画像 `word_range`（默认 1500-2200），整篇 Markdown，**不要拆 thread / 短帖串**
+- **字数**：{writer_word_directive_md(c)}，整篇 Markdown，**不要拆 thread / 短帖串**
 - **句长 / 口吻 / 节奏**：严格贴 `voice_samples`，模仿其句长起伏
 - **硬约束**：逐条遵守 `style_rules`（账号级规则优先于下方通用反 AI 腔）
 - **避开** `taboo`（话题 / 词汇 / 立场）
@@ -299,7 +363,7 @@ brief 里的"候选锚点"要至少用 2 个写成第一人称的当下动作 / 
 - **写作习惯**: 逗号,句号全用半角, 句号后面偶尔会连续两三个空格.
 - **结构**：不要按 brief 的提纲"等比例翻译"成文章——brief 是素材清单，不是文章骨架。落笔前先决定哪一个点是核心，其余点围着它转或直接丢掉。拒绝每节等深等宽的对称结构。
 
-{WRITER_ANTI_AI_RULES_MD}
+{writer_rules_md(c)}
 
 ## 工作流（硬性，省 turn）
 本任务**没有 file / code_execution / terminal 工具**，全部在 message 中完成：
@@ -395,7 +459,7 @@ account_id: {c['account_id']}
 
 按 brief + 上方画像重写 Markdown：
 
-- **字数**：遵从画像 `word_range`（默认 1500-2200），整篇 Markdown，**不要拆 thread / 短帖串**
+- **字数**：{writer_word_directive_md(c)}，整篇 Markdown，**不要拆 thread / 短帖串**
 - **句长 / 口吻 / 节奏**：严格贴 `voice_samples`
 - **硬约束**：逐条遵守 `style_rules`（账号级规则优先于下方通用反 AI 腔）
 - **避开** `taboo`
@@ -403,7 +467,7 @@ account_id: {c['account_id']}
 - **写作习惯**: 逗号,句号全用半角, 句号后面偶尔会连续两三个空格.
 - **结构**：拒绝按 brief 等比例展开，拒绝对称结构。core_point 占 ≥40%。
 
-{WRITER_ANTI_AI_RULES_MD}
+{writer_rules_md(c)}
 
 {f"## 用户重写说明（必读）{chr(10)}{c['note']}" if c.get('note') else ''}
 
@@ -512,6 +576,35 @@ pipeline_task_id: {c['pipeline_task_id']}
 3. `kanban_complete(summary='<标题> {c['content_type_label']}完成', metadata={{"draft_id": ..., "wordcount": N}})`
 
 目标：从写稿到 complete **≤ 2 turn**。
+""".strip(),
+    ),
+    PipelineStep(
+        role="illustrator",
+        assignee="wms_illustrator",
+        title=lambda c: f"配图：{c['title']}",
+        body=lambda c: f"""account_id: {c['account_id']}
+
+# {c['title']}
+
+## 图片风格参考（宽松，优先贴内容而非品牌一致性）
+- image_style: {c['account_profile'].get('image_style') or '（未填，自由发挥）'}
+- 无需严格套用账号封面模板，以**内容相关性和视觉吸引力**为首要标准
+
+## 这棒任务（illustrator · 链路尾段，出封面即交付）
+`draft_id` 从 `worker_context.parents[0].metadata['draft_id']` 读取（writer 完成时写入）。
+用 `get_draft(<draft_id>)` 读正文 title + 前 500 字定调。
+
+调用 `baoyu-cover-image` 技能生成封面：
+- aspect_ratio: 16:9（公众号 / X 通用）
+- prompt 以内容主题为核心，风格参考 `image_style`（若为空则自由发挥）
+- **不必**照搬 signature_motifs 或 cover_style 细节
+
+失败时 `kanban_block(reason='封面生成失败: <err>')`。
+得到本地文件路径后，用 `upload_image_from_path(path=<本地路径>, filename_hint='cover.png', draft_id=<draft_id>)` 挂到 draft 图库。
+
+完成即整条链路交付：
+- **不要 `update_draft`**（draft 保持 writer 设置的 `drafting` 状态）
+- `kanban_complete(summary='封面已生成，链路交付', metadata={{"draft_id": ..., "cover_url": ..., "cover_image_id": ...}})`
 """.strip(),
     ),
 ]

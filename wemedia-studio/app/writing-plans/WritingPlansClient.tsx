@@ -12,13 +12,14 @@ import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import {
-  ContentTopic, TopicTag, TopicSource, DraftSummary, TopicUpdate,
-  getTopics, getTags, createTopic, updateTopic, deleteTopic,
-  addSource, deleteSource, getTopicDrafts, dispatchTopic,
-  analyzeTopic, getTopicUpdates,
+  WritingPlan, PlanTag, PlanSource, DraftSummary, PlanUpdate,
+  getWritingPlans, getTags, createWritingPlan, updateWritingPlan, deleteWritingPlan,
+  addPlanSource, deletePlanSource, getPlanDrafts, dispatchPlan,
+  analyzePlan, getPlanUpdates,
   PLATFORMS,
-} from '@/lib/api/content-topics'
+} from '@/lib/api/writing-plans'
 import { createDraft } from '@/lib/api/drafts'
+import { listPublishAccounts, type PublishAccount } from '@/lib/api/publish-accounts'
 import { PushToStudioPopover } from '@/components/features/PushToStudioPopover'
 
 marked.setOptions({ breaks: true, gfm: true })
@@ -46,7 +47,7 @@ function platformLabel(p: string) {
 
 // ── Tag chip ──────────────────────────────────────────────────────────────────
 
-function TagChip({ tag, onRemove }: { tag: TopicTag; onRemove?: () => void }) {
+function TagChip({ tag, onRemove }: { tag: PlanTag; onRemove?: () => void }) {
   return (
     <span
       className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full font-medium"
@@ -63,10 +64,10 @@ function TagChip({ tag, onRemove }: { tag: TopicTag; onRemove?: () => void }) {
 // ── Source row ────────────────────────────────────────────────────────────────
 
 function SourceRow({ source, onDelete, onPreview, onCreateDraft, isActive, creating }: {
-  source: TopicSource
+  source: PlanSource
   onDelete: () => void
-  onPreview: (s: TopicSource) => void
-  onCreateDraft: (s: TopicSource, type: string) => void
+  onPreview: (s: PlanSource) => void
+  onCreateDraft: (s: PlanSource, type: string) => void
   isActive: boolean
   creating: string | false
 }) {
@@ -116,13 +117,14 @@ function SourceRow({ source, onDelete, onPreview, onCreateDraft, isActive, creat
 
 // ── Source preview panel ──────────────────────────────────────────────────────
 
-function SourcePreview({ source, onClose }: { source: TopicSource; onClose: () => void }) {
-  const html = useMemo(() => marked(source.content || '') as string, [source.content])
+function SourcePreview({ source, onClose }: { source: PlanSource; onClose: () => void }) {
+  const body = source.content || source.note || ''
+  const html = useMemo(() => marked(body) as string, [body])
   return (
     <div className="w-96 flex-shrink-0 border-l border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 flex flex-col overflow-hidden">
       <div className="flex items-center gap-2 px-4 py-3 border-b border-zinc-100 dark:border-zinc-800 flex-shrink-0">
         <FileText className="w-3.5 h-3.5 text-indigo-400 flex-shrink-0" />
-        <span className="flex-1 text-xs font-semibold text-zinc-700 dark:text-zinc-300 truncate">{source.title || '原文预览'}</span>
+        <span className="flex-1 text-xs font-semibold text-zinc-700 dark:text-zinc-300 truncate">{source.title || '线索预览'}</span>
         {source.url && (
           <a href={source.url} target="_blank" rel="noopener noreferrer" className="text-zinc-400 hover:text-indigo-500 flex-shrink-0">
             <ExternalLink className="w-3.5 h-3.5" />
@@ -132,11 +134,26 @@ function SourcePreview({ source, onClose }: { source: TopicSource; onClose: () =
           <X className="w-4 h-4" />
         </button>
       </div>
-      <div className="flex-1 overflow-y-auto px-5 py-4">
-        <div
-          className="prose prose-sm dark:prose-invert max-w-none prose-headings:font-semibold prose-p:text-zinc-700 dark:prose-p:text-zinc-300 prose-p:leading-relaxed prose-a:text-indigo-500 prose-a:no-underline hover:prose-a:underline prose-code:text-pink-500 prose-code:bg-zinc-100 dark:prose-code:bg-zinc-800 prose-code:px-1 prose-code:rounded prose-pre:bg-zinc-100 dark:prose-pre:bg-zinc-900 prose-pre:rounded-lg prose-strong:text-zinc-900 dark:prose-strong:text-zinc-100"
-          dangerouslySetInnerHTML={{ __html: html }}
-        />
+      <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+        {source.url && (
+          <a
+            href={source.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1.5 text-xs text-indigo-500 hover:underline break-all"
+          >
+            <ExternalLink className="w-3 h-3 flex-shrink-0" />
+            {source.url}
+          </a>
+        )}
+        {body ? (
+          <div
+            className="prose prose-sm dark:prose-invert max-w-none prose-headings:font-semibold prose-p:text-zinc-700 dark:prose-p:text-zinc-300 prose-p:leading-relaxed prose-a:text-indigo-500 prose-a:no-underline hover:prose-a:underline prose-code:text-pink-500 prose-code:bg-zinc-100 dark:prose-code:bg-zinc-800 prose-code:px-1 prose-code:rounded prose-pre:bg-zinc-100 dark:prose-pre:bg-zinc-900 prose-pre:rounded-lg prose-strong:text-zinc-900 dark:prose-strong:text-zinc-100"
+            dangerouslySetInnerHTML={{ __html: html }}
+          />
+        ) : (
+          <p className="text-xs text-zinc-400">暂无内容</p>
+        )}
       </div>
     </div>
   )
@@ -150,14 +167,14 @@ interface AddSourceForm {
 
 type ActiveTab = 'brief' | 'sources' | 'drafts' | 'updates'
 
-export function TopicsClient({ initialTopics, initialTags }: {
-  initialTopics: ContentTopic[]
-  initialTags: TopicTag[]
+export function WritingPlansClient({ initialPlans, initialTags }: {
+  initialPlans: WritingPlan[]
+  initialTags: PlanTag[]
 }) {
   const router = useRouter()
-  const [topics, setTopics] = useState<ContentTopic[]>(initialTopics)
-  const [allTags, setAllTags] = useState<TopicTag[]>(initialTags)
-  const [selected, setSelected] = useState<ContentTopic | null>(initialTopics[0] ?? null)
+  const [plans, setPlans] = useState<WritingPlan[]>(initialPlans)
+  const [allTags, setAllTags] = useState<PlanTag[]>(initialTags)
+  const [selected, setSelected] = useState<WritingPlan | null>(initialPlans[0] ?? null)
   const [filterTagNames, setFilterTagNames] = useState<string[]>([])
   const [searchQuery, setSearchQuery] = useState('')
   const [activeTab, setActiveTab] = useState<ActiveTab>('brief')
@@ -177,7 +194,7 @@ export function TopicsClient({ initialTopics, initialTags }: {
   const [savingMeta, setSavingMeta] = useState(false)
   const titleRef = useRef<HTMLInputElement>(null)
 
-  // New topic
+  // New plan
   const [showNewForm, setShowNewForm] = useState(false)
   const [newTitle, setNewTitle] = useState('')
   const [newPriority, setNewPriority] = useState(3)
@@ -191,7 +208,7 @@ export function TopicsClient({ initialTopics, initialTags }: {
   const [showSourceForm, setShowSourceForm] = useState(false)
   const [sourceForm, setSourceForm] = useState<AddSourceForm>({ url: '', title: '', content: '', note: '', platform: 'manual' })
   const [addingSource, setAddingSource] = useState(false)
-  const [previewSource, setPreviewSource] = useState<TopicSource | null>(null)
+  const [previewSource, setPreviewSource] = useState<PlanSource | null>(null)
   const [creatingDraft, setCreatingDraft] = useState<{ id: number; type: string } | null>(null)
 
   // Drafts tab
@@ -199,7 +216,7 @@ export function TopicsClient({ initialTopics, initialTags }: {
   const [loadingDrafts, setLoadingDrafts] = useState(false)
 
   // Updates tab
-  const [topicUpdates, setTopicUpdates] = useState<TopicUpdate[]>([])
+  const [planUpdates, setPlanUpdates] = useState<PlanUpdate[]>([])
   const [loadingUpdates, setLoadingUpdates] = useState(false)
 
   // Analyze dialog
@@ -209,17 +226,21 @@ export function TopicsClient({ initialTopics, initialTags }: {
   const [analyzeText, setAnalyzeText] = useState('')
   const [analyzeBusy, setAnalyzeBusy] = useState(false)
 
+  // Dispatch account selection
+  const [dispatchAccounts, setDispatchAccounts] = useState<PublishAccount[]>([])
+  const [dispatchAccountId, setDispatchAccountId] = useState<string>('')
+
   // Deleting
   const [deleting, setDeleting] = useState(false)
 
-  // Sync selected topic when topics list refreshes
+  // Sync selected plan when plans list refreshes
   useEffect(() => {
     if (!selected) return
-    const fresh = topics.find(t => t.id === selected.id)
+    const fresh = plans.find(p => p.id === selected.id)
     if (fresh) setSelected(fresh)
-  }, [topics])
+  }, [plans])
 
-  // Sync brief draft when topic changes
+  // Sync brief draft when plan changes
   useEffect(() => {
     setBriefDraft(selected?.brief ?? '')
   }, [selected?.id])
@@ -236,7 +257,7 @@ export function TopicsClient({ initialTopics, initialTags }: {
   useEffect(() => {
     if (activeTab !== 'drafts' || !selected) return
     setLoadingDrafts(true)
-    getTopicDrafts(selected.id)
+    getPlanDrafts(selected.id)
       .then(setDrafts)
       .catch(() => toast.error('加载产出失败'))
       .finally(() => setLoadingDrafts(false))
@@ -246,45 +267,45 @@ export function TopicsClient({ initialTopics, initialTags }: {
   useEffect(() => {
     if (activeTab !== 'updates' || !selected) return
     setLoadingUpdates(true)
-    getTopicUpdates(selected.id)
-      .then(setTopicUpdates)
+    getPlanUpdates(selected.id)
+      .then(setPlanUpdates)
       .catch(() => toast.error('加载更新历史失败'))
       .finally(() => setLoadingUpdates(false))
   }, [activeTab, selected?.id])
 
-  // Reset updates when topic changes
-  useEffect(() => { setTopicUpdates([]) }, [selected?.id])
+  // Reset updates when plan changes
+  useEffect(() => { setPlanUpdates([]) }, [selected?.id])
 
-  // Derived: visible topics
-  const visibleTopics = useMemo(() => {
-    let list = topics
+  // Derived: visible plans
+  const visiblePlans = useMemo(() => {
+    let list = plans
     if (filterTagNames.length > 0) {
-      list = list.filter(t =>
-        filterTagNames.some(name => t.tags.some(tag => tag.name === name))
+      list = list.filter(p =>
+        filterTagNames.some(name => p.tags.some(tag => tag.name === name))
       )
     }
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase()
-      list = list.filter(t =>
-        t.title.toLowerCase().includes(q) || t.brief.toLowerCase().includes(q)
+      list = list.filter(p =>
+        p.title.toLowerCase().includes(q) || p.brief.toLowerCase().includes(q)
       )
     }
     return list
-  }, [topics, filterTagNames, searchQuery])
+  }, [plans, filterTagNames, searchQuery])
 
   // Derived: unique tags
   const availableTags = useMemo(() => {
-    const byName = new Map<string, TopicTag>()
+    const byName = new Map<string, PlanTag>()
     allTags.forEach(t => byName.set(t.name, t))
-    topics.forEach(topic => topic.tags.forEach(tag => byName.set(tag.name, tag)))
+    plans.forEach(plan => plan.tags.forEach(tag => byName.set(tag.name, tag)))
     return Array.from(byName.values()).sort((a, b) => a.name.localeCompare(b.name))
-  }, [topics, allTags])
+  }, [plans, allTags])
 
   async function handleRefresh() {
     setRefreshing(true)
     try {
-      const [freshTopics, freshTags] = await Promise.all([getTopics(), getTags()])
-      setTopics(freshTopics)
+      const [freshPlans, freshTags] = await Promise.all([getWritingPlans(), getTags()])
+      setPlans(freshPlans)
       setAllTags(freshTags)
     } catch { toast.error('刷新失败') }
     finally { setRefreshing(false) }
@@ -297,7 +318,7 @@ export function TopicsClient({ initialTopics, initialTags }: {
     if (!body.url && !body.content) return
     setAnalyzeBusy(true)
     try {
-      const res = await analyzeTopic(body)
+      const res = await analyzePlan(body)
       toast.success('已派发给 Scout', {
         description: `任务 ${res.task_id}`,
         action: { label: '查看看板', onClick: () => router.push(res.kanban_url) },
@@ -315,8 +336,8 @@ export function TopicsClient({ initialTopics, initialTags }: {
     )
   }
 
-  function handleSelectTopic(t: ContentTopic) {
-    setSelected(t)
+  function handleSelectPlan(p: WritingPlan) {
+    setSelected(p)
     setPreviewSource(null)
     setActiveTab('brief')
   }
@@ -332,7 +353,7 @@ export function TopicsClient({ initialTopics, initialTags }: {
     if (!selected) return
     setSavingMeta(true)
     try {
-      const updated = await updateTopic(selected.id, {
+      const updated = await updateWritingPlan(selected.id, {
         title: editTitle.trim() || selected.title,
         priority: editPriority,
       })
@@ -342,22 +363,22 @@ export function TopicsClient({ initialTopics, initialTags }: {
     finally { setSavingMeta(false) }
   }
 
-  async function handleAddTagToTopic(name: string) {
+  async function handleAddTagToPlan(name: string) {
     if (!selected || !name.trim()) return
     const newNames = [...selected.tags.map(t => t.name), name.trim()]
     try {
-      const updated = await updateTopic(selected.id, { tags: newNames })
+      const updated = await updateWritingPlan(selected.id, { tags: newNames })
       replaceInList(updated)
       getTags().then(setAllTags).catch(() => {})
     } catch { toast.error('添加标签失败') }
     setTagInput('')
   }
 
-  async function handleRemoveTagFromTopic(tagName: string) {
+  async function handleRemoveTagFromPlan(tagName: string) {
     if (!selected) return
     const newNames = selected.tags.filter(t => t.name !== tagName).map(t => t.name)
     try {
-      const updated = await updateTopic(selected.id, { tags: newNames })
+      const updated = await updateWritingPlan(selected.id, { tags: newNames })
       replaceInList(updated)
     } catch { toast.error('移除标签失败') }
   }
@@ -366,7 +387,7 @@ export function TopicsClient({ initialTopics, initialTags }: {
     if (!selected) return
     setSavingBrief(true)
     try {
-      const updated = await updateTopic(selected.id, { brief: briefDraft })
+      const updated = await updateWritingPlan(selected.id, { brief: briefDraft })
       replaceInList(updated)
       toast.success('已保存')
     } catch { toast.error('保存失败') }
@@ -376,6 +397,12 @@ export function TopicsClient({ initialTopics, initialTags }: {
   function openDispatchConfirm() {
     setDispatchBrief(briefDraft)
     setShowDispatchConfirm(true)
+    listPublishAccounts()
+      .then(accs => {
+        setDispatchAccounts(accs.filter(a => a.is_active))
+        if (accs.length > 0 && !dispatchAccountId) setDispatchAccountId(accs[0].id)
+      })
+      .catch(() => {})
   }
 
   async function handleDispatch() {
@@ -383,14 +410,14 @@ export function TopicsClient({ initialTopics, initialTags }: {
     // Save dispatchBrief (modal may differ from briefDraft if user edited it in the modal)
     if (dispatchBrief !== selected.brief) {
       try {
-        const updated = await updateTopic(selected.id, { brief: dispatchBrief })
+        const updated = await updateWritingPlan(selected.id, { brief: dispatchBrief })
         replaceInList(updated)
         setBriefDraft(dispatchBrief)
       } catch { toast.error('保存 brief 失败'); return }
     }
     setDispatching(true)
     try {
-      const result = await dispatchTopic(selected.id)
+      const result = await dispatchPlan(selected.id, dispatchAccountId || undefined)
       setShowDispatchConfirm(false)
       toast.success('已派发给 Agent', {
         action: { label: '查看看板', onClick: () => router.push(result.kanban_url) },
@@ -403,7 +430,7 @@ export function TopicsClient({ initialTopics, initialTags }: {
   async function handleArchive() {
     if (!selected) return
     try {
-      const updated = await updateTopic(selected.id, {
+      const updated = await updateWritingPlan(selected.id, {
         status: selected.status === 'archived' ? 'active' : 'archived',
       })
       replaceInList(updated)
@@ -415,9 +442,9 @@ export function TopicsClient({ initialTopics, initialTags }: {
     if (!confirm(`确定删除「${selected.title}」及其所有线索？`)) return
     setDeleting(true)
     try {
-      await deleteTopic(selected.id)
-      const fresh = await getTopics()
-      setTopics(fresh)
+      await deleteWritingPlan(selected.id)
+      const fresh = await getWritingPlans()
+      setPlans(fresh)
       setSelected(fresh[0] ?? null)
     } catch { toast.error('删除失败') }
     finally { setDeleting(false) }
@@ -428,10 +455,10 @@ export function TopicsClient({ initialTopics, initialTags }: {
     if (!title) return
     setCreating(true)
     try {
-      await createTopic({ title, priority: newPriority, tags: [] })
-      const fresh = await getTopics()
-      setTopics(fresh)
-      setSelected(fresh.find(t => t.title === title) ?? fresh[0])
+      await createWritingPlan({ title, priority: newPriority, tags: [] })
+      const fresh = await getWritingPlans()
+      setPlans(fresh)
+      setSelected(fresh.find(p => p.title === title) ?? fresh[0])
       setShowNewForm(false)
       setNewTitle('')
     } catch (e: unknown) {
@@ -443,7 +470,7 @@ export function TopicsClient({ initialTopics, initialTags }: {
     if (!selected) return
     setAddingSource(true)
     try {
-      const src = await addSource(selected.id, {
+      const src = await addPlanSource(selected.id, {
         url: sourceForm.url.trim(),
         title: sourceForm.title.trim(),
         content: sourceForm.content.trim(),
@@ -458,10 +485,10 @@ export function TopicsClient({ initialTopics, initialTags }: {
     finally { setAddingSource(false) }
   }
 
-  async function handleDeleteSource(source: TopicSource) {
+  async function handleDeleteSource(source: PlanSource) {
     if (!selected) return
     try {
-      await deleteSource(selected.id, source.id)
+      await deletePlanSource(selected.id, source.id)
       setSelected(prev => prev ? {
         ...prev,
         sources: prev.sources.filter(s => s.id !== source.id),
@@ -471,7 +498,7 @@ export function TopicsClient({ initialTopics, initialTags }: {
     } catch { toast.error('删除失败') }
   }
 
-  async function handleCreateDraft(source: TopicSource, draftType = 'article') {
+  async function handleCreateDraft(source: PlanSource, draftType = 'article') {
     setCreatingDraft({ id: source.id, type: draftType })
     try {
       const draft = await createDraft({
@@ -479,7 +506,7 @@ export function TopicsClient({ initialTopics, initialTags }: {
         title: source.title || '',
         content: source.content || '',
         draft_type: draftType,
-        content_topic_id: selected?.id ?? null,
+        writing_plan_id: selected?.id ?? null,
         sources: source.url ? [{ url: source.url, title: source.title, note: source.note }] : [],
       })
       router.push(`/drafts?draft=${draft.id}&chat=1`)
@@ -487,8 +514,8 @@ export function TopicsClient({ initialTopics, initialTags }: {
     finally { setCreatingDraft(null) }
   }
 
-  function replaceInList(updated: ContentTopic) {
-    setTopics(prev => prev.map(t => t.id === updated.id ? updated : t))
+  function replaceInList(updated: WritingPlan) {
+    setPlans(prev => prev.map(p => p.id === updated.id ? updated : p))
     if (selected?.id === updated.id) setSelected(updated)
   }
 
@@ -499,12 +526,12 @@ export function TopicsClient({ initialTopics, initialTags }: {
         <div className="px-4 py-4 border-b border-zinc-100 dark:border-zinc-800 space-y-3">
           <div className="flex items-center gap-2">
             <Tag className="w-4 h-4 text-indigo-500" />
-            <span className="font-semibold text-sm text-zinc-900 dark:text-zinc-100">选题库</span>
+            <span className="font-semibold text-sm text-zinc-900 dark:text-zinc-100">写作方案</span>
             <div className="ml-auto flex items-center gap-1">
               <button onClick={handleRefresh} disabled={refreshing} className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 disabled:opacity-40">
                 <RefreshCw className={cn('w-3.5 h-3.5', refreshing && 'animate-spin')} />
               </button>
-              <button onClick={() => setAnalyzeOpen(true)} className="text-zinc-400 hover:text-indigo-500 transition-colors" title="分析文章 → 整理选题">
+              <button onClick={() => setAnalyzeOpen(true)} className="text-zinc-400 hover:text-indigo-500 transition-colors" title="分析文章 → 提炼方案">
                 <SendHorizonal className="w-3.5 h-3.5" />
               </button>
               <button onClick={() => setShowNewForm(true)} className="text-zinc-400 hover:text-indigo-500 transition-colors">
@@ -515,7 +542,7 @@ export function TopicsClient({ initialTopics, initialTags }: {
           <input
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
-            placeholder="搜索选题…"
+            placeholder="搜索方案…"
             className="w-full text-xs px-2.5 py-1.5 border border-zinc-200 dark:border-zinc-700 rounded-lg bg-transparent outline-none focus:border-indigo-400 text-zinc-700 dark:text-zinc-300 placeholder:text-zinc-400"
           />
           {availableTags.length > 0 && (
@@ -544,20 +571,20 @@ export function TopicsClient({ initialTopics, initialTags }: {
         </div>
 
         <div className="flex-1 overflow-y-auto py-2 px-2 space-y-1">
-          {visibleTopics.length === 0 ? (
+          {visiblePlans.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-40 text-zinc-400 gap-2">
               <BookMarked className="w-8 h-8 opacity-20" />
-              <p className="text-xs">暂无选题</p>
-              <button onClick={() => setShowNewForm(true)} className="text-xs text-indigo-500 hover:underline">新建选题</button>
+              <p className="text-xs">暂无方案</p>
+              <button onClick={() => setShowNewForm(true)} className="text-xs text-indigo-500 hover:underline">新建方案</button>
             </div>
           ) : (
-            visibleTopics.map(t => {
-              const p = PRIORITY_LABELS[t.priority] ?? PRIORITY_LABELS[3]
-              const isSelected = selected?.id === t.id
+            visiblePlans.map(p => {
+              const pr = PRIORITY_LABELS[p.priority] ?? PRIORITY_LABELS[3]
+              const isSelected = selected?.id === p.id
               return (
                 <div
-                  key={t.id}
-                  onClick={() => handleSelectTopic(t)}
+                  key={p.id}
+                  onClick={() => handleSelectPlan(p)}
                   className={cn(
                     'px-3 py-2.5 rounded-lg cursor-pointer transition-colors border',
                     isSelected
@@ -566,25 +593,25 @@ export function TopicsClient({ initialTopics, initialTags }: {
                   )}
                 >
                   <div className="flex items-center gap-1.5 mb-1">
-                    <span className={cn('text-[9px] px-1.5 py-0.5 rounded font-bold flex-shrink-0', p.cls)}>{p.label}</span>
-                    <span className="text-xs font-medium text-zinc-800 dark:text-zinc-200 truncate flex-1">{t.title}</span>
-                    {t.status === 'archived' && <span className="text-[9px] text-zinc-400 flex-shrink-0">归档</span>}
+                    <span className={cn('text-[9px] px-1.5 py-0.5 rounded font-bold flex-shrink-0', pr.cls)}>{pr.label}</span>
+                    <span className="text-xs font-medium text-zinc-800 dark:text-zinc-200 truncate flex-1">{p.title}</span>
+                    {p.status === 'archived' && <span className="text-[9px] text-zinc-400 flex-shrink-0">归档</span>}
                   </div>
-                  {t.tags.length > 0 && (
+                  {p.tags.length > 0 && (
                     <div className="flex flex-wrap gap-1 mb-1">
-                      {t.tags.slice(0, 3).map(tag => <TagChip key={tag.id} tag={tag} />)}
-                      {t.tags.length > 3 && <span className="text-[10px] text-zinc-400">+{t.tags.length - 3}</span>}
+                      {p.tags.slice(0, 3).map(tag => <TagChip key={tag.id} tag={tag} />)}
+                      {p.tags.length > 3 && <span className="text-[10px] text-zinc-400">+{p.tags.length - 3}</span>}
                     </div>
                   )}
-                  {t.brief && (
-                    <p className="text-[11px] text-zinc-400 dark:text-zinc-500 line-clamp-2 leading-relaxed">{t.brief.slice(0, 100)}</p>
+                  {p.brief && (
+                    <p className="text-[11px] text-zinc-400 dark:text-zinc-500 line-clamp-2 leading-relaxed">{p.brief.slice(0, 100)}</p>
                   )}
                   <div className="flex items-center gap-2 mt-1.5">
-                    {t.source_count > 0 && (
-                      <span className="text-[10px] text-zinc-400"><span className="font-medium text-zinc-600 dark:text-zinc-400">{t.source_count}</span> 条线索</span>
+                    {p.source_count > 0 && (
+                      <span className="text-[10px] text-zinc-400"><span className="font-medium text-zinc-600 dark:text-zinc-400">{p.source_count}</span> 条线索</span>
                     )}
-                    {t.draft_count > 0 && (
-                      <span className="text-[10px] text-zinc-400"><span className="font-medium text-zinc-600 dark:text-zinc-400">{t.draft_count}</span> 篇产出</span>
+                    {p.draft_count > 0 && (
+                      <span className="text-[10px] text-zinc-400"><span className="font-medium text-zinc-600 dark:text-zinc-400">{p.draft_count}</span> 篇产出</span>
                     )}
                   </div>
                 </div>
@@ -654,7 +681,7 @@ export function TopicsClient({ initialTopics, initialTags }: {
                 {/* Tags */}
                 <div className="flex flex-wrap items-center gap-1">
                   {selected.tags.map(tag => (
-                    <TagChip key={tag.id} tag={tag} onRemove={() => handleRemoveTagFromTopic(tag.name)} />
+                    <TagChip key={tag.id} tag={tag} onRemove={() => handleRemoveTagFromPlan(tag.name)} />
                   ))}
                   <input
                     value={tagInput}
@@ -662,7 +689,7 @@ export function TopicsClient({ initialTopics, initialTags }: {
                     onKeyDown={e => {
                       if ((e.key === 'Enter' || e.key === ',') && tagInput.trim()) {
                         e.preventDefault()
-                        handleAddTagToTopic(tagInput.trim())
+                        handleAddTagToPlan(tagInput.trim())
                       }
                     }}
                     placeholder="添加标签…"
@@ -705,7 +732,7 @@ export function TopicsClient({ initialTopics, initialTags }: {
                 <textarea
                   value={briefDraft}
                   onChange={e => setBriefDraft(e.target.value)}
-                  placeholder={`## 调研主题\n\n## 搜索范围\n\n## 提取要求\n\n## 输出格式`}
+                  placeholder={`## 文章模式\n这类文章的固定写法是什么样的。\n例：第一人称，讲一个普通人用某工具做到某件具体事的真实故事，有数字，500字左右。\n\n## 标题公式\n标题的固定结构 + 举例。\n例：「[时间] + [具体动作] + [具体结果]」→「花3周用Claude做了个工具，月入8000」\n\n## 找素材的方法\n- 搜索关键词：\n- 素材来源：（平台/网站）\n- 好素材的判断标准：有什么特征才值得写\n\n## 禁区\n不写什么，避开哪些角度`}
                   className="flex-1 text-sm font-mono bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg px-4 py-3 outline-none focus:border-indigo-400 resize-none text-zinc-800 dark:text-zinc-200 placeholder:text-zinc-300 dark:placeholder:text-zinc-600 leading-relaxed"
                 />
                 <div className="flex items-center gap-2 mt-3 flex-shrink-0">
@@ -783,7 +810,7 @@ export function TopicsClient({ initialTopics, initialTags }: {
                   <div className="flex flex-col items-center justify-center h-40 text-zinc-400 gap-2">
                     <FileText className="w-8 h-8 opacity-20" />
                     <p className="text-xs">暂无产出</p>
-                    <p className="text-[11px] text-zinc-300">从线索创作草稿，或在草稿页关联此选题</p>
+                    <p className="text-[11px] text-zinc-300">从线索创作草稿，或在草稿页关联此方案</p>
                   </div>
                 ) : (
                   <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
@@ -816,7 +843,7 @@ export function TopicsClient({ initialTopics, initialTags }: {
                   <div className="flex items-center justify-center h-40">
                     <Loader2 className="w-6 h-6 animate-spin text-zinc-400" />
                   </div>
-                ) : topicUpdates.length === 0 ? (
+                ) : planUpdates.length === 0 ? (
                   <div className="flex flex-col items-center justify-center h-40 text-zinc-400 gap-2">
                     <RefreshCw className="w-8 h-8 opacity-20" />
                     <p className="text-xs">暂无更新记录</p>
@@ -824,7 +851,7 @@ export function TopicsClient({ initialTopics, initialTags }: {
                   </div>
                 ) : (
                   <div className="space-y-3">
-                    {topicUpdates.map(u => (
+                    {planUpdates.map(u => (
                       <div key={u.id} className="rounded-lg border border-zinc-100 dark:border-zinc-800 p-3 space-y-1.5">
                         <p className="text-[11px] text-zinc-400">
                           {new Date(u.created_at).toLocaleString('zh-CN')}
@@ -856,9 +883,9 @@ export function TopicsClient({ initialTopics, initialTags }: {
       ) : (
         <div className="flex-1 flex flex-col items-center justify-center text-zinc-400 gap-3">
           <BookMarked className="w-12 h-12 opacity-20" />
-          <p className="text-sm">选择一个选题查看详情</p>
+          <p className="text-sm">选择一个方案查看详情</p>
           <button onClick={() => setShowNewForm(true)} className="text-xs text-indigo-500 hover:underline flex items-center gap-1">
-            <Plus className="w-3.5 h-3.5" /> 新建第一个选题
+            <Plus className="w-3.5 h-3.5" /> 新建第一个方案
           </button>
         </div>
       )}
@@ -869,9 +896,9 @@ export function TopicsClient({ initialTopics, initialTags }: {
           <div className="bg-white dark:bg-zinc-900 rounded-xl shadow-xl p-6 w-[520px] space-y-4" onClick={e => e.stopPropagation()}>
             <div className="flex items-center gap-2">
               <SendHorizonal className="w-4 h-4 text-indigo-500" />
-              <h3 className="font-semibold text-zinc-900 dark:text-zinc-100">分析文章 → 整理选题</h3>
+              <h3 className="font-semibold text-zinc-900 dark:text-zinc-100">分析文章 → 提炼方案</h3>
             </div>
-            <p className="text-xs text-zinc-500">Scout 会分析文章，在选题库中查找相似选题，决定更新/跳过/新建，并在"更新历史"记录决策。</p>
+            <p className="text-xs text-zinc-500">Scout 会分析文章，在写作方案库中查找相似方案，决定更新/跳过/新建，并在"更新历史"记录决策。</p>
             <div className="flex gap-2">
               {(['url', 'text'] as const).map(t => (
                 <button
@@ -927,9 +954,24 @@ export function TopicsClient({ initialTopics, initialTags }: {
           <div className="bg-white dark:bg-zinc-900 rounded-xl shadow-xl p-6 w-[560px] space-y-4" onClick={e => e.stopPropagation()}>
             <div className="flex items-center gap-2">
               <Rocket className="w-4 h-4 text-indigo-500" />
-              <h3 className="font-semibold text-zinc-900 dark:text-zinc-100">派发给 Scout Agent</h3>
+              <h3 className="font-semibold text-zinc-900 dark:text-zinc-100">派发给 Editor → 出稿</h3>
             </div>
-            <p className="text-xs text-zinc-500">以下 brief 将作为 Hermes kanban 任务发送给 scout。可在下方编辑后再派发。</p>
+            <p className="text-xs text-zinc-500">以下写作方案指引将发送给 editor。Editor 会读懂方案的角度，自行搜索真实素材，出创作 brief，再交 writer 写稿。可在下方编辑指引后再派发。</p>
+            {dispatchAccounts.length > 0 && (
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-zinc-500 flex-shrink-0">发布账号</span>
+                <select
+                  value={dispatchAccountId}
+                  onChange={e => setDispatchAccountId(e.target.value)}
+                  className="flex-1 text-xs px-2 py-1.5 border border-zinc-200 dark:border-zinc-700 rounded bg-white dark:bg-zinc-900 outline-none focus:border-indigo-400 text-zinc-700 dark:text-zinc-300"
+                >
+                  <option value="">（不指定）</option>
+                  {dispatchAccounts.map(a => (
+                    <option key={a.id} value={a.id}>{a.name}（{a.platform}）</option>
+                  ))}
+                </select>
+              </div>
+            )}
             <textarea
               value={dispatchBrief}
               onChange={e => setDispatchBrief(e.target.value)}
@@ -946,17 +988,17 @@ export function TopicsClient({ initialTopics, initialTags }: {
         </div>
       )}
 
-      {/* ── New topic modal ─────────────────────────────────── */}
+      {/* ── New plan modal ─────────────────────────────────── */}
       {showNewForm && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={() => setShowNewForm(false)}>
           <div className="bg-white dark:bg-zinc-900 rounded-xl shadow-xl p-6 w-96 space-y-4" onClick={e => e.stopPropagation()}>
-            <h3 className="font-semibold text-zinc-900 dark:text-zinc-100">新建选题</h3>
+            <h3 className="font-semibold text-zinc-900 dark:text-zinc-100">新建写作方案</h3>
             <input
               ref={newTitleRef}
               value={newTitle}
               onChange={e => setNewTitle(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') handleCreate(); if (e.key === 'Escape') setShowNewForm(false) }}
-              placeholder="选题名称…"
+              placeholder="方案名称…"
               className="w-full px-3 py-2 border border-zinc-200 dark:border-zinc-700 rounded-lg bg-transparent outline-none focus:border-indigo-400 text-sm"
             />
             <div className="flex items-center gap-2">

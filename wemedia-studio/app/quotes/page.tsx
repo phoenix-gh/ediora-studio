@@ -1,10 +1,10 @@
 import { getQuotes } from '@/lib/api/quotes'
-import { getTopics } from '@/lib/api/content-topics'
+import { getWritingPlans } from '@/lib/api/writing-plans'
 import { QuotesClient } from './QuotesClient'
 
 export const dynamic = 'force-dynamic'
 
 export default async function QuotesPage() {
-  const [quotes, topics] = await Promise.all([getQuotes(), getTopics()])
-  return <QuotesClient initialQuotes={quotes} initialTopics={topics} />
+  const [quotes, plans] = await Promise.all([getQuotes(), getWritingPlans()])
+  return <QuotesClient initialQuotes={quotes} initialPlans={plans} />
 }

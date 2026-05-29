@@ -54,10 +54,20 @@ def test_topic_long_writer_and_illustrator_same_as_full():
     assert topic_steps[2] is FULL_PIPELINE[2]
 
 
-def test_topic_short_has_one_writer_step():
+def test_topic_short_has_writer_then_illustrator():
     steps = get_pipeline("topic_short")
-    assert len(steps) == 1
+    assert len(steps) == 2
     assert steps[0].assignee == "wms_writer"
+    assert steps[1].assignee == "wms_illustrator"
+
+
+def test_topic_short_illustrator_body_is_casual():
+    steps = get_pipeline("topic_short")
+    body = steps[1].body(SAMPLE_CTX)
+    # casual: no strict cover_style JSON block (render_profile_illustrator not used)
+    assert "封面硬约束" not in body
+    assert "baoyu-cover-image" in body
+    assert "image_style" in body
 
 
 def test_topic_short_story_body_contains_sentence_count():

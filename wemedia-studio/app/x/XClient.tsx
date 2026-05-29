@@ -1,9 +1,11 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import {
   Bird, Search, RefreshCw, Loader2, Settings, Trash2, ExternalLink,
   Globe, ListFilter, MessageSquare, Repeat2, Heart, Eye, Pencil, Check, X,
+  SendHorizonal,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
@@ -20,6 +22,7 @@ import {
   createXSubscription, patchXSubscription, deleteXSubscription,
   collectXSubscription, collectAllXSubscriptions,
 } from '@/lib/api/x'
+import { analyzePlan } from '@/lib/api/writing-plans'
 
 const HOURS_OPTIONS = [
   { v: 24,  label: '24h' },
@@ -373,7 +376,23 @@ function SearchPanel() {
 // ── Post card (works for XPost and XSearchPost — shared fields only) ─────────
 
 function PostCard({ post: p }: { post: XPost | XSearchPost }) {
+  const router = useRouter()
+  const [analyzing, setAnalyzing] = useState(false)
   const avatar = p.author_avatar || `https://unavatar.io/x/${p.username}`
+
+  const handleAnalyze = async () => {
+    setAnalyzing(true)
+    try {
+      const res = await analyzePlan({ url: p.url, content: p.content })
+      toast.success('已派发给 Scout', {
+        description: `任务 ${res.task_id}`,
+        action: { label: '查看看板', onClick: () => router.push(res.kanban_url) },
+      })
+    } catch {
+      toast.error('派发失败')
+    } finally { setAnalyzing(false) }
+  }
+
   return (
     <div className="border border-zinc-200 dark:border-zinc-800 rounded-lg px-4 py-3 hover:bg-zinc-50 dark:hover:bg-zinc-900/50 transition-colors">
       <div className="flex items-start gap-3">
@@ -423,6 +442,17 @@ function PostCard({ post: p }: { post: XPost | XSearchPost }) {
             <span className="flex items-center gap-1"><Repeat2 className="w-3 h-3" />{p.reposts.toLocaleString()}</span>
             <span className="flex items-center gap-1"><Heart className="w-3 h-3" />{p.likes.toLocaleString()}</span>
             <span className="flex items-center gap-1"><MessageSquare className="w-3 h-3" />{p.replies.toLocaleString()}</span>
+            <button
+              onClick={handleAnalyze}
+              disabled={analyzing}
+              title="提炼写作方案"
+              className="ml-auto flex items-center gap-1 text-zinc-400 hover:text-indigo-500 disabled:opacity-40 transition-colors"
+            >
+              {analyzing
+                ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                : <SendHorizonal className="w-3.5 h-3.5" />}
+              <span>提炼方案</span>
+            </button>
           </div>
         </div>
       </div>

@@ -239,117 +239,117 @@ async def update_draft(
 
 
 @mcp.tool()
-async def list_content_topics(
+async def list_writing_plans(
     include_archived: bool = False,
 ) -> list[dict]:
     """
-    List all user-managed content topics (选题库) as a flat list.
+    List all user-managed writing plans (写作方案) as a flat list.
 
-    Topics are sorted by priority then created_at.
+    Plans are sorted by priority then created_at.
 
     Args:
-        include_archived: Include archived topics (default False).
+        include_archived: Include archived plans (default False).
 
     Returns a flat list. Each item includes: id, title, brief,
     tags (list of {id, name, color}), priority (1=highest), status,
     source_count, draft_count, created_at.
     """
-    from models import ContentTopic, TopicSource, ArticleDraft, TopicTag, ContentTopicTag
+    from models import WritingPlan, PlanSource, ArticleDraft, PlanTag, WritingPlanTag
     from sqlalchemy import func
 
     async with SessionLocal() as db:
-        q = select(ContentTopic).order_by(ContentTopic.priority, ContentTopic.created_at)
+        q = select(WritingPlan).order_by(WritingPlan.priority, WritingPlan.created_at)
         if not include_archived:
-            q = q.where(ContentTopic.status == "active")
-        topics = (await db.execute(q)).scalars().all()
+            q = q.where(WritingPlan.status == "active")
+        plans = (await db.execute(q)).scalars().all()
 
-        ids = [t.id for t in topics]
+        ids = [p.id for p in plans]
 
         source_counts = dict((await db.execute(
-            select(TopicSource.topic_id, func.count())
-            .where(TopicSource.topic_id.in_(ids))
-            .group_by(TopicSource.topic_id)
+            select(PlanSource.plan_id, func.count())
+            .where(PlanSource.plan_id.in_(ids))
+            .group_by(PlanSource.plan_id)
         )).all()) if ids else {}
 
         draft_counts = dict((await db.execute(
-            select(ArticleDraft.content_topic_id, func.count())
-            .where(ArticleDraft.content_topic_id.in_(ids))
-            .group_by(ArticleDraft.content_topic_id)
+            select(ArticleDraft.writing_plan_id, func.count())
+            .where(ArticleDraft.writing_plan_id.in_(ids))
+            .group_by(ArticleDraft.writing_plan_id)
         )).all()) if ids else {}
 
         tag_rows = (await db.execute(
-            select(ContentTopicTag.topic_id, TopicTag.id, TopicTag.name, TopicTag.color)
-            .join(TopicTag, TopicTag.id == ContentTopicTag.tag_id)
-            .where(ContentTopicTag.topic_id.in_(ids))
+            select(WritingPlanTag.plan_id, PlanTag.id, PlanTag.name, PlanTag.color)
+            .join(PlanTag, PlanTag.id == WritingPlanTag.tag_id)
+            .where(WritingPlanTag.plan_id.in_(ids))
         )).all() if ids else []
-        tags_by_topic: dict[int, list[dict]] = {}
+        tags_by_plan: dict[int, list[dict]] = {}
         for row in tag_rows:
-            tags_by_topic.setdefault(row.topic_id, []).append(
+            tags_by_plan.setdefault(row.plan_id, []).append(
                 {"id": row.id, "name": row.name, "color": row.color}
             )
 
     return [
         {
-            "id": t.id,
-            "title": t.title,
-            "brief": t.brief or "",
-            "tags": tags_by_topic.get(t.id, []),
-            "priority": t.priority,
-            "status": t.status,
-            "source_count": source_counts.get(t.id, 0),
-            "draft_count": draft_counts.get(t.id, 0),
-            "created_at": _fmt_dt(t.created_at),
+            "id": p.id,
+            "title": p.title,
+            "brief": p.brief or "",
+            "tags": tags_by_plan.get(p.id, []),
+            "priority": p.priority,
+            "status": p.status,
+            "source_count": source_counts.get(p.id, 0),
+            "draft_count": draft_counts.get(p.id, 0),
+            "created_at": _fmt_dt(p.created_at),
         }
-        for t in topics
+        for p in plans
     ]
 
 
 @mcp.tool()
-async def get_content_topic(topic_id: int) -> dict:
+async def get_writing_plan(plan_id: int) -> dict:
     """
-    Get a specific content topic with its sources, tags, and update history.
+    Get a specific writing plan (写作方案) with its sources, tags, and update history.
 
     Args:
-        topic_id: Integer ID of the topic (from list_content_topics or search_topics_by_keywords).
+        plan_id: Integer ID of the plan (from list_writing_plans or search_writing_plans).
 
     Returns: id, title, brief, tags, priority, status, created_at,
              sources list, and updates list (most recent first).
-    Raises an error if the topic is not found.
+    Raises an error if the plan is not found.
     """
-    from models import ContentTopic, TopicSource, TopicTag, ContentTopicTag, TopicUpdate
+    from models import WritingPlan, PlanSource, PlanTag, WritingPlanTag, PlanUpdate
 
     async with SessionLocal() as db:
-        topic = await db.get(ContentTopic, topic_id)
-        if topic is None:
-            raise ValueError(f"Topic {topic_id} not found")
+        plan = await db.get(WritingPlan, plan_id)
+        if plan is None:
+            raise ValueError(f"Writing plan {plan_id} not found")
 
         sources = (await db.execute(
-            select(TopicSource)
-            .where(TopicSource.topic_id == topic_id)
-            .order_by(desc(TopicSource.created_at))
+            select(PlanSource)
+            .where(PlanSource.plan_id == plan_id)
+            .order_by(desc(PlanSource.created_at))
         )).scalars().all()
 
         tag_rows = (await db.execute(
-            select(TopicTag)
-            .join(ContentTopicTag, ContentTopicTag.tag_id == TopicTag.id)
-            .where(ContentTopicTag.topic_id == topic_id)
+            select(PlanTag)
+            .join(WritingPlanTag, WritingPlanTag.tag_id == PlanTag.id)
+            .where(WritingPlanTag.plan_id == plan_id)
         )).scalars().all()
 
         updates = (await db.execute(
-            select(TopicUpdate)
-            .where(TopicUpdate.topic_id == topic_id)
-            .order_by(desc(TopicUpdate.created_at))
+            select(PlanUpdate)
+            .where(PlanUpdate.plan_id == plan_id)
+            .order_by(desc(PlanUpdate.created_at))
             .limit(20)
         )).scalars().all()
 
     return {
-        "id": topic.id,
-        "title": topic.title,
-        "brief": topic.brief or "",
+        "id": plan.id,
+        "title": plan.title,
+        "brief": plan.brief or "",
         "tags": [{"id": t.id, "name": t.name, "color": t.color} for t in tag_rows],
-        "priority": topic.priority,
-        "status": topic.status,
-        "created_at": _fmt_dt(topic.created_at),
+        "priority": plan.priority,
+        "status": plan.status,
+        "created_at": _fmt_dt(plan.created_at),
         "sources": [
             {
                 "id": s.id,
@@ -374,43 +374,49 @@ async def get_content_topic(topic_id: int) -> dict:
 
 
 @mcp.tool()
-async def create_content_topic(
+async def create_writing_plan(
     title: str,
     brief: str = "",
     tags: Optional[list[str]] = None,
     priority: int = 3,
 ) -> dict:
     """
-    Create a new content topic in the 选题库.
+    Create a new writing plan (写作方案) in the plan library.
 
     Args:
-        title: Topic name, e.g. "Claude 国内使用教程".
-        brief: Markdown brief describing the content angle and research scope (optional).
+        title: Plan name — describes the *type* of content / repeatable writing
+               pattern, NOT a specific article title.
+               ✅ Good: "非程序员AI工具创业故事"、"普通人副业收入数字拆解"、"工具对比实测横评"
+               ❌ Bad:  "AI压缩产品周期：非程序员用ChatGPT做付费APP案例拆解"（这是文章标题）
+               Rule: remove all specific names/numbers — if the title still makes
+               sense as a category name, it's correct.
+        brief: Markdown brief describing the writing pattern, title formula,
+               material sourcing method, and forbidden zones (optional).
         tags: List of tag names to attach (will be created if they don't exist).
         priority: 1 (highest) to 5 (lowest). Default 3.
 
     Returns: id, title, brief, tags, priority, status, created_at.
     """
-    from models import ContentTopic, TopicTag, ContentTopicTag
+    from models import WritingPlan, PlanTag, WritingPlanTag
     from sqlalchemy import func
 
     _TAG_COLORS = ["#6366f1","#8b5cf6","#ec4899","#f59e0b","#10b981","#3b82f6","#ef4444","#14b8a6"]
 
-    async def _get_or_create_tag(db, name: str) -> TopicTag:
+    async def _get_or_create_tag(db, name: str) -> PlanTag:
         normalized = name.strip().lower()
         existing = (await db.execute(
-            select(TopicTag).where(func.lower(TopicTag.name) == normalized)
+            select(PlanTag).where(func.lower(PlanTag.name) == normalized)
         )).scalar_one_or_none()
         if existing:
             return existing
         color = _TAG_COLORS[sum(ord(c) for c in name) % len(_TAG_COLORS)]
-        tag = TopicTag(name=name.strip(), color=color)
+        tag = PlanTag(name=name.strip(), color=color)
         db.add(tag)
         await db.flush()
         return tag
 
     async with SessionLocal() as db:
-        obj = ContentTopic(
+        obj = WritingPlan(
             title=title,
             brief=brief,
             priority=max(1, min(5, priority)),
@@ -421,15 +427,15 @@ async def create_content_topic(
         for name in (tags or []):
             if name.strip():
                 tag = await _get_or_create_tag(db, name)
-                db.add(ContentTopicTag(topic_id=obj.id, tag_id=tag.id))
+                db.add(WritingPlanTag(plan_id=obj.id, tag_id=tag.id))
 
         await db.commit()
         await db.refresh(obj)
 
         tag_rows = (await db.execute(
-            select(TopicTag)
-            .join(ContentTopicTag, ContentTopicTag.tag_id == TopicTag.id)
-            .where(ContentTopicTag.topic_id == obj.id)
+            select(PlanTag)
+            .join(WritingPlanTag, WritingPlanTag.tag_id == PlanTag.id)
+            .where(WritingPlanTag.plan_id == obj.id)
         )).scalars().all()
 
     return {
@@ -444,43 +450,48 @@ async def create_content_topic(
 
 
 @mcp.tool()
-async def add_topic_source(
-    topic_id: int,
+async def add_plan_source(
+    plan_id: int,
     url: str = "",
     title: str = "",
     note: str = "",
+    content: str = "",
     platform: str = "manual",
 ) -> dict:
     """
-    Add a reference source (线索) to a content topic.
+    Add a reference source (线索) to a writing plan (写作方案).
 
-    Use this to attach a useful link, article, or X post to a topic
+    Use this to attach a useful link, article, or X post to a plan
     as research material. At least one of url or note must be provided.
 
     Args:
-        topic_id: ID of the target topic (from list_content_topics).
+        plan_id: ID of the target plan (from list_writing_plans).
         url: Source URL (optional).
         title: Source title or headline (optional).
         note: Your annotation — e.g. "方法有效，2026-05 验证" (optional).
+        content: Full body text or key excerpts from the source (optional but
+                 recommended — users can read it in the preview panel without
+                 opening the URL).
         platform: Source platform: "x", "github", "wechat", "manual", "self".
 
-    Returns: id, topic_id, url, title, note, platform, created_at.
+    Returns: id, plan_id, url, title, note, content, platform, created_at.
     """
-    from models import ContentTopic, TopicSource
+    from models import WritingPlan, PlanSource
 
     if not url and not note:
         raise ValueError("At least one of url or note must be provided")
 
     async with SessionLocal() as db:
-        topic = await db.get(ContentTopic, topic_id)
-        if topic is None:
-            raise ValueError(f"Topic {topic_id} not found")
+        plan = await db.get(WritingPlan, plan_id)
+        if plan is None:
+            raise ValueError(f"Writing plan {plan_id} not found")
 
-        obj = TopicSource(
-            topic_id=topic_id,
+        obj = PlanSource(
+            plan_id=plan_id,
             url=url,
             title=title,
             note=note,
+            content=content,
             platform=platform,
         )
         db.add(obj)
@@ -489,116 +500,125 @@ async def add_topic_source(
 
     return {
         "id": obj.id,
-        "topic_id": obj.topic_id,
+        "plan_id": obj.plan_id,
         "url": obj.url or "",
         "title": obj.title or "",
         "note": obj.note or "",
+        "content": obj.content or "",
         "platform": obj.platform,
         "created_at": _fmt_dt(obj.created_at),
     }
 
 
 @mcp.tool()
-async def search_topics_by_keywords(keywords: list[str]) -> list[dict]:
+async def search_writing_plans(keywords: list[str]) -> list[dict]:
     """
-    Search existing content topics by keywords (full-text match on title + brief).
+    Search existing writing plans (写作方案) by keywords (full-text match on title + brief).
 
-    Use this as the first step in content-to-topic analysis to find candidate
-    topics before asking the LLM to judge similarity.
+    Use this as the first step in content-to-writing-plan analysis to find candidate
+    plans before asking the LLM to judge similarity.
 
     Args:
         keywords: List of keywords extracted from the source article,
                   e.g. ["AI", "创业", "一人公司"].
 
-    Returns up to 10 matching topics, each with: id, title, brief (first 200 chars), tags.
+    Returns up to 10 matching plans, each with: id, title, brief (first 200 chars), tags.
     Returns empty list if no matches or keywords is empty.
     """
-    from models import ContentTopic, TopicTag, ContentTopicTag
+    from models import WritingPlan, PlanTag, WritingPlanTag
 
     if not keywords:
         return []
 
     async with SessionLocal() as db:
-        topics = (await db.execute(
-            select(ContentTopic).where(ContentTopic.status == "active")
+        plans = (await db.execute(
+            select(WritingPlan).where(WritingPlan.status == "active")
         )).scalars().all()
 
         matched = []
-        for t in topics:
-            haystack = (t.title + " " + (t.brief or "")).lower()
+        for p in plans:
+            haystack = (p.title + " " + (p.brief or "")).lower()
             if any(kw.lower() in haystack for kw in keywords if kw.strip()):
-                matched.append(t)
+                matched.append(p)
         matched = matched[:10]
 
         if not matched:
             return []
 
-        ids = [t.id for t in matched]
+        ids = [p.id for p in matched]
         tag_rows = (await db.execute(
-            select(ContentTopicTag.topic_id, TopicTag.id, TopicTag.name, TopicTag.color)
-            .join(TopicTag, TopicTag.id == ContentTopicTag.tag_id)
-            .where(ContentTopicTag.topic_id.in_(ids))
+            select(WritingPlanTag.plan_id, PlanTag.id, PlanTag.name, PlanTag.color)
+            .join(PlanTag, PlanTag.id == WritingPlanTag.tag_id)
+            .where(WritingPlanTag.plan_id.in_(ids))
         )).all()
-        tags_by_topic: dict[int, list[dict]] = {}
+        tags_by_plan: dict[int, list[dict]] = {}
         for row in tag_rows:
-            tags_by_topic.setdefault(row.topic_id, []).append(
+            tags_by_plan.setdefault(row.plan_id, []).append(
                 {"id": row.id, "name": row.name, "color": row.color}
             )
 
     return [
         {
-            "id": t.id,
-            "title": t.title,
-            "brief": (t.brief or "")[:200],
-            "tags": tags_by_topic.get(t.id, []),
+            "id": p.id,
+            "title": p.title,
+            "brief": (p.brief or "")[:200],
+            "tags": tags_by_plan.get(p.id, []),
         }
-        for t in matched
+        for p in matched
     ]
 
 
 @mcp.tool()
-async def update_content_topic(
-    topic_id: int,
+async def update_writing_plan(
+    plan_id: int,
     title: Optional[str] = None,
     brief: Optional[str] = None,
     tags: Optional[list[str]] = None,
     priority: Optional[int] = None,
 ) -> dict:
     """
-    Update an existing content topic.
+    Update an existing writing plan (写作方案) — brief / title / tags / priority.
+
+    ⚠️  SCOUT-ONLY — Only call this during a content-to-writing-plan analysis task
+    (task body contains "## 任务类型\\ncontent-to-writing-plan").  The editor, writer,
+    and illustrator must NEVER call this tool.  The writing plan library stores
+    *research guidance* (how to find material, what angle to write), not article
+    content.  It may only be refined through the scout's extraction pipeline.
 
     Args:
-        topic_id: ID of the topic to update (from list_content_topics or search_topics_by_keywords).
-        title: New title, or omit to leave unchanged.
+        plan_id: ID of the plan to update (from list_writing_plans or search_writing_plans).
+        title: New title — must describe the *type* of content, not a specific
+               article.  Same naming rule as create_writing_plan (category name,
+               no specific persons/numbers).  Omit to leave unchanged.
         brief: New full markdown brief, or omit to leave unchanged.
         tags: New tag list (full replacement), or omit to leave unchanged.
         priority: New priority 1-5, or omit to leave unchanged.
 
-    Returns: updated topic with id, title, brief, tags, priority, status, updated_at.
-    Raises an error if the topic is not found.
+    Returns: updated plan with id, title, brief, tags, priority, status, updated_at.
+    Raises an error if the plan is not found.
     """
-    from models import ContentTopic, TopicTag, ContentTopicTag
+    from models import WritingPlan, PlanTag, WritingPlanTag
     from sqlalchemy import func, delete
 
     _TAG_COLORS = ["#6366f1","#8b5cf6","#ec4899","#f59e0b","#10b981","#3b82f6","#ef4444","#14b8a6"]
 
-    async def _get_or_create_tag(db, name: str) -> TopicTag:
+    async def _get_or_create_tag(db, name: str) -> PlanTag:
         normalized = name.strip().lower()
         existing = (await db.execute(
-            select(TopicTag).where(func.lower(TopicTag.name) == normalized)
+            select(PlanTag).where(func.lower(PlanTag.name) == normalized)
         )).scalar_one_or_none()
         if existing:
             return existing
         color = _TAG_COLORS[sum(ord(c) for c in name) % len(_TAG_COLORS)]
-        tag = TopicTag(name=name.strip(), color=color)
+        tag = PlanTag(name=name.strip(), color=color)
         db.add(tag)
         await db.flush()
         return tag
 
     async with SessionLocal() as db:
-        obj = await db.get(ContentTopic, topic_id)
+        obj = await db.get(WritingPlan, plan_id)
         if obj is None:
-            raise ValueError(f"Topic {topic_id} not found")
+            raise ValueError(f"Writing plan {plan_id} not found")
 
         if title is not None:
             obj.title = title
@@ -608,19 +628,19 @@ async def update_content_topic(
             obj.priority = max(1, min(5, priority))
 
         if tags is not None:
-            await db.execute(delete(ContentTopicTag).where(ContentTopicTag.topic_id == topic_id))
+            await db.execute(delete(WritingPlanTag).where(WritingPlanTag.plan_id == plan_id))
             for name in tags:
                 if name.strip():
                     tag = await _get_or_create_tag(db, name)
-                    db.add(ContentTopicTag(topic_id=topic_id, tag_id=tag.id))
+                    db.add(WritingPlanTag(plan_id=plan_id, tag_id=tag.id))
 
         await db.commit()
         await db.refresh(obj)
 
         tag_rows = (await db.execute(
-            select(TopicTag)
-            .join(ContentTopicTag, ContentTopicTag.tag_id == TopicTag.id)
-            .where(ContentTopicTag.topic_id == obj.id)
+            select(PlanTag)
+            .join(WritingPlanTag, WritingPlanTag.tag_id == PlanTag.id)
+            .where(WritingPlanTag.plan_id == obj.id)
         )).scalars().all()
 
     return {
@@ -635,36 +655,40 @@ async def update_content_topic(
 
 
 @mcp.tool()
-async def add_topic_update(
-    topic_id: int,
+async def add_plan_update(
+    plan_id: int,
     description: str,
     source_url: str = "",
 ) -> dict:
     """
-    Record a changelog entry for a content topic.
+    Record a changelog entry for a writing plan (写作方案).
 
-    Call this after every content-to-topic action — whether you updated,
+    ⚠️  SCOUT-ONLY — Only call this during a content-to-writing-plan analysis task
+    (task body contains "## 任务类型\\ncontent-to-writing-plan").  The editor, writer,
+    and illustrator must NEVER call this tool.
+
+    Call this after every content-to-writing-plan action — whether you updated,
     created, or skipped. The description should explain what changed or why
     you skipped, so the user can review the decision.
 
     Args:
-        topic_id: ID of the affected topic.
+        plan_id: ID of the affected writing plan.
         description: Human-readable summary of what happened, e.g.
                      "新增角度：产品化路径，补充了 2025 Q1 数据" or
-                     "无新增角度，已有选题覆盖相同切入点，跳过".
+                     "无新增角度，已有方案覆盖相同切入点，跳过".
         source_url: URL of the source article (optional).
 
-    Returns: id, topic_id, description, source_url, created_at.
+    Returns: id, plan_id, description, source_url, created_at.
     """
-    from models import ContentTopic, TopicUpdate
+    from models import WritingPlan, PlanUpdate
 
     async with SessionLocal() as db:
-        topic = await db.get(ContentTopic, topic_id)
-        if topic is None:
-            raise ValueError(f"Topic {topic_id} not found")
+        plan = await db.get(WritingPlan, plan_id)
+        if plan is None:
+            raise ValueError(f"Writing plan {plan_id} not found")
 
-        obj = TopicUpdate(
-            topic_id=topic_id,
+        obj = PlanUpdate(
+            plan_id=plan_id,
             description=description.strip(),
             source_url=source_url.strip(),
         )
@@ -674,7 +698,7 @@ async def add_topic_update(
 
     return {
         "id": obj.id,
-        "topic_id": obj.topic_id,
+        "plan_id": obj.plan_id,
         "description": obj.description,
         "source_url": obj.source_url or "",
         "created_at": _fmt_dt(obj.created_at),
@@ -742,7 +766,7 @@ async def save_quote(
     source: str = "",
     source_url: str = "",
     scene_tags: Optional[list[str]] = None,
-    content_topic_id: Optional[int] = None,
+    writing_plan_id: Optional[int] = None,
 ) -> dict:
     """
     Save a new quote to the 金句库.
@@ -762,7 +786,7 @@ async def save_quote(
                     "twist"     — counter-intuitive or surprising
                     "resonance" — emotionally resonant
                     "warning"   — cautionary or sobering
-        content_topic_id: Associate with a topic from 选题库 (optional).
+        writing_plan_id: Associate with a writing plan from 写作方案 (optional).
 
     Returns: id, text, author, scene_tags, created_at.
     """
@@ -778,7 +802,7 @@ async def save_quote(
             source=source.strip(),
             source_url=source_url.strip(),
             scene_tags=tags,
-            content_topic_id=content_topic_id,
+            writing_plan_id=writing_plan_id,
             platform="agent",
         )
         db.add(obj)
@@ -991,6 +1015,10 @@ async def save_draft(
             pt = await db.get(PipelineTask, pipeline_task_id)
             if pt is not None:
                 pt.draft_id = obj.id
+                # Link the draft back to its writing plan (so it shows in the plan's
+                # drafts tab). The pipeline run carries the plan id from dispatch.
+                if pt.writing_plan_id is not None and obj.writing_plan_id is None:
+                    obj.writing_plan_id = pt.writing_plan_id
                 await db.commit()
 
     return {

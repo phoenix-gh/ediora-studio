@@ -288,9 +288,9 @@ class ArticleSeries(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
 
 
-class ContentTopic(Base):
-    """User-managed content topics (flat, multi-tag)."""
-    __tablename__ = "content_topics"
+class WritingPlan(Base):
+    """User-managed writing plans (flat, multi-tag)."""
+    __tablename__ = "writing_plans"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     title: Mapped[str] = mapped_column(String, nullable=False)
@@ -303,12 +303,12 @@ class ContentTopic(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
 
 
-class TopicSource(Base):
-    """Reference links / clues attached to a ContentTopic."""
-    __tablename__ = "topic_sources"
+class PlanSource(Base):
+    """Reference links / clues attached to a WritingPlan."""
+    __tablename__ = "plan_sources"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    topic_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    plan_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     url: Mapped[str] = mapped_column(String, default="")
     title: Mapped[str] = mapped_column(String, default="")
     content: Mapped[str] = mapped_column(Text, default="")   # body text of the source
@@ -318,9 +318,9 @@ class TopicSource(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
 
 
-class TopicTag(Base):
-    """Tags for grouping content topics (replaces tree hierarchy)."""
-    __tablename__ = "topic_tags"
+class PlanTag(Base):
+    """Tags for grouping writing plans (replaces tree hierarchy)."""
+    __tablename__ = "plan_tags"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String, nullable=False)
@@ -328,20 +328,20 @@ class TopicTag(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
 
 
-class ContentTopicTag(Base):
-    """Many-to-many join between ContentTopic and TopicTag."""
-    __tablename__ = "content_topic_tags"
+class WritingPlanTag(Base):
+    """Many-to-many join between WritingPlan and PlanTag."""
+    __tablename__ = "writing_plan_tags"
 
-    topic_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    plan_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     tag_id: Mapped[int] = mapped_column(Integer, primary_key=True)
 
 
-class TopicUpdate(Base):
-    """Changelog entry written by scout agent when processing a content-to-topic task."""
-    __tablename__ = "topic_updates"
+class PlanUpdate(Base):
+    """Changelog entry written by scout agent when processing a content-to-writing-plan task."""
+    __tablename__ = "plan_updates"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    topic_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    plan_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     source_url: Mapped[str] = mapped_column(Text, default="")
     description: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
@@ -352,7 +352,7 @@ class ArticleDraft(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     topic_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
-    content_topic_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    writing_plan_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     title: Mapped[str] = mapped_column(String, default="")
     content: Mapped[str] = mapped_column(Text, default="")
     status: Mapped[str] = mapped_column(String, default="drafting", index=True)
@@ -375,6 +375,7 @@ class PipelineTask(Base):
     account_id: Mapped[str] = mapped_column(String, nullable=False)
     title: Mapped[str] = mapped_column(String, default="")
     source_url: Mapped[str] = mapped_column(String, default="")
+    writing_plan_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     draft_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     task_ids: Mapped[dict] = mapped_column(JSON, default=dict)  # {"scout": "t_xxx", "editor": "t_xxx", ...}
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
@@ -428,7 +429,7 @@ class Quote(Base):
     source: Mapped[str] = mapped_column(String, default="")
     source_url: Mapped[str] = mapped_column(String, default="")
     scene_tags: Mapped[list] = mapped_column(JSON, default=list)   # opener/closer/argument/twist/resonance/warning
-    content_topic_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    writing_plan_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     platform: Mapped[str] = mapped_column(String, default="manual")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)

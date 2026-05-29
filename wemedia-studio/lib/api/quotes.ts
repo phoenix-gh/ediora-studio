@@ -7,7 +7,7 @@ export interface Quote {
   source: string
   source_url: string
   scene_tags: string[]
-  content_topic_id: number | null
+  writing_plan_id: number | null
   platform: string
   created_at: string
   updated_at: string
@@ -19,7 +19,7 @@ export interface QuoteCreate {
   source?: string
   source_url?: string
   scene_tags?: string[]
-  content_topic_id?: number | null
+  writing_plan_id?: number | null
   platform?: string
 }
 
@@ -29,7 +29,7 @@ export interface QuoteUpdate {
   source?: string
   source_url?: string
   scene_tags?: string[]
-  content_topic_id?: number | null
+  writing_plan_id?: number | null
 }
 
 export const SCENE_TAGS = [

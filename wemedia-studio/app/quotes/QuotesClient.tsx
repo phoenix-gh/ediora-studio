@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState } from 'react'
 import { Quote as QuoteIcon, Plus, Search, Trash2, Pencil, Check, X, Copy, ExternalLink, RefreshCw, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
@@ -10,7 +10,7 @@ import {
   SCENE_TAGS, sceneTagInfo,
   getQuotes, createQuote, updateQuote, deleteQuote,
 } from '@/lib/api/quotes'
-import { ContentTopic, flattenTopics } from '@/lib/api/content-topics'
+import { WritingPlan, flattenTopics } from '@/lib/api/writing-plans'
 
 // ── Scene tag badge ───────────────────────────────────────────────────────────
 
@@ -27,12 +27,12 @@ function SceneTag({ value }: { value: string }) {
 
 interface QuoteCardProps {
   quote: Quote
-  topicMap: Record<number, string>
+  planMap: Record<number, string>
   onEdit: (q: Quote) => void
   onDelete: (q: Quote) => void
 }
 
-function QuoteCard({ quote, topicMap, onEdit, onDelete }: QuoteCardProps) {
+function QuoteCard({ quote, planMap, onEdit, onDelete }: QuoteCardProps) {
   function handleCopy() {
     const text = quote.author ? `"${quote.text}" —— ${quote.author}` : `"${quote.text}"`
     navigator.clipboard.writeText(text)
@@ -68,10 +68,10 @@ function QuoteCard({ quote, topicMap, onEdit, onDelete }: QuoteCardProps) {
         </div>
       )}
 
-      {/* Topic association */}
-      {quote.content_topic_id && topicMap[quote.content_topic_id] && (
+      {/* Plan association */}
+      {quote.writing_plan_id && planMap[quote.writing_plan_id] && (
         <p className="text-[10px] text-zinc-400 mb-2">
-          # {topicMap[quote.content_topic_id]}
+          # {planMap[quote.writing_plan_id]}
         </p>
       )}
 
@@ -95,19 +95,19 @@ function QuoteCard({ quote, topicMap, onEdit, onDelete }: QuoteCardProps) {
 
 interface QuoteFormProps {
   initial?: Quote
-  topics: ContentTopic[]
+  plans: WritingPlan[]
   onSave: (data: QuoteCreate | QuoteUpdate) => Promise<void>
   onCancel: () => void
   saving: boolean
 }
 
-function QuoteForm({ initial, topics, onSave, onCancel, saving }: QuoteFormProps) {
+function QuoteForm({ initial, plans, onSave, onCancel, saving }: QuoteFormProps) {
   const [text, setText] = useState(initial?.text ?? '')
   const [author, setAuthor] = useState(initial?.author ?? '')
   const [source, setSource] = useState(initial?.source ?? '')
   const [sourceUrl, setSourceUrl] = useState(initial?.source_url ?? '')
   const [selectedTags, setSelectedTags] = useState<string[]>(initial?.scene_tags ?? [])
-  const [topicId, setTopicId] = useState<number | null>(initial?.content_topic_id ?? null)
+  const [planId, setPlanId] = useState<number | null>(initial?.writing_plan_id ?? null)
 
   function toggleTag(v: string) {
     setSelectedTags(prev => prev.includes(v) ? prev.filter(t => t !== v) : [...prev, v])
@@ -115,10 +115,10 @@ function QuoteForm({ initial, topics, onSave, onCancel, saving }: QuoteFormProps
 
   async function handleSubmit() {
     if (!text.trim()) return
-    await onSave({ text: text.trim(), author, source, source_url: sourceUrl, scene_tags: selectedTags, content_topic_id: topicId })
+    await onSave({ text: text.trim(), author, source, source_url: sourceUrl, scene_tags: selectedTags, writing_plan_id: planId })
   }
 
-  const flat = flattenTopics(topics)
+  const flat = flattenTopics(plans)
 
   return (
     <div className="space-y-3">
@@ -160,15 +160,15 @@ function QuoteForm({ initial, topics, onSave, onCancel, saving }: QuoteFormProps
         </div>
       </div>
 
-      {/* Topic association */}
+      {/* Plan association */}
       {flat.length > 0 && (
         <select
-          value={topicId ?? ''}
-          onChange={e => setTopicId(e.target.value ? Number(e.target.value) : null)}
+          value={planId ?? ''}
+          onChange={e => setPlanId(e.target.value ? Number(e.target.value) : null)}
           className="w-full px-3 py-2 border border-zinc-200 dark:border-zinc-700 rounded-lg bg-transparent outline-none focus:border-indigo-400 text-xs text-zinc-600 dark:text-zinc-400"
         >
-          <option value="">不关联主题</option>
-          {flat.map(t => <option key={t.id} value={t.id}>{t.title}</option>)}
+          <option value="">不关联写作方案</option>
+          {flat.map(p => <option key={p.id} value={p.id}>{p.title}</option>)}
         </select>
       )}
 
@@ -187,13 +187,13 @@ function QuoteForm({ initial, topics, onSave, onCancel, saving }: QuoteFormProps
 
 export function QuotesClient({
   initialQuotes,
-  initialTopics,
+  initialPlans,
 }: {
   initialQuotes: Quote[]
-  initialTopics: ContentTopic[]
+  initialPlans: WritingPlan[]
 }) {
   const [quotes, setQuotes] = useState<Quote[]>(initialQuotes)
-  const [topics] = useState<ContentTopic[]>(initialTopics)
+  const [plans] = useState<WritingPlan[]>(initialPlans)
   const [search, setSearch] = useState('')
   const [activeTag, setActiveTag] = useState('')
   const [refreshing, setRefreshing] = useState(false)
@@ -203,8 +203,8 @@ export function QuotesClient({
   const [editingQuote, setEditingQuote] = useState<Quote | null>(null)
   const [saving, setSaving] = useState(false)
 
-  const topicMap = Object.fromEntries(
-    flattenTopics(topics).map(t => [t.id, t.title])
+  const planMap = Object.fromEntries(
+    flattenTopics(plans).map(p => [p.id, p.title])
   )
 
   const filtered = quotes.filter(q => {
@@ -337,7 +337,7 @@ export function QuotesClient({
               </p>
               <QuoteForm
                 initial={editingQuote ?? undefined}
-                topics={topics}
+                plans={plans}
                 onSave={editingQuote ? (d => handleUpdate(d as QuoteUpdate)) : (d => handleCreate(d as QuoteCreate))}
                 onCancel={closeForm}
                 saving={saving}
@@ -361,7 +361,7 @@ export function QuotesClient({
                 <div key={q.id} className="break-inside-avoid">
                   <QuoteCard
                     quote={q}
-                    topicMap={topicMap}
+                    planMap={planMap}
                     onEdit={openEdit}
                     onDelete={handleDelete}
                   />

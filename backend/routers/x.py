@@ -194,13 +194,17 @@ def _upsert_post_stmt(db: AsyncSession, sub_id: int, p):
         likes=p.likes, views=p.views,
         author_avatar=p.author_avatar, cover_image=p.cover_image,
         raw_markdown=p.raw_markdown,
-    ).on_conflict_do_update(
+    )
+    stmt = stmt.on_conflict_do_update(
         index_elements=["tweet_id"],
         set_={
-            "replies": p.replies, "reposts": p.reposts,
-            "likes": p.likes, "views": p.views,
-            "author_avatar": p.author_avatar,
-            "cover_image": p.cover_image,
+            "replies": stmt.excluded.replies,
+            "reposts": stmt.excluded.reposts,
+            "likes": stmt.excluded.likes,
+            "views": stmt.excluded.views,
+            "author_avatar": stmt.excluded.author_avatar,
+            "cover_image": stmt.excluded.cover_image,
+            "collected_at": stmt.excluded.collected_at,
         },
     )
     return stmt

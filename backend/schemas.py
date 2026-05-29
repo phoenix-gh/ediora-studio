@@ -248,13 +248,13 @@ class WriterPersonaOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
-# ── ContentTopic ──────────────────────────────────────────────────────────────
+# ── WritingPlan ───────────────────────────────────────────────────────────────
 
-class TopicTagCreate(BaseModel):
+class PlanTagCreate(BaseModel):
     name: str
 
 
-class TopicTagOut(BaseModel):
+class PlanTagOut(BaseModel):
     id: int
     name: str
     color: str
@@ -262,14 +262,14 @@ class TopicTagOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
-class ContentTopicCreate(BaseModel):
+class WritingPlanCreate(BaseModel):
     title: str
     brief: str = ""
     tags: list[str] = []
     priority: int = 3
 
 
-class ContentTopicUpdate(BaseModel):
+class WritingPlanUpdate(BaseModel):
     title: Optional[str] = None
     brief: Optional[str] = None
     tags: Optional[list[str]] = None
@@ -277,8 +277,8 @@ class ContentTopicUpdate(BaseModel):
     status: Optional[str] = None
 
 
-class TopicSourceCreate(BaseModel):
-    topic_id: int
+class PlanSourceCreate(BaseModel):
+    plan_id: int
     url: str = ""
     title: str = ""
     content: str = ""
@@ -287,9 +287,9 @@ class TopicSourceCreate(BaseModel):
     draft_id: Optional[int] = None
 
 
-class TopicSourceOut(BaseModel):
+class PlanSourceOut(BaseModel):
     id: int
-    topic_id: int
+    plan_id: int
     url: str
     title: str
     content: str = ""
@@ -301,7 +301,7 @@ class TopicSourceOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
-class ContentTopicOut(BaseModel):
+class WritingPlanOut(BaseModel):
     id: int
     title: str
     brief: str
@@ -310,8 +310,8 @@ class ContentTopicOut(BaseModel):
     status: str
     created_at: datetime
     updated_at: datetime
-    tags: list[TopicTagOut] = []
-    sources: list[TopicSourceOut] = []
+    tags: list[PlanTagOut] = []
+    sources: list[PlanSourceOut] = []
     source_count: int = 0
     draft_count: int = 0
 
@@ -328,14 +328,18 @@ class ArticleDraftSummary(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class DispatchPlanRequest(BaseModel):
+    account_id: Optional[str] = None
+
+
 class DispatchResponse(BaseModel):
     task_id: str
     kanban_url: str
 
 
-class TopicUpdateOut(BaseModel):
+class PlanUpdateOut(BaseModel):
     id: int
-    topic_id: int
+    plan_id: int
     source_url: str
     description: str
     created_at: datetime
@@ -372,7 +376,7 @@ class ArticleDraftOut(BaseModel):
     persona_id: Optional[int] = None
     series_id: Optional[int] = None
     series_order: int = 0
-    content_topic_id: Optional[int] = None
+    writing_plan_id: Optional[int] = None
     sources: list = []
     version: int = 1
     created_at: Optional[datetime] = None
@@ -389,7 +393,7 @@ class ArticleDraftCreate(BaseModel):
     draft_type: str = "article"
     linked_draft_id: Optional[int] = None
     persona_id: Optional[int] = None
-    content_topic_id: Optional[int] = None
+    writing_plan_id: Optional[int] = None
     sources: list = []
 
 
@@ -408,7 +412,7 @@ class ArticleDraftUpdate(BaseModel):
     persona_id: Optional[int] = None
     series_id: Optional[int] = None
     series_order: Optional[int] = None
-    content_topic_id: Optional[int] = None
+    writing_plan_id: Optional[int] = None
     sources: Optional[list[DraftSourceItem]] = None
 
 
@@ -548,7 +552,7 @@ class QuoteCreate(BaseModel):
     source: str = ""
     source_url: str = ""
     scene_tags: list[str] = []
-    content_topic_id: Optional[int] = None
+    writing_plan_id: Optional[int] = None
     platform: str = "manual"
 
 
@@ -558,7 +562,7 @@ class QuoteUpdate(BaseModel):
     source: Optional[str] = None
     source_url: Optional[str] = None
     scene_tags: Optional[list[str]] = None
-    content_topic_id: Optional[int] = None
+    writing_plan_id: Optional[int] = None
 
 
 class QuoteOut(BaseModel):
@@ -568,7 +572,7 @@ class QuoteOut(BaseModel):
     source: str
     source_url: str
     scene_tags: list[str]
-    content_topic_id: Optional[int] = None
+    writing_plan_id: Optional[int] = None
     platform: str
     created_at: datetime
     updated_at: datetime

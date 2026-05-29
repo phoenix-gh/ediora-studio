@@ -20,7 +20,7 @@ import {
   getDrafts, updateDraft, deleteDraft, createDraft, chatWithDraft,
   getDraftImages, uploadDraftImage, deleteDraftImage,
 } from '@/lib/api/drafts'
-import { ContentTopic, getTopics, flattenTopics, flattenTopicsWithDepth } from '@/lib/api/content-topics'
+import { WritingPlan, getWritingPlans, flattenTopicsWithDepth } from '@/lib/api/writing-plans'
 import { MarkdownEditor, MarkdownEditorHandle } from './MarkdownEditor'
 import { DraftAssetsDialog } from '@/components/features/DraftAssetsDialog'
 import { DraftTaskTimelineDialog } from '@/components/features/DraftTaskTimelineDialog'
@@ -86,12 +86,12 @@ export function DraftsClient({
   initialChatOpen = false,
 }: {
   initialDrafts: Draft[]
-  initialTopics: ContentTopic[]
+  initialTopics: WritingPlan[]
   initialDraftId?: number
   initialChatOpen?: boolean
 }) {
   const [drafts, setDrafts] = useState<Draft[]>(initialDrafts)
-  const [topicList, setTopicList] = useState<ContentTopic[]>(initialTopics)
+  const [topicList, setTopicList] = useState<WritingPlan[]>(initialTopics)
 
   // Group state
   const groups = buildGroups(drafts)
@@ -113,7 +113,7 @@ export function DraftsClient({
   const [editTitle, setEditTitle] = useState(selected?.title ?? '')
   const [editContent, setEditContent] = useState(selected?.content ?? '')
   const [editStatus, setEditStatus] = useState(selected?.status ?? 'drafting')
-  const [editContentTopicId, setEditContentTopicId] = useState<number | null>(selected?.content_topic_id ?? null)
+  const [editWritingPlanId, setEditWritingPlanId] = useState<number | null>(selected?.writing_plan_id ?? null)
   const [editSources, setEditSources] = useState<DraftSource[]>(selected?.sources ?? [])
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -186,7 +186,7 @@ export function DraftsClient({
     setEditTitle(selected.title)
     setEditContent(selected.content)
     setEditStatus(selected.status)
-    setEditContentTopicId(selected.content_topic_id ?? null)
+    setEditWritingPlanId(selected.writing_plan_id ?? null)
     setEditSources(selected.sources ?? [])
     // Restore persisted chat state for this draft
     const saved = loadChatFromStorage(selected.id)
@@ -201,7 +201,7 @@ export function DraftsClient({
     getDraftImages(rootId).then(setImages).catch(() => {}).finally(() => setImagesLoading(false))
   }, [selected?.id])
 
-  useEffect(() => { getTopics().then(t => setTopicList(t)).catch(() => {}) }, [])
+  useEffect(() => { getWritingPlans().then(t => setTopicList(t)).catch(() => {}) }, [])
 
   // Close adapt dropdown on outside click
   useEffect(() => {
@@ -220,7 +220,7 @@ export function DraftsClient({
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [dirty, editTitle, editContent, editStatus, editContentTopicId])
+  }, [dirty, editTitle, editContent, editStatus, editWritingPlanId])
 
   // ── Filtering ──────────────────────────────────────────────────────────────
 
@@ -229,7 +229,7 @@ export function DraftsClient({
     if (filterStatus !== 'all' && root.status !== filterStatus) return false
     if (filterTopicId !== 'all') {
       const tid = filterTopicId === 'none' ? null : Number(filterTopicId)
-      if (root.content_topic_id !== tid) return false
+      if (root.writing_plan_id !== tid) return false
     }
     return true
   })
@@ -278,7 +278,7 @@ export function DraftsClient({
       if (editTitle !== selected.title) body.title = editTitle
       if (editContent !== selected.content) body.content = editContent
       if (editStatus !== selected.status) body.status = editStatus
-      if (editContentTopicId !== (selected.content_topic_id ?? null)) body.content_topic_id = editContentTopicId
+      if (editWritingPlanId !== (selected.writing_plan_id ?? null)) body.writing_plan_id = editWritingPlanId
       if (JSON.stringify(editSources) !== JSON.stringify(selected.sources ?? [])) body.sources = editSources
       const updated = await updateDraft(selected.id, body)
       setDrafts(ds => ds.map(d => d.id === updated.id ? updated : d))
@@ -380,7 +380,7 @@ export function DraftsClient({
         content: articleDraft?.content ?? selected.content ?? '',
         draft_type: targetType,
         linked_draft_id: rootId,
-        content_topic_id: selected.content_topic_id,
+        writing_plan_id: selected.writing_plan_id,
         sources: selected.sources,
       })
       const fresh = await getDrafts()
@@ -522,8 +522,8 @@ export function DraftsClient({
           >
             <option value="all">全部主题</option>
             <option value="none">无主题</option>
-            {flattenTopicsWithDepth(topicList).map(({ topic, label }) => (
-              <option key={topic.id} value={String(topic.id)}>{label}</option>
+            {flattenTopicsWithDepth(topicList).map(({ plan, label }) => (
+              <option key={plan.id} value={String(plan.id)}>{label}</option>
             ))}
           </select>
           <select
@@ -556,7 +556,7 @@ export function DraftsClient({
           ) : (
             filteredGroups.map(group => {
               const isActive = selectedGroup?.root.id === group.root.id
-              const topicName = flattenTopicsWithDepth(topicList).find(({ topic }) => topic.id === group.root.content_topic_id)?.topic.title
+              const topicName = flattenTopicsWithDepth(topicList).find(({ plan }) => plan.id === group.root.writing_plan_id)?.plan.title
               const allInGroup = [group.root, ...group.variants]
               return (
                 <button
@@ -677,14 +677,14 @@ export function DraftsClient({
               </select>
 
               <select
-                value={editContentTopicId ?? ''}
-                onChange={e => { setEditContentTopicId(e.target.value ? Number(e.target.value) : null); setDirty(true) }}
+                value={editWritingPlanId ?? ''}
+                onChange={e => { setEditWritingPlanId(e.target.value ? Number(e.target.value) : null); setDirty(true) }}
                 className="text-xs px-2 py-1 rounded-full border border-zinc-200 dark:border-zinc-700 bg-transparent cursor-pointer focus:outline-none focus:ring-1 focus:ring-indigo-400 text-zinc-600 dark:text-zinc-400 max-w-[160px] truncate"
-                title="关联主题"
+                title="关联写作方案"
               >
-                <option value="">无主题</option>
-                {flattenTopicsWithDepth(topicList).map(({ topic, label }) => (
-                  <option key={topic.id} value={topic.id}>{label}</option>
+                <option value="">无写作方案</option>
+                {flattenTopicsWithDepth(topicList).map(({ plan, label }) => (
+                  <option key={plan.id} value={plan.id}>{label}</option>
                 ))}
               </select>
 
@@ -898,7 +898,7 @@ export function DraftsClient({
         <div className="flex-1 flex flex-col items-center justify-center text-zinc-400 gap-3">
           <BookMarked className="w-12 h-12 opacity-20" />
           <p className="text-sm">选择一篇草稿开始编辑</p>
-          <p className="text-xs text-zinc-300">从选题库线索创作后会自动进入草稿箱</p>
+          <p className="text-xs text-zinc-300">从写作方案线索创作后会自动进入草稿箱</p>
         </div>
       )}
 

@@ -36,7 +36,7 @@ export default async function Dashboard() {
             <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">系统推荐选题</h2>
             <span className="text-xs text-zinc-400">AI 从订阅内容中自动生成</span>
           </div>
-          <Link href="/topics" className="flex items-center gap-1 text-xs text-indigo-500 hover:text-indigo-600 transition-colors">
+          <Link href="/trend-topics" className="flex items-center gap-1 text-xs text-indigo-500 hover:text-indigo-600 transition-colors">
             查看全部 <ArrowRight className="w-3 h-3" />
           </Link>
         </div>
@@ -49,7 +49,7 @@ export default async function Dashboard() {
             {recommended.map(topic => (
               <Link
                 key={topic.id}
-                href={`/topics?id=${topic.id}`}
+                href={`/trend-topics?id=${topic.id}`}
                 className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-4 hover:border-indigo-300 hover:shadow-sm transition-all group"
               >
                 <div className="flex items-start justify-between gap-2 mb-2">

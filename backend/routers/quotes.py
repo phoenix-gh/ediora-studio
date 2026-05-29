@@ -26,7 +26,7 @@ async def list_quotes(
     if tag:
         result = [r for r in result if tag in (r.scene_tags or [])]
     if topic_id:
-        result = [r for r in result if r.content_topic_id == topic_id]
+        result = [r for r in result if r.writing_plan_id == topic_id]
     return result
 
 
