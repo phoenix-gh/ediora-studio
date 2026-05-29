@@ -1,4 +1,5 @@
 import { apiFetch } from './client'
+import { CoverStyle } from './publish-accounts'
 
 export type AgentStatus = 'idle' | 'working' | 'waiting' | 'blocked'
 
@@ -125,7 +126,7 @@ export interface RegenerateCoverIn {
   draft_id: number
   account_id: string
   note?: string
-  cover_style?: Record<string, unknown>
+  cover_style?: CoverStyle
 }
 
 export async function regenerateCover(body: RegenerateCoverIn): Promise<{ task_id: string }> {
