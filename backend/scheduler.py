@@ -293,6 +293,24 @@ async def scheduled_reddit():
         await log("reddit", "error", "Reddit 采集异常", str(e))
 
 
+async def scheduled_ref_collect():
+    """每日：跑所有启用的采集规则，提炼段子入参考文案库。"""
+    from logger import log
+    try:
+        from ref_collector import collect_all
+        async with SessionLocal() as db:
+            result = await collect_all(db)
+        if result["failed"]:
+            await log("materials", "warn",
+                      f"参考文案采集完成，新增 {result['new_materials']} 条",
+                      "; ".join(result["failed"]))
+        else:
+            await log("materials", "ok",
+                      f"参考文案采集完成，新增 {result['new_materials']} 条")
+    except Exception as e:
+        await log("materials", "error", "参考文案采集异常", str(e))
+
+
 def register_jobs(scheduler, cfg):
     collect_min = max(1, int(cfg.get("collect_interval_minutes", 15)))
     github_min  = max(1, int(cfg.get("github_interval_minutes", 1)))
@@ -306,6 +324,7 @@ def register_jobs(scheduler, cfg):
         (scheduled_wechat,              dict(trigger="interval", minutes=15,          id="wechat_collect")),
         (scheduled_x_collect,           dict(trigger="interval", hours=1,             id="x_collect_hourly")),
         (scheduled_reddit,              dict(trigger="interval", minutes=60,          id="reddit_collect")),
+        (scheduled_ref_collect,         dict(trigger="interval", hours=24,            id="ref_collect_daily")),
     ]
     for func, kwargs in jobs:
         scheduler.add_job(func, **kwargs)
