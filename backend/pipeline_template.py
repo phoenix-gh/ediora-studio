@@ -267,6 +267,25 @@ def parse_word_spec(text: str) -> dict | None:
     return None
 
 
+def resolve_effective_design(
+    account_cover: dict | None, account_image: str,
+    plan_cover: dict | None, plan_image: str,
+    task_cover: dict | None = None, task_image: str | None = None,
+) -> tuple[dict, str]:
+    """Merge cover_style / image_style across account < plan < task layers.
+
+    cover_style: per-key overlay — 高层的非空值逐键覆盖低层（空 dict / 空值不动）。
+    image_style: 取 task > plan > account 第一个非空字符串。
+    """
+    cover: dict = dict(account_cover or {})
+    for layer in (plan_cover, task_cover):
+        for k, v in (layer or {}).items():
+            if v not in (None, "", [], {}):
+                cover[k] = v
+    image = next((s for s in (task_image, plan_image, account_image) if s), "")
+    return cover, image
+
+
 def _user_body_md(ctx: RenderCtx) -> str:
     """渲染用户提交的原始素材块（scout 棒用）。"""
     parts: list[str] = []
