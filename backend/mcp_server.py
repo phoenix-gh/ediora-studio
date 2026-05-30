@@ -728,13 +728,15 @@ async def list_quotes(
     Each item includes: id, text, author, source, source_url,
     scene_tags, platform, created_at.
     """
-    from models import Quote
+    from models import RefMaterial
 
     limit = max(1, min(limit, 100))
 
     async with SessionLocal() as db:
         rows = (await db.execute(
-            select(Quote).order_by(desc(Quote.created_at)).limit(500)
+            select(RefMaterial)
+            .where(RefMaterial.platform != "x")
+            .order_by(desc(RefMaterial.created_at)).limit(500)
         )).scalars().all()
 
     result = list(rows)
@@ -790,13 +792,13 @@ async def save_quote(
 
     Returns: id, text, author, scene_tags, created_at.
     """
-    from models import Quote
+    from models import RefMaterial
 
     valid_tags = {"opener", "closer", "argument", "twist", "resonance", "warning"}
     tags = [t for t in (scene_tags or []) if t in valid_tags]
 
     async with SessionLocal() as db:
-        obj = Quote(
+        obj = RefMaterial(
             text=text.strip(),
             author=author.strip(),
             source=source.strip(),
