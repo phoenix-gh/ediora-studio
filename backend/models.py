@@ -1,4 +1,4 @@
-from sqlalchemy import String, Integer, Float, Boolean, Text, DateTime, JSON
+from sqlalchemy import String, Integer, Float, Boolean, Text, DateTime, JSON, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 from datetime import datetime, timezone
 from database import Base
@@ -674,3 +674,69 @@ class RedditPost(Base):
     is_self: Mapped[bool] = mapped_column(Boolean, default=True)
     published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+
+class RefMaterial(Base):
+    """统一参考文案条目：手工金句(platform=manual/agent) + 采集段子(platform=x)。"""
+    __tablename__ = "ref_materials"
+    __table_args__ = (
+        UniqueConstraint("platform", "source_id", name="uq_ref_materials_platform_source"),
+    )
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    platform: Mapped[str] = mapped_column(String, default="manual", index=True)
+    source_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    text_clean: Mapped[str] = mapped_column(Text, default="")
+    author: Mapped[str] = mapped_column(String, default="")
+    handle: Mapped[str] = mapped_column(String, default="")
+    source: Mapped[str] = mapped_column(String, default="")
+    source_url: Mapped[str] = mapped_column(String, default="")
+    cover_image: Mapped[str] = mapped_column(String, default="")
+    likes: Mapped[int] = mapped_column(Integer, default=0)
+    reposts: Mapped[int] = mapped_column(Integer, default=0)
+    replies: Mapped[int] = mapped_column(Integer, default=0)
+    views: Mapped[int] = mapped_column(Integer, default=0)
+    score: Mapped[int] = mapped_column(Integer, default=0, index=True)
+    category: Mapped[str] = mapped_column(String, default="", index=True)
+    scene_tags: Mapped[list] = mapped_column(JSON, default=list)
+    tags: Mapped[list] = mapped_column(JSON, default=list)
+    writing_plan_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    rule_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    status: Mapped[str] = mapped_column(String, default="active", index=True)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+
+
+class RefCollectRule(Base):
+    """采集规则 —— 一条 X Top 搜索 saved query。"""
+    __tablename__ = "ref_collect_rules"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    label: Mapped[str] = mapped_column(String, default="")
+    platform: Mapped[str] = mapped_column(String, default="x")
+    min_faves: Mapped[int] = mapped_column(Integer, default=1500)
+    min_retweets: Mapped[int] = mapped_column(Integer, default=0)
+    lang: Mapped[str] = mapped_column(String, default="zh")
+    days: Mapped[int] = mapped_column(Integer, default=2)
+    exclude_sensitive: Mapped[bool] = mapped_column(Boolean, default=True)
+    extra_terms: Mapped[str] = mapped_column(String, default="")
+    raw_query: Mapped[str] = mapped_column(String, default="")
+    sort: Mapped[str] = mapped_column(String, default="top")
+    max_results: Mapped[int] = mapped_column(Integer, default=100)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    last_collected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_error: Mapped[str] = mapped_column(String, default="")
+    added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, index=True)
+
+
+class RefSeen(Base):
+    """去重账本：已评估的 source_id，避免重复爆款二次过 LLM。"""
+    __tablename__ = "ref_seen"
+    __table_args__ = (
+        UniqueConstraint("platform", "source_id", name="uq_ref_seen_platform_source"),
+    )
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    platform: Mapped[str] = mapped_column(String, default="x")
+    source_id: Mapped[str] = mapped_column(String, nullable=False)
+    verdict: Mapped[str] = mapped_column(String, default="rejected")
+    seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
