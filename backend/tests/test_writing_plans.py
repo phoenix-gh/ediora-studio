@@ -401,3 +401,58 @@ def test_analyze_dispatches_task(client, monkeypatch):
     assert r.status_code == 200
     assert r.json()["task_id"] == "mock-analyze-task-1"
     assert r.json()["kanban_url"] == "/studio"
+
+
+# ── Dispatch: design merge + angle + goal ─────────────────────────────────────
+
+def test_dispatch_merges_plan_design_and_records_goal(client, monkeypatch):
+    import asyncio
+    captured = {"bodies": []}
+
+    async def _mock_create_task(self, *, title, body, assignee, parents=None):
+        captured["bodies"].append(body)
+        return f"t_{assignee}"
+
+    from hermes_kanban_client import HermesKanbanClient
+    monkeypatch.setattr(HermesKanbanClient, "create_task", _mock_create_task)
+
+    from database import SessionLocal
+    from models import PublishAccount, WritingPlan
+
+    async def _seed():
+        async with SessionLocal() as db:
+            db.add(PublishAccount(
+                id="acc1", name="A", platform="wechat",
+                cover_style={"type": "hero", "palette": "warm"},
+                image_style="account-illust",
+            ))
+            db.add(WritingPlan(
+                id=1, title="P", brief="写作模式:100-200字短文案",
+                cover_style={"palette": "cool"}, image_style="",
+            ))
+            await db.commit()
+    asyncio.new_event_loop().run_until_complete(_seed())
+
+    r = client.post("/api/writing-plans/1/dispatch", json={
+        "account_id": "acc1",
+        "angle": "聚焦反差",
+        "draft_type": "article",
+        "cover_style": {"type": "minimal"},
+    })
+    assert r.status_code == 200, r.text
+
+    illustrator_body = captured["bodies"][2]
+    assert '"palette": "cool"' in illustrator_body   # plan 覆盖 account
+    assert '"type": "minimal"' in illustrator_body    # request 覆盖 plan
+    editor_body = captured["bodies"][0]
+    assert "聚焦反差" in editor_body                    # angle 注入
+
+    async def _check_goal():
+        from sqlalchemy import select
+        from models import PipelineTask
+        async with SessionLocal() as db:
+            pt = (await db.execute(select(PipelineTask))).scalars().first()
+            return pt.goal
+    goal = asyncio.new_event_loop().run_until_complete(_check_goal())
+    assert goal["angle"] == "聚焦反差"
+    assert goal["draft_type"] == "article"

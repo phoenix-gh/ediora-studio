@@ -303,8 +303,20 @@ async def dispatch_plan(plan_id: int, body: DispatchPlanRequest, db: AsyncSessio
     await db.commit()
     await db.refresh(pt)
 
-    from pipeline_template import render_profile_editor, parse_word_spec, FULL_PIPELINE
+    from pipeline_template import (
+        render_profile_editor, parse_word_spec, FULL_PIPELINE, resolve_effective_design,
+    )
     from hermes_kanban_client import HermesKanbanClient, HermesKanbanError
+
+    # 设计字段三层合并：账号默认 < 写作方案覆盖 < 本次 dispatch 临时覆盖。
+    eff_cover, eff_image = resolve_effective_design(
+        account.cover_style if account else {}, account.image_style if account else "",
+        obj.cover_style, obj.image_style,
+        body.cover_style, body.image_style,
+    )
+    if profile:
+        profile["cover_style"] = eff_cover
+        profile["image_style"] = eff_image
 
     # 写作方案的「写作模式」可能规定字数（如 100-200 字短文案）。解析出来，
     # 既喂给 writer（覆盖账号 word_range），也让 editor 的 brief 对齐。
@@ -326,6 +338,12 @@ async def dispatch_plan(plan_id: int, body: DispatchPlanRequest, db: AsyncSessio
     if profile:
         editor_body_parts.append(render_profile_editor(profile))
         editor_body_parts.append("")
+    if body.angle:
+        editor_body_parts.extend([
+            "## 本次角度（用户指定，直接用，不要重新推导）",
+            body.angle,
+            "",
+        ])
     editor_body_parts.extend([
         "## 写作模式（来自写作方案）",
         obj.brief,
@@ -364,6 +382,7 @@ async def dispatch_plan(plan_id: int, body: DispatchPlanRequest, db: AsyncSessio
         "platform": platform_str,
         "pipeline_task_id": pt.id,
         "word_spec": word_spec,
+        "draft_type": body.draft_type,
     }
 
     try:
@@ -392,6 +411,7 @@ async def dispatch_plan(plan_id: int, body: DispatchPlanRequest, db: AsyncSessio
         raise HTTPException(502, f"Hermes 不可用: {e}")
 
     pt.task_ids = {"editor": editor_id, "writer": writer_id, "illustrator": illus_id}
+    pt.goal = {"angle": body.angle or "", "draft_type": body.draft_type}
     await db.commit()
 
     return DispatchResponse(task_id=editor_id, kanban_url="/studio")
