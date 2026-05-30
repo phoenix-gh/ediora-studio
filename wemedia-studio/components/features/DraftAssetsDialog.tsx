@@ -14,7 +14,7 @@ import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
 import { DraftImage, DraftSource } from "@/lib/api/drafts"
 import { CoverStyle, listPublishAccounts, PublishAccount } from "@/lib/api/publish-accounts"
-import { regenerateCover } from "@/lib/api/studio"
+import { regenerateCover, illustrateBody } from "@/lib/api/studio"
 import { CoverStyleEditor, buildCoverStyleFromEditor } from "@/components/features/CoverStyleEditor"
 
 type Tab = "sources" | "images"
@@ -70,16 +70,22 @@ export function DraftAssetsDialog({
   const [coverMotifsText, setCoverMotifsText] = useState("")
   const [coverNegativeText, setCoverNegativeText] = useState("")
 
+  // Inline illustration state
+  const [illusOpen, setIllusOpen] = useState(false)
+  const [illusMax, setIllusMax] = useState(4)
+  const [illusNote, setIllusNote] = useState("")
+  const [illusBusy, setIllusBusy] = useState(false)
+
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => { if (open) setTab(initialTab) }, [open, initialTab])
 
   useEffect(() => {
-    if (!regenOpen || accounts) return
+    if ((!regenOpen && !illusOpen) || accounts) return
     listPublishAccounts()
       .then(list => setAccounts(list.filter(a => a.is_active)))
       .catch(() => toast.error("加载发布账号失败"))
-  }, [regenOpen, accounts])
+  }, [regenOpen, illusOpen, accounts])
 
   useEffect(() => {
     if (!accountId || !accounts) return
@@ -131,6 +137,27 @@ export function DraftAssetsDialog({
       toast.error(e instanceof Error ? e.message : "派单失败")
     } finally {
       setRegenBusy(false)
+    }
+  }
+
+  async function handleIllustrate() {
+    if (!accountId) { toast.error("请选择发布账号"); return }
+    setIllusBusy(true)
+    try {
+      const res = await illustrateBody({
+        draft_id: draftId,
+        account_id: accountId,
+        max_images: illusMax,
+        note: illusNote || undefined,
+      })
+      toast.success(`已派 illustrator 正文配图 · ${res.task_id}`)
+      setIllusOpen(false)
+      setIllusNote("")
+      setTimeout(onRefreshImages, 5000)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "派单失败")
+    } finally {
+      setIllusBusy(false)
     }
   }
 
@@ -231,6 +258,13 @@ export function DraftAssetsDialog({
                     <Sparkles className="w-3 h-3" />
                     {cover ? "重生成封面" : "AI 生成封面"}
                   </button>
+                  <button
+                    onClick={() => setIllusOpen(v => !v)}
+                    className="flex items-center gap-1 text-xs text-violet-600 hover:text-violet-700 dark:text-violet-400 dark:hover:text-violet-300 transition-colors"
+                  >
+                    <Sparkles className="w-3 h-3" />
+                    自动配图
+                  </button>
                 </div>
 
                 {previewImg ? (
@@ -314,6 +348,49 @@ export function DraftAssetsDialog({
                       <Button size="sm" onClick={handleRegen} disabled={regenBusy || !accountId}>
                         {regenBusy && <Loader2 className="w-3 h-3 animate-spin mr-1" />}
                         派单
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
+                {illusOpen && (
+                  <div className="mt-2 p-3 border border-zinc-200 dark:border-zinc-800 rounded-md bg-zinc-50 dark:bg-zinc-900 space-y-2">
+                    <div className="text-xs font-medium text-zinc-700 dark:text-zinc-300">
+                      让 illustrator 分析章节，给正文插图（重跑会先清掉上一轮自动插图）
+                    </div>
+                    <div>
+                      <div className="text-xs font-medium text-zinc-500 mb-1.5">发布账号</div>
+                      <select
+                        value={accountId ?? ""}
+                        onChange={e => setAccountId(e.target.value || null)}
+                        className="w-full text-xs px-2 py-1.5 border border-zinc-200 dark:border-zinc-700 rounded bg-white dark:bg-zinc-950 outline-none focus:border-violet-400 text-zinc-700 dark:text-zinc-300"
+                      >
+                        <option value="">（选择账号）</option>
+                        {(accounts ?? []).map(a => (
+                          <option key={a.id} value={a.id}>{a.name}（{a.platform}）</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-zinc-500">最多插图</span>
+                      <input
+                        type="number" min={1} max={12} value={illusMax}
+                        onChange={e => setIllusMax(Math.max(1, Math.min(12, Number(e.target.value) || 1)))}
+                        className="w-16 text-xs px-2 py-1 border border-zinc-200 dark:border-zinc-700 rounded bg-white dark:bg-zinc-950 outline-none focus:border-violet-400"
+                      />
+                      <span className="text-[10px] text-zinc-400">张（护栏，agent 在此上限内按内容决定）</span>
+                    </div>
+                    <Input
+                      placeholder="额外指令（可选），比如「偏插画、少用照片」"
+                      value={illusNote}
+                      onChange={e => setIllusNote(e.target.value)}
+                      className="h-8 text-xs"
+                    />
+                    <div className="flex justify-end gap-2">
+                      <Button variant="outline" size="sm" onClick={() => setIllusOpen(false)} disabled={illusBusy}>取消</Button>
+                      <Button size="sm" onClick={handleIllustrate} disabled={illusBusy || !accountId}>
+                        {illusBusy && <Loader2 className="w-3 h-3 animate-spin mr-1" />}
+                        开始配图
                       </Button>
                     </div>
                   </div>
