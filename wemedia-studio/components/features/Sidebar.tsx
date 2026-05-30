@@ -30,7 +30,7 @@ const sections: NavSection[] = [
     items: [
       { href: '/drafts',       label: '草稿箱',   icon: BookMarked },
       { href: '/writing-plans', label: '写作方案', icon: Tag },
-      { href: '/quotes',       label: '金句库',   icon: Quote },
+      { href: '/materials',    label: '参考文案库', icon: Quote },
       { href: '/trend-topics', label: '热点选题', icon: Lightbulb },
     ],
   },
