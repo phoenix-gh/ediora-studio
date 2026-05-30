@@ -116,3 +116,11 @@ DO $$ BEGIN
 END $$
 """))
         # plan_updates: created by Base.metadata.create_all above (no raw DDL needed)
+
+    # One-off: migrate legacy quotes into unified ref_materials (idempotent)
+    try:
+        from ref_migrate import migrate_quotes_to_materials
+        async with SessionLocal() as db:
+            await migrate_quotes_to_materials(db)
+    except Exception as e:
+        print(f"[init_db] quotes→materials migration skipped: {e}")
