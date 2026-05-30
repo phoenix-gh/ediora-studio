@@ -299,6 +299,8 @@ class WritingPlan(Base):
     parent_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)  # kept, unused after migration
     priority: Mapped[int] = mapped_column(Integer, default=3)   # 1=highest 5=lowest
     status: Mapped[str] = mapped_column(String, default="active", index=True)  # active/archived
+    cover_style: Mapped[dict] = mapped_column(JSON, default=dict)  # 覆盖账号默认封面风格(空=继承)
+    image_style: Mapped[str] = mapped_column(Text, default="")     # 覆盖账号默认插图风格(空=继承)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
 
@@ -378,6 +380,7 @@ class PipelineTask(Base):
     writing_plan_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     draft_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     task_ids: Mapped[dict] = mapped_column(JSON, default=dict)  # {"scout": "t_xxx", "editor": "t_xxx", ...}
+    goal: Mapped[dict] = mapped_column(JSON, default=dict)      # {angle, draft_type} — dispatch 时拍板的本次目标
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
 
