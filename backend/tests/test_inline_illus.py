@@ -24,3 +24,22 @@ def test_keeps_handwritten_images():
 
 def test_empty():
     assert strip_inline_illus("") == ""
+
+
+def test_illustrate_body_pipeline_registered():
+    from pipeline_template import get_pipeline
+    steps = get_pipeline("illustrate_body")
+    assert len(steps) == 1
+    assert steps[0].assignee == "wms_illustrator"
+
+
+def test_illustrate_body_body_has_guardrail_marker_and_style():
+    from pipeline_template import get_pipeline
+    step = get_pipeline("illustrate_body")[0]
+    ctx = {"draft_id": 7, "account_id": "a",
+           "account_profile": {"image_style": "扁平插画"}, "max_images": 3, "note": ""}
+    body = step.body(ctx)
+    assert "≤ 3 个" in body
+    assert "<!-- wms-illus -->" in body
+    assert "扁平插画" in body
+    assert "draft #7" in step.title(ctx)

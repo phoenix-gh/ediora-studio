@@ -641,12 +641,55 @@ pipeline_task_id: {c['pipeline_task_id']}
 ]
 
 
+# ── illustrate_body：正文配图，用户在草稿箱手动触发的单棒 ──────────────
+# 服务端在派发前已用 strip_inline_illus 清掉上一轮自动插图，agent 在干净正文上插新图。
+def _inline_illus_note_md(c: RenderCtx) -> str:
+    return f"5. 用户备注（必读）：{c['note']}\n" if c.get("note") else ""
+
+
+INLINE_ILLUS_PIPELINE: list[PipelineStep] = [
+    PipelineStep(
+        role="illustrator",
+        assignee="wms_illustrator",
+        title=lambda c: f"正文配图：draft #{c['draft_id']}",
+        body=lambda c: f"""flow: illustrate_body
+draft_id: {c['draft_id']}
+account_id: {c['account_id']}
+
+## 视觉约束
+- image_style: {c['account_profile'].get('image_style') or '（未填，自由发挥）'}
+
+## 这棒任务（illustrator · 正文配图，单棒交付）
+`get_draft({c['draft_id']})` 读正文（系统已清掉上一轮自动插图，正文是干净的）。
+
+1. 分析正文的 H2 小节 / 段落结构，在**小节边界**挑 **≤ {c['max_images']} 个**插图点：
+   - 只在内容值得配图的小节配；短小节、过渡段可不配；不要为凑数硬配。
+   - 插图点落在小节之间，**绝不插在句子或段落中间**。
+2. 每个插图点：按 `image_style` + 该小节主题，调 `baoyu-cover-image` 技能生成**内容插图**：
+   - **不套封面 cover_style 模板、不放标题文字**；aspect_ratio 默认 16:9；以内容相关性与视觉吸引力为先。
+   - 生成失败就**跳过该点继续**，不要整体中断。
+   - 得到本地路径后 `upload_image_from_path(path=<本地路径>, filename_hint='illus.png', draft_id={c['draft_id']})` 拿 `hosted_url`。
+3. 组装新正文：每张图在选定边界插入，**必须逐字裹注释壳**（用于幂等重跑）：
+
+<!-- wms-illus -->
+![<一句话 alt，描述图意>](<hosted_url>)
+<!-- /wms-illus -->
+
+4. **一次** `update_draft(draft_id={c['draft_id']}, content=<带配图的完整新正文>)`（不要多次 patch）。
+{_inline_illus_note_md(c)}一张都没成才 `kanban_block(reason='正文配图失败: <err>')`。
+完成：`kanban_complete(summary='正文配图 N 张', metadata={{"draft_id": {c['draft_id']}, "image_count": N}})`
+""".strip(),
+    ),
+]
+
+
 PIPELINES: dict[str, list[PipelineStep]] = {
     "full": FULL_PIPELINE,
     "cover_only": COVER_ONLY_PIPELINE,
     "rewrite_only": REWRITE_ONLY_PIPELINE,
     "topic_long": TOPIC_LONG_PIPELINE,
     "topic_short": TOPIC_SHORT_PIPELINE,
+    "illustrate_body": INLINE_ILLUS_PIPELINE,
 }
 
 
