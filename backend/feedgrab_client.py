@@ -40,6 +40,7 @@ class ParsedPost:
     author_avatar: str = ""    # profile image URL from feedgrab's _raw_result
     cover_image: str = ""      # first attached image (tweets with photos)
     raw_markdown: str = ""
+    possibly_sensitive: bool = False
 
 
 def _parse_created_at(raw) -> datetime:
@@ -144,6 +145,7 @@ def _tweet_dict_to_parsed_post(d: dict) -> Optional[ParsedPost]:
         author_avatar=author_avatar,
         cover_image=cover_image,
         raw_markdown=raw_markdown,
+        possibly_sensitive=bool(d.get("possibly_sensitive", False)),
     )
 
 
@@ -153,6 +155,10 @@ import asyncio  # noqa: E402
 import os  # noqa: E402
 import re  # noqa: E402
 from pathlib import Path  # noqa: E402
+from datetime import date as _date, timedelta as _timedelta  # noqa: E402
+
+from feedgrab.fetchers.twitter_cookies import load_twitter_cookies  # noqa: E402
+from feedgrab.fetchers.twitter_keyword_search import search_twitter_keyword  # noqa: E402
 
 
 _PROFILE_RE = re.compile(r"(?:x\.com|twitter\.com)/([a-zA-Z0-9_]{1,15})(?:/|$)")
@@ -407,3 +413,59 @@ def auth_status() -> dict:
         "ready": False,
         "hint": f"未登录。请运行：feedgrab login twitter（cookies 应在 {data_dir}）",
     }
+
+
+# ─── Top search (reference-library harvest) ──────────────────────────────────
+
+def _build_top_query(*, min_faves: int, min_retweets: int, lang: str,
+                     days: int, extra_terms: str) -> str:
+    parts: list[str] = []
+    if extra_terms.strip():
+        parts.append(extra_terms.strip())
+    if min_faves > 0:
+        parts.append(f"min_faves:{min_faves}")
+    if min_retweets > 0:
+        parts.append(f"min_retweets:{min_retweets}")
+    if lang:
+        parts.append(f"lang:{lang}")
+    parts += ["-filter:replies", "-filter:links", "-filter:retweets"]
+    if days > 0:
+        since = (_date.today() - _timedelta(days=days)).isoformat()
+        parts.append(f"since:{since}")
+    return " ".join(parts)
+
+
+def _fetch_search_top_raw(query: str, limit: int, sort: str) -> list[dict]:
+    # load_twitter_cookies / search_twitter_keyword 为模块级名，便于测试 patch
+    cookies = load_twitter_cookies()
+    if not (cookies.get("auth_token") and cookies.get("ct0")):
+        raise RuntimeError("X 未登录 — 请在 backend 工作目录运行：feedgrab login twitter")
+    loop = asyncio.new_event_loop()
+    try:
+        result = loop.run_until_complete(search_twitter_keyword(
+            keyword=query, raw=True, sort=sort, max_results=limit,
+            save_tweets=False, skip_summary=True,
+        ))
+    finally:
+        loop.close()
+    return list(result.get("tweets") or [])
+
+
+async def search_top(raw_query: str = "", *, min_faves: int = 0, min_retweets: int = 0,
+                     lang: str = "", days: int = 1, extra_terms: str = "",
+                     sort: str = "top", limit: int = 100) -> list[ParsedPost]:
+    """X Top 搜索（互动度排序）。raw_query 非空时原样用作 operator-only 查询；
+    否则用结构化参数构建一条 operator 查询。两路都走 raw=True。"""
+    query = raw_query.strip() or _build_top_query(
+        min_faves=min_faves, min_retweets=min_retweets, lang=lang,
+        days=days, extra_terms=extra_terms,
+    )
+    raw = await asyncio.to_thread(_fetch_search_top_raw, query, limit, sort)
+    out: list[ParsedPost] = []
+    for d in raw:
+        if isinstance(d, dict):
+            p = _tweet_dict_to_parsed_post(d)
+            if p:
+                out.append(p)
+    return out
+
