@@ -5,7 +5,7 @@ import { marked } from 'marked'
 import {
   X, Copy, ExternalLink, Folder, GitBranch, Radar, Pencil, FileEdit,
   Clock, PlayCircle, CheckCircle2, AlertTriangle, ChevronRight, Unlock, Loader2, CheckSquare, Trash2,
-  Terminal, Coins,
+  Terminal, Coins, MessageSquare,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
@@ -13,6 +13,7 @@ import {
   type TaskDetail, type TaskComment, type TaskUsage,
 } from '@/lib/api/studio'
 import { cn } from '@/lib/utils'
+import { RetroTerminalDialog } from '@/components/features/RetroTerminalDialog'
 
 /* ── role & status mapping (mirror StudioClient) ──────────────────────── */
 
@@ -20,6 +21,12 @@ const ASSIGNEE_META: Record<string, { icon: React.ElementType; label: string; su
   wms_scout:  { icon: Radar,      label: 'SCOUT',  sub: '信号探子', bg: 'bg-amber-500',   text: 'text-amber-700 dark:text-amber-400',   soft: 'bg-amber-50 dark:bg-amber-950/40' },
   wms_editor: { icon: Pencil,     label: 'EDITOR', sub: '策划编辑', bg: 'bg-indigo-500',  text: 'text-indigo-700 dark:text-indigo-400', soft: 'bg-indigo-50 dark:bg-indigo-950/40' },
   wms_writer: { icon: FileEdit,   label: 'WRITER', sub: '撰稿',     bg: 'bg-emerald-500', text: 'text-emerald-700 dark:text-emerald-400', soft: 'bg-emerald-50 dark:bg-emerald-950/40' },
+}
+
+// 复盘对话用的 agent 显示名（覆盖全部 6 个 profile；ASSIGNEE_META 只有 3 个）
+const RETRO_LABEL: Record<string, string> = {
+  wms_scout: '信号探子', wms_editor: '策划编辑', wms_writer: '撰稿人',
+  wms_short_writer: '短稿撰稿', wms_illustrator: '封面设计师', wms_critic: '终审编辑',
 }
 
 const STATUS_META: Record<string, { label: string; chip: string; icon: React.ElementType }> = {
@@ -103,6 +110,7 @@ export function TaskDrawer({
   const [error, setError] = useState<string | null>(null)
   const [actionBusy, setActionBusy] = useState<null | 'unblock' | 'complete' | 'delete'>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
+  const [retroOpen, setRetroOpen] = useState(false)
 
   async function handleUnblock() {
     if (!taskId) return
@@ -184,6 +192,13 @@ export function TaskDrawer({
 
   if (!open) return null
 
+  const assignee = detail?.task.assignee ?? ''
+  const retroLabel = RETRO_LABEL[assignee] ?? assignee
+  const canRetro = !!detail && !!assignee && (
+    (detail.runs?.length ?? 0) > 0 ||
+    ['running', 'review', 'blocked', 'done', 'archived'].includes(detail.task.status)
+  )
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       {/* backdrop */}
@@ -239,6 +254,16 @@ export function TaskDrawer({
                 </button>
               </>
             )}
+            {canRetro && (
+              <button
+                onClick={() => setRetroOpen(true)}
+                className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded-md bg-violet-50 text-violet-700 hover:bg-violet-100 dark:bg-violet-950/40 dark:text-violet-300 dark:hover:bg-violet-950/70"
+                title="恢复该 agent 执行此任务的会话，跟它复盘这次做得怎么样"
+              >
+                <MessageSquare className="w-3.5 h-3.5" />
+                复盘
+              </button>
+            )}
             {detail && (
               <button
                 onClick={handleDelete}
@@ -258,6 +283,16 @@ export function TaskDrawer({
             </button>
           </div>
         </header>
+
+        {taskId && (
+          <RetroTerminalDialog
+            open={retroOpen}
+            onClose={() => setRetroOpen(false)}
+            taskId={taskId}
+            profile={assignee}
+            agentLabel={retroLabel}
+          />
+        )}
 
         {/* body */}
         <div ref={scrollRef} className="flex-1 overflow-y-auto">
