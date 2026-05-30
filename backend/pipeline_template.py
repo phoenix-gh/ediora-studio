@@ -286,6 +286,18 @@ def resolve_effective_design(
     return cover, image
 
 
+_INLINE_ILLUS_RE = re.compile(r"<!-- wms-illus -->.*?<!-- /wms-illus -->", re.S)
+
+
+def strip_inline_illus(md: str) -> str:
+    """剥掉所有 <!-- wms-illus -->...<!-- /wms-illus --> 块（系统自动插入的正文配图），
+    折叠残留空行。无标记时原样返回（保留末尾换行等）。"""
+    if not md or "<!-- wms-illus -->" not in md:
+        return md
+    out = _INLINE_ILLUS_RE.sub("", md)
+    return re.sub(r"\n{3,}", "\n\n", out).strip()
+
+
 def _user_body_md(ctx: RenderCtx) -> str:
     """渲染用户提交的原始素材块（scout 棒用）。"""
     parts: list[str] = []
