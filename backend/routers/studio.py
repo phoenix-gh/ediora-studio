@@ -483,6 +483,75 @@ async def regenerate_cover(payload: RegenerateCoverIn):
     return EnqueueOut(task_id=task_id)
 
 
+class IllustrateBodyIn(BaseModel):
+    draft_id: int
+    account_id: str
+    max_images: int = 4
+    note: str = ""
+    image_style: str | None = None
+
+
+@router.post("/illustrate-body", response_model=EnqueueOut)
+async def illustrate_body(payload: IllustrateBodyIn):
+    """Spawn a wms_illustrator task to analyze a draft's sections and insert
+    inline illustrations. Idempotent: strips previously auto-inserted images
+    (wms-illus marked) from the body before dispatching."""
+    if not payload.account_id.strip():
+        raise HTTPException(400, "account_id is required")
+    if payload.draft_id <= 0:
+        raise HTTPException(400, "draft_id is required")
+
+    from database import SessionLocal
+    from models import ArticleDraft, PipelineTask, PublishAccount, WritingPlan
+    from pipeline_template import get_pipeline, strip_inline_illus, resolve_effective_design
+    from sqlalchemy import select as sa_select
+
+    async with SessionLocal() as db:
+        draft = await db.get(ArticleDraft, payload.draft_id)
+        if draft is None:
+            raise HTTPException(404, f"draft #{payload.draft_id} not found")
+        acc = await db.get(PublishAccount, payload.account_id)
+        if acc is None:
+            raise HTTPException(400, f"account '{payload.account_id}' not found")
+        plan = await db.get(WritingPlan, draft.writing_plan_id) if draft.writing_plan_id else None
+        res = await db.execute(
+            sa_select(PipelineTask).where(PipelineTask.draft_id == payload.draft_id).limit(1)
+        )
+        pt = res.scalar_one_or_none()
+
+        # 幂等：派发前先剥旧块、存回干净正文
+        draft.content = strip_inline_illus(draft.content or "")
+        await db.commit()
+
+    _, eff_image = resolve_effective_design(
+        acc.cover_style or {}, acc.image_style,
+        (plan.cover_style if plan else {}) or {}, (plan.image_style if plan else "") or "",
+        None, payload.image_style,
+    )
+
+    parent_task_id: Optional[str] = None
+    if pt is not None:
+        ids = pt.task_ids or {}
+        parent_task_id = ids.get("writer") or ids.get("editor")
+
+    ctx = {
+        "draft_id": payload.draft_id,
+        "account_id": payload.account_id,
+        "account_profile": {"name": acc.name, "platform": acc.platform, "image_style": eff_image},
+        "max_images": payload.max_images,
+        "note": payload.note or "",
+    }
+    step = get_pipeline("illustrate_body")[0]
+    env = {**os.environ, "HERMES_KANBAN_BOARD": _KANBAN_BOARD}
+    task_id = await _kanban_create(
+        title=step.title(ctx), assignee=step.assignee, body=step.body(ctx),
+        parent=parent_task_id, env=env,
+    )
+    await _append_pipeline_extra(payload.draft_id, "illustrator", task_id)
+    _cache["data"] = None
+    return EnqueueOut(task_id=task_id)
+
+
 class RewriteDraftIn(BaseModel):
     draft_id: int
     note: str = ""
