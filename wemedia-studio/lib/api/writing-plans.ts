@@ -1,4 +1,5 @@
 import { apiFetch } from './client'
+import { CoverStyle } from './publish-accounts'
 
 export interface PlanTag {
   id: number
@@ -27,6 +28,8 @@ export interface WritingPlan {
   status: string
   created_at: string
   updated_at: string
+  cover_style?: CoverStyle
+  image_style?: string
   tags: PlanTag[]
   sources: PlanSource[]
   source_count: number
@@ -38,6 +41,8 @@ export interface WritingPlanCreate {
   brief?: string
   tags?: string[]
   priority?: number
+  cover_style?: CoverStyle
+  image_style?: string
 }
 
 export interface WritingPlanUpdate {
@@ -46,6 +51,8 @@ export interface WritingPlanUpdate {
   tags?: string[]
   priority?: number
   status?: string
+  cover_style?: CoverStyle
+  image_style?: string
 }
 
 export interface PlanSourceCreate {
@@ -139,10 +146,19 @@ export async function getPlanDrafts(planId: number): Promise<DraftSummary[]> {
   return apiFetch<DraftSummary[]>(`/writing-plans/${planId}/drafts`)
 }
 
-export async function dispatchPlan(planId: number, accountId?: string): Promise<DispatchResult> {
+export async function dispatchPlan(
+  planId: number,
+  opts: { accountId?: string; angle?: string; draftType?: string; coverStyle?: CoverStyle; imageStyle?: string } = {},
+): Promise<DispatchResult> {
   return apiFetch<DispatchResult>(`/writing-plans/${planId}/dispatch`, {
     method: 'POST',
-    body: JSON.stringify({ account_id: accountId ?? null }),
+    body: JSON.stringify({
+      account_id: opts.accountId ?? null,
+      angle: opts.angle,
+      draft_type: opts.draftType ?? 'article',
+      cover_style: opts.coverStyle,
+      image_style: opts.imageStyle,
+    }),
   })
 }
 
