@@ -1,7 +1,7 @@
 # 统一「参考文案库」：X 泛流量段子采集 + 金句库合并
 
 **Date:** 2026-05-30
-**Status:** Awaiting user review (revised — merged 金句库 in).
+**Status:** Awaiting user review (revised — merged 金句库 in; spike validated 2026-05-30).
 **命名说明:** 统一表 `ref_materials`、页面「参考文案库」、`/materials` 均为暂定，review 时可改。
 
 ## 1. 背景与目标
@@ -35,7 +35,7 @@
   - `min_faves` / `min_retweets` → 爆款门槛；`lang="zh"`、`days=N`
   - `raw=True` → 塞任意高级检索语法（`build_search_query` 默认给关键词加引号，话题无关查询**必须** `raw=True`）
 
-**核心未验证假设（→ 实现第一步 spike）：** feedgrab 的 SearchTimeline GraphQL 能否接受「**无关键词、纯算子**」的 raw 查询（`min_faves:3000 lang:zh -filter:replies -filter:links`）并按 Top 返回。这正是「抓取看看 feedgrab 能否抓到热门」。退路：带极宽种子词。
+**核心假设——已验证 ✅（spike 2026-05-30，见 `docs/superpowers/spikes/2026-05-30-x-top-search-operator-only.md`）：** operator-only raw 查询（`min_faves:1000 lang:zh -filter:replies -filter:links -filter:retweets`）+ `raw=True` + `sort="top"` 满页返回 20 条高赞中文帖，含大量真段子。主路径确认，**无需种子词退路**。spike 还测出：阈值/时间窗很敏感（高阈值+近窗过稀），且 tweet dict 自带 `possibly_sensitive` 可用于砍 NSFW。
 
 ## 3. 数据模型（3 张新表）
 
@@ -77,10 +77,11 @@ class RefCollectRule(Base):
     id: Mapped[int]
     label: Mapped[str]                       # 如「中文泛流量·点赞过3000」
     platform: Mapped[str] = "x"
-    min_faves: Mapped[int] = 3000
+    min_faves: Mapped[int] = 1500            # spike：高阈值+近窗过稀，中等阈值+seen 去重更稳
     min_retweets: Mapped[int] = 0
     lang: Mapped[str] = "zh"
-    days: Mapped[int] = 1
+    days: Mapped[int] = 2
+    exclude_sensitive: Mapped[bool] = True   # 砍 possibly_sensitive（NSFW）
     extra_terms: Mapped[str] = ""            # 可选种子词
     raw_query: Mapped[str] = ""              # 非空 → 原样传 raw=True（覆写上面）
     sort: Mapped[str] = "top"
@@ -122,7 +123,7 @@ async def search_top(raw_query: str = "", *, min_faves: int = 0, min_retweets: i
 透传到 `search_twitter_keyword`（`save_tweets=False, skip_summary=True`），复用现成的 `_tweet_dict_to_parsed_post`。
 
 ### 4.2 规则粗筛（`ref_collector.py`，零成本）
-丢弃：`(x, source_id)` 已在 `RefSeen` → 跳过不过 LLM；含 URL 且无配图；`len(text)<10`；@-提及占比过高。（转推已由 feedgrab builder 的 `-is:retweet`/`exclude_retweets=True` 排除。）
+丢弃：`(x, source_id)` 已在 `RefSeen` → 跳过不过 LLM；`possibly_sensitive=True`（NSFW，当规则 `exclude_sensitive`）；含 URL 且无配图；`len(text)<10`；@-提及占比过高。（转推由查询的 `-filter:retweets` 排除。）注：**日采集不收窄 `since`**（spike 证近窗过稀），靠 `RefSeen` 去重避免重复爆款。
 
 ### 4.3 LLM 精筛（`llm.py` 新增，仿 `generate_topics_from_x_posts`）
 ```python
@@ -190,7 +191,7 @@ POST   /materials/collect-all
 
 ## 10. 实现顺序（供 writing-plans 参考）
 
-1. **Spike**：实测 operator-only raw Top 搜索能否返回（§2），落 `docs/superpowers/spikes/`。决定主路径 or 种子词退路。
+1. ~~**Spike**~~ ✅ 已完成（`docs/superpowers/spikes/2026-05-30-x-top-search-operator-only.md`）：operator-only 主路径确认。
 2. 模型（3 张新表）+ `config.py` 加 `ref_categories` 默认。
 3. `feedgrab_client.search_top` + 单测。
 4. `llm.classify_ref_posts` + prompt（含 scene_tags 输出）。
@@ -211,7 +212,7 @@ POST   /materials/collect-all
 
 ## 12. 风险与已知未知
 
-- **operator-only raw 查询可行性**（最大风险）：§2，spike 验证；不行退种子词。
+- ~~operator-only raw 查询可行性~~ **已验证**（spike 2026-05-30）：满页返回，主路径确认，去掉种子词退路。
 - **金句迁移 / MCP 回归**：金句库已接 agent 写作管道（writer `list_quotes`），迁移必须保证 MCP 行为零变化——列为关键回归测试；物理 `quotes` 表迁移后暂留作备份。
 - **X 风控**：高 `min_faves` 返回页少；每天 1 次 + 逐规则 `sleep(2)`。需有效 cookie（`/x/auth-status` 探活）。
 - **LLM 成本/质量**：规则粗筛 + seen 去重压住过模型量；段子判定 + 场景标注准确率靠 prompt 迭代。
