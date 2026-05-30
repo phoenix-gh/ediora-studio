@@ -19,8 +19,9 @@ import {
   PLATFORMS,
 } from '@/lib/api/writing-plans'
 import { createDraft } from '@/lib/api/drafts'
-import { listPublishAccounts, type PublishAccount } from '@/lib/api/publish-accounts'
+import { listPublishAccounts, type PublishAccount, type CoverStyle } from '@/lib/api/publish-accounts'
 import { PushToStudioPopover } from '@/components/features/PushToStudioPopover'
+import { CoverStyleEditor, buildCoverStyleFromEditor } from '@/components/features/CoverStyleEditor'
 
 marked.setOptions({ breaks: true, gfm: true })
 
@@ -192,6 +193,12 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
   const [editTitle, setEditTitle] = useState('')
   const [editPriority, setEditPriority] = useState(3)
   const [savingMeta, setSavingMeta] = useState(false)
+
+  // Plan-level visual design (overrides account defaults)
+  const [editCoverStyle, setEditCoverStyle] = useState<CoverStyle>({})
+  const [editCoverMotifs, setEditCoverMotifs] = useState('')
+  const [editCoverNegative, setEditCoverNegative] = useState('')
+  const [editImageStyle, setEditImageStyle] = useState('')
   const titleRef = useRef<HTMLInputElement>(null)
 
   // New plan
@@ -226,9 +233,11 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
   const [analyzeText, setAnalyzeText] = useState('')
   const [analyzeBusy, setAnalyzeBusy] = useState(false)
 
-  // Dispatch account selection
+  // Dispatch account selection + 本次目标
   const [dispatchAccounts, setDispatchAccounts] = useState<PublishAccount[]>([])
   const [dispatchAccountId, setDispatchAccountId] = useState<string>('')
+  const [dispatchAngle, setDispatchAngle] = useState('')
+  const [dispatchDraftType, setDispatchDraftType] = useState<'article' | 'script'>('article')
 
   // Deleting
   const [deleting, setDeleting] = useState(false)
@@ -346,6 +355,10 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
     if (!selected) return
     setEditTitle(selected.title)
     setEditPriority(selected.priority)
+    setEditCoverStyle(selected.cover_style ?? {})
+    setEditCoverMotifs((selected.cover_style?.signature_motifs ?? []).join('\n'))
+    setEditCoverNegative((selected.cover_style?.negative ?? []).join('\n'))
+    setEditImageStyle(selected.image_style ?? '')
     setEditingTitle(true)
   }
 
@@ -356,6 +369,8 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
       const updated = await updateWritingPlan(selected.id, {
         title: editTitle.trim() || selected.title,
         priority: editPriority,
+        cover_style: buildCoverStyleFromEditor(editCoverStyle, editCoverMotifs, editCoverNegative),
+        image_style: editImageStyle,
       })
       replaceInList(updated)
       setEditingTitle(false)
@@ -417,8 +432,14 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
     }
     setDispatching(true)
     try {
-      const result = await dispatchPlan(selected.id, dispatchAccountId || undefined)
+      const result = await dispatchPlan(selected.id, {
+        accountId: dispatchAccountId || undefined,
+        angle: dispatchAngle.trim() || undefined,
+        draftType: dispatchDraftType,
+      })
       setShowDispatchConfirm(false)
+      setDispatchAngle('')
+      setDispatchDraftType('article')
       toast.success('已派发给 Agent', {
         action: { label: '查看看板', onClick: () => router.push(result.kanban_url) },
       })
@@ -646,6 +667,23 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
                         >{label}</button>
                       )
                     })}
+                  </div>
+                  <div className="space-y-2 border-t border-zinc-100 dark:border-zinc-800 pt-2">
+                    <div className="text-[11px] font-medium text-zinc-500">视觉设计（留空 = 继承账号默认）</div>
+                    <input
+                      value={editImageStyle}
+                      onChange={e => setEditImageStyle(e.target.value)}
+                      placeholder="插图风格 image_style（覆盖账号）"
+                      className="w-full text-xs px-2 py-1.5 border border-zinc-200 dark:border-zinc-700 rounded bg-white dark:bg-zinc-900 outline-none focus:border-indigo-400 text-zinc-700 dark:text-zinc-300"
+                    />
+                    <CoverStyleEditor
+                      coverStyle={editCoverStyle}
+                      onCoverStyleChange={setEditCoverStyle}
+                      motifsText={editCoverMotifs}
+                      onMotifsTextChange={setEditCoverMotifs}
+                      negativeText={editCoverNegative}
+                      onNegativeTextChange={setEditCoverNegative}
+                    />
                   </div>
                 </div>
                 <div className="flex gap-1 flex-shrink-0 pt-1">
@@ -972,6 +1010,24 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
                 </select>
               </div>
             )}
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-zinc-500 flex-shrink-0">本次目标</span>
+              <input
+                value={dispatchAngle}
+                onChange={e => setDispatchAngle(e.target.value)}
+                placeholder="本次切入角度（可选，覆盖『自己找角度』）"
+                className="flex-1 text-xs px-2 py-1.5 border border-zinc-200 dark:border-zinc-700 rounded bg-white dark:bg-zinc-900 outline-none focus:border-indigo-400 text-zinc-700 dark:text-zinc-300"
+              />
+              <div className="flex gap-1 flex-shrink-0">
+                {(['article', 'script'] as const).map(t => (
+                  <button key={t} type="button" onClick={() => setDispatchDraftType(t)}
+                    className={cn('px-2 py-1 rounded border text-xs',
+                      dispatchDraftType === t ? 'border-indigo-500 text-indigo-600 dark:text-indigo-400' : 'border-zinc-200 dark:border-zinc-700 text-zinc-400')}>
+                    {t === 'article' ? '文章' : '脚本'}
+                  </button>
+                ))}
+              </div>
+            </div>
             <textarea
               value={dispatchBrief}
               onChange={e => setDispatchBrief(e.target.value)}
