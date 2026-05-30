@@ -203,6 +203,8 @@ async def create_plan(body: WritingPlanCreate, db: AsyncSession = Depends(get_db
         title=body.title,
         brief=body.brief,
         priority=body.priority,
+        cover_style=body.cover_style,
+        image_style=body.image_style,
     )
     db.add(obj)
     await db.flush()

@@ -267,6 +267,8 @@ class WritingPlanCreate(BaseModel):
     brief: str = ""
     tags: list[str] = []
     priority: int = 3
+    cover_style: dict = {}
+    image_style: str = ""
 
 
 class WritingPlanUpdate(BaseModel):
@@ -275,6 +277,8 @@ class WritingPlanUpdate(BaseModel):
     tags: Optional[list[str]] = None
     priority: Optional[int] = None
     status: Optional[str] = None
+    cover_style: Optional[dict] = None
+    image_style: Optional[str] = None
 
 
 class PlanSourceCreate(BaseModel):
@@ -310,6 +314,8 @@ class WritingPlanOut(BaseModel):
     status: str
     created_at: datetime
     updated_at: datetime
+    cover_style: dict = {}
+    image_style: str = ""
     tags: list[PlanTagOut] = []
     sources: list[PlanSourceOut] = []
     source_count: int = 0
@@ -330,6 +336,10 @@ class ArticleDraftSummary(BaseModel):
 
 class DispatchPlanRequest(BaseModel):
     account_id: Optional[str] = None
+    angle: Optional[str] = None
+    draft_type: str = "article"
+    cover_style: Optional[dict] = None
+    image_style: Optional[str] = None
 
 
 class DispatchResponse(BaseModel):
