@@ -136,6 +136,21 @@ export async function regenerateCover(body: RegenerateCoverIn): Promise<{ task_i
   })
 }
 
+export interface IllustrateBodyIn {
+  draft_id: number
+  account_id: string
+  max_images?: number
+  note?: string
+  image_style?: string
+}
+
+export async function illustrateBody(body: IllustrateBodyIn): Promise<{ task_id: string }> {
+  return apiFetch('/studio/illustrate-body', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+}
+
 export interface RewriteDraftIn {
   draft_id: number
   note?: string
