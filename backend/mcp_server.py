@@ -983,6 +983,7 @@ async def save_draft(
     topic_id: str = "agent",
     status: str = "drafting",
     pipeline_task_id: Optional[int] = None,
+    draft_type: str = "article",
 ) -> dict:
     """
     Save a new article draft to WeMedia Studio's draft box.
@@ -995,6 +996,7 @@ async def save_draft(
         status: Initial status — "drafting" (default) or "review".
         pipeline_task_id: Optional pipeline_task_id from the task body (links this
                           draft to its pipeline run record for timeline tracking).
+        draft_type: "article"（默认）或 "script"。
 
     Returns: id, title, status, created_at of the newly created draft.
     """
@@ -1006,6 +1008,7 @@ async def save_draft(
             title=title,
             content=content,
             status=status,
+            draft_type=draft_type,
         )
         db.add(obj)
         await db.commit()

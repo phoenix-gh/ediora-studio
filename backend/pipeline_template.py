@@ -388,7 +388,7 @@ brief 里的"候选锚点"要至少用 2 个写成第一人称的当下动作 / 
 本任务**没有 file / code_execution / terminal 工具**，全部在 message 中完成：
 
 1. 在 message 里**一次性**写出完整 Markdown 终稿（不要落本地文件，不要 patch 迭代，不要先发初稿再修订）
-2. `save_draft(title, content, topic_id='agent', status='drafting', pipeline_task_id={c['pipeline_task_id']})` 拿 `draft_id`
+2. `save_draft(title, content, topic_id='agent', status='drafting', pipeline_task_id={c['pipeline_task_id']}, draft_type='{c.get('draft_type', 'article')}')` 拿 `draft_id`
 3. `kanban_complete(summary='<标题> 初稿 N 字', metadata={{"draft_id": ..., "wordcount": N}})`
 
 目标：从写稿到 complete **≤ 3 turn**。

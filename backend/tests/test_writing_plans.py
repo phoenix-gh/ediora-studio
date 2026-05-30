@@ -456,3 +456,20 @@ def test_dispatch_merges_plan_design_and_records_goal(client, monkeypatch):
     goal = asyncio.new_event_loop().run_until_complete(_check_goal())
     assert goal["angle"] == "聚焦反差"
     assert goal["draft_type"] == "article"
+
+
+def test_save_draft_sets_draft_type(client):
+    import asyncio
+    from mcp_server import save_draft
+    from database import SessionLocal
+    from sqlalchemy import select
+    from models import ArticleDraft
+
+    async def _run():
+        await save_draft(title="脚本稿", content="...", draft_type="script")
+        async with SessionLocal() as db:
+            d = (await db.execute(
+                select(ArticleDraft).where(ArticleDraft.title == "脚本稿")
+            )).scalars().first()
+            return d.draft_type
+    assert asyncio.new_event_loop().run_until_complete(_run()) == "script"
