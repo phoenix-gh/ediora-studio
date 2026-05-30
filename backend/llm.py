@@ -341,3 +341,48 @@ def _parse_translation_output(raw: str) -> list[dict]:
         if item.get("arxiv_id") and item.get("title_cn"):
             results.append(item)
     return results
+
+
+async def classify_ref_posts(
+    posts: list[dict],
+    categories: list[str],
+    scene_tags: list[str],
+) -> list[dict]:
+    """批量判定爆款帖是否值得作参考文案 + 打分 + 归类 + 标使用场景 + 清洗。
+    posts[i]: {source_id, text, likes, ...}
+    返回 [{source_id, keep, score, category, scene_tags, tags, text_clean}]。
+    解析失败/空 → 返回 []（调用方据此整批跳过）。"""
+    if not posts:
+        return []
+
+    posts_text = "\n\n".join(
+        f"[{p['source_id']}] 赞{p.get('likes', 0)}：{(p.get('text') or '')[:400]}"
+        for p in posts[:40]
+    )
+    cat_list = "、".join(categories)
+    scene_list = "、".join(scene_tags)
+
+    prompt = f"""你是中文自媒体的「参考文案」筛选与归类 AI。下面是一批 X 平台高赞帖子，
+判断每条是否值得收进「参考文案库」（有梗、有共鸣、有观点、可复用为写作素材即 keep=true；
+广告/带货/纯导流/无信息量/低俗无价值 → keep=false）。
+
+帖子（格式 [id] 赞数：正文）：
+{posts_text}
+
+对每条输出一个对象，组成 JSON 数组，字段：
+- source_id: 原样回传方括号里的 id（字符串）
+- keep: true/false
+- score: 0-100，参考价值/段子分
+- category: 从[{cat_list}]中选一个；不确定填「其他」
+- scene_tags: 从[{scene_list}]中选 0 个或多个（写作中的使用场景）
+- tags: 2-4 个自由细标签（字符串数组）
+- text_clean: 去掉 @提及/链接尾巴/多余 emoji 后的干净参考文案（保留原意）
+
+只输出 JSON 数组，不要其他文字。"""
+
+    try:
+        result = _extract_json_array(await _call(prompt, max_tokens=3000))
+    except Exception as e:
+        print(f"[llm] classify_ref_posts error: {e}")
+        return []
+    return result if isinstance(result, list) else []
