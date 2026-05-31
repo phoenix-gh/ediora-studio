@@ -88,3 +88,22 @@ def test_tutorial_body_drops_humanizer_first_person_and_symmetry():
     assert "拒绝每节等深等宽的对称结构" not in b
     assert "不写第一人称经历" in b           # 中立锚点提示
     assert "步骤 / 维度该等重" in b           # 中立结构提示
+
+
+# ── Task 5: plan_editor_task_block 按文体分流 ───────────────────────────────
+from pipeline_template import plan_editor_task_block
+
+
+def test_editor_block_commentary_is_hotspot_framing():
+    b = plan_editor_task_block("commentary", plan_id=7, word_rule_line="严格按写作模式字数")
+    assert "找今天的素材" in b
+    assert "add_plan_source(plan_id=7" in b
+    assert "第一人称可代入" in b
+
+
+def test_editor_block_tutorial_is_procedure_framing():
+    b = plan_editor_task_block("tutorial", plan_id=7, word_rule_line="严格按写作模式字数")
+    assert "找今天的素材" not in b
+    assert "讲准" in b
+    assert "第一人称可代入" not in b          # 不推第一人称锚点
+    assert "add_plan_source(plan_id=7" in b  # 线索库仍可用

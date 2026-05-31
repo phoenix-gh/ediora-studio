@@ -786,3 +786,65 @@ def get_pipeline(flow: str) -> list[PipelineStep]:
     if flow not in PIPELINES:
         raise ValueError(f"unknown flow '{flow}'; available: {sorted(PIPELINES)}")
     return PIPELINES[flow]
+
+
+def plan_editor_task_block(genre_key: str, plan_id: int, word_rule_line: str) -> str:
+    """写作方案路径 editor 棒的「## 这棒任务」块，按文体分流。
+    commentary/story = 找今天的热点素材填公式；tutorial/review = 把流程/对比讲准。"""
+    src = (f'每找到一条有价值的参考文章/帖子，立即调 '
+           f'`add_plan_source(plan_id={plan_id}, url=..., title=..., '
+           f'note="一句话说明为什么有价值", platform=...)`，把它存入写作方案的线索库。')
+    complete = (f'- `kanban_complete(summary=\'brief 完成: <一句话角度>\', '
+                f'metadata={{"plan_id": {plan_id}, "brief_md": "<完整 brief markdown>", '
+                f'"brief_chars": N, "core_point": "<一句话>"}})`')
+    if genre_key in ("tutorial", "review"):
+        kind = "教程" if genre_key == "tutorial" else "测评"
+        return "\n".join([
+            "## 这棒任务（editor）",
+            "",
+            f"上方是这个写作方案的**写作模式**。本文体裁是**{kind}**——你的工作不是「找今天的热点」，",
+            "而是把这个主题**讲准、讲全**，出 brief 交 writer。",
+            "",
+            "**Step 1 — 把素材组织清楚**",
+            "列出做成 / 讲清这件事需要的：前置条件、关键步骤或对比维度。每条要具体、可核对（数字 / 名称 / 链接）。",
+            "若需要核实事实或补料可调 web 工具。" + src,
+            "",
+            "**Step 2 — 造 ≥3 个候选标题**",
+            "说明这篇能帮读者**做成 / 搞清**什么；去掉具体细节后会变空话的，说明不够具体，重写。",
+            "",
+            "**Step 3 — 出创作 brief**",
+            "- **core_point**：一句话（读者读完能做成 / 搞清什么）",
+            "- **必须出现的事实** 3-5 条：每条带链接 + 一个具体细节",
+            "- **关键步骤 / 维度要点** ≥3：具体、可核对（**不要**第一人称经历 / 感受）",
+            "- **候选标题** ≥3",
+            f"- **字数/结构**：{word_rule_line}",
+            "",
+            "完成时：",
+            complete,
+        ])
+    # commentary / story —— 复刻现有热点框架（与改动前逐字一致）
+    return "\n".join([
+        "## 这棒任务（editor）",
+        "",
+        "上方是这个写作方案的**写作模式**——一种固定的文章公式，包含文章结构、标题公式和找素材的方法。",
+        "你的工作是：**按模式找今天的素材，把素材填进模式，出 brief 交 writer。**",
+        "",
+        "**Step 1 — 找今天的素材**",
+        "按模式里的搜索方法和关键词，搜索最近发生的真实内容。",
+        "目标：找到一个**符合模式判断标准**的具体案例（有人名/数字/时间/来源链接）。",
+        src,
+        "",
+        "**Step 2 — 用模式的标题公式造标题**",
+        "把找到的素材填进标题公式，造出 ≥3 个候选标题。",
+        "每个标题去掉具体细节后必须变成空话——否则说明细节不够具体，重找。",
+        "",
+        "**Step 3 — 出创作 brief**",
+        "- **core_point**：把素材填进模式后的主线，一句话（含具体人/数/事）",
+        "- **必须出现的事实** 3-5 条：每条带原始链接 + 一个具体细节",
+        "- **候选锚点** ≥2 个：来自找到的素材，第一人称可代入",
+        "- **候选标题** ≥3：用模式里的标题公式填入今天的素材",
+        f"- **字数/结构**：{word_rule_line}",
+        "",
+        "完成时：",
+        complete,
+    ])
