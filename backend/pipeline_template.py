@@ -223,6 +223,61 @@ def _writer_shortform_structure_md(max_chars: int) -> str:
 WRITER_ANTI_AI_RULES_MD = _WRITER_WORDING_RULES_MD + "\n\n" + _WRITER_LONGFORM_STRUCTURE_MD
 
 
+# ── 文体预设（genre）：每文体一套结构块 + first_person/humanizer 开关 ──────────
+# writer_rules_md / writer body / editor body 都按 ctx['genre'] 查表分流。
+# 缺省 / 非法 genre → commentary（= 现状，保证 topic/rewrite 等无 genre 流程不变）。
+_WRITER_TUTORIAL_STRUCTURE_MD = """
+## 教程 / 操作指南结构（硬性，最高优先级）
+本文是**操作教程**，目标是让读者照着做成一件事。上方「段落长度强制不均 / ≥250 字段落 / 第一人称当下感受」类规则**全部作废**。
+
+- **第二人称**：用「你」，直接给指令。禁第一人称经历、当下感受、个人观点立场（不要「我试了」「我觉得」「说实话」）。
+- **编号步骤**：正文主体是有序步骤（第一步 / 第二步… 或 1. 2. 3.），每步聚焦**一个**具体动作 + 预期结果（做完会看到什么）。
+- **解除平行禁令**：上方「三段平行结构」禁令对本文体作废——允许「首先 / 其次」「第一步 / 第二步」式并列、等重结构。
+- **前置先列清单**：开头用一个清单列出需要的条件 / 材料 / 账号 / 工具。
+- **关键步骤给判断与坑**：在容易出错的步骤后，简短给「怎么判断成功」或「常见坑 / 注意」，一两句即可，不展开。
+- **清楚 > 有趣**：不绕弯、不抒情、不堆背景。读者要的是照做能成，不是读一篇随笔。
+""".strip()
+
+_WRITER_REVIEW_STRUCTURE_MD = """
+## 测评 / 盘点结构（硬性，最高优先级）
+本文是**测评 / 清单盘点**，目标是用结构化信息帮读者做判断。上方「段落长度强制不均 / 第一人称当下感受」类规则**全部作废**。
+
+- **结构化**：按**维度**横向对比，或按**对象**列点盘点；允许子标题、允许列点（`-` / 数字）。
+- **解除平行禁令**：上方「三段平行结构」禁令对本文体作废——允许并列、等重的维度 / 条目结构。
+- **证据优先**：每个对象 / 维度给**具体证据**（数字 / 规格 / 实测细节 / 价格 / 来源），不要空泛形容。
+- **弱抒情、弱第一人称**：不写个人当下感受；要有观点也是**基于证据的结论 / 推荐**（给谁、为什么），不是情绪。
+- **结论明确**：让读者快速拿到「选哪个 / 适合谁」。
+""".strip()
+
+_WRITER_STORY_STRUCTURE_MD = _WRITER_LONGFORM_STRUCTURE_MD + """
+
+## 叙事侧重（硬性）
+本文以**叙事**为主：一个具体的人 / 事 / 瞬间为核，按时间线推进，可顺叙、可留白结尾；少下论断，多给画面。
+""".rstrip()
+
+
+@dataclass(frozen=True)
+class GenreProfile:
+    key: str
+    label: str            # 中文名（前端 / 留痕）
+    structure_md: str     # 结构规则块（替代原长 / 短结构块）
+    first_person: bool    # 是否注入第一人称当下动作 / 感受锚点
+    humanizer: bool       # 是否启用 humanizer 技能
+
+
+GENRE_PROFILES: dict[str, "GenreProfile"] = {
+    "commentary": GenreProfile("commentary", "评论", _WRITER_LONGFORM_STRUCTURE_MD, True, True),
+    "tutorial": GenreProfile("tutorial", "教程", _WRITER_TUTORIAL_STRUCTURE_MD, False, False),
+    "story": GenreProfile("story", "故事", _WRITER_STORY_STRUCTURE_MD, True, True),
+    "review": GenreProfile("review", "测评", _WRITER_REVIEW_STRUCTURE_MD, False, False),
+}
+
+
+def _genre_profile(c: RenderCtx) -> "GenreProfile":
+    """按 ctx['genre'] 查 profile，缺省 / 非法 → commentary（保证其它流程不变）。"""
+    return GENRE_PROFILES.get(c.get("genre") or "commentary", GENRE_PROFILES["commentary"])
+
+
 def _is_short_spec(spec: dict | None, threshold: int = 500) -> bool:
     return bool(spec and spec.get("max") and spec["max"] <= threshold)
 
