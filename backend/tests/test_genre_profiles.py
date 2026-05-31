@@ -57,3 +57,34 @@ def test_tutorial_short_appends_wordcap():
     out = writer_rules_md({"genre": "tutorial", "word_spec": {"max": 400, "raw": "400 字以内"}})
     assert "≤ 400 字" in out
     assert "教程 / 操作指南结构" in out
+
+
+# ── Task 4: writer body 按文体 gate ─────────────────────────────────────────
+from pipeline_template import FULL_PIPELINE
+
+_WRITER_STEP = FULL_PIPELINE[1]
+
+
+def _writer_body(genre):
+    ctx = {
+        "title": "T", "account_id": "a", "pipeline_task_id": 1,
+        "account_profile": {"name": "n", "platform": "wechat"},
+        "genre": genre,
+    }
+    return _WRITER_STEP.body(ctx)
+
+
+def test_commentary_body_keeps_humanizer_and_first_person():
+    b = _writer_body("commentary")
+    assert "使用技能**: humanizer" in b
+    assert "第一人称的当下动作" in b
+    assert "拒绝每节等深等宽的对称结构" in b
+
+
+def test_tutorial_body_drops_humanizer_first_person_and_symmetry():
+    b = _writer_body("tutorial")
+    assert "humanizer" not in b
+    assert "第一人称的当下动作" not in b
+    assert "拒绝每节等深等宽的对称结构" not in b
+    assert "不写第一人称经历" in b           # 中立锚点提示
+    assert "步骤 / 维度该等重" in b           # 中立结构提示

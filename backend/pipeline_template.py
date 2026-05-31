@@ -311,6 +311,28 @@ def writer_rules_md(c: RenderCtx) -> str:
     return "\n\n".join(parts)
 
 
+def writer_first_person_anchor_md(c: RenderCtx) -> str:
+    """writer 正文「候选锚点」指令：first_person 文体注入第一人称，否则给中立提示。"""
+    if _genre_profile(c).first_person:
+        return 'brief 里的"候选锚点"要至少用 2 个写成第一人称的当下动作 / 反应，散在中段，不要堆在首尾。'
+    return ('brief 里的"候选锚点"是写作素材，挑最能把事讲清楚的用；'
+            '本文体**不写第一人称经历 / 当下感受 / 个人观点**，保持中立。')
+
+
+def writer_humanizer_line_md(c: RenderCtx) -> str:
+    """humanizer 文体才输出该 bullet 行（含换行），否则空串。"""
+    return "- **使用技能**: humanizer\n" if _genre_profile(c).humanizer else ""
+
+
+def writer_structure_directive_md(c: RenderCtx) -> str:
+    """结构 bullet：评论/故事走反对称；教程/测评走等重结构。"""
+    if _genre_profile(c).key in ("commentary", "story"):
+        return ('- **结构**：不要按 brief 的提纲"等比例翻译"成文章——brief 是素材清单，'
+                '不是文章骨架。落笔前先决定哪一个点是核心，其余点围着它转或直接丢掉。'
+                '拒绝每节等深等宽的对称结构。')
+    return '- **结构**：按上面的体裁结构块组织；步骤 / 维度该等重就等重，不必制造长短起伏。'
+
+
 _WORD_RANGE_RE = re.compile(r"(\d{2,4})\s*[-~–—至到]\s*(\d{2,4})\s*字")
 _WORD_BOUND_RE = re.compile(r"(?:不超过|最多|上限|≤|<=)?\s*(\d{2,4})\s*字(?:以内|以下|左右|上限)?")
 
@@ -448,7 +470,7 @@ pipeline_task_id: {c['pipeline_task_id']}
 ## 这棒任务（writer · 出初稿）
 **brief 是素材清单，不是骨架。** 不要把 brief 的小节顺序当大纲逐节展开。
 落笔前先决定：哪一个点是核心（用 core_point），其余点围着它转或直接丢掉（看 secondary_points 的 drop_ok 标记）。
-brief 里的"候选锚点"要至少用 2 个写成第一人称的当下动作 / 反应，散在中段，不要堆在首尾。
+{writer_first_person_anchor_md(c)}
 
 按 brief + 上方画像写 Markdown 初稿：
 
@@ -457,9 +479,8 @@ brief 里的"候选锚点"要至少用 2 个写成第一人称的当下动作 / 
 - **硬约束**：逐条遵守 `style_rules`（账号级规则优先于下方通用反 AI 腔）
 - **避开** `taboo`（话题 / 词汇 / 立场）
 - **标题**：从 brief 候选挑或综合自创（贴 `tone`）
-- **使用技能**: humanizer
-- **写作习惯**: 逗号,句号全用半角, 句号后面偶尔会连续两三个空格.
-- **结构**：不要按 brief 的提纲"等比例翻译"成文章——brief 是素材清单，不是文章骨架。落笔前先决定哪一个点是核心，其余点围着它转或直接丢掉。拒绝每节等深等宽的对称结构。
+{writer_humanizer_line_md(c)}- **写作习惯**: 逗号,句号全用半角, 句号后面偶尔会连续两三个空格.
+{writer_structure_directive_md(c)}
 
 {writer_rules_md(c)}
 
