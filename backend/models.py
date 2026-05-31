@@ -301,6 +301,7 @@ class WritingPlan(Base):
     status: Mapped[str] = mapped_column(String, default="active", index=True)  # active/archived
     cover_style: Mapped[dict] = mapped_column(JSON, default=dict)  # 覆盖账号默认封面风格(空=继承)
     image_style: Mapped[str] = mapped_column(Text, default="")     # 覆盖账号默认插图风格(空=继承)
+    genre: Mapped[str] = mapped_column(String, default="commentary")  # tutorial/commentary/story/review
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
 

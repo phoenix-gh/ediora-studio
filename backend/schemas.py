@@ -269,6 +269,7 @@ class WritingPlanCreate(BaseModel):
     priority: int = 3
     cover_style: dict = {}
     image_style: str = ""
+    genre: str = "commentary"
 
 
 class WritingPlanUpdate(BaseModel):
@@ -279,6 +280,7 @@ class WritingPlanUpdate(BaseModel):
     status: Optional[str] = None
     cover_style: Optional[dict] = None
     image_style: Optional[str] = None
+    genre: Optional[str] = None
 
 
 class PlanSourceCreate(BaseModel):
@@ -316,6 +318,7 @@ class WritingPlanOut(BaseModel):
     updated_at: datetime
     cover_style: dict = {}
     image_style: str = ""
+    genre: str = "commentary"
     tags: list[PlanTagOut] = []
     sources: list[PlanSourceOut] = []
     source_count: int = 0
