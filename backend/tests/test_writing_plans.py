@@ -473,3 +473,67 @@ def test_save_draft_sets_draft_type(client):
             )).scalars().first()
             return d.draft_type
     assert asyncio.new_event_loop().run_until_complete(_run()) == "script"
+
+
+# ── Dispatch: genre 透传 ──────────────────────────────────────────────────────
+
+def test_dispatch_tutorial_genre_flows_to_bodies_and_goal(client, monkeypatch):
+    bodies: list[dict] = []
+
+    async def _mock_create_task(self, *, title, body, assignee, parents=None):
+        bodies.append({"assignee": assignee, "body": body})
+        return f"mock-task-{len(bodies)}"
+
+    from hermes_kanban_client import HermesKanbanClient
+    monkeypatch.setattr(HermesKanbanClient, "create_task", _mock_create_task)
+
+    r = client.post("/api/writing-plans", json={
+        "title": "跨境开户教程",
+        "brief": "操作教程：步骤化，400字以内",
+        "genre": "tutorial",
+        "tags": [],
+    })
+    assert r.json()["genre"] == "tutorial"   # create_plan 持久化 genre
+    plan_id = r.json()["id"]
+
+    dr = client.post(f"/api/writing-plans/{plan_id}/dispatch", json={})
+    assert dr.status_code == 200, dr.text
+
+    editor_body = next(b["body"] for b in bodies if b["assignee"] == "wms_editor")
+    writer_body = next(b["body"] for b in bodies if b["assignee"] == "wms_writer")
+    assert "找今天的素材" not in editor_body and "讲准" in editor_body
+    assert "humanizer" not in writer_body
+    assert "第一人称的当下动作" not in writer_body
+
+    from database import SessionLocal
+    from models import PipelineTask
+    from sqlalchemy import select
+
+    async def _goal():
+        async with SessionLocal() as db:
+            pt = (await db.execute(select(PipelineTask))).scalars().first()
+            return pt.goal
+    goal = asyncio.new_event_loop().run_until_complete(_goal())
+    assert goal["genre"] == "tutorial"
+
+
+def test_dispatch_default_genre_keeps_commentary_editor_framing(client, monkeypatch):
+    """不带 genre 的方案默认 commentary：editor 仍是「找今天的素材」热点框（不回归）。"""
+    bodies: list[dict] = []
+
+    async def _mock_create_task(self, *, title, body, assignee, parents=None):
+        bodies.append({"assignee": assignee, "body": body})
+        return f"mock-task-{len(bodies)}"
+
+    from hermes_kanban_client import HermesKanbanClient
+    monkeypatch.setattr(HermesKanbanClient, "create_task", _mock_create_task)
+
+    plan_id = client.post("/api/writing-plans", json={
+        "title": "评论方案", "brief": "## 文章模式\n深度拆解长文。", "tags": [],
+    }).json()["id"]
+    assert client.post(f"/api/writing-plans/{plan_id}/dispatch", json={}).status_code == 200
+
+    editor_body = next(b["body"] for b in bodies if b["assignee"] == "wms_editor")
+    writer_body = next(b["body"] for b in bodies if b["assignee"] == "wms_writer")
+    assert "找今天的素材" in editor_body
+    assert "humanizer" in writer_body

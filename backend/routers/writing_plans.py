@@ -306,6 +306,7 @@ async def dispatch_plan(plan_id: int, body: DispatchPlanRequest, db: AsyncSessio
 
     from pipeline_template import (
         render_profile_editor, parse_word_spec, FULL_PIPELINE, resolve_effective_design,
+        plan_editor_task_block,
     )
     from hermes_kanban_client import HermesKanbanClient, HermesKanbanError
 
@@ -351,29 +352,7 @@ async def dispatch_plan(plan_id: int, body: DispatchPlanRequest, db: AsyncSessio
         "",
         "---",
         "",
-        "## 这棒任务（editor）",
-        "",
-        "上方是这个写作方案的**写作模式**——一种固定的文章公式，包含文章结构、标题公式和找素材的方法。",
-        "你的工作是：**按模式找今天的素材，把素材填进模式，出 brief 交 writer。**",
-        "",
-        "**Step 1 — 找今天的素材**",
-        "按模式里的搜索方法和关键词，搜索最近发生的真实内容。",
-        "目标：找到一个**符合模式判断标准**的具体案例（有人名/数字/时间/来源链接）。",
-        f"每找到一条有价值的参考文章/帖子，立即调 `add_plan_source(plan_id={plan_id}, url=..., title=..., note=\"一句话说明为什么有价值\", platform=...)`，把它存入写作方案的线索库。",
-        "",
-        "**Step 2 — 用模式的标题公式造标题**",
-        "把找到的素材填进标题公式，造出 ≥3 个候选标题。",
-        "每个标题去掉具体细节后必须变成空话——否则说明细节不够具体，重找。",
-        "",
-        "**Step 3 — 出创作 brief**",
-        "- **core_point**：把素材填进模式后的主线，一句话（含具体人/数/事）",
-        "- **必须出现的事实** 3-5 条：每条带原始链接 + 一个具体细节",
-        "- **候选锚点** ≥2 个：来自找到的素材，第一人称可代入",
-        "- **候选标题** ≥3：用模式里的标题公式填入今天的素材",
-        f"- **字数/结构**：{word_rule_line}",
-        "",
-        "完成时：",
-        f'- `kanban_complete(summary=\'brief 完成: <一句话角度>\', metadata={{"plan_id": {plan_id}, "brief_md": "<完整 brief markdown>", "brief_chars": N, "core_point": "<一句话>"}})`',
+        plan_editor_task_block(obj.genre, plan_id, word_rule_line),
     ])
 
     ctx = {
@@ -384,6 +363,7 @@ async def dispatch_plan(plan_id: int, body: DispatchPlanRequest, db: AsyncSessio
         "pipeline_task_id": pt.id,
         "word_spec": word_spec,
         "draft_type": body.draft_type,
+        "genre": obj.genre,
     }
 
     try:
@@ -412,7 +392,7 @@ async def dispatch_plan(plan_id: int, body: DispatchPlanRequest, db: AsyncSessio
         raise HTTPException(502, f"Hermes 不可用: {e}")
 
     pt.task_ids = {"editor": editor_id, "writer": writer_id, "illustrator": illus_id}
-    pt.goal = {"angle": body.angle or "", "draft_type": body.draft_type}
+    pt.goal = {"angle": body.angle or "", "draft_type": body.draft_type, "genre": obj.genre}
     await db.commit()
 
     return DispatchResponse(task_id=editor_id, kanban_url="/studio")
