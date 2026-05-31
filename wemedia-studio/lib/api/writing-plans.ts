@@ -30,6 +30,7 @@ export interface WritingPlan {
   updated_at: string
   cover_style?: CoverStyle
   image_style?: string
+  genre?: string
   tags: PlanTag[]
   sources: PlanSource[]
   source_count: number
@@ -43,6 +44,7 @@ export interface WritingPlanCreate {
   priority?: number
   cover_style?: CoverStyle
   image_style?: string
+  genre?: string
 }
 
 export interface WritingPlanUpdate {
@@ -53,6 +55,7 @@ export interface WritingPlanUpdate {
   status?: string
   cover_style?: CoverStyle
   image_style?: string
+  genre?: string
 }
 
 export interface PlanSourceCreate {
