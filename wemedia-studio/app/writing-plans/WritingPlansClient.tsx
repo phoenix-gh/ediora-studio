@@ -33,6 +33,16 @@ const PRIORITY_LABELS: Record<number, { label: string; cls: string }> = {
   5: { label: 'P5', cls: 'bg-zinc-100 text-zinc-300 dark:bg-zinc-800 dark:text-zinc-600' },
 }
 
+const GENRE_OPTIONS: { value: string; label: string }[] = [
+  { value: 'tutorial', label: '教程' },
+  { value: 'commentary', label: '评论' },
+  { value: 'story', label: '故事' },
+  { value: 'review', label: '测评' },
+]
+const GENRE_LABEL: Record<string, string> = {
+  tutorial: '教程', commentary: '评论', story: '故事', review: '测评',
+}
+
 function formatDate(iso: string) {
   const d = new Date(iso)
   const now = new Date()
@@ -199,6 +209,7 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
   const [editCoverMotifs, setEditCoverMotifs] = useState('')
   const [editCoverNegative, setEditCoverNegative] = useState('')
   const [editImageStyle, setEditImageStyle] = useState('')
+  const [editGenre, setEditGenre] = useState('commentary')
   const titleRef = useRef<HTMLInputElement>(null)
 
   // New plan
@@ -359,6 +370,7 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
     setEditCoverMotifs((selected.cover_style?.signature_motifs ?? []).join('\n'))
     setEditCoverNegative((selected.cover_style?.negative ?? []).join('\n'))
     setEditImageStyle(selected.image_style ?? '')
+    setEditGenre(selected.genre ?? 'commentary')
     setEditingTitle(true)
   }
 
@@ -369,6 +381,7 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
       const updated = await updateWritingPlan(selected.id, {
         title: editTitle.trim() || selected.title,
         priority: editPriority,
+        genre: editGenre,
         cover_style: buildCoverStyleFromEditor(editCoverStyle, editCoverMotifs, editCoverNegative),
         image_style: editImageStyle,
       })
@@ -628,6 +641,9 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
                     <p className="text-[11px] text-zinc-400 dark:text-zinc-500 line-clamp-2 leading-relaxed">{p.brief.slice(0, 100)}</p>
                   )}
                   <div className="flex items-center gap-2 mt-1.5">
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400">
+                      {GENRE_LABEL[p.genre ?? 'commentary']}
+                    </span>
                     {p.source_count > 0 && (
                       <span className="text-[10px] text-zinc-400"><span className="font-medium text-zinc-600 dark:text-zinc-400">{p.source_count}</span> 条线索</span>
                     )}
@@ -668,6 +684,17 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
                       )
                     })}
                   </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-zinc-500">文体</span>
+                    <select
+                      value={editGenre}
+                      onChange={e => setEditGenre(e.target.value)}
+                      className="text-xs px-2 py-1 border border-zinc-200 dark:border-zinc-700 rounded bg-white dark:bg-zinc-900 outline-none focus:border-indigo-400 text-zinc-700 dark:text-zinc-300"
+                    >
+                      {GENRE_OPTIONS.map(g => <option key={g.value} value={g.value}>{g.label}</option>)}
+                    </select>
+                    <span className="text-[10px] text-zinc-400">决定 writer 怎么写</span>
+                  </div>
                   <div className="space-y-2 border-t border-zinc-100 dark:border-zinc-800 pt-2">
                     <div className="text-[11px] font-medium text-zinc-500">视觉设计（留空 = 继承账号默认）</div>
                     <input
@@ -703,6 +730,9 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
                   {selected.status === 'archived' && (
                     <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-100 text-zinc-400 dark:bg-zinc-800">已归档</span>
                   )}
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400 flex-shrink-0">
+                    {GENRE_LABEL[selected.genre ?? 'commentary']}
+                  </span>
                   <button onClick={openEdit} className="ml-1 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 p-1 rounded hover:bg-zinc-50 dark:hover:bg-zinc-900">
                     <Pencil className="w-3 h-3" />
                   </button>
