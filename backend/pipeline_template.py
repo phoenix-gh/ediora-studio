@@ -291,12 +291,24 @@ def writer_word_directive_md(c: RenderCtx) -> str:
     return "遵从画像 `word_range`（默认 1500-2200）"
 
 
+def _writer_wordcap_md(max_chars: int) -> str:
+    return (f"## 字数封顶（硬性）\n"
+            f"总字数严格 ≤ {max_chars} 字，宁短勿长，超出即不合格；写完数一遍再交。")
+
+
 def writer_rules_md(c: RenderCtx) -> str:
-    """按篇幅选反 AI 腔规则块：短文案用短结构，否则用长文结构。"""
+    """按文体选规则块。commentary 保留原「长/短」分流（逐字回归）；
+    其它文体 = 通用词汇块 + 文体结构块（+ 短字数封顶）。"""
+    profile = _genre_profile(c)
     spec = c.get("word_spec")
+    if profile.key == "commentary":
+        if _is_short_spec(spec):
+            return _WRITER_WORDING_RULES_MD + "\n\n" + _writer_shortform_structure_md(spec["max"])
+        return WRITER_ANTI_AI_RULES_MD
+    parts = [_WRITER_WORDING_RULES_MD, profile.structure_md]
     if _is_short_spec(spec):
-        return _WRITER_WORDING_RULES_MD + "\n\n" + _writer_shortform_structure_md(spec["max"])
-    return WRITER_ANTI_AI_RULES_MD
+        parts.append(_writer_wordcap_md(spec["max"]))
+    return "\n\n".join(parts)
 
 
 _WORD_RANGE_RE = re.compile(r"(\d{2,4})\s*[-~–—至到]\s*(\d{2,4})\s*字")

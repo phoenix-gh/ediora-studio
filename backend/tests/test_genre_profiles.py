@@ -28,3 +28,32 @@ def test_genre_profile_defaults_to_commentary():
     assert _genre_profile({"genre": None}).key == "commentary"
     assert _genre_profile({"genre": "nope"}).key == "commentary"
     assert _genre_profile({"genre": "tutorial"}).key == "tutorial"
+
+
+# ── Task 3: writer_rules_md 按文体分流 ──────────────────────────────────────
+from pipeline_template import writer_rules_md, WRITER_ANTI_AI_RULES_MD
+
+
+def test_commentary_long_is_exact_regression():
+    # commentary 长文 == 旧行为逐字
+    assert writer_rules_md({"genre": "commentary"}) == WRITER_ANTI_AI_RULES_MD
+    assert writer_rules_md({}) == WRITER_ANTI_AI_RULES_MD  # 缺省也走 commentary
+
+
+def test_commentary_short_keeps_shortform():
+    out = writer_rules_md({"genre": "commentary", "word_spec": {"max": 200, "raw": "100-200 字"}})
+    assert "短文案结构" in out
+    assert "≤ 200 字" in out
+
+
+def test_tutorial_uses_tutorial_block_not_longform():
+    out = writer_rules_md({"genre": "tutorial"})
+    assert "教程 / 操作指南结构" in out
+    assert "第一人称当下动作" not in out  # 长文强制具体化块不在
+    assert "通用反 AI 腔" in out          # 通用词汇块仍在
+
+
+def test_tutorial_short_appends_wordcap():
+    out = writer_rules_md({"genre": "tutorial", "word_spec": {"max": 400, "raw": "400 字以内"}})
+    assert "≤ 400 字" in out
+    assert "教程 / 操作指南结构" in out
