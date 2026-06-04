@@ -40,3 +40,30 @@ async def migrate_quotes_to_materials(db: AsyncSession) -> int:
         db.add(AppSetting(key=_FLAG, value="1"))
     await db.commit()
     return n
+
+
+async def migrate_rules_to_search_subs(db: AsyncSession) -> int:
+    """把每条旧 RefCollectRule 的搜索参数迁成一个 kind=search 的 XSubscription，
+    并回填 rule.source_subscription_id。幂等：已回填的规则跳过。"""
+    from models import RefCollectRule, XSubscription
+
+    rules = (await db.execute(select(RefCollectRule))).scalars().all()
+    n = 0
+    for r in rules:
+        if r.source_subscription_id is not None:
+            continue
+        if not (r.raw_query or "").strip():
+            continue
+        sub = XSubscription(
+            kind="search", url=None, label=r.label or f"搜索:{r.raw_query[:24]}",
+            enabled=r.enabled, raw_query=r.raw_query, min_faves=r.min_faves,
+            min_retweets=r.min_retweets, lang=r.lang, days=r.days,
+            extra_terms=r.extra_terms, sort=r.sort, max_results=r.max_results,
+            added_at=datetime.now(timezone.utc),
+        )
+        db.add(sub)
+        await db.flush()  # 拿到 sub.id
+        r.source_subscription_id = sub.id
+        n += 1
+    await db.commit()
+    return n

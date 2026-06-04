@@ -133,8 +133,10 @@ END $$
 
     # One-off: migrate legacy quotes into unified ref_materials (idempotent)
     try:
-        from ref_migrate import migrate_quotes_to_materials
+        from ref_migrate import migrate_quotes_to_materials, migrate_rules_to_search_subs
         async with SessionLocal() as db:
             await migrate_quotes_to_materials(db)
+        async with SessionLocal() as db:
+            await migrate_rules_to_search_subs(db)
     except Exception as e:
         print(f"[init_db] quotes→materials migration skipped: {e}")
