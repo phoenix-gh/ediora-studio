@@ -17,7 +17,7 @@ import { Switch } from '@/components/ui/switch'
 import { cn } from '@/lib/utils'
 import { fmtRelTime } from '@/lib/format'
 import {
-  type XSubscription, type XPost, type XSearchPost,
+  type XSubscription, type XPost, type XSearchPost, type CreateXSubscriptionInput,
   listXSubscriptions, listXPosts, searchX,
   createXSubscription, patchXSubscription, deleteXSubscription,
   collectXSubscription, collectAllXSubscriptions,
@@ -66,8 +66,8 @@ export function XClient({
 
   useEffect(() => { reloadPosts(selection, hours) }, [selection, hours])
 
-  const handleAdd = async (url: string) => {
-    await createXSubscription(url)
+  const handleAdd = async (input: CreateXSubscriptionInput) => {
+    await createXSubscription(input)
     await Promise.all([reloadSubs(), reloadPosts()])
     toast.success('订阅已添加')
   }
@@ -471,13 +471,19 @@ function SubscribeDialog({
   onOpenChange: (v: boolean) => void
   subs: XSubscription[]
   actingId: number | null
-  onAdd: (url: string) => Promise<void>
+  onAdd: (input: CreateXSubscriptionInput) => Promise<void>
   onToggle: (s: XSubscription) => Promise<void>
   onDelete: (s: XSubscription) => Promise<void>
   onCollect: (s: XSubscription) => Promise<void>
   onRename: (s: XSubscription, label: string) => Promise<void>
 }) {
+  const [kind, setKind] = useState<'timeline' | 'search'>('timeline')
   const [url, setUrl] = useState('')
+  const [rawQuery, setRawQuery] = useState('')
+  const [minFaves, setMinFaves] = useState(1500)
+  const [lang, setLang] = useState('zh')
+  const [days, setDays] = useState(2)
+  const [maxResults, setMaxResults] = useState(50)
   const [adding, setAdding] = useState(false)
   const [busyId, setBusyId] = useState<number | null>(null)
   const [editingId, setEditingId] = useState<number | null>(null)
@@ -485,12 +491,22 @@ function SubscribeDialog({
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
-    const trimmed = url.trim()
-    if (!trimmed) return
     setAdding(true)
     try {
-      await onAdd(trimmed)
-      setUrl('')
+      if (kind === 'search') {
+        const q = rawQuery.trim()
+        if (!q) return
+        await onAdd({
+          kind: 'search', raw_query: q, min_faves: minFaves,
+          lang, days, max_results: maxResults,
+        })
+        setRawQuery('')
+      } else {
+        const trimmed = url.trim()
+        if (!trimmed) return
+        await onAdd({ kind: 'timeline', url: trimmed })
+        setUrl('')
+      }
     } catch (err) {
       toast.error((err as Error).message || '添加失败')
     } finally { setAdding(false) }
@@ -509,20 +525,59 @@ function SubscribeDialog({
         <DialogHeader>
           <DialogTitle className="text-base">X 订阅管理</DialogTitle>
           <DialogDescription className="text-xs">
-            个人主页（<code>https://x.com/&lt;username&gt;</code>）或 list
-            （<code>https://x.com/i/lists/&lt;id&gt;</code>）URL，定时按订阅采集
+            时间线订阅用主页/list URL；搜索订阅用 X 高级搜索语法，两者都定时落库到 x_posts
           </DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={submit} className="flex items-center gap-2">
-          <Input value={url} onChange={e => setUrl(e.target.value)}
-            placeholder="https://x.com/elonmusk 或 https://x.com/i/lists/12345"
-            className="h-8 text-xs flex-1" />
-          <Button type="submit" size="sm" className="h-8 text-xs"
-            disabled={adding || !url.trim()}>
-            {adding ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : '添加'}
-          </Button>
-        </form>
+        <div className="flex items-center gap-1.5">
+          <Button type="button" size="sm" variant={kind === 'timeline' ? 'default' : 'outline'}
+            className="h-7 text-xs" onClick={() => setKind('timeline')}>时间线</Button>
+          <Button type="button" size="sm" variant={kind === 'search' ? 'default' : 'outline'}
+            className="h-7 text-xs" onClick={() => setKind('search')}>搜索</Button>
+        </div>
+
+        {kind === 'timeline' ? (
+          <form onSubmit={submit} className="flex items-center gap-2">
+            <Input value={url} onChange={e => setUrl(e.target.value)}
+              placeholder="https://x.com/elonmusk 或 https://x.com/i/lists/12345"
+              className="h-8 text-xs flex-1" />
+            <Button type="submit" size="sm" className="h-8 text-xs"
+              disabled={adding || !url.trim()}>
+              {adding ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : '添加'}
+            </Button>
+          </form>
+        ) : (
+          <form onSubmit={submit} className="space-y-2">
+            <Input value={rawQuery} onChange={e => setRawQuery(e.target.value)}
+              placeholder="搜索语法，如 min_faves:1500 lang:zh"
+              className="h-8 text-xs" />
+            <div className="flex items-center gap-2">
+              <label className="text-[11px] text-zinc-400 flex items-center gap-1">
+                最低赞 <Input type="number" value={minFaves}
+                  onChange={e => setMinFaves(Number(e.target.value) || 0)}
+                  className="h-7 w-20 text-xs" />
+              </label>
+              <label className="text-[11px] text-zinc-400 flex items-center gap-1">
+                语言 <Input value={lang} onChange={e => setLang(e.target.value)}
+                  className="h-7 w-14 text-xs" />
+              </label>
+              <label className="text-[11px] text-zinc-400 flex items-center gap-1">
+                天数 <Input type="number" value={days}
+                  onChange={e => setDays(Number(e.target.value) || 1)}
+                  className="h-7 w-14 text-xs" />
+              </label>
+              <label className="text-[11px] text-zinc-400 flex items-center gap-1">
+                上限 <Input type="number" value={maxResults}
+                  onChange={e => setMaxResults(Number(e.target.value) || 1)}
+                  className="h-7 w-16 text-xs" />
+              </label>
+              <Button type="submit" size="sm" className="h-7 text-xs ml-auto"
+                disabled={adding || !rawQuery.trim()}>
+                {adding ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : '添加'}
+              </Button>
+            </div>
+          </form>
+        )}
 
         <div>
           <div className="text-[11px] uppercase tracking-wider text-zinc-400 mb-1.5 px-0.5">
@@ -568,7 +623,17 @@ function SubscribeDialog({
                           className="h-6 text-xs px-1"
                         />
                       ) : (
-                        <div className="text-xs font-medium truncate">{s.label || '未命名'}</div>
+                        <div className="flex items-center gap-1.5">
+                          <div className="text-xs font-medium truncate">{s.label || '未命名'}</div>
+                          <span className={cn(
+                            'text-[10px] px-1 rounded flex-shrink-0',
+                            s.kind === 'search'
+                              ? 'bg-violet-100 text-violet-600 dark:bg-violet-950/40 dark:text-violet-400'
+                              : 'bg-sky-100 text-sky-600 dark:bg-sky-950/40 dark:text-sky-400',
+                          )}>
+                            {s.kind === 'search' ? '搜索' : '时间线'}
+                          </span>
+                        </div>
                       )}
                       <div className="text-[11px] text-zinc-400 truncate">
                         {s.post_count} 帖 · {s.last_collected_at
