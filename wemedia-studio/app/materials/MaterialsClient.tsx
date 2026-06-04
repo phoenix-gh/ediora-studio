@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import {
   Quote as QuoteIcon, Plus, Search, Trash2, Pencil, Check, Copy, ExternalLink,
   RefreshCw, Loader2, Heart, Repeat2, Eye, Settings2, Play, Zap,
@@ -15,6 +15,7 @@ import {
   getRules, createRule, updateRule, deleteRule, collectRule, collectAll,
 } from '@/lib/api/materials'
 import { WritingPlan, flattenTopics } from '@/lib/api/writing-plans'
+import { type XSubscription, listXSubscriptions } from '@/lib/api/x'
 
 type SourceFilter = 'all' | 'manual' | 'x'
 type SortKey = 'time' | 'score' | 'views'
@@ -183,18 +184,27 @@ function RulesDrawer({ rules, onClose, onChange, onAfterCollect }: {
   onChange: (rules: CollectRule[]) => void; onAfterCollect: () => void
 }) {
   const [label, setLabel] = useState('')
+  const [sourceSubId, setSourceSubId] = useState<number | ''>('')
   const [minFaves, setMinFaves] = useState(1500)
-  const [lang, setLang] = useState('zh')
   const [days, setDays] = useState(2)
-  const [rawQuery, setRawQuery] = useState('')
+  const [maxResults, setMaxResults] = useState(50)
+  const [subs, setSubs] = useState<XSubscription[]>([])
   const [busy, setBusy] = useState<number | 'all' | 'new' | null>(null)
+
+  useEffect(() => { listXSubscriptions().then(setSubs).catch(() => {}) }, [])
+  const subLabel = (id: number | null) =>
+    id == null ? '全部订阅' : (subs.find(s => s.id === id)?.label ?? `订阅#${id}`)
 
   async function add() {
     if (busy) return
+    if (sourceSubId === '') { toast.error('请选择来源订阅'); return }
     setBusy('new')
     try {
-      const r = await createRule({ label: label || '泛流量', min_faves: minFaves, lang, days, raw_query: rawQuery })
-      onChange([r, ...rules]); setLabel(''); setRawQuery('')
+      const r = await createRule({
+        label: label || subLabel(sourceSubId), source_subscription_id: sourceSubId,
+        min_faves: minFaves, days, max_results: maxResults,
+      })
+      onChange([r, ...rules]); setLabel('')
       toast.success('已添加规则')
     } catch { toast.error('添加失败') } finally { setBusy(null) }
   }
@@ -226,7 +236,7 @@ function RulesDrawer({ rules, onClose, onChange, onAfterCollect }: {
       <div className="relative w-[420px] max-w-full h-full bg-white dark:bg-zinc-950 border-l border-zinc-200 dark:border-zinc-800 overflow-y-auto p-5 space-y-4" onClick={e => e.stopPropagation()}>
         <div className="flex items-center gap-2">
           <Settings2 className="w-4 h-4 text-indigo-500" />
-          <span className="font-semibold text-sm">采集规则（X 泛流量）</span>
+          <span className="font-semibold text-sm">选取规则（从 X 订阅取数）</span>
           <Button size="sm" variant="outline" className="ml-auto gap-1" onClick={runAll} disabled={!!busy}>
             {busy === 'all' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5" />} 全部采集
           </Button>
@@ -234,24 +244,31 @@ function RulesDrawer({ rules, onClose, onChange, onAfterCollect }: {
 
         {/* New rule */}
         <div className="border border-zinc-200 dark:border-zinc-800 rounded-lg p-3 space-y-2">
-          <input value={label} onChange={e => setLabel(e.target.value)} placeholder="规则名（如：中文泛流量·赞过1500）"
+          <input value={label} onChange={e => setLabel(e.target.value)} placeholder="规则名（留空则用订阅名）"
             className="w-full px-2 py-1.5 border border-zinc-200 dark:border-zinc-700 rounded bg-transparent text-xs outline-none focus:border-indigo-400" />
+          <label className="text-[10px] text-zinc-500 block">来源订阅
+            <select value={sourceSubId} onChange={e => setSourceSubId(e.target.value === '' ? '' : Number(e.target.value))}
+              className="w-full px-2 py-1 border border-zinc-200 dark:border-zinc-700 rounded bg-transparent text-xs outline-none focus:border-indigo-400">
+              <option value="">— 选择一个 X 订阅 —</option>
+              {subs.map(s => (
+                <option key={s.id} value={s.id}>{s.label}（{s.kind === 'search' ? '搜索' : '时间线'}）</option>
+              ))}
+            </select>
+          </label>
           <div className="grid grid-cols-3 gap-2">
-            <label className="text-[10px] text-zinc-500">min_faves
+            <label className="text-[10px] text-zinc-500">最低赞
               <input type="number" value={minFaves} onChange={e => setMinFaves(Number(e.target.value))}
                 className="w-full px-2 py-1 border border-zinc-200 dark:border-zinc-700 rounded bg-transparent text-xs outline-none focus:border-indigo-400" />
             </label>
-            <label className="text-[10px] text-zinc-500">lang
-              <input value={lang} onChange={e => setLang(e.target.value)}
-                className="w-full px-2 py-1 border border-zinc-200 dark:border-zinc-700 rounded bg-transparent text-xs outline-none focus:border-indigo-400" />
-            </label>
-            <label className="text-[10px] text-zinc-500">days
+            <label className="text-[10px] text-zinc-500">天数
               <input type="number" value={days} onChange={e => setDays(Number(e.target.value))}
                 className="w-full px-2 py-1 border border-zinc-200 dark:border-zinc-700 rounded bg-transparent text-xs outline-none focus:border-indigo-400" />
             </label>
+            <label className="text-[10px] text-zinc-500">上限
+              <input type="number" value={maxResults} onChange={e => setMaxResults(Number(e.target.value))}
+                className="w-full px-2 py-1 border border-zinc-200 dark:border-zinc-700 rounded bg-transparent text-xs outline-none focus:border-indigo-400" />
+            </label>
           </div>
-          <input value={rawQuery} onChange={e => setRawQuery(e.target.value)} placeholder="raw_query（可选，填了则覆盖上面）"
-            className="w-full px-2 py-1.5 border border-zinc-200 dark:border-zinc-700 rounded bg-transparent text-xs outline-none focus:border-indigo-400" />
           <Button size="sm" className="w-full gap-1" onClick={add} disabled={!!busy}>
             {busy === 'new' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />} 添加规则
           </Button>
@@ -259,7 +276,7 @@ function RulesDrawer({ rules, onClose, onChange, onAfterCollect }: {
 
         {/* Rule list */}
         <div className="space-y-2">
-          {rules.length === 0 && <p className="text-xs text-zinc-400 text-center py-4">还没有采集规则</p>}
+          {rules.length === 0 && <p className="text-xs text-zinc-400 text-center py-4">还没有选取规则</p>}
           {rules.map(r => (
             <div key={r.id} className="border border-zinc-200 dark:border-zinc-800 rounded-lg p-3 text-xs space-y-1">
               <div className="flex items-center gap-2">
@@ -268,7 +285,7 @@ function RulesDrawer({ rules, onClose, onChange, onAfterCollect }: {
                   {r.enabled ? '启用' : '停用'}
                 </button>
               </div>
-              <p className="text-zinc-400 break-all">{r.raw_query || `min_faves:${r.min_faves} lang:${r.lang} (近${r.days}天)`}</p>
+              <p className="text-zinc-400 break-all">来源：{subLabel(r.source_subscription_id)} · 最低赞 {r.min_faves} · 近 {r.days} 天</p>
               {r.last_error && <p className="text-red-500 break-all">err: {r.last_error}</p>}
               <div className="flex items-center gap-1 pt-1">
                 <Button size="sm" variant="outline" className="h-6 gap-1 text-[11px]" onClick={() => runOne(r)} disabled={!!busy}>
