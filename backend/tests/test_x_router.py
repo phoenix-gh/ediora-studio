@@ -83,6 +83,34 @@ def test_delete_subscription(client):
     assert client.get(BASE).json() == []
 
 
+def test_delete_subscription_also_deletes_its_posts(client):
+    sub = client.post(BASE, json={"url": "https://x.com/a"}).json()
+    with patch("routers.x.grab_timeline",
+               new=AsyncMock(return_value=[_fake_post("p1"), _fake_post("p2")])):
+        client.post(f"/api/x/subscriptions/{sub['id']}/collect-sync")
+    assert len(client.get("/api/x/posts").json()) == 2
+
+    r = client.delete(f"{BASE}/{sub['id']}")
+    assert r.status_code == 200
+    # associated posts are gone
+    assert client.get("/api/x/posts").json() == []
+
+
+def test_delete_only_removes_its_own_posts(client):
+    a = client.post(BASE, json={"url": "https://x.com/a"}).json()
+    b = client.post(BASE, json={"url": "https://x.com/b"}).json()
+    with patch("routers.x.grab_timeline",
+               new=AsyncMock(return_value=[_fake_post("a1")])):
+        client.post(f"/api/x/subscriptions/{a['id']}/collect-sync")
+    with patch("routers.x.grab_timeline",
+               new=AsyncMock(return_value=[_fake_post("b1")])):
+        client.post(f"/api/x/subscriptions/{b['id']}/collect-sync")
+
+    client.delete(f"{BASE}/{a['id']}")
+    posts = client.get("/api/x/posts").json()
+    assert {p["tweet_id"] for p in posts} == {"b1"}
+
+
 def test_delete_missing_returns_404(client):
     r = client.delete(f"{BASE}/999")
     assert r.status_code == 404
