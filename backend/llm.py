@@ -11,6 +11,11 @@ import openai
 from config import get_config, effective_model, effective_base_url
 
 
+class RefClassifyError(Exception):
+    """参考文案精筛失败（LLM 调用异常 / 限流 / 安全拦截 / 返回不可解析）。
+    携带人类可读原因，供采集层写入 rule.last_error 并透传到前端。"""
+
+
 async def _named_session_chat(
     message: str,
     conversation: str,
@@ -343,25 +348,19 @@ def _parse_translation_output(raw: str) -> list[dict]:
     return results
 
 
-async def classify_ref_posts(
-    posts: list[dict],
-    categories: list[str],
-    scene_tags: list[str],
-) -> list[dict]:
-    """批量判定爆款帖是否值得作参考文案 + 打分 + 归类 + 标使用场景 + 清洗。
-    posts[i]: {source_id, text, likes, ...}
-    返回 [{source_id, keep, score, category, scene_tags, tags, text_clean}]。
-    解析失败/空 → 返回 []（调用方据此整批跳过）。"""
-    if not posts:
-        return []
+# 单次精筛的帖子数。整批拆小块逐块调用：避免输出超 max_tokens 被截断、
+# 也缩小"一条敏感帖毒化整批"的影响面。
+_REF_CLASSIFY_CHUNK = 6
 
+
+async def _classify_ref_chunk(
+    posts: list[dict], cat_list: str, scene_list: str,
+) -> list[dict]:
+    """筛一小块帖子。失败（调用异常 / 空 / 非 JSON / 解析失败）→ 抛 RefClassifyError。"""
     posts_text = "\n\n".join(
         f"[{p['source_id']}] 赞{p.get('likes', 0)}：{(p.get('text') or '')[:400]}"
-        for p in posts[:40]
+        for p in posts
     )
-    cat_list = "、".join(categories)
-    scene_list = "、".join(scene_tags)
-
     prompt = f"""你是中文自媒体的「参考文案」筛选与归类 AI。下面是一批 X 平台高赞帖子，
 判断每条是否值得收进「参考文案库」（有梗、有共鸣、有观点、可复用为写作素材即 keep=true；
 广告/带货/纯导流/无信息量/低俗无价值 → keep=false）。
@@ -380,9 +379,57 @@ async def classify_ref_posts(
 
 只输出 JSON 数组，不要其他文字。"""
 
+    # 每条输出最长可达 ~500 token（含 text_clean 全文），按块大小给足额度，避免截断。
+    max_tokens = min(8000, 700 * len(posts) + 800)
     try:
-        result = _extract_json_array(await _call(prompt, max_tokens=3000))
+        raw = await _call(prompt, max_tokens=max_tokens)
     except Exception as e:
-        print(f"[llm] classify_ref_posts error: {e}")
+        raise RefClassifyError(f"LLM 调用失败：{str(e)[:200]}") from e
+
+    raw = (raw or "").strip()
+    if not raw:
+        raise RefClassifyError("LLM 返回空内容（可能被安全策略拦截或限流）")
+
+    start, end = raw.find("["), raw.rfind("]") + 1
+    if not (start >= 0 and end > start):
+        raise RefClassifyError(f"LLM 未返回 JSON 数组：{raw[:120]}")
+    try:
+        result = json.loads(raw[start:end])
+    except Exception as e:
+        raise RefClassifyError(f"LLM 输出 JSON 解析失败（疑似截断）：{raw[:120]}") from e
+    if not isinstance(result, list):
+        raise RefClassifyError("LLM 输出不是 JSON 数组")
+    return result
+
+
+async def classify_ref_posts(
+    posts: list[dict],
+    categories: list[str],
+    scene_tags: list[str],
+) -> list[dict]:
+    """批量判定爆款帖是否值得作参考文案 + 打分 + 归类 + 标使用场景 + 清洗。
+    posts[i]: {source_id, text, likes, ...}
+    返回 [{source_id, keep, score, category, scene_tags, tags, text_clean}]。
+
+    内部按 _REF_CLASSIFY_CHUNK 拆块逐块调用 LLM：
+    - 任一块成功 → 累加其结果（部分成功；失败块的帖子下次重试）。
+    - 全部块都失败 → 抛出第一个 RefClassifyError，供采集层写入 last_error。"""
+    if not posts:
         return []
-    return result if isinstance(result, list) else []
+
+    cat_list = "、".join(categories)
+    scene_list = "、".join(scene_tags)
+    batch = posts[:40]
+
+    results: list[dict] = []
+    errors: list[RefClassifyError] = []
+    for i in range(0, len(batch), _REF_CLASSIFY_CHUNK):
+        chunk = batch[i:i + _REF_CLASSIFY_CHUNK]
+        try:
+            results.extend(await _classify_ref_chunk(chunk, cat_list, scene_list))
+        except RefClassifyError as e:
+            errors.append(e)
+
+    if not results and errors:
+        raise errors[0]
+    return results

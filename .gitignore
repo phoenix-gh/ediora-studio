@@ -35,6 +35,10 @@ wemedia-studio/out/
 wemedia-studio/.turbo/
 wemedia-studio/tsconfig.tsbuildinfo
 
+# ── Dev 服务管理 (dev.sh) ───────────────────────────────
+.run/
+logs/
+
 # ── System ──────────────────────────────────────────────
 .DS_Store
 Thumbs.db

@@ -10,7 +10,7 @@ from sqlalchemy.dialects.sqlite import insert as _sl_insert
 
 from models import RefMaterial, RefCollectRule, RefSeen
 from feedgrab_client import ParsedPost, search_top
-from llm import classify_ref_posts
+from llm import classify_ref_posts, RefClassifyError
 from config import get_config
 
 _URL_RE = re.compile(r"https?://")
@@ -111,7 +111,12 @@ async def collect_rule(db: AsyncSession, rule: RefCollectRule) -> int:
         categories = [c for c in cfg.get("ref_categories", "").split(",") if c]
         payload = [{"source_id": p.tweet_id, "text": p.content, "likes": p.likes}
                    for p in survivors]
-        verdicts = await classify_ref_posts(payload, categories, SCENE_TAGS)
+        try:
+            verdicts = await classify_ref_posts(payload, categories, SCENE_TAGS)
+        except RefClassifyError as e:
+            rule.last_error = f"精筛失败（{len(survivors)} 条待筛）：{e}"[:500]
+            await db.commit()
+            raise
         vmap = {str(v.get("source_id")): v for v in verdicts}
         by_id = {p.tweet_id: p for p in survivors}
         for sid, p in by_id.items():

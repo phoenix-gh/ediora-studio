@@ -84,6 +84,37 @@ def test_collect_rule_only_keeps_kept_and_writes_seen(db_session):
     asyncio.new_event_loop().run_until_complete(_run())
 
 
+def test_collect_rule_records_last_error_on_classify_failure(db_session):
+    """精筛失败时，把原因写进 rule.last_error 并抛出（不再静默清空 last_error）。"""
+    import ref_collector as rc
+    from llm import RefClassifyError
+    from models import RefCollectRule, RefMaterial
+    rid = _rule(db_session)
+
+    async def fake_search(**kw):
+        return [_post("k1")]
+    async def fail_classify(posts, categories, scene_tags):
+        raise RefClassifyError("LLM 返回空内容（可能被安全策略拦截或限流）")
+    async def fake_cfg():
+        return {"ref_categories": "其他"}
+
+    async def _run():
+        async with db_session() as db:
+            rule = await db.get(RefCollectRule, rid)
+            with patch.object(rc, "search_top", new=fake_search), \
+                 patch.object(rc, "classify_ref_posts", new=fail_classify), \
+                 patch.object(rc, "get_config", new=fake_cfg):
+                with pytest.raises(RefClassifyError):
+                    await rc.collect_rule(db, rule)
+            refreshed = await db.get(RefCollectRule, rid)
+            assert "精筛失败" in refreshed.last_error
+            assert "安全策略" in refreshed.last_error
+            # 失败时不应入库
+            mats = (await db.execute(select(RefMaterial))).scalars().all()
+            assert mats == []
+    asyncio.new_event_loop().run_until_complete(_run())
+
+
 def test_collect_rule_skips_seen_ids(db_session):
     import ref_collector as rc
     from models import RefCollectRule, RefSeen
