@@ -521,7 +521,7 @@ function SubscribeDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle className="text-base">X 订阅管理</DialogTitle>
           <DialogDescription className="text-xs">
