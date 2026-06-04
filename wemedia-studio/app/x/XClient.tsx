@@ -584,7 +584,7 @@ function SubscribeDialog({
           </form>
         )}
 
-        <div>
+        <div className="min-w-0">
           <div className="text-[11px] uppercase tracking-wider text-zinc-400 mb-1.5 px-0.5">
             已订阅 · {subs.length}
           </div>
