@@ -219,9 +219,19 @@ class XSubscription(Base):
     __tablename__ = "x_subscriptions"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    url: Mapped[str] = mapped_column(String, unique=True, nullable=False, index=True)
+    url: Mapped[str | None] = mapped_column(String, unique=True, nullable=True, index=True)
     label: Mapped[str] = mapped_column(String, default="")
+    kind: Mapped[str] = mapped_column(String, default="timeline")  # timeline | search
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    # search-only params (kind == "search")
+    raw_query: Mapped[str] = mapped_column(String, default="")
+    min_faves: Mapped[int] = mapped_column(Integer, default=0)
+    min_retweets: Mapped[int] = mapped_column(Integer, default=0)
+    lang: Mapped[str] = mapped_column(String, default="")
+    days: Mapped[int] = mapped_column(Integer, default=1)
+    extra_terms: Mapped[str] = mapped_column(String, default="")
+    sort: Mapped[str] = mapped_column(String, default="top")
+    max_results: Mapped[int] = mapped_column(Integer, default=100)
     last_collected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_error: Mapped[str] = mapped_column(String, default="")
     added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, index=True)
@@ -245,6 +255,7 @@ class XPost(Base):
     views: Mapped[int] = mapped_column(Integer, default=0)
     author_avatar: Mapped[str] = mapped_column(String, default="")
     cover_image: Mapped[str] = mapped_column(String, default="")
+    possibly_sensitive: Mapped[bool] = mapped_column(Boolean, default=False)
     raw_markdown: Mapped[str] = mapped_column(Text, default="")
 
 
@@ -715,6 +726,7 @@ class RefCollectRule(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     label: Mapped[str] = mapped_column(String, default="")
     platform: Mapped[str] = mapped_column(String, default="x")
+    source_subscription_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     min_faves: Mapped[int] = mapped_column(Integer, default=1500)
     min_retweets: Mapped[int] = mapped_column(Integer, default=0)
     lang: Mapped[str] = mapped_column(String, default="zh")
