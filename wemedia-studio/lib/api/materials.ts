@@ -28,7 +28,8 @@ export interface MaterialCreate {
 }
 
 export interface CollectRule {
-  id: number; label: string; min_faves: number; min_retweets: number
+  id: number; label: string; source_subscription_id: number | null
+  min_faves: number; min_retweets: number
   lang: string; days: number; exclude_sensitive: boolean
   extra_terms: string; raw_query: string; sort: string; max_results: number
   enabled: boolean; last_collected_at: string | null; last_error: string

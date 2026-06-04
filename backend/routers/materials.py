@@ -66,6 +66,7 @@ class MaterialPatch(BaseModel):
 class RuleOut(BaseModel):
     id: int
     label: str
+    source_subscription_id: Optional[int] = None
     min_faves: int
     min_retweets: int
     lang: str
@@ -83,6 +84,7 @@ class RuleOut(BaseModel):
 
 class RuleCreate(BaseModel):
     label: str = ""
+    source_subscription_id: Optional[int] = None
     min_faves: int = 1500
     min_retweets: int = 0
     lang: str = "zh"
@@ -95,6 +97,7 @@ class RuleCreate(BaseModel):
 
 class RulePatch(BaseModel):
     label: Optional[str] = None
+    source_subscription_id: Optional[int] = None
     min_faves: Optional[int] = None
     min_retweets: Optional[int] = None
     lang: Optional[str] = None

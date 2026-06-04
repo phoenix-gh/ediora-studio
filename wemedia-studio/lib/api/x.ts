@@ -4,13 +4,36 @@ import { apiFetch } from './client'
 
 export interface XSubscription {
   id: number
-  url: string
+  url: string | null
   label: string
+  kind: 'timeline' | 'search'
   enabled: boolean
+  raw_query: string
+  min_faves: number
+  min_retweets: number
+  lang: string
+  days: number
+  extra_terms: string
+  sort: string
+  max_results: number
   last_collected_at: string | null
   last_error: string
   added_at: string
   post_count: number
+}
+
+export interface CreateXSubscriptionInput {
+  kind?: 'timeline' | 'search'
+  url?: string
+  label?: string
+  raw_query?: string
+  min_faves?: number
+  min_retweets?: number
+  lang?: string
+  days?: number
+  extra_terms?: string
+  sort?: string
+  max_results?: number
 }
 
 export interface XPost {
@@ -68,10 +91,15 @@ export async function listXSubscriptions(): Promise<XSubscription[]> {
   return apiFetch<XSubscription[]>('/x/subscriptions')
 }
 
-export async function createXSubscription(url: string, label?: string): Promise<XSubscription> {
+export async function createXSubscription(
+  input: string | CreateXSubscriptionInput,
+  label?: string,
+): Promise<XSubscription> {
+  const body: CreateXSubscriptionInput =
+    typeof input === 'string' ? { url: input, label } : input
   return apiFetch<XSubscription>('/x/subscriptions', {
     method: 'POST',
-    body: JSON.stringify({ url, label }),
+    body: JSON.stringify(body),
   })
 }
 
