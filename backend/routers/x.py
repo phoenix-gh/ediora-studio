@@ -16,9 +16,18 @@ router = APIRouter(prefix="/x", tags=["x"])
 
 class SubscriptionOut(BaseModel):
     id: int
-    url: str
+    url: Optional[str] = None
     label: str
+    kind: str = "timeline"
     enabled: bool
+    raw_query: str = ""
+    min_faves: int = 0
+    min_retweets: int = 0
+    lang: str = ""
+    days: int = 1
+    extra_terms: str = ""
+    sort: str = "top"
+    max_results: int = 100
     last_collected_at: Optional[datetime]
     last_error: str
     added_at: datetime
@@ -27,8 +36,17 @@ class SubscriptionOut(BaseModel):
 
 
 class SubscriptionCreate(BaseModel):
-    url: str
+    kind: str = "timeline"
+    url: Optional[str] = None
     label: Optional[str] = None
+    raw_query: str = ""
+    min_faves: int = 0
+    min_retweets: int = 0
+    lang: str = ""
+    days: int = 1
+    extra_terms: str = ""
+    sort: str = "top"
+    max_results: int = 100
 
 
 class SubscriptionPatch(BaseModel):
@@ -51,7 +69,10 @@ async def _to_out(db: AsyncSession, sub: XSubscription) -> SubscriptionOut:
         .where(XPost.subscription_id == sub.id)
     )).scalar() or 0
     return SubscriptionOut(
-        id=sub.id, url=sub.url, label=sub.label, enabled=sub.enabled,
+        id=sub.id, url=sub.url, label=sub.label, kind=sub.kind, enabled=sub.enabled,
+        raw_query=sub.raw_query, min_faves=sub.min_faves, min_retweets=sub.min_retweets,
+        lang=sub.lang, days=sub.days, extra_terms=sub.extra_terms, sort=sub.sort,
+        max_results=sub.max_results,
         last_collected_at=sub.last_collected_at, last_error=sub.last_error,
         added_at=sub.added_at, post_count=int(cnt),
     )
@@ -71,7 +92,23 @@ async def list_subscriptions(db: AsyncSession = Depends(get_db)):
 async def create_subscription(
     body: SubscriptionCreate, db: AsyncSession = Depends(get_db),
 ):
-    url = body.url.strip()
+    if body.kind == "search":
+        if not body.raw_query.strip():
+            raise HTTPException(400, "搜索订阅需要 raw_query")
+        label = body.label or f"搜索:{body.raw_query[:24]}"
+        sub = XSubscription(
+            kind="search", url=None, label=label, enabled=True,
+            raw_query=body.raw_query.strip(), min_faves=body.min_faves,
+            min_retweets=body.min_retweets, lang=body.lang, days=body.days,
+            extra_terms=body.extra_terms, sort=body.sort, max_results=body.max_results,
+            added_at=datetime.now(timezone.utc),
+        )
+        db.add(sub)
+        await db.commit()
+        await db.refresh(sub)
+        return await _to_out(db, sub)
+
+    url = (body.url or "").strip()
     if not url.startswith(("http://", "https://")):
         raise HTTPException(400, "URL 必须以 http(s):// 开头")
     existing = (await db.execute(
@@ -91,7 +128,7 @@ async def create_subscription(
             label = _default_label(url)
 
     sub = XSubscription(
-        url=url, label=label,
+        kind="timeline", url=url, label=label,
         enabled=True, added_at=datetime.now(timezone.utc),
     )
     db.add(sub)
@@ -193,6 +230,7 @@ def _upsert_post_stmt(db: AsyncSession, sub_id: int, p):
         replies=p.replies, reposts=p.reposts,
         likes=p.likes, views=p.views,
         author_avatar=p.author_avatar, cover_image=p.cover_image,
+        possibly_sensitive=getattr(p, "possibly_sensitive", False),
         raw_markdown=p.raw_markdown,
     )
     stmt = stmt.on_conflict_do_update(
@@ -212,7 +250,7 @@ def _upsert_post_stmt(db: AsyncSession, sub_id: int, p):
 
 # ─── Collect ────────────────────────────────────────────────────────────────
 
-from feedgrab_client import grab_timeline, search_x, auth_status
+from feedgrab_client import grab_timeline, search_x, search_top, auth_status
 
 
 async def _compute_collect_cutoff(db: AsyncSession, sub_id: int) -> datetime:
@@ -232,11 +270,18 @@ async def _compute_collect_cutoff(db: AsyncSession, sub_id: int) -> datetime:
 
 
 async def _collect_one(db: AsyncSession, sub: XSubscription) -> int:
-    cutoff = await _compute_collect_cutoff(db, sub.id)
     try:
-        # Cutoff is pushed into feedgrab's paginator so it stops fetching
-        # once it crosses the boundary — no after-the-fact filtering needed.
-        posts = await grab_timeline(sub.url, since=cutoff)
+        if sub.kind == "search":
+            posts = await search_top(
+                raw_query=sub.raw_query, min_faves=sub.min_faves,
+                min_retweets=sub.min_retweets, lang=sub.lang, days=sub.days,
+                extra_terms=sub.extra_terms, sort=sub.sort, limit=sub.max_results,
+            )
+        else:
+            # Cutoff is pushed into feedgrab's paginator so it stops fetching
+            # once it crosses the boundary — no after-the-fact filtering needed.
+            cutoff = await _compute_collect_cutoff(db, sub.id)
+            posts = await grab_timeline(sub.url, since=cutoff)
     except Exception as e:
         sub.last_error = str(e)[:500]
         await db.commit()

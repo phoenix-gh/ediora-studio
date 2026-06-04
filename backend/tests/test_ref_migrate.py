@@ -39,3 +39,30 @@ def test_migrate_quotes_idempotent(env):
         a = next(m for m in mats if m.text == "金句A")
         assert a.platform == "manual" and a.scene_tags == ["opener"] and a.author == "鲁迅"
     asyncio.new_event_loop().run_until_complete(_run())
+
+
+def test_migrate_rules_to_search_subs_idempotent(env):
+    from database import SessionLocal
+    from models import RefCollectRule, XSubscription
+    from ref_migrate import migrate_rules_to_search_subs
+    from sqlalchemy import select
+    from datetime import datetime, timezone
+
+    async def _run():
+        async with SessionLocal() as db:
+            db.add(RefCollectRule(label="泛流量", raw_query="min_faves:1500 lang:zh",
+                                  min_faves=1500, lang="zh", days=2, max_results=50,
+                                  enabled=True, added_at=datetime.now(timezone.utc)))
+            await db.commit()
+        async with SessionLocal() as db:
+            await migrate_rules_to_search_subs(db)
+        async with SessionLocal() as db:
+            await migrate_rules_to_search_subs(db)  # 第二次应 no-op
+        async with SessionLocal() as db:
+            subs = (await db.execute(select(XSubscription))).scalars().all()
+            rules = (await db.execute(select(RefCollectRule))).scalars().all()
+        assert len(subs) == 1
+        assert subs[0].kind == "search" and subs[0].raw_query == "min_faves:1500 lang:zh"
+        assert subs[0].label == "泛流量" and subs[0].url is None
+        assert rules[0].source_subscription_id == subs[0].id
+    asyncio.new_event_loop().run_until_complete(_run())

@@ -8,8 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.dialects.postgresql import insert as _pg_insert
 from sqlalchemy.dialects.sqlite import insert as _sl_insert
 
-from models import RefMaterial, RefCollectRule, RefSeen
-from feedgrab_client import ParsedPost, search_top
+from models import RefMaterial, RefCollectRule, RefSeen, XPost
+from feedgrab_client import ParsedPost
 from llm import classify_ref_posts, RefClassifyError
 from config import get_config
 
@@ -82,18 +82,36 @@ async def _upsert_material(db: AsyncSession, rule_id: int, p: ParsedPost, v: dic
     await db.execute(stmt)
 
 
+def _xpost_to_parsed(x: XPost) -> ParsedPost:
+    return ParsedPost(
+        tweet_id=x.tweet_id, username=x.username, display_name=x.display_name,
+        content=x.content, url=x.url, published_at=x.published_at,
+        replies=x.replies, reposts=x.reposts, likes=x.likes, views=x.views,
+        author_avatar=x.author_avatar, cover_image=x.cover_image,
+        raw_markdown=x.raw_markdown, possibly_sensitive=x.possibly_sensitive,
+    )
+
+
 async def collect_rule(db: AsyncSession, rule: RefCollectRule) -> int:
-    """采集一条规则，返回新入库/更新的条目数。异常写 rule.last_error 后抛出。"""
+    """从 x_posts 取候选 → 粗筛 → LLM 精筛 → 入库。返回新入库/更新条目数。
+    异常写 rule.last_error 后抛出。"""
+    from datetime import timedelta
+    since = datetime.now(timezone.utc) - timedelta(days=max(1, rule.days))
+    stmt = (
+        select(XPost)
+        .where(XPost.published_at >= since, XPost.likes >= rule.min_faves)
+        .order_by(XPost.published_at.desc())
+        .limit(max(1, rule.max_results))
+    )
+    if rule.source_subscription_id is not None:
+        stmt = stmt.where(XPost.subscription_id == rule.source_subscription_id)
     try:
-        posts = await search_top(
-            raw_query=rule.raw_query, min_faves=rule.min_faves,
-            min_retweets=rule.min_retweets, lang=rule.lang, days=rule.days,
-            extra_terms=rule.extra_terms, sort=rule.sort, limit=rule.max_results,
-        )
+        rows = (await db.execute(stmt)).scalars().all()
     except Exception as e:
         rule.last_error = str(e)[:500]
         await db.commit()
         raise
+    posts = [_xpost_to_parsed(x) for x in rows]
 
     seen = await _already_seen(db, [p.tweet_id for p in posts])
     fresh = [p for p in posts if p.tweet_id not in seen]

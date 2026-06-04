@@ -46,6 +46,20 @@ async def init_db():
         await conn.execute(text(
             "ALTER TABLE x_posts ADD COLUMN IF NOT EXISTS cover_image VARCHAR NOT NULL DEFAULT ''"
         ))
+        if not DATABASE_URL.startswith("sqlite"):
+            # X search-subscription + ref-consumer schema (idempotent, PG only)
+            await conn.execute(text("ALTER TABLE x_posts ADD COLUMN IF NOT EXISTS possibly_sensitive BOOLEAN NOT NULL DEFAULT FALSE"))
+            await conn.execute(text("ALTER TABLE x_subscriptions ADD COLUMN IF NOT EXISTS kind VARCHAR NOT NULL DEFAULT 'timeline'"))
+            await conn.execute(text("ALTER TABLE x_subscriptions ADD COLUMN IF NOT EXISTS raw_query VARCHAR NOT NULL DEFAULT ''"))
+            await conn.execute(text("ALTER TABLE x_subscriptions ADD COLUMN IF NOT EXISTS min_faves INTEGER NOT NULL DEFAULT 0"))
+            await conn.execute(text("ALTER TABLE x_subscriptions ADD COLUMN IF NOT EXISTS min_retweets INTEGER NOT NULL DEFAULT 0"))
+            await conn.execute(text("ALTER TABLE x_subscriptions ADD COLUMN IF NOT EXISTS lang VARCHAR NOT NULL DEFAULT ''"))
+            await conn.execute(text("ALTER TABLE x_subscriptions ADD COLUMN IF NOT EXISTS days INTEGER NOT NULL DEFAULT 1"))
+            await conn.execute(text("ALTER TABLE x_subscriptions ADD COLUMN IF NOT EXISTS extra_terms VARCHAR NOT NULL DEFAULT ''"))
+            await conn.execute(text("ALTER TABLE x_subscriptions ADD COLUMN IF NOT EXISTS sort VARCHAR NOT NULL DEFAULT 'top'"))
+            await conn.execute(text("ALTER TABLE x_subscriptions ADD COLUMN IF NOT EXISTS max_results INTEGER NOT NULL DEFAULT 100"))
+            await conn.execute(text("ALTER TABLE x_subscriptions ALTER COLUMN url DROP NOT NULL"))
+            await conn.execute(text("ALTER TABLE ref_collect_rules ADD COLUMN IF NOT EXISTS source_subscription_id INTEGER"))
         # Lightweight in-place migrations for columns added after the original
         # table creation. PostgreSQL only — ADD COLUMN IF NOT EXISTS is no-op
         # when the column is already present.
@@ -119,8 +133,10 @@ END $$
 
     # One-off: migrate legacy quotes into unified ref_materials (idempotent)
     try:
-        from ref_migrate import migrate_quotes_to_materials
+        from ref_migrate import migrate_quotes_to_materials, migrate_rules_to_search_subs
         async with SessionLocal() as db:
             await migrate_quotes_to_materials(db)
+        async with SessionLocal() as db:
+            await migrate_rules_to_search_subs(db)
     except Exception as e:
         print(f"[init_db] quotes→materials migration skipped: {e}")
