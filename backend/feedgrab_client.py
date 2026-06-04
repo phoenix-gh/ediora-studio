@@ -428,9 +428,7 @@ def _build_top_query(*, min_faves: int, min_retweets: int, lang: str,
         parts.append(f"min_retweets:{min_retweets}")
     if lang:
         parts.append(f"lang:{lang}")
-    # NOTE: -filter:replies / -filter:retweets make this X search path return
-    # zero results (confirmed empirically); only -filter:links is safe.
-    parts.append("-filter:links")
+    parts += ["-filter:replies", "-filter:links", "-filter:retweets"]
     if days > 0:
         since = (_date.today() - _timedelta(days=days)).isoformat()
         parts.append(f"since:{since}")

@@ -96,11 +96,14 @@ async def create_subscription(
         if not body.raw_query.strip():
             raise HTTPException(400, "搜索订阅需要 raw_query")
         label = body.label or f"搜索:{body.raw_query[:24]}"
+        # Use X "Latest" product (sort=live): the "Top" product returns 0 for
+        # many operator queries (e.g. with -filter:replies). Latest honors all
+        # advanced operators and suits a subscription (recent matching posts).
         sub = XSubscription(
             kind="search", url=None, label=label, enabled=True,
             raw_query=body.raw_query.strip(), min_faves=body.min_faves,
             min_retweets=body.min_retweets, lang=body.lang, days=body.days,
-            extra_terms=body.extra_terms, sort=body.sort, max_results=body.max_results,
+            extra_terms=body.extra_terms, sort="live", max_results=body.max_results,
             added_at=datetime.now(timezone.utc),
         )
         db.add(sub)

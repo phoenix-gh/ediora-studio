@@ -58,7 +58,9 @@ async def migrate_rules_to_search_subs(db: AsyncSession) -> int:
             kind="search", url=None, label=r.label or f"搜索:{r.raw_query[:24]}",
             enabled=r.enabled, raw_query=r.raw_query, min_faves=r.min_faves,
             min_retweets=r.min_retweets, lang=r.lang, days=r.days,
-            extra_terms=r.extra_terms, sort=r.sort, max_results=r.max_results,
+            # sort="live" (Latest): the "Top" product returns 0 for many operator
+            # queries (e.g. -filter:replies); Latest honors all operators.
+            extra_terms=r.extra_terms, sort="live", max_results=r.max_results,
             added_at=datetime.now(timezone.utc),
         )
         db.add(sub)

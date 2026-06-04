@@ -488,12 +488,12 @@ function SubscribeDialog({
 
   const sinceDays = (n: number) =>
     new Date(Date.now() - n * 86400000).toISOString().slice(0, 10)
-  // 注意：X 搜索此路径下 -filter:replies / -filter:retweets 会让结果归零，故不提供这两个「排除」chip。
   const QUICK_TOKENS: { label: string; token: string }[] = [
     { label: 'OR 组', token: '(关键词A OR 关键词B)' },
+    { label: '排除回复', token: '-filter:replies' },
     { label: '只看回复', token: 'filter:replies' },
-    { label: '只看媒体', token: 'filter:media' },
     { label: '排除链接', token: '-filter:links' },
+    { label: '排除转推', token: '-filter:retweets' },
     { label: '高赞', token: 'min_faves:1500' },
     { label: '中文', token: 'lang:zh' },
     { label: '近7天', token: `since:${sinceDays(7)}` },
