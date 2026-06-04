@@ -641,7 +641,7 @@ function SubscribeDialog({
                         </div>
                       )}
                       {(s.kind === 'search' ? s.raw_query : s.url) && (
-                        <div className="text-[11px] text-zinc-500 font-mono truncate"
+                        <div className="text-[11px] text-zinc-500 font-mono break-words whitespace-pre-wrap"
                           title={(s.kind === 'search' ? s.raw_query : s.url) || ''}>
                           {s.kind === 'search' ? s.raw_query : s.url}
                         </div>
