@@ -279,3 +279,43 @@ def test_collect_incremental_passes_hour_aligned_cutoff(client):
 
     _, kwargs = mock.await_args
     assert kwargs["since"] == seed_at.replace(minute=0, second=0, microsecond=0)
+
+
+# ── Search subscriptions ──────────────────────────────────────────────────────
+
+
+def test_create_search_subscription(client):
+    r = client.post(BASE, json={
+        "kind": "search", "label": "泛流量",
+        "raw_query": "min_faves:1500 lang:zh", "max_results": 50,
+    })
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["kind"] == "search"
+    assert body["label"] == "泛流量"
+    assert body["url"] in (None, "")
+
+
+def test_search_subscription_collect_calls_search_top(client):
+    sub = client.post(BASE, json={
+        "kind": "search", "raw_query": "min_faves:1500 lang:zh",
+        "min_faves": 1500, "lang": "zh", "days": 2, "max_results": 30,
+    }).json()
+
+    mock = AsyncMock(return_value=[_fake_post("s1"), _fake_post("s2")])
+    with patch("routers.x.search_top", new=mock):
+        r = client.post(f"/api/x/subscriptions/{sub['id']}/collect-sync")
+    assert r.status_code == 200, r.text
+    assert r.json()["new_posts"] == 2
+
+    _, kwargs = mock.await_args
+    assert kwargs["raw_query"] == "min_faves:1500 lang:zh"
+    assert kwargs["limit"] == 30
+
+    posts = client.get(f"/api/x/posts?subscription_id={sub['id']}").json()
+    assert {p["tweet_id"] for p in posts} == {"s1", "s2"}
+
+
+def test_search_subscription_create_requires_query(client):
+    r = client.post(BASE, json={"kind": "search", "raw_query": ""})
+    assert r.status_code == 400
