@@ -521,7 +521,7 @@ function SubscribeDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-xl">
+      <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle className="text-base">X 订阅管理</DialogTitle>
           <DialogDescription className="text-xs">
@@ -551,31 +551,35 @@ function SubscribeDialog({
             <Input value={rawQuery} onChange={e => setRawQuery(e.target.value)}
               placeholder="搜索语法，如 min_faves:1500 lang:zh"
               className="h-8 text-xs" />
-            <div className="flex items-center gap-2">
-              <label className="text-[11px] text-zinc-400 flex items-center gap-1">
-                最低赞 <Input type="number" value={minFaves}
+            <div className="grid grid-cols-4 gap-2">
+              <label className="text-[11px] text-zinc-400 space-y-0.5">
+                <span className="block px-0.5">最低赞</span>
+                <Input type="number" value={minFaves}
                   onChange={e => setMinFaves(Number(e.target.value) || 0)}
-                  className="h-7 w-20 text-xs" />
+                  className="h-7 w-full text-xs" />
               </label>
-              <label className="text-[11px] text-zinc-400 flex items-center gap-1">
-                语言 <Input value={lang} onChange={e => setLang(e.target.value)}
-                  className="h-7 w-14 text-xs" />
+              <label className="text-[11px] text-zinc-400 space-y-0.5">
+                <span className="block px-0.5">语言</span>
+                <Input value={lang} onChange={e => setLang(e.target.value)}
+                  className="h-7 w-full text-xs" />
               </label>
-              <label className="text-[11px] text-zinc-400 flex items-center gap-1">
-                天数 <Input type="number" value={days}
+              <label className="text-[11px] text-zinc-400 space-y-0.5">
+                <span className="block px-0.5">天数</span>
+                <Input type="number" value={days}
                   onChange={e => setDays(Number(e.target.value) || 1)}
-                  className="h-7 w-14 text-xs" />
+                  className="h-7 w-full text-xs" />
               </label>
-              <label className="text-[11px] text-zinc-400 flex items-center gap-1">
-                上限 <Input type="number" value={maxResults}
+              <label className="text-[11px] text-zinc-400 space-y-0.5">
+                <span className="block px-0.5">上限</span>
+                <Input type="number" value={maxResults}
                   onChange={e => setMaxResults(Number(e.target.value) || 1)}
-                  className="h-7 w-16 text-xs" />
+                  className="h-7 w-full text-xs" />
               </label>
-              <Button type="submit" size="sm" className="h-7 text-xs ml-auto"
-                disabled={adding || !rawQuery.trim()}>
-                {adding ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : '添加'}
-              </Button>
             </div>
+            <Button type="submit" size="sm" className="h-8 text-xs w-full"
+              disabled={adding || !rawQuery.trim()}>
+              {adding ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : '添加搜索订阅'}
+            </Button>
           </form>
         )}
 
