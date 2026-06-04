@@ -33,11 +33,27 @@ def _rule(db_session):
     from models import RefCollectRule
     async def _mk():
         async with db_session() as db:
-            r = RefCollectRule(label="t", raw_query="min_faves:1 lang:zh",
-                               exclude_sensitive=True, max_results=20)
+            r = RefCollectRule(label="t", source_subscription_id=1,
+                               min_faves=1, exclude_sensitive=True, days=7, max_results=20)
             db.add(r); await db.commit(); await db.refresh(r)
             return r.id
     return asyncio.new_event_loop().run_until_complete(_mk())
+
+
+def _seed_xpost(db_session, tid, *, likes=9000, sensitive=False, sub_id=1,
+                text="这是一个挺好笑的段子内容哈哈"):
+    from models import XPost
+    from datetime import datetime, timezone
+    async def _mk():
+        async with db_session() as db:
+            db.add(XPost(tweet_id=tid, subscription_id=sub_id, username="u",
+                         display_name="U", content=text,
+                         url=f"https://x.com/u/status/{tid}",
+                         published_at=datetime.now(timezone.utc),
+                         replies=1, reposts=2, likes=likes, views=likes * 10,
+                         possibly_sensitive=sensitive))
+            await db.commit()
+    asyncio.new_event_loop().run_until_complete(_mk())
 
 
 def test_prefilter_drops_sensitive_short_link_mention():
@@ -57,9 +73,9 @@ def test_collect_rule_only_keeps_kept_and_writes_seen(db_session):
     import ref_collector as rc
     from models import RefMaterial, RefSeen, RefCollectRule
     rid = _rule(db_session)
+    _seed_xpost(db_session, "k1")
+    _seed_xpost(db_session, "d1")
 
-    async def fake_search(**kw):
-        return [_post("k1"), _post("d1")]
     async def fake_classify(posts, categories, scene_tags):
         return [{"source_id": "k1", "keep": True, "score": 80, "category": "沙雕搞笑",
                  "scene_tags": ["resonance"], "tags": ["a"], "text_clean": "净"},
@@ -71,8 +87,7 @@ def test_collect_rule_only_keeps_kept_and_writes_seen(db_session):
     async def _run():
         async with db_session() as db:
             rule = await db.get(RefCollectRule, rid)
-            with patch.object(rc, "search_top", new=fake_search), \
-                 patch.object(rc, "classify_ref_posts", new=fake_classify), \
+            with patch.object(rc, "classify_ref_posts", new=fake_classify), \
                  patch.object(rc, "get_config", new=fake_cfg):
                 kept = await rc.collect_rule(db, rule)
             assert kept == 1
@@ -90,9 +105,8 @@ def test_collect_rule_records_last_error_on_classify_failure(db_session):
     from llm import RefClassifyError
     from models import RefCollectRule, RefMaterial
     rid = _rule(db_session)
+    _seed_xpost(db_session, "k1")
 
-    async def fake_search(**kw):
-        return [_post("k1")]
     async def fail_classify(posts, categories, scene_tags):
         raise RefClassifyError("LLM 返回空内容（可能被安全策略拦截或限流）")
     async def fake_cfg():
@@ -101,8 +115,7 @@ def test_collect_rule_records_last_error_on_classify_failure(db_session):
     async def _run():
         async with db_session() as db:
             rule = await db.get(RefCollectRule, rid)
-            with patch.object(rc, "search_top", new=fake_search), \
-                 patch.object(rc, "classify_ref_posts", new=fail_classify), \
+            with patch.object(rc, "classify_ref_posts", new=fail_classify), \
                  patch.object(rc, "get_config", new=fake_cfg):
                 with pytest.raises(RefClassifyError):
                     await rc.collect_rule(db, rule)
@@ -119,9 +132,8 @@ def test_collect_rule_skips_seen_ids(db_session):
     import ref_collector as rc
     from models import RefCollectRule, RefSeen
     rid = _rule(db_session)
+    _seed_xpost(db_session, "already")
 
-    async def fake_search(**kw):
-        return [_post("already")]
     async def boom_classify(*a, **k):
         raise AssertionError("should not classify a seen id")
     async def fake_cfg():
@@ -132,8 +144,7 @@ def test_collect_rule_skips_seen_ids(db_session):
             db.add(RefSeen(platform="x", source_id="already", verdict="rejected"))
             await db.commit()
             rule = await db.get(RefCollectRule, rid)
-            with patch.object(rc, "search_top", new=fake_search), \
-                 patch.object(rc, "classify_ref_posts", new=boom_classify), \
+            with patch.object(rc, "classify_ref_posts", new=boom_classify), \
                  patch.object(rc, "get_config", new=fake_cfg):
                 kept = await rc.collect_rule(db, rule)
             assert kept == 0
