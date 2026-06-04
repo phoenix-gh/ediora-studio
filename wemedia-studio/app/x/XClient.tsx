@@ -480,14 +480,26 @@ function SubscribeDialog({
   const [kind, setKind] = useState<'timeline' | 'search'>('timeline')
   const [url, setUrl] = useState('')
   const [rawQuery, setRawQuery] = useState('')
-  const [minFaves, setMinFaves] = useState(1500)
-  const [lang, setLang] = useState('zh')
-  const [days, setDays] = useState(2)
   const [maxResults, setMaxResults] = useState(50)
   const [adding, setAdding] = useState(false)
   const [busyId, setBusyId] = useState<number | null>(null)
   const [editingId, setEditingId] = useState<number | null>(null)
   const [editValue, setEditValue] = useState('')
+
+  const sinceDays = (n: number) =>
+    new Date(Date.now() - n * 86400000).toISOString().slice(0, 10)
+  const QUICK_TOKENS: { label: string; token: string }[] = [
+    { label: 'OR 组', token: '(关键词A OR 关键词B)' },
+    { label: '排除回复', token: '-filter:replies' },
+    { label: '只看回复', token: 'filter:replies' },
+    { label: '排除链接', token: '-filter:links' },
+    { label: '排除转推', token: '-filter:retweets' },
+    { label: '高赞', token: 'min_faves:1500' },
+    { label: '中文', token: 'lang:zh' },
+    { label: '近7天', token: `since:${sinceDays(7)}` },
+  ]
+  const insertToken = (t: string) =>
+    setRawQuery(prev => (prev.trim() ? prev.trim() + ' ' : '') + t + ' ')
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -496,10 +508,7 @@ function SubscribeDialog({
       if (kind === 'search') {
         const q = rawQuery.trim()
         if (!q) return
-        await onAdd({
-          kind: 'search', raw_query: q, min_faves: minFaves,
-          lang, days, max_results: maxResults,
-        })
+        await onAdd({ kind: 'search', raw_query: q, max_results: maxResults })
         setRawQuery('')
       } else {
         const trimmed = url.trim()
@@ -548,38 +557,30 @@ function SubscribeDialog({
           </form>
         ) : (
           <form onSubmit={submit} className="space-y-2">
-            <Input value={rawQuery} onChange={e => setRawQuery(e.target.value)}
-              placeholder="搜索语法，如 min_faves:1500 lang:zh"
-              className="h-8 text-xs" />
-            <div className="grid grid-cols-4 gap-2">
-              <label className="text-[11px] text-zinc-400 space-y-0.5">
-                <span className="block px-0.5">最低赞</span>
-                <Input type="number" value={minFaves}
-                  onChange={e => setMinFaves(Number(e.target.value) || 0)}
-                  className="h-7 w-full text-xs" />
-              </label>
-              <label className="text-[11px] text-zinc-400 space-y-0.5">
-                <span className="block px-0.5">语言</span>
-                <Input value={lang} onChange={e => setLang(e.target.value)}
-                  className="h-7 w-full text-xs" />
-              </label>
-              <label className="text-[11px] text-zinc-400 space-y-0.5">
-                <span className="block px-0.5">天数</span>
-                <Input type="number" value={days}
-                  onChange={e => setDays(Number(e.target.value) || 1)}
-                  className="h-7 w-full text-xs" />
-              </label>
-              <label className="text-[11px] text-zinc-400 space-y-0.5">
-                <span className="block px-0.5">上限</span>
+            <textarea value={rawQuery} onChange={e => setRawQuery(e.target.value)}
+              rows={2} spellCheck={false}
+              placeholder="X 高级搜索语法，如：(AI OR 大模型) min_faves:1500 lang:zh -filter:replies"
+              className="w-full px-2 py-1.5 border border-zinc-200 dark:border-zinc-700 rounded bg-transparent text-xs font-mono outline-none focus:border-sky-400 resize-y" />
+            <div className="flex flex-wrap gap-1">
+              {QUICK_TOKENS.map(c => (
+                <button type="button" key={c.label} onClick={() => insertToken(c.token)}
+                  className="text-[11px] px-1.5 py-0.5 rounded border border-zinc-200 dark:border-zinc-700 text-zinc-500 hover:border-sky-400 hover:text-sky-500 transition-colors">
+                  + {c.label}
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center gap-2">
+              <label className="text-[11px] text-zinc-400 flex items-center gap-1">
+                条数上限
                 <Input type="number" value={maxResults}
                   onChange={e => setMaxResults(Number(e.target.value) || 1)}
-                  className="h-7 w-full text-xs" />
+                  className="h-7 w-20 text-xs" />
               </label>
+              <Button type="submit" size="sm" className="h-8 text-xs ml-auto"
+                disabled={adding || !rawQuery.trim()}>
+                {adding ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : '添加搜索订阅'}
+              </Button>
             </div>
-            <Button type="submit" size="sm" className="h-8 text-xs w-full"
-              disabled={adding || !rawQuery.trim()}>
-              {adding ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : '添加搜索订阅'}
-            </Button>
           </form>
         )}
 
@@ -637,6 +638,12 @@ function SubscribeDialog({
                           )}>
                             {s.kind === 'search' ? '搜索' : '时间线'}
                           </span>
+                        </div>
+                      )}
+                      {(s.kind === 'search' ? s.raw_query : s.url) && (
+                        <div className="text-[11px] text-zinc-500 font-mono truncate"
+                          title={(s.kind === 'search' ? s.raw_query : s.url) || ''}>
+                          {s.kind === 'search' ? s.raw_query : s.url}
                         </div>
                       )}
                       <div className="text-[11px] text-zinc-400 truncate">
