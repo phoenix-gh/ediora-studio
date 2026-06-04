@@ -10,7 +10,9 @@ def test_build_top_query_operator_only():
     import feedgrab_client as fc
     q = fc._build_top_query(min_faves=1500, min_retweets=0, lang="zh", days=2, extra_terms="")
     assert "min_faves:1500" in q and "lang:zh" in q
-    assert "-filter:replies" in q and "-filter:links" in q and "-filter:retweets" in q
+    # -filter:replies / -filter:retweets zero out X search results — only links is kept
+    assert "-filter:links" in q
+    assert "-filter:replies" not in q and "-filter:retweets" not in q
     assert "since:" in q
     assert "min_retweets" not in q          # 0 → 省略
 
