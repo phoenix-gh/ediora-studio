@@ -480,6 +480,7 @@ function SubscribeDialog({
   const [kind, setKind] = useState<'timeline' | 'search'>('timeline')
   const [url, setUrl] = useState('')
   const [rawQuery, setRawQuery] = useState('')
+  const [name, setName] = useState('')
   const [maxResults, setMaxResults] = useState(50)
   const [adding, setAdding] = useState(false)
   const [busyId, setBusyId] = useState<number | null>(null)
@@ -508,13 +509,15 @@ function SubscribeDialog({
       if (kind === 'search') {
         const q = rawQuery.trim()
         if (!q) return
-        await onAdd({ kind: 'search', raw_query: q, max_results: maxResults })
+        await onAdd({ kind: 'search', raw_query: q, max_results: maxResults, label: name.trim() || undefined })
         setRawQuery('')
+        setName('')
       } else {
         const trimmed = url.trim()
         if (!trimmed) return
-        await onAdd({ kind: 'timeline', url: trimmed })
+        await onAdd({ kind: 'timeline', url: trimmed, label: name.trim() || undefined })
         setUrl('')
+        setName('')
       }
     } catch (err) {
       toast.error((err as Error).message || '添加失败')
@@ -544,6 +547,10 @@ function SubscribeDialog({
           <Button type="button" size="sm" variant={kind === 'search' ? 'default' : 'outline'}
             className="h-7 text-xs" onClick={() => setKind('search')}>搜索</Button>
         </div>
+
+        <Input value={name} onChange={e => setName(e.target.value)}
+          placeholder="名称（可选，留空自动命名）"
+          className="h-8 text-xs" />
 
         {kind === 'timeline' ? (
           <form onSubmit={submit} className="flex items-center gap-2">
