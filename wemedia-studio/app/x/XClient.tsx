@@ -244,6 +244,7 @@ export function XClient({
         onDelete={handleDelete}
         onCollect={handleCollectOne}
         onRename={handleRename}
+        onSaved={reloadSubs}
       />
     </div>
   )
@@ -465,7 +466,7 @@ function PostCard({ post: p }: { post: XPost | XSearchPost }) {
 
 function SubscribeDialog({
   open, onOpenChange, subs, actingId,
-  onAdd, onToggle, onDelete, onCollect, onRename,
+  onAdd, onToggle, onDelete, onCollect, onRename, onSaved,
 }: {
   open: boolean
   onOpenChange: (v: boolean) => void
@@ -476,6 +477,7 @@ function SubscribeDialog({
   onDelete: (s: XSubscription) => Promise<void>
   onCollect: (s: XSubscription) => Promise<void>
   onRename: (s: XSubscription, label: string) => Promise<void>
+  onSaved: () => Promise<void>
 }) {
   const [kind, setKind] = useState<'timeline' | 'search'>('timeline')
   const [url, setUrl] = useState('')
@@ -486,6 +488,21 @@ function SubscribeDialog({
   const [busyId, setBusyId] = useState<number | null>(null)
   const [editingId, setEditingId] = useState<number | null>(null)
   const [editValue, setEditValue] = useState('')
+  const [editingSearchId, setEditingSearchId] = useState<number | null>(null)
+
+  const startEditSearch = (s: XSubscription) => {
+    setKind('search')
+    setRawQuery(s.raw_query)
+    setMaxResults(s.max_results)
+    setName(s.label)
+    setEditingSearchId(s.id)
+  }
+  const cancelEditSearch = () => {
+    setEditingSearchId(null)
+    setRawQuery('')
+    setMaxResults(50)
+    setName('')
+  }
 
   const sinceDays = (n: number) =>
     new Date(Date.now() - n * 86400000).toISOString().slice(0, 10)
@@ -509,9 +526,18 @@ function SubscribeDialog({
       if (kind === 'search') {
         const q = rawQuery.trim()
         if (!q) return
-        await onAdd({ kind: 'search', raw_query: q, max_results: maxResults, label: name.trim() || undefined })
-        setRawQuery('')
-        setName('')
+        if (editingSearchId != null) {
+          await patchXSubscription(editingSearchId, {
+            raw_query: q, max_results: maxResults, label: name.trim() || undefined,
+          })
+          toast.success('已保存修改')
+          await onSaved()
+          cancelEditSearch()
+        } else {
+          await onAdd({ kind: 'search', raw_query: q, max_results: maxResults, label: name.trim() || undefined })
+          setRawQuery('')
+          setName('')
+        }
       } else {
         const trimmed = url.trim()
         if (!trimmed) return
@@ -541,12 +567,20 @@ function SubscribeDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex items-center gap-1.5">
-          <Button type="button" size="sm" variant={kind === 'timeline' ? 'default' : 'outline'}
-            className="h-7 text-xs" onClick={() => setKind('timeline')}>时间线</Button>
-          <Button type="button" size="sm" variant={kind === 'search' ? 'default' : 'outline'}
-            className="h-7 text-xs" onClick={() => setKind('search')}>搜索</Button>
-        </div>
+        {editingSearchId == null ? (
+          <div className="flex items-center gap-1.5">
+            <Button type="button" size="sm" variant={kind === 'timeline' ? 'default' : 'outline'}
+              className="h-7 text-xs" onClick={() => setKind('timeline')}>时间线</Button>
+            <Button type="button" size="sm" variant={kind === 'search' ? 'default' : 'outline'}
+              className="h-7 text-xs" onClick={() => setKind('search')}>搜索</Button>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2 text-xs text-amber-600">
+            <Pencil className="w-3 h-3" /> 正在编辑搜索订阅
+            <Button type="button" size="sm" variant="ghost" className="h-7 text-xs ml-auto"
+              onClick={cancelEditSearch}>取消</Button>
+          </div>
+        )}
 
         <Input value={name} onChange={e => setName(e.target.value)}
           placeholder="名称（可选，留空自动命名）"
@@ -585,7 +619,8 @@ function SubscribeDialog({
               </label>
               <Button type="submit" size="sm" className="h-8 text-xs ml-auto"
                 disabled={adding || !rawQuery.trim()}>
-                {adding ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : '添加搜索订阅'}
+                {adding ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  : (editingSearchId != null ? '保存修改' : '添加搜索订阅')}
               </Button>
             </div>
           </form>
@@ -673,8 +708,14 @@ function SubscribeDialog({
                       <>
                         <Button size="sm" variant="ghost" className="h-7 w-7 p-0"
                           disabled={busyId === s.id}
-                          onClick={() => { setEditValue(s.label); setEditingId(s.id) }}
-                          title="重命名">
+                          onClick={() => {
+                            if (s.kind === 'search') {
+                              startEditSearch(s)
+                            } else {
+                              setEditValue(s.label); setEditingId(s.id)
+                            }
+                          }}
+                          title={s.kind === 'search' ? '编辑' : '重命名'}>
                           <Pencil className="w-3 h-3" />
                         </Button>
                         <Switch checked={s.enabled} onCheckedChange={() => wrap(s, onToggle)}
