@@ -52,6 +52,8 @@ class SubscriptionCreate(BaseModel):
 class SubscriptionPatch(BaseModel):
     enabled: Optional[bool] = None
     label: Optional[str] = None
+    raw_query: Optional[str] = None
+    max_results: Optional[int] = None
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -152,6 +154,15 @@ async def patch_subscription(
         sub.enabled = body.enabled
     if body.label is not None:
         sub.label = body.label
+    if body.raw_query is not None:
+        if sub.kind != "search":
+            raise HTTPException(400, "时间线订阅没有搜索规则可改")
+        rq = body.raw_query.strip()
+        if not rq:
+            raise HTTPException(400, "搜索订阅需要 raw_query")
+        sub.raw_query = rq
+    if body.max_results is not None:
+        sub.max_results = max(1, min(500, body.max_results))
     await db.commit()
     await db.refresh(sub)
     return await _to_out(db, sub)
