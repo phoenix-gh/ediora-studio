@@ -383,3 +383,11 @@ def test_patch_search_raw_query_empty_rejected(client):
     }).json()
     r = client.patch(f"{BASE}/{sub['id']}", json={"raw_query": "   "})
     assert r.status_code == 400
+
+
+def test_create_timeline_with_explicit_label(client):
+    r = client.post(BASE, json={
+        "url": "https://x.com/elonmusk", "label": "马斯克",
+    })
+    assert r.status_code == 200, r.text
+    assert r.json()["label"] == "马斯克"  # not auto "@elonmusk"
