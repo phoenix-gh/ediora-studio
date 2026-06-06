@@ -118,6 +118,14 @@ async def _call(prompt: str, max_tokens: int = 2048) -> str:
             max_tokens=max_tokens,
             messages=[{"role": "user", "content": prompt}],
         )
+        if isinstance(resp, str):
+            # 代理返回 SSE keepalive + JSON；提取嵌入的响应体
+            idx = resp.find('{"id":')
+            if idx >= 0:
+                import json as _json
+                data = _json.loads(resp[idx:])
+                return (data.get("choices", [{}])[0].get("message", {}).get("content") or "")
+            raise RuntimeError(f"代理返回异常格式（无 JSON）：{resp[:200]}")
         return resp.choices[0].message.content or ""
 
 
@@ -350,7 +358,7 @@ def _parse_translation_output(raw: str) -> list[dict]:
 
 # 单次精筛的帖子数。整批拆小块逐块调用：避免输出超 max_tokens 被截断、
 # 也缩小"一条敏感帖毒化整批"的影响面。
-_REF_CLASSIFY_CHUNK = 6
+_REF_CLASSIFY_CHUNK = 1
 
 
 async def _classify_ref_chunk(
@@ -380,7 +388,7 @@ async def _classify_ref_chunk(
 只输出 JSON 数组，不要其他文字。"""
 
     # 每条输出最长可达 ~500 token（含 text_clean 全文），按块大小给足额度，避免截断。
-    max_tokens = min(8000, 700 * len(posts) + 800)
+    max_tokens = min(8000, 3000 * len(posts) + 500)
     try:
         raw = await _call(prompt, max_tokens=max_tokens)
     except Exception as e:
