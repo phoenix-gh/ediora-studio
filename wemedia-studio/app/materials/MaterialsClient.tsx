@@ -9,10 +9,14 @@ import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import {
+  Dialog, DialogContent, DialogHeader, DialogTitle,
+} from '@/components/ui/dialog'
+import {
   Material, MaterialCreate, CollectRule,
   SCENE_TAGS, sceneTagInfo,
   getMaterials, createMaterial, updateMaterial, deleteMaterial,
   getRules, createRule, updateRule, deleteRule, collectRule, collectAll,
+  getRawCount, cleanBatch,
 } from '@/lib/api/materials'
 import { WritingPlan, flattenTopics } from '@/lib/api/writing-plans'
 import { type XSubscription, listXSubscriptions } from '@/lib/api/x'
@@ -124,7 +128,7 @@ function MaterialForm({ initial, plans, categories, onSave, onCancel, saving }: 
 
   return (
     <div className="space-y-3">
-      <textarea value={text} onChange={e => setText(e.target.value)} placeholder="参考文案 / 金句原文…"
+      <textarea value={text} onChange={e => setText(e.target.value)} placeholder="素材 / 金句原文…"
         rows={3} autoFocus
         className="w-full px-3 py-2 border border-zinc-200 dark:border-zinc-700 rounded-lg bg-transparent outline-none focus:border-indigo-400 text-sm resize-none" />
       <div className="grid grid-cols-2 gap-2">
@@ -170,7 +174,7 @@ function MaterialForm({ initial, plans, categories, onSave, onCancel, saving }: 
       <div className="flex gap-2 pt-1">
         <Button onClick={handleSubmit} disabled={saving || !text.trim()} className="flex-1 gap-1">
           {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-          {initial ? '保存修改' : '添加文案'}
+          {initial ? '保存修改' : '添加素材'}
         </Button>
         <Button variant="outline" onClick={onCancel}>取消</Button>
       </div>
@@ -220,13 +224,13 @@ function RulesDrawer({ rules, onClose, onChange, onAfterCollect }: {
   async function runOne(r: CollectRule) {
     if (busy) return
     setBusy(r.id)
-    try { const res = await collectRule(r.id); toast.success(`「${r.label}」新增 ${res.new_materials} 条`); onAfterCollect() }
+    try { const res = await collectRule(r.id); toast.success(`「${r.label}」新增 ${res.new_raw} 条`); onAfterCollect() }
     catch (e) { toast.error('采集失败：' + (e as Error).message) } finally { setBusy(null) }
   }
   async function runAll() {
     if (busy) return
     setBusy('all')
-    try { const res = await collectAll(); toast.success(`全部采集：新增 ${res.new_materials} 条${res.failed.length ? `，${res.failed.length} 条规则失败` : ''}`); onAfterCollect() }
+    try { const res = await collectAll(); toast.success(`全部采集：新增 ${res.new_raw} 条${res.failed.length ? `，${res.failed.length} 条规则失败` : ''}`); onAfterCollect() }
     catch (e) { toast.error('采集失败：' + (e as Error).message) } finally { setBusy(null) }
   }
 
@@ -320,6 +324,8 @@ export function MaterialsClient({ initialMaterials, categories, initialPlans }: 
 
   const [showRules, setShowRules] = useState(false)
   const [rules, setRules] = useState<CollectRule[]>([])
+  const [rawCount, setRawCount] = useState(0)
+  const [cleaning, setCleaning] = useState(false)
 
   const planMap = useMemo(
     () => Object.fromEntries(flattenTopics(plans).map(p => [p.id, p.title])),
@@ -344,8 +350,26 @@ export function MaterialsClient({ initialMaterials, categories, initialPlans }: 
 
   async function refresh() {
     setRefreshing(true)
-    try { setMaterials(await getMaterials({ limit: 500 })) }
+    try {
+      const [items, count] = await Promise.all([getMaterials({ limit: 500 }), getRawCount()])
+      setMaterials(items)
+      setRawCount(count)
+    }
     catch { toast.error('刷新失败') } finally { setRefreshing(false) }
+  }
+
+  async function handleCleanBatch() {
+    setCleaning(true)
+    try {
+      const r = await cleanBatch()
+      toast.success(`清洗完成：${r.kept} 条入库，${r.rejected} 条淘汰，剩余 ${r.remaining_raw} 条待处理`)
+      setRawCount(r.remaining_raw)
+      setMaterials(await getMaterials({ limit: 500 }))
+    } catch {
+      toast.error('清洗失败，请重试')
+    } finally {
+      setCleaning(false)
+    }
   }
 
   async function handleCreate(data: MaterialCreate) {
@@ -360,7 +384,7 @@ export function MaterialsClient({ initialMaterials, categories, initialPlans }: 
     catch { toast.error('保存失败') } finally { setSaving(false) }
   }
   async function handleDelete(m: Material) {
-    if (!confirm('确定删除这条参考文案？')) return
+    if (!confirm('确定删除这条素材？')) return
     try { await deleteMaterial(m.id); setMaterials(prev => prev.filter(x => x.id !== m.id)); toast.success('已删除') }
     catch { toast.error('删除失败') }
   }
@@ -379,7 +403,7 @@ export function MaterialsClient({ initialMaterials, categories, initialPlans }: 
       <aside className="w-52 flex-shrink-0 border-r border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 flex flex-col overflow-y-auto">
         <div className="px-4 py-4 border-b border-zinc-100 dark:border-zinc-800 flex items-center gap-2">
           <QuoteIcon className="w-4 h-4 text-indigo-500" />
-          <span className="font-semibold text-sm text-zinc-900 dark:text-zinc-100">参考文案库</span>
+          <span className="font-semibold text-sm text-zinc-900 dark:text-zinc-100">素材库</span>
           <button onClick={refresh} disabled={refreshing} className="ml-auto text-zinc-400 hover:text-zinc-600 disabled:opacity-40">
             <RefreshCw className={cn('w-3.5 h-3.5', refreshing && 'animate-spin')} />
           </button>
@@ -436,7 +460,7 @@ export function MaterialsClient({ initialMaterials, categories, initialPlans }: 
         <div className="flex items-center gap-3 px-6 py-3 border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 flex-shrink-0">
           <div className="relative flex-1 max-w-xs">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-400" />
-            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="搜索文案、作者…"
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="搜索素材、作者…"
               className="w-full pl-8 pr-3 py-1.5 border border-zinc-200 dark:border-zinc-700 rounded-lg bg-transparent text-xs outline-none focus:border-indigo-400" />
           </div>
           <select value={sort} onChange={e => setSort(e.target.value as SortKey)}
@@ -450,24 +474,32 @@ export function MaterialsClient({ initialMaterials, categories, initialPlans }: 
             <Settings2 className="w-3.5 h-3.5" /> 采集规则
           </Button>
           <Button size="sm" className="gap-1" onClick={() => { setShowForm(true); setEditing(null) }}>
-            <Plus className="w-3.5 h-3.5" /> 添加文案
+            <Plus className="w-3.5 h-3.5" /> 添加素材
           </Button>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-6">
-          {(showForm || editing) && (
-            <div className="bg-white dark:bg-zinc-900 border border-indigo-200 dark:border-indigo-800 rounded-xl p-5 mb-6 shadow-sm">
-              <p className="text-sm font-semibold text-zinc-800 dark:text-zinc-200 mb-4">{editing ? '编辑文案' : '添加新文案'}</p>
-              <MaterialForm initial={editing ?? undefined} plans={plans} categories={categories}
-                onSave={editing ? handleUpdate : handleCreate}
-                onCancel={() => { setShowForm(false); setEditing(null) }} saving={saving} />
-            </div>
-          )}
+        {rawCount > 0 && (
+          <div className="flex items-center gap-3 px-6 py-2 border-b border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 flex-shrink-0">
+            <Zap className="w-4 h-4 shrink-0 text-amber-500" />
+            <span className="text-sm text-amber-700 dark:text-amber-400">{rawCount} 条待清洗</span>
+            <Button
+              size="sm"
+              variant="outline"
+              className="ml-auto h-7 text-xs"
+              onClick={handleCleanBatch}
+              disabled={cleaning}
+            >
+              {cleaning ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : null}
+              清洗
+            </Button>
+          </div>
+        )}
 
+        <div className="flex-1 overflow-y-auto p-6">
           {filtered.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-64 text-zinc-400 gap-3">
               <QuoteIcon className="w-12 h-12 opacity-20" />
-              <p className="text-sm">{search || scene || category ? '没有匹配的文案' : '还没有收录任何参考文案'}</p>
+              <p className="text-sm">{search || scene || category ? '没有匹配的素材' : '还没有收录任何素材'}</p>
             </div>
           ) : (
             <div className="columns-1 sm:columns-2 lg:columns-3 gap-4 space-y-4">
@@ -481,6 +513,19 @@ export function MaterialsClient({ initialMaterials, categories, initialPlans }: 
           )}
         </div>
       </div>
+
+      <Dialog open={showForm || !!editing}
+        onOpenChange={open => { if (!open) { setShowForm(false); setEditing(null) } }}>
+        <DialogContent className="sm:max-w-lg max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="text-base">{editing ? '编辑素材' : '添加新素材'}</DialogTitle>
+          </DialogHeader>
+          <MaterialForm key={editing ? `edit-${editing.id}` : 'create'}
+            initial={editing ?? undefined} plans={plans} categories={categories}
+            onSave={editing ? handleUpdate : handleCreate}
+            onCancel={() => { setShowForm(false); setEditing(null) }} saving={saving} />
+        </DialogContent>
+      </Dialog>
 
       {showRules && (
         <RulesDrawer rules={rules} onClose={() => setShowRules(false)} onChange={setRules} onAfterCollect={refresh} />
