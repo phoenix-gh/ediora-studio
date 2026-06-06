@@ -202,4 +202,4 @@ async def collect_all(db: AsyncSession) -> dict:
             total += await collect_rule(db, rule)
         except Exception as e:
             failed.append(f"{rule.label}: {e}")
-    return {"checked": len(rules), "new_materials": total, "failed": failed}
+    return {"checked": len(rules), "new_raw": total, "failed": failed}

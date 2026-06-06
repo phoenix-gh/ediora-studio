@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from database import get_db
 from models import RefMaterial, RefCollectRule
 from config import get_config
-from ref_collector import collect_rule, collect_all
+from ref_collector import collect_rule, collect_all, clean_batch
 
 router = APIRouter(prefix="/materials", tags=["materials"])
 
@@ -127,9 +127,10 @@ async def list_materials(
     platform: str = "", category: str = "", scene_tag: str = "",
     min_score: int = 0, q: str = "", sort: str = "time",
     plan_id: int = 0, limit: int = 100, offset: int = 0,
+    status: str = "active",
     db: AsyncSession = Depends(get_db),
 ):
-    stmt = select(RefMaterial).where(RefMaterial.status == "active")
+    stmt = select(RefMaterial).where(RefMaterial.status == status)
     if platform:
         stmt = stmt.where(RefMaterial.platform == platform)
     if category:
@@ -234,3 +235,18 @@ async def collect_one_rule(rid: int, db: AsyncSession = Depends(get_db)):
 @router.post("/collect-all")
 async def collect_all_rules(db: AsyncSession = Depends(get_db)):
     return {"ok": True, **(await collect_all(db))}
+
+
+class CleanBatchBody(BaseModel):
+    size: Optional[int] = None
+
+
+@router.post("/clean-batch")
+async def clean_batch_endpoint(body: CleanBatchBody, db: AsyncSession = Depends(get_db)):
+    cfg = await get_config()
+    size = body.size or int(cfg.get("clean_batch_size", 20))
+    try:
+        result = await clean_batch(db, size)
+    except Exception as e:
+        raise HTTPException(502, f"LLM 精筛失败：{str(e)[:200]}")
+    return {"ok": True, **result}

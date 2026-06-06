@@ -46,6 +46,27 @@ def test_rules_crud_and_collect(client):
     assert c.status_code == 200 and c.json()["new_raw"] == 3
 
 
+def test_clean_batch_processes_raw_items(client):
+    with patch("routers.materials.clean_batch", new=AsyncMock(
+        return_value={"processed": 0, "kept": 0, "rejected": 0, "remaining_raw": 0}
+    )):
+        r = client.post("/api/materials/clean-batch", json={})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["processed"] == 0 and body["remaining_raw"] == 0
+
+
+def test_clean_batch_with_size_param(client):
+    with patch("routers.materials.clean_batch", new=AsyncMock(
+        return_value={"processed": 5, "kept": 3, "rejected": 2, "remaining_raw": 10}
+    )) as mock_cb:
+        r = client.post("/api/materials/clean-batch", json={"size": 5})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["kept"] == 3 and body["rejected"] == 2 and body["remaining_raw"] == 10
+    mock_cb.assert_awaited_once()
+
+
 def test_browse_filters_by_category(client):
     client.post("/api/materials", json={"text": "高分沙雕", "category": "沙雕搞笑"})
     client.post("/api/materials", json={"text": "吐槽", "category": "吐槽锐评"})
