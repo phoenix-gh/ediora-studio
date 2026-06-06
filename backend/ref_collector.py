@@ -1,9 +1,9 @@
-"""把 X Top 搜索结果提炼成参考文案：规则粗筛 → LLM 精筛 → 入库 + seen。"""
+"""把 X Top 搜索结果提炼成参考文案：规则粗筛 → 存 raw → 按需批量 LLM 精筛 → 入库 + seen。"""
 from __future__ import annotations
 import re
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.dialects.postgresql import insert as _pg_insert
 from sqlalchemy.dialects.sqlite import insert as _sl_insert
@@ -60,6 +60,20 @@ async def _mark_seen(db: AsyncSession, source_id: str, verdict: str):
     await db.execute(stmt)
 
 
+async def _upsert_raw(db: AsyncSession, rule_id: int, p: ParsedPost):
+    dialect = db.bind.dialect.name if db.bind else "postgresql"
+    stmt = _insert(RefMaterial, dialect).values(
+        platform="x", source_id=p.tweet_id, text=p.content,
+        text_clean="", author=p.display_name,
+        handle=p.username, source_url=p.url, cover_image=p.cover_image,
+        likes=p.likes, reposts=p.reposts, replies=p.replies, views=p.views,
+        score=0, category="", scene_tags=[], tags=[],
+        rule_id=rule_id, status="raw", published_at=p.published_at,
+        created_at=datetime.now(timezone.utc), updated_at=datetime.now(timezone.utc),
+    ).on_conflict_do_nothing(index_elements=["platform", "source_id"])
+    await db.execute(stmt)
+
+
 async def _upsert_material(db: AsyncSession, rule_id: int, p: ParsedPost, v: dict):
     dialect = db.bind.dialect.name if db.bind else "postgresql"
     stmt = _insert(RefMaterial, dialect).values(
@@ -93,7 +107,7 @@ def _xpost_to_parsed(x: XPost) -> ParsedPost:
 
 
 async def collect_rule(db: AsyncSession, rule: RefCollectRule) -> int:
-    """从 x_posts 取候选 → 粗筛 → LLM 精筛 → 入库。返回新入库/更新条目数。
+    """从 x_posts 取候选 → 粗筛 → 存为 raw。返回新存入 raw 条目数。
     异常写 rule.last_error 后抛出。"""
     from datetime import timedelta
     since = datetime.now(timezone.utc) - timedelta(days=max(1, rule.days))
@@ -123,34 +137,14 @@ async def collect_rule(db: AsyncSession, rule: RefCollectRule) -> int:
         if p.tweet_id not in survivor_ids:
             await _mark_seen(db, p.tweet_id, "rejected")
 
-    kept = 0
-    if survivors:
-        cfg = await get_config()
-        categories = [c for c in cfg.get("ref_categories", "").split(",") if c]
-        payload = [{"source_id": p.tweet_id, "text": p.content, "likes": p.likes}
-                   for p in survivors]
-        try:
-            verdicts = await classify_ref_posts(payload, categories, SCENE_TAGS)
-        except RefClassifyError as e:
-            rule.last_error = f"精筛失败（{len(survivors)} 条待筛）：{e}"[:500]
-            await db.commit()
-            raise
-        vmap = {str(v.get("source_id")): v for v in verdicts}
-        by_id = {p.tweet_id: p for p in survivors}
-        for sid, p in by_id.items():
-            v = vmap.get(sid)
-            if v and v.get("keep"):
-                await _upsert_material(db, rule.id, p, v)
-                await _mark_seen(db, sid, "kept")
-                kept += 1
-            elif v is not None:
-                await _mark_seen(db, sid, "rejected")
-            # v is None（LLM 没回这条/整批失败）→ 不记 seen，下次再试
+    for p in survivors:
+        await _upsert_raw(db, rule.id, p)
+        await _mark_seen(db, p.tweet_id, "raw")
 
     rule.last_collected_at = datetime.now(timezone.utc)
     rule.last_error = ""
     await db.commit()
-    return kept
+    return len(survivors)
 
 
 async def collect_all(db: AsyncSession) -> dict:

@@ -228,7 +228,7 @@ async def collect_one_rule(rid: int, db: AsyncSession = Depends(get_db)):
         n = await collect_rule(db, rule)
     except Exception as e:
         raise HTTPException(502, str(e))
-    return {"ok": True, "new_materials": n}
+    return {"ok": True, "new_raw": n}
 
 
 @router.post("/collect-all")

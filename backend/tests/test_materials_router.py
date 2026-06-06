@@ -43,7 +43,7 @@ def test_rules_crud_and_collect(client):
 
     with patch("routers.materials.collect_rule", new=AsyncMock(return_value=3)):
         c = client.post(f"/api/materials/rules/{rid}/collect")
-    assert c.status_code == 200 and c.json()["new_materials"] == 3
+    assert c.status_code == 200 and c.json()["new_raw"] == 3
 
 
 def test_browse_filters_by_category(client):
