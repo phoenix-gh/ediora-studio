@@ -147,6 +147,51 @@ async def collect_rule(db: AsyncSession, rule: RefCollectRule) -> int:
     return len(survivors)
 
 
+async def clean_batch(db: AsyncSession, size: int) -> dict:
+    """从 raw 队列取前 size 条，过 LLM 精筛后更新状态。
+    LLM 全批失败时抛 RefClassifyError，items 保持 raw 可重试。
+    单条 v is None（LLM 漏回）保持 raw，下次重试。"""
+    items = list((await db.execute(
+        select(RefMaterial).where(RefMaterial.status == "raw").limit(size)
+    )).scalars().all())
+
+    if not items:
+        return {"processed": 0, "kept": 0, "rejected": 0, "remaining_raw": 0}
+
+    cfg = await get_config()
+    categories = [c for c in cfg.get("ref_categories", "").split(",") if c]
+    payload = [{"source_id": str(m.id), "text": m.text, "likes": m.likes} for m in items]
+
+    # 整批失败 → 抛出，items 保持 raw
+    verdicts = await classify_ref_posts(payload, categories, SCENE_TAGS)
+    vmap = {str(v.get("source_id")): v for v in verdicts}
+
+    kept = rejected = 0
+    now = datetime.now(timezone.utc)
+    for m in items:
+        v = vmap.get(str(m.id))
+        if v and v.get("keep"):
+            m.status = "active"
+            m.text_clean = v.get("text_clean") or ""
+            m.score = int(v.get("score") or 0)
+            m.category = v.get("category") or ""
+            m.scene_tags = list(v.get("scene_tags") or [])
+            m.tags = list(v.get("tags") or [])
+            m.updated_at = now
+            kept += 1
+        elif v is not None:
+            m.status = "rejected"
+            m.updated_at = now
+            rejected += 1
+        # v is None → 保持 raw
+
+    await db.commit()
+    remaining = await db.scalar(
+        select(func.count()).where(RefMaterial.status == "raw")
+    )
+    return {"processed": len(items), "kept": kept, "rejected": rejected, "remaining_raw": remaining or 0}
+
+
 async def collect_all(db: AsyncSession) -> dict:
     rules = (await db.execute(
         select(RefCollectRule).where(RefCollectRule.enabled == True)  # noqa: E712
