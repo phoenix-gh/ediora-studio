@@ -105,7 +105,7 @@ export async function createXSubscription(
 
 export async function patchXSubscription(
   id: number,
-  body: Partial<Pick<XSubscription, 'enabled' | 'label'>>,
+  body: Partial<Pick<XSubscription, 'enabled' | 'label' | 'raw_query' | 'max_results'>>,
 ): Promise<XSubscription> {
   return apiFetch<XSubscription>(`/x/subscriptions/${id}`, {
     method: 'PATCH',

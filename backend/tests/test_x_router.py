@@ -347,3 +347,47 @@ def test_search_subscription_collect_calls_search_top(client):
 def test_search_subscription_create_requires_query(client):
     r = client.post(BASE, json={"kind": "search", "raw_query": ""})
     assert r.status_code == 400
+
+
+def test_patch_search_raw_query_and_max_results(client):
+    sub = client.post(BASE, json={
+        "kind": "search", "raw_query": "AI lang:zh", "max_results": 50,
+    }).json()
+    r = client.patch(f"{BASE}/{sub['id']}", json={
+        "raw_query": "  (AI OR 大模型) lang:zh  ", "max_results": 80,
+    })
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["raw_query"] == "(AI OR 大模型) lang:zh"  # trimmed
+    assert body["max_results"] == 80
+
+
+def test_patch_max_results_clamped(client):
+    sub = client.post(BASE, json={
+        "kind": "search", "raw_query": "AI", "max_results": 50,
+    }).json()
+    r = client.patch(f"{BASE}/{sub['id']}", json={"max_results": 9999})
+    assert r.status_code == 200, r.text
+    assert r.json()["max_results"] == 500  # clamped to upper bound
+
+
+def test_patch_raw_query_on_timeline_rejected(client):
+    sub = client.post(BASE, json={"url": "https://x.com/a"}).json()
+    r = client.patch(f"{BASE}/{sub['id']}", json={"raw_query": "AI"})
+    assert r.status_code == 400
+
+
+def test_patch_search_raw_query_empty_rejected(client):
+    sub = client.post(BASE, json={
+        "kind": "search", "raw_query": "AI", "max_results": 50,
+    }).json()
+    r = client.patch(f"{BASE}/{sub['id']}", json={"raw_query": "   "})
+    assert r.status_code == 400
+
+
+def test_create_timeline_with_explicit_label(client):
+    r = client.post(BASE, json={
+        "url": "https://x.com/elonmusk", "label": "马斯克",
+    })
+    assert r.status_code == 200, r.text
+    assert r.json()["label"] == "马斯克"  # not auto "@elonmusk"
