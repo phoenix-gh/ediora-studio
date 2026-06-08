@@ -250,7 +250,7 @@ async def list_writing_plans(
     Args:
         include_archived: Include archived plans (default False).
 
-    Returns a flat list. Each item includes: id, title, brief,
+    Returns a flat list. Each item includes: id, title, strategy,
     tags (list of {id, name, color}), priority (1=highest), status,
     source_count, draft_count, created_at.
     """
@@ -292,7 +292,7 @@ async def list_writing_plans(
         {
             "id": p.id,
             "title": p.title,
-            "brief": p.brief or "",
+            "strategy": p.strategy or "",
             "tags": tags_by_plan.get(p.id, []),
             "priority": p.priority,
             "status": p.status,
@@ -312,7 +312,7 @@ async def get_writing_plan(plan_id: int) -> dict:
     Args:
         plan_id: Integer ID of the plan (from list_writing_plans or search_writing_plans).
 
-    Returns: id, title, brief, tags, priority, status, created_at,
+    Returns: id, title, strategy, tags, priority, status, created_at,
              sources list, and updates list (most recent first).
     Raises an error if the plan is not found.
     """
@@ -345,7 +345,7 @@ async def get_writing_plan(plan_id: int) -> dict:
     return {
         "id": plan.id,
         "title": plan.title,
-        "brief": plan.brief or "",
+        "strategy": plan.strategy or "",
         "tags": [{"id": t.id, "name": t.name, "color": t.color} for t in tag_rows],
         "priority": plan.priority,
         "status": plan.status,
@@ -376,7 +376,7 @@ async def get_writing_plan(plan_id: int) -> dict:
 @mcp.tool()
 async def create_writing_plan(
     title: str,
-    brief: str = "",
+    strategy: str = "",
     tags: Optional[list[str]] = None,
     priority: int = 3,
 ) -> dict:
@@ -390,12 +390,12 @@ async def create_writing_plan(
                ❌ Bad:  "AI压缩产品周期：非程序员用ChatGPT做付费APP案例拆解"（这是文章标题）
                Rule: remove all specific names/numbers — if the title still makes
                sense as a category name, it's correct.
-        brief: Markdown brief describing the writing pattern, title formula,
+        strategy: Markdown strategy describing the writing pattern, title formula,
                material sourcing method, and forbidden zones (optional).
         tags: List of tag names to attach (will be created if they don't exist).
         priority: 1 (highest) to 5 (lowest). Default 3.
 
-    Returns: id, title, brief, tags, priority, status, created_at.
+    Returns: id, title, strategy, tags, priority, status, created_at.
     """
     from models import WritingPlan, PlanTag, WritingPlanTag
     from sqlalchemy import func
@@ -418,7 +418,7 @@ async def create_writing_plan(
     async with SessionLocal() as db:
         obj = WritingPlan(
             title=title,
-            brief=brief,
+            strategy=strategy,
             priority=max(1, min(5, priority)),
         )
         db.add(obj)
@@ -441,7 +441,7 @@ async def create_writing_plan(
     return {
         "id": obj.id,
         "title": obj.title,
-        "brief": obj.brief or "",
+        "strategy": obj.strategy or "",
         "tags": [{"id": t.id, "name": t.name, "color": t.color} for t in tag_rows],
         "priority": obj.priority,
         "status": obj.status,
@@ -513,7 +513,7 @@ async def add_plan_source(
 @mcp.tool()
 async def search_writing_plans(keywords: list[str]) -> list[dict]:
     """
-    Search existing writing plans (写作方案) by keywords (full-text match on title + brief).
+    Search existing writing plans (写作方案) by keywords (full-text match on title + strategy).
 
     Use this as the first step in content-to-writing-plan analysis to find candidate
     plans before asking the LLM to judge similarity.
@@ -522,7 +522,7 @@ async def search_writing_plans(keywords: list[str]) -> list[dict]:
         keywords: List of keywords extracted from the source article,
                   e.g. ["AI", "创业", "一人公司"].
 
-    Returns up to 10 matching plans, each with: id, title, brief (first 200 chars), tags.
+    Returns up to 10 matching plans, each with: id, title, strategy (first 200 chars), tags.
     Returns empty list if no matches or keywords is empty.
     """
     from models import WritingPlan, PlanTag, WritingPlanTag
@@ -537,7 +537,7 @@ async def search_writing_plans(keywords: list[str]) -> list[dict]:
 
         matched = []
         for p in plans:
-            haystack = (p.title + " " + (p.brief or "")).lower()
+            haystack = (p.title + " " + (p.strategy or "")).lower()
             if any(kw.lower() in haystack for kw in keywords if kw.strip()):
                 matched.append(p)
         matched = matched[:10]
@@ -561,7 +561,7 @@ async def search_writing_plans(keywords: list[str]) -> list[dict]:
         {
             "id": p.id,
             "title": p.title,
-            "brief": (p.brief or "")[:200],
+            "strategy": (p.strategy or "")[:200],
             "tags": tags_by_plan.get(p.id, []),
         }
         for p in matched
@@ -572,12 +572,12 @@ async def search_writing_plans(keywords: list[str]) -> list[dict]:
 async def update_writing_plan(
     plan_id: int,
     title: Optional[str] = None,
-    brief: Optional[str] = None,
+    strategy: Optional[str] = None,
     tags: Optional[list[str]] = None,
     priority: Optional[int] = None,
 ) -> dict:
     """
-    Update an existing writing plan (写作方案) — brief / title / tags / priority.
+    Update an existing writing plan (写作方案) — strategy / title / tags / priority.
 
     ⚠️  SCOUT-ONLY — Only call this during a content-to-writing-plan analysis task
     (task body contains "## 任务类型\\ncontent-to-writing-plan").  The editor, writer,
@@ -590,11 +590,11 @@ async def update_writing_plan(
         title: New title — must describe the *type* of content, not a specific
                article.  Same naming rule as create_writing_plan (category name,
                no specific persons/numbers).  Omit to leave unchanged.
-        brief: New full markdown brief, or omit to leave unchanged.
+        strategy: New full markdown strategy, or omit to leave unchanged.
         tags: New tag list (full replacement), or omit to leave unchanged.
         priority: New priority 1-5, or omit to leave unchanged.
 
-    Returns: updated plan with id, title, brief, tags, priority, status, updated_at.
+    Returns: updated plan with id, title, strategy, tags, priority, status, updated_at.
     Raises an error if the plan is not found.
     """
     from models import WritingPlan, PlanTag, WritingPlanTag
@@ -622,8 +622,8 @@ async def update_writing_plan(
 
         if title is not None:
             obj.title = title
-        if brief is not None:
-            obj.brief = brief
+        if strategy is not None:
+            obj.strategy = strategy
         if priority is not None:
             obj.priority = max(1, min(5, priority))
 
@@ -646,7 +646,7 @@ async def update_writing_plan(
     return {
         "id": obj.id,
         "title": obj.title,
-        "brief": obj.brief or "",
+        "strategy": obj.strategy or "",
         "tags": [{"id": t.id, "name": t.name, "color": t.color} for t in tag_rows],
         "priority": obj.priority,
         "status": obj.status,

@@ -176,7 +176,7 @@ interface AddSourceForm {
   url: string; title: string; content: string; note: string; platform: string
 }
 
-type ActiveTab = 'brief' | 'sources' | 'drafts' | 'updates'
+type ActiveTab = 'strategy' | 'sources' | 'drafts' | 'updates'
 
 export function WritingPlansClient({ initialPlans, initialTags }: {
   initialPlans: WritingPlan[]
@@ -188,11 +188,11 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
   const [selected, setSelected] = useState<WritingPlan | null>(initialPlans[0] ?? null)
   const [filterTagNames, setFilterTagNames] = useState<string[]>([])
   const [searchQuery, setSearchQuery] = useState('')
-  const [activeTab, setActiveTab] = useState<ActiveTab>('brief')
+  const [activeTab, setActiveTab] = useState<ActiveTab>('strategy')
   const [refreshing, setRefreshing] = useState(false)
 
-  // Brief editing
-  const [briefDraft, setBriefDraft] = useState('')
+  // Strategy editing
+  const [strategyDraft, setStrategyDraft] = useState('')
   const [savingBrief, setSavingBrief] = useState(false)
   const [dispatching, setDispatching] = useState(false)
   const [showDispatchConfirm, setShowDispatchConfirm] = useState(false)
@@ -260,9 +260,9 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
     if (fresh) setSelected(fresh)
   }, [plans])
 
-  // Sync brief draft when plan changes
+  // Sync strategy draft when plan changes
   useEffect(() => {
-    setBriefDraft(selected?.brief ?? '')
+    setStrategyDraft(selected?.strategy ?? '')
   }, [selected?.id])
 
   useEffect(() => {
@@ -307,7 +307,7 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase()
       list = list.filter(p =>
-        p.title.toLowerCase().includes(q) || p.brief.toLowerCase().includes(q)
+        p.title.toLowerCase().includes(q) || p.strategy.toLowerCase().includes(q)
       )
     }
     return list
@@ -359,7 +359,7 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
   function handleSelectPlan(p: WritingPlan) {
     setSelected(p)
     setPreviewSource(null)
-    setActiveTab('brief')
+    setActiveTab('strategy')
   }
 
   function openEdit() {
@@ -415,7 +415,7 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
     if (!selected) return
     setSavingBrief(true)
     try {
-      const updated = await updateWritingPlan(selected.id, { brief: briefDraft })
+      const updated = await updateWritingPlan(selected.id, { strategy: strategyDraft })
       replaceInList(updated)
       toast.success('已保存')
     } catch { toast.error('保存失败') }
@@ -423,7 +423,7 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
   }
 
   function openDispatchConfirm() {
-    setDispatchBrief(briefDraft)
+    setDispatchBrief(strategyDraft)
     setShowDispatchConfirm(true)
     listPublishAccounts()
       .then(accs => {
@@ -435,13 +435,13 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
 
   async function handleDispatch() {
     if (!selected) return
-    // Save dispatchBrief (modal may differ from briefDraft if user edited it in the modal)
-    if (dispatchBrief !== selected.brief) {
+    // Save dispatchBrief (modal may differ from strategyDraft if user edited it in the modal)
+    if (dispatchBrief !== selected.strategy) {
       try {
-        const updated = await updateWritingPlan(selected.id, { brief: dispatchBrief })
+        const updated = await updateWritingPlan(selected.id, { strategy: dispatchBrief })
         replaceInList(updated)
-        setBriefDraft(dispatchBrief)
-      } catch { toast.error('保存 brief 失败'); return }
+        setStrategyDraft(dispatchBrief)
+      } catch { toast.error('保存写作策略失败'); return }
     }
     setDispatching(true)
     try {
@@ -637,8 +637,8 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
                       {p.tags.length > 3 && <span className="text-[10px] text-zinc-400">+{p.tags.length - 3}</span>}
                     </div>
                   )}
-                  {p.brief && (
-                    <p className="text-[11px] text-zinc-400 dark:text-zinc-500 line-clamp-2 leading-relaxed">{p.brief.slice(0, 100)}</p>
+                  {p.strategy && (
+                    <p className="text-[11px] text-zinc-400 dark:text-zinc-500 line-clamp-2 leading-relaxed">{p.strategy.slice(0, 100)}</p>
                   )}
                   <div className="flex items-center gap-2 mt-1.5">
                     <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400">
@@ -774,7 +774,7 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
 
           {/* Tabs */}
           <div className="flex border-b border-zinc-100 dark:border-zinc-800 px-6 flex-shrink-0">
-            {(['brief', 'sources', 'drafts', 'updates'] as ActiveTab[]).map(tab => (
+            {(['strategy', 'sources', 'drafts', 'updates'] as ActiveTab[]).map(tab => (
               <button
                 key={tab}
                 onClick={() => setActiveTab(tab)}
@@ -785,7 +785,7 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
                     : 'border-transparent text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'
                 )}
               >
-                {tab === 'brief' ? 'Brief'
+                {tab === 'strategy' ? 'Strategy'
                   : tab === 'sources' ? `线索 (${selected.source_count})`
                   : tab === 'drafts' ? `产出 (${selected.draft_count})`
                   : '更新历史'}
@@ -795,22 +795,22 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
 
           {/* Tab content */}
           <div className="flex-1 overflow-hidden flex">
-            {activeTab === 'brief' && (
+            {activeTab === 'strategy' && (
               <div className="flex-1 flex flex-col p-6 overflow-hidden">
                 <textarea
-                  value={briefDraft}
-                  onChange={e => setBriefDraft(e.target.value)}
+                  value={strategyDraft}
+                  onChange={e => setStrategyDraft(e.target.value)}
                   placeholder={`## 文章模式\n这类文章的固定写法是什么样的。\n例：第一人称，讲一个普通人用某工具做到某件具体事的真实故事，有数字，500字左右。\n\n## 标题公式\n标题的固定结构 + 举例。\n例：「[时间] + [具体动作] + [具体结果]」→「花3周用Claude做了个工具，月入8000」\n\n## 找素材的方法\n- 搜索关键词：\n- 素材来源：（平台/网站）\n- 好素材的判断标准：有什么特征才值得写\n\n## 禁区\n不写什么，避开哪些角度`}
                   className="flex-1 text-sm font-mono bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg px-4 py-3 outline-none focus:border-indigo-400 resize-none text-zinc-800 dark:text-zinc-200 placeholder:text-zinc-300 dark:placeholder:text-zinc-600 leading-relaxed"
                 />
                 <div className="flex items-center gap-2 mt-3 flex-shrink-0">
-                  <Button size="sm" onClick={handleSaveBrief} disabled={savingBrief || briefDraft === selected.brief} className="gap-1 text-xs h-8">
+                  <Button size="sm" onClick={handleSaveBrief} disabled={savingBrief || strategyDraft === selected.strategy} className="gap-1 text-xs h-8">
                     {savingBrief ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />} 保存
                   </Button>
-                  <Button size="sm" variant="outline" onClick={openDispatchConfirm} disabled={!briefDraft.trim()} className="gap-1 text-xs h-8 text-indigo-600 border-indigo-300 hover:bg-indigo-50">
+                  <Button size="sm" variant="outline" onClick={openDispatchConfirm} disabled={!strategyDraft.trim()} className="gap-1 text-xs h-8 text-indigo-600 border-indigo-300 hover:bg-indigo-50">
                     <Rocket className="w-3.5 h-3.5" /> 派发给 Agent
                   </Button>
-                  {briefDraft !== selected.brief && (
+                  {strategyDraft !== selected.strategy && (
                     <span className="text-[11px] text-zinc-400 ml-auto">未保存</span>
                   )}
                 </div>

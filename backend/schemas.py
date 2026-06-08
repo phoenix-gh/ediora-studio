@@ -264,7 +264,7 @@ class PlanTagOut(BaseModel):
 
 class WritingPlanCreate(BaseModel):
     title: str
-    brief: str = ""
+    strategy: str = ""
     tags: list[str] = []
     priority: int = 3
     cover_style: dict = {}
@@ -274,7 +274,7 @@ class WritingPlanCreate(BaseModel):
 
 class WritingPlanUpdate(BaseModel):
     title: Optional[str] = None
-    brief: Optional[str] = None
+    strategy: Optional[str] = None
     tags: Optional[list[str]] = None
     priority: Optional[int] = None
     status: Optional[str] = None
@@ -310,7 +310,7 @@ class PlanSourceOut(BaseModel):
 class WritingPlanOut(BaseModel):
     id: int
     title: str
-    brief: str
+    strategy: str
     description: str  # legacy field, kept for backwards compat
     priority: int
     status: str

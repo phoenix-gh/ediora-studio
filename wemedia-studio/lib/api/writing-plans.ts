@@ -22,7 +22,7 @@ export interface PlanSource {
 export interface WritingPlan {
   id: number
   title: string
-  brief: string
+  strategy: string
   description: string
   priority: number
   status: string
@@ -39,7 +39,7 @@ export interface WritingPlan {
 
 export interface WritingPlanCreate {
   title: string
-  brief?: string
+  strategy?: string
   tags?: string[]
   priority?: number
   cover_style?: CoverStyle
@@ -49,7 +49,7 @@ export interface WritingPlanCreate {
 
 export interface WritingPlanUpdate {
   title?: string
-  brief?: string
+  strategy?: string
   tags?: string[]
   priority?: number
   status?: string

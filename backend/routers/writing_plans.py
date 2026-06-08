@@ -128,7 +128,7 @@ async def search_plans(q: str = "", db: AsyncSession = Depends(get_db)):
     rows = (await db.execute(
         select(WritingPlan).where(WritingPlan.status == "active")
     )).scalars().all()
-    matched = [p for p in rows if any(kw.lower() in (p.title + " " + p.brief).lower() for kw in keywords)]
+    matched = [p for p in rows if any(kw.lower() in (p.title + " " + p.strategy).lower() for kw in keywords)]
     return await _enrich_plans(db, matched[:10])
 
 
@@ -201,7 +201,7 @@ async def list_plans(tags: str | None = None, db: AsyncSession = Depends(get_db)
 async def create_plan(body: WritingPlanCreate, db: AsyncSession = Depends(get_db)):
     obj = WritingPlan(
         title=body.title,
-        brief=body.brief,
+        strategy=body.strategy,
         priority=body.priority,
         cover_style=body.cover_style,
         image_style=body.image_style,
@@ -276,8 +276,8 @@ async def dispatch_plan(plan_id: int, body: DispatchPlanRequest, db: AsyncSessio
     obj = await db.get(WritingPlan, plan_id)
     if not obj:
         raise HTTPException(404, "Plan not found")
-    if not obj.brief.strip():
-        raise HTTPException(400, "Brief is empty — add a research brief before dispatching")
+    if not obj.strategy.strip():
+        raise HTTPException(400, "Strategy is empty — add a writing strategy before dispatching")
 
     account: PublishAccount | None = None
     if body.account_id:
@@ -322,7 +322,7 @@ async def dispatch_plan(plan_id: int, body: DispatchPlanRequest, db: AsyncSessio
 
     # 写作方案的「写作模式」可能规定字数（如 100-200 字短文案）。解析出来，
     # 既喂给 writer（覆盖账号 word_range），也让 editor 的 brief 对齐。
-    word_spec = parse_word_spec(obj.brief)
+    word_spec = parse_word_spec(obj.strategy)
     word_rule_line = (
         f"严格按写作模式字数 **{word_spec['raw']}**（忽略上方账号画像的 word_range）"
         if word_spec else
@@ -348,7 +348,7 @@ async def dispatch_plan(plan_id: int, body: DispatchPlanRequest, db: AsyncSessio
         ])
     editor_body_parts.extend([
         "## 写作模式（来自写作方案）",
-        obj.brief,
+        obj.strategy,
         "",
         "---",
         "",

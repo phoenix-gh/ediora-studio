@@ -312,7 +312,7 @@ class WritingPlan(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     title: Mapped[str] = mapped_column(String, nullable=False)
     description: Mapped[str] = mapped_column(Text, default="")  # kept for migration rollback
-    brief: Mapped[str] = mapped_column(Text, default="")
+    strategy: Mapped[str] = mapped_column(Text, default="")
     parent_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)  # kept, unused after migration
     priority: Mapped[int] = mapped_column(Integer, default=3)   # 1=highest 5=lowest
     status: Mapped[str] = mapped_column(String, default="active", index=True)  # active/archived
