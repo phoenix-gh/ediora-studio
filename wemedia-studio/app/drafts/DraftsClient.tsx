@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import {
   BookMarked, Trash2, Save, RefreshCw, FileText, Clock,
   ChevronRight, Loader2, Plus, X,
@@ -157,6 +157,14 @@ export function DraftsClient({
     setConfirmDialog({ open: true, confirmLabel: '确定', danger: false, ...opts })
   }
   function closeConfirm() { setConfirmDialog(d => ({ ...d, open: false })) }
+
+  const wordCount = useMemo(() =>
+    editContent
+      .replace(/```[\s\S]*?```/g, '')   // fenced code blocks
+      .replace(/`[^`\n]*`/g, '')         // inline code
+      .replace(/\s/g, '')                // whitespace
+      .length
+  , [editContent])
 
   function chatStorageKey(draftId: number) { return `wms-chat-${draftId}` }
 
@@ -689,7 +697,7 @@ export function DraftsClient({
               </select>
 
               <span className="text-[11px] text-zinc-400">
-                v{selected.version} · 更新于 {formatDate(selected.updated_at)}
+                v{selected.version} · 更新于 {formatDate(selected.updated_at)} · {wordCount} 字
               </span>
 
               <div className="ml-auto flex items-center gap-2">
