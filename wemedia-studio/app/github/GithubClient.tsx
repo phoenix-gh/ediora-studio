@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input'
 import {
   GitFork, TrendingUp, AlertCircle, Zap, Plus, RefreshCw,
   Trash2, VolumeX, Volume2, Star, ExternalLink, ChevronDown, Loader2,
-  Bug, Lightbulb, Gauge, MousePointer, BookOpen, Clock, Tag, Settings,
+  Bug, Lightbulb, Gauge, MousePointer, BookOpen, Clock, Tag, Settings, FileText,
 } from 'lucide-react'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
@@ -70,6 +70,7 @@ function SubscribeDialog({
   const [group, setGroup] = useState('未分组')
   const [adding, setAdding] = useState(false)
   const [actingId, setActingId] = useState<string | null>(null)
+  const [expandedRepoId, setExpandedRepoId] = useState<string | null>(null)
 
   async function handleAdd(e?: React.FormEvent) {
     e?.preventDefault()
@@ -162,11 +163,8 @@ function SubscribeDialog({
           ) : (
             <div className="border border-zinc-200 dark:border-zinc-800 rounded-md max-h-72 overflow-y-auto">
               {repos.map(r => (
-                <div key={r.id}
-                  className={cn(
-                    'flex items-center gap-2 px-2.5 py-1.5 border-b border-zinc-100 dark:border-zinc-800 last:border-0',
-                    r.muted && 'opacity-50'
-                  )}>
+                <div key={r.id} className={cn('border-b border-zinc-100 dark:border-zinc-800 last:border-0', r.muted && 'opacity-50')}>
+                  <div className="flex items-center gap-2 px-2.5 py-1.5">
                   <GitFork className="w-4 h-4 text-zinc-400 flex-shrink-0" />
                   <div className="flex-1 min-w-0">
                     <div className="text-xs font-medium truncate">{r.id}</div>
@@ -189,12 +187,67 @@ function SubscribeDialog({
                     onClick={() => handleToggleMute(r)}>
                     {r.muted ? <Volume2 className="w-3 h-3" /> : <VolumeX className="w-3 h-3" />}
                   </Button>
+                  <Button size="sm" variant="ghost" className="h-7 w-7 p-0"
+                    title="草稿设置"
+                    onClick={() => setExpandedRepoId(expandedRepoId === r.id ? null : r.id)}>
+                    <FileText className="w-3 h-3" />
+                  </Button>
                   <Button size="sm" variant="ghost"
                     className="h-7 w-7 p-0 text-red-400 hover:text-red-600"
                     disabled={actingId === r.id}
                     onClick={() => handleDelete(r)}>
                     <Trash2 className="w-3 h-3" />
                   </Button>
+                  </div>
+                {expandedRepoId === r.id && (
+                  <div className="px-2.5 py-2 bg-zinc-50 dark:bg-zinc-900 border-t border-zinc-100 dark:border-zinc-800 flex items-center gap-3 flex-wrap">
+                    <span className="text-[11px] text-zinc-500">发布稿</span>
+                    <button
+                      className={cn(
+                        'text-[11px] px-2 py-0.5 rounded border transition-colors',
+                        r.release_draft_enabled
+                          ? 'bg-indigo-50 border-indigo-200 text-indigo-600 dark:bg-indigo-950 dark:border-indigo-800 dark:text-indigo-400'
+                          : 'bg-zinc-100 border-zinc-200 text-zinc-500 dark:bg-zinc-800 dark:border-zinc-700'
+                      )}
+                      onClick={async () => {
+                        const u = await updateGithubRepo(r.owner, r.repo, { release_draft_enabled: !r.release_draft_enabled })
+                        onUpdated(u)
+                      }}
+                    >
+                      {r.release_draft_enabled ? '已开启' : '已关闭'}
+                    </button>
+                    {r.release_draft_enabled && (
+                      <>
+                        {(['tech', 'product'] as const).map(t => {
+                          const active = r.release_draft_types?.includes(t) ?? true
+                          const label = t === 'tech' ? '技术向' : '产品向'
+                          return (
+                            <button
+                              key={t}
+                              className={cn(
+                                'text-[11px] px-2 py-0.5 rounded border transition-colors',
+                                active
+                                  ? 'bg-emerald-50 border-emerald-200 text-emerald-600 dark:bg-emerald-950 dark:border-emerald-800 dark:text-emerald-400'
+                                  : 'bg-zinc-100 border-zinc-200 text-zinc-500 dark:bg-zinc-800 dark:border-zinc-700'
+                              )}
+                              onClick={async () => {
+                                const current = r.release_draft_types ?? ['tech', 'product']
+                                const next = active
+                                  ? current.filter(x => x !== t)
+                                  : [...current, t]
+                                if (next.length === 0) return
+                                const u = await updateGithubRepo(r.owner, r.repo, { release_draft_types: next })
+                                onUpdated(u)
+                              }}
+                            >
+                              {label}
+                            </button>
+                          )
+                        })}
+                      </>
+                    )}
+                  </div>
+                )}
                 </div>
               ))}
             </div>
@@ -554,6 +607,14 @@ function ReleasesTab({ repoId, releases: initial, onLoad }: { repoId: string; re
                         <span className="text-[10px] font-medium border px-1.5 py-0.5 rounded-full text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950 border-amber-200 dark:border-amber-800">
                           Pre-release
                         </span>
+                      )}
+                      {rel.draft_generated_at && (
+                        <a
+                          href="/drafts"
+                          className="text-[10px] font-medium border px-1.5 py-0.5 rounded-full text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950 border-emerald-200 dark:border-emerald-800 hover:opacity-80 transition-opacity"
+                        >
+                          草稿已生成
+                        </a>
                       )}
                       <span className="ml-auto flex items-center gap-1 text-[11px] text-zinc-400 flex-shrink-0">
                         <Clock className="w-3 h-3" />
