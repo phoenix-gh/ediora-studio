@@ -138,6 +138,8 @@ class GithubRepo(Base):
     collect_interval_minutes: Mapped[int] = mapped_column(Integer, default=10)
     last_collected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    release_draft_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    release_draft_types: Mapped[list] = mapped_column(JSON, default=lambda: ["tech", "product"])
 
 
 class GithubIssue(Base):
@@ -202,6 +204,7 @@ class GithubRelease(Base):
     html_url: Mapped[str] = mapped_column(String, default="")
     published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    draft_generated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, default=None)
 
 
 class AppSetting(Base):
@@ -257,6 +260,9 @@ class XPost(Base):
     cover_image: Mapped[str] = mapped_column(String, default="")
     possibly_sensitive: Mapped[bool] = mapped_column(Boolean, default=False)
     raw_markdown: Mapped[str] = mapped_column(Text, default="")
+    x_reply_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    x_reply_draft: Mapped[str | None] = mapped_column(Text, nullable=True)
+    x_reply_notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class Paper(Base):
