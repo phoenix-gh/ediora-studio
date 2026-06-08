@@ -99,30 +99,19 @@ def render_profile_editor(profile: dict[str, Any]) -> str:
 
 
 def render_profile_writer(profile: dict[str, Any]) -> str:
-    """writer 写稿，需要语气/受众/字数/voice_samples/style_rules/taboo。"""
+    """writer 写稿，只给身份定位 + 禁区；字数/风格/示例由写作方案策略决定。"""
     p = profile
     lines = [
         "## 账号写作约束",
         f"- **name**: {p.get('name', '')}（{p.get('platform', '')}）",
         f"- **tone**: {p.get('tone', '') or '(未填)'}",
         f"- **audience**: {p.get('audience', '') or '(未填)'}",
-        f"- **word_range**: {_wr_str(p)}",
     ]
     taboo = p.get("taboo") or []
     if taboo:
         lines.append("- **taboo**（禁区，绝不能碰）:")
         for it in taboo:
             lines.append(f"  - {it}")
-    style_rules = p.get("style_rules") or []
-    if style_rules:
-        lines.append("- **style_rules**（账号级硬规则，逐条遵守，优先于通用反 AI 腔）:")
-        for it in style_rules:
-            lines.append(f"  - {it}")
-    voice_samples = p.get("voice_samples") or []
-    if voice_samples:
-        lines.append("- **voice_samples**（必读，模仿句长/口吻/节奏）:")
-        for i, vs in enumerate(voice_samples, 1):
-            lines.append(f"  {i}. > {vs}")
     return "\n".join(lines)
 
 
