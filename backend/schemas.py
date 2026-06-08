@@ -472,6 +472,7 @@ class ArticleSeriesUpdate(BaseModel):
 class DispatchReleaseWriteRequest(BaseModel):
     account_id: str
     plan_id: int
+    with_cover: bool = True
 
 
 class GithubRepoCreate(BaseModel):

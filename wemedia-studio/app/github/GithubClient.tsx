@@ -526,6 +526,7 @@ function ReleasesTab({ repoId, releases: initial, onLoad }: { repoId: string; re
   const [dispatchPlans, setDispatchPlans] = useState<WritingPlan[]>([])
   const [dispatchAccountId, setDispatchAccountId] = useState('')
   const [dispatchPlanId, setDispatchPlanId] = useState<number | null>(null)
+  const [dispatchWithCover, setDispatchWithCover] = useState(true)
   const [dispatching, setDispatching] = useState(false)
 
   function stopPoll() {
@@ -601,7 +602,7 @@ function ReleasesTab({ repoId, releases: initial, onLoad }: { repoId: string; re
     const [owner, repo] = repoId.split('/')
     setDispatching(true)
     try {
-      const result = await dispatchReleaseWrite(owner, repo, dispatchTarget.tag_name, dispatchAccountId, dispatchPlanId)
+      const result = await dispatchReleaseWrite(owner, repo, dispatchTarget.tag_name, dispatchAccountId, dispatchPlanId, dispatchWithCover)
       setDispatchTarget(null)
       toast.success('已派发给 Agent', {
         description: `任务 ${result.task_id}`,
@@ -775,19 +776,30 @@ function ReleasesTab({ repoId, releases: initial, onLoad }: { repoId: string; re
               )}
             </div>
           </div>
-          <div className="flex justify-end gap-2 pt-1">
-            <Button variant="outline" size="sm" className="text-xs h-8" onClick={() => setDispatchTarget(null)}>
-              取消
-            </Button>
-            <Button
-              size="sm"
-              className="text-xs h-8 gap-1"
-              disabled={dispatching || !dispatchAccountId || dispatchPlanId === null}
-              onClick={handleDispatch}
-            >
-              {dispatching && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-              派发给 Agent
-            </Button>
+          <div className="flex items-center gap-2 pt-1">
+            <label className="flex items-center gap-1.5 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={dispatchWithCover}
+                onChange={e => setDispatchWithCover(e.target.checked)}
+                className="rounded"
+              />
+              <span className="text-xs text-zinc-600 dark:text-zinc-400">同时配封面</span>
+            </label>
+            <div className="ml-auto flex gap-2">
+              <Button variant="outline" size="sm" className="text-xs h-8" onClick={() => setDispatchTarget(null)}>
+                取消
+              </Button>
+              <Button
+                size="sm"
+                className="text-xs h-8 gap-1"
+                disabled={dispatching || !dispatchAccountId || dispatchPlanId === null}
+                onClick={handleDispatch}
+              >
+                {dispatching && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                派发给 Agent
+              </Button>
+            </div>
           </div>
         </DialogContent>
       </Dialog>

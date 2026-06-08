@@ -254,12 +254,14 @@ async def dispatch_release_write(
         "word_rule_line": word_rule_line,
     }
 
+    steps = RELEASE_WRITE_PIPELINE if body.with_cover else RELEASE_WRITE_PIPELINE[:1]
+
     from hermes_kanban_client import HermesKanbanClient, HermesKanbanError
     try:
         kanban = HermesKanbanClient()
         task_ids: dict[str, str] = {}
         prev_id: str | None = None
-        for step in RELEASE_WRITE_PIPELINE:
+        for step in steps:
             parents = [prev_id] if prev_id else []
             tid = await kanban.create_task(
                 title=step.title(ctx),

@@ -58,14 +58,14 @@ export async function getGithubReleases(repoId?: string, limit = 30): Promise<Gi
 
 export async function dispatchReleaseWrite(
   owner: string, repo: string, tag: string,
-  accountId: string, planId: number,
+  accountId: string, planId: number, withCover: boolean,
 ): Promise<{ task_id: string; kanban_url: string }> {
   return apiFetch<{ task_id: string; kanban_url: string }>(
     `/github/releases/${owner}/${repo}/${encodeURIComponent(tag)}/dispatch-write`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ account_id: accountId, plan_id: planId }),
+      body: JSON.stringify({ account_id: accountId, plan_id: planId, with_cover: withCover }),
     }
   )
 }
