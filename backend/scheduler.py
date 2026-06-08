@@ -67,6 +67,8 @@ async def scheduled_github():
         do_trending = _should_run("github_trending", trending_hours * 3600)
         trending_new = 0
         trending_error = ""
+        draft_new = 0
+        detail_parts = []
         async with SessionLocal() as db:
             if do_trending:
                 try:
@@ -76,15 +78,21 @@ async def scheduled_github():
             repo_results = await collect_all_repos(db)
         issue_new = sum(r["new_issues"] for r in repo_results)
         release_new = sum(r.get("new_releases", 0) for r in repo_results)
+        if release_new > 0:
+            try:
+                from release_drafter import generate_pending_drafts
+                async with SessionLocal() as db:
+                    draft_new = await generate_pending_drafts(db)
+            except Exception as de:
+                detail_parts.append("draft: " + str(de))
         errors = [r for r in repo_results if r.get("error")]
-        detail_parts = []
         if trending_error:
             detail_parts.append("trending: " + trending_error)
         if errors:
             for r in errors:
                 detail_parts.append("{0}: {1}".format(r["repo_id"], r["error"]))
         detail = "; ".join(detail_parts)
-        msg = "趋势 +{0}  Issues +{1}  Releases +{2}".format(trending_new, issue_new, release_new)
+        msg = "趋势 +{0}  Issues +{1}  Releases +{2}  草稿 +{3}".format(trending_new, issue_new, release_new, draft_new)
         if trending_error or errors:
             if trending_error:
                 msg += "  (趋势抓取失败)"
@@ -243,13 +251,18 @@ async def scheduled_juejin():
 
 
 async def scheduled_x_collect():
-    """Hourly: iterate all enabled XSubscription rows; per-source error isolation."""
+    """定时：采集所有启用 XSubscription；间隔由 x_collect_interval_minutes 控制。"""
     from logger import log
+    from config import get_config
     from sqlalchemy import select
     from models import XSubscription
     from routers.x import _collect_one
 
     try:
+        cfg = await get_config()
+        minutes = max(1, int(cfg.get("x_collect_interval_minutes", 15)))
+        if not _should_run("x_collect", minutes * 60):
+            return
         async with SessionLocal() as db:
             rows = (await db.execute(
                 select(XSubscription).where(XSubscription.enabled == True)
@@ -294,21 +307,135 @@ async def scheduled_reddit():
 
 
 async def scheduled_ref_collect():
-    """每日：跑所有启用的采集规则，提炼段子入参考文案库。"""
+    """定时：跑所有启用采集规则，存入 raw 队列；间隔由 ref_collect_interval_minutes 控制。"""
     from logger import log
+    from config import get_config
     try:
+        cfg = await get_config()
+        minutes = max(1, int(cfg.get("ref_collect_interval_minutes", 15)))
+        if not _should_run("ref_collect", minutes * 60):
+            return
         from ref_collector import collect_all
         async with SessionLocal() as db:
             result = await collect_all(db)
         if result["failed"]:
             await log("materials", "warn",
-                      f"参考文案采集完成，新增 {result['new_materials']} 条",
+                      f"参考文案采集完成，新增 raw {result['new_raw']} 条",
                       "; ".join(result["failed"]))
-        else:
+        elif result["new_raw"]:
             await log("materials", "ok",
-                      f"参考文案采集完成，新增 {result['new_materials']} 条")
+                      f"参考文案采集完成，新增 raw {result['new_raw']} 条")
     except Exception as e:
         await log("materials", "error", "参考文案采集异常", str(e))
+
+
+async def scheduled_ref_clean():
+    """每隔 clean_interval_minutes 分钟：对 raw 队列做 LLM 精筛，入素材库。"""
+    from logger import log
+    from config import get_config
+    try:
+        cfg = await get_config()
+        minutes = max(5, int(cfg.get("ref_clean_interval_minutes", 30)))
+        if not _should_run("ref_clean", minutes * 60):
+            return
+        size = int(cfg.get("clean_batch_size", 20))
+        from ref_collector import clean_batch
+        async with SessionLocal() as db:
+            result = await clean_batch(db, size)
+        if result["processed"] == 0:
+            return
+        await log("materials", "ok",
+                  f"素材精筛：处理 {result['processed']} 条，入库 {result['kept']} 条，"
+                  f"淘汰 {result['rejected']} 条，剩余 raw {result['remaining_raw']} 条")
+    except Exception as e:
+        await log("materials", "error", "素材精筛异常", str(e))
+
+
+async def scheduled_x_reply_scout():
+    """扫描新采集的 X 帖子，LLM 评估回复价值，高分帖发 Telegram 通知附带回复草稿。"""
+    from logger import log
+    from config import get_config
+    from datetime import datetime, timezone, timedelta
+    from sqlalchemy import select
+    from models import XPost
+
+    try:
+        cfg = await get_config()
+        minutes = max(5, int(cfg.get("x_reply_scout_interval_minutes", 15)))
+        if not _should_run("x_reply_scout", minutes * 60):
+            return
+
+        threshold = float(cfg.get("x_reply_score_threshold", 7))
+        batch_size = int(cfg.get("x_reply_scout_batch", 20))
+
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=48)
+        async with SessionLocal() as db:
+            rows = (await db.execute(
+                select(XPost)
+                .where(XPost.x_reply_score.is_(None))
+                .where(XPost.published_at >= cutoff)
+                .order_by(XPost.collected_at.desc())
+                .limit(batch_size)
+            )).scalars().all()
+
+        if not rows:
+            return
+
+        from llm import assess_x_reply
+        notified = 0
+        for post in rows:
+            try:
+                result = await assess_x_reply({
+                    "username": post.username,
+                    "display_name": post.display_name,
+                    "content": post.content,
+                    "views": post.views,
+                    "reposts": post.reposts,
+                    "likes": post.likes,
+                    "replies": post.replies,
+                })
+                score = result["score"]
+                draft = result.get("draft")
+
+                async with SessionLocal() as db:
+                    p = await db.get(XPost, post.tweet_id)
+                    if p:
+                        p.x_reply_score = float(score)
+                        p.x_reply_draft = draft
+                        if score >= threshold and draft:
+                            p.x_reply_notified_at = datetime.now(timezone.utc)
+                        await db.commit()
+
+                if score >= threshold and draft:
+                    content_preview = (post.content or "")[:280]
+                    msg = (
+                        f"🎯 X 回复建议 [{score}/10]\n\n"
+                        f"@{post.username}（{post.display_name}）\n"
+                        f"{content_preview}\n\n"
+                        f"👁 {post.views}  ❤️ {post.likes}  🔁 {post.reposts}  💬 {post.replies}\n\n"
+                        f"💡 {result.get('reason', '')}\n\n"
+                        f"📝 建议回复：\n{draft}\n\n"
+                        f"🔗 {post.url}"
+                    )
+                    proc = await asyncio.create_subprocess_exec(
+                        "/home/violet/.local/bin/hermes", "send", "--to", "telegram", msg,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                    )
+                    await proc.wait()
+                    notified += 1
+
+            except Exception as e:
+                await log("x_reply", "error", f"帖子 {post.tweet_id} 评估异常", str(e))
+
+            await asyncio.sleep(1)
+
+        if notified:
+            await log("x_reply", "ok",
+                      f"X 回复侦查：处理 {len(rows)} 条，{notified} 条高价值帖已推送 Telegram")
+
+    except Exception as e:
+        await log("x_reply", "error", "X 回复侦查异常", str(e))
 
 
 def register_jobs(scheduler, cfg):
@@ -322,9 +449,11 @@ def register_jobs(scheduler, cfg):
         (scheduled_kr,                  dict(trigger="interval", minutes=10,          id="kr_collect")),
         (scheduled_juejin,              dict(trigger="interval", minutes=10,          id="juejin_collect")),
         (scheduled_wechat,              dict(trigger="interval", minutes=15,          id="wechat_collect")),
-        (scheduled_x_collect,           dict(trigger="interval", hours=1,             id="x_collect_hourly")),
+        (scheduled_x_collect,           dict(trigger="interval", minutes=5,           id="x_collect_hourly")),
         (scheduled_reddit,              dict(trigger="interval", minutes=60,          id="reddit_collect")),
-        (scheduled_ref_collect,         dict(trigger="interval", hours=24,            id="ref_collect_daily")),
+        (scheduled_ref_collect,         dict(trigger="interval", minutes=5,           id="ref_collect_daily")),
+        (scheduled_ref_clean,           dict(trigger="interval", minutes=5,           id="ref_clean_batch")),
+        (scheduled_x_reply_scout,       dict(trigger="interval", minutes=5,           id="x_reply_scout")),
     ]
     for func, kwargs in jobs:
         scheduler.add_job(func, **kwargs)
