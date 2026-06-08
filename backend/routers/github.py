@@ -173,6 +173,29 @@ async def collect_releases(owner: str, repo_name: str, db: AsyncSession = Depend
     return {"repo_id": rid, "new_releases": n}
 
 
+@router.post("/releases/{owner}/{repo_name}/{tag}/generate-draft")
+async def generate_release_draft(
+    owner: str, repo_name: str, tag: str, db: AsyncSession = Depends(get_db)
+):
+    """Manually generate (or re-generate) draft articles for a specific release."""
+    rid = f"{owner}/{repo_name}"
+    release_id = f"{rid}:{tag}"
+    repo = await db.get(GithubRepo, rid)
+    if not repo:
+        raise HTTPException(404, "Repo not found")
+    release = await db.get(GithubRelease, release_id)
+    if not release:
+        raise HTTPException(404, "Release not found")
+
+    # Reset so generate_release_drafts will re-run even if already generated
+    release.draft_generated_at = None
+    await db.commit()
+
+    from release_drafter import generate_release_drafts
+    n = await generate_release_drafts(release, repo, db)
+    return {"drafts_created": n}
+
+
 # ── Trending ──────────────────────────────────────────────────────────────────
 
 @router.get("/trending", response_model=list[GithubTrendingRepoOut])

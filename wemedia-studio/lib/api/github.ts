@@ -56,6 +56,15 @@ export async function getGithubReleases(repoId?: string, limit = 30): Promise<Gi
   return apiFetch<GithubRelease[]>(`/github/releases?${params}`)
 }
 
+export async function generateReleaseDraft(
+  owner: string, repo: string, tag: string
+): Promise<{ drafts_created: number }> {
+  return apiFetch<{ drafts_created: number }>(
+    `/github/releases/${owner}/${repo}/${encodeURIComponent(tag)}/generate-draft`,
+    { method: 'POST' }
+  )
+}
+
 export async function collectAllGithub(): Promise<{ ok: boolean }> {
   return apiFetch('/github/collect', { method: 'POST' })
 }

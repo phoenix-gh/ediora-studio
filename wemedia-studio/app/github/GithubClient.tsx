@@ -18,6 +18,7 @@ import {
   addGithubRepo, deleteGithubRepo, updateGithubRepo,
   collectOneRepo, collectOneRepoReleases, collectAllGithub, analyzePainPoints,
   getGithubIssues, getPainPoints, getTrendingRepos, getGithubReleases,
+  generateReleaseDraft,
 } from '@/lib/api/github'
 import { AddToTopicPopover } from '@/components/features/AddToTopicPopover'
 
@@ -514,6 +515,7 @@ function ReleasesTab({ repoId, releases: initial, onLoad }: { repoId: string; re
   const [releases, setReleases] = useState(initial)
   const [collecting, setCollecting] = useState(false)
   const [expanded, setExpanded] = useState<string | null>(null)
+  const [generatingId, setGeneratingId] = useState<string | null>(null)
   const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   function stopPoll() {
@@ -550,6 +552,25 @@ function ReleasesTab({ repoId, releases: initial, onLoad }: { repoId: string; re
       toast.error('采集失败')
     } finally {
       setCollecting(false)
+    }
+  }
+
+  async function handleGenerateDraft(rel: GithubRelease) {
+    const [owner, repo] = repoId.split('/')
+    setGeneratingId(rel.id)
+    try {
+      const result = await generateReleaseDraft(owner, repo, rel.tag_name)
+      const rows = await getGithubReleases(repoId, 30)
+      applyRows(rows)
+      if (result.drafts_created > 0) {
+        toast.success(`已生成 ${result.drafts_created} 份草稿，前往草稿箱查看`)
+      } else {
+        toast('草稿已存在，未重复创建')
+      }
+    } catch {
+      toast.error('生成失败，请检查 LLM 配置')
+    } finally {
+      setGeneratingId(null)
     }
   }
 
@@ -643,7 +664,7 @@ function ReleasesTab({ repoId, releases: initial, onLoad }: { repoId: string; re
                       </div>
                     )}
 
-                    <div className="mt-2">
+                    <div className="mt-2 flex items-center gap-3 flex-wrap">
                       <a
                         href={rel.html_url}
                         target="_blank"
@@ -652,6 +673,16 @@ function ReleasesTab({ repoId, releases: initial, onLoad }: { repoId: string; re
                       >
                         <ExternalLink className="w-3 h-3" />在 GitHub 查看
                       </a>
+                      <button
+                        onClick={() => handleGenerateDraft(rel)}
+                        disabled={generatingId === rel.id}
+                        className="inline-flex items-center gap-1 text-[11px] text-zinc-400 hover:text-emerald-600 transition-colors disabled:opacity-50"
+                      >
+                        {generatingId === rel.id
+                          ? <Loader2 className="w-3 h-3 animate-spin" />
+                          : <FileText className="w-3 h-3" />}
+                        {generatingId === rel.id ? '生成中…' : rel.draft_generated_at ? '重新生成草稿' : '生成草稿'}
+                      </button>
                     </div>
                   </div>
                 </div>
