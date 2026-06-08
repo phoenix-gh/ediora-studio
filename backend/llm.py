@@ -137,6 +137,14 @@ def _extract_json_array(text: str) -> list:
     return []
 
 
+def _extract_json_object(text: str) -> dict:
+    start = text.find("{")
+    end = text.rfind("}") + 1
+    if start >= 0 and end > start:
+        return json.loads(text[start:end])
+    return {}
+
+
 async def generate_topics_from_posts(posts_info: list[dict]) -> list[dict]:
     if not posts_info:
         return []
@@ -205,6 +213,81 @@ Issues 列表（按关注度排序）:
     except Exception as e:
         print(f"[llm] analyze_pain_points error: {e}")
         return []
+
+
+async def generate_release_article(
+    repo: str,
+    tag: str,
+    release_name: str,
+    html_url: str,
+    body: str,
+    draft_types: list[str],
+) -> dict:
+    """Generate tech and/or product-facing release article drafts with fine-grained TODO annotations."""
+    types_str = "、".join(
+        "技术向(tech)" if t == "tech" else "产品运营向(product)" for t in draft_types
+    )
+
+    if not body.strip():
+        result: dict = {}
+        for t in draft_types:
+            label = "技术解读" if t == "tech" else "更新亮点"
+            prefix = "[pre] " if any(kw in tag.lower() for kw in ("rc", "alpha", "beta", "pre")) else ""
+            result[t] = {
+                "title": f"{prefix}[{t}] {repo} {tag} {label}",
+                "sections": [{
+                    "heading": "## 发布说明",
+                    "content": f"{repo} 发布了 {tag}，暂无 changelog 正文。",
+                    "todos": [f"[TODO: 访问 {html_url} 查看完整 changelog，补充实际变更内容]"],
+                }],
+            }
+        return result
+
+    prerelease_hint = ""
+    if any(kw in tag.lower() for kw in ("rc", "alpha", "beta", "pre")):
+        prerelease_hint = "注意：这是一个预发布版本（pre-release），请在文章标题加 [pre] 前缀，并在开头加一段提示说明这是预发布版本，可能不稳定。"
+
+    prompt = f"""你是中文科技自媒体内容专家。现在需要为 GitHub 项目 {repo} 的 {tag} 版本（发布名称：{release_name}）撰写发布解读文章。
+
+GitHub Release 页面：{html_url}
+Changelog 原文（Markdown）：
+---
+{body[:4000]}
+---
+
+{prerelease_hint}
+
+请生成以下类型的文章草稿：{types_str}
+
+输出 JSON 对象，每个请求的类型作为顶层 key（"tech" 和/或 "product"），值为：
+{{
+  "title": "文章标题",
+  "sections": [
+    {{
+      "heading": "## 章节标题",
+      "content": "章节正文（中文，200-400字）",
+      "todos": ["[TODO: 具体描述需要补充的素材，如截图/录屏/对比图]"]
+    }}
+  ]
+}}
+
+关键要求：
+1. tech 版本：面向开发者，保留技术细节、API 变更、性能数字、breaking changes
+2. product 版本：面向普通用户/运营，把技术变更翻译成"用户能感知的变化"，功能亮点优先
+3. [TODO: ...] 必须针对每个具体变更点推断所需素材，例如：
+   - "[TODO: 截图 - 新版 UI 界面，对比旧版布局变化]"
+   - "[TODO: 录制 GIF - xxx 功能的完整操作演示，展示从触发到结果的全流程]"
+   - "[TODO: 截图 - 性能对比数据表格或基准测试结果图]"
+   不要写泛化的 "[TODO: 补充截图]"
+4. 章节数量：3-6 个，每节对应 changelog 中一个独立功能/修复
+5. 只输出 JSON 对象，不要任何 markdown 代码块或其他文字"""
+
+    try:
+        raw = await _call(prompt, max_tokens=4000)
+        return _extract_json_object(raw)
+    except Exception as e:
+        print(f"[llm] generate_release_article error: {e}")
+        return {}
 
 
 async def generate_topics_from_x_posts(
@@ -408,6 +491,42 @@ async def _classify_ref_chunk(
     if not isinstance(result, list):
         raise RefClassifyError("LLM 输出不是 JSON 数组")
     return result
+
+
+async def assess_x_reply(post: dict) -> dict:
+    """Score an X post for reply value (0-10). If score >= 7, also drafts a short reply.
+    Returns {score: int, reason: str, draft: str|None}."""
+    prompt = f"""你是一位活跃在 X 平台的科技行业从业者，擅长用英文写有价值的短评。
+
+分析以下帖子，判断是否值得发一条回复参与互动。
+
+作者：@{post.get('username', '')}（{post.get('display_name', '')}）
+内容：{(post.get('content') or '')[:600]}
+数据：阅读 {post.get('views', 0)}  转发 {post.get('reposts', 0)}  点赞 {post.get('likes', 0)}  评论 {post.get('replies', 0)}
+
+评分标准（0-10）：
+- 8-10：帖子有明确观点/数据/争议点，回复可以补充视角、提问引发讨论，或表达独到见解
+- 5-7：普通质量，可回复但收益有限
+- 0-4：广告、纯日常闲聊、语言不通、低价值内容
+
+若 score >= 7，用中文写 1-2 句回复。要求：自然口语、有实质内容（具体问题/数据补充/独到观点），不要泛泛夸奖。
+
+以 JSON 格式输出（只输出 JSON，不要其他文字）：
+{{"score": <0-10 整数>, "reason": "<20字内评分原因>", "draft": "<中文回复 or null>"}}"""
+
+    try:
+        raw = (await _call(prompt, max_tokens=400)).strip()
+        start, end = raw.find("{"), raw.rfind("}") + 1
+        if start >= 0 and end > start:
+            data = json.loads(raw[start:end])
+            return {
+                "score": int(data.get("score", 0)),
+                "reason": str(data.get("reason", "")),
+                "draft": data.get("draft") or None,
+            }
+    except Exception as e:
+        print(f"[llm] assess_x_reply error: {e}")
+    return {"score": 0, "reason": "LLM error", "draft": None}
 
 
 async def classify_ref_posts(
