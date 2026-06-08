@@ -15,7 +15,7 @@ export async function addGithubRepo(owner: string, repo: string, group = '未分
 
 export async function updateGithubRepo(
   owner: string, repo: string,
-  body: { group?: string; muted?: boolean; collect_interval_minutes?: number }
+  body: { group?: string; muted?: boolean; collect_interval_minutes?: number; release_draft_enabled?: boolean; release_draft_types?: string[] }
 ): Promise<GithubRepo> {
   return apiFetch<GithubRepo>(`/github/repos/${owner}/${repo}`, {
     method: 'PATCH',

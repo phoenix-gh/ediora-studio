@@ -59,6 +59,8 @@ export interface GithubRepo {
   muted: boolean
   collect_interval_minutes: number
   last_collected_at: string | null
+  release_draft_enabled: boolean
+  release_draft_types: string[]
 }
 
 export interface GithubIssue {
@@ -98,6 +100,7 @@ export interface GithubRelease {
   is_draft: boolean
   html_url: string
   published_at: string
+  draft_generated_at: string | null
 }
 
 export interface GithubTrendingRepo {
