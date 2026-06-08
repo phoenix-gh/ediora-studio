@@ -475,12 +475,8 @@ pipeline_task_id: {c['pipeline_task_id']}
 按 brief + 上方画像写 Markdown 初稿：
 
 - **字数**：{writer_word_directive_md(c)}，整篇 Markdown，**不要拆 thread / 短帖串**
-- **句长 / 口吻 / 节奏**：严格贴 `voice_samples`，模仿其句长起伏
-- **硬约束**：逐条遵守 `style_rules`（账号级规则优先于下方通用反 AI 腔）
-- **避开** `taboo`（话题 / 词汇 / 立场）
 - **标题**：从 brief 候选挑或综合自创（贴 `tone`）
-{writer_humanizer_line_md(c)}- **写作习惯**: 逗号,句号全用半角, 句号后面偶尔会连续两三个空格.
-{writer_structure_directive_md(c)}
+{writer_humanizer_line_md(c)}{writer_structure_directive_md(c)}
 
 {writer_rules_md(c)}
 
@@ -579,12 +575,7 @@ account_id: {c['account_id']}
 按 brief + 上方画像重写 Markdown：
 
 - **字数**：{writer_word_directive_md(c)}，整篇 Markdown，**不要拆 thread / 短帖串**
-- **句长 / 口吻 / 节奏**：严格贴 `voice_samples`
-- **硬约束**：逐条遵守 `style_rules`（账号级规则优先于下方通用反 AI 腔）
-- **避开** `taboo`
-- **使用技能**: humanizer
-- **写作习惯**: 逗号,句号全用半角, 句号后面偶尔会连续两三个空格.
-- **结构**：拒绝按 brief 等比例展开，拒绝对称结构。core_point 占 ≥40%。
+{writer_humanizer_line_md(c)}- **结构**：拒绝按 brief 等比例展开，拒绝对称结构。core_point 占 ≥40%。
 
 {writer_rules_md(c)}
 
@@ -800,18 +791,7 @@ pipeline_task_id: {c['pipeline_task_id']}
 ---
 
 ## 这棒任务（writer · 直接从 Release 日志写稿）
-按上方「写作策略」的框架，把 Release 内容写成一篇发布稿。无需另出 brief，直接写终稿。
-
-写稿要点：
-- **字数**：{writer_word_directive_md(c)}，整篇 Markdown，**不要拆分 thread / 短帖串**
-- **角度**：写作策略已定义框架，把 Release 里最重要的改动填进去；不要面面俱到，挑 1-2 个核心改动深写
-- **具体 > 概括**：每处改动要给出功能名 / 版本号 / 性能数字等具体细节，不要写「大幅提升了 X 的体验」
-- **句长 / 口吻**：严格贴 `voice_samples`，模仿其句长起伏
-- **硬约束**：逐条遵守 `style_rules`
-- **避开** `taboo`
-{writer_humanizer_line_md(c)}- **写作习惯**: 逗号,句号全用半角, 句号后面偶尔会连续两三个空格.
-
-{writer_rules_md(c)}
+按上方「写作策略」的框架，把 Release 内容写成一篇发布稿。字数、结构、风格全部以写作策略为准。
 
 ## 工作流（硬性，省 turn）
 本任务**没有 file / code_execution / terminal 工具**，全部在 message 中完成：
