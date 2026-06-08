@@ -104,7 +104,6 @@ def render_profile_writer(profile: dict[str, Any]) -> str:
     lines = [
         "## 账号写作约束",
         f"- **name**: {p.get('name', '')}（{p.get('platform', '')}）",
-        f"- **tone**: {p.get('tone', '') or '(未填)'}",
         f"- **audience**: {p.get('audience', '') or '(未填)'}",
     ]
     taboo = p.get("taboo") or []
