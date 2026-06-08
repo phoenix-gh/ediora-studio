@@ -88,6 +88,10 @@ async def update_repo(
         repo.muted = body.muted
     if body.collect_interval_minutes is not None:
         repo.collect_interval_minutes = max(1, body.collect_interval_minutes)
+    if body.release_draft_enabled is not None:
+        repo.release_draft_enabled = body.release_draft_enabled
+    if body.release_draft_types is not None and len(body.release_draft_types) > 0:
+        repo.release_draft_types = [t for t in body.release_draft_types if t in ("tech", "product")]
     await db.commit()
     await db.refresh(repo)
     return repo

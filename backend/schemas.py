@@ -480,6 +480,8 @@ class GithubRepoUpdate(BaseModel):
     group: Optional[str] = None
     muted: Optional[bool] = None
     collect_interval_minutes: Optional[int] = None
+    release_draft_enabled: Optional[bool] = None
+    release_draft_types: Optional[list[str]] = None
 
 
 class GithubRepoOut(BaseModel):
@@ -493,6 +495,8 @@ class GithubRepoOut(BaseModel):
     muted: bool
     collect_interval_minutes: int
     last_collected_at: Optional[datetime] = None
+    release_draft_enabled: bool = True
+    release_draft_types: list = []
 
     model_config = {"from_attributes": True}
 
@@ -538,6 +542,7 @@ class GithubReleaseOut(BaseModel):
     is_draft: bool
     html_url: str
     published_at: datetime
+    draft_generated_at: Optional[datetime] = None
 
     model_config = {"from_attributes": True}
 
