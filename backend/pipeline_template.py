@@ -771,6 +771,62 @@ account_id: {c['account_id']}
 ]
 
 
+# ── release_write：从 GitHub Release 出发的发布稿链路 writer → illustrator ─────
+# 无 editor 棒，writer 直接读 release 日志 + 写作策略写稿；illustrator 复用 FULL_PIPELINE。
+RELEASE_WRITE_PIPELINE: list[PipelineStep] = [
+    PipelineStep(
+        role="writer",
+        assignee="wms_writer",
+        title=lambda c: f"写稿：{c['title']}",
+        body=lambda c: f"""account_id: {c['account_id']}
+pipeline_task_id: {c['pipeline_task_id']}
+
+# {c['title']}
+
+{render_profile_writer(c['account_profile'])}
+
+## 写作策略（来自写作方案「{c['plan_title']}」）
+{c['plan_strategy'] or '（未填写作策略，请自行判断角度）'}
+
+---
+
+## 来源：GitHub Release — {c['repo_name']} {c['release_tag']}
+
+**Release 名称**: {c['release_name'] or c['release_tag']}
+**链接**: {c['release_html_url']}
+
+{c['release_body'] or '（本次 Release 无说明文字）'}
+
+---
+
+## 这棒任务（writer · 直接从 Release 日志写稿）
+按上方「写作策略」的框架，把 Release 内容写成一篇发布稿。无需另出 brief，直接写终稿。
+
+写稿要点：
+- **字数**：{writer_word_directive_md(c)}，整篇 Markdown，**不要拆分 thread / 短帖串**
+- **角度**：写作策略已定义框架，把 Release 里最重要的改动填进去；不要面面俱到，挑 1-2 个核心改动深写
+- **具体 > 概括**：每处改动要给出功能名 / 版本号 / 性能数字等具体细节，不要写「大幅提升了 X 的体验」
+- **句长 / 口吻**：严格贴 `voice_samples`，模仿其句长起伏
+- **硬约束**：逐条遵守 `style_rules`
+- **避开** `taboo`
+{writer_humanizer_line_md(c)}- **写作习惯**: 逗号,句号全用半角, 句号后面偶尔会连续两三个空格.
+
+{writer_rules_md(c)}
+
+## 工作流（硬性，省 turn）
+本任务**没有 file / code_execution / terminal 工具**，全部在 message 中完成：
+
+1. 在 message 里**一次性**写出完整 Markdown 终稿
+2. `save_draft(title, content, topic_id='release:{c['repo_name']}:{c['release_tag']}', status='drafting', pipeline_task_id={c['pipeline_task_id']}, draft_type='{c.get('draft_type', 'article')}')` 拿 `draft_id`
+3. `kanban_complete(summary='<标题> 发布稿 N 字', metadata={{"draft_id": ..., "wordcount": N}})`
+
+目标：从写稿到 complete **≤ 3 turn**。
+""".strip(),
+    ),
+    FULL_PIPELINE[2],  # illustrator — 读 draft_id from parent metadata，ctx keys 兼容
+]
+
+
 PIPELINES: dict[str, list[PipelineStep]] = {
     "full": FULL_PIPELINE,
     "cover_only": COVER_ONLY_PIPELINE,
@@ -778,6 +834,7 @@ PIPELINES: dict[str, list[PipelineStep]] = {
     "topic_long": TOPIC_LONG_PIPELINE,
     "topic_short": TOPIC_SHORT_PIPELINE,
     "illustrate_body": INLINE_ILLUS_PIPELINE,
+    "release_write": RELEASE_WRITE_PIPELINE,
 }
 
 

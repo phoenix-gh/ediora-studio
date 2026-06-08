@@ -7,6 +7,7 @@ from models import GithubRepo, GithubIssue, IssuePainPoint, GithubTrendingRepo, 
 from schemas import (
     GithubRepoCreate, GithubRepoUpdate, GithubRepoOut,
     GithubIssueOut, IssuePainPointOut, GithubTrendingRepoOut, GithubReleaseOut,
+    DispatchReleaseWriteRequest, DispatchResponse,
 )
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -171,6 +172,110 @@ async def collect_releases(owner: str, repo_name: str, db: AsyncSession = Depend
     from github_collector import collect_repo_releases
     n = await collect_repo_releases(repo, db)
     return {"repo_id": rid, "new_releases": n}
+
+
+@router.post("/releases/{owner}/{repo_name}/{tag}/dispatch-write", response_model=DispatchResponse)
+async def dispatch_release_write(
+    owner: str, repo_name: str, tag: str,
+    body: DispatchReleaseWriteRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Dispatch wms_writer pipeline (editor→writer→illustrator) for a release article."""
+    rid = f"{owner}/{repo_name}"
+    release_id = f"{rid}:{tag}"
+    repo = await db.get(GithubRepo, rid)
+    if not repo:
+        raise HTTPException(404, "Repo not found")
+    release = await db.get(GithubRelease, release_id)
+    if not release:
+        raise HTTPException(404, "Release not found")
+
+    from models import PublishAccount, WritingPlan, PipelineTask
+    account = await db.get(PublishAccount, body.account_id)
+    if not account:
+        raise HTTPException(404, f"Account '{body.account_id}' not found")
+    plan = await db.get(WritingPlan, body.plan_id)
+    if not plan:
+        raise HTTPException(404, f"Writing plan {body.plan_id} not found")
+
+    account_profile = {
+        "name": account.name, "platform": account.platform,
+        "positioning": account.positioning, "audience": account.audience,
+        "tone": account.tone, "word_range": account.word_range or {},
+        "image_style": account.image_style, "cover_style": account.cover_style or {},
+        "voice_samples": account.voice_samples or [], "style_rules": account.style_rules or [],
+    }
+
+    from pipeline_template import (
+        parse_word_spec, resolve_effective_design, RELEASE_WRITE_PIPELINE,
+    )
+    eff_cover, eff_image = resolve_effective_design(
+        account.cover_style, account.image_style or "",
+        plan.cover_style, plan.image_style or "",
+    )
+    account_profile["cover_style"] = eff_cover
+    account_profile["image_style"] = eff_image
+
+    word_spec = parse_word_spec(plan.strategy)
+    word_rule_line = (
+        f"严格按写作策略字数 **{word_spec['raw']}**（忽略上方账号画像的 word_range）"
+        if word_spec else "严格按写作策略里的文章格式 / 字数"
+    )
+
+    article_title = f"{rid} {release.tag_name}"
+
+    pt = PipelineTask(
+        account_id=account.id,
+        title=article_title,
+        source_url=release.html_url or "",
+        writing_plan_id=plan.id,
+        task_ids={},
+    )
+    db.add(pt)
+    await db.commit()
+    await db.refresh(pt)
+
+    ctx = {
+        "title": article_title,
+        "account_id": account.id,
+        "account_profile": account_profile,
+        "platform": account.platform,
+        "pipeline_task_id": pt.id,
+        "word_spec": word_spec,
+        "draft_type": "article",
+        "genre": plan.genre or "commentary",
+        "plan_strategy": plan.strategy or "",
+        "plan_title": plan.title,
+        "repo_name": rid,
+        "release_tag": release.tag_name,
+        "release_name": release.name or "",
+        "release_body": release.body or "",
+        "release_html_url": release.html_url or "",
+        "word_rule_line": word_rule_line,
+    }
+
+    from hermes_kanban_client import HermesKanbanClient, HermesKanbanError
+    try:
+        kanban = HermesKanbanClient()
+        task_ids: dict[str, str] = {}
+        prev_id: str | None = None
+        for step in RELEASE_WRITE_PIPELINE:
+            parents = [prev_id] if prev_id else []
+            tid = await kanban.create_task(
+                title=step.title(ctx),
+                body=step.body(ctx),
+                assignee=step.assignee,
+                parents=parents,
+            )
+            task_ids[step.role] = tid
+            prev_id = tid
+    except HermesKanbanError as e:
+        raise HTTPException(502, f"Hermes 不可用: {e}")
+
+    pt.task_ids = task_ids
+    await db.commit()
+
+    return DispatchResponse(task_id=task_ids.get("editor", ""), kanban_url="/studio")
 
 
 @router.post("/releases/{owner}/{repo_name}/{tag}/generate-draft")

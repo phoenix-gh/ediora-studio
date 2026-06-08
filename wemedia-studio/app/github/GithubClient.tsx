@@ -18,8 +18,10 @@ import {
   addGithubRepo, deleteGithubRepo, updateGithubRepo,
   collectOneRepo, collectOneRepoReleases, collectAllGithub, analyzePainPoints,
   getGithubIssues, getPainPoints, getTrendingRepos, getGithubReleases,
-  generateReleaseDraft,
+  generateReleaseDraft, dispatchReleaseWrite,
 } from '@/lib/api/github'
+import { WritingPlan, getWritingPlans } from '@/lib/api/writing-plans'
+import { PublishAccount, listPublishAccounts } from '@/lib/api/publish-accounts'
 import { AddToTopicPopover } from '@/components/features/AddToTopicPopover'
 
 type Tab = 'trending' | 'issues' | 'pain-points' | 'releases'
@@ -518,6 +520,14 @@ function ReleasesTab({ repoId, releases: initial, onLoad }: { repoId: string; re
   const [generatingId, setGeneratingId] = useState<string | null>(null)
   const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  // Agent dispatch dialog
+  const [dispatchTarget, setDispatchTarget] = useState<GithubRelease | null>(null)
+  const [dispatchAccounts, setDispatchAccounts] = useState<PublishAccount[]>([])
+  const [dispatchPlans, setDispatchPlans] = useState<WritingPlan[]>([])
+  const [dispatchAccountId, setDispatchAccountId] = useState('')
+  const [dispatchPlanId, setDispatchPlanId] = useState<number | null>(null)
+  const [dispatching, setDispatching] = useState(false)
+
   function stopPoll() {
     if (pollTimer.current) { clearTimeout(pollTimer.current); pollTimer.current = null }
   }
@@ -571,6 +581,36 @@ function ReleasesTab({ repoId, releases: initial, onLoad }: { repoId: string; re
       toast.error('生成失败，请检查 LLM 配置')
     } finally {
       setGeneratingId(null)
+    }
+  }
+
+  function openDispatch(rel: GithubRelease) {
+    setDispatchTarget(rel)
+    setDispatching(false)
+    Promise.all([listPublishAccounts(), getWritingPlans()]).then(([accs, plans]) => {
+      const active = accs.filter(a => a.is_active)
+      setDispatchAccounts(active)
+      setDispatchPlans(plans)
+      if (active.length > 0 && !dispatchAccountId) setDispatchAccountId(active[0].id)
+      if (plans.length > 0 && dispatchPlanId === null) setDispatchPlanId(plans[0].id)
+    }).catch(() => toast.error('加载数据失败'))
+  }
+
+  async function handleDispatch() {
+    if (!dispatchTarget || !dispatchAccountId || dispatchPlanId === null) return
+    const [owner, repo] = repoId.split('/')
+    setDispatching(true)
+    try {
+      const result = await dispatchReleaseWrite(owner, repo, dispatchTarget.tag_name, dispatchAccountId, dispatchPlanId)
+      setDispatchTarget(null)
+      toast.success('已派发给 Agent', {
+        description: `任务 ${result.task_id}`,
+        action: { label: '查看看板', onClick: () => window.location.href = result.kanban_url },
+      })
+    } catch {
+      toast.error('派发失败，请检查 Hermes 服务')
+    } finally {
+      setDispatching(false)
     }
   }
 
@@ -674,14 +714,11 @@ function ReleasesTab({ repoId, releases: initial, onLoad }: { repoId: string; re
                         <ExternalLink className="w-3 h-3" />在 GitHub 查看
                       </a>
                       <button
-                        onClick={() => handleGenerateDraft(rel)}
-                        disabled={generatingId === rel.id}
-                        className="inline-flex items-center gap-1 text-[11px] text-zinc-400 hover:text-emerald-600 transition-colors disabled:opacity-50"
+                        onClick={() => openDispatch(rel)}
+                        className="inline-flex items-center gap-1 text-[11px] text-zinc-400 hover:text-indigo-600 transition-colors"
                       >
-                        {generatingId === rel.id
-                          ? <Loader2 className="w-3 h-3 animate-spin" />
-                          : <FileText className="w-3 h-3" />}
-                        {generatingId === rel.id ? '生成中…' : rel.draft_generated_at ? '重新生成草稿' : '生成草稿'}
+                        <FileText className="w-3 h-3" />
+                        Agent 写稿
                       </button>
                     </div>
                   </div>
@@ -691,6 +728,69 @@ function ReleasesTab({ repoId, releases: initial, onLoad }: { repoId: string; re
           })}
         </div>
       )}
+
+      {/* Agent 写稿 dialog */}
+      <Dialog open={!!dispatchTarget} onOpenChange={open => { if (!open) setDispatchTarget(null) }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="text-base">Agent 写稿</DialogTitle>
+            <DialogDescription className="text-xs">
+              {dispatchTarget && (
+                <span className="font-mono">{dispatchTarget.tag_name}</span>
+              )}
+              {' '}— 选择账号和写作方案后派发给 wms_writer
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-1">
+            <div>
+              <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400 mb-1 block">发布账号</label>
+              {dispatchAccounts.length === 0 ? (
+                <p className="text-xs text-zinc-400">加载中…</p>
+              ) : (
+                <select
+                  value={dispatchAccountId}
+                  onChange={e => setDispatchAccountId(e.target.value)}
+                  className="w-full text-xs border border-zinc-200 dark:border-zinc-700 rounded-md px-2.5 py-1.5 bg-white dark:bg-zinc-900 text-zinc-800 dark:text-zinc-200 outline-none focus:border-indigo-400"
+                >
+                  {dispatchAccounts.map(a => (
+                    <option key={a.id} value={a.id}>{a.name} ({a.platform})</option>
+                  ))}
+                </select>
+              )}
+            </div>
+            <div>
+              <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400 mb-1 block">写作方案</label>
+              {dispatchPlans.length === 0 ? (
+                <p className="text-xs text-zinc-400">加载中…</p>
+              ) : (
+                <select
+                  value={dispatchPlanId ?? ''}
+                  onChange={e => setDispatchPlanId(Number(e.target.value))}
+                  className="w-full text-xs border border-zinc-200 dark:border-zinc-700 rounded-md px-2.5 py-1.5 bg-white dark:bg-zinc-900 text-zinc-800 dark:text-zinc-200 outline-none focus:border-indigo-400"
+                >
+                  {dispatchPlans.map(p => (
+                    <option key={p.id} value={p.id}>{p.title}</option>
+                  ))}
+                </select>
+              )}
+            </div>
+          </div>
+          <div className="flex justify-end gap-2 pt-1">
+            <Button variant="outline" size="sm" className="text-xs h-8" onClick={() => setDispatchTarget(null)}>
+              取消
+            </Button>
+            <Button
+              size="sm"
+              className="text-xs h-8 gap-1"
+              disabled={dispatching || !dispatchAccountId || dispatchPlanId === null}
+              onClick={handleDispatch}
+            >
+              {dispatching && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+              派发给 Agent
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

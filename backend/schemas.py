@@ -469,6 +469,11 @@ class ArticleSeriesUpdate(BaseModel):
     sort_order: Optional[int] = None
 
 
+class DispatchReleaseWriteRequest(BaseModel):
+    account_id: str
+    plan_id: int
+
+
 class GithubRepoCreate(BaseModel):
     owner: str
     repo: str
