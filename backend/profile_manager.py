@@ -88,6 +88,64 @@ def list_project_skills() -> list[dict[str, Any]]:
     return out
 
 
+def list_project_skills_for_profile(profile: str) -> list[dict[str, Any]]:
+    """All project skills plus a per-profile `installed` flag (symlink check)."""
+    _safe_name(profile)
+    wemedia_dir = _profile_dir(profile) / "skills" / "wemedia"
+    root = _project_skills_root()
+    out: list[dict[str, Any]] = []
+    for meta in list_project_skills():
+        link = wemedia_dir / meta["name"]
+        src = root / meta["name"]
+        installed = link.is_symlink() and link.resolve() == src.resolve()
+        out.append({**meta, "installed": installed})
+    return out
+
+
+def install_project_skill(profile: str, skill: str) -> None:
+    """Symlink a project skill into the profile's skills/wemedia/ dir."""
+    if profile == "default":
+        raise PermissionError("default profile is read-only")
+    _safe_name(profile)
+    if not _NAME_RE.match(skill):
+        raise ValueError(f"invalid skill name: {skill!r}")
+    src = _project_skills_root() / skill
+    if not (src / "SKILL.md").exists():
+        raise FileNotFoundError(f"project skill not found: {skill}")
+    pdir = _profile_dir(profile)
+    if not pdir.exists():
+        raise FileNotFoundError(f"profile not found: {profile}")
+    wemedia_dir = pdir / "skills" / "wemedia"
+    wemedia_dir.mkdir(parents=True, exist_ok=True)
+    link = wemedia_dir / skill
+    if link.is_symlink():
+        if link.resolve() == src.resolve():
+            return  # already installed
+        link.unlink()  # repoint a stale/wrong symlink
+    elif link.exists():
+        raise RuntimeError(f"{link} exists and is not a symlink; refusing to overwrite")
+    link.symlink_to(src.resolve(), target_is_directory=True)
+
+
+def uninstall_project_skill(profile: str, skill: str) -> None:
+    """Remove the symlink for a project skill from a profile. Idempotent."""
+    if profile == "default":
+        raise PermissionError("default profile is read-only")
+    _safe_name(profile)
+    if not _NAME_RE.match(skill):
+        raise ValueError(f"invalid skill name: {skill!r}")
+    pdir = _profile_dir(profile)
+    if not pdir.exists():
+        raise FileNotFoundError(f"profile not found: {profile}")
+    link = pdir / "skills" / "wemedia" / skill
+    if link.is_symlink():
+        link.unlink()
+        return
+    if link.exists():
+        raise RuntimeError(f"{link} is not a symlink; refusing to delete")
+    # neither symlink nor real path: idempotent no-op
+
+
 def _safe_name(name: str) -> str:
     if not _NAME_RE.match(name):
         raise ValueError(f"invalid profile name: {name!r}")

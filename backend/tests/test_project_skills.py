@@ -51,3 +51,105 @@ def test_list_project_skills_scans_root(tmp_path, monkeypatch):
 def test_list_project_skills_empty_when_root_missing(tmp_path, monkeypatch):
     monkeypatch.setenv("WEMS_SKILLS_ROOT", str(tmp_path / "nope"))
     assert list_project_skills() == []
+
+
+from profile_manager import (
+    list_project_skills_for_profile,
+    install_project_skill,
+    uninstall_project_skill,
+)
+
+
+def _fixture(tmp_path):
+    skills_root = tmp_path / "skills"
+    _make_skill(skills_root, "x-post", description="推文")
+    _make_skill(skills_root, "content-ideation", description="选题")
+    home = tmp_path / "hermes"
+    (home / "profiles" / "wms_writer").mkdir(parents=True)
+    (home / "profiles" / "wms_writer" / "config.yaml").write_text("model:\n  default: m\n")
+    return skills_root, home
+
+
+def test_install_creates_symlink(tmp_path, monkeypatch):
+    skills_root, home = _fixture(tmp_path)
+    monkeypatch.setenv("WEMS_SKILLS_ROOT", str(skills_root))
+    monkeypatch.setenv("HERMES_HOME_ROOT", str(home))
+    install_project_skill("wms_writer", "x-post")
+    link = home / "profiles" / "wms_writer" / "skills" / "wemedia" / "x-post"
+    assert link.is_symlink()
+    assert link.resolve() == (skills_root / "x-post").resolve()
+
+
+def test_install_is_idempotent(tmp_path, monkeypatch):
+    skills_root, home = _fixture(tmp_path)
+    monkeypatch.setenv("WEMS_SKILLS_ROOT", str(skills_root))
+    monkeypatch.setenv("HERMES_HOME_ROOT", str(home))
+    install_project_skill("wms_writer", "x-post")
+    install_project_skill("wms_writer", "x-post")  # no raise
+    link = home / "profiles" / "wms_writer" / "skills" / "wemedia" / "x-post"
+    assert link.is_symlink()
+
+
+def test_install_refuses_to_overwrite_real_dir(tmp_path, monkeypatch):
+    skills_root, home = _fixture(tmp_path)
+    monkeypatch.setenv("WEMS_SKILLS_ROOT", str(skills_root))
+    monkeypatch.setenv("HERMES_HOME_ROOT", str(home))
+    real = home / "profiles" / "wms_writer" / "skills" / "wemedia" / "x-post"
+    real.mkdir(parents=True)
+    with pytest.raises(RuntimeError):
+        install_project_skill("wms_writer", "x-post")
+
+
+def test_install_missing_skill_raises(tmp_path, monkeypatch):
+    skills_root, home = _fixture(tmp_path)
+    monkeypatch.setenv("WEMS_SKILLS_ROOT", str(skills_root))
+    monkeypatch.setenv("HERMES_HOME_ROOT", str(home))
+    with pytest.raises(FileNotFoundError):
+        install_project_skill("wms_writer", "does-not-exist")
+
+
+def test_install_default_profile_forbidden(tmp_path, monkeypatch):
+    skills_root, home = _fixture(tmp_path)
+    monkeypatch.setenv("WEMS_SKILLS_ROOT", str(skills_root))
+    monkeypatch.setenv("HERMES_HOME_ROOT", str(home))
+    with pytest.raises(PermissionError):
+        install_project_skill("default", "x-post")
+
+
+def test_uninstall_removes_symlink(tmp_path, monkeypatch):
+    skills_root, home = _fixture(tmp_path)
+    monkeypatch.setenv("WEMS_SKILLS_ROOT", str(skills_root))
+    monkeypatch.setenv("HERMES_HOME_ROOT", str(home))
+    install_project_skill("wms_writer", "x-post")
+    uninstall_project_skill("wms_writer", "x-post")
+    link = home / "profiles" / "wms_writer" / "skills" / "wemedia" / "x-post"
+    assert not link.is_symlink()
+    assert not link.exists()
+
+
+def test_uninstall_idempotent_when_absent(tmp_path, monkeypatch):
+    skills_root, home = _fixture(tmp_path)
+    monkeypatch.setenv("WEMS_SKILLS_ROOT", str(skills_root))
+    monkeypatch.setenv("HERMES_HOME_ROOT", str(home))
+    uninstall_project_skill("wms_writer", "x-post")  # no raise
+
+
+def test_uninstall_refuses_real_dir(tmp_path, monkeypatch):
+    skills_root, home = _fixture(tmp_path)
+    monkeypatch.setenv("WEMS_SKILLS_ROOT", str(skills_root))
+    monkeypatch.setenv("HERMES_HOME_ROOT", str(home))
+    real = home / "profiles" / "wms_writer" / "skills" / "wemedia" / "x-post"
+    real.mkdir(parents=True)
+    with pytest.raises(RuntimeError):
+        uninstall_project_skill("wms_writer", "x-post")
+
+
+def test_list_for_profile_marks_installed(tmp_path, monkeypatch):
+    skills_root, home = _fixture(tmp_path)
+    monkeypatch.setenv("WEMS_SKILLS_ROOT", str(skills_root))
+    monkeypatch.setenv("HERMES_HOME_ROOT", str(home))
+    install_project_skill("wms_writer", "x-post")
+    rows = list_project_skills_for_profile("wms_writer")
+    by_name = {r["name"]: r for r in rows}
+    assert by_name["x-post"]["installed"] is True
+    assert by_name["content-ideation"]["installed"] is False
