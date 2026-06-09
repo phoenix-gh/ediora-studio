@@ -45,6 +45,49 @@ def _hermes_root() -> Path:
     return Path(override) if override else Path.home() / ".hermes"
 
 
+def _project_skills_root() -> Path:
+    # Test override via WEMS_SKILLS_ROOT; production = repo's skills/ dir.
+    override = os.environ.get("WEMS_SKILLS_ROOT")
+    if override:
+        return Path(override)
+    return Path(__file__).resolve().parent.parent / "skills"
+
+
+def parse_skill_frontmatter(skill_md: Path) -> dict[str, Any]:
+    """Extract description/version/tags from a SKILL.md YAML frontmatter block."""
+    try:
+        text = skill_md.read_text(encoding="utf-8")
+    except OSError:
+        return {"description": "", "version": "", "tags": []}
+    if not text.startswith("---"):
+        return {"description": "", "version": "", "tags": []}
+    parts = text.split("---", 2)
+    if len(parts) < 3:
+        return {"description": "", "version": "", "tags": []}
+    data = yaml.safe_load(parts[1]) or {}
+    tags = ((data.get("metadata") or {}).get("hermes") or {}).get("tags") or []
+    return {
+        "description": data.get("description", "") or "",
+        "version": str(data.get("version", "") or ""),
+        "tags": list(tags),
+    }
+
+
+def list_project_skills() -> list[dict[str, Any]]:
+    """Scan the project skills/ dir; return metadata for each skill dir with a SKILL.md."""
+    root = _project_skills_root()
+    if not root.is_dir():
+        return []
+    out: list[dict[str, Any]] = []
+    for entry in sorted(root.iterdir()):
+        skill_md = entry / "SKILL.md"
+        if not entry.is_dir() or entry.name.startswith(".") or not skill_md.exists():
+            continue
+        meta = parse_skill_frontmatter(skill_md)
+        out.append({"name": entry.name, **meta})
+    return out
+
+
 def _safe_name(name: str) -> str:
     if not _NAME_RE.match(name):
         raise ValueError(f"invalid profile name: {name!r}")
