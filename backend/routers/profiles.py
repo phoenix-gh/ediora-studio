@@ -312,3 +312,40 @@ def post_mcp(name: str, body: ToggleBody):
         raise HTTPException(404, "profile not found")
     except RuntimeError as e:
         raise HTTPException(502, str(e))
+
+
+@router.get("/{name}/project-skills")
+def get_project_skills(name: str):
+    try:
+        return {"skills": pm.list_project_skills_for_profile(name)}
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@router.post("/{name}/project-skills/{skill}")
+def post_project_skill(name: str, skill: str):
+    try:
+        pm.install_project_skill(name, skill)
+        return {"ok": True}
+    except PermissionError as e:
+        raise HTTPException(403, str(e))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except FileNotFoundError as e:
+        raise HTTPException(404, str(e))
+    except RuntimeError as e:
+        raise HTTPException(409, str(e))
+
+
+@router.delete("/{name}/project-skills/{skill}", status_code=204)
+def delete_project_skill(name: str, skill: str):
+    try:
+        pm.uninstall_project_skill(name, skill)
+    except PermissionError as e:
+        raise HTTPException(403, str(e))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except FileNotFoundError as e:
+        raise HTTPException(404, str(e))
+    except RuntimeError as e:
+        raise HTTPException(409, str(e))
