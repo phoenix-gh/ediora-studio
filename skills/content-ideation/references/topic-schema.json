@@ -1,0 +1,59 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "ContentTopicIdeas",
+  "description": "content-ideation skill 输出的选题数组格式",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "required": ["title", "summary", "urgency", "score", "category", "recommend_reason", "tags", "competitor_count", "source_urls"],
+    "properties": {
+      "title": {
+        "type": "string",
+        "maxLength": 20,
+        "description": "选题标题，简洁吸引人，20字以内"
+      },
+      "summary": {
+        "type": "string",
+        "description": "选题摘要，2-3句话说明核心观点和价值"
+      },
+      "urgency": {
+        "type": "string",
+        "enum": ["urgent", "this_week", "long_tail"],
+        "description": "时效性：urgent=24h内, this_week=本周, long_tail=长尾"
+      },
+      "score": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 5,
+        "description": "推荐分数1-5"
+      },
+      "category": {
+        "type": "string",
+        "enum": ["人工智能", "芯片", "开源", "大模型", "编程工具", "操作系统", "安全", "区块链", "量子计算"],
+        "description": "内容分类"
+      },
+      "recommend_reason": {
+        "type": "string",
+        "description": "推荐理由，引用具体信息说明价值和差异化"
+      },
+      "tags": {
+        "type": "array",
+        "items": { "type": "string" },
+        "minItems": 2,
+        "maxItems": 4,
+        "description": "标签数组，2-4个"
+      },
+      "competitor_count": {
+        "type": "integer",
+        "minimum": 0,
+        "description": "预估同主题竞品内容数量"
+      },
+      "source_urls": {
+        "type": "array",
+        "items": { "type": "string", "format": "uri" },
+        "description": "相关信源URL"
+      }
+    },
+    "additionalProperties": false
+  }
+}
