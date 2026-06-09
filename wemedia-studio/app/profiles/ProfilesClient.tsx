@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/button'
 import { SoulEditor } from './SoulEditor'
 import { ToolsPanel } from './ToolsPanel'
 import { SkillsPanel } from './SkillsPanel'
+import { ProjectSkillsPanel } from './ProjectSkillsPanel'
 import { ProfileHeader, Avatar } from './ProfileHeader'
 import { NewProfileDialog } from './NewProfileDialog'
 
@@ -20,7 +21,7 @@ export function ProfilesClient() {
   const [list, setList] = useState<ProfileSummary[]>([])
   const [selected, setSelected] = useState<string | null>(null)
   const [detail, setDetail] = useState<ProfileDetail | null>(null)
-  const [tab, setTab] = useState<'soul' | 'tools' | 'skills'>('soul')
+  const [tab, setTab] = useState<'soul' | 'tools' | 'skills' | 'project'>('soul')
   const [newOpen, setNewOpen] = useState(false)
 
   async function reload(selectName?: string) {
@@ -100,7 +101,7 @@ export function ProfilesClient() {
               }}
             />
             <div className="border-b mb-4 flex gap-4">
-              {(['soul', 'tools', 'skills'] as const).map(t => (
+              {(['soul', 'tools', 'skills', 'project'] as const).map(t => (
                 <button
                   key={t}
                   className={`pb-2 text-sm ${
@@ -110,7 +111,7 @@ export function ProfilesClient() {
                   }`}
                   onClick={() => setTab(t)}
                 >
-                  {t.toUpperCase()}
+                  {t === 'project' ? '项目技能' : t.toUpperCase()}
                 </button>
               ))}
             </div>
@@ -138,6 +139,9 @@ export function ProfilesClient() {
                 skills={detail.skills}
                 onChange={next => setDetail({ ...detail, skills: next })}
               />
+            )}
+            {tab === 'project' && (
+              <ProjectSkillsPanel profile={detail.name} readonly={readonly} />
             )}
           </>
         )}
