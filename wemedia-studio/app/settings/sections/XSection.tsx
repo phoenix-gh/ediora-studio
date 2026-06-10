@@ -15,7 +15,7 @@ export function XSection({ settings, onSaved }: { settings: AppSettings | null; 
 
   const [xInterval, setXInterval] = useState(settings?.x_collect_interval_minutes ?? 15)
   const [collectInterval, setCollectInterval] = useState(settings?.ref_collect_interval_minutes ?? 15)
-  const [cleanInterval, setCleanInterval] = useState(settings?.ref_clean_interval_minutes ?? 30)
+  const [cleanInterval, setCleanInterval] = useState(settings?.ref_classify_interval_minutes ?? 30)
   const [batchSize, setBatchSize] = useState(settings?.clean_batch_size ?? 20)
   const [saving, setSaving] = useState(false)
 
@@ -34,7 +34,7 @@ export function XSection({ settings, onSaved }: { settings: AppSettings | null; 
       const updated = await updateSettings({
         x_collect_interval_minutes: xInterval,
         ref_collect_interval_minutes: collectInterval,
-        ref_clean_interval_minutes: cleanInterval,
+        ref_classify_interval_minutes: cleanInterval,
         clean_batch_size: batchSize,
       })
       onSaved(updated)
@@ -118,11 +118,11 @@ export X_CT0=...`}
             />
             <span className="text-sm text-zinc-500">分钟</span>
           </div>
-          <p className="text-[11px] text-zinc-400">多久按采集规则（赞数/天数过滤）筛一次推文存入 raw 队列</p>
+          <p className="text-[11px] text-zinc-400">多久按采集规则（赞数/天数过滤）筛一次推文，规则清洗打分后直接入素材库</p>
         </div>
 
         <div className="space-y-1.5">
-          <Label className="text-xs">素材清洗间隔</Label>
+          <Label className="text-xs">素材分类间隔</Label>
           <div className="flex items-center gap-2">
             <Input
               type="number" min={5} max={1440}
@@ -132,7 +132,7 @@ export X_CT0=...`}
             />
             <span className="text-sm text-zinc-500">分钟</span>
           </div>
-          <p className="text-[11px] text-zinc-400">多久对 raw 队列做一次 LLM 精筛（节省 token）</p>
+          <p className="text-[11px] text-zinc-400">多久给高分未分类素材补一次分类标签（LLM 低频，节省 token）</p>
         </div>
 
         <div className="space-y-1.5">

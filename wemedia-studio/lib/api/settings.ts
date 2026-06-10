@@ -47,7 +47,7 @@ export interface AppSettings {
   arxiv_categories: string
   arxiv_collect_interval_hours: number
   ref_collect_interval_minutes: number
-  ref_clean_interval_minutes: number
+  ref_classify_interval_minutes: number
   clean_batch_size: number
   providers: ProviderInfo[]
 }
@@ -88,7 +88,7 @@ export interface SettingsUpdate {
   arxiv_categories?: string
   arxiv_collect_interval_hours?: number
   ref_collect_interval_minutes?: number
-  ref_clean_interval_minutes?: number
+  ref_classify_interval_minutes?: number
   clean_batch_size?: number
 }
 

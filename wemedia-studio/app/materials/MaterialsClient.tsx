@@ -16,7 +16,7 @@ import {
   SCENE_TAGS, sceneTagInfo,
   getMaterials, createMaterial, updateMaterial, deleteMaterial,
   getRules, createRule, updateRule, deleteRule, collectRule, collectAll,
-  getRawCount, cleanBatch,
+  getUnclassifiedCount, classifyBatch,
 } from '@/lib/api/materials'
 import { WritingPlan, flattenTopics } from '@/lib/api/writing-plans'
 import { type XSubscription, listXSubscriptions } from '@/lib/api/x'
@@ -75,9 +75,14 @@ function MaterialCard({ m, planMap, onEdit, onDelete }: {
           <span className="flex items-center gap-0.5"><Heart className="w-3 h-3" />{m.likes}</span>
           <span className="flex items-center gap-0.5"><Repeat2 className="w-3 h-3" />{m.reposts}</span>
           <span className="flex items-center gap-0.5"><Eye className="w-3 h-3" />{m.views}</span>
+          {m.parent_source_id && (
+            <span className="px-1.5 py-0.5 rounded-full bg-violet-100 text-violet-700 dark:bg-violet-950/40 dark:text-violet-400 font-medium">
+              神回复
+            </span>
+          )}
           {m.score > 0 && (
             <span className="ml-auto px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400 font-medium">
-              段子分 {m.score}
+              热度分 {m.score}
             </span>
           )}
         </div>
@@ -237,13 +242,13 @@ function RulesDrawer({ rules, onClose, onChange, onAfterCollect }: {
   async function runOne(r: CollectRule) {
     if (busy) return
     setBusy(r.id)
-    try { const res = await collectRule(r.id); toast.success(`「${r.label}」新增 ${res.new_raw} 条`); onAfterCollect() }
+    try { const res = await collectRule(r.id); toast.success(`「${r.label}」新增 ${res.new} 条`); onAfterCollect() }
     catch (e) { toast.error('采集失败：' + (e as Error).message) } finally { setBusy(null) }
   }
   async function runAll() {
     if (busy) return
     setBusy('all')
-    try { const res = await collectAll(); toast.success(`全部采集：新增 ${res.new_raw} 条${res.failed.length ? `，${res.failed.length} 条规则失败` : ''}`); onAfterCollect() }
+    try { const res = await collectAll(); toast.success(`全部采集：新增 ${res.new} 条${res.new_replies ? `，神回复 ${res.new_replies} 条` : ''}${res.failed.length ? `，${res.failed.length} 条规则失败` : ''}`); onAfterCollect() }
     catch (e) { toast.error('采集失败：' + (e as Error).message) } finally { setBusy(null) }
   }
 
@@ -337,7 +342,7 @@ export function MaterialsClient({ initialMaterials, categories, initialPlans }: 
 
   const [showRules, setShowRules] = useState(false)
   const [rules, setRules] = useState<CollectRule[]>([])
-  const [rawCount, setRawCount] = useState(0)
+  const [unclassifiedCount, setUnclassifiedCount] = useState(0)
   const [cleaning, setCleaning] = useState(false)
 
   const planMap = useMemo(
@@ -364,22 +369,22 @@ export function MaterialsClient({ initialMaterials, categories, initialPlans }: 
   async function refresh() {
     setRefreshing(true)
     try {
-      const [items, count] = await Promise.all([getMaterials({ limit: 500 }), getRawCount()])
+      const [items, count] = await Promise.all([getMaterials({ limit: 500 }), getUnclassifiedCount()])
       setMaterials(items)
-      setRawCount(count)
+      setUnclassifiedCount(count)
     }
     catch { toast.error('刷新失败') } finally { setRefreshing(false) }
   }
 
-  async function handleCleanBatch() {
+  async function handleClassifyBatch() {
     setCleaning(true)
     try {
-      const r = await cleanBatch()
-      toast.success(`清洗完成：${r.kept} 条入库，${r.rejected} 条淘汰，剩余 ${r.remaining_raw} 条待处理`)
-      setRawCount(r.remaining_raw)
+      const r = await classifyBatch()
+      toast.success(`分类完成：${r.classified} 条已归类，剩余 ${r.remaining} 条待分类`)
+      setUnclassifiedCount(r.remaining)
       setMaterials(await getMaterials({ limit: 500 }))
     } catch {
-      toast.error('清洗失败，请重试')
+      toast.error('分类失败，请重试')
     } finally {
       setCleaning(false)
     }
@@ -479,7 +484,7 @@ export function MaterialsClient({ initialMaterials, categories, initialPlans }: 
           <select value={sort} onChange={e => setSort(e.target.value as SortKey)}
             className="px-2 py-1.5 border border-zinc-200 dark:border-zinc-700 rounded-lg bg-transparent text-xs outline-none focus:border-indigo-400 text-zinc-600 dark:text-zinc-400">
             <option value="time">最新</option>
-            <option value="score">段子分</option>
+            <option value="score">热度分</option>
             <option value="views">流量</option>
           </select>
           <span className="text-xs text-zinc-400">{filtered.length} 条</span>
@@ -491,19 +496,19 @@ export function MaterialsClient({ initialMaterials, categories, initialPlans }: 
           </Button>
         </div>
 
-        {rawCount > 0 && (
+        {unclassifiedCount > 0 && (
           <div className="flex items-center gap-3 px-6 py-2 border-b border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 flex-shrink-0">
             <Zap className="w-4 h-4 shrink-0 text-amber-500" />
-            <span className="text-sm text-amber-700 dark:text-amber-400">{rawCount} 条待清洗</span>
+            <span className="text-sm text-amber-700 dark:text-amber-400">{unclassifiedCount} 条待分类</span>
             <Button
               size="sm"
               variant="outline"
               className="ml-auto h-7 text-xs"
-              onClick={handleCleanBatch}
+              onClick={handleClassifyBatch}
               disabled={cleaning}
             >
               {cleaning ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : null}
-              清洗
+              补分类
             </Button>
           </div>
         )}

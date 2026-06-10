@@ -17,6 +17,7 @@ export interface Material {
   scene_tags: string[]
   tags: string[]
   writing_plan_id: number | null
+  parent_source_id: string | null
   status: string
   published_at: string | null
   created_at: string
@@ -77,27 +78,26 @@ export async function updateRule(id: number, body: Partial<CollectRule>): Promis
 export async function deleteRule(id: number): Promise<void> {
   await apiFetch(`/materials/rules/${id}`, { method: 'DELETE' })
 }
-export async function collectRule(id: number): Promise<{ new_raw: number }> {
+export async function collectRule(id: number): Promise<{ new: number }> {
   return apiFetch(`/materials/rules/${id}/collect`, { method: 'POST' })
 }
-export async function collectAll(): Promise<{ new_raw: number; failed: string[] }> {
+export async function collectAll(): Promise<{ new: number; failed: string[]; scouted?: number; new_replies?: number }> {
   return apiFetch('/materials/collect-all', { method: 'POST' })
 }
 
-export async function getRawCount(): Promise<number> {
-  const items = await apiFetch<Material[]>('/materials?status=raw&limit=1000')
-  return items.length
+export async function getUnclassifiedCount(): Promise<number> {
+  const items = await apiFetch<Material[]>('/materials?status=active&limit=1000')
+  return items.filter(m => !m.category && m.score >= 60).length
 }
 
-export interface CleanBatchResult {
+export interface ClassifyBatchResult {
   processed: number
-  kept: number
-  rejected: number
-  remaining_raw: number
+  classified: number
+  remaining: number
 }
 
-export async function cleanBatch(size?: number): Promise<CleanBatchResult> {
-  return apiFetch('/materials/clean-batch', {
+export async function classifyBatch(size?: number): Promise<ClassifyBatchResult> {
+  return apiFetch('/materials/classify-batch', {
     method: 'POST',
     body: JSON.stringify(size !== undefined ? { size } : {}),
   })
