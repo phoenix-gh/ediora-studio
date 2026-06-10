@@ -439,39 +439,33 @@ def _parse_translation_output(raw: str) -> list[dict]:
     return results
 
 
-# 单次精筛的帖子数。整批拆小块逐块调用：避免输出超 max_tokens 被截断、
-# 也缩小"一条敏感帖毒化整批"的影响面。
-_REF_CLASSIFY_CHUNK = 1
+# 单次分类的文案数。输出极短（每条仅 category+scene_tags），但推理模型
+# token 不足时 content 会被 reasoning 吃光（deepseek-v4-flash 踩过坑），保守用小块。
+_REF_CLASSIFY_CHUNK = 5
 
 
-async def _classify_ref_chunk(
+async def _classify_category_chunk(
     posts: list[dict], cat_list: str, scene_list: str,
 ) -> list[dict]:
-    """筛一小块帖子。失败（调用异常 / 空 / 非 JSON / 解析失败）→ 抛 RefClassifyError。"""
+    """给一小块文案补分类标签。失败（调用异常/空/非 JSON/解析失败）→ 抛 RefClassifyError。"""
     posts_text = "\n\n".join(
-        f"[{p['source_id']}] 赞{p.get('likes', 0)}：{(p.get('text') or '')[:400]}"
+        f"[{p['source_id']}] {(p.get('text') or '')[:300]}"
         for p in posts
     )
-    prompt = f"""你是中文自媒体的「参考文案」筛选与归类 AI。下面是一批 X 平台高赞帖子，
-判断每条是否值得收进「参考文案库」（有梗、有共鸣、有观点、可复用为写作素材即 keep=true；
-广告/带货/纯导流/无信息量/低俗无价值 → keep=false）。
+    prompt = f"""你是中文自媒体「参考文案库」的归类 AI。下面每条文案已确认入库，
+只需为它选分类和使用场景标签。
 
-帖子（格式 [id] 赞数：正文）：
+文案（格式 [id] 正文）：
 {posts_text}
 
 对每条输出一个对象，组成 JSON 数组，字段：
 - source_id: 原样回传方括号里的 id（字符串）
-- keep: true/false
-- score: 0-100，参考价值/段子分
 - category: 从[{cat_list}]中选一个；不确定填「其他」
 - scene_tags: 从[{scene_list}]中选 0 个或多个（写作中的使用场景）
-- tags: 2-4 个自由细标签（字符串数组）
-- text_clean: 去掉 @提及/链接尾巴/多余 emoji 后的干净参考文案（保留原意）
 
 只输出 JSON 数组，不要其他文字。"""
 
-    # 每条输出最长可达 ~500 token（含 text_clean 全文），按块大小给足额度，避免截断。
-    max_tokens = min(8000, 3000 * len(posts) + 500)
+    max_tokens = min(4000, 300 * len(posts) + 500)
     try:
         raw = await _call(prompt, max_tokens=max_tokens)
     except Exception as e:
@@ -529,31 +523,29 @@ async def assess_x_reply(post: dict) -> dict:
     return {"score": 0, "reason": "LLM error", "draft": None}
 
 
-async def classify_ref_posts(
+async def classify_ref_categories(
     posts: list[dict],
     categories: list[str],
     scene_tags: list[str],
 ) -> list[dict]:
-    """批量判定爆款帖是否值得作参考文案 + 打分 + 归类 + 标使用场景 + 清洗。
-    posts[i]: {source_id, text, likes, ...}
-    返回 [{source_id, keep, score, category, scene_tags, tags, text_clean}]。
+    """批量补分类标签（不判 keep、不打分、不改文本）。
+    posts[i]: {source_id, text}；返回 [{source_id, category, scene_tags}]。
 
-    内部按 _REF_CLASSIFY_CHUNK 拆块逐块调用 LLM：
-    - 任一块成功 → 累加其结果（部分成功；失败块的帖子下次重试）。
-    - 全部块都失败 → 抛出第一个 RefClassifyError，供采集层写入 last_error。"""
+    按 _REF_CLASSIFY_CHUNK 拆块逐块调用：
+    - 任一块成功 → 累加其结果（部分成功；失败块下次重试）。
+    - 全部块失败 → 抛第一个 RefClassifyError。"""
     if not posts:
         return []
 
     cat_list = "、".join(categories)
     scene_list = "、".join(scene_tags)
-    batch = posts[:40]
 
     results: list[dict] = []
     errors: list[RefClassifyError] = []
-    for i in range(0, len(batch), _REF_CLASSIFY_CHUNK):
-        chunk = batch[i:i + _REF_CLASSIFY_CHUNK]
+    for i in range(0, len(posts), _REF_CLASSIFY_CHUNK):
+        chunk = posts[i:i + _REF_CLASSIFY_CHUNK]
         try:
-            results.extend(await _classify_ref_chunk(chunk, cat_list, scene_list))
+            results.extend(await _classify_category_chunk(chunk, cat_list, scene_list))
         except RefClassifyError as e:
             errors.append(e)
 
