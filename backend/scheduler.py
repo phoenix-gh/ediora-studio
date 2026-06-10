@@ -334,7 +334,8 @@ async def scheduled_reddit():
 
 
 async def scheduled_ref_collect():
-    """定时：跑所有启用采集规则，存入 raw 队列；间隔由 ref_collect_interval_minutes 控制。"""
+    """定时：跑所有启用采集规则（漏斗直接入库），尾部触发神回复侦察；
+    间隔由 ref_collect_interval_minutes 控制。"""
     from logger import log
     from config import get_config
     try:
@@ -347,35 +348,45 @@ async def scheduled_ref_collect():
             result = await collect_all(db)
         if result["failed"]:
             await log("materials", "warn",
-                      f"参考文案采集完成，新增 raw {result['new_raw']} 条",
+                      f"参考文案采集完成，新增 {result['new']} 条",
                       "; ".join(result["failed"]))
-        elif result["new_raw"]:
+        elif result["new"]:
             await log("materials", "ok",
-                      f"参考文案采集完成，新增 raw {result['new_raw']} 条")
+                      f"参考文案采集完成，新增 {result['new']} 条")
+        # 神回复侦察：失败只降级，不影响采集结果
+        from reply_scout import scout_replies
+        try:
+            async with SessionLocal() as db:
+                scout = await scout_replies(db)
+            if scout["scouted"]:
+                await log("materials", "ok",
+                          f"神回复侦察：{scout['scouted']} 条父帖，入库 {scout['new_replies']} 条回复")
+        except Exception as e:
+            await log("materials", "warn", "神回复侦察异常", str(e))
     except Exception as e:
         await log("materials", "error", "参考文案采集异常", str(e))
 
 
-async def scheduled_ref_clean():
-    """每隔 clean_interval_minutes 分钟：对 raw 队列做 LLM 精筛，入素材库。"""
+async def scheduled_ref_classify():
+    """定时：给高分未分类素材补 category/scene_tags；间隔 ref_classify_interval_minutes。"""
     from logger import log
     from config import get_config
     try:
         cfg = await get_config()
-        minutes = max(5, int(cfg.get("ref_clean_interval_minutes", 30)))
-        if not _should_run("ref_clean", minutes * 60):
+        minutes = max(5, int(cfg.get("ref_classify_interval_minutes", 60)))
+        if not _should_run("ref_classify", minutes * 60):
             return
         size = int(cfg.get("clean_batch_size", 20))
-        from ref_collector import clean_batch
+        from ref_collector import classify_batch
         async with SessionLocal() as db:
-            result = await clean_batch(db, size)
+            result = await classify_batch(db, size)
         if result["processed"] == 0:
             return
         await log("materials", "ok",
-                  f"素材精筛：处理 {result['processed']} 条，入库 {result['kept']} 条，"
-                  f"淘汰 {result['rejected']} 条，剩余 raw {result['remaining_raw']} 条")
+                  f"素材分类：处理 {result['processed']} 条，归类 {result['classified']} 条，"
+                  f"剩余 {result['remaining']} 条待分类")
     except Exception as e:
-        await log("materials", "error", "素材精筛异常", str(e))
+        await log("materials", "error", "素材分类异常", str(e))
 
 
 async def scheduled_x_reply_scout():
@@ -495,7 +506,7 @@ def register_jobs(scheduler, cfg):
         (scheduled_x_collect,           dict(trigger="interval", minutes=5,           id="x_collect_hourly",  next_run_time=_first_run(5,   "x_collect"))),
         (scheduled_reddit,              dict(trigger="interval", minutes=60,          id="reddit_collect",    next_run_time=_first_run(60,  "reddit"))),
         (scheduled_ref_collect,         dict(trigger="interval", minutes=5,           id="ref_collect_daily", next_run_time=_first_run(5,   "ref_collect"))),
-        (scheduled_ref_clean,           dict(trigger="interval", minutes=5,           id="ref_clean_batch",   next_run_time=_first_run(5,   "ref_clean"))),
+        (scheduled_ref_classify,        dict(trigger="interval", minutes=10,          id="ref_classify",      next_run_time=_first_run(10,  "ref_classify"))),
         (scheduled_x_reply_scout,       dict(trigger="interval", minutes=5,           id="x_reply_scout",     next_run_time=_first_run(5,   "x_reply_scout"))),
     ]
     for func, kwargs in jobs:

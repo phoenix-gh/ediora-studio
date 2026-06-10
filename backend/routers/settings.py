@@ -44,7 +44,7 @@ class SettingsOut(BaseModel):
     arxiv_collect_interval_hours: int
     x_collect_interval_minutes: int
     ref_collect_interval_minutes: int
-    ref_clean_interval_minutes: int
+    ref_classify_interval_minutes: int
     clean_batch_size: int
     providers: list[ProviderInfo]
 
@@ -71,7 +71,7 @@ class SettingsUpdate(BaseModel):
     arxiv_collect_interval_hours: Optional[int] = None
     x_collect_interval_minutes: Optional[int] = None
     ref_collect_interval_minutes: Optional[int] = None
-    ref_clean_interval_minutes: Optional[int] = None
+    ref_classify_interval_minutes: Optional[int] = None
     clean_batch_size: Optional[int] = None
 
 
@@ -113,7 +113,7 @@ def _build_out(cfg: dict) -> SettingsOut:
         arxiv_collect_interval_hours=max(1, int(cfg.get("arxiv_collect_interval_hours", 6))),
         x_collect_interval_minutes=max(1, int(cfg.get("x_collect_interval_minutes", 15))),
         ref_collect_interval_minutes=max(1, int(cfg.get("ref_collect_interval_minutes", 15))),
-        ref_clean_interval_minutes=max(1, int(cfg.get("ref_clean_interval_minutes", 30))),
+        ref_classify_interval_minutes=max(1, int(cfg.get("ref_classify_interval_minutes", 60))),
         clean_batch_size=max(1, int(cfg.get("clean_batch_size", 20))),
         providers=[
             ProviderInfo(key=k, label=v["label"], base_url=v["base_url"], default_model=v["default_model"])
@@ -200,8 +200,8 @@ async def update_settings(body: SettingsUpdate, request: Request):
         updates["x_collect_interval_minutes"] = str(max(1, body.x_collect_interval_minutes))
     if body.ref_collect_interval_minutes is not None:
         updates["ref_collect_interval_minutes"] = str(max(1, body.ref_collect_interval_minutes))
-    if body.ref_clean_interval_minutes is not None:
-        updates["ref_clean_interval_minutes"] = str(max(1, body.ref_clean_interval_minutes))
+    if body.ref_classify_interval_minutes is not None:
+        updates["ref_classify_interval_minutes"] = str(max(1, body.ref_classify_interval_minutes))
     if body.clean_batch_size is not None:
         updates["clean_batch_size"] = str(max(1, body.clean_batch_size))
     if updates:

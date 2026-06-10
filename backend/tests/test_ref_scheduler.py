@@ -25,11 +25,14 @@ def test_ref_collect_job_registered(env):
     fs = FakeSched()
     scheduler.register_jobs(fs, {})
     assert "ref_collect_daily" in fs.jobs
+    assert "ref_classify" in fs.jobs
 
 
 def test_scheduled_ref_collect_runs(env):
     import scheduler
     with patch("ref_collector.collect_all",
-               new=AsyncMock(return_value={"checked": 1, "new_materials": 2, "failed": []})):
+               new=AsyncMock(return_value={"checked": 1, "new": 2, "failed": []})), \
+         patch("reply_scout.scout_replies",
+               new=AsyncMock(return_value={"scouted": 0, "new_replies": 0})):
         asyncio.new_event_loop().run_until_complete(scheduler.scheduled_ref_collect())
     # 不抛异常即通过

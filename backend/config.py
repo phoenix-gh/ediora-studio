@@ -60,8 +60,12 @@ DEFAULTS: dict[str, str] = {
     "x_reply_score_threshold": "7",
     "x_reply_scout_batch": "20",
     "ref_collect_interval_minutes": "15",
-    "ref_clean_interval_minutes": "30",
+    "ref_classify_interval_minutes": "60",
     "clean_batch_size": "20",
+    "ref_score_scale": "18.5",
+    "ref_reply_scout_threshold": "70",
+    "ref_reply_min_likes": "100",
+    "ref_classify_min_score": "60",
 }
 
 # Provider presets: label + default base_url + hint for default model
