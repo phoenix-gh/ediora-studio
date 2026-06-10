@@ -1,5 +1,7 @@
 import sys
+import io
 import asyncio
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -39,3 +41,111 @@ def test_publish_account_credentials_roundtrip(client):
     r2 = client.patch("/api/publish-accounts/gzh_main", json={"app_secret": "sec789"})
     assert r2.status_code == 200
     assert r2.json()["app_secret"] == "sec789"
+
+
+# ── 发布端点 ──────────────────────────────────────────────────────────────────
+
+def _png_file():
+    from PIL import Image
+    buf = io.BytesIO()
+    Image.new("RGB", (10, 10), "blue").save(buf, format="PNG")
+    buf.seek(0)
+    return ("cover.png", buf, "image/png")
+
+
+def _wx_handler(request: httpx.Request) -> httpx.Response:
+    p = request.url.path
+    if p == "/cgi-bin/token":
+        return httpx.Response(200, json={"access_token": "T", "expires_in": 7200})
+    if p == "/cgi-bin/media/uploadimg":
+        return httpx.Response(200, json={"url": "https://mmbiz.qpic.cn/content1"})
+    if p == "/cgi-bin/material/add_material":
+        return httpx.Response(200, json={"media_id": "THUMB1", "url": "https://mmbiz.qpic.cn/cover"})
+    if p == "/cgi-bin/draft/add":
+        return httpx.Response(200, json={"media_id": "DRAFT_MEDIA_1"})
+    raise AssertionError(p)
+
+
+@pytest.fixture
+def wx_mock(monkeypatch):
+    import wechat_api_client as wx
+    wx._token_cache.clear()
+    monkeypatch.setattr(
+        wx, "_client",
+        lambda: httpx.AsyncClient(transport=httpx.MockTransport(_wx_handler)),
+    )
+    yield wx
+    wx._token_cache.clear()
+
+
+@pytest.fixture
+def uploads_dir(client, monkeypatch, tmp_path):
+    """client fixture 重导入 routers.drafts 后，把上传目录指到 tmp。"""
+    import routers.drafts as drafts_mod
+    d = tmp_path / "uploads"
+    d.mkdir()
+    monkeypatch.setattr(drafts_mod, "_UPLOADS_DIR", str(d))
+    return d
+
+
+def _setup_draft_with_image(client):
+    acc = client.post("/api/publish-accounts", json={
+        "id": "gzh", "name": "号", "platform": "wechat",
+        "app_id": "wx1", "app_secret": "s1",
+    })
+    assert acc.status_code == 201
+    draft = client.post("/api/write/drafts", json={"title": "测试文章", "content": "# hi"}).json()
+    img = client.post(f"/api/write/drafts/{draft['id']}/images", files={"file": _png_file()}).json()
+    return draft, img
+
+
+def test_publish_happy_path(client, uploads_dir, wx_mock):
+    draft, img = _setup_draft_with_image(client)
+    html = f'<section><p style="color:#333">正文</p><img src="{img["url"]}"></section>'
+    r = client.post(f"/api/write/drafts/{draft['id']}/publish/wechat", json={
+        "account_id": "gzh", "title": "测试文章", "digest": "摘要",
+        "html": html, "cover_image_id": img["id"],
+    })
+    assert r.status_code == 200, r.text
+    assert r.json()["media_id"] == "DRAFT_MEDIA_1"
+
+
+def test_publish_account_without_credentials(client, uploads_dir, wx_mock):
+    client.post("/api/publish-accounts", json={"id": "nocred", "name": "无凭证", "platform": "wechat"})
+    draft = client.post("/api/write/drafts", json={"title": "t", "content": "c"}).json()
+    img = client.post(f"/api/write/drafts/{draft['id']}/images", files={"file": _png_file()}).json()
+    r = client.post(f"/api/write/drafts/{draft['id']}/publish/wechat", json={
+        "account_id": "nocred", "title": "t", "digest": "",
+        "html": "<p>x</p>", "cover_image_id": img["id"],
+    })
+    assert r.status_code == 400
+    assert "AppID" in r.json()["detail"]
+
+
+def test_publish_missing_cover(client, uploads_dir, wx_mock):
+    draft, img = _setup_draft_with_image(client)
+    r = client.post(f"/api/write/drafts/{draft['id']}/publish/wechat", json={
+        "account_id": "gzh", "title": "t", "digest": "",
+        "html": "<p>x</p>", "cover_image_id": 99999,
+    })
+    assert r.status_code == 404
+
+
+def test_publish_wechat_error_surfaces_as_502(client, uploads_dir, monkeypatch):
+    import wechat_api_client as wx
+    wx._token_cache.clear()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/cgi-bin/token":
+            return httpx.Response(200, json={"access_token": "T", "expires_in": 7200})
+        return httpx.Response(200, json={"errcode": 40164, "errmsg": "invalid ip 9.9.9.9, not in whitelist"})
+
+    monkeypatch.setattr(wx, "_client", lambda: httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+    draft, img = _setup_draft_with_image(client)
+    r = client.post(f"/api/write/drafts/{draft['id']}/publish/wechat", json={
+        "account_id": "gzh", "title": "t", "digest": "",
+        "html": "<p>x</p>", "cover_image_id": img["id"],
+    })
+    assert r.status_code == 502
+    assert "IP 白名单" in r.json()["detail"]
+    wx._token_cache.clear()

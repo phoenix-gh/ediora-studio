@@ -1,13 +1,16 @@
+import mimetypes
 import os
 import uuid
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
 from pydantic import BaseModel
 from typing import Optional
 
+import wechat_api_client as wx
 from database import get_db
-from models import ArticleDraft, ArticleSeries, DraftImage
+from models import ArticleDraft, ArticleSeries, DraftImage, PublishAccount
 
 _UPLOADS_DIR = os.path.join(os.path.dirname(__file__), "..", "uploads")
 _ALLOWED_MIME = {"image/jpeg", "image/png", "image/gif", "image/webp", "image/svg+xml", "image/avif"}
@@ -29,6 +32,18 @@ class DraftChatResponse(BaseModel):
     reply: str
     updated_content: Optional[str] = None
     session_name: str = ""
+
+
+class WechatPublishRequest(BaseModel):
+    account_id: str
+    title: str
+    digest: str = ""
+    html: str               # 前端 wenyan 渲染好的内联样式 HTML
+    cover_image_id: int
+
+
+class WechatPublishResponse(BaseModel):
+    media_id: str
 
 router = APIRouter(prefix="/write", tags=["drafts"])
 
@@ -234,6 +249,80 @@ async def delete_draft_image(draft_id: int, image_id: int, db: AsyncSession = De
         os.remove(filepath)
     await db.delete(img)
     await db.commit()
+
+
+# ── 发布到公众号 ──────────────────────────────────────────────────────────────
+
+async def _load_image_bytes(src: str) -> tuple[bytes, str]:
+    """把 <img src> 解析成字节。本站 uploads 直接读盘，其余按外链下载。"""
+    if "/api/uploads/" in src:
+        filename = src.rsplit("/", 1)[-1].split("?")[0]
+        path = os.path.join(_UPLOADS_DIR, filename)
+        if not os.path.isfile(path):
+            raise HTTPException(404, f"图片文件缺失: {filename}")
+        mime = mimetypes.guess_type(filename)[0] or "image/jpeg"
+        with open(path, "rb") as f:
+            return f.read(), mime
+    if src.startswith(("http://", "https://")):
+        async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
+            resp = await client.get(src)
+            if resp.status_code != 200:
+                raise HTTPException(502, f"外链图片下载失败({resp.status_code}): {src}")
+            return resp.content, (resp.headers.get("content-type") or "image/jpeg").split(";")[0]
+    raise HTTPException(400, f"无法解析图片地址: {src}")
+
+
+@router.post("/drafts/{draft_id}/publish/wechat", response_model=WechatPublishResponse)
+async def publish_draft_to_wechat(
+    draft_id: int, body: WechatPublishRequest, db: AsyncSession = Depends(get_db),
+):
+    draft = await db.get(ArticleDraft, draft_id)
+    if not draft:
+        raise HTTPException(404, "Draft not found")
+    account = await db.get(PublishAccount, body.account_id)
+    if not account:
+        raise HTTPException(404, "发布账号不存在")
+    if not account.app_id or not account.app_secret:
+        raise HTTPException(400, "该账号未配置 AppID/AppSecret，请到设置页补全")
+
+    root_id = await _resolve_root_id(draft_id, db)
+    cover = await db.get(DraftImage, body.cover_image_id)
+    if not cover or cover.root_draft_id != root_id:
+        raise HTTPException(404, "封面图不存在")
+    cover_path = os.path.join(_UPLOADS_DIR, cover.filename)
+    if not os.path.isfile(cover_path):
+        raise HTTPException(404, "封面图文件缺失")
+
+    html = body.html
+    try:
+        # 正文图片逐张传微信图床并替换 src —— 外域图片微信会剥离
+        mapping: dict[str, str] = {}
+        for src in wx.extract_image_srcs(html):
+            data, mime = await _load_image_bytes(src)
+            prepared, ext, p_mime = wx.prepare_image_bytes(data, mime)
+            mapping[src] = await wx.upload_content_image(
+                account.app_id, account.app_secret, prepared, f"img.{ext}", p_mime)
+        html = wx.replace_image_srcs(html, mapping)
+
+        with open(cover_path, "rb") as f:
+            cover_data = f.read()
+        c_data, c_ext, c_mime = wx.prepare_image_bytes(cover_data, cover.mime_type)
+        thumb_media_id = await wx.add_thumb_material(
+            account.app_id, account.app_secret, c_data, f"cover.{c_ext}", c_mime)
+
+        media_id = await wx.add_draft(account.app_id, account.app_secret, {
+            "title": body.title[:64],
+            "digest": body.digest[:120],
+            "content": html,
+            "thumb_media_id": thumb_media_id,
+            "need_open_comment": 1,
+            "only_fans_can_comment": 0,
+        })
+    except wx.WechatApiError as e:
+        raise HTTPException(502, str(e))
+    except httpx.HTTPError as e:
+        raise HTTPException(502, f"微信接口网络请求失败: {e}")
+    return WechatPublishResponse(media_id=media_id)
 
 
 @router.delete("/drafts/{draft_id}", status_code=204)
