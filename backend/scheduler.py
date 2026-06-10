@@ -1,26 +1,53 @@
 """Scheduler job registry — extracted from main.py.
 
 Each scheduled_* coroutine is a self-contained APScheduler job. The throttle
-helper unifies the repeated time.monotonic() interval pattern that previously
-lived as a global _last_X_ts per job.
+helper unifies the repeated interval pattern across jobs.
+
+_last_ts is persisted to STATE_FILE so service restarts respect elapsed time:
+- if the job ran 2 min ago and interval is 30 min, restart won't re-run it
+- if the job ran 8 h ago (overnight) and interval is 6 h, it fires immediately
 """
 from __future__ import annotations
 import asyncio
+import json
+import os
 import time
 from typing import Awaitable, Callable
 
 from database import SessionLocal
 
 
+STATE_FILE = os.path.join(os.path.dirname(__file__), ".scheduler_state.json")
+
+# Wall-clock timestamps (time.time()) keyed by job_key, persisted across restarts.
 _last_ts: dict[str, float] = {}
 
 
+def _load_state() -> None:
+    try:
+        with open(STATE_FILE) as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            _last_ts.update({k: float(v) for k, v in data.items()})
+    except (FileNotFoundError, json.JSONDecodeError, ValueError):
+        pass
+
+
+def _save_state() -> None:
+    try:
+        with open(STATE_FILE, "w") as f:
+            json.dump(_last_ts, f)
+    except OSError:
+        pass
+
+
 def _should_run(job_key: str, interval_seconds: float) -> bool:
-    now = time.monotonic()
-    last = _last_ts.get(job_key, 0.0)
+    now = time.time()
+    last = _last_ts.get(job_key, 0.0)  # 0.0 = epoch → always runs on first ever start
     if now - last < interval_seconds:
         return False
     _last_ts[job_key] = now
+    _save_state()
     return True
 
 
@@ -439,21 +466,37 @@ async def scheduled_x_reply_scout():
 
 
 def register_jobs(scheduler, cfg):
+    from datetime import datetime, timedelta
+    _load_state()
     collect_min = max(1, int(cfg.get("collect_interval_minutes", 15)))
     github_min  = max(1, int(cfg.get("github_interval_minutes", 1)))
+
+    def _first_run(interval_minutes: int, state_key: str | None = None) -> datetime:
+        """Return datetime.now() if the job is overdue, otherwise schedule normally."""
+        if state_key is None:
+            return datetime.now()
+        last = _last_ts.get(state_key, 0.0)
+        elapsed = time.time() - last
+        if elapsed >= interval_minutes * 60:
+            return datetime.now()
+        remaining = interval_minutes * 60 - elapsed
+        return datetime.now() + timedelta(seconds=remaining)
+
+    # state_key must match the key used inside the job's _should_run() call.
+    # Jobs without _should_run (collect_analyze, github_collect) always fire on startup.
     jobs = [
-        (scheduled_collect_and_analyze, dict(trigger="interval", minutes=collect_min, id="collect_analyze")),
-        (scheduled_github,              dict(trigger="interval", minutes=github_min,  id="github_collect")),
-        (scheduled_papers,              dict(trigger="interval", minutes=30,          id="papers_collect")),
-        (scheduled_v2ex,                dict(trigger="interval", minutes=10,          id="v2ex_collect")),
-        (scheduled_kr,                  dict(trigger="interval", minutes=10,          id="kr_collect")),
-        (scheduled_juejin,              dict(trigger="interval", minutes=10,          id="juejin_collect")),
-        (scheduled_wechat,              dict(trigger="interval", minutes=15,          id="wechat_collect")),
-        (scheduled_x_collect,           dict(trigger="interval", minutes=5,           id="x_collect_hourly")),
-        (scheduled_reddit,              dict(trigger="interval", minutes=60,          id="reddit_collect")),
-        (scheduled_ref_collect,         dict(trigger="interval", minutes=5,           id="ref_collect_daily")),
-        (scheduled_ref_clean,           dict(trigger="interval", minutes=5,           id="ref_clean_batch")),
-        (scheduled_x_reply_scout,       dict(trigger="interval", minutes=5,           id="x_reply_scout")),
+        (scheduled_collect_and_analyze, dict(trigger="interval", minutes=collect_min, id="collect_analyze",   next_run_time=datetime.now())),
+        (scheduled_github,              dict(trigger="interval", minutes=github_min,  id="github_collect",    next_run_time=datetime.now())),
+        (scheduled_papers,              dict(trigger="interval", minutes=30,          id="papers_collect",    next_run_time=_first_run(30,  "papers"))),
+        (scheduled_v2ex,                dict(trigger="interval", minutes=10,          id="v2ex_collect",      next_run_time=_first_run(10,  "v2ex"))),
+        (scheduled_kr,                  dict(trigger="interval", minutes=10,          id="kr_collect",        next_run_time=_first_run(10,  "kr"))),
+        (scheduled_juejin,              dict(trigger="interval", minutes=10,          id="juejin_collect",    next_run_time=_first_run(10,  "juejin"))),
+        (scheduled_wechat,              dict(trigger="interval", minutes=15,          id="wechat_collect",    next_run_time=_first_run(15,  "wechat"))),
+        (scheduled_x_collect,           dict(trigger="interval", minutes=5,           id="x_collect_hourly",  next_run_time=_first_run(5,   "x_collect"))),
+        (scheduled_reddit,              dict(trigger="interval", minutes=60,          id="reddit_collect",    next_run_time=_first_run(60,  "reddit"))),
+        (scheduled_ref_collect,         dict(trigger="interval", minutes=5,           id="ref_collect_daily", next_run_time=_first_run(5,   "ref_collect"))),
+        (scheduled_ref_clean,           dict(trigger="interval", minutes=5,           id="ref_clean_batch",   next_run_time=_first_run(5,   "ref_clean"))),
+        (scheduled_x_reply_scout,       dict(trigger="interval", minutes=5,           id="x_reply_scout",     next_run_time=_first_run(5,   "x_reply_scout"))),
     ]
     for func, kwargs in jobs:
         scheduler.add_job(func, **kwargs)

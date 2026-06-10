@@ -18,7 +18,7 @@ import {
   addGithubRepo, deleteGithubRepo, updateGithubRepo,
   collectOneRepo, collectOneRepoReleases, collectAllGithub, analyzePainPoints,
   getGithubIssues, getPainPoints, getTrendingRepos, getGithubReleases,
-  generateReleaseDraft, dispatchReleaseWrite,
+  generateReleaseDraft, dispatchReleaseWrite, dispatchRepoIntro,
 } from '@/lib/api/github'
 import { WritingPlan, getWritingPlans } from '@/lib/api/writing-plans'
 import { PublishAccount, listPublishAccounts } from '@/lib/api/publish-accounts'
@@ -902,6 +902,15 @@ export function GithubClient({ initialRepos, initialTrending, initialIssues, ini
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [subsOpen, setSubsOpen] = useState(false)
 
+  // 写简介 dialog state
+  const [introTargetRepo, setIntroTargetRepo] = useState<GithubRepo | null>(null)
+  const [introAccounts, setIntroAccounts] = useState<PublishAccount[]>([])
+  const [introPlans, setIntroPlans] = useState<WritingPlan[]>([])
+  const [introAccountId, setIntroAccountId] = useState<string>('')
+  const [introPlanId, setIntroPlanId] = useState<number | null>(null)
+  const [introWithCover, setIntroWithCover] = useState(true)
+  const [introDispatching, setIntroDispatching] = useState(false)
+
   const selected = repos.find(r => r.id === selectedId) ?? null
 
   const repoIssues = useMemo(
@@ -942,6 +951,34 @@ export function GithubClient({ initialRepos, initialTrending, initialIssues, ini
       setRepos(prev => prev.map(r => r.id === updated.id ? updated : r))
     } catch {
       toast.error('操作失败')
+    }
+  }
+
+  async function openIntroDispatch(repo: GithubRepo) {
+    setIntroTargetRepo(repo)
+    setIntroDispatching(false)
+    try {
+      const [accounts, plans] = await Promise.all([listPublishAccounts(), getWritingPlans()])
+      setIntroAccounts(accounts)
+      setIntroPlans(plans)
+      if (accounts.length > 0) setIntroAccountId(accounts[0].id)
+      if (plans.length > 0) setIntroPlanId(plans[0].id)
+    } catch {
+      toast.error('加载账号/方案失败')
+    }
+  }
+
+  async function handleIntroDispatch() {
+    if (!introTargetRepo || !introAccountId || introPlanId === null) return
+    setIntroDispatching(true)
+    try {
+      await dispatchRepoIntro(introTargetRepo.owner, introTargetRepo.repo, introAccountId, introPlanId, introWithCover)
+      toast.success(`已派发「${introTargetRepo.id}」简介写稿任务`)
+      setIntroTargetRepo(null)
+    } catch {
+      toast.error('派发失败')
+    } finally {
+      setIntroDispatching(false)
     }
   }
 
@@ -1021,6 +1058,13 @@ export function GithubClient({ initialRepos, initialTrending, initialIssues, ini
                     className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
                     onClick={e => e.stopPropagation()}
                   >
+                    <button
+                      onClick={() => openIntroDispatch(repo)}
+                      className="p-1 rounded hover:bg-indigo-100 dark:hover:bg-indigo-950 text-zinc-400 hover:text-indigo-600"
+                      title="写简介"
+                    >
+                      <BookOpen className="w-3 h-3" />
+                    </button>
                     <button
                       onClick={() => handleToggleMute(repo)}
                       className="p-1 rounded hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-400 hover:text-zinc-700"
@@ -1131,6 +1175,78 @@ export function GithubClient({ initialRepos, initialTrending, initialIssues, ini
           if (selectedId === id) { setSelectedId(null); setTab('trending') }
         }}
       />
+
+      {/* 写简介 dialog */}
+      <Dialog open={!!introTargetRepo} onOpenChange={open => { if (!open) setIntroTargetRepo(null) }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="text-base">写简介</DialogTitle>
+            <DialogDescription className="text-xs">
+              {introTargetRepo && <span className="font-mono">{introTargetRepo.id}</span>}
+              {' '}— 选择账号和写作方案后派发给 wms_writer
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-1">
+            <div>
+              <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400 mb-1 block">发布账号</label>
+              {introAccounts.length === 0 ? (
+                <p className="text-xs text-zinc-400">加载中…</p>
+              ) : (
+                <select
+                  value={introAccountId}
+                  onChange={e => setIntroAccountId(e.target.value)}
+                  className="w-full text-xs border border-zinc-200 dark:border-zinc-700 rounded-md px-2.5 py-1.5 bg-white dark:bg-zinc-900 text-zinc-800 dark:text-zinc-200 outline-none focus:border-indigo-400"
+                >
+                  {introAccounts.map(a => (
+                    <option key={a.id} value={a.id}>{a.name} ({a.platform})</option>
+                  ))}
+                </select>
+              )}
+            </div>
+            <div>
+              <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400 mb-1 block">写作方案</label>
+              {introPlans.length === 0 ? (
+                <p className="text-xs text-zinc-400">加载中…</p>
+              ) : (
+                <select
+                  value={introPlanId ?? ''}
+                  onChange={e => setIntroPlanId(Number(e.target.value))}
+                  className="w-full text-xs border border-zinc-200 dark:border-zinc-700 rounded-md px-2.5 py-1.5 bg-white dark:bg-zinc-900 text-zinc-800 dark:text-zinc-200 outline-none focus:border-indigo-400"
+                >
+                  {introPlans.map(p => (
+                    <option key={p.id} value={p.id}>{p.title}</option>
+                  ))}
+                </select>
+              )}
+            </div>
+          </div>
+          <div className="flex items-center gap-2 pt-1">
+            <label className="flex items-center gap-1.5 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={introWithCover}
+                onChange={e => setIntroWithCover(e.target.checked)}
+                className="rounded"
+              />
+              <span className="text-xs text-zinc-600 dark:text-zinc-400">同时配封面</span>
+            </label>
+            <div className="ml-auto flex gap-2">
+              <Button variant="outline" size="sm" className="text-xs h-8" onClick={() => setIntroTargetRepo(null)}>
+                取消
+              </Button>
+              <Button
+                size="sm"
+                className="text-xs h-8 gap-1"
+                disabled={introDispatching || !introAccountId || introPlanId === null}
+                onClick={handleIntroDispatch}
+              >
+                {introDispatching && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                派发给 Agent
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

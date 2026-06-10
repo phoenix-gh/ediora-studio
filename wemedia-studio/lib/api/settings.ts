@@ -46,6 +46,9 @@ export interface AppSettings {
   x_post_classify_prompt: string
   arxiv_categories: string
   arxiv_collect_interval_hours: number
+  ref_collect_interval_minutes: number
+  ref_clean_interval_minutes: number
+  clean_batch_size: number
   providers: ProviderInfo[]
 }
 
@@ -84,6 +87,9 @@ export interface SettingsUpdate {
   x_post_classify_prompt?: string
   arxiv_categories?: string
   arxiv_collect_interval_hours?: number
+  ref_collect_interval_minutes?: number
+  ref_clean_interval_minutes?: number
+  clean_batch_size?: number
 }
 
 export interface FetchModelsRequest {

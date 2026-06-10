@@ -26,6 +26,16 @@ type SortKey = 'time' | 'score' | 'views'
 
 const isManual = (m: Material) => m.platform !== 'x'
 
+function formatDate(iso: string) {
+  const d = new Date(iso)
+  const now = new Date()
+  const diff = (now.getTime() - d.getTime()) / 1000
+  if (diff < 3600) return `${Math.floor(diff / 60) || 1} 分钟前`
+  if (diff < 86400) return `${Math.floor(diff / 3600)} 小时前`
+  if (diff < 86400 * 30) return `${Math.floor(diff / 86400)} 天前`
+  return d.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })
+}
+
 // ── Scene tag badge ───────────────────────────────────────────────────────────
 function SceneTag({ value }: { value: string }) {
   const info = sceneTagInfo(value)
@@ -88,13 +98,16 @@ function MaterialCard({ m, planMap, onEdit, onDelete }: {
         <p className="text-[10px] text-zinc-400 mb-2"># {planMap[m.writing_plan_id]}</p>
       )}
 
-      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-        <button onClick={handleCopy} className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 p-1 rounded" title="复制"><Copy className="w-3.5 h-3.5" /></button>
-        {isX && m.source_url && (
-          <a href={m.source_url} target="_blank" rel="noopener noreferrer" className="text-zinc-400 hover:text-indigo-500 p-1 rounded" title="查看原推"><ExternalLink className="w-3.5 h-3.5" /></a>
-        )}
-        <button onClick={() => onEdit(m)} className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 p-1 rounded" title="编辑"><Pencil className="w-3.5 h-3.5" /></button>
-        <button onClick={() => onDelete(m)} className="text-zinc-400 hover:text-red-500 p-1 rounded" title="删除"><Trash2 className="w-3.5 h-3.5" /></button>
+      <div className="flex items-center gap-1">
+        <span className="text-[10px] text-zinc-300 dark:text-zinc-600">{formatDate(m.created_at)}</span>
+        <div className="ml-auto flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+          <button onClick={handleCopy} className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 p-1 rounded" title="复制"><Copy className="w-3.5 h-3.5" /></button>
+          {isX && m.source_url && (
+            <a href={m.source_url} target="_blank" rel="noopener noreferrer" className="text-zinc-400 hover:text-indigo-500 p-1 rounded" title="查看原推"><ExternalLink className="w-3.5 h-3.5" /></a>
+          )}
+          <button onClick={() => onEdit(m)} className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 p-1 rounded" title="编辑"><Pencil className="w-3.5 h-3.5" /></button>
+          <button onClick={() => onDelete(m)} className="text-zinc-400 hover:text-red-500 p-1 rounded" title="删除"><Trash2 className="w-3.5 h-3.5" /></button>
+        </div>
       </div>
     </div>
   )
@@ -394,8 +407,8 @@ export function MaterialsClient({ initialMaterials, categories, initialPlans }: 
     try { setRules(await getRules()) } catch { toast.error('加载规则失败') }
   }
 
-  const sceneCount = (v: string) => materials.filter(m => bySource(m) && m.scene_tags.includes(v)).length
-  const catCount = (c: string) => materials.filter(m => bySource(m) && m.category === c).length
+  const sceneCount = (v: string) => materials.filter(m => bySource(m) && (!category || m.category === category) && m.scene_tags.includes(v)).length
+  const catCount = (c: string) => materials.filter(m => bySource(m) && (!scene || m.scene_tags.includes(scene)) && m.category === c).length
 
   return (
     <div className="flex h-screen overflow-hidden">

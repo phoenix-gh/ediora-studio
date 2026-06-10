@@ -25,6 +25,43 @@ DEFAULTS: dict[str, str] = {
     "camofox_user_id": "wemedia_x",         # userId for the X session
     "camofox_novnc_url": "http://localhost:6080/vnc.html",  # web VNC address
     "ref_categories": "吐槽锐评,沙雕搞笑,温情共鸣,反转梗,金句格言,冷知识科普,热点观点,生活观察,职场打工,情感两性,其他",
+    "analyze_instructions": (
+        "\n## 指令\n"
+        "1. 读取文章，提取 3-5 个主题关键词\n"
+        "2. 调 search_writing_plans 检索候选写作方案（传入关键词列表）\n"
+        "3. 判断相似度：\n"
+        "   - 相似且有新角度 → update_writing_plan + add_plan_update（记录新增了什么）\n"
+        "   - 相似但无新内容 → add_plan_update（记录跳过原因，plan_id 取相似方案 id）\n"
+        "   - 无匹配 → create_writing_plan + add_plan_update（记录新建原因）\n"
+        "4. 提炼写作方案要素：\n"
+        "   - 文章模式（这类文章的写法、视角、字数）\n"
+        "   - 标题公式（标题结构 + 占位符举例）\n"
+        "   - 找素材的方法（搜索维度、来源类型、判断标准）\n"
+        "   - 禁区\n"
+        "\n## 去具体化原则（必须遵守，否则方案无法复用）\n"
+        "写作方案是「可重复使用的写法模板」，不是对原文章内容的复述。\n"
+        "提炼时必须做到：\n"
+        "- 标题公式的举例用通用占位符，不用原文的具体产品/人名/数字\n"
+        "  ✅ 「[工具名] 的副作用：[问题现象]」「[平台]上有人卖 [品类]，[价格区间]，月销 [量级]+」\n"
+        "  ❌ 「Vibe Coding 的副作用：...」「闲鱼上有人卖 Notion 模板，19.9 元一套」\n"
+        "- 找素材的方法描述搜索「维度」和「来源类型」，不列原文章里提到的具体产品名、网站、人物\n"
+        "  ✅ 「搜 [主题]+[痛点词]，来源：开发者社区一手吐槽、工具使用者维护案例」\n"
+        "  ❌ 「搜 WorkBuddy、腾讯生态、Litter-tv，来源：MCP社区公告」\n"
+        "- 禁区描述写法风险，不是针对某篇文章的具体说明\n"
+        "检验方法：把方案交给另一个不知道原文章的人，他能否用这个方案写一篇完全不同的文章？能 → 合格。\n"
+        "\n## 方案命名规范（必须遵守）\n"
+        "方案名称描述「可重复使用的写法类型」，不是某篇具体文章的标题。\n"
+        "✅ 正确示例：「非程序员AI工具创业故事」「普通人副业收入数字拆解」「工具对比实测横评」\n"
+        "❌ 错误示例：「AI压缩产品周期：非程序员用ChatGPT做付费APP案例拆解」（这是文章标题）\n"
+        "检验方法：去掉所有具体姓名/数字/工具名，剩下的还能作为一类内容的分类标签 → 合格。"
+    ),
+    "x_collect_interval_minutes": "15",
+    "x_reply_scout_interval_minutes": "15",
+    "x_reply_score_threshold": "7",
+    "x_reply_scout_batch": "20",
+    "ref_collect_interval_minutes": "15",
+    "ref_clean_interval_minutes": "30",
+    "clean_batch_size": "20",
 }
 
 # Provider presets: label + default base_url + hint for default model

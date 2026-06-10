@@ -7,7 +7,7 @@ from models import GithubRepo, GithubIssue, IssuePainPoint, GithubTrendingRepo, 
 from schemas import (
     GithubRepoCreate, GithubRepoUpdate, GithubRepoOut,
     GithubIssueOut, IssuePainPointOut, GithubTrendingRepoOut, GithubReleaseOut,
-    DispatchReleaseWriteRequest, DispatchResponse,
+    DispatchReleaseWriteRequest, DispatchRepoIntroRequest, DispatchResponse,
 )
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -278,6 +278,98 @@ async def dispatch_release_write(
     await db.commit()
 
     return DispatchResponse(task_id=task_ids.get("editor", ""), kanban_url="/studio")
+
+
+@router.post("/repos/{owner}/{repo_name}/dispatch-intro", response_model=DispatchResponse)
+async def dispatch_repo_intro(
+    owner: str, repo_name: str,
+    body: DispatchRepoIntroRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Dispatch wms_writer pipeline to write a project introduction article for a GitHub repo."""
+    rid = f"{owner}/{repo_name}"
+    repo = await db.get(GithubRepo, rid)
+    if not repo:
+        raise HTTPException(404, "Repo not found")
+
+    from models import PublishAccount, WritingPlan, PipelineTask
+    account = await db.get(PublishAccount, body.account_id)
+    if not account:
+        raise HTTPException(404, f"Account '{body.account_id}' not found")
+    plan = await db.get(WritingPlan, body.plan_id)
+    if not plan:
+        raise HTTPException(404, f"Writing plan {body.plan_id} not found")
+
+    account_profile = {
+        "name": account.name, "platform": account.platform,
+        "positioning": account.positioning, "audience": account.audience,
+        "tone": account.tone, "word_range": account.word_range or {},
+        "image_style": account.image_style, "cover_style": account.cover_style or {},
+        "voice_samples": account.voice_samples or [], "style_rules": account.style_rules or [],
+    }
+
+    from pipeline_template import resolve_effective_design, REPO_INTRO_PIPELINE
+    eff_cover, eff_image = resolve_effective_design(
+        account.cover_style, account.image_style or "",
+        plan.cover_style, plan.image_style or "",
+    )
+    account_profile["cover_style"] = eff_cover
+    account_profile["image_style"] = eff_image
+
+    article_title = f"{rid} 项目简介"
+
+    pt = PipelineTask(
+        account_id=account.id,
+        title=article_title,
+        source_url=f"https://github.com/{rid}",
+        writing_plan_id=plan.id,
+        task_ids={},
+    )
+    db.add(pt)
+    await db.commit()
+    await db.refresh(pt)
+
+    ctx = {
+        "title": article_title,
+        "account_id": account.id,
+        "account_profile": account_profile,
+        "platform": account.platform,
+        "pipeline_task_id": pt.id,
+        "draft_type": "article",
+        "genre": plan.genre or "commentary",
+        "plan_strategy": plan.strategy or "",
+        "plan_title": plan.title,
+        "repo_name": rid,
+        "repo_description": repo.description or "",
+        "repo_language": repo.language or "",
+        "repo_stars": repo.stars or 0,
+        "repo_html_url": f"https://github.com/{rid}",
+    }
+
+    steps = REPO_INTRO_PIPELINE if body.with_cover else REPO_INTRO_PIPELINE[:1]
+
+    from hermes_kanban_client import HermesKanbanClient, HermesKanbanError
+    try:
+        kanban = HermesKanbanClient()
+        task_ids: dict[str, str] = {}
+        prev_id: str | None = None
+        for step in steps:
+            parents = [prev_id] if prev_id else []
+            tid = await kanban.create_task(
+                title=step.title(ctx),
+                body=step.body(ctx),
+                assignee=step.assignee,
+                parents=parents,
+            )
+            task_ids[step.role] = tid
+            prev_id = tid
+    except HermesKanbanError as e:
+        raise HTTPException(502, f"Hermes 不可用: {e}")
+
+    pt.task_ids = task_ids
+    await db.commit()
+
+    return DispatchResponse(task_id=task_ids.get("writer", ""), kanban_url="/studio")
 
 
 @router.post("/releases/{owner}/{repo_name}/{tag}/generate-draft")

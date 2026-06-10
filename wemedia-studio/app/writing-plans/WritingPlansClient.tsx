@@ -5,7 +5,8 @@ import { useRouter } from 'next/navigation'
 import {
   Plus, Trash2, Pencil, Check, X, RefreshCw,
   BookMarked, Loader2, Tag, FileText, PenLine,
-  Link2, ExternalLink, SendHorizonal, Rocket,
+  Link2, ExternalLink, SendHorizonal, Rocket, ChevronDown,
+  Settings, RotateCcw,
 } from 'lucide-react'
 import { marked } from 'marked'
 import { toast } from 'sonner'
@@ -16,6 +17,7 @@ import {
   getWritingPlans, getTags, createWritingPlan, updateWritingPlan, deleteWritingPlan,
   addPlanSource, deletePlanSource, getPlanDrafts, dispatchPlan,
   analyzePlan, getPlanUpdates,
+  reanalyzePlan, getAnalyzePrompt, updateAnalyzePrompt,
   PLATFORMS,
 } from '@/lib/api/writing-plans'
 import { createDraft } from '@/lib/api/drafts'
@@ -219,6 +221,20 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
   const [creating, setCreating] = useState(false)
   const newTitleRef = useRef<HTMLInputElement>(null)
 
+  // Tag filter dropdown
+  const [tagFilterOpen, setTagFilterOpen] = useState(false)
+  const tagFilterRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    function handleOutside(e: MouseEvent) {
+      if (tagFilterRef.current && !tagFilterRef.current.contains(e.target as Node)) {
+        setTagFilterOpen(false)
+      }
+    }
+    if (tagFilterOpen) document.addEventListener('mousedown', handleOutside)
+    return () => document.removeEventListener('mousedown', handleOutside)
+  }, [tagFilterOpen])
+
   // Tag editing
   const [tagInput, setTagInput] = useState('')
 
@@ -243,6 +259,17 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
   const [analyzeUrl, setAnalyzeUrl] = useState('')
   const [analyzeText, setAnalyzeText] = useState('')
   const [analyzeBusy, setAnalyzeBusy] = useState(false)
+
+  // Reanalyze dialog
+  const [reanalyzeOpen, setReanalyzeOpen] = useState(false)
+  const [reanalyzeSuggestions, setReanalyzeSuggestions] = useState('')
+  const [reanalyzeBusy, setReanalyzeBusy] = useState(false)
+
+  // Prompt editor dialog
+  const [promptEditorOpen, setPromptEditorOpen] = useState(false)
+  const [promptEditorContent, setPromptEditorContent] = useState('')
+  const [promptEditorLoading, setPromptEditorLoading] = useState(false)
+  const [promptEditorBusy, setPromptEditorBusy] = useState(false)
 
   // Dispatch account selection + 本次目标
   const [dispatchAccounts, setDispatchAccounts] = useState<PublishAccount[]>([])
@@ -348,6 +375,41 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
       setAnalyzeText('')
     } catch { toast.error('派发失败') }
     finally { setAnalyzeBusy(false) }
+  }
+
+  async function handleReanalyze() {
+    if (!selected) return
+    setReanalyzeBusy(true)
+    try {
+      const res = await reanalyzePlan(selected.id, reanalyzeSuggestions.trim() || undefined)
+      toast.success('已派发给 Scout', {
+        description: `任务 ${res.task_id}`,
+        action: { label: '查看看板', onClick: () => router.push(res.kanban_url) },
+      })
+      setReanalyzeOpen(false)
+      setReanalyzeSuggestions('')
+    } catch { toast.error('派发失败') }
+    finally { setReanalyzeBusy(false) }
+  }
+
+  async function openPromptEditor() {
+    setPromptEditorOpen(true)
+    setPromptEditorLoading(true)
+    try {
+      const instructions = await getAnalyzePrompt()
+      setPromptEditorContent(instructions)
+    } catch { toast.error('加载提示词失败') }
+    finally { setPromptEditorLoading(false) }
+  }
+
+  async function handleSavePrompt() {
+    setPromptEditorBusy(true)
+    try {
+      await updateAnalyzePrompt(promptEditorContent)
+      toast.success('提示词已保存')
+      setPromptEditorOpen(false)
+    } catch { toast.error('保存失败') }
+    finally { setPromptEditorBusy(false) }
   }
 
   function toggleFilterTag(name: string) {
@@ -568,6 +630,9 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
               <button onClick={() => setAnalyzeOpen(true)} className="text-zinc-400 hover:text-indigo-500 transition-colors" title="分析文章 → 提炼方案">
                 <SendHorizonal className="w-3.5 h-3.5" />
               </button>
+              <button onClick={openPromptEditor} className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors" title="编辑提炼提示词">
+                <Settings className="w-3.5 h-3.5" />
+              </button>
               <button onClick={() => setShowNewForm(true)} className="text-zinc-400 hover:text-indigo-500 transition-colors">
                 <Plus className="w-3.5 h-3.5" />
               </button>
@@ -580,26 +645,55 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
             className="w-full text-xs px-2.5 py-1.5 border border-zinc-200 dark:border-zinc-700 rounded-lg bg-transparent outline-none focus:border-indigo-400 text-zinc-700 dark:text-zinc-300 placeholder:text-zinc-400"
           />
           {availableTags.length > 0 && (
-            <div className="flex flex-wrap gap-1">
-              {availableTags.map(tag => (
-                <button
-                  key={tag.id}
-                  onClick={() => toggleFilterTag(tag.name)}
-                  className={cn(
-                    'text-[10px] px-2 py-0.5 rounded-full font-medium transition-all border',
-                    filterTagNames.includes(tag.name)
-                      ? 'border-transparent'
-                      : 'border-zinc-200 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400 hover:border-zinc-300'
-                  )}
-                  style={filterTagNames.includes(tag.name) ? {
-                    backgroundColor: tag.color + '33',
-                    color: tag.color,
-                    borderColor: tag.color + '66',
-                  } : {}}
-                >
-                  {tag.name}
-                </button>
-              ))}
+            <div ref={tagFilterRef} className="relative">
+              <button
+                onClick={() => setTagFilterOpen(v => !v)}
+                className={cn(
+                  'w-full flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border transition-colors',
+                  filterTagNames.length > 0
+                    ? 'border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-950/30 text-indigo-700 dark:text-indigo-300'
+                    : 'border-zinc-200 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400 hover:border-zinc-300 bg-transparent'
+                )}
+              >
+                <Tag className="w-3 h-3 flex-shrink-0" />
+                <span className="flex-1 text-left">
+                  {filterTagNames.length === 0
+                    ? '标签筛选'
+                    : filterTagNames.length === 1
+                      ? filterTagNames[0]
+                      : `已选 ${filterTagNames.length} 个标签`}
+                </span>
+                {filterTagNames.length > 0 && (
+                  <span
+                    className="text-[10px] hover:text-red-400 transition-colors"
+                    onClick={e => { e.stopPropagation(); setFilterTagNames([]) }}
+                    title="清除筛选"
+                  >✕</span>
+                )}
+                <ChevronDown className={cn('w-3 h-3 transition-transform flex-shrink-0', tagFilterOpen && 'rotate-180')} />
+              </button>
+
+              {tagFilterOpen && (
+                <div className="absolute z-20 top-full left-0 right-0 mt-1 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg shadow-lg overflow-hidden max-h-52 overflow-y-auto">
+                  {availableTags.map(tag => {
+                    const active = filterTagNames.includes(tag.name)
+                    return (
+                      <button
+                        key={tag.id}
+                        onClick={() => toggleFilterTag(tag.name)}
+                        className="w-full flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors text-left"
+                      >
+                        <span
+                          className="w-2 h-2 rounded-full flex-shrink-0"
+                          style={{ backgroundColor: tag.color }}
+                        />
+                        <span className="flex-1 text-zinc-700 dark:text-zinc-300">{tag.name}</span>
+                        {active && <Check className="w-3 h-3 text-indigo-500 flex-shrink-0" />}
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -807,6 +901,9 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
                   <Button size="sm" onClick={handleSaveBrief} disabled={savingBrief || strategyDraft === selected.strategy} className="gap-1 text-xs h-8">
                     {savingBrief ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />} 保存
                   </Button>
+                  <Button size="sm" variant="outline" onClick={() => setReanalyzeOpen(true)} className="gap-1 text-xs h-8 text-zinc-600 dark:text-zinc-400">
+                    <RotateCcw className="w-3.5 h-3.5" /> 重新提炼
+                  </Button>
                   <Button size="sm" variant="outline" onClick={openDispatchConfirm} disabled={!strategyDraft.trim()} className="gap-1 text-xs h-8 text-indigo-600 border-indigo-300 hover:bg-indigo-50">
                     <Rocket className="w-3.5 h-3.5" /> 派发给 Agent
                   </Button>
@@ -1010,6 +1107,70 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
                 className="text-xs h-8 gap-1"
               >
                 {analyzeBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <SendHorizonal className="w-3.5 h-3.5" />} 派发给 Scout
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Reanalyze modal ────────────────────────────────── */}
+      {reanalyzeOpen && selected && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={() => setReanalyzeOpen(false)}>
+          <div className="bg-white dark:bg-zinc-900 rounded-xl shadow-xl p-6 w-[480px] space-y-4" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center gap-2">
+              <RotateCcw className="w-4 h-4 text-indigo-500" />
+              <h3 className="font-semibold text-zinc-900 dark:text-zinc-100">重新提炼方案</h3>
+            </div>
+            <p className="text-xs text-zinc-500">
+              Scout 会根据当前策略内容重新提炼，去掉过于具体的内容（产品名/人名/数字），保留可复用的写法框架。
+            </p>
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-zinc-500">修改建议（可选）</label>
+              <textarea
+                autoFocus
+                value={reanalyzeSuggestions}
+                onChange={e => setReanalyzeSuggestions(e.target.value)}
+                placeholder="例：标题公式太具体，找素材的方法要更通用，禁区写得不够清晰…"
+                rows={4}
+                className="w-full px-3 py-2 text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg bg-zinc-50 dark:bg-zinc-900 outline-none focus:border-indigo-400 resize-none"
+              />
+            </div>
+            <div className="flex gap-2 justify-end pt-1">
+              <Button variant="outline" onClick={() => setReanalyzeOpen(false)} className="text-xs h-8">取消</Button>
+              <Button onClick={handleReanalyze} disabled={reanalyzeBusy} className="text-xs h-8 gap-1">
+                {reanalyzeBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />} 派发给 Scout
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Prompt editor modal ─────────────────────────────── */}
+      {promptEditorOpen && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={() => setPromptEditorOpen(false)}>
+          <div className="bg-white dark:bg-zinc-900 rounded-xl shadow-xl p-6 w-[640px] space-y-4" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center gap-2">
+              <Settings className="w-4 h-4 text-zinc-500" />
+              <h3 className="font-semibold text-zinc-900 dark:text-zinc-100">编辑提炼提示词</h3>
+              <span className="ml-auto text-[11px] text-zinc-400">修改后对所有后续提炼任务生效</span>
+            </div>
+            {promptEditorLoading ? (
+              <div className="flex items-center justify-center h-48">
+                <Loader2 className="w-5 h-5 animate-spin text-zinc-400" />
+              </div>
+            ) : (
+              <textarea
+                autoFocus
+                value={promptEditorContent}
+                onChange={e => setPromptEditorContent(e.target.value)}
+                rows={18}
+                className="w-full px-3 py-2.5 text-xs font-mono border border-zinc-200 dark:border-zinc-700 rounded-lg bg-zinc-50 dark:bg-zinc-900 outline-none focus:border-indigo-400 resize-y leading-relaxed"
+              />
+            )}
+            <div className="flex gap-2 justify-end pt-1">
+              <Button variant="outline" onClick={() => setPromptEditorOpen(false)} className="text-xs h-8">取消</Button>
+              <Button onClick={handleSavePrompt} disabled={promptEditorBusy || promptEditorLoading} className="text-xs h-8 gap-1">
+                {promptEditorBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />} 保存
               </Button>
             </div>
           </div>

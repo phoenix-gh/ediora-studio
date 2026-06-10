@@ -172,6 +172,25 @@ export async function analyzePlan(body: AnalyzeRequest): Promise<AnalyzeResult> 
   })
 }
 
+export async function reanalyzePlan(planId: number, suggestions?: string): Promise<AnalyzeResult> {
+  return apiFetch<AnalyzeResult>(`/writing-plans/${planId}/reanalyze`, {
+    method: 'POST',
+    body: JSON.stringify({ suggestions: suggestions ?? '' }),
+  })
+}
+
+export async function getAnalyzePrompt(): Promise<string> {
+  const res = await apiFetch<{ instructions: string }>('/writing-plans/analyze-prompt')
+  return res.instructions
+}
+
+export async function updateAnalyzePrompt(instructions: string): Promise<void> {
+  await apiFetch('/writing-plans/analyze-prompt', {
+    method: 'PUT',
+    body: JSON.stringify({ instructions }),
+  })
+}
+
 export async function getPlanUpdates(planId: number): Promise<PlanUpdate[]> {
   return apiFetch<PlanUpdate[]>(`/writing-plans/${planId}/updates`)
 }

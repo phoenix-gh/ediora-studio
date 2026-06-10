@@ -10,7 +10,9 @@ from schemas import (
     PlanSourceCreate, PlanSourceOut,
     ArticleDraftSummary, DispatchPlanRequest, DispatchResponse,
     PlanUpdateOut, AnalyzeRequest, AnalyzeResponse,
+    ReanalyzeRequest, AnalyzePromptUpdate,
 )
+from config import get_config, set_config
 
 router = APIRouter(prefix="/writing-plans", tags=["writing-plans"])
 
@@ -132,42 +134,68 @@ async def search_plans(q: str = "", db: AsyncSession = Depends(get_db)):
     return await _enrich_plans(db, matched[:10])
 
 
-# ── Analyze (dispatches to scout, registered before /{plan_id}) ───────────────
+# ── Analyze / Prompt CRUD (registered before /{plan_id}) ─────────────────────
+
+@router.get("/analyze-prompt")
+async def get_analyze_prompt():
+    cfg = await get_config()
+    return {"instructions": cfg.get("analyze_instructions", "")}
+
+
+@router.put("/analyze-prompt", status_code=204)
+async def update_analyze_prompt(body: AnalyzePromptUpdate):
+    await set_config({"analyze_instructions": body.instructions})
+
 
 @router.post("/analyze", response_model=AnalyzeResponse)
 async def analyze_article(body: AnalyzeRequest):
     if not body.url and not body.content:
         raise HTTPException(400, "url 或 content 至少提供一个")
+    cfg = await get_config()
+    instructions = cfg.get("analyze_instructions", "")
     parts = ["## 任务类型\ncontent-to-writing-plan\n\n## 输入"]
     if body.url:
         parts.append(f"URL: {body.url}")
     if body.content:
         parts.append(f"内容:\n{body.content[:3000]}")
-    parts.append(
-        "\n## 指令\n"
-        "1. 读取文章，提取 3-5 个主题关键词\n"
-        "2. 调 search_writing_plans 检索候选写作方案（传入关键词列表）\n"
-        "3. 判断相似度：\n"
-        "   - 相似且有新角度 → update_writing_plan + add_plan_update（记录新增了什么）\n"
-        "   - 相似但无新内容 → add_plan_update（记录跳过原因，plan_id 取相似方案 id）\n"
-        "   - 无匹配 → create_writing_plan + add_plan_update（记录新建原因）\n"
-        "4. 提炼写作方案要素：\n"
-        "   - 文章模式（这类文章的写法、视角、字数）\n"
-        "   - 标题公式（标题结构 + 举例）\n"
-        "   - 找素材的方法（关键词、来源、判断标准）\n"
-        "   - 禁区\n"
-        "\n## 方案命名规范（必须遵守）\n"
-        "方案名称描述「可重复使用的写法类型」，不是某篇具体文章的标题。\n"
-        "✅ 正确示例：「非程序员AI工具创业故事」「普通人副业收入数字拆解」「工具对比实测横评」\n"
-        "❌ 错误示例：「AI压缩产品周期：非程序员用ChatGPT做付费APP案例拆解」（这是文章标题）\n"
-        "检验方法：去掉所有具体姓名/数字/工具名，剩下的还能作为一类内容的分类标签 → 合格。"
-    )
+    parts.append(instructions)
     from hermes_kanban_client import HermesKanbanClient, HermesKanbanError
     try:
         kanban = HermesKanbanClient()
         task_id = await kanban.create_task(
             title="[写作方案] 文章提炼",
             body="\n".join(parts),
+            assignee="wms_scout",
+        )
+    except HermesKanbanError as e:
+        raise HTTPException(502, f"Hermes 不可用: {e}")
+    return AnalyzeResponse(task_id=task_id, kanban_url="/studio")
+
+
+@router.post("/{plan_id}/reanalyze", response_model=AnalyzeResponse)
+async def reanalyze_plan(plan_id: int, body: ReanalyzeRequest, db: AsyncSession = Depends(get_db)):
+    obj = await db.get(WritingPlan, plan_id)
+    if not obj:
+        raise HTTPException(404, "Plan not found")
+    cfg = await get_config()
+    instructions = cfg.get("analyze_instructions", "")
+    suggestions_block = f"\n## 用户建议\n{body.suggestions.strip()}" if body.suggestions.strip() else ""
+    task_body = (
+        f"## 任务类型\nreanalyze-writing-plan\n\n"
+        f"## 目标方案\nID: {obj.id}\n标题: {obj.title}\n\n"
+        f"## 当前策略（需要修订）\n{obj.strategy or '（空）'}"
+        f"{suggestions_block}\n\n"
+        f"## 指令\n"
+        f"直接更新方案 ID {obj.id}（调 update_writing_plan，plan_id={obj.id}），"
+        f"并调 add_plan_update 记录改了什么。不需要搜索其他方案，也不需要新建方案。\n"
+        f"{instructions}"
+    )
+    from hermes_kanban_client import HermesKanbanClient, HermesKanbanError
+    try:
+        kanban = HermesKanbanClient()
+        task_id = await kanban.create_task(
+            title=f"[写作方案] 重新提炼：{obj.title}",
+            body=task_body,
             assignee="wms_scout",
         )
     except HermesKanbanError as e:

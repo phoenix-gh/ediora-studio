@@ -25,6 +25,7 @@ output/
 backend/avatars/
 backend/uploads/
 backend/wechat_imgs/
+backend/.scheduler_state.json
 
 # ── Node / pnpm ─────────────────────────────────────────
 node_modules/

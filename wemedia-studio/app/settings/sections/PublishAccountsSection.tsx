@@ -454,7 +454,7 @@ function AccountForm({
         <textarea
           value={form.image_style}
           onChange={e => setForm({ ...form, image_style: e.target.value })}
-          placeholder="极简示意图，纯文字示意优先，不要 stock photo"
+          placeholder=""
           rows={2}
           className={cn(
             'w-full resize-none rounded-lg border border-zinc-200 dark:border-zinc-700',

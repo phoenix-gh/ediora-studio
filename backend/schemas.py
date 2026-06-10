@@ -365,6 +365,14 @@ class AnalyzeRequest(BaseModel):
     content: Optional[str] = None
 
 
+class ReanalyzeRequest(BaseModel):
+    suggestions: str = ""
+
+
+class AnalyzePromptUpdate(BaseModel):
+    instructions: str
+
+
 class AnalyzeResponse(BaseModel):
     task_id: str
     kanban_url: str
@@ -470,6 +478,12 @@ class ArticleSeriesUpdate(BaseModel):
 
 
 class DispatchReleaseWriteRequest(BaseModel):
+    account_id: str
+    plan_id: int
+    with_cover: bool = True
+
+
+class DispatchRepoIntroRequest(BaseModel):
     account_id: str
     plan_id: int
     with_cover: bool = True

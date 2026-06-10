@@ -70,6 +70,20 @@ export async function dispatchReleaseWrite(
   )
 }
 
+export async function dispatchRepoIntro(
+  owner: string, repo: string,
+  accountId: string, planId: number, withCover: boolean,
+): Promise<{ task_id: string; kanban_url: string }> {
+  return apiFetch<{ task_id: string; kanban_url: string }>(
+    `/github/repos/${owner}/${repo}/dispatch-intro`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ account_id: accountId, plan_id: planId, with_cover: withCover }),
+    }
+  )
+}
+
 export async function generateReleaseDraft(
   owner: string, repo: string, tag: string
 ): Promise<{ drafts_created: number }> {

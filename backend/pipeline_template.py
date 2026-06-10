@@ -732,7 +732,7 @@ account_id: {c['account_id']}
 1. 分析正文的 H2 小节 / 段落结构，在**小节边界**挑 **≤ {c['max_images']} 个**插图点：
    - 只在内容值得配图的小节配；短小节、过渡段可不配；不要为凑数硬配。
    - 插图点落在小节之间，**绝不插在句子或段落中间**。
-2. 每个插图点：按 `image_style` + 该小节主题，调 `baoyu-cover-image` 技能生成**内容插图**：
+2. 每个插图点：按 `image_style` + 该小节主题，调 `baoyu-article-illustrator` 技能生成**内容插图**：
    - **不套封面 cover_style 模板、不放标题文字**；aspect_ratio 默认 16:9；以内容相关性与视觉吸引力为先。
    - 生成失败就**跳过该点继续**，不要整体中断。
    - 得到本地路径后 `upload_image_from_path(path=<本地路径>, filename_hint='illus.png', draft_id={c['draft_id']})` 拿 `hosted_url`。
@@ -795,6 +795,55 @@ pipeline_task_id: {c['pipeline_task_id']}
 ]
 
 
+# ── repo_intro：GitHub 项目简介 writer → illustrator ────────────────────────
+# writer 收到仓库元数据 + 写作策略，可调 web 工具补充 README 细节后直接写简介文章。
+REPO_INTRO_PIPELINE: list[PipelineStep] = [
+    PipelineStep(
+        role="writer",
+        assignee="wms_writer",
+        title=lambda c: f"写简介：{c['repo_name']}",
+        body=lambda c: f"""account_id: {c['account_id']}
+pipeline_task_id: {c['pipeline_task_id']}
+
+# {c['title']}
+
+{render_profile_writer(c['account_profile'])}
+
+## 写作策略（来自写作方案「{c['plan_title']}」）
+{c['plan_strategy'] or '（未填写作策略，请自行判断角度）'}
+
+---
+
+## 目标项目：{c['repo_name']}
+
+- **描述**: {c['repo_description'] or '（无描述）'}
+- **主要语言**: {c['repo_language'] or '（未知）'}
+- **Stars**: {c['repo_stars']}
+- **链接**: {c['repo_html_url']}
+
+---
+
+## 这棒任务（writer · 写项目简介）
+按上方「写作策略」的框架，为这个 GitHub 项目写一篇简介文章。
+字数、结构、风格全部以写作策略为准。
+
+可用 web 工具访问 GitHub 仓库链接，读取 README 及相关信息补充具体细节。
+侧重让读者快速理解：这个项目解决什么问题、核心能力是什么、适合谁用。
+
+## 工作流（硬性，省 turn）
+本任务**没有 file / code_execution / terminal 工具**，全部在 message 中完成：
+
+1. 在 message 里**一次性**写出完整 Markdown 终稿
+2. `save_draft(title, content, topic_id='repo_intro:{c['repo_name']}', status='drafting', pipeline_task_id={c['pipeline_task_id']}, draft_type='{c.get('draft_type', 'article')}')` 拿 `draft_id`
+3. `kanban_complete(summary='<标题> 项目简介 N 字', metadata={{"draft_id": ..., "wordcount": N}})`
+
+目标：从写稿到 complete **≤ 3 turn**。
+""".strip(),
+    ),
+    FULL_PIPELINE[2],  # illustrator — 读 draft_id from parent metadata
+]
+
+
 PIPELINES: dict[str, list[PipelineStep]] = {
     "full": FULL_PIPELINE,
     "cover_only": COVER_ONLY_PIPELINE,
@@ -803,6 +852,7 @@ PIPELINES: dict[str, list[PipelineStep]] = {
     "topic_short": TOPIC_SHORT_PIPELINE,
     "illustrate_body": INLINE_ILLUS_PIPELINE,
     "release_write": RELEASE_WRITE_PIPELINE,
+    "repo_intro": REPO_INTRO_PIPELINE,
 }
 
 

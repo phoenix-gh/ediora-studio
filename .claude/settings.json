@@ -1,5 +1,14 @@
 {
   "env": {
     "PATH": "/home/violet/miniconda3/envs/wems/bin:/home/violet/miniconda3/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+  },
+  "permissions": {
+    "allow": [
+      "Bash(curl -s -o /dev/null -w *)",
+      "Bash(npx tsc --noEmit *)",
+      "Bash(pnpm exec tsc --noEmit *)",
+      "Bash(./node_modules/.bin/tsc --noEmit *)",
+      "Bash(pnpm tsc --noEmit *)"
+    ]
   }
 }
