@@ -17,6 +17,8 @@ class PublishAccountCreate(BaseModel):
     cover_style: dict = Field(default_factory=dict)
     voice_samples: list[str] = Field(default_factory=list)
     style_rules: list[str] = Field(default_factory=list)
+    app_id: str = ""
+    app_secret: str = ""
     is_active: bool = True
 
 
@@ -34,6 +36,8 @@ class PublishAccountOut(BaseModel):
     cover_style: dict
     voice_samples: list[str]
     style_rules: list[str]
+    app_id: str
+    app_secret: str
     is_active: bool
     created_at: datetime
 
@@ -53,6 +57,8 @@ class PublishAccountUpdate(BaseModel):
     cover_style: Optional[dict] = None
     voice_samples: Optional[list[str]] = None
     style_rules: Optional[list[str]] = None
+    app_id: Optional[str] = None
+    app_secret: Optional[str] = None
     is_active: Optional[bool] = None
 
 

@@ -37,6 +37,8 @@ class PublishAccount(Base):
     cover_style: Mapped[dict] = mapped_column(JSON, default=dict)
     voice_samples: Mapped[list] = mapped_column(JSON, default=list)
     style_rules: Mapped[list] = mapped_column(JSON, default=list)
+    app_id: Mapped[str] = mapped_column(String, default="")       # 公众号开发者 AppID
+    app_secret: Mapped[str] = mapped_column(String, default="")   # 仅用于发布到草稿箱
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
 
