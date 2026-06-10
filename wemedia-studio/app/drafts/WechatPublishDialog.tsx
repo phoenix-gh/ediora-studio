@@ -104,23 +104,20 @@ export function WechatPublishDialog({
         const wenyan = wenyanRef.current!
         const inner = await wenyan.renderMarkdown(content)
         if (cancelled) return
-        // applyStylesWithTheme 需要挂在真实 DOM 上的元素来解析样式
-        const el = document.createElement('div')
-        el.style.position = 'fixed'
-        el.style.left = '-99999px'
+        // 主题 CSS 全部以 #wenyan 选择器为前缀，容器必须是 section#wenyan，
+        // 否则样式静默不内联；返回值是该元素的 outerHTML，所以容器上不能带
+        // 任何额外样式（曾因藏屏幕外的 position:fixed 把预览整体推出可视区）。
+        // 样式内联不依赖 layout，元素无需挂载到 document。
+        const el = document.createElement('section')
+        el.id = 'wenyan'
         el.innerHTML = inner
-        document.body.appendChild(el)
-        try {
-          const styled = await wenyan.applyStylesWithTheme(el, {
-            themeId,
-            hlThemeId: HL_THEME_ID,
-            isMacStyle: true,
-            isAddFootnote: true,
-          })
-          if (!cancelled) setHtml(styled)
-        } finally {
-          el.remove()
-        }
+        const styled = await wenyan.applyStylesWithTheme(el, {
+          themeId,
+          hlThemeId: HL_THEME_ID,
+          isMacStyle: true,
+          isAddFootnote: true,
+        })
+        if (!cancelled) setHtml(styled)
       } catch {
         if (!cancelled) toast.error('渲染失败')
       }
