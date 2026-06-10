@@ -32,7 +32,7 @@ def test_manual_create_and_list(client):
 
 def test_categories_endpoint(client):
     cats = client.get("/api/materials/categories").json()
-    assert "沙雕搞笑" in cats and "其他" in cats
+    assert "产品动态" in cats and "其他" in cats
 
 
 def test_rules_crud_and_collect(client):
@@ -68,7 +68,7 @@ def test_classify_batch_with_size_param(client):
 
 
 def test_browse_filters_by_category(client):
-    client.post("/api/materials", json={"text": "高分沙雕", "category": "沙雕搞笑"})
-    client.post("/api/materials", json={"text": "吐槽", "category": "吐槽锐评"})
-    only = client.get("/api/materials?category=沙雕搞笑").json()
-    assert [m["text"] for m in only] == ["高分沙雕"]
+    client.post("/api/materials", json={"text": "高分动态", "category": "产品动态"})
+    client.post("/api/materials", json={"text": "吐槽", "category": "翻车吐槽"})
+    only = client.get("/api/materials?category=产品动态").json()
+    assert [m["text"] for m in only] == ["高分动态"]

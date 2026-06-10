@@ -762,6 +762,73 @@ async def list_quotes(
 
 
 @mcp.tool()
+async def search_ref_materials(
+    q: str = "",
+    category: str = "",
+    scene_tag: str = "",
+    min_score: int = 60,
+    limit: int = 10,
+) -> list[dict]:
+    """
+    Search the AI 信息素材库 (collected high-engagement X posts + viral replies).
+
+    Use this when writing articles or X posts to find evidence, hooks, data
+    points, hot takes, or controversy — real content people actually engaged
+    with, scored 0-100 by engagement (likes/reposts/replies/views).
+
+    Args:
+        q: Keyword to search in material text (case-insensitive).
+        category: Filter by category — one of: 产品动态, 观点争论, 工具实战,
+                  翻车吐槽, 数据事实, 行业八卦, 其他. Leave empty for all.
+        scene_tag: Filter by intended position in your writing — one of:
+                   opener (开头钩子), argument (论据), closer (收尾),
+                   twist (反转), resonance (共鸣), warning (警示).
+        min_score: Minimum engagement score 0-100 (default 60).
+        limit: Maximum results (max 50, default 10).
+
+    Returns a list sorted by score descending. Each item includes:
+    id, text (cleaned), score, category, scene_tags, likes, source_url,
+    is_reply (True = viral reply under a hot post, often the wittiest take).
+    """
+    from models import RefMaterial
+
+    limit = max(1, min(limit, 50))
+
+    async with SessionLocal() as db:
+        stmt = (
+            select(RefMaterial)
+            .where(RefMaterial.status == "active", RefMaterial.score >= min_score)
+            .order_by(desc(RefMaterial.score))
+            .limit(500)
+        )
+        if category:
+            stmt = stmt.where(RefMaterial.category == category)
+        rows = (await db.execute(stmt)).scalars().all()
+
+    result = list(rows)
+    # scene_tags 是 JSON 列，跨 SQLite/PG 的 contains 查询不可移植 → 内存过滤
+    if scene_tag:
+        result = [r for r in result if scene_tag in (r.scene_tags or [])]
+    if q:
+        s = q.lower()
+        result = [r for r in result if s in (r.text_clean or r.text).lower()]
+
+    return [
+        {
+            "id": m.id,
+            "text": m.text_clean or m.text,
+            "score": m.score,
+            "category": m.category or "",
+            "scene_tags": m.scene_tags or [],
+            "likes": m.likes,
+            "source_url": m.source_url or "",
+            "is_reply": m.parent_source_id is not None,
+        }
+        for m in result[:limit]
+    ]
+
+
+@mcp.tool()
 async def save_quote(
     text: str,
     author: str = "",

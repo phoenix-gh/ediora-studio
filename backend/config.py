@@ -24,7 +24,7 @@ DEFAULTS: dict[str, str] = {
     "camofox_api_key": "",
     "camofox_user_id": "wemedia_x",         # userId for the X session
     "camofox_novnc_url": "http://localhost:6080/vnc.html",  # web VNC address
-    "ref_categories": "吐槽锐评,沙雕搞笑,温情共鸣,反转梗,金句格言,冷知识科普,热点观点,生活观察,职场打工,情感两性,其他",
+    "ref_categories": "产品动态,观点争论,工具实战,翻车吐槽,数据事实,行业八卦,其他",
     "analyze_instructions": (
         "\n## 指令\n"
         "1. 读取文章，提取 3-5 个主题关键词\n"
