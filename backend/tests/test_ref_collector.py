@@ -1,5 +1,4 @@
 import sys, asyncio, pytest
-from unittest.mock import patch
 from sqlalchemy import select
 
 
@@ -19,24 +18,15 @@ def db_session(monkeypatch, tmp_path):
     return SessionLocal
 
 
-def _post(tid, text="这是一个挺好笑的段子内容哈哈", sensitive=False, likes=9000):
-    from feedgrab_client import ParsedPost
-    from datetime import datetime, timezone
-    return ParsedPost(tweet_id=tid, username="u", display_name="U", content=text,
-                      url=f"https://x.com/u/status/{tid}",
-                      published_at=datetime.now(timezone.utc),
-                      replies=1, reposts=2, likes=likes, views=likes * 10,
-                      possibly_sensitive=sensitive)
-
-
-def _rule(db_session):
+def _rule(db_session, **kw):
     from models import RefCollectRule
     async def _mk():
         async with db_session() as db:
             r = RefCollectRule(label="t", source_subscription_id=1,
-                               min_faves=1, exclude_sensitive=True, days=7, max_results=20)
+                               min_faves=1, exclude_sensitive=True, days=7, max_results=20, **kw)
             db.add(r); await db.commit(); await db.refresh(r)
-            return r.id
+            db.expunge(r)
+            return r
     return asyncio.new_event_loop().run_until_complete(_mk())
 
 
@@ -56,96 +46,120 @@ def _seed_xpost(db_session, tid, *, likes=9000, sensitive=False, sub_id=1,
     asyncio.new_event_loop().run_until_complete(_mk())
 
 
+def _collect(db_session, rule):
+    from ref_collector import collect_rule
+    async def _go():
+        async with db_session() as db:
+            merged = await db.merge(rule)
+            return await collect_rule(db, merged)
+    return asyncio.new_event_loop().run_until_complete(_go())
+
+
+def _materials(db_session):
+    from models import RefMaterial
+    async def _q():
+        async with db_session() as db:
+            return list((await db.execute(select(RefMaterial))).scalars().all())
+    return asyncio.new_event_loop().run_until_complete(_q())
+
+
+def _seen_verdicts(db_session):
+    from models import RefSeen
+    async def _q():
+        async with db_session() as db:
+            rows = (await db.execute(select(RefSeen))).scalars().all()
+            return {(r.platform, r.source_id): r.verdict for r in rows}
+    return asyncio.new_event_loop().run_until_complete(_q())
+
+
 def test_prefilter_drops_sensitive_short_link_mention():
     from ref_collector import _prefilter
+    from feedgrab_client import ParsedPost
+    from datetime import datetime, timezone
+    def p(tid, text, sensitive=False):
+        return ParsedPost(tweet_id=tid, username="u", display_name="U", content=text,
+                          url="", published_at=datetime.now(timezone.utc),
+                          possibly_sensitive=sensitive)
     posts = [
-        _post("ok"),                                   # keep
-        _post("sens", sensitive=True),                 # drop: sensitive
-        _post("short", text="哈"),                      # drop: too short
-        _post("link", text="好物推荐 http://t.co/x"),    # drop: link
-        _post("at", text="@a @b @c @d"),                # drop: mention-heavy
+        p("1", "这是一条足够长的正常段子内容"),
+        p("2", "太短"),
+        p("3", "看这个链接 https://t.co/x 快点"),
+        p("4", "@a @b @c 冲"),
+        p("5", "这条其实还行但是敏感", sensitive=True),
     ]
-    kept = _prefilter(posts, exclude_sensitive=True)
-    assert [p.tweet_id for p in kept] == ["ok"]
+    out = _prefilter(posts, exclude_sensitive=True)
+    assert [x.tweet_id for x in out] == ["1"]
 
 
-def test_collect_rule_only_keeps_kept_and_writes_seen(db_session):
-    import ref_collector as rc
-    from models import RefMaterial, RefSeen, RefCollectRule
-    rid = _rule(db_session)
-    _seed_xpost(db_session, "k1")
-    _seed_xpost(db_session, "d1")
-
-    async def fake_classify(posts, categories, scene_tags):
-        return [{"source_id": "k1", "keep": True, "score": 80, "category": "沙雕搞笑",
-                 "scene_tags": ["resonance"], "tags": ["a"], "text_clean": "净"},
-                {"source_id": "d1", "keep": False, "score": 5, "category": "其他",
-                 "scene_tags": [], "tags": [], "text_clean": ""}]
-    async def fake_cfg():
-        return {"ref_categories": "沙雕搞笑,其他"}
-
-    async def _run():
-        async with db_session() as db:
-            rule = await db.get(RefCollectRule, rid)
-            with patch.object(rc, "classify_ref_posts", new=fake_classify), \
-                 patch.object(rc, "get_config", new=fake_cfg):
-                kept = await rc.collect_rule(db, rule)
-            assert kept == 1
-            mats = (await db.execute(select(RefMaterial))).scalars().all()
-            assert {m.source_id for m in mats} == {"k1"}
-            assert mats[0].category == "沙雕搞笑" and mats[0].text_clean == "净"
-            seen = (await db.execute(select(RefSeen))).scalars().all()
-            assert {s.source_id: s.verdict for s in seen} == {"k1": "kept", "d1": "rejected"}
-    asyncio.new_event_loop().run_until_complete(_run())
+def test_collect_inserts_active_with_local_score(db_session):
+    rule = _rule(db_session)
+    _seed_xpost(db_session, "t1", likes=9000)
+    created = _collect(db_session, rule)
+    assert len(created) == 1
+    mats = _materials(db_session)
+    assert len(mats) == 1
+    m = mats[0]
+    assert m.status == "active"
+    assert m.score > 0           # 本地信号分，非 LLM
+    assert m.category == ""      # 待低频分类
+    assert m.text_clean != ""    # 规则清洗文本
+    assert _seen_verdicts(db_session)[("x", "t1")] == "active"
 
 
-def test_collect_rule_records_last_error_on_classify_failure(db_session):
-    """精筛失败时，把原因写进 rule.last_error 并抛出（不再静默清空 last_error）。"""
-    import ref_collector as rc
-    from llm import RefClassifyError
-    from models import RefCollectRule, RefMaterial
-    rid = _rule(db_session)
-    _seed_xpost(db_session, "k1")
-
-    async def fail_classify(posts, categories, scene_tags):
-        raise RefClassifyError("LLM 返回空内容（可能被安全策略拦截或限流）")
-    async def fake_cfg():
-        return {"ref_categories": "其他"}
-
-    async def _run():
-        async with db_session() as db:
-            rule = await db.get(RefCollectRule, rid)
-            with patch.object(rc, "classify_ref_posts", new=fail_classify), \
-                 patch.object(rc, "get_config", new=fake_cfg):
-                with pytest.raises(RefClassifyError):
-                    await rc.collect_rule(db, rule)
-            refreshed = await db.get(RefCollectRule, rid)
-            assert "精筛失败" in refreshed.last_error
-            assert "安全策略" in refreshed.last_error
-            # 失败时不应入库
-            mats = (await db.execute(select(RefMaterial))).scalars().all()
-            assert mats == []
-    asyncio.new_event_loop().run_until_complete(_run())
+def test_collect_clean_text_strips_trailing_tags(db_session):
+    rule = _rule(db_session)
+    _seed_xpost(db_session, "t1", text="正经段子内容在这里！！！！ #搞笑 #日常")
+    _collect(db_session, rule)
+    m = _materials(db_session)[0]
+    assert "#搞笑" not in m.text_clean
+    assert "！！！！" not in m.text_clean   # 重复标点压缩
+    assert m.text.startswith("正经段子内容")  # 原文保留
 
 
-def test_collect_rule_skips_seen_ids(db_session):
-    import ref_collector as rc
-    from models import RefCollectRule, RefSeen
-    rid = _rule(db_session)
-    _seed_xpost(db_session, "already")
+def test_collect_dedup_within_batch_keeps_higher_score(db_session):
+    rule = _rule(db_session)
+    _seed_xpost(db_session, "hi", likes=50000,
+                text="打工人的尽头是带薪拉屎，一天不拉浑身难受")
+    _seed_xpost(db_session, "lo", likes=1000,
+                text="打工人的尽头就是带薪拉屎，一天不拉感觉浑身难受")
+    created = _collect(db_session, rule)
+    assert len(created) == 1 and created[0].source_id == "hi"
+    assert _seen_verdicts(db_session)[("x", "lo")] == "duplicate"
 
-    async def boom_classify(*a, **k):
-        raise AssertionError("should not classify a seen id")
-    async def fake_cfg():
-        return {"ref_categories": "其他"}
 
-    async def _run():
-        async with db_session() as db:
-            db.add(RefSeen(platform="x", source_id="already", verdict="rejected"))
-            await db.commit()
-            rule = await db.get(RefCollectRule, rid)
-            with patch.object(rc, "classify_ref_posts", new=boom_classify), \
-                 patch.object(rc, "get_config", new=fake_cfg):
-                kept = await rc.collect_rule(db, rule)
-            assert kept == 0
-    asyncio.new_event_loop().run_until_complete(_run())
+def test_collect_dedup_against_db_replaces_lower(db_session):
+    rule = _rule(db_session)
+    _seed_xpost(db_session, "old", likes=1000,
+                text="程序员的快乐就是下班前十分钟修好了 bug")
+    _collect(db_session, rule)
+    _seed_xpost(db_session, "new", likes=80000,
+                text="程序员的快乐，就是下班前十分钟修好了bug！")
+    created = _collect(db_session, rule)
+    assert len(created) == 1 and created[0].source_id == "new"
+    by_sid = {m.source_id: m for m in _materials(db_session)}
+    assert by_sid["old"].status == "duplicate"
+    assert by_sid["new"].status == "active"
+
+
+def test_collect_dedup_against_db_drops_lower_newcomer(db_session):
+    rule = _rule(db_session)
+    _seed_xpost(db_session, "old", likes=80000,
+                text="程序员的快乐就是下班前十分钟修好了 bug")
+    _collect(db_session, rule)
+    _seed_xpost(db_session, "new", likes=500,
+                text="程序员的快乐，就是下班前十分钟修好了bug！")
+    created = _collect(db_session, rule)
+    assert created == []
+    by_sid = {m.source_id: m for m in _materials(db_session)}
+    assert "new" not in by_sid
+    assert by_sid["old"].status == "active"
+    assert _seen_verdicts(db_session)[("x", "new")] == "duplicate"
+
+
+def test_collect_skips_already_seen(db_session):
+    rule = _rule(db_session)
+    _seed_xpost(db_session, "t1")
+    _collect(db_session, rule)
+    created2 = _collect(db_session, rule)   # 二次跑同一条
+    assert created2 == []
+    assert len(_materials(db_session)) == 1
