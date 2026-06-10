@@ -22,6 +22,7 @@ import {
 } from '@/lib/api/drafts'
 import { WritingPlan, getWritingPlans, flattenTopicsWithDepth } from '@/lib/api/writing-plans'
 import { MarkdownEditor, MarkdownEditorHandle } from './MarkdownEditor'
+import { WechatPublishDialog } from './WechatPublishDialog'
 import { DraftAssetsDialog } from '@/components/features/DraftAssetsDialog'
 import { DraftTaskTimelineDialog } from '@/components/features/DraftTaskTimelineDialog'
 import '@uiw/react-md-editor/markdown-editor.css'
@@ -121,6 +122,7 @@ export function DraftsClient({
   // Chat state
   const [chatOpen, setChatOpen] = useState(initialChatOpen)
   const [timelineOpen, setTimelineOpen] = useState(false)
+  const [publishOpen, setPublishOpen] = useState(false)
   const [assetsOpen, setAssetsOpen] = useState(false)
   const [assetsTab, setAssetsTab] = useState<'sources' | 'images'>('sources')
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([])
@@ -741,6 +743,15 @@ export function DraftsClient({
                 </Button>
                 <Button
                   variant="outline" size="sm"
+                  onClick={() => setPublishOpen(true)}
+                  className="gap-1.5"
+                  title="渲染排版并发布到微信公众号"
+                >
+                  <Send className="w-3.5 h-3.5" />
+                  发布
+                </Button>
+                <Button
+                  variant="outline" size="sm"
                   onClick={() => setChatOpen(v => !v)}
                   className={cn('gap-1.5', chatOpen && 'bg-violet-50 border-violet-300 text-violet-600 dark:bg-violet-950/30 dark:border-violet-700 dark:text-violet-400')}
                 >
@@ -954,6 +965,14 @@ export function DraftsClient({
               const rootId = selected.linked_draft_id ?? selected.id
               getDraftImages(rootId).then(setImages).catch(() => {})
             }}
+          />
+          <WechatPublishDialog
+            open={publishOpen}
+            onClose={() => setPublishOpen(false)}
+            draftId={selected.id}
+            title={editTitle}
+            content={editContent}
+            images={images}
           />
         </>
       )}
