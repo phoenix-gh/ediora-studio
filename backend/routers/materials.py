@@ -235,7 +235,13 @@ async def collect_one_rule(rid: int, db: AsyncSession = Depends(get_db)):
 
 @router.post("/collect-all")
 async def collect_all_rules(db: AsyncSession = Depends(get_db)):
-    return {"ok": True, **(await collect_all(db))}
+    result = await collect_all(db)
+    from reply_scout import scout_replies
+    try:
+        scout = await scout_replies(db)
+    except Exception as e:
+        scout = {"scouted": 0, "new_replies": 0, "scout_error": str(e)[:200]}
+    return {"ok": True, **result, **scout}
 
 
 class CleanBatchBody(BaseModel):
