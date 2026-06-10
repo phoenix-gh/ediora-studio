@@ -465,7 +465,10 @@ async def _classify_category_chunk(
 
 只输出 JSON 数组，不要其他文字。"""
 
-    max_tokens = min(4000, 300 * len(posts) + 500)
+    # 输出本身每条只需 ~100 token，但推理模型的 reasoning 也消耗这份额度，
+    # 给少了 content 会被吃光/截断（实测 4 条×300+500=1700 时 JSON 输出中途断掉）。
+    # 沿用旧线按 ~2000/条 给足余量。
+    max_tokens = min(8000, 2000 * len(posts) + 1000)
     try:
         raw = await _call(prompt, max_tokens=max_tokens)
     except Exception as e:
