@@ -35,6 +35,8 @@ interface EditState {
   cover_style: CoverStyle
   cover_motifs_text: string   // newline-separated
   cover_negative_text: string // newline-separated
+  app_id: string
+  app_secret: string
   is_active: boolean
 }
 
@@ -67,6 +69,8 @@ const EMPTY_EDIT: EditState = {
   cover_style: {},
   cover_motifs_text: '',
   cover_negative_text: '',
+  app_id: '',
+  app_secret: '',
   is_active: true,
 }
 
@@ -87,6 +91,8 @@ function accountToEdit(p: PublishAccount): EditState {
     cover_style: p.cover_style ?? {},
     cover_motifs_text: (p.cover_style?.signature_motifs ?? []).join('\n'),
     cover_negative_text: (p.cover_style?.negative ?? []).join('\n'),
+    app_id: p.app_id ?? '',
+    app_secret: p.app_secret ?? '',
     is_active: p.is_active,
   }
 }
@@ -118,6 +124,8 @@ function editToInput(form: EditState): PublishAccountInput | { error: string } {
     voice_samples: form.voice_samples_text.split(/\n\s*---\s*\n/).map(s => s.trim()).filter(Boolean),
     style_rules: form.style_rules_text.split('\n').map(s => s.trim()).filter(Boolean),
     cover_style: buildCoverStyle(form),
+    app_id: form.app_id.trim(),
+    app_secret: form.app_secret.trim(),
     is_active: form.is_active,
   }
 }
@@ -366,6 +374,35 @@ function AccountForm({
           </select>
         </div>
       </div>
+
+      {form.platform === 'wechat' && (
+        <div className="space-y-1">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <Label className="text-xs">AppID（开发者ID）</Label>
+              <Input
+                value={form.app_id}
+                onChange={e => setForm({ ...form, app_id: e.target.value })}
+                placeholder="wx1234567890abcdef"
+                className="h-8 text-sm font-mono"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">AppSecret</Label>
+              <Input
+                type="password"
+                value={form.app_secret}
+                onChange={e => setForm({ ...form, app_secret: e.target.value })}
+                placeholder="开发者密码"
+                className="h-8 text-sm font-mono"
+              />
+            </div>
+          </div>
+          <p className="text-[11px] text-zinc-400">
+            用于「存入公众号草稿箱」。需在公众号后台开启开发者模式，并把运行后端的服务器出口 IP 加入 IP 白名单。
+          </p>
+        </div>
+      )}
 
       <div className="space-y-1">
         <Label className="text-xs">定位（positioning）</Label>
