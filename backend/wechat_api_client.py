@@ -72,3 +72,117 @@ def prepare_image_bytes(data: bytes, mime: str) -> tuple[bytes, str, str]:
         else:
             w, h = img.size
             img = img.resize((max(w // 2, 1), max(h // 2, 1)))
+
+
+# ── 官方 API：token / 上传 / 草稿 ─────────────────────────────────────────────
+
+class WechatApiError(RuntimeError):
+    """微信接口 errcode != 0。message 已转成面向用户的中文说明。"""
+
+    def __init__(self, errcode: int, errmsg: str):
+        self.errcode = errcode
+        self.errmsg = errmsg
+        super().__init__(self._friendly())
+
+    def _friendly(self) -> str:
+        if self.errcode == 40164:
+            return (
+                f"服务器 IP 不在公众号 IP 白名单（{self.errmsg}）。"
+                "请到公众号后台「设置与开发 → 安全中心 → IP 白名单」添加后重试。"
+            )
+        if self.errcode in (40013, 40125, 41004):
+            return f"AppID 或 AppSecret 不正确（errcode={self.errcode}: {self.errmsg}）"
+        return f"微信接口错误 errcode={self.errcode}: {self.errmsg}"
+
+
+# app_id -> (token, 失效时刻)。微信 token 有效期 7200s，提前 5 分钟视为过期。
+_token_cache: dict[str, tuple[str, float]] = {}
+
+
+def _client() -> httpx.AsyncClient:
+    """测试通过 monkeypatch 本函数注入 MockTransport。"""
+    return httpx.AsyncClient(timeout=30)
+
+
+async def get_access_token(app_id: str, app_secret: str, force: bool = False) -> str:
+    now = time.time()
+    if not force:
+        cached = _token_cache.get(app_id)
+        if cached and cached[1] > now:
+            return cached[0]
+    async with _client() as client:
+        resp = await client.get(f"{WX_API_BASE}/cgi-bin/token", params={
+            "grant_type": "client_credential", "appid": app_id, "secret": app_secret,
+        })
+        resp.raise_for_status()
+        data = resp.json()
+    if "access_token" not in data:
+        raise WechatApiError(data.get("errcode", -1), data.get("errmsg", str(data)))
+    _token_cache[app_id] = (data["access_token"], now + int(data.get("expires_in", 7200)) - 300)
+    return data["access_token"]
+
+
+def _check(data: dict[str, Any]) -> None:
+    if data.get("errcode", 0) != 0:
+        raise WechatApiError(data["errcode"], data.get("errmsg", ""))
+
+
+async def _with_token_retry(
+    app_id: str, app_secret: str,
+    do: Callable[[str], Awaitable[dict[str, Any]]],
+) -> dict[str, Any]:
+    """token 失效（40001/42001）时强刷重试一次，其余错误直接抛。"""
+    token = await get_access_token(app_id, app_secret)
+    data = await do(token)
+    if data.get("errcode") in (40001, 42001):
+        token = await get_access_token(app_id, app_secret, force=True)
+        data = await do(token)
+    _check(data)
+    return data
+
+
+async def upload_content_image(app_id: str, app_secret: str,
+                               data: bytes, filename: str, mime: str) -> str:
+    """正文图片 → 微信图床 URL（mmbiz.qpic.cn）。外域图片微信会剥离，必须走这里。"""
+    async def do(token: str) -> dict[str, Any]:
+        async with _client() as client:
+            resp = await client.post(
+                f"{WX_API_BASE}/cgi-bin/media/uploadimg",
+                params={"access_token": token},
+                files={"media": (filename, data, mime)},
+            )
+            resp.raise_for_status()
+            return resp.json()
+    return (await _with_token_retry(app_id, app_secret, do))["url"]
+
+
+async def add_thumb_material(app_id: str, app_secret: str,
+                             data: bytes, filename: str, mime: str) -> str:
+    """封面图存为永久素材，返回 thumb_media_id。"""
+    async def do(token: str) -> dict[str, Any]:
+        async with _client() as client:
+            resp = await client.post(
+                f"{WX_API_BASE}/cgi-bin/material/add_material",
+                params={"access_token": token, "type": "image"},
+                files={"media": (filename, data, mime)},
+            )
+            resp.raise_for_status()
+            return resp.json()
+    return (await _with_token_retry(app_id, app_secret, do))["media_id"]
+
+
+async def add_draft(app_id: str, app_secret: str, article: dict[str, Any]) -> str:
+    """新增图文到公众号草稿箱，返回草稿 media_id。中文须按 UTF-8 原样发送。"""
+    payload = json.dumps({"articles": [article]}, ensure_ascii=False).encode("utf-8")
+
+    async def do(token: str) -> dict[str, Any]:
+        async with _client() as client:
+            resp = await client.post(
+                f"{WX_API_BASE}/cgi-bin/draft/add",
+                params={"access_token": token},
+                content=payload,
+                headers={"Content-Type": "application/json; charset=utf-8"},
+            )
+            resp.raise_for_status()
+            return resp.json()
+    return (await _with_token_retry(app_id, app_secret, do))["media_id"]
