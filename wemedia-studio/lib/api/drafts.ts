@@ -181,3 +181,20 @@ export async function chatWithDraft(
     }),
   })
 }
+
+export interface WechatPublishRequest {
+  account_id: string
+  title: string
+  digest: string
+  html: string
+  cover_image_id: number
+}
+
+export async function publishDraftToWechat(
+  draftId: number, body: WechatPublishRequest,
+): Promise<{ media_id: string }> {
+  return apiFetch(`/write/drafts/${draftId}/publish/wechat`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+}

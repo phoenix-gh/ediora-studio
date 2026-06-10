@@ -25,6 +25,8 @@ export interface PublishAccount {
   cover_style: CoverStyle
   voice_samples: string[]
   style_rules: string[]
+  app_id: string
+  app_secret: string
   is_active: boolean
   created_at: string
 }
