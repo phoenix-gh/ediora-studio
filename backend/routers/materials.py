@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from database import get_db
 from models import RefMaterial, RefCollectRule
 from config import get_config
-from ref_collector import collect_rule, collect_all, clean_batch
+from ref_collector import collect_rule, collect_all, classify_batch
 
 router = APIRouter(prefix="/materials", tags=["materials"])
 
@@ -37,6 +37,7 @@ class MaterialOut(BaseModel):
     scene_tags: list[str] = []
     tags: list[str] = []
     writing_plan_id: Optional[int] = None
+    parent_source_id: Optional[str] = None
     status: str = "active"
     published_at: Optional[datetime] = None
     created_at: datetime
@@ -226,10 +227,10 @@ async def collect_one_rule(rid: int, db: AsyncSession = Depends(get_db)):
     if not rule:
         raise HTTPException(404, "规则不存在")
     try:
-        n = await collect_rule(db, rule)
+        created = await collect_rule(db, rule)
     except Exception as e:
         raise HTTPException(502, str(e))
-    return {"ok": True, "new_raw": n}
+    return {"ok": True, "new": len(created)}
 
 
 @router.post("/collect-all")
@@ -241,12 +242,12 @@ class CleanBatchBody(BaseModel):
     size: Optional[int] = None
 
 
-@router.post("/clean-batch")
-async def clean_batch_endpoint(body: CleanBatchBody, db: AsyncSession = Depends(get_db)):
+@router.post("/classify-batch")
+async def classify_batch_endpoint(body: CleanBatchBody, db: AsyncSession = Depends(get_db)):
     cfg = await get_config()
     size = body.size or int(cfg.get("clean_batch_size", 20))
     try:
-        result = await clean_batch(db, size)
+        result = await classify_batch(db, size)
     except Exception as e:
-        raise HTTPException(502, f"LLM 精筛失败：{str(e)[:200]}")
+        raise HTTPException(502, f"LLM 分类失败：{str(e)[:200]}")
     return {"ok": True, **result}

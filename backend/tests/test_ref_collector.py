@@ -163,3 +163,39 @@ def test_collect_skips_already_seen(db_session):
     created2 = _collect(db_session, rule)   # 二次跑同一条
     assert created2 == []
     assert len(_materials(db_session)) == 1
+
+
+def test_classify_batch_fills_category_for_high_score(db_session):
+    from unittest.mock import patch
+    import json as _json
+    rule = _rule(db_session)
+    _seed_xpost(db_session, "t1", likes=90000)   # 高分，进分类队列
+    _collect(db_session, rule)
+    mid = _materials(db_session)[0].id
+
+    async def fake_call(prompt, max_tokens=2048):
+        return _json.dumps([{"source_id": str(mid), "category": "沙雕搞笑", "scene_tags": ["resonance"]}])
+
+    from ref_collector import classify_batch
+    async def _go():
+        async with db_session() as db:
+            with patch("llm._call", new=fake_call):
+                return await classify_batch(db, 10)
+    r = asyncio.new_event_loop().run_until_complete(_go())
+    assert r["processed"] == 1 and r["classified"] == 1 and r["remaining"] == 0
+    m = _materials(db_session)[0]
+    assert m.category == "沙雕搞笑"
+    assert m.scene_tags == ["resonance"]
+    assert m.status == "active"
+
+
+def test_classify_batch_skips_low_score(db_session):
+    rule = _rule(db_session)
+    _seed_xpost(db_session, "t1", likes=2)   # 低分（< ref_classify_min_score 60）
+    _collect(db_session, rule)
+    from ref_collector import classify_batch
+    async def _go():
+        async with db_session() as db:
+            return await classify_batch(db, 10)
+    r = asyncio.new_event_loop().run_until_complete(_go())
+    assert r == {"processed": 0, "classified": 0, "remaining": 0}
