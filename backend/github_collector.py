@@ -148,7 +148,10 @@ async def fetch_repo_meta(owner: str, repo: str, token: str = "") -> dict:
 
 
 async def collect_repo_issues(repo: GithubRepo, db: AsyncSession) -> int:
-    """Fetch open issues for a tracked repo from GitHub API."""
+    """Fetch open issues for a tracked repo from GitHub API.
+
+    ⚠️ 暂时停用（2026-06，无消费场景）：所有调用点已移除，
+    meta 刷新 / last_collected_at 已挪到 collect_repo_releases。"""
     token = await _github_token()
     headers = _api_headers(token)
 
@@ -229,7 +232,10 @@ async def collect_repo_issues(repo: GithubRepo, db: AsyncSession) -> int:
 
 
 async def collect_repo_releases(repo: GithubRepo, db: AsyncSession) -> int:
-    """Fetch the latest 20 releases for a tracked repo."""
+    """Fetch the latest 20 releases for a tracked repo.
+
+    issues 抓取停用后这里是唯一的定期采集路径，负责刷新仓库 meta
+    （stars/描述/语言）并更新 last_collected_at。"""
     token = await _github_token()
     headers = _api_headers(token)
 
@@ -275,12 +281,25 @@ async def collect_repo_releases(repo: GithubRepo, db: AsyncSession) -> int:
         ))
         new_count += 1
 
+    # Refresh repo metadata (stars, description)
+    try:
+        meta = await fetch_repo_meta(repo.owner, repo.repo, token)
+        repo.stars = meta.get("stargazers_count", repo.stars)
+        repo.description = (meta.get("description") or repo.description)[:500]
+        repo.language = meta.get("language") or repo.language
+    except Exception:
+        pass
+
+    repo.last_collected_at = datetime.now(timezone.utc)
     await db.commit()
     return new_count
 
 
 async def collect_all_repos(db: AsyncSession) -> list[dict]:
-    """Collect issues for all non-muted repos that are due for collection."""
+    """Collect releases for all non-muted repos that are due for collection.
+
+    issues 抓取暂时停用（用不到，且匿名配额吃紧）；恢复时把
+    collect_repo_issues 加回循环即可。"""
     repos = (
         await db.execute(select(GithubRepo).where(GithubRepo.muted == False))
     ).scalars().all()
@@ -297,10 +316,9 @@ async def collect_all_repos(db: AsyncSession) -> list[dict]:
             if elapsed_min < repo.collect_interval_minutes:
                 continue
         try:
-            n = await collect_repo_issues(repo, db)
             r = await collect_repo_releases(repo, db)
-            results.append({"repo_id": repo.id, "new_issues": n, "new_releases": r, "error": None})
+            results.append({"repo_id": repo.id, "new_releases": r, "error": None})
         except Exception as e:
-            results.append({"repo_id": repo.id, "new_issues": 0, "new_releases": 0, "error": str(e)})
+            results.append({"repo_id": repo.id, "new_releases": 0, "error": str(e)})
 
     return results

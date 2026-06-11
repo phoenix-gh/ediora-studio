@@ -103,7 +103,6 @@ async def scheduled_github():
                 except Exception as te:
                     trending_error = str(te)
             repo_results = await collect_all_repos(db)
-        issue_new = sum(r["new_issues"] for r in repo_results)
         release_new = sum(r.get("new_releases", 0) for r in repo_results)
         if release_new > 0:
             try:
@@ -119,7 +118,7 @@ async def scheduled_github():
             for r in errors:
                 detail_parts.append("{0}: {1}".format(r["repo_id"], r["error"]))
         detail = "; ".join(detail_parts)
-        msg = "趋势 +{0}  Issues +{1}  Releases +{2}  草稿 +{3}".format(trending_new, issue_new, release_new, draft_new)
+        msg = "趋势 +{0}  Releases +{1}  草稿 +{2}".format(trending_new, release_new, draft_new)
         if trending_error or errors:
             if trending_error:
                 msg += "  (趋势抓取失败)"

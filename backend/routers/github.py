@@ -59,14 +59,13 @@ async def add_repo(body: GithubRepoCreate, background_tasks: BackgroundTasks, db
     await db.commit()
     await db.refresh(repo)
 
-    # Immediately collect issues + releases for the new repo in background
+    # Immediately collect releases for the new repo in background
     async def _initial_collect(rid: str):
         from database import SessionLocal
         async with SessionLocal() as bg_db:
             r = await bg_db.get(GithubRepo, rid)
             if r:
-                from github_collector import collect_repo_issues, collect_repo_releases
-                await collect_repo_issues(r, bg_db)
+                from github_collector import collect_repo_releases
                 await collect_repo_releases(r, bg_db)
     background_tasks.add_task(_initial_collect, rid)
 
@@ -429,7 +428,7 @@ async def list_trending(
 
 @router.post("/collect")
 async def collect_all(background_tasks: BackgroundTasks, db: AsyncSession = Depends(get_db)):
-    """Trigger issue collection for all due repos + trending refresh (runs in background)."""
+    """Trigger release collection for all due repos + trending refresh (runs in background)."""
     async def _run():
         from database import SessionLocal
         async with SessionLocal() as bg_db:
@@ -454,7 +453,7 @@ async def collect_one_releases(owner: str, repo_name: str, db: AsyncSession = De
 
 @router.post("/collect/{owner}/{repo_name}")
 async def collect_one(owner: str, repo_name: str, background_tasks: BackgroundTasks, db: AsyncSession = Depends(get_db)):
-    """Trigger issue + release collection for a specific repo (runs in background)."""
+    """Trigger release collection for a specific repo (runs in background)."""
     rid = f"{owner}/{repo_name}"
     repo = await db.get(GithubRepo, rid)
     if not repo:
@@ -464,8 +463,7 @@ async def collect_one(owner: str, repo_name: str, background_tasks: BackgroundTa
         async with SessionLocal() as bg_db:
             bg_repo = await bg_db.get(GithubRepo, rid)
             if bg_repo:
-                from github_collector import collect_repo_issues, collect_repo_releases
-                await collect_repo_issues(bg_repo, bg_db)
+                from github_collector import collect_repo_releases
                 await collect_repo_releases(bg_repo, bg_db)
     background_tasks.add_task(_run)
-    return {"repo_id": rid, "new_issues": 0, "new_releases": 0, "message": "采集任务已启动"}
+    return {"repo_id": rid, "new_releases": 0, "message": "采集任务已启动"}
