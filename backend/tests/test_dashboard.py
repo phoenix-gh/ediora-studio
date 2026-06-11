@@ -151,3 +151,109 @@ def test_manual_source_last_run_from_table(client):
     assert src["last_status"] == "ok"
     assert src["last_run_at"] is not None
     assert src["today_new"] in (0, 1)  # 取决于跑测试的时刻是否同一天，不强断言
+
+
+# ── 提醒规则 ────────────────────────────────────────────────────────────────
+
+def test_wechat_cred_expired_alert(client):
+    from models import WechatCredential, WechatAccount
+
+    async def seed(db):
+        db.add(WechatAccount(biz="b1", name="测试号"))
+        db.add(WechatCredential(id=1, token="t", cookie="c",
+                                expires_at=_now() - timedelta(hours=1)))
+    _run_db(seed)
+
+    body = _get(client)
+    hits = [a for a in body["alerts"] if "已过期" in a["text"]]
+    assert len(hits) == 1
+    assert hits[0]["severity"] == "warn"
+    assert hits[0]["href"] == "/wechat"
+
+
+def test_wechat_not_refreshed_today_alert(client):
+    """凭证有效但今天没采到公众号文章 ⇒ info 提醒。"""
+    from models import WechatCredential, WechatAccount, WechatArticle
+    start = _today_start()
+
+    async def seed(db):
+        db.add(WechatAccount(biz="b1", name="测试号"))
+        db.add(WechatCredential(id=1, token="t", cookie="c",
+                                expires_at=_now() + timedelta(days=1)))
+        db.add(WechatArticle(id="w1", biz="b1", published_at=start,
+                             collected_at=start - timedelta(hours=2)))  # 昨天采的
+    _run_db(seed)
+
+    body = _get(client)
+    assert any("尚未刷新" in a["text"] for a in body["alerts"])
+
+
+def test_wechat_refreshed_today_no_alert(client):
+    from models import WechatCredential, WechatAccount, WechatArticle
+
+    async def seed(db):
+        db.add(WechatAccount(biz="b1", name="测试号"))
+        db.add(WechatCredential(id=1, token="t", cookie="c",
+                                expires_at=_now() + timedelta(days=1)))
+        db.add(WechatArticle(id="w1", biz="b1", published_at=_now(), collected_at=_now()))
+    _run_db(seed)
+
+    body = _get(client)
+    assert not any("尚未刷新" in a["text"] or "已过期" in a["text"] for a in body["alerts"])
+
+
+def test_wechat_no_accounts_no_nag(client):
+    """没订阅任何公众号 ⇒ 即使没凭证也不提醒（全新安装不烦人）。"""
+    body = _get(client)
+    assert not any("公众" in a["text"] for a in body["alerts"])
+
+
+def test_stale_scheduler_alert_and_floor(client):
+    """reddit 超过 2× 间隔 ⇒ 告警；github 间隔 1 分钟但有 30 分钟保底 ⇒ 不告警。"""
+    from models import CollectLog
+
+    async def seed(db):
+        a = CollectLog(job="reddit", status="ok", message="x", detail="")
+        a.created_at = _now() - timedelta(hours=10)   # 间隔 60min，阈值 2h
+        db.add(a)
+        b = CollectLog(job="github", status="ok", message="x", detail="")
+        b.created_at = _now() - timedelta(minutes=20)  # 阈值 max(2min, 30min)=30min
+        db.add(b)
+    _run_db(seed)
+
+    body = _get(client)
+    stale = [a for a in body["alerts"] if "未运行" in a["text"]]
+    assert len(stale) == 1
+    assert "Reddit" in stale[0]["text"]
+
+
+def test_publish_account_missing_creds_alert(client):
+    from models import PublishAccount
+
+    async def seed(db):
+        db.add(PublishAccount(id="a", name="缺密钥号", platform="wechat",
+                              app_id="", app_secret=""))
+        db.add(PublishAccount(id="b", name="完整号", platform="wechat",
+                              app_id="wx1", app_secret="s1"))
+    _run_db(seed)
+
+    body = _get(client)
+    hits = [a for a in body["alerts"] if "发布凭证" in a["text"]]
+    assert len(hits) == 1
+    assert "缺密钥号" in hits[0]["text"]
+    assert "完整号" not in hits[0]["text"]
+
+
+def test_alerts_sorted_by_severity(client):
+    """error 排最前。"""
+    from models import CollectLog, PublishAccount
+
+    async def seed(db):
+        db.add(PublishAccount(id="a", name="缺密钥号", platform="wechat"))
+        db.add(CollectLog(job="reddit", status="error", message="boom", detail=""))
+    _run_db(seed)
+
+    body = _get(client)
+    sevs = [a["severity"] for a in body["alerts"]]
+    assert sevs == sorted(sevs, key={"error": 0, "warn": 1, "info": 2}.get)
+    assert sevs[0] == "error"

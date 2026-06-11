@@ -201,6 +201,71 @@ async def _build_sources(
     return out
 
 
+_SEVERITY_ORDER = {"error": 0, "warn": 1, "info": 2}
+
+
+async def _build_alerts(
+    db: AsyncSession, cfg: dict, latest: dict[str, CollectLog],
+    sources: list[SourceStatus], now: datetime, today_start: datetime,
+) -> list[Alert]:
+    alerts: list[Alert] = []
+    names = {s[0]: s[1] for s in SOURCES}
+
+    # 1+2. 公众平台凭证 / 今日未刷新 —— 仅当订阅了公众号才提醒
+    has_accounts = (await db.execute(
+        select(func.count()).select_from(WechatAccount).where(WechatAccount.muted.is_(False))
+    )).scalar_one() > 0
+    if has_accounts:
+        cred = await db.get(WechatCredential, 1)
+        if not cred or not cred.token or not cred.cookie:
+            alerts.append(Alert(severity="info", text="未登录公众平台，公众号内容不会自动采集",
+                                action_label="去扫码", href="/wechat"))
+        elif cred.expires_at and _as_utc(cred.expires_at) <= now:
+            alerts.append(Alert(severity="warn",
+                                text="公众平台登录已过期，公众号内容今天没有刷新——去重新扫码",
+                                action_label="去扫码", href="/wechat"))
+        else:
+            last_art = (await db.execute(
+                select(func.max(WechatArticle.collected_at))
+            )).scalar_one_or_none()
+            if last_art is None or _as_utc(last_art) < today_start:
+                alerts.append(Alert(severity="info", text="今日公众号内容尚未刷新",
+                                    action_label="去看看", href="/wechat"))
+
+    # 3. 任一 job 最新日志是 error（含 x_reply 等非内容源 job）
+    for job, log in latest.items():
+        if log.status == "error":
+            alerts.append(Alert(severity="error",
+                                text=f"「{names.get(job, job)}」采集最近一次运行失败：{log.message}",
+                                action_label="查看日志", href="/settings"))
+
+    # 4. 调度停摆：超过 max(2×间隔, 30 分钟) 没动静（手动源/从未运行的不报）
+    for src, spec in zip(sources, SOURCES):
+        interval = spec[4]
+        if interval is None or src.last_run_at is None:
+            continue
+        threshold = max(2 * _interval_seconds(cfg, interval), 1800)
+        overdue = (now - _as_utc(src.last_run_at)).total_seconds()
+        if overdue > threshold:
+            alerts.append(Alert(severity="warn",
+                                text=f"「{src.name}」已 {int(overdue // 60)} 分钟未运行，调度可能停了",
+                                action_label="查看日志", href="/settings"))
+
+    # 5. 公众号发布凭证缺失
+    rows = (await db.execute(
+        select(PublishAccount).where(PublishAccount.is_active.is_(True),
+                                     PublishAccount.platform == "wechat")
+    )).scalars().all()
+    missing = [a.name for a in rows if not a.app_id or not a.app_secret]
+    if missing:
+        alerts.append(Alert(severity="info",
+                            text="公众号发布凭证未配置，无法推送草稿箱：" + "、".join(missing),
+                            action_label="去配置", href="/settings"))
+
+    alerts.sort(key=lambda a: _SEVERITY_ORDER.get(a.severity, 9))
+    return alerts
+
+
 # ── Endpoint ───────────────────────────────────────────────────────────────────
 
 @router.get("/overview", response_model=Overview)
@@ -229,7 +294,12 @@ async def get_overview(db: AsyncSession = Depends(get_db)):
         sources = []
         errors.append(f"sources: {e}")
 
-    alerts: list[Alert] = []      # Task 4
+    try:
+        alerts = await _build_alerts(db, cfg, latest, sources, now, today_start)
+    except Exception as e:
+        alerts = []
+        errors.append(f"alerts: {e}")
+
     releases: list[ReleaseToday] = []   # Task 6
     today_output = TodayOutput(topics=0, drafts=0)  # Task 6
 
