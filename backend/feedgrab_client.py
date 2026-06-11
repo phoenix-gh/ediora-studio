@@ -41,6 +41,7 @@ class ParsedPost:
     cover_image: str = ""      # first attached image (tweets with photos)
     raw_markdown: str = ""
     possibly_sensitive: bool = False
+    is_reply: bool = False     # in_reply_to_status_id 非空 ⇒ 这条是对别人帖子的回复
 
 
 def _parse_created_at(raw) -> datetime:
@@ -146,6 +147,7 @@ def _tweet_dict_to_parsed_post(d: dict) -> Optional[ParsedPost]:
         cover_image=cover_image,
         raw_markdown=raw_markdown,
         possibly_sensitive=bool(d.get("possibly_sensitive", False)),
+        is_reply=bool(str(d.get("in_reply_to_status_id", "") or "").strip()),
     )
 
 

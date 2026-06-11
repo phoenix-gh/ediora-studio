@@ -57,6 +57,21 @@ def test_parses_basic_tweet():
     assert "Mars by 2030" in p.raw_markdown
 
 
+def test_is_reply_flag_from_in_reply_to_status_id():
+    d = _tweet_dict("222")
+    d["in_reply_to_status_id"] = "111"
+    p = _tweet_dict_to_parsed_post(d)
+    assert p.is_reply is True
+
+
+def test_is_reply_false_for_original_posts():
+    # 字段缺失（搜索路径）与空串（extract_tweet_data 非回复）都算原创
+    assert _tweet_dict_to_parsed_post(_tweet_dict("333")).is_reply is False
+    d = _tweet_dict("444")
+    d["in_reply_to_status_id"] = ""
+    assert _tweet_dict_to_parsed_post(d).is_reply is False
+
+
 def test_missing_id_returns_none():
     assert _tweet_dict_to_parsed_post({"text": "hi"}) is None
 

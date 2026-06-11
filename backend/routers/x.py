@@ -212,6 +212,7 @@ class PostOut(BaseModel):
     views: int
     author_avatar: str = ""
     cover_image: str = ""
+    is_reply: bool = False
     model_config = {"from_attributes": True}
 
 
@@ -253,6 +254,7 @@ def _upsert_post_stmt(db: AsyncSession, sub_id: int, p):
         likes=p.likes, views=p.views,
         author_avatar=p.author_avatar, cover_image=p.cover_image,
         possibly_sensitive=getattr(p, "possibly_sensitive", False),
+        is_reply=getattr(p, "is_reply", False),
         raw_markdown=p.raw_markdown,
     )
     stmt = stmt.on_conflict_do_update(

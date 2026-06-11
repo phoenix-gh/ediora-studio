@@ -52,6 +52,7 @@ export interface XPost {
   views: number
   author_avatar: string
   cover_image: string
+  is_reply: boolean
 }
 
 export interface XSearchPost {

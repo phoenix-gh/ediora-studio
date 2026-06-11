@@ -92,6 +92,7 @@ def _reply_to_parsed(r: dict, text: str) -> ParsedPost:
         likes=int(r.get("likes") or 0), views=views,
         cover_image=str(images[0]) if images else "",
         possibly_sensitive=bool(r.get("possibly_sensitive")),
+        is_reply=True,
     )
 
 

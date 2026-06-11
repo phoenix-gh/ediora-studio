@@ -50,11 +50,12 @@ def test_notify_scout_pushes_only_opted_in_new_posts(scheduler_env, monkeypatch)
     now = datetime.now(timezone.utc)
     enabled_at = now - timedelta(hours=1)
 
-    def _post(tid, sub_id, collected, published=None):
+    def _post(tid, sub_id, collected, published=None, is_reply=False):
         return XPost(
             tweet_id=tid, subscription_id=sub_id, username="u", display_name="U",
             content=f"内容 {tid}", url=f"https://x.com/u/status/{tid}",
             published_at=published or now, collected_at=collected,
+            is_reply=is_reply,
         )
 
     async def run():
@@ -84,6 +85,8 @@ def test_notify_scout_pushes_only_opted_in_new_posts(scheduler_env, monkeypatch)
                 # ✗ 发布超过 48h 窗口
                 _post("stale_on", sub_on.id, collected=now,
                       published=now - timedelta(hours=72)),
+                # ✗ 目标账号发的回复（只推原创帖）
+                _post("reply_on", sub_on.id, collected=now, is_reply=True),
             ])
             await db.commit()
 
@@ -91,7 +94,7 @@ def test_notify_scout_pushes_only_opted_in_new_posts(scheduler_env, monkeypatch)
 
         async with SessionLocal() as db:
             return {tid: await db.get(XPost, tid)
-                    for tid in ("new_on", "old_on", "any_off", "stale_on")}
+                    for tid in ("new_on", "old_on", "any_off", "stale_on", "reply_on")}
 
     posts = asyncio.new_event_loop().run_until_complete(run())
 
@@ -107,7 +110,7 @@ def test_notify_scout_pushes_only_opted_in_new_posts(scheduler_env, monkeypatch)
     assert posts["new_on"].x_reply_score == 8.0
     assert posts["new_on"].x_reply_draft == "建议回复内容"
     assert posts["new_on"].x_reply_notified_at is not None
-    for tid in ("old_on", "any_off", "stale_on"):
+    for tid in ("old_on", "any_off", "stale_on", "reply_on"):
         assert posts[tid].x_reply_score is None, tid
         assert posts[tid].x_reply_notified_at is None, tid
 

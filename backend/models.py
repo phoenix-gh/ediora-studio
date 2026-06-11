@@ -265,6 +265,7 @@ class XPost(Base):
     author_avatar: Mapped[str] = mapped_column(String, default="")
     cover_image: Mapped[str] = mapped_column(String, default="")
     possibly_sensitive: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_reply: Mapped[bool] = mapped_column(Boolean, default=False)
     raw_markdown: Mapped[str] = mapped_column(Text, default="")
     x_reply_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     x_reply_draft: Mapped[str | None] = mapped_column(Text, nullable=True)

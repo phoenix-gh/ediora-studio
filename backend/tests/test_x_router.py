@@ -120,7 +120,7 @@ from datetime import datetime, timezone, timedelta
 from unittest.mock import patch, AsyncMock
 
 
-def _fake_post(tid="111", views=100, published_at=None):
+def _fake_post(tid="111", views=100, published_at=None, is_reply=False):
     from feedgrab_client import ParsedPost
     # Default to "now" so the post falls inside the 24h cutoff window
     # used by _collect_one's first-time collect path.
@@ -135,7 +135,20 @@ def _fake_post(tid="111", views=100, published_at=None):
         published_at=published_at,
         replies=1, reposts=2, likes=5, views=views,
         raw_markdown="raw",
+        is_reply=is_reply,
     )
+
+
+def test_collect_stores_is_reply_flag(client):
+    sub = client.post(BASE, json={"url": "https://x.com/foo"}).json()
+    with patch("routers.x.grab_timeline",
+               new=AsyncMock(return_value=[_fake_post("orig"),
+                                           _fake_post("rep", is_reply=True)])):
+        r = client.post(f"/api/x/subscriptions/{sub['id']}/collect-sync")
+    assert r.status_code == 200, r.text
+    posts = {p["tweet_id"]: p for p in client.get("/api/x/posts").json()}
+    assert posts["orig"]["is_reply"] is False
+    assert posts["rep"]["is_reply"] is True
 
 
 def test_auth_status_endpoint(client):

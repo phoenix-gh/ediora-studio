@@ -415,6 +415,7 @@ async def scheduled_x_reply_scout():
                 .join(XSubscription, XPost.subscription_id == XSubscription.id)
                 .where(XSubscription.enabled == True)
                 .where(XSubscription.notify_new_posts == True)
+                .where(XPost.is_reply == False)  # 只推原创帖，目标账号发的回复不通知
                 .where(XPost.x_reply_score.is_(None))
                 .where(XPost.published_at >= cutoff)
                 .where(XPost.collected_at >= func.coalesce(XSubscription.notify_enabled_at, now))
