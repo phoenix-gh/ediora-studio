@@ -11,6 +11,7 @@ import {
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
 import { DraftImage, publishDraftToWechat } from '@/lib/api/drafts'
+import { API_BASE } from '@/lib/api/client'
 import { PublishAccount, listPublishAccounts } from '@/lib/api/publish-accounts'
 
 type WenyanModule = typeof import('@wenyan-md/core')
@@ -25,6 +26,21 @@ interface ThemeOption {
   description: string
 }
 
+interface PreviewImage {
+  src: string
+  copySrc: string
+  alt: string
+}
+
+function isCoverImage(img: DraftImage): boolean {
+  const name = (img.original_name || img.filename || '').toLowerCase()
+  return name.startsWith('cover')
+}
+
+function pickDefaultCoverImage(images: DraftImage[]): DraftImage | null {
+  return images.filter(isCoverImage).sort((a, b) => b.id - a.id)[0] ?? images[0] ?? null
+}
+
 /** markdown → 纯文本摘录，用作摘要默认值 */
 function mdToPlainExcerpt(md: string, limit: number): string {
   return md
@@ -36,6 +52,68 @@ function mdToPlainExcerpt(md: string, limit: number): string {
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, limit)
+}
+
+function resolveCopyImageUrl(src: string): string {
+  if (!src || src.startsWith('data:') || /^https?:\/\//i.test(src)) return src
+  if (src.startsWith('/api/')) return `${API_BASE.replace(/\/api\/?$/, '')}${src}`
+  if (src.startsWith('/')) {
+    return typeof window === 'undefined' ? src : new URL(src, window.location.origin).toString()
+  }
+  return typeof window === 'undefined' ? src : new URL(src, window.location.href).toString()
+}
+
+function imageCopyApiUrl(src: string): string {
+  return `${API_BASE}/write/image-copy-source?src=${encodeURIComponent(src)}`
+}
+
+function extractPreviewImages(html: string): PreviewImage[] {
+  if (!html || typeof window === 'undefined') return []
+  const doc = new DOMParser().parseFromString(html, 'text/html')
+  const seen = new Set<string>()
+  return Array.from(doc.querySelectorAll('img'))
+    .map((img, index) => {
+      const src = img.getAttribute('src')?.trim() ?? ''
+      return {
+        src,
+        copySrc: resolveCopyImageUrl(src),
+        alt: img.getAttribute('alt')?.trim() || `图片 ${index + 1}`,
+      }
+    })
+    .filter(img => {
+      if (!img.src || seen.has(img.copySrc)) return false
+      seen.add(img.copySrc)
+      return true
+    })
+}
+
+async function imageBlobToPng(blob: Blob): Promise<Blob> {
+  if (blob.type === 'image/png') return blob
+  const objectUrl = URL.createObjectURL(blob)
+  try {
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const el = new Image()
+      el.onload = () => resolve(el)
+      el.onerror = () => reject(new Error('image decode failed'))
+      el.src = objectUrl
+    })
+    const canvas = document.createElement('canvas')
+    canvas.width = img.naturalWidth || img.width
+    canvas.height = img.naturalHeight || img.height
+    const ctx = canvas.getContext('2d')
+    if (!ctx || canvas.width === 0 || canvas.height === 0) {
+      throw new Error('canvas unavailable')
+    }
+    ctx.drawImage(img, 0, 0)
+    return await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob(out => {
+        if (out) resolve(out)
+        else reject(new Error('png encode failed'))
+      }, 'image/png')
+    })
+  } finally {
+    URL.revokeObjectURL(objectUrl)
+  }
 }
 
 export function WechatPublishDialog({
@@ -57,6 +135,7 @@ export function WechatPublishDialog({
   const [digest, setDigest] = useState('')
   const [html, setHtml] = useState('')   // 空串 = 渲染中
   const [publishing, setPublishing] = useState(false)
+  const [copyingImageSrc, setCopyingImageSrc] = useState('')
   const wenyanRef = useRef<WenyanInstance | null>(null)
 
   // 打开瞬间重置表单默认值（render 期间调整状态，避免 effect 内同步 setState）
@@ -66,7 +145,7 @@ export function WechatPublishDialog({
     if (open) {
       setPubTitle(title)
       setDigest(mdToPlainExcerpt(content, 120))
-      setCoverId(images[0]?.id ?? null)
+      setCoverId(pickDefaultCoverImage(images)?.id ?? null)
       setHtml('')
       const saved = typeof window !== 'undefined' ? localStorage.getItem(THEME_STORAGE_KEY) : null
       if (saved) setThemeId(saved)
@@ -151,9 +230,30 @@ export function WechatPublishDialog({
     }
   }
 
+  async function handleCopyImage(img: PreviewImage) {
+    if (!('ClipboardItem' in window) || !navigator.clipboard?.write) {
+      toast.error('当前浏览器不支持复制图片到剪贴板')
+      return
+    }
+    setCopyingImageSrc(img.copySrc)
+    try {
+      const res = await fetch(img.src.startsWith('data:') ? img.src : imageCopyApiUrl(img.src))
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const png = await imageBlobToPng(await res.blob())
+      await navigator.clipboard.write([
+        new ClipboardItem({ 'image/png': png }),
+      ])
+      toast.success('已复制图片，可直接粘贴到编辑器')
+    } catch {
+      toast.error('复制图片失败，可能是图片跨域或浏览器权限限制')
+    } finally {
+      setCopyingImageSrc('')
+    }
+  }
+
   async function handlePublish() {
     if (!accountId) { toast.error('请选择发布账号'); return }
-    if (!coverId) { toast.error('请先在素材库上传封面图'); return }
+    if (!effectiveCoverId) { toast.error('请先在素材库上传封面图'); return }
     if (!pubTitle.trim()) { toast.error('标题不能为空'); return }
     if (!html) return
     setPublishing(true)
@@ -163,7 +263,7 @@ export function WechatPublishDialog({
         title: pubTitle.trim(),
         digest,
         html,
-        cover_image_id: coverId,
+        cover_image_id: effectiveCoverId,
       })
       toast.success('已存入公众号草稿箱，请到公众号后台确认发布')
       onClose()
@@ -178,6 +278,18 @@ export function WechatPublishDialog({
     () => `<!doctype html><html><head><meta charset="utf-8"><style>body{margin:0;padding:16px;background:#fff;}</style></head><body>${html}</body></html>`,
     [html],
   )
+  const previewImages = useMemo(() => extractPreviewImages(html), [html])
+  const coverChoices = useMemo(
+    () => [...images].sort((a, b) => {
+      const aCover = isCoverImage(a)
+      const bCover = isCoverImage(b)
+      if (aCover !== bCover) return aCover ? -1 : 1
+      return b.id - a.id
+    }),
+    [images],
+  )
+  const defaultCoverId = useMemo(() => pickDefaultCoverImage(images)?.id ?? null, [images])
+  const effectiveCoverId = coverId && images.some(img => img.id === coverId) ? coverId : defaultCoverId
 
   return (
     <Dialog open={open} onOpenChange={o => { if (!o) onClose() }}>
@@ -201,7 +313,7 @@ export function WechatPublishDialog({
                 srcDoc={srcDoc}
                 sandbox=""
                 title="公众号预览"
-                className="w-[390px] h-full bg-white border-x border-zinc-200 dark:border-zinc-700"
+                className="w-full h-full bg-white"
               />
             )}
           </div>
@@ -283,14 +395,14 @@ export function WechatPublishDialog({
                 </div>
               ) : (
                 <div className="grid grid-cols-3 gap-1.5">
-                  {images.map(img => (
+                  {coverChoices.map(img => (
                     <button
                       key={img.id}
                       onClick={() => setCoverId(img.id)}
                       title={img.original_name}
                       className={cn(
                         'aspect-square rounded-md overflow-hidden border-2 transition-colors',
-                        coverId === img.id ? 'border-indigo-400' : 'border-transparent hover:border-zinc-300',
+                        effectiveCoverId === img.id ? 'border-indigo-400' : 'border-transparent hover:border-zinc-300',
                       )}
                     >
                       {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -300,6 +412,40 @@ export function WechatPublishDialog({
                 </div>
               )}
             </div>
+
+            {previewImages.length > 0 && (
+              <div className="space-y-1">
+                <Label className="text-xs">预览图片</Label>
+                <div className="space-y-1.5">
+                  {previewImages.map((img, index) => {
+                    const copying = copyingImageSrc === img.copySrc
+                    return (
+                      <div key={img.copySrc} className="flex items-center gap-2 rounded-md border border-zinc-200 dark:border-zinc-700 p-1.5">
+                        <div className="h-10 w-10 flex-shrink-0 overflow-hidden rounded bg-zinc-100 dark:bg-zinc-800">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={img.copySrc} alt={img.alt} className="h-full w-full object-cover" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-xs text-zinc-700 dark:text-zinc-200">{img.alt}</div>
+                          <div className="text-[10px] text-zinc-400">第 {index + 1} 张</div>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleCopyImage(img)}
+                          disabled={copyingImageSrc !== ''}
+                          className="h-7 flex-shrink-0 gap-1 px-2 text-xs"
+                        >
+                          {copying ? <Loader2 className="w-3 h-3 animate-spin" /> : <Copy className="w-3 h-3" />}
+                          复制图片
+                        </Button>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
 
             <div className="space-y-2 pt-1">
               <Button
@@ -314,7 +460,7 @@ export function WechatPublishDialog({
               <Button
                 size="sm"
                 onClick={handlePublish}
-                disabled={publishing || !html || !accountId || !coverId}
+                disabled={publishing || !html || !accountId || !effectiveCoverId}
                 className="w-full gap-1.5"
               >
                 {publishing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}

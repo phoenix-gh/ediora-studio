@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useMemo, useCallback } from 'react'
+import { marked } from 'marked'
 import {
   Hash, RefreshCw, Trash2, Volume2, VolumeX, ExternalLink,
   Search, MessageCircle, Loader2, Settings, TrendingUp, Clock, ArrowUp,
@@ -25,6 +26,52 @@ import { fmtRelTime } from '@/lib/format'
 import { useInfiniteScroll } from '@/lib/use-infinite-scroll'
 
 const PAGE_SIZE = 30
+
+function asText(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function buildStructuredPostText(post: RedditPost): string {
+  const parts: string[] = []
+  const body = post.body?.trim()
+  const comments = Array.isArray(post.comments) ? post.comments : []
+
+  if (body) {
+    parts.push('## 正文')
+    parts.push('')
+    parts.push(body)
+  }
+
+  if (!post.is_self && post.linked_url) {
+    if (parts.length > 0) parts.push('')
+    parts.push(`[原始外链](${post.linked_url})`)
+  }
+
+  const renderedComments = comments
+    .map((comment, index) => {
+      const text = asText(comment.body)
+      if (!text) return ''
+      const author = asText(comment.author) || '[deleted]'
+      const score = typeof comment.score === 'number' ? comment.score : 0
+      return [`### #${index + 1} u/${author} · ${score} 分`, '', text].join('\n')
+    })
+    .filter(Boolean)
+
+  if (renderedComments.length > 0) {
+    if (parts.length > 0) parts.push('')
+    parts.push('---')
+    parts.push('')
+    parts.push(`## 评论（Top ${renderedComments.length}）`)
+    parts.push('')
+    parts.push(renderedComments.join('\n\n'))
+  }
+
+  return parts.join('\n').trim() || post.content
+}
+
+function renderStructuredPostHtml(post: RedditPost): string {
+  return marked(buildStructuredPostText(post)) as string
+}
 
 // ── Subscribe Dialog ───────────────────────────────────────────────────────────
 
@@ -230,12 +277,12 @@ export function RedditClient({
       subscription_id: selectedSubId ?? undefined,
     }).catch(() => allPosts)
     setAllPosts(posts)
-  }, [selectedSubId])
+  }, [allPosts, selectedSubId])
 
   const reloadSubs = useCallback(async () => {
     const s = await getRedditSubscriptions().catch(() => subs)
     setSubs(s)
-  }, [])
+  }, [subs])
 
   // Poll every 10s until last_collected_at changes (max 3 min), then reload posts.
   function _pollUntilDone(before: { id: number; ts: string | null }[]) {
@@ -304,7 +351,7 @@ export function RedditClient({
         url: readerPost.url,
         author: `u/${readerPost.author}`,
         published_at: readerPost.published_at,
-        content: readerPost.content,
+        content: renderStructuredPostHtml(readerPost),
       }
     : null
 
@@ -414,7 +461,7 @@ export function RedditClient({
                 <div className="shrink-0 flex items-center gap-1 px-2 pt-3">
                   <AddToTopicPopover
                     title={post.title}
-                    summary={post.content}
+                    summary={buildStructuredPostText(post)}
                     url={post.url}
                     platform="reddit"
                   />

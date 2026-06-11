@@ -46,6 +46,16 @@ class SettingsOut(BaseModel):
     ref_collect_interval_minutes: int
     ref_classify_interval_minutes: int
     clean_batch_size: int
+    wechat_tunnel_enabled: bool
+    wechat_tunnel_ssh_host: str
+    wechat_tunnel_ssh_port: int
+    wechat_tunnel_ssh_user: str
+    wechat_tunnel_ssh_key_path: str
+    wechat_tunnel_local_host: str
+    wechat_tunnel_local_port: int
+    wechat_tunnel_remote_host: str
+    wechat_tunnel_remote_port: int
+    wechat_tunnel_extra_args: str
     providers: list[ProviderInfo]
 
 
@@ -73,6 +83,16 @@ class SettingsUpdate(BaseModel):
     ref_collect_interval_minutes: Optional[int] = None
     ref_classify_interval_minutes: Optional[int] = None
     clean_batch_size: Optional[int] = None
+    wechat_tunnel_enabled: Optional[bool] = None
+    wechat_tunnel_ssh_host: Optional[str] = None
+    wechat_tunnel_ssh_port: Optional[int] = None
+    wechat_tunnel_ssh_user: Optional[str] = None
+    wechat_tunnel_ssh_key_path: Optional[str] = None
+    wechat_tunnel_local_host: Optional[str] = None
+    wechat_tunnel_local_port: Optional[int] = None
+    wechat_tunnel_remote_host: Optional[str] = None
+    wechat_tunnel_remote_port: Optional[int] = None
+    wechat_tunnel_extra_args: Optional[str] = None
 
 
 class FetchModelsRequest(BaseModel):
@@ -115,6 +135,16 @@ def _build_out(cfg: dict) -> SettingsOut:
         ref_collect_interval_minutes=max(1, int(cfg.get("ref_collect_interval_minutes", 15))),
         ref_classify_interval_minutes=max(1, int(cfg.get("ref_classify_interval_minutes", 60))),
         clean_batch_size=max(1, int(cfg.get("clean_batch_size", 20))),
+        wechat_tunnel_enabled=str(cfg.get("wechat_tunnel_enabled", "0")).lower() in ("1", "true", "yes", "on"),
+        wechat_tunnel_ssh_host=cfg.get("wechat_tunnel_ssh_host", ""),
+        wechat_tunnel_ssh_port=max(1, int(cfg.get("wechat_tunnel_ssh_port", 22))),
+        wechat_tunnel_ssh_user=cfg.get("wechat_tunnel_ssh_user", ""),
+        wechat_tunnel_ssh_key_path=cfg.get("wechat_tunnel_ssh_key_path", ""),
+        wechat_tunnel_local_host=cfg.get("wechat_tunnel_local_host", "127.0.0.1"),
+        wechat_tunnel_local_port=max(1, int(cfg.get("wechat_tunnel_local_port", 18443))),
+        wechat_tunnel_remote_host=cfg.get("wechat_tunnel_remote_host", "api.weixin.qq.com"),
+        wechat_tunnel_remote_port=max(1, int(cfg.get("wechat_tunnel_remote_port", 443))),
+        wechat_tunnel_extra_args=cfg.get("wechat_tunnel_extra_args", ""),
         providers=[
             ProviderInfo(key=k, label=v["label"], base_url=v["base_url"], default_model=v["default_model"])
             for k, v in PROVIDERS.items()
@@ -204,6 +234,26 @@ async def update_settings(body: SettingsUpdate, request: Request):
         updates["ref_classify_interval_minutes"] = str(max(1, body.ref_classify_interval_minutes))
     if body.clean_batch_size is not None:
         updates["clean_batch_size"] = str(max(1, body.clean_batch_size))
+    if body.wechat_tunnel_enabled is not None:
+        updates["wechat_tunnel_enabled"] = "1" if body.wechat_tunnel_enabled else "0"
+    if body.wechat_tunnel_ssh_host is not None:
+        updates["wechat_tunnel_ssh_host"] = body.wechat_tunnel_ssh_host.strip()
+    if body.wechat_tunnel_ssh_port is not None:
+        updates["wechat_tunnel_ssh_port"] = str(max(1, body.wechat_tunnel_ssh_port))
+    if body.wechat_tunnel_ssh_user is not None:
+        updates["wechat_tunnel_ssh_user"] = body.wechat_tunnel_ssh_user.strip()
+    if body.wechat_tunnel_ssh_key_path is not None:
+        updates["wechat_tunnel_ssh_key_path"] = body.wechat_tunnel_ssh_key_path.strip()
+    if body.wechat_tunnel_local_host is not None:
+        updates["wechat_tunnel_local_host"] = body.wechat_tunnel_local_host.strip() or "127.0.0.1"
+    if body.wechat_tunnel_local_port is not None:
+        updates["wechat_tunnel_local_port"] = str(max(1, body.wechat_tunnel_local_port))
+    if body.wechat_tunnel_remote_host is not None:
+        updates["wechat_tunnel_remote_host"] = body.wechat_tunnel_remote_host.strip() or "api.weixin.qq.com"
+    if body.wechat_tunnel_remote_port is not None:
+        updates["wechat_tunnel_remote_port"] = str(max(1, body.wechat_tunnel_remote_port))
+    if body.wechat_tunnel_extra_args is not None:
+        updates["wechat_tunnel_extra_args"] = body.wechat_tunnel_extra_args.strip()
     if updates:
         await set_config(updates)
 

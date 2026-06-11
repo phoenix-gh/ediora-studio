@@ -66,6 +66,16 @@ DEFAULTS: dict[str, str] = {
     "ref_reply_scout_threshold": "70",
     "ref_reply_min_likes": "100",
     "ref_classify_min_score": "60",
+    "wechat_tunnel_enabled": "0",
+    "wechat_tunnel_ssh_host": "",
+    "wechat_tunnel_ssh_port": "22",
+    "wechat_tunnel_ssh_user": "",
+    "wechat_tunnel_ssh_key_path": "",
+    "wechat_tunnel_local_host": "127.0.0.1",
+    "wechat_tunnel_local_port": "18443",
+    "wechat_tunnel_remote_host": "api.weixin.qq.com",
+    "wechat_tunnel_remote_port": "443",
+    "wechat_tunnel_extra_args": "",
 }
 
 # Provider presets: label + default base_url + hint for default model

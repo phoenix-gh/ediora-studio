@@ -62,8 +62,12 @@ def _mock_client(handler):
 
 
 @pytest.fixture(autouse=True)
-def _clear_token_cache():
+def _clear_token_cache(monkeypatch):
+    async def _disabled_tunnel_config():
+        return {"wechat_tunnel_enabled": "0"}
+
     wx._token_cache.clear()
+    monkeypatch.setattr(wx, "get_config", _disabled_tunnel_config)
     yield
     wx._token_cache.clear()
 
@@ -142,3 +146,23 @@ async def test_add_draft_returns_media_id(monkeypatch):
     assert media_id == "MEDIA_1"
     # 中文按 UTF-8 原样发送（不经 ensure_ascii 转义）
     assert "标题".encode("utf-8") in captured["body"]
+
+
+def test_tunnel_command_uses_noninteractive_ssh():
+    cmd, local_host, local_port, remote_host = wx._tunnel_command({
+        "wechat_tunnel_ssh_host": "jump.example.com",
+        "wechat_tunnel_ssh_user": "ubuntu",
+        "wechat_tunnel_ssh_port": "2222",
+        "wechat_tunnel_ssh_key_path": "/home/u/.ssh/id_ed25519",
+        "wechat_tunnel_local_host": "127.0.0.1",
+        "wechat_tunnel_local_port": "18443",
+        "wechat_tunnel_remote_host": "api.weixin.qq.com",
+        "wechat_tunnel_remote_port": "443",
+    })
+    assert cmd[:4] == ["ssh", "-N", "-T", "-L"]
+    assert "127.0.0.1:18443:api.weixin.qq.com:443" in cmd
+    assert "BatchMode=yes" in cmd
+    assert "ConnectTimeout=10" in cmd
+    assert local_host == "127.0.0.1"
+    assert local_port == 18443
+    assert remote_host == "api.weixin.qq.com"

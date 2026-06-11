@@ -28,9 +28,12 @@ def _parse_created_at(ts_iso: str) -> datetime:
 
 async def _fetch_sort(subreddit: str, sort: str, limit: int) -> list[dict[str, Any]]:
     """Fetch one sort listing; returns [] on any error."""
-    from feedgrab.fetchers.reddit import fetch_reddit_subreddit
     try:
-        return await fetch_reddit_subreddit(subreddit, sort=sort, limit=limit)
+        from feedgrab.fetchers.reddit import fetch_reddit_subreddit_structured
+    except ImportError:
+        from feedgrab.fetchers.reddit import fetch_reddit_subreddit as fetch_reddit_subreddit_structured
+    try:
+        return await fetch_reddit_subreddit_structured(subreddit, sort=sort, limit=limit)
     except Exception:
         return []
 
@@ -55,9 +58,21 @@ async def collect_subscription(sub: RedditSubscription, db: AsyncSession) -> int
         existing = await db.get(RedditPost, composite_id)
         if existing:
             # Update mutable fields
+            existing.title = (item.get("title") or existing.title or "")[:500]
+            existing.content = item.get("content") or existing.content
+            existing.body = item.get("body") or existing.body or ""
+            existing.comments = item.get("comments") or existing.comments or []
+            existing.fetch_status = item.get("fetch_status") or existing.fetch_status or "ok"
+            existing.url = item.get("url") or existing.url
+            existing.linked_url = item.get("linked_url") or existing.linked_url
+            existing.author = item.get("author") or existing.author
+            existing.subreddit = item.get("subreddit") or existing.subreddit or sub.subreddit
+            existing.flair = item.get("flair") or existing.flair
             existing.score = item.get("score", existing.score)
             existing.comment_count = item.get("comment_count", existing.comment_count)
             existing.upvote_ratio = item.get("upvote_ratio", existing.upvote_ratio)
+            existing.is_self = bool(item.get("is_self", existing.is_self))
+            existing.published_at = _parse_created_at(item.get("created_at") or "") if item.get("created_at") else existing.published_at
         else:
             db.add(RedditPost(
                 id=composite_id,
@@ -65,6 +80,9 @@ async def collect_subscription(sub: RedditSubscription, db: AsyncSession) -> int
                 subscription_id=sub.id,
                 title=(item.get("title") or "")[:500],
                 content=item.get("content") or "",
+                body=item.get("body") or "",
+                comments=item.get("comments") or [],
+                fetch_status=item.get("fetch_status") or "ok",
                 url=item.get("url") or "",
                 linked_url=item.get("linked_url") or "",
                 author=item.get("author") or "",

@@ -16,6 +16,7 @@ import {
   updatePublishAccount,
   deletePublishAccount,
 } from '@/lib/api/publish-accounts'
+import { AppSettings, getSettings, updateSettings } from '@/lib/api/settings'
 import { CoverStyleEditor, buildCoverStyleFromEditor } from '@/components/features/CoverStyleEditor'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 
@@ -38,6 +39,19 @@ interface EditState {
   app_id: string
   app_secret: string
   is_active: boolean
+}
+
+interface TunnelForm {
+  enabled: boolean
+  ssh_host: string
+  ssh_port: string
+  ssh_user: string
+  ssh_key_path: string
+  local_host: string
+  local_port: string
+  remote_host: string
+  remote_port: string
+  extra_args: string
 }
 
 const PLATFORM_OPTIONS = [
@@ -72,6 +86,19 @@ const EMPTY_EDIT: EditState = {
   app_id: '',
   app_secret: '',
   is_active: true,
+}
+
+const EMPTY_TUNNEL: TunnelForm = {
+  enabled: false,
+  ssh_host: '',
+  ssh_port: '22',
+  ssh_user: '',
+  ssh_key_path: '',
+  local_host: '127.0.0.1',
+  local_port: '18443',
+  remote_host: 'api.weixin.qq.com',
+  remote_port: '443',
+  extra_args: '',
 }
 
 function accountToEdit(p: PublishAccount): EditState {
@@ -134,15 +161,40 @@ function buildCoverStyle(form: EditState): CoverStyle {
   return buildCoverStyleFromEditor(form.cover_style, form.cover_motifs_text, form.cover_negative_text)
 }
 
+function settingsToTunnelForm(settings: AppSettings): TunnelForm {
+  return {
+    enabled: settings.wechat_tunnel_enabled,
+    ssh_host: settings.wechat_tunnel_ssh_host,
+    ssh_port: String(settings.wechat_tunnel_ssh_port || 22),
+    ssh_user: settings.wechat_tunnel_ssh_user,
+    ssh_key_path: settings.wechat_tunnel_ssh_key_path,
+    local_host: settings.wechat_tunnel_local_host || '127.0.0.1',
+    local_port: String(settings.wechat_tunnel_local_port || 18443),
+    remote_host: settings.wechat_tunnel_remote_host || 'api.weixin.qq.com',
+    remote_port: String(settings.wechat_tunnel_remote_port || 443),
+    extra_args: settings.wechat_tunnel_extra_args,
+  }
+}
+
 export function PublishAccountsSection() {
   const [accounts, setAccounts] = useState<PublishAccount[]>([])
   const [loading, setLoading] = useState(true)
+  const [tunnelForm, setTunnelForm] = useState<TunnelForm>(EMPTY_TUNNEL)
+  const [savingTunnel, setSavingTunnel] = useState(false)
   const [editingId, setEditingId] = useState<string | 'new' | null>(null)
   const [form, setForm] = useState<EditState>(EMPTY_EDIT)
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
-    listPublishAccounts().then(setAccounts).finally(() => setLoading(false))
+    Promise.all([
+      listPublishAccounts(),
+      getSettings(),
+    ])
+      .then(([list, settings]) => {
+        setAccounts(list)
+        setTunnelForm(settingsToTunnelForm(settings))
+      })
+      .finally(() => setLoading(false))
   }, [])
 
   function startNew() {
@@ -183,7 +235,8 @@ export function PublishAccountsSection() {
         toast.success('账号已创建')
       } else if (editingId !== null) {
         // PATCH: 不传 id（不可改）
-        const { id: _id, ...patch } = result
+        const { id: omittedId, ...patch } = result
+        void omittedId
         const updated = await updatePublishAccount(editingId, patch)
         setAccounts(prev => prev.map(a => a.id === editingId ? updated : a))
         toast.success('账号已更新')
@@ -216,6 +269,34 @@ export function PublishAccountsSection() {
     }
   }
 
+  async function saveTunnel() {
+    if (tunnelForm.enabled && (!tunnelForm.ssh_host.trim() || !tunnelForm.ssh_user.trim())) {
+      toast.error('启用隧道时必须填写 SSH Host 和 SSH User')
+      return
+    }
+    setSavingTunnel(true)
+    try {
+      const saved = await updateSettings({
+        wechat_tunnel_enabled: tunnelForm.enabled,
+        wechat_tunnel_ssh_host: tunnelForm.ssh_host,
+        wechat_tunnel_ssh_port: Number(tunnelForm.ssh_port) || 22,
+        wechat_tunnel_ssh_user: tunnelForm.ssh_user,
+        wechat_tunnel_ssh_key_path: tunnelForm.ssh_key_path,
+        wechat_tunnel_local_host: tunnelForm.local_host || '127.0.0.1',
+        wechat_tunnel_local_port: Number(tunnelForm.local_port) || 18443,
+        wechat_tunnel_remote_host: tunnelForm.remote_host || 'api.weixin.qq.com',
+        wechat_tunnel_remote_port: Number(tunnelForm.remote_port) || 443,
+        wechat_tunnel_extra_args: tunnelForm.extra_args,
+      })
+      setTunnelForm(settingsToTunnelForm(saved))
+      toast.success('公众号发布隧道配置已保存')
+    } catch (e) {
+      toast.error('保存隧道配置失败：' + (e instanceof Error ? e.message : '未知错误'))
+    } finally {
+      setSavingTunnel(false)
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex items-center gap-2 text-sm text-zinc-400">
@@ -231,6 +312,119 @@ export function PublishAccountsSection() {
         会按任务 metadata 的 <code className="font-mono text-zinc-500">account_id</code> 读取该账号画像，
         所有产出都贴合此处填写的定位/调性/受众/禁区。
       </p>
+
+      <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 p-4 space-y-3">
+        <div className="flex items-start gap-3">
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-medium text-zinc-900 dark:text-zinc-100">公众号发布隧道</div>
+            <p className="text-[11px] text-zinc-400 mt-0.5">
+              发布到公众号草稿箱前先建立 SSH 本地转发，让微信官方 API 请求从跳板机出口访问。
+            </p>
+          </div>
+          <label className="flex items-center gap-2 text-xs text-zinc-600 dark:text-zinc-300 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={tunnelForm.enabled}
+              onChange={e => setTunnelForm({ ...tunnelForm, enabled: e.target.checked })}
+              className="rounded"
+            />
+            启用
+          </label>
+        </div>
+
+        <div className="grid grid-cols-3 gap-3">
+          <div className="space-y-1">
+            <Label className="text-xs">SSH Host</Label>
+            <Input
+              value={tunnelForm.ssh_host}
+              onChange={e => setTunnelForm({ ...tunnelForm, ssh_host: e.target.value })}
+              placeholder="jump.example.com"
+              className="h-8 text-sm font-mono"
+            />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">SSH Port</Label>
+            <Input
+              value={tunnelForm.ssh_port}
+              onChange={e => setTunnelForm({ ...tunnelForm, ssh_port: e.target.value })}
+              placeholder="22"
+              className="h-8 text-sm font-mono"
+            />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">SSH User</Label>
+            <Input
+              value={tunnelForm.ssh_user}
+              onChange={e => setTunnelForm({ ...tunnelForm, ssh_user: e.target.value })}
+              placeholder="ubuntu"
+              className="h-8 text-sm font-mono"
+            />
+          </div>
+        </div>
+
+        <div className="space-y-1">
+          <Label className="text-xs">SSH Key Path</Label>
+          <Input
+            value={tunnelForm.ssh_key_path}
+            onChange={e => setTunnelForm({ ...tunnelForm, ssh_key_path: e.target.value })}
+            placeholder="/home/user/.ssh/id_ed25519"
+            className="h-8 text-sm font-mono"
+          />
+        </div>
+
+        <div className="grid grid-cols-4 gap-3">
+          <div className="space-y-1">
+            <Label className="text-xs">Local Host</Label>
+            <Input
+              value={tunnelForm.local_host}
+              onChange={e => setTunnelForm({ ...tunnelForm, local_host: e.target.value })}
+              className="h-8 text-sm font-mono"
+            />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">Local Port</Label>
+            <Input
+              value={tunnelForm.local_port}
+              onChange={e => setTunnelForm({ ...tunnelForm, local_port: e.target.value })}
+              className="h-8 text-sm font-mono"
+            />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">Remote Host</Label>
+            <Input
+              value={tunnelForm.remote_host}
+              onChange={e => setTunnelForm({ ...tunnelForm, remote_host: e.target.value })}
+              className="h-8 text-sm font-mono"
+            />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">Remote Port</Label>
+            <Input
+              value={tunnelForm.remote_port}
+              onChange={e => setTunnelForm({ ...tunnelForm, remote_port: e.target.value })}
+              className="h-8 text-sm font-mono"
+            />
+          </div>
+        </div>
+
+        <div className="space-y-1">
+          <Label className="text-xs">额外 SSH 参数</Label>
+          <Input
+            value={tunnelForm.extra_args}
+            onChange={e => setTunnelForm({ ...tunnelForm, extra_args: e.target.value })}
+            placeholder="-o ProxyJump=bastion"
+            className="h-8 text-sm font-mono"
+          />
+          <p className="text-[11px] text-zinc-400">
+            发布时执行 <code className="font-mono">ssh -N -T -L local:remote</code>。请确保后端机器可免密登录跳板机。
+          </p>
+        </div>
+
+        <Button size="sm" variant="outline" className="gap-1.5" onClick={saveTunnel} disabled={savingTunnel}>
+          {savingTunnel ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+          保存隧道配置
+        </Button>
+      </div>
 
       <div className="space-y-2">
         {accounts.map(p => (
@@ -507,7 +701,7 @@ function AccountForm({
         </summary>
         <div className="px-3 py-3 space-y-3 border-t border-zinc-200 dark:border-zinc-700">
           <p className="text-[11px] text-zinc-400">
-            填了之后 illustrator 直接照搬这套参数，不再凭 image_style 现场推断 —— 这是让同账号封面"看起来是一套的"关键。
+            填了之后 illustrator 直接照搬这套参数，不再凭 image_style 现场推断 —— 这是让同账号封面「看起来是一套的」关键。
             留空则回退到旧逻辑（按 image_style 翻译）。
           </p>
           <CoverStyleEditor
@@ -524,7 +718,7 @@ function AccountForm({
       <div className="space-y-1">
         <Label className="text-xs">声音范文（voice_samples，多段用一行 <code className="font-mono">---</code> 分隔）</Label>
         <p className="text-[11px] text-zinc-400">
-          贴 2-3 段你认可的、能代表此账号"该有的样子"的真实文字（自己写的、或目标作者的）。
+          贴 2-3 段你认可的、能代表此账号「该有的样子」的真实文字（自己写的、或目标作者的）。
           writer 会把它当 few-shot 模仿对象，比 tone 字段管用得多。
         </p>
         <textarea
@@ -543,7 +737,7 @@ function AccountForm({
       <div className="space-y-1">
         <Label className="text-xs">账号专属硬规则（style_rules，一行一条）</Label>
         <p className="text-[11px] text-zinc-400">
-          覆盖在 SOUL 通用反 AI 规则之上的账号级约束。比如"用第一人称""禁问句开头""每段 ≤ 3 行"。
+          覆盖在 SOUL 通用反 AI 规则之上的账号级约束。比如「用第一人称」「禁问句开头」「每段 ≤ 3 行」。
           writer 把它当硬约束逐条遵守。
         </p>
         <textarea

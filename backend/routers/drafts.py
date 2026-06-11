@@ -2,7 +2,8 @@ import mimetypes
 import os
 import uuid
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
+from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
 from pydantic import BaseModel
@@ -270,6 +271,17 @@ async def _load_image_bytes(src: str) -> tuple[bytes, str]:
                 raise HTTPException(502, f"外链图片下载失败({resp.status_code}): {src}")
             return resp.content, (resp.headers.get("content-type") or "image/jpeg").split(";")[0]
     raise HTTPException(400, f"无法解析图片地址: {src}")
+
+
+@router.get("/image-copy-source")
+async def image_copy_source(src: str = Query(..., min_length=1)):
+    """Return image bytes through the API so browser clipboard copy avoids CORS."""
+    data, mime = await _load_image_bytes(src)
+    if len(data) > _MAX_SIZE:
+        raise HTTPException(413, "图片超过 10MB 限制")
+    if mime not in _ALLOWED_MIME:
+        raise HTTPException(400, f"不支持的文件类型: {mime}")
+    return Response(content=data, media_type=mime)
 
 
 @router.post("/drafts/{draft_id}/publish/wechat", response_model=WechatPublishResponse)

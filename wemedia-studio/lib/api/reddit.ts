@@ -17,6 +17,9 @@ export interface RedditPost {
   subscription_id: number
   title: string
   content: string
+  body: string
+  comments: Array<Record<string, unknown>>
+  fetch_status: string
   url: string
   linked_url: string
   author: string

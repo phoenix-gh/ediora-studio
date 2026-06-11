@@ -4,11 +4,15 @@
   },
   "permissions": {
     "allow": [
-      "Bash(curl -s -o /dev/null -w *)",
       "Bash(npx tsc --noEmit *)",
       "Bash(pnpm exec tsc --noEmit *)",
       "Bash(./node_modules/.bin/tsc --noEmit *)",
-      "Bash(pnpm tsc --noEmit *)"
+      "Bash(pnpm tsc --noEmit *)",
+      "Bash(npm run *)",
+      "Bash(git *)",
+      "Edit",
+      "Write",
+      "Read"
     ]
   }
 }

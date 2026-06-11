@@ -49,6 +49,16 @@ export interface AppSettings {
   ref_collect_interval_minutes: number
   ref_classify_interval_minutes: number
   clean_batch_size: number
+  wechat_tunnel_enabled: boolean
+  wechat_tunnel_ssh_host: string
+  wechat_tunnel_ssh_port: number
+  wechat_tunnel_ssh_user: string
+  wechat_tunnel_ssh_key_path: string
+  wechat_tunnel_local_host: string
+  wechat_tunnel_local_port: number
+  wechat_tunnel_remote_host: string
+  wechat_tunnel_remote_port: number
+  wechat_tunnel_extra_args: string
   providers: ProviderInfo[]
 }
 
@@ -90,6 +100,16 @@ export interface SettingsUpdate {
   ref_collect_interval_minutes?: number
   ref_classify_interval_minutes?: number
   clean_batch_size?: number
+  wechat_tunnel_enabled?: boolean
+  wechat_tunnel_ssh_host?: string
+  wechat_tunnel_ssh_port?: number
+  wechat_tunnel_ssh_user?: string
+  wechat_tunnel_ssh_key_path?: string
+  wechat_tunnel_local_host?: string
+  wechat_tunnel_local_port?: number
+  wechat_tunnel_remote_host?: string
+  wechat_tunnel_remote_port?: number
+  wechat_tunnel_extra_args?: string
 }
 
 export interface FetchModelsRequest {

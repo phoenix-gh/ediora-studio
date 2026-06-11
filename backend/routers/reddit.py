@@ -2,7 +2,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query, BackgroundTasks, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select, desc, delete, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -45,6 +45,9 @@ class PostOut(BaseModel):
     subscription_id: int
     title: str
     content: str
+    body: str
+    comments: list[dict] = Field(default_factory=list)
+    fetch_status: str
     url: str
     linked_url: str
     author: str

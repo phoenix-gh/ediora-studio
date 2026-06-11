@@ -60,6 +60,9 @@ async def init_db():
             await conn.execute(text("ALTER TABLE x_subscriptions ADD COLUMN IF NOT EXISTS max_results INTEGER NOT NULL DEFAULT 100"))
             await conn.execute(text("ALTER TABLE x_subscriptions ALTER COLUMN url DROP NOT NULL"))
             await conn.execute(text("ALTER TABLE ref_collect_rules ADD COLUMN IF NOT EXISTS source_subscription_id INTEGER"))
+            await conn.execute(text("ALTER TABLE reddit_posts ADD COLUMN IF NOT EXISTS body TEXT NOT NULL DEFAULT ''"))
+            await conn.execute(text("ALTER TABLE reddit_posts ADD COLUMN IF NOT EXISTS comments JSON NOT NULL DEFAULT '[]'::json"))
+            await conn.execute(text("ALTER TABLE reddit_posts ADD COLUMN IF NOT EXISTS fetch_status VARCHAR NOT NULL DEFAULT 'ok'"))
         # Lightweight in-place migrations for columns added after the original
         # table creation. PostgreSQL only — ADD COLUMN IF NOT EXISTS is no-op
         # when the column is already present.

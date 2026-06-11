@@ -6,13 +6,17 @@ add_material（封面）→ draft/add。要求运行机器出口 IP 在公众号
 """
 
 from __future__ import annotations
+import asyncio
+from contextlib import asynccontextmanager
 import io
 import json
 import re
+import shlex
 import time
 from typing import Any, Awaitable, Callable
 
 import httpx
+from config import get_config
 
 WX_API_BASE = "https://api.weixin.qq.com"
 
@@ -97,11 +101,105 @@ class WechatApiError(RuntimeError):
 
 # app_id -> (token, 失效时刻)。微信 token 有效期 7200s，提前 5 分钟视为过期。
 _token_cache: dict[str, tuple[str, float]] = {}
+_tunnel_lock = asyncio.Lock()
+_tunnel_proc: asyncio.subprocess.Process | None = None
+_tunnel_signature: tuple[str, ...] | None = None
 
 
 def _client() -> httpx.AsyncClient:
     """测试通过 monkeypatch 本函数注入 MockTransport。"""
     return httpx.AsyncClient(timeout=30)
+
+
+def _truthy(value: str) -> bool:
+    return value.lower() in ("1", "true", "yes", "on")
+
+
+def _tunnel_command(cfg: dict[str, str]) -> tuple[list[str], str, int, str]:
+    ssh_host = cfg.get("wechat_tunnel_ssh_host", "").strip()
+    ssh_user = cfg.get("wechat_tunnel_ssh_user", "").strip()
+    if not ssh_host:
+        raise WechatApiError(-1, "已启用公众号发布 SSH 隧道，但未配置 SSH Host")
+    if not ssh_user:
+        raise WechatApiError(-1, "已启用公众号发布 SSH 隧道，但未配置 SSH User")
+
+    ssh_port = max(1, int(cfg.get("wechat_tunnel_ssh_port", "22")))
+    local_host = cfg.get("wechat_tunnel_local_host", "127.0.0.1").strip() or "127.0.0.1"
+    local_port = max(1, int(cfg.get("wechat_tunnel_local_port", "18443")))
+    remote_host = cfg.get("wechat_tunnel_remote_host", "api.weixin.qq.com").strip() or "api.weixin.qq.com"
+    remote_port = max(1, int(cfg.get("wechat_tunnel_remote_port", "443")))
+    key_path = cfg.get("wechat_tunnel_ssh_key_path", "").strip()
+    extra_args = cfg.get("wechat_tunnel_extra_args", "").strip()
+
+    cmd = [
+        "ssh",
+        "-N",
+        "-T",
+        "-L", f"{local_host}:{local_port}:{remote_host}:{remote_port}",
+        "-p", str(ssh_port),
+        "-o", "ExitOnForwardFailure=yes",
+        "-o", "BatchMode=yes",
+        "-o", "ConnectTimeout=10",
+        "-o", "ServerAliveInterval=30",
+        "-o", "ServerAliveCountMax=3",
+    ]
+    if key_path:
+        cmd.extend(["-i", key_path])
+    if extra_args:
+        cmd.extend(shlex.split(extra_args))
+    cmd.append(f"{ssh_user}@{ssh_host}")
+    return cmd, local_host, local_port, remote_host
+
+
+async def _ensure_tunnel(cfg: dict[str, str]) -> tuple[str, int, str]:
+    global _tunnel_proc, _tunnel_signature
+
+    cmd, local_host, local_port, remote_host = _tunnel_command(cfg)
+    signature = tuple(cmd)
+    async with _tunnel_lock:
+        if _tunnel_proc and _tunnel_proc.returncode is None and _tunnel_signature == signature:
+            return local_host, local_port, remote_host
+
+        if _tunnel_proc and _tunnel_proc.returncode is None:
+            _tunnel_proc.terminate()
+            try:
+                await asyncio.wait_for(_tunnel_proc.wait(), timeout=3)
+            except asyncio.TimeoutError:
+                _tunnel_proc.kill()
+                await _tunnel_proc.wait()
+
+        _tunnel_proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _tunnel_signature = signature
+        await asyncio.sleep(0.4)
+        if _tunnel_proc.returncode is not None:
+            stderr = ""
+            if _tunnel_proc.stderr:
+                raw = await _tunnel_proc.stderr.read()
+                stderr = raw.decode("utf-8", "ignore").strip()
+            raise WechatApiError(-1, f"SSH 隧道建立失败：{stderr or 'ssh 进程已退出'}")
+
+    return local_host, local_port, remote_host
+
+
+@asynccontextmanager
+async def _api_client():
+    cfg = await get_config()
+    if _truthy(str(cfg.get("wechat_tunnel_enabled", "0"))):
+        local_host, local_port, remote_host = await _ensure_tunnel(cfg)
+        async with httpx.AsyncClient(
+            timeout=30,
+            verify=False,
+            headers={"Host": remote_host},
+        ) as client:
+            yield client, f"https://{local_host}:{local_port}"
+        return
+
+    async with _client() as client:
+        yield client, WX_API_BASE
 
 
 async def get_access_token(app_id: str, app_secret: str, force: bool = False) -> str:
@@ -110,8 +208,8 @@ async def get_access_token(app_id: str, app_secret: str, force: bool = False) ->
         cached = _token_cache.get(app_id)
         if cached and cached[1] > now:
             return cached[0]
-    async with _client() as client:
-        resp = await client.get(f"{WX_API_BASE}/cgi-bin/token", params={
+    async with _api_client() as (client, api_base):
+        resp = await client.get(f"{api_base}/cgi-bin/token", params={
             "grant_type": "client_credential", "appid": app_id, "secret": app_secret,
         })
         resp.raise_for_status()
@@ -145,9 +243,9 @@ async def upload_content_image(app_id: str, app_secret: str,
                                data: bytes, filename: str, mime: str) -> str:
     """正文图片 → 微信图床 URL（mmbiz.qpic.cn）。外域图片微信会剥离，必须走这里。"""
     async def do(token: str) -> dict[str, Any]:
-        async with _client() as client:
+        async with _api_client() as (client, api_base):
             resp = await client.post(
-                f"{WX_API_BASE}/cgi-bin/media/uploadimg",
+                f"{api_base}/cgi-bin/media/uploadimg",
                 params={"access_token": token},
                 files={"media": (filename, data, mime)},
             )
@@ -160,9 +258,9 @@ async def add_thumb_material(app_id: str, app_secret: str,
                              data: bytes, filename: str, mime: str) -> str:
     """封面图存为永久素材，返回 thumb_media_id。"""
     async def do(token: str) -> dict[str, Any]:
-        async with _client() as client:
+        async with _api_client() as (client, api_base):
             resp = await client.post(
-                f"{WX_API_BASE}/cgi-bin/material/add_material",
+                f"{api_base}/cgi-bin/material/add_material",
                 params={"access_token": token, "type": "image"},
                 files={"media": (filename, data, mime)},
             )
@@ -176,9 +274,9 @@ async def add_draft(app_id: str, app_secret: str, article: dict[str, Any]) -> st
     payload = json.dumps({"articles": [article]}, ensure_ascii=False).encode("utf-8")
 
     async def do(token: str) -> dict[str, Any]:
-        async with _client() as client:
+        async with _api_client() as (client, api_base):
             resp = await client.post(
-                f"{WX_API_BASE}/cgi-bin/draft/add",
+                f"{api_base}/cgi-bin/draft/add",
                 params={"access_token": token},
                 content=payload,
                 headers={"Content-Type": "application/json; charset=utf-8"},

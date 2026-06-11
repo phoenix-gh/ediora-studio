@@ -110,6 +110,14 @@ def test_publish_happy_path(client, uploads_dir, wx_mock):
     assert r.json()["media_id"] == "DRAFT_MEDIA_1"
 
 
+def test_image_copy_source_reads_uploaded_image(client, uploads_dir):
+    draft, img = _setup_draft_with_image(client)
+    r = client.get("/api/write/image-copy-source", params={"src": img["url"]})
+    assert r.status_code == 200, r.text
+    assert r.headers["content-type"].startswith("image/png")
+    assert r.content.startswith(b"\x89PNG")
+
+
 def test_publish_account_without_credentials(client, uploads_dir, wx_mock):
     client.post("/api/publish-accounts", json={"id": "nocred", "name": "无凭证", "platform": "wechat"})
     draft = client.post("/api/write/drafts", json={"title": "t", "content": "c"}).json()

@@ -683,6 +683,9 @@ class RedditPost(Base):
     subscription_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     title: Mapped[str] = mapped_column(String, default="")
     content: Mapped[str] = mapped_column(Text, default="")             # Markdown: body + top comments
+    body: Mapped[str] = mapped_column(Text, default="")                # post body without rendered comments/header
+    comments: Mapped[list] = mapped_column(JSON, default=list)         # structured top comments
+    fetch_status: Mapped[str] = mapped_column(String, default="ok")
     url: Mapped[str] = mapped_column(String, default="")               # reddit permalink
     linked_url: Mapped[str] = mapped_column(String, default="")        # external URL for link posts
     author: Mapped[str] = mapped_column(String, default="")
