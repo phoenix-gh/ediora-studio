@@ -527,37 +527,6 @@ class GithubRepoOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
-class GithubIssueOut(BaseModel):
-    id: str
-    repo_id: str
-    number: int
-    title: str
-    body: str
-    labels: list
-    state: str
-    comments: int
-    reactions: int
-    html_url: str
-    created_at: datetime
-    updated_at: datetime
-
-    model_config = {"from_attributes": True}
-
-
-class IssuePainPointOut(BaseModel):
-    id: str
-    repo_id: str
-    title: str
-    description: str
-    issue_count: int
-    example_issues: list
-    category: str
-    severity: str
-    created_at: datetime
-
-    model_config = {"from_attributes": True}
-
-
 class GithubReleaseOut(BaseModel):
     id: str
     repo_id: str

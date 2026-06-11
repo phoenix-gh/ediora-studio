@@ -3,10 +3,10 @@ from sqlalchemy import select, desc
 from typing import Optional
 
 from database import SessionLocal, get_db
-from models import GithubRepo, GithubIssue, IssuePainPoint, GithubTrendingRepo, GithubRelease
+from models import GithubRepo, GithubTrendingRepo, GithubRelease
 from schemas import (
     GithubRepoCreate, GithubRepoUpdate, GithubRepoOut,
-    GithubIssueOut, IssuePainPointOut, GithubTrendingRepoOut, GithubReleaseOut,
+    GithubTrendingRepoOut, GithubReleaseOut,
     DispatchReleaseWriteRequest, DispatchRepoIntroRequest, DispatchResponse,
 )
 from fastapi import Depends
@@ -106,45 +106,6 @@ async def delete_repo(owner: str, repo_name: str, db: AsyncSession = Depends(get
     await db.delete(repo)
     await db.commit()
     return {"ok": True}
-
-
-# ── Issues ────────────────────────────────────────────────────────────────────
-
-@router.get("/issues", response_model=list[GithubIssueOut])
-async def list_issues(
-    repo_id: Optional[str] = Query(None),
-    limit: int = Query(50, le=200),
-    db: AsyncSession = Depends(get_db),
-):
-    q = select(GithubIssue).order_by(
-        desc(GithubIssue.reactions + GithubIssue.comments)
-    ).limit(limit)
-    if repo_id:
-        q = q.where(GithubIssue.repo_id == repo_id)
-    rows = (await db.execute(q)).scalars().all()
-    return rows
-
-
-# ── Pain Points ───────────────────────────────────────────────────────────────
-
-@router.get("/pain-points", response_model=list[IssuePainPointOut])
-async def list_pain_points(
-    repo_id: Optional[str] = Query(None),
-    db: AsyncSession = Depends(get_db),
-):
-    q = select(IssuePainPoint).order_by(desc(IssuePainPoint.created_at))
-    if repo_id:
-        q = q.where(IssuePainPoint.repo_id == repo_id)
-    rows = (await db.execute(q)).scalars().all()
-    return rows
-
-
-@router.post("/pain-points/analyze")
-async def analyze_pain_points(repo_id: str, db: AsyncSession = Depends(get_db)):
-    """Trigger LLM pain point analysis for a repo."""
-    from github_analyzer import analyze_repo_pain_points
-    n = await analyze_repo_pain_points(repo_id, db)
-    return {"new_pain_points": n}
 
 
 # ── Releases ─────────────────────────────────────────────────────────────────

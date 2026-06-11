@@ -63,33 +63,6 @@ export interface GithubRepo {
   release_draft_types: string[]
 }
 
-export interface GithubIssue {
-  id: string
-  repo_id: string
-  number: number
-  title: string
-  body: string
-  labels: string[]
-  state: string
-  comments: number
-  reactions: number
-  html_url: string
-  created_at: string
-  updated_at: string
-}
-
-export interface IssuePainPoint {
-  id: string
-  repo_id: string
-  title: string
-  description: string
-  issue_count: number
-  example_issues: number[]
-  category: string
-  severity: string
-  created_at: string
-}
-
 export interface GithubRelease {
   id: string
   repo_id: string

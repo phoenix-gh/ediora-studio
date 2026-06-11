@@ -29,6 +29,9 @@ async def init_db():
         # across restarts and migrate the schema via ALTER TABLE below.
         await conn.execute(text("DROP TABLE IF EXISTS x_post_metrics CASCADE"))
         await conn.execute(text("DROP TABLE IF EXISTS x_blogger_candidates CASCADE"))
+        # GitHub issues 功能已整体移除（2026-06）：数据可随时从 GitHub 重新拉取
+        await conn.execute(text("DROP TABLE IF EXISTS github_issues CASCADE"))
+        await conn.execute(text("DROP TABLE IF EXISTS issue_pain_points CASCADE"))
 
         if not DATABASE_URL.startswith("sqlite"):
             # Rename tables (idempotent)

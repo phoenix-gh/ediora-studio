@@ -112,10 +112,12 @@ def test_releases_collect_refreshes_meta_and_timestamp(client, monkeypatch):
     assert repo.last_collected_at is not None
 
 
-def test_collect_all_repos_skips_issues(client, monkeypatch):
-    # issues 暂时不抓：collect_all_repos 只走 releases 路径。
+def test_collect_all_repos_collects_releases(client, monkeypatch):
+    # issues 功能已整体移除：collect_all_repos 只走 releases 路径。
     import github_collector as gc
     from database import SessionLocal
+
+    assert not hasattr(gc, "collect_repo_issues")
 
     _add_repo()
     monkeypatch.setattr(gc.httpx, "AsyncClient", _FakeAsyncClient([_release()]))
@@ -123,10 +125,6 @@ def test_collect_all_repos_skips_issues(client, monkeypatch):
     async def _fake_meta(owner, repo, token=""):
         return {}
     monkeypatch.setattr(gc, "fetch_repo_meta", _fake_meta)
-
-    async def _boom(*a, **kw):
-        raise AssertionError("collect_repo_issues should not be called")
-    monkeypatch.setattr(gc, "collect_repo_issues", _boom)
 
     async def _run():
         async with SessionLocal() as db:

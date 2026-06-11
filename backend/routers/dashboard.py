@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
 from models import (
-    ArticleDraft, CollectLog, GithubIssue, GithubRelease, JuejinArticle,
+    ArticleDraft, CollectLog, GithubRelease, JuejinArticle,
     KrArticle, Paper, Post, ProductHuntPost, PublishAccount, RedditPost,
     RefMaterial, Topic, V2exTopic, WechatAccount, WechatArticle,
     WechatCredential, XPost, YoutubeVideo,
@@ -48,7 +48,7 @@ SOURCES: list[tuple] = [
 _TODAY_TABLES = {
     "collect":     [(Post, Post.collected_at)],
     "analyze":     [(Topic, Topic.created_at)],
-    "github":      [(GithubRelease, GithubRelease.collected_at), (GithubIssue, GithubIssue.collected_at)],
+    "github":      [(GithubRelease, GithubRelease.collected_at)],
     "x":           [(XPost, XPost.collected_at)],
     "wechat":      [(WechatArticle, WechatArticle.collected_at)],
     "reddit":      [(RedditPost, RedditPost.collected_at)],

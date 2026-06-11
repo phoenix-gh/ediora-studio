@@ -181,40 +181,6 @@ async def generate_topics_from_posts(posts_info: list[dict]) -> list[dict]:
         return []
 
 
-async def analyze_github_pain_points(owner: str, repo: str, issues: list[dict]) -> list[dict]:
-    """Cluster GitHub issues into user pain points."""
-    if not issues:
-        return []
-
-    issues_text = "\n".join(
-        f"#{i['number']} [{','.join(i['labels'])}] 👍{i['reactions']} 💬{i['comments']}\n"
-        f"  标题: {i['title']}\n"
-        f"  描述: {i['body'][:300]}"
-        for i in issues[:50]
-    )
-
-    prompt = f"""分析 GitHub 仓库 {owner}/{repo} 的 Issues，识别用户核心痛点和诉求。
-
-Issues 列表（按关注度排序）:
-{issues_text}
-
-请将这些 issues 聚类归纳为 5-8 个用户痛点，以 JSON 数组输出，每项包含:
-- title: 痛点标题（20字以内，直接描述问题）
-- description: 详细描述（用户遇到了什么问题，影响是什么，100字以内）
-- category: 分类，从 ["bug","feature","performance","ux","docs"] 选一个
-- severity: 严重程度 ["high","medium","low"]，基于 reactions+comments 综合判断
-- issue_count: 该痛点涉及的 issue 数量估计
-- example_issues: 最具代表性的 3-5 个 issue 编号（整数数组）
-
-只输出 JSON 数组，不要其他文字。"""
-
-    try:
-        return _extract_json_array(await _call(prompt, max_tokens=2000))
-    except Exception as e:
-        print(f"[llm] analyze_pain_points error: {e}")
-        return []
-
-
 async def generate_release_article(
     repo: str,
     tag: str,

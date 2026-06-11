@@ -1,11 +1,11 @@
-"""GitHub data collection: trending repos and per-repo issue tracking."""
+"""GitHub data collection: trending repos and per-repo release tracking."""
 import hashlib
 import httpx
 from datetime import datetime, timezone, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from models import GithubRepo, GithubIssue, GithubTrendingRepo, GithubRelease
+from models import GithubRepo, GithubTrendingRepo, GithubRelease
 
 GITHUB_API = "https://api.github.com"
 
@@ -147,95 +147,11 @@ async def fetch_repo_meta(owner: str, repo: str, token: str = "") -> dict:
         return resp.json()
 
 
-async def collect_repo_issues(repo: GithubRepo, db: AsyncSession) -> int:
-    """Fetch open issues for a tracked repo from GitHub API.
-
-    ⚠️ 暂时停用（2026-06，无消费场景）：所有调用点已移除，
-    meta 刷新 / last_collected_at 已挪到 collect_repo_releases。"""
-    token = await _github_token()
-    headers = _api_headers(token)
-
-    try:
-        async with httpx.AsyncClient(timeout=30, headers=headers) as client:
-            resp = await client.get(
-                f"{GITHUB_API}/repos/{repo.owner}/{repo.repo}/issues",
-                params={
-                    "state": "open",
-                    "sort": "updated",
-                    "direction": "desc",
-                    "per_page": 100,
-                },
-            )
-            remaining = int(resp.headers.get("X-RateLimit-Remaining", "999"))
-            if resp.status_code == 403 or remaining == 0:
-                reset_ts = resp.headers.get("X-RateLimit-Reset", "")
-                print(f"[github] rate limited for {repo.id}; reset at {reset_ts}")
-                return 0
-            resp.raise_for_status()
-            issues = resp.json()
-    except Exception as e:
-        print(f"[github] issue fetch failed for {repo.id}: {e}")
-        return 0
-
-    new_count = 0
-    for issue in issues:
-        # Skip pull requests (they share the issues endpoint)
-        if issue.get("pull_request"):
-            continue
-
-        number = issue["number"]
-        iid = f"{repo.id}:{number}"
-        reactions = issue.get("reactions", {}).get("total_count", 0)
-
-        existing = await db.get(GithubIssue, iid)
-        if existing:
-            existing.comments = issue.get("comments", 0)
-            existing.reactions = reactions
-            existing.updated_at = datetime.fromisoformat(
-                issue["updated_at"].replace("Z", "+00:00")
-            )
-        else:
-            labels = [lbl["name"] for lbl in issue.get("labels", [])]
-            body = (issue.get("body") or "")[:3000]
-            db.add(GithubIssue(
-                id=iid,
-                repo_id=repo.id,
-                number=number,
-                title=(issue.get("title") or "")[:500],
-                body=body,
-                labels=labels,
-                state="open",
-                comments=issue.get("comments", 0),
-                reactions=reactions,
-                html_url=issue.get("html_url", ""),
-                created_at=datetime.fromisoformat(
-                    issue["created_at"].replace("Z", "+00:00")
-                ),
-                updated_at=datetime.fromisoformat(
-                    issue["updated_at"].replace("Z", "+00:00")
-                ),
-            ))
-            new_count += 1
-
-    # Refresh repo metadata (stars, description)
-    try:
-        meta = await fetch_repo_meta(repo.owner, repo.repo, token)
-        repo.stars = meta.get("stargazers_count", repo.stars)
-        repo.description = (meta.get("description") or repo.description)[:500]
-        repo.language = meta.get("language") or repo.language
-    except Exception:
-        pass
-
-    repo.last_collected_at = datetime.now(timezone.utc)
-    await db.commit()
-    return new_count
-
-
 async def collect_repo_releases(repo: GithubRepo, db: AsyncSession) -> int:
     """Fetch the latest 20 releases for a tracked repo.
 
-    issues 抓取停用后这里是唯一的定期采集路径，负责刷新仓库 meta
-    （stars/描述/语言）并更新 last_collected_at。"""
+    唯一的定期采集路径，负责刷新仓库 meta（stars/描述/语言）
+    并更新 last_collected_at。"""
     token = await _github_token()
     headers = _api_headers(token)
 
@@ -297,9 +213,6 @@ async def collect_repo_releases(repo: GithubRepo, db: AsyncSession) -> int:
 
 async def collect_all_repos(db: AsyncSession) -> list[dict]:
     """Collect releases for all non-muted repos that are due for collection.
-
-    issues 抓取暂时停用（用不到，且匿名配额吃紧）；恢复时把
-    collect_repo_issues 加回循环即可。
 
     最久未采集的优先（NULL 最前）——配额耗尽时被跳过的库
     下一轮自动排到队首，不会有库永远饿死。"""

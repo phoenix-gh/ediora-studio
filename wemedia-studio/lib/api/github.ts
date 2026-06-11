@@ -1,11 +1,11 @@
-import { GithubRepo, GithubIssue, IssuePainPoint, GithubTrendingRepo, GithubRelease } from '@/lib/types'
+import { GithubRepo, GithubTrendingRepo, GithubRelease } from '@/lib/types'
 import { apiFetch } from './client'
 
 export async function getGithubRepos(): Promise<GithubRepo[]> {
   return apiFetch<GithubRepo[]>('/github/repos')
 }
 
-export async function addGithubRepo(owner: string, repo: string, group = '未分组', interval = 10): Promise<GithubRepo> {
+export async function addGithubRepo(owner: string, repo: string, group = '未分组', interval = 60): Promise<GithubRepo> {
   return apiFetch<GithubRepo>('/github/repos', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -26,24 +26,6 @@ export async function updateGithubRepo(
 
 export async function deleteGithubRepo(owner: string, repo: string): Promise<void> {
   await apiFetch(`/github/repos/${owner}/${repo}`, { method: 'DELETE' })
-}
-
-export async function getGithubIssues(repoId?: string, limit = 50): Promise<GithubIssue[]> {
-  const params = new URLSearchParams({ limit: String(limit) })
-  if (repoId) params.set('repo_id', repoId)
-  return apiFetch<GithubIssue[]>(`/github/issues?${params}`)
-}
-
-export async function getPainPoints(repoId?: string): Promise<IssuePainPoint[]> {
-  const params = repoId ? `?repo_id=${encodeURIComponent(repoId)}` : ''
-  return apiFetch<IssuePainPoint[]>(`/github/pain-points${params}`)
-}
-
-export async function analyzePainPoints(repoId: string): Promise<{ new_pain_points: number }> {
-  return apiFetch<{ new_pain_points: number }>(
-    `/github/pain-points/analyze?repo_id=${encodeURIComponent(repoId)}`,
-    { method: 'POST' }
-  )
 }
 
 export async function getTrendingRepos(period: 'daily' | 'weekly' = 'daily'): Promise<GithubTrendingRepo[]> {

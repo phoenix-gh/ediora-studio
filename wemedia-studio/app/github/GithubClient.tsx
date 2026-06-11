@@ -1,13 +1,13 @@
 'use client'
 
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react'
-import { GithubRepo, GithubIssue, IssuePainPoint, GithubTrendingRepo, GithubRelease } from '@/lib/types'
+import { GithubRepo, GithubTrendingRepo, GithubRelease } from '@/lib/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
-  GitFork, TrendingUp, AlertCircle, Zap, Plus, RefreshCw,
+  GitFork, TrendingUp, Plus, RefreshCw,
   Trash2, VolumeX, Volume2, Star, ExternalLink, ChevronDown, Loader2,
-  Bug, Lightbulb, Gauge, MousePointer, BookOpen, Clock, Tag, Settings, FileText,
+  BookOpen, Clock, Tag, Settings, FileText,
 } from 'lucide-react'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
@@ -16,33 +16,15 @@ import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import {
   addGithubRepo, deleteGithubRepo, updateGithubRepo,
-  collectOneRepo, collectOneRepoReleases, collectAllGithub, analyzePainPoints,
-  getGithubIssues, getPainPoints, getTrendingRepos, getGithubReleases,
+  collectOneRepo, collectOneRepoReleases, collectAllGithub,
+  getTrendingRepos, getGithubReleases,
   generateReleaseDraft, dispatchReleaseWrite, dispatchRepoIntro,
 } from '@/lib/api/github'
 import { WritingPlan, getWritingPlans } from '@/lib/api/writing-plans'
 import { PublishAccount, listPublishAccounts } from '@/lib/api/publish-accounts'
 import { AddToTopicPopover } from '@/components/features/AddToTopicPopover'
 
-type Tab = 'trending' | 'issues' | 'pain-points' | 'releases'
-
-const severityColor: Record<string, string> = {
-  high: 'text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950 border-red-200 dark:border-red-800',
-  medium: 'text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950 border-amber-200 dark:border-amber-800',
-  low: 'text-zinc-500 bg-zinc-50 dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700',
-}
-const severityLabel: Record<string, string> = { high: '高', medium: '中', low: '低' }
-
-const categoryIcon: Record<string, typeof Bug> = {
-  bug: Bug,
-  feature: Lightbulb,
-  performance: Gauge,
-  ux: MousePointer,
-  docs: BookOpen,
-}
-const categoryLabel: Record<string, string> = {
-  bug: 'Bug', feature: '功能', performance: '性能', ux: '体验', docs: '文档',
-}
+type Tab = 'trending' | 'releases'
 
 function formatStars(n: number) {
   return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n)
@@ -139,7 +121,7 @@ function SubscribeDialog({
         <DialogHeader>
           <DialogTitle>订阅管理 · GitHub</DialogTitle>
           <DialogDescription>
-            添加要追踪的仓库，系统会按设定间隔自动采集 Issues / Releases / 用户痛点。
+            添加要追踪的仓库，系统会按设定间隔自动采集 Releases。
           </DialogDescription>
         </DialogHeader>
 
@@ -366,145 +348,6 @@ function TrendingTab({ items }: { items: GithubTrendingRepo[] }) {
               </div>
             </div>
           ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ── Issues Tab ─────────────────────────────────────────────────────────────────
-
-function IssuesTab({ repoId, issues: initial, onLoad }: { repoId: string; issues: GithubIssue[]; onLoad: (rows: GithubIssue[]) => void }) {
-  const [issues, setIssues] = useState(initial)
-  const [collecting, setCollecting] = useState(false)
-  const [expanded, setExpanded] = useState<string | null>(null)
-  const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  function stopPoll() {
-    if (pollTimer.current) { clearTimeout(pollTimer.current); pollTimer.current = null }
-  }
-
-  function applyRows(rows: GithubIssue[]) {
-    setIssues(rows)
-    onLoad(rows)
-  }
-
-  async function pollUntilData(rid: string, attempts = 0) {
-    if (attempts > 20) { setCollecting(false); return }
-    const rows = await getGithubIssues(rid, 100).catch(() => null)
-    if (rows && rows.length > 0) {
-      applyRows(rows)
-      setCollecting(false)
-    } else {
-      pollTimer.current = setTimeout(() => pollUntilData(rid, attempts + 1), 3000)
-    }
-  }
-
-  // Manual refresh button — only user-initiated
-  async function handleCollect() {
-    setCollecting(true)
-    stopPoll()
-    try {
-      const [owner, repo] = repoId.split('/')
-      await collectOneRepo(owner, repo)
-      const rows = await getGithubIssues(repoId, 100)
-      applyRows(rows)
-      toast.success('采集完成')
-    } catch {
-      toast.error('采集失败')
-    } finally {
-      setCollecting(false)
-    }
-  }
-
-  // When no data yet, poll — backend is already collecting in background
-  useEffect(() => {
-    stopPoll()
-    setIssues(initial)
-    if (initial.length === 0) {
-      setCollecting(true)
-      pollUntilData(repoId)
-    }
-    return stopPoll
-  }, [repoId])
-
-  return (
-    <div className="flex-1 overflow-y-auto">
-      <div className="px-6 py-3 border-b border-zinc-100 dark:border-zinc-800 flex items-center gap-3">
-        <span className="text-xs text-zinc-400">{issues.length} 条 Open Issues · 按关注度排序</span>
-        <Button size="sm" variant="outline" className="ml-auto h-7 text-xs gap-1" onClick={handleCollect} disabled={collecting}>
-          <RefreshCw className={cn('w-3.5 h-3.5', collecting && 'animate-spin')} />立即采集
-        </Button>
-      </div>
-
-      {issues.length === 0 ? (
-        <div className="flex flex-col items-center justify-center h-64 gap-3 text-center">
-          <AlertCircle className="w-10 h-10 text-zinc-300 dark:text-zinc-700" />
-          <p className="text-sm text-zinc-500">暂无 Issues</p>
-          <p className="text-xs text-zinc-400">点击「立即采集」从 GitHub 拉取</p>
-        </div>
-      ) : (
-        <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
-          {issues.map(issue => {
-            const isOpen = expanded === issue.id
-            return (
-              <div key={issue.id} className="px-6 py-3 hover:bg-zinc-50/80 dark:hover:bg-zinc-800/30 transition-colors">
-                <div className="flex items-start gap-3">
-                  <AlertCircle className="w-4 h-4 text-emerald-500 flex-shrink-0 mt-0.5" />
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-start gap-2 mb-1">
-                      <a
-                        href={issue.html_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-sm font-medium text-zinc-900 dark:text-zinc-100 hover:text-indigo-600 transition-colors leading-snug flex-1"
-                      >
-                        {issue.title}
-                      </a>
-                      <span className="text-[10px] text-zinc-400 flex-shrink-0">#{issue.number}</span>
-                      <AddToTopicPopover
-                        url={issue.html_url}
-                        title={issue.title}
-                        summary={issue.body?.slice(0, 200) ?? ''}
-                        platform="github"
-                        className="!w-6 !h-6 flex-shrink-0"
-                      />
-                    </div>
-                    {issue.labels.length > 0 && (
-                      <div className="flex flex-wrap items-center gap-1.5 mb-1.5">
-                        {issue.labels.map(l => (
-                          <span key={l} className="text-[10px] bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800 px-1.5 py-0.5 rounded-full">{l}</span>
-                        ))}
-                      </div>
-                    )}
-                    {issue.body && (
-                      <div>
-                        <p className={cn('text-xs text-zinc-500 leading-relaxed', !isOpen && 'line-clamp-2')}>
-                          {issue.body}
-                        </p>
-                        {issue.body.length > 200 && (
-                          <button
-                            onClick={() => setExpanded(isOpen ? null : issue.id)}
-                            className="mt-0.5 flex items-center gap-0.5 text-[11px] text-zinc-400 hover:text-indigo-500"
-                          >
-                            <ChevronDown className={cn('w-3 h-3 transition-transform', isOpen && 'rotate-180')} />
-                            {isOpen ? '收起' : '展开'}
-                          </button>
-                        )}
-                      </div>
-                    )}
-                    <div className="flex items-center gap-3 mt-1.5 text-[11px] text-zinc-400">
-                      <span>👍 {issue.reactions}</span>
-                      <span>💬 {issue.comments}</span>
-                      <span className="flex items-center gap-1">
-                        <Clock className="w-3 h-3" />{formatRelative(issue.created_at)}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )
-          })}
         </div>
       )}
     </div>
@@ -807,95 +650,16 @@ function ReleasesTab({ repoId, releases: initial, onLoad }: { repoId: string; re
   )
 }
 
-// ── Pain Points Tab ────────────────────────────────────────────────────────────
-
-function PainPointsTab({ repoId, points: initial }: { repoId: string; points: IssuePainPoint[] }) {
-  const [points, setPoints] = useState(initial)
-  const [analyzing, setAnalyzing] = useState(false)
-
-  async function handleAnalyze() {
-    setAnalyzing(true)
-    try {
-      const result = await analyzePainPoints(repoId)
-      setPoints(await getPainPoints(repoId))
-      toast.success(`分析完成，归纳出 ${result.new_pain_points} 个痛点`)
-    } catch {
-      toast.error('分析失败，请检查 LLM 配置')
-    } finally {
-      setAnalyzing(false)
-    }
-  }
-
-  return (
-    <div className="flex-1 overflow-y-auto">
-      <div className="px-6 py-3 border-b border-zinc-100 dark:border-zinc-800 flex items-center gap-3">
-        <span className="text-xs text-zinc-400">{points.length} 个用户痛点 · AI 归纳自 Issues</span>
-        <Button size="sm" variant="outline" className="ml-auto h-7 text-xs gap-1" onClick={handleAnalyze} disabled={analyzing}>
-          {analyzing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5" />}
-          {analyzing ? 'AI 分析中…' : 'AI 重新分析'}
-        </Button>
-      </div>
-
-      {points.length === 0 ? (
-        <div className="flex flex-col items-center justify-center h-64 gap-3 text-center">
-          <Zap className="w-10 h-10 text-zinc-300 dark:text-zinc-700" />
-          <p className="text-sm text-zinc-500">暂无痛点分析</p>
-          <p className="text-xs text-zinc-400">先采集 Issues，再点击「AI 重新分析」</p>
-        </div>
-      ) : (
-        <div className="p-6 grid gap-3">
-          {points.map(pp => {
-            const Icon = categoryIcon[pp.category] ?? Bug
-            return (
-              <div
-                key={pp.id}
-                className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-4 hover:border-zinc-300 dark:hover:border-zinc-700 transition-colors"
-              >
-                <div className="flex items-start gap-3">
-                  <div className="w-7 h-7 rounded-lg bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center flex-shrink-0">
-                    <Icon className="w-3.5 h-3.5 text-zinc-500" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1.5 flex-wrap">
-                      <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">{pp.title}</span>
-                      <span className={cn('text-[10px] font-medium border px-1.5 py-0.5 rounded-full', severityColor[pp.severity])}>
-                        严重性：{severityLabel[pp.severity]}
-                      </span>
-                      <span className="text-[10px] text-zinc-400 bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded">
-                        {categoryLabel[pp.category] ?? pp.category}
-                      </span>
-                    </div>
-                    <p className="text-xs text-zinc-500 leading-relaxed mb-2">{pp.description}</p>
-                    <div className="flex items-center gap-3 text-[11px] text-zinc-400">
-                      <span>涉及 {pp.issue_count} 个 Issues</span>
-                      {pp.example_issues.length > 0 && (
-                        <span>代表：{pp.example_issues.slice(0, 5).map(n => `#${n}`).join(' ')}</span>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )
-          })}
-        </div>
-      )}
-    </div>
-  )
-}
-
 // ── Main Client ────────────────────────────────────────────────────────────────
 
 interface Props {
   initialRepos: GithubRepo[]
   initialTrending: GithubTrendingRepo[]
-  initialIssues: GithubIssue[]
-  initialPainPoints: IssuePainPoint[]
   initialReleases: GithubRelease[]
 }
 
-export function GithubClient({ initialRepos, initialTrending, initialIssues, initialPainPoints, initialReleases }: Props) {
+export function GithubClient({ initialRepos, initialTrending, initialReleases }: Props) {
   const [repos, setRepos] = useState(initialRepos)
-  const [allIssues, setAllIssues] = useState(initialIssues)
   const [allReleases, setAllReleases] = useState(initialReleases)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [tab, setTab] = useState<Tab>('trending')
@@ -913,14 +677,6 @@ export function GithubClient({ initialRepos, initialTrending, initialIssues, ini
 
   const selected = repos.find(r => r.id === selectedId) ?? null
 
-  const repoIssues = useMemo(
-    () => allIssues.filter(i => i.repo_id === selectedId),
-    [allIssues, selectedId]
-  )
-  const repoPainPoints = useMemo(
-    () => initialPainPoints.filter(p => p.repo_id === selectedId),
-    [initialPainPoints, selectedId]
-  )
   const repoReleases = useMemo(
     () => allReleases.filter(r => r.repo_id === selectedId),
     [allReleases, selectedId]
@@ -928,7 +684,7 @@ export function GithubClient({ initialRepos, initialTrending, initialIssues, ini
 
   const handleSelectRepo = useCallback((id: string) => {
     setSelectedId(id)
-    setTab(prev => prev === 'trending' ? 'issues' : prev)
+    setTab('releases')
   }, [])
 
   async function handleDelete(repo: GithubRepo) {
@@ -985,8 +741,6 @@ export function GithubClient({ initialRepos, initialTrending, initialIssues, ini
   const tabs: { id: Tab; label: string; icon: typeof GitFork }[] = [
     { id: 'trending', label: '热门趋势', icon: TrendingUp },
     { id: 'releases', label: '发布', icon: Tag },
-    { id: 'issues', label: 'Issues', icon: AlertCircle },
-    { id: 'pain-points', label: '用户痛点', icon: Zap },
   ]
 
   return (
@@ -1119,7 +873,7 @@ export function GithubClient({ initialRepos, initialTrending, initialIssues, ini
                   {t.label}
                   {t.id !== 'trending' && selected && (
                     <span className="text-[10px] text-zinc-400">
-                      ({t.id === 'issues' ? repoIssues.length : t.id === 'releases' ? repoReleases.length : repoPainPoints.length})
+                      ({repoReleases.length})
                     </span>
                   )}
                 </button>
@@ -1149,14 +903,6 @@ export function GithubClient({ initialRepos, initialTrending, initialIssues, ini
             onLoad={rows => setAllReleases(prev => [...prev.filter(r => r.repo_id !== selected.id), ...rows])}
           />
         )}
-        {tab === 'issues' && selected && (
-          <IssuesTab
-            repoId={selected.id}
-            issues={repoIssues}
-            onLoad={rows => setAllIssues(prev => [...prev.filter(i => i.repo_id !== selected.id), ...rows])}
-          />
-        )}
-        {tab === 'pain-points' && selected && <PainPointsTab repoId={selected.id} points={repoPainPoints} />}
         {tab !== 'trending' && !selected && (
           <div className="flex-1 flex items-center justify-center">
             <p className="text-sm text-zinc-400">请先在左侧选择一个仓库</p>

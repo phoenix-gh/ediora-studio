@@ -144,38 +144,6 @@ class GithubRepo(Base):
     release_draft_types: Mapped[list] = mapped_column(JSON, default=lambda: ["tech", "product"])
 
 
-class GithubIssue(Base):
-    __tablename__ = "github_issues"
-
-    id: Mapped[str] = mapped_column(String, primary_key=True)  # "owner/repo:number"
-    repo_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
-    number: Mapped[int] = mapped_column(Integer, nullable=False)
-    title: Mapped[str] = mapped_column(String, default="")
-    body: Mapped[str] = mapped_column(Text, default="")
-    labels: Mapped[list] = mapped_column(JSON, default=list)
-    state: Mapped[str] = mapped_column(String, default="open")
-    comments: Mapped[int] = mapped_column(Integer, default=0)
-    reactions: Mapped[int] = mapped_column(Integer, default=0)
-    html_url: Mapped[str] = mapped_column(String, default="")
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
-    collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
-
-
-class IssuePainPoint(Base):
-    __tablename__ = "issue_pain_points"
-
-    id: Mapped[str] = mapped_column(String, primary_key=True)
-    repo_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
-    title: Mapped[str] = mapped_column(String, nullable=False)
-    description: Mapped[str] = mapped_column(Text, default="")
-    issue_count: Mapped[int] = mapped_column(Integer, default=0)
-    example_issues: Mapped[list] = mapped_column(JSON, default=list)
-    category: Mapped[str] = mapped_column(String, default="bug")   # bug/feature/performance/ux/docs
-    severity: Mapped[str] = mapped_column(String, default="medium")  # high/medium/low
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
-
-
 class GithubTrendingRepo(Base):
     __tablename__ = "github_trending"
 
