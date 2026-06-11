@@ -151,6 +151,21 @@ def test_collect_stores_is_reply_flag(client):
     assert posts["rep"]["is_reply"] is True
 
 
+def test_recollect_corrects_stale_is_reply_flag(client):
+    # 修复前入库的回复贴 is_reply=False（ALTER 默认值）；重采时 upsert 必须
+    # 用最新解析值纠正，否则 collected_at 被刷新而 is_reply 永远是错的。
+    sub = client.post(BASE, json={"url": "https://x.com/foo"}).json()
+    with patch("routers.x.grab_timeline",
+               new=AsyncMock(return_value=[_fake_post("t1", is_reply=False)])):
+        client.post(f"/api/x/subscriptions/{sub['id']}/collect-sync")
+    with patch("routers.x.grab_timeline",
+               new=AsyncMock(return_value=[_fake_post("t1", is_reply=True)])):
+        r = client.post(f"/api/x/subscriptions/{sub['id']}/collect-sync")
+    assert r.status_code == 200, r.text
+    posts = {p["tweet_id"]: p for p in client.get("/api/x/posts").json()}
+    assert posts["t1"]["is_reply"] is True
+
+
 def test_auth_status_endpoint(client):
     r = client.get("/api/x/auth-status")
     assert r.status_code == 200

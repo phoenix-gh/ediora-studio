@@ -267,6 +267,7 @@ def _upsert_post_stmt(db: AsyncSession, sub_id: int, p):
             "author_avatar": stmt.excluded.author_avatar,
             "cover_image": stmt.excluded.cover_image,
             "collected_at": stmt.excluded.collected_at,
+            "is_reply": stmt.excluded.is_reply,
         },
     )
     return stmt
