@@ -390,12 +390,14 @@ async def scheduled_ref_classify():
 
 
 async def scheduled_x_reply_scout():
-    """扫描新采集的 X 帖子，LLM 评估回复价值，高分帖发 Telegram 通知附带回复草稿。"""
+    """动态通知：勾选 notify_new_posts 的订阅出新帖时，LLM 评回复价值（0-10）
+    并起草回复建议，每条新帖经 hermes send 推送 Telegram。
+    只看开启时刻（notify_enabled_at）之后采集的帖子，避免积压旧帖刷屏。"""
     from logger import log
     from config import get_config
     from datetime import datetime, timezone, timedelta
-    from sqlalchemy import select
-    from models import XPost
+    from sqlalchemy import select, func
+    from models import XPost, XSubscription
 
     try:
         cfg = await get_config()
@@ -403,25 +405,30 @@ async def scheduled_x_reply_scout():
         if not _should_run("x_reply_scout", minutes * 60):
             return
 
-        threshold = float(cfg.get("x_reply_score_threshold", 7))
         batch_size = int(cfg.get("x_reply_scout_batch", 20))
+        now = datetime.now(timezone.utc)
+        cutoff = now - timedelta(hours=48)
 
-        cutoff = datetime.now(timezone.utc) - timedelta(hours=48)
         async with SessionLocal() as db:
             rows = (await db.execute(
-                select(XPost)
+                select(XPost, XSubscription.label)
+                .join(XSubscription, XPost.subscription_id == XSubscription.id)
+                .where(XSubscription.enabled == True)
+                .where(XSubscription.notify_new_posts == True)
                 .where(XPost.x_reply_score.is_(None))
                 .where(XPost.published_at >= cutoff)
+                .where(XPost.collected_at >= func.coalesce(XSubscription.notify_enabled_at, now))
                 .order_by(XPost.collected_at.desc())
                 .limit(batch_size)
-            )).scalars().all()
+            )).all()
 
         if not rows:
             return
 
+        from hermes_kanban_client import _HERMES_BIN
         from llm import assess_x_reply
         notified = 0
-        for post in rows:
+        for post, sub_label in rows:
             try:
                 result = await assess_x_reply({
                     "username": post.username,
@@ -435,33 +442,37 @@ async def scheduled_x_reply_scout():
                 score = result["score"]
                 draft = result.get("draft")
 
+                content_preview = (post.content or "")[:280]
+                msg = (
+                    f"🔔 X 动态 · {sub_label}\n\n"
+                    f"@{post.username}（{post.display_name}）\n"
+                    f"{content_preview}\n\n"
+                    f"👁 {post.views}  ❤️ {post.likes}  🔁 {post.reposts}  💬 {post.replies}\n\n"
+                    f"⭐ 回复价值 {score}/10：{result.get('reason', '')}\n"
+                    + (f"📝 建议回复：\n{draft}\n\n" if draft else "\n")
+                    + f"🔗 {post.url}"
+                )
+                proc = await asyncio.create_subprocess_exec(
+                    _HERMES_BIN, "send", "--to", "telegram", msg,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                _, err = await proc.communicate()
+                if proc.returncode != 0:
+                    await log("x_reply", "warn",
+                              f"帖子 {post.tweet_id} Telegram 推送失败",
+                              err.decode()[:300])
+                else:
+                    notified += 1
+
                 async with SessionLocal() as db:
                     p = await db.get(XPost, post.tweet_id)
                     if p:
                         p.x_reply_score = float(score)
                         p.x_reply_draft = draft
-                        if score >= threshold and draft:
+                        if proc.returncode == 0:
                             p.x_reply_notified_at = datetime.now(timezone.utc)
                         await db.commit()
-
-                if score >= threshold and draft:
-                    content_preview = (post.content or "")[:280]
-                    msg = (
-                        f"🎯 X 回复建议 [{score}/10]\n\n"
-                        f"@{post.username}（{post.display_name}）\n"
-                        f"{content_preview}\n\n"
-                        f"👁 {post.views}  ❤️ {post.likes}  🔁 {post.reposts}  💬 {post.replies}\n\n"
-                        f"💡 {result.get('reason', '')}\n\n"
-                        f"📝 建议回复：\n{draft}\n\n"
-                        f"🔗 {post.url}"
-                    )
-                    proc = await asyncio.create_subprocess_exec(
-                        "/home/violet/.local/bin/hermes", "send", "--to", "telegram", msg,
-                        stdout=asyncio.subprocess.PIPE,
-                        stderr=asyncio.subprocess.PIPE,
-                    )
-                    await proc.wait()
-                    notified += 1
 
             except Exception as e:
                 await log("x_reply", "error", f"帖子 {post.tweet_id} 评估异常", str(e))
@@ -470,10 +481,10 @@ async def scheduled_x_reply_scout():
 
         if notified:
             await log("x_reply", "ok",
-                      f"X 回复侦查：处理 {len(rows)} 条，{notified} 条高价值帖已推送 Telegram")
+                      f"X 动态通知：{notified}/{len(rows)} 条新帖已推送 Telegram")
 
     except Exception as e:
-        await log("x_reply", "error", "X 回复侦查异常", str(e))
+        await log("x_reply", "error", "X 动态通知异常", str(e))
 
 
 def register_jobs(scheduler, cfg):

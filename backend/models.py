@@ -237,6 +237,10 @@ class XSubscription(Base):
     extra_terms: Mapped[str] = mapped_column(String, default="")
     sort: Mapped[str] = mapped_column(String, default="top")
     max_results: Mapped[int] = mapped_column(Integer, default=100)
+    # 动态通知：勾选后该订阅的新帖经 LLM 评估并推送 Telegram；
+    # notify_enabled_at 记录开启时刻，只推送之后采集到的帖子
+    notify_new_posts: Mapped[bool] = mapped_column(Boolean, default=False)
+    notify_enabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_collected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_error: Mapped[str] = mapped_column(String, default="")
     added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, index=True)

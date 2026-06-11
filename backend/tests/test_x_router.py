@@ -391,3 +391,44 @@ def test_create_timeline_with_explicit_label(client):
     })
     assert r.status_code == 200, r.text
     assert r.json()["label"] == "马斯克"  # not auto "@elonmusk"
+
+
+# ── 动态通知 ──────────────────────────────────────────────────────────────────
+
+
+def test_subscription_notify_defaults_off(client):
+    sub = client.post(BASE, json={"url": "https://x.com/a"}).json()
+    assert sub["notify_new_posts"] is False
+
+
+def test_patch_notify_on_then_off(client):
+    sub = client.post(BASE, json={"url": "https://x.com/a"}).json()
+    r = client.patch(f"{BASE}/{sub['id']}", json={"notify_new_posts": True})
+    assert r.status_code == 200, r.text
+    assert r.json()["notify_new_posts"] is True
+    r = client.patch(f"{BASE}/{sub['id']}", json={"notify_new_posts": False})
+    assert r.status_code == 200
+    assert r.json()["notify_new_posts"] is False
+
+
+def test_patch_notify_on_stamps_enabled_at(client):
+    """开启动态通知须记录 notify_enabled_at（只推送之后采集的帖子）。"""
+    sub = client.post(BASE, json={"url": "https://x.com/a"}).json()
+    client.patch(f"{BASE}/{sub['id']}", json={"notify_new_posts": True})
+
+    import asyncio as _asyncio
+    from database import SessionLocal
+    from models import XSubscription
+
+    async def _fetch():
+        async with SessionLocal() as db:
+            return await db.get(XSubscription, sub["id"])
+
+    row = _asyncio.new_event_loop().run_until_complete(_fetch())
+    assert row.notify_new_posts is True
+    assert row.notify_enabled_at is not None
+
+    client.patch(f"{BASE}/{sub['id']}", json={"notify_new_posts": False})
+    row = _asyncio.new_event_loop().run_until_complete(_fetch())
+    assert row.notify_new_posts is False
+    assert row.notify_enabled_at is None

@@ -57,7 +57,6 @@ DEFAULTS: dict[str, str] = {
     ),
     "x_collect_interval_minutes": "15",
     "x_reply_scout_interval_minutes": "15",
-    "x_reply_score_threshold": "7",
     "x_reply_scout_batch": "20",
     "ref_collect_interval_minutes": "15",
     "ref_classify_interval_minutes": "60",

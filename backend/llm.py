@@ -491,7 +491,7 @@ async def _classify_category_chunk(
 
 
 async def assess_x_reply(post: dict) -> dict:
-    """Score an X post for reply value (0-10). If score >= 7, also drafts a short reply.
+    """Score an X post for reply value (0-10) and draft a short reply suggestion.
     Returns {score: int, reason: str, draft: str|None}."""
     prompt = f"""你是一位活跃在 X 平台的科技行业从业者，擅长用英文写有价值的短评。
 
@@ -506,10 +506,10 @@ async def assess_x_reply(post: dict) -> dict:
 - 5-7：普通质量，可回复但收益有限
 - 0-4：广告、纯日常闲聊、语言不通、低价值内容
 
-若 score >= 7，用中文写 1-2 句回复。要求：自然口语、有实质内容（具体问题/数据补充/独到观点），不要泛泛夸奖。
+无论评分高低，都用中文写 1-2 句回复建议。要求：自然口语、有实质内容（具体问题/数据补充/独到观点），不要泛泛夸奖。
 
 以 JSON 格式输出（只输出 JSON，不要其他文字）：
-{{"score": <0-10 整数>, "reason": "<20字内评分原因>", "draft": "<中文回复 or null>"}}"""
+{{"score": <0-10 整数>, "reason": "<20字内评分原因>", "draft": "<中文回复建议>"}}"""
 
     try:
         raw = (await _call(prompt, max_tokens=400)).strip()

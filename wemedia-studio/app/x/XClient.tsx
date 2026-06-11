@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import {
   Bird, Search, RefreshCw, Loader2, Settings, Trash2, ExternalLink,
   Globe, ListFilter, MessageSquare, Repeat2, Heart, Eye, Pencil, Check, X,
-  SendHorizonal,
+  SendHorizonal, Bell, BellOff,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
@@ -75,6 +75,15 @@ export function XClient({
   const handleToggle = async (s: XSubscription) => {
     await patchXSubscription(s.id, { enabled: !s.enabled })
     await reloadSubs()
+  }
+
+  const handleToggleNotify = async (s: XSubscription) => {
+    const next = !s.notify_new_posts
+    await patchXSubscription(s.id, { notify_new_posts: next })
+    await reloadSubs()
+    toast.success(next
+      ? `「${s.label}」动态通知已开启：新帖将推送 Telegram`
+      : `「${s.label}」动态通知已关闭`)
   }
 
   const handleRename = async (s: XSubscription, label: string) => {
@@ -241,6 +250,7 @@ export function XClient({
         actingId={actingId}
         onAdd={handleAdd}
         onToggle={handleToggle}
+        onToggleNotify={handleToggleNotify}
         onDelete={handleDelete}
         onCollect={handleCollectOne}
         onRename={handleRename}
@@ -466,7 +476,7 @@ function PostCard({ post: p }: { post: XPost | XSearchPost }) {
 
 function SubscribeDialog({
   open, onOpenChange, subs, actingId,
-  onAdd, onToggle, onDelete, onCollect, onRename, onSaved,
+  onAdd, onToggle, onToggleNotify, onDelete, onCollect, onRename, onSaved,
 }: {
   open: boolean
   onOpenChange: (v: boolean) => void
@@ -474,6 +484,7 @@ function SubscribeDialog({
   actingId: number | null
   onAdd: (input: CreateXSubscriptionInput) => Promise<void>
   onToggle: (s: XSubscription) => Promise<void>
+  onToggleNotify: (s: XSubscription) => Promise<void>
   onDelete: (s: XSubscription) => Promise<void>
   onCollect: (s: XSubscription) => Promise<void>
   onRename: (s: XSubscription, label: string) => Promise<void>
@@ -563,7 +574,8 @@ function SubscribeDialog({
         <DialogHeader>
           <DialogTitle className="text-base">X 订阅管理</DialogTitle>
           <DialogDescription className="text-xs">
-            时间线订阅用主页/list URL；搜索订阅用 X 高级搜索语法，两者都定时落库到 x_posts
+            时间线订阅用主页/list URL；搜索订阅用 X 高级搜索语法，两者都定时落库到 x_posts。
+            🔔 动态通知：新帖经 LLM 评回复价值并附建议，推送到 Telegram
           </DialogDescription>
         </DialogHeader>
 
@@ -717,6 +729,22 @@ function SubscribeDialog({
                           }}
                           title={s.kind === 'search' ? '编辑' : '重命名'}>
                           <Pencil className="w-3 h-3" />
+                        </Button>
+                        <Button size="sm" variant="ghost"
+                          className={cn(
+                            'h-7 w-7 p-0',
+                            s.notify_new_posts
+                              ? 'text-amber-500 hover:text-amber-600'
+                              : 'text-zinc-300 hover:text-zinc-500',
+                          )}
+                          disabled={busyId === s.id}
+                          onClick={() => wrap(s, onToggleNotify)}
+                          title={s.notify_new_posts
+                            ? '动态通知已开启：新帖推送 Telegram（含回复建议与评分），点击关闭'
+                            : '开启动态通知：新帖推送 Telegram（含回复建议与评分）'}>
+                          {s.notify_new_posts
+                            ? <Bell className="w-3 h-3" />
+                            : <BellOff className="w-3 h-3" />}
                         </Button>
                         <Switch checked={s.enabled} onCheckedChange={() => wrap(s, onToggle)}
                           disabled={busyId === s.id} />

@@ -28,6 +28,7 @@ class SubscriptionOut(BaseModel):
     extra_terms: str = ""
     sort: str = "top"
     max_results: int = 100
+    notify_new_posts: bool = False
     last_collected_at: Optional[datetime]
     last_error: str
     added_at: datetime
@@ -54,6 +55,7 @@ class SubscriptionPatch(BaseModel):
     label: Optional[str] = None
     raw_query: Optional[str] = None
     max_results: Optional[int] = None
+    notify_new_posts: Optional[bool] = None
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -74,7 +76,7 @@ async def _to_out(db: AsyncSession, sub: XSubscription) -> SubscriptionOut:
         id=sub.id, url=sub.url, label=sub.label, kind=sub.kind, enabled=sub.enabled,
         raw_query=sub.raw_query, min_faves=sub.min_faves, min_retweets=sub.min_retweets,
         lang=sub.lang, days=sub.days, extra_terms=sub.extra_terms, sort=sub.sort,
-        max_results=sub.max_results,
+        max_results=sub.max_results, notify_new_posts=sub.notify_new_posts,
         last_collected_at=sub.last_collected_at, last_error=sub.last_error,
         added_at=sub.added_at, post_count=int(cnt),
     )
@@ -163,6 +165,12 @@ async def patch_subscription(
         sub.raw_query = rq
     if body.max_results is not None:
         sub.max_results = max(1, min(500, body.max_results))
+    if body.notify_new_posts is not None and body.notify_new_posts != sub.notify_new_posts:
+        sub.notify_new_posts = body.notify_new_posts
+        # 只在开启时刻起算，避免把开启前积压的旧帖推送出去
+        sub.notify_enabled_at = (
+            datetime.now(timezone.utc) if body.notify_new_posts else None
+        )
     await db.commit()
     await db.refresh(sub)
     return await _to_out(db, sub)

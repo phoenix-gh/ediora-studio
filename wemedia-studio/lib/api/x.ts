@@ -16,6 +16,7 @@ export interface XSubscription {
   extra_terms: string
   sort: string
   max_results: number
+  notify_new_posts: boolean
   last_collected_at: string | null
   last_error: string
   added_at: string
@@ -105,7 +106,7 @@ export async function createXSubscription(
 
 export async function patchXSubscription(
   id: number,
-  body: Partial<Pick<XSubscription, 'enabled' | 'label' | 'raw_query' | 'max_results'>>,
+  body: Partial<Pick<XSubscription, 'enabled' | 'label' | 'raw_query' | 'max_results' | 'notify_new_posts'>>,
 ): Promise<XSubscription> {
   return apiFetch<XSubscription>(`/x/subscriptions/${id}`, {
     method: 'PATCH',
