@@ -70,7 +70,7 @@ export function GitHubSection({ settings, onSaved }: { settings: AppSettings | n
       {/* Intervals */}
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-1.5">
-          <Label className="text-xs">Issues 采集间隔</Label>
+          <Label className="text-xs">采集调度间隔</Label>
           <div className="flex items-center gap-2">
             <Input
               type="number" min={1} max={1440}

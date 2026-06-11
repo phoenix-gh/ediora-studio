@@ -69,7 +69,7 @@ function SubscribeDialog({
   onDeleted: (id: string) => void
 }) {
   const [input, setInput] = useState('')
-  const [intervalMin, setIntervalMin] = useState('10')
+  const [intervalMin, setIntervalMin] = useState('60')
   const [group, setGroup] = useState('未分组')
   const [adding, setAdding] = useState(false)
   const [actingId, setActingId] = useState<string | null>(null)
@@ -85,7 +85,7 @@ function SubscribeDialog({
     const [owner, repo] = parts
     setAdding(true)
     try {
-      const added = await addGithubRepo(owner, repo, group, parseInt(intervalMin) || 10)
+      const added = await addGithubRepo(owner, repo, group, parseInt(intervalMin) || 60)
       onAdded(added)
       toast.success(`已添加 ${owner}/${repo}，后台采集中…`)
       setInput('')

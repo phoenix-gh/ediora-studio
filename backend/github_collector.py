@@ -299,9 +299,16 @@ async def collect_all_repos(db: AsyncSession) -> list[dict]:
     """Collect releases for all non-muted repos that are due for collection.
 
     issues 抓取暂时停用（用不到，且匿名配额吃紧）；恢复时把
-    collect_repo_issues 加回循环即可。"""
+    collect_repo_issues 加回循环即可。
+
+    最久未采集的优先（NULL 最前）——配额耗尽时被跳过的库
+    下一轮自动排到队首，不会有库永远饿死。"""
     repos = (
-        await db.execute(select(GithubRepo).where(GithubRepo.muted == False))
+        await db.execute(
+            select(GithubRepo)
+            .where(GithubRepo.muted == False)
+            .order_by(GithubRepo.last_collected_at.asc().nulls_first())
+        )
     ).scalars().all()
 
     results = []

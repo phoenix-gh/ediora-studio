@@ -71,13 +71,15 @@ def _release(tag="v1.0.0"):
     }
 
 
-def _add_repo(rid="o/r"):
+def _add_repo(rid="o/r", last_collected_at=None):
     from database import SessionLocal
     import models
 
     async def _run():
         async with SessionLocal() as db:
-            db.add(models.GithubRepo(id=rid, owner="o", repo="r", stars=0))
+            owner, repo = rid.split("/")
+            db.add(models.GithubRepo(id=rid, owner=owner, repo=repo, stars=0,
+                                     last_collected_at=last_collected_at))
             await db.commit()
         return rid
     return asyncio.new_event_loop().run_until_complete(_run())
@@ -134,3 +136,29 @@ def test_collect_all_repos_skips_issues(client, monkeypatch):
     assert len(results) == 1
     assert results[0]["error"] is None
     assert results[0]["new_releases"] == 1
+
+
+def test_collect_all_repos_oldest_first(client, monkeypatch):
+    # 配额耗尽时迭代靠后的库会被跳过，所以必须最久未采的优先：
+    # 从未采集(NULL) → 最旧 → 较新。
+    from datetime import timedelta
+    import github_collector as gc
+    from database import SessionLocal
+
+    now = datetime.now(timezone.utc)
+    _add_repo("o/recent", last_collected_at=now - timedelta(hours=2))
+    _add_repo("o/never", last_collected_at=None)
+    _add_repo("o/oldest", last_collected_at=now - timedelta(hours=9))
+
+    monkeypatch.setattr(gc.httpx, "AsyncClient", _FakeAsyncClient([]))
+
+    async def _fake_meta(owner, repo, token=""):
+        return {}
+    monkeypatch.setattr(gc, "fetch_repo_meta", _fake_meta)
+
+    async def _run():
+        async with SessionLocal() as db:
+            return await gc.collect_all_repos(db)
+
+    results = asyncio.new_event_loop().run_until_complete(_run())
+    assert [r["repo_id"] for r in results] == ["o/never", "o/oldest", "o/recent"]

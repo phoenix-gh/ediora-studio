@@ -499,7 +499,7 @@ class GithubRepoCreate(BaseModel):
     owner: str
     repo: str
     group: str = "未分组"
-    collect_interval_minutes: int = 10
+    collect_interval_minutes: int = 60
 
 
 class GithubRepoUpdate(BaseModel):

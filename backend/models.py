@@ -137,7 +137,7 @@ class GithubRepo(Base):
     language: Mapped[str] = mapped_column(String, default="")
     group: Mapped[str] = mapped_column(String, default="未分组")
     muted: Mapped[bool] = mapped_column(Boolean, default=False)
-    collect_interval_minutes: Mapped[int] = mapped_column(Integer, default=10)
+    collect_interval_minutes: Mapped[int] = mapped_column(Integer, default=60)
     last_collected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     release_draft_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
