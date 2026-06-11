@@ -257,3 +257,66 @@ def test_alerts_sorted_by_severity(client):
     sevs = [a["severity"] for a in body["alerts"]]
     assert sevs == sorted(sevs, key={"error": 0, "warn": 1, "info": 2}.get)
     assert sevs[0] == "error"
+
+
+# ── 今日 Release / 今日产出 / 异常隔离 ──────────────────────────────────────
+
+def test_releases_today_with_draft_link(client):
+    from models import GithubRelease, ArticleDraft
+    start = _today_start()
+
+    async def seed(db):
+        db.add(GithubRelease(id="o/r:v1.0.0", repo_id="o/r", tag_name="v1.0.0",
+                             name="Release v1", published_at=start + timedelta(hours=1)))
+        db.add(GithubRelease(id="o/r:v0.9.0", repo_id="o/r", tag_name="v0.9.0",
+                             name="老版本", published_at=start - timedelta(hours=1)))
+        db.add(ArticleDraft(topic_id="release:o/r:v1.0.0", title="[tech] o/r v1.0.0"))
+    _run_db(seed)
+
+    body = _get(client)
+    rels = body["releases_today"]
+    assert len(rels) == 1
+    assert rels[0]["tag_name"] == "v1.0.0"
+    assert len(rels[0]["draft_ids"]) == 1
+
+
+def test_release_today_without_draft(client):
+    from models import GithubRelease
+    start = _today_start()
+
+    async def seed(db):
+        db.add(GithubRelease(id="o/r:v2.0.0", repo_id="o/r", tag_name="v2.0.0",
+                             name="", is_prerelease=True,
+                             published_at=start + timedelta(minutes=5)))
+    _run_db(seed)
+
+    body = _get(client)
+    rels = body["releases_today"]
+    assert rels[0]["draft_ids"] == []
+    assert rels[0]["is_prerelease"] is True
+    assert rels[0]["name"] == "v2.0.0"  # name 空时回退 tag
+
+
+def test_today_output_counts(client):
+    from models import Topic, ArticleDraft
+
+    async def seed(db):
+        db.add(Topic(id="t1", title="今天的选题"))
+        db.add(ArticleDraft(topic_id="t1", title="今天的草稿"))
+    _run_db(seed)
+
+    body = _get(client)
+    assert body["today_output"] == {"topics": 1, "drafts": 1}
+
+
+def test_partial_failure_isolation(client, monkeypatch):
+    """某区块炸了：端点仍 200，errors 记录，其余区块照常。"""
+    import routers.dashboard as dash
+
+    async def boom(*args, **kwargs):
+        raise RuntimeError("固定炸点")
+    monkeypatch.setattr(dash, "_build_releases", boom)
+
+    body = _get(client)
+    assert any(e.startswith("releases:") for e in body["errors"])
+    assert len(body["sources"]) == 13

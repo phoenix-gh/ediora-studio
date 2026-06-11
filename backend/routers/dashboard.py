@@ -201,6 +201,31 @@ async def _build_sources(
     return out
 
 
+async def _build_releases(db: AsyncSession, today_start: datetime) -> list[ReleaseToday]:
+    rels = (await db.execute(
+        select(GithubRelease)
+        .where(GithubRelease.published_at >= today_start)
+        .order_by(GithubRelease.published_at.desc())
+        .limit(20)
+    )).scalars().all()
+    if not rels:
+        return []
+    topic_ids = [f"release:{r.repo_id}:{r.tag_name}" for r in rels]
+    drafts = (await db.execute(
+        select(ArticleDraft.id, ArticleDraft.topic_id)
+        .where(ArticleDraft.topic_id.in_(topic_ids))
+    )).all()
+    by_topic: dict[str, list[int]] = {}
+    for did, tid in drafts:
+        by_topic.setdefault(tid, []).append(did)
+    return [ReleaseToday(
+        repo_id=r.repo_id, tag_name=r.tag_name, name=r.name or r.tag_name,
+        published_at=_as_utc(r.published_at), is_prerelease=r.is_prerelease,
+        html_url=r.html_url,
+        draft_ids=sorted(by_topic.get(f"release:{r.repo_id}:{r.tag_name}", [])),
+    ) for r in rels]
+
+
 _SEVERITY_ORDER = {"error": 0, "warn": 1, "info": 2}
 
 
@@ -300,8 +325,24 @@ async def get_overview(db: AsyncSession = Depends(get_db)):
         alerts = []
         errors.append(f"alerts: {e}")
 
-    releases: list[ReleaseToday] = []   # Task 6
-    today_output = TodayOutput(topics=0, drafts=0)  # Task 6
+    try:
+        releases = await _build_releases(db, today_start)
+    except Exception as e:
+        releases = []
+        errors.append(f"releases: {e}")
+
+    try:
+        today_output = TodayOutput(
+            topics=(await db.execute(
+                select(func.count()).select_from(Topic).where(Topic.created_at >= today_start)
+            )).scalar_one(),
+            drafts=(await db.execute(
+                select(func.count()).select_from(ArticleDraft).where(ArticleDraft.created_at >= today_start)
+            )).scalar_one(),
+        )
+    except Exception as e:
+        today_output = TodayOutput(topics=0, drafts=0)
+        errors.append(f"output: {e}")
 
     return Overview(alerts=alerts, releases_today=releases, sources=sources,
                     today_output=today_output, errors=errors, generated_at=now)
