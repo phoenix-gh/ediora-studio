@@ -21,7 +21,7 @@
 **Files:**
 - Test: `backend/tests/test_dashboard.py`（新建）
 
-- [ ] **Step 1.1: 写测试文件（fixture 抄 test_reddit_router.py 模式 + seed 工具 + 前 4 个测试）**
+- [x] **Step 1.1: 写测试文件（fixture 抄 test_reddit_router.py 模式 + seed 工具 + 前 4 个测试）**
 
 ```python
 """Dashboard overview endpoint tests."""
@@ -173,7 +173,7 @@ def test_manual_source_last_run_from_table(client):
     assert src["today_new"] in (0, 1)  # 取决于跑测试的时刻是否同一天，不强断言
 ```
 
-- [ ] **Step 1.2: 跑测试确认全部 import 失败（router 不存在）**
+- [x] **Step 1.2: 跑测试确认全部 import 失败（router 不存在）**
 
 Run: `source ~/.zshrc && conda run -n wems python -m pytest backend/tests/test_dashboard.py -v 2>&1 | tail -5`
 Expected: FAIL/ERROR — `ModuleNotFoundError: No module named 'routers.dashboard'`（在 `_today_start` 引用处）；`test_overview_empty_db` 404。
@@ -186,7 +186,7 @@ Expected: FAIL/ERROR — `ModuleNotFoundError: No module named 'routers.dashboar
 - Create: `backend/routers/dashboard.py`
 - Modify: `backend/main.py:13`（import 行）、`backend/main.py:82` 后（挂载行）
 
-- [ ] **Step 2.1: 写 `backend/routers/dashboard.py`（本任务先到 sources / errors / 占位 alerts，releases/today_output 返回空）**
+- [x] **Step 2.1: 写 `backend/routers/dashboard.py`（本任务先到 sources / errors / 占位 alerts，releases/today_output 返回空）**
 
 ```python
 """Dashboard aggregation — read-only overview for the 今日工作台 home page.
@@ -428,7 +428,7 @@ async def get_overview(db: AsyncSession = Depends(get_db)):
                     today_output=today_output, errors=errors, generated_at=now)
 ```
 
-- [ ] **Step 2.2: 挂载到 main.py**
+- [x] **Step 2.2: 挂载到 main.py**
 
 `backend/main.py:13` 的 import 行末尾追加 `, dashboard`：
 
@@ -442,12 +442,12 @@ from routers import accounts, collect, settings, github, x, papers, personas, up
 app.include_router(dashboard.router, prefix="/api")
 ```
 
-- [ ] **Step 2.3: 跑 Task 1 测试**
+- [x] **Step 2.3: 跑 Task 1 测试**
 
 Run: `source ~/.zshrc && conda run -n wems python -m pytest backend/tests/test_dashboard.py -v 2>&1 | tail -10`
 Expected: `test_overview_empty_db`、`test_today_boundary_counts`、`test_silent_success_from_scheduler_state`、`test_manual_source_last_run_from_table` PASS；`test_latest_log_wins_and_error_alert` FAIL（alerts 还是空——断言 error 提醒那两行失败）。
 
-- [ ] **Step 2.4: 提交**
+- [x] **Step 2.4: 提交**
 
 ```bash
 git add backend/routers/dashboard.py backend/main.py backend/tests/test_dashboard.py
@@ -461,7 +461,7 @@ git commit -m "feat(dashboard): overview 端点——采集状态网格（日志
 **Files:**
 - Modify: `backend/tests/test_dashboard.py`（追加）
 
-- [ ] **Step 3.1: 追加提醒规则测试**
+- [x] **Step 3.1: 追加提醒规则测试**
 
 ```python
 # ── 提醒规则 ────────────────────────────────────────────────────────────────
@@ -570,7 +570,7 @@ def test_alerts_sorted_by_severity(client):
     assert sevs[0] == "error"
 ```
 
-- [ ] **Step 3.2: 跑测试确认新增用例失败**
+- [x] **Step 3.2: 跑测试确认新增用例失败**
 
 Run: `source ~/.zshrc && conda run -n wems python -m pytest backend/tests/test_dashboard.py -v 2>&1 | tail -12`
 Expected: Task 1 的旧用例 PASS（除 error_alert）；新增的提醒用例 FAIL（alerts 恒为空）。`test_wechat_no_accounts_no_nag` 此时会"假绿"——没关系，实现后它防回归。
@@ -582,7 +582,7 @@ Expected: Task 1 的旧用例 PASS（除 error_alert）；新增的提醒用例 
 **Files:**
 - Modify: `backend/routers/dashboard.py`
 
-- [ ] **Step 4.1: 在 `_build_sources` 之后加 `_build_alerts`**
+- [x] **Step 4.1: 在 `_build_sources` 之后加 `_build_alerts`**
 
 ```python
 _SEVERITY_ORDER = {"error": 0, "warn": 1, "info": 2}
@@ -650,7 +650,7 @@ async def _build_alerts(
     return alerts
 ```
 
-- [ ] **Step 4.2: 端点里替换占位**
+- [x] **Step 4.2: 端点里替换占位**
 
 `get_overview` 中 `alerts: list[Alert] = []      # Task 4` 一行替换为：
 
@@ -662,13 +662,13 @@ async def _build_alerts(
         errors.append(f"alerts: {e}")
 ```
 
-- [ ] **Step 4.3: 跑测试**
+- [x] **Step 4.3: 跑测试**
 
 Run: `source ~/.zshrc && conda run -n wems python -m pytest backend/tests/test_dashboard.py -v 2>&1 | tail -15`
 Expected: 全部 PASS（含 Task 1 的 `test_latest_log_wins_and_error_alert`）。
 注意 `test_stale_scheduler_alert_and_floor`：reddit 的 error/stale 都基于同一条日志——该用例日志 status 是 ok，只该出 stale 一条。
 
-- [ ] **Step 4.4: 提交**
+- [x] **Step 4.4: 提交**
 
 ```bash
 git add backend/routers/dashboard.py backend/tests/test_dashboard.py
@@ -682,7 +682,7 @@ git commit -m "feat(dashboard): 提醒规则——公众号凭证/今日未刷�
 **Files:**
 - Modify: `backend/tests/test_dashboard.py`（追加）
 
-- [ ] **Step 5.1: 追加测试**
+- [x] **Step 5.1: 追加测试**
 
 ```python
 # ── 今日 Release / 今日产出 / 异常隔离 ──────────────────────────────────────
@@ -748,7 +748,7 @@ def test_partial_failure_isolation(client, monkeypatch):
     assert len(body["sources"]) == 13
 ```
 
-- [ ] **Step 5.2: 跑测试确认失败**
+- [x] **Step 5.2: 跑测试确认失败**
 
 Run: `source ~/.zshrc && conda run -n wems python -m pytest backend/tests/test_dashboard.py -v 2>&1 | tail -8`
 Expected: 新增 4 个用例 FAIL（releases/today_output 恒空、`_build_releases` 不存在 → monkeypatch AttributeError）。
@@ -760,7 +760,7 @@ Expected: 新增 4 个用例 FAIL（releases/today_output 恒空、`_build_relea
 **Files:**
 - Modify: `backend/routers/dashboard.py`
 
-- [ ] **Step 6.1: 加 `_build_releases`（放 `_build_alerts` 后）**
+- [x] **Step 6.1: 加 `_build_releases`（放 `_build_alerts` 后）**
 
 ```python
 async def _build_releases(db: AsyncSession, today_start: datetime) -> list[ReleaseToday]:
@@ -788,7 +788,7 @@ async def _build_releases(db: AsyncSession, today_start: datetime) -> list[Relea
     ) for r in rels]
 ```
 
-- [ ] **Step 6.2: 端点里替换两处占位**
+- [x] **Step 6.2: 端点里替换两处占位**
 
 ```python
     try:
@@ -811,17 +811,17 @@ async def _build_releases(db: AsyncSession, today_start: datetime) -> list[Relea
         errors.append(f"output: {e}")
 ```
 
-- [ ] **Step 6.3: 跑全文件测试**
+- [x] **Step 6.3: 跑全文件测试**
 
 Run: `source ~/.zshrc && conda run -n wems python -m pytest backend/tests/test_dashboard.py -v 2>&1 | tail -6`
 Expected: 全部 PASS（约 16 个用例）。
 
-- [ ] **Step 6.4: 后端回归（注意 main HEAD 有 9 个 writing_plans 既存失败，与本功能无关）**
+- [x] **Step 6.4: 后端回归（注意 main HEAD 有 9 个 writing_plans 既存失败，与本功能无关）**
 
 Run: `source ~/.zshrc && conda run -n wems python -m pytest backend/tests/ -q 2>&1 | tail -5`
 Expected: 除既存 9 个 writing_plans 失败外全绿。
 
-- [ ] **Step 6.5: 提交**
+- [x] **Step 6.5: 提交**
 
 ```bash
 git add backend/routers/dashboard.py backend/tests/test_dashboard.py
@@ -839,11 +839,11 @@ git commit -m "feat(dashboard): 今日 Release（关联草稿）+ 今日产出�
 - Create: `wemedia-studio/components/features/dashboard/ReleasesToday.tsx`
 - Create: `wemedia-studio/components/features/dashboard/GenerateDraftButton.tsx`
 
-- [ ] **Step 7.0: 按 AGENTS.md 要求先读本仓库 Next.js 文档**
+- [x] **Step 7.0: 按 AGENTS.md 要求先读本仓库 Next.js 文档**
 
 `ls wemedia-studio/node_modules/next/dist/docs/`，读 server/client components 与 app router 相关篇目（重点确认：server component 取数写法、`'use client'` 边界、`useRouter`/`router.refresh()` 是否仍来自 `next/navigation`）。与下面代码冲突时**以文档为准**改代码。
 
-- [ ] **Step 7.1: `lib/api/dashboard.ts`**
+- [x] **Step 7.1: `lib/api/dashboard.ts`**
 
 ```ts
 import { apiFetch } from './client'
@@ -899,7 +899,7 @@ export function getDashboardOverview(): Promise<DashboardOverview> {
 }
 ```
 
-- [ ] **Step 7.2: `AlertsBar.tsx`（server component，无 'use client'）**
+- [x] **Step 7.2: `AlertsBar.tsx`（server component，无 'use client'）**
 
 ```tsx
 import Link from 'next/link'
@@ -936,7 +936,7 @@ export function AlertsBar({ alerts }: { alerts: DashboardAlert[] }) {
 }
 ```
 
-- [ ] **Step 7.3: `SourceStatusGrid.tsx`（server component）**
+- [x] **Step 7.3: `SourceStatusGrid.tsx`（server component）**
 
 ```tsx
 import Link from 'next/link'
@@ -985,7 +985,7 @@ export function SourceStatusGrid({ sources }: { sources: SourceStatus[] }) {
 }
 ```
 
-- [ ] **Step 7.4: `GenerateDraftButton.tsx`（client，仿 GenerateButton.tsx）**
+- [x] **Step 7.4: `GenerateDraftButton.tsx`（client，仿 GenerateButton.tsx）**
 
 ```tsx
 'use client'
@@ -1030,7 +1030,7 @@ export function GenerateDraftButton({ repoId, tag }: { repoId: string; tag: stri
 }
 ```
 
-- [ ] **Step 7.5: `ReleasesToday.tsx`（server component）**
+- [x] **Step 7.5: `ReleasesToday.tsx`（server component）**
 
 ```tsx
 import Link from 'next/link'
@@ -1096,7 +1096,7 @@ export function ReleasesToday({ releases }: { releases: ReleaseToday[] }) {
 }
 ```
 
-- [ ] **Step 7.6: 提交**
+- [x] **Step 7.6: 提交**
 
 ```bash
 git add wemedia-studio/lib/api/dashboard.ts wemedia-studio/components/features/dashboard/
@@ -1110,7 +1110,7 @@ git commit -m "feat(dashboard): 前端 API 封装 + 提醒条/Release/采集网�
 **Files:**
 - Modify: `wemedia-studio/app/page.tsx`
 
-- [ ] **Step 8.1: 改造 page.tsx（推荐选题区块整段保留不动，只调整外层）**
+- [x] **Step 8.1: 改造 page.tsx（推荐选题区块整段保留不动，只调整外层）**
 
 ```tsx
 import Link from 'next/link'
@@ -1167,12 +1167,12 @@ export default async function Dashboard() {
 
 注意：`<section>` 里的推荐选题代码是现文件 32-75 行原文，不重写；唯一改动是它前后插入新组件、头部副标题加今日产出、`mb-8` 改 `mb-6`。
 
-- [ ] **Step 8.2: 类型检查 / 构建**
+- [x] **Step 8.2: 类型检查 / 构建**
 
 Run: `source ~/.zshrc && cd wemedia-studio && npx tsc --noEmit 2>&1 | tail -5`（若项目无独立 tsc 配置则 `npm run build`）
 Expected: 无类型错误。
 
-- [ ] **Step 8.3: 后端起服务冒烟**
+- [x] **Step 8.3: 后端起服务冒烟**
 
 ```bash
 source ~/.zshrc && curl -s http://localhost:8000/api/dashboard/overview | head -c 400
@@ -1180,7 +1180,7 @@ source ~/.zshrc && curl -s http://localhost:8000/api/dashboard/overview | head -
 （开发后端常驻 8000 端口；若没起，`conda run -n wems uvicorn main:app` 起一个或跳过此步用测试覆盖。）
 Expected: JSON 含 `"sources":[...13 项...]`。
 
-- [ ] **Step 8.4: 提交**
+- [x] **Step 8.4: 提交**
 
 ```bash
 git add wemedia-studio/app/page.tsx
@@ -1191,11 +1191,11 @@ git commit -m "feat(dashboard): 首页工作台接入提醒区/今日 Release/�
 
 ## Task 9: 收尾
 
-- [ ] **Step 9.1: 全量后端测试最终回归**
+- [x] **Step 9.1: 全量后端测试最终回归**
 
 Run: `source ~/.zshrc && conda run -n wems python -m pytest backend/tests/ -q 2>&1 | tail -3`
 Expected: 仅既存 9 个 writing_plans 失败。
 
-- [ ] **Step 9.2: 浏览器/截图自查首页**（dev server 在跑的话）确认四区块渲染、空态正常。
+- [x] **Step 9.2: 浏览器/截图自查首页**（dev server 在跑的话）确认四区块渲染、空态正常。
 
-- [ ] **Step 9.3: 勾掉本计划 checkbox，更新记忆索引（新增 dashboard 功能记忆条目）。**
+- [x] **Step 9.3: 勾掉本计划 checkbox，更新记忆索引（新增 dashboard 功能记忆条目）。**
