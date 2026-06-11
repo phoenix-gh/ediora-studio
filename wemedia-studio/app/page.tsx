@@ -1,33 +1,44 @@
 import Link from 'next/link'
 import { ArrowRight, Sparkles } from 'lucide-react'
 import { getRecommendedTopics } from '@/lib/api/topics'
+import { getDashboardOverview, EMPTY_OVERVIEW } from '@/lib/api/dashboard'
 import { UrgencyBadge } from '@/components/features/UrgencyBadge'
 import { ScoreStars } from '@/components/features/ScoreStars'
 import { MiniSparkline } from '@/components/features/MiniSparkline'
 import { GenerateButton } from '@/components/features/GenerateButton'
+import { AlertsBar } from '@/components/features/dashboard/AlertsBar'
+import { ReleasesToday } from '@/components/features/dashboard/ReleasesToday'
+import { SourceStatusGrid } from '@/components/features/dashboard/SourceStatusGrid'
 
 export const dynamic = 'force-dynamic'
 
 export default async function Dashboard() {
-  const recommended = await getRecommendedTopics(5).catch(
-    () => [] as Awaited<ReturnType<typeof getRecommendedTopics>>,
-  )
+  const [recommended, overview] = await Promise.all([
+    getRecommendedTopics(5).catch(() => [] as Awaited<ReturnType<typeof getRecommendedTopics>>),
+    getDashboardOverview().catch(() => EMPTY_OVERVIEW),
+  ])
 
   const today = new Date().toLocaleDateString('zh-CN', { month: 'long', day: 'numeric', weekday: 'long' })
 
   return (
     <div className="px-8 py-8">
-      <div className="mb-8 flex items-start justify-between">
+      <div className="mb-6 flex items-start justify-between">
         <div>
           <p className="text-xs text-zinc-400 mb-1">{today}</p>
           <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-100">今日工作台</h1>
           <p className="text-sm text-zinc-500 mt-1">
             共 <span className="text-zinc-900 dark:text-zinc-100 font-medium">{recommended.length}</span> 条推荐选题，
             <span className="text-red-500 font-medium">{recommended.filter(t => t.urgency === 'urgent').length}</span> 条紧急
+            <span className="text-zinc-300 dark:text-zinc-600 mx-2">·</span>
+            今日 +{overview.today_output.topics} 选题 / +{overview.today_output.drafts} 草稿
           </p>
         </div>
         <GenerateButton />
       </div>
+
+      <AlertsBar alerts={overview.alerts} />
+
+      <ReleasesToday releases={overview.releases_today} />
 
       <section>
         <div className="flex items-center justify-between mb-3">
@@ -73,6 +84,8 @@ export default async function Dashboard() {
           </div>
         )}
       </section>
+
+      <SourceStatusGrid sources={overview.sources} />
     </div>
   )
 }
