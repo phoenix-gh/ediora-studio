@@ -22,7 +22,7 @@ import {
 } from '@/lib/api/drafts'
 import { WritingPlan, getWritingPlans, flattenTopicsWithDepth } from '@/lib/api/writing-plans'
 import { MarkdownEditor, MarkdownEditorHandle } from './MarkdownEditor'
-import { WechatPublishDialog } from './WechatPublishDialog'
+import { PublishDialog } from './PublishDialog'
 import { DraftAssetsDialog } from '@/components/features/DraftAssetsDialog'
 import { DraftTaskTimelineDialog } from '@/components/features/DraftTaskTimelineDialog'
 import '@uiw/react-md-editor/markdown-editor.css'
@@ -745,7 +745,7 @@ export function DraftsClient({
                   variant="outline" size="sm"
                   onClick={() => setPublishOpen(true)}
                   className="gap-1.5"
-                  title="渲染排版并发布到微信公众号"
+                  title="发布到公众号 / 复制 X 长文"
                 >
                   <Send className="w-3.5 h-3.5" />
                   发布
@@ -966,7 +966,7 @@ export function DraftsClient({
               getDraftImages(rootId).then(setImages).catch(() => {})
             }}
           />
-          <WechatPublishDialog
+          <PublishDialog
             open={publishOpen}
             onClose={() => setPublishOpen(false)}
             draftId={selected.id}
