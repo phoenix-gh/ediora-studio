@@ -122,6 +122,23 @@ export async function enqueueStudioTask(body: EnqueueIn): Promise<{ task_id: str
   })
 }
 
+export type ManualGenre = 'commentary' | 'tutorial' | 'story' | 'review'
+
+export interface ManualEnqueueIn {
+  account_id: string
+  title: string
+  idea?: string
+  genre?: ManualGenre
+  note?: string
+}
+
+export async function enqueueManualTask(body: ManualEnqueueIn): Promise<{ task_id: string; task_ids: string[] }> {
+  return apiFetch('/studio/enqueue-manual', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+}
+
 export interface RegenerateCoverIn {
   draft_id: number
   account_id: string

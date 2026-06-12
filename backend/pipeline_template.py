@@ -750,6 +750,59 @@ account_id: {c['account_id']}
 ]
 
 
+# ── manual_topic：用户自拟主题手动发布 editor → writer → illustrator ──────────
+# 与 FULL_PIPELINE 的差异：editor 收到的不是采集素材，而是用户手写的主题 + 可选
+# 想法/素材；素材不足时 editor 自己调 web 工具补料。writer/illustrator 复用 FULL。
+MANUAL_TOPIC_PIPELINE: list[PipelineStep] = [
+    PipelineStep(
+        role="editor",
+        assignee="wms_editor",
+        title=lambda c: f"策划：{c['title']}",
+        body=lambda c: f"""flow: manual_topic
+account_id: {c['account_id']}
+
+# {c['title']}
+
+{render_profile_editor(c['account_profile'])}
+
+## 体裁
+**{c.get('genre_label') or '评论'}**（字数遵从画像 word_range）
+
+## 用户想法 / 素材
+{(c.get('idea') or '').strip() or '（用户只给了主题，没附想法或素材——素材全靠你补）'}
+{f"{chr(10)}---{chr(10)}用户备注：{c['note']}" if c.get('note') else ''}
+
+## 这棒任务（editor · 用户自拟主题，补料 + 出 brief）
+主题由用户手动发布，**不要改主题方向**；用户给的想法/素材是出发点，优先用。
+素材不足以支撑写作时，调 web 工具搜索补料——找最近的真实内容（数字/人名/时间/来源链接，可核对）。
+先抽**具体锚点 ≥ 3 个**（任选：数字 / 人名 / 时间 / 地名 / 引语 / 动作场景）——
+下游 writer 靠这些锚点写"我看到 X 时 Y"，缺它就只能写 AI 味的概括。
+
+**重要：brief 是给 writer 的素材清单，不是文章骨架。**
+明确一个**核心点**，其余素材围绕它转或允许被砍。
+
+按上方画像写 brief，要点（不必都用，按需取舍）：
+
+- **angle**（核心角度，对齐 audience，≤ 30 字；贴用户想法走，不要另起炉灶）
+- **core_point**（本文唯一最重要的点，写一句话；writer 必须把它当主线，篇幅 ≥40%）
+- **secondary_points**（次要点 ≤ 3 个，每个标注权重：keep / mention / drop_ok）
+- **必须出现的事实** 3-5 条（每条带原始链接 + 一个具体细节：数字 / 人名 / 时间 / 场景）
+- **反方/补充观点** ≥ 1 条
+- **候选锚点**（具体的、可第一人称代入的场景或动作，≥ 2 个）
+- **平台与字数**：用 word_range
+- **配图思路**：贴合 image_style
+- **候选标题** ≥ 3（语气贴 tone）
+- **禁区提醒**（画像 taboo）
+
+完成时：
+- `kanban_complete(summary='brief 完成: <一句话角度>', metadata={{"brief_md": "<完整 brief markdown>", "brief_chars": N, "core_point": "<一句话>"}})`
+""".strip(),
+    ),
+    FULL_PIPELINE[1],  # writer — ctx keys 兼容：account_id/title/account_profile/pipeline_task_id/genre
+    FULL_PIPELINE[2],  # illustrator — 读 draft_id from parent metadata
+]
+
+
 # ── release_write：从 GitHub Release 出发的发布稿链路 writer → illustrator ─────
 # 无 editor 棒，writer 直接读 release 日志 + 写作策略写稿；illustrator 复用 FULL_PIPELINE。
 RELEASE_WRITE_PIPELINE: list[PipelineStep] = [
@@ -850,6 +903,7 @@ PIPELINES: dict[str, list[PipelineStep]] = {
     "rewrite_only": REWRITE_ONLY_PIPELINE,
     "topic_long": TOPIC_LONG_PIPELINE,
     "topic_short": TOPIC_SHORT_PIPELINE,
+    "manual_topic": MANUAL_TOPIC_PIPELINE,
     "illustrate_body": INLINE_ILLUS_PIPELINE,
     "release_write": RELEASE_WRITE_PIPELINE,
     "repo_intro": REPO_INTRO_PIPELINE,

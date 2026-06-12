@@ -315,27 +315,8 @@ async def _kanban_create(title: str, assignee: str, body: str,
     return tid
 
 
-@router.post("/enqueue", response_model=EnqueueOut)
-async def enqueue_scout_task(payload: EnqueueIn):
-    """Create the full scout→editor→writer→illustrator task chain on the kanban
-    board. Each step is linked to the previous via --parent so the dispatcher
-    auto-promotes downstream tasks as each step completes.
-    """
-    if not payload.account_id.strip():
-        raise HTTPException(400, "account_id is required")
-    if not payload.source_url.strip() or not payload.title.strip():
-        raise HTTPException(400, "title and source_url are required")
-
-    from database import SessionLocal
-    from models import PublishAccount, PipelineTask
-    from pipeline_template import get_pipeline
-
-    async with SessionLocal() as db:
-        acc = await db.get(PublishAccount, payload.account_id)
-    if acc is None:
-        raise HTTPException(400, f"account '{payload.account_id}' not found")
-
-    account_profile = {
+def _account_profile_full(acc) -> dict:
+    return {
         "name": acc.name,
         "platform": acc.platform,
         "positioning": acc.positioning,
@@ -350,17 +331,25 @@ async def enqueue_scout_task(payload: EnqueueIn):
         "style_rules": acc.style_rules or [],
     }
 
-    content = (payload.content or "").strip()
-    truncated = len(content) > _ENQUEUE_CONTENT_CAP
-    if truncated:
-        content = content[:_ENQUEUE_CONTENT_CAP]
+
+async def _run_pipeline_chain(flow: str, ctx: dict, *, account_id: str,
+                              title: str, source_url: str = "") -> EnqueueOut:
+    """Create a PipelineTask record + the kanban task chain for `flow`.
+
+    Each step is linked to the previous via --parent so the dispatcher
+    auto-promotes downstream tasks as each step completes. Back-fills the
+    created task ids into the PipelineTask row.
+    """
+    from database import SessionLocal
+    from models import PipelineTask
+    from pipeline_template import get_pipeline
 
     # Create PipelineTask record first to get an ID for the writer to reference.
     async with SessionLocal() as db:
         pt = PipelineTask(
-            account_id=payload.account_id,
-            title=payload.title,
-            source_url=payload.source_url,
+            account_id=account_id,
+            title=title,
+            source_url=source_url,
             task_ids={},
         )
         db.add(pt)
@@ -368,21 +357,8 @@ async def enqueue_scout_task(payload: EnqueueIn):
         await db.refresh(pt)
         pipeline_task_id = pt.id
 
-    ctx = {
-        "title": payload.title,
-        "account_id": payload.account_id,
-        "account_profile": account_profile,
-        "platform": payload.platform or "unknown",
-        "source_url": payload.source_url,
-        "summary": payload.summary or "",
-        "content": content,
-        "content_truncated": truncated,
-        "note": payload.note or "",
-        "draft_id": 0,
-        "pipeline_task_id": pipeline_task_id,
-    }
-
-    steps = get_pipeline("full")
+    ctx["pipeline_task_id"] = pipeline_task_id
+    steps = get_pipeline(flow)
     env = {**os.environ, "HERMES_KANBAN_BOARD": _KANBAN_BOARD}
     task_id_list: list[str] = []
 
@@ -396,7 +372,6 @@ async def enqueue_scout_task(payload: EnqueueIn):
         )
         task_id_list.append(tid)
 
-    # Back-fill task_ids JSON into the PipelineTask record.
     task_ids_map = {steps[i].role: task_id_list[i] for i in range(len(task_id_list))}
     async with SessionLocal() as db:
         pt2 = await db.get(PipelineTask, pipeline_task_id)
@@ -406,6 +381,97 @@ async def enqueue_scout_task(payload: EnqueueIn):
 
     _cache["data"] = None
     return EnqueueOut(task_id=task_id_list[0], task_ids=task_id_list)
+
+
+@router.post("/enqueue", response_model=EnqueueOut)
+async def enqueue_scout_task(payload: EnqueueIn):
+    """Create the full editor→writer→illustrator task chain from a piece of
+    collected source material the user picked in the UI.
+    """
+    if not payload.account_id.strip():
+        raise HTTPException(400, "account_id is required")
+    if not payload.source_url.strip() or not payload.title.strip():
+        raise HTTPException(400, "title and source_url are required")
+
+    from database import SessionLocal
+    from models import PublishAccount
+
+    async with SessionLocal() as db:
+        acc = await db.get(PublishAccount, payload.account_id)
+    if acc is None:
+        raise HTTPException(400, f"account '{payload.account_id}' not found")
+
+    content = (payload.content or "").strip()
+    truncated = len(content) > _ENQUEUE_CONTENT_CAP
+    if truncated:
+        content = content[:_ENQUEUE_CONTENT_CAP]
+
+    ctx = {
+        "title": payload.title,
+        "account_id": payload.account_id,
+        "account_profile": _account_profile_full(acc),
+        "platform": payload.platform or "unknown",
+        "source_url": payload.source_url,
+        "summary": payload.summary or "",
+        "content": content,
+        "content_truncated": truncated,
+        "note": payload.note or "",
+        "draft_id": 0,
+    }
+    return await _run_pipeline_chain(
+        "full", ctx,
+        account_id=payload.account_id,
+        title=payload.title,
+        source_url=payload.source_url,
+    )
+
+
+class ManualEnqueueIn(BaseModel):
+    account_id: str
+    title: str
+    idea: str = ""
+    genre: str = "commentary"
+    note: str = ""
+
+
+@router.post("/enqueue-manual", response_model=EnqueueOut)
+async def enqueue_manual_task(payload: ManualEnqueueIn):
+    """用户自拟主题手动发布：manual_topic 链路 editor→writer→illustrator。
+    与 /enqueue 的区别：没有 source_url / 采集素材，editor 拿用户想法补料出 brief。
+    """
+    from pipeline_template import GENRE_PROFILES
+
+    if not payload.account_id.strip():
+        raise HTTPException(400, "account_id is required")
+    title = payload.title.strip()
+    if not title:
+        raise HTTPException(400, "title is required")
+    if payload.genre not in GENRE_PROFILES:
+        raise HTTPException(400, f"unknown genre '{payload.genre}'; available: {sorted(GENRE_PROFILES)}")
+
+    from database import SessionLocal
+    from models import PublishAccount
+
+    async with SessionLocal() as db:
+        acc = await db.get(PublishAccount, payload.account_id)
+    if acc is None:
+        raise HTTPException(400, f"account '{payload.account_id}' not found")
+
+    idea = payload.idea.strip()
+    if len(idea) > _ENQUEUE_CONTENT_CAP:
+        idea = idea[:_ENQUEUE_CONTENT_CAP] + "\n…(已截断)"
+
+    ctx = {
+        "title": title,
+        "account_id": payload.account_id,
+        "account_profile": _account_profile_full(acc),
+        "idea": idea,
+        "genre": payload.genre,
+        "genre_label": GENRE_PROFILES[payload.genre].label,
+        "note": payload.note.strip(),
+        "draft_id": 0,
+    }
+    return await _run_pipeline_chain("manual_topic", ctx, account_id=payload.account_id, title=title)
 
 
 class RegenerateCoverIn(BaseModel):
@@ -588,25 +654,10 @@ async def rewrite_draft(payload: RewriteDraftIn):
     if acc is None:
         raise HTTPException(400, f"account '{account_id}' not found")
 
-    account_profile = {
-        "name": acc.name,
-        "platform": acc.platform,
-        "positioning": acc.positioning,
-        "audience": acc.audience,
-        "tone": acc.tone,
-        "topic_focus": acc.topic_focus or [],
-        "taboo": acc.taboo or [],
-        "word_range": acc.word_range or {},
-        "image_style": acc.image_style,
-        "cover_style": acc.cover_style or {},
-        "voice_samples": acc.voice_samples or [],
-        "style_rules": acc.style_rules or [],
-    }
-
     ctx = {
         "draft_id": payload.draft_id,
         "account_id": account_id,
-        "account_profile": account_profile,
+        "account_profile": _account_profile_full(acc),
         "title": draft.title or pt.title or f"draft #{payload.draft_id}",
         "note": payload.note or "",
     }

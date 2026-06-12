@@ -6,6 +6,7 @@ import { UrgencyBadge } from '@/components/features/UrgencyBadge'
 import { ScoreStars } from '@/components/features/ScoreStars'
 import { MiniSparkline } from '@/components/features/MiniSparkline'
 import { GenerateButton } from '@/components/features/GenerateButton'
+import { CreateTaskButton } from '@/components/features/CreateTaskDialog'
 import { AlertsBar } from '@/components/features/dashboard/AlertsBar'
 import { ReleasesToday } from '@/components/features/dashboard/ReleasesToday'
 import { SourceStatusGrid } from '@/components/features/dashboard/SourceStatusGrid'
@@ -33,7 +34,10 @@ export default async function Dashboard() {
             今日 +{overview.today_output.topics} 选题 / +{overview.today_output.drafts} 草稿
           </p>
         </div>
-        <GenerateButton />
+        <div className="flex items-center gap-2">
+          <CreateTaskButton />
+          <GenerateButton />
+        </div>
       </div>
 
       <AlertsBar alerts={overview.alerts} />

@@ -10,6 +10,7 @@ import { toast } from 'sonner'
 import { getStudioBoard, deleteTask, type BoardSnapshot, type AgentState, type TaskBrief } from '@/lib/api/studio'
 import { cn } from '@/lib/utils'
 import { TaskDrawer } from './TaskDrawer'
+import { CreateTaskDialog } from '@/components/features/CreateTaskDialog'
 
 const POLL_INTERVAL_MS = 2000
 
@@ -342,6 +343,7 @@ export function StudioClient() {
   const [error, setError] = useState<string | null>(null)
   const [tick, setTick] = useState(0)
   const [openTaskId, setOpenTaskId] = useState<string | null>(null)
+  const [createOpen, setCreateOpen] = useState(false)
 
   async function handleDelete(id: string, title: string) {
     if (!window.confirm(`归档并删除任务？\n\n「${title}」\n\n此操作不可撤销。`)) return
@@ -478,7 +480,7 @@ export function StudioClient() {
           </p>
         </div>
         <button
-          onClick={() => toast.info('「发布任务」入口接下来放到公众号/X 面板，从素材直接入队 →')}
+          onClick={() => setCreateOpen(true)}
           className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium shadow-sm transition-colors shrink-0"
         >
           <Plus className="w-4 h-4" />
@@ -558,6 +560,8 @@ export function StudioClient() {
           ⚠ 最新轮询失败：{error}（继续使用上一次成功的数据）
         </p>
       )}
+
+      <CreateTaskDialog open={createOpen} onOpenChange={setCreateOpen} />
 
       <TaskDrawer
         taskId={openTaskId}
