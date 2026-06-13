@@ -1,0 +1,123 @@
+"""每日内容计划：为 active 账号生成「今日计划」总编策划任务（wms_scout 单棒）。
+
+调用方：scheduler 8 点 cron / POST /daily-plan/generate（重新生成）。
+agent 产出经 MCP save_daily_plan 写回 DailyPlanItem，用户确认后入队创作链。
+"""
+from __future__ import annotations
+
+import json
+from datetime import datetime, timedelta, timezone
+
+from sqlalchemy import delete as sa_delete, select
+
+from database import SessionLocal
+from models import ArticleDraft, DailyPlan, DailyPlanItem, PublishAccount
+
+
+def today_str() -> str:
+    """本地日期（cron 按本地 8 点跑，计划也按本地日界）。"""
+    return datetime.now().strftime("%Y-%m-%d")
+
+
+def _build_accounts_md(accounts: list[PublishAccount]) -> str:
+    blocks = []
+    for acc in accounts:
+        blocks.append(
+            f"### {acc.name}（account_id: {acc.id} / {acc.platform}）\n"
+            f"- 定位：{acc.positioning or '（未填）'}\n"
+            f"- 受众：{acc.audience or '（未填）'}\n"
+            f"- 调性：{acc.tone or '（未填）'}\n"
+            f"- 选题重点：{'、'.join(acc.topic_focus) if acc.topic_focus else '不限'}\n"
+            f"- 禁区：{'、'.join(acc.taboo) if acc.taboo else '无'}\n"
+            f"- 今日配额 daily_quota：{json.dumps(acc.daily_quota or {}, ensure_ascii=False)}"
+        )
+    return "## 账号与配额\n\n" + "\n\n".join(blocks)
+
+
+async def _recent_titles_md(db, days: int = 7) -> str:
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    item_titles = (await db.execute(
+        select(DailyPlanItem.title).where(DailyPlanItem.created_at >= cutoff)
+    )).scalars().all()
+    draft_titles = (await db.execute(
+        select(ArticleDraft.title).where(ArticleDraft.created_at >= cutoff)
+    )).scalars().all()
+    titles = [t for t in dict.fromkeys([*item_titles, *draft_titles]) if t and t.strip()]
+    if not titles:
+        return "（近 7 天无产出）"
+    return "\n".join(f"- {t}" for t in titles[:100])
+
+
+async def create_today_plan(*, force: bool = False) -> DailyPlan | None:
+    """生成今天的 DailyPlan + 总编策划任务。
+
+    - 当天已有计划且非 force：直接返回现有计划（幂等，cron 重跑安全）
+    - force：删除当天计划（连带 items）重建
+    - 无 active 账号或配额全空：记日志返回 None
+    - kanban 建任务失败：计划标 failed 后原样抛出（调用方决定如何上报）
+    """
+    from logger import log
+    from hermes_kanban_client import HermesKanbanClient
+    from pipeline_template import get_pipeline
+
+    date_str = today_str()
+
+    async with SessionLocal() as db:
+        existing = (await db.execute(
+            select(DailyPlan).where(DailyPlan.plan_date == date_str)
+        )).scalar_one_or_none()
+        if existing is not None:
+            if not force:
+                return existing
+            await db.execute(sa_delete(DailyPlanItem).where(DailyPlanItem.plan_id == existing.id))
+            await db.delete(existing)
+            await db.commit()
+
+        accounts = [
+            a for a in (await db.execute(
+                select(PublishAccount)
+                .where(PublishAccount.is_active == True)  # noqa: E712
+                .order_by(PublishAccount.name)
+            )).scalars().all()
+            if a.daily_quota
+        ]
+        if not accounts:
+            await log("daily_plan", "skip", "无 active 账号或所有 daily_quota 为空，跳过今日计划")
+            return None
+
+        recent_md = await _recent_titles_md(db)
+
+        plan = DailyPlan(plan_date=date_str, status="planning")
+        db.add(plan)
+        await db.commit()
+        await db.refresh(plan)
+        plan_id = plan.id
+
+    ctx = {
+        "date_str": date_str,
+        "plan_id": plan_id,
+        "accounts_md": _build_accounts_md(accounts),
+        "recent_titles_md": recent_md,
+    }
+    step = get_pipeline("daily_plan")[0]
+    try:
+        tid = await HermesKanbanClient().create_task(
+            title=step.title(ctx), body=step.body(ctx), assignee=step.assignee,
+        )
+    except Exception as e:
+        async with SessionLocal() as db:
+            p = await db.get(DailyPlan, plan_id)
+            if p is not None:
+                p.status = "failed"
+                await db.commit()
+        await log("daily_plan", "error", "今日计划策划任务创建失败", str(e)[:500])
+        raise
+
+    async with SessionLocal() as db:
+        p = await db.get(DailyPlan, plan_id)
+        if p is not None:
+            p.kanban_task_id = tid
+            await db.commit()
+    await log("daily_plan", "ok", f"今日计划任务已创建（{date_str}），等待总编产出")
+    async with SessionLocal() as db:
+        return await db.get(DailyPlan, plan_id)
