@@ -30,6 +30,7 @@ interface EditState {
   topic_focus_text: string  // newline-separated
   taboo_text: string        // newline-separated
   word_range_json: string   // raw JSON
+  daily_quota_json: string  // raw JSON，如 {"long":1,"short":2}；{} = 不参与每日计划
   image_style: string
   voice_samples_text: string  // blank-line-separated paragraphs
   style_rules_text: string    // newline-separated rules
@@ -77,6 +78,7 @@ const EMPTY_EDIT: EditState = {
   topic_focus_text: '',
   taboo_text: '',
   word_range_json: '{"min": 1500, "max": 2200}',
+  daily_quota_json: '{}',
   image_style: '',
   voice_samples_text: '',
   style_rules_text: '',
@@ -112,6 +114,7 @@ function accountToEdit(p: PublishAccount): EditState {
     topic_focus_text: (p.topic_focus ?? []).join('\n'),
     taboo_text: (p.taboo ?? []).join('\n'),
     word_range_json: JSON.stringify(p.word_range ?? {}, null, 0),
+    daily_quota_json: JSON.stringify(p.daily_quota ?? {}, null, 0),
     image_style: p.image_style,
     voice_samples_text: (p.voice_samples ?? []).join('\n\n---\n\n'),
     style_rules_text: (p.style_rules ?? []).join('\n'),
@@ -137,6 +140,18 @@ function editToInput(form: EditState): PublishAccountInput | { error: string } {
       return { error: '字数范围 JSON 格式错误' }
     }
   }
+  let daily_quota: Record<string, number> = {}
+  if (form.daily_quota_json.trim()) {
+    try {
+      const parsed = JSON.parse(form.daily_quota_json)
+      if (typeof parsed !== 'object' || Array.isArray(parsed) || parsed === null) {
+        return { error: '每日配额必须是 JSON 对象（如 {"long":1,"short":2}）' }
+      }
+      daily_quota = parsed
+    } catch {
+      return { error: '每日配额 JSON 格式错误' }
+    }
+  }
   return {
     id: form.id.trim(),
     name: form.name.trim(),
@@ -147,6 +162,7 @@ function editToInput(form: EditState): PublishAccountInput | { error: string } {
     topic_focus: form.topic_focus_text.split('\n').map(s => s.trim()).filter(Boolean),
     taboo: form.taboo_text.split('\n').map(s => s.trim()).filter(Boolean),
     word_range,
+    daily_quota,
     image_style: form.image_style,
     voice_samples: form.voice_samples_text.split(/\n\s*---\s*\n/).map(s => s.trim()).filter(Boolean),
     style_rules: form.style_rules_text.split('\n').map(s => s.trim()).filter(Boolean),
@@ -676,6 +692,20 @@ function AccountForm({
           value={form.word_range_json}
           onChange={e => setForm({ ...form, word_range_json: e.target.value })}
           placeholder='{"min":1500,"max":2200}'
+          className="h-8 text-sm font-mono"
+        />
+      </div>
+
+      <div className="space-y-1">
+        <Label className="text-xs">每日配额（daily_quota，JSON 对象）</Label>
+        <p className="text-[11px] text-zinc-400">
+          今日计划按此配额给账号派选题，如 <code className="font-mono">{`{"long":1,"short":2}`}</code>
+          （story/share 计入 short）；留 <code className="font-mono">{`{}`}</code> 表示不参与每日计划
+        </p>
+        <Input
+          value={form.daily_quota_json}
+          onChange={e => setForm({ ...form, daily_quota_json: e.target.value })}
+          placeholder='{"long":1,"short":2}'
           className="h-8 text-sm font-mono"
         />
       </div>
