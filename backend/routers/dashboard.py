@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
 from models import (
-    ArticleDraft, CollectLog, GithubRelease, JuejinArticle,
+    ArticleDraft, CollectLog, DailyPlan, DailyPlanItem, GithubRelease, JuejinArticle,
     KrArticle, Paper, Post, ProductHuntPost, PublishAccount, RedditPost,
     RefMaterial, Topic, V2exTopic, WechatAccount, WechatArticle,
     WechatCredential, XPost, YoutubeVideo,
@@ -286,6 +286,28 @@ async def _build_alerts(
         alerts.append(Alert(severity="info",
                             text="公众号发布凭证未配置，无法推送草稿箱：" + "、".join(missing),
                             action_label="去配置", href="/settings"))
+
+    # 6. 今日计划：就绪待确认 / 生成失败
+    try:
+        import daily_planner
+        plan = (await db.execute(
+            select(DailyPlan).where(DailyPlan.plan_date == daily_planner.today_str())
+        )).scalar_one_or_none()
+        if plan is not None and plan.status == "ready":
+            pending = (await db.execute(
+                select(func.count()).select_from(DailyPlanItem)
+                .where(DailyPlanItem.plan_id == plan.id,
+                       DailyPlanItem.status == "suggested")
+            )).scalar_one()
+            if pending:
+                alerts.append(Alert(severity="info",
+                                    text=f"今日计划已就绪，{pending} 条待确认",
+                                    action_label="去确认", href="/daily-plan"))
+        elif plan is not None and plan.status == "failed":
+            alerts.append(Alert(severity="warn", text="今日计划生成失败",
+                                action_label="重新生成", href="/daily-plan"))
+    except Exception:
+        pass
 
     alerts.sort(key=lambda a: _SEVERITY_ORDER.get(a.severity, 9))
     return alerts

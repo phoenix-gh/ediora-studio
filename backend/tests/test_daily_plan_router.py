@@ -160,7 +160,6 @@ def test_generate_400_when_no_quota(client):
     assert r.status_code == 400
 
 
-@pytest.mark.skip(reason="Task 10 实现 dashboard alert 后启用")
 def test_dashboard_alert_for_ready_plan(client, monkeypatch):
     import daily_planner
     monkeypatch.setattr(daily_planner, "today_str", lambda: "2026-06-12")
