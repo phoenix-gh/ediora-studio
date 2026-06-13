@@ -1294,3 +1294,90 @@ async def get_topic_candidates(
                     for w in rows]
 
     return out
+
+
+_PLAN_CONTENT_TYPES = {"long", "short", "story", "share"}
+
+
+@mcp.tool()
+async def save_daily_plan(plan_id: int, items: list[dict], note: str = "") -> dict:
+    """
+    写回今日计划（daily_plan 总编任务的产出）。重复调用整体替换（幂等），成功后计划置 ready。
+
+    items 每条：{account_id, title, angle, reason, content_type, sources, group_key, is_primary}
+    - content_type ∈ long|short|story|share
+    - 撞题公用：同 group_key 的 items 共享一稿，必须同 content_type，且恰好一条 is_primary=true
+    - 无 group_key 的 item 各自独立（is_primary 自动置 true）
+    校验失败返回 {"error": "..."}，不落任何数据。
+    """
+    from models import DailyPlan, DailyPlanItem, PublishAccount
+
+    async with SessionLocal() as db:
+        plan = await db.get(DailyPlan, plan_id)
+        if plan is None:
+            return {"error": f"daily plan {plan_id} not found"}
+
+        acc_ids = set((await db.execute(select(PublishAccount.id))).scalars().all())
+
+        groups: dict[str, list[dict]] = {}
+        for i, it in enumerate(items):
+            if not (it.get("title") or "").strip():
+                return {"error": f"items[{i}]: title 不能为空"}
+            if it.get("account_id") not in acc_ids:
+                return {"error": f"items[{i}]: account_id '{it.get('account_id')}' 不存在"}
+            ct = it.get("content_type", "long")
+            if ct not in _PLAN_CONTENT_TYPES:
+                return {"error": f"items[{i}]: content_type '{ct}' 非法（long|short|story|share）"}
+            gk = (it.get("group_key") or "").strip()
+            if gk:
+                groups.setdefault(gk, []).append(it)
+
+        for gk, members in groups.items():
+            if len({m.get("content_type", "long") for m in members}) > 1:
+                return {"error": f"group '{gk}' 内 content_type 不一致（同组必须同体裁）"}
+            primaries = [m for m in members if m.get("is_primary")]
+            if len(primaries) != 1:
+                return {"error": f"group '{gk}' 必须恰好一条 is_primary=true（当前 {len(primaries)} 条）"}
+
+        await db.execute(sa_delete(DailyPlanItem).where(DailyPlanItem.plan_id == plan_id))
+        for it in items:
+            gk = (it.get("group_key") or "").strip()
+            db.add(DailyPlanItem(
+                plan_id=plan_id,
+                account_id=it["account_id"],
+                title=it["title"].strip(),
+                angle=(it.get("angle") or "").strip(),
+                reason=(it.get("reason") or "").strip(),
+                content_type=it.get("content_type", "long"),
+                sources=it.get("sources") or [],
+                group_key=gk,
+                is_primary=bool(it.get("is_primary")) if gk else True,
+            ))
+        plan.status = "ready"
+        plan.planner_note = note or ""
+        await db.commit()
+        return {"ok": True, "plan_id": plan_id, "item_count": len(items)}
+
+
+@mcp.tool()
+async def get_recent_outputs(days: int = 7) -> list[dict]:
+    """
+    近 N 天已计划/已产出的标题清单（查重用）。daily_plan 任务书里通常已附，此工具备查。
+    返回 [{type: "plan_item"|"draft", title}]。
+    """
+    from models import ArticleDraft, DailyPlanItem
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=max(1, min(int(days), 30)))
+    out: list[dict] = []
+    async with SessionLocal() as db:
+        for t in (await db.execute(
+            select(DailyPlanItem.title).where(DailyPlanItem.created_at >= cutoff)
+        )).scalars().all():
+            if t and t.strip():
+                out.append({"type": "plan_item", "title": t})
+        for t in (await db.execute(
+            select(ArticleDraft.title).where(ArticleDraft.created_at >= cutoff)
+        )).scalars().all():
+            if t and t.strip():
+                out.append({"type": "draft", "title": t})
+    return out
