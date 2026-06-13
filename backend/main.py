@@ -10,7 +10,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from database import init_db, SessionLocal
-from routers import accounts, collect, settings, github, x, papers, personas, upload, drafts, writing_plans, synthesize, youtube, producthunt, wechat, v2ex, kr, juejin, studio, publish_accounts, profiles, reddit, topic_generator, retro, materials, skills, dashboard
+from routers import accounts, collect, settings, github, x, papers, personas, upload, drafts, writing_plans, synthesize, youtube, producthunt, wechat, v2ex, kr, juejin, studio, publish_accounts, profiles, reddit, topic_generator, retro, materials, skills, dashboard, daily_plan
 import scheduler as job_registry
 
 scheduler = AsyncIOScheduler()
@@ -81,6 +81,7 @@ app.include_router(retro.router, prefix="/api")
 app.include_router(materials.router, prefix="/api")
 app.include_router(skills.router, prefix="/api")
 app.include_router(dashboard.router, prefix="/api")
+app.include_router(daily_plan.router, prefix="/api")
 
 _mcp_handler = _mcp_http_app.routes[0].endpoint
 app.add_route("/mcp", _mcp_handler, methods=["GET", "POST", "DELETE"])
