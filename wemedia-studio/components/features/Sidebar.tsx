@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
   LayoutDashboard, TrendingUp, Settings, GitFork, AtSign, FileText, BookMarked, Tag, Quote,
-  PlaySquare, Rocket, MessageSquare, Globe, Flame, Gem, Bot, UserCog, Hash, Lightbulb,
+  PlaySquare, Rocket, MessageSquare, Globe, Flame, Gem, Bot, UserCog, Hash, Lightbulb, CalendarCheck,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -21,6 +21,7 @@ const sections: NavSection[] = [
   {
     items: [
       { href: '/',          label: '今日工作台', icon: LayoutDashboard },
+      { href: '/daily-plan', label: '今日计划',  icon: CalendarCheck },
       { href: '/studio',    label: '工作室',     icon: Bot },
       { href: '/profiles',  label: 'Profile',   icon: UserCog },
     ],
