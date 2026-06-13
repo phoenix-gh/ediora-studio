@@ -283,6 +283,7 @@ _ENQUEUE_CONTENT_CAP = 30000
 class EnqueueOut(BaseModel):
     task_id: str
     task_ids: list[str] = []
+    pipeline_task_id: int = 0
 
 
 async def _kanban_create(title: str, assignee: str, body: str,
@@ -380,7 +381,8 @@ async def _run_pipeline_chain(flow: str, ctx: dict, *, account_id: str,
             await db.commit()
 
     _cache["data"] = None
-    return EnqueueOut(task_id=task_id_list[0], task_ids=task_id_list)
+    return EnqueueOut(task_id=task_id_list[0], task_ids=task_id_list,
+                      pipeline_task_id=pipeline_task_id)
 
 
 @router.post("/enqueue", response_model=EnqueueOut)

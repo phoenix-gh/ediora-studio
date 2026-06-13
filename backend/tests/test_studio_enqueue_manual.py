@@ -102,6 +102,7 @@ def test_enqueue_manual_persists_pipeline_task(seeded, monkeypatch):
     assert row.task_ids == {
         "editor": "t_manual_1", "writer": "t_manual_2", "illustrator": "t_manual_3",
     }
+    assert r.json()["pipeline_task_id"] == row.id
 
 
 def test_enqueue_manual_genre_flows_into_writer_body(seeded, monkeypatch):
