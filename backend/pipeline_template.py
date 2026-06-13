@@ -897,6 +897,45 @@ pipeline_task_id: {c['pipeline_task_id']}
 ]
 
 
+# ── daily_plan：每日内容计划 策划单棒（wms_scout 当总编） ────────────────────
+# 产出不是稿子而是计划：按账号画像+配额从候选池选题，save_daily_plan 写回，
+# 用户在 /daily-plan 页确认后才入队 topic_long/topic_short 创作链。
+DAILY_PLAN_PIPELINE: list[PipelineStep] = [
+    PipelineStep(
+        role="planner",
+        assignee="wms_scout",
+        title=lambda c: f"今日内容计划：{c['date_str']}",
+        body=lambda c: f"""flow: daily_plan
+plan_id: {c['plan_id']}
+
+# 制定 {c['date_str']} 各账号内容计划
+
+你是今天的总编。为下列每个账号挑选今天要写的选题，产出今日计划。
+
+{c['accounts_md']}
+
+## 近 7 天已写标题（禁止重复选题）
+{c['recent_titles_md']}
+
+## 工作流
+1. 调 `get_topic_candidates()` 拉取近 24h 候选池（X 热帖 / GitHub release / 论文 / 36氪 /
+   掘金 / V2EX / Reddit / Product Hunt / YouTube / 选题库 / 写作方案）
+2. 可用 web 工具核实候选热点、补充今天的新动态
+3. 按每个账号的画像（定位/受众/选题重点/禁区）和 daily_quota 分配选题，每条给出：
+   - `title`（拟发标题）、`angle`（一句话切入角度）、`reason`（为什么今天写它）
+   - `content_type`：long|short|story|share（story/share 计入 short 配额）
+   - `sources`：参考来源 `[{{"platform": "...", "title": "...", "url": "..."}}]`
+   - **撞题公用**：同一选题适合多个账号时，每个账号各建一条 item，填**相同的
+     `group_key`**（如 "g1"），把画像最适合写这篇的那条标 `is_primary=true`——
+     一组只跑一条创作链、共享一稿。同组必须同 content_type。
+   - 不得与「近 7 天已写标题」重复
+4. `save_daily_plan(plan_id={c['plan_id']}, items=[...], note='<给运营的一句话总编留言>')`
+5. `kanban_complete(summary='今日计划 N 条', metadata={{"plan_id": {c['plan_id']}, "item_count": N}})`
+""".strip(),
+    ),
+]
+
+
 PIPELINES: dict[str, list[PipelineStep]] = {
     "full": FULL_PIPELINE,
     "cover_only": COVER_ONLY_PIPELINE,
@@ -907,6 +946,7 @@ PIPELINES: dict[str, list[PipelineStep]] = {
     "illustrate_body": INLINE_ILLUS_PIPELINE,
     "release_write": RELEASE_WRITE_PIPELINE,
     "repo_intro": REPO_INTRO_PIPELINE,
+    "daily_plan": DAILY_PLAN_PIPELINE,
 }
 
 
