@@ -118,3 +118,82 @@ async def toggle_skip(item_id: int, db: AsyncSession = Depends(get_db)):
     it.status = "skipped" if it.status == "suggested" else "suggested"
     await db.commit()
     return {"id": it.id, "status": it.status}
+
+
+class EnqueueItemsIn(BaseModel):
+    item_ids: list[int]
+
+
+class EnqueueItemsOut(BaseModel):
+    enqueued_items: int
+    chains: int
+    task_ids: list[str]   # 每条链第一棒的 kanban task id
+
+
+@router.post("/{plan_id}/enqueue", response_model=EnqueueItemsOut)
+async def enqueue_items(plan_id: int, body: EnqueueItemsIn,
+                        db: AsyncSession = Depends(get_db)):
+    """把勾选的计划条目入队创作链。
+
+    撞题组（同 group_key）只建一条链：优先用主笔（is_primary）账号的画像；
+    主笔未被勾选时退化为组内第一个被勾选的账号。组内所有勾选条目共享同一
+    pipeline_task_id（一稿多发）。仅 suggested 状态可入队。
+    """
+    from routers.studio import _account_profile_full, _run_pipeline_chain
+    from routers.topic_generator import _TYPE_LABEL, _WORD_RANGE
+
+    plan = await db.get(DailyPlan, plan_id)
+    if plan is None:
+        raise HTTPException(404, "plan not found")
+    if not body.item_ids:
+        raise HTTPException(400, "item_ids 不能为空")
+
+    items = (await db.execute(
+        select(DailyPlanItem).where(DailyPlanItem.plan_id == plan_id,
+                                    DailyPlanItem.id.in_(body.item_ids))
+        .order_by(DailyPlanItem.id)
+    )).scalars().all()
+    todo = [it for it in items if it.status == "suggested"]
+    if not todo:
+        raise HTTPException(400, "所选条目中没有可入队的（仅 suggested 状态可入队）")
+
+    groups: dict[str, list[DailyPlanItem]] = {}
+    for it in todo:
+        groups.setdefault(it.group_key or f"__solo_{it.id}", []).append(it)
+
+    first_task_ids: list[str] = []
+    chains = 0
+    for members in groups.values():
+        leader = next((m for m in members if m.is_primary), members[0])
+        acc = await db.get(PublishAccount, leader.account_id)
+        if acc is None:
+            raise HTTPException(400, f"account '{leader.account_id}' not found")
+
+        sources_md = "\n".join(
+            f"- [{s.get('platform', '?')}] {s.get('title', '')} [{s.get('url', '')}]"
+            for s in (leader.sources or [])
+        ) or "（无参考来源）"
+
+        ctx = {
+            "title": leader.title,
+            "account_id": leader.account_id,
+            "account_profile": _account_profile_full(acc),
+            "content_type": leader.content_type,
+            "content_type_label": _TYPE_LABEL.get(leader.content_type, leader.content_type),
+            "word_range": _WORD_RANGE.get(leader.content_type, ""),
+            "angle": leader.angle,
+            "source_posts_md": sources_md,
+            "draft_id": 0,
+        }
+        flow = "topic_long" if leader.content_type == "long" else "topic_short"
+        out = await _run_pipeline_chain(flow, ctx, account_id=leader.account_id,
+                                        title=leader.title)
+        chains += 1
+        first_task_ids.append(out.task_id)
+        for m in members:
+            m.status = "enqueued"
+            m.pipeline_task_id = out.pipeline_task_id
+    await db.commit()
+
+    return EnqueueItemsOut(enqueued_items=len(todo), chains=chains,
+                           task_ids=first_task_ids)
