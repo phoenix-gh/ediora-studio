@@ -11,7 +11,7 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Optional
 from mcp.server.fastmcp import FastMCP
-from sqlalchemy import select, desc
+from sqlalchemy import select, desc, delete as sa_delete
 from database import SessionLocal
 
 _UPLOADS_DIR = Path(__file__).parent / "uploads"
@@ -1168,3 +1168,129 @@ async def get_account_profile(pub_id: str) -> dict:
             "style_rules": acc.style_rules or [],
             "is_active": acc.is_active,
         }
+
+
+# ── 每日内容计划（daily_plan 总编任务专用） ────────────────────────────────────
+
+@mcp.tool()
+async def get_topic_candidates(
+    sources: Optional[list[str]] = None,
+    limit_per_source: int = 10,
+) -> list[dict]:
+    """
+    统一选题候选池：近 24h 各信息源高热内容 + 选题库 + 写作方案。
+
+    供每日计划总编（daily_plan 任务）调用。统一结构：
+    {source, title, summary, url, heat, published_at}
+    source ∈ x / github_release / paper / kr / juejin / v2ex / reddit /
+             producthunt / youtube / topic_library / writing_plan
+    sources 传子集可只拉部分源；limit_per_source 每源上限（X 固定 50，写作方案固定 20）。
+    """
+    from models import (XPost, GithubRelease, Paper, KrArticle, JuejinArticle,
+                        V2exTopic, RedditPost, ProductHuntPost, YoutubeVideo,
+                        Topic, WritingPlan)
+
+    since = datetime.now(timezone.utc) - timedelta(hours=24)
+    lim = max(1, min(int(limit_per_source), 50))
+    want = set(sources) if sources else None
+
+    def _on(key: str) -> bool:
+        return want is None or key in want
+
+    def _c(source, title, summary, url, heat, published_at) -> dict:
+        return {"source": source, "title": (title or "")[:120],
+                "summary": (summary or "")[:300], "url": url or "",
+                "heat": int(heat or 0), "published_at": _fmt_dt(published_at)}
+
+    out: list[dict] = []
+    async with SessionLocal() as db:
+        if _on("x"):
+            rows = (await db.execute(
+                select(XPost)
+                .where(XPost.published_at >= since, XPost.is_reply == False)  # noqa: E712
+                .order_by(desc(XPost.likes + XPost.reposts)).limit(50)
+            )).scalars().all()
+            out += [_c("x", f"@{p.username}: {p.content[:80]}", p.content, p.url,
+                       p.likes + p.reposts, p.published_at) for p in rows]
+
+        if _on("github_release"):
+            rows = (await db.execute(
+                select(GithubRelease).where(GithubRelease.published_at >= since)
+                .order_by(desc(GithubRelease.published_at)).limit(lim)
+            )).scalars().all()
+            out += [_c("github_release", f"{r.repo_id} {r.tag_name}", r.body,
+                       r.html_url, 0, r.published_at) for r in rows]
+
+        if _on("paper"):
+            rows = (await db.execute(
+                select(Paper).where(Paper.collected_at >= since)
+                .order_by(desc(Paper.collected_at)).limit(lim)
+            )).scalars().all()
+            out += [_c("paper", p.title_cn or p.title, p.abstract_cn or p.abstract,
+                       p.arxiv_url, 0, p.submitted_at) for p in rows]
+
+        if _on("kr"):
+            rows = (await db.execute(
+                select(KrArticle).where(KrArticle.published_at >= since)
+                .order_by(desc(KrArticle.stat_read)).limit(lim)
+            )).scalars().all()
+            out += [_c("kr", a.title, a.summary, a.url, a.stat_read, a.published_at)
+                    for a in rows]
+
+        if _on("juejin"):
+            rows = (await db.execute(
+                select(JuejinArticle).where(JuejinArticle.published_at >= since)
+                .order_by(desc(JuejinArticle.view_count)).limit(lim)
+            )).scalars().all()
+            out += [_c("juejin", a.title, a.brief, a.url, a.view_count, a.published_at)
+                    for a in rows]
+
+        if _on("v2ex"):
+            rows = (await db.execute(
+                select(V2exTopic).where(V2exTopic.published_at >= since)
+                .order_by(desc(V2exTopic.replies)).limit(lim)
+            )).scalars().all()
+            out += [_c("v2ex", t.title, t.content, t.url, t.replies, t.published_at)
+                    for t in rows]
+
+        if _on("reddit"):
+            rows = (await db.execute(
+                select(RedditPost).where(RedditPost.published_at >= since)
+                .order_by(desc(RedditPost.score)).limit(lim)
+            )).scalars().all()
+            out += [_c("reddit", p.title, p.body, p.url, p.score, p.published_at)
+                    for p in rows]
+
+        if _on("producthunt"):
+            rows = (await db.execute(
+                select(ProductHuntPost).where(ProductHuntPost.published_at >= since)
+                .order_by(desc(ProductHuntPost.votes)).limit(lim)
+            )).scalars().all()
+            out += [_c("producthunt", f"{p.title} — {p.tagline}", p.description,
+                       p.url, p.votes, p.published_at) for p in rows]
+
+        if _on("youtube"):
+            rows = (await db.execute(
+                select(YoutubeVideo).where(YoutubeVideo.published_at >= since)
+                .order_by(desc(YoutubeVideo.views)).limit(lim)
+            )).scalars().all()
+            out += [_c("youtube", f"[{v.channel_name}] {v.title}", v.description,
+                       v.url, v.views, v.published_at) for v in rows]
+
+        if _on("topic_library"):
+            rows = (await db.execute(
+                select(Topic).where(Topic.status == "pending")
+                .order_by(desc(Topic.score)).limit(lim)
+            )).scalars().all()
+            out += [_c("topic_library", t.title, t.summary or t.recommend_reason,
+                       "", int(t.score * 10), t.created_at) for t in rows]
+
+        if _on("writing_plan"):
+            rows = (await db.execute(
+                select(WritingPlan).where(WritingPlan.status == "active")
+                .order_by(WritingPlan.priority).limit(20)
+            )).scalars().all()
+            out += [_c("writing_plan", w.title, w.strategy, "", 0, w.updated_at)
+                    for w in rows]
+
+    return out
