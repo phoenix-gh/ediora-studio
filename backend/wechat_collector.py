@@ -46,6 +46,63 @@ def _re_str(pattern: str, text: str, group: int = 1) -> str:
     return m.group(group).strip() if m else ""
 
 
+# JS string escapes seen in the embedded data blob (\x0a newlines, ️ etc.)
+_JS_ESCAPE = re.compile(r"\\(?:x[0-9A-Fa-f]{2}|u[0-9A-Fa-f]{4}|u\{[0-9A-Fa-f]+\}|.)", re.S)
+_JS_SIMPLE = {
+    "n": "\n", "r": "\r", "t": "\t", "b": "\b", "f": "\f", "v": "\v", "0": "\0",
+    "'": "'", '"': '"', "\\": "\\", "/": "/", "`": "`", "\n": "", "\r": "",
+}
+
+
+def _js_unescape(s: str) -> str:
+    """Decode the escape sequences of a JavaScript string literal."""
+    def repl(m: "re.Match[str]") -> str:
+        tok = m.group(0)
+        c = tok[1]
+        if c == "x":
+            return chr(int(tok[2:], 16))
+        if c == "u":
+            return chr(int(tok[3:-1] if tok[2] == "{" else tok[2:], 16))
+        return _JS_SIMPLE.get(c, c)
+    return _JS_ESCAPE.sub(repl, s)
+
+
+def _js_string(key: str, text: str) -> str:
+    """Return the decoded value of a single-quoted JS field `key: '...'`."""
+    m = re.search(key + r"\s*:\s*'((?:[^'\\]|\\.)*)'", text)
+    return _js_unescape(m.group(1)) if m else ""
+
+
+def _extract_picture_message(page: str) -> str:
+    """Body HTML for the newer 图片消息 / 文案 layout.
+
+    These posts render client-side: #js_content is absent and the DOM container
+    (#js_article) is empty. The body lives in a JS data blob as `content_noencode`,
+    with \\x0a hex escapes for newlines. The value is already HTML (WeChat embeds
+    topic links as <a> anchors), so — like the legacy #js_content path — we keep it
+    as markup and only wrap each line in <p> to restore the paragraph breaks that
+    the bare newlines would otherwise collapse.
+
+    (Album posts also carry body images in a `picture_info` region; we only have a
+    text sample to verify against, so image harvesting is intentionally left out
+    until we can confirm that structure.)
+    """
+    content = _js_string("content_noencode", page)
+    if not content:
+        return ""
+    paras = [line.strip() for line in content.split("\n") if line.strip()]
+    return _rewrite_mmbiz_images("".join(f"<p>{p}</p>" for p in paras))
+
+
+def _extract_body(page: str) -> str:
+    """Extract and rewrite the article body, across legacy and new layouts."""
+    soup = BeautifulSoup(page, "html.parser")
+    node = soup.find(id="js_content") or soup.select_one("div.rich_media_content")
+    if node:
+        return _rewrite_mmbiz_images(node.decode_contents().strip())
+    return _extract_picture_message(page)
+
+
 def _rewrite_mmbiz_images(html_text: str) -> str:
     """Rewrite <img> tags inside an article body so that every mmbiz image
     flows through the local cache proxy, and lazy-loaded data-src becomes src.
@@ -89,45 +146,43 @@ async def fetch_article_body(url: str, client: httpx.AsyncClient | None = None) 
     finally:
         if own:
             await client.aclose()
-    soup = BeautifulSoup(page, "html.parser")
-    node = soup.find(id="js_content") or soup.select_one("div.rich_media_content")
-    if not node:
-        return ""
-    return _rewrite_mmbiz_images(node.decode_contents().strip())
+    return _extract_body(page)
 
 
-async def fetch_article(url: str) -> dict:
-    """Fetch a WeChat article URL and return its metadata + body."""
-    async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
-        resp = await client.get(url, headers=_HEADERS)
-        resp.raise_for_status()
-        page = resp.text
-        final_url = str(resp.url)
+def parse_article(page: str, final_url: str) -> dict:
+    """Parse a WeChat article page into metadata + body.
 
+    Handles both the legacy text layout (var nickname / var biz / var ct) and the
+    newer 图片消息 / 文案 layout, which drops those globals and instead exposes the
+    same facts as nick_name / __biz= / create_time inside the embedded data blob.
+    """
     title = html.unescape(_re_str(r'<meta\s+property="og:title"\s+content="([^"]+)"', page))
-    cover = html.unescape(_re_str(r'<meta\s+property="og:image"\s+content="([^"]+)"', page))
-    digest = html.unescape(_re_str(r'<meta\s+property="og:description"\s+content="([^"]+)"', page))
-
     if not title:
         raise ValueError("无法解析文章标题，请确认这是一篇微信公众号文章链接")
 
+    cover = html.unescape(_re_str(r'<meta\s+property="og:image"\s+content="([^"]+)"', page))
+    digest = html.unescape(_re_str(r'<meta\s+property="og:description"\s+content="([^"]+)"', page))
+
     account_name = html.unescape(
         _re_str(r'var\s+nickname\s*=\s*(?:htmlDecode\()?["\']([^"\']+)["\']', page)
+        or _re_str(r'nick_name\s*:\s*["\']([^"\']+)["\']', page)
+        or _re_str(r'<meta\s+property="og:article:author"\s+content="([^"]+)"', page)
     )
 
-    biz = _re_str(r'biz\s*:\s*["\']([A-Za-z0-9+/=]+)["\']', page)
-    if not biz:
-        biz = _re_str(r'var\s+biz\s*=\s*["\']([A-Za-z0-9+/=]+)["\']', page)
+    biz = (
+        _re_str(r'biz\s*:\s*["\']([A-Za-z0-9+/=]+)["\']', page)
+        or _re_str(r'var\s+biz\s*=\s*["\']([A-Za-z0-9+/=]+)["\']', page)
+        or _re_str(r'__biz=([A-Za-z0-9+/=]+)', page)
+    )
 
-    ts_str = _re_str(r'var\s+ct\s*=\s*["\']?(\d{10})["\']?', page)
+    ts_str = (
+        _re_str(r'var\s+ct\s*=\s*["\']?(\d{10})["\']?', page)
+        or _re_str(r'create_time\s*:\s*["\']?(\d{10})\b', page)
+    )
     published_at = (
         datetime.fromtimestamp(int(ts_str), tz=timezone.utc)
         if ts_str else datetime.now(timezone.utc)
     )
-
-    soup = BeautifulSoup(page, "html.parser")
-    body_node = soup.find(id="js_content") or soup.select_one("div.rich_media_content")
-    body_html = _rewrite_mmbiz_images(body_node.decode_contents().strip()) if body_node else ""
 
     return {
         "id": _article_id(final_url),
@@ -137,9 +192,19 @@ async def fetch_article(url: str) -> dict:
         "url": final_url,
         "cover_url": cover,
         "digest": digest,
-        "content": body_html,
+        "content": _extract_body(page),
         "published_at": published_at,
     }
+
+
+async def fetch_article(url: str) -> dict:
+    """Fetch a WeChat article URL and return its metadata + body."""
+    async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
+        resp = await client.get(url, headers=_HEADERS)
+        resp.raise_for_status()
+        page = resp.text
+        final_url = str(resp.url)
+    return parse_article(page, final_url)
 
 
 async def save_article(url: str, db: AsyncSession) -> WechatArticle:
