@@ -198,3 +198,31 @@ export async function publishDraftToWechat(
     body: JSON.stringify(body),
   })
 }
+
+export interface BlogPublishRequest {
+  title: string
+  description: string
+  content_markdown: string
+  cover_image_id?: number
+  slug?: string
+  series?: string
+  tags?: string[]
+  pullquote?: string
+  revision_notes?: string
+}
+
+export interface BlogPublishResult {
+  id: string
+  slug: string
+  status: string
+  admin_url: string
+}
+
+export async function publishDraftToBlog(
+  draftId: number, body: BlogPublishRequest,
+): Promise<BlogPublishResult> {
+  return apiFetch(`/write/drafts/${draftId}/publish/blog`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+}

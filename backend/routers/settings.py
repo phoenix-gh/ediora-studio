@@ -56,6 +56,9 @@ class SettingsOut(BaseModel):
     wechat_tunnel_remote_host: str
     wechat_tunnel_remote_port: int
     wechat_tunnel_extra_args: str
+    blog_api_base: str
+    blog_api_token_set: bool
+    blog_api_token_preview: str
     providers: list[ProviderInfo]
 
 
@@ -93,6 +96,8 @@ class SettingsUpdate(BaseModel):
     wechat_tunnel_remote_host: Optional[str] = None
     wechat_tunnel_remote_port: Optional[int] = None
     wechat_tunnel_extra_args: Optional[str] = None
+    blog_api_base: Optional[str] = None
+    blog_api_token: Optional[str] = None
 
 
 class FetchModelsRequest(BaseModel):
@@ -104,9 +109,11 @@ class FetchModelsRequest(BaseModel):
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _build_out(cfg: dict) -> SettingsOut:
+    import blog_client
     api_key = cfg.get("llm_api_key", "")
     gh_token = cfg.get("github_token", "")
     embedding_api_key = cfg.get("embedding_api_key", "")
+    blog_base, blog_token = blog_client.effective_blog_config(cfg)
     return SettingsOut(
         llm_provider=cfg.get("llm_provider", "openai"),
         llm_model=cfg.get("llm_model", ""),
@@ -145,6 +152,9 @@ def _build_out(cfg: dict) -> SettingsOut:
         wechat_tunnel_remote_host=cfg.get("wechat_tunnel_remote_host", "api.weixin.qq.com"),
         wechat_tunnel_remote_port=max(1, int(cfg.get("wechat_tunnel_remote_port", 443))),
         wechat_tunnel_extra_args=cfg.get("wechat_tunnel_extra_args", ""),
+        blog_api_base=blog_base,
+        blog_api_token_set=bool(blog_token),
+        blog_api_token_preview=f"…{blog_token[-4:]}" if len(blog_token) >= 4 else "",
         providers=[
             ProviderInfo(key=k, label=v["label"], base_url=v["base_url"], default_model=v["default_model"])
             for k, v in PROVIDERS.items()
@@ -254,6 +264,10 @@ async def update_settings(body: SettingsUpdate, request: Request):
         updates["wechat_tunnel_remote_port"] = str(max(1, body.wechat_tunnel_remote_port))
     if body.wechat_tunnel_extra_args is not None:
         updates["wechat_tunnel_extra_args"] = body.wechat_tunnel_extra_args.strip()
+    if body.blog_api_base is not None:
+        updates["blog_api_base"] = body.blog_api_base.strip().rstrip("/")
+    if body.blog_api_token is not None:
+        updates["blog_api_token"] = body.blog_api_token.strip()
     if updates:
         await set_config(updates)
 

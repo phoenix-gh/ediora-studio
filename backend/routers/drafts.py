@@ -1,3 +1,4 @@
+import base64
 import mimetypes
 import os
 import uuid
@@ -9,7 +10,9 @@ from sqlalchemy import select, desc
 from pydantic import BaseModel
 from typing import Optional
 
+import blog_client as blog
 import wechat_api_client as wx
+from config import get_config
 from database import get_db
 from models import ArticleDraft, ArticleSeries, DraftImage, PublishAccount
 
@@ -45,6 +48,25 @@ class WechatPublishRequest(BaseModel):
 
 class WechatPublishResponse(BaseModel):
     media_id: str
+
+
+class BlogPublishRequest(BaseModel):
+    title: str
+    description: str
+    content_markdown: str
+    cover_image_id: Optional[int] = None
+    slug: str = ""
+    series: str = ""
+    tags: list[str] = []
+    pullquote: str = ""
+    revision_notes: str = ""
+
+
+class BlogPublishResponse(BaseModel):
+    id: str
+    slug: str
+    status: str
+    admin_url: str
 
 router = APIRouter(prefix="/write", tags=["drafts"])
 
@@ -335,6 +357,91 @@ async def publish_draft_to_wechat(
     except httpx.HTTPError as e:
         raise HTTPException(502, f"微信接口网络请求失败: {e}")
     return WechatPublishResponse(media_id=media_id)
+
+
+# ── 发布到 Blog（MK Flow）────────────────────────────────────────────────────
+
+@router.post("/drafts/{draft_id}/publish/blog", response_model=BlogPublishResponse)
+async def publish_draft_to_blog(
+    draft_id: int, body: BlogPublishRequest, db: AsyncSession = Depends(get_db),
+):
+    draft = await db.get(ArticleDraft, draft_id)
+    if not draft:
+        raise HTTPException(404, "Draft not found")
+    if not body.title.strip() or not body.description.strip() or not body.content_markdown.strip():
+        raise HTTPException(400, "标题、摘要和正文不能为空")
+
+    cfg = await get_config()
+    base, token = blog.effective_blog_config(cfg)
+    if not token:
+        raise HTTPException(400, "未配置 Blog API Token，请到「设置 → Blog 投稿」填写")
+
+    # 本站 uploads 图片博客拉不到，转 base64 随稿上传；外链图片保持原样
+    images: list[dict] = []
+    seen: set[str] = set()
+    for alt, src in blog.extract_markdown_images(body.content_markdown):
+        if "/api/uploads/" not in src or src in seen:
+            continue
+        seen.add(src)
+        data, mime = await _load_image_bytes(src)
+        filename = src.rsplit("/", 1)[-1].split("?")[0]
+        images.append({
+            "source": src,
+            "filename": filename,
+            "alt": alt,
+            "contentType": mime,
+            "base64": base64.b64encode(data).decode("ascii"),
+        })
+
+    payload: dict = {
+        "title": body.title.strip(),
+        "description": body.description.strip(),
+        "contentMarkdown": body.content_markdown,
+        "agentName": "wemedia-studio",
+    }
+    if body.slug.strip():
+        payload["slug"] = body.slug.strip()
+    if body.series.strip():
+        payload["series"] = body.series.strip()
+    if tags := [t.strip() for t in body.tags if t.strip()]:
+        payload["tags"] = tags
+    if body.pullquote.strip():
+        payload["pullquote"] = body.pullquote.strip()
+    if body.revision_notes.strip():
+        payload["revisionNotes"] = body.revision_notes.strip()
+    if images:
+        payload["images"] = images
+
+    # 封面图：从素材库选的图片转 base64 随稿上传
+    if body.cover_image_id is not None:
+        root_id = await _resolve_root_id(draft_id, db)
+        cover_img = await db.get(DraftImage, body.cover_image_id)
+        if not cover_img or cover_img.root_draft_id != root_id:
+            raise HTTPException(404, "封面图不存在")
+        cover_data, cover_mime = await _load_image_bytes(cover_img.url)
+        payload["coverImage"] = {
+            "filename": cover_img.original_name or cover_img.filename,
+            "alt": cover_img.original_name or "封面",
+            "contentType": cover_mime,
+            "base64": base64.b64encode(cover_data).decode("ascii"),
+        }
+
+    try:
+        data = await blog.submit_post(base, token, payload)
+    except blog.BlogApiError as e:
+        raise HTTPException(502, f"Blog 接口返回错误：{e}")
+    except httpx.HTTPError as e:
+        raise HTTPException(502, f"Blog 接口网络请求失败：{e}")
+
+    admin_url = str(data.get("adminUrl") or "")
+    if admin_url.startswith("/"):
+        admin_url = f"{base}{admin_url}"
+    return BlogPublishResponse(
+        id=str(data.get("id", "")),
+        slug=str(data.get("slug", "")),
+        status=str(data.get("status", "review")),
+        admin_url=admin_url,
+    )
 
 
 @router.delete("/drafts/{draft_id}", status_code=204)

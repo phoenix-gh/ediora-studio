@@ -1,4 +1,4 @@
-/** 发布面板（公众号 / X 长文）共享的封面挑选与图片 URL 处理工具。 */
+/** 发布面板（公众号 / X 长文 / Blog）共享的封面挑选与图片 URL 处理工具。 */
 
 import { DraftImage } from '@/lib/api/drafts'
 import { API_BASE } from '@/lib/api/client'

@@ -59,6 +59,9 @@ export interface AppSettings {
   wechat_tunnel_remote_host: string
   wechat_tunnel_remote_port: number
   wechat_tunnel_extra_args: string
+  blog_api_base: string
+  blog_api_token_set: boolean
+  blog_api_token_preview: string
   providers: ProviderInfo[]
 }
 
@@ -110,6 +113,8 @@ export interface SettingsUpdate {
   wechat_tunnel_remote_host?: string
   wechat_tunnel_remote_port?: number
   wechat_tunnel_extra_args?: string
+  blog_api_base?: string
+  blog_api_token?: string
 }
 
 export interface FetchModelsRequest {

@@ -8,19 +8,22 @@ import {
 import { DraftImage } from '@/lib/api/drafts'
 import { WechatPublishPanel } from './WechatPublishPanel'
 import { XArticlePanel } from './XArticlePanel'
+import { BlogPublishPanel } from './BlogPublishPanel'
 
 const TAB_STORAGE_KEY = 'wms-publish-tab'
 
-type PublishTab = 'wechat' | 'x'
+type PublishTab = 'wechat' | 'x' | 'blog'
 
 const TABS: { value: PublishTab; label: string }[] = [
   { value: 'wechat', label: '公众号' },
   { value: 'x', label: 'X 长文' },
+  { value: 'blog', label: 'Blog' },
 ]
 
 const TAB_DESCRIPTION: Record<PublishTab, string> = {
   wechat: '渲染排版后存入公众号草稿箱；群发请到公众号后台确认',
   x: 'X 没有长文发布接口：预览并复制内容，到 x.com 文章编辑器手动发布',
+  blog: '提交到 MK Flow 博客，进入 review 状态，人工后台审核后发布',
 }
 
 /** 统一发布弹窗：壳 + 平台 tab，各平台面板独立组件。 */
@@ -37,13 +40,13 @@ export function PublishDialog({
   const [tab, setTab] = useState<PublishTab>(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem(TAB_STORAGE_KEY)
-      if (saved === 'wechat' || saved === 'x') return saved
+      if (saved === 'wechat' || saved === 'x' || saved === 'blog') return saved
     }
     return 'wechat'
   })
   // 面板懒挂载：切到过的 tab 保持挂载（hidden 隐藏），切回不丢状态、不重渲染
   const [activated, setActivated] = useState<Record<PublishTab, boolean>>(
-    () => ({ wechat: tab === 'wechat', x: tab === 'x' }),
+    () => ({ wechat: tab === 'wechat', x: tab === 'x', blog: tab === 'blog' }),
   )
 
   function pickTab(t: PublishTab) {
@@ -93,6 +96,11 @@ export function PublishDialog({
         {activated.x && (
           <div className={cn('flex-1 flex flex-col overflow-hidden min-h-0', tab !== 'x' && 'hidden')}>
             <XArticlePanel title={title} content={content} images={images} />
+          </div>
+        )}
+        {activated.blog && (
+          <div className={cn('flex-1 flex flex-col overflow-hidden min-h-0', tab !== 'blog' && 'hidden')}>
+            <BlogPublishPanel draftId={draftId} title={title} content={content} images={images} />
           </div>
         )}
       </DialogContent>
