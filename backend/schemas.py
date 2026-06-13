@@ -19,6 +19,7 @@ class PublishAccountCreate(BaseModel):
     style_rules: list[str] = Field(default_factory=list)
     app_id: str = ""
     app_secret: str = ""
+    daily_quota: dict = Field(default_factory=dict)
     is_active: bool = True
 
 
@@ -38,6 +39,7 @@ class PublishAccountOut(BaseModel):
     style_rules: list[str]
     app_id: str
     app_secret: str
+    daily_quota: dict
     is_active: bool
     created_at: datetime
 
@@ -59,6 +61,7 @@ class PublishAccountUpdate(BaseModel):
     style_rules: Optional[list[str]] = None
     app_id: Optional[str] = None
     app_secret: Optional[str] = None
+    daily_quota: Optional[dict] = None
     is_active: Optional[bool] = None
 
 

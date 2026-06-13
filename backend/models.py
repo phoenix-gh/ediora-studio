@@ -39,6 +39,7 @@ class PublishAccount(Base):
     style_rules: Mapped[list] = mapped_column(JSON, default=list)
     app_id: Mapped[str] = mapped_column(String, default="")       # 公众号开发者 AppID
     app_secret: Mapped[str] = mapped_column(String, default="")   # 仅用于发布到草稿箱
+    daily_quota: Mapped[dict] = mapped_column(JSON, default=dict)  # {"long":1,"short":2}；空=不参与每日计划
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
 
@@ -738,3 +739,36 @@ class RefSeen(Base):
     source_id: Mapped[str] = mapped_column(String, nullable=False)
     verdict: Mapped[str] = mapped_column(String, default="rejected")
     seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+
+class DailyPlan(Base):
+    """每日内容计划：8 点总编策划任务的载体，items 确认后入队创作链。"""
+    __tablename__ = "daily_plans"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    plan_date: Mapped[str] = mapped_column(String, nullable=False, unique=True, index=True)  # 本地日期 "YYYY-MM-DD"
+    status: Mapped[str] = mapped_column(String, default="planning", index=True)  # planning|ready|failed
+    kanban_task_id: Mapped[str] = mapped_column(String, default="")
+    planner_note: Mapped[str] = mapped_column(Text, default="")  # 总编留言
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+
+
+class DailyPlanItem(Base):
+    """计划里的一条选题。后续发布排期/效果回流都挂在这个锚点上。"""
+    __tablename__ = "daily_plan_items"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    plan_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    account_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String, nullable=False)
+    angle: Mapped[str] = mapped_column(Text, default="")
+    reason: Mapped[str] = mapped_column(Text, default="")
+    content_type: Mapped[str] = mapped_column(String, default="long")  # long|short|story|share
+    sources: Mapped[list] = mapped_column(JSON, default=list)  # [{platform,title,url}]
+    group_key: Mapped[str] = mapped_column(String, default="", index=True)  # 非空=撞题组，共享一稿
+    is_primary: Mapped[bool] = mapped_column(Boolean, default=True)  # 组内主笔（用谁的画像写）
+    status: Mapped[str] = mapped_column(String, default="suggested", index=True)  # suggested|skipped|enqueued
+    pipeline_task_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    draft_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
