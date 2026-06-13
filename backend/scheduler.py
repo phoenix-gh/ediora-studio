@@ -487,6 +487,17 @@ async def scheduled_x_reply_scout():
         await log("x_reply", "error", "X 动态通知异常", str(e))
 
 
+async def scheduled_daily_plan():
+    """每天 8 点：为每个 active 账号生成今日内容计划（wms_scout 总编单棒）。
+    create_today_plan 自带「当天已有计划则跳过」幂等守卫，重启重跑安全。"""
+    from logger import log
+    try:
+        from daily_planner import create_today_plan
+        await create_today_plan()
+    except Exception as e:
+        await log("daily_plan", "error", "今日计划生成异常", str(e))
+
+
 def register_jobs(scheduler, cfg):
     from datetime import datetime, timedelta
     _load_state()
@@ -519,6 +530,7 @@ def register_jobs(scheduler, cfg):
         (scheduled_ref_collect,         dict(trigger="interval", minutes=5,           id="ref_collect_daily", next_run_time=_first_run(5,   "ref_collect"))),
         (scheduled_ref_classify,        dict(trigger="interval", minutes=10,          id="ref_classify",      next_run_time=_first_run(10,  "ref_classify"))),
         (scheduled_x_reply_scout,       dict(trigger="interval", minutes=5,           id="x_reply_scout",     next_run_time=_first_run(5,   "x_reply_scout"))),
+        (scheduled_daily_plan,          dict(trigger="cron",     hour=8, minute=0,    id="daily_plan")),
     ]
     for func, kwargs in jobs:
         scheduler.add_job(func, **kwargs)

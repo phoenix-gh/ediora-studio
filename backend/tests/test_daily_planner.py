@@ -130,3 +130,15 @@ def test_recent_draft_titles_in_body(fake_kanban):
     from daily_planner import create_today_plan
     _run(create_today_plan())
     assert "昨天已写过的稿子" in fake_kanban.created[0]["body"]
+
+
+def test_register_jobs_includes_daily_plan_cron(env):
+    import scheduler
+    class FakeSched:
+        def __init__(self): self.jobs = {}
+        def add_job(self, func, **kw): self.jobs[kw.get("id")] = kw
+    fs = FakeSched()
+    scheduler.register_jobs(fs, {})
+    assert "daily_plan" in fs.jobs
+    assert fs.jobs["daily_plan"].get("trigger") == "cron"
+    assert fs.jobs["daily_plan"].get("hour") == 8
