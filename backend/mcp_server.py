@@ -1178,17 +1178,17 @@ async def get_topic_candidates(
     limit_per_source: int = 10,
 ) -> list[dict]:
     """
-    统一选题候选池：近 24h 各信息源高热内容 + 选题库 + 写作方案。
+    统一选题候选池：近 24h 各信息源高热内容 + 写作方案。
 
     供每日计划总编（daily_plan 任务）调用。统一结构：
     {source, title, summary, url, heat, published_at}
     source ∈ x / github_release / paper / kr / juejin / v2ex / reddit /
-             producthunt / youtube / topic_library / writing_plan
+             producthunt / youtube / writing_plan
     sources 传子集可只拉部分源；limit_per_source 每源上限（X 固定 50，写作方案固定 20）。
     """
     from models import (XPost, GithubRelease, Paper, KrArticle, JuejinArticle,
                         V2exTopic, RedditPost, ProductHuntPost, YoutubeVideo,
-                        Topic, WritingPlan)
+                        WritingPlan)
 
     since = datetime.now(timezone.utc) - timedelta(hours=24)
     lim = max(1, min(int(limit_per_source), 50))
@@ -1276,14 +1276,6 @@ async def get_topic_candidates(
             )).scalars().all()
             out += [_c("youtube", f"[{v.channel_name}] {v.title}", v.description,
                        v.url, v.views, v.published_at) for v in rows]
-
-        if _on("topic_library"):
-            rows = (await db.execute(
-                select(Topic).where(Topic.status == "pending")
-                .order_by(desc(Topic.score)).limit(lim)
-            )).scalars().all()
-            out += [_c("topic_library", t.title, t.summary or t.recommend_reason,
-                       "", int(t.score * 10), t.created_at) for t in rows]
 
         if _on("writing_plan"):
             rows = (await db.execute(

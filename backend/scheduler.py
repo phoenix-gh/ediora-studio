@@ -51,39 +51,6 @@ def _should_run(job_key: str, interval_seconds: float) -> bool:
     return True
 
 
-async def scheduled_collect_and_analyze():
-    from logger import log
-    from collector import collect_all
-    try:
-        async with SessionLocal() as db:
-            results = await collect_all(db)
-        new_total = sum(r["new_posts"] for r in results)
-        errors = [r for r in results if r["error"]]
-        ok_count = len(results) - len(errors)
-        if errors:
-            detail = "; ".join("{0}: {1}".format(r["account_id"], r["error"]) for r in errors)
-        else:
-            detail = ""
-        if errors:
-            await log("collect", "warn",
-                      "完成 {0}/{1} 个账号，新增 {2} 条，{3} 个失败".format(ok_count, len(results), new_total, len(errors)),
-                      detail)
-        else:
-            await log("collect", "ok", "完成 {0} 个账号，新增 {1} 条内容".format(len(results), new_total))
-    except Exception as e:
-        await log("collect", "error", "采集任务异常", str(e))
-        return
-
-    try:
-        from analyzer import run_full_analysis
-        async with SessionLocal() as db:
-            result = await run_full_analysis(db)
-        await log("analyze", "ok",
-                  "选题 +{0}".format(result["new_topics"]))
-    except Exception as e:
-        await log("analyze", "error", "AI 分析异常", str(e))
-
-
 async def scheduled_github():
     from logger import log
     from config import get_config
@@ -501,7 +468,6 @@ async def scheduled_daily_plan():
 def register_jobs(scheduler, cfg):
     from datetime import datetime, timedelta
     _load_state()
-    collect_min = max(1, int(cfg.get("collect_interval_minutes", 15)))
     github_min  = max(1, int(cfg.get("github_interval_minutes", 1)))
 
     def _first_run(interval_minutes: int, state_key: str | None = None) -> datetime:
@@ -516,9 +482,8 @@ def register_jobs(scheduler, cfg):
         return datetime.now() + timedelta(seconds=remaining)
 
     # state_key must match the key used inside the job's _should_run() call.
-    # Jobs without _should_run (collect_analyze, github_collect) always fire on startup.
+    # Jobs without _should_run (github_collect) always fire on startup.
     jobs = [
-        (scheduled_collect_and_analyze, dict(trigger="interval", minutes=collect_min, id="collect_analyze",   next_run_time=datetime.now())),
         (scheduled_github,              dict(trigger="interval", minutes=github_min,  id="github_collect",    next_run_time=datetime.now())),
         (scheduled_papers,              dict(trigger="interval", minutes=30,          id="papers_collect",    next_run_time=_first_run(30,  "papers"))),
         (scheduled_v2ex,                dict(trigger="interval", minutes=10,          id="v2ex_collect",      next_run_time=_first_run(10,  "v2ex"))),

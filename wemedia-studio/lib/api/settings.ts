@@ -22,7 +22,6 @@ export interface AppSettings {
   rsshub_base: string
   github_token_set: boolean
   github_token_preview: string
-  collect_interval_minutes: number
   github_interval_minutes: number
   github_trending_interval_hours: number
   camofox_url: string
@@ -76,7 +75,6 @@ export interface SettingsUpdate {
   embedding_similarity_threshold?: number
   rsshub_base?: string
   github_token?: string
-  collect_interval_minutes?: number
   github_interval_minutes?: number
   github_trending_interval_hours?: number
   camofox_url?: string

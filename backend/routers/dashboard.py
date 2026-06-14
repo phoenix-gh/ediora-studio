@@ -17,8 +17,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from database import get_db
 from models import (
     ArticleDraft, CollectLog, DailyPlan, DailyPlanItem, GithubRelease, JuejinArticle,
-    KrArticle, Paper, Post, ProductHuntPost, PublishAccount, RedditPost,
-    RefMaterial, Topic, V2exTopic, WechatAccount, WechatArticle,
+    KrArticle, Paper, ProductHuntPost, PublishAccount, RedditPost,
+    RefMaterial, V2exTopic, WechatAccount, WechatArticle,
     WechatCredential, XPost, YoutubeVideo,
 )
 
@@ -29,8 +29,6 @@ CN_TZ = timezone(timedelta(hours=8))
 # (key, 名称, scheduler-state key, 页面路径, (配置键, 默认值, 单位))；interval None ⇒ 手动源。
 # key 必须等于该任务写 collect_logs 用的 job 名（见 scheduler.py / logger.log 调用）。
 SOURCES: list[tuple] = [
-    ("collect",     "订阅账号",     None,          "/settings",     ("collect_interval_minutes", 15, "min")),
-    ("analyze",     "选题分析",     None,          "/trend-topics", ("collect_interval_minutes", 15, "min")),
     ("github",      "GitHub",      None,          "/github",       ("github_interval_minutes", 1, "min")),
     ("x",           "X",           "x_collect",   "/x",            ("x_collect_interval_minutes", 15, "min")),
     ("wechat",      "公众号",       "wechat",      "/wechat",       ("wechat_collect_interval_minutes", 60, "min")),
@@ -46,8 +44,6 @@ SOURCES: list[tuple] = [
 
 # 今日新增 count 用的 (模型, 时间列)；analyze/materials 没有 collected_at 用 created_at
 _TODAY_TABLES = {
-    "collect":     [(Post, Post.collected_at)],
-    "analyze":     [(Topic, Topic.created_at)],
     "github":      [(GithubRelease, GithubRelease.collected_at)],
     "x":           [(XPost, XPost.collected_at)],
     "wechat":      [(WechatArticle, WechatArticle.collected_at)],
@@ -356,7 +352,7 @@ async def get_overview(db: AsyncSession = Depends(get_db)):
     try:
         today_output = TodayOutput(
             topics=(await db.execute(
-                select(func.count()).select_from(Topic).where(Topic.created_at >= today_start)
+                select(func.count()).select_from(DailyPlanItem).where(DailyPlanItem.created_at >= today_start)
             )).scalar_one(),
             drafts=(await db.execute(
                 select(func.count()).select_from(ArticleDraft).where(ArticleDraft.created_at >= today_start)

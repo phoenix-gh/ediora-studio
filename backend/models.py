@@ -6,20 +6,6 @@ from database import Base
 def now_utc():
     return datetime.now(timezone.utc)
 
-class Account(Base):
-    __tablename__ = "accounts"
-
-    id: Mapped[str] = mapped_column(String, primary_key=True)
-    name: Mapped[str] = mapped_column(String, nullable=False)
-    avatar: Mapped[str] = mapped_column(String, default="")
-    platform: Mapped[str] = mapped_column(String, default="X")
-    group: Mapped[str] = mapped_column(String, default="未分组")
-    priority: Mapped[str] = mapped_column(String, default="normal")
-    muted: Mapped[bool] = mapped_column(Boolean, default=False)
-    rsshub_path: Mapped[str] = mapped_column(String, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
-
-
 class PublishAccount(Base):
     """运营的对外发布账号（公众号 / X / 视频号等）。承载账号定位画像，供 agent 在策划-写作-审核全链路读取。"""
     __tablename__ = "publish_accounts"
@@ -42,21 +28,6 @@ class PublishAccount(Base):
     daily_quota: Mapped[dict] = mapped_column(JSON, default=dict)  # {"long":1,"short":2}；空=不参与每日计划
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
-
-class Post(Base):
-    __tablename__ = "posts"
-
-    id: Mapped[str] = mapped_column(String, primary_key=True)
-    account_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
-    title: Mapped[str] = mapped_column(String, default="")
-    content: Mapped[str] = mapped_column(Text, default="")
-    url: Mapped[str] = mapped_column(String, default="")
-    published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
-    likes: Mapped[int] = mapped_column(Integer, default=0)
-    reposts: Mapped[int] = mapped_column(Integer, default=0)
-    comments: Mapped[int] = mapped_column(Integer, default=0)
-    is_abnormally_popular: Mapped[bool] = mapped_column(Boolean, default=False)
-    collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
 
 class ContentDirection(Base):
     __tablename__ = "content_directions"
@@ -83,48 +54,6 @@ class TopicStrategy(Base):
     output_count: Mapped[int] = mapped_column(Integer, default=5)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
-
-
-class Topic(Base):
-    __tablename__ = "topics"
-
-    id: Mapped[str] = mapped_column(String, primary_key=True)
-    title: Mapped[str] = mapped_column(String, nullable=False)
-    summary: Mapped[str] = mapped_column(Text, default="")
-    score: Mapped[float] = mapped_column(Float, default=3.0)
-    urgency: Mapped[str] = mapped_column(String, default="this_week")
-    tags: Mapped[list] = mapped_column(JSON, default=list)
-    category: Mapped[str] = mapped_column(String, default="人工智能")
-    sources: Mapped[list] = mapped_column(JSON, default=list)
-    competitor_count: Mapped[int] = mapped_column(Integer, default=0)
-    status: Mapped[str] = mapped_column(String, default="pending", index=True)
-    recommend_reason: Mapped[str] = mapped_column(Text, default="")
-    trend_data: Mapped[list] = mapped_column(JSON, default=list)
-    direction_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    direction_name: Mapped[str] = mapped_column(String, default="")
-    strategy_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    strategy_name: Mapped[str] = mapped_column(String, default="")
-    cluster_id: Mapped[str] = mapped_column(String, default="", index=True)
-    cluster_title: Mapped[str] = mapped_column(String, default="")
-    cluster_source_count: Mapped[int] = mapped_column(Integer, default=0)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
-
-
-class TopicCluster(Base):
-    __tablename__ = "topic_clusters"
-
-    id: Mapped[str] = mapped_column(String, primary_key=True)
-    canonical_title: Mapped[str] = mapped_column(String, nullable=False)
-    summary: Mapped[str] = mapped_column(Text, default="")
-    sources: Mapped[list] = mapped_column(JSON, default=list)
-    embedding: Mapped[list] = mapped_column(JSON, default=list)
-    embedding_model: Mapped[str] = mapped_column(String, default="")
-    source_count: Mapped[int] = mapped_column(Integer, default=0)
-    heat_score: Mapped[int] = mapped_column(Integer, default=0)
-    first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
-    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
 
 
 class GithubRepo(Base):

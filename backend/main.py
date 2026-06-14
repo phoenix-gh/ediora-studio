@@ -9,8 +9,8 @@ load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from database import init_db, SessionLocal
-from routers import accounts, collect, settings, github, x, papers, personas, upload, drafts, writing_plans, synthesize, youtube, producthunt, wechat, v2ex, kr, juejin, studio, publish_accounts, profiles, reddit, topic_generator, retro, materials, skills, dashboard, daily_plan
+from database import init_db
+from routers import settings, github, x, papers, personas, upload, drafts, writing_plans, youtube, producthunt, wechat, v2ex, kr, juejin, studio, publish_accounts, profiles, reddit, topic_generator, retro, materials, skills, dashboard, daily_plan
 import scheduler as job_registry
 
 scheduler = AsyncIOScheduler()
@@ -55,8 +55,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(accounts.router, prefix="/api")
-app.include_router(collect.router, prefix="/api")
 app.include_router(settings.router, prefix="/api")
 app.include_router(github.router, prefix="/api")
 app.include_router(x.router, prefix="/api")
@@ -65,7 +63,6 @@ app.include_router(personas.router, prefix="/api")
 app.include_router(upload.router, prefix="/api")
 app.include_router(drafts.router, prefix="/api")
 app.include_router(writing_plans.router, prefix="/api")
-app.include_router(synthesize.router, prefix="/api")
 app.include_router(youtube.router, prefix="/api")
 app.include_router(producthunt.router, prefix="/api")
 app.include_router(wechat.router, prefix="/api")
@@ -96,11 +93,3 @@ app.mount("/api/uploads", StaticFiles(directory=_uploads_dir), name="uploads")
 @app.get("/health")
 async def health():
     return {"status": "ok"}
-
-
-@app.post("/api/analyze/all")
-async def trigger_full_analysis():
-    from analyzer import run_full_analysis
-    async with SessionLocal() as db:
-        result = await run_full_analysis(db)
-    return result

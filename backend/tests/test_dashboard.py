@@ -71,7 +71,7 @@ def _source(body, key):
 def test_overview_empty_db(client):
     body = _get(client)
     assert body["errors"] == []
-    assert len(body["sources"]) == 13
+    assert len(body["sources"]) == 11
     for s in body["sources"]:
         assert s["today_new"] == 0
         assert s["last_status"] is None
@@ -298,10 +298,10 @@ def test_release_today_without_draft(client):
 
 
 def test_today_output_counts(client):
-    from models import Topic, ArticleDraft
+    from models import DailyPlanItem, ArticleDraft
 
     async def seed(db):
-        db.add(Topic(id="t1", title="今天的选题"))
+        db.add(DailyPlanItem(plan_id=1, account_id="acc1", title="今天的选题"))
         db.add(ArticleDraft(topic_id="t1", title="今天的草稿"))
     _run_db(seed)
 
@@ -319,4 +319,4 @@ def test_partial_failure_isolation(client, monkeypatch):
 
     body = _get(client)
     assert any(e.startswith("releases:") for e in body["errors"])
-    assert len(body["sources"]) == 13
+    assert len(body["sources"]) == 11

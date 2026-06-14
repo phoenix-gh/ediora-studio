@@ -35,12 +35,11 @@ def _seed(model, **kw):
 
 
 def _seed_basics():
-    from models import XPost, KrArticle, Topic, WritingPlan
+    from models import XPost, KrArticle, WritingPlan
     _seed(XPost, tweet_id="x1", subscription_id=1, username="alice", content="大模型价格战开打",
           url="https://x.com/1", published_at=_now(), likes=100, reposts=50, is_reply=False)
     _seed(KrArticle, id="k1", feed_type="hot", title="某 AI 公司融资",
           url="https://36kr.com/1", published_at=_now(), stat_read=999)
-    _seed(Topic, id="t1", title="选题库里的待写选题", score=4.5)
     _seed(WritingPlan, title="长期写作方案A", strategy="持续追踪 agent 生态")
 
 
@@ -48,7 +47,7 @@ def test_candidates_unified_shape(env):
     _seed_basics()
     import mcp_server
     res = _run(mcp_server.get_topic_candidates())
-    assert {c["source"] for c in res} >= {"x", "kr", "topic_library", "writing_plan"}
+    assert {c["source"] for c in res} >= {"x", "kr", "writing_plan"}
     for c in res:
         assert set(c) == {"source", "title", "summary", "url", "heat", "published_at"}
     x = [c for c in res if c["source"] == "x"][0]

@@ -32,6 +32,11 @@ async def init_db():
         # GitHub issues 功能已整体移除（2026-06）：数据可随时从 GitHub 重新拉取
         await conn.execute(text("DROP TABLE IF EXISTS github_issues CASCADE"))
         await conn.execute(text("DROP TABLE IF EXISTS issue_pain_points CASCADE"))
+        # 旧选题链路已整体移除（2026-06）：通用 collector/analyzer + Topic 聚类，产出无人消费
+        await conn.execute(text("DROP TABLE IF EXISTS topics CASCADE"))
+        await conn.execute(text("DROP TABLE IF EXISTS topic_clusters CASCADE"))
+        await conn.execute(text("DROP TABLE IF EXISTS posts CASCADE"))
+        await conn.execute(text("DROP TABLE IF EXISTS accounts CASCADE"))
 
         if not DATABASE_URL.startswith("sqlite"):
             # Rename tables (idempotent)

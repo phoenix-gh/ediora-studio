@@ -33,7 +33,6 @@ class SettingsOut(BaseModel):
     rsshub_base: str
     github_token_set: bool
     github_token_preview: str
-    collect_interval_minutes: int
     github_interval_minutes: int
     github_trending_interval_hours: int
     camofox_url: str
@@ -73,7 +72,6 @@ class SettingsUpdate(BaseModel):
     embedding_similarity_threshold: Optional[float] = None
     rsshub_base: Optional[str] = None
     github_token: Optional[str] = None
-    collect_interval_minutes: Optional[int] = None
     github_interval_minutes: Optional[int] = None
     github_trending_interval_hours: Optional[int] = None
     camofox_url: Optional[str] = None
@@ -126,7 +124,6 @@ def _build_out(cfg: dict) -> SettingsOut:
         embedding_api_key_set=bool(embedding_api_key),
         embedding_api_key_preview=f"…{embedding_api_key[-4:]}" if len(embedding_api_key) >= 4 else "",
         embedding_similarity_threshold=float(cfg.get("embedding_similarity_threshold", "0.82")),
-        collect_interval_minutes=max(1, int(cfg.get("collect_interval_minutes", 15))),
         github_interval_minutes=max(1, int(cfg.get("github_interval_minutes", 1))),
         github_trending_interval_hours=max(1, int(cfg.get("github_trending_interval_hours", 6))),
         rsshub_base=cfg.get("rsshub_base", "http://127.0.0.1:1200"),
@@ -218,8 +215,6 @@ async def update_settings(body: SettingsUpdate, request: Request):
         updates["rsshub_base"] = body.rsshub_base
     if body.github_token is not None:
         updates["github_token"] = body.github_token
-    if body.collect_interval_minutes is not None:
-        updates["collect_interval_minutes"] = str(max(1, body.collect_interval_minutes))
     if body.github_interval_minutes is not None:
         updates["github_interval_minutes"] = str(max(1, body.github_interval_minutes))
     if body.github_trending_interval_hours is not None:
@@ -272,15 +267,11 @@ async def update_settings(body: SettingsUpdate, request: Request):
         await set_config(updates)
 
     # Reschedule jobs if intervals changed
-    interval_keys = {"collect_interval_minutes", "github_interval_minutes"}
+    interval_keys = {"github_interval_minutes"}
     if interval_keys & set(updates):
         cfg = await get_config()
         try:
             sched = request.app.state.scheduler
-            sched.reschedule_job(
-                "collect_analyze", trigger="interval",
-                minutes=max(1, int(cfg.get("collect_interval_minutes", 15))),
-            )
             sched.reschedule_job(
                 "github_collect", trigger="interval",
                 minutes=max(1, int(cfg.get("github_interval_minutes", 1))),

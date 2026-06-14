@@ -65,83 +65,6 @@ class PublishAccountUpdate(BaseModel):
     is_active: Optional[bool] = None
 
 
-class AccountCreate(BaseModel):
-    id: str
-    name: str
-    avatar: str = ""
-    platform: str = "X"
-    group: str = "未分组"
-    priority: str = "normal"
-    muted: bool = False
-    rsshub_path: str  # e.g. "/twitter/user/karpathy"
-
-class AccountOut(BaseModel):
-    id: str
-    name: str
-    avatar: str
-    platform: str
-    group: str
-    priority: str
-    muted: bool
-    rsshub_path: str
-
-    model_config = {"from_attributes": True}
-
-class AccountUpdate(BaseModel):
-    priority: Optional[str] = None
-    muted: Optional[bool] = None
-    group: Optional[str] = None
-
-class PostOut(BaseModel):
-    id: str
-    account_id: str
-    title: str
-    content: str
-    url: str
-    published_at: datetime
-    metrics: dict
-    is_abnormally_popular: bool
-
-    model_config = {"from_attributes": True}
-
-    @classmethod
-    def from_orm_with_metrics(cls, obj):
-        return cls(
-            id=obj.id,
-            account_id=obj.account_id,
-            title=obj.title,
-            content=obj.content,
-            url=obj.url,
-            published_at=obj.published_at,
-            metrics={"likes": obj.likes, "reposts": obj.reposts, "comments": obj.comments},
-            is_abnormally_popular=obj.is_abnormally_popular,
-        )
-
-class TopicOut(BaseModel):
-    id: str
-    title: str
-    summary: str
-    score: float
-    urgency: str
-    tags: list
-    category: str
-    sources: list
-    competitor_count: int
-    status: str
-    recommend_reason: str
-    trend_data: list
-    direction_id: Optional[int] = None
-    direction_name: str = ""
-    strategy_id: Optional[int] = None
-    strategy_name: str = ""
-    cluster_id: str = ""
-    cluster_title: str = ""
-    cluster_source_count: int = 0
-    created_at: datetime
-
-    model_config = {"from_attributes": True}
-
-
 class DirectionCreate(BaseModel):
     name: str
     description: str = ""
@@ -201,33 +124,6 @@ class StrategyOut(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
-
-class TopicStatusUpdate(BaseModel):
-    status: str
-
-class TopicCreate(BaseModel):
-    id: str
-    title: str
-    summary: str = ""
-    score: float = 3.0
-    urgency: str = "this_week"
-    tags: list = []
-    category: str = "人工智能"
-    sources: list = []
-    competitor_count: int = 0
-    recommend_reason: str = ""
-    trend_data: list = []
-
-class CollectResult(BaseModel):
-    account_id: str
-    new_posts: int
-    error: Optional[str] = None
-
-
-class GenerateResult(BaseModel):
-    new_topics: int = 0
-    message: str = ""
-
 
 class WriterPersonaCreate(BaseModel):
     name: str

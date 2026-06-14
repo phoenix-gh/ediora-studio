@@ -17,7 +17,6 @@ DEFAULTS: dict[str, str] = {
     "embedding_model": "text-embedding-3-small",
     "embedding_similarity_threshold": "0.82",
     "rsshub_base": "http://127.0.0.1:1200",
-    "collect_interval_minutes": "15",
     "github_interval_minutes": "1",
     "github_trending_interval_hours": "6",
     "camofox_url": "http://localhost:9377",
