@@ -1183,12 +1183,12 @@ async def get_topic_candidates(
     供每日计划总编（daily_plan 任务）调用。统一结构：
     {source, title, summary, url, heat, published_at}
     source ∈ x / github_release / paper / kr / juejin / v2ex / reddit /
-             producthunt / youtube / writing_plan
+             producthunt / youtube / wechat / writing_plan
     sources 传子集可只拉部分源；limit_per_source 每源上限（X 固定 50，写作方案固定 20）。
     """
     from models import (XPost, GithubRelease, Paper, KrArticle, JuejinArticle,
                         V2exTopic, RedditPost, ProductHuntPost, YoutubeVideo,
-                        WritingPlan)
+                        WechatArticle, WritingPlan)
 
     since = datetime.now(timezone.utc) - timedelta(hours=24)
     lim = max(1, min(int(limit_per_source), 50))
@@ -1276,6 +1276,14 @@ async def get_topic_candidates(
             )).scalars().all()
             out += [_c("youtube", f"[{v.channel_name}] {v.title}", v.description,
                        v.url, v.views, v.published_at) for v in rows]
+
+        if _on("wechat"):
+            rows = (await db.execute(
+                select(WechatArticle).where(WechatArticle.published_at >= since)
+                .order_by(desc(WechatArticle.published_at)).limit(lim)
+            )).scalars().all()
+            out += [_c("wechat", f"[{a.account_name}] {a.title}", a.digest, a.url, 0, a.published_at)
+                    for a in rows]
 
         if _on("writing_plan"):
             rows = (await db.execute(

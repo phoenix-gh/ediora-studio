@@ -203,3 +203,27 @@ def test_recent_performance_window(env):
           status="published", published_at=_now() - timedelta(days=40), read_count=5)
     import mcp_server
     assert _run(mcp_server.get_recent_performance(days=30)) == []
+
+
+def test_candidates_includes_wechat(env):
+    from models import WechatArticle
+    _seed(WechatArticle, id="w1", biz="b1", account_name="竞品号",
+          title="竞品今日文章", digest="摘要", url="https://mp.weixin.qq.com/s/x",
+          published_at=_now())
+    import mcp_server
+    res = _run(mcp_server.get_topic_candidates(sources=["wechat"]))
+    assert len(res) == 1
+    c = res[0]
+    assert c["source"] == "wechat"
+    assert c["title"].startswith("[竞品号]")
+    assert c["heat"] == 0
+    assert set(c) == {"source", "title", "summary", "url", "heat", "published_at"}
+
+
+def test_candidates_wechat_24h_window(env):
+    from models import WechatArticle
+    _seed(WechatArticle, id="w_old", biz="b1", account_name="竞品号",
+          title="两天前", digest="", url="https://mp.weixin.qq.com/s/old",
+          published_at=_now() - timedelta(days=2))
+    import mcp_server
+    assert _run(mcp_server.get_topic_candidates(sources=["wechat"])) == []
