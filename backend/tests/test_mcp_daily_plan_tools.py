@@ -175,3 +175,31 @@ def test_get_recent_outputs(env):
     titles = {r["title"] for r in res}
     assert {"计划里的标题", "草稿标题"} <= titles
     assert all(set(r) == {"type", "title"} for r in res)
+
+
+def test_recent_performance_published_only_sorted(env):
+    from models import PublishAccount, Publication
+    _seed(PublishAccount, id="gzh", name="主号")
+    _seed(Publication, draft_id=1, account_id="gzh", title="爆款",
+          status="published", published_at=_now(), read_count=9999)
+    _seed(Publication, draft_id=2, account_id="gzh", title="一般",
+          status="published", published_at=_now(), read_count=10)
+    _seed(Publication, draft_id=3, account_id="gzh", title="还没发",
+          status="draft_box", read_count=88888)  # 草稿箱态，不该出现
+    import mcp_server
+    res = _run(mcp_server.get_recent_performance())
+    assert [r["title"] for r in res] == ["爆款", "一般"]
+    assert res[0]["account_name"] == "主号"
+    assert set(res[0]) == {"title", "account_id", "account_name",
+                           "read_count", "like_count", "look_count",
+                           "share_count", "published_at"}
+
+
+def test_recent_performance_window(env):
+    from datetime import timedelta
+    from models import PublishAccount, Publication
+    _seed(PublishAccount, id="gzh", name="主号")
+    _seed(Publication, draft_id=1, account_id="gzh", title="旧文",
+          status="published", published_at=_now() - timedelta(days=40), read_count=5)
+    import mcp_server
+    assert _run(mcp_server.get_recent_performance(days=30)) == []

@@ -1288,6 +1288,36 @@ async def get_topic_candidates(
     return out
 
 
+@mcp.tool()
+async def get_recent_performance(days: int = 30, limit: int = 20) -> list[dict]:
+    """
+    近 N 天已发布文章的表现（阅读/点赞/在看/分享），按阅读量倒序。
+    供每日计划总编判断什么选题/账号有效：复制成功方向、避开重复哑火。
+    只含 status=published 的记录；空则返回 []。
+    """
+    from models import Publication, PublishAccount
+
+    since = datetime.now(timezone.utc) - timedelta(days=max(1, int(days)))
+    lim = max(1, min(int(limit), 100))
+    async with SessionLocal() as db:
+        rows = (await db.execute(
+            select(Publication, PublishAccount.name)
+            .join(PublishAccount, Publication.account_id == PublishAccount.id, isouter=True)
+            .where(Publication.status == "published", Publication.published_at >= since)
+            .order_by(desc(Publication.read_count)).limit(lim)
+        )).all()
+    return [{
+        "title": p.title,
+        "account_id": p.account_id,
+        "account_name": name or "",
+        "read_count": p.read_count,
+        "like_count": p.like_count,
+        "look_count": p.look_count,
+        "share_count": p.share_count,
+        "published_at": _fmt_dt(p.published_at),
+    } for p, name in rows]
+
+
 _PLAN_CONTENT_TYPES = {"long", "short", "story", "share"}
 
 
