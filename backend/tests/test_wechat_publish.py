@@ -157,3 +157,30 @@ def test_publish_wechat_error_surfaces_as_502(client, uploads_dir, monkeypatch):
     assert r.status_code == 502
     assert "IP 白名单" in r.json()["detail"]
     wx._token_cache.clear()
+
+
+def test_publish_creates_publication_record(client, uploads_dir, wx_mock):
+    draft, img = _setup_draft_with_image(client)
+    html = f'<section><p>正文</p><img src="{img["url"]}"></section>'
+    r = client.post(f"/api/write/drafts/{draft['id']}/publish/wechat", json={
+        "account_id": "gzh", "title": "测试文章", "digest": "摘要",
+        "html": html, "cover_image_id": img["id"],
+    })
+    assert r.status_code == 200, r.text
+
+    pubs = client.get("/api/published-articles").json()
+    assert len(pubs) == 1
+    assert pubs[0]["draft_id"] == draft["id"]
+    assert pubs[0]["account_id"] == "gzh"
+    assert pubs[0]["external_id"] == "DRAFT_MEDIA_1"
+    assert pubs[0]["status"] == "draft_box"
+
+    # 同 draft+account 再发一次：更新而非重复建
+    r2 = client.post(f"/api/write/drafts/{draft['id']}/publish/wechat", json={
+        "account_id": "gzh", "title": "改了标题", "digest": "摘要",
+        "html": html, "cover_image_id": img["id"],
+    })
+    assert r2.status_code == 200, r2.text
+    pubs2 = client.get("/api/published-articles").json()
+    assert len(pubs2) == 1
+    assert pubs2[0]["title"] == "改了标题"
