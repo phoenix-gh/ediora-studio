@@ -59,7 +59,8 @@ async def update_publication(pub_id: int, body: PublicationUpdate, db: AsyncSess
     if _STAT_FIELDS & {k for k, v in data.items() if v is not None}:
         pub.stats_as_of = datetime.now(timezone.utc)
     for k, v in data.items():
-        setattr(pub, k, v)
+        if v is not None:  # 显式 null 视为「不改」，避免把非空列写成 NULL
+            setattr(pub, k, v)
     if data.get("status") == "published" and pub.published_at is None:
         pub.published_at = datetime.now(timezone.utc)
     await db.commit()

@@ -89,3 +89,14 @@ def test_delete(client):
     pub = _create_pub(client)
     assert client.delete(f"/api/published-articles/{pub['id']}").status_code == 204
     assert client.get("/api/published-articles").json() == []
+
+
+def test_patch_explicit_null_stat_ignored_not_500(client):
+    """显式传 null 的统计字段视为「不改」，不能把非空列写成 NULL 触发 500。"""
+    _seed_account(client)
+    pub = _create_pub(client)
+    r = client.patch(f"/api/published-articles/{pub['id']}",
+                     json={"read_count": None, "url": "https://mp.weixin.qq.com/s/x"})
+    assert r.status_code == 200, r.text
+    assert r.json()["read_count"] == 0            # 未被改成 null，保持默认 0
+    assert r.json()["url"] == "https://mp.weixin.qq.com/s/x"  # 正常字段照常更新

@@ -184,3 +184,23 @@ def test_publish_creates_publication_record(client, uploads_dir, wx_mock):
     pubs2 = client.get("/api/published-articles").json()
     assert len(pubs2) == 1
     assert pubs2[0]["title"] == "改了标题"
+
+
+def test_publish_record_failure_is_non_fatal(client, uploads_dir, wx_mock, monkeypatch):
+    """发布记录写入失败不应影响发布本身——media_id 已成功返回。"""
+    import routers.drafts as drafts_mod
+
+    class _Boom:
+        def __init__(self, *a, **k):
+            raise RuntimeError("boom")
+
+    monkeypatch.setattr(drafts_mod, "Publication", _Boom)
+    draft, img = _setup_draft_with_image(client)
+    html = f'<section><p>x</p><img src="{img["url"]}"></section>'
+    r = client.post(f"/api/write/drafts/{draft['id']}/publish/wechat", json={
+        "account_id": "gzh", "title": "t", "digest": "",
+        "html": html, "cover_image_id": img["id"],
+    })
+    assert r.status_code == 200, r.text          # 发布仍成功
+    assert r.json()["media_id"] == "DRAFT_MEDIA_1"
+    assert client.get("/api/published-articles").json() == []  # 记录没建成

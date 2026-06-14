@@ -24,7 +24,10 @@ export type PublicationPatch = Partial<Pick<Publication,
   'status' | 'url' | 'read_count' | 'like_count' | 'look_count' | 'share_count'>>
 
 export function getPublications(params?: { status?: string; account_id?: string }): Promise<Publication[]> {
-  const qs = new URLSearchParams(params as Record<string, string> | undefined).toString()
+  const clean = Object.fromEntries(
+    Object.entries(params ?? {}).filter(([, v]) => v !== undefined),
+  ) as Record<string, string>
+  const qs = new URLSearchParams(clean).toString()
   return apiFetch<Publication[]>(`/published-articles${qs ? `?${qs}` : ''}`)
 }
 
