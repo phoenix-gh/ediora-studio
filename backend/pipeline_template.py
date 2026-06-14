@@ -920,8 +920,10 @@ plan_id: {c['plan_id']}
 ## 工作流
 1. 调 `get_topic_candidates()` 拉取近 24h 候选池（X 热帖 / GitHub release / 论文 / 36氪 /
    掘金 / V2EX / Reddit / Product Hunt / YouTube / 选题库 / 写作方案）
-2. 可用 web 工具核实候选热点、补充今天的新动态
-3. 按每个账号的画像（定位/受众/选题重点/禁区）和 daily_quota 分配选题，每条给出：
+2. 调 `get_recent_performance()` 看最近哪些选题/账号阅读表现好或哑火——
+   选题时倾向复制成功方向、避开重复哑火的题材
+3. 可用 web 工具核实候选热点、补充今天的新动态
+4. 按每个账号的画像（定位/受众/选题重点/禁区）和 daily_quota 分配选题，每条给出：
    - `title`（拟发标题）、`angle`（一句话切入角度）、`reason`（为什么今天写它）
    - `content_type`：long|short|story|share（story/share 计入 short 配额）
    - `sources`：参考来源 `[{{"platform": "...", "title": "...", "url": "..."}}]`
@@ -929,8 +931,8 @@ plan_id: {c['plan_id']}
      `group_key`**（如 "g1"），把画像最适合写这篇的那条标 `is_primary=true`——
      一组只跑一条创作链、共享一稿。同组必须同 content_type。
    - 不得与「近 7 天已写标题」重复
-4. `save_daily_plan(plan_id={c['plan_id']}, items=[...], note='<给运营的一句话总编留言>')`
-5. `kanban_complete(summary='今日计划 N 条', metadata={{"plan_id": {c['plan_id']}, "item_count": N}})`
+5. `save_daily_plan(plan_id={c['plan_id']}, items=[...], note='<给运营的一句话总编留言>')`
+6. `kanban_complete(summary='今日计划 N 条', metadata={{"plan_id": {c['plan_id']}, "item_count": N}})`
 """.strip(),
     ),
 ]
