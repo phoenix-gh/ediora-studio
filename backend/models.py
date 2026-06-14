@@ -292,6 +292,28 @@ class ArticleDraft(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
 
 
+class Publication(Base):
+    """一次「草稿→平台」的发布记录；效果回流（阅读/点赞）的锚点。"""
+    __tablename__ = "publications"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    draft_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    account_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    platform: Mapped[str] = mapped_column(String, default="wechat")
+    title: Mapped[str] = mapped_column(String, default="")
+    external_id: Mapped[str] = mapped_column(String, default="")  # 微信 media_id
+    url: Mapped[str] = mapped_column(String, default="")          # 公开文章 URL（群发后回填）
+    status: Mapped[str] = mapped_column(String, default="draft_box", index=True)  # draft_box | published
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    read_count: Mapped[int] = mapped_column(Integer, default=0)
+    like_count: Mapped[int] = mapped_column(Integer, default=0)
+    look_count: Mapped[int] = mapped_column(Integer, default=0)
+    share_count: Mapped[int] = mapped_column(Integer, default=0)
+    stats_as_of: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+
+
 class PipelineTask(Base):
     """Links a studio pipeline run to its kanban task IDs and eventual draft."""
     __tablename__ = "pipeline_tasks"
