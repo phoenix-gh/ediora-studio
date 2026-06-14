@@ -1,13 +1,18 @@
 import { getDashboardOverview, EMPTY_OVERVIEW } from '@/lib/api/dashboard'
+import { getTodayPlan } from '@/lib/api/daily-plan'
 import { CreateTaskButton } from '@/components/features/CreateTaskDialog'
 import { AlertsBar } from '@/components/features/dashboard/AlertsBar'
+import { TodayPlan } from '@/components/features/dashboard/TodayPlan'
 import { ReleasesToday } from '@/components/features/dashboard/ReleasesToday'
 import { SourceStatusGrid } from '@/components/features/dashboard/SourceStatusGrid'
 
 export const dynamic = 'force-dynamic'
 
 export default async function Dashboard() {
-  const overview = await getDashboardOverview().catch(() => EMPTY_OVERVIEW)
+  const [overview, todayPlanResp] = await Promise.all([
+    getDashboardOverview().catch(() => EMPTY_OVERVIEW),
+    getTodayPlan().catch(() => ({ plan: null })),
+  ])
 
   const today = new Date().toLocaleDateString('zh-CN', { month: 'long', day: 'numeric', weekday: 'long' })
 
@@ -27,6 +32,8 @@ export default async function Dashboard() {
       </div>
 
       <AlertsBar alerts={overview.alerts} />
+
+      <TodayPlan plan={todayPlanResp.plan} />
 
       <ReleasesToday releases={overview.releases_today} />
 
