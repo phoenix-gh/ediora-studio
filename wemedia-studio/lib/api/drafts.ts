@@ -15,7 +15,6 @@ export interface Draft {
   status: string
   draft_type: string
   linked_draft_id: number | null
-  persona_id: number | null
   series_id: number | null
   series_order: number
   version: number

@@ -312,14 +312,13 @@ async def generate_article_draft(
     recommend_reason: str,
     sources: list[dict],
     tags: list[str],
-    persona_prompt: str = "",
 ) -> str:
     sources_text = "\n".join(
         f"- {s.get('title', s.get('url', ''))} [{s.get('platform', '')}]"
         for s in sources[:6]
     )
 
-    role = persona_prompt.strip() if persona_prompt.strip() else (
+    role = (
         "你是一位专业的中文科技自媒体作者，擅长深度分析和独到见解。\n"
         "根据以下选题信息，撰写一篇1500-2000字的原创文章。\n\n"
         "要求:\n"

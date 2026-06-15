@@ -187,18 +187,6 @@ class Paper(Base):
     collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
 
 
-class WriterPersona(Base):
-    __tablename__ = "writer_personas"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    name: Mapped[str] = mapped_column(String, nullable=False)
-    description: Mapped[str] = mapped_column(String, default="")
-    prompt: Mapped[str] = mapped_column(Text, nullable=False)
-    model: Mapped[str] = mapped_column(String, default="")
-    is_default: Mapped[bool] = mapped_column(Boolean, default=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
-
-
 class ArticleSeries(Base):
     __tablename__ = "article_series"
 
@@ -283,7 +271,6 @@ class ArticleDraft(Base):
     status: Mapped[str] = mapped_column(String, default="drafting", index=True)
     draft_type: Mapped[str] = mapped_column(String, default="article")  # article | script
     linked_draft_id: Mapped[int | None] = mapped_column(Integer, nullable=True)  # sibling draft of different type
-    persona_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     series_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     series_order: Mapped[int] = mapped_column(Integer, default=0)
     version: Mapped[int] = mapped_column(Integer, default=1)

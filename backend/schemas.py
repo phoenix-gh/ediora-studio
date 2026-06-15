@@ -125,33 +125,6 @@ class StrategyOut(BaseModel):
 
     model_config = {"from_attributes": True}
 
-class WriterPersonaCreate(BaseModel):
-    name: str
-    description: str = ""
-    prompt: str
-    model: str = ""
-    is_default: bool = False
-
-
-class WriterPersonaUpdate(BaseModel):
-    name: Optional[str] = None
-    description: Optional[str] = None
-    prompt: Optional[str] = None
-    model: Optional[str] = None
-    is_default: Optional[bool] = None
-
-
-class WriterPersonaOut(BaseModel):
-    id: int
-    name: str
-    description: str
-    prompt: str
-    model: str
-    is_default: bool
-    created_at: datetime
-
-    model_config = {"from_attributes": True}
-
 
 # ── WritingPlan ───────────────────────────────────────────────────────────────
 
@@ -287,7 +260,6 @@ class AnalyzeResponse(BaseModel):
 
 class ArticleDraftRequest(BaseModel):
     topic_id: str
-    persona_id: Optional[int] = None
 
 
 class ArticleDraftOut(BaseModel):
@@ -299,7 +271,6 @@ class ArticleDraftOut(BaseModel):
     status: str = "drafting"
     draft_type: str = "article"
     linked_draft_id: Optional[int] = None
-    persona_id: Optional[int] = None
     series_id: Optional[int] = None
     series_order: int = 0
     writing_plan_id: Optional[int] = None
@@ -318,7 +289,6 @@ class ArticleDraftCreate(BaseModel):
     status: str = "drafting"
     draft_type: str = "article"
     linked_draft_id: Optional[int] = None
-    persona_id: Optional[int] = None
     writing_plan_id: Optional[int] = None
     sources: list = []
 
@@ -335,7 +305,6 @@ class ArticleDraftUpdate(BaseModel):
     status: Optional[str] = None
     draft_type: Optional[str] = None
     linked_draft_id: Optional[int] = None
-    persona_id: Optional[int] = None
     series_id: Optional[int] = None
     series_order: Optional[int] = None
     writing_plan_id: Optional[int] = None
@@ -348,7 +317,6 @@ class ArticleDraftRecordOut(BaseModel):
     title: str
     content: str
     status: str
-    persona_id: Optional[int] = None
     series_id: Optional[int] = None
     series_order: int = 0
     version: int
