@@ -31,6 +31,7 @@ export interface AppSettings {
   x_collect_enabled: boolean
   x_cookies_set: boolean
   x_collect_interval_minutes: number
+  x_notify_enabled: boolean
   x_follower_threshold: number
   x_post_window_hours: number
   x_post_lookback_hours: number
@@ -84,6 +85,7 @@ export interface SettingsUpdate {
   x_collect_enabled?: boolean
   x_cookies?: string
   x_collect_interval_minutes?: number
+  x_notify_enabled?: boolean
   x_follower_threshold?: number
   x_post_window_hours?: number
   x_post_lookback_hours?: number

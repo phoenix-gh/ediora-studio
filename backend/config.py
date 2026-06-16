@@ -57,6 +57,7 @@ DEFAULTS: dict[str, str] = {
     "x_collect_interval_minutes": "15",
     "x_reply_scout_interval_minutes": "15",
     "x_reply_scout_batch": "20",
+    "x_notify_enabled": "1",                 # 全局开关：X 回复关注提醒（动态通知推 Telegram）
     "ref_collect_interval_minutes": "15",
     "ref_classify_interval_minutes": "60",
     "clean_batch_size": "20",

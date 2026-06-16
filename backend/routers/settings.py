@@ -42,6 +42,7 @@ class SettingsOut(BaseModel):
     arxiv_categories: str
     arxiv_collect_interval_hours: int
     x_collect_interval_minutes: int
+    x_notify_enabled: bool
     ref_collect_interval_minutes: int
     ref_classify_interval_minutes: int
     clean_batch_size: int
@@ -81,6 +82,7 @@ class SettingsUpdate(BaseModel):
     arxiv_categories: Optional[str] = None
     arxiv_collect_interval_hours: Optional[int] = None
     x_collect_interval_minutes: Optional[int] = None
+    x_notify_enabled: Optional[bool] = None
     ref_collect_interval_minutes: Optional[int] = None
     ref_classify_interval_minutes: Optional[int] = None
     clean_batch_size: Optional[int] = None
@@ -136,6 +138,7 @@ def _build_out(cfg: dict) -> SettingsOut:
         arxiv_categories=cfg.get("arxiv_categories", "cs.AI,cs.CL,cs.CV,cs.LG"),
         arxiv_collect_interval_hours=max(1, int(cfg.get("arxiv_collect_interval_hours", 6))),
         x_collect_interval_minutes=max(1, int(cfg.get("x_collect_interval_minutes", 15))),
+        x_notify_enabled=str(cfg.get("x_notify_enabled", "1")).lower() in ("1", "true", "yes", "on"),
         ref_collect_interval_minutes=max(1, int(cfg.get("ref_collect_interval_minutes", 15))),
         ref_classify_interval_minutes=max(1, int(cfg.get("ref_classify_interval_minutes", 60))),
         clean_batch_size=max(1, int(cfg.get("clean_batch_size", 20))),
@@ -233,6 +236,8 @@ async def update_settings(body: SettingsUpdate, request: Request):
         updates["arxiv_collect_interval_hours"] = str(max(1, body.arxiv_collect_interval_hours))
     if body.x_collect_interval_minutes is not None:
         updates["x_collect_interval_minutes"] = str(max(1, body.x_collect_interval_minutes))
+    if body.x_notify_enabled is not None:
+        updates["x_notify_enabled"] = "1" if body.x_notify_enabled else "0"
     if body.ref_collect_interval_minutes is not None:
         updates["ref_collect_interval_minutes"] = str(max(1, body.ref_collect_interval_minutes))
     if body.ref_classify_interval_minutes is not None:

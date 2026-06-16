@@ -8,6 +8,7 @@ import { AppSettings, updateSettings } from '@/lib/api/settings'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Switch } from '@/components/ui/switch'
 
 export function XSection({ settings, onSaved }: { settings: AppSettings | null; onSaved: (s: AppSettings) => void }) {
   const [status, setStatus] = useState<XAuthStatus | null>(null)
@@ -17,6 +18,7 @@ export function XSection({ settings, onSaved }: { settings: AppSettings | null; 
   const [collectInterval, setCollectInterval] = useState(settings?.ref_collect_interval_minutes ?? 15)
   const [cleanInterval, setCleanInterval] = useState(settings?.ref_classify_interval_minutes ?? 30)
   const [batchSize, setBatchSize] = useState(settings?.clean_batch_size ?? 20)
+  const [notifyEnabled, setNotifyEnabled] = useState(settings?.x_notify_enabled ?? true)
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
@@ -33,6 +35,7 @@ export function XSection({ settings, onSaved }: { settings: AppSettings | null; 
     try {
       const updated = await updateSettings({
         x_collect_interval_minutes: xInterval,
+        x_notify_enabled: notifyEnabled,
         ref_collect_interval_minutes: collectInterval,
         ref_classify_interval_minutes: cleanInterval,
         clean_batch_size: batchSize,
@@ -93,6 +96,16 @@ export X_CT0=...`}
 
       {/* Interval settings */}
       <div className="space-y-5">
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between gap-3">
+            <Label className="text-xs">回复关注提醒</Label>
+            <Switch checked={notifyEnabled} onCheckedChange={(v) => setNotifyEnabled(v)} />
+          </div>
+          <p className="text-[11px] text-zinc-400">
+            开启后，已勾选「动态通知」的 X 订阅出新帖时，经 LLM 评回复价值并附建议，推送到 Telegram。关闭则全局停止所有此类提醒。
+          </p>
+        </div>
+
         <div className="space-y-1.5">
           <Label className="text-xs">X 订阅采集间隔</Label>
           <div className="flex items-center gap-2">

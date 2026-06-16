@@ -367,6 +367,9 @@ async def scheduled_x_reply_scout():
 
     try:
         cfg = await get_config()
+        # 全局开关：用户可在设置里关闭「回复关注提醒」，关掉后无视各订阅的 notify_new_posts
+        if str(cfg.get("x_notify_enabled", "1")).lower() not in ("1", "true", "yes", "on"):
+            return
         minutes = max(5, int(cfg.get("x_reply_scout_interval_minutes", 15)))
         if not _should_run("x_reply_scout", minutes * 60):
             return
