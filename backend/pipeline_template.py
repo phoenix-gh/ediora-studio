@@ -21,6 +21,8 @@ import re
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from prompt_templates import load, render
+
 RenderCtx = dict[str, Any]
 
 def _normalize_material(text: str) -> str:
@@ -150,114 +152,33 @@ def render_profile_illustrator(profile: dict[str, Any]) -> str:
 # 拆成两块：词汇 / 语气 / 节奏（与篇幅无关，长短文都适用）和结构规则（长短文不同）。
 # 长文沿用原有「段落长度强制不均（≥250 字段落）」等规则；短文案（如写作方案里的
 # 100-200 字短帖）必须作废这些长文结构规则，否则物理上无法满足。
-_WRITER_WORDING_RULES_MD = """
-## 通用反 AI 腔（硬约束，账号 style_rules 可单条放行）
-下列词汇 / 句式**全文禁用**，一次都不要出现：
-
-- 套话：作为一个 AI、在这个数字化时代、综上所述、值得我们深思、毋庸置疑、不可否认、值得注意的是、众所周知、随着……的发展、在……的同时、与此同时
-- 商业黑话：赋能、打造、生态、闭环、抓手、底层逻辑、深度、维度、范式、本质上、底层、向上
-- 万能形容词：强大的、卓越的、前沿的、革命性的、颠覆性的、令人瞩目的、备受关注的
-- 三段平行结构：「首先……其次……最后」「一方面……另一方面」「不仅……而且……更」
-- 虚指连词收尾：不要以「因此」「所以」「总之」「由此可见」开新段
-
-## 节奏要求（硬性）
-- **句长参差**：相邻 3 句不允许长度都在 20-35 字区间；必须穿插 ≤12 字短句
-- **具体 > 抽象**：每 300 字至少 1 处具体细节（人名 / 数字 / 时间 / 地名 / 引语 / 场景动作）
-- **少用「的」**：单句「的」字 ≤ 2 个；3 个就重写
-- **首段钩子**：前 50 字必须是场景 / 反差 / 数字 / 反问之一；禁概括式开场（「近年来」「在 X 领域」）
-
-## 禁互动话术结尾
-- 除非 voice_samples 出现过，否则禁：一键三连 / 点赞收藏 / 求关注 / 各位觉得有用 / 评论区聊聊 / 欢迎留言
-- 默认结尾留白，或写一个**具体的、下一步会做的动作**（"明天我会拿它扫 2019 年的标记"），不喊话
-
-## 增补禁词（一次都不准出现）
-- 值得一提的是、通用考量、一部分拼图、生长/长出来、并行拉取、跨书关联、主题聚类
-- 这一步用户看不到、但很重要 / 但同样重要 / 这是关键的一步
-- "覆盖了 X、Y、Z 三个场景"（标准 AI 总结句）
-""".strip()
-
-_WRITER_LONGFORM_STRUCTURE_MD = """
-## 反模板结构（硬性）
-AI 写作最明显的特征之一是结构对称、篇幅均摊。以下全部禁止：
-
-- **禁对称大纲**：不要写「引言 → 4 层拆解 → 反方声音 → 建议」这类等深结构。真实文章里有的点只值一句话，有的值 600 字，深度天然不均。
-- **禁过渡归纳句**：段落之间不要用句子归纳上文或引出下文。不要写「以上说明了 X」「接下来看 Y」「这就是为什么 Z 很重要」。直接跳。
-- **禁归因总结**：不要写「X 解决了 Y 的痛点」「Z 的本质是 W」「这套机制让 A 得以 B」——这类句子是 AI 在帮读者"消化"，真实作者不这么干。
-- **禁均匀分配**：如果有 3 个论点，允许第 1 个占 60% 篇幅，第 2 个两句带过，第 3 个干脆砍掉。不要"每个都照顾到"。
-- **允许跳跃**：可以突然换话题不铺垫，可以提出问题不收口，可以同一个词连用两次不换同义词。真实写作有毛刺。
-
-## 段落长度强制不均（关键，单独自检）
-- 全文必须存在 ≥1 段 ≤ 40 字，且 ≥1 段 ≥ 250 字
-- 不允许相邻 3 段字数都落在 80-180 区间
-- brief 里有 N 个点，**不要写成 N 个等长段**——核心点占 ≥40%，次要点两句带过或砍掉
-
-## 强制具体化（在「具体 > 抽象」之上加权）
-- 全文至少 2 处第一人称当下动作 + 当下感受：「我点了 X，看到 Y，愣了一下」
-- 这类锚点散在中段，不能都堆在首尾
-""".strip()
-
-
-def _writer_shortform_structure_md(max_chars: int) -> str:
-    return f"""
-## 短文案结构（硬性，最高优先级）
-本文是 **≤ {max_chars} 字的短文案**，上方「段落长度强制不均」「≥250 字段落」类长文结构规则**全部作废**。
-- **总字数严格 ≤ {max_chars} 字**：宁短勿长，超出即不合格；写完数一遍字数再交。
-- 不分小标题、不写引言/结语、不堆砌段落；一个核心案例 + 一句洞察收尾即可。
-- 至少 1 处具体细节（人名 / 数字 / 时间 / 引语），但不要为凑字数注水。
-""".strip()
-
-
-# 长文的完整反 AI 腔规则（词汇 + 长文结构）── 既有 full / topic_long 流程沿用。
-WRITER_ANTI_AI_RULES_MD = _WRITER_WORDING_RULES_MD + "\n\n" + _WRITER_LONGFORM_STRUCTURE_MD
+def _wording_rules() -> str:
+    """通用反 AI 腔（词汇 / 节奏 / 结尾）——与篇幅无关，长短文都适用。"""
+    return load("writer/wording_rules.md")
 
 
 # ── 文体预设（genre）：每文体一套结构块 + first_person/humanizer 开关 ──────────
 # writer_rules_md / writer body / editor body 都按 ctx['genre'] 查表分流。
 # 缺省 / 非法 genre → commentary（= 现状，保证 topic/rewrite 等无 genre 流程不变）。
-_WRITER_TUTORIAL_STRUCTURE_MD = """
-## 教程 / 操作指南结构（硬性，最高优先级）
-本文是**操作教程**，目标是让读者照着做成一件事。上方「段落长度强制不均 / ≥250 字段落 / 第一人称当下感受」类规则**全部作废**。
-
-- **第二人称**：用「你」，直接给指令。禁第一人称经历、当下感受、个人观点立场（不要「我试了」「我觉得」「说实话」）。
-- **编号步骤**：正文主体是有序步骤（第一步 / 第二步… 或 1. 2. 3.），每步聚焦**一个**具体动作 + 预期结果（做完会看到什么）。
-- **解除平行禁令**：上方「三段平行结构」禁令对本文体作废——允许「首先 / 其次」「第一步 / 第二步」式并列、等重结构。
-- **前置先列清单**：开头用一个清单列出需要的条件 / 材料 / 账号 / 工具。
-- **关键步骤给判断与坑**：在容易出错的步骤后，简短给「怎么判断成功」或「常见坑 / 注意」，一两句即可，不展开。
-- **清楚 > 有趣**：不绕弯、不抒情、不堆背景。读者要的是照做能成，不是读一篇随笔。
-""".strip()
-
-_WRITER_REVIEW_STRUCTURE_MD = """
-## 测评 / 盘点结构（硬性，最高优先级）
-本文是**测评 / 清单盘点**，目标是用结构化信息帮读者做判断。上方「段落长度强制不均 / 第一人称当下感受」类规则**全部作废**。
-
-- **结构化**：按**维度**横向对比，或按**对象**列点盘点；允许子标题、允许列点（`-` / 数字）。
-- **解除平行禁令**：上方「三段平行结构」禁令对本文体作废——允许并列、等重的维度 / 条目结构。
-- **证据优先**：每个对象 / 维度给**具体证据**（数字 / 规格 / 实测细节 / 价格 / 来源），不要空泛形容。
-- **弱抒情、弱第一人称**：不写个人当下感受；要有观点也是**基于证据的结论 / 推荐**（给谁、为什么），不是情绪。
-- **结论明确**：让读者快速拿到「选哪个 / 适合谁」。
-""".strip()
-
-_WRITER_STORY_STRUCTURE_MD = _WRITER_LONGFORM_STRUCTURE_MD + """
-
-## 叙事侧重（硬性）
-本文以**叙事**为主：一个具体的人 / 事 / 瞬间为核，按时间线推进，可顺叙、可留白结尾；少下论断，多给画面。
-""".rstrip()
-
-
 @dataclass(frozen=True)
 class GenreProfile:
     key: str
-    label: str            # 中文名（前端 / 留痕）
-    structure_md: str     # 结构规则块（替代原长 / 短结构块）
-    first_person: bool    # 是否注入第一人称当下动作 / 感受锚点
-    humanizer: bool       # 是否启用 humanizer 技能
+    label: str                        # 中文名（前端 / 留痕）
+    structure_files: tuple[str, ...]  # writer/ 下结构块文件，按序拼接（首个即长文结构）
+    first_person: bool                # 是否注入第一人称当下动作 / 感受锚点
+    humanizer: bool                   # 是否启用 humanizer 技能
+
+    @property
+    def structure_md(self) -> str:
+        """文体结构块文本：按 structure_files 顺序拼接（每次读盘，改 md 即生效）。"""
+        return "\n\n".join(load(f) for f in self.structure_files)
 
 
 GENRE_PROFILES: dict[str, "GenreProfile"] = {
-    "commentary": GenreProfile("commentary", "评论", _WRITER_LONGFORM_STRUCTURE_MD, True, True),
-    "tutorial": GenreProfile("tutorial", "教程", _WRITER_TUTORIAL_STRUCTURE_MD, False, False),
-    "story": GenreProfile("story", "故事", _WRITER_STORY_STRUCTURE_MD, True, True),
-    "review": GenreProfile("review", "测评", _WRITER_REVIEW_STRUCTURE_MD, False, False),
+    "commentary": GenreProfile("commentary", "评论", ("writer/structure_longform.md",), True, True),
+    "tutorial":   GenreProfile("tutorial", "教程", ("writer/structure_tutorial.md",), False, False),
+    "story":      GenreProfile("story", "故事", ("writer/structure_longform.md", "writer/structure_story_extra.md"), True, True),
+    "review":     GenreProfile("review", "测评", ("writer/structure_review.md",), False, False),
 }
 
 
@@ -274,51 +195,39 @@ def writer_word_directive_md(c: RenderCtx) -> str:
     """writer body 的「字数」一行：方案给了字数就以方案为准，否则回退账号 word_range。"""
     spec = c.get("word_spec")
     if spec and spec.get("raw"):
-        return (f"严格 **{spec['raw']}**（写作方案硬规格，**超出即不合格**；"
-                f"忽略上方画像 word_range）")
-    return "遵从画像 `word_range`（默认 1500-2200）"
-
-
-def _writer_wordcap_md(max_chars: int) -> str:
-    return (f"## 字数封顶（硬性）\n"
-            f"总字数严格 ≤ {max_chars} 字，宁短勿长，超出即不合格；写完数一遍再交。")
+        return render("writer/word_directive_plan.md", raw=spec["raw"])
+    return load("writer/word_directive_default.md")
 
 
 def writer_rules_md(c: RenderCtx) -> str:
-    """按文体选规则块。commentary 保留原「长/短」分流（逐字回归）；
-    其它文体 = 通用词汇块 + 文体结构块（+ 短字数封顶）。"""
+    """按文体选规则块（挑块逻辑在此，文本来自 prompts/writer/）。
+    commentary 短文案走 shortform 替换；其它文体 = 通用词汇块 + 文体结构块（短文案再加字数封顶）。"""
     profile = _genre_profile(c)
     spec = c.get("word_spec")
-    if profile.key == "commentary":
-        if _is_short_spec(spec):
-            return _WRITER_WORDING_RULES_MD + "\n\n" + _writer_shortform_structure_md(spec["max"])
-        return WRITER_ANTI_AI_RULES_MD
-    parts = [_WRITER_WORDING_RULES_MD, profile.structure_md]
-    if _is_short_spec(spec):
-        parts.append(_writer_wordcap_md(spec["max"]))
+    short = _is_short_spec(spec)
+    if profile.key == "commentary" and short:
+        return _wording_rules() + "\n\n" + render("writer/structure_shortform.md", max_chars=spec["max"])
+    parts = [_wording_rules(), profile.structure_md]
+    if short:
+        parts.append(render("writer/wordcap.md", max_chars=spec["max"]))
     return "\n\n".join(parts)
 
 
 def writer_first_person_anchor_md(c: RenderCtx) -> str:
     """writer 正文「候选锚点」指令：first_person 文体注入第一人称，否则给中立提示。"""
-    if _genre_profile(c).first_person:
-        return 'brief 里的"候选锚点"要至少用 2 个写成第一人称的当下动作 / 反应，散在中段，不要堆在首尾。'
-    return ('brief 里的"候选锚点"是写作素材，挑最能把事讲清楚的用；'
-            '本文体**不写第一人称经历 / 当下感受 / 个人观点**，保持中立。')
+    name = "first_person_on" if _genre_profile(c).first_person else "first_person_off"
+    return load(f"writer/{name}.md")
 
 
 def writer_humanizer_line_md(c: RenderCtx) -> str:
     """humanizer 文体才输出该 bullet 行（含换行），否则空串。"""
-    return "- **使用技能**: humanizer\n" if _genre_profile(c).humanizer else ""
+    return load("writer/humanizer_line.md") + "\n" if _genre_profile(c).humanizer else ""
 
 
 def writer_structure_directive_md(c: RenderCtx) -> str:
     """结构 bullet：评论/故事走反对称；教程/测评走等重结构。"""
-    if _genre_profile(c).key in ("commentary", "story"):
-        return ('- **结构**：不要按 brief 的提纲"等比例翻译"成文章——brief 是素材清单，'
-                '不是文章骨架。落笔前先决定哪一个点是核心，其余点围着它转或直接丢掉。'
-                '拒绝每节等深等宽的对称结构。')
-    return '- **结构**：按上面的体裁结构块组织；步骤 / 维度该等重就等重，不必制造长短起伏。'
+    name = "asymmetric" if _genre_profile(c).key in ("commentary", "story") else "even"
+    return load(f"writer/structure_directive_{name}.md")
 
 
 _WORD_RANGE_RE = re.compile(r"(\d{2,4})\s*[-~–—至到]\s*(\d{2,4})\s*字")

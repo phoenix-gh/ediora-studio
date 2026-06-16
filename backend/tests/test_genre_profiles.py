@@ -31,13 +31,15 @@ def test_genre_profile_defaults_to_commentary():
 
 
 # ── Task 3: writer_rules_md 按文体分流 ──────────────────────────────────────
-from pipeline_template import writer_rules_md, WRITER_ANTI_AI_RULES_MD
+from pipeline_template import writer_rules_md
+from prompt_templates import load
 
 
 def test_commentary_long_is_exact_regression():
-    # commentary 长文 == 旧行为逐字
-    assert writer_rules_md({"genre": "commentary"}) == WRITER_ANTI_AI_RULES_MD
-    assert writer_rules_md({}) == WRITER_ANTI_AI_RULES_MD  # 缺省也走 commentary
+    # commentary 长文 == 通用词汇块 + 长文结构块（逐字）
+    expected = load("writer/wording_rules.md") + "\n\n" + load("writer/structure_longform.md")
+    assert writer_rules_md({"genre": "commentary"}) == expected
+    assert writer_rules_md({}) == expected  # 缺省也走 commentary
 
 
 def test_commentary_short_keeps_shortform():
