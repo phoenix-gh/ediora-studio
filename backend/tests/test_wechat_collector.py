@@ -1,8 +1,6 @@
 """Tests for wechat_collector body extraction across article layouts."""
 
-from datetime import timezone
-
-from wechat_collector import _extract_body, parse_article
+from wechat_collector import _extract_body
 
 # New-style 图片消息 / 文案 post: body is NOT in #js_content. The text lives in a
 # JS data blob as `content_noencode`, with \x0a hex escapes for newlines, and the
@@ -59,13 +57,3 @@ def test_extract_body_legacy_js_content():
 
 def test_extract_body_returns_empty_when_no_content():
     assert _extract_body("<html><body><div id='js_article'></div></body></html>") == ""
-
-
-def test_parse_article_picture_message_metadata():
-    data = parse_article(PICTURE_MESSAGE_PAGE, "https://mp.weixin.qq.com/s/abc")
-    assert data["title"] == "测试文案"
-    # new layout: account name via nick_name, biz via __biz=, ct via create_time
-    assert data["account_name"] == "拾夕1226"
-    assert data["biz"] == "MzY5MzAzNzU3Mg=="
-    assert data["published_at"].astimezone(timezone.utc).strftime("%Y-%m-%d") == "2026-06-12"
-    assert "<p>第一段开场白</p>" in data["content"]

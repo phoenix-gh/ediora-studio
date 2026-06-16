@@ -1,22 +1,15 @@
-"""WeChat article collector — fetch single article pages.
+"""WeChat article body fetcher.
 
-Used for two paths:
-  - User pastes a URL → POST /wechat/articles (save metadata + body)
-  - Scheduled mp.weixin.qq.com sync stores stub records → lazy GET /wechat/articles/{id}
-    triggers fetch_article_body() on demand.
+The scheduled mp.weixin.qq.com sync stores stub records (metadata only); the
+lazy GET /wechat/articles/{id} then calls fetch_article_body() on demand to fill
+in the rich-media body the first time an article is read.
 """
 
 import re
-import html
-import hashlib
-from datetime import datetime, timezone
 from urllib.parse import quote
 
 import httpx
 from bs4 import BeautifulSoup
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from models import WechatArticle
 
 _UA = (
     "Mozilla/5.0 (Linux; U; Android 2.3.6; zh-cn; GT-S5660 Build/GINGERBREAD) "
@@ -35,15 +28,6 @@ _HEADERS = {
 # `data-src` and only fills `src` after JS execution, so we have to look at both.
 _IMG_SRC_ATTRS = ("data-src", "src")
 _PROXY_PATH = "/api/wechat/img?url="
-
-
-def _article_id(url: str) -> str:
-    return hashlib.md5(url.encode()).hexdigest()
-
-
-def _re_str(pattern: str, text: str, group: int = 1) -> str:
-    m = re.search(pattern, text)
-    return m.group(group).strip() if m else ""
 
 
 # JS string escapes seen in the embedded data blob (\x0a newlines, ️ etc.)
@@ -147,89 +131,3 @@ async def fetch_article_body(url: str, client: httpx.AsyncClient | None = None) 
         if own:
             await client.aclose()
     return _extract_body(page)
-
-
-def parse_article(page: str, final_url: str) -> dict:
-    """Parse a WeChat article page into metadata + body.
-
-    Handles both the legacy text layout (var nickname / var biz / var ct) and the
-    newer 图片消息 / 文案 layout, which drops those globals and instead exposes the
-    same facts as nick_name / __biz= / create_time inside the embedded data blob.
-    """
-    title = html.unescape(_re_str(r'<meta\s+property="og:title"\s+content="([^"]+)"', page))
-    if not title:
-        raise ValueError("无法解析文章标题，请确认这是一篇微信公众号文章链接")
-
-    cover = html.unescape(_re_str(r'<meta\s+property="og:image"\s+content="([^"]+)"', page))
-    digest = html.unescape(_re_str(r'<meta\s+property="og:description"\s+content="([^"]+)"', page))
-
-    account_name = html.unescape(
-        _re_str(r'var\s+nickname\s*=\s*(?:htmlDecode\()?["\']([^"\']+)["\']', page)
-        or _re_str(r'nick_name\s*:\s*["\']([^"\']+)["\']', page)
-        or _re_str(r'<meta\s+property="og:article:author"\s+content="([^"]+)"', page)
-    )
-
-    biz = (
-        _re_str(r'biz\s*:\s*["\']([A-Za-z0-9+/=]+)["\']', page)
-        or _re_str(r'var\s+biz\s*=\s*["\']([A-Za-z0-9+/=]+)["\']', page)
-        or _re_str(r'__biz=([A-Za-z0-9+/=]+)', page)
-    )
-
-    ts_str = (
-        _re_str(r'var\s+ct\s*=\s*["\']?(\d{10})["\']?', page)
-        or _re_str(r'create_time\s*:\s*["\']?(\d{10})\b', page)
-    )
-    published_at = (
-        datetime.fromtimestamp(int(ts_str), tz=timezone.utc)
-        if ts_str else datetime.now(timezone.utc)
-    )
-
-    return {
-        "id": _article_id(final_url),
-        "biz": biz,
-        "account_name": account_name,
-        "title": title,
-        "url": final_url,
-        "cover_url": cover,
-        "digest": digest,
-        "content": _extract_body(page),
-        "published_at": published_at,
-    }
-
-
-async def fetch_article(url: str) -> dict:
-    """Fetch a WeChat article URL and return its metadata + body."""
-    async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
-        resp = await client.get(url, headers=_HEADERS)
-        resp.raise_for_status()
-        page = resp.text
-        final_url = str(resp.url)
-    return parse_article(page, final_url)
-
-
-async def save_article(url: str, db: AsyncSession) -> WechatArticle:
-    """Fetch and persist a WeChat article. Returns the saved model."""
-    data = await fetch_article(url)
-    existing = await db.get(WechatArticle, data["id"])
-    if existing:
-        # If we already have the row but no body, backfill it.
-        if not existing.content and data["content"]:
-            existing.content = data["content"]
-            await db.commit()
-            await db.refresh(existing)
-        return existing
-    article = WechatArticle(
-        id=data["id"],
-        biz=data["biz"],
-        account_name=data["account_name"],
-        title=data["title"][:500],
-        url=data["url"],
-        cover_url=data["cover_url"],
-        digest=data["digest"][:1000],
-        content=data["content"],
-        published_at=data["published_at"],
-    )
-    db.add(article)
-    await db.commit()
-    await db.refresh(article)
-    return article

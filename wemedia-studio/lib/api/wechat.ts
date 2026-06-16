@@ -57,13 +57,6 @@ export async function getWechatArticles(opts?: {
   return list
 }
 
-export async function addWechatArticle(url: string): Promise<WechatArticle> {
-  return apiFetch<WechatArticle>('/wechat/articles', {
-    method: 'POST',
-    body: JSON.stringify({ url }),
-  })
-}
-
 export async function deleteWechatArticle(id: string): Promise<void> {
   return apiFetch<void>(`/wechat/articles/${id}`, { method: 'DELETE' })
 }
@@ -169,4 +162,29 @@ export async function syncWechatAccount(biz: string, pages = 1): Promise<WechatS
     `/wechat/accounts/${encodeURIComponent(biz)}/sync?pages=${pages}`,
     { method: 'POST' },
   )
+}
+
+// ── One-click collect all ─────────────────────────────────────────────────────
+
+export interface WechatCollectStatus {
+  running: boolean
+  total: number
+  done: number
+  current: string
+  new_articles: number
+  errors: string[]
+  started_at: string | null
+  finished_at: string | null
+  message: string
+}
+
+/** Start a background sync of every subscribed account (10s apart). Returns the
+ * initial progress; poll getWechatCollectStatus() to follow it. Throws on 409
+ * (already running) / 401 (not logged in) / 400 (no subscriptions). */
+export async function startWechatCollectAll(): Promise<WechatCollectStatus> {
+  return apiFetch<WechatCollectStatus>('/wechat/collect', { method: 'POST' })
+}
+
+export async function getWechatCollectStatus(): Promise<WechatCollectStatus> {
+  return apiFetch<WechatCollectStatus>('/wechat/collect/status')
 }

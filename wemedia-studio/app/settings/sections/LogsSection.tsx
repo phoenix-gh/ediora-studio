@@ -60,7 +60,7 @@ export function LogsSection() {
   }, [fetchLogs])
 
   return (
-    <div className="space-y-3">
+    <div className="flex flex-col flex-1 min-h-0 space-y-3">
       <div className="flex items-center justify-between">
         <p className="text-[11px] text-zinc-400">自动每 30 秒刷新</p>
         <button onClick={fetchLogs}
@@ -69,7 +69,7 @@ export function LogsSection() {
         </button>
       </div>
 
-      <div className="bg-zinc-950 rounded-xl overflow-hidden border border-zinc-800 font-mono text-xs">
+      <div className="flex flex-col flex-1 min-h-0 bg-zinc-950 rounded-xl overflow-hidden border border-zinc-800 font-mono text-xs">
         {/* Legend */}
         <div className="flex items-center gap-4 px-3 py-2 border-b border-zinc-800 text-zinc-500">
           {Object.entries(JOB_LABEL).map(([k, v]) => (
@@ -80,7 +80,7 @@ export function LogsSection() {
         </div>
 
         {/* Rows */}
-        <div className="max-h-96 overflow-y-auto">
+        <div className="flex-1 min-h-0 overflow-y-auto">
           {loading ? (
             <div className="flex items-center gap-2 px-3 py-4 text-zinc-500">
               <Loader2 className="w-3.5 h-3.5 animate-spin" />加载中…

@@ -2,17 +2,19 @@
 
 import { useState, useMemo, useRef, useEffect, useCallback } from 'react'
 import {
-  MessageSquare, Plus, Trash2, Search, X, Loader2,
+  MessageSquare, Trash2, Search, Loader2,
   ScanLine, LogOut, RefreshCw, Settings, UserPlus,
+  DownloadCloud, ChevronDown, Check,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
-  WechatArticle, getWechatArticles, getWechatArticle, addWechatArticle, deleteWechatArticle,
+  WechatArticle, getWechatArticles, getWechatArticle, deleteWechatArticle,
   WechatAuthState, getWechatAuthState, startWechatQrcode, pollWechatScan,
   finalizeWechatLogin, logoutWechat,
   WechatAccountCandidate, WechatSubscribedAccount,
   searchWechatAccounts, listSubscribedAccounts,
   subscribeWechatAccount, unsubscribeWechatAccount, syncWechatAccount,
+  WechatCollectStatus, startWechatCollectAll, getWechatCollectStatus,
   wechatImg,
 } from '@/lib/api/wechat'
 import { AddToTopicPopover } from '@/components/features/AddToTopicPopover'
@@ -22,6 +24,7 @@ import { Input } from '@/components/ui/input'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from '@/components/ui/dialog'
+import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
 import { cn } from '@/lib/utils'
 import { fmtFullDate } from '@/lib/format'
 import { useInfiniteScroll } from '@/lib/use-infinite-scroll'
@@ -29,62 +32,6 @@ import { useMediaQuery } from '@/lib/use-media-query'
 import { ResponsiveArticleReader, ReaderMeta } from '@/components/features/ArticleReader'
 
 const PAGE_SIZE = 40
-
-// ── Add Article Bar ────────────────────────────────────────────────────────────
-
-function AddBar({ onAdd }: { onAdd: (url: string) => Promise<void> }) {
-  const [open, setOpen] = useState(false)
-  const [url, setUrl] = useState('')
-  const [loading, setLoading] = useState(false)
-  const inputRef = useRef<HTMLInputElement>(null)
-
-  useEffect(() => {
-    if (open) inputRef.current?.focus()
-  }, [open])
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    const u = url.trim()
-    if (!u) return
-    setLoading(true)
-    try {
-      await onAdd(u)
-      setUrl('')
-      setOpen(false)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  if (!open) {
-    return (
-      <Button size="sm" variant="outline" className="h-8 text-xs gap-1.5" onClick={() => setOpen(true)}>
-        <Plus className="w-3.5 h-3.5" />
-        添加文章
-      </Button>
-    )
-  }
-
-  return (
-    <form onSubmit={handleSubmit} className="flex items-center gap-2">
-      <Input
-        ref={inputRef}
-        value={url}
-        onChange={e => setUrl(e.target.value)}
-        placeholder="粘贴微信文章链接…"
-        className="h-8 text-xs w-80"
-        onKeyDown={e => e.key === 'Escape' && setOpen(false)}
-      />
-      <Button type="submit" size="sm" className="h-8 text-xs" disabled={loading || !url.trim()}>
-        {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : '保存'}
-      </Button>
-      <Button type="button" size="sm" variant="ghost" className="h-8 text-xs px-2"
-        onClick={() => { setUrl(''); setOpen(false) }}>
-        <X className="w-3.5 h-3.5" />
-      </Button>
-    </form>
-  )
-}
 
 // ── Login dialog (QR scan) ─────────────────────────────────────────────────────
 
@@ -504,44 +451,83 @@ function ArticleCard({
   )
 }
 
-// ── Account filter pills ────────────────────────────────────────────────────────
+// ── Account filter (searchable dropdown) ────────────────────────────────────────
 
-function AccountPills({
+function AccountFilter({
   accounts, selected, onSelect,
 }: {
   accounts: string[]
   selected: string | null
   onSelect: (a: string | null) => void
 }) {
+  const [open, setOpen] = useState(false)
+  const [q, setQ] = useState('')
+
+  const filtered = useMemo(() => {
+    const s = q.trim().toLowerCase()
+    return s ? accounts.filter(a => a.toLowerCase().includes(s)) : accounts
+  }, [accounts, q])
+
   if (accounts.length === 0) return null
+
+  function pick(a: string | null) {
+    onSelect(a)
+    setOpen(false)
+  }
+
   return (
-    <div className="flex items-center gap-1.5 flex-wrap">
-      <button
-        onClick={() => onSelect(null)}
-        className={cn(
-          'px-2.5 py-0.5 rounded-full text-xs transition-colors',
-          selected === null
-            ? 'bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300 font-medium'
-            : 'text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800',
-        )}
+    <Popover open={open} onOpenChange={o => { setOpen(o); if (o) setQ('') }}>
+      <PopoverTrigger
+        render={
+          <button
+            type="button"
+            className="flex items-center gap-1.5 h-8 px-2.5 rounded-md border border-zinc-200 dark:border-zinc-800 text-xs text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-900 transition-colors max-w-[180px]"
+          />
+        }
       >
-        全部
-      </button>
-      {accounts.map(a => (
-        <button
-          key={a}
-          onClick={() => onSelect(a === selected ? null : a)}
-          className={cn(
-            'px-2.5 py-0.5 rounded-full text-xs transition-colors',
-            selected === a
-              ? 'bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300 font-medium'
-              : 'text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800',
+        <MessageSquare className="w-3.5 h-3.5 text-green-500 flex-shrink-0" />
+        <span className="truncate">{selected ?? '全部公众号'}</span>
+        <ChevronDown className="w-3.5 h-3.5 text-zinc-400 flex-shrink-0 ml-auto" />
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-64 p-2">
+        <Input
+          value={q}
+          onChange={e => setQ(e.target.value)}
+          placeholder="搜索公众号…"
+          className="h-8 text-xs mb-1.5"
+        />
+        <div className="max-h-64 overflow-y-auto">
+          <button
+            type="button"
+            onClick={() => pick(null)}
+            className={cn(
+              'w-full flex items-center gap-2 text-left px-2 py-1.5 text-xs rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors',
+              selected === null && 'text-green-600 dark:text-green-400 font-medium',
+            )}
+          >
+            <Check className={cn('w-3.5 h-3.5 flex-shrink-0', selected === null ? 'opacity-100' : 'opacity-0')} />
+            全部公众号
+          </button>
+          {filtered.map(a => (
+            <button
+              key={a}
+              type="button"
+              onClick={() => pick(a)}
+              className={cn(
+                'w-full flex items-center gap-2 text-left px-2 py-1.5 text-xs rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors',
+                selected === a && 'text-green-600 dark:text-green-400 font-medium',
+              )}
+            >
+              <Check className={cn('w-3.5 h-3.5 flex-shrink-0', selected === a ? 'opacity-100' : 'opacity-0')} />
+              <span className="truncate">{a}</span>
+            </button>
+          ))}
+          {filtered.length === 0 && (
+            <div className="px-2 py-3 text-center text-xs text-zinc-400">无匹配公众号</div>
           )}
-        >
-          {a}
-        </button>
-      ))}
-    </div>
+        </div>
+      </PopoverContent>
+    </Popover>
   )
 }
 
@@ -554,6 +540,10 @@ export function WechatClient({ initialArticles }: { initialArticles: WechatArtic
   const [auth, setAuth] = useState<WechatAuthState | null>(null)
   const [loginOpen, setLoginOpen] = useState(false)
   const [subsOpen, setSubsOpen] = useState(false)
+  const [collect, setCollect] = useState<WechatCollectStatus | null>(null)
+  const collectPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const wasCollectingRef = useRef(false)
+  const collecting = collect?.running ?? false
 
   // Reader state — side panel on wide screens, modal otherwise
   const useSidePanel = useMediaQuery('(min-width: 1280px)')
@@ -608,7 +598,69 @@ export function WechatClient({ initialArticles }: { initialArticles: WechatArtic
     }
   }, [])
 
+  // ── One-click collect: kick off backend job, then poll its progress ──────────
+  const stopCollectPoll = useCallback(() => {
+    if (collectPollRef.current) {
+      clearInterval(collectPollRef.current)
+      collectPollRef.current = null
+    }
+  }, [])
+
+  const pollCollect = useCallback(async () => {
+    try {
+      const st = await getWechatCollectStatus()
+      setCollect(st)
+      if (st.running) {
+        wasCollectingRef.current = true
+        return
+      }
+      stopCollectPoll()
+      if (wasCollectingRef.current) {
+        wasCollectingRef.current = false
+        if (st.errors.length) toast.warning(st.message || `采集完成，${st.errors.length} 个失败`)
+        else toast.success(st.message || '采集完成')
+        reloadArticles()
+      }
+    } catch {
+      // transient network blip — keep polling
+    }
+  }, [stopCollectPoll, reloadArticles])
+
+  const startCollectPoll = useCallback(() => {
+    stopCollectPoll()
+    collectPollRef.current = setInterval(pollCollect, 1500)
+  }, [stopCollectPoll, pollCollect])
+
+  async function handleCollectAll() {
+    if (!auth?.logged_in) {
+      toast.info('请先扫码登录公众平台')
+      setLoginOpen(true)
+      return
+    }
+    try {
+      const st = await startWechatCollectAll()
+      setCollect(st)
+      wasCollectingRef.current = true
+      startCollectPoll()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : '启动采集失败')
+    }
+  }
+
   useEffect(() => { reloadAuth() }, [reloadAuth])
+
+  // Resume showing progress if a collect job is already running (page reopened / 2nd tab)
+  useEffect(() => {
+    let cancelled = false
+    getWechatCollectStatus()
+      .then(st => {
+        if (cancelled) return
+        setCollect(st)
+        if (st.running) { wasCollectingRef.current = true; startCollectPoll() }
+      })
+      .catch(() => { /* backend may be down; ignore */ })
+    return () => { cancelled = true; stopCollectPoll() }
+  }, [startCollectPoll, stopCollectPoll])
 
   const accounts = useMemo(() => {
     const names = [...new Set(articles.map(a => a.account_name).filter(Boolean))]
@@ -633,20 +685,6 @@ export function WechatClient({ initialArticles }: { initialArticles: WechatArtic
     pageSize: PAGE_SIZE,
   })
   const visible = filtered.slice(0, visibleCount)
-
-  async function handleAdd(url: string) {
-    try {
-      const art = await addWechatArticle(url)
-      setArticles(prev => {
-        if (prev.some(a => a.id === art.id)) return prev
-        return [art, ...prev]
-      })
-      toast.success(`已保存：${art.title.slice(0, 30)}…`)
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : '添加失败')
-      throw e
-    }
-  }
 
   async function handleDelete(article: WechatArticle) {
     try {
@@ -702,6 +740,25 @@ export function WechatClient({ initialArticles }: { initialArticles: WechatArtic
                 <Settings className="w-3.5 h-3.5" />
                 订阅管理
               </Button>
+              <Button size="sm" variant="outline" className="h-8 text-xs gap-1.5"
+                onClick={handleCollectAll} disabled={collecting}>
+                {collecting ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    采集中 {collect?.done ?? 0}/{collect?.total ?? 0}
+                  </>
+                ) : (
+                  <>
+                    <DownloadCloud className="w-3.5 h-3.5" />
+                    一键采集
+                  </>
+                )}
+              </Button>
+              <AccountFilter
+                accounts={accounts}
+                selected={selectedAccount}
+                onSelect={a => { setSelectedAccount(a); resetScroll() }}
+              />
               <div className="relative">
                 <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-400" />
                 <Input
@@ -711,17 +768,29 @@ export function WechatClient({ initialArticles }: { initialArticles: WechatArtic
                   className="h-8 text-xs pl-8 w-40"
                 />
               </div>
-              <AddBar onAdd={handleAdd} />
             </div>
           </div>
 
-          {accounts.length > 0 && (
+          {collecting && collect && (
             <div className="mt-2.5">
-              <AccountPills
-                accounts={accounts}
-                selected={selectedAccount}
-                onSelect={a => { setSelectedAccount(a); resetScroll() }}
-              />
+              <div className="flex items-center justify-between gap-3 text-[11px] text-zinc-500 mb-1">
+                <span className="flex items-center gap-1.5 min-w-0">
+                  <Loader2 className="w-3 h-3 animate-spin text-green-500 flex-shrink-0" />
+                  <span className="truncate">
+                    采集中 {collect.done}/{collect.total}
+                    {collect.current && ` · 当前：${collect.current}`}
+                  </span>
+                </span>
+                <span className="flex-shrink-0 text-green-600 dark:text-green-400">
+                  已新增 {collect.new_articles} 篇
+                </span>
+              </div>
+              <div className="h-1 w-full rounded-full bg-zinc-100 dark:bg-zinc-800 overflow-hidden">
+                <div
+                  className="h-full bg-green-500 transition-all duration-500"
+                  style={{ width: `${collect.total ? Math.round((collect.done / collect.total) * 100) : 0}%` }}
+                />
+              </div>
             </div>
           )}
         </div>
@@ -733,7 +802,7 @@ export function WechatClient({ initialArticles }: { initialArticles: WechatArtic
               <MessageSquare className="w-10 h-10 opacity-20 text-green-500" />
               <p className="text-sm">
                 {articles.length === 0
-                  ? '订阅公众号或粘贴文章链接以开始'
+                  ? '订阅公众号后点「一键采集」开始'
                   : '没有符合条件的文章'}
               </p>
             </div>

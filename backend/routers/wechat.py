@@ -4,13 +4,13 @@ import hashlib
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Any
 
-from fastapi import APIRouter, HTTPException, Query, Depends
+from fastapi import APIRouter, HTTPException, Query, Depends, BackgroundTasks
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from database import get_db
+from database import get_db, SessionLocal
 from models import WechatArticle, WechatAccount, WechatCredential
 import wechat_mp_client as mp
 import wechat_img_cache as wimg
@@ -19,10 +19,6 @@ router = APIRouter(prefix="/wechat", tags=["wechat"])
 
 
 # ── Schemas ────────────────────────────────────────────────────────────────────
-
-class ArticleCreate(BaseModel):
-    url: str
-
 
 class ArticleOut(BaseModel):
     id: str
@@ -95,6 +91,19 @@ class SyncResult(BaseModel):
     biz: str
     new_articles: int
     total_seen: int
+
+
+class CollectStatus(BaseModel):
+    """Live progress of the one-click "collect all accounts" background job."""
+    running: bool = False
+    total: int = 0
+    done: int = 0
+    current: str = ""                       # name of the account currently syncing
+    new_articles: int = 0
+    errors: list[str] = Field(default_factory=list)
+    started_at: Optional[datetime] = None
+    finished_at: Optional[datetime] = None
+    message: str = ""                       # final summary, or why it stopped early
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -191,16 +200,6 @@ async def list_articles_endpoint(
         q = q.where(WechatArticle.title.contains(search))
     rows = (await db.execute(q)).scalars().all()
     return rows
-
-
-@router.post("/articles", response_model=ArticleOut, status_code=201)
-async def add_article(body: ArticleCreate, db: AsyncSession = Depends(get_db)):
-    from wechat_collector import save_article
-    try:
-        article = await save_article(body.url, db)
-    except Exception as e:
-        raise HTTPException(400, f"无法抓取文章：{e}")
-    return article
 
 
 @router.get("/articles/{article_id}", response_model=ArticleOut)
@@ -400,3 +399,99 @@ async def accounts_sync(
         raise HTTPException(404, "未找到该订阅账号")
     cred = await _get_active_credential(db)
     return await _sync_account(db, acc, cred.token, cred.cookie, pages=pages)
+
+
+# ── One-click collect all ───────────────────────────────────────────────────────
+
+# Live progress of the manual "collect all" job. In-memory singleton: the backend
+# is a single process, the job is transient, and losing this on restart is fine —
+# so no DB schema change is needed just to track progress.
+_collect_status = CollectStatus()
+
+# Seconds to wait between accounts, to stay gentle with mp.weixin.qq.com risk control.
+_COLLECT_DELAY_SECONDS = 10.0
+
+
+async def _run_collect_all(delay_seconds: float = _COLLECT_DELAY_SECONDS) -> None:
+    """Background job: sync every non-muted account, pacing `delay_seconds` apart,
+    updating the module-level `_collect_status` as it goes. Writes a one-line
+    summary to the system log on completion."""
+    from logger import log
+    st = _collect_status
+    try:
+        async with SessionLocal() as db:
+            cred = await db.get(WechatCredential, 1)
+            if (not cred or not cred.token or not cred.cookie
+                    or (cred.expires_at and cred.expires_at <= datetime.now(timezone.utc))):
+                st.message = "公众平台未登录或登录已过期，请先扫码"
+                await log("wechat", "warn", st.message)
+                return
+            accounts = (await db.execute(
+                select(WechatAccount).where(WechatAccount.muted.is_(False))
+            )).scalars().all()
+            st.total = len(accounts)
+            token, cookie = cred.token, cred.cookie
+            for i, acc in enumerate(accounts):
+                st.current = acc.name
+                try:
+                    res = await _sync_account(db, acc, token, cookie, pages=1, page_size=20)
+                    st.new_articles += res.new_articles
+                except Exception as e:
+                    # SessionExpired surfaces as HTTPException(401) — stop and ask to re-scan.
+                    if "登录已过期" in str(e):
+                        st.message = "公众平台登录已过期，需重新扫码"
+                        await log("wechat", "warn", st.message)
+                        break
+                    st.errors.append("{0}: {1}".format(acc.name, e))
+                st.done = i + 1
+                if i < len(accounts) - 1:
+                    await asyncio.sleep(delay_seconds)
+            if not st.message:
+                if st.errors:
+                    st.message = "采集完成：{0} 个账号，新增 {1} 篇，{2} 个失败".format(
+                        st.total, st.new_articles, len(st.errors))
+                    await log("wechat", "warn", st.message, "; ".join(st.errors))
+                else:
+                    st.message = "采集完成：{0} 个账号，新增 {1} 篇".format(st.total, st.new_articles)
+                    await log("wechat", "ok", st.message)
+    except Exception as e:
+        st.message = "一键采集异常：{0}".format(e)
+        await log("wechat", "error", "公众号一键采集异常", str(e))
+    finally:
+        st.current = ""
+        st.running = False
+        st.finished_at = datetime.now(timezone.utc)
+
+
+@router.post("/collect", response_model=CollectStatus)
+async def collect_all_accounts(
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+):
+    """Kick off a background sync of every non-muted account, 10s apart.
+    Returns immediately; poll GET /wechat/collect/status for progress."""
+    if _collect_status.running:
+        raise HTTPException(409, "采集正在进行中，请稍候")
+    await _get_active_credential(db)        # raises 401 when not logged in / expired
+    accounts = (await db.execute(
+        select(WechatAccount).where(WechatAccount.muted.is_(False))
+    )).scalars().all()
+    if not accounts:
+        raise HTTPException(400, "暂无已订阅的公众号")
+    # Reset progress in place so the very first status poll already reflects it.
+    _collect_status.running = True
+    _collect_status.total = len(accounts)
+    _collect_status.done = 0
+    _collect_status.current = ""
+    _collect_status.new_articles = 0
+    _collect_status.errors = []
+    _collect_status.started_at = datetime.now(timezone.utc)
+    _collect_status.finished_at = None
+    _collect_status.message = ""
+    background_tasks.add_task(_run_collect_all, _COLLECT_DELAY_SECONDS)
+    return _collect_status
+
+
+@router.get("/collect/status", response_model=CollectStatus)
+async def collect_all_status():
+    return _collect_status

@@ -40,6 +40,7 @@ const SECTION_TITLE: Record<SectionId, string> = {
 export function SettingsClient({ initialSettings }: { initialSettings: AppSettings | null }) {
   const [active, setActive] = useState<SectionId>('ai')
   const [settings, setSettings] = useState<AppSettings | null>(initialSettings)
+  const isLogs = active === 'logs'
 
   return (
     <div className="flex h-full min-h-screen">
@@ -69,11 +70,14 @@ export function SettingsClient({ initialSettings }: { initialSettings: AppSettin
 
       {/* ── Content area ────────────────────────────────────────────── */}
       <main className="flex-1 overflow-y-auto">
-        <div className="max-w-2xl px-10 py-8">
+        <div className={cn(
+          'px-10 py-8',
+          isLogs ? 'h-full flex flex-col' : 'max-w-2xl'
+        )}>
           <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100 mb-1">
             {SECTION_TITLE[active]}
           </h1>
-          <p className="text-xs text-zinc-400 mb-7">{NAV.find(n => n.id === active)?.desc}</p>
+          <p className={cn('text-xs text-zinc-400', isLogs ? 'mb-4' : 'mb-7')}>{NAV.find(n => n.id === active)?.desc}</p>
 
           {active === 'ai'       && <AISection      settings={settings} onSaved={setSettings} />}
           {active === 'collect'  && <CollectSection settings={settings} onSaved={setSettings} />}
