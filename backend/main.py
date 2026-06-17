@@ -13,7 +13,16 @@ from database import init_db
 from routers import settings, github, x, papers, upload, drafts, writing_plans, youtube, producthunt, wechat, v2ex, kr, juejin, studio, publish_accounts, profiles, reddit, topic_generator, retro, materials, skills, dashboard, daily_plan, published
 import scheduler as job_registry
 
-scheduler = AsyncIOScheduler()
+scheduler = AsyncIOScheduler(
+    # 默认 misfire_grace_time 只有 1 秒：WSL2 墙上时钟漂移几秒就会让每个任务
+    # 被判成 misfire 而被静默跳过（曾导致全部定时任务从某刻起集体停摆）。
+    # 放宽容忍窗口 + coalesce，让时钟/事件循环的几秒抖动不再废掉整轮执行。
+    job_defaults={
+        "misfire_grace_time": 3600,
+        "coalesce": True,
+        "max_instances": 1,
+    }
+)
 
 
 @asynccontextmanager
