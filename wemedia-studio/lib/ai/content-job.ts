@@ -4,13 +4,14 @@ import { z } from 'zod'
 
 const apiBase = () => (process.env.WMS_API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000/api').replace(/\/$/, '')
 
-export type ContentStep = 'brief' | 'draft' | 'cover' | 'illustrations'
+export type ContentStep = 'brief' | 'draft' | 'cover' | 'illustrations' | 'daily_plan'
 
 const stepToolNames: Record<ContentStep, string[]> = {
   brief: ['loadSource', 'loadAccountContext', 'saveBrief'],
   draft: ['getBrief', 'loadWritingContext', 'saveDraft'],
   cover: ['getDraft', 'loadCoverContext', 'saveCoverAsset'],
   illustrations: ['getDraft', 'loadImageContext', 'saveInlineAsset'],
+  daily_plan: ['loadPlanningContext', 'saveDailyPlan'],
 }
 
 export function toolsForContentStep(step: ContentStep): string[] {
@@ -137,7 +138,7 @@ export async function runContentJob(jobId: number) {
       await completeJob(job.id)
       return output
     }
-    activeStep = await startStep(job.id, 'brief')
+    activeStep = await startStep(job.id, job.flow === 'daily_plan' ? 'daily_plan' : 'brief')
     const apiKey = process.env.WMS_LLM_API_KEY
     if (!apiKey) throw new Error('WMS_LLM_API_KEY is not configured')
     const modelName = process.env.WMS_LLM_MODEL ?? 'gpt-4o-mini'

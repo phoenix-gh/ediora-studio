@@ -126,6 +126,7 @@ async def post_retry(job_id: int, body: RetryRequest, db: AsyncSession = Depends
         raise HTTPException(404, "job not found") from None
     except InvalidJobTransition as exc:
         raise HTTPException(409, str(exc)) from exc
+    await enqueue_job(job_id)
     job = await db.get(ContentJob, job_id)
     assert job is not None
     return await _job_payload(db, job)

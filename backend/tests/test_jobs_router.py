@@ -68,6 +68,24 @@ def test_retry_unknown_job_returns_404(client):
     assert response.status_code == 404
 
 
+def test_retry_enqueues_job_again(client, monkeypatch):
+    import routers.jobs as jobs_router
+    queued: list[int] = []
+
+    async def enqueue(job_id: int):
+        queued.append(job_id)
+
+    monkeypatch.setattr(jobs_router, "enqueue_job", enqueue)
+    created = client.post("/api/jobs", json={"flow": "draft", "title": "Retry", "input": {}}).json()
+    started = client.post(f"/api/jobs/{created['id']}/steps/draft/start").json()
+    client.post(f"/api/jobs/{created['id']}/steps/{started['id']}/fail", json={"error": "timeout", "retryable": True})
+
+    response = client.post(f"/api/jobs/{created['id']}/retry", json={"step_key": "draft"})
+
+    assert response.status_code == 200
+    assert queued == [created["id"], created["id"]]
+
+
 def test_step_lifecycle_api_records_success(client):
     created = client.post("/api/jobs", json={"flow": "draft", "title": "Lifecycle", "input": {}}).json()
     started = client.post(f"/api/jobs/{created['id']}/steps/brief/start")

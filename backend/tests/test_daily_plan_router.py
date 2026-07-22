@@ -118,7 +118,7 @@ def test_skip_toggles_and_rejects_enqueued(client):
     assert r.status_code == 404
 
 
-def test_generate_force_recreates(client):
+def test_generate_force_recreates(client, monkeypatch):
     from database import SessionLocal
     from models import PublishAccount
 
@@ -127,6 +127,11 @@ def test_generate_force_recreates(client):
             db.add(PublishAccount(id="acc1", name="号一", daily_quota={"long": 1}))
             await db.commit()
     _run(_acc())
+
+    import job_queue
+    async def no_op_enqueue(_job_id):
+        return None
+    monkeypatch.setattr(job_queue, "enqueue_job", no_op_enqueue)
 
     r = client.post("/api/daily-plan/generate")
     assert r.status_code == 200, r.text
