@@ -326,7 +326,7 @@ async def dispatch_plan(plan_id: int, body: DispatchPlanRequest, db: AsyncSessio
         render_profile_editor, parse_word_spec, FULL_PIPELINE, resolve_effective_design,
         plan_editor_task_block,
     )
-    from hermes_kanban_client import HermesKanbanClient, HermesKanbanError
+    from job_dispatch import JobDispatcher, JobDispatchError
 
     # 设计字段三层合并：账号默认 < 写作方案覆盖 < 本次 dispatch 临时覆盖。
     eff_cover, eff_image = resolve_effective_design(
@@ -385,35 +385,19 @@ async def dispatch_plan(plan_id: int, body: DispatchPlanRequest, db: AsyncSessio
     }
 
     try:
-        kanban = HermesKanbanClient()
-
-        editor_id = await kanban.create_task(
+        editor_id = await JobDispatcher().create(
             title=f"[创作] {obj.title}",
-            body="\n".join(editor_body_parts),
-            assignee="wms_editor",
+            input_data={**ctx, "editor_prompt": "\n".join(editor_body_parts)},
+            flow="draft",
         )
-        writer_step = FULL_PIPELINE[1]
-        writer_id = await kanban.create_task(
-            title=writer_step.title(ctx),
-            body=writer_step.body(ctx),
-            assignee=writer_step.assignee,
-            parents=[editor_id],
-        )
-        illus_step = FULL_PIPELINE[2]
-        illus_id = await kanban.create_task(
-            title=illus_step.title(ctx),
-            body=illus_step.body(ctx),
-            assignee=illus_step.assignee,
-            parents=[writer_id],
-        )
-    except HermesKanbanError as e:
-        raise HTTPException(502, f"Hermes 不可用: {e}")
+    except JobDispatchError as e:
+        raise HTTPException(502, f"任务队列不可用: {e}")
 
-    pt.task_ids = {"editor": editor_id, "writer": writer_id, "illustrator": illus_id}
+    pt.task_ids = {"job": editor_id}
     pt.goal = {"angle": body.angle or "", "draft_type": body.draft_type, "genre": obj.genre}
     await db.commit()
 
-    return DispatchResponse(task_id=editor_id, kanban_url="/studio")
+    return DispatchResponse(task_id=editor_id, kanban_url="/jobs")
 
 
 # ── Plan updates (changelog written by scout) ─────────────────────────────────
