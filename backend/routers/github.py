@@ -214,30 +214,16 @@ async def dispatch_release_write(
         "word_rule_line": word_rule_line,
     }
 
-    steps = RELEASE_WRITE_PIPELINE if body.with_cover else RELEASE_WRITE_PIPELINE[:1]
-
-    from hermes_kanban_client import HermesKanbanClient, HermesKanbanError
+    from job_dispatch import JobDispatcher, JobDispatchError
     try:
-        kanban = HermesKanbanClient()
-        task_ids: dict[str, str] = {}
-        prev_id: str | None = None
-        for step in steps:
-            parents = [prev_id] if prev_id else []
-            tid = await kanban.create_task(
-                title=step.title(ctx),
-                body=step.body(ctx),
-                assignee=step.assignee,
-                parents=parents,
-            )
-            task_ids[step.role] = tid
-            prev_id = tid
-    except HermesKanbanError as e:
-        raise HTTPException(502, f"Hermes 不可用: {e}")
+        job_id = await JobDispatcher().create(title=ctx["title"], input_data=ctx, flow="draft")
+    except JobDispatchError as e:
+        raise HTTPException(502, f"任务队列不可用: {e}")
 
-    pt.task_ids = task_ids
+    pt.task_ids = {"job": job_id}
     await db.commit()
 
-    return DispatchResponse(task_id=task_ids.get("editor", ""), kanban_url="/studio")
+    return DispatchResponse(task_id=job_id, kanban_url="/jobs")
 
 
 @router.post("/repos/{owner}/{repo_name}/dispatch-intro", response_model=DispatchResponse)
@@ -306,30 +292,16 @@ async def dispatch_repo_intro(
         "repo_html_url": f"https://github.com/{rid}",
     }
 
-    steps = REPO_INTRO_PIPELINE if body.with_cover else REPO_INTRO_PIPELINE[:1]
-
-    from hermes_kanban_client import HermesKanbanClient, HermesKanbanError
+    from job_dispatch import JobDispatcher, JobDispatchError
     try:
-        kanban = HermesKanbanClient()
-        task_ids: dict[str, str] = {}
-        prev_id: str | None = None
-        for step in steps:
-            parents = [prev_id] if prev_id else []
-            tid = await kanban.create_task(
-                title=step.title(ctx),
-                body=step.body(ctx),
-                assignee=step.assignee,
-                parents=parents,
-            )
-            task_ids[step.role] = tid
-            prev_id = tid
-    except HermesKanbanError as e:
-        raise HTTPException(502, f"Hermes 不可用: {e}")
+        job_id = await JobDispatcher().create(title=ctx["title"], input_data=ctx, flow="draft")
+    except JobDispatchError as e:
+        raise HTTPException(502, f"任务队列不可用: {e}")
 
-    pt.task_ids = task_ids
+    pt.task_ids = {"job": job_id}
     await db.commit()
 
-    return DispatchResponse(task_id=task_ids.get("writer", ""), kanban_url="/studio")
+    return DispatchResponse(task_id=job_id, kanban_url="/jobs")
 
 
 @router.post("/releases/{owner}/{repo_name}/{tag}/generate-draft")

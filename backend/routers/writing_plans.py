@@ -159,17 +159,12 @@ async def analyze_article(body: AnalyzeRequest):
     if body.content:
         parts.append(f"内容:\n{body.content[:3000]}")
     parts.append(instructions)
-    from hermes_kanban_client import HermesKanbanClient, HermesKanbanError
+    from job_dispatch import JobDispatcher, JobDispatchError
     try:
-        kanban = HermesKanbanClient()
-        task_id = await kanban.create_task(
-            title="[写作方案] 文章提炼",
-            body="\n".join(parts),
-            assignee="wms_scout",
-        )
-    except HermesKanbanError as e:
-        raise HTTPException(502, f"Hermes 不可用: {e}")
-    return AnalyzeResponse(task_id=task_id, kanban_url="/studio")
+        task_id = await JobDispatcher().create(title="[写作方案] 文章提炼", input_data={"prompt": "\n".join(parts)})
+    except JobDispatchError as e:
+        raise HTTPException(502, f"任务队列不可用: {e}")
+    return AnalyzeResponse(task_id=task_id, kanban_url="/jobs")
 
 
 @router.post("/{plan_id}/reanalyze", response_model=AnalyzeResponse)
@@ -190,17 +185,12 @@ async def reanalyze_plan(plan_id: int, body: ReanalyzeRequest, db: AsyncSession 
         f"并调 add_plan_update 记录改了什么。不需要搜索其他方案，也不需要新建方案。\n"
         f"{instructions}"
     )
-    from hermes_kanban_client import HermesKanbanClient, HermesKanbanError
+    from job_dispatch import JobDispatcher, JobDispatchError
     try:
-        kanban = HermesKanbanClient()
-        task_id = await kanban.create_task(
-            title=f"[写作方案] 重新提炼：{obj.title}",
-            body=task_body,
-            assignee="wms_scout",
-        )
-    except HermesKanbanError as e:
-        raise HTTPException(502, f"Hermes 不可用: {e}")
-    return AnalyzeResponse(task_id=task_id, kanban_url="/studio")
+        task_id = await JobDispatcher().create(title=f"[写作方案] 重新提炼：{obj.title}", input_data={"prompt": task_body})
+    except JobDispatchError as e:
+        raise HTTPException(502, f"任务队列不可用: {e}")
+    return AnalyzeResponse(task_id=task_id, kanban_url="/jobs")
 
 
 # ── Writing plan endpoints ─────────────────────────────────────────────────────
