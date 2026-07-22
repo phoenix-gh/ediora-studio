@@ -40,13 +40,14 @@ services:
         condition: service_healthy
 
   worker:
-    build: ./backend
-    command: ["python", "-m", "job_worker"]
+    build: ./wemedia-studio
+    command: ["pnpm", "jobs:worker"]
     environment:
-      WMS_DATABASE_URL: postgresql+asyncpg://wemedia:${POSTGRES_PASSWORD:-wemedia}@postgres:5432/wemedia
       WMS_REDIS_URL: redis://redis:6379/0
-    volumes:
-      - uploads-data:/app/uploads
+      WMS_API_URL: http://api:8000/api
+      WMS_LLM_API_KEY: ${WMS_LLM_API_KEY:-}
+      WMS_LLM_MODEL: ${WMS_LLM_MODEL:-gpt-4o-mini}
+      WMS_LLM_BASE_URL: ${WMS_LLM_BASE_URL:-}
     depends_on:
       postgres:
         condition: service_healthy

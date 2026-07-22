@@ -66,3 +66,15 @@ def test_retry_unknown_job_returns_404(client):
     response = client.post("/api/jobs/999/retry", json={"step_key": "draft"})
 
     assert response.status_code == 404
+
+
+def test_step_lifecycle_api_records_success(client):
+    created = client.post("/api/jobs", json={"flow": "draft", "title": "Lifecycle", "input": {}}).json()
+    started = client.post(f"/api/jobs/{created['id']}/steps/brief/start")
+
+    assert started.status_code == 200
+    assert started.json()["status"] == "running"
+
+    completed = client.post(f"/api/jobs/{created['id']}/steps/{started.json()['id']}/succeed", json={"output": {"brief": "ok"}})
+    assert completed.status_code == 200
+    assert completed.json()["status"] == "succeeded"

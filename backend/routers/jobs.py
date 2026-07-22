@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from content_jobs import InvalidJobTransition, cancel_job, create_job, retry_step
+from content_jobs import InvalidJobTransition, cancel_job, create_job, retry_step, start_step, succeed_job, succeed_step
 from database import get_db
 from job_queue import enqueue_job
 from models import ContentJob, ContentJobEvent, ContentJobStep
@@ -27,6 +27,10 @@ class JobCreate(BaseModel):
 
 class RetryRequest(BaseModel):
     step_key: str = Field(min_length=1, max_length=64)
+
+
+class StepOutputRequest(BaseModel):
+    output: dict = Field(default_factory=dict)
 
 
 def _step_payload(step: ContentJobStep) -> dict:
@@ -120,3 +124,34 @@ async def post_retry(job_id: int, body: RetryRequest, db: AsyncSession = Depends
     job = await db.get(ContentJob, job_id)
     assert job is not None
     return await _job_payload(db, job)
+
+
+@router.post("/{job_id}/steps/{step_key}/start")
+async def post_start_step(job_id: int, step_key: str, db: AsyncSession = Depends(get_db)):
+    try:
+        return _step_payload(await start_step(db, job_id, step_key))
+    except KeyError:
+        raise HTTPException(404, "job not found") from None
+    except InvalidJobTransition as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@router.post("/{job_id}/steps/{step_id}/succeed")
+async def post_succeed_step(job_id: int, step_id: int, body: StepOutputRequest, db: AsyncSession = Depends(get_db)):
+    step = await db.get(ContentJobStep, step_id)
+    if step is None or step.job_id != job_id:
+        raise HTTPException(404, "step not found")
+    try:
+        return _step_payload(await succeed_step(db, step_id, body.output))
+    except InvalidJobTransition as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@router.post("/{job_id}/succeed")
+async def post_succeed_job(job_id: int, db: AsyncSession = Depends(get_db)):
+    try:
+        return await _job_payload(db, await succeed_job(db, job_id))
+    except KeyError:
+        raise HTTPException(404, "job not found") from None
+    except InvalidJobTransition as exc:
+        raise HTTPException(409, str(exc)) from exc

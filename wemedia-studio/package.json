@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "vitest run"
+    "test": "vitest run",
+    "jobs:worker": "tsx scripts/content-worker.ts"
   },
   "dependencies": {
     "@ai-sdk/openai": "^4.0.17",
@@ -19,6 +20,7 @@
     "ai": "^7.0.34",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "ioredis": "^5.11.1",
     "lucide-react": "^1.14.0",
     "marked": "^18.0.3",
     "next": "16.2.4",
@@ -44,6 +46,7 @@
     "eslint-config-next": "16.2.4",
     "jsdom": "^29.1.1",
     "tailwindcss": "^4",
+    "tsx": "^4.23.1",
     "typescript": "^5",
     "vitest": "^4.1.10"
   }

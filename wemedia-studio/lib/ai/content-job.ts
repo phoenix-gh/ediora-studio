@@ -34,6 +34,24 @@ async function saveDraft(jobId: number, title: string, content: string) {
   return { draftId: draft.id }
 }
 
+async function startStep(jobId: number, step: ContentStep) {
+  const response = await fetch(`${apiBase()}/jobs/${jobId}/steps/${step}/start`, { method: 'POST' })
+  if (!response.ok) throw new Error(`Unable to start ${step} step`)
+  return response.json() as Promise<{ id: number }>
+}
+
+async function completeStep(jobId: number, stepId: number, output: Record<string, unknown>) {
+  const response = await fetch(`${apiBase()}/jobs/${jobId}/steps/${stepId}/succeed`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ output }),
+  })
+  if (!response.ok) throw new Error('Unable to record content step')
+}
+
+async function completeJob(jobId: number) {
+  const response = await fetch(`${apiBase()}/jobs/${jobId}/succeed`, { method: 'POST' })
+  if (!response.ok) throw new Error('Unable to complete content job')
+}
+
 export async function runContentJob(jobId: number) {
   const apiKey = process.env.WMS_LLM_API_KEY
   const modelName = process.env.WMS_LLM_MODEL ?? 'gpt-4o-mini'
@@ -44,6 +62,15 @@ export async function runContentJob(jobId: number) {
   if (draftStep?.output?.draft_id) return draftStep.output
 
   const openai = createOpenAI({ apiKey, baseURL: process.env.WMS_LLM_BASE_URL })
+  const brief = await startStep(job.id, 'brief')
+  const briefResult = await generateText({
+    model: openai(modelName),
+    instructions: '根据用户提供的素材和账号约束，生成简洁、可执行的中文写作 brief。不得调用外部工具。',
+    prompt: JSON.stringify({ title: job.title, input: job.input }),
+  })
+  await completeStep(job.id, brief.id, { brief: briefResult.text })
+  const draft = await startStep(job.id, 'draft')
+  let savedDraft: { draftId: number } | undefined
   const result = await generateText({
     model: openai(modelName),
     instructions: '你是内容写作助手。只能使用提供的工具保存完整 Markdown 草稿；不得发布内容。',
@@ -53,7 +80,7 @@ export async function runContentJob(jobId: number) {
       getBrief: tool({
         description: '读取本次任务已生成的 brief。',
         inputSchema: z.object({}),
-        execute: async () => job.steps.find(step => step.key === 'brief')?.output ?? {},
+        execute: async () => ({ brief: briefResult.text }),
       }),
       loadWritingContext: tool({
         description: '读取账号、素材和写作约束。',
@@ -63,9 +90,15 @@ export async function runContentJob(jobId: number) {
       saveDraft: tool({
         description: '保存完整草稿。必须调用一次作为最终输出。',
         inputSchema: z.object({ title: z.string().min(1), content: z.string().min(1) }),
-        execute: async ({ title, content }) => saveDraft(job.id, title, content),
+        execute: async ({ title, content }) => {
+          savedDraft = await saveDraft(job.id, title, content)
+          return savedDraft
+        },
       }),
     },
   })
-  return { text: result.text, steps: result.steps.length }
+  const saved = savedDraft ?? await saveDraft(job.id, job.title, result.text)
+  await completeStep(job.id, draft.id, { draft_id: saved.draftId, text_length: result.text.length })
+  await completeJob(job.id)
+  return { ...saved, text: result.text, steps: result.steps.length }
 }
