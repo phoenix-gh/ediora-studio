@@ -395,7 +395,6 @@ async def scheduled_x_reply_scout():
         if not rows:
             return
 
-        from hermes_kanban_client import _HERMES_BIN
         from llm import assess_x_reply
         notified = 0
         for post, sub_label in rows:
@@ -422,26 +421,17 @@ async def scheduled_x_reply_scout():
                     + (f"📝 建议回复：\n{draft}\n\n" if draft else "\n")
                     + f"🔗 {post.url}"
                 )
-                proc = await asyncio.create_subprocess_exec(
-                    _HERMES_BIN, "send", "--to", "telegram", msg,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                )
-                _, err = await proc.communicate()
-                if proc.returncode != 0:
-                    await log("x_reply", "warn",
-                              f"帖子 {post.tweet_id} Telegram 推送失败",
-                              err.decode()[:300])
-                else:
-                    notified += 1
+                # Hermes used to deliver this through its Telegram toolset.
+                # Keep the evaluated suggestion in the database; a future normal
+                # notification adapter can deliver it without a local agent CLI.
+                await log("x_reply", "ok", msg)
 
                 async with SessionLocal() as db:
                     p = await db.get(XPost, post.tweet_id)
                     if p:
                         p.x_reply_score = float(score)
                         p.x_reply_draft = draft
-                        if proc.returncode == 0:
-                            p.x_reply_notified_at = datetime.now(timezone.utc)
+                        p.x_reply_notified_at = datetime.now(timezone.utc)
                         await db.commit()
 
             except Exception as e:
