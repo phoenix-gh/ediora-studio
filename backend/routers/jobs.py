@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from content_jobs import InvalidJobTransition, cancel_job, create_job, retry_step
 from database import get_db
+from job_queue import enqueue_job
 from models import ContentJob, ContentJobEvent, ContentJobStep
 
 
@@ -78,6 +79,7 @@ async def post_job(body: JobCreate, db: AsyncSession = Depends(get_db)):
         db, flow=body.flow, title=body.title,
         input_data=body.input_data, idempotency_key=body.idempotency_key,
     )
+    await enqueue_job(job.id)
     return await _job_payload(db, job)
 
 

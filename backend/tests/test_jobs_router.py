@@ -14,7 +14,13 @@ def client(monkeypatch, tmp_path):
             sys.modules.pop(module, None)
     from database import Base, SessionLocal, engine, get_db
     import models  # noqa: F401
-    from routers.jobs import router
+    import routers.jobs as jobs_module
+    router = jobs_module.router
+
+    async def no_op_enqueue(_job_id: int):
+        return None
+
+    monkeypatch.setattr(jobs_module, "enqueue_job", no_op_enqueue)
 
     async def setup():
         async with engine.begin() as connection:
@@ -40,6 +46,20 @@ def test_create_job_returns_queued_job(client):
     assert response.status_code == 201
     assert response.json()["status"] == "queued"
     assert response.json()["id"] > 0
+
+
+def test_create_job_enqueues_worker_execution(client, monkeypatch):
+    import routers.jobs as jobs_router
+    queued: list[int] = []
+
+    async def enqueue(job_id: int):
+        queued.append(job_id)
+
+    monkeypatch.setattr(jobs_router, "enqueue_job", enqueue)
+    response = client.post("/api/jobs", json={"flow": "draft", "title": "Queued", "input": {}})
+
+    assert response.status_code == 201
+    assert queued == [response.json()["id"]]
 
 
 def test_retry_unknown_job_returns_404(client):
