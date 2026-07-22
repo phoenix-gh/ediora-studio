@@ -40,6 +40,9 @@ wemedia-studio/tsconfig.tsbuildinfo
 .run/
 logs/
 
+# ── Agent worktrees ─────────────────────────────────────
+.worktrees/
+
 # ── System ──────────────────────────────────────────────
 .DS_Store
 Thumbs.db
