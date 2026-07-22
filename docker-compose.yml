@@ -41,7 +41,7 @@ services:
 
   worker:
     build: ./wemedia-studio
-    command: ["pnpm", "jobs:worker"]
+    command: ["./node_modules/.bin/tsx", "scripts/content-worker.ts"]
     environment:
       WMS_REDIS_URL: redis://redis:6379/0
       WMS_API_URL: http://api:8000/api
