@@ -515,7 +515,7 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
       setShowDispatchConfirm(false)
       setDispatchAngle('')
       setDispatchDraftType('article')
-      toast.success('已派发给 Agent', {
+      toast.success('已创建创作任务', {
         action: { label: '查看看板', onClick: () => router.push(result.kanban_url) },
       })
     } catch (e: unknown) {
@@ -905,7 +905,7 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
                     <RotateCcw className="w-3.5 h-3.5" /> 重新提炼
                   </Button>
                   <Button size="sm" variant="outline" onClick={openDispatchConfirm} disabled={!strategyDraft.trim()} className="gap-1 text-xs h-8 text-indigo-600 border-indigo-300 hover:bg-indigo-50">
-                    <Rocket className="w-3.5 h-3.5" /> 派发给 Agent
+                    <Rocket className="w-3.5 h-3.5" /> 创建创作任务
                   </Button>
                   {strategyDraft !== selected.strategy && (
                     <span className="text-[11px] text-zinc-400 ml-auto">未保存</span>

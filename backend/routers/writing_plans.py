@@ -323,7 +323,7 @@ async def dispatch_plan(plan_id: int, body: DispatchPlanRequest, db: AsyncSessio
     await db.refresh(pt)
 
     from pipeline_template import (
-        render_profile_editor, parse_word_spec, FULL_PIPELINE, resolve_effective_design,
+        render_profile_editor, parse_word_spec, resolve_effective_design,
         plan_editor_task_block,
     )
     from job_dispatch import JobDispatcher, JobDispatchError

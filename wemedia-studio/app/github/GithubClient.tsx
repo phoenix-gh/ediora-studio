@@ -447,12 +447,12 @@ function ReleasesTab({ repoId, releases: initial, onLoad }: { repoId: string; re
     try {
       const result = await dispatchReleaseWrite(owner, repo, dispatchTarget.tag_name, dispatchAccountId, dispatchPlanId, dispatchWithCover)
       setDispatchTarget(null)
-      toast.success('已派发给 Agent', {
+      toast.success('已创建创作任务', {
         description: `任务 ${result.task_id}`,
         action: { label: '查看看板', onClick: () => window.location.href = result.kanban_url },
       })
     } catch {
-      toast.error('派发失败，请检查 Hermes 服务')
+      toast.error('派发失败，请检查任务服务')
     } finally {
       setDispatching(false)
     }
@@ -562,7 +562,7 @@ function ReleasesTab({ repoId, releases: initial, onLoad }: { repoId: string; re
                         className="inline-flex items-center gap-1 text-[11px] text-zinc-400 hover:text-indigo-600 transition-colors"
                       >
                         <FileText className="w-3 h-3" />
-                        Agent 写稿
+                        创建稿件
                       </button>
                     </div>
                   </div>
@@ -573,11 +573,11 @@ function ReleasesTab({ repoId, releases: initial, onLoad }: { repoId: string; re
         </div>
       )}
 
-      {/* Agent 写稿 dialog */}
+      {/* 创作任务 dialog */}
       <Dialog open={!!dispatchTarget} onOpenChange={open => { if (!open) setDispatchTarget(null) }}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
-            <DialogTitle className="text-base">Agent 写稿</DialogTitle>
+            <DialogTitle className="text-base">创建稿件</DialogTitle>
             <DialogDescription className="text-xs">
               {dispatchTarget && (
                 <span className="font-mono">{dispatchTarget.tag_name}</span>
@@ -640,7 +640,7 @@ function ReleasesTab({ repoId, releases: initial, onLoad }: { repoId: string; re
                 onClick={handleDispatch}
               >
                 {dispatching && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                派发给 Agent
+                创建创作任务
               </Button>
             </div>
           </div>
@@ -987,7 +987,7 @@ export function GithubClient({ initialRepos, initialTrending, initialReleases }:
                 onClick={handleIntroDispatch}
               >
                 {introDispatching && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                派发给 Agent
+                创建创作任务
               </Button>
             </div>
           </div>

@@ -357,7 +357,7 @@ async def scheduled_ref_classify():
 
 async def scheduled_x_reply_scout():
     """动态通知：勾选 notify_new_posts 的订阅出新帖时，LLM 评回复价值（0-10）
-    并起草回复建议，每条新帖经 hermes send 推送 Telegram。
+    并起草回复建议，交由外部通知适配器推送 Telegram。
     只看开启时刻（notify_enabled_at）之后采集的帖子，避免积压旧帖刷屏。"""
     from logger import log
     from config import get_config
@@ -421,7 +421,7 @@ async def scheduled_x_reply_scout():
                     + (f"📝 建议回复：\n{draft}\n\n" if draft else "\n")
                     + f"🔗 {post.url}"
                 )
-                # Hermes used to deliver this through its Telegram toolset.
+                # Delivery is delegated to an optional notification adapter.
                 # Keep the evaluated suggestion in the database; a future normal
                 # notification adapter can deliver it without a local agent CLI.
                 await log("x_reply", "ok", msg)

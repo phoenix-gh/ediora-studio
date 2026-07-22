@@ -324,7 +324,7 @@ export function PublishAccountsSection() {
   return (
     <div className="space-y-4">
       <p className="text-xs text-zinc-400 -mt-3">
-        发布账号即你运营的对外内容账号（公众号/X 等）。Hermes agent 链路（scout→editor→writer→illustrator）
+        发布账号即你运营的对外内容账号（公众号/X 等）。账号画像会被创作任务复用。
         会按任务 metadata 的 <code className="font-mono text-zinc-500">account_id</code> 读取该账号画像，
         所有产出都贴合此处填写的定位/调性/受众/禁区。
       </p>

@@ -167,7 +167,7 @@ async def dispatch_release_write(
     }
 
     from pipeline_template import (
-        parse_word_spec, resolve_effective_design, RELEASE_WRITE_PIPELINE,
+        parse_word_spec, resolve_effective_design,
     )
     eff_cover, eff_image = resolve_effective_design(
         account.cover_style, account.image_style or "",
@@ -254,7 +254,7 @@ async def dispatch_repo_intro(
         "voice_samples": account.voice_samples or [], "style_rules": account.style_rules or [],
     }
 
-    from pipeline_template import resolve_effective_design, REPO_INTRO_PIPELINE
+    from pipeline_template import resolve_effective_design
     eff_cover, eff_image = resolve_effective_design(
         account.cover_style, account.image_style or "",
         plan.cover_style, plan.image_style or "",

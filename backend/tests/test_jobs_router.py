@@ -78,3 +78,18 @@ def test_step_lifecycle_api_records_success(client):
     completed = client.post(f"/api/jobs/{created['id']}/steps/{started.json()['id']}/succeed", json={"output": {"brief": "ok"}})
     assert completed.status_code == 200
     assert completed.json()["status"] == "succeeded"
+
+
+def test_step_failure_marks_job_failed_and_retryable(client):
+    created = client.post("/api/jobs", json={"flow": "draft", "title": "Failure", "input": {}}).json()
+    started = client.post(f"/api/jobs/{created['id']}/steps/draft/start").json()
+
+    failed = client.post(
+        f"/api/jobs/{created['id']}/steps/{started['id']}/fail",
+        json={"error": "provider timeout", "retryable": True},
+    )
+
+    assert failed.status_code == 200
+    assert failed.json()["status"] == "failed"
+    assert failed.json()["retryable"] is True
+    assert client.get(f"/api/jobs/{created['id']}").json()["status"] == "failed"

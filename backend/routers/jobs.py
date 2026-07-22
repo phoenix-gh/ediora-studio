@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from content_jobs import InvalidJobTransition, cancel_job, create_job, retry_step, start_step, succeed_job, succeed_step
+from content_jobs import InvalidJobTransition, cancel_job, create_job, fail_step, retry_step, start_step, succeed_job, succeed_step
 from database import get_db
 from job_queue import enqueue_job
 from models import ContentJob, ContentJobEvent, ContentJobStep
@@ -31,6 +31,11 @@ class RetryRequest(BaseModel):
 
 class StepOutputRequest(BaseModel):
     output: dict = Field(default_factory=dict)
+
+
+class StepFailureRequest(BaseModel):
+    error: str = Field(min_length=1, max_length=500)
+    retryable: bool = True
 
 
 def _step_payload(step: ContentJobStep) -> dict:
@@ -143,6 +148,17 @@ async def post_succeed_step(job_id: int, step_id: int, body: StepOutputRequest, 
         raise HTTPException(404, "step not found")
     try:
         return _step_payload(await succeed_step(db, step_id, body.output))
+    except InvalidJobTransition as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@router.post("/{job_id}/steps/{step_id}/fail")
+async def post_fail_step(job_id: int, step_id: int, body: StepFailureRequest, db: AsyncSession = Depends(get_db)):
+    step = await db.get(ContentJobStep, step_id)
+    if step is None or step.job_id != job_id:
+        raise HTTPException(404, "step not found")
+    try:
+        return _step_payload(await fail_step(db, step_id, body.error, retryable=body.retryable))
     except InvalidJobTransition as exc:
         raise HTTPException(409, str(exc)) from exc
 

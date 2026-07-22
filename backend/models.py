@@ -302,7 +302,7 @@ class Publication(Base):
 
 
 class PipelineTask(Base):
-    """Links a studio pipeline run to its kanban task IDs and eventual draft."""
+    """Links a legacy creation entry point to its durable job and eventual draft."""
     __tablename__ = "pipeline_tasks"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)

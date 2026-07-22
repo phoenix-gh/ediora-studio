@@ -208,8 +208,6 @@ def _extract_complete_objects(raw: str) -> list:
 
 @router.post("/enqueue", response_model=EnqueueResponse)
 async def enqueue_topics(body: EnqueueRequest, db: AsyncSession = Depends(get_db)):
-    from pipeline_template import get_pipeline
-
     if not body.account_id or not body.account_id.strip():
         raise HTTPException(400, "account_id 必填")
 

@@ -21,7 +21,7 @@ const NAV: { id: SectionId; label: string; icon: React.ElementType; desc: string
   { id: 'github',   label: 'GitHub',      icon: GitFork,   desc: 'Token · Issues · Trending' },
   { id: 'x',        label: 'X / Twitter', icon: AtSign,    desc: 'camofox · Cookie · 帖子趋势' },
   { id: 'arxiv',    label: 'arXiv 论文',  icon: FileText,  desc: '采集分类 · 更新间隔' },
-  { id: 'publish',  label: '发布账号',    icon: Megaphone, desc: '账号画像 · agent 流程复用' },
+  { id: 'publish',  label: '发布账号',    icon: Megaphone, desc: '账号画像 · 创作流程复用' },
   { id: 'blog',     label: 'Blog 投稿',   icon: Globe,     desc: 'MK Flow · API Token · 投稿接口' },
   { id: 'logs',     label: '系统日志',    icon: ScrollText, desc: '采集运行记录' },
 ]
