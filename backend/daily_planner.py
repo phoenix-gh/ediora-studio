@@ -1,8 +1,4 @@
-"""每日内容计划：为 active 账号生成「今日计划」总编策划任务（wms_scout 单棒）。
-
-调用方：scheduler 8 点 cron / POST /daily-plan/generate（重新生成）。
-agent 产出经 MCP save_daily_plan 写回 DailyPlanItem，用户确认后入队创作链。
-"""
+"""Daily-plan job creation without an external agent runtime."""
 from __future__ import annotations
 
 import json
@@ -54,11 +50,11 @@ async def create_today_plan(*, force: bool = False) -> DailyPlan | None:
     - 当天已有计划且非 force：直接返回现有计划（幂等，cron 重跑安全）
     - force：删除当天计划（连带 items）重建
     - 无 active 账号或配额全空：记日志返回 None
-    - kanban 建任务失败：计划标 failed 后原样抛出（调用方决定如何上报）
+    - creates a durable content job for the planner instead of a Kanban task
     """
     from logger import log
-    from hermes_kanban_client import HermesKanbanClient
-    from pipeline_template import get_pipeline
+    from content_jobs import create_job
+    from job_queue import enqueue_job
 
     date_str = today_str()
 
@@ -99,11 +95,10 @@ async def create_today_plan(*, force: bool = False) -> DailyPlan | None:
         "accounts_md": _build_accounts_md(accounts),
         "recent_titles_md": recent_md,
     }
-    step = get_pipeline("daily_plan")[0]
     try:
-        tid = await HermesKanbanClient().create_task(
-            title=step.title(ctx), body=step.body(ctx), assignee=step.assignee,
-        )
+        async with SessionLocal() as db:
+            job = await create_job(db, flow="daily_plan", title=f"今日计划 {date_str}", input_data=ctx)
+        await enqueue_job(job.id)
     except Exception as e:
         async with SessionLocal() as db:
             p = await db.get(DailyPlan, plan_id)
@@ -116,8 +111,8 @@ async def create_today_plan(*, force: bool = False) -> DailyPlan | None:
     async with SessionLocal() as db:
         p = await db.get(DailyPlan, plan_id)
         if p is not None:
-            p.kanban_task_id = tid
+            p.kanban_task_id = str(job.id)
             await db.commit()
-    await log("daily_plan", "ok", f"今日计划任务已创建（{date_str}），等待总编产出")
+    await log("daily_plan", "ok", f"今日计划任务已创建（{date_str}）")
     async with SessionLocal() as db:
         return await db.get(DailyPlan, plan_id)
