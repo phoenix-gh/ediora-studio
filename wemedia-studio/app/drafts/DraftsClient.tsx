@@ -24,7 +24,6 @@ import { WritingPlan, getWritingPlans, flattenTopicsWithDepth } from '@/lib/api/
 import { MarkdownEditor, MarkdownEditorHandle } from './MarkdownEditor'
 import { PublishDialog } from './PublishDialog'
 import { DraftAssetsDialog } from '@/components/features/DraftAssetsDialog'
-import { DraftTaskTimelineDialog } from '@/components/features/DraftTaskTimelineDialog'
 import '@uiw/react-md-editor/markdown-editor.css'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
@@ -121,7 +120,6 @@ export function DraftsClient({
 
   // Chat state
   const [chatOpen, setChatOpen] = useState(initialChatOpen)
-  const [timelineOpen, setTimelineOpen] = useState(false)
   const [publishOpen, setPublishOpen] = useState(false)
   const [assetsOpen, setAssetsOpen] = useState(false)
   const [assetsTab, setAssetsTab] = useState<'sources' | 'images'>('sources')
@@ -734,7 +732,7 @@ export function DraftsClient({
                 </Button>
                 <Button
                   variant="outline" size="sm"
-                  onClick={() => setTimelineOpen(true)}
+                  onClick={() => { window.location.href = '/jobs' }}
                   className="gap-1.5"
                   title="查看 scout→editor→writer→illustrator 每棒的任务详情"
                 >
@@ -942,12 +940,6 @@ export function DraftsClient({
 
       {selected && (
         <>
-          <DraftTaskTimelineDialog
-            open={timelineOpen}
-            onClose={() => setTimelineOpen(false)}
-            draftId={selected.linked_draft_id ?? selected.id}
-            draftTitle={selected.title}
-          />
           <DraftAssetsDialog
             open={assetsOpen}
             onClose={() => setAssetsOpen(false)}

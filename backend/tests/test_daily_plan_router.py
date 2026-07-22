@@ -9,7 +9,7 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setenv("WMS_DISABLE_SCHEDULER", "1")
     for mod in list(sys.modules):
         if mod.startswith(("database", "models", "main", "routers", "config", "schemas",
-                            "hermes_kanban_client", "mcp_server", "pipeline_template",
+                            "mcp_server",
                             "daily_planner", "logger", "scheduler")):
             sys.modules.pop(mod, None)
     from database import engine, Base
@@ -118,7 +118,7 @@ def test_skip_toggles_and_rejects_enqueued(client):
     assert r.status_code == 404
 
 
-def test_generate_force_recreates(client, monkeypatch):
+def test_generate_force_recreates(client):
     from database import SessionLocal
     from models import PublishAccount
 
@@ -128,23 +128,12 @@ def test_generate_force_recreates(client, monkeypatch):
             await db.commit()
     _run(_acc())
 
-    class FakeKanban:
-        created = []
-        def __init__(self, *a, **kw): pass
-        async def create_task(self, *, title, body, assignee, parents=None):
-            FakeKanban.created.append(title)
-            return f"t_gen_{len(FakeKanban.created)}"
-    FakeKanban.created = []
-    import hermes_kanban_client
-    monkeypatch.setattr(hermes_kanban_client, "HermesKanbanClient", FakeKanban)
-
     r = client.post("/api/daily-plan/generate")
     assert r.status_code == 200, r.text
     assert r.json()["status"] == "planning"
     r2 = client.post("/api/daily-plan/generate")
     assert r2.status_code == 200
-    # force 重建：旧计划被删、重新建了策划任务（SQLite 会复用 rowid，不能断言 plan_id 不同）
-    assert len(FakeKanban.created) == 2
+    # force 重建：旧计划被删、重新创建持久化任务（SQLite 可复用 rowid）。
 
     from database import SessionLocal
     from models import DailyPlan
@@ -153,6 +142,18 @@ def test_generate_force_recreates(client, monkeypatch):
         async with SessionLocal() as db:
             return len((await db.execute(select(DailyPlan))).scalars().all())
     assert _run(_count()) == 1
+
+
+def test_save_plan_items_marks_plan_ready(client):
+    plan_id, _ = _seed_plan(client, status="planning")
+    response = client.post(f"/api/daily-plan/{plan_id}/items", json={
+        "note": "今天聚焦产品更新",
+        "items": [{"account_id": "acc1", "title": "AI 产品更新", "angle": "实测", "reason": "热点", "content_type": "short"}],
+    })
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "ready"
+    assert response.json()["planner_note"] == "今天聚焦产品更新"
+    assert len(response.json()["items"]) == 1
 
 
 def test_generate_400_when_no_quota(client):

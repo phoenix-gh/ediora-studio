@@ -140,7 +140,7 @@ async def dispatch_release_write(
     body: DispatchReleaseWriteRequest,
     db: AsyncSession = Depends(get_db),
 ):
-    """Dispatch wms_writer pipeline (editor→writer→illustrator) for a release article."""
+    """Create a durable draft job for a release article."""
     rid = f"{owner}/{repo_name}"
     release_id = f"{rid}:{tag}"
     repo = await db.get(GithubRepo, rid)
@@ -166,7 +166,7 @@ async def dispatch_release_write(
         "voice_samples": account.voice_samples or [], "style_rules": account.style_rules or [],
     }
 
-    from pipeline_template import (
+    from content_prompts import (
         parse_word_spec, resolve_effective_design,
     )
     eff_cover, eff_image = resolve_effective_design(
@@ -232,7 +232,7 @@ async def dispatch_repo_intro(
     body: DispatchRepoIntroRequest,
     db: AsyncSession = Depends(get_db),
 ):
-    """Dispatch wms_writer pipeline to write a project introduction article for a GitHub repo."""
+    """Create a durable draft job for a project introduction article."""
     rid = f"{owner}/{repo_name}"
     repo = await db.get(GithubRepo, rid)
     if not repo:
@@ -254,7 +254,7 @@ async def dispatch_repo_intro(
         "voice_samples": account.voice_samples or [], "style_rules": account.style_rules or [],
     }
 
-    from pipeline_template import resolve_effective_design
+    from content_prompts import resolve_effective_design
     eff_cover, eff_image = resolve_effective_design(
         account.cover_style, account.image_style or "",
         plan.cover_style, plan.image_style or "",

@@ -322,7 +322,7 @@ async def dispatch_plan(plan_id: int, body: DispatchPlanRequest, db: AsyncSessio
     await db.commit()
     await db.refresh(pt)
 
-    from pipeline_template import (
+    from content_prompts import (
         render_profile_editor, parse_word_spec, resolve_effective_design,
         plan_editor_task_block,
     )

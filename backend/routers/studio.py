@@ -94,6 +94,9 @@ class DraftJobIn(BaseModel):
     draft_id: int
     account_id: str = ""
     note: str = ""
+    cover_style: dict = {}
+    image_style: str = ""
+    max_images: int = 1
 
 
 async def _draft_job(payload: DraftJobIn, flow: str) -> EnqueueOut:
@@ -103,7 +106,10 @@ async def _draft_job(payload: DraftJobIn, flow: str) -> EnqueueOut:
         draft = await db.get(ArticleDraft, payload.draft_id)
     if draft is None:
         raise HTTPException(404, "draft not found")
-    return await _run_pipeline_chain(flow, {"draft_id": draft.id, "note": payload.note},
+    return await _run_pipeline_chain(flow, {
+        "draft_id": draft.id, "note": payload.note, "cover_style": payload.cover_style,
+        "image_style": payload.image_style, "max_images": max(1, min(payload.max_images, 4)),
+    },
                                      account_id=payload.account_id, title=draft.title or f"draft #{draft.id}")
 
 

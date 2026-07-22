@@ -32,6 +32,11 @@ WMS_LLM_API_KEY=...
 WMS_LLM_MODEL=gpt-4o-mini
 # Optional OpenAI-compatible endpoint:
 WMS_LLM_BASE_URL=
+# Image jobs can use a separate OpenAI-compatible image provider; otherwise
+# they reuse WMS_LLM_API_KEY and WMS_LLM_BASE_URL.
+WMS_IMAGE_API_KEY=
+WMS_IMAGE_MODEL=gpt-image-1
+WMS_IMAGE_BASE_URL=
 ```
 
 Do not use `NEXT_PUBLIC_` for credentials. Publishing remains an explicit
@@ -45,8 +50,6 @@ Back up the `postgres-data` volume before upgrades.
 
 ## First open-source version scope
 
-The initial worker implements the `draft` flow (brief plus persisted Markdown
-draft). Cover, inline illustration, and daily-plan flows are already durable
-job types, but need their dedicated image/planning adapters before they are
-enabled for successful execution. They fail visibly and do not fall back to a
-different flow or publish anything.
+The worker supports draft, cover, inline illustration, and daily-plan jobs.
+Image jobs require an image-capable configured provider. Jobs never publish as
+a side effect of generation.

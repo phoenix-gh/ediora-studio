@@ -582,7 +582,7 @@ function ReleasesTab({ repoId, releases: initial, onLoad }: { repoId: string; re
               {dispatchTarget && (
                 <span className="font-mono">{dispatchTarget.tag_name}</span>
               )}
-              {' '}— 选择账号和写作方案后派发给 wms_writer
+              {' '}— 选择账号和写作方案后创建创作任务
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3 py-1">
@@ -929,7 +929,7 @@ export function GithubClient({ initialRepos, initialTrending, initialReleases }:
             <DialogTitle className="text-base">写简介</DialogTitle>
             <DialogDescription className="text-xs">
               {introTargetRepo && <span className="font-mono">{introTargetRepo.id}</span>}
-              {' '}— 选择账号和写作方案后派发给 wms_writer
+              {' '}— 选择账号和写作方案后创建创作任务
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3 py-1">

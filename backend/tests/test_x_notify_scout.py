@@ -1,5 +1,5 @@
 """scheduled_x_reply_scout（动态通知）：只推送勾选订阅在开启之后采集的新帖，
-每帖带 LLM 回复价值评分与建议，经 hermes send 推 Telegram。"""
+每帖带 LLM 回复价值评分与建议，经通知适配器推送 Telegram。"""
 import sys
 import asyncio
 import pytest

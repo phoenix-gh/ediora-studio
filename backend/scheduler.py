@@ -448,7 +448,7 @@ async def scheduled_x_reply_scout():
 
 
 async def scheduled_daily_plan():
-    """每天 8 点：为每个 active 账号生成今日内容计划（wms_scout 总编单棒）。
+    """每天 8 点：为每个 active 账号生成今日内容计划。
     create_today_plan 自带「当天已有计划则跳过」幂等守卫，重启重跑安全。"""
     from logger import log
     try:

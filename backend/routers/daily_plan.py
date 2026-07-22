@@ -5,7 +5,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import delete as sa_delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
@@ -92,6 +92,52 @@ async def get_today_plan(date: Optional[str] = None, db: AsyncSession = Depends(
 class GenerateOut(BaseModel):
     plan_id: int
     status: str
+
+
+class PlannedItemIn(BaseModel):
+    account_id: str
+    title: str
+    angle: str = ""
+    reason: str = ""
+    content_type: str = "long"
+    sources: list[dict] = []
+    group_key: str = ""
+    is_primary: bool = True
+
+
+class PlanItemsIn(BaseModel):
+    items: list[PlannedItemIn]
+    note: str = ""
+
+
+@router.post("/{plan_id}/items", response_model=PlanOut)
+async def save_plan_items(plan_id: int, body: PlanItemsIn, db: AsyncSession = Depends(get_db)):
+    """Persist a planner result through the normal HTTP boundary (worker-safe)."""
+    plan = await db.get(DailyPlan, plan_id)
+    if plan is None:
+        raise HTTPException(404, "plan not found")
+    account_ids = set((await db.execute(select(PublishAccount.id))).scalars().all())
+    allowed_types = {"long", "short", "story", "share"}
+    if not body.items:
+        raise HTTPException(400, "items cannot be empty")
+    for index, item in enumerate(body.items):
+        if item.account_id not in account_ids:
+            raise HTTPException(400, f"items[{index}]: unknown account")
+        if not item.title.strip() or item.content_type not in allowed_types:
+            raise HTTPException(400, f"items[{index}]: invalid title or content_type")
+    await db.execute(sa_delete(DailyPlanItem).where(DailyPlanItem.plan_id == plan_id))
+    for item in body.items:
+        db.add(DailyPlanItem(
+            plan_id=plan_id, account_id=item.account_id, title=item.title.strip(),
+            angle=item.angle.strip(), reason=item.reason.strip(), content_type=item.content_type,
+            sources=item.sources, group_key=item.group_key.strip(),
+            is_primary=item.is_primary if item.group_key.strip() else True,
+        ))
+    plan.status = "ready"
+    plan.planner_note = body.note.strip()
+    await db.commit()
+    await db.refresh(plan)
+    return await _plan_out(db, plan)
 
 
 @router.post("/generate", response_model=GenerateOut)
