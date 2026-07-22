@@ -578,37 +578,6 @@ class YoutubeVideo(Base):
     collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
 
 
-class AgentProfile(Base):
-    """Hermes profile metadata + SOUL backup.
-
-    `id` mirrors the hermes profile folder name (e.g. `wms_writer`) and is the
-    stable agent identifier referenced by kanban / hooks / cron. Filesystem
-    state stays in `~/.hermes/profiles/<id>/`; this table stores presentation
-    metadata (display_name, avatar) and a durable copy of SOUL.md so a corrupt
-    config dir doesn't lose persona text.
-    """
-    __tablename__ = "agent_profiles"
-
-    id: Mapped[str] = mapped_column(String, primary_key=True)
-    display_name: Mapped[str] = mapped_column(String, default="")
-    avatar_url: Mapped[str] = mapped_column(String, default="")
-    description: Mapped[str] = mapped_column(Text, default="")
-    soul: Mapped[str] = mapped_column(Text, default="")
-    soul_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, default=None)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
-
-
-class ProfileSoulBackup(Base):
-    """Append-only history of SOUL.md edits keyed by profile_id."""
-    __tablename__ = "profile_soul_backups"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    profile_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
-    content: Mapped[str] = mapped_column(Text, default="")
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, index=True)
-
-
 class RedditSubscription(Base):
     __tablename__ = "reddit_subscriptions"
 
