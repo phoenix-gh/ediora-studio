@@ -36,7 +36,7 @@ async def _run_pipeline_chain(flow: str, ctx: dict, *, account_id: str, title: s
     """Legacy name retained for callers; creates one persistent job, not a task graph."""
     payload = {**ctx, "account_id": account_id, "source_url": source_url}
     async with SessionLocal() as db:
-        job = await create_job(db, flow="draft", title=title, input_data=payload)
+        job = await create_job(db, flow=flow, title=title, input_data=payload)
     await enqueue_job(job.id)
     return EnqueueOut(content_job_id=job.id, task_id=str(job.id), task_ids=[str(job.id)], pipeline_task_id=job.id)
 

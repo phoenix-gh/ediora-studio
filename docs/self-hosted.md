@@ -42,3 +42,11 @@ operation from the draft UI; content-job execution never publishes by itself.
 Failed job steps are visible in **创作任务** and may be retried. The job and
 event records are durable, so restarting the worker does not erase history.
 Back up the `postgres-data` volume before upgrades.
+
+## First open-source version scope
+
+The initial worker implements the `draft` flow (brief plus persisted Markdown
+draft). Cover, inline illustration, and daily-plan flows are already durable
+job types, but need their dedicated image/planning adapters before they are
+enabled for successful execution. They fail visibly and do not fall back to a
+different flow or publish anything.
