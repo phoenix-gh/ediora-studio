@@ -56,6 +56,18 @@ pnpm dev
 
 后端 localhost:8000，前端 localhost:3000，API 文档 /docs。
 
+### 自托管（Docker Compose）
+
+开源版不需要 Hermes、Agent profile 或本地任务看板。复制环境变量模板后启动：
+
+```bash
+cp .env.example .env
+docker compose up --build
+```
+
+服务会启动 Web（3000）、Python API（8000）、Postgres、Redis 和内容任务 worker。
+`POSTGRES_PASSWORD` 可在 `.env` 中覆盖；LLM 与图片提供商密钥只配置在服务端环境变量中，绝不放入浏览器变量。
+
 ### 数据库
 
 默认 PostgreSQL，通过 WMS_DATABASE_URL 覆盖：

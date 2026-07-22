@@ -1,0 +1,68 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: wemedia
+      POSTGRES_USER: wemedia
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-wemedia}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wemedia -d wemedia"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  api:
+    build: ./backend
+    environment:
+      WMS_DATABASE_URL: postgresql+asyncpg://wemedia:${POSTGRES_PASSWORD:-wemedia}@postgres:5432/wemedia
+      WMS_REDIS_URL: redis://redis:6379/0
+      WMS_DISABLE_SCHEDULER: "0"
+    volumes:
+      - uploads-data:/app/uploads
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    build: ./backend
+    command: ["python", "-m", "job_worker"]
+    environment:
+      WMS_DATABASE_URL: postgresql+asyncpg://wemedia:${POSTGRES_PASSWORD:-wemedia}@postgres:5432/wemedia
+      WMS_REDIS_URL: redis://redis:6379/0
+    volumes:
+      - uploads-data:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  web:
+    build: ./wemedia-studio
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000/api
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+
+volumes:
+  postgres-data:
+  redis-data:
+  uploads-data:

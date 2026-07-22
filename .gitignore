@@ -40,6 +40,11 @@ wemedia-studio/tsconfig.tsbuildinfo
 .run/
 logs/
 
+# ── Self-hosted runtime ─────────────────────────────────
+backend/uploads/
+backend/avatars/
+backend/wechat_imgs/
+
 # ── Agent worktrees ─────────────────────────────────────
 .worktrees/
 
