@@ -10,7 +10,7 @@ from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
-from hermes_kanban_client import HermesKanbanClient
+from job_dispatch import JobDispatcher
 from models import XPost, PublishAccount, TopicGeneratorCache, PipelineTask
 
 router = APIRouter(prefix="/topic-generator", tags=["topic-generator"])
@@ -232,7 +232,7 @@ async def enqueue_topics(body: EnqueueRequest, db: AsyncSession = Depends(get_db
         "style_rules": acc.style_rules or [],
     }
 
-    kanban = HermesKanbanClient()
+    dispatcher = JobDispatcher()
     task_ids: list[str] = []
     pipeline_task_ids: list[int] = []
 
@@ -263,27 +263,14 @@ async def enqueue_topics(body: EnqueueRequest, db: AsyncSession = Depends(get_db
             "draft_id": 0,
         }
 
-        flow = "topic_long" if topic.type == "long" else "topic_short"
-        steps = get_pipeline(flow)
-
-        step_task_ids: list[str] = []
-        for step in steps:
-            try:
-                tid = await kanban.create_task(
-                    title=step.title(ctx),
-                    body=step.body(ctx),
-                    assignee=step.assignee,
-                    parents=[step_task_ids[-1]] if step_task_ids else None,
-                )
-            except Exception as e:
-                raise HTTPException(500, f"入队失败: {e}")
-            step_task_ids.append(tid)
-
-        task_ids_map = {steps[i].role: step_task_ids[i] for i in range(len(steps))}
-        pt.task_ids = task_ids_map
+        try:
+            tid = await dispatcher.create(title=topic.title, input_data=ctx, flow="draft")
+        except Exception as e:
+            raise HTTPException(500, f"入队失败: {e}")
+        pt.task_ids = {"job": tid}
         await db.commit()
 
-        task_ids.append(step_task_ids[0])
+        task_ids.append(tid)
         pipeline_task_ids.append(pt.id)
 
     return EnqueueResponse(
