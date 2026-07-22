@@ -159,8 +159,12 @@ import re  # noqa: E402
 from pathlib import Path  # noqa: E402
 from datetime import date as _date, timedelta as _timedelta  # noqa: E402
 
-from feedgrab.fetchers.twitter_cookies import load_twitter_cookies  # noqa: E402
-from feedgrab.fetchers.twitter_keyword_search import search_twitter_keyword  # noqa: E402
+try:  # Optional X collector integration; the core self-hosted API must start without it.
+    from feedgrab.fetchers.twitter_cookies import load_twitter_cookies  # noqa: E402
+    from feedgrab.fetchers.twitter_keyword_search import search_twitter_keyword  # noqa: E402
+except ModuleNotFoundError:  # pragma: no cover - exercised by the slim container
+    load_twitter_cookies = None
+    search_twitter_keyword = None
 
 
 _PROFILE_RE = re.compile(r"(?:x\.com|twitter\.com)/([a-zA-Z0-9_]{1,15})(?:/|$)")
@@ -470,4 +474,3 @@ async def search_top(raw_query: str = "", *, min_faves: int = 0, min_retweets: i
             if p:
                 out.append(p)
     return out
-
