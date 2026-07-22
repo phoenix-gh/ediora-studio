@@ -10,7 +10,8 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
 import { listPublishAccounts, PublishAccount } from "@/lib/api/publish-accounts"
-import { enqueueManualTask, ManualGenre } from "@/lib/api/studio"
+import { ManualGenre } from "@/lib/api/studio"
+import { createJob } from "@/lib/api/jobs"
 
 const GENRES: { value: ManualGenre; label: string }[] = [
   { value: "commentary", label: "评论" },
@@ -67,14 +68,18 @@ export function CreateTaskDialog({ open, onOpenChange }: Props) {
     }
     setBusy(true)
     try {
-      const res = await enqueueManualTask({
-        account_id: accountId,
+      const res = await createJob({
+        flow: "draft",
         title: title.trim(),
-        idea: idea.trim(),
-        genre,
-        note: note.trim(),
+        input: {
+          account_id: accountId,
+          idea: idea.trim(),
+          genre,
+          note: note.trim(),
+        },
+        idempotency_key: crypto.randomUUID(),
       })
-      toast.success(`已发布创作任务 · ${res.task_id}`)
+      toast.success(`已创建创作任务 · #${res.id}`)
       reset()
       onOpenChange(false)
     } catch (e) {
@@ -93,7 +98,7 @@ export function CreateTaskDialog({ open, onOpenChange }: Props) {
             发布创作任务
           </DialogTitle>
           <DialogDescription>
-            自拟主题，策划编辑会基于你的想法补料出 brief，再交撰稿人成文、设计师配封面。
+            自拟主题后，系统会先生成 brief，再生成可编辑的草稿。
           </DialogDescription>
         </DialogHeader>
 

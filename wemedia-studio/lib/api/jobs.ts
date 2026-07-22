@@ -27,6 +27,9 @@ export interface ContentJob {
 }
 
 export function listJobs() { return apiFetch<{ jobs: ContentJob[] }>('/jobs') }
+export function createJob(body: { flow: string; title: string; input: Record<string, unknown>; idempotency_key?: string }) {
+  return apiFetch<ContentJob>('/jobs', { method: 'POST', body: JSON.stringify(body) })
+}
 export function getJob(id: number) { return apiFetch<ContentJob>(`/jobs/${id}`) }
 export function cancelJob(id: number) { return apiFetch<ContentJob>(`/jobs/${id}/cancel`, { method: 'POST' }) }
 export function retryJobStep(id: number, stepKey: string) {
