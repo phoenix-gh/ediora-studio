@@ -57,6 +57,7 @@ async def _job_payload(db: AsyncSession, job: ContentJob) -> dict:
         "flow": job.flow,
         "title": job.title,
         "status": job.status,
+        "input": job.input_data,
         "created_at": job.created_at,
         "started_at": job.started_at,
         "completed_at": job.completed_at,
