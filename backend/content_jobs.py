@@ -130,3 +130,17 @@ async def cancel_job(session: AsyncSession, job_id: int) -> ContentJob:
     await session.commit()
     await session.refresh(job)
     return job
+
+
+async def succeed_job(session: AsyncSession, job_id: int) -> ContentJob:
+    job = await session.get(ContentJob, job_id)
+    if job is None:
+        raise KeyError(f"job {job_id} not found")
+    if job.status != "running":
+        raise InvalidJobTransition(f"cannot succeed {job.status} job")
+    job.status = "succeeded"
+    job.completed_at = _now()
+    await _event(session, job_id, "job_succeeded")
+    await session.commit()
+    await session.refresh(job)
+    return job
