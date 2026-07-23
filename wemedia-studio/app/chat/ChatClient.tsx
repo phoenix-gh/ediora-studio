@@ -19,6 +19,8 @@ import {
 } from '@/lib/api/chat'
 import { cn } from '@/lib/utils'
 
+import { chatContentColumn } from './chat-layout'
+
 type DisplayMessage = Omit<ChatMessage, 'id'> & { id: string | number }
 
 type ToolEventPart = ChatPart & {
@@ -285,13 +287,15 @@ export function ChatClient() {
       </aside>
 
       <section className="flex min-w-0 flex-1 flex-col">
-        <header className="flex items-center gap-3 border-b border-zinc-200 bg-white px-6 py-4 dark:border-zinc-800 dark:bg-zinc-950">
-          <FileSearch className="h-5 w-5 text-indigo-600" />
-          <div><h2 className="font-medium text-zinc-900 dark:text-zinc-100">全局研究助手</h2><p className="text-xs text-zinc-500">可检索写作方案与参考素材；所有工具调用均会记录。</p></div>
+        <header className="border-b border-zinc-200 bg-white py-4 dark:border-zinc-800 dark:bg-zinc-950">
+          <div className={cn(chatContentColumn, 'flex items-center gap-3')}>
+            <FileSearch className="h-5 w-5 text-indigo-600" />
+            <div><h2 className="font-medium text-zinc-900 dark:text-zinc-100">全局研究助手</h2><p className="text-xs text-zinc-500">可检索写作方案与参考素材；所有工具调用均会记录。</p></div>
+          </div>
         </header>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
-          <div className="mx-auto flex w-full max-w-4xl flex-col gap-5">
+        <div className="min-h-0 flex-1 overflow-y-auto py-6">
+          <div className={cn(chatContentColumn, 'flex flex-col gap-5')}>
             {messages.length === 0 && !loading && (
               <div className="rounded-2xl border border-dashed border-zinc-300 bg-white px-6 py-10 text-center dark:border-zinc-700 dark:bg-zinc-900">
                 <Bot className="mx-auto h-8 w-8 text-indigo-500" />
@@ -305,16 +309,18 @@ export function ChatClient() {
           </div>
         </div>
 
-        <form onSubmit={submit} className="border-t border-zinc-200 bg-white px-6 py-4 dark:border-zinc-800 dark:bg-zinc-950">
-          <div className="mx-auto flex w-full max-w-4xl items-end gap-3 rounded-xl border border-zinc-200 bg-zinc-50 p-2 transition-colors focus-within:border-indigo-400 dark:border-zinc-700 dark:bg-zinc-900">
-            <textarea value={input} onChange={event => setInput(event.target.value)} disabled={sending} rows={2}
-              placeholder="问问本地信息源里的内容…"
-              className="max-h-40 min-h-12 flex-1 resize-none bg-transparent px-2 py-1 text-sm leading-6 outline-none placeholder:text-zinc-400 disabled:cursor-not-allowed" />
-            <Button type="submit" size="icon" disabled={!input.trim() || sending} title="发送消息">
-              {sending ? <Loader2 className="animate-spin" /> : <Send />}
-            </Button>
+        <form onSubmit={submit} className="border-t border-zinc-200 bg-zinc-50/70 py-4 dark:border-zinc-800 dark:bg-zinc-950/70">
+          <div className={chatContentColumn}>
+            <div className="flex items-end gap-3 rounded-xl border border-zinc-200 bg-white p-2 transition-colors focus-within:border-indigo-400 dark:border-zinc-700 dark:bg-zinc-900">
+              <textarea value={input} onChange={event => setInput(event.target.value)} disabled={sending} rows={2}
+                placeholder="问问本地信息源里的内容…"
+                className="max-h-40 min-h-12 flex-1 resize-none bg-transparent px-2 py-1 text-sm leading-6 outline-none placeholder:text-zinc-400 disabled:cursor-not-allowed" />
+              <Button type="submit" size="icon" disabled={!input.trim() || sending} title="发送消息">
+                {sending ? <Loader2 className="animate-spin" /> : <Send />}
+              </Button>
+            </div>
+            <p className="mt-2 flex items-center gap-1.5 text-[11px] text-zinc-400"><MessageSquarePlus className="h-3 w-3" />新对话会在发送第一条消息时创建。</p>
           </div>
-          <p className="mx-auto mt-2 flex w-full max-w-4xl items-center gap-1.5 text-[11px] text-zinc-400"><MessageSquarePlus className="h-3 w-3" />新对话会在发送第一条消息时创建。</p>
         </form>
       </section>
     </div>
