@@ -4,6 +4,8 @@ import { z } from 'zod'
 
 const apiBase = () => (process.env.WMS_API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000/api').replace(/\/$/, '')
 
+type ModelConfig = { apiKey: string; modelName: string; baseURL?: string }
+
 export type ContentStep = 'brief' | 'draft' | 'cover' | 'illustrations' | 'daily_plan'
 
 const stepToolNames: Record<ContentStep, string[]> = {
@@ -89,10 +91,27 @@ async function completeJob(jobId: number) {
   if (!response.ok) throw new Error('Unable to complete content job')
 }
 
-function imageProvider() {
-  const apiKey = process.env.WMS_IMAGE_API_KEY ?? process.env.WMS_LLM_API_KEY
-  if (!apiKey) throw new Error('WMS_IMAGE_API_KEY or WMS_LLM_API_KEY is not configured')
-  return createOpenAI({ apiKey, baseURL: process.env.WMS_IMAGE_BASE_URL ?? process.env.WMS_LLM_BASE_URL })
+async function configuredTextModel(): Promise<ModelConfig> {
+  try {
+    const response = await fetch(`${apiBase()}/settings/ai-runtime`, { cache: 'no-store' })
+    if (response.ok) {
+      const settings = await response.json() as { api_key: string; model: string; base_url: string }
+      if (settings.api_key) return { apiKey: settings.api_key, modelName: settings.model || 'gpt-4o-mini', baseURL: settings.base_url || undefined }
+    }
+  } catch {
+    // Environment variables keep Docker and disconnected development usable.
+  }
+  const apiKey = process.env.WMS_LLM_API_KEY
+  if (!apiKey) throw new Error('No LLM API key is configured in Settings or WMS_LLM_API_KEY')
+  return { apiKey, modelName: process.env.WMS_LLM_MODEL ?? 'gpt-4o-mini', baseURL: process.env.WMS_LLM_BASE_URL }
+}
+
+async function imageProvider() {
+  const text = await configuredTextModel()
+  return createOpenAI({
+    apiKey: process.env.WMS_IMAGE_API_KEY ?? text.apiKey,
+    baseURL: process.env.WMS_IMAGE_BASE_URL ?? text.baseURL,
+  })
 }
 
 async function runImageFlow(job: Awaited<ReturnType<typeof getJob>>, step: 'cover' | 'illustrations') {
@@ -104,7 +123,7 @@ async function runImageFlow(job: Awaited<ReturnType<typeof getJob>>, step: 'cove
   const prompt = step === 'cover'
     ? `Create a clean editorial cover image with no text. Article title: ${draft.title}. Context: ${draft.content.slice(0, 4000)}. Style: ${style}`
     : `Create an editorial inline illustration with no text for this Chinese article. Title: ${draft.title}. Article: ${draft.content.slice(0, 4000)}. Style: ${style}`
-  const generated = await generateImage({ model: imageProvider().image(process.env.WMS_IMAGE_MODEL ?? 'gpt-image-1'), prompt, n: maxImages })
+  const generated = await generateImage({ model: (await imageProvider()).image(process.env.WMS_IMAGE_MODEL ?? 'gpt-image-1'), prompt, n: maxImages })
   const assets = []
   for (const [index, image] of generated.images.entries()) {
     assets.push(await saveDraftImage(job.id, draftId, `${step}-${job.id}-${index + 1}.png`, image.uint8Array, image.mediaType))
@@ -139,10 +158,9 @@ export async function runContentJob(jobId: number) {
       return output
     }
     activeStep = await startStep(job.id, job.flow === 'daily_plan' ? 'daily_plan' : 'brief')
-    const apiKey = process.env.WMS_LLM_API_KEY
-    if (!apiKey) throw new Error('WMS_LLM_API_KEY is not configured')
-    const modelName = process.env.WMS_LLM_MODEL ?? 'gpt-4o-mini'
-    const openai = createOpenAI({ apiKey, baseURL: process.env.WMS_LLM_BASE_URL })
+    const modelConfig = await configuredTextModel()
+    const modelName = modelConfig.modelName
+    const openai = createOpenAI({ apiKey: modelConfig.apiKey, baseURL: modelConfig.baseURL })
     if (job.flow === 'daily_plan') {
       const output = await runDailyPlanFlow(job, openai, modelName)
       await completeStep(job.id, activeStep.id, output)

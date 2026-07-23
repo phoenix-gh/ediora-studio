@@ -106,6 +106,13 @@ class FetchModelsRequest(BaseModel):
     base_url: Optional[str] = None   # if None, derive from provider/stored
 
 
+class AiRuntimeConfig(BaseModel):
+    """Server-to-server model credentials for the local AI worker."""
+    api_key: str
+    model: str
+    base_url: str
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _build_out(cfg: dict) -> SettingsOut:
@@ -191,6 +198,22 @@ async def _fetch_models_anthropic(api_key: str) -> list[str]:
 @router.get("", response_model=SettingsOut)
 async def get_settings():
     return _build_out(await get_config())
+
+
+@router.get("/ai-runtime", response_model=AiRuntimeConfig, include_in_schema=False)
+async def get_ai_runtime_config():
+    """Expose the configured provider only to the trusted local job worker.
+
+    The open-source edition has no login/tenant boundary; this endpoint keeps
+    credentials out of browser bundles while allowing the separately deployed
+    Node worker to use the same Settings-page configuration.
+    """
+    cfg = await get_config()
+    return AiRuntimeConfig(
+        api_key=cfg.get("llm_api_key", ""),
+        model=effective_model(cfg),
+        base_url=effective_base_url(cfg),
+    )
 
 
 @router.put("", response_model=SettingsOut)
