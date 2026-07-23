@@ -21,6 +21,22 @@ type ChatToolOptions = {
   sessionId: number
 }
 
+type PersistedChatMessage = {
+  id: number
+  role: 'user' | 'assistant' | 'tool'
+  parts: unknown[]
+}
+
+export function latestClientTurn(messages: unknown[]) {
+  return messages.at(-1)
+}
+
+export function modelHistoryCandidates(messages: PersistedChatMessage[]) {
+  return messages
+    .filter((message): message is PersistedChatMessage & { role: 'user' | 'assistant' } => message.role !== 'tool')
+    .map(message => ({ id: String(message.id), role: message.role, parts: message.parts }))
+}
+
 type ToolAudit = {
   toolName: (typeof chatToolNames)[number]
   input: Record<string, unknown>
@@ -46,7 +62,7 @@ async function persistToolAudit({ apiBase, sessionId, audit }: ChatToolOptions &
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       role: 'tool',
-      parts: [{ type: 'tool-result', toolName: audit.toolName, input: audit.input, output: audit.output }],
+      parts: [{ type: 'tool-audit', toolName: audit.toolName, input: audit.input, output: audit.output }],
       text: toolSummary(audit),
     }),
   })

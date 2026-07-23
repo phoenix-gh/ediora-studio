@@ -3,7 +3,7 @@ import { convertToModelMessages, safeValidateUIMessages, stepCountIs, streamText
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 
-import { makeChatTools } from '@/lib/ai/chat-tools'
+import { latestClientTurn, makeChatTools, modelHistoryCandidates } from '@/lib/ai/chat-tools'
 
 const requestSchema = z.object({
   sessionId: z.number().int().positive(),
@@ -36,6 +36,10 @@ async function configuredTextModel(): Promise<ModelConfig> {
   }
 }
 
+type PersistedChatSession = {
+  messages: Array<{ id: number; role: 'user' | 'assistant' | 'tool'; parts: unknown[] }>
+}
+
 function messageText(message: Pick<UIMessage, 'parts'>) {
   return message.parts
     .filter((part): part is Extract<typeof part, { type: 'text' }> => part.type === 'text')
@@ -43,13 +47,22 @@ function messageText(message: Pick<UIMessage, 'parts'>) {
     .join('')
 }
 
-async function persistMessage(sessionId: number, message: Pick<UIMessage, 'role' | 'parts'>) {
+async function persistMessage(sessionId: number, message: Pick<UIMessage, 'parts'> & { role: 'user' | 'assistant' }) {
   const response = await fetch(`${apiBase()}/chat/sessions/${sessionId}/messages`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ role: message.role, parts: message.parts, text: messageText(message) }),
   })
   if (!response.ok) throw new Error(`Unable to persist chat message (${response.status})`)
+}
+
+async function persistedModelHistory(sessionId: number) {
+  const response = await fetch(`${apiBase()}/chat/sessions/${sessionId}`, { cache: 'no-store' })
+  if (!response.ok) throw new Error(`Unable to load chat session (${response.status})`)
+  const session = await response.json() as PersistedChatSession
+  const validated = await safeValidateUIMessages({ messages: modelHistoryCandidates(session.messages) })
+  if (!validated.success) throw new Error('Persisted chat history is invalid')
+  return validated.data
 }
 
 export async function POST(request: NextRequest) {
@@ -60,20 +73,21 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Invalid chat request' }, { status: 400 })
   }
 
-  const tools = makeChatTools({ apiBase: apiBase(), sessionId: body.sessionId })
-  const validated = await safeValidateUIMessages({ messages: body.messages })
-  if (!validated.success || validated.data.some(message => message.role === 'system')) {
+  const clientLatestMessage = latestClientTurn(body.messages)
+  const validatedClientTurn = await safeValidateUIMessages({ messages: clientLatestMessage ? [clientLatestMessage] : [] })
+  if (!validatedClientTurn.success) {
     return NextResponse.json({ error: 'Invalid chat messages' }, { status: 400 })
   }
 
-  const messages = validated.data
-  const latestMessage = messages.at(-1)
+  const latestMessage = validatedClientTurn.data.at(-1)
   if (!latestMessage || latestMessage.role !== 'user') {
     return NextResponse.json({ error: 'The latest chat message must be from the user' }, { status: 400 })
   }
 
   try {
-    await persistMessage(body.sessionId, latestMessage)
+    await persistMessage(body.sessionId, { role: 'user', parts: latestMessage.parts })
+    const tools = makeChatTools({ apiBase: apiBase(), sessionId: body.sessionId })
+    const messages = await persistedModelHistory(body.sessionId)
     const modelConfig = await configuredTextModel()
     const provider = createOpenAI({ apiKey: modelConfig.apiKey, baseURL: modelConfig.baseURL })
     const result = streamText({
@@ -87,7 +101,7 @@ export async function POST(request: NextRequest) {
     return result.toUIMessageStreamResponse({
       originalMessages: messages,
       onFinish: async ({ responseMessage, isAborted }) => {
-        if (!isAborted) await persistMessage(body.sessionId, responseMessage)
+        if (!isAborted) await persistMessage(body.sessionId, { role: 'assistant', parts: responseMessage.parts })
       },
     })
   } catch (error) {
