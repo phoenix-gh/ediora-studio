@@ -20,6 +20,10 @@ export function toolsForContentStep(step: ContentStep): string[] {
   return stepToolNames[step]
 }
 
+export function textModelForProvider<T>(provider: { chat: (modelName: string) => T }, modelName: string): T {
+  return provider.chat(modelName)
+}
+
 async function getJob(jobId: number) {
   const response = await fetch(`${apiBase()}/jobs/${jobId}`, { cache: 'no-store' })
   if (!response.ok) throw new Error(`Unable to load content job (${response.status})`)
@@ -135,7 +139,7 @@ async function runDailyPlanFlow(job: Awaited<ReturnType<typeof getJob>>, model: 
   const planId = Number(job.input.plan_id)
   if (!Number.isSafeInteger(planId) || planId <= 0) throw new Error('daily_plan flow requires plan_id')
   const result = await generateObject({
-    model: model(modelName),
+    model: textModelForProvider(model, modelName),
     schema: z.object({ note: z.string(), items: z.array(z.object({ account_id: z.string(), title: z.string(), angle: z.string(), reason: z.string(), content_type: z.enum(['long', 'short', 'story', 'share']), sources: z.array(z.record(z.string(), z.unknown())).default([]), group_key: z.string().default(''), is_primary: z.boolean().default(true) })).min(1) }),
     prompt: `Create today's content plan. Return only valid plan data. ${JSON.stringify(job.input)}`,
   })
@@ -170,7 +174,7 @@ export async function runContentJob(jobId: number) {
     }
     if (job.flow !== 'draft') throw new Error(`Unsupported content flow: ${job.flow}`)
     const briefResult = await generateText({
-      model: openai(modelName),
+      model: textModelForProvider(openai, modelName),
       instructions: '根据用户提供的素材和账号约束，生成简洁、可执行的中文写作 brief。不得调用外部工具。',
       prompt: JSON.stringify({ title: job.title, input: job.input }),
     })
@@ -178,7 +182,7 @@ export async function runContentJob(jobId: number) {
     activeStep = await startStep(job.id, 'draft')
     let savedDraft: { draftId: number } | undefined
     const result = await generateText({
-      model: openai(modelName),
+      model: textModelForProvider(openai, modelName),
       instructions: '你是内容写作助手。只能使用提供的工具保存完整 Markdown 草稿；不得发布内容。',
       prompt: `为以下任务写作：${JSON.stringify({ title: job.title, input: job.input })}`,
       stopWhen: stepCountIs(4),
