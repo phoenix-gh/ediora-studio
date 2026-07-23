@@ -1,13 +1,13 @@
 from datetime import datetime
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
-from models import ChatMessage, ChatSession, now_utc
+from models import ChatMessage, ChatSession, RefMaterial, WritingPlan, now_utc
 
 
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -44,6 +44,59 @@ class ChatMessageCreate(BaseModel):
     role: Literal["user", "assistant", "tool"]
     parts: list[dict] = Field(default_factory=list)
     text: str = ""
+
+
+class SourceSearchResult(BaseModel):
+    source: Literal["writing_plan", "reference_material"]
+    id: int
+    title: str
+    summary: str
+    url: str
+    published_at: datetime | None
+
+
+class SourceReadResult(SourceSearchResult):
+    found: Literal[True] = True
+    content: str
+
+
+class SourceNotFound(BaseModel):
+    source: str
+    id: int
+    found: Literal[False] = False
+
+
+def _summary(text: str, max_length: int = 500) -> str:
+    normalized = " ".join(text.split())
+    return normalized[:max_length]
+
+
+def _matches_keywords(text: str, keywords: list[str]) -> bool:
+    normalized = text.lower()
+    return any(keyword in normalized for keyword in keywords)
+
+
+def _writing_plan_result(plan: WritingPlan) -> SourceSearchResult:
+    return SourceSearchResult(
+        source="writing_plan",
+        id=plan.id,
+        title=plan.title,
+        summary=_summary(plan.strategy or plan.description),
+        url="",
+        published_at=plan.updated_at,
+    )
+
+
+def _reference_material_result(material: RefMaterial) -> SourceSearchResult:
+    text = material.text_clean or material.text
+    return SourceSearchResult(
+        source="reference_material",
+        id=material.id,
+        title=_summary(text, max_length=120),
+        summary=_summary(text),
+        url=material.source_url,
+        published_at=material.published_at or material.created_at,
+    )
 
 
 @router.get("/sessions", response_model=list[ChatSessionOut])
@@ -96,3 +149,63 @@ async def append_message(
     await db.commit()
     await db.refresh(message)
     return message
+
+
+@router.get("/sources/search", response_model=list[SourceSearchResult])
+async def search_sources(
+    q: str = Query(..., min_length=1),
+    limit: int = Query(10, ge=1, le=20),
+    db: AsyncSession = Depends(get_db),
+):
+    keywords = [keyword.lower() for keyword in q.replace(",", " ").split() if keyword]
+    if not keywords:
+        return []
+
+    plans = (await db.execute(
+        select(WritingPlan)
+        .where(WritingPlan.status == "active")
+        .order_by(desc(WritingPlan.updated_at), desc(WritingPlan.id))
+        .limit(200)
+    )).scalars().all()
+    results = [
+        _writing_plan_result(plan)
+        for plan in plans
+        if _matches_keywords(f"{plan.title} {plan.strategy} {plan.description}", keywords)
+    ][:limit]
+
+    remaining = limit - len(results)
+    if remaining:
+        materials = (await db.execute(
+            select(RefMaterial)
+            .where(RefMaterial.status == "active")
+            .order_by(desc(RefMaterial.created_at), desc(RefMaterial.id))
+            .limit(200)
+        )).scalars().all()
+        results.extend(
+            _reference_material_result(material)
+            for material in materials
+            if _matches_keywords(
+                f"{material.text} {material.text_clean} {material.author} {material.source} {material.category}",
+                keywords,
+            )
+        )
+    return results[:limit]
+
+
+@router.get("/sources/{source}/{source_id}", response_model=SourceReadResult | SourceNotFound)
+async def read_source(
+    source: str,
+    source_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    if source == "writing_plan":
+        plan = await db.get(WritingPlan, source_id)
+        if plan:
+            result = _writing_plan_result(plan)
+            return SourceReadResult(**result.model_dump(), content=plan.strategy or plan.description)
+    elif source == "reference_material":
+        material = await db.get(RefMaterial, source_id)
+        if material:
+            result = _reference_material_result(material)
+            return SourceReadResult(**result.model_dump(), content=material.text_clean or material.text)
+    return SourceNotFound(source=source, id=source_id)

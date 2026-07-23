@@ -1,5 +1,6 @@
 import asyncio
 import sys
+from datetime import datetime
 
 import pytest
 from fastapi import FastAPI
@@ -29,7 +30,32 @@ def client(monkeypatch, tmp_path):
             yield session
 
     app.dependency_overrides[get_db] = override_db
+    app.state.session_local = SessionLocal
     return TestClient(app)
+
+
+def _add_searchable_sources(client):
+    from models import RefMaterial, WritingPlan
+
+    async def insert():
+        async with client.app.state.session_local() as session:
+            plan = WritingPlan(
+                title="AI 产品研究计划",
+                strategy="关注 AI 产品的发布节奏与用户反馈。",
+            )
+            material = RefMaterial(
+                platform="manual",
+                text="AI 产品发布后，用户最在意真实工作流是否变得更快。",
+                source_url="https://example.com/ai-product",
+                published_at=datetime(2026, 7, 23),
+            )
+            session.add_all([plan, material])
+            await session.commit()
+            await session.refresh(plan)
+            await session.refresh(material)
+            return plan.id, material.id
+
+    return asyncio.new_event_loop().run_until_complete(insert())
 
 
 def test_create_session_append_message_and_get_messages_in_chronological_order(client):
@@ -55,3 +81,45 @@ def test_create_session_append_message_and_get_messages_in_chronological_order(c
         "text": "今天有什么新信息？",
         "created_at": appended.json()["created_at"],
     }]
+
+
+def test_source_search_validates_query_and_returns_writing_plan_and_reference_material(client):
+    plan_id, material_id = _add_searchable_sources(client)
+
+    missing_query = client.get("/api/chat/sources/search")
+    too_many = client.get("/api/chat/sources/search", params={"q": "AI", "limit": 21})
+    response = client.get("/api/chat/sources/search", params={"q": "AI", "limit": 20})
+
+    assert missing_query.status_code == 422
+    assert too_many.status_code == 422
+    assert response.status_code == 200
+    assert response.json() == [
+        {
+            "source": "writing_plan",
+            "id": plan_id,
+            "title": "AI 产品研究计划",
+            "summary": "关注 AI 产品的发布节奏与用户反馈。",
+            "url": "",
+            "published_at": response.json()[0]["published_at"],
+        },
+        {
+            "source": "reference_material",
+            "id": material_id,
+            "title": "AI 产品发布后，用户最在意真实工作流是否变得更快。",
+            "summary": "AI 产品发布后，用户最在意真实工作流是否变得更快。",
+            "url": "https://example.com/ai-product",
+            "published_at": "2026-07-23T00:00:00",
+        },
+    ]
+
+
+def test_read_source_returns_explicit_empty_result_for_unknown_source_or_id(client):
+    _add_searchable_sources(client)
+
+    unknown_source = client.get("/api/chat/sources/unknown/1")
+    unknown_id = client.get("/api/chat/sources/writing_plan/999")
+
+    assert unknown_source.status_code == 200
+    assert unknown_source.json() == {"source": "unknown", "id": 1, "found": False}
+    assert unknown_id.status_code == 200
+    assert unknown_id.json() == {"source": "writing_plan", "id": 999, "found": False}
