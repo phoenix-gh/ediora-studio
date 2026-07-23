@@ -50,3 +50,11 @@ it('keeps message and composer padding compact and aligned', () => {
   expect(source).toContain("'break-words rounded-2xl px-3 py-2 text-sm leading-6'")
   expect(source).toContain('rounded-xl border border-zinc-200 bg-white p-3')
 })
+
+it('collapses assistant tool activity and hides audit-only messages', () => {
+  const source = readFileSync(new URL('./ChatClient.tsx', import.meta.url), 'utf8')
+
+  expect(source).toContain('return `已检索本地资料，并阅读 ${reads} 条相关内容`')
+  expect(source).toContain("if (message.role === 'tool') {\n    return null\n  }")
+  expect(source).toContain('<ToolActivityGroup parts={toolParts} />')
+})

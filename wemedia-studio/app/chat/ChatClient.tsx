@@ -49,36 +49,30 @@ function toolName(part: ToolEventPart) {
   return part.type.startsWith('tool-') ? part.type.slice('tool-'.length) : '工具调用'
 }
 
-function toolDetails(part: ToolEventPart) {
-  const details: Record<string, unknown> = {}
-  if (part.state) details.state = part.state
-  if (part.input !== undefined) details.input = part.input
-  if (part.output !== undefined) details.output = part.output
-  const extra = Object.fromEntries(Object.entries(part).filter(([key]) => ![
-    'type', 'toolCallId', 'toolName', 'state', 'input', 'output',
-  ].includes(key)))
-  if (Object.keys(extra).length > 0) details.details = extra
-  return details
+function activitySummary(parts: ToolEventPart[]) {
+  const searches = parts.filter(part => toolName(part) === 'searchInformationSources').length
+  const reads = parts.filter(part => toolName(part) === 'readInformationSource').length
+  if (searches && reads) return `已检索本地资料，并阅读 ${reads} 条相关内容`
+  if (searches) return '已检索本地资料'
+  if (reads) return `已阅读 ${reads} 条资料`
+  return `已调用 ${parts.length} 项工具`
 }
 
-function ToolEvent({ part }: { part: ToolEventPart }) {
-  const name = toolName(part)
-  const details = toolDetails(part)
-  const label = toolLabels[name] ?? name
-
+function ToolActivityGroup({ parts }: { parts: ToolEventPart[] }) {
   return (
-    <details className="rounded-lg border border-indigo-100 bg-indigo-50/60 px-3 py-2 text-xs text-indigo-950 dark:border-indigo-950 dark:bg-indigo-950/30 dark:text-indigo-100">
+    <details className="rounded-lg bg-indigo-50/60 px-3 py-2 text-xs text-indigo-950 dark:bg-indigo-950/30 dark:text-indigo-100">
       <summary className="flex cursor-pointer list-none items-center gap-2 font-medium [&::-webkit-details-marker]:hidden">
         <Wrench className="h-3.5 w-3.5 text-indigo-500" />
-        <span>{label}</span>
-        <span className="text-indigo-500">{part.state === 'running' ? '正在执行…' : part.state === 'completed' ? '已完成' : '已调用'}</span>
+        <span>{activitySummary(parts)}</span>
         <ChevronDown className="ml-auto h-3.5 w-3.5 transition-transform [[open]_&]:rotate-180" />
       </summary>
-      {Object.keys(details).length > 0 && (
-        <pre className="mt-2 max-h-56 overflow-auto whitespace-pre-wrap break-words rounded-md bg-white/70 p-2 font-mono text-[11px] leading-relaxed text-zinc-600 dark:bg-zinc-950/70 dark:text-zinc-300">
-          {JSON.stringify(details, null, 2)}
-        </pre>
-      )}
+      <ul className="mt-2 space-y-1 text-indigo-700 dark:text-indigo-200">
+        {parts.map((part, index) => {
+          const label = toolLabels[toolName(part)] ?? toolName(part)
+          const status = part.state === 'running' ? '进行中' : '已完成'
+          return <li key={part.toolCallId ?? `${part.type}-${index}`} className="flex items-center justify-between gap-3"><span>{label}</span><span className="text-indigo-500">{status}</span></li>
+        })}
+      </ul>
     </details>
   )
 }
@@ -86,12 +80,11 @@ function ToolEvent({ part }: { part: ToolEventPart }) {
 function MessageBubble({ message }: { message: DisplayMessage }) {
   const isUser = message.role === 'user'
   const textParts = message.parts.filter(part => part.type === 'text')
-  const toolParts = message.parts.filter(isToolPart)
+  const toolParts = message.parts.filter(isToolPart) as ToolEventPart[]
   const fallbackText = textParts.length === 0 && message.text ? message.text : ''
 
   if (message.role === 'tool') {
-    const auditParts = toolParts.length > 0 ? toolParts : message.parts
-    return <div className="max-w-3xl space-y-2">{auditParts.map((part, index) => <ToolEvent key={`${message.id}-${index}`} part={part} />)}</div>
+    return null
   }
 
   return (
@@ -112,7 +105,7 @@ function MessageBubble({ message }: { message: DisplayMessage }) {
                   : <ChatMarkdown content={fallbackText} />)}
           </div>
         )}
-        {toolParts.map((part, index) => <ToolEvent key={`${message.id}-tool-${index}`} part={part} />)}
+        {toolParts.length > 0 && <ToolActivityGroup parts={toolParts} />}
         <time className={cn('block px-1 text-[11px] text-zinc-400', isUser && 'text-right')}>{displayTime(message.created_at)}</time>
       </div>
     </article>
