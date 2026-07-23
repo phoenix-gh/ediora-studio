@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { createImageJob, requiresToolApproval } from './global-chat-tools'
+import { createImageJob, imageGenerationInputSchema, requiresToolApproval } from './global-chat-tools'
 
 describe('global Chat tool policy', () => {
   afterEach(() => vi.unstubAllGlobals())
@@ -13,6 +13,10 @@ describe('global Chat tool policy', () => {
 
   it('does not require approval to create a durable image-generation job', () => {
     expect(requiresToolApproval('generateImage')).toBe(false)
+  })
+
+  it('accepts a complete cover brief without forcing a retry', () => {
+    expect(imageGenerationInputSchema.safeParse({ kind: 'cover', note: 'x'.repeat(4_000) }).success).toBe(true)
   })
 
   it('creates a cover job for the selected draft', async () => {

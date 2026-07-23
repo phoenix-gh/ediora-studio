@@ -21,6 +21,11 @@ export type GlobalChatToolOptions = {
 
 export type ImageFlow = 'cover' | 'illustrations'
 
+export const imageGenerationInputSchema = z.object({
+  kind: z.enum(['cover', 'illustrations']).default('cover'),
+  note: z.string().max(4_000).optional(),
+})
+
 export async function createImageJob({
   apiBase,
   draftId,
@@ -59,10 +64,7 @@ export async function openGlobalChatTools({ apiBase, draftId }: GlobalChatToolOp
   ) as ToolSet
   tools.generateImage = tool({
     description: 'Create a durable cover or illustration generation job for the selected draft. The job runs in the content worker and saves its images to that draft.',
-    inputSchema: z.object({
-      kind: z.enum(['cover', 'illustrations']).default('cover'),
-      note: z.string().max(1_000).optional(),
-    }),
+    inputSchema: imageGenerationInputSchema,
     execute: async ({ kind, note }) => {
       if (!draftId) return { error: 'Select a draft before generating an image.' }
       return createImageJob({ apiBase, draftId, flow: kind, note })
