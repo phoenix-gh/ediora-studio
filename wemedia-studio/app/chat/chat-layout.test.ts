@@ -59,6 +59,10 @@ it('collapses assistant tool activity and hides audit-only messages', () => {
   expect(source).toContain('<ToolActivityGroup parts={toolParts} onApproval=')
   expect(source).toContain('function ImageJobPreview({ jobId }: { jobId: number })')
   expect(source).toContain('<ImageJobPreview key={jobId} jobId={jobId} />')
+  expect(source).toContain("import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'")
+  expect(source).toContain('const [selectedImage, setSelectedImage] = useState<string | null>(null)')
+  expect(source).toContain('<button type="button" onClick={() => setSelectedImage(url)}')
+  expect(source).toContain('<Dialog open={selectedImage !== null} onOpenChange={open => !open && setSelectedImage(null)}>')
 })
 
 it('uses lazy new conversations and deletes selected persisted sessions', () => {

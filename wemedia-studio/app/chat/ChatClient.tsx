@@ -5,6 +5,7 @@ import { Bot, ChevronDown, FileSearch, Loader2, MessageSquarePlus, Plus, Send, T
 import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { ChatContextPicker } from '@/components/features/chat/ChatContextPicker'
 import { ChatMarkdown } from '@/components/features/chat/ChatMarkdown'
 import {
@@ -75,6 +76,7 @@ function imageJobId(part: ToolEventPart) {
 function ImageJobPreview({ jobId }: { jobId: number }) {
   const [status, setStatus] = useState<JobStatus | 'loading'>('loading')
   const [urls, setUrls] = useState<string[]>([])
+  const [selectedImage, setSelectedImage] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -100,16 +102,28 @@ function ImageJobPreview({ jobId }: { jobId: number }) {
     }
   }, [jobId])
 
-  if (urls.length > 0) {
-    return <div className="mt-3 grid gap-2 sm:grid-cols-2">
-      {urls.map(url => <a key={url} href={url} target="_blank" rel="noreferrer" className="block overflow-hidden rounded-lg border border-indigo-100 bg-white dark:border-indigo-900 dark:bg-zinc-900">
+  return <>
+    {urls.length > 0 ? <div className="mt-3 grid gap-2 sm:grid-cols-2">
+      {urls.map(url => <button type="button" onClick={() => setSelectedImage(url)} key={url} className="block overflow-hidden rounded-lg border border-indigo-100 bg-white text-left dark:border-indigo-900 dark:bg-zinc-900">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={url} alt="AI 生成图片" className="aspect-video w-full object-cover" />
-      </a>)}
-    </div>
-  }
-  if (status === 'failed' || status === 'cancelled') return <p className="mt-2 text-xs text-red-600">图片生成失败</p>
-  return <p className="mt-2 text-xs text-indigo-600">图片生成中…</p>
+      </button>)}
+    </div> : status === 'failed' || status === 'cancelled'
+      ? <p className="mt-2 text-xs text-red-600">图片生成失败</p>
+      : <p className="mt-2 text-xs text-indigo-600">图片生成中…</p>}
+    <Dialog open={selectedImage !== null} onOpenChange={open => !open && setSelectedImage(null)}>
+      <DialogContent className="max-w-5xl p-3">
+        <DialogHeader className="sr-only">
+          <DialogTitle>AI 生成图片预览</DialogTitle>
+          <DialogDescription>点击遮罩或关闭按钮返回聊天。</DialogDescription>
+        </DialogHeader>
+        {selectedImage && <>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={selectedImage} alt="AI 生成图片预览" className="max-h-[80vh] w-full object-contain" />
+        </>}
+      </DialogContent>
+    </Dialog>
+  </>
 }
 
 function ToolActivityGroup({ parts, onApproval }: { parts: ToolEventPart[]; onApproval?: (toolCallId: string, approvalId: string, approved: boolean) => void }) {
