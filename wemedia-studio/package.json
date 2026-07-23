@@ -11,6 +11,7 @@
     "jobs:worker": "tsx scripts/content-worker.ts"
   },
   "dependencies": {
+    "@ai-sdk/mcp": "^2.0.16",
     "@ai-sdk/openai": "^4.0.17",
     "@base-ui/react": "^1.4.1",
     "@uiw/react-md-editor": "^4.1.0",
