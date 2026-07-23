@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { textModelForProvider, toolsForContentStep } from './content-job'
+import { parseDailyPlanText, textModelForProvider, toolsForContentStep } from './content-job'
 
 describe('content job tool allowlist', () => {
   it('limits draft orchestration to declared tools', () => {
@@ -20,5 +20,23 @@ describe('compatible OpenAI providers', () => {
       endpoint: 'chat',
       modelName: 'deepseek-v4-flash',
     })
+  })
+})
+
+describe('daily-plan compatible output', () => {
+  it('validates plain JSON returned by a compatible Chat Completions model', () => {
+    expect(parseDailyPlanText('{"note":"今日重点","items":[{"account_id":"mp_qdgzs","title":"AI SDK 入门","angle":"从接口兼容性切入","reason":"适合今日主题","content_type":"long"}]}')).toEqual({
+      note: '今日重点',
+      items: [{
+        account_id: 'mp_qdgzs', title: 'AI SDK 入门', angle: '从接口兼容性切入', reason: '适合今日主题',
+        content_type: 'long', sources: [], group_key: '', is_primary: true,
+      }],
+    })
+  })
+
+  it('normalizes string sources to source objects', () => {
+    expect(parseDailyPlanText('{"note":"今日重点","items":[{"account_id":"mp_qdgzs","title":"AI SDK 入门","angle":"接口兼容性","reason":"适合今日主题","content_type":"long","sources":["https://example.com/source"]}]}').items[0].sources).toEqual([
+      { url: 'https://example.com/source' },
+    ])
   })
 })

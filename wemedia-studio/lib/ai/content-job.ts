@@ -1,5 +1,5 @@
 import { createOpenAI } from '@ai-sdk/openai'
-import { generateImage, generateObject, generateText, stepCountIs, tool } from 'ai'
+import { generateImage, generateText, stepCountIs, tool } from 'ai'
 import { z } from 'zod'
 
 const apiBase = () => (process.env.WMS_API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000/api').replace(/\/$/, '')
@@ -22,6 +22,22 @@ export function toolsForContentStep(step: ContentStep): string[] {
 
 export function textModelForProvider<T>(provider: { chat: (modelName: string) => T }, modelName: string): T {
   return provider.chat(modelName)
+}
+
+const dailyPlanSchema = z.object({
+  note: z.string(),
+  items: z.array(z.object({
+    account_id: z.string(), title: z.string(), angle: z.string(), reason: z.string(),
+    content_type: z.enum(['long', 'short', 'story', 'share']),
+    sources: z.array(z.union([z.record(z.string(), z.unknown()), z.string()])).default([])
+      .transform(sources => sources.map(source => typeof source === 'string' ? { url: source } : source)),
+    group_key: z.string().default(''), is_primary: z.boolean().default(true),
+  })).min(1),
+})
+
+export function parseDailyPlanText(text: string) {
+  const json = text.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '')
+  return dailyPlanSchema.parse(JSON.parse(json))
 }
 
 async function getJob(jobId: number) {
@@ -138,12 +154,12 @@ async function runImageFlow(job: Awaited<ReturnType<typeof getJob>>, step: 'cove
 async function runDailyPlanFlow(job: Awaited<ReturnType<typeof getJob>>, model: ReturnType<typeof createOpenAI>, modelName: string) {
   const planId = Number(job.input.plan_id)
   if (!Number.isSafeInteger(planId) || planId <= 0) throw new Error('daily_plan flow requires plan_id')
-  const result = await generateObject({
+  const result = await generateText({
     model: textModelForProvider(model, modelName),
-    schema: z.object({ note: z.string(), items: z.array(z.object({ account_id: z.string(), title: z.string(), angle: z.string(), reason: z.string(), content_type: z.enum(['long', 'short', 'story', 'share']), sources: z.array(z.record(z.string(), z.unknown())).default([]), group_key: z.string().default(''), is_primary: z.boolean().default(true) })).min(1) }),
-    prompt: `Create today's content plan. Return only valid plan data. ${JSON.stringify(job.input)}`,
+    prompt: `Create today's content plan. Return only a valid JSON object, without Markdown fences. It must have a string note and a non-empty items array. Each item must include account_id, title, angle, reason, content_type (long, short, story, or share), sources (array), group_key (string), and is_primary (boolean). ${JSON.stringify(job.input)}`,
   })
-  const saved = await saveDailyPlan(planId, result.object.items, result.object.note)
+  const plan = parseDailyPlanText(result.text)
+  const saved = await saveDailyPlan(planId, plan.items, plan.note)
   return { plan_id: planId, item_count: saved.items.length }
 }
 
