@@ -4,10 +4,13 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 
 import { latestClientTurn, makeChatTools, modelHistoryCandidates } from '@/lib/ai/chat-tools'
+import { discoverSkills } from '@/lib/ai/discover-skills'
 
 const requestSchema = z.object({
   sessionId: z.number().int().positive(),
   messages: z.array(z.unknown()).min(1).max(50),
+  skillName: z.string().min(1).max(200).optional(),
+  draftId: z.number().int().positive().optional(),
 })
 
 const apiBase = () => (process.env.WMS_API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000/api').replace(/\/$/, '')
@@ -65,6 +68,22 @@ async function persistedModelHistory(sessionId: number) {
   return validated.data
 }
 
+async function selectedContext(skillName?: string, draftId?: number) {
+  const context: string[] = []
+  if (skillName) {
+    const skill = (await discoverSkills()).find(item => item.name === skillName)
+    if (!skill) throw new Error('Selected skill is unavailable')
+    context.push(`Selected skill: ${skill.name}\n\n${skill.instructions}`)
+  }
+  if (draftId) {
+    const response = await fetch(`${apiBase()}/write/drafts/${draftId}`, { cache: 'no-store' })
+    if (!response.ok) throw new Error('Selected draft is unavailable')
+    const draft = await response.json() as { title: string; content: string }
+    context.push(`Selected draft: ${draft.title}\n\n${draft.content}`)
+  }
+  return context.join('\n\n---\n\n')
+}
+
 export async function POST(request: NextRequest) {
   let body: z.infer<typeof requestSchema>
   try {
@@ -89,10 +108,11 @@ export async function POST(request: NextRequest) {
     const tools = makeChatTools({ apiBase: apiBase(), sessionId: body.sessionId })
     const messages = await persistedModelHistory(body.sessionId)
     const modelConfig = await configuredTextModel()
+    const context = await selectedContext(body.skillName, body.draftId)
     const provider = createOpenAI({ apiKey: modelConfig.apiKey, baseURL: modelConfig.baseURL })
     const result = streamText({
       model: provider.chat(modelConfig.modelName),
-      instructions: 'You are WeMedia Studio’s research assistant. Use the read-only information-source tools when local sources are relevant. Cite source titles in your answer, distinguish source facts from inference, and never claim to have created or changed content.',
+      instructions: `You are WeMedia Studio’s research assistant. Use the read-only information-source tools when local sources are relevant. Cite source titles in your answer, distinguish source facts from inference, and never claim to have created or changed content.${context ? `\n\nSelected turn context:\n${context}` : ''}`,
       messages: await convertToModelMessages(messages, { tools, ignoreIncompleteToolCalls: true }),
       tools,
       stopWhen: stepCountIs(4),

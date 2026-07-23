@@ -26,6 +26,9 @@ export type ChatSessionDetail = ChatSession & {
   messages: ChatMessage[]
 }
 
+export type ChatSkill = { name: string; description: string; version: string }
+export type ChatDraft = { id: number; title: string; status: string; updated_at: string }
+
 export type UIChatMessage = {
   id: string
   role: Exclude<ChatRole, 'tool'>
@@ -53,6 +56,16 @@ export async function getChatSession(sessionId: number): Promise<ChatSessionDeta
 
 export async function deleteChatSession(sessionId: number) {
   await apiFetch<void>(`/chat/sessions/${sessionId}`, { method: 'DELETE' })
+}
+
+export async function listChatSkills(): Promise<ChatSkill[]> {
+  const response = await fetch('/api/chat/skills', { cache: 'no-store' })
+  if (!response.ok) throw new Error('Unable to load local skills')
+  return response.json()
+}
+
+export async function listChatDrafts(): Promise<ChatDraft[]> {
+  return apiFetch<ChatDraft[]>('/write/drafts')
 }
 
 export function toUIChatMessages(messages: ChatMessage[]): UIChatMessage[] {
@@ -118,18 +131,22 @@ export async function consumeUIMessageStream(
 export async function streamChatReply({
   sessionId,
   messages,
+  skillName,
+  draftId,
   signal,
   onEvent,
 }: {
   sessionId: number
   messages: UIChatMessage[]
+  skillName?: string
+  draftId?: number
   signal?: AbortSignal
   onEvent: (event: UIMessageStreamEvent) => void
 }) {
   const response = await fetch('/api/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sessionId, messages }),
+    body: JSON.stringify({ sessionId, messages, skillName, draftId }),
     signal,
   })
   if (!response.ok) {

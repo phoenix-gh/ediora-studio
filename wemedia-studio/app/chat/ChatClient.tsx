@@ -11,10 +11,14 @@ import {
   type ChatPart,
   type ChatRole,
   type ChatSession,
+  type ChatSkill,
+  type ChatDraft,
   type UIChatMessage,
   createChatSession,
   deleteChatSession,
   getChatSession,
+  listChatDrafts,
+  listChatSkills,
   listChatSessions,
   streamChatReply,
 } from '@/lib/api/chat'
@@ -131,6 +135,10 @@ function makeLocalMessage(role: Exclude<ChatRole, 'tool'>, parts: ChatPart[]): D
 
 export function ChatClient() {
   const [sessions, setSessions] = useState<ChatSession[]>([])
+  const [skills, setSkills] = useState<ChatSkill[]>([])
+  const [drafts, setDrafts] = useState<ChatDraft[]>([])
+  const [skillName, setSkillName] = useState('')
+  const [draftId, setDraftId] = useState('')
   const [activeSessionId, setActiveSessionId] = useState<number | null>(null)
   const [messages, setMessages] = useState<DisplayMessage[]>([])
   const [input, setInput] = useState('')
@@ -161,6 +169,12 @@ export function ChatClient() {
   }, [refreshSessions])
 
   useEffect(() => {
+    void Promise.all([listChatSkills(), listChatDrafts()])
+      .then(([nextSkills, nextDrafts]) => { setSkills(nextSkills); setDrafts(nextDrafts) })
+      .catch(error => toast.error(error instanceof Error ? error.message : '加载技能或草稿失败'))
+  }, [])
+
+  useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: sending ? 'smooth' : 'auto' })
   }, [messages, sending])
 
@@ -168,6 +182,8 @@ export function ChatClient() {
     setActiveSessionId(null)
     setMessages([])
     setInput('')
+    setSkillName('')
+    setDraftId('')
   }
 
   async function removeSession(session: ChatSession) {
@@ -216,6 +232,8 @@ export function ChatClient() {
       await streamChatReply({
         sessionId,
         messages: requestMessages,
+        skillName: skillName || undefined,
+        draftId: draftId ? Number(draftId) : undefined,
         onEvent: event => {
           if (event.type === 'text-delta') {
             const partId = typeof event.id === 'string' ? event.id : 'text'
@@ -318,6 +336,16 @@ export function ChatClient() {
               <Button type="submit" size="icon" disabled={!input.trim() || sending} title="发送消息">
                 {sending ? <Loader2 className="animate-spin" /> : <Send />}
               </Button>
+            </div>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <select value={skillName} onChange={event => setSkillName(event.target.value)} disabled={sending} className="max-w-56 rounded border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300">
+                <option value="">不使用技能</option>
+                {skills.map(skill => <option key={skill.name} value={skill.name}>{skill.name}{skill.version ? ` · ${skill.version}` : ''}</option>)}
+              </select>
+              <select value={draftId} onChange={event => setDraftId(event.target.value)} disabled={sending} className="max-w-56 rounded border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300">
+                <option value="">不选择草稿</option>
+                {drafts.map(draft => <option key={draft.id} value={draft.id}>{draft.title || `草稿 #${draft.id}`}</option>)}
+              </select>
             </div>
             <p className="mt-2 flex items-center gap-1.5 text-[11px] text-zinc-400"><MessageSquarePlus className="h-3 w-3" />新对话会在发送第一条消息时创建。</p>
           </div>

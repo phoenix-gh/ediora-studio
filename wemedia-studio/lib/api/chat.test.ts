@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { consumeUIMessageStream, createChatSession, deleteChatSession } from './chat'
+import { consumeUIMessageStream, createChatSession, deleteChatSession, listChatDrafts, listChatSkills, streamChatReply } from './chat'
 
 describe('chat API client', () => {
   afterEach(() => vi.unstubAllGlobals())
@@ -35,6 +35,51 @@ describe('chat API client', () => {
       'http://localhost:8000/api/chat/sessions/8',
       expect.objectContaining({ method: 'DELETE' }),
     )
+  })
+
+  it('loads selectable skills locally and drafts from the Python API', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify([{ name: 'baoyu-cover-image', description: 'cover', version: '1.0.0' }]), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify([{ id: 5, title: '草稿', status: 'draft', updated_at: '2026-07-23T00:00:00Z' }]), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(listChatSkills()).resolves.toEqual([{ name: 'baoyu-cover-image', description: 'cover', version: '1.0.0' }])
+    await expect(listChatDrafts()).resolves.toEqual([{ id: 5, title: '草稿', status: 'draft', updated_at: '2026-07-23T00:00:00Z' }])
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/chat/skills', { cache: 'no-store' })
+    expect(fetchMock).toHaveBeenNthCalledWith(2, 'http://localhost:8000/api/write/drafts', expect.objectContaining({
+      cache: 'no-store',
+      headers: { 'Content-Type': 'application/json' },
+    }))
+  })
+
+  it('serializes selected context identifiers without sending their content', async () => {
+    const encoder = new TextEncoder()
+    const fetchMock = vi.fn().mockResolvedValue(new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode('data: [DONE]\n\n'))
+        controller.close()
+      },
+    }), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await streamChatReply({
+      sessionId: 7,
+      messages: [{ id: 'user-1', role: 'user', parts: [{ type: 'text', text: '请参考草稿' }] }],
+      skillName: 'baoyu-cover-image',
+      draftId: 12,
+      onEvent: () => undefined,
+    })
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/chat', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({
+        sessionId: 7,
+        messages: [{ id: 'user-1', role: 'user', parts: [{ type: 'text', text: '请参考草稿' }] }],
+        skillName: 'baoyu-cover-image',
+        draftId: 12,
+      }),
+    }))
   })
 
   it('decodes fragmented UI message stream events', async () => {
