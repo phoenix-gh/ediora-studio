@@ -66,3 +66,22 @@ def test_completed_step_cannot_be_started_again(session_factory):
                 await start_step(session, job.id, "brief")
 
     asyncio.new_event_loop().run_until_complete(run())
+
+
+def test_daily_plan_job_failure_marks_plan_failed(session_factory):
+    from content_jobs import create_job, fail_step, start_step
+    from models import DailyPlan
+
+    async def run():
+        async with session_factory() as session:
+            plan = DailyPlan(plan_date="2099-01-01", status="planning")
+            session.add(plan)
+            await session.commit()
+            await session.refresh(plan)
+            job = await create_job(session, flow="daily_plan", title="Plan", input_data={"plan_id": plan.id})
+            step = await start_step(session, job.id, "daily_plan")
+            await fail_step(session, step.id, "invalid key", retryable=True)
+            await session.refresh(plan)
+            assert plan.status == "failed"
+
+    asyncio.new_event_loop().run_until_complete(run())

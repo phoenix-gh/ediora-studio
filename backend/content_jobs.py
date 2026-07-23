@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from models import ContentJob, ContentJobEvent, ContentJobStep
+from models import ContentJob, ContentJobEvent, ContentJobStep, DailyPlan
 
 
 class InvalidJobTransition(ValueError):
@@ -94,6 +94,12 @@ async def fail_step(session: AsyncSession, step_id: int, error: str, *, retryabl
     assert job is not None
     job.status = "failed"
     job.completed_at = step.completed_at
+    if job.flow == "daily_plan":
+        plan_id = job.input_data.get("plan_id")
+        if isinstance(plan_id, int):
+            plan = await session.get(DailyPlan, plan_id)
+            if plan is not None and plan.status == "planning":
+                plan.status = "failed"
     await _event(session, step.job_id, "step_failed", step_id=step.id, payload={"step_key": step.step_key, "retryable": retryable})
     await session.commit()
     await session.refresh(step)
