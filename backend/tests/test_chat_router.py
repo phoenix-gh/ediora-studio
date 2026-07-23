@@ -113,6 +113,35 @@ def test_source_search_validates_query_and_returns_writing_plan_and_reference_ma
     ]
 
 
+def test_writing_plan_search_and_read_include_description_when_strategy_is_present(client):
+    from models import WritingPlan
+
+    async def insert():
+        async with client.app.state.session_local() as session:
+            plan = WritingPlan(
+                title="内容研究计划",
+                strategy="追踪内容团队的长期选题策略。",
+                description="重点关注只出现在描述中的独家信号。",
+            )
+            session.add(plan)
+            await session.commit()
+            await session.refresh(plan)
+            return plan.id
+
+    plan_id = asyncio.new_event_loop().run_until_complete(insert())
+
+    search = client.get("/api/chat/sources/search", params={"q": "独家信号"})
+
+    assert search.status_code == 200
+    assert search.json()[0]["id"] == plan_id
+    assert "独家信号" in search.json()[0]["summary"]
+
+    read = client.get(f"/api/chat/sources/writing_plan/{plan_id}")
+
+    assert read.status_code == 200
+    assert "独家信号" in read.json()["content"]
+
+
 def test_read_source_returns_explicit_empty_result_for_unknown_source_or_id(client):
     _add_searchable_sources(client)
 

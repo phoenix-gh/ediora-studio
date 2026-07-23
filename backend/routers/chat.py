@@ -76,12 +76,16 @@ def _matches_keywords(text: str, keywords: list[str]) -> bool:
     return any(keyword in normalized for keyword in keywords)
 
 
+def _writing_plan_content(plan: WritingPlan) -> str:
+    return "\n\n".join(part for part in (plan.strategy, plan.description) if part)
+
+
 def _writing_plan_result(plan: WritingPlan) -> SourceSearchResult:
     return SourceSearchResult(
         source="writing_plan",
         id=plan.id,
         title=plan.title,
-        summary=_summary(plan.strategy or plan.description),
+        summary=_summary(_writing_plan_content(plan)),
         url="",
         published_at=plan.updated_at,
     )
@@ -202,7 +206,7 @@ async def read_source(
         plan = await db.get(WritingPlan, source_id)
         if plan:
             result = _writing_plan_result(plan)
-            return SourceReadResult(**result.model_dump(), content=plan.strategy or plan.description)
+            return SourceReadResult(**result.model_dump(), content=_writing_plan_content(plan))
     elif source == "reference_material":
         material = await db.get(RefMaterial, source_id)
         if material:
