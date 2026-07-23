@@ -25,6 +25,10 @@ class SettingsOut(BaseModel):
     llm_effective_base_url: str
     llm_api_key_set: bool
     llm_api_key_preview: str
+    image_model: str
+    image_base_url: str
+    image_api_key_set: bool
+    image_api_key_preview: str
     embedding_model: str
     embedding_base_url: str
     embedding_api_key_set: bool
@@ -67,6 +71,9 @@ class SettingsUpdate(BaseModel):
     llm_model: Optional[str] = None
     llm_api_key: Optional[str] = None
     llm_base_url: Optional[str] = None
+    image_model: Optional[str] = None
+    image_api_key: Optional[str] = None
+    image_base_url: Optional[str] = None
     embedding_model: Optional[str] = None
     embedding_base_url: Optional[str] = None
     embedding_api_key: Optional[str] = None
@@ -106,11 +113,18 @@ class FetchModelsRequest(BaseModel):
     base_url: Optional[str] = None   # if None, derive from provider/stored
 
 
+class ImageRuntimeConfig(BaseModel):
+    api_key: str
+    model: str
+    base_url: str
+
+
 class AiRuntimeConfig(BaseModel):
     """Server-to-server model credentials for the local AI worker."""
     api_key: str
     model: str
     base_url: str
+    image: ImageRuntimeConfig
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -118,6 +132,7 @@ class AiRuntimeConfig(BaseModel):
 def _build_out(cfg: dict) -> SettingsOut:
     import blog_client
     api_key = cfg.get("llm_api_key", "")
+    image_api_key = cfg.get("image_api_key", "")
     gh_token = cfg.get("github_token", "")
     embedding_api_key = cfg.get("embedding_api_key", "")
     blog_base, blog_token = blog_client.effective_blog_config(cfg)
@@ -128,6 +143,10 @@ def _build_out(cfg: dict) -> SettingsOut:
         llm_effective_base_url=effective_base_url(cfg),
         llm_api_key_set=bool(api_key),
         llm_api_key_preview=f"…{api_key[-4:]}" if len(api_key) >= 4 else "",
+        image_model=cfg.get("image_model", "gpt-image-1"),
+        image_base_url=cfg.get("image_base_url", ""),
+        image_api_key_set=bool(image_api_key),
+        image_api_key_preview=f"…{image_api_key[-4:]}" if len(image_api_key) >= 4 else "",
         embedding_model=cfg.get("embedding_model", "text-embedding-3-small"),
         embedding_base_url=cfg.get("embedding_base_url", ""),
         embedding_api_key_set=bool(embedding_api_key),
@@ -213,6 +232,11 @@ async def get_ai_runtime_config():
         api_key=cfg.get("llm_api_key", ""),
         model=effective_model(cfg),
         base_url=effective_base_url(cfg),
+        image=ImageRuntimeConfig(
+            api_key=cfg.get("image_api_key", ""),
+            model=cfg.get("image_model", "gpt-image-1"),
+            base_url=cfg.get("image_base_url", ""),
+        ),
     )
 
 
@@ -229,6 +253,12 @@ async def update_settings(body: SettingsUpdate, request: Request):
         updates["llm_api_key"] = body.llm_api_key
     if body.llm_base_url is not None:
         updates["llm_base_url"] = body.llm_base_url
+    if body.image_model is not None:
+        updates["image_model"] = body.image_model.strip() or "gpt-image-1"
+    if body.image_api_key is not None:
+        updates["image_api_key"] = body.image_api_key.strip()
+    if body.image_base_url is not None:
+        updates["image_base_url"] = body.image_base_url.strip()
     if body.embedding_model is not None:
         updates["embedding_model"] = body.embedding_model
     if body.embedding_base_url is not None:

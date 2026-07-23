@@ -5,6 +5,7 @@ import { z } from 'zod'
 const apiBase = () => (process.env.WMS_API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000/api').replace(/\/$/, '')
 
 type ModelConfig = { apiKey: string; modelName: string; baseURL?: string }
+type ImageModelConfig = { apiKey: string; modelName: string; baseURL?: string }
 
 export type ContentStep = 'brief' | 'draft' | 'cover' | 'illustrations' | 'daily_plan'
 
@@ -126,12 +127,17 @@ async function configuredTextModel(): Promise<ModelConfig> {
   return { apiKey, modelName: process.env.WMS_LLM_MODEL ?? 'gpt-4o-mini', baseURL: process.env.WMS_LLM_BASE_URL }
 }
 
-async function imageProvider() {
-  const text = await configuredTextModel()
-  return createOpenAI({
-    apiKey: process.env.WMS_IMAGE_API_KEY ?? text.apiKey,
-    baseURL: process.env.WMS_IMAGE_BASE_URL ?? text.baseURL,
-  })
+async function configuredImageModel(): Promise<ImageModelConfig> {
+  const response = await fetch(`${apiBase()}/settings/ai-runtime`, { cache: 'no-store' })
+  if (response.ok) {
+    const settings = await response.json() as { image?: { api_key: string; model: string; base_url: string } }
+    if (settings.image?.api_key) {
+      return { apiKey: settings.image.api_key, modelName: settings.image.model || 'gpt-image-1', baseURL: settings.image.base_url || undefined }
+    }
+  }
+  const apiKey = process.env.WMS_IMAGE_API_KEY
+  if (!apiKey) throw new Error('Image model is not configured. Set an image API key in Settings.')
+  return { apiKey, modelName: process.env.WMS_IMAGE_MODEL ?? 'gpt-image-1', baseURL: process.env.WMS_IMAGE_BASE_URL }
 }
 
 async function runImageFlow(job: Awaited<ReturnType<typeof getJob>>, step: 'cover' | 'illustrations') {
@@ -143,7 +149,9 @@ async function runImageFlow(job: Awaited<ReturnType<typeof getJob>>, step: 'cove
   const prompt = step === 'cover'
     ? `Create a clean editorial cover image with no text. Article title: ${draft.title}. Context: ${draft.content.slice(0, 4000)}. Style: ${style}`
     : `Create an editorial inline illustration with no text for this Chinese article. Title: ${draft.title}. Article: ${draft.content.slice(0, 4000)}. Style: ${style}`
-  const generated = await generateImage({ model: (await imageProvider()).image(process.env.WMS_IMAGE_MODEL ?? 'gpt-image-1'), prompt, n: maxImages })
+  const image = await configuredImageModel()
+  const provider = createOpenAI({ apiKey: image.apiKey, baseURL: image.baseURL })
+  const generated = await generateImage({ model: provider.image(image.modelName), prompt, n: maxImages })
   const assets = []
   for (const [index, image] of generated.images.entries()) {
     assets.push(await saveDraftImage(job.id, draftId, `${step}-${job.id}-${index + 1}.png`, image.uint8Array, image.mediaType))

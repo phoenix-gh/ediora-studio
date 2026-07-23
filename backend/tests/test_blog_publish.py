@@ -97,6 +97,23 @@ def test_settings_blog_fields_roundtrip(client):
     assert r.json()["blog_api_base"] == "https://blog.example.com"
 
 
+def test_settings_image_provider_is_separate_from_text_provider(client):
+    r = client.put("/api/settings", json={
+        "llm_api_key": "text_key", "llm_base_url": "https://api.deepseek.com",
+        "image_api_key": "image_key", "image_base_url": "https://api.openai.com/v1",
+        "image_model": "gpt-image-1",
+    })
+    assert r.status_code == 200, r.text
+    assert r.json()["image_api_key_set"] is True
+    assert r.json()["image_model"] == "gpt-image-1"
+
+    runtime = client.get("/api/settings/ai-runtime")
+    assert runtime.status_code == 200
+    assert runtime.json()["image"] == {
+        "api_key": "image_key", "base_url": "https://api.openai.com/v1", "model": "gpt-image-1",
+    }
+
+
 def test_blog_token_env_fallback(client, monkeypatch):
     monkeypatch.setenv("MKFLOW_AGENT_API_TOKEN", "env_tok_9999")
     r = client.get("/api/settings")

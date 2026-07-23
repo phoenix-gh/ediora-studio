@@ -14,6 +14,10 @@ export interface AppSettings {
   llm_effective_base_url: string
   llm_api_key_set: boolean
   llm_api_key_preview: string
+  image_model: string
+  image_base_url: string
+  image_api_key_set: boolean
+  image_api_key_preview: string
   embedding_model: string
   embedding_base_url: string
   embedding_api_key_set: boolean
@@ -70,6 +74,9 @@ export interface SettingsUpdate {
   llm_model?: string
   llm_api_key?: string
   llm_base_url?: string
+  image_model?: string
+  image_api_key?: string
+  image_base_url?: string
   embedding_model?: string
   embedding_base_url?: string
   embedding_api_key?: string

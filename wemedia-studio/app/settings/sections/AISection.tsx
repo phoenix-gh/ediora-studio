@@ -22,6 +22,9 @@ export function AISection({ settings, onSaved }: { settings: AppSettings | null;
   )
   const [apiKey, setApiKey]     = useState('')
   const [model, setModel]       = useState(settings?.llm_model ?? '')
+  const [imageBaseUrl, setImageBaseUrl] = useState(settings?.image_base_url ?? '')
+  const [imageApiKey, setImageApiKey] = useState('')
+  const [imageModel, setImageModel] = useState(settings?.image_model ?? 'gpt-image-1')
   const [embeddingApiKey, setEmbeddingApiKey] = useState('')
   const [embeddingBaseUrl, setEmbeddingBaseUrl] = useState(settings?.embedding_base_url ?? '')
   const [embeddingModel, setEmbeddingModel] = useState(settings?.embedding_model ?? 'text-embedding-3-small')
@@ -99,10 +102,14 @@ export function AISection({ settings, onSaved }: { settings: AppSettings | null;
         embedding_model: embeddingModel.trim() || 'text-embedding-3-small',
         embedding_similarity_threshold: parseFloat(embeddingThreshold) || 0.82,
         ...(apiKey ? { llm_api_key: apiKey } : {}),
+        image_base_url: imageBaseUrl.trim(),
+        image_model: imageModel.trim() || 'gpt-image-1',
+        ...(imageApiKey ? { image_api_key: imageApiKey } : {}),
         ...(embeddingApiKey ? { embedding_api_key: embeddingApiKey } : {}),
       })
       onSaved(updated)
       setApiKey('')
+      setImageApiKey('')
       setEmbeddingApiKey('')
       toast.success('AI 配置已保存')
     } catch {
@@ -255,6 +262,22 @@ export function AISection({ settings, onSaved }: { settings: AppSettings | null;
             className="h-9 text-sm font-mono"
           />
         </div>
+      </div>
+
+      <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 p-3 space-y-3">
+        <div>
+          <Label className="text-xs">图像生成 Endpoint</Label>
+          <Input value={imageBaseUrl} onChange={e => setImageBaseUrl(e.target.value)} placeholder="https://api.openai.com/v1" className="h-9 text-sm font-mono mt-1.5" />
+        </div>
+        <div>
+          <Label className="text-xs">图像生成 API Key</Label>
+          <Input type={showKey ? 'text' : 'password'} value={imageApiKey} onChange={e => setImageApiKey(e.target.value)} placeholder={settings?.image_api_key_set ? `已配置 (${settings.image_api_key_preview}) — 留空不修改` : '输入图像模型 API Key'} className="h-9 text-sm font-mono mt-1.5" autoComplete="off" />
+        </div>
+        <div>
+          <Label className="text-xs">图像模型</Label>
+          <Input value={imageModel} onChange={e => setImageModel(e.target.value)} placeholder="gpt-image-1" className="h-9 text-sm font-mono mt-1.5" />
+        </div>
+        <p className="text-[11px] text-zinc-400">封面和插图使用此配置，不会复用聊天模型接口。需使用支持 OpenAI Images API 的服务。</p>
       </div>
       <p className="text-[11px] text-zinc-400">建议使用支持 OpenAI-compatible embeddings 的服务；不填 Endpoint/Key 时复用上方聊天模型配置。</p>
       </div>
