@@ -161,6 +161,27 @@ def test_save_plan_items_marks_plan_ready(client):
     assert len(response.json()["items"]) == 1
 
 
+def test_enqueue_daily_plan_uses_draft_job(client, monkeypatch):
+    plan_id, item_ids = _seed_plan(client)
+    from routers.studio import EnqueueOut
+    import routers.studio
+
+    captured = []
+
+    async def fake_run(flow, ctx, *, account_id, title, source_url=""):
+        captured.append((flow, ctx, account_id, title))
+        return EnqueueOut(content_job_id=9, task_id="9", task_ids=["9"], pipeline_task_id=9)
+
+    monkeypatch.setattr(routers.studio, "_run_pipeline_chain", fake_run)
+    response = client.post(f"/api/daily-plan/{plan_id}/enqueue", json={"item_ids": [item_ids[2]]})
+
+    assert response.status_code == 200, response.text
+    assert captured[0][0] == "draft"
+    assert captured[0][1]["content_type"] == "long"
+    assert captured[0][1]["word_range"]
+    assert captured[0][1]["angle"] == "角度2"
+
+
 def test_generate_400_when_no_quota(client):
     r = client.post("/api/daily-plan/generate")
     assert r.status_code == 400

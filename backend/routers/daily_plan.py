@@ -231,8 +231,7 @@ async def enqueue_items(plan_id: int, body: EnqueueItemsIn,
             "source_posts_md": sources_md,
             "draft_id": 0,
         }
-        flow = "topic_long" if leader.content_type == "long" else "topic_short"
-        out = await _run_pipeline_chain(flow, ctx, account_id=leader.account_id,
+        out = await _run_pipeline_chain("draft", ctx, account_id=leader.account_id,
                                         title=leader.title)
         chains += 1
         first_task_ids.append(out.task_id)
