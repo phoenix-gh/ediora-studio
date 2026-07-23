@@ -91,18 +91,12 @@ function MessageBubble({ message }: { message: DisplayMessage }) {
 
   if (message.role === 'tool') {
     const auditParts = toolParts.length > 0 ? toolParts : message.parts
-    return <div className="ml-10 max-w-3xl space-y-2">{auditParts.map((part, index) => <ToolEvent key={`${message.id}-${index}`} part={part} />)}</div>
+    return <div className="max-w-3xl space-y-2">{auditParts.map((part, index) => <ToolEvent key={`${message.id}-${index}`} part={part} />)}</div>
   }
 
   return (
-    <article className={cn('flex gap-3', isUser && 'flex-row-reverse')}>
-      <div className={cn(
-        'mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full',
-        isUser ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900' : 'bg-indigo-600 text-white',
-      )}>
-        {isUser ? <span className="text-xs font-semibold">我</span> : <Bot className="h-4 w-4" />}
-      </div>
-      <div className={cn('min-w-0 max-w-3xl space-y-2', isUser && 'items-end')}>
+    <article className={cn('flex', isUser && 'justify-end')}>
+      <div className="min-w-0 max-w-3xl space-y-2">
         {(textParts.length > 0 || fallbackText) && (
           <div className={cn(
             'break-words rounded-2xl px-4 py-3 text-sm leading-6',
@@ -311,10 +305,10 @@ export function ChatClient() {
 
         <form onSubmit={submit} className="py-4">
           <div className={chatComposerColumn}>
-            <div className="flex items-end gap-3 rounded-xl border border-zinc-200 bg-white p-2 transition-colors focus-within:border-indigo-400 dark:border-zinc-700 dark:bg-zinc-900">
+            <div className="flex items-end gap-3 rounded-xl border border-zinc-200 bg-white p-4 transition-colors focus-within:border-indigo-400 dark:border-zinc-700 dark:bg-zinc-900">
               <textarea value={input} onChange={event => setInput(event.target.value)} disabled={sending} rows={2}
                 placeholder="问问本地信息源里的内容…"
-                className="max-h-40 min-h-12 flex-1 resize-none bg-transparent px-2 py-1 text-sm leading-6 outline-none placeholder:text-zinc-400 disabled:cursor-not-allowed" />
+                className="max-h-40 min-h-12 flex-1 resize-none bg-transparent py-1 text-sm leading-6 outline-none placeholder:text-zinc-400 disabled:cursor-not-allowed" />
               <Button type="submit" size="icon" disabled={!input.trim() || sending} title="发送消息">
                 {sending ? <Loader2 className="animate-spin" /> : <Send />}
               </Button>
