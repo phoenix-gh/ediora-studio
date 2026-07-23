@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { Brain, Rss, GitFork, AtSign, ScrollText, FileText, Megaphone, Globe } from 'lucide-react'
+import { Brain, Rss, GitFork, AtSign, ScrollText, FileText, Megaphone, Globe, Search } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { AppSettings } from '@/lib/api/settings'
 import { AISection }       from './sections/AISection'
@@ -12,8 +12,9 @@ import { ArxivSection }    from './sections/ArxivSection'
 import { LogsSection }     from './sections/LogsSection'
 import { PublishAccountsSection } from './sections/PublishAccountsSection'
 import { BlogSection }     from './sections/BlogSection'
+import { WebSearchSection } from './sections/WebSearchSection'
 
-type SectionId = 'ai' | 'collect' | 'github' | 'x' | 'arxiv' | 'publish' | 'blog' | 'logs'
+type SectionId = 'ai' | 'collect' | 'github' | 'x' | 'arxiv' | 'publish' | 'blog' | 'web-search' | 'logs'
 
 const NAV: { id: SectionId; label: string; icon: React.ElementType; desc: string }[] = [
   { id: 'ai',       label: 'AI 大模型',   icon: Brain,     desc: '供应商 · API Key · 模型' },
@@ -23,6 +24,7 @@ const NAV: { id: SectionId; label: string; icon: React.ElementType; desc: string
   { id: 'arxiv',    label: 'arXiv 论文',  icon: FileText,  desc: '采集分类 · 更新间隔' },
   { id: 'publish',  label: '发布账号',    icon: Megaphone, desc: '账号画像 · 创作流程复用' },
   { id: 'blog',     label: 'Blog 投稿',   icon: Globe,     desc: 'MK Flow · API Token · 投稿接口' },
+  { id: 'web-search', label: 'Web 搜索',  icon: Search,    desc: 'SearXNG · 搜索工具 · 降级顺序' },
   { id: 'logs',     label: '系统日志',    icon: ScrollText, desc: '采集运行记录' },
 ]
 
@@ -34,6 +36,7 @@ const SECTION_TITLE: Record<SectionId, string> = {
   arxiv:    'arXiv 论文采集',
   publish:  '发布账号',
   blog:     'Blog 投稿',
+  'web-search': 'Web 搜索',
   logs:     '系统日志',
 }
 
@@ -86,6 +89,7 @@ export function SettingsClient({ initialSettings }: { initialSettings: AppSettin
           {active === 'arxiv'    && <ArxivSection   settings={settings} onSaved={setSettings} />}
           {active === 'publish'  && <PublishAccountsSection />}
           {active === 'blog'     && <BlogSection     settings={settings} onSaved={setSettings} />}
+          {active === 'web-search' && <WebSearchSection settings={settings} onSaved={setSettings} />}
           {active === 'logs'     && <LogsSection />}
         </div>
       </main>

@@ -1,8 +1,10 @@
 from fastapi import APIRouter, Body, Query, Request
-from pydantic import BaseModel
-from typing import Optional
+from pydantic import BaseModel, field_validator, model_validator
+from typing import Literal, Optional
 from datetime import datetime
+import json
 import httpx
+from urllib.parse import urlsplit
 
 from config import get_config, set_config, PROVIDERS, effective_model, effective_base_url
 
@@ -16,6 +18,37 @@ class ProviderInfo(BaseModel):
     label: str
     base_url: str
     default_model: str
+
+
+class WebSearchProviderConfig(BaseModel):
+    key: Literal["searxng"]
+    enabled: bool = True
+    base_url: str = ""
+    timeout_seconds: int = 12
+
+    @field_validator("base_url")
+    @classmethod
+    def validate_base_url(cls, value: str) -> str:
+        value = value.strip().rstrip("/")
+        if not value:
+            return ""
+        parsed = urlsplit(value)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise ValueError("must be an HTTP(S) URL")
+        return value
+
+    @field_validator("timeout_seconds")
+    @classmethod
+    def validate_timeout(cls, value: int) -> int:
+        if not 1 <= value <= 30:
+            raise ValueError("must be between 1 and 30 seconds")
+        return value
+
+    @model_validator(mode="after")
+    def require_url_when_enabled(self):
+        if self.enabled and not self.base_url:
+            raise ValueError("Base URL is required when provider is enabled")
+        return self
 
 
 class SettingsOut(BaseModel):
@@ -58,6 +91,7 @@ class SettingsOut(BaseModel):
     blog_api_base: str
     blog_api_token_set: bool
     blog_api_token_preview: str
+    web_search_providers: list[WebSearchProviderConfig]
     providers: list[ProviderInfo]
 
 
@@ -96,6 +130,7 @@ class SettingsUpdate(BaseModel):
     wechat_tunnel_extra_args: Optional[str] = None
     blog_api_base: Optional[str] = None
     blog_api_token: Optional[str] = None
+    web_search_providers: Optional[list[WebSearchProviderConfig]] = None
 
 
 class FetchModelsRequest(BaseModel):
@@ -126,6 +161,14 @@ def _build_out(cfg: dict) -> SettingsOut:
     image_api_key = cfg.get("image_api_key", "")
     gh_token = cfg.get("github_token", "")
     blog_base, blog_token = blog_client.effective_blog_config(cfg)
+    try:
+        raw_search_providers = json.loads(cfg.get("web_search_providers", "[]"))
+    except json.JSONDecodeError:
+        raw_search_providers = []
+    web_search_providers = [
+        WebSearchProviderConfig.model_validate(provider)
+        for provider in raw_search_providers if isinstance(provider, dict)
+    ] if isinstance(raw_search_providers, list) else []
     return SettingsOut(
         llm_provider=cfg.get("llm_provider", "openai"),
         llm_model=cfg.get("llm_model", ""),
@@ -166,6 +209,7 @@ def _build_out(cfg: dict) -> SettingsOut:
         blog_api_base=blog_base,
         blog_api_token_set=bool(blog_token),
         blog_api_token_preview=f"…{blog_token[-4:]}" if len(blog_token) >= 4 else "",
+        web_search_providers=web_search_providers,
         providers=[
             ProviderInfo(key=k, label=v["label"], base_url=v["base_url"], default_model=v["default_model"])
             for k, v in PROVIDERS.items()
@@ -298,6 +342,10 @@ async def update_settings(body: SettingsUpdate, request: Request):
         updates["blog_api_base"] = body.blog_api_base.strip().rstrip("/")
     if body.blog_api_token is not None:
         updates["blog_api_token"] = body.blog_api_token.strip()
+    if body.web_search_providers is not None:
+        updates["web_search_providers"] = json.dumps(
+            [provider.model_dump() for provider in body.web_search_providers], ensure_ascii=False,
+        )
     if updates:
         await set_config(updates)
 

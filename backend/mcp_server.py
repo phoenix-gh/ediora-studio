@@ -7,12 +7,14 @@ Mount at /mcp in main.py: app.mount("/mcp", mcp.streamable_http_app())
 import mimetypes
 import os
 import uuid
+from dataclasses import asdict
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Optional
 from mcp.server.fastmcp import FastMCP
 from sqlalchemy import select, desc, delete as sa_delete
 from database import SessionLocal
+from web_search import WebSearchProviderError, search_web as run_web_search
 
 _UPLOADS_DIR = Path(__file__).parent / "uploads"
 _UPLOADS_DIR.mkdir(exist_ok=True)
@@ -65,6 +67,20 @@ async def _register_draft_image(
 
 
 # ── tools ─────────────────────────────────────────────────────────────────────
+
+@mcp.tool()
+async def web_search(query: str, max_results: int = 5, language: str = "zh-CN") -> dict:
+    """Search the public web. Cite returned URLs and do not claim results beyond this output."""
+    try:
+        results, provider = await run_web_search(
+            query.strip(), max(1, min(max_results, 10)), language.strip() or "zh-CN",
+        )
+    except WebSearchProviderError as exc:
+        return {
+            "error": f"Web search is unavailable: {exc.reason}. Configure it in Settings → Web 搜索.",
+            "results": [],
+        }
+    return {"provider": provider, "results": [asdict(result) for result in results]}
 
 @mcp.tool()
 async def get_content_directions() -> list[dict]:

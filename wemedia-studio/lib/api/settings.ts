@@ -7,6 +7,13 @@ export interface ProviderInfo {
   default_model: string
 }
 
+export interface WebSearchProviderConfig {
+  key: 'searxng'
+  enabled: boolean
+  base_url: string
+  timeout_seconds: number
+}
+
 export interface AppSettings {
   llm_provider: string
   llm_model: string
@@ -61,6 +68,7 @@ export interface AppSettings {
   blog_api_base: string
   blog_api_token_set: boolean
   blog_api_token_preview: string
+  web_search_providers: WebSearchProviderConfig[]
   providers: ProviderInfo[]
 }
 
@@ -113,6 +121,7 @@ export interface SettingsUpdate {
   wechat_tunnel_extra_args?: string
   blog_api_base?: string
   blog_api_token?: string
+  web_search_providers?: WebSearchProviderConfig[]
 }
 
 export interface FetchModelsRequest {

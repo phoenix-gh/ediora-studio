@@ -76,6 +76,7 @@ DEFAULTS: dict[str, str] = {
     "wechat_tunnel_extra_args": "",
     "blog_api_base": "https://mkflow.dev",
     "blog_api_token": "",          # 留空时回退环境变量 MKFLOW_AGENT_API_TOKEN
+    "web_search_providers": "[]",
 }
 
 # Provider presets: label + default base_url + hint for default model
