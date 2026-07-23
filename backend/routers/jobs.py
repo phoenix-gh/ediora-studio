@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from content_jobs import InvalidJobTransition, cancel_job, create_job, fail_step, retry_step, start_step, succeed_job, succeed_step
+from content_jobs import InvalidJobTransition, cancel_job, create_job, fail_step, record_event, retry_step, start_step, succeed_job, succeed_step
 from database import get_db
 from job_queue import enqueue_job
 from models import ContentJob, ContentJobEvent, ContentJobStep
@@ -36,6 +36,11 @@ class StepOutputRequest(BaseModel):
 class StepFailureRequest(BaseModel):
     error: str = Field(min_length=1, max_length=500)
     retryable: bool = True
+
+
+class JobEventRequest(BaseModel):
+    kind: str = Field(min_length=1, max_length=64)
+    payload: dict = Field(default_factory=dict)
 
 
 def _step_payload(step: ContentJobStep) -> dict:
@@ -105,6 +110,15 @@ async def get_job(job_id: int, db: AsyncSession = Depends(get_db)):
     if job is None:
         raise HTTPException(404, "job not found")
     return await _job_payload(db, job)
+
+
+@router.post("/{job_id}/events", status_code=status.HTTP_201_CREATED)
+async def post_job_event(job_id: int, body: JobEventRequest, db: AsyncSession = Depends(get_db)):
+    try:
+        event = await record_event(db, job_id, body.kind, body.payload)
+    except KeyError:
+        raise HTTPException(404, "job not found") from None
+    return {"id": event.id, "kind": event.kind, "payload": event.payload, "created_at": event.created_at}
 
 
 @router.post("/{job_id}/cancel")

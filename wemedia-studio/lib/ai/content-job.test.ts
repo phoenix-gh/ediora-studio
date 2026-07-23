@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { baoyuRuntimeInstructions, extractBaoyuSkillCore, imageToolNamesForSkill, parseDailyPlanText, textModelForProvider, toolsForContentStep } from './content-job'
+import { baoyuRuntimeInstructions, coverConstraintsFromStyle, extractBaoyuSkillCore, imageToolNamesForSkill, parseDailyPlanText, textModelForProvider, toolsForContentStep } from './content-job'
 
 describe('content job tool allowlist', () => {
   it('limits draft orchestration to declared tools', () => {
@@ -32,6 +32,15 @@ describe('Baoyu image skills', () => {
 
     expect(core).toContain('cover-rule')
     expect(core).not.toContain('interactive-workflow')
+  })
+
+  it('turns account cover style into non-negotiable image constraints', () => {
+    expect(coverConstraintsFromStyle({
+      type: 'scene', palette: 'vivid', rendering: 'hand-drawn', text: 'text-rich', mood: 'bold', aspect_ratio: '16:9',
+      signature_motifs: ['MK@Phoenix tag ribbon'], negative: ['no dark background'],
+    })).toContain('MUST use type: scene')
+    expect(coverConstraintsFromStyle({ signature_motifs: ['MK@Phoenix tag ribbon'] })).toContain('MUST include: MK@Phoenix tag ribbon')
+    expect(coverConstraintsFromStyle({ negative: ['no dark background'] })).toContain('MUST NOT include: no dark background')
   })
 })
 

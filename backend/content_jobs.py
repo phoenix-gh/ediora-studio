@@ -22,6 +22,17 @@ async def _event(session: AsyncSession, job_id: int, kind: str, *, step_id: int 
     session.add(ContentJobEvent(job_id=job_id, step_id=step_id, kind=kind, payload=payload or {}))
 
 
+async def record_event(session: AsyncSession, job_id: int, kind: str, payload: dict | None = None) -> ContentJobEvent:
+    job = await session.get(ContentJob, job_id)
+    if job is None:
+        raise KeyError(f"job {job_id} not found")
+    event = ContentJobEvent(job_id=job_id, kind=kind, payload=payload or {})
+    session.add(event)
+    await session.commit()
+    await session.refresh(event)
+    return event
+
+
 async def create_job(session: AsyncSession, *, flow: str, title: str, input_data: dict, idempotency_key: str = "") -> ContentJob:
     job = ContentJob(flow=flow, title=title, input_data=input_data, idempotency_key=idempotency_key)
     session.add(job)

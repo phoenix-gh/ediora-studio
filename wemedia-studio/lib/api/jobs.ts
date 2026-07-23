@@ -15,6 +15,13 @@ export interface ContentJobStep {
   completed_at: string | null
 }
 
+export interface ContentJobEvent {
+  id: number
+  kind: string
+  payload: Record<string, unknown>
+  created_at: string
+}
+
 export interface ContentJob {
   id: number
   flow: string
@@ -24,6 +31,7 @@ export interface ContentJob {
   started_at: string | null
   completed_at: string | null
   steps: ContentJobStep[]
+  events: ContentJobEvent[]
 }
 
 export function listJobs() { return apiFetch<{ jobs: ContentJob[] }>('/jobs') }

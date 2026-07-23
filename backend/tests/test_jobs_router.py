@@ -98,6 +98,20 @@ def test_step_lifecycle_api_records_success(client):
     assert completed.json()["status"] == "succeeded"
 
 
+def test_job_event_api_persists_auditable_generation_trace(client):
+    created = client.post("/api/jobs", json={"flow": "cover", "title": "Trace", "input": {}}).json()
+
+    response = client.post(
+        f"/api/jobs/{created['id']}/events",
+        json={"kind": "skill_loaded", "payload": {"skill": "baoyu-cover-image"}},
+    )
+
+    assert response.status_code == 201
+    job = client.get(f"/api/jobs/{created['id']}").json()
+    assert job["events"][0]["kind"] == "skill_loaded"
+    assert job["events"][0]["payload"] == {"skill": "baoyu-cover-image"}
+
+
 def test_step_failure_marks_job_failed_and_retryable(client):
     created = client.post("/api/jobs", json={"flow": "draft", "title": "Failure", "input": {}}).json()
     started = client.post(f"/api/jobs/{created['id']}/steps/draft/start").json()

@@ -8,6 +8,7 @@ const apiBase = () => (process.env.WMS_API_URL ?? process.env.NEXT_PUBLIC_API_UR
 
 type ModelConfig = { apiKey: string; modelName: string; baseURL?: string }
 type ImageModelConfig = { apiKey: string; modelName: string; baseURL?: string }
+type CoverStyle = Record<string, unknown>
 
 export type ContentStep = 'brief' | 'draft' | 'cover' | 'illustrations' | 'daily_plan'
 
@@ -118,6 +119,13 @@ async function completeJob(jobId: number) {
   if (!response.ok) throw new Error('Unable to complete content job')
 }
 
+async function recordJobEvent(jobId: number, kind: string, payload: Record<string, unknown>) {
+  const response = await fetch(`${apiBase()}/jobs/${jobId}/events`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind, payload }),
+  })
+  if (!response.ok) throw new Error(`Unable to record ${kind} event`)
+}
+
 async function configuredTextModel(): Promise<ModelConfig> {
   try {
     const response = await fetch(`${apiBase()}/settings/ai-runtime`, { cache: 'no-store' })
@@ -154,6 +162,14 @@ export function baoyuRuntimeInstructions(step: 'cover' | 'illustrations', maxIma
   return `You are the runtime adapter for the vendored baoyu-article-illustrator skill. Analyze the article and choose the most useful ${maxImages} visual explanation point${maxImages === 1 ? '' : 's'}. For each, create a clear 16:9 hand-drawn editorial infographic or conceptual illustration with strong visual hierarchy, ample whitespace, and no photorealism. The images must explain the surrounding content rather than repeat the cover. ${common}`
 }
 
+export function coverConstraintsFromStyle(style: CoverStyle) {
+  const dimensions = ['type', 'palette', 'rendering', 'text', 'mood', 'aspect_ratio', 'font']
+    .flatMap(key => typeof style[key] === 'string' && style[key].trim() ? [`MUST use ${key}: ${style[key].trim()}.`] : [])
+  const required = Array.isArray(style.signature_motifs) ? style.signature_motifs.filter((item): item is string => typeof item === 'string' && Boolean(item.trim())).map(item => `MUST include: ${item.trim()}.`) : []
+  const prohibited = Array.isArray(style.negative) ? style.negative.filter((item): item is string => typeof item === 'string' && Boolean(item.trim())).map(item => `MUST NOT include: ${item.trim()}.`) : []
+  return [...dimensions, ...required, ...prohibited].join('\n')
+}
+
 export function extractBaoyuSkillCore(step: 'cover' | 'illustrations', skill: string) {
   const startHeading = step === 'cover' ? '## Five Dimensions' : '## Three Dimensions'
   const endHeading = step === 'cover' ? '## File Structure' : '## Workflow'
@@ -174,6 +190,22 @@ async function loadBaoyuSkillCore(step: 'cover' | 'illustrations') {
   }
 }
 
+async function loadBaoyuSkillRules(step: 'cover' | 'illustrations') {
+  const skillName = step === 'cover' ? 'baoyu-cover-image' : 'baoyu-article-illustrator'
+  const skillDir = join(process.cwd(), 'skills', skillName)
+  const core = await loadBaoyuSkillCore(step)
+  if (step === 'illustrations') return { skillName, rules: core, ruleSources: ['SKILL.md: Three Dimensions'] }
+  try {
+    const [autoSelection, promptTemplate] = await Promise.all([
+      readFile(join(skillDir, 'references', 'auto-selection.md'), 'utf8'),
+      readFile(join(skillDir, 'references', 'workflow', 'prompt-template.md'), 'utf8'),
+    ])
+    return { skillName, rules: `${core}\n\n${autoSelection}\n\n${promptTemplate}`, ruleSources: ['SKILL.md: Five Dimensions', 'references/auto-selection.md', 'references/workflow/prompt-template.md'] }
+  } catch {
+    throw new Error(`Bundled image skill references are missing: ${skillName}`)
+  }
+}
+
 async function runImageFlow(job: Awaited<ReturnType<typeof getJob>>, step: 'cover' | 'illustrations') {
   const draftId = Number(job.input.draft_id)
   if (!Number.isSafeInteger(draftId) || draftId <= 0) throw new Error(`${step} flow requires draft_id`)
@@ -184,11 +216,16 @@ async function runImageFlow(job: Awaited<ReturnType<typeof getJob>>, step: 'cove
   const text = await configuredTextModel()
   const textProvider = createOpenAI({ apiKey: text.apiKey, baseURL: text.baseURL })
   const assets: Array<{ id: number; url: string }> = []
-  const style = String(job.input[step === 'cover' ? 'cover_style' : 'image_style'] ?? job.input.note ?? '')
-  const skillCore = await loadBaoyuSkillCore(step)
+  const rawStyle = job.input[step === 'cover' ? 'cover_style' : 'image_style'] ?? job.input.note ?? ''
+  const style = typeof rawStyle === 'string' ? rawStyle : JSON.stringify(rawStyle)
+  const coverConstraints = step === 'cover' && rawStyle && typeof rawStyle === 'object' && !Array.isArray(rawStyle)
+    ? coverConstraintsFromStyle(rawStyle as CoverStyle) : ''
+  const skill = await loadBaoyuSkillRules(step)
+  await recordJobEvent(job.id, 'skill_loaded', { skill: skill.skillName, rule_sources: skill.ruleSources })
+  if (coverConstraints) await recordJobEvent(job.id, 'cover_constraints', { constraints: coverConstraints })
   await generateText({
     model: textModelForProvider(textProvider, text.modelName),
-    instructions: `${baoyuRuntimeInstructions(step, maxImages)}\n\nBundled Baoyu skill rules:\n${skillCore}`,
+    instructions: `${baoyuRuntimeInstructions(step, maxImages)}\n\nHard cover constraints:\n${coverConstraints || 'No account-specific constraints.'}\n\nBundled Baoyu skill rules:\n${skill.rules}`,
     prompt: JSON.stringify({ task: step, title: draft.title, article: draft.content.slice(0, 4000), style, max_images: maxImages }),
     stopWhen: stepCountIs(maxImages + 1),
     tools: {
@@ -197,10 +234,13 @@ async function runImageFlow(job: Awaited<ReturnType<typeof getJob>>, step: 'cove
         inputSchema: z.object({ prompt: z.string().min(20), filename_hint: z.string().min(1).max(80).optional() }),
         execute: async ({ prompt, filename_hint }) => {
           if (assets.length >= maxImages) return { error: `Image limit reached (${maxImages})` }
-          const generated = await generateImage({ model: provider.image(image.modelName), prompt, n: 1 })
+          const finalPrompt = step === 'cover' && coverConstraints ? `${coverConstraints}\n\n${prompt}` : prompt
+          await recordJobEvent(job.id, 'generate_image_called', { tool: 'generateImage', prompt: finalPrompt, filename_hint: filename_hint ?? '' })
+          const generated = await generateImage({ model: provider.image(image.modelName), prompt: finalPrompt, n: 1 })
           const output = generated.images[0]
           const asset = await saveDraftImage(job.id, draftId, `${filename_hint ?? step}-${job.id}-${assets.length + 1}.png`, output.uint8Array, output.mediaType)
           assets.push(asset)
+          await recordJobEvent(job.id, 'generate_image_succeeded', { tool: 'generateImage', asset_id: asset.id, asset_url: asset.url })
           return asset
         },
       }),
