@@ -79,6 +79,8 @@ it('uses one context picker instead of permanent select controls', () => {
   expect(source).toContain('draftId: draftId ? Number(draftId) : undefined')
   expect(source).not.toContain('<select value={skillName}')
   expect(source).not.toContain('<select value={draftId}')
+  expect(source).toContain('flex flex-col gap-2 rounded-xl border border-zinc-200 bg-white p-3')
+  expect(source.indexOf('<ChatContextPicker')).toBeGreaterThan(source.indexOf('<textarea'))
   expect(source).toContain('setSkillName(\'\')')
   expect(source).toContain('setDraftId(\'\')')
 })

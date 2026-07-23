@@ -62,7 +62,7 @@ export function ChatContextPicker({
 
   return (
     <>
-      <div className="mt-2 flex flex-wrap items-center gap-1.5">
+      <div className="flex flex-wrap items-center gap-1.5">
         {selectedSkill && (
           <span className="inline-flex h-7 max-w-full items-center gap-1 rounded-md bg-violet-50 px-2 text-xs text-violet-800 dark:bg-violet-950/50 dark:text-violet-200">
             <Sparkles className="h-3 w-3 shrink-0" />
