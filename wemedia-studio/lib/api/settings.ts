@@ -18,11 +18,6 @@ export interface AppSettings {
   image_base_url: string
   image_api_key_set: boolean
   image_api_key_preview: string
-  embedding_model: string
-  embedding_base_url: string
-  embedding_api_key_set: boolean
-  embedding_api_key_preview: string
-  embedding_similarity_threshold: number
   rsshub_base: string
   github_token_set: boolean
   github_token_preview: string
@@ -77,10 +72,6 @@ export interface SettingsUpdate {
   image_model?: string
   image_api_key?: string
   image_base_url?: string
-  embedding_model?: string
-  embedding_base_url?: string
-  embedding_api_key?: string
-  embedding_similarity_threshold?: number
   rsshub_base?: string
   github_token?: string
   github_interval_minutes?: number

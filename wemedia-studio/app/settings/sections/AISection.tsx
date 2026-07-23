@@ -25,10 +25,6 @@ export function AISection({ settings, onSaved }: { settings: AppSettings | null;
   const [imageBaseUrl, setImageBaseUrl] = useState(settings?.image_base_url ?? '')
   const [imageApiKey, setImageApiKey] = useState('')
   const [imageModel, setImageModel] = useState(settings?.image_model ?? 'gpt-image-1')
-  const [embeddingApiKey, setEmbeddingApiKey] = useState('')
-  const [embeddingBaseUrl, setEmbeddingBaseUrl] = useState(settings?.embedding_base_url ?? '')
-  const [embeddingModel, setEmbeddingModel] = useState(settings?.embedding_model ?? 'text-embedding-3-small')
-  const [embeddingThreshold, setEmbeddingThreshold] = useState(String(settings?.embedding_similarity_threshold ?? 0.82))
   const [showKey, setShowKey]   = useState(false)
   const [saving, setSaving]     = useState(false)
 
@@ -98,19 +94,14 @@ export function AISection({ settings, onSaved }: { settings: AppSettings | null;
         llm_provider: provider,
         llm_model: model,
         llm_base_url: baseUrl,
-        embedding_base_url: embeddingBaseUrl.trim(),
-        embedding_model: embeddingModel.trim() || 'text-embedding-3-small',
-        embedding_similarity_threshold: parseFloat(embeddingThreshold) || 0.82,
         ...(apiKey ? { llm_api_key: apiKey } : {}),
         image_base_url: imageBaseUrl.trim(),
         image_model: imageModel.trim() || 'gpt-image-1',
         ...(imageApiKey ? { image_api_key: imageApiKey } : {}),
-        ...(embeddingApiKey ? { embedding_api_key: embeddingApiKey } : {}),
       })
       onSaved(updated)
       setApiKey('')
       setImageApiKey('')
-      setEmbeddingApiKey('')
       toast.success('AI 配置已保存')
     } catch {
       toast.error('保存失败')
@@ -126,10 +117,6 @@ export function AISection({ settings, onSaved }: { settings: AppSettings | null;
   const keyPlaceholder = settings?.llm_api_key_set
     ? `已配置 (${settings.llm_api_key_preview}) — 留空不修改`
     : '输入 API Key'
-  const embeddingKeyPlaceholder = settings?.embedding_api_key_set
-    ? `已配置 (${settings.embedding_api_key_preview}) — 留空不修改`
-    : '留空复用上面的 API Key'
-
   return (
     <div className="space-y-5">
       {/* Provider */}
@@ -221,51 +208,6 @@ export function AISection({ settings, onSaved }: { settings: AppSettings | null;
 
       <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 p-3 space-y-3">
         <div>
-          <Label className="text-xs">Embedding Endpoint</Label>
-          <Input
-            value={embeddingBaseUrl}
-            onChange={e => setEmbeddingBaseUrl(e.target.value)}
-            placeholder="留空复用 API Endpoint"
-            className="h-9 text-sm font-mono mt-1.5"
-          />
-        </div>
-        <div>
-          <Label className="text-xs">Embedding API Key</Label>
-          <Input
-            type={showKey ? 'text' : 'password'}
-            value={embeddingApiKey}
-            onChange={e => setEmbeddingApiKey(e.target.value)}
-            placeholder={embeddingKeyPlaceholder}
-            className="h-9 text-sm font-mono mt-1.5"
-            autoComplete="off"
-          />
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-        <div className="space-y-1.5">
-          <Label className="text-xs">Embedding 模型</Label>
-          <Input
-            value={embeddingModel}
-            onChange={e => setEmbeddingModel(e.target.value)}
-            placeholder="text-embedding-3-small"
-            className="h-9 text-sm font-mono"
-          />
-        </div>
-        <div className="space-y-1.5">
-          <Label className="text-xs">归并阈值</Label>
-          <Input
-            type="number"
-            min="0.5"
-            max="0.98"
-            step="0.01"
-            value={embeddingThreshold}
-            onChange={e => setEmbeddingThreshold(e.target.value)}
-            className="h-9 text-sm font-mono"
-          />
-        </div>
-      </div>
-
-      <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 p-3 space-y-3">
-        <div>
           <Label className="text-xs">图像生成 Endpoint</Label>
           <Input value={imageBaseUrl} onChange={e => setImageBaseUrl(e.target.value)} placeholder="https://api.openai.com/v1" className="h-9 text-sm font-mono mt-1.5" />
         </div>
@@ -278,8 +220,6 @@ export function AISection({ settings, onSaved }: { settings: AppSettings | null;
           <Input value={imageModel} onChange={e => setImageModel(e.target.value)} placeholder="gpt-image-1" className="h-9 text-sm font-mono mt-1.5" />
         </div>
         <p className="text-[11px] text-zinc-400">封面和插图使用此配置，不会复用聊天模型接口。需使用支持 OpenAI Images API 的服务。</p>
-      </div>
-      <p className="text-[11px] text-zinc-400">建议使用支持 OpenAI-compatible embeddings 的服务；不填 Endpoint/Key 时复用上方聊天模型配置。</p>
       </div>
 
       {/* Actions */}

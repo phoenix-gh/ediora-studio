@@ -29,11 +29,6 @@ class SettingsOut(BaseModel):
     image_base_url: str
     image_api_key_set: bool
     image_api_key_preview: str
-    embedding_model: str
-    embedding_base_url: str
-    embedding_api_key_set: bool
-    embedding_api_key_preview: str
-    embedding_similarity_threshold: float
     rsshub_base: str
     github_token_set: bool
     github_token_preview: str
@@ -74,10 +69,6 @@ class SettingsUpdate(BaseModel):
     image_model: Optional[str] = None
     image_api_key: Optional[str] = None
     image_base_url: Optional[str] = None
-    embedding_model: Optional[str] = None
-    embedding_base_url: Optional[str] = None
-    embedding_api_key: Optional[str] = None
-    embedding_similarity_threshold: Optional[float] = None
     rsshub_base: Optional[str] = None
     github_token: Optional[str] = None
     github_interval_minutes: Optional[int] = None
@@ -134,7 +125,6 @@ def _build_out(cfg: dict) -> SettingsOut:
     api_key = cfg.get("llm_api_key", "")
     image_api_key = cfg.get("image_api_key", "")
     gh_token = cfg.get("github_token", "")
-    embedding_api_key = cfg.get("embedding_api_key", "")
     blog_base, blog_token = blog_client.effective_blog_config(cfg)
     return SettingsOut(
         llm_provider=cfg.get("llm_provider", "openai"),
@@ -147,11 +137,6 @@ def _build_out(cfg: dict) -> SettingsOut:
         image_base_url=cfg.get("image_base_url", ""),
         image_api_key_set=bool(image_api_key),
         image_api_key_preview=f"…{image_api_key[-4:]}" if len(image_api_key) >= 4 else "",
-        embedding_model=cfg.get("embedding_model", "text-embedding-3-small"),
-        embedding_base_url=cfg.get("embedding_base_url", ""),
-        embedding_api_key_set=bool(embedding_api_key),
-        embedding_api_key_preview=f"…{embedding_api_key[-4:]}" if len(embedding_api_key) >= 4 else "",
-        embedding_similarity_threshold=float(cfg.get("embedding_similarity_threshold", "0.82")),
         github_interval_minutes=max(1, int(cfg.get("github_interval_minutes", 1))),
         github_trending_interval_hours=max(1, int(cfg.get("github_trending_interval_hours", 6))),
         rsshub_base=cfg.get("rsshub_base", "http://127.0.0.1:1200"),
@@ -259,14 +244,6 @@ async def update_settings(body: SettingsUpdate, request: Request):
         updates["image_api_key"] = body.image_api_key.strip()
     if body.image_base_url is not None:
         updates["image_base_url"] = body.image_base_url.strip()
-    if body.embedding_model is not None:
-        updates["embedding_model"] = body.embedding_model
-    if body.embedding_base_url is not None:
-        updates["embedding_base_url"] = body.embedding_base_url
-    if body.embedding_api_key is not None:
-        updates["embedding_api_key"] = body.embedding_api_key
-    if body.embedding_similarity_threshold is not None:
-        updates["embedding_similarity_threshold"] = str(max(0.5, min(0.98, body.embedding_similarity_threshold)))
     if body.rsshub_base is not None:
         updates["rsshub_base"] = body.rsshub_base
     if body.github_token is not None:
