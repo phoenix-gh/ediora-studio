@@ -96,7 +96,7 @@ function MessageBubble({ message }: { message: DisplayMessage }) {
 
   return (
     <article className={cn('flex', isUser && 'justify-end')}>
-      <div className="min-w-0 max-w-3xl space-y-2">
+      <div className={isUser ? 'min-w-0 max-w-3xl space-y-2' : 'w-full min-w-0 space-y-2'}>
         {(textParts.length > 0 || fallbackText) && (
           <div className={cn(
             'break-words rounded-2xl px-4 py-3 text-sm leading-6',

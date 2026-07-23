@@ -30,3 +30,9 @@ it('does not render message avatars', () => {
   expect(source).not.toContain('<span className="text-xs font-semibold">我</span>')
   expect(source).not.toContain('<Bot className="h-4 w-4" />')
 })
+
+it('renders assistant replies at the full message-column width', () => {
+  const source = readFileSync(new URL('./ChatClient.tsx', import.meta.url), 'utf8')
+
+  expect(source).toContain("isUser ? 'min-w-0 max-w-3xl space-y-2' : 'w-full min-w-0 space-y-2'")
+})
