@@ -56,7 +56,7 @@ it('collapses assistant tool activity and hides audit-only messages', () => {
 
   expect(source).toContain('return `已检索本地资料，并阅读 ${reads} 条相关内容`')
   expect(source).toContain("if (message.role === 'tool') {\n    return null\n  }")
-  expect(source).toContain('<ToolActivityGroup parts={toolParts} />')
+  expect(source).toContain('<ToolActivityGroup parts={toolParts} onApproval=')
 })
 
 it('uses lazy new conversations and deletes selected persisted sessions', () => {
@@ -84,4 +84,12 @@ it('uses one context picker instead of permanent select controls', () => {
   expect(source.indexOf('<ChatContextPicker')).toBeLessThan(source.indexOf('<Button type="submit"'))
   expect(source).toContain('setSkillName(\'\')')
   expect(source).toContain('setDraftId(\'\')')
+})
+
+it('renders approval controls for pending global tool calls', () => {
+  const source = readFileSync(new URL('./ChatClient.tsx', import.meta.url), 'utf8')
+
+  expect(source).toContain('批准')
+  expect(source).toContain('拒绝')
+  expect(source).toContain('approval: { messageId')
 })

@@ -35,6 +35,7 @@ type ToolEventPart = ChatPart & {
   input?: unknown
   output?: unknown
   state?: string
+  approval?: { id?: string; approved?: boolean }
 }
 
 const toolLabels: Record<string, string> = {
@@ -64,7 +65,7 @@ function activitySummary(parts: ToolEventPart[]) {
   return `已调用 ${parts.length} 项工具`
 }
 
-function ToolActivityGroup({ parts }: { parts: ToolEventPart[] }) {
+function ToolActivityGroup({ parts, onApproval }: { parts: ToolEventPart[]; onApproval?: (toolCallId: string, approvalId: string, approved: boolean) => void }) {
   return (
     <details className="rounded-lg bg-indigo-50/60 px-3 py-2 text-xs text-indigo-950 dark:bg-indigo-950/30 dark:text-indigo-100">
       <summary className="flex cursor-pointer list-none items-center gap-2 font-medium [&::-webkit-details-marker]:hidden">
@@ -75,19 +76,21 @@ function ToolActivityGroup({ parts }: { parts: ToolEventPart[] }) {
       <ul className="mt-2 space-y-1 text-indigo-700 dark:text-indigo-200">
         {parts.map((part, index) => {
           const label = toolLabels[toolName(part)] ?? toolName(part)
-          const status = part.state === 'running' ? '进行中' : '已完成'
-          return <li key={part.toolCallId ?? `${part.type}-${index}`} className="flex items-center justify-between gap-3"><span>{label}</span><span className="text-indigo-500">{status}</span></li>
+          const pending = part.state === 'approval-requested' && part.toolCallId && part.approval?.id
+          const status = pending ? '等待确认' : part.state === 'running' ? '进行中' : part.state === 'approval-responded' ? (part.approval?.approved ? '已批准' : '已拒绝') : '已完成'
+          return <li key={part.toolCallId ?? `${part.type}-${index}`} className="flex flex-wrap items-center justify-between gap-3"><span>{label}</span>{pending && onApproval ? <span className="flex items-center gap-1"><Button type="button" size="xs" onClick={() => onApproval(part.toolCallId!, part.approval!.id!, true)}>批准</Button><Button type="button" size="xs" variant="outline" onClick={() => onApproval(part.toolCallId!, part.approval!.id!, false)}>拒绝</Button></span> : <span className="text-indigo-500">{status}</span>}</li>
         })}
       </ul>
     </details>
   )
 }
 
-function MessageBubble({ message }: { message: DisplayMessage }) {
+function MessageBubble({ message, onApproval }: { message: DisplayMessage; onApproval?: (messageId: number, toolCallId: string, approvalId: string, approved: boolean) => void }) {
   const isUser = message.role === 'user'
   const textParts = message.parts.filter(part => part.type === 'text')
   const toolParts = message.parts.filter(isToolPart) as ToolEventPart[]
   const fallbackText = textParts.length === 0 && message.text ? message.text : ''
+  const persistedMessageId = typeof message.id === 'number' ? message.id : undefined
 
   if (message.role === 'tool') {
     return null
@@ -111,7 +114,7 @@ function MessageBubble({ message }: { message: DisplayMessage }) {
                   : <ChatMarkdown content={fallbackText} />)}
           </div>
         )}
-        {toolParts.length > 0 && <ToolActivityGroup parts={toolParts} />}
+        {toolParts.length > 0 && <ToolActivityGroup parts={toolParts} onApproval={persistedMessageId ? (toolCallId, approvalId, approved) => onApproval?.(persistedMessageId, toolCallId, approvalId, approved) : undefined} />}
         <time className={cn('block px-1 text-[11px] text-zinc-400', isUser && 'text-right')}>{displayTime(message.created_at)}</time>
       </div>
     </article>
@@ -195,6 +198,28 @@ export function ChatClient() {
       if (activeSessionId === session.id) startNewConversation()
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '删除会话失败')
+    }
+  }
+
+  async function respondToApproval(messageId: number, toolCallId: string, approvalId: string, approved: boolean) {
+    if (!activeSessionId || sending) return
+    setSending(true)
+    try {
+      await streamChatReply({
+        sessionId: activeSessionId,
+        messages: [],
+        skillName: skillName || undefined,
+        draftId: draftId ? Number(draftId) : undefined,
+        approval: { messageId, toolCallId, approvalId, approved },
+        onEvent: () => undefined,
+      })
+      const session = await getChatSession(activeSessionId)
+      setMessages(session.messages)
+      await refreshSessions()
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '处理工具确认失败')
+    } finally {
+      setSending(false)
     }
   }
 
@@ -322,7 +347,7 @@ export function ChatClient() {
                 <p className="mx-auto mt-1 max-w-md text-sm leading-6 text-zinc-500">例如：“素材库里有哪些适合 AI 编程主题的观点？” 我会在需要时调用只读搜索工具。</p>
               </div>
             )}
-            {messages.map(message => <MessageBubble key={String(message.id)} message={message} />)}
+            {messages.map(message => <MessageBubble key={String(message.id)} message={message} onApproval={respondToApproval} />)}
             {sending && <div className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" />正在思考并检索资料…</div>}
             <div ref={bottomRef} />
           </div>
