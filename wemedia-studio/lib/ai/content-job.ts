@@ -22,7 +22,7 @@ export function toolsForContentStep(step: ContentStep): string[] {
 }
 
 export function imageToolNamesForSkill(step: 'cover' | 'illustrations'): string[] {
-  return ['generateImageAsset']
+  return ['generateImage']
 }
 
 export function textModelForProvider<T>(provider: { chat: (modelName: string) => T }, modelName: string): T {
@@ -145,7 +145,7 @@ async function configuredImageModel(): Promise<ImageModelConfig> {
 }
 
 export function baoyuRuntimeInstructions(step: 'cover' | 'illustrations', maxImages: number) {
-  const common = `This application has already collected preferences and user confirmation. Work autonomously: do not ask questions, do not perform first-time setup, and do not write prompt files. Use generateImageAsset exactly ${maxImages} time${maxImages === 1 ? '' : 's'}; an image is created only when that tool succeeds. Do not put text in generated images unless the request explicitly asks for it.`
+  const common = `This application has already collected preferences and user confirmation. Work autonomously: do not ask questions, do not perform first-time setup, and do not write prompt files. Use generateImage exactly ${maxImages} time${maxImages === 1 ? '' : 's'}; an image is created only when that tool succeeds. Do not put text in generated images unless the request explicitly asks for it.`
   if (step === 'cover') {
     return `You are the runtime adapter for the vendored baoyu-cover-image skill. Create an elegant raster article cover using its five dimensions: type (hero, conceptual, typography, metaphor, scene, minimal), palette, rendering (flat-vector, hand-drawn, painterly, digital, pixel, chalk, screen-print), text level, and mood. Infer suitable choices from the article and supplied style. Write one complete, concrete image-generation prompt with subject, composition, palette, rendering, aspect ratio, and any explicit no-text instruction. ${common}`
   }
@@ -169,7 +169,7 @@ async function runImageFlow(job: Awaited<ReturnType<typeof getJob>>, step: 'cove
     prompt: JSON.stringify({ task: step, title: draft.title, article: draft.content.slice(0, 4000), style, max_images: maxImages }),
     stopWhen: stepCountIs(maxImages + 1),
     tools: {
-      generateImageAsset: tool({
+      generateImage: tool({
         description: 'Generate one raster image from the supplied prompt and save it to this draft. Use this tool for every requested cover or illustration.',
         inputSchema: z.object({ prompt: z.string().min(20), filename_hint: z.string().min(1).max(80).optional() }),
         execute: async ({ prompt, filename_hint }) => {
@@ -184,7 +184,7 @@ async function runImageFlow(job: Awaited<ReturnType<typeof getJob>>, step: 'cove
     },
   })
   if (!assets.length) {
-    throw new Error(`The ${step} skill did not call generateImageAsset`)
+    throw new Error(`The ${step} skill did not call generateImage`)
   }
   return { draft_id: draftId, asset_ids: assets.map(asset => asset.id), asset_urls: assets.map(asset => asset.url) }
 }
