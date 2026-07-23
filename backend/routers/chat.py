@@ -3,7 +3,7 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import desc, select
+from sqlalchemy import delete, desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
@@ -136,6 +136,16 @@ async def get_session(session_id: int, db: AsyncSession = Depends(get_db)):
         updated_at=session.updated_at,
         messages=messages,
     )
+
+
+@router.delete("/sessions/{session_id}", status_code=204)
+async def delete_session(session_id: int, db: AsyncSession = Depends(get_db)):
+    session = await db.get(ChatSession, session_id)
+    if not session:
+        raise HTTPException(404, "会话不存在")
+    await db.execute(delete(ChatMessage).where(ChatMessage.session_id == session_id))
+    await db.delete(session)
+    await db.commit()
 
 
 @router.post("/sessions/{session_id}/messages", response_model=ChatMessageOut, status_code=201)

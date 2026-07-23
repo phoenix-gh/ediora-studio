@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { consumeUIMessageStream, createChatSession } from './chat'
+import { consumeUIMessageStream, createChatSession, deleteChatSession } from './chat'
 
 describe('chat API client', () => {
   afterEach(() => vi.unstubAllGlobals())
@@ -22,6 +22,18 @@ describe('chat API client', () => {
         method: 'POST',
         body: JSON.stringify({ title: 'AI 趋势研究' }),
       }),
+    )
+  })
+
+  it('deletes a persisted session', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await deleteChatSession(8)
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:8000/api/chat/sessions/8',
+      expect.objectContaining({ method: 'DELETE' }),
     )
   })
 

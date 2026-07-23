@@ -83,6 +83,25 @@ def test_create_session_append_message_and_get_messages_in_chronological_order(c
     }]
 
 
+def test_delete_session_removes_its_messages(client):
+    created = client.post("/api/chat/sessions", json={"title": "待删除会话"})
+    session_id = created.json()["id"]
+    client.post(
+        f"/api/chat/sessions/{session_id}/messages",
+        json={"role": "user", "parts": [{"type": "text", "text": "删除我"}], "text": "删除我"},
+    )
+
+    deleted = client.delete(f"/api/chat/sessions/{session_id}")
+
+    assert deleted.status_code == 204
+    assert client.get(f"/api/chat/sessions/{session_id}").status_code == 404
+    assert client.get("/api/chat/sessions").json() == []
+
+
+def test_delete_missing_session_returns_404(client):
+    assert client.delete("/api/chat/sessions/999999").status_code == 404
+
+
 def test_source_search_validates_query_and_returns_writing_plan_and_reference_material(client):
     plan_id, material_id = _add_searchable_sources(client)
 

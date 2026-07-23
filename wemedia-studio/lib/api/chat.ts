@@ -51,6 +51,10 @@ export async function getChatSession(sessionId: number): Promise<ChatSessionDeta
   return apiFetch<ChatSessionDetail>(`/chat/sessions/${sessionId}`)
 }
 
+export async function deleteChatSession(sessionId: number) {
+  await apiFetch<void>(`/chat/sessions/${sessionId}`, { method: 'DELETE' })
+}
+
 export function toUIChatMessages(messages: ChatMessage[]): UIChatMessage[] {
   return messages
     .filter((message): message is ChatMessage & { role: Exclude<ChatRole, 'tool'> } => message.role !== 'tool')
