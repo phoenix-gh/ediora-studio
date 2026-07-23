@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { type ReactNode, useMemo, useState } from 'react'
 import { Check, FileText, Plus, Search, Sparkles, X } from 'lucide-react'
 
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -15,6 +15,7 @@ type Props = {
   skillName?: string
   draftId?: number
   disabled: boolean
+  footerAction?: ReactNode
   onSkillNameChange: (skillName: string | undefined) => void
   onDraftIdChange: (draftId: number | undefined) => void
 }
@@ -25,6 +26,7 @@ export function ChatContextPicker({
   skillName,
   draftId,
   disabled,
+  footerAction,
   onSkillNameChange,
   onDraftIdChange,
 }: Props) {
@@ -105,6 +107,7 @@ export function ChatContextPicker({
             </button>
           </PopoverContent>
         </Popover>
+        {footerAction && <span className="ml-auto">{footerAction}</span>}
       </div>
 
       <Dialog open={draftDialogOpen} onOpenChange={setDraftDialogOpen}>

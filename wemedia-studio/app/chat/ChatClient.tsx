@@ -331,13 +331,10 @@ export function ChatClient() {
         <form onSubmit={submit} className="py-4">
           <div className={chatComposerColumn}>
             <div className="flex flex-col gap-2 rounded-xl border border-zinc-200 bg-white p-3 transition-colors focus-within:border-indigo-400 dark:border-zinc-700 dark:bg-zinc-900">
-              <div className="flex items-end gap-3">
+              <div className="flex">
                 <textarea value={input} onChange={event => setInput(event.target.value)} disabled={sending} rows={2}
                   placeholder="问问本地信息源里的内容…"
                   className="max-h-40 min-h-12 flex-1 resize-none bg-transparent py-1 text-sm leading-6 outline-none placeholder:text-zinc-400 disabled:cursor-not-allowed" />
-                <Button type="submit" size="icon" disabled={!input.trim() || sending} title="发送消息">
-                  {sending ? <Loader2 className="animate-spin" /> : <Send />}
-                </Button>
               </div>
               <ChatContextPicker
                 skills={skills}
@@ -345,6 +342,9 @@ export function ChatClient() {
                 skillName={skillName || undefined}
                 draftId={draftId ? Number(draftId) : undefined}
                 disabled={sending}
+                footerAction={<Button type="submit" size="icon" disabled={!input.trim() || sending} title="发送消息">
+                  {sending ? <Loader2 className="animate-spin" /> : <Send />}
+                </Button>}
                 onSkillNameChange={skill => setSkillName(skill ?? '')}
                 onDraftIdChange={draft => setDraftId(draft ? String(draft) : '')}
               />
