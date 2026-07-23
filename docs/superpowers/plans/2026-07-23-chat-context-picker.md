@@ -123,7 +123,7 @@ Expected: FAIL because the composer still contains native selects.
 />
 ```
 
-Import the component. Remove the native select container only; retain the data-loading effect, `startNewConversation` resets, and request serialization.
+Import the component. Move it inside the bordered composer surface, above the text-area/send row, and remove the native select container. Retain the data-loading effect, `startNewConversation` resets, and request serialization.
 
 - [ ] **Step 4: Run frontend validation**
 

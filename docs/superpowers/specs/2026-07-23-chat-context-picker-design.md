@@ -19,8 +19,10 @@ click it opens a popover with two actions:
   the dialog and returns focus to the composer context area.
 
 The composer displays each current selection as a compact chip with an `×`
-control. Removing a chip immediately clears only that selection. One skill and
-one draft remain the maximum context for a Chat turn.
+control. Chips and the add-context entry sit inside the same bordered composer
+surface, above the text area; the text area and send button remain on the lower
+row. Removing a chip immediately clears only that selection. One skill and one
+draft remain the maximum context for a Chat turn.
 
 ## State and Accessibility
 
