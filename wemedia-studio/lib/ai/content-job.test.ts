@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { baoyuRuntimeInstructions, imageToolNamesForSkill, parseDailyPlanText, textModelForProvider, toolsForContentStep } from './content-job'
+import { baoyuRuntimeInstructions, extractBaoyuSkillCore, imageToolNamesForSkill, parseDailyPlanText, textModelForProvider, toolsForContentStep } from './content-job'
 
 describe('content job tool allowlist', () => {
   it('limits draft orchestration to declared tools', () => {
@@ -25,6 +25,13 @@ describe('Baoyu image skills', () => {
     expect(cover).toContain('generateImage exactly 1 time')
     expect(cover).not.toContain('First-Time Setup')
     expect(cover).not.toContain('AskUserQuestion')
+  })
+
+  it('uses the safe core rules from the vendored cover skill', () => {
+    const core = extractBaoyuSkillCore('cover', `intro\n## Five Dimensions\ncover-rule\n## File Structure\ninteractive-workflow`)
+
+    expect(core).toContain('cover-rule')
+    expect(core).not.toContain('interactive-workflow')
   })
 })
 

@@ -1,5 +1,7 @@
 import { createOpenAI } from '@ai-sdk/openai'
 import { generateImage, generateText, stepCountIs, tool } from 'ai'
+import { readFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import { z } from 'zod'
 
 const apiBase = () => (process.env.WMS_API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000/api').replace(/\/$/, '')
@@ -152,6 +154,26 @@ export function baoyuRuntimeInstructions(step: 'cover' | 'illustrations', maxIma
   return `You are the runtime adapter for the vendored baoyu-article-illustrator skill. Analyze the article and choose the most useful ${maxImages} visual explanation point${maxImages === 1 ? '' : 's'}. For each, create a clear 16:9 hand-drawn editorial infographic or conceptual illustration with strong visual hierarchy, ample whitespace, and no photorealism. The images must explain the surrounding content rather than repeat the cover. ${common}`
 }
 
+export function extractBaoyuSkillCore(step: 'cover' | 'illustrations', skill: string) {
+  const startHeading = step === 'cover' ? '## Five Dimensions' : '## Three Dimensions'
+  const endHeading = step === 'cover' ? '## File Structure' : '## Workflow'
+  const start = skill.indexOf(startHeading)
+  const end = skill.indexOf(endHeading, start)
+  if (start < 0 || end < 0) throw new Error(`Bundled ${step} skill is missing its core guidance`)
+  return skill.slice(start, end).trim()
+}
+
+async function loadBaoyuSkillCore(step: 'cover' | 'illustrations') {
+  const skillName = step === 'cover' ? 'baoyu-cover-image' : 'baoyu-article-illustrator'
+  const skillPath = join(process.cwd(), 'skills', skillName, 'SKILL.md')
+  try {
+    return extractBaoyuSkillCore(step, await readFile(skillPath, 'utf8'))
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('core guidance')) throw error
+    throw new Error(`Bundled image skill is missing: ${skillName}`)
+  }
+}
+
 async function runImageFlow(job: Awaited<ReturnType<typeof getJob>>, step: 'cover' | 'illustrations') {
   const draftId = Number(job.input.draft_id)
   if (!Number.isSafeInteger(draftId) || draftId <= 0) throw new Error(`${step} flow requires draft_id`)
@@ -163,9 +185,10 @@ async function runImageFlow(job: Awaited<ReturnType<typeof getJob>>, step: 'cove
   const textProvider = createOpenAI({ apiKey: text.apiKey, baseURL: text.baseURL })
   const assets: Array<{ id: number; url: string }> = []
   const style = String(job.input[step === 'cover' ? 'cover_style' : 'image_style'] ?? job.input.note ?? '')
+  const skillCore = await loadBaoyuSkillCore(step)
   await generateText({
     model: textModelForProvider(textProvider, text.modelName),
-    instructions: baoyuRuntimeInstructions(step, maxImages),
+    instructions: `${baoyuRuntimeInstructions(step, maxImages)}\n\nBundled Baoyu skill rules:\n${skillCore}`,
     prompt: JSON.stringify({ task: step, title: draft.title, article: draft.content.slice(0, 4000), style, max_images: maxImages }),
     stopWhen: stepCountIs(maxImages + 1),
     tools: {
