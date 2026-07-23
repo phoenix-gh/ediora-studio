@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { imageToolNamesForSkill, parseDailyPlanText, textModelForProvider, toolsForContentStep } from './content-job'
+import { baoyuRuntimeInstructions, imageToolNamesForSkill, parseDailyPlanText, textModelForProvider, toolsForContentStep } from './content-job'
 
 describe('content job tool allowlist', () => {
   it('limits draft orchestration to declared tools', () => {
@@ -16,6 +16,15 @@ describe('Baoyu image skills', () => {
   it('exposes one controlled image-generation tool to both image skills', () => {
     expect(imageToolNamesForSkill('cover')).toEqual(['generateImageAsset'])
     expect(imageToolNamesForSkill('illustrations')).toEqual(['generateImageAsset'])
+  })
+
+  it('adapts vendored skills to the non-interactive application runtime', () => {
+    const cover = baoyuRuntimeInstructions('cover', 1)
+
+    expect(cover).toContain('five dimensions')
+    expect(cover).toContain('generateImageAsset exactly 1 time')
+    expect(cover).not.toContain('First-Time Setup')
+    expect(cover).not.toContain('AskUserQuestion')
   })
 })
 

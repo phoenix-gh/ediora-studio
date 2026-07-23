@@ -1,7 +1,5 @@
 import { createOpenAI } from '@ai-sdk/openai'
 import { generateImage, generateText, stepCountIs, tool } from 'ai'
-import { readFile } from 'node:fs/promises'
-import { join } from 'node:path'
 import { z } from 'zod'
 
 const apiBase = () => (process.env.WMS_API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000/api').replace(/\/$/, '')
@@ -146,14 +144,12 @@ async function configuredImageModel(): Promise<ImageModelConfig> {
   return { apiKey, modelName: process.env.WMS_IMAGE_MODEL ?? 'gpt-image-1', baseURL: process.env.WMS_IMAGE_BASE_URL }
 }
 
-async function baoyuSkillInstructions(step: 'cover' | 'illustrations') {
-  const skillName = step === 'cover' ? 'baoyu-cover-image' : 'baoyu-article-illustrator'
-  const skillPath = join(process.cwd(), 'skills', skillName, 'SKILL.md')
-  try {
-    return await readFile(skillPath, 'utf8')
-  } catch {
-    throw new Error(`Bundled image skill is missing: ${skillName}`)
+export function baoyuRuntimeInstructions(step: 'cover' | 'illustrations', maxImages: number) {
+  const common = `This application has already collected preferences and user confirmation. Work autonomously: do not ask questions, do not perform first-time setup, and do not write prompt files. Use generateImageAsset exactly ${maxImages} time${maxImages === 1 ? '' : 's'}; an image is created only when that tool succeeds. Do not put text in generated images unless the request explicitly asks for it.`
+  if (step === 'cover') {
+    return `You are the runtime adapter for the vendored baoyu-cover-image skill. Create an elegant raster article cover using its five dimensions: type (hero, conceptual, typography, metaphor, scene, minimal), palette, rendering (flat-vector, hand-drawn, painterly, digital, pixel, chalk, screen-print), text level, and mood. Infer suitable choices from the article and supplied style. Write one complete, concrete image-generation prompt with subject, composition, palette, rendering, aspect ratio, and any explicit no-text instruction. ${common}`
   }
+  return `You are the runtime adapter for the vendored baoyu-article-illustrator skill. Analyze the article and choose the most useful ${maxImages} visual explanation point${maxImages === 1 ? '' : 's'}. For each, create a clear 16:9 hand-drawn editorial infographic or conceptual illustration with strong visual hierarchy, ample whitespace, and no photorealism. The images must explain the surrounding content rather than repeat the cover. ${common}`
 }
 
 async function runImageFlow(job: Awaited<ReturnType<typeof getJob>>, step: 'cover' | 'illustrations') {
@@ -167,10 +163,9 @@ async function runImageFlow(job: Awaited<ReturnType<typeof getJob>>, step: 'cove
   const textProvider = createOpenAI({ apiKey: text.apiKey, baseURL: text.baseURL })
   const assets: Array<{ id: number; url: string }> = []
   const style = String(job.input[step === 'cover' ? 'cover_style' : 'image_style'] ?? job.input.note ?? '')
-  const skill = await baoyuSkillInstructions(step)
   await generateText({
     model: textModelForProvider(textProvider, text.modelName),
-    instructions: `${skill}\n\nRuntime override: this task was explicitly confirmed by the user in the application. Do not perform first-time setup, ask questions, or wait for confirmation. Generate now. You must call generateImageAsset exactly ${maxImages} time(s) to create the requested image assets. Do not claim an image was created unless the tool succeeded. Do not put text in generated images unless the task explicitly requests it.`,
+    instructions: baoyuRuntimeInstructions(step, maxImages),
     prompt: JSON.stringify({ task: step, title: draft.title, article: draft.content.slice(0, 4000), style, max_images: maxImages }),
     stopWhen: stepCountIs(maxImages + 1),
     tools: {
