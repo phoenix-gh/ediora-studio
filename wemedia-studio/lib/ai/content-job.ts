@@ -170,7 +170,7 @@ async function runImageFlow(job: Awaited<ReturnType<typeof getJob>>, step: 'cove
   const skill = await baoyuSkillInstructions(step)
   await generateText({
     model: textModelForProvider(textProvider, text.modelName),
-    instructions: `${skill}\n\nYou are orchestrating image generation for a content job. You must call generateImageAsset to create the requested image assets. Do not claim an image was created unless the tool succeeded. Do not put text in generated images unless the task explicitly requests it.`,
+    instructions: `${skill}\n\nRuntime override: this task was explicitly confirmed by the user in the application. Do not perform first-time setup, ask questions, or wait for confirmation. Generate now. You must call generateImageAsset exactly ${maxImages} time(s) to create the requested image assets. Do not claim an image was created unless the tool succeeded. Do not put text in generated images unless the task explicitly requests it.`,
     prompt: JSON.stringify({ task: step, title: draft.title, article: draft.content.slice(0, 4000), style, max_images: maxImages }),
     stopWhen: stepCountIs(maxImages + 1),
     tools: {
