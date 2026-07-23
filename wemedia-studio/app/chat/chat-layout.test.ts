@@ -43,3 +43,10 @@ it('uses a white workspace and borderless assistant replies', () => {
   expect(source).toContain('flex h-full min-h-0 bg-white dark:bg-zinc-950')
   expect(source).toContain("? 'rounded-tr-sm bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900'\n              : 'text-zinc-800 dark:text-zinc-100'")
 })
+
+it('keeps message and composer padding compact and aligned', () => {
+  const source = readFileSync(new URL('./ChatClient.tsx', import.meta.url), 'utf8')
+
+  expect(source).toContain("'break-words rounded-2xl px-3 py-2 text-sm leading-6'")
+  expect(source).toContain('rounded-xl border border-zinc-200 bg-white p-3')
+})

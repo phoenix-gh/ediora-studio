@@ -99,7 +99,7 @@ function MessageBubble({ message }: { message: DisplayMessage }) {
       <div className={isUser ? 'min-w-0 max-w-3xl space-y-2' : 'w-full min-w-0 space-y-2'}>
         {(textParts.length > 0 || fallbackText) && (
           <div className={cn(
-            'break-words rounded-2xl px-4 py-3 text-sm leading-6',
+            'break-words rounded-2xl px-3 py-2 text-sm leading-6',
             isUser && 'whitespace-pre-wrap',
             isUser
               ? 'rounded-tr-sm bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900'
@@ -305,7 +305,7 @@ export function ChatClient() {
 
         <form onSubmit={submit} className="py-4">
           <div className={chatComposerColumn}>
-            <div className="flex items-end gap-3 rounded-xl border border-zinc-200 bg-white p-4 transition-colors focus-within:border-indigo-400 dark:border-zinc-700 dark:bg-zinc-900">
+            <div className="flex items-end gap-3 rounded-xl border border-zinc-200 bg-white p-3 transition-colors focus-within:border-indigo-400 dark:border-zinc-700 dark:bg-zinc-900">
               <textarea value={input} onChange={event => setInput(event.target.value)} disabled={sending} rows={2}
                 placeholder="问问本地信息源里的内容…"
                 className="max-h-40 min-h-12 flex-1 resize-none bg-transparent py-1 text-sm leading-6 outline-none placeholder:text-zinc-400 disabled:cursor-not-allowed" />
