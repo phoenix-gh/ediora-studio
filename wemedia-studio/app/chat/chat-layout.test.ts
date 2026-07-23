@@ -36,3 +36,10 @@ it('renders assistant replies at the full message-column width', () => {
 
   expect(source).toContain("isUser ? 'min-w-0 max-w-3xl space-y-2' : 'w-full min-w-0 space-y-2'")
 })
+
+it('uses a white workspace and borderless assistant replies', () => {
+  const source = readFileSync(new URL('./ChatClient.tsx', import.meta.url), 'utf8')
+
+  expect(source).toContain('flex h-full min-h-0 bg-white dark:bg-zinc-950')
+  expect(source).toContain("? 'rounded-tr-sm bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900'\n              : 'text-zinc-800 dark:text-zinc-100'")
+})

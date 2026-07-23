@@ -103,7 +103,7 @@ function MessageBubble({ message }: { message: DisplayMessage }) {
             isUser && 'whitespace-pre-wrap',
             isUser
               ? 'rounded-tr-sm bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900'
-              : 'rounded-tl-sm border border-zinc-200 bg-white text-zinc-800 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100',
+              : 'text-zinc-800 dark:text-zinc-100',
           )}>
             {isUser
               ? (textParts.length > 0 ? textParts.map((part, index) => <span key={`${message.id}-text-${index}`}>{String(part.text ?? '')}</span>) : fallbackText)
@@ -259,7 +259,7 @@ export function ChatClient() {
   }
 
   return (
-    <div className="flex h-full min-h-0 bg-zinc-50 dark:bg-zinc-950">
+    <div className="flex h-full min-h-0 bg-white dark:bg-zinc-950">
       <aside className="flex w-72 shrink-0 flex-col border-r border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
         <div className="border-b border-zinc-100 px-4 py-4 dark:border-zinc-800">
           <div className="flex items-center justify-between gap-3">
