@@ -116,6 +116,28 @@ class AppSetting(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
 
 
+class ChatSession(Base):
+    """A persisted global research-chat conversation."""
+    __tablename__ = "chat_sessions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    title: Mapped[str] = mapped_column(String, default="新对话")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+
+
+class ChatMessage(Base):
+    """A chat message with AI SDK-compatible structured parts."""
+    __tablename__ = "chat_messages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    session_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    role: Mapped[str] = mapped_column(String, nullable=False)
+    parts: Mapped[list] = mapped_column(JSON, default=list)
+    text: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, index=True)
+
+
 
 class XSubscription(Base):
     """User-curated X subscription source. URL points to an X profile or list."""
