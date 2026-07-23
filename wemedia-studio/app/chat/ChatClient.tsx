@@ -5,6 +5,7 @@ import { Bot, ChevronDown, FileSearch, Loader2, MessageSquarePlus, Plus, Send, W
 import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
+import { ChatMarkdown } from '@/components/features/chat/ChatMarkdown'
 import {
   type ChatMessage,
   type ChatPart,
@@ -102,12 +103,17 @@ function MessageBubble({ message }: { message: DisplayMessage }) {
       <div className={cn('min-w-0 max-w-3xl space-y-2', isUser && 'items-end')}>
         {(textParts.length > 0 || fallbackText) && (
           <div className={cn(
-            'whitespace-pre-wrap break-words rounded-2xl px-4 py-3 text-sm leading-6',
+            'break-words rounded-2xl px-4 py-3 text-sm leading-6',
+            isUser && 'whitespace-pre-wrap',
             isUser
               ? 'rounded-tr-sm bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900'
               : 'rounded-tl-sm border border-zinc-200 bg-white text-zinc-800 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-100',
           )}>
-            {textParts.length > 0 ? textParts.map((part, index) => <span key={`${message.id}-text-${index}`}>{String(part.text ?? '')}</span>) : fallbackText}
+            {isUser
+              ? (textParts.length > 0 ? textParts.map((part, index) => <span key={`${message.id}-text-${index}`}>{String(part.text ?? '')}</span>) : fallbackText)
+              : (textParts.length > 0
+                  ? textParts.map((part, index) => <ChatMarkdown key={`${message.id}-text-${index}`} content={String(part.text ?? '')} />)
+                  : <ChatMarkdown content={fallbackText} />)}
           </div>
         )}
         {toolParts.map((part, index) => <ToolEvent key={`${message.id}-tool-${index}`} part={part} />)}
