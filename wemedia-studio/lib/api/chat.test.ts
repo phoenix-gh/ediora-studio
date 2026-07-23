@@ -82,6 +82,32 @@ describe('chat API client', () => {
     }))
   })
 
+  it('sends a tool approval decision without a new user message', async () => {
+    const encoder = new TextEncoder()
+    const fetchMock = vi.fn().mockResolvedValue(new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode('data: [DONE]\n\n'))
+        controller.close()
+      },
+    }), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await streamChatReply({
+      sessionId: 7,
+      messages: [],
+      approval: { messageId: 15, toolCallId: 'call-1', approvalId: 'approval-1', approved: true },
+      onEvent: () => undefined,
+    })
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/chat', expect.objectContaining({
+      body: JSON.stringify({
+        sessionId: 7,
+        messages: [],
+        approval: { messageId: 15, toolCallId: 'call-1', approvalId: 'approval-1', approved: true },
+      }),
+    }))
+  })
+
   it('decodes fragmented UI message stream events', async () => {
     const encoder = new TextEncoder()
     const stream = new ReadableStream<Uint8Array>({

@@ -10,9 +10,15 @@ import { openGlobalChatTools } from '@/lib/ai/global-chat-tools'
 
 const requestSchema = z.object({
   sessionId: z.number().int().positive(),
-  messages: z.array(z.unknown()).min(1).max(50),
+  messages: z.array(z.unknown()).max(50).default([]),
   skillName: z.string().min(1).max(200).optional(),
   draftId: z.number().int().positive().optional(),
+  approval: z.object({
+    messageId: z.number().int().positive(),
+    toolCallId: z.string().min(1).max(200),
+    approvalId: z.string().min(1).max(200),
+    approved: z.boolean(),
+  }).optional(),
 })
 
 const apiBase = () => (process.env.WMS_API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000/api').replace(/\/$/, '')
@@ -70,6 +76,30 @@ async function persistedModelHistory(sessionId: number) {
   return validated.data
 }
 
+async function persistApproval(sessionId: number, approval: NonNullable<z.infer<typeof requestSchema>['approval']>) {
+  const response = await fetch(`${apiBase()}/chat/sessions/${sessionId}`, { cache: 'no-store' })
+  if (!response.ok) throw new Error(`Unable to load chat session (${response.status})`)
+  const session = await response.json() as PersistedChatSession
+  const message = session.messages.find(item => item.id === approval.messageId && item.role === 'assistant')
+  if (!message) throw new Error('The pending tool approval message is unavailable')
+  let matched = false
+  const parts = message.parts.map(part => {
+    if (!part || typeof part !== 'object') return part
+    const record = part as Record<string, unknown>
+    const pendingApproval = record.approval
+    if (record.toolCallId !== approval.toolCallId || !pendingApproval || typeof pendingApproval !== 'object' || (pendingApproval as Record<string, unknown>).id !== approval.approvalId) return part
+    matched = true
+    return { ...record, state: 'approval-responded', approval: { ...(pendingApproval as Record<string, unknown>), approved: approval.approved } }
+  })
+  if (!matched) throw new Error('The pending tool approval no longer matches this session')
+  const updated = await fetch(`${apiBase()}/chat/sessions/${sessionId}/messages/${message.id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ parts }),
+  })
+  if (!updated.ok) throw new Error(`Unable to persist tool approval (${updated.status})`)
+}
+
 async function selectedContext(skillName?: string, draftId?: number) {
   const context: string[] = []
   if (skillName) {
@@ -100,20 +130,23 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Invalid chat request' }, { status: 400 })
   }
 
-  const clientLatestMessage = latestClientTurn(body.messages)
-  const validatedClientTurn = await safeValidateUIMessages({ messages: clientLatestMessage ? [clientLatestMessage] : [] })
-  if (!validatedClientTurn.success) {
-    return NextResponse.json({ error: 'Invalid chat messages' }, { status: 400 })
-  }
-
-  const latestMessage = validatedClientTurn.data.at(-1)
-  if (!latestMessage || latestMessage.role !== 'user') {
-    return NextResponse.json({ error: 'The latest chat message must be from the user' }, { status: 400 })
+  let latestMessage: UIMessage | undefined
+  if (!body.approval) {
+    const clientLatestMessage = latestClientTurn(body.messages)
+    const validatedClientTurn = await safeValidateUIMessages({ messages: clientLatestMessage ? [clientLatestMessage] : [] })
+    if (!validatedClientTurn.success) {
+      return NextResponse.json({ error: 'Invalid chat messages' }, { status: 400 })
+    }
+    latestMessage = validatedClientTurn.data.at(-1)
+    if (!latestMessage || latestMessage.role !== 'user') {
+      return NextResponse.json({ error: 'The latest chat message must be from the user' }, { status: 400 })
+    }
   }
 
   let registry: Awaited<ReturnType<typeof openGlobalChatTools>> | undefined
   try {
-    await persistMessage(body.sessionId, { role: 'user', parts: latestMessage.parts })
+    if (body.approval) await persistApproval(body.sessionId, body.approval)
+    else if (latestMessage) await persistMessage(body.sessionId, { role: 'user', parts: latestMessage.parts })
     registry = await openGlobalChatTools({ apiBase: apiBase(), sessionId: body.sessionId, draftId: body.draftId, skillName: body.skillName })
     const messages = await persistedModelHistory(body.sessionId)
     const modelConfig = await configuredTextModel()

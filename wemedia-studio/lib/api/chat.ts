@@ -28,6 +28,7 @@ export type ChatSessionDetail = ChatSession & {
 
 export type ChatSkill = { name: string; description: string; version: string }
 export type ChatDraft = { id: number; title: string; status: string; updated_at: string }
+export type ChatToolApproval = { messageId: number; toolCallId: string; approvalId: string; approved: boolean }
 
 export type UIChatMessage = {
   id: string
@@ -133,6 +134,7 @@ export async function streamChatReply({
   messages,
   skillName,
   draftId,
+  approval,
   signal,
   onEvent,
 }: {
@@ -140,13 +142,14 @@ export async function streamChatReply({
   messages: UIChatMessage[]
   skillName?: string
   draftId?: number
+  approval?: ChatToolApproval
   signal?: AbortSignal
   onEvent: (event: UIMessageStreamEvent) => void
 }) {
   const response = await fetch('/api/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sessionId, messages, skillName, draftId }),
+    body: JSON.stringify({ sessionId, messages, skillName, draftId, approval }),
     signal,
   })
   if (!response.ok) {

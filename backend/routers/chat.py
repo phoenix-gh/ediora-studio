@@ -46,6 +46,10 @@ class ChatMessageCreate(BaseModel):
     text: str = ""
 
 
+class ChatMessagePartsUpdate(BaseModel):
+    parts: list[dict] = Field(default_factory=list)
+
+
 class SourceSearchResult(BaseModel):
     source: Literal["writing_plan", "reference_material"]
     id: int
@@ -160,6 +164,26 @@ async def append_message(
     message = ChatMessage(session_id=session_id, **body.model_dump())
     session.updated_at = now_utc()
     db.add(message)
+    await db.commit()
+    await db.refresh(message)
+    return message
+
+
+@router.patch("/sessions/{session_id}/messages/{message_id}", response_model=ChatMessageOut)
+async def replace_message_parts(
+    session_id: int,
+    message_id: int,
+    body: ChatMessagePartsUpdate,
+    db: AsyncSession = Depends(get_db),
+):
+    session = await db.get(ChatSession, session_id)
+    if not session:
+        raise HTTPException(404, "会话不存在")
+    message = await db.get(ChatMessage, message_id)
+    if not message or message.session_id != session_id:
+        raise HTTPException(404, "会话消息不存在")
+    message.parts = body.parts
+    session.updated_at = now_utc()
     await db.commit()
     await db.refresh(message)
     return message

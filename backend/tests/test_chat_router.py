@@ -102,6 +102,36 @@ def test_delete_missing_session_returns_404(client):
     assert client.delete("/api/chat/sessions/999999").status_code == 404
 
 
+def test_replaces_assistant_message_parts_for_tool_approval(client):
+    session = client.post("/api/chat/sessions", json={}).json()
+    message = client.post(
+        f"/api/chat/sessions/{session['id']}/messages",
+        json={
+            "role": "assistant",
+            "parts": [{
+                "type": "tool-update_draft",
+                "toolCallId": "call-1",
+                "state": "approval-requested",
+                "approval": {"id": "approval-1"},
+            }],
+        },
+    ).json()
+
+    replacement = [{
+        "type": "tool-update_draft",
+        "toolCallId": "call-1",
+        "state": "approval-responded",
+        "approval": {"id": "approval-1", "approved": True},
+    }]
+    response = client.patch(
+        f"/api/chat/sessions/{session['id']}/messages/{message['id']}",
+        json={"parts": replacement},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["parts"] == replacement
+
+
 def test_source_search_validates_query_and_returns_writing_plan_and_reference_material(client):
     plan_id, material_id = _add_searchable_sources(client)
 
