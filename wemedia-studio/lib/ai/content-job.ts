@@ -43,6 +43,12 @@ const dailyPlanSchema = z.object({
   })).min(1),
 })
 
+export const coverSpecSchema = z.object({
+  visual_concept: z.string().min(10).max(500),
+  composition: z.string().min(10).max(500),
+  text_elements: z.array(z.string().min(1).max(200)).max(8),
+})
+
 export function parseDailyPlanText(text: string) {
   const json = text.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '')
   return dailyPlanSchema.parse(JSON.parse(json))
@@ -230,12 +236,16 @@ async function runImageFlow(job: Awaited<ReturnType<typeof getJob>>, step: 'cove
     stopWhen: stepCountIs(maxImages + 1),
     tools: {
       generateImage: tool({
-        description: 'Generate one raster image from the supplied prompt and save it to this draft. Use this tool for every requested cover or illustration.',
-        inputSchema: z.object({ prompt: z.string().min(20), filename_hint: z.string().min(1).max(80).optional() }),
-        execute: async ({ prompt, filename_hint }) => {
+        description: step === 'cover'
+          ? 'Generate one raster cover image and save it to this draft. The cover_spec is mandatory and records the visual concept, composition, and requested visible text.'
+          : 'Generate one raster image from the supplied prompt and save it to this draft. Use this tool for every requested illustration.',
+        inputSchema: z.object({ prompt: z.string().min(20), filename_hint: z.string().min(1).max(80).optional(), cover_spec: coverSpecSchema.optional() }),
+        execute: async ({ prompt, filename_hint, cover_spec }) => {
           if (assets.length >= maxImages) return { error: `Image limit reached (${maxImages})` }
-          const finalPrompt = step === 'cover' && coverConstraints ? `${coverConstraints}\n\n${prompt}` : prompt
-          await recordJobEvent(job.id, 'generate_image_called', { tool: 'generateImage', prompt: finalPrompt, filename_hint: filename_hint ?? '' })
+          if (step === 'cover' && !cover_spec) return { error: 'cover_spec is required for cover generation' }
+          const specPrompt = cover_spec ? `Cover spec:\n- Visual concept: ${cover_spec.visual_concept}\n- Composition: ${cover_spec.composition}\n- Visible text: ${cover_spec.text_elements.join(' | ')}` : ''
+          const finalPrompt = step === 'cover' && coverConstraints ? `${coverConstraints}\n\n${specPrompt}\n\n${prompt}` : prompt
+          await recordJobEvent(job.id, 'generate_image_called', { tool: 'generateImage', prompt: finalPrompt, filename_hint: filename_hint ?? '', cover_spec: cover_spec ?? {} })
           const generated = await generateImage({ model: provider.image(image.modelName), prompt: finalPrompt, n: 1 })
           const output = generated.images[0]
           const asset = await saveDraftImage(job.id, draftId, `${filename_hint ?? step}-${job.id}-${assets.length + 1}.png`, output.uint8Array, output.mediaType)

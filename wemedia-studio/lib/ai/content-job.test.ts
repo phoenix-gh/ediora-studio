@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { baoyuRuntimeInstructions, coverConstraintsFromStyle, extractBaoyuSkillCore, imageToolNamesForSkill, parseDailyPlanText, textModelForProvider, toolsForContentStep } from './content-job'
+import { baoyuRuntimeInstructions, coverConstraintsFromStyle, coverSpecSchema, extractBaoyuSkillCore, imageToolNamesForSkill, parseDailyPlanText, textModelForProvider, toolsForContentStep } from './content-job'
 
 describe('content job tool allowlist', () => {
   it('limits draft orchestration to declared tools', () => {
@@ -41,6 +41,14 @@ describe('Baoyu image skills', () => {
     })).toContain('MUST use type: scene')
     expect(coverConstraintsFromStyle({ signature_motifs: ['MK@Phoenix tag ribbon'] })).toContain('MUST include: MK@Phoenix tag ribbon')
     expect(coverConstraintsFromStyle({ negative: ['no dark background'] })).toContain('MUST NOT include: no dark background')
+  })
+
+  it('requires a structured cover specification before image generation', () => {
+    expect(coverSpecSchema.parse({
+      visual_concept: '笔记本里的 AI 编程工具横评', composition: '横向三栏的工具能力对比布局', text_elements: ['2026 AI编程工具横评'],
+    })).toEqual({
+      visual_concept: '笔记本里的 AI 编程工具横评', composition: '横向三栏的工具能力对比布局', text_elements: ['2026 AI编程工具横评'],
+    })
   })
 })
 
