@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { parseDailyPlanText, textModelForProvider, toolsForContentStep } from './content-job'
+import { imageToolNamesForSkill, parseDailyPlanText, textModelForProvider, toolsForContentStep } from './content-job'
 
 describe('content job tool allowlist', () => {
   it('limits draft orchestration to declared tools', () => {
@@ -9,6 +9,13 @@ describe('content job tool allowlist', () => {
       'loadWritingContext',
       'saveDraft',
     ])
+  })
+})
+
+describe('Baoyu image skills', () => {
+  it('exposes one controlled image-generation tool to both image skills', () => {
+    expect(imageToolNamesForSkill('cover')).toEqual(['generateImageAsset'])
+    expect(imageToolNamesForSkill('illustrations')).toEqual(['generateImageAsset'])
   })
 })
 

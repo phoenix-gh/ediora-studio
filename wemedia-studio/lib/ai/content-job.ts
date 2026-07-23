@@ -1,5 +1,7 @@
 import { createOpenAI } from '@ai-sdk/openai'
 import { generateImage, generateText, stepCountIs, tool } from 'ai'
+import { readFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import { z } from 'zod'
 
 const apiBase = () => (process.env.WMS_API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000/api').replace(/\/$/, '')
@@ -19,6 +21,10 @@ const stepToolNames: Record<ContentStep, string[]> = {
 
 export function toolsForContentStep(step: ContentStep): string[] {
   return stepToolNames[step]
+}
+
+export function imageToolNamesForSkill(step: 'cover' | 'illustrations'): string[] {
+  return ['generateImageAsset']
 }
 
 export function textModelForProvider<T>(provider: { chat: (modelName: string) => T }, modelName: string): T {
@@ -140,21 +146,50 @@ async function configuredImageModel(): Promise<ImageModelConfig> {
   return { apiKey, modelName: process.env.WMS_IMAGE_MODEL ?? 'gpt-image-1', baseURL: process.env.WMS_IMAGE_BASE_URL }
 }
 
+async function baoyuSkillInstructions(step: 'cover' | 'illustrations') {
+  const skillName = step === 'cover' ? 'baoyu-cover-image' : 'baoyu-article-illustrator'
+  const skillPath = join(process.cwd(), 'skills', skillName, 'SKILL.md')
+  try {
+    return await readFile(skillPath, 'utf8')
+  } catch {
+    throw new Error(`Bundled image skill is missing: ${skillName}`)
+  }
+}
+
 async function runImageFlow(job: Awaited<ReturnType<typeof getJob>>, step: 'cover' | 'illustrations') {
   const draftId = Number(job.input.draft_id)
   if (!Number.isSafeInteger(draftId) || draftId <= 0) throw new Error(`${step} flow requires draft_id`)
   const draft = await getDraft(draftId)
   const maxImages = step === 'cover' ? 1 : Math.max(1, Math.min(Number(job.input.max_images) || 1, 4))
-  const style = String(job.input[step === 'cover' ? 'cover_style' : 'image_style'] ?? job.input.note ?? '')
-  const prompt = step === 'cover'
-    ? `Create a clean editorial cover image with no text. Article title: ${draft.title}. Context: ${draft.content.slice(0, 4000)}. Style: ${style}`
-    : `Create an editorial inline illustration with no text for this Chinese article. Title: ${draft.title}. Article: ${draft.content.slice(0, 4000)}. Style: ${style}`
   const image = await configuredImageModel()
   const provider = createOpenAI({ apiKey: image.apiKey, baseURL: image.baseURL })
-  const generated = await generateImage({ model: provider.image(image.modelName), prompt, n: maxImages })
-  const assets = []
-  for (const [index, image] of generated.images.entries()) {
-    assets.push(await saveDraftImage(job.id, draftId, `${step}-${job.id}-${index + 1}.png`, image.uint8Array, image.mediaType))
+  const text = await configuredTextModel()
+  const textProvider = createOpenAI({ apiKey: text.apiKey, baseURL: text.baseURL })
+  const assets: Array<{ id: number; url: string }> = []
+  const style = String(job.input[step === 'cover' ? 'cover_style' : 'image_style'] ?? job.input.note ?? '')
+  const skill = await baoyuSkillInstructions(step)
+  await generateText({
+    model: textModelForProvider(textProvider, text.modelName),
+    instructions: `${skill}\n\nYou are orchestrating image generation for a content job. You must call generateImageAsset to create the requested image assets. Do not claim an image was created unless the tool succeeded. Do not put text in generated images unless the task explicitly requests it.`,
+    prompt: JSON.stringify({ task: step, title: draft.title, article: draft.content.slice(0, 4000), style, max_images: maxImages }),
+    stopWhen: stepCountIs(maxImages + 1),
+    tools: {
+      generateImageAsset: tool({
+        description: 'Generate one raster image from the supplied prompt and save it to this draft. Use this tool for every requested cover or illustration.',
+        inputSchema: z.object({ prompt: z.string().min(20), filename_hint: z.string().min(1).max(80).optional() }),
+        execute: async ({ prompt, filename_hint }) => {
+          if (assets.length >= maxImages) return { error: `Image limit reached (${maxImages})` }
+          const generated = await generateImage({ model: provider.image(image.modelName), prompt, n: 1 })
+          const output = generated.images[0]
+          const asset = await saveDraftImage(job.id, draftId, `${filename_hint ?? step}-${job.id}-${assets.length + 1}.png`, output.uint8Array, output.mediaType)
+          assets.push(asset)
+          return asset
+        },
+      }),
+    },
+  })
+  if (!assets.length) {
+    throw new Error(`The ${step} skill did not call generateImageAsset`)
   }
   return { draft_id: draftId, asset_ids: assets.map(asset => asset.id), asset_urls: assets.map(asset => asset.url) }
 }
