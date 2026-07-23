@@ -5,6 +5,7 @@ import { Bot, ChevronDown, FileSearch, Loader2, MessageSquarePlus, Plus, Send, T
 import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
+import { ChatContextPicker } from '@/components/features/chat/ChatContextPicker'
 import { ChatMarkdown } from '@/components/features/chat/ChatMarkdown'
 import {
   type ChatMessage,
@@ -337,16 +338,15 @@ export function ChatClient() {
                 {sending ? <Loader2 className="animate-spin" /> : <Send />}
               </Button>
             </div>
-            <div className="mt-2 flex flex-wrap gap-2">
-              <select value={skillName} onChange={event => setSkillName(event.target.value)} disabled={sending} className="max-w-56 rounded border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300">
-                <option value="">不使用技能</option>
-                {skills.map(skill => <option key={skill.name} value={skill.name}>{skill.name}{skill.version ? ` · ${skill.version}` : ''}</option>)}
-              </select>
-              <select value={draftId} onChange={event => setDraftId(event.target.value)} disabled={sending} className="max-w-56 rounded border border-zinc-200 bg-white px-2 py-1 text-xs text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300">
-                <option value="">不选择草稿</option>
-                {drafts.map(draft => <option key={draft.id} value={draft.id}>{draft.title || `草稿 #${draft.id}`}</option>)}
-              </select>
-            </div>
+            <ChatContextPicker
+              skills={skills}
+              drafts={drafts}
+              skillName={skillName || undefined}
+              draftId={draftId ? Number(draftId) : undefined}
+              disabled={sending}
+              onSkillNameChange={skill => setSkillName(skill ?? '')}
+              onDraftIdChange={draft => setDraftId(draft ? String(draft) : '')}
+            />
             <p className="mt-2 flex items-center gap-1.5 text-[11px] text-zinc-400"><MessageSquarePlus className="h-3 w-3" />新对话会在发送第一条消息时创建。</p>
           </div>
         </form>

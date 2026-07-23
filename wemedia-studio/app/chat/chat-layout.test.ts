@@ -68,14 +68,17 @@ it('uses lazy new conversations and deletes selected persisted sessions', () => 
   expect(source).toContain('<Trash2')
 })
 
-it('lets a turn select one automatically discovered skill and one draft', () => {
+it('uses one context picker instead of permanent select controls', () => {
   const source = readFileSync(new URL('./ChatClient.tsx', import.meta.url), 'utf8')
 
   expect(source).toContain('Promise.all([listChatSkills(), listChatDrafts()])')
+  expect(source).toContain('<ChatContextPicker')
+  expect(source).toContain("onSkillNameChange={skill => setSkillName(skill ?? '')}")
+  expect(source).toContain("onDraftIdChange={draft => setDraftId(draft ? String(draft) : '')}")
   expect(source).toContain('skillName: skillName || undefined')
   expect(source).toContain('draftId: draftId ? Number(draftId) : undefined')
-  expect(source).toContain('不使用技能')
-  expect(source).toContain('不选择草稿')
+  expect(source).not.toContain('<select value={skillName}')
+  expect(source).not.toContain('<select value={draftId}')
   expect(source).toContain('setSkillName(\'\')')
   expect(source).toContain('setDraftId(\'\')')
 })
