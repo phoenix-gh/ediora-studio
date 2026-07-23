@@ -1,7 +1,7 @@
 'use client'
 
 import { FormEvent, useCallback, useEffect, useRef, useState } from 'react'
-import { Bot, ChevronDown, FileSearch, Loader2, MessageSquarePlus, Plus, Send, Wrench } from 'lucide-react'
+import { Bot, ChevronDown, FileSearch, Loader2, MessageSquarePlus, Plus, Send, Trash2, Wrench } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
@@ -13,6 +13,7 @@ import {
   type ChatSession,
   type UIChatMessage,
   createChatSession,
+  deleteChatSession,
   getChatSession,
   listChatSessions,
   streamChatReply,
@@ -163,14 +164,20 @@ export function ChatClient() {
     bottomRef.current?.scrollIntoView({ behavior: sending ? 'smooth' : 'auto' })
   }, [messages, sending])
 
-  async function createSession() {
+  function startNewConversation() {
+    setActiveSessionId(null)
+    setMessages([])
+    setInput('')
+  }
+
+  async function removeSession(session: ChatSession) {
+    if (!window.confirm(`删除会话“${session.title || '新对话'}”？此操作不可恢复。`)) return
     try {
-      const session = await createChatSession()
-      setSessions(current => [session, ...current])
-      setActiveSessionId(session.id)
-      setMessages([])
+      await deleteChatSession(session.id)
+      setSessions(current => current.filter(currentSession => currentSession.id !== session.id))
+      if (activeSessionId === session.id) startNewConversation()
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : '创建会话失败')
+      toast.error(error instanceof Error ? error.message : '删除会话失败')
     }
   }
 
@@ -257,18 +264,24 @@ export function ChatClient() {
         <div className="border-b border-zinc-100 px-4 py-4 dark:border-zinc-800">
           <div className="flex items-center justify-between gap-3">
             <div><h1 className="font-semibold text-zinc-900 dark:text-zinc-100">AI 助手</h1><p className="mt-0.5 text-xs text-zinc-500">搜索并阅读本地信息源</p></div>
-            <Button size="icon-sm" title="新建对话" onClick={() => void createSession()}><Plus /></Button>
+            <Button size="icon-sm" title="新建对话" onClick={startNewConversation}><Plus /></Button>
           </div>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto p-2">
           {loading ? <div className="flex items-center gap-2 px-3 py-4 text-sm text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" />加载会话…</div> : sessions.length === 0 ? (
             <div className="px-3 py-8 text-center text-sm text-zinc-500">还没有对话。<br />开始提问即可新建。</div>
           ) : sessions.map(session => (
-            <button key={session.id} type="button" onClick={() => void openSession(session.id)}
-              className={cn('mb-1 w-full rounded-lg px-3 py-2.5 text-left transition-colors', activeSessionId === session.id ? 'bg-indigo-50 text-indigo-950 dark:bg-indigo-950/40 dark:text-indigo-100' : 'text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-900')}>
-              <span className="block truncate text-sm font-medium">{session.title || '新对话'}</span>
-              <span className="mt-1 block text-[11px] text-zinc-400">{displayTime(session.updated_at)}</span>
-            </button>
+            <div key={session.id} className="group relative mb-1">
+              <button type="button" onClick={() => void openSession(session.id)}
+                className={cn('w-full rounded-lg px-3 py-2.5 pr-9 text-left transition-colors', activeSessionId === session.id ? 'bg-indigo-50 text-indigo-950 dark:bg-indigo-950/40 dark:text-indigo-100' : 'text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-900')}>
+                <span className="block truncate text-sm font-medium">{session.title || '新对话'}</span>
+                <span className="mt-1 block text-[11px] text-zinc-400">{displayTime(session.updated_at)}</span>
+              </button>
+              <button type="button" title="删除会话" aria-label={`删除会话：${session.title || '新对话'}`} onClick={event => { event.stopPropagation(); void removeSession(session) }}
+                className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-zinc-400 opacity-0 transition hover:bg-zinc-200 hover:text-red-600 group-hover:opacity-100 focus:opacity-100 dark:hover:bg-zinc-800">
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            </div>
           ))}
         </div>
       </aside>

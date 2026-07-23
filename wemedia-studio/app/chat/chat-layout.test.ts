@@ -58,3 +58,12 @@ it('collapses assistant tool activity and hides audit-only messages', () => {
   expect(source).toContain("if (message.role === 'tool') {\n    return null\n  }")
   expect(source).toContain('<ToolActivityGroup parts={toolParts} />')
 })
+
+it('uses lazy new conversations and deletes selected persisted sessions', () => {
+  const source = readFileSync(new URL('./ChatClient.tsx', import.meta.url), 'utf8')
+
+  expect(source).toContain('function startNewConversation()')
+  expect(source).toContain('onClick={startNewConversation}')
+  expect(source).toContain('await deleteChatSession(session.id)')
+  expect(source).toContain('<Trash2')
+})
