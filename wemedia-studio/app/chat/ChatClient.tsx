@@ -19,7 +19,7 @@ import {
 } from '@/lib/api/chat'
 import { cn } from '@/lib/utils'
 
-import { chatContentColumn } from './chat-layout'
+import { chatComposerColumn, chatConversationColumn } from './chat-layout'
 
 type DisplayMessage = Omit<ChatMessage, 'id'> & { id: string | number }
 
@@ -287,15 +287,15 @@ export function ChatClient() {
       </aside>
 
       <section className="flex min-w-0 flex-1 flex-col">
-        <header className="border-b border-zinc-200 bg-white py-4 dark:border-zinc-800 dark:bg-zinc-950">
-          <div className={cn(chatContentColumn, 'flex items-center gap-3')}>
+        <header className="py-4">
+          <div className={cn(chatConversationColumn, 'flex items-center gap-3')}>
             <FileSearch className="h-5 w-5 text-indigo-600" />
             <div><h2 className="font-medium text-zinc-900 dark:text-zinc-100">全局研究助手</h2><p className="text-xs text-zinc-500">可检索写作方案与参考素材；所有工具调用均会记录。</p></div>
           </div>
         </header>
 
         <div className="min-h-0 flex-1 overflow-y-auto py-6">
-          <div className={cn(chatContentColumn, 'flex flex-col gap-5')}>
+          <div className={cn(chatConversationColumn, 'flex flex-col gap-5')}>
             {messages.length === 0 && !loading && (
               <div className="rounded-2xl border border-dashed border-zinc-300 bg-white px-6 py-10 text-center dark:border-zinc-700 dark:bg-zinc-900">
                 <Bot className="mx-auto h-8 w-8 text-indigo-500" />
@@ -309,8 +309,8 @@ export function ChatClient() {
           </div>
         </div>
 
-        <form onSubmit={submit} className="border-t border-zinc-200 bg-zinc-50/70 py-4 dark:border-zinc-800 dark:bg-zinc-950/70">
-          <div className={chatContentColumn}>
+        <form onSubmit={submit} className="py-4">
+          <div className={chatComposerColumn}>
             <div className="flex items-end gap-3 rounded-xl border border-zinc-200 bg-white p-2 transition-colors focus-within:border-indigo-400 dark:border-zinc-700 dark:bg-zinc-900">
               <textarea value={input} onChange={event => setInput(event.target.value)} disabled={sending} rows={2}
                 placeholder="问问本地信息源里的内容…"
