@@ -23,6 +23,7 @@ import {
   listChatSessions,
   streamChatReply,
 } from '@/lib/api/chat'
+import { getJob, imageUrlsForJob, type JobStatus } from '@/lib/api/jobs'
 import { cn } from '@/lib/utils'
 
 import { chatComposerColumn, chatConversationColumn } from './chat-layout'
@@ -65,23 +66,73 @@ function activitySummary(parts: ToolEventPart[]) {
   return `已调用 ${parts.length} 项工具`
 }
 
+function imageJobId(part: ToolEventPart) {
+  if (toolName(part) !== 'generateImage' || !part.output || typeof part.output !== 'object') return null
+  const jobId = (part.output as { jobId?: unknown }).jobId
+  return typeof jobId === 'number' ? jobId : null
+}
+
+function ImageJobPreview({ jobId }: { jobId: number }) {
+  const [status, setStatus] = useState<JobStatus | 'loading'>('loading')
+  const [urls, setUrls] = useState<string[]>([])
+
+  useEffect(() => {
+    let cancelled = false
+    let timer: ReturnType<typeof setInterval> | undefined
+    const refresh = async () => {
+      try {
+        const job = await getJob(jobId)
+        if (cancelled) return
+        setStatus(job.status)
+        setUrls(imageUrlsForJob(job))
+        if (job.status === 'succeeded' || job.status === 'failed' || job.status === 'cancelled') {
+          if (timer) clearInterval(timer)
+        }
+      } catch {
+        if (!cancelled) setStatus('failed')
+      }
+    }
+    void refresh()
+    timer = setInterval(() => void refresh(), 2_000)
+    return () => {
+      cancelled = true
+      if (timer) clearInterval(timer)
+    }
+  }, [jobId])
+
+  if (urls.length > 0) {
+    return <div className="mt-3 grid gap-2 sm:grid-cols-2">
+      {urls.map(url => <a key={url} href={url} target="_blank" rel="noreferrer" className="block overflow-hidden rounded-lg border border-indigo-100 bg-white dark:border-indigo-900 dark:bg-zinc-900">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={url} alt="AI 生成图片" className="aspect-video w-full object-cover" />
+      </a>)}
+    </div>
+  }
+  if (status === 'failed' || status === 'cancelled') return <p className="mt-2 text-xs text-red-600">图片生成失败</p>
+  return <p className="mt-2 text-xs text-indigo-600">图片生成中…</p>
+}
+
 function ToolActivityGroup({ parts, onApproval }: { parts: ToolEventPart[]; onApproval?: (toolCallId: string, approvalId: string, approved: boolean) => void }) {
+  const imageJobIds = [...new Set(parts.map(imageJobId).filter((jobId): jobId is number => jobId !== null))]
   return (
-    <details className="rounded-lg bg-indigo-50/60 px-3 py-2 text-xs text-indigo-950 dark:bg-indigo-950/30 dark:text-indigo-100">
-      <summary className="flex cursor-pointer list-none items-center gap-2 font-medium [&::-webkit-details-marker]:hidden">
-        <Wrench className="h-3.5 w-3.5 text-indigo-500" />
-        <span>{activitySummary(parts)}</span>
-        <ChevronDown className="ml-auto h-3.5 w-3.5 transition-transform [[open]_&]:rotate-180" />
-      </summary>
-      <ul className="mt-2 space-y-1 text-indigo-700 dark:text-indigo-200">
-        {parts.map((part, index) => {
-          const label = toolLabels[toolName(part)] ?? toolName(part)
-          const pending = part.state === 'approval-requested' && part.toolCallId && part.approval?.id
-          const status = pending ? '等待确认' : part.state === 'running' ? '进行中' : part.state === 'approval-responded' ? (part.approval?.approved ? '已批准' : '已拒绝') : '已完成'
-          return <li key={part.toolCallId ?? `${part.type}-${index}`} className="flex flex-wrap items-center justify-between gap-3"><span>{label}</span>{pending && onApproval ? <span className="flex items-center gap-1"><Button type="button" size="xs" onClick={() => onApproval(part.toolCallId!, part.approval!.id!, true)}>批准</Button><Button type="button" size="xs" variant="outline" onClick={() => onApproval(part.toolCallId!, part.approval!.id!, false)}>拒绝</Button></span> : <span className="text-indigo-500">{status}</span>}</li>
-        })}
-      </ul>
-    </details>
+    <div>
+      <details className="rounded-lg bg-indigo-50/60 px-3 py-2 text-xs text-indigo-950 dark:bg-indigo-950/30 dark:text-indigo-100">
+        <summary className="flex cursor-pointer list-none items-center gap-2 font-medium [&::-webkit-details-marker]:hidden">
+          <Wrench className="h-3.5 w-3.5 text-indigo-500" />
+          <span>{activitySummary(parts)}</span>
+          <ChevronDown className="ml-auto h-3.5 w-3.5 transition-transform [[open]_&]:rotate-180" />
+        </summary>
+        <ul className="mt-2 space-y-1 text-indigo-700 dark:text-indigo-200">
+          {parts.map((part, index) => {
+            const label = toolLabels[toolName(part)] ?? toolName(part)
+            const pending = part.state === 'approval-requested' && part.toolCallId && part.approval?.id
+            const status = pending ? '等待确认' : part.state === 'running' ? '进行中' : part.state === 'approval-responded' ? (part.approval?.approved ? '已批准' : '已拒绝') : '已完成'
+            return <li key={part.toolCallId ?? `${part.type}-${index}`} className="flex flex-wrap items-center justify-between gap-3"><span>{label}</span>{pending && onApproval ? <span className="flex items-center gap-1"><Button type="button" size="xs" onClick={() => onApproval(part.toolCallId!, part.approval!.id!, true)}>批准</Button><Button type="button" size="xs" variant="outline" onClick={() => onApproval(part.toolCallId!, part.approval!.id!, false)}>拒绝</Button></span> : <span className="text-indigo-500">{status}</span>}</li>
+          })}
+        </ul>
+      </details>
+      {imageJobIds.map(jobId => <ImageJobPreview key={jobId} jobId={jobId} />)}
+    </div>
   )
 }
 

@@ -1,4 +1,4 @@
-import { apiFetch } from './client'
+import { API_BASE, apiFetch } from './client'
 
 export type JobStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'
 
@@ -32,6 +32,15 @@ export interface ContentJob {
   completed_at: string | null
   steps: ContentJobStep[]
   events: ContentJobEvent[]
+}
+
+export function imageUrlsForJob(job: ContentJob) {
+  const apiOrigin = new URL(API_BASE).origin
+  return job.steps.flatMap(step => {
+    const assetUrls = step.output.asset_urls
+    if (!Array.isArray(assetUrls)) return []
+    return assetUrls.filter((url): url is string => typeof url === 'string')
+  }).map(url => new URL(url, apiOrigin).toString())
 }
 
 export function listJobs() { return apiFetch<{ jobs: ContentJob[] }>('/jobs') }
