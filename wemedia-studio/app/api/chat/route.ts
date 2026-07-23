@@ -3,8 +3,10 @@ import { convertToModelMessages, safeValidateUIMessages, stepCountIs, streamText
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 
-import { latestClientTurn, makeChatTools, modelHistoryCandidates } from '@/lib/ai/chat-tools'
+import { latestClientTurn, modelHistoryCandidates } from '@/lib/ai/chat-tools'
+import { baoyuRuntimeInstructions } from '@/lib/ai/content-job'
 import { discoverSkills } from '@/lib/ai/discover-skills'
+import { openGlobalChatTools } from '@/lib/ai/global-chat-tools'
 
 const requestSchema = z.object({
   sessionId: z.number().int().positive(),
@@ -73,7 +75,13 @@ async function selectedContext(skillName?: string, draftId?: number) {
   if (skillName) {
     const skill = (await discoverSkills()).find(item => item.name === skillName)
     if (!skill) throw new Error('Selected skill is unavailable')
-    context.push(`Selected skill: ${skill.name}\n\n${skill.instructions}`)
+    if (skill.name === 'baoyu-cover-image') {
+      context.push(`Selected skill: ${skill.name}\n\n${baoyuRuntimeInstructions('cover', 1)} Use generateImage to create the cover for the selected draft.`)
+    } else if (skill.name === 'baoyu-article-illustrator') {
+      context.push(`Selected skill: ${skill.name}\n\n${baoyuRuntimeInstructions('illustrations', 1)} Use generateImage to create the illustration for the selected draft.`)
+    } else {
+      context.push(`Selected skill: ${skill.name}\n\n${skill.instructions}`)
+    }
   }
   if (draftId) {
     const response = await fetch(`${apiBase()}/write/drafts/${draftId}`, { cache: 'no-store' })
@@ -103,28 +111,34 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'The latest chat message must be from the user' }, { status: 400 })
   }
 
+  let registry: Awaited<ReturnType<typeof openGlobalChatTools>> | undefined
   try {
     await persistMessage(body.sessionId, { role: 'user', parts: latestMessage.parts })
-    const tools = makeChatTools({ apiBase: apiBase(), sessionId: body.sessionId })
+    registry = await openGlobalChatTools({ apiBase: apiBase(), sessionId: body.sessionId, draftId: body.draftId, skillName: body.skillName })
     const messages = await persistedModelHistory(body.sessionId)
     const modelConfig = await configuredTextModel()
     const context = await selectedContext(body.skillName, body.draftId)
     const provider = createOpenAI({ apiKey: modelConfig.apiKey, baseURL: modelConfig.baseURL })
     const result = streamText({
       model: provider.chat(modelConfig.modelName),
-      instructions: `You are WeMedia Studio’s research assistant. Use the read-only information-source tools when local sources are relevant. Cite source titles in your answer, distinguish source facts from inference, and never claim to have created or changed content.${context ? `\n\nSelected turn context:\n${context}` : ''}`,
-      messages: await convertToModelMessages(messages, { tools, ignoreIncompleteToolCalls: true }),
-      tools,
-      stopWhen: stepCountIs(4),
+      instructions: `You are WeMedia Studio’s global workspace assistant. Use the available tools when they are relevant, clearly distinguish tool results from inference, and only claim an action succeeded after its tool reports success. Sensitive actions may require user approval.${context ? `\n\nSelected turn context:\n${context}` : ''}`,
+      messages: await convertToModelMessages(messages, { tools: registry.tools, ignoreIncompleteToolCalls: true }),
+      tools: registry.tools,
+      stopWhen: stepCountIs(8),
     })
 
     return result.toUIMessageStreamResponse({
       originalMessages: messages,
       onFinish: async ({ responseMessage, isAborted }) => {
-        if (!isAborted) await persistMessage(body.sessionId, { role: 'assistant', parts: responseMessage.parts })
+        try {
+          if (!isAborted) await persistMessage(body.sessionId, { role: 'assistant', parts: responseMessage.parts })
+        } finally {
+          await registry?.close()
+        }
       },
     })
   } catch (error) {
+    await registry?.close()
     const message = error instanceof Error ? error.message : 'Chat request failed'
     return NextResponse.json({ error: message }, { status: 500 })
   }

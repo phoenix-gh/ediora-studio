@@ -1,8 +1,18 @@
+import { readFileSync } from 'node:fs'
+
 import { describe, expect, it } from 'vitest'
 
 import { latestClientTurn, modelHistoryCandidates } from '../../../lib/ai/chat-tools'
 
 describe('global chat model history', () => {
+  it('uses the global MCP registry and image-skill runtime adapter', () => {
+    const source = readFileSync(new URL('./route.ts', import.meta.url), 'utf8')
+
+    expect(source).toContain('openGlobalChatTools')
+    expect(source).toContain('baoyuRuntimeInstructions')
+    expect(source).not.toContain('makeChatTools')
+  })
+
   it('uses only the new client turn instead of client-supplied history', () => {
     const latestTurn = { id: 'new-user-turn', role: 'user', parts: [{ type: 'text', text: '帮我检索资料' }] }
 
