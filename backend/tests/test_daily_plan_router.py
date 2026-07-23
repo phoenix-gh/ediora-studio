@@ -182,6 +182,34 @@ def test_enqueue_daily_plan_uses_draft_job(client, monkeypatch):
     assert captured[0][1]["angle"] == "角度2"
 
 
+def test_enqueue_same_account_group_creates_separate_drafts(client, monkeypatch):
+    plan_id, item_ids = _seed_plan(client)
+    from database import SessionLocal
+    from models import DailyPlanItem
+    from routers.studio import EnqueueOut
+    import routers.studio
+
+    async def _reuse_group_key():
+        async with SessionLocal() as db:
+            item = await db.get(DailyPlanItem, item_ids[2])
+            item.group_key = "g1"
+            await db.commit()
+    _run(_reuse_group_key())
+
+    captured = []
+
+    async def fake_run(flow, ctx, *, account_id, title, source_url=""):
+        captured.append((flow, title, account_id))
+        return EnqueueOut(content_job_id=len(captured), task_id=str(len(captured)), task_ids=[str(len(captured))], pipeline_task_id=len(captured))
+
+    monkeypatch.setattr(routers.studio, "_run_pipeline_chain", fake_run)
+    response = client.post(f"/api/daily-plan/{plan_id}/enqueue", json={"item_ids": [item_ids[0], item_ids[2]]})
+
+    assert response.status_code == 200, response.text
+    assert response.json()["chains"] == 2
+    assert [entry[1] for entry in captured] == ["撞题选题", "独立长文"]
+
+
 def test_generate_400_when_no_quota(client):
     r = client.post("/api/daily-plan/generate")
     assert r.status_code == 400

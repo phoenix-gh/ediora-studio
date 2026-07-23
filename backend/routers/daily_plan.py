@@ -204,8 +204,15 @@ async def enqueue_items(plan_id: int, body: EnqueueItemsIn,
         raise HTTPException(400, "所选条目中没有可入队的（仅 suggested 状态可入队）")
 
     groups: dict[str, list[DailyPlanItem]] = {}
+    group_accounts: dict[str, set[str]] = {}
     for it in todo:
-        groups.setdefault(it.group_key or f"__solo_{it.id}", []).append(it)
+        key = it.group_key or f"__solo_{it.id}"
+        if it.group_key:
+            accounts = group_accounts.setdefault(it.group_key, set())
+            if it.account_id in accounts:
+                key = f"__solo_{it.id}"
+            accounts.add(it.account_id)
+        groups.setdefault(key, []).append(it)
 
     first_task_ids: list[str] = []
     chains = 0
