@@ -135,3 +135,39 @@ def test_rejects_english_only_publishable_draft(client):
     body["quote_draft"] = "OpenAI launched Responses API."
     response = client.post("/api/x/responses/internal/t1/decision", json=body)
     assert response.status_code == 422
+
+
+def test_digest_send_is_idempotent(client, monkeypatch):
+    body = _decision_body()
+    body.update({
+        "action": "comment",
+        "score": 60,
+        "confidence": 0.8,
+        "comment_draft": "这个更新值得关注。",
+        "quote_draft": None,
+    })
+    decision = client.post("/api/x/responses/internal/t1/decision", json=body).json()
+    assert decision["notification_tier"] == "digest"
+    client.put("/api/settings", json={
+        "telegram_bot_token": "token",
+        "telegram_chat_id": "chat",
+    })
+    calls = []
+
+    async def fake_send(token, chat_id, messages, **kwargs):
+        calls.append((token, chat_id, messages))
+        return [901]
+
+    import telegram_notifier
+    monkeypatch.setattr(telegram_notifier, "send_html_messages", fake_send)
+
+    date_key = datetime.now().astimezone().date().isoformat()
+    first = client.post("/api/x/responses/digest/send", json={"date": date_key})
+    second = client.post("/api/x/responses/digest/send", json={"date": date_key})
+
+    assert first.status_code == 200, first.text
+    assert first.json() == {"sent": 1, "message_ids": [901]}
+    assert second.json() == {"sent": 0, "message_ids": []}
+    assert len(calls) == 1
+    listed = client.get("/api/x/responses").json()["items"]
+    assert listed[0]["telegram_status"] == "sent"

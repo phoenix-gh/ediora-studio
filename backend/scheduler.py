@@ -355,96 +355,54 @@ async def scheduled_ref_classify():
         await log("materials", "error", "素材分类异常", str(e))
 
 
-async def scheduled_x_reply_scout():
-    """动态通知：勾选 notify_new_posts 的订阅出新帖时，LLM 评回复价值（0-10）
-    并起草回复建议，交由外部通知适配器推送 Telegram。
-    只看开启时刻（notify_enabled_at）之后采集的帖子，避免积压旧帖刷屏。"""
+async def scheduled_x_response_reconcile():
+    """每五分钟补偿已入库但尚未创建即时响应任务的新帖。"""
     from logger import log
     from config import get_config
-    from datetime import datetime, timezone, timedelta
-    from sqlalchemy import select, func
-    from models import XPost, XSubscription
 
     try:
         cfg = await get_config()
-        # 全局开关：用户可在设置里关闭「回复关注提醒」，关掉后无视各订阅的 notify_new_posts
         if str(cfg.get("x_notify_enabled", "1")).lower() not in ("1", "true", "yes", "on"):
             return
-        minutes = max(5, int(cfg.get("x_reply_scout_interval_minutes", 15)))
-        if not _should_run("x_reply_scout", minutes * 60):
-            return
-
-        batch_size = int(cfg.get("x_reply_scout_batch", 20))
-        now = datetime.now(timezone.utc)
-        cutoff = now - timedelta(hours=48)
-
-        async with SessionLocal() as db:
-            rows = (await db.execute(
-                select(XPost, XSubscription.label)
-                .join(XSubscription, XPost.subscription_id == XSubscription.id)
-                .where(XSubscription.enabled == True)
-                .where(XSubscription.notify_new_posts == True)
-                .where(XPost.is_reply == False)  # 只推原创帖，目标账号发的回复不通知
-                .where(XPost.x_reply_score.is_(None))
-                .where(XPost.published_at >= cutoff)
-                .where(XPost.collected_at >= func.coalesce(XSubscription.notify_enabled_at, now))
-                .order_by(XPost.collected_at.desc())
-                .limit(batch_size)
-            )).all()
-
-        if not rows:
-            return
-
-        from llm import assess_x_reply
-        notified = 0
-        for post, sub_label in rows:
-            try:
-                result = await assess_x_reply({
-                    "username": post.username,
-                    "display_name": post.display_name,
-                    "content": post.content,
-                    "views": post.views,
-                    "reposts": post.reposts,
-                    "likes": post.likes,
-                    "replies": post.replies,
-                })
-                score = result["score"]
-                draft = result.get("draft")
-
-                content_preview = (post.content or "")[:280]
-                msg = (
-                    f"🔔 X 动态 · {sub_label}\n\n"
-                    f"@{post.username}（{post.display_name}）\n"
-                    f"{content_preview}\n\n"
-                    f"👁 {post.views}  ❤️ {post.likes}  🔁 {post.reposts}  💬 {post.replies}\n\n"
-                    f"⭐ 回复价值 {score}/10：{result.get('reason', '')}\n"
-                    + (f"📝 建议回复：\n{draft}\n\n" if draft else "\n")
-                    + f"🔗 {post.url}"
-                )
-                # Delivery is delegated to an optional notification adapter.
-                # Keep the evaluated suggestion in the database; a future normal
-                # notification adapter can deliver it without a local agent CLI.
-                await log("x_reply", "ok", msg)
-
-                async with SessionLocal() as db:
-                    p = await db.get(XPost, post.tweet_id)
-                    if p:
-                        p.x_reply_score = float(score)
-                        p.x_reply_draft = draft
-                        p.x_reply_notified_at = datetime.now(timezone.utc)
-                        await db.commit()
-
-            except Exception as e:
-                await log("x_reply", "error", f"帖子 {post.tweet_id} 评估异常", str(e))
-
-            await asyncio.sleep(1)
-
-        if notified:
-            await log("x_reply", "ok",
-                      f"X 动态通知：{notified}/{len(rows)} 条新帖已推送 Telegram")
-
+        from x_response_service import reconcile_response_jobs
+        result = await reconcile_response_jobs()
+        if result["errors"]:
+            await log(
+                "x_response",
+                "warn",
+                f"即时响应补偿：创建 {result['created']}，入队 {result['enqueued']}",
+                "; ".join(result["errors"]),
+            )
+        elif result["created"]:
+            await log(
+                "x_response",
+                "ok",
+                f"即时响应补偿：创建并入队 {result['enqueued']} 个任务",
+            )
     except Exception as e:
-        await log("x_reply", "error", "X 动态通知异常", str(e))
+        await log("x_response", "error", "即时响应补偿异常", str(e))
+
+
+async def scheduled_x_response_digest():
+    """每天 18:00（Asia/Shanghai）创建并投递一次中等价值摘要任务。"""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    from logger import log
+    from config import get_config
+
+    try:
+        cfg = await get_config()
+        if str(cfg.get("x_notify_enabled", "1")).lower() not in ("1", "true", "yes", "on"):
+            return
+        from job_queue import enqueue_job
+        from x_response_service import create_response_digest_job
+        date_key = datetime.now(ZoneInfo("Asia/Shanghai")).date().isoformat()
+        job, created = await create_response_digest_job(date_key)
+        if created:
+            await enqueue_job(job.id)
+            await log("x_response", "ok", f"即时响应摘要已入队：{date_key}")
+    except Exception as e:
+        await log("x_response", "error", "即时响应摘要入队异常", str(e))
 
 
 async def scheduled_daily_plan():
@@ -485,7 +443,8 @@ def register_jobs(scheduler, cfg):
         (scheduled_wechat,              dict(trigger="interval", minutes=15,          id="wechat_collect",    next_run_time=_first_run(15,  "wechat"))),
         (scheduled_x_collect,           dict(trigger="interval", minutes=5,           id="x_collect_hourly",  next_run_time=_first_run(5,   "x_collect"))),
         (scheduled_reddit,              dict(trigger="interval", minutes=60,          id="reddit_collect",    next_run_time=_first_run(60,  "reddit"))),
-        (scheduled_x_reply_scout,       dict(trigger="interval", minutes=5,           id="x_reply_scout",     next_run_time=_first_run(5,   "x_reply_scout"))),
+        (scheduled_x_response_reconcile,dict(trigger="interval", minutes=5,           id="x_response_reconcile", next_run_time=datetime.now())),
+        (scheduled_x_response_digest,   dict(trigger="cron", hour=18, minute=0, timezone="Asia/Shanghai", id="x_response_digest")),
         (scheduled_daily_plan,          dict(trigger="cron",     hour=8, minute=0,    id="daily_plan")),
     ]
     for func, kwargs in jobs:

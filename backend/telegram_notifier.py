@@ -58,6 +58,39 @@ def render_immediate_messages(decision, post, subscription, web_url: str) -> lis
     return [first, second]
 
 
+def render_digest_messages(
+    rows: list[tuple],
+    date_label: str,
+    web_url: str,
+) -> list[str]:
+    """Render a bounded daily digest while keeping each suggested draft copyable."""
+    header = f"🟡 <b>X 即时响应 · 18:00 摘要</b>\n{html.escape(date_label)}"
+    footer = f'\n\n<a href="{html.escape(web_url, quote=True)}">查看全部待响应</a>'
+    messages: list[str] = []
+    current = header
+    for decision, post, subscription in rows:
+        confidence = round(float(decision.confidence) * 100)
+        block = (
+            f"<b>{ACTION_LABELS.get(decision.action, decision.action)}</b>"
+            f" · {decision.score}分 · {confidence}%\n"
+            f"来源：{html.escape(subscription.label or '@' + post.username)}\n"
+            f"{html.escape(decision.summary_cn)}\n"
+            f"{_draft_blocks(decision)}\n"
+            f'<a href="{html.escape(post.url, quote=True)}">查看原帖</a>'
+        )
+        candidate = f"{current}\n\n{block}"
+        if len(candidate) + len(footer) > MAX_TELEGRAM_TEXT and current != header:
+            messages.append(current + footer)
+            current = f"{header}\n\n{block}"
+        else:
+            current = candidate
+        if len(current) + len(footer) > MAX_TELEGRAM_TEXT:
+            raise ValueError("digest entry exceeds Telegram message limit")
+    if current != header:
+        messages.append(current + footer)
+    return messages
+
+
 async def send_html_messages(
     token: str,
     chat_id: str,

@@ -52,6 +52,27 @@ def test_long_summary_splits_without_splitting_copyable_draft():
     assert all(len(message) < 4096 for message in messages)
 
 
+def test_digest_message_contains_copyable_drafts_and_source_links():
+    from telegram_notifier import render_digest_messages
+
+    rows = [(
+        _decision(score=62, action="comment", comment_draft="这个更新值得关注。", quote_draft=None),
+        SimpleNamespace(username="OpenAI", url="https://x.com/OpenAI/status/1"),
+        SimpleNamespace(label="OpenAI"),
+    )]
+
+    messages = render_digest_messages(
+        rows,
+        "2026-07-25",
+        "http://localhost:3000/x-responses",
+    )
+
+    assert len(messages) == 1
+    assert "18:00 摘要" in messages[0]
+    assert "<pre>这个更新值得关注。</pre>" in messages[0]
+    assert "https://x.com/OpenAI/status/1" in messages[0]
+
+
 def test_send_html_messages_returns_message_ids():
     from telegram_notifier import send_html_messages
 

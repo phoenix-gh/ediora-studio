@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Literal
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, field_validator
@@ -53,6 +54,10 @@ class DecisionIn(BaseModel):
 
 class FeedbackIn(BaseModel):
     status: Literal["used", "ignored"]
+
+
+class DigestIn(BaseModel):
+    date: date
 
 
 def _aware(value: datetime | None) -> datetime | None:
@@ -220,6 +225,58 @@ async def list_responses(
         ).limit(max(1, min(limit, 100)))
     )).all()
     return {"items": [_payload(*row) for row in rows]}
+
+
+@router.post("/digest/send")
+async def send_digest(body: DigestIn, db: AsyncSession = Depends(get_db)):
+    """Send one idempotent Asia/Shanghai digest for the requested calendar day."""
+    shanghai = ZoneInfo("Asia/Shanghai")
+    start = datetime.combine(body.date, time.min, shanghai).astimezone(timezone.utc)
+    end = start + timedelta(days=1)
+    rows = (await db.execute(
+        select(XResponseDecision, XPost, XSubscription)
+        .join(XPost, XPost.tweet_id == XResponseDecision.tweet_id)
+        .join(XSubscription, XSubscription.id == XResponseDecision.subscription_id)
+        .where(XResponseDecision.notification_tier == "digest")
+        .where(XResponseDecision.telegram_status != "sent")
+        .where(XResponseDecision.created_at >= start)
+        .where(XResponseDecision.created_at < end)
+        .order_by(desc(XResponseDecision.score), desc(XPost.published_at))
+    )).all()
+    if not rows:
+        return {"sent": 0, "message_ids": []}
+
+    import telegram_notifier
+    cfg = await get_config()
+    decisions = [row[0] for row in rows]
+    for decision in decisions:
+        decision.telegram_attempts += 1
+    messages = telegram_notifier.render_digest_messages(
+        rows,
+        body.date.isoformat(),
+        "http://localhost:3000/x-responses",
+    )
+    try:
+        message_ids = await telegram_notifier.send_html_messages(
+            cfg.get("telegram_bot_token", ""),
+            cfg.get("telegram_chat_id", ""),
+            messages,
+        )
+    except telegram_notifier.TelegramSendError as exc:
+        for decision in decisions:
+            decision.telegram_status = "failed"
+            decision.telegram_last_error = str(exc)[:500]
+        await db.commit()
+        raise HTTPException(503, str(exc)) from exc
+
+    sent_at = datetime.now(timezone.utc)
+    for decision in decisions:
+        decision.telegram_status = "sent"
+        decision.telegram_message_ids = message_ids
+        decision.telegram_last_error = ""
+        decision.notified_at = sent_at
+    await db.commit()
+    return {"sent": len(decisions), "message_ids": message_ids}
 
 
 @router.get("/{decision_id}")

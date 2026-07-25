@@ -166,6 +166,8 @@ async def patch_subscription(
     if body.max_results is not None:
         sub.max_results = max(1, min(500, body.max_results))
     if body.notify_new_posts is not None and body.notify_new_posts != sub.notify_new_posts:
+        if body.notify_new_posts and sub.kind != "timeline":
+            raise HTTPException(400, "搜索订阅不能开启即时响应")
         sub.notify_new_posts = body.notify_new_posts
         # 只在开启时刻起算，避免把开启前积压的旧帖推送出去
         sub.notify_enabled_at = (
@@ -311,12 +313,30 @@ async def _collect_one(db: AsyncSession, sub: XSubscription) -> int:
         sub.last_error = str(e)[:500]
         await db.commit()
         raise
+    fetched_ids = [p.tweet_id for p in posts]
+    existing_ids: set[str] = set()
+    if fetched_ids:
+        existing_ids = set((await db.execute(
+            select(XPost.tweet_id).where(XPost.tweet_id.in_(fetched_ids))
+        )).scalars().all())
+    fresh_ids = [tweet_id for tweet_id in fetched_ids if tweet_id not in existing_ids]
     for p in posts:
         await db.execute(_upsert_post_stmt(db, sub.id, p))
     sub.last_collected_at = datetime.now(timezone.utc)
     sub.last_error = ""
     await db.commit()
-    return len(posts)
+    if fresh_ids:
+        from x_response_service import dispatch_response_posts
+        dispatch = await dispatch_response_posts(db, sub, fresh_ids)
+        if dispatch["errors"]:
+            from logger import log
+            await log(
+                "x_response",
+                "warn",
+                f"{sub.label} 新帖已入库，但即时响应任务入队失败",
+                "; ".join(dispatch["errors"]),
+            )
+    return len(fresh_ids)
 
 
 @router.post("/subscriptions/{sub_id}/collect-sync")

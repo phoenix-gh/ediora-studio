@@ -439,6 +439,57 @@ def test_patch_notify_on_then_off(client):
     assert r.json()["notify_new_posts"] is False
 
 
+def test_search_subscription_cannot_enable_realtime_response(client):
+    sub = client.post(BASE, json={
+        "kind": "search", "raw_query": "AI lang:zh",
+    }).json()
+
+    response = client.patch(
+        f"{BASE}/{sub['id']}",
+        json={"notify_new_posts": True},
+    )
+
+    assert response.status_code == 400
+    assert "搜索订阅" in response.json()["detail"]
+
+
+def test_repeated_collect_reports_only_genuinely_new_posts(client):
+    sub = client.post(BASE, json={"url": "https://x.com/a"}).json()
+    post = _fake_post("same")
+
+    with patch("routers.x.grab_timeline", new=AsyncMock(return_value=[post])):
+        first = client.post(f"{BASE}/{sub['id']}/collect-sync")
+    with patch("routers.x.grab_timeline", new=AsyncMock(return_value=[post])):
+        second = client.post(f"{BASE}/{sub['id']}/collect-sync")
+
+    assert first.json()["new_posts"] == 1
+    assert second.json()["new_posts"] == 0
+
+
+def test_collect_dispatches_only_fresh_posts(client):
+    sub = client.post(BASE, json={"url": "https://x.com/a"}).json()
+    client.patch(f"{BASE}/{sub['id']}", json={"notify_new_posts": True})
+
+    dispatched: list[list[str]] = []
+
+    async def fake_dispatch(db, subscription, tweet_ids):
+        dispatched.append(list(tweet_ids))
+        return {"created": len(tweet_ids), "enqueued": len(tweet_ids), "errors": []}
+
+    with (
+        patch("routers.x.grab_timeline", new=AsyncMock(return_value=[
+            _fake_post("original"),
+            _fake_post("reply", is_reply=True),
+        ])),
+        patch("x_response_service.dispatch_response_posts", new=fake_dispatch),
+    ):
+        response = client.post(f"{BASE}/{sub['id']}/collect-sync")
+
+    assert response.status_code == 200
+    assert response.json()["new_posts"] == 2
+    assert dispatched == [["original", "reply"]]
+
+
 def test_patch_notify_on_stamps_enabled_at(client):
     """开启动态通知须记录 notify_enabled_at（只推送之后采集的帖子）。"""
     sub = client.post(BASE, json={"url": "https://x.com/a"}).json()

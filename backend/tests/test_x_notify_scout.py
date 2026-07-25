@@ -1,159 +1,178 @@
-"""scheduled_x_reply_scout（动态通知）：只推送勾选订阅在开启之后采集的新帖，
-每帖带 LLM 回复价值评分与建议，经通知适配器推送 Telegram。"""
-import sys
+"""Dispatch, reconciliation, and digest tests for the X response workflow."""
+
 import asyncio
+import sys
+from datetime import datetime, timedelta, timezone
+
 import pytest
-from datetime import datetime, timezone, timedelta
+from sqlalchemy import select
 
 
 @pytest.fixture
-def scheduler_env(monkeypatch, tmp_path):
-    db_file = tmp_path / "test.db"
-    monkeypatch.setenv("WMS_DATABASE_URL", f"sqlite+aiosqlite:///{db_file}")
+def service_env(monkeypatch, tmp_path):
+    monkeypatch.setenv(
+        "WMS_DATABASE_URL",
+        f"sqlite+aiosqlite:///{tmp_path / 'responses.db'}",
+    )
     monkeypatch.setenv("WMS_DISABLE_SCHEDULER", "1")
+    for name in list(sys.modules):
+        if name.startswith((
+            "database", "models", "config", "x_response_service", "scheduler",
+            "content_jobs", "job_queue",
+        )):
+            sys.modules.pop(name, None)
 
-    for mod in list(sys.modules):
-        if mod.startswith(("database", "models", "main", "routers", "config",
-                           "scheduler", "logger", "llm")):
-            sys.modules.pop(mod, None)
+    from database import Base, engine
+    import models  # noqa: F401 - register ORM tables before create_all
 
-    # 隔离调度器状态：不让测试读写开发机真实的 .scheduler_state.json
-    import scheduler
-    monkeypatch.setattr(scheduler, "STATE_FILE", str(tmp_path / "sched_state.json"))
-    scheduler._last_ts.clear()
-    return scheduler
+    async def create_schema():
+        async with engine.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all)
+
+    asyncio.run(create_schema())
 
 
-def test_notify_scout_pushes_only_opted_in_new_posts(scheduler_env, monkeypatch):
-    scheduler = scheduler_env
-    from database import engine, Base, SessionLocal
-    from models import XSubscription, XPost
-    import llm
+def _post(tweet_id, subscription_id, *, now, is_reply=False, age_hours=0):
+    from models import XPost
 
-    async def fake_assess(post):
-        return {"score": 8, "reason": "有观点", "draft": "建议回复内容"}
-    monkeypatch.setattr(llm, "assess_x_reply", fake_assess)
+    return XPost(
+        tweet_id=tweet_id,
+        subscription_id=subscription_id,
+        username="openai",
+        display_name="OpenAI",
+        content=f"announcement {tweet_id}",
+        url=f"https://x.com/openai/status/{tweet_id}",
+        published_at=now - timedelta(hours=age_hours),
+        collected_at=now,
+        is_reply=is_reply,
+    )
 
-    sent: list[tuple] = []
 
-    class FakeProc:
-        returncode = 0
+def test_dispatch_is_eligible_and_idempotent(service_env):
+    from database import SessionLocal
+    from models import ContentJob, XSubscription
+    from x_response_service import dispatch_response_posts
 
-        async def communicate(self):
-            return b"", b""
+    enqueued: list[int] = []
 
-    async def fake_exec(*args, **kwargs):
-        sent.append(args)
-        return FakeProc()
-    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
-
-    now = datetime.now(timezone.utc)
-    enabled_at = now - timedelta(hours=1)
-
-    def _post(tid, sub_id, collected, published=None, is_reply=False):
-        return XPost(
-            tweet_id=tid, subscription_id=sub_id, username="u", display_name="U",
-            content=f"内容 {tid}", url=f"https://x.com/u/status/{tid}",
-            published_at=published or now, collected_at=collected,
-            is_reply=is_reply,
-        )
+    async def enqueue(job_id):
+        enqueued.append(job_id)
 
     async def run():
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-        async with SessionLocal() as db:
-            sub_on = XSubscription(
-                label="通知源", kind="timeline", url="https://x.com/on",
-                enabled=True, notify_new_posts=True, notify_enabled_at=enabled_at,
-                added_at=now,
-            )
-            sub_off = XSubscription(
-                label="静默源", kind="timeline", url="https://x.com/off",
-                enabled=True, notify_new_posts=False, added_at=now,
-            )
-            db.add_all([sub_on, sub_off])
-            await db.commit()
-            await db.refresh(sub_on)
-            await db.refresh(sub_off)
-            db.add_all([
-                # ✓ 勾选订阅、开启后采集 → 推送
-                _post("new_on", sub_on.id, collected=now),
-                # ✗ 开启前采集的积压帖
-                _post("old_on", sub_on.id, collected=enabled_at - timedelta(hours=1)),
-                # ✗ 未勾选订阅
-                _post("any_off", sub_off.id, collected=now),
-                # ✗ 发布超过 48h 窗口
-                _post("stale_on", sub_on.id, collected=now,
-                      published=now - timedelta(hours=72)),
-                # ✗ 目标账号发的回复（只推原创帖）
-                _post("reply_on", sub_on.id, collected=now, is_reply=True),
-            ])
-            await db.commit()
-
-        await scheduler.scheduled_x_reply_scout()
-
-        async with SessionLocal() as db:
-            return {tid: await db.get(XPost, tid)
-                    for tid in ("new_on", "old_on", "any_off", "stale_on", "reply_on")}
-
-    posts = asyncio.new_event_loop().run_until_complete(run())
-
-    assert len(sent) == 1
-    args = sent[0]
-    assert args[1:4] == ("send", "--to", "telegram")
-    msg = args[-1]
-    assert "new_on" in msg            # 帖子链接
-    assert "8/10" in msg              # 是否值得回复的评分
-    assert "建议回复内容" in msg       # LLM 回复建议
-    assert "通知源" in msg            # 订阅名
-
-    assert posts["new_on"].x_reply_score == 8.0
-    assert posts["new_on"].x_reply_draft == "建议回复内容"
-    assert posts["new_on"].x_reply_notified_at is not None
-    for tid in ("old_on", "any_off", "stale_on", "reply_on"):
-        assert posts[tid].x_reply_score is None, tid
-        assert posts[tid].x_reply_notified_at is None, tid
-
-
-def test_notify_scout_noop_when_nothing_opted_in(scheduler_env, monkeypatch):
-    """没有勾选动态通知的订阅时，不调 LLM、不发推送。"""
-    scheduler = scheduler_env
-    from database import engine, Base, SessionLocal
-    from models import XSubscription, XPost
-    import llm
-
-    calls = {"assess": 0, "send": 0}
-
-    async def fake_assess(post):
-        calls["assess"] += 1
-        return {"score": 8, "reason": "", "draft": "x"}
-    monkeypatch.setattr(llm, "assess_x_reply", fake_assess)
-
-    async def fake_exec(*args, **kwargs):
-        calls["send"] += 1
-        raise AssertionError("should not spawn hermes")
-    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
-
-    now = datetime.now(timezone.utc)
-
-    async def run():
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
+        now = datetime.now(timezone.utc)
         async with SessionLocal() as db:
             sub = XSubscription(
-                label="普通源", kind="timeline", url="https://x.com/plain",
-                enabled=True, notify_new_posts=False, added_at=now,
+                label="OpenAI",
+                kind="timeline",
+                url="https://x.com/openai",
+                enabled=True,
+                notify_new_posts=True,
+                notify_enabled_at=now - timedelta(minutes=5),
+                added_at=now,
             )
             db.add(sub)
             await db.commit()
             await db.refresh(sub)
-            db.add(XPost(
-                tweet_id="t1", subscription_id=sub.id, username="u",
-                display_name="U", content="c", url="https://x.com/u/status/t1",
-                published_at=now, collected_at=now,
+            db.add_all([
+                _post("fresh", sub.id, now=now),
+                _post("reply", sub.id, now=now, is_reply=True),
+                _post("stale", sub.id, now=now, age_hours=72),
+            ])
+            await db.commit()
+
+            first = await dispatch_response_posts(
+                db, sub, ["fresh", "reply", "stale"], enqueue=enqueue,
+            )
+            second = await dispatch_response_posts(
+                db, sub, ["fresh"], enqueue=enqueue,
+            )
+            jobs = (await db.execute(select(ContentJob))).scalars().all()
+            return first, second, jobs
+
+    first, second, jobs = asyncio.run(run())
+    assert first == {"created": 1, "enqueued": 1, "errors": []}
+    assert second == {"created": 0, "enqueued": 0, "errors": []}
+    assert len(jobs) == 1
+    assert jobs[0].idempotency_key == "x-response:fresh"
+    assert jobs[0].input_data == {"tweet_id": "fresh"}
+    assert enqueued == [jobs[0].id]
+
+
+def test_reconciliation_creates_only_missing_jobs(service_env):
+    from database import SessionLocal
+    from models import ContentJob, XResponseDecision, XSubscription
+    from x_response_service import ensure_response_job, reconcile_response_jobs
+
+    enqueued: list[int] = []
+
+    async def enqueue(job_id):
+        enqueued.append(job_id)
+
+    async def run():
+        now = datetime.now(timezone.utc)
+        async with SessionLocal() as db:
+            sub = XSubscription(
+                label="OpenAI",
+                kind="timeline",
+                url="https://x.com/openai",
+                enabled=True,
+                notify_new_posts=True,
+                notify_enabled_at=now - timedelta(minutes=10),
+                added_at=now,
+            )
+            db.add(sub)
+            await db.commit()
+            await db.refresh(sub)
+            db.add_all([
+                _post("missing", sub.id, now=now),
+                _post("has-job", sub.id, now=now),
+                _post("decided", sub.id, now=now),
+            ])
+            await db.commit()
+            await ensure_response_job(db, "has-job")
+            db.add(XResponseDecision(
+                tweet_id="decided",
+                subscription_id=sub.id,
+                action="ignore",
+                score=10,
+                confidence=0.9,
             ))
             await db.commit()
-        await scheduler.scheduled_x_reply_scout()
 
-    asyncio.new_event_loop().run_until_complete(run())
-    assert calls == {"assess": 0, "send": 0}
+        result = await reconcile_response_jobs(enqueue=enqueue)
+        async with SessionLocal() as db:
+            jobs = (await db.execute(select(ContentJob))).scalars().all()
+            return result, jobs
+
+    result, jobs = asyncio.run(run())
+    assert result == {"created": 1, "enqueued": 1, "errors": []}
+    assert {job.idempotency_key for job in jobs} == {
+        "x-response:has-job",
+        "x-response:missing",
+    }
+    assert len(enqueued) == 1
+
+
+def test_daily_digest_job_is_idempotent(service_env):
+    from database import SessionLocal
+    from models import ContentJob
+    from x_response_service import create_response_digest_job
+
+    async def run():
+        async with SessionLocal() as db:
+            first, first_created = await create_response_digest_job(
+                "2026-07-25", db=db,
+            )
+            second, second_created = await create_response_digest_job(
+                "2026-07-25", db=db,
+            )
+            jobs = (await db.execute(select(ContentJob))).scalars().all()
+            return first, first_created, second, second_created, jobs
+
+    first, first_created, second, second_created, jobs = asyncio.run(run())
+    assert first_created is True
+    assert second_created is False
+    assert first.id == second.id
+    assert len(jobs) == 1
+    assert jobs[0].flow == "x_response_digest"
+    assert jobs[0].idempotency_key == "x-response-digest:2026-07-25"

@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
-from typing import Any
+from datetime import datetime, timedelta, timezone
+from typing import Any, Awaitable, Callable
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from models import XPost, XResponseDecision
+from content_jobs import create_job
+from models import ContentJob, XPost, XResponseDecision, XSubscription
 
 
 IMMEDIATE_SCORE = 75
@@ -16,6 +18,177 @@ MIN_IMMEDIATE_CONFIDENCE = 0.70
 POLICY_VERSION = "x-response-v1"
 VALID_ACTIONS = {"comment", "translate_quote", "watch", "ignore"}
 VALID_VERIFICATION = {"verified", "not_required", "unverified"}
+
+
+def _aware(value: datetime | None) -> datetime | None:
+    if value is None or value.tzinfo is not None:
+        return value
+    return value.replace(tzinfo=timezone.utc)
+
+
+def _post_is_eligible(
+    post: XPost,
+    subscription: XSubscription,
+    *,
+    now: datetime | None = None,
+) -> bool:
+    current = now or datetime.now(timezone.utc)
+    if (
+        subscription.kind != "timeline"
+        or not subscription.enabled
+        or not subscription.notify_new_posts
+        or post.is_reply
+    ):
+        return False
+    enabled_at = _aware(subscription.notify_enabled_at)
+    collected_at = _aware(post.collected_at)
+    published_at = _aware(post.published_at)
+    return bool(
+        enabled_at
+        and collected_at
+        and collected_at >= enabled_at
+        and published_at
+        and published_at >= current - timedelta(hours=48)
+    )
+
+
+async def ensure_response_job(
+    db: AsyncSession,
+    tweet_id: str,
+) -> tuple[ContentJob, bool]:
+    """Return the one durable response job for a tweet, creating it if absent."""
+    key = f"x-response:{tweet_id}"
+    existing = (await db.execute(
+        select(ContentJob).where(ContentJob.idempotency_key == key)
+    )).scalar_one_or_none()
+    if existing is not None:
+        return existing, False
+
+    post = await db.get(XPost, tweet_id)
+    if post is None:
+        raise KeyError(f"X post {tweet_id} not found")
+    job = await create_job(
+        db,
+        flow="x_response",
+        title=f"即时响应 @{post.username}",
+        input_data={"tweet_id": tweet_id},
+        idempotency_key=key,
+    )
+    return job, True
+
+
+async def dispatch_response_posts(
+    db: AsyncSession,
+    subscription: XSubscription,
+    tweet_ids: list[str],
+    *,
+    enqueue: Callable[[int], Awaitable[None]] | None = None,
+) -> dict[str, Any]:
+    """Create and enqueue jobs only for newly collected, eligible original posts."""
+    result: dict[str, Any] = {"created": 0, "enqueued": 0, "errors": []}
+    if (
+        not tweet_ids
+        or subscription.kind != "timeline"
+        or not subscription.enabled
+        or not subscription.notify_new_posts
+    ):
+        return result
+    if enqueue is None:
+        from job_queue import enqueue_job
+        enqueue = enqueue_job
+
+    posts = (await db.execute(
+        select(XPost).where(XPost.tweet_id.in_(tweet_ids))
+    )).scalars().all()
+    for post in posts:
+        if not _post_is_eligible(post, subscription):
+            continue
+        job, created = await ensure_response_job(db, post.tweet_id)
+        if not created:
+            continue
+        result["created"] += 1
+        try:
+            await enqueue(job.id)
+            result["enqueued"] += 1
+        except Exception as exc:
+            result["errors"].append(f"{post.tweet_id}: {exc}")
+    return result
+
+
+async def reconcile_response_jobs(
+    *,
+    enqueue: Callable[[int], Awaitable[None]] | None = None,
+) -> dict[str, Any]:
+    """Repair posts that were committed but never received a durable job."""
+    from database import SessionLocal
+
+    result: dict[str, Any] = {"created": 0, "enqueued": 0, "errors": []}
+    if enqueue is None:
+        from job_queue import enqueue_job
+        enqueue = enqueue_job
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=48)
+
+    async with SessionLocal() as db:
+        rows = (await db.execute(
+            select(XPost, XSubscription)
+            .join(XSubscription, XSubscription.id == XPost.subscription_id)
+            .where(XSubscription.kind == "timeline")
+            .where(XSubscription.enabled.is_(True))
+            .where(XSubscription.notify_new_posts.is_(True))
+            .where(XPost.is_reply.is_(False))
+            .where(XPost.published_at >= cutoff)
+            .order_by(XPost.collected_at)
+        )).all()
+        for post, subscription in rows:
+            if not _post_is_eligible(post, subscription):
+                continue
+            decision = (await db.execute(
+                select(XResponseDecision.id).where(
+                    XResponseDecision.tweet_id == post.tweet_id
+                )
+            )).scalar_one_or_none()
+            if decision is not None:
+                continue
+            job, created = await ensure_response_job(db, post.tweet_id)
+            if not created:
+                continue
+            result["created"] += 1
+            try:
+                await enqueue(job.id)
+                result["enqueued"] += 1
+            except Exception as exc:
+                result["errors"].append(f"{post.tweet_id}: {exc}")
+    return result
+
+
+async def create_response_digest_job(
+    date_key: str,
+    *,
+    db: AsyncSession | None = None,
+) -> tuple[ContentJob, bool]:
+    """Create the one Asia/Shanghai digest job for a calendar date."""
+    from database import SessionLocal
+
+    async def ensure(session: AsyncSession) -> tuple[ContentJob, bool]:
+        key = f"x-response-digest:{date_key}"
+        existing = (await session.execute(
+            select(ContentJob).where(ContentJob.idempotency_key == key)
+        )).scalar_one_or_none()
+        if existing is not None:
+            return existing, False
+        job = await create_job(
+            session,
+            flow="x_response_digest",
+            title=f"X 即时响应摘要 {date_key}",
+            input_data={"date": date_key},
+            idempotency_key=key,
+        )
+        return job, True
+
+    if db is not None:
+        return await ensure(db)
+    async with SessionLocal() as session:
+        return await ensure(session)
 
 
 def notification_tier(score: int, confidence: float, verification_status: str) -> str:
