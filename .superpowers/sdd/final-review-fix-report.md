@@ -68,3 +68,45 @@ remains an operator step with saved credentials. `sending` and `unknown`
 delivery states intentionally require manual inspection before any resend.
 The cross-process credential lock targets the documented Linux/Compose
 runtime.
+
+## Scoped re-review continuation
+
+The scoped re-review found and closed two regressions introduced by this fix
+wave:
+
+1. `migrate_x_response_claim_schema()` now branches on the live SQLAlchemy
+   connection dialect. SQLite inspects `PRAGMA table_info`, uses plain
+   `ADD COLUMN` only when missing, and creates the claim-token index
+   idempotently. PostgreSQL retains `ADD COLUMN IF NOT EXISTS`. Tests cover
+   both an existing SQLite table and a newly created schema.
+2. Telegram notification failures now expose a safe `X-WMS-Retryable`
+   response header. The TypeScript API error preserves that flag through
+   `failStep`; both immediate and digest workers persist the real retryability
+   instead of hardcoding `true`. Permanent 4xx and unknown/partial delivery
+   are non-retryable, while definitive 429/5xx responses remain retryable.
+
+The directly related operator UI now renders `推送中` and
+`投递状态待确认`, including known Telegram message IDs and the safe stored
+error for manual inspection.
+
+Continuation TDD evidence:
+
+- SQLite migration / backend retryability RED: `4 failed, 1 passed`; GREEN:
+  `5 passed`.
+- Worker retryability / manual-inspection UI RED: `4 failed, 8 passed`;
+  GREEN: `3` files and `12` tests passed.
+
+Continuation commits:
+
+- `decded6` `fix(db): migrate Telegram claim schema on SQLite`
+- `f7dc55a` `fix(telegram): propagate delivery retryability to jobs`
+
+Fresh full verification after the continuation:
+
+- Backend: `341 passed in 155.44s`.
+- Frontend: `31 passed` test files, `108 passed` tests.
+- TypeScript: `pnpm exec tsc --noEmit` exited 0.
+- Production build: Next.js 16.2.4 compiled and generated all routes.
+- Python compilation, Compose validation, and
+  `git diff --check eb8e73c..HEAD` all exited 0.
+- No real X or Telegram service was called.
