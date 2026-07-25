@@ -433,3 +433,81 @@ def test_account_probe_redacts_and_truncates_persisted_error(client, monkeypatch
     assert "auth_token=***" in tested["last_test_error"]
     for secret in ("probe-auth-secret", "probe-csrf-secret", "telegram-secret"):
         assert secret not in response.text
+
+
+def test_concurrent_creates_use_distinct_slots_and_files(client):
+    from database import SessionLocal
+    from routers.x_accounts import XCredentialAccountCreate, create_x_account
+
+    async def create(name, token):
+        async with SessionLocal() as db:
+            return await create_x_account(
+                XCredentialAccountCreate(
+                    name=name,
+                    auth_token=token,
+                    ct0=f"{token}-csrf",
+                ),
+                db,
+            )
+
+    async def run():
+        return await asyncio.gather(
+            create("并发账号 A", "token-a"),
+            create("并发账号 B", "token-b"),
+        )
+
+    asyncio.run(run())
+
+    files = sorted(session_dir().glob("x_[0-9]*.json"))
+    assert [path.name for path in files] == ["x_1.json", "x_2.json"]
+    payloads = {path.read_text() for path in files}
+    assert payloads == {
+        '{"auth_token":"token-a","ct0":"token-a-csrf"}',
+        '{"auth_token":"token-b","ct0":"token-b-csrf"}',
+    }
+    accounts = client.get("/api/x/accounts").json()["accounts"]
+    assert {row["name"] for row in accounts} == {"并发账号 A", "并发账号 B"}
+
+
+def test_reconcile_restores_precommit_quarantine_for_existing_db_slot(client):
+    account = create_account(client)
+    from database import SessionLocal
+    from routers.x_accounts import reconcile_x_credential_accounts
+    from x_credential_store import CredentialFileStore
+
+    store = CredentialFileStore(session_dir())
+    quarantine = store.quarantine(1)
+    assert quarantine.path.exists()
+    assert not (session_dir() / "x_1.json").exists()
+
+    async def reconcile():
+        async with SessionLocal() as db:
+            return await reconcile_x_credential_accounts(db, store)
+
+    assert asyncio.run(reconcile()) == []
+    assert (session_dir() / "x_1.json").exists()
+    assert not quarantine.path.exists()
+    assert client.get("/api/x/accounts").json()["accounts"][0]["id"] == account["id"]
+
+
+def test_reconcile_cleans_postcommit_quarantine_when_db_slot_is_gone(client):
+    account = create_account(client)
+    from database import SessionLocal
+    from models import XCredentialAccount
+    from routers.x_accounts import reconcile_x_credential_accounts
+    from x_credential_store import CredentialFileStore
+
+    store = CredentialFileStore(session_dir())
+    quarantine = store.quarantine(1)
+
+    async def remove_db_then_reconcile():
+        async with SessionLocal() as db:
+            row = await db.get(XCredentialAccount, account["id"])
+            await db.delete(row)
+            await db.commit()
+        async with SessionLocal() as db:
+            return await reconcile_x_credential_accounts(db, store)
+
+    assert asyncio.run(remove_db_then_reconcile()) == []
+    assert not quarantine.path.exists()
+    assert not list(session_dir().glob("x_[0-9]*.json"))

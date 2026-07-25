@@ -2,6 +2,7 @@ import os
 import re
 import json
 import tempfile
+import fcntl
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -19,6 +20,9 @@ def resolve_session_dir() -> Path:
 
 MANAGED_ACTIVE = re.compile(r"^x_(\d+)\.json$")
 MANAGED_DISABLED = re.compile(r"^x_(\d+)\.disabled\.json$")
+QUARANTINED = re.compile(
+    r"^\.x-credential-quarantine-(\d+)\.(active|disabled)\.json$"
+)
 
 
 @dataclass(frozen=True)
@@ -32,6 +36,13 @@ class CredentialFileSnapshot:
     slot: int
     active: bytes | None
     disabled: bytes | None
+
+
+@dataclass(frozen=True)
+class CredentialFileQuarantine:
+    snapshot: CredentialFileSnapshot
+    path: Path
+    was_enabled: bool
 
 
 class CredentialFileError(RuntimeError):
@@ -60,6 +71,25 @@ class CredentialFileStore:
         while slot in occupied:
             slot += 1
         return slot
+
+    def acquire_lock(self):
+        self._ensure_directory()
+        path = self.directory / ".x-credential-pool.lock"
+        handle = path.open("a+b")
+        os.chmod(path, 0o600)
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        except Exception:
+            handle.close()
+            raise
+        return handle
+
+    @staticmethod
+    def release_lock(handle) -> None:
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        finally:
+            handle.close()
 
     def _atomic_write(self, path: Path, payload: bytes) -> None:
         self._ensure_directory()
@@ -136,6 +166,63 @@ class CredentialFileStore:
             self.restore(previous)
             raise
         return previous
+
+    def quarantine(self, slot: int) -> CredentialFileQuarantine:
+        """Hide one managed credential without permanently deleting it."""
+        self._ensure_directory()
+        previous = self.snapshot(slot)
+        active, disabled = self._paths(slot)
+        existing = [path for path in (active, disabled) if path.exists()]
+        if len(existing) != 1:
+            raise CredentialFileError("托管凭据文件不存在或状态冲突")
+        source = existing[0]
+        was_enabled = source == active
+        state = "active" if was_enabled else "disabled"
+        destination = self.directory / (
+            f".x-credential-quarantine-{slot}.{state}.json"
+        )
+        if destination.exists():
+            raise CredentialFileError("托管凭据隔离文件状态冲突")
+        os.replace(source, destination)
+        os.chmod(destination, 0o600)
+        return CredentialFileQuarantine(previous, destination, was_enabled)
+
+    def restore_quarantine(self, quarantine: CredentialFileQuarantine) -> None:
+        if not quarantine.path.exists():
+            self.restore(quarantine.snapshot)
+            return
+        active, disabled = self._paths(quarantine.snapshot.slot)
+        destination = active if quarantine.was_enabled else disabled
+        if active.exists() or disabled.exists():
+            raise CredentialFileError("托管凭据文件状态冲突")
+        os.replace(quarantine.path, destination)
+        os.chmod(destination, 0o600)
+
+    def finalize_quarantine(self, quarantine: CredentialFileQuarantine) -> None:
+        quarantine.path.unlink(missing_ok=True)
+
+    def reconcile_quarantines(self, managed_slots: set[int]) -> list[str]:
+        """Recover pre-commit deletes and finish post-commit deletes."""
+        if not self.directory.exists():
+            return []
+        errors: list[str] = []
+        for path in sorted(self.directory.iterdir()):
+            match = QUARANTINED.match(path.name)
+            if not match or not path.is_file():
+                continue
+            slot = int(match.group(1))
+            if slot not in managed_slots:
+                path.unlink(missing_ok=True)
+                continue
+            was_enabled = match.group(2) == "active"
+            active, disabled = self._paths(slot)
+            destination = active if was_enabled else disabled
+            if active.exists() or disabled.exists():
+                errors.append(f"账号凭据槽位 {slot} 的隔离文件状态冲突")
+                continue
+            os.replace(path, destination)
+            os.chmod(destination, 0o600)
+        return errors
 
     def restore(self, previous: CredentialFileSnapshot) -> None:
         active, disabled = self._paths(previous.slot)

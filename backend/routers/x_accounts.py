@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -148,6 +150,15 @@ def _restore_after_commit_failure(store: CredentialFileStore, snapshot) -> None:
         store.restore(snapshot)
 
 
+@asynccontextmanager
+async def _credential_mutation_lock(store: CredentialFileStore):
+    handle = await asyncio.to_thread(store.acquire_lock)
+    try:
+        yield
+    finally:
+        await asyncio.to_thread(store.release_lock, handle)
+
+
 @router.get("", response_model=XCredentialPoolOut)
 async def list_x_accounts(db: AsyncSession = Depends(get_db)):
     return await _pool(db, CredentialFileStore())
@@ -159,28 +170,29 @@ async def create_x_account(
     db: AsyncSession = Depends(get_db),
 ):
     store = CredentialFileStore()
-    reserved_slots = set((await db.execute(
-        select(XCredentialAccount.credential_slot)
-    )).scalars())
-    slot = store.allocate_slot(reserved_slots)
-    pair = CredentialPair(body.auth_token, body.ct0)
-    account = XCredentialAccount(
-        name=body.name,
-        enabled=body.enabled,
-        credential_slot=slot,
-        auth_token_preview=credential_preview(pair.auth_token),
-        ct0_preview=credential_preview(pair.ct0),
-    )
-    db.add(account)
-    snapshot = None
-    try:
-        await db.flush()
-        snapshot = store.write(slot, body.enabled, pair)
-        await db.commit()
-    except Exception:
-        await db.rollback()
-        _restore_after_commit_failure(store, snapshot)
-        raise
+    async with _credential_mutation_lock(store):
+        reserved_slots = set((await db.execute(
+            select(XCredentialAccount.credential_slot)
+        )).scalars())
+        slot = store.allocate_slot(reserved_slots)
+        pair = CredentialPair(body.auth_token, body.ct0)
+        account = XCredentialAccount(
+            name=body.name,
+            enabled=body.enabled,
+            credential_slot=slot,
+            auth_token_preview=credential_preview(pair.auth_token),
+            ct0_preview=credential_preview(pair.ct0),
+        )
+        db.add(account)
+        snapshot = None
+        try:
+            await db.flush()
+            snapshot = store.write(slot, body.enabled, pair)
+            await db.commit()
+        except Exception:
+            await db.rollback()
+            _restore_after_commit_failure(store, snapshot)
+            raise
     return await _pool(db, store)
 
 
@@ -190,52 +202,54 @@ async def patch_x_account(
     body: XCredentialAccountPatch = Depends(parse_x_credential_account_patch),
     db: AsyncSession = Depends(get_db),
 ):
-    account = await db.get(XCredentialAccount, account_id)
-    if account is None:
-        raise HTTPException(404, "account not found")
-
     store = CredentialFileStore()
-    replacing_credentials = bool((body.auth_token or "").strip())
-    changing_enabled = body.enabled is not None and body.enabled != account.enabled
-    next_enabled = body.enabled if body.enabled is not None else account.enabled
-    snapshot = None
-    try:
-        if replacing_credentials:
-            pair = CredentialPair(body.auth_token.strip(), body.ct0.strip())
-            snapshot = store.write(account.credential_slot, next_enabled, pair)
-            account.auth_token_preview = credential_preview(pair.auth_token)
-            account.ct0_preview = credential_preview(pair.ct0)
-            reset_test_status(account)
-        elif changing_enabled:
-            snapshot = store.set_enabled(account.credential_slot, next_enabled)
-        if body.name is not None:
-            account.name = body.name
-        if body.enabled is not None:
-            account.enabled = body.enabled
-        await db.commit()
-    except Exception:
-        await db.rollback()
-        _restore_after_commit_failure(store, snapshot)
-        raise
+    async with _credential_mutation_lock(store):
+        account = await db.get(XCredentialAccount, account_id)
+        if account is None:
+            raise HTTPException(404, "account not found")
+
+        replacing_credentials = bool((body.auth_token or "").strip())
+        changing_enabled = body.enabled is not None and body.enabled != account.enabled
+        next_enabled = body.enabled if body.enabled is not None else account.enabled
+        snapshot = None
+        try:
+            if replacing_credentials:
+                pair = CredentialPair(body.auth_token.strip(), body.ct0.strip())
+                snapshot = store.write(account.credential_slot, next_enabled, pair)
+                account.auth_token_preview = credential_preview(pair.auth_token)
+                account.ct0_preview = credential_preview(pair.ct0)
+                reset_test_status(account)
+            elif changing_enabled:
+                snapshot = store.set_enabled(account.credential_slot, next_enabled)
+            if body.name is not None:
+                account.name = body.name
+            if body.enabled is not None:
+                account.enabled = body.enabled
+            await db.commit()
+        except Exception:
+            await db.rollback()
+            _restore_after_commit_failure(store, snapshot)
+            raise
     return await _pool(db, store)
 
 
 @router.delete("/{account_id}", response_model=XCredentialPoolOut)
 async def delete_x_account(account_id: int, db: AsyncSession = Depends(get_db)):
-    account = await db.get(XCredentialAccount, account_id)
-    if account is None:
-        raise HTTPException(404, "account not found")
-
     store = CredentialFileStore()
-    snapshot = None
-    try:
-        snapshot = store.delete(account.credential_slot)
-        await db.delete(account)
-        await db.commit()
-    except Exception:
-        await db.rollback()
-        _restore_after_commit_failure(store, snapshot)
-        raise
+    async with _credential_mutation_lock(store):
+        account = await db.get(XCredentialAccount, account_id)
+        if account is None:
+            raise HTTPException(404, "account not found")
+
+        quarantine = store.quarantine(account.credential_slot)
+        try:
+            await db.delete(account)
+            await db.commit()
+        except Exception:
+            await db.rollback()
+            store.restore_quarantine(quarantine)
+            raise
+        store.finalize_quarantine(quarantine)
     return await _pool(db, store)
 
 
@@ -262,7 +276,10 @@ async def reconcile_x_credential_accounts(
     """Repair only DB-owned files and report inconsistent account records."""
     errors: list[str] = []
     snapshots = []
-    for account in await _accounts(db):
+    accounts = await _accounts(db)
+    managed_slots = {account.credential_slot for account in accounts}
+    errors.extend(store.reconcile_quarantines(managed_slots))
+    for account in accounts:
         try:
             pair = store.read(account.credential_slot)
         except CredentialFileError as exc:

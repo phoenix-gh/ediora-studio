@@ -140,3 +140,26 @@ def test_non_write_lifecycle_operations_repair_directory_mode(tmp_path, operatio
         store.delete(3)
 
     assert stat.S_IMODE(tmp_path.stat().st_mode) == 0o700
+
+
+def test_quarantine_is_hidden_until_finalized_or_restored(tmp_path):
+    store = CredentialFileStore(tmp_path)
+    pair = CredentialPair("token", "csrf")
+    store.write(3, True, pair)
+
+    quarantine = store.quarantine(3)
+
+    assert not (tmp_path / "x_3.json").exists()
+    assert quarantine.path.exists()
+    assert quarantine.path.name.startswith(".x-credential-quarantine-")
+    assert store.external_sessions(set()) == []
+
+    store.restore_quarantine(quarantine)
+    assert store.read(3) == pair
+    assert not quarantine.path.exists()
+
+    quarantine = store.quarantine(3)
+    store.finalize_quarantine(quarantine)
+    assert not quarantine.path.exists()
+    with pytest.raises(CredentialFileError):
+        store.read(3)
