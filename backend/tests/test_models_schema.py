@@ -18,7 +18,7 @@ def db_session(monkeypatch, tmp_path):
 
 
 def test_new_columns_exist_with_defaults(db_session):
-    from models import XSubscription, XPost, RefCollectRule
+    from models import XSubscription, XPost
     from datetime import datetime, timezone
 
     async def _run():
@@ -34,8 +34,4 @@ def test_new_columns_exist_with_defaults(db_session):
             db.add(post); await db.commit(); await db.refresh(post)
             assert post.possibly_sensitive is True
 
-            rule = RefCollectRule(label="r", source_subscription_id=sub.id,
-                                  added_at=datetime.now(timezone.utc))
-            db.add(rule); await db.commit(); await db.refresh(rule)
-            assert rule.source_subscription_id == sub.id
     asyncio.new_event_loop().run_until_complete(_run())

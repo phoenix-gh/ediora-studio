@@ -16,9 +16,6 @@ export function XSection({ settings, onSaved }: { settings: AppSettings | null; 
   const [loading, setLoading] = useState(true)
 
   const [xInterval, setXInterval] = useState(settings?.x_collect_interval_minutes ?? 15)
-  const [collectInterval, setCollectInterval] = useState(settings?.ref_collect_interval_minutes ?? 15)
-  const [cleanInterval, setCleanInterval] = useState(settings?.ref_classify_interval_minutes ?? 30)
-  const [batchSize, setBatchSize] = useState(settings?.clean_batch_size ?? 20)
   const [notifyEnabled, setNotifyEnabled] = useState(settings?.x_notify_enabled ?? true)
   const [telegramToken, setTelegramToken] = useState('')
   const [telegramChatId, setTelegramChatId] = useState(settings?.telegram_chat_id ?? '')
@@ -50,9 +47,6 @@ export function XSection({ settings, onSaved }: { settings: AppSettings | null; 
         ...(telegramToken.trim() ? { telegram_bot_token: telegramToken.trim() } : {}),
         telegram_chat_id: telegramChatId.trim(),
         x_response_account_id: responseAccountId,
-        ref_collect_interval_minutes: collectInterval,
-        ref_classify_interval_minutes: cleanInterval,
-        clean_batch_size: batchSize,
       })
       setTelegramToken('')
       onSaved(updated)
@@ -182,48 +176,6 @@ export X_CT0=...`}
             <span className="text-sm text-zinc-500">分钟</span>
           </div>
           <p className="text-[11px] text-zinc-400">多久从 X 订阅拉取一次原始推文（存入 x_posts）</p>
-        </div>
-
-        <div className="space-y-1.5">
-          <Label className="text-xs">素材采集间隔</Label>
-          <div className="flex items-center gap-2">
-            <Input
-              type="number" min={1} max={1440}
-              value={collectInterval}
-              onChange={e => setCollectInterval(Math.max(1, Number(e.target.value)))}
-              className="h-9 text-sm w-24"
-            />
-            <span className="text-sm text-zinc-500">分钟</span>
-          </div>
-          <p className="text-[11px] text-zinc-400">多久按采集规则（赞数/天数过滤）筛一次推文，规则清洗打分后直接入素材库</p>
-        </div>
-
-        <div className="space-y-1.5">
-          <Label className="text-xs">素材分类间隔</Label>
-          <div className="flex items-center gap-2">
-            <Input
-              type="number" min={5} max={1440}
-              value={cleanInterval}
-              onChange={e => setCleanInterval(Math.max(5, Number(e.target.value)))}
-              className="h-9 text-sm w-24"
-            />
-            <span className="text-sm text-zinc-500">分钟</span>
-          </div>
-          <p className="text-[11px] text-zinc-400">多久给高分未分类素材补一次分类标签（LLM 低频，节省 token）</p>
-        </div>
-
-        <div className="space-y-1.5">
-          <Label className="text-xs">每批清洗条数</Label>
-          <div className="flex items-center gap-2">
-            <Input
-              type="number" min={1} max={200}
-              value={batchSize}
-              onChange={e => setBatchSize(Math.max(1, Number(e.target.value)))}
-              className="h-9 text-sm w-24"
-            />
-            <span className="text-sm text-zinc-500">条</span>
-          </div>
-          <p className="text-[11px] text-zinc-400">每次清洗最多处理多少条 raw 素材（推理模型建议 1–5）</p>
         </div>
 
         <Button onClick={handleSave} disabled={saving} size="sm" className="gap-1.5">

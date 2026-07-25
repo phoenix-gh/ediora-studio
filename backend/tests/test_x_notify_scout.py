@@ -140,17 +140,19 @@ def test_reconciliation_creates_only_missing_jobs(service_env):
             await db.commit()
 
         result = await reconcile_response_jobs(enqueue=enqueue)
+        repeated = await reconcile_response_jobs(enqueue=enqueue)
         async with SessionLocal() as db:
             jobs = (await db.execute(select(ContentJob))).scalars().all()
-            return result, jobs
+            return result, repeated, jobs
 
-    result, jobs = asyncio.run(run())
-    assert result == {"created": 1, "enqueued": 1, "errors": []}
+    result, repeated, jobs = asyncio.run(run())
+    assert result == {"created": 1, "enqueued": 2, "errors": []}
+    assert repeated == {"created": 0, "enqueued": 0, "errors": []}
     assert {job.idempotency_key for job in jobs} == {
         "x-response:has-job",
         "x-response:missing",
     }
-    assert len(enqueued) == 1
+    assert len(enqueued) == 2
 
 
 def test_daily_digest_job_is_idempotent(service_env):

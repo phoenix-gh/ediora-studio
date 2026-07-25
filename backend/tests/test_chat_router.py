@@ -1,7 +1,5 @@
 import asyncio
 import sys
-from datetime import datetime
-
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -35,7 +33,7 @@ def client(monkeypatch, tmp_path):
 
 
 def _add_searchable_sources(client):
-    from models import RefMaterial, WritingPlan
+    from models import WritingPlan
 
     async def insert():
         async with client.app.state.session_local() as session:
@@ -43,17 +41,10 @@ def _add_searchable_sources(client):
                 title="AI 产品研究计划",
                 strategy="关注 AI 产品的发布节奏与用户反馈。",
             )
-            material = RefMaterial(
-                platform="manual",
-                text="AI 产品发布后，用户最在意真实工作流是否变得更快。",
-                source_url="https://example.com/ai-product",
-                published_at=datetime(2026, 7, 23),
-            )
-            session.add_all([plan, material])
+            session.add(plan)
             await session.commit()
             await session.refresh(plan)
-            await session.refresh(material)
-            return plan.id, material.id
+            return plan.id
 
     return asyncio.new_event_loop().run_until_complete(insert())
 
@@ -141,8 +132,8 @@ def test_replaces_assistant_message_parts_for_tool_approval(client):
     assert response.json()["parts"] == replacement
 
 
-def test_source_search_validates_query_and_returns_writing_plan_and_reference_material(client):
-    plan_id, material_id = _add_searchable_sources(client)
+def test_source_search_validates_query_and_returns_writing_plan(client):
+    plan_id = _add_searchable_sources(client)
 
     missing_query = client.get("/api/chat/sources/search")
     too_many = client.get("/api/chat/sources/search", params={"q": "AI", "limit": 21})
@@ -159,14 +150,6 @@ def test_source_search_validates_query_and_returns_writing_plan_and_reference_ma
             "summary": "关注 AI 产品的发布节奏与用户反馈。",
             "url": "",
             "published_at": response.json()[0]["published_at"],
-        },
-        {
-            "source": "reference_material",
-            "id": material_id,
-            "title": "AI 产品发布后，用户最在意真实工作流是否变得更快。",
-            "summary": "AI 产品发布后，用户最在意真实工作流是否变得更快。",
-            "url": "https://example.com/ai-product",
-            "published_at": "2026-07-23T00:00:00",
         },
     ]
 

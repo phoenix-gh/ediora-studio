@@ -22,6 +22,20 @@ def client(monkeypatch, tmp_path):
             await conn.run_sync(Base.metadata.create_all)
     asyncio.new_event_loop().run_until_complete(_create())
 
+    import reddit_collector
+
+    async def _no_op_collect(*_args, **_kwargs):
+        return 0
+
+    monkeypatch.setattr(reddit_collector, "collect_subscription", _no_op_collect)
+    monkeypatch.setattr(
+        reddit_collector,
+        "collect_all",
+        lambda *_args, **_kwargs: asyncio.sleep(
+            0, result={"new_posts": 0, "errors": []},
+        ),
+    )
+
     from main import app
     return TestClient(app)
 

@@ -53,9 +53,7 @@ DEFAULTS: dict[str, str] = {
         "检验方法：去掉所有具体姓名/数字/工具名，剩下的还能作为一类内容的分类标签 → 合格。"
     ),
     "x_collect_interval_minutes": "15",
-    "x_reply_scout_interval_minutes": "15",
-    "x_reply_scout_batch": "20",
-    "x_notify_enabled": "1",                 # 全局开关：X 回复关注提醒（动态通知推 Telegram）
+    "x_notify_enabled": "1",                 # 全局开关：X 即时响应建议与 Telegram 推送
     "telegram_bot_token": "",
     "telegram_chat_id": "",
     "x_response_account_id": "",

@@ -455,42 +455,6 @@ async def _classify_category_chunk(
     return result
 
 
-async def assess_x_reply(post: dict) -> dict:
-    """Score an X post for reply value (0-10) and draft a short reply suggestion.
-    Returns {score: int, reason: str, draft: str|None}."""
-    prompt = f"""你是一位活跃在 X 平台的科技行业从业者，擅长用英文写有价值的短评。
-
-分析以下帖子，判断是否值得发一条回复参与互动。
-
-作者：@{post.get('username', '')}（{post.get('display_name', '')}）
-内容：{(post.get('content') or '')[:600]}
-数据：阅读 {post.get('views', 0)}  转发 {post.get('reposts', 0)}  点赞 {post.get('likes', 0)}  评论 {post.get('replies', 0)}
-
-评分标准（0-10）：
-- 8-10：帖子有明确观点/数据/争议点，回复可以补充视角、提问引发讨论，或表达独到见解
-- 5-7：普通质量，可回复但收益有限
-- 0-4：广告、纯日常闲聊、语言不通、低价值内容
-
-无论评分高低，都用中文写 1-2 句回复建议。要求：自然口语、有实质内容（具体问题/数据补充/独到观点），不要泛泛夸奖。
-
-以 JSON 格式输出（只输出 JSON，不要其他文字）：
-{{"score": <0-10 整数>, "reason": "<20字内评分原因>", "draft": "<中文回复建议>"}}"""
-
-    try:
-        raw = (await _call(prompt, max_tokens=400)).strip()
-        start, end = raw.find("{"), raw.rfind("}") + 1
-        if start >= 0 and end > start:
-            data = json.loads(raw[start:end])
-            return {
-                "score": int(data.get("score", 0)),
-                "reason": str(data.get("reason", "")),
-                "draft": data.get("draft") or None,
-            }
-    except Exception as e:
-        print(f"[llm] assess_x_reply error: {e}")
-    return {"score": 0, "reason": "LLM error", "draft": None}
-
-
 async def classify_ref_categories(
     posts: list[dict],
     categories: list[str],

@@ -59,6 +59,12 @@ export function nextResponseStep(steps: JobStep[]): XResponseStep | null {
   return stepOrder.find(key => latest.get(key)?.status !== 'succeeded') ?? null
 }
 
+export function nextDigestStep(steps: JobStep[]): 'notify' | null {
+  return steps.some(step => step.key === 'notify' && step.status === 'succeeded')
+    ? null
+    : 'notify'
+}
+
 function succeededOutput(job: Awaited<ReturnType<typeof getJob>>, key: XResponseStep) {
   return [...job.steps]
     .filter(step => step.key === key && step.status === 'succeeded')
@@ -186,6 +192,9 @@ export async function runXResponseJob(jobId: number) {
 
 export async function runXResponseDigestJob(jobId: number) {
   const job = await getJob(jobId)
+  if (job.status === 'succeeded' || nextDigestStep(job.steps) === null) {
+    return succeededOutput(job, 'notify') ?? { already_completed: true }
+  }
   const step = await startStep(job.id, 'notify')
   try {
     const output = await apiPost<Record<string, unknown>>('/x/responses/digest/send', job.input)

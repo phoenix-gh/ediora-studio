@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { nextResponseStep, parseXResponseDecisionText } from './x-response-job'
+import { nextDigestStep, nextResponseStep, parseXResponseDecisionText } from './x-response-job'
 
 describe('X response decision contract', () => {
   it('accepts a Chinese quote translation', () => {
@@ -60,6 +60,12 @@ describe('resumable X response steps', () => {
       { key: 'decide', attempt: 1, status: 'succeeded', output: {} },
       { key: 'persist', attempt: 1, status: 'succeeded', output: {} },
       { key: 'notify', attempt: 1, status: 'succeeded', output: {} },
+    ])).toBeNull()
+  })
+
+  it('does not resend a completed daily digest', () => {
+    expect(nextDigestStep([
+      { key: 'notify', attempt: 1, status: 'succeeded', output: { sent: 3 } },
     ])).toBeNull()
   })
 })

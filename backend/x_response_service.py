@@ -9,7 +9,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from content_jobs import create_job
-from models import ContentJob, XPost, XResponseDecision, XSubscription
+from models import (
+    ContentJob, ContentJobEvent, XPost, XResponseDecision, XSubscription,
+)
 
 
 IMMEDIATE_SCORE = 75
@@ -77,6 +79,20 @@ async def ensure_response_job(
     return job, True
 
 
+async def _queue_was_dispatched(db: AsyncSession, job_id: int) -> bool:
+    return (await db.execute(
+        select(ContentJobEvent.id)
+        .where(ContentJobEvent.job_id == job_id)
+        .where(ContentJobEvent.kind == "queue_dispatched")
+        .limit(1)
+    )).scalar_one_or_none() is not None
+
+
+async def _record_queue_dispatch(db: AsyncSession, job_id: int) -> None:
+    db.add(ContentJobEvent(job_id=job_id, kind="queue_dispatched"))
+    await db.commit()
+
+
 async def dispatch_response_posts(
     db: AsyncSession,
     subscription: XSubscription,
@@ -109,6 +125,7 @@ async def dispatch_response_posts(
         result["created"] += 1
         try:
             await enqueue(job.id)
+            await _record_queue_dispatch(db, job.id)
             result["enqueued"] += 1
         except Exception as exc:
             result["errors"].append(f"{post.tweet_id}: {exc}")
@@ -150,11 +167,16 @@ async def reconcile_response_jobs(
             if decision is not None:
                 continue
             job, created = await ensure_response_job(db, post.tweet_id)
-            if not created:
+            if (
+                job.status != "queued"
+                or await _queue_was_dispatched(db, job.id)
+            ):
                 continue
-            result["created"] += 1
+            if created:
+                result["created"] += 1
             try:
                 await enqueue(job.id)
+                await _record_queue_dispatch(db, job.id)
                 result["enqueued"] += 1
             except Exception as exc:
                 result["errors"].append(f"{post.tweet_id}: {exc}")

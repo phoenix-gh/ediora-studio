@@ -71,7 +71,7 @@ def _source(body, key):
 def test_overview_empty_db(client):
     body = _get(client)
     assert body["errors"] == []
-    assert len(body["sources"]) == 11
+    assert len(body["sources"]) == 10
     for s in body["sources"]:
         assert s["today_new"] == 0
         assert s["last_status"] is None
@@ -319,4 +319,4 @@ def test_partial_failure_isolation(client, monkeypatch):
 
     body = _get(client)
     assert any(e.startswith("releases:") for e in body["errors"])
-    assert len(body["sources"]) == 11
+    assert len(body["sources"]) == 10

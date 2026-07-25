@@ -13,7 +13,10 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setenv("WMS_DISABLE_SCHEDULER", "1")
 
     for mod in list(sys.modules):
-        if mod.startswith(("database", "models", "main", "routers", "config")):
+        if mod.startswith((
+            "database", "models", "main", "routers", "config",
+            "wechat_api_client",
+        )):
             sys.modules.pop(mod, None)
 
     from database import engine, Base
@@ -68,7 +71,8 @@ def _wx_handler(request: httpx.Request) -> httpx.Response:
 
 @pytest.fixture
 def wx_mock(monkeypatch):
-    import wechat_api_client as wx
+    import routers.drafts as drafts_mod
+    wx = drafts_mod.wx
     wx._token_cache.clear()
     monkeypatch.setattr(
         wx, "_client",
@@ -140,7 +144,8 @@ def test_publish_missing_cover(client, uploads_dir, wx_mock):
 
 
 def test_publish_wechat_error_surfaces_as_502(client, uploads_dir, monkeypatch):
-    import wechat_api_client as wx
+    import routers.drafts as drafts_mod
+    wx = drafts_mod.wx
     wx._token_cache.clear()
 
     def handler(request: httpx.Request) -> httpx.Response:
