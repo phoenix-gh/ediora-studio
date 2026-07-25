@@ -37,6 +37,7 @@ import { fmtDateTime } from '@/lib/format'
 import {
   type AppSettings,
   clearTelegramSettings,
+  getSettings,
   testTelegramSettings,
   updateSettings,
 } from '@/lib/api/settings'
@@ -154,6 +155,12 @@ export function TelegramSettingsCard({
       toast.success('Telegram 测试消息已发送')
     } catch (error) {
       showActionError('测试失败', error, token)
+      try {
+        applyReturnedSettings(await getSettings(), false)
+      } catch {
+        // Keep the original test failure visible if refreshing persisted
+        // backend metadata is temporarily unavailable.
+      }
     } finally {
       setPendingAction(null)
     }

@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
   clearTelegramSettings,
+  getSettings,
   testTelegramSettings,
   updateSettings,
 } from '@/lib/api/settings'
@@ -21,6 +22,7 @@ vi.mock('@/lib/api/settings', async importOriginal => {
   return {
     ...original,
     updateSettings: vi.fn(),
+    getSettings: vi.fn(),
     testTelegramSettings: vi.fn(),
     clearTelegramSettings: vi.fn(),
   }
@@ -111,6 +113,47 @@ describe('TelegramSettingsCard', () => {
     expect(await screen.findByText('上次测试：2026-07-25 22:06:07（Asia/Shanghai）')).not.toBeNull()
     expect(onSaved).toHaveBeenCalledWith(testedSettings)
     expect(testTelegramSettings).toHaveBeenCalledWith()
+  })
+
+  it('refreshes backend-persisted failure metadata after a failed test request', async () => {
+    const failedSettings = {
+      ...configuredSettings,
+      telegram_test_status: 'failed' as const,
+      telegram_last_tested_at: '2026-07-25T14:06:07Z',
+      telegram_last_test_error: 'chat not found',
+    }
+    vi.mocked(testTelegramSettings).mockRejectedValue(new Error('连接测试请求失败'))
+    vi.mocked(getSettings).mockResolvedValue(failedSettings)
+    const onSaved = vi.fn()
+    render(<TelegramSettingsCard settings={configuredSettings} onSaved={onSaved} />)
+
+    fireEvent.click(screen.getByRole('button', { name: '发送测试消息' }))
+
+    await waitFor(() => expect(getSettings).toHaveBeenCalledOnce())
+    expect(onSaved).toHaveBeenCalledWith(failedSettings)
+    expect(screen.queryByText('测试成功')).toBeNull()
+    expect(screen.getByText('测试失败')).not.toBeNull()
+    expect(screen.getByText('上次测试：2026-07-25 22:06:07（Asia/Shanghai）')).not.toBeNull()
+    expect(screen.getByText('上次测试失败：chat not found')).not.toBeNull()
+    expect(screen.getByText('测试失败：连接测试请求失败')).not.toBeNull()
+    expect(toastError).toHaveBeenCalledWith('测试失败：连接测试请求失败')
+  })
+
+  it('keeps the original safe test error when failure metadata refresh also fails', async () => {
+    vi.mocked(testTelegramSettings).mockRejectedValue(new Error('连接测试请求失败'))
+    vi.mocked(getSettings).mockRejectedValue(new Error('刷新状态失败'))
+    const onSaved = vi.fn()
+    render(<TelegramSettingsCard settings={configuredSettings} onSaved={onSaved} />)
+
+    fireEvent.click(screen.getByRole('button', { name: '发送测试消息' }))
+
+    await waitFor(() => expect(getSettings).toHaveBeenCalledOnce())
+    expect(onSaved).not.toHaveBeenCalled()
+    expect(screen.getByText('测试成功')).not.toBeNull()
+    expect(screen.getByText('测试失败：连接测试请求失败')).not.toBeNull()
+    expect(screen.queryByText(/刷新状态失败/)).toBeNull()
+    expect(toastError).toHaveBeenCalledTimes(1)
+    expect(toastError).toHaveBeenCalledWith('测试失败：连接测试请求失败')
   })
 
   it('redacts the current token from save errors and toast output', async () => {
