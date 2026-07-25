@@ -137,6 +137,60 @@ def test_installed_patcher_redacts_rendered_exception_and_keeps_context():
         assert secret not in rendered
 
 
+def test_installed_patcher_redacts_nested_exception_group_children():
+    output = StringIO()
+    sink_id = logger.add(
+        output,
+        format="{message} | {extra}",
+        backtrace=False,
+        diagnose=False,
+    )
+    try:
+        install_log_redaction()
+        nested = ExceptionGroup(
+            "public nested credential checks",
+            [
+                RuntimeError(
+                    "account A failed: auth_token=group-auth-secret"
+                ),
+                ValueError("account B failed: ct0: group-csrf-secret"),
+            ],
+        )
+        group = ExceptionGroup(
+            "public credential batch 42",
+            [
+                nested,
+                OSError(
+                    "notifier failed: https://api.telegram.org/"
+                    "bot123:group-telegram-secret/sendMessage"
+                ),
+            ],
+        )
+        assert isinstance(group, BaseExceptionGroup)
+        try:
+            raise group
+        except ExceptionGroup:
+            logger.exception("credential group probe failed")
+    finally:
+        logger.remove(sink_id)
+        logger.configure(patcher=None)
+
+    rendered = output.getvalue()
+    assert "credential group probe failed" in rendered
+    assert "ExceptionGroup" in rendered
+    assert "public credential batch 42" in rendered
+    assert "public nested credential checks" in rendered
+    assert "account A failed" in rendered
+    assert "account B failed" in rendered
+    assert "notifier failed" in rendered
+    for secret in (
+        "group-auth-secret",
+        "group-csrf-secret",
+        "group-telegram-secret",
+    ):
+        assert secret not in rendered
+
+
 def test_main_installs_redaction_before_optional_feedgrab_import(tmp_path):
     fake_root = tmp_path / "fake-dependency"
     feedgrab_package = fake_root / "feedgrab"

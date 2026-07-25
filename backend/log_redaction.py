@@ -85,7 +85,13 @@ def _redact_log_value(
         seen.remove(value_id)
 
 
-def _redact_exception_value(error: BaseException, seen: set[int] | None = None):
+def _redact_exception_value(
+    error: BaseException,
+    seen: set[int] | None = None,
+    depth: int = 0,
+):
+    if depth >= MAX_LOG_VALUE_DEPTH:
+        return Exception("<max-depth exception>")
     if seen is None:
         seen = set()
     error_id = id(error)
@@ -94,22 +100,46 @@ def _redact_exception_value(error: BaseException, seen: set[int] | None = None):
     seen.add(error_id)
     try:
         safe_text = redact_secret_text(str(error))
-        try:
-            safe_error = copy.copy(error)
-            safe_args = _redact_log_value(error.args)
-            safe_error.args = tuple(safe_args)
-            if getattr(error, "__dict__", None):
-                safe_error.__dict__.update(_redact_log_value(error.__dict__))
-        except Exception:
-            safe_error = Exception(safe_text)
+        if isinstance(error, BaseExceptionGroup):
+            safe_children = tuple(
+                _redact_exception_value(child, seen, depth + 1)
+                for child in error.exceptions
+            )
+            safe_message = redact_secret_text(error.message)
+            try:
+                if safe_message == error.message:
+                    safe_error = error.derive(safe_children)
+                else:
+                    safe_error = type(error)(safe_message, safe_children)
+            except Exception:
+                safe_error = BaseExceptionGroup(safe_message, safe_children)
+        else:
+            try:
+                safe_error = copy.copy(error)
+                safe_args = _redact_log_value(error.args)
+                safe_error.args = tuple(safe_args)
+                if getattr(error, "__dict__", None):
+                    safe_error.__dict__.update(_redact_log_value(error.__dict__))
+            except Exception:
+                safe_error = Exception(safe_text)
 
         cause = error.__cause__
         context = error.__context__
         if cause is not None:
-            safe_error.__cause__ = _redact_exception_value(cause, seen)
+            safe_error.__cause__ = _redact_exception_value(
+                cause,
+                seen,
+                depth + 1,
+            )
         if context is not None:
-            safe_error.__context__ = _redact_exception_value(context, seen)
+            safe_error.__context__ = _redact_exception_value(
+                context,
+                seen,
+                depth + 1,
+            )
         safe_error.__suppress_context__ = error.__suppress_context__
+        if error.__traceback__ is not None:
+            safe_error = safe_error.with_traceback(error.__traceback__)
 
         if redact_secret_text(str(safe_error)) != str(safe_error):
             fallback = Exception(safe_text)
