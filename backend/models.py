@@ -192,6 +192,39 @@ class XPost(Base):
     x_reply_notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class XResponseDecision(Base):
+    """One durable realtime-response decision for one collected X post."""
+    __tablename__ = "x_response_decisions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tweet_id: Mapped[str] = mapped_column(String, nullable=False, unique=True, index=True)
+    subscription_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    action: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    score: Mapped[int] = mapped_column(Integer, default=0, index=True)
+    confidence: Mapped[float] = mapped_column(Float, default=0.0)
+    reason: Mapped[str] = mapped_column(Text, default="")
+    summary_cn: Mapped[str] = mapped_column(Text, default="")
+    comment_draft: Mapped[str | None] = mapped_column(Text, nullable=True)
+    quote_draft: Mapped[str | None] = mapped_column(Text, nullable=True)
+    claims: Mapped[list] = mapped_column(JSON, default=list)
+    verification_status: Mapped[str] = mapped_column(String, default="not_required", index=True)
+    verified_urls: Mapped[list] = mapped_column(JSON, default=list)
+    notification_tier: Mapped[str] = mapped_column(String, default="silent", index=True)
+    workflow_status: Mapped[str] = mapped_column(String, default="ready", index=True)
+    model_provider: Mapped[str] = mapped_column(String, default="")
+    model_name: Mapped[str] = mapped_column(String, default="")
+    prompt_version: Mapped[str] = mapped_column(String, default="")
+    decision_policy_version: Mapped[str] = mapped_column(String, default="x-response-v1")
+    telegram_status: Mapped[str] = mapped_column(String, default="not_required", index=True)
+    telegram_message_ids: Mapped[list] = mapped_column(JSON, default=list)
+    telegram_attempts: Mapped[int] = mapped_column(Integer, default=0)
+    telegram_last_error: Mapped[str] = mapped_column(Text, default="")
+    notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    event_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+
+
 class Paper(Base):
     __tablename__ = "papers"
 
