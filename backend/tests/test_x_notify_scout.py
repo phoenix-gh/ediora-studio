@@ -178,3 +178,55 @@ def test_daily_digest_job_is_idempotent(service_env):
     assert len(jobs) == 1
     assert jobs[0].flow == "x_response_digest"
     assert jobs[0].idempotency_key == "x-response-digest:2026-07-25"
+
+
+def test_reconciliation_repairs_digest_job_that_was_not_enqueued(service_env):
+    from x_response_service import (
+        create_response_digest_job,
+        reconcile_response_jobs,
+    )
+
+    enqueued: list[int] = []
+
+    async def enqueue(job_id):
+        enqueued.append(job_id)
+
+    async def run():
+        job, created = await create_response_digest_job("2026-07-25")
+        first = await reconcile_response_jobs(enqueue=enqueue)
+        second = await reconcile_response_jobs(enqueue=enqueue)
+        return job.id, created, first, second
+
+    job_id, created, first, second = asyncio.run(run())
+    assert created is True
+    assert first["enqueued"] == 1
+    assert second["enqueued"] == 0
+    assert enqueued == [job_id]
+
+
+def test_scheduler_registers_reconciliation_and_shanghai_digest(service_env):
+    import scheduler
+
+    registered: list[tuple] = []
+
+    class FakeScheduler:
+        def add_job(self, func, **kwargs):
+            registered.append((func, kwargs))
+
+    scheduler.register_jobs(FakeScheduler(), {})
+    by_id = {kwargs["id"]: (func, kwargs) for func, kwargs in registered}
+
+    assert "x_reply_scout" not in by_id
+    reconcile_func, reconcile = by_id["x_response_reconcile"]
+    digest_func, digest = by_id["x_response_digest"]
+    assert reconcile_func is scheduler.scheduled_x_response_reconcile
+    assert reconcile["trigger"] == "interval"
+    assert reconcile["minutes"] == 5
+    assert digest_func is scheduler.scheduled_x_response_digest
+    assert digest == {
+        "trigger": "cron",
+        "hour": 18,
+        "minute": 0,
+        "timezone": "Asia/Shanghai",
+        "id": "x_response_digest",
+    }

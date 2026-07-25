@@ -44,6 +44,11 @@ def _complete_step(client, job_id, key, output):
     assert completed.status_code == 200, completed.text
 
 
+def _aware_iso(value: str) -> datetime:
+    parsed = datetime.fromisoformat(value)
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
 def test_controlled_queue_to_telegram_flow_finishes_under_one_minute(client, monkeypatch):
     from database import SessionLocal
     from job_queue import InMemoryJobQueue
@@ -172,7 +177,13 @@ def test_controlled_queue_to_telegram_flow_finishes_under_one_minute(client, mon
     assert [step["key"] for step in job["steps"]] == [
         "qualify", "verify_links", "decide", "persist", "notify",
     ]
-    notified_at = datetime.fromisoformat(duplicate_notify.json()["notified_at"])
-    if notified_at.tzinfo is None:
-        notified_at = notified_at.replace(tzinfo=timezone.utc)
+    queue_event = next(
+        event for event in job["events"]
+        if event["kind"] == "queue_dispatched"
+    )
+    published_at = _aware_iso(context["post"]["published_at"])
+    queued_at = _aware_iso(queue_event["created_at"])
+    decided_at = _aware_iso(decision["created_at"])
+    notified_at = _aware_iso(duplicate_notify.json()["notified_at"])
+    assert published_at <= collected_at <= queued_at <= decided_at <= notified_at
     assert (notified_at - collected_at).total_seconds() < 60

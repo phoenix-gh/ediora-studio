@@ -93,6 +93,23 @@ async def _record_queue_dispatch(db: AsyncSession, job_id: int) -> None:
     await db.commit()
 
 
+async def enqueue_content_job_once(
+    db: AsyncSession,
+    job: ContentJob,
+    *,
+    enqueue: Callable[[int], Awaitable[None]] | None = None,
+) -> bool:
+    """Enqueue a queued job once, with an auditable repair marker."""
+    if job.status != "queued" or await _queue_was_dispatched(db, job.id):
+        return False
+    if enqueue is None:
+        from job_queue import enqueue_job
+        enqueue = enqueue_job
+    await enqueue(job.id)
+    await _record_queue_dispatch(db, job.id)
+    return True
+
+
 async def dispatch_response_posts(
     db: AsyncSession,
     subscription: XSubscription,
@@ -124,9 +141,8 @@ async def dispatch_response_posts(
             continue
         result["created"] += 1
         try:
-            await enqueue(job.id)
-            await _record_queue_dispatch(db, job.id)
-            result["enqueued"] += 1
+            if await enqueue_content_job_once(db, job, enqueue=enqueue):
+                result["enqueued"] += 1
         except Exception as exc:
             result["errors"].append(f"{post.tweet_id}: {exc}")
     return result
@@ -167,19 +183,26 @@ async def reconcile_response_jobs(
             if decision is not None:
                 continue
             job, created = await ensure_response_job(db, post.tweet_id)
-            if (
-                job.status != "queued"
-                or await _queue_was_dispatched(db, job.id)
-            ):
-                continue
             if created:
                 result["created"] += 1
             try:
-                await enqueue(job.id)
-                await _record_queue_dispatch(db, job.id)
-                result["enqueued"] += 1
+                if await enqueue_content_job_once(db, job, enqueue=enqueue):
+                    result["enqueued"] += 1
             except Exception as exc:
                 result["errors"].append(f"{post.tweet_id}: {exc}")
+
+        digest_jobs = (await db.execute(
+            select(ContentJob)
+            .where(ContentJob.flow == "x_response_digest")
+            .where(ContentJob.status == "queued")
+            .order_by(ContentJob.created_at)
+        )).scalars().all()
+        for job in digest_jobs:
+            try:
+                if await enqueue_content_job_once(db, job, enqueue=enqueue):
+                    result["enqueued"] += 1
+            except Exception as exc:
+                result["errors"].append(f"digest:{job.id}: {exc}")
     return result
 
 

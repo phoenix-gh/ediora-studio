@@ -339,11 +339,19 @@ async def scheduled_x_response_digest():
         if str(cfg.get("x_notify_enabled", "1")).lower() not in ("1", "true", "yes", "on"):
             return
         from job_queue import enqueue_job
-        from x_response_service import create_response_digest_job
+        from x_response_service import (
+            create_response_digest_job,
+            enqueue_content_job_once,
+        )
         date_key = datetime.now(ZoneInfo("Asia/Shanghai")).date().isoformat()
-        job, created = await create_response_digest_job(date_key)
-        if created:
-            await enqueue_job(job.id)
+        async with SessionLocal() as db:
+            job, _created = await create_response_digest_job(date_key, db=db)
+            enqueued = await enqueue_content_job_once(
+                db,
+                job,
+                enqueue=enqueue_job,
+            )
+        if enqueued:
             await log("x_response", "ok", f"即时响应摘要已入队：{date_key}")
     except Exception as e:
         await log("x_response", "error", "即时响应摘要入队异常", str(e))
