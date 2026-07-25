@@ -172,9 +172,11 @@ function ResponseCard({
   const verificationText = item.verification_status === 'verified'
     ? '链接已核验'
     : item.verification_status === 'unverified' ? '链接未核验' : '无需外链核验'
-  const telegramText = item.telegram_status === 'sent'
-    ? 'Telegram 已推送'
-    : item.notification_tier === 'digest' ? '等待 18:00 摘要' : '未推送'
+  const telegramText = telegramStatusText(item)
+  const requiresTelegramInspection = (
+    item.telegram_status === 'sending'
+    || item.telegram_status === 'unknown'
+  )
 
   return (
     <article className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
@@ -225,6 +227,20 @@ function ResponseCard({
         </a>
       </div>
 
+      {requiresTelegramInspection ? (
+        <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
+          <div>请先人工核对 Telegram，再决定是否处理后续任务。</div>
+          {item.telegram_message_ids.length > 0 ? (
+            <div className="mt-1">
+              已知消息 ID：{item.telegram_message_ids.join('、')}
+            </div>
+          ) : null}
+          {item.telegram_last_error ? (
+            <div className="mt-1 break-words">{item.telegram_last_error}</div>
+          ) : null}
+        </div>
+      ) : null}
+
       {item.workflow_status === 'ready' ? (
         <div className="mt-3 flex flex-wrap justify-end gap-2">
           <Button size="sm" variant="outline" disabled={busy} onClick={() => onStatus('ignored')}>
@@ -248,4 +264,12 @@ function workflowLabel(status: XResponseWorkflowStatus) {
   if (status === 'ignored') return '已忽略'
   if (status === 'converted') return '已转选题'
   return '待处理'
+}
+
+function telegramStatusText(item: XResponseDecision) {
+  if (item.telegram_status === 'sent') return 'Telegram 已推送'
+  if (item.telegram_status === 'sending') return '推送中'
+  if (item.telegram_status === 'unknown') return '投递状态待确认'
+  if (item.notification_tier === 'digest') return '等待 18:00 摘要'
+  return '未推送'
 }

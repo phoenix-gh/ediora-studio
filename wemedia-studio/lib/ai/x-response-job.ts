@@ -3,7 +3,8 @@ import { generateText } from 'ai'
 import { z } from 'zod'
 
 import {
-  apiGet, apiPost, completeJob, completeStep, failStep, getJob, startStep,
+  apiGet, apiPost, completeJob, completeStep, failStep, getJob,
+  retryableForError, startStep,
   type JobStep,
 } from './job-client'
 
@@ -185,7 +186,14 @@ export async function runXResponseJob(jobId: number) {
     await completeJob(job.id)
     return persisted
   } catch (error) {
-    if (activeStep) await failStep(job.id, activeStep.id, error, true)
+    if (activeStep) {
+      await failStep(
+        job.id,
+        activeStep.id,
+        error,
+        retryableForError(error),
+      )
+    }
     throw error
   }
 }
@@ -202,7 +210,12 @@ export async function runXResponseDigestJob(jobId: number) {
     await completeJob(job.id)
     return output
   } catch (error) {
-    await failStep(job.id, step.id, error, true)
+    await failStep(
+      job.id,
+      step.id,
+      error,
+      retryableForError(error),
+    )
     throw error
   }
 }

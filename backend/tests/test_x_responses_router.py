@@ -284,10 +284,48 @@ def test_notify_request_error_with_partial_delivery_is_unknown_and_never_retried
     stored = client.get(f"/api/x/responses/{decision['id']}").json()
 
     assert first.status_code == 503
+    assert first.headers["x-wms-retryable"] == "false"
     assert second.status_code == 200
     assert calls == 1
     assert stored["telegram_status"] == "unknown"
     assert stored["telegram_message_ids"] == [701]
+
+
+@pytest.mark.parametrize(
+    ("retryable", "expected"),
+    [(False, "false"), (True, "true")],
+)
+def test_notify_exposes_safe_retryability_contract(
+    client,
+    monkeypatch,
+    retryable,
+    expected,
+):
+    from telegram_notifier import TelegramSendError
+
+    decision = client.post(
+        "/api/x/responses/internal/t1/decision",
+        json=_decision_body(),
+    ).json()
+    client.put("/api/settings", json={
+        "telegram_bot_token": "123456:secret-token",
+        "telegram_chat_id": "chat",
+    })
+
+    async def fail_send(*_args, **_kwargs):
+        raise TelegramSendError(
+            "Too Many Requests" if retryable else "chat not found",
+            retryable=retryable,
+        )
+
+    import telegram_notifier
+    monkeypatch.setattr(telegram_notifier, "send_html_messages", fail_send)
+
+    response = client.post(f"/api/x/responses/{decision['id']}/notify")
+
+    assert response.status_code == 503
+    assert response.headers["x-wms-retryable"] == expected
+    assert "secret-token" not in response.text
 
 
 def test_concurrent_digest_claims_one_non_overlapping_decision_set(client, monkeypatch):
@@ -416,6 +454,7 @@ def test_digest_partial_delivery_is_unknown_and_preserves_message_ids(
     stored = client.get(f"/api/x/responses/{decision['id']}").json()
 
     assert first.status_code == 503
+    assert first.headers["x-wms-retryable"] == "false"
     assert second.json() == {"sent": 0, "message_ids": []}
     assert calls == 1
     assert stored["telegram_status"] == "unknown"

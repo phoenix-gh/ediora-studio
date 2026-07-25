@@ -137,6 +137,19 @@ def _safe_telegram_error(exc: Exception, token: str) -> str:
     return safe[:500]
 
 
+def _telegram_retryable(exc: Exception) -> bool:
+    return bool(getattr(exc, "retryable", False)) and not (
+        bool(getattr(exc, "delivery_unknown", False))
+        or bool(getattr(exc, "message_ids", []) or [])
+    )
+
+
+def _retryability_headers(exc: Exception) -> dict[str, str]:
+    return {
+        "X-WMS-Retryable": "true" if _telegram_retryable(exc) else "false",
+    }
+
+
 async def _claim_decision(
     db: AsyncSession,
     decision_id: int,
@@ -365,6 +378,7 @@ async def send_digest(body: DigestIn, db: AsyncSession = Depends(get_db)):
         raise HTTPException(
             503,
             _safe_telegram_error(exc, configured_token),
+            headers=_retryability_headers(exc),
         ) from None
 
     sent_at = datetime.now(timezone.utc)
@@ -466,6 +480,7 @@ async def notify_response(decision_id: int, db: AsyncSession = Depends(get_db)):
         raise HTTPException(
             503,
             _safe_telegram_error(exc, configured_token),
+            headers=_retryability_headers(exc),
         ) from None
     await db.execute(
         update(XResponseDecision)

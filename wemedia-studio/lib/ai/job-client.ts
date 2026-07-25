@@ -21,6 +21,20 @@ export type DurableJob = {
   steps: JobStep[]
 }
 
+export class ApiRequestError extends Error {
+  retryable: boolean
+
+  constructor(message: string, retryable: boolean) {
+    super(message)
+    this.name = 'ApiRequestError'
+    this.retryable = retryable
+  }
+}
+
+export function retryableForError(error: unknown, fallback = true) {
+  return error instanceof ApiRequestError ? error.retryable : fallback
+}
+
 async function jsonRequest<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${apiBase()}${path}`, {
     ...init,
@@ -30,7 +44,14 @@ async function jsonRequest<T>(path: string, init?: RequestInit): Promise<T> {
   if (!response.ok) {
     let detail = ''
     try { detail = (await response.json() as { detail?: string }).detail ?? '' } catch { /* no JSON body */ }
-    throw new Error(detail || `${path} failed (${response.status})`)
+    const retryableHeader = response.headers.get('X-WMS-Retryable')
+    const retryable = retryableHeader === null
+      ? true
+      : retryableHeader.toLowerCase() === 'true'
+    throw new ApiRequestError(
+      detail || `${path} failed (${response.status})`,
+      retryable,
+    )
   }
   return response.json() as Promise<T>
 }
@@ -50,7 +71,12 @@ export function completeStep(jobId: number, stepId: number, output: Record<strin
   })
 }
 
-export function failStep(jobId: number, stepId: number, error: unknown, retryable = true) {
+export function failStep(
+  jobId: number,
+  stepId: number,
+  error: unknown,
+  retryable = retryableForError(error),
+) {
   const message = error instanceof Error ? error.message : String(error)
   return jsonRequest(`/jobs/${jobId}/steps/${stepId}/fail`, {
     method: 'POST',

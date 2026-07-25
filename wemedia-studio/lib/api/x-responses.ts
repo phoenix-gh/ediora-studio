@@ -27,7 +27,13 @@ export interface XResponseDecision {
   verified_urls: Array<{ url?: string; canonical_url?: string; title?: string }>
   notification_tier: XResponseTier
   workflow_status: XResponseWorkflowStatus
-  telegram_status: 'pending' | 'sent' | 'failed' | 'not_required'
+  telegram_status:
+    | 'pending'
+    | 'sending'
+    | 'sent'
+    | 'failed'
+    | 'unknown'
+    | 'not_required'
   telegram_message_ids: number[]
   telegram_last_error: string
   notified_at: string | null
