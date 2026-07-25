@@ -4,6 +4,18 @@
  */
 
 const LOCALE = 'zh-CN'
+const SHANGHAI_OFFSET_MS = 8 * 60 * 60 * 1000
+
+/** Stable "YYYY-MM-DD HH:mm:ss" in Asia/Shanghai, identical during SSR and hydration. */
+export function fmtDateTime(iso: string): string {
+  const date = new Date(new Date(iso).getTime() + SHANGHAI_OFFSET_MS)
+  const pad = (value: number) => String(value).padStart(2, '0')
+  return [
+    date.getUTCFullYear(),
+    pad(date.getUTCMonth() + 1),
+    pad(date.getUTCDate()),
+  ].join('-') + ` ${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}:${pad(date.getUTCSeconds())}`
+}
 
 /** "刚刚" / "X 分钟前" / "X 小时前" / "X 天前" / "Mon d" — used by KR/Juejin/V2EX/Drafts/Wechat. */
 export function fmtRelTime(iso: string): string {

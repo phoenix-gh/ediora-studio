@@ -15,7 +15,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { cn } from '@/lib/utils'
-import { fmtRelTime } from '@/lib/format'
+import { fmtDateTime, fmtRelTime } from '@/lib/format'
 import {
   type XSubscription, type XPost, type XSearchPost, type CreateXSubscriptionInput,
   listXSubscriptions, listXPosts, searchX,
@@ -430,12 +430,12 @@ function PostCard({ post: p }: { post: XPost | XSearchPost }) {
             {sourceUrl ? (
               <a href={sourceUrl} target="_blank" rel="noreferrer"
                 className="text-xs text-zinc-400 hover:text-sky-500 flex items-center gap-1 shrink-0"
-                title={new Date(p.published_at).toLocaleString()}>
+                title={fmtDateTime(p.published_at)}>
                 {fmtRelTime(p.published_at)}
                 <ExternalLink className="w-3 h-3" />
               </a>
             ) : (
-              <span className="text-xs text-zinc-400 shrink-0" title={new Date(p.published_at).toLocaleString()}>
+              <span className="text-xs text-zinc-400 shrink-0" title={fmtDateTime(p.published_at)}>
                 {fmtRelTime(p.published_at)}
               </span>
             )}
