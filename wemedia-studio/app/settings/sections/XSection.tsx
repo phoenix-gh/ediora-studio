@@ -1,20 +1,17 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { CheckCircle2, XCircle, Loader2, Save } from 'lucide-react'
+import { Loader2, Save } from 'lucide-react'
 import { toast } from 'sonner'
-import { getXAuthStatus, type XAuthStatus } from '@/lib/api/x'
 import { AppSettings, updateSettings } from '@/lib/api/settings'
 import { listPublishAccounts, type PublishAccount } from '@/lib/api/publish-accounts'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
+import { XCredentialAccountsCard } from './XCredentialAccountsCard'
 
 export function XSection({ settings, onSaved }: { settings: AppSettings | null; onSaved: (s: AppSettings) => void }) {
-  const [status, setStatus] = useState<XAuthStatus | null>(null)
-  const [loading, setLoading] = useState(true)
-
   const [xInterval, setXInterval] = useState(settings?.x_collect_interval_minutes ?? 15)
   const [notifyEnabled, setNotifyEnabled] = useState(settings?.x_notify_enabled ?? true)
   const [telegramToken, setTelegramToken] = useState('')
@@ -25,16 +22,12 @@ export function XSection({ settings, onSaved }: { settings: AppSettings | null; 
 
   useEffect(() => {
     let cancelled = false
-    Promise.all([
-      getXAuthStatus().catch(() => ({ ready: false, hint: '无法连接后端 /api/x/auth-status' })),
-      listPublishAccounts().catch(() => []),
-    ])
-      .then(([nextStatus, nextAccounts]) => {
+    listPublishAccounts()
+      .then(nextAccounts => {
         if (cancelled) return
-        setStatus(nextStatus)
         setAccounts(nextAccounts)
       })
-      .finally(() => { if (!cancelled) setLoading(false) })
+      .catch(() => { if (!cancelled) setAccounts([]) })
     return () => { cancelled = true }
   }, [])
 
@@ -64,44 +57,11 @@ export function XSection({ settings, onSaved }: { settings: AppSettings | null; 
       <div>
         <h2 className="text-base font-medium">X / Twitter (feedgrab)</h2>
         <p className="text-sm text-muted-foreground">
-          本项目通过 feedgrab 采集 X 内容，认证完全交由 feedgrab 管理。
+          本项目通过 feedgrab 采集 X 内容，并在下方管理可轮换的采集账号。
         </p>
       </div>
 
-      <div className="rounded-lg border bg-card p-4">
-        <div className="flex items-center gap-2 text-sm">
-          <span className="font-medium">认证状态：</span>
-          {loading ? (
-            <span className="flex items-center gap-1 text-muted-foreground">
-              <Loader2 className="size-4 animate-spin" /> 检查中…
-            </span>
-          ) : status?.ready ? (
-            <span className="flex items-center gap-1 text-green-600">
-              <CheckCircle2 className="size-4" /> 已就绪
-            </span>
-          ) : (
-            <span className="flex items-center gap-1 text-destructive">
-              <XCircle className="size-4" /> 未登录
-            </span>
-          )}
-        </div>
-        {status?.hint && (
-          <p className="mt-1 text-xs text-muted-foreground">{status.hint}</p>
-        )}
-      </div>
-
-      <div className="rounded-lg border bg-card p-4">
-        <p className="mb-2 text-sm font-medium">如何登录</p>
-        <p className="mb-2 text-xs text-muted-foreground">在 backend 启动目录任选其一：</p>
-        <pre className="overflow-x-auto rounded bg-muted p-3 text-xs">
-{`# 方法 1：交互式浏览器登录（推荐）
-feedgrab login twitter
-
-# 方法 2：环境变量（在 backend 启动前导出）
-export X_AUTH_TOKEN=...
-export X_CT0=...`}
-        </pre>
-      </div>
+      <XCredentialAccountsCard />
 
       {/* Interval settings */}
       <div className="space-y-5">
@@ -147,7 +107,7 @@ export X_CT0=...`}
             />
           </div>
           <div className="space-y-1.5">
-            <Label className="text-xs" htmlFor="x-response-account">建议基于账号</Label>
+            <Label className="text-xs" htmlFor="x-response-account">建议使用的发布账号画像</Label>
             <select
               id="x-response-account"
               value={responseAccountId}
