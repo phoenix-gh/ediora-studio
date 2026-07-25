@@ -48,6 +48,9 @@ export interface AppSettings {
   telegram_bot_token_set: boolean
   telegram_bot_token_preview: string
   telegram_chat_id: string
+  telegram_test_status: '' | 'success' | 'failed'
+  telegram_last_tested_at: string
+  telegram_last_test_error: string
   x_response_account_id: string
   x_follower_threshold: number
   x_post_window_hours: number
@@ -161,6 +164,14 @@ export async function updateSettings(body: SettingsUpdate): Promise<AppSettings>
     method: 'PUT',
     body: JSON.stringify(body),
   })
+}
+
+export async function testTelegramSettings(): Promise<AppSettings> {
+  return apiFetch<AppSettings>('/settings/telegram/test', { method: 'POST' })
+}
+
+export async function clearTelegramSettings(): Promise<AppSettings> {
+  return apiFetch<AppSettings>('/settings/telegram', { method: 'DELETE' })
 }
 
 export async function fetchProviderModels(body: FetchModelsRequest): Promise<FetchModelsResult> {
