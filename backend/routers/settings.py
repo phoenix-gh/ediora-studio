@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Body, HTTPException, Query, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, field_validator, model_validator
 from typing import Literal, Optional
 from datetime import datetime, timezone
@@ -9,6 +9,9 @@ from urllib.parse import urlsplit
 from config import get_config, set_config, PROVIDERS, effective_model, effective_base_url
 from log_redaction import redact_secret_text
 import telegram_notifier
+from database import get_db
+from models import PublishAccount
+from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 
@@ -332,7 +335,11 @@ async def get_ai_runtime_config():
 
 
 @router.put("", response_model=SettingsOut)
-async def update_settings(body: SettingsUpdate, request: Request):
+async def update_settings(
+    body: SettingsUpdate,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
     saved_cfg = await get_config()
     updates: dict = {}
     if body.llm_provider is not None:
@@ -398,7 +405,19 @@ async def update_settings(body: SettingsUpdate, request: Request):
             "telegram_last_test_error": "",
         })
     if body.x_response_account_id is not None:
-        updates["x_response_account_id"] = body.x_response_account_id.strip()
+        account_id = body.x_response_account_id.strip()
+        if account_id:
+            account = await db.get(PublishAccount, account_id)
+            if (
+                account is None
+                or not account.is_active
+                or account.platform.strip().casefold() not in {"x", "twitter"}
+            ):
+                raise HTTPException(
+                    status_code=422,
+                    detail="指定的 X 发布账号不存在、未启用或平台不匹配",
+                )
+        updates["x_response_account_id"] = account_id
     if body.ref_collect_interval_minutes is not None:
         updates["ref_collect_interval_minutes"] = str(max(1, body.ref_collect_interval_minutes))
     if body.ref_classify_interval_minutes is not None:

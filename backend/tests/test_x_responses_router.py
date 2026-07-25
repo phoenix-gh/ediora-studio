@@ -79,6 +79,38 @@ def test_worker_context_returns_eligible_post_and_neutral_profile(client):
     assert body["external_urls"] == ["https://official.example/announcement"]
 
 
+@pytest.mark.parametrize(
+    ("platform", "is_active"),
+    [("wechat", True), ("x", False)],
+)
+def test_worker_context_defensively_ignores_invalid_saved_publish_account(
+    client,
+    platform,
+    is_active,
+):
+    from config import set_config
+    from database import SessionLocal
+    from models import PublishAccount
+
+    async def seed():
+        async with SessionLocal() as db:
+            db.add(PublishAccount(
+                id="unsafe",
+                name="Unsafe",
+                platform=platform,
+                is_active=is_active,
+                positioning="不应使用",
+            ))
+            await db.commit()
+        await set_config({"x_response_account_id": "unsafe"})
+
+    asyncio.run(seed())
+    body = client.get("/api/x/responses/internal/t1/context").json()
+
+    assert body["account_profile"]["id"] == ""
+    assert body["account_profile"]["positioning"] == "中文科技从业者"
+
+
 def test_decision_persists_and_list_filters(client):
     created = client.post("/api/x/responses/internal/t1/decision", json=_decision_body())
     assert created.status_code == 200, created.text

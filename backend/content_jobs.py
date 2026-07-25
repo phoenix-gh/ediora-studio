@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from log_redaction import redact_secret_text
 from models import ContentJob, ContentJobEvent, ContentJobStep, DailyPlan
 
 
@@ -98,7 +99,7 @@ async def fail_step(session: AsyncSession, step_id: int, error: str, *, retryabl
     if step.status != "running":
         raise InvalidJobTransition(f"cannot fail {step.status} step")
     step.status = "failed"
-    step.error = error[:500]
+    step.error = redact_secret_text(error)[:500]
     step.retryable = retryable
     step.completed_at = _now()
     job = await session.get(ContentJob, step.job_id)

@@ -138,6 +138,12 @@ async def worker_context(tweet_id: str, db: AsyncSession = Depends(get_db)):
     account_id = cfg.get("x_response_account_id", "").strip()
     if account_id:
         account = await db.get(PublishAccount, account_id)
+        if (
+            account is None
+            or not account.is_active
+            or account.platform.strip().casefold() not in {"x", "twitter"}
+        ):
+            account = None
     profile = {
         "id": account.id if account else "",
         "name": account.name if account else "中文科技从业者",

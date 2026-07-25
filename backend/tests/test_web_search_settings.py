@@ -317,3 +317,67 @@ def test_clear_telegram_removes_credentials_and_test_metadata(client, monkeypatc
     assert body["telegram_last_test_error"] == ""
     assert "telegram_bot_token" not in body
     assert "saved-token" not in response.text
+
+
+@pytest.mark.parametrize(
+    "account",
+    [
+        None,
+        {"id": "inactive-x", "platform": "x", "is_active": False},
+        {"id": "wechat", "platform": "wechat", "is_active": True},
+    ],
+)
+def test_settings_rejects_invalid_x_response_publish_account(client, account):
+    if account:
+        from database import SessionLocal
+        from models import PublishAccount
+
+        async def seed():
+            async with SessionLocal() as db:
+                db.add(PublishAccount(
+                    id=account["id"],
+                    name=account["id"],
+                    platform=account["platform"],
+                    is_active=account["is_active"],
+                ))
+                await db.commit()
+
+        asyncio.run(seed())
+        account_id = account["id"]
+    else:
+        account_id = "missing"
+
+    response = client.put(
+        "/api/settings",
+        json={"x_response_account_id": account_id},
+    )
+
+    assert response.status_code == 422
+    assert client.get("/api/settings").json()["x_response_account_id"] == ""
+
+
+def test_settings_accepts_active_twitter_publish_account_and_blank_default(client):
+    from database import SessionLocal
+    from models import PublishAccount
+
+    async def seed():
+        async with SessionLocal() as db:
+            db.add(PublishAccount(
+                id="publisher",
+                name="Publisher",
+                platform="TwItTeR",
+                is_active=True,
+            ))
+            await db.commit()
+
+    asyncio.run(seed())
+    accepted = client.put(
+        "/api/settings",
+        json={"x_response_account_id": "publisher"},
+    )
+    assert accepted.status_code == 200, accepted.text
+    assert accepted.json()["x_response_account_id"] == "publisher"
+
+    cleared = client.put("/api/settings", json={"x_response_account_id": " "})
+    assert cleared.status_code == 200, cleared.text
+    assert cleared.json()["x_response_account_id"] == ""

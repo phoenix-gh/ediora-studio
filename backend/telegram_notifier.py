@@ -8,6 +8,8 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
+from log_redaction import redact_secret_text
+
 
 MAX_TELEGRAM_TEXT = 4000
 ACTION_LABELS = {
@@ -19,9 +21,18 @@ ACTION_LABELS = {
 
 
 class TelegramSendError(RuntimeError):
-    def __init__(self, message: str, *, retryable: bool):
+    def __init__(
+        self,
+        message: str,
+        *,
+        retryable: bool,
+        message_ids: list[int] | None = None,
+        delivery_unknown: bool = False,
+    ):
         super().__init__(message)
         self.retryable = retryable
+        self.message_ids = list(message_ids or [])
+        self.delivery_unknown = delivery_unknown
 
 
 def render_test_message(tested_at: datetime) -> str:
@@ -116,16 +127,30 @@ async def send_html_messages(
     message_ids: list[int] = []
     try:
         for message in messages:
-            response = await active_client.post(
-                f"https://api.telegram.org/bot{token}/sendMessage",
-                json={
-                    "chat_id": chat_id,
-                    "text": message,
-                    "parse_mode": "HTML",
-                    "link_preview_options": {"is_disabled": True},
-                },
-                timeout=15,
-            )
+            request_failure: TelegramSendError | None = None
+            try:
+                response = await active_client.post(
+                    f"https://api.telegram.org/bot{token}/sendMessage",
+                    json={
+                        "chat_id": chat_id,
+                        "text": message,
+                        "parse_mode": "HTML",
+                        "link_preview_options": {"is_disabled": True},
+                    },
+                    timeout=15,
+                )
+            except httpx.RequestError as exc:
+                safe_detail = redact_secret_text(str(exc))
+                if token:
+                    safe_detail = safe_detail.replace(token, "***")
+                request_failure = TelegramSendError(
+                    safe_detail or "Telegram 网络请求失败，投递状态未知",
+                    retryable=False,
+                    message_ids=message_ids,
+                    delivery_unknown=True,
+                )
+            if request_failure is not None:
+                raise request_failure from None
             try:
                 payload = response.json()
             except ValueError:
@@ -135,6 +160,7 @@ async def send_html_messages(
                 raise TelegramSendError(
                     detail,
                     retryable=response.status_code == 429 or response.status_code >= 500,
+                    message_ids=message_ids,
                 )
             message_ids.append(int(payload["result"]["message_id"]))
     finally:

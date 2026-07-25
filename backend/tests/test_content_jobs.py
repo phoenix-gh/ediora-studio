@@ -85,3 +85,30 @@ def test_daily_plan_job_failure_marks_plan_failed(session_factory):
             assert plan.status == "failed"
 
     asyncio.new_event_loop().run_until_complete(run())
+
+
+def test_fail_step_redacts_secrets_before_database_persistence(session_factory):
+    from content_jobs import create_job, fail_step, start_step
+
+    async def run():
+        token = "123456:secret-token"
+        async with session_factory() as session:
+            job = await create_job(
+                session,
+                flow="x_response",
+                title="secret boundary",
+                input_data={},
+            )
+            step = await start_step(session, job.id, "notify")
+            failed = await fail_step(
+                session,
+                step.id,
+                f"POST https://api.telegram.org/bot{token}/sendMessage auth_token=x-secret",
+                retryable=True,
+            )
+
+            assert token not in failed.error
+            assert "x-secret" not in failed.error
+            assert "bot***/sendMessage" in failed.error
+
+    asyncio.new_event_loop().run_until_complete(run())
