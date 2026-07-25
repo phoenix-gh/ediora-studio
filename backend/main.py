@@ -8,7 +8,7 @@ load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
 from log_redaction import install_log_redaction
 
-install_log_redaction()
+install_log_redaction(secure_default_handler=True)
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
