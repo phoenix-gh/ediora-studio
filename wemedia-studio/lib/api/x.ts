@@ -73,6 +73,10 @@ export interface XSearchPost {
 export interface XAuthStatus {
   ready: boolean
   hint: string
+  managed_accounts?: number
+  external_sessions?: number
+  total_accounts?: number
+  available_accounts?: number
 }
 
 export interface XCollectResult {
