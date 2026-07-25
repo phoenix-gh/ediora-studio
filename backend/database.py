@@ -98,6 +98,10 @@ async def init_db():
         await conn.execute(text(
             "ALTER TABLE publish_accounts ADD COLUMN IF NOT EXISTS daily_quota JSON NOT NULL DEFAULT '{}'::json"
         ))
+        await conn.execute(text(
+            "ALTER TABLE x_response_decisions "
+            "ADD COLUMN IF NOT EXISTS telegram_claim_token VARCHAR"
+        ))
 
         if not DATABASE_URL.startswith("sqlite"):
             # Writing plans brief field (added in redesign; idempotent)

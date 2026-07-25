@@ -237,6 +237,9 @@ class XResponseDecision(Base):
     telegram_message_ids: Mapped[list] = mapped_column(JSON, default=list)
     telegram_attempts: Mapped[int] = mapped_column(Integer, default=0)
     telegram_last_error: Mapped[str] = mapped_column(Text, default="")
+    telegram_claim_token: Mapped[str | None] = mapped_column(
+        String, nullable=True, index=True
+    )
     notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     event_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, index=True)

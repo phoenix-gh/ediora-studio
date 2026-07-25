@@ -1,5 +1,7 @@
 import asyncio
 import sys
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -203,3 +205,218 @@ def test_digest_send_is_idempotent(client, monkeypatch):
     assert len(calls) == 1
     listed = client.get("/api/x/responses").json()["items"]
     assert listed[0]["telegram_status"] == "sent"
+
+
+def test_notify_claim_prevents_concurrent_duplicate_send(client, monkeypatch):
+    decision = client.post(
+        "/api/x/responses/internal/t1/decision",
+        json=_decision_body(),
+    ).json()
+    client.put("/api/settings", json={
+        "telegram_bot_token": "token",
+        "telegram_chat_id": "chat",
+    })
+    entered = threading.Event()
+    release = threading.Event()
+    calls = 0
+    calls_lock = threading.Lock()
+
+    async def blocking_send(*_args, **_kwargs):
+        nonlocal calls
+        with calls_lock:
+            calls += 1
+        entered.set()
+        await asyncio.to_thread(release.wait, 5)
+        return [711]
+
+    import telegram_notifier
+    monkeypatch.setattr(telegram_notifier, "send_html_messages", blocking_send)
+
+    url = f"/api/x/responses/{decision['id']}/notify"
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first = executor.submit(client.post, url)
+        assert entered.wait(2)
+        second = executor.submit(client.post, url)
+        second_response = second.result(timeout=2)
+        release.set()
+        first_response = first.result(timeout=5)
+
+    assert first_response.status_code == 200
+    assert second_response.status_code == 200
+    assert calls == 1
+    assert client.get(f"/api/x/responses/{decision['id']}").json()[
+        "telegram_status"
+    ] == "sent"
+
+
+def test_notify_request_error_with_partial_delivery_is_unknown_and_never_retried(
+    client,
+    monkeypatch,
+):
+    from telegram_notifier import TelegramSendError
+
+    decision = client.post(
+        "/api/x/responses/internal/t1/decision",
+        json=_decision_body(),
+    ).json()
+    client.put("/api/settings", json={
+        "telegram_bot_token": "123456:secret-token",
+        "telegram_chat_id": "chat",
+    })
+    calls = 0
+
+    async def unknown_send(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        raise TelegramSendError(
+            "network timed out",
+            retryable=False,
+            message_ids=[701],
+            delivery_unknown=True,
+        )
+
+    import telegram_notifier
+    monkeypatch.setattr(telegram_notifier, "send_html_messages", unknown_send)
+    url = f"/api/x/responses/{decision['id']}/notify"
+
+    first = client.post(url)
+    second = client.post(url)
+    stored = client.get(f"/api/x/responses/{decision['id']}").json()
+
+    assert first.status_code == 503
+    assert second.status_code == 200
+    assert calls == 1
+    assert stored["telegram_status"] == "unknown"
+    assert stored["telegram_message_ids"] == [701]
+
+
+def test_concurrent_digest_claims_one_non_overlapping_decision_set(client, monkeypatch):
+    from database import SessionLocal
+    from models import XPost
+
+    now = datetime.now(timezone.utc)
+
+    async def seed_second_post():
+        async with SessionLocal() as db:
+            db.add(XPost(
+                tweet_id="t2",
+                subscription_id=1,
+                username="AnthropicAI",
+                display_name="Anthropic",
+                content="Second update",
+                raw_markdown="Second update",
+                url="https://x.com/AnthropicAI/status/t2",
+                published_at=now,
+                collected_at=now,
+            ))
+            await db.commit()
+
+    asyncio.run(seed_second_post())
+    digest_body = _decision_body()
+    digest_body.update({
+        "action": "comment",
+        "score": 60,
+        "confidence": 0.8,
+        "comment_draft": "这个更新值得关注。",
+        "quote_draft": None,
+    })
+    assert client.post(
+        "/api/x/responses/internal/t1/decision",
+        json=digest_body,
+    ).status_code == 200
+    assert client.post(
+        "/api/x/responses/internal/t2/decision",
+        json=digest_body,
+    ).status_code == 200
+    client.put("/api/settings", json={
+        "telegram_bot_token": "token",
+        "telegram_chat_id": "chat",
+    })
+    entered = threading.Event()
+    release = threading.Event()
+    sends: list[list[str]] = []
+
+    async def blocking_send(_token, _chat_id, messages, **_kwargs):
+        sends.append(messages)
+        entered.set()
+        await asyncio.to_thread(release.wait, 5)
+        return [801]
+
+    import telegram_notifier
+    monkeypatch.setattr(telegram_notifier, "send_html_messages", blocking_send)
+    date_key = datetime.now().astimezone().date().isoformat()
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first = executor.submit(
+            client.post,
+            "/api/x/responses/digest/send",
+            json={"date": date_key},
+        )
+        assert entered.wait(2)
+        second = executor.submit(
+            client.post,
+            "/api/x/responses/digest/send",
+            json={"date": date_key},
+        )
+        second_response = second.result(timeout=2)
+        release.set()
+        first_response = first.result(timeout=5)
+
+    assert first_response.json()["sent"] == 2
+    assert second_response.json() == {"sent": 0, "message_ids": []}
+    assert len(sends) == 1
+
+
+def test_digest_partial_delivery_is_unknown_and_preserves_message_ids(
+    client,
+    monkeypatch,
+):
+    from telegram_notifier import TelegramSendError
+
+    body = _decision_body()
+    body.update({
+        "action": "comment",
+        "score": 60,
+        "confidence": 0.8,
+        "comment_draft": "这个更新值得关注。",
+        "quote_draft": None,
+    })
+    decision = client.post(
+        "/api/x/responses/internal/t1/decision",
+        json=body,
+    ).json()
+    client.put("/api/settings", json={
+        "telegram_bot_token": "token",
+        "telegram_chat_id": "chat",
+    })
+    calls = 0
+
+    async def partial_send(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        raise TelegramSendError(
+            "second message timed out",
+            retryable=False,
+            message_ids=[911],
+            delivery_unknown=True,
+        )
+
+    import telegram_notifier
+    monkeypatch.setattr(telegram_notifier, "send_html_messages", partial_send)
+    date_key = datetime.now().astimezone().date().isoformat()
+
+    first = client.post(
+        "/api/x/responses/digest/send",
+        json={"date": date_key},
+    )
+    second = client.post(
+        "/api/x/responses/digest/send",
+        json={"date": date_key},
+    )
+    stored = client.get(f"/api/x/responses/{decision['id']}").json()
+
+    assert first.status_code == 503
+    assert second.json() == {"sent": 0, "message_ids": []}
+    assert calls == 1
+    assert stored["telegram_status"] == "unknown"
+    assert stored["telegram_message_ids"] == [911]

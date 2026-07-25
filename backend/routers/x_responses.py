@@ -3,17 +3,19 @@
 from __future__ import annotations
 
 import re
+import uuid
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Literal
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import desc, select
+from sqlalchemy import desc, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import get_config
 from database import get_db
+from log_redaction import redact_secret_text
 from models import PublishAccount, XPost, XResponseDecision, XSubscription
 from x_response_links import extract_external_urls, verify_urls
 from x_response_service import persist_decision
@@ -58,6 +60,10 @@ class FeedbackIn(BaseModel):
 
 class DigestIn(BaseModel):
     date: date
+
+
+CLAIMABLE_IMMEDIATE_STATUSES = {"pending", "failed"}
+CLAIMABLE_DIGEST_STATUSES = {"not_required", "failed"}
 
 
 def _aware(value: datetime | None) -> datetime | None:
@@ -122,6 +128,58 @@ def _payload(decision: XResponseDecision, post: XPost, sub: XSubscription) -> di
         "notified_at": decision.notified_at,
         "created_at": decision.created_at,
     }
+
+
+def _safe_telegram_error(exc: Exception, token: str) -> str:
+    safe = redact_secret_text(str(exc))
+    if token:
+        safe = safe.replace(token, "***")
+    return safe[:500]
+
+
+async def _claim_decision(
+    db: AsyncSession,
+    decision_id: int,
+    claimable_statuses: set[str],
+) -> str | None:
+    claim_token = uuid.uuid4().hex
+    result = await db.execute(
+        update(XResponseDecision)
+        .where(XResponseDecision.id == decision_id)
+        .where(XResponseDecision.telegram_status.in_(claimable_statuses))
+        .values(
+            telegram_status="sending",
+            telegram_claim_token=claim_token,
+            telegram_attempts=XResponseDecision.telegram_attempts + 1,
+            telegram_last_error="",
+        )
+    )
+    await db.commit()
+    return claim_token if result.rowcount == 1 else None
+
+
+async def _finish_claim_failure(
+    db: AsyncSession,
+    *,
+    claim_token: str,
+    exc: Exception,
+    configured_token: str,
+) -> str:
+    message_ids = list(getattr(exc, "message_ids", []) or [])
+    delivery_unknown = bool(getattr(exc, "delivery_unknown", False))
+    status = "unknown" if delivery_unknown or message_ids else "failed"
+    await db.execute(
+        update(XResponseDecision)
+        .where(XResponseDecision.telegram_claim_token == claim_token)
+        .where(XResponseDecision.telegram_status == "sending")
+        .values(
+            telegram_status=status,
+            telegram_message_ids=message_ids,
+            telegram_last_error=_safe_telegram_error(exc, configured_token),
+        )
+    )
+    await db.commit()
+    return status
 
 
 @router.get("/internal/{tweet_id}/context")
@@ -244,7 +302,9 @@ async def send_digest(body: DigestIn, db: AsyncSession = Depends(get_db)):
         .join(XPost, XPost.tweet_id == XResponseDecision.tweet_id)
         .join(XSubscription, XSubscription.id == XResponseDecision.subscription_id)
         .where(XResponseDecision.notification_tier == "digest")
-        .where(XResponseDecision.telegram_status != "sent")
+        .where(
+            XResponseDecision.telegram_status.in_(CLAIMABLE_DIGEST_STATUSES)
+        )
         .where(XResponseDecision.created_at >= start)
         .where(XResponseDecision.created_at < end)
         .order_by(desc(XResponseDecision.score), desc(XPost.published_at))
@@ -254,9 +314,35 @@ async def send_digest(body: DigestIn, db: AsyncSession = Depends(get_db)):
 
     import telegram_notifier
     cfg = await get_config()
+    claim_token = uuid.uuid4().hex
+    candidate_ids = [row[0].id for row in rows]
+    await db.execute(
+        update(XResponseDecision)
+        .where(XResponseDecision.id.in_(candidate_ids))
+        .where(
+            XResponseDecision.telegram_status.in_(CLAIMABLE_DIGEST_STATUSES)
+        )
+        .values(
+            telegram_status="sending",
+            telegram_claim_token=claim_token,
+            telegram_attempts=XResponseDecision.telegram_attempts + 1,
+            telegram_last_error="",
+        )
+    )
+    await db.commit()
+    db.expire_all()
+    rows = (await db.execute(
+        select(XResponseDecision, XPost, XSubscription)
+        .join(XPost, XPost.tweet_id == XResponseDecision.tweet_id)
+        .join(XSubscription, XSubscription.id == XResponseDecision.subscription_id)
+        .where(XResponseDecision.telegram_claim_token == claim_token)
+        .where(XResponseDecision.telegram_status == "sending")
+        .order_by(desc(XResponseDecision.score), desc(XPost.published_at))
+    )).all()
+    if not rows:
+        return {"sent": 0, "message_ids": []}
+
     decisions = [row[0] for row in rows]
-    for decision in decisions:
-        decision.telegram_attempts += 1
     messages = telegram_notifier.render_digest_messages(
         rows,
         body.date.isoformat(),
@@ -269,18 +355,30 @@ async def send_digest(body: DigestIn, db: AsyncSession = Depends(get_db)):
             messages,
         )
     except telegram_notifier.TelegramSendError as exc:
-        for decision in decisions:
-            decision.telegram_status = "failed"
-            decision.telegram_last_error = str(exc)[:500]
-        await db.commit()
-        raise HTTPException(503, str(exc)) from exc
+        configured_token = cfg.get("telegram_bot_token", "")
+        await _finish_claim_failure(
+            db,
+            claim_token=claim_token,
+            exc=exc,
+            configured_token=configured_token,
+        )
+        raise HTTPException(
+            503,
+            _safe_telegram_error(exc, configured_token),
+        ) from None
 
     sent_at = datetime.now(timezone.utc)
-    for decision in decisions:
-        decision.telegram_status = "sent"
-        decision.telegram_message_ids = message_ids
-        decision.telegram_last_error = ""
-        decision.notified_at = sent_at
+    await db.execute(
+        update(XResponseDecision)
+        .where(XResponseDecision.telegram_claim_token == claim_token)
+        .where(XResponseDecision.telegram_status == "sending")
+        .values(
+            telegram_status="sent",
+            telegram_message_ids=message_ids,
+            telegram_last_error="",
+            notified_at=sent_at,
+        )
+    )
     await db.commit()
     return {"sent": len(decisions), "message_ids": message_ids}
 
@@ -329,12 +427,24 @@ async def notify_response(decision_id: int, db: AsyncSession = Depends(get_db)):
     decision, post, sub = row
     if decision.telegram_status == "sent":
         return _payload(decision, post, sub)
+    if decision.telegram_status in {"sending", "unknown"}:
+        return _payload(decision, post, sub)
     if decision.notification_tier != "immediate":
         return _payload(decision, post, sub)
 
     import telegram_notifier
     cfg = await get_config()
-    decision.telegram_attempts += 1
+    claim_token = await _claim_decision(
+        db,
+        decision.id,
+        CLAIMABLE_IMMEDIATE_STATUSES,
+    )
+    if claim_token is None:
+        db.expire_all()
+        current = await _joined(db, decision_id)
+        assert current is not None
+        return _payload(*current)
+    await db.refresh(decision)
     messages = telegram_notifier.render_immediate_messages(
         decision, post, sub,
         f"http://localhost:3000/x-responses?decision={decision.id}",
@@ -346,13 +456,30 @@ async def notify_response(decision_id: int, db: AsyncSession = Depends(get_db)):
             messages,
         )
     except telegram_notifier.TelegramSendError as exc:
-        decision.telegram_status = "failed"
-        decision.telegram_last_error = str(exc)[:500]
-        await db.commit()
-        raise HTTPException(503, str(exc)) from exc
-    decision.telegram_status = "sent"
-    decision.telegram_message_ids = message_ids
-    decision.telegram_last_error = ""
-    decision.notified_at = datetime.now(timezone.utc)
+        configured_token = cfg.get("telegram_bot_token", "")
+        await _finish_claim_failure(
+            db,
+            claim_token=claim_token,
+            exc=exc,
+            configured_token=configured_token,
+        )
+        raise HTTPException(
+            503,
+            _safe_telegram_error(exc, configured_token),
+        ) from None
+    await db.execute(
+        update(XResponseDecision)
+        .where(XResponseDecision.telegram_claim_token == claim_token)
+        .where(XResponseDecision.telegram_status == "sending")
+        .values(
+            telegram_status="sent",
+            telegram_message_ids=message_ids,
+            telegram_last_error="",
+            notified_at=datetime.now(timezone.utc),
+        )
+    )
     await db.commit()
-    return _payload(decision, post, sub)
+    db.expire_all()
+    completed = await _joined(db, decision_id)
+    assert completed is not None
+    return _payload(*completed)
