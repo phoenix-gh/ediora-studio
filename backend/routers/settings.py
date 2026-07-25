@@ -468,6 +468,7 @@ def _clean_telegram_test_error(exc: Exception, cfg: dict[str, str]) -> str:
 async def test_telegram():
     cfg = await get_config()
     tested_at = datetime.now(timezone.utc)
+    safe_error: str | None = None
     try:
         await telegram_notifier.send_html_messages(
             cfg.get("telegram_bot_token", ""),
@@ -476,12 +477,20 @@ async def test_telegram():
         )
     except Exception as exc:
         safe_error = _clean_telegram_test_error(exc, cfg)
-        await set_config({
-            "telegram_test_status": "failed",
-            "telegram_last_tested_at": tested_at.isoformat(),
-            "telegram_last_test_error": safe_error,
-        })
-        raise HTTPException(status_code=503, detail=safe_error) from exc
+
+    if safe_error is not None:
+        try:
+            await set_config({
+                "telegram_test_status": "failed",
+                "telegram_last_tested_at": tested_at.isoformat(),
+                "telegram_last_test_error": safe_error,
+            })
+        except Exception:
+            raise HTTPException(
+                status_code=503,
+                detail="Telegram 测试状态保存失败",
+            ) from None
+        raise HTTPException(status_code=503, detail=safe_error) from None
 
     await set_config({
         "telegram_test_status": "success",

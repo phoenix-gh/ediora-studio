@@ -1,7 +1,9 @@
 import asyncio
 import sys
+import traceback
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 
@@ -170,6 +172,69 @@ def test_telegram_test_unexpected_failure_is_redacted_and_persisted(client, monk
     assert settings["telegram_last_test_error"] == (
         "transport failed at https://api.telegram.org/bot***/sendMessage"
     )
+
+
+def test_telegram_test_metadata_failure_has_fixed_response_and_no_sensitive_exception_chain(
+    client,
+    monkeypatch,
+    capsys,
+):
+    import routers.settings as settings_router
+
+    client.put("/api/settings", json={
+        "telegram_bot_token": "saved-token",
+        "telegram_chat_id": "-100123",
+    })
+
+    async def fail_send(*_args, **_kwargs):
+        raise RuntimeError(
+            "send failed at https://api.telegram.org/botsaved-token/sendMessage",
+        )
+
+    async def fail_set_config(_updates):
+        raise RuntimeError("database write failed for saved-token")
+
+    monkeypatch.setattr("telegram_notifier.send_html_messages", fail_send)
+    monkeypatch.setattr(settings_router, "set_config", fail_set_config)
+
+    safe_client = TestClient(client.app, raise_server_exceptions=False)
+    response = safe_client.post("/api/settings/telegram/test")
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "Telegram 测试状态保存失败"}
+
+    with pytest.raises(HTTPException) as raised:
+        asyncio.run(settings_router.test_telegram())
+
+    formatted = "".join(
+        traceback.format_exception(
+            type(raised.value),
+            raised.value,
+            raised.value.__traceback__,
+        ),
+    )
+    captured = capsys.readouterr()
+    observable = response.text + formatted + captured.out + captured.err
+    assert raised.value.__suppress_context__ is True
+    assert "saved-token" not in observable
+    assert "database write failed" not in observable
+
+
+def test_telegram_test_does_not_swallow_cancelled_error(client, monkeypatch):
+    import routers.settings as settings_router
+
+    client.put("/api/settings", json={
+        "telegram_bot_token": "saved-token",
+        "telegram_chat_id": "-100123",
+    })
+
+    async def cancel_send(*_args, **_kwargs):
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr("telegram_notifier.send_html_messages", cancel_send)
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(settings_router.test_telegram())
 
 
 def test_telegram_save_preserves_blank_token_and_resets_old_test_status(client, monkeypatch):
