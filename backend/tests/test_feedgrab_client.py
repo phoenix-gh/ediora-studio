@@ -142,6 +142,16 @@ def test_auth_status_no_creds(monkeypatch, tmp_path):
     monkeypatch.delenv("X_CT0", raising=False)
     monkeypatch.chdir(tmp_path)  # no sessions/twitter.json or sessions/x.json
     monkeypatch.setenv("HOME", str(tmp_path))  # no ~/.feedgrab/...
+    monkeypatch.setenv("FEEDGRAB_DATA_DIR", str(tmp_path / "sessions"))
+    # feedgrab 0.24.1 caches its cookie directory at module import time.
+    monkeypatch.setattr(
+        "feedgrab.fetchers.twitter_cookies.count_total_accounts",
+        lambda: 0,
+    )
+    monkeypatch.setattr(
+        "feedgrab.fetchers.twitter_cookies.count_available_accounts",
+        lambda: 0,
+    )
     s = auth_status()
     assert s["ready"] is False
     assert "feedgrab login twitter" in s["hint"]
