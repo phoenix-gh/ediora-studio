@@ -259,6 +259,18 @@ describe('XCredentialAccountsCard', () => {
     expect(screen.queryByText(/secret-auth/)).toBeNull()
   })
 
+  it('redacts trimmed credentials when the API error echoes the sent values', async () => {
+    vi.mocked(createXCredentialAccount).mockRejectedValue(new Error('凭据 secret-auth 已失效'))
+    renderLoaded(emptyPool)
+
+    await openAddDialog()
+    await fillCredentialForm({ authToken: '  secret-auth  ', ct0: '  secret-csrf  ' })
+    fireEvent.click(screen.getByRole('button', { name: '保存账号' }))
+
+    expect(await screen.findByText(/保存账号失败/)).not.toBeNull()
+    expect(screen.queryByText(/secret-auth/)).toBeNull()
+  })
+
   it('clears a generic action error when a later action begins and succeeds', async () => {
     let resolveRetry: (pool: XCredentialPool) => void = () => {}
     vi.mocked(testXCredentialAccount)
@@ -286,5 +298,40 @@ describe('XCredentialAccountsCard', () => {
 
     expect(await within(dialog).findByText('删除账号失败：删除服务不可用')).not.toBeNull()
     expect((within(dialog).getByRole('button', { name: '确认删除' }) as HTMLButtonElement).disabled).toBe(false)
+  })
+
+  it('does not close a pending delete dialog when cancellation is attempted', async () => {
+    let resolveDelete: (pool: XCredentialPool) => void = () => {}
+    vi.mocked(deleteXCredentialAccount).mockImplementation(() => new Promise(resolve => { resolveDelete = resolve }))
+    renderLoaded()
+
+    fireEvent.click(await screen.findByRole('button', { name: '删除采集账号 A' }))
+    const dialog = await screen.findByRole('alertdialog', { name: '删除采集账号' })
+    fireEvent.click(within(dialog).getByRole('button', { name: '确认删除' }))
+
+    const cancel = within(dialog).getByRole('button', { name: '取消' }) as HTMLButtonElement
+    expect(cancel.disabled).toBe(true)
+    fireEvent.click(cancel)
+    expect(screen.getByRole('alertdialog', { name: '删除采集账号' })).not.toBeNull()
+
+    resolveDelete(emptyPool)
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
+  })
+
+  it('clears a failed delete error before opening another account target', async () => {
+    vi.mocked(deleteXCredentialAccount).mockRejectedValueOnce(new Error('删除服务不可用'))
+    renderLoaded(twoAccountPool)
+
+    fireEvent.click(await screen.findByRole('button', { name: '删除采集账号 A' }))
+    const firstDialog = await screen.findByRole('alertdialog', { name: '删除采集账号' })
+    fireEvent.click(within(firstDialog).getByRole('button', { name: '确认删除' }))
+    expect(await within(firstDialog).findByText('删除账号失败：删除服务不可用')).not.toBeNull()
+
+    fireEvent.click(within(firstDialog).getByRole('button', { name: '取消' }))
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull())
+    fireEvent.click(screen.getByRole('button', { name: '删除采集账号 B' }))
+    const secondDialog = await screen.findByRole('alertdialog', { name: '删除采集账号' })
+
+    expect(within(secondDialog).queryByText('删除账号失败：删除服务不可用')).toBeNull()
   })
 })

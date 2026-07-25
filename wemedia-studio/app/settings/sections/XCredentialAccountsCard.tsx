@@ -155,6 +155,19 @@ export function XCredentialAccountsCard() {
     if (!open) resetForm()
   }
 
+  function openDeleteDialog(account: XCredentialAccount) {
+    if (isActing) return
+    setActionError(null)
+    setDeleteTarget(account)
+  }
+
+  function handleDeleteOpenChange(open: boolean) {
+    if (!open && !isActing) {
+      setActionError(null)
+      setDeleteTarget(null)
+    }
+  }
+
   function beginAction(id: number | null, action: Exclude<ActionName, null>) {
     setActionError(null)
     setActingId(id)
@@ -172,7 +185,12 @@ export function XCredentialAccountsCard() {
 
     beginAction(form.id, 'save')
     setFormError('')
-    const credentials = [form.auth_token, form.ct0]
+    const credentials = [...new Set([
+      form.auth_token,
+      form.ct0,
+      trimmedAuthToken,
+      trimmedCt0,
+    ].filter(Boolean))]
     try {
       let nextPool: XCredentialPool
       if (form.id === null) {
@@ -324,7 +342,7 @@ export function XCredentialAccountsCard() {
         {actionError?.action !== 'delete' && actionError && <FieldError>{actionError.message}</FieldError>}
         {loading && <p className="text-sm text-muted-foreground">正在加载采集账号…</p>}
         {!loading && pool?.accounts.length === 0 && <p className="text-sm text-muted-foreground">还没有托管采集账号。</p>}
-        <AlertDialog open={Boolean(deleteTarget)} onOpenChange={open => { if (!open) setDeleteTarget(null) }}>
+        <AlertDialog open={Boolean(deleteTarget)} onOpenChange={handleDeleteOpenChange}>
           <div className="flex flex-col gap-3">
             {pool?.accounts.map(account => {
               const status = STATUS[account.test_status]
@@ -371,7 +389,7 @@ export function XCredentialAccountsCard() {
                     </Button>
                     <AlertDialogTrigger
                       render={<Button type="button" size="sm" variant="destructive" disabled={isActing} aria-label={`删除${account.name}`} />}
-                      onClick={() => setDeleteTarget(account)}
+                      onClick={() => openDeleteDialog(account)}
                     >
                       <Trash2Icon data-icon="inline-start" />
                       删除
@@ -388,7 +406,7 @@ export function XCredentialAccountsCard() {
               {actionError?.action === 'delete' && <FieldError>{actionError.message}</FieldError>}
             </AlertDialogHeader>
             <AlertDialogFooter>
-              <AlertDialogCancel>取消</AlertDialogCancel>
+              <AlertDialogCancel disabled={isActing}>取消</AlertDialogCancel>
               <AlertDialogAction onClick={() => void handleDelete()} disabled={isActing}>
                 {actingAction === 'delete' && <LoaderCircleIcon data-icon="inline-start" className="animate-spin" />}
                 确认删除
