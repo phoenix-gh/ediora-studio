@@ -21,6 +21,33 @@ async def get_db() -> AsyncSession:
     async with SessionLocal() as session:
         yield session
 
+async def migrate_x_response_claim_schema(conn) -> None:
+    """Add the delivery-claim column/index on both SQLite and PostgreSQL."""
+    from sqlalchemy import text
+
+    if conn.dialect.name == "sqlite":
+        rows = (
+            await conn.execute(text("PRAGMA table_info(x_response_decisions)"))
+        ).all()
+        if not rows:
+            return
+        columns = {row[1] for row in rows}
+        if "telegram_claim_token" not in columns:
+            await conn.execute(text(
+                "ALTER TABLE x_response_decisions "
+                "ADD COLUMN telegram_claim_token VARCHAR"
+            ))
+    else:
+        await conn.execute(text(
+            "ALTER TABLE x_response_decisions "
+            "ADD COLUMN IF NOT EXISTS telegram_claim_token VARCHAR"
+        ))
+    await conn.execute(text(
+        "CREATE INDEX IF NOT EXISTS "
+        "ix_x_response_decisions_telegram_claim_token "
+        "ON x_response_decisions (telegram_claim_token)"
+    ))
+
 async def init_db():
     from sqlalchemy import text
     async with engine.begin() as conn:
@@ -98,10 +125,7 @@ async def init_db():
         await conn.execute(text(
             "ALTER TABLE publish_accounts ADD COLUMN IF NOT EXISTS daily_quota JSON NOT NULL DEFAULT '{}'::json"
         ))
-        await conn.execute(text(
-            "ALTER TABLE x_response_decisions "
-            "ADD COLUMN IF NOT EXISTS telegram_claim_token VARCHAR"
-        ))
+        await migrate_x_response_claim_schema(conn)
 
         if not DATABASE_URL.startswith("sqlite"):
             # Writing plans brief field (added in redesign; idempotent)
