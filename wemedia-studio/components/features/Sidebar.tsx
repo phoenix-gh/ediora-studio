@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation'
 import {
   LayoutDashboard, TrendingUp, Settings, GitFork, AtSign, FileText, BookMarked, Tag, Bot,
   PlaySquare, Rocket, MessageSquare, Globe, Flame, Gem, ListChecks, Hash, Lightbulb, CalendarCheck, Send,
+  MessageSquareReply,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -33,6 +34,7 @@ const sections: NavSection[] = [
       { href: '/writing-plans', label: '写作模板', icon: Tag },
       { href: '/assets',       label: '创作资产', icon: FileText },
       { href: '/trend-topics', label: '热点选题', icon: Lightbulb },
+      { href: '/x-responses',  label: '待响应',   icon: MessageSquareReply },
       { href: '/published',    label: '发布',     icon: Send },
     ],
   },
