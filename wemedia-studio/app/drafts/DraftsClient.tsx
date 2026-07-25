@@ -688,9 +688,9 @@ export function DraftsClient({
                 value={editWritingPlanId ?? ''}
                 onChange={e => { setEditWritingPlanId(e.target.value ? Number(e.target.value) : null); setDirty(true) }}
                 className="text-xs px-2 py-1 rounded-full border border-zinc-200 dark:border-zinc-700 bg-transparent cursor-pointer focus:outline-none focus:ring-1 focus:ring-indigo-400 text-zinc-600 dark:text-zinc-400 max-w-[160px] truncate"
-                title="关联写作方案"
+                title="关联写作模板"
               >
-                <option value="">无写作方案</option>
+                <option value="">无写作模板</option>
                 {flattenTopicsWithDepth(topicList).map(({ plan, label }) => (
                   <option key={plan.id} value={plan.id}>{label}</option>
                 ))}
@@ -915,7 +915,7 @@ export function DraftsClient({
         <div className="flex-1 flex flex-col items-center justify-center text-zinc-400 gap-3">
           <BookMarked className="w-12 h-12 opacity-20" />
           <p className="text-sm">选择一篇草稿开始编辑</p>
-          <p className="text-xs text-zinc-300">从写作方案线索创作后会自动进入草稿箱</p>
+          <p className="text-xs text-zinc-300">从写作模板参考创作后会自动进入草稿箱</p>
         </div>
       )}
 

@@ -12,7 +12,7 @@ export const searchInformationSourcesSchema = z.object({
 })
 
 export const readInformationSourceSchema = z.object({
-  source: z.enum(['writing_plan', 'reference_material']),
+  source: z.literal('writing_plan'),
   id: z.number().int().positive(),
 })
 
@@ -27,14 +27,41 @@ type PersistedChatMessage = {
   parts: unknown[]
 }
 
+type PersistedChatPart = { type?: unknown; state?: unknown }
+
 export function latestClientTurn(messages: unknown[]) {
   return messages.at(-1)
 }
 
-export function modelHistoryCandidates(messages: PersistedChatMessage[]) {
+function isTextPart(part: unknown): part is { type: 'text'; text: string } {
+  return Boolean(part)
+    && typeof part === 'object'
+    && (part as PersistedChatPart).type === 'text'
+    && typeof (part as { text?: unknown }).text === 'string'
+}
+
+function isPendingApprovalPart(part: unknown): part is Record<string, unknown> {
+  if (!part || typeof part !== 'object') return false
+  const record = part as PersistedChatPart
+  return record.type === 'dynamic-tool'
+    && (record.state === 'approval-requested' || record.state === 'approval-responded')
+}
+
+export function modelHistoryCandidates(
+  messages: PersistedChatMessage[],
+  { includeToolApprovals = false }: { includeToolApprovals?: boolean } = {},
+) {
   return messages
     .filter((message): message is PersistedChatMessage & { role: 'user' | 'assistant' } => message.role !== 'tool')
-    .map(message => ({ id: String(message.id), role: message.role, parts: message.parts }))
+    .map(message => ({
+      id: String(message.id),
+      role: message.role,
+      parts: [
+        ...message.parts.filter(isTextPart),
+        ...(includeToolApprovals && message.role === 'assistant' ? message.parts.filter(isPendingApprovalPart) : []),
+      ],
+    }))
+    .filter(message => message.parts.length > 0)
 }
 
 type ToolAudit = {
@@ -78,7 +105,7 @@ async function fetchToolResult(apiBase: string, path: string) {
 export function makeChatTools({ apiBase, sessionId }: ChatToolOptions) {
   return {
     searchInformationSources: tool({
-      description: 'Search the locally collected writing plans and reference materials. This tool is read-only.',
+      description: 'Search locally stored writing plans. This tool is read-only.',
       inputSchema: searchInformationSourcesSchema,
       execute: async ({ q, limit }) => {
         const input = { q, limit }
@@ -93,7 +120,7 @@ export function makeChatTools({ apiBase, sessionId }: ChatToolOptions) {
       },
     }),
     readInformationSource: tool({
-      description: 'Read one locally collected writing plan or reference material by source and id. This tool is read-only.',
+      description: 'Read one locally stored writing plan. This tool is read-only.',
       inputSchema: readInformationSourceSchema,
       execute: async ({ source, id }) => {
         const input = { source, id }

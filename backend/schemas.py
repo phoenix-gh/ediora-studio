@@ -249,6 +249,7 @@ class ReanalyzeRequest(BaseModel):
 
 class AnalyzePromptUpdate(BaseModel):
     instructions: str
+    override: bool = False
 
 
 class AnalyzeResponse(BaseModel):

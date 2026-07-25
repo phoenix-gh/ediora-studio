@@ -47,6 +47,16 @@ async def init_db():
             await conn.execute(text("ALTER TABLE IF EXISTS topic_updates RENAME TO plan_updates"))
 
         await conn.run_sync(Base.metadata.create_all)
+        await conn.execute(text("ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS media_kind VARCHAR NOT NULL DEFAULT ''"))
+        await conn.execute(text("ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS directory VARCHAR NOT NULL DEFAULT ''"))
+        await conn.execute(text("ALTER TABLE creative_asset_directories ADD COLUMN IF NOT EXISTS asset_type VARCHAR NOT NULL DEFAULT 'article'"))
+        await conn.execute(text("ALTER TABLE creative_asset_directories ADD COLUMN IF NOT EXISTS parent_id INTEGER"))
+        if not DATABASE_URL.startswith("sqlite"):
+            # The first version used a globally unique name. Directories now
+            # have independent article/media trees, so the same name is valid
+            # once in each tree.
+            await conn.execute(text("ALTER TABLE creative_asset_directories DROP CONSTRAINT IF EXISTS creative_asset_directories_name_key"))
+            await conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_creative_asset_directories_asset_type_name ON creative_asset_directories (asset_type, name)"))
         # x_posts column additions (idempotent)
         await conn.execute(text(
             "ALTER TABLE x_posts ADD COLUMN IF NOT EXISTS author_avatar VARCHAR NOT NULL DEFAULT ''"
@@ -67,7 +77,6 @@ async def init_db():
             await conn.execute(text("ALTER TABLE x_subscriptions ADD COLUMN IF NOT EXISTS sort VARCHAR NOT NULL DEFAULT 'top'"))
             await conn.execute(text("ALTER TABLE x_subscriptions ADD COLUMN IF NOT EXISTS max_results INTEGER NOT NULL DEFAULT 100"))
             await conn.execute(text("ALTER TABLE x_subscriptions ALTER COLUMN url DROP NOT NULL"))
-            await conn.execute(text("ALTER TABLE ref_collect_rules ADD COLUMN IF NOT EXISTS source_subscription_id INTEGER"))
             await conn.execute(text("ALTER TABLE reddit_posts ADD COLUMN IF NOT EXISTS body TEXT NOT NULL DEFAULT ''"))
             await conn.execute(text("ALTER TABLE reddit_posts ADD COLUMN IF NOT EXISTS comments JSON NOT NULL DEFAULT '[]'::json"))
             await conn.execute(text("ALTER TABLE reddit_posts ADD COLUMN IF NOT EXISTS fetch_status VARCHAR NOT NULL DEFAULT 'ok'"))
@@ -142,12 +151,6 @@ END $$
 """))
         # plan_updates: created by Base.metadata.create_all above (no raw DDL needed)
 
-    # One-off: migrate legacy quotes into unified ref_materials (idempotent)
-    try:
-        from ref_migrate import migrate_quotes_to_materials, migrate_rules_to_search_subs
-        async with SessionLocal() as db:
-            await migrate_quotes_to_materials(db)
-        async with SessionLocal() as db:
-            await migrate_rules_to_search_subs(db)
-    except Exception as e:
-        print(f"[init_db] quotes→materials migration skipped: {e}")
+        await conn.execute(text("DROP TABLE IF EXISTS ref_seen CASCADE"))
+        await conn.execute(text("DROP TABLE IF EXISTS ref_collect_rules CASCADE"))
+        await conn.execute(text("DROP TABLE IF EXISTS ref_materials CASCADE"))

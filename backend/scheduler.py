@@ -485,8 +485,6 @@ def register_jobs(scheduler, cfg):
         (scheduled_wechat,              dict(trigger="interval", minutes=15,          id="wechat_collect",    next_run_time=_first_run(15,  "wechat"))),
         (scheduled_x_collect,           dict(trigger="interval", minutes=5,           id="x_collect_hourly",  next_run_time=_first_run(5,   "x_collect"))),
         (scheduled_reddit,              dict(trigger="interval", minutes=60,          id="reddit_collect",    next_run_time=_first_run(60,  "reddit"))),
-        (scheduled_ref_collect,         dict(trigger="interval", minutes=5,           id="ref_collect_daily", next_run_time=_first_run(5,   "ref_collect"))),
-        (scheduled_ref_classify,        dict(trigger="interval", minutes=10,          id="ref_classify",      next_run_time=_first_run(10,  "ref_classify"))),
         (scheduled_x_reply_scout,       dict(trigger="interval", minutes=5,           id="x_reply_scout",     next_run_time=_first_run(5,   "x_reply_scout"))),
         (scheduled_daily_plan,          dict(trigger="cron",     hour=8, minute=0,    id="daily_plan")),
     ]

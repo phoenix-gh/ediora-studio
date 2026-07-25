@@ -21,6 +21,7 @@ import {
   PLATFORMS,
 } from '@/lib/api/writing-plans'
 import { createDraft } from '@/lib/api/drafts'
+import { getJob, listJobs, recordJobEvent } from '@/lib/api/jobs'
 import { listPublishAccounts, type PublishAccount, type CoverStyle } from '@/lib/api/publish-accounts'
 import { PushToStudioPopover } from '@/components/features/PushToStudioPopover'
 import { CoverStyleEditor, buildCoverStyleFromEditor } from '@/components/features/CoverStyleEditor'
@@ -179,6 +180,7 @@ interface AddSourceForm {
 }
 
 type ActiveTab = 'strategy' | 'sources' | 'drafts' | 'updates'
+type TemplateCandidate = { jobId: number; recommendation: 'create' | 'merge' | 'skip'; title: string; genre: string; writing_guide: string; title_formula: string; unsuitable_for: string; genericity_check: string; merge_target_id?: number | null; reason: string }
 
 export function WritingPlansClient({ initialPlans, initialTags }: {
   initialPlans: WritingPlan[]
@@ -259,6 +261,16 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
   const [analyzeUrl, setAnalyzeUrl] = useState('')
   const [analyzeText, setAnalyzeText] = useState('')
   const [analyzeBusy, setAnalyzeBusy] = useState(false)
+  const [candidate, setCandidate] = useState<TemplateCandidate | null>(null)
+  const [candidateSaving, setCandidateSaving] = useState(false)
+
+  useEffect(() => {
+    void listJobs().then(({ jobs }) => {
+      const job = jobs.find(job => job.flow === 'template_extraction' && job.status === 'succeeded' && !job.events.some(event => event.kind === 'template_candidate_resolved') && job.steps.some(step => step.key === 'template_extraction' && step.output.candidate))
+      const raw = job?.steps.find(step => step.key === 'template_extraction')?.output.candidate
+      if (job && raw && typeof raw === 'object') setCandidate({ ...(raw as Omit<TemplateCandidate, 'jobId'>), jobId: job.id })
+    }).catch(() => undefined)
+  }, [])
 
   // Reanalyze dialog
   const [reanalyzeOpen, setReanalyzeOpen] = useState(false)
@@ -268,6 +280,7 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
   // Prompt editor dialog
   const [promptEditorOpen, setPromptEditorOpen] = useState(false)
   const [promptEditorContent, setPromptEditorContent] = useState('')
+  const [promptEditorOverride, setPromptEditorOverride] = useState(false)
   const [promptEditorLoading, setPromptEditorLoading] = useState(false)
   const [promptEditorBusy, setPromptEditorBusy] = useState(false)
 
@@ -370,11 +383,39 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
         description: `任务 ${res.task_id}`,
         action: { label: '查看看板', onClick: () => router.push(res.kanban_url) },
       })
+      for (let attempt = 0; attempt < 30; attempt += 1) {
+        await new Promise(resolve => setTimeout(resolve, 2_000))
+        const job = await getJob(Number(res.task_id))
+        if (job.status === 'failed' || job.status === 'cancelled') throw new Error('提炼任务失败')
+        const raw = job.steps.find(step => step.key === 'template_extraction')?.output.candidate
+        if (raw && typeof raw === 'object') {
+          setCandidate({ ...(raw as Omit<TemplateCandidate, 'jobId'>), jobId: job.id })
+          break
+        }
+      }
       setAnalyzeOpen(false)
       setAnalyzeUrl('')
       setAnalyzeText('')
     } catch { toast.error('派发失败') }
     finally { setAnalyzeBusy(false) }
+  }
+
+  async function confirmCandidate() {
+    if (!candidate) return
+    setCandidateSaving(true)
+    try {
+      const strategy = `${candidate.writing_guide}\n\n## 标题规律\n${candidate.title_formula}\n\n## 不适用\n${candidate.unsuitable_for}`
+      if (candidate.recommendation === 'merge' && candidate.merge_target_id) {
+        await updateWritingPlan(candidate.merge_target_id, { strategy })
+      } else {
+        await createWritingPlan({ title: candidate.title, strategy, genre: candidate.genre })
+      }
+      await handleRefresh()
+      await recordJobEvent(candidate.jobId, 'template_candidate_resolved', { action: candidate.recommendation === 'merge' ? 'merged' : 'created' })
+      setCandidate(null)
+      toast.success('写作模板已保存')
+    } catch (error) { toast.error(error instanceof Error ? error.message : '保存模板失败') }
+    finally { setCandidateSaving(false) }
   }
 
   async function handleReanalyze() {
@@ -396,8 +437,9 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
     setPromptEditorOpen(true)
     setPromptEditorLoading(true)
     try {
-      const instructions = await getAnalyzePrompt()
-      setPromptEditorContent(instructions)
+      const prompt = await getAnalyzePrompt()
+      setPromptEditorContent(prompt.instructions)
+      setPromptEditorOverride(prompt.override)
     } catch { toast.error('加载提示词失败') }
     finally { setPromptEditorLoading(false) }
   }
@@ -405,7 +447,7 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
   async function handleSavePrompt() {
     setPromptEditorBusy(true)
     try {
-      await updateAnalyzePrompt(promptEditorContent)
+      await updateAnalyzePrompt(promptEditorContent, promptEditorOverride)
       toast.success('提示词已保存')
       setPromptEditorOpen(false)
     } catch { toast.error('保存失败') }
@@ -622,7 +664,7 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
         <div className="px-4 py-4 border-b border-zinc-100 dark:border-zinc-800 space-y-3">
           <div className="flex items-center gap-2">
             <Tag className="w-4 h-4 text-indigo-500" />
-            <span className="font-semibold text-sm text-zinc-900 dark:text-zinc-100">写作方案</span>
+            <span className="font-semibold text-sm text-zinc-900 dark:text-zinc-100">写作模板</span>
             <div className="ml-auto flex items-center gap-1">
               <button onClick={handleRefresh} disabled={refreshing} className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 disabled:opacity-40">
                 <RefreshCw className={cn('w-3.5 h-3.5', refreshing && 'animate-spin')} />
@@ -630,7 +672,7 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
               <button onClick={() => setAnalyzeOpen(true)} className="text-zinc-400 hover:text-indigo-500 transition-colors" title="分析文章 → 提炼方案">
                 <SendHorizonal className="w-3.5 h-3.5" />
               </button>
-              <button onClick={openPromptEditor} className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors" title="编辑提炼提示词">
+              <button onClick={openPromptEditor} className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors" title="编辑模板提炼补充规则">
                 <Settings className="w-3.5 h-3.5" />
               </button>
               <button onClick={() => setShowNewForm(true)} className="text-zinc-400 hover:text-indigo-500 transition-colors">
@@ -1056,6 +1098,16 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
       )}
 
       {/* ── Analyze article modal ───────────────────────────── */}
+      {candidate && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setCandidate(null)}>
+          <div className="w-[620px] space-y-4 rounded-xl bg-white p-6 shadow-xl dark:bg-zinc-900" onClick={event => event.stopPropagation()}>
+            <div><h3 className="font-semibold text-zinc-900 dark:text-zinc-100">提炼候选模板</h3><p className="mt-1 text-xs text-zinc-500">请确认它描述的是可复用写法，而不是这篇文章的主题或案例。</p></div>
+            <div className="space-y-2 rounded-lg bg-zinc-50 p-3 text-sm dark:bg-zinc-800"><p><span className="text-zinc-500">名称：</span>{candidate.title}</p><p><span className="text-zinc-500">文体：</span>{GENRE_LABEL[candidate.genre] ?? candidate.genre}</p><p className="whitespace-pre-wrap"><span className="text-zinc-500">写作说明：</span>{candidate.writing_guide}</p><p><span className="text-zinc-500">标题规律：</span>{candidate.title_formula}</p><p><span className="text-zinc-500">不适用：</span>{candidate.unsuitable_for}</p><p className="text-xs text-zinc-500">泛化检查：{candidate.genericity_check}</p></div>
+            <p className="text-xs text-zinc-500">建议：{candidate.recommendation === 'merge' ? '合并更新现有模板' : candidate.recommendation === 'skip' ? '仅作为素材，不保存模板' : '新建模板'}。{candidate.reason}</p>
+            <div className="flex justify-end gap-2"><Button variant="outline" onClick={() => { void recordJobEvent(candidate.jobId, 'template_candidate_resolved', { action: 'ignored' }); setCandidate(null) }}>忽略</Button>{candidate.recommendation !== 'skip' && <Button onClick={confirmCandidate} disabled={candidateSaving}>{candidateSaving ? <Loader2 className="animate-spin" /> : '确认保存'}</Button>}</div>
+          </div>
+        </div>
+      )}
       {analyzeOpen && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={() => setAnalyzeOpen(false)}>
           <div className="bg-white dark:bg-zinc-900 rounded-xl shadow-xl p-6 w-[520px] space-y-4" onClick={e => e.stopPropagation()}>
@@ -1151,14 +1203,14 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
           <div className="bg-white dark:bg-zinc-900 rounded-xl shadow-xl p-6 w-[640px] space-y-4" onClick={e => e.stopPropagation()}>
             <div className="flex items-center gap-2">
               <Settings className="w-4 h-4 text-zinc-500" />
-              <h3 className="font-semibold text-zinc-900 dark:text-zinc-100">编辑提炼提示词</h3>
-              <span className="ml-auto text-[11px] text-zinc-400">修改后对所有后续提炼任务生效</span>
+              <h3 className="font-semibold text-zinc-900 dark:text-zinc-100">模板提炼补充规则</h3>
+              <span className="ml-auto text-[11px] text-zinc-400">用于补充泛化与质量要求，不可要求模型自动写入模板</span>
             </div>
             {promptEditorLoading ? (
               <div className="flex items-center justify-center h-48">
                 <Loader2 className="w-5 h-5 animate-spin text-zinc-400" />
               </div>
-            ) : (
+            ) : (<>
               <textarea
                 autoFocus
                 value={promptEditorContent}
@@ -1166,7 +1218,8 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
                 rows={18}
                 className="w-full px-3 py-2.5 text-xs font-mono border border-zinc-200 dark:border-zinc-700 rounded-lg bg-zinc-50 dark:bg-zinc-900 outline-none focus:border-indigo-400 resize-y leading-relaxed"
               />
-            )}
+              <label className="flex items-center gap-2 text-xs text-zinc-600 dark:text-zinc-300"><input type="checkbox" checked={promptEditorOverride} onChange={event => setPromptEditorOverride(event.target.checked)} />覆盖系统提炼规则（仍须输出候选 JSON）</label>
+            </>)}
             <div className="flex gap-2 justify-end pt-1">
               <Button variant="outline" onClick={() => setPromptEditorOpen(false)} className="text-xs h-8">取消</Button>
               <Button onClick={handleSavePrompt} disabled={promptEditorBusy || promptEditorLoading} className="text-xs h-8 gap-1">
@@ -1239,13 +1292,13 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
       {showNewForm && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={() => setShowNewForm(false)}>
           <div className="bg-white dark:bg-zinc-900 rounded-xl shadow-xl p-6 w-96 space-y-4" onClick={e => e.stopPropagation()}>
-            <h3 className="font-semibold text-zinc-900 dark:text-zinc-100">新建写作方案</h3>
+              <h3 className="font-semibold text-zinc-900 dark:text-zinc-100">新建写作模板</h3>
             <input
               ref={newTitleRef}
               value={newTitle}
               onChange={e => setNewTitle(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') handleCreate(); if (e.key === 'Escape') setShowNewForm(false) }}
-              placeholder="方案名称…"
+              placeholder="模板名称…"
               className="w-full px-3 py-2 border border-zinc-200 dark:border-zinc-700 rounded-lg bg-transparent outline-none focus:border-indigo-400 text-sm"
             />
             <div className="flex items-center gap-2">

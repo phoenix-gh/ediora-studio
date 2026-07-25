@@ -15,6 +15,7 @@ from mcp.server.fastmcp import FastMCP
 from sqlalchemy import select, desc, delete as sa_delete
 from database import SessionLocal
 from web_search import WebSearchProviderError, search_web as run_web_search
+from web_fetch import WebFetchProviderError, fetch_web_url as run_web_fetch
 
 _UPLOADS_DIR = Path(__file__).parent / "uploads"
 _UPLOADS_DIR.mkdir(exist_ok=True)
@@ -81,6 +82,20 @@ async def web_search(query: str, max_results: int = 5, language: str = "zh-CN") 
             "results": [],
         }
     return {"provider": provider, "results": [asdict(result) for result in results]}
+
+
+@mcp.tool()
+async def fetch_url(url: str, max_chars: int = 12_000) -> dict:
+    """Fetch a public webpage and return its readable text. Cite the returned URL when using its content."""
+    try:
+        result, provider = await run_web_fetch(url.strip(), max(1, min(max_chars, 12_000)))
+    except WebFetchProviderError as exc:
+        return {
+            "error": f"URL fetch is unavailable: {exc.reason}. Configure it in Settings → 网页抓取.",
+            "url": url,
+            "content": "",
+        }
+    return {"provider": provider, "url": result.url, "title": result.title, "content": result.content, "content_type": result.content_type}
 
 @mcp.tool()
 async def get_content_directions() -> list[dict]:

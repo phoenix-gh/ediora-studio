@@ -179,15 +179,14 @@ export async function reanalyzePlan(planId: number, suggestions?: string): Promi
   })
 }
 
-export async function getAnalyzePrompt(): Promise<string> {
-  const res = await apiFetch<{ instructions: string }>('/writing-plans/analyze-prompt')
-  return res.instructions
+export async function getAnalyzePrompt(): Promise<{ instructions: string; override: boolean }> {
+  return apiFetch('/writing-plans/analyze-prompt')
 }
 
-export async function updateAnalyzePrompt(instructions: string): Promise<void> {
+export async function updateAnalyzePrompt(instructions: string, override: boolean): Promise<void> {
   await apiFetch('/writing-plans/analyze-prompt', {
     method: 'PUT',
-    body: JSON.stringify({ instructions }),
+    body: JSON.stringify({ instructions, override }),
   })
 }
 

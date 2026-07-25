@@ -18,7 +18,7 @@ from database import get_db
 from models import (
     ArticleDraft, CollectLog, DailyPlan, DailyPlanItem, GithubRelease, JuejinArticle,
     KrArticle, Paper, ProductHuntPost, PublishAccount, RedditPost,
-    RefMaterial, V2exTopic, WechatAccount, WechatArticle,
+    V2exTopic, WechatAccount, WechatArticle,
     WechatCredential, XPost, YoutubeVideo,
 )
 
@@ -37,7 +37,6 @@ SOURCES: list[tuple] = [
     ("36kr",        "36 氪",        "kr",          "/kr",           ("kr_collect_interval_minutes", 30, "min")),
     ("v2ex",        "V2EX",        "v2ex",        "/v2ex",         ("v2ex_collect_interval_minutes", 30, "min")),
     ("papers",      "论文",         "papers",      "/papers",       ("arxiv_collect_interval_hours", 6, "hour")),
-    ("materials",   "参考文案",     "ref_collect", "/materials",    ("ref_collect_interval_minutes", 15, "min")),
     ("producthunt", "Product Hunt", None,         "/producthunt",  None),
     ("youtube",     "YouTube",     None,          "/youtube",      None),
 ]
@@ -52,7 +51,6 @@ _TODAY_TABLES = {
     "36kr":        [(KrArticle, KrArticle.collected_at)],
     "v2ex":        [(V2exTopic, V2exTopic.collected_at)],
     "papers":      [(Paper, Paper.collected_at)],
-    "materials":   [(RefMaterial, RefMaterial.created_at)],
     "producthunt": [(ProductHuntPost, ProductHuntPost.collected_at)],
     "youtube":     [(YoutubeVideo, YoutubeVideo.collected_at)],
 }

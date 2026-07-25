@@ -13,6 +13,14 @@ describe('global chat model history', () => {
     expect(source).not.toContain('makeChatTools')
   })
 
+  it('reserves a tool-free final step for the user-facing answer', () => {
+    const source = readFileSync(new URL('./route.ts', import.meta.url), 'utf8')
+
+    expect(source).toContain('prepareStep')
+    expect(source).toContain('chatToolLoopStep')
+    expect(source).toContain('activeTools: []')
+  })
+
   it('uses only the new client turn instead of client-supplied history', () => {
     const latestTurn = { id: 'new-user-turn', role: 'user', parts: [{ type: 'text', text: '帮我检索资料' }] }
 
@@ -30,6 +38,21 @@ describe('global chat model history', () => {
     ])).toEqual([
       { id: '1', role: 'user', parts: [{ type: 'text', text: '查找 AI SDK 资料' }] },
       { id: '3', role: 'assistant', parts: [{ type: 'text', text: '我找到了资料。' }] },
+    ])
+  })
+
+  it('keeps completed tool payloads out of later model history', () => {
+    expect(modelHistoryCandidates([
+      {
+        id: 4,
+        role: 'assistant',
+        parts: [
+          { type: 'text', text: '我已查到资料。' },
+          { type: 'dynamic-tool', toolName: 'fetch_url', state: 'output-available', output: { content: 'very large page body' } },
+        ],
+      },
+    ])).toEqual([
+      { id: '4', role: 'assistant', parts: [{ type: 'text', text: '我已查到资料。' }] },
     ])
   })
 })

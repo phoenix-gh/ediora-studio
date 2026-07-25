@@ -41,3 +41,16 @@ def test_settings_rejects_non_http_search_url(client):
     }]})
 
     assert response.status_code == 422
+
+
+def test_settings_persists_web_fetch_provider_order(client):
+    providers = [
+        {"key": "direct", "enabled": True, "base_url": "", "timeout_seconds": 12},
+        {"key": "jina_reader", "enabled": True, "base_url": "https://r.jina.ai", "timeout_seconds": 20},
+        {"key": "camofox", "enabled": False, "base_url": "", "timeout_seconds": 30},
+    ]
+
+    response = client.put("/api/settings", json={"web_fetch_providers": providers})
+
+    assert response.status_code == 200, response.text
+    assert response.json()["web_fetch_providers"] == providers

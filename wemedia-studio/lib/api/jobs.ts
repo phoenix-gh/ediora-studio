@@ -38,8 +38,8 @@ export function imageUrlsForJob(job: ContentJob) {
   const apiOrigin = new URL(API_BASE).origin
   return job.steps.flatMap(step => {
     const assetUrls = step.output.asset_urls
-    if (!Array.isArray(assetUrls)) return []
-    return assetUrls.filter((url): url is string => typeof url === 'string')
+    if (Array.isArray(assetUrls)) return assetUrls.filter((url): url is string => typeof url === 'string')
+    return typeof step.output.asset_url === 'string' ? [step.output.asset_url] : []
   }).map(url => new URL(url, apiOrigin).toString())
 }
 
@@ -51,4 +51,7 @@ export function getJob(id: number) { return apiFetch<ContentJob>(`/jobs/${id}`) 
 export function cancelJob(id: number) { return apiFetch<ContentJob>(`/jobs/${id}/cancel`, { method: 'POST' }) }
 export function retryJobStep(id: number, stepKey: string) {
   return apiFetch<ContentJob>(`/jobs/${id}/retry`, { method: 'POST', body: JSON.stringify({ step_key: stepKey }) })
+}
+export function recordJobEvent(id: number, kind: string, payload: Record<string, unknown> = {}) {
+  return apiFetch(`/jobs/${id}/events`, { method: 'POST', body: JSON.stringify({ kind, payload }) })
 }

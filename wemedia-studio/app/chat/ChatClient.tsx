@@ -1,10 +1,11 @@
 'use client'
 
 import { FormEvent, useCallback, useEffect, useRef, useState } from 'react'
-import { Bot, ChevronDown, FileSearch, Loader2, MessageSquarePlus, Plus, Send, Trash2, Wrench } from 'lucide-react'
+import { Bot, ChevronDown, FileSearch, Loader2, MessageSquarePlus, Pencil, Plus, Send, Trash2, Wrench } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { ChatContextPicker } from '@/components/features/chat/ChatContextPicker'
 import { ChatMarkdown } from '@/components/features/chat/ChatMarkdown'
@@ -22,12 +23,15 @@ import {
   listChatDrafts,
   listChatSkills,
   listChatSessions,
+  renameChatSession,
   streamChatReply,
 } from '@/lib/api/chat'
 import { getJob, imageUrlsForJob, type JobStatus } from '@/lib/api/jobs'
 import { cn } from '@/lib/utils'
 
 import { chatComposerColumn, chatConversationColumn } from './chat-layout'
+import { shouldSubmitChatComposerKey } from './chat-composer'
+import { titleFromFirstMessage } from './chat-title'
 
 type DisplayMessage = Omit<ChatMessage, 'id'> & { id: string | number }
 
@@ -128,9 +132,10 @@ function ImageJobPreview({ jobId }: { jobId: number }) {
 
 function ToolActivityGroup({ parts, onApproval }: { parts: ToolEventPart[]; onApproval?: (toolCallId: string, approvalId: string, approved: boolean) => void }) {
   const imageJobIds = [...new Set(parts.map(imageJobId).filter((jobId): jobId is number => jobId !== null))]
+  const hasPendingApproval = parts.some(part => part.state === 'approval-requested' && part.toolCallId && part.approval?.id)
   return (
     <div>
-      <details className="rounded-lg bg-indigo-50/60 px-3 py-2 text-xs text-indigo-950 dark:bg-indigo-950/30 dark:text-indigo-100">
+      <details open={hasPendingApproval} className="rounded-lg bg-indigo-50/60 px-3 py-2 text-xs text-indigo-950 dark:bg-indigo-950/30 dark:text-indigo-100">
         <summary className="flex cursor-pointer list-none items-center gap-2 font-medium [&::-webkit-details-marker]:hidden">
           <Wrench className="h-3.5 w-3.5 text-indigo-500" />
           <span>{activitySummary(parts)}</span>
@@ -140,7 +145,7 @@ function ToolActivityGroup({ parts, onApproval }: { parts: ToolEventPart[]; onAp
           {parts.map((part, index) => {
             const label = toolLabels[toolName(part)] ?? toolName(part)
             const pending = part.state === 'approval-requested' && part.toolCallId && part.approval?.id
-            const status = pending ? '等待确认' : part.state === 'running' ? '进行中' : part.state === 'approval-responded' ? (part.approval?.approved ? '已批准' : '已拒绝') : '已完成'
+            const status = pending ? '等待你确认' : part.state === 'running' ? '进行中' : part.state === 'approval-responded' ? (part.approval?.approved ? '已批准' : '已拒绝') : '已完成'
             return <li key={part.toolCallId ?? `${part.type}-${index}`} className="flex flex-wrap items-center justify-between gap-3"><span>{label}</span>{pending && onApproval ? <span className="flex items-center gap-1"><Button type="button" size="xs" onClick={() => onApproval(part.toolCallId!, part.approval!.id!, true)}>批准</Button><Button type="button" size="xs" variant="outline" onClick={() => onApproval(part.toolCallId!, part.approval!.id!, false)}>拒绝</Button></span> : <span className="text-indigo-500">{status}</span>}</li>
           })}
         </ul>
@@ -209,6 +214,8 @@ export function ChatClient() {
   const [skillName, setSkillName] = useState('')
   const [draftId, setDraftId] = useState('')
   const [activeSessionId, setActiveSessionId] = useState<number | null>(null)
+  const [editingSessionId, setEditingSessionId] = useState<number | null>(null)
+  const [editingTitle, setEditingTitle] = useState('')
   const [messages, setMessages] = useState<DisplayMessage[]>([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(true)
@@ -232,10 +239,17 @@ export function ChatClient() {
   }, [])
 
   useEffect(() => {
-    void refreshSessions()
-      .catch(error => toast.error(error instanceof Error ? error.message : '加载会话列表失败'))
-      .finally(() => setLoading(false))
-  }, [refreshSessions])
+    void (async () => {
+      try {
+        const nextSessions = await refreshSessions()
+        if (nextSessions[0]) void openSession(nextSessions[0].id)
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : '加载会话列表失败')
+      } finally {
+        setLoading(false)
+      }
+    })()
+  }, [openSession, refreshSessions])
 
   useEffect(() => {
     void Promise.all([listChatSkills(), listChatDrafts()])
@@ -263,6 +277,17 @@ export function ChatClient() {
       if (activeSessionId === session.id) startNewConversation()
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '删除会话失败')
+    }
+  }
+
+  async function saveSessionTitle(session: ChatSession) {
+    const title = editingTitle.trim() || '新对话'
+    try {
+      const updated = await renameChatSession(session.id, title)
+      setSessions(current => current.map(item => item.id === updated.id ? updated : item))
+      setEditingSessionId(null)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '修改会话名称失败')
     }
   }
 
@@ -296,7 +321,7 @@ export function ChatClient() {
     let sessionId = activeSessionId
     if (!sessionId) {
       try {
-        const session = await createChatSession()
+        const session = await createChatSession(titleFromFirstMessage(text))
         setSessions(current => [session, ...current])
         setActiveSessionId(session.id)
         sessionId = session.id
@@ -381,11 +406,27 @@ export function ChatClient() {
             <div className="px-3 py-8 text-center text-sm text-zinc-500">还没有对话。<br />开始提问即可新建。</div>
           ) : sessions.map(session => (
             <div key={session.id} className="group relative mb-1">
-              <button type="button" onClick={() => void openSession(session.id)}
-                className={cn('w-full rounded-lg px-3 py-2.5 pr-9 text-left transition-colors', activeSessionId === session.id ? 'bg-indigo-50 text-indigo-950 dark:bg-indigo-950/40 dark:text-indigo-100' : 'text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-900')}>
-                <span className="block truncate text-sm font-medium">{session.title || '新对话'}</span>
-                <span className="mt-1 block text-[11px] text-zinc-400">{displayTime(session.updated_at)}</span>
-              </button>
+              {editingSessionId === session.id ? (
+                <div className="rounded-lg px-2 py-2">
+                  <Input autoFocus value={editingTitle} onChange={event => setEditingTitle(event.target.value)}
+                    onBlur={() => void saveSessionTitle(session)}
+                    onKeyDown={event => {
+                      if (event.key === 'Enter') { event.preventDefault(); void saveSessionTitle(session) }
+                      if (event.key === 'Escape') { setEditingSessionId(null); setEditingTitle('') }
+                    }}
+                    aria-label="会话名称" className="h-8 text-sm" />
+                </div>
+              ) : (
+                <button type="button" onClick={() => void openSession(session.id)}
+                  className={cn('w-full rounded-lg px-3 py-2.5 pr-16 text-left transition-colors', activeSessionId === session.id ? 'bg-indigo-50 text-indigo-950 dark:bg-indigo-950/40 dark:text-indigo-100' : 'text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-900')}>
+                  <span className="block truncate text-sm font-medium">{session.title || '新对话'}</span>
+                  <span className="mt-1 block text-[11px] text-zinc-400">{displayTime(session.updated_at)}</span>
+                </button>
+              )}
+              {editingSessionId !== session.id && <button type="button" title="重命名会话" aria-label={`重命名会话：${session.title || '新对话'}`} onClick={event => { event.stopPropagation(); setEditingSessionId(session.id); setEditingTitle(session.title || '') }}
+                className="absolute right-8 top-1/2 -translate-y-1/2 rounded p-1 text-zinc-400 opacity-0 transition hover:bg-zinc-200 hover:text-indigo-600 group-hover:opacity-100 focus:opacity-100 dark:hover:bg-zinc-800">
+                <Pencil className="h-3.5 w-3.5" />
+              </button>}
               <button type="button" title="删除会话" aria-label={`删除会话：${session.title || '新对话'}`} onClick={event => { event.stopPropagation(); void removeSession(session) }}
                 className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-zinc-400 opacity-0 transition hover:bg-zinc-200 hover:text-red-600 group-hover:opacity-100 focus:opacity-100 dark:hover:bg-zinc-800">
                 <Trash2 className="h-3.5 w-3.5" />
@@ -399,7 +440,7 @@ export function ChatClient() {
         <header className="py-4">
           <div className={cn(chatConversationColumn, 'flex items-center gap-3')}>
             <FileSearch className="h-5 w-5 text-indigo-600" />
-            <div><h2 className="font-medium text-zinc-900 dark:text-zinc-100">全局研究助手</h2><p className="text-xs text-zinc-500">可检索写作方案与参考素材；所有工具调用均会记录。</p></div>
+            <div><h2 className="font-medium text-zinc-900 dark:text-zinc-100">全局研究助手</h2><p className="text-xs text-zinc-500">可检索写作方案；所有工具调用均会记录。</p></div>
           </div>
         </header>
 
@@ -409,7 +450,7 @@ export function ChatClient() {
               <div className="rounded-2xl border border-dashed border-zinc-300 bg-white px-6 py-10 text-center dark:border-zinc-700 dark:bg-zinc-900">
                 <Bot className="mx-auto h-8 w-8 text-indigo-500" />
                 <h3 className="mt-3 font-medium text-zinc-900 dark:text-zinc-100">从本地信息源开始研究</h3>
-                <p className="mx-auto mt-1 max-w-md text-sm leading-6 text-zinc-500">例如：“素材库里有哪些适合 AI 编程主题的观点？” 我会在需要时调用只读搜索工具。</p>
+                <p className="mx-auto mt-1 max-w-md text-sm leading-6 text-zinc-500">例如：“有哪些适合 AI 编程主题的写作方案？” 我会在需要时调用只读搜索工具。</p>
               </div>
             )}
             {messages.map(message => <MessageBubble key={String(message.id)} message={message} onApproval={respondToApproval} />)}
@@ -423,6 +464,11 @@ export function ChatClient() {
             <div className="flex flex-col gap-2 rounded-xl border border-zinc-200 bg-white p-3 transition-colors focus-within:border-indigo-400 dark:border-zinc-700 dark:bg-zinc-900">
               <div className="flex">
                 <textarea value={input} onChange={event => setInput(event.target.value)} disabled={sending} rows={2}
+                  onKeyDown={event => {
+                    if (!shouldSubmitChatComposerKey({ key: event.key, shiftKey: event.shiftKey, isComposing: event.nativeEvent.isComposing })) return
+                    event.preventDefault()
+                    event.currentTarget.form?.requestSubmit()
+                  }}
                   placeholder="问问本地信息源里的内容…"
                   className="max-h-40 min-h-12 flex-1 resize-none bg-transparent py-1 text-sm leading-6 outline-none placeholder:text-zinc-400 disabled:cursor-not-allowed" />
               </div>

@@ -139,12 +139,12 @@ async def search_plans(q: str = "", db: AsyncSession = Depends(get_db)):
 @router.get("/analyze-prompt")
 async def get_analyze_prompt():
     cfg = await get_config()
-    return {"instructions": cfg.get("analyze_instructions", "")}
+    return {"instructions": cfg.get("template_extraction_instructions", ""), "override": cfg.get("template_extraction_override", "0") == "1"}
 
 
 @router.put("/analyze-prompt", status_code=204)
 async def update_analyze_prompt(body: AnalyzePromptUpdate):
-    await set_config({"analyze_instructions": body.instructions})
+    await set_config({"template_extraction_instructions": body.instructions, "template_extraction_override": "1" if body.override else "0"})
 
 
 @router.post("/analyze", response_model=AnalyzeResponse)
@@ -152,8 +152,8 @@ async def analyze_article(body: AnalyzeRequest):
     if not body.url and not body.content:
         raise HTTPException(400, "url 或 content 至少提供一个")
     cfg = await get_config()
-    instructions = cfg.get("analyze_instructions", "")
-    parts = ["## 任务类型\ncontent-to-writing-plan\n\n## 输入"]
+    instructions = cfg.get("template_extraction_instructions", "")
+    parts = ["## 任务类型\ntemplate-extraction-candidate\n\n## 输入"]
     if body.url:
         parts.append(f"URL: {body.url}")
     if body.content:
@@ -161,7 +161,7 @@ async def analyze_article(body: AnalyzeRequest):
     parts.append(instructions)
     from job_dispatch import JobDispatcher, JobDispatchError
     try:
-        task_id = await JobDispatcher().create(title="[写作方案] 文章提炼", input_data={"prompt": "\n".join(parts)})
+        task_id = await JobDispatcher().create(title="[写作模板] 提炼候选", input_data={"prompt": "\n".join(parts), "template_extraction_override": cfg.get("template_extraction_override", "0") == "1"}, flow="template_extraction")
     except JobDispatchError as e:
         raise HTTPException(502, f"任务队列不可用: {e}")
     return AnalyzeResponse(task_id=task_id, kanban_url="/jobs")

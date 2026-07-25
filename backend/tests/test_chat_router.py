@@ -102,6 +102,15 @@ def test_delete_missing_session_returns_404(client):
     assert client.delete("/api/chat/sessions/999999").status_code == 404
 
 
+def test_renames_session(client):
+    created = client.post("/api/chat/sessions", json={}).json()
+
+    renamed = client.patch(f"/api/chat/sessions/{created['id']}", json={"title": "AI 趋势研究"})
+
+    assert renamed.status_code == 200
+    assert renamed.json()["title"] == "AI 趋势研究"
+
+
 def test_replaces_assistant_message_parts_for_tool_approval(client):
     session = client.post("/api/chat/sessions", json={}).json()
     message = client.post(

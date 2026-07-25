@@ -23,6 +23,7 @@ import {
   collectXSubscription, collectAllXSubscriptions,
 } from '@/lib/api/x'
 import { analyzePlan } from '@/lib/api/writing-plans'
+import { externalHttpUrl } from './x-post-url'
 
 const HOURS_OPTIONS = [
   { v: 24,  label: '24h' },
@@ -390,11 +391,12 @@ function PostCard({ post: p }: { post: XPost | XSearchPost }) {
   const router = useRouter()
   const [analyzing, setAnalyzing] = useState(false)
   const avatar = p.author_avatar || `https://unavatar.io/x/${p.username}`
+  const sourceUrl = externalHttpUrl(p.url)
 
   const handleAnalyze = async () => {
     setAnalyzing(true)
     try {
-      const res = await analyzePlan({ url: p.url, content: p.content })
+      const res = await analyzePlan({ url: sourceUrl ?? '', content: p.content })
       toast.success('已派发给 Scout', {
         description: `任务 ${res.task_id}`,
         action: { label: '查看看板', onClick: () => router.push(res.kanban_url) },
@@ -425,18 +427,24 @@ function PostCard({ post: p }: { post: XPost | XSearchPost }) {
               </span>
               <span className="text-zinc-400 text-xs truncate">@{p.username}</span>
             </div>
-            <a href={p.url} target="_blank" rel="noreferrer"
-              className="text-xs text-zinc-400 hover:text-sky-500 flex items-center gap-1 shrink-0"
-              title={new Date(p.published_at).toLocaleString()}>
-              {fmtRelTime(p.published_at)}
-              <ExternalLink className="w-3 h-3" />
-            </a>
+            {sourceUrl ? (
+              <a href={sourceUrl} target="_blank" rel="noreferrer"
+                className="text-xs text-zinc-400 hover:text-sky-500 flex items-center gap-1 shrink-0"
+                title={new Date(p.published_at).toLocaleString()}>
+                {fmtRelTime(p.published_at)}
+                <ExternalLink className="w-3 h-3" />
+              </a>
+            ) : (
+              <span className="text-xs text-zinc-400 shrink-0" title={new Date(p.published_at).toLocaleString()}>
+                {fmtRelTime(p.published_at)}
+              </span>
+            )}
           </div>
           <p className="text-sm text-zinc-700 dark:text-zinc-300 whitespace-pre-wrap mb-2">
             {p.content}
           </p>
-          {p.cover_image && (
-            <a href={p.url} target="_blank" rel="noreferrer"
+          {p.cover_image && sourceUrl && (
+            <a href={sourceUrl} target="_blank" rel="noreferrer"
               className="block mb-2 rounded-lg overflow-hidden border border-zinc-200 dark:border-zinc-800">
               <img
                 src={p.cover_image}

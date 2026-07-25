@@ -22,7 +22,6 @@ DEFAULTS: dict[str, str] = {
     "camofox_api_key": "",
     "camofox_user_id": "wemedia_x",         # userId for the X session
     "camofox_novnc_url": "http://localhost:6080/vnc.html",  # web VNC address
-    "ref_categories": "产品动态,观点争论,工具实战,翻车吐槽,数据事实,行业八卦,其他",
     "analyze_instructions": (
         "\n## 指令\n"
         "1. 读取文章，提取 3-5 个主题关键词\n"
@@ -57,13 +56,6 @@ DEFAULTS: dict[str, str] = {
     "x_reply_scout_interval_minutes": "15",
     "x_reply_scout_batch": "20",
     "x_notify_enabled": "1",                 # 全局开关：X 回复关注提醒（动态通知推 Telegram）
-    "ref_collect_interval_minutes": "15",
-    "ref_classify_interval_minutes": "60",
-    "clean_batch_size": "20",
-    "ref_score_scale": "18.5",
-    "ref_reply_scout_threshold": "70",
-    "ref_reply_min_likes": "100",
-    "ref_classify_min_score": "60",
     "wechat_tunnel_enabled": "0",
     "wechat_tunnel_ssh_host": "",
     "wechat_tunnel_ssh_port": "22",
@@ -77,6 +69,9 @@ DEFAULTS: dict[str, str] = {
     "blog_api_base": "https://mkflow.dev",
     "blog_api_token": "",          # 留空时回退环境变量 MKFLOW_AGENT_API_TOKEN
     "web_search_providers": "[]",
+    "web_fetch_providers": '[{"key":"direct","enabled":true,"base_url":"","timeout_seconds":12},{"key":"jina_reader","enabled":true,"base_url":"https://r.jina.ai","timeout_seconds":20},{"key":"camofox","enabled":true,"base_url":"","timeout_seconds":30}]',
+    "template_extraction_instructions": "",
+    "template_extraction_override": "0",
 }
 
 # Provider presets: label + default base_url + hint for default model

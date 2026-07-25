@@ -51,6 +51,13 @@ export async function createChatSession(title = '新对话'): Promise<ChatSessio
   })
 }
 
+export async function renameChatSession(sessionId: number, title: string): Promise<ChatSession> {
+  return apiFetch<ChatSession>(`/chat/sessions/${sessionId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ title }),
+  })
+}
+
 export async function getChatSession(sessionId: number): Promise<ChatSessionDetail> {
   return apiFetch<ChatSessionDetail>(`/chat/sessions/${sessionId}`)
 }

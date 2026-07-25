@@ -1,9 +1,11 @@
 import { createOpenAI } from '@ai-sdk/openai'
-import { convertToModelMessages, safeValidateUIMessages, stepCountIs, streamText, type UIMessage } from 'ai'
+import { convertToModelMessages, generateText, safeValidateUIMessages, stepCountIs, streamText, type UIMessage } from 'ai'
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 
 import { latestClientTurn, modelHistoryCandidates } from '@/lib/ai/chat-tools'
+import { buildChatInstructions } from '@/lib/ai/chat-instructions'
+import { CHAT_MAX_STEPS, chatToolLoopStep, needsFinalAnswerFallback } from '@/lib/ai/chat-loop'
 import { baoyuRuntimeInstructions } from '@/lib/ai/content-job'
 import { discoverSkills } from '@/lib/ai/discover-skills'
 import { openGlobalChatTools } from '@/lib/ai/global-chat-tools'
@@ -67,11 +69,11 @@ async function persistMessage(sessionId: number, message: Pick<UIMessage, 'parts
   if (!response.ok) throw new Error(`Unable to persist chat message (${response.status})`)
 }
 
-async function persistedModelHistory(sessionId: number) {
+async function persistedModelHistory(sessionId: number, includeToolApprovals = false) {
   const response = await fetch(`${apiBase()}/chat/sessions/${sessionId}`, { cache: 'no-store' })
   if (!response.ok) throw new Error(`Unable to load chat session (${response.status})`)
   const session = await response.json() as PersistedChatSession
-  const validated = await safeValidateUIMessages({ messages: modelHistoryCandidates(session.messages) })
+  const validated = await safeValidateUIMessages({ messages: modelHistoryCandidates(session.messages, { includeToolApprovals }) })
   if (!validated.success) throw new Error('Persisted chat history is invalid')
   return validated.data
 }
@@ -122,6 +124,33 @@ async function selectedContext(skillName?: string, draftId?: number) {
   return context.join('\n\n---\n\n')
 }
 
+function conversationForRecovery(messages: UIMessage[]) {
+  return messages
+    .map(message => `${message.role === 'user' ? '用户' : '助手'}：${messageText(message)}`)
+    .filter(line => line.trim().length > 3)
+    .join('\n\n')
+    .slice(-16_000)
+}
+
+async function recoverFinalAnswer({
+  provider,
+  modelName,
+  messages,
+  instructions,
+}: {
+  provider: ReturnType<typeof createOpenAI>
+  modelName: string
+  messages: UIMessage[]
+  instructions: string
+}) {
+  const recovery = await generateText({
+    model: provider.chat(modelName),
+    instructions: `${instructions}\n\nYou are in the final-answer recovery phase. Do not call tools, do not emit tool-call markup, and reply directly to the user in their language. Use only the conversation context below; be transparent if it lacks evidence.`,
+    prompt: conversationForRecovery(messages),
+  })
+  return recovery.text.trim()
+}
+
 export async function POST(request: NextRequest) {
   let body: z.infer<typeof requestSchema>
   try {
@@ -148,23 +177,49 @@ export async function POST(request: NextRequest) {
     if (body.approval) await persistApproval(body.sessionId, body.approval)
     else if (latestMessage) await persistMessage(body.sessionId, { role: 'user', parts: latestMessage.parts })
     registry = await openGlobalChatTools({ apiBase: apiBase(), sessionId: body.sessionId, draftId: body.draftId, skillName: body.skillName })
-    const messages = await persistedModelHistory(body.sessionId)
+    const messages = await persistedModelHistory(body.sessionId, Boolean(body.approval))
     const modelConfig = await configuredTextModel()
     const context = await selectedContext(body.skillName, body.draftId)
     const provider = createOpenAI({ apiKey: modelConfig.apiKey, baseURL: modelConfig.baseURL })
+    const instructions = buildChatInstructions(context)
     const result = streamText({
       model: provider.chat(modelConfig.modelName),
-      instructions: `You are WeMedia Studio’s global workspace assistant. Use the available tools when they are relevant, clearly distinguish tool results from inference, and only claim an action succeeded after its tool reports success. Sensitive actions may require user approval.${context ? `\n\nSelected turn context:\n${context}` : ''}`,
+      instructions,
       messages: await convertToModelMessages(messages, { tools: registry.tools, ignoreIncompleteToolCalls: true }),
       tools: registry.tools,
-      stopWhen: stepCountIs(8),
+      stopWhen: stepCountIs(CHAT_MAX_STEPS),
+      prepareStep: ({ stepNumber }) => {
+        const stepPolicy = chatToolLoopStep(stepNumber)
+        if (!stepPolicy) return undefined
+        return {
+          ...stepPolicy,
+          activeTools: [],
+          instructions: `${instructions}\n\nResearch is complete. No tools are available for this step. Do not emit tool-call markup or XML. Now write the final answer in the user's language, using the evidence already collected.`,
+        }
+      },
     })
 
     return result.toUIMessageStreamResponse({
       originalMessages: messages,
       onFinish: async ({ responseMessage, isAborted }) => {
         try {
-          if (!isAborted) await persistMessage(body.sessionId, { role: 'assistant', parts: responseMessage.parts })
+          if (!isAborted) {
+            const pendingApproval = responseMessage.parts.some(part => part.type === 'dynamic-tool' && part.state === 'approval-requested')
+            let parts = responseMessage.parts
+            if (!pendingApproval && needsFinalAnswerFallback(messageText(responseMessage))) {
+              try {
+                const recoveredText = await recoverFinalAnswer({ provider, modelName: modelConfig.modelName, messages, instructions })
+                if (!needsFinalAnswerFallback(recoveredText)) parts = [{ type: 'text', text: recoveredText }]
+              } catch {
+                // Persist the clear fallback below if the recovery call itself fails.
+              }
+            }
+            const finalHasText = messageText({ parts }).trim().length > 0
+            await persistMessage(body.sessionId, {
+              role: 'assistant',
+              parts: finalHasText || pendingApproval ? parts : [{ type: 'text', text: '本次回复没有生成有效内容。请重试；如果问题持续出现，请缩小检索范围。' }],
+            })
+          }
         } finally {
           await registry?.close()
         }

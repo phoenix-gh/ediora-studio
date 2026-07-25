@@ -14,6 +14,13 @@ export interface WebSearchProviderConfig {
   timeout_seconds: number
 }
 
+export interface WebFetchProviderConfig {
+  key: 'direct' | 'jina_reader' | 'camofox'
+  enabled: boolean
+  base_url: string
+  timeout_seconds: number
+}
+
 export interface AppSettings {
   llm_provider: string
   llm_model: string
@@ -69,6 +76,7 @@ export interface AppSettings {
   blog_api_token_set: boolean
   blog_api_token_preview: string
   web_search_providers: WebSearchProviderConfig[]
+  web_fetch_providers: WebFetchProviderConfig[]
   providers: ProviderInfo[]
 }
 
@@ -122,6 +130,7 @@ export interface SettingsUpdate {
   blog_api_base?: string
   blog_api_token?: string
   web_search_providers?: WebSearchProviderConfig[]
+  web_fetch_providers?: WebFetchProviderConfig[]
 }
 
 export interface FetchModelsRequest {

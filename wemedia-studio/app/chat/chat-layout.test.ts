@@ -74,6 +74,12 @@ it('uses lazy new conversations and deletes selected persisted sessions', () => 
   expect(source).toContain('<Trash2')
 })
 
+it('opens the most recently used persisted session when the assistant loads', () => {
+  const source = readFileSync(new URL('./ChatClient.tsx', import.meta.url), 'utf8')
+
+  expect(source).toContain('if (nextSessions[0]) void openSession(nextSessions[0].id)')
+})
+
 it('uses one context picker instead of permanent select controls', () => {
   const source = readFileSync(new URL('./ChatClient.tsx', import.meta.url), 'utf8')
 
@@ -97,5 +103,15 @@ it('renders approval controls for pending global tool calls', () => {
 
   expect(source).toContain('批准')
   expect(source).toContain('拒绝')
+  expect(source).toContain('<details open={hasPendingApproval}')
+  expect(source).toContain('等待你确认')
   expect(source).toContain('approval: { messageId')
+})
+
+it('submits on Enter while preserving Shift+Enter newlines', () => {
+  const source = readFileSync(new URL('./ChatClient.tsx', import.meta.url), 'utf8')
+
+  expect(source).toContain("import { shouldSubmitChatComposerKey } from './chat-composer'")
+  expect(source).toContain('shouldSubmitChatComposerKey({')
+  expect(source).toContain('event.currentTarget.form?.requestSubmit()')
 })

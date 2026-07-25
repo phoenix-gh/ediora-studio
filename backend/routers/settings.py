@@ -51,6 +51,37 @@ class WebSearchProviderConfig(BaseModel):
         return self
 
 
+class WebFetchProviderConfig(BaseModel):
+    key: Literal["direct", "jina_reader", "camofox"]
+    enabled: bool = True
+    base_url: str = ""
+    timeout_seconds: int = 12
+
+    @field_validator("base_url")
+    @classmethod
+    def validate_base_url(cls, value: str) -> str:
+        value = value.strip().rstrip("/")
+        if not value:
+            return ""
+        parsed = urlsplit(value)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise ValueError("must be an HTTP(S) URL")
+        return value
+
+    @field_validator("timeout_seconds")
+    @classmethod
+    def validate_timeout(cls, value: int) -> int:
+        if not 1 <= value <= 30:
+            raise ValueError("must be between 1 and 30 seconds")
+        return value
+
+    @model_validator(mode="after")
+    def require_jina_url_when_enabled(self):
+        if self.enabled and self.key == "jina_reader" and not self.base_url:
+            raise ValueError("Base URL is required when Jina Reader is enabled")
+        return self
+
+
 class SettingsOut(BaseModel):
     llm_provider: str
     llm_model: str
@@ -92,6 +123,7 @@ class SettingsOut(BaseModel):
     blog_api_token_set: bool
     blog_api_token_preview: str
     web_search_providers: list[WebSearchProviderConfig]
+    web_fetch_providers: list[WebFetchProviderConfig]
     providers: list[ProviderInfo]
 
 
@@ -131,6 +163,7 @@ class SettingsUpdate(BaseModel):
     blog_api_base: Optional[str] = None
     blog_api_token: Optional[str] = None
     web_search_providers: Optional[list[WebSearchProviderConfig]] = None
+    web_fetch_providers: Optional[list[WebFetchProviderConfig]] = None
 
 
 class FetchModelsRequest(BaseModel):
@@ -169,6 +202,14 @@ def _build_out(cfg: dict) -> SettingsOut:
         WebSearchProviderConfig.model_validate(provider)
         for provider in raw_search_providers if isinstance(provider, dict)
     ] if isinstance(raw_search_providers, list) else []
+    try:
+        raw_fetch_providers = json.loads(cfg.get("web_fetch_providers", "[]"))
+    except json.JSONDecodeError:
+        raw_fetch_providers = []
+    web_fetch_providers = [
+        WebFetchProviderConfig.model_validate(provider)
+        for provider in raw_fetch_providers if isinstance(provider, dict)
+    ] if isinstance(raw_fetch_providers, list) else []
     return SettingsOut(
         llm_provider=cfg.get("llm_provider", "openai"),
         llm_model=cfg.get("llm_model", ""),
@@ -210,6 +251,7 @@ def _build_out(cfg: dict) -> SettingsOut:
         blog_api_token_set=bool(blog_token),
         blog_api_token_preview=f"…{blog_token[-4:]}" if len(blog_token) >= 4 else "",
         web_search_providers=web_search_providers,
+        web_fetch_providers=web_fetch_providers,
         providers=[
             ProviderInfo(key=k, label=v["label"], base_url=v["base_url"], default_model=v["default_model"])
             for k, v in PROVIDERS.items()
@@ -345,6 +387,10 @@ async def update_settings(body: SettingsUpdate, request: Request):
     if body.web_search_providers is not None:
         updates["web_search_providers"] = json.dumps(
             [provider.model_dump() for provider in body.web_search_providers], ensure_ascii=False,
+        )
+    if body.web_fetch_providers is not None:
+        updates["web_fetch_providers"] = json.dumps(
+            [provider.model_dump() for provider in body.web_fetch_providers], ensure_ascii=False,
         )
     if updates:
         await set_config(updates)

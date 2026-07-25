@@ -646,7 +646,8 @@ class RedditPost(Base):
     collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
 
 
-class RefMaterial(Base):
+class _RetiredRefMaterial(Base):
+    __abstract__ = True
     """统一参考文案条目：手工金句(platform=manual/agent) + 采集段子(platform=x)。"""
     __tablename__ = "ref_materials"
     __table_args__ = (
@@ -679,7 +680,8 @@ class RefMaterial(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
 
 
-class RefCollectRule(Base):
+class _RetiredRefCollectRule(Base):
+    __abstract__ = True
     """采集规则 —— 一条 X Top 搜索 saved query。"""
     __tablename__ = "ref_collect_rules"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -701,7 +703,8 @@ class RefCollectRule(Base):
     added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, index=True)
 
 
-class RefSeen(Base):
+class _RetiredRefSeen(Base):
+    __abstract__ = True
     """去重账本：已评估的 source_id，避免重复爆款二次过 LLM。"""
     __tablename__ = "ref_seen"
     __table_args__ = (
@@ -712,6 +715,32 @@ class RefSeen(Base):
     source_id: Mapped[str] = mapped_column(String, nullable=False)
     verdict: Mapped[str] = mapped_column(String, default="rejected")
     seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+
+class CreativeAsset(Base):
+    __tablename__ = "creative_assets"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    asset_type: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    media_kind: Mapped[str] = mapped_column(String, default="")
+    title: Mapped[str] = mapped_column(String, default="")
+    content: Mapped[str] = mapped_column(Text, default="")
+    url: Mapped[str] = mapped_column(String, default="")
+    media_type: Mapped[str] = mapped_column(String, default="")
+    filename: Mapped[str] = mapped_column(String, default="")
+    directory: Mapped[str] = mapped_column(String, default="", index=True)
+    tags: Mapped[list] = mapped_column(JSON, default=list)
+    source: Mapped[str] = mapped_column(String, default="manual")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+
+class CreativeAssetDirectory(Base):
+    __tablename__ = "creative_asset_directories"
+    __table_args__ = (UniqueConstraint("asset_type", "name", name="uq_creative_asset_directories_asset_type_name"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    asset_type: Mapped[str] = mapped_column(String, nullable=False, default="article", index=True)
+    parent_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
 
 
 class DailyPlan(Base):

@@ -7,7 +7,7 @@ from sqlalchemy import delete, desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
-from models import ChatMessage, ChatSession, RefMaterial, WritingPlan, now_utc
+from models import ChatMessage, ChatSession, WritingPlan, now_utc
 
 
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -40,6 +40,10 @@ class ChatSessionCreate(BaseModel):
     title: str = "新对话"
 
 
+class ChatSessionTitleUpdate(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+
+
 class ChatMessageCreate(BaseModel):
     role: Literal["user", "assistant", "tool"]
     parts: list[dict] = Field(default_factory=list)
@@ -51,7 +55,7 @@ class ChatMessagePartsUpdate(BaseModel):
 
 
 class SourceSearchResult(BaseModel):
-    source: Literal["writing_plan", "reference_material"]
+    source: Literal["writing_plan"]
     id: int
     title: str
     summary: str
@@ -95,18 +99,6 @@ def _writing_plan_result(plan: WritingPlan) -> SourceSearchResult:
     )
 
 
-def _reference_material_result(material: RefMaterial) -> SourceSearchResult:
-    text = material.text_clean or material.text
-    return SourceSearchResult(
-        source="reference_material",
-        id=material.id,
-        title=_summary(text, max_length=120),
-        summary=_summary(text),
-        url=material.source_url,
-        published_at=material.published_at or material.created_at,
-    )
-
-
 @router.get("/sessions", response_model=list[ChatSessionOut])
 async def list_sessions(db: AsyncSession = Depends(get_db)):
     return (await db.execute(
@@ -140,6 +132,18 @@ async def get_session(session_id: int, db: AsyncSession = Depends(get_db)):
         updated_at=session.updated_at,
         messages=messages,
     )
+
+
+@router.patch("/sessions/{session_id}", response_model=ChatSessionOut)
+async def rename_session(session_id: int, body: ChatSessionTitleUpdate, db: AsyncSession = Depends(get_db)):
+    session = await db.get(ChatSession, session_id)
+    if not session:
+        raise HTTPException(404, "会话不存在")
+    session.title = body.title.strip() or "新对话"
+    session.updated_at = now_utc()
+    await db.commit()
+    await db.refresh(session)
+    return session
 
 
 @router.delete("/sessions/{session_id}", status_code=204)
@@ -211,22 +215,6 @@ async def search_sources(
         if _matches_keywords(f"{plan.title} {plan.strategy} {plan.description}", keywords)
     ][:limit]
 
-    remaining = limit - len(results)
-    if remaining:
-        materials = (await db.execute(
-            select(RefMaterial)
-            .where(RefMaterial.status == "active")
-            .order_by(desc(RefMaterial.created_at), desc(RefMaterial.id))
-            .limit(200)
-        )).scalars().all()
-        results.extend(
-            _reference_material_result(material)
-            for material in materials
-            if _matches_keywords(
-                f"{material.text} {material.text_clean} {material.author} {material.source} {material.category}",
-                keywords,
-            )
-        )
     return results[:limit]
 
 
@@ -241,9 +229,4 @@ async def read_source(
         if plan:
             result = _writing_plan_result(plan)
             return SourceReadResult(**result.model_dump(), content=_writing_plan_content(plan))
-    elif source == "reference_material":
-        material = await db.get(RefMaterial, source_id)
-        if material:
-            result = _reference_material_result(material)
-            return SourceReadResult(**result.model_dump(), content=material.text_clean or material.text)
     return SourceNotFound(source=source, id=source_id)
