@@ -5,6 +5,7 @@ import sys
 from datetime import datetime, timedelta, timezone
 
 import pytest
+import httpx
 from fastapi.testclient import TestClient
 
 
@@ -187,3 +188,117 @@ def test_controlled_queue_to_telegram_flow_finishes_under_one_minute(client, mon
     notified_at = _aware_iso(duplicate_notify.json()["notified_at"])
     assert published_at <= collected_at <= queued_at <= decided_at <= notified_at
     assert (notified_at - collected_at).total_seconds() < 60
+
+
+def test_telegram_request_error_secret_never_reaches_job_storage_or_api(
+    client,
+    monkeypatch,
+):
+    from content_jobs import create_job
+    from database import SessionLocal
+    from models import ContentJobStep, XPost, XSubscription
+    import telegram_notifier
+
+    token = "123456:secret-token"
+    now = datetime.now(timezone.utc)
+
+    async def seed():
+        async with SessionLocal() as db:
+            subscription = XSubscription(
+                label="OpenAI",
+                kind="timeline",
+                url="https://x.com/openai",
+                enabled=True,
+                notify_new_posts=True,
+                notify_enabled_at=now - timedelta(minutes=1),
+            )
+            db.add(subscription)
+            await db.commit()
+            await db.refresh(subscription)
+            db.add(XPost(
+                tweet_id="secret-e2e",
+                subscription_id=subscription.id,
+                username="OpenAI",
+                display_name="OpenAI",
+                content="A release",
+                url="https://x.com/OpenAI/status/secret-e2e",
+                published_at=now,
+                collected_at=now,
+            ))
+            await db.commit()
+            return await create_job(
+                db,
+                flow="x_response",
+                title="secret regression",
+                input_data={"tweet_id": "secret-e2e"},
+            )
+
+    job = asyncio.run(seed())
+    decision_body = {
+        "action": "comment",
+        "score": 90,
+        "confidence": 0.95,
+        "reason": "官方重要产品更新",
+        "summary_cn": "OpenAI 发布了新功能。",
+        "comment_draft": "这个更新带来了哪些实际改进？",
+        "quote_draft": None,
+        "claims": [],
+        "verification_status": "not_required",
+        "verified_urls": [],
+        "model_provider": "controlled-test",
+        "model_name": "deterministic",
+        "prompt_version": "x-response-prompt-v1",
+    }
+    decision = client.post(
+        "/api/x/responses/internal/secret-e2e/decision",
+        json=decision_body,
+    ).json()
+    client.put("/api/settings", json={
+        "telegram_bot_token": token,
+        "telegram_chat_id": "test-chat",
+    })
+    real_send = telegram_notifier.send_html_messages
+
+    def fail_transport(request: httpx.Request):
+        raise httpx.ConnectError(
+            f"failed for https://api.telegram.org/bot{token}/sendMessage",
+            request=request,
+        )
+
+    async def request_error_send(token_value, chat_id, messages, **_kwargs):
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(fail_transport),
+        ) as transport_client:
+            return await real_send(
+                token_value,
+                chat_id,
+                messages,
+                client=transport_client,
+            )
+
+    monkeypatch.setattr(
+        telegram_notifier,
+        "send_html_messages",
+        request_error_send,
+    )
+
+    started = client.post(f"/api/jobs/{job.id}/steps/notify/start").json()
+    notify = client.post(f"/api/x/responses/{decision['id']}/notify")
+    assert notify.status_code == 503
+    assert token not in notify.text
+    failed = client.post(
+        f"/api/jobs/{job.id}/steps/{started['id']}/fail",
+        json={"error": notify.text, "retryable": True},
+    )
+    assert failed.status_code == 200, failed.text
+
+    async def stored_error():
+        async with SessionLocal() as db:
+            step = await db.get(ContentJobStep, started["id"])
+            return step.error
+
+    persisted = asyncio.run(stored_error())
+    public_job = client.get(f"/api/jobs/{job.id}")
+    observable = notify.text + failed.text + public_job.text + persisted
+    assert token not in observable
+    assert "bot***/sendMessage" in observable
