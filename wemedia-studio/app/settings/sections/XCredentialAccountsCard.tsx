@@ -91,6 +91,7 @@ export function XCredentialAccountsCard() {
   const [formError, setFormError] = useState('')
   const [actingId, setActingId] = useState<number | null>(null)
   const [actingAction, setActingAction] = useState<ActionName>(null)
+  const [actionError, setActionError] = useState<{ action: Exclude<ActionName, null>; message: string } | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<XCredentialAccount | null>(null)
 
   useEffect(() => {
@@ -111,8 +112,19 @@ export function XCredentialAccountsCard() {
     return () => { cancelled = true }
   }, [])
 
-  const hasPartialCredentials = Boolean(form.auth_token) !== Boolean(form.ct0)
-  const canSave = Boolean(form.name.trim()) && !hasPartialCredentials && actingAction !== 'save'
+  const trimmedName = form.name.trim()
+  const trimmedAuthToken = form.auth_token.trim()
+  const trimmedCt0 = form.ct0.trim()
+  const hasAuthToken = Boolean(trimmedAuthToken)
+  const hasCt0 = Boolean(trimmedCt0)
+  const hasPartialCredentials = hasAuthToken !== hasCt0
+  const hasCompleteCredentials = hasAuthToken && hasCt0
+  const hasBlankCredentials = !hasAuthToken && !hasCt0
+  const isActing = actingAction !== null
+  const canSave = Boolean(trimmedName)
+    && !hasPartialCredentials
+    && (form.id === null ? hasCompleteCredentials : hasCompleteCredentials || hasBlankCredentials)
+    && !isActing
 
   function resetForm() {
     setForm(EMPTY_FORM)
@@ -120,11 +132,13 @@ export function XCredentialAccountsCard() {
   }
 
   function openCreateForm() {
+    if (isActing) return
     resetForm()
     setFormOpen(true)
   }
 
   function openEditForm(account: XCredentialAccount) {
+    if (isActing) return
     setForm({
       id: account.id,
       name: account.name,
@@ -142,6 +156,7 @@ export function XCredentialAccountsCard() {
   }
 
   function beginAction(id: number | null, action: Exclude<ActionName, null>) {
+    setActionError(null)
     setActingId(id)
     setActingAction(action)
   }
@@ -153,7 +168,7 @@ export function XCredentialAccountsCard() {
 
   async function handleSave(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!canSave) return
+    if (!canSave || isActing) return
 
     beginAction(form.id, 'save')
     setFormError('')
@@ -163,15 +178,15 @@ export function XCredentialAccountsCard() {
       if (form.id === null) {
         nextPool = await createXCredentialAccount({
           name: form.name.trim(),
-          auth_token: form.auth_token,
-          ct0: form.ct0,
+          auth_token: trimmedAuthToken,
+          ct0: trimmedCt0,
           enabled: form.enabled,
         })
       } else {
         nextPool = await patchXCredentialAccount(form.id, {
           name: form.name.trim(),
           enabled: form.enabled,
-          ...(form.auth_token && form.ct0 ? { auth_token: form.auth_token, ct0: form.ct0 } : {}),
+          ...(hasCompleteCredentials ? { auth_token: trimmedAuthToken, ct0: trimmedCt0 } : {}),
         })
       }
       setPool(nextPool)
@@ -185,35 +200,37 @@ export function XCredentialAccountsCard() {
   }
 
   async function handleToggle(account: XCredentialAccount, enabled: boolean) {
+    if (isActing) return
     beginAction(account.id, 'toggle')
     try {
       setPool(await patchXCredentialAccount(account.id, { enabled }))
     } catch (error) {
-      setLoadError(`更新账号失败：${safeErrorMessage(error)}`)
+      setActionError({ action: 'toggle', message: `更新账号失败：${safeErrorMessage(error)}` })
     } finally {
       finishAction()
     }
   }
 
   async function handleTest(account: XCredentialAccount) {
+    if (isActing) return
     beginAction(account.id, 'test')
     try {
       setPool(await testXCredentialAccount(account.id))
     } catch (error) {
-      setLoadError(`测试账号失败：${safeErrorMessage(error)}`)
+      setActionError({ action: 'test', message: `测试账号失败：${safeErrorMessage(error)}` })
     } finally {
       finishAction()
     }
   }
 
   async function handleDelete() {
-    if (!deleteTarget) return
+    if (!deleteTarget || isActing) return
     beginAction(deleteTarget.id, 'delete')
     try {
       setPool(await deleteXCredentialAccount(deleteTarget.id))
       setDeleteTarget(null)
     } catch (error) {
-      setLoadError(`删除账号失败：${safeErrorMessage(error)}`)
+      setActionError({ action: 'delete', message: `删除账号失败：${safeErrorMessage(error)}` })
     } finally {
       finishAction()
     }
@@ -226,14 +243,18 @@ export function XCredentialAccountsCard() {
         <CardDescription>为 feedgrab 管理多个轮换采集凭据；页面只展示后端返回的脱敏预览。</CardDescription>
         <CardAction>
           <Dialog open={formOpen} onOpenChange={handleFormOpenChange}>
-            <DialogTrigger render={<Button type="button" onClick={openCreateForm} />}>
+            <DialogTrigger render={<Button type="button" disabled={isActing} onClick={openCreateForm} />}>
               <PlusIcon data-icon="inline-start" />
               添加账号
             </DialogTrigger>
             <DialogContent>
               <DialogHeader>
                 <DialogTitle>{form.id === null ? '添加采集账号' : '编辑采集账号'}</DialogTitle>
-                <DialogDescription>凭据仅在保存时提交；留空可保留已有凭据。</DialogDescription>
+                <DialogDescription>
+                  {form.id === null
+                    ? '新增账号必须填写 auth_token 和 ct0；编辑时留空可保留已有凭据。'
+                    : '凭据仅在保存时提交；留空可保留已有凭据。'}
+                </DialogDescription>
               </DialogHeader>
               <form className="flex flex-col gap-4" onSubmit={handleSave}>
                 <FieldGroup>
@@ -300,13 +321,13 @@ export function XCredentialAccountsCard() {
           <Badge variant="outline">外部 session：{pool?.external_sessions.length ?? 0}</Badge>
         </div>
         {loadError && <FieldError>{loadError}</FieldError>}
+        {actionError?.action !== 'delete' && actionError && <FieldError>{actionError.message}</FieldError>}
         {loading && <p className="text-sm text-muted-foreground">正在加载采集账号…</p>}
         {!loading && pool?.accounts.length === 0 && <p className="text-sm text-muted-foreground">还没有托管采集账号。</p>}
         <AlertDialog open={Boolean(deleteTarget)} onOpenChange={open => { if (!open) setDeleteTarget(null) }}>
           <div className="flex flex-col gap-3">
             {pool?.accounts.map(account => {
               const status = STATUS[account.test_status]
-              const accountIsBusy = actingId === account.id
               return (
                 <div key={account.id} className="flex flex-col gap-3 rounded-lg border p-3 sm:flex-row sm:items-center sm:justify-between">
                   <div className="flex min-w-0 flex-col gap-1">
@@ -320,7 +341,7 @@ export function XCredentialAccountsCard() {
                   <div className="flex flex-wrap items-center gap-2">
                     <Switch
                       checked={account.enabled}
-                      disabled={accountIsBusy}
+                      disabled={isActing}
                       aria-label={`启用${account.name}`}
                       onCheckedChange={enabled => void handleToggle(account, enabled)}
                     />
@@ -328,7 +349,7 @@ export function XCredentialAccountsCard() {
                       type="button"
                       size="sm"
                       variant="outline"
-                      disabled={accountIsBusy}
+                      disabled={isActing}
                       aria-label={`编辑${account.name}`}
                       onClick={() => openEditForm(account)}
                     >
@@ -339,7 +360,7 @@ export function XCredentialAccountsCard() {
                       type="button"
                       size="sm"
                       variant="outline"
-                      disabled={accountIsBusy}
+                      disabled={isActing}
                       aria-label={actingId === account.id && actingAction === 'test' ? '测试中…' : `测试${account.name}`}
                       onClick={() => void handleTest(account)}
                     >
@@ -349,7 +370,7 @@ export function XCredentialAccountsCard() {
                       {actingId === account.id && actingAction === 'test' ? '测试中…' : '测试'}
                     </Button>
                     <AlertDialogTrigger
-                      render={<Button type="button" size="sm" variant="destructive" disabled={accountIsBusy} aria-label={`删除${account.name}`} />}
+                      render={<Button type="button" size="sm" variant="destructive" disabled={isActing} aria-label={`删除${account.name}`} />}
                       onClick={() => setDeleteTarget(account)}
                     >
                       <Trash2Icon data-icon="inline-start" />
@@ -364,10 +385,11 @@ export function XCredentialAccountsCard() {
             <AlertDialogHeader>
               <AlertDialogTitle>删除采集账号</AlertDialogTitle>
               <AlertDialogDescription>删除后该托管账号将不能再参与采集轮换。</AlertDialogDescription>
+              {actionError?.action === 'delete' && <FieldError>{actionError.message}</FieldError>}
             </AlertDialogHeader>
             <AlertDialogFooter>
               <AlertDialogCancel>取消</AlertDialogCancel>
-              <AlertDialogAction onClick={() => void handleDelete()} disabled={actingAction === 'delete'}>
+              <AlertDialogAction onClick={() => void handleDelete()} disabled={isActing}>
                 {actingAction === 'delete' && <LoaderCircleIcon data-icon="inline-start" className="animate-spin" />}
                 确认删除
               </AlertDialogAction>

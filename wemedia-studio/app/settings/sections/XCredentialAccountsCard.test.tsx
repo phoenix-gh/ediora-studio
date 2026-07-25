@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { XCredentialPool } from '@/lib/api/x-accounts'
@@ -47,6 +47,16 @@ const emptyPool: XCredentialPool = {
   managed_enabled: 0,
   total_accounts: 0,
   available_accounts: 0,
+}
+
+const twoAccountPool: XCredentialPool = {
+  ...poolFixture,
+  accounts: [
+    poolFixture.accounts[0],
+    { ...poolFixture.accounts[0], id: 8, name: '采集账号 B' },
+  ],
+  managed_enabled: 2,
+  total_accounts: 3,
 }
 
 function renderLoaded(pool = poolFixture) {
@@ -116,6 +126,34 @@ describe('XCredentialAccountsCard', () => {
     expect(createXCredentialAccount).not.toHaveBeenCalled()
   })
 
+  it('requires both credentials when creating an account', async () => {
+    renderLoaded(emptyPool)
+
+    await openAddDialog()
+    fireEvent.change(screen.getByLabelText('账号名称'), { target: { value: '采集账号 A' } })
+
+    expect((screen.getByRole('button', { name: '保存账号' }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('rejects whitespace-only credentials when creating an account', async () => {
+    renderLoaded(emptyPool)
+
+    await openAddDialog()
+    fireEvent.change(screen.getByLabelText('账号名称'), { target: { value: '采集账号 A' } })
+    fireEvent.change(screen.getByLabelText('auth_token'), { target: { value: '   ' } })
+    fireEvent.change(screen.getByLabelText('ct0'), { target: { value: '  ' } })
+
+    expect((screen.getByRole('button', { name: '保存账号' }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('distinguishes create requirements from edit credential retention', async () => {
+    renderLoaded(emptyPool)
+
+    await openAddDialog()
+
+    expect(screen.getByText('新增账号必须填写 auth_token 和 ct0；编辑时留空可保留已有凭据。')).not.toBeNull()
+  })
+
   it('edits account metadata while keeping credential fields blank', async () => {
     vi.mocked(patchXCredentialAccount).mockResolvedValue(poolFixture)
     renderLoaded()
@@ -163,6 +201,38 @@ describe('XCredentialAccountsCard', () => {
     expect(await screen.findByText('已失效')).not.toBeNull()
   })
 
+  it('globally locks account actions while a cross-account mutation is pending', async () => {
+    let resolveTest: (pool: XCredentialPool) => void = () => {}
+    vi.mocked(testXCredentialAccount).mockImplementation(() => new Promise(resolve => { resolveTest = resolve }))
+    renderLoaded(twoAccountPool)
+
+    fireEvent.click(await screen.findByRole('button', { name: '测试采集账号 A' }))
+
+    expect((document.querySelector('button[data-slot="dialog-trigger"]') as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByRole('button', { name: '编辑采集账号 B' }) as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByRole('button', { name: '测试采集账号 B' }) as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByRole('button', { name: '删除采集账号 B' }) as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.getByRole('switch', { name: '启用采集账号 B' }).hasAttribute('data-disabled')).toBe(true)
+
+    fireEvent.click(screen.getByRole('button', { name: '测试采集账号 B' }))
+    expect(testXCredentialAccount).toHaveBeenCalledTimes(1)
+
+    resolveTest(twoAccountPool)
+    await waitFor(() => expect((screen.getByRole('button', { name: '测试采集账号 B' }) as HTMLButtonElement).disabled).toBe(false))
+  })
+
+  it('locks the add trigger while a create save with no acting id is pending', async () => {
+    vi.mocked(createXCredentialAccount).mockImplementation(() => new Promise(() => {}))
+    renderLoaded(emptyPool)
+
+    await openAddDialog()
+    await fillCredentialForm()
+    fireEvent.click(screen.getByRole('button', { name: '保存账号' }))
+
+    expect((document.querySelector('button[data-slot="dialog-trigger"]') as HTMLButtonElement).disabled).toBe(true)
+    expect((screen.getByRole('button', { name: '保存账号' }) as HTMLButtonElement).disabled).toBe(true)
+  })
+
   it('requires AlertDialog confirmation before deleting an account', async () => {
     vi.mocked(deleteXCredentialAccount).mockResolvedValue(emptyPool)
     renderLoaded()
@@ -187,5 +257,34 @@ describe('XCredentialAccountsCard', () => {
 
     expect(await screen.findByText(/保存账号失败/)).not.toBeNull()
     expect(screen.queryByText(/secret-auth/)).toBeNull()
+  })
+
+  it('clears a generic action error when a later action begins and succeeds', async () => {
+    let resolveRetry: (pool: XCredentialPool) => void = () => {}
+    vi.mocked(testXCredentialAccount)
+      .mockRejectedValueOnce(new Error('临时测试失败'))
+      .mockImplementationOnce(() => new Promise(resolve => { resolveRetry = resolve }))
+    renderLoaded()
+
+    fireEvent.click(await screen.findByRole('button', { name: '测试采集账号 A' }))
+    expect(await screen.findByText('测试账号失败：临时测试失败')).not.toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: '测试采集账号 A' }))
+    await waitFor(() => expect(screen.queryByText('测试账号失败：临时测试失败')).toBeNull())
+    resolveRetry(poolFixture)
+
+    await waitFor(() => expect(screen.queryByText('测试账号失败：临时测试失败')).toBeNull())
+  })
+
+  it('keeps a failed delete dialog open with a retryable in-dialog error', async () => {
+    vi.mocked(deleteXCredentialAccount).mockRejectedValue(new Error('删除服务不可用'))
+    renderLoaded()
+
+    fireEvent.click(await screen.findByRole('button', { name: '删除采集账号 A' }))
+    const dialog = await screen.findByRole('alertdialog', { name: '删除采集账号' })
+    fireEvent.click(within(dialog).getByRole('button', { name: '确认删除' }))
+
+    expect(await within(dialog).findByText('删除账号失败：删除服务不可用')).not.toBeNull()
+    expect((within(dialog).getByRole('button', { name: '确认删除' }) as HTMLButtonElement).disabled).toBe(false)
   })
 })
