@@ -215,6 +215,8 @@ def test_telegram_test_metadata_failure_has_fixed_response_and_no_sensitive_exce
     )
     captured = capsys.readouterr()
     observable = response.text + formatted + captured.out + captured.err
+    assert raised.value.__cause__ is None
+    assert raised.value.__context__ is None
     assert raised.value.__suppress_context__ is True
     assert "saved-token" not in observable
     assert "database write failed" not in observable

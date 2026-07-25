@@ -479,6 +479,7 @@ async def test_telegram():
         safe_error = _clean_telegram_test_error(exc, cfg)
 
     if safe_error is not None:
+        metadata_persist_failed = False
         try:
             await set_config({
                 "telegram_test_status": "failed",
@@ -486,6 +487,8 @@ async def test_telegram():
                 "telegram_last_test_error": safe_error,
             })
         except Exception:
+            metadata_persist_failed = True
+        if metadata_persist_failed:
             raise HTTPException(
                 status_code=503,
                 detail="Telegram 测试状态保存失败",
