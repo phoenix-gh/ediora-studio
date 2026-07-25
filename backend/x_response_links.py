@@ -6,7 +6,7 @@ import ipaddress
 import re
 import socket
 from collections.abc import Callable
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import urljoin, urlsplit, urlunsplit
 
 import httpx
 from bs4 import BeautifulSoup
@@ -43,27 +43,50 @@ def _is_public_address(value: str) -> bool:
 def _validate_public_url(
     url: str,
     resolver: Callable = socket.getaddrinfo,
-) -> None:
+) -> tuple[str, str, str]:
     parsed = urlsplit(url)
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
         raise ValueError("URL must be public HTTP(S)")
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError("URL credentials are not allowed")
     host = parsed.hostname
     try:
-        if not _is_public_address(host):
+        address = ipaddress.ip_address(host)
+        if not address.is_global:
             raise ValueError("URL host must resolve to a public address")
-        return
+        selected_ip = str(address)
     except ValueError as exc:
         if "must resolve" in str(exc):
             raise
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        try:
+            addresses = resolver(host, port, type=socket.SOCK_STREAM)
+        except OSError as resolution_error:
+            raise ValueError(
+                f"URL host resolution failed: {resolution_error}"
+            ) from resolution_error
+        resolved = [item[4][0] for item in addresses]
+        if not resolved or any(
+            not _is_public_address(candidate) for candidate in resolved
+        ):
+            raise ValueError("URL host must resolve to a public address")
+        selected_ip = resolved[0]
 
-    port = parsed.port or (443 if parsed.scheme == "https" else 80)
-    try:
-        addresses = resolver(host, port, type=socket.SOCK_STREAM)
-    except OSError as exc:
-        raise ValueError(f"URL host resolution failed: {exc}") from exc
-    resolved = {item[4][0] for item in addresses}
-    if not resolved or any(not _is_public_address(address) for address in resolved):
-        raise ValueError("URL host must resolve to a public address")
+    ip_value = ipaddress.ip_address(selected_ip)
+    pinned_host = f"[{selected_ip}]" if ip_value.version == 6 else selected_ip
+    if parsed.port is not None:
+        pinned_host = f"{pinned_host}:{parsed.port}"
+    pinned_url = urlunsplit((
+        parsed.scheme,
+        pinned_host,
+        parsed.path or "/",
+        parsed.query,
+        "",
+    ))
+    host_header = f"[{host}]" if ":" in host else host
+    if parsed.port is not None:
+        host_header = f"{host_header}:{parsed.port}"
+    return pinned_url, host_header, host
 
 
 def _extract_text(response: httpx.Response) -> tuple[str, str]:
@@ -94,8 +117,21 @@ async def _fetch_one(
 ) -> dict:
     current = url
     for redirect_count in range(MAX_REDIRECTS + 1):
-        _validate_public_url(current, resolver)
-        response = await client.get(current, timeout=12)
+        pinned_url, host_header, sni_hostname = _validate_public_url(
+            current,
+            resolver,
+        )
+        extensions = (
+            {"sni_hostname": sni_hostname}
+            if urlsplit(current).scheme == "https"
+            else None
+        )
+        response = await client.get(
+            pinned_url,
+            headers={"Host": host_header},
+            extensions=extensions,
+            timeout=12,
+        )
         if response.status_code in {301, 302, 303, 307, 308}:
             if redirect_count >= MAX_REDIRECTS:
                 raise ValueError("too many redirects")
@@ -110,7 +146,7 @@ async def _fetch_one(
             raise ValueError("page contains no readable text")
         return {
             "url": url,
-            "canonical_url": str(response.url) if response.url else current,
+            "canonical_url": current,
             "title": title,
             "text": text,
         }

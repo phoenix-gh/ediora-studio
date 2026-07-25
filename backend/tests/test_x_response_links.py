@@ -90,3 +90,101 @@ def test_unsupported_content_type_is_unverified():
     result = asyncio.run(run())
     assert result["verification_status"] == "unverified"
     assert "content type" in result["errors"][0]
+
+
+def test_https_request_is_pinned_to_validated_ip_with_host_and_sni():
+    from x_response_links import verify_urls
+
+    observed = {}
+
+    def handler(request: httpx.Request):
+        observed.update(
+            url=str(request.url),
+            host=request.headers["host"],
+            sni=request.extensions.get("sni_hostname"),
+        )
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/plain"},
+            text="release details",
+        )
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            return await verify_urls(
+                ["https://official.example/announcement?version=1"],
+                client=client,
+                resolver=_public_resolver,
+            )
+
+    result = asyncio.run(run())
+
+    assert observed == {
+        "url": "https://93.184.216.34/announcement?version=1",
+        "host": "official.example",
+        "sni": "official.example",
+    }
+    assert result["links"][0]["canonical_url"] == (
+        "https://official.example/announcement?version=1"
+    )
+
+
+def test_dns_rebinding_second_resolution_is_never_used_for_connection():
+    from x_response_links import verify_urls
+
+    resolutions = 0
+    requested_hosts = []
+
+    def rebinding_resolver(host, port, *args, **kwargs):
+        nonlocal resolutions
+        resolutions += 1
+        address = "93.184.216.34" if resolutions == 1 else "127.0.0.1"
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (address, port))]
+
+    def handler(request: httpx.Request):
+        requested_hosts.append(request.url.host)
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/plain"},
+            text="verified once",
+        )
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            return await verify_urls(
+                ["https://official.example/announcement"],
+                client=client,
+                resolver=rebinding_resolver,
+            )
+
+    result = asyncio.run(run())
+
+    assert result["verification_status"] == "verified"
+    assert resolutions == 1
+    assert requested_hosts == ["93.184.216.34"]
+
+
+def test_public_ipv6_literal_is_pinned_with_bracketed_url():
+    from x_response_links import verify_urls
+
+    requested_urls = []
+
+    def handler(request: httpx.Request):
+        requested_urls.append(str(request.url))
+        return httpx.Response(
+            200,
+            headers={"content-type": "text/plain"},
+            text="ipv6 release",
+        )
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            return await verify_urls(
+                ["https://[2606:4700:4700::1111]/announcement"],
+                client=client,
+            )
+
+    result = asyncio.run(run())
+
+    assert result["verification_status"] == "verified"
+    assert requested_urls == ["https://[2606:4700:4700::1111]/announcement"]
