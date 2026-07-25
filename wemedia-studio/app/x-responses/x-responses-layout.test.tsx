@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest'
 const inbox = readFileSync(new URL('./XResponsesClient.tsx', import.meta.url), 'utf8')
 const xSubscriptions = readFileSync(new URL('../x/XClient.tsx', import.meta.url), 'utf8')
 const xSettings = readFileSync(new URL('../settings/sections/XSection.tsx', import.meta.url), 'utf8')
+const telegramSettings = readFileSync(new URL('../settings/sections/TelegramSettingsCard.tsx', import.meta.url), 'utf8')
 const sidebar = readFileSync(new URL('../../components/features/Sidebar.tsx', import.meta.url), 'utf8')
 
 
@@ -29,10 +30,13 @@ describe('X realtime response UI', () => {
   })
 
   it('keeps the Telegram token write-only and exposes target account selection', () => {
-    expect(xSettings).toContain('Telegram Bot Token')
-    expect(xSettings).toContain('telegram_bot_token_set')
+    expect(xSettings).toContain('<TelegramSettingsCard settings={settings} onSaved={onSaved} />')
+    expect(telegramSettings).toContain('Telegram Bot Token')
+    expect(telegramSettings).toContain('telegram_bot_token_set')
     expect(xSettings).toContain('x_response_account_id')
-    expect(xSettings).not.toContain('settings?.telegram_bot_token ??')
+    expect(telegramSettings).not.toContain('settings?.telegram_bot_token ??')
+    expect(xSettings).not.toContain('telegram_bot_token:')
+    expect(xSettings).not.toContain('telegram_chat_id:')
   })
 
   it('adds the pending response destination to global navigation', () => {

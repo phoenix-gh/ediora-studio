@@ -106,11 +106,14 @@ docker compose up --build
 ### Telegram 配置
 
 1. 在 Telegram 中打开 `@BotFather`，使用 `/newbot` 创建机器人并取得 Bot Token。
-2. 先向机器人发送一条消息，再通过 Telegram Bot API 的 `getUpdates` 获取目标 Chat ID；群组或频道通常使用负数 Chat ID，并需把机器人加入目标会话。
-3. 打开「设置 → X / Twitter」，填写 `Telegram Bot Token` 和 `Telegram Chat ID`。Token 为只写字段，保存后界面只显示末四位预览。
-4. 可选“建议基于账号”，从已启用的 X 发布账号中选择一个账号画像，用于约束语气、受众与禁区。
+2. 先向机器人发送一条消息，再访问 Telegram Bot API 的 `getUpdates` 获取目标 Chat ID；群组或频道通常使用负数 Chat ID，并需先把机器人加入目标会话。
+3. 打开「设置 → X / Twitter」，填写 `Telegram Bot Token` 和 `Telegram Chat ID`，点击“保存 Telegram 配置”。Token 是只写字段，保存后不会回填，页面只显示后端返回的末四位脱敏预览；输入框留空并保存会保留已有 Token。
+4. 必须先保存当前修改，才能点击“发送测试消息”。测试只使用服务端已保存的 Token 和 Chat ID，且只发送一条带 Asia/Shanghai 时间的固定中文连接测试消息，不会使用尚未保存的输入。
+5. “清除 Telegram 配置”需要二次确认，会删除已保存的 Token、Chat ID 和测试状态，但不会删除历史 X 响应决策、投递记录或消息 ID。
+6. 可选“建议使用的发布账号画像”，从已启用的 X 发布账号中选择一个账号画像，用于约束语气、受众与禁区。
 
 Telegram 消息使用 HTML `<pre>` 块承载草稿，便于手机端长按复制。重复执行通知接口不会再次发送同一条决策。
+单元测试和页面冒烟不会替代真实 Telegram 投递验收；只有在本机已安全配置实际 Bot Token 与 Chat ID 时，才应由操作员发送一次测试消息并在目标会话中人工确认。
 
 ### 数据库
 

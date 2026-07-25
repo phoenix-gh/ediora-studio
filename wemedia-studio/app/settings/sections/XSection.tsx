@@ -9,13 +9,12 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
+import { TelegramSettingsCard } from './TelegramSettingsCard'
 import { XCredentialAccountsCard } from './XCredentialAccountsCard'
 
 export function XSection({ settings, onSaved }: { settings: AppSettings | null; onSaved: (s: AppSettings) => void }) {
   const [xInterval, setXInterval] = useState(settings?.x_collect_interval_minutes ?? 15)
   const [notifyEnabled, setNotifyEnabled] = useState(settings?.x_notify_enabled ?? true)
-  const [telegramToken, setTelegramToken] = useState('')
-  const [telegramChatId, setTelegramChatId] = useState(settings?.telegram_chat_id ?? '')
   const [responseAccountId, setResponseAccountId] = useState(settings?.x_response_account_id ?? '')
   const [accounts, setAccounts] = useState<PublishAccount[]>([])
   const [saving, setSaving] = useState(false)
@@ -37,11 +36,8 @@ export function XSection({ settings, onSaved }: { settings: AppSettings | null; 
       const updated = await updateSettings({
         x_collect_interval_minutes: xInterval,
         x_notify_enabled: notifyEnabled,
-        ...(telegramToken.trim() ? { telegram_bot_token: telegramToken.trim() } : {}),
-        telegram_chat_id: telegramChatId.trim(),
         x_response_account_id: responseAccountId,
       })
-      setTelegramToken('')
       onSaved(updated)
       toast.success('X 采集配置已保存')
     } catch {
@@ -62,6 +58,7 @@ export function XSection({ settings, onSaved }: { settings: AppSettings | null; 
       </div>
 
       <XCredentialAccountsCard />
+      <TelegramSettingsCard settings={settings} onSaved={onSaved} />
 
       {/* Interval settings */}
       <div className="space-y-5">
@@ -75,53 +72,21 @@ export function XSection({ settings, onSaved }: { settings: AppSettings | null; 
           </p>
         </div>
 
-        <div className="rounded-lg border bg-card p-4 space-y-4">
-          <div>
-            <p className="text-sm font-medium">Telegram 推送</p>
-            <p className="text-[11px] text-zinc-400">
-              Token 只写不回显。当前状态：{settings?.telegram_bot_token_set
-                ? `已配置 ${settings.telegram_bot_token_preview}`
-                : '未配置'}
-            </p>
-          </div>
-          <div className="space-y-1.5">
-            <Label className="text-xs" htmlFor="telegram-bot-token">Telegram Bot Token</Label>
-            <Input
-              id="telegram-bot-token"
-              type="password"
-              autoComplete="new-password"
-              value={telegramToken}
-              onChange={event => setTelegramToken(event.target.value)}
-              placeholder={settings?.telegram_bot_token_set ? '留空则保留当前 Token' : '123456:ABC…'}
-              className="h-9 text-sm"
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label className="text-xs" htmlFor="telegram-chat-id">Telegram Chat ID</Label>
-            <Input
-              id="telegram-chat-id"
-              value={telegramChatId}
-              onChange={event => setTelegramChatId(event.target.value)}
-              placeholder="-1001234567890"
-              className="h-9 text-sm"
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label className="text-xs" htmlFor="x-response-account">建议使用的发布账号画像</Label>
-            <select
-              id="x-response-account"
-              value={responseAccountId}
-              onChange={event => setResponseAccountId(event.target.value)}
-              className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm"
-            >
-              <option value="">使用默认中文科技账号画像</option>
-              {accounts
-                .filter(account => account.is_active && ['x', 'twitter'].includes(account.platform.toLowerCase()))
-                .map(account => (
-                  <option key={account.id} value={account.id}>{account.name}</option>
-                ))}
-            </select>
-          </div>
+        <div className="space-y-1.5">
+          <Label className="text-xs" htmlFor="x-response-account">建议使用的发布账号画像</Label>
+          <select
+            id="x-response-account"
+            value={responseAccountId}
+            onChange={event => setResponseAccountId(event.target.value)}
+            className="h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm"
+          >
+            <option value="">使用默认中文科技账号画像</option>
+            {accounts
+              .filter(account => account.is_active && ['x', 'twitter'].includes(account.platform.toLowerCase()))
+              .map(account => (
+                <option key={account.id} value={account.id}>{account.name}</option>
+              ))}
+          </select>
         </div>
 
         <div className="space-y-1.5">
