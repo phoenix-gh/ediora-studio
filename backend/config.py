@@ -56,6 +56,9 @@ DEFAULTS: dict[str, str] = {
     "x_reply_scout_interval_minutes": "15",
     "x_reply_scout_batch": "20",
     "x_notify_enabled": "1",                 # 全局开关：X 回复关注提醒（动态通知推 Telegram）
+    "telegram_bot_token": "",
+    "telegram_chat_id": "",
+    "x_response_account_id": "",
     "wechat_tunnel_enabled": "0",
     "wechat_tunnel_ssh_host": "",
     "wechat_tunnel_ssh_port": "22",

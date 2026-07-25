@@ -1,0 +1,88 @@
+import asyncio
+from types import SimpleNamespace
+
+import httpx
+
+
+def _decision(**overrides):
+    data = {
+        "id": 7,
+        "action": "translate_quote",
+        "score": 88,
+        "confidence": 0.91,
+        "reason": "官方发布重要 API <beta>",
+        "summary_cn": "官方发布了新的 API。",
+        "comment_draft": None,
+        "quote_draft": "OpenAI 发布了新的 Responses API。",
+    }
+    data.update(overrides)
+    return SimpleNamespace(**data)
+
+
+def test_immediate_message_escapes_html_and_keeps_copy_block():
+    from telegram_notifier import render_immediate_messages
+
+    messages = render_immediate_messages(
+        _decision(),
+        SimpleNamespace(username="OpenAI", url="https://x.com/OpenAI/status/1"),
+        SimpleNamespace(label="OpenAI"),
+        "http://localhost:3000/x-responses?decision=7",
+    )
+
+    assert len(messages) == 1
+    assert "&lt;beta&gt;" in messages[0]
+    assert "<pre>OpenAI 发布了新的 Responses API。</pre>" in messages[0]
+    assert "https://x.com/OpenAI/status/1" in messages[0]
+    assert len(messages[0]) < 4096
+
+
+def test_long_summary_splits_without_splitting_copyable_draft():
+    from telegram_notifier import render_immediate_messages
+
+    messages = render_immediate_messages(
+        _decision(summary_cn="摘要" * 2200),
+        SimpleNamespace(username="OpenAI", url="https://x.com/OpenAI/status/1"),
+        SimpleNamespace(label="OpenAI"),
+        "http://localhost:3000/x-responses?decision=7",
+    )
+
+    assert len(messages) == 2
+    assert "<pre>" not in messages[0]
+    assert "<pre>OpenAI 发布了新的 Responses API。</pre>" in messages[1]
+    assert all(len(message) < 4096 for message in messages)
+
+
+def test_send_html_messages_returns_message_ids():
+    from telegram_notifier import send_html_messages
+
+    sent = []
+
+    def handler(request: httpx.Request):
+        sent.append(request)
+        return httpx.Response(200, json={"ok": True, "result": {"message_id": len(sent)}})
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            return await send_html_messages("token", "chat", ["one", "two"], client=client)
+
+    assert asyncio.run(run()) == [1, 2]
+    assert len(sent) == 2
+
+
+def test_send_html_messages_marks_bad_configuration_non_retryable():
+    from telegram_notifier import TelegramSendError, send_html_messages
+
+    def handler(request: httpx.Request):
+        return httpx.Response(400, json={"ok": False, "description": "chat not found"})
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            await send_html_messages("token", "chat", ["one"], client=client)
+
+    try:
+        asyncio.run(run())
+    except TelegramSendError as exc:
+        assert exc.retryable is False
+        assert "chat not found" in str(exc)
+    else:
+        raise AssertionError("expected TelegramSendError")

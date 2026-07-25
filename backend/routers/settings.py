@@ -106,6 +106,10 @@ class SettingsOut(BaseModel):
     arxiv_collect_interval_hours: int
     x_collect_interval_minutes: int
     x_notify_enabled: bool
+    telegram_bot_token_set: bool
+    telegram_bot_token_preview: str
+    telegram_chat_id: str
+    x_response_account_id: str
     ref_collect_interval_minutes: int
     ref_classify_interval_minutes: int
     clean_batch_size: int
@@ -147,6 +151,9 @@ class SettingsUpdate(BaseModel):
     arxiv_collect_interval_hours: Optional[int] = None
     x_collect_interval_minutes: Optional[int] = None
     x_notify_enabled: Optional[bool] = None
+    telegram_bot_token: Optional[str] = None
+    telegram_chat_id: Optional[str] = None
+    x_response_account_id: Optional[str] = None
     ref_collect_interval_minutes: Optional[int] = None
     ref_classify_interval_minutes: Optional[int] = None
     clean_batch_size: Optional[int] = None
@@ -193,6 +200,7 @@ def _build_out(cfg: dict) -> SettingsOut:
     api_key = cfg.get("llm_api_key", "")
     image_api_key = cfg.get("image_api_key", "")
     gh_token = cfg.get("github_token", "")
+    telegram_token = cfg.get("telegram_bot_token", "")
     blog_base, blog_token = blog_client.effective_blog_config(cfg)
     try:
         raw_search_providers = json.loads(cfg.get("web_search_providers", "[]"))
@@ -234,6 +242,10 @@ def _build_out(cfg: dict) -> SettingsOut:
         arxiv_collect_interval_hours=max(1, int(cfg.get("arxiv_collect_interval_hours", 6))),
         x_collect_interval_minutes=max(1, int(cfg.get("x_collect_interval_minutes", 15))),
         x_notify_enabled=str(cfg.get("x_notify_enabled", "1")).lower() in ("1", "true", "yes", "on"),
+        telegram_bot_token_set=bool(telegram_token),
+        telegram_bot_token_preview=f"…{telegram_token[-4:]}" if len(telegram_token) >= 4 else "",
+        telegram_chat_id=cfg.get("telegram_chat_id", ""),
+        x_response_account_id=cfg.get("x_response_account_id", ""),
         ref_collect_interval_minutes=max(1, int(cfg.get("ref_collect_interval_minutes", 15))),
         ref_classify_interval_minutes=max(1, int(cfg.get("ref_classify_interval_minutes", 60))),
         clean_batch_size=max(1, int(cfg.get("clean_batch_size", 20))),
@@ -354,6 +366,12 @@ async def update_settings(body: SettingsUpdate, request: Request):
         updates["x_collect_interval_minutes"] = str(max(1, body.x_collect_interval_minutes))
     if body.x_notify_enabled is not None:
         updates["x_notify_enabled"] = "1" if body.x_notify_enabled else "0"
+    if body.telegram_bot_token is not None:
+        updates["telegram_bot_token"] = body.telegram_bot_token.strip()
+    if body.telegram_chat_id is not None:
+        updates["telegram_chat_id"] = body.telegram_chat_id.strip()
+    if body.x_response_account_id is not None:
+        updates["x_response_account_id"] = body.x_response_account_id.strip()
     if body.ref_collect_interval_minutes is not None:
         updates["ref_collect_interval_minutes"] = str(max(1, body.ref_collect_interval_minutes))
     if body.ref_classify_interval_minutes is not None:

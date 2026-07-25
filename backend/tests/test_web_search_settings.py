@@ -54,3 +54,17 @@ def test_settings_persists_web_fetch_provider_order(client):
 
     assert response.status_code == 200, response.text
     assert response.json()["web_fetch_providers"] == providers
+
+
+def test_telegram_token_is_write_only(client):
+    response = client.put("/api/settings", json={
+        "telegram_bot_token": "123456:secret-token",
+        "telegram_chat_id": "-100123",
+    })
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["telegram_bot_token_set"] is True
+    assert body["telegram_bot_token_preview"] == "…oken"
+    assert body["telegram_chat_id"] == "-100123"
+    assert "telegram_bot_token" not in body
