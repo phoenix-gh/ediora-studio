@@ -149,3 +149,26 @@ def test_request_error_is_redacted_and_severs_sensitive_exception_chain():
     assert token not in repr(error)
     assert error.__cause__ is None
     assert error.__context__ is None
+
+
+def test_telegram_api_error_keeps_semantics_without_echoing_configured_token():
+    from telegram_notifier import TelegramSendError, send_html_messages
+
+    token = "123456:secret-token"
+
+    def handler(request: httpx.Request):
+        return httpx.Response(400, json={
+            "ok": False,
+            "description": f"chat not found via bot {token}",
+        })
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            await send_html_messages(token, "chat", ["one"], client=client)
+
+    with pytest.raises(TelegramSendError) as raised:
+        asyncio.run(run())
+
+    assert "chat not found" in str(raised.value)
+    assert token not in str(raised.value)
+    assert raised.value.delivery_unknown is False

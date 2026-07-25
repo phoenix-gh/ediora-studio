@@ -157,6 +157,9 @@ async def send_html_messages(
                 payload = {}
             if response.status_code >= 400 or not payload.get("ok"):
                 detail = str(payload.get("description") or f"HTTP {response.status_code}")
+                detail = redact_secret_text(detail)
+                if token:
+                    detail = detail.replace(token, "***")
                 raise TelegramSendError(
                     detail,
                     retryable=response.status_code == 429 or response.status_code >= 500,
