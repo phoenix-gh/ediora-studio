@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 import html
+from zoneinfo import ZoneInfo
 
 import httpx
 
@@ -20,6 +22,15 @@ class TelegramSendError(RuntimeError):
     def __init__(self, message: str, *, retryable: bool):
         super().__init__(message)
         self.retryable = retryable
+
+
+def render_test_message(tested_at: datetime) -> str:
+    shanghai = tested_at.astimezone(ZoneInfo("Asia/Shanghai"))
+    stamp = shanghai.strftime("%Y-%m-%d %H:%M:%S")
+    return (
+        "✅ <b>WeMedia Studio Telegram 连接测试成功</b>\n"
+        f"测试时间：{stamp}（Asia/Shanghai）"
+    )
 
 
 def _draft_blocks(decision) -> str:

@@ -1,12 +1,14 @@
-from fastapi import APIRouter, Body, Query, Request
+from fastapi import APIRouter, Body, HTTPException, Query, Request
 from pydantic import BaseModel, field_validator, model_validator
 from typing import Literal, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 import httpx
 from urllib.parse import urlsplit
 
 from config import get_config, set_config, PROVIDERS, effective_model, effective_base_url
+from log_redaction import redact_secret_text
+import telegram_notifier
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 
@@ -109,6 +111,9 @@ class SettingsOut(BaseModel):
     telegram_bot_token_set: bool
     telegram_bot_token_preview: str
     telegram_chat_id: str
+    telegram_test_status: Literal["", "success", "failed"]
+    telegram_last_tested_at: str
+    telegram_last_test_error: str
     x_response_account_id: str
     ref_collect_interval_minutes: int
     ref_classify_interval_minutes: int
@@ -245,6 +250,9 @@ def _build_out(cfg: dict) -> SettingsOut:
         telegram_bot_token_set=bool(telegram_token),
         telegram_bot_token_preview=f"…{telegram_token[-4:]}" if len(telegram_token) >= 4 else "",
         telegram_chat_id=cfg.get("telegram_chat_id", ""),
+        telegram_test_status=cfg.get("telegram_test_status", ""),
+        telegram_last_tested_at=cfg.get("telegram_last_tested_at", ""),
+        telegram_last_test_error=cfg.get("telegram_last_test_error", ""),
         x_response_account_id=cfg.get("x_response_account_id", ""),
         ref_collect_interval_minutes=max(1, int(cfg.get("ref_collect_interval_minutes", 15))),
         ref_classify_interval_minutes=max(1, int(cfg.get("ref_classify_interval_minutes", 60))),
@@ -325,6 +333,7 @@ async def get_ai_runtime_config():
 
 @router.put("", response_model=SettingsOut)
 async def update_settings(body: SettingsUpdate, request: Request):
+    saved_cfg = await get_config()
     updates: dict = {}
     if body.llm_provider is not None:
         updates["llm_provider"] = body.llm_provider
@@ -366,10 +375,28 @@ async def update_settings(body: SettingsUpdate, request: Request):
         updates["x_collect_interval_minutes"] = str(max(1, body.x_collect_interval_minutes))
     if body.x_notify_enabled is not None:
         updates["x_notify_enabled"] = "1" if body.x_notify_enabled else "0"
+    telegram_configuration_changed = False
     if body.telegram_bot_token is not None:
-        updates["telegram_bot_token"] = body.telegram_bot_token.strip()
+        telegram_token = body.telegram_bot_token.strip()
+        if telegram_token:
+            updates["telegram_bot_token"] = telegram_token
+            telegram_configuration_changed = (
+                telegram_configuration_changed
+                or telegram_token != saved_cfg.get("telegram_bot_token", "")
+            )
     if body.telegram_chat_id is not None:
-        updates["telegram_chat_id"] = body.telegram_chat_id.strip()
+        telegram_chat_id = body.telegram_chat_id.strip()
+        updates["telegram_chat_id"] = telegram_chat_id
+        telegram_configuration_changed = (
+            telegram_configuration_changed
+            or telegram_chat_id != saved_cfg.get("telegram_chat_id", "")
+        )
+    if telegram_configuration_changed:
+        updates.update({
+            "telegram_test_status": "",
+            "telegram_last_tested_at": "",
+            "telegram_last_test_error": "",
+        })
     if body.x_response_account_id is not None:
         updates["x_response_account_id"] = body.x_response_account_id.strip()
     if body.ref_collect_interval_minutes is not None:
@@ -426,6 +453,53 @@ async def update_settings(body: SettingsUpdate, request: Request):
         except Exception as e:
             print(f"[settings] reschedule failed: {e}")
 
+    return _build_out(await get_config())
+
+
+def _clean_telegram_test_error(exc: Exception, cfg: dict[str, str]) -> str:
+    cleaned = redact_secret_text(str(exc))
+    token = cfg.get("telegram_bot_token", "")
+    if token:
+        cleaned = cleaned.replace(token, "***")
+    return cleaned[:500]
+
+
+@router.post("/telegram/test", response_model=SettingsOut)
+async def test_telegram():
+    cfg = await get_config()
+    tested_at = datetime.now(timezone.utc)
+    try:
+        await telegram_notifier.send_html_messages(
+            cfg.get("telegram_bot_token", ""),
+            cfg.get("telegram_chat_id", ""),
+            [telegram_notifier.render_test_message(tested_at)],
+        )
+    except Exception as exc:
+        safe_error = _clean_telegram_test_error(exc, cfg)
+        await set_config({
+            "telegram_test_status": "failed",
+            "telegram_last_tested_at": tested_at.isoformat(),
+            "telegram_last_test_error": safe_error,
+        })
+        raise HTTPException(status_code=503, detail=safe_error) from exc
+
+    await set_config({
+        "telegram_test_status": "success",
+        "telegram_last_tested_at": tested_at.isoformat(),
+        "telegram_last_test_error": "",
+    })
+    return _build_out(await get_config())
+
+
+@router.delete("/telegram", response_model=SettingsOut)
+async def clear_telegram():
+    await set_config({
+        "telegram_bot_token": "",
+        "telegram_chat_id": "",
+        "telegram_test_status": "",
+        "telegram_last_tested_at": "",
+        "telegram_last_test_error": "",
+    })
     return _build_out(await get_config())
 
 

@@ -56,6 +56,9 @@ DEFAULTS: dict[str, str] = {
     "x_notify_enabled": "1",                 # 全局开关：X 即时响应建议与 Telegram 推送
     "telegram_bot_token": "",
     "telegram_chat_id": "",
+    "telegram_test_status": "",
+    "telegram_last_tested_at": "",
+    "telegram_last_test_error": "",
     "x_response_account_id": "",
     "wechat_tunnel_enabled": "0",
     "wechat_tunnel_ssh_host": "",

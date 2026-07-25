@@ -1,7 +1,20 @@
 import asyncio
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import httpx
+
+
+def test_render_test_message_is_fixed_chinese_and_shanghai_time():
+    from telegram_notifier import render_test_message
+
+    tested_at = datetime(2026, 7, 25, 13, 6, 7, tzinfo=timezone.utc)
+
+    message = render_test_message(tested_at)
+
+    assert "WeMedia Studio Telegram 连接测试成功" in message
+    assert "2026-07-25 21:06:07" in message
+    assert "<script" not in message
 
 
 def _decision(**overrides):
