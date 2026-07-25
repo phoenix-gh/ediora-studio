@@ -1,6 +1,8 @@
 import json
 import stat
 
+import pytest
+
 from models import XCredentialAccount
 from x_credential_store import CredentialFileStore, CredentialPair
 
@@ -60,3 +62,72 @@ def test_external_files_are_reported_but_untouched(tmp_path):
     assert store.external_sessions(set()) == ["twitter.json"]
     store.write(2, True, CredentialPair("managed", "csrf"))
     assert external.read_text() == '{"cookies":[]}'
+
+
+def test_write_removes_old_state_before_exposing_new_state(tmp_path, monkeypatch):
+    store = CredentialFileStore(tmp_path)
+    store.write(3, True, CredentialPair("old-token", "old-ct0"))
+    active = tmp_path / "x_3.json"
+    disabled = tmp_path / "x_3.disabled.json"
+    original_unlink = type(active).unlink
+
+    def unlink_without_dual_state(path, *args, **kwargs):
+        if path == active:
+            assert not disabled.exists()
+        return original_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(type(active), "unlink", unlink_without_dual_state)
+
+    store.write(3, False, CredentialPair("new-token", "new-ct0"))
+
+    assert store.read(3) == CredentialPair("new-token", "new-ct0")
+
+
+def test_delete_restores_snapshot_when_later_removal_fails(tmp_path, monkeypatch):
+    store = CredentialFileStore(tmp_path)
+    active = tmp_path / "x_3.json"
+    disabled = tmp_path / "x_3.disabled.json"
+    active.write_text('{"auth_token":"active","ct0":"csrf"}')
+    disabled.write_text('{"auth_token":"disabled","ct0":"csrf"}')
+    previous = store.snapshot(3)
+    original_unlink = type(active).unlink
+    failed = False
+
+    def fail_once_for_disabled(path, *args, **kwargs):
+        nonlocal failed
+        if path == disabled and not failed:
+            failed = True
+            raise OSError("simulated second removal failure")
+        return original_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(type(active), "unlink", fail_once_for_disabled)
+
+    with pytest.raises(OSError, match="simulated second removal failure"):
+        store.delete(3)
+
+    assert store.snapshot(3) == previous
+
+
+@pytest.mark.parametrize(
+    ("operation", "filename"),
+    [
+        ("enable", "x_3.disabled.json"),
+        ("disable", "x_3.json"),
+        ("delete", "x_3.json"),
+    ],
+)
+def test_non_write_lifecycle_operations_repair_directory_mode(tmp_path, operation, filename):
+    store = CredentialFileStore(tmp_path)
+    credential = tmp_path / filename
+    credential.write_text('{"auth_token":"token","ct0":"csrf"}')
+    credential.chmod(0o600)
+    tmp_path.chmod(0o755)
+
+    if operation == "enable":
+        store.set_enabled(3, True)
+    elif operation == "disable":
+        store.set_enabled(3, False)
+    else:
+        store.delete(3)
+
+    assert stat.S_IMODE(tmp_path.stat().st_mode) == 0o700

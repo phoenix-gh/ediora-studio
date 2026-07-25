@@ -62,8 +62,7 @@ class CredentialFileStore:
         return slot
 
     def _atomic_write(self, path: Path, payload: bytes) -> None:
-        self.directory.mkdir(parents=True, exist_ok=True, mode=0o700)
-        os.chmod(self.directory, 0o700)
+        self._ensure_directory()
         fd, temp_name = tempfile.mkstemp(prefix=".x-credential-", dir=self.directory)
         try:
             with os.fdopen(fd, "wb") as handle:
@@ -75,6 +74,10 @@ class CredentialFileStore:
         finally:
             if os.path.exists(temp_name):
                 os.unlink(temp_name)
+
+    def _ensure_directory(self) -> None:
+        self.directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+        os.chmod(self.directory, 0o700)
 
     def _paths(self, slot: int) -> tuple[Path, Path]:
         return (
@@ -100,14 +103,17 @@ class CredentialFileStore:
         active, disabled = self._paths(slot)
         destination, obsolete = (active, disabled) if enabled else (disabled, active)
         try:
+            if obsolete.exists():
+                os.replace(obsolete, destination)
+                os.chmod(destination, 0o600)
             self._atomic_write(destination, _payload(pair))
-            obsolete.unlink(missing_ok=True)
         except Exception:
             self.restore(previous)
             raise
         return previous
 
     def set_enabled(self, slot: int, enabled: bool) -> CredentialFileSnapshot:
+        self._ensure_directory()
         previous = self.snapshot(slot)
         active, disabled = self._paths(slot)
         source, destination = (disabled, active) if enabled else (active, disabled)
@@ -118,10 +124,17 @@ class CredentialFileStore:
         return previous
 
     def delete(self, slot: int) -> CredentialFileSnapshot:
+        self._ensure_directory()
         previous = self.snapshot(slot)
         active, disabled = self._paths(slot)
-        active.unlink(missing_ok=True)
-        disabled.unlink(missing_ok=True)
+        try:
+            if active.exists():
+                os.replace(active, disabled)
+                os.chmod(disabled, 0o600)
+            disabled.unlink(missing_ok=True)
+        except Exception:
+            self.restore(previous)
+            raise
         return previous
 
     def restore(self, previous: CredentialFileSnapshot) -> None:
