@@ -44,6 +44,7 @@
 - `id`：整数主键；
 - `name`：账号名称；
 - `enabled`：是否加入 feedgrab 账号池；
+- `credential_slot`：唯一的正整数文件槽位；
 - `auth_token_preview`：掩码预览；
 - `ct0_preview`：掩码预览；
 - `test_status`：`untested | available | expired | rate_limited | failed`；
@@ -51,7 +52,7 @@
 - `last_test_error`：经过清理的错误摘要；
 - `created_at`、`updated_at`。
 
-凭据文件名由主键确定，不在模型中重复保存：启用时为 `x_<id>.json`，停用时为 `x_<id>.disabled.json`。
+凭据文件名由 `credential_slot` 确定：启用时为 `x_<slot>.json`，停用时为 `x_<slot>.disabled.json`。创建账号时同时扫描数据库槽位和 session 目录中已有的 `x_<数字>.json`，分配一个未占用的正整数，确保不会覆盖外部文件。槽位属于服务端实现细节，不通过 API 暴露。
 
 “被限流”等状态明确表示最近一次手动测试结果，不承诺是实时监控状态。全局认证状态可以额外展示 feedgrab 当前可用账号总数。
 
@@ -214,10 +215,11 @@ Bot Token 仍是只写字段，设置输出只包含是否已配置和末四位�
 
 1. 校验名称和成对凭据；
 2. 数据库 `flush` 得到账号 ID；
-3. 在 session 目录创建临时文件并设为 `0600`；
-4. 原子替换为启用或停用文件名；
-5. 提交数据库；
-6. 返回不含原始凭据的账号数据。
+3. 扫描数据库和 session 目录，分配未占用的 `credential_slot`；
+4. 在 session 目录创建临时文件并设为 `0600`；
+5. 原子替换为启用或停用文件名；
+6. 提交数据库；
+7. 返回不含原始凭据的账号数据。
 
 数据库提交失败时删除新文件并回滚。
 
@@ -240,7 +242,7 @@ Bot Token 仍是只写字段，设置输出只包含是否已配置和末四位�
 
 ### 6.4 采集轮换
 
-采集逻辑不接收账号 ID。feedgrab 从固定 session 目录加载环境变量账号、外部 session 和所有启用的托管 `x_<id>.json`，按其现有优先级选择账号。收到 429 后由 feedgrab 标记当前账号并选择下一个未限流账号。
+采集逻辑不接收账号 ID。feedgrab 从固定 session 目录加载环境变量账号、外部 session 和所有启用的托管 `x_<slot>.json`，按其现有优先级选择账号。收到 429 后由 feedgrab 标记当前账号并选择下一个未限流账号。
 
 ## 7. 安全与错误处理
 
@@ -279,6 +281,7 @@ Docker Compose 的 API 服务增加：
 - 凭据替换后测试状态重置；
 - API、错误和日志不泄露完整凭据；
 - 外部 session 被识别但不被修改；
+- 已占用的外部 `x_<数字>.json` 槽位不会被托管账号覆盖；
 - 认证测试的 2xx、401、403、429、超时和无效响应映射；
 - 两个托管账号中第一个模拟 429 后 feedgrab 使用第二个账号；
 - 停用账号不参与 feedgrab 加载；
