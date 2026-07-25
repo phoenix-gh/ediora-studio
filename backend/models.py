@@ -6,6 +6,24 @@ from database import Base
 def now_utc():
     return datetime.now(timezone.utc)
 
+
+class XCredentialAccount(Base):
+    __tablename__ = "x_credential_accounts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String, nullable=False, unique=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    credential_slot: Mapped[int] = mapped_column(Integer, nullable=False, unique=True)
+    auth_token_preview: Mapped[str] = mapped_column(String, default="")
+    ct0_preview: Mapped[str] = mapped_column(String, default="")
+    test_status: Mapped[str] = mapped_column(String, default="untested", index=True)
+    last_tested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_test_error: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=now_utc, onupdate=now_utc
+    )
+
 class PublishAccount(Base):
     """运营的对外发布账号（公众号 / X / 视频号等）。承载账号定位画像，供 agent 在策划-写作-审核全链路读取。"""
     __tablename__ = "publish_accounts"
