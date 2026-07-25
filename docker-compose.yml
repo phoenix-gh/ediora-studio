@@ -29,8 +29,10 @@ services:
       WMS_DATABASE_URL: postgresql+asyncpg://wemedia:${POSTGRES_PASSWORD:-wemedia}@postgres:5432/wemedia
       WMS_REDIS_URL: redis://redis:6379/0
       WMS_DISABLE_SCHEDULER: "0"
+      FEEDGRAB_DATA_DIR: /app/sessions
     volumes:
       - uploads-data:/app/uploads
+      - sessions-data:/app/sessions
     ports:
       - "8000:8000"
     depends_on:
@@ -77,3 +79,4 @@ volumes:
   postgres-data:
   redis-data:
   uploads-data:
+  sessions-data:

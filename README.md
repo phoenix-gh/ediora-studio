@@ -85,6 +85,24 @@ docker compose up --build
 
 系统只生成与推送建议，**永远不会自动调用 X 的发布、回复、转发或引用接口**。X 采集由定时器每 5 分钟检查一次，实际端到端延迟还取决于设置中的采集间隔和模型响应时间。
 
+### X 采集账号池
+
+- 打开「设置 → X / Twitter → X 采集账号池」可以新增、编辑、启停、测试和删除由 UI 管理的采集账号。凭据只写入后端 session 目录，界面和 API 只返回脱敏预览。
+- 所有已启用凭据组成 feedgrab 的全局轮换池；单个账号遇到限流时，后续请求可切换到其他可用账号。
+- 既有的 `feedgrab login twitter` session 继续参与采集，但在 UI 中仅显示为外部 session，不能查看、修改或删除。
+- 本地运行时，须在启动后端前设置专用目录，例如：
+
+  ```bash
+  export FEEDGRAB_DATA_DIR="$PWD/backend/sessions"
+  mkdir -p "$FEEDGRAB_DATA_DIR"
+  cd backend
+  conda run -n wems uvicorn main:app --host 0.0.0.0 --port 8000
+  ```
+
+  如需继续使用 feedgrab 命令登录，请确保命令与后端使用同一个 `FEEDGRAB_DATA_DIR`。不要把 session 文件、Cookie 或 Token 复制进源码目录或容器镜像。
+- Docker Compose 已将 API 的 `FEEDGRAB_DATA_DIR` 固定为 `/app/sessions`，并通过 `sessions-data` 命名卷持久化；重建 API 容器不会清空账号池。
+- feedgrab 是可选的宿主机/运行时集成，不包含在默认后端依赖中。只有需要实际采集 X 时，才需在后端运行环境中安装兼容版本；未安装时其余信息源和产品功能仍可运行。
+
 ### Telegram 配置
 
 1. 在 Telegram 中打开 `@BotFather`，使用 `/newbot` 创建机器人并取得 Bot Token。
@@ -134,6 +152,6 @@ NEXT_PUBLIC_API_URL=http://localhost:8000/api
 ## 注意事项
 
 - LLM 功能需在 设置 -> AI 模型 中配置 API Key
-- X 认证由 feedgrab 管理；可运行 `feedgrab login twitter`，或在后端环境配置 `X_AUTH_TOKEN` 与 `X_CT0`
+- X 认证可在「设置 → X / Twitter → X 采集账号池」管理；外部 `feedgrab login twitter` session 仍兼容但只读
 - RSSHub 需独立部署，在 设置 -> 数据采集 中填写地址
 - 头像缓存目录 backend/avatars/，首次约 30s，后续毫秒级
