@@ -1,6 +1,8 @@
 import Redis from 'ioredis'
 
 import { runContentJob } from '../lib/ai/content-job'
+import { getJob } from '../lib/ai/job-client'
+import { runXResponseDigestJob, runXResponseJob } from '../lib/ai/x-response-job'
 
 const redisUrl = process.env.WMS_REDIS_URL ?? 'redis://redis:6379/0'
 const queueName = process.env.WMS_WORKER_QUEUE ?? 'content-jobs'
@@ -13,7 +15,10 @@ async function run() {
     const jobId = Number(item[1])
     if (!Number.isSafeInteger(jobId)) continue
     try {
-      await runContentJob(jobId)
+      const job = await getJob(jobId)
+      if (job.flow === 'x_response') await runXResponseJob(jobId)
+      else if (job.flow === 'x_response_digest') await runXResponseDigestJob(jobId)
+      else await runContentJob(jobId)
     } catch (error) {
       console.error(`content job ${jobId} failed`, error)
     }
