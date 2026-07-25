@@ -153,9 +153,15 @@ class CredentialFileStore:
             raise CredentialFileError("托管凭据文件不存在或状态冲突")
         try:
             value = json.loads(existing[0].read_text())
-            auth_token = value["auth_token"].strip()
-            ct0 = value["ct0"].strip()
-        except (OSError, json.JSONDecodeError, KeyError, AttributeError) as exc:
+            if not isinstance(value, dict):
+                raise TypeError("credential file must contain an object")
+            auth_token = value["auth_token"]
+            ct0 = value["ct0"]
+            if not isinstance(auth_token, str) or not isinstance(ct0, str):
+                raise TypeError("credential fields must be strings")
+            auth_token = auth_token.strip()
+            ct0 = ct0.strip()
+        except (OSError, json.JSONDecodeError, KeyError, AttributeError, TypeError) as exc:
             raise CredentialFileError("托管凭据文件格式无效") from exc
         if not auth_token or not ct0:
             raise CredentialFileError("托管凭据字段为空")

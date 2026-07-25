@@ -4,7 +4,7 @@ import stat
 import pytest
 
 from models import XCredentialAccount
-from x_credential_store import CredentialFileStore, CredentialPair
+from x_credential_store import CredentialFileError, CredentialFileStore, CredentialPair
 
 
 def test_allocate_slot_skips_database_and_external_files(tmp_path):
@@ -62,6 +62,15 @@ def test_external_files_are_reported_but_untouched(tmp_path):
     assert store.external_sessions(set()) == ["twitter.json"]
     store.write(2, True, CredentialPair("managed", "csrf"))
     assert external.read_text() == '{"cookies":[]}'
+
+
+@pytest.mark.parametrize("payload", ["[]", "null"])
+def test_read_rejects_non_object_json_as_invalid_credential_file(tmp_path, payload):
+    credential = tmp_path / "x_3.json"
+    credential.write_text(payload)
+
+    with pytest.raises(CredentialFileError, match="托管凭据文件格式无效"):
+        CredentialFileStore(tmp_path).read(3)
 
 
 def test_write_removes_old_state_before_exposing_new_state(tmp_path, monkeypatch):

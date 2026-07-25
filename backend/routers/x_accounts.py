@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, ConfigDict, model_validator
+from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -49,9 +49,14 @@ class XCredentialAccountPatch(BaseModel):
             self.name = self.name.strip()
             if not self.name:
                 raise ValueError("账号名称不能为空")
-        supplied = [bool((self.auth_token or "").strip()), bool((self.ct0 or "").strip())]
-        if any(supplied) and not all(supplied):
+        if (self.auth_token is None) != (self.ct0 is None):
             raise ValueError("auth_token 和 ct0 必须同时填写")
+        if self.auth_token is not None:
+            self.auth_token = self.auth_token.strip()
+            self.ct0 = self.ct0.strip()
+            supplied = [bool(self.auth_token), bool(self.ct0)]
+            if any(supplied) and not all(supplied):
+                raise ValueError("auth_token 和 ct0 必须同时填写")
         return self
 
 
@@ -88,6 +93,34 @@ def reset_test_status(account: XCredentialAccount) -> None:
     account.last_test_error = ""
 
 
+def _invalid_credential_request() -> HTTPException:
+    return HTTPException(status_code=422, detail="账号凭据请求无效")
+
+
+async def _credential_request_json(request: Request) -> dict:
+    try:
+        payload = await request.json()
+    except (UnicodeDecodeError, ValueError):
+        raise _invalid_credential_request() from None
+    if not isinstance(payload, dict):
+        raise _invalid_credential_request()
+    return payload
+
+
+async def parse_x_credential_account_create(request: Request) -> XCredentialAccountCreate:
+    try:
+        return XCredentialAccountCreate.model_validate(await _credential_request_json(request))
+    except ValidationError:
+        raise _invalid_credential_request() from None
+
+
+async def parse_x_credential_account_patch(request: Request) -> XCredentialAccountPatch:
+    try:
+        return XCredentialAccountPatch.model_validate(await _credential_request_json(request))
+    except ValidationError:
+        raise _invalid_credential_request() from None
+
+
 async def _accounts(db: AsyncSession) -> list[XCredentialAccount]:
     return list((await db.execute(
         select(XCredentialAccount).order_by(XCredentialAccount.id)
@@ -120,7 +153,7 @@ async def list_x_accounts(db: AsyncSession = Depends(get_db)):
 
 @router.post("", response_model=XCredentialPoolOut)
 async def create_x_account(
-    body: XCredentialAccountCreate,
+    body: XCredentialAccountCreate = Depends(parse_x_credential_account_create),
     db: AsyncSession = Depends(get_db),
 ):
     store = CredentialFileStore()
@@ -152,7 +185,7 @@ async def create_x_account(
 @router.patch("/{account_id}", response_model=XCredentialPoolOut)
 async def patch_x_account(
     account_id: int,
-    body: XCredentialAccountPatch,
+    body: XCredentialAccountPatch = Depends(parse_x_credential_account_patch),
     db: AsyncSession = Depends(get_db),
 ):
     account = await db.get(XCredentialAccount, account_id)

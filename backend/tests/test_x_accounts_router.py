@@ -73,6 +73,20 @@ def test_create_account_writes_file_without_returning_secrets(client):
     assert managed_active_file().read_text() == '{"auth_token":"secret-auth","ct0":"secret-csrf"}'
 
 
+def test_invalid_create_credential_response_is_redacted(client):
+    response = client.post("/api/x/accounts", json={
+        "name": " ",
+        "auth_token": "create-auth-secret",
+        "ct0": "create-csrf-secret",
+        "enabled": True,
+    })
+
+    assert response.status_code == 422
+    assert response.json() == {"detail": "账号凭据请求无效"}
+    for raw_value in ("create-auth-secret", "create-csrf-secret", "input"):
+        assert raw_value not in response.text
+
+
 def test_credential_slot_is_rejected_on_input_and_never_returned(client):
     response = client.post("/api/x/accounts", json={
         "name": "采集账号 A",
@@ -111,6 +125,33 @@ def test_patch_requires_both_credentials_and_blank_pair_preserves_file(client):
     assert managed_active_file().read_bytes() == before
     renamed = next(item for item in kept.json()["accounts"] if item["id"] == account["id"])
     assert renamed["name"] == "重命名"
+
+
+def test_invalid_patch_credential_response_is_redacted(client):
+    account = create_account(client)
+    response = client.patch(
+        f"/api/x/accounts/{account['id']}",
+        json={
+            "name": "patch-request-name",
+            "auth_token": "patch-auth-secret",
+            "ct0": "",
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json() == {"detail": "账号凭据请求无效"}
+    for raw_value in ("patch-request-name", "patch-auth-secret"):
+        assert raw_value not in response.text
+
+
+@pytest.mark.parametrize("body", [{"auth_token": ""}, {"ct0": ""}])
+def test_patch_rejects_each_single_blank_credential_field(client, body):
+    account = create_account(client)
+
+    response = client.patch(f"/api/x/accounts/{account['id']}", json=body)
+
+    assert response.status_code == 422
+    assert response.json() == {"detail": "账号凭据请求无效"}
 
 
 def test_disable_and_delete_only_touch_owned_slot(client):
@@ -263,6 +304,28 @@ def test_reconcile_marks_malformed_managed_file_failed(client):
     row = next(item for item in result["accounts"] if item["id"] == account["id"])
     assert row["test_status"] == "failed"
     assert "格式无效" in row["last_test_error"]
+
+
+@pytest.mark.parametrize("malformed", ["[]", "null"])
+def test_reconcile_marks_non_object_json_failed_and_continues(client, malformed):
+    broken = create_account(client, "损坏账号")
+    healthy = create_account(client, "正常账号")
+    managed_active_file().write_text(malformed)
+
+    async def reconcile():
+        from database import SessionLocal
+        from routers.x_accounts import reconcile_x_credential_accounts
+        from x_credential_store import CredentialFileStore
+
+        async with SessionLocal() as db:
+            return await reconcile_x_credential_accounts(db, CredentialFileStore(session_dir()))
+
+    errors = asyncio.run(reconcile())
+    assert errors == [f"账号 {broken['id']} 的凭据文件不存在或状态冲突"]
+    rows = {row["id"]: row for row in client.get("/api/x/accounts").json()["accounts"]}
+    assert rows[broken["id"]]["test_status"] == "failed"
+    assert "格式无效" in rows[broken["id"]]["last_test_error"]
+    assert rows[healthy["id"]]["test_status"] == "untested"
 
 
 def test_reconcile_moves_owned_file_to_match_enabled_state(client):
