@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
@@ -10,8 +10,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
+from log_redaction import redact_secret_text
 from models import XCredentialAccount
 from x_credential_store import CredentialFileError, CredentialFileStore, CredentialPair
+from x_credential_probe import probe_x_credentials
 
 
 router = APIRouter(prefix="/x/accounts", tags=["x-accounts"])
@@ -234,6 +236,22 @@ async def delete_x_account(account_id: int, db: AsyncSession = Depends(get_db)):
         await db.rollback()
         _restore_after_commit_failure(store, snapshot)
         raise
+    return await _pool(db, store)
+
+
+@router.post("/{account_id}/test", response_model=XCredentialPoolOut)
+async def test_x_account(account_id: int, db: AsyncSession = Depends(get_db)):
+    account = await db.get(XCredentialAccount, account_id)
+    if account is None:
+        raise HTTPException(404, "account not found")
+
+    store = CredentialFileStore()
+    pair = store.read(account.credential_slot)
+    result = await probe_x_credentials(pair)
+    account.test_status = result.status
+    account.last_tested_at = datetime.now(timezone.utc)
+    account.last_test_error = redact_secret_text(result.error)[:500]
+    await db.commit()
     return await _pool(db, store)
 
 

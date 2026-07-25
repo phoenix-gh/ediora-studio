@@ -1,5 +1,8 @@
 import sys
 import asyncio
+import os
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -9,6 +12,7 @@ def client(monkeypatch, tmp_path):
     db_file = tmp_path / "test.db"
     monkeypatch.setenv("WMS_DATABASE_URL", f"sqlite+aiosqlite:///{db_file}")
     monkeypatch.setenv("WMS_DISABLE_SCHEDULER", "1")
+    monkeypatch.setenv("FEEDGRAB_DATA_DIR", str(tmp_path / "sessions"))
 
     for mod in list(sys.modules):
         if mod.startswith(("database", "models", "main", "routers", "config")):
@@ -166,12 +170,49 @@ def test_recollect_corrects_stale_is_reply_flag(client):
     assert posts["t1"]["is_reply"] is True
 
 
-def test_auth_status_endpoint(client):
+def test_auth_status_counts_managed_and_external_accounts(client, monkeypatch):
+    monkeypatch.delenv("X_AUTH_TOKEN", raising=False)
+    monkeypatch.delenv("X_CT0", raising=False)
+    created = client.post("/api/x/accounts", json={
+        "name": "采集账号 A",
+        "auth_token": "managed-auth-token-value-auth",
+        "ct0": "managed-csrf-token-value-csrf",
+        "enabled": True,
+    })
+    assert created.status_code == 200, created.text
+    data_dir = Path(os.environ["FEEDGRAB_DATA_DIR"])
+    (data_dir / "x.json").write_text(
+        '{"auth_token":"external-auth-token-value",'
+        '"ct0":"external-csrf-token-value"}'
+    )
+    from feedgrab.fetchers import twitter_cookies
+
+    twitter_cookies._rate_limited_accounts.clear()
+    twitter_cookies._current_account_key = ""
+    monkeypatch.setattr(twitter_cookies, "COOKIE_DIR", data_dir)
+    monkeypatch.setattr(twitter_cookies, "SESSION_DIR", data_dir)
+    monkeypatch.setattr(twitter_cookies, "_LEGACY_COOKIE_DIRS", [])
+    monkeypatch.setattr(twitter_cookies, "_LEGACY_SESSION_DIRS", [])
+    monkeypatch.setattr(twitter_cookies, "_load_from_chrome_cdp", lambda: {})
+
     r = client.get("/api/x/auth-status")
+
     assert r.status_code == 200
     body = r.json()
-    assert "ready" in body and "hint" in body
-    assert isinstance(body["ready"], bool)
+    assert set(body) == {
+        "ready",
+        "hint",
+        "managed_accounts",
+        "external_sessions",
+        "total_accounts",
+        "available_accounts",
+    }
+    assert body["ready"] is True
+    assert isinstance(body["hint"], str)
+    assert body["managed_accounts"] == 1
+    assert body["external_sessions"] == 1
+    assert body["total_accounts"] == 2
+    assert body["available_accounts"] == 2
 
 
 def test_search_returns_results(client):

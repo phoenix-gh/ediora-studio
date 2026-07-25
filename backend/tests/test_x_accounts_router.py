@@ -1,6 +1,7 @@
 import asyncio
 import os
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -347,3 +348,88 @@ def test_reconcile_moves_owned_file_to_match_enabled_state(client):
     assert asyncio.run(mark_disabled_then_reconcile()) == []
     assert not (session_dir() / "x_1.json").exists()
     assert (session_dir() / "x_1.disabled.json").exists()
+
+
+def test_account_probe_reads_owned_file_persists_utc_status_and_returns_safe_pool(
+    client,
+    monkeypatch,
+):
+    account = create_account(client)
+    session_dir().mkdir(parents=True, exist_ok=True)
+    (session_dir() / "x.json").write_text(
+        '{"auth_token":"external-auth-secret","ct0":"external-csrf-secret"}'
+    )
+    seen_pairs = []
+    from routers import x_accounts
+    from x_credential_probe import CredentialProbeResult
+
+    async def successful_probe(pair):
+        seen_pairs.append(pair)
+        return CredentialProbeResult("available", "")
+
+    monkeypatch.setattr(
+        x_accounts,
+        "probe_x_credentials",
+        successful_probe,
+        raising=False,
+    )
+
+    response = client.post(f"/api/x/accounts/{account['id']}/test")
+
+    assert response.status_code == 200, response.text
+    assert [(pair.auth_token, pair.ct0) for pair in seen_pairs] == [
+        ("secret-auth", "secret-csrf"),
+    ]
+    body = response.json()
+    assert set(body) == {
+        "accounts",
+        "external_sessions",
+        "managed_enabled",
+        "total_accounts",
+        "available_accounts",
+    }
+    tested = next(row for row in body["accounts"] if row["id"] == account["id"])
+    assert tested["test_status"] == "available"
+    assert tested["last_test_error"] == ""
+    tested_at = datetime.fromisoformat(tested["last_tested_at"])
+    assert tested_at.utcoffset() == timezone.utc.utcoffset(tested_at)
+    assert body["external_sessions"] == ["x.json"]
+    for secret in (
+        "secret-auth",
+        "secret-csrf",
+        "external-auth-secret",
+        "external-csrf-secret",
+    ):
+        assert secret not in response.text
+
+
+def test_account_probe_redacts_and_truncates_persisted_error(client, monkeypatch):
+    account = create_account(client)
+    from routers import x_accounts
+    from x_credential_probe import CredentialProbeResult
+
+    leaked = (
+        "auth_token=probe-auth-secret ct0: probe-csrf-secret "
+        "https://api.telegram.org/bot123456:telegram-secret/sendMessage "
+        + ("x" * 600)
+    )
+
+    async def failed_probe(_pair):
+        return CredentialProbeResult("failed", leaked)
+
+    monkeypatch.setattr(
+        x_accounts,
+        "probe_x_credentials",
+        failed_probe,
+        raising=False,
+    )
+
+    response = client.post(f"/api/x/accounts/{account['id']}/test")
+
+    assert response.status_code == 200, response.text
+    tested = response.json()["accounts"][0]
+    assert tested["test_status"] == "failed"
+    assert len(tested["last_test_error"]) == 500
+    assert "auth_token=***" in tested["last_test_error"]
+    for secret in ("probe-auth-secret", "probe-csrf-secret", "telegram-secret"):
+        assert secret not in response.text

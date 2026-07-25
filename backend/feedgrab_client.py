@@ -391,33 +391,67 @@ async def search_x(query: str, limit: int = 20) -> list[ParsedPost]:
     return out
 
 
-def auth_status() -> dict:
-    """Return {ready, hint}. ready=True iff feedgrab has X session credentials.
-
-    Probes env vars first (fastest), then known session file locations.
-    """
-    if os.getenv("X_AUTH_TOKEN") and os.getenv("X_CT0"):
-        return {"ready": True, "hint": "via env vars X_AUTH_TOKEN / X_CT0"}
-
-    # Use feedgrab's own dir resolver so we look exactly where feedgrab will
-    # look at call time (honors FEEDGRAB_DATA_DIR).
+def auth_status(managed_slots: set[int] | None = None) -> dict:
+    """Return legacy readiness plus safe aggregate X account counts."""
+    has_env_account = bool(os.getenv("X_AUTH_TOKEN") and os.getenv("X_CT0"))
     try:
         from feedgrab.config import get_cookie_dir
         data_dir = get_cookie_dir()
     except Exception:
-        data_dir = Path.cwd() / "sessions"
+        configured = os.getenv("FEEDGRAB_DATA_DIR", "").strip()
+        data_dir = Path(configured).expanduser() if configured else Path.cwd() / "sessions"
+    data_dir = Path(data_dir)
 
-    candidates = [data_dir / "x.json", data_dir / "twitter.json"]
-    for p in candidates:
-        try:
-            if p.exists():
-                return {"ready": True, "hint": f"via {p}"}
-        except OSError:
-            continue
+    recognized_files: set[str] = set()
+    try:
+        for path in data_dir.iterdir():
+            if not path.is_file():
+                continue
+            if (
+                path.name == "x.json"
+                or re.fullmatch(r"x_\d+\.json", path.name)
+                or re.fullmatch(r"twitter(?:_\d+)?\.json", path.name)
+            ):
+                recognized_files.add(path.name)
+    except OSError:
+        pass
+
+    owned_active = {
+        f"x_{slot}.json"
+        for slot in (managed_slots or set())
+        if f"x_{slot}.json" in recognized_files
+    }
+    managed_accounts = len(owned_active)
+    external_sessions = len(recognized_files - owned_active)
+    fallback_total = len(recognized_files) + int(has_env_account)
+
+    try:
+        from feedgrab.fetchers.twitter_cookies import (
+            count_available_accounts,
+            count_total_accounts,
+        )
+
+        total_accounts = count_total_accounts()
+        available_accounts = count_available_accounts()
+    except (ImportError, OSError, RuntimeError):
+        total_accounts = fallback_total
+        available_accounts = fallback_total
+
+    ready = has_env_account or total_accounts > 0
+    if has_env_account:
+        hint = "via env vars X_AUTH_TOKEN / X_CT0"
+    elif recognized_files:
+        hint = f"via {data_dir}"
+    else:
+        hint = f"未登录。请运行：feedgrab login twitter（cookies 应在 {data_dir}）"
 
     return {
-        "ready": False,
-        "hint": f"未登录。请运行：feedgrab login twitter（cookies 应在 {data_dir}）",
+        "ready": ready,
+        "hint": hint,
+        "managed_accounts": managed_accounts,
+        "external_sessions": external_sessions,
+        "total_accounts": total_accounts,
+        "available_accounts": available_accounts,
     }
 
 

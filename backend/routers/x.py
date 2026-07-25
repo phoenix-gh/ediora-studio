@@ -7,7 +7,7 @@ from sqlalchemy import select, func, desc, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
-from models import XSubscription, XPost
+from models import XCredentialAccount, XSubscription, XPost
 
 router = APIRouter(prefix="/x", tags=["x"])
 
@@ -408,5 +408,8 @@ async def search(q: str, limit: int = 20):
 
 
 @router.get("/auth-status")
-async def get_auth_status():
-    return auth_status()
+async def get_auth_status(db: AsyncSession = Depends(get_db)):
+    managed_slots = set((await db.execute(
+        select(XCredentialAccount.credential_slot)
+    )).scalars())
+    return auth_status(managed_slots)

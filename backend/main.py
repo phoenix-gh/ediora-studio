@@ -6,6 +6,10 @@ from dotenv import load_dotenv
 # see X_BOOKMARKS_ENABLED, WMS_DATABASE_URL, X_AUTH_TOKEN, etc.
 load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
+from log_redaction import install_log_redaction
+
+install_log_redaction()
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
