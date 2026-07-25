@@ -9,8 +9,11 @@ load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from database import init_db
-from routers import settings, github, x, x_responses, papers, upload, drafts, writing_plans, youtube, producthunt, wechat, v2ex, kr, juejin, studio, publish_accounts, reddit, topic_generator, assets, dashboard, daily_plan, published, jobs, chat
+from loguru import logger
+from database import SessionLocal, init_db
+from routers import settings, github, x, x_accounts, x_responses, papers, upload, drafts, writing_plans, youtube, producthunt, wechat, v2ex, kr, juejin, studio, publish_accounts, reddit, topic_generator, assets, dashboard, daily_plan, published, jobs, chat
+from x_credential_store import CredentialFileStore
+from routers.x_accounts import reconcile_x_credential_accounts
 import scheduler as job_registry
 
 scheduler = AsyncIOScheduler(
@@ -28,6 +31,13 @@ scheduler = AsyncIOScheduler(
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
+    try:
+        async with SessionLocal() as db:
+            errors = await reconcile_x_credential_accounts(db, CredentialFileStore())
+            for error in errors:
+                logger.warning("X 凭据对账：{}", error)
+    except Exception:
+        logger.error("X 凭据启动对账失败；账号接口仍可用于修复")
     from config import get_config
     cfg = await get_config()
     if os.getenv("WMS_DISABLE_SCHEDULER") == "1":
@@ -67,6 +77,7 @@ app.add_middleware(
 app.include_router(settings.router, prefix="/api")
 app.include_router(github.router, prefix="/api")
 app.include_router(x.router, prefix="/api")
+app.include_router(x_accounts.router, prefix="/api")
 app.include_router(x_responses.router, prefix="/api")
 app.include_router(papers.router, prefix="/api")
 app.include_router(upload.router, prefix="/api")
