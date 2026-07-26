@@ -78,18 +78,83 @@ describe('HeyGen V3 client', () => {
       'role:1:portrait',
     )
 
-    expect(fetchMock).toHaveBeenCalledWith(
-      'https://api.heygen.com/v3/assets',
-      expect.objectContaining({
-        method: 'POST',
-        headers: expect.objectContaining({
-          'Content-Type': 'image/png',
-          'Content-Disposition': 'attachment; filename="portrait.png"',
-          'Idempotency-Key': 'role:1:portrait',
-        }),
+    const [url, request] = fetchMock.mock.calls[0]
+    expect(url).toBe('https://api.heygen.com/v3/assets')
+    expect(request).toEqual(expect.objectContaining({
+      method: 'POST',
+      headers: expect.objectContaining({
+        'x-api-key': 'secret',
+        'Idempotency-Key': 'role:1:portrait',
       }),
-    )
+    }))
+    expect(request?.headers).not.toEqual(expect.objectContaining({
+      'Content-Type': expect.anything(),
+    }))
+    expect(request?.body).toBeInstanceOf(FormData)
+    const file = (request?.body as FormData).get('file')
+    expect(file).toBeInstanceOf(File)
+    expect(file).toMatchObject({
+      name: 'portrait.png',
+      type: 'image/png',
+      size: 3,
+    })
     expect(result.asset_id).toBe('asset-1')
+  })
+
+  it('clones a voice from an uploaded audio asset', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({
+      data: { voice_clone_id: 'voice-clone-1' },
+    }))
+
+    const result = await client.cloneVoice({
+      name: '林晓的声音',
+      assetId: 'audio-asset-1',
+    })
+
+    const request = fetchMock.mock.calls[0][1]
+    expect(JSON.parse(String(request?.body))).toEqual({
+      audio: { type: 'asset_id', asset_id: 'audio-asset-1' },
+      voice_name: '林晓的声音',
+      remove_background_noise: true,
+    })
+    expect(result).toEqual({ voiceId: 'voice-clone-1' })
+  })
+
+  it('returns the clone failure message while polling a voice', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({
+      data: {
+        voice_id: 'voice-clone-1',
+        status: 'failed',
+        failure_message: 'Audio is too short',
+      },
+    }))
+
+    await expect(client.getVoice('voice-clone-1')).resolves.toEqual({
+      voiceId: 'voice-clone-1',
+      status: 'failed',
+      error: 'Audio is too short',
+    })
+  })
+
+  it('returns structured avatar errors while polling a look', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({
+      data: {
+        id: 'look-1',
+        group_id: 'group-1',
+        status: 'failed',
+        error: {
+          code: 'training_failed',
+          message: 'The face could not be detected',
+        },
+      },
+    }))
+
+    await expect(client.getAvatar('group-1', 'look-1')).resolves.toEqual({
+      avatarId: 'look-1',
+      groupId: 'group-1',
+      status: 'failed',
+      error: 'The face could not be detected',
+    })
   })
 
   it('creates a 16:9 mp4 avatar video with an image background', async () => {
@@ -118,6 +183,24 @@ describe('HeyGen V3 client', () => {
       output_format: 'mp4',
     })
     expect(result).toMatchObject({ videoId: 'video-1', status: 'waiting' })
+  })
+
+  it('returns the provider failure message while polling a video', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({
+      data: {
+        id: 'video-1',
+        status: 'failed',
+        failure_message: 'Avatar rendering timed out',
+      },
+    }))
+
+    await expect(client.getVideo('video-1')).resolves.toEqual({
+      videoId: 'video-1',
+      status: 'failed',
+      videoUrl: undefined,
+      thumbnailUrl: undefined,
+      error: 'Avatar rendering timed out',
+    })
   })
 
   it.each([

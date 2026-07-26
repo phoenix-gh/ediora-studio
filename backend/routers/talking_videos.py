@@ -166,7 +166,7 @@ async def list_projects(db: AsyncSession = Depends(get_db)):
         )
     ).scalars().all()
     return [
-        await _project_payload(db, project, detail=False)
+        await _project_payload(db, project, detail=True)
         for project in projects
     ]
 

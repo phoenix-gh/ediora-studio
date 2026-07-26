@@ -200,3 +200,7 @@ def test_render_progress_requires_local_video_asset_and_detail_is_nested(api):
     assert detail["effective_environment"]["media_kind"] == "image"
     assert detail["renders"][0]["video_asset"]["url"] == "/api/uploads/render.mp4"
     assert detail["current_render_id"] == render["id"]
+
+    listing = client.get("/api/talking-videos").json()
+    assert listing[0]["id"] == project["id"]
+    assert listing[0]["renders"][0]["id"] == render["id"]

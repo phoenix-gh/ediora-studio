@@ -67,6 +67,13 @@ function firstRecord(...values: unknown[]) {
 }
 
 
+function errorMessage(value: unknown) {
+  if (typeof value === 'string') return value
+  const error = asRecord(value)
+  return text(error.message, text(error.code))
+}
+
+
 function fallbackCode(status: number) {
   if (status === 401) return 'authentication_failed'
   if (status === 403) return 'plan_upgrade_required'
@@ -129,6 +136,7 @@ export function createHeyGenClient(config: HeyGenConfig) {
 
   function parseAvatar(data: unknown): HeyGenAvatar {
     const root = asRecord(data)
+    const group = asRecord(root.avatar_group)
     const avatar = firstRecord(
       root.avatar_item,
       root.avatar,
@@ -136,10 +144,13 @@ export function createHeyGenClient(config: HeyGenConfig) {
       root,
     )
     return {
-      groupId: text(avatar.group_id, text(root.group_id)),
+      groupId: text(
+        avatar.group_id,
+        text(root.group_id, text(group.id)),
+      ),
       avatarId: text(avatar.id, text(avatar.avatar_id)),
       status: text(avatar.status, text(root.status, 'processing')),
-      error: text(avatar.error) || undefined,
+      error: errorMessage(avatar.error) || undefined,
     }
   }
 
@@ -149,7 +160,7 @@ export function createHeyGenClient(config: HeyGenConfig) {
     return {
       voiceId: text(voice.id, text(voice.voice_id)),
       status: text(voice.status, 'processing'),
-      error: text(voice.error) || undefined,
+      error: text(voice.failure_message, text(voice.error)) || undefined,
     }
   }
 
@@ -161,7 +172,10 @@ export function createHeyGenClient(config: HeyGenConfig) {
       status: text(video.status, 'waiting'),
       videoUrl: text(video.video_url, text(video.url)) || undefined,
       thumbnailUrl: text(video.thumbnail_url) || undefined,
-      error: text(video.error) || undefined,
+      error: text(
+        video.failure_message,
+        errorMessage(video.error),
+      ) || undefined,
     }
   }
 
@@ -175,13 +189,11 @@ export function createHeyGenClient(config: HeyGenConfig) {
       const safeFilename = filename.replace(/["\r\n]/g, '_')
       const upload = new Uint8Array(bytes.byteLength)
       upload.set(bytes)
+      const body = new FormData()
+      body.append('file', new Blob([upload], { type: mediaType }), safeFilename)
       return request<HeyGenAsset>('/v3/assets', {
         method: 'POST',
-        headers: {
-          'Content-Type': mediaType,
-          'Content-Disposition': `attachment; filename="${safeFilename}"`,
-        },
-        body: new Blob([upload], { type: mediaType }),
+        body,
       }, idempotencyKey)
     },
 
@@ -221,12 +233,17 @@ export function createHeyGenClient(config: HeyGenConfig) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          name: input.name,
-          file: { type: 'asset_id', asset_id: input.assetId },
+          audio: { type: 'asset_id', asset_id: input.assetId },
+          voice_name: input.name,
+          remove_background_noise: true,
         }),
       }))
-      const voice = firstRecord(data.voice, data)
-      return { voiceId: text(voice.id, text(voice.voice_id)) }
+      return {
+        voiceId: text(
+          data.voice_clone_id,
+          text(data.voice_id, text(data.id)),
+        ),
+      }
     },
 
     async getVoice(voiceId: string): Promise<HeyGenVoice> {
