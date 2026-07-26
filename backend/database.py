@@ -72,6 +72,177 @@ async def migrate_removed_publication_schema(conn) -> None:
     await conn.execute(text("DROP TABLE IF EXISTS publications"))
 
 
+async def _add_columns(conn, table_name: str, definitions: dict[str, str]) -> None:
+    """Add missing columns on SQLite and PostgreSQL without rebuilding tables."""
+    from sqlalchemy import inspect, text
+
+    tables = set(await conn.run_sync(
+        lambda sync_connection: inspect(sync_connection).get_table_names()
+    ))
+    if table_name not in tables:
+        return
+    columns = {
+        column["name"]
+        for column in await conn.run_sync(
+            lambda sync_connection: inspect(sync_connection).get_columns(table_name)
+        )
+    }
+    for name, definition in definitions.items():
+        if name not in columns:
+            await conn.execute(text(
+                f'ALTER TABLE "{table_name}" ADD COLUMN "{name}" {definition}'
+            ))
+
+
+async def migrate_content_response_schema(conn) -> None:
+    """Add YouTube response fields and copy legacy X decisions exactly once."""
+    from sqlalchemy import inspect, select
+    from models import (
+        ContentAnalysisRun,
+        ContentResponseItem,
+        ContentResponseNotification,
+        ContentResponseOutput,
+        XPost,
+        XResponseDecision,
+    )
+
+    json_default = "'[]'" if conn.dialect.name == "sqlite" else "'[]'::json"
+    await _add_columns(conn, "youtube_channels", {
+        "auto_analyze_new_videos": "BOOLEAN NOT NULL DEFAULT FALSE",
+        "analysis_enabled_at": "TIMESTAMP",
+    })
+    await _add_columns(conn, "youtube_videos", {
+        "transcript_status": "VARCHAR NOT NULL DEFAULT 'not_requested'",
+        "transcript_source": "VARCHAR NOT NULL DEFAULT ''",
+        "transcript_language": "VARCHAR NOT NULL DEFAULT ''",
+        "transcript_text": "TEXT NOT NULL DEFAULT ''",
+        "transcript_segments": f"JSON NOT NULL DEFAULT {json_default}",
+        "transcript_content_hash": "VARCHAR NOT NULL DEFAULT ''",
+        "transcript_fetched_at": "TIMESTAMP",
+        "transcript_error_code": "VARCHAR NOT NULL DEFAULT ''",
+        "transcript_error": "TEXT NOT NULL DEFAULT ''",
+    })
+
+    tables = set(await conn.run_sync(
+        lambda sync_connection: inspect(sync_connection).get_table_names()
+    ))
+    if "x_response_decisions" not in tables:
+        return
+
+    decisions = (await conn.execute(select(XResponseDecision.__table__))).mappings().all()
+    for decision in decisions:
+        existing_item = (await conn.execute(
+            select(ContentResponseItem.__table__.c.id).where(
+                ContentResponseItem.__table__.c.source_type == "x_post",
+                ContentResponseItem.__table__.c.source_id == decision["tweet_id"],
+            )
+        )).scalar_one_or_none()
+        post = (await conn.execute(
+            select(XPost.__table__).where(XPost.__table__.c.tweet_id == decision["tweet_id"])
+        )).mappings().first()
+        if existing_item is None:
+            result = await conn.execute(ContentResponseItem.__table__.insert().values(
+                source_type="x_post",
+                source_id=decision["tweet_id"],
+                source_url=(post or {}).get("url", ""),
+                source_title=((post or {}).get("content", "") or "")[:500],
+                source_author=(post or {}).get("username", ""),
+                source_published_at=(post or {}).get("published_at"),
+                workflow_status="ready",
+                decision_status={
+                    "used": "adopted",
+                    "ignored": "rejected",
+                }.get(decision["workflow_status"], "pending"),
+                created_at=decision["created_at"],
+                updated_at=decision["updated_at"],
+            ))
+            existing_item = result.inserted_primary_key[0]
+
+        analysis_id = (await conn.execute(
+            select(ContentAnalysisRun.__table__.c.id).where(
+                ContentAnalysisRun.__table__.c.response_item_id == existing_item,
+                ContentAnalysisRun.__table__.c.version == 1,
+            )
+        )).scalar_one_or_none()
+        if analysis_id is None:
+            result = await conn.execute(ContentAnalysisRun.__table__.insert().values(
+                response_item_id=existing_item,
+                version=1,
+                status="succeeded",
+                content_value_score=decision["score"],
+                value_dimensions={"legacy_score": decision["score"]},
+                summary_cn=decision["summary_cn"],
+                core_thesis=decision["summary_cn"],
+                evidence=decision["claims"] or [],
+                recommended_action=decision["action"],
+                recommendation_reason=decision["reason"],
+                model_provider=decision["model_provider"],
+                model_name=decision["model_name"],
+                prompt_version=decision["prompt_version"],
+                policy_version=decision["decision_policy_version"],
+                source_snapshot={
+                    "verification_status": decision["verification_status"],
+                    "verified_urls": decision["verified_urls"] or [],
+                },
+                created_at=decision["created_at"],
+                completed_at=decision["updated_at"],
+            ))
+            analysis_id = result.inserted_primary_key[0]
+
+        await conn.execute(
+            ContentResponseItem.__table__.update()
+            .where(ContentResponseItem.__table__.c.id == existing_item)
+            .values(current_analysis_run_id=analysis_id)
+        )
+        for output_type, content in (
+            ("x_reply", decision["comment_draft"]),
+            ("x_quote", decision["quote_draft"]),
+        ):
+            if not content:
+                continue
+            exists = (await conn.execute(
+                select(ContentResponseOutput.__table__.c.id).where(
+                    ContentResponseOutput.__table__.c.analysis_run_id == analysis_id,
+                    ContentResponseOutput.__table__.c.output_type == output_type,
+                )
+            )).scalar_one_or_none()
+            if exists is None:
+                await conn.execute(ContentResponseOutput.__table__.insert().values(
+                    response_item_id=existing_item,
+                    analysis_run_id=analysis_id,
+                    output_type=output_type,
+                    status="draft_ready",
+                    content=content,
+                    source_attribution={"url": (post or {}).get("url", "")},
+                    created_at=decision["created_at"],
+                    updated_at=decision["updated_at"],
+                ))
+
+        notification = (await conn.execute(
+            select(ContentResponseNotification.__table__.c.id).where(
+                ContentResponseNotification.__table__.c.analysis_run_id == analysis_id,
+                ContentResponseNotification.__table__.c.channel == "telegram",
+                ContentResponseNotification.__table__.c.notification_tier
+                == decision["notification_tier"],
+            )
+        )).scalar_one_or_none()
+        if notification is None:
+            await conn.execute(ContentResponseNotification.__table__.insert().values(
+                response_item_id=existing_item,
+                analysis_run_id=analysis_id,
+                channel="telegram",
+                notification_tier=decision["notification_tier"],
+                status=decision["telegram_status"],
+                message_ids=decision["telegram_message_ids"] or [],
+                attempts=decision["telegram_attempts"],
+                claim_token=decision["telegram_claim_token"],
+                last_error=decision["telegram_last_error"],
+                notified_at=decision["notified_at"],
+                created_at=decision["created_at"],
+                updated_at=decision["updated_at"],
+            ))
+
+
 async def init_db():
     from sqlalchemy import text
     async with engine.begin() as conn:
@@ -100,6 +271,7 @@ async def init_db():
         await migrate_removed_hot_topic_schema(conn)
         await migrate_removed_publication_schema(conn)
         await conn.run_sync(Base.metadata.create_all)
+        await migrate_content_response_schema(conn)
         await conn.execute(text("ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS media_kind VARCHAR NOT NULL DEFAULT ''"))
         await conn.execute(text("ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS directory VARCHAR NOT NULL DEFAULT ''"))
         await conn.execute(text("ALTER TABLE creative_asset_directories ADD COLUMN IF NOT EXISTS asset_type VARCHAR NOT NULL DEFAULT 'article'"))

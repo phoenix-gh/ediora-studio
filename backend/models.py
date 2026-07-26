@@ -415,6 +415,157 @@ class ContentJobEvent(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
 
 
+class ContentResponseItem(Base):
+    """Stable, source-neutral identity for one item in the response inbox."""
+    __tablename__ = "content_response_items"
+    __table_args__ = (
+        UniqueConstraint("source_type", "source_id", name="uq_content_response_source"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    source_type: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    source_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    source_url: Mapped[str] = mapped_column(String, default="")
+    source_title: Mapped[str] = mapped_column(String, default="")
+    source_author: Mapped[str] = mapped_column(String, default="")
+    source_published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    workflow_status: Mapped[str] = mapped_column(String, default="queued", index=True)
+    decision_status: Mapped[str] = mapped_column(String, default="pending", index=True)
+    current_analysis_run_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    selected_publish_account_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    selected_output_types: Mapped[list] = mapped_column(JSON, default=list)
+    feedback_reason: Mapped[str] = mapped_column(Text, default="")
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+
+
+class ContentAnalysisRun(Base):
+    """Immutable versioned AI analysis of a response item."""
+    __tablename__ = "content_analysis_runs"
+    __table_args__ = (
+        UniqueConstraint("response_item_id", "version", name="uq_content_analysis_version"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    response_item_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String, default="queued", index=True)
+    job_id: Mapped[int | None] = mapped_column(Integer, nullable=True, unique=True, index=True)
+    source_content_hash: Mapped[str] = mapped_column(String, default="")
+    source_snapshot: Mapped[dict] = mapped_column(JSON, default=dict)
+    content_value_score: Mapped[int] = mapped_column(Integer, default=0, index=True)
+    value_dimensions: Mapped[dict] = mapped_column(JSON, default=dict)
+    summary_cn: Mapped[str] = mapped_column(Text, default="")
+    core_thesis: Mapped[str] = mapped_column(Text, default="")
+    key_points: Mapped[list] = mapped_column(JSON, default=list)
+    evidence: Mapped[list] = mapped_column(JSON, default=list)
+    value_points: Mapped[list] = mapped_column(JSON, default=list)
+    risks: Mapped[list] = mapped_column(JSON, default=list)
+    verification_items: Mapped[list] = mapped_column(JSON, default=list)
+    personal_angles: Mapped[list] = mapped_column(JSON, default=list)
+    article_outlines: Mapped[list] = mapped_column(JSON, default=list)
+    comment_angles: Mapped[list] = mapped_column(JSON, default=list)
+    recommended_output_types: Mapped[list] = mapped_column(JSON, default=list)
+    recommended_action: Mapped[str] = mapped_column(String, default="")
+    recommendation_reason: Mapped[str] = mapped_column(Text, default="")
+    recommended_publish_account_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    model_provider: Mapped[str] = mapped_column(String, default="")
+    model_name: Mapped[str] = mapped_column(String, default="")
+    prompt_version: Mapped[str] = mapped_column(String, default="")
+    policy_version: Mapped[str] = mapped_column(String, default="")
+    error_code: Mapped[str] = mapped_column(String, default="")
+    error: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, index=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class ContentAccountScore(Base):
+    __tablename__ = "content_account_scores"
+    __table_args__ = (
+        UniqueConstraint("analysis_run_id", "publish_account_id", name="uq_content_account_score"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    analysis_run_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    publish_account_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    account_snapshot: Mapped[dict] = mapped_column(JSON, default=dict)
+    score: Mapped[int] = mapped_column(Integer, default=0, index=True)
+    rank: Mapped[int] = mapped_column(Integer, default=0)
+    fit_reasons: Mapped[list] = mapped_column(JSON, default=list)
+    audience_value: Mapped[str] = mapped_column(Text, default="")
+    recommended_tone: Mapped[str] = mapped_column(String, default="")
+    recommended_output_types: Mapped[list] = mapped_column(JSON, default=list)
+    taboo_risks: Mapped[list] = mapped_column(JSON, default=list)
+    has_hard_conflict: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+
+class ContentResponseOutput(Base):
+    __tablename__ = "content_response_outputs"
+    __table_args__ = (
+        UniqueConstraint(
+            "analysis_run_id",
+            "publish_account_id",
+            "output_type",
+            name="uq_content_response_output",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    response_item_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    analysis_run_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    publish_account_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    output_type: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String, default="queued", index=True)
+    job_id: Mapped[int | None] = mapped_column(Integer, nullable=True, unique=True, index=True)
+    article_draft_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    content: Mapped[str] = mapped_column(Text, default="")
+    source_attribution: Mapped[dict] = mapped_column(JSON, default=dict)
+    error_code: Mapped[str] = mapped_column(String, default="")
+    error: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+
+
+class ContentResponseNotification(Base):
+    __tablename__ = "content_response_notifications"
+    __table_args__ = (
+        UniqueConstraint(
+            "analysis_run_id",
+            "channel",
+            "notification_tier",
+            name="uq_content_response_notification",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    response_item_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    analysis_run_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    channel: Mapped[str] = mapped_column(String, default="telegram", index=True)
+    notification_tier: Mapped[str] = mapped_column(String, default="silent", index=True)
+    status: Mapped[str] = mapped_column(String, default="not_required", index=True)
+    message_ids: Mapped[list] = mapped_column(JSON, default=list)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    claim_token: Mapped[str | None] = mapped_column(String, nullable=True, unique=True, index=True)
+    last_error: Mapped[str] = mapped_column(Text, default="")
+    notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+
+
+class ContentResponseEvent(Base):
+    __tablename__ = "content_response_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    response_item_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    analysis_run_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    event_type: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    actor: Mapped[str] = mapped_column(String, default="system")
+    payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, index=True)
+
+
 class DraftImage(Base):
     """Images attached to a draft group, keyed by the root (article) draft ID."""
     __tablename__ = "draft_images"
@@ -612,6 +763,8 @@ class YoutubeChannel(Base):
     note: Mapped[str] = mapped_column(Text, default="")
     group: Mapped[str] = mapped_column(String, default="未分组")
     muted: Mapped[bool] = mapped_column(Boolean, default=False)
+    auto_analyze_new_videos: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    analysis_enabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_collected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
 
@@ -630,6 +783,15 @@ class YoutubeVideo(Base):
     published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     collected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    transcript_status: Mapped[str] = mapped_column(String, default="not_requested", index=True)
+    transcript_source: Mapped[str] = mapped_column(String, default="")
+    transcript_language: Mapped[str] = mapped_column(String, default="")
+    transcript_text: Mapped[str] = mapped_column(Text, default="")
+    transcript_segments: Mapped[list] = mapped_column(JSON, default=list)
+    transcript_content_hash: Mapped[str] = mapped_column(String, default="", index=True)
+    transcript_fetched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    transcript_error_code: Mapped[str] = mapped_column(String, default="")
+    transcript_error: Mapped[str] = mapped_column(Text, default="")
 
 
 class RedditSubscription(Base):
