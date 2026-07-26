@@ -4,6 +4,8 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { z } from 'zod'
 
+import { workerHeaders } from './job-client'
+
 const apiBase = () => (process.env.WMS_API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000/api').replace(/\/$/, '')
 
 type ModelConfig = { apiKey: string; modelName: string; baseURL?: string }
@@ -165,7 +167,10 @@ async function recordJobEvent(jobId: number, kind: string, payload: Record<strin
 
 async function configuredTextModel(): Promise<ModelConfig> {
   try {
-    const response = await fetch(`${apiBase()}/settings/ai-runtime`, { cache: 'no-store' })
+    const response = await fetch(`${apiBase()}/settings/ai-runtime`, {
+      cache: 'no-store',
+      headers: workerHeaders(),
+    })
     if (response.ok) {
       const settings = await response.json() as { api_key: string; model: string; base_url: string }
       if (settings.api_key) return { apiKey: settings.api_key, modelName: settings.model || 'gpt-4o-mini', baseURL: settings.base_url || undefined }
@@ -179,7 +184,10 @@ async function configuredTextModel(): Promise<ModelConfig> {
 }
 
 async function configuredImageModel(): Promise<ImageModelConfig> {
-  const response = await fetch(`${apiBase()}/settings/ai-runtime`, { cache: 'no-store' })
+  const response = await fetch(`${apiBase()}/settings/ai-runtime`, {
+    cache: 'no-store',
+    headers: workerHeaders(),
+  })
   if (response.ok) {
     const settings = await response.json() as { image?: { api_key: string; model: string; base_url: string } }
     if (settings.image?.api_key) {

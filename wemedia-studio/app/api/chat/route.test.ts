@@ -10,6 +10,7 @@ describe('global chat model history', () => {
 
     expect(source).toContain('openGlobalChatTools')
     expect(source).toContain('baoyuRuntimeInstructions')
+    expect(source).toContain('workerHeaders()')
     expect(source).not.toContain('makeChatTools')
   })
 

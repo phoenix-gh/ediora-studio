@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { FileVideo, Plus } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -39,6 +39,15 @@ import {
 import { cn } from '@/lib/utils'
 
 
+const renderStatusCopy = {
+  queued: '等待中',
+  running: '生成中',
+  succeeded: '已完成',
+  failed: '失败',
+  cancelled: '已取消',
+} as const
+
+
 export function TalkingProjectList({
   projects,
   roles,
@@ -57,6 +66,11 @@ export function TalkingProjectList({
   const [title, setTitle] = useState('')
   const [roleId, setRoleId] = useState(String(readyRoles[0]?.id ?? ''))
   const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    if (readyRoles.some(role => String(role.id) === roleId)) return
+    setRoleId(String(readyRoles[0]?.id ?? ''))
+  }, [readyRoles, roleId])
 
   async function create() {
     if (!roleId) return
@@ -97,7 +111,9 @@ export function TalkingProjectList({
             </EmptyHeader>
             <EmptyContent />
           </Empty>
-        ) : projects.map(project => (
+        ) : projects.map(project => {
+          const status = project.renders?.[0]?.status
+          return (
           <button
             key={project.id}
             type="button"
@@ -110,12 +126,13 @@ export function TalkingProjectList({
             <span className="block truncate font-medium">{project.title}</span>
             <span className="mt-1 flex items-center justify-between gap-2 text-xs text-muted-foreground">
               {project.role.name}
-              <Badge variant="secondary">
-                {project.renders?.[0]?.status ?? '未生成'}
+              <Badge variant={status === 'failed' ? 'destructive' : 'secondary'}>
+                {status ? renderStatusCopy[status] : '未生成'}
               </Badge>
             </span>
           </button>
-        ))}
+          )
+        })}
       </div>
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent>
@@ -138,7 +155,11 @@ export function TalkingProjectList({
               <FieldLabel>数字人角色</FieldLabel>
               <Select value={roleId} onValueChange={value => value && setRoleId(value)}>
                 <SelectTrigger>
-                  <SelectValue placeholder="选择已就绪角色" />
+                  <SelectValue placeholder="选择已就绪角色">
+                    {value => readyRoles.find(
+                      role => String(role.id) === value,
+                    )?.name ?? '选择已就绪角色'}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   <SelectGroup>

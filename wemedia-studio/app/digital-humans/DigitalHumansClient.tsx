@@ -35,6 +35,7 @@ export function DigitalHumansClient({
     if (Number.isSafeInteger(value) && value > 0) setSelectedProjectId(value)
   }, [])
   const [roleEditorOpen, setRoleEditorOpen] = useState(false)
+  const [editingRole, setEditingRole] = useState<DigitalHuman | null>(null)
   const selectedProject = projects.find(project => project.id === selectedProjectId)
     ?? projects[0]
 
@@ -65,7 +66,7 @@ export function DigitalHumansClient({
       title: `${role.name} 的口播作品`,
       digital_human_id: role.id,
     })
-    updateProject(project)
+    activateProject(project)
   }
 
   function selectProject(project: TalkingVideoProject) {
@@ -73,12 +74,16 @@ export function DigitalHumansClient({
     window.history.pushState(null, '', `/digital-humans?project=${project.id}`)
   }
 
-  function updateProject(project: TalkingVideoProject) {
+  function mergeProject(project: TalkingVideoProject) {
     setProjects(current => (
       current.some(item => item.id === project.id)
         ? current.map(item => item.id === project.id ? project : item)
         : [project, ...current]
     ))
+  }
+
+  function activateProject(project: TalkingVideoProject) {
+    mergeProject(project)
     setSelectedProjectId(project.id)
     window.history.replaceState(null, '', `/digital-humans?project=${project.id}`)
   }
@@ -92,7 +97,10 @@ export function DigitalHumansClient({
             管理可复用角色，并从脚本生成 HeyGen 口播视频。
           </p>
         </div>
-        <Button onClick={() => setRoleEditorOpen(true)}>
+        <Button onClick={() => {
+          setEditingRole(null)
+          setRoleEditorOpen(true)
+        }}>
           <Plus data-icon="inline-start" />
           创建数字人
         </Button>
@@ -109,13 +117,14 @@ export function DigitalHumansClient({
               roles={roles}
               selectedId={selectedProject?.id ?? null}
               onSelect={selectProject}
-              onCreated={updateProject}
+              onCreated={activateProject}
             />
             {selectedProject ? (
               <TalkingVideoEditor
+                key={selectedProject.id}
                 project={selectedProject}
                 roles={roles}
-                onProjectChange={updateProject}
+                onProjectChange={mergeProject}
               />
             ) : (
               <div className="rounded-xl border p-8 text-center text-sm text-muted-foreground">
@@ -127,7 +136,14 @@ export function DigitalHumansClient({
         <TabsContent value="roles">
           <RoleLibrary
             roles={roles}
-            onCreate={() => setRoleEditorOpen(true)}
+            onCreate={() => {
+              setEditingRole(null)
+              setRoleEditorOpen(true)
+            }}
+            onEdit={role => {
+              setEditingRole(role)
+              setRoleEditorOpen(true)
+            }}
             onChanged={updateRole}
             onStartProject={role => void startProject(role)}
           />
@@ -135,6 +151,7 @@ export function DigitalHumansClient({
       </Tabs>
       <RoleEditorDialog
         open={roleEditorOpen}
+        role={editingRole}
         onClose={() => setRoleEditorOpen(false)}
         onCreated={updateRole}
       />

@@ -9,6 +9,7 @@ import { CHAT_MAX_STEPS, chatToolLoopStep, needsFinalAnswerFallback } from '@/li
 import { baoyuRuntimeInstructions } from '@/lib/ai/content-job'
 import { discoverSkills } from '@/lib/ai/discover-skills'
 import { openGlobalChatTools } from '@/lib/ai/global-chat-tools'
+import { workerHeaders } from '@/lib/ai/job-client'
 
 const requestSchema = z.object({
   sessionId: z.number().int().positive(),
@@ -29,7 +30,10 @@ type ModelConfig = { apiKey: string; modelName: string; baseURL?: string }
 
 async function configuredTextModel(): Promise<ModelConfig> {
   try {
-    const response = await fetch(`${apiBase()}/settings/ai-runtime`, { cache: 'no-store' })
+    const response = await fetch(`${apiBase()}/settings/ai-runtime`, {
+      cache: 'no-store',
+      headers: workerHeaders(),
+    })
     if (response.ok) {
       const settings = await response.json() as { api_key: string; model: string; base_url: string }
       if (settings.api_key) {

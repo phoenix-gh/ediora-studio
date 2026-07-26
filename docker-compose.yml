@@ -31,6 +31,8 @@ services:
       WMS_DISABLE_SCHEDULER: "0"
       FEEDGRAB_DATA_DIR: /app/sessions
       HEYGEN_API_KEY: ${HEYGEN_API_KEY:-}
+      WMS_WORKER_TOKEN: ${WMS_WORKER_TOKEN:-}
+      WMS_CORS_ORIGINS: ${WMS_CORS_ORIGINS:-http://localhost:3000}
     volumes:
       - uploads-data:/app/uploads
       - sessions-data:/app/sessions
@@ -55,6 +57,7 @@ services:
       WMS_IMAGE_MODEL: ${WMS_IMAGE_MODEL:-gpt-image-1}
       WMS_IMAGE_BASE_URL: ${WMS_IMAGE_BASE_URL:-}
       HEYGEN_API_KEY: ${HEYGEN_API_KEY:-}
+      WMS_WORKER_TOKEN: ${WMS_WORKER_TOKEN:-}
     depends_on:
       postgres:
         condition: service_healthy
@@ -72,6 +75,7 @@ services:
       WMS_IMAGE_API_KEY: ${WMS_IMAGE_API_KEY:-}
       WMS_IMAGE_MODEL: ${WMS_IMAGE_MODEL:-gpt-image-1}
       WMS_IMAGE_BASE_URL: ${WMS_IMAGE_BASE_URL:-}
+      WMS_WORKER_TOKEN: ${WMS_WORKER_TOKEN:-}
     ports:
       - "3000:3000"
     depends_on:

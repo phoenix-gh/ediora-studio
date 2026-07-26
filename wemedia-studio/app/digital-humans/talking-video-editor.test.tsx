@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 const mocks = vi.hoisted(() => ({
   updateTalkingVideo: vi.fn(),
   createTalkingVideoRender: vi.fn(),
+  createTalkingVideo: vi.fn(),
   getTalkingVideo: vi.fn(),
   selectTalkingVideoRender: vi.fn(),
   deleteTalkingVideoRender: vi.fn(),
@@ -15,6 +16,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@/lib/api/digital-humans', () => ({
   updateTalkingVideo: mocks.updateTalkingVideo,
   createTalkingVideoRender: mocks.createTalkingVideoRender,
+  createTalkingVideo: mocks.createTalkingVideo,
   getTalkingVideo: mocks.getTalkingVideo,
   selectTalkingVideoRender: mocks.selectTalkingVideoRender,
   deleteTalkingVideoRender: mocks.deleteTalkingVideoRender,
@@ -22,6 +24,7 @@ vi.mock('@/lib/api/digital-humans', () => ({
 }))
 
 import { RenderVersionsPanel } from './RenderVersionsPanel'
+import { TalkingProjectList } from './TalkingProjectList'
 import { TalkingVideoEditor } from './TalkingVideoEditor'
 import type {
   DigitalHuman,
@@ -130,6 +133,7 @@ describe('talking video editor', () => {
     expect(screen.getByTestId('talking-config-column')).toBeTruthy()
     expect(screen.getByTestId('talking-script-column')).toBeTruthy()
     expect(screen.getByTestId('talking-render-column')).toBeTruthy()
+    expect(screen.getByRole('combobox').textContent).toContain('林晓')
   })
 
   it('debounces script saves and never renders before explicit confirmation', async () => {
@@ -158,6 +162,29 @@ describe('talking video editor', () => {
     expect(mocks.createTalkingVideoRender).not.toHaveBeenCalled()
   })
 
+  it('flushes a pending script save when switching projects', async () => {
+    mocks.updateTalkingVideo.mockResolvedValue(project)
+    const user = userEvent.setup()
+    const view = render(
+      <TalkingVideoEditor
+        project={project}
+        roles={[readyRole]}
+        saveProject={mocks.updateTalkingVideo}
+      />,
+    )
+
+    await user.clear(screen.getByLabelText('口播脚本'))
+    await user.type(screen.getByLabelText('口播脚本'), '切换前保存')
+    view.unmount()
+
+    await vi.waitFor(() => {
+      expect(mocks.updateTalkingVideo).toHaveBeenCalledWith(
+        project.id,
+        expect.objectContaining({ script: '切换前保存' }),
+      )
+    })
+  })
+
   it('keeps earlier successful versions after generating another render', () => {
     render(
       <RenderVersionsPanel
@@ -169,5 +196,23 @@ describe('talking video editor', () => {
 
     expect(screen.getByText('版本 2')).toBeTruthy()
     expect(screen.getByText('版本 1')).toBeTruthy()
+  })
+
+  it('shows project and role labels instead of raw ids or statuses', async () => {
+    const user = userEvent.setup()
+    render(
+      <TalkingProjectList
+        projects={[{ ...project, renders: [renderV1] }]}
+        roles={[readyRole]}
+        selectedId={project.id}
+        onSelect={vi.fn()}
+        onCreated={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByText('已完成')).toBeTruthy()
+    expect(screen.queryByText('succeeded')).toBeNull()
+    await user.click(screen.getByRole('button', { name: '新建口播作品' }))
+    expect(screen.getByRole('combobox').textContent).toContain('林晓')
   })
 })

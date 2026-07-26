@@ -20,11 +20,14 @@ NEXT_PUBLIC_API_URL=http://localhost:8000/api
 数字人口播由 Python API 保存角色、作品、版本与创作资产，Node worker 调用 HeyGen。宿主机开发时三项服务建议分别启动：
 
 ```bash
+# 先生成一个长随机 token，并让 API 与 worker 共用
+export WMS_WORKER_TOKEN="$(openssl rand -hex 32)"
+
 # API（项目 backend 目录）
-WMS_REDIS_URL=redis://127.0.0.1:6379/0 conda run -n wems uvicorn main:app --host 0.0.0.0 --port 8000
+WMS_WORKER_TOKEN="$WMS_WORKER_TOKEN" WMS_REDIS_URL=redis://127.0.0.1:6379/0 conda run -n wems uvicorn main:app --host 0.0.0.0 --port 8000
 
 # worker（本目录）
-WMS_REDIS_URL=redis://127.0.0.1:6379/0 WMS_API_URL=http://127.0.0.1:8000/api pnpm jobs:worker
+WMS_WORKER_TOKEN="$WMS_WORKER_TOKEN" WMS_REDIS_URL=redis://127.0.0.1:6379/0 WMS_API_URL=http://127.0.0.1:8000/api pnpm jobs:worker
 
 # Web（本目录）
 pnpm dev

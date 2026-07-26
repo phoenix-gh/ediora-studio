@@ -26,6 +26,7 @@ import {
 } from '@/lib/api/assets'
 import {
   createDigitalHuman,
+  updateDigitalHuman,
   type DigitalHuman,
 } from '@/lib/api/digital-humans'
 
@@ -136,10 +137,12 @@ function MediaPickerDialog({
 
 export function RoleEditorDialog({
   open,
+  role = null,
   onClose,
   onCreated,
 }: {
   open: boolean
+  role?: DigitalHuman | null
   onClose: () => void
   onCreated: (role: DigitalHuman) => void
 }) {
@@ -151,19 +154,34 @@ export function RoleEditorDialog({
   const [environmentOpen, setEnvironmentOpen] = useState(false)
   const [saving, setSaving] = useState(false)
 
+  useEffect(() => {
+    if (!open) return
+    setName(role?.name ?? '')
+    setPortrait(role?.portrait ?? null)
+    setVoice(role?.voice_sample ?? null)
+    setEnvironment(role?.default_environment ?? null)
+    setPicker(null)
+    setEnvironmentOpen(false)
+  }, [open, role])
+
   async function handleSave() {
     if (!name.trim() || !portrait || !voice || !environment) return
     setSaving(true)
     try {
-      const role = await createDigitalHuman({
+      const input = {
         name: name.trim(),
         portrait_asset_id: portrait.id,
         voice_sample_asset_id: voice.id,
         default_environment_asset_id: environment.id,
-      })
-      onCreated(role)
+      }
+      const saved = role
+        ? await updateDigitalHuman(role.id, input)
+        : await createDigitalHuman(input)
+      onCreated(saved)
       onClose()
-      toast.success('数字人已创建，正在处理形象和声音')
+      toast.success(role
+        ? '数字人角色已保存'
+        : '数字人已创建，正在处理形象和声音')
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '创建失败')
     } finally {
@@ -176,9 +194,13 @@ export function RoleEditorDialog({
       <Dialog open={open} onOpenChange={value => !value && onClose()}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>创建数字人角色</DialogTitle>
+            <DialogTitle>
+              {role ? '编辑数字人角色' : '创建数字人角色'}
+            </DialogTitle>
             <DialogDescription>
-              上传一张正面照和一段清晰录音，HeyGen 将创建可复用形象与克隆声音。
+              {role
+                ? '更换人物形象或声音后，HeyGen 会重新处理对应资源。'
+                : '上传一张正面照和一段清晰录音，HeyGen 将创建可复用形象与克隆声音。'}
             </DialogDescription>
           </DialogHeader>
           <FieldGroup>
@@ -230,7 +252,7 @@ export function RoleEditorDialog({
               {saving
                 ? <Loader2 data-icon="inline-start" />
                 : <Save data-icon="inline-start" />}
-              保存并开始处理
+              {role ? '保存角色' : '保存并开始处理'}
             </Button>
           </FieldGroup>
         </DialogContent>

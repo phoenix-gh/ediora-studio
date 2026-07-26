@@ -4,7 +4,7 @@ import { z } from 'zod'
 
 import {
   apiGet, apiPost, completeJob, completeStep, failStep, getJob,
-  retryableForError, startStep,
+  retryableForError, startStep, workerHeaders,
   type JobStep,
 } from './job-client'
 
@@ -73,7 +73,10 @@ function succeededOutput(job: Awaited<ReturnType<typeof getJob>>, key: XResponse
 }
 
 async function configuredModel() {
-  const response = await apiGet<{ api_key: string; model: string; base_url: string }>('/settings/ai-runtime')
+  const response = await apiGet<{ api_key: string; model: string; base_url: string }>(
+    '/settings/ai-runtime',
+    workerHeaders(),
+  )
   const apiKey = response.api_key || process.env.WMS_LLM_API_KEY
   if (!apiKey) throw new Error('No LLM API key is configured')
   return {

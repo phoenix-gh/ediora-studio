@@ -2,6 +2,7 @@ import Redis from 'ioredis'
 
 import { runContentJob } from '../lib/ai/content-job'
 import {
+  JobFinalizationError,
   runDigitalHumanRenderJob,
   runDigitalHumanSetupJob,
 } from '../lib/ai/digital-human-job'
@@ -28,6 +29,11 @@ async function run() {
       else if (job.flow === 'x_response_digest') await runXResponseDigestJob(jobId)
       else await runContentJob(jobId)
     } catch (error) {
+      if (error instanceof JobFinalizationError) {
+        setTimeout(() => {
+          void redis.rpush(queueName, String(jobId))
+        }, 5_000)
+      }
       console.error(`content job ${jobId} failed`, error)
     }
   }

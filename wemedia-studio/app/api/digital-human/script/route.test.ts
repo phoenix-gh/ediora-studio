@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   generateText: vi.fn(),
@@ -14,7 +14,12 @@ import { POST } from './route'
 
 
 describe('POST /api/digital-human/script', () => {
+  beforeEach(() => {
+    process.env.WMS_WORKER_TOKEN = 'test-worker-token-at-least-32-chars'
+  })
+
   afterEach(() => {
+    delete process.env.WMS_WORKER_TOKEN
     vi.unstubAllGlobals()
     mocks.generateText.mockReset()
     mocks.chat.mockClear()
@@ -55,6 +60,15 @@ describe('POST /api/digital-human/script', () => {
       prompt: expect.stringContaining('事实正文'),
     }))
     expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      expect.stringContaining('/settings/ai-runtime'),
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          'X-WMS-Worker-Token': 'test-worker-token-at-least-32-chars',
+        }),
+      }),
+    )
     expect(fetchMock.mock.calls.every(([, init]) => !init?.method || init.method === 'GET')).toBe(true)
   })
 

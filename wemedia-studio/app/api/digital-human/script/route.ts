@@ -6,6 +6,7 @@ import {
   cleanTalkingScript,
   talkingScriptRequestSchema,
 } from '@/lib/ai/talking-script'
+import { workerHeaders } from '@/lib/ai/job-client'
 
 
 const apiBase = () => (
@@ -19,6 +20,7 @@ async function configuredModel() {
   try {
     const response = await fetch(`${apiBase()}/settings/ai-runtime`, {
       cache: 'no-store',
+      headers: workerHeaders(),
     })
     if (response.ok) {
       const settings = await response.json() as {

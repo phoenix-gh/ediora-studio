@@ -4,6 +4,15 @@ export const apiBase = () => (
   ?? 'http://localhost:8000/api'
 ).replace(/\/$/, '')
 
+export function workerHeaders(jobId?: number): Record<string, string> {
+  const token = process.env.WMS_WORKER_TOKEN
+  if (!token) throw new Error('WMS_WORKER_TOKEN 未配置')
+  return {
+    'X-WMS-Worker-Token': token,
+    ...(jobId === undefined ? {} : { 'X-Content-Job-Id': String(jobId) }),
+  }
+}
+
 export type JobStep = {
   id?: number
   key: string
@@ -53,6 +62,7 @@ async function jsonRequest<T>(path: string, init?: RequestInit): Promise<T> {
       retryable,
     )
   }
+  if (response.status === 204) return undefined as T
   return response.json() as Promise<T>
 }
 
@@ -88,13 +98,22 @@ export function completeJob(jobId: number) {
   return jsonRequest(`/jobs/${jobId}/succeed`, { method: 'POST' })
 }
 
-export function apiGet<T>(path: string) {
-  return jsonRequest<T>(path)
+export function apiGet<T>(path: string, headers?: HeadersInit) {
+  return jsonRequest<T>(path, { headers })
 }
 
-export function apiPost<T>(path: string, body?: unknown) {
+export function apiPost<T>(
+  path: string,
+  body?: unknown,
+  headers?: HeadersInit,
+) {
   return jsonRequest<T>(path, {
     method: 'POST',
+    headers,
     body: body === undefined ? undefined : JSON.stringify(body),
   })
+}
+
+export function apiDelete<T>(path: string, headers?: HeadersInit) {
+  return jsonRequest<T>(path, { method: 'DELETE', headers })
 }

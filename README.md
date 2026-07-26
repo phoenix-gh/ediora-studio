@@ -69,13 +69,16 @@ docker compose up --build
 ```
 
 服务会启动 Web（3000）、Python API（8000）、Postgres、Redis 和内容任务 worker。
-`POSTGRES_PASSWORD` 可在 `.env` 中覆盖；LLM 与图片提供商密钥只配置在服务端环境变量中，绝不放入浏览器变量。
+`POSTGRES_PASSWORD` 可在 `.env` 中覆盖；首次启动前还需把
+`WMS_WORKER_TOKEN` 改成一个长随机值。API 与 worker 必须使用同一个值，
+且不得使用 `NEXT_PUBLIC_` 前缀。LLM、图片和 HeyGen 密钥只配置在服务端，
+绝不放入浏览器变量。
 
 ## 数字人口播（HeyGen）
 
 「创作 → 数字人口播」提供可复用数字人角色、项目内脚本编辑、环境图和不可变成片版本：
 
-1. 在「设置 → HeyGen」保存 API Key；也可用服务端 `HEYGEN_API_KEY` 作为回退。界面中已保存的设置优先于环境变量，浏览器不会拿到明文密钥。
+1. 在「设置 → HeyGen」保存 API Key；也可用服务端 `HEYGEN_API_KEY` 作为回退。界面中已保存的设置优先于环境变量。明文密钥只通过 `WMS_WORKER_TOKEN` 保护的内部接口交给 Node worker，浏览器不会拿到。
 2. 创建角色时选择一张 PNG/JPEG 正面照、一段 MP3/WAV 录音和一张默认环境图。直接发送给 HeyGen 的单个素材最大 32MB。
 3. 在口播作品内手写脚本，或让 AI 按主题生成、把已有草稿转换为口播、改写当前脚本。AI 候选只有确认后才替换编辑器内容，不会自动生成视频。
 4. 每次生成都会冻结脚本、角色和环境为独立版本。HeyGen 返回的临时下载地址不会作为最终资产；worker 会把 MP4 复制到本地 `uploads` 创作资产后才标记成功。

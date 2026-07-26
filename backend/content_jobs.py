@@ -8,7 +8,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from log_redaction import redact_secret_text
-from models import ContentJob, ContentJobEvent, ContentJobStep, DailyPlan
+from models import (
+    ContentJob,
+    ContentJobEvent,
+    ContentJobStep,
+    DailyPlan,
+    DigitalHuman,
+    TalkingVideoRender,
+)
 
 
 class InvalidJobTransition(ValueError):
@@ -34,13 +41,24 @@ async def record_event(session: AsyncSession, job_id: int, kind: str, payload: d
     return event
 
 
-async def create_job(session: AsyncSession, *, flow: str, title: str, input_data: dict, idempotency_key: str = "") -> ContentJob:
+async def create_job(
+    session: AsyncSession,
+    *,
+    flow: str,
+    title: str,
+    input_data: dict,
+    idempotency_key: str = "",
+    commit: bool = True,
+) -> ContentJob:
     job = ContentJob(flow=flow, title=title, input_data=input_data, idempotency_key=idempotency_key)
     session.add(job)
     await session.flush()
     await _event(session, job.id, "job_queued")
-    await session.commit()
-    await session.refresh(job)
+    if commit:
+        await session.commit()
+        await session.refresh(job)
+    else:
+        await session.flush()
     return job
 
 
@@ -54,7 +72,9 @@ async def _latest_step(session: AsyncSession, job_id: int, step_key: str) -> Con
 
 
 async def start_step(session: AsyncSession, job_id: int, step_key: str) -> ContentJobStep:
-    job = await session.get(ContentJob, job_id)
+    job = await session.scalar(
+        select(ContentJob).where(ContentJob.id == job_id).with_for_update()
+    )
     if job is None:
         raise KeyError(f"job {job_id} not found")
     if job.status in {"cancelled", "succeeded"}:
@@ -81,8 +101,19 @@ async def succeed_step(session: AsyncSession, step_id: int, output_data: dict) -
     step = await session.get(ContentJobStep, step_id)
     if step is None:
         raise KeyError(f"step {step_id} not found")
+    if step.status == "succeeded":
+        return step
     if step.status != "running":
         raise InvalidJobTransition(f"cannot succeed {step.status} step")
+    job = await session.scalar(
+        select(ContentJob)
+        .where(ContentJob.id == step.job_id)
+        .with_for_update()
+    )
+    if job is None:
+        raise KeyError(f"job {step.job_id} not found")
+    if job.status == "cancelled":
+        raise InvalidJobTransition("cannot succeed a step for cancelled job")
     step.status = "succeeded"
     step.output_data = output_data
     step.completed_at = _now()
@@ -98,12 +129,19 @@ async def fail_step(session: AsyncSession, step_id: int, error: str, *, retryabl
         raise KeyError(f"step {step_id} not found")
     if step.status != "running":
         raise InvalidJobTransition(f"cannot fail {step.status} step")
+    job = await session.scalar(
+        select(ContentJob)
+        .where(ContentJob.id == step.job_id)
+        .with_for_update()
+    )
+    if job is None:
+        raise KeyError(f"job {step.job_id} not found")
+    if job.status == "cancelled":
+        raise InvalidJobTransition("cannot fail a step for cancelled job")
     step.status = "failed"
     step.error = redact_secret_text(error)[:500]
     step.retryable = retryable
     step.completed_at = _now()
-    job = await session.get(ContentJob, step.job_id)
-    assert job is not None
     job.status = "failed"
     job.completed_at = step.completed_at
     if job.flow == "daily_plan":
@@ -137,13 +175,74 @@ async def retry_step(session: AsyncSession, job_id: int, step_key: str) -> Conte
 
 
 async def cancel_job(session: AsyncSession, job_id: int) -> ContentJob:
-    job = await session.get(ContentJob, job_id)
+    job = await session.scalar(
+        select(ContentJob).where(ContentJob.id == job_id).with_for_update()
+    )
     if job is None:
         raise KeyError(f"job {job_id} not found")
     if job.status in {"succeeded", "cancelled"}:
         raise InvalidJobTransition(f"cannot cancel {job.status} job")
+    if job.flow == "digital_human_render":
+        render_id = job.input_data.get("render_id")
+        if isinstance(render_id, int):
+            render = await session.scalar(
+                select(TalkingVideoRender)
+                .where(TalkingVideoRender.id == render_id)
+                .with_for_update()
+            )
+            if (
+                render is not None
+                and render.job_id == job.id
+                and render.status == "succeeded"
+            ):
+                raise InvalidJobTransition("cannot cancel completed render")
+    elif job.flow == "digital_human_setup":
+        role_id = job.input_data.get("digital_human_id")
+        if isinstance(role_id, int):
+            role = await session.scalar(
+                select(DigitalHuman)
+                .where(DigitalHuman.id == role_id)
+                .with_for_update()
+            )
+            if (
+                role is not None
+                and role.setup_job_id == job.id
+                and role.status == "ready"
+            ):
+                raise InvalidJobTransition("cannot cancel ready digital human")
     job.status = "cancelled"
     job.completed_at = _now()
+    if job.flow == "digital_human_render":
+        render_id = job.input_data.get("render_id")
+        if isinstance(render_id, int):
+            render = await session.scalar(
+                select(TalkingVideoRender)
+                .where(TalkingVideoRender.id == render_id)
+                .with_for_update()
+            )
+            if (
+                render is not None
+                and render.job_id == job.id
+                and render.status in {"queued", "running"}
+            ):
+                render.status = "cancelled"
+                render.error = "任务已取消"
+                render.completed_at = job.completed_at
+    elif job.flow == "digital_human_setup":
+        role_id = job.input_data.get("digital_human_id")
+        if isinstance(role_id, int):
+            role = await session.scalar(
+                select(DigitalHuman)
+                .where(DigitalHuman.id == role_id)
+                .with_for_update()
+            )
+            if (
+                role is not None
+                and role.setup_job_id == job.id
+                and role.status == "processing"
+            ):
+                role.status = "failed"
+                role.error = "任务已取消"
     await _event(session, job_id, "job_cancelled")
     await session.commit()
     await session.refresh(job)
@@ -151,9 +250,13 @@ async def cancel_job(session: AsyncSession, job_id: int) -> ContentJob:
 
 
 async def succeed_job(session: AsyncSession, job_id: int) -> ContentJob:
-    job = await session.get(ContentJob, job_id)
+    job = await session.scalar(
+        select(ContentJob).where(ContentJob.id == job_id).with_for_update()
+    )
     if job is None:
         raise KeyError(f"job {job_id} not found")
+    if job.status == "succeeded":
+        return job
     if job.status != "running":
         raise InvalidJobTransition(f"cannot succeed {job.status} job")
     job.status = "succeeded"

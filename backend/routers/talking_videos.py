@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from config import effective_heygen_api_key, get_config
 from database import get_db
 from digital_human_service import (
     InvalidTalkingVideo,
@@ -20,11 +21,13 @@ from digital_human_service import (
 from job_queue import enqueue_job
 from models import (
     CreativeAsset,
+    ContentJob,
     DigitalHuman,
     TalkingVideoProject,
     TalkingVideoRender,
     now_utc,
 )
+from worker_auth import require_worker_token
 
 
 router = APIRouter(prefix="/talking-videos", tags=["talking-videos"])
@@ -192,13 +195,20 @@ async def post_project(
     return await _project_payload(db, project, detail=True)
 
 
-@router.get("/renders/{render_id}/worker-context")
+@router.get(
+    "/renders/{render_id}/worker-context",
+    dependencies=[Depends(require_worker_token)],
+)
 async def render_worker_context(
-    render_id: int, db: AsyncSession = Depends(get_db)
+    render_id: int,
+    job_id: int = Header(alias="X-Content-Job-Id"),
+    db: AsyncSession = Depends(get_db),
 ):
     render = await db.get(TalkingVideoRender, render_id)
     if render is None:
         raise HTTPException(404, "渲染版本不存在")
+    if render.job_id != job_id:
+        raise HTTPException(409, "该渲染任务已被更新任务替代")
     environment = await db.get(CreativeAsset, render.environment_asset_id)
     if environment is None:
         raise HTTPException(409, "环境图素材不存在")
@@ -213,18 +223,44 @@ async def render_worker_context(
         "provider_state": render.provider_state,
         "heygen_environment_asset_id": render.heygen_environment_asset_id,
         "heygen_video_id": render.heygen_video_id,
+        "video_asset_id": render.video_asset_id,
     }
 
 
-@router.post("/renders/{render_id}/worker-progress")
+@router.post(
+    "/renders/{render_id}/worker-progress",
+    dependencies=[Depends(require_worker_token)],
+)
 async def render_worker_progress(
     render_id: int,
     body: RenderWorkerProgress,
+    job_id: int = Header(alias="X-Content-Job-Id"),
     db: AsyncSession = Depends(get_db),
 ):
-    render = await db.get(TalkingVideoRender, render_id)
+    job = await db.scalar(
+        select(ContentJob).where(ContentJob.id == job_id).with_for_update()
+    )
+    if job is None:
+        raise HTTPException(409, "渲染任务不存在")
+    render = await db.scalar(
+        select(TalkingVideoRender)
+        .where(TalkingVideoRender.id == render_id)
+        .with_for_update()
+    )
     if render is None:
         raise HTTPException(404, "渲染版本不存在")
+    if render.job_id != job_id:
+        raise HTTPException(409, "该渲染任务已被更新任务替代")
+    if job.status == "cancelled":
+        if render.status in {"queued", "running"}:
+            render.status = "cancelled"
+            render.completed_at = now_utc()
+            render.error = "任务已取消"
+            await db.commit()
+            await db.refresh(render)
+        return await _render_payload(db, render)
+    if render.status == "succeeded":
+        return await _render_payload(db, render)
     if body.status == "succeeded":
         if body.video_asset_id is None:
             raise HTTPException(422, "成功状态必须包含本地视频资产")
@@ -238,11 +274,20 @@ async def render_worker_progress(
             raise HTTPException(422, "本地视频资产无效")
         render.video_asset_id = video_asset.id
         render.completed_at = now_utc()
+        project = await db.scalar(
+            select(TalkingVideoProject)
+            .where(TalkingVideoProject.id == render.project_id)
+            .with_for_update()
+        )
+        if project is not None and project.current_render_id is None:
+            project.current_render_id = render.id
     render.status = body.status
     render.heygen_environment_asset_id = body.heygen_environment_asset_id
     render.heygen_video_id = body.heygen_video_id
     render.provider_state = body.provider_state
     render.error = body.error[:500]
+    if body.status in {"failed", "cancelled"}:
+        render.completed_at = now_utc()
     await db.commit()
     await db.refresh(render)
     return await _render_payload(db, render)
@@ -311,6 +356,8 @@ async def remove_project(
 async def post_render(
     project_id: int, db: AsyncSession = Depends(get_db)
 ):
+    if not effective_heygen_api_key(await get_config()):
+        raise HTTPException(409, "请先配置 HeyGen API Key")
     try:
         render, job = await create_render(db, project_id=project_id)
     except InvalidTalkingVideo as exc:

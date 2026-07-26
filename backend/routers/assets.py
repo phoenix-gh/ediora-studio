@@ -3,13 +3,14 @@ import uuid
 from datetime import datetime
 from typing import Literal
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Header, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
-from models import CreativeAsset, CreativeAssetDirectory
+from models import ContentJob, CreativeAsset, CreativeAssetDirectory
+from worker_auth import require_worker_token
 
 router = APIRouter(prefix="/assets", tags=["assets"])
 AssetType = Literal["article", "media"]
@@ -146,14 +147,46 @@ async def update_asset(asset_id: int, body: AssetUpdate, db: AsyncSession = Depe
 async def delete_asset(asset_id: int, db: AsyncSession = Depends(get_db)):
     asset = await db.get(CreativeAsset, asset_id)
     if not asset: raise HTTPException(404, "创作资产不存在")
+    upload_path = ""
+    if asset.source == "upload" and asset.url.startswith("/api/uploads/"):
+        stored_name = os.path.basename(asset.url)
+        candidate = os.path.abspath(os.path.join(_UPLOADS_DIR, stored_name))
+        uploads_root = os.path.abspath(_UPLOADS_DIR)
+        if os.path.commonpath([candidate, uploads_root]) == uploads_root:
+            upload_path = candidate
     await db.delete(asset); await db.commit()
+    if upload_path:
+        try:
+            os.remove(upload_path)
+        except FileNotFoundError:
+            pass
 
 @router.post("/upload", response_model=AssetOut, status_code=201)
-async def upload_asset(media_kind: Literal["image", "video", "audio"], file: UploadFile = File(...), title: str = "", db: AsyncSession = Depends(get_db)):
+async def upload_asset(
+    media_kind: Literal["image", "video", "audio"],
+    file: UploadFile = File(...),
+    title: str = "",
+    job_id: int | None = Header(default=None, alias="X-Content-Job-Id"),
+    worker_token: str | None = Header(
+        default=None, alias="X-WMS-Worker-Token"
+    ),
+    db: AsyncSession = Depends(get_db),
+):
     expected = f"{media_kind}/"
     if not file.content_type or not file.content_type.startswith(expected): raise HTTPException(400, f"请上传{media_kind}文件")
     data = await file.read()
     if len(data) > 100 * 1024 * 1024: raise HTTPException(413, "文件超过100MB限制")
+    if job_id is not None:
+        require_worker_token(worker_token)
+        job = await db.scalar(
+            select(ContentJob)
+            .where(ContentJob.id == job_id)
+            .with_for_update()
+        )
+        if job is None:
+            raise HTTPException(409, "内容任务不存在")
+        if job.status == "cancelled":
+            raise HTTPException(409, "内容任务已取消")
     ext = os.path.splitext(file.filename or "")[1] or ".bin"
     filename = f"{uuid.uuid4().hex}{ext}"
     os.makedirs(_UPLOADS_DIR, exist_ok=True)

@@ -15,6 +15,7 @@ describe('talking video workbench layout', () => {
     )
 
     expect(studio).toContain('grid-cols-[220px_minmax(0,1fr)]')
+    expect(studio).toContain('key={selectedProject.id}')
     expect(source).toContain(
       'min-[1360px]:grid-cols-[200px_minmax(320px,1fr)_280px]',
     )

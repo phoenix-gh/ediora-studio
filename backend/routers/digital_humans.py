@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from config import effective_heygen_api_key, get_config
 from content_jobs import create_job
 from database import get_db
 from digital_human_service import (
@@ -20,7 +21,8 @@ from digital_human_service import (
     require_media_asset,
 )
 from job_queue import enqueue_job
-from models import CreativeAsset, DigitalHuman, TalkingVideoProject
+from models import ContentJob, CreativeAsset, DigitalHuman, TalkingVideoProject
+from worker_auth import require_worker_token
 
 
 router = APIRouter(prefix="/digital-humans", tags=["digital-humans"])
@@ -92,8 +94,20 @@ async def _role_payload(db: AsyncSession, role: DigitalHuman) -> dict:
     }
 
 
-async def _get_role(db: AsyncSession, role_id: int) -> DigitalHuman:
-    role = await db.get(DigitalHuman, role_id)
+async def _get_role(
+    db: AsyncSession,
+    role_id: int,
+    *,
+    for_update: bool = False,
+) -> DigitalHuman:
+    if for_update:
+        role = await db.scalar(
+            select(DigitalHuman)
+            .where(DigitalHuman.id == role_id)
+            .with_for_update()
+        )
+    else:
+        role = await db.get(DigitalHuman, role_id)
     if role is None:
         raise HTTPException(404, "数字人角色不存在")
     return role
@@ -106,6 +120,7 @@ async def _queue_setup(db: AsyncSession, role: DigitalHuman):
         title=f"初始化数字人 · {role.name}",
         input_data={"digital_human_id": role.id},
         idempotency_key=f"digital-human-setup:{role.id}:{role.updated_at.timestamp()}",
+        commit=False,
     )
     role.setup_job_id = job.id
     role.status = "processing"
@@ -129,6 +144,8 @@ async def list_roles(
 
 @router.post("", status_code=status.HTTP_201_CREATED)
 async def post_role(body: RoleCreate, db: AsyncSession = Depends(get_db)):
+    if not effective_heygen_api_key(await get_config()):
+        raise HTTPException(409, "请先配置 HeyGen API Key")
     try:
         role, job = await create_digital_human(
             db,
@@ -154,10 +171,10 @@ async def patch_role(
     body: RoleUpdate,
     db: AsyncSession = Depends(get_db),
 ):
-    role = await _get_role(db, role_id)
+    role = await _get_role(db, role_id, for_update=True)
     if body.name is not None:
         role.name = body.name.strip()
-    changed_provider_input = False
+    changed_provider_inputs: set[str] = set()
     validations = (
         (
             "portrait_asset_id",
@@ -182,14 +199,35 @@ async def patch_role(
             await require_media_asset(db, value, media_types, 32 * 1024 * 1024)
             if getattr(role, field) != value:
                 setattr(role, field, value)
-                changed_provider_input = True
+                if field in {"portrait_asset_id", "voice_sample_asset_id"}:
+                    changed_provider_inputs.add(field)
     except InvalidTalkingVideo as exc:
         raise HTTPException(422, str(exc)) from exc
-    await db.commit()
-    await db.refresh(role)
-    if changed_provider_input:
+    if changed_provider_inputs and role.status == "processing":
+        await db.rollback()
+        raise HTTPException(409, "数字人正在处理，请完成后再更换形象或声音")
+    if (
+        changed_provider_inputs
+        and not effective_heygen_api_key(await get_config())
+    ):
+        await db.rollback()
+        raise HTTPException(409, "请先配置 HeyGen API Key")
+    if "portrait_asset_id" in changed_provider_inputs:
+        state = dict(role.provider_state)
+        for key in ("portrait_asset_id", "avatar_group_id", "avatar_id"):
+            state.pop(key, None)
+        role.provider_state = state
+    if "voice_sample_asset_id" in changed_provider_inputs:
+        state = dict(role.provider_state)
+        for key in ("voice_asset_id", "voice_id"):
+            state.pop(key, None)
+        role.provider_state = state
+    if changed_provider_inputs:
+        await db.flush()
         await _queue_setup(db, role)
-        await db.refresh(role)
+    else:
+        await db.commit()
+    await db.refresh(role)
     return await _role_payload(db, role)
 
 
@@ -214,15 +252,28 @@ async def archive_role(role_id: int, db: AsyncSession = Depends(get_db)):
 
 @router.post("/{role_id}/retry")
 async def retry_role(role_id: int, db: AsyncSession = Depends(get_db)):
-    role = await _get_role(db, role_id)
+    role = await _get_role(db, role_id, for_update=True)
+    if role.status != "failed":
+        raise HTTPException(409, "只能重试处理失败的数字人")
+    if not effective_heygen_api_key(await get_config()):
+        raise HTTPException(409, "请先配置 HeyGen API Key")
     await _queue_setup(db, role)
     await db.refresh(role)
     return await _role_payload(db, role)
 
 
-@router.get("/{role_id}/worker-context")
-async def role_worker_context(role_id: int, db: AsyncSession = Depends(get_db)):
+@router.get(
+    "/{role_id}/worker-context",
+    dependencies=[Depends(require_worker_token)],
+)
+async def role_worker_context(
+    role_id: int,
+    job_id: int = Header(alias="X-Content-Job-Id"),
+    db: AsyncSession = Depends(get_db),
+):
     role = await _get_role(db, role_id)
+    if role.setup_job_id != job_id:
+        raise HTTPException(409, "该数字人任务已被更新任务替代")
     portrait = await db.get(CreativeAsset, role.portrait_asset_id)
     voice = await db.get(CreativeAsset, role.voice_sample_asset_id)
     environment = await db.get(CreativeAsset, role.default_environment_asset_id)
@@ -242,13 +293,33 @@ async def role_worker_context(role_id: int, db: AsyncSession = Depends(get_db)):
     }
 
 
-@router.post("/{role_id}/worker-progress")
+@router.post(
+    "/{role_id}/worker-progress",
+    dependencies=[Depends(require_worker_token)],
+)
 async def role_worker_progress(
     role_id: int,
     body: RoleWorkerProgress,
+    job_id: int = Header(alias="X-Content-Job-Id"),
     db: AsyncSession = Depends(get_db),
 ):
-    role = await _get_role(db, role_id)
+    job = await db.scalar(
+        select(ContentJob).where(ContentJob.id == job_id).with_for_update()
+    )
+    if job is None:
+        raise HTTPException(409, "数字人任务不存在")
+    role = await _get_role(db, role_id, for_update=True)
+    if role.setup_job_id != job_id:
+        raise HTTPException(409, "该数字人任务已被更新任务替代")
+    if job.status == "cancelled":
+        if role.status == "processing":
+            role.status = "failed"
+            role.error = "任务已取消"
+            await db.commit()
+            await db.refresh(role)
+        return await _role_payload(db, role)
+    if role.status == "ready":
+        return await _role_payload(db, role)
     if body.status == "ready":
         if not body.heygen_avatar_id or not body.heygen_voice_id:
             raise HTTPException(422, "就绪状态必须同时包含 HeyGen 形象和声音")

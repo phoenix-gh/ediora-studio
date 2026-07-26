@@ -13,6 +13,9 @@ def client(monkeypatch, tmp_path):
         f"sqlite+aiosqlite:///{tmp_path / 'heygen-settings.db'}",
     )
     monkeypatch.setenv("WMS_DISABLE_SCHEDULER", "1")
+    monkeypatch.setenv(
+        "WMS_WORKER_TOKEN", "test-worker-token-at-least-32-chars"
+    )
     monkeypatch.delenv("HEYGEN_API_KEY", raising=False)
     for module in list(sys.modules):
         if module.startswith(("database", "models", "main", "routers", "config")):
@@ -45,13 +48,40 @@ def test_heygen_key_roundtrip_is_redacted(client):
 def test_heygen_runtime_uses_environment_fallback(client, monkeypatch):
     monkeypatch.setenv("HEYGEN_API_KEY", "env-key")
 
-    response = client.get("/api/settings/heygen-runtime")
+    response = client.get(
+        "/api/settings/heygen-runtime",
+        headers={"X-WMS-Worker-Token": "test-worker-token-at-least-32-chars"},
+    )
 
     assert response.status_code == 200
     assert response.json() == {
         "api_key": "env-key",
         "base_url": "https://api.heygen.com",
     }
+
+
+def test_heygen_runtime_rejects_missing_or_wrong_worker_token(client):
+    missing = client.get("/api/settings/heygen-runtime")
+    wrong = client.get(
+        "/api/settings/heygen-runtime",
+        headers={"X-WMS-Worker-Token": "wrong-token"},
+    )
+
+    assert missing.status_code == 403
+    assert wrong.status_code == 403
+
+
+def test_heygen_runtime_fails_closed_without_server_worker_token(
+    client, monkeypatch
+):
+    monkeypatch.delenv("WMS_WORKER_TOKEN")
+
+    response = client.get(
+        "/api/settings/heygen-runtime",
+        headers={"X-WMS-Worker-Token": "test-worker-token-at-least-32-chars"},
+    )
+
+    assert response.status_code == 503
 
 
 @pytest.mark.parametrize(

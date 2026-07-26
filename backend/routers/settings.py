@@ -4,15 +4,22 @@ from typing import Literal, Optional
 from datetime import datetime, timezone
 import json
 import httpx
-import os
 from urllib.parse import urlsplit
 
-from config import get_config, set_config, PROVIDERS, effective_model, effective_base_url
+from config import (
+    PROVIDERS,
+    effective_base_url,
+    effective_heygen_api_key,
+    effective_model,
+    get_config,
+    set_config,
+)
 from log_redaction import redact_secret_text
 import telegram_notifier
 from database import get_db
 from models import PublishAccount
 from sqlalchemy.ext.asyncio import AsyncSession
+from worker_auth import require_worker_token
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 
@@ -205,15 +212,6 @@ class AiRuntimeConfig(BaseModel):
     image: ImageRuntimeConfig
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
-
-def effective_heygen_api_key(cfg: dict[str, str]) -> str:
-    return (
-        cfg.get("heygen_api_key", "").strip()
-        or os.getenv("HEYGEN_API_KEY", "").strip()
-    )
-
-
 def _build_out(cfg: dict) -> SettingsOut:
     import blog_client
     api_key = cfg.get("llm_api_key", "")
@@ -327,7 +325,12 @@ async def get_settings():
     return _build_out(await get_config())
 
 
-@router.get("/ai-runtime", response_model=AiRuntimeConfig, include_in_schema=False)
+@router.get(
+    "/ai-runtime",
+    response_model=AiRuntimeConfig,
+    include_in_schema=False,
+    dependencies=[Depends(require_worker_token)],
+)
 async def get_ai_runtime_config():
     """Expose the configured provider only to the trusted local job worker.
 
@@ -348,7 +351,11 @@ async def get_ai_runtime_config():
     )
 
 
-@router.get("/heygen-runtime", include_in_schema=False)
+@router.get(
+    "/heygen-runtime",
+    include_in_schema=False,
+    dependencies=[Depends(require_worker_token)],
+)
 async def get_heygen_runtime_config():
     return {
         "api_key": effective_heygen_api_key(await get_config()),

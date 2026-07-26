@@ -2,6 +2,7 @@
 
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { CreativeAsset } from '@/lib/api/assets'
 
 const assets = vi.hoisted(() => ({
   portrait: {
@@ -53,6 +54,7 @@ const assets = vi.hoisted(() => ({
 
 const mocks = vi.hoisted(() => ({
   createDigitalHuman: vi.fn(),
+  updateDigitalHuman: vi.fn(),
   listCreativeAssets: vi.fn(),
   uploadCreativeAsset: vi.fn(),
   createJob: vi.fn(),
@@ -61,6 +63,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@/lib/api/digital-humans', () => ({
   createDigitalHuman: mocks.createDigitalHuman,
+  updateDigitalHuman: mocks.updateDigitalHuman,
 }))
 vi.mock('@/lib/api/assets', () => ({
   listCreativeAssets: mocks.listCreativeAssets,
@@ -133,5 +136,58 @@ describe('digital-human role creation', () => {
     expect(screen.getByRole('tab', { name: '上传图片' })).toBeTruthy()
     expect(screen.getByRole('tab', { name: '创作资产' })).toBeTruthy()
     expect(screen.getByRole('tab', { name: 'AI 生成' })).toBeTruthy()
+  })
+
+  it('edits an existing role and keeps its current assets selected', async () => {
+    mocks.updateDigitalHuman.mockResolvedValue({
+      id: 8,
+      name: '林晓（新版）',
+    })
+
+    render(
+      <RoleEditorDialog
+        open
+        role={{
+          id: 8,
+          name: '林晓',
+          status: 'ready',
+          portrait_asset_id: assets.portrait.id,
+          voice_sample_asset_id: assets.voice.id,
+          default_environment_asset_id: assets.environment.id,
+          portrait: assets.portrait as CreativeAsset,
+          voice_sample: assets.voice as CreativeAsset,
+          default_environment: assets.environment as CreativeAsset,
+          heygen_avatar_group_id: 'group-1',
+          heygen_avatar_id: 'avatar-1',
+          heygen_voice_id: 'voice-1',
+          provider_state: {},
+          setup_job_id: 10,
+          error: '',
+          archived_at: null,
+          created_at: '',
+          updated_at: '',
+        }}
+        onClose={vi.fn()}
+        onCreated={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByText('编辑数字人角色')).toBeTruthy()
+    expect(screen.getByRole('button', { name: '正面形象照' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '声音样本' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '明亮演播室' })).toBeTruthy()
+    fireEvent.change(screen.getByLabelText('角色名称'), {
+      target: { value: '林晓（新版）' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '保存角色' }))
+
+    await waitFor(() => {
+      expect(mocks.updateDigitalHuman).toHaveBeenCalledWith(8, {
+        name: '林晓（新版）',
+        portrait_asset_id: assets.portrait.id,
+        voice_sample_asset_id: assets.voice.id,
+        default_environment_asset_id: assets.environment.id,
+      })
+    })
   })
 })

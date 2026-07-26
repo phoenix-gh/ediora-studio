@@ -12,9 +12,14 @@ def api(monkeypatch, tmp_path):
         "WMS_DATABASE_URL",
         f"sqlite+aiosqlite:///{tmp_path / 'talking-videos-router.db'}",
     )
+    monkeypatch.setenv("HEYGEN_API_KEY", "test-heygen-key")
+    monkeypatch.setenv(
+        "WMS_WORKER_TOKEN", "test-worker-token-at-least-32-chars"
+    )
     for module in list(sys.modules):
         if module.startswith(
             (
+                "config",
                 "database",
                 "models",
                 "content_jobs",
@@ -46,7 +51,20 @@ def api(monkeypatch, tmp_path):
             yield session
 
     app.dependency_overrides[get_db] = override_db
-    return TestClient(app), SessionLocal, router_module
+    return (
+        TestClient(
+            app,
+            headers={
+                "X-WMS-Worker-Token": "test-worker-token-at-least-32-chars"
+            },
+        ),
+        SessionLocal,
+        router_module,
+    )
+
+
+def _job_headers(render: dict) -> dict[str, str]:
+    return {"X-Content-Job-Id": str(render["job_id"])}
 
 
 def _seed(session_factory, *, ready: bool):
@@ -114,6 +132,25 @@ def test_render_endpoint_rejects_non_ready_role(api):
     assert "尚未就绪" in response.json()["detail"]
 
 
+def test_render_endpoint_rejects_missing_heygen_configuration(api, monkeypatch):
+    client, session_factory, _ = api
+    role_id, _ = _seed(session_factory, ready=True)
+    project = client.post(
+        "/api/talking-videos",
+        json={
+            "title": "作品",
+            "digital_human_id": role_id,
+            "script": "准备生成",
+        },
+    ).json()
+    monkeypatch.delenv("HEYGEN_API_KEY")
+
+    response = client.post(f"/api/talking-videos/{project['id']}/renders")
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "请先配置 HeyGen API Key"
+
+
 def test_create_render_enqueues_job_and_returns_immutable_version(api, monkeypatch):
     client, session_factory, router_module = api
     role_id, environment_id = _seed(session_factory, ready=True)
@@ -159,6 +196,7 @@ def test_render_progress_requires_local_video_asset_and_detail_is_nested(api):
 
     invalid = client.post(
         f"/api/talking-videos/renders/{render['id']}/worker-progress",
+        headers=_job_headers(render),
         json={"status": "succeeded", "heygen_video_id": "video-1"},
     )
     assert invalid.status_code == 422
@@ -184,6 +222,7 @@ def test_render_progress_requires_local_video_asset_and_detail_is_nested(api):
     )
     succeeded = client.post(
         f"/api/talking-videos/renders/{render['id']}/worker-progress",
+        headers=_job_headers(render),
         json={
             "status": "succeeded",
             "heygen_video_id": "video-1",
@@ -191,6 +230,11 @@ def test_render_progress_requires_local_video_asset_and_detail_is_nested(api):
         },
     )
     assert succeeded.status_code == 200, succeeded.text
+
+    auto_selected = client.get(
+        f"/api/talking-videos/{project['id']}"
+    ).json()
+    assert auto_selected["current_render_id"] == render["id"]
 
     client.post(
         f"/api/talking-videos/{project['id']}/renders/{render['id']}/select"

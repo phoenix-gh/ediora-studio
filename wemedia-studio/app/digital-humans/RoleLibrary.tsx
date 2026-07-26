@@ -1,6 +1,6 @@
 'use client'
 
-import { Archive, Plus, RefreshCw, Trash2, Video } from 'lucide-react'
+import { Archive, Pencil, Plus, RefreshCw, Trash2, Video } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { Badge } from '@/components/ui/badge'
@@ -42,11 +42,13 @@ const statusCopy: Record<DigitalHuman['status'], string> = {
 export function RoleLibrary({
   roles,
   onCreate,
+  onEdit,
   onChanged,
   onStartProject,
 }: {
   roles: DigitalHuman[]
   onCreate: () => void
+  onEdit: (role: DigitalHuman) => void
   onChanged: (role: DigitalHuman | null) => void
   onStartProject: (role: DigitalHuman) => void
 }) {
@@ -116,6 +118,14 @@ export function RoleLibrary({
             ) : null}
           </CardContent>
           <CardFooter className="gap-2">
+            <Button
+              variant="outline"
+              onClick={() => onEdit(role)}
+              disabled={role.status === 'processing'}
+            >
+              <Pencil data-icon="inline-start" />
+              编辑
+            </Button>
             {role.status === 'ready' ? (
               <Button onClick={() => onStartProject(role)}>
                 <Video data-icon="inline-start" />

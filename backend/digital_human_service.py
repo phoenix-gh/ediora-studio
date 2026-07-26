@@ -106,6 +106,7 @@ async def create_digital_human(
         title=f"初始化数字人 · {role.name}",
         input_data={"digital_human_id": role.id},
         idempotency_key=f"digital-human-setup:{role.id}:1",
+        commit=False,
     )
     role.setup_job_id = job.id
     await session.commit()
@@ -149,7 +150,11 @@ async def create_render(
     *,
     project_id: int,
 ) -> tuple[TalkingVideoRender, ContentJob]:
-    project = await session.get(TalkingVideoProject, project_id)
+    project = await session.scalar(
+        select(TalkingVideoProject)
+        .where(TalkingVideoProject.id == project_id)
+        .with_for_update()
+    )
     if project is None:
         raise InvalidTalkingVideo("口播作品不存在")
     script = project.script.strip()
@@ -196,6 +201,7 @@ async def create_render(
         title=f"生成口播视频 · {project.title or f'作品 {project.id}'} · V{render.version}",
         input_data={"render_id": render.id},
         idempotency_key=f"talking-video-render:{render.id}",
+        commit=False,
     )
     render.job_id = job.id
     await session.commit()

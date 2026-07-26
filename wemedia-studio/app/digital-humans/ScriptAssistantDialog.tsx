@@ -132,7 +132,16 @@ export function ScriptAssistantDialog({
               <FieldLabel>选择草稿</FieldLabel>
               <Select value={draftId} onValueChange={value => value && setDraftId(value)}>
                 <SelectTrigger>
-                  <SelectValue placeholder="选择已有草稿" />
+                  <SelectValue placeholder="选择已有草稿">
+                    {value => {
+                      const draft = drafts.find(
+                        item => String(item.id) === value,
+                      )
+                      return draft?.title || (
+                        draft ? `草稿 ${draft.id}` : '选择已有草稿'
+                      )
+                    }}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   <SelectGroup>

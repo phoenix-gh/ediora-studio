@@ -1,5 +1,6 @@
 """Application config store with in-process cache."""
 import asyncio
+import os
 import time
 from typing import Any
 
@@ -106,6 +107,13 @@ def effective_base_url(cfg: dict[str, str]) -> str:
     if override:
         return override
     return PROVIDERS.get(cfg.get("llm_provider", ""), {}).get("base_url", "")
+
+
+def effective_heygen_api_key(cfg: dict[str, str]) -> str:
+    return (
+        cfg.get("heygen_api_key", "").strip()
+        or os.getenv("HEYGEN_API_KEY", "").strip()
+    )
 
 
 # ── Cache ─────────────────────────────────────────────────────────────────────

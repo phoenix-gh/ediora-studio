@@ -12,10 +12,15 @@ def client(monkeypatch, tmp_path):
         f"sqlite+aiosqlite:///{tmp_path / 'digital-human-e2e.db'}",
     )
     monkeypatch.setenv("WMS_DISABLE_SCHEDULER", "1")
+    monkeypatch.setenv("HEYGEN_API_KEY", "test-heygen-key")
+    monkeypatch.setenv(
+        "WMS_WORKER_TOKEN", "test-worker-token-at-least-32-chars"
+    )
     for module in list(sys.modules):
         if module.startswith(
             (
                 "database",
+                "config",
                 "models",
                 "main",
                 "routers",
@@ -47,7 +52,12 @@ def client(monkeypatch, tmp_path):
 
     monkeypatch.setattr(roles_router, "enqueue_job", no_op_enqueue)
     monkeypatch.setattr(videos_router, "enqueue_job", no_op_enqueue)
-    return TestClient(app)
+    return TestClient(
+        app,
+        headers={
+            "X-WMS-Worker-Token": "test-worker-token-at-least-32-chars"
+        },
+    )
 
 
 def upload_asset(
@@ -115,6 +125,7 @@ def test_role_to_two_versioned_local_videos(client):
     role = create_role_with_assets(client)
     progress = client.post(
         f"/api/digital-humans/{role['id']}/worker-progress",
+        headers={"X-Content-Job-Id": str(role["setup_job_id"])},
         json={
             "status": "ready",
             "heygen_avatar_group_id": "group-1",
@@ -147,6 +158,7 @@ def test_role_to_two_versioned_local_videos(client):
     first_asset = upload_fake_mp4(client, "version-1.mp4")
     first_progress = client.post(
         f"/api/talking-videos/renders/{first['id']}/worker-progress",
+        headers={"X-Content-Job-Id": str(first["job_id"])},
         json={
             "status": "succeeded",
             "heygen_environment_asset_id": "environment-1",
@@ -156,6 +168,9 @@ def test_role_to_two_versioned_local_videos(client):
         },
     )
     assert first_progress.status_code == 200, first_progress.text
+    assert client.get(
+        f"/api/talking-videos/{project['id']}"
+    ).json()["current_render_id"] == first["id"]
 
     updated = client.patch(
         f"/api/talking-videos/{project['id']}",
@@ -170,6 +185,7 @@ def test_role_to_two_versioned_local_videos(client):
     second_asset = upload_fake_mp4(client, "version-2.mp4")
     second_progress = client.post(
         f"/api/talking-videos/renders/{second['id']}/worker-progress",
+        headers={"X-Content-Job-Id": str(second["job_id"])},
         json={
             "status": "succeeded",
             "heygen_environment_asset_id": "environment-1",
@@ -181,6 +197,7 @@ def test_role_to_two_versioned_local_videos(client):
     assert second_progress.status_code == 200, second_progress.text
 
     detail = client.get(f"/api/talking-videos/{project['id']}").json()
+    assert detail["current_render_id"] == first["id"]
     assert [item["version"] for item in detail["renders"]] == [2, 1]
     assert [item["script_snapshot"] for item in detail["renders"]] == [
         "第二版脚本",

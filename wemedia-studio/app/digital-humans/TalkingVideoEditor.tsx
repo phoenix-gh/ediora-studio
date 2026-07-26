@@ -76,6 +76,10 @@ export function TalkingVideoEditor({
   const [rendering, setRendering] = useState(false)
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pendingSave = useRef<TalkingVideoUpdate | null>(null)
+  const saveProjectRef = useRef(saveProject)
+  const onProjectChangeRef = useRef(onProjectChange)
+  saveProjectRef.current = saveProject
+  onProjectChangeRef.current = onProjectChange
 
   const role = roles.find(item => item.id === roleId) ?? null
   const hasActiveRender = project.renders.some(
@@ -92,7 +96,14 @@ export function TalkingVideoEditor({
 
   useEffect(() => () => {
     if (saveTimer.current !== null) clearTimeout(saveTimer.current)
-  }, [])
+    const body = pendingSave.current
+    pendingSave.current = null
+    saveTimer.current = null
+    if (!body) return
+    void saveProjectRef.current(project.id, body)
+      .then(updated => onProjectChangeRef.current?.(updated))
+      .catch(() => toast.error('作品自动保存失败'))
+  }, [project.id])
 
   function scheduleSave(update: TalkingVideoUpdate) {
     pendingSave.current = { ...pendingSave.current, ...update }
@@ -177,7 +188,11 @@ export function TalkingVideoEditor({
                   <FieldLabel>数字人角色</FieldLabel>
                   <Select value={String(roleId)} onValueChange={changeRole}>
                     <SelectTrigger>
-                      <SelectValue />
+                      <SelectValue>
+                        {value => roles.find(
+                          item => String(item.id) === value,
+                        )?.name ?? '选择数字人角色'}
+                      </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       <SelectGroup>

@@ -13,6 +13,9 @@ def client(monkeypatch, tmp_path):
     db_file = tmp_path / "test.db"
     monkeypatch.setenv("WMS_DATABASE_URL", f"sqlite+aiosqlite:///{db_file}")
     monkeypatch.setenv("WMS_DISABLE_SCHEDULER", "1")
+    monkeypatch.setenv(
+        "WMS_WORKER_TOKEN", "test-worker-token-at-least-32-chars"
+    )
     monkeypatch.delenv("MKFLOW_AGENT_API_TOKEN", raising=False)
 
     for mod in list(sys.modules):
@@ -107,7 +110,12 @@ def test_settings_image_provider_is_separate_from_text_provider(client):
     assert r.json()["image_api_key_set"] is True
     assert r.json()["image_model"] == "gpt-image-1"
 
-    runtime = client.get("/api/settings/ai-runtime")
+    runtime = client.get(
+        "/api/settings/ai-runtime",
+        headers={
+            "X-WMS-Worker-Token": "test-worker-token-at-least-32-chars"
+        },
+    )
     assert runtime.status_code == 200
     assert runtime.json()["image"] == {
         "api_key": "image_key", "base_url": "https://api.openai.com/v1", "model": "gpt-image-1",
