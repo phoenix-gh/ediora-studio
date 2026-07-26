@@ -27,7 +27,6 @@
 **Files:**
 - Create: `backend/tests/test_database_publication_removal.py`
 - Modify: `backend/database.py`
-- Modify: `backend/models.py`
 
 **Interfaces:**
 - Produces: `async def migrate_removed_publication_schema(conn) -> None`
@@ -111,17 +110,11 @@ async def migrate_removed_publication_schema(conn) -> None:
     await conn.execute(text("DROP TABLE IF EXISTS publications"))
 ```
 
-Call it in `init_db()` after `migrate_removed_hot_topic_schema(conn)` and before
-`Base.metadata.create_all`:
-
-```python
-await migrate_removed_hot_topic_schema(conn)
-await migrate_removed_publication_schema(conn)
-await conn.run_sync(Base.metadata.create_all)
-```
-
-Delete the complete `Publication` model from `backend/models.py`. This ensures
-`Base.metadata.create_all` cannot recreate `publications`.
+Do not call the migration from `init_db()` yet and do not remove the model in
+this task. Wiring the migration before removing the model would cause
+`Base.metadata.create_all` to recreate the table; removing the model before its
+router consumers would temporarily break backend imports. Task 2 performs those
+dependent changes atomically.
 
 - [ ] **Step 4: Run migration and schema tests and verify GREEN**
 
@@ -131,8 +124,7 @@ Run:
 cd backend
 conda run --no-capture-output -n wems python -m pytest \
   tests/test_database_publication_removal.py \
-  tests/test_database_hot_topic_removal.py \
-  tests/test_models_schema.py -q
+  tests/test_database_hot_topic_removal.py -q
 ```
 
 Expected: all selected tests pass.
@@ -140,8 +132,7 @@ Expected: all selected tests pass.
 - [ ] **Step 5: Commit the database removal**
 
 ```bash
-git add backend/database.py backend/models.py \
-  backend/tests/test_database_publication_removal.py
+git add backend/database.py backend/tests/test_database_publication_removal.py
 git commit -m "refactor(db): remove publication records"
 ```
 
@@ -151,6 +142,8 @@ git commit -m "refactor(db): remove publication records"
 
 **Files:**
 - Modify: `backend/tests/test_wechat_publish.py`
+- Modify: `backend/database.py`
+- Modify: `backend/models.py`
 - Modify: `backend/main.py`
 - Modify: `backend/routers/drafts.py`
 - Modify: `backend/schemas.py`
@@ -158,6 +151,7 @@ git commit -m "refactor(db): remove publication records"
 - Delete: `backend/tests/test_published.py`
 
 **Interfaces:**
+- Consumes: `async def migrate_removed_publication_schema(conn) -> None`.
 - Removes: all methods under `/api/published-articles`.
 - Preserves: `POST /api/write/drafts/{draft_id}/publish/wechat`.
 - Preserves: `WechatPublishResponse(media_id: str)`.
@@ -217,6 +211,19 @@ In `backend/main.py`:
 
 Delete `backend/routers/published.py`.
 
+In `backend/database.py`, call the migration after
+`migrate_removed_hot_topic_schema(conn)` and before metadata creation:
+
+```python
+await migrate_removed_hot_topic_schema(conn)
+await migrate_removed_publication_schema(conn)
+await conn.run_sync(Base.metadata.create_all)
+```
+
+Delete the complete `Publication` model from `backend/models.py`. With the
+migration wired before metadata creation and the model absent, the table cannot
+be recreated.
+
 Delete `PublicationCreate`, `PublicationUpdate`, and `PublicationOut` from
 `backend/schemas.py`.
 
@@ -248,6 +255,8 @@ Run:
 ```bash
 cd backend
 conda run --no-capture-output -n wems python -m pytest \
+  tests/test_database_publication_removal.py \
+  tests/test_models_schema.py \
   tests/test_wechat_publish.py \
   tests/test_blog_publish.py -q
 ```
@@ -270,7 +279,8 @@ Expected: no runtime matches. Test-only 404 request strings remain excluded.
 - [ ] **Step 6: Commit the backend removal**
 
 ```bash
-git add backend/main.py backend/routers/drafts.py backend/schemas.py \
+git add backend/database.py backend/models.py backend/main.py \
+  backend/routers/drafts.py backend/schemas.py \
   backend/tests/test_wechat_publish.py
 git add -u backend/routers/published.py backend/tests/test_published.py
 git commit -m "refactor(api): remove publication record routes"
@@ -281,7 +291,6 @@ git commit -m "refactor(api): remove publication record routes"
 ### Task 3: Remove the publication-record frontend
 
 **Files:**
-- Create: `wemedia-studio/app/drafts/publication-records-removal.test.ts`
 - Modify: `wemedia-studio/components/features/Sidebar.tsx`
 - Modify: `README.md`
 - Delete: `wemedia-studio/app/published/page.tsx`
@@ -292,56 +301,19 @@ git commit -m "refactor(api): remove publication record routes"
 - Removes: the `/published` Next.js route and publication-record API client.
 - Preserves: `PublishDialog` and its `wechat`, `x`, and `blog` tabs.
 
-- [ ] **Step 1: Write the failing frontend boundary test**
-
-Create `wemedia-studio/app/drafts/publication-records-removal.test.ts`:
-
-```typescript
-import { existsSync, readFileSync } from 'node:fs'
-import { describe, expect, it } from 'vitest'
-
-const sidebar = readFileSync(
-  new URL('../../components/features/Sidebar.tsx', import.meta.url),
-  'utf8',
-)
-const draftsClient = readFileSync(
-  new URL('./DraftsClient.tsx', import.meta.url),
-  'utf8',
-)
-const publishDialog = readFileSync(
-  new URL('./PublishDialog.tsx', import.meta.url),
-  'utf8',
-)
-
-describe('publication record removal', () => {
-  it('removes the publication record page and navigation entry', () => {
-    expect(sidebar).not.toContain("href: '/published'")
-    expect(existsSync(new URL('../published/page.tsx', import.meta.url))).toBe(false)
-    expect(existsSync(new URL('../../lib/api/published.ts', import.meta.url))).toBe(false)
-  })
-
-  it('keeps draft publishing available', () => {
-    expect(draftsClient).toContain('PublishDialog')
-    expect(publishDialog).toContain('WechatPublishPanel')
-    expect(publishDialog).toContain('XArticlePanel')
-    expect(publishDialog).toContain('BlogPublishPanel')
-  })
-})
-```
-
-- [ ] **Step 2: Run the boundary test and verify RED**
+- [ ] **Step 1: Verify the existing page before removal (RED)**
 
 Run:
 
 ```bash
-cd wemedia-studio
-pnpm vitest run app/drafts/publication-records-removal.test.ts
+curl -sS -o /dev/null -w '%{http_code}\n' \
+  http://127.0.0.1:3000/published
 ```
 
-Expected: the first test fails because the sidebar entry and files still exist;
-the retained publishing test passes.
+Expected: `200`, proving the user-visible page exists before the change and
+would fail the desired 404 contract.
 
-- [ ] **Step 3: Delete the frontend record-management layer**
+- [ ] **Step 2: Delete the frontend record-management layer**
 
 - Delete `wemedia-studio/app/published/page.tsx`.
 - Delete `wemedia-studio/app/published/PublishedClient.tsx`.
@@ -360,20 +332,7 @@ to:
 今日工作台 / 今日计划 / 创作任务 / AI 助手 / 草稿箱 / 写作模板 / 创作资产 / 待响应 / 各信息源 / 设置。
 ```
 
-- [ ] **Step 4: Run focused frontend tests and verify GREEN**
-
-Run:
-
-```bash
-cd wemedia-studio
-pnpm vitest run \
-  app/drafts/publication-records-removal.test.ts \
-  app/x-responses/x-responses-layout.test.tsx
-```
-
-Expected: all selected tests pass.
-
-- [ ] **Step 5: Regenerate Next.js route types and type-check**
+- [ ] **Step 3: Regenerate route types, type-check, and verify GREEN**
 
 Run:
 
@@ -381,17 +340,20 @@ Run:
 cd wemedia-studio
 pnpm exec next typegen
 pnpm exec tsc --noEmit
+curl -sS -o /dev/null -w '%{http_code}\n' \
+  http://127.0.0.1:3000/published
 ```
 
-Expected: both commands exit 0 and generated route types contain no
-`/published` route.
+Expected: both build-time commands exit 0, generated route types contain no
+`/published` route, and the running development server returns `404`. Because
+`DraftsClient` still imports `PublishDialog`, type-checking also protects the
+retained draft publishing surface from accidental deletion.
 
-- [ ] **Step 6: Commit the frontend removal**
+- [ ] **Step 4: Commit the frontend removal**
 
 ```bash
 git add README.md \
-  wemedia-studio/components/features/Sidebar.tsx \
-  wemedia-studio/app/drafts/publication-records-removal.test.ts
+  wemedia-studio/components/features/Sidebar.tsx
 git add -u wemedia-studio/app/published \
   wemedia-studio/lib/api/published.ts
 git commit -m "refactor(ui): remove publication records page"
