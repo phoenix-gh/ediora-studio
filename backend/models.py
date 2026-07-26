@@ -708,7 +708,7 @@ class DailyPlan(Base):
 
 
 class DailyPlanItem(Base):
-    """计划里的一条选题。后续发布排期/效果回流都挂在这个锚点上。"""
+    """计划里的一条选题，是入队创作及撞题共享稿件的锚点。"""
     __tablename__ = "daily_plan_items"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
