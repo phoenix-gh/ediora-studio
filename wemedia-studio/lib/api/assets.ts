@@ -11,7 +11,7 @@ export const listCreativeAssets = (assetType?: CreativeAsset['asset_type']) => a
 export const createCreativeAsset = (body: Pick<CreativeAsset, 'asset_type' | 'media_kind' | 'title' | 'content' | 'url' | 'media_type' | 'filename' | 'directory' | 'tags'>) => apiFetch<CreativeAsset>('/assets', { method: 'POST', body: JSON.stringify(body) })
 export async function uploadCreativeAsset(mediaKind: 'image' | 'video' | 'audio', file: File) { const body = new FormData(); body.append('file', file); return apiFetch<CreativeAsset>(`/assets/upload?media_kind=${mediaKind}`, { method: 'POST', body, headers: {} }) }
 export const deleteCreativeAsset = (id: number) => apiFetch<void>(`/assets/${id}`, { method: 'DELETE' })
-export type CreativeAssetDirectory = { id: number; name: string; asset_type: 'article' | 'media'; parent_id: number | null; created_at: string }
+export type CreativeAssetDirectory = { id: number; name: string; asset_type: 'article' | 'media'; parent_id: number | null; is_system: boolean; created_at: string }
 export const listCreativeAssetDirectories = (assetType: 'article' | 'media') => apiFetch<CreativeAssetDirectory[]>(`/assets/directories?asset_type=${assetType}`)
 export const createCreativeAssetDirectory = (name: string, assetType: 'article' | 'media', parentId: number | null = null) => apiFetch<CreativeAssetDirectory>('/assets/directories', { method: 'POST', body: JSON.stringify({ name, asset_type: assetType, parent_id: parentId }) })
 export const renameCreativeAssetDirectory = (id: number, name: string) => apiFetch<CreativeAssetDirectory>(`/assets/directories/${id}`, { method: 'PATCH', body: JSON.stringify({ name }) })

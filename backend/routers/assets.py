@@ -58,12 +58,24 @@ class DirectoryOut(BaseModel):
     name: str
     asset_type: AssetType
     parent_id: int | None
+    is_system: bool
     created_at: datetime
-    model_config = {"from_attributes": True}
+
+
+def _directory_payload(directory: CreativeAssetDirectory) -> dict:
+    return {
+        "id": directory.id,
+        "name": directory.name,
+        "asset_type": directory.asset_type,
+        "parent_id": directory.parent_id,
+        "is_system": bool(directory.system_key),
+        "created_at": directory.created_at,
+    }
 
 @router.get("/directories", response_model=list[DirectoryOut])
 async def list_directories(asset_type: AssetType, db: AsyncSession = Depends(get_db)):
-    return (await db.execute(select(CreativeAssetDirectory).where(CreativeAssetDirectory.asset_type == asset_type).order_by(CreativeAssetDirectory.name))).scalars().all()
+    directories = (await db.execute(select(CreativeAssetDirectory).where(CreativeAssetDirectory.asset_type == asset_type).order_by(CreativeAssetDirectory.name))).scalars().all()
+    return [_directory_payload(directory) for directory in directories]
 
 @router.post("/directories", response_model=DirectoryOut, status_code=201)
 async def create_directory(body: DirectoryBody, db: AsyncSession = Depends(get_db)):
@@ -75,24 +87,28 @@ async def create_directory(body: DirectoryBody, db: AsyncSession = Depends(get_d
     directory = CreativeAssetDirectory(name=name, asset_type=body.asset_type, parent_id=body.parent_id); db.add(directory)
     try: await db.commit()
     except Exception: await db.rollback(); raise HTTPException(409, "目录已存在")
-    await db.refresh(directory); return directory
+    await db.refresh(directory); return _directory_payload(directory)
 
 @router.patch("/directories/{directory_id}", response_model=DirectoryOut)
 async def rename_directory(directory_id: int, body: DirectoryBody, db: AsyncSession = Depends(get_db)):
     directory = await db.get(CreativeAssetDirectory, directory_id)
     if not directory: raise HTTPException(404, "目录不存在")
+    if directory.system_key:
+        raise HTTPException(409, "系统目录不能重命名")
     old, directory.name = directory.name, body.name.strip()
     assets = (await db.execute(select(CreativeAsset).where(
         CreativeAsset.directory == old,
         CreativeAsset.asset_type == directory.asset_type,
     ))).scalars().all()
     for asset in assets: asset.directory = directory.name
-    await db.commit(); await db.refresh(directory); return directory
+    await db.commit(); await db.refresh(directory); return _directory_payload(directory)
 
 @router.delete("/directories/{directory_id}", status_code=204)
 async def delete_directory(directory_id: int, db: AsyncSession = Depends(get_db)):
     directory = await db.get(CreativeAssetDirectory, directory_id)
     if not directory: raise HTTPException(404, "目录不存在")
+    if directory.system_key:
+        raise HTTPException(409, "系统目录不能删除")
     descendants = [directory]
     known_ids = {directory.id}
     while True:

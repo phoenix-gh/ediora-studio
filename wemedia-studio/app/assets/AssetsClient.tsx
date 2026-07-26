@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useMemo, useState } from 'react'
-import { Image as ImageIcon, Music, Pencil, Plus, Trash2, Video } from 'lucide-react'
+import { Image as ImageIcon, LockKeyhole, Music, Pencil, Plus, Trash2, Video } from 'lucide-react'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
 import { createCreativeAssetDirectory, creativeAssetUrl, deleteCreativeAssetDirectory, listCreativeAssetDirectories, renameCreativeAssetDirectory, type CreativeAsset, type CreativeAssetDirectory } from '@/lib/api/assets'
@@ -49,7 +49,26 @@ export function AssetsClient({ initialAssets }: { initialAssets: CreativeAsset[]
         <button onClick={() => { setType('media'); setDirectory('') }} className={cn('flex-1 border-b-2 py-2.5 text-xs', type === 'media' ? 'border-indigo-500 text-indigo-600' : 'border-transparent text-zinc-500')}>多媒体</button>
       </div>
       <div className="flex items-center px-4 pt-4 pb-1 text-[11px] font-medium text-zinc-400">目录<button onClick={() => void addDirectory()} className="ml-auto text-indigo-500"><Plus className="h-3.5 w-3.5" /></button></div>
-      <nav className="py-1"><button onClick={() => setDirectory('')} className={cn('flex w-full items-center px-4 py-2 text-left text-xs', !directory ? 'bg-indigo-50 text-indigo-700 dark:bg-indigo-950/50 dark:text-indigo-300' : 'text-zinc-600 hover:bg-zinc-50 dark:text-zinc-400 dark:hover:bg-zinc-800')}><span>全部资产</span><span className="ml-auto text-zinc-400">{count('')}</span></button>{tree.map(item => <div key={item.id} className="group flex items-center" style={{ paddingLeft: `${item.depth * 14}px` }}><button onClick={() => setDirectory(item.name)} className={cn('flex flex-1 items-center px-4 py-2 text-left text-xs', directory === item.name && 'bg-indigo-50 text-indigo-700')}><span>📁 {item.name}</span><span className="ml-auto text-zinc-400">{count(item.name)}</span></button><span className="mr-2 hidden gap-1 group-hover:flex"><button onClick={() => void editDirectory(item)}><Pencil className="h-3 w-3" /></button><button className="text-red-500" onClick={() => void removeDirectory(item)}><Trash2 className="h-3 w-3" /></button></span></div>)}</nav>
+      <nav className="py-1">
+        <button onClick={() => setDirectory('')} className={cn('flex w-full items-center px-4 py-2 text-left text-xs', !directory ? 'bg-indigo-50 text-indigo-700 dark:bg-indigo-950/50 dark:text-indigo-300' : 'text-zinc-600 hover:bg-zinc-50 dark:text-zinc-400 dark:hover:bg-zinc-800')}><span>全部资产</span><span className="ml-auto text-zinc-400">{count('')}</span></button>
+        {tree.map(item => (
+          <div key={item.id} className="group flex items-center" style={{ paddingLeft: `${item.depth * 14}px` }}>
+            <button onClick={() => setDirectory(item.name)} className={cn('flex flex-1 items-center px-4 py-2 text-left text-xs', directory === item.name && 'bg-indigo-50 text-indigo-700')}>
+              <span className="inline-flex items-center">
+                {item.is_system ? <LockKeyhole aria-label="系统目录" className="mr-1 h-3 w-3" /> : <span aria-hidden="true">📁&nbsp;</span>}
+                {item.name}
+              </span>
+              <span className="ml-auto text-zinc-400">{count(item.name)}</span>
+            </button>
+            {!item.is_system && (
+              <span className="mr-2 hidden gap-1 group-hover:flex">
+                <button aria-label={`重命名${item.name}`} onClick={() => void editDirectory(item)}><Pencil className="h-3 w-3" /></button>
+                <button aria-label={`删除${item.name}`} className="text-red-500" onClick={() => void removeDirectory(item)}><Trash2 className="h-3 w-3" /></button>
+              </span>
+            )}
+          </div>
+        ))}
+      </nav>
     </aside>
     <main className="flex min-w-0 flex-1 flex-col">
       <div className="flex h-12 items-center gap-4 border-b border-zinc-200 px-6 dark:border-zinc-800"><span className="text-xs font-medium">{directory || '全部资产'}</span>{type === 'media' && <div className="flex gap-3 text-xs text-zinc-500">{(['all','image','video','audio'] as MediaFilter[]).map(item => <button key={item} onClick={() => setMediaFilter(item)} className={cn(mediaFilter === item && 'font-medium text-indigo-600')}>{item === 'all' ? '全部' : item === 'image' ? '图片' : item === 'video' ? '视频' : '音频'}</button>)}</div>}<span className="ml-auto text-xs text-zinc-400">{visible.length} 项</span></div>
