@@ -758,6 +758,9 @@ class CreativeAssetDirectory(Base):
     name: Mapped[str] = mapped_column(String, nullable=False)
     asset_type: Mapped[str] = mapped_column(String, nullable=False, default="article", index=True)
     parent_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    system_key: Mapped[str | None] = mapped_column(
+        String, nullable=True, unique=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
 
 

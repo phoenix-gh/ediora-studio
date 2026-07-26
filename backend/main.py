@@ -15,6 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from loguru import logger
 from database import SessionLocal, init_db
+from digital_human_assets import backfill_digital_human_assets
 from routers import settings, github, x, x_accounts, x_responses, papers, upload, drafts, writing_plans, youtube, producthunt, wechat, v2ex, kr, juejin, studio, publish_accounts, reddit, assets, dashboard, daily_plan, jobs, chat, digital_humans, talking_videos
 from x_credential_store import CredentialFileStore
 from routers.x_accounts import reconcile_x_credential_accounts
@@ -35,6 +36,9 @@ scheduler = AsyncIOScheduler(
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
+    async with SessionLocal() as db:
+        await backfill_digital_human_assets(db)
+        await db.commit()
     try:
         async with SessionLocal() as db:
             errors = await reconcile_x_credential_accounts(db, CredentialFileStore())

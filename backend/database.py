@@ -104,12 +104,22 @@ async def init_db():
         await conn.execute(text("ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS directory VARCHAR NOT NULL DEFAULT ''"))
         await conn.execute(text("ALTER TABLE creative_asset_directories ADD COLUMN IF NOT EXISTS asset_type VARCHAR NOT NULL DEFAULT 'article'"))
         await conn.execute(text("ALTER TABLE creative_asset_directories ADD COLUMN IF NOT EXISTS parent_id INTEGER"))
+        await conn.execute(text(
+            "ALTER TABLE creative_asset_directories "
+            "ADD COLUMN IF NOT EXISTS system_key VARCHAR"
+        ))
         if not DATABASE_URL.startswith("sqlite"):
             # The first version used a globally unique name. Directories now
             # have independent article/media trees, so the same name is valid
             # once in each tree.
             await conn.execute(text("ALTER TABLE creative_asset_directories DROP CONSTRAINT IF EXISTS creative_asset_directories_name_key"))
             await conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_creative_asset_directories_asset_type_name ON creative_asset_directories (asset_type, name)"))
+            await conn.execute(text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS "
+                "uq_creative_asset_directories_system_key "
+                "ON creative_asset_directories (system_key) "
+                "WHERE system_key IS NOT NULL"
+            ))
         # x_posts column additions (idempotent)
         await conn.execute(text(
             "ALTER TABLE x_posts ADD COLUMN IF NOT EXISTS author_avatar VARCHAR NOT NULL DEFAULT ''"
