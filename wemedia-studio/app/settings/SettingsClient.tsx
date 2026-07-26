@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { Brain, Rss, GitFork, AtSign, ScrollText, FileText, Megaphone, Globe, Search, Download } from 'lucide-react'
+import { Brain, Rss, GitFork, AtSign, ScrollText, FileText, Megaphone, Globe, Search, Download, Video } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { AppSettings } from '@/lib/api/settings'
 import { AISection }       from './sections/AISection'
@@ -14,11 +14,13 @@ import { PublishAccountsSection } from './sections/PublishAccountsSection'
 import { BlogSection }     from './sections/BlogSection'
 import { WebSearchSection } from './sections/WebSearchSection'
 import { WebFetchSection } from './sections/WebFetchSection'
+import { HeyGenSection } from './sections/HeyGenSection'
 
-type SectionId = 'ai' | 'collect' | 'github' | 'x' | 'arxiv' | 'publish' | 'blog' | 'web-search' | 'web-fetch' | 'logs'
+type SectionId = 'ai' | 'heygen' | 'collect' | 'github' | 'x' | 'arxiv' | 'publish' | 'blog' | 'web-search' | 'web-fetch' | 'logs'
 
 const NAV: { id: SectionId; label: string; icon: React.ElementType; desc: string }[] = [
   { id: 'ai',       label: 'AI 大模型',   icon: Brain,     desc: '供应商 · API Key · 模型' },
+  { id: 'heygen',   label: 'HeyGen',      icon: Video,     desc: '数字人 · 声音克隆 · 视频生成' },
   { id: 'collect',  label: '数据采集',    icon: Rss,       desc: 'RSSHub · 采集间隔' },
   { id: 'github',   label: 'GitHub',      icon: GitFork,   desc: 'Token · Issues · Trending' },
   { id: 'x',        label: 'X / Twitter', icon: AtSign,    desc: 'camofox · Cookie · 帖子趋势' },
@@ -32,6 +34,7 @@ const NAV: { id: SectionId; label: string; icon: React.ElementType; desc: string
 
 const SECTION_TITLE: Record<SectionId, string> = {
   ai:       'AI 大模型',
+  heygen:   'HeyGen',
   collect:  '数据采集',
   github:   'GitHub 集成',
   x:        'X / Twitter 采集',
@@ -86,6 +89,7 @@ export function SettingsClient({ initialSettings }: { initialSettings: AppSettin
           <p className={cn('text-xs text-zinc-400', isLogs ? 'mb-4' : 'mb-7')}>{NAV.find(n => n.id === active)?.desc}</p>
 
           {active === 'ai'       && <AISection      settings={settings} onSaved={setSettings} />}
+          {active === 'heygen'   && <HeyGenSection  settings={settings} onSaved={setSettings} />}
           {active === 'collect'  && <CollectSection settings={settings} onSaved={setSettings} />}
           {active === 'github'   && <GitHubSection  settings={settings} onSaved={setSettings} />}
           {active === 'x'        && <XSection       settings={settings} onSaved={setSettings} />}

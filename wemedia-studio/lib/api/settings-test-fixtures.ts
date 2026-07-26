@@ -12,6 +12,8 @@ export function makeSettings(overrides: Partial<AppSettings> = {}): AppSettings 
     image_base_url: '',
     image_api_key_set: false,
     image_api_key_preview: '',
+    heygen_api_key_set: false,
+    heygen_api_key_preview: '',
     rsshub_base: 'http://127.0.0.1:1200',
     github_token_set: false,
     github_token_preview: '',

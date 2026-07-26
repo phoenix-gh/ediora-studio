@@ -32,6 +32,8 @@ export interface AppSettings {
   image_base_url: string
   image_api_key_set: boolean
   image_api_key_preview: string
+  heygen_api_key_set: boolean
+  heygen_api_key_preview: string
   rsshub_base: string
   github_token_set: boolean
   github_token_preview: string
@@ -95,6 +97,7 @@ export interface SettingsUpdate {
   image_model?: string
   image_api_key?: string
   image_base_url?: string
+  heygen_api_key?: string
   rsshub_base?: string
   github_token?: string
   github_interval_minutes?: number
@@ -183,4 +186,8 @@ export async function fetchProviderModels(body: FetchModelsRequest): Promise<Fet
 
 export async function testLLM(): Promise<{ ok: boolean; response?: string; error?: string }> {
   return apiFetch('/settings/test', { method: 'POST' })
+}
+
+export async function testHeyGen(): Promise<{ ok: boolean; error: string }> {
+  return apiFetch('/settings/heygen/test', { method: 'POST' })
 }

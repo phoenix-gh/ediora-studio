@@ -1,9 +1,12 @@
 export const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000/api'
 
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  const isFormData = typeof FormData !== 'undefined' && init?.body instanceof FormData
   const res = await fetch(`${API_BASE}${path}`, {
     ...init,
-    headers: { 'Content-Type': 'application/json', ...init?.headers },
+    headers: isFormData
+      ? init?.headers
+      : { 'Content-Type': 'application/json', ...init?.headers },
     cache: init?.cache ?? 'no-store',
   })
   if (!res.ok) {
