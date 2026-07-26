@@ -167,11 +167,11 @@ def test_controlled_queue_to_telegram_flow_finishes_under_one_minute(client, mon
     )
     assert used.json()["workflow_status"] == "used"
     converted = client.post(f"/api/x/responses/{decision['id']}/convert-to-topic")
-    assert converted.json()["workflow_status"] == "converted"
-    converted_list = client.get(
-        "/api/x/responses?workflow_status=converted",
+    assert converted.status_code == 404
+    used_list = client.get(
+        "/api/x/responses?workflow_status=used",
     ).json()["items"]
-    assert [item["tweet_id"] for item in converted_list] == ["controlled-e2e"]
+    assert [item["tweet_id"] for item in used_list] == ["controlled-e2e"]
 
     job = client.get(f"/api/jobs/{job_id}").json()
     assert job["status"] == "succeeded"
