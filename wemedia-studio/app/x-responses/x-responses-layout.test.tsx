@@ -42,7 +42,7 @@ describe('X realtime response UI', () => {
   })
 
   it('adds the pending response destination to global navigation', () => {
-    expect(sidebar).toContain("href: '/x-responses'")
+    expect(sidebar).toContain("href: '/responses'")
     expect(sidebar).toContain("label: '待响应'")
     expect(sidebar).not.toContain('/trend-topics')
     expect(sidebar).not.toContain('热点选题')
