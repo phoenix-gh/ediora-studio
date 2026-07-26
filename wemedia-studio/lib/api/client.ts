@@ -1,4 +1,6 @@
-export const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000/api'
+export const API_BASE = (
+  typeof window === 'undefined' ? process.env.WMS_API_URL : undefined
+) ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000/api'
 
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const isFormData = typeof FormData !== 'undefined' && init?.body instanceof FormData

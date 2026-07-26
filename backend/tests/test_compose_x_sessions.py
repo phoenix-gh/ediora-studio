@@ -35,6 +35,26 @@ def test_api_uses_persistent_feedgrab_session_directory():
     assert_x_session_contract(compose)
 
 
+def test_built_api_image_can_import_application():
+    result = subprocess.run(
+        [
+            "docker",
+            "compose",
+            "run",
+            "--rm",
+            "--no-deps",
+            "api",
+            "python",
+            "-c",
+            "import main",
+        ],
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
 @pytest.mark.parametrize(
     "volumes",
     [
