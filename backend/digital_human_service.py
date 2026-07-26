@@ -157,7 +157,7 @@ async def create_render(
         raise InvalidTalkingVideo("请先填写口播脚本")
     role = await session.get(DigitalHuman, project.digital_human_id)
     if role is None or role.status != "ready":
-        raise InvalidTalkingVideo("数字人角色尚未准备完成")
+        raise InvalidTalkingVideo("数字人角色尚未就绪")
     if not role.heygen_avatar_id or not role.heygen_voice_id:
         raise InvalidTalkingVideo("数字人角色缺少 HeyGen 形象或声音")
     environment_asset_id = (

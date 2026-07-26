@@ -15,7 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from loguru import logger
 from database import SessionLocal, init_db
-from routers import settings, github, x, x_accounts, x_responses, papers, upload, drafts, writing_plans, youtube, producthunt, wechat, v2ex, kr, juejin, studio, publish_accounts, reddit, assets, dashboard, daily_plan, jobs, chat
+from routers import settings, github, x, x_accounts, x_responses, papers, upload, drafts, writing_plans, youtube, producthunt, wechat, v2ex, kr, juejin, studio, publish_accounts, reddit, assets, dashboard, daily_plan, jobs, chat, digital_humans, talking_videos
 from x_credential_store import CredentialFileStore
 from routers.x_accounts import reconcile_x_credential_accounts
 import scheduler as job_registry
@@ -101,6 +101,8 @@ app.include_router(dashboard.router, prefix="/api")
 app.include_router(daily_plan.router, prefix="/api")
 app.include_router(jobs.router, prefix="/api")
 app.include_router(chat.router, prefix="/api")
+app.include_router(digital_humans.router, prefix="/api")
+app.include_router(talking_videos.router, prefix="/api")
 
 _mcp_handler = _mcp_http_app.routes[0].endpoint
 app.add_route("/mcp", _mcp_handler, methods=["GET", "POST", "DELETE"])

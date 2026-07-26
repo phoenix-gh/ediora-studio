@@ -1,0 +1,202 @@
+import asyncio
+import sys
+
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+
+@pytest.fixture
+def api(monkeypatch, tmp_path):
+    monkeypatch.setenv(
+        "WMS_DATABASE_URL",
+        f"sqlite+aiosqlite:///{tmp_path / 'talking-videos-router.db'}",
+    )
+    for module in list(sys.modules):
+        if module.startswith(
+            (
+                "database",
+                "models",
+                "content_jobs",
+                "digital_human_service",
+                "routers.talking_videos",
+            )
+        ):
+            sys.modules.pop(module, None)
+
+    from database import Base, SessionLocal, engine, get_db
+    import models  # noqa: F401
+    import routers.talking_videos as router_module
+
+    async def no_op_enqueue(_job_id: int):
+        return None
+
+    monkeypatch.setattr(router_module, "enqueue_job", no_op_enqueue)
+
+    async def setup():
+        async with engine.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all)
+
+    asyncio.new_event_loop().run_until_complete(setup())
+    app = FastAPI()
+    app.include_router(router_module.router, prefix="/api")
+
+    async def override_db():
+        async with SessionLocal() as session:
+            yield session
+
+    app.dependency_overrides[get_db] = override_db
+    return TestClient(app), SessionLocal, router_module
+
+
+def _seed(session_factory, *, ready: bool):
+    async def run():
+        from models import CreativeAsset, DigitalHuman
+
+        async with session_factory() as session:
+            environment = CreativeAsset(
+                asset_type="media",
+                media_kind="image",
+                title="environment",
+                url="/api/uploads/environment.jpg",
+                media_type="image/jpeg",
+                filename="environment.jpg",
+            )
+            portrait = CreativeAsset(
+                asset_type="media",
+                media_kind="image",
+                title="portrait",
+                url="/api/uploads/portrait.png",
+                media_type="image/png",
+                filename="portrait.png",
+            )
+            voice = CreativeAsset(
+                asset_type="media",
+                media_kind="audio",
+                title="voice",
+                url="/api/uploads/voice.wav",
+                media_type="audio/wav",
+                filename="voice.wav",
+            )
+            session.add_all([environment, portrait, voice])
+            await session.flush()
+            role = DigitalHuman(
+                name="林晓",
+                status="ready" if ready else "processing",
+                portrait_asset_id=portrait.id,
+                voice_sample_asset_id=voice.id,
+                default_environment_asset_id=environment.id,
+                heygen_avatar_id="avatar-1" if ready else "",
+                heygen_voice_id="voice-1" if ready else "",
+            )
+            session.add(role)
+            await session.commit()
+            return role.id, environment.id
+
+    return asyncio.new_event_loop().run_until_complete(run())
+
+
+def test_render_endpoint_rejects_non_ready_role(api):
+    client, session_factory, _ = api
+    role_id, _ = _seed(session_factory, ready=False)
+    project = client.post(
+        "/api/talking-videos",
+        json={"title": "作品", "digital_human_id": role_id},
+    ).json()
+    client.patch(
+        f"/api/talking-videos/{project['id']}",
+        json={"script": "准备生成"},
+    )
+
+    response = client.post(f"/api/talking-videos/{project['id']}/renders")
+
+    assert response.status_code == 409
+    assert "尚未就绪" in response.json()["detail"]
+
+
+def test_create_render_enqueues_job_and_returns_immutable_version(api, monkeypatch):
+    client, session_factory, router_module = api
+    role_id, environment_id = _seed(session_factory, ready=True)
+    queued = []
+
+    async def capture(job_id: int):
+        queued.append(job_id)
+
+    monkeypatch.setattr(router_module, "enqueue_job", capture)
+    project = client.post(
+        "/api/talking-videos",
+        json={"title": "作品", "digital_human_id": role_id},
+    ).json()
+    client.patch(
+        f"/api/talking-videos/{project['id']}",
+        json={"script": "第一版脚本"},
+    )
+    first = client.post(
+        f"/api/talking-videos/{project['id']}/renders"
+    )
+
+    assert first.status_code == 201, first.text
+    assert first.json()["version"] == 1
+    assert first.json()["script_snapshot"] == "第一版脚本"
+    assert first.json()["environment_asset_id"] == environment_id
+    assert queued == [first.json()["job_id"]]
+
+
+def test_render_progress_requires_local_video_asset_and_detail_is_nested(api):
+    client, session_factory, _ = api
+    role_id, _ = _seed(session_factory, ready=True)
+    project = client.post(
+        "/api/talking-videos",
+        json={
+            "title": "作品",
+            "digital_human_id": role_id,
+            "script": "第一版脚本",
+        },
+    ).json()
+    render = client.post(
+        f"/api/talking-videos/{project['id']}/renders"
+    ).json()
+
+    invalid = client.post(
+        f"/api/talking-videos/renders/{render['id']}/worker-progress",
+        json={"status": "succeeded", "heygen_video_id": "video-1"},
+    )
+    assert invalid.status_code == 422
+
+    async def create_video_asset():
+        from models import CreativeAsset
+
+        async with session_factory() as session:
+            asset = CreativeAsset(
+                asset_type="media",
+                media_kind="video",
+                title="render.mp4",
+                url="/api/uploads/render.mp4",
+                media_type="video/mp4",
+                filename="render.mp4",
+            )
+            session.add(asset)
+            await session.commit()
+            return asset.id
+
+    video_asset_id = asyncio.new_event_loop().run_until_complete(
+        create_video_asset()
+    )
+    succeeded = client.post(
+        f"/api/talking-videos/renders/{render['id']}/worker-progress",
+        json={
+            "status": "succeeded",
+            "heygen_video_id": "video-1",
+            "video_asset_id": video_asset_id,
+        },
+    )
+    assert succeeded.status_code == 200, succeeded.text
+
+    client.post(
+        f"/api/talking-videos/{project['id']}/renders/{render['id']}/select"
+    )
+    detail = client.get(f"/api/talking-videos/{project['id']}").json()
+    assert detail["role"]["id"] == role_id
+    assert detail["effective_environment"]["media_kind"] == "image"
+    assert detail["renders"][0]["video_asset"]["url"] == "/api/uploads/render.mp4"
+    assert detail["current_render_id"] == render["id"]
