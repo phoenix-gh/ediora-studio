@@ -684,6 +684,73 @@ class CreativeAsset(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
 
+
+class DigitalHuman(Base):
+    __tablename__ = "digital_humans"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="processing", index=True)
+    portrait_asset_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    voice_sample_asset_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    default_environment_asset_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    heygen_avatar_group_id: Mapped[str] = mapped_column(String, default="")
+    heygen_avatar_id: Mapped[str] = mapped_column(String, default="")
+    heygen_voice_id: Mapped[str] = mapped_column(String, default="")
+    provider_state: Mapped[dict] = mapped_column(JSON, default=dict)
+    setup_job_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    error: Mapped[str] = mapped_column(Text, default="")
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=now_utc, onupdate=now_utc
+    )
+
+
+class TalkingVideoProject(Base):
+    __tablename__ = "talking_video_projects"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    title: Mapped[str] = mapped_column(String(300), default="")
+    digital_human_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    script: Mapped[str] = mapped_column(Text, default="")
+    script_source: Mapped[str] = mapped_column(String(20), default="manual")
+    source_draft_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    environment_asset_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    current_render_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=now_utc, onupdate=now_utc
+    )
+
+
+class TalkingVideoRender(Base):
+    __tablename__ = "talking_video_renders"
+    __table_args__ = (
+        UniqueConstraint(
+            "project_id", "version", name="uq_talking_video_render_version"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    project_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="queued", index=True)
+    job_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    script_snapshot: Mapped[str] = mapped_column(Text, nullable=False)
+    digital_human_snapshot: Mapped[dict] = mapped_column(JSON, default=dict)
+    environment_asset_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    provider_state: Mapped[dict] = mapped_column(JSON, default=dict)
+    heygen_environment_asset_id: Mapped[str] = mapped_column(String, default="")
+    heygen_video_id: Mapped[str] = mapped_column(String, default="")
+    video_asset_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    error: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
 class CreativeAssetDirectory(Base):
     __tablename__ = "creative_asset_directories"
     __table_args__ = (UniqueConstraint("asset_type", "name", name="uq_creative_asset_directories_asset_type_name"),)
