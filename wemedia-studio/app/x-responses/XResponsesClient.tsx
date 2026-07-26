@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import {
-  Check, Clipboard, ExternalLink, FileInput, Loader2, MessageSquareReply,
+  Check, Clipboard, ExternalLink, Loader2, MessageSquareReply,
   RefreshCw, ShieldCheck, ShieldQuestion, X,
 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -10,7 +10,6 @@ import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import {
-  convertXResponseToTopic,
   listXResponses,
   setXResponseFeedback,
   type XResponseDecision,
@@ -145,11 +144,6 @@ export function XResponsesClient({ initialItems }: { initialItems: XResponseDeci
                   () => setXResponseFeedback(item.id, status),
                   status === 'used' ? '已标记采用' : '已忽略',
                 )}
-                onConvert={() => applyMutation(
-                  item.id,
-                  () => convertXResponseToTopic(item.id),
-                  '已转为选题',
-                )}
               />
             ))}
           </div>
@@ -160,13 +154,12 @@ export function XResponsesClient({ initialItems }: { initialItems: XResponseDeci
 }
 
 function ResponseCard({
-  item, busy, onCopy, onStatus, onConvert,
+  item, busy, onCopy, onStatus,
 }: {
   item: XResponseDecision
   busy: boolean
   onCopy: () => void
   onStatus: (status: 'used' | 'ignored') => void
-  onConvert: () => void
 }) {
   const draft = item.comment_draft ?? item.quote_draft
   const verificationText = item.verification_status === 'verified'
@@ -246,9 +239,6 @@ function ResponseCard({
           <Button size="sm" variant="outline" disabled={busy} onClick={() => onStatus('ignored')}>
             <X className="size-3.5" />忽略
           </Button>
-          <Button size="sm" variant="outline" disabled={busy} onClick={onConvert}>
-            <FileInput className="size-3.5" />转为选题
-          </Button>
           <Button size="sm" disabled={busy} onClick={() => onStatus('used')}>
             {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
             已采用
@@ -262,7 +252,6 @@ function ResponseCard({
 function workflowLabel(status: XResponseWorkflowStatus) {
   if (status === 'used') return '已采用'
   if (status === 'ignored') return '已忽略'
-  if (status === 'converted') return '已转选题'
   return '待处理'
 }
 

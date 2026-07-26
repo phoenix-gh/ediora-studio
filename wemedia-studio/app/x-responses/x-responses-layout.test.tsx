@@ -8,10 +8,11 @@ const xSubscriptions = readFileSync(new URL('../x/XClient.tsx', import.meta.url)
 const xSettings = readFileSync(new URL('../settings/sections/XSection.tsx', import.meta.url), 'utf8')
 const telegramSettings = readFileSync(new URL('../settings/sections/TelegramSettingsCard.tsx', import.meta.url), 'utf8')
 const sidebar = readFileSync(new URL('../../components/features/Sidebar.tsx', import.meta.url), 'utf8')
+const xResponseApi = readFileSync(new URL('../../lib/api/x-responses.ts', import.meta.url), 'utf8')
 
 
 describe('X realtime response UI', () => {
-  it('shows the decision evidence and all manual actions', () => {
+  it('shows decision evidence and the surviving manual actions', () => {
     expect(inbox).toContain('评分')
     expect(inbox).toContain('置信度')
     expect(inbox).toContain('核验')
@@ -20,7 +21,8 @@ describe('X realtime response UI', () => {
     expect(inbox).toContain('查看原帖')
     expect(inbox).toContain('已采用')
     expect(inbox).toContain('忽略')
-    expect(inbox).toContain('转为选题')
+    expect(inbox).not.toContain('转为选题')
+    expect(inbox).not.toContain('convertXResponseToTopic')
   })
 
   it('uses realtime response wording and hides it for search subscriptions', () => {
@@ -42,5 +44,12 @@ describe('X realtime response UI', () => {
   it('adds the pending response destination to global navigation', () => {
     expect(sidebar).toContain("href: '/x-responses'")
     expect(sidebar).toContain("label: '待响应'")
+    expect(sidebar).not.toContain('/trend-topics')
+    expect(sidebar).not.toContain('热点选题')
+  })
+
+  it('removes the converted workflow contract', () => {
+    expect(xResponseApi).not.toContain('convert-to-topic')
+    expect(xResponseApi).not.toContain("'converted'")
   })
 })

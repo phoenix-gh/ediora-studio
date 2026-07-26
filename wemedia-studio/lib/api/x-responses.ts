@@ -2,7 +2,7 @@ import { apiFetch } from './client'
 
 
 export type XResponseAction = 'comment' | 'translate_quote' | 'watch' | 'ignore'
-export type XResponseWorkflowStatus = 'ready' | 'used' | 'ignored' | 'converted'
+export type XResponseWorkflowStatus = 'ready' | 'used' | 'ignored'
 export type XResponseTier = 'immediate' | 'digest' | 'silent'
 
 export interface XResponseDecision {
@@ -66,8 +66,4 @@ export function setXResponseFeedback(
     method: 'POST',
     body: JSON.stringify({ status }),
   })
-}
-
-export function convertXResponseToTopic(id: number): Promise<XResponseDecision> {
-  return apiFetch(`/x/responses/${id}/convert-to-topic`, { method: 'POST' })
 }

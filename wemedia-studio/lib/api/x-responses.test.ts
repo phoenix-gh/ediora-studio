@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
-  convertXResponseToTopic,
   listXResponses,
   setXResponseFeedback,
 } from './x-responses'
@@ -25,31 +24,22 @@ describe('X response inbox API', () => {
     )
   })
 
-  it('persists feedback and topic conversion', async () => {
+  it('persists feedback', async () => {
     const response = () => new Response(
       JSON.stringify({ id: 7 }),
       { status: 200, headers: { 'Content-Type': 'application/json' } },
     )
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(response())
-      .mockResolvedValueOnce(response())
+    const fetchMock = vi.fn().mockResolvedValueOnce(response())
     vi.stubGlobal('fetch', fetchMock)
 
     await setXResponseFeedback(7, 'used')
-    await convertXResponseToTopic(7)
 
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      1,
+    expect(fetchMock).toHaveBeenCalledWith(
       'http://localhost:8000/api/x/responses/7/feedback',
       expect.objectContaining({
         method: 'POST',
         body: JSON.stringify({ status: 'used' }),
       }),
-    )
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      2,
-      'http://localhost:8000/api/x/responses/7/convert-to-topic',
-      expect.objectContaining({ method: 'POST' }),
     )
   })
 })
