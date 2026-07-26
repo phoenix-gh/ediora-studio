@@ -65,6 +65,13 @@ async def migrate_removed_hot_topic_schema(conn) -> None:
     await conn.execute(text("DROP TABLE IF EXISTS topic_generator_cache"))
 
 
+async def migrate_removed_publication_schema(conn) -> None:
+    """Remove the retired publication-record and statistics store."""
+    from sqlalchemy import text
+
+    await conn.execute(text("DROP TABLE IF EXISTS publications"))
+
+
 async def init_db():
     from sqlalchemy import text
     async with engine.begin() as conn:
