@@ -15,7 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from loguru import logger
 from database import SessionLocal, init_db
-from routers import settings, github, x, x_accounts, x_responses, papers, upload, drafts, writing_plans, youtube, producthunt, wechat, v2ex, kr, juejin, studio, publish_accounts, reddit, topic_generator, assets, dashboard, daily_plan, published, jobs, chat
+from routers import settings, github, x, x_accounts, x_responses, papers, upload, drafts, writing_plans, youtube, producthunt, wechat, v2ex, kr, juejin, studio, publish_accounts, reddit, assets, dashboard, daily_plan, published, jobs, chat
 from x_credential_store import CredentialFileStore
 from routers.x_accounts import reconcile_x_credential_accounts
 import scheduler as job_registry
@@ -96,7 +96,6 @@ app.include_router(studio.router, prefix="/api")
 app.include_router(juejin.router, prefix="/api")
 app.include_router(publish_accounts.router, prefix="/api")
 app.include_router(reddit.router, prefix="/api")
-app.include_router(topic_generator.router, prefix="/api")
 app.include_router(assets.router, prefix="/api")
 app.include_router(dashboard.router, prefix="/api")
 app.include_router(daily_plan.router, prefix="/api")

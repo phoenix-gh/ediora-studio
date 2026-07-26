@@ -178,6 +178,7 @@ def test_enqueue_daily_plan_uses_draft_job(client, monkeypatch):
     assert response.status_code == 200, response.text
     assert captured[0][0] == "draft"
     assert captured[0][1]["content_type"] == "long"
+    assert captured[0][1]["content_type_label"]
     assert captured[0][1]["word_range"]
     assert captured[0][1]["angle"] == "角度2"
 

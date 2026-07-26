@@ -124,7 +124,7 @@ def test_decision_persists_and_list_filters(client):
     assert listed["items"][0]["source_label"] == "OpenAI"
 
 
-def test_feedback_and_convert_are_idempotent(client):
+def test_feedback_is_idempotent_and_convert_route_is_removed(client):
     decision = client.post("/api/x/responses/internal/t1/decision", json=_decision_body()).json()
 
     used = client.post(f"/api/x/responses/{decision['id']}/feedback", json={"status": "used"})
@@ -135,9 +135,7 @@ def test_feedback_and_convert_are_idempotent(client):
     ).status_code == 200
 
     converted = client.post(f"/api/x/responses/{decision['id']}/convert-to-topic")
-    assert converted.status_code == 200
-    assert converted.json()["workflow_status"] == "converted"
-    assert client.post(f"/api/x/responses/{decision['id']}/convert-to-topic").status_code == 200
+    assert converted.status_code == 404
 
 
 def test_notify_is_idempotent(client, monkeypatch):

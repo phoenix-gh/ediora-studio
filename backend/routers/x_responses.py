@@ -421,18 +421,6 @@ async def set_feedback(
     return _payload(*row)
 
 
-@router.post("/{decision_id}/convert-to-topic")
-async def convert_to_topic(decision_id: int, db: AsyncSession = Depends(get_db)):
-    decision = await db.get(XResponseDecision, decision_id)
-    if decision is None:
-        raise HTTPException(404, "response not found")
-    decision.workflow_status = "converted"
-    await db.commit()
-    row = await _joined(db, decision_id)
-    assert row is not None
-    return _payload(*row)
-
-
 @router.post("/{decision_id}/notify")
 async def notify_response(decision_id: int, db: AsyncSession = Depends(get_db)):
     row = await _joined(db, decision_id)

@@ -13,6 +13,20 @@ from models import DailyPlan, DailyPlanItem, PipelineTask, PublishAccount
 
 router = APIRouter(prefix="/daily-plan", tags=["daily-plan"])
 
+_WORD_RANGE: dict[str, str] = {
+    "long": "1500-3000 字",
+    "short": "200-500 字",
+    "story": "5-6 句话",
+    "share": "3-5 句话",
+}
+
+_TYPE_LABEL: dict[str, str] = {
+    "long": "长文",
+    "short": "短文",
+    "story": "微故事",
+    "share": "发现",
+}
+
 
 class ItemOut(BaseModel):
     id: int
@@ -186,7 +200,6 @@ async def enqueue_items(plan_id: int, body: EnqueueItemsIn,
     pipeline_task_id（一稿多发）。仅 suggested 状态可入队。
     """
     from routers.studio import _account_profile_full, _run_pipeline_chain
-    from routers.topic_generator import _TYPE_LABEL, _WORD_RANGE
 
     plan = await db.get(DailyPlan, plan_id)
     if plan is None:
