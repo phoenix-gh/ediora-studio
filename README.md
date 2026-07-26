@@ -128,7 +128,7 @@ pnpm heygen:smoke
 
   如需继续使用 feedgrab 命令登录，请确保命令与后端使用同一个 `FEEDGRAB_DATA_DIR`。不要把 session 文件、Cookie 或 Token 复制进源码目录或容器镜像。
 - Docker Compose 已将 API 的 `FEEDGRAB_DATA_DIR` 固定为 `/app/sessions`，并通过 `sessions-data` 命名卷持久化；重建 API 容器不会清空账号池。
-- feedgrab 是可选的宿主机/运行时集成，不包含在默认后端依赖中。只有需要实际采集 X 时，才需在后端运行环境中安装兼容版本；未安装时其余信息源和产品功能仍可运行。
+- Docker API 镜像会安装固定版本的 feedgrab X 运行时，启动后即可使用持久化 session 采集。若使用宿主机方式启动后端，也需在对应 Python 环境中安装 `backend/requirements.txt`，确保 feedgrab 版本与容器一致。
 
 ### Telegram 配置
 

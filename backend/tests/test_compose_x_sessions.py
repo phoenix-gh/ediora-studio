@@ -55,6 +55,33 @@ def test_built_api_image_can_import_application():
     assert result.returncode == 0, result.stderr
 
 
+def test_built_api_image_can_import_feedgrab_x_runtime():
+    result = subprocess.run(
+        [
+            "docker",
+            "compose",
+            "run",
+            "--rm",
+            "--no-deps",
+            "api",
+            "python",
+            "-c",
+            (
+                "from feedgrab.fetchers.twitter_cookies "
+                "import load_twitter_cookies; "
+                "from feedgrab.fetchers.twitter_keyword_search "
+                "import search_twitter_keyword; "
+                "assert callable(load_twitter_cookies); "
+                "assert callable(search_twitter_keyword)"
+            ),
+        ],
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
 @pytest.mark.parametrize(
     "volumes",
     [
