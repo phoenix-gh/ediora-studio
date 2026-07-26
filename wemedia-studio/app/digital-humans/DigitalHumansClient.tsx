@@ -9,19 +9,34 @@ import {
   createTalkingVideo,
   listDigitalHumans,
   type DigitalHuman,
+  type TalkingVideoProject,
 } from '@/lib/api/digital-humans'
 
 import { RoleEditorDialog } from './RoleEditorDialog'
 import { RoleLibrary } from './RoleLibrary'
+import { TalkingProjectList } from './TalkingProjectList'
+import { TalkingVideoEditor } from './TalkingVideoEditor'
 
 
 export function DigitalHumansClient({
   initialRoles,
+  initialProjects,
 }: {
   initialRoles: DigitalHuman[]
+  initialProjects: TalkingVideoProject[]
 }) {
   const [roles, setRoles] = useState(initialRoles)
+  const [projects, setProjects] = useState(initialProjects)
+  const [selectedProjectId, setSelectedProjectId] = useState<number | null>(
+    initialProjects[0]?.id ?? null,
+  )
+  useEffect(() => {
+    const value = Number(new URLSearchParams(window.location.search).get('project'))
+    if (Number.isSafeInteger(value) && value > 0) setSelectedProjectId(value)
+  }, [])
   const [roleEditorOpen, setRoleEditorOpen] = useState(false)
+  const selectedProject = projects.find(project => project.id === selectedProjectId)
+    ?? projects[0]
 
   const hasProcessing = roles.some(role => role.status === 'processing')
   useEffect(() => {
@@ -50,7 +65,22 @@ export function DigitalHumansClient({
       title: `${role.name} 的口播作品`,
       digital_human_id: role.id,
     })
-    window.location.assign(`/digital-humans?project=${project.id}`)
+    updateProject(project)
+  }
+
+  function selectProject(project: TalkingVideoProject) {
+    setSelectedProjectId(project.id)
+    window.history.pushState(null, '', `/digital-humans?project=${project.id}`)
+  }
+
+  function updateProject(project: TalkingVideoProject) {
+    setProjects(current => (
+      current.some(item => item.id === project.id)
+        ? current.map(item => item.id === project.id ? project : item)
+        : [project, ...current]
+    ))
+    setSelectedProjectId(project.id)
+    window.history.replaceState(null, '', `/digital-humans?project=${project.id}`)
   }
 
   return (
@@ -73,8 +103,25 @@ export function DigitalHumansClient({
           <TabsTrigger value="roles">数字人角色</TabsTrigger>
         </TabsList>
         <TabsContent value="projects">
-          <div className="rounded-xl border p-8 text-center text-sm text-muted-foreground">
-            口播作品编辑器将在此显示。
+          <div className="grid gap-4 lg:grid-cols-[240px_minmax(0,1fr)]">
+            <TalkingProjectList
+              projects={projects}
+              roles={roles}
+              selectedId={selectedProject?.id ?? null}
+              onSelect={selectProject}
+              onCreated={updateProject}
+            />
+            {selectedProject ? (
+              <TalkingVideoEditor
+                project={selectedProject}
+                roles={roles}
+                onProjectChange={updateProject}
+              />
+            ) : (
+              <div className="rounded-xl border p-8 text-center text-sm text-muted-foreground">
+                新建口播作品后开始编辑脚本。
+              </div>
+            )}
           </div>
         </TabsContent>
         <TabsContent value="roles">
