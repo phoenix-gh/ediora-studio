@@ -17,6 +17,7 @@ include the draft publishing dialog or publish-account profiles.
 - The sidebar "发布" navigation item.
 - The frontend publication-record API client.
 - All `/api/published-articles` backend routes.
+- The MCP `get_recent_performance` tool backed by publication records.
 - The `PublicationCreate`, `PublicationUpdate`, and `PublicationOut` schemas.
 - The SQLAlchemy `Publication` model.
 - Automatic creation or update of a publication record after a successful
@@ -58,7 +59,8 @@ publication statistics, as approved. No archive or compatibility view is kept.
 ### Backend cleanup
 
 Remove the `published` router from the application and delete its CRUD module.
-Remove its request/response schemas and its model.
+Remove its request/response schemas, model, and the MCP performance-query tool
+that reads the same records.
 
 The WeChat publishing endpoint currently performs two actions:
 
@@ -113,4 +115,3 @@ feedback path.
   - `/published` returns 404.
   - `/api/published-articles` returns 404.
   - the draft page and retained publishing endpoints remain available.
-

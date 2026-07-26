@@ -145,8 +145,10 @@ git commit -m "refactor(db): remove publication records"
 - Modify: `backend/database.py`
 - Modify: `backend/models.py`
 - Modify: `backend/main.py`
+- Modify: `backend/mcp_server.py`
 - Modify: `backend/routers/drafts.py`
 - Modify: `backend/schemas.py`
+- Modify: `backend/tests/test_mcp_daily_plan_tools.py`
 - Delete: `backend/routers/published.py`
 - Delete: `backend/tests/test_published.py`
 
@@ -227,6 +229,10 @@ be recreated.
 Delete `PublicationCreate`, `PublicationUpdate`, and `PublicationOut` from
 `backend/schemas.py`.
 
+Delete the `get_recent_performance` MCP tool from `backend/mcp_server.py` and
+its two publication-backed tests from
+`backend/tests/test_mcp_daily_plan_tools.py`.
+
 In `backend/routers/drafts.py`:
 
 - Remove `Publication` from the models import.
@@ -258,7 +264,8 @@ conda run --no-capture-output -n wems python -m pytest \
   tests/test_database_publication_removal.py \
   tests/test_models_schema.py \
   tests/test_wechat_publish.py \
-  tests/test_blog_publish.py -q
+  tests/test_blog_publish.py \
+  tests/test_mcp_daily_plan_tools.py -q
 ```
 
 Expected: all selected tests pass. This proves the removed record API does not
@@ -280,8 +287,8 @@ Expected: no runtime matches. Test-only 404 request strings remain excluded.
 
 ```bash
 git add backend/database.py backend/models.py backend/main.py \
-  backend/routers/drafts.py backend/schemas.py \
-  backend/tests/test_wechat_publish.py
+  backend/mcp_server.py backend/routers/drafts.py backend/schemas.py \
+  backend/tests/test_mcp_daily_plan_tools.py backend/tests/test_wechat_publish.py
 git add -u backend/routers/published.py backend/tests/test_published.py
 git commit -m "refactor(api): remove publication record routes"
 ```

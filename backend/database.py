@@ -98,6 +98,7 @@ async def init_db():
             await conn.execute(text("ALTER TABLE IF EXISTS topic_updates RENAME TO plan_updates"))
 
         await migrate_removed_hot_topic_schema(conn)
+        await migrate_removed_publication_schema(conn)
         await conn.run_sync(Base.metadata.create_all)
         await conn.execute(text("ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS media_kind VARCHAR NOT NULL DEFAULT ''"))
         await conn.execute(text("ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS directory VARCHAR NOT NULL DEFAULT ''"))

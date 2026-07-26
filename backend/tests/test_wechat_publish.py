@@ -164,48 +164,27 @@ def test_publish_wechat_error_surfaces_as_502(client, uploads_dir, monkeypatch):
     wx._token_cache.clear()
 
 
-def test_publish_creates_publication_record(client, uploads_dir, wx_mock):
+def test_publish_succeeds_without_publication_record_api(
+    client, uploads_dir, wx_mock
+):
     draft, img = _setup_draft_with_image(client)
     html = f'<section><p>正文</p><img src="{img["url"]}"></section>'
-    r = client.post(f"/api/write/drafts/{draft['id']}/publish/wechat", json={
-        "account_id": "gzh", "title": "测试文章", "digest": "摘要",
-        "html": html, "cover_image_id": img["id"],
-    })
-    assert r.status_code == 200, r.text
 
-    pubs = client.get("/api/published-articles").json()
-    assert len(pubs) == 1
-    assert pubs[0]["draft_id"] == draft["id"]
-    assert pubs[0]["account_id"] == "gzh"
-    assert pubs[0]["external_id"] == "DRAFT_MEDIA_1"
-    assert pubs[0]["status"] == "draft_box"
+    response = client.post(
+        f"/api/write/drafts/{draft['id']}/publish/wechat",
+        json={
+            "account_id": "gzh",
+            "title": "测试文章",
+            "digest": "摘要",
+            "html": html,
+            "cover_image_id": img["id"],
+        },
+    )
 
-    # 同 draft+account 再发一次：更新而非重复建
-    r2 = client.post(f"/api/write/drafts/{draft['id']}/publish/wechat", json={
-        "account_id": "gzh", "title": "改了标题", "digest": "摘要",
-        "html": html, "cover_image_id": img["id"],
-    })
-    assert r2.status_code == 200, r2.text
-    pubs2 = client.get("/api/published-articles").json()
-    assert len(pubs2) == 1
-    assert pubs2[0]["title"] == "改了标题"
-
-
-def test_publish_record_failure_is_non_fatal(client, uploads_dir, wx_mock, monkeypatch):
-    """发布记录写入失败不应影响发布本身——media_id 已成功返回。"""
-    import routers.drafts as drafts_mod
-
-    class _Boom:
-        def __init__(self, *a, **k):
-            raise RuntimeError("boom")
-
-    monkeypatch.setattr(drafts_mod, "Publication", _Boom)
-    draft, img = _setup_draft_with_image(client)
-    html = f'<section><p>x</p><img src="{img["url"]}"></section>'
-    r = client.post(f"/api/write/drafts/{draft['id']}/publish/wechat", json={
-        "account_id": "gzh", "title": "t", "digest": "",
-        "html": html, "cover_image_id": img["id"],
-    })
-    assert r.status_code == 200, r.text          # 发布仍成功
-    assert r.json()["media_id"] == "DRAFT_MEDIA_1"
-    assert client.get("/api/published-articles").json() == []  # 记录没建成
+    assert response.status_code == 200, response.text
+    assert response.json()["media_id"] == "DRAFT_MEDIA_1"
+    assert client.get("/api/published-articles").status_code == 404
+    assert client.post(
+        "/api/published-articles",
+        json={"draft_id": draft["id"], "account_id": "gzh", "title": "测试文章"},
+    ).status_code == 404

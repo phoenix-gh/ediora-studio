@@ -14,7 +14,7 @@ import blog_client as blog
 import wechat_api_client as wx
 from config import get_config
 from database import get_db
-from models import ArticleDraft, ArticleSeries, DraftImage, PublishAccount, Publication
+from models import ArticleDraft, ArticleSeries, DraftImage, PublishAccount
 
 _UPLOADS_DIR = os.path.join(os.path.dirname(__file__), "..", "uploads")
 _ALLOWED_MIME = {"image/jpeg", "image/png", "image/gif", "image/webp", "image/svg+xml", "image/avif"}
@@ -356,29 +356,6 @@ async def publish_draft_to_wechat(
         raise HTTPException(502, str(e))
     except httpx.HTTPError as e:
         raise HTTPException(502, f"微信接口网络请求失败: {e}")
-    # 发布记录（效果回流锚点）：同 draft+account 已有草稿箱记录则更新，否则新建。
-    # 失败不影响发布——media_id 已成功返回。
-    try:
-        existing = (await db.execute(
-            select(Publication).where(
-                Publication.draft_id == draft_id,
-                Publication.account_id == account.id,
-                Publication.platform == "wechat",
-                Publication.status == "draft_box",
-            )
-        )).scalar_one_or_none()
-        if existing:
-            existing.external_id = media_id
-            existing.title = body.title[:200]
-        else:
-            db.add(Publication(
-                draft_id=draft_id, account_id=account.id, platform="wechat",
-                title=body.title[:200], external_id=media_id, status="draft_box",
-            ))
-        await db.commit()
-    except Exception as e:
-        from logger import log
-        await log("publish", "warn", f"发布记录写入失败 draft={draft_id}", str(e))
     return WechatPublishResponse(media_id=media_id)
 
 
