@@ -34,7 +34,7 @@ const sections: NavSection[] = [
       { href: '/writing-plans', label: '写作模板', icon: Tag },
       { href: '/assets',       label: '创作资产', icon: FileText },
       { href: '/digital-humans', label: '数字人口播', icon: PersonStanding },
-      { href: '/x-responses',  label: '待响应',   icon: MessageSquareReply },
+      { href: '/responses',    label: '待响应',   icon: MessageSquareReply },
     ],
   },
   {

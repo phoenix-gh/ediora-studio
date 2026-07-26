@@ -591,6 +591,28 @@ async def test_heygen():
     return {"ok": False, "error": safe_error}
 
 
+@router.post("/transcription/test")
+async def test_transcription():
+    cfg = await get_config()
+    api_key = cfg.get("transcription_api_key", "").strip()
+    base_url = cfg.get("transcription_base_url", "").strip().rstrip("/")
+    if not api_key or not base_url:
+        return {"ok": False, "error": "请先填写并保存语音转写 API Key 和 Base URL"}
+    try:
+        async with httpx.AsyncClient(timeout=15, follow_redirects=False) as client:
+            response = await client.get(
+                f"{base_url}/models",
+                headers={"Authorization": f"Bearer {api_key}"},
+            )
+        if response.status_code in {401, 403}:
+            return {"ok": False, "error": "语音转写 API Key 无效或无权限"}
+        response.raise_for_status()
+        return {"ok": True, "error": ""}
+    except Exception as exc:
+        error = redact_secret_text(str(exc)).replace(api_key, "***")[:500]
+        return {"ok": False, "error": error}
+
+
 def _clean_telegram_test_error(exc: Exception, cfg: dict[str, str]) -> str:
     cleaned = redact_secret_text(str(exc))
     token = cfg.get("telegram_bot_token", "")

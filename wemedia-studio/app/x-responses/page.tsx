@@ -1,13 +1,5 @@
-import { listXResponses } from '@/lib/api/x-responses'
+import { redirect } from 'next/navigation'
 
-import { XResponsesClient } from './XResponsesClient'
-
-
-export const dynamic = 'force-dynamic'
-
-export default async function XResponsesPage() {
-  const initial = await listXResponses({ workflow_status: 'ready' })
-    .then(result => result.items)
-    .catch(() => [])
-  return <XResponsesClient initialItems={initial} />
+export default function LegacyXResponsesPage() {
+  redirect('/responses?source_type=x_post')
 }

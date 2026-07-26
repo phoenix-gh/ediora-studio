@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useMemo, useCallback, useEffect } from 'react'
-import { PlaySquare, RefreshCw, Trash2, Volume2, VolumeX, ExternalLink, Search, Pencil, Check, X, Settings, Loader2, Eye } from 'lucide-react'
+import { useState, useMemo, useCallback } from 'react'
+import { PlaySquare, RefreshCw, Trash2, Volume2, VolumeX, ExternalLink, Search, Pencil, Check, X, Settings, Loader2, Eye, Sparkles } from 'lucide-react'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from '@/components/ui/dialog'
@@ -11,6 +11,7 @@ import {
   getYoutubeChannels, getYoutubeVideos,
   addYoutubeChannel, updateYoutubeChannel, deleteYoutubeChannel,
   collectYoutube, collectYoutubeChannel,
+  analyzeYoutubeVideo,
 } from '@/lib/api/youtube'
 import { AddToTopicPopover } from '@/components/features/AddToTopicPopover'
 import { Button } from '@/components/ui/button'
@@ -18,6 +19,7 @@ import { Input } from '@/components/ui/input'
 import { fmtShortDate } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { useInfiniteScroll } from '@/lib/use-infinite-scroll'
+import { Switch } from '@/components/ui/switch'
 
 const DAYS_OPTIONS = [7, 14, 30, 90]
 const PAGE_SIZE = 24
@@ -225,9 +227,11 @@ function ChannelList({
 function ChannelHeader({
   channel,
   onNoteChange,
+  onAutoAnalyzeChange,
 }: {
   channel: YoutubeChannel
   onNoteChange: (note: string) => Promise<void>
+  onAutoAnalyzeChange: (enabled: boolean) => Promise<void>
 }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(channel.note)
@@ -332,6 +336,17 @@ function ChannelHeader({
               </button>
             )}
           </div>
+          <div className="mt-3 flex items-center gap-2">
+            <Switch
+              checked={channel.auto_analyze_new_videos}
+              onCheckedChange={onAutoAnalyzeChange}
+              aria-label="自动分析新视频"
+            />
+            <div>
+              <p className="text-xs font-medium">自动分析新视频</p>
+              <p className="text-[11px] text-zinc-400">只分析开启后新采集的视频，不补跑历史；历史视频可逐条手动分析。</p>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -343,11 +358,19 @@ function ChannelHeader({
 function VideoCard({
   video,
   channels,
+  onAnalyze,
 }: {
   video: YoutubeVideo
   channels: YoutubeChannel[]
+  onAnalyze: (video: YoutubeVideo, force: boolean) => Promise<void>
 }) {
   const channel = channels.find(c => c.id === video.channel_id)
+  const [analyzing, setAnalyzing] = useState(false)
+
+  async function analyze(force: boolean) {
+    setAnalyzing(true)
+    try { await onAnalyze(video, force) } finally { setAnalyzing(false) }
+  }
 
   return (
     <div className="group flex flex-col rounded-xl overflow-hidden hover:bg-zinc-50 dark:hover:bg-zinc-900 transition-colors">
@@ -407,6 +430,27 @@ function VideoCard({
           <span>{fmtShortDate(video.published_at)}</span>
         </div>
         <div className="ml-auto flex items-center gap-0.5">
+          {video.response_item_id && video.analysis_status === 'ready' ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 px-2 text-[11px]"
+              onClick={() => { window.location.href = `/responses?selected=${video.response_item_id}` }}
+            >
+              查看分析
+            </Button>
+          ) : (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 px-2 text-[11px]"
+              disabled={analyzing || ['queued', 'processing'].includes(video.analysis_status ?? '')}
+              onClick={() => void analyze(Boolean(video.response_item_id))}
+            >
+              {analyzing ? <Loader2 className="size-3 animate-spin" /> : <Sparkles className="size-3" />}
+              {video.response_item_id ? '重新分析' : '提取字幕并分析'}
+            </Button>
+          )}
           <AddToTopicPopover
             url={video.url}
             title={video.title}
@@ -453,7 +497,6 @@ export function YoutubeClient({
         search: search || undefined,
       })
       setVideos(data)
-      resetScroll()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : '加载失败')
     } finally {
@@ -545,6 +588,35 @@ export function YoutubeClient({
     }
   }
 
+  async function handleAutoAnalyzeChange(enabled: boolean) {
+    if (!selectedChannelId) return
+    try {
+      const updated = await updateYoutubeChannel(selectedChannelId, {
+        auto_analyze_new_videos: enabled,
+      })
+      setChannels(previous => previous.map(channel => (
+        channel.id === selectedChannelId ? updated : channel
+      )))
+      toast.success(enabled ? '已开启，只分析之后采集的新视频' : '已关闭自动分析')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '开关保存失败')
+    }
+  }
+
+  async function handleAnalyze(video: YoutubeVideo, force: boolean) {
+    try {
+      const result = await analyzeYoutubeVideo(video.id, force)
+      setVideos(previous => previous.map(item => (
+        item.id === video.id
+          ? { ...item, response_item_id: result.response_item_id, analysis_status: 'queued', transcript_status: 'queued' }
+          : item
+      )))
+      toast.success(result.created ? '字幕提取与分析任务已启动' : '任务正在执行中')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '分析任务启动失败')
+    }
+  }
+
   const filtered = useMemo(() => {
     let list = videos
     if (search) {
@@ -588,7 +660,11 @@ export function YoutubeClient({
       <div className="flex-1 flex flex-col min-w-0">
         {/* Channel header — shown when a specific channel is selected */}
         {selectedChannel && (
-          <ChannelHeader channel={selectedChannel} onNoteChange={handleNoteChange} />
+          <ChannelHeader
+            channel={selectedChannel}
+            onNoteChange={handleNoteChange}
+            onAutoAnalyzeChange={handleAutoAnalyzeChange}
+          />
         )}
 
         {/* Toolbar */}
@@ -668,7 +744,7 @@ export function YoutubeClient({
             <>
               <div className="grid grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-x-4 gap-y-6">
                 {visibleVideos.map(video => (
-                  <VideoCard key={video.id} video={video} channels={channels} />
+                  <VideoCard key={video.id} video={video} channels={channels} onAnalyze={handleAnalyze} />
                 ))}
               </div>
               <div ref={sentinelRef} className="flex items-center justify-center py-6">

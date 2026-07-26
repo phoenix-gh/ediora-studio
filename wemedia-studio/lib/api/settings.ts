@@ -34,6 +34,13 @@ export interface AppSettings {
   image_api_key_preview: string
   heygen_api_key_set: boolean
   heygen_api_key_preview: string
+  transcription_provider: string
+  transcription_model: string
+  transcription_base_url: string
+  transcription_api_key_set: boolean
+  transcription_api_key_preview: string
+  transcription_max_duration_seconds: number
+  transcription_max_audio_bytes: number
   rsshub_base: string
   github_token_set: boolean
   github_token_preview: string
@@ -98,6 +105,13 @@ export interface SettingsUpdate {
   image_api_key?: string
   image_base_url?: string
   heygen_api_key?: string
+  transcription_provider?: string
+  transcription_model?: string
+  transcription_base_url?: string
+  transcription_api_key?: string
+  transcription_clear_api_key?: boolean
+  transcription_max_duration_seconds?: number
+  transcription_max_audio_bytes?: number
   rsshub_base?: string
   github_token?: string
   github_interval_minutes?: number
@@ -190,4 +204,8 @@ export async function testLLM(): Promise<{ ok: boolean; response?: string; error
 
 export async function testHeyGen(): Promise<{ ok: boolean; error: string }> {
   return apiFetch('/settings/heygen/test', { method: 'POST' })
+}
+
+export async function testTranscription(): Promise<{ ok: boolean; error: string }> {
+  return apiFetch('/settings/transcription/test', { method: 'POST' })
 }
