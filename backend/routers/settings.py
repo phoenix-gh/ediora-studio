@@ -4,6 +4,7 @@ from typing import Literal, Optional
 from datetime import datetime, timezone
 import json
 import httpx
+import os
 from urllib.parse import urlsplit
 
 from config import get_config, set_config, PROVIDERS, effective_model, effective_base_url
@@ -98,6 +99,8 @@ class SettingsOut(BaseModel):
     image_base_url: str
     image_api_key_set: bool
     image_api_key_preview: str
+    heygen_api_key_set: bool
+    heygen_api_key_preview: str
     rsshub_base: str
     github_token_set: bool
     github_token_preview: str
@@ -147,6 +150,7 @@ class SettingsUpdate(BaseModel):
     image_model: Optional[str] = None
     image_api_key: Optional[str] = None
     image_base_url: Optional[str] = None
+    heygen_api_key: Optional[str] = None
     rsshub_base: Optional[str] = None
     github_token: Optional[str] = None
     github_interval_minutes: Optional[int] = None
@@ -203,10 +207,18 @@ class AiRuntimeConfig(BaseModel):
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+def effective_heygen_api_key(cfg: dict[str, str]) -> str:
+    return (
+        cfg.get("heygen_api_key", "").strip()
+        or os.getenv("HEYGEN_API_KEY", "").strip()
+    )
+
+
 def _build_out(cfg: dict) -> SettingsOut:
     import blog_client
     api_key = cfg.get("llm_api_key", "")
     image_api_key = cfg.get("image_api_key", "")
+    heygen_api_key = effective_heygen_api_key(cfg)
     gh_token = cfg.get("github_token", "")
     telegram_token = cfg.get("telegram_bot_token", "")
     blog_base, blog_token = blog_client.effective_blog_config(cfg)
@@ -237,6 +249,8 @@ def _build_out(cfg: dict) -> SettingsOut:
         image_base_url=cfg.get("image_base_url", ""),
         image_api_key_set=bool(image_api_key),
         image_api_key_preview=f"…{image_api_key[-4:]}" if len(image_api_key) >= 4 else "",
+        heygen_api_key_set=bool(heygen_api_key),
+        heygen_api_key_preview=f"…{heygen_api_key[-4:]}" if len(heygen_api_key) >= 4 else "",
         github_interval_minutes=max(1, int(cfg.get("github_interval_minutes", 1))),
         github_trending_interval_hours=max(1, int(cfg.get("github_trending_interval_hours", 6))),
         rsshub_base=cfg.get("rsshub_base", "http://127.0.0.1:1200"),
@@ -334,6 +348,14 @@ async def get_ai_runtime_config():
     )
 
 
+@router.get("/heygen-runtime", include_in_schema=False)
+async def get_heygen_runtime_config():
+    return {
+        "api_key": effective_heygen_api_key(await get_config()),
+        "base_url": "https://api.heygen.com",
+    }
+
+
 @router.put("", response_model=SettingsOut)
 async def update_settings(
     body: SettingsUpdate,
@@ -358,6 +380,8 @@ async def update_settings(
         updates["image_api_key"] = body.image_api_key.strip()
     if body.image_base_url is not None:
         updates["image_base_url"] = body.image_base_url.strip()
+    if body.heygen_api_key is not None:
+        updates["heygen_api_key"] = body.heygen_api_key.strip()
     if body.rsshub_base is not None:
         updates["rsshub_base"] = body.rsshub_base
     if body.github_token is not None:
@@ -473,6 +497,35 @@ async def update_settings(
             print(f"[settings] reschedule failed: {e}")
 
     return _build_out(await get_config())
+
+
+@router.post("/heygen/test")
+async def test_heygen():
+    cfg = await get_config()
+    api_key = effective_heygen_api_key(cfg)
+    if not api_key:
+        return {"ok": False, "error": "请先填写 HeyGen API Key"}
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            response = await client.get(
+                "https://api.heygen.com/v3/avatars",
+                params={"ownership": "private", "limit": 1},
+                headers={"x-api-key": api_key},
+            )
+        if response.status_code == 401:
+            return {"ok": False, "error": "HeyGen API Key 无效"}
+        if response.status_code == 403:
+            return {"ok": False, "error": "当前 HeyGen 套餐不可用"}
+        if response.status_code == 429:
+            return {"ok": False, "error": "HeyGen 请求过于频繁，请稍后重试"}
+        response.raise_for_status()
+        return {"ok": True, "error": ""}
+    except httpx.HTTPStatusError as exc:
+        error = f"HeyGen HTTP {exc.response.status_code}: {exc.response.text[:200]}"
+    except Exception as exc:
+        error = str(exc)
+    safe_error = redact_secret_text(error).replace(api_key, "***")[:500]
+    return {"ok": False, "error": safe_error}
 
 
 def _clean_telegram_test_error(exc: Exception, cfg: dict[str, str]) -> str:

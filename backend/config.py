@@ -15,6 +15,7 @@ DEFAULTS: dict[str, str] = {
     "image_api_key": "",
     "image_base_url": "",
     "image_model": "gpt-image-1",
+    "heygen_api_key": "",
     "rsshub_base": "http://127.0.0.1:1200",
     "github_interval_minutes": "1",
     "github_trending_interval_hours": "6",
