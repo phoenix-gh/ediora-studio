@@ -5,12 +5,20 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Any, Awaitable, Callable
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from content_jobs import create_job
 from models import (
-    ContentJob, ContentJobEvent, XPost, XResponseDecision, XSubscription,
+    ContentAnalysisRun,
+    ContentJob,
+    ContentJobEvent,
+    ContentResponseItem,
+    ContentResponseNotification,
+    ContentResponseOutput,
+    XPost,
+    XResponseDecision,
+    XSubscription,
 )
 
 
@@ -76,6 +84,41 @@ async def ensure_response_job(
         input_data={"tweet_id": tweet_id},
         idempotency_key=key,
     )
+    item = (await db.execute(
+        select(ContentResponseItem).where(
+            ContentResponseItem.source_type == "x_post",
+            ContentResponseItem.source_id == tweet_id,
+        )
+    )).scalar_one_or_none()
+    if item is None:
+        item = ContentResponseItem(
+            source_type="x_post",
+            source_id=tweet_id,
+            source_url=post.url,
+            source_title=post.content[:500],
+            source_author=post.username,
+            source_published_at=post.published_at,
+            workflow_status="queued",
+        )
+        db.add(item)
+        await db.flush()
+    run = (await db.execute(
+        select(ContentAnalysisRun).where(ContentAnalysisRun.job_id == job.id)
+    )).scalar_one_or_none()
+    if run is None:
+        version = int((await db.scalar(
+            select(func.coalesce(func.max(ContentAnalysisRun.version), 0))
+            .where(ContentAnalysisRun.response_item_id == item.id)
+        )) or 0) + 1
+        run = ContentAnalysisRun(
+            response_item_id=item.id,
+            version=version,
+            status="queued",
+            job_id=job.id,
+        )
+        db.add(run)
+        await db.flush()
+    await db.commit()
     return job, True
 
 
@@ -330,4 +373,106 @@ async def persist_decision(
     db.add(decision)
     await db.commit()
     await db.refresh(decision)
+    await _mirror_decision_to_unified(db, post, decision)
     return decision
+
+
+async def _mirror_decision_to_unified(
+    db: AsyncSession,
+    post: XPost,
+    decision: XResponseDecision,
+) -> None:
+    """Transition bridge: keep the unified inbox current while legacy Telegram APIs retire."""
+    item = (await db.execute(
+        select(ContentResponseItem).where(
+            ContentResponseItem.source_type == "x_post",
+            ContentResponseItem.source_id == post.tweet_id,
+        )
+    )).scalar_one_or_none()
+    if item is None:
+        item = ContentResponseItem(
+            source_type="x_post",
+            source_id=post.tweet_id,
+            source_url=post.url,
+            source_title=post.content[:500],
+            source_author=post.username,
+            source_published_at=post.published_at,
+        )
+        db.add(item)
+        await db.flush()
+    run = (await db.execute(
+        select(ContentAnalysisRun)
+        .join(ContentJob, ContentJob.id == ContentAnalysisRun.job_id)
+        .where(ContentAnalysisRun.response_item_id == item.id)
+        .where(ContentJob.idempotency_key == f"x-response:{post.tweet_id}")
+    )).scalar_one_or_none()
+    if run is None:
+        version = int((await db.scalar(
+            select(func.coalesce(func.max(ContentAnalysisRun.version), 0))
+            .where(ContentAnalysisRun.response_item_id == item.id)
+        )) or 0) + 1
+        run = ContentAnalysisRun(response_item_id=item.id, version=version)
+        db.add(run)
+        await db.flush()
+    run.status = "succeeded"
+    run.content_value_score = decision.score
+    run.value_dimensions = {"legacy_score": {"score": decision.score, "reason": decision.reason}}
+    run.summary_cn = decision.summary_cn
+    run.core_thesis = decision.summary_cn
+    run.evidence = decision.claims or []
+    run.recommended_action = decision.action
+    run.recommendation_reason = decision.reason
+    run.model_provider = decision.model_provider
+    run.model_name = decision.model_name
+    run.prompt_version = decision.prompt_version
+    run.policy_version = decision.decision_policy_version
+    run.completed_at = decision.updated_at
+    item.current_analysis_run_id = run.id
+    item.workflow_status = "ready"
+    item.decision_status = {
+        "used": "adopted",
+        "ignored": "rejected",
+    }.get(decision.workflow_status, "pending")
+    for output_type, content in (
+        ("x_reply", decision.comment_draft),
+        ("x_quote", decision.quote_draft),
+    ):
+        if not content:
+            continue
+        output = (await db.execute(
+            select(ContentResponseOutput).where(
+                ContentResponseOutput.analysis_run_id == run.id,
+                ContentResponseOutput.output_type == output_type,
+            )
+        )).scalar_one_or_none()
+        if output is None:
+            db.add(ContentResponseOutput(
+                response_item_id=item.id,
+                analysis_run_id=run.id,
+                output_type=output_type,
+                status="draft_ready",
+                content=content,
+                source_attribution={"url": post.url},
+            ))
+    notification = (await db.execute(
+        select(ContentResponseNotification).where(
+            ContentResponseNotification.analysis_run_id == run.id,
+            ContentResponseNotification.channel == "telegram",
+            ContentResponseNotification.notification_tier == decision.notification_tier,
+        )
+    )).scalar_one_or_none()
+    if notification is None:
+        notification = ContentResponseNotification(
+            response_item_id=item.id,
+            analysis_run_id=run.id,
+            channel="telegram",
+            notification_tier=decision.notification_tier,
+        )
+        db.add(notification)
+    notification.status = decision.telegram_status
+    notification.message_ids = decision.telegram_message_ids or []
+    notification.attempts = decision.telegram_attempts
+    notification.claim_token = decision.telegram_claim_token
+    notification.last_error = decision.telegram_last_error
+    notification.notified_at = decision.notified_at
+    await db.commit()

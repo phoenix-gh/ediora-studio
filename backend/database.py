@@ -271,7 +271,6 @@ async def init_db():
         await migrate_removed_hot_topic_schema(conn)
         await migrate_removed_publication_schema(conn)
         await conn.run_sync(Base.metadata.create_all)
-        await migrate_content_response_schema(conn)
         await conn.execute(text("ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS media_kind VARCHAR NOT NULL DEFAULT ''"))
         await conn.execute(text("ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS directory VARCHAR NOT NULL DEFAULT ''"))
         await conn.execute(text("ALTER TABLE creative_asset_directories ADD COLUMN IF NOT EXISTS asset_type VARCHAR NOT NULL DEFAULT 'article'"))
@@ -334,6 +333,7 @@ async def init_db():
             "ALTER TABLE publish_accounts ADD COLUMN IF NOT EXISTS daily_quota JSON NOT NULL DEFAULT '{}'::json"
         ))
         await migrate_x_response_claim_schema(conn)
+        await migrate_content_response_schema(conn)
 
         if not DATABASE_URL.startswith("sqlite"):
             # Writing plans brief field (added in redesign; idempotent)
