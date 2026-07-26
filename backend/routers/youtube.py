@@ -6,7 +6,8 @@ from pydantic import BaseModel
 from typing import Optional
 
 from database import get_db
-from models import YoutubeChannel, YoutubeVideo
+from models import ContentResponseItem, YoutubeChannel, YoutubeVideo
+from worker_auth import require_worker_token
 
 router = APIRouter(prefix="/youtube", tags=["youtube"])
 
@@ -16,12 +17,14 @@ router = APIRouter(prefix="/youtube", tags=["youtube"])
 class ChannelCreate(BaseModel):
     channel_id: str
     group: str = "未分组"
+    auto_analyze_new_videos: bool = True
 
 
 class ChannelUpdate(BaseModel):
     group: Optional[str] = None
     muted: Optional[bool] = None
     note: Optional[str] = None
+    auto_analyze_new_videos: Optional[bool] = None
 
 
 class ChannelOut(BaseModel):
@@ -33,6 +36,8 @@ class ChannelOut(BaseModel):
     note: str
     group: str
     muted: bool
+    auto_analyze_new_videos: bool
+    analysis_enabled_at: Optional[datetime] = None
     last_collected_at: Optional[datetime] = None
     created_at: datetime
 
@@ -51,6 +56,13 @@ class VideoOut(BaseModel):
     published_at: datetime
     updated_at: datetime
     collected_at: datetime
+    transcript_status: str
+    transcript_source: str
+    transcript_language: str
+    transcript_error_code: str
+    transcript_error: str
+    response_item_id: Optional[int] = None
+    analysis_status: Optional[str] = None
 
     model_config = {"from_attributes": True}
 
@@ -86,6 +98,8 @@ async def add_channel(
         id=body.channel_id,
         name=name,
         group=body.group,
+        auto_analyze_new_videos=body.auto_analyze_new_videos,
+        analysis_enabled_at=datetime.now(timezone.utc) if body.auto_analyze_new_videos else None,
     )
     db.add(channel)
     await db.commit()
@@ -114,6 +128,10 @@ async def update_channel(
         channel.muted = body.muted
     if body.note is not None:
         channel.note = body.note
+    if body.auto_analyze_new_videos is not None:
+        if body.auto_analyze_new_videos and not channel.auto_analyze_new_videos:
+            channel.analysis_enabled_at = datetime.now(timezone.utc)
+        channel.auto_analyze_new_videos = body.auto_analyze_new_videos
     await db.commit()
     await db.refresh(channel)
     return channel
@@ -142,7 +160,12 @@ async def list_videos(
 ):
     since = datetime.now(timezone.utc) - timedelta(days=days)
     q = (
-        select(YoutubeVideo)
+        select(YoutubeVideo, ContentResponseItem)
+        .outerjoin(
+            ContentResponseItem,
+            (ContentResponseItem.source_type == "youtube_video")
+            & (ContentResponseItem.source_id == YoutubeVideo.id),
+        )
         .where(YoutubeVideo.published_at >= since)
         .order_by(desc(YoutubeVideo.published_at))
         .limit(limit)
@@ -151,8 +174,107 @@ async def list_videos(
         q = q.where(YoutubeVideo.channel_id == channel_id)
     if search:
         q = q.where(YoutubeVideo.title.contains(search))
-    rows = (await db.execute(q)).scalars().all()
-    return rows
+    rows = (await db.execute(q)).all()
+    return [{
+        **{
+            column.name: getattr(video, column.name)
+            for column in YoutubeVideo.__table__.columns
+            if column.name != "transcript_text" and column.name != "transcript_segments"
+        },
+        "response_item_id": item.id if item else None,
+        "analysis_status": item.workflow_status if item else None,
+    } for video, item in rows]
+
+
+@router.post("/videos/{video_id}/analyze")
+async def analyze_video(
+    video_id: str,
+    force: bool = False,
+    db: AsyncSession = Depends(get_db),
+):
+    from content_response_service import create_analysis_run, ensure_response_item
+    from job_queue import enqueue_job
+
+    if await db.get(YoutubeVideo, video_id) is None:
+        raise HTTPException(404, "Video not found")
+    item, _ = await ensure_response_item(db, "youtube_video", video_id)
+    await db.commit()
+    run, job, created = await create_analysis_run(db, item, force=force)
+    if created:
+        await enqueue_job(job.id)
+    return {
+        "response_item_id": item.id,
+        "analysis_run_id": run.id,
+        "job_id": job.id,
+        "created": created,
+    }
+
+
+@router.get("/videos/{video_id}/transcript")
+async def get_video_transcript(video_id: str, db: AsyncSession = Depends(get_db)):
+    video = await db.get(YoutubeVideo, video_id)
+    if video is None:
+        raise HTTPException(404, "Video not found")
+    return {
+        "status": video.transcript_status,
+        "source": video.transcript_source,
+        "language": video.transcript_language,
+        "text": video.transcript_text,
+        "segments": video.transcript_segments,
+        "content_hash": video.transcript_content_hash,
+        "fetched_at": video.transcript_fetched_at,
+        "error_code": video.transcript_error_code,
+        "error": video.transcript_error,
+    }
+
+
+@router.post("/videos/{video_id}/transcript/retry")
+async def retry_video_transcript(video_id: str, db: AsyncSession = Depends(get_db)):
+    video = await db.get(YoutubeVideo, video_id)
+    if video is None:
+        raise HTTPException(404, "Video not found")
+    video.transcript_status = "queued"
+    video.transcript_error_code = ""
+    video.transcript_error = ""
+    await db.commit()
+    return await analyze_video(video_id, force=True, db=db)
+
+
+@router.post(
+    "/videos/{video_id}/extract-transcript",
+    dependencies=[Depends(require_worker_token)],
+)
+async def extract_video_transcript(video_id: str, db: AsyncSession = Depends(get_db)):
+    from config import get_config
+    from youtube_transcript import TranscriptError, extract_youtube_transcript
+
+    video = await db.get(YoutubeVideo, video_id)
+    if video is None:
+        raise HTTPException(404, "Video not found")
+    if video.transcript_status == "ready" and video.transcript_text:
+        return await get_video_transcript(video_id, db)
+    video.transcript_status = "extracting"
+    await db.commit()
+    try:
+        result = await extract_youtube_transcript(video.url, await get_config())
+    except TranscriptError as exc:
+        video.transcript_status = "failed"
+        video.transcript_error_code = exc.code
+        video.transcript_error = str(exc)[:500]
+        await db.commit()
+        headers = {"X-WMS-Retryable": "true" if exc.retryable else "false"}
+        raise HTTPException(422, str(exc), headers=headers) from exc
+    video.transcript_status = "ready"
+    video.transcript_source = result["source"]
+    video.transcript_language = result["language"]
+    video.transcript_text = result["text"]
+    video.transcript_segments = result["segments"]
+    video.transcript_content_hash = result["content_hash"]
+    video.transcript_fetched_at = datetime.now(timezone.utc)
+    video.transcript_error_code = ""
+    video.transcript_error = ""
+    await db.commit()
+    return await get_video_transcript(video_id, db)
 
 
 # ── Collect ────────────────────────────────────────────────────────────────────

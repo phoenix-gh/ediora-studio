@@ -108,6 +108,13 @@ class SettingsOut(BaseModel):
     image_api_key_preview: str
     heygen_api_key_set: bool
     heygen_api_key_preview: str
+    transcription_provider: str
+    transcription_model: str
+    transcription_base_url: str
+    transcription_api_key_set: bool
+    transcription_api_key_preview: str
+    transcription_max_duration_seconds: int
+    transcription_max_audio_bytes: int
     rsshub_base: str
     github_token_set: bool
     github_token_preview: str
@@ -158,6 +165,13 @@ class SettingsUpdate(BaseModel):
     image_api_key: Optional[str] = None
     image_base_url: Optional[str] = None
     heygen_api_key: Optional[str] = None
+    transcription_provider: Optional[str] = None
+    transcription_model: Optional[str] = None
+    transcription_base_url: Optional[str] = None
+    transcription_api_key: Optional[str] = None
+    transcription_clear_api_key: Optional[bool] = None
+    transcription_max_duration_seconds: Optional[int] = None
+    transcription_max_audio_bytes: Optional[int] = None
     rsshub_base: Optional[str] = None
     github_token: Optional[str] = None
     github_interval_minutes: Optional[int] = None
@@ -217,6 +231,7 @@ def _build_out(cfg: dict) -> SettingsOut:
     api_key = cfg.get("llm_api_key", "")
     image_api_key = cfg.get("image_api_key", "")
     heygen_api_key = effective_heygen_api_key(cfg)
+    transcription_api_key = cfg.get("transcription_api_key", "")
     gh_token = cfg.get("github_token", "")
     telegram_token = cfg.get("telegram_bot_token", "")
     blog_base, blog_token = blog_client.effective_blog_config(cfg)
@@ -249,6 +264,13 @@ def _build_out(cfg: dict) -> SettingsOut:
         image_api_key_preview=f"…{image_api_key[-4:]}" if len(image_api_key) >= 4 else "",
         heygen_api_key_set=bool(heygen_api_key),
         heygen_api_key_preview=f"…{heygen_api_key[-4:]}" if len(heygen_api_key) >= 4 else "",
+        transcription_provider=cfg.get("transcription_provider", "openai-compatible"),
+        transcription_model=cfg.get("transcription_model", "whisper-1"),
+        transcription_base_url=cfg.get("transcription_base_url", "https://api.openai.com/v1"),
+        transcription_api_key_set=bool(transcription_api_key),
+        transcription_api_key_preview=f"…{transcription_api_key[-4:]}" if len(transcription_api_key) >= 4 else "",
+        transcription_max_duration_seconds=max(60, int(cfg.get("transcription_max_duration_seconds", 7200))),
+        transcription_max_audio_bytes=max(1024 * 1024, int(cfg.get("transcription_max_audio_bytes", 26214400))),
         github_interval_minutes=max(1, int(cfg.get("github_interval_minutes", 1))),
         github_trending_interval_hours=max(1, int(cfg.get("github_trending_interval_hours", 6))),
         rsshub_base=cfg.get("rsshub_base", "http://127.0.0.1:1200"),
@@ -363,6 +385,26 @@ async def get_heygen_runtime_config():
     }
 
 
+@router.get(
+    "/transcription-runtime",
+    include_in_schema=False,
+    dependencies=[Depends(require_worker_token)],
+)
+async def get_transcription_runtime_config():
+    cfg = await get_config()
+    return {
+        key: cfg.get(key, "")
+        for key in (
+            "transcription_provider",
+            "transcription_model",
+            "transcription_base_url",
+            "transcription_api_key",
+            "transcription_max_duration_seconds",
+            "transcription_max_audio_bytes",
+        )
+    }
+
+
 @router.put("", response_model=SettingsOut)
 async def update_settings(
     body: SettingsUpdate,
@@ -389,6 +431,20 @@ async def update_settings(
         updates["image_base_url"] = body.image_base_url.strip()
     if body.heygen_api_key is not None:
         updates["heygen_api_key"] = body.heygen_api_key.strip()
+    if body.transcription_provider is not None:
+        updates["transcription_provider"] = body.transcription_provider.strip() or "openai-compatible"
+    if body.transcription_model is not None:
+        updates["transcription_model"] = body.transcription_model.strip() or "whisper-1"
+    if body.transcription_base_url is not None:
+        updates["transcription_base_url"] = body.transcription_base_url.strip().rstrip("/")
+    if body.transcription_clear_api_key:
+        updates["transcription_api_key"] = ""
+    elif body.transcription_api_key is not None and body.transcription_api_key.strip():
+        updates["transcription_api_key"] = body.transcription_api_key.strip()
+    if body.transcription_max_duration_seconds is not None:
+        updates["transcription_max_duration_seconds"] = str(max(60, body.transcription_max_duration_seconds))
+    if body.transcription_max_audio_bytes is not None:
+        updates["transcription_max_audio_bytes"] = str(max(1024 * 1024, body.transcription_max_audio_bytes))
     if body.rsshub_base is not None:
         updates["rsshub_base"] = body.rsshub_base
     if body.github_token is not None:

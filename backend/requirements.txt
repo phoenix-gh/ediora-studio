@@ -17,3 +17,4 @@ loguru>=0.7,<1
 feedgrab[twitter] @ https://github.com/iBigQiang/feedgrab/archive/b1a58d376e7ec478eed23f3a615bf533b069cae9.tar.gz
 pytest>=8.0,<9
 pytest-asyncio>=0.23,<1
+yt-dlp>=2025.1.1,<2027

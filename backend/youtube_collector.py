@@ -160,6 +160,7 @@ async def collect_channel_by_id(channel_id: str) -> int:
             return 0
 
         new_count = 0
+        new_video_ids: list[str] = []
         for v in data["videos"]:
             existing = await db.get(YoutubeVideo, v["id"])
             if existing:
@@ -182,6 +183,7 @@ async def collect_channel_by_id(channel_id: str) -> int:
                     collected_at=now,
                 ))
                 new_count += 1
+                new_video_ids.append(v["id"])
 
         channel.name = data["name"]
         channel.last_collected_at = now
@@ -193,6 +195,24 @@ async def collect_channel_by_id(channel_id: str) -> int:
             channel.description_cn = data["description_cn"]
 
         await db.commit()
+        if (
+            channel.auto_analyze_new_videos
+            and channel.analysis_enabled_at is not None
+            and now >= (
+                channel.analysis_enabled_at
+                if channel.analysis_enabled_at.tzinfo is not None
+                else channel.analysis_enabled_at.replace(tzinfo=timezone.utc)
+            )
+        ):
+            from content_response_service import create_analysis_run, ensure_response_item
+            from job_queue import enqueue_job
+
+            for video_id in new_video_ids:
+                item, _ = await ensure_response_item(db, "youtube_video", video_id)
+                await db.commit()
+                _, job, created = await create_analysis_run(db, item)
+                if created:
+                    await enqueue_job(job.id)
     return new_count
 
 
