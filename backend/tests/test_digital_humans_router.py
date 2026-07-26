@@ -23,6 +23,7 @@ def api(monkeypatch, tmp_path):
                 "database",
                 "models",
                 "content_jobs",
+                "digital_human_assets",
                 "digital_human_service",
                 "routers.digital_humans",
             )
@@ -100,6 +101,23 @@ def _create_media_assets(session_factory):
     return asyncio.new_event_loop().run_until_complete(run())
 
 
+def _asset_directories(session_factory, asset_ids):
+    async def run():
+        from models import CreativeAsset
+
+        async with session_factory() as session:
+            assets = [
+                await session.get(CreativeAsset, asset_id)
+                for asset_id in asset_ids
+            ]
+            return [
+                asset.directory if asset is not None else None
+                for asset in assets
+            ]
+
+    return asyncio.new_event_loop().run_until_complete(run())
+
+
 def test_create_role_enqueues_setup_job(api, monkeypatch):
     client, session_factory, router_module = api
     portrait, voice, environment = _create_media_assets(session_factory)
@@ -122,6 +140,9 @@ def test_create_role_enqueues_setup_job(api, monkeypatch):
     assert response.status_code == 201, response.text
     assert response.json()["status"] == "processing"
     assert queued == [response.json()["setup_job_id"]]
+    assert _asset_directories(
+        session_factory, [portrait, voice, environment]
+    ) == ["数字人资产", "数字人资产", "数字人资产"]
 
 
 def test_create_role_rejects_missing_heygen_configuration(api, monkeypatch):
@@ -374,6 +395,9 @@ def test_changing_only_default_environment_does_not_rebuild_provider(
     assert updated.json()["status"] == "ready"
     assert updated.json()["setup_job_id"] == ready["setup_job_id"]
     assert queued == [role["setup_job_id"]]
+    assert _asset_directories(
+        session_factory, [replacement_environment]
+    ) == ["数字人资产"]
 
 
 def test_changing_provider_inputs_requires_heygen_configuration(

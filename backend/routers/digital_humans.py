@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from config import effective_heygen_api_key, get_config
 from content_jobs import create_job
 from database import get_db
+from digital_human_assets import archive_digital_human_asset_ids
 from digital_human_service import (
     DigitalHumanInUse,
     InvalidTalkingVideo,
@@ -203,6 +204,14 @@ async def patch_role(
                     changed_provider_inputs.add(field)
     except InvalidTalkingVideo as exc:
         raise HTTPException(422, str(exc)) from exc
+    await archive_digital_human_asset_ids(
+        db,
+        {
+            body.portrait_asset_id,
+            body.voice_sample_asset_id,
+            body.default_environment_asset_id,
+        },
+    )
     if changed_provider_inputs and role.status == "processing":
         await db.rollback()
         raise HTTPException(409, "数字人正在处理，请完成后再更换形象或声音")

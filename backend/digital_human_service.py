@@ -9,6 +9,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from content_jobs import create_job
+from digital_human_assets import archive_digital_human_asset_ids
 from models import (
     ContentJob,
     CreativeAsset,
@@ -91,6 +92,14 @@ async def create_digital_human(
         {"image/png", "image/jpeg"},
         32 * 1024 * 1024,
     )
+    await archive_digital_human_asset_ids(
+        session,
+        {
+            portrait_asset_id,
+            voice_sample_asset_id,
+            default_environment_asset_id,
+        },
+    )
     role = DigitalHuman(
         name=clean_name,
         status="processing",
@@ -131,6 +140,9 @@ async def create_talking_project(
             environment_asset_id,
             {"image/png", "image/jpeg"},
             32 * 1024 * 1024,
+        )
+        await archive_digital_human_asset_ids(
+            session, {environment_asset_id}
         )
     project = TalkingVideoProject(
         title=title.strip(),
@@ -173,6 +185,9 @@ async def create_render(
         environment_asset_id,
         {"image/png", "image/jpeg"},
         32 * 1024 * 1024,
+    )
+    await archive_digital_human_asset_ids(
+        session, {environment_asset_id}
     )
     latest = await session.scalar(
         select(func.max(TalkingVideoRender.version)).where(

@@ -25,6 +25,7 @@ def client(monkeypatch, tmp_path):
                 "main",
                 "routers",
                 "content_jobs",
+                "digital_human_assets",
                 "digital_human_service",
             )
         ):

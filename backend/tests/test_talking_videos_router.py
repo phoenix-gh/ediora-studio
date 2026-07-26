@@ -23,6 +23,7 @@ def api(monkeypatch, tmp_path):
                 "database",
                 "models",
                 "content_jobs",
+                "digital_human_assets",
                 "digital_human_service",
                 "routers.talking_videos",
             )
@@ -114,6 +115,77 @@ def _seed(session_factory, *, ready: bool):
     return asyncio.new_event_loop().run_until_complete(run())
 
 
+def _create_environment(session_factory, filename: str):
+    async def run():
+        from models import CreativeAsset
+
+        async with session_factory() as session:
+            asset = CreativeAsset(
+                asset_type="media",
+                media_kind="image",
+                title=filename,
+                url=f"/api/uploads/{filename}",
+                media_type="image/png",
+                filename=filename,
+            )
+            session.add(asset)
+            await session.commit()
+            return asset.id
+
+    return asyncio.new_event_loop().run_until_complete(run())
+
+
+def _asset_directory(session_factory, asset_id: int):
+    async def run():
+        from models import CreativeAsset
+
+        async with session_factory() as session:
+            asset = await session.get(CreativeAsset, asset_id)
+            return asset.directory if asset is not None else None
+
+    return asyncio.new_event_loop().run_until_complete(run())
+
+
+def test_project_override_environment_is_archived_on_create(api):
+    client, session_factory, _ = api
+    role_id, _ = _seed(session_factory, ready=True)
+    override_id = _create_environment(session_factory, "override-create.png")
+
+    response = client.post(
+        "/api/talking-videos",
+        json={
+            "title": "作品",
+            "digital_human_id": role_id,
+            "environment_asset_id": override_id,
+        },
+    )
+
+    assert response.status_code == 201, response.text
+    assert _asset_directory(
+        session_factory, override_id
+    ) == "数字人资产"
+
+
+def test_project_override_environment_is_archived_on_update(api):
+    client, session_factory, _ = api
+    role_id, _ = _seed(session_factory, ready=True)
+    override_id = _create_environment(session_factory, "override-update.png")
+    project = client.post(
+        "/api/talking-videos",
+        json={"title": "作品", "digital_human_id": role_id},
+    ).json()
+
+    response = client.patch(
+        f"/api/talking-videos/{project['id']}",
+        json={"environment_asset_id": override_id},
+    )
+
+    assert response.status_code == 200, response.text
+    assert _asset_directory(
+        session_factory, override_id
+    ) == "数字人资产"
+
+
 def test_render_endpoint_rejects_non_ready_role(api):
     client, session_factory, _ = api
     role_id, _ = _seed(session_factory, ready=False)
@@ -177,6 +249,9 @@ def test_create_render_enqueues_job_and_returns_immutable_version(api, monkeypat
     assert first.json()["script_snapshot"] == "第一版脚本"
     assert first.json()["environment_asset_id"] == environment_id
     assert queued == [first.json()["job_id"]]
+    assert _asset_directory(
+        session_factory, environment_id
+    ) == "数字人资产"
 
 
 def test_render_progress_requires_local_video_asset_and_detail_is_nested(api):
@@ -230,6 +305,9 @@ def test_render_progress_requires_local_video_asset_and_detail_is_nested(api):
         },
     )
     assert succeeded.status_code == 200, succeeded.text
+    assert _asset_directory(
+        session_factory, video_asset_id
+    ) == "数字人资产"
 
     auto_selected = client.get(
         f"/api/talking-videos/{project['id']}"

@@ -12,7 +12,13 @@ def session_factory(monkeypatch, tmp_path):
     )
     for module in list(sys.modules):
         if module.startswith(
-            ("database", "models", "content_jobs", "digital_human_service")
+            (
+                "database",
+                "models",
+                "content_jobs",
+                "digital_human_assets",
+                "digital_human_service",
+            )
         ):
             sys.modules.pop(module, None)
 

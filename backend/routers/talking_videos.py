@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import effective_heygen_api_key, get_config
 from database import get_db
+from digital_human_assets import archive_digital_human_asset_ids
 from digital_human_service import (
     InvalidTalkingVideo,
     create_render,
@@ -272,6 +273,9 @@ async def render_worker_progress(
             or video_asset.media_type.lower().split(";", 1)[0] != "video/mp4"
         ):
             raise HTTPException(422, "本地视频资产无效")
+        await archive_digital_human_asset_ids(
+            db, {video_asset.id}
+        )
         render.video_asset_id = video_asset.id
         render.completed_at = now_utc()
         project = await db.scalar(
@@ -327,6 +331,9 @@ async def patch_project(
             )
         except InvalidTalkingVideo as exc:
             raise HTTPException(422, str(exc)) from exc
+        await archive_digital_human_asset_ids(
+            db, {values["environment_asset_id"]}
+        )
     for key, value in values.items():
         setattr(project, key, value)
     await db.commit()
