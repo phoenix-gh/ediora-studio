@@ -666,16 +666,6 @@ class RedditSubscription(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
 
 
-class TopicGeneratorCache(Base):
-    """Cached output of the last /topic-generator/generate call, keyed by account_id (NULL = no account)."""
-    __tablename__ = "topic_generator_cache"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    account_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True, unique=True)
-    topics: Mapped[list] = mapped_column(JSON, default=list)
-    generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
-
-
 class RedditPost(Base):
     __tablename__ = "reddit_posts"
 

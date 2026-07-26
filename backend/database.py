@@ -48,6 +48,23 @@ async def migrate_x_response_claim_schema(conn) -> None:
         "ON x_response_decisions (telegram_claim_token)"
     ))
 
+
+async def migrate_removed_hot_topic_schema(conn) -> None:
+    """Remove the retired topic generator while preserving processed history."""
+    from sqlalchemy import inspect, text
+
+    tables = set(await conn.run_sync(
+        lambda sync_connection: inspect(sync_connection).get_table_names()
+    ))
+    if "x_response_decisions" in tables:
+        await conn.execute(text(
+            "UPDATE x_response_decisions "
+            "SET workflow_status = 'used' "
+            "WHERE workflow_status = 'converted'"
+        ))
+    await conn.execute(text("DROP TABLE IF EXISTS topic_generator_cache"))
+
+
 async def init_db():
     from sqlalchemy import text
     async with engine.begin() as conn:
@@ -73,6 +90,7 @@ async def init_db():
             await conn.execute(text("ALTER TABLE IF EXISTS topic_sources RENAME TO plan_sources"))
             await conn.execute(text("ALTER TABLE IF EXISTS topic_updates RENAME TO plan_updates"))
 
+        await migrate_removed_hot_topic_schema(conn)
         await conn.run_sync(Base.metadata.create_all)
         await conn.execute(text("ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS media_kind VARCHAR NOT NULL DEFAULT ''"))
         await conn.execute(text("ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS directory VARCHAR NOT NULL DEFAULT ''"))
