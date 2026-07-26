@@ -21,6 +21,8 @@ import {
   type TalkingVideoRender,
 } from '@/lib/api/digital-humans'
 
+import { formatRenderCreatedAt } from './render-time'
+
 
 const statusLabel: Record<TalkingVideoRender['status'], string> = {
   queued: '等待中',
@@ -76,7 +78,7 @@ export function RenderVersionsPanel({
             <CardHeader>
               <CardTitle>版本 {render.version}</CardTitle>
               <CardDescription>
-                {new Date(render.created_at || Date.now()).toLocaleString('zh-CN')}
+                {formatRenderCreatedAt(render.created_at)}
               </CardDescription>
               <CardAction>
                 <Badge variant={render.status === 'failed' ? 'destructive' : 'secondary'}>

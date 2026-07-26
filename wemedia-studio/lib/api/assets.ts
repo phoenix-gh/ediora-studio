@@ -1,7 +1,12 @@
-import { API_BASE, apiFetch } from './client'
+import { apiFetch } from './client'
 
 export type CreativeAsset = { id: number; asset_type: 'article' | 'media'; media_kind: '' | 'image' | 'video' | 'audio'; title: string; content: string; url: string; media_type: string; filename: string; directory: string; tags: string[]; source: string; created_at: string; updated_at: string }
-export const creativeAssetUrl = (url: string) => new URL(url, new URL(API_BASE).origin).toString()
+const PUBLIC_API_BASE = process.env.NEXT_PUBLIC_API_URL
+  ?? 'http://localhost:8000/api'
+export const creativeAssetUrl = (url: string) => new URL(
+  url,
+  new URL(PUBLIC_API_BASE).origin,
+).toString()
 export const listCreativeAssets = (assetType?: CreativeAsset['asset_type']) => apiFetch<CreativeAsset[]>(`/assets${assetType ? `?asset_type=${assetType}` : ''}`)
 export const createCreativeAsset = (body: Pick<CreativeAsset, 'asset_type' | 'media_kind' | 'title' | 'content' | 'url' | 'media_type' | 'filename' | 'directory' | 'tags'>) => apiFetch<CreativeAsset>('/assets', { method: 'POST', body: JSON.stringify(body) })
 export async function uploadCreativeAsset(mediaKind: 'image' | 'video' | 'audio', file: File) { const body = new FormData(); body.append('file', file); return apiFetch<CreativeAsset>(`/assets/upload?media_kind=${mediaKind}`, { method: 'POST', body, headers: {} }) }
