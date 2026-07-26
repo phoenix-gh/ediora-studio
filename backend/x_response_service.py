@@ -458,7 +458,7 @@ async def load_unified_decision(
         telegram_claim_token=notification.claim_token if notification else None,
         telegram_last_error=notification.last_error if notification else "",
         notified_at=notification.notified_at if notification else None,
-        created_at=run.created_at,
+        created_at=run.completed_at or run.created_at,
         analysis_run_id=run.id,
         notification_id=notification.id if notification else None,
     )
