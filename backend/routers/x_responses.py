@@ -10,15 +10,26 @@ from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import desc, select, update
+from sqlalchemy import String, cast, desc, literal, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import get_config
 from database import get_db
 from log_redaction import redact_secret_text
-from models import PublishAccount, XPost, XResponseDecision, XSubscription
+from models import (
+    ContentAnalysisRun,
+    ContentResponseItem,
+    ContentResponseNotification,
+    PublishAccount,
+    XPost,
+    XSubscription,
+)
 from x_response_links import extract_external_urls, verify_urls
-from x_response_service import persist_decision
+from x_response_service import (
+    XResponseDecisionView,
+    load_unified_decision,
+    persist_decision,
+)
 
 
 router = APIRouter(prefix="/x/responses", tags=["x-responses"])
@@ -91,15 +102,14 @@ def _eligible(post: XPost, sub: XSubscription) -> tuple[bool, str]:
 
 
 async def _joined(db: AsyncSession, decision_id: int):
-    return (await db.execute(
-        select(XResponseDecision, XPost, XSubscription)
-        .join(XPost, XPost.tweet_id == XResponseDecision.tweet_id)
-        .join(XSubscription, XSubscription.id == XResponseDecision.subscription_id)
-        .where(XResponseDecision.id == decision_id)
-    )).first()
+    return await load_unified_decision(db, item_id=decision_id)
 
 
-def _payload(decision: XResponseDecision, post: XPost, sub: XSubscription) -> dict:
+def _payload(
+    decision: XResponseDecisionView,
+    post: XPost,
+    sub: XSubscription,
+) -> dict:
     return {
         "id": decision.id,
         "tweet_id": decision.tweet_id,
@@ -155,16 +165,20 @@ async def _claim_decision(
     decision_id: int,
     claimable_statuses: set[str],
 ) -> str | None:
+    joined = await _joined(db, decision_id)
+    if joined is None or joined[0].notification_id is None:
+        return None
+    notification_id = joined[0].notification_id
     claim_token = uuid.uuid4().hex
     result = await db.execute(
-        update(XResponseDecision)
-        .where(XResponseDecision.id == decision_id)
-        .where(XResponseDecision.telegram_status.in_(claimable_statuses))
+        update(ContentResponseNotification)
+        .where(ContentResponseNotification.id == notification_id)
+        .where(ContentResponseNotification.status.in_(claimable_statuses))
         .values(
-            telegram_status="sending",
-            telegram_claim_token=claim_token,
-            telegram_attempts=XResponseDecision.telegram_attempts + 1,
-            telegram_last_error="",
+            status="sending",
+            claim_token=claim_token,
+            attempts=ContentResponseNotification.attempts + 1,
+            last_error="",
         )
     )
     await db.commit()
@@ -177,18 +191,24 @@ async def _finish_claim_failure(
     claim_token: str,
     exc: Exception,
     configured_token: str,
+    claim_group: bool = False,
 ) -> str:
     message_ids = list(getattr(exc, "message_ids", []) or [])
     delivery_unknown = bool(getattr(exc, "delivery_unknown", False))
     status = "unknown" if delivery_unknown or message_ids else "failed"
+    token_condition = (
+        ContentResponseNotification.claim_token.like(f"{claim_token}:%")
+        if claim_group
+        else ContentResponseNotification.claim_token == claim_token
+    )
     await db.execute(
-        update(XResponseDecision)
-        .where(XResponseDecision.telegram_claim_token == claim_token)
-        .where(XResponseDecision.telegram_status == "sending")
+        update(ContentResponseNotification)
+        .where(token_condition)
+        .where(ContentResponseNotification.status == "sending")
         .values(
-            telegram_status=status,
-            telegram_message_ids=message_ids,
-            telegram_last_error=_safe_telegram_error(exc, configured_token),
+            status=status,
+            message_ids=message_ids,
+            last_error=_safe_telegram_error(exc, configured_token),
         )
     )
     await db.commit()
@@ -267,7 +287,7 @@ async def worker_persist_decision(
             "prompt_version": body.prompt_version,
         },
     )
-    row = await _joined(db, decision.id)
+    row = await load_unified_decision(db, item_id=decision.id)
     assert row is not None
     return _payload(*row)
 
@@ -281,27 +301,48 @@ async def list_responses(
     limit: int = 50,
     db: AsyncSession = Depends(get_db),
 ):
-    query = (
-        select(XResponseDecision, XPost, XSubscription)
-        .join(XPost, XPost.tweet_id == XResponseDecision.tweet_id)
-        .join(XSubscription, XSubscription.id == XResponseDecision.subscription_id)
+    item_ids = (await db.execute(
+        select(ContentResponseItem.id)
+        .where(ContentResponseItem.source_type == "x_post")
+        .where(ContentResponseItem.current_analysis_run_id.is_not(None))
+    )).scalars().all()
+    rows = []
+    for item_id in item_ids:
+        row = await load_unified_decision(db, item_id=item_id)
+        if row is None:
+            continue
+        decision, _post, _subscription = row
+        if action and decision.action != action:
+            continue
+        if workflow_status and decision.workflow_status != workflow_status:
+            continue
+        if (
+            notification_tier
+            and decision.notification_tier != notification_tier
+        ):
+            continue
+        if (
+            subscription_id is not None
+            and decision.subscription_id != subscription_id
+        ):
+            continue
+        rows.append(row)
+    rows.sort(
+        key=lambda row: (
+            row[0].workflow_status == "ready",
+            row[0].score,
+            _aware(row[1].published_at) or datetime.min.replace(
+                tzinfo=timezone.utc
+            ),
+        ),
+        reverse=True,
     )
-    if action:
-        query = query.where(XResponseDecision.action == action)
-    if workflow_status:
-        query = query.where(XResponseDecision.workflow_status == workflow_status)
-    if notification_tier:
-        query = query.where(XResponseDecision.notification_tier == notification_tier)
-    if subscription_id is not None:
-        query = query.where(XResponseDecision.subscription_id == subscription_id)
-    rows = (await db.execute(
-        query.order_by(
-            XResponseDecision.workflow_status != "ready",
-            desc(XResponseDecision.score),
-            desc(XPost.published_at),
-        ).limit(max(1, min(limit, 100)))
-    )).all()
-    return {"items": [_payload(*row) for row in rows]}
+    return {
+        "items": [
+            _payload(*row)
+            for row in rows[:max(1, min(limit, 100))]
+        ],
+    }
 
 
 @router.post("/digest/send")
@@ -311,16 +352,42 @@ async def send_digest(body: DigestIn, db: AsyncSession = Depends(get_db)):
     start = datetime.combine(body.date, time.min, shanghai).astimezone(timezone.utc)
     end = start + timedelta(days=1)
     rows = (await db.execute(
-        select(XResponseDecision, XPost, XSubscription)
-        .join(XPost, XPost.tweet_id == XResponseDecision.tweet_id)
-        .join(XSubscription, XSubscription.id == XResponseDecision.subscription_id)
-        .where(XResponseDecision.notification_tier == "digest")
-        .where(
-            XResponseDecision.telegram_status.in_(CLAIMABLE_DIGEST_STATUSES)
+        select(
+            ContentResponseNotification,
+            ContentResponseItem,
+            ContentAnalysisRun,
+            XPost,
+            XSubscription,
         )
-        .where(XResponseDecision.created_at >= start)
-        .where(XResponseDecision.created_at < end)
-        .order_by(desc(XResponseDecision.score), desc(XPost.published_at))
+        .join(
+            ContentResponseItem,
+            ContentResponseItem.id
+            == ContentResponseNotification.response_item_id,
+        )
+        .join(
+            ContentAnalysisRun,
+            ContentAnalysisRun.id
+            == ContentResponseNotification.analysis_run_id,
+        )
+        .join(XPost, XPost.tweet_id == ContentResponseItem.source_id)
+        .join(XSubscription, XSubscription.id == XPost.subscription_id)
+        .where(ContentResponseItem.source_type == "x_post")
+        .where(
+            ContentResponseItem.current_analysis_run_id
+            == ContentAnalysisRun.id
+        )
+        .where(ContentResponseNotification.notification_tier == "digest")
+        .where(
+            ContentResponseNotification.status.in_(
+                CLAIMABLE_DIGEST_STATUSES
+            )
+        )
+        .where(ContentAnalysisRun.created_at >= start)
+        .where(ContentAnalysisRun.created_at < end)
+        .order_by(
+            desc(ContentAnalysisRun.content_value_score),
+            desc(XPost.published_at),
+        )
     )).all()
     if not rows:
         return {"sent": 0, "message_ids": []}
@@ -328,36 +395,50 @@ async def send_digest(body: DigestIn, db: AsyncSession = Depends(get_db)):
     import telegram_notifier
     cfg = await get_config()
     claim_token = uuid.uuid4().hex
-    candidate_ids = [row[0].id for row in rows]
+    candidate_ids = [notification.id for notification, *_rest in rows]
     await db.execute(
-        update(XResponseDecision)
-        .where(XResponseDecision.id.in_(candidate_ids))
+        update(ContentResponseNotification)
+        .where(ContentResponseNotification.id.in_(candidate_ids))
         .where(
-            XResponseDecision.telegram_status.in_(CLAIMABLE_DIGEST_STATUSES)
+            ContentResponseNotification.status.in_(
+                CLAIMABLE_DIGEST_STATUSES
+            )
         )
         .values(
-            telegram_status="sending",
-            telegram_claim_token=claim_token,
-            telegram_attempts=XResponseDecision.telegram_attempts + 1,
-            telegram_last_error="",
+            status="sending",
+            claim_token=(
+                literal(f"{claim_token}:")
+                + cast(ContentResponseNotification.id, String)
+            ),
+            attempts=ContentResponseNotification.attempts + 1,
+            last_error="",
         )
     )
     await db.commit()
     db.expire_all()
     rows = (await db.execute(
-        select(XResponseDecision, XPost, XSubscription)
-        .join(XPost, XPost.tweet_id == XResponseDecision.tweet_id)
-        .join(XSubscription, XSubscription.id == XResponseDecision.subscription_id)
-        .where(XResponseDecision.telegram_claim_token == claim_token)
-        .where(XResponseDecision.telegram_status == "sending")
-        .order_by(desc(XResponseDecision.score), desc(XPost.published_at))
+        select(ContentResponseNotification, ContentResponseItem)
+        .join(
+            ContentResponseItem,
+            ContentResponseItem.id
+            == ContentResponseNotification.response_item_id,
+        )
+        .where(
+            ContentResponseNotification.claim_token.like(f"{claim_token}:%")
+        )
+        .where(ContentResponseNotification.status == "sending")
     )).all()
     if not rows:
         return {"sent": 0, "message_ids": []}
 
-    decisions = [row[0] for row in rows]
+    render_rows = []
+    for _notification, item in rows:
+        joined = await load_unified_decision(db, item_id=item.id)
+        if joined is not None:
+            render_rows.append(joined)
+    decisions = [row[0] for row in render_rows]
     messages = telegram_notifier.render_digest_messages(
-        rows,
+        render_rows,
         body.date.isoformat(),
         "http://localhost:3000/x-responses",
     )
@@ -374,6 +455,7 @@ async def send_digest(body: DigestIn, db: AsyncSession = Depends(get_db)):
             claim_token=claim_token,
             exc=exc,
             configured_token=configured_token,
+            claim_group=True,
         )
         raise HTTPException(
             503,
@@ -383,13 +465,15 @@ async def send_digest(body: DigestIn, db: AsyncSession = Depends(get_db)):
 
     sent_at = datetime.now(timezone.utc)
     await db.execute(
-        update(XResponseDecision)
-        .where(XResponseDecision.telegram_claim_token == claim_token)
-        .where(XResponseDecision.telegram_status == "sending")
+        update(ContentResponseNotification)
+        .where(
+            ContentResponseNotification.claim_token.like(f"{claim_token}:%")
+        )
+        .where(ContentResponseNotification.status == "sending")
         .values(
-            telegram_status="sent",
-            telegram_message_ids=message_ids,
-            telegram_last_error="",
+            status="sent",
+            message_ids=message_ids,
+            last_error="",
             notified_at=sent_at,
         )
     )
@@ -411,10 +495,13 @@ async def set_feedback(
     body: FeedbackIn,
     db: AsyncSession = Depends(get_db),
 ):
-    decision = await db.get(XResponseDecision, decision_id)
-    if decision is None:
+    item = await db.get(ContentResponseItem, decision_id)
+    if item is None or item.source_type != "x_post":
         raise HTTPException(404, "response not found")
-    decision.workflow_status = body.status
+    item.decision_status = {
+        "used": "adopted",
+        "ignored": "rejected",
+    }[body.status]
     await db.commit()
     row = await _joined(db, decision_id)
     assert row is not None
@@ -446,7 +533,10 @@ async def notify_response(decision_id: int, db: AsyncSession = Depends(get_db)):
         current = await _joined(db, decision_id)
         assert current is not None
         return _payload(*current)
-    await db.refresh(decision)
+    db.expire_all()
+    claimed = await _joined(db, decision_id)
+    assert claimed is not None
+    decision, post, sub = claimed
     messages = telegram_notifier.render_immediate_messages(
         decision, post, sub,
         f"http://localhost:3000/x-responses?decision={decision.id}",
@@ -471,13 +561,13 @@ async def notify_response(decision_id: int, db: AsyncSession = Depends(get_db)):
             headers=_retryability_headers(exc),
         ) from None
     await db.execute(
-        update(XResponseDecision)
-        .where(XResponseDecision.telegram_claim_token == claim_token)
-        .where(XResponseDecision.telegram_status == "sending")
+        update(ContentResponseNotification)
+        .where(ContentResponseNotification.claim_token == claim_token)
+        .where(ContentResponseNotification.status == "sending")
         .values(
-            telegram_status="sent",
-            telegram_message_ids=message_ids,
-            telegram_last_error="",
+            status="sent",
+            message_ids=message_ids,
+            last_error="",
             notified_at=datetime.now(timezone.utc),
         )
     )

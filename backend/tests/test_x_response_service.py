@@ -76,7 +76,15 @@ def test_watch_and_ignore_never_keep_publishable_drafts():
 
 
 def test_persist_decision_is_idempotent_per_tweet(env):
-    from models import XPost, XResponseDecision, XSubscription
+    from sqlalchemy import func, select
+    from models import (
+        ContentAnalysisRun,
+        ContentResponseItem,
+        ContentResponseNotification,
+        XPost,
+        XResponseDecision,
+        XSubscription,
+    )
     from x_response_service import persist_decision
     from datetime import datetime, timezone
 
@@ -115,13 +123,39 @@ def test_persist_decision_is_idempotent_per_tweet(env):
                 db, "t1", {**raw, "score": 99},
                 {"verification_status": "not_required"},
             )
-            rows = (await db.execute(
-                __import__("sqlalchemy").select(XResponseDecision)
-            )).scalars().all()
-            return first, second, rows
+            legacy_count = await db.scalar(select(func.count()).select_from(
+                XResponseDecision
+            ))
+            item_count = await db.scalar(select(func.count()).select_from(
+                ContentResponseItem
+            ))
+            run_count = await db.scalar(select(func.count()).select_from(
+                ContentAnalysisRun
+            ))
+            notification_count = await db.scalar(select(func.count()).select_from(
+                ContentResponseNotification
+            ))
+            return (
+                first,
+                second,
+                legacy_count,
+                item_count,
+                run_count,
+                notification_count,
+            )
 
-    first, second, rows = asyncio.run(run())
+    (
+        first,
+        second,
+        legacy_count,
+        item_count,
+        run_count,
+        notification_count,
+    ) = asyncio.run(run())
     assert first.id == second.id
-    assert len(rows) == 1
-    assert rows[0].score == 80
-    assert rows[0].telegram_status == "pending"
+    assert first.score == 80
+    assert first.telegram_status == "pending"
+    assert legacy_count == 0
+    assert item_count == 1
+    assert run_count == 1
+    assert notification_count == 1

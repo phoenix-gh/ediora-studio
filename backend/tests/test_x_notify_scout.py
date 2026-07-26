@@ -100,8 +100,12 @@ def test_dispatch_is_eligible_and_idempotent(service_env):
 
 def test_reconciliation_creates_only_missing_jobs(service_env):
     from database import SessionLocal
-    from models import ContentJob, XResponseDecision, XSubscription
-    from x_response_service import ensure_response_job, reconcile_response_jobs
+    from models import ContentJob, XSubscription
+    from x_response_service import (
+        ensure_response_job,
+        persist_decision,
+        reconcile_response_jobs,
+    )
 
     enqueued: list[int] = []
 
@@ -130,14 +134,19 @@ def test_reconciliation_creates_only_missing_jobs(service_env):
             ])
             await db.commit()
             await ensure_response_job(db, "has-job")
-            db.add(XResponseDecision(
-                tweet_id="decided",
-                subscription_id=sub.id,
-                action="ignore",
-                score=10,
-                confidence=0.9,
-            ))
-            await db.commit()
+            await persist_decision(
+                db,
+                "decided",
+                {
+                    "action": "ignore",
+                    "score": 10,
+                    "confidence": 0.9,
+                    "reason": "无需响应",
+                    "summary_cn": "普通更新",
+                    "claims": [],
+                },
+                {"verification_status": "not_required"},
+            )
 
         result = await reconcile_response_jobs(enqueue=enqueue)
         repeated = await reconcile_response_jobs(enqueue=enqueue)

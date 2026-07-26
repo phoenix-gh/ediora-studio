@@ -188,6 +188,35 @@ async def migrate_content_response_schema(conn) -> None:
                 completed_at=decision["updated_at"],
             ))
             analysis_id = result.inserted_primary_key[0]
+        await conn.execute(
+            ContentAnalysisRun.__table__.update()
+            .where(ContentAnalysisRun.__table__.c.id == analysis_id)
+            .values(
+                status="succeeded",
+                content_value_score=decision["score"],
+                value_dimensions={"legacy_score": decision["score"]},
+                summary_cn=decision["summary_cn"],
+                core_thesis=decision["summary_cn"],
+                evidence=decision["claims"] or [],
+                recommended_action=decision["action"],
+                recommendation_reason=decision["reason"],
+                model_provider=decision["model_provider"],
+                model_name=decision["model_name"],
+                prompt_version=decision["prompt_version"],
+                policy_version=decision["decision_policy_version"],
+                source_snapshot={
+                    "x_response": {
+                        "subscription_id": decision["subscription_id"],
+                        "action": decision["action"],
+                        "confidence": decision["confidence"],
+                        "claims": decision["claims"] or [],
+                        "verification_status": decision["verification_status"],
+                        "verified_urls": decision["verified_urls"] or [],
+                    },
+                },
+                completed_at=decision["updated_at"],
+            )
+        )
 
         await conn.execute(
             ContentResponseItem.__table__.update()
@@ -217,13 +246,22 @@ async def migrate_content_response_schema(conn) -> None:
                     created_at=decision["created_at"],
                     updated_at=decision["updated_at"],
                 ))
+            else:
+                await conn.execute(
+                    ContentResponseOutput.__table__.update()
+                    .where(ContentResponseOutput.__table__.c.id == exists)
+                    .values(
+                        status="draft_ready",
+                        content=content,
+                        source_attribution={"url": (post or {}).get("url", "")},
+                        updated_at=decision["updated_at"],
+                    )
+                )
 
         notification = (await conn.execute(
             select(ContentResponseNotification.__table__.c.id).where(
                 ContentResponseNotification.__table__.c.analysis_run_id == analysis_id,
                 ContentResponseNotification.__table__.c.channel == "telegram",
-                ContentResponseNotification.__table__.c.notification_tier
-                == decision["notification_tier"],
             )
         )).scalar_one_or_none()
         if notification is None:
@@ -241,6 +279,134 @@ async def migrate_content_response_schema(conn) -> None:
                 created_at=decision["created_at"],
                 updated_at=decision["updated_at"],
             ))
+        else:
+            await conn.execute(
+                ContentResponseNotification.__table__.update()
+                .where(ContentResponseNotification.__table__.c.id == notification)
+                .values(
+                    notification_tier=decision["notification_tier"],
+                    status=decision["telegram_status"],
+                    message_ids=decision["telegram_message_ids"] or [],
+                    attempts=decision["telegram_attempts"],
+                    claim_token=decision["telegram_claim_token"],
+                    last_error=decision["telegram_last_error"],
+                    notified_at=decision["notified_at"],
+                    updated_at=decision["updated_at"],
+                )
+            )
+
+
+async def retire_x_response_decision_schema(conn) -> None:
+    """Drop the legacy X decision table only after row-by-row parity checks."""
+    from sqlalchemy import inspect, select, text
+    from models import (
+        ContentAnalysisRun,
+        ContentResponseItem,
+        ContentResponseNotification,
+        ContentResponseOutput,
+        XResponseDecision,
+    )
+
+    tables = set(await conn.run_sync(
+        lambda sync_connection: inspect(sync_connection).get_table_names()
+    ))
+    if "x_response_decisions" not in tables:
+        return
+
+    decisions = (
+        await conn.execute(select(XResponseDecision.__table__))
+    ).mappings().all()
+    for decision in decisions:
+        item = (await conn.execute(
+            select(ContentResponseItem.__table__).where(
+                ContentResponseItem.__table__.c.source_type == "x_post",
+                ContentResponseItem.__table__.c.source_id == decision["tweet_id"],
+            )
+        )).mappings().one_or_none()
+        if item is None or item["current_analysis_run_id"] is None:
+            raise RuntimeError(
+                f"cannot retire x_response_decisions: missing unified item "
+                f"for {decision['tweet_id']}"
+            )
+        run = (await conn.execute(
+            select(ContentAnalysisRun.__table__).where(
+                ContentAnalysisRun.__table__.c.id
+                == item["current_analysis_run_id"]
+            )
+        )).mappings().one_or_none()
+        snapshot = (run or {}).get("source_snapshot") or {}
+        x_snapshot = snapshot.get("x_response") or {}
+        expected_decision_status = {
+            "used": "adopted",
+            "ignored": "rejected",
+        }.get(decision["workflow_status"], "pending")
+        run_matches = bool(
+            run
+            and run["status"] == "succeeded"
+            and run["content_value_score"] == decision["score"]
+            and run["summary_cn"] == decision["summary_cn"]
+            and run["recommended_action"] == decision["action"]
+            and run["recommendation_reason"] == decision["reason"]
+            and x_snapshot.get("confidence") == decision["confidence"]
+            and (x_snapshot.get("claims") or []) == (decision["claims"] or [])
+            and x_snapshot.get("verification_status")
+            == decision["verification_status"]
+            and (x_snapshot.get("verified_urls") or [])
+            == (decision["verified_urls"] or [])
+            and item["decision_status"] == expected_decision_status
+        )
+        if not run_matches:
+            raise RuntimeError(
+                f"cannot retire x_response_decisions: analysis mismatch "
+                f"for {decision['tweet_id']}"
+            )
+
+        outputs = (await conn.execute(
+            select(
+                ContentResponseOutput.__table__.c.output_type,
+                ContentResponseOutput.__table__.c.content,
+            ).where(
+                ContentResponseOutput.__table__.c.analysis_run_id == run["id"]
+            )
+        )).all()
+        output_map = dict(outputs)
+        if (
+            (decision["comment_draft"] and output_map.get("x_reply")
+             != decision["comment_draft"])
+            or (decision["quote_draft"] and output_map.get("x_quote")
+                != decision["quote_draft"])
+        ):
+            raise RuntimeError(
+                f"cannot retire x_response_decisions: draft mismatch "
+                f"for {decision['tweet_id']}"
+            )
+
+        notification = (await conn.execute(
+            select(ContentResponseNotification.__table__).where(
+                ContentResponseNotification.__table__.c.analysis_run_id
+                == run["id"],
+                ContentResponseNotification.__table__.c.channel == "telegram",
+            )
+        )).mappings().one_or_none()
+        notification_matches = bool(
+            notification
+            and notification["notification_tier"]
+            == decision["notification_tier"]
+            and notification["status"] == decision["telegram_status"]
+            and (notification["message_ids"] or [])
+            == (decision["telegram_message_ids"] or [])
+            and notification["attempts"] == decision["telegram_attempts"]
+            and notification["claim_token"]
+            == decision["telegram_claim_token"]
+            and notification["last_error"] == decision["telegram_last_error"]
+        )
+        if not notification_matches:
+            raise RuntimeError(
+                f"cannot retire x_response_decisions: notification mismatch "
+                f"for {decision['tweet_id']}"
+            )
+
+    await conn.execute(text("DROP TABLE x_response_decisions"))
 
 
 async def init_db():
@@ -334,6 +500,7 @@ async def init_db():
         ))
         await migrate_x_response_claim_schema(conn)
         await migrate_content_response_schema(conn)
+        await retire_x_response_decision_schema(conn)
 
         if not DATABASE_URL.startswith("sqlite"):
             # Writing plans brief field (added in redesign; idempotent)

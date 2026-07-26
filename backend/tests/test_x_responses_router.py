@@ -3,6 +3,7 @@ import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import pytest
 from fastapi.testclient import TestClient
@@ -193,7 +194,7 @@ def test_digest_send_is_idempotent(client, monkeypatch):
     import telegram_notifier
     monkeypatch.setattr(telegram_notifier, "send_html_messages", fake_send)
 
-    date_key = datetime.now().astimezone().date().isoformat()
+    date_key = datetime.now(ZoneInfo("Asia/Shanghai")).date().isoformat()
     first = client.post("/api/x/responses/digest/send", json={"date": date_key})
     second = client.post("/api/x/responses/digest/send", json={"date": date_key})
 
@@ -380,7 +381,7 @@ def test_concurrent_digest_claims_one_non_overlapping_decision_set(client, monke
 
     import telegram_notifier
     monkeypatch.setattr(telegram_notifier, "send_html_messages", blocking_send)
-    date_key = datetime.now().astimezone().date().isoformat()
+    date_key = datetime.now(ZoneInfo("Asia/Shanghai")).date().isoformat()
 
     with ThreadPoolExecutor(max_workers=2) as executor:
         first = executor.submit(
@@ -439,7 +440,7 @@ def test_digest_partial_delivery_is_unknown_and_preserves_message_ids(
 
     import telegram_notifier
     monkeypatch.setattr(telegram_notifier, "send_html_messages", partial_send)
-    date_key = datetime.now().astimezone().date().isoformat()
+    date_key = datetime.now(ZoneInfo("Asia/Shanghai")).date().isoformat()
 
     first = client.post(
         "/api/x/responses/digest/send",
