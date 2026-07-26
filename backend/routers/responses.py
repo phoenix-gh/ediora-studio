@@ -217,6 +217,23 @@ async def output_worker_context(output_id: int, db: AsyncSession = Depends(get_d
     account = await db.get(PublishAccount, output.publish_account_id) if output.publish_account_id else None
     if item is None or run is None:
         raise HTTPException(409, "response output context is incomplete")
+    if item.source_type == "youtube_video":
+        video = await db.get(YoutubeVideo, item.source_id)
+        source = None if video is None else {
+            "title": video.title,
+            "url": video.url,
+            "description": video.description,
+            "transcript_language": video.transcript_language,
+            "transcript_text": video.transcript_text,
+        }
+    else:
+        post = await db.get(XPost, item.source_id)
+        source = None if post is None else {
+            "title": post.content[:500],
+            "url": post.url,
+            "content": post.content,
+            "raw_markdown": post.raw_markdown,
+        }
     return {
         "output": {
             "id": output.id,
@@ -224,6 +241,7 @@ async def output_worker_context(output_id: int, db: AsyncSession = Depends(get_d
             "status": output.status,
         },
         "item": _item_payload(item, run),
+        "source": source,
         "account": None if account is None else {
             "id": account.id,
             "name": account.name,

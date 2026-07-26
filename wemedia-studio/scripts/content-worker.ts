@@ -7,6 +7,8 @@ import {
   runDigitalHumanSetupJob,
 } from '../lib/ai/digital-human-job'
 import { getJob } from '../lib/ai/job-client'
+import { runContentResponseAnalysisJob } from '../lib/ai/content-response-job'
+import { runContentResponseOutputJob } from '../lib/ai/content-response-output-job'
 import { runXResponseDigestJob, runXResponseJob } from '../lib/ai/x-response-job'
 
 const redisUrl = process.env.WMS_REDIS_URL ?? 'redis://redis:6379/0'
@@ -25,6 +27,10 @@ async function run() {
         await runDigitalHumanSetupJob(jobId)
       } else if (job.flow === 'digital_human_render') {
         await runDigitalHumanRenderJob(jobId)
+      } else if (job.flow === 'content_response_analysis') {
+        await runContentResponseAnalysisJob(jobId)
+      } else if (job.flow === 'content_response_output') {
+        await runContentResponseOutputJob(jobId)
       } else if (job.flow === 'x_response') await runXResponseJob(jobId)
       else if (job.flow === 'x_response_digest') await runXResponseDigestJob(jobId)
       else await runContentJob(jobId)
