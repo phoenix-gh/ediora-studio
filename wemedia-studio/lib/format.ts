@@ -44,10 +44,19 @@ export function fmtCount(n: number): string {
 
 /** Short calendar date — "Mon d" in zh-CN. */
 export function fmtShortDate(iso: string): string {
-  return new Date(iso).toLocaleDateString(LOCALE, { month: 'short', day: 'numeric' })
+  return new Date(iso).toLocaleDateString(LOCALE, {
+    timeZone: 'Asia/Shanghai',
+    month: 'short',
+    day: 'numeric',
+  })
 }
 
 /** Full date with year — "2026 5月 3日" — for wechat-style feeds whose articles span years. */
 export function fmtFullDate(iso: string): string {
-  return new Date(iso).toLocaleDateString(LOCALE, { year: 'numeric', month: 'short', day: 'numeric' })
+  return new Date(iso).toLocaleDateString(LOCALE, {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  })
 }

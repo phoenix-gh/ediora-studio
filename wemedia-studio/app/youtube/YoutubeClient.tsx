@@ -15,6 +15,7 @@ import {
 import { AddToTopicPopover } from '@/components/features/AddToTopicPopover'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { fmtShortDate } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { useInfiniteScroll } from '@/lib/use-infinite-scroll'
 
@@ -25,10 +26,6 @@ function fmtViews(n: number) {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
   return String(n)
-}
-
-function fmtDate(iso: string) {
-  return new Date(iso).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })
 }
 
 // ── Subscribe Dialog ──────────────────────────────────────────────────────────
@@ -407,7 +404,7 @@ function VideoCard({
           {video.views > 0 && (
             <span className="flex items-center gap-1"><Eye className="w-3.5 h-3.5" />{fmtViews(video.views)}</span>
           )}
-          <span>{fmtDate(video.published_at)}</span>
+          <span>{fmtShortDate(video.published_at)}</span>
         </div>
         <div className="ml-auto flex items-center gap-0.5">
           <AddToTopicPopover
