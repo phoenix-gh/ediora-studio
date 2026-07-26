@@ -103,7 +103,7 @@ export function DigitalHumansClient({
           <TabsTrigger value="roles">数字人角色</TabsTrigger>
         </TabsList>
         <TabsContent value="projects">
-          <div className="grid gap-4 lg:grid-cols-[240px_minmax(0,1fr)]">
+          <div className="grid gap-4 lg:grid-cols-[220px_minmax(0,1fr)]">
             <TalkingProjectList
               projects={projects}
               roles={roles}

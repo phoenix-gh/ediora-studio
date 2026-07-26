@@ -161,7 +161,7 @@ export function TalkingVideoEditor({
 
   return (
     <>
-      <div className="grid gap-4 xl:grid-cols-[260px_minmax(420px,1fr)_360px]">
+      <div className="grid min-w-0 gap-4 min-[1360px]:grid-cols-[200px_minmax(320px,1fr)_280px]">
         <aside
           data-testid="talking-config-column"
           className="flex flex-col gap-4"
