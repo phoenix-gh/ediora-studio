@@ -6,7 +6,7 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from content_jobs import create_job
@@ -20,7 +20,7 @@ from digital_human_service import (
     require_media_asset,
 )
 from job_queue import enqueue_job
-from models import CreativeAsset, DigitalHuman
+from models import CreativeAsset, DigitalHuman, TalkingVideoProject
 
 
 router = APIRouter(prefix="/digital-humans", tags=["digital-humans"])
@@ -64,6 +64,11 @@ async def _role_payload(db: AsyncSession, role: DigitalHuman) -> dict:
     portrait = await db.get(CreativeAsset, role.portrait_asset_id)
     voice = await db.get(CreativeAsset, role.voice_sample_asset_id)
     environment = await db.get(CreativeAsset, role.default_environment_asset_id)
+    project_count = await db.scalar(
+        select(func.count(TalkingVideoProject.id)).where(
+            TalkingVideoProject.digital_human_id == role.id
+        )
+    )
     return {
         "id": role.id,
         "name": role.name,
@@ -83,6 +88,7 @@ async def _role_payload(db: AsyncSession, role: DigitalHuman) -> dict:
         "archived_at": role.archived_at,
         "created_at": role.created_at,
         "updated_at": role.updated_at,
+        "project_count": project_count or 0,
     }
 
 
