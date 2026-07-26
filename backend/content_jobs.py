@@ -9,9 +9,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from log_redaction import redact_secret_text
 from models import (
+    ContentAnalysisRun,
     ContentJob,
     ContentJobEvent,
     ContentJobStep,
+    ContentResponseEvent,
+    ContentResponseItem,
     DailyPlan,
     DigitalHuman,
     TalkingVideoRender,
@@ -71,6 +74,23 @@ async def _latest_step(session: AsyncSession, job_id: int, step_key: str) -> Con
     return result.scalars().first()
 
 
+async def _analysis_for_job(
+    session: AsyncSession,
+    job: ContentJob,
+) -> tuple[ContentAnalysisRun | None, ContentResponseItem | None]:
+    if job.flow != "content_response_analysis":
+        return None, None
+    analysis = (await session.execute(
+        select(ContentAnalysisRun).where(ContentAnalysisRun.job_id == job.id)
+    )).scalar_one_or_none()
+    if analysis is None:
+        return None, None
+    return analysis, await session.get(
+        ContentResponseItem,
+        analysis.response_item_id,
+    )
+
+
 async def start_step(session: AsyncSession, job_id: int, step_key: str) -> ContentJobStep:
     job = await session.scalar(
         select(ContentJob).where(ContentJob.id == job_id).with_for_update()
@@ -91,6 +111,11 @@ async def start_step(session: AsyncSession, job_id: int, step_key: str) -> Conte
     step.started_at = now
     job.status = "running"
     job.started_at = job.started_at or now
+    analysis, item = await _analysis_for_job(session, job)
+    if analysis is not None:
+        analysis.status = "running"
+    if item is not None:
+        item.workflow_status = "processing"
     await _event(session, job_id, "step_started", step_id=step.id, payload={"step_key": step_key, "attempt": step.attempt})
     await session.commit()
     await session.refresh(step)
@@ -150,6 +175,24 @@ async def fail_step(session: AsyncSession, step_id: int, error: str, *, retryabl
             plan = await session.get(DailyPlan, plan_id)
             if plan is not None and plan.status == "planning":
                 plan.status = "failed"
+    analysis, item = await _analysis_for_job(session, job)
+    if analysis is not None:
+        analysis.status = "failed"
+        analysis.error_code = step.step_key
+        analysis.error = step.error
+        analysis.completed_at = step.completed_at
+    if item is not None:
+        item.workflow_status = "failed"
+        session.add(ContentResponseEvent(
+            response_item_id=item.id,
+            analysis_run_id=analysis.id if analysis is not None else None,
+            event_type="analysis_failed",
+            payload={
+                "step_key": step.step_key,
+                "retryable": retryable,
+                "error": step.error,
+            },
+        ))
     await _event(session, step.job_id, "step_failed", step_id=step.id, payload={"step_key": step.step_key, "retryable": retryable})
     await session.commit()
     await session.refresh(step)
@@ -167,6 +210,20 @@ async def retry_step(session: AsyncSession, job_id: int, step_key: str) -> Conte
     session.add(step)
     job.status = "queued"
     job.completed_at = None
+    analysis, item = await _analysis_for_job(session, job)
+    if analysis is not None:
+        analysis.status = "queued"
+        analysis.error_code = ""
+        analysis.error = ""
+        analysis.completed_at = None
+    if item is not None:
+        item.workflow_status = "queued"
+        session.add(ContentResponseEvent(
+            response_item_id=item.id,
+            analysis_run_id=analysis.id if analysis is not None else None,
+            event_type="analysis_retried",
+            payload={"step_key": step_key, "attempt": step.attempt},
+        ))
     await session.flush()
     await _event(session, job_id, "step_retried", step_id=step.id, payload={"step_key": step_key, "attempt": step.attempt})
     await session.commit()

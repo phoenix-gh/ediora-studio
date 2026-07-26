@@ -30,6 +30,7 @@ class UnsafeVideoUrl(TranscriptError):
 
 
 _YOUTUBE_HOSTS = {"youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be"}
+_YOUTUBE_MEDIA_DOMAINS = {"youtube.com", "googlevideo.com"}
 _TIMING = re.compile(
     r"(?P<start>\d{2}:\d{2}:\d{2}\.\d{3})\s+-->\s+"
     r"(?P<end>\d{2}:\d{2}:\d{2}\.\d{3})"
@@ -139,11 +140,20 @@ def select_caption(
 
 async def _ensure_public_http_url(url: str) -> None:
     parsed = urlparse(url)
-    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+    if parsed.scheme != "https" or not parsed.hostname:
         raise TranscriptError("caption_download_failed", "字幕地址不受支持")
+    host = parsed.hostname.lower().rstrip(".")
+    if any(
+        host == domain or host.endswith(f".{domain}")
+        for domain in _YOUTUBE_MEDIA_DOMAINS
+    ):
+        # DNS proxy/TUN setups commonly return RFC 2544 fake IPs for public
+        # hosts. Exact HTTPS domain allowlisting avoids that false positive
+        # without opening the caption fetcher to arbitrary private hosts.
+        return
     try:
         addresses = await asyncio.to_thread(
-            socket.getaddrinfo, parsed.hostname, parsed.port or 443, type=socket.SOCK_STREAM
+            socket.getaddrinfo, host, parsed.port or 443, type=socket.SOCK_STREAM
         )
     except OSError as exc:
         raise TranscriptError("caption_download_failed", "字幕地址解析失败", retryable=True) from exc

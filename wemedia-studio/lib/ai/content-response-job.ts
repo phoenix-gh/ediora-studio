@@ -1,5 +1,5 @@
 import { createOpenAI } from '@ai-sdk/openai'
-import { generateText } from 'ai'
+import { generateText, Output } from 'ai'
 import { z } from 'zod'
 
 import {
@@ -91,6 +91,53 @@ export function parseContentResponseAnalysis(text: string): ContentResponseAnaly
   return contentResponseAnalysisSchema.parse(JSON.parse(json))
 }
 
+export function contentResponseContractExample(
+  accountIds: string[],
+): ContentResponseAnalysis {
+  return {
+    content_value_score: 70,
+    value_dimensions: {
+      novelty: { score: 70, reason: '说明新颖性判断' },
+      practicality: { score: 70, reason: '说明实用性判断' },
+      credibility: { score: 70, reason: '说明可信度判断' },
+      discussion_value: { score: 70, reason: '说明讨论价值判断' },
+      evergreen_value: { score: 70, reason: '说明长期价值判断' },
+    },
+    summary_cn: '中文摘要',
+    core_thesis: '核心思想',
+    key_points: ['关键观点'],
+    evidence: [{
+      text: '原始内容中的证据或来源说法',
+      type: 'source_claim',
+      source: '原始内容',
+    }],
+    value_points: ['价值点'],
+    risks: [],
+    verification_items: [],
+    personal_angles: ['可加入的个人角度'],
+    article_outlines: [{
+      title: '文章标题方向',
+      sections: ['开篇', '论证', '结论'],
+    }],
+    comment_angles: ['评论角度'],
+    recommended_output_types: ['expanded_article'],
+    recommended_action: '建议动作',
+    recommendation_reason: '建议理由',
+    recommended_publish_account_id: null,
+    account_scores: accountIds.map((publishAccountId, index) => ({
+      publish_account_id: publishAccountId,
+      score: 70,
+      rank: index + 1,
+      fit_reasons: ['适配理由'],
+      audience_value: '对该账号受众的价值',
+      recommended_tone: '建议语气',
+      recommended_output_types: ['expanded_article'],
+      taboo_risks: [],
+      has_hard_conflict: false,
+    })),
+  }
+}
+
 const stepOrder = [
   'prepare_source',
   'extract_content',
@@ -141,15 +188,30 @@ async function analyze(context: Record<string, unknown>) {
 必须给 accounts 中每个启用账号一条 account_scores；硬禁区冲突时 has_hard_conflict=true，不能推荐该账号。
 五个价值维度固定为 novelty、practicality、credibility、discussion_value、evergreen_value。
 分析、理由、建议使用中文；原文专有名词可保留。只返回严格 JSON，不要 Markdown。`
-  const prompt = JSON.stringify(context)
+  const accountIds = Array.isArray(context.accounts)
+    ? context.accounts
+      .map(account => (
+        account && typeof account === 'object' && 'id' in account
+          ? String(account.id)
+          : ''
+      ))
+      .filter(Boolean)
+    : []
+  const contractExample = contentResponseContractExample(accountIds)
+  const prompt = JSON.stringify({
+    task: '分析 source，并严格按 required_output_shape 的字段和嵌套类型返回 JSON。示例值仅用于说明合同，必须替换为真实分析。',
+    required_output_shape: contractExample,
+    context,
+  })
   const first = await generateText({
     model: provider.chat(config.modelName),
     instructions,
+    output: Output.json(),
     prompt,
   })
   try {
     return {
-      analysis: parseContentResponseAnalysis(first.text),
+      analysis: contentResponseAnalysisSchema.parse(first.output),
       model_provider: 'openai-compatible',
       model_name: config.modelName,
       prompt_version: 'content-response-v1',
@@ -159,12 +221,17 @@ async function analyze(context: Record<string, unknown>) {
     const repair = await generateText({
       model: provider.chat(config.modelName),
       instructions,
-      prompt: `只修复下列输出，使其满足 JSON 合同，不增加原文没有的事实。
-错误：${String(error)}
-原始输出：${first.text}`,
+      output: Output.json(),
+      prompt: JSON.stringify({
+        task: '修复 invalid_output，使其严格满足 required_output_shape 的字段和嵌套类型。不得增加原始内容没有的事实，只返回 JSON。',
+        validation_error: String(error),
+        required_output_shape: contractExample,
+        invalid_output: first.output,
+        context,
+      }),
     })
     return {
-      analysis: parseContentResponseAnalysis(repair.text),
+      analysis: contentResponseAnalysisSchema.parse(repair.output),
       model_provider: 'openai-compatible',
       model_name: config.modelName,
       prompt_version: 'content-response-v1',

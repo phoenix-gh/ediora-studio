@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  contentResponseContractExample,
   contentResponseAnalysisSchema,
   parseContentResponseAnalysis,
 } from './content-response-job'
@@ -62,5 +63,13 @@ describe('content response analysis schema', () => {
   it('parses fenced JSON output', () => {
     expect(parseContentResponseAnalysis(`\`\`\`json\n${JSON.stringify(validAnalysis())}\n\`\`\``))
       .toMatchObject({ summary_cn: '摘要' })
+  })
+
+  it('builds an exact repair contract for every active account', () => {
+    const example = contentResponseContractExample(['wechat-main', 'x-main'])
+
+    expect(contentResponseAnalysisSchema.parse(example).account_scores.map(
+      score => score.publish_account_id,
+    )).toEqual(['wechat-main', 'x-main'])
   })
 })

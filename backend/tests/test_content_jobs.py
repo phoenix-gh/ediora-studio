@@ -42,6 +42,60 @@ def test_retrying_failed_step_preserves_completed_steps(session_factory):
     asyncio.new_event_loop().run_until_complete(run())
 
 
+def test_analysis_job_failure_and_retry_update_response_state(session_factory):
+    from content_jobs import create_job, fail_step, retry_step, start_step
+    from models import ContentAnalysisRun, ContentResponseItem
+
+    async def run():
+        async with session_factory() as session:
+            item = ContentResponseItem(
+                source_type="youtube_video",
+                source_id="video",
+            )
+            session.add(item)
+            await session.flush()
+            job = await create_job(
+                session,
+                flow="content_response_analysis",
+                title="Analyze",
+                input_data={"response_item_id": item.id},
+                commit=False,
+            )
+            analysis = ContentAnalysisRun(
+                response_item_id=item.id,
+                version=1,
+                job_id=job.id,
+            )
+            session.add(analysis)
+            await session.commit()
+
+            step = await start_step(session, job.id, "extract_content")
+            await fail_step(
+                session,
+                step.id,
+                "caption provider timed out",
+                retryable=True,
+            )
+            await session.refresh(item)
+            await session.refresh(analysis)
+
+            assert item.workflow_status == "failed"
+            assert analysis.status == "failed"
+            assert analysis.error_code == "extract_content"
+            assert analysis.error == "caption provider timed out"
+
+            await retry_step(session, job.id, "extract_content")
+            await session.refresh(item)
+            await session.refresh(analysis)
+
+            assert item.workflow_status == "queued"
+            assert analysis.status == "queued"
+            assert analysis.error_code == ""
+            assert analysis.error == ""
+
+    asyncio.new_event_loop().run_until_complete(run())
+
+
 def test_job_can_join_the_callers_transaction(session_factory):
     from content_jobs import create_job
     from models import ContentJob

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -141,6 +141,28 @@ async def _item_with_run(db: AsyncSession, item_id: int):
     if row is None:
         raise HTTPException(404, "response item not found")
     return row
+
+
+async def _item_with_job_run(
+    db: AsyncSession,
+    item_id: int,
+    job_id: int,
+):
+    row = (await db.execute(
+        select(ContentResponseItem, ContentAnalysisRun, ContentJob)
+        .join(
+            ContentAnalysisRun,
+            ContentAnalysisRun.response_item_id == ContentResponseItem.id,
+        )
+        .join(ContentJob, ContentJob.id == ContentAnalysisRun.job_id)
+        .where(ContentResponseItem.id == item_id)
+        .where(ContentJob.id == job_id)
+    )).first()
+    if row is not None:
+        return row
+    if await db.get(ContentResponseItem, item_id) is None:
+        raise HTTPException(404, "response item not found")
+    raise HTTPException(409, "analysis run is missing for this job")
 
 
 @router.get("")
@@ -445,10 +467,12 @@ async def select_analysis(
 
 
 @router.get("/{item_id}/worker-context", dependencies=[Depends(require_worker_token)])
-async def worker_context(item_id: int, db: AsyncSession = Depends(get_db)):
-    item, run, job = await _item_with_run(db, item_id)
-    if run is None:
-        raise HTTPException(409, "analysis run is missing")
+async def worker_context(
+    item_id: int,
+    worker_job_id: int = Header(alias="X-Content-Job-Id"),
+    db: AsyncSession = Depends(get_db),
+):
+    item, run, job = await _item_with_job_run(db, item_id, worker_job_id)
     accounts = (await db.execute(
         select(PublishAccount)
         .where(PublishAccount.is_active.is_(True))

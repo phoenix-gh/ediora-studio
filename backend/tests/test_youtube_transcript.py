@@ -62,3 +62,17 @@ def test_transcript_result_has_stable_content_hash():
 
     assert first["text"] == "Hello"
     assert first["content_hash"] == second["content_hash"]
+
+
+@pytest.mark.asyncio
+async def test_official_caption_url_survives_dns_proxy_fake_ip(monkeypatch):
+    from youtube_transcript import _ensure_public_http_url
+
+    def should_not_resolve(*_args, **_kwargs):
+        raise AssertionError("official YouTube caption hosts must use the allowlist")
+
+    monkeypatch.setattr("youtube_transcript.socket.getaddrinfo", should_not_resolve)
+
+    await _ensure_public_http_url(
+        "https://www.youtube.com/api/timedtext?v=video&lang=en"
+    )
