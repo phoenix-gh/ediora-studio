@@ -47,7 +47,6 @@ backend/wechat_imgs/
 
 # ── Agent worktrees ─────────────────────────────────────
 .worktrees/
-docs/superpowers/
 
 # ── System ──────────────────────────────────────────────
 .DS_Store
