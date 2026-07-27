@@ -115,6 +115,7 @@ class SettingsOut(BaseModel):
     transcription_api_key_preview: str
     transcription_max_duration_seconds: int
     transcription_max_audio_bytes: int
+    youtube_cookies_set: bool
     rsshub_base: str
     github_token_set: bool
     github_token_preview: str
@@ -172,6 +173,7 @@ class SettingsUpdate(BaseModel):
     transcription_clear_api_key: Optional[bool] = None
     transcription_max_duration_seconds: Optional[int] = None
     transcription_max_audio_bytes: Optional[int] = None
+    youtube_cookies: Optional[str] = None
     rsshub_base: Optional[str] = None
     github_token: Optional[str] = None
     github_interval_minutes: Optional[int] = None
@@ -271,6 +273,7 @@ def _build_out(cfg: dict) -> SettingsOut:
         transcription_api_key_preview=f"…{transcription_api_key[-4:]}" if len(transcription_api_key) >= 4 else "",
         transcription_max_duration_seconds=max(60, int(cfg.get("transcription_max_duration_seconds", 7200))),
         transcription_max_audio_bytes=max(1024 * 1024, int(cfg.get("transcription_max_audio_bytes", 26214400))),
+        youtube_cookies_set=bool(cfg.get("youtube_cookies", "")),
         github_interval_minutes=max(1, int(cfg.get("github_interval_minutes", 1))),
         github_trending_interval_hours=max(1, int(cfg.get("github_trending_interval_hours", 6))),
         rsshub_base=cfg.get("rsshub_base", "http://127.0.0.1:1200"),
@@ -314,6 +317,27 @@ def _build_out(cfg: dict) -> SettingsOut:
             for k, v in PROVIDERS.items()
         ],
     )
+
+
+def _validate_youtube_cookies(value: str) -> str:
+    normalized = value.replace("\r\n", "\n").strip()
+    if not normalized:
+        return ""
+    has_header = any(
+        line.strip() == "# Netscape HTTP Cookie File"
+        for line in normalized.splitlines()
+    )
+    has_cookie_row = any(
+        len(line.split("\t")) == 7
+        for line in normalized.splitlines()
+        if line and (not line.startswith("#") or line.startswith("#HttpOnly_"))
+    )
+    if not (has_header and has_cookie_row):
+        raise HTTPException(
+            status_code=422,
+            detail="YouTube Cookie 必须是 Netscape cookies.txt 格式",
+        )
+    return normalized
 
 
 async def _fetch_models_openai_compat(base_url: str, api_key: str) -> list[str]:
@@ -445,6 +469,8 @@ async def update_settings(
         updates["transcription_max_duration_seconds"] = str(max(60, body.transcription_max_duration_seconds))
     if body.transcription_max_audio_bytes is not None:
         updates["transcription_max_audio_bytes"] = str(max(1024 * 1024, body.transcription_max_audio_bytes))
+    if body.youtube_cookies is not None:
+        updates["youtube_cookies"] = _validate_youtube_cookies(body.youtube_cookies)
     if body.rsshub_base is not None:
         updates["rsshub_base"] = body.rsshub_base
     if body.github_token is not None:

@@ -23,6 +23,7 @@ DEFAULTS: dict[str, str] = {
     "transcription_api_key": "",
     "transcription_max_duration_seconds": "7200",
     "transcription_max_audio_bytes": "26214400",
+    "youtube_cookies": "",
     "rsshub_base": "http://127.0.0.1:1200",
     "github_interval_minutes": "1",
     "github_trending_interval_hours": "6",
