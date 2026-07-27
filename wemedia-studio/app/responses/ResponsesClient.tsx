@@ -72,6 +72,7 @@ export function ResponsesClient({
   const [accountId, setAccountId] = useState('')
   const [outputTypes, setOutputTypes] = useState<string[]>([])
   const [showCreate, setShowCreate] = useState(false)
+  const [creationDetail, setCreationDetail] = useState<ResponseDetail | null>(null)
 
   const loadList = useCallback(async () => {
     setLoading(true)
@@ -108,6 +109,7 @@ export function ResponsesClient({
       setTranscript(null)
       setEvents([])
       setDetail(next)
+      if (creationDetail) return
       setAccountId(
         next.analysis?.recommended_publish_account_id
         ?? next.selected_publish_account_id
@@ -120,7 +122,7 @@ export function ResponsesClient({
           : ['expanded_article'],
       )
     }).catch(error => toast.error(error instanceof Error ? error.message : '详情加载失败'))
-  }, [selectedId, accounts])
+  }, [selectedId, accounts, creationDetail])
 
   const selected = useMemo(
     () => items.find(item => item.id === selectedId)
@@ -132,8 +134,23 @@ export function ResponsesClient({
     if (!selectedId) return
     try {
       await decideResponse(selectedId, action, reason)
-      if (action === 'adopt') setShowCreate(true)
-      setDetail(await getResponse(selectedId))
+      const updated = await getResponse(selectedId)
+      setDetail(updated)
+      if (action === 'adopt') {
+        setCreationDetail(updated)
+        setAccountId(
+          updated.analysis?.recommended_publish_account_id
+          ?? updated.selected_publish_account_id
+          ?? accounts[0]?.id
+          ?? '',
+        )
+        setOutputTypes(
+          updated.analysis?.recommended_output_types.length
+            ? updated.analysis.recommended_output_types
+            : ['expanded_article'],
+        )
+        setShowCreate(true)
+      }
       await loadList()
       toast.success('处理状态已保存')
     } catch (error) {
@@ -160,14 +177,15 @@ export function ResponsesClient({
   }
 
   async function submitOutputs() {
-    if (!detail?.current_analysis_run_id || !outputTypes.length) return
+    if (!creationDetail?.current_analysis_run_id || !outputTypes.length) return
     try {
-      await createResponseOutputs(detail.id, {
-        analysis_run_id: detail.current_analysis_run_id,
+      await createResponseOutputs(creationDetail.id, {
+        analysis_run_id: creationDetail.current_analysis_run_id,
         publish_account_id: accountId || null,
         output_types: outputTypes,
       })
-      setDetail(await getResponse(detail.id))
+      if (detail?.id === creationDetail.id) setDetail(await getResponse(creationDetail.id))
+      setCreationDetail(null)
       setShowCreate(false)
       toast.success('创作任务已创建')
     } catch (error) {
@@ -325,6 +343,7 @@ export function ResponsesClient({
               {showCreate ? (
                 <div className="space-y-4">
                   <div className="flex items-center gap-2"><Sparkles className="size-4 text-indigo-500" /><span className="font-medium">选择创作形式</span></div>
+                  {creationDetail && <p className="text-sm text-zinc-500">将基于：{creationDetail.source_title}</p>}
                   <select value={accountId} onChange={event => setAccountId(event.target.value)} className="h-9 w-full rounded-md border bg-transparent px-3 text-sm">
                     <option value="">不指定账号</option>
                     {accounts.map(account => <option key={account.id} value={account.id}>{account.name} · {account.platform}</option>)}
@@ -341,7 +360,7 @@ export function ResponsesClient({
                     ))}
                   </div>
                   <div className="flex justify-end gap-2">
-                    <Button variant="ghost" onClick={() => setShowCreate(false)}>取消</Button>
+                    <Button variant="ghost" onClick={() => { setCreationDetail(null); setShowCreate(false) }}>取消</Button>
                     <Button onClick={() => void submitOutputs()} disabled={!outputTypes.length}>创建任务</Button>
                   </div>
                 </div>
