@@ -327,6 +327,30 @@ async def scheduled_x_response_reconcile():
         await log("x_response", "error", "即时响应补偿异常", str(e))
 
 
+async def scheduled_topic_source_reconcile():
+    """每五分钟补偿已落库但未成功投递到 AI worker 的主题素材任务。"""
+    from logger import log
+
+    try:
+        from topic_source_service import reconcile_topic_source_jobs
+        result = await reconcile_topic_source_jobs()
+        if result["errors"]:
+            await log(
+                "topic_source",
+                "warn",
+                f"主题素材甄选补偿：入队 {result['enqueued']} 个任务",
+                "; ".join(result["errors"]),
+            )
+        elif result["enqueued"]:
+            await log(
+                "topic_source",
+                "ok",
+                f"主题素材甄选补偿：入队 {result['enqueued']} 个任务",
+            )
+    except Exception as e:
+        await log("topic_source", "error", "主题素材甄选补偿异常", str(e))
+
+
 async def scheduled_x_response_digest():
     """每天 18:00（Asia/Shanghai）创建并投递一次中等价值摘要任务。"""
     from datetime import datetime
@@ -396,6 +420,7 @@ def register_jobs(scheduler, cfg):
         (scheduled_x_collect,           dict(trigger="interval", minutes=5,           id="x_collect_hourly",  next_run_time=_first_run(5,   "x_collect"))),
         (scheduled_reddit,              dict(trigger="interval", minutes=60,          id="reddit_collect",    next_run_time=_first_run(60,  "reddit"))),
         (scheduled_x_response_reconcile,dict(trigger="interval", minutes=5,           id="x_response_reconcile", next_run_time=datetime.now())),
+        (scheduled_topic_source_reconcile,dict(trigger="interval", minutes=5,         id="topic_source_reconcile", next_run_time=datetime.now())),
         (scheduled_x_response_digest,   dict(trigger="cron", hour=18, minute=0, timezone="Asia/Shanghai", id="x_response_digest")),
         (scheduled_daily_plan,          dict(trigger="cron",     hour=8, minute=0,    id="daily_plan")),
     ]

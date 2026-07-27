@@ -439,6 +439,7 @@ async def init_db():
         await conn.run_sync(Base.metadata.create_all)
         await conn.execute(text("ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS media_kind VARCHAR NOT NULL DEFAULT ''"))
         await conn.execute(text("ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS directory VARCHAR NOT NULL DEFAULT ''"))
+        await conn.execute(text("ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS last_selected_at TIMESTAMP"))
         await conn.execute(text("ALTER TABLE creative_asset_directories ADD COLUMN IF NOT EXISTS asset_type VARCHAR NOT NULL DEFAULT 'article'"))
         await conn.execute(text("ALTER TABLE creative_asset_directories ADD COLUMN IF NOT EXISTS parent_id INTEGER"))
         await conn.execute(text(

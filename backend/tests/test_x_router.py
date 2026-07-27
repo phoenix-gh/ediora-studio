@@ -121,7 +121,7 @@ def test_delete_missing_returns_404(client):
 
 
 from datetime import datetime, timezone, timedelta
-from unittest.mock import patch, AsyncMock
+from unittest.mock import ANY, patch, AsyncMock
 
 
 def _fake_post(tid="111", views=100, published_at=None, is_reply=False):
@@ -254,6 +254,22 @@ def test_collect_one_subscription(client):
     assert len(posts) == 2
     assert {p["tweet_id"] for p in posts} == {"aaa", "bbb"}
     assert all(p["subscription_id"] == sub["id"] for p in posts)
+
+
+def test_collect_dispatches_new_posts_to_enabled_topic_source_rules(client):
+    sub = client.post(
+        "/api/x/subscriptions", json={"url": "https://x.com/topic-source"}).json()
+    rule = client.post("/api/assets/topic-rules", json={
+        "subscription_id": sub["id"], "directory": "副业搞钱", "keywords": ["副业"],
+    })
+    assert rule.status_code == 201, rule.text
+
+    with patch("routers.x.grab_timeline", new=AsyncMock(return_value=[_fake_post("topic-1")])), \
+         patch("topic_source_service.dispatch_topic_source_posts", new=AsyncMock(return_value={"created": 1, "enqueued": 1, "errors": []})) as dispatch:
+        response = client.post(f"/api/x/subscriptions/{sub['id']}/collect-sync")
+
+    assert response.status_code == 200, response.text
+    dispatch.assert_awaited_once_with(ANY, sub["id"], ["topic-1"])
 
 
 def test_collect_one_records_error_on_failure(client):

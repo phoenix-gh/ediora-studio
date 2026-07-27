@@ -5,26 +5,43 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 
 const mocks = vi.hoisted(() => ({
+  createCreativeAsset: vi.fn(),
   createCreativeAssetDirectory: vi.fn(),
+  createTopicSourceRule: vi.fn(),
+  deleteCreativeAsset: vi.fn(),
   deleteCreativeAssetDirectory: vi.fn(),
   listCreativeAssetDirectories: vi.fn(),
+  listTopicSourceRules: vi.fn(),
   renameCreativeAssetDirectory: vi.fn(),
+  selectDailyArticleCandidates: vi.fn(),
+  updateCreativeAsset: vi.fn(),
 }))
 
 
 vi.mock('@/lib/api/assets', () => ({
+  createCreativeAsset: mocks.createCreativeAsset,
   createCreativeAssetDirectory: mocks.createCreativeAssetDirectory,
+  createTopicSourceRule: mocks.createTopicSourceRule,
   creativeAssetUrl: (url: string) => url,
+  deleteCreativeAsset: mocks.deleteCreativeAsset,
   deleteCreativeAssetDirectory: mocks.deleteCreativeAssetDirectory,
   listCreativeAssetDirectories: mocks.listCreativeAssetDirectories,
+  listTopicSourceRules: mocks.listTopicSourceRules,
   renameCreativeAssetDirectory: mocks.renameCreativeAssetDirectory,
+  selectDailyArticleCandidates: mocks.selectDailyArticleCandidates,
+  updateCreativeAsset: mocks.updateCreativeAsset,
 }))
+
+
+vi.mock('@/lib/api/jobs', () => ({ createJob: vi.fn() }))
+vi.mock('@/lib/api/x', () => ({ listXSubscriptions: vi.fn() }))
 
 
 import { AssetsClient } from './AssetsClient'
 
 
 beforeEach(() => {
+  mocks.listTopicSourceRules.mockResolvedValue([])
   mocks.listCreativeAssetDirectories.mockResolvedValue([
     {
       id: 1,

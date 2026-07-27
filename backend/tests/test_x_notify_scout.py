@@ -239,3 +239,9 @@ def test_scheduler_registers_reconciliation_and_shanghai_digest(service_env):
         "timezone": "Asia/Shanghai",
         "id": "x_response_digest",
     }
+    topic_reconcile_func, topic_reconcile = by_id["topic_source_reconcile"]
+    assert topic_reconcile_func is scheduler.scheduled_topic_source_reconcile
+    assert topic_reconcile["trigger"] == "interval"
+    assert topic_reconcile["minutes"] == 5
+    assert topic_reconcile["id"] == "topic_source_reconcile"
+    assert topic_reconcile["next_run_time"] is not None

@@ -336,6 +336,16 @@ async def _collect_one(db: AsyncSession, sub: XSubscription) -> int:
                 f"{sub.label} 新帖已入库，但即时响应任务入队失败",
                 "; ".join(dispatch["errors"]),
             )
+        from topic_source_service import dispatch_topic_source_posts
+        topic_dispatch = await dispatch_topic_source_posts(db, sub.id, fresh_ids)
+        if topic_dispatch["errors"]:
+            from logger import log
+            await log(
+                "topic_source",
+                "warn",
+                f"{sub.label} 新帖已入库，但主题素材甄选任务入队失败",
+                "; ".join(topic_dispatch["errors"]),
+            )
     return len(fresh_ids)
 
 

@@ -843,6 +843,9 @@ class CreativeAsset(Base):
     directory: Mapped[str] = mapped_column(String, default="", index=True)
     tags: Mapped[list] = mapped_column(JSON, default=list)
     source: Mapped[str] = mapped_column(String, default="manual")
+    last_selected_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
 
@@ -923,6 +926,38 @@ class CreativeAssetDirectory(Base):
     system_key: Mapped[str | None] = mapped_column(
         String, nullable=True, unique=True, index=True
     )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+
+class TopicSourceRule(Base):
+    """One X subscription's material-selection rule for an article asset directory."""
+    __tablename__ = "topic_source_rules"
+    __table_args__ = (
+        UniqueConstraint("subscription_id", "directory", name="uq_topic_source_rule_subscription_directory"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    subscription_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    directory: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    keywords: Mapped[list] = mapped_column(JSON, default=list)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=now_utc, onupdate=now_utc
+    )
+
+
+class TopicSourceDecision(Base):
+    """The durable AI verdict for a single post under one topic rule."""
+    __tablename__ = "topic_source_decisions"
+    __table_args__ = (
+        UniqueConstraint("rule_id", "tweet_id", name="uq_topic_source_decision_rule_tweet"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    rule_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    tweet_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    accepted: Mapped[bool] = mapped_column(Boolean, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
 
 

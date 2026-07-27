@@ -10,6 +10,7 @@ import { getJob } from '../lib/ai/job-client'
 import { runContentResponseAnalysisJob } from '../lib/ai/content-response-job'
 import { runContentResponseOutputJob } from '../lib/ai/content-response-output-job'
 import { runXResponseDigestJob, runXResponseJob } from '../lib/ai/x-response-job'
+import { runTopicSourceJob } from '../lib/ai/topic-source-job'
 
 const redisUrl = process.env.WMS_REDIS_URL ?? 'redis://redis:6379/0'
 const queueName = process.env.WMS_WORKER_QUEUE ?? 'content-jobs'
@@ -33,6 +34,7 @@ async function run() {
         await runContentResponseOutputJob(jobId)
       } else if (job.flow === 'x_response') await runXResponseJob(jobId)
       else if (job.flow === 'x_response_digest') await runXResponseDigestJob(jobId)
+      else if (job.flow === 'topic_source') await runTopicSourceJob(jobId)
       else await runContentJob(jobId)
     } catch (error) {
       if (error instanceof JobFinalizationError) {
