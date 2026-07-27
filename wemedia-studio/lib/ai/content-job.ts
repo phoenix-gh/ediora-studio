@@ -86,6 +86,17 @@ export const coverSpecSchema = z.object({
   text_elements: z.array(z.string().min(1).max(200)).max(8),
 })
 
+const imageGenerationInputSchema = z.object({
+  prompt: z.string().min(20),
+  filename_hint: z.string().min(1).max(80).optional(),
+  cover_spec: coverSpecSchema.optional(),
+  anchor_heading: z.string().min(1).max(160).optional(),
+})
+
+export const illustrationImageInputSchema = imageGenerationInputSchema.extend({
+  anchor_heading: z.string().min(1).max(160),
+})
+
 export function parseDailyPlanText(text: string) {
   const json = text.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '')
   return dailyPlanSchema.parse(JSON.parse(json))
@@ -112,6 +123,15 @@ async function getDraft(draftId: number) {
   const response = await fetch(`${apiBase()}/write/drafts/${draftId}`, { cache: 'no-store' })
   if (!response.ok) throw new Error(`Unable to load draft (${response.status})`)
   return response.json() as Promise<{ id: number; title: string; content: string }>
+}
+
+async function updateDraftContent(jobId: number, draftId: number, content: string) {
+  const response = await fetch(`${apiBase()}/write/drafts/${draftId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', 'X-Content-Job-Id': String(jobId) },
+    body: JSON.stringify({ content }),
+  })
+  if (!response.ok) throw new Error(`Draft image insertion failed (${response.status})`)
 }
 
 async function saveDraftImage(jobId: number, draftId: number, filename: string, bytes: Uint8Array, mediaType: string) {
@@ -220,7 +240,7 @@ export function baoyuRuntimeInstructions(step: 'cover' | 'illustrations', maxIma
   if (step === 'cover') {
     return `You are the runtime adapter for the vendored baoyu-cover-image skill. Create an elegant raster article cover using its five dimensions: type (hero, conceptual, typography, metaphor, scene, minimal), palette, rendering (flat-vector, hand-drawn, painterly, digital, pixel, chalk, screen-print), text level, and mood. Infer suitable choices from the article and supplied style. Write one complete, concrete image-generation prompt with subject, composition, palette, rendering, aspect ratio, and any explicit no-text instruction. ${common}`
   }
-  return `You are the runtime adapter for the vendored baoyu-article-illustrator skill. Analyze the article and choose the most useful ${maxImages} visual explanation point${maxImages === 1 ? '' : 's'}. For each, create a clear 16:9 hand-drawn editorial infographic or conceptual illustration with strong visual hierarchy, ample whitespace, and no photorealism. The images must explain the surrounding content rather than repeat the cover. ${common}`
+  return `You are the runtime adapter for the vendored baoyu-article-illustrator skill. Analyze the article and choose the most useful ${maxImages} visual explanation point${maxImages === 1 ? '' : 's'}. For each, create a clear 16:9 hand-drawn editorial infographic or conceptual illustration with strong visual hierarchy, ample whitespace, and no photorealism. The images must explain the surrounding content rather than repeat the cover. For every generateImage call, provide anchor_heading exactly matching the most relevant existing level-two Markdown heading from the supplied article. ${common}`
 }
 
 export function coverConstraintsFromStyle(style: CoverStyle) {
@@ -276,7 +296,7 @@ async function runImageFlow(job: Awaited<ReturnType<typeof getJob>>, step: 'cove
   const provider = createOpenAI({ apiKey: image.apiKey, baseURL: image.baseURL })
   const text = await configuredTextModel()
   const textProvider = createOpenAI({ apiKey: text.apiKey, baseURL: text.baseURL })
-  const assets: Array<{ id: number; url: string }> = []
+  const assets: Array<{ id: number; url: string; anchor_heading?: string }> = []
   const rawStyle = job.input[step === 'cover' ? 'cover_style' : 'image_style'] ?? job.input.note ?? ''
   const style = typeof rawStyle === 'string' ? rawStyle : JSON.stringify(rawStyle)
   const coverConstraints = step === 'cover' && rawStyle && typeof rawStyle === 'object' && !Array.isArray(rawStyle)
@@ -294,18 +314,19 @@ async function runImageFlow(job: Awaited<ReturnType<typeof getJob>>, step: 'cove
         description: step === 'cover'
           ? 'Generate one raster cover image and save it to this draft. The cover_spec is mandatory and records the visual concept, composition, and requested visible text.'
           : 'Generate one raster image from the supplied prompt and save it to this draft. Use this tool for every requested illustration.',
-        inputSchema: z.object({ prompt: z.string().min(20), filename_hint: z.string().min(1).max(80).optional(), cover_spec: coverSpecSchema.optional() }),
-        execute: async ({ prompt, filename_hint, cover_spec }) => {
+        inputSchema: imageGenerationInputSchema,
+        execute: async ({ prompt, filename_hint, cover_spec, anchor_heading }) => {
           if (assets.length >= maxImages) return { error: `Image limit reached (${maxImages})` }
           if (step === 'cover' && !cover_spec) return { error: 'cover_spec is required for cover generation' }
+          if (step === 'illustrations' && !anchor_heading) return { error: 'anchor_heading is required for illustration generation' }
           const specPrompt = cover_spec ? `Cover spec:\n- Visual concept: ${cover_spec.visual_concept}\n- Composition: ${cover_spec.composition}\n- Visible text: ${cover_spec.text_elements.join(' | ')}` : ''
           const finalPrompt = step === 'cover' && coverConstraints ? `${coverConstraints}\n\n${specPrompt}\n\n${prompt}` : prompt
           await recordJobEvent(job.id, 'generate_image_called', { tool: 'generateImage', prompt: finalPrompt, filename_hint: filename_hint ?? '', cover_spec: cover_spec ?? {} })
           const generated = await generateImage({ model: provider.image(image.modelName), prompt: finalPrompt, n: 1 })
           const output = generated.images[0]
           const asset = await saveDraftImage(job.id, draftId, `${filename_hint ?? step}-${job.id}-${assets.length + 1}.png`, output.uint8Array, output.mediaType)
-          assets.push(asset)
-          await recordJobEvent(job.id, 'generate_image_succeeded', { tool: 'generateImage', asset_id: asset.id, asset_url: asset.url })
+          assets.push({ ...asset, anchor_heading })
+          await recordJobEvent(job.id, 'generate_image_succeeded', { tool: 'generateImage', asset_id: asset.id, asset_url: asset.url, anchor_heading: anchor_heading ?? '' })
           return asset
         },
       }),
@@ -314,7 +335,19 @@ async function runImageFlow(job: Awaited<ReturnType<typeof getJob>>, step: 'cove
   if (!assets.length) {
     throw new Error(`The ${step} skill did not call generateImage`)
   }
-  return { draft_id: draftId, asset_ids: assets.map(asset => asset.id), asset_urls: assets.map(asset => asset.url) }
+  const placements: Array<{ asset_id: number; asset_url: string; anchor_heading: string; placement: 'anchor' | 'append' | 'existing' }> = []
+  if (step === 'illustrations') {
+    let current = await getDraft(draftId)
+    for (const asset of assets) {
+      const anchorHeading = asset.anchor_heading ?? ''
+      const inserted = insertInlineImage(current.content, asset.url, anchorHeading)
+      current = { ...current, content: inserted.content }
+      placements.push({ asset_id: asset.id, asset_url: asset.url, anchor_heading: anchorHeading, placement: inserted.placement })
+    }
+    await updateDraftContent(job.id, draftId, current.content)
+    await recordJobEvent(job.id, 'inline_images_inserted', { placements })
+  }
+  return { draft_id: draftId, asset_ids: assets.map(asset => asset.id), asset_urls: assets.map(asset => asset.url), placements }
 }
 
 async function runStandaloneImageFlow(job: Awaited<ReturnType<typeof getJob>>) {

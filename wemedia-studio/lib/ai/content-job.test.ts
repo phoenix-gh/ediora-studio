@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest'
 
-import { insertInlineImage, parseTemplateCandidate, toolsForContentStep } from './content-job'
+import { illustrationImageInputSchema, insertInlineImage, parseTemplateCandidate, toolsForContentStep } from './content-job'
 
 it('keeps template extraction free of persistence tools', () => {
   expect(toolsForContentStep('template_extraction')).toEqual([])
@@ -25,6 +25,14 @@ it('does not insert the same illustration URL twice', () => {
     content: '![插图](/api/uploads/install.png)',
     placement: 'existing',
   })
+})
+
+it('requires a heading anchor for automatic illustrations', () => {
+  expect(illustrationImageInputSchema.safeParse({ prompt: 'x'.repeat(20) }).success).toBe(false)
+  expect(illustrationImageInputSchema.safeParse({
+    prompt: 'x'.repeat(20),
+    anchor_heading: '安装 sing-box',
+  }).success).toBe(true)
 })
 
 it('accepts a null merge target from a non-merge candidate', () => {
