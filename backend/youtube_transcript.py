@@ -10,8 +10,9 @@ import json
 import re
 import socket
 import tempfile
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Awaitable, Callable
+from typing import Any, Awaitable, Callable, Iterator
 from urllib.parse import urlparse
 
 import httpx
@@ -226,6 +227,27 @@ async def _transcribe_audio(audio_path: Path, config: dict[str, str]) -> dict[st
     return build_transcript("whisper", str(payload.get("language") or ""), segments)
 
 
+@contextmanager
+def youtube_cookies_file(cookies: str) -> Iterator[str | None]:
+    if not cookies.strip():
+        yield None
+        return
+    with tempfile.TemporaryDirectory(prefix="wms-youtube-cookies-") as directory:
+        path = Path(directory) / "cookies.txt"
+        path.write_text(cookies, encoding="utf-8")
+        path.chmod(0o600)
+        yield str(path)
+
+
+def ytdlp_argv(*args: str, cookie_path: str | None, url: str) -> tuple[str, ...]:
+    return (
+        "yt-dlp",
+        *args,
+        *(("--cookies", cookie_path) if cookie_path else ()),
+        url,
+    )
+
+
 async def extract_youtube_transcript(
     url: str,
     config: dict[str, str],
@@ -234,55 +256,68 @@ async def extract_youtube_transcript(
 ) -> dict[str, Any]:
     """Extract subtitles, falling back to a bounded audio-only transcription."""
     validate_youtube_url(url)
-    metadata_raw = await command(
-        "yt-dlp", "--dump-single-json", "--skip-download", "--no-playlist", url,
-        timeout=60,
-    )
-    try:
-        metadata = json.loads(metadata_raw)
-    except ValueError as exc:
-        raise TranscriptError("source_not_found", "无法读取视频信息", retryable=True) from exc
-    max_duration = int(config.get("transcription_max_duration_seconds", "7200"))
-    if float(metadata.get("duration") or 0) > max_duration:
-        raise TranscriptError("video_too_long", "视频时长超过转写上限")
-    preferred = str(metadata.get("language") or metadata.get("original_language") or "")
-    caption = select_caption(
-        metadata.get("subtitles") or {},
-        metadata.get("automatic_captions") or {},
-        preferred,
-    )
-    if caption:
-        source, language, _caption_url = caption
-        with tempfile.TemporaryDirectory(prefix="wms-youtube-captions-") as directory:
-            template = str(Path(directory) / "%(id)s.%(ext)s")
-            await command(
-                "yt-dlp", "--skip-download",
-                "--write-subs" if source == "manual" else "--write-auto-subs",
-                "--sub-langs", language,
-                "--sub-format", "vtt",
-                "-o", template,
-                url,
-                timeout=120,
-            )
-            subtitle_files = list(Path(directory).glob("*.vtt"))
-            if not subtitle_files:
-                raise TranscriptError("caption_download_failed", "未能取得字幕文件", retryable=True)
-            segments = parse_vtt(subtitle_files[0].read_text(encoding="utf-8", errors="replace"))
-            if segments:
-                return build_transcript(source, language, segments)
-
-    max_bytes = int(config.get("transcription_max_audio_bytes", str(25 * 1024 * 1024)))
-    with tempfile.TemporaryDirectory(prefix="wms-youtube-") as directory:
-        template = str(Path(directory) / "audio.%(ext)s")
-        await command(
-            "yt-dlp", "--no-playlist", "-x", "--audio-format", "mp3",
-            "--audio-quality", "7", "--postprocessor-args", "ffmpeg:-ac 1 -ar 16000",
-            "-o", template, url, timeout=300,
+    with youtube_cookies_file(config.get("youtube_cookies", "")) as cookie_path:
+        metadata_raw = await command(
+            *ytdlp_argv(
+                "--dump-single-json", "--skip-download", "--no-playlist",
+                cookie_path=cookie_path,
+                url=url,
+            ),
+            timeout=60,
         )
-        files = list(Path(directory).glob("audio.*"))
-        if not files:
-            raise TranscriptError("audio_download_failed", "未能取得视频音频", retryable=True)
-        audio = files[0]
-        if audio.stat().st_size > max_bytes:
-            raise TranscriptError("audio_too_large", "压缩音频超过转写上限")
-        return await _transcribe_audio(audio, config)
+        try:
+            metadata = json.loads(metadata_raw)
+        except ValueError as exc:
+            raise TranscriptError("source_not_found", "无法读取视频信息", retryable=True) from exc
+        max_duration = int(config.get("transcription_max_duration_seconds", "7200"))
+        if float(metadata.get("duration") or 0) > max_duration:
+            raise TranscriptError("video_too_long", "视频时长超过转写上限")
+        preferred = str(metadata.get("language") or metadata.get("original_language") or "")
+        caption = select_caption(
+            metadata.get("subtitles") or {},
+            metadata.get("automatic_captions") or {},
+            preferred,
+        )
+        if caption:
+            source, language, _caption_url = caption
+            with tempfile.TemporaryDirectory(prefix="wms-youtube-captions-") as directory:
+                template = str(Path(directory) / "%(id)s.%(ext)s")
+                await command(
+                    *ytdlp_argv(
+                        "--skip-download",
+                        "--write-subs" if source == "manual" else "--write-auto-subs",
+                        "--sub-langs", language,
+                        "--sub-format", "vtt",
+                        "-o", template,
+                        cookie_path=cookie_path,
+                        url=url,
+                    ),
+                    timeout=120,
+                )
+                subtitle_files = list(Path(directory).glob("*.vtt"))
+                if not subtitle_files:
+                    raise TranscriptError("caption_download_failed", "未能取得字幕文件", retryable=True)
+                segments = parse_vtt(subtitle_files[0].read_text(encoding="utf-8", errors="replace"))
+                if segments:
+                    return build_transcript(source, language, segments)
+
+        max_bytes = int(config.get("transcription_max_audio_bytes", str(25 * 1024 * 1024)))
+        with tempfile.TemporaryDirectory(prefix="wms-youtube-") as directory:
+            template = str(Path(directory) / "audio.%(ext)s")
+            await command(
+                *ytdlp_argv(
+                    "--no-playlist", "-x", "--audio-format", "mp3",
+                    "--audio-quality", "7", "--postprocessor-args", "ffmpeg:-ac 1 -ar 16000",
+                    "-o", template,
+                    cookie_path=cookie_path,
+                    url=url,
+                ),
+                timeout=300,
+            )
+            files = list(Path(directory).glob("audio.*"))
+            if not files:
+                raise TranscriptError("audio_download_failed", "未能取得视频音频", retryable=True)
+            audio = files[0]
+            if audio.stat().st_size > max_bytes:
+                raise TranscriptError("audio_too_large", "压缩音频超过转写上限")
+            return await _transcribe_audio(audio, config)

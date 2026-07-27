@@ -15,6 +15,9 @@ Build agents with tools
 00:00:05.000 --> 00:00:07.000
 with tools &amp; memory
 """
+NETSCAPE_COOKIES = """# Netscape HTTP Cookie File
+.youtube.com\tTRUE\t/\tTRUE\t0\tSID\tyoutube-secret
+"""
 
 
 def test_parse_vtt_strips_tags_preserves_timestamps_and_collapses_rolling_text():
@@ -130,6 +133,78 @@ async def test_extract_downloads_selected_chinese_caption_with_ytdlp(monkeypatch
     assert commands[1][0:6] == (
         "yt-dlp", "--skip-download", "--write-auto-subs", "--sub-langs", "zh-Hans", "--sub-format",
     )
+    assert all("--cookies" not in command for command in commands)
+
+
+@pytest.mark.asyncio
+async def test_extract_passes_one_temporary_cookie_file_to_metadata_and_subtitles():
+    from youtube_transcript import extract_youtube_transcript
+
+    metadata = {
+        "id": "video-id",
+        "duration": 7,
+        "language": "en",
+        "automatic_captions": {
+            "zh-Hans": [{"ext": "vtt", "url": "https://caption.test/zh"}],
+        },
+    }
+    commands: list[tuple[str, ...]] = []
+    cookie_paths: list[Path] = []
+
+    async def command(*argv: str, timeout: float) -> str:
+        commands.append(argv)
+        cookie_path = Path(argv[argv.index("--cookies") + 1])
+        cookie_paths.append(cookie_path)
+        assert cookie_path.read_text(encoding="utf-8") == NETSCAPE_COOKIES
+        if "--dump-single-json" in argv:
+            return json.dumps(metadata)
+        template = argv[argv.index("-o") + 1]
+        subtitle = Path(template.replace("%(id)s", "video-id").replace("%(ext)s", "vtt"))
+        subtitle.write_text(VTT, encoding="utf-8")
+        return ""
+
+    result = await extract_youtube_transcript(
+        "https://www.youtube.com/watch?v=video-id",
+        {"youtube_cookies": NETSCAPE_COOKIES},
+        command=command,
+    )
+
+    assert result["language"] == "zh-Hans"
+    assert len(commands) == 2
+    assert len(set(cookie_paths)) == 1
+    assert not cookie_paths[0].exists()
+
+
+@pytest.mark.asyncio
+async def test_extract_passes_cookie_file_to_audio_fallback(monkeypatch):
+    import youtube_transcript
+
+    commands: list[tuple[str, ...]] = []
+
+    async def command(*argv: str, timeout: float) -> str:
+        commands.append(argv)
+        cookie_path = Path(argv[argv.index("--cookies") + 1])
+        assert cookie_path.read_text(encoding="utf-8") == NETSCAPE_COOKIES
+        if "--dump-single-json" in argv:
+            return json.dumps({"id": "video-id", "duration": 7})
+        template = argv[argv.index("-o") + 1]
+        Path(template.replace("%(ext)s", "mp3")).write_bytes(b"audio")
+        return ""
+
+    async def transcribe(_audio: Path, _config: dict[str, str]):
+        return {"source": "whisper", "language": "en", "text": "Audio transcript", "segments": []}
+
+    monkeypatch.setattr(youtube_transcript, "_transcribe_audio", transcribe)
+
+    result = await youtube_transcript.extract_youtube_transcript(
+        "https://www.youtube.com/watch?v=video-id",
+        {"youtube_cookies": NETSCAPE_COOKIES},
+        command=command,
+    )
+
+    assert result["source"] == "whisper"
+    assert len(commands) == 2
+    assert all("--cookies" in command for command in commands)
 
 
 def test_transcript_result_has_stable_content_hash():
