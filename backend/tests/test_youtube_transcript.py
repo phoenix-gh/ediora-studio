@@ -130,9 +130,9 @@ async def test_extract_downloads_selected_chinese_caption_with_ytdlp(monkeypatch
     assert result["source"] == "auto"
     assert result["language"] == "zh-Hans"
     assert result["text"] == "Build agents with tools & memory"
-    assert commands[1][0:6] == (
-        "yt-dlp", "--skip-download", "--write-auto-subs", "--sub-langs", "zh-Hans", "--sub-format",
-    )
+    assert commands[1][0:2] == ("yt-dlp", "--skip-download")
+    assert "--ignore-no-formats-error" in commands[1]
+    assert commands[1][commands[1].index("--sub-langs") + 1] == "zh-Hans"
     assert all("--cookies" not in command for command in commands)
 
 
@@ -172,6 +172,8 @@ async def test_extract_passes_one_temporary_cookie_file_to_metadata_and_subtitle
     assert result["language"] == "zh-Hans"
     assert len(commands) == 2
     assert len(set(cookie_paths)) == 1
+    assert "--ignore-no-formats-error" in commands[0]
+    assert "--ignore-no-formats-error" in commands[1]
     assert not cookie_paths[0].exists()
 
 

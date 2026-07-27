@@ -259,7 +259,7 @@ async def extract_youtube_transcript(
     with youtube_cookies_file(config.get("youtube_cookies", "")) as cookie_path:
         metadata_raw = await command(
             *ytdlp_argv(
-                "--dump-single-json", "--skip-download", "--no-playlist",
+                "--dump-single-json", "--skip-download", "--ignore-no-formats-error", "--no-playlist",
                 cookie_path=cookie_path,
                 url=url,
             ),
@@ -285,6 +285,7 @@ async def extract_youtube_transcript(
                 await command(
                     *ytdlp_argv(
                         "--skip-download",
+                        "--ignore-no-formats-error",
                         "--write-subs" if source == "manual" else "--write-auto-subs",
                         "--sub-langs", language,
                         "--sub-format", "vtt",
