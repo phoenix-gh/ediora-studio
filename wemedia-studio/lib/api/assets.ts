@@ -16,6 +16,7 @@ export const deleteCreativeAsset = (id: number) => apiFetch<void>(`/assets/${id}
 export type TopicSourceRule = { id: number; subscription_id: number; directory: string; keywords: string[]; enabled: boolean; created_at: string; updated_at: string }
 export const listTopicSourceRules = () => apiFetch<TopicSourceRule[]>('/assets/topic-rules')
 export const createTopicSourceRule = (body: Pick<TopicSourceRule, 'subscription_id' | 'directory' | 'keywords'>) => apiFetch<TopicSourceRule>('/assets/topic-rules', { method: 'POST', body: JSON.stringify(body) })
+export const updateTopicSourceRule = (id: number, body: Partial<Pick<TopicSourceRule, 'keywords' | 'enabled'>>) => apiFetch<TopicSourceRule>(`/assets/topic-rules/${id}`, { method: 'PATCH', body: JSON.stringify(body) })
 export const dailyArticleCandidates = (directory: string) => apiFetch<{ assets: CreativeAsset[] }>(`/assets/daily-candidates?directory=${encodeURIComponent(directory)}`)
 export const selectDailyArticleCandidates = (directory: string) => apiFetch<{ assets: CreativeAsset[] }>('/assets/daily-candidates', { method: 'POST', body: JSON.stringify({ directory }) })
 export type CreativeAssetDirectory = { id: number; name: string; asset_type: 'article' | 'media'; parent_id: number | null; is_system: boolean; created_at: string }

@@ -23,6 +23,8 @@ import {
   collectXSubscription, collectAllXSubscriptions,
 } from '@/lib/api/x'
 import { analyzePlan } from '@/lib/api/writing-plans'
+import { createTopicSourceRule, listCreativeAssetDirectories, listTopicSourceRules, updateTopicSourceRule, type CreativeAssetDirectory, type TopicSourceRule } from '@/lib/api/assets'
+import { createJob } from '@/lib/api/jobs'
 import { externalHttpUrl } from './x-post-url'
 
 const HOURS_OPTIONS = [
@@ -508,6 +510,75 @@ function SubscribeDialog({
   const [editingId, setEditingId] = useState<number | null>(null)
   const [editValue, setEditValue] = useState('')
   const [editingSearchId, setEditingSearchId] = useState<number | null>(null)
+  const [topicRules, setTopicRules] = useState<TopicSourceRule[]>([])
+  const [articleDirectories, setArticleDirectories] = useState<CreativeAssetDirectory[]>([])
+  const [topicDialog, setTopicDialog] = useState<{ subscription: XSubscription; directory: string; keywords: string; error: string } | null>(null)
+  const [screeningId, setScreeningId] = useState<number | null>(null)
+
+  const reloadTopicSettings = async () => {
+    const [rules, directories] = await Promise.all([
+      listTopicSourceRules(),
+      listCreativeAssetDirectories('article'),
+    ])
+    setTopicRules(rules)
+    setArticleDirectories(directories)
+  }
+
+  useEffect(() => {
+    if (open) void reloadTopicSettings().catch(() => {})
+  }, [open])
+
+  const openTopicDialog = (subscription: XSubscription) => {
+    const rule = topicRules.find(item => item.subscription_id === subscription.id)
+    setTopicDialog({
+      subscription,
+      directory: rule?.directory ?? articleDirectories[0]?.name ?? '',
+      keywords: rule?.keywords.join('，') ?? '',
+      error: articleDirectories.length ? '' : '请先在创作资产中创建文章目录。',
+    })
+  }
+
+  const saveTopicRule = async () => {
+    if (!topicDialog) return
+    const directory = topicDialog.directory.trim()
+    if (!directory) {
+      setTopicDialog(value => value ? { ...value, error: '请选择文章目录。' } : value)
+      return
+    }
+    const keywords = topicDialog.keywords.split(/[,，]/).map(value => value.trim()).filter(Boolean)
+    const existing = topicRules.find(item => item.subscription_id === topicDialog.subscription.id && item.directory === directory)
+    const saved = existing
+      ? await updateTopicSourceRule(existing.id, { keywords })
+      : await createTopicSourceRule({ subscription_id: topicDialog.subscription.id, directory, keywords })
+    setTopicRules(items => existing
+      ? items.map(item => item.id === saved.id ? saved : item)
+      : [saved, ...items])
+    setTopicDialog(null)
+    toast.success('素材入库规则已保存')
+  }
+
+  const startTopicScreening = async (subscription: XSubscription) => {
+    const rules = topicRules.filter(item => item.subscription_id === subscription.id && item.enabled)
+    if (!rules.length) {
+      toast.error('请先配置素材入库目录')
+      return
+    }
+    setScreeningId(subscription.id)
+    try {
+      const now = Date.now()
+      await Promise.all(rules.map(rule => createJob({
+        flow: 'topic_source',
+        title: `${subscription.label}：X 主题素材甄选`,
+        input: { rule_id: rule.id },
+        idempotency_key: `topic-source:${rule.id}:${now}`,
+      })))
+      toast.success(`已提交 ${rules.length} 个 AI 甄选任务`)
+    } catch (err) {
+      toast.error((err as Error).message || '提交 AI 甄选任务失败')
+    } finally {
+      setScreeningId(null)
+    }
+  }
 
   const startEditSearch = (s: XSubscription) => {
     setKind('search')
@@ -716,6 +787,9 @@ function SubscribeDialog({
                           <span className="text-red-500 ml-1">⚠ {s.last_error}</span>
                         )}
                       </div>
+                      <div className="mt-1 text-[11px] text-zinc-400">
+                        素材入库：{topicRules.filter(rule => rule.subscription_id === s.id && rule.enabled).length} 个目录规则
+                      </div>
                     </div>
                     {isEditing ? (
                       <>
@@ -757,6 +831,18 @@ function SubscribeDialog({
                             即时响应
                           </Button>
                         ) : null}
+                        <Button size="sm" variant="ghost" className="h-7 px-2 text-[11px]"
+                          disabled={busyId === s.id}
+                          onClick={() => openTopicDialog(s)}>
+                          素材入库
+                        </Button>
+                        <Button size="sm" variant="ghost" className="h-7 px-2 text-[11px]"
+                          disabled={busyId === s.id || screeningId === s.id}
+                          onClick={() => void startTopicScreening(s)}>
+                          {screeningId === s.id
+                            ? <Loader2 className="w-3 h-3 animate-spin" />
+                            : 'AI 筛选入库'}
+                        </Button>
                         <Switch checked={s.enabled} onCheckedChange={() => wrap(s, onToggle)}
                           disabled={busyId === s.id} />
                         <Button size="sm" variant="ghost" className="h-7 text-xs gap-1 px-2"
@@ -784,6 +870,36 @@ function SubscribeDialog({
             </div>
           )}
         </div>
+        <Dialog open={topicDialog !== null} onOpenChange={value => !value && setTopicDialog(null)}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>配置素材入库</DialogTitle>
+              <DialogDescription>
+                {topicDialog?.subscription.label} 的帖子将由 AI 按此规则甄选，并保存为文章素材。
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3">
+              <select
+                value={topicDialog?.directory ?? ''}
+                onChange={event => setTopicDialog(value => value ? { ...value, directory: event.target.value, error: '' } : value)}
+                className="h-9 w-full rounded-md border border-zinc-200 bg-transparent px-2 text-sm dark:border-zinc-800"
+              >
+                <option value="">选择文章目录</option>
+                {articleDirectories.map(directory => <option key={directory.id} value={directory.name}>{directory.name}</option>)}
+              </select>
+              <Input
+                value={topicDialog?.keywords ?? ''}
+                onChange={event => setTopicDialog(value => value ? { ...value, keywords: event.target.value, error: '' } : value)}
+                placeholder="主题关键词（逗号分隔，可留空）"
+              />
+              {topicDialog?.error && <p className="text-xs text-red-500">{topicDialog.error}</p>}
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setTopicDialog(null)}>取消</Button>
+              <Button onClick={() => void saveTopicRule()}>保存</Button>
+            </div>
+          </DialogContent>
+        </Dialog>
       </DialogContent>
     </Dialog>
   )
