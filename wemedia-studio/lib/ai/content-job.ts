@@ -32,6 +32,22 @@ export function imageToolNamesForSkill(step: 'cover' | 'illustrations'): string[
   return ['generateImage']
 }
 
+export function insertInlineImage(content: string, imageUrl: string, anchorHeading: string) {
+  if (content.includes(`](${imageUrl})`)) return { content, placement: 'existing' as const }
+  const marker = `## ${anchorHeading.trim()}`
+  const headingStart = content.indexOf(marker)
+  const markdown = `![插图](${imageUrl})`
+  if (headingStart < 0) {
+    return { content: `${content.trimEnd()}\n\n${markdown}`, placement: 'append' as const }
+  }
+  const headingEnd = content.indexOf('\n', headingStart)
+  const insertAt = headingEnd < 0 ? content.length : headingEnd + 1
+  return {
+    content: `${content.slice(0, insertAt)}\n${markdown}\n${content.slice(insertAt)}`,
+    placement: 'anchor' as const,
+  }
+}
+
 export function textModelForProvider<T>(provider: { chat: (modelName: string) => T }, modelName: string): T {
   return provider.chat(modelName)
 }
