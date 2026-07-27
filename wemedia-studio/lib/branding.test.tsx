@@ -25,4 +25,10 @@ describe('product branding', () => {
   it('uses the approved browser title', () => {
     expect(metadata.title).toBe('Ediora · 述策 — AI 内容工作台')
   })
+
+  it('renders the local Ediora mark beside the product name', () => {
+    const { container } = render(<Sidebar />)
+
+    expect(container.querySelector('img[src="/brand/ediora-mark.svg"]')).not.toBeNull()
+  })
 })

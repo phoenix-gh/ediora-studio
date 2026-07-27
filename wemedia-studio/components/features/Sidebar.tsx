@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
-  LayoutDashboard, TrendingUp, Settings, GitFork, AtSign, FileText, BookMarked, Tag, Bot,
+  LayoutDashboard, Settings, GitFork, AtSign, FileText, BookMarked, Tag, Bot,
   PlaySquare, Rocket, MessageSquare, Globe, Flame, Gem, ListChecks, Hash, CalendarCheck,
   MessageSquareReply, PersonStanding,
 } from 'lucide-react'
@@ -62,9 +62,7 @@ export function Sidebar() {
     <aside className="fixed left-0 top-0 h-screen w-56 border-r border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950 flex flex-col">
       <div className="px-4 py-5 border-b border-zinc-100 dark:border-zinc-800">
         <div className="flex items-center gap-2">
-          <div className="w-6 h-6 rounded bg-indigo-600 flex items-center justify-center">
-            <TrendingUp className="w-3.5 h-3.5 text-white" />
-          </div>
+          <img src="/brand/ediora-mark.svg" alt="" aria-hidden="true" className="w-6 h-6 flex-shrink-0" />
           <span className="font-semibold text-sm text-zinc-900 dark:text-zinc-100">{PRODUCT_NAME}</span>
         </div>
       </div>
