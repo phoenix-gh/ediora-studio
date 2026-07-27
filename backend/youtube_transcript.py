@@ -122,12 +122,28 @@ def _caption_url(formats: list[dict]) -> str:
     return ""
 
 
+def _is_chinese_caption(language: str) -> bool:
+    return language.lower().replace("_", "-").startswith("zh")
+
+
+def _is_english_caption(language: str) -> bool:
+    return language.lower().replace("_", "-").startswith("en")
+
+
 def select_caption(
     manual: dict[str, list[dict]],
     automatic: dict[str, list[dict]],
     preferred_language: str = "",
 ) -> tuple[str, str, str] | None:
-    for source, collection in (("manual", manual), ("auto", automatic)):
+    collections = (("manual", manual), ("auto", automatic))
+    for predicate in (_is_chinese_caption, _is_english_caption):
+        for source, collection in collections:
+            for language, formats in collection.items():
+                if predicate(language):
+                    url = _caption_url(formats)
+                    if url:
+                        return source, language, url
+    for source, collection in collections:
         languages = ([preferred_language] if preferred_language in collection else []) + [
             language for language in collection if language != preferred_language
         ]
@@ -236,17 +252,24 @@ async def extract_youtube_transcript(
         preferred,
     )
     if caption:
-        source, language, caption_url = caption
-        await _ensure_public_http_url(caption_url)
-        try:
-            async with httpx.AsyncClient(timeout=45, follow_redirects=False) as client:
-                response = await client.get(caption_url)
-                response.raise_for_status()
-        except httpx.HTTPError as exc:
-            raise TranscriptError("caption_download_failed", "字幕下载失败", retryable=True) from exc
-        segments = parse_vtt(response.text)
-        if segments:
-            return build_transcript(source, language, segments)
+        source, language, _caption_url = caption
+        with tempfile.TemporaryDirectory(prefix="wms-youtube-captions-") as directory:
+            template = str(Path(directory) / "%(id)s.%(ext)s")
+            await command(
+                "yt-dlp", "--skip-download",
+                "--write-subs" if source == "manual" else "--write-auto-subs",
+                "--sub-langs", language,
+                "--sub-format", "vtt",
+                "-o", template,
+                url,
+                timeout=120,
+            )
+            subtitle_files = list(Path(directory).glob("*.vtt"))
+            if not subtitle_files:
+                raise TranscriptError("caption_download_failed", "未能取得字幕文件", retryable=True)
+            segments = parse_vtt(subtitle_files[0].read_text(encoding="utf-8", errors="replace"))
+            if segments:
+                return build_transcript(source, language, segments)
 
     max_bytes = int(config.get("transcription_max_audio_bytes", str(25 * 1024 * 1024)))
     with tempfile.TemporaryDirectory(prefix="wms-youtube-") as directory:

@@ -1,3 +1,6 @@
+import json
+from pathlib import Path
+
 import pytest
 
 
@@ -51,6 +54,81 @@ def test_caption_selection_prefers_manual_then_auto():
     )
     assert select_caption({}, automatic, "en") == (
         "auto", "en", "https://caption.test/auto",
+    )
+
+
+def test_caption_selection_prefers_chinese_across_caption_sources():
+    from youtube_transcript import select_caption
+
+    manual = {"en-US": [{"ext": "vtt", "url": "https://caption.test/manual-en"}]}
+    automatic = {
+        "ab": [{"ext": "vtt", "url": "https://caption.test/auto-ab"}],
+        "zh-Hans": [{"ext": "vtt", "url": "https://caption.test/auto-zh"}],
+    }
+
+    assert select_caption(manual, automatic, "en-US") == (
+        "auto", "zh-Hans", "https://caption.test/auto-zh",
+    )
+
+
+def test_caption_selection_falls_back_to_english_without_chinese():
+    from youtube_transcript import select_caption
+
+    manual = {"en-US": [{"ext": "vtt", "url": "https://caption.test/manual-en"}]}
+    automatic = {"ab": [{"ext": "vtt", "url": "https://caption.test/auto-ab"}]}
+
+    assert select_caption(manual, automatic, "ab") == (
+        "manual", "en-US", "https://caption.test/manual-en",
+    )
+
+
+@pytest.mark.asyncio
+async def test_extract_downloads_selected_chinese_caption_with_ytdlp(monkeypatch):
+    from youtube_transcript import extract_youtube_transcript
+
+    metadata = {
+        "id": "video-id",
+        "duration": 7,
+        "language": "en",
+        "subtitles": {"en": [{"ext": "vtt", "url": "https://caption.test/en"}]},
+        "automatic_captions": {
+            "zh-Hans": [{"ext": "vtt", "url": "https://caption.test/zh"}],
+        },
+    }
+    commands: list[tuple[str, ...]] = []
+
+    async def command(*argv: str, timeout: float) -> str:
+        commands.append(argv)
+        if "--dump-single-json" in argv:
+            return json.dumps(metadata)
+        if "--write-auto-subs" in argv:
+            template = argv[argv.index("-o") + 1]
+            subtitle = Path(template.replace("%(id)s", "video-id").replace("%(ext)s", "vtt"))
+            subtitle.write_text(VTT, encoding="utf-8")
+            return ""
+        raise AssertionError(f"unexpected command: {argv}")
+
+    class DirectCaptionHttpClient:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            raise AssertionError("caption requests must be delegated to yt-dlp")
+
+        async def __aexit__(self, *_args):
+            return False
+
+    monkeypatch.setattr("youtube_transcript.httpx.AsyncClient", DirectCaptionHttpClient)
+
+    result = await extract_youtube_transcript(
+        "https://www.youtube.com/watch?v=video-id", {}, command=command
+    )
+
+    assert result["source"] == "auto"
+    assert result["language"] == "zh-Hans"
+    assert result["text"] == "Build agents with tools & memory"
+    assert commands[1][0:6] == (
+        "yt-dlp", "--skip-download", "--write-auto-subs", "--sub-langs", "zh-Hans", "--sub-format",
     )
 
 
