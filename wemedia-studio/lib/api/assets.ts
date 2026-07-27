@@ -8,7 +8,8 @@ export const creativeAssetUrl = (url: string) => new URL(
   new URL(PUBLIC_API_BASE).origin,
 ).toString()
 export const listCreativeAssets = (assetType?: CreativeAsset['asset_type']) => apiFetch<CreativeAsset[]>(`/assets${assetType ? `?asset_type=${assetType}` : ''}`)
-export const createCreativeAsset = (body: Pick<CreativeAsset, 'asset_type' | 'media_kind' | 'title' | 'content' | 'url' | 'media_type' | 'filename' | 'directory' | 'tags'>) => apiFetch<CreativeAsset>('/assets', { method: 'POST', body: JSON.stringify(body) })
+export type CreativeAssetCreate = Omit<Pick<CreativeAsset, 'asset_type' | 'media_kind' | 'title' | 'content' | 'url' | 'media_type' | 'filename' | 'directory' | 'tags'>, 'media_kind'> & { media_kind: CreativeAsset['media_kind'] | null }
+export const createCreativeAsset = (body: CreativeAssetCreate) => apiFetch<CreativeAsset>('/assets', { method: 'POST', body: JSON.stringify(body) })
 export const updateCreativeAsset = (id: number, body: Partial<Pick<CreativeAsset, 'title' | 'content' | 'url' | 'directory' | 'tags'>>) => apiFetch<CreativeAsset>(`/assets/${id}`, { method: 'PATCH', body: JSON.stringify(body) })
 export async function uploadCreativeAsset(mediaKind: 'image' | 'video' | 'audio', file: File) { const body = new FormData(); body.append('file', file); return apiFetch<CreativeAsset>(`/assets/upload?media_kind=${mediaKind}`, { method: 'POST', body, headers: {} }) }
 export const deleteCreativeAsset = (id: number) => apiFetch<void>(`/assets/${id}`, { method: 'DELETE' })
