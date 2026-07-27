@@ -21,6 +21,7 @@ export function makeSettings(overrides: Partial<AppSettings> = {}): AppSettings 
     transcription_api_key_preview: '',
     transcription_max_duration_seconds: 7200,
     transcription_max_audio_bytes: 26214400,
+    youtube_cookies_set: false,
     rsshub_base: 'http://127.0.0.1:1200',
     github_token_set: false,
     github_token_preview: '',

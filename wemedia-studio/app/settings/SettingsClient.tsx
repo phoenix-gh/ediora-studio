@@ -16,12 +16,14 @@ import { WebSearchSection } from './sections/WebSearchSection'
 import { WebFetchSection } from './sections/WebFetchSection'
 import { HeyGenSection } from './sections/HeyGenSection'
 import { TranscriptionSection } from './sections/TranscriptionSection'
+import { YouTubeSection } from './sections/YouTubeSection'
 
-type SectionId = 'ai' | 'transcription' | 'heygen' | 'collect' | 'github' | 'x' | 'arxiv' | 'publish' | 'blog' | 'web-search' | 'web-fetch' | 'logs'
+type SectionId = 'ai' | 'transcription' | 'youtube' | 'heygen' | 'collect' | 'github' | 'x' | 'arxiv' | 'publish' | 'blog' | 'web-search' | 'web-fetch' | 'logs'
 
 const NAV: { id: SectionId; label: string; icon: React.ElementType; desc: string }[] = [
   { id: 'ai',       label: 'AI 大模型',   icon: Brain,     desc: '供应商 · API Key · 模型' },
   { id: 'transcription', label: '语音转写', icon: Captions, desc: 'Whisper · 字幕兜底 · 音频限制' },
+  { id: 'youtube',  label: 'YouTube',     icon: Video, desc: 'Cookie · 字幕下载稳定性' },
   { id: 'heygen',   label: 'HeyGen',      icon: Video,     desc: '数字人 · 声音克隆 · 视频生成' },
   { id: 'collect',  label: '数据采集',    icon: Rss,       desc: 'RSSHub · 采集间隔' },
   { id: 'github',   label: 'GitHub',      icon: GitFork,   desc: 'Token · Issues · Trending' },
@@ -37,6 +39,7 @@ const NAV: { id: SectionId; label: string; icon: React.ElementType; desc: string
 const SECTION_TITLE: Record<SectionId, string> = {
   ai:       'AI 大模型',
   transcription: '语音转写',
+  youtube:  'YouTube',
   heygen:   'HeyGen',
   collect:  '数据采集',
   github:   'GitHub 集成',
@@ -93,6 +96,7 @@ export function SettingsClient({ initialSettings }: { initialSettings: AppSettin
 
           {active === 'ai'       && <AISection      settings={settings} onSaved={setSettings} />}
           {active === 'transcription' && <TranscriptionSection settings={settings} onSaved={setSettings} />}
+          {active === 'youtube'  && <YouTubeSection settings={settings} onSaved={setSettings} />}
           {active === 'heygen'   && <HeyGenSection  settings={settings} onSaved={setSettings} />}
           {active === 'collect'  && <CollectSection settings={settings} onSaved={setSettings} />}
           {active === 'github'   && <GitHubSection  settings={settings} onSaved={setSettings} />}

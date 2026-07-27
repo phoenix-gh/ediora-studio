@@ -41,6 +41,7 @@ export interface AppSettings {
   transcription_api_key_preview: string
   transcription_max_duration_seconds: number
   transcription_max_audio_bytes: number
+  youtube_cookies_set: boolean
   rsshub_base: string
   github_token_set: boolean
   github_token_preview: string
@@ -112,6 +113,7 @@ export interface SettingsUpdate {
   transcription_clear_api_key?: boolean
   transcription_max_duration_seconds?: number
   transcription_max_audio_bytes?: number
+  youtube_cookies?: string
   rsshub_base?: string
   github_token?: string
   github_interval_minutes?: number
