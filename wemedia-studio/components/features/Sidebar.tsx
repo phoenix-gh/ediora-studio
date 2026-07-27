@@ -8,6 +8,7 @@ import {
   MessageSquareReply, PersonStanding,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { PRODUCT_NAME } from '@/lib/branding'
 
 type NavItem = {
   href: string
@@ -64,7 +65,7 @@ export function Sidebar() {
           <div className="w-6 h-6 rounded bg-indigo-600 flex items-center justify-center">
             <TrendingUp className="w-3.5 h-3.5 text-white" />
           </div>
-          <span className="font-semibold text-sm text-zinc-900 dark:text-zinc-100">WeMedia Studio</span>
+          <span className="font-semibold text-sm text-zinc-900 dark:text-zinc-100">{PRODUCT_NAME}</span>
         </div>
       </div>
 

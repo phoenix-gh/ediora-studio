@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from 'next/font/google'
 import './globals.css'
 import { Sidebar } from '@/components/features/Sidebar'
 import { Toaster } from '@/components/ui/sonner'
+import { BROWSER_TITLE } from '@/lib/branding'
 
 const geistSans = Geist({
   variable: '--font-geist-sans',
@@ -15,7 +16,7 @@ const geistMono = Geist_Mono({
 })
 
 export const metadata: Metadata = {
-  title: 'WeMedia Studio',
+  title: BROWSER_TITLE,
   description: '自媒体信息监控与选题决策工作台',
 }
 
