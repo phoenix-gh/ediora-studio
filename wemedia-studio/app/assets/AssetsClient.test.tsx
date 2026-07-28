@@ -63,6 +63,16 @@ const image = {
   url: '/api/uploads/cover.png',
 }
 
+function deferred<T>() {
+  let reject!: (error: Error) => void
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  return { promise, reject, resolve }
+}
+
 beforeEach(() => {
   vi.clearAllMocks()
   mocks.listCreativeAssetDirectories.mockResolvedValue([])
@@ -214,6 +224,8 @@ describe('creative assets workspace', () => {
     expect(screen.getByDisplayValue('失败文章')).toBeVisible()
     expect(screen.getByDisplayValue('失败正文')).toBeVisible()
     expect(screen.getByDisplayValue('https://example.com/failure')).toBeVisible()
+    await user.type(screen.getByLabelText(/来源 URL/), '/retry')
+    expect(screen.queryByRole('alert')).toBeNull()
   })
 
   it('keeps a directory rename dialog open when the server rejects it', async () => {
@@ -287,5 +299,102 @@ describe('creative assets workspace', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent('加载目录失败，请重试。')
     expect(screen.queryByRole('button', { name: /过期文章目录/ })).toBeNull()
+  })
+
+  it('immediately clears resolved article directories while media loading fails', async () => {
+    const user = userEvent.setup()
+    const mediaRequest = deferred<ReturnType<typeof directory>[]>()
+    mocks.listCreativeAssetDirectories
+      .mockResolvedValueOnce([directory(10, '文章目录')])
+      .mockReturnValueOnce(mediaRequest.promise)
+    render(<AssetsClient initialAssets={[]} />)
+
+    expect(await screen.findByText('文章目录')).toBeVisible()
+    await user.click(screen.getByRole('tab', { name: '多媒体' }))
+    expect(screen.queryByText('文章目录')).toBeNull()
+    mediaRequest.reject(new Error('network'))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('加载目录失败，请重试。')
+    expect(screen.queryByText('文章目录')).toBeNull()
+  })
+
+  it('locks a pending article create form against close and duplicate submit', async () => {
+    const user = userEvent.setup()
+    const request = deferred<ReturnType<typeof article>>()
+    mocks.createCreativeAsset.mockReturnValue(request.promise)
+    render(<AssetsClient initialAssets={[]} />)
+
+    await user.click(screen.getByRole('button', { name: '新增素材' }))
+    await user.type(screen.getByLabelText('文章标题'), '待创建文章')
+    await user.type(screen.getByLabelText('原始内容'), '待创建正文')
+    const dialog = screen.getByRole('dialog')
+    const save = within(dialog).getByRole('button', { name: '保存' })
+    await user.click(save)
+    await user.click(save)
+
+    expect(mocks.createCreativeAsset).toHaveBeenCalledTimes(1)
+    expect(screen.getByLabelText('文章标题')).toBeDisabled()
+    expect(within(dialog).getByRole('button', { name: '取消' })).toBeDisabled()
+    expect(within(dialog).queryByRole('button', { name: 'Close' })).toBeNull()
+    await user.keyboard('{Escape}')
+    expect(screen.getByRole('dialog')).toBeVisible()
+    request.resolve(article(50, '待创建文章', '待创建正文'))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  })
+
+  it('locks a pending directory rename to the same dialog lifecycle', async () => {
+    const user = userEvent.setup()
+    const request = deferred<ReturnType<typeof directory>>()
+    mocks.listCreativeAssetDirectories.mockResolvedValue([directory(10, '旧目录')])
+    mocks.renameCreativeAssetDirectory.mockReturnValue(request.promise)
+    render(<AssetsClient initialAssets={[]} />)
+
+    await user.click(await screen.findByRole('button', { name: '重命名旧目录' }))
+    const name = screen.getByLabelText('目录名称')
+    await user.clear(name)
+    await user.type(name, '新目录')
+    const dialog = screen.getByRole('dialog')
+    const save = within(dialog).getByRole('button', { name: '保存' })
+    await user.click(save)
+    await user.click(save)
+
+    expect(mocks.renameCreativeAssetDirectory).toHaveBeenCalledTimes(1)
+    expect(name).toBeDisabled()
+    expect(within(dialog).getByRole('button', { name: '取消' })).toBeDisabled()
+    request.resolve(directory(10, '新目录'))
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  })
+
+  it('preserves edits made after a selected article save starts when its response resolves', async () => {
+    const user = userEvent.setup()
+    const request = deferred<ReturnType<typeof article>>()
+    mocks.updateCreativeAsset.mockReturnValue(request.promise)
+    render(<AssetsClient initialAssets={[article(60, '初始标题', '正文')]} />)
+
+    const title = screen.getByLabelText('文章标题')
+    await user.clear(title)
+    await user.type(title, '已保存标题')
+    await user.click(screen.getByRole('button', { name: '保存' }))
+    expect(screen.getByRole('button', { name: '保存中…' })).toBeDisabled()
+    await user.clear(title)
+    await user.type(title, '更新中的新标题')
+    request.resolve({ ...article(60, '服务端旧标题', '服务端正文') })
+
+    await waitFor(() => expect(screen.getByRole('button', { name: '保存' })).toBeEnabled())
+    expect(screen.getByDisplayValue('更新中的新标题')).toBeVisible()
+  })
+
+  it('does not show a rejected selected-article save on another selected asset', async () => {
+    const user = userEvent.setup()
+    const request = deferred<ReturnType<typeof article>>()
+    mocks.updateCreativeAsset.mockReturnValue(request.promise)
+    render(<AssetsClient initialAssets={[article(61, '第一篇', '正文一'), article(62, '第二篇', '正文二')]} />)
+
+    await user.click(screen.getByRole('button', { name: '保存' }))
+    await user.click(screen.getByRole('button', { name: /第二篇/ }))
+    request.reject(new Error('network'))
+
+    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull())
+    expect(screen.getByDisplayValue('第二篇')).toBeVisible()
   })
 })

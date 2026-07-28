@@ -12,13 +12,14 @@ import '@uiw/react-md-editor/markdown-editor.css'
 type ArticleAssetWorkspaceProps = {
   assets: CreativeAsset[]
   selected: CreativeAsset | undefined
+  isSaving?: boolean
   onSelect: (id: number) => void
   onChange: (asset: CreativeAsset) => void
   onSave: () => void
   onDelete: () => void
 }
 
-export function ArticleAssetWorkspace({ assets, selected, onSelect, onChange, onSave, onDelete }: ArticleAssetWorkspaceProps) {
+export function ArticleAssetWorkspace({ assets, selected, isSaving = false, onSelect, onChange, onSave, onDelete }: ArticleAssetWorkspaceProps) {
   return (
     <SplitWorkspace
       editorLabel="素材编辑器"
@@ -33,7 +34,7 @@ export function ArticleAssetWorkspace({ assets, selected, onSelect, onChange, on
         <div className="flex items-center gap-2">
           <Input aria-label="文章标题" className="max-w-xl border-0 bg-transparent px-0 text-lg font-semibold shadow-none focus-visible:ring-0" onChange={event => onChange({ ...selected, title: event.target.value })} placeholder="文章标题" value={selected.title} />
           <Button className="ml-auto" onClick={onDelete} size="sm" variant="destructive"><Trash2 />删除</Button>
-          <Button onClick={onSave} size="sm">保存</Button>
+          <Button disabled={isSaving} onClick={onSave} size="sm">{isSaving ? '保存中…' : '保存'}</Button>
         </div>
         <div className="mt-4 grid gap-3">
           <Input aria-label="来源 URL" onChange={event => onChange({ ...selected, url: event.target.value })} placeholder="来源 URL（可留空）" value={selected.url} />

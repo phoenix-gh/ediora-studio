@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
@@ -27,9 +27,10 @@ import {
 
 type AssetType = 'article' | 'media'
 type MediaFilter = 'all' | 'image' | 'video' | 'audio'
-type ArticleDialogState = { content: string; error: string; title: string; url: string }
-type DirectoryDialogState = { error: string; item: CreativeAssetDirectory | null; name: string }
+type ArticleDialogState = { busy: boolean; content: string; error: string; id: number; title: string; url: string }
+type DirectoryDialogState = { busy: boolean; error: string; id: number; item: CreativeAssetDirectory | null; name: string }
 type ConfirmationState = { action: () => Promise<void>; busy: boolean; error: string; message: string }
+type OperationError = { assetId: number; message: string }
 
 export function AssetsClient({ initialAssets }: { initialAssets: CreativeAsset[] }) {
   const [assets, setAssets] = useState(initialAssets)
@@ -43,7 +44,9 @@ export function AssetsClient({ initialAssets }: { initialAssets: CreativeAsset[]
   const [directoryDialog, setDirectoryDialog] = useState<DirectoryDialogState | null>(null)
   const [confirmation, setConfirmation] = useState<ConfirmationState | null>(null)
   const [directoryLoadError, setDirectoryLoadError] = useState('')
-  const [operationError, setOperationError] = useState('')
+  const [operationError, setOperationError] = useState<OperationError | null>(null)
+  const [savingAssetId, setSavingAssetId] = useState<number | null>(null)
+  const formId = useRef(0)
 
   useEffect(() => {
     let current = true
@@ -62,24 +65,29 @@ export function AssetsClient({ initialAssets }: { initialAssets: CreativeAsset[]
   function changeType(nextType: AssetType) {
     setType(nextType)
     setDirectory('')
+    setDirectories([])
     setDirectoryLoadError('')
     setSelectedId(null)
+    setOperationError(null)
   }
 
   function openNewDirectory() {
-    setDirectoryDialog({ error: '', item: null, name: '' })
+    if (directoryDialog?.busy) return
+    setDirectoryDialog({ busy: false, error: '', id: ++formId.current, item: null, name: '' })
   }
 
   async function saveDirectory() {
-    if (!directoryDialog) return
-    const name = directoryDialog.name.trim()
+    if (!directoryDialog || directoryDialog.busy) return
+    const form = directoryDialog
+    const name = form.name.trim()
     if (!name) {
       setDirectoryDialog(value => value ? { ...value, error: '请输入目录名称。' } : value)
       return
     }
+    setDirectoryDialog(value => value?.id === form.id ? { ...value, busy: true, error: '' } : value)
     try {
-      if (directoryDialog.item) {
-        const previous = directoryDialog.item
+      if (form.item) {
+        const previous = form.item
         const updated = await renameCreativeAssetDirectory(previous.id, name)
         setDirectories(items => items.map(item => item.id === updated.id ? updated : item))
         setAssets(items => items.map(item => item.asset_type === previous.asset_type && item.directory === previous.name ? { ...item, directory: updated.name } : item))
@@ -89,9 +97,9 @@ export function AssetsClient({ initialAssets }: { initialAssets: CreativeAsset[]
         const created = await createCreativeAssetDirectory(name, type, parent?.id ?? null)
         setDirectories(items => [...items, created])
       }
-      setDirectoryDialog(null)
+      setDirectoryDialog(value => value?.id === form.id ? null : value)
     } catch {
-      setDirectoryDialog(value => value ? { ...value, error: '保存目录失败，请重试。' } : value)
+      setDirectoryDialog(value => value?.id === form.id ? { ...value, busy: false, error: '保存目录失败，请重试。' } : value)
     }
   }
 
@@ -112,17 +120,20 @@ export function AssetsClient({ initialAssets }: { initialAssets: CreativeAsset[]
   }
 
   function openNewArticle() {
-    setArticleDialog({ content: '', error: '', title: '', url: '' })
+    if (articleDialog?.busy) return
+    setArticleDialog({ busy: false, content: '', error: '', id: ++formId.current, title: '', url: '' })
   }
 
   async function saveNewArticle() {
-    if (!articleDialog) return
-    const title = articleDialog.title.trim()
-    const content = articleDialog.content.trim()
+    if (!articleDialog || articleDialog.busy) return
+    const form = articleDialog
+    const title = form.title.trim()
+    const content = form.content.trim()
     if (!title || !content) {
       setArticleDialog(value => value ? { ...value, error: '请填写标题和原始内容。' } : value)
       return
     }
+    setArticleDialog(value => value?.id === form.id ? { ...value, busy: true, error: '' } : value)
     try {
       const created = await createCreativeAsset({
         asset_type: 'article',
@@ -133,29 +144,45 @@ export function AssetsClient({ initialAssets }: { initialAssets: CreativeAsset[]
         media_type: '',
         tags: [],
         title,
-        url: articleDialog.url.trim(),
+        url: form.url.trim(),
       })
       setAssets(items => [created, ...items])
       setSelectedId(created.id)
-      setArticleDialog(null)
+      setArticleDialog(value => value?.id === form.id ? null : value)
     } catch {
-      setArticleDialog(value => value ? { ...value, error: '保存文章素材失败，请重试。' } : value)
+      setArticleDialog(value => value?.id === form.id ? { ...value, busy: false, error: '保存文章素材失败，请重试。' } : value)
     }
   }
 
   function changeSelectedArticle(asset: CreativeAsset) {
     setAssets(items => items.map(item => item.id === asset.id ? asset : item))
+    setOperationError(null)
   }
 
   async function saveSelectedArticle() {
-    if (!selected) return
-    setOperationError('')
+    if (!selected || savingAssetId !== null) return
+    const assetId = selected.id
+    const snapshot = { content: selected.content, title: selected.title, url: selected.url }
+    setOperationError(null)
+    setSavingAssetId(assetId)
     try {
-      const updated = await updateCreativeAsset(selected.id, { content: selected.content, title: selected.title, url: selected.url })
-      setAssets(items => items.map(item => item.id === updated.id ? updated : item))
+      const updated = await updateCreativeAsset(assetId, snapshot)
+      setAssets(items => items.map(item => item.id !== assetId ? item : {
+        ...updated,
+        content: item.content === snapshot.content ? updated.content : item.content,
+        title: item.title === snapshot.title ? updated.title : item.title,
+        url: item.url === snapshot.url ? updated.url : item.url,
+      }))
     } catch {
-      setOperationError('更新文章素材失败，请重试。')
+      setOperationError({ assetId, message: '更新文章素材失败，请重试。' })
+    } finally {
+      setSavingAssetId(value => value === assetId ? null : value)
     }
+  }
+
+  function selectArticle(id: number) {
+    setSelectedId(id)
+    setOperationError(null)
   }
 
   function requestArticleDelete() {
@@ -191,7 +218,7 @@ export function AssetsClient({ initialAssets }: { initialAssets: CreativeAsset[]
       onAddDirectory={openNewDirectory}
       onDeleteDirectory={requestDirectoryDelete}
       onDirectoryChange={setDirectory}
-      onRenameDirectory={item => setDirectoryDialog({ error: '', item, name: item.name })}
+      onRenameDirectory={item => setDirectoryDialog({ busy: false, error: '', id: ++formId.current, item, name: item.name })}
       onTypeChange={changeType}
       type={type}
     />
@@ -206,9 +233,9 @@ export function AssetsClient({ initialAssets }: { initialAssets: CreativeAsset[]
         </div> : null}
       </WorkspaceToolbar>
       {directoryLoadError ? <p className="px-7 pt-3 text-sm text-destructive" role="alert">{directoryLoadError}</p> : null}
-      {operationError ? <p className="px-7 pt-3 text-sm text-destructive" role="alert">{operationError}</p> : null}
+      {operationError && operationError.assetId === selected?.id ? <p className="px-7 pt-3 text-sm text-destructive" role="alert">{operationError.message}</p> : null}
       {type === 'article'
-        ? <ArticleAssetWorkspace assets={visibleAssets} onChange={changeSelectedArticle} onDelete={requestArticleDelete} onSave={saveSelectedArticle} onSelect={setSelectedId} selected={selected} />
+        ? <ArticleAssetWorkspace assets={visibleAssets} isSaving={savingAssetId !== null} onChange={changeSelectedArticle} onDelete={requestArticleDelete} onSave={saveSelectedArticle} onSelect={selectArticle} selected={selected} />
         : <MediaAssetGrid assets={visibleAssets} onPreview={setPreviewAsset} onSelect={setSelectedId} selectedId={selected?.id ?? null} />}
     </div>
 
@@ -221,25 +248,25 @@ export function AssetsClient({ initialAssets }: { initialAssets: CreativeAsset[]
       </DialogContent>
     </Dialog>
 
-    <Dialog open={articleDialog !== null} onOpenChange={open => { if (!open) setArticleDialog(null) }}>
-      <DialogContent size="md">
+    <Dialog open={articleDialog !== null} onOpenChange={open => { if (!open && !articleDialog?.busy) setArticleDialog(null) }}>
+      <DialogContent showCloseButton={!articleDialog?.busy} size="md">
         <DialogHeader><DialogTitle>新增文章素材</DialogTitle><DialogDescription>填写标题和原始内容，来源 URL 可留空。</DialogDescription></DialogHeader>
         <div className="space-y-3">
-          <div className="grid gap-1.5"><Label htmlFor="asset-title">文章标题</Label><Input aria-describedby={articleDialog?.error ? 'article-form-error' : undefined} aria-invalid={Boolean(articleDialog?.error) || undefined} autoFocus id="asset-title" onChange={event => setArticleDialog(value => value ? { ...value, error: '', title: event.target.value } : value)} placeholder="文章标题" value={articleDialog?.title ?? ''} /></div>
-          <div className="grid gap-1.5"><Label htmlFor="asset-content">原始内容</Label><Textarea aria-describedby={articleDialog?.error ? 'article-form-error' : undefined} aria-invalid={Boolean(articleDialog?.error) || undefined} id="asset-content" onChange={event => setArticleDialog(value => value ? { ...value, content: event.target.value, error: '' } : value)} placeholder="粘贴原始文章内容" value={articleDialog?.content ?? ''} /></div>
-          <div className="grid gap-1.5"><Label htmlFor="asset-url">来源 URL（可留空）</Label><Input aria-describedby={articleDialog?.error ? 'article-form-error' : undefined} aria-invalid={Boolean(articleDialog?.error) || undefined} id="asset-url" onChange={event => setArticleDialog(value => value ? { ...value, url: event.target.value } : value)} placeholder="来源 URL（可留空）" value={articleDialog?.url ?? ''} /></div>
+          <div className="grid gap-1.5"><Label htmlFor="asset-title">文章标题</Label><Input aria-describedby={articleDialog?.error ? 'article-form-error' : undefined} aria-invalid={Boolean(articleDialog?.error) || undefined} autoFocus disabled={articleDialog?.busy} id="asset-title" onChange={event => setArticleDialog(value => value ? { ...value, error: '', title: event.target.value } : value)} placeholder="文章标题" value={articleDialog?.title ?? ''} /></div>
+          <div className="grid gap-1.5"><Label htmlFor="asset-content">原始内容</Label><Textarea aria-describedby={articleDialog?.error ? 'article-form-error' : undefined} aria-invalid={Boolean(articleDialog?.error) || undefined} disabled={articleDialog?.busy} id="asset-content" onChange={event => setArticleDialog(value => value ? { ...value, content: event.target.value, error: '' } : value)} placeholder="粘贴原始文章内容" value={articleDialog?.content ?? ''} /></div>
+          <div className="grid gap-1.5"><Label htmlFor="asset-url">来源 URL（可留空）</Label><Input aria-describedby={articleDialog?.error ? 'article-form-error' : undefined} aria-invalid={Boolean(articleDialog?.error) || undefined} disabled={articleDialog?.busy} id="asset-url" onChange={event => setArticleDialog(value => value ? { ...value, error: '', url: event.target.value } : value)} placeholder="来源 URL（可留空）" value={articleDialog?.url ?? ''} /></div>
           {articleDialog?.error ? <p className="text-xs text-destructive" id="article-form-error" role="alert">{articleDialog.error}</p> : null}
         </div>
-        <DialogFooter><Button onClick={() => setArticleDialog(null)} variant="outline">取消</Button><Button onClick={() => void saveNewArticle()}>保存</Button></DialogFooter>
+        <DialogFooter><Button disabled={articleDialog?.busy} onClick={() => setArticleDialog(null)} variant="outline">取消</Button><Button disabled={articleDialog?.busy} onClick={() => void saveNewArticle()}>{articleDialog?.busy ? '保存中…' : '保存'}</Button></DialogFooter>
       </DialogContent>
     </Dialog>
 
-    <Dialog open={directoryDialog !== null} onOpenChange={open => { if (!open) setDirectoryDialog(null) }}>
-      <DialogContent size="sm">
+    <Dialog open={directoryDialog !== null} onOpenChange={open => { if (!open && !directoryDialog?.busy) setDirectoryDialog(null) }}>
+      <DialogContent showCloseButton={!directoryDialog?.busy} size="sm">
         <DialogHeader><DialogTitle>{directoryDialog?.item ? '重命名目录' : '新增目录'}</DialogTitle></DialogHeader>
-        <div className="grid gap-1.5"><Label htmlFor="asset-directory-name">目录名称</Label><Input aria-describedby={directoryDialog?.error ? 'directory-form-error' : undefined} aria-invalid={Boolean(directoryDialog?.error) || undefined} autoFocus id="asset-directory-name" onChange={event => setDirectoryDialog(value => value ? { ...value, error: '', name: event.target.value } : value)} placeholder="目录名称" value={directoryDialog?.name ?? ''} /></div>
+        <div className="grid gap-1.5"><Label htmlFor="asset-directory-name">目录名称</Label><Input aria-describedby={directoryDialog?.error ? 'directory-form-error' : undefined} aria-invalid={Boolean(directoryDialog?.error) || undefined} autoFocus disabled={directoryDialog?.busy} id="asset-directory-name" onChange={event => setDirectoryDialog(value => value ? { ...value, error: '', name: event.target.value } : value)} placeholder="目录名称" value={directoryDialog?.name ?? ''} /></div>
         {directoryDialog?.error ? <p className="text-xs text-destructive" id="directory-form-error" role="alert">{directoryDialog.error}</p> : null}
-        <DialogFooter><Button onClick={() => setDirectoryDialog(null)} variant="outline">取消</Button><Button onClick={() => void saveDirectory()}>保存</Button></DialogFooter>
+        <DialogFooter><Button disabled={directoryDialog?.busy} onClick={() => setDirectoryDialog(null)} variant="outline">取消</Button><Button disabled={directoryDialog?.busy} onClick={() => void saveDirectory()}>{directoryDialog?.busy ? '保存中…' : '保存'}</Button></DialogFooter>
       </DialogContent>
     </Dialog>
 
