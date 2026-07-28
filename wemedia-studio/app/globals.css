@@ -113,6 +113,12 @@
   --sidebar-ring: var(--ring);
 }
 
+@media (max-width: 1024px) {
+  :root {
+    --sidebar-width: 4.5rem;
+  }
+}
+
 .dark {
   --background: #0e111b;
   --foreground: #f0f2f8;

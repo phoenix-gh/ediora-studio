@@ -59,19 +59,19 @@ export function Sidebar() {
   const pathname = usePathname()
 
   return (
-    <aside className="fixed left-0 top-0 h-screen w-56 border-r border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950 flex flex-col">
-      <div className="px-4 py-5 border-b border-zinc-100 dark:border-zinc-800">
+    <aside className="fixed left-0 top-0 flex h-screen w-[var(--sidebar-width)] flex-col border-r border-border bg-surface">
+      <div className="border-b border-border px-4 py-5 max-lg:px-3">
         <div className="flex items-center gap-2">
           <img src="/brand/ediora-mark.svg" alt="" aria-hidden="true" className="w-6 h-6 flex-shrink-0" />
-          <span className="font-semibold text-sm text-zinc-900 dark:text-zinc-100">{PRODUCT_NAME}</span>
+          <span className="text-sm font-semibold max-lg:sr-only">{PRODUCT_NAME}</span>
         </div>
       </div>
 
-      <nav className="flex-1 overflow-y-auto px-2 py-3">
+      <nav aria-label="主导航" className="flex-1 overflow-y-auto px-2 py-3">
         {sections.map((section, i) => (
-          <div key={i} className={cn(i > 0 && 'pt-3 mt-3 border-t border-zinc-100 dark:border-zinc-900')}>
+          <div key={i} className={cn(i > 0 && 'mt-3 border-t border-border pt-3')}>
             {section.title && (
-              <p className="px-3 pb-1.5 text-[10px] font-semibold text-zinc-400 uppercase tracking-wider">
+              <p className="px-3 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-foreground-subtle max-lg:sr-only">
                 {section.title}
               </p>
             )}
@@ -82,18 +82,19 @@ export function Sidebar() {
                   <Link
                     key={href}
                     href={disabled ? '#' : href}
+                    aria-current={active ? 'page' : undefined}
                     className={cn(
-                      'flex items-center gap-2.5 px-3 py-2 rounded-md text-sm transition-colors',
+                      'relative flex items-center gap-2.5 rounded-md px-3 py-2 text-sm transition-colors',
                       active
-                        ? 'bg-zinc-100 text-zinc-900 font-medium dark:bg-zinc-800 dark:text-zinc-100'
-                        : 'text-zinc-500 hover:text-zinc-900 hover:bg-zinc-50 dark:text-zinc-400 dark:hover:text-zinc-100 dark:hover:bg-zinc-900',
+                        ? 'bg-accent font-medium text-accent-foreground before:absolute before:inset-y-1.5 before:left-0 before:w-[3px] before:rounded-r before:bg-primary'
+                        : 'text-muted-foreground hover:bg-muted hover:text-foreground',
                       disabled && 'opacity-40 cursor-not-allowed pointer-events-none',
                     )}
                   >
                     <Icon className="w-4 h-4 flex-shrink-0" />
-                    {label}
+                    <span className="max-lg:sr-only">{label}</span>
                     {disabled && (
-                      <span className="ml-auto text-[10px] text-zinc-400">即将上线</span>
+                      <span className="ml-auto text-[10px] text-foreground-subtle max-lg:sr-only">即将上线</span>
                     )}
                   </Link>
                 )
@@ -103,18 +104,19 @@ export function Sidebar() {
         ))}
       </nav>
 
-      <div className="px-2 py-3 border-t border-zinc-100 dark:border-zinc-800">
+      <div className="border-t border-border px-2 py-3">
         <Link
           href="/settings"
+          aria-current={pathname === '/settings' ? 'page' : undefined}
           className={cn(
-            'flex items-center gap-2.5 px-3 py-2 rounded-md text-sm transition-colors',
+            'relative flex items-center gap-2.5 rounded-md px-3 py-2 text-sm transition-colors',
             pathname === '/settings'
-              ? 'bg-zinc-100 text-zinc-900 font-medium dark:bg-zinc-800 dark:text-zinc-100'
-              : 'text-zinc-500 hover:text-zinc-900 hover:bg-zinc-50 dark:text-zinc-400 dark:hover:text-zinc-100 dark:hover:bg-zinc-900',
+              ? 'bg-accent font-medium text-accent-foreground before:absolute before:inset-y-1.5 before:left-0 before:w-[3px] before:rounded-r before:bg-primary'
+              : 'text-muted-foreground hover:bg-muted hover:text-foreground',
           )}
         >
           <Settings className="w-4 h-4" />
-          设置
+          <span className="max-lg:sr-only">设置</span>
         </Link>
       </div>
     </aside>

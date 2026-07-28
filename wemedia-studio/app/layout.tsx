@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import { Geist, Geist_Mono } from 'next/font/google'
 import './globals.css'
 import { Sidebar } from '@/components/features/Sidebar'
+import { AppShell } from '@/components/layout/AppShell'
 import { ThemeProvider } from '@/components/providers/ThemeProvider'
 import { Toaster } from '@/components/ui/sonner'
 import { BROWSER_TITLE } from '@/lib/branding'
@@ -32,8 +33,7 @@ export default function RootLayout({
     >
       <body className="min-h-full bg-background text-foreground">
         <ThemeProvider>
-          <Sidebar />
-          <main className="ml-56 h-screen overflow-auto">{children}</main>
+          <AppShell sidebar={<Sidebar />}>{children}</AppShell>
           <Toaster position="bottom-right" />
         </ThemeProvider>
       </body>
