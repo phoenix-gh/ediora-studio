@@ -43,6 +43,7 @@ export function AssetsClient({ initialAssets }: { initialAssets: CreativeAsset[]
   const [directoryDialog, setDirectoryDialog] = useState<DirectoryDialogState | null>(null)
   const [confirmation, setConfirmation] = useState<ConfirmationState | null>(null)
   const [directoryLoadError, setDirectoryLoadError] = useState('')
+  const [directoryLoadAttempt, setDirectoryLoadAttempt] = useState(0)
   const [operationErrors, setOperationErrors] = useState<Record<number, string>>({})
   const [savingAssetId, setSavingAssetId] = useState<number | null>(null)
   const formId = useRef(0)
@@ -50,10 +51,15 @@ export function AssetsClient({ initialAssets }: { initialAssets: CreativeAsset[]
   useEffect(() => {
     let current = true
     void listCreativeAssetDirectories(type)
-      .then(items => { if (current) setDirectories(items) })
+      .then(items => {
+        if (current) {
+          setDirectories(items)
+          setDirectoryLoadError('')
+        }
+      })
       .catch(() => { if (current) setDirectoryLoadError('加载目录失败，请重试。') })
     return () => { current = false }
-  }, [type])
+  }, [directoryLoadAttempt, type])
 
   const visibleAssets = useMemo(() => assets.filter(asset => asset.asset_type === type
     && (!directory || asset.directory === directory)
@@ -241,7 +247,10 @@ export function AssetsClient({ initialAssets }: { initialAssets: CreativeAsset[]
           {(['all', 'image', 'video', 'audio'] as MediaFilter[]).map(filter => <Button aria-pressed={mediaFilter === filter} key={filter} onClick={() => setMediaFilter(filter)} size="xs" variant={mediaFilter === filter ? 'secondary' : 'ghost'}>{mediaFilterLabel(filter)}</Button>)}
         </div> : null}
       </WorkspaceToolbar>
-      {directoryLoadError ? <p className="px-7 pt-3 text-sm text-destructive" role="alert">{directoryLoadError}</p> : null}
+      {directoryLoadError ? <div className="flex items-center gap-2 px-7 pt-3">
+        <p className="text-sm text-destructive" role="alert">{directoryLoadError}</p>
+        <Button onClick={() => setDirectoryLoadAttempt(attempt => attempt + 1)} size="xs" variant="outline">重试加载目录</Button>
+      </div> : null}
       {selected && operationErrors[selected.id] ? <p className="px-7 pt-3 text-sm text-destructive" role="alert">{operationErrors[selected.id]}</p> : null}
       {type === 'article'
         ? <ArticleAssetWorkspace assets={visibleAssets} isSaving={savingAssetId !== null} onChange={changeSelectedArticle} onDelete={requestArticleDelete} onSave={saveSelectedArticle} onSelect={selectArticle} selected={selected} />

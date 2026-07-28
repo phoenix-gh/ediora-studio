@@ -40,8 +40,11 @@ describe('layout components', () => {
       />,
     )
 
-    expect(screen.getByRole('region', { name: '素材列表' })).toBeTruthy()
-    expect(screen.getByRole('region', { name: '素材编辑器' })).toBeTruthy()
+    const list = screen.getByRole('region', { name: '素材列表' })
+    const editor = screen.getByRole('region', { name: '素材编辑器' })
+    expect(list).toHaveClass('w-1/4', 'min-w-[280px]', 'max-w-[360px]', 'shrink-0')
+    expect(editor).toHaveClass('min-w-0', 'flex-1')
+    expect(list.parentElement).toHaveClass('flex')
   })
 
   it('groups form content under its visible title and actions', () => {

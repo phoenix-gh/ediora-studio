@@ -32,7 +32,7 @@ export function ArticleAssetWorkspace({ assets, selected, isSaving = false, onSe
       </div> : <AsyncState description="新增文章素材后会显示在这里。" title="当前目录没有素材" variant="empty" />}
       editor={selected ? <div className="flex h-full min-h-0 flex-col p-6">
         <div className="flex items-center gap-2">
-          <Input aria-label="文章标题" className="max-w-xl border-0 bg-transparent px-0 text-lg font-semibold shadow-none focus-visible:ring-0" onChange={event => onChange({ ...selected, title: event.target.value })} placeholder="文章标题" value={selected.title} />
+          <Input aria-label="文章标题" className="max-w-xl border-0 bg-transparent px-0 text-lg font-semibold shadow-none dark:bg-transparent" onChange={event => onChange({ ...selected, title: event.target.value })} placeholder="文章标题" value={selected.title} />
           <Button className="ml-auto" onClick={onDelete} size="sm" variant="destructive"><Trash2 />删除</Button>
           <Button disabled={isSaving} onClick={onSave} size="sm">{isSaving ? '保存中…' : '保存'}</Button>
         </div>

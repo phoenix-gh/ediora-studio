@@ -105,6 +105,20 @@ describe('creative assets workspace', () => {
     expect(screen.getByRole('region', { name: '素材编辑器' })).toBeVisible()
   })
 
+  it('shows the shared focus ring when keyboard navigation reaches the article title', async () => {
+    const user = userEvent.setup()
+    render(<AssetsClient initialAssets={[article(1, '键盘标题', '正文')]} />)
+
+    const title = screen.getByRole('textbox', { name: '文章标题' })
+    for (let step = 0; step < 20 && document.activeElement !== title; step += 1) {
+      await user.tab()
+    }
+
+    expect(title).toHaveFocus()
+    expect(title).toHaveClass('focus-visible:ring-3', 'focus-visible:ring-ring/50', 'dark:bg-transparent')
+    expect(title).not.toHaveClass('focus-visible:ring-0')
+  })
+
   it('saves title, content, and source URL edits for the selected article id', async () => {
     const user = userEvent.setup()
     render(<AssetsClient initialAssets={[article(7, '原题', '原正文')]} />)
@@ -159,6 +173,9 @@ describe('creative assets workspace', () => {
     const card = await screen.findByRole('button', { name: /封面图/ })
     const grid = card.closest('[data-slot="media-asset-grid"]')
     expect(grid).toHaveClass('grid-cols-3', 'md:grid-cols-6', 'xl:grid-cols-8')
+    expect(card).toHaveClass('hover:bg-muted/50', 'hover:border-border-strong', 'hover:shadow-sm')
+    expect(card).not.toHaveClass('hover:border-primary/50')
+    expect(card).toHaveClass('border-primary', 'ring-1', 'ring-primary')
     expect(screen.getByRole('img', { name: '封面图' })).toHaveAttribute('src', 'http://media.test/api/uploads/cover.png')
     await user.dblClick(card)
 
@@ -333,6 +350,22 @@ describe('creative assets workspace', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent('加载目录失败，请重试。')
     expect(screen.queryByText('文章目录')).toBeNull()
+  })
+
+  it('retries the current directory load locally and renders the successful result', async () => {
+    const user = userEvent.setup()
+    mocks.listCreativeAssetDirectories
+      .mockRejectedValueOnce(new Error('network'))
+      .mockResolvedValueOnce([directory(10, '重试成功目录')])
+    render(<AssetsClient initialAssets={[]} />)
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('加载目录失败')
+    await user.click(screen.getByRole('button', { name: '重试加载目录' }))
+
+    expect(await screen.findByText('重试成功目录')).toBeVisible()
+    expect(screen.queryByRole('alert')).toBeNull()
+    expect(mocks.listCreativeAssetDirectories).toHaveBeenCalledTimes(2)
+    expect(mocks.listCreativeAssetDirectories).toHaveBeenLastCalledWith('article')
   })
 
   it('locks a pending article create form against close and duplicate submit', async () => {

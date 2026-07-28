@@ -38,10 +38,16 @@ describe('Sidebar in the app shell', () => {
 
     expect(sidebarSource.match(/sidebar-compact-label/g)).toHaveLength(5)
     expect(sidebarSource).toContain('sidebar-compact-header')
+    expect(sidebarSource.match(/sidebar-compact-link/g)).toHaveLength(2)
     expect(sidebarSource).not.toMatch(/max-(?:lg|\[1024px\])/)
     expect(compactMedia).toContain('.sidebar-compact-label')
     expect(compactMedia).toContain('.sidebar-compact-header')
+    expect(compactMedia).toContain('.sidebar-compact-header > div')
+    expect(compactMedia).toContain('.sidebar-compact-link')
     expect(compactMedia).toContain('clip: rect(0, 0, 0, 0)')
+    expect(compactMedia).toMatch(/\.sidebar-compact-header > div\s*{[^}]*justify-content:\s*center/)
+    expect(compactMedia).toMatch(/\.sidebar-compact-link\s*{[^}]*justify-content:\s*center/)
+    expect(compactMedia).toMatch(/\.sidebar-compact-link\s*{[^}]*padding-inline:\s*0/)
   })
 
   it('renders one application content boundary', () => {

@@ -195,6 +195,24 @@ for (const viewport of VIEWPORTS) {
 
         const sidebarWidth = await page.locator('aside').first().evaluate(element => element.getBoundingClientRect().width)
         expect(sidebarWidth).toBe(viewport.width === 1024 ? 72 : 224)
+        if (viewport.width === 1024) {
+          const sidebar = page.locator('aside').first()
+          const sidebarBox = await sidebar.boundingBox()
+          const iconCenters = await sidebar.locator('img, a svg').evaluateAll(elements =>
+            elements.map(element => {
+              const bounds = element.getBoundingClientRect()
+              return bounds.x + bounds.width / 2
+            }),
+          )
+          expect(sidebarBox).not.toBeNull()
+          expect(iconCenters.length).toBeGreaterThan(0)
+          if (sidebarBox) {
+            const sidebarCenter = sidebarBox.x + sidebarBox.width / 2
+            for (const iconCenter of iconCenters) {
+              expect(Math.abs(iconCenter - sidebarCenter)).toBeLessThanOrEqual(1)
+            }
+          }
+        }
 
         await waitForStableScreenshot(page)
         await page.screenshot({

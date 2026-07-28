@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef } from 'react'
+import { useId, useRef, useState } from 'react'
 import { Loader2, Eye, EyeOff, RefreshCw, FlaskConical, CheckCircle, XCircle, Save } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
@@ -32,7 +32,9 @@ export function AISection({ settings, onSaved }: { settings: AppSettings | null;
   const [modelList, setModelList]         = useState<string[]>([])
   const [fetchingModels, setFetchingModels] = useState(false)
   const [showModelList, setShowModelList]  = useState(false)
+  const [activeModelIndex, setActiveModelIndex] = useState(-1)
   const modelInputRef = useRef<HTMLInputElement>(null)
+  const modelListboxId = useId()
   const modelRequestSequence = useRef(0)
 
   const [testState, setTestState] = useState<TestState>('idle')
@@ -48,6 +50,7 @@ export function AISection({ settings, onSaved }: { settings: AppSettings | null;
     setModel('')
     setModelList([])
     setShowModelList(false)
+    setActiveModelIndex(-1)
     setFetchingModels(false)
   }
 
@@ -55,6 +58,7 @@ export function AISection({ settings, onSaved }: { settings: AppSettings | null;
     const requestId = ++modelRequestSequence.current
     setFetchingModels(true)
     setShowModelList(false)
+    setActiveModelIndex(-1)
     try {
       const res = await fetchProviderModels({
         provider,
@@ -124,6 +128,53 @@ export function AISection({ settings, onSaved }: { settings: AppSettings | null;
   const filteredModels = model
     ? modelList.filter(m => m.toLowerCase().includes(model.toLowerCase()))
     : modelList
+
+  const modelListOpen = showModelList && filteredModels.length > 0
+
+  function closeModelList() {
+    setShowModelList(false)
+    setActiveModelIndex(-1)
+  }
+
+  function selectModel(item: string) {
+    setModel(item)
+    closeModelList()
+  }
+
+  function handleModelKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
+    if (event.key === 'Escape') {
+      if (modelListOpen) {
+        event.preventDefault()
+        closeModelList()
+      }
+      return
+    }
+
+    if (filteredModels.length === 0) return
+
+    if (event.key === 'ArrowDown') {
+      event.preventDefault()
+      setShowModelList(true)
+      setActiveModelIndex(current => (
+        current < filteredModels.length - 1 ? current + 1 : current
+      ))
+      return
+    }
+
+    if (event.key === 'ArrowUp') {
+      event.preventDefault()
+      setShowModelList(true)
+      setActiveModelIndex(current => (
+        current === -1 ? filteredModels.length - 1 : Math.max(current - 1, 0)
+      ))
+      return
+    }
+
+    if (event.key === 'Enter' && modelListOpen && activeModelIndex >= 0) {
+      event.preventDefault()
+      selectModel(filteredModels[activeModelIndex])
+    }
+  }
 
   const keyPlaceholder = settings?.llm_api_key_set
     ? `已配置 (${settings.llm_api_key_preview}) — 留空不修改`
@@ -217,27 +268,45 @@ export function AISection({ settings, onSaved }: { settings: AppSettings | null;
                 onChange={event => {
                   setModel(event.target.value)
                   setShowModelList(true)
+                  setActiveModelIndex(-1)
                 }}
                 onFocus={() => modelList.length && setShowModelList(true)}
-                onBlur={() => setTimeout(() => setShowModelList(false), 150)}
+                onBlur={() => setTimeout(closeModelList, 150)}
+                onKeyDown={handleModelKeyDown}
+                role="combobox"
+                aria-autocomplete="list"
+                aria-expanded={modelListOpen}
+                aria-controls={modelListOpen ? modelListboxId : undefined}
+                aria-activedescendant={modelListOpen && activeModelIndex >= 0
+                  ? `${modelListboxId}-option-${activeModelIndex}`
+                  : undefined}
                 placeholder={currentPreset?.default_model
                   ? `默认: ${currentPreset.default_model}`
                   : '输入或选择模型名称'}
                 className="font-mono"
               />
-              {showModelList && filteredModels.length > 0 ? (
-                <div className="absolute top-full z-20 mt-1 max-h-52 w-full overflow-y-auto rounded-lg border border-border bg-surface p-1 shadow-lg">
-                  {filteredModels.map(item => (
+              {modelListOpen ? (
+                <div
+                  id={modelListboxId}
+                  role="listbox"
+                  aria-label="可用模型"
+                  className="absolute top-full z-20 mt-1 max-h-52 w-full overflow-y-auto rounded-lg border border-border bg-surface p-1 shadow-lg"
+                >
+                  {filteredModels.map((item, index) => (
                     <button
                       key={item}
+                      id={`${modelListboxId}-option-${index}`}
                       type="button"
-                      onMouseDown={() => {
-                        setModel(item)
-                        setShowModelList(false)
+                      role="option"
+                      tabIndex={-1}
+                      aria-selected={activeModelIndex === index}
+                      onMouseDown={event => {
+                        event.preventDefault()
+                        selectModel(item)
                       }}
                       className={cn(
                         'w-full rounded-md px-3 py-2 text-left text-sm font-mono transition-colors hover:bg-surface-muted',
-                        model === item && 'bg-surface-muted text-foreground'
+                        (activeModelIndex === index || model === item) && 'bg-surface-muted text-foreground'
                       )}
                     >
                       {item}

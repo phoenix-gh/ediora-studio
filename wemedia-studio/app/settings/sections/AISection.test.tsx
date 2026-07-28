@@ -59,6 +59,23 @@ const settings = makeSettings({
   ],
 })
 
+async function renderWithModelSuggestions() {
+  vi.mocked(fetchProviderModels).mockResolvedValue({
+    ok: true,
+    models: ['gpt-alpha', 'gpt-beta', 'gpt-gamma'],
+  })
+  render(<AISection settings={{ ...settings, llm_model: '' }} onSaved={vi.fn()} />)
+  const user = userEvent.setup()
+
+  await user.click(screen.getByRole('button', { name: '获取可用模型' }))
+  await screen.findByText('gpt-alpha')
+
+  const modelInput = screen.getByLabelText('模型')
+  await user.click(modelInput)
+
+  return { modelInput, user }
+}
+
 describe('AISection', () => {
   afterEach(() => {
     cleanup()
@@ -146,6 +163,56 @@ describe('AISection', () => {
     expect(screen.getByRole('button', { name: '获取可用模型' })).toBeEnabled()
     fireEvent.focus(screen.getByLabelText('模型'))
     expect(await screen.findByText('deepseek-chat')).toBeInTheDocument()
+  })
+
+  it('exposes model suggestions as an owned listbox from the model combobox', async () => {
+    const { modelInput } = await renderWithModelSuggestions()
+
+    expect(modelInput).toHaveAttribute('role', 'combobox')
+    expect(modelInput).toHaveAttribute('aria-autocomplete', 'list')
+    expect(modelInput).toHaveAttribute('aria-expanded', 'true')
+
+    const listbox = screen.getByRole('listbox', { name: '可用模型' })
+    expect(modelInput).toHaveAttribute('aria-controls', listbox.id)
+    expect(screen.getAllByRole('option')).toHaveLength(3)
+  })
+
+  it('navigates model suggestions with arrow keys and selects the active option with Enter', async () => {
+    const { modelInput, user } = await renderWithModelSuggestions()
+
+    await user.keyboard('{ArrowDown}{ArrowDown}{ArrowUp}')
+
+    const activeOptionId = modelInput.getAttribute('aria-activedescendant')
+    expect(activeOptionId).toBeTruthy()
+    expect(document.getElementById(activeOptionId!)).toHaveTextContent('gpt-alpha')
+    expect(modelInput).toHaveFocus()
+
+    await user.keyboard('{Enter}')
+
+    expect(modelInput).toHaveValue('gpt-alpha')
+    expect(modelInput).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
+  })
+
+  it('dismisses model suggestions with Escape without changing the typed value', async () => {
+    const { modelInput, user } = await renderWithModelSuggestions()
+
+    await user.keyboard('{ArrowDown}{Escape}')
+
+    expect(modelInput).toHaveValue('')
+    expect(modelInput).toHaveFocus()
+    expect(modelInput).toHaveAttribute('aria-expanded', 'false')
+    expect(modelInput).not.toHaveAttribute('aria-activedescendant')
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
+  })
+
+  it('still selects a model suggestion with the mouse', async () => {
+    const { modelInput, user } = await renderWithModelSuggestions()
+
+    await user.click(screen.getByText('gpt-beta'))
+
+    expect(modelInput).toHaveValue('gpt-beta')
+    expect(screen.queryByText('gpt-alpha')).not.toBeInTheDocument()
   })
 
   it('offers an adjacent image save action that persists the shared AI payload', async () => {
