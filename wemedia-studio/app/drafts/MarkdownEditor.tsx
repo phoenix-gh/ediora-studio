@@ -3,7 +3,7 @@
 import React, { forwardRef, useImperativeHandle } from 'react'
 import { commands as markdownCommands } from '@uiw/react-md-editor'
 import dynamic from 'next/dynamic'
-import { useCallback, useRef } from 'react'
+import { useCallback, useRef, useSyncExternalStore } from 'react'
 import { useTheme } from 'next-themes'
 import { toast } from 'sonner'
 
@@ -13,6 +13,10 @@ const MDEditor = dynamic(() => import('@uiw/react-md-editor'), {
 })
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000/api'
+
+const subscribeToHydration = () => () => {}
+const getClientHydrationSnapshot = () => true
+const getServerHydrationSnapshot = () => false
 
 async function uploadImageFile(file: File): Promise<string | null> {
   const form = new FormData()
@@ -54,7 +58,12 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, Props>(
 function MarkdownEditor({ value, onChange, minHeight = 500 }, ref) {
   const containerRef = useRef<HTMLDivElement>(null)
   const { resolvedTheme } = useTheme()
-  const colorMode = resolvedTheme === 'dark' ? 'dark' : 'light'
+  const isHydrated = useSyncExternalStore(
+    subscribeToHydration,
+    getClientHydrationSnapshot,
+    getServerHydrationSnapshot,
+  )
+  const colorMode = isHydrated && resolvedTheme === 'dark' ? 'dark' : 'light'
 
   useImperativeHandle(ref, () => ({
     insert(text: string) {
