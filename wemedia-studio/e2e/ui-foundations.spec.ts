@@ -1,4 +1,12 @@
-import { expect, test, type Locator, type Page } from '@playwright/test'
+import {
+  expect,
+  test,
+  type APIRequestContext,
+  type Locator,
+  type Page,
+  type Request,
+  type Response,
+} from '@playwright/test'
 
 const VIEWPORTS = [
   { width: 1440, height: 1000 },
@@ -7,8 +15,69 @@ const VIEWPORTS = [
 ] as const
 
 const THEMES = ['light', 'dark'] as const
+const API_BASE = 'http://127.0.0.1:8000/api'
+const MEDIA_FIXTURE_PREFIX = '__ediora_e2e_media_fixture__'
+const MEDIA_FIXTURE_DATA_URI = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
+const LAYOUT_STRESS_CARD_COUNT = 100
 
 type Theme = (typeof THEMES)[number]
+type MediaFixture = { id: number; title: string }
+
+let mediaFixture: MediaFixture | null = null
+
+async function deleteStaleMediaFixtures(request: APIRequestContext) {
+  const response = await request.get(`${API_BASE}/assets?asset_type=media&q=${encodeURIComponent(MEDIA_FIXTURE_PREFIX)}`)
+  expect(response.ok(), `Unable to list stale E2E media fixtures: ${response.status()}`).toBeTruthy()
+  const assets = await response.json() as MediaFixture[]
+  for (const asset of assets.filter(item => item.title.startsWith(MEDIA_FIXTURE_PREFIX))) {
+    const deletion = await request.delete(`${API_BASE}/assets/${asset.id}`)
+    expect(deletion.status(), `Unable to delete stale E2E media fixture ${asset.id}`).toBe(204)
+  }
+}
+
+function mediaThumbnailFailureReason(request: Request) {
+  if (request.method() !== 'GET' || !['image', 'media'].includes(request.resourceType())) return null
+  return 'Media thumbnail failures are allowed because user-owned remote/static media may be unavailable without indicating an API business failure.'
+}
+
+function allowedRequestFailureReason(request: Request) {
+  const failure = request.failure()?.errorText ?? ''
+  if (request.isNavigationRequest() && failure.includes('ERR_ABORTED')) {
+    return 'Navigation ERR_ABORTED is allowed when client-side navigation supersedes an in-flight document request.'
+  }
+  return mediaThumbnailFailureReason(request)
+}
+
+function allowedHttpFailureReason(response: Response) {
+  return mediaThumbnailFailureReason(response.request())
+}
+
+test.beforeAll(async ({ request }) => {
+  await deleteStaleMediaFixtures(request)
+  const title = `${MEDIA_FIXTURE_PREFIX}${Date.now()}-${process.pid}`
+  const response = await request.post(`${API_BASE}/assets`, {
+    data: {
+      asset_type: 'media',
+      media_kind: 'image',
+      title,
+      content: '',
+      url: MEDIA_FIXTURE_DATA_URI,
+      media_type: 'image/png',
+      filename: 'ediora-e2e-fixture.png',
+      directory: '',
+      tags: ['e2e-fixture'],
+    },
+  })
+  expect(response.status(), 'Unable to create deterministic E2E media fixture').toBe(201)
+  mediaFixture = await response.json() as MediaFixture
+  expect(mediaFixture.title).toBe(title)
+})
+
+test.afterAll(async ({ request }) => {
+  if (!mediaFixture) return
+  const response = await request.delete(`${API_BASE}/assets/${mediaFixture.id}`)
+  expect(response.status(), `Unable to delete E2E media fixture ${mediaFixture.id}`).toBe(204)
+})
 
 async function openCenteredDialog(page: Page, trigger: Locator) {
   await trigger.click()
@@ -62,10 +131,34 @@ for (const viewport of VIEWPORTS) {
   for (const theme of THEMES) {
     test(`${viewport.width}x${viewport.height} ${theme} foundations`, async ({ page }) => {
       const runtimeErrors: string[] = []
+      const consoleErrors: { text: string; url: string }[] = []
+      const networkAllowlistReasons = new Set<string>()
+      const networkAllowlistedUrls = new Set<string>()
       page.on('console', message => {
-        if (message.type() === 'error') runtimeErrors.push(`console: ${message.text()}`)
+        if (message.type() === 'error') {
+          consoleErrors.push({ text: message.text(), url: message.location().url })
+        }
       })
       page.on('pageerror', error => runtimeErrors.push(`pageerror: ${error.message}`))
+      page.on('requestfailed', request => {
+        const reason = allowedRequestFailureReason(request)
+        if (reason) {
+          networkAllowlistReasons.add(reason)
+          networkAllowlistedUrls.add(request.url())
+          return
+        }
+        runtimeErrors.push(`requestfailed: ${request.method()} ${request.url()} (${request.failure()?.errorText ?? 'unknown'})`)
+      })
+      page.on('response', response => {
+        if (response.status() < 400) return
+        const reason = allowedHttpFailureReason(response)
+        if (reason) {
+          networkAllowlistReasons.add(reason)
+          networkAllowlistedUrls.add(response.url())
+          return
+        }
+        runtimeErrors.push(`http ${response.status()}: ${response.request().method()} ${response.url()}`)
+      })
 
       await page.setViewportSize(viewport)
       await page.addInitScript(selectedTheme => {
@@ -104,8 +197,14 @@ for (const viewport of VIEWPORTS) {
         expect(editorBox).not.toBeNull()
         if (listBox && editorBox) {
           expect(listBox.width).toBeGreaterThanOrEqual(280)
+          expect(listBox.width).toBeLessThanOrEqual(360)
           expect(editorBox.x).toBeCloseTo(listBox.x + listBox.width, 0)
           expect(editorBox.width).toBeGreaterThan(listBox.width)
+          if (viewport.width === 1440) {
+            const listRatio = listBox.width / (listBox.width + editorBox.width)
+            expect(listRatio).toBeGreaterThanOrEqual(0.25)
+            expect(listRatio).toBeLessThanOrEqual(0.30)
+          }
         }
 
         await waitForStableScreenshot(page)
@@ -133,28 +232,66 @@ for (const viewport of VIEWPORTS) {
         if (mediaGridBox && appContentBox) {
           expect(mediaGridBox.y + mediaGridBox.height).toBeLessThanOrEqual(appContentBox.y + appContentBox.height + 1)
         }
-        const mediaItems = mediaGrid.locator(':scope > button')
-        const mediaCount = await mediaItems.count()
-        if (mediaCount === 0) {
-          test.info().annotations.push({
-            type: 'skip',
-            description: 'Media preview skipped because the live API returned no media assets.',
-          })
-        } else {
-          await mediaItems.first().dblclick()
-          const preview = page.getByRole('dialog')
-          await expect(preview).toContainText('双击多媒体资产打开预览。')
-          const previewBounds = await preview.boundingBox()
-          const currentViewport = page.viewportSize()
-          expect(previewBounds).not.toBeNull()
-          expect(currentViewport).not.toBeNull()
-          if (previewBounds && currentViewport) {
-            expect(Math.abs(previewBounds.x + previewBounds.width / 2 - currentViewport.width / 2)).toBeLessThanOrEqual(2)
-            expect(Math.abs(previewBounds.y + previewBounds.height / 2 - currentViewport.height / 2)).toBeLessThanOrEqual(2)
-          }
-          await page.keyboard.press('Escape')
-          await expect(preview).toBeHidden()
+        if (!mediaFixture) throw new Error('Deterministic media fixture was not created')
+        const fixtureMedia = mediaGrid.getByRole('button').filter({ hasText: mediaFixture.title })
+        await expect(fixtureMedia).toBeVisible()
+        await fixtureMedia.dblclick()
+        const preview = page.getByRole('dialog')
+        await expect(preview).toContainText('双击多媒体资产打开预览。')
+        const previewBounds = await preview.boundingBox()
+        const currentViewport = page.viewportSize()
+        expect(previewBounds).not.toBeNull()
+        expect(currentViewport).not.toBeNull()
+        if (previewBounds && currentViewport) {
+          expect(Math.abs(previewBounds.x + previewBounds.width / 2 - currentViewport.width / 2)).toBeLessThanOrEqual(2)
+          expect(Math.abs(previewBounds.y + previewBounds.height / 2 - currentViewport.height / 2)).toBeLessThanOrEqual(2)
         }
+        await page.keyboard.press('Escape')
+        await expect(preview).toBeHidden()
+
+        await fixtureMedia.evaluate((button, desiredCount) => {
+          const grid = button.parentElement
+          if (!grid) throw new Error('Fixture media button has no grid parent')
+          while (grid.querySelectorAll(':scope > button').length < desiredCount) {
+            const clone = button.cloneNode(true) as HTMLButtonElement
+            clone.dataset.e2eLayoutClone = 'true'
+            clone.setAttribute('aria-hidden', 'true')
+            clone.tabIndex = -1
+            grid.appendChild(clone)
+          }
+        }, LAYOUT_STRESS_CARD_COUNT)
+
+        const stressMetrics = await mediaGrid.evaluate(element => ({
+          clientHeight: element.clientHeight,
+          scrollHeight: element.scrollHeight,
+        }))
+        expect(stressMetrics.scrollHeight).toBeGreaterThan(stressMetrics.clientHeight)
+
+        const lastStressCard = mediaGrid.locator(':scope > button').last()
+        await lastStressCard.scrollIntoViewIfNeeded()
+        const [scrolledMetrics, scrolledGridBox, lastStressCardBox] = await Promise.all([
+          mediaGrid.evaluate(element => ({
+            clientHeight: element.clientHeight,
+            scrollHeight: element.scrollHeight,
+            scrollTop: element.scrollTop,
+          })),
+          mediaGrid.boundingBox(),
+          lastStressCard.boundingBox(),
+        ])
+        expect(scrolledMetrics.scrollTop).toBeGreaterThan(0)
+        expect(scrolledGridBox).not.toBeNull()
+        expect(lastStressCardBox).not.toBeNull()
+        if (scrolledGridBox && lastStressCardBox) {
+          expect(lastStressCardBox.y).toBeGreaterThanOrEqual(scrolledGridBox.y)
+          expect(lastStressCardBox.y + lastStressCardBox.height).toBeLessThanOrEqual(
+            scrolledGridBox.y + scrolledGridBox.height + 1,
+          )
+        }
+        const stressedDocumentWidth = await page.evaluate(() => ({
+          clientWidth: document.documentElement.clientWidth,
+          scrollWidth: document.documentElement.scrollWidth,
+        }))
+        expect(stressedDocumentWidth.scrollWidth).toBeLessThanOrEqual(stressedDocumentWidth.clientWidth)
       })
 
       await test.step('settings dialog and theme persistence', async () => {
@@ -180,20 +317,36 @@ for (const viewport of VIEWPORTS) {
         await openCenteredDialog(page, page.getByRole('button', { name: '新增发布账号' }))
 
         await page.getByRole('button', { name: /^外观/ }).click()
-        const themeButton = settingsContent.getByRole('button', { name: theme === 'light' ? '浅色' : '深色', exact: true })
-        await expect(themeButton).toHaveAttribute('aria-pressed', 'true')
+        const selectedThemeButton = settingsContent.getByRole('button', { name: theme === 'light' ? '浅色' : '深色', exact: true })
+        const oppositeTheme: Theme = theme === 'light' ? 'dark' : 'light'
+        const oppositeThemeButton = settingsContent.getByRole('button', { name: oppositeTheme === 'light' ? '浅色' : '深色', exact: true })
+        await expect(selectedThemeButton).toHaveAttribute('aria-pressed', 'true')
+        await oppositeThemeButton.click()
+        await expectTheme(page, oppositeTheme)
+        await expect(selectedThemeButton).toHaveAttribute('aria-pressed', 'false')
+        await expect(oppositeThemeButton).toHaveAttribute('aria-pressed', 'true')
+        expect(await page.evaluate(() => localStorage.getItem('theme'))).toBe(oppositeTheme)
 
         await page.getByRole('link', { name: '今日工作台' }).click()
         await expect(page).toHaveURL(/\/$/)
-        await expectTheme(page, theme)
+        await expectTheme(page, oppositeTheme)
 
         await page.getByRole('link', { name: '设置' }).click()
         await expect(page).toHaveURL(/\/settings$/)
         await page.getByRole('button', { name: /^外观/ }).click()
-        await expect(settingsContent.getByRole('button', { name: theme === 'light' ? '浅色' : '深色', exact: true })).toHaveAttribute('aria-pressed', 'true')
-        expect(await page.evaluate(() => localStorage.getItem('theme'))).toBe(theme)
+        await expect(settingsContent.getByRole('button', { name: oppositeTheme === 'light' ? '浅色' : '深色', exact: true })).toHaveAttribute('aria-pressed', 'true')
+        expect(await page.evaluate(() => localStorage.getItem('theme'))).toBe(oppositeTheme)
       })
 
+      await page.waitForLoadState('networkidle')
+      for (const error of consoleErrors) {
+        const isAllowlistedResourceFailure = error.text.includes('Failed to load resource')
+          && networkAllowlistedUrls.has(error.url)
+        if (!isAllowlistedResourceFailure) runtimeErrors.push(`console: ${error.text}`)
+      }
+      for (const description of networkAllowlistReasons) {
+        test.info().annotations.push({ type: 'network-allowlist', description })
+      }
       expect(runtimeErrors, runtimeErrors.join('\n')).toEqual([])
     })
   }
