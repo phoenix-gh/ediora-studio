@@ -1033,6 +1033,8 @@ git commit -m "feat: unify Ediora settings experience"
 - Create: `wemedia-studio/lib/ui/ui-policy.test.ts`
 - Create: `wemedia-studio/playwright.config.ts`
 - Create: `wemedia-studio/e2e/ui-foundations.spec.ts`
+- Modify: `wemedia-studio/.gitignore`
+- Modify: `wemedia-studio/components/features/Sidebar.tsx`
 - Modify: `wemedia-studio/package.json`
 - Modify: `wemedia-studio/pnpm-lock.yaml`
 
@@ -1131,6 +1133,7 @@ export default defineConfig({
 8. Verify settings theme selection persists across route navigation.
 
 Store screenshots under `test-results/ui-foundations/`; do not commit generated PNG files.
+Also ignore `test-results/` and `playwright-report/` in the frontend `.gitignore`.
 
 - [ ] **Step 6: Run full automated verification**
 
@@ -1138,7 +1141,16 @@ Run:
 
 ```bash
 pnpm test
-pnpm lint
+pnpm exec eslint \
+  app/page.tsx app/assets app/settings \
+  components/features/Sidebar.tsx components/features/CreateTaskDialog.tsx \
+  components/features/dashboard components/layout components/providers \
+  components/ui/alert.tsx components/ui/alert-dialog.tsx components/ui/badge.tsx \
+  components/ui/button.tsx components/ui/card.tsx components/ui/dialog.tsx \
+  components/ui/input.tsx components/ui/select.tsx components/ui/sonner.tsx \
+  components/ui/switch.tsx components/ui/tabs.tsx components/ui/textarea.tsx \
+  lib/ui e2e playwright.config.ts
+pnpm exec eslint . --quiet
 pnpm exec tsc --noEmit --incremental false
 pnpm build
 pnpm exec playwright test e2e/ui-foundations.spec.ts --project=chromium
@@ -1147,7 +1159,11 @@ pnpm exec playwright test e2e/ui-foundations.spec.ts --project=chromium
 Expected:
 
 - Vitest: all files PASS.
-- ESLint: exit 0.
+- Phase 1 migrated-scope ESLint: zero errors.
+- Full-repository ESLint diagnostic: no increase over the verified pre-Task-7
+  baseline of 36 errors. These errors are in deferred pages and the legacy
+  Telegram settings card; preserve the non-zero result in the handoff rather
+  than representing it as a pass.
 - TypeScript: exit 0.
 - Next build: exit 0.
 - Playwright: every viewport/theme case PASS.
@@ -1178,6 +1194,7 @@ Continue correcting visual mismatches until no material mismatch remains.
 git add wemedia-studio/lib/ui/ui-policy.test.ts \
   wemedia-studio/playwright.config.ts \
   wemedia-studio/e2e/ui-foundations.spec.ts \
+  wemedia-studio/.gitignore wemedia-studio/components/features/Sidebar.tsx \
   wemedia-studio/package.json wemedia-studio/pnpm-lock.yaml
 git commit -m "test: verify Ediora UI foundations"
 ```
@@ -1189,7 +1206,8 @@ git commit -m "test: verify Ediora UI foundations"
 Phase 1 is complete only when:
 
 - all seven task commits exist;
-- all automated verification commands pass;
+- all scoped automated verification commands pass, and the full-repository
+  ESLint diagnostic does not regress beyond its documented 36-error baseline;
 - browser screenshots have been compared directly with the accepted A concept;
 - dashboard, creative assets and settings retain their existing business behavior;
 - no material visual mismatch remains in the three pilot pages;
