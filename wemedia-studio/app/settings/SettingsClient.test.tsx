@@ -1,0 +1,52 @@
+// @vitest-environment jsdom
+
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+
+import { SettingsClient } from './SettingsClient'
+
+vi.mock('./sections/AISection', () => ({ AISection: () => <div>AI settings</div> }))
+vi.mock('./sections/ArxivSection', () => ({ ArxivSection: () => <div>arXiv settings</div> }))
+vi.mock('./sections/BlogSection', () => ({ BlogSection: () => <div>Blog settings</div> }))
+vi.mock('./sections/CollectSection', () => ({ CollectSection: () => <div>Collect settings</div> }))
+vi.mock('./sections/GitHubSection', () => ({ GitHubSection: () => <div>GitHub settings</div> }))
+vi.mock('./sections/HeyGenSection', () => ({ HeyGenSection: () => <div>HeyGen settings</div> }))
+vi.mock('./sections/LogsSection', () => ({ LogsSection: () => <div>Logs settings</div> }))
+vi.mock('./sections/PublishAccountsSection', () => ({ PublishAccountsSection: () => <div>Publish settings</div> }))
+vi.mock('./sections/TranscriptionSection', () => ({ TranscriptionSection: () => <div>Transcription settings</div> }))
+vi.mock('./sections/WebFetchSection', () => ({ WebFetchSection: () => <div>Web fetch settings</div> }))
+vi.mock('./sections/WebSearchSection', () => ({ WebSearchSection: () => <div>Web search settings</div> }))
+vi.mock('./sections/XSection', () => ({ XSection: () => <div>X settings</div> }))
+vi.mock('./sections/YouTubeSection', () => ({ YouTubeSection: () => <div>YouTube settings</div> }))
+
+describe('SettingsClient', () => {
+  afterEach(cleanup)
+
+  it('exposes a named settings navigation with the selected page', () => {
+    render(<SettingsClient initialSettings={null} />)
+
+    const navigation = screen.getByRole('navigation', { name: '设置导航' })
+    expect(navigation).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /AI 大模型/ })).toHaveAttribute('aria-current', 'page')
+    expect(screen.getByRole('button', { name: /外观/ })).not.toHaveAttribute('aria-current')
+  })
+
+  it('opens the appearance section and renders it in the bounded content region', () => {
+    render(<SettingsClient initialSettings={null} />)
+
+    fireEvent.click(screen.getByRole('button', { name: /外观/ }))
+
+    expect(screen.getByRole('heading', { level: 1, name: '外观与主题' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /外观/ })).toHaveAttribute('aria-current', 'page')
+    expect(screen.getByTestId('settings-content')).toHaveClass('max-w-[760px]')
+  })
+
+  it('lets the logs section use the full available width', () => {
+    render(<SettingsClient initialSettings={null} />)
+
+    fireEvent.click(screen.getByRole('button', { name: /系统日志/ }))
+
+    expect(screen.getByTestId('settings-content')).toHaveClass('w-full')
+    expect(screen.getByTestId('settings-content')).not.toHaveClass('max-w-[760px]')
+  })
+})

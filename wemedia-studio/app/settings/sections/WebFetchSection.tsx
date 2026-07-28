@@ -4,9 +4,12 @@ import { useState } from 'react'
 import { ArrowDown, ArrowUp, Loader2, Save } from 'lucide-react'
 import { toast } from 'sonner'
 
+import { FormSection } from '@/components/layout/FormSection'
 import { Button } from '@/components/ui/button'
+import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Switch } from '@/components/ui/switch'
 import { type AppSettings, type WebFetchProviderConfig, updateSettings } from '@/lib/api/settings'
 
 const DEFAULT_PROVIDERS: WebFetchProviderConfig[] = [
@@ -56,18 +59,94 @@ export function WebFetchSection({ settings, onSaved }: { settings: AppSettings |
     }
   }
 
-  return <div className="space-y-4">
-    <p className="text-xs leading-5 text-zinc-500">`fetch_url` 会依次尝试已启用的抓取器，成功后停止。抓取结果最多返回 12,000 个字符。</p>
-    {providers.map((provider, index) => <div key={provider.key} className="rounded-lg border border-zinc-200 p-4 dark:border-zinc-800">
-      <div className="flex items-start justify-between gap-4">
-        <div><h2 className="text-sm font-medium">{DETAILS[provider.key].title}</h2><p className="mt-1 text-xs text-zinc-500">{DETAILS[provider.key].description}</p></div>
-        <div className="flex items-center gap-1"><Button type="button" size="icon-xs" variant="ghost" disabled={index === 0} onClick={() => move(index, -1)} title="提高优先级"><ArrowUp /></Button><Button type="button" size="icon-xs" variant="ghost" disabled={index === providers.length - 1} onClick={() => move(index, 1)} title="降低优先级"><ArrowDown /></Button><label className="ml-2 flex items-center gap-2 text-sm"><input type="checkbox" checked={provider.enabled} onChange={event => updateProvider(index, { enabled: event.target.checked })} />启用</label></div>
-      </div>
-      <div className="mt-4 grid gap-4 sm:grid-cols-[1fr_9rem]">
-        {provider.key === 'jina_reader' ? <div className="space-y-1.5"><Label className="text-xs">Jina Reader Base URL</Label><Input value={provider.base_url} onChange={event => updateProvider(index, { base_url: event.target.value })} placeholder="https://r.jina.ai" className="h-9 font-mono text-sm" /></div> : <div className="text-xs text-zinc-500">{provider.key === 'camofox' ? '浏览器地址和凭据复用 X / Twitter 设置。' : '无需额外连接配置。'}</div>}
-        <div className="space-y-1.5"><Label className="text-xs">超时（秒）</Label><Input type="number" min={1} max={30} value={provider.timeout_seconds} onChange={event => updateProvider(index, { timeout_seconds: Math.max(1, Math.min(30, Number(event.target.value) || 1)) })} className="h-9" /></div>
-      </div>
-    </div>)}
-    <Button onClick={handleSave} disabled={saving} size="sm" className="gap-1.5">{saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}保存网页抓取设置</Button>
-  </div>
+  return (
+    <div className="flex flex-col gap-4">
+      <p className="text-sm text-muted-foreground">
+        `fetch_url` 会依次尝试已启用的抓取器，成功后停止。抓取结果最多返回 12,000 个字符。
+      </p>
+      {providers.map((provider, index) => {
+        const title = DETAILS[provider.key].title
+        const enabledId = `web-fetch-${provider.key}-enabled`
+        const baseUrlId = `web-fetch-${provider.key}-base-url`
+        const timeoutId = `web-fetch-${provider.key}-timeout`
+        return (
+          <FormSection
+            key={provider.key}
+            title={title}
+            description={DETAILS[provider.key].description}
+            actions={(
+              <>
+                <Button
+                  type="button"
+                  size="icon-xs"
+                  variant="ghost"
+                  disabled={index === 0}
+                  onClick={() => move(index, -1)}
+                  aria-label={`提高 ${title} 优先级`}
+                >
+                  <ArrowUp />
+                </Button>
+                <Button
+                  type="button"
+                  size="icon-xs"
+                  variant="ghost"
+                  disabled={index === providers.length - 1}
+                  onClick={() => move(index, 1)}
+                  aria-label={`降低 ${title} 优先级`}
+                >
+                  <ArrowDown />
+                </Button>
+                <Label htmlFor={enabledId}>启用 {title}</Label>
+                <Switch
+                  id={enabledId}
+                  checked={provider.enabled}
+                  onCheckedChange={checked => updateProvider(index, { enabled: checked })}
+                />
+              </>
+            )}
+          >
+            <FieldGroup>
+              <div className="grid gap-4 sm:grid-cols-[1fr_9rem]">
+                {provider.key === 'jina_reader' ? (
+                  <Field>
+                    <FieldLabel htmlFor={baseUrlId}>Jina Reader Base URL</FieldLabel>
+                    <Input
+                      id={baseUrlId}
+                      value={provider.base_url}
+                      onChange={event => updateProvider(index, { base_url: event.target.value })}
+                      placeholder="https://r.jina.ai"
+                      className="font-mono"
+                    />
+                  </Field>
+                ) : (
+                  <FieldDescription>
+                    {provider.key === 'camofox'
+                      ? '浏览器地址和凭据复用 X / Twitter 设置。'
+                      : '无需额外连接配置。'}
+                  </FieldDescription>
+                )}
+                <Field>
+                  <FieldLabel htmlFor={timeoutId}>超时（秒）</FieldLabel>
+                  <Input
+                    id={timeoutId}
+                    type="number"
+                    min={1}
+                    max={30}
+                    value={provider.timeout_seconds}
+                    onChange={event => updateProvider(index, {
+                      timeout_seconds: Math.max(1, Math.min(30, Number(event.target.value) || 1)),
+                    })}
+                  />
+                </Field>
+              </div>
+            </FieldGroup>
+          </FormSection>
+        )
+      })}
+      <Button onClick={handleSave} disabled={saving}>
+        {saving ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <Save data-icon="inline-start" />}
+        保存网页抓取设置
+      </Button>
+    </div>
+  )
 }

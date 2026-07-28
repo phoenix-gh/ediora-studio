@@ -3,9 +3,10 @@
 import { useState } from 'react'
 import { Loader2, Save } from 'lucide-react'
 import { toast } from 'sonner'
+import { FormSection } from '@/components/layout/FormSection'
 import { Button } from '@/components/ui/button'
+import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { AppSettings, updateSettings } from '@/lib/api/settings'
 
 export function CollectSection({ settings, onSaved }: { settings: AppSettings | null; onSaved: (s: AppSettings) => void }) {
@@ -28,24 +29,27 @@ export function CollectSection({ settings, onSaved }: { settings: AppSettings | 
   }
 
   return (
-    <div className="space-y-5">
-      <div className="space-y-1.5">
-        <Label className="text-xs">RSSHub 地址</Label>
+    <FormSection
+      title="RSSHub"
+      description="将 X / 知乎 / 微博等平台转换为 RSS 源，可使用本地部署或公共实例地址。"
+    >
+      <FieldGroup>
+        <Field>
+          <FieldLabel htmlFor="rsshub-base">RSSHub 地址</FieldLabel>
         <Input
+          id="rsshub-base"
           value={rsshub}
           onChange={e => setRsshub(e.target.value)}
           placeholder="http://127.0.0.1:1200"
-          className="h-9 text-sm font-mono"
+          className="font-mono"
         />
-        <p className="text-[11px] text-zinc-400">
-          将 X / 知乎 / 微博等平台转换为 RSS 源，可使用本地部署或公共实例地址
-        </p>
-      </div>
-
-      <Button onClick={handleSave} disabled={saving} size="sm" className="gap-1.5">
-        {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
-        保存
-      </Button>
-    </div>
+          <FieldDescription>地址会按原样保存，便于使用容器内或本机地址。</FieldDescription>
+        </Field>
+        <Button onClick={handleSave} disabled={saving}>
+          {saving ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <Save data-icon="inline-start" />}
+          保存
+        </Button>
+      </FieldGroup>
+    </FormSection>
   )
 }

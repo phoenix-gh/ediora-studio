@@ -32,6 +32,7 @@ describe('YouTubeSection', () => {
     const onSaved = vi.fn()
     render(<YouTubeSection settings={makeSettings()} onSaved={onSaved} />)
 
+    expect(screen.getByRole('heading', { level: 2, name: 'YouTube Cookie' })).toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('cookies.txt'), { target: { value: NETSCAPE_COOKIES } })
     fireEvent.click(screen.getByRole('button', { name: '保存 Cookie' }))
 

@@ -3,9 +3,10 @@
 import { useState } from 'react'
 import { Loader2, Eye, EyeOff, CheckCircle, Save } from 'lucide-react'
 import { toast } from 'sonner'
+import { FormSection } from '@/components/layout/FormSection'
 import { Button } from '@/components/ui/button'
+import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { AppSettings, updateSettings } from '@/lib/api/settings'
 
 export function BlogSection({ settings, onSaved }: { settings: AppSettings | null; onSaved: (s: AppSettings) => void }) {
@@ -32,25 +33,31 @@ export function BlogSection({ settings, onSaved }: { settings: AppSettings | nul
   }
 
   return (
-    <div className="space-y-5">
-      <div className="space-y-1.5">
-        <Label className="text-xs">接口地址</Label>
+    <FormSection
+      title="MK Flow 投稿接口"
+      description="配置博客根地址和只写的 Agent API Token。"
+    >
+      <FieldGroup>
+        <Field>
+          <FieldLabel htmlFor="blog-api-base">接口地址</FieldLabel>
         <Input
+          id="blog-api-base"
           value={base}
           onChange={e => setBase(e.target.value)}
           placeholder="https://mkflow.dev"
-          className="h-9 text-sm font-mono"
+            className="font-mono"
           autoComplete="off"
         />
-        <p className="text-[11px] text-zinc-400">
+          <FieldDescription>
           博客站点根地址，投稿走 {base.trim().replace(/\/$/, '') || 'https://mkflow.dev'}/api/agent/posts
-        </p>
-      </div>
+          </FieldDescription>
+        </Field>
 
-      <div className="space-y-1.5">
-        <Label className="text-xs">Agent API Token</Label>
-        <div className="relative">
+        <Field>
+          <FieldLabel htmlFor="blog-api-token">Agent API Token</FieldLabel>
+          <div className="flex gap-2">
           <Input
+              id="blog-api-token"
             type={showToken ? 'text' : 'password'}
             value={token}
             onChange={e => setToken(e.target.value)}
@@ -59,33 +66,40 @@ export function BlogSection({ settings, onSaved }: { settings: AppSettings | nul
                 ? `已配置 (${settings.blog_api_token_preview}) — 留空不修改`
                 : '博客服务器 .env 里的 AGENT_API_TOKEN'
             }
-            className="h-9 text-sm pr-9 font-mono"
+              className="font-mono"
             autoComplete="off"
           />
-          <button type="button" onClick={() => setShowToken(v => !v)}
-            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-600">
-            {showToken ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-          </button>
-        </div>
+            <Button
+              type="button"
+              size="icon"
+              variant="outline"
+              aria-label={showToken ? '隐藏 Agent API Token' : '显示 Agent API Token'}
+              onClick={() => setShowToken(value => !value)}
+            >
+              {showToken ? <EyeOff /> : <Eye />}
+            </Button>
+          </div>
         {settings?.blog_api_token_set && !token ? (
-          <p className="text-[11px] text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
-            <CheckCircle className="w-3 h-3" />已配置 ({settings.blog_api_token_preview})
-          </p>
+            <FieldDescription className="flex items-center gap-1 text-foreground">
+              <CheckCircle />
+              已配置 ({settings.blog_api_token_preview})
+            </FieldDescription>
         ) : (
-          <p className="text-[11px] text-zinc-400">
+            <FieldDescription>
             也可以在后端环境变量 MKFLOW_AGENT_API_TOKEN 里配置；此处填写后优先生效
-          </p>
+            </FieldDescription>
         )}
-      </div>
+        </Field>
 
-      <p className="text-[11px] text-zinc-400">
+        <FieldDescription>
         投稿后文章进入博客后台 review 状态，人工审核确认后才会发布。
-      </p>
+        </FieldDescription>
 
-      <Button onClick={handleSave} disabled={saving} size="sm" className="gap-1.5">
-        {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
-        保存
-      </Button>
-    </div>
+        <Button onClick={handleSave} disabled={saving}>
+          {saving ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <Save data-icon="inline-start" />}
+          保存
+        </Button>
+      </FieldGroup>
+    </FormSection>
   )
 }

@@ -3,9 +3,10 @@
 import { useState } from 'react'
 import { Loader2, Save } from 'lucide-react'
 import { toast } from 'sonner'
+import { FormSection } from '@/components/layout/FormSection'
 import { Button } from '@/components/ui/button'
+import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { AppSettings, updateSettings } from '@/lib/api/settings'
 
 export function ArxivSection({ settings, onSaved }: { settings: AppSettings | null; onSaved: (s: AppSettings) => void }) {
@@ -30,38 +31,45 @@ export function ArxivSection({ settings, onSaved }: { settings: AppSettings | nu
   }
 
   return (
-    <div className="space-y-5">
-      <div className="space-y-1.5">
-        <Label className="text-xs">采集分类</Label>
+    <FormSection
+      title="arXiv 数据源"
+      description="按分类读取 arXiv RSS，适合定时采集论文更新。"
+    >
+      <FieldGroup>
+        <Field>
+          <FieldLabel htmlFor="arxiv-categories">采集分类</FieldLabel>
         <Input
+          id="arxiv-categories"
           value={categories}
           onChange={e => setCategories(e.target.value)}
           placeholder="cs.AI,cs.CL,cs.CV,cs.LG"
-          className="h-9 text-sm font-mono"
+          className="font-mono"
         />
-        <p className="text-[11px] text-zinc-400">
+          <FieldDescription>
           多个分类用英文逗号分隔，常用：cs.AI · cs.CL · cs.CV · cs.LG · cs.RO · stat.ML
-        </p>
-      </div>
+          </FieldDescription>
+        </Field>
 
-      <div className="space-y-1.5">
-        <Label className="text-xs">采集间隔</Label>
+        <Field>
+          <FieldLabel htmlFor="arxiv-interval">采集间隔</FieldLabel>
         <div className="flex items-center gap-2">
           <Input
+            id="arxiv-interval"
             type="number" min={1} max={168}
             value={interval}
             onChange={e => setInterval(Math.max(1, Number(e.target.value)))}
-            className="h-9 text-sm w-20"
+            className="w-24"
           />
-          <span className="text-sm text-zinc-500">小时</span>
+            <span className="text-sm text-muted-foreground">小时</span>
         </div>
-        <p className="text-[11px] text-zinc-400">arXiv RSS 每天更新一次，建议设置 6-24 小时</p>
-      </div>
+          <FieldDescription>arXiv RSS 每天更新一次，建议设置 6-24 小时。</FieldDescription>
+        </Field>
 
-      <Button onClick={handleSave} disabled={saving} size="sm" className="gap-1.5">
-        {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
-        保存
-      </Button>
-    </div>
+        <Button onClick={handleSave} disabled={saving}>
+          {saving ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <Save data-icon="inline-start" />}
+          保存
+        </Button>
+      </FieldGroup>
+    </FormSection>
   )
 }

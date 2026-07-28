@@ -4,10 +4,11 @@ import { useState, useRef } from 'react'
 import { Loader2, Eye, EyeOff, RefreshCw, FlaskConical, CheckCircle, XCircle, Save } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
+import { FormSection } from '@/components/layout/FormSection'
 import { Button } from '@/components/ui/button'
+import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { AppSettings, ProviderInfo, updateSettings, fetchProviderModels, testLLM } from '@/lib/api/settings'
 
 type TestState = 'idle' | 'testing' | 'ok' | 'fail'
@@ -117,132 +118,198 @@ export function AISection({ settings, onSaved }: { settings: AppSettings | null;
   const keyPlaceholder = settings?.llm_api_key_set
     ? `已配置 (${settings.llm_api_key_preview}) — 留空不修改`
     : '输入 API Key'
+
   return (
-    <div className="space-y-5">
-      {/* Provider */}
-      <div className="space-y-1.5">
-        <Label className="text-xs">供应商</Label>
-        <Select value={provider} onValueChange={v => v && handleProviderChange(v)}>
-          <SelectTrigger className="h-9 text-sm">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {providers.map(p => (
-              <SelectItem key={p.key} value={p.key}>{p.label}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
+    <div className="flex flex-col gap-4">
+      <FormSection
+        title="聊天模型"
+        description="选择供应商并配置兼容接口。连通性测试始终使用已保存的配置。"
+      >
+        <FieldGroup>
+          <Field>
+            <FieldLabel htmlFor="llm-provider">供应商</FieldLabel>
+            <Select value={provider} onValueChange={value => value && handleProviderChange(value)}>
+              <SelectTrigger id="llm-provider" className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  {providers.map(item => (
+                    <SelectItem key={item.key} value={item.key}>{item.label}</SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          </Field>
 
-      {/* API Key */}
-      <div className="space-y-1.5">
-        <Label className="text-xs">API Key</Label>
-        <div className="relative">
-          <Input
-            type={showKey ? 'text' : 'password'}
-            value={apiKey}
-            onChange={e => setApiKey(e.target.value)}
-            placeholder={keyPlaceholder}
-            className="h-9 text-sm pr-9 font-mono"
-            autoComplete="off"
-          />
-          <button type="button" onClick={() => setShowKey(v => !v)}
-            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-600">
-            {showKey ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-          </button>
-        </div>
-        {settings?.llm_api_key_set && !apiKey && (
-          <p className="text-[11px] text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
-            <CheckCircle className="w-3 h-3" />已配置 ({settings.llm_api_key_preview})
-          </p>
-        )}
-      </div>
-
-      {/* Endpoint */}
-      <div className="space-y-1.5">
-        <Label className="text-xs">API Endpoint</Label>
-        <Input
-          value={baseUrl}
-          onChange={e => setBaseUrl(e.target.value)}
-          placeholder="https://..."
-          className="h-9 text-sm font-mono"
-        />
-      </div>
-
-      {/* Model combobox */}
-      <div className="space-y-1.5">
-        <div className="flex items-center justify-between">
-          <Label className="text-xs">模型</Label>
-          <button onClick={handleFetchModels} disabled={fetchingModels}
-            className="flex items-center gap-1 text-[11px] text-indigo-500 hover:text-indigo-600 disabled:opacity-50 transition-colors">
-            {fetchingModels ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
-            获取可用模型
-          </button>
-        </div>
-        <div className="relative">
-          <Input
-            ref={modelInputRef}
-            value={model}
-            onChange={e => { setModel(e.target.value); setShowModelList(true) }}
-            onFocus={() => modelList.length && setShowModelList(true)}
-            onBlur={() => setTimeout(() => setShowModelList(false), 150)}
-            placeholder={currentPreset?.default_model ? `默认: ${currentPreset.default_model}` : '输入或选择模型名称'}
-            className="h-9 text-sm font-mono"
-          />
-          {showModelList && filteredModels.length > 0 && (
-            <div className="absolute z-20 top-full mt-1 w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg shadow-lg max-h-52 overflow-y-auto">
-              {filteredModels.map(m => (
-                <button key={m} onMouseDown={() => { setModel(m); setShowModelList(false) }}
-                  className={cn(
-                    'w-full text-left px-3 py-2 text-xs font-mono hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors',
-                    model === m && 'bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400'
-                  )}>
-                  {m}
-                </button>
-              ))}
+          <Field>
+            <FieldLabel htmlFor="llm-api-key">API Key</FieldLabel>
+            <div className="flex gap-2">
+              <Input
+                id="llm-api-key"
+                type={showKey ? 'text' : 'password'}
+                value={apiKey}
+                onChange={event => setApiKey(event.target.value)}
+                placeholder={keyPlaceholder}
+                className="font-mono"
+                autoComplete="off"
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                aria-label={showKey ? '隐藏 API Key' : '显示 API Key'}
+                onClick={() => setShowKey(value => !value)}
+              >
+                {showKey ? <EyeOff /> : <Eye />}
+              </Button>
             </div>
-          )}
-        </div>
-        <p className="text-[11px] text-zinc-400">留空使用供应商默认模型</p>
-      </div>
+            {settings?.llm_api_key_set && !apiKey ? (
+              <FieldDescription className="flex items-center gap-1 text-foreground">
+                <CheckCircle />
+                已配置 ({settings.llm_api_key_preview})
+              </FieldDescription>
+            ) : null}
+          </Field>
 
-      <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 p-3 space-y-3">
-        <div>
-          <Label className="text-xs">图像生成 Endpoint</Label>
-          <Input value={imageBaseUrl} onChange={e => setImageBaseUrl(e.target.value)} placeholder="https://api.openai.com/v1" className="h-9 text-sm font-mono mt-1.5" />
-        </div>
-        <div>
-          <Label className="text-xs">图像生成 API Key</Label>
-          <Input type={showKey ? 'text' : 'password'} value={imageApiKey} onChange={e => setImageApiKey(e.target.value)} placeholder={settings?.image_api_key_set ? `已配置 (${settings.image_api_key_preview}) — 留空不修改` : '输入图像模型 API Key'} className="h-9 text-sm font-mono mt-1.5" autoComplete="off" />
-        </div>
-        <div>
-          <Label className="text-xs">图像模型</Label>
-          <Input value={imageModel} onChange={e => setImageModel(e.target.value)} placeholder="gpt-image-1" className="h-9 text-sm font-mono mt-1.5" />
-        </div>
-        <p className="text-[11px] text-zinc-400">封面和插图使用此配置，不会复用聊天模型接口。需使用支持 OpenAI Images API 的服务。</p>
-      </div>
+          <Field>
+            <FieldLabel htmlFor="llm-base-url">API Endpoint</FieldLabel>
+            <Input
+              id="llm-base-url"
+              value={baseUrl}
+              onChange={event => setBaseUrl(event.target.value)}
+              placeholder="https://..."
+              className="font-mono"
+            />
+          </Field>
 
-      {/* Actions */}
-      <div className="flex items-center gap-3 pt-1">
-        <Button onClick={handleSave} disabled={saving} size="sm" className="gap-1.5">
-          {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
-          保存
-        </Button>
-        <Button variant="outline" size="sm" onClick={handleTest}
-          disabled={testState === 'testing' || !settings?.llm_api_key_set} className="gap-1.5">
-          {testState === 'testing' && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-          {testState === 'ok'      && <CheckCircle className="w-3.5 h-3.5 text-emerald-500" />}
-          {testState === 'fail'    && <XCircle className="w-3.5 h-3.5 text-red-500" />}
-          {testState === 'idle'    && <FlaskConical className="w-3.5 h-3.5" />}
-          连通性测试
-        </Button>
-        {testMsg && (
-          <span className={cn('text-xs truncate max-w-xs',
-            testState === 'ok' ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500')}>
-            {testState === 'ok' ? `✓ ${testMsg}` : testMsg}
-          </span>
-        )}
-      </div>
+          <Field>
+            <div className="flex items-center justify-between gap-3">
+              <FieldLabel htmlFor="llm-model">模型</FieldLabel>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={handleFetchModels}
+                disabled={fetchingModels}
+              >
+                {fetchingModels
+                  ? <Loader2 data-icon="inline-start" className="animate-spin" />
+                  : <RefreshCw data-icon="inline-start" />}
+                获取可用模型
+              </Button>
+            </div>
+            <div className="relative">
+              <Input
+                id="llm-model"
+                ref={modelInputRef}
+                value={model}
+                onChange={event => {
+                  setModel(event.target.value)
+                  setShowModelList(true)
+                }}
+                onFocus={() => modelList.length && setShowModelList(true)}
+                onBlur={() => setTimeout(() => setShowModelList(false), 150)}
+                placeholder={currentPreset?.default_model
+                  ? `默认: ${currentPreset.default_model}`
+                  : '输入或选择模型名称'}
+                className="font-mono"
+              />
+              {showModelList && filteredModels.length > 0 ? (
+                <div className="absolute top-full z-20 mt-1 max-h-52 w-full overflow-y-auto rounded-lg border border-border bg-surface p-1 shadow-lg">
+                  {filteredModels.map(item => (
+                    <button
+                      key={item}
+                      type="button"
+                      onMouseDown={() => {
+                        setModel(item)
+                        setShowModelList(false)
+                      }}
+                      className={cn(
+                        'w-full rounded-md px-3 py-2 text-left text-sm font-mono transition-colors hover:bg-surface-muted',
+                        model === item && 'bg-surface-muted text-foreground'
+                      )}
+                    >
+                      {item}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+            <FieldDescription>留空使用供应商默认模型</FieldDescription>
+          </Field>
+
+          <div className="flex flex-wrap items-center gap-3">
+            <Button onClick={handleSave} disabled={saving}>
+              {saving
+                ? <Loader2 data-icon="inline-start" className="animate-spin" />
+                : <Save data-icon="inline-start" />}
+              保存
+            </Button>
+            <Button
+              variant="outline"
+              onClick={handleTest}
+              disabled={testState === 'testing' || !settings?.llm_api_key_set}
+            >
+              {testState === 'testing' ? <Loader2 data-icon="inline-start" className="animate-spin" /> : null}
+              {testState === 'ok' ? <CheckCircle data-icon="inline-start" /> : null}
+              {testState === 'fail' ? <XCircle data-icon="inline-start" /> : null}
+              {testState === 'idle' ? <FlaskConical data-icon="inline-start" /> : null}
+              连通性测试
+            </Button>
+            {testMsg ? (
+              <span className={cn(
+                'max-w-xs truncate text-sm',
+                testState === 'fail' && 'text-destructive'
+              )}>
+                {testState === 'ok' ? `✓ ${testMsg}` : testMsg}
+              </span>
+            ) : null}
+          </div>
+        </FieldGroup>
+      </FormSection>
+
+      <FormSection
+        title="图像生成"
+        description="封面和插图使用此独立配置，不会复用聊天模型接口。需使用支持 OpenAI Images API 的服务。"
+      >
+        <FieldGroup>
+          <Field>
+            <FieldLabel htmlFor="image-base-url">图像生成 Endpoint</FieldLabel>
+            <Input
+              id="image-base-url"
+              value={imageBaseUrl}
+              onChange={event => setImageBaseUrl(event.target.value)}
+              placeholder="https://api.openai.com/v1"
+              className="font-mono"
+            />
+          </Field>
+          <Field>
+            <FieldLabel htmlFor="image-api-key">图像生成 API Key</FieldLabel>
+            <Input
+              id="image-api-key"
+              type={showKey ? 'text' : 'password'}
+              value={imageApiKey}
+              onChange={event => setImageApiKey(event.target.value)}
+              placeholder={settings?.image_api_key_set
+                ? `已配置 (${settings.image_api_key_preview}) — 留空不修改`
+                : '输入图像模型 API Key'}
+              className="font-mono"
+              autoComplete="off"
+            />
+          </Field>
+          <Field>
+            <FieldLabel htmlFor="image-model">图像模型</FieldLabel>
+            <Input
+              id="image-model"
+              value={imageModel}
+              onChange={event => setImageModel(event.target.value)}
+              placeholder="gpt-image-1"
+              className="font-mono"
+            />
+          </Field>
+        </FieldGroup>
+      </FormSection>
     </div>
   )
 }

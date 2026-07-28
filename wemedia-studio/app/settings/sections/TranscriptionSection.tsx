@@ -4,8 +4,8 @@ import { useState } from 'react'
 import { FlaskConical, Loader2, Save, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 
+import { FormSection } from '@/components/layout/FormSection'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import {
@@ -64,56 +64,54 @@ export function TranscriptionSection({
   }
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>语音转写</CardTitle>
-        <CardDescription>
-          视频没有人工或自动字幕时，才调用此 OpenAI 兼容 Whisper 接口。它与聊天模型配置相互独立。
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <FieldGroup>
-          <Field>
-            <FieldLabel htmlFor="transcription-base-url">Base URL</FieldLabel>
-            <Input id="transcription-base-url" value={baseUrl} onChange={event => setBaseUrl(event.target.value)} />
-          </Field>
-          <Field>
-            <FieldLabel htmlFor="transcription-model">模型</FieldLabel>
-            <Input id="transcription-model" value={model} onChange={event => setModel(event.target.value)} placeholder="whisper-1" />
-          </Field>
-          <Field>
-            <FieldLabel htmlFor="transcription-api-key">API Key</FieldLabel>
-            <Input
-              id="transcription-api-key"
-              type="password"
-              value={apiKey}
-              onChange={event => setApiKey(event.target.value)}
-              placeholder={settings?.transcription_api_key_set
-                ? `已配置 (${settings.transcription_api_key_preview})，留空保持不变`
-                : '输入语音转写 API Key'}
-              autoComplete="off"
-            />
-            <FieldDescription>密钥只保存在服务端，不会写入任务、日志或浏览器响应。</FieldDescription>
-          </Field>
-          <Field>
-            <FieldLabel htmlFor="transcription-max-minutes">单视频最长分钟数</FieldLabel>
-            <Input id="transcription-max-minutes" type="number" min={1} value={maxMinutes} onChange={event => setMaxMinutes(Number(event.target.value))} />
-          </Field>
-          <div className="flex flex-wrap gap-2">
-            <Button onClick={() => void save()} disabled={saving || !baseUrl.trim() || !model.trim()}>
-              {saving ? <Loader2 className="animate-spin" /> : <Save />} 保存
+    <FormSection
+      title="语音转写"
+      description="视频没有人工或自动字幕时，才调用此 OpenAI 兼容 Whisper 接口。它与聊天模型配置相互独立。"
+    >
+      <FieldGroup>
+        <Field>
+          <FieldLabel htmlFor="transcription-base-url">Base URL</FieldLabel>
+          <Input id="transcription-base-url" value={baseUrl} onChange={event => setBaseUrl(event.target.value)} />
+        </Field>
+        <Field>
+          <FieldLabel htmlFor="transcription-model">模型</FieldLabel>
+          <Input id="transcription-model" value={model} onChange={event => setModel(event.target.value)} placeholder="whisper-1" />
+        </Field>
+        <Field>
+          <FieldLabel htmlFor="transcription-api-key">API Key</FieldLabel>
+          <Input
+            id="transcription-api-key"
+            type="password"
+            value={apiKey}
+            onChange={event => setApiKey(event.target.value)}
+            placeholder={settings?.transcription_api_key_set
+              ? `已配置 (${settings.transcription_api_key_preview})，留空保持不变`
+              : '输入语音转写 API Key'}
+            autoComplete="off"
+          />
+          <FieldDescription>密钥只保存在服务端，不会写入任务、日志或浏览器响应。</FieldDescription>
+        </Field>
+        <Field>
+          <FieldLabel htmlFor="transcription-max-minutes">单视频最长分钟数</FieldLabel>
+          <Input id="transcription-max-minutes" type="number" min={1} value={maxMinutes} onChange={event => setMaxMinutes(Number(event.target.value))} />
+        </Field>
+        <div className="flex flex-wrap gap-2">
+          <Button onClick={() => void save()} disabled={saving || !baseUrl.trim() || !model.trim()}>
+            {saving ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <Save data-icon="inline-start" />}
+            保存
+          </Button>
+          <Button variant="outline" onClick={() => void test()} disabled={testing || !settings?.transcription_api_key_set}>
+            {testing ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <FlaskConical data-icon="inline-start" />}
+            测试连接
+          </Button>
+          {settings?.transcription_api_key_set && (
+            <Button variant="ghost" onClick={() => void save(true)} disabled={saving}>
+              <Trash2 data-icon="inline-start" />
+              清除密钥
             </Button>
-            <Button variant="outline" onClick={() => void test()} disabled={testing || !settings?.transcription_api_key_set}>
-              {testing ? <Loader2 className="animate-spin" /> : <FlaskConical />} 测试连接
-            </Button>
-            {settings?.transcription_api_key_set && (
-              <Button variant="ghost" onClick={() => void save(true)} disabled={saving}>
-                <Trash2 /> 清除密钥
-              </Button>
-            )}
-          </div>
-        </FieldGroup>
-      </CardContent>
-    </Card>
+          )}
+        </div>
+      </FieldGroup>
+    </FormSection>
   )
 }

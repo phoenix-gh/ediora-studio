@@ -4,15 +4,9 @@ import { useState } from 'react'
 import { CheckCircle2, Eye, EyeOff, FlaskConical, Loader2, Save } from 'lucide-react'
 import { toast } from 'sonner'
 
+import { FormSection } from '@/components/layout/FormSection'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card'
 import {
   Field,
   FieldDescription,
@@ -83,15 +77,11 @@ export function HeyGenSection({
     : '输入 HeyGen API Key'
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>HeyGen API</CardTitle>
-        <CardDescription>
-          用于单照片数字人、声音克隆和 16:9 口播视频生成。密钥只保存在服务端。
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <FieldGroup>
+    <FormSection
+      title="HeyGen API"
+      description="用于单照片数字人、声音克隆和 16:9 口播视频生成。密钥只保存在服务端。"
+    >
+      <FieldGroup>
           <Field>
             <FieldLabel htmlFor="heygen-api-key">API Key</FieldLabel>
             <div className="flex gap-2">
@@ -150,8 +140,7 @@ export function HeyGenSection({
               测试连接
             </Button>
           </div>
-        </FieldGroup>
-      </CardContent>
-    </Card>
+      </FieldGroup>
+    </FormSection>
   )
 }

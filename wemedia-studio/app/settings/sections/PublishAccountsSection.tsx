@@ -3,10 +3,25 @@
 import { useState, useEffect } from 'react'
 import { Plus, Trash2, Pencil, Check, X, Loader2, Power, PowerOff } from 'lucide-react'
 import { toast } from 'sonner'
+import { FormSection } from '@/components/layout/FormSection'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { cn } from '@/lib/utils'
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Switch } from '@/components/ui/switch'
+import { Textarea } from '@/components/ui/textarea'
 import {
   PublishAccount,
   PublishAccountInput,
@@ -200,6 +215,9 @@ export function PublishAccountsSection() {
   const [editingId, setEditingId] = useState<string | 'new' | null>(null)
   const [form, setForm] = useState<EditState>(EMPTY_EDIT)
   const [saving, setSaving] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState<PublishAccount | null>(null)
+  const [deleteError, setDeleteError] = useState('')
+  const [deleting, setDeleting] = useState(false)
 
   useEffect(() => {
     Promise.all([
@@ -265,14 +283,25 @@ export function PublishAccountsSection() {
     }
   }
 
-  async function handleDelete(id: string) {
-    if (!confirm(`删除账号 ${id}？此操作不可撤销。`)) return
+  function requestDelete(account: PublishAccount) {
+    setDeleteTarget(account)
+    setDeleteError('')
+  }
+
+  async function confirmDelete() {
+    if (!deleteTarget || deleting) return
+    setDeleting(true)
+    setDeleteError('')
     try {
-      await deletePublishAccount(id)
-      setAccounts(prev => prev.filter(a => a.id !== id))
+      await deletePublishAccount(deleteTarget.id)
+      setAccounts(prev => prev.filter(account => account.id !== deleteTarget.id))
+      setDeleteTarget(null)
       toast.success('已删除')
-    } catch {
+    } catch (error) {
+      setDeleteError(error instanceof Error ? error.message : '删除失败')
       toast.error('删除失败')
+    } finally {
+      setDeleting(false)
     }
   }
 
@@ -315,210 +344,221 @@ export function PublishAccountsSection() {
 
   if (loading) {
     return (
-      <div className="flex items-center gap-2 text-sm text-zinc-400">
-        <Loader2 className="w-4 h-4 animate-spin" /> 加载中…
+      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+        <Loader2 className="animate-spin" /> 加载中…
       </div>
     )
   }
 
   return (
-    <div className="space-y-4">
-      <p className="text-xs text-zinc-400 -mt-3">
+    <div className="flex flex-col gap-4">
+      <p className="text-sm text-muted-foreground">
         发布账号即你运营的对外内容账号（公众号/X 等）。账号画像会被创作任务复用。
-        会按任务 metadata 的 <code className="font-mono text-zinc-500">account_id</code> 读取该账号画像，
+        会按任务 metadata 的 <code className="font-mono">account_id</code> 读取该账号画像，
         所有产出都贴合此处填写的定位/调性/受众/禁区。
       </p>
 
-      <div className="rounded-xl border border-zinc-200 dark:border-zinc-800 p-4 space-y-3">
-        <div className="flex items-start gap-3">
-          <div className="flex-1 min-w-0">
-            <div className="text-sm font-medium text-zinc-900 dark:text-zinc-100">公众号发布隧道</div>
-            <p className="text-[11px] text-zinc-400 mt-0.5">
-              发布到公众号草稿箱前先建立 SSH 本地转发，让微信官方 API 请求从跳板机出口访问。
-            </p>
-          </div>
-          <label className="flex items-center gap-2 text-xs text-zinc-600 dark:text-zinc-300 cursor-pointer">
-            <input
-              type="checkbox"
+      <FormSection
+        title="公众号发布隧道"
+        description="发布到公众号草稿箱前先建立 SSH 本地转发，让微信官方 API 请求从跳板机出口访问。"
+        actions={(
+          <div className="flex items-center gap-2">
+            <Label htmlFor="wechat-tunnel-enabled">启用发布隧道</Label>
+            <Switch
+              id="wechat-tunnel-enabled"
               checked={tunnelForm.enabled}
-              onChange={e => setTunnelForm({ ...tunnelForm, enabled: e.target.checked })}
-              className="rounded"
+              onCheckedChange={enabled => setTunnelForm({ ...tunnelForm, enabled })}
             />
-            启用
-          </label>
-        </div>
-
-        <div className="grid grid-cols-3 gap-3">
-          <div className="space-y-1">
-            <Label className="text-xs">SSH Host</Label>
+          </div>
+        )}
+      >
+        <FieldGroup>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <Field>
+              <FieldLabel htmlFor="tunnel-ssh-host">SSH Host</FieldLabel>
             <Input
+                id="tunnel-ssh-host"
               value={tunnelForm.ssh_host}
               onChange={e => setTunnelForm({ ...tunnelForm, ssh_host: e.target.value })}
               placeholder="jump.example.com"
-              className="h-8 text-sm font-mono"
+                className="font-mono"
             />
-          </div>
-          <div className="space-y-1">
-            <Label className="text-xs">SSH Port</Label>
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="tunnel-ssh-port">SSH Port</FieldLabel>
             <Input
+                id="tunnel-ssh-port"
               value={tunnelForm.ssh_port}
               onChange={e => setTunnelForm({ ...tunnelForm, ssh_port: e.target.value })}
               placeholder="22"
-              className="h-8 text-sm font-mono"
+                className="font-mono"
             />
-          </div>
-          <div className="space-y-1">
-            <Label className="text-xs">SSH User</Label>
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="tunnel-ssh-user">SSH User</FieldLabel>
             <Input
+                id="tunnel-ssh-user"
               value={tunnelForm.ssh_user}
               onChange={e => setTunnelForm({ ...tunnelForm, ssh_user: e.target.value })}
               placeholder="ubuntu"
-              className="h-8 text-sm font-mono"
+                className="font-mono"
             />
+            </Field>
           </div>
-        </div>
 
-        <div className="space-y-1">
-          <Label className="text-xs">SSH Key Path</Label>
+          <Field>
+            <FieldLabel htmlFor="tunnel-ssh-key-path">SSH Key Path</FieldLabel>
           <Input
+              id="tunnel-ssh-key-path"
             value={tunnelForm.ssh_key_path}
             onChange={e => setTunnelForm({ ...tunnelForm, ssh_key_path: e.target.value })}
             placeholder="/home/user/.ssh/id_ed25519"
-            className="h-8 text-sm font-mono"
+              className="font-mono"
           />
-        </div>
+          </Field>
 
-        <div className="grid grid-cols-4 gap-3">
-          <div className="space-y-1">
-            <Label className="text-xs">Local Host</Label>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <Field>
+              <FieldLabel htmlFor="tunnel-local-host">Local Host</FieldLabel>
             <Input
+                id="tunnel-local-host"
               value={tunnelForm.local_host}
               onChange={e => setTunnelForm({ ...tunnelForm, local_host: e.target.value })}
-              className="h-8 text-sm font-mono"
+                className="font-mono"
             />
-          </div>
-          <div className="space-y-1">
-            <Label className="text-xs">Local Port</Label>
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="tunnel-local-port">Local Port</FieldLabel>
             <Input
+                id="tunnel-local-port"
               value={tunnelForm.local_port}
               onChange={e => setTunnelForm({ ...tunnelForm, local_port: e.target.value })}
-              className="h-8 text-sm font-mono"
+                className="font-mono"
             />
-          </div>
-          <div className="space-y-1">
-            <Label className="text-xs">Remote Host</Label>
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="tunnel-remote-host">Remote Host</FieldLabel>
             <Input
+                id="tunnel-remote-host"
               value={tunnelForm.remote_host}
               onChange={e => setTunnelForm({ ...tunnelForm, remote_host: e.target.value })}
-              className="h-8 text-sm font-mono"
+                className="font-mono"
             />
-          </div>
-          <div className="space-y-1">
-            <Label className="text-xs">Remote Port</Label>
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="tunnel-remote-port">Remote Port</FieldLabel>
             <Input
+                id="tunnel-remote-port"
               value={tunnelForm.remote_port}
               onChange={e => setTunnelForm({ ...tunnelForm, remote_port: e.target.value })}
-              className="h-8 text-sm font-mono"
+                className="font-mono"
             />
+            </Field>
           </div>
-        </div>
 
-        <div className="space-y-1">
-          <Label className="text-xs">额外 SSH 参数</Label>
+          <Field>
+            <FieldLabel htmlFor="tunnel-extra-args">额外 SSH 参数</FieldLabel>
           <Input
+              id="tunnel-extra-args"
             value={tunnelForm.extra_args}
             onChange={e => setTunnelForm({ ...tunnelForm, extra_args: e.target.value })}
             placeholder="-o ProxyJump=bastion"
-            className="h-8 text-sm font-mono"
+              className="font-mono"
           />
-          <p className="text-[11px] text-zinc-400">
+            <FieldDescription>
             发布时执行 <code className="font-mono">ssh -N -T -L local:remote</code>。请确保后端机器可免密登录跳板机。
-          </p>
-        </div>
+            </FieldDescription>
+          </Field>
 
-        <Button size="sm" variant="outline" className="gap-1.5" onClick={saveTunnel} disabled={savingTunnel}>
-          {savingTunnel ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
-          保存隧道配置
-        </Button>
-      </div>
+          <Button variant="outline" onClick={saveTunnel} disabled={savingTunnel}>
+            {savingTunnel
+              ? <Loader2 data-icon="inline-start" className="animate-spin" />
+              : <Check data-icon="inline-start" />}
+            保存隧道配置
+          </Button>
+        </FieldGroup>
+      </FormSection>
 
-      <div className="space-y-2">
-        {accounts.map(p => (
-          <div key={p.id} className="border border-zinc-200 dark:border-zinc-800 rounded-xl overflow-hidden">
-            {(
-              <div className="px-4 py-3 flex items-start gap-3">
+      <FormSection
+        title="账号画像"
+        description="账号画像会被创作任务和发布流程复用。"
+        actions={(
+          <Button variant="outline" size="sm" onClick={startNew}>
+            <Plus data-icon="inline-start" />
+            新增发布账号
+          </Button>
+        )}
+      >
+        <div className="flex flex-col gap-2">
+          {accounts.map(account => (
+            <div key={account.id} className="rounded-xl border border-border bg-surface p-4">
+              <div className="flex items-start gap-3">
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-1.5 mb-1 flex-wrap">
-                    <span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">{p.name}</span>
-                    <span className="text-[10px] text-zinc-500 bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded-full font-mono">
-                      {p.id}
-                    </span>
-                    <span className="text-[10px] text-indigo-600 bg-indigo-50 dark:bg-indigo-950 dark:text-indigo-400 px-1.5 py-0.5 rounded-full">
-                      {PLATFORM_LABEL[p.platform] ?? p.platform}
-                    </span>
-                    {p.is_active ? (
-                      <span className="text-[10px] text-emerald-600 bg-emerald-50 dark:bg-emerald-950 dark:text-emerald-400 px-1.5 py-0.5 rounded-full">
-                        启用
-                      </span>
-                    ) : (
-                      <span className="text-[10px] text-zinc-400 bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded-full">
-                        停用
-                      </span>
-                    )}
+                  <div className="mb-2 flex flex-wrap items-center gap-1.5">
+                    <span className="text-sm font-medium">{account.name}</span>
+                    <Badge variant="outline" className="font-mono">{account.id}</Badge>
+                    <Badge variant="secondary">{PLATFORM_LABEL[account.platform] ?? account.platform}</Badge>
+                    <Badge variant={account.is_active ? 'default' : 'outline'}>
+                      {account.is_active ? '启用' : '停用'}
+                    </Badge>
                   </div>
-                  {p.positioning && (
-                    <p className="text-[11px] text-zinc-500 mb-1.5 line-clamp-2">{p.positioning}</p>
-                  )}
-                  <div className="flex flex-wrap gap-1">
-                    {(p.topic_focus ?? []).map(t => (
-                      <span key={t} className="text-[10px] text-zinc-600 dark:text-zinc-300 bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 px-1.5 py-0.5 rounded">
-                        {t}
-                      </span>
+                  {account.positioning ? (
+                    <p className="mb-2 line-clamp-2 text-sm text-muted-foreground">{account.positioning}</p>
+                  ) : null}
+                  <div className="flex flex-wrap gap-1.5">
+                    {(account.topic_focus ?? []).map(topic => (
+                      <Badge key={topic} variant="outline">{topic}</Badge>
                     ))}
-                    {(p.taboo ?? []).map(t => (
-                      <span key={'tb-' + t} className="text-[10px] text-red-500 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900 px-1.5 py-0.5 rounded">
-                        ⛔ {t}
-                      </span>
+                    {(account.taboo ?? []).map(taboo => (
+                      <Badge key={`tb-${taboo}`} variant="destructive">⛔ {taboo}</Badge>
                     ))}
                   </div>
                 </div>
-                <div className="flex items-center gap-1 flex-shrink-0">
-                  <button
-                    onClick={() => toggleActive(p)}
-                    title={p.is_active ? '停用' : '启用'}
-                    className="p-1.5 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 transition-colors"
+                <div className="flex shrink-0 items-center gap-1">
+                  <Button
+                    type="button"
+                    size="icon-sm"
+                    variant="ghost"
+                    aria-label={`${account.is_active ? '停用' : '启用'} ${account.name}`}
+                    onClick={() => toggleActive(account)}
                   >
-                    {p.is_active ? <Power className="w-3.5 h-3.5" /> : <PowerOff className="w-3.5 h-3.5" />}
-                  </button>
-                  <button
-                    onClick={() => startEdit(p)}
-                    className="p-1.5 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 transition-colors"
+                    {account.is_active ? <Power /> : <PowerOff />}
+                  </Button>
+                  <Button
+                    type="button"
+                    size="icon-sm"
+                    variant="ghost"
+                    aria-label={`编辑 ${account.name}`}
+                    onClick={() => startEdit(account)}
                   >
-                    <Pencil className="w-3.5 h-3.5" />
-                  </button>
-                  <button
-                    onClick={() => handleDelete(p.id)}
-                    className="p-1.5 rounded-md hover:bg-red-50 dark:hover:bg-red-950 text-zinc-400 hover:text-red-500 transition-colors"
+                    <Pencil />
+                  </Button>
+                  <Button
+                    type="button"
+                    size="icon-sm"
+                    variant="ghost"
+                    aria-label={`删除 ${account.name}`}
+                    onClick={() => requestDelete(account)}
                   >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
+                    <Trash2 />
+                  </Button>
                 </div>
               </div>
-            )}
-          </div>
-        ))}
-      </div>
-
-      <Button variant="outline" size="sm" className="gap-1.5" onClick={startNew}>
-        <Plus className="w-3.5 h-3.5" /> 新增发布账号
-      </Button>
+            </div>
+          ))}
+          {accounts.length === 0 ? (
+            <p className="text-sm text-muted-foreground">暂无发布账号。</p>
+          ) : null}
+        </div>
+      </FormSection>
 
       <Dialog
         open={editingId !== null}
         onOpenChange={o => { if (!o) cancelEdit() }}
       >
         <DialogContent
-          className="sm:max-w-3xl max-h-[90vh] overflow-y-auto"
+          size="md"
+          className="max-h-[90vh] overflow-y-auto"
         >
           <DialogHeader>
             <DialogTitle>{editingId === 'new' ? '新增发布账号' : '编辑发布账号'}</DialogTitle>
@@ -535,6 +575,37 @@ export function PublishAccountsSection() {
           )}
         </DialogContent>
       </Dialog>
+
+      <AlertDialog
+        open={deleteTarget !== null}
+        onOpenChange={open => {
+          if (!open && !deleting) {
+            setDeleteTarget(null)
+            setDeleteError('')
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>删除发布账号？</AlertDialogTitle>
+            <AlertDialogDescription>
+              删除账号 {deleteTarget?.name}（{deleteTarget?.id}）后无法恢复。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {deleteError ? <p role="alert" className="text-sm text-destructive">{deleteError}</p> : null}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>取消</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              disabled={deleting}
+              onClick={() => void confirmDelete()}
+            >
+              {deleting ? <Loader2 data-icon="inline-start" className="animate-spin" /> : null}
+              确认删除
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }
@@ -550,187 +621,180 @@ function AccountForm({
   isNew: boolean
 }) {
   return (
-    <div className="space-y-3">
-      <div className="grid grid-cols-3 gap-3">
-        <div className="space-y-1">
-          <Label className="text-xs">ID {isNew ? '*' : '（不可改）'}</Label>
+    <FieldGroup>
+      <div className="grid gap-3 sm:grid-cols-3">
+        <Field>
+          <FieldLabel htmlFor="publish-account-id">ID {isNew ? '*' : '（不可改）'}</FieldLabel>
           <Input
+            id="publish-account-id"
             value={form.id}
             disabled={!isNew}
             onChange={e => setForm({ ...form, id: e.target.value })}
             placeholder="pub_tech_gzh"
-            className="h-8 text-sm font-mono"
+            className="font-mono"
           />
-        </div>
-        <div className="space-y-1">
-          <Label className="text-xs">名称 *</Label>
+        </Field>
+        <Field>
+          <FieldLabel htmlFor="publish-account-name">名称 *</FieldLabel>
           <Input
+            id="publish-account-name"
             value={form.name}
             onChange={e => setForm({ ...form, name: e.target.value })}
             placeholder="硬核技术派"
-            className="h-8 text-sm"
           />
-        </div>
-        <div className="space-y-1">
-          <Label className="text-xs">平台</Label>
-          <select
+        </Field>
+        <Field>
+          <FieldLabel htmlFor="publish-account-platform">平台</FieldLabel>
+          <Select
             value={form.platform}
-            onChange={e => setForm({ ...form, platform: e.target.value })}
-            className="h-8 w-full rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-2 text-sm"
+            onValueChange={value => value && setForm({ ...form, platform: value })}
           >
-            {PLATFORM_OPTIONS.map(opt => (
-              <option key={opt.value} value={opt.value}>{opt.label}</option>
-            ))}
-          </select>
-        </div>
+            <SelectTrigger id="publish-account-platform" className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                {PLATFORM_OPTIONS.map(option => (
+                  <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+        </Field>
       </div>
 
       {form.platform === 'wechat' && (
-        <div className="space-y-1">
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1">
-              <Label className="text-xs">AppID（开发者ID）</Label>
+        <div className="grid gap-3 sm:grid-cols-2">
+            <Field>
+              <FieldLabel htmlFor="publish-account-app-id">AppID（开发者ID）</FieldLabel>
               <Input
+                id="publish-account-app-id"
                 value={form.app_id}
                 onChange={e => setForm({ ...form, app_id: e.target.value })}
                 placeholder="wx1234567890abcdef"
-                className="h-8 text-sm font-mono"
+                className="font-mono"
               />
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs">AppSecret</Label>
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="publish-account-app-secret">AppSecret</FieldLabel>
               <Input
+                id="publish-account-app-secret"
                 type="password"
                 value={form.app_secret}
                 onChange={e => setForm({ ...form, app_secret: e.target.value })}
                 placeholder="开发者密码"
-                className="h-8 text-sm font-mono"
+                className="font-mono"
               />
-            </div>
-          </div>
-          <p className="text-[11px] text-zinc-400">
-            用于「存入公众号草稿箱」。需在公众号后台开启开发者模式，并把运行后端的服务器出口 IP 加入 IP 白名单。
-          </p>
+              <FieldDescription>
+                用于「存入公众号草稿箱」。需在公众号后台开启开发者模式，并把运行后端的服务器出口 IP 加入 IP 白名单。
+              </FieldDescription>
+            </Field>
         </div>
       )}
 
-      <div className="space-y-1">
-        <Label className="text-xs">定位（positioning）</Label>
-        <p className="text-[11px] text-zinc-400">一句话说清这个号是什么、面向谁、提供什么价值</p>
-        <textarea
+      <Field>
+        <FieldLabel htmlFor="publish-account-positioning">定位（positioning）</FieldLabel>
+        <Textarea
+          id="publish-account-positioning"
           value={form.positioning}
           onChange={e => setForm({ ...form, positioning: e.target.value })}
           placeholder="面向资深工程师的深度技术分析号"
           rows={2}
-          className={cn(
-            'w-full resize-none rounded-lg border border-zinc-200 dark:border-zinc-700',
-            'bg-white dark:bg-zinc-800 px-3 py-2 text-sm',
-            'focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-400',
-          )}
         />
-      </div>
+        <FieldDescription>一句话说清这个号是什么、面向谁、提供什么价值。</FieldDescription>
+      </Field>
 
-      <div className="grid grid-cols-2 gap-3">
-        <div className="space-y-1">
-          <Label className="text-xs">受众（audience）</Label>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Field>
+          <FieldLabel htmlFor="publish-account-audience">受众（audience）</FieldLabel>
           <Input
+            id="publish-account-audience"
             value={form.audience}
             onChange={e => setForm({ ...form, audience: e.target.value })}
             placeholder="5年以上工龄的后端工程师"
-            className="h-8 text-sm"
           />
-        </div>
-        <div className="space-y-1">
-          <Label className="text-xs">调性（tone）</Label>
+        </Field>
+        <Field>
+          <FieldLabel htmlFor="publish-account-tone">调性（tone）</FieldLabel>
           <Input
+            id="publish-account-tone"
             value={form.tone}
             onChange={e => setForm({ ...form, tone: e.target.value })}
             placeholder="克制、有结构、不堆砌术语"
-            className="h-8 text-sm"
           />
-        </div>
+        </Field>
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
-        <div className="space-y-1">
-          <Label className="text-xs">选题方向（topic_focus，一行一个）</Label>
-          <textarea
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Field>
+          <FieldLabel htmlFor="publish-account-topic-focus">选题方向（topic_focus，一行一个）</FieldLabel>
+          <Textarea
+            id="publish-account-topic-focus"
             value={form.topic_focus_text}
             onChange={e => setForm({ ...form, topic_focus_text: e.target.value })}
             placeholder={'分布式系统\n数据库内核\n开源项目剖析'}
             rows={4}
-            className={cn(
-              'w-full resize-none rounded-lg border border-zinc-200 dark:border-zinc-700',
-              'bg-white dark:bg-zinc-800 px-3 py-2 text-sm',
-              'focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-400',
-            )}
           />
-        </div>
-        <div className="space-y-1">
-          <Label className="text-xs">禁区（taboo，一行一个）</Label>
-          <textarea
+        </Field>
+        <Field>
+          <FieldLabel htmlFor="publish-account-taboo">禁区（taboo，一行一个）</FieldLabel>
+          <Textarea
+            id="publish-account-taboo"
             value={form.taboo_text}
             onChange={e => setForm({ ...form, taboo_text: e.target.value })}
             placeholder={'职场鸡汤\n面试技巧\n培训广告'}
             rows={4}
-            className={cn(
-              'w-full resize-none rounded-lg border border-zinc-200 dark:border-zinc-700',
-              'bg-white dark:bg-zinc-800 px-3 py-2 text-sm',
-              'focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-400',
-            )}
           />
-        </div>
+        </Field>
       </div>
 
-      <div className="space-y-1">
-        <Label className="text-xs">字数范围（word_range，JSON 对象）</Label>
-        <p className="text-[11px] text-zinc-400">
+      <Field>
+        <FieldLabel htmlFor="publish-account-word-range">字数范围（word_range，JSON 对象）</FieldLabel>
+        <FieldDescription>
           公众号通常：<code className="font-mono">{`{"min":1500,"max":2200}`}</code>；
           X 短串：<code className="font-mono">{`{"posts_min":8,"posts_max":12,"per_post_max_chars":270}`}</code>
-        </p>
+        </FieldDescription>
         <Input
+          id="publish-account-word-range"
           value={form.word_range_json}
           onChange={e => setForm({ ...form, word_range_json: e.target.value })}
           placeholder='{"min":1500,"max":2200}'
-          className="h-8 text-sm font-mono"
+          className="font-mono"
         />
-      </div>
+      </Field>
 
-      <div className="space-y-1">
-        <Label className="text-xs">每日配额（daily_quota，JSON 对象）</Label>
-        <p className="text-[11px] text-zinc-400">
+      <Field>
+        <FieldLabel htmlFor="publish-account-daily-quota">每日配额（daily_quota，JSON 对象）</FieldLabel>
+        <FieldDescription>
           今日计划按此配额给账号派选题，如 <code className="font-mono">{`{"long":1,"short":2}`}</code>
           （story/share 计入 short）；留 <code className="font-mono">{`{}`}</code> 表示不参与每日计划
-        </p>
+        </FieldDescription>
         <Input
+          id="publish-account-daily-quota"
           value={form.daily_quota_json}
           onChange={e => setForm({ ...form, daily_quota_json: e.target.value })}
           placeholder='{"long":1,"short":2}'
-          className="h-8 text-sm font-mono"
+          className="font-mono"
         />
-      </div>
+      </Field>
 
-      <div className="space-y-1">
-        <Label className="text-xs">配图风格（image_style）</Label>
-        <textarea
+      <Field>
+        <FieldLabel htmlFor="publish-account-image-style">配图风格（image_style）</FieldLabel>
+        <Textarea
+          id="publish-account-image-style"
           value={form.image_style}
           onChange={e => setForm({ ...form, image_style: e.target.value })}
           placeholder=""
           rows={2}
-          className={cn(
-            'w-full resize-none rounded-lg border border-zinc-200 dark:border-zinc-700',
-            'bg-white dark:bg-zinc-800 px-3 py-2 text-sm',
-            'focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-400',
-          )}
         />
-      </div>
+      </Field>
 
-      <details className="rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800">
-        <summary className="cursor-pointer select-none px-3 py-2 text-xs font-medium text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-900">
+      <details className="rounded-lg border border-border bg-surface">
+        <summary className="cursor-pointer select-none px-3 py-2 text-sm font-medium hover:bg-surface-muted">
           封面风格（cover_style）── 锁死封面的 5 维与签名元素
         </summary>
-        <div className="px-3 py-3 space-y-3 border-t border-zinc-200 dark:border-zinc-700">
-          <p className="text-[11px] text-zinc-400">
+        <div className="flex flex-col gap-3 border-t border-border px-3 py-3">
+          <p className="text-sm text-muted-foreground">
             填了之后 illustrator 直接照搬这套参数，不再凭 image_style 现场推断 —— 这是让同账号封面「看起来是一套的」关键。
             留空则回退到旧逻辑（按 image_style 翻译）。
           </p>
@@ -745,66 +809,59 @@ function AccountForm({
         </div>
       </details>
 
-      <div className="space-y-1">
-        <Label className="text-xs">声音范文（voice_samples，多段用一行 <code className="font-mono">---</code> 分隔）</Label>
-        <p className="text-[11px] text-zinc-400">
+      <Field>
+        <FieldLabel htmlFor="publish-account-voice-samples">
+          声音范文（voice_samples，多段用一行 --- 分隔）
+        </FieldLabel>
+        <FieldDescription>
           贴 2-3 段你认可的、能代表此账号「该有的样子」的真实文字（自己写的、或目标作者的）。
           writer 会把它当 few-shot 模仿对象，比 tone 字段管用得多。
-        </p>
-        <textarea
+        </FieldDescription>
+        <Textarea
+          id="publish-account-voice-samples"
           value={form.voice_samples_text}
           onChange={e => setForm({ ...form, voice_samples_text: e.target.value })}
           placeholder={'范文 1 的段落……\n\n---\n\n范文 2 的段落……'}
           rows={8}
-          className={cn(
-            'w-full resize-y rounded-lg border border-zinc-200 dark:border-zinc-700',
-            'bg-white dark:bg-zinc-800 px-3 py-2 text-sm',
-            'focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-400',
-          )}
         />
-      </div>
+      </Field>
 
-      <div className="space-y-1">
-        <Label className="text-xs">账号专属硬规则（style_rules，一行一条）</Label>
-        <p className="text-[11px] text-zinc-400">
+      <Field>
+        <FieldLabel htmlFor="publish-account-style-rules">账号专属硬规则（style_rules，一行一条）</FieldLabel>
+        <FieldDescription>
           覆盖在 SOUL 通用反 AI 规则之上的账号级约束。比如「用第一人称」「禁问句开头」「每段 ≤ 3 行」。
           writer 把它当硬约束逐条遵守。
-        </p>
-        <textarea
+        </FieldDescription>
+        <Textarea
+          id="publish-account-style-rules"
           value={form.style_rules_text}
           onChange={e => setForm({ ...form, style_rules_text: e.target.value })}
           placeholder={'用第一人称叙述\n禁用感叹号\n段落不超过 3 行\n允许使用「赛道」「估值」等行业词'}
           rows={4}
-          className={cn(
-            'w-full resize-none rounded-lg border border-zinc-200 dark:border-zinc-700',
-            'bg-white dark:bg-zinc-800 px-3 py-2 text-sm',
-            'focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-400',
-          )}
         />
-      </div>
+      </Field>
 
-      <div className="flex items-center gap-2">
-        <input
-          type="checkbox"
+      <Field orientation="horizontal">
+        <Label htmlFor="pa_is_active">启用（停用后不会出现在派单下拉里）</Label>
+        <Switch
           id="pa_is_active"
           checked={form.is_active}
-          onChange={e => setForm({ ...form, is_active: e.target.checked })}
-          className="rounded"
+          onCheckedChange={is_active => setForm({ ...form, is_active })}
         />
-        <label htmlFor="pa_is_active" className="text-xs text-zinc-600 dark:text-zinc-400 cursor-pointer">
-          启用（停用后不会出现在派单下拉里）
-        </label>
-      </div>
+      </Field>
 
       <div className="flex items-center gap-2">
-        <Button size="sm" className="gap-1.5" onClick={onSave} disabled={saving}>
-          {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+        <Button onClick={onSave} disabled={saving}>
+          {saving
+            ? <Loader2 data-icon="inline-start" className="animate-spin" />
+            : <Check data-icon="inline-start" />}
           保存
         </Button>
-        <Button size="sm" variant="ghost" className="gap-1.5" onClick={onCancel}>
-          <X className="w-3.5 h-3.5" /> 取消
+        <Button variant="ghost" onClick={onCancel}>
+          <X data-icon="inline-start" />
+          取消
         </Button>
       </div>
-    </div>
+    </FieldGroup>
   )
 }

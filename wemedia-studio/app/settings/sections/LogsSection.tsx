@@ -2,6 +2,9 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { RefreshCw, Loader2 } from 'lucide-react'
+import { FormSection } from '@/components/layout/FormSection'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000/api'
@@ -16,16 +19,10 @@ interface LogEntry {
 }
 
 const JOB_LABEL: Record<string, string> = { collect: '采集', github: 'GitHub', analyze: 'AI 分析', x: 'X' }
-const JOB_COLOR: Record<string, string> = {
-  collect: 'text-indigo-500 dark:text-indigo-400',
-  github:  'text-violet-500 dark:text-violet-400',
-  analyze: 'text-amber-500 dark:text-amber-400',
-  x:       'text-sky-500 dark:text-sky-400',
-}
 const STATUS_DOT: Record<string, string> = {
-  ok:    'bg-emerald-500',
-  warn:  'bg-amber-400',
-  error: 'bg-red-500',
+  ok:    'bg-primary',
+  warn:  'bg-muted-foreground',
+  error: 'bg-destructive',
 }
 
 function formatTime(iso: string) {
@@ -60,69 +57,71 @@ export function LogsSection() {
   }, [fetchLogs])
 
   return (
-    <div className="flex flex-col flex-1 min-h-0 space-y-3">
-      <div className="flex items-center justify-between">
-        <p className="text-[11px] text-zinc-400">自动每 30 秒刷新</p>
-        <button onClick={fetchLogs}
-          className="flex items-center gap-1 text-[11px] text-zinc-400 hover:text-zinc-600 transition-colors">
-          <RefreshCw className="w-3 h-3" />刷新
-        </button>
-      </div>
+    <div className="flex min-h-0 flex-1 flex-col">
+      <FormSection
+        title="运行日志"
+        description="最多显示最近 100 条记录，自动每 30 秒刷新。"
+        actions={(
+          <Button type="button" variant="outline" size="sm" onClick={() => void fetchLogs()}>
+            <RefreshCw data-icon="inline-start" />
+            刷新
+          </Button>
+        )}
+      >
+        <div className="flex min-h-[24rem] flex-col overflow-hidden rounded-xl border border-border bg-surface font-mono text-sm">
+          <div className="flex flex-wrap items-center gap-2 border-b border-border bg-surface-muted px-3 py-2">
+            {Object.entries(JOB_LABEL).map(([key, label]) => (
+              <Badge key={key} variant="outline">{label}</Badge>
+            ))}
+          </div>
 
-      <div className="flex flex-col flex-1 min-h-0 bg-zinc-950 rounded-xl overflow-hidden border border-zinc-800 font-mono text-xs">
-        {/* Legend */}
-        <div className="flex items-center gap-4 px-3 py-2 border-b border-zinc-800 text-zinc-500">
-          {Object.entries(JOB_LABEL).map(([k, v]) => (
-            <span key={k} className={cn('flex items-center gap-1', JOB_COLOR[k])}>
-              <span className="text-[10px]">■</span>{v}
-            </span>
-          ))}
-        </div>
-
-        {/* Rows */}
-        <div className="flex-1 min-h-0 overflow-y-auto">
+          <div className="min-h-0 flex-1 overflow-y-auto">
           {loading ? (
-            <div className="flex items-center gap-2 px-3 py-4 text-zinc-500">
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />加载中…
+              <div className="flex items-center gap-2 px-3 py-4 text-muted-foreground">
+                <Loader2 className="animate-spin" />
+                加载中…
             </div>
           ) : logs.length === 0 ? (
-            <div className="px-3 py-4 text-zinc-600">暂无日志 · 等待首次调度</div>
+              <div className="px-3 py-4 text-muted-foreground">暂无日志 · 等待首次调度</div>
           ) : (
             logs.map(log => (
               <div key={log.id}>
-                <div
+                  <button
+                    type="button"
+                    disabled={!log.detail}
                   className={cn(
-                    'flex items-start gap-2 px-3 py-1.5 hover:bg-zinc-900 transition-colors',
-                    log.detail && 'cursor-pointer'
+                      'flex w-full items-start gap-2 px-3 py-2 text-left transition-colors',
+                      log.detail && 'hover:bg-surface-muted'
                   )}
                   onClick={() => log.detail && setExpanded(expanded === log.id ? null : log.id)}
                 >
-                  <span className="text-zinc-600 flex-shrink-0 tabular-nums w-28">{formatTime(log.created_at)}</span>
-                  <span className={cn('flex-shrink-0 w-14 text-center', JOB_COLOR[log.job] ?? 'text-zinc-400')}>
+                    <span className="w-28 shrink-0 tabular-nums text-foreground-subtle">{formatTime(log.created_at)}</span>
+                    <span className="w-14 shrink-0 text-center text-muted-foreground">
                     {JOB_LABEL[log.job] ?? log.job}
                   </span>
                   <span className={cn(
-                    'flex-shrink-0 w-1.5 h-1.5 rounded-full mt-1.5',
-                    STATUS_DOT[log.status] ?? 'bg-zinc-500'
+                      'mt-1.5 size-1.5 shrink-0 rounded-full',
+                      STATUS_DOT[log.status] ?? 'bg-muted-foreground'
                   )} />
                   <span className={cn(
-                    'flex-1 min-w-0',
-                    log.status === 'error' ? 'text-red-400' : log.status === 'warn' ? 'text-amber-400' : 'text-zinc-300'
+                      'min-w-0 flex-1',
+                      log.status === 'error' && 'text-destructive'
                   )}>
                     {log.message}
-                    {log.detail && <span className="text-zinc-600 ml-1">▸</span>}
+                      {log.detail ? <span className="ml-1 text-foreground-subtle">▸</span> : null}
                   </span>
-                </div>
+                  </button>
                 {expanded === log.id && log.detail && (
-                  <div className="px-3 pb-2 ml-[7rem] text-red-400/80 whitespace-pre-wrap break-all text-[10px] leading-relaxed">
+                    <div className="ml-[7rem] whitespace-pre-wrap break-all px-3 pb-2 text-sm leading-relaxed text-destructive">
                     {log.detail}
                   </div>
                 )}
               </div>
             ))
           )}
+          </div>
         </div>
-      </div>
+      </FormSection>
     </div>
   )
 }
