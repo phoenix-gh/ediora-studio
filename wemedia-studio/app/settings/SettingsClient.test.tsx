@@ -25,8 +25,13 @@ describe('SettingsClient', () => {
   it('exposes a named settings navigation with the selected page', () => {
     render(<SettingsClient initialSettings={null} />)
 
+    const layout = screen.getByTestId('settings-layout')
     const navigation = screen.getByRole('navigation', { name: '设置导航' })
+    expect(layout).toHaveClass('h-dvh', 'min-h-0', 'overflow-hidden')
+    expect(layout).not.toHaveClass('h-screen', 'min-h-screen')
     expect(navigation).toBeInTheDocument()
+    expect(navigation).toHaveClass('w-60', 'overflow-y-auto')
+    expect(screen.getByTestId('settings-scroll-region')).toHaveClass('overflow-y-auto')
     expect(screen.getByRole('button', { name: /AI 大模型/ })).toHaveAttribute('aria-current', 'page')
     expect(screen.getByRole('button', { name: /外观/ })).not.toHaveAttribute('aria-current')
   })

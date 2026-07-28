@@ -33,6 +33,7 @@ export function AISection({ settings, onSaved }: { settings: AppSettings | null;
   const [fetchingModels, setFetchingModels] = useState(false)
   const [showModelList, setShowModelList]  = useState(false)
   const modelInputRef = useRef<HTMLInputElement>(null)
+  const modelRequestSequence = useRef(0)
 
   const [testState, setTestState] = useState<TestState>('idle')
   const [testMsg, setTestMsg]     = useState('')
@@ -40,14 +41,18 @@ export function AISection({ settings, onSaved }: { settings: AppSettings | null;
   const currentPreset = providers.find(p => p.key === provider)
 
   function handleProviderChange(key: string) {
+    modelRequestSequence.current += 1
     const preset = providers.find(p => p.key === key)
     setProvider(key)
     setBaseUrl(preset?.base_url ?? '')
     setModel('')
     setModelList([])
+    setShowModelList(false)
+    setFetchingModels(false)
   }
 
   async function handleFetchModels() {
+    const requestId = ++modelRequestSequence.current
     setFetchingModels(true)
     setShowModelList(false)
     try {
@@ -56,6 +61,7 @@ export function AISection({ settings, onSaved }: { settings: AppSettings | null;
         api_key: apiKey || undefined,
         base_url: baseUrl.trim() || undefined,
       })
+      if (requestId !== modelRequestSequence.current) return
       if (res.ok && res.models.length) {
         setModelList(res.models)
         setShowModelList(true)
@@ -64,9 +70,13 @@ export function AISection({ settings, onSaved }: { settings: AppSettings | null;
         toast.error(res.error ?? '未返回模型列表')
       }
     } catch {
-      toast.error('请求失败，请检查配置')
+      if (requestId === modelRequestSequence.current) {
+        toast.error('请求失败，请检查配置')
+      }
     } finally {
-      setFetchingModels(false)
+      if (requestId === modelRequestSequence.current) {
+        setFetchingModels(false)
+      }
     }
   }
 
@@ -272,6 +282,14 @@ export function AISection({ settings, onSaved }: { settings: AppSettings | null;
       <FormSection
         title="图像生成"
         description="封面和插图使用此独立配置，不会复用聊天模型接口。需使用支持 OpenAI Images API 的服务。"
+        actions={(
+          <Button type="button" variant="outline" size="sm" onClick={handleSave} disabled={saving}>
+            {saving
+              ? <Loader2 data-icon="inline-start" className="animate-spin" />
+              : <Save data-icon="inline-start" />}
+            保存图像配置
+          </Button>
+        )}
       >
         <FieldGroup>
           <Field>

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Plus, Trash2, Pencil, Check, X, Loader2, Power, PowerOff } from 'lucide-react'
 import { toast } from 'sonner'
 import { FormSection } from '@/components/layout/FormSection'
@@ -210,43 +210,65 @@ function settingsToTunnelForm(settings: AppSettings): TunnelForm {
 export function PublishAccountsSection() {
   const [accounts, setAccounts] = useState<PublishAccount[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
   const [tunnelForm, setTunnelForm] = useState<TunnelForm>(EMPTY_TUNNEL)
   const [savingTunnel, setSavingTunnel] = useState(false)
   const [editingId, setEditingId] = useState<string | 'new' | null>(null)
   const [form, setForm] = useState<EditState>(EMPTY_EDIT)
   const [saving, setSaving] = useState(false)
+  const savingRef = useRef(false)
+  const editorSession = useRef(0)
   const [deleteTarget, setDeleteTarget] = useState<PublishAccount | null>(null)
   const [deleteError, setDeleteError] = useState('')
   const [deleting, setDeleting] = useState(false)
 
   useEffect(() => {
+    let active = true
     Promise.all([
       listPublishAccounts(),
       getSettings(),
     ])
       .then(([list, settings]) => {
+        if (!active) return
         setAccounts(list)
         setTunnelForm(settingsToTunnelForm(settings))
       })
-      .finally(() => setLoading(false))
+      .catch(() => {
+        if (active) setLoadError('发布账号配置加载失败，请稍后重试')
+      })
+      .finally(() => {
+        if (active) setLoading(false)
+      })
+    return () => {
+      active = false
+    }
   }, [])
 
   function startNew() {
+    editorSession.current += 1
+    savingRef.current = false
+    setSaving(false)
     setEditingId('new')
     setForm(EMPTY_EDIT)
   }
 
   function startEdit(p: PublishAccount) {
+    editorSession.current += 1
+    savingRef.current = false
+    setSaving(false)
     setEditingId(p.id)
     setForm(accountToEdit(p))
   }
 
   function cancelEdit() {
+    if (savingRef.current) return
+    editorSession.current += 1
     setEditingId(null)
     setForm(EMPTY_EDIT)
   }
 
   async function handleSave() {
+    if (savingRef.current) return
     const result = editToInput(form)
     if ('error' in result) {
       toast.error(result.error)
@@ -261,25 +283,38 @@ export function PublishAccountsSection() {
       return
     }
 
+    const saveSession = editorSession.current
+    const savedEditingId = editingId
+    savingRef.current = true
     setSaving(true)
     try {
-      if (editingId === 'new') {
+      if (savedEditingId === 'new') {
         const created = await createPublishAccount(result)
         setAccounts(prev => [...prev, created])
         toast.success('账号已创建')
-      } else if (editingId !== null) {
+      } else if (savedEditingId !== null) {
         // PATCH: 不传 id（不可改）
         const { id: omittedId, ...patch } = result
         void omittedId
-        const updated = await updatePublishAccount(editingId, patch)
-        setAccounts(prev => prev.map(a => a.id === editingId ? updated : a))
+        const updated = await updatePublishAccount(savedEditingId, patch)
+        setAccounts(prev => prev.map(a => a.id === savedEditingId ? updated : a))
         toast.success('账号已更新')
       }
-      cancelEdit()
+      if (editorSession.current === saveSession) {
+        savingRef.current = false
+        editorSession.current += 1
+        setEditingId(null)
+        setForm(EMPTY_EDIT)
+      }
     } catch (e) {
-      toast.error('保存失败：' + (e instanceof Error ? e.message : '未知错误'))
+      if (editorSession.current === saveSession) {
+        toast.error('保存失败：' + (e instanceof Error ? e.message : '未知错误'))
+      }
     } finally {
-      setSaving(false)
+      if (editorSession.current === saveSession) {
+        savingRef.current = false
+        setSaving(false)
+      }
     }
   }
 
@@ -352,6 +387,9 @@ export function PublishAccountsSection() {
 
   return (
     <div className="flex flex-col gap-4">
+      {loadError ? (
+        <p role="alert" className="text-sm text-destructive">{loadError}</p>
+      ) : null}
       <p className="text-sm text-muted-foreground">
         发布账号即你运营的对外内容账号（公众号/X 等）。账号画像会被创作任务复用。
         会按任务 metadata 的 <code className="font-mono">account_id</code> 读取该账号画像，
@@ -554,11 +592,14 @@ export function PublishAccountsSection() {
 
       <Dialog
         open={editingId !== null}
-        onOpenChange={o => { if (!o) cancelEdit() }}
+        onOpenChange={open => {
+          if (!open && !savingRef.current) cancelEdit()
+        }}
       >
         <DialogContent
           size="md"
           className="max-h-[90vh] overflow-y-auto"
+          showCloseButton={!saving}
         >
           <DialogHeader>
             <DialogTitle>{editingId === 'new' ? '新增发布账号' : '编辑发布账号'}</DialogTitle>
@@ -621,6 +662,7 @@ function AccountForm({
   isNew: boolean
 }) {
   return (
+    <fieldset disabled={saving} className="contents">
     <FieldGroup>
       <div className="grid gap-3 sm:grid-cols-3">
         <Field>
@@ -647,6 +689,7 @@ function AccountForm({
           <FieldLabel htmlFor="publish-account-platform">平台</FieldLabel>
           <Select
             value={form.platform}
+            disabled={saving}
             onValueChange={value => value && setForm({ ...form, platform: value })}
           >
             <SelectTrigger id="publish-account-platform" className="w-full">
@@ -846,6 +889,7 @@ function AccountForm({
         <Switch
           id="pa_is_active"
           checked={form.is_active}
+          disabled={saving}
           onCheckedChange={is_active => setForm({ ...form, is_active })}
         />
       </Field>
@@ -857,11 +901,12 @@ function AccountForm({
             : <Check data-icon="inline-start" />}
           保存
         </Button>
-        <Button variant="ghost" onClick={onCancel}>
+        <Button variant="ghost" onClick={onCancel} disabled={saving}>
           <X data-icon="inline-start" />
           取消
         </Button>
       </div>
     </FieldGroup>
+    </fieldset>
   )
 }

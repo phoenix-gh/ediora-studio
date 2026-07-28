@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
@@ -15,6 +15,16 @@ import { makeSettings } from '@/lib/api/settings-test-fixtures'
 import { toast } from 'sonner'
 
 import { PublishAccountsSection } from './PublishAccountsSection'
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  return { promise, resolve, reject }
+}
 
 vi.mock('@/lib/api/publish-accounts', async importOriginal => {
   const original = await importOriginal<typeof import('@/lib/api/publish-accounts')>()
@@ -160,5 +170,91 @@ describe('PublishAccountsSection', () => {
     await waitFor(() => expect(updatePublishAccount).toHaveBeenLastCalledWith('writer', {
       is_active: false,
     }))
+  })
+
+  it('locks the editor while saving, prevents duplicate submit and closes only after success', async () => {
+    const pendingSave = deferred<PublishAccount>()
+    vi.mocked(createPublishAccount).mockReturnValue(pendingSave.promise)
+    render(<PublishAccountsSection />)
+
+    await screen.findByRole('button', { name: '新增发布账号' })
+    fireEvent.click(screen.getByRole('button', { name: '新增发布账号' }))
+    fireEvent.change(screen.getByLabelText(/^ID/), { target: { value: 'writer' } })
+    fireEvent.change(screen.getByLabelText(/名称/), { target: { value: '技术作者' } })
+
+    const saveButton = screen.getByRole('button', { name: '保存' })
+    fireEvent.click(saveButton)
+    fireEvent.click(saveButton)
+
+    await waitFor(() => expect(createPublishAccount).toHaveBeenCalledTimes(1))
+    expect(screen.getByLabelText(/^ID/)).toBeDisabled()
+    expect(screen.getByLabelText(/名称/)).toBeDisabled()
+    expect(screen.getByRole('combobox', { name: '平台' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '保存' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '取消' })).toBeDisabled()
+    expect(screen.queryByRole('button', { name: 'Close' })).not.toBeInTheDocument()
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(screen.getByRole('heading', { name: '新增发布账号' })).toBeInTheDocument()
+
+    await act(async () => {
+      pendingSave.resolve(account)
+      await pendingSave.promise
+    })
+    await waitFor(() => expect(screen.queryByRole('heading', { name: '新增发布账号' })).not.toBeInTheDocument())
+  })
+
+  it('keeps the same editor open and editable when saving fails', async () => {
+    vi.mocked(createPublishAccount).mockRejectedValue(new Error('offline'))
+    render(<PublishAccountsSection />)
+
+    await screen.findByRole('button', { name: '新增发布账号' })
+    fireEvent.click(screen.getByRole('button', { name: '新增发布账号' }))
+    fireEvent.change(screen.getByLabelText(/^ID/), { target: { value: 'writer' } })
+    fireEvent.change(screen.getByLabelText(/名称/), { target: { value: '技术作者' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith('保存失败：offline'))
+    expect(screen.getByRole('heading', { name: '新增发布账号' })).toBeInTheDocument()
+    expect(screen.getByLabelText(/^ID/)).toHaveValue('writer')
+    expect(screen.getByLabelText(/名称/)).toHaveValue('技术作者')
+    expect(screen.getByRole('button', { name: '保存' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: '取消' })).toBeEnabled()
+  })
+
+  it('keeps a later editor session when an older save resolves', async () => {
+    const secondAccount = { ...account, id: 'editor', name: '编辑者' }
+    const pendingSave = deferred<PublishAccount>()
+    vi.mocked(listPublishAccounts).mockResolvedValue([account, secondAccount])
+    vi.mocked(updatePublishAccount).mockReturnValue(pendingSave.promise)
+    render(<PublishAccountsSection />)
+
+    await screen.findByText('技术作者')
+    fireEvent.click(screen.getByRole('button', { name: '编辑 技术作者' }))
+    fireEvent.change(screen.getByLabelText(/名称/), { target: { value: '技术作者 A' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(updatePublishAccount).toHaveBeenCalledTimes(1))
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑 编辑者', hidden: true }))
+    expect(screen.getByLabelText(/^ID/)).toHaveValue('editor')
+    expect(screen.getByLabelText(/名称/)).toHaveValue('编辑者')
+
+    await act(async () => {
+      pendingSave.resolve({ ...account, name: '技术作者 A' })
+      await pendingSave.promise
+    })
+
+    expect(screen.getByRole('heading', { name: '编辑发布账号' })).toBeInTheDocument()
+    expect(screen.getByLabelText(/^ID/)).toHaveValue('editor')
+    expect(screen.getByLabelText(/名称/)).toHaveValue('编辑者')
+  })
+
+  it('shows the initial account/settings load failure without an unhandled rejection', async () => {
+    vi.mocked(listPublishAccounts).mockRejectedValue(new Error('offline'))
+
+    render(<PublishAccountsSection />)
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('发布账号配置加载失败，请稍后重试')
+    expect(screen.getByRole('button', { name: '新增发布账号' })).toBeInTheDocument()
   })
 })

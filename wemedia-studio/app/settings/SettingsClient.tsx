@@ -62,7 +62,10 @@ export function SettingsClient({ initialSettings }: { initialSettings: AppSettin
   const isLogs = active === 'logs'
 
   return (
-    <div className="flex h-full min-h-0">
+    <div
+      data-testid="settings-layout"
+      className="flex h-dvh min-h-0 overflow-hidden"
+    >
       <nav
         aria-label="设置导航"
         className="flex w-60 shrink-0 flex-col gap-1 overflow-y-auto border-r border-border bg-surface-muted px-3 py-6"
@@ -93,7 +96,7 @@ export function SettingsClient({ initialSettings }: { initialSettings: AppSettin
         })}
       </nav>
 
-      <div className="min-w-0 flex-1 overflow-y-auto">
+      <div data-testid="settings-scroll-region" className="min-w-0 flex-1 overflow-y-auto">
         <div className={cn(
           'flex min-h-full flex-col',
           isLogs ? 'w-full' : 'max-w-[760px]'
