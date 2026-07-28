@@ -61,6 +61,8 @@ export function ResponsesClient({
   )
   const [detail, setDetail] = useState<ResponseDetail | null>(null)
   const [detailLoading, setDetailLoading] = useState(selectedId !== null)
+  const [detailError, setDetailError] = useState('')
+  const [detailRetryVersion, setDetailRetryVersion] = useState(0)
   const [source, setSource] = useState(initialSource)
   const [status, setStatus] = useState('pending')
   const [search, setSearch] = useState('')
@@ -74,18 +76,40 @@ export function ResponsesClient({
   const [outputTypes, setOutputTypes] = useState<string[]>([])
   const [showCreate, setShowCreate] = useState(false)
   const [creationDetail, setCreationDetail] = useState<ResponseDetail | null>(null)
+  const [submittingOutputs, setSubmittingOutputs] = useState(false)
   const selectedIdRef = useRef(selectedId)
   const detailRequestGeneration = useRef(0)
+  const detailLoadStateRef = useRef<'idle' | 'loading' | 'ready' | 'error'>(
+    selectedId === null ? 'idle' : 'loading',
+  )
   const creationDetailRef = useRef(creationDetail)
+  const creationSessionRef = useRef(0)
+  const outputSubmitBusyRef = useRef(false)
+  const accountsRef = useRef(accounts)
 
   useEffect(() => {
     creationDetailRef.current = creationDetail
   }, [creationDetail])
 
+  useEffect(() => {
+    accountsRef.current = accounts
+  }, [accounts])
+
   const selectResponse = useCallback((nextId: number | null) => {
-    if (selectedIdRef.current === nextId) return
+    if (selectedIdRef.current === nextId) {
+      if (nextId !== null && detailLoadStateRef.current === 'error') {
+        detailLoadStateRef.current = 'loading'
+        detailRequestGeneration.current += 1
+        setDetailError('')
+        setDetailLoading(true)
+        setDetailRetryVersion(current => current + 1)
+      }
+      return
+    }
     selectedIdRef.current = nextId
     detailRequestGeneration.current += 1
+    detailLoadStateRef.current = nextId === null ? 'idle' : 'loading'
+    setDetailError('')
     setDetailLoading(nextId !== null)
     if (nextId === null) setDetail(null)
     setSelectedId(nextId)
@@ -128,6 +152,8 @@ export function ResponsesClient({
         || selectedIdRef.current !== requestedId
         || next.id !== requestedId
       ) return
+      detailLoadStateRef.current = 'ready'
+      setDetailError('')
       setTranscript(null)
       setEvents([])
       setDetail(next)
@@ -135,7 +161,7 @@ export function ResponsesClient({
       setAccountId(
         next.analysis?.recommended_publish_account_id
         ?? next.selected_publish_account_id
-        ?? accounts[0]?.id
+        ?? accountsRef.current[0]?.id
         ?? '',
       )
       setOutputTypes(
@@ -145,7 +171,10 @@ export function ResponsesClient({
       )
     }).catch(error => {
       if (detailRequestGeneration.current !== generation) return
-      toast.error(error instanceof Error ? error.message : '详情加载失败')
+      const message = `详情加载失败：${error instanceof Error ? error.message : '未知错误'}`
+      detailLoadStateRef.current = 'error'
+      setDetailError(message)
+      toast.error(message)
     }).finally(() => {
       if (detailRequestGeneration.current === generation) setDetailLoading(false)
     })
@@ -154,7 +183,7 @@ export function ResponsesClient({
         detailRequestGeneration.current += 1
       }
     }
-  }, [selectedId, accounts])
+  }, [detailRetryVersion, selectedId])
 
   const selected = useMemo(
     () => items.find(item => item.id === selectedId)
@@ -163,19 +192,56 @@ export function ResponsesClient({
   )
   const detailReady = (
     !detailLoading
+    && !detailError
     && selectedId !== null
     && detail?.id === selectedId
   )
-  const outputCreationReady = (
+  const outputCreationMatches = (
     detailReady
     && creationDetail?.id === selectedId
     && creationDetail.current_analysis_run_id !== null
     && outputTypes.length > 0
   )
+  const outputCreationReady = outputCreationMatches && !submittingOutputs
+
+  function openCreationSession(next: ResponseDetail) {
+    creationSessionRef.current += 1
+    creationDetailRef.current = next
+    outputSubmitBusyRef.current = false
+    setSubmittingOutputs(false)
+    setCreationDetail(next)
+    setAccountId(
+      next.analysis?.recommended_publish_account_id
+      ?? next.selected_publish_account_id
+      ?? accountsRef.current[0]?.id
+      ?? '',
+    )
+    setOutputTypes(
+      next.analysis?.recommended_output_types.length
+        ? next.analysis.recommended_output_types
+        : ['expanded_article'],
+    )
+    setShowCreate(true)
+  }
+
+  function closeCreationSession() {
+    creationSessionRef.current += 1
+    creationDetailRef.current = null
+    outputSubmitBusyRef.current = false
+    setSubmittingOutputs(false)
+    setCreationDetail(null)
+    setShowCreate(false)
+  }
 
   async function decide(action: 'adopt' | 'later' | 'not_valuable' | 'reset') {
-    if (!detailReady || !detail || selectedId === null) return
-    const responseId = selectedId
+    if (
+      !detailReady
+      || !detail
+      || selectedId === null
+      || detail.id !== selectedId
+      || selectedIdRef.current !== detail.id
+    ) return
+    const responseId = detail.id
     const generation = detailRequestGeneration.current
     try {
       await decideResponse(responseId, action, reason)
@@ -187,19 +253,7 @@ export function ResponsesClient({
       ) {
         setDetail(updated)
         if (action === 'adopt') {
-          setCreationDetail(updated)
-          setAccountId(
-            updated.analysis?.recommended_publish_account_id
-            ?? updated.selected_publish_account_id
-            ?? accounts[0]?.id
-            ?? '',
-          )
-          setOutputTypes(
-            updated.analysis?.recommended_output_types.length
-              ? updated.analysis.recommended_output_types
-              : ['expanded_article'],
-          )
-          setShowCreate(true)
+          openCreationSession(updated)
         }
       }
       await loadList()
@@ -240,28 +294,55 @@ export function ResponsesClient({
   }
 
   async function submitOutputs() {
-    if (!outputCreationReady || !creationDetail || selectedId === null) return
+    if (
+      outputSubmitBusyRef.current
+      || !outputCreationMatches
+      || !creationDetail
+      || !detail
+      || selectedId === null
+      || detail.id !== selectedId
+      || creationDetail.id !== selectedId
+      || selectedIdRef.current !== creationDetail.id
+      || creationDetailRef.current !== creationDetail
+    ) return
     const analysisRunId = creationDetail.current_analysis_run_id
     if (analysisRunId === null) return
-    const responseId = selectedId
+    const responseId = creationDetail.id
     const generation = detailRequestGeneration.current
+    const creationSession = creationSessionRef.current
+    outputSubmitBusyRef.current = true
+    setSubmittingOutputs(true)
+
     try {
-      await createResponseOutputs(responseId, {
-        analysis_run_id: analysisRunId,
-        publish_account_id: accountId || null,
-        output_types: outputTypes,
-      })
-      const updated = await getResponse(responseId)
-      if (
-        detailRequestGeneration.current === generation
-        && selectedIdRef.current === responseId
-        && updated.id === responseId
-      ) setDetail(updated)
-      setCreationDetail(null)
-      setShowCreate(false)
+      try {
+        await createResponseOutputs(responseId, {
+          analysis_run_id: analysisRunId,
+          publish_account_id: accountId || null,
+          output_types: outputTypes,
+        })
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : '创作任务创建失败')
+        return
+      }
+
+      if (creationSessionRef.current === creationSession) closeCreationSession()
       toast.success('创作任务已创建')
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : '创作任务创建失败')
+
+      try {
+        const updated = await getResponse(responseId)
+        if (
+          detailRequestGeneration.current === generation
+          && selectedIdRef.current === responseId
+          && updated.id === responseId
+        ) setDetail(updated)
+      } catch (error) {
+        toast.error(`详情刷新失败：${error instanceof Error ? error.message : '未知错误'}`)
+      }
+    } finally {
+      if (creationSessionRef.current === creationSession) {
+        outputSubmitBusyRef.current = false
+        setSubmittingOutputs(false)
+      }
     }
   }
 
@@ -339,11 +420,30 @@ export function ResponsesClient({
 
       <main className="min-w-0 flex-1 overflow-y-auto">
         {!selected && <div className="grid h-full place-items-center text-sm text-zinc-400">选择一条内容查看分析</div>}
-        {selected && !detail && <div className="grid h-full place-items-center text-sm text-zinc-400">正在加载详情…</div>}
+        {selected && !detail && !detailError && <div className="grid h-full place-items-center text-sm text-zinc-400">正在加载详情…</div>}
+        {selected && !detail && detailError && (
+          <div className="grid h-full place-items-center">
+            <div role="alert" className="text-center text-sm text-red-500">
+              <p>{detailError}</p>
+              <Button className="mt-3" variant="outline" size="sm" onClick={() => selectResponse(selectedId)}>
+                重试加载详情
+              </Button>
+            </div>
+          </div>
+        )}
         {detail && (
-          <div className="mx-auto max-w-4xl p-7" aria-busy={!detailReady}>
+          <div className="mx-auto max-w-4xl p-7" aria-busy={detailLoading}>
             {!detailReady && (
-              <p role="status" className="mb-4 text-sm text-zinc-400">正在加载详情…</p>
+              detailError ? (
+                <div role="alert" className="mb-4 flex items-center gap-3 text-sm text-red-500">
+                  <span>{detailError}</span>
+                  <Button variant="outline" size="sm" onClick={() => selectResponse(selectedId)}>
+                    重试加载详情
+                  </Button>
+                </div>
+              ) : (
+                <p role="status" className="mb-4 text-sm text-zinc-400">正在加载详情…</p>
+              )
             )}
             <div className="mb-5 flex items-start gap-4">
               <div className="min-w-0 flex-1">
@@ -441,8 +541,14 @@ export function ResponsesClient({
                     ))}
                   </div>
                   <div className="flex justify-end gap-2">
-                    <Button variant="ghost" onClick={() => { setCreationDetail(null); setShowCreate(false) }}>取消</Button>
-                    <Button onClick={() => void submitOutputs()} disabled={!outputCreationReady}>创建任务</Button>
+                    <Button variant="ghost" onClick={closeCreationSession}>取消</Button>
+                    <Button
+                      aria-busy={submittingOutputs}
+                      onClick={() => void submitOutputs()}
+                      disabled={!outputCreationReady}
+                    >
+                      {submittingOutputs ? '创建中…' : '创建任务'}
+                    </Button>
                   </div>
                 </div>
               ) : (
