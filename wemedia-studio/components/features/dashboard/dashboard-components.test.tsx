@@ -3,7 +3,7 @@ import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
-import { CreateTaskDialog } from '@/components/features/CreateTaskDialog'
+import { CreateTaskButton, CreateTaskDialog } from '@/components/features/CreateTaskDialog'
 import { AlertsBar } from './AlertsBar'
 import { GenerateDraftButton } from './GenerateDraftButton'
 import { SourceStatusGrid } from './SourceStatusGrid'
@@ -71,6 +71,14 @@ describe('dashboard components', () => {
 
     expect(screen.getByRole('button', { name: '生成中…' })).toBeDisabled()
     resolveRequest!({ drafts_created: 1 })
+  })
+
+  it('renders the dashboard create-task action as a filled primary button', () => {
+    render(<CreateTaskButton />)
+
+    const action = screen.getByRole('button', { name: '发布创作任务' })
+    expect(action).toHaveClass('bg-primary', 'text-primary-foreground')
+    expect(action).not.toHaveClass('border-border')
   })
 
   it('uses the medium dialog and shared textarea for a new task', async () => {

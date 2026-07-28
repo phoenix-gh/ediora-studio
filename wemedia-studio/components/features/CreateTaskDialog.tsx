@@ -215,7 +215,7 @@ export function CreateTaskButton() {
   const [open, setOpen] = useState(false)
   return (
     <>
-      <Button size="sm" variant="outline" onClick={() => setOpen(true)}>
+      <Button size="sm" onClick={() => setOpen(true)}>
         <Plus data-icon="inline-start" />
         发布创作任务
       </Button>
