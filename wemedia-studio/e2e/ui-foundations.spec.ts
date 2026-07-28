@@ -5,8 +5,14 @@ import {
   type Locator,
   type Page,
   type Request,
-  type Response,
+  type Route,
 } from '@playwright/test'
+
+import {
+  allowedHttpFailureReason,
+  allowedRequestFailureReason,
+  type NetworkRequestDetails,
+} from './network-allowlist'
 
 const VIEWPORTS = [
   { width: 1440, height: 1000 },
@@ -35,21 +41,37 @@ async function deleteStaleMediaFixtures(request: APIRequestContext) {
   }
 }
 
-function mediaThumbnailFailureReason(request: Request) {
-  if (request.method() !== 'GET' || !['image', 'media'].includes(request.resourceType())) return null
-  return 'Media thumbnail failures are allowed because user-owned remote/static media may be unavailable without indicating an API business failure.'
-}
-
-function allowedRequestFailureReason(request: Request) {
-  const failure = request.failure()?.errorText ?? ''
-  if (request.isNavigationRequest() && failure.includes('ERR_ABORTED')) {
-    return 'Navigation ERR_ABORTED is allowed when client-side navigation supersedes an in-flight document request.'
+async function probeAmbientApiMedia(route: Route) {
+  const upstream = await route.fetch({
+    headers: {
+      ...route.request().headers(),
+      range: 'bytes=0-0',
+    },
+  })
+  if (upstream.status() >= 400) {
+    await route.fulfill({ response: upstream })
+    return
   }
-  return mediaThumbnailFailureReason(request)
+  // Chromium intentionally aborts successful preload="metadata" transfers once
+  // it has enough bytes. Replace only a proven-successful ambient transfer;
+  // upstream 4xx/5xx responses are forwarded and fail the network gate.
+  await route.fulfill({
+    status: 204,
+    headers: {
+      'cache-control': 'no-store',
+      'x-ediora-e2e-upstream-status': String(upstream.status()),
+    },
+  })
 }
 
-function allowedHttpFailureReason(response: Response) {
-  return mediaThumbnailFailureReason(response.request())
+function networkRequestDetails(request: Request): NetworkRequestDetails {
+  return {
+    failureText: request.failure()?.errorText ?? '',
+    isNavigationRequest: request.isNavigationRequest(),
+    method: request.method(),
+    resourceType: request.resourceType(),
+    url: request.url(),
+  }
 }
 
 test.beforeAll(async ({ request }) => {
@@ -141,7 +163,7 @@ for (const viewport of VIEWPORTS) {
       })
       page.on('pageerror', error => runtimeErrors.push(`pageerror: ${error.message}`))
       page.on('requestfailed', request => {
-        const reason = allowedRequestFailureReason(request)
+        const reason = allowedRequestFailureReason(networkRequestDetails(request))
         if (reason) {
           networkAllowlistReasons.add(reason)
           networkAllowlistedUrls.add(request.url())
@@ -151,7 +173,7 @@ for (const viewport of VIEWPORTS) {
       })
       page.on('response', response => {
         if (response.status() < 400) return
-        const reason = allowedHttpFailureReason(response)
+        const reason = allowedHttpFailureReason(networkRequestDetails(response.request()), response.status())
         if (reason) {
           networkAllowlistReasons.add(reason)
           networkAllowlistedUrls.add(response.url())
@@ -159,6 +181,7 @@ for (const viewport of VIEWPORTS) {
         }
         runtimeErrors.push(`http ${response.status()}: ${response.request().method()} ${response.url()}`)
       })
+      await page.route(/^http:\/\/(?:127\.0\.0\.1|localhost):8000\/api\/uploads\//, probeAmbientApiMedia)
 
       await page.setViewportSize(viewport)
       await page.addInitScript(selectedTheme => {
@@ -217,6 +240,7 @@ for (const viewport of VIEWPORTS) {
         await page.getByRole('tab', { name: '多媒体' }).click()
         const mediaGrid = page.locator('[data-slot="media-asset-grid"]')
         await expect(mediaGrid).toBeVisible()
+        await page.waitForLoadState('networkidle')
         const mediaGridStyle = await mediaGrid.evaluate(element => {
           const style = getComputedStyle(element)
           return { gridAutoRows: style.gridAutoRows, overflowY: style.overflowY }
