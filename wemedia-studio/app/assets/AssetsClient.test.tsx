@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { render, screen, within } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -17,7 +17,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@/lib/api/assets', () => ({
   createCreativeAsset: mocks.createCreativeAsset,
   createCreativeAssetDirectory: mocks.createCreativeAssetDirectory,
-  creativeAssetUrl: (url: string) => url,
+  creativeAssetUrl: (url: string) => new URL(url, 'http://media.test').toString(),
   deleteCreativeAsset: mocks.deleteCreativeAsset,
   deleteCreativeAssetDirectory: mocks.deleteCreativeAssetDirectory,
   listCreativeAssetDirectories: mocks.listCreativeAssetDirectories,
@@ -47,6 +47,15 @@ const article = (id: number, title: string, content: string) => ({
   updated_at: '',
 })
 
+const directory = (id: number, name: string, parentId: number | null = null) => ({
+  id,
+  name,
+  asset_type: 'article' as const,
+  parent_id: parentId,
+  is_system: false,
+  created_at: '',
+})
+
 const image = {
   ...article(3, '封面图', ''),
   asset_type: 'media' as const,
@@ -55,6 +64,7 @@ const image = {
 }
 
 beforeEach(() => {
+  vi.clearAllMocks()
   mocks.listCreativeAssetDirectories.mockResolvedValue([])
   mocks.updateCreativeAsset.mockImplementation(async (id, body) => ({ ...article(id, body.title ?? '', body.content ?? ''), url: body.url ?? '' }))
   mocks.createCreativeAsset.mockResolvedValue(article(4, '新文章', '保留的正文'))
@@ -78,7 +88,7 @@ describe('creative assets workspace', () => {
     expect(screen.getByRole('region', { name: '素材编辑器' })).toBeVisible()
   })
 
-  it('saves title and content edits for the selected article id', async () => {
+  it('saves title, content, and source URL edits for the selected article id', async () => {
     const user = userEvent.setup()
     render(<AssetsClient initialAssets={[article(7, '原题', '原正文')]} />)
 
@@ -88,9 +98,15 @@ describe('creative assets workspace', () => {
     const content = screen.getByLabelText('Markdown content')
     await user.clear(content)
     await user.type(content, '新正文')
+    const sourceUrl = screen.getByLabelText('来源 URL')
+    await user.type(sourceUrl, 'https://example.com/source')
     await user.click(screen.getByRole('button', { name: '保存' }))
 
-    expect(mocks.updateCreativeAsset).toHaveBeenCalledWith(7, expect.objectContaining({ title: '新标题', content: '新正文' }))
+    expect(mocks.updateCreativeAsset).toHaveBeenCalledWith(7, {
+      title: '新标题',
+      content: '新正文',
+      url: 'https://example.com/source',
+    })
   })
 
   it('keeps entered new-article content visible after missing-title validation', async () => {
@@ -118,15 +134,158 @@ describe('creative assets workspace', () => {
     expect(mocks.deleteCreativeAsset).toHaveBeenCalledWith(9)
   })
 
-  it('shows media in a compact grid and opens its preview on double click', async () => {
+  it('shows media in a compact 3/6/8 grid and opens its preview on double click or Enter', async () => {
     const user = userEvent.setup()
     render(<AssetsClient initialAssets={[image]} />)
 
     await user.click(screen.getByRole('tab', { name: '多媒体' }))
     const card = await screen.findByRole('button', { name: /封面图/ })
-    expect(card.closest('[data-slot="media-asset-grid"]')).toBeVisible()
+    const grid = card.closest('[data-slot="media-asset-grid"]')
+    expect(grid).toHaveClass('grid-cols-3', 'md:grid-cols-6', 'xl:grid-cols-8')
+    expect(screen.getByRole('img', { name: '封面图' })).toHaveAttribute('src', 'http://media.test/api/uploads/cover.png')
     await user.dblClick(card)
 
     expect(await screen.findByRole('dialog')).toHaveAttribute('data-size', 'lg')
+    await user.click(screen.getByRole('button', { name: 'Close' }))
+    card.focus()
+    await user.keyboard('{Enter}')
+    expect(await screen.findByRole('dialog')).toHaveAttribute('data-size', 'lg')
+  })
+
+  it('marks the active media filter and only shows matching media', async () => {
+    const user = userEvent.setup()
+    const audio = { ...image, id: 4, media_kind: 'audio' as const, title: '采访录音' }
+    render(<AssetsClient initialAssets={[image, audio]} />)
+
+    await user.click(screen.getByRole('tab', { name: '多媒体' }))
+    const filters = screen.getByRole('group', { name: '媒体筛选' })
+    const audioFilter = within(filters).getByRole('button', { name: '音频' })
+    expect(within(filters).getByRole('button', { name: '全部' })).toHaveAttribute('aria-pressed', 'true')
+    await user.click(audioFilter)
+
+    expect(audioFilter).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: /采访录音/ })).toBeVisible()
+    expect(screen.queryByRole('button', { name: /封面图/ })).toBeNull()
+  })
+
+  it('renames active directory assets locally after server rename succeeds', async () => {
+    const user = userEvent.setup()
+    mocks.listCreativeAssetDirectories.mockResolvedValue([directory(10, '旧目录')])
+    mocks.renameCreativeAssetDirectory.mockResolvedValue(directory(10, '新目录'))
+    render(<AssetsClient initialAssets={[{ ...article(10, '目录文章', '正文'), directory: '旧目录' }]} />)
+
+    await user.click(await screen.findByRole('button', { name: /旧目录1/ }))
+    await user.click(screen.getByRole('button', { name: '重命名旧目录' }))
+    const name = screen.getByLabelText('目录名称')
+    await user.clear(name)
+    await user.type(name, '新目录')
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: '保存' }))
+
+    await waitFor(() => expect(screen.getByRole('toolbar', { name: '新目录工作区' })).toBeVisible())
+    expect(screen.getByRole('button', { name: /目录文章/ })).toBeVisible()
+  })
+
+  it('moves a deleted parent subtree assets to uncategorized when a child is active', async () => {
+    const user = userEvent.setup()
+    mocks.listCreativeAssetDirectories.mockResolvedValue([directory(10, '父目录'), directory(11, '子目录', 10)])
+    mocks.deleteCreativeAssetDirectory.mockResolvedValue(undefined)
+    render(<AssetsClient initialAssets={[{ ...article(11, '子目录文章', '正文'), directory: '子目录' }]} />)
+
+    await user.click(await screen.findByRole('button', { name: /子目录1/ }))
+    await user.click(screen.getByRole('button', { name: '删除父目录' }))
+    await user.click(await screen.findByRole('button', { name: '确认' }))
+
+    await waitFor(() => expect(screen.getByRole('toolbar', { name: '全部资产工作区' })).toBeVisible())
+    expect(screen.getByRole('button', { name: /子目录文章/ })).toBeVisible()
+  })
+
+  it('keeps article form fields and announces an API create failure', async () => {
+    const user = userEvent.setup()
+    mocks.createCreativeAsset.mockRejectedValue(new Error('network'))
+    render(<AssetsClient initialAssets={[]} />)
+
+    await user.click(screen.getByRole('button', { name: '新增素材' }))
+    await user.type(screen.getByLabelText('文章标题'), '失败文章')
+    await user.type(screen.getByLabelText('原始内容'), '失败正文')
+    await user.type(screen.getByLabelText(/来源 URL/), 'https://example.com/failure')
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: '保存' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('保存文章素材失败，请重试。')
+    expect(screen.getByDisplayValue('失败文章')).toBeVisible()
+    expect(screen.getByDisplayValue('失败正文')).toBeVisible()
+    expect(screen.getByDisplayValue('https://example.com/failure')).toBeVisible()
+  })
+
+  it('keeps a directory rename dialog open when the server rejects it', async () => {
+    const user = userEvent.setup()
+    mocks.listCreativeAssetDirectories.mockResolvedValue([directory(10, '待重命名')])
+    mocks.renameCreativeAssetDirectory.mockRejectedValue(new Error('network'))
+    render(<AssetsClient initialAssets={[]} />)
+
+    await user.click(await screen.findByRole('button', { name: '重命名待重命名' }))
+    const name = screen.getByLabelText('目录名称')
+    await user.clear(name)
+    await user.type(name, '仍在编辑')
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: '保存' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('保存目录失败，请重试。')
+    expect(screen.getByDisplayValue('仍在编辑')).toBeVisible()
+  })
+
+  it('keeps a new directory form open when the server rejects creation', async () => {
+    const user = userEvent.setup()
+    mocks.createCreativeAssetDirectory.mockRejectedValue(new Error('network'))
+    render(<AssetsClient initialAssets={[]} />)
+
+    await user.click(screen.getByRole('button', { name: '新增目录' }))
+    await user.type(screen.getByLabelText('目录名称'), '不能丢失的目录')
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: '保存' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('保存目录失败，请重试。')
+    expect(screen.getByDisplayValue('不能丢失的目录')).toBeVisible()
+  })
+
+  it('keeps deletion confirmation open and retains assets when deletion fails', async () => {
+    const user = userEvent.setup()
+    mocks.deleteCreativeAsset.mockRejectedValue(new Error('network'))
+    render(<AssetsClient initialAssets={[article(20, '不能删除', '正文')]} />)
+
+    await user.click(screen.getByRole('button', { name: '删除' }))
+    await user.click(await screen.findByRole('button', { name: '确认' }))
+
+    expect(await screen.findByRole('alertdialog')).toBeVisible()
+    expect(screen.getByRole('alert')).toHaveTextContent('删除失败，请重试。')
+    await user.click(screen.getByRole('button', { name: '取消' }))
+    expect(screen.getByRole('button', { name: /不能删除/ })).toBeVisible()
+  })
+
+  it('announces update failures without discarding editor values', async () => {
+    const user = userEvent.setup()
+    mocks.updateCreativeAsset.mockRejectedValue(new Error('network'))
+    render(<AssetsClient initialAssets={[article(21, '待保存', '正文')]} />)
+
+    const title = screen.getByLabelText('文章标题')
+    await user.clear(title)
+    await user.type(title, '仍待保存')
+    await user.click(screen.getByRole('button', { name: '保存' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('更新文章素材失败，请重试。')
+    expect(screen.getByDisplayValue('仍待保存')).toBeVisible()
+  })
+
+  it('ignores stale directory responses after changing asset type and announces current fetch failures', async () => {
+    const user = userEvent.setup()
+    let resolveArticle: (value: ReturnType<typeof directory>[]) => void
+    const articleRequest = new Promise<ReturnType<typeof directory>[]>(resolve => { resolveArticle = resolve })
+    mocks.listCreativeAssetDirectories
+      .mockReturnValueOnce(articleRequest)
+      .mockRejectedValueOnce(new Error('network'))
+    render(<AssetsClient initialAssets={[]} />)
+
+    await user.click(screen.getByRole('tab', { name: '多媒体' }))
+    resolveArticle!([directory(10, '过期文章目录')])
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('加载目录失败，请重试。')
+    expect(screen.queryByRole('button', { name: /过期文章目录/ })).toBeNull()
   })
 })

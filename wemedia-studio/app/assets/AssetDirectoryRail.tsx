@@ -56,7 +56,7 @@ export function AssetDirectoryRail({
               onClick={() => onDirectoryChange(directory.name)}
             />
             {!directory.is_system ? (
-              <span className="mr-1 hidden shrink-0 items-center gap-0.5 group-hover:flex">
+              <span className="mr-1 flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 focus-within:opacity-100">
                 <Button aria-label={`重命名${directory.name}`} onClick={() => onRenameDirectory(directory)} size="icon-xs" variant="ghost"><Pencil /></Button>
                 <Button aria-label={`删除${directory.name}`} onClick={() => onDeleteDirectory(directory)} size="icon-xs" variant="ghost"><Trash2 className="text-destructive" /></Button>
               </span>
