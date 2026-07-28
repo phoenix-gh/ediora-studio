@@ -42,6 +42,16 @@ describe('layout components', () => {
     expect(screen.getByRole('group', { name: '发布设置操作' })).toBeTruthy()
   })
 
+  it('labels a form section when its title is a React node', () => {
+    render(
+      <FormSection title={<span>高级发布设置</span>}>
+        <input aria-label="发布账号" />
+      </FormSection>,
+    )
+
+    expect(screen.getByRole('region', { name: '高级发布设置' })).toContainElement(screen.getByLabelText('发布账号'))
+  })
+
   it('provides a labelled workspace toolbar with a far-end action group', () => {
     render(<WorkspaceToolbar title="素材" count="12" actions={<button>上传</button>}>筛选器</WorkspaceToolbar>)
 
@@ -53,6 +63,12 @@ describe('layout components', () => {
     render(<AsyncState variant={variant} title={`${variant} title`} />)
 
     expect(screen.getByRole('status', { name: `${variant} title` })).toBeTruthy()
+  })
+
+  it('names an async state from a React node title', () => {
+    render(<AsyncState variant="empty" title={<strong>没有可用素材</strong>} />)
+
+    expect(screen.getByRole('status', { name: '没有可用素材' })).toBeTruthy()
   })
 
   it.each(['neutral', 'data', 'ai', 'success', 'warning', 'danger', 'info'] as const)(

@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useId, type ReactNode } from 'react'
 
 type FormSectionProps = {
   title: ReactNode
@@ -8,7 +8,7 @@ type FormSectionProps = {
 }
 
 export function FormSection({ title, description, children, actions }: FormSectionProps) {
-  const headingId = typeof title === 'string' ? `form-section-${title}` : undefined
+  const headingId = useId()
   const actionsLabel = typeof title === 'string' ? `${title}操作` : '分区操作'
 
   return (
