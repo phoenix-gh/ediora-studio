@@ -9,7 +9,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
-import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
+import { Field, FieldError, FieldGroup, FieldLabel, FieldTitle } from "@/components/ui/field"
 import { listPublishAccounts, PublishAccount } from "@/lib/api/publish-accounts"
 import { ManualGenre } from "@/lib/api/studio"
 import { createJob } from "@/lib/api/jobs"
@@ -102,8 +102,12 @@ export function CreateTaskDialog({ open, onOpenChange }: Props) {
 
         <FieldGroup className="gap-4">
           <Field data-invalid={Boolean(errors.accountId)}>
-            <FieldLabel>发布账号 *</FieldLabel>
-            <div className="max-h-36 overflow-y-auto rounded-md border border-border bg-surface">
+            <FieldTitle id="task-account-choices-label">发布账号 <span aria-hidden="true">*</span></FieldTitle>
+            <div
+              aria-labelledby="task-account-choices-label"
+              className="max-h-36 overflow-y-auto rounded-md border border-border bg-surface"
+              role="group"
+            >
               {accounts === null ? (
                 <div className="flex items-center justify-center gap-1 p-3 text-xs text-muted-foreground">
                   <Loader2 className="animate-spin" /> 加载中
@@ -118,6 +122,7 @@ export function CreateTaskDialog({ open, onOpenChange }: Props) {
                     key={a.id}
                     type="button"
                     variant={accountId === a.id ? "secondary" : "ghost"}
+                    aria-pressed={accountId === a.id}
                     onClick={() => {
                       setAccountId(a.id)
                       setErrors(current => ({ ...current, accountId: undefined }))
@@ -162,14 +167,15 @@ export function CreateTaskDialog({ open, onOpenChange }: Props) {
           </Field>
 
           <Field>
-            <FieldLabel>体裁</FieldLabel>
-            <div className="grid grid-cols-4 gap-1.5">
+            <FieldTitle id="task-genre-choices-label">体裁</FieldTitle>
+            <div aria-labelledby="task-genre-choices-label" className="grid grid-cols-4 gap-1.5" role="group">
               {GENRES.map(g => (
                 <Button
                   key={g.value}
                   type="button"
                   onClick={() => setGenre(g.value)}
                   variant={genre === g.value ? "default" : "outline"}
+                  aria-pressed={genre === g.value}
                   size="sm"
                   className="w-full"
                 >

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -88,6 +88,29 @@ describe('dashboard components', () => {
 
     expect(screen.getByText('请选择发布账号')).toHaveAttribute('data-slot', 'field-error')
     expect(screen.getByText('请填写主题')).toHaveAttribute('data-slot', 'field-error')
+  })
+
+  it('names account and genre choice groups and exposes their selected buttons', async () => {
+    const user = userEvent.setup()
+    publishApi.listPublishAccounts.mockResolvedValueOnce([{
+      id: 'account-1', name: 'Ediora', platform: 'wechat', positioning: '', audience: '', tone: '', topic_focus: [], taboo: [],
+      word_range: {}, daily_quota: {}, image_style: '', cover_style: {}, voice_samples: [], style_rules: [], app_id: '', app_secret: '', is_active: true, created_at: '',
+    }])
+    render(<CreateTaskDialog open onOpenChange={vi.fn()} />)
+
+    const accountChoices = await screen.findByRole('group', { name: '发布账号' })
+    const genreChoices = screen.getByRole('group', { name: '体裁' })
+    const account = within(accountChoices).getByRole('button', { name: /Ediora/ })
+    const tutorial = within(genreChoices).getByRole('button', { name: '教程' })
+
+    expect(account).toHaveAttribute('aria-pressed', 'false')
+    expect(tutorial).toHaveAttribute('aria-pressed', 'false')
+    await user.click(account)
+    await user.click(tutorial)
+
+    expect(account).toHaveAttribute('aria-pressed', 'true')
+    expect(tutorial).toHaveAttribute('aria-pressed', 'true')
+    expect(within(genreChoices).getByRole('button', { name: '评论' })).toHaveAttribute('aria-pressed', 'false')
   })
 
   it('submits the established draft-job payload and closes after task creation', async () => {
