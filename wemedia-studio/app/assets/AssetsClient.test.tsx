@@ -30,8 +30,9 @@ vi.mock('@/app/drafts/MarkdownEditor', () => ({
 }))
 
 import { AssetsClient } from './AssetsClient'
+import type { CreativeAsset } from '@/lib/api/assets'
 
-const article = (id: number, title: string, content: string) => ({
+const article = (id: number, title: string, content: string): CreativeAsset => ({
   id,
   asset_type: 'article' as const,
   media_kind: '' as const,
@@ -384,7 +385,7 @@ describe('creative assets workspace', () => {
     expect(screen.getByDisplayValue('更新中的新标题')).toBeVisible()
   })
 
-  it('does not show a rejected selected-article save on another selected asset', async () => {
+  it('keeps a rejected save with its asset until that asset is edited', async () => {
     const user = userEvent.setup()
     const request = deferred<ReturnType<typeof article>>()
     mocks.updateCreativeAsset.mockReturnValue(request.promise)
@@ -396,5 +397,31 @@ describe('creative assets workspace', () => {
 
     await waitFor(() => expect(screen.queryByRole('alert')).toBeNull())
     expect(screen.getByDisplayValue('第二篇')).toBeVisible()
+    await user.click(screen.getByRole('button', { name: /第一篇/ }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('更新文章素材失败，请重试。')
+    await user.type(screen.getByLabelText('文章标题'), '已修改')
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('does not restore a stale directory from a delayed article update after directory rename', async () => {
+    const user = userEvent.setup()
+    const updateRequest = deferred<ReturnType<typeof article>>()
+    mocks.listCreativeAssetDirectories.mockResolvedValue([directory(10, '旧目录')])
+    mocks.renameCreativeAssetDirectory.mockResolvedValue(directory(10, '新目录'))
+    mocks.updateCreativeAsset.mockReturnValue(updateRequest.promise)
+    render(<AssetsClient initialAssets={[{ ...article(70, '并发文章', '正文'), directory: '旧目录', tags: ['local-tag'] }]} />)
+
+    await user.click(await screen.findByRole('button', { name: /旧目录1/ }))
+    await user.click(screen.getByRole('button', { name: '保存' }))
+    await user.click(screen.getByRole('button', { name: '重命名旧目录' }))
+    const name = screen.getByLabelText('目录名称')
+    await user.clear(name)
+    await user.type(name, '新目录')
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(screen.getByRole('toolbar', { name: '新目录工作区' })).toBeVisible())
+
+    updateRequest.resolve({ ...article(70, '服务端标题', '服务端正文'), directory: '旧目录', tags: ['stale-tag'] })
+    await waitFor(() => expect(screen.getByRole('button', { name: '保存' })).toBeEnabled())
+    await waitFor(() => expect(screen.getByRole('button', { name: /服务端标题/ })).toBeVisible())
   })
 })

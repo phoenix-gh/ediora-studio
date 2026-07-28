@@ -30,7 +30,6 @@ type MediaFilter = 'all' | 'image' | 'video' | 'audio'
 type ArticleDialogState = { busy: boolean; content: string; error: string; id: number; title: string; url: string }
 type DirectoryDialogState = { busy: boolean; error: string; id: number; item: CreativeAssetDirectory | null; name: string }
 type ConfirmationState = { action: () => Promise<void>; busy: boolean; error: string; message: string }
-type OperationError = { assetId: number; message: string }
 
 export function AssetsClient({ initialAssets }: { initialAssets: CreativeAsset[] }) {
   const [assets, setAssets] = useState(initialAssets)
@@ -44,7 +43,7 @@ export function AssetsClient({ initialAssets }: { initialAssets: CreativeAsset[]
   const [directoryDialog, setDirectoryDialog] = useState<DirectoryDialogState | null>(null)
   const [confirmation, setConfirmation] = useState<ConfirmationState | null>(null)
   const [directoryLoadError, setDirectoryLoadError] = useState('')
-  const [operationError, setOperationError] = useState<OperationError | null>(null)
+  const [operationErrors, setOperationErrors] = useState<Record<number, string>>({})
   const [savingAssetId, setSavingAssetId] = useState<number | null>(null)
   const formId = useRef(0)
 
@@ -68,7 +67,7 @@ export function AssetsClient({ initialAssets }: { initialAssets: CreativeAsset[]
     setDirectories([])
     setDirectoryLoadError('')
     setSelectedId(null)
-    setOperationError(null)
+    setOperationErrors({})
   }
 
   function openNewDirectory() {
@@ -156,25 +155,26 @@ export function AssetsClient({ initialAssets }: { initialAssets: CreativeAsset[]
 
   function changeSelectedArticle(asset: CreativeAsset) {
     setAssets(items => items.map(item => item.id === asset.id ? asset : item))
-    setOperationError(null)
+    clearOperationError(asset.id)
   }
 
   async function saveSelectedArticle() {
     if (!selected || savingAssetId !== null) return
     const assetId = selected.id
     const snapshot = { content: selected.content, title: selected.title, url: selected.url }
-    setOperationError(null)
+    clearOperationError(assetId)
     setSavingAssetId(assetId)
     try {
       const updated = await updateCreativeAsset(assetId, snapshot)
       setAssets(items => items.map(item => item.id !== assetId ? item : {
-        ...updated,
+        ...item,
         content: item.content === snapshot.content ? updated.content : item.content,
         title: item.title === snapshot.title ? updated.title : item.title,
+        updated_at: updated.updated_at,
         url: item.url === snapshot.url ? updated.url : item.url,
       }))
     } catch {
-      setOperationError({ assetId, message: '更新文章素材失败，请重试。' })
+      setOperationErrors(errors => ({ ...errors, [assetId]: '更新文章素材失败，请重试。' }))
     } finally {
       setSavingAssetId(value => value === assetId ? null : value)
     }
@@ -182,7 +182,15 @@ export function AssetsClient({ initialAssets }: { initialAssets: CreativeAsset[]
 
   function selectArticle(id: number) {
     setSelectedId(id)
-    setOperationError(null)
+  }
+
+  function clearOperationError(assetId: number) {
+    setOperationErrors(errors => {
+      if (!errors[assetId]) return errors
+      const next = { ...errors }
+      delete next[assetId]
+      return next
+    })
   }
 
   function requestArticleDelete() {
@@ -194,6 +202,7 @@ export function AssetsClient({ initialAssets }: { initialAssets: CreativeAsset[]
       action: async () => {
         await deleteCreativeAsset(selected.id)
         setAssets(items => items.filter(item => item.id !== selected.id))
+        clearOperationError(selected.id)
         setSelectedId(null)
       },
     })
@@ -233,7 +242,7 @@ export function AssetsClient({ initialAssets }: { initialAssets: CreativeAsset[]
         </div> : null}
       </WorkspaceToolbar>
       {directoryLoadError ? <p className="px-7 pt-3 text-sm text-destructive" role="alert">{directoryLoadError}</p> : null}
-      {operationError && operationError.assetId === selected?.id ? <p className="px-7 pt-3 text-sm text-destructive" role="alert">{operationError.message}</p> : null}
+      {selected && operationErrors[selected.id] ? <p className="px-7 pt-3 text-sm text-destructive" role="alert">{operationErrors[selected.id]}</p> : null}
       {type === 'article'
         ? <ArticleAssetWorkspace assets={visibleAssets} isSaving={savingAssetId !== null} onChange={changeSelectedArticle} onDelete={requestArticleDelete} onSave={saveSelectedArticle} onSelect={selectArticle} selected={selected} />
         : <MediaAssetGrid assets={visibleAssets} onPreview={setPreviewAsset} onSelect={setSelectedId} selectedId={selected?.id ?? null} />}
