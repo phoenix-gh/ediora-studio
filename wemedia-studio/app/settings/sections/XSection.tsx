@@ -15,7 +15,19 @@ import { Switch } from '@/components/ui/switch'
 import { TelegramSettingsCard } from './TelegramSettingsCard'
 import { XCredentialAccountsCard } from './XCredentialAccountsCard'
 
-const DEFAULT_ACCOUNT_VALUE = '__default_account__'
+const DEFAULT_ACCOUNT_VALUE = 'default'
+const ACCOUNT_VALUE_PREFIX = 'account:'
+
+function accountSelectValue(accountId: string) {
+  return `${ACCOUNT_VALUE_PREFIX}${encodeURIComponent(accountId)}`
+}
+
+function accountIdFromSelectValue(value: string | null) {
+  if (!value || value === DEFAULT_ACCOUNT_VALUE || !value.startsWith(ACCOUNT_VALUE_PREFIX)) {
+    return null
+  }
+  return decodeURIComponent(value.slice(ACCOUNT_VALUE_PREFIX.length))
+}
 
 export function XSection({ settings, onSaved }: { settings: AppSettings | null; onSaved: (s: AppSettings) => void }) {
   const [xInterval, setXInterval] = useState(settings?.x_collect_interval_minutes ?? 15)
@@ -83,10 +95,10 @@ export function XSection({ settings, onSaved }: { settings: AppSettings | null; 
           <Field>
             <FieldLabel htmlFor="x-response-account">建议使用的发布账号画像</FieldLabel>
             <Select
-              value={responseAccountId ?? DEFAULT_ACCOUNT_VALUE}
-              onValueChange={value => setResponseAccountId(
-                !value || value === DEFAULT_ACCOUNT_VALUE ? null : value
-              )}
+              value={responseAccountId === null
+                ? DEFAULT_ACCOUNT_VALUE
+                : accountSelectValue(responseAccountId)}
+              onValueChange={value => setResponseAccountId(accountIdFromSelectValue(value))}
             >
               <SelectTrigger id="x-response-account" className="w-full">
                 <SelectValue />
@@ -97,7 +109,9 @@ export function XSection({ settings, onSaved }: { settings: AppSettings | null; 
                   {accounts
                     .filter(account => account.is_active && ['x', 'twitter'].includes(account.platform.toLowerCase()))
                     .map(account => (
-                      <SelectItem key={account.id} value={account.id}>{account.name}</SelectItem>
+                      <SelectItem key={account.id} value={accountSelectValue(account.id)}>
+                        {account.name}
+                      </SelectItem>
                     ))}
                 </SelectGroup>
               </SelectContent>

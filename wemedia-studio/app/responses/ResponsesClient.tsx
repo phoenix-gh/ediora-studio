@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Check, Clock3, ExternalLink, FileText, MessageCircle, RefreshCw,
   Search, Sparkles, AtSign, Video, XCircle,
@@ -60,6 +60,7 @@ export function ResponsesClient({
     initialSelectedId ?? initialItems[0]?.id ?? null,
   )
   const [detail, setDetail] = useState<ResponseDetail | null>(null)
+  const [detailLoading, setDetailLoading] = useState(selectedId !== null)
   const [source, setSource] = useState(initialSource)
   const [status, setStatus] = useState('pending')
   const [search, setSearch] = useState('')
@@ -73,6 +74,22 @@ export function ResponsesClient({
   const [outputTypes, setOutputTypes] = useState<string[]>([])
   const [showCreate, setShowCreate] = useState(false)
   const [creationDetail, setCreationDetail] = useState<ResponseDetail | null>(null)
+  const selectedIdRef = useRef(selectedId)
+  const detailRequestGeneration = useRef(0)
+  const creationDetailRef = useRef(creationDetail)
+
+  useEffect(() => {
+    creationDetailRef.current = creationDetail
+  }, [creationDetail])
+
+  const selectResponse = useCallback((nextId: number | null) => {
+    if (selectedIdRef.current === nextId) return
+    selectedIdRef.current = nextId
+    detailRequestGeneration.current += 1
+    setDetailLoading(nextId !== null)
+    if (nextId === null) setDetail(null)
+    setSelectedId(nextId)
+  }, [])
 
   const loadList = useCallback(async () => {
     setLoading(true)
@@ -84,17 +101,17 @@ export function ResponsesClient({
       })
       setItems(result.items)
       setTotal(result.total)
-      setSelectedId(current => (
-        current && result.items.some(item => item.id === current)
-          ? current
-          : result.items[0]?.id ?? null
-      ))
+      const currentId = selectedIdRef.current
+      const nextId = currentId && result.items.some(item => item.id === currentId)
+        ? currentId
+        : result.items[0]?.id ?? null
+      if (nextId !== currentId) selectResponse(nextId)
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '待响应加载失败')
     } finally {
       setLoading(false)
     }
-  }, [search, source, status])
+  }, [search, selectResponse, source, status])
 
   useEffect(() => {
     const timer = window.setTimeout(() => { void loadList() }, 250)
@@ -102,14 +119,19 @@ export function ResponsesClient({
   }, [loadList])
 
   useEffect(() => {
-    if (!selectedId) {
-      return
-    }
+    if (!selectedId) return
+    const requestedId = selectedId
+    const generation = ++detailRequestGeneration.current
     void getResponse(selectedId).then(next => {
+      if (
+        detailRequestGeneration.current !== generation
+        || selectedIdRef.current !== requestedId
+        || next.id !== requestedId
+      ) return
       setTranscript(null)
       setEvents([])
       setDetail(next)
-      if (creationDetail) return
+      if (creationDetailRef.current) return
       setAccountId(
         next.analysis?.recommended_publish_account_id
         ?? next.selected_publish_account_id
@@ -121,36 +143,64 @@ export function ResponsesClient({
           ? next.analysis.recommended_output_types
           : ['expanded_article'],
       )
-    }).catch(error => toast.error(error instanceof Error ? error.message : '详情加载失败'))
-  }, [selectedId, accounts, creationDetail])
+    }).catch(error => {
+      if (detailRequestGeneration.current !== generation) return
+      toast.error(error instanceof Error ? error.message : '详情加载失败')
+    }).finally(() => {
+      if (detailRequestGeneration.current === generation) setDetailLoading(false)
+    })
+    return () => {
+      if (detailRequestGeneration.current === generation) {
+        detailRequestGeneration.current += 1
+      }
+    }
+  }, [selectedId, accounts])
 
   const selected = useMemo(
     () => items.find(item => item.id === selectedId)
       ?? (detail?.id === selectedId ? detail : null),
     [detail, items, selectedId],
   )
+  const detailReady = (
+    !detailLoading
+    && selectedId !== null
+    && detail?.id === selectedId
+  )
+  const outputCreationReady = (
+    detailReady
+    && creationDetail?.id === selectedId
+    && creationDetail.current_analysis_run_id !== null
+    && outputTypes.length > 0
+  )
 
   async function decide(action: 'adopt' | 'later' | 'not_valuable' | 'reset') {
-    const responseId = detail?.id
-    if (!responseId) return
+    if (!detailReady || !detail || selectedId === null) return
+    const responseId = selectedId
+    const generation = detailRequestGeneration.current
     try {
       await decideResponse(responseId, action, reason)
       const updated = await getResponse(responseId)
-      setDetail(updated)
-      if (action === 'adopt') {
-        setCreationDetail(updated)
-        setAccountId(
-          updated.analysis?.recommended_publish_account_id
-          ?? updated.selected_publish_account_id
-          ?? accounts[0]?.id
-          ?? '',
-        )
-        setOutputTypes(
-          updated.analysis?.recommended_output_types.length
-            ? updated.analysis.recommended_output_types
-            : ['expanded_article'],
-        )
-        setShowCreate(true)
+      if (
+        detailRequestGeneration.current === generation
+        && selectedIdRef.current === responseId
+        && updated.id === responseId
+      ) {
+        setDetail(updated)
+        if (action === 'adopt') {
+          setCreationDetail(updated)
+          setAccountId(
+            updated.analysis?.recommended_publish_account_id
+            ?? updated.selected_publish_account_id
+            ?? accounts[0]?.id
+            ?? '',
+          )
+          setOutputTypes(
+            updated.analysis?.recommended_output_types.length
+              ? updated.analysis.recommended_output_types
+              : ['expanded_article'],
+          )
+          setShowCreate(true)
+        }
       }
       await loadList()
       toast.success('处理状态已保存')
@@ -160,32 +210,53 @@ export function ResponsesClient({
   }
 
   async function openTranscript() {
-    if (!detail || detail.source_type !== 'youtube_video' || transcript) return
+    if (!detailReady || !detail || detail.source_type !== 'youtube_video' || transcript) return
+    const responseId = detail.id
+    const generation = detailRequestGeneration.current
     try {
-      setTranscript(await getTranscript(detail.source_id))
+      const nextTranscript = await getTranscript(detail.source_id)
+      if (
+        detailRequestGeneration.current === generation
+        && selectedIdRef.current === responseId
+      ) setTranscript(nextTranscript)
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '字幕加载失败')
     }
   }
 
   async function openHistory() {
-    if (!selectedId || events.length) return
+    if (!detailReady || selectedId === null || events.length) return
+    const responseId = selectedId
+    const generation = detailRequestGeneration.current
     try {
-      setEvents((await getResponseEvents(selectedId)).items)
+      const nextEvents = (await getResponseEvents(responseId)).items
+      if (
+        detailRequestGeneration.current === generation
+        && selectedIdRef.current === responseId
+      ) setEvents(nextEvents)
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '历史加载失败')
     }
   }
 
   async function submitOutputs() {
-    if (!creationDetail?.current_analysis_run_id || !outputTypes.length) return
+    if (!outputCreationReady || !creationDetail || selectedId === null) return
+    const analysisRunId = creationDetail.current_analysis_run_id
+    if (analysisRunId === null) return
+    const responseId = selectedId
+    const generation = detailRequestGeneration.current
     try {
-      await createResponseOutputs(creationDetail.id, {
-        analysis_run_id: creationDetail.current_analysis_run_id,
+      await createResponseOutputs(responseId, {
+        analysis_run_id: analysisRunId,
         publish_account_id: accountId || null,
         output_types: outputTypes,
       })
-      if (detail?.id === creationDetail.id) setDetail(await getResponse(creationDetail.id))
+      const updated = await getResponse(responseId)
+      if (
+        detailRequestGeneration.current === generation
+        && selectedIdRef.current === responseId
+        && updated.id === responseId
+      ) setDetail(updated)
       setCreationDetail(null)
       setShowCreate(false)
       toast.success('创作任务已创建')
@@ -238,7 +309,7 @@ export function ResponsesClient({
           {items.map(item => (
             <button
               key={item.id}
-              onClick={() => setSelectedId(item.id)}
+              onClick={() => selectResponse(item.id)}
               className={cn(
                 'w-full border-b px-4 py-4 text-left transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-900',
                 selectedId === item.id && 'bg-indigo-50/70 dark:bg-indigo-950/30',
@@ -270,7 +341,10 @@ export function ResponsesClient({
         {!selected && <div className="grid h-full place-items-center text-sm text-zinc-400">选择一条内容查看分析</div>}
         {selected && !detail && <div className="grid h-full place-items-center text-sm text-zinc-400">正在加载详情…</div>}
         {detail && (
-          <div className="mx-auto max-w-4xl p-7">
+          <div className="mx-auto max-w-4xl p-7" aria-busy={!detailReady}>
+            {!detailReady && (
+              <p role="status" className="mb-4 text-sm text-zinc-400">正在加载详情…</p>
+            )}
             <div className="mb-5 flex items-start gap-4">
               <div className="min-w-0 flex-1">
                 <div className="mb-2 flex items-center gap-2 text-xs text-zinc-500">
@@ -345,7 +419,12 @@ export function ResponsesClient({
                 <div className="space-y-4">
                   <div className="flex items-center gap-2"><Sparkles className="size-4 text-indigo-500" /><span className="font-medium">选择创作形式</span></div>
                   {creationDetail && <p className="text-sm text-zinc-500">将基于：{creationDetail.source_title}</p>}
-                  <select value={accountId} onChange={event => setAccountId(event.target.value)} className="h-9 w-full rounded-md border bg-transparent px-3 text-sm">
+                  <select
+                    value={accountId}
+                    disabled={!outputCreationReady}
+                    onChange={event => setAccountId(event.target.value)}
+                    className="h-9 w-full rounded-md border bg-transparent px-3 text-sm"
+                  >
                     <option value="">不指定账号</option>
                     {accounts.map(account => <option key={account.id} value={account.id}>{account.name} · {account.platform}</option>)}
                   </select>
@@ -353,6 +432,7 @@ export function ResponsesClient({
                     {['expanded_article', 'commentary', 'x_share'].map(type => (
                       <button
                         key={type}
+                        disabled={!outputCreationReady}
                         onClick={() => setOutputTypes(current => current.includes(type) ? current.filter(value => value !== type) : [...current, type])}
                         className={cn('rounded-full border px-3 py-1.5 text-sm', outputTypes.includes(type) && 'border-indigo-500 bg-indigo-50 text-indigo-700')}
                       >
@@ -362,18 +442,18 @@ export function ResponsesClient({
                   </div>
                   <div className="flex justify-end gap-2">
                     <Button variant="ghost" onClick={() => { setCreationDetail(null); setShowCreate(false) }}>取消</Button>
-                    <Button onClick={() => void submitOutputs()} disabled={!outputTypes.length}>创建任务</Button>
+                    <Button onClick={() => void submitOutputs()} disabled={!outputCreationReady}>创建任务</Button>
                   </div>
                 </div>
               ) : (
                 <>
                   <div className="mb-3 flex gap-2">
-                    <Button size="sm" onClick={() => void decide('adopt')}><Check className="mr-1 size-4" />采纳创作</Button>
-                    <Button size="sm" variant="outline" onClick={() => void decide('later')}><Clock3 className="mr-1 size-4" />稍后处理</Button>
-                    <Button size="sm" variant="ghost" onClick={() => void decide('not_valuable')}><XCircle className="mr-1 size-4" />不值得</Button>
-                    <Button size="sm" variant="ghost" className="ml-auto" onClick={() => void decide('reset')}><RefreshCw className="size-4" /></Button>
+                    <Button size="sm" disabled={!detailReady} onClick={() => void decide('adopt')}><Check className="mr-1 size-4" />采纳创作</Button>
+                    <Button size="sm" variant="outline" disabled={!detailReady} onClick={() => void decide('later')}><Clock3 className="mr-1 size-4" />稍后处理</Button>
+                    <Button size="sm" variant="ghost" disabled={!detailReady} onClick={() => void decide('not_valuable')}><XCircle className="mr-1 size-4" />不值得</Button>
+                    <Button size="sm" variant="ghost" className="ml-auto" aria-label="重置处理状态" disabled={!detailReady} onClick={() => void decide('reset')}><RefreshCw className="size-4" /></Button>
                   </div>
-                  <Input value={reason} onChange={event => setReason(event.target.value)} placeholder="可选：记录不值得或稍后处理的原因" />
+                  <Input value={reason} disabled={!detailReady} onChange={event => setReason(event.target.value)} placeholder="可选：记录不值得或稍后处理的原因" />
                 </>
               )}
               {!!detail.outputs.length && (

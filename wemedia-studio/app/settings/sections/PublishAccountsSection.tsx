@@ -70,6 +70,8 @@ interface TunnelForm {
   extra_args: string
 }
 
+type LoadState = 'loading' | 'loaded' | 'error'
+
 const PLATFORM_OPTIONS = [
   { value: 'wechat',   label: '公众号' },
   { value: 'x',        label: 'X / Twitter' },
@@ -209,8 +211,8 @@ function settingsToTunnelForm(settings: AppSettings): TunnelForm {
 
 export function PublishAccountsSection() {
   const [accounts, setAccounts] = useState<PublishAccount[]>([])
-  const [loading, setLoading] = useState(true)
-  const [loadError, setLoadError] = useState('')
+  const [accountsLoadState, setAccountsLoadState] = useState<LoadState>('loading')
+  const [tunnelLoadState, setTunnelLoadState] = useState<LoadState>('loading')
   const [tunnelForm, setTunnelForm] = useState<TunnelForm>(EMPTY_TUNNEL)
   const [savingTunnel, setSavingTunnel] = useState(false)
   const [editingId, setEditingId] = useState<string | 'new' | null>(null)
@@ -221,30 +223,78 @@ export function PublishAccountsSection() {
   const [deleteTarget, setDeleteTarget] = useState<PublishAccount | null>(null)
   const [deleteError, setDeleteError] = useState('')
   const [deleting, setDeleting] = useState(false)
+  const accountsLoadGeneration = useRef(0)
+  const tunnelLoadGeneration = useRef(0)
+
+  async function loadAccounts() {
+    const generation = ++accountsLoadGeneration.current
+    try {
+      const list = await listPublishAccounts()
+      if (accountsLoadGeneration.current !== generation) return
+      setAccounts(list)
+      setAccountsLoadState('loaded')
+    } catch {
+      if (accountsLoadGeneration.current === generation) setAccountsLoadState('error')
+    }
+  }
+
+  async function loadTunnel() {
+    const generation = ++tunnelLoadGeneration.current
+    try {
+      const settings = await getSettings()
+      if (tunnelLoadGeneration.current !== generation) return
+      setTunnelForm(settingsToTunnelForm(settings))
+      setTunnelLoadState('loaded')
+    } catch {
+      if (tunnelLoadGeneration.current === generation) setTunnelLoadState('error')
+    }
+  }
 
   useEffect(() => {
-    let active = true
-    Promise.all([
-      listPublishAccounts(),
-      getSettings(),
-    ])
-      .then(([list, settings]) => {
-        if (!active) return
+    const accountsGeneration = ++accountsLoadGeneration.current
+    void listPublishAccounts()
+      .then(list => {
+        if (accountsLoadGeneration.current !== accountsGeneration) return
         setAccounts(list)
-        setTunnelForm(settingsToTunnelForm(settings))
+        setAccountsLoadState('loaded')
       })
       .catch(() => {
-        if (active) setLoadError('发布账号配置加载失败，请稍后重试')
+        if (accountsLoadGeneration.current === accountsGeneration) {
+          setAccountsLoadState('error')
+        }
       })
-      .finally(() => {
-        if (active) setLoading(false)
+
+    const tunnelGeneration = ++tunnelLoadGeneration.current
+    void getSettings()
+      .then(settings => {
+        if (tunnelLoadGeneration.current !== tunnelGeneration) return
+        setTunnelForm(settingsToTunnelForm(settings))
+        setTunnelLoadState('loaded')
       })
+      .catch(() => {
+        if (tunnelLoadGeneration.current === tunnelGeneration) {
+          setTunnelLoadState('error')
+        }
+      })
+
     return () => {
-      active = false
+      accountsLoadGeneration.current += 1
+      tunnelLoadGeneration.current += 1
     }
   }, [])
 
+  function retryAccounts() {
+    setAccountsLoadState('loading')
+    void loadAccounts()
+  }
+
+  function retryTunnel() {
+    setTunnelLoadState('loading')
+    void loadTunnel()
+  }
+
   function startNew() {
+    if (accountsLoadState !== 'loaded') return
     editorSession.current += 1
     savingRef.current = false
     setSaving(false)
@@ -253,6 +303,7 @@ export function PublishAccountsSection() {
   }
 
   function startEdit(p: PublishAccount) {
+    if (accountsLoadState !== 'loaded') return
     editorSession.current += 1
     savingRef.current = false
     setSaving(false)
@@ -268,7 +319,7 @@ export function PublishAccountsSection() {
   }
 
   async function handleSave() {
-    if (savingRef.current) return
+    if (accountsLoadState !== 'loaded' || savingRef.current) return
     const result = editToInput(form)
     if ('error' in result) {
       toast.error(result.error)
@@ -319,12 +370,13 @@ export function PublishAccountsSection() {
   }
 
   function requestDelete(account: PublishAccount) {
+    if (accountsLoadState !== 'loaded') return
     setDeleteTarget(account)
     setDeleteError('')
   }
 
   async function confirmDelete() {
-    if (!deleteTarget || deleting) return
+    if (accountsLoadState !== 'loaded' || !deleteTarget || deleting) return
     setDeleting(true)
     setDeleteError('')
     try {
@@ -341,6 +393,7 @@ export function PublishAccountsSection() {
   }
 
   async function toggleActive(p: PublishAccount) {
+    if (accountsLoadState !== 'loaded') return
     try {
       const updated = await updatePublishAccount(p.id, { is_active: !p.is_active })
       setAccounts(prev => prev.map(a => a.id === p.id ? updated : a))
@@ -350,6 +403,7 @@ export function PublishAccountsSection() {
   }
 
   async function saveTunnel() {
+    if (tunnelLoadState !== 'loaded' || savingTunnel) return
     if (tunnelForm.enabled && (!tunnelForm.ssh_host.trim() || !tunnelForm.ssh_user.trim())) {
       toast.error('启用隧道时必须填写 SSH Host 和 SSH User')
       return
@@ -377,19 +431,8 @@ export function PublishAccountsSection() {
     }
   }
 
-  if (loading) {
-    return (
-      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-        <Loader2 className="animate-spin" /> 加载中…
-      </div>
-    )
-  }
-
   return (
     <div className="flex flex-col gap-4">
-      {loadError ? (
-        <p role="alert" className="text-sm text-destructive">{loadError}</p>
-      ) : null}
       <p className="text-sm text-muted-foreground">
         发布账号即你运营的对外内容账号（公众号/X 等）。账号画像会被创作任务复用。
         会按任务 metadata 的 <code className="font-mono">account_id</code> 读取该账号画像，
@@ -405,12 +448,36 @@ export function PublishAccountsSection() {
             <Switch
               id="wechat-tunnel-enabled"
               checked={tunnelForm.enabled}
+              disabled={tunnelLoadState !== 'loaded' || savingTunnel}
               onCheckedChange={enabled => setTunnelForm({ ...tunnelForm, enabled })}
             />
           </div>
         )}
       >
-        <FieldGroup>
+        {tunnelLoadState === 'loading' ? (
+          <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Loader2 className="size-4 animate-spin" /> 正在加载隧道配置…
+          </p>
+        ) : null}
+        {tunnelLoadState === 'error' ? (
+          <div className="flex flex-wrap items-center gap-3">
+            <p
+              role="alert"
+              aria-label="公众号发布隧道配置加载失败"
+              className="text-sm text-destructive"
+            >
+              公众号发布隧道配置加载失败，请稍后重试
+            </p>
+            <Button type="button" variant="outline" size="sm" onClick={retryTunnel}>
+              重试加载隧道配置
+            </Button>
+          </div>
+        ) : null}
+        <fieldset
+          disabled={tunnelLoadState !== 'loaded' || savingTunnel}
+          className="contents"
+        >
+          <FieldGroup>
           <div className="grid gap-3 sm:grid-cols-3">
             <Field>
               <FieldLabel htmlFor="tunnel-ssh-host">SSH Host</FieldLabel>
@@ -508,25 +575,54 @@ export function PublishAccountsSection() {
             </FieldDescription>
           </Field>
 
-          <Button variant="outline" onClick={saveTunnel} disabled={savingTunnel}>
+          <Button
+            variant="outline"
+            onClick={saveTunnel}
+            disabled={tunnelLoadState !== 'loaded' || savingTunnel}
+          >
             {savingTunnel
               ? <Loader2 data-icon="inline-start" className="animate-spin" />
               : <Check data-icon="inline-start" />}
             保存隧道配置
           </Button>
-        </FieldGroup>
+          </FieldGroup>
+        </fieldset>
       </FormSection>
 
       <FormSection
         title="账号画像"
         description="账号画像会被创作任务和发布流程复用。"
         actions={(
-          <Button variant="outline" size="sm" onClick={startNew}>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={startNew}
+            disabled={accountsLoadState !== 'loaded'}
+          >
             <Plus data-icon="inline-start" />
             新增发布账号
           </Button>
         )}
       >
+        {accountsLoadState === 'loading' ? (
+          <p role="status" className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Loader2 className="size-4 animate-spin" /> 正在加载发布账号…
+          </p>
+        ) : null}
+        {accountsLoadState === 'error' ? (
+          <div className="flex flex-wrap items-center gap-3">
+            <p
+              role="alert"
+              aria-label="发布账号加载失败"
+              className="text-sm text-destructive"
+            >
+              发布账号加载失败，请稍后重试
+            </p>
+            <Button type="button" variant="outline" size="sm" onClick={retryAccounts}>
+              重试加载发布账号
+            </Button>
+          </div>
+        ) : null}
         <div className="flex flex-col gap-2">
           {accounts.map(account => (
             <div key={account.id} className="rounded-xl border border-border bg-surface p-4">
@@ -558,6 +654,7 @@ export function PublishAccountsSection() {
                     size="icon-sm"
                     variant="ghost"
                     aria-label={`${account.is_active ? '停用' : '启用'} ${account.name}`}
+                    disabled={accountsLoadState !== 'loaded'}
                     onClick={() => toggleActive(account)}
                   >
                     {account.is_active ? <Power /> : <PowerOff />}
@@ -567,6 +664,7 @@ export function PublishAccountsSection() {
                     size="icon-sm"
                     variant="ghost"
                     aria-label={`编辑 ${account.name}`}
+                    disabled={accountsLoadState !== 'loaded'}
                     onClick={() => startEdit(account)}
                   >
                     <Pencil />
@@ -576,6 +674,7 @@ export function PublishAccountsSection() {
                     size="icon-sm"
                     variant="ghost"
                     aria-label={`删除 ${account.name}`}
+                    disabled={accountsLoadState !== 'loaded'}
                     onClick={() => requestDelete(account)}
                   >
                     <Trash2 />
@@ -584,7 +683,7 @@ export function PublishAccountsSection() {
               </div>
             </div>
           ))}
-          {accounts.length === 0 ? (
+          {accountsLoadState === 'loaded' && accounts.length === 0 ? (
             <p className="text-sm text-muted-foreground">暂无发布账号。</p>
           ) : null}
         </div>

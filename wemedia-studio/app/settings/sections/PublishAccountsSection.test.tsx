@@ -10,7 +10,7 @@ import {
   updatePublishAccount,
   type PublishAccount,
 } from '@/lib/api/publish-accounts'
-import { getSettings } from '@/lib/api/settings'
+import { getSettings, updateSettings, type AppSettings } from '@/lib/api/settings'
 import { makeSettings } from '@/lib/api/settings-test-fixtures'
 import { toast } from 'sonner'
 
@@ -249,12 +249,76 @@ describe('PublishAccountsSection', () => {
     expect(screen.getByLabelText(/名称/)).toHaveValue('编辑者')
   })
 
-  it('shows the initial account/settings load failure without an unhandled rejection', async () => {
-    vi.mocked(listPublishAccounts).mockRejectedValue(new Error('offline'))
+  it('makes loaded accounts usable while tunnel settings are still loading', async () => {
+    const settingsRequest = deferred<AppSettings>()
+    vi.mocked(listPublishAccounts).mockResolvedValue([account])
+    vi.mocked(getSettings).mockReturnValue(settingsRequest.promise)
 
     render(<PublishAccountsSection />)
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('发布账号配置加载失败，请稍后重试')
-    expect(screen.getByRole('button', { name: '新增发布账号' })).toBeInTheDocument()
+    expect(await screen.findByText('技术作者')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '新增发布账号' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: '保存隧道配置' })).toBeDisabled()
+
+    await act(async () => {
+      settingsRequest.resolve(makeSettings({ wechat_tunnel_ssh_host: 'loaded.example.com' }))
+      await settingsRequest.promise
+    })
+
+    await waitFor(() => expect(screen.getByRole('button', { name: '保存隧道配置' })).toBeEnabled())
+    expect(screen.getByLabelText('SSH Host')).toHaveValue('loaded.example.com')
+  })
+
+  it('never saves placeholder tunnel defaults after a load failure and unlocks writes only after retry', async () => {
+    const loadedSettings = makeSettings({
+      wechat_tunnel_ssh_host: 'jump.example.com',
+      wechat_tunnel_ssh_user: 'publisher',
+    })
+    vi.mocked(listPublishAccounts).mockResolvedValue([account])
+    vi.mocked(getSettings)
+      .mockRejectedValueOnce(new Error('settings offline'))
+      .mockResolvedValueOnce(loadedSettings)
+    vi.mocked(updateSettings).mockResolvedValue(loadedSettings)
+
+    render(<PublishAccountsSection />)
+
+    expect(await screen.findByRole('alert', { name: '公众号发布隧道配置加载失败' }))
+      .toHaveTextContent('公众号发布隧道配置加载失败，请稍后重试')
+    const saveTunnelButton = screen.getByRole('button', { name: '保存隧道配置' })
+    expect(saveTunnelButton).toBeDisabled()
+    fireEvent.click(saveTunnelButton)
+    expect(updateSettings).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: '重试加载隧道配置' }))
+    await waitFor(() => expect(saveTunnelButton).toBeEnabled())
+    expect(screen.getByLabelText('SSH Host')).toHaveValue('jump.example.com')
+
+    fireEvent.change(screen.getByLabelText('SSH Host'), { target: { value: 'new-jump.example.com' } })
+    fireEvent.click(saveTunnelButton)
+    await waitFor(() => expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({
+      wechat_tunnel_ssh_host: 'new-jump.example.com',
+      wechat_tunnel_ssh_user: 'publisher',
+    })))
+  })
+
+  it('keeps loaded tunnel settings writable while account loading fails and retries accounts independently', async () => {
+    vi.mocked(listPublishAccounts)
+      .mockRejectedValueOnce(new Error('accounts offline'))
+      .mockResolvedValueOnce([account])
+    vi.mocked(getSettings).mockResolvedValue(makeSettings({
+      wechat_tunnel_ssh_host: 'jump.example.com',
+    }))
+
+    render(<PublishAccountsSection />)
+
+    await waitFor(() => expect(screen.getByRole('button', { name: '保存隧道配置' })).toBeEnabled())
+    expect(screen.getByLabelText('SSH Host')).toHaveValue('jump.example.com')
+    expect(screen.getByRole('alert', { name: '发布账号加载失败' }))
+      .toHaveTextContent('发布账号加载失败，请稍后重试')
+    expect(screen.getByRole('button', { name: '新增发布账号' })).toBeDisabled()
+
+    fireEvent.click(screen.getByRole('button', { name: '重试加载发布账号' }))
+    expect(await screen.findByText('技术作者')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '新增发布账号' })).toBeEnabled()
   })
 })
