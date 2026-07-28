@@ -1,8 +1,10 @@
 'use client'
 
 import React, { forwardRef, useImperativeHandle } from 'react'
+import { commands as markdownCommands } from '@uiw/react-md-editor'
 import dynamic from 'next/dynamic'
 import { useCallback, useRef } from 'react'
+import { useTheme } from 'next-themes'
 import { toast } from 'sonner'
 
 const MDEditor = dynamic(() => import('@uiw/react-md-editor'), {
@@ -51,6 +53,8 @@ interface Props {
 export const MarkdownEditor = forwardRef<MarkdownEditorHandle, Props>(
 function MarkdownEditor({ value, onChange, minHeight = 500 }, ref) {
   const containerRef = useRef<HTMLDivElement>(null)
+  const { resolvedTheme } = useTheme()
+  const colorMode = resolvedTheme === 'dark' ? 'dark' : 'light'
 
   useImperativeHandle(ref, () => ({
     insert(text: string) {
@@ -106,7 +110,7 @@ function MarkdownEditor({ value, onChange, minHeight = 500 }, ref) {
   return (
     <div
       ref={containerRef}
-      data-color-mode="light"
+      data-color-mode={colorMode}
       className="h-full flex flex-col [&_.w-md-editor]:flex-1 [&_.w-md-editor]:border-0 [&_.w-md-editor]:rounded-none [&_.w-md-editor-toolbar]:border-b [&_.w-md-editor-toolbar]:border-zinc-200 [&_.w-md-editor-content]:flex-1 [&_.w-md-editor-input]:font-mono [&_.w-md-editor-input]:text-sm"
       onPaste={handlePaste}
       onDrop={handleDrop}
@@ -126,7 +130,7 @@ function MarkdownEditor({ value, onChange, minHeight = 500 }, ref) {
         }}
         extraCommands={[]}
         commands={[
-          ...require('@uiw/react-md-editor').commands.getCommands(),
+          ...markdownCommands.getCommands(),
           {
             name: 'upload-image',
             keyCommand: 'upload-image',
