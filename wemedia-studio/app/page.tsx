@@ -5,6 +5,7 @@ import { AlertsBar } from '@/components/features/dashboard/AlertsBar'
 import { TodayPlan } from '@/components/features/dashboard/TodayPlan'
 import { ReleasesToday } from '@/components/features/dashboard/ReleasesToday'
 import { SourceStatusGrid } from '@/components/features/dashboard/SourceStatusGrid'
+import { PageHeader } from '@/components/layout/PageHeader'
 
 export const dynamic = 'force-dynamic'
 
@@ -17,27 +18,19 @@ export default async function Dashboard() {
   const today = new Date().toLocaleDateString('zh-CN', { month: 'long', day: 'numeric', weekday: 'long' })
 
   return (
-    <div className="px-8 py-8">
-      <div className="mb-6 flex items-start justify-between">
-        <div>
-          <p className="text-xs text-zinc-400 mb-1">{today}</p>
-          <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-100">今日工作台</h1>
-          <p className="text-sm text-zinc-500 mt-1">
-            今日 +{overview.today_output.topics} 选题 / +{overview.today_output.drafts} 草稿
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <CreateTaskButton />
-        </div>
+    <div className="min-h-full bg-background">
+      <PageHeader
+        eyebrow={today}
+        title="今日工作台"
+        description={`今日 +${overview.today_output.topics} 选题 / +${overview.today_output.drafts} 草稿`}
+        actions={<CreateTaskButton />}
+      />
+      <div className="px-7 pb-8">
+        <AlertsBar alerts={overview.alerts} />
+        <TodayPlan plan={todayPlanResp.plan} />
+        <ReleasesToday releases={overview.releases_today} />
+        <SourceStatusGrid sources={overview.sources} />
       </div>
-
-      <AlertsBar alerts={overview.alerts} />
-
-      <TodayPlan plan={todayPlanResp.plan} />
-
-      <ReleasesToday releases={overview.releases_today} />
-
-      <SourceStatusGrid sources={overview.sources} />
     </div>
   )
 }

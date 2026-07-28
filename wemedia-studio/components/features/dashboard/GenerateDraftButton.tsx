@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { PenLine, RefreshCw } from 'lucide-react'
 import { toast } from 'sonner'
 import { apiFetch } from '@/lib/api/client'
+import { Button } from '@/components/ui/button'
 
 export function GenerateDraftButton({ repoId, tag }: { repoId: string; tag: string }) {
   const router = useRouter()
@@ -28,13 +29,16 @@ export function GenerateDraftButton({ repoId, tag }: { repoId: string; tag: stri
   }
 
   return (
-    <button
+    <Button
       onClick={handle}
       disabled={loading}
-      className="flex items-center gap-1 text-xs font-medium text-indigo-600 hover:text-indigo-700 disabled:opacity-50 shrink-0"
+      aria-busy={loading}
+      size="xs"
+      variant="link"
+      className="shrink-0"
     >
-      {loading ? <RefreshCw className="w-3 h-3 animate-spin" /> : <PenLine className="w-3 h-3" />}
+      {loading ? <RefreshCw className="animate-spin" data-icon="inline-start" /> : <PenLine data-icon="inline-start" />}
       {loading ? '生成中…' : '生成草稿'}
-    </button>
+    </Button>
   )
 }

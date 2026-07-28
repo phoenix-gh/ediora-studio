@@ -8,7 +8,8 @@ import {
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { cn } from "@/lib/utils"
+import { Textarea } from "@/components/ui/textarea"
+import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { listPublishAccounts, PublishAccount } from "@/lib/api/publish-accounts"
 import { ManualGenre } from "@/lib/api/studio"
 import { createJob } from "@/lib/api/jobs"
@@ -19,11 +20,6 @@ const GENRES: { value: ManualGenre; label: string }[] = [
   { value: "story", label: "故事" },
   { value: "review", label: "测评" },
 ]
-
-const TEXTAREA_CLS =
-  "w-full resize-none rounded-lg border border-zinc-200 dark:border-zinc-700 " +
-  "bg-white dark:bg-zinc-900 px-3 py-2 text-xs text-zinc-900 dark:text-zinc-100 " +
-  "placeholder:text-zinc-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
 
 interface Props {
   open: boolean
@@ -39,6 +35,7 @@ export function CreateTaskDialog({ open, onOpenChange }: Props) {
   const [genre, setGenre] = useState<ManualGenre>("commentary")
   const [note, setNote] = useState("")
   const [busy, setBusy] = useState(false)
+  const [errors, setErrors] = useState<{ accountId?: string; title?: string }>({})
 
   useEffect(() => {
     if (!open || accounts) return
@@ -55,15 +52,16 @@ export function CreateTaskDialog({ open, onOpenChange }: Props) {
     setIdea("")
     setGenre("commentary")
     setNote("")
+    setErrors({})
   }
 
   async function handleSubmit() {
-    if (!accountId) {
-      toast.error("请选择发布账号")
-      return
+    const nextErrors = {
+      accountId: accountId ? undefined : "请选择发布账号",
+      title: title.trim() ? undefined : "请填写主题",
     }
-    if (!title.trim()) {
-      toast.error("请填写主题")
+    setErrors(nextErrors)
+    if (nextErrors.accountId || nextErrors.title) {
       return
     }
     setBusy(true)
@@ -91,10 +89,10 @@ export function CreateTaskDialog({ open, onOpenChange }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent size="md">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-1.5">
-            <PenLine className="w-4 h-4 text-indigo-500" />
+            <PenLine className="text-primary" />
             发布创作任务
           </DialogTitle>
           <DialogDescription>
@@ -102,98 +100,102 @@ export function CreateTaskDialog({ open, onOpenChange }: Props) {
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-3">
-          <div>
-            <div className="text-xs font-medium text-zinc-500 mb-1.5">发布账号 *</div>
-            <div className="max-h-36 overflow-y-auto border border-zinc-200 dark:border-zinc-800 rounded-md">
+        <FieldGroup className="gap-4">
+          <Field data-invalid={Boolean(errors.accountId)}>
+            <FieldLabel>发布账号 *</FieldLabel>
+            <div className="max-h-36 overflow-y-auto rounded-md border border-border bg-surface">
               {accounts === null ? (
-                <div className="p-3 text-center text-xs text-zinc-400 flex items-center justify-center gap-1">
-                  <Loader2 className="w-3 h-3 animate-spin" /> 加载中
+                <div className="flex items-center justify-center gap-1 p-3 text-xs text-muted-foreground">
+                  <Loader2 className="animate-spin" /> 加载中
                 </div>
               ) : accounts.length === 0 ? (
-                <div className="p-3 text-center text-xs text-zinc-400">
+                <div className="p-3 text-center text-xs text-muted-foreground">
                   暂无启用账号 · 去「设置 → 发布账号」配置
                 </div>
               ) : (
                 accounts.map(a => (
-                  <button
+                  <Button
                     key={a.id}
                     type="button"
-                    onClick={() => setAccountId(a.id)}
-                    className={cn(
-                      "w-full text-left px-2 py-1.5 text-xs hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors",
-                      accountId === a.id && "bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300",
-                    )}
+                    variant={accountId === a.id ? "secondary" : "ghost"}
+                    onClick={() => {
+                      setAccountId(a.id)
+                      setErrors(current => ({ ...current, accountId: undefined }))
+                    }}
+                    className="h-auto w-full justify-start rounded-none px-2 py-1.5 text-left text-xs first:rounded-t-md last:rounded-b-md"
                   >
                     <div className="font-medium truncate">{a.name}</div>
-                    <div className="text-[10px] text-zinc-400 truncate">
+                    <div className="truncate text-[10px] text-muted-foreground">
                       {a.platform} · {a.positioning || "（无定位描述）"}
                     </div>
-                  </button>
+                  </Button>
                 ))
               )}
             </div>
-          </div>
+            <FieldError>{errors.accountId}</FieldError>
+          </Field>
 
-          <div>
-            <div className="text-xs font-medium text-zinc-500 mb-1.5">主题 *</div>
+          <Field data-invalid={Boolean(errors.title)}>
+            <FieldLabel htmlFor="task-title">主题 *</FieldLabel>
             <Input
+              id="task-title"
               placeholder="比如「为什么本地优先软件又火了」"
               value={title}
-              onChange={e => setTitle(e.target.value)}
-              className="h-8 text-xs"
+              onChange={e => {
+                setTitle(e.target.value)
+                setErrors(current => ({ ...current, title: undefined }))
+              }}
+              aria-invalid={Boolean(errors.title)}
             />
-          </div>
+            <FieldError>{errors.title}</FieldError>
+          </Field>
 
-          <div>
-            <div className="text-xs font-medium text-zinc-500 mb-1.5">想法与素材（可选）</div>
-            <textarea
+          <Field>
+            <FieldLabel htmlFor="task-idea">想法与素材（可选）</FieldLabel>
+            <Textarea
+              id="task-idea"
               value={idea}
               onChange={e => setIdea(e.target.value)}
               placeholder="写下你的角度、想法，或粘贴参考素材；留空则由策划编辑自己搜料"
               rows={5}
-              className={TEXTAREA_CLS}
             />
-          </div>
+          </Field>
 
-          <div>
-            <div className="text-xs font-medium text-zinc-500 mb-1.5">体裁</div>
+          <Field>
+            <FieldLabel>体裁</FieldLabel>
             <div className="grid grid-cols-4 gap-1.5">
               {GENRES.map(g => (
-                <button
+                <Button
                   key={g.value}
                   type="button"
                   onClick={() => setGenre(g.value)}
-                  className={cn(
-                    "py-1.5 rounded-md border text-xs transition-colors",
-                    genre === g.value
-                      ? "border-indigo-500 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-300 font-medium"
-                      : "border-zinc-200 dark:border-zinc-800 text-zinc-500 hover:border-zinc-300 dark:hover:border-zinc-700",
-                  )}
+                  variant={genre === g.value ? "default" : "outline"}
+                  size="sm"
+                  className="w-full"
                 >
                   {g.label}
-                </button>
+                </Button>
               ))}
             </div>
-          </div>
+          </Field>
 
-          <div>
-            <div className="text-xs font-medium text-zinc-500 mb-1.5">备注（可选）</div>
+          <Field>
+            <FieldLabel htmlFor="task-note">备注（可选）</FieldLabel>
             <Input
+              id="task-note"
               placeholder="给策划编辑的额外指令，比如「别写成科普」"
               value={note}
               onChange={e => setNote(e.target.value)}
-              className="h-8 text-xs"
             />
-          </div>
-        </div>
+          </Field>
+        </FieldGroup>
 
         <DialogFooter>
           <Button variant="outline" size="sm" onClick={() => onOpenChange(false)} disabled={busy}>
             取消
           </Button>
-          <Button size="sm" onClick={handleSubmit} disabled={busy || !accountId || !title.trim()}>
-            {busy && <Loader2 className="w-3 h-3 animate-spin mr-1" />}
+          <Button size="sm" onClick={handleSubmit} disabled={busy}>
+            {busy && <Loader2 className="animate-spin" data-icon="inline-start" />}
             发布
           </Button>
         </DialogFooter>
@@ -207,8 +209,8 @@ export function CreateTaskButton() {
   const [open, setOpen] = useState(false)
   return (
     <>
-      <Button size="sm" variant="outline" onClick={() => setOpen(true)} className="gap-1.5">
-        <Plus className="w-3.5 h-3.5" />
+      <Button size="sm" variant="outline" onClick={() => setOpen(true)}>
+        <Plus data-icon="inline-start" />
         发布创作任务
       </Button>
       <CreateTaskDialog open={open} onOpenChange={setOpen} />
