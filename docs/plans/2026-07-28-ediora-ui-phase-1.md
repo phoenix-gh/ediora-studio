@@ -1035,8 +1035,10 @@ git commit -m "feat: unify Ediora settings experience"
 - Create: `wemedia-studio/e2e/ui-foundations.spec.ts`
 - Modify: `wemedia-studio/.gitignore`
 - Modify: `wemedia-studio/components/features/Sidebar.tsx`
+- Modify: `wemedia-studio/next.config.ts`
 - Modify: `wemedia-studio/package.json`
 - Modify: `wemedia-studio/pnpm-lock.yaml`
+- Modify: `wemedia-studio/vitest.config.ts`
 
 **Interfaces:**
 - Produces: migration-scope policy guard for Phase 1 files.
@@ -1134,6 +1136,9 @@ export default defineConfig({
 
 Store screenshots under `test-results/ui-foundations/`; do not commit generated PNG files.
 Also ignore `test-results/` and `playwright-report/` in the frontend `.gitignore`.
+Allow the documented `127.0.0.1` development origin in Next.js so the browser
+suite exercises a hydrated application rather than SSR-only HTML. Exclude
+`e2e/**` from Vitest discovery so Playwright specs remain owned by Playwright.
 
 - [ ] **Step 6: Run full automated verification**
 
@@ -1198,6 +1203,7 @@ git add wemedia-studio/lib/ui/ui-policy.test.ts \
   wemedia-studio/playwright.config.ts \
   wemedia-studio/e2e/ui-foundations.spec.ts \
   wemedia-studio/.gitignore wemedia-studio/components/features/Sidebar.tsx \
+  wemedia-studio/next.config.ts wemedia-studio/vitest.config.ts \
   wemedia-studio/package.json wemedia-studio/pnpm-lock.yaml
 git commit -m "test: verify Ediora UI foundations"
 ```
