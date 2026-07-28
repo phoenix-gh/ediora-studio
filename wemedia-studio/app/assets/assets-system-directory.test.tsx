@@ -73,7 +73,7 @@ describe('digital human system asset directory', () => {
   it('shows a lock and removes mutation controls only for the system folder', async () => {
     render(<AssetsClient initialAssets={[]} />)
 
-    fireEvent.click(screen.getByRole('button', { name: '多媒体' }))
+    fireEvent.click(screen.getByRole('tab', { name: '多媒体' }))
 
     expect(await screen.findByLabelText('系统目录')).toBeTruthy()
     expect(screen.queryByRole('button', {

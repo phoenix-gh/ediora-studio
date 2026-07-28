@@ -1,14 +1,48 @@
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
-import { describe, expect, it } from 'vitest'
+// @vitest-environment jsdom
 
-const source = readFileSync(resolve(process.cwd(), 'app/assets/AssetsClient.tsx'), 'utf8')
+import { createElement } from 'react'
+import { render, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+const mocks = vi.hoisted(() => ({
+  listCreativeAssetDirectories: vi.fn(),
+}))
+
+vi.mock('@/lib/api/assets', () => ({
+  creativeAssetUrl: (url: string) => url,
+  listCreativeAssetDirectories: mocks.listCreativeAssetDirectories,
+}))
+
+import { AssetsClient } from './AssetsClient'
 
 describe('creative asset media layout', () => {
-  it('opens multimedia cards in a dialog and keeps the article preview separate', () => {
-    expect(source).toContain('onDoubleClick={() => setPreviewAsset(item)}')
-    expect(source).toContain('<Dialog open={previewAsset !== null}')
-    expect(source).toContain("type === 'article' && <aside")
-    expect(source).toContain('grid-cols-3 content-start gap-3 p-4 md:grid-cols-6 xl:grid-cols-8')
+  beforeEach(() => {
+    mocks.listCreativeAssetDirectories.mockResolvedValue([])
+  })
+
+  it('opens previews in the large application dialog on double click', async () => {
+    const user = userEvent.setup()
+    render(createElement(AssetsClient, { initialAssets: [{
+      id: 1,
+      asset_type: 'media',
+      media_kind: 'audio',
+      title: '采访录音',
+      content: '',
+      url: '/api/uploads/interview.mp3',
+      media_type: 'audio/mpeg',
+      filename: 'interview.mp3',
+      directory: '',
+      tags: [],
+      source: '',
+      created_at: '',
+      updated_at: '',
+    }] }))
+
+    await user.click(screen.getByRole('tab', { name: '多媒体' }))
+    const card = screen.getByRole('button', { name: /采访录音/ })
+    await user.dblClick(card)
+
+    expect(await screen.findByRole('dialog')).toHaveAttribute('data-size', 'lg')
   })
 })
