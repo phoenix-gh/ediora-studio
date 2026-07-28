@@ -1,6 +1,6 @@
 'use client'
 
-import { useId, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { Loader2, Eye, EyeOff, RefreshCw, FlaskConical, CheckCircle, XCircle, Save } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
@@ -36,11 +36,18 @@ export function AISection({ settings, onSaved }: { settings: AppSettings | null;
   const modelInputRef = useRef<HTMLInputElement>(null)
   const modelListboxId = useId()
   const modelRequestSequence = useRef(0)
+  const modelBlurTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const [testState, setTestState] = useState<TestState>('idle')
   const [testMsg, setTestMsg]     = useState('')
 
   const currentPreset = providers.find(p => p.key === provider)
+
+  useEffect(() => () => {
+    if (modelBlurTimer.current !== null) {
+      clearTimeout(modelBlurTimer.current)
+    }
+  }, [])
 
   function handleProviderChange(key: string) {
     modelRequestSequence.current += 1
@@ -49,16 +56,14 @@ export function AISection({ settings, onSaved }: { settings: AppSettings | null;
     setBaseUrl(preset?.base_url ?? '')
     setModel('')
     setModelList([])
-    setShowModelList(false)
-    setActiveModelIndex(-1)
+    closeModelList()
     setFetchingModels(false)
   }
 
   async function handleFetchModels() {
     const requestId = ++modelRequestSequence.current
     setFetchingModels(true)
-    setShowModelList(false)
-    setActiveModelIndex(-1)
+    closeModelList()
     try {
       const res = await fetchProviderModels({
         provider,
@@ -68,7 +73,7 @@ export function AISection({ settings, onSaved }: { settings: AppSettings | null;
       if (requestId !== modelRequestSequence.current) return
       if (res.ok && res.models.length) {
         setModelList(res.models)
-        setShowModelList(true)
+        openModelList()
         toast.success(`获取到 ${res.models.length} 个可用模型`)
       } else {
         toast.error(res.error ?? '未返回模型列表')
@@ -131,9 +136,29 @@ export function AISection({ settings, onSaved }: { settings: AppSettings | null;
 
   const modelListOpen = showModelList && filteredModels.length > 0
 
+  function cancelModelBlurTimer() {
+    if (modelBlurTimer.current === null) return
+    clearTimeout(modelBlurTimer.current)
+    modelBlurTimer.current = null
+  }
+
+  function openModelList() {
+    cancelModelBlurTimer()
+    setShowModelList(true)
+  }
+
   function closeModelList() {
+    cancelModelBlurTimer()
     setShowModelList(false)
     setActiveModelIndex(-1)
+  }
+
+  function scheduleModelListClose() {
+    cancelModelBlurTimer()
+    modelBlurTimer.current = setTimeout(() => {
+      modelBlurTimer.current = null
+      closeModelList()
+    }, 150)
   }
 
   function selectModel(item: string) {
@@ -154,7 +179,7 @@ export function AISection({ settings, onSaved }: { settings: AppSettings | null;
 
     if (event.key === 'ArrowDown') {
       event.preventDefault()
-      setShowModelList(true)
+      openModelList()
       setActiveModelIndex(current => (
         current < filteredModels.length - 1 ? current + 1 : current
       ))
@@ -163,7 +188,7 @@ export function AISection({ settings, onSaved }: { settings: AppSettings | null;
 
     if (event.key === 'ArrowUp') {
       event.preventDefault()
-      setShowModelList(true)
+      openModelList()
       setActiveModelIndex(current => (
         current === -1 ? filteredModels.length - 1 : Math.max(current - 1, 0)
       ))
@@ -267,11 +292,11 @@ export function AISection({ settings, onSaved }: { settings: AppSettings | null;
                 value={model}
                 onChange={event => {
                   setModel(event.target.value)
-                  setShowModelList(true)
+                  openModelList()
                   setActiveModelIndex(-1)
                 }}
-                onFocus={() => modelList.length && setShowModelList(true)}
-                onBlur={() => setTimeout(closeModelList, 150)}
+                onFocus={() => modelList.length && openModelList()}
+                onBlur={scheduleModelListClose}
                 onKeyDown={handleModelKeyDown}
                 role="combobox"
                 aria-autocomplete="list"

@@ -79,6 +79,8 @@ async function renderWithModelSuggestions() {
 describe('AISection', () => {
   afterEach(() => {
     cleanup()
+    vi.clearAllTimers()
+    vi.useRealTimers()
     vi.clearAllMocks()
   })
 
@@ -213,6 +215,48 @@ describe('AISection', () => {
 
     expect(modelInput).toHaveValue('gpt-beta')
     expect(screen.queryByText('gpt-alpha')).not.toBeInTheDocument()
+  })
+
+  it('keeps model suggestions open when the input is refocused before the blur delay expires', async () => {
+    const { modelInput } = await renderWithModelSuggestions()
+    vi.useFakeTimers()
+
+    fireEvent.blur(modelInput)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(100)
+    })
+    fireEvent.focus(modelInput)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(50)
+    })
+
+    expect(screen.getByRole('listbox', { name: '可用模型' })).toBeInTheDocument()
+    expect(modelInput).toHaveAttribute('aria-expanded', 'true')
+  })
+
+  it('keeps newly fetched model suggestions open after an earlier blur delay expires', async () => {
+    const modelRequest = deferred<Awaited<ReturnType<typeof fetchProviderModels>>>()
+    vi.mocked(fetchProviderModels).mockReturnValue(modelRequest.promise)
+    render(<AISection settings={{ ...settings, llm_model: '' }} onSaved={vi.fn()} />)
+    const modelInput = screen.getByLabelText('模型')
+    vi.useFakeTimers()
+
+    fireEvent.focus(modelInput)
+    fireEvent.blur(modelInput)
+    fireEvent.click(screen.getByRole('button', { name: '获取可用模型' }))
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(100)
+      modelRequest.resolve({ ok: true, models: ['newly-fetched-model'] })
+      await modelRequest.promise
+    })
+    expect(screen.getByRole('listbox', { name: '可用模型' })).toBeInTheDocument()
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(50)
+    })
+
+    expect(screen.getByRole('listbox', { name: '可用模型' })).toBeInTheDocument()
+    expect(modelInput).toHaveAttribute('aria-expanded', 'true')
   })
 
   it('offers an adjacent image save action that persists the shared AI payload', async () => {
