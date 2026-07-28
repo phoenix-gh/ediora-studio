@@ -60,10 +60,10 @@ export function Sidebar() {
 
   return (
     <aside className="fixed left-0 top-0 flex h-screen w-[var(--sidebar-width)] flex-col border-r border-border bg-surface">
-      <div className="border-b border-border px-4 py-5 max-[1024px]:px-3">
+      <div className="sidebar-compact-header border-b border-border px-4 py-5">
         <div className="flex items-center gap-2">
           <img src="/brand/ediora-mark.svg" alt="" aria-hidden="true" className="w-6 h-6 flex-shrink-0" />
-          <span className="text-sm font-semibold max-[1024px]:sr-only">{PRODUCT_NAME}</span>
+          <span className="sidebar-compact-label text-sm font-semibold">{PRODUCT_NAME}</span>
         </div>
       </div>
 
@@ -71,7 +71,7 @@ export function Sidebar() {
         {sections.map((section, i) => (
           <div key={i} className={cn(i > 0 && 'mt-3 border-t border-border pt-3')}>
             {section.title && (
-              <p className="px-3 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-foreground-subtle max-[1024px]:sr-only">
+              <p className="sidebar-compact-label px-3 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-foreground-subtle">
                 {section.title}
               </p>
             )}
@@ -92,9 +92,9 @@ export function Sidebar() {
                     )}
                   >
                     <Icon className="w-4 h-4 flex-shrink-0" />
-                    <span className="max-[1024px]:sr-only">{label}</span>
+                    <span className="sidebar-compact-label">{label}</span>
                     {disabled && (
-                      <span className="ml-auto text-[10px] text-foreground-subtle max-[1024px]:sr-only">即将上线</span>
+                      <span className="sidebar-compact-label ml-auto text-[10px] text-foreground-subtle">即将上线</span>
                     )}
                   </Link>
                 )
@@ -116,7 +116,7 @@ export function Sidebar() {
           )}
         >
           <Settings className="w-4 h-4" />
-          <span className="max-[1024px]:sr-only">设置</span>
+          <span className="sidebar-compact-label">设置</span>
         </Link>
       </div>
     </aside>
