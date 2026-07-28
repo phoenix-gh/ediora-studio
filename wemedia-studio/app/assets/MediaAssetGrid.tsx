@@ -11,7 +11,7 @@ type MediaAssetGridProps = {
 }
 
 export function MediaAssetGrid({ assets, selectedId, onSelect, onPreview }: MediaAssetGridProps) {
-  return <div className="grid min-h-0 flex-1 grid-cols-3 content-start gap-3 overflow-y-auto p-4 md:grid-cols-6 xl:grid-cols-8" data-slot="media-asset-grid">
+  return <div className="grid min-h-0 flex-1 auto-rows-max grid-cols-3 content-start gap-3 overflow-y-auto p-4 md:grid-cols-6 xl:grid-cols-8" data-slot="media-asset-grid">
     {assets.map(asset => <button key={asset.id} className={cn('overflow-hidden rounded-xl border border-border bg-surface text-left transition-colors hover:border-primary/50', selectedId === asset.id && 'border-primary ring-1 ring-primary')} onClick={() => onSelect(asset.id)} onDoubleClick={() => onPreview(asset)} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); onPreview(asset) } }} title="双击预览，按 Enter 预览" type="button">
       <MediaThumbnail asset={asset} />
       <div className="p-2.5"><p className="truncate text-xs font-medium">{asset.title}</p><p className="mt-1 flex items-center gap-1 text-[10px] text-muted-foreground"><MediaIcon kind={asset.media_kind} /><span>{asset.media_kind === 'image' ? '图片' : asset.media_kind === 'video' ? '视频' : '音频'}</span></p></div>
