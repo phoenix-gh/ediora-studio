@@ -1,10 +1,18 @@
 // @vitest-environment jsdom
 
 import { useState } from 'react'
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog'
 import type { CoverStyle } from '@/lib/api/publish-accounts'
 
 import { CoverStyleEditor } from './CoverStyleEditor'
@@ -85,6 +93,54 @@ describe('CoverStyleEditor', () => {
     await user.keyboard('(')
 
     expect(onCoverStyleChange).toHaveBeenLastCalledWith({ type: '' })
+  })
+
+  it('selects through a Dialog portal and returns focus to the trigger', async () => {
+    const user = userEvent.setup()
+    const onCoverStyleChange = vi.fn()
+
+    function DialogHarness() {
+      const [coverStyle, setCoverStyle] = useState<CoverStyle>({ type: 'minimal' })
+      return (
+        <Dialog>
+          <DialogTrigger>编辑封面风格</DialogTrigger>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>封面风格</DialogTitle>
+              <DialogDescription>设置发布账号的封面风格。</DialogDescription>
+            </DialogHeader>
+            <CoverStyleEditor
+              coverStyle={coverStyle}
+              onCoverStyleChange={value => {
+                onCoverStyleChange(value)
+                setCoverStyle(value)
+              }}
+              motifsText=""
+              onMotifsTextChange={vi.fn()}
+              negativeText=""
+              onNegativeTextChange={vi.fn()}
+            />
+          </DialogContent>
+        </Dialog>
+      )
+    }
+
+    render(<DialogHarness />)
+    const trigger = screen.getByRole('button', { name: '编辑封面风格' })
+    await user.click(trigger)
+
+    const typeSelect = await screen.findByLabelText('类型 type')
+    typeSelect.focus()
+    await user.keyboard('{Enter}')
+    expect(await screen.findByRole('listbox')).toBeVisible()
+    await user.keyboard('h{Enter}')
+
+    expect(onCoverStyleChange).toHaveBeenLastCalledWith({ type: 'hero' })
+    await waitFor(() => expect(screen.queryByRole('listbox')).not.toBeInTheDocument())
+    expect(typeSelect).toHaveFocus()
+    await user.keyboard('{Escape}')
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(trigger).toHaveFocus()
   })
 
   it('updates both labelled textareas without changing callback payloads', async () => {

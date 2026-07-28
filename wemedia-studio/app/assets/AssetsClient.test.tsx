@@ -169,6 +169,16 @@ describe('creative assets workspace', () => {
     expect(await screen.findByRole('dialog')).toHaveAttribute('data-size', 'lg')
   })
 
+  it('keeps the media grid reachable by owning the remaining workspace scroll', async () => {
+    const user = userEvent.setup()
+    render(<AssetsClient initialAssets={[image]} />)
+
+    await user.click(screen.getByRole('tab', { name: '多媒体' }))
+
+    const grid = screen.getByRole('button', { name: /封面图/ }).closest('[data-slot="media-asset-grid"]')
+    expect(grid).toHaveClass('min-h-0', 'flex-1', 'overflow-y-auto')
+  })
+
   it('marks the active media filter and only shows matching media', async () => {
     const user = userEvent.setup()
     const audio = { ...image, id: 4, media_kind: 'audio' as const, title: '采访录音' }
