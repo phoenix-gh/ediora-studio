@@ -716,6 +716,7 @@ git commit -m "feat: add unified Ediora app shell"
 - Modify: `wemedia-studio/components/features/dashboard/SourceStatusGrid.tsx`
 - Modify: `wemedia-studio/components/features/dashboard/GenerateDraftButton.tsx`
 - Modify: `wemedia-studio/components/features/CreateTaskDialog.tsx`
+- Modify: `wemedia-studio/components/ui/alert.tsx`
 
 **Interfaces:**
 - Consumes: `PageHeader`, `AsyncState`, `StatusBadge`, semantic `Alert`, updated `Button`, `Textarea`, and sized `DialogContent`.
@@ -752,6 +753,8 @@ Apply exact semantic substitutions:
 - Subtle meta: `text-foreground-subtle`.
 - Primary action/link: `text-primary` or default `Button`.
 - Alerts: use `Alert` with `danger | warning | info` semantics.
+- Extend the shared `Alert` variants with `danger | warning | info` while
+  preserving the existing `default | destructive` API.
 - Plan/release rows: use standard 64px rows and `StatusBadge`.
 - Empty sections: use `AsyncState variant="empty"`.
 - Create Task dialog: `size="md"`, `Input`, `Textarea`, inline field errors, primary submit button.
