@@ -7,9 +7,9 @@ type AppShellProps = {
 
 export function AppShell({ sidebar, children }: AppShellProps) {
   return (
-    <div className="min-h-dvh bg-background text-foreground">
+    <div className="h-dvh overflow-hidden bg-background text-foreground">
       {sidebar}
-      <main data-slot="app-content" className="min-h-dvh pl-[var(--sidebar-width)]">
+      <main data-slot="app-content" className="h-dvh overflow-y-auto pl-[var(--sidebar-width)]">
         {children}
       </main>
     </div>

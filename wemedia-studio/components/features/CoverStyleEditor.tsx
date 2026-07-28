@@ -1,8 +1,9 @@
 'use client'
 
-import { Label } from '@/components/ui/label'
-import { cn } from '@/lib/utils'
-import { CoverStyle } from '@/lib/api/publish-accounts'
+import { Field, FieldLabel } from '@/components/ui/field'
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Textarea } from '@/components/ui/textarea'
+import type { CoverStyle } from '@/lib/api/publish-accounts'
 
 export const COVER_TYPE_OPTS      = ['', 'hero', 'conceptual', 'typography', 'metaphor', 'scene', 'minimal']
 export const COVER_PALETTE_OPTS   = ['', 'warm', 'elegant', 'cool', 'dark', 'earth', 'vivid', 'pastel', 'mono', 'retro', 'duotone', 'macaron']
@@ -10,6 +11,8 @@ export const COVER_RENDERING_OPTS = ['', 'flat-vector', 'hand-drawn', 'painterly
 export const COVER_TEXT_OPTS      = ['', 'none', 'title-only', 'title-subtitle', 'text-rich']
 export const COVER_MOOD_OPTS      = ['', 'subtle', 'balanced', 'bold']
 export const COVER_RATIO_OPTS     = ['', '16:9', '5:2', '1:1', '2.35:1', '3:4', '4:3', '9:16']
+
+const UNSET_COVER_STYLE_VALUE = '__cover_style_unset__'
 
 export interface CoverStyleEditorProps {
   coverStyle: CoverStyle
@@ -39,12 +42,12 @@ export function buildCoverStyleFromEditor(
 }
 
 const DIMS = [
-  { key: 'type',         label: '类型 type',       opts: COVER_TYPE_OPTS      },
-  { key: 'palette',      label: '配色 palette',     opts: COVER_PALETTE_OPTS   },
-  { key: 'rendering',    label: '渲染 rendering',   opts: COVER_RENDERING_OPTS },
-  { key: 'text',         label: '文字 text',        opts: COVER_TEXT_OPTS      },
-  { key: 'mood',         label: '气氛 mood',        opts: COVER_MOOD_OPTS      },
-  { key: 'aspect_ratio', label: '长宽比 aspect',    opts: COVER_RATIO_OPTS     },
+  { id: 'cover-style-type', key: 'type', label: '类型 type', opts: COVER_TYPE_OPTS },
+  { id: 'cover-style-palette', key: 'palette', label: '配色 palette', opts: COVER_PALETTE_OPTS },
+  { id: 'cover-style-rendering', key: 'rendering', label: '渲染 rendering', opts: COVER_RENDERING_OPTS },
+  { id: 'cover-style-text', key: 'text', label: '文字 text', opts: COVER_TEXT_OPTS },
+  { id: 'cover-style-mood', key: 'mood', label: '气氛 mood', opts: COVER_MOOD_OPTS },
+  { id: 'cover-style-aspect-ratio', key: 'aspect_ratio', label: '长宽比 aspect', opts: COVER_RATIO_OPTS },
 ] as const
 
 export function CoverStyleEditor({
@@ -55,51 +58,59 @@ export function CoverStyleEditor({
   return (
     <div className="space-y-3">
       <div className="grid grid-cols-3 gap-3">
-        {DIMS.map(({ key, label, opts }) => (
-          <div key={key} className="space-y-1">
-            <Label className="text-xs">{label}</Label>
-            <select
-              value={coverStyle[key] ?? ''}
-              onChange={e => onCoverStyleChange({ ...coverStyle, [key]: e.target.value })}
-              className="h-8 w-full rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-2 text-sm"
+        {DIMS.map(({ id, key, label, opts }) => (
+          <Field key={key}>
+            <FieldLabel htmlFor={id}>{label}</FieldLabel>
+            <Select
+              value={coverStyle[key] || UNSET_COVER_STYLE_VALUE}
+              onValueChange={value => onCoverStyleChange({
+                ...coverStyle,
+                [key]: value === UNSET_COVER_STYLE_VALUE ? '' : value ?? '',
+              })}
             >
-              {opts.map(o => (
-                <option key={o} value={o}>{o || '(未设)'}</option>
-              ))}
-            </select>
-          </div>
+              <SelectTrigger id={id} className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  {opts.map(option => (
+                    <SelectItem
+                      key={option || UNSET_COVER_STYLE_VALUE}
+                      value={option || UNSET_COVER_STYLE_VALUE}
+                    >
+                      {option || '(未设)'}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          </Field>
         ))}
       </div>
 
-      <div className="space-y-1">
-        <Label className="text-xs">视觉签名（signature_motifs，一行一个）</Label>
-        <textarea
+      <Field>
+        <FieldLabel htmlFor="cover-style-signature-motifs">视觉签名（signature_motifs，一行一个）</FieldLabel>
+        <Textarea
+          id="cover-style-signature-motifs"
           value={motifsText}
           onChange={e => onMotifsTextChange(e.target.value)}
           placeholder={'always include a small purple chunky lobster icon in lower-right corner\nthin 1px grid background, very subtle'}
           rows={3}
-          className={cn(
-            'w-full resize-none rounded-lg border border-zinc-200 dark:border-zinc-700',
-            'bg-white dark:bg-zinc-800 px-3 py-2 text-sm',
-            'focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-400',
-          )}
+          className="resize-none"
         />
-      </div>
+      </Field>
 
-      <div className="space-y-1">
-        <Label className="text-xs">禁止元素（negative，一行一个）</Label>
-        <textarea
+      <Field>
+        <FieldLabel htmlFor="cover-style-negative">禁止元素（negative，一行一个）</FieldLabel>
+        <Textarea
+          id="cover-style-negative"
           value={negativeText}
           onChange={e => onNegativeTextChange(e.target.value)}
           placeholder={'no realistic humans\nno stock photo feel'}
           rows={2}
-          className={cn(
-            'w-full resize-none rounded-lg border border-zinc-200 dark:border-zinc-700',
-            'bg-white dark:bg-zinc-800 px-3 py-2 text-sm',
-            'focus:outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-400',
-          )}
+          className="resize-none"
         />
-      </div>
+      </Field>
     </div>
   )
 }

@@ -3,6 +3,7 @@ import { render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 
 import { AsyncState } from './AsyncState'
+import { AppShell } from './AppShell'
 import { FormSection } from './FormSection'
 import { PageHeader } from './PageHeader'
 import { SplitWorkspace } from './SplitWorkspace'
@@ -10,6 +11,18 @@ import { StatusBadge } from './StatusBadge'
 import { WorkspaceToolbar } from './WorkspaceToolbar'
 
 describe('layout components', () => {
+  it('keeps document overflow at the viewport shell and scrolls ordinary pages in main content', () => {
+    render(
+      <AppShell sidebar={<aside>Navigation</aside>}>
+        <div>Page content</div>
+      </AppShell>,
+    )
+
+    const content = screen.getByText('Page content').closest('main')
+    expect(content).toHaveClass('h-dvh', 'overflow-y-auto')
+    expect(content?.parentElement).toHaveClass('h-dvh', 'overflow-hidden')
+  })
+
   it('renders one page heading and a named action region', () => {
     render(<PageHeader title="创作资产" actions={<button>新增素材</button>} />)
 

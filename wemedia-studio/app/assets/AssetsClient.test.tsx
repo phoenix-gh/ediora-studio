@@ -82,6 +82,12 @@ beforeEach(() => {
 })
 
 describe('creative assets workspace', () => {
+  it('fills its definite parent and delegates overflow to workspace regions', () => {
+    const { container } = render(<AssetsClient initialAssets={[]} />)
+
+    expect(container.firstElementChild).toHaveClass('h-full', 'min-h-0', 'overflow-hidden')
+  })
+
   it('renders named list and editor regions for articles', () => {
     render(<AssetsClient initialAssets={[article(1, '第一篇', '正文')]} />)
 
