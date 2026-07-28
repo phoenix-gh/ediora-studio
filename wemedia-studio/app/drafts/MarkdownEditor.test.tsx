@@ -14,8 +14,16 @@ vi.mock('next-themes', () => ({
 }))
 
 vi.mock('next/dynamic', () => ({
-  default: () => function MarkdownEditorStub() {
-    return <div aria-label="Markdown editor" />
+  default: () => function MarkdownEditorStub({ value, previewOptions }: {
+    value?: string
+    previewOptions?: { components?: { img?: (props: React.ImgHTMLAttributes<HTMLImageElement>) => React.ReactNode } }
+  }) {
+    const PreviewImage = previewOptions?.components?.img
+    return (
+      <div aria-label="Markdown editor">
+        {PreviewImage && value?.includes('![') ? <PreviewImage src="/api/uploads/inline-image.png" alt="正文插图" /> : null}
+      </div>
+    )
   },
 }))
 
@@ -83,5 +91,14 @@ describe('MarkdownEditor theme', () => {
       consoleError.mockRestore()
       container.remove()
     }
+  })
+
+  it('renders backend-relative inline images through the API origin', () => {
+    const { container } = render(<MarkdownEditor value={'![正文插图](/api/uploads/inline-image.png)'} onChange={vi.fn()} />)
+
+    expect(container.querySelector('img')).toHaveAttribute(
+      'src',
+      'http://localhost:8000/api/uploads/inline-image.png',
+    )
   })
 })

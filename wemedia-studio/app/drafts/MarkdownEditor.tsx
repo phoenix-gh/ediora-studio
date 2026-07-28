@@ -6,6 +6,7 @@ import dynamic from 'next/dynamic'
 import { useCallback, useRef, useSyncExternalStore } from 'react'
 import { useTheme } from 'next-themes'
 import { toast } from 'sonner'
+import { creativeAssetUrl } from '@/lib/api/assets'
 
 const MDEditor = dynamic(() => import('@uiw/react-md-editor'), {
   ssr: false,
@@ -134,7 +135,7 @@ function MarkdownEditor({ value, onChange, minHeight = 500 }, ref) {
         previewOptions={{
           components: {
             img: ({ src, alt, ...props }: React.ImgHTMLAttributes<HTMLImageElement>) =>
-              src ? <img src={src} alt={alt} {...props} /> : null,
+              typeof src === 'string' ? <img src={creativeAssetUrl(src)} alt={alt} {...props} /> : null,
           },
         }}
         extraCommands={[]}
