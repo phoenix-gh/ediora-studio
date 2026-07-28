@@ -70,10 +70,12 @@ function detail(id: number, title: string, decision_status: ResponseItem['decisi
 }
 
 describe('ResponsesClient creation source', () => {
-  it('keeps the adopted response as the creation source after it leaves the pending list', async () => {
+  it('keeps the visible response as the action and creation source while the list selection refreshes', async () => {
     const adopted = detail(38, 'Selected video')
     const nextPending = detail(39, 'Another video')
-    api.getResponse.mockImplementation((id: number) => Promise.resolve(id === 38 ? adopted : nextPending))
+    api.getResponse.mockImplementation((id: number) => (
+      id === 38 ? Promise.resolve(adopted) : new Promise<ResponseDetail>(() => {})
+    ))
     api.getResponses.mockResolvedValue({ items: [nextPending], total: 1, page: 1, page_size: 30 })
     api.decideResponse.mockResolvedValue({ ...adopted, decision_status: 'adopted' })
     api.createResponseOutputs.mockResolvedValue({ outputs: [] })
@@ -81,10 +83,12 @@ describe('ResponsesClient creation source', () => {
     render(<ResponsesClient initialItems={[adopted, nextPending]} initialTotal={2} accounts={[]} initialSelectedId={38} initialSource="" />)
     const user = userEvent.setup()
 
-    await screen.findByText('Selected video')
+    await screen.findByRole('heading', { name: 'Selected video' })
+    await waitFor(() => expect(api.getResponse).toHaveBeenCalledWith(39))
     await user.click(screen.getByRole('button', { name: '采纳创作' }))
+    expect(api.decideResponse).toHaveBeenCalledWith(38, 'adopt', '')
     await screen.findByRole('button', { name: '创建任务' })
-    await screen.findByRole('heading', { name: 'Another video' })
+    expect(screen.getByText('将基于：Selected video')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: '创建任务' }))
 
     await waitFor(() => {

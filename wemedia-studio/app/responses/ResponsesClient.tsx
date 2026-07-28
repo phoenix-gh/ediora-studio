@@ -131,10 +131,11 @@ export function ResponsesClient({
   )
 
   async function decide(action: 'adopt' | 'later' | 'not_valuable' | 'reset') {
-    if (!selectedId) return
+    const responseId = detail?.id
+    if (!responseId) return
     try {
-      await decideResponse(selectedId, action, reason)
-      const updated = await getResponse(selectedId)
+      await decideResponse(responseId, action, reason)
+      const updated = await getResponse(responseId)
       setDetail(updated)
       if (action === 'adopt') {
         setCreationDetail(updated)
