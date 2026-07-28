@@ -49,9 +49,10 @@ interface in its own task and obtain an independent review before reusing it.
 - 当前活跃 `/responses` 的 `pending | adopted | later | rejected` 状态和精确 output payload 原样保留；旧 `/x-responses` redirect 不恢复为第二套 UI。
 - “待响应”不扩展为通用 Todo，不增加期限、子任务、项目或标签。
 - 多媒体资产继续使用紧凑网格和双击 Dialog，不改为右侧常驻预览。
-- Phase 2 implementation baseline: `64fd00f`, which includes the hardened
-  Phase 1 browser gate `702aa56` and reviewed response-race fix `21732bf`;
-  exact frontend suite is 70 files / 320 tests. The full-repository ESLint
+- Phase 2 implementation baseline: `ed85ac3`, which includes the hardened
+  Phase 1 browser gate, final UI/settings state gates, and reviewed response
+  creation-session isolation; exact frontend suite is 70 files / 337 tests.
+  The full-repository ESLint
   diagnostic has 35 deferred errors; Phase 2 may reduce but must not exceed
   that ceiling.
 - `docs/superpowers` 不进入 Git；计划和设计文档保存在 `docs/plans` 与 `docs/design`。
@@ -120,7 +121,7 @@ Information-source pages remain Phase 3.
 - Jobs active polling, `cancelJob(id)`, `retryJobStep(id, key)`, refresh, steps
   and events.
 - Response actions and output creation remain bound to the visible response
-  detail, including the reviewed `21732bf` race.
+  detail, including the reviewed state gates through `ed85ac3`.
 
 **Known defects intentionally not characterized as correct behavior:**
 
@@ -129,6 +130,8 @@ Information-source pages remain Phase 3.
 - Digital-human environment generation currently adds `input.title` to the
   prompt-only image input.
 - Jobs cancel/retry lacks per-action busy state and cancel confirmation.
+- Response output creation still allows cancel/reopen while the same response
+  has an in-flight request; Phase 2 must add a response-keyed in-flight guard.
 
 The owning tasks below must write expected RED recovery tests before fixing
 these defects. Task 1 freezes correct payload ownership and success semantics
@@ -739,7 +742,11 @@ git commit -m "feat: restyle Ediora creation jobs"
 - Preserve actions `adopt | later | not_valuable | reset`.
 - Preserve exact output payload
   `{ analysis_run_id, publish_account_id, output_types }`.
-- Preserve the reviewed visible-detail race fix `21732bf`.
+- Preserve the complete reviewed response state gates through `ed85ac3`:
+  decision mutations use the loaded `detail.id`, output mutations use
+  `creationDetail.id`, loading/mismatch states disable actions, stale detail
+  requests are ignored, same-row failures can be retried, and output creation
+  uses synchronous busy plus creation-session guards.
 - Keep `/x-responses` as a redirect; do not revive a second inbox.
 
 - [ ] **Step 1: Write failing workspace behavior tests**
@@ -749,7 +756,11 @@ decision actions, the race where the current pending item leaves the filtered
 list while the next detail is still loading, output Dialog payload, busy
 locking, failed output recovery and current-detail preservation. Actions and
 output creation remain bound to the visible `detail.id`, never merely the new
-list selection.
+list selection. A successful output mutation ends its creation session even if
+the follow-up detail refresh fails. Prevent duplicate output creation across
+same-tick clicks and cancel/reopen cycles while a request for the same response
+is still in flight; a stale session completion must never close or mutate a
+newer session.
 
 - [ ] **Step 2: Verify RED**
 
@@ -970,7 +981,10 @@ At 1440×1000, 1280×800 and 1024×768 in Light and Dark:
 8. preserve route-specific scroll ownership;
 9. exercise seeded media/preview and publishing UI; browser routes mock the
    external publish/provider side effects and assert request payloads;
-10. reproduce the response visible-detail race with the two seeded records;
+10. reproduce the response visible-detail race with the two seeded records,
+    same-tick duplicate submit, cancel/reopen while the first request is still
+    in flight, stale A completion against a newer B session, successful
+    mutation plus failed refresh, and same-row detail-load retry;
 11. verify active-job polling and terminal cleanup without real workers.
 
 Store 36 route screenshots under
