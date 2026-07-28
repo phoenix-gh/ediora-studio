@@ -1149,7 +1149,8 @@ pnpm exec eslint \
   components/ui/button.tsx components/ui/card.tsx components/ui/dialog.tsx \
   components/ui/input.tsx components/ui/select.tsx components/ui/sonner.tsx \
   components/ui/switch.tsx components/ui/tabs.tsx components/ui/textarea.tsx \
-  lib/ui e2e playwright.config.ts
+  lib/ui e2e playwright.config.ts \
+  --ignore-pattern app/settings/sections/TelegramSettingsCard.tsx
 pnpm exec eslint . --quiet
 pnpm exec tsc --noEmit --incremental false
 pnpm build
@@ -1159,7 +1160,9 @@ pnpm exec playwright test e2e/ui-foundations.spec.ts --project=chromium
 Expected:
 
 - Vitest: all files PASS.
-- Phase 1 migrated-scope ESLint: zero errors.
+- Phase 1 migrated-scope ESLint: zero errors. The legacy
+  `TelegramSettingsCard.tsx` is explicitly excluded because it remains a
+  deferred, non-migrated settings surface in this phase.
 - Full-repository ESLint diagnostic: no increase over the verified pre-Task-7
   baseline of 36 errors. These errors are in deferred pages and the legacy
   Telegram settings card; preserve the non-zero result in the handoff rather
