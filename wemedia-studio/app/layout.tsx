@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import { Geist, Geist_Mono } from 'next/font/google'
 import './globals.css'
 import { Sidebar } from '@/components/features/Sidebar'
+import { ThemeProvider } from '@/components/providers/ThemeProvider'
 import { Toaster } from '@/components/ui/sonner'
 import { BROWSER_TITLE } from '@/lib/branding'
 
@@ -24,11 +25,17 @@ export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="zh-CN" className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}>
-      <body className="h-full bg-zinc-50 dark:bg-zinc-950">
-        <Sidebar />
-        <main className="ml-56 h-screen overflow-auto">{children}</main>
-        <Toaster position="bottom-right" />
+    <html
+      lang="zh-CN"
+      suppressHydrationWarning
+      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+    >
+      <body className="min-h-full bg-background text-foreground">
+        <ThemeProvider>
+          <Sidebar />
+          <main className="ml-56 h-screen overflow-auto">{children}</main>
+          <Toaster position="bottom-right" />
+        </ThemeProvider>
       </body>
     </html>
   )

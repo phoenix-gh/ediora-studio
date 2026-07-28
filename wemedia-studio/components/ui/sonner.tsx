@@ -1,23 +1,12 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useTheme } from "next-themes"
 import { Toaster as Sonner, type ToasterProps } from "sonner"
 import { CircleCheckIcon, InfoIcon, TriangleAlertIcon, OctagonXIcon, Loader2Icon } from "lucide-react"
 
 const Toaster = ({ ...props }: ToasterProps) => {
-  // Resolve the color scheme AFTER mount. The app has no next-themes provider —
-  // dark mode is driven purely by CSS `prefers-color-scheme`. Passing sonner a
-  // concrete theme (never "system") keeps SSR and the first client render
-  // identical ("light"), avoiding the hydration mismatch sonner otherwise hits
-  // when it reads `matchMedia` during its initial render in a dark-mode browser.
-  const [theme, setTheme] = useState<ToasterProps["theme"]>("light")
-  useEffect(() => {
-    const mq = window.matchMedia("(prefers-color-scheme: dark)")
-    const apply = () => setTheme(mq.matches ? "dark" : "light")
-    apply()
-    mq.addEventListener("change", apply)
-    return () => mq.removeEventListener("change", apply)
-  }, [])
+  const { resolvedTheme } = useTheme()
+  const theme: ToasterProps["theme"] = resolvedTheme === "dark" ? "dark" : "light"
 
   return (
     <Sonner
