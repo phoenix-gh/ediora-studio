@@ -59,7 +59,7 @@ export function Sidebar() {
   const pathname = usePathname()
 
   return (
-    <aside className="fixed left-0 top-0 flex h-screen w-[var(--sidebar-width)] flex-col border-r border-border bg-surface">
+    <aside className="fixed left-0 top-0 flex h-dvh w-[var(--sidebar-width)] flex-col border-r border-border bg-surface">
       <div className="sidebar-compact-header border-b border-border px-4 py-5">
         <div className="flex items-center gap-2">
           <img src="/brand/ediora-mark.svg" alt="" aria-hidden="true" className="w-6 h-6 flex-shrink-0" />
