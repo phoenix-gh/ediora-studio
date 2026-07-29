@@ -250,6 +250,27 @@ def test_same_scene_echo_does_not_recalibrate_stale_narration_state():
     assert project.scene_plan == stale_scene_plan
 
 
+def test_narration_autosave_with_same_scene_echo_invalidates_without_reprojection():
+    project = _make_video_ready_project()
+    visual_echo = _visual_autosave_echo(project)
+    previous_scenes = deepcopy(project.scene_plan["scenes"])
+
+    merge_editable_project(
+        project,
+        {
+            "script": "完成修改",
+            "paragraphs": [{"id": "a", "text": "完成修改"}],
+            **visual_echo,
+        },
+        speech_model="mimo-v2.5-tts",
+    )
+
+    assert project.master_audio["status"] == "stale"
+    assert project.scene_plan["status"] == "stale"
+    assert project.scene_plan["scenes"] == previous_scenes
+    assert project.render_input["audio"] == ""
+
+
 def test_same_scene_echo_preserves_inflight_scene_job():
     project = _make_video_ready_project()
     project.scene_plan = {

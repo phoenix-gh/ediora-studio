@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest'
 
+import type { TextVideoProject } from '@/lib/api/text-videos'
+
 import {
+  makeGlobalWords,
   makeMasterAudio,
+  makeRenderInput,
+  makeScenePlan,
   makeSpeechSegment,
   makeTextVideoProject,
 } from './test-fixtures'
@@ -15,6 +20,51 @@ import {
   reorderSpeechSegment,
 } from './speech-segments'
 
+
+const canonicalScenes = [{
+  id: 'scene-1',
+  fromWordId: 'word-1',
+  throughWordId: 'word-2',
+  displayText: '甲乙',
+  highlight: ['甲'],
+  animation: 'fade-up',
+}]
+
+function makeVideoReadyProject(): TextVideoProject {
+  const sourceHash = 'm'.repeat(64)
+  const audioUrl = '/api/uploads/master.mp3'
+  return makeTextVideoProject({
+    script: '甲乙',
+    paragraphs: [makeSpeechSegment('a', '甲乙', {
+      status: 'confirmed',
+    })],
+    master_audio: makeMasterAudio({
+      status: 'ready',
+      timeline_status: 'ready',
+      audio_url: audioUrl,
+      duration: 2.4,
+      source_hash: sourceHash,
+      word_timings: makeGlobalWords(['甲', '乙'], 'a'),
+    }),
+    scene_plan: makeScenePlan({
+      status: 'ready',
+      master_source_hash: sourceHash,
+      scenes: canonicalScenes,
+    }),
+    render_input: makeRenderInput({
+      audio: audioUrl,
+      segments: [{
+        id: 'scene-1',
+        start: 0,
+        end: 2.4,
+        text: '甲乙',
+        highlight: ['甲'],
+        animation: 'fade-up',
+      }],
+    }),
+    duration: 2.4,
+  })
+}
 
 describe('mergeWorkerProject', () => {
   it('merges completed speech without replacing an unrelated local edit', () => {
@@ -247,6 +297,92 @@ describe('mergeWorkerProject', () => {
     expect(merged.duration).toBe(4.5)
   })
 
+  it('keeps local scene intent but uses server render seconds, audio, and duration', () => {
+    const baseline = makeVideoReadyProject()
+    const local = {
+      ...baseline,
+      duration: 99,
+      scene_plan: {
+        ...baseline.scene_plan,
+        scenes: [{
+          ...baseline.scene_plan.scenes[0],
+          displayText: '本地视觉意图',
+        }],
+      },
+      render_input: {
+        ...baseline.render_input,
+        audio: '/api/uploads/local-stale.mp3',
+        segments: [{
+          ...baseline.render_input.segments[0],
+          end: 99,
+          text: '本地旧秒数',
+        }],
+      },
+    }
+    const server = {
+      ...baseline,
+      revision: 2,
+      duration: 4.2,
+      render_input: {
+        ...baseline.render_input,
+        segments: [{
+          ...baseline.render_input.segments[0],
+          end: 4.2,
+          text: '服务端权威投影',
+        }],
+      },
+    }
+
+    const merged = mergeWorkerProject(local, server, {
+      editableBaseline: baseline,
+      localDirty: true,
+    })
+
+    expect(merged.scene_plan.scenes[0].displayText).toBe('本地视觉意图')
+    expect(merged.render_input.segments).toEqual(server.render_input.segments)
+    expect(merged.render_input.audio).toBe(server.render_input.audio)
+    expect(merged.duration).toBe(server.duration)
+  })
+
+  it('uses the saved server projection after a local narration invalidation', () => {
+    const baseline = makeVideoReadyProject()
+    const edited = editSpeechSegment(baseline, 'a', '甲乙改')
+    const local = {
+      ...edited,
+      duration: 99,
+      render_input: {
+        ...edited.render_input,
+        segments: [{
+          ...edited.render_input.segments[0],
+          end: 99,
+          text: '浏览器旧投影',
+        }],
+      },
+    }
+    const server = {
+      ...edited,
+      revision: 2,
+      duration: 0,
+      render_input: {
+        ...edited.render_input,
+        segments: [{
+          ...edited.render_input.segments[0],
+          end: 2.4,
+          text: '服务端失效后投影',
+        }],
+      },
+    }
+
+    const merged = mergeWorkerProject(local, server, {
+      editableBaseline: baseline,
+      localDirty: true,
+    })
+
+    expect(merged.render_input.segments).toEqual(server.render_input.segments)
+    expect(merged.render_input.audio).toBe(server.render_input.audio)
+    expect(merged.duration).toBe(0)
+  })
+
   it('keeps newer local worker state when an older action snapshot arrives', () => {
     const baseline = makeTextVideoProject({
       script: '甲。乙。',
@@ -412,22 +548,15 @@ describe('project speech settings and video gate', () => {
   })
 
   it('requires non-empty confirmed speech and both authoritative audio states', () => {
-    const ready = makeTextVideoProject({
-      script: '甲。   ',
+    const canonical = makeVideoReadyProject()
+    const ready = {
+      ...canonical,
+      script: `${canonical.script}   `,
       paragraphs: [
-        makeSpeechSegment('a', '甲。', { status: 'confirmed' }),
+        ...canonical.paragraphs,
         makeSpeechSegment('blank', '   '),
       ],
-      master_audio: makeMasterAudio({
-        status: 'ready',
-        timeline_status: 'ready',
-        audio_url: '/api/uploads/master.mp3',
-      }),
-      render_input: {
-        ...makeTextVideoProject().render_input,
-        audio: '/api/uploads/master.mp3',
-      },
-    })
+    }
 
     expect(canEnterVideoStage(ready)).toBe(true)
     expect(canEnterVideoStage({
@@ -442,6 +571,73 @@ describe('project speech settings and video gate', () => {
         timeline_status: 'failed',
       },
     })).toBe(false)
+  })
+
+  it('accepts only a canonical project that matches the backend gate', () => {
+    expect(canEnterVideoStage(makeVideoReadyProject())).toBe(true)
+  })
+
+  it.each([
+    [
+      'missing current words',
+      (project: TextVideoProject) => ({
+        ...project,
+        master_audio: { ...project.master_audio, word_timings: [] },
+      }),
+    ],
+    [
+      'stale scene plan',
+      (project: TextVideoProject) => ({
+        ...project,
+        scene_plan: { ...project.scene_plan, status: 'stale' as const },
+      }),
+    ],
+    [
+      'scene plan from another master',
+      (project: TextVideoProject) => ({
+        ...project,
+        scene_plan: {
+          ...project.scene_plan,
+          master_source_hash: 'stale-master',
+        },
+      }),
+    ],
+    [
+      'render audio mismatch',
+      (project: TextVideoProject) => ({
+        ...project,
+        render_input: {
+          ...project.render_input,
+          audio: '/api/uploads/other.mp3',
+        },
+      }),
+    ],
+    [
+      'unknown template pair',
+      (project: TextVideoProject) => ({
+        ...project,
+        render_input: {
+          ...project.render_input,
+          templateId: 'retired-template',
+        },
+      }),
+    ],
+    [
+      'tampered render segments',
+      (project: TextVideoProject) => ({
+        ...project,
+        render_input: {
+          ...project.render_input,
+          segments: [{
+            ...project.render_input.segments[0],
+            text: '被篡改的投影',
+            highlight: [],
+          }],
+        },
+      }),
+    ],
+  ])('rejects %s', (_name, mutate) => {
+    expect(canEnterVideoStage(mutate(makeVideoReadyProject()))).toBe(false)
   })
 })
 

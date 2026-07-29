@@ -1,8 +1,12 @@
 import type {
+  GlobalWordTiming,
+  ScenePlanSceneDocument,
   TextVideoParagraph,
   TextVideoProject,
   TextVideoVoiceSettings,
 } from '@/lib/api/text-videos'
+import { parseTextVideoRenderInput } from '@/remotion/contract'
+import { CONTINUITY_EPSILON_SECONDS } from '@/remotion/types'
 
 
 const voiceKeys = [
@@ -41,7 +45,9 @@ function mergeVoiceSettings(
 }
 
 function generatedState(segment: TextVideoParagraph) {
-  const { id: _id, text: _text, ...state } = segment
+  const state: Partial<TextVideoParagraph> = { ...segment }
+  delete state.id
+  delete state.text
   return state
 }
 
@@ -145,27 +151,7 @@ export function mergeWorkerProject(
   const baselineSlices = editableSlices(baseline)
   const localSlices = editableSlices(local)
   const slicesChanged = !equal(localSlices, baselineSlices)
-  const scriptChanged = local.script !== baseline.script
   const voiceChanged = !equal(local.voice_settings, baseline.voice_settings)
-  const localGenerationInvalidated = local.paragraphs.some(segment => {
-    const prior = baseline.paragraphs.find(item => item.id === segment.id)
-    if (!prior) return true
-    return (
-      segment.status === 'draft'
-      && !segment.audio_url
-      && !segment.source_hash
-      && (
-        segment.generation_revision !== prior.generation_revision
-        || ['ready', 'confirmed'].includes(prior.status)
-      )
-    )
-  })
-  const narrationChanged = (
-    slicesChanged
-    || scriptChanged
-    || voiceChanged
-    || localGenerationInvalidated
-  )
   const localScenesChanged = !equal(
     local.scene_plan.scenes,
     baseline.scene_plan.scenes,
@@ -186,11 +172,6 @@ export function mergeWorkerProject(
       templateProps: baseline.render_input.templateProps,
     },
   )
-  const localRenderScenesChanged = !equal(
-    local.render_input.segments,
-    baseline.render_input.segments,
-  )
-
   const paragraphSource = slicesChanged ? local.paragraphs : server.paragraphs
   const baselineById = new Map(
     baseline.paragraphs.map(segment => [segment.id, segment]),
@@ -217,10 +198,11 @@ export function mergeWorkerProject(
       || !equal(generatedState(segment), generatedState(serverSegment))
     )
   })
-  const downstreamStateFromLocal = (
-    narrationChanged
-    || localSpeechWorkerWon
-  )
+  // Browser narration edits are persisted through the same response that
+  // carries authoritative downstream invalidation. Preserve local downstream
+  // state only when a newer speech worker state proves the server snapshot is
+  // older (for example, a delayed master response after speech regeneration).
+  const downstreamStateFromLocal = localSpeechWorkerWon
 
   const masterAudio = downstreamStateFromLocal
     ? local.master_audio
@@ -257,20 +239,12 @@ export function mergeWorkerProject(
     composition: localCompositionChanged
       ? local.render_input.composition
       : server.render_input.composition,
-    segments: downstreamStateFromLocal || localRenderScenesChanged
+    segments: downstreamStateFromLocal
       ? local.render_input.segments
-      : chooseWorkerState(
-          baseline.render_input.segments,
-          local.render_input.segments,
-          server.render_input.segments,
-        ),
+      : server.render_input.segments,
     audio: downstreamStateFromLocal
       ? local.render_input.audio
-      : chooseWorkerState(
-          baseline.render_input.audio,
-          local.render_input.audio,
-          server.render_input.audio,
-        ),
+      : server.render_input.audio,
   }
 
   return {
@@ -279,7 +253,7 @@ export function mergeWorkerProject(
     title: chooseEditable(baseline.title, local.title, server.title),
     stage: chooseEditable(baseline.stage, local.stage, server.stage),
     status: downstreamStateFromLocal ? local.status : server.status,
-    script: slicesChanged || scriptChanged ? local.script : server.script,
+    script: slicesChanged ? local.script : server.script,
     paragraphs,
     speech_split_mode: paragraphs.length <= 1
       ? 'single'
@@ -360,13 +334,109 @@ export function updateProjectVoiceSettings(
 }
 
 export function canEnterVideoStage(project: TextVideoProject): boolean {
-  const speakable = project.paragraphs.filter(segment => segment.text.trim())
-  return Boolean(
-    speakable.length > 0
-    && speakable.every(segment => segment.status === 'confirmed')
-    && project.master_audio.status === 'ready'
-    && project.master_audio.timeline_status === 'ready'
-    && project.master_audio.audio_url.trim()
-    && project.render_input.audio.trim(),
-  )
+  try {
+    const speakable = project.paragraphs.filter(segment => segment.text.trim())
+    const master = project.master_audio
+    const scenePlan = project.scene_plan
+    if (
+      !project.script.trim()
+      || project.paragraphs.map(segment => segment.text).join('')
+        !== project.script
+      || speakable.length === 0
+      || !speakable.every(segment => segment.status === 'confirmed')
+      || master.status !== 'ready'
+      || master.timeline_status !== 'ready'
+      || !master.audio_url.trim()
+      || !master.source_hash.trim()
+      || !Number.isFinite(master.duration)
+      || master.duration <= 0
+      || master.word_timings.length === 0
+      || scenePlan.status !== 'ready'
+      || scenePlan.master_source_hash !== master.source_hash
+      || project.render_input.audio !== master.audio_url
+    ) {
+      return false
+    }
+
+    const expectedSegments = projectSceneProjection(
+      scenePlan.scenes,
+      master.word_timings,
+      master.duration,
+    )
+    const parsed = parseTextVideoRenderInput(project.render_input, {
+      masterDuration: master.duration,
+    })
+    return equal(parsed.segments, expectedSegments)
+  } catch {
+    return false
+  }
+}
+
+function projectSceneProjection(
+  scenes: ScenePlanSceneDocument[],
+  words: GlobalWordTiming[],
+  masterDuration: number,
+) {
+  const wordIndexes = new Map<string, number>()
+  let previousStart = -1
+  let previousEnd = -1
+  for (const [index, word] of words.entries()) {
+    if (
+      !word.id.trim()
+      || wordIndexes.has(word.id)
+      || !Number.isFinite(word.start)
+      || !Number.isFinite(word.end)
+      || word.start < 0
+      || word.end < word.start
+      || word.start < previousStart
+      || word.end < previousEnd
+      || word.end > masterDuration + CONTINUITY_EPSILON_SECONDS
+    ) {
+      throw new Error('Invalid global word timeline')
+    }
+    wordIndexes.set(word.id, index)
+    previousStart = word.start
+    previousEnd = word.end
+  }
+  if (wordIndexes.size === 0 || scenes.length === 0) {
+    throw new Error('Scene plan must cover the word timeline')
+  }
+
+  let cursor = 0
+  const sceneIds = new Set<string>()
+  const ranges = scenes.map(scene => {
+    const fromIndex = wordIndexes.get(scene.fromWordId)
+    const throughIndex = wordIndexes.get(scene.throughWordId)
+    if (
+      !scene.id.trim()
+      || sceneIds.has(scene.id)
+      || fromIndex === undefined
+      || throughIndex === undefined
+      || fromIndex !== cursor
+      || throughIndex < fromIndex
+    ) {
+      throw new Error('Scene word ranges must be complete and contiguous')
+    }
+    sceneIds.add(scene.id)
+    cursor = throughIndex + 1
+    return { scene, fromIndex }
+  })
+  if (cursor !== words.length) {
+    throw new Error('Scene word ranges must cover every word')
+  }
+
+  return ranges.map(({ scene, fromIndex }, index) => {
+    const next = ranges[index + 1]
+    const start = index === 0 ? 0 : words[fromIndex].start
+    const end = next ? words[next.fromIndex].start : masterDuration
+    if (end <= start) throw new Error('Projected scenes must have positive duration')
+    return {
+      id: scene.id,
+      start,
+      end,
+      text: scene.displayText,
+      highlight: [...scene.highlight],
+      animation: scene.animation,
+    }
+  })
 }
