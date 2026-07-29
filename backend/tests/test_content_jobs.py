@@ -169,6 +169,65 @@ def test_create_or_get_job_reuses_nonempty_key_but_not_empty_keys(
     asyncio.new_event_loop().run_until_complete(run())
 
 
+def test_idempotency_migration_rewrites_historical_duplicates_and_keeps_empty(
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.setenv(
+        "WMS_DATABASE_URL",
+        f"sqlite+aiosqlite:///{tmp_path / 'legacy-idempotency.db'}",
+    )
+    import sys
+    sys.modules.pop("database", None)
+    from database import migrate_content_job_idempotency_schema
+    from sqlalchemy import text
+    from sqlalchemy.exc import IntegrityError
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    async def run():
+        engine = create_async_engine(
+            f"sqlite+aiosqlite:///{tmp_path / 'legacy-idempotency.db'}",
+        )
+        async with engine.begin() as connection:
+            await connection.execute(text(
+                "CREATE TABLE content_jobs ("
+                "id INTEGER PRIMARY KEY, idempotency_key VARCHAR NOT NULL)"
+            ))
+            await connection.execute(text(
+                "INSERT INTO content_jobs (id, idempotency_key) VALUES "
+                "(1, 'same'), (2, 'same'), (3, ''), (4, ''), "
+                "(5, 'same:legacy:2')"
+            ))
+            await migrate_content_job_idempotency_schema(connection)
+            await migrate_content_job_idempotency_schema(connection)
+            rows = (
+                await connection.execute(text(
+                    "SELECT id, idempotency_key FROM content_jobs ORDER BY id",
+                ))
+            ).all()
+        assert rows == [
+            (1, "same"),
+            (2, "same:legacy:2:1"),
+            (3, ""),
+            (4, ""),
+            (5, "same:legacy:2"),
+        ]
+        with pytest.raises(IntegrityError):
+            async with engine.begin() as connection:
+                await connection.execute(text(
+                    "INSERT INTO content_jobs (id, idempotency_key) "
+                    "VALUES (7, 'same')"
+                ))
+        async with engine.begin() as connection:
+            await connection.execute(text(
+                "INSERT INTO content_jobs (id, idempotency_key) "
+                "VALUES (8, '')"
+            ))
+        await engine.dispose()
+
+    asyncio.new_event_loop().run_until_complete(run())
+
+
 def test_speech_retry_restores_only_its_current_segment(session_factory):
     from content_jobs import create_job, fail_step, retry_step, start_step
     from models import TextVideoProject
@@ -217,6 +276,16 @@ def test_speech_retry_restores_only_its_current_segment(session_factory):
                 "temporary",
                 retryable=True,
             )
+            await session.refresh(project)
+            paragraphs = list(project.paragraphs)
+            paragraphs[0] = {
+                **paragraphs[0],
+                "status": "failed",
+                "job_id": None,
+                "error": "temporary",
+            }
+            project.paragraphs = paragraphs
+            await session.commit()
 
             await retry_step(session, job.id, "generate_speech")
             await session.refresh(project)

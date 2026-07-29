@@ -188,19 +188,18 @@ async function saveSpeechResult(
 }
 
 async function defaultDeps(jobId: number): Promise<TextVideoSpeechJobDeps> {
-  const runtime = await apiGet<{
-    provider: string
-    model: string
-    base_url: string
-    api_key: string
-    default_voice: string
-  }>('/settings/speech-runtime', workerHeaders(jobId))
-  if (runtime.provider !== 'mimo') {
-    throw new Error(`不支持的语音供应商：${runtime.provider}`)
+  let jobPromise: Promise<DurableJob> | undefined
+  const loadJob = () => {
+    jobPromise ??= getJob(jobId)
+    return jobPromise
   }
   return {
     api: {
-      getJob,
+      getJob: currentJobId => {
+        const request = getJob(currentJobId)
+        if (currentJobId === jobId) jobPromise ??= request
+        return request
+      },
       getSpeechContext: (projectId, segmentId, currentJobId) => apiGet(
         `/text-videos/${projectId}/speech-segments/`
           + `${encodeURIComponent(segmentId)}/worker-context`,
@@ -222,12 +221,32 @@ async function defaultDeps(jobId: number): Promise<TextVideoSpeechJobDeps> {
         workerHeaders(currentJobId),
       ),
     },
-    speech: createMiMoSpeechProvider({
-      apiKey: runtime.api_key,
-      baseUrl: runtime.base_url,
-      model: runtime.model,
-      defaultVoice: runtime.default_voice,
-    }),
+    speech: {
+      async generate(request) {
+        const [runtime, frozenJob] = await Promise.all([
+          apiGet<{
+            provider: string
+            model: string
+            base_url: string
+            api_key: string
+            default_voice: string
+          }>('/settings/speech-runtime', workerHeaders(jobId)),
+          loadJob(),
+        ])
+        if (runtime.provider !== 'mimo') {
+          throw new Error(`不支持的语音供应商：${runtime.provider}`)
+        }
+        return createMiMoSpeechProvider({
+          apiKey: runtime.api_key,
+          baseUrl: runtime.base_url,
+          model: typeof frozenJob.input.speech_model === 'string'
+            && frozenJob.input.speech_model
+            ? frozenJob.input.speech_model
+            : runtime.model,
+          defaultVoice: runtime.default_voice,
+        }).generate(request)
+      },
+    },
   }
 }
 
@@ -243,6 +262,50 @@ async function finalizeJob(
       { cause: error },
     )
   }
+}
+
+async function completePersistedResult(
+  jobId: number,
+  stepId: number,
+  saved: SavedSpeechResult,
+  deps: TextVideoSpeechJobDeps,
+): Promise<SavedSpeechResult> {
+  try {
+    await deps.api.completeStep(jobId, stepId, { ...saved })
+  } catch (error) {
+    try {
+      const refreshed = await deps.api.getJob(jobId)
+      const completed = latestStep(refreshed.steps, 'generate_speech')
+      if (completed?.status !== 'succeeded') throw error
+    } catch (reconcileError) {
+      throw new JobFinalizationError(
+        '配音素材已保存，等待步骤状态对账',
+        { cause: reconcileError },
+      )
+    }
+  }
+  await finalizeJob(jobId, deps)
+  return saved
+}
+
+async function recoverSavedResult(
+  projectId: number,
+  segmentId: string,
+  jobId: number,
+  error: unknown,
+  deps: TextVideoSpeechJobDeps,
+): Promise<SavedSpeechResult> {
+  try {
+    const current = await deps.api.getSpeechContext(
+      projectId,
+      segmentId,
+      jobId,
+    )
+    if ('already_saved' in current) return current.already_saved
+  } catch {
+    // Preserve the original persistence failure when reconciliation is down.
+  }
+  throw error
 }
 
 function errorRetryable(error: unknown) {
@@ -281,9 +344,7 @@ export async function runTextVideoSpeechJob(
     )
     if ('already_saved' in current) {
       const saved = current.already_saved
-      await deps.api.completeStep(jobId, step.id, { ...saved })
-      await finalizeJob(jobId, deps)
-      return saved
+      return completePersistedResult(jobId, step.id, saved, deps)
     }
     context = current
     const result = await deps.speech.generate({
@@ -300,10 +361,19 @@ export async function runTextVideoSpeechJob(
         channels: 1,
       },
     })
-    const saved = await deps.api.saveSpeechResult(context, result, jobId)
-    await deps.api.completeStep(jobId, step.id, saved)
-    await finalizeJob(jobId, deps)
-    return saved
+    let saved: SavedSpeechResult
+    try {
+      saved = await deps.api.saveSpeechResult(context, result, jobId)
+    } catch (error) {
+      saved = await recoverSavedResult(
+        projectId,
+        segmentId,
+        jobId,
+        error,
+        deps,
+      )
+    }
+    return completePersistedResult(jobId, step.id, saved, deps)
   } catch (error) {
     if (error instanceof JobFinalizationError) throw error
     const stale = Boolean(
@@ -313,7 +383,12 @@ export async function runTextVideoSpeechJob(
       && error.stale,
     )
     if (context && !stale) {
-      await deps.api.postSpeechFailure(context, error, jobId)
+      try {
+        await deps.api.postSpeechFailure(context, error, jobId)
+      } catch {
+        // Step failure remains necessary even when domain failure reporting
+        // races a persisted result or the backend is temporarily unavailable.
+      }
     }
     await deps.api.failStep(
       jobId,

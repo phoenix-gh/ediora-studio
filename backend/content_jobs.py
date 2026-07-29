@@ -140,7 +140,7 @@ async def _restore_current_speech_segment(
     for index, segment in enumerate(paragraphs):
         if (
             segment.get("id") == segment_id
-            and segment.get("job_id") == job.id
+            and segment.get("job_id") in {job.id, None}
             and segment.get("generation_revision")
             == job.input_data.get("generation_revision")
             and segment.get("source_hash")

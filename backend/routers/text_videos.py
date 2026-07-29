@@ -1,10 +1,23 @@
+import asyncio
 from copy import deepcopy
 from datetime import datetime
 import hashlib
 import json
+from pathlib import Path
 from typing import Any, Literal
+from uuid import uuid4
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Response, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    Header,
+    HTTPException,
+    Response,
+    UploadFile,
+    status,
+)
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,6 +26,7 @@ from database import get_db
 from config import get_config
 from content_jobs import create_or_get_job
 from job_queue import enqueue_job
+from log_redaction import redact_secret_text
 from models import ContentJob, TextVideoProject, now_utc
 from text_video_domain import (
     default_speech_segment,
@@ -27,7 +41,13 @@ from text_video_jobs import (
     assert_current_speech_job,
     launch_pending_speech_jobs,
     launch_speech_job,
+    mark_text_video_downstream_stale,
     speech_asset_result,
+)
+from media_command import MediaCommandError, MediaToolUnavailable
+from text_video_audio import (
+    SUPPORTED_MEDIA_TYPES,
+    save_text_video_audio_asset,
 )
 from text_video_segmentation import (
     SegmentationError,
@@ -39,6 +59,8 @@ from worker_auth import require_worker_token
 
 
 router = APIRouter(prefix="/text-videos", tags=["text-videos"])
+UPLOADS_DIR = Path(__file__).resolve().parent.parent / "uploads"
+MAX_SPEECH_AUDIO_BYTES = 100 * 1024 * 1024
 
 
 class WordTimingDocument(BaseModel):
@@ -516,6 +538,7 @@ async def generate_speech_segment(
             segment_id,
             expected_revision=payload.revision,
             speech_model=runtime["speech_model"],
+            speech_default_voice=runtime["default_voice"],
         )
     except StaleTextVideoJob as error:
         raise _stale_conflict(error) from error
@@ -542,6 +565,7 @@ async def generate_pending_speech_segments(
             project,
             expected_revision=payload.revision,
             speech_model=runtime["speech_model"],
+            speech_default_voice=runtime["default_voice"],
         )
     except StaleTextVideoJob as error:
         raise _stale_conflict(error) from error
@@ -611,10 +635,12 @@ async def get_speech_worker_context(
 ):
     try:
         job = await db.get(ContentJob, job_id)
-        snapshot = _validate_speech_job(
-            job,
-            project_id=project_id,
-            segment_id=segment_id,
+        snapshot = deepcopy(
+            _validate_speech_job(
+                job,
+                project_id=project_id,
+                segment_id=segment_id,
+            ),
         )
         project = await get_project_or_404(db, project_id)
         segment = assert_current_speech_job(project, snapshot)
@@ -690,7 +716,7 @@ async def save_speech_worker_failure(
                     **current,
                     "status": "failed",
                     "job_id": None,
-                    "error": payload.error,
+                    "error": redact_secret_text(payload.error)[:500],
                 }
                 break
         project.paragraphs = paragraphs
@@ -700,6 +726,207 @@ async def save_speech_worker_failure(
     except StaleTextVideoJob as error:
         await db.rollback()
         raise _stale_conflict(error) from error
+
+
+async def _stream_speech_upload(audio: UploadFile) -> Path:
+    uploads = Path(UPLOADS_DIR)
+    temporary_directory = uploads / ".speech-tmp"
+    temporary_directory.mkdir(parents=True, exist_ok=True)
+    path = temporary_directory / f"incoming-{uuid4().hex}"
+    size = 0
+    try:
+        with path.open("wb") as output:
+            while True:
+                chunk = await audio.read(1024 * 1024)
+                if not chunk:
+                    break
+                size += len(chunk)
+                if size > MAX_SPEECH_AUDIO_BYTES:
+                    raise HTTPException(413, "配音文件不能超过 100 MB")
+                await asyncio.to_thread(output.write, chunk)
+        if size == 0:
+            raise HTTPException(422, "配音文件不能为空")
+        return path
+    except BaseException:
+        path.unlink(missing_ok=True)
+        raise
+    finally:
+        await audio.close()
+
+
+def _remove_saved_audio(saved: dict) -> None:
+    prefix = "/api/uploads/"
+    url = str(saved.get("audio_url") or "")
+    if not url.startswith(prefix):
+        return
+    root = Path(UPLOADS_DIR).resolve()
+    candidate = (root / url[len(prefix):]).resolve()
+    try:
+        candidate.relative_to(root)
+    except ValueError:
+        return
+    candidate.unlink(missing_ok=True)
+
+
+@router.post(
+    "/{project_id}/speech-segments/{segment_id}/worker-result",
+    dependencies=[Depends(require_worker_token)],
+)
+async def save_speech_worker_result(
+    project_id: int,
+    segment_id: str,
+    audio: UploadFile = File(...),
+    generation_revision: int = Form(..., ge=0),
+    source_hash: str = Form(..., min_length=64, max_length=64),
+    provider_request_id: str = Form(default="", max_length=500),
+    media_type: str = Form(...),
+    word_timings: str = Form(default="[]"),
+    job_id: int = Header(alias="X-Content-Job-Id"),
+    db: AsyncSession = Depends(get_db),
+):
+    temporary: Path | None = None
+    saved: dict | None = None
+    try:
+        job = await db.get(ContentJob, job_id)
+        snapshot = _validate_speech_job(
+            job,
+            project_id=project_id,
+            segment_id=segment_id,
+        )
+        if job.status == "cancelled":
+            raise StaleTextVideoJob("任务已取消")
+        if (
+            snapshot.get("generation_revision") != generation_revision
+            or snapshot.get("source_hash") != source_hash
+        ):
+            raise StaleTextVideoJob("配音任务快照不匹配")
+        project = await db.get(TextVideoProject, project_id)
+        if project is None:
+            raise StaleTextVideoJob("文字视频作品不存在")
+        segment = assert_current_speech_job(project, snapshot)
+        if segment["status"] in {"ready", "confirmed"}:
+            replay = await speech_asset_result(
+                db,
+                source_hash=source_hash,
+                audio_url=str(segment["audio_url"]),
+            )
+            if replay is None:
+                raise StaleTextVideoJob(
+                    "配音素材已丢失，请重新生成当前段",
+                )
+            await db.rollback()
+            return replay
+        if segment.get("job_id") != job_id:
+            raise StaleTextVideoJob("配音任务已被替换")
+        voice = deepcopy(snapshot.get("voice_settings") or {})
+        # Release the initial read transaction before upload and FFmpeg work.
+        # The current job and project are checked again under locks afterward.
+        await db.rollback()
+        if (
+            media_type not in SUPPORTED_MEDIA_TYPES
+            or audio.content_type not in SUPPORTED_MEDIA_TYPES
+            or audio.content_type != media_type
+        ):
+            raise HTTPException(422, "不支持的配音文件类型")
+        try:
+            parsed_timings = json.loads(word_timings)
+        except json.JSONDecodeError as error:
+            raise HTTPException(422, "word timings 必须是 JSON 数组") from error
+        if not isinstance(parsed_timings, list):
+            raise HTTPException(422, "word timings 必须是 JSON 数组")
+        temporary = await _stream_speech_upload(audio)
+        saved = await save_text_video_audio_asset(
+            db,
+            temporary,
+            source_hash=source_hash,
+            media_type=media_type,
+            speed=float(voice.get("speed", 1)),
+            volume=float(voice.get("volume", 1)),
+            pitch=float(voice.get("pitch", 0)),
+            word_timings=parsed_timings,
+            provider_request_id=provider_request_id,
+        )
+
+        locked_job = await db.scalar(
+            select(ContentJob)
+            .where(ContentJob.id == job_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        snapshot = _validate_speech_job(
+            locked_job,
+            project_id=project_id,
+            segment_id=segment_id,
+        )
+        if locked_job.status == "cancelled":
+            raise StaleTextVideoJob("任务已取消")
+        if (
+            snapshot.get("generation_revision") != generation_revision
+            or snapshot.get("source_hash") != source_hash
+        ):
+            raise StaleTextVideoJob("配音任务快照不匹配")
+        locked_project = await db.scalar(
+            select(TextVideoProject)
+            .where(TextVideoProject.id == project_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        if locked_project is None:
+            raise StaleTextVideoJob("文字视频作品不存在")
+        current = assert_current_speech_job(locked_project, snapshot)
+        if current.get("job_id") != job_id:
+            raise StaleTextVideoJob("配音任务已被替换")
+        paragraphs = list(locked_project.paragraphs or [])
+        for index, item in enumerate(paragraphs):
+            if item.get("id") == segment_id:
+                paragraphs[index] = {
+                    **item,
+                    "status": "ready",
+                    "audio_url": saved["audio_url"],
+                    "duration": saved["duration"],
+                    "word_timings": saved["word_timings"],
+                    "source_hash": source_hash,
+                    "error": "",
+                    "job_id": None,
+                }
+                break
+        locked_project.paragraphs = paragraphs
+        mark_text_video_downstream_stale(locked_project)
+        try:
+            await db.commit()
+        except BaseException:
+            await db.rollback()
+            _remove_saved_audio(saved)
+            raise
+        return saved
+    except StaleTextVideoJob as error:
+        if saved is None:
+            await db.rollback()
+        else:
+            # The normalized asset is valid and may be reused, but the second
+            # stale check forbids it from replacing edited project state.
+            try:
+                await db.commit()
+            except BaseException:
+                await db.rollback()
+                _remove_saved_audio(saved)
+                raise
+        raise _stale_conflict(error) from error
+    except MediaToolUnavailable as error:
+        await db.rollback()
+        raise HTTPException(
+            503,
+            "FFmpeg/FFprobe 不可用，请安装媒体工具后重试",
+        ) from error
+    except MediaCommandError as error:
+        await db.rollback()
+        raise HTTPException(422, "配音文件无法解析或转换") from error
+    except ValueError as error:
+        await db.rollback()
+        raise HTTPException(422, str(error)) from error
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
 
 
 @router.post(

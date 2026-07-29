@@ -87,17 +87,28 @@ async def migrate_content_job_idempotency_schema(conn) -> None:
             "WHERE idempotency_key <> '' ORDER BY id"
         ))
     ).mappings().all()
+    reserved = {
+        str(row["idempotency_key"])
+        for row in rows
+    }
     seen: set[str] = set()
     for row in rows:
         key = str(row["idempotency_key"])
         if key in seen:
+            base = f"{key}:legacy:{row['id']}"
+            replacement = base
+            counter = 1
+            while replacement in reserved:
+                replacement = f"{base}:{counter}"
+                counter += 1
+            reserved.add(replacement)
             await conn.execute(
                 text(
                     "UPDATE content_jobs SET idempotency_key = :replacement "
                     "WHERE id = :job_id"
                 ),
                 {
-                    "replacement": f"{key}:legacy:{row['id']}",
+                    "replacement": replacement,
                     "job_id": row["id"],
                 },
             )

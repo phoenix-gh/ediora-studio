@@ -1,4 +1,5 @@
 import asyncio
+import json
 import sys
 
 import pytest
@@ -388,3 +389,660 @@ def test_cancelling_speech_job_changes_only_its_segment(client, monkeypatch):
     assert detail["paragraphs"][0]["error"] == "任务已取消"
     assert detail["paragraphs"][1]["status"] == "generating"
     assert detail["paragraphs"][1]["job_id"] == jobs[1]["id"]
+
+    relaunched = client.post(
+        f"/api/text-videos/{project['id']}/speech-segments/a/generate",
+        json={"revision": split["revision"]},
+    )
+    assert relaunched.status_code == 201, relaunched.text
+    replacement = relaunched.json()
+    assert replacement["jobs"][0]["id"] != jobs[0]["id"]
+    assert (
+        replacement["project"]["paragraphs"][0]["generation_revision"]
+        == pending["project"]["paragraphs"][0]["generation_revision"] + 1
+    )
+
+
+def test_worker_failure_retry_restores_current_job_but_not_after_replacement(
+    client,
+    monkeypatch,
+):
+    import routers.jobs as jobs_router
+    import text_video_jobs
+
+    async def ignore_enqueue(_job_id: int):
+        return None
+
+    monkeypatch.setattr(text_video_jobs, "enqueue_job", ignore_enqueue)
+    monkeypatch.setattr(jobs_router, "enqueue_job", ignore_enqueue)
+    project = _speech_project(client)
+    segment = project["paragraphs"][0]
+    generated = client.post(
+        f"/api/text-videos/{project['id']}/speech-segments/"
+        f"{segment['id']}/generate",
+        json={"revision": project["revision"]},
+    ).json()
+    job = generated["jobs"][0]
+    context = client.get(
+        f"/api/text-videos/{project['id']}/speech-segments/"
+        f"{segment['id']}/worker-context",
+        headers={
+            "X-WMS-Worker-Token": "test-worker-token-at-least-32-chars",
+            "X-Content-Job-Id": str(job["id"]),
+        },
+    ).json()
+    step = client.post(
+        f"/api/jobs/{job['id']}/steps/generate_speech/start",
+    ).json()
+    worker_headers = {
+        "X-WMS-Worker-Token": "test-worker-token-at-least-32-chars",
+        "X-Content-Job-Id": str(job["id"]),
+    }
+    failure_body = {
+        "generation_revision": context["generation_revision"],
+        "source_hash": context["source_hash"],
+        "error": "temporary provider failure",
+    }
+
+    domain_failure = client.post(
+        f"/api/text-videos/{project['id']}/speech-segments/"
+        f"{segment['id']}/worker-failure",
+        json=failure_body,
+        headers=worker_headers,
+    )
+    assert domain_failure.status_code == 200, domain_failure.text
+    failed = client.post(
+        f"/api/jobs/{job['id']}/steps/{step['id']}/fail",
+        json={"error": "temporary provider failure", "retryable": True},
+    )
+    assert failed.status_code == 200, failed.text
+    retry = client.post(
+        f"/api/jobs/{job['id']}/retry",
+        json={"step_key": "generate_speech"},
+    )
+    assert retry.status_code == 200, retry.text
+    restored = client.get(f"/api/text-videos/{project['id']}").json()
+    assert restored["paragraphs"][0]["status"] == "generating"
+    assert restored["paragraphs"][0]["job_id"] == job["id"]
+
+    second_step = client.post(
+        f"/api/jobs/{job['id']}/steps/generate_speech/start",
+    ).json()
+    assert client.post(
+        f"/api/text-videos/{project['id']}/speech-segments/"
+        f"{segment['id']}/worker-failure",
+        json=failure_body,
+        headers=worker_headers,
+    ).status_code == 200
+    assert client.post(
+        f"/api/jobs/{job['id']}/steps/{second_step['id']}/fail",
+        json={"error": "temporary provider failure", "retryable": True},
+    ).status_code == 200
+    replacement = client.post(
+        f"/api/text-videos/{project['id']}/speech-segments/"
+        f"{segment['id']}/generate",
+        json={"revision": project["revision"]},
+    ).json()
+    replacement_job = replacement["jobs"][0]
+    assert replacement_job["id"] != job["id"]
+
+    old_retry = client.post(
+        f"/api/jobs/{job['id']}/retry",
+        json={"step_key": "generate_speech"},
+    )
+    assert old_retry.status_code == 200, old_retry.text
+    current = client.get(f"/api/text-videos/{project['id']}").json()
+    assert current["paragraphs"][0]["job_id"] == replacement_job["id"]
+    assert current["paragraphs"][0]["generation_revision"] == (
+        context["generation_revision"] + 1
+    )
+
+
+def test_worker_result_normalizes_persists_and_replays_after_response_loss(
+    client,
+    monkeypatch,
+    tmp_path,
+):
+    import routers.text_videos as router_module
+    import text_video_audio
+    import text_video_jobs
+
+    uploads = tmp_path / "worker uploads"
+    monkeypatch.setattr(router_module, "UPLOADS_DIR", uploads)
+    monkeypatch.setattr(text_video_audio, "UPLOADS_DIR", uploads)
+    monkeypatch.setattr(text_video_jobs, "UPLOADS_DIR", uploads)
+
+    async def ignore_enqueue(_job_id: int):
+        return None
+
+    monkeypatch.setattr(text_video_jobs, "enqueue_job", ignore_enqueue)
+    project = _speech_project(client)
+    segment = project["paragraphs"][0]
+    generated = client.post(
+        f"/api/text-videos/{project['id']}/speech-segments/"
+        f"{segment['id']}/generate",
+        json={"revision": project["revision"]},
+    ).json()
+    job = generated["jobs"][0]
+    context = client.get(
+        f"/api/text-videos/{project['id']}/speech-segments/"
+        f"{segment['id']}/worker-context",
+        headers={
+            "X-WMS-Worker-Token": "test-worker-token-at-least-32-chars",
+            "X-Content-Job-Id": str(job["id"]),
+        },
+    ).json()
+    wav = tmp_path / "provider.wav"
+    asyncio.new_event_loop().run_until_complete(
+        __import__("tests.test_media_command", fromlist=["sine_wave"])
+        .sine_wave(wav),
+    )
+    form = {
+        "generation_revision": str(context["generation_revision"]),
+        "source_hash": context["source_hash"],
+        "provider_request_id": "provider-1",
+        "media_type": "audio/wav",
+        "word_timings": json.dumps([
+            {"id": "w1", "text": "需要", "start": 0, "end": 0.4},
+        ]),
+    }
+    headers = {
+        "X-WMS-Worker-Token": "test-worker-token-at-least-32-chars",
+        "X-Content-Job-Id": str(job["id"]),
+    }
+
+    first = client.post(
+        f"/api/text-videos/{project['id']}/speech-segments/"
+        f"{segment['id']}/worker-result",
+        data=form,
+        files={"audio": ("ignored-name.wav", wav.read_bytes(), "audio/wav")},
+        headers=headers,
+    )
+    assert first.status_code == 200, first.text
+    saved = first.json()
+    assert saved["audio_url"].endswith(".mp3")
+    assert saved["sample_rate"] == 44100
+    assert saved["duration"] == (
+        saved["sample_count"] / saved["sample_rate"]
+    )
+    detail = client.get(f"/api/text-videos/{project['id']}").json()
+    assert detail["paragraphs"][0]["status"] == "ready"
+    assert detail["paragraphs"][0]["audio_url"] == saved["audio_url"]
+    assert detail["paragraphs"][0]["job_id"] is None
+
+    replay = client.post(
+        f"/api/text-videos/{project['id']}/speech-segments/"
+        f"{segment['id']}/worker-result",
+        data=form,
+        files={"audio": ("different.wav", b"response lost", "audio/wav")},
+        headers=headers,
+    )
+    assert replay.status_code == 200, replay.text
+    assert replay.json() == saved
+
+    confirmed = client.post(
+        f"/api/text-videos/{project['id']}/speech-segments/"
+        f"{segment['id']}/confirm",
+        json={
+            "revision": project["revision"],
+            "generation_revision": context["generation_revision"],
+            "source_hash": context["source_hash"],
+        },
+    )
+    assert confirmed.status_code == 200, confirmed.text
+    assert confirmed.json()["paragraphs"][0]["status"] == "confirmed"
+    repeated_confirmation = client.post(
+        f"/api/text-videos/{project['id']}/speech-segments/"
+        f"{segment['id']}/confirm",
+        json={
+            "revision": project["revision"],
+            "generation_revision": context["generation_revision"],
+            "source_hash": context["source_hash"],
+        },
+    )
+    assert repeated_confirmation.status_code == 409
+
+
+def test_worker_result_rejects_stale_audio_without_persisting(
+    client,
+    monkeypatch,
+    tmp_path,
+):
+    import routers.text_videos as router_module
+    import text_video_audio
+    import text_video_jobs
+
+    uploads = tmp_path / "stale uploads"
+    monkeypatch.setattr(router_module, "UPLOADS_DIR", uploads)
+    monkeypatch.setattr(text_video_audio, "UPLOADS_DIR", uploads)
+    monkeypatch.setattr(text_video_jobs, "UPLOADS_DIR", uploads)
+
+    async def ignore_enqueue(_job_id: int):
+        return None
+
+    monkeypatch.setattr(text_video_jobs, "enqueue_job", ignore_enqueue)
+    project = _speech_project(client)
+    segment = project["paragraphs"][0]
+    generated = client.post(
+        f"/api/text-videos/{project['id']}/speech-segments/"
+        f"{segment['id']}/generate",
+        json={"revision": project["revision"]},
+    ).json()
+    job = generated["jobs"][0]
+    context = client.get(
+        f"/api/text-videos/{project['id']}/speech-segments/"
+        f"{segment['id']}/worker-context",
+        headers={
+            "X-WMS-Worker-Token": "test-worker-token-at-least-32-chars",
+            "X-Content-Job-Id": str(job["id"]),
+        },
+    ).json()
+    client.patch(
+        f"/api/text-videos/{project['id']}",
+        json={
+            "revision": project["revision"],
+            "script": "已经修改。",
+        },
+    )
+
+    stale = client.post(
+        f"/api/text-videos/{project['id']}/speech-segments/"
+        f"{segment['id']}/worker-result",
+        data={
+            "generation_revision": str(context["generation_revision"]),
+            "source_hash": context["source_hash"],
+            "provider_request_id": "",
+            "media_type": "audio/wav",
+        },
+        files={"audio": ("provider.wav", b"not persisted", "audio/wav")},
+        headers={
+            "X-WMS-Worker-Token": "test-worker-token-at-least-32-chars",
+            "X-Content-Job-Id": str(job["id"]),
+        },
+    )
+    assert stale.status_code == 409
+    assert stale.headers["X-WMS-Retryable"] == "false"
+    assert not uploads.exists() or list(uploads.rglob("*.mp3")) == []
+
+
+def test_worker_result_rejects_empty_corrupt_oversized_and_unsupported_audio(
+    client,
+    monkeypatch,
+    tmp_path,
+):
+    import routers.text_videos as router_module
+    import text_video_audio
+    import text_video_jobs
+
+    uploads = tmp_path / "invalid uploads"
+    monkeypatch.setattr(router_module, "UPLOADS_DIR", uploads)
+    monkeypatch.setattr(text_video_audio, "UPLOADS_DIR", uploads)
+    monkeypatch.setattr(text_video_jobs, "UPLOADS_DIR", uploads)
+
+    async def ignore_enqueue(_job_id: int):
+        return None
+
+    monkeypatch.setattr(text_video_jobs, "enqueue_job", ignore_enqueue)
+    project = _speech_project(client)
+    segment = project["paragraphs"][0]
+    job = client.post(
+        f"/api/text-videos/{project['id']}/speech-segments/"
+        f"{segment['id']}/generate",
+        json={"revision": project["revision"]},
+    ).json()["jobs"][0]
+    context = client.get(
+        f"/api/text-videos/{project['id']}/speech-segments/"
+        f"{segment['id']}/worker-context",
+        headers={
+            "X-WMS-Worker-Token": "test-worker-token-at-least-32-chars",
+            "X-Content-Job-Id": str(job["id"]),
+        },
+    ).json()
+    path = (
+        f"/api/text-videos/{project['id']}/speech-segments/"
+        f"{segment['id']}/worker-result"
+    )
+    headers = {
+        "X-WMS-Worker-Token": "test-worker-token-at-least-32-chars",
+        "X-Content-Job-Id": str(job["id"]),
+    }
+    form = {
+        "generation_revision": str(context["generation_revision"]),
+        "source_hash": context["source_hash"],
+        "provider_request_id": "",
+        "media_type": "audio/wav",
+    }
+
+    empty = client.post(
+        path,
+        data=form,
+        files={"audio": ("empty.wav", b"", "audio/wav")},
+        headers=headers,
+    )
+    corrupt = client.post(
+        path,
+        data=form,
+        files={"audio": ("corrupt.wav", b"not audio", "audio/wav")},
+        headers=headers,
+    )
+    unsupported = client.post(
+        path,
+        data={**form, "media_type": "audio/ogg"},
+        files={"audio": ("speech.ogg", b"data", "audio/ogg")},
+        headers=headers,
+    )
+    monkeypatch.setattr(router_module, "MAX_SPEECH_AUDIO_BYTES", 4)
+    oversized = client.post(
+        path,
+        data=form,
+        files={"audio": ("large.wav", b"12345", "audio/wav")},
+        headers=headers,
+    )
+
+    assert empty.status_code == 422
+    assert corrupt.status_code == 422
+    assert unsupported.status_code == 422
+    assert oversized.status_code == 413
+    assert list(uploads.rglob("*.mp3")) == []
+
+
+def test_worker_result_maps_missing_ffmpeg_to_actionable_503(
+    client,
+    monkeypatch,
+    tmp_path,
+):
+    import routers.text_videos as router_module
+    import text_video_jobs
+    from media_command import MediaToolUnavailable
+
+    uploads = tmp_path / "missing ffmpeg"
+    monkeypatch.setattr(router_module, "UPLOADS_DIR", uploads)
+    monkeypatch.setattr(text_video_jobs, "UPLOADS_DIR", uploads)
+
+    async def ignore_enqueue(_job_id: int):
+        return None
+
+    async def missing_tool(*_args, **_kwargs):
+        raise MediaToolUnavailable(
+            ["ffmpeg"],
+            None,
+            "",
+            message="ffmpeg is not installed",
+        )
+
+    monkeypatch.setattr(text_video_jobs, "enqueue_job", ignore_enqueue)
+    monkeypatch.setattr(
+        router_module,
+        "save_text_video_audio_asset",
+        missing_tool,
+    )
+    project = _speech_project(client)
+    segment = project["paragraphs"][0]
+    job = client.post(
+        f"/api/text-videos/{project['id']}/speech-segments/"
+        f"{segment['id']}/generate",
+        json={"revision": project["revision"]},
+    ).json()["jobs"][0]
+    context = client.get(
+        f"/api/text-videos/{project['id']}/speech-segments/"
+        f"{segment['id']}/worker-context",
+        headers={
+            "X-WMS-Worker-Token": "test-worker-token-at-least-32-chars",
+            "X-Content-Job-Id": str(job["id"]),
+        },
+    ).json()
+
+    response = client.post(
+        f"/api/text-videos/{project['id']}/speech-segments/"
+        f"{segment['id']}/worker-result",
+        data={
+            "generation_revision": str(context["generation_revision"]),
+            "source_hash": context["source_hash"],
+            "provider_request_id": "",
+            "media_type": "audio/wav",
+        },
+        files={"audio": ("provider.wav", b"RIFF", "audio/wav")},
+        headers={
+            "X-WMS-Worker-Token": "test-worker-token-at-least-32-chars",
+            "X-Content-Job-Id": str(job["id"]),
+        },
+    )
+
+    assert response.status_code == 503
+    assert "FFmpeg/FFprobe" in response.text
+    assert list(uploads.rglob("*.mp3")) == []
+
+
+def test_worker_result_second_stale_check_keeps_asset_unreferenced(
+    client,
+    monkeypatch,
+    tmp_path,
+):
+    import routers.text_videos as router_module
+    import text_video_audio
+    import text_video_jobs
+    from models import CreativeAsset
+
+    uploads = tmp_path / "second stale"
+    monkeypatch.setattr(router_module, "UPLOADS_DIR", uploads)
+    monkeypatch.setattr(text_video_audio, "UPLOADS_DIR", uploads)
+    monkeypatch.setattr(text_video_jobs, "UPLOADS_DIR", uploads)
+
+    async def ignore_enqueue(_job_id: int):
+        return None
+
+    monkeypatch.setattr(text_video_jobs, "enqueue_job", ignore_enqueue)
+    project = _speech_project(client)
+    segment = project["paragraphs"][0]
+    job = client.post(
+        f"/api/text-videos/{project['id']}/speech-segments/"
+        f"{segment['id']}/generate",
+        json={"revision": project["revision"]},
+    ).json()["jobs"][0]
+    context = client.get(
+        f"/api/text-videos/{project['id']}/speech-segments/"
+        f"{segment['id']}/worker-context",
+        headers={
+            "X-WMS-Worker-Token": "test-worker-token-at-least-32-chars",
+            "X-Content-Job-Id": str(job["id"]),
+        },
+    ).json()
+    original_save = router_module.save_text_video_audio_asset
+
+    async def save_then_edit(db, *args, **kwargs):
+        saved = await original_save(db, *args, **kwargs)
+        current = await db.get(router_module.TextVideoProject, project["id"])
+        paragraphs = list(current.paragraphs)
+        paragraphs[0] = {
+            **paragraphs[0],
+            "generation_revision": (
+                paragraphs[0]["generation_revision"] + 1
+            ),
+        }
+        current.paragraphs = paragraphs
+        await db.flush()
+        return saved
+
+    monkeypatch.setattr(
+        router_module,
+        "save_text_video_audio_asset",
+        save_then_edit,
+    )
+    wav = tmp_path / "provider.wav"
+    asyncio.new_event_loop().run_until_complete(
+        __import__("tests.test_media_command", fromlist=["sine_wave"])
+        .sine_wave(wav),
+    )
+    response = client.post(
+        f"/api/text-videos/{project['id']}/speech-segments/"
+        f"{segment['id']}/worker-result",
+        data={
+            "generation_revision": str(context["generation_revision"]),
+            "source_hash": context["source_hash"],
+            "provider_request_id": "",
+            "media_type": "audio/wav",
+        },
+        files={"audio": ("provider.wav", wav.read_bytes(), "audio/wav")},
+        headers={
+            "X-WMS-Worker-Token": "test-worker-token-at-least-32-chars",
+            "X-Content-Job-Id": str(job["id"]),
+        },
+    )
+    assert response.status_code == 409
+    assert response.headers["X-WMS-Retryable"] == "false"
+    detail = client.get(f"/api/text-videos/{project['id']}").json()
+    assert detail["paragraphs"][0]["audio_url"] == ""
+    assert detail["paragraphs"][0]["status"] == "generating"
+
+    from database import SessionLocal
+    from sqlalchemy import func, select
+
+    async def count_assets():
+        async with SessionLocal() as session:
+            return await session.scalar(select(func.count(CreativeAsset.id)))
+
+    assert asyncio.new_event_loop().run_until_complete(count_assets()) == 1
+    assert len(list(uploads.glob("*.mp3"))) == 1
+
+
+def test_worker_result_second_check_observes_cancellation_after_normalize(
+    client,
+    monkeypatch,
+    tmp_path,
+):
+    import routers.text_videos as router_module
+    import text_video_audio
+    import text_video_jobs
+
+    uploads = tmp_path / "cancel during normalize"
+    monkeypatch.setattr(router_module, "UPLOADS_DIR", uploads)
+    monkeypatch.setattr(text_video_audio, "UPLOADS_DIR", uploads)
+    monkeypatch.setattr(text_video_jobs, "UPLOADS_DIR", uploads)
+
+    async def ignore_enqueue(_job_id: int):
+        return None
+
+    monkeypatch.setattr(text_video_jobs, "enqueue_job", ignore_enqueue)
+    project = _speech_project(client)
+    segment = project["paragraphs"][0]
+    job = client.post(
+        f"/api/text-videos/{project['id']}/speech-segments/"
+        f"{segment['id']}/generate",
+        json={"revision": project["revision"]},
+    ).json()["jobs"][0]
+    context = client.get(
+        f"/api/text-videos/{project['id']}/speech-segments/"
+        f"{segment['id']}/worker-context",
+        headers={
+            "X-WMS-Worker-Token": "test-worker-token-at-least-32-chars",
+            "X-Content-Job-Id": str(job["id"]),
+        },
+    ).json()
+    original_save = router_module.save_text_video_audio_asset
+
+    async def save_then_cancel(db, *args, **kwargs):
+        saved = await original_save(db, *args, **kwargs)
+        current_job = await db.get(router_module.ContentJob, job["id"])
+        current_job.status = "cancelled"
+        await db.flush()
+        return saved
+
+    monkeypatch.setattr(
+        router_module,
+        "save_text_video_audio_asset",
+        save_then_cancel,
+    )
+    wav = tmp_path / "provider.wav"
+    asyncio.new_event_loop().run_until_complete(
+        __import__("tests.test_media_command", fromlist=["sine_wave"])
+        .sine_wave(wav),
+    )
+    response = client.post(
+        f"/api/text-videos/{project['id']}/speech-segments/"
+        f"{segment['id']}/worker-result",
+        data={
+            "generation_revision": str(context["generation_revision"]),
+            "source_hash": context["source_hash"],
+            "provider_request_id": "",
+            "media_type": "audio/wav",
+        },
+        files={"audio": ("provider.wav", wav.read_bytes(), "audio/wav")},
+        headers={
+            "X-WMS-Worker-Token": "test-worker-token-at-least-32-chars",
+            "X-Content-Job-Id": str(job["id"]),
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.headers["X-WMS-Retryable"] == "false"
+    detail = client.get(f"/api/text-videos/{project['id']}").json()
+    assert detail["paragraphs"][0]["audio_url"] == ""
+    assert detail["paragraphs"][0]["status"] == "generating"
+    assert len(list(uploads.glob("*.mp3"))) == 1
+
+
+def test_worker_result_commit_failure_deletes_final_file(
+    client,
+    monkeypatch,
+    tmp_path,
+):
+    import routers.text_videos as router_module
+    import text_video_audio
+    import text_video_jobs
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    uploads = tmp_path / "commit failure"
+    monkeypatch.setattr(router_module, "UPLOADS_DIR", uploads)
+    monkeypatch.setattr(text_video_audio, "UPLOADS_DIR", uploads)
+    monkeypatch.setattr(text_video_jobs, "UPLOADS_DIR", uploads)
+
+    async def ignore_enqueue(_job_id: int):
+        return None
+
+    monkeypatch.setattr(text_video_jobs, "enqueue_job", ignore_enqueue)
+    project = _speech_project(client)
+    segment = project["paragraphs"][0]
+    job = client.post(
+        f"/api/text-videos/{project['id']}/speech-segments/"
+        f"{segment['id']}/generate",
+        json={"revision": project["revision"]},
+    ).json()["jobs"][0]
+    context = client.get(
+        f"/api/text-videos/{project['id']}/speech-segments/"
+        f"{segment['id']}/worker-context",
+        headers={
+            "X-WMS-Worker-Token": "test-worker-token-at-least-32-chars",
+            "X-Content-Job-Id": str(job["id"]),
+        },
+    ).json()
+    wav = tmp_path / "provider.wav"
+    asyncio.new_event_loop().run_until_complete(
+        __import__("tests.test_media_command", fromlist=["sine_wave"])
+        .sine_wave(wav),
+    )
+
+    async def fail_commit(_self):
+        raise RuntimeError("database commit failed")
+
+    monkeypatch.setattr(AsyncSession, "commit", fail_commit)
+    with pytest.raises(RuntimeError, match="database commit failed"):
+        client.post(
+            f"/api/text-videos/{project['id']}/speech-segments/"
+            f"{segment['id']}/worker-result",
+            data={
+                "generation_revision": str(context["generation_revision"]),
+                "source_hash": context["source_hash"],
+                "provider_request_id": "",
+                "media_type": "audio/wav",
+            },
+            files={
+                "audio": ("provider.wav", wav.read_bytes(), "audio/wav"),
+            },
+            headers={
+                "X-WMS-Worker-Token": (
+                    "test-worker-token-at-least-32-chars"
+                ),
+                "X-Content-Job-Id": str(job["id"]),
+            },
+        )
+    assert list(uploads.glob("*.mp3")) == []

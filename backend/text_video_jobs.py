@@ -164,7 +164,7 @@ async def speech_asset_result(
         sample_count = int(metadata.sample_count or 0)
         duration = (
             sample_count / sample_rate
-            if sample_rate > 0 and sample_count >= 0
+            if sample_rate > 0 and sample_count > 0
             else float(metadata.duration)
         )
         return {
@@ -179,7 +179,7 @@ async def speech_asset_result(
     return None
 
 
-def _stale_downstream(project: TextVideoProject) -> None:
+def mark_text_video_downstream_stale(project: TextVideoProject) -> None:
     master = empty_master_audio() | deepcopy(project.master_audio or {})
     if master["status"] != "missing":
         master["status"] = "stale"
@@ -246,6 +246,7 @@ async def _launch(
     segment_ids: Iterable[str],
     *,
     speech_model: str,
+    speech_default_voice: str,
     reuse_assets: bool,
 ) -> SpeechLaunchResult:
     paragraphs = normalize_speech_segments(
@@ -259,8 +260,20 @@ async def _launch(
 
     voice_settings = deepcopy(project.voice_settings or {})
     resolved_model = str(voice_settings.get("model") or speech_model)
-    if voice_settings.get("model") != resolved_model:
-        voice_settings["model"] = resolved_model
+    resolved_voice = str(
+        voice_settings.get("voice_id")
+        or speech_default_voice
+        or "mimo_default"
+    )
+    if (
+        voice_settings.get("model") != resolved_model
+        or voice_settings.get("voice_id") != resolved_voice
+    ):
+        voice_settings = {
+            **voice_settings,
+            "model": resolved_model,
+            "voice_id": resolved_voice,
+        }
         project.voice_settings = voice_settings
 
     for segment_id in segment_ids:
@@ -299,7 +312,7 @@ async def _launch(
                     "job_id": None,
                 }
                 reused.append(segment_id)
-                _stale_downstream(project)
+                mark_text_video_downstream_stale(project)
                 continue
 
         if segment["status"] in {"ready", "confirmed", "failed", "generating"}:
@@ -307,7 +320,7 @@ async def _launch(
                 int(segment["generation_revision"]) + 1
             )
             paragraphs[index] = segment
-            project.paragraphs = paragraphs
+            project.paragraphs = deepcopy(paragraphs)
             snapshot = freeze_speech_job_input(
                 project,
                 segment_id,
@@ -327,7 +340,7 @@ async def _launch(
                 int(segment["generation_revision"]) + 1
             )
             paragraphs[index] = segment
-            project.paragraphs = paragraphs
+            project.paragraphs = deepcopy(paragraphs)
             snapshot = freeze_speech_job_input(
                 project,
                 segment_id,
@@ -355,9 +368,9 @@ async def _launch(
         jobs.append(job)
         if job.status == "queued":
             jobs_to_enqueue.append(job)
-        _stale_downstream(project)
+        mark_text_video_downstream_stale(project)
 
-    project.paragraphs = paragraphs
+    project.paragraphs = deepcopy(paragraphs)
     await db.commit()
     await db.refresh(project)
     for job in jobs:
@@ -378,6 +391,7 @@ async def launch_speech_job(
     *,
     expected_revision: int,
     speech_model: str,
+    speech_default_voice: str = "mimo_default",
 ) -> SpeechLaunchResult:
     project = await _locked_project(db, project, expected_revision)
     return await _launch(
@@ -385,6 +399,7 @@ async def launch_speech_job(
         project,
         [segment_id],
         speech_model=speech_model,
+        speech_default_voice=speech_default_voice,
         reuse_assets=False,
     )
 
@@ -395,6 +410,7 @@ async def launch_pending_speech_jobs(
     *,
     expected_revision: int,
     speech_model: str,
+    speech_default_voice: str = "mimo_default",
 ) -> SpeechLaunchResult:
     project = await _locked_project(db, project, expected_revision)
     segment_ids = [
@@ -403,12 +419,19 @@ async def launch_pending_speech_jobs(
             str(project.script or ""),
             project.paragraphs or [],
         )
-        if segment["status"] in {"draft", "failed"}
+        if (
+            segment["status"] in {"draft", "failed"}
+            or (
+                segment["status"] == "generating"
+                and isinstance(segment.get("job_id"), int)
+            )
+        )
     ]
     return await _launch(
         db,
         project,
         segment_ids,
         speech_model=speech_model,
+        speech_default_voice=speech_default_voice,
         reuse_assets=True,
     )

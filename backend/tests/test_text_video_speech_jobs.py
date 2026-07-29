@@ -89,6 +89,57 @@ def test_stale_speech_result_cannot_replace_edited_segment():
         assert_current_speech_job(project, snapshot)
 
 
+def test_launch_pins_effective_model_and_default_voice_into_hash(
+    monkeypatch,
+    tmp_path,
+):
+    session_factory = _fresh(monkeypatch, tmp_path, "speech-pin.db")
+    import text_video_jobs
+    from text_video_domain import speech_source_hash
+
+    async def ignore_enqueue(_job_id: int):
+        return None
+
+    monkeypatch.setattr(text_video_jobs, "enqueue_job", ignore_enqueue)
+
+    async def run():
+        async with session_factory() as session:
+            project = make_text_video_project(
+                script="冻结设置。",
+                paragraphs=[make_speech_segment("a", "冻结设置。")],
+                voice_settings={
+                    "voice_id": "",
+                    "model": "",
+                    "speed": 1,
+                    "volume": 1,
+                    "pitch": 0,
+                },
+            )
+            session.add(project)
+            await session.commit()
+            result = await text_video_jobs.launch_speech_job(
+                session,
+                project,
+                "a",
+                expected_revision=project.revision,
+                speech_model="mimo-v2.5-tts",
+                speech_default_voice="voice-at-launch",
+            )
+            snapshot = result.jobs[0].input_data
+
+            assert snapshot["speech_model"] == "mimo-v2.5-tts"
+            assert snapshot["voice_settings"]["model"] == "mimo-v2.5-tts"
+            assert snapshot["voice_settings"]["voice_id"] == "voice-at-launch"
+            assert result.project.voice_settings == snapshot["voice_settings"]
+            assert snapshot["source_hash"] == speech_source_hash(
+                "冻结设置。",
+                snapshot["voice_settings"],
+                "mimo-v2.5-tts",
+            )
+
+    run_async(run())
+
+
 def test_duplicate_launch_reuses_one_active_job_and_reenqueues(
     monkeypatch,
     tmp_path,
@@ -142,6 +193,160 @@ def test_duplicate_launch_reuses_one_active_job_and_reenqueues(
         assert result1.jobs[0].id == result2.jobs[0].id
         assert count == 1
         assert queued == [result1.jobs[0].id, result1.jobs[0].id]
+
+    run_async(run())
+
+
+@pytest.mark.parametrize("failed_enqueue_number", [1, 2])
+def test_pending_retry_reenqueues_all_committed_segment_jobs(
+    monkeypatch,
+    tmp_path,
+    failed_enqueue_number,
+):
+    session_factory = _fresh(
+        monkeypatch,
+        tmp_path,
+        f"speech-enqueue-{failed_enqueue_number}.db",
+    )
+    import text_video_jobs
+    from models import ContentJob
+
+    attempts: list[int] = []
+    failed = False
+
+    async def fail_selected_attempt_once(job_id: int):
+        nonlocal failed
+        attempts.append(job_id)
+        if len(attempts) == failed_enqueue_number and not failed:
+            failed = True
+            raise RuntimeError("redis unavailable")
+
+    monkeypatch.setattr(
+        text_video_jobs,
+        "enqueue_job",
+        fail_selected_attempt_once,
+    )
+
+    async def run():
+        async with session_factory() as session:
+            project = make_text_video_project(
+                script="甲。乙。",
+                paragraphs=[
+                    make_speech_segment("a", "甲。"),
+                    make_speech_segment("b", "乙。"),
+                ],
+            )
+            session.add(project)
+            await session.commit()
+
+            with pytest.raises(RuntimeError, match="redis unavailable"):
+                await text_video_jobs.launch_pending_speech_jobs(
+                    session,
+                    project,
+                    expected_revision=project.revision,
+                    speech_model="mimo-v2.5-tts",
+                )
+            await session.refresh(project)
+            jobs = (
+                await session.execute(
+                    select(ContentJob).order_by(ContentJob.id),
+                )
+            ).scalars().all()
+            assert len(jobs) == 2
+            assert all(job.status == "queued" for job in jobs)
+            assert all(
+                segment["status"] == "generating"
+                for segment in project.paragraphs
+            )
+
+            retried = await text_video_jobs.launch_pending_speech_jobs(
+                session,
+                project,
+                expected_revision=project.revision,
+                speech_model="mimo-v2.5-tts",
+            )
+
+            assert [job.id for job in retried.jobs] == [
+                job.id for job in jobs
+            ]
+            expected_first_attempt = [
+                job.id for job in jobs[:failed_enqueue_number]
+            ]
+            assert attempts == expected_first_attempt + [
+                job.id for job in jobs
+            ]
+
+    run_async(run())
+
+
+def test_concurrent_identical_launches_create_one_billable_job(
+    monkeypatch,
+    tmp_path,
+):
+    session_factory = _fresh(monkeypatch, tmp_path, "speech-concurrent.db")
+    import text_video_jobs
+    from models import ContentJob, TextVideoProject
+
+    queued: list[int] = []
+    arrivals = 0
+    both_read = asyncio.Event()
+    original_active_job = text_video_jobs._active_job
+
+    async def capture_enqueue(job_id: int):
+        queued.append(job_id)
+
+    async def synchronize_after_read(db, segment, snapshot):
+        nonlocal arrivals
+        result = await original_active_job(db, segment, snapshot)
+        if result is None:
+            arrivals += 1
+            if arrivals == 2:
+                both_read.set()
+            await asyncio.wait_for(both_read.wait(), timeout=2)
+        return result
+
+    monkeypatch.setattr(text_video_jobs, "enqueue_job", capture_enqueue)
+    monkeypatch.setattr(
+        text_video_jobs,
+        "_active_job",
+        synchronize_after_read,
+    )
+
+    async def run():
+        async with session_factory() as setup:
+            project = make_text_video_project(
+                script="并发。",
+                paragraphs=[make_speech_segment("a", "并发。")],
+            )
+            setup.add(project)
+            await setup.commit()
+            project_id = project.id
+            revision = project.revision
+
+        async def launch():
+            async with session_factory() as session:
+                current = await session.get(TextVideoProject, project_id)
+                return await text_video_jobs.launch_speech_job(
+                    session,
+                    current,
+                    "a",
+                    expected_revision=revision,
+                    speech_model="mimo-v2.5-tts",
+                )
+
+        first, second = await asyncio.gather(launch(), launch())
+        async with session_factory() as session:
+            count = await session.scalar(
+                select(func.count(ContentJob.id)).where(
+                    ContentJob.flow == "text_video_speech",
+                )
+            )
+            current = await session.get(TextVideoProject, project_id)
+        assert first.jobs[0].id == second.jobs[0].id
+        assert count == 1
+        assert queued == [first.jobs[0].id, first.jobs[0].id]
+        assert current.paragraphs[0]["status"] == "generating"
+        assert current.paragraphs[0]["job_id"] == first.jobs[0].id
 
     run_async(run())
 
@@ -200,6 +405,52 @@ def test_failed_generation_gets_a_new_deterministic_key(
             assert len(jobs) == 2
             assert jobs[0].idempotency_key != jobs[1].idempotency_key
             assert second.jobs[0].input_data["generation_revision"] == 1
+
+    run_async(run())
+
+
+def test_explicit_generation_of_ready_segment_never_reuses_prior_audio(
+    monkeypatch,
+    tmp_path,
+):
+    session_factory = _fresh(monkeypatch, tmp_path, "speech-regenerate.db")
+    import text_video_jobs
+
+    async def ignore_enqueue(_job_id: int):
+        return None
+
+    monkeypatch.setattr(text_video_jobs, "enqueue_job", ignore_enqueue)
+
+    async def run():
+        async with session_factory() as session:
+            project = make_text_video_project(
+                script="重生成。",
+                paragraphs=[make_speech_segment(
+                    "a",
+                    "重生成。",
+                    status="ready",
+                    audio_url="/api/uploads/old.mp3",
+                    duration=1,
+                    generation_revision=4,
+                )],
+            )
+            session.add(project)
+            await session.commit()
+
+            result = await text_video_jobs.launch_speech_job(
+                session,
+                project,
+                "a",
+                expected_revision=project.revision,
+                speech_model="mimo-v2.5-tts",
+            )
+            segment = result.project.paragraphs[0]
+
+            assert len(result.jobs) == 1
+            assert result.reused_segment_ids == []
+            assert segment["generation_revision"] == 5
+            assert segment["status"] == "generating"
+            assert segment["audio_url"] == ""
 
     run_async(run())
 
@@ -284,5 +535,71 @@ def test_pending_reuses_only_an_existing_uploaded_asset(
                 speech_model="mimo-v2.5-tts",
             )
             assert len(regenerated.jobs) == 1
+
+    run_async(run())
+
+
+def test_reusable_asset_url_cannot_escape_uploads_root(
+    monkeypatch,
+    tmp_path,
+):
+    session_factory = _fresh(monkeypatch, tmp_path, "speech-path.db")
+    import text_video_jobs
+    from models import CreativeAsset, TextVideoSpeechAsset
+    from text_video_domain import speech_source_hash
+
+    uploads = tmp_path / "uploads"
+    uploads.mkdir()
+    outside = tmp_path / "outside.mp3"
+    outside.write_bytes(b"must not be reused")
+    monkeypatch.setattr(text_video_jobs, "UPLOADS_DIR", uploads)
+    queued: list[int] = []
+
+    async def capture_enqueue(job_id: int):
+        queued.append(job_id)
+
+    monkeypatch.setattr(text_video_jobs, "enqueue_job", capture_enqueue)
+
+    async def run():
+        async with session_factory() as session:
+            project = make_text_video_project(
+                script="安全路径。",
+                paragraphs=[make_speech_segment("a", "安全路径。")],
+            )
+            source_hash = speech_source_hash(
+                "安全路径。",
+                project.voice_settings,
+                "mimo-v2.5-tts",
+            )
+            asset = CreativeAsset(
+                asset_type="media",
+                media_kind="audio",
+                title="escape",
+                url="/api/uploads/../outside.mp3",
+                media_type="audio/mpeg",
+                filename="outside.mp3",
+                source="generated",
+            )
+            session.add_all([project, asset])
+            await session.flush()
+            session.add(TextVideoSpeechAsset(
+                creative_asset_id=asset.id,
+                source_hash=source_hash,
+                duration=1,
+                sample_count=44100,
+                sample_rate=44100,
+            ))
+            await session.commit()
+
+            result = await text_video_jobs.launch_pending_speech_jobs(
+                session,
+                project,
+                expected_revision=project.revision,
+                speech_model="mimo-v2.5-tts",
+            )
+
+            assert len(result.jobs) == 1
+            assert result.reused_segment_ids == []
+            assert queued == [result.jobs[0].id]
 
     run_async(run())
