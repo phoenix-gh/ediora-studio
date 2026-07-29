@@ -46,6 +46,15 @@ export const textVideoTemplates = [techTextV1Manifest] as const
 const templates = createTextVideoTemplateRegistry(textVideoTemplates)
 
 export function resolveTextVideoTemplate(id: string, version: number) {
+  if (
+    typeof id !== 'string'
+    || !id.trim()
+    || typeof version !== 'number'
+    || !Number.isSafeInteger(version)
+    || version <= 0
+  ) {
+    throw new Error(`未知文字视频模板：${String(id)}@${String(version)}`)
+  }
   const key = templateKey(id, version)
   const template = templates.get(key)
   if (!template) {

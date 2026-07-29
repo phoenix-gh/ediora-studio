@@ -6,6 +6,7 @@ from text_video_scene_plan import (
     resolve_scene_seconds,
     validate_render_input_projection,
     validate_scene_partition,
+    validate_template_configuration,
 )
 from text_video_templates import get_text_video_template
 
@@ -42,6 +43,7 @@ def test_template_manifest_is_versioned_json_safe_and_fails_closed():
         "id": "tech-text-v1",
         "version": 1,
         "composition_id": "tech-text-v1",
+        "default_composition": {"width": 1080, "height": 1920, "fps": 30},
         "aspect_ratios": ["9:16", "16:9", "1:1"],
         "animations": ["fade-up", "scale"],
         "transitions": ["soft-push"],
@@ -64,6 +66,29 @@ def test_template_manifest_is_versioned_json_safe_and_fails_closed():
         get_text_video_template("tech-text-v1", 2)
     with pytest.raises(ValueError, match=r"tech-text-v1@True"):
         get_text_video_template("tech-text-v1", True)
+
+
+def test_template_configuration_does_not_assume_a_transition_prop():
+    manifest = {
+        "id": "horizontal-color-v1",
+        "version": 1,
+        "composition_id": "horizontal-color-v1",
+        "default_composition": {"width": 1920, "height": 1080, "fps": 24},
+        "aspect_ratios": ["16:9"],
+        "animations": ["fade-up"],
+        "transitions": ["crossfade"],
+        "template_props": {"color": ["cyan", "violet"]},
+        "defaults": {"color": "cyan"},
+    }
+
+    assert validate_template_configuration(
+        manifest=manifest,
+        composition=manifest["default_composition"],
+        template_props=manifest["defaults"],
+    ) == (
+        {"width": 1920, "height": 1080, "fps": 24},
+        {"color": "cyan"},
+    )
 
 
 def test_scene_word_partition_resolves_to_continuous_master_seconds():

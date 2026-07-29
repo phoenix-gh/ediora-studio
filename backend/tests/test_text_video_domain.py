@@ -155,20 +155,53 @@ def test_generated_speech_is_invalidated_when_its_source_hash_no_longer_matches(
     assert project.paragraphs[0]["generation_revision"] == 1
 
 
-def test_video_stage_requires_confirmed_speech_and_ready_master_timeline():
-    project = make_text_video_project(
+def _make_video_ready_project():
+    master_hash = "master-current"
+    words = [
+        {"id": "word-1", "text": "完", "start": 0.1, "end": 0.8},
+        {"id": "word-2", "text": "成", "start": 1.0, "end": 1.8},
+    ]
+    scenes = [{
+        "id": "scene-1",
+        "fromWordId": "word-1",
+        "throughWordId": "word-2",
+        "displayText": "完成",
+        "highlight": [],
+        "animation": "fade-up",
+    }]
+    return make_text_video_project(
         script="完成",
         paragraphs=[make_speech_segment("a", "完成", status="confirmed")],
         master_audio=make_master_audio(
             status="ready",
             timeline_status="ready",
             audio_url="/api/uploads/master.mp3",
+            duration=2.4,
+            source_hash=master_hash,
+            word_timings=words,
+        ),
+        scene_plan=make_scene_plan(
+            status="ready",
+            master_source_hash=master_hash,
+            scenes=scenes,
         ),
         render_input={
             **make_text_video_project().render_input,
             "audio": "/api/uploads/master.mp3",
+            "segments": [{
+                "id": "scene-1",
+                "start": 0.0,
+                "end": 2.4,
+                "text": "完成",
+                "highlight": [],
+                "animation": "fade-up",
+            }],
         },
     )
+
+
+def test_video_stage_requires_current_authoritative_projection():
+    project = _make_video_ready_project()
     assert video_stage_ready(project) is True
 
     project.master_audio = make_master_audio(
@@ -176,4 +209,39 @@ def test_video_stage_requires_confirmed_speech_and_ready_master_timeline():
         timeline_status="missing",
         audio_url="/api/uploads/master.mp3",
     )
+    assert video_stage_ready(project) is False
+
+
+def test_video_stage_rejects_render_timeline_shorter_than_master_audio():
+    project = _make_video_ready_project()
+    project.master_audio["duration"] = 8.0
+
+    assert video_stage_ready(project) is False
+
+
+def test_video_stage_rejects_audio_scene_hash_and_scene_status_mismatches():
+    project = _make_video_ready_project()
+    project.render_input["audio"] = "/api/uploads/other.mp3"
+    assert video_stage_ready(project) is False
+
+    project = _make_video_ready_project()
+    project.scene_plan["master_source_hash"] = "stale-master"
+    assert video_stage_ready(project) is False
+
+    project = _make_video_ready_project()
+    project.scene_plan["status"] = "stale"
+    assert video_stage_ready(project) is False
+
+
+def test_video_stage_rejects_missing_words_unknown_template_and_tampered_projection():
+    project = _make_video_ready_project()
+    project.master_audio["word_timings"] = []
+    assert video_stage_ready(project) is False
+
+    project = _make_video_ready_project()
+    project.render_input["templateId"] = "legacy-template"
+    assert video_stage_ready(project) is False
+
+    project = _make_video_ready_project()
+    project.render_input["segments"][0]["text"] = "非服务端投影"
     assert video_stage_ready(project) is False

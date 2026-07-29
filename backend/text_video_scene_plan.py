@@ -148,9 +148,6 @@ def validate_template_configuration(
         value = template_props.get(key)
         if not isinstance(value, str) or value not in allowed_values:
             raise ValueError(f"当前模板不支持参数 {key}={value}")
-    if template_props["transition"] not in manifest["transitions"]:
-        raise ValueError("当前模板不支持该转场")
-
     return deepcopy(composition), deepcopy(template_props)
 
 

@@ -507,21 +507,58 @@ def merge_editable_project(project, update: dict, speech_model: str) -> None:
     )
 
 def video_stage_ready(project) -> bool:
-    segments = normalize_speech_segments(
-        str(project.script or ""),
-        project.paragraphs or [],
-    )
-    master = _document_with_defaults(empty_master_audio(), project.master_audio)
-    render_input = project.render_input or {}
-    return bool(
-        str(project.script or "").strip()
-        and segments
-        and all(
-            not segment["text"].strip() or segment["status"] == "confirmed"
-            for segment in segments
+    try:
+        segments = normalize_speech_segments(
+            str(project.script or ""),
+            project.paragraphs or [],
         )
-        and master["status"] == "ready"
-        and master["timeline_status"] == "ready"
-        and master["audio_url"]
-        and render_input.get("audio")
-    )
+        master = _document_with_defaults(
+            empty_master_audio(),
+            project.master_audio,
+        )
+        scene_plan = _document_with_defaults(
+            empty_scene_plan(),
+            project.scene_plan,
+        )
+        render_input = deepcopy(project.render_input or {})
+        words = master.get("word_timings")
+        duration = master.get("duration")
+
+        if not (
+            str(project.script or "").strip()
+            and segments
+            and all(
+                not segment["text"].strip()
+                or segment["status"] == "confirmed"
+                for segment in segments
+            )
+            and master["status"] == "ready"
+            and master["timeline_status"] == "ready"
+            and master.get("audio_url")
+            and master.get("source_hash")
+            and isinstance(words, list)
+            and words
+            and scene_plan["status"] == "ready"
+            and scene_plan["master_source_hash"] == master["source_hash"]
+            and isinstance(render_input, dict)
+            and render_input.get("audio") == master["audio_url"]
+        ):
+            return False
+
+        validated_render_input = validate_render_input_projection(
+            render_input,
+            master_duration=duration,
+        )
+        manifest = get_text_video_template(
+            validated_render_input["templateId"],
+            validated_render_input["templateVersion"],
+        )
+        expected_segments = resolve_scene_seconds(
+            proposals=scene_plan["scenes"],
+            words=words,
+            master_duration=duration,
+            manifest=manifest,
+        )
+        return validated_render_input["segments"] == expected_segments
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return False

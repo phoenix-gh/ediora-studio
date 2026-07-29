@@ -9,6 +9,7 @@ TEXT_VIDEO_TEMPLATES: dict[tuple[str, int], dict[str, Any]] = {
         "id": "tech-text-v1",
         "version": 1,
         "composition_id": "tech-text-v1",
+        "default_composition": {"width": 1080, "height": 1920, "fps": 30},
         "aspect_ratios": ["9:16", "16:9", "1:1"],
         "animations": ["fade-up", "scale"],
         "transitions": ["soft-push"],

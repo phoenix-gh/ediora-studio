@@ -1,7 +1,10 @@
 import { AbsoluteFill, Html5Audio, interpolate, useCurrentFrame, useVideoConfig } from 'remotion'
 
-import type { TextVideoRenderInput } from '../../types'
-import type { TextVideoSegment } from '../../types'
+import {
+  CONTINUITY_EPSILON_SECONDS,
+  type TextVideoRenderInput,
+  type TextVideoSegment,
+} from '../../types'
 import { TimedText } from '../../shared/TimedText'
 
 export function findActiveTextVideoSegment(
@@ -9,7 +12,18 @@ export function findActiveTextVideoSegment(
   seconds: number,
 ) {
   const segment = segments.find(
-    item => seconds >= item.start && seconds < item.end,
+    (item, index) => {
+      const previous = segments[index - 1]
+      const effectiveStart = index === 0
+        && Math.abs(item.start) <= CONTINUITY_EPSILON_SECONDS
+        ? 0
+        : previous
+          && Math.abs(item.start - previous.end)
+            <= CONTINUITY_EPSILON_SECONDS
+          ? previous.end
+          : item.start
+      return seconds >= effectiveStart && seconds < item.end
+    },
   )
   if (!segment) {
     throw new Error(

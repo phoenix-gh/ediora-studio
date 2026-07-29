@@ -1,14 +1,16 @@
 import { z } from 'zod'
 
 import { resolveTextVideoTemplate } from './registry'
-
-export type {
-  TextVideoRenderInput,
-  TextVideoSegment,
+import {
+  CONTINUITY_EPSILON_SECONDS,
+  type TextVideoAspectRatio,
+  type TextVideoRenderInput,
+  type TextVideoTemplateManifest,
 } from './types'
-import type { TextVideoAspectRatio, TextVideoRenderInput } from './types'
 
-export const CONTINUITY_EPSILON_SECONDS = 0.001
+export type { TextVideoRenderInput, TextVideoSegment } from './types'
+export { CONTINUITY_EPSILON_SECONDS } from './types'
+
 const CONTINUITY_ERROR = 'segments must continuously cover the master audio'
 
 const compositionSchema = z.object({
@@ -55,36 +57,40 @@ function fail(message: string): never {
   throw new Error(message)
 }
 
-export function parseTextVideoRenderInput(
-  value: unknown,
-  { masterDuration }: { masterDuration: number },
-): TextVideoRenderInput {
+function validateMasterDuration(masterDuration: number) {
   if (!Number.isFinite(masterDuration) || masterDuration <= 0) {
     fail('master duration must be finite and positive')
   }
+}
+
+export function parseTextVideoRenderInputWithManifest<
+  P extends Record<string, unknown>,
+>(
+  value: unknown,
+  {
+    masterDuration,
+    manifest,
+  }: {
+    masterDuration: number
+    manifest: TextVideoTemplateManifest<P>
+  },
+): TextVideoRenderInput<P> {
+  validateMasterDuration(masterDuration)
 
   const envelope = textVideoRenderInputSchema.parse(value)
-  const manifest = resolveTextVideoTemplate(
-    envelope.templateId,
-    envelope.templateVersion,
-  )
+  if (
+    envelope.templateId !== manifest.id
+    || envelope.templateVersion !== manifest.version
+  ) {
+    fail(
+      `unknown text-video template: ${envelope.templateId}@${envelope.templateVersion}`,
+    )
+  }
   const templateProps = manifest.propsSchema.parse(envelope.templateProps)
   const ratio = aspectRatio(envelope.composition)
 
   if (!ratio || !manifest.aspectRatios.includes(ratio)) {
     fail('composition must use a supported aspect ratio')
-  }
-
-  const transition = (
-    typeof templateProps === 'object'
-    && templateProps !== null
-    && 'transition' in templateProps
-  ) ? templateProps.transition : undefined
-  if (
-    typeof transition !== 'string'
-    || !manifest.transitions.includes(transition)
-  ) {
-    fail('template transition is not supported')
   }
 
   const ids = new Set<string>()
@@ -124,4 +130,20 @@ export function parseTextVideoRenderInput(
     ...envelope,
     templateProps,
   }
+}
+
+export function parseTextVideoRenderInput(
+  value: unknown,
+  { masterDuration }: { masterDuration: number },
+): TextVideoRenderInput {
+  validateMasterDuration(masterDuration)
+  const envelope = textVideoRenderInputSchema.parse(value)
+  const manifest = resolveTextVideoTemplate(
+    envelope.templateId,
+    envelope.templateVersion,
+  )
+  return parseTextVideoRenderInputWithManifest(envelope, {
+    masterDuration,
+    manifest,
+  })
 }

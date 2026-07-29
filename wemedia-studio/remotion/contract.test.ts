@@ -3,8 +3,11 @@ import { describe, expect, it } from 'vitest'
 import {
   CONTINUITY_EPSILON_SECONDS,
   parseTextVideoRenderInput,
+  parseTextVideoRenderInputWithManifest,
 } from './contract'
 import { findActiveTextVideoSegment } from './templates/tech-text-v1/Composition'
+import type { TextVideoTemplateManifest } from './types'
+import { z } from 'zod'
 
 const validInput = {
   templateId: 'tech-text-v1',
@@ -75,13 +78,23 @@ describe('text-video render contract', () => {
   })
 
   it('uses a 0.001 second continuity epsilon', () => {
-    expect(() => parse({
+    const toleratedInput = {
       ...validInput,
       segments: [
         { ...validInput.segments[0], start: 0.0009 },
         { ...validInput.segments[1], start: 2.4009, end: 4.2009 },
       ],
-    })).not.toThrow()
+    }
+
+    expect(() => parse(toleratedInput)).not.toThrow()
+    expect(findActiveTextVideoSegment(toleratedInput.segments, 0).id)
+      .toBe('scene-1')
+    expect(findActiveTextVideoSegment(toleratedInput.segments, 2.4).id)
+      .toBe('scene-2')
+    expect(() => findActiveTextVideoSegment(
+      toleratedInput.segments,
+      4.2009,
+    )).toThrow('没有对应的连续分镜')
 
     expect(() => parse({
       ...validInput,
@@ -122,6 +135,32 @@ describe('text-video render contract', () => {
       ...validInput,
       templateProps: { ...validInput.templateProps, extra: true },
     })).toThrow()
+  })
+
+  it('lets a heterogeneous manifest own its props schema and composition', () => {
+    const horizontalManifest = {
+      id: 'horizontal-color-v1',
+      version: 1,
+      compositionId: 'horizontal-color-v1',
+      component: () => null,
+      propsSchema: z.object({ color: z.string() }).strict(),
+      defaultComposition: { width: 1920, height: 1080, fps: 30 },
+      aspectRatios: ['16:9'],
+      animations: ['fade-up', 'scale'],
+      transitions: ['crossfade'],
+      defaults: { color: 'cyan' },
+    } satisfies TextVideoTemplateManifest<{ color: string }>
+    const horizontalInput = {
+      ...validInput,
+      templateId: horizontalManifest.id,
+      composition: horizontalManifest.defaultComposition,
+      templateProps: horizontalManifest.defaults,
+    }
+
+    expect(parseTextVideoRenderInputWithManifest(horizontalInput, {
+      masterDuration: 4.2,
+      manifest: horizontalManifest,
+    })).toEqual(horizontalInput)
   })
 
   it('rejects duplicate ids, blank text, and highlights outside scene text', () => {

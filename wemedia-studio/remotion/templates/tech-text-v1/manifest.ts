@@ -24,6 +24,7 @@ export const techTextV1Manifest = {
   description: '深色科技网格、关键词高亮与节奏化文字转场',
   component: TechTextV1Composition,
   propsSchema: techTextV1PropsSchema,
+  defaultComposition: { width: 1080, height: 1920, fps: 30 },
   aspectRatios: ['9:16', '16:9', '1:1'],
   animations: ['fade-up', 'scale'],
   transitions: ['soft-push'],
