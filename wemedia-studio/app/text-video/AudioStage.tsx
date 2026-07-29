@@ -21,8 +21,8 @@ export function AudioStage({
   const paragraph = project.paragraphs[selectedParagraph]
   const confirmed = project.paragraphs.filter(item => item.status === 'confirmed').length
   return (
-    <div className="grid min-h-[650px] grid-cols-1 border-t border-border xl:grid-cols-[28fr_52fr_20fr]">
-      <aside className="border-b border-border bg-surface/60 p-4 xl:border-r xl:border-b-0">
+    <div data-testid="editor-workspace" className="grid min-h-[650px] grid-cols-[28fr_52fr_20fr] border-border">
+      <aside className="border-r border-border bg-surface/60 p-4">
         <div className="mb-3 flex items-center justify-between">
           <p className="text-xs font-semibold uppercase tracking-[0.14em] text-foreground-subtle">配音段落</p>
           <Badge variant="secondary">{confirmed} / {project.paragraphs.length} 段已确认</Badge>
@@ -84,7 +84,7 @@ export function AudioStage({
         <p className="mt-4 text-center text-xs text-muted-foreground">演示波形 · MiMo 接入后可生成和试听真实音频</p>
       </section>
 
-      <aside className="border-t border-border bg-surface/45 p-5 xl:border-t-0 xl:border-l">
+      <aside className="border-l border-border bg-surface/45 p-5">
         <div className="flex items-center gap-2">
           <Mic2 data-icon className="size-4 text-primary" />
           <p className="text-sm font-semibold">音色设置</p>

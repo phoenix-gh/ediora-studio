@@ -12,15 +12,17 @@ export function ScriptStage({
   project,
   selectedParagraph,
   onSelectParagraph,
+  onParagraphTextChange,
 }: {
   project: TextVideoFixtureProject
   selectedParagraph: number
   onSelectParagraph: (index: number) => void
+  onParagraphTextChange?: (text: string) => void
 }) {
   const paragraph = project.paragraphs[selectedParagraph]
   return (
-    <div className="grid min-h-[650px] grid-cols-1 border-t border-border xl:grid-cols-[28fr_52fr_20fr]">
-      <aside className="border-b border-border bg-surface/60 p-4 xl:border-r xl:border-b-0">
+    <div data-testid="editor-workspace" className="grid min-h-[650px] grid-cols-[28fr_52fr_20fr] border-border">
+      <aside className="border-r border-border bg-surface/60 p-4">
         <p className="mb-3 text-xs font-semibold uppercase tracking-[0.14em] text-foreground-subtle">口播段落</p>
         <div className="space-y-2">
           {project.paragraphs.map((item, index) => (
@@ -59,7 +61,9 @@ export function ScriptStage({
           <FieldLabel htmlFor="text-video-script">口播内容</FieldLabel>
           <Textarea
             id="text-video-script"
-            defaultValue={paragraph.text}
+            value={paragraph.text}
+            readOnly={!onParagraphTextChange}
+            onChange={event => onParagraphTextChange?.(event.target.value)}
             className="min-h-52 resize-none bg-surface text-base leading-8"
           />
           <FieldDescription>修改口播内容后，需要重新生成这一段配音。</FieldDescription>
@@ -72,7 +76,7 @@ export function ScriptStage({
         </div>
       </section>
 
-      <aside className="border-t border-border bg-surface/45 p-5 xl:border-t-0 xl:border-l">
+      <aside className="border-l border-border bg-surface/45 p-5">
         <p className="text-xs font-semibold uppercase tracking-[0.14em] text-foreground-subtle">稿件信息</p>
         <dl className="mt-5 space-y-4 text-sm">
           <div><dt className="text-muted-foreground">段落数量</dt><dd className="mt-1 font-medium">{project.paragraphs.length} 段</dd></div>

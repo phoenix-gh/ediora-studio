@@ -42,4 +42,18 @@ describe('TextVideoWorkbench', () => {
     expect(screen.getByText('Remotion 预览')).toBeVisible()
     expect(screen.getByRole('button', { name: '预览全片' })).toBeVisible()
   })
+
+  it('restores the approved editor structure with controls and timeline', async () => {
+    const user = userEvent.setup()
+    render(<TextVideoWorkbench />)
+
+    expect(screen.getByTestId('editor-topbar')).toBeVisible()
+    expect(screen.getByTestId('editor-workspace')).toBeVisible()
+
+    await user.click(screen.getByRole('tab', { name: '视频合成' }))
+
+    expect(screen.getByTestId('player-controls')).toBeVisible()
+    expect(screen.getByTestId('scene-timeline')).toBeVisible()
+    expect(screen.getByText('配音音频')).toBeVisible()
+  })
 })
