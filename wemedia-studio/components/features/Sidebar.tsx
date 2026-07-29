@@ -5,7 +5,7 @@ import { usePathname } from 'next/navigation'
 import {
   LayoutDashboard, Settings, GitFork, AtSign, FileText, BookMarked, Tag, Bot,
   PlaySquare, Rocket, MessageSquare, Globe, Flame, Gem, ListChecks, Hash, CalendarCheck,
-  MessageSquareReply, PersonStanding,
+  MessageSquareReply, PersonStanding, Captions,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { PRODUCT_NAME } from '@/lib/branding'
@@ -32,6 +32,7 @@ const sections: NavSection[] = [
     title: '创作',
     items: [
       { href: '/drafts',       label: '草稿箱',   icon: BookMarked },
+      { href: '/text-video',    label: '文字视频', icon: Captions },
       { href: '/writing-plans', label: '写作模板', icon: Tag },
       { href: '/assets',       label: '创作资产', icon: FileText },
       { href: '/digital-humans', label: '数字人口播', icon: PersonStanding },

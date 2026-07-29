@@ -29,6 +29,12 @@ describe('Sidebar in the app shell', () => {
     expect(assetsLink.querySelector('span')).toHaveClass('sidebar-compact-label')
   })
 
+  it('adds text video under creation navigation', () => {
+    render(<Sidebar />)
+
+    expect(screen.getByRole('link', { name: '文字视频' })).toHaveAttribute('href', '/text-video')
+  })
+
   it('uses the inclusive 1024px compact breakpoint for every visually-hidden sidebar label', () => {
     const sidebarSource = readFileSync(resolve(process.cwd(), 'components/features/Sidebar.tsx'), 'utf8')
     const globalsSource = readFileSync(resolve(process.cwd(), 'app/globals.css'), 'utf8')
