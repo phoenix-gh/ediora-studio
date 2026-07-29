@@ -143,10 +143,11 @@ export function DraftsClient({
   const initialDraft = initialDraftId
     ? (initialDrafts.find(d => d.id === initialDraftId) ?? initialDrafts[0] ?? null)
     : (initialDrafts[0] ?? null)
-  const initialGroup = initialDraft ? (buildGroups(initialDrafts).find(g => g.root.id === initialDraft.id || g.variants.some(v => v.id === initialDraft.id)) ?? null) : null
 
-  const [selectedGroup, setSelectedGroup] = useState<DraftGroup | null>(initialGroup)
   const [selected, setSelected] = useState<Draft | null>(initialDraft)
+  const selectedDraftIdRef = useRef<number | null>(initialDraft?.id ?? null)
+  const selectionIdentityRef = useRef(0)
+  const selectedGroup = selected ? findGroupForDraft(selected.id) : null
 
   const [filterStatus, setFilterStatus] = useState<string>('all')
   const [filterTopicId, setFilterTopicId] = useState<string>('all')
@@ -179,6 +180,11 @@ export function DraftsClient({
   const [chatInput, setChatInput] = useState('')
   const [chatLoading, setChatLoading] = useState(false)
   const pendingContent = chatState ? chatState.pending : storedInitialChat.pending
+  const chatSnapshotRef = useRef({
+    history: chatHistory,
+    sessionName: chatSessionName,
+    pending: pendingContent,
+  })
   const chatEndRef = useRef<HTMLDivElement>(null)
   const editorRef = useRef<MarkdownEditorHandle>(null)
 
@@ -198,16 +204,27 @@ export function DraftsClient({
   const [adaptMenuOpen, setAdaptMenuOpen] = useState(false)
 
   function setChatHistory(history: ChatMessage[]) {
+    chatSnapshotRef.current = { ...chatSnapshotRef.current, history }
     setChatState(current => ({ ...(current ?? storedInitialChat), history }))
   }
 
   function setChatSessionName(sessionName: string | null) {
+    chatSnapshotRef.current = { ...chatSnapshotRef.current, sessionName }
     setChatState(current => ({ ...(current ?? storedInitialChat), sessionName }))
   }
 
   function setPendingContent(pending: string | null) {
+    chatSnapshotRef.current = { ...chatSnapshotRef.current, pending }
     setChatState(current => ({ ...(current ?? storedInitialChat), pending }))
   }
+
+  useEffect(() => {
+    chatSnapshotRef.current = {
+      history: chatHistory,
+      sessionName: chatSessionName,
+      pending: pendingContent,
+    }
+  }, [chatHistory, chatSessionName, pendingContent])
 
   // Confirm dialog
   const [confirmDialog, setConfirmDialog] = useState<{
@@ -237,13 +254,27 @@ export function DraftsClient({
   useEffect(() => {
     if (initialImageRootId === null) return
     let cancelled = false
+    const requestedDraftId = selectedDraftIdRef.current
+    const requestedSelectionIdentity = selectionIdentityRef.current
     void getDraftImages(initialImageRootId)
       .then(items => {
-        if (!cancelled) setImages(items)
+        if (
+          !cancelled
+          && selectedDraftIdRef.current === requestedDraftId
+          && selectionIdentityRef.current === requestedSelectionIdentity
+        ) {
+          setImages(items)
+        }
       })
       .catch(() => {})
       .finally(() => {
-        if (!cancelled) setImagesLoading(false)
+        if (
+          !cancelled
+          && selectedDraftIdRef.current === requestedDraftId
+          && selectionIdentityRef.current === requestedSelectionIdentity
+        ) {
+          setImagesLoading(false)
+        }
     })
     return () => { cancelled = true }
   }, [initialImageRootId])
@@ -275,15 +306,26 @@ export function DraftsClient({
   // ── Handlers ───────────────────────────────────────────────────────────────
 
   function activateDraft(next: Draft | null) {
-    if (next?.id === selected?.id) {
-      setSelected(next)
+    const outgoingDraftId = selectedDraftIdRef.current
+    if (outgoingDraftId !== null) {
+      const latestChat = chatSnapshotRef.current
+      saveChatToStorage(
+        outgoingDraftId,
+        latestChat.history,
+        latestChat.sessionName,
+        latestChat.pending,
+      )
+    }
+    const selectionIdentity = selectionIdentityRef.current + 1
+    selectionIdentityRef.current = selectionIdentity
+    selectedDraftIdRef.current = next?.id ?? null
+    setSelected(next)
+    setSaving(false)
+    if (!next) {
+      setImages([])
+      setImagesLoading(false)
       return
     }
-    if (selected) {
-      saveChatToStorage(selected.id, chatHistory, chatSessionName, pendingContent)
-    }
-    setSelected(next)
-    if (!next) return
 
     setEditTitle(next.title)
     setEditContent(next.content)
@@ -299,13 +341,16 @@ export function DraftsClient({
     setImagesLoading(true)
     const rootId = next.linked_draft_id ?? next.id
     void getDraftImages(rootId)
-      .then(setImages)
+      .then(items => {
+        if (selectionIdentityRef.current === selectionIdentity) setImages(items)
+      })
       .catch(() => {})
-      .finally(() => setImagesLoading(false))
+      .finally(() => {
+        if (selectionIdentityRef.current === selectionIdentity) setImagesLoading(false)
+      })
   }
 
   function doSelectGroup(group: DraftGroup) {
-    setSelectedGroup(group)
     const article = [group.root, ...group.variants].find(d => d.draft_type === 'article')
     activateDraft(article ?? group.root)
   }
@@ -340,6 +385,8 @@ export function DraftsClient({
 
   async function handleSave() {
     if (!selected) return
+    const requestedDraftId = selected.id
+    const requestedSelectionIdentity = selectionIdentityRef.current
     setSaving(true)
     try {
       const body: DraftUpdate = {}
@@ -350,13 +397,22 @@ export function DraftsClient({
       if (JSON.stringify(editSources) !== JSON.stringify(selected.sources ?? [])) body.sources = editSources
       const updated = await updateDraft(selected.id, body)
       setDrafts(ds => ds.map(d => d.id === updated.id ? updated : d))
-      activateDraft(updated)
-      setDirty(false)
+      if (
+        selectedDraftIdRef.current === requestedDraftId
+        && selectionIdentityRef.current === requestedSelectionIdentity
+      ) {
+        activateDraft(updated)
+      }
       toast.success('已保存')
     } catch {
       toast.error('保存失败')
     } finally {
-      setSaving(false)
+      if (
+        selectedDraftIdRef.current === requestedDraftId
+        && selectionIdentityRef.current === requestedSelectionIdentity
+      ) {
+        setSaving(false)
+      }
     }
   }
 
@@ -395,11 +451,9 @@ export function DraftsClient({
       if (selectedGroup) {
         const refreshedGroup = nextGroups.find(g => g.root.id === selectedGroup.root.id)
         if (refreshedGroup) {
-          setSelectedGroup(refreshedGroup)
           const remaining = [refreshedGroup.root, ...refreshedGroup.variants]
           activateDraft(remaining[0] ?? null)
         } else {
-          setSelectedGroup(nextGroups[0] ?? null)
           activateDraft(nextGroups[0]?.root ?? null)
         }
       }
@@ -420,7 +474,6 @@ export function DraftsClient({
       const freshGroups = buildGroups(fresh)
       const newGroup = freshGroups.find(g => g.root.id === draft.id)
       if (newGroup) {
-        setSelectedGroup(newGroup)
         activateDraft(draft)
       }
       toast.success('已新建草稿')
@@ -432,12 +485,18 @@ export function DraftsClient({
   }
 
   async function handleRefresh() {
+    const requestedDraftId = selectedDraftIdRef.current
+    const requestedSelectionIdentity = selectionIdentityRef.current
     setRefreshing(true)
     try {
       const fresh = await getDrafts()
       setDrafts(fresh)
-      if (selected) {
-        const refreshed = fresh.find(d => d.id === selected.id)
+      if (
+        requestedDraftId !== null
+        && selectedDraftIdRef.current === requestedDraftId
+        && selectionIdentityRef.current === requestedSelectionIdentity
+      ) {
+        const refreshed = fresh.find(d => d.id === requestedDraftId)
         if (refreshed) activateDraft(refreshed)
       }
     } catch {
@@ -468,7 +527,6 @@ export function DraftsClient({
       const freshGroups = buildGroups(fresh)
       const newGroup = freshGroups.find(g => g.root.id === rootId) ?? freshGroups.find(g => g.root.id === variant.id)
       if (newGroup) {
-        setSelectedGroup(newGroup)
         const newVariant = fresh.find(d => d.id === variant.id)
         if (newVariant) { activateDraft(newVariant); setChatOpen(true) }
       }

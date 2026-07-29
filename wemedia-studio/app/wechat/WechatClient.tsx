@@ -359,13 +359,18 @@ function SubscriptionsDialog({
 
 // ── Auth pill ──────────────────────────────────────────────────────────────────
 
-function AuthPill({
-  state, onLogin, onLogout,
-}: {
+interface AuthPillProps {
   state: WechatAuthState | null
   onLogin: () => void
   onLogout: () => void
-}) {
+}
+
+export function AuthPill(props: AuthPillProps) {
+  const clockIdentity = `${props.state?.logged_in ?? 'loading'}:${props.state?.expires_at ?? ''}`
+  return <AuthPillClock key={clockIdentity} {...props} />
+}
+
+function AuthPillClock({ state, onLogin, onLogout }: AuthPillProps) {
   const [now, setNow] = useState(() => Date.now())
 
   useEffect(() => {

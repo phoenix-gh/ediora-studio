@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   Bird, Search, RefreshCw, Loader2, Settings, Trash2, ExternalLink,
@@ -47,24 +47,61 @@ export function XClient({
   const [posts, setPosts] = useState<XPost[]>(initialPosts)
   const [selection, setSelection] = useState<Selection>({ kind: 'all' })
   const [hours, setHours] = useState<number>(168)
-  const [loadingFeed, setLoadingFeed] = useState(false)
+  const [loadingFeed, setLoadingFeed] = useState(initialPosts.length === 0)
   const [collectingAll, setCollectingAll] = useState(false)
   const [actingId, setActingId] = useState<number | null>(null)
   const [subsOpen, setSubsOpen] = useState(false)
+  const feedRequestIdentityRef = useRef(0)
+  const initialRecoveryRef = useRef<{
+    identity: number
+    request: Promise<XPost[]>
+  } | null>(null)
+
+  useEffect(() => {
+    if (initialPosts.length > 0) return
+    let cancelled = false
+    let recovery = initialRecoveryRef.current
+    if (!recovery) {
+      recovery = {
+        identity: feedRequestIdentityRef.current + 1,
+        request: listXPosts({ hours: 168 }),
+      }
+      feedRequestIdentityRef.current = recovery.identity
+      initialRecoveryRef.current = recovery
+    }
+    void recovery.request
+      .then(items => {
+        if (!cancelled && feedRequestIdentityRef.current === recovery.identity) {
+          setPosts(items)
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled && feedRequestIdentityRef.current === recovery.identity) {
+          setLoadingFeed(false)
+        }
+      })
+    return () => { cancelled = true }
+  }, [initialPosts.length])
 
   const reloadSubs = async () => setSubs(await listXSubscriptions().catch(() => []))
 
   const reloadPosts = async (sel: Selection = selection, h: number = hours) => {
     if (sel.kind === 'search') return
+    const requestIdentity = feedRequestIdentityRef.current + 1
+    feedRequestIdentityRef.current = requestIdentity
     setLoadingFeed(true)
     try {
-      setPosts(await listXPosts({
+      const items = await listXPosts({
         subscription_id: sel.kind === 'sub' ? sel.id : undefined,
         hours: h,
-      }))
+      })
+      if (feedRequestIdentityRef.current === requestIdentity) setPosts(items)
     } catch {
       // silent
-    } finally { setLoadingFeed(false) }
+    } finally {
+      if (feedRequestIdentityRef.current === requestIdentity) setLoadingFeed(false)
+    }
   }
 
   const selectFeed = (next: Selection) => {
