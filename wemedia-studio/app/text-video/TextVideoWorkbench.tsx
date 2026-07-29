@@ -297,6 +297,9 @@ export function TextVideoWorkbench({
             onMergeSpeechSegment={projectDocument ? mergeSpeech : undefined}
             onCollapseToSingleSegment={projectDocument ? collapseSpeech : undefined}
             onReorderSpeechSegment={projectDocument ? reorderSpeech : undefined}
+            onApplySpeechSplit={projectDocument ? next => {
+              commitSpeechProject(next, next.paragraphs[0]?.id)
+            } : undefined}
           />
         ) : stage === 'audio' ? (
           <AudioStage

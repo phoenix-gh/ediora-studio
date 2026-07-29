@@ -12,12 +12,23 @@ def client(monkeypatch, tmp_path):
         "WMS_DATABASE_URL",
         f"sqlite+aiosqlite:///{tmp_path / 'text-videos-router.db'}",
     )
+    monkeypatch.setenv(
+        "WMS_WORKER_TOKEN",
+        "test-worker-token-at-least-32-chars",
+    )
     for module in list(sys.modules):
-        if module.startswith(("database", "models", "routers.text_videos")):
+        if module.startswith((
+            "content_jobs",
+            "database",
+            "models",
+            "routers.jobs",
+            "routers.text_videos",
+        )):
             sys.modules.pop(module, None)
 
     from database import Base, SessionLocal, engine, get_db
     import models  # noqa: F401
+    import routers.jobs as jobs_module
     import routers.text_videos as router_module
 
     async def setup():
@@ -27,6 +38,7 @@ def client(monkeypatch, tmp_path):
     asyncio.new_event_loop().run_until_complete(setup())
     app = FastAPI()
     app.include_router(router_module.router, prefix="/api")
+    app.include_router(jobs_module.router, prefix="/api")
 
     async def override_db():
         async with SessionLocal() as session:
@@ -167,3 +179,53 @@ def test_rejects_overlapping_render_segments(client):
 
     assert response.status_code == 422
     assert "重叠" in response.text
+
+
+def test_speech_split_preview_snapshots_exact_script_and_worker_validation(client, monkeypatch):
+    import routers.text_videos as router_module
+
+    queued = []
+
+    async def capture_enqueue(job_id: int):
+        queued.append(job_id)
+
+    monkeypatch.setattr(router_module, "enqueue_job", capture_enqueue)
+    project = client.post("/api/text-videos", json={}).json()
+    updated = client.patch(
+        f"/api/text-videos/{project['id']}",
+        json={
+            "revision": project["revision"],
+            "script": "甲。乙。",
+        },
+    ).json()
+
+    preview = client.post(
+        f"/api/text-videos/{project['id']}/speech-split-preview",
+        json={"revision": updated["revision"], "direction": "适合短句口播"},
+    )
+
+    assert preview.status_code == 201, preview.text
+    body = preview.json()
+    assert body["project"]["id"] == project["id"]
+    assert body["jobs"][0]["flow"] == "text_video_split_preview"
+    assert body["jobs"][0]["target_id"] == project["id"]
+    assert queued == [body["jobs"][0]["id"]]
+
+    job = client.get(f"/api/jobs/{body['jobs'][0]['id']}").json()
+    assert job["input"]["script"] == "甲。乙。"
+    assert job["input"]["script_hash"]
+    boundary_ids = [item["id"] for item in job["input"]["candidates"]]
+
+    validation = client.post(
+        f"/api/text-videos/{project['id']}/speech-split-preview/worker-validate",
+        json={"script_hash": job["input"]["script_hash"], "boundary_ids": boundary_ids[:1]},
+        headers={
+            "X-WMS-Worker-Token": "test-worker-token-at-least-32-chars",
+            "X-Content-Job-Id": str(body["jobs"][0]["id"]),
+        },
+    )
+
+    assert validation.status_code == 200, validation.text
+    proposal = validation.json()
+    assert "".join(item["text"] for item in proposal["segments"]) == "甲。乙。"
+    assert proposal["speech_split_mode"] == "auto"

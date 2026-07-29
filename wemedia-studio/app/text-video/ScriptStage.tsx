@@ -32,6 +32,8 @@ import type {
 import { estimateSpeechDuration } from '@/lib/text-video/speech-segments'
 import { cn } from '@/lib/utils'
 
+import { SpeechSplitPreviewDialog } from './SpeechSplitPreviewDialog'
+
 
 type Confirmation =
   | { kind: 'collapse' }
@@ -62,6 +64,7 @@ export function ScriptStage({
   onCollapseToSingleSegment,
   onReorderSpeechSegment,
   onRequestAiSplit,
+  onApplySpeechSplit,
 }: {
   project: TextVideoProject
   selectedSpeechSegmentId: string
@@ -75,9 +78,11 @@ export function ScriptStage({
   onCollapseToSingleSegment?: () => void
   onReorderSpeechSegment?: (segmentId: string, targetIndex: number) => void
   onRequestAiSplit?: () => void
+  onApplySpeechSplit?: (project: TextVideoProject) => void
 }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null)
+  const [speechSplitPreviewOpen, setSpeechSplitPreviewOpen] = useState(false)
   const selectedIndex = Math.max(
     0,
     project.paragraphs.findIndex(
@@ -134,8 +139,11 @@ export function ScriptStage({
             <Button
               size="xs"
               variant="outline"
-              disabled={!onRequestAiSplit || !project.script.trim()}
-              onClick={onRequestAiSplit}
+              disabled={(!onRequestAiSplit && !onApplySpeechSplit) || !project.script.trim()}
+              onClick={() => {
+                onRequestAiSplit?.()
+                if (onApplySpeechSplit) setSpeechSplitPreviewOpen(true)
+              }}
             >
               <Sparkles data-icon="inline-start" />
               AI 自动分段
@@ -310,6 +318,16 @@ export function ScriptStage({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {onApplySpeechSplit ? (
+        <SpeechSplitPreviewDialog
+          open={speechSplitPreviewOpen}
+          project={project}
+          direction=""
+          onOpenChange={setSpeechSplitPreviewOpen}
+          onApply={onApplySpeechSplit}
+        />
+      ) : null}
     </>
   )
 }

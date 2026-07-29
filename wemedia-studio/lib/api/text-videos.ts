@@ -118,6 +118,27 @@ export type TextVideoProjectUpdate = {
   output_asset_url?: string
 }
 
+export type SpeechSplitProposal = {
+  segments: Array<{
+    id: string
+    text: string
+    estimated_duration: number
+    reason: string
+  }>
+  speech_split_mode: 'auto'
+}
+
+export type SpeechSplitPreviewJob = {
+  id: number
+  flow: 'text_video_split_preview'
+  target_id: number
+}
+
+export type SpeechSplitPreviewResponse = {
+  jobs: SpeechSplitPreviewJob[]
+  project: TextVideoProject
+}
+
 export class TextVideoApiError extends Error {
   constructor(
     message: string,
@@ -179,4 +200,14 @@ export function deleteTextVideoProject(projectId: number) {
   return textVideoRequest<void>(`/text-videos/${projectId}`, {
     method: 'DELETE',
   })
+}
+
+export function createSpeechSplitPreview(
+  projectId: number,
+  input: { revision: number; direction: string },
+) {
+  return textVideoRequest<SpeechSplitPreviewResponse>(
+    `/text-videos/${projectId}/speech-split-preview`,
+    { method: 'POST', body: JSON.stringify(input) },
+  )
 }

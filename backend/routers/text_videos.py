@@ -1,14 +1,18 @@
 from copy import deepcopy
 from datetime import datetime
+import hashlib
+import json
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Response, status
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
-from models import TextVideoProject, now_utc
+from content_jobs import create_job
+from job_queue import enqueue_job
+from models import ContentJob, TextVideoProject, now_utc
 from text_video_domain import (
     default_speech_segment,
     empty_master_audio,
@@ -17,6 +21,13 @@ from text_video_domain import (
     normalize_speech_segments,
     video_stage_ready,
 )
+from text_video_segmentation import (
+    SegmentationError,
+    build_boundary_candidates,
+    slice_at_boundary_ids,
+    speakable_character_count,
+)
+from worker_auth import require_worker_token
 
 
 router = APIRouter(prefix="/text-videos", tags=["text-videos"])
@@ -151,6 +162,16 @@ class ProjectUpdate(BaseModel):
     render_input: RenderInputDocument | None = None
     cover_asset_url: str | None = None
     output_asset_url: str | None = None
+
+
+class SpeechSplitPreviewRequest(BaseModel):
+    revision: int = Field(ge=1)
+    direction: str = Field(default="", max_length=1_000)
+
+
+class SpeechSplitWorkerValidationRequest(BaseModel):
+    boundary_ids: list[str] = Field(default_factory=list)
+    script_hash: str = Field(min_length=64, max_length=64)
 
 DEFAULT_PARAGRAPHS = [default_speech_segment("", segment_id="paragraph-1")]
 
@@ -317,6 +338,152 @@ async def update_project(
     await db.commit()
     await db.refresh(project)
     return serialize_project(project)
+
+
+def _script_hash(script: str) -> str:
+    return hashlib.sha256(script.encode("utf-8")).hexdigest()
+
+
+def _split_preview_request_hash(
+    *,
+    revision: int,
+    script_hash: str,
+    direction: str,
+) -> str:
+    canonical = json.dumps(
+        {
+            "direction": direction,
+            "revision": revision,
+            "script_hash": script_hash,
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _public_candidate(candidate) -> dict[str, str]:
+    return {
+        "id": candidate.id,
+        "kind": candidate.kind,
+        "context": candidate.context,
+    }
+
+
+def _speech_split_preview_job_payload(job: ContentJob, project_id: int) -> dict:
+    return {
+        "id": job.id,
+        "flow": job.flow,
+        "target_id": project_id,
+    }
+
+
+@router.post("/{project_id}/speech-split-preview", status_code=status.HTTP_201_CREATED)
+async def create_speech_split_preview(
+    project_id: int,
+    payload: SpeechSplitPreviewRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    project = await get_project_or_404(db, project_id)
+    if project.revision != payload.revision:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "作品已在其他页面更新",
+                "revision": project.revision,
+            },
+        )
+    script = str(project.script or "")
+    if not script.strip():
+        raise HTTPException(422, "请先输入需要分段的口播稿")
+
+    script_hash = _script_hash(script)
+    request_hash = _split_preview_request_hash(
+        revision=payload.revision,
+        script_hash=script_hash,
+        direction=payload.direction,
+    )
+    key = f"text-video-split:{project.id}:{request_hash}"
+    existing = (await db.execute(
+        select(ContentJob).where(ContentJob.idempotency_key == key)
+    )).scalars().first()
+    if existing is not None:
+        return {
+            "jobs": [_speech_split_preview_job_payload(existing, project.id)],
+            "project": serialize_project(project),
+        }
+
+    candidates = build_boundary_candidates(script)
+    job = await create_job(
+        db,
+        flow="text_video_split_preview",
+        title=f"AI 口播分段预览 · {project.title}",
+        input_data={
+            "project_id": project.id,
+            "revision": project.revision,
+            "script": script,
+            "script_hash": script_hash,
+            "direction": payload.direction,
+            "candidates": [_public_candidate(candidate) for candidate in candidates],
+        },
+        idempotency_key=key,
+        commit=False,
+    )
+    await db.commit()
+    await db.refresh(job)
+    await enqueue_job(job.id)
+    return {
+        "jobs": [_speech_split_preview_job_payload(job, project.id)],
+        "project": serialize_project(project),
+    }
+
+
+@router.post(
+    "/{project_id}/speech-split-preview/worker-validate",
+    dependencies=[Depends(require_worker_token)],
+)
+async def validate_speech_split_preview(
+    project_id: int,
+    payload: SpeechSplitWorkerValidationRequest,
+    job_id: int = Header(alias="X-Content-Job-Id"),
+    db: AsyncSession = Depends(get_db),
+):
+    job = await db.get(ContentJob, job_id)
+    if (
+        job is None
+        or job.flow != "text_video_split_preview"
+        or job.input_data.get("project_id") != project_id
+        or job.input_data.get("script_hash") != payload.script_hash
+    ):
+        raise HTTPException(409, "口播分段预览任务已失效")
+    script = str(job.input_data.get("script") or "")
+    if _script_hash(script) != payload.script_hash:
+        raise HTTPException(409, "口播分段预览稿件校验失败")
+    try:
+        slices = slice_at_boundary_ids(
+            script,
+            build_boundary_candidates(script),
+            payload.boundary_ids,
+        )
+    except SegmentationError as error:
+        raise HTTPException(422, str(error)) from error
+    prefix = payload.script_hash[:12]
+    return {
+        "segments": [
+            {
+                "id": f"segment-{prefix}-{index}",
+                "text": segment,
+                "estimated_duration": round(
+                    max(0.5, speakable_character_count(segment) / 4.2),
+                    1,
+                ),
+                "reason": "AI 建议分段",
+            }
+            for index, segment in enumerate(slices, start=1)
+        ],
+        "speech_split_mode": "auto",
+    }
 
 
 @router.delete("/{project_id}", status_code=status.HTTP_204_NO_CONTENT)
