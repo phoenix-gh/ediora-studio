@@ -178,6 +178,50 @@ describe('AudioStage', () => {
     expect(screen.getByRole('button', { name: '生成主音频' })).toBeDisabled()
   })
 
+  it('prevents speech and master generation from overlapping while a launch is pending', () => {
+    const project = makeTextVideoProject({
+      script: '甲。',
+      stage: 'audio',
+      paragraphs: [makeSpeechSegment('a', '甲。', {
+        status: 'confirmed',
+        source_hash: 'a'.repeat(64),
+        audio_url: '/api/uploads/a.mp3',
+      })],
+    })
+    const { rerender, props } = renderStage(project, {
+      selectedSegmentId: 'a',
+      actionStates: {
+        master: {
+          status: 'running',
+          error: '',
+          retryable: false,
+          jobId: null,
+          stepKey: '',
+        },
+      },
+    })
+
+    expect(screen.getByRole('button', { name: '重新生成当前段' }))
+      .toBeDisabled()
+
+    rerender(
+      <AudioStage
+        {...props}
+        project={project}
+        actionStates={{
+          'speech:a': {
+            status: 'running',
+            error: '',
+            retryable: false,
+            jobId: null,
+            stepKey: '',
+          },
+        }}
+      />,
+    )
+    expect(screen.getByRole('button', { name: '生成主音频' })).toBeDisabled()
+  })
+
   it('keeps failed alignment audio playable and exposes the exact retry path', async () => {
     const user = userEvent.setup()
     const onRealignMasterAudio = vi.fn()

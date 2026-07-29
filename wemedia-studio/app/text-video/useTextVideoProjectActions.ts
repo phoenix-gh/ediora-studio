@@ -89,7 +89,7 @@ class TextVideoActionOutcomeUnknownError extends TextVideoActionError {
   constructor() {
     super(
       '操作结果未知，请刷新作品状态后再决定是否重试',
-      true,
+      false,
       0,
       '',
     )
@@ -148,6 +148,29 @@ function actionError(jobs: ContentJob[]): TextVideoActionError | null {
 
 function terminal(job: ContentJob): boolean {
   return ['succeeded', 'failed', 'cancelled'].includes(job.status)
+}
+
+function isDownstreamAction(
+  upstreamKey: string,
+  candidateKey: string,
+): boolean {
+  if (upstreamKey.startsWith('speech:')) {
+    return (
+      candidateKey === 'master'
+      || candidateKey.startsWith('scene:')
+      || candidateKey.startsWith('render:')
+    )
+  }
+  if (upstreamKey === 'master') {
+    return (
+      candidateKey.startsWith('scene:')
+      || candidateKey.startsWith('render:')
+    )
+  }
+  return (
+    upstreamKey.startsWith('scene:')
+    && candidateKey.startsWith('render:')
+  )
 }
 
 function statusForError(error: unknown): number | null {
@@ -484,6 +507,39 @@ export function useTextVideoProjectActions({
     return generation
   }, [])
 
+  const supersedeDownstreamActions = useCallback((key: string) => {
+    const knownKeys = new Set([
+      ...Object.keys(generationsRef.current),
+      ...Object.keys(waitersRef.current),
+      ...Object.keys(operationsRef.current),
+    ])
+    if (key.startsWith('speech:')) knownKeys.add('master')
+    const downstreamKeys = [...knownKeys].filter(candidate => (
+      isDownstreamAction(key, candidate)
+    ))
+    if (downstreamKeys.length === 0) return
+
+    downstreamKeys.forEach(candidate => {
+      const waiter = waitersRef.current[candidate]
+      if (waiter) {
+        window.clearTimeout(waiter.timer)
+        waiter.resolve(false)
+        delete waitersRef.current[candidate]
+      }
+      generationsRef.current[candidate] = (
+        generationsRef.current[candidate] ?? 0
+      ) + 1
+      delete operationsRef.current[candidate]
+    })
+    setActionStates(current => {
+      const next = { ...current }
+      downstreamKeys.forEach(candidate => {
+        if (candidate in next) next[candidate] = idleAction
+      })
+      return next
+    })
+  }, [])
+
   const waitForNextPoll = useCallback((
     key: string,
     generation: number,
@@ -515,13 +571,16 @@ export function useTextVideoProjectActions({
     jobIds,
     context,
     generation,
+    recoveredFailure = null,
   }: {
     key: string
     jobIds: number[]
     context: MergeContext
     generation: number
+    recoveredFailure?: TextVideoActionError | null
   }): Promise<void> => {
     let currentIds = uniqueJobIds(jobIds)
+    let pendingFailure = recoveredFailure
     while (currentGeneration(key, generation) && currentIds.length > 0) {
       let currentJobs: ContentJob[]
       try {
@@ -550,14 +609,15 @@ export function useTextVideoProjectActions({
         )
         if (!proof.proven) throw new TextVideoActionOutcomeUnknownError()
         if (proof.failedError) {
-          throw new TextVideoActionError(
+          pendingFailure = new TextVideoActionError(
             proof.failedError,
-            true,
+            false,
             0,
             '',
           )
         }
         if (proof.jobIds.length === 0) {
+          if (pendingFailure) throw pendingFailure
           updateActionState(key, generation, {
             ...idleAction,
             status: 'succeeded',
@@ -580,6 +640,7 @@ export function useTextVideoProjectActions({
         if (!currentGeneration(key, generation)) return
         const failure = actionError(currentJobs)
         if (failure) throw failure
+        if (pendingFailure) throw pendingFailure
         updateActionState(key, generation, {
           ...idleAction,
           status: 'succeeded',
@@ -642,21 +703,24 @@ export function useTextVideoProjectActions({
         observed,
       )
       if (observedProof.proven) {
-        if (observedProof.failedError) {
-          throw new TextVideoActionError(
+        const recoveredFailure = observedProof.failedError
+          ? new TextVideoActionError(
             observedProof.failedError,
-            true,
+            false,
             0,
             '',
           )
-        }
+          : null
         if (observedProof.jobIds.length > 0) {
           await pollProjectJobs({
             key,
             jobIds: observedProof.jobIds,
             context,
             generation,
+            recoveredFailure,
           })
+        } else if (recoveredFailure) {
+          throw recoveredFailure
         } else {
           updateActionState(key, generation, {
             ...idleAction,
@@ -695,21 +759,24 @@ export function useTextVideoProjectActions({
           recovered,
         )
         if (!proof.proven) throw new TextVideoActionOutcomeUnknownError()
-        if (proof.failedError) {
-          throw new TextVideoActionError(
+        const recoveredFailure = proof.failedError
+          ? new TextVideoActionError(
             proof.failedError,
-            true,
+            false,
             0,
             '',
           )
-        }
+          : null
         if (proof.jobIds.length > 0) {
           await pollProjectJobs({
             key,
             jobIds: proof.jobIds,
             context,
             generation,
+            recoveredFailure,
           })
+        } else if (recoveredFailure) {
+          throw recoveredFailure
         } else {
           updateActionState(key, generation, {
             ...idleAction,
@@ -792,6 +859,7 @@ export function useTextVideoProjectActions({
     const current = operationsRef.current[key]
     if (current) return current
 
+    supersedeDownstreamActions(key)
     const generation = beginGeneration(key)
     const operation = executeProjectAction(key, generation, launch)
       .finally(() => {
@@ -801,7 +869,11 @@ export function useTextVideoProjectActions({
       })
     operationsRef.current[key] = operation
     return operation
-  }, [beginGeneration, executeProjectAction])
+  }, [
+    beginGeneration,
+    executeProjectAction,
+    supersedeDownstreamActions,
+  ])
 
   const executeRetry = useCallback(async (
     key: string,
@@ -853,6 +925,7 @@ export function useTextVideoProjectActions({
   ): Promise<void> => {
     const current = operationsRef.current[key]
     if (current) return current
+    supersedeDownstreamActions(key)
     const generation = beginGeneration(key)
     const operation = executeRetry(key, generation, jobId, stepKey)
       .finally(() => {
@@ -862,7 +935,11 @@ export function useTextVideoProjectActions({
       })
     operationsRef.current[key] = operation
     return operation
-  }, [beginGeneration, executeRetry])
+  }, [
+    beginGeneration,
+    executeRetry,
+    supersedeDownstreamActions,
+  ])
 
   const executeRefresh = useCallback(async (
     key: string,

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { render, screen } from '@testing-library/react'
+import { act, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -132,5 +132,53 @@ describe('SpeechSplitPreviewDialog', () => {
 
     expect(await screen.findByRole('alert'))
       .toHaveTextContent('模型返回了无效边界')
+  })
+
+  it('fails visibly without polling again when a succeeded job has no valid proposal', async () => {
+    vi.useFakeTimers()
+    const project = makeTextVideoProject({
+      script: '甲。乙。',
+      paragraphs: [makeSpeechSegment('segment-1', '甲。乙。')],
+    })
+    const getJob = vi.fn().mockResolvedValue({
+      id: 8,
+      status: 'succeeded',
+      steps: [{
+        id: 1,
+        key: 'propose_boundaries',
+        attempt: 1,
+        status: 'succeeded',
+        output: {},
+        error: '',
+        retryable: false,
+      }],
+    })
+
+    render(
+      <SpeechSplitPreviewDialog
+        open
+        project={project}
+        direction=""
+        createPreview={vi.fn().mockResolvedValue({
+          jobs: [{ id: 8, flow: 'text_video_split_preview', target_id: project.id }],
+          project,
+        })}
+        getJob={getJob}
+        onOpenChange={vi.fn()}
+        onApply={vi.fn()}
+      />,
+    )
+
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(screen.getByRole('alert'))
+      .toHaveTextContent('分段预览任务已完成，但未返回有效分段建议')
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3_000)
+    })
+    expect(getJob).toHaveBeenCalledTimes(1)
+    vi.useRealTimers()
   })
 })

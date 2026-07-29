@@ -11,6 +11,7 @@ import {
   type TextVideoProject,
 } from '@/lib/api/text-videos'
 import {
+  makeMasterAudio,
   makeSpeechSegment,
   makeTextVideoProject,
 } from '@/lib/text-video/test-fixtures'
@@ -364,6 +365,132 @@ describe('useTextVideoProjectActions', () => {
     ])
   })
 
+  it('supersedes a delayed master response when speech regeneration invalidates it', async () => {
+    const baseline = makeTextVideoProject({
+      script: '甲。',
+      paragraphs: [makeSpeechSegment('a', '甲。', {
+        status: 'confirmed',
+        generation_revision: 3,
+        source_hash: 'a'.repeat(64),
+        audio_url: '/api/uploads/a.mp3',
+      })],
+      master_audio: makeMasterAudio(),
+    })
+    const delayedMaster = {
+      ...baseline,
+      master_audio: makeMasterAudio({
+        status: 'building',
+        source_hash: 'm'.repeat(64),
+        job_id: 11,
+      }),
+      scene_plan: {
+        ...baseline.scene_plan,
+        status: 'generating' as const,
+        generation_revision: 2,
+        job_id: 31,
+      },
+      render_input: {
+        ...baseline.render_input,
+        audio: '/api/uploads/old-master.mp3',
+        segments: [{
+          ...baseline.render_input.segments[0],
+          id: 'old-scene',
+        }],
+      },
+    }
+    const regenerated = {
+      ...baseline,
+      paragraphs: [makeSpeechSegment('a', '甲。', {
+        status: 'generating',
+        generation_revision: 4,
+        source_hash: 'b'.repeat(64),
+        job_id: 22,
+      })],
+      master_audio: makeMasterAudio(),
+      scene_plan: {
+        ...baseline.scene_plan,
+        status: 'stale' as const,
+        job_id: null,
+      },
+      render_input: {
+        ...baseline.render_input,
+        audio: '',
+        segments: [{
+          ...baseline.render_input.segments[0],
+          id: 'new-scene',
+        }],
+      },
+    }
+    let resolveMaster!: (value: {
+      jobs: Array<{ id: number; flow: string; target_id: number }>
+      project: TextVideoProject
+    }) => void
+    let resolveMasterJob!: (job: ContentJob) => void
+    const masterLaunch = vi.fn().mockReturnValue(new Promise(resolve => {
+      resolveMaster = resolve
+    }))
+    const readJob = vi.fn().mockReturnValue(new Promise(resolve => {
+      resolveMasterJob = resolve
+    }))
+    const readProject = vi.fn().mockResolvedValue(regenerated)
+    const { result } = renderHook(() => useHarness({
+      initialProject: baseline,
+      flush: vi.fn().mockResolvedValue({
+        project: baseline,
+        dirtyVersion: 0,
+      }),
+      readProject,
+      readJob,
+    }))
+
+    let masterAction!: Promise<void>
+    act(() => {
+      masterAction = result.current.actions.runProjectAction(
+        'master',
+        masterLaunch,
+      )
+    })
+    await waitFor(() => expect(masterLaunch).toHaveBeenCalledOnce())
+    await act(async () => {
+      await result.current.actions.runProjectAction(
+        'speech:a',
+        vi.fn().mockResolvedValue({ jobs: [], project: regenerated }),
+      )
+    })
+
+    try {
+      await act(async () => {
+        resolveMaster({
+          jobs: [{
+            id: 11,
+            flow: 'text_video_master_audio',
+            target_id: baseline.id,
+          }],
+          project: delayedMaster,
+        })
+        await Promise.resolve()
+      })
+      await waitFor(() => {
+        expect(result.current.project.master_audio).toMatchObject({
+          status: 'missing',
+          job_id: null,
+        })
+        expect(result.current.project.scene_plan).toMatchObject({
+          status: 'stale',
+          job_id: null,
+        })
+        expect(result.current.project.render_input.audio).toBe('')
+        expect(result.current.project.render_input.segments[0].id)
+          .toBe('new-scene')
+      })
+    } finally {
+      resolveMasterJob(makeJob({ id: 11 }))
+      await act(async () => {
+        await masterAction
+      })
+    }
+  })
+
   it('rejects with the latest failed step error and retryability', async () => {
     const project = makeTextVideoProject()
     const failedJob = makeJob({
@@ -553,7 +680,7 @@ describe('useTextVideoProjectActions', () => {
     expect(launch).toHaveBeenCalledTimes(2)
     expect(result.current.actions.actionStates['speech:a']).toMatchObject({
       status: 'failed',
-      retryable: true,
+      retryable: false,
     })
   })
 
@@ -621,6 +748,85 @@ describe('useTextVideoProjectActions', () => {
     expect(result.current.actions.actionStates['speech:a']).toMatchObject({
       status: 'failed',
       error: 'MiMo 余额不足',
+      retryable: false,
+      jobId: null,
+      stepKey: '',
+    })
+  })
+
+  it('keeps polling active pending jobs before reporting an unidentifiable fast failure', async () => {
+    const project = makeTextVideoProject({
+      script: '甲。乙。',
+      paragraphs: [
+        makeSpeechSegment('a', '甲。'),
+        makeSpeechSegment('b', '乙。'),
+      ],
+    })
+    const observed = {
+      ...project,
+      paragraphs: [
+        makeSpeechSegment('a', '甲。', {
+          status: 'failed',
+          generation_revision: 1,
+          source_hash: 'a'.repeat(64),
+          error: 'MiMo 余额不足',
+          job_id: null,
+        }),
+        makeSpeechSegment('b', '乙。', {
+          status: 'generating',
+          generation_revision: 1,
+          source_hash: 'b'.repeat(64),
+          job_id: 22,
+        }),
+      ],
+    }
+    const completed = {
+      ...observed,
+      paragraphs: [
+        observed.paragraphs[0],
+        makeSpeechSegment('b', '乙。', {
+          status: 'ready',
+          generation_revision: 1,
+          source_hash: 'b'.repeat(64),
+          audio_url: '/api/uploads/b.mp3',
+          job_id: null,
+        }),
+      ],
+    }
+    const readProject = vi.fn()
+      .mockResolvedValueOnce(observed)
+      .mockResolvedValueOnce(completed)
+    const readJob = vi.fn().mockResolvedValue(makeJob({ id: 22 }))
+    const { result } = renderHook(() => useHarness({
+      initialProject: project,
+      flush: vi.fn().mockResolvedValue({ project, dirtyVersion: 0 }),
+      readProject,
+      readJob,
+    }))
+
+    let thrown: unknown
+    await act(async () => {
+      try {
+        await result.current.actions.runProjectAction(
+          'speech:pending',
+          vi.fn().mockRejectedValue(new TypeError('Failed to fetch')),
+        )
+      } catch (error) {
+        thrown = error
+      }
+    })
+
+    expect(readJob).toHaveBeenCalledWith(22)
+    expect(readProject).toHaveBeenCalledTimes(2)
+    expect(result.current.project.paragraphs[1]).toMatchObject({
+      status: 'ready',
+      audio_url: '/api/uploads/b.mp3',
+    })
+    expect(thrown).toMatchObject({
+      message: 'MiMo 余额不足',
+      retryable: false,
+      jobId: 0,
+      stepKey: '',
     })
   })
 

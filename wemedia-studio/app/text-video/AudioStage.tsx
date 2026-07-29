@@ -118,9 +118,11 @@ export function AudioStage({
     : undefined
   const pendingAction = actionStates['speech:pending']
   const masterAction = actionStates.master
-  const generationBusy = (
-    selectedAction?.status === 'running'
-    || pendingAction?.status === 'running'
+  const generationBusy = Object.entries(actionStates).some(
+    ([key, state]) => (
+      key.startsWith('speech:')
+      && state.status === 'running'
+    ),
   )
   const masterBusy = (
     masterAction?.status === 'running'
@@ -170,6 +172,7 @@ export function AudioStage({
             disabled={
               pendingCount === 0
               || generationBusy
+              || masterBusy
               || !onGeneratePending
             }
             onClick={onGeneratePending}
@@ -283,6 +286,7 @@ export function AudioStage({
                 !selected.text.trim()
                 || selected.status === 'generating'
                 || generationBusy
+                || masterBusy
                 || !onGenerateSegment
               }
               onClick={() => onGenerateSegment?.(selected.id)}
@@ -303,6 +307,7 @@ export function AudioStage({
                 selected.status !== 'ready'
                 || !selected.source_hash
                 || generationBusy
+                || masterBusy
                 || !onConfirmSegment
               }
               onClick={() => onConfirmSegment?.(selected)}
@@ -361,6 +366,7 @@ export function AudioStage({
               disabled={
                 !allConfirmed
                 || masterBusy
+                || generationBusy
                 || !onBuildMasterAudio
               }
               onClick={onBuildMasterAudio}
@@ -389,7 +395,11 @@ export function AudioStage({
               <Button
                 size="sm"
                 variant="outline"
-                disabled={masterBusy || !onRealignMasterAudio}
+                disabled={
+                  masterBusy
+                  || generationBusy
+                  || !onRealignMasterAudio
+                }
                 onClick={() => onRealignMasterAudio?.(
                   project.master_audio.job_id!,
                 )}

@@ -288,6 +288,94 @@ describe('mergeWorkerProject', () => {
       { id: 'b', status: 'generating', job_id: 22 },
     ])
   })
+
+  it('does not revive downstream master, scene, or render state from a speech-stale snapshot', () => {
+    const baseline = makeTextVideoProject({
+      script: '甲。',
+      paragraphs: [makeSpeechSegment('a', '甲。', {
+        status: 'confirmed',
+        generation_revision: 3,
+        source_hash: 'old'.repeat(21) + 'o',
+        audio_url: '/api/uploads/old-speech.mp3',
+      })],
+    })
+    const local = {
+      ...baseline,
+      paragraphs: [makeSpeechSegment('a', '甲。', {
+        status: 'generating',
+        generation_revision: 4,
+        source_hash: 'new'.repeat(21) + 'n',
+        job_id: 22,
+      })],
+      master_audio: {
+        ...baseline.master_audio,
+        status: 'missing' as const,
+        job_id: null,
+      },
+      scene_plan: {
+        ...baseline.scene_plan,
+        status: 'stale' as const,
+        job_id: null,
+      },
+      render_input: {
+        ...baseline.render_input,
+        audio: '',
+        segments: [{
+          ...baseline.render_input.segments[0],
+          id: 'new-scene',
+          text: '新分镜',
+        }],
+      },
+      duration: 0,
+    }
+    const delayedMasterSnapshot = {
+      ...baseline,
+      master_audio: {
+        ...baseline.master_audio,
+        status: 'building' as const,
+        source_hash: 'master-old',
+        job_id: 11,
+      },
+      scene_plan: {
+        ...baseline.scene_plan,
+        status: 'generating' as const,
+        generation_revision: 2,
+        job_id: 31,
+      },
+      render_input: {
+        ...baseline.render_input,
+        audio: '/api/uploads/old-master.mp3',
+        segments: [{
+          ...baseline.render_input.segments[0],
+          id: 'old-scene',
+          text: '旧分镜',
+        }],
+      },
+      duration: 9,
+    }
+
+    const merged = mergeWorkerProject(local, delayedMasterSnapshot, {
+      editableBaseline: baseline,
+      localDirty: false,
+    })
+
+    expect(merged.paragraphs[0]).toMatchObject({
+      status: 'generating',
+      generation_revision: 4,
+      job_id: 22,
+    })
+    expect(merged.master_audio).toMatchObject({
+      status: 'missing',
+      job_id: null,
+    })
+    expect(merged.scene_plan).toMatchObject({
+      status: 'stale',
+      job_id: null,
+    })
+    expect(merged.render_input.audio).toBe('')
+    expect(merged.render_input.segments[0].id).toBe('new-scene')
+    expect(merged.duration).toBe(0)
+  })
 })
 
 describe('project speech settings and video gate', () => {

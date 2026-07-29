@@ -66,6 +66,8 @@ function SpeechSplitPreviewSession({
           setProposal(result)
         } else if (job.status === 'failed' || job.status === 'cancelled') {
           setError(failedJobMessage(job))
+        } else if (job.status === 'succeeded') {
+          setError('分段预览任务已完成，但未返回有效分段建议')
         } else {
           timer = window.setTimeout(() => {
             void poll(id)

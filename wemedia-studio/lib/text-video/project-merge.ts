@@ -62,14 +62,12 @@ function mergeGeneratedSegment(
 ): TextVideoParagraph {
   const locallyInvalidated = Boolean(
     baseline
+    && local.status === 'draft'
+    && !local.audio_url
+    && !local.source_hash
     && (
       local.generation_revision !== baseline.generation_revision
-      || (
-        ['ready', 'confirmed'].includes(baseline.status)
-        && local.status === 'draft'
-        && !local.audio_url
-        && !local.source_hash
-      )
+      || ['ready', 'confirmed'].includes(baseline.status)
     ),
   )
   if (
@@ -91,6 +89,18 @@ function mergeGeneratedSegment(
     if (
       !equal(serverState, baselineState)
       && equal(localState, baselineState)
+    ) {
+      return {
+        ...server,
+        id: local.id,
+        text: local.text,
+      }
+    }
+    if (
+      local.generation_revision === server.generation_revision
+      && local.source_hash === server.source_hash
+      && local.status === 'generating'
+      && ['ready', 'confirmed', 'failed'].includes(server.status)
     ) {
       return {
         ...server,
@@ -200,22 +210,33 @@ export function mergeWorkerProject(
       voiceChanged,
     )
   })
+  const localSpeechWorkerWon = paragraphs.some(segment => {
+    const serverSegment = serverById.get(segment.id)
+    return (
+      !serverSegment
+      || !equal(generatedState(segment), generatedState(serverSegment))
+    )
+  })
+  const downstreamStateFromLocal = (
+    narrationChanged
+    || localSpeechWorkerWon
+  )
 
-  const masterAudio = narrationChanged
+  const masterAudio = downstreamStateFromLocal
     ? local.master_audio
     : chooseWorkerState(
         baseline.master_audio,
         local.master_audio,
         server.master_audio,
       )
-  const scenePlanBase = narrationChanged
+  const scenePlanBase = downstreamStateFromLocal
     ? local.scene_plan
     : chooseWorkerState(
         baseline.scene_plan,
         local.scene_plan,
         server.scene_plan,
       )
-  const scenePlan = !narrationChanged && localScenesChanged
+  const scenePlan = !downstreamStateFromLocal && localScenesChanged
     ? {
         ...scenePlanBase,
         scenes: local.scene_plan.scenes,
@@ -236,14 +257,14 @@ export function mergeWorkerProject(
     composition: localCompositionChanged
       ? local.render_input.composition
       : server.render_input.composition,
-    segments: localRenderScenesChanged
+    segments: downstreamStateFromLocal || localRenderScenesChanged
       ? local.render_input.segments
       : chooseWorkerState(
           baseline.render_input.segments,
           local.render_input.segments,
           server.render_input.segments,
         ),
-    audio: narrationChanged
+    audio: downstreamStateFromLocal
       ? local.render_input.audio
       : chooseWorkerState(
           baseline.render_input.audio,
@@ -257,7 +278,7 @@ export function mergeWorkerProject(
     revision: Math.max(local.revision, server.revision),
     title: chooseEditable(baseline.title, local.title, server.title),
     stage: chooseEditable(baseline.stage, local.stage, server.stage),
-    status: narrationChanged ? local.status : server.status,
+    status: downstreamStateFromLocal ? local.status : server.status,
     script: slicesChanged || scriptChanged ? local.script : server.script,
     paragraphs,
     speech_split_mode: paragraphs.length <= 1
@@ -278,7 +299,7 @@ export function mergeWorkerProject(
     aspect_ratio: localCompositionChanged
       ? local.aspect_ratio
       : server.aspect_ratio,
-    duration: server.duration,
+    duration: downstreamStateFromLocal ? local.duration : server.duration,
   }
 }
 
