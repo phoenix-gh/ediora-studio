@@ -116,6 +116,26 @@ def _prepare_speech_worker_result(
     }
 
 
+async def _submit_prepared_speech_worker_result(case, session):
+    upload = UploadFile(
+        BytesIO(case["wav"].read_bytes()),
+        filename="provider.wav",
+        headers=Headers({"content-type": "audio/wav"}),
+    )
+    return await case["router"].save_speech_worker_result(
+        case["project"]["id"],
+        case["segment"]["id"],
+        upload,
+        case["context"]["generation_revision"],
+        case["context"]["source_hash"],
+        "",
+        "audio/wav",
+        "[]",
+        case["job"]["id"],
+        session,
+    )
+
+
 def test_text_video_project_crud_and_revision_conflict(client):
     assert client.get("/api/text-videos").json() == []
 
@@ -1352,10 +1372,13 @@ def test_worker_result_waits_for_durable_commit_before_propagating_cancel(
             )
             await asyncio.wait_for(durable.wait(), timeout=10)
             request_task.cancel()
-            await asyncio.sleep(0)
-            acknowledge.set()
+            done, _ = await asyncio.wait({request_task}, timeout=0.3)
+            finished_in_time = request_task in done
+            if not finished_in_time:
+                acknowledge.set()
             with pytest.raises(asyncio.CancelledError):
                 await request_task
+            assert finished_in_time is True
             assert commit_finished.is_set()
             assert [
                 task
@@ -1692,6 +1715,229 @@ def test_worker_result_preserves_file_when_durability_check_is_unavailable(
     assert len(list(case["uploads"].glob("*.mp3"))) == 1
 
 
+def test_worker_result_preserves_file_when_commit_and_rollback_fail(
+    client,
+    monkeypatch,
+    tmp_path,
+):
+    from database import SessionLocal
+
+    case = _prepare_speech_worker_result(
+        client,
+        monkeypatch,
+        tmp_path,
+        "commit and rollback unavailable",
+    )
+    router_module = case["router"]
+    original_save = router_module.save_text_video_audio_asset
+
+    async def save_then_break_transaction(db, *args, **kwargs):
+        saved = await original_save(db, *args, **kwargs)
+
+        async def fail_commit():
+            raise ConnectionError("commit connection unavailable")
+
+        async def fail_rollback():
+            raise ConnectionError("rollback connection unavailable")
+
+        db.commit = fail_commit
+        db.rollback = fail_rollback
+        return saved
+
+    monkeypatch.setattr(
+        router_module,
+        "save_text_video_audio_asset",
+        save_then_break_transaction,
+    )
+
+    async def run():
+        async with SessionLocal() as session:
+            with pytest.raises(
+                ConnectionError,
+                match="commit connection unavailable",
+            ):
+                await _submit_prepared_speech_worker_result(case, session)
+
+    asyncio.new_event_loop().run_until_complete(run())
+    assert len(list(case["uploads"].glob("*.mp3"))) == 1
+
+
+def test_worker_result_commit_deadline_is_bounded_and_preserves_file(
+    client,
+    monkeypatch,
+    tmp_path,
+):
+    from database import SessionLocal
+
+    case = _prepare_speech_worker_result(
+        client,
+        monkeypatch,
+        tmp_path,
+        "commit deadline",
+    )
+    router_module = case["router"]
+    original_save = router_module.save_text_video_audio_asset
+    release_commit = asyncio.Event()
+    commit_cancelled = asyncio.Event()
+
+    async def save_then_hang_commit(db, *args, **kwargs):
+        saved = await original_save(db, *args, **kwargs)
+
+        async def hang_commit():
+            try:
+                await release_commit.wait()
+            except asyncio.CancelledError:
+                commit_cancelled.set()
+                raise
+
+        db.commit = hang_commit
+        return saved
+
+    monkeypatch.setattr(
+        router_module,
+        "save_text_video_audio_asset",
+        save_then_hang_commit,
+    )
+    monkeypatch.setattr(
+        router_module,
+        "SPEECH_DB_OPERATION_TIMEOUT_SECONDS",
+        0.02,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        router_module,
+        "SPEECH_DB_CANCEL_GRACE_SECONDS",
+        0.02,
+        raising=False,
+    )
+
+    async def run():
+        async with SessionLocal() as session:
+            request = asyncio.create_task(
+                _submit_prepared_speech_worker_result(case, session),
+            )
+            done, _ = await asyncio.wait({request}, timeout=0.3)
+            finished_in_time = request in done
+            if not finished_in_time:
+                release_commit.set()
+                request.cancel()
+            try:
+                await request
+            except BaseException as error:
+                failure = error
+            else:
+                failure = None
+            pending_helpers = [
+                task
+                for task in asyncio.all_tasks()
+                if task is not asyncio.current_task()
+                and task.get_name().startswith("text-video-speech-")
+                and not task.done()
+            ]
+            return finished_in_time, failure, pending_helpers
+
+    (
+        finished_in_time,
+        error,
+        pending_helpers,
+    ) = asyncio.new_event_loop().run_until_complete(run())
+    assert finished_in_time is True
+    assert isinstance(error, TimeoutError)
+    assert pending_helpers == []
+    assert commit_cancelled.is_set()
+    assert len(list(case["uploads"].glob("*.mp3"))) == 1
+
+
+def test_worker_result_rollback_deadline_is_bounded_and_preserves_file(
+    client,
+    monkeypatch,
+    tmp_path,
+):
+    from database import SessionLocal
+
+    case = _prepare_speech_worker_result(
+        client,
+        monkeypatch,
+        tmp_path,
+        "rollback deadline",
+    )
+    router_module = case["router"]
+    original_save = router_module.save_text_video_audio_asset
+    release_rollback = asyncio.Event()
+    rollback_cancelled = asyncio.Event()
+
+    async def save_then_hang_rollback(db, *args, **kwargs):
+        saved = await original_save(db, *args, **kwargs)
+
+        async def fail_commit():
+            raise ConnectionError("commit connection unavailable")
+
+        async def hang_rollback():
+            try:
+                await release_rollback.wait()
+            except asyncio.CancelledError:
+                rollback_cancelled.set()
+                raise
+
+        db.commit = fail_commit
+        db.rollback = hang_rollback
+        return saved
+
+    monkeypatch.setattr(
+        router_module,
+        "save_text_video_audio_asset",
+        save_then_hang_rollback,
+    )
+    monkeypatch.setattr(
+        router_module,
+        "SPEECH_DB_OPERATION_TIMEOUT_SECONDS",
+        0.02,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        router_module,
+        "SPEECH_DB_CANCEL_GRACE_SECONDS",
+        0.02,
+        raising=False,
+    )
+
+    async def run():
+        async with SessionLocal() as session:
+            request = asyncio.create_task(
+                _submit_prepared_speech_worker_result(case, session),
+            )
+            done, _ = await asyncio.wait({request}, timeout=0.3)
+            finished_in_time = request in done
+            if not finished_in_time:
+                release_rollback.set()
+                request.cancel()
+            try:
+                await request
+            except BaseException as error:
+                failure = error
+            else:
+                failure = None
+            pending_helpers = [
+                task
+                for task in asyncio.all_tasks()
+                if task is not asyncio.current_task()
+                and task.get_name().startswith("text-video-speech-")
+                and not task.done()
+            ]
+            return finished_in_time, failure, pending_helpers
+
+    (
+        finished_in_time,
+        error,
+        pending_helpers,
+    ) = asyncio.new_event_loop().run_until_complete(run())
+    assert finished_in_time is True
+    assert isinstance(error, ConnectionError)
+    assert pending_helpers == []
+    assert rollback_cancelled.is_set()
+    assert len(list(case["uploads"].glob("*.mp3"))) == 1
+
+
 def test_durability_verifier_preserves_contradictory_project_reference(
     client,
 ):
@@ -1728,6 +1974,216 @@ def test_durability_verifier_preserves_contradictory_project_reference(
                     "asset_id": 2_147_483_647,
                     "audio_url": audio_url,
                 },
+                source_hash=source_hash,
+                project_id=project["id"],
+                segment_id=segment["id"],
+                generation_revision=segment["generation_revision"],
+                require_project_reference=True,
+            )
+
+    assert asyncio.new_event_loop().run_until_complete(verify()) is None
+
+
+@pytest.mark.parametrize(
+    ("target", "field", "invalid_value"),
+    [
+        ("asset", "media_kind", "video"),
+        ("asset", "source", "manual"),
+        ("metadata", "sample_count", 22050),
+        ("metadata", "provider_request_id", "different-provider"),
+        ("project", "duration", 2.0),
+        ("project", "error", "stale error"),
+    ],
+)
+def test_durability_verifier_rejects_immutable_state_mismatch(
+    client,
+    target,
+    field,
+    invalid_value,
+):
+    from database import SessionLocal
+    from models import (
+        CreativeAsset,
+        TextVideoProject,
+        TextVideoSpeechAsset,
+    )
+
+    project = _speech_project(client)
+    segment = project["paragraphs"][0]
+    source_hash = "b" * 64
+    audio_url = "/api/uploads/verified-speech.mp3"
+    saved = {
+        "asset_id": 1,
+        "audio_url": audio_url,
+        "duration": 1.0,
+        "sample_count": 44100,
+        "sample_rate": 44100,
+        "word_timings": [{
+            "id": "word-1",
+            "text": "需要",
+            "start": 0.0,
+            "end": 0.4,
+        }],
+        "provider_request_id": "provider-1",
+    }
+
+    async def verify():
+        async with SessionLocal() as session:
+            asset = CreativeAsset(
+                id=saved["asset_id"],
+                asset_type="media",
+                media_kind="audio",
+                title="文字视频口播配音",
+                url=audio_url,
+                media_type="audio/mpeg",
+                filename="verified-speech.mp3",
+                source="generated",
+            )
+            metadata = TextVideoSpeechAsset(
+                creative_asset_id=saved["asset_id"],
+                source_hash=source_hash,
+                duration=1.0,
+                sample_count=44100,
+                sample_rate=44100,
+                word_timings=saved["word_timings"],
+                provider_request_id=saved["provider_request_id"],
+            )
+            stored_project = await session.get(
+                TextVideoProject,
+                project["id"],
+            )
+            paragraphs = list(stored_project.paragraphs)
+            paragraphs[0] = {
+                **paragraphs[0],
+                "status": "ready",
+                "audio_url": audio_url,
+                "duration": saved["duration"],
+                "word_timings": saved["word_timings"],
+                "source_hash": source_hash,
+                "generation_revision": segment["generation_revision"],
+                "error": "",
+                "job_id": None,
+            }
+            stored_project.paragraphs = paragraphs
+            session.add_all([asset, metadata])
+            await session.commit()
+
+        async with SessionLocal() as session:
+            if target == "asset":
+                row = await session.get(
+                    CreativeAsset,
+                    saved["asset_id"],
+                )
+                setattr(row, field, invalid_value)
+            elif target == "metadata":
+                row = await session.scalar(
+                    __import__("sqlalchemy").select(
+                        TextVideoSpeechAsset,
+                    ),
+                )
+                setattr(row, field, invalid_value)
+            else:
+                row = await session.get(
+                    TextVideoProject,
+                    project["id"],
+                )
+                paragraphs = list(row.paragraphs)
+                paragraphs[0] = {
+                    **paragraphs[0],
+                    field: invalid_value,
+                }
+                row.paragraphs = paragraphs
+            await session.commit()
+
+        import routers.text_videos as router_module
+
+        async with SessionLocal() as session:
+            return await router_module._verify_saved_speech_result(
+                session,
+                saved,
+                source_hash=source_hash,
+                project_id=project["id"],
+                segment_id=segment["id"],
+                generation_revision=segment["generation_revision"],
+                require_project_reference=True,
+            )
+
+    assert asyncio.new_event_loop().run_until_complete(verify()) is None
+
+
+def test_durability_verifier_rejects_duplicate_speech_metadata(client):
+    from database import SessionLocal
+    from models import (
+        CreativeAsset,
+        TextVideoProject,
+        TextVideoSpeechAsset,
+    )
+
+    project = _speech_project(client)
+    segment = project["paragraphs"][0]
+    source_hash = "c" * 64
+    saved = {
+        "asset_id": 1,
+        "audio_url": "/api/uploads/duplicate-metadata.mp3",
+        "duration": 1.0,
+        "sample_count": 44100,
+        "sample_rate": 44100,
+        "word_timings": [],
+        "provider_request_id": "",
+    }
+
+    async def verify():
+        async with SessionLocal() as session:
+            session.add(CreativeAsset(
+                id=saved["asset_id"],
+                asset_type="media",
+                media_kind="audio",
+                title="文字视频口播配音",
+                url=saved["audio_url"],
+                media_type="audio/mpeg",
+                filename="duplicate-metadata.mp3",
+                source="generated",
+            ))
+            session.add_all([
+                TextVideoSpeechAsset(
+                    creative_asset_id=saved["asset_id"],
+                    source_hash=source_hash,
+                    duration=1.0,
+                    sample_count=44100,
+                    sample_rate=44100,
+                ),
+                TextVideoSpeechAsset(
+                    creative_asset_id=saved["asset_id"],
+                    source_hash=source_hash,
+                    duration=1.0,
+                    sample_count=44100,
+                    sample_rate=44100,
+                ),
+            ])
+            stored_project = await session.get(
+                TextVideoProject,
+                project["id"],
+            )
+            paragraphs = list(stored_project.paragraphs)
+            paragraphs[0] = {
+                **paragraphs[0],
+                "status": "ready",
+                "audio_url": saved["audio_url"],
+                "duration": saved["duration"],
+                "word_timings": [],
+                "source_hash": source_hash,
+                "error": "",
+                "job_id": None,
+            }
+            stored_project.paragraphs = paragraphs
+            await session.commit()
+
+        import routers.text_videos as router_module
+
+        async with SessionLocal() as session:
+            return await router_module._verify_saved_speech_result(
+                session,
+                saved,
                 source_hash=source_hash,
                 project_id=project["id"],
                 segment_id=segment["id"],

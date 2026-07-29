@@ -1,16 +1,93 @@
+import asyncio
+import math
 import os
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy.orm import DeclarativeBase
+
+_MAX_DATABASE_TIMEOUT_SECONDS = 300.0
+_DEFERRED_SESSION_TASKS_KEY = "wms_deferred_session_tasks"
+_BACKGROUND_DATABASE_TASKS: set[asyncio.Task] = set()
+
+
+def _parse_database_timeout_seconds(value: str) -> float:
+    try:
+        timeout = float(value)
+    except (TypeError, ValueError) as error:
+        raise ValueError(
+            "WMS_DATABASE_COMMAND_TIMEOUT_SECONDS must be a finite number "
+            "between 0 and 300",
+        ) from error
+    if (
+        not math.isfinite(timeout)
+        or timeout <= 0
+        or timeout > _MAX_DATABASE_TIMEOUT_SECONDS
+    ):
+        raise ValueError(
+            "WMS_DATABASE_COMMAND_TIMEOUT_SECONDS must be a finite number "
+            "between 0 and 300",
+        )
+    return timeout
+
+
+def _database_engine_kwargs(
+    database_url: str,
+    command_timeout_seconds: float,
+) -> dict:
+    options: dict = {"echo": False, "pool_pre_ping": True}
+    if database_url.startswith("sqlite"):
+        options["connect_args"] = {"timeout": command_timeout_seconds}
+    else:
+        options.update(pool_size=10, max_overflow=20)
+        if database_url.startswith("postgresql+asyncpg"):
+            options["connect_args"] = {
+                "command_timeout": command_timeout_seconds,
+            }
+    return options
+
+
+def _consume_background_database_task(task: asyncio.Task) -> None:
+    _BACKGROUND_DATABASE_TASKS.discard(task)
+    try:
+        task.result()
+    except BaseException:
+        pass
+
+
+def defer_session_close_until_task_terminal(
+    session: AsyncSession,
+    task: asyncio.Task,
+) -> None:
+    tasks = session.info.setdefault(_DEFERRED_SESSION_TASKS_KEY, set())
+    tasks.add(task)
+    _BACKGROUND_DATABASE_TASKS.add(task)
+    task.add_done_callback(_consume_background_database_task)
+
+
+async def _close_session_after_tasks(
+    session: AsyncSession,
+    tasks: tuple[asyncio.Task, ...],
+) -> None:
+    await asyncio.gather(*tasks, return_exceptions=True)
+    await session.close()
+
+
+def _track_background_database_task(task: asyncio.Task) -> None:
+    _BACKGROUND_DATABASE_TASKS.add(task)
+    task.add_done_callback(_consume_background_database_task)
+
 
 DATABASE_URL = os.getenv(
     "WMS_DATABASE_URL",
     "postgresql+asyncpg://postgres:123456@127.0.0.1:5432/wemedia",
 )
+DATABASE_COMMAND_TIMEOUT_SECONDS = _parse_database_timeout_seconds(
+    os.getenv("WMS_DATABASE_COMMAND_TIMEOUT_SECONDS", "30"),
+)
 
-_engine_kwargs: dict = dict(echo=False, pool_pre_ping=True)
-if not DATABASE_URL.startswith("sqlite"):
-    _engine_kwargs.update(pool_size=10, max_overflow=20)
-
+_engine_kwargs = _database_engine_kwargs(
+    DATABASE_URL,
+    DATABASE_COMMAND_TIMEOUT_SECONDS,
+)
 engine = create_async_engine(DATABASE_URL, **_engine_kwargs)
 SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
@@ -18,8 +95,22 @@ class Base(DeclarativeBase):
     pass
 
 async def get_db() -> AsyncSession:
-    async with SessionLocal() as session:
+    session = SessionLocal()
+    try:
         yield session
+    finally:
+        deferred = tuple(
+            session.info.pop(_DEFERRED_SESSION_TASKS_KEY, set()),
+        )
+        pending = tuple(task for task in deferred if not task.done())
+        if pending:
+            cleanup = asyncio.create_task(
+                _close_session_after_tasks(session, pending),
+                name="deferred-database-session-close",
+            )
+            _track_background_database_task(cleanup)
+        else:
+            await session.close()
 
 async def migrate_x_response_claim_schema(conn) -> None:
     """Add the delivery-claim column/index on both SQLite and PostgreSQL."""

@@ -1,8 +1,10 @@
 import asyncio
 from copy import deepcopy
+from dataclasses import dataclass
 from datetime import datetime
 import hashlib
 import json
+import math
 from pathlib import Path
 from typing import Any, Literal
 from uuid import uuid4
@@ -23,7 +25,11 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from database import get_db
+from database import (
+    DATABASE_COMMAND_TIMEOUT_SECONDS,
+    defer_session_close_until_task_terminal,
+    get_db,
+)
 from config import get_config
 from content_jobs import create_or_get_job
 from job_queue import enqueue_job
@@ -68,6 +74,13 @@ from worker_auth import require_worker_token
 
 router = APIRouter(prefix="/text-videos", tags=["text-videos"])
 UPLOADS_DIR = Path(__file__).resolve().parent.parent / "uploads"
+SPEECH_DB_OPERATION_TIMEOUT_SECONDS = min(
+    DATABASE_COMMAND_TIMEOUT_SECONDS + 5,
+    305,
+)
+SPEECH_DB_CANCEL_GRACE_SECONDS = 1.0
+SPEECH_DB_VERIFICATION_TIMEOUT_SECONDS = 6.0
+_DETACHED_SPEECH_DB_TASKS: set[asyncio.Task] = set()
 
 
 class WordTimingDocument(BaseModel):
@@ -775,29 +788,153 @@ def _remove_saved_audio(saved: dict) -> None:
     candidate.unlink(missing_ok=True)
 
 
-async def _wait_for_task_terminal(
-    task: asyncio.Task,
-    pending_cancellation: asyncio.CancelledError | None = None,
-) -> asyncio.CancelledError | None:
-    while not task.done():
-        try:
-            await asyncio.shield(task)
-        except asyncio.CancelledError as error:
-            if pending_cancellation is None:
-                pending_cancellation = error
-            if task.done() and task.cancelled():
-                break
-        except BaseException:
-            break
-    return pending_cancellation
-
-
 def _task_failure(task: asyncio.Task) -> BaseException | None:
     try:
         task.result()
     except BaseException as error:
         return error
     return None
+
+
+@dataclass(frozen=True)
+class _TaskOutcome:
+    terminal: bool
+    timed_out: bool
+    cancellation_requested: bool
+    failure: BaseException | None
+    pending_cancellation: asyncio.CancelledError | None
+
+
+async def _wait_for_task_window(
+    task: asyncio.Task,
+    timeout_seconds: float,
+    pending_cancellation: asyncio.CancelledError | None,
+    *,
+    cancellation_interrupts: bool,
+) -> tuple[
+    asyncio.CancelledError | None,
+    bool,
+    Literal["terminal", "cancelled", "timeout"],
+]:
+    deadline = asyncio.get_running_loop().time() + timeout_seconds
+    cancellation_seen = False
+    while not task.done():
+        remaining = deadline - asyncio.get_running_loop().time()
+        if remaining <= 0:
+            return pending_cancellation, cancellation_seen, "timeout"
+        try:
+            await asyncio.wait_for(
+                asyncio.shield(task),
+                timeout=remaining,
+            )
+        except asyncio.CancelledError as error:
+            current = asyncio.current_task()
+            caller_cancelled = bool(
+                current is not None and current.cancelling()
+            )
+            if caller_cancelled:
+                cancellation_seen = True
+                if pending_cancellation is None:
+                    pending_cancellation = error
+            if task.done():
+                break
+            if caller_cancelled and cancellation_interrupts:
+                return pending_cancellation, cancellation_seen, "cancelled"
+        except TimeoutError:
+            if task.done():
+                break
+            return pending_cancellation, cancellation_seen, "timeout"
+        except BaseException:
+            break
+    return pending_cancellation, cancellation_seen, "terminal"
+
+
+def _retain_unfinished_speech_db_task(
+    task: asyncio.Task,
+    *,
+    db: AsyncSession | None,
+) -> None:
+    _DETACHED_SPEECH_DB_TASKS.add(task)
+    if db is not None:
+        defer_session_close_until_task_terminal(db, task)
+
+    def consume(completed: asyncio.Task) -> None:
+        _DETACHED_SPEECH_DB_TASKS.discard(completed)
+        _task_failure(completed)
+
+    task.add_done_callback(consume)
+
+
+async def _bounded_task_outcome(
+    task: asyncio.Task,
+    *,
+    timeout_seconds: float,
+    pending_cancellation: asyncio.CancelledError | None = None,
+    db: AsyncSession | None = None,
+) -> _TaskOutcome:
+    (
+        pending_cancellation,
+        cancellation_seen,
+        wait_status,
+    ) = await _wait_for_task_window(
+        task,
+        timeout_seconds,
+        pending_cancellation,
+        cancellation_interrupts=True,
+    )
+    timed_out = wait_status == "timeout"
+    interrupted = wait_status in {"cancelled", "timeout"}
+    if interrupted and not task.done():
+        task.cancel()
+        (
+            pending_cancellation,
+            drain_cancellation_seen,
+            _drain_status,
+        ) = await _wait_for_task_window(
+            task,
+            SPEECH_DB_CANCEL_GRACE_SECONDS,
+            pending_cancellation,
+            cancellation_interrupts=False,
+        )
+        cancellation_seen = (
+            cancellation_seen or drain_cancellation_seen
+        )
+    if not task.done():
+        _retain_unfinished_speech_db_task(task, db=db)
+        return _TaskOutcome(
+            terminal=False,
+            timed_out=timed_out,
+            cancellation_requested=True,
+            failure=None,
+            pending_cancellation=pending_cancellation,
+        )
+    return _TaskOutcome(
+        terminal=True,
+        timed_out=timed_out,
+        cancellation_requested=(
+            cancellation_seen or interrupted or task.cancelled()
+        ),
+        failure=_task_failure(task),
+        pending_cancellation=pending_cancellation,
+    )
+
+
+def _finite_duration_matches(value: Any, expected: float) -> bool:
+    if isinstance(value, bool):
+        return False
+    try:
+        candidate = float(value)
+    except (TypeError, ValueError):
+        return False
+    return bool(
+        math.isfinite(candidate)
+        and math.isclose(
+            candidate,
+            expected,
+            rel_tol=0,
+            abs_tol=1e-9,
+        )
+    )
 
 
 async def _verify_saved_speech_result(
@@ -822,39 +959,59 @@ async def _verify_saved_speech_result(
         expire_on_commit=False,
     )
     try:
+        sample_count = saved["sample_count"]
+        sample_rate = saved["sample_rate"]
+        if (
+            isinstance(sample_count, bool)
+            or not isinstance(sample_count, int)
+            or sample_count <= 0
+            or isinstance(sample_rate, bool)
+            or not isinstance(sample_rate, int)
+            or sample_rate <= 0
+        ):
+            raise ValueError("saved speech sample metadata is invalid")
+        expected_duration = sample_count / sample_rate
+        if (
+            not math.isfinite(expected_duration)
+            or not _finite_duration_matches(
+                saved.get("duration"),
+                expected_duration,
+            )
+        ):
+            raise ValueError("saved speech duration is invalid")
+        expected_filename = Path(saved["audio_url"]).name
         async with asyncio.timeout(5):
             async with verification_factory() as verification:
                 asset = await verification.get(
                     CreativeAsset,
                     saved["asset_id"],
                 )
-                metadata = await verification.scalar(
-                    select(TextVideoSpeechAsset).where(
-                        TextVideoSpeechAsset.creative_asset_id
-                        == saved["asset_id"],
-                    ),
-                )
-                referenced = False
+                metadata_rows = (
+                    await verification.scalars(
+                        select(TextVideoSpeechAsset).where(
+                            TextVideoSpeechAsset.creative_asset_id
+                            == saved["asset_id"],
+                        ),
+                    )
+                ).all()
+                project_references: list[dict] = []
                 if require_project_reference:
                     project = await verification.get(
                         TextVideoProject,
                         project_id,
                     )
-                    referenced = bool(
-                        project is not None
-                        and any(
-                            item.get("id") == segment_id
-                            and item.get("audio_url") == saved["audio_url"]
-                            and item.get("source_hash") == source_hash
-                            and item.get("generation_revision")
-                            == generation_revision
-                            and item.get("status") in {"ready", "confirmed"}
-                            and item.get("job_id") is None
+                    if project is not None:
+                        project_references = [
+                            item
                             for item in (project.paragraphs or [])
-                        )
-                    )
-                if asset is None and metadata is None:
-                    if referenced:
+                            if (
+                                item.get("id") == segment_id
+                                and item.get("audio_url")
+                                == saved["audio_url"]
+                            )
+                        ]
+                if asset is None and not metadata_rows:
+                    if project_references:
                         logger.error(
                             "Speech asset {} rows are absent but its project "
                             "reference is durable; preserving its file",
@@ -862,25 +1019,72 @@ async def _verify_saved_speech_result(
                         )
                         return None
                     return False
-                if (
-                    asset is None
-                    or metadata is None
-                    or asset.url != saved["audio_url"]
-                    or metadata.source_hash != source_hash
-                ):
+                if asset is None or len(metadata_rows) != 1:
                     logger.error(
-                        "Speech asset {} durability is partial or "
-                        "inconsistent; preserving its file",
+                        "Speech asset {} durability is partial, duplicated, "
+                        "or inconsistent; preserving its file",
                         saved["asset_id"],
                     )
                     return None
-                if require_project_reference and not referenced:
+                metadata = metadata_rows[0]
+                asset_matches = bool(
+                    asset.asset_type == "media"
+                    and asset.media_kind == "audio"
+                    and asset.url == saved["audio_url"]
+                    and asset.media_type == "audio/mpeg"
+                    and asset.filename == expected_filename
+                    and asset.source == "generated"
+                )
+                metadata_matches = bool(
+                    metadata.source_hash == source_hash
+                    and metadata.sample_count == sample_count
+                    and metadata.sample_rate == sample_rate
+                    and _finite_duration_matches(
+                        metadata.duration,
+                        expected_duration,
+                    )
+                    and metadata.word_timings
+                    == saved.get("word_timings")
+                    and metadata.provider_request_id
+                    == saved.get("provider_request_id")
+                )
+                if not asset_matches or not metadata_matches:
                     logger.error(
-                        "Durable speech asset {} has no expected project "
-                        "reference; preserving its file",
+                        "Speech asset {} immutable state is inconsistent; "
+                        "preserving its file",
                         saved["asset_id"],
                     )
                     return None
+                if require_project_reference:
+                    item = (
+                        project_references[0]
+                        if len(project_references) == 1
+                        else None
+                    )
+                    referenced = bool(
+                        item is not None
+                        and item.get("id") == segment_id
+                        and item.get("status") in {"ready", "confirmed"}
+                        and item.get("audio_url") == saved["audio_url"]
+                        and item.get("source_hash") == source_hash
+                        and item.get("generation_revision")
+                        == generation_revision
+                        and item.get("job_id") is None
+                        and _finite_duration_matches(
+                            item.get("duration"),
+                            expected_duration,
+                        )
+                        and item.get("word_timings")
+                        == saved.get("word_timings")
+                        and item.get("error") == ""
+                    )
+                    if not referenced:
+                        logger.error(
+                            "Durable speech asset {} has no exact project "
+                            "reference; preserving its file",
+                            saved["asset_id"],
+                        )
+                        return None
                 return True
     except Exception as error:
         logger.error(
@@ -905,27 +1109,70 @@ async def _commit_saved_speech_result(
         db.commit(),
         name=f"text-video-speech-commit-{saved['asset_id']}",
     )
-    pending_cancellation = await _wait_for_task_terminal(commit_task)
-    commit_failure = _task_failure(commit_task)
+    commit_outcome = await _bounded_task_outcome(
+        commit_task,
+        timeout_seconds=SPEECH_DB_OPERATION_TIMEOUT_SECONDS,
+        db=db,
+    )
+    pending_cancellation = commit_outcome.pending_cancellation
+    if not commit_outcome.terminal:
+        commit_failure = TimeoutError(
+            "speech result commit did not reach a terminal state",
+        )
+        logger.error(
+            "Speech result commit did not terminate for asset {}; "
+            "preserving its file and deferring session close",
+            saved["asset_id"],
+        )
+        if pending_cancellation is not None:
+            raise pending_cancellation from commit_failure
+        raise commit_failure
+    commit_failure = commit_outcome.failure
     if commit_failure is None:
         if pending_cancellation is not None:
             raise pending_cancellation
         return
+    effective_commit_failure = (
+        TimeoutError("speech result commit exceeded its deadline")
+        if commit_outcome.timed_out
+        else commit_failure
+    )
 
     rollback_task = asyncio.create_task(
         db.rollback(),
         name=f"text-video-speech-rollback-{saved['asset_id']}",
     )
-    pending_cancellation = await _wait_for_task_terminal(
+    rollback_outcome = await _bounded_task_outcome(
         rollback_task,
-        pending_cancellation,
+        timeout_seconds=(
+            SPEECH_DB_CANCEL_GRACE_SECONDS
+            if pending_cancellation is not None
+            else SPEECH_DB_OPERATION_TIMEOUT_SECONDS
+        ),
+        pending_cancellation=pending_cancellation,
+        db=db,
     )
-    rollback_failure = _task_failure(rollback_task)
-    if rollback_failure is not None:
-        logger.warning(
-            "Speech result rollback failed for asset {}: {}",
+    pending_cancellation = rollback_outcome.pending_cancellation
+    if not rollback_outcome.terminal:
+        logger.error(
+            "Speech result rollback did not terminate for asset {}; "
+            "preserving its file and deferring session close",
             saved["asset_id"],
-            redact_secret_text(str(rollback_failure))[:500],
+        )
+        if pending_cancellation is not None:
+            raise pending_cancellation from effective_commit_failure
+        raise effective_commit_failure
+    rollback_failure = rollback_outcome.failure
+    rollback_confirmed = bool(
+        rollback_failure is None
+        and not rollback_outcome.timed_out
+        and not rollback_outcome.cancellation_requested
+    )
+    if not rollback_confirmed:
+        logger.warning(
+            "Speech result rollback was not confirmed for asset {}: {}",
+            saved["asset_id"],
+            redact_secret_text(str(rollback_failure or "interrupted"))[:500],
         )
 
     verification_task = asyncio.create_task(
@@ -940,24 +1187,42 @@ async def _commit_saved_speech_result(
         ),
         name=f"text-video-speech-verify-{saved['asset_id']}",
     )
-    pending_cancellation = await _wait_for_task_terminal(
+    verification_outcome = await _bounded_task_outcome(
         verification_task,
-        pending_cancellation,
+        timeout_seconds=(
+            SPEECH_DB_CANCEL_GRACE_SECONDS
+            if pending_cancellation is not None
+            else SPEECH_DB_VERIFICATION_TIMEOUT_SECONDS
+        ),
+        pending_cancellation=pending_cancellation,
     )
-    verification_failure = _task_failure(verification_task)
+    pending_cancellation = verification_outcome.pending_cancellation
+    verification_failure = verification_outcome.failure
     durable = (
         verification_task.result()
-        if verification_failure is None
+        if (
+            verification_outcome.terminal
+            and verification_failure is None
+            and not verification_outcome.timed_out
+        )
         else None
     )
-    if verification_failure is not None:
+    if not verification_outcome.terminal or verification_failure is not None:
         logger.error(
             "Speech result verification crashed for asset {}: {}",
             saved["asset_id"],
-            redact_secret_text(str(verification_failure))[:500],
+            redact_secret_text(
+                str(verification_failure or "did not terminate"),
+            )[:500],
         )
 
-    if durable is False:
+    deletion_is_safe = bool(
+        durable is False
+        and rollback_confirmed
+        and not commit_outcome.timed_out
+        and not commit_outcome.cancellation_requested
+    )
+    if deletion_is_safe:
         _remove_saved_audio(saved)
     elif durable is True:
         logger.warning(
@@ -973,10 +1238,12 @@ async def _commit_saved_speech_result(
         )
 
     if pending_cancellation is not None:
-        raise pending_cancellation from commit_failure
+        raise pending_cancellation from effective_commit_failure
     if durable is True:
+        if isinstance(effective_commit_failure, asyncio.CancelledError):
+            raise effective_commit_failure
         return
-    raise commit_failure
+    raise effective_commit_failure
 
 
 @router.post(

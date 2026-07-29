@@ -7,7 +7,6 @@ import re
 from typing import Any, Awaitable, Callable
 
 from fastapi import HTTPException
-from starlette._utils import get_route_path
 
 from worker_auth import validate_worker_token
 
@@ -65,6 +64,18 @@ def _worker_token(scope: dict[str, Any]) -> bytes | None:
         raise AssertionError("worker-token validation must raise")
 
 
+def _route_path(scope: dict[str, Any]) -> str:
+    path = str(scope.get("path") or "")
+    root_path = str(scope.get("root_path") or "")
+    if not root_path or not path.startswith(root_path):
+        return path
+    if path == root_path:
+        return ""
+    if path[len(root_path)] == "/":
+        return path[len(root_path):]
+    return path
+
+
 class SpeechWorkerUploadBoundary:
     """Reject untrusted or unbounded multipart bodies before FastAPI parses."""
 
@@ -88,7 +99,7 @@ class SpeechWorkerUploadBoundary:
         if (
             scope.get("type") != "http"
             or scope.get("method") != "POST"
-            or not _WORKER_RESULT_PATH.fullmatch(get_route_path(scope))
+            or not _WORKER_RESULT_PATH.fullmatch(_route_path(scope))
         ):
             await self.app(scope, receive, send)
             return
