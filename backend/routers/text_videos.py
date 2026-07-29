@@ -409,6 +409,8 @@ async def create_speech_split_preview(
         select(ContentJob).where(ContentJob.idempotency_key == key)
     )).scalars().first()
     if existing is not None:
+        if existing.status == "queued":
+            await enqueue_job(existing.id)
         return {
             "jobs": [_speech_split_preview_job_payload(existing, project.id)],
             "project": serialize_project(project),

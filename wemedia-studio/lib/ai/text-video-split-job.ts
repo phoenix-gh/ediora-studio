@@ -4,6 +4,7 @@ import { z } from 'zod'
 
 import type { SpeechSplitProposal } from '@/lib/api/text-videos'
 
+import { JobFinalizationError } from './digital-human-job'
 import {
   apiGet,
   apiPost,
@@ -174,6 +175,16 @@ async function defaultDeps(jobId: number): Promise<TextVideoSplitJobDeps> {
   }
 }
 
+async function finalizeJob(jobId: number, deps: TextVideoSplitJobDeps) {
+  try {
+    await deps.api.completeJob(jobId)
+  } catch (error) {
+    throw new JobFinalizationError('步骤结果已保存，等待任务状态对账', {
+      cause: error,
+    })
+  }
+}
+
 export async function runTextVideoSplitJob(
   jobId: number,
   providedDeps?: TextVideoSplitJobDeps,
@@ -181,7 +192,11 @@ export async function runTextVideoSplitJob(
   const deps = providedDeps ?? await defaultDeps(jobId)
   const job = await deps.api.getJob(jobId)
   const existing = latestStep(job.steps, 'propose_boundaries')
-  if (existing?.status === 'succeeded') return proposalFromOutput(existing.output)
+  if (existing?.status === 'succeeded') {
+    const proposal = proposalFromOutput(existing.output)
+    await finalizeJob(jobId, deps)
+    return proposal
+  }
   if (job.status === 'cancelled') throw new Error('任务已取消')
   const context = asContext(job)
   const step = existing?.status === 'running' && existing.id
@@ -199,9 +214,10 @@ export async function runTextVideoSplitJob(
     })
     const proposal = withAiReasons(validated, aiResult.boundaries)
     await deps.api.completeStep(jobId, step.id, proposal)
-    await deps.api.completeJob(jobId)
+    await finalizeJob(jobId, deps)
     return proposal
   } catch (error) {
+    if (error instanceof JobFinalizationError) throw error
     await deps.api.failStep(jobId, step.id, error, retryableForError(error))
     throw error
   }

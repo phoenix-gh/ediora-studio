@@ -56,3 +56,78 @@ it('validates AI boundary IDs server-side before completing the durable proposal
   expect(api.completeStep).toHaveBeenCalledWith(31, 41, proposal)
   expect(api.completeJob).toHaveBeenCalledWith(31)
 })
+
+it('recovers a succeeded proposal step by completing the job without rerunning AI or validation', async () => {
+  const proposal = {
+    segments: [
+      { id: 'segment-a', text: '甲。乙。', estimated_duration: 1, reason: '完整口播段' },
+    ],
+    speech_split_mode: 'auto' as const,
+  }
+  const api = {
+    getJob: vi.fn().mockResolvedValue({
+      id: 31,
+      flow: 'text_video_split_preview',
+      status: 'running',
+      input: {},
+      steps: [{
+        id: 41,
+        key: 'propose_boundaries',
+        attempt: 1,
+        status: 'succeeded',
+        output: proposal,
+      }],
+    }),
+    startStep: vi.fn(),
+    completeStep: vi.fn(),
+    failStep: vi.fn(),
+    completeJob: vi.fn().mockResolvedValue({}),
+    validateProposal: vi.fn(),
+  }
+  const generateBoundaries = vi.fn()
+
+  await expect(runTextVideoSplitJob(31, { api, generateBoundaries }))
+    .resolves.toEqual(proposal)
+
+  expect(api.completeJob).toHaveBeenCalledWith(31)
+  expect(generateBoundaries).not.toHaveBeenCalled()
+  expect(api.validateProposal).not.toHaveBeenCalled()
+  expect(api.startStep).not.toHaveBeenCalled()
+  expect(api.completeStep).not.toHaveBeenCalled()
+  expect(api.failStep).not.toHaveBeenCalled()
+})
+
+it('does not fail an already-succeeded step when job finalization fails', async () => {
+  const api = {
+    getJob: vi.fn().mockResolvedValue({
+      id: 31,
+      flow: 'text_video_split_preview',
+      status: 'queued',
+      input: {
+        project_id: 7,
+        script: '甲。乙。',
+        script_hash: 'a'.repeat(64),
+        direction: '',
+        candidates: [],
+      },
+      steps: [],
+    }),
+    startStep: vi.fn().mockResolvedValue({ id: 41 }),
+    completeStep: vi.fn().mockResolvedValue({}),
+    failStep: vi.fn().mockResolvedValue({}),
+    completeJob: vi.fn().mockRejectedValue(new Error('job finalization unavailable')),
+    validateProposal: vi.fn().mockResolvedValue({
+      segments: [
+        { id: 'segment-a', text: '甲。乙。', estimated_duration: 1, reason: 'AI 建议分段' },
+      ],
+      speech_split_mode: 'auto' as const,
+    }),
+  }
+  const generateBoundaries = vi.fn().mockResolvedValue({ boundaries: [] })
+
+  await expect(runTextVideoSplitJob(31, { api, generateBoundaries }))
+    .rejects.toThrow('步骤结果已保存，等待任务状态对账')
+
+  expect(api.completeStep).toHaveBeenCalledOnce()
+  expect(api.failStep).not.toHaveBeenCalled()
+})

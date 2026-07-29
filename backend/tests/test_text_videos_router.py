@@ -229,3 +229,48 @@ def test_speech_split_preview_snapshots_exact_script_and_worker_validation(clien
     proposal = validation.json()
     assert "".join(item["text"] for item in proposal["segments"]) == "甲。乙。"
     assert proposal["speech_split_mode"] == "auto"
+
+
+def test_speech_split_preview_retry_reenqueues_existing_job_after_first_enqueue_failure(
+    client,
+    monkeypatch,
+):
+    import routers.text_videos as router_module
+
+    enqueue_attempts = []
+
+    async def fail_once_then_enqueue(job_id: int):
+        enqueue_attempts.append(job_id)
+        if len(enqueue_attempts) == 1:
+            raise RuntimeError("redis unavailable")
+
+    monkeypatch.setattr(router_module, "enqueue_job", fail_once_then_enqueue)
+    project = client.post("/api/text-videos", json={}).json()
+    updated = client.patch(
+        f"/api/text-videos/{project['id']}",
+        json={
+            "revision": project["revision"],
+            "script": "甲。乙。",
+        },
+    ).json()
+    request = {
+        "revision": updated["revision"],
+        "direction": "适合短句口播",
+    }
+
+    with pytest.raises(RuntimeError, match="redis unavailable"):
+        client.post(
+            f"/api/text-videos/{project['id']}/speech-split-preview",
+            json=request,
+        )
+
+    retry = client.post(
+        f"/api/text-videos/{project['id']}/speech-split-preview",
+        json=request,
+    )
+
+    assert retry.status_code == 201, retry.text
+    job_id = retry.json()["jobs"][0]["id"]
+    assert enqueue_attempts == [job_id, job_id]
+    jobs = client.get("/api/jobs").json()["jobs"]
+    assert [(job["id"], job["status"]) for job in jobs] == [(job_id, "queued")]
