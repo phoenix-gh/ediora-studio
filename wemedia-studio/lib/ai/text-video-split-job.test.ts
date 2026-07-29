@@ -97,6 +97,46 @@ it('recovers a succeeded proposal step by completing the job without rerunning A
   expect(api.failStep).not.toHaveBeenCalled()
 })
 
+it('returns a cancelled job proposal without finalization, AI, validation, or step failure', async () => {
+  const proposal = {
+    segments: [
+      { id: 'segment-a', text: '甲。乙。', estimated_duration: 1, reason: '完整口播段' },
+    ],
+    speech_split_mode: 'auto' as const,
+  }
+  const api = {
+    getJob: vi.fn().mockResolvedValue({
+      id: 31,
+      flow: 'text_video_split_preview',
+      status: 'cancelled',
+      input: {},
+      steps: [{
+        id: 41,
+        key: 'propose_boundaries',
+        attempt: 1,
+        status: 'succeeded',
+        output: proposal,
+      }],
+    }),
+    startStep: vi.fn(),
+    completeStep: vi.fn(),
+    failStep: vi.fn(),
+    completeJob: vi.fn().mockRejectedValue(new Error('cannot succeed cancelled job')),
+    validateProposal: vi.fn(),
+  }
+  const generateBoundaries = vi.fn()
+
+  await expect(runTextVideoSplitJob(31, { api, generateBoundaries }))
+    .resolves.toEqual(proposal)
+
+  expect(api.completeJob).not.toHaveBeenCalled()
+  expect(generateBoundaries).not.toHaveBeenCalled()
+  expect(api.validateProposal).not.toHaveBeenCalled()
+  expect(api.startStep).not.toHaveBeenCalled()
+  expect(api.completeStep).not.toHaveBeenCalled()
+  expect(api.failStep).not.toHaveBeenCalled()
+})
+
 it('does not fail an already-succeeded step when job finalization fails', async () => {
   const api = {
     getJob: vi.fn().mockResolvedValue({

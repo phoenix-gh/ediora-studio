@@ -192,12 +192,17 @@ export async function runTextVideoSplitJob(
   const deps = providedDeps ?? await defaultDeps(jobId)
   const job = await deps.api.getJob(jobId)
   const existing = latestStep(job.steps, 'propose_boundaries')
+  if (job.status === 'cancelled') {
+    if (existing?.status === 'succeeded') {
+      return proposalFromOutput(existing.output)
+    }
+    throw new Error('任务已取消')
+  }
   if (existing?.status === 'succeeded') {
     const proposal = proposalFromOutput(existing.output)
     await finalizeJob(jobId, deps)
     return proposal
   }
-  if (job.status === 'cancelled') throw new Error('任务已取消')
   const context = asContext(job)
   const step = existing?.status === 'running' && existing.id
     ? { id: existing.id }
