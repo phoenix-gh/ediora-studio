@@ -18,16 +18,23 @@ from fastapi import (
     UploadFile,
     status,
 )
+from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from database import get_db
 from config import get_config
 from content_jobs import create_or_get_job
 from job_queue import enqueue_job
 from log_redaction import redact_secret_text
-from models import ContentJob, TextVideoProject, now_utc
+from models import (
+    ContentJob,
+    CreativeAsset,
+    TextVideoProject,
+    TextVideoSpeechAsset,
+    now_utc,
+)
 from text_video_domain import (
     default_speech_segment,
     empty_master_audio,
@@ -768,6 +775,210 @@ def _remove_saved_audio(saved: dict) -> None:
     candidate.unlink(missing_ok=True)
 
 
+async def _wait_for_task_terminal(
+    task: asyncio.Task,
+    pending_cancellation: asyncio.CancelledError | None = None,
+) -> asyncio.CancelledError | None:
+    while not task.done():
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError as error:
+            if pending_cancellation is None:
+                pending_cancellation = error
+            if task.done() and task.cancelled():
+                break
+        except BaseException:
+            break
+    return pending_cancellation
+
+
+def _task_failure(task: asyncio.Task) -> BaseException | None:
+    try:
+        task.result()
+    except BaseException as error:
+        return error
+    return None
+
+
+async def _verify_saved_speech_result(
+    db: AsyncSession,
+    saved: dict,
+    *,
+    source_hash: str,
+    project_id: int,
+    segment_id: str,
+    generation_revision: int,
+    require_project_reference: bool,
+) -> bool | None:
+    bind = db.bind
+    if bind is None:
+        logger.error(
+            "Cannot verify speech asset {} durability: no database bind",
+            saved.get("asset_id"),
+        )
+        return None
+    verification_factory = async_sessionmaker(
+        bind,
+        expire_on_commit=False,
+    )
+    try:
+        async with asyncio.timeout(5):
+            async with verification_factory() as verification:
+                asset = await verification.get(
+                    CreativeAsset,
+                    saved["asset_id"],
+                )
+                metadata = await verification.scalar(
+                    select(TextVideoSpeechAsset).where(
+                        TextVideoSpeechAsset.creative_asset_id
+                        == saved["asset_id"],
+                    ),
+                )
+                referenced = False
+                if require_project_reference:
+                    project = await verification.get(
+                        TextVideoProject,
+                        project_id,
+                    )
+                    referenced = bool(
+                        project is not None
+                        and any(
+                            item.get("id") == segment_id
+                            and item.get("audio_url") == saved["audio_url"]
+                            and item.get("source_hash") == source_hash
+                            and item.get("generation_revision")
+                            == generation_revision
+                            and item.get("status") in {"ready", "confirmed"}
+                            and item.get("job_id") is None
+                            for item in (project.paragraphs or [])
+                        )
+                    )
+                if asset is None and metadata is None:
+                    if referenced:
+                        logger.error(
+                            "Speech asset {} rows are absent but its project "
+                            "reference is durable; preserving its file",
+                            saved["asset_id"],
+                        )
+                        return None
+                    return False
+                if (
+                    asset is None
+                    or metadata is None
+                    or asset.url != saved["audio_url"]
+                    or metadata.source_hash != source_hash
+                ):
+                    logger.error(
+                        "Speech asset {} durability is partial or "
+                        "inconsistent; preserving its file",
+                        saved["asset_id"],
+                    )
+                    return None
+                if require_project_reference and not referenced:
+                    logger.error(
+                        "Durable speech asset {} has no expected project "
+                        "reference; preserving its file",
+                        saved["asset_id"],
+                    )
+                    return None
+                return True
+    except Exception as error:
+        logger.error(
+            "Cannot verify speech asset {} durability: {}",
+            saved.get("asset_id"),
+            redact_secret_text(str(error))[:500],
+        )
+        return None
+
+
+async def _commit_saved_speech_result(
+    db: AsyncSession,
+    saved: dict,
+    *,
+    source_hash: str,
+    project_id: int,
+    segment_id: str,
+    generation_revision: int,
+    require_project_reference: bool,
+) -> None:
+    commit_task = asyncio.create_task(
+        db.commit(),
+        name=f"text-video-speech-commit-{saved['asset_id']}",
+    )
+    pending_cancellation = await _wait_for_task_terminal(commit_task)
+    commit_failure = _task_failure(commit_task)
+    if commit_failure is None:
+        if pending_cancellation is not None:
+            raise pending_cancellation
+        return
+
+    rollback_task = asyncio.create_task(
+        db.rollback(),
+        name=f"text-video-speech-rollback-{saved['asset_id']}",
+    )
+    pending_cancellation = await _wait_for_task_terminal(
+        rollback_task,
+        pending_cancellation,
+    )
+    rollback_failure = _task_failure(rollback_task)
+    if rollback_failure is not None:
+        logger.warning(
+            "Speech result rollback failed for asset {}: {}",
+            saved["asset_id"],
+            redact_secret_text(str(rollback_failure))[:500],
+        )
+
+    verification_task = asyncio.create_task(
+        _verify_saved_speech_result(
+            db,
+            saved,
+            source_hash=source_hash,
+            project_id=project_id,
+            segment_id=segment_id,
+            generation_revision=generation_revision,
+            require_project_reference=require_project_reference,
+        ),
+        name=f"text-video-speech-verify-{saved['asset_id']}",
+    )
+    pending_cancellation = await _wait_for_task_terminal(
+        verification_task,
+        pending_cancellation,
+    )
+    verification_failure = _task_failure(verification_task)
+    durable = (
+        verification_task.result()
+        if verification_failure is None
+        else None
+    )
+    if verification_failure is not None:
+        logger.error(
+            "Speech result verification crashed for asset {}: {}",
+            saved["asset_id"],
+            redact_secret_text(str(verification_failure))[:500],
+        )
+
+    if durable is False:
+        _remove_saved_audio(saved)
+    elif durable is True:
+        logger.warning(
+            "Speech result commit acknowledgement failed for asset {}, but "
+            "independent verification found durable state",
+            saved["asset_id"],
+        )
+    else:
+        logger.error(
+            "Speech result commit state is unknown for asset {}; preserving "
+            "its file",
+            saved["asset_id"],
+        )
+
+    if pending_cancellation is not None:
+        raise pending_cancellation from commit_failure
+    if durable is True:
+        return
+    raise commit_failure
+
+
 @router.post(
     "/{project_id}/speech-segments/{segment_id}/worker-result",
     dependencies=[Depends(require_worker_token)],
@@ -786,7 +997,7 @@ async def save_speech_worker_result(
 ):
     temporary: Path | None = None
     saved: dict | None = None
-    saved_file_released = False
+    commit_owns_saved_file = False
     try:
         job = await db.get(ContentJob, job_id)
         snapshot = _validate_speech_job(
@@ -893,8 +1104,16 @@ async def save_speech_worker_result(
                 break
         locked_project.paragraphs = paragraphs
         mark_text_video_downstream_stale(locked_project)
-        await db.commit()
-        saved_file_released = True
+        commit_owns_saved_file = True
+        await _commit_saved_speech_result(
+            db,
+            saved,
+            source_hash=source_hash,
+            project_id=project_id,
+            segment_id=segment_id,
+            generation_revision=generation_revision,
+            require_project_reference=True,
+        )
         return saved
     except StaleTextVideoJob as error:
         if saved is None:
@@ -902,8 +1121,16 @@ async def save_speech_worker_result(
         else:
             # The normalized asset is valid and may be reused, but the second
             # stale check forbids it from replacing edited project state.
-            await db.commit()
-            saved_file_released = True
+            commit_owns_saved_file = True
+            await _commit_saved_speech_result(
+                db,
+                saved,
+                source_hash=source_hash,
+                project_id=project_id,
+                segment_id=segment_id,
+                generation_revision=generation_revision,
+                require_project_reference=False,
+            )
         raise _stale_conflict(error) from error
     except MediaToolUnavailable as error:
         await db.rollback()
@@ -918,7 +1145,7 @@ async def save_speech_worker_result(
         await db.rollback()
         raise HTTPException(422, str(error)) from error
     finally:
-        if saved is not None and not saved_file_released:
+        if saved is not None and not commit_owns_saved_file:
             try:
                 await db.rollback()
             finally:

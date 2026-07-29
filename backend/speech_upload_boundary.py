@@ -7,6 +7,7 @@ import re
 from typing import Any, Awaitable, Callable
 
 from fastapi import HTTPException
+from starlette._utils import get_route_path
 
 from worker_auth import validate_worker_token
 
@@ -14,7 +15,7 @@ from worker_auth import validate_worker_token
 MAX_SPEECH_AUDIO_BYTES = 100 * 1024 * 1024
 MAX_SPEECH_MULTIPART_OVERHEAD_BYTES = 1024 * 1024
 _WORKER_RESULT_PATH = re.compile(
-    r"^/api/text-videos/[0-9]+/speech-segments/[^/]+/worker-result$",
+    r"^/api/text-videos/[^/]+/speech-segments/[^/]+/worker-result$",
 )
 
 ASGIApp = Callable[[dict, Callable, Callable], Awaitable[None]]
@@ -54,6 +55,16 @@ def _header(scope: dict[str, Any], name: bytes) -> bytes | None:
     return values[0]
 
 
+def _worker_token(scope: dict[str, Any]) -> bytes | None:
+    try:
+        return _header(scope, b"x-wms-worker-token")
+    except ValueError:
+        # Preserve the authentication contract: missing server configuration
+        # is 503; once configured, conflicting credentials are a 403.
+        validate_worker_token(None)
+        raise AssertionError("worker-token validation must raise")
+
+
 class SpeechWorkerUploadBoundary:
     """Reject untrusted or unbounded multipart bodies before FastAPI parses."""
 
@@ -77,13 +88,13 @@ class SpeechWorkerUploadBoundary:
         if (
             scope.get("type") != "http"
             or scope.get("method") != "POST"
-            or not _WORKER_RESULT_PATH.fullmatch(scope.get("path", ""))
+            or not _WORKER_RESULT_PATH.fullmatch(get_route_path(scope))
         ):
             await self.app(scope, receive, send)
             return
 
         try:
-            raw_token = _header(scope, b"x-wms-worker-token")
+            raw_token = _worker_token(scope)
             validate_worker_token(
                 raw_token.decode("utf-8", errors="replace")
                 if raw_token is not None
@@ -91,9 +102,6 @@ class SpeechWorkerUploadBoundary:
             )
         except HTTPException as error:
             await _send_error(send, error.status_code, str(error.detail))
-            return
-        except ValueError:
-            await _send_error(send, 400, "worker 请求头无效")
             return
 
         try:

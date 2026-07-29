@@ -1,6 +1,7 @@
 import asyncio
 from io import BytesIO
 import json
+from pathlib import Path
 import sys
 
 import pytest
@@ -63,6 +64,56 @@ def _speech_project(client, text="需要配音。"):
             "script": text,
         },
     ).json()
+
+
+def _prepare_speech_worker_result(
+    client,
+    monkeypatch,
+    tmp_path,
+    directory_name,
+):
+    import routers.text_videos as router_module
+    import text_video_audio
+    import text_video_jobs
+
+    uploads = tmp_path / directory_name
+    monkeypatch.setattr(router_module, "UPLOADS_DIR", uploads)
+    monkeypatch.setattr(text_video_audio, "UPLOADS_DIR", uploads)
+    monkeypatch.setattr(text_video_jobs, "UPLOADS_DIR", uploads)
+
+    async def ignore_enqueue(_job_id: int):
+        return None
+
+    monkeypatch.setattr(text_video_jobs, "enqueue_job", ignore_enqueue)
+    project = _speech_project(client)
+    segment = project["paragraphs"][0]
+    job = client.post(
+        f"/api/text-videos/{project['id']}/speech-segments/"
+        f"{segment['id']}/generate",
+        json={"revision": project["revision"]},
+    ).json()["jobs"][0]
+    context = client.get(
+        f"/api/text-videos/{project['id']}/speech-segments/"
+        f"{segment['id']}/worker-context",
+        headers={
+            "X-WMS-Worker-Token": "test-worker-token-at-least-32-chars",
+            "X-Content-Job-Id": str(job["id"]),
+        },
+    ).json()
+    wav = tmp_path / f"{directory_name}.wav"
+    asyncio.new_event_loop().run_until_complete(
+        __import__("tests.test_media_command", fromlist=["sine_wave"])
+        .sine_wave(wav),
+    )
+    return {
+        "router": router_module,
+        "uploads": uploads,
+        "project": project,
+        "segment": segment,
+        "job": job,
+        "context": context,
+        "wav": wav,
+    }
 
 
 def test_text_video_project_crud_and_revision_conflict(client):
@@ -1246,6 +1297,445 @@ def test_worker_result_commit_failure_deletes_final_file(
             },
         )
     assert list(uploads.glob("*.mp3")) == []
+
+
+def test_worker_result_waits_for_durable_commit_before_propagating_cancel(
+    client,
+    monkeypatch,
+    tmp_path,
+):
+    from database import SessionLocal
+    from models import CreativeAsset, TextVideoProject
+
+    case = _prepare_speech_worker_result(
+        client,
+        monkeypatch,
+        tmp_path,
+        "durable commit cancel",
+    )
+    router_module = case["router"]
+
+    async def run():
+        durable = asyncio.Event()
+        acknowledge = asyncio.Event()
+        commit_finished = asyncio.Event()
+        async with SessionLocal() as session:
+            original_commit = session.commit
+
+            async def commit_then_wait_for_ack():
+                try:
+                    await original_commit()
+                    durable.set()
+                    await acknowledge.wait()
+                finally:
+                    commit_finished.set()
+
+            session.commit = commit_then_wait_for_ack
+            upload = UploadFile(
+                BytesIO(case["wav"].read_bytes()),
+                filename="provider.wav",
+                headers=Headers({"content-type": "audio/wav"}),
+            )
+            request_task = asyncio.create_task(
+                router_module.save_speech_worker_result(
+                    case["project"]["id"],
+                    case["segment"]["id"],
+                    upload,
+                    case["context"]["generation_revision"],
+                    case["context"]["source_hash"],
+                    "",
+                    "audio/wav",
+                    "[]",
+                    case["job"]["id"],
+                    session,
+                ),
+            )
+            await asyncio.wait_for(durable.wait(), timeout=10)
+            request_task.cancel()
+            await asyncio.sleep(0)
+            acknowledge.set()
+            with pytest.raises(asyncio.CancelledError):
+                await request_task
+            assert commit_finished.is_set()
+            assert [
+                task
+                for task in asyncio.all_tasks()
+                if task is not asyncio.current_task()
+                and task.get_name().startswith("text-video-speech-")
+                and not task.done()
+            ] == []
+
+        async with SessionLocal() as verification:
+            project = await verification.get(
+                TextVideoProject,
+                case["project"]["id"],
+            )
+            asset = await verification.scalar(
+                __import__("sqlalchemy").select(CreativeAsset),
+            )
+            return project, asset
+
+    project, asset = asyncio.new_event_loop().run_until_complete(run())
+    segment = project.paragraphs[0]
+    assert segment["status"] == "ready"
+    assert segment["audio_url"] == asset.url
+    assert (case["uploads"] / Path(asset.url).name).is_file()
+
+
+def test_worker_result_propagates_cancelled_commit_task_after_durable_write(
+    client,
+    monkeypatch,
+    tmp_path,
+):
+    from database import SessionLocal
+    from models import CreativeAsset, TextVideoProject
+
+    case = _prepare_speech_worker_result(
+        client,
+        monkeypatch,
+        tmp_path,
+        "durable commit task cancel",
+    )
+    router_module = case["router"]
+
+    async def run():
+        async with SessionLocal() as session:
+            original_commit = session.commit
+
+            async def commit_then_cancel():
+                await original_commit()
+                raise asyncio.CancelledError()
+
+            session.commit = commit_then_cancel
+            upload = UploadFile(
+                BytesIO(case["wav"].read_bytes()),
+                filename="provider.wav",
+                headers=Headers({"content-type": "audio/wav"}),
+            )
+            with pytest.raises(asyncio.CancelledError):
+                await router_module.save_speech_worker_result(
+                    case["project"]["id"],
+                    case["segment"]["id"],
+                    upload,
+                    case["context"]["generation_revision"],
+                    case["context"]["source_hash"],
+                    "",
+                    "audio/wav",
+                    "[]",
+                    case["job"]["id"],
+                    session,
+                )
+            assert [
+                task
+                for task in asyncio.all_tasks()
+                if task is not asyncio.current_task()
+                and task.get_name().startswith("text-video-speech-")
+                and not task.done()
+            ] == []
+
+        async with SessionLocal() as verification:
+            project = await verification.get(
+                TextVideoProject,
+                case["project"]["id"],
+            )
+            asset = await verification.scalar(
+                __import__("sqlalchemy").select(CreativeAsset),
+            )
+            return project, asset
+
+    project, asset = asyncio.new_event_loop().run_until_complete(run())
+    segment = project.paragraphs[0]
+    assert segment["status"] == "ready"
+    assert segment["audio_url"] == asset.url
+    assert (case["uploads"] / Path(asset.url).name).is_file()
+
+
+def test_worker_result_recovers_normal_commit_when_ack_is_lost(
+    client,
+    monkeypatch,
+    tmp_path,
+):
+    from database import SessionLocal
+    from models import CreativeAsset, TextVideoProject
+
+    case = _prepare_speech_worker_result(
+        client,
+        monkeypatch,
+        tmp_path,
+        "normal durable commit",
+    )
+    router_module = case["router"]
+    original_save = router_module.save_text_video_audio_asset
+
+    async def save_then_lose_commit_ack(db, *args, **kwargs):
+        saved = await original_save(db, *args, **kwargs)
+        original_commit = db.commit
+
+        async def durable_then_connection_error():
+            await original_commit()
+            raise ConnectionError("commit acknowledgement lost")
+
+        db.commit = durable_then_connection_error
+        return saved
+
+    monkeypatch.setattr(
+        router_module,
+        "save_text_video_audio_asset",
+        save_then_lose_commit_ack,
+    )
+    response = client.post(
+        f"/api/text-videos/{case['project']['id']}/speech-segments/"
+        f"{case['segment']['id']}/worker-result",
+        data={
+            "generation_revision": str(
+                case["context"]["generation_revision"],
+            ),
+            "source_hash": case["context"]["source_hash"],
+            "provider_request_id": "",
+            "media_type": "audio/wav",
+        },
+        files={
+            "audio": (
+                "provider.wav",
+                case["wav"].read_bytes(),
+                "audio/wav",
+            ),
+        },
+        headers={
+            "X-WMS-Worker-Token": "test-worker-token-at-least-32-chars",
+            "X-Content-Job-Id": str(case["job"]["id"]),
+        },
+    )
+
+    assert response.status_code == 200, response.text
+
+    async def persisted_result():
+        async with SessionLocal() as session:
+            project = await session.get(
+                TextVideoProject,
+                case["project"]["id"],
+            )
+            asset = await session.scalar(
+                __import__("sqlalchemy").select(CreativeAsset),
+            )
+            return project, asset
+
+    project, asset = asyncio.new_event_loop().run_until_complete(
+        persisted_result(),
+    )
+    segment = project.paragraphs[0]
+    assert segment["status"] == "ready"
+    assert segment["audio_url"] == asset.url
+    assert (case["uploads"] / Path(asset.url).name).is_file()
+
+
+def test_stale_worker_result_preserves_durable_asset_when_commit_ack_is_lost(
+    client,
+    monkeypatch,
+    tmp_path,
+):
+    from database import SessionLocal
+    from models import CreativeAsset, TextVideoSpeechAsset
+    from sqlalchemy import func, select
+
+    case = _prepare_speech_worker_result(
+        client,
+        monkeypatch,
+        tmp_path,
+        "stale durable commit",
+    )
+    router_module = case["router"]
+    original_save = router_module.save_text_video_audio_asset
+
+    async def save_edit_then_lose_commit_ack(db, *args, **kwargs):
+        saved = await original_save(db, *args, **kwargs)
+        current = await db.get(
+            router_module.TextVideoProject,
+            case["project"]["id"],
+        )
+        paragraphs = list(current.paragraphs)
+        paragraphs[0] = {
+            **paragraphs[0],
+            "generation_revision": (
+                paragraphs[0]["generation_revision"] + 1
+            ),
+        }
+        current.paragraphs = paragraphs
+        await db.flush()
+        original_commit = db.commit
+
+        async def durable_then_connection_error():
+            await original_commit()
+            raise ConnectionError("commit acknowledgement lost")
+
+        db.commit = durable_then_connection_error
+        return saved
+
+    monkeypatch.setattr(
+        router_module,
+        "save_text_video_audio_asset",
+        save_edit_then_lose_commit_ack,
+    )
+    response = client.post(
+        f"/api/text-videos/{case['project']['id']}/speech-segments/"
+        f"{case['segment']['id']}/worker-result",
+        data={
+            "generation_revision": str(
+                case["context"]["generation_revision"],
+            ),
+            "source_hash": case["context"]["source_hash"],
+            "provider_request_id": "",
+            "media_type": "audio/wav",
+        },
+        files={
+            "audio": (
+                "provider.wav",
+                case["wav"].read_bytes(),
+                "audio/wav",
+            ),
+        },
+        headers={
+            "X-WMS-Worker-Token": "test-worker-token-at-least-32-chars",
+            "X-Content-Job-Id": str(case["job"]["id"]),
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.headers["X-WMS-Retryable"] == "false"
+
+    async def persisted_asset_count():
+        async with SessionLocal() as session:
+            assets = await session.scalar(
+                select(func.count(CreativeAsset.id)),
+            )
+            metadata = await session.scalar(
+                select(func.count(TextVideoSpeechAsset.id)),
+            )
+            return assets, metadata
+
+    assert asyncio.new_event_loop().run_until_complete(
+        persisted_asset_count(),
+    ) == (1, 1)
+    assert len(list(case["uploads"].glob("*.mp3"))) == 1
+
+
+def test_worker_result_preserves_file_when_durability_check_is_unavailable(
+    client,
+    monkeypatch,
+    tmp_path,
+):
+    case = _prepare_speech_worker_result(
+        client,
+        monkeypatch,
+        tmp_path,
+        "unknown commit state",
+    )
+    router_module = case["router"]
+    original_save = router_module.save_text_video_audio_asset
+
+    async def save_then_fail_commit(db, *args, **kwargs):
+        saved = await original_save(db, *args, **kwargs)
+
+        async def connection_lost_before_ack():
+            raise ConnectionError("database state unavailable")
+
+        db.commit = connection_lost_before_ack
+        return saved
+
+    class UnavailableVerificationSession:
+        async def __aenter__(self):
+            raise ConnectionError("verification database unavailable")
+
+        async def __aexit__(self, *_args):
+            return False
+
+    def unavailable_sessionmaker(*_args, **_kwargs):
+        return UnavailableVerificationSession
+
+    monkeypatch.setattr(
+        router_module,
+        "save_text_video_audio_asset",
+        save_then_fail_commit,
+    )
+    monkeypatch.setattr(
+        router_module,
+        "async_sessionmaker",
+        unavailable_sessionmaker,
+    )
+    with pytest.raises(ConnectionError, match="database state unavailable"):
+        client.post(
+            f"/api/text-videos/{case['project']['id']}/speech-segments/"
+            f"{case['segment']['id']}/worker-result",
+            data={
+                "generation_revision": str(
+                    case["context"]["generation_revision"],
+                ),
+                "source_hash": case["context"]["source_hash"],
+                "provider_request_id": "",
+                "media_type": "audio/wav",
+            },
+            files={
+                "audio": (
+                    "provider.wav",
+                    case["wav"].read_bytes(),
+                    "audio/wav",
+                ),
+            },
+            headers={
+                "X-WMS-Worker-Token": (
+                    "test-worker-token-at-least-32-chars"
+                ),
+                "X-Content-Job-Id": str(case["job"]["id"]),
+            },
+        )
+
+    assert len(list(case["uploads"].glob("*.mp3"))) == 1
+
+
+def test_durability_verifier_preserves_contradictory_project_reference(
+    client,
+):
+    from database import SessionLocal
+
+    project = _speech_project(client)
+    segment = project["paragraphs"][0]
+    source_hash = "a" * 64
+    audio_url = "/api/uploads/contradictory-reference.mp3"
+
+    async def verify():
+        async with SessionLocal() as session:
+            stored = await session.get(
+                __import__("models").TextVideoProject,
+                project["id"],
+            )
+            paragraphs = list(stored.paragraphs)
+            paragraphs[0] = {
+                **paragraphs[0],
+                "status": "ready",
+                "audio_url": audio_url,
+                "source_hash": source_hash,
+                "job_id": None,
+            }
+            stored.paragraphs = paragraphs
+            await session.commit()
+
+        import routers.text_videos as router_module
+
+        async with SessionLocal() as session:
+            return await router_module._verify_saved_speech_result(
+                session,
+                {
+                    "asset_id": 2_147_483_647,
+                    "audio_url": audio_url,
+                },
+                source_hash=source_hash,
+                project_id=project["id"],
+                segment_id=segment["id"],
+                generation_revision=segment["generation_revision"],
+                require_project_reference=True,
+            )
+
+    assert asyncio.new_event_loop().run_until_complete(verify()) is None
 
 
 def test_worker_result_second_lock_failure_deletes_final_file(
