@@ -24,6 +24,7 @@ from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.pool import StaticPool
 
 from database import (
     DATABASE_COMMAND_TIMEOUT_SECONDS,
@@ -954,6 +955,18 @@ async def _verify_saved_speech_result(
             saved.get("asset_id"),
         )
         return None
+    verification_engine = getattr(bind, "engine", bind)
+    verification_pool = getattr(verification_engine, "pool", None)
+    if verification_pool is None or isinstance(
+        verification_pool,
+        StaticPool,
+    ):
+        logger.error(
+            "Cannot independently verify speech asset {} durability: "
+            "database pool does not provide an independent connection",
+            saved.get("asset_id"),
+        )
+        return None
     verification_factory = async_sessionmaker(
         bind,
         expire_on_commit=False,
@@ -1004,14 +1017,21 @@ async def _verify_saved_speech_result(
                         project_references = [
                             item
                             for item in (project.paragraphs or [])
-                            if (
-                                item.get("id") == segment_id
-                                and item.get("audio_url")
-                                == saved["audio_url"]
-                            )
+                            if item.get("id") == segment_id
                         ]
                 if asset is None and not metadata_rows:
-                    if project_references:
+                    contradictory_reference = bool(
+                        require_project_reference
+                        and (
+                            len(project_references) > 1
+                            or any(
+                                item.get("audio_url")
+                                == saved["audio_url"]
+                                for item in project_references
+                            )
+                        )
+                    )
+                    if contradictory_reference:
                         logger.error(
                             "Speech asset {} rows are absent but its project "
                             "reference is durable; preserving its file",
@@ -1030,6 +1050,7 @@ async def _verify_saved_speech_result(
                 asset_matches = bool(
                     asset.asset_type == "media"
                     and asset.media_kind == "audio"
+                    and asset.title == "文字视频口播配音"
                     and asset.url == saved["audio_url"]
                     and asset.media_type == "audio/mpeg"
                     and asset.filename == expected_filename
@@ -1127,11 +1148,29 @@ async def _commit_saved_speech_result(
         if pending_cancellation is not None:
             raise pending_cancellation from commit_failure
         raise commit_failure
-    commit_failure = commit_outcome.failure
-    if commit_failure is None:
+    commit_confirmed = bool(
+        commit_outcome.failure is None
+        and not commit_outcome.timed_out
+        and not commit_outcome.cancellation_requested
+    )
+    if commit_confirmed:
         if pending_cancellation is not None:
             raise pending_cancellation
         return
+    commit_failure = commit_outcome.failure
+    if commit_failure is None:
+        if commit_outcome.timed_out:
+            commit_failure = TimeoutError(
+                "speech result commit exceeded its deadline",
+            )
+        elif commit_outcome.cancellation_requested:
+            commit_failure = asyncio.CancelledError(
+                "speech result commit was interrupted",
+            )
+        else:
+            commit_failure = RuntimeError(
+                "speech result commit was not confirmed",
+            )
     effective_commit_failure = (
         TimeoutError("speech result commit exceeded its deadline")
         if commit_outcome.timed_out
