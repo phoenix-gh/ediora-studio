@@ -3,6 +3,7 @@ from io import BytesIO
 import json
 from pathlib import Path
 import sys
+from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI
@@ -66,41 +67,42 @@ def _speech_project(client, text="需要配音。"):
     ).json()
 
 
-def _set_ready_master(project_id, *, duration=4.2):
+def _set_ready_master(project_id, *, duration=4.2, words=None):
     from database import SessionLocal
     from models import TextVideoProject
     from text_video_domain import empty_master_audio
 
-    words = [
-        {
-            "id": "word-1",
-            "text": "甲",
-            "start": 0.2,
-            "end": 0.5,
-            "speech_segment_id": "paragraph-1",
-        },
-        {
-            "id": "word-2",
-            "text": "乙",
-            "start": 0.7,
-            "end": 1.0,
-            "speech_segment_id": "paragraph-1",
-        },
-        {
-            "id": "word-3",
-            "text": "丙",
-            "start": 2.2,
-            "end": 2.5,
-            "speech_segment_id": "paragraph-1",
-        },
-        {
-            "id": "word-4",
-            "text": "丁",
-            "start": 3.2,
-            "end": 3.5,
-            "speech_segment_id": "paragraph-1",
-        },
-    ]
+    if words is None:
+        words = [
+            {
+                "id": "word-1",
+                "text": "甲",
+                "start": 0.2,
+                "end": 0.5,
+                "speech_segment_id": "paragraph-1",
+            },
+            {
+                "id": "word-2",
+                "text": "乙",
+                "start": 0.7,
+                "end": 1.0,
+                "speech_segment_id": "paragraph-1",
+            },
+            {
+                "id": "word-3",
+                "text": "丙",
+                "start": 2.2,
+                "end": 2.5,
+                "speech_segment_id": "paragraph-1",
+            },
+            {
+                "id": "word-4",
+                "text": "丁",
+                "start": 3.2,
+                "end": 3.5,
+                "speech_segment_id": "paragraph-1",
+            },
+        ]
 
     async def prepare():
         async with SessionLocal() as session:
@@ -118,6 +120,119 @@ def _set_ready_master(project_id, *, duration=4.2):
 
     asyncio.new_event_loop().run_until_complete(prepare())
     return words
+
+
+def _scene_scenes():
+    return [
+        {
+            "id": "scene-1",
+            "fromWordId": "word-1",
+            "throughWordId": "word-2",
+            "displayText": "甲乙",
+            "highlight": ["甲"],
+            "animation": "fade-up",
+        },
+        {
+            "id": "scene-2",
+            "fromWordId": "word-3",
+            "throughWordId": "word-4",
+            "displayText": "丙丁",
+            "highlight": ["丁"],
+            "animation": "scale",
+        },
+    ]
+
+
+def _subframe_words():
+    return [
+        {
+            "id": f"word-{index}",
+            "text": text,
+            "start": start,
+            "end": end,
+            "speech_segment_id": "paragraph-1",
+        }
+        for index, (text, start, end) in enumerate(
+            [
+                ("甲", 0.0, 0.005),
+                ("乙", 0.01, 0.015),
+                ("丙", 0.02, 0.025),
+            ],
+            start=1,
+        )
+    ]
+
+
+def _subframe_scenes():
+    return [
+        {
+            "id": "scene-1",
+            "fromWordId": "word-1",
+            "throughWordId": "word-1",
+            "displayText": "甲",
+            "highlight": [],
+            "animation": "fade-up",
+        },
+        {
+            "id": "scene-2",
+            "fromWordId": "word-2",
+            "throughWordId": "word-2",
+            "displayText": "乙",
+            "highlight": [],
+            "animation": "scale",
+        },
+        {
+            "id": "scene-3",
+            "fromWordId": "word-3",
+            "throughWordId": "word-3",
+            "displayText": "丙",
+            "highlight": [],
+            "animation": "fade-up",
+        },
+    ]
+
+
+def _scene_worker_headers(
+    job_id,
+    step_id,
+    *,
+    attempt=1,
+    claim="scene-claim-token-1234567890",
+):
+    return {
+        "X-WMS-Worker-Token": "test-worker-token-at-least-32-chars",
+        "X-Content-Job-Id": str(job_id),
+        "X-Content-Step-Id": str(step_id),
+        "X-Content-Step-Attempt": str(attempt),
+        "X-Content-Step-Claim": claim,
+    }
+
+
+def _start_scene_job(
+    client,
+    job_id,
+    *,
+    project_id=None,
+    claim="scene-claim-token-1234567890",
+):
+    started = client.post(
+        f"/api/jobs/{job_id}/steps/generate_scene_plan/start",
+    )
+    assert started.status_code == 200, started.text
+    step = started.json()
+    headers = _scene_worker_headers(
+        job_id,
+        step["id"],
+        attempt=step["attempt"],
+        claim=claim,
+    )
+    if project_id is not None:
+        context = client.get(
+            f"/api/text-videos/{project_id}/scene-plan/worker-context",
+            headers=headers,
+        )
+        assert context.status_code == 200, context.text
+    return step, headers
 
 
 def _prepare_speech_worker_result(
@@ -188,6 +303,37 @@ async def _submit_prepared_speech_worker_result(case, session):
         case["job"]["id"],
         session,
     )
+
+
+def test_scene_generate_reads_current_job_without_a_second_row_lock(client):
+    from sqlalchemy.dialects import postgresql
+
+    import routers.text_videos as router_module
+
+    statement = router_module._scene_current_job_statement(17)
+    sql = str(statement.compile(dialect=postgresql.dialect())).upper()
+
+    assert "CONTENT_JOBS" in sql
+    assert "FOR UPDATE" not in sql
+
+
+def test_scene_worker_rejects_a_malformed_frozen_job_as_stale(client):
+    import routers.text_videos as router_module
+
+    malformed = SimpleNamespace(
+        flow="text_video_scene_plan",
+        status="running",
+        input_data={
+            "project_id": 1,
+            "request_hash": "not-a-valid-snapshot",
+        },
+    )
+
+    with pytest.raises(
+        router_module.StaleScenePlanJob,
+        match="任务快照无效",
+    ):
+        router_module._validate_scene_job(malformed, project_id=1)
 
 
 def test_text_video_project_crud_and_revision_conflict(client):
@@ -347,7 +493,7 @@ def test_patch_rejects_browser_owned_render_input(client):
 
 
 def test_scene_plan_patch_projects_authoritative_audio_and_seconds(client):
-    project = _speech_project(client, "甲乙丙丁")
+    project = _speech_project(client, "甲乙丙")
     _set_ready_master(project["id"])
     before = client.get(f"/api/text-videos/{project['id']}").json()
     scenes = [
@@ -385,6 +531,7 @@ def test_scene_plan_patch_projects_authoritative_audio_and_seconds(client):
         "master_source_hash": "a" * 64,
         "scenes": scenes,
         "job_id": None,
+        "applied_job_id": None,
         "error": "",
     }
     assert updated["render_input"]["audio"] == "/api/uploads/master.mp3"
@@ -646,6 +793,980 @@ def test_speech_split_preview_snapshots_exact_script_and_worker_validation(clien
     proposal = validation.json()
     assert "".join(item["text"] for item in proposal["segments"]) == "甲。乙。"
     assert proposal["speech_split_mode"] == "auto"
+
+
+def test_scene_plan_launch_snapshots_ready_timeline_template_and_preserves_render(
+    client,
+    monkeypatch,
+):
+    import routers.text_videos as router_module
+
+    queued: list[int] = []
+
+    async def capture_enqueue(job_id: int):
+        queued.append(job_id)
+
+    monkeypatch.setattr(router_module, "enqueue_job", capture_enqueue)
+    project = _speech_project(client, "甲乙丙丁")
+    words = _set_ready_master(project["id"])
+    current = client.get(f"/api/text-videos/{project['id']}").json()
+    original_render = current["render_input"]
+
+    response = client.post(
+        f"/api/text-videos/{project['id']}/scene-plan/generate",
+        json={
+            "revision": current["revision"],
+            "scope": "all",
+            "selected_scene_id": "",
+            "direction": "减少每屏文字",
+        },
+    )
+
+    assert response.status_code == 201, response.text
+    launched = response.json()
+    job = client.get(f"/api/jobs/{launched['jobs'][0]['id']}").json()
+    assert launched["jobs"] == [{
+        "id": job["id"],
+        "flow": "text_video_scene_plan",
+        "target_id": project["id"],
+    }]
+    assert queued == [job["id"]]
+    assert job["input"]["master_source_hash"] == "a" * 64
+    assert len(job["input"]["timeline_fingerprint"]) == 64
+    assert len(job["input"]["manifest_digest"]) == 64
+    assert len(job["input"]["visual_selection_fingerprint"]) == 64
+    assert len(job["input"]["existing_scenes_digest"]) == 64
+    assert job["input"]["scene_generation_revision"] == 0
+    assert job["input"]["words"] == words
+    assert job["input"]["speech_segments"] == [{
+        "id": "paragraph-1",
+        "fromWordId": "word-1",
+        "throughWordId": "word-4",
+    }]
+    assert job["input"]["template"] == {
+        "id": "tech-text-v1",
+        "version": 1,
+        "animations": ["fade-up", "scale"],
+        "transitions": ["soft-push"],
+    }
+    assert job["input"]["scope"] == "all"
+    assert job["input"]["direction"] == "减少每屏文字"
+    assert len(job["input"]["request_hash"]) == 64
+    assert len(job["input"]["idempotency_key"]) < 128
+    assert job["input"]["idempotency_key"].startswith(
+        f"text-video-scene:{project['id']}:",
+    )
+    assert launched["project"]["scene_plan"] == {
+        **current["scene_plan"],
+        "status": "generating",
+        "job_id": job["id"],
+        "error": "",
+    }
+    assert launched["project"]["render_input"] == original_render
+
+
+def test_scene_worker_context_claim_and_strict_word_only_validation(
+    client,
+    monkeypatch,
+):
+    import routers.text_videos as router_module
+
+    async def ignore_enqueue(_job_id: int):
+        return None
+
+    monkeypatch.setattr(router_module, "enqueue_job", ignore_enqueue)
+    project = _speech_project(client, "甲乙丙丁")
+    _set_ready_master(project["id"])
+    current = client.get(f"/api/text-videos/{project['id']}").json()
+    launched = client.post(
+        f"/api/text-videos/{project['id']}/scene-plan/generate",
+        json={
+            "revision": current["revision"],
+            "scope": "all",
+            "selected_scene_id": "",
+            "direction": "",
+        },
+    ).json()
+    job_id = launched["jobs"][0]["id"]
+    _, headers = _start_scene_job(
+        client,
+        job_id,
+        project_id=project["id"],
+    )
+
+    context = client.get(
+        f"/api/text-videos/{project['id']}/scene-plan/worker-context",
+        headers=headers,
+    )
+    assert context.status_code == 200, context.text
+    assert context.json()["project_id"] == project["id"]
+    assert context.json()["timeline_fingerprint"]
+    assert context.json()["template"]["id"] == "tech-text-v1"
+
+    competing = client.get(
+        f"/api/text-videos/{project['id']}/scene-plan/worker-context",
+        headers={
+            **headers,
+            "X-Content-Step-Claim": "competing-claim-token-123456",
+        },
+    )
+    assert competing.status_code == 409
+    assert competing.headers["X-WMS-Retryable"] == "false"
+
+    with_timing = client.post(
+        f"/api/text-videos/{project['id']}/scene-plan/worker-validate",
+        json={
+            "scenes": [{
+                **_scene_scenes()[0],
+                "throughWordId": "word-4",
+                "displayText": "甲乙丙丁",
+                "highlight": [],
+                "start": 0,
+                "end": 4.2,
+            }],
+        },
+        headers=headers,
+    )
+    assert with_timing.status_code == 422
+
+    valid = client.post(
+        f"/api/text-videos/{project['id']}/scene-plan/worker-validate",
+        json={
+            "scenes": [{
+                **_scene_scenes()[0],
+                "throughWordId": "word-4",
+                "displayText": "甲乙丙丁",
+                "highlight": ["甲"],
+            }],
+        },
+        headers=headers,
+    )
+    assert valid.status_code == 200, valid.text
+    assert len(valid.json()["validation_token"]) == 64
+
+
+def test_scene_worker_validation_rejects_subframe_scene_and_accepts_repair(
+    client,
+    monkeypatch,
+):
+    import routers.text_videos as router_module
+
+    async def ignore_enqueue(_job_id: int):
+        return None
+
+    monkeypatch.setattr(router_module, "enqueue_job", ignore_enqueue)
+    project = _speech_project(client, "甲乙丙丁")
+    _set_ready_master(
+        project["id"],
+        duration=0.04,
+        words=_subframe_words(),
+    )
+    current = client.get(f"/api/text-videos/{project['id']}").json()
+    launched = client.post(
+        f"/api/text-videos/{project['id']}/scene-plan/generate",
+        json={
+            "revision": current["revision"],
+            "scope": "all",
+            "selected_scene_id": "",
+            "direction": "",
+        },
+    ).json()
+    job_id = launched["jobs"][0]["id"]
+    _, headers = _start_scene_job(
+        client,
+        job_id,
+        project_id=project["id"],
+    )
+
+    unsafe = client.post(
+        f"/api/text-videos/{project['id']}/scene-plan/worker-validate",
+        json={"scenes": _subframe_scenes()},
+        headers=headers,
+    )
+    assert unsafe.status_code == 422, unsafe.text
+    assert unsafe.headers["X-WMS-Retryable"] == "false"
+    assert "安全帧" in unsafe.json()["detail"]["message"]
+
+    repaired_scenes = [
+        _subframe_scenes()[0],
+        {
+            **_subframe_scenes()[1],
+            "throughWordId": "word-3",
+            "displayText": "乙丙",
+        },
+    ]
+    repaired = client.post(
+        f"/api/text-videos/{project['id']}/scene-plan/worker-validate",
+        json={"scenes": repaired_scenes},
+        headers=headers,
+    )
+    assert repaired.status_code == 200, repaired.text
+    assert repaired.json()["scenes"] == repaired_scenes
+    assert len(repaired.json()["validation_token"]) == 64
+
+
+def test_scene_worker_result_rechecks_subframe_safety_with_master_duration(
+    client,
+    monkeypatch,
+):
+    import routers.text_videos as router_module
+    from database import SessionLocal
+    from models import ContentJob, ContentJobStep
+
+    async def ignore_enqueue(_job_id: int):
+        return None
+
+    monkeypatch.setattr(router_module, "enqueue_job", ignore_enqueue)
+    project = _speech_project(client, "甲乙丙")
+    _set_ready_master(
+        project["id"],
+        duration=0.04,
+        words=_subframe_words(),
+    )
+    current = client.get(f"/api/text-videos/{project['id']}").json()
+    launched = client.post(
+        f"/api/text-videos/{project['id']}/scene-plan/generate",
+        json={
+            "revision": current["revision"],
+            "scope": "all",
+            "selected_scene_id": "",
+            "direction": "",
+        },
+    ).json()
+    job_id = launched["jobs"][0]["id"]
+    step, headers = _start_scene_job(
+        client,
+        job_id,
+        project_id=project["id"],
+    )
+    scenes = _subframe_scenes()
+
+    async def make_token():
+        async with SessionLocal() as session:
+            job = await session.get(ContentJob, job_id)
+            stored_step = await session.get(ContentJobStep, step["id"])
+            return router_module._scene_validation_token(
+                job=job,
+                step=stored_step,
+                claim_token=headers["X-Content-Step-Claim"],
+                scenes=scenes,
+            )
+
+    token = asyncio.new_event_loop().run_until_complete(make_token())
+    result = client.post(
+        f"/api/text-videos/{project['id']}/scene-plan/worker-result",
+        json={"scenes": scenes, "validation_token": token},
+        headers=headers,
+    )
+
+    assert result.status_code == 422, result.text
+    assert result.headers["X-WMS-Retryable"] == "false"
+    assert "安全帧" in result.json()["detail"]["message"]
+    after = client.get(f"/api/text-videos/{project['id']}").json()
+    assert after["scene_plan"]["status"] == "generating"
+    assert after["scene_plan"]["scenes"] == current["scene_plan"]["scenes"]
+    assert after["render_input"] == current["render_input"]
+
+
+def test_selected_scene_validation_returns_frozen_full_canonical_plan(
+    client,
+    monkeypatch,
+):
+    import routers.text_videos as router_module
+
+    async def ignore_enqueue(_job_id: int):
+        return None
+
+    monkeypatch.setattr(router_module, "enqueue_job", ignore_enqueue)
+    project = _speech_project(client, "甲乙丙丁")
+    _set_ready_master(project["id"])
+    ready = client.patch(
+        f"/api/text-videos/{project['id']}",
+        json={
+            "revision": project["revision"],
+            "scene_plan": {"scenes": _scene_scenes()},
+        },
+    ).json()
+    launched = client.post(
+        f"/api/text-videos/{project['id']}/scene-plan/generate",
+        json={
+            "revision": ready["revision"],
+            "scope": "selected",
+            "selected_scene_id": "scene-1",
+            "direction": "强化重点",
+        },
+    ).json()
+    job_id = launched["jobs"][0]["id"]
+    _, headers = _start_scene_job(
+        client,
+        job_id,
+        project_id=project["id"],
+    )
+    raw = {
+        **_scene_scenes()[0],
+        "displayText": "重点甲乙",
+        "highlight": ["甲"],
+        "animation": "scale",
+    }
+
+    validated = client.post(
+        f"/api/text-videos/{project['id']}/scene-plan/worker-validate",
+        json={"scenes": [raw]},
+        headers=headers,
+    )
+
+    assert validated.status_code == 200, validated.text
+    assert validated.json()["scenes"] == [raw, _scene_scenes()[1]]
+    assert len(validated.json()["validation_token"]) == 64
+
+    changed_boundary = client.post(
+        f"/api/text-videos/{project['id']}/scene-plan/worker-validate",
+        json={
+            "scenes": [{
+                **raw,
+                "throughWordId": "word-3",
+            }],
+        },
+        headers=headers,
+    )
+    assert changed_boundary.status_code == 422
+    assert changed_boundary.headers["X-WMS-Retryable"] == "false"
+
+
+def test_scene_worker_result_rejects_changed_timeline_and_preserves_last_plan(
+    client,
+    monkeypatch,
+):
+    import routers.text_videos as router_module
+    from database import SessionLocal
+    from models import TextVideoProject
+
+    async def ignore_enqueue(_job_id: int):
+        return None
+
+    monkeypatch.setattr(router_module, "enqueue_job", ignore_enqueue)
+    project = _speech_project(client, "甲乙丙丁")
+    _set_ready_master(project["id"])
+    ready = client.patch(
+        f"/api/text-videos/{project['id']}",
+        json={
+            "revision": project["revision"],
+            "scene_plan": {"scenes": _scene_scenes()},
+        },
+    ).json()
+    original_scene = ready["scene_plan"]
+    original_render = ready["render_input"]
+    launched = client.post(
+        f"/api/text-videos/{project['id']}/scene-plan/generate",
+        json={
+            "revision": ready["revision"],
+            "scope": "all",
+            "selected_scene_id": "",
+            "direction": "",
+        },
+    ).json()
+    job_id = launched["jobs"][0]["id"]
+    _, headers = _start_scene_job(
+        client,
+        job_id,
+        project_id=project["id"],
+    )
+    proposal = {
+        "scenes": [{
+            **_scene_scenes()[0],
+            "throughWordId": "word-4",
+            "displayText": "甲乙丙丁",
+            "highlight": ["甲"],
+        }],
+    }
+    validated = client.post(
+        f"/api/text-videos/{project['id']}/scene-plan/worker-validate",
+        json=proposal,
+        headers=headers,
+    ).json()
+
+    async def alter_word_timing():
+        async with SessionLocal() as session:
+            stored = await session.get(TextVideoProject, project["id"])
+            master = dict(stored.master_audio)
+            words = [dict(item) for item in master["word_timings"]]
+            words[1]["start"] = 0.8
+            master["word_timings"] = words
+            stored.master_audio = master
+            await session.commit()
+
+    asyncio.new_event_loop().run_until_complete(alter_word_timing())
+    stale = client.post(
+        f"/api/text-videos/{project['id']}/scene-plan/worker-result",
+        json=validated,
+        headers=headers,
+    )
+
+    assert stale.status_code == 409, stale.text
+    assert stale.headers["X-WMS-Retryable"] == "false"
+    after = client.get(f"/api/text-videos/{project['id']}").json()
+    assert after["scene_plan"]["scenes"] == original_scene["scenes"]
+    assert after["scene_plan"]["generation_revision"] == (
+        original_scene["generation_revision"]
+    )
+    assert after["render_input"] == original_render
+
+
+def test_scene_worker_result_is_atomic_and_recovers_lost_ack_by_provenance(
+    client,
+    monkeypatch,
+):
+    import routers.text_videos as router_module
+
+    async def ignore_enqueue(_job_id: int):
+        return None
+
+    monkeypatch.setattr(router_module, "enqueue_job", ignore_enqueue)
+    project = _speech_project(client, "甲乙丙丁")
+    _set_ready_master(project["id"])
+    current = client.get(f"/api/text-videos/{project['id']}").json()
+    launched = client.post(
+        f"/api/text-videos/{project['id']}/scene-plan/generate",
+        json={
+            "revision": current["revision"],
+            "scope": "all",
+            "selected_scene_id": "",
+            "direction": "",
+        },
+    ).json()
+    job_id = launched["jobs"][0]["id"]
+    _, headers = _start_scene_job(
+        client,
+        job_id,
+        project_id=project["id"],
+    )
+    validation = client.post(
+        f"/api/text-videos/{project['id']}/scene-plan/worker-validate",
+        json={
+            "scenes": [{
+                **_scene_scenes()[0],
+                "throughWordId": "word-4",
+                "displayText": "甲乙丙丁",
+                "highlight": ["甲"],
+            }],
+        },
+        headers=headers,
+    ).json()
+
+    saved = client.post(
+        f"/api/text-videos/{project['id']}/scene-plan/worker-result",
+        json=validation,
+        headers=headers,
+    )
+    assert saved.status_code == 200, saved.text
+    body = saved.json()
+    assert body["scene_plan"]["status"] == "ready"
+    assert body["scene_plan"]["generation_revision"] == 1
+    assert body["scene_plan"]["job_id"] is None
+    assert body["scene_plan"]["applied_job_id"] == job_id
+    assert body["render_input"]["audio"] == "/api/uploads/master.mp3"
+    assert body["render_input"]["segments"] == [{
+        "id": "scene-1",
+        "start": 0.0,
+        "end": 4.2,
+        "text": "甲乙丙丁",
+        "highlight": ["甲"],
+        "animation": "fade-up",
+    }]
+
+    recovered = client.get(
+        f"/api/text-videos/{project['id']}/scene-plan/worker-context",
+        headers=headers,
+    )
+    assert recovered.status_code == 200, recovered.text
+    assert recovered.json()["already_saved"] == body
+
+    repeated = client.post(
+        f"/api/text-videos/{project['id']}/scene-plan/worker-result",
+        json=validation,
+        headers=headers,
+    )
+    assert repeated.status_code == 200, repeated.text
+    assert repeated.json() == body
+
+
+def test_scene_failure_and_cancel_preserve_plan_and_cancel_relaunches_new_key(
+    client,
+    monkeypatch,
+):
+    import routers.jobs as jobs_router
+    import routers.text_videos as router_module
+
+    async def ignore_enqueue(_job_id: int):
+        return None
+
+    monkeypatch.setattr(router_module, "enqueue_job", ignore_enqueue)
+    monkeypatch.setattr(jobs_router, "enqueue_job", ignore_enqueue)
+    project = _speech_project(client, "甲乙丙丁")
+    _set_ready_master(project["id"])
+    ready = client.patch(
+        f"/api/text-videos/{project['id']}",
+        json={
+            "revision": project["revision"],
+            "scene_plan": {"scenes": _scene_scenes()},
+        },
+    ).json()
+    original_render = ready["render_input"]
+    first = client.post(
+        f"/api/text-videos/{project['id']}/scene-plan/generate",
+        json={
+            "revision": ready["revision"],
+            "scope": "all",
+            "selected_scene_id": "",
+            "direction": "",
+        },
+    ).json()
+    first_id = first["jobs"][0]["id"]
+    _, first_headers = _start_scene_job(
+        client,
+        first_id,
+        project_id=project["id"],
+    )
+    failed = client.post(
+        f"/api/text-videos/{project['id']}/scene-plan/worker-failure",
+        json={"error": "provider unavailable"},
+        headers=first_headers,
+    )
+    assert failed.status_code == 200, failed.text
+    assert failed.json()["scene_plan"]["status"] == "failed"
+    assert failed.json()["scene_plan"]["generation_revision"] == 1
+    assert failed.json()["scene_plan"]["job_id"] == first_id
+    assert failed.json()["scene_plan"]["scenes"] == _scene_scenes()
+    assert failed.json()["render_input"] == original_render
+
+    retry_failure_ack = client.post(
+        f"/api/text-videos/{project['id']}/scene-plan/worker-failure",
+        json={"error": "provider unavailable"},
+        headers=first_headers,
+    )
+    assert retry_failure_ack.status_code == 200, retry_failure_ack.text
+
+    cancelled = client.post(f"/api/jobs/{first_id}/cancel")
+    assert cancelled.status_code == 200, cancelled.text
+    after_cancel = client.get(f"/api/text-videos/{project['id']}").json()
+    assert after_cancel["scene_plan"]["status"] == "failed"
+    assert after_cancel["scene_plan"]["generation_revision"] == 2
+    assert after_cancel["scene_plan"]["job_id"] is None
+    assert after_cancel["scene_plan"]["scenes"] == _scene_scenes()
+    assert after_cancel["render_input"] == original_render
+
+    third = client.post(
+        f"/api/text-videos/{project['id']}/scene-plan/generate",
+        json={
+            "revision": ready["revision"],
+            "scope": "all",
+            "selected_scene_id": "",
+            "direction": "",
+        },
+    )
+    assert third.status_code == 201, third.text
+    assert third.json()["jobs"][0]["id"] != first_id
+
+
+def test_scene_plan_launch_reuses_same_request_and_rejects_competing_request(
+    client,
+    monkeypatch,
+):
+    import routers.text_videos as router_module
+
+    queued: list[int] = []
+
+    async def capture_enqueue(job_id: int):
+        queued.append(job_id)
+
+    monkeypatch.setattr(router_module, "enqueue_job", capture_enqueue)
+    project = _speech_project(client, "甲乙丙丁")
+    _set_ready_master(project["id"])
+    current = client.get(f"/api/text-videos/{project['id']}").json()
+    request = {
+        "revision": current["revision"],
+        "scope": "all",
+        "selected_scene_id": "",
+        "direction": "简洁",
+    }
+    first = client.post(
+        f"/api/text-videos/{project['id']}/scene-plan/generate",
+        json=request,
+    )
+    repeated = client.post(
+        f"/api/text-videos/{project['id']}/scene-plan/generate",
+        json=request,
+    )
+    competing = client.post(
+        f"/api/text-videos/{project['id']}/scene-plan/generate",
+        json={**request, "direction": "完全不同"},
+    )
+
+    assert first.status_code == repeated.status_code == 201
+    assert first.json()["jobs"][0]["id"] == repeated.json()["jobs"][0]["id"]
+    assert competing.status_code == 409
+    assert competing.headers["X-WMS-Retryable"] == "false"
+    assert queued == [
+        first.json()["jobs"][0]["id"],
+        first.json()["jobs"][0]["id"],
+    ]
+
+
+def test_scene_worker_result_rejects_changed_visual_selection(
+    client,
+    monkeypatch,
+):
+    import routers.text_videos as router_module
+
+    async def ignore_enqueue(_job_id: int):
+        return None
+
+    monkeypatch.setattr(router_module, "enqueue_job", ignore_enqueue)
+    project = _speech_project(client, "甲乙丙丁")
+    _set_ready_master(project["id"])
+    ready = client.patch(
+        f"/api/text-videos/{project['id']}",
+        json={
+            "revision": project["revision"],
+            "scene_plan": {"scenes": _scene_scenes()},
+        },
+    ).json()
+    launched = client.post(
+        f"/api/text-videos/{project['id']}/scene-plan/generate",
+        json={
+            "revision": ready["revision"],
+            "scope": "all",
+            "selected_scene_id": "",
+            "direction": "",
+        },
+    ).json()
+    job_id = launched["jobs"][0]["id"]
+    _, headers = _start_scene_job(
+        client,
+        job_id,
+        project_id=project["id"],
+    )
+    validation = client.post(
+        f"/api/text-videos/{project['id']}/scene-plan/worker-validate",
+        json={"scenes": _scene_scenes()},
+        headers=headers,
+    ).json()
+
+    changed_visual = client.patch(
+        f"/api/text-videos/{project['id']}",
+        json={
+            "revision": ready["revision"],
+            "template": {
+                "templateId": "tech-text-v1",
+                "templateVersion": 1,
+                "templateProps": {
+                    **ready["render_input"]["templateProps"],
+                    "textDensity": "compact",
+                },
+            },
+        },
+    )
+    assert changed_visual.status_code == 200, changed_visual.text
+    stale_visual = client.post(
+        f"/api/text-videos/{project['id']}/scene-plan/worker-result",
+        json=validation,
+        headers=headers,
+    )
+    assert stale_visual.status_code == 409
+    assert (
+        client.get(f"/api/text-videos/{project['id']}").json()
+        ["render_input"]["templateProps"]["textDensity"]
+        == "compact"
+    )
+
+    # Launch a new job, then a normal revision-checked scene edit owns state.
+    latest = client.get(f"/api/text-videos/{project['id']}").json()
+    relaunched = client.post(
+        f"/api/text-videos/{project['id']}/scene-plan/generate",
+        json={
+            "revision": latest["revision"],
+            "scope": "all",
+            "selected_scene_id": "",
+            "direction": "new",
+        },
+    )
+    # The stale running job must block a competing paid request.
+    assert relaunched.status_code == 409
+
+
+def test_scene_worker_result_rejects_manifest_drift_for_same_template_pair(
+    client,
+    monkeypatch,
+):
+    from copy import deepcopy
+
+    import routers.text_videos as router_module
+
+    async def ignore_enqueue(_job_id: int):
+        return None
+
+    monkeypatch.setattr(router_module, "enqueue_job", ignore_enqueue)
+    project = _speech_project(client, "甲乙丙丁")
+    _set_ready_master(project["id"])
+    current = client.get(f"/api/text-videos/{project['id']}").json()
+    launched = client.post(
+        f"/api/text-videos/{project['id']}/scene-plan/generate",
+        json={
+            "revision": current["revision"],
+            "scope": "all",
+            "selected_scene_id": "",
+            "direction": "",
+        },
+    ).json()
+    job_id = launched["jobs"][0]["id"]
+    _, headers = _start_scene_job(
+        client,
+        job_id,
+        project_id=project["id"],
+    )
+    validated = client.post(
+        f"/api/text-videos/{project['id']}/scene-plan/worker-validate",
+        json={
+            "scenes": [{
+                **_scene_scenes()[0],
+                "throughWordId": "word-4",
+                "displayText": "甲乙丙丁",
+            }],
+        },
+        headers=headers,
+    ).json()
+    original_loader = router_module.get_text_video_template
+
+    def drifted_manifest(template_id, template_version):
+        manifest = deepcopy(
+            original_loader(template_id, template_version),
+        )
+        manifest["animations"] = [
+            *manifest["animations"],
+            "manifest-added-animation",
+        ]
+        return manifest
+
+    monkeypatch.setattr(
+        router_module,
+        "get_text_video_template",
+        drifted_manifest,
+    )
+
+    stale = client.post(
+        f"/api/text-videos/{project['id']}/scene-plan/worker-result",
+        json=validated,
+        headers=headers,
+    )
+
+    assert stale.status_code == 409, stale.text
+    assert stale.headers["X-WMS-Retryable"] == "false"
+    after = client.get(f"/api/text-videos/{project['id']}").json()
+    assert after["scene_plan"]["status"] == "generating"
+    assert after["scene_plan"]["scenes"] == current["scene_plan"]["scenes"]
+    assert after["render_input"] == current["render_input"]
+
+
+def test_manual_scene_edit_supersedes_old_validate_result_and_failure(
+    client,
+    monkeypatch,
+):
+    import routers.text_videos as router_module
+
+    async def ignore_enqueue(_job_id: int):
+        return None
+
+    monkeypatch.setattr(router_module, "enqueue_job", ignore_enqueue)
+    project = _speech_project(client, "甲乙丙丁")
+    _set_ready_master(project["id"])
+    ready = client.patch(
+        f"/api/text-videos/{project['id']}",
+        json={
+            "revision": project["revision"],
+            "scene_plan": {"scenes": _scene_scenes()},
+        },
+    ).json()
+    launched = client.post(
+        f"/api/text-videos/{project['id']}/scene-plan/generate",
+        json={
+            "revision": ready["revision"],
+            "scope": "all",
+            "selected_scene_id": "",
+            "direction": "",
+        },
+    ).json()
+    job_id = launched["jobs"][0]["id"]
+    _, headers = _start_scene_job(
+        client,
+        job_id,
+        project_id=project["id"],
+    )
+    validated = client.post(
+        f"/api/text-videos/{project['id']}/scene-plan/worker-validate",
+        json={"scenes": _scene_scenes()},
+        headers=headers,
+    ).json()
+    manual_scenes = [
+        {
+            **_scene_scenes()[0],
+            "displayText": "手动甲乙",
+            "highlight": ["甲"],
+            "animation": "scale",
+        },
+        _scene_scenes()[1],
+    ]
+    manual = client.patch(
+        f"/api/text-videos/{project['id']}",
+        json={
+            "revision": ready["revision"],
+            "scene_plan": {"scenes": manual_scenes},
+        },
+    )
+    assert manual.status_code == 200, manual.text
+    manual_project = manual.json()
+
+    old_validate = client.post(
+        f"/api/text-videos/{project['id']}/scene-plan/worker-validate",
+        json={"scenes": _scene_scenes()},
+        headers=headers,
+    )
+    old_result = client.post(
+        f"/api/text-videos/{project['id']}/scene-plan/worker-result",
+        json=validated,
+        headers=headers,
+    )
+    old_failure = client.post(
+        f"/api/text-videos/{project['id']}/scene-plan/worker-failure",
+        json={"error": "late provider error"},
+        headers=headers,
+    )
+
+    for response in (old_validate, old_result, old_failure):
+        assert response.status_code == 409, response.text
+        assert response.headers["X-WMS-Retryable"] == "false"
+    after = client.get(f"/api/text-videos/{project['id']}").json()
+    assert after["scene_plan"] == manual_project["scene_plan"]
+    assert after["render_input"] == manual_project["render_input"]
+
+
+def test_scene_worker_result_rejects_a_different_payload_with_old_token(
+    client,
+    monkeypatch,
+):
+    import routers.text_videos as router_module
+
+    async def ignore_enqueue(_job_id: int):
+        return None
+
+    monkeypatch.setattr(router_module, "enqueue_job", ignore_enqueue)
+    project = _speech_project(client, "甲乙丙丁")
+    _set_ready_master(project["id"])
+    current = client.get(f"/api/text-videos/{project['id']}").json()
+    launched = client.post(
+        f"/api/text-videos/{project['id']}/scene-plan/generate",
+        json={
+            "revision": current["revision"],
+            "scope": "all",
+            "selected_scene_id": "",
+            "direction": "",
+        },
+    ).json()
+    job_id = launched["jobs"][0]["id"]
+    _, headers = _start_scene_job(
+        client,
+        job_id,
+        project_id=project["id"],
+    )
+    validated = client.post(
+        f"/api/text-videos/{project['id']}/scene-plan/worker-validate",
+        json={
+            "scenes": [{
+                **_scene_scenes()[0],
+                "throughWordId": "word-4",
+                "displayText": "甲乙丙丁",
+                "highlight": ["甲"],
+            }],
+        },
+        headers=headers,
+    ).json()
+    tampered = {
+        **validated,
+        "scenes": [{
+            **validated["scenes"][0],
+            "displayText": "另一份内容",
+            "highlight": [],
+        }],
+    }
+
+    result = client.post(
+        f"/api/text-videos/{project['id']}/scene-plan/worker-result",
+        json=tampered,
+        headers=headers,
+    )
+
+    assert result.status_code == 409
+    assert result.headers["X-WMS-Retryable"] == "false"
+    after = client.get(f"/api/text-videos/{project['id']}").json()
+    assert after["scene_plan"]["status"] == "generating"
+    assert after["render_input"] == current["render_input"]
+
+
+def test_failed_scene_job_remains_discoverable_and_retry_restores_generation(
+    client,
+    monkeypatch,
+):
+    import routers.jobs as jobs_router
+    import routers.text_videos as router_module
+
+    async def ignore_enqueue(_job_id: int):
+        return None
+
+    monkeypatch.setattr(router_module, "enqueue_job", ignore_enqueue)
+    monkeypatch.setattr(jobs_router, "enqueue_job", ignore_enqueue)
+    project = _speech_project(client, "甲乙丙丁")
+    _set_ready_master(project["id"])
+    current = client.get(f"/api/text-videos/{project['id']}").json()
+    launched = client.post(
+        f"/api/text-videos/{project['id']}/scene-plan/generate",
+        json={
+            "revision": current["revision"],
+            "scope": "all",
+            "selected_scene_id": "",
+            "direction": "",
+        },
+    ).json()
+    job_id = launched["jobs"][0]["id"]
+    step, headers = _start_scene_job(
+        client,
+        job_id,
+        project_id=project["id"],
+    )
+    domain_failure = client.post(
+        f"/api/text-videos/{project['id']}/scene-plan/worker-failure",
+        json={"error": "provider unavailable"},
+        headers=headers,
+    )
+    assert domain_failure.status_code == 200
+    durable_failure = client.post(
+        f"/api/jobs/{job_id}/steps/{step['id']}/fail",
+        json={"error": "provider unavailable", "retryable": True},
+    )
+    assert durable_failure.status_code == 200
+
+    refreshed = client.get(f"/api/text-videos/{project['id']}").json()
+    assert refreshed["scene_plan"]["status"] == "failed"
+    assert refreshed["scene_plan"]["job_id"] == job_id
+    retry = client.post(
+        f"/api/jobs/{job_id}/retry",
+        json={"step_key": "generate_scene_plan"},
+    )
+    assert retry.status_code == 200, retry.text
+    assert retry.json()["status"] == "queued"
+    restored = client.get(f"/api/text-videos/{project['id']}").json()
+    assert restored["scene_plan"]["status"] == "generating"
+    assert restored["scene_plan"]["job_id"] == job_id
+    assert restored["scene_plan"]["scenes"] == current["scene_plan"]["scenes"]
+    assert restored["render_input"] == current["render_input"]
 
 
 def test_speech_split_preview_retry_reenqueues_existing_job_after_first_enqueue_failure(

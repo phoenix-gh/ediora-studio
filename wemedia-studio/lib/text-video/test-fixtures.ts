@@ -55,6 +55,7 @@ export function makeScenePlan(
     master_source_hash: '',
     scenes: [],
     job_id: null,
+    applied_job_id: null,
     error: '',
     ...overrides,
   }

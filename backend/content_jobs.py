@@ -21,6 +21,7 @@ from models import (
     TalkingVideoRender,
     TextVideoProject,
 )
+from text_video_domain import empty_scene_plan
 
 
 class InvalidJobTransition(ValueError):
@@ -238,6 +239,46 @@ async def _cancel_current_master_audio(
     project.render_input = render_input
 
 
+async def _cancel_current_scene_plan(
+    session: AsyncSession,
+    job: ContentJob,
+) -> None:
+    if job.flow != "text_video_scene_plan":
+        return
+    project_id = job.input_data.get("project_id")
+    generation_revision = job.input_data.get(
+        "scene_generation_revision",
+    )
+    if (
+        not isinstance(project_id, int)
+        or not isinstance(generation_revision, int)
+        or isinstance(generation_revision, bool)
+    ):
+        return
+    project = await session.scalar(
+        select(TextVideoProject)
+        .where(TextVideoProject.id == project_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if project is None:
+        return
+    plan = empty_scene_plan() | dict(project.scene_plan or {})
+    if (
+        plan.get("job_id") != job.id
+        or plan.get("status") not in {"generating", "failed"}
+        or plan.get("generation_revision") != generation_revision
+    ):
+        return
+    plan.update({
+        "status": "failed",
+        "generation_revision": generation_revision + 1,
+        "job_id": None,
+        "error": "任务已取消",
+    })
+    project.scene_plan = plan
+
+
 async def _restore_current_master_audio(
     session: AsyncSession,
     job: ContentJob,
@@ -286,6 +327,52 @@ async def _restore_current_master_audio(
         render_input = dict(project.render_input or {})
         render_input["audio"] = ""
         project.render_input = render_input
+
+
+async def _restore_current_scene_plan(
+    session: AsyncSession,
+    job: ContentJob,
+    step_key: str,
+) -> None:
+    if (
+        job.flow != "text_video_scene_plan"
+        or step_key != "generate_scene_plan"
+    ):
+        return
+    project_id = job.input_data.get("project_id")
+    generation_revision = job.input_data.get(
+        "scene_generation_revision",
+    )
+    existing_scenes = job.input_data.get("existing_scenes")
+    if (
+        not isinstance(project_id, int)
+        or not isinstance(generation_revision, int)
+        or isinstance(generation_revision, bool)
+        or not isinstance(existing_scenes, list)
+    ):
+        return
+    project = await session.scalar(
+        select(TextVideoProject)
+        .where(TextVideoProject.id == project_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if project is None:
+        return
+    plan = empty_scene_plan() | dict(project.scene_plan or {})
+    if (
+        plan.get("status") != "failed"
+        or plan.get("job_id") != job.id
+        or plan.get("generation_revision") != generation_revision
+        or plan.get("scenes") != existing_scenes
+    ):
+        return
+    plan.update({
+        "status": "generating",
+        "job_id": job.id,
+        "error": "",
+    })
+    project.scene_plan = plan
 
 
 async def _latest_step(session: AsyncSession, job_id: int, step_key: str) -> ContentJobStep | None:
@@ -459,6 +546,7 @@ async def retry_step(session: AsyncSession, job_id: int, step_key: str) -> Conte
         ))
     await _restore_current_speech_segment(session, job)
     await _restore_current_master_audio(session, job, step_key)
+    await _restore_current_scene_plan(session, job, step_key)
     await session.flush()
     await _event(session, job_id, "step_retried", step_id=step.id, payload={"step_key": step_key, "attempt": step.attempt})
     await session.commit()
@@ -527,6 +615,27 @@ async def cancel_job(session: AsyncSession, job_id: int) -> ContentJob:
                 raise InvalidJobTransition(
                     "cannot cancel completed master",
                 )
+    elif job.flow == "text_video_scene_plan":
+        project_id = job.input_data.get("project_id")
+        if isinstance(project_id, int):
+            project = await session.scalar(
+                select(TextVideoProject)
+                .where(TextVideoProject.id == project_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+            plan = (
+                empty_scene_plan() | dict(project.scene_plan or {})
+                if project is not None
+                else empty_scene_plan()
+            )
+            if (
+                plan.get("status") == "ready"
+                and plan.get("applied_job_id") == job.id
+            ):
+                raise InvalidJobTransition(
+                    "cannot cancel completed scene plan",
+                )
     job.status = "cancelled"
     job.completed_at = _now()
     if job.flow == "digital_human_render":
@@ -564,6 +673,8 @@ async def cancel_job(session: AsyncSession, job_id: int) -> ContentJob:
         await _cancel_current_speech_segment(session, job)
     elif job.flow == "text_video_master_audio":
         await _cancel_current_master_audio(session, job)
+    elif job.flow == "text_video_scene_plan":
+        await _cancel_current_scene_plan(session, job)
     await _event(session, job_id, "job_cancelled")
     await session.commit()
     await session.refresh(job)

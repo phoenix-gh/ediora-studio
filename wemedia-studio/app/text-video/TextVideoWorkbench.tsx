@@ -433,6 +433,7 @@ function fixtureToDocument(
       master_source_hash: '',
       scenes: [],
       job_id: null,
+      applied_job_id: null,
       error: '',
     },
     render_input: {

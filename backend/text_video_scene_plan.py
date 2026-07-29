@@ -108,6 +108,14 @@ def _validate_word_timeline(
         previous_end = float(end)
 
 
+def validate_word_timeline(
+    words: list[dict],
+    master_duration: float,
+) -> list[dict]:
+    _validate_word_timeline(words, master_duration)
+    return deepcopy(words)
+
+
 def validate_template_configuration(
     *,
     manifest: dict,
@@ -216,6 +224,89 @@ def validate_scene_partition(
     if cursor != len(words):
         raise ValueError("分镜词范围必须完整且连续")
     return validated
+
+
+def canonicalize_scene_generation_proposal(
+    *,
+    proposals: list[dict],
+    words: list[dict],
+    manifest: dict,
+    scope: str,
+    selected_scene_id: str,
+    existing_scenes: list[dict],
+) -> list[dict]:
+    if scope == "all":
+        return validate_scene_partition(proposals, words, manifest)
+    if scope != "selected":
+        raise ValueError("AI 分镜生成范围无效")
+
+    existing = validate_scene_partition(
+        existing_scenes,
+        words,
+        manifest,
+    )
+    if not selected_scene_id or len(proposals) != 1:
+        raise ValueError("选中分镜生成必须只返回一个分镜")
+    selected_index = next(
+        (
+            index
+            for index, scene in enumerate(existing)
+            if scene["id"] == selected_scene_id
+        ),
+        None,
+    )
+    if selected_index is None:
+        raise ValueError("目标分镜不存在")
+    proposal = proposals[0]
+    selected = existing[selected_index]
+    if (
+        not isinstance(proposal, dict)
+        or proposal.get("id") != selected["id"]
+        or proposal.get("fromWordId") != selected["fromWordId"]
+        or proposal.get("throughWordId") != selected["throughWordId"]
+    ):
+        raise ValueError("目标分镜 ID 与词边界不能改变")
+    merged = deepcopy(existing)
+    merged[selected_index] = deepcopy(proposal)
+    return validate_scene_partition(merged, words, manifest)
+
+
+def validate_canonical_scene_result(
+    *,
+    proposals: list[dict],
+    words: list[dict],
+    manifest: dict,
+    scope: str,
+    selected_scene_id: str,
+    existing_scenes: list[dict],
+) -> list[dict]:
+    if scope == "all":
+        return validate_scene_partition(proposals, words, manifest)
+    if scope != "selected":
+        raise ValueError("AI 分镜生成范围无效")
+
+    existing = validate_scene_partition(
+        existing_scenes,
+        words,
+        manifest,
+    )
+    if len(proposals) != len(existing):
+        raise ValueError("选中分镜结果必须保留完整分镜计划")
+    for current, frozen in zip(proposals, existing, strict=True):
+        if not isinstance(current, dict):
+            raise ValueError("选中分镜结果格式无效")
+        if current.get("id") != frozen["id"]:
+            raise ValueError("选中分镜结果不能改变分镜顺序或 ID")
+        if (
+            current.get("fromWordId") != frozen["fromWordId"]
+            or current.get("throughWordId") != frozen["throughWordId"]
+        ):
+            raise ValueError("目标分镜 ID 与词边界不能改变")
+        if frozen["id"] != selected_scene_id and current != frozen:
+            raise ValueError("非目标分镜不能改变")
+    if not any(scene["id"] == selected_scene_id for scene in existing):
+        raise ValueError("目标分镜不存在")
+    return validate_scene_partition(proposals, words, manifest)
 
 
 def resolve_scene_seconds(
@@ -339,6 +430,13 @@ def validate_render_input_projection(
         for segment in segments
     ):
         raise ValueError("渲染分镜必须连续覆盖主音频")
+    fps = composition["fps"]
+    if any(
+        math.ceil(segment["start"] * fps)
+        > math.ceil(segment["end"] * fps) - 1
+        for segment in segments
+    ):
+        raise ValueError("渲染分镜在当前帧率下必须至少包含一个安全帧")
 
     return {
         "templateId": template_id,

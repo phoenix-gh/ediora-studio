@@ -3,7 +3,9 @@ import math
 import pytest
 
 from text_video_scene_plan import (
+    canonicalize_scene_generation_proposal,
     resolve_scene_seconds,
+    validate_canonical_scene_result,
     validate_render_input_projection,
     validate_scene_partition,
     validate_template_configuration,
@@ -295,6 +297,36 @@ def test_render_projection_rejects_scene_collapsed_by_canonicalization():
         )
 
 
+def test_render_projection_rejects_positive_seconds_without_a_safe_frame():
+    unsafe = _render_input(
+        composition={"width": 1080, "height": 1920, "fps": 30},
+        segments=[
+            {
+                **_render_input()["segments"][0],
+                "start": 0.0,
+                "end": 0.01,
+            },
+            {
+                **_render_input()["segments"][1],
+                "start": 0.01,
+                "end": 0.02,
+            },
+            {
+                **_render_input()["segments"][1],
+                "id": "s3",
+                "start": 0.02,
+                "end": 0.04,
+            },
+        ],
+    )
+
+    with pytest.raises(ValueError, match="安全帧"):
+        validate_render_input_projection(
+            unsafe,
+            master_duration=0.04,
+        )
+
+
 def test_template_configuration_rejects_exact_ratio_false_positive():
     with pytest.raises(ValueError, match="画面比例"):
         validate_template_configuration(
@@ -334,4 +366,79 @@ def test_render_projection_fails_closed_for_invalid_contract(render_input):
         validate_render_input_projection(
             render_input,
             master_duration=4.2,
+        )
+
+
+def test_selected_scene_generation_merges_only_visual_intent():
+    selected = {
+        **SCENES[0],
+        "displayText": "重点甲乙",
+        "highlight": ["甲"],
+        "animation": "scale",
+    }
+
+    assert canonicalize_scene_generation_proposal(
+        proposals=[selected],
+        words=WORDS,
+        manifest=MANIFEST,
+        scope="selected",
+        selected_scene_id="s1",
+        existing_scenes=SCENES,
+    ) == [selected, SCENES[1]]
+
+
+@pytest.mark.parametrize(
+    "proposal",
+    [
+        [{**SCENES[0], "fromWordId": "word-2"}],
+        [{**SCENES[0], "throughWordId": "word-3"}],
+        [{**SCENES[0], "id": "other"}],
+        [SCENES[0], SCENES[1]],
+        [],
+    ],
+)
+def test_selected_scene_generation_keeps_exact_id_and_word_boundaries(proposal):
+    with pytest.raises(ValueError, match="目标分镜|一个分镜"):
+        canonicalize_scene_generation_proposal(
+            proposals=proposal,
+            words=WORDS,
+            manifest=MANIFEST,
+            scope="selected",
+            selected_scene_id="s1",
+            existing_scenes=SCENES,
+        )
+
+
+def test_selected_canonical_result_rejects_changes_to_unselected_scenes():
+    with pytest.raises(ValueError, match="非目标分镜"):
+        validate_canonical_scene_result(
+            proposals=[
+                SCENES[0],
+                {**SCENES[1], "displayText": "偷偷改了"},
+            ],
+            words=WORDS,
+            manifest=MANIFEST,
+            scope="selected",
+            selected_scene_id="s1",
+            existing_scenes=SCENES,
+        )
+
+
+def test_full_scene_generation_requires_one_complete_word_partition():
+    assert canonicalize_scene_generation_proposal(
+        proposals=SCENES,
+        words=WORDS,
+        manifest=MANIFEST,
+        scope="all",
+        selected_scene_id="",
+        existing_scenes=[],
+    ) == SCENES
+    with pytest.raises(ValueError, match="完整且连续"):
+        canonicalize_scene_generation_proposal(
+            proposals=[SCENES[0]],
+            words=WORDS,
+            manifest=MANIFEST,
+            scope="all",
+            selected_scene_id="",
+            existing_scenes=[],
         )
