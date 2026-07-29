@@ -25,9 +25,16 @@ services:
 
   api:
     build: ./backend
+    command:
+      - sh
+      - -ec
+      - |
+        python -c 'import os, sys; ok = len(os.environ.get("WMS_WORKER_TOKEN", "")) >= 32; sys.stderr.write("" if ok else "WMS_WORKER_TOKEN must contain at least 32 characters\n"); sys.exit(0 if ok else 1)'
+        exec uvicorn main:app --host 0.0.0.0 --port 8000
     environment:
       WMS_DATABASE_URL: postgresql+asyncpg://wemedia:${POSTGRES_PASSWORD:-wemedia}@postgres:5432/wemedia
       WMS_REDIS_URL: redis://redis:6379/0
+      WMS_WORKER_QUEUE: ${WMS_WORKER_QUEUE:-content-jobs}
       WMS_DISABLE_SCHEDULER: "0"
       FEEDGRAB_DATA_DIR: /app/sessions
       HEYGEN_API_KEY: ${HEYGEN_API_KEY:-}
@@ -44,6 +51,16 @@ services:
       - sessions-data:/app/sessions
     ports:
       - "8000:8000"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen("http://127.0.0.1:8000/health", timeout=3).read()
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
     depends_on:
       postgres:
         condition: service_healthy
@@ -52,9 +69,15 @@ services:
 
   worker:
     build: ./wemedia-studio
-    command: ["./node_modules/.bin/tsx", "scripts/content-worker.ts"]
+    command:
+      - sh
+      - -ec
+      - |
+        node -e 'const ok = (process.env.WMS_WORKER_TOKEN ?? "").length >= 32; if (!ok) { console.error("WMS_WORKER_TOKEN must contain at least 32 characters"); process.exit(1) }'
+        exec ./node_modules/.bin/tsx scripts/content-worker.ts
     environment:
       WMS_REDIS_URL: redis://redis:6379/0
+      WMS_WORKER_QUEUE: ${WMS_WORKER_QUEUE:-content-jobs}
       WMS_API_URL: http://api:8000/api
       WMS_LLM_API_KEY: ${WMS_LLM_API_KEY:-}
       WMS_LLM_MODEL: ${WMS_LLM_MODEL:-gpt-4o-mini}
@@ -68,6 +91,8 @@ services:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      api:
         condition: service_healthy
 
   web:
@@ -85,7 +110,8 @@ services:
     ports:
       - "3000:3000"
     depends_on:
-      - api
+      api:
+        condition: service_healthy
 
 volumes:
   postgres-data:

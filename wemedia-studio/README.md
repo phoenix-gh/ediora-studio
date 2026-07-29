@@ -1,36 +1,35 @@
 # WeMedia Studio Frontend
 
-Next.js 前端应用。请从本目录启动前端服务：
+Next.js 前端应用。完整本地运行时应从项目根目录统一启动：
 
 ```bash
-cd /workspace/projects/WeMediaStudio/wemedia-studio
-pnpm dev
+export WMS_WORKER_TOKEN="$(openssl rand -hex 32)"
+./dev.sh
 ```
 
-前端默认访问 `http://localhost:3000`，API 地址由 `.env.local` 配置：
+默认 Web 为 `http://localhost:3000`、API 为
+`http://localhost:8000`、worker 使用 `content-jobs` 队列，宿主机 Redis
+为 `redis://127.0.0.1:6379/0`。`WMS_WORKER_TOKEN` 必须至少 32 字符，
+并由 API 与 worker 共享。已有健康 Redis 会作为 external 服务复用且不会被
+`./dev.sh stop` 停止；完整状态与日志可用 `./dev.sh status` 和
+`./dev.sh logs` 查看。
 
-```bash
-NEXT_PUBLIC_API_URL=http://localhost:8000/api
-```
+前端 API 地址由 `NEXT_PUBLIC_API_URL` 配置；统一脚本会按实际
+`WMS_API_PORT` 自动设置。完整启动、端口覆盖和进程所有权规则见项目根目录
+`README.md`。
 
-后端必须从项目的 `backend/` 目录启动，否则 SQLite 的相对路径会指向错误位置。完整启动说明见项目根目录 `README.md`。
+## 文字视频本地配置
+
+MiMo 语音凭据只保留在服务端，官方 base URL 为
+`https://api.xiaomimimo.com/v1`。转写 provider 必须返回
+`verbose_json.words`。AI 分段先预览再应用；所有已生成口播段都要人工试听
+确认，才能生成主音频并进入按稳定 word range 生成分镜的阶段。当前里程碑
+只有 Remotion 时间轴预览，不提供 MP4 渲染或音色克隆；不明确是否成功的
+付费 provider 调用必须由用户手动重试，并可能再次计费。
 
 ## 数字人口播本地开发
 
-数字人口播由 Python API 保存角色、作品、版本与创作资产，Node worker 调用 HeyGen。宿主机开发时三项服务建议分别启动：
-
-```bash
-# 先生成一个长随机 token，并让 API 与 worker 共用
-export WMS_WORKER_TOKEN="$(openssl rand -hex 32)"
-
-# API（项目 backend 目录）
-WMS_WORKER_TOKEN="$WMS_WORKER_TOKEN" WMS_REDIS_URL=redis://127.0.0.1:6379/0 conda run -n wems uvicorn main:app --host 0.0.0.0 --port 8000
-
-# worker（本目录）
-WMS_WORKER_TOKEN="$WMS_WORKER_TOKEN" WMS_REDIS_URL=redis://127.0.0.1:6379/0 WMS_API_URL=http://127.0.0.1:8000/api pnpm jobs:worker
-
-# Web（本目录）
-pnpm dev
-```
+数字人口播由 Python API 保存角色、作品、版本与创作资产，统一脚本启动的
+Node worker 调用 HeyGen。
 
 HeyGen API Key 优先在「设置 → HeyGen」保存，也可在 API 环境中设置 `HEYGEN_API_KEY` 作为回退。角色素材只接受 PNG/JPEG 与 MP3/WAV，且发送给 HeyGen 的单文件上限为 32MB。声音克隆要求 HeyGen 套餐具备相应权限；成片完成后会被下载到后端本地 uploads，而不是长期引用 HeyGen 的临时 URL。

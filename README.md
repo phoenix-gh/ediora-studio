@@ -45,19 +45,42 @@ WeMediaStudio/
 
 ## 启动方式
 
-后端必须从 backend/ 目录启动，使用 conda env wems。
+宿主机开发推荐从项目根目录使用统一脚本。先确保 conda 环境 `wems`、
+`pnpm` 和 `redis-server`（仅在本机没有可用 Redis 时需要）可从当前
+`PATH` 找到，并配置 API 与内容任务 worker 共用的 32 字符以上 token：
 
 ```bash
-# 终端 A：后端
-cd backend
-conda run -n wems uvicorn main:app --host 0.0.0.0 --port 8000
-
-# 终端 B：前端
-cd wemedia-studio
-pnpm dev
+export WMS_WORKER_TOKEN="$(openssl rand -hex 32)"
+./dev.sh
 ```
 
-后端 localhost:8000，前端 localhost:3000，API 文档 /docs。
+脚本按 Redis 健康 → API HTTP 就绪 → worker 进程就绪 → Web HTTP 就绪的
+顺序启动完整运行时：
+
+```text
+Web:    http://localhost:3000
+API:    http://localhost:8000
+Worker: content-jobs queue
+Redis:  redis://127.0.0.1:6379/0
+```
+
+若 `127.0.0.1:6379` 已有能响应 PING 的 Redis，脚本只连接并把它标记为
+`external`，`./dev.sh stop` 不会停止它；否则脚本启动并只管理自己创建的
+临时 Redis。API 与 worker 始终共享同一个宿主机 Redis URL、队列名和
+`WMS_WORKER_TOKEN`。端口可分别用 `WMS_REDIS_PORT`、`WMS_API_PORT` 和
+`WMS_WEB_PORT` 覆盖。
+
+```bash
+./dev.sh status
+./dev.sh logs                 # 跟随四项服务日志
+./dev.sh logs --no-follow     # 只看最近日志
+./dev.sh restart
+./dev.sh stop
+```
+
+脚本只停止带有匹配 PID、进程组、Linux 启动时间和本次服务标记的进程，
+不会依据一个复用或过期的 PID 误杀其他服务。任一启动阶段失败时，只会
+逆序回滚本次新创建的进程。
 
 ### 自托管（Docker Compose）
 
@@ -73,6 +96,30 @@ docker compose up --build
 `WMS_WORKER_TOKEN` 改成一个长随机值。API 与 worker 必须使用同一个值，
 且不得使用 `NEXT_PUBLIC_` 前缀。LLM、图片和 HeyGen 密钥只配置在服务端，
 绝不放入浏览器变量。
+
+## 文字视频（当前里程碑）
+
+「创作 → 文字视频」把整篇文稿先生成一条主音频，再依据转写词级时间轴
+驱动 Remotion 动态文字场景。语音与转写凭据都保留在服务端；MiMo 使用
+官方 `https://api.xiaomimimo.com/v1` 地址。可在设置页保存语音配置，
+或通过 `.env` 配置以下服务器变量：
+
+```text
+WMS_SPEECH_PROVIDER=mimo
+WMS_SPEECH_MODEL=mimo-v2.5-tts
+WMS_SPEECH_BASE_URL=https://api.xiaomimimo.com/v1
+WMS_SPEECH_API_KEY=...
+WMS_SPEECH_DEFAULT_VOICE=mimo_default
+```
+
+转写 provider 必须返回带 `words` 数组的 `verbose_json`，系统才能把每个
+稳定 word ID 投影到精确秒数。AI 自动分段只产生预览，用户点击“应用分段”
+后才修改项目；每个生成完成的口播段都必须人工试听并确认，全部确认后才能
+生成主音频。分镜 AI 只操作稳定的词范围，最终起止秒数由 Python 后端投影。
+
+若付费 provider 调用在响应是否送达不明确时中断，系统不会自动重复扣费
+调用，需要用户明确重试，并可能再次计费。当前里程碑提供带真实音频时间轴的
+Remotion 预览，**不包含 MP4 文件渲染，也不包含音色克隆**。
 
 ## 数字人口播（HeyGen）
 
