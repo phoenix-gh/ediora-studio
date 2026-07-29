@@ -3,7 +3,7 @@ export function sceneFrameRange(
   fps: number,
 ) {
   return {
-    inFrame: Math.round(scene.start * fps),
+    inFrame: Math.ceil(scene.start * fps),
     outFrame: Math.ceil(scene.end * fps) - 1,
   }
 }
