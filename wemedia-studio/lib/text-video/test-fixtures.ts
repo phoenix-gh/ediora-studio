@@ -49,15 +49,17 @@ export function makeMasterAudio(
 export function makeScenePlan(
   overrides: Partial<ScenePlanDocument> = {},
 ): ScenePlanDocument {
-  return {
+  const value: ScenePlanDocument & { applied_job_id: number | null } = {
     status: 'missing',
     generation_revision: 0,
     master_source_hash: '',
     scenes: [],
     job_id: null,
     error: '',
+    applied_job_id: null,
     ...overrides,
   }
+  return value
 }
 
 export function makeRenderInput(

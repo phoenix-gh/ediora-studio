@@ -64,6 +64,7 @@ describe('text-video project API', () => {
       status: 'missing',
       generation_revision: 0,
       scenes: [],
+      applied_job_id: null,
     }))
   })
 })

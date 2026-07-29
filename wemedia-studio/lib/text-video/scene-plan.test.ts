@@ -44,15 +44,19 @@ function scene(
 }
 
 function plan(scenes: ScenePlanSceneDocument[]): ScenePlanDocument {
-  return {
+  const value: ScenePlanDocument & { applied_job_id: number | null } = {
     status: 'ready',
     generation_revision: 3,
     master_source_hash: 'master-hash',
     scenes,
     job_id: null,
     error: '',
+    applied_job_id: null,
   }
+  return value
 }
+
+const timing = { masterDuration: 2.4, fps: 30 }
 
 function twoScenePlan(): ScenePlanDocument {
   return plan([
@@ -234,6 +238,8 @@ describe('splitSceneAtWord', () => {
     const original = {
       ...twoScenePlan(),
       applied_job_id: 71,
+      job_id: 7001,
+      error: '旧 AI 任务失败',
     }
     const snapshot = structuredClone(original)
     const createId = vi.fn(() => 'scene-new')
@@ -241,6 +247,7 @@ describe('splitSceneAtWord', () => {
     const next = splitSceneAtWord(
       original,
       timeline,
+      timing,
       'scene-1',
       'word-2',
       createId,
@@ -249,6 +256,7 @@ describe('splitSceneAtWord', () => {
     expect(createId).toHaveBeenCalledTimes(1)
     expect(next.generation_revision).toBe(original.generation_revision + 1)
     expect(next).toMatchObject({ applied_job_id: null })
+    expect(next).toMatchObject({ job_id: null, error: '' })
     expect(next.scenes).toEqual([
       scene('scene-1', 'word-1', 'word-1', '甲', ['甲'], 'fade-up'),
       scene('scene-new', 'word-2', 'word-2', ' 乙', [], 'fade-up'),
@@ -268,6 +276,7 @@ describe('splitSceneAtWord', () => {
     expect(() => splitSceneAtWord(
       twoScenePlan(),
       words(['甲', '乙', '丙', '丁', '戊', '己']),
+      timing,
       'scene-1',
       boundaryWordId,
       createId,
@@ -282,6 +291,7 @@ describe('splitSceneAtWord', () => {
     expect(() => splitSceneAtWord(
       twoScenePlan(),
       timeline,
+      timing,
       'missing-scene',
       'word-2',
       duplicateId,
@@ -291,6 +301,7 @@ describe('splitSceneAtWord', () => {
     expect(() => splitSceneAtWord(
       twoScenePlan(),
       timeline,
+      timing,
       'scene-1',
       'word-2',
       duplicateId,
@@ -310,6 +321,7 @@ describe('splitSceneAtWord', () => {
     expect(() => splitSceneAtWord(
       original,
       timeline,
+      timing,
       'scene-1',
       'word-2',
       createId,
@@ -318,7 +330,7 @@ describe('splitSceneAtWord', () => {
     expect(original).toEqual(snapshot)
   })
 
-  it('rejects a split whose final scene has no provably positive duration', () => {
+  it('uses master duration so trailing silence can keep the final scene positive', () => {
     const timeline: GlobalWordTiming[] = [
       {
         id: 'word-1',
@@ -336,12 +348,126 @@ describe('splitSceneAtWord', () => {
       },
     ]
 
-    expect(() => splitSceneAtWord(
+    const next = splitSceneAtWord(
       plan([scene('scene-1', 'word-1', 'word-2', '甲乙')]),
       timeline,
+      { masterDuration: 2, fps: 30 },
       'scene-1',
       'word-2',
       () => 'scene-new',
+    )
+
+    expect(next.scenes).toHaveLength(2)
+    expect(next.scenes[1]).toMatchObject({
+      id: 'scene-new',
+      fromWordId: 'word-2',
+      throughWordId: 'word-2',
+    })
+  })
+
+  it('rejects a split when any projected scene contains no frame', () => {
+    const timeline: GlobalWordTiming[] = [
+      {
+        id: 'word-1',
+        text: '甲',
+        start: 0,
+        end: 0.005,
+        speech_segment_id: 'speech-1',
+      },
+      {
+        id: 'word-2',
+        text: '乙',
+        start: 0.01,
+        end: 0.015,
+        speech_segment_id: 'speech-1',
+      },
+      {
+        id: 'word-3',
+        text: '丙',
+        start: 0.02,
+        end: 0.025,
+        speech_segment_id: 'speech-1',
+      },
+    ]
+    const original = plan([
+      scene('scene-1', 'word-1', 'word-3', '甲乙丙'),
+    ])
+    const snapshot = structuredClone(original)
+
+    expect(() => splitSceneAtWord(
+      original,
+      timeline,
+      { masterDuration: 0.03, fps: 30 },
+      'scene-1',
+      'word-2',
+      () => 'scene-new',
+    )).toThrow()
+    expect(original).toEqual(snapshot)
+
+    expect(splitSceneAtWord(
+      original,
+      timeline,
+      { masterDuration: 0.03, fps: 100 },
+      'scene-1',
+      'word-2',
+      () => 'scene-new',
+    ).scenes).toHaveLength(2)
+  })
+
+  it('rejects a consecutive split before it can create a subframe scene', () => {
+    const timeline: GlobalWordTiming[] = [
+      {
+        id: 'word-1',
+        text: '甲',
+        start: 0,
+        end: 0.02,
+        speech_segment_id: 'speech-1',
+      },
+      {
+        id: 'word-2',
+        text: '乙',
+        start: 0.04,
+        end: 0.045,
+        speech_segment_id: 'speech-1',
+      },
+      {
+        id: 'word-3',
+        text: '丙',
+        start: 0.05,
+        end: 0.06,
+        speech_segment_id: 'speech-1',
+      },
+    ]
+    const editTiming = { masterDuration: 0.08, fps: 30 }
+    const first = splitSceneAtWord(
+      plan([scene('scene-1', 'word-1', 'word-3', '甲乙丙')]),
+      timeline,
+      editTiming,
+      'scene-1',
+      'word-2',
+      () => 'scene-2',
+    )
+    const snapshot = structuredClone(first)
+
+    expect(() => splitSceneAtWord(
+      first,
+      timeline,
+      editTiming,
+      'scene-2',
+      'word-3',
+      () => 'scene-3',
+    )).toThrow()
+    expect(first).toEqual(snapshot)
+  })
+
+  it('rejects timing contexts that do not contain the authoritative words', () => {
+    expect(() => splitSceneAtWord(
+      plan([scene('scene-1', 'word-1', 'word-3', '甲乙丙')]),
+      words(['甲', '乙', '丙']),
+      { masterDuration: 1, fps: 30 },
+      'scene-1',
+      'word-2',
+      () => 'scene-2',
     )).toThrow()
   })
 })
@@ -355,10 +481,21 @@ describe('mergeScene', () => {
   ])
 
   it('merges with previous and preserves the timeline-left survivor ID and visuals', () => {
-    const original = { ...threeScenes, applied_job_id: 72 }
+    const original = {
+      ...threeScenes,
+      applied_job_id: 72,
+      job_id: 7002,
+      error: '旧 AI 任务失败',
+    }
     const snapshot = structuredClone(original)
 
-    const next = mergeScene(original, timeline, 'scene-2', 'previous')
+    const next = mergeScene(
+      original,
+      timeline,
+      timing,
+      'scene-2',
+      'previous',
+    )
 
     expect(next.scenes).toEqual([
       scene('scene-1', 'word-1', 'word-4', '甲 乙丙丁', ['甲'], 'fade-up'),
@@ -366,12 +503,19 @@ describe('mergeScene', () => {
     ])
     expect(next.generation_revision).toBe(threeScenes.generation_revision + 1)
     expect(next).toMatchObject({ applied_job_id: null })
+    expect(next).toMatchObject({ job_id: null, error: '' })
     expect(sceneWordIds(next, timeline)).toEqual(timeline.map(word => word.id))
     expect(original).toEqual(snapshot)
   })
 
   it('merges with next and preserves the timeline-left survivor ID and visuals', () => {
-    const next = mergeScene(threeScenes, timeline, 'scene-2', 'next')
+    const next = mergeScene(
+      threeScenes,
+      timeline,
+      timing,
+      'scene-2',
+      'next',
+    )
 
     expect(next.scenes).toEqual([
       threeScenes.scenes[0],
@@ -386,7 +530,13 @@ describe('mergeScene', () => {
     ['last scene with next', 'scene-3', 'next'],
     ['unknown scene', 'missing-scene', 'next'],
   ] as const)('rejects %s', (_name, sceneId, direction) => {
-    expect(() => mergeScene(threeScenes, timeline, sceneId, direction)).toThrow()
+    expect(() => mergeScene(
+      threeScenes,
+      timeline,
+      timing,
+      sceneId,
+      direction,
+    )).toThrow()
   })
 })
 
@@ -394,10 +544,22 @@ describe('moveSceneBoundary', () => {
   const timeline = words(['甲', '乙', '丙', '丁', '戊', '己'])
 
   it('moves forward by whole words and keeps a complete immutable partition', () => {
-    const original = { ...twoScenePlan(), applied_job_id: 73 }
+    const original = {
+      ...twoScenePlan(),
+      applied_job_id: 73,
+      job_id: 7003,
+      error: '旧 AI 任务失败',
+    }
     const snapshot = structuredClone(original)
 
-    const next = moveSceneBoundary(original, timeline, 'scene-1', 'forward', 1)
+    const next = moveSceneBoundary(
+      original,
+      timeline,
+      timing,
+      'scene-1',
+      'forward',
+      1,
+    )
 
     expect(next.scenes).toEqual([
       scene('scene-1', 'word-1', 'word-3', '甲乙丙', ['甲', '丙'], 'fade-up'),
@@ -405,6 +567,7 @@ describe('moveSceneBoundary', () => {
     ])
     expect(next.generation_revision).toBe(original.generation_revision + 1)
     expect(next).toMatchObject({ applied_job_id: null })
+    expect(next).toMatchObject({ job_id: null, error: '' })
     expect(sceneWordIds(next, timeline)).toEqual(timeline.map(word => word.id))
     expect(original).toEqual(snapshot)
   })
@@ -416,6 +579,7 @@ describe('moveSceneBoundary', () => {
         scene('scene-2', 'word-4', 'word-6', 'AI right', ['丁', '己'], 'scale'),
       ]),
       timeline,
+      timing,
       'scene-1',
       'backward',
       1,
@@ -435,6 +599,7 @@ describe('moveSceneBoundary', () => {
       expect(() => moveSceneBoundary(
         twoScenePlan(),
         timeline,
+        timing,
         'scene-1',
         'forward',
         wordCount,
@@ -452,6 +617,7 @@ describe('moveSceneBoundary', () => {
     expect(() => moveSceneBoundary(
       oneWordEach,
       twoWords,
+      timing,
       'scene-1',
       'backward',
       1,
@@ -459,6 +625,7 @@ describe('moveSceneBoundary', () => {
     expect(() => moveSceneBoundary(
       oneWordEach,
       twoWords,
+      timing,
       'scene-1',
       'forward',
       1,
@@ -469,6 +636,7 @@ describe('moveSceneBoundary', () => {
     expect(() => moveSceneBoundary(
       twoScenePlan(),
       timeline,
+      timing,
       'scene-1',
       'forward',
       4,
@@ -476,6 +644,7 @@ describe('moveSceneBoundary', () => {
     expect(() => moveSceneBoundary(
       twoScenePlan(),
       timeline,
+      timing,
       'scene-2',
       'forward',
       1,
@@ -483,6 +652,7 @@ describe('moveSceneBoundary', () => {
     expect(() => moveSceneBoundary(
       twoScenePlan(),
       timeline,
+      timing,
       'missing-scene',
       'forward',
       1,
@@ -490,6 +660,7 @@ describe('moveSceneBoundary', () => {
     expect(() => moveSceneBoundary(
       twoScenePlan(),
       timeline,
+      timing,
       'scene-1',
       'sideways' as 'forward',
       1,
@@ -508,6 +679,7 @@ describe('moveSceneBoundary', () => {
     expect(() => moveSceneBoundary(
       original,
       timeline,
+      timing,
       'scene-1',
       'backward',
       1,
@@ -522,6 +694,8 @@ describe('editSceneVisuals', () => {
     original.scene_plan = {
       ...original.scene_plan,
       applied_job_id: 74,
+      job_id: 7004,
+      error: '旧 AI 任务失败',
     } as ScenePlanDocument
     const snapshot = structuredClone(original)
     const update = {
@@ -542,6 +716,7 @@ describe('editSceneVisuals', () => {
     expect(next.scene_plan.generation_revision)
       .toBe(original.scene_plan.generation_revision + 1)
     expect(next.scene_plan).toMatchObject({ applied_job_id: null })
+    expect(next.scene_plan).toMatchObject({ job_id: null, error: '' })
     expect(next.scene_plan.scenes[1]).toEqual(original.scene_plan.scenes[1])
     expect(next.render_input.segments[0]).toEqual({
       ...original.render_input.segments[0],
@@ -561,6 +736,12 @@ describe('editSceneVisuals', () => {
 
   it('returns the original project for an exact visual no-op without advancing ownership', () => {
     const project = projectForVisualEdit()
+    project.scene_plan = {
+      ...project.scene_plan,
+      applied_job_id: 75,
+      job_id: 7005,
+      error: '保留原状态',
+    } as ScenePlanDocument
     const current = project.scene_plan.scenes[0]
 
     const next = editSceneVisuals(project, current.id, {
@@ -571,6 +752,11 @@ describe('editSceneVisuals', () => {
 
     expect(next).toBe(project)
     expect(next.scene_plan.generation_revision).toBe(3)
+    expect(next.scene_plan).toMatchObject({
+      applied_job_id: 75,
+      job_id: 7005,
+      error: '保留原状态',
+    })
   })
 
   it('rejects edits while AI generation owns the scene plan', () => {

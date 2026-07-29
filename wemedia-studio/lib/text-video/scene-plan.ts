@@ -5,6 +5,9 @@ import type {
   TextVideoProject,
 } from '@/lib/api/text-videos'
 import { resolveTextVideoTemplate } from '@/remotion/registry'
+import { CONTINUITY_EPSILON_SECONDS } from '@/remotion/types'
+
+import { sceneFrameRange } from './scene-range'
 
 type SceneRange = {
   scene: ScenePlanSceneDocument
@@ -14,6 +17,11 @@ type SceneRange = {
 }
 
 type SceneIdFactory = () => string
+
+export type SceneEditTiming = {
+  masterDuration: number
+  fps: number
+}
 
 function fail(message: string): never {
   throw new Error(message)
@@ -89,19 +97,34 @@ function sceneRanges(
 function assertProjectableSceneRanges(
   plan: ScenePlanDocument,
   words: GlobalWordTiming[],
+  timing: SceneEditTiming,
 ) {
-  const ranges = sceneRanges(plan, words)
-  let previousBoundary = 0
-  for (const range of ranges.slice(1)) {
-    const boundary = words[range.fromIndex].start
-    if (boundary <= previousBoundary) {
-      fail('scene start boundaries must be strictly increasing')
-    }
-    previousBoundary = boundary
+  if (
+    !Number.isFinite(timing.masterDuration)
+    || timing.masterDuration <= 0
+  ) {
+    fail('master duration must be finite and positive')
   }
-  const guaranteedTimelineEnd = words[words.length - 1].end
-  if (guaranteedTimelineEnd <= previousBoundary) {
-    fail('the final scene must have a provably positive duration')
+  const ranges = sceneRanges(plan, words)
+  for (const word of words) {
+    if (
+      word.end
+      > timing.masterDuration + CONTINUITY_EPSILON_SECONDS
+    ) {
+      fail('global word timeline must stay inside the master audio')
+    }
+  }
+
+  const boundaries = [
+    0,
+    ...ranges.slice(1).map(range => words[range.fromIndex].start),
+    timing.masterDuration,
+  ]
+  for (let index = 0; index < ranges.length; index += 1) {
+    sceneFrameRange({
+      start: boundaries[index],
+      end: boundaries[index + 1],
+    }, timing.fps)
   }
 }
 
@@ -171,14 +194,17 @@ function changedPlan(
   plan: ScenePlanDocument,
   scenes: ScenePlanSceneDocument[],
   words: GlobalWordTiming[],
+  timing: SceneEditTiming,
 ) {
   const next = {
     ...plan,
     applied_job_id: null,
     generation_revision: advancedRevision(plan),
     scenes,
+    job_id: null,
+    error: '',
   }
-  assertProjectableSceneRanges(next, words)
+  assertProjectableSceneRanges(next, words, timing)
   return next
 }
 
@@ -194,6 +220,7 @@ export function sceneWordIds(
 export function splitSceneAtWord(
   plan: ScenePlanDocument,
   words: GlobalWordTiming[],
+  timing: SceneEditTiming,
   sceneId: string,
   firstWordIdOfRightScene: string,
   createSceneId: SceneIdFactory = defaultSceneId,
@@ -240,12 +267,13 @@ export function splitSceneAtWord(
     right,
     ...plan.scenes.slice(target.sceneIndex + 1),
   ]
-  return changedPlan(plan, scenes, words)
+  return changedPlan(plan, scenes, words, timing)
 }
 
 export function mergeScene(
   plan: ScenePlanDocument,
   words: GlobalWordTiming[],
+  timing: SceneEditTiming,
   sceneId: string,
   direction: 'previous' | 'next',
 ): ScenePlanDocument {
@@ -277,12 +305,13 @@ export function mergeScene(
     merged,
     ...plan.scenes.slice(rightIndex + 1),
   ]
-  return changedPlan(plan, scenes, words)
+  return changedPlan(plan, scenes, words, timing)
 }
 
 export function moveSceneBoundary(
   plan: ScenePlanDocument,
   words: GlobalWordTiming[],
+  timing: SceneEditTiming,
   leftSceneId: string,
   direction: 'backward' | 'forward',
   wordCount: number,
@@ -329,7 +358,7 @@ export function moveSceneBoundary(
   const scenes = [...plan.scenes]
   scenes[leftIndex] = nextLeft
   scenes[leftIndex + 1] = nextRight
-  return changedPlan(plan, scenes, words)
+  return changedPlan(plan, scenes, words, timing)
 }
 
 function validateVisualUpdate(
@@ -379,6 +408,10 @@ export function editSceneVisuals(
   assertProjectableSceneRanges(
     project.scene_plan,
     project.master_audio.word_timings,
+    {
+      masterDuration: project.master_audio.duration,
+      fps: project.render_input.composition.fps,
+    },
   )
   validateVisualUpdate(update)
   const manifest = resolveTextVideoTemplate(
@@ -434,6 +467,8 @@ export function editSceneVisuals(
     applied_job_id: null,
     generation_revision: advancedRevision(project.scene_plan),
     scenes,
+    job_id: null,
+    error: '',
   }
 
   return {
