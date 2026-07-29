@@ -25,4 +25,26 @@ describe('sceneFrameRange', () => {
     expect(second.inFrame).toBe(first.outFrame + 1)
     expect(second.outFrame).toBe(Math.ceil(4.2 * 30) - 1)
   })
+
+  it('rejects a positive scene that contains no frame at the configured fps', () => {
+    expect(() => sceneFrameRange({ start: 2.4001, end: 2.41 }, 30))
+      .toThrow()
+  })
+
+  it.each([
+    [{ start: Number.NaN, end: 1 }, 30],
+    [{ start: Number.POSITIVE_INFINITY, end: 2 }, 30],
+    [{ start: -0.1, end: 1 }, 30],
+    [{ start: 1, end: 1 }, 30],
+    [{ start: 2, end: 1 }, 30],
+    [{ start: 0, end: Number.POSITIVE_INFINITY }, 30],
+    [{ start: 0, end: 1 }, 0],
+    [{ start: 0, end: 1 }, -1],
+    [{ start: 0, end: 1 }, 1.5],
+    [{ start: 0, end: 1 }, Number.NaN],
+    [{ start: 0, end: 1 }, Number.MAX_SAFE_INTEGER + 1],
+    [{ start: Number.MAX_VALUE / 2, end: Number.MAX_VALUE }, 2],
+  ])('rejects invalid or unsafe scene/fps values', (scene, fps) => {
+    expect(() => sceneFrameRange(scene, fps)).toThrow()
+  })
 })

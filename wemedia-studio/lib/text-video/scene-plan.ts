@@ -86,6 +86,25 @@ function sceneRanges(
   return ranges
 }
 
+function assertProjectableSceneRanges(
+  plan: ScenePlanDocument,
+  words: GlobalWordTiming[],
+) {
+  const ranges = sceneRanges(plan, words)
+  let previousBoundary = 0
+  for (const range of ranges.slice(1)) {
+    const boundary = words[range.fromIndex].start
+    if (boundary <= previousBoundary) {
+      fail('scene start boundaries must be strictly increasing')
+    }
+    previousBoundary = boundary
+  }
+  const guaranteedTimelineEnd = words[words.length - 1].end
+  if (guaranteedTimelineEnd <= previousBoundary) {
+    fail('the final scene must have a provably positive duration')
+  }
+}
+
 function ensureEditablePlan(plan: ScenePlanDocument) {
   if (plan.status !== 'ready') {
     fail('only a ready scene plan can be edited')
@@ -155,10 +174,11 @@ function changedPlan(
 ) {
   const next = {
     ...plan,
+    applied_job_id: null,
     generation_revision: advancedRevision(plan),
     scenes,
   }
-  sceneWordIds(next, words)
+  assertProjectableSceneRanges(next, words)
   return next
 }
 
@@ -356,7 +376,10 @@ export function editSceneVisuals(
   >,
 ): TextVideoProject {
   ensureEditablePlan(project.scene_plan)
-  sceneWordIds(project.scene_plan, project.master_audio.word_timings)
+  assertProjectableSceneRanges(
+    project.scene_plan,
+    project.master_audio.word_timings,
+  )
   validateVisualUpdate(update)
   const manifest = resolveTextVideoTemplate(
     project.render_input.templateId,
@@ -406,14 +429,16 @@ export function editSceneVisuals(
     highlight: [...highlights],
     animation: update.animation,
   }
+  const nextScenePlan = {
+    ...project.scene_plan,
+    applied_job_id: null,
+    generation_revision: advancedRevision(project.scene_plan),
+    scenes,
+  }
 
   return {
     ...project,
-    scene_plan: {
-      ...project.scene_plan,
-      generation_revision: advancedRevision(project.scene_plan),
-      scenes,
-    },
+    scene_plan: nextScenePlan,
     render_input: {
       ...project.render_input,
       segments,
