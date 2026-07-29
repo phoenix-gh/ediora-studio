@@ -21,6 +21,10 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectVa
 import type { TextVideoProject } from '@/lib/api/text-videos'
 import { TEXT_VIDEO_FIXTURE, type TextVideoFixtureProject } from '@/lib/text-video/fixture'
 import {
+  canEnterVideoStage,
+  updateProjectVoiceSettings,
+} from '@/lib/text-video/project-merge'
+import {
   collapseToSingleSegment,
   editSpeechSegment,
   mergeSpeechSegment,
@@ -32,6 +36,7 @@ import { cn } from '@/lib/utils'
 import { AudioStage } from './AudioStage'
 import { ScriptStage } from './ScriptStage'
 import type { TextVideoSaveState } from './useTextVideoAutosave'
+import type { TextVideoActionState } from './useTextVideoProjectActions'
 import { VideoStage } from './VideoStage'
 
 type Stage = 'script' | 'audio' | 'video'
@@ -54,12 +59,28 @@ export function TextVideoWorkbench({
   saveState = 'saved',
   onProjectChange,
   onSave,
+  actionStates,
+  onGeneratePendingSpeech,
+  onGenerateSpeechSegment,
+  onConfirmSpeechSegment,
+  onBuildMasterAudio,
+  onRealignMasterAudio,
+  onPrepareSpeechSplit,
 }: {
   initialProject?: TextVideoFixtureProject
   projectDocument?: TextVideoProject
   saveState?: TextVideoSaveState
   onProjectChange?: (project: TextVideoProject) => void
   onSave?: () => void
+  actionStates?: Record<string, TextVideoActionState>
+  onGeneratePendingSpeech?: () => void
+  onGenerateSpeechSegment?: (segmentId: string) => void
+  onConfirmSpeechSegment?: (
+    segment: TextVideoProject['paragraphs'][number],
+  ) => void
+  onBuildMasterAudio?: () => void
+  onRealignMasterAudio?: (jobId: number) => void
+  onPrepareSpeechSplit?: () => Promise<TextVideoProject>
 }) {
   const [localStage, setLocalStage] = useState<Stage>(projectDocument?.stage ?? 'script')
   const [selectedScene, setSelectedScene] = useState(0)
@@ -92,26 +113,18 @@ export function TextVideoWorkbench({
     },
     [fixtureRatio, initialProject, projectDocument],
   )
-  const selectedParagraph = Math.max(
-    0,
-    scriptProject.paragraphs.findIndex(
-      paragraph => paragraph.id === activeSpeechSegmentId,
-    ),
+  const speakableSegments = scriptProject.paragraphs.filter(
+    item => item.text.trim(),
   )
-  const confirmed = scriptProject.paragraphs.filter(
+  const confirmed = speakableSegments.filter(
     item => item.status === 'confirmed',
   ).length
   const allSpeechConfirmed = (
-    scriptProject.paragraphs.length > 0
-    && confirmed === scriptProject.paragraphs.length
+    speakableSegments.length > 0
+    && confirmed === speakableSegments.length
   )
   const audioReady = projectDocument
-    ? Boolean(
-        allSpeechConfirmed
-        && scriptProject.master_audio.status === 'ready'
-        && scriptProject.master_audio.timeline_status === 'ready'
-        && scriptProject.render_input.audio,
-      )
+    ? canEnterVideoStage(scriptProject)
     : allSpeechConfirmed
 
   function changeDocument(update: (current: TextVideoProject) => TextVideoProject) {
@@ -205,6 +218,12 @@ export function TextVideoWorkbench({
     }
   }
 
+  function changeVoiceSettings(
+    update: Parameters<typeof updateProjectVoiceSettings>[1],
+  ) {
+    changeDocument(current => updateProjectVoiceSettings(current, update))
+  }
+
   function chooseScene(index: number) {
     setSelectedScene(index)
     setPreviewAll(false)
@@ -282,7 +301,7 @@ export function TextVideoWorkbench({
         {!audioReady ? (
           <div className="border-b border-amber-500/20 bg-amber-500/8 px-5 py-1.5 text-center text-xs text-amber-700">
             {!allSpeechConfirmed
-              ? <><span>还需确认 {scriptProject.paragraphs.length - confirmed} 段配音</span>，确认后可生成主音频</>
+              ? <><span>还需确认 {speakableSegments.length - confirmed} 段配音</span>，确认后可生成主音频</>
               : <span>配音已确认，生成主音频和时间轴后可进入视频合成</span>}
           </div>
         ) : null}
@@ -297,19 +316,25 @@ export function TextVideoWorkbench({
             onMergeSpeechSegment={projectDocument ? mergeSpeech : undefined}
             onCollapseToSingleSegment={projectDocument ? collapseSpeech : undefined}
             onReorderSpeechSegment={projectDocument ? reorderSpeech : undefined}
+            onPrepareSpeechSplit={onPrepareSpeechSplit}
             onApplySpeechSplit={projectDocument ? next => {
               commitSpeechProject(next, next.paragraphs[0]?.id)
             } : undefined}
           />
         ) : stage === 'audio' ? (
           <AudioStage
-            project={legacyProject}
-            selectedParagraph={selectedParagraph}
-            onSelectParagraph={index => {
-              setSelectedSpeechSegmentId(
-                scriptProject.paragraphs[index]?.id ?? '',
-              )
-            }}
+            project={scriptProject}
+            selectedSegmentId={activeSpeechSegmentId}
+            onSelectSegment={setSelectedSpeechSegmentId}
+            onVoiceSettingsChange={
+              projectDocument ? changeVoiceSettings : undefined
+            }
+            onGeneratePending={onGeneratePendingSpeech}
+            onGenerateSegment={onGenerateSpeechSegment}
+            onConfirmSegment={onConfirmSpeechSegment}
+            onBuildMasterAudio={onBuildMasterAudio}
+            onRealignMasterAudio={onRealignMasterAudio}
+            actionStates={actionStates}
           />
         ) : (
           <VideoStage

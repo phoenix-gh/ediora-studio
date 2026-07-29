@@ -114,6 +114,7 @@ export type TextVideoProjectUpdate = {
   script?: string
   voice_settings?: TextVideoVoiceSettings
   paragraphs?: Array<Pick<TextVideoParagraph, 'id' | 'text'>>
+  speech_split_mode?: SpeechSplitMode
   composition?: TextVideoRenderInput['composition']
   template?: {
     templateId: string

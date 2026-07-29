@@ -190,6 +190,45 @@ def test_text_video_project_crud_and_revision_conflict(client):
     assert client.get(f"/api/text-videos/{created['id']}").status_code == 404
 
 
+def test_patch_persists_explicit_ai_speech_split_mode(client):
+    project = client.post("/api/text-videos", json={}).json()
+
+    response = client.patch(
+        f"/api/text-videos/{project['id']}",
+        json={
+            "revision": project["revision"],
+            "script": "甲。乙。",
+            "paragraphs": [
+                {"id": "a", "text": "甲。"},
+                {"id": "b", "text": "乙。"},
+            ],
+            "speech_split_mode": "auto",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["speech_split_mode"] == "auto"
+
+
+def test_patch_normalizes_single_segment_ai_mode_to_single(client):
+    project = client.post("/api/text-videos", json={}).json()
+
+    response = client.patch(
+        f"/api/text-videos/{project['id']}",
+        json={
+            "revision": project["revision"],
+            "script": "完整口播。",
+            "paragraphs": [
+                {"id": "only", "text": "完整口播。"},
+            ],
+            "speech_split_mode": "auto",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["speech_split_mode"] == "single"
+
+
 def test_video_stage_requires_all_paragraphs_confirmed(client):
     project = client.post("/api/text-videos", json={}).json()
     response = client.patch(

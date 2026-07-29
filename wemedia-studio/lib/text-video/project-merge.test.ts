@@ -1,0 +1,397 @@
+import { describe, expect, it } from 'vitest'
+
+import {
+  makeMasterAudio,
+  makeSpeechSegment,
+  makeTextVideoProject,
+} from './test-fixtures'
+import {
+  canEnterVideoStage,
+  mergeWorkerProject,
+  updateProjectVoiceSettings,
+} from './project-merge'
+import {
+  editSpeechSegment,
+  reorderSpeechSegment,
+} from './speech-segments'
+
+
+describe('mergeWorkerProject', () => {
+  it('merges completed speech without replacing an unrelated local edit', () => {
+    const baseline = makeTextVideoProject({
+      script: '甲。乙。',
+      paragraphs: [
+        makeSpeechSegment('a', '甲。'),
+        makeSpeechSegment('b', '乙。'),
+      ],
+      master_audio: makeMasterAudio({
+        status: 'ready',
+        timeline_status: 'ready',
+        audio_url: '/api/uploads/old-master.mp3',
+      }),
+    })
+    const local = editSpeechSegment(baseline, 'b', '本地乙。')
+    const server = {
+      ...baseline,
+      paragraphs: baseline.paragraphs.map(segment => (
+        segment.id === 'a'
+          ? {
+              ...segment,
+              status: 'ready' as const,
+              audio_url: '/api/uploads/a.mp3',
+              duration: 1.2,
+              source_hash: 'a'.repeat(64),
+              job_id: null,
+            }
+          : segment
+      )),
+    }
+
+    const merged = mergeWorkerProject(local, server, {
+      editableBaseline: baseline,
+      localDirty: true,
+    })
+
+    expect(merged.paragraphs.find(item => item.id === 'a')).toMatchObject({
+      status: 'ready',
+      audio_url: '/api/uploads/a.mp3',
+    })
+    expect(merged.paragraphs.find(item => item.id === 'b')).toMatchObject({
+      text: '本地乙。',
+      status: 'draft',
+    })
+    expect(merged.master_audio.status).toBe('stale')
+    expect(merged.render_input.audio).toBe('')
+  })
+
+  it('never attaches old worker audio to a locally edited same-ID segment', () => {
+    const baseline = makeTextVideoProject({
+      script: '甲。',
+      paragraphs: [makeSpeechSegment('a', '甲。')],
+    })
+    const local = editSpeechSegment(baseline, 'a', '甲改。')
+    const server = {
+      ...baseline,
+      paragraphs: [makeSpeechSegment('a', '甲。', {
+        status: 'ready',
+        audio_url: '/api/uploads/a.mp3',
+        source_hash: 'a'.repeat(64),
+      })],
+    }
+
+    const merged = mergeWorkerProject(local, server, {
+      editableBaseline: baseline,
+      localDirty: true,
+    })
+
+    expect(merged.paragraphs[0]).toMatchObject({
+      text: '甲改。',
+      status: 'draft',
+      audio_url: '',
+      generation_revision: 1,
+    })
+  })
+
+  it('does not revive old audio after narration is edited and reverted', () => {
+    const baseline = makeTextVideoProject({
+      script: '甲。',
+      paragraphs: [makeSpeechSegment('a', '甲。', {
+        status: 'confirmed',
+        audio_url: '/api/uploads/old-a.mp3',
+        source_hash: 'a'.repeat(64),
+        generation_revision: 3,
+      })],
+      master_audio: makeMasterAudio({
+        status: 'ready',
+        timeline_status: 'ready',
+        audio_url: '/api/uploads/old-master.mp3',
+      }),
+      render_input: {
+        ...makeTextVideoProject().render_input,
+        audio: '/api/uploads/old-master.mp3',
+      },
+    })
+    const edited = editSpeechSegment(baseline, 'a', '甲改。')
+    const reverted = editSpeechSegment(edited, 'a', '甲。')
+
+    const merged = mergeWorkerProject(reverted, baseline, {
+      editableBaseline: baseline,
+      localDirty: true,
+    })
+
+    expect(merged.paragraphs[0]).toMatchObject({
+      status: 'draft',
+      audio_url: '',
+      generation_revision: 5,
+    })
+    expect(merged.master_audio.status).toBe('stale')
+    expect(merged.render_input.audio).toBe('')
+  })
+
+  it('does not revive old audio after voice settings are changed and reverted', () => {
+    const baseline = makeTextVideoProject({
+      script: '甲。',
+      paragraphs: [makeSpeechSegment('a', '甲。', {
+        status: 'confirmed',
+        audio_url: '/api/uploads/old-a.mp3',
+        source_hash: 'a'.repeat(64),
+        generation_revision: 3,
+      })],
+      master_audio: makeMasterAudio({
+        status: 'ready',
+        timeline_status: 'ready',
+        audio_url: '/api/uploads/old-master.mp3',
+      }),
+      render_input: {
+        ...makeTextVideoProject().render_input,
+        audio: '/api/uploads/old-master.mp3',
+      },
+    })
+    const changed = updateProjectVoiceSettings(baseline, { speed: 1.2 })
+    const reverted = updateProjectVoiceSettings(changed, { speed: 1 })
+
+    const merged = mergeWorkerProject(reverted, baseline, {
+      editableBaseline: baseline,
+      localDirty: true,
+    })
+
+    expect(merged.voice_settings.speed).toBe(1)
+    expect(merged.paragraphs[0]).toMatchObject({
+      status: 'draft',
+      audio_url: '',
+      generation_revision: 5,
+    })
+    expect(merged.master_audio.status).toBe('stale')
+    expect(merged.render_input.audio).toBe('')
+  })
+
+  it('preserves an explicit AI split mode when exact slices stay unchanged', () => {
+    const baseline = makeTextVideoProject({
+      script: '甲。乙。',
+      paragraphs: [
+        makeSpeechSegment('a', '甲。'),
+        makeSpeechSegment('b', '乙。'),
+      ],
+      speech_split_mode: 'manual',
+    })
+    const local = {
+      ...baseline,
+      speech_split_mode: 'auto' as const,
+    }
+
+    const merged = mergeWorkerProject(local, baseline, {
+      editableBaseline: baseline,
+      localDirty: true,
+    })
+
+    expect(merged.speech_split_mode).toBe('auto')
+  })
+
+  it('merges visual scenes without replacing server job metadata or duration', () => {
+    const baseline = makeTextVideoProject({
+      duration: 4,
+      scene_plan: {
+        ...makeTextVideoProject().scene_plan,
+        status: 'ready',
+        generation_revision: 1,
+        scenes: [{
+          id: 'scene-1',
+          fromWordId: 'word-1',
+          throughWordId: 'word-2',
+          displayText: '原屏显',
+          highlight: [],
+          animation: 'fade-up',
+        }],
+      },
+    })
+    const local = {
+      ...baseline,
+      duration: 99,
+      scene_plan: {
+        ...baseline.scene_plan,
+        scenes: [{
+          ...baseline.scene_plan.scenes[0],
+          displayText: '本地屏显',
+        }],
+      },
+      render_input: {
+        ...baseline.render_input,
+        segments: [{
+          ...baseline.render_input.segments[0],
+          text: '本地屏显',
+        }],
+      },
+    }
+    const server = {
+      ...baseline,
+      duration: 4.5,
+      scene_plan: {
+        ...baseline.scene_plan,
+        status: 'generating' as const,
+        generation_revision: 2,
+        job_id: 88,
+      },
+    }
+
+    const merged = mergeWorkerProject(local, server, {
+      editableBaseline: baseline,
+      localDirty: true,
+    })
+
+    expect(merged.scene_plan).toMatchObject({
+      status: 'generating',
+      generation_revision: 2,
+      job_id: 88,
+      scenes: [expect.objectContaining({ displayText: '本地屏显' })],
+    })
+    expect(merged.duration).toBe(4.5)
+  })
+
+  it('keeps newer local worker state when an older action snapshot arrives', () => {
+    const baseline = makeTextVideoProject({
+      script: '甲。乙。',
+      paragraphs: [
+        makeSpeechSegment('a', '甲。'),
+        makeSpeechSegment('b', '乙。'),
+      ],
+    })
+    const local = {
+      ...baseline,
+      paragraphs: [
+        makeSpeechSegment('a', '甲。', {
+          status: 'generating',
+          source_hash: 'a'.repeat(64),
+          job_id: 11,
+        }),
+        makeSpeechSegment('b', '乙。', {
+          status: 'generating',
+          source_hash: 'b'.repeat(64),
+          job_id: 22,
+        }),
+      ],
+    }
+    const olderServer = {
+      ...baseline,
+      paragraphs: [
+        local.paragraphs[0],
+        baseline.paragraphs[1],
+      ],
+    }
+
+    const merged = mergeWorkerProject(local, olderServer, {
+      editableBaseline: baseline,
+      localDirty: false,
+    })
+
+    expect(merged.paragraphs).toMatchObject([
+      { id: 'a', status: 'generating', job_id: 11 },
+      { id: 'b', status: 'generating', job_id: 22 },
+    ])
+  })
+})
+
+describe('project speech settings and video gate', () => {
+  it('invalidates speech and downstream state when a voice setting changes', () => {
+    const project = makeTextVideoProject({
+      script: '甲。',
+      paragraphs: [makeSpeechSegment('a', '甲。', {
+        status: 'confirmed',
+        audio_url: '/api/uploads/a.mp3',
+        generation_revision: 3,
+      })],
+      master_audio: makeMasterAudio({
+        status: 'ready',
+        timeline_status: 'ready',
+        audio_url: '/api/uploads/master.mp3',
+      }),
+      render_input: {
+        ...makeTextVideoProject().render_input,
+        audio: '/api/uploads/master.mp3',
+      },
+    })
+
+    const next = updateProjectVoiceSettings(project, { speed: 1.2 })
+
+    expect(next.voice_settings.speed).toBe(1.2)
+    expect(next.paragraphs[0]).toMatchObject({
+      status: 'draft',
+      audio_url: '',
+      generation_revision: 4,
+    })
+    expect(next.master_audio.status).toBe('stale')
+    expect(next.master_audio.timeline_status).toBe('stale')
+    expect(next.render_input.audio).toBe('')
+  })
+
+  it('requires non-empty confirmed speech and both authoritative audio states', () => {
+    const ready = makeTextVideoProject({
+      script: '甲。   ',
+      paragraphs: [
+        makeSpeechSegment('a', '甲。', { status: 'confirmed' }),
+        makeSpeechSegment('blank', '   '),
+      ],
+      master_audio: makeMasterAudio({
+        status: 'ready',
+        timeline_status: 'ready',
+        audio_url: '/api/uploads/master.mp3',
+      }),
+      render_input: {
+        ...makeTextVideoProject().render_input,
+        audio: '/api/uploads/master.mp3',
+      },
+    })
+
+    expect(canEnterVideoStage(ready)).toBe(true)
+    expect(canEnterVideoStage({
+      ...ready,
+      paragraphs: [makeSpeechSegment('blank', '   ')],
+      script: '   ',
+    })).toBe(false)
+    expect(canEnterVideoStage({
+      ...ready,
+      master_audio: {
+        ...ready.master_audio,
+        timeline_status: 'failed',
+      },
+    })).toBe(false)
+  })
+})
+
+describe('mergeWorkerProject ordering', () => {
+  it('keeps a local reorder and reusable segment speech while master stays stale', () => {
+    const baseline = makeTextVideoProject({
+      script: '甲。乙。',
+      paragraphs: [
+        makeSpeechSegment('a', '甲。'),
+        makeSpeechSegment('b', '乙。'),
+      ],
+      master_audio: makeMasterAudio({
+        status: 'ready',
+        timeline_status: 'ready',
+      }),
+    })
+    const local = reorderSpeechSegment(baseline, 'b', 0)
+    const server = {
+      ...baseline,
+      paragraphs: baseline.paragraphs.map(segment => ({
+        ...segment,
+        status: 'ready' as const,
+        audio_url: `/api/uploads/${segment.id}.mp3`,
+        source_hash: segment.id.repeat(64),
+      })),
+    }
+
+    const merged = mergeWorkerProject(local, server, {
+      editableBaseline: baseline,
+      localDirty: true,
+    })
+
+    expect(merged.paragraphs.map(item => item.id)).toEqual(['b', 'a'])
+    expect(merged.paragraphs.map(item => item.audio_url)).toEqual([
+      '/api/uploads/b.mp3',
+      '/api/uploads/a.mp3',
+    ])
+    expect(merged.script).toBe('乙。甲。')
+    expect(merged.master_audio.status).toBe('stale')
+  })
+})

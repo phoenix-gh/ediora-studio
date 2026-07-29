@@ -96,4 +96,41 @@ describe('SpeechSplitPreviewDialog', () => {
       speech_split_mode: 'auto',
     }))
   })
+
+  it('shows the exact latest failed step error', async () => {
+    const project = makeTextVideoProject({
+      script: '甲。乙。',
+      paragraphs: [makeSpeechSegment('segment-1', '甲。乙。')],
+    })
+
+    render(
+      <SpeechSplitPreviewDialog
+        open
+        project={project}
+        direction=""
+        createPreview={vi.fn().mockResolvedValue({
+          jobs: [{ id: 8, flow: 'text_video_split_preview', target_id: project.id }],
+          project,
+        })}
+        getJob={vi.fn().mockResolvedValue({
+          id: 8,
+          status: 'failed',
+          steps: [{
+            id: 2,
+            key: 'propose_boundaries',
+            attempt: 2,
+            status: 'failed',
+            output: {},
+            error: '模型返回了无效边界',
+            retryable: false,
+          }],
+        })}
+        onOpenChange={vi.fn()}
+        onApply={vi.fn()}
+      />,
+    )
+
+    expect(await screen.findByRole('alert'))
+      .toHaveTextContent('模型返回了无效边界')
+  })
 })

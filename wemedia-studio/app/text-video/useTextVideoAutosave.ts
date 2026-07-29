@@ -10,10 +10,39 @@ import {
 
 export type TextVideoSaveState = 'saved' | 'dirty' | 'saving' | 'error' | 'conflict'
 
+export type TextVideoFlushResult = {
+  project: TextVideoProject
+  dirtyVersion: number
+}
+
 type SaveFunction = (
   projectId: number,
   update: TextVideoProjectUpdate,
 ) => Promise<TextVideoProject>
+
+function editableProjectUpdate(
+  project: TextVideoProject,
+  revision: number,
+): TextVideoProjectUpdate {
+  return {
+    revision,
+    title: project.title,
+    stage: project.stage,
+    script: project.script,
+    voice_settings: project.voice_settings,
+    paragraphs: project.paragraphs.map(({ id, text }) => ({ id, text })),
+    speech_split_mode: project.speech_split_mode,
+    composition: project.render_input.composition,
+    template: {
+      templateId: project.render_input.templateId,
+      templateVersion: project.render_input.templateVersion,
+      templateProps: project.render_input.templateProps,
+    },
+    scene_plan: {
+      scenes: project.scene_plan.scenes,
+    },
+  }
+}
 
 export function useTextVideoAutosave({
   project,
@@ -33,12 +62,16 @@ export function useTextVideoAutosave({
   const revisionRef = useRef(project.revision)
   const dirtyVersionRef = useRef(0)
   const savedVersionRef = useRef(0)
-  const savingRef = useRef(false)
+  const latestSavedProjectRef = useRef(project)
+  const inFlightRef = useRef<Promise<TextVideoFlushResult> | null>(null)
 
   useEffect(() => {
     projectRef.current = project
-    if (saveState === 'saved') revisionRef.current = project.revision
-  }, [project, saveState])
+    if (dirtyVersionRef.current === savedVersionRef.current) {
+      revisionRef.current = project.revision
+      latestSavedProjectRef.current = project
+    }
+  }, [project])
 
   const markDirty = useCallback(() => {
     dirtyVersionRef.current += 1
@@ -46,52 +79,67 @@ export function useTextVideoAutosave({
     setSaveState('dirty')
   }, [])
 
-  const saveNow = useCallback(async () => {
-    if (savingRef.current || dirtyVersionRef.current === savedVersionRef.current) return
-    const snapshot = projectRef.current
-    const savingVersion = dirtyVersionRef.current
-    savingRef.current = true
-    setSaveState('saving')
-    try {
-      const updated = await save(snapshot.id, {
-        revision: revisionRef.current,
-        title: snapshot.title,
-        status: snapshot.status,
-        stage: snapshot.stage,
-        script: snapshot.script,
-        voice_settings: snapshot.voice_settings,
-        paragraphs: snapshot.paragraphs,
-        render_input: snapshot.render_input,
-        cover_asset_url: snapshot.cover_asset_url,
-        output_asset_url: snapshot.output_asset_url,
-      })
-      revisionRef.current = updated.revision
-      savedVersionRef.current = savingVersion
-      onRevision(updated.revision)
-      setConflictRevision(null)
-      setSaveState(
-        dirtyVersionRef.current === savingVersion ? 'saved' : 'dirty',
-      )
-    } catch (error) {
-      if (error instanceof TextVideoApiError && error.status === 409) {
-        const detail = error.detail
-        const revision = typeof detail === 'object' && detail && 'revision' in detail
-          ? Number(detail.revision)
-          : null
-        setConflictRevision(Number.isSafeInteger(revision) ? revision : null)
-        setSaveState('conflict')
-      } else {
-        setSaveState('error')
+  const runSaveLoop = useCallback(async (): Promise<TextVideoFlushResult> => {
+    let savedProject = latestSavedProjectRef.current
+
+    while (savedVersionRef.current < dirtyVersionRef.current) {
+      const snapshot = projectRef.current
+      const savingVersion = dirtyVersionRef.current
+      setSaveState('saving')
+
+      try {
+        const updated = await save(
+          snapshot.id,
+          editableProjectUpdate(snapshot, revisionRef.current),
+        )
+        revisionRef.current = updated.revision
+        savedVersionRef.current = savingVersion
+        latestSavedProjectRef.current = updated
+        savedProject = updated
+        onRevision(updated.revision)
+        setConflictRevision(null)
+      } catch (error) {
+        if (error instanceof TextVideoApiError && error.status === 409) {
+          const detail = error.detail
+          const revision = typeof detail === 'object' && detail && 'revision' in detail
+            ? Number(detail.revision)
+            : null
+          setConflictRevision(Number.isSafeInteger(revision) ? revision : null)
+          setSaveState('conflict')
+        } else {
+          setSaveState('error')
+        }
+        throw error
       }
-    } finally {
-      savingRef.current = false
+    }
+
+    setSaveState('saved')
+    return {
+      project: savedProject,
+      dirtyVersion: savedVersionRef.current,
     }
   }, [onRevision, save])
 
+  const flush = useCallback((): Promise<TextVideoFlushResult> => {
+    if (inFlightRef.current) return inFlightRef.current
+    if (dirtyVersionRef.current === savedVersionRef.current) {
+      return Promise.resolve({
+        project: latestSavedProjectRef.current,
+        dirtyVersion: savedVersionRef.current,
+      })
+    }
+
+    const operation = runSaveLoop().finally(() => {
+      if (inFlightRef.current === operation) inFlightRef.current = null
+    })
+    inFlightRef.current = operation
+    return operation
+  }, [runSaveLoop])
+
   const retry = useCallback(async () => {
     setSaveState('dirty')
-    await saveNow()
-  }, [saveNow])
+    return flush()
+  }, [flush])
 
   const acceptConflictRevision = useCallback((revision: number) => {
     revisionRef.current = revision
@@ -102,26 +150,29 @@ export function useTextVideoAutosave({
   useEffect(() => {
     if (dirtyVersion === savedVersionRef.current || saveState !== 'dirty') return
     const timer = window.setTimeout(() => {
-      void saveNow()
+      void flush().catch(() => undefined)
     }, debounceMs)
     return () => window.clearTimeout(timer)
-  }, [debounceMs, dirtyVersion, project, saveNow, saveState])
+  }, [debounceMs, dirtyVersion, flush, saveState])
 
   useEffect(() => {
     const handleSaveShortcut = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
         event.preventDefault()
-        void saveNow()
+        void flush().catch(() => undefined)
       }
     }
     window.addEventListener('keydown', handleSaveShortcut)
     return () => window.removeEventListener('keydown', handleSaveShortcut)
-  }, [saveNow])
+  }, [flush])
 
   return {
     saveState,
     markDirty,
-    saveNow,
+    flush,
+    saveNow: flush,
+    isDirty: () => dirtyVersionRef.current !== savedVersionRef.current,
+    getDirtyVersion: () => dirtyVersionRef.current,
     retry,
     conflictRevision,
     acceptConflictRevision,

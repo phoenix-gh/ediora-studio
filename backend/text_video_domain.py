@@ -303,15 +303,17 @@ def merge_editable_project(project, update: dict, speech_model: str) -> None:
     project.script = next_script
     project.paragraphs = next_segments
     project.voice_settings = next_voice
-    project.speech_split_mode = (
-        "single"
-        if len(next_segments) <= 1
-        else (
+    requested_split_mode = update.get("speech_split_mode")
+    if len(next_segments) <= 1:
+        project.speech_split_mode = "single"
+    elif requested_split_mode in {"auto", "manual"}:
+        project.speech_split_mode = requested_split_mode
+    else:
+        project.speech_split_mode = (
             project.speech_split_mode
             if project.speech_split_mode == "auto" and not structure_changed
             else "manual"
         )
-    )
 
     if invalidated or voice_changed:
         _mark_downstream_stale(project)

@@ -4,10 +4,22 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
+import type { TextVideoProject } from '@/lib/api/text-videos'
 import { makeSpeechSegment, makeTextVideoProject } from '@/lib/text-video/test-fixtures'
 
 import { ScriptStage } from './ScriptStage'
 
+vi.mock('./SpeechSplitPreviewDialog', () => ({
+  SpeechSplitPreviewDialog: ({
+    open,
+    project,
+  }: {
+    open: boolean
+    project: TextVideoProject
+  }) => open ? (
+    <div role="dialog">预览修订 {project.revision}</div>
+  ) : null,
+}))
 
 describe('ScriptStage', () => {
   it('uses the exact textarea selection for a stable-ID split callback', async () => {
@@ -128,5 +140,37 @@ describe('ScriptStage', () => {
     expect(onRequestAiSplit).not.toHaveBeenCalled()
     await user.click(screen.getByRole('button', { name: 'AI 自动分段' }))
     expect(onRequestAiSplit).toHaveBeenCalledOnce()
+  })
+
+  it('flushes edits and freezes the saved project before opening AI split preview', async () => {
+    const user = userEvent.setup()
+    const project = makeTextVideoProject({
+      script: '甲。乙。',
+      paragraphs: [makeSpeechSegment('segment-1', '甲。乙。')],
+    })
+    let resolveSaved!: (savedProject: TextVideoProject) => void
+    const onPrepareSpeechSplit = vi.fn().mockReturnValue(
+      new Promise<typeof project>(resolve => {
+        resolveSaved = resolve
+      }),
+    )
+    render(
+      <ScriptStage
+        project={project}
+        selectedSpeechSegmentId="segment-1"
+        onApplySpeechSplit={vi.fn()}
+        onPrepareSpeechSplit={onPrepareSpeechSplit}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'AI 自动分段' }))
+    expect(onPrepareSpeechSplit).toHaveBeenCalledOnce()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '正在保存稿件…' }))
+      .toBeDisabled()
+
+    resolveSaved({ ...project, revision: 3 })
+
+    expect(await screen.findByRole('dialog')).toHaveTextContent('预览修订 3')
   })
 })

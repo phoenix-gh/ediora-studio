@@ -238,6 +238,7 @@ class ProjectUpdate(BaseModel):
     script: str | None = None
     voice_settings: VoiceSettingsDocument | None = None
     paragraphs: list[SpeechSegmentEdit] | None = None
+    speech_split_mode: Literal["single", "auto", "manual"] | None = None
     composition: CompositionDocument | None = None
     template: TemplateSelectionDocument | None = None
     scene_plan: ScenePlanEdit | None = None

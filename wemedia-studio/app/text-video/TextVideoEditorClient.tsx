@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useState } from 'react'
+import { toast } from 'sonner'
 
 import {
   Dialog,
@@ -12,12 +13,17 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import {
+  buildTextVideoMasterAudio,
+  confirmTextVideoSpeechSegment,
+  generatePendingTextVideoSpeech,
+  generateTextVideoSpeechSegment,
   updateTextVideoProject,
   type TextVideoProject,
 } from '@/lib/api/text-videos'
 
 import { TextVideoWorkbench } from './TextVideoWorkbench'
 import { useTextVideoAutosave } from './useTextVideoAutosave'
+import { useTextVideoProjectActions } from './useTextVideoProjectActions'
 
 export function TextVideoEditorClient({
   initialProject,
@@ -33,6 +39,11 @@ export function TextVideoEditorClient({
     save: updateTextVideoProject,
     onRevision,
   })
+  const actions = useTextVideoProjectActions({
+    project,
+    autosave,
+    setProject,
+  })
 
   function changeProject(nextProject: TextVideoProject) {
     setProject(nextProject)
@@ -44,8 +55,72 @@ export function TextVideoEditorClient({
     setProject(current => ({ ...current, revision: autosave.conflictRevision! }))
     autosave.acceptConflictRevision(autosave.conflictRevision)
     window.setTimeout(() => {
-      void autosave.saveNow()
+      void autosave.flush().catch(reportError)
     }, 0)
+  }
+
+  function reportError(error: unknown) {
+    toast.error(error instanceof Error ? error.message : '操作失败')
+  }
+
+  function run(operation: Promise<void>) {
+    void operation.catch(reportError)
+  }
+
+  function generatePendingSpeech() {
+    run(actions.runProjectAction(
+      'speech:pending',
+      async saved => generatePendingTextVideoSpeech(
+        saved.id,
+        saved.revision,
+      ),
+    ))
+  }
+
+  function generateSpeechSegment(segmentId: string) {
+    run(actions.runProjectAction(
+      `speech:${segmentId}`,
+      async saved => generateTextVideoSpeechSegment(
+        saved.id,
+        segmentId,
+        saved.revision,
+      ),
+    ))
+  }
+
+  function confirmSpeechSegment(segmentId: string) {
+    run(actions.runProjectAction(
+      `speech:${segmentId}`,
+      async saved => {
+        const segment = saved.paragraphs.find(item => item.id === segmentId)
+        if (!segment) throw new Error('配音段落不存在')
+        const confirmed = await confirmTextVideoSpeechSegment(
+          saved.id,
+          segment.id,
+          {
+            revision: saved.revision,
+            generation_revision: segment.generation_revision,
+            source_hash: segment.source_hash,
+          },
+        )
+        return { jobs: [], project: confirmed }
+      },
+    ))
+  }
+
+  function buildMasterAudio() {
+    run(actions.runProjectAction(
+      'master',
+      async saved => buildTextVideoMasterAudio(saved.id, saved.revision),
+    ))
+  }
+
+  function realignMasterAudio(jobId: number) {
+    run(actions.retryProjectJob(
+      'master',
+      jobId,
+      'align_master_timeline',
+    ))
   }
 
   return (
@@ -54,7 +129,21 @@ export function TextVideoEditorClient({
         projectDocument={project}
         saveState={autosave.saveState}
         onProjectChange={changeProject}
-        onSave={() => void (autosave.saveState === 'error' ? autosave.retry() : autosave.saveNow())}
+        onSave={() => {
+          const operation = autosave.saveState === 'error'
+            ? autosave.retry()
+            : autosave.flush()
+          void operation.catch(reportError)
+        }}
+        actionStates={actions.actionStates}
+        onGeneratePendingSpeech={generatePendingSpeech}
+        onGenerateSpeechSegment={generateSpeechSegment}
+        onConfirmSpeechSegment={segment => confirmSpeechSegment(segment.id)}
+        onBuildMasterAudio={buildMasterAudio}
+        onRealignMasterAudio={realignMasterAudio}
+        onPrepareSpeechSplit={async () => (
+          await autosave.flush()
+        ).project}
       />
       <Dialog open={autosave.saveState === 'conflict'}>
         <DialogContent showCloseButton={false}>

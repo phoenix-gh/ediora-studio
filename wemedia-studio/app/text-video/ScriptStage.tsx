@@ -6,6 +6,7 @@ import {
   ArrowUp,
   Clock3,
   FileText,
+  LoaderCircle,
   Merge,
   Scissors,
   Sparkles,
@@ -64,6 +65,7 @@ export function ScriptStage({
   onCollapseToSingleSegment,
   onReorderSpeechSegment,
   onRequestAiSplit,
+  onPrepareSpeechSplit,
   onApplySpeechSplit,
 }: {
   project: TextVideoProject
@@ -78,11 +80,17 @@ export function ScriptStage({
   onCollapseToSingleSegment?: () => void
   onReorderSpeechSegment?: (segmentId: string, targetIndex: number) => void
   onRequestAiSplit?: () => void
+  onPrepareSpeechSplit?: () => Promise<TextVideoProject>
   onApplySpeechSplit?: (project: TextVideoProject) => void
 }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null)
   const [speechSplitPreviewOpen, setSpeechSplitPreviewOpen] = useState(false)
+  const [speechSplitProject, setSpeechSplitProject] = useState<
+    TextVideoProject | null
+  >(null)
+  const [speechSplitPreparing, setSpeechSplitPreparing] = useState(false)
+  const [speechSplitError, setSpeechSplitError] = useState('')
   const selectedIndex = Math.max(
     0,
     project.paragraphs.findIndex(
@@ -107,6 +115,26 @@ export function ScriptStage({
       onReorderSpeechSegment?.(segment.id, confirmation.targetIndex)
     }
     setConfirmation(null)
+  }
+
+  async function prepareSpeechSplitPreview() {
+    onRequestAiSplit?.()
+    if (!onApplySpeechSplit) return
+    setSpeechSplitPreparing(true)
+    setSpeechSplitError('')
+    try {
+      const saved = onPrepareSpeechSplit
+        ? await onPrepareSpeechSplit()
+        : project
+      setSpeechSplitProject(saved)
+      setSpeechSplitPreviewOpen(true)
+    } catch (error) {
+      setSpeechSplitError(
+        error instanceof Error ? error.message : '保存稿件失败',
+      )
+    } finally {
+      setSpeechSplitPreparing(false)
+    }
   }
 
   if (!segment) {
@@ -139,16 +167,24 @@ export function ScriptStage({
             <Button
               size="xs"
               variant="outline"
-              disabled={(!onRequestAiSplit && !onApplySpeechSplit) || !project.script.trim()}
-              onClick={() => {
-                onRequestAiSplit?.()
-                if (onApplySpeechSplit) setSpeechSplitPreviewOpen(true)
-              }}
+              disabled={
+                (!onRequestAiSplit && !onApplySpeechSplit)
+                || !project.script.trim()
+                || speechSplitPreparing
+              }
+              onClick={() => void prepareSpeechSplitPreview()}
             >
-              <Sparkles data-icon="inline-start" />
-              AI 自动分段
+              {speechSplitPreparing
+                ? <LoaderCircle data-icon="inline-start" className="animate-spin" />
+                : <Sparkles data-icon="inline-start" />}
+              {speechSplitPreparing ? '正在保存稿件…' : 'AI 自动分段'}
             </Button>
           </div>
+          {speechSplitError ? (
+            <p role="alert" className="mb-3 text-xs text-destructive">
+              {speechSplitError}
+            </p>
+          ) : null}
           <div className="flex flex-col gap-2">
             {project.paragraphs.map((item, index) => {
               const duration = item.duration > 0
@@ -319,10 +355,10 @@ export function ScriptStage({
         </AlertDialogContent>
       </AlertDialog>
 
-      {onApplySpeechSplit ? (
+      {onApplySpeechSplit && speechSplitProject ? (
         <SpeechSplitPreviewDialog
           open={speechSplitPreviewOpen}
-          project={project}
+          project={speechSplitProject}
           direction=""
           onOpenChange={setSpeechSplitPreviewOpen}
           onApply={onApplySpeechSplit}
