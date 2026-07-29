@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { useMemo, useState } from 'react'
+import { toast } from 'sonner'
 import {
   ArrowLeft,
   Check,
@@ -19,6 +20,13 @@ import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import type { TextVideoProject } from '@/lib/api/text-videos'
 import { TEXT_VIDEO_FIXTURE, type TextVideoFixtureProject } from '@/lib/text-video/fixture'
+import {
+  collapseToSingleSegment,
+  editSpeechSegment,
+  mergeSpeechSegment,
+  reorderSpeechSegment,
+  splitSpeechSegment,
+} from '@/lib/text-video/speech-segments'
 import { cn } from '@/lib/utils'
 
 import { AudioStage } from './AudioStage'
@@ -54,13 +62,24 @@ export function TextVideoWorkbench({
   onSave?: () => void
 }) {
   const [localStage, setLocalStage] = useState<Stage>(projectDocument?.stage ?? 'script')
-  const [selectedParagraph, setSelectedParagraph] = useState(0)
   const [selectedScene, setSelectedScene] = useState(0)
   const [previewAll, setPreviewAll] = useState(false)
   const [fixtureRatio, setFixtureRatio] = useState<keyof typeof ratioDimensions>('9:16')
   const stage = projectDocument?.stage ?? localStage
   const ratio = projectDocument ? aspectRatio(projectDocument) : fixtureRatio
-  const project = useMemo(
+  const scriptProject = useMemo(
+    () => projectDocument ?? fixtureToDocument(initialProject, fixtureRatio),
+    [fixtureRatio, initialProject, projectDocument],
+  )
+  const [selectedSpeechSegmentId, setSelectedSpeechSegmentId] = useState(
+    () => scriptProject.paragraphs[0]?.id ?? '',
+  )
+  const activeSpeechSegmentId = scriptProject.paragraphs.some(
+    paragraph => paragraph.id === selectedSpeechSegmentId,
+  )
+    ? selectedSpeechSegmentId
+    : scriptProject.paragraphs[0]?.id ?? ''
+  const legacyProject = useMemo(
     () => projectDocument ? documentToWorkbench(projectDocument) : {
       ...initialProject,
       renderInput: {
@@ -73,8 +92,27 @@ export function TextVideoWorkbench({
     },
     [fixtureRatio, initialProject, projectDocument],
   )
-  const confirmed = project.paragraphs.filter(item => item.status === 'confirmed').length
-  const audioReady = project.paragraphs.length > 0 && confirmed === project.paragraphs.length
+  const selectedParagraph = Math.max(
+    0,
+    scriptProject.paragraphs.findIndex(
+      paragraph => paragraph.id === activeSpeechSegmentId,
+    ),
+  )
+  const confirmed = scriptProject.paragraphs.filter(
+    item => item.status === 'confirmed',
+  ).length
+  const allSpeechConfirmed = (
+    scriptProject.paragraphs.length > 0
+    && confirmed === scriptProject.paragraphs.length
+  )
+  const audioReady = projectDocument
+    ? Boolean(
+        allSpeechConfirmed
+        && scriptProject.master_audio.status === 'ready'
+        && scriptProject.master_audio.timeline_status === 'ready'
+        && scriptProject.render_input.audio,
+      )
+    : allSpeechConfirmed
 
   function changeDocument(update: (current: TextVideoProject) => TextVideoProject) {
     if (projectDocument && onProjectChange) onProjectChange(update(projectDocument))
@@ -104,27 +142,67 @@ export function TextVideoWorkbench({
     }))
   }
 
-  function changeParagraphText(text: string) {
-    changeDocument(current => {
-      const paragraphs = current.paragraphs.map((paragraph, index) => (
-        index === selectedParagraph
-          ? { ...paragraph, text, status: 'draft' as const, audio_url: '', word_timings: [] }
-          : paragraph
-      ))
-      const script = paragraphs.map(paragraph => paragraph.text).filter(Boolean).join('\n\n')
-      const segments = current.render_input.segments.map((segment, index) => (
-        index === Math.min(selectedParagraph, current.render_input.segments.length - 1)
-          ? { ...segment, text: text.trim() || '在这里输入稿件', highlight: [] }
-          : segment
-      ))
-      return {
-        ...current,
-        script,
-        status: 'draft',
-        paragraphs,
-        render_input: { ...current.render_input, segments },
-      }
-    })
+  function commitSpeechProject(next: TextVideoProject, selectedId?: string) {
+    if (!projectDocument || !onProjectChange) return
+    onProjectChange(next)
+    if (selectedId) setSelectedSpeechSegmentId(selectedId)
+  }
+
+  function changeSpeechText(segmentId: string, text: string) {
+    if (!projectDocument) return
+    commitSpeechProject(editSpeechSegment(projectDocument, segmentId, text))
+  }
+
+  function splitSpeech(segmentId: string, cursor: number) {
+    if (!projectDocument) return
+    try {
+      const currentIndex = projectDocument.paragraphs.findIndex(
+        paragraph => paragraph.id === segmentId,
+      )
+      const next = splitSpeechSegment(projectDocument, segmentId, cursor)
+      commitSpeechProject(next, next.paragraphs[currentIndex + 1]?.id)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '分段失败')
+    }
+  }
+
+  function mergeSpeech(
+    segmentId: string,
+    direction: 'previous' | 'next',
+  ) {
+    if (!projectDocument) return
+    try {
+      const currentIndex = projectDocument.paragraphs.findIndex(
+        paragraph => paragraph.id === segmentId,
+      )
+      const survivingId = direction === 'previous'
+        ? projectDocument.paragraphs[currentIndex - 1]?.id
+        : segmentId
+      const next = mergeSpeechSegment(projectDocument, segmentId, direction)
+      commitSpeechProject(next, survivingId)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '合并失败')
+    }
+  }
+
+  function collapseSpeech() {
+    if (!projectDocument) return
+    const next = collapseToSingleSegment(projectDocument)
+    commitSpeechProject(next, next.paragraphs[0]?.id)
+  }
+
+  function reorderSpeech(segmentId: string, targetIndex: number) {
+    if (!projectDocument) return
+    try {
+      const next = reorderSpeechSegment(
+        projectDocument,
+        segmentId,
+        targetIndex,
+      )
+      commitSpeechProject(next, segmentId)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '调整顺序失败')
+    }
   }
 
   function chooseScene(index: number) {
@@ -142,13 +220,13 @@ export function TextVideoWorkbench({
             </Link>
             <Input
               aria-label="作品标题"
-              value={project.title}
+              value={scriptProject.title}
               readOnly={!projectDocument}
               onChange={event => changeDocument(current => ({ ...current, title: event.target.value }))}
               className="h-9 min-w-0 border-transparent bg-transparent px-2 text-base font-semibold shadow-none hover:border-border focus-visible:bg-background"
             />
             {!projectDocument ? <Badge variant="outline">演示</Badge> : null}
-            {!projectDocument ? <span className="sr-only">{project.description}</span> : null}
+            {!projectDocument ? <span className="sr-only">{legacyProject.description}</span> : null}
           </div>
 
           <div role="tablist" aria-label="文字视频制作阶段" className="flex w-[52%] items-center justify-center px-3">
@@ -203,22 +281,36 @@ export function TextVideoWorkbench({
 
         {!audioReady ? (
           <div className="border-b border-amber-500/20 bg-amber-500/8 px-5 py-1.5 text-center text-xs text-amber-700">
-            <span>还需确认 {project.paragraphs.length - confirmed} 段配音</span>，确认后可进入视频合成
+            {!allSpeechConfirmed
+              ? <><span>还需确认 {scriptProject.paragraphs.length - confirmed} 段配音</span>，确认后可生成主音频</>
+              : <span>配音已确认，生成主音频和时间轴后可进入视频合成</span>}
           </div>
         ) : null}
 
         {stage === 'script' ? (
           <ScriptStage
-            project={project}
-            selectedParagraph={selectedParagraph}
-            onSelectParagraph={setSelectedParagraph}
-            onParagraphTextChange={projectDocument ? changeParagraphText : undefined}
+            project={scriptProject}
+            selectedSpeechSegmentId={activeSpeechSegmentId}
+            onSelectSpeechSegment={setSelectedSpeechSegmentId}
+            onSpeechSegmentTextChange={projectDocument ? changeSpeechText : undefined}
+            onSplitSpeechSegment={projectDocument ? splitSpeech : undefined}
+            onMergeSpeechSegment={projectDocument ? mergeSpeech : undefined}
+            onCollapseToSingleSegment={projectDocument ? collapseSpeech : undefined}
+            onReorderSpeechSegment={projectDocument ? reorderSpeech : undefined}
           />
         ) : stage === 'audio' ? (
-          <AudioStage project={project} selectedParagraph={selectedParagraph} onSelectParagraph={setSelectedParagraph} />
+          <AudioStage
+            project={legacyProject}
+            selectedParagraph={selectedParagraph}
+            onSelectParagraph={index => {
+              setSelectedSpeechSegmentId(
+                scriptProject.paragraphs[index]?.id ?? '',
+              )
+            }}
+          />
         ) : (
           <VideoStage
-            project={project}
+            project={legacyProject}
             selectedScene={selectedScene}
             onSelectScene={chooseScene}
             previewAll={previewAll}
@@ -262,6 +354,74 @@ function aspectRatio(project: TextVideoProject): keyof typeof ratioDimensions {
   const { width, height } = project.render_input.composition
   if (width === height) return '1:1'
   return width > height ? '16:9' : '9:16'
+}
+
+function fixtureToDocument(
+  project: TextVideoFixtureProject,
+  ratio: keyof typeof ratioDimensions,
+): TextVideoProject {
+  const paragraphs = project.paragraphs.map((paragraph, index) => ({
+    ...paragraph,
+    text: paragraph.text + (
+      index < project.paragraphs.length - 1 ? '\n\n' : ''
+    ),
+    audio_url: '',
+    word_timings: [],
+    source_hash: '',
+    generation_revision: 0,
+    error: '',
+    job_id: null,
+  }))
+  return {
+    id: 0,
+    title: project.title,
+    status: 'draft',
+    stage: 'script',
+    script: paragraphs.map(paragraph => paragraph.text).join(''),
+    voice_settings: {
+      voice_id: project.voiceName,
+      model: '',
+      speed: 1,
+      volume: 1,
+      pitch: 0,
+    },
+    paragraphs,
+    speech_split_mode: paragraphs.length === 1 ? 'single' : 'manual',
+    master_audio: {
+      status: 'missing',
+      timeline_status: 'missing',
+      audio_url: '',
+      duration: 0,
+      source_hash: '',
+      word_timings: [],
+      timeline_source: '',
+      error: '',
+      timeline_error: '',
+      job_id: null,
+    },
+    scene_plan: {
+      status: 'missing',
+      generation_revision: 0,
+      master_source_hash: '',
+      scenes: [],
+      job_id: null,
+      error: '',
+    },
+    render_input: {
+      ...project.renderInput,
+      composition: {
+        ...project.renderInput.composition,
+        ...ratioDimensions[ratio],
+      },
+    },
+    cover_asset_url: '',
+    output_asset_url: '',
+    revision: 1,
+    duration: project.renderInput.segments.at(-1)?.end ?? 0,
+    aspect_ratio: ratio,
+    created_at: '',
+    updated_at: '',
+  }
 }
 
 function documentToWorkbench(project: TextVideoProject): TextVideoFixtureProject {
