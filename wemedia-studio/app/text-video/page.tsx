@@ -1,5 +1,10 @@
-import { TextVideoWorkbench } from './TextVideoWorkbench'
+import { listTextVideoProjects } from '@/lib/api/text-videos'
 
-export default function TextVideoPage() {
-  return <TextVideoWorkbench />
+import { TextVideoProjectsClient } from './TextVideoProjectsClient'
+
+export const dynamic = 'force-dynamic'
+
+export default async function TextVideoPage() {
+  const projects = await listTextVideoProjects().catch(() => [])
+  return <TextVideoProjectsClient initialProjects={projects} />
 }
