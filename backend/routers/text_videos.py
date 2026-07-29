@@ -23,7 +23,11 @@ from fastapi import (
 from loguru import logger
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+)
 from sqlalchemy.pool import StaticPool
 
 from database import (
@@ -955,8 +959,14 @@ async def _verify_saved_speech_result(
             saved.get("asset_id"),
         )
         return None
-    verification_engine = getattr(bind, "engine", bind)
-    verification_pool = getattr(verification_engine, "pool", None)
+    if not isinstance(bind, AsyncEngine):
+        logger.error(
+            "Cannot independently verify speech asset {} durability: "
+            "database bind is not an async engine",
+            saved.get("asset_id"),
+        )
+        return None
+    verification_pool = getattr(bind, "pool", None)
     if verification_pool is None or isinstance(
         verification_pool,
         StaticPool,
@@ -1278,9 +1288,11 @@ async def _commit_saved_speech_result(
 
     if pending_cancellation is not None:
         raise pending_cancellation from effective_commit_failure
-    if durable is True:
-        if isinstance(effective_commit_failure, asyncio.CancelledError):
-            raise effective_commit_failure
+    if (
+        durable is True
+        and not commit_outcome.timed_out
+        and not commit_outcome.cancellation_requested
+    ):
         return
     raise effective_commit_failure
 

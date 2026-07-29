@@ -1922,6 +1922,112 @@ def test_worker_result_commit_deadline_rejects_caught_cancellation(
     assert len(list(case["uploads"].glob("*.mp3"))) == 1
 
 
+def test_worker_result_durable_commit_deadline_still_times_out(
+    client,
+    monkeypatch,
+    tmp_path,
+):
+    from database import SessionLocal
+    from models import (
+        CreativeAsset,
+        TextVideoProject,
+        TextVideoSpeechAsset,
+    )
+    from sqlalchemy import func, select
+
+    case = _prepare_speech_worker_result(
+        client,
+        monkeypatch,
+        tmp_path,
+        "durable caught commit cancellation",
+    )
+    router_module = case["router"]
+    original_save = router_module.save_text_video_audio_asset
+    commit_cancelled = asyncio.Event()
+
+    async def save_then_delay_commit_ack(db, *args, **kwargs):
+        saved = await original_save(db, *args, **kwargs)
+        original_commit = db.commit
+
+        async def durable_then_catch_cancellation():
+            await original_commit()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                commit_cancelled.set()
+                return
+
+        db.commit = durable_then_catch_cancellation
+        return saved
+
+    monkeypatch.setattr(
+        router_module,
+        "save_text_video_audio_asset",
+        save_then_delay_commit_ack,
+    )
+    monkeypatch.setattr(
+        router_module,
+        "SPEECH_DB_OPERATION_TIMEOUT_SECONDS",
+        0.02,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        router_module,
+        "SPEECH_DB_CANCEL_GRACE_SECONDS",
+        0.02,
+        raising=False,
+    )
+
+    async def run():
+        async with SessionLocal() as session:
+            try:
+                await _submit_prepared_speech_worker_result(case, session)
+            except BaseException as error:
+                failure = error
+            else:
+                failure = None
+            pending_helpers = [
+                task
+                for task in asyncio.all_tasks()
+                if task is not asyncio.current_task()
+                and task.get_name().startswith("text-video-speech-")
+                and not task.done()
+            ]
+        async with SessionLocal() as verification:
+            project = await verification.get(
+                TextVideoProject,
+                case["project"]["id"],
+            )
+            asset_count = await verification.scalar(
+                select(func.count(CreativeAsset.id)),
+            )
+            metadata_count = await verification.scalar(
+                select(func.count(TextVideoSpeechAsset.id)),
+            )
+        return (
+            failure,
+            pending_helpers,
+            project,
+            asset_count,
+            metadata_count,
+        )
+
+    (
+        error,
+        pending_helpers,
+        project,
+        asset_count,
+        metadata_count,
+    ) = asyncio.new_event_loop().run_until_complete(run())
+    assert isinstance(error, TimeoutError)
+    assert commit_cancelled.is_set()
+    assert pending_helpers == []
+    assert project.paragraphs[0]["status"] == "ready"
+    assert asset_count == 1
+    assert metadata_count == 1
+    assert len(list(case["uploads"].glob("*.mp3"))) == 1
+
+
 def test_worker_result_rollback_deadline_is_bounded_and_preserves_file(
     client,
     monkeypatch,
@@ -2058,11 +2164,19 @@ def test_durability_verifier_preserves_contradictory_project_reference(
     assert asyncio.new_event_loop().run_until_complete(verify()) is None
 
 
-@pytest.mark.parametrize("bind_shape", ["engine", "connection"])
-def test_commit_verification_fails_closed_for_static_pool(
+@pytest.mark.parametrize(
+    ("database_kind", "bind_shape"),
+    [
+        ("memory", "engine"),
+        ("memory", "connection"),
+        ("file", "connection"),
+    ],
+)
+def test_commit_verification_requires_independent_engine(
     client,
     monkeypatch,
     tmp_path,
+    database_kind,
     bind_shape,
 ):
     from database import Base
@@ -2079,7 +2193,7 @@ def test_commit_verification_fails_closed_for_static_pool(
     )
     from sqlalchemy.pool import StaticPool
 
-    uploads = tmp_path / f"static pool {bind_shape}"
+    uploads = tmp_path / f"{database_kind} {bind_shape}"
     uploads.mkdir(parents=True)
     monkeypatch.setattr(router_module, "UPLOADS_DIR", uploads)
     audio_url = "/api/uploads/static-pool.mp3"
@@ -2099,8 +2213,18 @@ def test_commit_verification_fails_closed_for_static_pool(
     }
 
     async def run():
-        engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-        assert isinstance(engine.pool, StaticPool)
+        database_url = (
+            "sqlite+aiosqlite:///:memory:"
+            if database_kind == "memory"
+            else (
+                "sqlite+aiosqlite:///"
+                f"{tmp_path / 'connection-bound.db'}"
+            )
+        )
+        engine = create_async_engine(database_url)
+        assert isinstance(engine.pool, StaticPool) is (
+            database_kind == "memory"
+        )
         connection = None
         try:
             async with engine.begin() as setup_connection:
@@ -2189,19 +2313,28 @@ def test_commit_verification_fails_closed_for_static_pool(
                 metadata_count = await verification.scalar(
                     select(func.count(TextVideoSpeechAsset.id)),
                 )
-            return failure, asset_count, metadata_count
+                project_count = await verification.scalar(
+                    select(func.count(TextVideoProject.id)),
+                )
+            return (
+                failure,
+                asset_count,
+                metadata_count,
+                project_count,
+            )
         finally:
             if connection is not None:
                 await connection.close()
             await engine.dispose()
 
-    error, asset_count, metadata_count = (
+    error, asset_count, metadata_count, project_count = (
         asyncio.new_event_loop().run_until_complete(run())
     )
     assert isinstance(error, ConnectionError)
     assert str(error) == "commit connection unavailable"
     assert asset_count == 0
     assert metadata_count == 0
+    assert project_count == 0
     assert audio_path.is_file()
 
 
