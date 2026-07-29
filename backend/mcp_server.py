@@ -12,6 +12,7 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Optional
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 from sqlalchemy import select, desc, delete as sa_delete
 from database import SessionLocal
 from web_search import WebSearchProviderError, search_web as run_web_search
@@ -24,7 +25,15 @@ _UPLOADS_DIR.mkdir(exist_ok=True)
 # Override with WMS_BASE_URL env var when running behind a reverse proxy.
 _BASE_URL = os.getenv("WMS_BASE_URL", "http://localhost:8000")
 
-mcp = FastMCP("WeMedia Studio")
+mcp = FastMCP(
+    "WeMedia Studio",
+    transport_security=TransportSecuritySettings(
+        # The Next.js AI route calls this service through Docker Compose's
+        # internal DNS name. Keep DNS-rebinding protection on, but allow that
+        # explicit backend-to-backend host alongside local development hosts.
+        allowed_hosts=["api:8000", "localhost:8000", "127.0.0.1:8000"],
+    ),
+)
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -222,6 +231,99 @@ async def get_draft(draft_id: int) -> dict:
         "version": obj.version,
         "created_at": _fmt_dt(obj.created_at),
         "updated_at": _fmt_dt(obj.updated_at),
+    }
+
+
+@mcp.tool()
+async def search_creative_assets(
+    query: str = "",
+    directory: str = "",
+    asset_type: str = "",
+    limit: int = 10,
+) -> list[dict]:
+    """
+    Search the user's Creative Assets / 素材库. This tool is read-only.
+
+    Use it to find raw article material, images, video, or audio stored under
+    创作资产. Query matches an asset's title, body text, and tags. Directory
+    optionally narrows the result to one material folder, such as "搞钱副业".
+
+    Args:
+        query: Optional keywords to search for.
+        directory: Optional exact material-folder name.
+        asset_type: Optional "article" or "media" filter.
+        limit: Maximum assets to return (default 10, max 30).
+
+    Returns compact metadata and a content summary. Call get_creative_asset(id)
+    to read the complete article material or inspect all asset fields.
+    """
+    from models import CreativeAsset
+
+    normalized_type = asset_type.strip().lower()
+    if normalized_type and normalized_type not in {"article", "media"}:
+        raise ValueError("asset_type must be 'article', 'media', or empty")
+    normalized_directory = directory.strip()
+    keywords = [item.lower() for item in query.split() if item]
+    take = max(1, min(int(limit), 30))
+
+    async with SessionLocal() as db:
+        statement = select(CreativeAsset).order_by(
+            desc(CreativeAsset.updated_at), desc(CreativeAsset.id)
+        )
+        if normalized_type:
+            statement = statement.where(CreativeAsset.asset_type == normalized_type)
+        if normalized_directory:
+            statement = statement.where(CreativeAsset.directory == normalized_directory)
+        rows = (await db.execute(statement.limit(500))).scalars().all()
+
+    def matches(asset) -> bool:
+        searchable = " ".join([
+            asset.title or "", asset.content or "", " ".join(asset.tags or []),
+        ]).lower()
+        return all(keyword in searchable for keyword in keywords)
+
+    return [
+        {
+            "id": asset.id,
+            "asset_type": asset.asset_type,
+            "media_kind": asset.media_kind or "",
+            "title": asset.title or "",
+            "summary": " ".join((asset.content or "").split())[:500],
+            "url": asset.url or "",
+            "directory": asset.directory or "",
+            "tags": asset.tags or [],
+            "source": asset.source or "",
+        }
+        for asset in rows if matches(asset)
+    ][:take]
+
+
+@mcp.tool()
+async def get_creative_asset(asset_id: int) -> dict:
+    """
+    Read one complete Creative Asset / 素材库 item by ID. This tool is read-only.
+
+    Use search_creative_assets first to locate an ID, then call this tool to
+    retrieve the full raw content before analyzing or repurposing it.
+    """
+    from models import CreativeAsset
+
+    async with SessionLocal() as db:
+        asset = await db.get(CreativeAsset, asset_id)
+    if asset is None:
+        raise ValueError(f"Creative asset {asset_id} not found")
+    return {
+        "id": asset.id,
+        "asset_type": asset.asset_type,
+        "media_kind": asset.media_kind or "",
+        "title": asset.title or "",
+        "content": asset.content or "",
+        "url": asset.url or "",
+        "media_type": asset.media_type or "",
+        "filename": asset.filename or "",
+        "directory": asset.directory or "",
+        "tags": asset.tags or [],
+        "source": asset.source or "",
     }
 
 
