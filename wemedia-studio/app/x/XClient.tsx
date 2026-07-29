@@ -67,7 +67,15 @@ export function XClient({
     } finally { setLoadingFeed(false) }
   }
 
-  useEffect(() => { reloadPosts(selection, hours) }, [selection, hours])
+  const selectFeed = (next: Selection) => {
+    setSelection(next)
+    void reloadPosts(next, hours)
+  }
+
+  const selectHours = (next: number) => {
+    setHours(next)
+    void reloadPosts(selection, next)
+  }
 
   const handleAdd = async (input: CreateXSubscriptionInput) => {
     await createXSubscription(input)
@@ -96,10 +104,12 @@ export function XClient({
 
   const handleDelete = async (s: XSubscription) => {
     await deleteXSubscription(s.id)
+    let nextSelection = selection
     if (selection.kind === 'sub' && selection.id === s.id) {
-      setSelection({ kind: 'all' })
+      nextSelection = { kind: 'all' }
+      setSelection(nextSelection)
     }
-    await Promise.all([reloadSubs(), reloadPosts()])
+    await Promise.all([reloadSubs(), reloadPosts(nextSelection)])
   }
 
   const handleCollectOne = async (s: XSubscription) => {
@@ -152,7 +162,7 @@ export function XClient({
         <div className="flex-1 overflow-y-auto px-2 py-2">
           <SidebarRow
             icon={Search} iconColor="text-emerald-500" label="实时搜索"
-            active={selection.kind === 'search'} onClick={() => setSelection({ kind: 'search' })}
+            active={selection.kind === 'search'} onClick={() => selectFeed({ kind: 'search' })}
           />
           <div className="text-[11px] uppercase tracking-wider text-zinc-400 mt-3 mb-1 px-2">
             已订阅 · {subs.length}
@@ -161,7 +171,7 @@ export function XClient({
             icon={Globe} iconColor="text-sky-500" label="全部"
             badge={totalPostCount > 0 ? String(totalPostCount) : undefined}
             active={selection.kind === 'all'}
-            onClick={() => setSelection({ kind: 'all' })}
+            onClick={() => selectFeed({ kind: 'all' })}
           />
           {subs.length === 0 ? (
             <p className="text-xs text-zinc-400 text-center mt-2 px-3">
@@ -178,7 +188,7 @@ export function XClient({
                 active={selection.kind === 'sub' && selection.id === s.id}
                 muted={!s.enabled}
                 hasError={!!s.last_error}
-                onClick={() => setSelection({ kind: 'sub', id: s.id })}
+                onClick={() => selectFeed({ kind: 'sub', id: s.id })}
               />
             ))
           )}
@@ -221,7 +231,7 @@ export function XClient({
               <span className="text-xs text-zinc-400 mr-1">最近</span>
               {HOURS_OPTIONS.map(({ v, label }) => (
                 <button key={v}
-                  onClick={() => setHours(v)}
+                  onClick={() => selectHours(v)}
                   className={cn(
                     'text-xs px-2 py-0.5 rounded transition-colors',
                     hours === v
@@ -515,17 +525,15 @@ function SubscribeDialog({
   const [topicDialog, setTopicDialog] = useState<{ subscription: XSubscription; directory: string; keywords: string; error: string } | null>(null)
   const [screeningId, setScreeningId] = useState<number | null>(null)
 
-  const reloadTopicSettings = async () => {
-    const [rules, directories] = await Promise.all([
+  useEffect(() => {
+    if (!open) return
+    void Promise.all([
       listTopicSourceRules(),
       listCreativeAssetDirectories('article'),
-    ])
-    setTopicRules(rules)
-    setArticleDirectories(directories)
-  }
-
-  useEffect(() => {
-    if (open) void reloadTopicSettings().catch(() => {})
+    ]).then(([rules, directories]) => {
+      setTopicRules(rules)
+      setArticleDirectories(directories)
+    }).catch(() => {})
   }, [open])
 
   const openTopicDialog = (subscription: XSubscription) => {
@@ -596,7 +604,7 @@ function SubscribeDialog({
 
   const sinceDays = (n: number) =>
     new Date(Date.now() - n * 86400000).toISOString().slice(0, 10)
-  const QUICK_TOKENS: { label: string; token: string }[] = [
+  const QUICK_TOKENS: { label: string; token: string | (() => string) }[] = [
     { label: 'OR 组', token: '(关键词A OR 关键词B)' },
     { label: '排除回复', token: '-filter:replies' },
     { label: '只看回复', token: 'filter:replies' },
@@ -604,7 +612,7 @@ function SubscribeDialog({
     { label: '排除转推', token: '-filter:retweets' },
     { label: '高赞', token: 'min_faves:1500' },
     { label: '中文', token: 'lang:zh' },
-    { label: '近7天', token: `since:${sinceDays(7)}` },
+    { label: '近7天', token: () => `since:${sinceDays(7)}` },
   ]
   const insertToken = (t: string) =>
     setRawQuery(prev => (prev.trim() ? prev.trim() + ' ' : '') + t + ' ')
@@ -695,7 +703,12 @@ function SubscribeDialog({
               className="w-full px-2 py-1.5 border border-zinc-200 dark:border-zinc-700 rounded bg-transparent text-xs font-mono outline-none focus:border-sky-400 resize-y" />
             <div className="flex flex-wrap gap-1">
               {QUICK_TOKENS.map(c => (
-                <button type="button" key={c.label} onClick={() => insertToken(c.token)}
+                <button
+                  type="button"
+                  key={c.label}
+                  onClick={() => insertToken(
+                    typeof c.token === 'function' ? c.token() : c.token,
+                  )}
                   className="text-[11px] px-1.5 py-0.5 rounded border border-zinc-200 dark:border-zinc-700 text-zinc-500 hover:border-sky-400 hover:text-sky-500 transition-colors">
                   + {c.label}
                 </button>

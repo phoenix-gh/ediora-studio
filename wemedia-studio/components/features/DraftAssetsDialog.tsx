@@ -78,8 +78,6 @@ export function DraftAssetsDialog({
 
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  useEffect(() => { if (open) setTab(initialTab) }, [open, initialTab])
-
   useEffect(() => {
     if ((!regenOpen && !illusOpen) || accounts) return
     listPublishAccounts()
@@ -87,25 +85,20 @@ export function DraftAssetsDialog({
       .catch(() => toast.error("加载发布账号失败"))
   }, [regenOpen, illusOpen, accounts])
 
-  useEffect(() => {
-    if (!accountId || !accounts) return
-    const acc = accounts.find(a => a.id === accountId)
+  function selectAccount(id: string | null) {
+    setAccountId(id)
+    if (!id || !accounts) return
+    const acc = accounts.find(a => a.id === id)
     const cs: CoverStyle = acc?.cover_style ?? {}
     setCoverStyle({ type: cs.type, palette: cs.palette, rendering: cs.rendering, text: cs.text, mood: cs.mood, aspect_ratio: cs.aspect_ratio })
     setCoverMotifsText((cs.signature_motifs ?? []).join('\n'))
     setCoverNegativeText((cs.negative ?? []).join('\n'))
-  }, [accountId, accounts])
+  }
 
   const cover = images.filter(isCover).sort((a, b) => b.id - a.id)[0]
-
-  // Auto-select first image (prefer cover) when images load or dialog opens
-  useEffect(() => {
-    if (images.length === 0) { setPreviewImg(null); return }
-    setPreviewImg(prev => {
-      if (prev && images.find(i => i.id === prev.id)) return prev
-      return cover ?? images[0]
-    })
-  }, [images, cover])
+  const activePreviewImg = previewImg && images.some(image => image.id === previewImg.id)
+    ? previewImg
+    : cover ?? images[0] ?? null
 
   function addSource() {
     const url = newUrl.trim()
@@ -246,7 +239,7 @@ export function DraftAssetsDialog({
                 <div className="flex items-center gap-2 mb-2">
                   <ImagePlus className="w-3.5 h-3.5 text-emerald-500" />
                   <span className="text-[11px] uppercase tracking-wider text-zinc-500 font-semibold">预览</span>
-                  {previewImg && isCover(previewImg) && (
+                  {activePreviewImg && isCover(activePreviewImg) && (
                     <span className="text-[10px] bg-emerald-100 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400 px-1.5 py-0.5 rounded-full font-medium">
                       封面
                     </span>
@@ -267,17 +260,17 @@ export function DraftAssetsDialog({
                   </button>
                 </div>
 
-                {previewImg ? (
+                {activePreviewImg ? (
                   <div className="relative w-full aspect-[16/9] rounded-md overflow-hidden bg-zinc-100 dark:bg-zinc-800 ring-1 ring-zinc-200 dark:ring-zinc-800">
-                    <img src={previewImg.hosted_url} alt={previewImg.original_name} className="w-full h-full object-contain" />
+                    <img src={activePreviewImg.hosted_url} alt={activePreviewImg.original_name} className="w-full h-full object-contain" />
                     <div className="absolute bottom-0 left-0 right-0 flex items-center justify-between px-2 py-1.5 bg-gradient-to-t from-black/60 to-transparent">
                       <span className="text-white text-[10px] truncate max-w-[60%]">
-                        {previewImg.original_name || previewImg.filename}
+                        {activePreviewImg.original_name || activePreviewImg.filename}
                       </span>
                       <Button
                         size="sm"
                         className="h-6 text-[11px] px-2 gap-1 bg-white/20 hover:bg-white/30 text-white border-0 backdrop-blur-sm"
-                        onClick={() => { onInsert(previewImg); toast.success("已插入图片") }}
+                        onClick={() => { onInsert(activePreviewImg); toast.success("已插入图片") }}
                       >
                         <ImageIcon className="w-3 h-3" />
                         插入
@@ -310,7 +303,7 @@ export function DraftAssetsDialog({
                           <button
                             key={a.id}
                             type="button"
-                            onClick={() => setAccountId(a.id)}
+                            onClick={() => selectAccount(a.id)}
                             className={cn(
                               "w-full text-left px-2 py-1.5 text-xs hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors",
                               accountId === a.id && "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300",
@@ -362,7 +355,7 @@ export function DraftAssetsDialog({
                       <div className="text-xs font-medium text-zinc-500 mb-1.5">发布账号</div>
                       <select
                         value={accountId ?? ""}
-                        onChange={e => setAccountId(e.target.value || null)}
+                        onChange={e => selectAccount(e.target.value || null)}
                         className="w-full text-xs px-2 py-1.5 border border-zinc-200 dark:border-zinc-700 rounded bg-white dark:bg-zinc-950 outline-none focus:border-violet-400 text-zinc-700 dark:text-zinc-300"
                       >
                         <option value="">（选择账号）</option>
@@ -428,7 +421,7 @@ export function DraftAssetsDialog({
                 ) : (
                   <div className="grid grid-cols-5 gap-1.5">
                     {images.map(img => {
-                      const selected = previewImg?.id === img.id
+                      const selected = activePreviewImg?.id === img.id
                       return (
                         <div key={img.id}
                           className={cn(
@@ -457,7 +450,7 @@ export function DraftAssetsDialog({
                               e.stopPropagation()
                               const name = img.original_name || img.filename
                               if (!confirm(`删除「${name}」？此操作不可撤销。`)) return
-                              if (previewImg?.id === img.id) setPreviewImg(null)
+                              if (activePreviewImg?.id === img.id) setPreviewImg(null)
                               onDelete(img.id)
                             }}
                             className="absolute top-0.5 right-0.5 opacity-0 group-hover:opacity-100 bg-black/60 hover:bg-red-600/90 text-white rounded-full p-0.5 transition-colors transition-opacity"

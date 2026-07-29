@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { FileVideo, Plus } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -66,19 +66,17 @@ export function TalkingProjectList({
   const [title, setTitle] = useState('')
   const [roleId, setRoleId] = useState(String(readyRoles[0]?.id ?? ''))
   const [saving, setSaving] = useState(false)
-
-  useEffect(() => {
-    if (readyRoles.some(role => String(role.id) === roleId)) return
-    setRoleId(String(readyRoles[0]?.id ?? ''))
-  }, [readyRoles, roleId])
+  const effectiveRoleId = readyRoles.some(role => String(role.id) === roleId)
+    ? roleId
+    : String(readyRoles[0]?.id ?? '')
 
   async function create() {
-    if (!roleId) return
+    if (!effectiveRoleId) return
     setSaving(true)
     try {
       const project = await createTalkingVideo({
         title: title.trim() || '未命名口播作品',
-        digital_human_id: Number(roleId),
+        digital_human_id: Number(effectiveRoleId),
       })
       onCreated(project)
       setDialogOpen(false)
@@ -153,7 +151,7 @@ export function TalkingProjectList({
             </Field>
             <Field>
               <FieldLabel>数字人角色</FieldLabel>
-              <Select value={roleId} onValueChange={value => value && setRoleId(value)}>
+              <Select value={effectiveRoleId} onValueChange={value => value && setRoleId(value)}>
                 <SelectTrigger>
                   <SelectValue placeholder="选择已就绪角色">
                     {value => readyRoles.find(
@@ -172,7 +170,7 @@ export function TalkingProjectList({
                 </SelectContent>
               </Select>
             </Field>
-            <Button onClick={() => void create()} disabled={saving || !roleId}>
+            <Button onClick={() => void create()} disabled={saving || !effectiveRoleId}>
               创建并编辑
             </Button>
           </FieldGroup>

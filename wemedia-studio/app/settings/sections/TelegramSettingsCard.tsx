@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useState } from 'react'
 import { BotIcon, LoaderCircleIcon, SaveIcon, SendIcon, Trash2Icon } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -68,25 +68,18 @@ export function TelegramSettingsCard({
   const [actionError, setActionError] = useState('')
   const [clearOpen, setClearOpen] = useState(false)
   const [clearError, setClearError] = useState('')
-  const tokenRef = useRef(token)
-  const chatIdRef = useRef(chatId)
-  const savedChatIdRef = useRef(initialChatId)
+  const [previousSettings, setPreviousSettings] = useState(settings)
 
-  tokenRef.current = token
-  chatIdRef.current = chatId
-
-  useEffect(() => {
+  if (settings !== previousSettings) {
     const nextChatId = settings?.telegram_chat_id ?? ''
-    const hasDirtyDraft = tokenRef.current.trim().length > 0
-      || chatIdRef.current.trim() !== savedChatIdRef.current
+    const savedChatId = previousSettings?.telegram_chat_id ?? ''
+    const hasDirtyDraft = token.trim().length > 0
+      || chatId.trim() !== savedChatId
 
+    setPreviousSettings(settings)
     setServerSettings(settings)
-    if (!hasDirtyDraft) {
-      setChatId(nextChatId)
-      chatIdRef.current = nextChatId
-    }
-    savedChatIdRef.current = nextChatId
-  }, [settings])
+    if (!hasDirtyDraft) setChatId(nextChatId)
+  }
 
   const trimmedToken = token.trim()
   const trimmedChatId = chatId.trim()
@@ -107,11 +100,8 @@ export function TelegramSettingsCard({
 
   function applyReturnedSettings(nextSettings: AppSettings, clearToken: boolean) {
     setServerSettings(nextSettings)
-    savedChatIdRef.current = nextSettings.telegram_chat_id
-    chatIdRef.current = nextSettings.telegram_chat_id
     setChatId(nextSettings.telegram_chat_id)
     if (clearToken) {
-      tokenRef.current = ''
       setToken('')
     }
     onSaved(nextSettings)

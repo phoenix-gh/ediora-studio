@@ -31,9 +31,14 @@ export function AddToTopicPopover({ url, title, summary = "", platform, classNam
   const [drafts, setDrafts] = useState<Draft[] | null>(null)
   const [planId, setPlanId] = useState<number | null>(null)
   const [draftId, setDraftId] = useState<number | null>(null)
-  const [note, setNote] = useState(summary)
+  const [noteDraft, setNoteDraft] = useState({ summary, value: summary })
   const [query, setQuery] = useState("")
   const [busy, setBusy] = useState(false)
+
+  if (noteDraft.summary !== summary) {
+    setNoteDraft({ summary, value: summary })
+  }
+  const note = noteDraft.summary === summary ? noteDraft.value : summary
 
   useEffect(() => {
     if (!open || plans) return
@@ -47,9 +52,6 @@ export function AddToTopicPopover({ url, title, summary = "", platform, classNam
       .catch(() => toast.error("加载写作方案/草稿失败"))
     return () => { cancelled = true }
   }, [open, plans])
-
-  // Reset note when summary changes (different content trigger)
-  useEffect(() => { setNote(summary) }, [summary])
 
   const flatPlans = useMemo(() => {
     if (!plans) return []
@@ -185,7 +187,7 @@ export function AddToTopicPopover({ url, title, summary = "", platform, classNam
             <Input
               placeholder="对这条线索的备注"
               value={note}
-              onChange={e => setNote(e.target.value)}
+              onChange={e => setNoteDraft({ summary, value: e.target.value })}
               className="h-8 text-xs"
             />
           </div>

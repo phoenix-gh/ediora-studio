@@ -358,7 +358,7 @@ function TrendingTab({ items }: { items: GithubTrendingRepo[] }) {
 
 function ReleasesTab({ repoId, releases: initial, onLoad }: { repoId: string; releases: GithubRelease[]; onLoad: (rows: GithubRelease[]) => void }) {
   const [releases, setReleases] = useState(initial)
-  const [collecting, setCollecting] = useState(false)
+  const [collecting, setCollecting] = useState(initial.length === 0)
   const [expanded, setExpanded] = useState<string | null>(null)
   const [generatingId, setGeneratingId] = useState<string | null>(null)
   const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -461,11 +461,7 @@ function ReleasesTab({ repoId, releases: initial, onLoad }: { repoId: string; re
   // When no data yet, poll — backend is already collecting in background
   useEffect(() => {
     stopPoll()
-    setReleases(initial)
-    if (initial.length === 0) {
-      setCollecting(true)
-      pollUntilData(repoId)
-    }
+    if (initial.length === 0) void pollUntilData(repoId)
     return stopPoll
   }, [repoId])
 
@@ -898,6 +894,7 @@ export function GithubClient({ initialRepos, initialTrending, initialReleases }:
         {tab === 'trending' && <TrendingTab items={initialTrending} />}
         {tab === 'releases' && selected && (
           <ReleasesTab
+            key={selected.id}
             repoId={selected.id}
             releases={repoReleases}
             onLoad={rows => setAllReleases(prev => [...prev.filter(r => r.repo_id !== selected.id), ...rows])}

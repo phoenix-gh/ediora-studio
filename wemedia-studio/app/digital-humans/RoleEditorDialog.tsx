@@ -146,23 +146,15 @@ export function RoleEditorDialog({
   onClose: () => void
   onCreated: (role: DigitalHuman) => void
 }) {
-  const [name, setName] = useState('')
-  const [portrait, setPortrait] = useState<CreativeAsset | null>(null)
-  const [voice, setVoice] = useState<CreativeAsset | null>(null)
-  const [environment, setEnvironment] = useState<CreativeAsset | null>(null)
+  const [name, setName] = useState(role?.name ?? '')
+  const [portrait, setPortrait] = useState<CreativeAsset | null>(role?.portrait ?? null)
+  const [voice, setVoice] = useState<CreativeAsset | null>(role?.voice_sample ?? null)
+  const [environment, setEnvironment] = useState<CreativeAsset | null>(
+    role?.default_environment ?? null,
+  )
   const [picker, setPicker] = useState<PickerKind>(null)
   const [environmentOpen, setEnvironmentOpen] = useState(false)
   const [saving, setSaving] = useState(false)
-
-  useEffect(() => {
-    if (!open) return
-    setName(role?.name ?? '')
-    setPortrait(role?.portrait ?? null)
-    setVoice(role?.voice_sample ?? null)
-    setEnvironment(role?.default_environment ?? null)
-    setPicker(null)
-    setEnvironmentOpen(false)
-  }, [open, role])
 
   async function handleSave() {
     if (!name.trim() || !portrait || !voice || !environment) return

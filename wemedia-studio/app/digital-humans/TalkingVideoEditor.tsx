@@ -78,8 +78,11 @@ export function TalkingVideoEditor({
   const pendingSave = useRef<TalkingVideoUpdate | null>(null)
   const saveProjectRef = useRef(saveProject)
   const onProjectChangeRef = useRef(onProjectChange)
-  saveProjectRef.current = saveProject
-  onProjectChangeRef.current = onProjectChange
+
+  useEffect(() => {
+    saveProjectRef.current = saveProject
+    onProjectChangeRef.current = onProjectChange
+  }, [onProjectChange, saveProject])
 
   const role = roles.find(item => item.id === roleId) ?? null
   const hasActiveRender = project.renders.some(

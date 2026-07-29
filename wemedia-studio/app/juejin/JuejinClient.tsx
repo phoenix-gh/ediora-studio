@@ -146,7 +146,7 @@ export function JuejinClient({
   const [activeCategory, setActiveCategory] = useState<JuejinCategory>('hot')
   const [articles, setArticles] = useState<Record<string, JuejinArticle[]>>({ hot: initial })
   const [search, setSearch] = useState('')
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(initial.length === 0)
   const [collecting, setCollecting] = useState(false)
 
   // Reader state — switches between right-side panel (wide screens) and modal
@@ -191,37 +191,6 @@ export function JuejinClient({
     }
   }
 
-  const load = useCallback(async (cat: JuejinCategory) => {
-    setLoading(true)
-    try {
-      const data = await getJuejinArticles({
-        category: cat,
-        limit: 100,
-        search: search || undefined,
-      })
-      setArticles(prev => ({ ...prev, [cat]: data }))
-      resetScroll()
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : '加载失败')
-    } finally {
-      setLoading(false)
-    }
-  }, [search])
-
-  useEffect(() => {
-    if (!articles[activeCategory] || articles[activeCategory].length === 0) {
-      load(activeCategory)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeCategory])
-
-  useEffect(() => {
-    if (!search) return
-    const t = setTimeout(() => load(activeCategory), 300)
-    return () => clearTimeout(t)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search])
-
   async function handleCollect() {
     setCollecting(true)
     try {
@@ -247,6 +216,48 @@ export function JuejinClient({
     pageSize: PAGE_SIZE,
   })
   const visible = filtered.slice(0, visibleCount)
+
+  const load = useCallback(async (cat: JuejinCategory) => {
+    setLoading(true)
+    try {
+      const data = await getJuejinArticles({
+        category: cat,
+        limit: 100,
+        search: search || undefined,
+      })
+      setArticles(prev => ({ ...prev, [cat]: data }))
+      resetScroll()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : '加载失败')
+    } finally {
+      setLoading(false)
+    }
+  }, [search])
+
+  useEffect(() => {
+    if (!search) return
+    const t = setTimeout(() => load(activeCategory), 300)
+    return () => clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search])
+
+  useEffect(() => {
+    if (initial.length > 0) return
+    let cancelled = false
+    void getJuejinArticles({ category: 'hot', limit: 100 })
+      .then(data => {
+        if (!cancelled) setArticles(prev => ({ ...prev, hot: data }))
+      })
+      .catch(error => {
+        if (!cancelled) {
+          toast.error(error instanceof Error ? error.message : '加载失败')
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => { cancelled = true }
+  }, [initial.length])
 
   const currentLabel = categories.find(c => c.key === activeCategory)?.label || '热榜'
 
@@ -293,7 +304,11 @@ export function JuejinClient({
               return (
                 <button
                   key={c.key}
-                  onClick={() => { setActiveCategory(c.key); resetScroll() }}
+                  onClick={() => {
+                    setActiveCategory(c.key)
+                    resetScroll()
+                    if (!articles[c.key]?.length) void load(c.key)
+                  }}
                   className={cn(
                     'flex-shrink-0 px-3 py-1 rounded-full text-xs transition-colors',
                     active

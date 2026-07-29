@@ -55,7 +55,7 @@ function LoginDialog({
   const [qr, setQr] = useState<string>('')
   const [token, setToken] = useState<string>('')
   const [msg, setMsg] = useState<string>('正在获取二维码…')
-  const [busy, setBusy] = useState(false)
+  const [busy, setBusy] = useState(true)
   const stopRef = useRef(false)
 
   const start = useCallback(async () => {
@@ -78,9 +78,24 @@ function LoginDialog({
       stopRef.current = true
       return
     }
-    start()
+    stopRef.current = false
+    void startWechatQrcode()
+      .then(({ qr_data_url, login_token }) => {
+        if (stopRef.current) return
+        setQr(qr_data_url)
+        setToken(login_token)
+        setMsg(SCAN_STATUS_TEXT[0])
+      })
+      .catch(error => {
+        if (!stopRef.current) {
+          setMsg(error instanceof Error ? error.message : '获取二维码失败')
+        }
+      })
+      .finally(() => {
+        if (!stopRef.current) setBusy(false)
+      })
     return () => { stopRef.current = true }
-  }, [open, start])
+  }, [open])
 
   // poll loop
   useEffect(() => {
@@ -176,8 +191,11 @@ function SubscriptionsDialog({
   }, [])
 
   useEffect(() => {
-    if (open) refreshSubscribed()
-  }, [open, refreshSubscribed])
+    if (!open) return
+    void listSubscribedAccounts()
+      .then(setSubscribed)
+      .catch(error => toast.error(error instanceof Error ? error.message : '加载订阅失败'))
+  }, [open])
 
   async function doSearch(e?: React.FormEvent) {
     e?.preventDefault()
@@ -348,6 +366,14 @@ function AuthPill({
   onLogin: () => void
   onLogout: () => void
 }) {
+  const [now, setNow] = useState(() => Date.now())
+
+  useEffect(() => {
+    if (!state?.logged_in || !state.expires_at) return
+    const timer = window.setInterval(() => setNow(Date.now()), 60_000)
+    return () => window.clearInterval(timer)
+  }, [state?.expires_at, state?.logged_in])
+
   if (!state) {
     return (
       <span className="text-[11px] text-zinc-400 px-2 py-0.5">登录态加载中…</span>
@@ -362,7 +388,7 @@ function AuthPill({
     )
   }
   const remaining = state.expires_at
-    ? Math.max(0, Math.round((new Date(state.expires_at).getTime() - Date.now()) / 60000))
+    ? Math.max(0, Math.round((new Date(state.expires_at).getTime() - now) / 60000))
     : 0
   return (
     <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-green-50 dark:bg-green-950 border border-green-200/60 dark:border-green-900">
@@ -647,7 +673,17 @@ export function WechatClient({ initialArticles }: { initialArticles: WechatArtic
     }
   }
 
-  useEffect(() => { reloadAuth() }, [reloadAuth])
+  useEffect(() => {
+    void getWechatAuthState()
+      .then(setAuth)
+      .catch(() => setAuth({
+        logged_in: false,
+        nickname: '',
+        avatar: '',
+        expires_at: null,
+        expired: false,
+      }))
+  }, [])
 
   // Resume showing progress if a collect job is already running (page reopened / 2nd tab)
   useEffect(() => {
@@ -841,7 +877,9 @@ export function WechatClient({ initialArticles }: { initialArticles: WechatArtic
         )}
       />
 
-      <LoginDialog open={loginOpen} onOpenChange={setLoginOpen} onLoggedIn={reloadAuth} />
+      {loginOpen && (
+        <LoginDialog open onOpenChange={setLoginOpen} onLoggedIn={reloadAuth} />
+      )}
       <SubscriptionsDialog open={subsOpen} onOpenChange={setSubsOpen}
         onChanged={() => { reloadArticles() }} />
     </div>

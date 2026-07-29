@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { useState, useEffect, useRef, useMemo, useSyncExternalStore } from 'react'
 import {
   BookMarked, Trash2, Save, RefreshCw, FileText, Clock,
   ChevronRight, Loader2, Plus, X,
@@ -79,6 +79,48 @@ function formatDate(iso: string) {
 
 // ── Main Component ─────────────────────────────────────────────────────────────
 
+const subscribeToHydration = () => () => {}
+const getHydratedClientSnapshot = () => true
+const getHydratedServerSnapshot = () => false
+const emptyStoredChat = {
+  history: [] as ChatMessage[],
+  sessionName: null as string | null,
+  pending: null as string | null,
+}
+
+function chatStorageKey(draftId: number) {
+  return `wms-chat-${draftId}`
+}
+
+function saveChatToStorage(
+  draftId: number,
+  history: ChatMessage[],
+  sessionName: string | null,
+  pending: string | null,
+) {
+  try {
+    localStorage.setItem(
+      chatStorageKey(draftId),
+      JSON.stringify({ history, sessionName, pending }),
+    )
+  } catch {}
+}
+
+function loadChatFromStorage(draftId: number): {
+  history: ChatMessage[]
+  sessionName: string | null
+  pending: string | null
+} {
+  if (typeof localStorage === 'undefined') {
+    return { history: [], sessionName: null, pending: null }
+  }
+  try {
+    const raw = localStorage.getItem(chatStorageKey(draftId))
+    if (raw) return JSON.parse(raw)
+  } catch {}
+  return { history: [], sessionName: null, pending: null }
+}
+
 export function DraftsClient({
   initialDrafts,
   initialTopics,
@@ -123,17 +165,29 @@ export function DraftsClient({
   const [publishOpen, setPublishOpen] = useState(false)
   const [assetsOpen, setAssetsOpen] = useState(false)
   const [assetsTab, setAssetsTab] = useState<'sources' | 'images'>('sources')
-  const [chatHistory, setChatHistory] = useState<ChatMessage[]>([])
-  const [chatSessionName, setChatSessionName] = useState<string | null>(null)
+  const hydrated = useSyncExternalStore(
+    subscribeToHydration,
+    getHydratedClientSnapshot,
+    getHydratedServerSnapshot,
+  )
+  const storedInitialChat = hydrated && initialDraft
+    ? loadChatFromStorage(initialDraft.id)
+    : emptyStoredChat
+  const [chatState, setChatState] = useState<typeof emptyStoredChat | null>(null)
+  const chatHistory = chatState ? chatState.history : storedInitialChat.history
+  const chatSessionName = chatState ? chatState.sessionName : storedInitialChat.sessionName
   const [chatInput, setChatInput] = useState('')
   const [chatLoading, setChatLoading] = useState(false)
-  const [pendingContent, setPendingContent] = useState<string | null>(null)
+  const pendingContent = chatState ? chatState.pending : storedInitialChat.pending
   const chatEndRef = useRef<HTMLDivElement>(null)
   const editorRef = useRef<MarkdownEditorHandle>(null)
 
   // Image library state
   const [images, setImages] = useState<DraftImage[]>([])
-  const [imagesLoading, setImagesLoading] = useState(false)
+  const [imagesLoading, setImagesLoading] = useState(initialDraft !== null)
+  const [initialImageRootId] = useState(
+    () => initialDraft ? initialDraft.linked_draft_id ?? initialDraft.id : null,
+  )
   const [uploadingImage, setUploadingImage] = useState(false)
   const imageInputRef = useRef<HTMLInputElement>(null)
 
@@ -142,6 +196,18 @@ export function DraftsClient({
   const [deleting, setDeleting] = useState(false)
   const [creatingVariant, setCreatingVariant] = useState(false)
   const [adaptMenuOpen, setAdaptMenuOpen] = useState(false)
+
+  function setChatHistory(history: ChatMessage[]) {
+    setChatState(current => ({ ...(current ?? storedInitialChat), history }))
+  }
+
+  function setChatSessionName(sessionName: string | null) {
+    setChatState(current => ({ ...(current ?? storedInitialChat), sessionName }))
+  }
+
+  function setPendingContent(pending: string | null) {
+    setChatState(current => ({ ...(current ?? storedInitialChat), pending }))
+  }
 
   // Confirm dialog
   const [confirmDialog, setConfirmDialog] = useState<{
@@ -166,48 +232,21 @@ export function DraftsClient({
       .length
   , [editContent])
 
-  function chatStorageKey(draftId: number) { return `wms-chat-${draftId}` }
-
-  function saveChatToStorage(draftId: number, history: ChatMessage[], sessionName: string | null, pending: string | null) {
-    try {
-      localStorage.setItem(chatStorageKey(draftId), JSON.stringify({ history, sessionName, pending }))
-    } catch {}
-  }
-
-  function loadChatFromStorage(draftId: number): { history: ChatMessage[]; sessionName: string | null; pending: string | null } {
-    try {
-      const raw = localStorage.getItem(chatStorageKey(draftId))
-      if (raw) return JSON.parse(raw)
-    } catch {}
-    return { history: [], sessionName: null, pending: null }
-  }
-
-  // Sync editor when active draft changes
-  const prevDraftIdRef = useRef<number | undefined>(undefined)
+  // Load the initial draft's image library. Later draft changes load from
+  // activateDraft(), where the user action also resets the editor state.
   useEffect(() => {
-    if (!selected) return
-    // Persist current chat state before switching drafts
-    if (prevDraftIdRef.current !== undefined && prevDraftIdRef.current !== selected.id) {
-      saveChatToStorage(prevDraftIdRef.current, chatHistory, chatSessionName, pendingContent)
-    }
-    prevDraftIdRef.current = selected.id
-    setEditTitle(selected.title)
-    setEditContent(selected.content)
-    setEditStatus(selected.status)
-    setEditWritingPlanId(selected.writing_plan_id ?? null)
-    setEditSources(selected.sources ?? [])
-    // Restore persisted chat state for this draft
-    const saved = loadChatFromStorage(selected.id)
-    setChatHistory(saved.history)
-    setChatSessionName(saved.sessionName)
-    setPendingContent(saved.pending)
-    setDirty(false)
-    // Load image library for this draft group
-    setImages([])
-    const rootId = selected.linked_draft_id ?? selected.id
-    setImagesLoading(true)
-    getDraftImages(rootId).then(setImages).catch(() => {}).finally(() => setImagesLoading(false))
-  }, [selected?.id])
+    if (initialImageRootId === null) return
+    let cancelled = false
+    void getDraftImages(initialImageRootId)
+      .then(items => {
+        if (!cancelled) setImages(items)
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setImagesLoading(false)
+    })
+    return () => { cancelled = true }
+  }, [initialImageRootId])
 
   useEffect(() => { getWritingPlans().then(t => setTopicList(t)).catch(() => {}) }, [])
 
@@ -220,15 +259,6 @@ export function DraftsClient({
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
   }, [adaptMenuOpen])
-
-  // Ctrl/Cmd + S
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); if (dirty) handleSave() }
-    }
-    window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
-  }, [dirty, editTitle, editContent, editStatus, editWritingPlanId])
 
   // ── Filtering ──────────────────────────────────────────────────────────────
 
@@ -244,10 +274,40 @@ export function DraftsClient({
 
   // ── Handlers ───────────────────────────────────────────────────────────────
 
+  function activateDraft(next: Draft | null) {
+    if (next?.id === selected?.id) {
+      setSelected(next)
+      return
+    }
+    if (selected) {
+      saveChatToStorage(selected.id, chatHistory, chatSessionName, pendingContent)
+    }
+    setSelected(next)
+    if (!next) return
+
+    setEditTitle(next.title)
+    setEditContent(next.content)
+    setEditStatus(next.status)
+    setEditWritingPlanId(next.writing_plan_id ?? null)
+    setEditSources(next.sources ?? [])
+    const saved = loadChatFromStorage(next.id)
+    setChatHistory(saved.history)
+    setChatSessionName(saved.sessionName)
+    setPendingContent(saved.pending)
+    setDirty(false)
+    setImages([])
+    setImagesLoading(true)
+    const rootId = next.linked_draft_id ?? next.id
+    void getDraftImages(rootId)
+      .then(setImages)
+      .catch(() => {})
+      .finally(() => setImagesLoading(false))
+  }
+
   function doSelectGroup(group: DraftGroup) {
     setSelectedGroup(group)
     const article = [group.root, ...group.variants].find(d => d.draft_type === 'article')
-    setSelected(article ?? group.root)
+    activateDraft(article ?? group.root)
   }
 
   function handleSelectGroup(group: DraftGroup) {
@@ -271,11 +331,11 @@ export function DraftsClient({
         description: '切换版本后当前修改将丢失，确定继续？',
         confirmLabel: '放弃修改',
         danger: true,
-        onConfirm: () => setSelected(draft),
+        onConfirm: () => activateDraft(draft),
       })
       return
     }
-    setSelected(draft)
+    activateDraft(draft)
   }
 
   async function handleSave() {
@@ -290,7 +350,7 @@ export function DraftsClient({
       if (JSON.stringify(editSources) !== JSON.stringify(selected.sources ?? [])) body.sources = editSources
       const updated = await updateDraft(selected.id, body)
       setDrafts(ds => ds.map(d => d.id === updated.id ? updated : d))
-      setSelected(updated)
+      activateDraft(updated)
       setDirty(false)
       toast.success('已保存')
     } catch {
@@ -299,6 +359,18 @@ export function DraftsClient({
       setSaving(false)
     }
   }
+
+  // Ctrl/Cmd + S
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+        e.preventDefault()
+        if (dirty) void handleSave()
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [dirty, handleSave])
 
   async function handleDelete() {
     if (!selected) return
@@ -325,10 +397,10 @@ export function DraftsClient({
         if (refreshedGroup) {
           setSelectedGroup(refreshedGroup)
           const remaining = [refreshedGroup.root, ...refreshedGroup.variants]
-          setSelected(remaining[0] ?? null)
+          activateDraft(remaining[0] ?? null)
         } else {
           setSelectedGroup(nextGroups[0] ?? null)
-          setSelected(nextGroups[0]?.root ?? null)
+          activateDraft(nextGroups[0]?.root ?? null)
         }
       }
       toast.success('已删除')
@@ -349,7 +421,7 @@ export function DraftsClient({
       const newGroup = freshGroups.find(g => g.root.id === draft.id)
       if (newGroup) {
         setSelectedGroup(newGroup)
-        setSelected(draft)
+        activateDraft(draft)
       }
       toast.success('已新建草稿')
     } catch {
@@ -366,7 +438,7 @@ export function DraftsClient({
       setDrafts(fresh)
       if (selected) {
         const refreshed = fresh.find(d => d.id === selected.id)
-        if (refreshed) setSelected(refreshed)
+        if (refreshed) activateDraft(refreshed)
       }
     } catch {
       toast.error('刷新失败')
@@ -398,7 +470,7 @@ export function DraftsClient({
       if (newGroup) {
         setSelectedGroup(newGroup)
         const newVariant = fresh.find(d => d.id === variant.id)
-        if (newVariant) { setSelected(newVariant); setChatOpen(true) }
+        if (newVariant) { activateDraft(newVariant); setChatOpen(true) }
       }
       toast.success(`已创建${typeLabel}版本`)
     } catch {
@@ -477,8 +549,8 @@ export function DraftsClient({
     }
   }
 
-  function handleNewChatSession() {
-    const newSession = `wms-draft-${selected?.id}-${Date.now()}`
+  function handleNewChatSession(event: React.MouseEvent<HTMLButtonElement>) {
+    const newSession = `wms-draft-${selected?.id}-${event.timeStamp.toString(36)}`
     setChatHistory([])
     setPendingContent(null)
     setChatSessionName(newSession)
@@ -940,24 +1012,26 @@ export function DraftsClient({
 
       {selected && (
         <>
-          <DraftAssetsDialog
-            open={assetsOpen}
-            onClose={() => setAssetsOpen(false)}
-            initialTab={assetsTab}
-            draftId={selected.linked_draft_id ?? selected.id}
-            sources={editSources}
-            onSourcesChange={next => { setEditSources(next); setDirty(true) }}
-            images={images}
-            imagesLoading={imagesLoading}
-            uploading={uploadingImage}
-            onUpload={handleImageUpload}
-            onDelete={handleImageDelete}
-            onInsert={handleInsertImage}
-            onRefreshImages={() => {
-              const rootId = selected.linked_draft_id ?? selected.id
-              getDraftImages(rootId).then(setImages).catch(() => {})
-            }}
-          />
+          {assetsOpen && (
+            <DraftAssetsDialog
+              open
+              onClose={() => setAssetsOpen(false)}
+              initialTab={assetsTab}
+              draftId={selected.linked_draft_id ?? selected.id}
+              sources={editSources}
+              onSourcesChange={next => { setEditSources(next); setDirty(true) }}
+              images={images}
+              imagesLoading={imagesLoading}
+              uploading={uploadingImage}
+              onUpload={handleImageUpload}
+              onDelete={handleImageDelete}
+              onInsert={handleInsertImage}
+              onRefreshImages={() => {
+                const rootId = selected.linked_draft_id ?? selected.id
+                getDraftImages(rootId).then(setImages).catch(() => {})
+              }}
+            />
+          )}
           <PublishDialog
             open={publishOpen}
             onClose={() => setPublishOpen(false)}

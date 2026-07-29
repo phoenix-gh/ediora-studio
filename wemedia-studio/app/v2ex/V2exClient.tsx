@@ -382,6 +382,23 @@ export function V2exClient({
   const useSidePanel = useMediaQuery('(min-width: 1440px)')
 
   const selectedSub = selectedSubId ? subs.find(s => s.id === selectedSubId) ?? null : null
+  const filtered = useMemo(() => {
+    let list = topics
+    if (search) {
+      const q = search.toLowerCase()
+      list = list.filter(t =>
+        t.title.toLowerCase().includes(q) ||
+        t.author.toLowerCase().includes(q)
+      )
+    }
+    return list
+  }, [topics, search])
+
+  const { visibleCount, sentinelRef, hasMore, reset: resetScroll } = useInfiniteScroll({
+    totalCount: filtered.length,
+    pageSize: PAGE_SIZE,
+  })
+  const visible = filtered.slice(0, visibleCount)
 
   function openReader(topic: V2exTopic) {
     const sub = subs.find(s => s.id === topic.subscription_id)
@@ -487,24 +504,6 @@ export function V2exClient({
     setDays(d)
     await refreshTopics({ daysVal: d })
   }
-
-  const filtered = useMemo(() => {
-    let list = topics
-    if (search) {
-      const q = search.toLowerCase()
-      list = list.filter(t =>
-        t.title.toLowerCase().includes(q) ||
-        t.author.toLowerCase().includes(q)
-      )
-    }
-    return list
-  }, [topics, search])
-
-  const { visibleCount, sentinelRef, hasMore, reset: resetScroll } = useInfiniteScroll({
-    totalCount: filtered.length,
-    pageSize: PAGE_SIZE,
-  })
-  const visible = filtered.slice(0, visibleCount)
 
   return (
     <div className="flex h-full">

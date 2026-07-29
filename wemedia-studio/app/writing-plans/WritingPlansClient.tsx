@@ -196,7 +196,7 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
   const [refreshing, setRefreshing] = useState(false)
 
   // Strategy editing
-  const [strategyDraft, setStrategyDraft] = useState('')
+  const [strategyDraft, setStrategyDraft] = useState(initialPlans[0]?.strategy ?? '')
   const [savingBrief, setSavingBrief] = useState(false)
   const [dispatching, setDispatching] = useState(false)
   const [showDispatchConfirm, setShowDispatchConfirm] = useState(false)
@@ -293,18 +293,6 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
   // Deleting
   const [deleting, setDeleting] = useState(false)
 
-  // Sync selected plan when plans list refreshes
-  useEffect(() => {
-    if (!selected) return
-    const fresh = plans.find(p => p.id === selected.id)
-    if (fresh) setSelected(fresh)
-  }, [plans])
-
-  // Sync strategy draft when plan changes
-  useEffect(() => {
-    setStrategyDraft(selected?.strategy ?? '')
-  }, [selected?.id])
-
   useEffect(() => {
     if (editingTitle) titleRef.current?.focus()
   }, [editingTitle])
@@ -312,29 +300,6 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
   useEffect(() => {
     if (showNewForm) newTitleRef.current?.focus()
   }, [showNewForm])
-
-  // Load drafts when tab switches
-  useEffect(() => {
-    if (activeTab !== 'drafts' || !selected) return
-    setLoadingDrafts(true)
-    getPlanDrafts(selected.id)
-      .then(setDrafts)
-      .catch(() => toast.error('加载产出失败'))
-      .finally(() => setLoadingDrafts(false))
-  }, [activeTab, selected?.id])
-
-  // Load updates when tab switches
-  useEffect(() => {
-    if (activeTab !== 'updates' || !selected) return
-    setLoadingUpdates(true)
-    getPlanUpdates(selected.id)
-      .then(setPlanUpdates)
-      .catch(() => toast.error('加载更新历史失败'))
-      .finally(() => setLoadingUpdates(false))
-  }, [activeTab, selected?.id])
-
-  // Reset updates when plan changes
-  useEffect(() => { setPlanUpdates([]) }, [selected?.id])
 
   // Derived: visible plans
   const visiblePlans = useMemo(() => {
@@ -366,6 +331,9 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
     try {
       const [freshPlans, freshTags] = await Promise.all([getWritingPlans(), getTags()])
       setPlans(freshPlans)
+      setSelected(current => (
+        current ? freshPlans.find(plan => plan.id === current.id) ?? current : current
+      ))
       setAllTags(freshTags)
     } catch { toast.error('刷新失败') }
     finally { setRefreshing(false) }
@@ -462,8 +430,29 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
 
   function handleSelectPlan(p: WritingPlan) {
     setSelected(p)
+    setStrategyDraft(p.strategy)
+    setPlanUpdates([])
     setPreviewSource(null)
     setActiveTab('strategy')
+  }
+
+  function handleSelectTab(tab: ActiveTab) {
+    setActiveTab(tab)
+    if (!selected) return
+    if (tab === 'drafts') {
+      setLoadingDrafts(true)
+      void getPlanDrafts(selected.id)
+        .then(setDrafts)
+        .catch(() => toast.error('加载产出失败'))
+        .finally(() => setLoadingDrafts(false))
+    }
+    if (tab === 'updates') {
+      setLoadingUpdates(true)
+      void getPlanUpdates(selected.id)
+        .then(setPlanUpdates)
+        .catch(() => toast.error('加载更新历史失败'))
+        .finally(() => setLoadingUpdates(false))
+    }
   }
 
   function openEdit() {
@@ -582,8 +571,11 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
     try {
       await deleteWritingPlan(selected.id)
       const fresh = await getWritingPlans()
+      const next = fresh[0] ?? null
       setPlans(fresh)
-      setSelected(fresh[0] ?? null)
+      setSelected(next)
+      setStrategyDraft(next?.strategy ?? '')
+      setPlanUpdates([])
     } catch { toast.error('删除失败') }
     finally { setDeleting(false) }
   }
@@ -595,8 +587,11 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
     try {
       await createWritingPlan({ title, priority: newPriority, tags: [] })
       const fresh = await getWritingPlans()
+      const next = fresh.find(p => p.title === title) ?? fresh[0] ?? null
       setPlans(fresh)
-      setSelected(fresh.find(p => p.title === title) ?? fresh[0])
+      setSelected(next)
+      setStrategyDraft(next?.strategy ?? '')
+      setPlanUpdates([])
       setShowNewForm(false)
       setNewTitle('')
     } catch (e: unknown) {
@@ -913,7 +908,7 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
             {(['strategy', 'sources', 'drafts', 'updates'] as ActiveTab[]).map(tab => (
               <button
                 key={tab}
-                onClick={() => setActiveTab(tab)}
+                onClick={() => handleSelectTab(tab)}
                 className={cn(
                   'text-xs py-2.5 px-1 mr-6 font-medium border-b-2 transition-colors',
                   activeTab === tab
@@ -1115,7 +1110,7 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
               <SendHorizonal className="w-4 h-4 text-indigo-500" />
               <h3 className="font-semibold text-zinc-900 dark:text-zinc-100">分析文章 → 提炼方案</h3>
             </div>
-            <p className="text-xs text-zinc-500">Scout 会分析文章，在写作方案库中查找相似方案，决定更新/跳过/新建，并在"更新历史"记录决策。</p>
+            <p className="text-xs text-zinc-500">Scout 会分析文章，在写作方案库中查找相似方案，决定更新/跳过/新建，并在“更新历史”记录决策。</p>
             <div className="flex gap-2">
               {(['url', 'text'] as const).map(t => (
                 <button

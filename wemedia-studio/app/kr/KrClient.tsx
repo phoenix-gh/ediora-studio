@@ -150,7 +150,7 @@ export function KrClient({ initial }: { initial: KrArticle[] }) {
     newsflash: [],
   })
   const [search, setSearch] = useState('')
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(initial.length === 0)
   const [collecting, setCollecting] = useState(false)
 
   // Reader state — switches between right-side panel (wide screens) and modal
@@ -196,39 +196,6 @@ export function KrClient({ initial }: { initial: KrArticle[] }) {
     }
   }
 
-  const load = useCallback(async (tab: KrFeedType) => {
-    setLoading(true)
-    try {
-      const data = await getKrArticles({
-        feed_type: tab,
-        days: tab === 'newsflash' ? 3 : tab === 'article' ? 7 : 365,
-        limit: tab === 'hot' ? 50 : 100,
-        search: search || undefined,
-      })
-      setArticles(prev => ({ ...prev, [tab]: data }))
-      resetScroll()
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : '加载失败')
-    } finally {
-      setLoading(false)
-    }
-  }, [search])
-
-  // Load when tab changes (if data is empty) or search changes
-  useEffect(() => {
-    if (articles[activeTab].length === 0) {
-      load(activeTab)
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab])
-
-  useEffect(() => {
-    if (!search) return
-    const t = setTimeout(() => load(activeTab), 300)
-    return () => clearTimeout(t)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search])
-
   async function handleCollect() {
     setCollecting(true)
     try {
@@ -254,6 +221,49 @@ export function KrClient({ initial }: { initial: KrArticle[] }) {
     pageSize: PAGE_SIZE,
   })
   const visible = filtered.slice(0, visibleCount)
+
+  const load = useCallback(async (tab: KrFeedType) => {
+    setLoading(true)
+    try {
+      const data = await getKrArticles({
+        feed_type: tab,
+        days: tab === 'newsflash' ? 3 : tab === 'article' ? 7 : 365,
+        limit: tab === 'hot' ? 50 : 100,
+        search: search || undefined,
+      })
+      setArticles(prev => ({ ...prev, [tab]: data }))
+      resetScroll()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : '加载失败')
+    } finally {
+      setLoading(false)
+    }
+  }, [search])
+
+  useEffect(() => {
+    if (!search) return
+    const t = setTimeout(() => load(activeTab), 300)
+    return () => clearTimeout(t)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search])
+
+  useEffect(() => {
+    if (initial.length > 0) return
+    let cancelled = false
+    void getKrArticles({ feed_type: 'hot', days: 365, limit: 50 })
+      .then(data => {
+        if (!cancelled) setArticles(prev => ({ ...prev, hot: data }))
+      })
+      .catch(error => {
+        if (!cancelled) {
+          toast.error(error instanceof Error ? error.message : '加载失败')
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => { cancelled = true }
+  }, [initial.length])
 
   const tabMeta = TABS.find(t => t.key === activeTab)!
   const TabIcon = tabMeta.icon
@@ -305,7 +315,11 @@ export function KrClient({ initial }: { initial: KrArticle[] }) {
             return (
               <button
                 key={t.key}
-                onClick={() => { setActiveTab(t.key); resetScroll() }}
+                onClick={() => {
+                  setActiveTab(t.key)
+                  resetScroll()
+                  if (!articles[t.key]?.length) void load(t.key)
+                }}
                 className={cn(
                   'flex items-center gap-1.5 px-3 py-1 rounded-full text-xs transition-colors',
                   active

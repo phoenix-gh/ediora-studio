@@ -84,7 +84,6 @@ function ImageJobPreview({ jobId }: { jobId: number }) {
 
   useEffect(() => {
     let cancelled = false
-    let timer: ReturnType<typeof setInterval> | undefined
     const refresh = async () => {
       try {
         const job = await getJob(jobId)
@@ -92,17 +91,17 @@ function ImageJobPreview({ jobId }: { jobId: number }) {
         setStatus(job.status)
         setUrls(imageUrlsForJob(job))
         if (job.status === 'succeeded' || job.status === 'failed' || job.status === 'cancelled') {
-          if (timer) clearInterval(timer)
+          clearInterval(timer)
         }
       } catch {
         if (!cancelled) setStatus('failed')
       }
     }
     void refresh()
-    timer = setInterval(() => void refresh(), 2_000)
+    const timer = setInterval(() => void refresh(), 2_000)
     return () => {
       cancelled = true
-      if (timer) clearInterval(timer)
+      clearInterval(timer)
     }
   }, [jobId])
 

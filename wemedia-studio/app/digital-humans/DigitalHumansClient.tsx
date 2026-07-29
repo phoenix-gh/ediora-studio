@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useSyncExternalStore } from 'react'
 import { Plus } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
@@ -17,6 +17,13 @@ import { RoleLibrary } from './RoleLibrary'
 import { TalkingProjectList } from './TalkingProjectList'
 import { TalkingVideoEditor } from './TalkingVideoEditor'
 
+const subscribeToInitialLocation = () => () => {}
+const noProjectFromServer = () => null
+
+function projectIdFromLocation() {
+  const value = Number(new URLSearchParams(window.location.search).get('project'))
+  return Number.isSafeInteger(value) && value > 0 ? value : null
+}
 
 export function DigitalHumansClient({
   initialRoles,
@@ -27,16 +34,19 @@ export function DigitalHumansClient({
 }) {
   const [roles, setRoles] = useState(initialRoles)
   const [projects, setProjects] = useState(initialProjects)
-  const [selectedProjectId, setSelectedProjectId] = useState<number | null>(
-    initialProjects[0]?.id ?? null,
+  const projectIdFromUrl = useSyncExternalStore(
+    subscribeToInitialLocation,
+    projectIdFromLocation,
+    noProjectFromServer,
   )
-  useEffect(() => {
-    const value = Number(new URLSearchParams(window.location.search).get('project'))
-    if (Number.isSafeInteger(value) && value > 0) setSelectedProjectId(value)
-  }, [])
+  const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null)
   const [roleEditorOpen, setRoleEditorOpen] = useState(false)
   const [editingRole, setEditingRole] = useState<DigitalHuman | null>(null)
-  const selectedProject = projects.find(project => project.id === selectedProjectId)
+  const effectiveProjectId = selectedProjectId
+    ?? projectIdFromUrl
+    ?? initialProjects[0]?.id
+    ?? null
+  const selectedProject = projects.find(project => project.id === effectiveProjectId)
     ?? projects[0]
 
   const hasProcessing = roles.some(role => role.status === 'processing')
@@ -149,12 +159,14 @@ export function DigitalHumansClient({
           />
         </TabsContent>
       </Tabs>
-      <RoleEditorDialog
-        open={roleEditorOpen}
-        role={editingRole}
-        onClose={() => setRoleEditorOpen(false)}
-        onCreated={updateRole}
-      />
+      {roleEditorOpen && (
+        <RoleEditorDialog
+          open
+          role={editingRole}
+          onClose={() => setRoleEditorOpen(false)}
+          onCreated={updateRole}
+        />
+      )}
     </div>
   )
 }
