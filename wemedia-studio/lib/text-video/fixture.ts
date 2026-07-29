@@ -1,6 +1,7 @@
 import type { TextVideoRenderInput } from '@/remotion/contract'
+import type { SpeechStatus } from '@/lib/api/text-videos'
 
-export type SpeechParagraphStatus = 'confirmed' | 'ready' | 'draft'
+export type SpeechParagraphStatus = SpeechStatus
 
 export type SpeechParagraph = {
   id: string

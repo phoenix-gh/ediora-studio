@@ -899,6 +899,11 @@ class TextVideoProject(Base):
     script: Mapped[str] = mapped_column(Text, nullable=False, default="")
     voice_settings: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     paragraphs: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    speech_split_mode: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="single"
+    )
+    master_audio: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    scene_plan: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     render_input: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     cover_asset_url: Mapped[str] = mapped_column(String, nullable=False, default="")
     output_asset_url: Mapped[str] = mapped_column(String, nullable=False, default="")
@@ -906,6 +911,22 @@ class TextVideoProject(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=now_utc, onupdate=now_utc
+    )
+
+
+class TextVideoSpeechAsset(Base):
+    __tablename__ = "text_video_speech_assets"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    creative_asset_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    source_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    duration: Mapped[float] = mapped_column(Float, nullable=False)
+    word_timings: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    provider_request_id: Mapped[str] = mapped_column(
+        String, nullable=False, default=""
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=now_utc
     )
 
 

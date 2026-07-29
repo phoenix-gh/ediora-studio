@@ -270,7 +270,7 @@ function documentToWorkbench(project: TextVideoProject): TextVideoFixtureProject
     title: project.title,
     description: '',
     script: project.script,
-    voiceName: String(project.voice_settings.voice_name ?? '默认音色'),
+    voiceName: project.voice_settings.voice_id || '默认音色',
     paragraphs: project.paragraphs.map(paragraph => ({
       id: paragraph.id,
       text: paragraph.text,

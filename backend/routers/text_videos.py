@@ -1,3 +1,4 @@
+from copy import deepcopy
 from datetime import datetime
 from typing import Any, Literal
 
@@ -8,18 +9,52 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
 from models import TextVideoProject, now_utc
+from text_video_domain import (
+    default_speech_segment,
+    empty_master_audio,
+    empty_scene_plan,
+    merge_editable_project,
+    normalize_speech_segments,
+    video_stage_ready,
+)
 
 
 router = APIRouter(prefix="/text-videos", tags=["text-videos"])
 
 
-class ParagraphDocument(BaseModel):
+class WordTimingDocument(BaseModel):
+    id: str
+    text: str
+    start: float = Field(ge=0)
+    end: float = Field(ge=0)
+
+
+class SpeechSegmentDocument(BaseModel):
     id: str = Field(min_length=1)
     text: str = ""
     duration: float = Field(default=0, ge=0)
-    status: Literal["draft", "ready", "confirmed"] = "draft"
+    status: Literal["draft", "generating", "ready", "confirmed", "failed"] = "draft"
     audio_url: str = ""
-    word_timings: list[dict[str, Any]] = Field(default_factory=list)
+    word_timings: list[WordTimingDocument] = Field(default_factory=list)
+    source_hash: str = ""
+    generation_revision: int = Field(default=0, ge=0)
+    error: str = ""
+    job_id: int | None = None
+
+
+class SpeechSegmentEdit(BaseModel):
+    id: str = Field(min_length=1)
+    text: str = ""
+
+
+class VoiceSettingsDocument(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    voice_id: str = ""
+    model: str = ""
+    speed: float = Field(default=1, ge=0.5, le=2)
+    volume: float = Field(default=1, ge=0, le=2)
+    pitch: float = Field(default=0, ge=-12, le=12)
 
 
 class CompositionDocument(BaseModel):
@@ -79,6 +114,25 @@ class RenderInputDocument(BaseModel):
         return self
 
 
+class TemplateSelectionDocument(BaseModel):
+    templateId: str
+    templateVersion: int = Field(ge=1)
+    templateProps: dict[str, Any] = Field(default_factory=dict)
+
+
+class ScenePlanSceneEdit(BaseModel):
+    id: str = Field(min_length=1)
+    fromWordId: str = ""
+    throughWordId: str = ""
+    displayText: str = ""
+    highlight: list[str] = Field(default_factory=list)
+    animation: str = ""
+
+
+class ScenePlanEdit(BaseModel):
+    scenes: list[ScenePlanSceneEdit]
+
+
 class ProjectCreate(BaseModel):
     title: str = Field(default="未命名文字视频", max_length=300)
 
@@ -89,30 +143,16 @@ class ProjectUpdate(BaseModel):
     status: Literal["draft", "audio_ready", "video_ready", "completed", "archived"] | None = None
     stage: Literal["script", "audio", "video"] | None = None
     script: str | None = None
-    voice_settings: dict[str, Any] | None = None
-    paragraphs: list[ParagraphDocument] | None = None
+    voice_settings: VoiceSettingsDocument | None = None
+    paragraphs: list[SpeechSegmentEdit] | None = None
+    composition: CompositionDocument | None = None
+    template: TemplateSelectionDocument | None = None
+    scene_plan: ScenePlanEdit | None = None
     render_input: RenderInputDocument | None = None
     cover_asset_url: str | None = None
     output_asset_url: str | None = None
 
-    @model_validator(mode="after")
-    def video_stage_gate(self):
-        if self.stage == "video" and (
-            not self.paragraphs
-            or any(paragraph.status != "confirmed" for paragraph in self.paragraphs)
-        ):
-            raise ValueError("进入视频合成前请先确认所有配音")
-        return self
-
-
-DEFAULT_PARAGRAPHS = [{
-    "id": "paragraph-1",
-    "text": "",
-    "duration": 0,
-    "status": "draft",
-    "audio_url": "",
-    "word_timings": [],
-}]
+DEFAULT_PARAGRAPHS = [default_speech_segment("", segment_id="paragraph-1")]
 
 DEFAULT_RENDER_INPUT = {
     "templateId": "tech-text-v1",
@@ -158,7 +198,13 @@ def serialize_project(project: TextVideoProject, *, summary: bool = False) -> di
         data.update({
             "script": project.script,
             "voice_settings": project.voice_settings or {},
-            "paragraphs": project.paragraphs or [],
+            "paragraphs": normalize_speech_segments(
+                project.script or "",
+                project.paragraphs or [],
+            ),
+            "speech_split_mode": project.speech_split_mode or "single",
+            "master_audio": empty_master_audio() | (project.master_audio or {}),
+            "scene_plan": empty_scene_plan() | (project.scene_plan or {}),
             "render_input": render_input,
         })
     return data
@@ -206,9 +252,18 @@ async def create_project(payload: ProjectCreate, db: AsyncSession = Depends(get_
         status="draft",
         stage="script",
         script="",
-        voice_settings={"voice_id": "", "speed": 1, "volume": 1, "pitch": 0},
-        paragraphs=DEFAULT_PARAGRAPHS,
-        render_input=DEFAULT_RENDER_INPUT,
+        voice_settings={
+            "voice_id": "",
+            "model": "",
+            "speed": 1,
+            "volume": 1,
+            "pitch": 0,
+        },
+        paragraphs=deepcopy(DEFAULT_PARAGRAPHS),
+        speech_split_mode="single",
+        master_audio=empty_master_audio(),
+        scene_plan=empty_scene_plan(),
+        render_input=deepcopy(DEFAULT_RENDER_INPUT),
         revision=1,
     )
     db.add(project)
@@ -241,16 +296,22 @@ async def update_project(
     changes = payload.model_dump(exclude_unset=True, exclude={"revision"}, mode="json")
     if changes.get("title") is not None:
         changes["title"] = changes["title"].strip() or "未命名文字视频"
-    next_stage = changes.get("stage", project.stage)
-    next_paragraphs = changes.get("paragraphs", project.paragraphs or [])
-    if next_stage == "video" and (
-        not next_paragraphs
-        or any(paragraph.get("status") != "confirmed" for paragraph in next_paragraphs)
-    ):
-        raise HTTPException(status_code=422, detail="进入视频合成前请先确认所有配音")
-
-    for key, value in changes.items():
-        setattr(project, key, value)
+    try:
+        merge_editable_project(
+            project,
+            changes,
+            speech_model=(
+                (project.voice_settings or {}).get("model")
+                or "mimo-v2.5-tts"
+            ),
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    if project.stage == "video" and not video_stage_ready(project):
+        raise HTTPException(
+            status_code=422,
+            detail="进入视频合成前请先确认所有配音并生成主音频时间轴",
+        )
     project.revision += 1
     project.updated_at = now_utc()
     await db.commit()

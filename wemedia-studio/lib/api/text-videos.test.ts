@@ -6,24 +6,9 @@ import {
   listTextVideoProjects,
   updateTextVideoProject,
 } from './text-videos'
+import { makeTextVideoProject } from '@/lib/text-video/test-fixtures'
 
-const project = {
-  id: 7,
-  title: '测试作品',
-  status: 'draft',
-  stage: 'script',
-  script: '',
-  voice_settings: {},
-  paragraphs: [],
-  render_input: {},
-  cover_asset_url: '',
-  output_asset_url: '',
-  revision: 1,
-  duration: 0,
-  aspect_ratio: '9:16',
-  created_at: '2026-07-29T00:00:00Z',
-  updated_at: '2026-07-29T00:00:00Z',
-}
+const project = makeTextVideoProject({ id: 7, title: '测试作品' })
 
 describe('text-video project API', () => {
   afterEach(() => vi.unstubAllGlobals())
@@ -61,5 +46,24 @@ describe('text-video project API', () => {
       'http://localhost:8000/api/text-videos/7',
       expect.objectContaining({ method: 'DELETE' }),
     )
+  })
+
+  it('provides complete authoritative document fixtures', () => {
+    expect(project.paragraphs[0]).toEqual(expect.objectContaining({
+      status: 'draft',
+      generation_revision: 0,
+      source_hash: '',
+      job_id: null,
+    }))
+    expect(project.master_audio).toEqual(expect.objectContaining({
+      status: 'missing',
+      timeline_status: 'missing',
+      word_timings: [],
+    }))
+    expect(project.scene_plan).toEqual(expect.objectContaining({
+      status: 'missing',
+      generation_revision: 0,
+      scenes: [],
+    }))
   })
 })

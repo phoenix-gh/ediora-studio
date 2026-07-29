@@ -96,21 +96,118 @@ async def _add_columns(conn, table_name: str, definitions: dict[str, str]) -> No
 
 async def migrate_text_video_project_schema(conn) -> None:
     """Keep early text-video project tables compatible across SQLite and PostgreSQL."""
+    import json
+
+    from sqlalchemy import JSON, bindparam, inspect, text
+
     json_object_default = "'{}'" if conn.dialect.name == "sqlite" else "'{}'::json"
     json_array_default = "'[]'" if conn.dialect.name == "sqlite" else "'[]'::json"
+    timestamp_definition = (
+        "TIMESTAMP"
+        if conn.dialect.name == "sqlite"
+        else "TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP"
+    )
+    tables = set(await conn.run_sync(
+        lambda sync_connection: inspect(sync_connection).get_table_names()
+    ))
+    if "text_video_projects" not in tables:
+        return
+    existing_columns = {
+        column["name"]
+        for column in await conn.run_sync(
+            lambda sync_connection: inspect(sync_connection)
+            .get_columns("text_video_projects")
+        )
+    }
+    had_split_mode = "speech_split_mode" in existing_columns
+    had_master_audio = "master_audio" in existing_columns
+    had_scene_plan = "scene_plan" in existing_columns
+
     await _add_columns(conn, "text_video_projects", {
         "status": "VARCHAR NOT NULL DEFAULT 'draft'",
         "stage": "VARCHAR NOT NULL DEFAULT 'script'",
         "script": "TEXT NOT NULL DEFAULT ''",
         "voice_settings": f"JSON NOT NULL DEFAULT {json_object_default}",
         "paragraphs": f"JSON NOT NULL DEFAULT {json_array_default}",
+        "speech_split_mode": "VARCHAR NOT NULL DEFAULT 'single'",
+        "master_audio": f"JSON NOT NULL DEFAULT {json_object_default}",
+        "scene_plan": f"JSON NOT NULL DEFAULT {json_object_default}",
         "render_input": f"JSON NOT NULL DEFAULT {json_object_default}",
         "cover_asset_url": "VARCHAR NOT NULL DEFAULT ''",
         "output_asset_url": "VARCHAR NOT NULL DEFAULT ''",
         "revision": "INTEGER NOT NULL DEFAULT 1",
-        "created_at": "TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP",
-        "updated_at": "TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP",
+        "created_at": timestamp_definition,
+        "updated_at": timestamp_definition,
     })
+
+    if conn.dialect.name == "sqlite":
+        await conn.execute(text(
+            "UPDATE text_video_projects "
+            "SET created_at = COALESCE(created_at, CURRENT_TIMESTAMP), "
+            "updated_at = COALESCE(updated_at, CURRENT_TIMESTAMP)"
+        ))
+
+    from text_video_domain import (
+        empty_master_audio,
+        empty_scene_plan,
+        normalize_speech_segments,
+    )
+
+    rows = (
+        await conn.execute(text(
+            "SELECT id, script, paragraphs, speech_split_mode, "
+            "master_audio, scene_plan FROM text_video_projects"
+        ))
+    ).mappings().all()
+
+    def decode_json(value, fallback):
+        if isinstance(value, str):
+            try:
+                return json.loads(value)
+            except json.JSONDecodeError:
+                return fallback
+        return value if value is not None else fallback
+
+    update_statement = text(
+        "UPDATE text_video_projects SET "
+        "paragraphs = :paragraphs, "
+        "speech_split_mode = :speech_split_mode, "
+        "master_audio = :master_audio, "
+        "scene_plan = :scene_plan "
+        "WHERE id = :id"
+    ).bindparams(
+        bindparam("paragraphs", type_=JSON),
+        bindparam("master_audio", type_=JSON),
+        bindparam("scene_plan", type_=JSON),
+    )
+    for row in rows:
+        script = str(row["script"] or "")
+        paragraphs = normalize_speech_segments(
+            script,
+            decode_json(row["paragraphs"], []),
+        )
+        split_mode = row["speech_split_mode"] if had_split_mode else ""
+        if split_mode not in {"single", "auto", "manual"}:
+            split_mode = "manual" if len(paragraphs) > 1 else "single"
+        master_audio = (
+            empty_master_audio()
+            | decode_json(row["master_audio"], {})
+            if had_master_audio
+            else empty_master_audio()
+        )
+        scene_plan = (
+            empty_scene_plan()
+            | decode_json(row["scene_plan"], {})
+            if had_scene_plan
+            else empty_scene_plan()
+        )
+        await conn.execute(update_statement, {
+            "id": row["id"],
+            "paragraphs": paragraphs,
+            "speech_split_mode": split_mode,
+            "master_audio": master_audio,
+            "scene_plan": scene_plan,
+        })
 
 
 async def migrate_content_response_schema(conn) -> None:

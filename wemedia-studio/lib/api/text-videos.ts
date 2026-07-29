@@ -4,14 +4,70 @@ import { API_BASE } from './client'
 
 export type TextVideoProjectStatus = 'draft' | 'audio_ready' | 'video_ready' | 'completed' | 'archived'
 export type TextVideoStage = 'script' | 'audio' | 'video'
+export type SpeechSplitMode = 'single' | 'auto' | 'manual'
+export type SpeechStatus = 'draft' | 'generating' | 'ready' | 'confirmed' | 'failed'
+
+export type TextVideoVoiceSettings = {
+  voice_id: string
+  model: string
+  speed: number
+  volume: number
+  pitch: number
+}
+
+export type WordTiming = {
+  id: string
+  text: string
+  start: number
+  end: number
+}
+
+export type GlobalWordTiming = WordTiming & {
+  speech_segment_id: string
+}
 
 export type TextVideoParagraph = {
   id: string
   text: string
   duration: number
-  status: 'draft' | 'ready' | 'confirmed'
+  status: SpeechStatus
   audio_url: string
-  word_timings: Array<Record<string, unknown>>
+  word_timings: WordTiming[]
+  source_hash: string
+  generation_revision: number
+  error: string
+  job_id: number | null
+}
+
+export type MasterAudioDocument = {
+  status: 'missing' | 'building' | 'ready' | 'stale' | 'failed'
+  timeline_status: 'missing' | 'aligning' | 'ready' | 'stale' | 'failed'
+  audio_url: string
+  duration: number
+  source_hash: string
+  word_timings: GlobalWordTiming[]
+  timeline_source: '' | 'provider' | 'forced-alignment'
+  error: string
+  timeline_error: string
+  job_id: number | null
+}
+
+export type ScenePlanSceneDocument = {
+  id: string
+  fromWordId: string
+  throughWordId: string
+  displayText: string
+  highlight: string[]
+  animation: string
+}
+
+export type ScenePlanDocument = {
+  status: 'missing' | 'generating' | 'ready' | 'stale' | 'failed'
+  generation_revision: number
+  master_source_hash: string
+  scenes: ScenePlanSceneDocument[]
+  job_id: number | null
+  error: string
 }
 
 export type TextVideoProjectSummary = {
@@ -30,23 +86,37 @@ export type TextVideoProjectSummary = {
 
 export type TextVideoProject = TextVideoProjectSummary & {
   script: string
-  voice_settings: Record<string, unknown>
+  voice_settings: TextVideoVoiceSettings
   paragraphs: TextVideoParagraph[]
+  speech_split_mode: SpeechSplitMode
+  master_audio: MasterAudioDocument
+  scene_plan: ScenePlanDocument
   render_input: TextVideoRenderInput
 }
 
-export type TextVideoProjectUpdate = Partial<Pick<
-  TextVideoProject,
-  | 'title'
-  | 'status'
-  | 'stage'
-  | 'script'
-  | 'voice_settings'
-  | 'paragraphs'
-  | 'render_input'
-  | 'cover_asset_url'
-  | 'output_asset_url'
->> & { revision: number }
+export type TextVideoProjectUpdate = {
+  revision: number
+  title?: string
+  status?: TextVideoProjectStatus
+  stage?: TextVideoStage
+  script?: string
+  voice_settings?: TextVideoVoiceSettings
+  paragraphs?: Array<Pick<TextVideoParagraph, 'id' | 'text'>>
+  composition?: TextVideoRenderInput['composition']
+  template?: {
+    templateId: string
+    templateVersion: number
+    templateProps: Record<string, unknown>
+  }
+  scene_plan?: { scenes: ScenePlanSceneDocument[] }
+  /**
+   * Compatibility bridge for the current editor. The API accepts only its
+   * visual fields and ignores browser-supplied audio.
+   */
+  render_input?: TextVideoRenderInput
+  cover_asset_url?: string
+  output_asset_url?: string
+}
 
 export class TextVideoApiError extends Error {
   constructor(

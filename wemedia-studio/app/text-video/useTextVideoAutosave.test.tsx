@@ -3,40 +3,15 @@
 import { act, renderHook } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import type { TextVideoProject } from '@/lib/api/text-videos'
+import { makeTextVideoProject } from '@/lib/text-video/test-fixtures'
 
 import { useTextVideoAutosave } from './useTextVideoAutosave'
 
-const project = {
+const project = makeTextVideoProject({
   id: 7,
   title: '自动保存作品',
-  status: 'draft',
-  stage: 'script',
-  script: '',
-  voice_settings: {},
-  paragraphs: [],
-  render_input: {
-    templateId: 'tech-text-v1',
-    templateVersion: 1,
-    composition: { width: 1080, height: 1920, fps: 30 },
-    audio: '',
-    segments: [{ id: 's1', start: 0, end: 2.4, text: '开始', highlight: [], animation: 'fade-up' }],
-    templateProps: {
-      theme: 'tech-blue',
-      font: 'source-han-sans',
-      background: 'dark-grid',
-      transition: 'soft-push',
-      textDensity: 'standard',
-    },
-  },
-  cover_asset_url: '',
-  output_asset_url: '',
-  revision: 1,
   duration: 2.4,
-  aspect_ratio: '9:16',
-  created_at: '2026-07-29T00:00:00Z',
-  updated_at: '2026-07-29T00:00:00Z',
-} satisfies TextVideoProject
+})
 
 describe('useTextVideoAutosave', () => {
   afterEach(() => {

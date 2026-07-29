@@ -49,6 +49,11 @@ def test_text_video_project_crud_and_revision_conflict(client):
     assert created["stage"] == "script"
     assert created["status"] == "draft"
     assert created["revision"] == 1
+    assert created["speech_split_mode"] == "single"
+    assert created["paragraphs"][0]["text"] == ""
+    assert created["paragraphs"][0]["generation_revision"] == 0
+    assert created["master_audio"]["status"] == "missing"
+    assert created["scene_plan"]["status"] == "missing"
     assert created["render_input"]["templateId"] == "tech-text-v1"
 
     detail = client.get(f"/api/text-videos/{created['id']}")
@@ -66,6 +71,8 @@ def test_text_video_project_crud_and_revision_conflict(client):
     updated = updated_response.json()
     assert updated["revision"] == 2
     assert updated["title"] == "自动保存后的标题"
+    assert [item["text"] for item in updated["paragraphs"]] == ["一段真实稿件"]
+    assert "".join(item["text"] for item in updated["paragraphs"]) == updated["script"]
 
     conflict = client.patch(
         f"/api/text-videos/{created['id']}",
@@ -93,16 +100,42 @@ def test_video_stage_requires_all_paragraphs_confirmed(client):
             "paragraphs": [{
                 "id": "paragraph-1",
                 "text": "尚未确认",
-                "duration": 1.2,
-                "status": "ready",
-                "audio_url": "",
-                "word_timings": [],
             }],
         },
     )
 
     assert response.status_code == 422
     assert "确认所有配音" in response.text
+
+
+def test_patch_ignores_browser_owned_speech_generation_fields(client):
+    project = client.post("/api/text-videos", json={}).json()
+    response = client.patch(
+        f"/api/text-videos/{project['id']}",
+        json={
+            "revision": project["revision"],
+            "script": "不能伪造",
+            "paragraphs": [{
+                "id": "paragraph-1",
+                "text": "不能伪造",
+                "status": "confirmed",
+                "audio_url": "/api/uploads/forged.mp3",
+                "duration": 88,
+                "source_hash": "forged",
+                "generation_revision": 99,
+                "job_id": 7,
+            }],
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    segment = response.json()["paragraphs"][0]
+    assert segment["status"] == "draft"
+    assert segment["audio_url"] == ""
+    assert segment["duration"] == 0
+    assert segment["source_hash"] == ""
+    assert segment["generation_revision"] == 1
+    assert segment["job_id"] is None
 
 
 def test_rejects_overlapping_render_segments(client):
