@@ -72,6 +72,53 @@ async def migrate_removed_publication_schema(conn) -> None:
     await conn.execute(text("DROP TABLE IF EXISTS publications"))
 
 
+async def migrate_content_job_idempotency_schema(conn) -> None:
+    """Make every non-empty durable-job key unique without losing history."""
+    from sqlalchemy import inspect, text
+
+    tables = set(await conn.run_sync(
+        lambda sync_connection: inspect(sync_connection).get_table_names()
+    ))
+    if "content_jobs" not in tables:
+        return
+    rows = (
+        await conn.execute(text(
+            "SELECT id, idempotency_key FROM content_jobs "
+            "WHERE idempotency_key <> '' ORDER BY id"
+        ))
+    ).mappings().all()
+    seen: set[str] = set()
+    for row in rows:
+        key = str(row["idempotency_key"])
+        if key in seen:
+            await conn.execute(
+                text(
+                    "UPDATE content_jobs SET idempotency_key = :replacement "
+                    "WHERE id = :job_id"
+                ),
+                {
+                    "replacement": f"{key}:legacy:{row['id']}",
+                    "job_id": row["id"],
+                },
+            )
+        else:
+            seen.add(key)
+    await conn.execute(text(
+        "CREATE UNIQUE INDEX IF NOT EXISTS "
+        "uq_content_jobs_idempotency_nonempty "
+        "ON content_jobs (idempotency_key) "
+        "WHERE idempotency_key <> ''"
+    ))
+
+
+async def migrate_text_video_speech_asset_schema(conn) -> None:
+    """Add sample-accurate metadata to speech assets created before this release."""
+    await _add_columns(conn, "text_video_speech_assets", {
+        "sample_count": "INTEGER NOT NULL DEFAULT 0",
+        "sample_rate": "INTEGER NOT NULL DEFAULT 44100",
+    })
+
+
 async def _add_columns(conn, table_name: str, definitions: dict[str, str]) -> None:
     """Add missing columns on SQLite and PostgreSQL without rebuilding tables."""
     from sqlalchemy import inspect, text
@@ -552,8 +599,13 @@ async def init_db():
 
         await migrate_removed_hot_topic_schema(conn)
         await migrate_removed_publication_schema(conn)
+        # Existing databases may contain duplicate keys, so repair them before
+        # metadata.create_all attempts to create the unique partial index.
+        await migrate_content_job_idempotency_schema(conn)
         await conn.run_sync(Base.metadata.create_all)
+        await migrate_content_job_idempotency_schema(conn)
         await migrate_text_video_project_schema(conn)
+        await migrate_text_video_speech_asset_schema(conn)
         await conn.execute(text("ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS media_kind VARCHAR NOT NULL DEFAULT ''"))
         await conn.execute(text("ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS directory VARCHAR NOT NULL DEFAULT ''"))
         await conn.execute(text("ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS last_selected_at TIMESTAMP"))

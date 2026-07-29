@@ -19,10 +19,13 @@ def client(monkeypatch, tmp_path):
     for module in list(sys.modules):
         if module.startswith((
             "content_jobs",
+            "config",
             "database",
             "models",
             "routers.jobs",
             "routers.text_videos",
+            "text_video_audio",
+            "text_video_jobs",
         )):
             sys.modules.pop(module, None)
 
@@ -46,6 +49,17 @@ def client(monkeypatch, tmp_path):
 
     app.dependency_overrides[get_db] = override_db
     return TestClient(app)
+
+
+def _speech_project(client, text="需要配音。"):
+    project = client.post("/api/text-videos", json={}).json()
+    return client.patch(
+        f"/api/text-videos/{project['id']}",
+        json={
+            "revision": project["revision"],
+            "script": text,
+        },
+    ).json()
 
 
 def test_text_video_project_crud_and_revision_conflict(client):
@@ -274,3 +288,103 @@ def test_speech_split_preview_retry_reenqueues_existing_job_after_first_enqueue_
     assert enqueue_attempts == [job_id, job_id]
     jobs = client.get("/api/jobs").json()["jobs"]
     assert [(job["id"], job["status"]) for job in jobs] == [(job_id, "queued")]
+
+
+def test_speech_generation_confirmation_and_stale_worker_result(
+    client,
+    monkeypatch,
+):
+    import routers.text_videos as router_module
+    import text_video_jobs
+
+    queued: list[int] = []
+
+    async def capture_enqueue(job_id: int):
+        queued.append(job_id)
+
+    monkeypatch.setattr(text_video_jobs, "enqueue_job", capture_enqueue)
+    project = _speech_project(client)
+    segment = project["paragraphs"][0]
+    generated = client.post(
+        f"/api/text-videos/{project['id']}/speech-segments/"
+        f"{segment['id']}/generate",
+        json={"revision": project["revision"]},
+    )
+    assert generated.status_code == 201, generated.text
+    body = generated.json()
+    job = body["jobs"][0]
+    assert job["flow"] == "text_video_speech"
+    assert job["target_id"] == segment["id"]
+    assert queued == [job["id"]]
+
+    context = client.get(
+        f"/api/text-videos/{project['id']}/speech-segments/"
+        f"{segment['id']}/worker-context",
+        headers={
+            "X-WMS-Worker-Token": "test-worker-token-at-least-32-chars",
+            "X-Content-Job-Id": str(job["id"]),
+        },
+    )
+    assert context.status_code == 200, context.text
+    snapshot = context.json()
+    assert snapshot["text"] == "需要配音。"
+    assert snapshot["generation_revision"] == 1
+    assert snapshot["runtime"]["default_voice"] == "mimo_default"
+
+    edited = client.patch(
+        f"/api/text-videos/{project['id']}",
+        json={
+            "revision": project["revision"],
+            "script": "已经改稿。",
+        },
+    )
+    assert edited.status_code == 200
+    stale = client.post(
+        f"/api/text-videos/{project['id']}/speech-segments/"
+        f"{segment['id']}/worker-failure",
+        json={
+            "generation_revision": snapshot["generation_revision"],
+            "source_hash": snapshot["source_hash"],
+            "error": "late provider response",
+        },
+        headers={
+            "X-WMS-Worker-Token": "test-worker-token-at-least-32-chars",
+            "X-Content-Job-Id": str(job["id"]),
+        },
+    )
+    assert stale.status_code == 409
+    assert stale.headers["X-WMS-Retryable"] == "false"
+
+
+def test_cancelling_speech_job_changes_only_its_segment(client, monkeypatch):
+    import text_video_jobs
+
+    async def ignore_enqueue(_job_id: int):
+        return None
+
+    monkeypatch.setattr(text_video_jobs, "enqueue_job", ignore_enqueue)
+    project = _speech_project(client, "甲。乙。")
+    split = client.patch(
+        f"/api/text-videos/{project['id']}",
+        json={
+            "revision": project["revision"],
+            "paragraphs": [
+                {"id": "a", "text": "甲。"},
+                {"id": "b", "text": "乙。"},
+            ],
+        },
+    ).json()
+    pending = client.post(
+        f"/api/text-videos/{project['id']}/speech-segments/generate-pending",
+        json={"revision": split["revision"]},
+    ).json()
+    jobs = pending["jobs"]
+
+    cancelled = client.post(f"/api/jobs/{jobs[0]['id']}/cancel")
+    assert cancelled.status_code == 200, cancelled.text
+    detail = client.get(f"/api/text-videos/{project['id']}").json()
+    assert detail["paragraphs"][0]["status"] == "failed"
+    assert detail["paragraphs"][0]["job_id"] is None
+    assert detail["paragraphs"][0]["error"] == "任务已取消"
+    assert detail["paragraphs"][1]["status"] == "generating"
+    assert detail["paragraphs"][1]["job_id"] == jobs[1]["id"]

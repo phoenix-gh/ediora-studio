@@ -10,7 +10,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
-from content_jobs import create_job
+from config import get_config
+from content_jobs import create_or_get_job
 from job_queue import enqueue_job
 from models import ContentJob, TextVideoProject, now_utc
 from text_video_domain import (
@@ -20,6 +21,13 @@ from text_video_domain import (
     merge_editable_project,
     normalize_speech_segments,
     video_stage_ready,
+)
+from text_video_jobs import (
+    StaleTextVideoJob,
+    assert_current_speech_job,
+    launch_pending_speech_jobs,
+    launch_speech_job,
+    speech_asset_result,
 )
 from text_video_segmentation import (
     SegmentationError,
@@ -172,6 +180,22 @@ class SpeechSplitPreviewRequest(BaseModel):
 class SpeechSplitWorkerValidationRequest(BaseModel):
     boundary_ids: list[str] = Field(default_factory=list)
     script_hash: str = Field(min_length=64, max_length=64)
+
+
+class SpeechActionRequest(BaseModel):
+    revision: int = Field(ge=1)
+
+
+class SpeechConfirmRequest(SpeechActionRequest):
+    generation_revision: int = Field(ge=0)
+    source_hash: str = Field(min_length=64, max_length=64)
+
+
+class SpeechWorkerFailureRequest(BaseModel):
+    generation_revision: int = Field(ge=0)
+    source_hash: str = Field(min_length=64, max_length=64)
+    error: str = Field(min_length=1, max_length=500)
+
 
 DEFAULT_PARAGRAPHS = [default_speech_segment("", segment_id="paragraph-1")]
 
@@ -379,6 +403,49 @@ def _speech_split_preview_job_payload(job: ContentJob, project_id: int) -> dict:
     }
 
 
+def _speech_job_payload(job: ContentJob) -> dict:
+    return {
+        "id": job.id,
+        "flow": job.flow,
+        "target_id": str(job.input_data.get("segment_id") or ""),
+    }
+
+
+def _stale_conflict(error: Exception) -> HTTPException:
+    return HTTPException(
+        status_code=409,
+        detail=str(error),
+        headers={"X-WMS-Retryable": "false"},
+    )
+
+
+async def _speech_runtime() -> dict:
+    config = await get_config()
+    return {
+        "speech_model": config.get("speech_model", "mimo-v2.5-tts"),
+        "default_voice": config.get(
+            "speech_default_voice",
+            "mimo_default",
+        ),
+    }
+
+
+def _validate_speech_job(
+    job: ContentJob | None,
+    *,
+    project_id: int,
+    segment_id: str,
+) -> dict:
+    if (
+        job is None
+        or job.flow != "text_video_speech"
+        or job.input_data.get("project_id") != project_id
+        or job.input_data.get("segment_id") != segment_id
+    ):
+        raise StaleTextVideoJob("配音任务已失效")
+    return job.input_data
+
+
 @router.post("/{project_id}/speech-split-preview", status_code=status.HTTP_201_CREATED)
 async def create_speech_split_preview(
     project_id: int,
@@ -405,19 +472,8 @@ async def create_speech_split_preview(
         direction=payload.direction,
     )
     key = f"text-video-split:{project.id}:{request_hash}"
-    existing = (await db.execute(
-        select(ContentJob).where(ContentJob.idempotency_key == key)
-    )).scalars().first()
-    if existing is not None:
-        if existing.status == "queued":
-            await enqueue_job(existing.id)
-        return {
-            "jobs": [_speech_split_preview_job_payload(existing, project.id)],
-            "project": serialize_project(project),
-        }
-
     candidates = build_boundary_candidates(script)
-    job = await create_job(
+    job = await create_or_get_job(
         db,
         flow="text_video_split_preview",
         title=f"AI 口播分段预览 · {project.title}",
@@ -439,6 +495,211 @@ async def create_speech_split_preview(
         "jobs": [_speech_split_preview_job_payload(job, project.id)],
         "project": serialize_project(project),
     }
+
+
+@router.post(
+    "/{project_id}/speech-segments/{segment_id}/generate",
+    status_code=status.HTTP_201_CREATED,
+)
+async def generate_speech_segment(
+    project_id: int,
+    segment_id: str,
+    payload: SpeechActionRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    project = await get_project_or_404(db, project_id)
+    runtime = await _speech_runtime()
+    try:
+        result = await launch_speech_job(
+            db,
+            project,
+            segment_id,
+            expected_revision=payload.revision,
+            speech_model=runtime["speech_model"],
+        )
+    except StaleTextVideoJob as error:
+        raise _stale_conflict(error) from error
+    return {
+        "jobs": [_speech_job_payload(job) for job in result.jobs],
+        "project": serialize_project(result.project),
+    }
+
+
+@router.post(
+    "/{project_id}/speech-segments/generate-pending",
+    status_code=status.HTTP_201_CREATED,
+)
+async def generate_pending_speech_segments(
+    project_id: int,
+    payload: SpeechActionRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    project = await get_project_or_404(db, project_id)
+    runtime = await _speech_runtime()
+    try:
+        result = await launch_pending_speech_jobs(
+            db,
+            project,
+            expected_revision=payload.revision,
+            speech_model=runtime["speech_model"],
+        )
+    except StaleTextVideoJob as error:
+        raise _stale_conflict(error) from error
+    return {
+        "jobs": [_speech_job_payload(job) for job in result.jobs],
+        "project": serialize_project(result.project),
+    }
+
+
+@router.post("/{project_id}/speech-segments/{segment_id}/confirm")
+async def confirm_speech_segment(
+    project_id: int,
+    segment_id: str,
+    payload: SpeechConfirmRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    project = await db.scalar(
+        select(TextVideoProject)
+        .where(TextVideoProject.id == project_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if project is None:
+        raise HTTPException(404, "文字视频作品不存在")
+    if project.revision != payload.revision:
+        raise _stale_conflict(StaleTextVideoJob("作品已在其他页面更新"))
+    paragraphs = normalize_speech_segments(
+        str(project.script or ""),
+        project.paragraphs or [],
+    )
+    for index, segment in enumerate(paragraphs):
+        if segment["id"] != segment_id:
+            continue
+        if (
+            segment["status"] != "ready"
+            or segment["generation_revision"] != payload.generation_revision
+            or segment["source_hash"] != payload.source_hash
+        ):
+            raise _stale_conflict(StaleTextVideoJob("配音段落已更新"))
+        existing = await speech_asset_result(
+            db,
+            source_hash=payload.source_hash,
+            audio_url=str(segment["audio_url"]),
+        )
+        if existing is None:
+            raise HTTPException(
+                409,
+                "配音素材已丢失，请重新生成当前段",
+            )
+        paragraphs[index] = {**segment, "status": "confirmed", "error": ""}
+        project.paragraphs = paragraphs
+        await db.commit()
+        await db.refresh(project)
+        return serialize_project(project)
+    raise HTTPException(404, "配音段落不存在")
+
+
+@router.get(
+    "/{project_id}/speech-segments/{segment_id}/worker-context",
+    dependencies=[Depends(require_worker_token)],
+)
+async def get_speech_worker_context(
+    project_id: int,
+    segment_id: str,
+    job_id: int = Header(alias="X-Content-Job-Id"),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        job = await db.get(ContentJob, job_id)
+        snapshot = _validate_speech_job(
+            job,
+            project_id=project_id,
+            segment_id=segment_id,
+        )
+        project = await get_project_or_404(db, project_id)
+        segment = assert_current_speech_job(project, snapshot)
+        if segment.get("job_id") not in {job_id, None}:
+            raise StaleTextVideoJob("配音任务已被替换")
+        if segment["status"] in {"ready", "confirmed"}:
+            saved = await speech_asset_result(
+                db,
+                source_hash=snapshot["source_hash"],
+                audio_url=str(segment["audio_url"]),
+            )
+            if saved is None:
+                raise StaleTextVideoJob(
+                    "配音素材已丢失，请重新生成当前段",
+                )
+            return {"already_saved": saved}
+        if segment.get("job_id") != job_id:
+            raise StaleTextVideoJob("配音任务已被替换")
+        runtime = await _speech_runtime()
+        return {
+            **snapshot,
+            "runtime": {
+                "default_voice": runtime["default_voice"],
+            },
+        }
+    except StaleTextVideoJob as error:
+        raise _stale_conflict(error) from error
+
+
+@router.post(
+    "/{project_id}/speech-segments/{segment_id}/worker-failure",
+    dependencies=[Depends(require_worker_token)],
+)
+async def save_speech_worker_failure(
+    project_id: int,
+    segment_id: str,
+    payload: SpeechWorkerFailureRequest,
+    job_id: int = Header(alias="X-Content-Job-Id"),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        job = await db.scalar(
+            select(ContentJob)
+            .where(ContentJob.id == job_id)
+            .with_for_update()
+        )
+        snapshot = _validate_speech_job(
+            job,
+            project_id=project_id,
+            segment_id=segment_id,
+        )
+        if (
+            snapshot.get("generation_revision")
+            != payload.generation_revision
+            or snapshot.get("source_hash") != payload.source_hash
+        ):
+            raise StaleTextVideoJob("配音任务快照不匹配")
+        project = await db.scalar(
+            select(TextVideoProject)
+            .where(TextVideoProject.id == project_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        if project is None:
+            raise StaleTextVideoJob("文字视频作品不存在")
+        segment = assert_current_speech_job(project, snapshot)
+        if segment.get("job_id") != job_id:
+            raise StaleTextVideoJob("配音任务已被替换")
+        paragraphs = list(project.paragraphs or [])
+        for index, current in enumerate(paragraphs):
+            if current.get("id") == segment_id:
+                paragraphs[index] = {
+                    **current,
+                    "status": "failed",
+                    "job_id": None,
+                    "error": payload.error,
+                }
+                break
+        project.paragraphs = paragraphs
+        await db.commit()
+        await db.refresh(project)
+        return serialize_project(project)
+    except StaleTextVideoJob as error:
+        await db.rollback()
+        raise _stale_conflict(error) from error
 
 
 @router.post(

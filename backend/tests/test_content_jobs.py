@@ -120,6 +120,116 @@ def test_job_can_join_the_callers_transaction(session_factory):
     asyncio.new_event_loop().run_until_complete(run())
 
 
+def test_create_or_get_job_reuses_nonempty_key_but_not_empty_keys(
+    session_factory,
+):
+    from content_jobs import create_or_get_job
+    from models import ContentJob
+    from sqlalchemy import select
+
+    async def run():
+        async with session_factory() as session:
+            first = await create_or_get_job(
+                session,
+                flow="text_video_speech",
+                title="one",
+                input_data={"segment_id": "a"},
+                idempotency_key="speech-key",
+            )
+            repeated = await create_or_get_job(
+                session,
+                flow="text_video_speech",
+                title="duplicate",
+                input_data={"segment_id": "a"},
+                idempotency_key="speech-key",
+            )
+            empty_one = await create_or_get_job(
+                session,
+                flow="draft",
+                title="empty one",
+                input_data={},
+            )
+            empty_two = await create_or_get_job(
+                session,
+                flow="draft",
+                title="empty two",
+                input_data={},
+            )
+            await session.commit()
+            jobs = (
+                await session.execute(
+                    select(ContentJob).order_by(ContentJob.id),
+                )
+            ).scalars().all()
+
+            assert repeated.id == first.id
+            assert empty_one.id != empty_two.id
+            assert len(jobs) == 3
+
+    asyncio.new_event_loop().run_until_complete(run())
+
+
+def test_speech_retry_restores_only_its_current_segment(session_factory):
+    from content_jobs import create_job, fail_step, retry_step, start_step
+    from models import TextVideoProject
+    from tests.text_video_factories import (
+        make_speech_segment,
+        make_text_video_project,
+    )
+
+    async def run():
+        async with session_factory() as session:
+            project = make_text_video_project(
+                script="甲。乙。",
+                paragraphs=[
+                    make_speech_segment("a", "甲。"),
+                    make_speech_segment("b", "乙。", status="confirmed"),
+                ],
+            )
+            session.add(project)
+            await session.flush()
+            job = await create_job(
+                session,
+                flow="text_video_speech",
+                title="speech",
+                input_data={
+                    "project_id": project.id,
+                    "segment_id": "a",
+                    "generation_revision": 0,
+                    "source_hash": "a" * 64,
+                },
+                commit=False,
+            )
+            project.paragraphs = [
+                {
+                    **project.paragraphs[0],
+                    "status": "generating",
+                    "job_id": job.id,
+                    "source_hash": "a" * 64,
+                },
+                project.paragraphs[1],
+            ]
+            await session.commit()
+            step = await start_step(session, job.id, "generate_speech")
+            await fail_step(
+                session,
+                step.id,
+                "temporary",
+                retryable=True,
+            )
+
+            await retry_step(session, job.id, "generate_speech")
+            await session.refresh(project)
+            current = await session.get(TextVideoProject, project.id)
+
+            assert current.paragraphs[0]["status"] == "generating"
+            assert current.paragraphs[0]["job_id"] == job.id
+            assert current.paragraphs[0]["error"] == ""
+            assert current.paragraphs[1]["status"] == "confirmed"
+
+    asyncio.new_event_loop().run_until_complete(run())
+
+
 def test_cancelling_queued_job_marks_job_cancelled(session_factory):
     from content_jobs import cancel_job, create_job
 

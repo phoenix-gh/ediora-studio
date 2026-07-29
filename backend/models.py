@@ -1,4 +1,15 @@
-from sqlalchemy import String, Integer, Float, Boolean, Text, DateTime, JSON, UniqueConstraint
+from sqlalchemy import (
+    String,
+    Integer,
+    Float,
+    Boolean,
+    Text,
+    DateTime,
+    JSON,
+    Index,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 from datetime import datetime, timezone
 from database import Base
@@ -374,6 +385,15 @@ class PipelineTask(Base):
 class ContentJob(Base):
     """Durable, Hermes-free execution record for one content flow."""
     __tablename__ = "content_jobs"
+    __table_args__ = (
+        Index(
+            "uq_content_jobs_idempotency_nonempty",
+            "idempotency_key",
+            unique=True,
+            sqlite_where=text("idempotency_key <> ''"),
+            postgresql_where=text("idempotency_key <> ''"),
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     flow: Mapped[str] = mapped_column(String, nullable=False, index=True)
@@ -921,6 +941,8 @@ class TextVideoSpeechAsset(Base):
     creative_asset_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     source_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     duration: Mapped[float] = mapped_column(Float, nullable=False)
+    sample_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    sample_rate: Mapped[int] = mapped_column(Integer, nullable=False, default=44100)
     word_timings: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     provider_request_id: Mapped[str] = mapped_column(
         String, nullable=False, default=""

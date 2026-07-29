@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from log_redaction import redact_secret_text
@@ -18,6 +19,7 @@ from models import (
     DailyPlan,
     DigitalHuman,
     TalkingVideoRender,
+    TextVideoProject,
 )
 
 
@@ -63,6 +65,135 @@ async def create_job(
     else:
         await session.flush()
     return job
+
+
+async def create_or_get_job(
+    session: AsyncSession,
+    *,
+    flow: str,
+    title: str,
+    input_data: dict,
+    idempotency_key: str = "",
+    commit: bool = True,
+) -> ContentJob:
+    """Create a durable job or return the winner of the same non-empty key."""
+    if not idempotency_key:
+        return await create_job(
+            session,
+            flow=flow,
+            title=title,
+            input_data=input_data,
+            commit=commit,
+        )
+    existing = await session.scalar(
+        select(ContentJob).where(
+            ContentJob.idempotency_key == idempotency_key,
+        )
+    )
+    if existing is not None:
+        return existing
+    try:
+        async with session.begin_nested():
+            job = await create_job(
+                session,
+                flow=flow,
+                title=title,
+                input_data=input_data,
+                idempotency_key=idempotency_key,
+                commit=False,
+            )
+    except IntegrityError:
+        winner = await session.scalar(
+            select(ContentJob).where(
+                ContentJob.idempotency_key == idempotency_key,
+            )
+        )
+        if winner is None:
+            raise
+        return winner
+    if commit:
+        await session.commit()
+        await session.refresh(job)
+    return job
+
+
+async def _restore_current_speech_segment(
+    session: AsyncSession,
+    job: ContentJob,
+) -> None:
+    if job.flow != "text_video_speech":
+        return
+    project_id = job.input_data.get("project_id")
+    segment_id = job.input_data.get("segment_id")
+    if not isinstance(project_id, int) or not isinstance(segment_id, str):
+        return
+    project = await session.scalar(
+        select(TextVideoProject)
+        .where(TextVideoProject.id == project_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if project is None:
+        return
+    paragraphs = list(project.paragraphs or [])
+    changed = False
+    for index, segment in enumerate(paragraphs):
+        if (
+            segment.get("id") == segment_id
+            and segment.get("job_id") == job.id
+            and segment.get("generation_revision")
+            == job.input_data.get("generation_revision")
+            and segment.get("source_hash")
+            == job.input_data.get("source_hash")
+        ):
+            paragraphs[index] = {
+                **segment,
+                "status": "generating",
+                "job_id": job.id,
+                "error": "",
+            }
+            changed = True
+            break
+    if changed:
+        project.paragraphs = paragraphs
+
+
+async def _cancel_current_speech_segment(
+    session: AsyncSession,
+    job: ContentJob,
+) -> None:
+    if job.flow != "text_video_speech":
+        return
+    project_id = job.input_data.get("project_id")
+    segment_id = job.input_data.get("segment_id")
+    if not isinstance(project_id, int) or not isinstance(segment_id, str):
+        return
+    project = await session.scalar(
+        select(TextVideoProject)
+        .where(TextVideoProject.id == project_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if project is None:
+        return
+    paragraphs = list(project.paragraphs or [])
+    for index, segment in enumerate(paragraphs):
+        if (
+            segment.get("id") == segment_id
+            and segment.get("job_id") == job.id
+            and segment.get("generation_revision")
+            == job.input_data.get("generation_revision")
+            and segment.get("source_hash")
+            == job.input_data.get("source_hash")
+        ):
+            paragraphs[index] = {
+                **segment,
+                "status": "failed",
+                "job_id": None,
+                "error": "任务已取消",
+            }
+            project.paragraphs = paragraphs
+            return
 
 
 async def _latest_step(session: AsyncSession, job_id: int, step_key: str) -> ContentJobStep | None:
@@ -200,7 +331,9 @@ async def fail_step(session: AsyncSession, step_id: int, error: str, *, retryabl
 
 
 async def retry_step(session: AsyncSession, job_id: int, step_key: str) -> ContentJobStep:
-    job = await session.get(ContentJob, job_id)
+    job = await session.scalar(
+        select(ContentJob).where(ContentJob.id == job_id).with_for_update()
+    )
     if job is None:
         raise KeyError(f"job {job_id} not found")
     previous = await _latest_step(session, job_id, step_key)
@@ -224,6 +357,7 @@ async def retry_step(session: AsyncSession, job_id: int, step_key: str) -> Conte
             event_type="analysis_retried",
             payload={"step_key": step_key, "attempt": step.attempt},
         ))
+    await _restore_current_speech_segment(session, job)
     await session.flush()
     await _event(session, job_id, "step_retried", step_id=step.id, payload={"step_key": step_key, "attempt": step.attempt})
     await session.commit()
@@ -300,6 +434,8 @@ async def cancel_job(session: AsyncSession, job_id: int) -> ContentJob:
             ):
                 role.status = "failed"
                 role.error = "任务已取消"
+    elif job.flow == "text_video_speech":
+        await _cancel_current_speech_segment(session, job)
     await _event(session, job_id, "job_cancelled")
     await session.commit()
     await session.refresh(job)

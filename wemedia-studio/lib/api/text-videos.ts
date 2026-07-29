@@ -139,6 +139,17 @@ export type SpeechSplitPreviewResponse = {
   project: TextVideoProject
 }
 
+export type TextVideoSpeechJob = {
+  id: number
+  flow: 'text_video_speech'
+  target_id: string
+}
+
+export type TextVideoSpeechResponse = {
+  jobs: TextVideoSpeechJob[]
+  project: TextVideoProject
+}
+
 export class TextVideoApiError extends Error {
   constructor(
     message: string,
@@ -208,6 +219,44 @@ export function createSpeechSplitPreview(
 ) {
   return textVideoRequest<SpeechSplitPreviewResponse>(
     `/text-videos/${projectId}/speech-split-preview`,
+    { method: 'POST', body: JSON.stringify(input) },
+  )
+}
+
+export function generateTextVideoSpeechSegment(
+  projectId: number,
+  segmentId: string,
+  revision: number,
+) {
+  return textVideoRequest<TextVideoSpeechResponse>(
+    `/text-videos/${projectId}/speech-segments/`
+      + `${encodeURIComponent(segmentId)}/generate`,
+    { method: 'POST', body: JSON.stringify({ revision }) },
+  )
+}
+
+export function generatePendingTextVideoSpeech(
+  projectId: number,
+  revision: number,
+) {
+  return textVideoRequest<TextVideoSpeechResponse>(
+    `/text-videos/${projectId}/speech-segments/generate-pending`,
+    { method: 'POST', body: JSON.stringify({ revision }) },
+  )
+}
+
+export function confirmTextVideoSpeechSegment(
+  projectId: number,
+  segmentId: string,
+  input: {
+    revision: number
+    generation_revision: number
+    source_hash: string
+  },
+) {
+  return textVideoRequest<TextVideoProject>(
+    `/text-videos/${projectId}/speech-segments/`
+      + `${encodeURIComponent(segmentId)}/confirm`,
     { method: 'POST', body: JSON.stringify(input) },
   )
 }
