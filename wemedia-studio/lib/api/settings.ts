@@ -41,6 +41,12 @@ export interface AppSettings {
   transcription_api_key_preview: string
   transcription_max_duration_seconds: number
   transcription_max_audio_bytes: number
+  speech_provider: string
+  speech_model: string
+  speech_base_url: string
+  speech_api_key_set: boolean
+  speech_api_key_preview: string
+  speech_default_voice: string
   youtube_cookies_set: boolean
   rsshub_base: string
   github_token_set: boolean
@@ -113,6 +119,12 @@ export interface SettingsUpdate {
   transcription_clear_api_key?: boolean
   transcription_max_duration_seconds?: number
   transcription_max_audio_bytes?: number
+  speech_provider?: string
+  speech_model?: string
+  speech_base_url?: string
+  speech_api_key?: string
+  speech_clear_api_key?: boolean
+  speech_default_voice?: string
   youtube_cookies?: string
   rsshub_base?: string
   github_token?: string

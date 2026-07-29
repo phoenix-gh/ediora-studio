@@ -13,6 +13,7 @@ vi.mock('./sections/GitHubSection', () => ({ GitHubSection: () => <div>GitHub se
 vi.mock('./sections/HeyGenSection', () => ({ HeyGenSection: () => <div>HeyGen settings</div> }))
 vi.mock('./sections/LogsSection', () => ({ LogsSection: () => <div>Logs settings</div> }))
 vi.mock('./sections/PublishAccountsSection', () => ({ PublishAccountsSection: () => <div>Publish settings</div> }))
+vi.mock('./sections/SpeechSection', () => ({ SpeechSection: () => <div>Speech settings</div> }))
 vi.mock('./sections/TranscriptionSection', () => ({ TranscriptionSection: () => <div>Transcription settings</div> }))
 vi.mock('./sections/WebFetchSection', () => ({ WebFetchSection: () => <div>Web fetch settings</div> }))
 vi.mock('./sections/WebSearchSection', () => ({ WebSearchSection: () => <div>Web search settings</div> }))
@@ -53,5 +54,14 @@ describe('SettingsClient', () => {
 
     expect(screen.getByTestId('settings-content')).toHaveClass('w-full')
     expect(screen.getByTestId('settings-content')).not.toHaveClass('max-w-[760px]')
+  })
+
+  it('opens speech synthesis next to transcription settings', () => {
+    render(<SettingsClient initialSettings={null} />)
+
+    fireEvent.click(screen.getByRole('button', { name: /语音合成/ }))
+
+    expect(screen.getByRole('heading', { level: 1, name: '语音合成' })).toBeInTheDocument()
+    expect(screen.getByText('Speech settings')).toBeVisible()
   })
 })

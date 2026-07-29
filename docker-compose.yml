@@ -31,6 +31,12 @@ services:
       WMS_DISABLE_SCHEDULER: "0"
       FEEDGRAB_DATA_DIR: /app/sessions
       HEYGEN_API_KEY: ${HEYGEN_API_KEY:-}
+      WMS_SPEECH_PROVIDER: ${WMS_SPEECH_PROVIDER:-mimo}
+      WMS_SPEECH_MODEL: ${WMS_SPEECH_MODEL:-mimo-v2.5-tts}
+      WMS_SPEECH_BASE_URL: ${WMS_SPEECH_BASE_URL:-https://api.xiaomimimo.com/v1}
+      WMS_SPEECH_API_KEY: ${WMS_SPEECH_API_KEY:-}
+      WMS_SPEECH_DEFAULT_VOICE: ${WMS_SPEECH_DEFAULT_VOICE:-mimo_default}
+      MIMO_API_KEY: ${MIMO_API_KEY:-}
       WMS_WORKER_TOKEN: ${WMS_WORKER_TOKEN:-}
       WMS_CORS_ORIGINS: ${WMS_CORS_ORIGINS:-http://localhost:3000}
     volumes:

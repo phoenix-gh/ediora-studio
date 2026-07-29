@@ -23,6 +23,20 @@ DEFAULTS: dict[str, str] = {
     "transcription_api_key": "",
     "transcription_max_duration_seconds": "7200",
     "transcription_max_audio_bytes": "26214400",
+    "speech_provider": os.getenv("WMS_SPEECH_PROVIDER", "mimo"),
+    "speech_model": os.getenv("WMS_SPEECH_MODEL", "mimo-v2.5-tts"),
+    "speech_base_url": os.getenv(
+        "WMS_SPEECH_BASE_URL",
+        "https://api.xiaomimimo.com/v1",
+    ),
+    "speech_api_key": os.getenv(
+        "WMS_SPEECH_API_KEY",
+        "",
+    ).strip() or os.getenv("MIMO_API_KEY", "").strip(),
+    "speech_default_voice": os.getenv(
+        "WMS_SPEECH_DEFAULT_VOICE",
+        "mimo_default",
+    ),
     "youtube_cookies": "",
     "rsshub_base": "http://127.0.0.1:1200",
     "github_interval_minutes": "1",

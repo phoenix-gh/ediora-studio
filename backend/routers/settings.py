@@ -115,6 +115,12 @@ class SettingsOut(BaseModel):
     transcription_api_key_preview: str
     transcription_max_duration_seconds: int
     transcription_max_audio_bytes: int
+    speech_provider: str
+    speech_model: str
+    speech_base_url: str
+    speech_api_key_set: bool
+    speech_api_key_preview: str
+    speech_default_voice: str
     youtube_cookies_set: bool
     rsshub_base: str
     github_token_set: bool
@@ -173,6 +179,12 @@ class SettingsUpdate(BaseModel):
     transcription_clear_api_key: Optional[bool] = None
     transcription_max_duration_seconds: Optional[int] = None
     transcription_max_audio_bytes: Optional[int] = None
+    speech_provider: Optional[str] = None
+    speech_model: Optional[str] = None
+    speech_base_url: Optional[str] = None
+    speech_api_key: Optional[str] = None
+    speech_clear_api_key: Optional[bool] = None
+    speech_default_voice: Optional[str] = None
     youtube_cookies: Optional[str] = None
     rsshub_base: Optional[str] = None
     github_token: Optional[str] = None
@@ -228,12 +240,21 @@ class AiRuntimeConfig(BaseModel):
     image: ImageRuntimeConfig
 
 
+class SpeechRuntimeConfig(BaseModel):
+    provider: str
+    model: str
+    base_url: str
+    api_key: str
+    default_voice: str
+
+
 def _build_out(cfg: dict) -> SettingsOut:
     import blog_client
     api_key = cfg.get("llm_api_key", "")
     image_api_key = cfg.get("image_api_key", "")
     heygen_api_key = effective_heygen_api_key(cfg)
     transcription_api_key = cfg.get("transcription_api_key", "")
+    speech_api_key = cfg.get("speech_api_key", "")
     gh_token = cfg.get("github_token", "")
     telegram_token = cfg.get("telegram_bot_token", "")
     blog_base, blog_token = blog_client.effective_blog_config(cfg)
@@ -273,6 +294,22 @@ def _build_out(cfg: dict) -> SettingsOut:
         transcription_api_key_preview=f"…{transcription_api_key[-4:]}" if len(transcription_api_key) >= 4 else "",
         transcription_max_duration_seconds=max(60, int(cfg.get("transcription_max_duration_seconds", 7200))),
         transcription_max_audio_bytes=max(1024 * 1024, int(cfg.get("transcription_max_audio_bytes", 26214400))),
+        speech_provider=cfg.get("speech_provider", "mimo"),
+        speech_model=cfg.get("speech_model", "mimo-v2.5-tts"),
+        speech_base_url=cfg.get(
+            "speech_base_url",
+            "https://api.xiaomimimo.com/v1",
+        ).rstrip("/"),
+        speech_api_key_set=bool(speech_api_key),
+        speech_api_key_preview=(
+            f"…{speech_api_key[-4:]}"
+            if len(speech_api_key) >= 4
+            else ""
+        ),
+        speech_default_voice=cfg.get(
+            "speech_default_voice",
+            "mimo_default",
+        ),
         youtube_cookies_set=bool(cfg.get("youtube_cookies", "")),
         github_interval_minutes=max(1, int(cfg.get("github_interval_minutes", 1))),
         github_trending_interval_hours=max(1, int(cfg.get("github_trending_interval_hours", 6))),
@@ -336,6 +373,35 @@ def _validate_youtube_cookies(value: str) -> str:
         raise HTTPException(
             status_code=422,
             detail="YouTube Cookie 必须是 Netscape cookies.txt 格式",
+        )
+    return normalized
+
+
+def _normalize_speech_base_url(value: str) -> str:
+    normalized = value.strip().rstrip("/")
+    if not normalized:
+        return "https://api.xiaomimimo.com/v1"
+    try:
+        parsed = urlsplit(normalized)
+        port = parsed.port
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail="MiMo Base URL 必须使用官方 HTTPS /v1 地址",
+        ) from exc
+    if (
+        parsed.scheme != "https"
+        or parsed.hostname != "api.xiaomimimo.com"
+        or parsed.path != "/v1"
+        or parsed.username is not None
+        or parsed.password is not None
+        or port not in {None, 443}
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="MiMo Base URL 必须使用官方 HTTPS /v1 地址",
         )
     return normalized
 
@@ -429,6 +495,29 @@ async def get_transcription_runtime_config():
     }
 
 
+@router.get(
+    "/speech-runtime",
+    response_model=SpeechRuntimeConfig,
+    include_in_schema=False,
+    dependencies=[Depends(require_worker_token)],
+)
+async def get_speech_runtime_config():
+    cfg = await get_config()
+    return SpeechRuntimeConfig(
+        provider=cfg.get("speech_provider", "mimo"),
+        model=cfg.get("speech_model", "mimo-v2.5-tts"),
+        base_url=cfg.get(
+            "speech_base_url",
+            "https://api.xiaomimimo.com/v1",
+        ).strip().rstrip("/"),
+        api_key=cfg.get("speech_api_key", "").strip(),
+        default_voice=cfg.get(
+            "speech_default_voice",
+            "mimo_default",
+        ).strip(),
+    )
+
+
 @router.put("", response_model=SettingsOut)
 async def update_settings(
     body: SettingsUpdate,
@@ -469,6 +558,32 @@ async def update_settings(
         updates["transcription_max_duration_seconds"] = str(max(60, body.transcription_max_duration_seconds))
     if body.transcription_max_audio_bytes is not None:
         updates["transcription_max_audio_bytes"] = str(max(1024 * 1024, body.transcription_max_audio_bytes))
+    if body.speech_provider is not None:
+        speech_provider = body.speech_provider.strip() or "mimo"
+        if speech_provider != "mimo":
+            raise HTTPException(
+                status_code=422,
+                detail="语音合成服务商目前仅支持 MiMo",
+            )
+        updates["speech_provider"] = speech_provider
+    if body.speech_model is not None:
+        updates["speech_model"] = (
+            body.speech_model.strip()
+            or "mimo-v2.5-tts"
+        )
+    if body.speech_base_url is not None:
+        updates["speech_base_url"] = _normalize_speech_base_url(
+            body.speech_base_url,
+        )
+    if body.speech_clear_api_key:
+        updates["speech_api_key"] = ""
+    elif body.speech_api_key is not None and body.speech_api_key.strip():
+        updates["speech_api_key"] = body.speech_api_key.strip()
+    if body.speech_default_voice is not None:
+        updates["speech_default_voice"] = (
+            body.speech_default_voice.strip()
+            or "mimo_default"
+        )
     if body.youtube_cookies is not None:
         updates["youtube_cookies"] = _validate_youtube_cookies(body.youtube_cookies)
     if body.rsshub_base is not None:
