@@ -16,6 +16,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from loguru import logger
 from database import SessionLocal, init_db
 from digital_human_assets import backfill_digital_human_assets
+from speech_upload_boundary import SpeechWorkerUploadBoundary
 from routers import settings, github, x, x_accounts, x_responses, responses, papers, upload, drafts, writing_plans, youtube, producthunt, wechat, v2ex, kr, juejin, studio, publish_accounts, reddit, assets, dashboard, daily_plan, jobs, chat, digital_humans, talking_videos, text_videos
 from x_credential_store import CredentialFileStore
 from routers.x_accounts import reconcile_x_credential_accounts
@@ -89,6 +90,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(SpeechWorkerUploadBoundary)
 
 app.include_router(settings.router, prefix="/api")
 app.include_router(github.router, prefix="/api")

@@ -45,6 +45,7 @@ from text_video_jobs import (
     speech_asset_result,
 )
 from media_command import MediaCommandError, MediaToolUnavailable
+from speech_upload_boundary import MAX_SPEECH_AUDIO_BYTES
 from text_video_audio import (
     SUPPORTED_MEDIA_TYPES,
     save_text_video_audio_asset,
@@ -60,7 +61,6 @@ from worker_auth import require_worker_token
 
 router = APIRouter(prefix="/text-videos", tags=["text-videos"])
 UPLOADS_DIR = Path(__file__).resolve().parent.parent / "uploads"
-MAX_SPEECH_AUDIO_BYTES = 100 * 1024 * 1024
 
 
 class WordTimingDocument(BaseModel):
@@ -786,6 +786,7 @@ async def save_speech_worker_result(
 ):
     temporary: Path | None = None
     saved: dict | None = None
+    saved_file_released = False
     try:
         job = await db.get(ContentJob, job_id)
         snapshot = _validate_speech_job(
@@ -892,12 +893,8 @@ async def save_speech_worker_result(
                 break
         locked_project.paragraphs = paragraphs
         mark_text_video_downstream_stale(locked_project)
-        try:
-            await db.commit()
-        except BaseException:
-            await db.rollback()
-            _remove_saved_audio(saved)
-            raise
+        await db.commit()
+        saved_file_released = True
         return saved
     except StaleTextVideoJob as error:
         if saved is None:
@@ -905,12 +902,8 @@ async def save_speech_worker_result(
         else:
             # The normalized asset is valid and may be reused, but the second
             # stale check forbids it from replacing edited project state.
-            try:
-                await db.commit()
-            except BaseException:
-                await db.rollback()
-                _remove_saved_audio(saved)
-                raise
+            await db.commit()
+            saved_file_released = True
         raise _stale_conflict(error) from error
     except MediaToolUnavailable as error:
         await db.rollback()
@@ -925,6 +918,11 @@ async def save_speech_worker_result(
         await db.rollback()
         raise HTTPException(422, str(error)) from error
     finally:
+        if saved is not None and not saved_file_released:
+            try:
+                await db.rollback()
+            finally:
+                _remove_saved_audio(saved)
         if temporary is not None:
             temporary.unlink(missing_ok=True)
 
