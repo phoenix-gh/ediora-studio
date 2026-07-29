@@ -94,6 +94,25 @@ async def _add_columns(conn, table_name: str, definitions: dict[str, str]) -> No
             ))
 
 
+async def migrate_text_video_project_schema(conn) -> None:
+    """Keep early text-video project tables compatible across SQLite and PostgreSQL."""
+    json_object_default = "'{}'" if conn.dialect.name == "sqlite" else "'{}'::json"
+    json_array_default = "'[]'" if conn.dialect.name == "sqlite" else "'[]'::json"
+    await _add_columns(conn, "text_video_projects", {
+        "status": "VARCHAR NOT NULL DEFAULT 'draft'",
+        "stage": "VARCHAR NOT NULL DEFAULT 'script'",
+        "script": "TEXT NOT NULL DEFAULT ''",
+        "voice_settings": f"JSON NOT NULL DEFAULT {json_object_default}",
+        "paragraphs": f"JSON NOT NULL DEFAULT {json_array_default}",
+        "render_input": f"JSON NOT NULL DEFAULT {json_object_default}",
+        "cover_asset_url": "VARCHAR NOT NULL DEFAULT ''",
+        "output_asset_url": "VARCHAR NOT NULL DEFAULT ''",
+        "revision": "INTEGER NOT NULL DEFAULT 1",
+        "created_at": "TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP",
+        "updated_at": "TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP",
+    })
+
+
 async def migrate_content_response_schema(conn) -> None:
     """Add YouTube response fields and copy legacy X decisions exactly once."""
     from sqlalchemy import inspect, select
@@ -437,6 +456,7 @@ async def init_db():
         await migrate_removed_hot_topic_schema(conn)
         await migrate_removed_publication_schema(conn)
         await conn.run_sync(Base.metadata.create_all)
+        await migrate_text_video_project_schema(conn)
         await conn.execute(text("ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS media_kind VARCHAR NOT NULL DEFAULT ''"))
         await conn.execute(text("ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS directory VARCHAR NOT NULL DEFAULT ''"))
         await conn.execute(text("ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS last_selected_at TIMESTAMP"))

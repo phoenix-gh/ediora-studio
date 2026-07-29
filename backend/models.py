@@ -889,6 +889,26 @@ class TalkingVideoProject(Base):
     )
 
 
+class TextVideoProject(Base):
+    __tablename__ = "text_video_projects"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    title: Mapped[str] = mapped_column(String(300), nullable=False, default="未命名文字视频")
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="draft", index=True)
+    stage: Mapped[str] = mapped_column(String(20), nullable=False, default="script")
+    script: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    voice_settings: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    paragraphs: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    render_input: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    cover_asset_url: Mapped[str] = mapped_column(String, nullable=False, default="")
+    output_asset_url: Mapped[str] = mapped_column(String, nullable=False, default="")
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=now_utc, onupdate=now_utc
+    )
+
+
 class TalkingVideoRender(Base):
     __tablename__ = "talking_video_renders"
     __table_args__ = (
