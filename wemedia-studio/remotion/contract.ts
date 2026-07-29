@@ -14,9 +14,9 @@ export { CONTINUITY_EPSILON_SECONDS } from './types'
 const CONTINUITY_ERROR = 'segments must continuously cover the master audio'
 
 const compositionSchema = z.object({
-  width: z.number().int().positive(),
-  height: z.number().int().positive(),
-  fps: z.number().int().positive(),
+  width: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+  height: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+  fps: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
 }).strict()
 
 const textVideoSegmentSchema = z.object({
@@ -47,9 +47,11 @@ export const textVideoRenderInputSchema = z.object({
 function aspectRatio(
   composition: TextVideoRenderInput['composition'],
 ): TextVideoAspectRatio | null {
-  if (composition.width === composition.height) return '1:1'
-  if (composition.width * 16 === composition.height * 9) return '9:16'
-  if (composition.width * 9 === composition.height * 16) return '16:9'
+  const width = BigInt(composition.width)
+  const height = BigInt(composition.height)
+  if (width === height) return '1:1'
+  if (width * BigInt(16) === height * BigInt(9)) return '9:16'
+  if (width * BigInt(9) === height * BigInt(16)) return '16:9'
   return null
 }
 
@@ -126,8 +128,24 @@ export function parseTextVideoRenderInputWithManifest<
     fail(CONTINUITY_ERROR)
   }
 
+  const segments = envelope.segments.map(segment => ({
+    ...segment,
+    highlight: [...segment.highlight],
+  }))
+  segments[0].start = 0
+  for (let index = 1; index < segments.length; index += 1) {
+    segments[index].start = segments[index - 1].end
+  }
+  segments[segments.length - 1].end = masterDuration
+  for (const segment of segments) {
+    if (segment.end <= segment.start) {
+      fail(CONTINUITY_ERROR)
+    }
+  }
+
   return {
     ...envelope,
+    segments,
     templateProps,
   }
 }

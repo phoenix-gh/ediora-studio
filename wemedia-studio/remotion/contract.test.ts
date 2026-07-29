@@ -86,14 +86,18 @@ describe('text-video render contract', () => {
       ],
     }
 
-    expect(() => parse(toleratedInput)).not.toThrow()
-    expect(findActiveTextVideoSegment(toleratedInput.segments, 0).id)
+    const parsed = parse(toleratedInput)
+    expect(parsed.segments).toEqual([
+      { ...toleratedInput.segments[0], start: 0 },
+      { ...toleratedInput.segments[1], start: 2.4, end: 4.2 },
+    ])
+    expect(findActiveTextVideoSegment(parsed.segments, 0).id)
       .toBe('scene-1')
-    expect(findActiveTextVideoSegment(toleratedInput.segments, 2.4).id)
+    expect(findActiveTextVideoSegment(parsed.segments, 2.4).id)
       .toBe('scene-2')
     expect(() => findActiveTextVideoSegment(
-      toleratedInput.segments,
-      4.2009,
+      parsed.segments,
+      4.2,
     )).toThrow('没有对应的连续分镜')
 
     expect(() => parse({
@@ -101,6 +105,26 @@ describe('text-video render contract', () => {
       segments: [
         { ...validInput.segments[0], start: 0.0011 },
         validInput.segments[1],
+      ],
+    })).toThrow('segments must continuously cover the master audio')
+  })
+
+  it('rejects a raw positive scene that collapses after canonicalization', () => {
+    expect(() => parse({
+      ...validInput,
+      segments: [
+        { ...validInput.segments[0], end: 1 },
+        {
+          ...validInput.segments[1],
+          start: 0.9995,
+          end: 0.9998,
+        },
+        {
+          ...validInput.segments[1],
+          id: 'scene-3',
+          start: 0.9998,
+          end: 4.2,
+        },
       ],
     })).toThrow('segments must continuously cover the master audio')
   })
@@ -144,7 +168,7 @@ describe('text-video render contract', () => {
       compositionId: 'horizontal-color-v1',
       component: () => null,
       propsSchema: z.object({ color: z.string() }).strict(),
-      defaultComposition: { width: 1920, height: 1080, fps: 30 },
+      defaultComposition: { width: 1920, height: 1080, fps: 2000 },
       aspectRatios: ['16:9'],
       animations: ['fade-up', 'scale'],
       transitions: ['crossfade'],
@@ -154,13 +178,46 @@ describe('text-video render contract', () => {
       ...validInput,
       templateId: horizontalManifest.id,
       composition: horizontalManifest.defaultComposition,
+      segments: [
+        {
+          ...validInput.segments[0],
+          start: 0.0009,
+          end: 1,
+        },
+        {
+          ...validInput.segments[1],
+          start: 1.0009,
+          end: 2,
+        },
+      ],
       templateProps: horizontalManifest.defaults,
     }
 
-    expect(parseTextVideoRenderInputWithManifest(horizontalInput, {
-      masterDuration: 4.2,
+    const parsed = parseTextVideoRenderInputWithManifest(horizontalInput, {
+      masterDuration: 2,
       manifest: horizontalManifest,
-    })).toEqual(horizontalInput)
+    })
+    const activeAtHighFpsFrame = parsed.segments.find(
+      segment => 1.0005 >= segment.start && 1.0005 < segment.end,
+    )
+    const activeAtFinalEnd = parsed.segments.find(
+      segment => 2 >= segment.start && 2 < segment.end,
+    )
+
+    expect(parsed.segments.map(segment => segment.start)).toEqual([0, 1])
+    expect(activeAtHighFpsFrame?.id).toBe('scene-2')
+    expect(activeAtFinalEnd).toBeUndefined()
+  })
+
+  it('rejects a floating-point false-positive aspect ratio', () => {
+    expect(() => parse({
+      ...validInput,
+      composition: {
+        width: 5_066_549_580_791_807,
+        height: 9_007_199_254_740_991,
+        fps: 30,
+      },
+    })).toThrow('composition must use a supported aspect ratio')
   })
 
   it('rejects duplicate ids, blank text, and highlights outside scene text', () => {

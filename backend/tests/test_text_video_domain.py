@@ -1,3 +1,5 @@
+from copy import deepcopy
+
 from tests.text_video_factories import (
     make_master_audio,
     make_scene_plan,
@@ -198,6 +200,79 @@ def _make_video_ready_project():
             }],
         },
     )
+
+
+def _visual_autosave_echo(project) -> dict:
+    return {
+        "composition": deepcopy(project.render_input["composition"]),
+        "template": {
+            "templateId": project.render_input["templateId"],
+            "templateVersion": project.render_input["templateVersion"],
+            "templateProps": deepcopy(project.render_input["templateProps"]),
+        },
+        "scene_plan": {
+            "scenes": deepcopy(project.scene_plan["scenes"]),
+        },
+    }
+
+
+def test_same_scene_echo_does_not_recalibrate_stale_narration_state():
+    project = _make_video_ready_project()
+    merge_editable_project(
+        project,
+        {
+            "script": "完成修改",
+            "paragraphs": [{"id": "a", "text": "完成修改"}],
+        },
+        speech_model="mimo-v2.5-tts",
+    )
+    assert project.master_audio["status"] == "stale"
+    assert project.scene_plan["status"] == "stale"
+    stale_master = deepcopy(project.master_audio)
+    stale_scene_plan = deepcopy(project.scene_plan)
+
+    merge_editable_project(
+        project,
+        {
+            "title": "只修改标题",
+            "script": project.script,
+            "paragraphs": [
+                {"id": segment["id"], "text": segment["text"]}
+                for segment in project.paragraphs
+            ],
+            **_visual_autosave_echo(project),
+        },
+        speech_model="mimo-v2.5-tts",
+    )
+
+    assert project.title == "只修改标题"
+    assert project.master_audio == stale_master
+    assert project.scene_plan == stale_scene_plan
+
+
+def test_same_scene_echo_preserves_inflight_scene_job():
+    project = _make_video_ready_project()
+    project.scene_plan = {
+        **project.scene_plan,
+        "status": "generating",
+        "generation_revision": 7,
+        "job_id": 42,
+    }
+    before_scene_plan = deepcopy(project.scene_plan)
+    before_render_input = deepcopy(project.render_input)
+
+    merge_editable_project(
+        project,
+        {
+            "title": "只修改标题",
+            **_visual_autosave_echo(project),
+        },
+        speech_model="mimo-v2.5-tts",
+    )
+
+    assert project.title == "只修改标题"
+    assert project.scene_plan == before_scene_plan
+    assert project.render_input == before_render_input
 
 
 def test_video_stage_requires_current_authoritative_projection():

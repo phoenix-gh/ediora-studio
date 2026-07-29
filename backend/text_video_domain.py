@@ -236,8 +236,6 @@ def _visual_selection(project, update: dict) -> tuple[dict, dict, dict]:
 def _apply_visual_edits(
     project,
     update: dict,
-    *,
-    downstream_invalidated: bool,
 ) -> None:
     visual_fields = {"composition", "template", "scene_plan"}
     if not any(field in update for field in visual_fields):
@@ -293,27 +291,16 @@ def _apply_visual_edits(
         requested_scenes is not None
         and requested_scenes != current_scene_plan["scenes"]
     )
-    scene_needs_refresh = bool(
-        requested_scenes
-        and not downstream_invalidated
-        and (
-            current_scene_plan["status"] != "ready"
-            or current_scene_plan["master_source_hash"]
-            != (project.master_audio or {}).get("source_hash")
-        )
-    )
     if not (
         template_changed
         or composition_changed
         or scene_intent_changed
-        or scene_needs_refresh
     ):
         return
 
     manifest, composition, template_props = _visual_selection(project, update)
     should_project = bool(
         scene_intent_changed
-        or scene_needs_refresh
         or (
             (template_changed or composition_changed)
             and current_scene_plan["status"] == "ready"
@@ -503,7 +490,6 @@ def merge_editable_project(project, update: dict, speech_model: str) -> None:
     _apply_visual_edits(
         project,
         update,
-        downstream_invalidated=downstream_invalidated,
     )
 
 def video_stage_ready(project) -> bool:

@@ -330,6 +330,16 @@ def validate_render_input_projection(
     if abs(segments[-1]["end"] - master_duration) > CONTINUITY_EPSILON_SECONDS:
         raise ValueError("渲染分镜必须连续覆盖主音频")
 
+    segments[0]["start"] = 0.0
+    for index in range(1, len(segments)):
+        segments[index]["start"] = segments[index - 1]["end"]
+    segments[-1]["end"] = float(master_duration)
+    if any(
+        segment["end"] <= segment["start"]
+        for segment in segments
+    ):
+        raise ValueError("渲染分镜必须连续覆盖主音频")
+
     return {
         "templateId": template_id,
         "templateVersion": version,

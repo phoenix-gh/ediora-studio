@@ -253,10 +253,13 @@ def test_render_projection_uses_the_same_point_zero_zero_one_epsilon():
             "end": 4.2009,
         },
     ])
-    assert validate_render_input_projection(
+    canonical = validate_render_input_projection(
         within_epsilon,
         master_duration=4.2,
-    )["segments"][-1]["end"] == 4.2009
+    )["segments"]
+    assert canonical[0]["start"] == 0.0
+    assert canonical[1]["start"] == canonical[0]["end"] == 2.2
+    assert canonical[-1]["end"] == 4.2
 
     outside_epsilon = _render_input(segments=[
         {**_render_input()["segments"][0], "start": 0.0011},
@@ -266,6 +269,42 @@ def test_render_projection_uses_the_same_point_zero_zero_one_epsilon():
         validate_render_input_projection(
             outside_epsilon,
             master_duration=4.2,
+        )
+
+
+def test_render_projection_rejects_scene_collapsed_by_canonicalization():
+    collapsed = _render_input(segments=[
+        {**_render_input()["segments"][0], "end": 1.0},
+        {
+            **_render_input()["segments"][1],
+            "start": 0.9995,
+            "end": 0.9998,
+        },
+        {
+            **_render_input()["segments"][1],
+            "id": "s3",
+            "start": 0.9998,
+            "end": 4.2,
+        },
+    ])
+
+    with pytest.raises(ValueError, match="连续覆盖"):
+        validate_render_input_projection(
+            collapsed,
+            master_duration=4.2,
+        )
+
+
+def test_template_configuration_rejects_exact_ratio_false_positive():
+    with pytest.raises(ValueError, match="画面比例"):
+        validate_template_configuration(
+            manifest=MANIFEST,
+            composition={
+                "width": 5_066_549_580_791_807,
+                "height": 9_007_199_254_740_991,
+                "fps": 30,
+            },
+            template_props=MANIFEST["defaults"],
         )
 
 
