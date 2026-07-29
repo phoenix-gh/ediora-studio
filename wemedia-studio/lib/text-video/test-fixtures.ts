@@ -5,7 +5,7 @@ import type {
   TextVideoParagraph,
   TextVideoProject,
 } from '@/lib/api/text-videos'
-import type { TextVideoRenderInput } from '@/remotion/contract'
+import type { TextVideoRenderInput } from '@/remotion/types'
 
 
 export function makeSpeechSegment(

@@ -1,7 +1,7 @@
 import type { CSSProperties, ReactNode } from 'react'
 import { interpolate, spring, useCurrentFrame, useVideoConfig } from 'remotion'
 
-import type { TextVideoSegment } from '../contract'
+import type { TextVideoSegment } from '../types'
 
 function highlightedText(text: string, highlights: string[], accent: string): ReactNode[] {
   const matches = highlights

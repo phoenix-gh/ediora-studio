@@ -122,11 +122,6 @@ export type TextVideoProjectUpdate = {
     templateProps: Record<string, unknown>
   }
   scene_plan?: { scenes: ScenePlanSceneDocument[] }
-  /**
-   * Compatibility bridge for the current editor. The API accepts only its
-   * visual fields and ignores browser-supplied audio.
-   */
-  render_input?: TextVideoRenderInput
   cover_asset_url?: string
   output_asset_url?: string
 }

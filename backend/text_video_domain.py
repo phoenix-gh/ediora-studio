@@ -6,6 +6,14 @@ import json
 from typing import Any
 from uuid import uuid4
 
+from text_video_scene_plan import (
+    resolve_scene_seconds,
+    validate_render_input_projection,
+    validate_scene_partition,
+    validate_template_configuration,
+)
+from text_video_templates import get_text_video_template
+
 
 SPEECH_STATUSES = {"draft", "generating", "ready", "confirmed", "failed"}
 SEGMENT_SERVER_FIELDS = {
@@ -181,25 +189,194 @@ def _sanitize_voice_settings(current: dict, update: dict) -> dict:
     return next_settings
 
 
-def _sanitize_render_input(current: dict, update: dict) -> dict:
-    """Keep legacy visual editing while never accepting browser-owned audio."""
-    result = deepcopy(current or {})
-    for field in ("templateId", "templateVersion", "composition", "segments", "templateProps"):
-        if field in update:
-            result[field] = deepcopy(update[field])
-    return result
+def _ready_master_for_scene_projection(project) -> dict:
+    master = _document_with_defaults(empty_master_audio(), project.master_audio)
+    if (
+        master["status"] != "ready"
+        or master["timeline_status"] != "ready"
+        or not master.get("audio_url")
+        or not master.get("source_hash")
+        or not isinstance(master.get("word_timings"), list)
+        or not master["word_timings"]
+    ):
+        raise ValueError("分镜编辑需要已就绪的当前主音频时间轴")
+    return master
 
 
-def _sanitize_scene(scene: dict) -> dict:
-    fields = {
-        "id",
-        "fromWordId",
-        "throughWordId",
-        "displayText",
-        "highlight",
-        "animation",
+def _visual_selection(project, update: dict) -> tuple[dict, dict, dict]:
+    current_render = deepcopy(project.render_input or {})
+    template_update = update.get("template")
+    if not isinstance(template_update, dict):
+        template_update = {}
+
+    template_id = template_update.get(
+        "templateId",
+        current_render.get("templateId"),
+    )
+    template_version = template_update.get(
+        "templateVersion",
+        current_render.get("templateVersion"),
+    )
+    manifest = get_text_video_template(template_id, template_version)
+    composition, template_props = validate_template_configuration(
+        manifest=manifest,
+        composition=deepcopy(
+            update.get("composition", current_render.get("composition")),
+        ),
+        template_props=deepcopy(
+            template_update.get(
+                "templateProps",
+                current_render.get("templateProps"),
+            ),
+        ),
+    )
+    return manifest, composition, template_props
+
+
+def _apply_visual_edits(
+    project,
+    update: dict,
+    *,
+    downstream_invalidated: bool,
+) -> None:
+    visual_fields = {"composition", "template", "scene_plan"}
+    if not any(field in update for field in visual_fields):
+        return
+
+    current_render = deepcopy(project.render_input or {})
+    current_scene_plan = _document_with_defaults(
+        empty_scene_plan(),
+        project.scene_plan,
+    )
+    template_update = (
+        update["template"]
+        if isinstance(update.get("template"), dict)
+        else {}
+    )
+    requested_composition = deepcopy(
+        update.get("composition", current_render.get("composition")),
+    )
+    requested_template_id = template_update.get(
+        "templateId",
+        current_render.get("templateId"),
+    )
+    requested_template_version = template_update.get(
+        "templateVersion",
+        current_render.get("templateVersion"),
+    )
+    requested_template_props = deepcopy(
+        template_update.get(
+            "templateProps",
+            current_render.get("templateProps"),
+        ),
+    )
+    template_changed = (
+        requested_template_id != current_render.get("templateId")
+        or requested_template_version != current_render.get("templateVersion")
+        or requested_template_props != current_render.get("templateProps")
+    )
+    composition_changed = (
+        requested_composition != current_render.get("composition")
+    )
+
+    scene_update = (
+        update["scene_plan"]
+        if isinstance(update.get("scene_plan"), dict)
+        else None
+    )
+    requested_scenes = (
+        deepcopy(scene_update.get("scenes"))
+        if scene_update is not None
+        else None
+    )
+    scene_intent_changed = (
+        requested_scenes is not None
+        and requested_scenes != current_scene_plan["scenes"]
+    )
+    scene_needs_refresh = bool(
+        requested_scenes
+        and not downstream_invalidated
+        and (
+            current_scene_plan["status"] != "ready"
+            or current_scene_plan["master_source_hash"]
+            != (project.master_audio or {}).get("source_hash")
+        )
+    )
+    if not (
+        template_changed
+        or composition_changed
+        or scene_intent_changed
+        or scene_needs_refresh
+    ):
+        return
+
+    manifest, composition, template_props = _visual_selection(project, update)
+    should_project = bool(
+        scene_intent_changed
+        or scene_needs_refresh
+        or (
+            (template_changed or composition_changed)
+            and current_scene_plan["status"] == "ready"
+        )
+    )
+    if not should_project:
+        current_render.update({
+            "templateId": manifest["id"],
+            "templateVersion": manifest["version"],
+            "composition": composition,
+            "templateProps": template_props,
+        })
+        project.render_input = current_render
+        return
+
+    master = _ready_master_for_scene_projection(project)
+    if scene_update is not None:
+        proposals = requested_scenes
+    else:
+        proposals = deepcopy(current_scene_plan["scenes"])
+        if (
+            current_scene_plan["master_source_hash"]
+            != master["source_hash"]
+        ):
+            raise ValueError("当前分镜不属于已就绪的主音频时间轴")
+
+    validated_scenes = validate_scene_partition(
+        proposals=proposals,
+        words=master["word_timings"],
+        manifest=manifest,
+    )
+    segments = resolve_scene_seconds(
+        proposals=validated_scenes,
+        words=master["word_timings"],
+        master_duration=master["duration"],
+        manifest=manifest,
+    )
+    render_input = validate_render_input_projection(
+        {
+            "templateId": manifest["id"],
+            "templateVersion": manifest["version"],
+            "composition": composition,
+            "audio": master["audio_url"],
+            "segments": segments,
+            "templateProps": template_props,
+        },
+        master_duration=master["duration"],
+    )
+
+    generation_revision = int(
+        current_scene_plan["generation_revision"] or 0,
+    )
+    if validated_scenes != current_scene_plan["scenes"]:
+        generation_revision += 1
+    project.scene_plan = {
+        "status": "ready",
+        "generation_revision": generation_revision,
+        "master_source_hash": master["source_hash"],
+        "scenes": validated_scenes,
+        "job_id": None,
+        "error": "",
     }
-    return {key: deepcopy(value) for key, value in scene.items() if key in fields}
+    project.render_input = render_input
 
 
 def merge_editable_project(project, update: dict, speech_model: str) -> None:
@@ -315,45 +492,19 @@ def merge_editable_project(project, update: dict, speech_model: str) -> None:
             else "manual"
         )
 
-    if invalidated or voice_changed:
+    downstream_invalidated = invalidated or voice_changed
+    if downstream_invalidated:
         _mark_downstream_stale(project)
 
     for field in ("title", "status", "stage", "cover_asset_url", "output_asset_url"):
         if field in update:
             setattr(project, field, update[field])
 
-    if isinstance(update.get("render_input"), dict):
-        project.render_input = _sanitize_render_input(
-            project.render_input or {},
-            update["render_input"],
-        )
-    if isinstance(update.get("composition"), dict):
-        render_input = deepcopy(project.render_input or {})
-        render_input["composition"] = deepcopy(update["composition"])
-        project.render_input = render_input
-    if isinstance(update.get("template"), dict):
-        render_input = deepcopy(project.render_input or {})
-        template = update["template"]
-        if "templateId" in template:
-            render_input["templateId"] = template["templateId"]
-        if "templateVersion" in template:
-            render_input["templateVersion"] = template["templateVersion"]
-        if "templateProps" in template:
-            render_input["templateProps"] = deepcopy(template["templateProps"])
-        project.render_input = render_input
-    if isinstance(update.get("scene_plan"), dict):
-        scene_plan = _document_with_defaults(empty_scene_plan(), project.scene_plan)
-        scenes = update["scene_plan"].get("scenes")
-        if isinstance(scenes, list):
-            scene_plan["scenes"] = [
-                _sanitize_scene(scene)
-                for scene in scenes
-                if isinstance(scene, dict)
-            ]
-            scene_plan["generation_revision"] = (
-                int(scene_plan["generation_revision"] or 0) + 1
-            )
-        project.scene_plan = scene_plan
+    _apply_visual_edits(
+        project,
+        update,
+        downstream_invalidated=downstream_invalidated,
+    )
 
 def video_stage_ready(project) -> bool:
     segments = normalize_speech_segments(

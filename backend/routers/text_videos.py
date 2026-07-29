@@ -60,6 +60,7 @@ from text_video_domain import (
     normalize_speech_segments,
     video_stage_ready,
 )
+from text_video_scene_plan import CONTINUITY_EPSILON_SECONDS
 from text_video_jobs import (
     StaleTextVideoJob,
     assert_current_speech_job,
@@ -151,9 +152,11 @@ class VoiceSettingsDocument(BaseModel):
 
 
 class CompositionDocument(BaseModel):
-    width: int = Field(gt=0)
-    height: int = Field(gt=0)
-    fps: int = Field(gt=0)
+    model_config = ConfigDict(extra="forbid")
+
+    width: StrictInt = Field(gt=0, le=9_007_199_254_740_991)
+    height: StrictInt = Field(gt=0, le=9_007_199_254_740_991)
+    fps: StrictInt = Field(gt=0, le=9_007_199_254_740_991)
 
     @model_validator(mode="after")
     def supported_ratio(self):
@@ -167,12 +170,14 @@ class CompositionDocument(BaseModel):
 
 
 class SegmentDocument(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     id: str = Field(min_length=1)
     start: float = Field(ge=0)
     end: float = Field(gt=0)
     text: str = Field(min_length=1)
     highlight: list[str] = Field(default_factory=list)
-    animation: Literal["fade-up", "scale"]
+    animation: str = Field(min_length=1)
 
     @model_validator(mode="after")
     def valid_time_range(self):
@@ -181,48 +186,57 @@ class SegmentDocument(BaseModel):
         return self
 
 
-class TemplatePropsDocument(BaseModel):
+class RenderInputDocument(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    theme: Literal["tech-blue"]
-    font: Literal["source-han-sans"]
-    background: Literal["dark-grid"]
-    transition: Literal["soft-push"]
-    textDensity: Literal["compact", "standard", "spacious"]
-
-
-class RenderInputDocument(BaseModel):
-    templateId: Literal["tech-text-v1"]
-    templateVersion: Literal[1]
+    templateId: str = Field(min_length=1)
+    templateVersion: StrictInt = Field(
+        ge=1,
+        le=9_007_199_254_740_991,
+    )
     composition: CompositionDocument
     audio: str = ""
     segments: list[SegmentDocument] = Field(min_length=1)
-    templateProps: TemplatePropsDocument
+    templateProps: dict[str, Any]
 
     @model_validator(mode="after")
     def ordered_segments(self):
+        if abs(self.segments[0].start) > CONTINUITY_EPSILON_SECONDS:
+            raise ValueError("分镜必须从主音频零点开始")
         for index in range(1, len(self.segments)):
-            if self.segments[index].start < self.segments[index - 1].end:
-                raise ValueError("分镜时间不能重叠，且必须按时间排序")
+            if abs(
+                self.segments[index].start
+                - self.segments[index - 1].end
+            ) > CONTINUITY_EPSILON_SECONDS:
+                raise ValueError("分镜必须连续且按时间排序")
         return self
 
 
 class TemplateSelectionDocument(BaseModel):
-    templateId: str
-    templateVersion: int = Field(ge=1)
+    model_config = ConfigDict(extra="forbid")
+
+    templateId: str = Field(min_length=1)
+    templateVersion: StrictInt = Field(
+        ge=1,
+        le=9_007_199_254_740_991,
+    )
     templateProps: dict[str, Any] = Field(default_factory=dict)
 
 
 class ScenePlanSceneEdit(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     id: str = Field(min_length=1)
-    fromWordId: str = ""
-    throughWordId: str = ""
-    displayText: str = ""
+    fromWordId: str = Field(min_length=1)
+    throughWordId: str = Field(min_length=1)
+    displayText: str = Field(min_length=1)
     highlight: list[str] = Field(default_factory=list)
-    animation: str = ""
+    animation: str = Field(min_length=1)
 
 
 class ScenePlanEdit(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     scenes: list[ScenePlanSceneEdit]
 
 
@@ -231,6 +245,8 @@ class ProjectCreate(BaseModel):
 
 
 class ProjectUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     revision: int = Field(ge=1)
     title: str | None = Field(default=None, max_length=300)
     status: Literal["draft", "audio_ready", "video_ready", "completed", "archived"] | None = None
@@ -242,7 +258,6 @@ class ProjectUpdate(BaseModel):
     composition: CompositionDocument | None = None
     template: TemplateSelectionDocument | None = None
     scene_plan: ScenePlanEdit | None = None
-    render_input: RenderInputDocument | None = None
     cover_asset_url: str | None = None
     output_asset_url: str | None = None
 
@@ -341,8 +356,19 @@ DEFAULT_RENDER_INPUT = {
 
 def serialize_project(project: TextVideoProject, *, summary: bool = False) -> dict[str, Any]:
     render_input = project.render_input or DEFAULT_RENDER_INPUT
-    segments = render_input.get("segments") or []
-    duration = max((float(segment.get("end", 0)) for segment in segments), default=0)
+    master_audio = empty_master_audio() | (project.master_audio or {})
+    master_duration = master_audio.get("duration")
+    duration = (
+        float(master_duration)
+        if (
+            master_audio.get("status") == "ready"
+            and isinstance(master_duration, (int, float))
+            and not isinstance(master_duration, bool)
+            and math.isfinite(master_duration)
+            and master_duration > 0
+        )
+        else 0.0
+    )
     data = {
         "id": project.id,
         "title": project.title,
@@ -365,7 +391,7 @@ def serialize_project(project: TextVideoProject, *, summary: bool = False) -> di
                 project.paragraphs or [],
             ),
             "speech_split_mode": project.speech_split_mode or "single",
-            "master_audio": empty_master_audio() | (project.master_audio or {}),
+            "master_audio": master_audio,
             "scene_plan": empty_scene_plan() | (project.scene_plan or {}),
             "render_input": render_input,
         })

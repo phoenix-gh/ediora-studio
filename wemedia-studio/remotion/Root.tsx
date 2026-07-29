@@ -1,28 +1,80 @@
 import { Composition } from 'remotion'
 
-import { TEXT_VIDEO_FIXTURE } from '../lib/text-video/fixture'
-import type { TextVideoRenderInput } from './contract'
-import { TechTextV1Composition } from './templates/tech-text-v1/Composition'
-import { TECH_TEXT_V1_ID } from './templates/tech-text-v1/manifest'
+import { parseTextVideoRenderInput } from './contract'
+import { textVideoTemplates } from './registry'
+import type {
+  TextVideoRenderInput,
+  TextVideoTemplateManifest,
+} from './types'
 
-const defaultProps = TEXT_VIDEO_FIXTURE.renderInput
+function defaultRenderInput<P>(
+  manifest: TextVideoTemplateManifest<P>,
+): TextVideoRenderInput<P> {
+  return {
+    templateId: manifest.id,
+    templateVersion: manifest.version,
+    composition: { width: 1080, height: 1920, fps: 30 },
+    audio: '',
+    segments: [{
+      id: 'scene-1',
+      start: 0,
+      end: 2.4,
+      text: '在这里输入稿件',
+      highlight: [],
+      animation: manifest.animations[0],
+    }],
+    templateProps: manifest.defaults,
+  }
+}
 
-export function RemotionRoot() {
+function RegisteredComposition<P>({
+  manifest,
+}: {
+  manifest: TextVideoTemplateManifest<P>
+}) {
+  const defaultProps = defaultRenderInput(manifest)
+  const duration = defaultProps.segments.at(-1)!.end
+  parseTextVideoRenderInput(defaultProps, { masterDuration: duration })
+
   return (
     <Composition
-      id={TECH_TEXT_V1_ID}
-      component={TechTextV1Composition}
-      durationInFrames={Math.ceil(defaultProps.segments.at(-1)!.end * defaultProps.composition.fps)}
+      id={manifest.compositionId}
+      component={manifest.component}
+      durationInFrames={Math.ceil(duration * defaultProps.composition.fps)}
       fps={defaultProps.composition.fps}
       width={defaultProps.composition.width}
       height={defaultProps.composition.height}
       defaultProps={defaultProps}
-      calculateMetadata={({ props }: { props: TextVideoRenderInput }) => ({
-        durationInFrames: Math.ceil(props.segments.at(-1)!.end * props.composition.fps),
-        fps: props.composition.fps,
-        width: props.composition.width,
-        height: props.composition.height,
-      })}
+      calculateMetadata={({ props }) => {
+        const finalEnd = props.segments.at(-1)?.end
+        if (finalEnd === undefined) {
+          throw new Error('文字视频渲染契约错误：至少需要一个分镜')
+        }
+        const parsed = parseTextVideoRenderInput(props, {
+          masterDuration: finalEnd,
+        })
+        return {
+          durationInFrames: Math.ceil(
+            finalEnd * parsed.composition.fps,
+          ),
+          fps: parsed.composition.fps,
+          width: parsed.composition.width,
+          height: parsed.composition.height,
+        }
+      }}
     />
+  )
+}
+
+export function RemotionRoot() {
+  return (
+    <>
+      {textVideoTemplates.map(manifest => (
+        <RegisteredComposition
+          key={`${manifest.id}@${manifest.version}`}
+          manifest={manifest}
+        />
+      ))}
+    </>
   )
 }

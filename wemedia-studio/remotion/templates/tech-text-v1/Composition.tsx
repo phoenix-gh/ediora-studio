@@ -1,14 +1,29 @@
 import { AbsoluteFill, Html5Audio, interpolate, useCurrentFrame, useVideoConfig } from 'remotion'
 
-import type { TextVideoRenderInput } from '../../contract'
+import type { TextVideoRenderInput } from '../../types'
+import type { TextVideoSegment } from '../../types'
 import { TimedText } from '../../shared/TimedText'
+
+export function findActiveTextVideoSegment(
+  segments: TextVideoSegment[],
+  seconds: number,
+) {
+  const segment = segments.find(
+    item => seconds >= item.start && seconds < item.end,
+  )
+  if (!segment) {
+    throw new Error(
+      `文字视频渲染契约错误：${seconds} 秒没有对应的连续分镜`,
+    )
+  }
+  return segment
+}
 
 export function TechTextV1Composition(props: TextVideoRenderInput) {
   const frame = useCurrentFrame()
   const { fps, width, height } = useVideoConfig()
   const seconds = frame / fps
-  const segment = props.segments.find(item => seconds >= item.start && seconds < item.end)
-    ?? props.segments.at(-1)!
+  const segment = findActiveTextVideoSegment(props.segments, seconds)
   const portrait = height > width
   const landscape = width > height
   const segmentStartFrame = Math.round(segment.start * fps)

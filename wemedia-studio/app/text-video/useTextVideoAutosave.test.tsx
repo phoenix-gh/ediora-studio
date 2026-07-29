@@ -54,6 +54,20 @@ describe('useTextVideoAutosave', () => {
       await vi.advanceTimersByTimeAsync(1)
     })
     expect(save).toHaveBeenCalledWith(7, expect.objectContaining({ revision: 1 }))
+    const payload = save.mock.calls[0][1]
+    expect(payload).toMatchObject({
+      composition: project.render_input.composition,
+      template: {
+        templateId: project.render_input.templateId,
+        templateVersion: project.render_input.templateVersion,
+        templateProps: project.render_input.templateProps,
+      },
+      scene_plan: { scenes: project.scene_plan.scenes },
+    })
+    expect(payload).not.toHaveProperty('render_input')
+    expect(JSON.stringify(payload)).not.toContain('"start"')
+    expect(JSON.stringify(payload)).not.toContain('"end"')
+    expect(JSON.stringify(payload)).not.toContain('"audio"')
     expect(onRevision).toHaveBeenCalledWith(2)
     expect(result.current.saveState).toBe('saved')
   })

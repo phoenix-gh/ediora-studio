@@ -66,6 +66,60 @@ def _speech_project(client, text="需要配音。"):
     ).json()
 
 
+def _set_ready_master(project_id, *, duration=4.2):
+    from database import SessionLocal
+    from models import TextVideoProject
+    from text_video_domain import empty_master_audio
+
+    words = [
+        {
+            "id": "word-1",
+            "text": "甲",
+            "start": 0.2,
+            "end": 0.5,
+            "speech_segment_id": "paragraph-1",
+        },
+        {
+            "id": "word-2",
+            "text": "乙",
+            "start": 0.7,
+            "end": 1.0,
+            "speech_segment_id": "paragraph-1",
+        },
+        {
+            "id": "word-3",
+            "text": "丙",
+            "start": 2.2,
+            "end": 2.5,
+            "speech_segment_id": "paragraph-1",
+        },
+        {
+            "id": "word-4",
+            "text": "丁",
+            "start": 3.2,
+            "end": 3.5,
+            "speech_segment_id": "paragraph-1",
+        },
+    ]
+
+    async def prepare():
+        async with SessionLocal() as session:
+            project = await session.get(TextVideoProject, project_id)
+            project.master_audio = empty_master_audio() | {
+                "status": "ready",
+                "timeline_status": "ready",
+                "audio_url": "/api/uploads/master.mp3",
+                "duration": duration,
+                "source_hash": "a" * 64,
+                "word_timings": words,
+                "timeline_source": "provider",
+            }
+            await session.commit()
+
+    asyncio.new_event_loop().run_until_complete(prepare())
+    return words
+
+
 def _prepare_speech_worker_result(
     client,
     monkeypatch,
@@ -155,6 +209,7 @@ def test_text_video_project_crud_and_revision_conflict(client):
     assert created["master_audio"]["status"] == "missing"
     assert created["scene_plan"]["status"] == "missing"
     assert created["render_input"]["templateId"] == "tech-text-v1"
+    assert client.get("/api/text-videos").json()[0]["duration"] == 0
 
     detail = client.get(f"/api/text-videos/{created['id']}")
     assert detail.status_code == 200
@@ -277,35 +332,270 @@ def test_patch_ignores_browser_owned_speech_generation_fields(client):
     assert segment["job_id"] is None
 
 
-def test_rejects_overlapping_render_segments(client):
+def test_patch_rejects_browser_owned_render_input(client):
     project = client.post("/api/text-videos", json={}).json()
-    render_input = project["render_input"]
-    render_input["segments"] = [
+    response = client.patch(
+        f"/api/text-videos/{project['id']}",
+        json={
+            "revision": project["revision"],
+            "render_input": project["render_input"],
+        },
+    )
+
+    assert response.status_code == 422
+    assert "render_input" in response.text
+
+
+def test_scene_plan_patch_projects_authoritative_audio_and_seconds(client):
+    project = _speech_project(client, "甲乙丙丁")
+    _set_ready_master(project["id"])
+    before = client.get(f"/api/text-videos/{project['id']}").json()
+    scenes = [
         {
             "id": "scene-1",
-            "start": 0,
-            "end": 2.4,
-            "text": "第一幕",
-            "highlight": [],
+            "fromWordId": "word-1",
+            "throughWordId": "word-2",
+            "displayText": "甲乙",
+            "highlight": ["甲"],
             "animation": "fade-up",
         },
         {
             "id": "scene-2",
-            "start": 2,
-            "end": 4,
-            "text": "第二幕",
-            "highlight": [],
+            "fromWordId": "word-3",
+            "throughWordId": "word-4",
+            "displayText": "丙丁",
+            "highlight": ["丁"],
             "animation": "scale",
         },
     ]
 
     response = client.patch(
         f"/api/text-videos/{project['id']}",
-        json={"revision": project["revision"], "render_input": render_input},
+        json={
+            "revision": project["revision"],
+            "scene_plan": {"scenes": scenes},
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    updated = response.json()
+    assert updated["scene_plan"] == {
+        "status": "ready",
+        "generation_revision": 1,
+        "master_source_hash": "a" * 64,
+        "scenes": scenes,
+        "job_id": None,
+        "error": "",
+    }
+    assert updated["render_input"]["audio"] == "/api/uploads/master.mp3"
+    assert updated["render_input"]["segments"] == [
+        {
+            "id": "scene-1",
+            "start": 0.0,
+            "end": 2.2,
+            "text": "甲乙",
+            "highlight": ["甲"],
+            "animation": "fade-up",
+        },
+        {
+            "id": "scene-2",
+            "start": 2.2,
+            "end": 4.2,
+            "text": "丙丁",
+            "highlight": ["丁"],
+            "animation": "scale",
+        },
+    ]
+    summary = client.get("/api/text-videos").json()[0]
+    assert summary["duration"] == 4.2
+    assert updated["master_audio"] == before["master_audio"]
+    assert updated["paragraphs"] == before["paragraphs"]
+
+    repeated = client.patch(
+        f"/api/text-videos/{project['id']}",
+        json={
+            "revision": updated["revision"],
+            "scene_plan": {"scenes": scenes},
+        },
+    )
+    assert repeated.status_code == 200, repeated.text
+    assert repeated.json()["scene_plan"]["generation_revision"] == 1
+
+    last_valid = repeated.json()
+    invalid = client.patch(
+        f"/api/text-videos/{project['id']}",
+        json={
+            "revision": last_valid["revision"],
+            "scene_plan": {
+                "scenes": [{
+                    **scenes[0],
+                    "throughWordId": "word-3",
+                }, scenes[1]],
+            },
+        },
+    )
+    assert invalid.status_code == 422
+    preserved = client.get(f"/api/text-videos/{project['id']}").json()
+    assert preserved["revision"] == last_valid["revision"]
+    assert preserved["scene_plan"] == last_valid["scene_plan"]
+    assert preserved["render_input"] == last_valid["render_input"]
+
+
+def test_scene_plan_patch_rejects_timing_fields_and_preserves_projection(client):
+    project = _speech_project(client, "甲乙丙丁")
+    _set_ready_master(project["id"])
+    before = client.get(f"/api/text-videos/{project['id']}").json()
+
+    response = client.patch(
+        f"/api/text-videos/{project['id']}",
+        json={
+            "revision": project["revision"],
+            "scene_plan": {
+                "scenes": [{
+                    "id": "scene-1",
+                    "fromWordId": "word-1",
+                    "throughWordId": "word-4",
+                    "displayText": "甲乙丙丁",
+                    "highlight": [],
+                    "animation": "fade-up",
+                    "start": 0,
+                    "end": 4.2,
+                }],
+            },
+        },
     )
 
     assert response.status_code == 422
-    assert "重叠" in response.text
+    after = client.get(f"/api/text-videos/{project['id']}").json()
+    assert after["revision"] == before["revision"]
+    assert after["scene_plan"] == before["scene_plan"]
+    assert after["render_input"] == before["render_input"]
+
+
+def test_scene_plan_requires_ready_current_master_timeline(client):
+    project = _speech_project(client, "甲乙")
+    response = client.patch(
+        f"/api/text-videos/{project['id']}",
+        json={
+            "revision": project["revision"],
+            "scene_plan": {
+                "scenes": [{
+                    "id": "scene-1",
+                    "fromWordId": "word-1",
+                    "throughWordId": "word-1",
+                    "displayText": "甲乙",
+                    "highlight": [],
+                    "animation": "fade-up",
+                }],
+            },
+        },
+    )
+    assert response.status_code == 422
+    assert "主音频时间轴" in response.text
+
+
+def test_template_and_composition_edits_reproject_or_fail_atomically(client):
+    project = _speech_project(client, "甲乙丙丁")
+    _set_ready_master(project["id"])
+    scenes = [
+        {
+            "id": "scene-1",
+            "fromWordId": "word-1",
+            "throughWordId": "word-2",
+            "displayText": "甲乙",
+            "highlight": [],
+            "animation": "fade-up",
+        },
+        {
+            "id": "scene-2",
+            "fromWordId": "word-3",
+            "throughWordId": "word-4",
+            "displayText": "丙丁",
+            "highlight": [],
+            "animation": "scale",
+        },
+    ]
+    ready = client.patch(
+        f"/api/text-videos/{project['id']}",
+        json={
+            "revision": project["revision"],
+            "scene_plan": {"scenes": scenes},
+        },
+    ).json()
+
+    landscape = client.patch(
+        f"/api/text-videos/{project['id']}",
+        json={
+            "revision": ready["revision"],
+            "composition": {"width": 1920, "height": 1080, "fps": 30},
+        },
+    )
+    assert landscape.status_code == 200, landscape.text
+    changed = landscape.json()
+    assert changed["render_input"]["composition"] == {
+        "width": 1920,
+        "height": 1080,
+        "fps": 30,
+    }
+    assert changed["render_input"]["segments"] == ready["render_input"]["segments"]
+    assert changed["render_input"]["audio"] == ready["render_input"]["audio"]
+    assert (
+        changed["scene_plan"]["generation_revision"]
+        == ready["scene_plan"]["generation_revision"]
+    )
+
+    invalid = client.patch(
+        f"/api/text-videos/{project['id']}",
+        json={
+            "revision": changed["revision"],
+            "template": {
+                "templateId": "tech-text-v1",
+                "templateVersion": 1,
+                "templateProps": {
+                    **changed["render_input"]["templateProps"],
+                    "transition": "wipe",
+                },
+            },
+        },
+    )
+    assert invalid.status_code == 422
+    after = client.get(f"/api/text-videos/{project['id']}").json()
+    assert after["revision"] == changed["revision"]
+    assert after["scene_plan"] == changed["scene_plan"]
+    assert after["render_input"] == changed["render_input"]
+
+
+def test_unknown_template_pair_is_visible_but_not_editable(client):
+    from database import SessionLocal
+    from models import TextVideoProject
+
+    project = client.post("/api/text-videos", json={}).json()
+
+    async def store_legacy_unknown_pair():
+        async with SessionLocal() as session:
+            stored = await session.get(TextVideoProject, project["id"])
+            stored.render_input = {
+                **stored.render_input,
+                "templateId": "retired-template",
+                "templateVersion": 9,
+            }
+            await session.commit()
+
+    asyncio.new_event_loop().run_until_complete(store_legacy_unknown_pair())
+    readable = client.get(f"/api/text-videos/{project['id']}")
+    assert readable.status_code == 200
+    assert readable.json()["render_input"]["templateId"] == "retired-template"
+    assert client.get("/api/text-videos").json()[0]["duration"] == 0
+
+    edit = client.patch(
+        f"/api/text-videos/{project['id']}",
+        json={
+            "revision": project["revision"],
+            "composition": {"width": 1080, "height": 1080, "fps": 30},
+        },
+    )
+    assert edit.status_code == 422
+    assert "retired-template@9" in edit.text
 
 
 def test_speech_split_preview_snapshots_exact_script_and_worker_validation(client, monkeypatch):
