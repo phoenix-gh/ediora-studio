@@ -21,7 +21,13 @@ from fastapi import (
     status,
 )
 from loguru import logger
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictInt,
+    model_validator,
+)
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -68,11 +74,31 @@ from text_video_audio import (
     SUPPORTED_MEDIA_TYPES,
     save_text_video_audio_asset,
 )
+from text_video_alignment import (
+    AlignmentError,
+    align_transcript_words,
+    build_global_timeline,
+)
+from text_video_master import (
+    MasterAlignmentFailedError,
+    MasterBusyError,
+    MasterStateError,
+    StaleMasterJob,
+    assemble_master,
+    begin_master_alignment,
+    complete_master_alignment,
+    fail_master_audio,
+    launch_master_audio,
+)
 from text_video_segmentation import (
     SegmentationError,
     build_boundary_candidates,
     slice_at_boundary_ids,
     speakable_character_count,
+)
+from text_video_transcription import (
+    TranscriptionError,
+    transcribe_audio_words,
 )
 from worker_auth import require_worker_token
 
@@ -86,6 +112,7 @@ SPEECH_DB_OPERATION_TIMEOUT_SECONDS = min(
 SPEECH_DB_CANCEL_GRACE_SECONDS = 1.0
 SPEECH_DB_VERIFICATION_TIMEOUT_SECONDS = 6.0
 _DETACHED_SPEECH_DB_TASKS: set[asyncio.Task] = set()
+_MASTER_ALIGNMENT_LOCKS: dict[tuple[int, int], asyncio.Lock] = {}
 
 
 class WordTimingDocument(BaseModel):
@@ -242,6 +269,48 @@ class SpeechWorkerFailureRequest(BaseModel):
     generation_revision: int = Field(ge=0)
     source_hash: str = Field(min_length=64, max_length=64)
     error: str = Field(min_length=1, max_length=500)
+
+
+class MasterAlignRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    source_hash: str = Field(min_length=64, max_length=64)
+    step_id: StrictInt = Field(ge=1)
+    attempt: StrictInt = Field(ge=1)
+    claim_token: str = Field(min_length=16, max_length=128)
+
+
+class MasterWorkerFailureRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    source_hash: str = Field(min_length=64, max_length=64)
+    phase: Literal[
+        "assemble_master_audio",
+        "align_master_timeline",
+    ]
+    error: str = Field(min_length=1, max_length=500)
+    step_id: StrictInt | None = Field(default=None, ge=1)
+    attempt: StrictInt | None = Field(default=None, ge=1)
+    claim_token: str | None = Field(
+        default=None,
+        min_length=16,
+        max_length=128,
+    )
+
+    @model_validator(mode="after")
+    def validate_alignment_claim(self):
+        claim = (self.step_id, self.attempt, self.claim_token)
+        if (
+            self.phase == "align_master_timeline"
+            and any(value is None for value in claim)
+        ):
+            raise ValueError("对齐失败上报必须携带 step/attempt/claim")
+        if (
+            self.phase == "assemble_master_audio"
+            and any(value is not None for value in claim)
+        ):
+            raise ValueError("拼接失败上报不能携带对齐 claim")
+        return self
 
 
 DEFAULT_PARAGRAPHS = [default_speech_segment("", segment_id="paragraph-1")]
@@ -458,6 +527,14 @@ def _speech_job_payload(job: ContentJob) -> dict:
     }
 
 
+def _master_job_payload(job: ContentJob) -> dict:
+    return {
+        "id": job.id,
+        "flow": job.flow,
+        "target_id": int(job.input_data["project_id"]),
+    }
+
+
 def _stale_conflict(error: Exception) -> HTTPException:
     return HTTPException(
         status_code=409,
@@ -646,6 +723,316 @@ async def confirm_speech_segment(
         await db.refresh(project)
         return serialize_project(project)
     raise HTTPException(404, "配音段落不存在")
+
+
+@router.post(
+    "/{project_id}/master-audio/build",
+    status_code=status.HTTP_201_CREATED,
+)
+async def build_master_audio(
+    project_id: int,
+    payload: SpeechActionRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        result = await launch_master_audio(
+            db,
+            project_id,
+            expected_revision=payload.revision,
+        )
+    except (StaleMasterJob, MasterStateError) as error:
+        await db.rollback()
+        raise HTTPException(
+            409,
+            str(error),
+            headers={"X-WMS-Retryable": "false"},
+        ) from error
+    return {
+        "jobs": [_master_job_payload(job) for job in result.jobs],
+        "project": serialize_project(result.project),
+    }
+
+
+@router.post(
+    "/{project_id}/master-audio/worker-assemble",
+    dependencies=[Depends(require_worker_token)],
+)
+async def worker_assemble_master_audio(
+    project_id: int,
+    job_id: int = Header(alias="X-Content-Job-Id"),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        return await assemble_master(
+            db,
+            project_id=project_id,
+            job_id=job_id,
+        )
+    except StaleMasterJob as error:
+        await db.rollback()
+        raise _stale_conflict(error) from error
+    except MasterStateError as error:
+        await db.rollback()
+        raise HTTPException(
+            422,
+            str(error),
+            headers={"X-WMS-Retryable": "false"},
+        ) from error
+    except MediaToolUnavailable as error:
+        await db.rollback()
+        raise HTTPException(
+            503,
+            "FFmpeg/FFprobe 不可用，请安装媒体工具后重试",
+            headers={"X-WMS-Retryable": "true"},
+        ) from error
+    except MediaCommandError as error:
+        await db.rollback()
+        raise HTTPException(
+            422,
+            "主音频无法解析或拼接",
+            headers={"X-WMS-Retryable": "false"},
+        ) from error
+
+
+@router.post(
+    "/{project_id}/master-audio/worker-align",
+    dependencies=[Depends(require_worker_token)],
+)
+async def worker_align_master_audio(
+    project_id: int,
+    payload: MasterAlignRequest,
+    job_id: int = Header(alias="X-Content-Job-Id"),
+    db: AsyncSession = Depends(get_db),
+):
+    lock = _MASTER_ALIGNMENT_LOCKS.setdefault(
+        (project_id, job_id),
+        asyncio.Lock(),
+    )
+    async with lock:
+        return await _worker_align_master_audio(
+            project_id,
+            payload,
+            job_id,
+            db,
+        )
+
+
+async def _worker_align_master_audio(
+    project_id: int,
+    payload: MasterAlignRequest,
+    job_id: int,
+    db: AsyncSession,
+):
+    while True:
+        try:
+            context = await begin_master_alignment(
+                db,
+                project_id=project_id,
+                job_id=job_id,
+                source_hash=payload.source_hash,
+                step_id=payload.step_id,
+                attempt=payload.attempt,
+                claim_token=payload.claim_token,
+            )
+            break
+        except MasterBusyError:
+            # Another API process owns the durable claim. Wait for its
+            # committed result instead of starting a second paid
+            # transcription or failing the shared durable step. Lease expiry
+            # is fail-closed for the same durable attempt.
+            await db.rollback()
+            await asyncio.sleep(0.05)
+        except MasterAlignmentFailedError as error:
+            await db.rollback()
+            raise HTTPException(
+                422,
+                str(error),
+                headers={
+                    "X-WMS-Retryable": (
+                        "true" if error.retryable else "false"
+                    ),
+                },
+            ) from error
+        except StaleMasterJob as error:
+            await db.rollback()
+            raise _stale_conflict(error) from error
+        except MediaToolUnavailable as error:
+            await db.rollback()
+            raise HTTPException(
+                503,
+                "FFmpeg/FFprobe 不可用，请安装媒体工具后重试",
+                headers={"X-WMS-Retryable": "true"},
+            ) from error
+        except (MediaCommandError, MasterStateError) as error:
+            await db.rollback()
+            raise HTTPException(
+                422,
+                str(error),
+                headers={"X-WMS-Retryable": "false"},
+            ) from error
+    if context.already_ready:
+        return serialize_project(context.project)
+
+    segments = [
+        {
+            "id": item["speech_segment_id"],
+            "text": item["text"],
+            "sample_count": item["sample_count"],
+            "word_timings": deepcopy(item.get("word_timings") or []),
+        }
+        for item in context.segments
+    ]
+    script = "".join(item["text"] for item in segments)
+    offsets = {
+        item["segment_id"]: item["sample_offset"]
+        for item in context.segment_offsets
+    }
+    duration = context.sample_count / context.sample_rate
+    try:
+        try:
+            words = build_global_timeline(
+                script,
+                segments,
+                offsets,
+                duration,
+                sample_rate=context.sample_rate,
+                master_sample_count=context.sample_count,
+            )
+            timeline_source = "provider"
+        except AlignmentError:
+            if context.audio_path is None:
+                raise AlignmentError("主音频文件已丢失")
+            transcription = await transcribe_audio_words(
+                context.audio_path,
+                await get_config(),
+                duration=duration,
+            )
+            words = align_transcript_words(
+                script,
+                list(transcription.words),
+                duration,
+                speech_segments=[
+                    {
+                        "id": item["id"],
+                        "text": item["text"],
+                    }
+                    for item in segments
+                ],
+                sample_rate=context.sample_rate,
+                master_sample_count=context.sample_count,
+            )
+            timeline_source = "forced-alignment"
+        project = await complete_master_alignment(
+            db,
+            project_id=project_id,
+            job_id=job_id,
+            source_hash=payload.source_hash,
+            step_id=payload.step_id,
+            attempt=payload.attempt,
+            claim_token=payload.claim_token,
+            words=words,
+            timeline_source=timeline_source,
+        )
+        return serialize_project(project)
+    except TranscriptionError as error:
+        try:
+            await fail_master_audio(
+                db,
+                project_id=project_id,
+                job_id=job_id,
+                source_hash=payload.source_hash,
+                phase="align_master_timeline",
+                error=str(error),
+                step_id=payload.step_id,
+                attempt=payload.attempt,
+                claim_token=payload.claim_token,
+                retryable=error.retryable,
+            )
+        except StaleMasterJob as stale:
+            await db.rollback()
+            raise _stale_conflict(stale) from error
+        raise HTTPException(
+            422,
+            str(error),
+            headers={
+                "X-WMS-Retryable": (
+                    "true" if error.retryable else "false"
+                ),
+            },
+        ) from error
+    except AlignmentError as error:
+        try:
+            await fail_master_audio(
+                db,
+                project_id=project_id,
+                job_id=job_id,
+                source_hash=payload.source_hash,
+                phase="align_master_timeline",
+                error=str(error),
+                step_id=payload.step_id,
+                attempt=payload.attempt,
+                claim_token=payload.claim_token,
+                retryable=False,
+            )
+        except StaleMasterJob as stale:
+            await db.rollback()
+            raise _stale_conflict(stale) from error
+        raise HTTPException(
+            422,
+            str(error),
+            headers={"X-WMS-Retryable": "false"},
+        ) from error
+    except StaleMasterJob as error:
+        await db.rollback()
+        raise _stale_conflict(error) from error
+
+
+@router.post(
+    "/{project_id}/master-audio/worker-failure",
+    dependencies=[Depends(require_worker_token)],
+)
+async def worker_fail_master_audio(
+    project_id: int,
+    payload: MasterWorkerFailureRequest,
+    job_id: int = Header(alias="X-Content-Job-Id"),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        project = await fail_master_audio(
+            db,
+            project_id=project_id,
+            job_id=job_id,
+            source_hash=payload.source_hash,
+            phase=payload.phase,
+            error=payload.error,
+            step_id=payload.step_id,
+            attempt=payload.attempt,
+            claim_token=payload.claim_token,
+            reconcile_only=(
+                payload.phase == "align_master_timeline"
+            ),
+        )
+        serialized = serialize_project(project)
+        master = serialized["master_audio"]
+        failure_applied = (
+            master["status"] == "failed"
+            if payload.phase == "assemble_master_audio"
+            else master["timeline_status"] == "failed"
+        )
+        return {
+            **serialized,
+            "failure_applied": failure_applied,
+        }
+    except StaleMasterJob as error:
+        await db.rollback()
+        raise _stale_conflict(error) from error
+    except MasterStateError as error:
+        await db.rollback()
+        raise HTTPException(
+            422,
+            str(error),
+            headers={"X-WMS-Retryable": "false"},
+        ) from error
 
 
 @router.get(

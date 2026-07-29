@@ -12,6 +12,7 @@ import { runContentResponseOutputJob } from '../lib/ai/content-response-output-j
 import { runXResponseDigestJob, runXResponseJob } from '../lib/ai/x-response-job'
 import { runTopicSourceJob } from '../lib/ai/topic-source-job'
 import { runTextVideoSplitJob } from '../lib/ai/text-video-split-job'
+import { runTextVideoMasterJob } from '../lib/ai/text-video-master-job'
 import { runTextVideoSpeechJob } from '../lib/ai/text-video-speech-job'
 
 const redisUrl = process.env.WMS_REDIS_URL ?? 'redis://redis:6379/0'
@@ -39,6 +40,7 @@ async function run() {
       else if (job.flow === 'topic_source') await runTopicSourceJob(jobId)
       else if (job.flow === 'text_video_split_preview') await runTextVideoSplitJob(jobId)
       else if (job.flow === 'text_video_speech') await runTextVideoSpeechJob(jobId)
+      else if (job.flow === 'text_video_master_audio') await runTextVideoMasterJob(jobId)
       else await runContentJob(jobId)
     } catch (error) {
       if (error instanceof JobFinalizationError) {

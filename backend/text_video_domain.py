@@ -25,14 +25,25 @@ def empty_master_audio() -> dict:
     return {
         "status": "missing",
         "timeline_status": "missing",
+        "asset_id": None,
         "audio_url": "",
         "duration": 0.0,
+        "sample_count": 0,
+        "sample_rate": 0,
         "source_hash": "",
+        "segment_offsets": [],
+        "owns_asset": False,
         "word_timings": [],
         "timeline_source": "",
         "error": "",
         "timeline_error": "",
+        "timeline_retryable": False,
         "job_id": None,
+        "repair_generation": 0,
+        "alignment_step_id": None,
+        "alignment_attempt": 0,
+        "alignment_claim_token": "",
+        "alignment_claim_expires_at": 0.0,
     }
 
 

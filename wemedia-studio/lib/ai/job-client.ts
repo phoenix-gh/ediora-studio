@@ -32,11 +32,17 @@ export type DurableJob = {
 
 export class ApiRequestError extends Error {
   retryable: boolean
+  responseReceived: boolean
 
-  constructor(message: string, retryable: boolean) {
+  constructor(
+    message: string,
+    retryable: boolean,
+    responseReceived = false,
+  ) {
     super(message)
     this.name = 'ApiRequestError'
     this.retryable = retryable
+    this.responseReceived = responseReceived
   }
 }
 
@@ -60,6 +66,7 @@ async function jsonRequest<T>(path: string, init?: RequestInit): Promise<T> {
     throw new ApiRequestError(
       detail || `${path} failed (${response.status})`,
       retryable,
+      true,
     )
   }
   if (response.status === 204) return undefined as T
@@ -71,7 +78,10 @@ export function getJob(jobId: number) {
 }
 
 export function startStep(jobId: number, step: string) {
-  return jsonRequest<{ id: number }>(`/jobs/${jobId}/steps/${step}/start`, { method: 'POST' })
+  return jsonRequest<{ id: number; attempt: number }>(
+    `/jobs/${jobId}/steps/${step}/start`,
+    { method: 'POST' },
+  )
 }
 
 export function completeStep(jobId: number, stepId: number, output: Record<string, unknown>) {

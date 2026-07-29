@@ -42,6 +42,116 @@ def test_retrying_failed_step_preserves_completed_steps(session_factory):
     asyncio.new_event_loop().run_until_complete(run())
 
 
+def test_cancelled_job_cannot_retry_its_previous_failed_step(session_factory):
+    from content_jobs import (
+        InvalidJobTransition,
+        cancel_job,
+        create_job,
+        fail_step,
+        retry_step,
+        start_step,
+    )
+    from models import ContentJob, ContentJobStep
+    from sqlalchemy import select
+
+    async def run():
+        async with session_factory() as session:
+            job = await create_job(
+                session,
+                flow="draft",
+                title="cancelled retry",
+                input_data={},
+            )
+            step = await start_step(session, job.id, "draft")
+            await fail_step(
+                session,
+                step.id,
+                "temporary",
+                retryable=True,
+            )
+            await cancel_job(session, job.id)
+
+            with pytest.raises(
+                InvalidJobTransition,
+                match="failed job",
+            ):
+                await retry_step(session, job.id, "draft")
+
+            current = await session.get(ContentJob, job.id)
+            attempts = (
+                await session.scalars(
+                    select(ContentJobStep)
+                    .where(
+                        ContentJobStep.job_id == job.id,
+                        ContentJobStep.step_key == "draft",
+                    )
+                    .order_by(ContentJobStep.attempt),
+                )
+            ).all()
+
+            assert current.status == "cancelled"
+            assert [(item.attempt, item.status) for item in attempts] == [
+                (1, "failed"),
+            ]
+
+    asyncio.new_event_loop().run_until_complete(run())
+
+
+def test_retrying_an_already_queued_attempt_is_idempotent(session_factory):
+    from content_jobs import create_job, fail_step, retry_step, start_step
+    from models import ContentJobEvent, ContentJobStep
+    from sqlalchemy import select
+
+    async def run():
+        async with session_factory() as session:
+            job = await create_job(
+                session,
+                flow="draft",
+                title="retry replay",
+                input_data={},
+            )
+            step = await start_step(session, job.id, "draft")
+            await fail_step(
+                session,
+                step.id,
+                "temporary",
+                retryable=True,
+            )
+
+            first = await retry_step(session, job.id, "draft")
+            replay = await retry_step(session, job.id, "draft")
+            attempts = (
+                await session.scalars(
+                    select(ContentJobStep)
+                    .where(
+                        ContentJobStep.job_id == job.id,
+                        ContentJobStep.step_key == "draft",
+                    )
+                    .order_by(ContentJobStep.attempt),
+                )
+            ).all()
+            events = (
+                await session.scalars(
+                    select(ContentJobEvent).where(
+                        ContentJobEvent.job_id == job.id,
+                        ContentJobEvent.kind == "step_retried",
+                    ),
+                )
+            ).all()
+
+            assert replay.id == first.id
+            assert replay.attempt == first.attempt == 2
+            assert replay.status == "queued"
+            assert [(item.attempt, item.status) for item in attempts] == [
+                (1, "failed"),
+                (2, "queued"),
+            ]
+            assert len(events) == 1
+            assert events[0].step_id == first.id
+
+    asyncio.new_event_loop().run_until_complete(run())
+
+
 def test_analysis_job_failure_and_retry_update_response_state(session_factory):
     from content_jobs import create_job, fail_step, retry_step, start_step
     from models import ContentAnalysisRun, ContentResponseItem
@@ -295,6 +405,898 @@ def test_speech_retry_restores_only_its_current_segment(session_factory):
             assert current.paragraphs[0]["job_id"] == job.id
             assert current.paragraphs[0]["error"] == ""
             assert current.paragraphs[1]["status"] == "confirmed"
+
+    asyncio.new_event_loop().run_until_complete(run())
+
+
+def test_retrying_master_assembly_restores_current_master_to_building(
+    session_factory,
+):
+    from content_jobs import (
+        create_job,
+        fail_step,
+        retry_step,
+        start_step,
+    )
+    from models import ContentJobStep, TextVideoProject
+    from tests.text_video_factories import (
+        make_master_audio,
+        make_text_video_project,
+    )
+
+    async def run():
+        async with session_factory() as session:
+            project = make_text_video_project(script="甲。")
+            session.add(project)
+            await session.flush()
+            job = await create_job(
+                session,
+                flow="text_video_master_audio",
+                title="master",
+                input_data={
+                    "project_id": project.id,
+                    "source_hash": "d" * 64,
+                },
+                commit=False,
+            )
+            project.master_audio = make_master_audio(
+                status="building",
+                timeline_status="missing",
+                source_hash="d" * 64,
+                job_id=job.id,
+            )
+            await session.commit()
+            step = await start_step(
+                session,
+                job.id,
+                "assemble_master_audio",
+            )
+            await fail_step(
+                session,
+                step.id,
+                "temporary assembly failure",
+                retryable=True,
+            )
+            project = await session.get(TextVideoProject, project.id)
+            project.master_audio = {
+                **project.master_audio,
+                "status": "failed",
+                "error": "temporary assembly failure",
+            }
+            await session.commit()
+
+            retried = await retry_step(
+                session,
+                job.id,
+                "assemble_master_audio",
+            )
+            current = await session.get(TextVideoProject, project.id)
+            stored_retry = await session.get(ContentJobStep, retried.id)
+
+            assert stored_retry.attempt == 2
+            assert stored_retry.status == "queued"
+            assert current.master_audio["status"] == "building"
+            assert current.master_audio["timeline_status"] == "missing"
+            assert current.master_audio["error"] == ""
+            assert current.master_audio["timeline_error"] == ""
+            assert current.master_audio["job_id"] == job.id
+            assert current.render_input["audio"] == ""
+
+    asyncio.new_event_loop().run_until_complete(run())
+
+
+def test_retrying_master_assembly_preserves_a_durable_ready_result(
+    session_factory,
+):
+    from copy import deepcopy
+
+    from content_jobs import (
+        create_job,
+        fail_step,
+        retry_step,
+        start_step,
+    )
+    from models import TextVideoProject
+    from tests.text_video_factories import (
+        make_master_audio,
+        make_text_video_project,
+    )
+
+    async def run():
+        async with session_factory() as session:
+            project = make_text_video_project(script="甲。")
+            session.add(project)
+            await session.flush()
+            job = await create_job(
+                session,
+                flow="text_video_master_audio",
+                title="master",
+                input_data={
+                    "project_id": project.id,
+                    "source_hash": "5" * 64,
+                },
+                commit=False,
+            )
+            project.master_audio = make_master_audio(
+                status="building",
+                timeline_status="missing",
+                source_hash="5" * 64,
+                job_id=job.id,
+            )
+            await session.commit()
+            step = await start_step(
+                session,
+                job.id,
+                "assemble_master_audio",
+            )
+            project = await session.get(TextVideoProject, project.id)
+            project.master_audio = make_master_audio(
+                status="ready",
+                timeline_status="missing",
+                asset_id=71,
+                audio_url="/api/uploads/durable-master.mp3",
+                source_hash="5" * 64,
+                sample_rate=44100,
+                sample_count=44100,
+                duration=1.0,
+                segment_offsets=[{
+                    "speech_segment_id": "segment-1",
+                    "asset_id": 70,
+                    "source_hash": "6" * 64,
+                    "sample_offset": 0,
+                    "sample_count": 44100,
+                    "sample_rate": 44100,
+                }],
+                owns_asset=True,
+                job_id=job.id,
+            )
+            await session.commit()
+            durable_master = deepcopy(project.master_audio)
+            await fail_step(
+                session,
+                step.id,
+                "assemble response lost",
+                retryable=True,
+            )
+
+            await retry_step(
+                session,
+                job.id,
+                "assemble_master_audio",
+            )
+            current = await session.get(TextVideoProject, project.id)
+
+            assert current.master_audio == durable_master
+            assert current.render_input["audio"] == ""
+
+    asyncio.new_event_loop().run_until_complete(run())
+
+
+def test_retrying_master_alignment_keeps_audio_and_restores_aligning(
+    session_factory,
+):
+    from content_jobs import (
+        create_job,
+        fail_step,
+        retry_step,
+        start_step,
+        succeed_step,
+    )
+    from models import TextVideoProject
+    from tests.text_video_factories import (
+        make_master_audio,
+        make_text_video_project,
+    )
+
+    async def run():
+        async with session_factory() as session:
+            project = make_text_video_project(script="甲。")
+            session.add(project)
+            await session.flush()
+            job = await create_job(
+                session,
+                flow="text_video_master_audio",
+                title="master",
+                input_data={
+                    "project_id": project.id,
+                    "source_hash": "e" * 64,
+                },
+                commit=False,
+            )
+            project.master_audio = make_master_audio(
+                status="building",
+                timeline_status="missing",
+                source_hash="e" * 64,
+                job_id=job.id,
+            )
+            await session.commit()
+            assemble = await start_step(
+                session,
+                job.id,
+                "assemble_master_audio",
+            )
+            await succeed_step(session, assemble.id, {"asset_id": 31})
+            project = await session.get(TextVideoProject, project.id)
+            project.master_audio = make_master_audio(
+                status="ready",
+                timeline_status="aligning",
+                asset_id=31,
+                audio_url="/api/uploads/master-align.mp3",
+                source_hash="e" * 64,
+                sample_rate=44100,
+                sample_count=88200,
+                duration=2.0,
+                segment_offsets=[{
+                    "segment_id": "segment-1",
+                    "asset_id": 7,
+                    "start_sample": 0,
+                    "end_sample": 88200,
+                }],
+                job_id=job.id,
+            )
+            await session.commit()
+            align = await start_step(
+                session,
+                job.id,
+                "align_master_timeline",
+            )
+            await fail_step(
+                session,
+                align.id,
+                "temporary alignment failure",
+                retryable=True,
+            )
+            project = await session.get(TextVideoProject, project.id)
+            project.master_audio = {
+                **project.master_audio,
+                "timeline_status": "failed",
+                "timeline_error": "temporary alignment failure",
+            }
+            await session.commit()
+
+            retried = await retry_step(
+                session,
+                job.id,
+                "align_master_timeline",
+            )
+            current = await session.get(TextVideoProject, project.id)
+            master = current.master_audio
+
+            assert retried.attempt == 2
+            assert retried.status == "queued"
+            assert master["status"] == "ready"
+            assert master["timeline_status"] == "aligning"
+            assert master["timeline_error"] == ""
+            assert master["error"] == ""
+            assert master["asset_id"] == 31
+            assert master["audio_url"] == "/api/uploads/master-align.mp3"
+            assert master["sample_rate"] == 44100
+            assert master["sample_count"] == 88200
+            assert master["segment_offsets"][0]["end_sample"] == 88200
+            assert current.render_input["audio"] == ""
+
+    asyncio.new_event_loop().run_until_complete(run())
+
+
+def test_retrying_master_alignment_preserves_a_durable_ready_timeline(
+    session_factory,
+):
+    from copy import deepcopy
+
+    from content_jobs import (
+        create_job,
+        fail_step,
+        retry_step,
+        start_step,
+        succeed_step,
+    )
+    from models import TextVideoProject
+    from tests.text_video_factories import (
+        make_master_audio,
+        make_text_video_project,
+    )
+
+    async def run():
+        async with session_factory() as session:
+            project = make_text_video_project(script="甲。")
+            session.add(project)
+            await session.flush()
+            job = await create_job(
+                session,
+                flow="text_video_master_audio",
+                title="master",
+                input_data={
+                    "project_id": project.id,
+                    "source_hash": "7" * 64,
+                },
+                commit=False,
+            )
+            project.master_audio = make_master_audio(
+                status="building",
+                timeline_status="missing",
+                source_hash="7" * 64,
+                job_id=job.id,
+            )
+            await session.commit()
+            assemble = await start_step(
+                session,
+                job.id,
+                "assemble_master_audio",
+            )
+            await succeed_step(session, assemble.id, {"asset_id": 81})
+            align = await start_step(
+                session,
+                job.id,
+                "align_master_timeline",
+            )
+            project = await session.get(TextVideoProject, project.id)
+            project.master_audio = make_master_audio(
+                status="ready",
+                timeline_status="ready",
+                asset_id=81,
+                audio_url="/api/uploads/durable-timeline.mp3",
+                source_hash="7" * 64,
+                sample_rate=44100,
+                sample_count=44100,
+                duration=1.0,
+                segment_offsets=[{
+                    "speech_segment_id": "segment-1",
+                    "asset_id": 80,
+                    "source_hash": "8" * 64,
+                    "sample_offset": 0,
+                    "sample_count": 44100,
+                    "sample_rate": 44100,
+                }],
+                word_timings=[{
+                    "id": "word-1",
+                    "text": "甲。",
+                    "start": 0.0,
+                    "end": 1.0,
+                    "speech_segment_id": "segment-1",
+                }],
+                timeline_source="provider",
+                job_id=job.id,
+            )
+            project.render_input = {
+                **project.render_input,
+                "audio": "/api/uploads/durable-timeline.mp3",
+            }
+            await session.commit()
+            durable_master = deepcopy(project.master_audio)
+            durable_render_input = deepcopy(project.render_input)
+            await fail_step(
+                session,
+                align.id,
+                "align response lost",
+                retryable=True,
+            )
+
+            await retry_step(
+                session,
+                job.id,
+                "align_master_timeline",
+            )
+            current = await session.get(TextVideoProject, project.id)
+
+            assert current.master_audio == durable_master
+            assert current.render_input == durable_render_input
+
+    asyncio.new_event_loop().run_until_complete(run())
+
+
+def test_retrying_old_master_job_does_not_bind_a_new_source(
+    session_factory,
+):
+    from copy import deepcopy
+
+    from content_jobs import (
+        create_job,
+        fail_step,
+        retry_step,
+        start_step,
+    )
+    from models import TextVideoProject
+    from tests.text_video_factories import (
+        make_master_audio,
+        make_text_video_project,
+    )
+
+    async def run():
+        async with session_factory() as session:
+            project = make_text_video_project(script="甲。")
+            session.add(project)
+            await session.flush()
+            old_job = await create_job(
+                session,
+                flow="text_video_master_audio",
+                title="old master",
+                input_data={
+                    "project_id": project.id,
+                    "source_hash": "f" * 64,
+                },
+                commit=False,
+            )
+            await session.commit()
+            old_step = await start_step(
+                session,
+                old_job.id,
+                "assemble_master_audio",
+            )
+            await fail_step(
+                session,
+                old_step.id,
+                "old source failed",
+                retryable=True,
+            )
+            new_job = await create_job(
+                session,
+                flow="text_video_master_audio",
+                title="new master",
+                input_data={
+                    "project_id": project.id,
+                    "source_hash": "1" * 64,
+                },
+                commit=False,
+            )
+            project = await session.get(TextVideoProject, project.id)
+            project.master_audio = make_master_audio(
+                status="ready",
+                timeline_status="ready",
+                asset_id=51,
+                audio_url="/api/uploads/new-master.mp3",
+                source_hash="1" * 64,
+                sample_rate=44100,
+                sample_count=44100,
+                duration=1.0,
+                job_id=new_job.id,
+            )
+            project.render_input = {
+                **project.render_input,
+                "audio": "/api/uploads/new-master.mp3",
+            }
+            await session.commit()
+            expected_master = deepcopy(project.master_audio)
+            expected_render_input = deepcopy(project.render_input)
+
+            await retry_step(
+                session,
+                old_job.id,
+                "assemble_master_audio",
+            )
+            current = await session.get(TextVideoProject, project.id)
+
+            assert current.master_audio == expected_master
+            assert current.render_input == expected_render_input
+
+    asyncio.new_event_loop().run_until_complete(run())
+
+
+def test_old_master_job_cannot_mutate_a_new_job_with_the_same_source(
+    session_factory,
+):
+    from copy import deepcopy
+
+    from content_jobs import (
+        cancel_job,
+        create_job,
+        fail_step,
+        retry_step,
+        start_step,
+    )
+    from models import TextVideoProject
+    from tests.text_video_factories import (
+        make_master_audio,
+        make_text_video_project,
+    )
+
+    async def run():
+        async with session_factory() as session:
+            source_hash = "8" * 64
+            project = make_text_video_project(script="甲。")
+            session.add(project)
+            await session.flush()
+            old_job = await create_job(
+                session,
+                flow="text_video_master_audio",
+                title="old master",
+                input_data={
+                    "project_id": project.id,
+                    "source_hash": source_hash,
+                },
+                commit=False,
+            )
+            await session.commit()
+            old_step = await start_step(
+                session,
+                old_job.id,
+                "assemble_master_audio",
+            )
+            await fail_step(
+                session,
+                old_step.id,
+                "old job failed",
+                retryable=True,
+            )
+            new_job = await create_job(
+                session,
+                flow="text_video_master_audio",
+                title="replacement master",
+                input_data={
+                    "project_id": project.id,
+                    "source_hash": source_hash,
+                },
+                commit=False,
+            )
+            project = await session.get(TextVideoProject, project.id)
+            project.master_audio = make_master_audio(
+                status="ready",
+                timeline_status="ready",
+                asset_id=81,
+                audio_url="/api/uploads/replacement-master.mp3",
+                source_hash=source_hash,
+                sample_rate=44100,
+                sample_count=44100,
+                duration=1.0,
+                job_id=new_job.id,
+            )
+            project.render_input = {
+                **project.render_input,
+                "audio": "/api/uploads/replacement-master.mp3",
+            }
+            await session.commit()
+            expected_master = deepcopy(project.master_audio)
+            expected_render_input = deepcopy(project.render_input)
+
+            await retry_step(
+                session,
+                old_job.id,
+                "assemble_master_audio",
+            )
+            after_retry = await session.get(TextVideoProject, project.id)
+            assert after_retry.master_audio == expected_master
+            assert after_retry.render_input == expected_render_input
+
+            await cancel_job(session, old_job.id)
+            after_cancel = await session.get(TextVideoProject, project.id)
+            assert after_cancel.master_audio == expected_master
+            assert after_cancel.render_input == expected_render_input
+
+    asyncio.new_event_loop().run_until_complete(run())
+
+
+def test_cancelling_old_master_job_does_not_downgrade_new_ready_source(
+    session_factory,
+):
+    from copy import deepcopy
+
+    from content_jobs import cancel_job, create_job
+    from models import TextVideoProject
+    from tests.text_video_factories import (
+        make_master_audio,
+        make_text_video_project,
+    )
+
+    async def run():
+        async with session_factory() as session:
+            project = make_text_video_project(script="甲。")
+            session.add(project)
+            await session.flush()
+            old_job = await create_job(
+                session,
+                flow="text_video_master_audio",
+                title="old master",
+                input_data={
+                    "project_id": project.id,
+                    "source_hash": "3" * 64,
+                },
+                commit=False,
+            )
+            new_job = await create_job(
+                session,
+                flow="text_video_master_audio",
+                title="new master",
+                input_data={
+                    "project_id": project.id,
+                    "source_hash": "4" * 64,
+                },
+                commit=False,
+            )
+            project.master_audio = make_master_audio(
+                status="ready",
+                timeline_status="ready",
+                asset_id=61,
+                audio_url="/api/uploads/current-master.mp3",
+                source_hash="4" * 64,
+                sample_rate=44100,
+                sample_count=44100,
+                duration=1.0,
+                job_id=new_job.id,
+            )
+            project.render_input = {
+                **project.render_input,
+                "audio": "/api/uploads/current-master.mp3",
+            }
+            await session.commit()
+            expected_master = deepcopy(project.master_audio)
+            expected_render_input = deepcopy(project.render_input)
+
+            cancelled = await cancel_job(session, old_job.id)
+            current = await session.get(TextVideoProject, project.id)
+
+            assert cancelled.status == "cancelled"
+            assert current.master_audio == expected_master
+            assert current.render_input == expected_render_input
+
+    asyncio.new_event_loop().run_until_complete(run())
+
+
+def test_cancelling_master_job_before_assembly_commit_fails_only_master(
+    session_factory,
+):
+    from content_jobs import cancel_job, create_job
+    from models import TextVideoProject
+    from tests.text_video_factories import (
+        make_master_audio,
+        make_speech_segment,
+        make_text_video_project,
+    )
+
+    async def run():
+        async with session_factory() as session:
+            project = make_text_video_project(
+                script="甲。",
+                paragraphs=[
+                    make_speech_segment("a", "甲。", status="confirmed"),
+                ],
+            )
+            session.add(project)
+            await session.flush()
+            job = await create_job(
+                session,
+                flow="text_video_master_audio",
+                title="master",
+                input_data={
+                    "project_id": project.id,
+                    "source_hash": "a" * 64,
+                },
+                commit=False,
+            )
+            project.master_audio = make_master_audio(
+                status="building",
+                timeline_status="missing",
+                source_hash="a" * 64,
+                job_id=job.id,
+            )
+            confirmed = list(project.paragraphs)
+            await session.commit()
+
+            await cancel_job(session, job.id)
+            current = await session.get(TextVideoProject, project.id)
+
+            assert current.master_audio["status"] == "failed"
+            assert current.master_audio["error"] == "任务已取消"
+            assert current.master_audio["timeline_status"] == "missing"
+            assert current.render_input["audio"] == ""
+            assert current.paragraphs == confirmed
+
+    asyncio.new_event_loop().run_until_complete(run())
+
+
+def test_cancelling_master_job_after_assembly_keeps_playable_audio(
+    session_factory,
+):
+    from content_jobs import cancel_job, create_job
+    from models import TextVideoProject
+    from tests.text_video_factories import (
+        make_master_audio,
+        make_speech_segment,
+        make_text_video_project,
+    )
+
+    async def run():
+        async with session_factory() as session:
+            project = make_text_video_project(
+                script="甲。",
+                paragraphs=[
+                    make_speech_segment("a", "甲。", status="confirmed"),
+                ],
+            )
+            project.render_input = {
+                **project.render_input,
+                "audio": "/api/uploads/old-master.mp3",
+            }
+            session.add(project)
+            await session.flush()
+            job = await create_job(
+                session,
+                flow="text_video_master_audio",
+                title="master",
+                input_data={
+                    "project_id": project.id,
+                    "source_hash": "b" * 64,
+                },
+                commit=False,
+            )
+            project.master_audio = make_master_audio(
+                status="ready",
+                timeline_status="aligning",
+                asset_id=17,
+                audio_url="/api/uploads/master.mp3",
+                source_hash="b" * 64,
+                sample_rate=44100,
+                sample_count=44100,
+                duration=1.0,
+                segment_offsets=[{
+                    "segment_id": "a",
+                    "asset_id": 9,
+                    "start_sample": 0,
+                    "end_sample": 44100,
+                }],
+                job_id=job.id,
+            )
+            confirmed = list(project.paragraphs)
+            await session.commit()
+
+            await cancel_job(session, job.id)
+            current = await session.get(TextVideoProject, project.id)
+            master = current.master_audio
+
+            assert master["status"] == "ready"
+            assert master["error"] == ""
+            assert master["timeline_status"] == "failed"
+            assert master["timeline_error"] == "任务已取消"
+            assert master["asset_id"] == 17
+            assert master["audio_url"] == "/api/uploads/master.mp3"
+            assert master["sample_rate"] == 44100
+            assert master["sample_count"] == 44100
+            assert master["segment_offsets"][0]["end_sample"] == 44100
+            assert current.render_input["audio"] == ""
+            assert current.paragraphs == confirmed
+
+    asyncio.new_event_loop().run_until_complete(run())
+
+
+def test_repeated_master_cancel_is_idempotent(session_factory):
+    from content_jobs import cancel_job, create_job
+    from models import ContentJobEvent, TextVideoProject
+    from sqlalchemy import select
+    from tests.text_video_factories import (
+        make_master_audio,
+        make_text_video_project,
+    )
+
+    async def run():
+        async with session_factory() as session:
+            project = make_text_video_project(script="甲。")
+            session.add(project)
+            await session.flush()
+            job = await create_job(
+                session,
+                flow="text_video_master_audio",
+                title="master",
+                input_data={
+                    "project_id": project.id,
+                    "source_hash": "2" * 64,
+                },
+                commit=False,
+            )
+            project.master_audio = make_master_audio(
+                status="building",
+                timeline_status="missing",
+                source_hash="2" * 64,
+                job_id=job.id,
+            )
+            await session.commit()
+
+            first = await cancel_job(session, job.id)
+            second = await cancel_job(session, job.id)
+            current = await session.get(TextVideoProject, project.id)
+            events = (
+                await session.scalars(
+                    select(ContentJobEvent).where(
+                        ContentJobEvent.job_id == job.id,
+                        ContentJobEvent.kind == "job_cancelled",
+                    ),
+                )
+            ).all()
+
+            assert first.id == second.id == job.id
+            assert second.status == "cancelled"
+            assert current.master_audio["status"] == "failed"
+            assert current.master_audio["error"] == "任务已取消"
+            assert len(events) == 1
+
+    asyncio.new_event_loop().run_until_complete(run())
+
+
+def test_cancelling_master_job_rejects_durable_ready_timeline(
+    session_factory,
+):
+    from content_jobs import (
+        InvalidJobTransition,
+        cancel_job,
+        create_job,
+        start_step,
+        succeed_step,
+    )
+    from models import ContentJob, TextVideoProject
+    from tests.text_video_factories import (
+        make_master_audio,
+        make_text_video_project,
+    )
+
+    async def run():
+        async with session_factory() as session:
+            project = make_text_video_project(script="甲。")
+            session.add(project)
+            await session.flush()
+            job = await create_job(
+                session,
+                flow="text_video_master_audio",
+                title="master",
+                input_data={
+                    "project_id": project.id,
+                    "source_hash": "c" * 64,
+                },
+                commit=False,
+            )
+            project.master_audio = make_master_audio(
+                status="building",
+                timeline_status="missing",
+                source_hash="c" * 64,
+                job_id=job.id,
+            )
+            await session.commit()
+            assemble = await start_step(
+                session,
+                job.id,
+                "assemble_master_audio",
+            )
+            await succeed_step(session, assemble.id, {"asset_id": 23})
+            await start_step(session, job.id, "align_master_timeline")
+            project = await session.get(TextVideoProject, project.id)
+            project.master_audio = make_master_audio(
+                status="ready",
+                timeline_status="ready",
+                asset_id=23,
+                audio_url="/api/uploads/master-ready.mp3",
+                source_hash="c" * 64,
+                sample_rate=44100,
+                sample_count=44100,
+                duration=1.0,
+                word_timings=[{
+                    "id": "word-1",
+                    "text": "甲。",
+                    "start": 0.0,
+                    "end": 1.0,
+                    "speech_segment_id": "segment-1",
+                }],
+                timeline_source="provider",
+                job_id=job.id,
+            )
+            project.render_input = {
+                **project.render_input,
+                "audio": "/api/uploads/master-ready.mp3",
+            }
+            await session.commit()
+            project_id = project.id
+            job_id = job.id
+
+            with pytest.raises(
+                InvalidJobTransition,
+                match="cannot cancel completed master",
+            ):
+                await cancel_job(session, job_id)
+            await session.rollback()
+            current = await session.get(TextVideoProject, project_id)
+            current_job = await session.get(ContentJob, job_id)
+
+            assert current_job.status == "running"
+            assert current.master_audio["timeline_status"] == "ready"
+            assert current.master_audio["timeline_error"] == ""
+            assert current.render_input["audio"] == (
+                "/api/uploads/master-ready.mp3"
+            )
 
     asyncio.new_event_loop().run_until_complete(run())
 

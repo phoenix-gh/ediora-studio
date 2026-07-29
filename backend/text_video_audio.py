@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from copy import deepcopy
+from dataclasses import dataclass
 import math
 import os
 from pathlib import Path
@@ -22,6 +23,12 @@ UPLOADS_DIR = Path(__file__).resolve().parent / "uploads"
 SUPPORTED_MEDIA_TYPES = {"audio/wav", "audio/mpeg"}
 TARGET_SAMPLE_RATE = 44100
 TARGET_BIT_RATE = 128000
+
+
+@dataclass(frozen=True)
+class MasterAudioAssembly:
+    probe: AudioProbe
+    sample_offsets: tuple[int, ...]
 
 
 def _validated_setting(
@@ -172,6 +179,50 @@ async def concatenate_master_audio(
             str(output),
         ])
     return await probe_audio(output)
+
+
+async def assemble_master_audio(
+    inputs: Sequence[Path],
+    output: Path,
+    *,
+    expected_sample_counts: Sequence[int],
+) -> MasterAudioAssembly:
+    if len(inputs) != len(expected_sample_counts) or not inputs:
+        raise ValueError("master audio inputs and sample counts must match")
+    sample_offsets: list[int] = []
+    total = 0
+    for source, expected in zip(
+        inputs,
+        expected_sample_counts,
+        strict=True,
+    ):
+        if (
+            isinstance(expected, bool)
+            or not isinstance(expected, int)
+            or expected <= 0
+        ):
+            raise ValueError("speech sample count must be a positive integer")
+        probe = await probe_audio(source)
+        if (
+            probe.sample_rate != TARGET_SAMPLE_RATE
+            or probe.channels != 1
+            or probe.sample_count != expected
+        ):
+            raise ValueError("speech audio sample metadata does not match")
+        sample_offsets.append(total)
+        total += expected
+    probe = await concatenate_master_audio(inputs, output)
+    if (
+        probe.sample_rate != TARGET_SAMPLE_RATE
+        or probe.channels != 1
+        or probe.sample_count != total
+    ):
+        output.unlink(missing_ok=True)
+        raise ValueError("master audio sample count does not match its inputs")
+    return MasterAudioAssembly(
+        probe=probe,
+        sample_offsets=tuple(sample_offsets),
+    )
 
 
 def _validated_timings(

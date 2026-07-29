@@ -9,6 +9,7 @@ from tests.test_media_command import sine_wave
 from tests.text_video_factories import fresh_session_factory, run_async
 from text_video_audio import (
     audio_tempo_filters,
+    assemble_master_audio,
     concatenate_master_audio,
     normalize_speech_audio,
 )
@@ -133,6 +134,85 @@ def test_concat_preserves_order_and_real_duration(tmp_path):
         probe = await probe_audio(output)
         assert probe.duration == pytest.approx(1.5, abs=0.002)
         assert probe.sample_count == pytest.approx(66150, abs=1)
+
+    run_async(run())
+
+
+def test_master_assembly_uses_persisted_sample_counts_for_exact_offsets(
+    tmp_path,
+):
+    async def run():
+        first = await sine_wave(
+            tmp_path / "first-exact.wav",
+            seconds=1.0,
+        )
+        second = await sine_wave(
+            tmp_path / "second-exact.wav",
+            seconds=1.5,
+        )
+        first_mp3 = tmp_path / "first-exact.mp3"
+        second_mp3 = tmp_path / "second-exact.mp3"
+        await normalize_speech_audio(
+            first,
+            first_mp3,
+            speed=1,
+            volume=1,
+            pitch=0,
+        )
+        await normalize_speech_audio(
+            second,
+            second_mp3,
+            speed=1,
+            volume=1,
+            pitch=0,
+        )
+
+        assembled = await assemble_master_audio(
+            [first_mp3, second_mp3],
+            tmp_path / "master-exact.mp3",
+            expected_sample_counts=[44100, 66150],
+        )
+
+        assert assembled.sample_offsets == (0, 44100)
+        assert assembled.probe.sample_count == 110250
+        assert assembled.probe.duration == 2.5
+
+    run_async(run())
+
+
+def test_many_short_mp3_inputs_do_not_accumulate_container_duration_drift(
+    tmp_path,
+):
+    async def run():
+        inputs = []
+        expected = []
+        for index in range(12):
+            wav = await sine_wave(
+                tmp_path / f"short-{index}.wav",
+                seconds=0.1,
+            )
+            mp3 = tmp_path / f"short-{index}.mp3"
+            await normalize_speech_audio(
+                wav,
+                mp3,
+                speed=1,
+                volume=1,
+                pitch=0,
+            )
+            inputs.append(mp3)
+            expected.append(4410)
+
+        assembled = await assemble_master_audio(
+            inputs,
+            tmp_path / "short-master.mp3",
+            expected_sample_counts=expected,
+        )
+
+        assert assembled.sample_offsets == tuple(
+            index * 4410 for index in range(12)
+        )
+        assert assembled.probe.sample_count == 52920
+        assert assembled.probe.duration == 1.2
 
     run_async(run())
 

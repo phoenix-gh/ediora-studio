@@ -26,6 +26,13 @@ export type GlobalWordTiming = WordTiming & {
   speech_segment_id: string
 }
 
+export type MasterAudioSegmentOffset = {
+  segment_id: string
+  asset_id?: number
+  sample_offset: number
+  sample_count: number
+}
+
 export type TextVideoParagraph = {
   id: string
   text: string
@@ -42,14 +49,19 @@ export type TextVideoParagraph = {
 export type MasterAudioDocument = {
   status: 'missing' | 'building' | 'ready' | 'stale' | 'failed'
   timeline_status: 'missing' | 'aligning' | 'ready' | 'stale' | 'failed'
+  asset_id?: number | null
   audio_url: string
   duration: number
+  sample_rate?: number
+  sample_count?: number
+  segment_offsets?: MasterAudioSegmentOffset[]
   source_hash: string
   word_timings: GlobalWordTiming[]
   timeline_source: '' | 'provider' | 'forced-alignment'
   error: string
   timeline_error: string
   job_id: number | null
+  repair_generation?: number
 }
 
 export type ScenePlanSceneDocument = {
@@ -147,6 +159,17 @@ export type TextVideoSpeechJob = {
 
 export type TextVideoSpeechResponse = {
   jobs: TextVideoSpeechJob[]
+  project: TextVideoProject
+}
+
+export type TextVideoMasterJob = {
+  id: number
+  flow: 'text_video_master_audio'
+  target_id: number
+}
+
+export type TextVideoMasterResponse = {
+  jobs: TextVideoMasterJob[]
   project: TextVideoProject
 }
 
@@ -258,5 +281,15 @@ export function confirmTextVideoSpeechSegment(
     `/text-videos/${projectId}/speech-segments/`
       + `${encodeURIComponent(segmentId)}/confirm`,
     { method: 'POST', body: JSON.stringify(input) },
+  )
+}
+
+export function buildTextVideoMasterAudio(
+  projectId: number,
+  revision: number,
+) {
+  return textVideoRequest<TextVideoMasterResponse>(
+    `/text-videos/${projectId}/master-audio/build`,
+    { method: 'POST', body: JSON.stringify({ revision }) },
   )
 }

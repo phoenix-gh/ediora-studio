@@ -202,6 +202,92 @@ async def _cancel_current_speech_segment(
             return
 
 
+async def _cancel_current_master_audio(
+    session: AsyncSession,
+    job: ContentJob,
+) -> None:
+    if job.flow != "text_video_master_audio":
+        return
+    project_id = job.input_data.get("project_id")
+    source_hash = job.input_data.get("source_hash")
+    if not isinstance(project_id, int) or not isinstance(source_hash, str):
+        return
+    project = await session.scalar(
+        select(TextVideoProject)
+        .where(TextVideoProject.id == project_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if project is None:
+        return
+    master = dict(project.master_audio or {})
+    if (
+        master.get("job_id") != job.id
+        or master.get("source_hash") != source_hash
+    ):
+        return
+    if master.get("status") != "ready":
+        master["status"] = "failed"
+        master["error"] = "任务已取消"
+    else:
+        master["timeline_status"] = "failed"
+        master["timeline_error"] = "任务已取消"
+    project.master_audio = master
+    render_input = dict(project.render_input or {})
+    render_input["audio"] = ""
+    project.render_input = render_input
+
+
+async def _restore_current_master_audio(
+    session: AsyncSession,
+    job: ContentJob,
+    step_key: str,
+) -> None:
+    if job.flow != "text_video_master_audio":
+        return
+    project_id = job.input_data.get("project_id")
+    source_hash = job.input_data.get("source_hash")
+    if not isinstance(project_id, int) or not isinstance(source_hash, str):
+        return
+    project = await session.scalar(
+        select(TextVideoProject)
+        .where(TextVideoProject.id == project_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if project is None:
+        return
+    master = dict(project.master_audio or {})
+    if (
+        master.get("job_id") != job.id
+        or master.get("source_hash") != source_hash
+    ):
+        return
+    if step_key == "assemble_master_audio":
+        master["error"] = ""
+        master["timeline_error"] = ""
+        if master.get("status") != "ready":
+            master["status"] = "building"
+            master["timeline_status"] = "missing"
+        project.master_audio = master
+        if master.get("timeline_status") != "ready":
+            render_input = dict(project.render_input or {})
+            render_input["audio"] = ""
+            project.render_input = render_input
+    elif (
+        step_key == "align_master_timeline"
+        and master.get("status") == "ready"
+        and master.get("timeline_status") != "ready"
+    ):
+        master["timeline_status"] = "aligning"
+        master["error"] = ""
+        master["timeline_error"] = ""
+        project.master_audio = master
+        render_input = dict(project.render_input or {})
+        render_input["audio"] = ""
+        project.render_input = render_input
+
+
 async def _latest_step(session: AsyncSession, job_id: int, step_key: str) -> ContentJobStep | None:
     result = await session.execute(
         select(ContentJobStep)
@@ -343,6 +429,14 @@ async def retry_step(session: AsyncSession, job_id: int, step_key: str) -> Conte
     if job is None:
         raise KeyError(f"job {job_id} not found")
     previous = await _latest_step(session, job_id, step_key)
+    if (
+        job.status == "queued"
+        and previous is not None
+        and previous.status == "queued"
+    ):
+        return previous
+    if job.status != "failed":
+        raise InvalidJobTransition("only a failed job can be retried")
     if previous is None or previous.status != "failed" or not previous.retryable:
         raise InvalidJobTransition("only a retryable failed step can be retried")
     step = ContentJobStep(job_id=job_id, step_key=step_key, attempt=previous.attempt + 1)
@@ -364,6 +458,7 @@ async def retry_step(session: AsyncSession, job_id: int, step_key: str) -> Conte
             payload={"step_key": step_key, "attempt": step.attempt},
         ))
     await _restore_current_speech_segment(session, job)
+    await _restore_current_master_audio(session, job, step_key)
     await session.flush()
     await _event(session, job_id, "step_retried", step_id=step.id, payload={"step_key": step_key, "attempt": step.attempt})
     await session.commit()
@@ -377,6 +472,11 @@ async def cancel_job(session: AsyncSession, job_id: int) -> ContentJob:
     )
     if job is None:
         raise KeyError(f"job {job_id} not found")
+    if (
+        job.status == "cancelled"
+        and job.flow == "text_video_master_audio"
+    ):
+        return job
     if job.status in {"succeeded", "cancelled"}:
         raise InvalidJobTransition(f"cannot cancel {job.status} job")
     if job.flow == "digital_human_render":
@@ -407,6 +507,26 @@ async def cancel_job(session: AsyncSession, job_id: int) -> ContentJob:
                 and role.status == "ready"
             ):
                 raise InvalidJobTransition("cannot cancel ready digital human")
+    elif job.flow == "text_video_master_audio":
+        project_id = job.input_data.get("project_id")
+        source_hash = job.input_data.get("source_hash")
+        if isinstance(project_id, int) and isinstance(source_hash, str):
+            project = await session.scalar(
+                select(TextVideoProject)
+                .where(TextVideoProject.id == project_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+            master = dict(project.master_audio or {}) if project else {}
+            if (
+                master.get("job_id") == job.id
+                and master.get("source_hash") == source_hash
+                and master.get("status") == "ready"
+                and master.get("timeline_status") == "ready"
+            ):
+                raise InvalidJobTransition(
+                    "cannot cancel completed master",
+                )
     job.status = "cancelled"
     job.completed_at = _now()
     if job.flow == "digital_human_render":
@@ -442,6 +562,8 @@ async def cancel_job(session: AsyncSession, job_id: int) -> ContentJob:
                 role.error = "任务已取消"
     elif job.flow == "text_video_speech":
         await _cancel_current_speech_segment(session, job)
+    elif job.flow == "text_video_master_audio":
+        await _cancel_current_master_audio(session, job)
     await _event(session, job_id, "job_cancelled")
     await session.commit()
     await session.refresh(job)
