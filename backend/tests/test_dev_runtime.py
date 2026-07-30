@@ -386,6 +386,70 @@ else:
     return leader, child_pid
 
 
+def _run_failed_owned_start_with_orphaned_child(
+    tmp_path: Path,
+    *,
+    block_cleanup_signals: bool = False,
+) -> tuple[subprocess.CompletedProcess[str], int, Path]:
+    metadata = tmp_path / "failed-start.meta"
+    log = tmp_path / "failed-start.log"
+    child_pid_path = tmp_path / "failed-start-child.pid"
+    target = r"""
+import os
+import signal
+import sys
+
+child = os.fork()
+if child == 0:
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    with open(sys.argv[1], "w", encoding="utf-8") as handle:
+        handle.write(str(os.getpid()))
+    while True:
+        signal.pause()
+os._exit(17)
+"""
+    harness = r"""
+    source "$1"
+    if [ "$8" = yes ]; then
+      kill() {
+        if [ "${1:-}" = "-0" ]; then
+          builtin kill "$@"
+        else
+          return 1
+        fi
+      }
+    fi
+    export WMS_DEV_READY_TIMEOUT_SECONDS=0.3
+    export WMS_DEV_STOP_TIMEOUT_SECONDS=0.1
+    export WMS_DEV_POLL_INTERVAL_SECONDS=0.02
+    dev_start_owned_service \
+      api API "$2" "$3" "$4" failed-start-fingerprint \
+      "$5" -c "$6" "$7"
+    """
+    result = subprocess.run(
+        [
+            "bash",
+            "-c",
+            textwrap.dedent(harness),
+            "_",
+            str(ROOT / "scripts" / "dev-runtime.sh"),
+            str(ROOT),
+            str(metadata),
+            str(log),
+            sys.executable,
+            target,
+            str(child_pid_path),
+            "yes" if block_cleanup_signals else "no",
+        ],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        timeout=3,
+    )
+    assert _wait_until(child_pid_path.exists)
+    return result, int(child_pid_path.read_text(encoding="utf-8")), metadata
+
+
 def test_short_worker_token_fails_before_spawning_any_child_and_stays_secret(
     tmp_path: Path,
 ) -> None:
@@ -574,6 +638,41 @@ def test_failed_config_replacement_leaves_no_mixed_application_unit(
         )
         assert _metadata_pid(run_dir / "redis.meta") == redis_pid
         assert _process_is_running(redis_pid)
+        assert not (run_dir / "worker.ready").exists()
+    finally:
+        _run_dev(env, "stop")
+
+
+def test_failed_redis_config_replacement_stops_the_old_application_unit(
+    tmp_path: Path,
+) -> None:
+    bin_dir = _fake_runtime_tools(tmp_path)
+    env = _dev_env(tmp_path, bin_dir)
+    run_dir = Path(env["WMS_DEV_RUN_DIR"])
+
+    try:
+        first = _run_dev(env, "start")
+        assert first.returncode == 0, first.stdout + first.stderr
+        old_pids = {
+            service: _metadata_pid(run_dir / f"{service}.meta")
+            for service in ("redis", "api", "worker", "web")
+        }
+        replacement_env = env | {
+            "WMS_REDIS_PORT": "46380",
+            "WMS_DEV_TEST_FAIL_STAGE": "redis",
+        }
+
+        replaced = _run_dev(replacement_env, "start")
+
+        assert replaced.returncode != 0
+        assert all(
+            not (run_dir / f"{service}.meta").exists()
+            for service in ("redis", "api", "worker", "web")
+        )
+        assert all(
+            _wait_until(lambda pid=pid: not _process_is_running(pid))
+            for pid in old_pids.values()
+        )
         assert not (run_dir / "worker.ready").exists()
     finally:
         _run_dev(env, "stop")
@@ -768,6 +867,42 @@ def test_stop_kills_marker_owned_group_member_after_leader_exits(
     finally:
         if _process_is_running(child_pid):
             os.killpg(leader.pid, signal.SIGKILL)
+            assert _wait_until(lambda: not _process_is_running(child_pid))
+
+
+def test_failed_start_kills_marker_owned_group_member_after_leader_exits(
+    tmp_path: Path,
+) -> None:
+    result, child_pid, metadata = _run_failed_owned_start_with_orphaned_child(
+        tmp_path
+    )
+
+    try:
+        assert result.returncode != 0
+        assert _wait_until(lambda: not _process_is_running(child_pid))
+        assert not metadata.exists()
+    finally:
+        if _process_is_running(child_pid):
+            os.killpg(os.getpgid(child_pid), signal.SIGKILL)
+            assert _wait_until(lambda: not _process_is_running(child_pid))
+
+
+def test_failed_start_retains_metadata_when_owned_group_cannot_be_signalled(
+    tmp_path: Path,
+) -> None:
+    result, child_pid, metadata = _run_failed_owned_start_with_orphaned_child(
+        tmp_path,
+        block_cleanup_signals=True,
+    )
+
+    try:
+        assert result.returncode != 0
+        assert _process_is_running(child_pid)
+        assert metadata.exists()
+        assert "ownership retained" in result.stderr
+    finally:
+        if _process_is_running(child_pid):
+            os.killpg(os.getpgid(child_pid), signal.SIGKILL)
             assert _wait_until(lambda: not _process_is_running(child_pid))
 
 

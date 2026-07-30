@@ -173,24 +173,36 @@ dev_start_owned_service() {
     "${WMS_DEV_READY_TIMEOUT_SECONDS:-30}" \
     "${WMS_DEV_POLL_INTERVAL_SECONDS:-0.1}" \
     dev_owned_identity_matches "$service" "$metadata_file"; then
-    local actual_pgid
-    actual_pgid="$(dev_process_group "$launcher_pid" 2>/dev/null)" || actual_pgid=
-    if [ "$actual_pgid" = "$launcher_pid" ] \
-      && dev_marker_matches "$launcher_pid" "$marker"; then
-      kill -TERM -- "-$actual_pgid" 2>/dev/null || true
-      dev_wait_for \
-        "${WMS_DEV_STOP_TIMEOUT_SECONDS:-8}" \
-        "${WMS_DEV_POLL_INTERVAL_SECONDS:-0.1}" \
-        dev_launcher_stopped "$launcher_pid" || true
-      if kill -0 "$launcher_pid" 2>/dev/null; then
-        kill -KILL -- "-$actual_pgid" 2>/dev/null || true
+    local actual_pgid recorded_marker recorded_service cleanup_failed=0
+    recorded_marker="$(dev_meta_value "$metadata_file" marker 2>/dev/null)" \
+      || recorded_marker=
+    recorded_service="$(dev_meta_value "$metadata_file" service 2>/dev/null)" \
+      || recorded_service=
+    if [ "$recorded_marker" = "$marker" ] \
+      && [ "$recorded_service" = "$service" ]; then
+      dev_stop_owned_service \
+        "$service" "$display_name" "$metadata_file" || cleanup_failed=1
+    else
+      actual_pgid="$(dev_process_group "$launcher_pid" 2>/dev/null)" \
+        || actual_pgid=
+      if [ "$actual_pgid" = "$launcher_pid" ] \
+        && dev_marker_matches "$launcher_pid" "$marker"; then
+        kill -TERM -- "-$actual_pgid" 2>/dev/null || true
+        dev_wait_for \
+          "${WMS_DEV_STOP_TIMEOUT_SECONDS:-8}" \
+          "${WMS_DEV_POLL_INTERVAL_SECONDS:-0.1}" \
+          dev_launcher_stopped "$launcher_pid" || true
+        if kill -0 "$launcher_pid" 2>/dev/null; then
+          kill -KILL -- "-$actual_pgid" 2>/dev/null || true
+        fi
       fi
+      rm -f -- "$metadata_file"
     fi
     if ! kill -0 "$launcher_pid" 2>/dev/null; then
       wait "$launcher_pid" 2>/dev/null || true
     fi
-    rm -f -- "$metadata_file"
     printf '  ✗ %s failed to start; see %s\n' "$display_name" "$log_file" >&2
+    [ "$cleanup_failed" -eq 0 ] || return 1
     return 1
   fi
 

@@ -227,6 +227,18 @@ prepare_application_unit() {
   rm -f -- "$WORKER_READY_FILE"
 }
 
+redis_transport_reusable() {
+  local redis_metadata
+  redis_metadata="$(metadata_path redis)"
+  if dev_owned_identity_matches redis "$redis_metadata"; then
+    dev_config_fingerprint_matches \
+      "$redis_metadata" "$REDIS_CONFIG_FINGERPRINT" \
+      && redis_ping
+    return
+  fi
+  redis_ping
+}
+
 ensure_redis_ready() {
   local redis_metadata
   redis_metadata="$(metadata_path redis)"
@@ -371,6 +383,10 @@ cmd_start() {
   STARTED_THIS_RUN=()
 
   printf 'Starting WeMedia Studio local runtime...\n'
+  if ! redis_transport_reusable && application_unit_has_state; then
+    printf '  • Stopping API/Worker/Web before replacing Redis\n'
+    stop_application_unit || { rollback_start; return 1; }
+  fi
   ensure_redis_ready || { rollback_start; return 1; }
   prepare_application_unit || { rollback_start; return 1; }
   if [ "$APPLICATION_UNIT_REUSED" -eq 1 ]; then
