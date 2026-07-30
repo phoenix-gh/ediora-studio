@@ -6,7 +6,7 @@ import sys
 from types import SimpleNamespace
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from starlette.datastructures import Headers, UploadFile
 
@@ -233,6 +233,65 @@ def _start_scene_job(
         )
         assert context.status_code == 200, context.text
     return step, headers
+
+
+def _prepare_scene_result_case(client, monkeypatch):
+    import routers.text_videos as router_module
+
+    async def ignore_enqueue(_job_id: int):
+        return None
+
+    monkeypatch.setattr(router_module, "enqueue_job", ignore_enqueue)
+    project = _speech_project(client, "甲乙丙丁")
+    _set_ready_master(project["id"])
+    ready = client.patch(
+        f"/api/text-videos/{project['id']}",
+        json={
+            "revision": project["revision"],
+            "scene_plan": {
+                "generation_revision": (
+                    project["scene_plan"]["generation_revision"]
+                ),
+                "scenes": _scene_scenes(),
+            },
+        },
+    ).json()
+    launched = client.post(
+        f"/api/text-videos/{project['id']}/scene-plan/generate",
+        json={
+            "revision": ready["revision"],
+            "scope": "all",
+            "selected_scene_id": "",
+            "direction": "",
+        },
+    ).json()
+    job_id = launched["jobs"][0]["id"]
+    step, headers = _start_scene_job(
+        client,
+        job_id,
+        project_id=project["id"],
+    )
+    proposed_scenes = [{
+        **_scene_scenes()[0],
+        "throughWordId": "word-4",
+        "displayText": "AI 新分镜",
+        "highlight": ["AI"],
+    }]
+    validated = client.post(
+        f"/api/text-videos/{project['id']}/scene-plan/worker-validate",
+        json={"scenes": proposed_scenes},
+        headers=headers,
+    )
+    assert validated.status_code == 200, validated.text
+    return {
+        "project_id": project["id"],
+        "ready": ready,
+        "job_id": job_id,
+        "step": step,
+        "headers": headers,
+        "proposed_scenes": proposed_scenes,
+        "validated": validated.json(),
+    }
 
 
 def _prepare_speech_worker_result(
@@ -564,7 +623,12 @@ def test_scene_plan_patch_projects_authoritative_audio_and_seconds(client):
         f"/api/text-videos/{project['id']}",
         json={
             "revision": project["revision"],
-            "scene_plan": {"scenes": scenes},
+            "scene_plan": {
+                "generation_revision": (
+                    project["scene_plan"]["generation_revision"]
+                ),
+                "scenes": scenes,
+            },
         },
     )
 
@@ -619,6 +683,9 @@ def test_scene_plan_patch_projects_authoritative_audio_and_seconds(client):
         json={
             "revision": last_valid["revision"],
             "scene_plan": {
+                "generation_revision": (
+                    last_valid["scene_plan"]["generation_revision"]
+                ),
                 "scenes": [{
                     **scenes[0],
                     "throughWordId": "word-3",
@@ -643,6 +710,9 @@ def test_scene_plan_patch_rejects_timing_fields_and_preserves_projection(client)
         json={
             "revision": project["revision"],
             "scene_plan": {
+                "generation_revision": (
+                    project["scene_plan"]["generation_revision"]
+                ),
                 "scenes": [{
                     "id": "scene-1",
                     "fromWordId": "word-1",
@@ -671,6 +741,9 @@ def test_scene_plan_requires_ready_current_master_timeline(client):
         json={
             "revision": project["revision"],
             "scene_plan": {
+                "generation_revision": (
+                    project["scene_plan"]["generation_revision"]
+                ),
                 "scenes": [{
                     "id": "scene-1",
                     "fromWordId": "word-1",
@@ -711,7 +784,12 @@ def test_template_and_composition_edits_reproject_or_fail_atomically(client):
         f"/api/text-videos/{project['id']}",
         json={
             "revision": project["revision"],
-            "scene_plan": {"scenes": scenes},
+            "scene_plan": {
+                "generation_revision": (
+                    project["scene_plan"]["generation_revision"]
+                ),
+                "scenes": scenes,
+            },
         },
     ).json()
 
@@ -990,6 +1068,244 @@ def test_scene_worker_context_claim_and_strict_word_only_validation(
     assert len(valid.json()["validation_token"]) == 64
 
 
+def test_simultaneous_scene_claims_have_one_database_winner(
+    client,
+    monkeypatch,
+):
+    from database import SessionLocal
+    import routers.text_videos as router_module
+
+    async def ignore_enqueue(_job_id: int):
+        return None
+
+    monkeypatch.setattr(router_module, "enqueue_job", ignore_enqueue)
+    project = _speech_project(client, "甲乙丙丁")
+    _set_ready_master(project["id"])
+    current = client.get(f"/api/text-videos/{project['id']}").json()
+    launched = client.post(
+        f"/api/text-videos/{project['id']}/scene-plan/generate",
+        json={
+            "revision": current["revision"],
+            "scope": "all",
+            "selected_scene_id": "",
+            "direction": "",
+        },
+    ).json()
+    job_id = launched["jobs"][0]["id"]
+    step, _ = _start_scene_job(client, job_id)
+    first_claim = "first-simultaneous-claim"
+    second_claim = "second-simultaneous-claim"
+
+    async def race():
+        async with SessionLocal() as first, SessionLocal() as second:
+            await router_module._require_scene_claim(
+                first,
+                job_id=job_id,
+                project_id=project["id"],
+                step_id=step["id"],
+                attempt=step["attempt"],
+                claim_token=first_claim,
+                acquire=True,
+            )
+            competing = asyncio.create_task(
+                router_module._require_scene_claim(
+                    second,
+                    job_id=job_id,
+                    project_id=project["id"],
+                    step_id=step["id"],
+                    attempt=step["attempt"],
+                    claim_token=second_claim,
+                    acquire=True,
+                ),
+            )
+            await asyncio.sleep(0.05)
+            blocked_until_first_commit = not competing.done()
+            await first.commit()
+            conflict = None
+            try:
+                await asyncio.wait_for(competing, timeout=5)
+            except router_module.ScenePlanClaimConflict as error:
+                conflict = error
+            await second.rollback()
+        return blocked_until_first_commit, conflict
+
+    blocked, conflict = asyncio.new_event_loop().run_until_complete(race())
+    assert blocked is True
+    assert conflict is not None
+
+    loser = client.get(
+        f"/api/text-videos/{project['id']}/scene-plan/worker-context",
+        headers=_scene_worker_headers(
+            job_id,
+            step["id"],
+            attempt=step["attempt"],
+            claim=second_claim,
+        ),
+    )
+    assert loser.status_code == 409, loser.text
+    assert loser.json()["detail"] == {
+        "code": "scene_claim_conflict",
+        "message": "AI 分镜步骤已被其他 worker 领取",
+    }
+    winner = client.get(
+        f"/api/text-videos/{project['id']}/scene-plan/worker-context",
+        headers=_scene_worker_headers(
+            job_id,
+            step["id"],
+            attempt=step["attempt"],
+            claim=first_claim,
+        ),
+    )
+    assert winner.status_code == 200, winner.text
+
+
+def test_scene_cancel_commit_first_rejects_worker_result_without_mutation(
+    client,
+    monkeypatch,
+):
+    from content_jobs import cancel_job, lock_content_job_row
+    from database import SessionLocal
+    from models import ContentJob, TextVideoProject
+    import routers.text_videos as router_module
+
+    case = _prepare_scene_result_case(client, monkeypatch)
+    payload = router_module.ScenePlanWorkerResultRequest(
+        **case["validated"],
+    )
+
+    async def ordered_race():
+        async with (
+            SessionLocal() as cancel_session,
+            SessionLocal() as result_session,
+        ):
+            await lock_content_job_row(cancel_session, case["job_id"])
+            result_task = asyncio.create_task(
+                router_module.save_scene_plan_worker_result(
+                    case["project_id"],
+                    payload,
+                    case["job_id"],
+                    case["step"]["id"],
+                    case["step"]["attempt"],
+                    case["headers"]["X-Content-Step-Claim"],
+                    result_session,
+                ),
+            )
+            await asyncio.sleep(0.05)
+            blocked_until_cancel_commit = not result_task.done()
+            cancelled = await cancel_job(
+                cancel_session,
+                case["job_id"],
+            )
+            result_error = None
+            try:
+                await asyncio.wait_for(result_task, timeout=5)
+            except HTTPException as error:
+                result_error = error
+            await result_session.rollback()
+
+        async with SessionLocal() as verify:
+            job = await verify.get(ContentJob, case["job_id"])
+            project = await verify.get(
+                TextVideoProject,
+                case["project_id"],
+            )
+            return (
+                blocked_until_cancel_commit,
+                cancelled.status,
+                result_error,
+                job.status,
+                dict(project.scene_plan or {}),
+            )
+
+    blocked, cancelled_status, error, job_status, plan = (
+        asyncio.new_event_loop().run_until_complete(ordered_race())
+    )
+    assert blocked is True
+    assert cancelled_status == "cancelled"
+    assert error is not None
+    assert error.status_code == 409
+    assert job_status == "cancelled"
+    assert plan["status"] == "failed"
+    assert plan["job_id"] is None
+    assert plan["generation_revision"] == (
+        case["ready"]["scene_plan"]["generation_revision"] + 1
+    )
+    assert plan["scenes"] == case["ready"]["scene_plan"]["scenes"]
+
+
+def test_scene_result_commit_first_prevents_late_cancel(
+    client,
+    monkeypatch,
+):
+    from content_jobs import (
+        InvalidJobTransition,
+        cancel_job,
+        lock_content_job_row,
+    )
+    from database import SessionLocal
+    from models import ContentJob, TextVideoProject
+    import routers.text_videos as router_module
+
+    case = _prepare_scene_result_case(client, monkeypatch)
+    payload = router_module.ScenePlanWorkerResultRequest(
+        **case["validated"],
+    )
+
+    async def ordered_race():
+        async with (
+            SessionLocal() as result_session,
+            SessionLocal() as cancel_session,
+        ):
+            await lock_content_job_row(result_session, case["job_id"])
+            cancel_task = asyncio.create_task(
+                cancel_job(cancel_session, case["job_id"]),
+            )
+            await asyncio.sleep(0.05)
+            blocked_until_result_commit = not cancel_task.done()
+            result = await router_module.save_scene_plan_worker_result(
+                case["project_id"],
+                payload,
+                case["job_id"],
+                case["step"]["id"],
+                case["step"]["attempt"],
+                case["headers"]["X-Content-Step-Claim"],
+                result_session,
+            )
+            cancel_error = None
+            try:
+                await asyncio.wait_for(cancel_task, timeout=5)
+            except InvalidJobTransition as error:
+                cancel_error = error
+            await cancel_session.rollback()
+
+        async with SessionLocal() as verify:
+            job = await verify.get(ContentJob, case["job_id"])
+            project = await verify.get(
+                TextVideoProject,
+                case["project_id"],
+            )
+            return (
+                blocked_until_result_commit,
+                result,
+                cancel_error,
+                job.status,
+                dict(project.scene_plan or {}),
+            )
+
+    blocked, result, error, job_status, plan = (
+        asyncio.new_event_loop().run_until_complete(ordered_race())
+    )
+    assert blocked is True
+    assert result["scene_plan"]["status"] == "ready"
+    assert error is not None
+    assert "completed scene plan" in str(error)
+    assert job_status == "running"
+    assert plan["status"] == "ready"
+    assert plan["job_id"] is None
+    assert plan["applied_job_id"] == case["job_id"]
+    assert plan["scenes"] == result["scene_plan"]["scenes"]
+
+
 def test_scene_worker_validation_rejects_subframe_scene_and_accepts_repair(
     client,
     monkeypatch,
@@ -1129,7 +1445,12 @@ def test_selected_scene_validation_returns_frozen_full_canonical_plan(
         f"/api/text-videos/{project['id']}",
         json={
             "revision": project["revision"],
-            "scene_plan": {"scenes": _scene_scenes()},
+            "scene_plan": {
+                "generation_revision": (
+                    project["scene_plan"]["generation_revision"]
+                ),
+                "scenes": _scene_scenes(),
+            },
         },
     ).json()
     launched = client.post(
@@ -1196,7 +1517,12 @@ def test_scene_worker_result_rejects_changed_timeline_and_preserves_last_plan(
         f"/api/text-videos/{project['id']}",
         json={
             "revision": project["revision"],
-            "scene_plan": {"scenes": _scene_scenes()},
+            "scene_plan": {
+                "generation_revision": (
+                    project["scene_plan"]["generation_revision"]
+                ),
+                "scenes": _scene_scenes(),
+            },
         },
     ).json()
     original_scene = ready["scene_plan"]
@@ -1335,6 +1661,243 @@ def test_scene_worker_result_is_atomic_and_recovers_lost_ack_by_provenance(
     assert repeated.json() == body
 
 
+def test_ai_scene_result_rejects_stale_full_autosave_but_allows_title_delta(
+    client,
+    monkeypatch,
+):
+    case = _prepare_scene_result_case(client, monkeypatch)
+    saved = client.post(
+        f"/api/text-videos/{case['project_id']}/scene-plan/worker-result",
+        json=case["validated"],
+        headers=case["headers"],
+    )
+    assert saved.status_code == 200, saved.text
+    ai_project = saved.json()
+
+    stale_full_save = client.patch(
+        f"/api/text-videos/{case['project_id']}",
+        json={
+            "revision": ai_project["revision"],
+            "title": "旧页面标题",
+            "scene_plan": {
+                "scenes": case["ready"]["scene_plan"]["scenes"],
+            },
+        },
+    )
+
+    assert stale_full_save.status_code == 409, stale_full_save.text
+    after_conflict = client.get(
+        f"/api/text-videos/{case['project_id']}",
+    ).json()
+    assert after_conflict["scene_plan"] == ai_project["scene_plan"]
+    assert after_conflict["render_input"] == ai_project["render_input"]
+
+    stale_generation = client.patch(
+        f"/api/text-videos/{case['project_id']}",
+        json={
+            "revision": ai_project["revision"],
+            "scene_plan": {
+                "generation_revision": (
+                    case["ready"]["scene_plan"]["generation_revision"]
+                ),
+                "scenes": case["ready"]["scene_plan"]["scenes"],
+            },
+        },
+    )
+    assert stale_generation.status_code == 409, stale_generation.text
+
+    title_only = client.patch(
+        f"/api/text-videos/{case['project_id']}",
+        json={
+            "revision": ai_project["revision"],
+            "title": "仅更新标题",
+        },
+    )
+    assert title_only.status_code == 200, title_only.text
+    assert title_only.json()["title"] == "仅更新标题"
+    assert title_only.json()["scene_plan"] == ai_project["scene_plan"]
+    assert title_only.json()["render_input"] == ai_project["render_input"]
+
+
+def test_manual_scene_change_requires_and_advances_current_generation(
+    client,
+    monkeypatch,
+):
+    case = _prepare_scene_result_case(client, monkeypatch)
+    saved = client.post(
+        f"/api/text-videos/{case['project_id']}/scene-plan/worker-result",
+        json=case["validated"],
+        headers=case["headers"],
+    ).json()
+
+    changed = client.patch(
+        f"/api/text-videos/{case['project_id']}",
+        json={
+            "revision": saved["revision"],
+            "scene_plan": {
+                "generation_revision": (
+                    saved["scene_plan"]["generation_revision"]
+                ),
+                "scenes": _scene_scenes(),
+            },
+        },
+    )
+
+    assert changed.status_code == 200, changed.text
+    updated = changed.json()
+    assert updated["scene_plan"]["scenes"] == _scene_scenes()
+    assert updated["scene_plan"]["generation_revision"] == (
+        saved["scene_plan"]["generation_revision"] + 1
+    )
+
+
+def test_project_patch_first_then_worker_result_preserves_both_changes(
+    client,
+    monkeypatch,
+):
+    from database import SessionLocal
+    import routers.text_videos as router_module
+
+    case = _prepare_scene_result_case(client, monkeypatch)
+    payload = router_module.ScenePlanWorkerResultRequest(
+        **case["validated"],
+    )
+
+    async def ordered_updates():
+        async with (
+            SessionLocal() as patch_session,
+            SessionLocal() as worker_session,
+        ):
+            await router_module._lock_text_video_project_row(
+                patch_session,
+                case["project_id"],
+            )
+            worker_task = asyncio.create_task(
+                router_module.save_scene_plan_worker_result(
+                    case["project_id"],
+                    payload,
+                    case["job_id"],
+                    case["step"]["id"],
+                    case["step"]["attempt"],
+                    case["headers"]["X-Content-Step-Claim"],
+                    worker_session,
+                ),
+            )
+            await asyncio.sleep(0.05)
+            blocked_until_patch_commit = not worker_task.done()
+            patched = await router_module.update_project(
+                case["project_id"],
+                router_module.ProjectUpdate(
+                    revision=case["ready"]["revision"],
+                    title="PATCH 先提交",
+                ),
+                patch_session,
+            )
+            worker_result = await asyncio.wait_for(
+                worker_task,
+                timeout=5,
+            )
+            return (
+                blocked_until_patch_commit,
+                patched,
+                worker_result,
+            )
+
+    blocked, patched, result = (
+        asyncio.new_event_loop().run_until_complete(ordered_updates())
+    )
+    assert blocked is True
+    assert patched["revision"] == case["ready"]["revision"] + 1
+    assert result["revision"] == patched["revision"]
+    assert result["title"] == "PATCH 先提交"
+    assert result["scene_plan"]["scenes"] == case["proposed_scenes"]
+
+
+def test_worker_result_first_then_title_delta_preserves_ai_and_stale_scene_conflicts(
+    client,
+    monkeypatch,
+):
+    from content_jobs import lock_content_job_row
+    from database import SessionLocal
+    import routers.text_videos as router_module
+
+    case = _prepare_scene_result_case(client, monkeypatch)
+    payload = router_module.ScenePlanWorkerResultRequest(
+        **case["validated"],
+    )
+
+    async def ordered_updates():
+        async with (
+            SessionLocal() as worker_session,
+            SessionLocal() as patch_session,
+        ):
+            await lock_content_job_row(
+                worker_session,
+                case["job_id"],
+            )
+            await router_module._lock_text_video_project_row(
+                worker_session,
+                case["project_id"],
+            )
+            patch_task = asyncio.create_task(
+                router_module.update_project(
+                    case["project_id"],
+                    router_module.ProjectUpdate(
+                        revision=case["ready"]["revision"],
+                        title="worker 先提交",
+                    ),
+                    patch_session,
+                ),
+            )
+            await asyncio.sleep(0.05)
+            blocked_until_worker_commit = not patch_task.done()
+            worker_result = (
+                await router_module.save_scene_plan_worker_result(
+                    case["project_id"],
+                    payload,
+                    case["job_id"],
+                    case["step"]["id"],
+                    case["step"]["attempt"],
+                    case["headers"]["X-Content-Step-Claim"],
+                    worker_session,
+                )
+            )
+            patched = await asyncio.wait_for(patch_task, timeout=5)
+            return (
+                blocked_until_worker_commit,
+                worker_result,
+                patched,
+            )
+
+    blocked, worker_result, patched = (
+        asyncio.new_event_loop().run_until_complete(ordered_updates())
+    )
+    assert blocked is True
+    assert worker_result["revision"] == case["ready"]["revision"]
+    assert patched["revision"] == case["ready"]["revision"] + 1
+    assert patched["title"] == "worker 先提交"
+    assert patched["scene_plan"] == worker_result["scene_plan"]
+
+    stale_manual = client.patch(
+        f"/api/text-videos/{case['project_id']}",
+        json={
+            "revision": patched["revision"],
+            "scene_plan": {
+                "generation_revision": (
+                    case["ready"]["scene_plan"]["generation_revision"]
+                ),
+                "scenes": case["ready"]["scene_plan"]["scenes"],
+            },
+        },
+    )
+    assert stale_manual.status_code == 409, stale_manual.text
+    after_conflict = client.get(
+        f"/api/text-videos/{case['project_id']}",
+    ).json()
+    assert after_conflict["title"] == "worker 先提交"
+    assert after_conflict["scene_plan"] == worker_result["scene_plan"]
+
+
 def test_scene_failure_and_cancel_preserve_plan_and_cancel_relaunches_new_key(
     client,
     monkeypatch,
@@ -1353,7 +1916,12 @@ def test_scene_failure_and_cancel_preserve_plan_and_cancel_relaunches_new_key(
         f"/api/text-videos/{project['id']}",
         json={
             "revision": project["revision"],
-            "scene_plan": {"scenes": _scene_scenes()},
+            "scene_plan": {
+                "generation_revision": (
+                    project["scene_plan"]["generation_revision"]
+                ),
+                "scenes": _scene_scenes(),
+            },
         },
     ).json()
     original_render = ready["render_input"]
@@ -1473,7 +2041,12 @@ def test_scene_worker_result_rejects_changed_visual_selection(
         f"/api/text-videos/{project['id']}",
         json={
             "revision": project["revision"],
-            "scene_plan": {"scenes": _scene_scenes()},
+            "scene_plan": {
+                "generation_revision": (
+                    project["scene_plan"]["generation_revision"]
+                ),
+                "scenes": _scene_scenes(),
+            },
         },
     ).json()
     launched = client.post(
@@ -1628,7 +2201,12 @@ def test_manual_scene_edit_supersedes_old_validate_result_and_failure(
         f"/api/text-videos/{project['id']}",
         json={
             "revision": project["revision"],
-            "scene_plan": {"scenes": _scene_scenes()},
+            "scene_plan": {
+                "generation_revision": (
+                    project["scene_plan"]["generation_revision"]
+                ),
+                "scenes": _scene_scenes(),
+            },
         },
     ).json()
     launched = client.post(
@@ -1664,7 +2242,12 @@ def test_manual_scene_edit_supersedes_old_validate_result_and_failure(
         f"/api/text-videos/{project['id']}",
         json={
             "revision": ready["revision"],
-            "scene_plan": {"scenes": manual_scenes},
+            "scene_plan": {
+                "generation_revision": (
+                    ready["scene_plan"]["generation_revision"]
+                ),
+                "scenes": manual_scenes,
+            },
         },
     )
     assert manual.status_code == 200, manual.text

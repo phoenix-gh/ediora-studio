@@ -47,6 +47,11 @@ type AutosaveCoordinator = {
   flush(): Promise<TextVideoFlushResult>
   isDirty(): boolean
   getDirtyVersion(): number
+  adoptServerProject?(
+    server: TextVideoProject,
+    editableBaseline: TextVideoProject,
+    localProject?: TextVideoProject,
+  ): TextVideoProject
 }
 
 type TimerWaiter = {
@@ -486,10 +491,17 @@ export function useTextVideoProjectActions({
         autosaveRef.current.isDirty()
         || autosaveRef.current.getDirtyVersion() > context.dirtyVersion
       )
-      const merged = mergeWorkerProject(local, server, {
-        editableBaseline: context.editableBaseline,
-        localDirty,
-      })
+      const merged = (
+        autosaveRef.current.adoptServerProject?.(
+          server,
+          context.editableBaseline,
+          local,
+        )
+        ?? mergeWorkerProject(local, server, {
+          editableBaseline: context.editableBaseline,
+          localDirty,
+        })
+      )
       projectRef.current = merged
       return merged
     })

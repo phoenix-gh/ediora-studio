@@ -216,11 +216,34 @@ function errorStatus(error: unknown) {
   return undefined
 }
 
+function requestOutcomeIsAmbiguous(error: unknown) {
+  const responseReceived = Boolean(
+    error
+      && typeof error === 'object'
+      && 'responseReceived' in error
+      && error.responseReceived === true,
+  )
+  if (!responseReceived) return true
+  const status = errorStatus(error)
+  return status === 408 || (status !== undefined && status >= 500)
+}
+
 function errorDetail(error: unknown) {
   if (error && typeof error === 'object' && 'detail' in error) {
     return error.detail
   }
   return error instanceof Error ? error.message : String(error)
+}
+
+function isSceneClaimConflict(error: unknown) {
+  if (errorStatus(error) !== 409) return false
+  const detail = errorDetail(error)
+  return Boolean(
+    detail
+    && typeof detail === 'object'
+    && 'code' in detail
+    && detail.code === 'scene_claim_conflict',
+  )
 }
 
 function errorMessage(error: unknown) {
@@ -403,6 +426,54 @@ async function completeSceneStep(
   return project
 }
 
+async function startSceneStep(
+  jobId: number,
+  deps: TextVideoSceneJobDeps,
+) {
+  try {
+    return await deps.api.startStep(
+      jobId,
+      'generate_scene_plan',
+    )
+  } catch (error) {
+    if (!requestOutcomeIsAmbiguous(error)) throw error
+    let current: DurableJob
+    try {
+      current = await deps.api.getJob(jobId)
+    } catch (readError) {
+      throw new JobFinalizationError(
+        'AI 分镜步骤启动状态无法确认，等待状态对账',
+        {
+          cause: readError instanceof Error
+            ? readError
+            : undefined,
+        },
+      )
+    }
+    const running = latestStep(
+      current.steps,
+      'generate_scene_plan',
+    )
+    if (
+      current.status === 'running'
+      && running?.status === 'running'
+      && Number.isSafeInteger(running.id)
+      && Number(running.id) > 0
+      && Number.isSafeInteger(running.attempt)
+      && running.attempt > 0
+    ) {
+      return {
+        id: Number(running.id),
+        attempt: running.attempt,
+      }
+    }
+    throw new JobFinalizationError(
+      'AI 分镜步骤启动状态无法确认，等待状态对账',
+      { cause: error instanceof Error ? error : undefined },
+    )
+  }
+}
+
 async function validateWithOneRepair(
   projectId: number,
   context: SceneJobContext,
@@ -468,7 +539,7 @@ export async function runTextVideoSceneJob(
   if (previous?.status === 'failed') {
     throw new Error('AI 分镜失败步骤尚未进入重试队列')
   }
-  const step = await deps.api.startStep(jobId, 'generate_scene_plan')
+  const step = await startSceneStep(jobId, deps)
   if (
     !Number.isSafeInteger(step.id)
     || step.id <= 0
@@ -517,24 +588,45 @@ export async function runTextVideoSceneJob(
         claim,
       )
     } catch (persistError) {
+      if (!requestOutcomeIsAmbiguous(persistError)) {
+        throw persistError
+      }
+      let reconciled: (
+        SceneJobContext
+        | { already_saved: TextVideoProject }
+      )
       try {
-        const reconciled = await deps.api.getSceneContext(
+        reconciled = await deps.api.getSceneContext(
           projectId,
           jobId,
           claim,
         )
-        if (!('already_saved' in reconciled)) throw persistError
-        project = projectFromOutput(
-          { project: reconciled.already_saved },
-          job,
+      } catch (readError) {
+        if (isSceneClaimConflict(readError)) {
+          throw new SceneJobPendingError()
+        }
+        throw new JobFinalizationError(
+          'AI 分镜结果状态无法确认，等待状态对账',
+          {
+            cause: readError instanceof Error
+              ? readError
+              : undefined,
+          },
         )
-      } catch {
-        throw persistError
       }
+      if (!('already_saved' in reconciled)) throw persistError
+      project = projectFromOutput(
+        { project: reconciled.already_saved },
+        job,
+      )
     }
     project = projectFromOutput({ project }, job)
     return completeSceneStep(jobId, step, project, job, deps)
   } catch (error) {
+    if (error instanceof SceneJobPendingError) throw error
+    if (isSceneClaimConflict(error)) {
+      throw new SceneJobPendingError()
+    }
     if (error instanceof JobFinalizationError) throw error
     const stale = errorStatus(error) === 409
     if (!stale) {

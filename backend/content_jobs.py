@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -30,6 +30,24 @@ class InvalidJobTransition(ValueError):
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+async def lock_content_job_row(
+    session: AsyncSession,
+    job_id: int,
+) -> ContentJob | None:
+    """Serialize job transitions on databases where FOR UPDATE is ignored."""
+    await session.execute(
+        update(ContentJob)
+        .where(ContentJob.id == job_id)
+        .values(status=ContentJob.status)
+    )
+    return await session.scalar(
+        select(ContentJob)
+        .where(ContentJob.id == job_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
 
 
 async def _event(session: AsyncSession, job_id: int, kind: str, *, step_id: int | None = None, payload: dict | None = None) -> None:
@@ -402,9 +420,7 @@ async def _analysis_for_job(
 
 
 async def start_step(session: AsyncSession, job_id: int, step_key: str) -> ContentJobStep:
-    job = await session.scalar(
-        select(ContentJob).where(ContentJob.id == job_id).with_for_update()
-    )
+    job = await lock_content_job_row(session, job_id)
     if job is None:
         raise KeyError(f"job {job_id} not found")
     if job.status in {"cancelled", "succeeded"}:
@@ -433,20 +449,27 @@ async def start_step(session: AsyncSession, job_id: int, step_key: str) -> Conte
 
 
 async def succeed_step(session: AsyncSession, step_id: int, output_data: dict) -> ContentJobStep:
-    step = await session.get(ContentJobStep, step_id)
+    job_id = await session.scalar(
+        select(ContentJobStep.job_id).where(ContentJobStep.id == step_id)
+    )
+    if job_id is None:
+        raise KeyError(f"step {step_id} not found")
+    job = await lock_content_job_row(session, job_id)
+    if job is None:
+        raise KeyError(f"job {job_id} not found")
+    step = await session.scalar(
+        select(ContentJobStep)
+        .where(ContentJobStep.id == step_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
     if step is None:
         raise KeyError(f"step {step_id} not found")
     if step.status == "succeeded":
+        await session.commit()
         return step
     if step.status != "running":
         raise InvalidJobTransition(f"cannot succeed {step.status} step")
-    job = await session.scalar(
-        select(ContentJob)
-        .where(ContentJob.id == step.job_id)
-        .with_for_update()
-    )
-    if job is None:
-        raise KeyError(f"job {step.job_id} not found")
     if job.status == "cancelled":
         raise InvalidJobTransition("cannot succeed a step for cancelled job")
     step.status = "succeeded"
@@ -459,18 +482,24 @@ async def succeed_step(session: AsyncSession, step_id: int, output_data: dict) -
 
 
 async def fail_step(session: AsyncSession, step_id: int, error: str, *, retryable: bool) -> ContentJobStep:
-    step = await session.get(ContentJobStep, step_id)
+    job_id = await session.scalar(
+        select(ContentJobStep.job_id).where(ContentJobStep.id == step_id)
+    )
+    if job_id is None:
+        raise KeyError(f"step {step_id} not found")
+    job = await lock_content_job_row(session, job_id)
+    if job is None:
+        raise KeyError(f"job {job_id} not found")
+    step = await session.scalar(
+        select(ContentJobStep)
+        .where(ContentJobStep.id == step_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
     if step is None:
         raise KeyError(f"step {step_id} not found")
     if step.status != "running":
         raise InvalidJobTransition(f"cannot fail {step.status} step")
-    job = await session.scalar(
-        select(ContentJob)
-        .where(ContentJob.id == step.job_id)
-        .with_for_update()
-    )
-    if job is None:
-        raise KeyError(f"job {step.job_id} not found")
     if job.status == "cancelled":
         raise InvalidJobTransition("cannot fail a step for cancelled job")
     step.status = "failed"
@@ -510,9 +539,7 @@ async def fail_step(session: AsyncSession, step_id: int, error: str, *, retryabl
 
 
 async def retry_step(session: AsyncSession, job_id: int, step_key: str) -> ContentJobStep:
-    job = await session.scalar(
-        select(ContentJob).where(ContentJob.id == job_id).with_for_update()
-    )
+    job = await lock_content_job_row(session, job_id)
     if job is None:
         raise KeyError(f"job {job_id} not found")
     previous = await _latest_step(session, job_id, step_key)
@@ -521,6 +548,7 @@ async def retry_step(session: AsyncSession, job_id: int, step_key: str) -> Conte
         and previous is not None
         and previous.status == "queued"
     ):
+        await session.commit()
         return previous
     if job.status != "failed":
         raise InvalidJobTransition("only a failed job can be retried")
@@ -555,15 +583,14 @@ async def retry_step(session: AsyncSession, job_id: int, step_key: str) -> Conte
 
 
 async def cancel_job(session: AsyncSession, job_id: int) -> ContentJob:
-    job = await session.scalar(
-        select(ContentJob).where(ContentJob.id == job_id).with_for_update()
-    )
+    job = await lock_content_job_row(session, job_id)
     if job is None:
         raise KeyError(f"job {job_id} not found")
     if (
         job.status == "cancelled"
         and job.flow == "text_video_master_audio"
     ):
+        await session.commit()
         return job
     if job.status in {"succeeded", "cancelled"}:
         raise InvalidJobTransition(f"cannot cancel {job.status} job")
@@ -682,12 +709,11 @@ async def cancel_job(session: AsyncSession, job_id: int) -> ContentJob:
 
 
 async def succeed_job(session: AsyncSession, job_id: int) -> ContentJob:
-    job = await session.scalar(
-        select(ContentJob).where(ContentJob.id == job_id).with_for_update()
-    )
+    job = await lock_content_job_row(session, job_id)
     if job is None:
         raise KeyError(f"job {job_id} not found")
     if job.status == "succeeded":
+        await session.commit()
         return job
     if job.status != "running":
         raise InvalidJobTransition(f"cannot succeed {job.status} job")

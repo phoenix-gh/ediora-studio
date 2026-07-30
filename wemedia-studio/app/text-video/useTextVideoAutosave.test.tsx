@@ -3,7 +3,10 @@
 import { act, renderHook } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { TextVideoApiError } from '@/lib/api/text-videos'
+import {
+  TextVideoApiError,
+  type TextVideoProject,
+} from '@/lib/api/text-videos'
 import {
   makeSpeechSegment,
   makeTextVideoProject,
@@ -32,17 +35,24 @@ describe('useTextVideoAutosave', () => {
     vi.useRealTimers()
   })
 
-  it('debounces dirty projects for 800ms and reports saved revision', async () => {
+  it('debounces a title edit and sends only the title delta', async () => {
     vi.useFakeTimers()
-    const save = vi.fn().mockResolvedValue({ ...project, revision: 2 })
+    const edited = { ...project, title: '只改标题' }
+    const save = vi.fn().mockResolvedValue({ ...edited, revision: 2 })
     const onRevision = vi.fn()
-    const { result } = renderHook(() => useTextVideoAutosave({
-      project,
-      save,
-      onRevision,
-    }))
+    const { result, rerender } = renderHook(
+      ({ value }) => useTextVideoAutosave({
+        project: value,
+        save,
+        onRevision,
+      }),
+      { initialProps: { value: project } },
+    )
 
-    act(() => result.current.markDirty())
+    act(() => {
+      result.current.markDirty()
+      rerender({ value: edited })
+    })
     expect(result.current.saveState).toBe('dirty')
 
     await act(async () => {
@@ -53,21 +63,10 @@ describe('useTextVideoAutosave', () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1)
     })
-    expect(save).toHaveBeenCalledWith(7, expect.objectContaining({ revision: 1 }))
-    const payload = save.mock.calls[0][1]
-    expect(payload).toMatchObject({
-      composition: project.render_input.composition,
-      template: {
-        templateId: project.render_input.templateId,
-        templateVersion: project.render_input.templateVersion,
-        templateProps: project.render_input.templateProps,
-      },
-      scene_plan: { scenes: project.scene_plan.scenes },
+    expect(save).toHaveBeenCalledWith(7, {
+      revision: 1,
+      title: '只改标题',
     })
-    expect(payload).not.toHaveProperty('render_input')
-    expect(JSON.stringify(payload)).not.toContain('"start"')
-    expect(JSON.stringify(payload)).not.toContain('"end"')
-    expect(JSON.stringify(payload)).not.toContain('"audio"')
     expect(onRevision).toHaveBeenCalledWith(2)
     expect(result.current.saveState).toBe('saved')
   })
@@ -163,8 +162,9 @@ describe('useTextVideoAutosave', () => {
     })
   })
 
-  it('sends only editable fields and exact segment slices', async () => {
+  it('sends only changed editable narration fields and exact slices', async () => {
     const generated = makeTextVideoProject({
+      title: project.title,
       script: '甲。乙。',
       paragraphs: [
         makeSpeechSegment('a', '甲。', {
@@ -190,38 +190,279 @@ describe('useTextVideoAutosave', () => {
       ...generated,
       revision: 2,
     })
-    const { result } = renderHook(() => useTextVideoAutosave({
-      project: generated,
-      save,
-      onRevision: vi.fn(),
-      debounceMs: 60_000,
-    }))
+    const { result, rerender } = renderHook(
+      ({ value }) => useTextVideoAutosave({
+        project: value,
+        save,
+        onRevision: vi.fn(),
+        debounceMs: 60_000,
+      }),
+      { initialProps: { value: project } },
+    )
 
-    act(() => result.current.markDirty())
+    act(() => {
+      result.current.markDirty()
+      rerender({ value: generated })
+    })
     await act(async () => {
       await result.current.flush()
     })
 
     expect(save).toHaveBeenCalledWith(generated.id, {
       revision: 1,
-      title: generated.title,
-      stage: generated.stage,
       script: '甲。乙。',
-      voice_settings: generated.voice_settings,
       paragraphs: [
         { id: 'a', text: '甲。' },
         { id: 'b', text: '乙。' },
       ],
       speech_split_mode: 'auto',
-      composition: generated.render_input.composition,
-      template: {
-        templateId: generated.render_input.templateId,
-        templateVersion: generated.render_input.templateVersion,
-        templateProps: generated.render_input.templateProps,
-      },
+    })
+  })
+
+  it('sends the last-saved scene generation with an actual scene edit', async () => {
+    const baseline = makeTextVideoProject({
       scene_plan: {
-        scenes: generated.scene_plan.scenes,
+        ...project.scene_plan,
+        status: 'ready',
+        generation_revision: 5,
+        scenes: [{
+          id: 'scene-1',
+          fromWordId: 'word-1',
+          throughWordId: 'word-2',
+          displayText: '原分镜',
+          highlight: [],
+          animation: 'fade-up',
+        }],
       },
+    })
+    const edited = {
+      ...baseline,
+      scene_plan: {
+        ...baseline.scene_plan,
+        scenes: [{
+          ...baseline.scene_plan.scenes[0],
+          displayText: '手工修改',
+        }],
+      },
+    }
+    const save = vi.fn().mockResolvedValue({
+      ...edited,
+      revision: 2,
+      scene_plan: {
+        ...edited.scene_plan,
+        generation_revision: 6,
+      },
+    })
+    const { result, rerender } = renderHook(
+      ({ value }) => useTextVideoAutosave({
+        project: value,
+        save,
+        onRevision: vi.fn(),
+        debounceMs: 60_000,
+      }),
+      { initialProps: { value: baseline } },
+    )
+
+    act(() => {
+      result.current.markDirty()
+      rerender({ value: edited })
+    })
+    await act(async () => {
+      await result.current.flush()
+    })
+
+    expect(save).toHaveBeenCalledWith(baseline.id, {
+      revision: 1,
+      scene_plan: {
+        generation_revision: 5,
+        scenes: edited.scene_plan.scenes,
+      },
+    })
+  })
+
+  it('includes changed lifecycle and asset fields in the delta', async () => {
+    const edited = {
+      ...project,
+      status: 'video_ready' as const,
+      cover_asset_url: '/api/uploads/cover.png',
+      output_asset_url: '/api/uploads/video.mp4',
+    }
+    const save = vi.fn().mockResolvedValue({
+      ...edited,
+      revision: 2,
+    })
+    const { result, rerender } = renderHook(
+      ({ value }) => useTextVideoAutosave({
+        project: value,
+        save,
+        onRevision: vi.fn(),
+        debounceMs: 60_000,
+      }),
+      { initialProps: { value: project } },
+    )
+
+    act(() => {
+      result.current.markDirty()
+      rerender({ value: edited })
+    })
+    await act(async () => {
+      await result.current.flush()
+    })
+
+    expect(save).toHaveBeenCalledWith(project.id, {
+      revision: 1,
+      status: 'video_ready',
+      cover_asset_url: '/api/uploads/cover.png',
+      output_asset_url: '/api/uploads/video.mp4',
+    })
+  })
+
+  it('adopts worker scenes into the baseline while preserving a dirty title delta', async () => {
+    const generating = makeTextVideoProject({
+      scene_plan: {
+        ...project.scene_plan,
+        status: 'generating',
+        generation_revision: 3,
+        job_id: 44,
+      },
+    })
+    const worker = {
+      ...generating,
+      scene_plan: {
+        ...generating.scene_plan,
+        status: 'ready' as const,
+        generation_revision: 4,
+        job_id: null,
+        applied_job_id: 44,
+        scenes: [{
+          id: 'scene-ai',
+          fromWordId: 'word-1',
+          throughWordId: 'word-2',
+          displayText: 'AI 分镜',
+          highlight: ['AI'],
+          animation: 'scale',
+        }],
+      },
+    }
+    const save = vi.fn().mockImplementation(async (
+      _id: number,
+      update: { title?: string },
+    ) => ({
+      ...worker,
+      title: update.title ?? worker.title,
+      revision: 2,
+    }))
+    const { result, rerender } = renderHook(
+      ({ value }) => useTextVideoAutosave({
+        project: value,
+        save,
+        onRevision: vi.fn(),
+        debounceMs: 60_000,
+      }),
+      { initialProps: { value: generating } },
+    )
+
+    let adopted!: TextVideoProject
+    act(() => {
+      adopted = result.current.adoptServerProject(
+        worker,
+        generating,
+      )
+    })
+    const dirtyTitle = { ...adopted, title: '分镜生成期间的新标题' }
+    act(() => {
+      result.current.markDirty()
+      rerender({ value: dirtyTitle })
+    })
+    await act(async () => {
+      await result.current.flush()
+    })
+
+    expect(adopted.scene_plan).toEqual(worker.scene_plan)
+    expect(save).toHaveBeenCalledWith(generating.id, {
+      revision: 1,
+      title: '分镜生成期间的新标题',
+    })
+  })
+
+  it('merges canonical worker state from a save response without overwriting in-flight edits', async () => {
+    const generating = makeTextVideoProject({
+      scene_plan: {
+        ...project.scene_plan,
+        status: 'generating',
+        generation_revision: 8,
+        job_id: 55,
+      },
+    })
+    const first = deferred<typeof generating>()
+    const second = deferred<typeof generating>()
+    const save = vi.fn()
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise)
+    const onSavedProject = vi.fn()
+    const { result, rerender } = renderHook(
+      ({ value }) => useTextVideoAutosave({
+        project: value,
+        save,
+        onRevision: vi.fn(),
+        onSavedProject,
+        debounceMs: 60_000,
+      }),
+      { initialProps: { value: generating } },
+    )
+    const saving = { ...generating, title: '正在保存的标题' }
+    act(() => {
+      result.current.markDirty()
+      rerender({ value: saving })
+    })
+    let flush!: ReturnType<typeof result.current.flush>
+    act(() => {
+      flush = result.current.flush()
+    })
+    const inFlight = { ...saving, title: '请求期间继续编辑' }
+    rerender({ value: inFlight })
+    act(() => result.current.markDirty())
+    const server = {
+      ...saving,
+      revision: 2,
+      scene_plan: {
+        ...saving.scene_plan,
+        status: 'ready' as const,
+        generation_revision: 9,
+        job_id: null,
+        applied_job_id: 55,
+        scenes: [{
+          id: 'scene-ai',
+          fromWordId: 'word-1',
+          throughWordId: 'word-2',
+          displayText: 'AI 新分镜',
+          highlight: [],
+          animation: 'fade-up',
+        }],
+      },
+    }
+
+    await act(async () => {
+      first.resolve(server)
+      await Promise.resolve()
+    })
+
+    expect(onSavedProject).toHaveBeenCalledWith(expect.objectContaining({
+      title: '请求期间继续编辑',
+      scene_plan: server.scene_plan,
+    }))
+    expect(save.mock.calls[1][1]).toEqual({
+      revision: 2,
+      title: '请求期间继续编辑',
+    })
+
+    await act(async () => {
+      second.resolve({
+        ...server,
+        title: '请求期间继续编辑',
+        revision: 3,
+      })
+      await flush
     })
   })
 

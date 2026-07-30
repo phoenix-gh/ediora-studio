@@ -122,7 +122,10 @@ export type TextVideoProjectUpdate = {
     templateVersion: number
     templateProps: Record<string, unknown>
   }
-  scene_plan?: { scenes: ScenePlanSceneDocument[] }
+  scene_plan?: {
+    generation_revision: number
+    scenes: ScenePlanSceneDocument[]
+  }
   cover_asset_url?: string
   output_asset_url?: string
 }

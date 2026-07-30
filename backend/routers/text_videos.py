@@ -28,7 +28,7 @@ from pydantic import (
     StrictInt,
     model_validator,
 )
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -42,7 +42,7 @@ from database import (
     get_db,
 )
 from config import get_config
-from content_jobs import create_or_get_job
+from content_jobs import create_or_get_job, lock_content_job_row
 from job_queue import enqueue_job
 from log_redaction import redact_secret_text
 from models import (
@@ -248,6 +248,7 @@ class ScenePlanSceneEdit(BaseModel):
 class ScenePlanEdit(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    generation_revision: StrictInt | None = Field(default=None, ge=0)
     scenes: list[ScenePlanSceneEdit]
 
 
@@ -466,6 +467,23 @@ async def get_project_or_404(db: AsyncSession, project_id: int) -> TextVideoProj
     return project
 
 
+async def _lock_text_video_project_row(
+    db: AsyncSession,
+    project_id: int,
+) -> TextVideoProject | None:
+    await db.execute(
+        update(TextVideoProject)
+        .where(TextVideoProject.id == project_id)
+        .values(revision=TextVideoProject.revision)
+    )
+    return await db.scalar(
+        select(TextVideoProject)
+        .where(TextVideoProject.id == project_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+
+
 @router.get("")
 async def list_projects(
     project_status: Literal["draft", "audio_ready", "video_ready", "completed", "archived"] | None = None,
@@ -519,7 +537,9 @@ async def update_project(
     payload: ProjectUpdate,
     db: AsyncSession = Depends(get_db),
 ):
-    project = await get_project_or_404(db, project_id)
+    project = await _lock_text_video_project_row(db, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="文字视频作品不存在")
     if project.revision != payload.revision:
         raise HTTPException(
             status_code=409,
@@ -530,6 +550,30 @@ async def update_project(
         )
 
     changes = payload.model_dump(exclude_unset=True, exclude={"revision"}, mode="json")
+    scene_update = changes.get("scene_plan")
+    if isinstance(scene_update, dict):
+        current_plan = (
+            empty_scene_plan()
+            | deepcopy(project.scene_plan or {})
+        )
+        requested_scenes = scene_update["scenes"]
+        if (
+            requested_scenes != current_plan["scenes"]
+            and scene_update.get("generation_revision")
+            != current_plan["generation_revision"]
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "message": "AI 分镜已在其他页面更新",
+                    "revision": project.revision,
+                    "generation_revision": (
+                        current_plan["generation_revision"]
+                    ),
+                },
+                headers={"X-WMS-Retryable": "false"},
+            )
+        scene_update.pop("generation_revision", None)
     if changes.get("title") is not None:
         changes["title"] = changes["title"].strip() or "未命名文字视频"
     try:
@@ -620,6 +664,21 @@ def _stale_conflict(error: Exception) -> HTTPException:
 
 class StaleScenePlanJob(ValueError):
     pass
+
+
+class ScenePlanClaimConflict(ValueError):
+    pass
+
+
+def _scene_claim_conflict() -> HTTPException:
+    return HTTPException(
+        status_code=409,
+        detail={
+            "code": "scene_claim_conflict",
+            "message": "AI 分镜步骤已被其他 worker 领取",
+        },
+        headers={"X-WMS-Retryable": "false"},
+    )
 
 
 def _canonical_digest(value: Any) -> str:
@@ -872,12 +931,7 @@ async def _require_scene_claim(
     acquire: bool,
 ) -> tuple[ContentJob, ContentJobStep, dict[str, Any]]:
     _validate_scene_claim_values(step_id, attempt, claim_token)
-    job = await db.scalar(
-        select(ContentJob)
-        .where(ContentJob.id == job_id)
-        .with_for_update()
-        .execution_options(populate_existing=True)
-    )
+    job = await lock_content_job_row(db, job_id)
     snapshot = _validate_scene_job(job, project_id=project_id)
     step = await db.scalar(
         select(ContentJobStep)
@@ -921,7 +975,9 @@ async def _require_scene_claim(
             "_scene_claim": requested_claim,
         }
     elif frozen_claim != requested_claim:
-        raise StaleScenePlanJob("AI 分镜步骤已被其他 worker 领取")
+        raise ScenePlanClaimConflict(
+            "AI 分镜步骤已被其他 worker 领取",
+        )
     return job, step, snapshot
 
 
@@ -1201,6 +1257,9 @@ async def get_scene_plan_worker_context(
         _assert_scene_snapshot_current(project, job, snapshot)
         await db.commit()
         return _scene_context(snapshot)
+    except ScenePlanClaimConflict as error:
+        await db.rollback()
+        raise _scene_claim_conflict() from error
     except StaleScenePlanJob as error:
         await db.rollback()
         raise _stale_conflict(error) from error
@@ -1275,6 +1334,9 @@ async def validate_scene_plan_worker_result(
                 scenes=scenes,
             ),
         }
+    except ScenePlanClaimConflict as error:
+        await db.rollback()
+        raise _scene_claim_conflict() from error
     except StaleScenePlanJob as error:
         await db.rollback()
         raise _stale_conflict(error) from error
@@ -1362,6 +1424,9 @@ async def save_scene_plan_worker_result(
         await db.commit()
         await db.refresh(project)
         return serialize_project(project)
+    except ScenePlanClaimConflict as error:
+        await db.rollback()
+        raise _scene_claim_conflict() from error
     except StaleScenePlanJob as error:
         await db.rollback()
         raise _stale_conflict(error) from error
@@ -1422,6 +1487,9 @@ async def save_scene_plan_worker_failure(
         await db.commit()
         await db.refresh(project)
         return serialize_project(project)
+    except ScenePlanClaimConflict as error:
+        await db.rollback()
+        raise _scene_claim_conflict() from error
     except StaleScenePlanJob as error:
         await db.rollback()
         raise _stale_conflict(error) from error

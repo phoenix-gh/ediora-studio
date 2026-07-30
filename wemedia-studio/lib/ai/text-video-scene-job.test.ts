@@ -85,6 +85,20 @@ function makeSceneContext() {
   }
 }
 
+function makeRunningJob() {
+  return {
+    ...makeQueuedJob(),
+    status: 'running',
+    steps: [{
+      id: 51,
+      key: 'generate_scene_plan',
+      attempt: 1,
+      status: 'running',
+      output: {},
+    }],
+  }
+}
+
 function sceneApiError(
   status: number,
   detail: unknown,
@@ -440,6 +454,19 @@ it('never repairs a 422 returned by worker-result persistence', async () => {
   expect(deps.generate).toHaveBeenCalledOnce()
   expect(deps.api.validateScenePlan).toHaveBeenCalledOnce()
   expect(deps.api.persistScenePlan).toHaveBeenCalledOnce()
+  expect(deps.api.getSceneContext).toHaveBeenCalledOnce()
+  expect(deps.api.failScenePlan).toHaveBeenCalledWith(
+    1,
+    '结果提交时场景已不再有效',
+    41,
+    expect.any(Object),
+  )
+  expect(deps.api.failStep).toHaveBeenCalledWith(
+    41,
+    51,
+    expect.any(Error),
+    false,
+  )
 })
 
 it('recovers a persisted result after worker-result loses its acknowledgement', async () => {
@@ -620,5 +647,171 @@ it('fails closed on an already-running durable step without a second paid call',
   expect(deps.generate).not.toHaveBeenCalled()
   expect(deps.api.getSceneContext).not.toHaveBeenCalled()
   expect(deps.api.startStep).not.toHaveBeenCalled()
+  expect(deps.api.failStep).not.toHaveBeenCalled()
+})
+
+it('recovers a durable running step after startStep acknowledgement loss', async () => {
+  const deps = makeSceneJobDeps()
+  vi.mocked(deps.api.getJob)
+    .mockResolvedValueOnce(makeQueuedJob())
+    .mockResolvedValueOnce(makeRunningJob())
+  vi.mocked(deps.api.startStep).mockRejectedValue(
+    new Error('startStep connection reset'),
+  )
+
+  await expect(runTextVideoSceneJob(41, deps)).resolves.toEqual(
+    readyProject,
+  )
+
+  expect(deps.api.startStep).toHaveBeenCalledOnce()
+  expect(deps.api.getJob).toHaveBeenCalledTimes(2)
+  expect(deps.generate).toHaveBeenCalledOnce()
+  expect(deps.api.failScenePlan).not.toHaveBeenCalled()
+  expect(deps.api.failStep).not.toHaveBeenCalled()
+})
+
+it('reconciles a durable running step after an ambiguous startStep 503', async () => {
+  const deps = makeSceneJobDeps()
+  vi.mocked(deps.api.getJob)
+    .mockResolvedValueOnce(makeQueuedJob())
+    .mockResolvedValueOnce(makeRunningJob())
+  vi.mocked(deps.api.startStep).mockRejectedValue(
+    sceneApiError(503, 'gateway timeout after commit', true),
+  )
+
+  await expect(runTextVideoSceneJob(41, deps)).resolves.toEqual(
+    readyProject,
+  )
+
+  expect(deps.api.getJob).toHaveBeenCalledTimes(2)
+  expect(deps.generate).toHaveBeenCalledOnce()
+  expect(deps.api.failScenePlan).not.toHaveBeenCalled()
+  expect(deps.api.failStep).not.toHaveBeenCalled()
+})
+
+it('fails closed when startStep acknowledgement reconciliation cannot read the job', async () => {
+  const deps = makeSceneJobDeps()
+  vi.mocked(deps.api.getJob)
+    .mockResolvedValueOnce(makeQueuedJob())
+    .mockRejectedValueOnce(new Error('job status read failed'))
+  vi.mocked(deps.api.startStep).mockRejectedValue(
+    new Error('startStep connection reset'),
+  )
+
+  await expect(runTextVideoSceneJob(41, deps)).rejects.toMatchObject({
+    name: 'JobFinalizationError',
+    message: 'AI 分镜步骤启动状态无法确认，等待状态对账',
+  })
+
+  expect(deps.generate).not.toHaveBeenCalled()
+  expect(deps.api.failScenePlan).not.toHaveBeenCalled()
+  expect(deps.api.failStep).not.toHaveBeenCalled()
+})
+
+it('does not reconcile a definite startStep HTTP response as acknowledgement loss', async () => {
+  const deps = makeSceneJobDeps()
+  vi.mocked(deps.api.startStep).mockRejectedValue(
+    sceneApiError(409, '步骤已在运行'),
+  )
+
+  await expect(runTextVideoSceneJob(41, deps))
+    .rejects.toThrow('步骤已在运行')
+
+  expect(deps.api.getJob).toHaveBeenCalledOnce()
+  expect(deps.generate).not.toHaveBeenCalled()
+  expect(deps.api.failScenePlan).not.toHaveBeenCalled()
+  expect(deps.api.failStep).not.toHaveBeenCalled()
+})
+
+it('turns a typed scene claim conflict into pending without failing domain state', async () => {
+  const deps = makeSceneJobDeps()
+  vi.mocked(deps.api.getSceneContext).mockRejectedValue(
+    sceneApiError(409, {
+      code: 'scene_claim_conflict',
+      message: 'AI 分镜步骤已被其他 worker 领取',
+    }),
+  )
+
+  await expect(runTextVideoSceneJob(41, deps)).rejects.toMatchObject({
+    name: 'SceneJobPendingError',
+  })
+
+  expect(deps.generate).not.toHaveBeenCalled()
+  expect(deps.api.failScenePlan).not.toHaveBeenCalled()
+  expect(deps.api.failStep).not.toHaveBeenCalled()
+})
+
+it('lets only the database claim winner call AI after two lost start acknowledgements', async () => {
+  const sharedGenerate = vi.fn().mockResolvedValue(validProposal)
+  let owner = ''
+  const getSceneContext = vi.fn().mockImplementation(
+    async (
+      _projectId: number,
+      _jobId: number,
+      claim: { claim_token: string },
+    ) => {
+      if (!owner) {
+        owner = claim.claim_token
+        return makeSceneContext()
+      }
+      if (owner === claim.claim_token) return makeSceneContext()
+      throw sceneApiError(409, {
+        code: 'scene_claim_conflict',
+        message: 'AI 分镜步骤已被其他 worker 领取',
+      })
+    },
+  )
+  const failScenePlan = vi.fn().mockResolvedValue({})
+  const failStep = vi.fn().mockResolvedValue({})
+
+  function competingDeps(claimToken: string) {
+    const deps = makeSceneJobDeps()
+    deps.generate = sharedGenerate
+    deps.createClaimToken = () => claimToken
+    vi.mocked(deps.api.getJob)
+      .mockResolvedValueOnce(makeQueuedJob())
+      .mockResolvedValueOnce(makeRunningJob())
+    vi.mocked(deps.api.startStep).mockRejectedValue(
+      new Error('startStep connection reset'),
+    )
+    deps.api.getSceneContext = getSceneContext
+    deps.api.failScenePlan = failScenePlan
+    deps.api.failStep = failStep
+    return deps
+  }
+
+  const outcomes = await Promise.allSettled([
+    runTextVideoSceneJob(41, competingDeps('claim-token-worker-one')),
+    runTextVideoSceneJob(41, competingDeps('claim-token-worker-two')),
+  ])
+
+  expect(outcomes.filter(result => result.status === 'fulfilled'))
+    .toHaveLength(1)
+  const rejected = outcomes.find(result => result.status === 'rejected')
+  expect(rejected).toMatchObject({
+    status: 'rejected',
+    reason: { name: 'SceneJobPendingError' },
+  })
+  expect(sharedGenerate).toHaveBeenCalledOnce()
+  expect(failScenePlan).not.toHaveBeenCalled()
+  expect(failStep).not.toHaveBeenCalled()
+})
+
+it('throws finalization uncertainty when persisted-result reconciliation read fails', async () => {
+  const deps = makeSceneJobDeps()
+  vi.mocked(deps.api.getSceneContext)
+    .mockResolvedValueOnce(makeSceneContext())
+    .mockRejectedValueOnce(new Error('scene context read failed'))
+  vi.mocked(deps.api.persistScenePlan).mockRejectedValue(
+    new Error('worker-result connection reset'),
+  )
+
+  await expect(runTextVideoSceneJob(41, deps)).rejects.toMatchObject({
+    name: 'JobFinalizationError',
+    message: 'AI 分镜结果状态无法确认，等待状态对账',
+  })
+
+  expect(deps.generate).toHaveBeenCalledOnce()
+  expect(deps.api.failScenePlan).not.toHaveBeenCalled()
   expect(deps.api.failStep).not.toHaveBeenCalled()
 })
