@@ -12,6 +12,7 @@ import {
 } from './test-fixtures'
 import {
   canEnterVideoStage,
+  canPreviewVideo,
   mergeWorkerProject,
   updateProjectVoiceSettings,
 } from './project-merge'
@@ -573,8 +574,20 @@ describe('project speech settings and video gate', () => {
     })).toBe(false)
   })
 
-  it('accepts only a canonical project that matches the backend gate', () => {
-    expect(canEnterVideoStage(makeVideoReadyProject())).toBe(true)
+  it('opens video composition before scenes exist but keeps preview gated', () => {
+    const canonical = makeVideoReadyProject()
+    const audioReady = {
+      ...canonical,
+      scene_plan: makeScenePlan(),
+      render_input: {
+        ...canonical.render_input,
+        audio: '',
+      },
+    }
+
+    expect(canEnterVideoStage(audioReady)).toBe(true)
+    expect(canPreviewVideo(audioReady)).toBe(false)
+    expect(canPreviewVideo(canonical)).toBe(true)
   })
 
   it.each([
@@ -637,7 +650,7 @@ describe('project speech settings and video gate', () => {
       }),
     ],
   ])('rejects %s', (_name, mutate) => {
-    expect(canEnterVideoStage(mutate(makeVideoReadyProject()))).toBe(false)
+    expect(canPreviewVideo(mutate(makeVideoReadyProject()))).toBe(false)
   })
 })
 

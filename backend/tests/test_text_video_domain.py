@@ -10,6 +10,7 @@ from text_video_domain import (
     merge_editable_project,
     normalize_speech_segments,
     speech_source_hash,
+    video_stage_open,
     video_stage_ready,
 )
 
@@ -298,6 +299,7 @@ def test_same_scene_echo_preserves_inflight_scene_job():
 
 def test_video_stage_requires_current_authoritative_projection():
     project = _make_video_ready_project()
+    assert video_stage_open(project) is True
     assert video_stage_ready(project) is True
 
     project.master_audio = make_master_audio(
@@ -305,6 +307,16 @@ def test_video_stage_requires_current_authoritative_projection():
         timeline_status="missing",
         audio_url="/api/uploads/master.mp3",
     )
+    assert video_stage_open(project) is False
+    assert video_stage_ready(project) is False
+
+
+def test_video_stage_opens_with_ready_audio_before_a_scene_plan_exists():
+    project = _make_video_ready_project()
+    project.scene_plan = make_scene_plan()
+    project.render_input["audio"] = ""
+
+    assert video_stage_open(project) is True
     assert video_stage_ready(project) is False
 
 

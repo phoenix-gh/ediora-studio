@@ -448,6 +448,51 @@ def test_video_stage_requires_all_paragraphs_confirmed(client):
     assert "确认所有配音" in response.text
 
 
+def test_video_stage_opens_after_master_timeline_before_scene_generation(client):
+    project = _speech_project(client, "甲乙")
+    _set_ready_master(project["id"], duration=1.2, words=[
+        {
+            "id": "word-1",
+            "text": "甲",
+            "start": 0.0,
+            "end": 0.5,
+            "speech_segment_id": project["paragraphs"][0]["id"],
+        },
+        {
+            "id": "word-2",
+            "text": "乙",
+            "start": 0.6,
+            "end": 1.2,
+            "speech_segment_id": project["paragraphs"][0]["id"],
+        },
+    ])
+
+    from database import SessionLocal
+    from models import TextVideoProject
+
+    async def confirm_speech():
+        async with SessionLocal() as session:
+            stored = await session.get(TextVideoProject, project["id"])
+            stored.paragraphs = [{
+                **stored.paragraphs[0],
+                "status": "confirmed",
+            }]
+            await session.commit()
+
+    asyncio.new_event_loop().run_until_complete(confirm_speech())
+    response = client.patch(
+        f"/api/text-videos/{project['id']}",
+        json={
+            "revision": project["revision"],
+            "stage": "video",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["stage"] == "video"
+    assert response.json()["scene_plan"]["status"] == "missing"
+
+
 def test_patch_ignores_browser_owned_speech_generation_fields(client):
     project = client.post("/api/text-videos", json={}).json()
     response = client.patch(

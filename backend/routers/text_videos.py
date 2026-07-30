@@ -59,7 +59,7 @@ from text_video_domain import (
     empty_scene_plan,
     merge_editable_project,
     normalize_speech_segments,
-    video_stage_ready,
+    video_stage_open,
 )
 from text_video_scene_plan import (
     CONTINUITY_EPSILON_SECONDS,
@@ -543,7 +543,7 @@ async def update_project(
         )
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
-    if project.stage == "video" and not video_stage_ready(project):
+    if project.stage == "video" and not video_stage_open(project):
         raise HTTPException(
             status_code=422,
             detail="进入视频合成前请先确认所有配音并生成主音频时间轴",
