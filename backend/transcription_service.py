@@ -9,9 +9,15 @@ import math
 from pathlib import Path
 from typing import AsyncIterator, Mapping
 from urllib.parse import urlsplit
+import uuid
 
 import httpx
 
+from local_asr_gate import (
+    LocalAsrBusyError,
+    LocalAsrLeaseLostError,
+    local_asr_gate,
+)
 from runtime_config import get_runtime_settings
 from text_video_alignment import AlignmentError, validate_word_timings
 
@@ -309,19 +315,36 @@ async def transcribe_audio(
     )
     try:
         audio_bytes = await asyncio.to_thread(request.audio_path.read_bytes)
-        async with _client_scope(client, duration=float(duration)) as active:
-            response = await active.post(
-                f"{provider.base_url}/audio/transcriptions",
-                headers=headers,
-                data=fields,
-                files={
-                    "file": (
-                        request.audio_path.name,
-                        audio_bytes,
-                        "audio/mpeg",
-                    ),
-                },
-            )
+        async def post() -> httpx.Response:
+            async with _client_scope(
+                client,
+                duration=float(duration),
+            ) as active:
+                return await active.post(
+                    f"{provider.base_url}/audio/transcriptions",
+                    headers=headers,
+                    data=fields,
+                    files={
+                        "file": (
+                            request.audio_path.name,
+                            audio_bytes,
+                            "audio/mpeg",
+                        ),
+                    },
+                )
+
+        if provider.local and client is None:
+            async with local_asr_gate(
+                owner=f"asr-{uuid.uuid4().hex}",
+            ):
+                response = await post()
+        else:
+            response = await post()
+    except (LocalAsrBusyError, LocalAsrLeaseLostError) as error:
+        raise TranscriptionError(
+            str(error),
+            retryable=True,
+        ) from error
     except (httpx.TimeoutException, httpx.NetworkError) as error:
         raise TranscriptionError(
             "语音转写服务暂时无法访问",

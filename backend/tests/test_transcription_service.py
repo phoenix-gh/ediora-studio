@@ -1,7 +1,9 @@
 import asyncio
+from contextlib import asynccontextmanager
 
 import httpx
 
+import transcription_service
 from transcription_service import (
     TranscriptionRequest,
     transcribe_audio,
@@ -131,3 +133,55 @@ def test_local_provider_normalizes_words_nested_in_segments(tmp_path):
         (0.1, 0.9),
     ]
 
+
+def test_production_local_request_holds_gpu_gate_around_http_inference(
+    tmp_path,
+    monkeypatch,
+):
+    """Catches local HTTP inference bypassing cross-process serialization."""
+    audio = tmp_path / "master.mp3"
+    audio.write_bytes(b"fake-mp3")
+    events = []
+
+    @asynccontextmanager
+    async def fake_gate(*, owner):
+        assert owner.startswith("asr-")
+        events.append("gate-enter")
+        try:
+            yield
+        finally:
+            events.append("gate-exit")
+
+    class FakeClient:
+        async def post(self, *_args, **_kwargs):
+            events.append("post")
+            return httpx.Response(
+                200,
+                json={
+                    "text": "甲",
+                    "language": "zh",
+                    "words": [
+                        {"word": "甲", "start": 0, "end": 0.5},
+                    ],
+                },
+            )
+
+    @asynccontextmanager
+    async def fake_client_scope(_client, *, duration):
+        assert duration == 0.5
+        yield FakeClient()
+
+    monkeypatch.setattr(transcription_service, "local_asr_gate", fake_gate)
+    monkeypatch.setattr(
+        transcription_service,
+        "_client_scope",
+        fake_client_scope,
+    )
+
+    result = asyncio.run(transcribe_audio(
+        TranscriptionRequest(audio_path=audio, duration=0.5),
+        _local_runtime(),
+    ))
+
+    assert result.text == "甲"
+    assert events == ["gate-enter", "post", "gate-exit"]

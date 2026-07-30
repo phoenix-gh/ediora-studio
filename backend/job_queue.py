@@ -136,6 +136,64 @@ class RedisJobQueue:
         )
         return bool(refreshed)
 
+    @staticmethod
+    def _validate_named_lease(
+        key: str,
+        owner: str,
+        ttl_ms: int | None = None,
+    ) -> None:
+        if not key or not owner:
+            raise ValueError("named lease key and owner cannot be empty")
+        if ttl_ms is not None and ttl_ms <= 0:
+            raise ValueError("named lease ttl must be positive")
+
+    async def try_acquire_named_lease(
+        self,
+        key: str,
+        owner: str,
+        *,
+        ttl_ms: int,
+    ) -> bool:
+        self._validate_named_lease(key, owner, ttl_ms)
+        acquired = await self._client.set(
+            key,
+            owner,
+            px=ttl_ms,
+            nx=True,
+        )
+        return acquired == "OK" or acquired is True
+
+    async def release_named_lease(
+        self,
+        key: str,
+        owner: str,
+    ) -> bool:
+        self._validate_named_lease(key, owner)
+        released = await self._client.eval(
+            COMPARE_DELETE_SCRIPT,
+            1,
+            key,
+            owner,
+        )
+        return bool(released)
+
+    async def refresh_named_lease(
+        self,
+        key: str,
+        owner: str,
+        *,
+        ttl_ms: int,
+    ) -> bool:
+        self._validate_named_lease(key, owner, ttl_ms)
+        refreshed = await self._client.eval(
+            COMPARE_PEXPIRE_SCRIPT,
+            1,
+            key,
+            owner,
+            str(ttl_ms),
+        )
+        return bool(refreshed)
+
     async def close(self) -> None:
         await self._client.aclose()
 
