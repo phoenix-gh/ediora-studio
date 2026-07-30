@@ -76,6 +76,7 @@ from text_video_templates import (
     get_text_video_template,
     normalize_text_video_template_default_map,
 )
+from text_video_render import launch_text_video_render
 from text_video_jobs import (
     StaleTextVideoJob,
     assert_current_speech_job,
@@ -721,6 +722,14 @@ def _master_job_payload(job: ContentJob) -> dict:
         "id": job.id,
         "flow": job.flow,
         "target_id": int(job.input_data["project_id"]),
+    }
+
+
+def _render_job_payload(job: ContentJob, project_id: int) -> dict:
+    return {
+        "id": job.id,
+        "flow": job.flow,
+        "target_id": project_id,
     }
 
 
@@ -2928,6 +2937,45 @@ async def validate_speech_split_preview(
             for index, segment in enumerate(slices, start=1)
         ],
         "speech_split_mode": "auto",
+    }
+
+
+@router.post(
+    "/{project_id}/render",
+    status_code=status.HTTP_201_CREATED,
+)
+async def render_text_video(
+    project_id: int,
+    payload: SpeechActionRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        result = await launch_text_video_render(
+            db,
+            project_id,
+            revision=payload.revision,
+        )
+    except LookupError as error:
+        raise HTTPException(404, str(error)) from error
+    except RuntimeError as error:
+        await db.rollback()
+        current = await get_project_or_404(db, project_id)
+        raise HTTPException(
+            409,
+            {
+                "message": str(error),
+                "revision": current.revision,
+            },
+        ) from error
+    except ValueError as error:
+        await db.rollback()
+        raise HTTPException(422, str(error)) from error
+    job = result.jobs[0]
+    if result.should_enqueue:
+        await enqueue_job(job.id)
+    return {
+        "jobs": [_render_job_payload(job, project_id)],
+        "project": serialize_project(result.project),
     }
 
 

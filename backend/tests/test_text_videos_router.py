@@ -32,6 +32,7 @@ def client(monkeypatch, tmp_path):
             "routers.text_videos",
             "text_video_audio",
             "text_video_jobs",
+            "text_video_render",
         )):
             sys.modules.pop(module, None)
 
@@ -123,6 +124,73 @@ def _set_ready_master(project_id, *, duration=4.2, words=None):
 
     asyncio.new_event_loop().run_until_complete(prepare())
     return words
+
+
+def _set_video_ready_project(project_id):
+    from database import SessionLocal
+    from models import TextVideoProject
+    from text_video_domain import (
+        default_speech_segment,
+        empty_master_audio,
+        empty_scene_plan,
+    )
+    from text_video_scene_plan import resolve_scene_seconds
+    from text_video_templates import get_text_video_template
+
+    words = _set_ready_master(project_id)
+
+    async def prepare():
+        async with SessionLocal() as session:
+            project = await session.get(TextVideoProject, project_id)
+            project.script = "甲乙丙丁"
+            project.paragraphs = [{
+                **default_speech_segment(
+                    "甲乙丙丁",
+                    segment_id="paragraph-1",
+                ),
+                "status": "confirmed",
+                "audio_url": "/api/uploads/master.mp3",
+                "duration": 4.2,
+                "source_hash": "b" * 64,
+            }]
+            master = empty_master_audio() | project.master_audio
+            scenes = _scene_scenes()
+            manifest = get_text_video_template("tech-text-v1", 1)
+            segments = resolve_scene_seconds(
+                proposals=scenes,
+                words=words,
+                master_duration=master["duration"],
+                manifest=manifest,
+            )
+            project.scene_plan = empty_scene_plan() | {
+                "status": "ready",
+                "master_source_hash": master["source_hash"],
+                "scenes": scenes,
+            }
+            project.render_input = {
+                **project.render_input,
+                "audio": master["audio_url"],
+                "segments": segments,
+            }
+            project.stage = "video"
+            project.status = "video_ready"
+            await session.commit()
+
+    asyncio.new_event_loop().run_until_complete(prepare())
+    return client_project(project_id)
+
+
+def client_project(project_id):
+    from database import SessionLocal
+    from routers.text_videos import serialize_project
+    from models import TextVideoProject
+
+    async def load():
+        async with SessionLocal() as session:
+            project = await session.get(TextVideoProject, project_id)
+            return serialize_project(project)
+
+    return asyncio.new_event_loop().run_until_complete(load())
 
 
 def _scene_scenes():
@@ -423,6 +491,99 @@ def test_new_project_copies_current_platform_defaults(client):
         ["brandTitle"]
         == "EDIORA"
     )
+
+
+def test_text_video_render_launch_freezes_current_input_and_reuses_active_job(
+    client,
+    monkeypatch,
+):
+    import routers.text_videos as router_module
+
+    enqueued = []
+
+    async def capture_enqueue(job_id):
+        enqueued.append(job_id)
+
+    monkeypatch.setattr(router_module, "enqueue_job", capture_enqueue)
+    created = client.post(
+        "/api/text-videos",
+        json={"title": "导出测试"},
+    ).json()
+    ready = _set_video_ready_project(created["id"])
+
+    first_response = client.post(
+        f"/api/text-videos/{ready['id']}/render",
+        json={"revision": ready["revision"]},
+    )
+
+    assert first_response.status_code == 201, first_response.text
+    first = first_response.json()
+    job = first["jobs"][0]
+    assert job["flow"] == "text_video_render"
+    assert job["target_id"] == ready["id"]
+    assert first["project"]["render_state"] == {
+        "status": "queued",
+        "generation": 1,
+        "source_hash": first["project"]["render_state"]["source_hash"],
+        "job_id": job["id"],
+        "applied_job_id": None,
+        "asset_id": None,
+        "progress": 0,
+        "error": "",
+    }
+    assert len(first["project"]["render_state"]["source_hash"]) == 64
+
+    stored_job = client.get(f"/api/jobs/{job['id']}")
+    assert stored_job.status_code == 200, stored_job.text
+    snapshot = stored_job.json()["input"]
+    assert snapshot["project_id"] == ready["id"]
+    assert snapshot["project_revision"] == ready["revision"]
+    assert snapshot["render_generation"] == 1
+    assert snapshot["render_input"] == ready["render_input"]
+    assert snapshot["composition_id"] == "tech-text-v1"
+
+    second_response = client.post(
+        f"/api/text-videos/{ready['id']}/render",
+        json={"revision": ready["revision"]},
+    )
+    assert second_response.status_code == 201, second_response.text
+    assert second_response.json()["jobs"][0]["id"] == job["id"]
+    assert enqueued == [job["id"]]
+
+
+def test_text_video_render_launch_rejects_non_current_scene_plan(
+    client,
+    monkeypatch,
+):
+    import routers.text_videos as router_module
+
+    async def ignore_enqueue(_job_id):
+        return None
+
+    monkeypatch.setattr(router_module, "enqueue_job", ignore_enqueue)
+    created = client.post("/api/text-videos", json={}).json()
+    ready = _set_video_ready_project(created["id"])
+
+    from database import SessionLocal
+    from models import TextVideoProject
+
+    async def make_stale():
+        async with SessionLocal() as session:
+            project = await session.get(TextVideoProject, ready["id"])
+            project.scene_plan = {
+                **project.scene_plan,
+                "master_source_hash": "c" * 64,
+            }
+            await session.commit()
+
+    asyncio.new_event_loop().run_until_complete(make_stale())
+    response = client.post(
+        f"/api/text-videos/{ready['id']}/render",
+        json={"revision": ready["revision"]},
+    )
+
+    assert response.status_code == 422
+    assert "分镜" in response.text
 
 
 def test_text_video_project_crud_and_revision_conflict(client):
