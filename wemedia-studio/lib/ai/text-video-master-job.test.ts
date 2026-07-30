@@ -73,6 +73,22 @@ function aligned(sourceHash = FIRST_HASH) {
   }
 }
 
+function readyAssemblyProject(
+  sourceHash = FIRST_HASH,
+  jobId = 81,
+) {
+  return {
+    id: 8,
+    master_audio: {
+      ...assembly(sourceHash),
+      status: 'ready',
+      timeline_status: 'missing',
+      job_id: jobId,
+    },
+    render_input: { audio: '' },
+  }
+}
+
 function deps(jobValue = job()) {
   const api = {
     getJob: vi.fn().mockResolvedValue(jobValue),
@@ -497,6 +513,62 @@ describe('text video master job', () => {
     )
     expect(provided.api.postMasterAlign).not.toHaveBeenCalled()
   })
+
+  it('recovers a committed assembly from the failure probe without concatenating again', async () => {
+    const provided = deps()
+    provided.api.postMasterAssemble.mockRejectedValue(
+      new TypeError('assembly response lost after commit'),
+    )
+    provided.api.postMasterFailure.mockResolvedValue({
+      ...readyAssemblyProject(),
+      failure_applied: false,
+    })
+
+    await expect(runTextVideoMasterJob(81, provided))
+      .resolves.toEqual(aligned())
+
+    expect(provided.api.postMasterAssemble).toHaveBeenCalledOnce()
+    expect(provided.api.postMasterFailure).toHaveBeenCalledOnce()
+    expect(provided.api.completeStep).toHaveBeenNthCalledWith(
+      1,
+      81,
+      91,
+      assembly(),
+    )
+    expect(provided.api.postMasterAlign).toHaveBeenCalledOnce()
+    expect(provided.api.failStep).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    {
+      name: 'another source snapshot',
+      project: readyAssemblyProject(DURABLE_HASH),
+    },
+    {
+      name: 'another job owner',
+      project: readyAssemblyProject(FIRST_HASH, 82),
+    },
+  ])(
+    'fails closed when an assembly failure probe reports ready state for $name',
+    async ({ project }) => {
+      const provided = deps()
+      provided.api.postMasterAssemble.mockRejectedValue(
+        new TypeError('assembly response lost after commit'),
+      )
+      provided.api.postMasterFailure.mockResolvedValue({
+        ...project,
+        failure_applied: false,
+      })
+
+      await expect(runTextVideoMasterJob(81, provided))
+        .rejects.toBeInstanceOf(JobFinalizationError)
+
+      expect(provided.api.postMasterAssemble).toHaveBeenCalledOnce()
+      expect(provided.api.completeStep).not.toHaveBeenCalled()
+      expect(provided.api.postMasterAlign).not.toHaveBeenCalled()
+      expect(provided.api.failStep).not.toHaveBeenCalled()
+    },
+  )
 
   it('recovers a lost complete-job response when durable state is succeeded', async () => {
     const provided = deps()

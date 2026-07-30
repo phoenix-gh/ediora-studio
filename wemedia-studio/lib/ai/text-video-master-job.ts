@@ -59,6 +59,10 @@ type StepFailureResolution<T> =
   | { kind: 'failed'; error: unknown }
   | { kind: 'recovered'; output: T }
 
+type MasterFailureResponse = Record<string, unknown> & {
+  failure_applied?: unknown
+}
+
 type MasterProgressApi = {
   getJob(jobId: number): Promise<DurableJob>
   startStep(jobId: number, step: string): Promise<RunningStep>
@@ -92,7 +96,7 @@ type MasterProgressApi = {
     projectId: number,
     failure: MasterFailure,
     jobId: number,
-  ): Promise<{ failure_applied?: unknown }>
+  ): Promise<MasterFailureResponse>
 }
 
 export type TextVideoMasterJobDeps = {
@@ -215,6 +219,33 @@ function assemblyFromOutput(
     segment_offsets: segmentOffsets,
     owns_asset: output.owns_asset,
   }
+}
+
+function assemblyFromFailureResponse(
+  output: MasterFailureResponse,
+  expectedProjectId: number,
+  expectedJobId: number,
+  expectedSourceHash: string,
+) {
+  const master = (
+    output.master_audio
+    && typeof output.master_audio === 'object'
+  )
+    ? output.master_audio as Record<string, unknown>
+    : undefined
+  if (
+    output.failure_applied !== false
+    || positiveInteger(output.id) !== expectedProjectId
+    || !master
+    || master.status !== 'ready'
+    || positiveInteger(master.job_id) !== expectedJobId
+  ) {
+    throw new ApiRequestError(
+      '主音频拼接失败状态不明确，等待任务状态对账',
+      true,
+    )
+  }
+  return assemblyFromOutput(master, expectedSourceHash)
 }
 
 function alignmentFromOutput(
@@ -490,10 +521,7 @@ export async function runTextVideoMasterJob(
     output => assemblyFromOutput(output, frozenSourceHash),
     () => deps.api.postMasterAssemble(projectId, jobId),
     async error => {
-      // Assembly has no paid-work claim. Preserve the original behavior:
-      // durable step failure remains authoritative even if the best-effort
-      // domain failure report is temporarily unavailable.
-      await reportFailure(
+      const report = await reportFailure(
         jobId,
         projectId,
         frozenSourceHash,
@@ -501,6 +529,27 @@ export async function runTextVideoMasterJob(
         error,
         deps,
       )
+      if (
+        report.acknowledged
+        && report.result.failure_applied === false
+      ) {
+        try {
+          return {
+            kind: 'recovered',
+            output: assemblyFromFailureResponse(
+              report.result,
+              projectId,
+              jobId,
+              frozenSourceHash,
+            ),
+          }
+        } catch (reconcileError) {
+          throw new JobFinalizationError(
+            '主音频拼接失败状态不明确，等待任务状态对账',
+            { cause: reconcileError },
+          )
+        }
+      }
       return { kind: 'failed', error }
     },
   )
