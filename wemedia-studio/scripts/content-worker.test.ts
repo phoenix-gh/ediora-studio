@@ -48,6 +48,7 @@ type RedisState = {
 class FakeRedis {
   readonly state: RedisState
   readonly pops: PopAction[]
+  readonly refreshActions: Array<Error | number> = []
 
   constructor(
     pops: PopAction[],
@@ -95,6 +96,9 @@ class FakeRedis {
     if (key.startsWith('wms:content-job-lease:')) {
       if (secondArgument !== undefined) {
         this.state.events.push(`refresh:${key}:${secondArgument}`)
+        const action = this.refreshActions.shift()
+        if (action instanceof Error) throw action
+        if (action !== undefined) return action
         return this.state.leases.get(key) === firstArgument ? 1 : 0
       }
       this.state.events.push(`release:${key}`)
@@ -355,6 +359,52 @@ describe('content worker lifecycle', () => {
     expect(vi.getTimerCount()).toBe(0)
   })
 
+  it('retries lease refresh after one Redis transport error and clears its timer', async () => {
+    vi.useFakeTimers()
+    const controller = new AbortController()
+    const redis = new FakeRedis([
+      ['content-jobs', '33'],
+      stopOnNextPop(controller),
+    ])
+    redis.refreshActions.push(new TypeError('Redis connection reset'))
+    let finishRunner!: () => void
+    const running = new Promise<void>(resolve => {
+      finishRunner = resolve
+    })
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const { runContentWorker } = await import('./content-worker')
+
+    const worker = runContentWorker({
+      redis,
+      queueName: 'content-jobs',
+      signal: controller.signal,
+      reconcile: vi.fn().mockResolvedValue({}),
+      getJob: vi.fn().mockResolvedValue(durableJob(33)),
+      resolveRunner: () => () => running,
+      leaseTtlMs: 100,
+      leaseRefreshIntervalMs: 30,
+    })
+    await settle()
+    await vi.advanceTimersByTimeAsync(60)
+
+    expect(redis.state.events.filter(event => event.startsWith(
+      'refresh:wms:content-job-lease:content-jobs:33:',
+    ))).toHaveLength(2)
+    expect(errorSpy).toHaveBeenCalledWith(
+      'content job lease wms:content-job-lease:content-jobs:33 refresh failed',
+      expect.any(TypeError),
+    )
+    expect(errorSpy).not.toHaveBeenCalledWith(
+      expect.stringContaining('was lost'),
+    )
+
+    finishRunner()
+    await worker
+
+    expect(redis.state.leases.size).toBe(0)
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
   it.each(['succeeded', 'cancelled', 'failed'])(
     'ignores terminal %s jobs after releasing their lease',
     async status => {
@@ -439,7 +489,32 @@ describe('content worker lifecycle', () => {
     expect(redis.state.queue).toEqual(['43'])
   })
 
-  it('does not requeue ordinary runner failures and leaves no refresh timer', async () => {
+  it('requeues a transport failure while loading the job before dispatch', async () => {
+    const controller = new AbortController()
+    const redis = new FakeRedis([
+      ['content-jobs', '45'],
+      stopOnNextPop(controller),
+    ])
+    const runner = vi.fn()
+    const { runContentWorker } = await import('./content-worker')
+
+    await runContentWorker({
+      redis,
+      queueName: 'content-jobs',
+      signal: controller.signal,
+      reconcile: vi.fn().mockResolvedValue({}),
+      getJob: vi.fn().mockRejectedValue(new TypeError('fetch failed')),
+      resolveRunner: () => runner,
+    })
+
+    expect(runner).not.toHaveBeenCalled()
+    expect(redis.state.queue).toEqual(['45'])
+    expect(redis.state.events.filter(event => (
+      event === 'enqueue:content-jobs:45'
+    ))).toHaveLength(1)
+  })
+
+  it('does not requeue ordinary runner TypeErrors and leaves no refresh timer', async () => {
     vi.useFakeTimers()
     const controller = new AbortController()
     const redis = new FakeRedis([
@@ -455,7 +530,7 @@ describe('content worker lifecycle', () => {
       reconcile: vi.fn().mockResolvedValue({}),
       getJob: vi.fn().mockResolvedValue(durableJob(47)),
       resolveRunner: () => async () => {
-        throw new Error('durable domain failure')
+        throw new TypeError('durable domain failure')
       },
     })
     await vi.runAllTimersAsync()

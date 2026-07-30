@@ -262,10 +262,16 @@ function startLeaseRefresh(
   intervalMs: number,
 ) {
   let active = true
+  let confirmedUntil = Date.now() + ttlMs
   let timer: ReturnType<typeof setTimeout> | undefined
   let inFlight = Promise.resolve()
 
   const schedule = () => {
+    const remainingMs = confirmedUntil - Date.now()
+    if (remainingMs <= 0) {
+      active = false
+      return
+    }
     timer = setTimeout(() => {
       timer = undefined
       inFlight = refreshLease(redis, key, owner, ttlMs)
@@ -273,16 +279,17 @@ function startLeaseRefresh(
           if (!refreshed) {
             active = false
             console.error(`content job lease ${key} was lost`)
+            return
           }
+          confirmedUntil = Date.now() + ttlMs
         })
         .catch(error => {
-          active = false
           console.error(`content job lease ${key} refresh failed`, error)
         })
         .finally(() => {
           if (active) schedule()
         })
-    }, intervalMs)
+    }, Math.max(1, Math.min(intervalMs, remainingMs)))
   }
 
   schedule()
@@ -293,7 +300,11 @@ function startLeaseRefresh(
   }
 }
 
-function shouldRequeue(error: unknown) {
+function shouldRequeue(
+  error: unknown,
+  phase: 'loading' | 'running',
+) {
+  if (phase === 'loading' && !(error instanceof ApiRequestError)) return true
   return error instanceof JobFinalizationError
     || (error instanceof ApiRequestError && error.retryable)
 }
@@ -328,14 +339,16 @@ async function runLeasedJob(
   )
   let retryError: unknown
   let released = false
+  let phase: 'loading' | 'running' = 'loading'
   try {
     const job = await options.getJob(jobId)
     if (TERMINAL_JOB_STATUSES.has(job.status)) return
+    phase = 'running'
     await options.resolveRunner(job.flow, {
       speechFetch: options.speechFetch,
     })(jobId)
   } catch (error) {
-    retryError = shouldRequeue(error) ? error : undefined
+    retryError = shouldRequeue(error, phase) ? error : undefined
     console.error(`content job ${jobId} failed`, error)
   } finally {
     await stopRefresh()
