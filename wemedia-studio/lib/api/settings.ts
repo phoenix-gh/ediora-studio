@@ -21,6 +21,19 @@ export interface WebFetchProviderConfig {
   timeout_seconds: number
 }
 
+export type TranscriptionProvider =
+  | 'local-whisper'
+  | 'openai-compatible'
+
+export interface TranscriptionStatus {
+  provider: TranscriptionProvider
+  status: 'unavailable' | 'preparing' | 'ready' | 'busy' | 'error'
+  model: string
+  device: string
+  compute_type: string
+  error: string
+}
+
 export interface AppSettings {
   llm_provider: string
   llm_model: string
@@ -34,7 +47,7 @@ export interface AppSettings {
   image_api_key_preview: string
   heygen_api_key_set: boolean
   heygen_api_key_preview: string
-  transcription_provider: string
+  transcription_provider: TranscriptionProvider
   transcription_model: string
   transcription_base_url: string
   transcription_api_key_set: boolean
@@ -112,7 +125,7 @@ export interface SettingsUpdate {
   image_api_key?: string
   image_base_url?: string
   heygen_api_key?: string
-  transcription_provider?: string
+  transcription_provider?: TranscriptionProvider
   transcription_model?: string
   transcription_base_url?: string
   transcription_api_key?: string
@@ -222,4 +235,8 @@ export async function testHeyGen(): Promise<{ ok: boolean; error: string }> {
 
 export async function testTranscription(): Promise<{ ok: boolean; error: string }> {
   return apiFetch('/settings/transcription/test', { method: 'POST' })
+}
+
+export async function getTranscriptionStatus(): Promise<TranscriptionStatus> {
+  return apiFetch<TranscriptionStatus>('/settings/transcription/status')
 }
