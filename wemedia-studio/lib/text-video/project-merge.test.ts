@@ -68,6 +68,118 @@ function makeVideoReadyProject(): TextVideoProject {
 }
 
 describe('mergeWorkerProject', () => {
+  it('adopts ready audio when launch-time voice defaults match the server', () => {
+    const baseline = makeTextVideoProject({
+      script: '甲。',
+      voice_settings: {
+        voice_id: '',
+        model: '',
+        speed: 1,
+        volume: 1,
+        pitch: 0,
+      },
+      paragraphs: [makeSpeechSegment('a', '甲。')],
+    })
+    const configuredVoice = {
+      voice_id: 'task12-voice',
+      model: 'mimo-v2.5-tts',
+      speed: 1,
+      volume: 1,
+      pitch: 0,
+    }
+    const generating = {
+      ...baseline,
+      voice_settings: configuredVoice,
+      paragraphs: [makeSpeechSegment('a', '甲。', {
+        status: 'generating',
+        source_hash: 'a'.repeat(64),
+        job_id: 41,
+      })],
+    }
+    const ready = {
+      ...generating,
+      paragraphs: [makeSpeechSegment('a', '甲。', {
+        status: 'ready',
+        source_hash: 'a'.repeat(64),
+        audio_url: '/api/uploads/a.mp3',
+        job_id: null,
+      })],
+    }
+
+    const merged = mergeWorkerProject(generating, ready, {
+      editableBaseline: baseline,
+      localDirty: false,
+    })
+
+    expect(merged.voice_settings).toEqual(configuredVoice)
+    expect(merged.paragraphs[0]).toMatchObject({
+      status: 'ready',
+      audio_url: '/api/uploads/a.mp3',
+      job_id: null,
+    })
+  })
+
+  it('keeps a real local voice edit instead of accepting ready launch audio', () => {
+    const baseline = makeTextVideoProject({
+      script: '甲。',
+      voice_settings: {
+        voice_id: '',
+        model: '',
+        speed: 1,
+        volume: 1,
+        pitch: 0,
+      },
+      paragraphs: [makeSpeechSegment('a', '甲。')],
+    })
+    const configuredVoice = {
+      voice_id: 'task12-voice',
+      model: 'mimo-v2.5-tts',
+      speed: 1,
+      volume: 1,
+      pitch: 0,
+    }
+    const generating = {
+      ...baseline,
+      voice_settings: configuredVoice,
+      paragraphs: [makeSpeechSegment('a', '甲。', {
+        status: 'generating',
+        source_hash: 'a'.repeat(64),
+        generation_revision: 1,
+        job_id: 41,
+      })],
+    }
+    const local = updateProjectVoiceSettings(generating, {
+      speed: 1.25,
+    })
+    const ready = {
+      ...generating,
+      paragraphs: [makeSpeechSegment('a', '甲。', {
+        status: 'ready',
+        source_hash: 'a'.repeat(64),
+        audio_url: '/api/uploads/a.mp3',
+        generation_revision: 1,
+        job_id: null,
+      })],
+    }
+
+    const merged = mergeWorkerProject(local, ready, {
+      editableBaseline: baseline,
+      localDirty: true,
+    })
+
+    expect(merged.voice_settings).toEqual({
+      ...configuredVoice,
+      speed: 1.25,
+    })
+    expect(merged.paragraphs[0]).toMatchObject({
+      status: 'draft',
+      audio_url: '',
+      source_hash: '',
+      generation_revision: 2,
+      job_id: null,
+    })
+  })
+
   it('merges completed speech without replacing an unrelated local edit', () => {
     const baseline = makeTextVideoProject({
       script: '甲。乙。',

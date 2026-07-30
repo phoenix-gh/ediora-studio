@@ -27,6 +27,7 @@ import type { ContentJob } from '../lib/api/jobs'
 import type { TextVideoProject } from '../lib/api/text-videos'
 import { runContentWorker } from '../scripts/content-worker'
 import {
+  combineStartupAndCleanupErrors,
   createDeferredTtsLatch,
   E2E_REDIS_OWNER_LABEL,
   E2E_LLM_MODEL,
@@ -37,6 +38,7 @@ import {
   resolveE2EPythonLaunch,
   resolveE2ERedisLaunch,
   startTextVideoProviderServer,
+  terminateProvisionalProcessGroup,
   type DeferredTtsLatch,
   type E2ERedisLaunch,
   type TextVideoProviderServer,
@@ -49,6 +51,8 @@ const BACKEND_ROOT = join(REPOSITORY_ROOT, 'backend')
 const OFFICIAL_MIMO_COMPLETION_URL =
   'https://api.xiaomimimo.com/v1/chat/completions'
 const SCRIPT = '真实链路，让文字跟随声音。'
+const SPLIT_TEXTS = ['真实链路，', '让文字跟随声音。'] as const
+const EDITED_SEGMENT = '更新后的真实链路，'
 const EDITED_SCRIPT = '更新后的真实链路，让文字跟随声音。'
 const PROJECT_TITLE = 'Task 12 真实文字视频'
 const PROCESS_LOG_LIMIT = 48 * 1024
@@ -63,12 +67,15 @@ const SECRET_ENV_NAMES = [
   'HEYGEN_API_KEY',
   'MIMO_API_KEY',
   'MINIMAX_API_KEY',
+  'MKFLOW_AGENT_API_TOKEN',
   'OPENAI_API_KEY',
   'OPENROUTER_API_KEY',
   'REPLICATE_API_TOKEN',
   'WMS_IMAGE_API_KEY',
   'WMS_LLM_API_KEY',
   'WMS_SPEECH_API_KEY',
+  'X_AUTH_TOKEN',
+  'X_CT0',
   'ZAI_API_KEY',
 ] as const
 
@@ -117,6 +124,25 @@ function timeout(ms: number): Promise<false> {
   return new Promise(resolve => {
     setTimeout(() => resolve(false), ms)
   })
+}
+
+async function waitForProcessGroupExit(
+  pid: number,
+  timeoutMs = 1_000,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    try {
+      process.kill(-pid, 0)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ESRCH') return true
+      throw error
+    }
+    await new Promise(resolvePromise => {
+      setTimeout(resolvePromise, 25)
+    })
+  }
+  return false
 }
 
 async function reserveLoopbackPort(): Promise<number> {
@@ -251,7 +277,7 @@ async function collectFiles(root: string): Promise<string[]> {
 
 function isolatedEnvironment(values: Record<string, string>) {
   const environment: NodeJS.ProcessEnv = { ...process.env }
-  for (const name of SECRET_ENV_NAMES) delete environment[name]
+  for (const name of SECRET_ENV_NAMES) environment[name] = ''
   return Object.assign(environment, values)
 }
 
@@ -371,7 +397,10 @@ class TextVideoHarness {
       return harness
     } catch (error) {
       await harness.close()
-      throw error
+      throw combineStartupAndCleanupErrors(
+        error,
+        harness.cleanupErrors,
+      )
     }
   }
 
@@ -383,7 +412,7 @@ class TextVideoHarness {
     for (const name of names) {
       this.previousEnvironment.set(name, process.env[name])
     }
-    for (const name of SECRET_ENV_NAMES) delete process.env[name]
+    for (const name of SECRET_ENV_NAMES) process.env[name] = ''
     for (const [name, value] of Object.entries(this.environment)) {
       if (value === undefined) delete process.env[name]
       else process.env[name] = value
@@ -437,10 +466,14 @@ class TextVideoHarness {
       })
     }
     if (!identity || !identity.commandLine.includes(marker)) {
-      if (child.exitCode === null) child.kill('SIGTERM')
+      const stopped = await terminateProvisionalProcessGroup({
+        pid: child.pid,
+        waitForExit: () => waitForProcessGroupExit(child.pid!, 1_000),
+      })
       throw new Error(
         `${name} PID identity is missing marker ${marker}: `
-        + `${identity?.commandLine ?? 'process exited'}`,
+        + `${identity?.commandLine ?? 'process exited'}`
+        + `${stopped ? '' : '; process group did not stop'}`,
       )
     }
     const owned: OwnedProcess = {
@@ -600,11 +633,13 @@ class TextVideoHarness {
 
   private async startWorker() {
     this.workerRedis = new Redis(this.redisUrl, {
+      lazyConnect: true,
       enableOfflineQueue: false,
       maxRetriesPerRequest: 0,
       retryStrategy: null,
     })
     this.workerRedis.on('error', () => undefined)
+    await this.workerRedis.connect()
     this.workerAbort = new AbortController()
     let ready!: () => void
     const readyPromise = new Promise<void>(resolvePromise => {
@@ -740,55 +775,39 @@ class TextVideoHarness {
   }
 
   private async stopOwned(process: OwnedProcess) {
-    if (process.child.exitCode !== null) return
-    const identity = await processIdentity(process.pid)
-    if (
-      !identity
-      || identity.startTicks !== process.startTicks
-      || !identity.commandLine.includes(process.marker)
-    ) {
-      this.cleanupErrors.push(
-        `refused to signal ${process.name}: PID identity changed`,
-      )
-      return
+    let firstWaitMs = 5_000
+    if (process.child.exitCode !== null) {
+      if (await waitForProcessGroupExit(process.pid, 250)) return
+      firstWaitMs = 1_000
+    } else {
+      const identity = await processIdentity(process.pid)
+      if (
+        !identity
+        || identity.startTicks !== process.startTicks
+        || !identity.commandLine.includes(process.marker)
+      ) {
+        this.cleanupErrors.push(
+          `refused to signal ${process.name}: PID identity changed`,
+        )
+        return
+      }
     }
-    const exitPromise = new Promise<true>(resolvePromise => {
-      process.child.once('exit', () => resolvePromise(true))
+    let waitAttempt = 0
+    const stopped = await terminateProvisionalProcessGroup({
+      pid: process.pid,
+      waitForExit: () => {
+        waitAttempt += 1
+        return waitForProcessGroupExit(
+          process.pid,
+          waitAttempt === 1 ? firstWaitMs : 2_000,
+        )
+      },
     })
-    try {
-      global.process.kill(-process.pid, 'SIGTERM')
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error
-    }
-    const exited = await Promise.race([
-      exitPromise,
-      timeout(5_000),
-    ])
-    if (exited) return
-    const stillOwned = await processIdentity(process.pid)
-    if (
-      !stillOwned
-      || stillOwned.startTicks !== process.startTicks
-      || !stillOwned.commandLine.includes(process.marker)
-    ) {
+    if (!stopped) {
       this.cleanupErrors.push(
-        `refused SIGKILL for ${process.name}: PID identity changed`,
+        `${process.name} process group did not stop`,
       )
-      return
     }
-    try {
-      global.process.kill(-process.pid, 'SIGKILL')
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error
-    }
-    await Promise.race([
-      new Promise<void>(resolvePromise => {
-        process.child.once('exit', () => resolvePromise())
-      }),
-      new Promise<void>(resolvePromise => {
-        setTimeout(resolvePromise, 2_000)
-      }),
-    ])
   }
 
   private async cleanupStep(
@@ -821,7 +840,16 @@ class TextVideoHarness {
       ],
       this.tempRoot,
     )
-    if (inspect.exitCode !== 0) return
+    if (inspect.exitCode !== 0) {
+      if (/no such (?:object|container)/iu.test(
+        `${inspect.stderr}\n${inspect.stdout}`,
+      )) return
+      this.cleanupErrors.push(
+        `failed to inspect Redis container ${name}: `
+        + `${inspect.stderr || inspect.stdout}`,
+      )
+      return
+    }
     if (inspect.stdout.trim() !== this.redisLaunch.ownerLabel) {
       this.cleanupErrors.push(
         `refused to remove Redis container ${name}: owner label changed`,
@@ -837,6 +865,23 @@ class TextVideoHarness {
       this.cleanupErrors.push(
         `failed to remove owned Redis container ${name}: `
         + `${removal.stderr || removal.stdout}`,
+      )
+      return
+    }
+    const confirmation = await runCommandResult(
+      'docker',
+      ['inspect', name],
+      this.tempRoot,
+    )
+    if (
+      confirmation.exitCode === 0
+      || !/no such (?:object|container)/iu.test(
+        `${confirmation.stderr}\n${confirmation.stdout}`,
+      )
+    ) {
+      this.cleanupErrors.push(
+        `could not confirm Redis container ${name} was removed: `
+        + `${confirmation.stderr || confirmation.stdout}`,
       )
     }
   }
@@ -1052,7 +1097,9 @@ async function createAndEditProject(
     response.url() === `${harness.apiBase}/text-videos`
     && response.request().method() === 'POST'
   ))
-  await page.getByRole('button', { name: '新建文字视频' }).click()
+  await page.getByLabel('页面操作')
+    .getByRole('button', { name: '新建文字视频' })
+    .click()
   const createdResponse = await creation
   expect(createdResponse.status()).toBe(201)
   const created = await createdResponse.json() as TextVideoProject
@@ -1093,11 +1140,67 @@ async function clickAndReadLaunch(
   })
   await action()
   const response = await responsePromise
-  expect(response.status()).toBe(200)
+  expect(response.status()).toBe(201)
   return response.json() as Promise<{
     jobs: Array<{ id: number; flow: string; target_id: number | string }>
     project: TextVideoProject
   }>
+}
+
+async function applyTwoSegmentAiSplit(
+  page: Page,
+  harness: TextVideoHarness,
+  saved: TextVideoProject,
+) {
+  const response = await clickAndReadLaunch(
+    page,
+    url => url.pathname.endsWith(
+      `/text-videos/${saved.id}/speech-split-preview`,
+    ),
+    async () => {
+      await page.getByRole('button', { name: 'AI 自动分段' }).click()
+    },
+  )
+  expect(response.jobs).toHaveLength(1)
+  expect(response.jobs[0].flow).toBe('text_video_split_preview')
+  const job = await harness.waitForTerminalJob(response.jobs[0].id)
+  expect(job.status).toBe('succeeded')
+  expect(job.steps).toEqual([
+    expect.objectContaining({
+      key: 'propose_boundaries',
+      status: 'succeeded',
+      output: expect.objectContaining({
+        speech_split_mode: 'auto',
+        segments: SPLIT_TEXTS.map(text => expect.objectContaining({ text })),
+      }),
+    }),
+  ])
+  const dialog = page.getByRole('dialog', {
+    name: 'AI 口播分段预览',
+  })
+  await expect(dialog).toBeVisible()
+  const apply = dialog.getByRole('button', { name: '应用分段' })
+  await expect(apply).toBeEnabled({ timeout: 20_000 })
+  await apply.click()
+  await expect(dialog).toBeHidden()
+  await waitForSaved(page)
+  const split = await harness.waitForProject(
+    saved.id,
+    'applied two exact split segments',
+    project => (
+      project.speech_split_mode === 'auto'
+      && project.paragraphs.length === SPLIT_TEXTS.length
+      && project.paragraphs.every(
+        (segment, index) => segment.text === SPLIT_TEXTS[index],
+      )
+    ),
+  )
+  expect(split.paragraphs.map(segment => segment.id)).toEqual([
+    expect.stringMatching(/^segment-[a-f0-9]{12}-1$/u),
+    expect.stringMatching(/^segment-[a-f0-9]{12}-2$/u),
+  ])
+  expect(split.paragraphs.map(segment => segment.text).join('')).toBe(SCRIPT)
+  return split
 }
 
 async function assertNoSyntheticUi(
@@ -1131,107 +1234,86 @@ test('real text-video workflow persists from desktop to compact UI', async ({
     expect(saved.paragraphs).toHaveLength(1)
     expect(saved.speech_split_mode).toBe('single')
 
-    const splitResponse = await clickAndReadLaunch(
-      page,
-      url => url.pathname.endsWith(
-        `/text-videos/${saved.id}/speech-split-preview`,
-      ),
-      async () => {
-        await page.getByRole('button', { name: 'AI 自动分段' }).click()
-      },
-    )
-    expect(splitResponse.jobs).toHaveLength(1)
-    expect(splitResponse.jobs[0].flow).toBe('text_video_split_preview')
-    const splitJob = await harness.waitForTerminalJob(
-      splitResponse.jobs[0].id,
-    )
-    expect(splitJob.status).toBe('succeeded')
-    expect(splitJob.steps).toEqual([
-      expect.objectContaining({
-        key: 'propose_boundaries',
-        status: 'succeeded',
-        output: expect.objectContaining({
-          speech_split_mode: 'auto',
-          segments: [expect.objectContaining({ text: SCRIPT })],
-        }),
-      }),
-    ])
-    const splitDialog = page.getByRole('dialog', {
-      name: 'AI 口播分段预览',
-    })
-    await expect(splitDialog).toBeVisible()
-    const apply = splitDialog.getByRole('button', { name: '应用分段' })
-    await expect(apply).toBeEnabled({ timeout: 20_000 })
-    await apply.click()
-    await expect(splitDialog).toBeHidden()
-    await waitForSaved(page)
-    const splitProject = await harness.waitForProject(
-      saved.id,
-      'applied one exact split segment',
-      project => (
-        project.speech_split_mode === 'auto'
-        && project.paragraphs.length === 1
-        && project.paragraphs[0].text === SCRIPT
-      ),
-    )
-    const stableSegmentId = splitProject.paragraphs[0].id
-    expect(stableSegmentId).toMatch(/^segment-[a-f0-9]{12}-1$/u)
+    const splitProject = await applyTwoSegmentAiSplit(page, harness, saved)
+    const stableSegmentIds = splitProject.paragraphs.map(segment => segment.id)
 
     await page.getByRole('tab', { name: '配音制作' }).click()
     await waitForSaved(page)
     const speechLaunch = await clickAndReadLaunch(
       page,
       url => url.pathname.endsWith(
-        `/text-videos/${saved.id}/speech-segments/`
-        + `${encodeURIComponent(stableSegmentId)}/generate`,
+        `/text-videos/${saved.id}/speech-segments/generate-pending`,
       ),
       async () => {
-        await page.getByRole('button', { name: '生成当前段' }).click()
+        await page.getByRole('button', {
+          name: '生成全部未生成段落',
+        }).click()
       },
     )
-    expect(speechLaunch.jobs).toHaveLength(1)
-    expect(speechLaunch.jobs[0]).toMatchObject({
-      flow: 'text_video_speech',
-      target_id: stableSegmentId,
-    })
-    const speechJob = await harness.waitForTerminalJob(
-      speechLaunch.jobs[0].id,
-    )
-    expect(speechJob.status).toBe('succeeded')
-    expect(speechJob.steps).toEqual([
-      expect.objectContaining({
-        key: 'generate_speech',
-        status: 'succeeded',
-      }),
+    expect(speechLaunch.jobs).toHaveLength(2)
+    expect(speechLaunch.jobs.map(job => job.flow)).toEqual([
+      'text_video_speech',
+      'text_video_speech',
     ])
+    expect(speechLaunch.jobs.map(job => job.target_id)).toEqual(
+      stableSegmentIds,
+    )
+    const speechJobs = await Promise.all(
+      speechLaunch.jobs.map(job => harness.waitForTerminalJob(job.id)),
+    )
+    speechJobs.forEach(job => {
+      expect(job.status).toBe('succeeded')
+      expect(job.steps).toEqual([
+        expect.objectContaining({
+          key: 'generate_speech',
+          status: 'succeeded',
+        }),
+      ])
+    })
     const speechReady = await harness.waitForProject(
       saved.id,
-      'ready speech segment',
-      project => project.paragraphs[0]?.status === 'ready',
+      'two ready speech segments',
+      project => (
+        project.paragraphs.length === 2
+        && project.paragraphs.every(segment => segment.status === 'ready')
+      ),
     )
-    await expect(page.getByTestId('segment-audio')).toBeVisible({
-      timeout: 20_000,
-    })
-    const speechSrc = await page.getByTestId('segment-audio')
-      .getAttribute('src')
-    expect(speechSrc).toBeTruthy()
-    expect(new URL(speechSrc!).origin).toBe(harness.apiOrigin)
-    await harness.probeAudioUrl(
-      speechReady.paragraphs[0].audio_url,
-      'speech',
-    )
-
-    await page.getByRole('button', { name: '确认当前段' }).click()
+    for (const [index, segment] of speechReady.paragraphs.entries()) {
+      const card = page.getByTestId('speech-segment-card').filter({
+        hasText: segment.text,
+      })
+      await card.click()
+      await expect(page.getByTestId('segment-audio')).toBeVisible({
+        timeout: 20_000,
+      })
+      const speechSrc = await page.getByTestId('segment-audio')
+        .getAttribute('src')
+      expect(speechSrc).toBeTruthy()
+      expect(new URL(speechSrc!).origin).toBe(harness.apiOrigin)
+      await harness.probeAudioUrl(segment.audio_url, `speech-${index + 1}`)
+      await page.getByRole('button', { name: '确认当前段' }).click()
+      await harness.waitForProject(
+        saved.id,
+        `confirmed speech segment ${index + 1}`,
+        project => project.paragraphs[index]?.status === 'confirmed',
+      )
+    }
     const confirmed = await harness.waitForProject(
       saved.id,
-      'confirmed speech segment',
-      project => project.paragraphs[0]?.status === 'confirmed',
+      'all speech segments confirmed',
+      project => project.paragraphs.every(
+        segment => segment.status === 'confirmed',
+      ),
     )
-    expect(confirmed.paragraphs[0]).toMatchObject({
-      id: stableSegmentId,
-      text: SCRIPT,
+    expect(confirmed.paragraphs.map(segment => ({
+      id: segment.id,
+      text: segment.text,
+      status: segment.status,
+    }))).toEqual(splitProject.paragraphs.map(segment => ({
+      id: segment.id,
+      text: segment.text,
       status: 'confirmed',
-    })
+    })))
 
     const masterLaunch = await clickAndReadLaunch(
       page,
@@ -1276,13 +1358,14 @@ test('real text-video workflow persists from desktop to compact UI', async ({
     )
     expect(timelineReady.master_audio).toMatchObject({
       sample_rate: 44_100,
-      sample_count: 44_100,
+      sample_count: 88_200,
       timeline_source: 'forced-alignment',
     })
+    expect(timelineReady.master_audio.duration).toBe(2)
     expect(timelineReady.master_audio.word_timings[0].start).toBe(0)
     expect(
       timelineReady.master_audio.word_timings.at(-1)?.end,
-    ).toBe(1)
+    ).toBe(2)
 
     await page.getByRole('tab', { name: '视频合成' }).click()
     await waitForSaved(page)
@@ -1302,7 +1385,7 @@ test('real text-video workflow persists from desktop to compact UI', async ({
       name: '让 AI 调整画面',
     }).click()
     const sceneResponse = await sceneResponsePromise
-    expect(sceneResponse.status()).toBe(200)
+    expect(sceneResponse.status()).toBe(201)
     const sceneLaunch = await sceneResponse.json() as {
       jobs: Array<{ id: number; flow: string }>
     }
@@ -1338,7 +1421,7 @@ test('real text-video workflow persists from desktop to compact UI', async ({
       audio: sceneReady.master_audio.audio_url,
       segments: [expect.objectContaining({
         start: 0,
-        end: 1,
+        end: 2,
         animation: 'fade-up',
       })],
     })
@@ -1355,17 +1438,19 @@ test('real text-video workflow persists from desktop to compact UI', async ({
     )
     expect(reloaded).toMatchObject({
       speech_split_mode: 'auto',
-      paragraphs: [expect.objectContaining({
-        id: stableSegmentId,
-        text: SCRIPT,
-        status: 'confirmed',
-        audio_url: speechReady.paragraphs[0].audio_url,
-      })],
+      paragraphs: speechReady.paragraphs.map(segment => (
+        expect.objectContaining({
+          id: segment.id,
+          text: segment.text,
+          status: 'confirmed',
+          audio_url: segment.audio_url,
+        })
+      )),
       master_audio: expect.objectContaining({
         status: 'ready',
         timeline_status: 'ready',
         sample_rate: 44_100,
-        sample_count: 44_100,
+        sample_count: 88_200,
       }),
       scene_plan: expect.objectContaining({
         status: 'ready',
@@ -1382,12 +1467,13 @@ test('real text-video workflow persists from desktop to compact UI', async ({
     await expect(page.getByTestId('remotion-preview')).toBeVisible()
 
     expect(harness.provider.callCounts).toEqual({
-      speech: 1,
+      speech: 2,
       split: 1,
       scene: 1,
       transcription: 1,
     })
     expect(harness.speechSourceUrls).toEqual([
+      OFFICIAL_MIMO_COMPLETION_URL,
       OFFICIAL_MIMO_COMPLETION_URL,
     ])
     const uploadFiles = await collectFiles(harness.uploadsRoot)
@@ -1409,16 +1495,50 @@ test('real text-video workflow persists from desktop to compact UI', async ({
 test('stale TTS cannot overwrite a compact-width edit', async ({
   page,
 }, testInfo) => {
-  const latch = createDeferredTtsLatch()
+  const latch = createDeferredTtsLatch({ text: SPLIT_TEXTS[0] })
   const harness = await TextVideoHarness.start({ ttsLatch: latch })
   const evidence = attachBrowserEvidence(page, harness)
   try {
     await page.setViewportSize({ width: 1024, height: 800 })
     const saved = await createAndEditProject(page, harness)
-    const segmentId = saved.paragraphs[0].id
+    expect(saved.paragraphs).toHaveLength(1)
+    const split = await applyTwoSegmentAiSplit(page, harness, saved)
+    const segmentId = split.paragraphs[0].id
+    const untouchedId = split.paragraphs[1].id
     await page.getByRole('tab', { name: '配音制作' }).click()
     await waitForSaved(page)
 
+    await page.getByTestId('speech-segment-card').filter({
+      hasText: SPLIT_TEXTS[1],
+    }).click()
+    const untouchedLaunch = await clickAndReadLaunch(
+      page,
+      url => url.pathname.endsWith(
+        `/text-videos/${saved.id}/speech-segments/`
+        + `${encodeURIComponent(untouchedId)}/generate`,
+      ),
+      async () => {
+        await page.getByRole('button', { name: '生成当前段' }).click()
+      },
+    )
+    expect(untouchedLaunch.jobs).toHaveLength(1)
+    expect((await harness.waitForTerminalJob(
+      untouchedLaunch.jobs[0].id,
+    )).status).toBe('succeeded')
+    await expect(page.getByTestId('segment-audio')).toBeVisible({
+      timeout: 20_000,
+    })
+    await page.getByRole('button', { name: '确认当前段' }).click()
+    const beforeStale = await harness.waitForProject(
+      saved.id,
+      'untouched segment confirmed before stale race',
+      project => project.paragraphs[1]?.status === 'confirmed',
+    )
+    const untouchedSegment = beforeStale.paragraphs[1]
+
+    await page.getByTestId('speech-segment-card').filter({
+      hasText: SPLIT_TEXTS[0],
+    }).click()
     const launch = await clickAndReadLaunch(
       page,
       url => url.pathname.endsWith(
@@ -1434,7 +1554,7 @@ test('stale TTS cannot overwrite a compact-width edit', async ({
 
     await page.getByRole('tab', { name: '稿件与分镜' }).click()
     await initializeSaveObservation(page)
-    await page.locator('#text-video-script').fill(EDITED_SCRIPT)
+    await page.locator('#text-video-script').fill(EDITED_SEGMENT)
     await expect(
       page.getByTestId('text-video-save-status'),
     ).toContainText('有未保存更改')
@@ -1448,16 +1568,19 @@ test('stale TTS cannot overwrite a compact-width edit', async ({
       saved.id,
       'saved edit while old TTS is in flight',
       project => (
-        project.paragraphs[0]?.text === EDITED_SCRIPT
+        project.script === EDITED_SCRIPT
+        && project.paragraphs[0]?.text === EDITED_SEGMENT
         && project.paragraphs[0]?.status === 'draft'
+        && project.paragraphs[1]?.status === 'confirmed'
       ),
     )
     expect(edited.paragraphs[0]).toMatchObject({
       id: segmentId,
-      text: EDITED_SCRIPT,
+      text: EDITED_SEGMENT,
       status: 'draft',
       audio_url: '',
     })
+    expect(edited.paragraphs[1]).toEqual(untouchedSegment)
 
     latch.release()
     const staleJob = await harness.waitForTerminalJob(launch.jobs[0].id)
@@ -1473,32 +1596,84 @@ test('stale TTS cannot overwrite a compact-width edit', async ({
       saved.id,
       'stale TTS rejected without overwriting edit',
       project => (
-        project.paragraphs[0]?.text === EDITED_SCRIPT
+        project.script === EDITED_SCRIPT
+        && project.paragraphs[0]?.text === EDITED_SEGMENT
         && project.paragraphs[0]?.status === 'draft'
         && project.paragraphs[0]?.audio_url === ''
+        && project.paragraphs[1]?.status === 'confirmed'
       ),
     )
-    expect(retained.paragraphs).toHaveLength(1)
+    expect(retained.paragraphs).toHaveLength(2)
     expect(retained.paragraphs[0].source_hash).toBe('')
+    expect(retained.paragraphs[1]).toEqual(untouchedSegment)
 
     await page.getByRole('tab', { name: '配音制作' }).click()
+    await page.getByTestId('speech-segment-card').filter({
+      hasText: EDITED_SEGMENT,
+    }).click()
     await expect(
       page.getByRole('button', { name: '生成当前段' }),
     ).toBeEnabled({ timeout: 20_000 })
-    await expect(page.getByText(EDITED_SCRIPT)).toBeVisible()
+    await expect(page.getByRole('blockquote')).toHaveText(EDITED_SEGMENT)
     await expect(page.getByTestId('segment-audio')).toHaveCount(0)
     await expect(page.getByText('可以重试当前操作')).toHaveCount(0)
+
+    const retryLaunch = await clickAndReadLaunch(
+      page,
+      url => url.pathname.endsWith(
+        `/text-videos/${saved.id}/speech-segments/generate-pending`,
+      ),
+      async () => {
+        await page.getByRole('button', {
+          name: '生成全部未生成段落',
+        }).click()
+      },
+    )
+    expect(retryLaunch.jobs).toEqual([
+      expect.objectContaining({
+        flow: 'text_video_speech',
+        target_id: segmentId,
+      }),
+    ])
+    expect((await harness.waitForTerminalJob(
+      retryLaunch.jobs[0].id,
+    )).status).toBe('succeeded')
+    const retried = await harness.waitForProject(
+      saved.id,
+      'only edited segment regenerated',
+      project => (
+        project.paragraphs[0]?.status === 'ready'
+        && project.paragraphs[0]?.audio_url !== ''
+        && project.paragraphs[1]?.status === 'confirmed'
+      ),
+    )
+    expect(retried.paragraphs[1]).toEqual(untouchedSegment)
+    await expect(page.getByTestId('segment-audio')).toBeVisible({
+      timeout: 20_000,
+    })
+
     await page.reload()
-    await expect(page.getByText(EDITED_SCRIPT)).toBeVisible()
-    await expect(page.getByTestId('segment-audio')).toHaveCount(0)
+    await expect(page.getByRole('blockquote')).toHaveText(EDITED_SEGMENT)
+    const reloaded = await harness.apiJson<TextVideoProject>(
+      `/text-videos/${saved.id}`,
+    )
+    expect(reloaded.paragraphs[0]).toMatchObject({
+      id: segmentId,
+      text: EDITED_SEGMENT,
+      status: 'ready',
+      audio_url: retried.paragraphs[0].audio_url,
+    })
+    expect(reloaded.paragraphs[1]).toEqual(untouchedSegment)
 
     expect(harness.provider.callCounts).toEqual({
-      speech: 1,
-      split: 0,
+      speech: 3,
+      split: 1,
       scene: 0,
       transcription: 0,
     })
     expect(harness.speechSourceUrls).toEqual([
+      OFFICIAL_MIMO_COMPLETION_URL,
+      OFFICIAL_MIMO_COMPLETION_URL,
       OFFICIAL_MIMO_COMPLETION_URL,
     ])
     await assertNoSyntheticUi(page, evidence)

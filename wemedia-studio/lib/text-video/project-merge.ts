@@ -151,7 +151,10 @@ export function mergeWorkerProject(
   const baselineSlices = editableSlices(baseline)
   const localSlices = editableSlices(local)
   const slicesChanged = !equal(localSlices, baselineSlices)
-  const voiceChanged = !equal(local.voice_settings, baseline.voice_settings)
+  const unacceptedLocalVoiceChange = (
+    !equal(local.voice_settings, baseline.voice_settings)
+    && !equal(local.voice_settings, server.voice_settings)
+  )
   const localScenesChanged = !equal(
     local.scene_plan.scenes,
     baseline.scene_plan.scenes,
@@ -188,7 +191,7 @@ export function mergeWorkerProject(
       baselineById.get(segment.id),
       localSegment,
       serverById.get(segment.id),
-      voiceChanged,
+      unacceptedLocalVoiceChange,
     )
   })
   const localSpeechWorkerWon = paragraphs.some(segment => {

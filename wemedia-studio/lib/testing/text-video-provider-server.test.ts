@@ -1,6 +1,7 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
+  combineStartupAndCleanupErrors,
   createDeferredTtsLatch,
   E2E_LLM_MODEL,
   E2E_PROVIDER_TOKEN,
@@ -10,6 +11,7 @@ import {
   resolveE2EPythonLaunch,
   resolveE2ERedisLaunch,
   startTextVideoProviderServer,
+  terminateProvisionalProcessGroup,
   type TextVideoProviderServer,
 } from '../../e2e/text-video-provider-server'
 
@@ -17,6 +19,7 @@ import {
 const servers: TextVideoProviderServer[] = []
 
 afterEach(async () => {
+  vi.useRealTimers()
   await Promise.allSettled(servers.splice(0).map(server => server.close()))
 })
 
@@ -93,7 +96,10 @@ describe('text-video E2E provider', () => {
         content: [
           '你是中文口播分段助手。',
           '完整稿件：测试稿件',
-          '有序候选边界：[]',
+          '有序候选边界：['
+            + '{"id":"boundary-middle","kind":"sentence","context":"测试｜稿件"},'
+            + '{"id":"boundary-late","kind":"pause","context":"稿｜件"}'
+            + ']',
         ].join('\n'),
       }],
       response_format: {
@@ -107,7 +113,10 @@ describe('text-video E2E provider', () => {
       choices: Array<{ message: { content: string } }>
     }
     expect(JSON.parse(payload.choices[0].message.content)).toEqual({
-      boundaries: [],
+      boundaries: [{
+        id: 'boundary-middle',
+        reason: '形成两段真实口播',
+      }],
     })
     expect(server.callCounts.split).toBe(1)
 
@@ -177,7 +186,8 @@ describe('text-video E2E provider', () => {
   it('validates multipart transcription and returns verbose_json words', async () => {
     const server = await startTextVideoProviderServer()
     servers.push(server)
-    await postJson(server, speechRequest('真实链路'))
+    await postJson(server, speechRequest('真实'))
+    await postJson(server, speechRequest('链路'))
 
     const form = new FormData()
     form.append('model', E2E_TRANSCRIPTION_MODEL)
@@ -201,12 +211,12 @@ describe('text-video E2E provider', () => {
     expect(await response.json()).toEqual({
       text: '真实链路',
       language: 'zh',
-      duration: 1,
+      duration: 2,
       words: [
-        { word: '真', start: 0, end: 0.25 },
-        { word: '实', start: 0.25, end: 0.5 },
-        { word: '链', start: 0.5, end: 0.75 },
-        { word: '路', start: 0.75, end: 1 },
+        { word: '真', start: 0, end: 0.5 },
+        { word: '实', start: 0.5, end: 1 },
+        { word: '链', start: 1, end: 1.5 },
+        { word: '路', start: 1.5, end: 2 },
       ],
     })
     expect(server.callCounts.transcription).toBe(1)
@@ -230,6 +240,40 @@ describe('text-video E2E provider', () => {
     latch.release()
     expect((await responsePromise).status).toBe(200)
     expect(resolved).toBe(true)
+  })
+
+  it('rejects a missing TTS observation within its own timeout', async () => {
+    vi.useFakeTimers()
+    const latch = createDeferredTtsLatch()
+    let error: unknown
+    void latch.waitUntilObserved(20).catch(cause => {
+      error = cause
+    })
+
+    await vi.advanceTimersByTimeAsync(20)
+
+    expect(error).toEqual(new Error('timed out waiting for TTS observation'))
+  })
+
+  it('holds only the configured stale speech text', async () => {
+    const latch = createDeferredTtsLatch({ text: '需要暂停' })
+    let bypassed = false
+    const bypass = latch.holdObservedRequest('直接通过').then(() => {
+      bypassed = true
+    })
+    await Promise.resolve()
+    expect(bypassed).toBe(true)
+
+    let held = false
+    const hold = latch.holdObservedRequest('需要暂停').then(() => {
+      held = true
+    })
+    await latch.waitUntilObserved()
+    expect(held).toBe(false)
+
+    latch.release()
+    await Promise.all([bypass, hold])
+    expect(held).toBe(true)
   })
 
   it('builds isolated native and Docker Redis launch contracts', () => {
@@ -312,5 +356,38 @@ describe('text-video E2E provider', () => {
         'python',
       ],
     })
+  })
+
+  it('terminates a provisional process group before escalating to SIGKILL', async () => {
+    const signals: Array<[number, NodeJS.Signals]> = []
+    const waits = [false, true]
+
+    const exited = await terminateProvisionalProcessGroup({
+      pid: 41,
+      signalGroup: (groupId, signal) => {
+        signals.push([groupId, signal])
+      },
+      waitForExit: async () => waits.shift() ?? false,
+    })
+
+    expect(exited).toBe(true)
+    expect(signals).toEqual([
+      [-41, 'SIGTERM'],
+      [-41, 'SIGKILL'],
+    ])
+  })
+
+  it('preserves the startup error object when cleanup also fails', () => {
+    const startup = new Error('API startup failed')
+    const combined = combineStartupAndCleanupErrors(
+      startup,
+      ['Redis container remained'],
+    )
+
+    expect(combined).toBeInstanceOf(AggregateError)
+    expect((combined as AggregateError).errors).toEqual([
+      startup,
+      new Error('Redis container remained'),
+    ])
   })
 })

@@ -95,6 +95,52 @@ export function resolveE2EPythonLaunch(
   }
 }
 
+export async function terminateProvisionalProcessGroup({
+  pid,
+  signalGroup = (groupId, signal) => {
+    process.kill(groupId, signal)
+  },
+  waitForExit,
+}: {
+  pid: number
+  signalGroup?: (groupId: number, signal: NodeJS.Signals) => void
+  waitForExit: () => Promise<boolean>
+}): Promise<boolean> {
+  if (!Number.isSafeInteger(pid) || pid <= 0) {
+    throw new Error('invalid provisional process PID')
+  }
+  const send = (signal: NodeJS.Signals) => {
+    try {
+      signalGroup(-pid, signal)
+      return true
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ESRCH') return false
+      throw error
+    }
+  }
+  if (!send('SIGTERM')) return true
+  if (await waitForExit()) return true
+  if (!send('SIGKILL')) return true
+  return waitForExit()
+}
+
+export function combineStartupAndCleanupErrors(
+  startupError: unknown,
+  cleanupErrors: string[],
+): Error {
+  const startup = startupError instanceof Error
+    ? startupError
+    : new Error(String(startupError))
+  if (cleanupErrors.length === 0) return startup
+  return new AggregateError(
+    [
+      startup,
+      ...cleanupErrors.map(message => new Error(message)),
+    ],
+    'text-video E2E startup failed and cleanup was incomplete',
+  )
+}
+
 export type ProviderCallKind =
   | 'speech'
   | 'split'
@@ -121,8 +167,22 @@ export class DeferredTtsLatch {
     this.resolveReleased = resolve
   })
 
-  waitUntilObserved(): Promise<void> {
-    return this.observedPromise
+  constructor(private readonly text?: string) {}
+
+  waitUntilObserved(timeoutMs = 20_000): Promise<void> {
+    if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+      return Promise.reject(new Error('invalid TTS observation timeout'))
+    }
+    if (this.observed) return Promise.resolve()
+    return new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        reject(new Error('timed out waiting for TTS observation'))
+      }, timeoutMs)
+      void this.observedPromise.then(() => {
+        clearTimeout(timer)
+        resolve()
+      })
+    })
   }
 
   release(): void {
@@ -131,7 +191,8 @@ export class DeferredTtsLatch {
     this.resolveReleased()
   }
 
-  async holdObservedRequest(): Promise<void> {
+  async holdObservedRequest(text = ''): Promise<void> {
+    if (this.text !== undefined && text !== this.text) return
     if (!this.observed) {
       this.observed = true
       this.resolveObserved()
@@ -140,8 +201,10 @@ export class DeferredTtsLatch {
   }
 }
 
-export function createDeferredTtsLatch(): DeferredTtsLatch {
-  return new DeferredTtsLatch()
+export function createDeferredTtsLatch(
+  options: { text?: string } = {},
+): DeferredTtsLatch {
+  return new DeferredTtsLatch(options.text)
 }
 
 export type TextVideoProviderServer = {
@@ -326,6 +389,43 @@ function extractSceneWords(prompt: string): Array<{ id: string; text: string }> 
   return words
 }
 
+function splitBoundaries(prompt: string) {
+  const match = prompt.match(/有序候选边界：\s*(\[[\s\S]*\])\s*$/u)
+  if (!match) {
+    throw new ProviderRequestError(422, 'split prompt lacks candidates')
+  }
+  let value: unknown
+  try {
+    value = JSON.parse(match[1])
+  } catch {
+    throw new ProviderRequestError(422, 'split candidates are invalid JSON')
+  }
+  if (!Array.isArray(value)) {
+    throw new ProviderRequestError(422, 'split candidates must be an array')
+  }
+  if (value.length === 0) return []
+  const candidates = value.flatMap(candidate => (
+    isRecord(candidate)
+    && typeof candidate.id === 'string'
+    && candidate.id
+    && typeof candidate.kind === 'string'
+    && typeof candidate.context === 'string'
+      ? [{ id: candidate.id }]
+      : []
+  ))
+  if (
+    candidates.length !== value.length
+    || new Set(candidates.map(candidate => candidate.id)).size
+      !== candidates.length
+  ) {
+    throw new ProviderRequestError(422, 'split candidates are invalid')
+  }
+  return [{
+    id: candidates[0].id,
+    reason: '形成两段真实口播',
+  }]
+}
+
 function chatCompletion(model: string, content: unknown, id: string) {
   return {
     id,
@@ -437,10 +537,11 @@ function partText(part: MultipartPart | undefined): string {
 
 function transcriptionText(
   parts: MultipartPart[],
-  latestSpeechText: string,
-): string {
+  speechTexts: string[],
+): { text: string; duration: number } {
   const byName = new Map(parts.map(part => [part.name, part]))
   const file = byName.get('file')
+  const text = speechTexts.join('')
   if (
     partText(byName.get('model')) !== E2E_TRANSCRIPTION_MODEL
     || partText(byName.get('response_format')) !== 'verbose_json'
@@ -448,11 +549,11 @@ function transcriptionText(
     || !file?.filename
     || file.contentType !== 'audio/mpeg'
     || file.bytes.length === 0
-    || !latestSpeechText
+    || !text
   ) {
     throw new ProviderRequestError(422, 'invalid transcription request')
   }
-  return latestSpeechText
+  return { text, duration: speechTexts.length }
 }
 
 function isCjk(character: string): boolean {
@@ -486,19 +587,19 @@ function transcriptTokens(text: string): string[] {
   return tokens
 }
 
-function verboseTranscription(text: string) {
+function verboseTranscription(text: string, duration: number) {
   const words = transcriptTokens(text)
-  if (!words.length) {
+  if (!words.length || !Number.isFinite(duration) || duration <= 0) {
     throw new ProviderRequestError(422, 'speech text has no tokens')
   }
   return {
     text,
     language: 'zh',
-    duration: 1,
+    duration,
     words: words.map((word, index) => ({
       word,
-      start: index / words.length,
-      end: (index + 1) / words.length,
+      start: duration * index / words.length,
+      end: duration * (index + 1) / words.length,
     })),
   }
 }
@@ -518,7 +619,7 @@ export async function startTextVideoProviderServer(
     transcription: 0,
   }
   const requestSummaries: ProviderRequestSummary[] = []
-  let latestSpeechText = ''
+  const speechTexts: string[] = []
 
   const server = createServer(async (request, response) => {
     try {
@@ -547,14 +648,17 @@ export async function startTextVideoProviderServer(
           bodyBytes,
           request.headers['content-type'],
         )
-        const text = transcriptionText(parts, latestSpeechText)
+        const transcription = transcriptionText(parts, speechTexts)
         callCounts.transcription += 1
         requestSummaries.push({
           kind: 'transcription',
           model: E2E_TRANSCRIPTION_MODEL,
           bytes: parts.find(part => part.name === 'file')?.bytes.length,
         })
-        json(response, 200, verboseTranscription(text), {
+        json(response, 200, verboseTranscription(
+          transcription.text,
+          transcription.duration,
+        ), {
           'X-Request-Id': `e2e-transcription-request-${callCounts.transcription}`,
         })
         return
@@ -567,13 +671,13 @@ export async function startTextVideoProviderServer(
       if ('audio' in body) {
         const text = validateSpeechRequest(body)
         callCounts.speech += 1
-        latestSpeechText = text
+        speechTexts.push(text)
         requestSummaries.push({
           kind: 'speech',
           model: E2E_SPEECH_MODEL,
           text,
         })
-        await options.ttsLatch?.holdObservedRequest()
+        await options.ttsLatch?.holdObservedRequest(text)
         const audio = pcmWav().toString('base64')
         json(response, 200, {
           id: `e2e-speech-request-${callCounts.speech}`,
@@ -598,7 +702,7 @@ export async function startTextVideoProviderServer(
         })
         json(response, 200, chatCompletion(
           E2E_LLM_MODEL,
-          { boundaries: [] },
+          { boundaries: splitBoundaries(prompt) },
           `e2e-split-request-${callCounts.split}`,
         ))
         return
