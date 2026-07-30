@@ -21,6 +21,12 @@ DEFAULT_RENDER_INPUT = {
         "background": "dark-grid",
         "transition": "soft-push",
         "textDensity": "standard",
+        "brandTitle": "EDIORA",
+        "brandSubtitle": "述策",
+        "showBrand": True,
+        "accentColor": "#69F6FF",
+        "showProgress": True,
+        "showSceneNumber": True,
     },
 }
 

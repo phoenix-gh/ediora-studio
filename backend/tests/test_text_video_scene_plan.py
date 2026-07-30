@@ -50,11 +50,23 @@ def test_template_manifest_is_versioned_json_safe_and_fails_closed():
         "animations": ["fade-up", "scale"],
         "transitions": ["soft-push"],
         "template_props": {
-            "theme": ["tech-blue"],
-            "font": ["source-han-sans"],
-            "background": ["dark-grid"],
-            "transition": ["soft-push"],
-            "textDensity": ["compact", "standard", "spacious"],
+            "theme": {"type": "literal", "value": "tech-blue"},
+            "font": {"type": "literal", "value": "source-han-sans"},
+            "background": {
+                "type": "enum",
+                "values": ["dark-grid", "deep-space", "clean-gradient"],
+            },
+            "transition": {"type": "literal", "value": "soft-push"},
+            "textDensity": {
+                "type": "enum",
+                "values": ["compact", "standard", "spacious"],
+            },
+            "brandTitle": {"type": "string", "maxLength": 32},
+            "brandSubtitle": {"type": "string", "maxLength": 32},
+            "showBrand": {"type": "boolean"},
+            "accentColor": {"type": "color"},
+            "showProgress": {"type": "boolean"},
+            "showSceneNumber": {"type": "boolean"},
         },
         "defaults": {
             "theme": "tech-blue",
@@ -62,6 +74,12 @@ def test_template_manifest_is_versioned_json_safe_and_fails_closed():
             "background": "dark-grid",
             "transition": "soft-push",
             "textDensity": "standard",
+            "brandTitle": "EDIORA",
+            "brandSubtitle": "述策",
+            "showBrand": True,
+            "accentColor": "#69F6FF",
+            "showProgress": True,
+            "showSceneNumber": True,
         },
     }
     with pytest.raises(ValueError, match=r"tech-text-v1@2"):
@@ -79,7 +97,9 @@ def test_template_configuration_does_not_assume_a_transition_prop():
         "aspect_ratios": ["16:9"],
         "animations": ["fade-up"],
         "transitions": ["crossfade"],
-        "template_props": {"color": ["cyan", "violet"]},
+        "template_props": {
+            "color": {"type": "enum", "values": ["cyan", "violet"]},
+        },
         "defaults": {"color": "cyan"},
     }
 
@@ -91,6 +111,24 @@ def test_template_configuration_does_not_assume_a_transition_prop():
         {"width": 1920, "height": 1080, "fps": 24},
         {"color": "cyan"},
     )
+
+
+def test_template_configuration_fills_legacy_template_props_with_defaults():
+    composition, template_props = validate_template_configuration(
+        manifest=MANIFEST,
+        composition=MANIFEST["default_composition"],
+        template_props={
+            "theme": "tech-blue",
+            "font": "source-han-sans",
+            "background": "dark-grid",
+            "transition": "soft-push",
+            "textDensity": "standard",
+        },
+    )
+
+    assert composition == MANIFEST["default_composition"]
+    assert template_props["brandTitle"] == "EDIORA"
+    assert template_props["showSceneNumber"] is True
 
 
 def test_scene_word_partition_resolves_to_continuous_master_seconds():

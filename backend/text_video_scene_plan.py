@@ -4,7 +4,10 @@ from copy import deepcopy
 import math
 from typing import Any
 
-from text_video_templates import get_text_video_template
+from text_video_templates import (
+    get_text_video_template,
+    normalize_text_video_template_props,
+)
 
 
 CONTINUITY_EPSILON_SECONDS = 0.001
@@ -147,16 +150,12 @@ def validate_template_configuration(
     if ratio not in manifest["aspect_ratios"]:
         raise ValueError("当前模板不支持该画面比例")
 
-    capabilities = manifest["template_props"]
-    if not isinstance(template_props, dict) or set(template_props) != set(
-        capabilities,
-    ):
-        raise ValueError("模板参数字段必须与版本化清单完全一致")
-    for key, allowed_values in capabilities.items():
-        value = template_props.get(key)
-        if not isinstance(value, str) or value not in allowed_values:
-            raise ValueError(f"当前模板不支持参数 {key}={value}")
-    return deepcopy(composition), deepcopy(template_props)
+    template_props = normalize_text_video_template_props(
+        manifest,
+        template_props,
+        fill_missing=True,
+    )
+    return deepcopy(composition), template_props
 
 
 def validate_scene_partition(
