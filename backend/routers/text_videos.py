@@ -47,6 +47,7 @@ from job_queue import enqueue_job
 from log_redaction import redact_secret_text
 from models import (
     ContentJob,
+    ContentJobStep,
     CreativeAsset,
     TextVideoProject,
     TextVideoSpeechAsset,
@@ -60,7 +61,17 @@ from text_video_domain import (
     normalize_speech_segments,
     video_stage_ready,
 )
-from text_video_scene_plan import CONTINUITY_EPSILON_SECONDS
+from text_video_scene_plan import (
+    CONTINUITY_EPSILON_SECONDS,
+    canonicalize_scene_generation_proposal,
+    resolve_scene_seconds,
+    validate_canonical_scene_result,
+    validate_render_input_projection,
+    validate_scene_partition,
+    validate_template_configuration,
+    validate_word_timeline,
+)
+from text_video_templates import get_text_video_template
 from text_video_jobs import (
     StaleTextVideoJob,
     assert_current_speech_job,
@@ -238,6 +249,43 @@ class ScenePlanEdit(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     scenes: list[ScenePlanSceneEdit]
+
+
+class ScenePlanGenerateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    revision: StrictInt = Field(ge=1)
+    scope: Literal["all", "selected"] = "all"
+    selected_scene_id: str = Field(default="", max_length=200)
+    direction: str = Field(default="", max_length=1_000)
+
+    @model_validator(mode="after")
+    def validate_selected_scene(self):
+        if self.scope == "selected" and not self.selected_scene_id.strip():
+            raise ValueError("选中分镜生成必须指定目标分镜")
+        if self.scope == "all" and self.selected_scene_id:
+            raise ValueError("全量分镜生成不能指定目标分镜")
+        return self
+
+
+class ScenePlanWorkerProposalRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    scenes: list[ScenePlanSceneEdit] = Field(min_length=1)
+
+
+class ScenePlanWorkerResultRequest(ScenePlanWorkerProposalRequest):
+    validation_token: str = Field(
+        min_length=64,
+        max_length=64,
+        pattern=r"^[a-fA-F0-9]{64}$",
+    )
+
+
+class ScenePlanWorkerFailureRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    error: str = Field(min_length=1, max_length=500)
 
 
 class ProjectCreate(BaseModel):
@@ -568,6 +616,818 @@ def _stale_conflict(error: Exception) -> HTTPException:
         detail=str(error),
         headers={"X-WMS-Retryable": "false"},
     )
+
+
+class StaleScenePlanJob(ValueError):
+    pass
+
+
+def _canonical_digest(value: Any) -> str:
+    canonical = json.dumps(
+        value,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _scene_plan_document(project: TextVideoProject) -> dict[str, Any]:
+    return empty_scene_plan() | deepcopy(project.scene_plan or {})
+
+
+def _scene_master_snapshot(project: TextVideoProject) -> dict[str, Any]:
+    master = empty_master_audio() | deepcopy(project.master_audio or {})
+    if (
+        master.get("status") != "ready"
+        or master.get("timeline_status") != "ready"
+        or not isinstance(master.get("source_hash"), str)
+        or len(master["source_hash"]) != 64
+        or not master.get("audio_url")
+    ):
+        raise ValueError("AI 分镜需要已就绪的当前主音频时间轴")
+    words = validate_word_timeline(
+        master.get("word_timings"),
+        master.get("duration"),
+    )
+    master["word_timings"] = words
+    return master
+
+
+def _scene_template_snapshot(
+    project: TextVideoProject,
+) -> tuple[dict, dict, dict, str, str]:
+    render_input = deepcopy(project.render_input or {})
+    template_id = render_input.get("templateId")
+    template_version = render_input.get("templateVersion")
+    manifest = get_text_video_template(template_id, template_version)
+    composition, template_props = validate_template_configuration(
+        manifest=manifest,
+        composition=render_input.get("composition"),
+        template_props=render_input.get("templateProps"),
+    )
+    manifest_digest = _canonical_digest(manifest)
+    visual_fingerprint = _canonical_digest({
+        "template_id": manifest["id"],
+        "template_version": manifest["version"],
+        "composition": composition,
+        "template_props": template_props,
+    })
+    return (
+        manifest,
+        composition,
+        template_props,
+        manifest_digest,
+        visual_fingerprint,
+    )
+
+
+def _scene_timeline_fingerprint(master: dict[str, Any]) -> str:
+    return _canonical_digest({
+        "source_hash": master["source_hash"],
+        "duration": master["duration"],
+        "words": master["word_timings"],
+    })
+
+
+def _scene_speech_boundaries(words: list[dict]) -> list[dict[str, str]]:
+    boundaries: list[dict[str, str]] = []
+    closed: set[str] = set()
+    for word in words:
+        segment_id = word.get("speech_segment_id")
+        if not isinstance(segment_id, str) or not segment_id:
+            raise ValueError("主音频词时间轴缺少口播段归属")
+        if not boundaries or boundaries[-1]["id"] != segment_id:
+            if segment_id in closed:
+                raise ValueError("主音频词时间轴的口播段必须连续")
+            if boundaries:
+                closed.add(boundaries[-1]["id"])
+            boundaries.append({
+                "id": segment_id,
+                "fromWordId": word["id"],
+                "throughWordId": word["id"],
+            })
+        else:
+            boundaries[-1]["throughWordId"] = word["id"]
+    return boundaries
+
+
+def _scene_request_hash(snapshot: dict[str, Any]) -> str:
+    return _canonical_digest({
+        "master_source_hash": snapshot["master_source_hash"],
+        "timeline_fingerprint": snapshot["timeline_fingerprint"],
+        "scene_generation_revision": snapshot[
+            "scene_generation_revision"
+        ],
+        "template_id": snapshot["template_id"],
+        "template_version": snapshot["template_version"],
+        "manifest_digest": snapshot["manifest_digest"],
+        "visual_selection_fingerprint": snapshot[
+            "visual_selection_fingerprint"
+        ],
+        "existing_scenes_digest": snapshot["existing_scenes_digest"],
+        "scope": snapshot["scope"],
+        "selected_scene_id": snapshot["selected_scene_id"],
+        "direction": snapshot["direction"],
+    })
+
+
+def _freeze_scene_job_input(
+    project: TextVideoProject,
+    payload: ScenePlanGenerateRequest,
+) -> dict[str, Any]:
+    master = _scene_master_snapshot(project)
+    (
+        manifest,
+        composition,
+        template_props,
+        manifest_digest,
+        visual_fingerprint,
+    ) = _scene_template_snapshot(project)
+    plan = _scene_plan_document(project)
+    existing_scenes = deepcopy(plan["scenes"])
+    if payload.scope == "selected":
+        if (
+            plan["status"] != "ready"
+            or plan["master_source_hash"] != master["source_hash"]
+        ):
+            raise ValueError("选中分镜生成需要当前有效的完整分镜计划")
+        validate_scene_partition(
+            existing_scenes,
+            master["word_timings"],
+            manifest,
+        )
+        if not any(
+            scene["id"] == payload.selected_scene_id
+            for scene in existing_scenes
+        ):
+            raise ValueError("目标分镜不存在")
+    snapshot: dict[str, Any] = {
+        "project_id": project.id,
+        "project_revision": project.revision,
+        "master_source_hash": master["source_hash"],
+        "timeline_fingerprint": _scene_timeline_fingerprint(master),
+        "scene_generation_revision": int(
+            plan["generation_revision"] or 0,
+        ),
+        "script": str(project.script or ""),
+        "words": deepcopy(master["word_timings"]),
+        "speech_segments": _scene_speech_boundaries(
+            master["word_timings"],
+        ),
+        "template_id": manifest["id"],
+        "template_version": manifest["version"],
+        "template": {
+            "id": manifest["id"],
+            "version": manifest["version"],
+            "animations": deepcopy(manifest["animations"]),
+            "transitions": deepcopy(manifest["transitions"]),
+        },
+        "composition": composition,
+        "template_props": template_props,
+        "manifest_digest": manifest_digest,
+        "visual_selection_fingerprint": visual_fingerprint,
+        "existing_scenes": existing_scenes,
+        "existing_scenes_digest": _canonical_digest(existing_scenes),
+        "scope": payload.scope,
+        "selected_scene_id": payload.selected_scene_id,
+        "direction": payload.direction,
+    }
+    snapshot["request_hash"] = _scene_request_hash(snapshot)
+    snapshot["idempotency_key"] = (
+        f"text-video-scene:{project.id}:{snapshot['request_hash']}"
+    )
+    if len(snapshot["idempotency_key"]) > 128:
+        raise ValueError("AI 分镜任务唯一键过长")
+    return snapshot
+
+
+def _scene_job_payload(job: ContentJob, project_id: int) -> dict:
+    return {
+        "id": job.id,
+        "flow": job.flow,
+        "target_id": project_id,
+    }
+
+
+def _scene_current_job_statement(job_id: int):
+    """Read the job after locking the project; never invert worker lock order."""
+    return select(ContentJob).where(ContentJob.id == job_id)
+
+
+def _validate_scene_job(
+    job: ContentJob | None,
+    *,
+    project_id: int,
+) -> dict[str, Any]:
+    if (
+        job is None
+        or job.flow != "text_video_scene_plan"
+    ):
+        raise StaleScenePlanJob("AI 分镜任务快照无效")
+    snapshot = job.input_data
+    if not isinstance(snapshot, dict):
+        raise StaleScenePlanJob("AI 分镜任务快照无效")
+    try:
+        expected_hash = _scene_request_hash(snapshot)
+    except (KeyError, TypeError, ValueError, OverflowError) as error:
+        raise StaleScenePlanJob("AI 分镜任务快照无效") from error
+    request_hash = snapshot.get("request_hash")
+    if (
+        snapshot.get("project_id") != project_id
+        or request_hash != expected_hash
+        or snapshot.get("idempotency_key")
+        != f"text-video-scene:{project_id}:{request_hash}"
+    ):
+        raise StaleScenePlanJob("AI 分镜任务快照无效")
+    if job.status != "running":
+        raise StaleScenePlanJob("AI 分镜任务已不再运行")
+    return snapshot
+
+
+def _validate_scene_claim_values(
+    step_id: int,
+    attempt: int,
+    claim_token: str,
+) -> None:
+    if (
+        isinstance(step_id, bool)
+        or step_id <= 0
+        or isinstance(attempt, bool)
+        or attempt <= 0
+        or not isinstance(claim_token, str)
+        or not 16 <= len(claim_token) <= 128
+    ):
+        raise StaleScenePlanJob("AI 分镜步骤 claim 无效")
+
+
+async def _require_scene_claim(
+    db: AsyncSession,
+    *,
+    job_id: int,
+    project_id: int,
+    step_id: int,
+    attempt: int,
+    claim_token: str,
+    acquire: bool,
+) -> tuple[ContentJob, ContentJobStep, dict[str, Any]]:
+    _validate_scene_claim_values(step_id, attempt, claim_token)
+    job = await db.scalar(
+        select(ContentJob)
+        .where(ContentJob.id == job_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    snapshot = _validate_scene_job(job, project_id=project_id)
+    step = await db.scalar(
+        select(ContentJobStep)
+        .where(
+            ContentJobStep.id == step_id,
+            ContentJobStep.job_id == job_id,
+            ContentJobStep.step_key == "generate_scene_plan",
+        )
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    latest = await db.scalar(
+        select(ContentJobStep)
+        .where(
+            ContentJobStep.job_id == job_id,
+            ContentJobStep.step_key == "generate_scene_plan",
+        )
+        .order_by(
+            ContentJobStep.attempt.desc(),
+            ContentJobStep.id.desc(),
+        )
+    )
+    if (
+        step is None
+        or latest is None
+        or latest.id != step.id
+        or step.attempt != attempt
+        or step.status != "running"
+    ):
+        raise StaleScenePlanJob("AI 分镜步骤已失效")
+    output = deepcopy(step.output_data or {})
+    frozen_claim = output.get("_scene_claim")
+    requested_claim = {
+        "step_id": step_id,
+        "attempt": attempt,
+        "claim_token": claim_token,
+    }
+    if frozen_claim is None and acquire:
+        step.output_data = {
+            **output,
+            "_scene_claim": requested_claim,
+        }
+    elif frozen_claim != requested_claim:
+        raise StaleScenePlanJob("AI 分镜步骤已被其他 worker 领取")
+    return job, step, snapshot
+
+
+def _assert_scene_snapshot_current(
+    project: TextVideoProject,
+    job: ContentJob,
+    snapshot: dict[str, Any],
+) -> tuple[dict, dict, dict, dict]:
+    plan = _scene_plan_document(project)
+    master = _scene_master_snapshot(project)
+    (
+        manifest,
+        composition,
+        template_props,
+        manifest_digest,
+        visual_fingerprint,
+    ) = _scene_template_snapshot(project)
+    if (
+        plan["status"] != "generating"
+        or plan["job_id"] != job.id
+        or int(plan["generation_revision"] or 0)
+        != snapshot["scene_generation_revision"]
+        or plan["scenes"] != snapshot["existing_scenes"]
+        or _canonical_digest(plan["scenes"])
+        != snapshot["existing_scenes_digest"]
+        or master["source_hash"] != snapshot["master_source_hash"]
+        or master["word_timings"] != snapshot["words"]
+        or _scene_timeline_fingerprint(master)
+        != snapshot["timeline_fingerprint"]
+        or manifest["id"] != snapshot["template_id"]
+        or manifest["version"] != snapshot["template_version"]
+        or manifest_digest != snapshot["manifest_digest"]
+        or visual_fingerprint
+        != snapshot["visual_selection_fingerprint"]
+    ):
+        raise StaleScenePlanJob("AI 分镜任务快照已更新")
+    return master, manifest, composition, template_props
+
+
+def _scene_render_input(
+    project: TextVideoProject,
+    *,
+    scenes: list[dict],
+    master: dict,
+    manifest: dict,
+    composition: dict,
+    template_props: dict,
+) -> dict:
+    segments = resolve_scene_seconds(
+        proposals=scenes,
+        words=master["word_timings"],
+        master_duration=master["duration"],
+        manifest=manifest,
+    )
+    return validate_render_input_projection(
+        {
+            "templateId": manifest["id"],
+            "templateVersion": manifest["version"],
+            "composition": composition,
+            "audio": master["audio_url"],
+            "segments": segments,
+            "templateProps": template_props,
+        },
+        master_duration=master["duration"],
+    )
+
+
+def _scene_result_already_applied(
+    project: TextVideoProject,
+    job: ContentJob,
+    snapshot: dict[str, Any],
+) -> bool:
+    try:
+        plan = _scene_plan_document(project)
+        master = _scene_master_snapshot(project)
+        (
+            manifest,
+            composition,
+            template_props,
+            manifest_digest,
+            visual_fingerprint,
+        ) = _scene_template_snapshot(project)
+        if not (
+            plan["status"] == "ready"
+            and plan["job_id"] is None
+            and plan["applied_job_id"] == job.id
+            and plan["generation_revision"]
+            == snapshot["scene_generation_revision"] + 1
+            and plan["master_source_hash"]
+            == snapshot["master_source_hash"]
+            and _scene_timeline_fingerprint(master)
+            == snapshot["timeline_fingerprint"]
+            and manifest_digest == snapshot["manifest_digest"]
+            and visual_fingerprint
+            == snapshot["visual_selection_fingerprint"]
+        ):
+            return False
+        expected = _scene_render_input(
+            project,
+            scenes=plan["scenes"],
+            master=master,
+            manifest=manifest,
+            composition=composition,
+            template_props=template_props,
+        )
+        return deepcopy(project.render_input or {}) == expected
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return False
+
+
+def _scene_context(snapshot: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: deepcopy(snapshot[key])
+        for key in (
+            "project_id",
+            "master_source_hash",
+            "timeline_fingerprint",
+            "scene_generation_revision",
+            "script",
+            "words",
+            "speech_segments",
+            "template",
+            "existing_scenes",
+            "scope",
+            "selected_scene_id",
+            "direction",
+        )
+    }
+
+
+def _scene_validation_token(
+    *,
+    job: ContentJob,
+    step: ContentJobStep,
+    claim_token: str,
+    scenes: list[dict],
+) -> str:
+    return _canonical_digest({
+        "job_id": job.id,
+        "request_hash": job.input_data["request_hash"],
+        "step_id": step.id,
+        "attempt": step.attempt,
+        "claim_token": claim_token,
+        "scenes": scenes,
+    })
+
+
+def _scene_validation_error(error: Exception) -> HTTPException:
+    message = str(error)
+    return HTTPException(
+        status_code=422,
+        detail={"message": message, "errors": [message]},
+        headers={"X-WMS-Retryable": "false"},
+    )
+
+
+@router.post(
+    "/{project_id}/scene-plan/generate",
+    status_code=status.HTTP_201_CREATED,
+)
+async def generate_scene_plan(
+    project_id: int,
+    payload: ScenePlanGenerateRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    project = await db.scalar(
+        select(TextVideoProject)
+        .where(TextVideoProject.id == project_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if project is None:
+        raise HTTPException(404, "文字视频作品不存在")
+    if project.revision != payload.revision:
+        raise HTTPException(
+            409,
+            {
+                "message": "作品已在其他页面更新",
+                "revision": project.revision,
+            },
+        )
+    try:
+        snapshot = _freeze_scene_job_input(project, payload)
+    except ValueError as error:
+        raise HTTPException(422, str(error)) from error
+    current_plan = _scene_plan_document(project)
+    current_job_id = current_plan.get("job_id")
+    current_job = (
+        await db.scalar(
+            _scene_current_job_statement(current_job_id)
+            .execution_options(populate_existing=True)
+        )
+        if (
+            isinstance(current_job_id, int)
+            and not isinstance(current_job_id, bool)
+        )
+        else None
+    )
+    if (
+        current_plan["status"] == "generating"
+        and current_job is not None
+        and current_job.flow == "text_video_scene_plan"
+        and current_job.status in {"queued", "running"}
+        and isinstance(current_job.input_data, dict)
+    ):
+        if (
+            current_job.input_data.get("idempotency_key")
+            != snapshot["idempotency_key"]
+        ):
+            raise HTTPException(
+                409,
+                "已有不同的 AI 分镜任务正在运行，请先等待或取消",
+                headers={"X-WMS-Retryable": "false"},
+            )
+        job = current_job
+    else:
+        job = await create_or_get_job(
+            db,
+            flow="text_video_scene_plan",
+            title=f"生成文字视频分镜 · {project.title}",
+            input_data=snapshot,
+            idempotency_key=snapshot["idempotency_key"],
+            commit=False,
+        )
+    if job.status in {"queued", "running"}:
+        plan = _scene_plan_document(project)
+        plan.update({
+            "status": "generating",
+            "job_id": job.id,
+            "error": "",
+        })
+        project.scene_plan = plan
+    await db.commit()
+    await db.refresh(project)
+    await db.refresh(job)
+    if job.status == "queued":
+        await enqueue_job(job.id)
+    return {
+        "jobs": [_scene_job_payload(job, project_id)],
+        "project": serialize_project(project),
+    }
+
+
+@router.get(
+    "/{project_id}/scene-plan/worker-context",
+    dependencies=[Depends(require_worker_token)],
+)
+async def get_scene_plan_worker_context(
+    project_id: int,
+    job_id: int = Header(alias="X-Content-Job-Id"),
+    step_id: int = Header(alias="X-Content-Step-Id"),
+    attempt: int = Header(alias="X-Content-Step-Attempt"),
+    claim_token: str = Header(alias="X-Content-Step-Claim"),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        job, _, snapshot = await _require_scene_claim(
+            db,
+            job_id=job_id,
+            project_id=project_id,
+            step_id=step_id,
+            attempt=attempt,
+            claim_token=claim_token,
+            acquire=True,
+        )
+        project = await db.scalar(
+            select(TextVideoProject)
+            .where(TextVideoProject.id == project_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        if project is None:
+            raise StaleScenePlanJob("文字视频作品不存在")
+        if _scene_result_already_applied(project, job, snapshot):
+            await db.commit()
+            return {"already_saved": serialize_project(project)}
+        _assert_scene_snapshot_current(project, job, snapshot)
+        await db.commit()
+        return _scene_context(snapshot)
+    except StaleScenePlanJob as error:
+        await db.rollback()
+        raise _stale_conflict(error) from error
+    except ValueError as error:
+        await db.rollback()
+        raise _scene_validation_error(error) from error
+
+
+@router.post(
+    "/{project_id}/scene-plan/worker-validate",
+    dependencies=[Depends(require_worker_token)],
+)
+async def validate_scene_plan_worker_result(
+    project_id: int,
+    payload: ScenePlanWorkerProposalRequest,
+    job_id: int = Header(alias="X-Content-Job-Id"),
+    step_id: int = Header(alias="X-Content-Step-Id"),
+    attempt: int = Header(alias="X-Content-Step-Attempt"),
+    claim_token: str = Header(alias="X-Content-Step-Claim"),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        job, step, snapshot = await _require_scene_claim(
+            db,
+            job_id=job_id,
+            project_id=project_id,
+            step_id=step_id,
+            attempt=attempt,
+            claim_token=claim_token,
+            acquire=False,
+        )
+        project = await db.scalar(
+            select(TextVideoProject)
+            .where(TextVideoProject.id == project_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        if project is None:
+            raise StaleScenePlanJob("文字视频作品不存在")
+        master, manifest, composition, template_props = (
+            _assert_scene_snapshot_current(
+                project,
+                job,
+                snapshot,
+            )
+        )
+        scenes = canonicalize_scene_generation_proposal(
+            proposals=[
+                item.model_dump(mode="json")
+                for item in payload.scenes
+            ],
+            words=snapshot["words"],
+            manifest=manifest,
+            scope=snapshot["scope"],
+            selected_scene_id=snapshot["selected_scene_id"],
+            existing_scenes=snapshot["existing_scenes"],
+        )
+        _scene_render_input(
+            project,
+            scenes=scenes,
+            master=master,
+            manifest=manifest,
+            composition=composition,
+            template_props=template_props,
+        )
+        return {
+            "scenes": scenes,
+            "validation_token": _scene_validation_token(
+                job=job,
+                step=step,
+                claim_token=claim_token,
+                scenes=scenes,
+            ),
+        }
+    except StaleScenePlanJob as error:
+        await db.rollback()
+        raise _stale_conflict(error) from error
+    except ValueError as error:
+        await db.rollback()
+        raise _scene_validation_error(error) from error
+
+
+@router.post(
+    "/{project_id}/scene-plan/worker-result",
+    dependencies=[Depends(require_worker_token)],
+)
+async def save_scene_plan_worker_result(
+    project_id: int,
+    payload: ScenePlanWorkerResultRequest,
+    job_id: int = Header(alias="X-Content-Job-Id"),
+    step_id: int = Header(alias="X-Content-Step-Id"),
+    attempt: int = Header(alias="X-Content-Step-Attempt"),
+    claim_token: str = Header(alias="X-Content-Step-Claim"),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        job, step, snapshot = await _require_scene_claim(
+            db,
+            job_id=job_id,
+            project_id=project_id,
+            step_id=step_id,
+            attempt=attempt,
+            claim_token=claim_token,
+            acquire=False,
+        )
+        raw_scenes = [
+            item.model_dump(mode="json")
+            for item in payload.scenes
+        ]
+        expected_token = _scene_validation_token(
+            job=job,
+            step=step,
+            claim_token=claim_token,
+            scenes=raw_scenes,
+        )
+        if payload.validation_token != expected_token:
+            raise StaleScenePlanJob("AI 分镜校验凭证不匹配")
+        project = await db.scalar(
+            select(TextVideoProject)
+            .where(TextVideoProject.id == project_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        if project is None:
+            raise StaleScenePlanJob("文字视频作品不存在")
+        if _scene_result_already_applied(project, job, snapshot):
+            return serialize_project(project)
+        master, manifest, composition, template_props = (
+            _assert_scene_snapshot_current(project, job, snapshot)
+        )
+        scenes = validate_canonical_scene_result(
+            proposals=raw_scenes,
+            words=snapshot["words"],
+            manifest=manifest,
+            scope=snapshot["scope"],
+            selected_scene_id=snapshot["selected_scene_id"],
+            existing_scenes=snapshot["existing_scenes"],
+        )
+        render_input = _scene_render_input(
+            project,
+            scenes=scenes,
+            master=master,
+            manifest=manifest,
+            composition=composition,
+            template_props=template_props,
+        )
+        project.scene_plan = {
+            "status": "ready",
+            "generation_revision": (
+                snapshot["scene_generation_revision"] + 1
+            ),
+            "master_source_hash": master["source_hash"],
+            "scenes": scenes,
+            "job_id": None,
+            "applied_job_id": job.id,
+            "error": "",
+        }
+        project.render_input = render_input
+        await db.commit()
+        await db.refresh(project)
+        return serialize_project(project)
+    except StaleScenePlanJob as error:
+        await db.rollback()
+        raise _stale_conflict(error) from error
+    except ValueError as error:
+        await db.rollback()
+        raise _scene_validation_error(error) from error
+
+
+@router.post(
+    "/{project_id}/scene-plan/worker-failure",
+    dependencies=[Depends(require_worker_token)],
+)
+async def save_scene_plan_worker_failure(
+    project_id: int,
+    payload: ScenePlanWorkerFailureRequest,
+    job_id: int = Header(alias="X-Content-Job-Id"),
+    step_id: int = Header(alias="X-Content-Step-Id"),
+    attempt: int = Header(alias="X-Content-Step-Attempt"),
+    claim_token: str = Header(alias="X-Content-Step-Claim"),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        job, _, snapshot = await _require_scene_claim(
+            db,
+            job_id=job_id,
+            project_id=project_id,
+            step_id=step_id,
+            attempt=attempt,
+            claim_token=claim_token,
+            acquire=False,
+        )
+        project = await db.scalar(
+            select(TextVideoProject)
+            .where(TextVideoProject.id == project_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        if project is None:
+            raise StaleScenePlanJob("文字视频作品不存在")
+        plan = _scene_plan_document(project)
+        error_text = redact_secret_text(payload.error)[:500]
+        if (
+            plan["status"] == "failed"
+            and plan["job_id"] == job.id
+            and plan["generation_revision"]
+            == snapshot["scene_generation_revision"]
+            and plan["scenes"] == snapshot["existing_scenes"]
+            and plan["error"] == error_text
+        ):
+            return serialize_project(project)
+        _assert_scene_snapshot_current(project, job, snapshot)
+        plan.update({
+            "status": "failed",
+            "job_id": job.id,
+            "error": error_text,
+        })
+        project.scene_plan = plan
+        await db.commit()
+        await db.refresh(project)
+        return serialize_project(project)
+    except StaleScenePlanJob as error:
+        await db.rollback()
+        raise _stale_conflict(error) from error
+    except ValueError as error:
+        await db.rollback()
+        raise _scene_validation_error(error) from error
 
 
 async def _speech_runtime() -> dict:

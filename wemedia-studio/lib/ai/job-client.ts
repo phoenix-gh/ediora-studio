@@ -33,16 +33,22 @@ export type DurableJob = {
 export class ApiRequestError extends Error {
   retryable: boolean
   responseReceived: boolean
+  status?: number
+  detail: unknown
 
   constructor(
     message: string,
     retryable: boolean,
     responseReceived = false,
+    status?: number,
+    detail: unknown = '',
   ) {
     super(message)
     this.name = 'ApiRequestError'
     this.retryable = retryable
     this.responseReceived = responseReceived
+    this.status = status
+    this.detail = detail
   }
 }
 
@@ -57,16 +63,29 @@ async function jsonRequest<T>(path: string, init?: RequestInit): Promise<T> {
     cache: init?.cache ?? 'no-store',
   })
   if (!response.ok) {
-    let detail = ''
-    try { detail = (await response.json() as { detail?: string }).detail ?? '' } catch { /* no JSON body */ }
+    let detail: unknown = ''
+    try {
+      detail = (await response.json() as { detail?: unknown }).detail ?? ''
+    } catch {
+      // Preserve an empty structured detail for non-JSON failures.
+    }
+    const message = typeof detail === 'string'
+      ? detail
+      : detail
+        && typeof detail === 'object'
+        && 'message' in detail
+        ? String(detail.message)
+        : ''
     const retryableHeader = response.headers.get('X-WMS-Retryable')
     const retryable = retryableHeader === null
       ? true
       : retryableHeader.toLowerCase() === 'true'
     throw new ApiRequestError(
-      detail || `${path} failed (${response.status})`,
+      message || `${path} failed (${response.status})`,
       retryable,
       true,
+      response.status,
+      detail,
     )
   }
   if (response.status === 204) return undefined as T

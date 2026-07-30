@@ -62,6 +62,7 @@ def empty_scene_plan() -> dict:
         "master_source_hash": "",
         "scenes": [],
         "job_id": None,
+        "applied_job_id": None,
         "error": "",
     }
 
@@ -361,6 +362,7 @@ def _apply_visual_edits(
         "master_source_hash": master["source_hash"],
         "scenes": validated_scenes,
         "job_id": None,
+        "applied_job_id": None,
         "error": "",
     }
     project.render_input = render_input

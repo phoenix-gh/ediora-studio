@@ -79,6 +79,7 @@ export type ScenePlanDocument = {
   master_source_hash: string
   scenes: ScenePlanSceneDocument[]
   job_id: number | null
+  applied_job_id: number | null
   error: string
 }
 
@@ -167,6 +168,24 @@ export type TextVideoMasterJob = {
 export type TextVideoMasterResponse = {
   jobs: TextVideoMasterJob[]
   project: TextVideoProject
+}
+
+export type TextVideoSceneJob = {
+  id: number
+  flow: 'text_video_scene_plan'
+  target_id: number
+}
+
+export type TextVideoSceneResponse = {
+  jobs: TextVideoSceneJob[]
+  project: TextVideoProject
+}
+
+export type TextVideoSceneGenerateInput = {
+  revision: number
+  scope: 'all' | 'selected'
+  selected_scene_id: string
+  direction: string
 }
 
 export class TextVideoApiError extends Error {
@@ -287,5 +306,15 @@ export function buildTextVideoMasterAudio(
   return textVideoRequest<TextVideoMasterResponse>(
     `/text-videos/${projectId}/master-audio/build`,
     { method: 'POST', body: JSON.stringify({ revision }) },
+  )
+}
+
+export function generateTextVideoScenePlan(
+  projectId: number,
+  input: TextVideoSceneGenerateInput,
+) {
+  return textVideoRequest<TextVideoSceneResponse>(
+    `/text-videos/${projectId}/scene-plan/generate`,
+    { method: 'POST', body: JSON.stringify(input) },
   )
 }

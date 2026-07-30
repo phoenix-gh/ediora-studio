@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   createTextVideoProject,
   deleteTextVideoProject,
+  generateTextVideoScenePlan,
   listTextVideoProjects,
   updateTextVideoProject,
 } from './text-videos'
@@ -66,5 +67,40 @@ describe('text-video project API', () => {
       scenes: [],
       applied_job_id: null,
     }))
+  })
+
+  it('launches AI scene generation with the exact public route contract', async () => {
+    const response = {
+      jobs: [{
+        id: 41,
+        flow: 'text_video_scene_plan',
+        target_id: 7,
+      }],
+      project: { id: 7 },
+    }
+    const fetchMock = vi.fn().mockResolvedValue(new Response(
+      JSON.stringify(response),
+      {
+        status: 201,
+        headers: { 'Content-Type': 'application/json' },
+      },
+    ))
+    vi.stubGlobal('fetch', fetchMock)
+    const input = {
+      revision: 12,
+      scope: 'selected' as const,
+      selected_scene_id: 'scene-2',
+      direction: '更有冲击力',
+    }
+
+    await expect(generateTextVideoScenePlan(7, input))
+      .resolves.toEqual(response)
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringMatching(/\/api\/text-videos\/7\/scene-plan\/generate$/u),
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify(input),
+      }),
+    )
   })
 })
