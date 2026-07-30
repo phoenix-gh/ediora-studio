@@ -17,6 +17,12 @@ from urllib.parse import urlparse
 
 import httpx
 
+from transcription_service import (
+    TranscriptionError,
+    TranscriptionRequest,
+    transcribe_audio,
+)
+
 
 class TranscriptError(RuntimeError):
     def __init__(self, code: str, message: str, *, retryable: bool = False):
@@ -198,33 +204,42 @@ async def run_command(*argv: str, timeout: float = 120) -> str:
     return stdout.decode("utf-8", "replace")
 
 
-async def _transcribe_audio(audio_path: Path, config: dict[str, str]) -> dict[str, Any]:
-    api_key = config.get("transcription_api_key", "").strip()
-    base_url = config.get("transcription_base_url", "").strip().rstrip("/")
-    model = config.get("transcription_model", "").strip() or "whisper-1"
-    if not api_key or not base_url:
-        raise TranscriptError("transcription_failed", "语音转写服务尚未配置")
+async def _transcribe_audio(
+    audio_path: Path,
+    config: dict[str, str],
+    *,
+    duration: float,
+) -> dict[str, Any]:
     try:
-        async with httpx.AsyncClient(timeout=180, follow_redirects=False) as client:
-            with audio_path.open("rb") as handle:
-                response = await client.post(
-                    f"{base_url}/audio/transcriptions",
-                    headers={"Authorization": f"Bearer {api_key}"},
-                    data={"model": model, "response_format": "verbose_json"},
-                    files={"file": (audio_path.name, handle, "audio/mpeg")},
-                )
-            response.raise_for_status()
-            payload = response.json()
-    except (httpx.HTTPError, ValueError) as exc:
-        raise TranscriptError("transcription_failed", "语音转写服务调用失败", retryable=True) from exc
-    segments = [{
-        "start": float(segment.get("start", 0)),
-        "end": float(segment.get("end", 0)),
-        "text": _clean_text(str(segment.get("text") or "")),
-    } for segment in payload.get("segments", []) if str(segment.get("text") or "").strip()]
-    if not segments and payload.get("text"):
-        segments = [{"start": 0.0, "end": 0.0, "text": _clean_text(str(payload["text"]))}]
-    return build_transcript("whisper", str(payload.get("language") or ""), segments)
+        result = await transcribe_audio(
+            TranscriptionRequest(
+                audio_path=audio_path,
+                duration=duration,
+                require_word_timestamps=False,
+            ),
+            config,
+        )
+    except TranscriptionError as exc:
+        raise TranscriptError(
+            "transcription_failed",
+            str(exc),
+            retryable=exc.retryable,
+        ) from exc
+    segments = [
+        {
+            "start": item.start,
+            "end": item.end,
+            "text": _clean_text(item.text),
+        }
+        for item in result.segments
+        if item.text.strip()
+    ]
+    if not segments:
+        raise TranscriptError(
+            "transcription_failed",
+            "语音转写未返回有效分段",
+        )
+    return build_transcript("whisper", result.language, segments)
 
 
 @contextmanager
@@ -270,7 +285,8 @@ async def extract_youtube_transcript(
         except ValueError as exc:
             raise TranscriptError("source_not_found", "无法读取视频信息", retryable=True) from exc
         max_duration = int(config.get("transcription_max_duration_seconds", "7200"))
-        if float(metadata.get("duration") or 0) > max_duration:
+        video_duration = float(metadata.get("duration") or 0)
+        if video_duration > max_duration:
             raise TranscriptError("video_too_long", "视频时长超过转写上限")
         preferred = str(metadata.get("language") or metadata.get("original_language") or "")
         caption = select_caption(
@@ -321,4 +337,8 @@ async def extract_youtube_transcript(
             audio = files[0]
             if audio.stat().st_size > max_bytes:
                 raise TranscriptError("audio_too_large", "压缩音频超过转写上限")
-            return await _transcribe_audio(audio, config)
+            return await _transcribe_audio(
+                audio,
+                config,
+                duration=video_duration,
+            )

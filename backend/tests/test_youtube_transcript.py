@@ -193,7 +193,13 @@ async def test_extract_passes_cookie_file_to_audio_fallback(monkeypatch):
         Path(template.replace("%(ext)s", "mp3")).write_bytes(b"audio")
         return ""
 
-    async def transcribe(_audio: Path, _config: dict[str, str]):
+    async def transcribe(
+        _audio: Path,
+        _config: dict[str, str],
+        *,
+        duration: float,
+    ):
+        assert duration == 7
         return {"source": "whisper", "language": "en", "text": "Audio transcript", "segments": []}
 
     monkeypatch.setattr(youtube_transcript, "_transcribe_audio", transcribe)
@@ -207,6 +213,65 @@ async def test_extract_passes_cookie_file_to_audio_fallback(monkeypatch):
     assert result["source"] == "whisper"
     assert len(commands) == 2
     assert all("--cookies" in command for command in commands)
+
+
+@pytest.mark.asyncio
+async def test_audio_fallback_uses_shared_transcription_segments(monkeypatch):
+    """Catches YouTube bypassing the selected local transcription provider."""
+    import youtube_transcript
+    from transcription_service import (
+        TranscriptSegment,
+        TranscriptionResult,
+    )
+
+    async def command(*argv: str, timeout: float) -> str:
+        if "--dump-single-json" in argv:
+            return json.dumps({
+                "id": "video-id",
+                "duration": 7,
+                "subtitles": {},
+                "automatic_captions": {},
+            })
+        template = argv[argv.index("-o") + 1]
+        Path(template.replace("%(ext)s", "mp3")).write_bytes(b"audio")
+        return ""
+
+    async def transcribe(request, _config):
+        assert request.duration == 7
+        assert request.require_word_timestamps is False
+        return TranscriptionResult(
+            words=(),
+            segments=(
+                TranscriptSegment(
+                    text="本地字幕",
+                    start=0.2,
+                    end=1.4,
+                ),
+            ),
+            text="本地字幕",
+            language="zh",
+            request_id="local-youtube-1",
+        )
+
+    monkeypatch.setattr(
+        youtube_transcript,
+        "transcribe_audio",
+        transcribe,
+        raising=False,
+    )
+
+    result = await youtube_transcript.extract_youtube_transcript(
+        "https://www.youtube.com/watch?v=video-id",
+        {"transcription_provider": "local-whisper"},
+        command=command,
+    )
+
+    assert result["source"] == "whisper"
+    assert result["language"] == "zh"
+    assert result["text"] == "本地字幕"
+    assert result["segments"] == [
+        {"start": 0.2, "end": 1.4, "text": "本地字幕"},
+    ]
 
 
 def test_transcript_result_has_stable_content_hash():
