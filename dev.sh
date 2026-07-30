@@ -429,6 +429,12 @@ service_status() {
   local metadata pid
   metadata="$(metadata_path "$service")"
   if ! dev_owned_identity_matches "$service" "$metadata"; then
+    if [ -e "$metadata" ] \
+      && dev_owned_group_matches_service "$service" "$metadata"; then
+      printf '  %-7s orphaned owned process group remains; run ./dev.sh stop\n' \
+        "$name"
+      return 1
+    fi
     if [ -e "$metadata" ]; then
       rm -f -- "$metadata"
       printf '  %-7s stale ownership metadata removed\n' "$name"
@@ -461,18 +467,22 @@ service_status() {
 }
 
 cmd_status() {
+  local unhealthy=0 redis_metadata
   validate_runtime_ports || return 1
-  if dev_owned_identity_matches redis "$(metadata_path redis)"; then
-    service_status redis Redis redis
+  redis_metadata="$(metadata_path redis)"
+  if dev_owned_identity_matches redis "$redis_metadata" \
+    || dev_owned_group_matches_service redis "$redis_metadata"; then
+    service_status redis Redis redis || unhealthy=1
   elif redis_ping; then
-    [ ! -e "$(metadata_path redis)" ] || rm -f -- "$(metadata_path redis)"
+    [ ! -e "$redis_metadata" ] || rm -f -- "$redis_metadata"
     printf '  Redis   ready (external; not owned)\n'
   else
-    service_status redis Redis redis
+    service_status redis Redis redis || unhealthy=1
   fi
-  service_status api API http "${HOST_API_ROOT}/health"
-  service_status worker Worker worker
-  service_status web Web http "${HOST_WEB_URL}/"
+  service_status api API http "${HOST_API_ROOT}/health" || unhealthy=1
+  service_status worker Worker worker || unhealthy=1
+  service_status web Web http "${HOST_WEB_URL}/" || unhealthy=1
+  return "$unhealthy"
 }
 
 print_log_snapshot() {

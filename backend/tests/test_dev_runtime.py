@@ -870,6 +870,83 @@ def test_stop_kills_marker_owned_group_member_after_leader_exits(
             assert _wait_until(lambda: not _process_is_running(child_pid))
 
 
+def test_status_preserves_orphaned_owned_group_for_subsequent_stop(
+    tmp_path: Path,
+) -> None:
+    bin_dir = _fake_runtime_tools(tmp_path)
+    env = _dev_env(tmp_path, bin_dir)
+    run_dir = Path(env["WMS_DEV_RUN_DIR"])
+    run_dir.mkdir()
+    metadata = run_dir / "api.meta"
+    leader, child_pid = _start_orphaned_owned_group(
+        metadata,
+        tmp_path / "status-orphan-child.pid",
+        "status-orphan-group-marker",
+    )
+
+    try:
+        status = _run_dev(env, "status")
+
+        assert status.returncode != 0
+        assert "orphaned owned process group" in status.stdout.lower()
+        assert metadata.exists()
+        assert _process_is_running(child_pid)
+
+        stopped = _run_dev(env, "stop")
+
+        assert stopped.returncode == 0, stopped.stdout + stopped.stderr
+        assert _wait_until(lambda: not _process_is_running(child_pid))
+        assert not metadata.exists()
+    finally:
+        if _process_is_running(child_pid):
+            os.killpg(leader.pid, signal.SIGKILL)
+            assert _wait_until(lambda: not _process_is_running(child_pid))
+
+
+@pytest.mark.parametrize("corruption", ["service", "marker", "empty-pgid"])
+def test_status_discards_unsafe_or_empty_orphan_metadata_without_signalling(
+    tmp_path: Path,
+    corruption: str,
+) -> None:
+    bin_dir = _fake_runtime_tools(tmp_path)
+    env = _dev_env(tmp_path, bin_dir)
+    run_dir = Path(env["WMS_DEV_RUN_DIR"])
+    run_dir.mkdir()
+    metadata = run_dir / "api.meta"
+    leader, child_pid = _start_orphaned_owned_group(
+        metadata,
+        tmp_path / f"unsafe-{corruption}-child.pid",
+        "actual-status-group-marker",
+    )
+    fields = _metadata_fields(metadata)
+    if corruption == "service":
+        fields["service"] = "worker"
+    elif corruption == "marker":
+        fields["marker"] = "forged-status-group-marker"
+    else:
+        fields["pid"] = fields["pgid"] = "99999999"
+    metadata.write_text(
+        "\n".join(f"{key}={value}" for key, value in fields.items()) + "\n",
+        encoding="utf-8",
+    )
+
+    try:
+        status = _run_dev(env, "status")
+
+        assert status.returncode == 0, status.stdout + status.stderr
+        assert "orphaned owned process group" not in status.stdout.lower()
+        assert not metadata.exists()
+        assert _process_is_running(child_pid)
+
+        stopped = _run_dev(env, "stop")
+        assert stopped.returncode == 0, stopped.stdout + stopped.stderr
+        assert _process_is_running(child_pid)
+    finally:
+        if _process_is_running(child_pid):
+            os.killpg(leader.pid, signal.SIGKILL)
+            assert _wait_until(lambda: not _process_is_running(child_pid))
+
+
 def test_failed_start_kills_marker_owned_group_member_after_leader_exits(
     tmp_path: Path,
 ) -> None:

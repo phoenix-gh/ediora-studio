@@ -70,6 +70,14 @@ dev_owned_group_has_members() {
   [ -n "$members" ]
 }
 
+dev_owned_group_matches_service() {
+  local service="$1" metadata_file="$2" recorded_service
+  recorded_service="$(dev_meta_value "$metadata_file" service 2>/dev/null)" \
+    || return 1
+  [ "$recorded_service" = "$service" ] \
+    && dev_owned_group_has_members "$metadata_file"
+}
+
 dev_owned_identity_matches() {
   local service="$1" metadata_file="$2"
   local recorded_service pid pgid start_ticks marker
@@ -231,7 +239,7 @@ dev_stop_owned_service() {
     # never fall back to signalling its group. Group fallback is only safe
     # after the recorded leader has exited or become a zombie.
     if dev_process_is_non_zombie "$pid" \
-      || ! dev_owned_group_has_members "$metadata_file"; then
+      || ! dev_owned_group_matches_service "$service" "$metadata_file"; then
       rm -f -- "$metadata_file"
       printf '  • %s ownership metadata was stale; no process was signalled\n' \
         "$display_name"
