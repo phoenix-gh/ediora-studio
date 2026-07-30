@@ -54,7 +54,7 @@ export WMS_WORKER_TOKEN="$(openssl rand -hex 32)"
 ./dev.sh
 ```
 
-脚本按 Redis 健康 → API HTTP 就绪 → worker 进程就绪 → Web HTTP 就绪的
+脚本按 Redis 健康 → API HTTP 就绪 → worker 就绪握手 → Web HTTP 就绪的
 顺序启动完整运行时：
 
 ```text
@@ -66,9 +66,26 @@ Redis:  redis://127.0.0.1:6379/0
 
 若 `127.0.0.1:6379` 已有能响应 PING 的 Redis，脚本只连接并把它标记为
 `external`，`./dev.sh stop` 不会停止它；否则脚本启动并只管理自己创建的
-临时 Redis。API 与 worker 始终共享同一个宿主机 Redis URL、队列名和
-`WMS_WORKER_TOKEN`。端口可分别用 `WMS_REDIS_PORT`、`WMS_API_PORT` 和
+临时 Redis。API、worker 与 Web 作为一个配置单元，共享同一个宿主机
+Redis URL、队列名、`WMS_WORKER_TOKEN`、API URL 与 CORS 配置。任一配置
+变化都会完整替换这三项服务，避免新旧配置混跑。默认 CORS 同时允许当前
+`WMS_WEB_PORT` 对应的 `127.0.0.1` 和 `localhost` 地址；需要覆盖时设置
+`WMS_CORS_ORIGINS`。端口可分别用 `WMS_REDIS_PORT`、`WMS_API_PORT` 和
 `WMS_WEB_PORT` 覆盖。
+
+worker 启动后只有完成 Redis 连接和启动时的待处理任务协调，才可以向
+`WMS_WORKER_READY_FILE` 原子写入当前进程的
+`WMS_DEV_SERVICE_MARKER` 与 `WMS_DEV_CONFIG_FINGERPRINT`：
+
+```text
+marker=<WMS_DEV_SERVICE_MARKER>
+config_fingerprint=<WMS_DEV_CONFIG_FINGERPRINT>
+```
+
+统一脚本会在每次启动 worker 前删除旧文件，并校验标记、配置指纹和进程
+所有权；仅有存活进程或遗留 ready 文件都不算就绪。握手超时会回滚本次
+启动。内容 worker 的实现应先写同目录临时文件，再以 rename 替换目标，
+不能直接逐行改写 ready 文件。
 
 ```bash
 ./dev.sh status
@@ -79,8 +96,10 @@ Redis:  redis://127.0.0.1:6379/0
 ```
 
 脚本只停止带有匹配 PID、进程组、Linux 启动时间和本次服务标记的进程，
-不会依据一个复用或过期的 PID 误杀其他服务。任一启动阶段失败时，只会
-逆序回滚本次新创建的进程。
+不会依据一个复用或过期的 PID 误杀其他服务。停止时会检查整个已记录进程
+组中的非僵尸成员；TERM 超时后升级为 KILL，只有确认进程组清空才删除
+所有权元数据并报告成功。无法清理时命令返回失败并保留元数据。任一启动
+阶段失败时，只会逆序回滚本次新创建的进程。
 
 ### 自托管（Docker Compose）
 

@@ -19,6 +19,8 @@ HOST_REDIS_URL="redis://127.0.0.1:${REDIS_PORT}/0"
 HOST_API_ROOT="http://127.0.0.1:${API_PORT}"
 HOST_API_URL="${HOST_API_ROOT}/api"
 HOST_WEB_URL="http://127.0.0.1:${WEB_PORT}"
+EFFECTIVE_CORS_ORIGINS="${WMS_CORS_ORIGINS:-${HOST_WEB_URL},http://localhost:${WEB_PORT}}"
+WORKER_READY_FILE="$RUN_DIR/worker.ready"
 
 source "$ROOT/scripts/dev-runtime.sh"
 
@@ -111,7 +113,25 @@ PY
 }
 
 worker_ready() {
-  dev_owned_identity_matches worker "$(metadata_path worker)"
+  local metadata marker fingerprint ready_marker ready_fingerprint
+  metadata="$(metadata_path worker)"
+  dev_owned_identity_matches worker "$metadata" || return 1
+  marker="$(dev_meta_value "$metadata" marker 2>/dev/null)" || return 1
+  fingerprint="$(
+    dev_meta_value "$metadata" config_fingerprint 2>/dev/null
+  )" || return 1
+  if [ -n "${APPLICATION_CONFIG_FINGERPRINT:-}" ] \
+    && [ "$fingerprint" != "$APPLICATION_CONFIG_FINGERPRINT" ]; then
+    return 1
+  fi
+  ready_marker="$(
+    dev_meta_value "$WORKER_READY_FILE" marker 2>/dev/null
+  )" || return 1
+  ready_fingerprint="$(
+    dev_meta_value "$WORKER_READY_FILE" config_fingerprint 2>/dev/null
+  )" || return 1
+  [ "$ready_marker" = "$marker" ] \
+    && [ "$ready_fingerprint" = "$fingerprint" ]
 }
 
 runtime_fingerprint() {
@@ -134,18 +154,77 @@ record_started_service() {
 }
 
 rollback_start() {
-  local index service
+  local index service failed=0
   [ "${#STARTED_THIS_RUN[@]}" -gt 0 ] || return 0
   printf 'Startup failed; rolling back newly owned services...\n' >&2
   for ((index = ${#STARTED_THIS_RUN[@]} - 1; index >= 0; index -= 1)); do
     service="${STARTED_THIS_RUN[$index]}"
     case "$service" in
-      web) dev_stop_owned_service web Web "$(metadata_path web)" ;;
-      worker) dev_stop_owned_service worker Worker "$(metadata_path worker)" ;;
-      api) dev_stop_owned_service api API "$(metadata_path api)" ;;
-      redis) dev_stop_owned_service redis Redis "$(metadata_path redis)" ;;
+      web)
+        dev_stop_owned_service web Web "$(metadata_path web)" || failed=1
+        ;;
+      worker)
+        dev_stop_owned_service worker Worker "$(metadata_path worker)" \
+          || failed=1
+        rm -f -- "$WORKER_READY_FILE"
+        ;;
+      api)
+        dev_stop_owned_service api API "$(metadata_path api)" || failed=1
+        ;;
+      redis)
+        dev_stop_owned_service redis Redis "$(metadata_path redis)" || failed=1
+        ;;
     esac
   done
+  return "$failed"
+}
+
+application_unit_has_state() {
+  [ -e "$(metadata_path api)" ] \
+    || [ -e "$(metadata_path worker)" ] \
+    || [ -e "$(metadata_path web)" ] \
+    || [ -e "$WORKER_READY_FILE" ]
+}
+
+application_unit_ready() {
+  local service metadata
+  for service in api worker web; do
+    metadata="$(metadata_path "$service")"
+    dev_owned_identity_matches "$service" "$metadata" || return 1
+    dev_config_fingerprint_matches \
+      "$metadata" "$APPLICATION_CONFIG_FINGERPRINT" || return 1
+  done
+  api_owned_http_ready \
+    && worker_ready \
+    && web_owned_http_ready
+}
+
+stop_application_unit() {
+  local failed=0
+  dev_stop_owned_service web Web "$(metadata_path web)" || failed=1
+  dev_stop_owned_service worker Worker "$(metadata_path worker)" || failed=1
+  rm -f -- "$WORKER_READY_FILE"
+  dev_stop_owned_service api API "$(metadata_path api)" || failed=1
+  return "$failed"
+}
+
+prepare_application_unit() {
+  APPLICATION_UNIT_REUSED=0
+  if application_unit_ready; then
+    APPLICATION_UNIT_REUSED=1
+    printf '  ✓ API HTTP ready (owned pid %s)\n' \
+      "$(dev_meta_value "$(metadata_path api)" pid)"
+    printf '  ✓ Worker ready handshake valid (owned pid %s)\n' \
+      "$(dev_meta_value "$(metadata_path worker)" pid)"
+    printf '  ✓ Web HTTP ready (owned pid %s)\n' \
+      "$(dev_meta_value "$(metadata_path web)" pid)"
+    return 0
+  fi
+  if application_unit_has_state; then
+    printf '  • Replacing the coordinated API/Worker/Web unit\n'
+    stop_application_unit || return 1
+  fi
+  rm -f -- "$WORKER_READY_FILE"
 }
 
 ensure_redis_ready() {
@@ -197,23 +276,9 @@ ensure_api_ready() {
   local api_metadata
   api_metadata="$(metadata_path api)"
 
-  if dev_owned_identity_matches api "$api_metadata"; then
-    if ! dev_config_fingerprint_matches \
-      "$api_metadata" "$RUNTIME_CONFIG_FINGERPRINT"; then
-      dev_stop_owned_service api API "$api_metadata"
-    elif api_owned_http_ready; then
-      printf '  ✓ API ready (owned pid %s)\n' "$(dev_meta_value "$api_metadata" pid)"
-      return 0
-    else
-      dev_stop_owned_service api API "$api_metadata"
-    fi
-  elif [ -e "$api_metadata" ]; then
-    rm -f -- "$api_metadata"
-  fi
-
   dev_start_owned_service \
     api API "$BACKEND_DIR" "$api_metadata" "$(log_path api)" \
-    "$RUNTIME_CONFIG_FINGERPRINT" \
+    "$APPLICATION_CONFIG_FINGERPRINT" \
     conda run --no-capture-output -n "$CONDA_ENV" \
     uvicorn main:app --host 0.0.0.0 --port "$API_PORT" --reload || return 1
   record_started_service api
@@ -238,54 +303,30 @@ ensure_worker_ready() {
   local worker_metadata
   worker_metadata="$(metadata_path worker)"
 
-  if dev_owned_identity_matches worker "$worker_metadata" \
-    && dev_config_fingerprint_matches \
-      "$worker_metadata" "$RUNTIME_CONFIG_FINGERPRINT"; then
-    printf '  ✓ Worker process alive (owned pid %s)\n' \
-      "$(dev_meta_value "$worker_metadata" pid)"
-    return 0
-  fi
-  if dev_owned_identity_matches worker "$worker_metadata"; then
-    dev_stop_owned_service worker Worker "$worker_metadata"
-  elif [ -e "$worker_metadata" ]; then
-    rm -f -- "$worker_metadata"
-  fi
-
+  rm -f -- "$WORKER_READY_FILE"
   dev_start_owned_service \
     worker Worker "$FRONTEND_DIR" "$worker_metadata" "$(log_path worker)" \
-    "$RUNTIME_CONFIG_FINGERPRINT" \
+    "$APPLICATION_CONFIG_FINGERPRINT" \
     pnpm jobs:worker || return 1
   record_started_service worker
-  sleep "${WMS_DEV_WORKER_SETTLE_SECONDS:-0.5}"
-  if ! worker_ready; then
-    printf 'Worker exited during its readiness window; see %s\n' \
+  if ! dev_wait_for \
+    "${WMS_DEV_READY_TIMEOUT_SECONDS:-30}" \
+    "${WMS_DEV_POLL_INTERVAL_SECONDS:-0.1}" \
+    worker_ready; then
+    printf 'Worker did not publish its current ready handshake; see %s\n' \
       "$(log_path worker)" >&2
     return 1
   fi
-  printf '  ✓ Worker process alive (content-jobs queue)\n'
+  printf '  ✓ Worker ready handshake valid (content-jobs queue)\n'
 }
 
 ensure_web_ready() {
   local web_metadata
   web_metadata="$(metadata_path web)"
 
-  if dev_owned_identity_matches web "$web_metadata"; then
-    if ! dev_config_fingerprint_matches \
-      "$web_metadata" "$WEB_CONFIG_FINGERPRINT"; then
-      dev_stop_owned_service web Web "$web_metadata"
-    elif web_owned_http_ready; then
-      printf '  ✓ Web ready (owned pid %s)\n' "$(dev_meta_value "$web_metadata" pid)"
-      return 0
-    else
-      dev_stop_owned_service web Web "$web_metadata"
-    fi
-  elif [ -e "$web_metadata" ]; then
-    rm -f -- "$web_metadata"
-  fi
-
   dev_start_owned_service \
     web Web "$FRONTEND_DIR" "$web_metadata" "$(log_path web)" \
-    "$WEB_CONFIG_FINGERPRINT" \
+    "$APPLICATION_CONFIG_FINGERPRINT" \
     pnpm exec next dev --hostname 0.0.0.0 --port "$WEB_PORT" || return 1
   record_started_service web
   if ! dev_wait_for \
@@ -315,20 +356,35 @@ cmd_start() {
   export WMS_API_URL="$HOST_API_URL"
   export NEXT_PUBLIC_API_URL="$HOST_API_URL"
   export WMS_WORKER_QUEUE="${WMS_WORKER_QUEUE:-content-jobs}"
+  export WMS_CORS_ORIGINS="$EFFECTIVE_CORS_ORIGINS"
+  export WMS_WORKER_READY_FILE="$WORKER_READY_FILE"
   REDIS_CONFIG_FINGERPRINT="$(runtime_fingerprint "$HOST_REDIS_URL")"
-  RUNTIME_CONFIG_FINGERPRINT="$(
+  APPLICATION_CONFIG_FINGERPRINT="$(
     runtime_fingerprint \
-      "$HOST_REDIS_URL" "$WMS_WORKER_QUEUE" "$WMS_WORKER_TOKEN" "$HOST_API_URL"
+      "$HOST_REDIS_URL" \
+      "$WMS_WORKER_QUEUE" \
+      "$WMS_WORKER_TOKEN" \
+      "$HOST_API_URL" \
+      "$HOST_WEB_URL" \
+      "$WMS_CORS_ORIGINS"
   )"
-  WEB_CONFIG_FINGERPRINT="$(runtime_fingerprint "$HOST_API_URL" "$HOST_WEB_URL")"
   STARTED_THIS_RUN=()
 
   printf 'Starting WeMedia Studio local runtime...\n'
   ensure_redis_ready || { rollback_start; return 1; }
+  prepare_application_unit || { rollback_start; return 1; }
+  if [ "$APPLICATION_UNIT_REUSED" -eq 1 ]; then
+    print_runtime_summary
+    return 0
+  fi
   ensure_api_ready || { rollback_start; return 1; }
   ensure_worker_ready || { rollback_start; return 1; }
   ensure_web_ready || { rollback_start; return 1; }
 
+  print_runtime_summary
+}
+
+print_runtime_summary() {
   printf '\n'
   printf '  Web:    %s\n' "$HOST_WEB_URL"
   printf '  API:    %s (docs: /docs)\n' "$HOST_API_ROOT"
@@ -338,18 +394,18 @@ cmd_start() {
 }
 
 cmd_stop() {
+  local failed=0
   validate_runtime_ports || return 1
   printf 'Stopping WeMedia Studio local runtime...\n'
-  dev_stop_owned_service web Web "$(metadata_path web)"
-  dev_stop_owned_service worker Worker "$(metadata_path worker)"
-  dev_stop_owned_service api API "$(metadata_path api)"
+  stop_application_unit || failed=1
   if [ -e "$(metadata_path redis)" ]; then
-    dev_stop_owned_service redis Redis "$(metadata_path redis)"
+    dev_stop_owned_service redis Redis "$(metadata_path redis)" || failed=1
   elif redis_ping; then
     printf '  • Redis is external and was left running\n'
   else
     printf '  • Redis is not running\n'
   fi
+  return "$failed"
 }
 
 service_status() {
@@ -380,6 +436,11 @@ service_status() {
     process)
       printf '  %-7s process alive (owned pid %s)\n' "$name" "$pid"
       ;;
+    worker)
+      worker_ready \
+        && printf '  %-7s ready handshake valid (owned pid %s)\n' "$name" "$pid" \
+        || printf '  %-7s process alive but ready handshake invalid (owned pid %s)\n' "$name" "$pid"
+      ;;
   esac
 }
 
@@ -394,7 +455,7 @@ cmd_status() {
     service_status redis Redis redis
   fi
   service_status api API http "${HOST_API_ROOT}/health"
-  service_status worker Worker process
+  service_status worker Worker worker
   service_status web Web http "${HOST_WEB_URL}/"
 }
 

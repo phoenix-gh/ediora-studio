@@ -28,12 +28,46 @@ dev_process_group() {
   ps -o pgid= -p "$pid" 2>/dev/null | tr -d '[:space:]'
 }
 
+dev_process_is_non_zombie() {
+  local pid="$1" stat rest state
+  [[ "$pid" =~ ^[0-9]+$ ]] || return 1
+  [ -r "/proc/$pid/stat" ] || return 1
+  stat="$(<"/proc/$pid/stat")" || return 1
+  rest="${stat##*) }"
+  state="${rest%% *}"
+  [ "$state" != Z ]
+}
+
 dev_marker_matches() {
   local pid="$1" marker="$2"
   [[ "$pid" =~ ^[0-9]+$ ]] || return 1
   [ -r "/proc/$pid/environ" ] || return 1
   tr '\0' '\n' <"/proc/$pid/environ" 2>/dev/null \
     | grep -Fqx "WMS_DEV_SERVICE_MARKER=$marker"
+}
+
+dev_owned_group_member_pids() {
+  local metadata_file="$1"
+  local pid pgid marker candidate_pid candidate_pgid candidate_state
+  pid="$(dev_meta_value "$metadata_file" pid 2>/dev/null)" || return 1
+  pgid="$(dev_meta_value "$metadata_file" pgid 2>/dev/null)" || return 1
+  marker="$(dev_meta_value "$metadata_file" marker 2>/dev/null)" || return 1
+  [[ "$pid" =~ ^[0-9]+$ && "$pgid" =~ ^[0-9]+$ ]] || return 1
+  [ "$pid" = "$pgid" ] && [ -n "$marker" ] || return 1
+
+  while read -r candidate_pid candidate_pgid candidate_state; do
+    [ "$candidate_pgid" = "$pgid" ] || continue
+    [ "${candidate_state:0:1}" != Z ] || continue
+    if dev_marker_matches "$candidate_pid" "$marker"; then
+      printf '%s\n' "$candidate_pid"
+    fi
+  done < <(ps -eo pid=,pgid=,stat=)
+}
+
+dev_owned_group_has_members() {
+  local metadata_file="$1" members
+  members="$(dev_owned_group_member_pids "$metadata_file" 2>/dev/null)" || return 1
+  [ -n "$members" ]
 }
 
 dev_owned_identity_matches() {
@@ -110,6 +144,7 @@ dev_start_owned_service() {
     shift 5
 
     export WMS_DEV_SERVICE_MARKER="$marker"
+    export WMS_DEV_CONFIG_FINGERPRINT="$config_fingerprint"
     pid="$$"
     pgid="$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d "[:space:]")"
     stat="$(cat "/proc/$pid/stat")"
@@ -177,31 +212,42 @@ dev_stop_owned_service() {
     printf '  • %s is not owned by this script\n' "$display_name"
     return 0
   fi
+  pid="$(dev_meta_value "$metadata_file" pid 2>/dev/null)" || pid=
+  pgid="$(dev_meta_value "$metadata_file" pgid 2>/dev/null)" || pgid=
   if ! dev_owned_identity_matches "$service" "$metadata_file"; then
-    rm -f -- "$metadata_file"
-    printf '  • %s ownership metadata was stale; no process was signalled\n' \
-      "$display_name"
-    return 0
+    # A live leader with a mismatched start tick/PGID/marker is PID reuse:
+    # never fall back to signalling its group. Group fallback is only safe
+    # after the recorded leader has exited or become a zombie.
+    if dev_process_is_non_zombie "$pid" \
+      || ! dev_owned_group_has_members "$metadata_file"; then
+      rm -f -- "$metadata_file"
+      printf '  • %s ownership metadata was stale; no process was signalled\n' \
+        "$display_name"
+      return 0
+    fi
   fi
 
-  pid="$(dev_meta_value "$metadata_file" pid)"
-  pgid="$(dev_meta_value "$metadata_file" pgid)"
   kill -TERM -- "-$pgid" 2>/dev/null || true
   dev_wait_for \
     "${WMS_DEV_STOP_TIMEOUT_SECONDS:-8}" \
     "${WMS_DEV_POLL_INTERVAL_SECONDS:-0.1}" \
-    dev_owned_process_stopped "$service" "$metadata_file" || true
+    dev_owned_group_stopped "$metadata_file" || true
 
-  if dev_owned_identity_matches "$service" "$metadata_file"; then
+  if dev_owned_group_has_members "$metadata_file"; then
     kill -KILL -- "-$pgid" 2>/dev/null || true
     dev_wait_for 1 "${WMS_DEV_POLL_INTERVAL_SECONDS:-0.1}" \
-      dev_owned_process_stopped "$service" "$metadata_file" || true
+      dev_owned_group_stopped "$metadata_file" || true
+  fi
+  if dev_owned_group_has_members "$metadata_file"; then
+    printf '  ✗ %s process group %s could not be stopped; ownership retained\n' \
+      "$display_name" "$pgid" >&2
+    return 1
   fi
   rm -f -- "$metadata_file"
   printf '  ✓ %s stopped (owned pid %s)\n' "$display_name" "$pid"
 }
 
-dev_owned_process_stopped() {
-  local service="$1" metadata_file="$2"
-  ! dev_owned_identity_matches "$service" "$metadata_file"
+dev_owned_group_stopped() {
+  local metadata_file="$1"
+  ! dev_owned_group_has_members "$metadata_file"
 }

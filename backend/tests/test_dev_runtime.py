@@ -19,12 +19,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 DEV_SCRIPT = ROOT / "dev.sh"
 VALID_TOKEN = "task12-runtime-worker-token-000000000000"
-
-
-def _unused_port() -> int:
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        return int(sock.getsockname()[1])
+REPLACEMENT_TOKEN = "replacement-worker-token-0000000000000000"
 
 
 def _write_executable(path: Path, body: str) -> None:
@@ -74,8 +69,9 @@ def _fake_runtime_tools(
         #!/bin/sh
         printf 'start:api\n' >>"$WMS_DEV_TEST_STATE/events"
         token_hash="$(printf '%s' "$WMS_WORKER_TOKEN" | sha256sum | awk '{print $1}')"
-        printf '%s|%s|%s|%s\n' \
+        printf '%s|%s|%s|%s|%s\n' \
           "$WMS_REDIS_URL" "$WMS_WORKER_QUEUE" "$token_hash" "$WMS_API_URL" \
+          "$WMS_CORS_ORIGINS" \
           >"$WMS_DEV_TEST_STATE/api.env"
         if [ "${WMS_DEV_TEST_FAIL_STAGE:-}" = api-bind ]; then
           sleep 0.15
@@ -96,17 +92,33 @@ def _fake_runtime_tools(
           *" jobs:worker "*)
             printf 'start:worker\n' >>"$WMS_DEV_TEST_STATE/events"
             token_hash="$(printf '%s' "$WMS_WORKER_TOKEN" | sha256sum | awk '{print $1}')"
-            printf '%s|%s|%s|%s\n' \
+            printf '%s|%s|%s|%s|%s\n' \
               "$WMS_REDIS_URL" "$WMS_WORKER_QUEUE" "$token_hash" "$WMS_API_URL" \
+              "$WMS_CORS_ORIGINS" \
               >"$WMS_DEV_TEST_STATE/worker.env"
             if [ "${WMS_DEV_TEST_FAIL_STAGE:-}" = worker ]; then
               exit 17
+            fi
+            if [ "${WMS_DEV_TEST_FAIL_STAGE:-}" != worker-never-ready ] \
+              && [ -n "${WMS_WORKER_READY_FILE:-}" ]; then
+              ready_tmp="${WMS_WORKER_READY_FILE}.tmp.$$"
+              {
+                printf 'marker=%s\n' "$WMS_DEV_SERVICE_MARKER"
+                printf 'config_fingerprint=%s\n' "$WMS_DEV_CONFIG_FINGERPRINT"
+              } >"$ready_tmp"
+              mv -f -- "$ready_tmp" "$WMS_WORKER_READY_FILE"
+              printf 'ready:worker\n' >>"$WMS_DEV_TEST_STATE/events"
             fi
             trap 'printf "stop:worker\\n" >>"$WMS_DEV_TEST_STATE/events"; exit 0' TERM INT
             while :; do sleep 1; done
             ;;
           *)
             printf 'start:web\n' >>"$WMS_DEV_TEST_STATE/events"
+            token_hash="$(printf '%s' "$WMS_WORKER_TOKEN" | sha256sum | awk '{print $1}')"
+            printf '%s|%s|%s|%s|%s\n' \
+              "$WMS_REDIS_URL" "$WMS_WORKER_QUEUE" "$token_hash" "$WMS_API_URL" \
+              "$WMS_CORS_ORIGINS" \
+              >"$WMS_DEV_TEST_STATE/web.env"
             if [ "${WMS_DEV_TEST_FAIL_STAGE:-}" != web ]; then
               : >"$WMS_DEV_TEST_STATE/web.ready"
             fi
@@ -156,11 +168,12 @@ def _dev_env(tmp_path: Path, bin_dir: Path) -> dict[str, str]:
             "WMS_DEV_READY_TIMEOUT_SECONDS": "0.6",
             "WMS_DEV_STOP_TIMEOUT_SECONDS": "0.6",
             "WMS_DEV_POLL_INTERVAL_SECONDS": "0.05",
-            "WMS_DEV_WORKER_SETTLE_SECONDS": "0.05",
             "WMS_DEV_HTTP_SETTLE_SECONDS": "0.2",
-            "WMS_REDIS_PORT": str(_unused_port()),
-            "WMS_API_PORT": str(_unused_port()),
-            "WMS_WEB_PORT": str(_unused_port()),
+            # The fake services do not bind. Real socket tests replace these
+            # values with ports held by their server processes.
+            "WMS_REDIS_PORT": "46379",
+            "WMS_API_PORT": "48000",
+            "WMS_WEB_PORT": "43000",
         }
     )
     return env
@@ -182,18 +195,59 @@ def _run_dev(
     )
 
 
+def _run_dev_with_unsignallable_group(
+    env: dict[str, str],
+    command: str,
+    blocked_pgid: int,
+    timeout: float = 10,
+) -> subprocess.CompletedProcess[str]:
+    harness = r"""
+    blocked_pgid="$1"
+    dev_script="$2"
+    command="$3"
+    kill() {
+      local last="${@: -1}"
+      if { [ "${1:-}" = "-TERM" ] || [ "${1:-}" = "-KILL" ]; } \
+        && [ "$last" = "-$blocked_pgid" ]; then
+        return 1
+      fi
+      builtin kill "$@"
+    }
+    source "$dev_script" "$command"
+    """
+    return subprocess.run(
+        [
+            "bash",
+            "-c",
+            textwrap.dedent(harness),
+            "_",
+            str(blocked_pgid),
+            str(DEV_SCRIPT),
+            command,
+        ],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        capture_output=True,
+        timeout=timeout,
+    )
+
+
 def _events(env: dict[str, str]) -> list[str]:
     path = Path(env["WMS_DEV_TEST_STATE"]) / "events"
     return path.read_text(encoding="utf-8").splitlines() if path.exists() else []
 
 
-def _metadata_pid(path: Path) -> int:
-    fields = dict(
+def _metadata_fields(path: Path) -> dict[str, str]:
+    return dict(
         line.split("=", 1)
         for line in path.read_text(encoding="utf-8").splitlines()
         if "=" in line
     )
-    return int(fields["pid"])
+
+
+def _metadata_pid(path: Path) -> int:
+    return int(_metadata_fields(path)["pid"])
 
 
 def _process_is_running(pid: int) -> bool:
@@ -212,7 +266,7 @@ def _wait_until(predicate, timeout: float = 3) -> bool:
     return predicate()
 
 
-def _start_http_server(port: int) -> subprocess.Popen[str]:
+def _start_http_server() -> tuple[subprocess.Popen[str], int]:
     code = """
 import http.server
 import socketserver
@@ -227,19 +281,24 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def log_message(self, *_args):
         pass
 
-with socketserver.TCPServer(("127.0.0.1", int(sys.argv[1])), Handler) as server:
+with socketserver.TCPServer(("127.0.0.1", 0), Handler) as server:
+    print(server.server_address[1], flush=True)
     server.serve_forever()
 """
-    return subprocess.Popen(
-        [sys.executable, "-u", "-c", code, str(port)],
+    process = subprocess.Popen(
+        [sys.executable, "-u", "-c", code],
         text=True,
-        stdout=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
         start_new_session=True,
     )
+    assert process.stdout is not None
+    port_line = process.stdout.readline().strip()
+    assert port_line, "ephemeral HTTP server did not report its bound port"
+    return process, int(port_line)
 
 
-def _start_redis_ping_server(port: int) -> subprocess.Popen[str]:
+def _start_redis_ping_server() -> tuple[subprocess.Popen[str], int]:
     code = """
 import socketserver
 import sys
@@ -249,16 +308,82 @@ class Handler(socketserver.BaseRequestHandler):
         self.request.recv(1024)
         self.request.sendall(b"+PONG\\r\\n")
 
-with socketserver.ThreadingTCPServer(("127.0.0.1", int(sys.argv[1])), Handler) as server:
+with socketserver.ThreadingTCPServer(("127.0.0.1", 0), Handler) as server:
+    print(server.server_address[1], flush=True)
     server.serve_forever()
 """
-    return subprocess.Popen(
-        [sys.executable, "-u", "-c", code, str(port)],
+    process = subprocess.Popen(
+        [sys.executable, "-u", "-c", code],
         text=True,
-        stdout=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
         start_new_session=True,
     )
+    assert process.stdout is not None
+    port_line = process.stdout.readline().strip()
+    assert port_line, "ephemeral Redis probe server did not report its bound port"
+    return process, int(port_line)
+
+
+def _start_orphaned_owned_group(
+    metadata_path: Path,
+    child_pid_path: Path,
+    marker: str,
+) -> tuple[subprocess.Popen[str], int]:
+    code = r"""
+import os
+import signal
+import sys
+from pathlib import Path
+
+metadata_path = Path(sys.argv[1])
+child_pid_path = Path(sys.argv[2])
+marker = sys.argv[3]
+pid = os.getpid()
+pgid = os.getpgrp()
+stat_fields = Path(f"/proc/{pid}/stat").read_text().rsplit(") ", 1)[1].split()
+metadata_path.write_text(
+    "\n".join(
+        [
+            f"pid={pid}",
+            f"pgid={pgid}",
+            f"start_ticks={stat_fields[19]}",
+            f"marker={marker}",
+            "service=api",
+            "config_fingerprint=orphan-test",
+            "",
+        ]
+    )
+)
+
+child = os.fork()
+if child == 0:
+    signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    child_pid_path.write_text(str(os.getpid()))
+    while True:
+        signal.pause()
+else:
+    os._exit(0)
+"""
+    env = os.environ.copy()
+    env["WMS_DEV_SERVICE_MARKER"] = marker
+    leader = subprocess.Popen(
+        [
+            sys.executable,
+            "-u",
+            "-c",
+            code,
+            str(metadata_path),
+            str(child_pid_path),
+            marker,
+        ],
+        env=env,
+        start_new_session=True,
+    )
+    assert _wait_until(lambda: child_pid_path.exists())
+    child_pid = int(child_pid_path.read_text(encoding="utf-8"))
+    assert _wait_until(lambda: leader.poll() is not None)
+    return leader, child_pid
 
 
 def test_short_worker_token_fails_before_spawning_any_child_and_stays_secret(
@@ -296,27 +421,50 @@ def test_start_waits_for_each_service_and_stop_reverses_owned_processes(
         launch_events = _events(env)
         assert launch_events.index("ready:redis") < launch_events.index("start:api")
         assert launch_events.index("ready:api") < launch_events.index("start:worker")
-        assert launch_events.index("start:worker") < launch_events.index("start:web")
+        assert launch_events.index("start:worker") < launch_events.index("ready:worker")
+        assert launch_events.index("ready:worker") < launch_events.index("start:web")
         assert launch_events.index("start:web") < launch_events.index("ready:web")
+        expected_cors = (
+            f"http://127.0.0.1:{env['WMS_WEB_PORT']},"
+            f"http://localhost:{env['WMS_WEB_PORT']}"
+        )
         expected_environment = "|".join(
             [
                 f"redis://127.0.0.1:{env['WMS_REDIS_PORT']}/0",
                 "content-jobs",
                 hashlib.sha256(VALID_TOKEN.encode()).hexdigest(),
                 f"http://127.0.0.1:{env['WMS_API_PORT']}/api",
+                expected_cors,
             ]
         )
         state = Path(env["WMS_DEV_TEST_STATE"])
-        assert (state / "api.env").read_text(encoding="utf-8").strip() == expected_environment
-        assert (state / "worker.env").read_text(encoding="utf-8").strip() == expected_environment
+        for service in ("api", "worker", "web"):
+            assert (
+                state / f"{service}.env"
+            ).read_text(encoding="utf-8").strip() == expected_environment
 
-        metadata = [run_dir / f"{service}.meta" for service in ("redis", "api", "worker", "web")]
+        metadata = [
+            run_dir / f"{service}.meta"
+            for service in ("redis", "api", "worker", "web")
+        ]
         assert all(path.exists() for path in metadata)
+        unit_fingerprints = {
+            _metadata_fields(run_dir / f"{service}.meta")["config_fingerprint"]
+            for service in ("api", "worker", "web")
+        }
+        assert len(unit_fingerprints) == 1
+        worker_ready = run_dir / "worker.ready"
+        assert worker_ready.exists()
+        assert _metadata_fields(worker_ready) == {
+            "marker": _metadata_fields(run_dir / "worker.meta")["marker"],
+            "config_fingerprint": next(iter(unit_fingerprints)),
+        }
         owned_pids = [_metadata_pid(path) for path in metadata]
 
         stopped = _run_dev(env, "stop")
         assert stopped.returncode == 0, stopped.stdout + stopped.stderr
         assert all(not path.exists() for path in metadata)
+        assert not worker_ready.exists()
         assert _wait_until(lambda: all(not _process_is_running(pid) for pid in owned_pids))
 
         stopped_events = _events(env)
@@ -327,8 +475,10 @@ def test_start_waits_for_each_service_and_stop_reverses_owned_processes(
         _run_dev(env, "stop")
 
 
-def test_start_replaces_owned_api_when_worker_would_use_a_new_token(
+@pytest.mark.parametrize("drift", ["token", "api", "cors"])
+def test_config_drift_replaces_the_entire_api_worker_web_unit(
     tmp_path: Path,
+    drift: str,
 ) -> None:
     bin_dir = _fake_runtime_tools(tmp_path)
     env = _dev_env(tmp_path, bin_dir)
@@ -338,22 +488,112 @@ def test_start_replaces_owned_api_when_worker_would_use_a_new_token(
     try:
         first = _run_dev(env, "start")
         assert first.returncode == 0, first.stdout + first.stderr
-        old_api_pid = _metadata_pid(run_dir / "api.meta")
-        worker_pid = _metadata_pid(run_dir / "worker.meta")
-        os.killpg(worker_pid, signal.SIGTERM)
-        assert _wait_until(lambda: not _process_is_running(worker_pid))
+        old_pids = {
+            service: _metadata_pid(run_dir / f"{service}.meta")
+            for service in ("redis", "api", "worker", "web")
+        }
+        old_fingerprint = _metadata_fields(run_dir / "api.meta")[
+            "config_fingerprint"
+        ]
+        replacement_env = env.copy()
+        if drift == "token":
+            replacement_env["WMS_WORKER_TOKEN"] = REPLACEMENT_TOKEN
+        elif drift == "api":
+            replacement_env["WMS_API_PORT"] = "48001"
+        else:
+            replacement_env["WMS_CORS_ORIGINS"] = "https://editor.example.test"
 
-        replacement_token = "replacement-worker-token-0000000000000000"
-        replacement_env = env | {"WMS_WORKER_TOKEN": replacement_token}
         second = _run_dev(replacement_env, "start")
-
         assert second.returncode == 0, second.stdout + second.stderr
-        assert _metadata_pid(run_dir / "api.meta") != old_api_pid
-        expected_hash = hashlib.sha256(replacement_token.encode()).hexdigest()
-        assert f"|{expected_hash}|" in (state / "api.env").read_text(encoding="utf-8")
-        assert f"|{expected_hash}|" in (state / "worker.env").read_text(
-            encoding="utf-8"
+        assert _metadata_pid(run_dir / "redis.meta") == old_pids["redis"]
+        assert all(
+            _metadata_pid(run_dir / f"{service}.meta") != old_pids[service]
+            for service in ("api", "worker", "web")
         )
+        fingerprints = {
+            _metadata_fields(run_dir / f"{service}.meta")["config_fingerprint"]
+            for service in ("api", "worker", "web")
+        }
+        assert len(fingerprints) == 1
+        assert old_fingerprint not in fingerprints
+
+        expected_hash = hashlib.sha256(
+            replacement_env["WMS_WORKER_TOKEN"].encode()
+        ).hexdigest()
+        expected_api = (
+            f"http://127.0.0.1:{replacement_env['WMS_API_PORT']}/api"
+        )
+        expected_cors = replacement_env.get(
+            "WMS_CORS_ORIGINS",
+            (
+                f"http://127.0.0.1:{replacement_env['WMS_WEB_PORT']},"
+                f"http://localhost:{replacement_env['WMS_WEB_PORT']}"
+            ),
+        )
+        for service in ("api", "worker", "web"):
+            effective = (state / f"{service}.env").read_text(
+                encoding="utf-8"
+            ).strip()
+            assert f"|{expected_hash}|{expected_api}|{expected_cors}" in effective
+    finally:
+        _run_dev(env, "stop")
+
+
+@pytest.mark.parametrize("failed_stage", ["api", "worker", "web"])
+def test_failed_config_replacement_leaves_no_mixed_application_unit(
+    tmp_path: Path,
+    failed_stage: str,
+) -> None:
+    bin_dir = _fake_runtime_tools(tmp_path)
+    env = _dev_env(tmp_path, bin_dir)
+    run_dir = Path(env["WMS_DEV_RUN_DIR"])
+
+    try:
+        first = _run_dev(env, "start")
+        assert first.returncode == 0, first.stdout + first.stderr
+        old_unit_pids = [
+            _metadata_pid(run_dir / f"{service}.meta")
+            for service in ("api", "worker", "web")
+        ]
+        redis_pid = _metadata_pid(run_dir / "redis.meta")
+        replacement_env = env | {
+            "WMS_WORKER_TOKEN": REPLACEMENT_TOKEN,
+            "WMS_DEV_TEST_FAIL_STAGE": failed_stage,
+        }
+
+        replaced = _run_dev(replacement_env, "start")
+
+        assert replaced.returncode != 0
+        assert all(
+            not (run_dir / f"{service}.meta").exists()
+            for service in ("api", "worker", "web")
+        )
+        assert all(
+            _wait_until(lambda pid=pid: not _process_is_running(pid))
+            for pid in old_unit_pids
+        )
+        assert _metadata_pid(run_dir / "redis.meta") == redis_pid
+        assert _process_is_running(redis_pid)
+        assert not (run_dir / "worker.ready").exists()
+    finally:
+        _run_dev(env, "stop")
+
+
+def test_worker_without_current_ready_handshake_times_out_and_rolls_back(
+    tmp_path: Path,
+) -> None:
+    bin_dir = _fake_runtime_tools(tmp_path)
+    env = _dev_env(tmp_path, bin_dir)
+    env["WMS_DEV_TEST_FAIL_STAGE"] = "worker-never-ready"
+    run_dir = Path(env["WMS_DEV_RUN_DIR"])
+
+    result = _run_dev(env, "start")
+
+    try:
+        assert result.returncode != 0
+        assert "ready" in (result.stdout + result.stderr).lower()
+        assert not list(run_dir.glob("*.meta"))
+        assert not (run_dir / "worker.ready").exists()
     finally:
         _run_dev(env, "stop")
 
@@ -424,8 +664,8 @@ def test_healthy_external_redis_has_no_metadata_and_survives_stop(
 ) -> None:
     bin_dir = _fake_runtime_tools(tmp_path, fake_redis=False)
     env = _dev_env(tmp_path, bin_dir)
-    redis_port = int(env["WMS_REDIS_PORT"])
-    external = _start_redis_ping_server(redis_port)
+    external, redis_port = _start_redis_ping_server()
+    env["WMS_REDIS_PORT"] = str(redis_port)
 
     def redis_ping() -> bool:
         try:
@@ -501,16 +741,164 @@ def test_stale_metadata_never_signals_a_reused_pid(
             unrelated.wait(timeout=3)
 
 
+def test_stop_kills_marker_owned_group_member_after_leader_exits(
+    tmp_path: Path,
+) -> None:
+    bin_dir = _fake_runtime_tools(tmp_path)
+    env = _dev_env(tmp_path, bin_dir)
+    run_dir = Path(env["WMS_DEV_RUN_DIR"])
+    run_dir.mkdir()
+    metadata = run_dir / "api.meta"
+    marker = "owned-orphan-group-marker"
+    leader, child_pid = _start_orphaned_owned_group(
+        metadata,
+        tmp_path / "orphan-child.pid",
+        marker,
+    )
+
+    try:
+        assert leader.poll() is not None
+        assert _process_is_running(child_pid)
+
+        stopped = _run_dev(env, "stop")
+
+        assert stopped.returncode == 0, stopped.stdout + stopped.stderr
+        assert _wait_until(lambda: not _process_is_running(child_pid))
+        assert not metadata.exists()
+    finally:
+        if _process_is_running(child_pid):
+            os.killpg(leader.pid, signal.SIGKILL)
+            assert _wait_until(lambda: not _process_is_running(child_pid))
+
+
+def test_stop_retains_metadata_and_fails_when_owned_group_cannot_be_signalled(
+    tmp_path: Path,
+) -> None:
+    bin_dir = _fake_runtime_tools(tmp_path)
+    env = _dev_env(tmp_path, bin_dir)
+    run_dir = Path(env["WMS_DEV_RUN_DIR"])
+    run_dir.mkdir()
+    metadata = run_dir / "api.meta"
+    marker = "owned-unkillable-group-marker"
+    process_env = os.environ.copy()
+    process_env["WMS_DEV_SERVICE_MARKER"] = marker
+    process = subprocess.Popen(
+        ["sleep", "30"],
+        env=process_env,
+        start_new_session=True,
+    )
+    stat_fields = Path(f"/proc/{process.pid}/stat").read_text(
+        encoding="utf-8"
+    ).rsplit(") ", 1)[1].split()
+    metadata.write_text(
+        "\n".join(
+            [
+                f"pid={process.pid}",
+                f"pgid={os.getpgid(process.pid)}",
+                f"start_ticks={stat_fields[19]}",
+                f"marker={marker}",
+                "service=api",
+                "config_fingerprint=unkillable-test",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    harness = """
+    source "$1"
+    kill() {
+      if [ "$1" = "-0" ]; then
+        builtin kill "$@"
+      else
+        return 1
+      fi
+    }
+    export WMS_DEV_STOP_TIMEOUT_SECONDS=0.1
+    export WMS_DEV_POLL_INTERVAL_SECONDS=0.02
+    dev_stop_owned_service api API "$2"
+    """
+
+    try:
+        stopped = subprocess.run(
+            [
+                "bash",
+                "-c",
+                textwrap.dedent(harness),
+                "_",
+                str(ROOT / "scripts" / "dev-runtime.sh"),
+                str(metadata),
+            ],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            timeout=3,
+        )
+
+        assert stopped.returncode != 0
+        assert metadata.exists()
+        assert process.poll() is None
+        assert "ownership retained" in stopped.stderr
+        assert "✓ API stopped" not in stopped.stdout
+    finally:
+        if process.poll() is None:
+            os.killpg(process.pid, signal.SIGKILL)
+            process.wait(timeout=3)
+
+
+@pytest.mark.parametrize("blocked_service", ["web", "worker"])
+def test_stop_best_effort_cleans_the_unit_when_one_group_cannot_be_signalled(
+    tmp_path: Path,
+    blocked_service: str,
+) -> None:
+    bin_dir = _fake_runtime_tools(tmp_path)
+    env = _dev_env(tmp_path, bin_dir)
+    run_dir = Path(env["WMS_DEV_RUN_DIR"])
+    started = _run_dev(env, "start")
+    assert started.returncode == 0, started.stdout + started.stderr
+    pids = {
+        service: _metadata_pid(run_dir / f"{service}.meta")
+        for service in ("redis", "api", "worker", "web")
+    }
+    blocked_pgid = int(
+        _metadata_fields(run_dir / f"{blocked_service}.meta")["pgid"]
+    )
+
+    try:
+        stopped = _run_dev_with_unsignallable_group(
+            env,
+            "stop",
+            blocked_pgid,
+        )
+
+        assert stopped.returncode != 0
+        assert (run_dir / f"{blocked_service}.meta").exists()
+        assert _process_is_running(pids[blocked_service])
+        for service in {"redis", "api", "worker", "web"} - {blocked_service}:
+            assert not (run_dir / f"{service}.meta").exists()
+            assert _wait_until(
+                lambda pid=pids[service]: not _process_is_running(pid)
+            )
+        assert not (run_dir / "worker.ready").exists()
+    finally:
+        _run_dev(env, "stop")
+        for pid in pids.values():
+            if _process_is_running(pid):
+                os.killpg(pid, signal.SIGKILL)
+        assert _wait_until(
+            lambda: all(not _process_is_running(pid) for pid in pids.values())
+        )
+
+
 def test_external_http_cannot_masquerade_as_the_owned_api_process(
     tmp_path: Path,
 ) -> None:
     bin_dir = _fake_runtime_tools(tmp_path, fake_http=False)
     env = _dev_env(tmp_path, bin_dir)
     env["WMS_DEV_TEST_FAIL_STAGE"] = "api-bind"
-    api_port = int(env["WMS_API_PORT"])
-    web_port = int(env["WMS_WEB_PORT"])
-    external_api = _start_http_server(api_port)
-    external_web = _start_http_server(web_port)
+    external_api, api_port = _start_http_server()
+    external_web, web_port = _start_http_server()
+    env["WMS_API_PORT"] = str(api_port)
+    env["WMS_WEB_PORT"] = str(web_port)
 
     def external_ready() -> bool:
         try:
@@ -557,13 +945,86 @@ def test_status_and_log_snapshot_cover_all_runtime_services(tmp_path: Path) -> N
     assert all(name in logs.stdout for name in ("Redis", "API", "Worker", "Web"))
 
 
-def test_compose_uses_real_api_health_and_healthy_dependencies() -> None:
-    env = os.environ.copy()
-    env["WMS_WORKER_TOKEN"] = VALID_TOKEN
-    resolved = subprocess.run(
-        ["docker", "compose", "config", "--format", "json"],
-        cwd=ROOT,
+def test_backend_health_uses_the_runtime_web_origins_for_real_cors_headers(
+    tmp_path: Path,
+) -> None:
+    origins = "http://127.0.0.1:43000,http://localhost:43000"
+    code = """
+import sys
+from fastapi.testclient import TestClient
+from main import app
+
+client = TestClient(app)
+for origin in sys.argv[1].split(","):
+    response = client.get("/health", headers={"Origin": origin})
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == origin
+blocked = client.get("/health", headers={"Origin": "https://blocked.example"})
+assert "access-control-allow-origin" not in blocked.headers
+"""
+    env = {
+        "PATH": os.environ["PATH"],
+        "PYTHON_DOTENV_DISABLED": "1",
+        "WMS_CORS_ORIGINS": origins,
+        "WMS_DATABASE_URL": (
+            f"sqlite+aiosqlite:///{tmp_path / 'cors.sqlite3'}"
+        ),
+        "WMS_DISABLE_SCHEDULER": "1",
+        "WMS_WORKER_TOKEN": VALID_TOKEN,
+        "FEEDGRAB_DATA_DIR": str(tmp_path / "sessions"),
+        "WMS_LLM_API_KEY": "",
+        "WMS_IMAGE_API_KEY": "",
+        "WMS_SPEECH_API_KEY": "",
+        "HEYGEN_API_KEY": "",
+    }
+
+    checked = subprocess.run(
+        [sys.executable, "-c", code, origins],
+        cwd=ROOT / "backend",
         env=env,
+        text=True,
+        capture_output=True,
+    )
+
+    assert checked.returncode == 0, checked.stdout + checked.stderr
+
+
+def _compose_environment() -> dict[str, str]:
+    allowed = (
+        "PATH",
+        "HOME",
+        "DOCKER_HOST",
+        "DOCKER_CONTEXT",
+        "DOCKER_CONFIG",
+        "XDG_CONFIG_HOME",
+        "TMPDIR",
+    )
+    environment = {
+        key: os.environ[key]
+        for key in allowed
+        if key in os.environ
+    }
+    environment["WMS_WORKER_TOKEN"] = VALID_TOKEN
+    return environment
+
+
+def test_compose_uses_real_api_health_and_healthy_dependencies(
+    tmp_path: Path,
+) -> None:
+    empty_env = tmp_path / "empty.env"
+    empty_env.write_text("# deliberately empty\n", encoding="utf-8")
+    resolved = subprocess.run(
+        [
+            "docker",
+            "compose",
+            "--env-file",
+            str(empty_env),
+            "config",
+            "--format",
+            "json",
+        ],
+        cwd=ROOT,
+        env=_compose_environment(),
         check=True,
         text=True,
         capture_output=True,
@@ -578,18 +1039,12 @@ def test_compose_uses_real_api_health_and_healthy_dependencies() -> None:
     assert services["worker"]["depends_on"]["redis"]["condition"] == "service_healthy"
     assert services["worker"]["depends_on"]["api"]["condition"] == "service_healthy"
     assert services["web"]["depends_on"]["api"]["condition"] == "service_healthy"
-
+    assert services["api"]["environment"]["WMS_SPEECH_API_KEY"] == ""
+    assert services["worker"]["environment"]["WMS_LLM_API_KEY"] == ""
     for service_name in ("api", "worker"):
         command = services[service_name].get("command")
         assert command, f"{service_name} must validate WMS_WORKER_TOKEN before startup"
-        short_env = env | {"WMS_WORKER_TOKEN": "short-compose-secret"}
-        rejected = subprocess.run(
-            command,
-            cwd=ROOT / ("backend" if service_name == "api" else "wemedia-studio"),
-            env=short_env,
-            text=True,
-            capture_output=True,
-        )
-        assert rejected.returncode != 0
-        assert "at least 32" in rejected.stderr
-        assert short_env["WMS_WORKER_TOKEN"] not in rejected.stderr
+        command_text = " ".join(command)
+        assert "WMS_WORKER_TOKEN" in command_text
+        assert "at least 32" in command_text
+        assert VALID_TOKEN not in command_text

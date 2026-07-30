@@ -10,13 +10,17 @@ export WMS_WORKER_TOKEN="$(openssl rand -hex 32)"
 默认 Web 为 `http://localhost:3000`、API 为
 `http://localhost:8000`、worker 使用 `content-jobs` 队列，宿主机 Redis
 为 `redis://127.0.0.1:6379/0`。`WMS_WORKER_TOKEN` 必须至少 32 字符，
-并由 API 与 worker 共享。已有健康 Redis 会作为 external 服务复用且不会被
+并由 API 与 worker 共享。API、worker 与 Web 会按统一配置指纹整体复用或
+替换；worker 必须完成 Redis 连接与启动协调，并使用脚本传入的
+`WMS_WORKER_READY_FILE` 发布匹配当前进程标记和配置指纹的原子就绪握手，
+仅有进程存活不算就绪。已有健康 Redis 会作为 external 服务复用且不会被
 `./dev.sh stop` 停止；完整状态与日志可用 `./dev.sh status` 和
 `./dev.sh logs` 查看。
 
 前端 API 地址由 `NEXT_PUBLIC_API_URL` 配置；统一脚本会按实际
-`WMS_API_PORT` 自动设置。完整启动、端口覆盖和进程所有权规则见项目根目录
-`README.md`。
+`WMS_API_PORT` 自动设置。默认 CORS 同时包含当前 Web 端口的
+`127.0.0.1` 与 `localhost` 地址。完整启动、ready 文件格式、端口覆盖和
+进程所有权规则见项目根目录 `README.md`。
 
 ## 文字视频本地配置
 
