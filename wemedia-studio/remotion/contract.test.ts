@@ -54,8 +54,28 @@ function parse(value: unknown, masterDuration = 4.2) {
 
 describe('text-video render contract', () => {
   it('accepts a valid versioned render input', () => {
-    expect(parse(validInput)).toEqual(validInput)
+    expect(parse(validInput)).toMatchObject(validInput)
     expect(CONTINUITY_EPSILON_SECONDS).toBe(0.001)
+  })
+
+  it('fills configurable template defaults for legacy render input', () => {
+    const parsed = parse({
+      ...validInput,
+      templateProps: {
+        theme: 'tech-blue',
+        font: 'source-han-sans',
+        background: 'dark-grid',
+        transition: 'soft-push',
+        textDensity: 'standard',
+      },
+    })
+
+    expect(parsed.templateProps).toMatchObject({
+      brandTitle: 'EDIORA',
+      brandSubtitle: '述策',
+      showBrand: true,
+      accentColor: '#69F6FF',
+    })
   })
 
   it.each([
@@ -186,6 +206,7 @@ describe('text-video render contract', () => {
       animations: ['fade-up', 'scale'],
       transitions: ['crossfade'],
       defaults: { color: 'cyan' },
+      settings: [],
     } satisfies TextVideoTemplateManifest<{ color: string }>
     const horizontalInput = {
       ...validInput,

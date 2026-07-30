@@ -4,6 +4,12 @@ type TemplateIdentity = {
   id: string
   version: number
   compositionId: string
+  defaults: Record<string, unknown>
+  settings: readonly {
+    fields: readonly {
+      key: string
+    }[]
+  }[]
 }
 
 function templateKey(id: string, version: number) {
@@ -25,6 +31,19 @@ export function createTextVideoTemplateRegistry<const T extends TemplateIdentity
     }
     if (!manifest.compositionId.trim() || manifest.compositionId.includes('@')) {
       throw new Error(`Remotion compositionId 无效：${manifest.compositionId}`)
+    }
+
+    const settingKeys = new Set<string>()
+    for (const group of manifest.settings) {
+      for (const field of group.fields) {
+        if (settingKeys.has(field.key)) {
+          throw new Error(`重复模板设置字段：${field.key}`)
+        }
+        if (!Object.hasOwn(manifest.defaults, field.key)) {
+          throw new Error(`模板设置字段缺少默认值：${field.key}`)
+        }
+        settingKeys.add(field.key)
+      }
     }
 
     const key = templateKey(manifest.id, manifest.version)

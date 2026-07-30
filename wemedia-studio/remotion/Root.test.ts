@@ -39,6 +39,7 @@ describe('text-video Remotion registration', () => {
       animations: ['fade-up'],
       transitions: ['crossfade'],
       defaults: { color: 'cyan' },
+      settings: [],
     } as const satisfies TextVideoTemplateManifest<{ color: string }>
 
     expect(createTextVideoDefaultRenderInput(horizontalManifest)).toMatchObject({
