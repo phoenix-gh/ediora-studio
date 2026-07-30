@@ -399,8 +399,30 @@ DEFAULT_RENDER_INPUT = {
         "background": "dark-grid",
         "transition": "soft-push",
         "textDensity": "standard",
+        "brandTitle": "EDIORA",
+        "brandSubtitle": "述策",
+        "showBrand": True,
+        "accentColor": "#69F6FF",
+        "showProgress": True,
+        "showSceneNumber": True,
     },
 }
+
+EDITABLE_PROJECT_FIELDS = (
+    "title",
+    "status",
+    "stage",
+    "script",
+    "voice_settings",
+    "paragraphs",
+    "speech_split_mode",
+    "master_audio",
+    "scene_plan",
+    "render_input",
+    "cover_asset_url",
+    "output_asset_url",
+    "output_stale",
+)
 
 
 def serialize_project(project: TextVideoProject, *, summary: bool = False) -> dict[str, Any]:
@@ -425,6 +447,7 @@ def serialize_project(project: TextVideoProject, *, summary: bool = False) -> di
         "stage": project.stage,
         "cover_asset_url": project.cover_asset_url,
         "output_asset_url": project.output_asset_url,
+        "output_stale": project.output_stale,
         "revision": project.revision,
         "duration": duration,
         "aspect_ratio": _aspect_ratio(render_input),
@@ -576,6 +599,10 @@ async def update_project(
         scene_update.pop("generation_revision", None)
     if changes.get("title") is not None:
         changes["title"] = changes["title"].strip() or "未命名文字视频"
+    before = {
+        field: deepcopy(getattr(project, field))
+        for field in EDITABLE_PROJECT_FIELDS
+    }
     try:
         merge_editable_project(
             project,
@@ -587,6 +614,11 @@ async def update_project(
         )
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
+    if all(
+        getattr(project, field) == value
+        for field, value in before.items()
+    ):
+        return serialize_project(project)
     if project.stage == "video" and not video_stage_open(project):
         raise HTTPException(
             status_code=422,

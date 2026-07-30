@@ -79,6 +79,7 @@ def make_text_video_project(**overrides):
         "master_audio": make_master_audio(),
         "scene_plan": make_scene_plan(),
         "render_input": deepcopy(DEFAULT_RENDER_INPUT),
+        "output_stale": False,
         "revision": 1,
     }
     return TextVideoProject(**(values | overrides))

@@ -414,7 +414,10 @@ def test_text_video_project_crud_and_revision_conflict(client):
     assert created["master_audio"]["status"] == "missing"
     assert created["scene_plan"]["status"] == "missing"
     assert created["render_input"]["templateId"] == "tech-text-v1"
-    assert client.get("/api/text-videos").json()[0]["duration"] == 0
+    assert created["output_stale"] is False
+    summary = client.get("/api/text-videos").json()[0]
+    assert summary["duration"] == 0
+    assert summary["output_stale"] is False
 
     detail = client.get(f"/api/text-videos/{created['id']}")
     assert detail.status_code == 200
@@ -448,6 +451,25 @@ def test_text_video_project_crud_and_revision_conflict(client):
     deleted = client.delete(f"/api/text-videos/{created['id']}")
     assert deleted.status_code == 204
     assert client.get(f"/api/text-videos/{created['id']}").status_code == 404
+
+
+def test_patch_with_persisted_template_props_keeps_revision_unchanged(client):
+    project = client.post("/api/text-videos", json={}).json()
+
+    response = client.patch(
+        f"/api/text-videos/{project['id']}",
+        json={
+            "revision": project["revision"],
+            "template": {
+                "templateId": project["render_input"]["templateId"],
+                "templateVersion": project["render_input"]["templateVersion"],
+                "templateProps": project["render_input"]["templateProps"],
+            },
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["revision"] == project["revision"]
 
 
 def test_patch_persists_explicit_ai_speech_split_mode(client):

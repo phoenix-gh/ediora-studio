@@ -301,6 +301,20 @@ def _apply_visual_edits(
         return
 
     manifest, composition, template_props = _visual_selection(project, update)
+    template_changed = (
+        manifest["id"] != current_render.get("templateId")
+        or manifest["version"] != current_render.get("templateVersion")
+        or template_props != current_render.get("templateProps")
+    )
+    composition_changed = (
+        composition != current_render.get("composition")
+    )
+    if not (
+        template_changed
+        or composition_changed
+        or scene_intent_changed
+    ):
+        return
     should_project = bool(
         scene_intent_changed
         or (
@@ -316,6 +330,8 @@ def _apply_visual_edits(
             "templateProps": template_props,
         })
         project.render_input = current_render
+        if project.output_asset_url:
+            project.output_stale = True
         return
 
     master = _ready_master_for_scene_projection(project)
@@ -367,6 +383,8 @@ def _apply_visual_edits(
         "error": "",
     }
     project.render_input = render_input
+    if project.output_asset_url:
+        project.output_stale = True
 
 
 def merge_editable_project(project, update: dict, speech_model: str) -> None:
@@ -486,7 +504,7 @@ def merge_editable_project(project, update: dict, speech_model: str) -> None:
     if downstream_invalidated:
         _mark_downstream_stale(project)
 
-    for field in ("title", "status", "stage", "cover_asset_url", "output_asset_url"):
+    for field in ("title", "status", "stage", "cover_asset_url"):
         if field in update:
             setattr(project, field, update[field])
 
@@ -494,6 +512,15 @@ def merge_editable_project(project, update: dict, speech_model: str) -> None:
         project,
         update,
     )
+    if "output_asset_url" in update:
+        previous_output_asset_url = project.output_asset_url
+        next_output_asset_url = update["output_asset_url"]
+        project.output_asset_url = next_output_asset_url
+        if (
+            next_output_asset_url
+            and next_output_asset_url != previous_output_asset_url
+        ):
+            project.output_stale = False
 
 def video_stage_open(project) -> bool:
     try:
