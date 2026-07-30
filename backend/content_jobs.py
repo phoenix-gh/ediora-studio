@@ -54,6 +54,24 @@ async def _event(session: AsyncSession, job_id: int, kind: str, *, step_id: int 
     session.add(ContentJobEvent(job_id=job_id, step_id=step_id, kind=kind, payload=payload or {}))
 
 
+async def add_locked_job_event(
+    session: AsyncSession,
+    job_id: int,
+    kind: str,
+    *,
+    step_id: int | None = None,
+    payload: dict | None = None,
+) -> None:
+    """Append an event inside a caller-owned job-row transaction."""
+    await _event(
+        session,
+        job_id,
+        kind,
+        step_id=step_id,
+        payload=payload,
+    )
+
+
 async def record_event(session: AsyncSession, job_id: int, kind: str, payload: dict | None = None) -> ContentJobEvent:
     job = await session.get(ContentJob, job_id)
     if job is None:
@@ -465,8 +483,20 @@ async def succeed_step(session: AsyncSession, step_id: int, output_data: dict) -
     )
     if step is None:
         raise KeyError(f"step {step_id} not found")
+    await succeed_locked_step(session, job, step, output_data)
+    await session.commit()
+    await session.refresh(step)
+    return step
+
+
+async def succeed_locked_step(
+    session: AsyncSession,
+    job: ContentJob,
+    step: ContentJobStep,
+    output_data: dict,
+) -> ContentJobStep:
+    """Mark a locked running step succeeded without committing."""
     if step.status == "succeeded":
-        await session.commit()
         return step
     if step.status != "running":
         raise InvalidJobTransition(f"cannot succeed {step.status} step")
@@ -476,8 +506,7 @@ async def succeed_step(session: AsyncSession, step_id: int, output_data: dict) -
     step.output_data = output_data
     step.completed_at = _now()
     await _event(session, step.job_id, "step_succeeded", step_id=step.id, payload={"step_key": step.step_key, "attempt": step.attempt})
-    await session.commit()
-    await session.refresh(step)
+    await session.flush()
     return step
 
 
@@ -498,6 +527,27 @@ async def fail_step(session: AsyncSession, step_id: int, error: str, *, retryabl
     )
     if step is None:
         raise KeyError(f"step {step_id} not found")
+    await fail_locked_step(
+        session,
+        job,
+        step,
+        error,
+        retryable=retryable,
+    )
+    await session.commit()
+    await session.refresh(step)
+    return step
+
+
+async def fail_locked_step(
+    session: AsyncSession,
+    job: ContentJob,
+    step: ContentJobStep,
+    error: str,
+    *,
+    retryable: bool,
+) -> ContentJobStep:
+    """Fail a locked running step and its job without committing."""
     if step.status != "running":
         raise InvalidJobTransition(f"cannot fail {step.status} step")
     if job.status == "cancelled":
@@ -533,8 +583,7 @@ async def fail_step(session: AsyncSession, step_id: int, error: str, *, retryabl
             },
         ))
     await _event(session, step.job_id, "step_failed", step_id=step.id, payload={"step_key": step.step_key, "retryable": retryable})
-    await session.commit()
-    await session.refresh(step)
+    await session.flush()
     return step
 
 
@@ -554,7 +603,28 @@ async def retry_step(session: AsyncSession, job_id: int, step_key: str) -> Conte
         raise InvalidJobTransition("only a failed job can be retried")
     if previous is None or previous.status != "failed" or not previous.retryable:
         raise InvalidJobTransition("only a retryable failed step can be retried")
-    step = ContentJobStep(job_id=job_id, step_key=step_key, attempt=previous.attempt + 1)
+    step = await retry_locked_step(session, job, previous)
+    await session.commit()
+    await session.refresh(step)
+    return step
+
+
+async def retry_locked_step(
+    session: AsyncSession,
+    job: ContentJob,
+    previous: ContentJobStep,
+) -> ContentJobStep:
+    """Queue a new attempt for a locked retryable failure without committing."""
+    if job.status != "failed":
+        raise InvalidJobTransition("only a failed job can be retried")
+    if previous.status != "failed" or not previous.retryable:
+        raise InvalidJobTransition("only a retryable failed step can be retried")
+    step_key = previous.step_key
+    step = ContentJobStep(
+        job_id=job.id,
+        step_key=step_key,
+        attempt=previous.attempt + 1,
+    )
     session.add(step)
     job.status = "queued"
     job.completed_at = None
@@ -576,9 +646,8 @@ async def retry_step(session: AsyncSession, job_id: int, step_key: str) -> Conte
     await _restore_current_master_audio(session, job, step_key)
     await _restore_current_scene_plan(session, job, step_key)
     await session.flush()
-    await _event(session, job_id, "step_retried", step_id=step.id, payload={"step_key": step_key, "attempt": step.attempt})
-    await session.commit()
-    await session.refresh(step)
+    await _event(session, job.id, "step_retried", step_id=step.id, payload={"step_key": step_key, "attempt": step.attempt})
+    await session.flush()
     return step
 
 

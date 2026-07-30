@@ -6,6 +6,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 import hashlib
 import json
+import math
 from pathlib import Path
 from typing import Iterable
 
@@ -177,6 +178,105 @@ async def speech_asset_result(
             "provider_request_id": metadata.provider_request_id,
         }
     return None
+
+
+async def recoverable_speech_asset_result(
+    db: AsyncSession,
+    project: TextVideoProject,
+    job: ContentJob,
+) -> dict | None:
+    """Return only an exact, durable result written by this speech job."""
+    snapshot = job.input_data if isinstance(job.input_data, dict) else {}
+    if (
+        job.flow != "text_video_speech"
+        or snapshot.get("project_id") != project.id
+        or not isinstance(snapshot.get("source_hash"), str)
+    ):
+        return None
+    try:
+        segment = assert_current_speech_job(project, snapshot)
+    except StaleTextVideoJob:
+        return None
+    if (
+        segment.get("status") not in {"ready", "confirmed"}
+        or segment.get("job_id") is not None
+        or segment.get("source_hash") != snapshot["source_hash"]
+        or not isinstance(segment.get("audio_url"), str)
+        or not segment["audio_url"]
+    ):
+        return None
+    result = await speech_asset_result(
+        db,
+        source_hash=snapshot["source_hash"],
+        audio_url=segment["audio_url"],
+    )
+    if result is None:
+        return None
+    metadata_rows = (
+        await db.execute(
+            select(TextVideoSpeechAsset, CreativeAsset)
+            .join(
+                CreativeAsset,
+                CreativeAsset.id
+                == TextVideoSpeechAsset.creative_asset_id,
+            )
+            .where(
+                TextVideoSpeechAsset.creative_asset_id
+                == result["asset_id"],
+                TextVideoSpeechAsset.source_hash
+                == snapshot["source_hash"],
+            ),
+        )
+    ).all()
+    if len(metadata_rows) != 1:
+        return None
+    metadata, asset = metadata_rows[0]
+    sample_count = result["sample_count"]
+    sample_rate = result["sample_rate"]
+    expected_duration = (
+        sample_count / sample_rate
+        if (
+            isinstance(sample_count, int)
+            and not isinstance(sample_count, bool)
+            and sample_count > 0
+            and isinstance(sample_rate, int)
+            and not isinstance(sample_rate, bool)
+            and sample_rate > 0
+        )
+        else 0
+    )
+    segment_duration = segment.get("duration")
+    if (
+        expected_duration <= 0
+        or asset.asset_type != "media"
+        or asset.media_kind != "audio"
+        or asset.title != "文字视频口播配音"
+        or asset.media_type != "audio/mpeg"
+        or asset.filename != Path(asset.url).name
+        or asset.source != "generated"
+        or metadata.sample_count != sample_count
+        or metadata.sample_rate != sample_rate
+        or not math.isclose(
+            float(metadata.duration),
+            expected_duration,
+            rel_tol=0,
+            abs_tol=1e-9,
+        )
+        or isinstance(segment_duration, bool)
+        or not isinstance(segment_duration, (int, float))
+        or not math.isclose(
+            float(segment_duration),
+            expected_duration,
+            rel_tol=0,
+            abs_tol=1e-9,
+        )
+        or segment.get("word_timings") != result["word_timings"]
+        or metadata.word_timings != result["word_timings"]
+        or metadata.provider_request_id
+        != result["provider_request_id"]
+    ):
+        return None
+    return result
 
 
 def mark_text_video_downstream_stale(project: TextVideoProject) -> None:

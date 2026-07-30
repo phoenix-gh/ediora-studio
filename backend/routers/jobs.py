@@ -9,8 +9,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from content_jobs import InvalidJobTransition, cancel_job, create_job, fail_step, record_event, retry_step, start_step, succeed_job, succeed_step
 from database import get_db
-from job_queue import enqueue_job
+from job_queue import RedisJobQueue, enqueue_job
+from job_reconciliation import reconcile_content_jobs
 from models import ContentJob, ContentJobEvent, ContentJobStep
+from worker_auth import require_worker_token
 
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
@@ -41,6 +43,15 @@ class StepFailureRequest(BaseModel):
 class JobEventRequest(BaseModel):
     kind: str = Field(min_length=1, max_length=64)
     payload: dict = Field(default_factory=dict)
+
+
+@router.post(
+    "/worker-reconcile",
+    dependencies=[Depends(require_worker_token)],
+)
+async def post_worker_reconcile():
+    async with RedisJobQueue() as queue:
+        return await reconcile_content_jobs(queue)
 
 
 def _step_payload(step: ContentJobStep) -> dict:

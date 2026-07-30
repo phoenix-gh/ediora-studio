@@ -103,6 +103,92 @@ def test_redis_queue_enqueues_once_checks_exact_lease_and_closes():
     asyncio.new_event_loop().run_until_complete(run())
 
 
+def test_redis_queue_lease_fence_uses_atomic_set_and_compare_delete():
+    from job_queue import (
+        COMPARE_DELETE_SCRIPT,
+        COMPARE_PEXPIRE_SCRIPT,
+        RedisJobQueue,
+        content_job_lease_key,
+    )
+
+    class FakeRedis:
+        def __init__(self):
+            self.values: dict[str, str] = {}
+            self.set_calls: list[tuple] = []
+            self.eval_calls: list[tuple] = []
+
+        async def set(self, key, value, *, px, nx):
+            self.set_calls.append((key, value, px, nx))
+            if key in self.values:
+                return None
+            self.values[key] = value
+            return "OK"
+
+        async def eval(self, script, key_count, key, owner, *args):
+            self.eval_calls.append(
+                (script, key_count, key, owner, *args),
+            )
+            if (
+                script == COMPARE_PEXPIRE_SCRIPT
+                and self.values.get(key) == owner
+            ):
+                return 1
+            if (
+                script == COMPARE_DELETE_SCRIPT
+                and self.values.get(key) == owner
+            ):
+                del self.values[key]
+                return 1
+            return 0
+
+        async def aclose(self):
+            return None
+
+    async def run():
+        client = FakeRedis()
+        queue = RedisJobQueue(
+            client=client,
+            queue_name="private-content-jobs",
+        )
+        key = content_job_lease_key("private-content-jobs", 19)
+
+        assert await queue.try_acquire_lease(
+            19,
+            "reconciler-a",
+            ttl_ms=30_000,
+        ) is True
+        assert client.set_calls == [
+            (key, "reconciler-a", 30_000, True),
+        ]
+        assert await queue.try_acquire_lease(
+            19,
+            "reconciler-b",
+            ttl_ms=30_000,
+        ) is False
+        assert await queue.refresh_lease(
+            19,
+            "reconciler-b",
+            ttl_ms=30_000,
+        ) is False
+        assert await queue.refresh_lease(
+            19,
+            "reconciler-a",
+            ttl_ms=30_000,
+        ) is True
+        assert await queue.release_lease(19, "reconciler-b") is False
+        assert client.values[key] == "reconciler-a"
+        assert await queue.release_lease(19, "reconciler-a") is True
+        assert key not in client.values
+        assert client.eval_calls[-1] == (
+            COMPARE_DELETE_SCRIPT,
+            1,
+            key,
+            "reconciler-a",
+        )
+
+    asyncio.new_event_loop().run_until_complete(run())
+
+
 def test_enqueue_job_owns_and_closes_its_redis_client(monkeypatch):
     import job_queue
 

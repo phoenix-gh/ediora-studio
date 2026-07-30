@@ -17,6 +17,20 @@ redis.call('RPUSH', KEYS[1], ARGV[1])
 return 1
 """.strip()
 
+COMPARE_DELETE_SCRIPT = """
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+  return redis.call('DEL', KEYS[1])
+end
+return 0
+""".strip()
+
+COMPARE_PEXPIRE_SCRIPT = """
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+  return redis.call('PEXPIRE', KEYS[1], ARGV[2])
+end
+return 0
+""".strip()
+
 
 def content_job_lease_key(queue_name: str, job_id: int) -> str:
     return f"wms:content-job-lease:{queue_name}:{job_id}"
@@ -77,6 +91,50 @@ class RedisJobQueue:
             content_job_lease_key(self._queue, job_id),
         )
         return bool(owner)
+
+    async def try_acquire_lease(
+        self,
+        job_id: int,
+        owner: str,
+        *,
+        ttl_ms: int,
+    ) -> bool:
+        if not owner:
+            raise ValueError("lease owner cannot be empty")
+        if ttl_ms <= 0:
+            raise ValueError("lease ttl must be positive")
+        acquired = await self._client.set(
+            content_job_lease_key(self._queue, job_id),
+            owner,
+            px=ttl_ms,
+            nx=True,
+        )
+        return acquired == "OK" or acquired is True
+
+    async def release_lease(self, job_id: int, owner: str) -> bool:
+        released = await self._client.eval(
+            COMPARE_DELETE_SCRIPT,
+            1,
+            content_job_lease_key(self._queue, job_id),
+            owner,
+        )
+        return bool(released)
+
+    async def refresh_lease(
+        self,
+        job_id: int,
+        owner: str,
+        *,
+        ttl_ms: int,
+    ) -> bool:
+        refreshed = await self._client.eval(
+            COMPARE_PEXPIRE_SCRIPT,
+            1,
+            content_job_lease_key(self._queue, job_id),
+            owner,
+            str(ttl_ms),
+        )
+        return bool(refreshed)
 
     async def close(self) -> None:
         await self._client.aclose()

@@ -45,6 +45,7 @@ from text_video_audio import (
     assemble_master_audio,
 )
 from text_video_domain import empty_master_audio, normalize_speech_segments
+from text_video_scene_plan import validate_word_timeline
 from storage_paths import UPLOADS_DIR
 
 
@@ -372,6 +373,77 @@ async def _master_asset_valid(
     if path is None:
         return False
     return True
+
+
+async def recoverable_master_assembly_result(
+    db: AsyncSession,
+    project: TextVideoProject,
+    job: ContentJob,
+) -> dict | None:
+    """Return an exact, decoded assembly committed by this durable job."""
+    snapshot = job.input_data if isinstance(job.input_data, dict) else {}
+    segments = snapshot.get("segments")
+    if (
+        job.flow != "text_video_master_audio"
+        or snapshot.get("project_id") != project.id
+        or not isinstance(snapshot.get("source_hash"), str)
+        or not isinstance(segments, list)
+        or not segments
+    ):
+        return None
+    try:
+        master = _current_master(project, snapshot, job.id)
+    except (KeyError, StaleMasterJob):
+        return None
+    if not await _master_asset_valid(
+        db,
+        master,
+        source_hash=snapshot["source_hash"],
+        snapshot=segments,
+    ):
+        return None
+    if not await _probe_master_audio(master):
+        return None
+    return _master_payload(master)
+
+
+async def recoverable_master_alignment_project(
+    db: AsyncSession,
+    project: TextVideoProject,
+    job: ContentJob,
+    step: ContentJobStep,
+) -> TextVideoProject | None:
+    """Return an exact ready timeline committed for this alignment attempt."""
+    result = await recoverable_master_assembly_result(db, project, job)
+    if result is None:
+        return None
+    master = _master_document(project.master_audio)
+    if (
+        master.get("timeline_status") != "ready"
+        or master.get("alignment_step_id") != step.id
+        or master.get("alignment_attempt") != step.attempt
+        or not isinstance(master.get("alignment_claim_token"), str)
+        or not master["alignment_claim_token"]
+        or (project.render_input or {}).get("audio")
+        != master.get("audio_url")
+        or project.status != "audio_ready"
+    ):
+        return None
+    try:
+        words = validate_word_timeline(
+            master.get("word_timings"),
+            master.get("duration"),
+        )
+    except (TypeError, ValueError):
+        return None
+    script = "".join(
+        str(segment.get("text") or "")
+        for segment in job.input_data["segments"]
+        if isinstance(segment, dict)
+    )
+    if "".join(str(word.get("text") or "") for word in words) != script:
+        return None
+    return project
 
 
 async def _job_for_master(

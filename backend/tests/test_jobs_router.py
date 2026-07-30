@@ -9,6 +9,11 @@ from fastapi.testclient import TestClient
 @pytest.fixture
 def client(monkeypatch, tmp_path):
     monkeypatch.setenv("WMS_DATABASE_URL", f"sqlite+aiosqlite:///{tmp_path / 'jobs-router.db'}")
+    monkeypatch.setenv(
+        "WMS_WORKER_TOKEN",
+        "test-worker-token-at-least-32-characters",
+    )
+    monkeypatch.setenv("WMS_WORKER_QUEUE", "api-private-content-jobs")
     for module in list(sys.modules):
         if module.startswith(("database", "models", "content_jobs", "routers.jobs")):
             sys.modules.pop(module, None)
@@ -110,6 +115,61 @@ def test_job_event_api_persists_auditable_generation_trace(client):
     job = client.get(f"/api/jobs/{created['id']}").json()
     assert job["events"][0]["kind"] == "skill_loaded"
     assert job["events"][0]["payload"] == {"skill": "baoyu-cover-image"}
+
+
+def test_worker_reconcile_requires_worker_auth_takes_no_body_and_closes_queue(
+    client,
+    monkeypatch,
+):
+    import routers.jobs as jobs_router
+
+    calls: list[object] = []
+
+    class FakeQueue:
+        def __init__(self, *args, **kwargs):
+            assert args == ()
+            assert kwargs == {}
+            calls.append("queue-created-from-runtime-settings")
+
+        async def __aenter__(self):
+            calls.append("queue-open")
+            return self
+
+        async def __aexit__(self, *_args):
+            calls.append("queue-closed")
+
+    async def reconcile(queue):
+        calls.append(queue)
+        return {"enqueued": 2, "job_ids": [7, 8]}
+
+    monkeypatch.setattr(jobs_router, "RedisJobQueue", FakeQueue)
+    monkeypatch.setattr(
+        jobs_router,
+        "reconcile_content_jobs",
+        reconcile,
+    )
+
+    denied = client.post("/api/jobs/worker-reconcile")
+    assert denied.status_code == 403
+
+    response = client.post(
+        "/api/jobs/worker-reconcile",
+        headers={
+            "X-WMS-Worker-Token":
+                "test-worker-token-at-least-32-characters",
+        },
+    )
+    assert response.status_code == 200
+    assert response.json() == {"enqueued": 2, "job_ids": [7, 8]}
+    assert calls[0:2] == [
+        "queue-created-from-runtime-settings",
+        "queue-open",
+    ]
+    assert calls[-1] == "queue-closed"
+    operation = client.app.openapi()["paths"][
+        "/api/jobs/worker-reconcile"
+    ]["post"]
+    assert "requestBody" not in operation
 
 
 def test_step_failure_marks_job_failed_and_retryable(client):

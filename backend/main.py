@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+import asyncio
 import os
 from dotenv import load_dotenv
 
@@ -17,6 +18,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from loguru import logger
 from database import SessionLocal, init_db
 from digital_human_assets import backfill_digital_human_assets
+from job_reconciliation import JobReconciler
 from speech_upload_boundary import SpeechWorkerUploadBoundary
 from storage_paths import UPLOADS_DIR
 from routers import settings, github, x, x_accounts, x_responses, responses, papers, upload, drafts, writing_plans, youtube, producthunt, wechat, v2ex, kr, juejin, studio, publish_accounts, reddit, assets, dashboard, daily_plan, jobs, chat, digital_humans, talking_videos, text_videos
@@ -49,16 +51,32 @@ async def lifespan(app: FastAPI):
                 logger.warning("X 凭据对账：{}", error)
     except Exception:
         logger.error("X 凭据启动对账失败；账号接口仍可用于修复")
-    from config import get_config
-    cfg = await get_config()
-    if os.getenv("WMS_DISABLE_SCHEDULER") == "1":
+    reconciler = JobReconciler()
+    reconciliation_task = asyncio.create_task(
+        reconciler.run_forever(),
+        name="content-job-reconciliation",
+    )
+    app.state.job_reconciler = reconciler
+    app.state.job_reconciliation_task = reconciliation_task
+    scheduler_started = False
+    try:
+        if os.getenv("WMS_DISABLE_SCHEDULER") != "1":
+            from config import get_config
+            cfg = await get_config()
+            job_registry.register_jobs(scheduler, cfg)
+            scheduler.start()
+            scheduler_started = True
+            app.state.scheduler = scheduler
         yield
-        return
-    job_registry.register_jobs(scheduler, cfg)
-    scheduler.start()
-    app.state.scheduler = scheduler
-    yield
-    scheduler.shutdown()
+    finally:
+        if scheduler_started:
+            scheduler.shutdown()
+        reconciliation_task.cancel()
+        await asyncio.gather(
+            reconciliation_task,
+            return_exceptions=True,
+        )
+        await reconciler.close()
 
 
 from mcp_server import mcp
