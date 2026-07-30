@@ -1087,6 +1087,36 @@ async function waitForSaved(page: Page) {
   ).toContainText('已保存', { timeout: 20_000 })
 }
 
+async function savePlatformTemplateDefault(
+  page: Page,
+  harness: TextVideoHarness,
+) {
+  await page.goto(`${harness.webOrigin}/settings`)
+  await page.getByLabel('设置导航')
+    .getByRole('button', { name: /文字视频/u })
+    .click()
+
+  await page.getByRole('textbox', { name: '品牌标题' })
+    .fill('CHANNEL DEFAULT')
+  const saveResponse = page.waitForResponse(response => (
+    response.url() === `${harness.apiBase}/settings`
+    && response.request().method() === 'PUT'
+  ))
+  await page.getByRole('button', { name: '保存模板默认值' }).click()
+  expect((await saveResponse).status()).toBe(200)
+  await expect(page.getByText('文字视频模板默认视觉已保存'))
+    .toBeVisible()
+
+  const settings = await harness.apiJson<{
+    text_video_template_defaults: Record<
+      string,
+      Record<string, unknown>
+    >
+  }>('/settings')
+  expect(settings.text_video_template_defaults['tech-text-v1@1'])
+    .toMatchObject({ brandTitle: 'CHANNEL DEFAULT' })
+}
+
 async function createAndEditProject(
   page: Page,
   harness: TextVideoHarness,
@@ -1230,9 +1260,14 @@ test('real text-video workflow persists from desktop to compact UI', async ({
   const evidence = attachBrowserEvidence(page, harness)
   try {
     await page.setViewportSize({ width: 1440, height: 960 })
+    await savePlatformTemplateDefault(page, harness)
     const saved = await createAndEditProject(page, harness)
     expect(saved.paragraphs).toHaveLength(1)
     expect(saved.speech_split_mode).toBe('single')
+    expect(saved.render_input.templateProps).toMatchObject({
+      brandTitle: 'CHANNEL DEFAULT',
+      showSceneNumber: true,
+    })
 
     const splitProject = await applyTwoSegmentAiSplit(page, harness, saved)
     const stableSegmentIds = splitProject.paragraphs.map(segment => segment.id)
@@ -1409,6 +1444,9 @@ test('real text-video workflow persists from desktop to compact UI', async ({
     await expect(
       page.getByTestId('remotion-preview').locator('.__remotion-player'),
     ).toHaveCount(1)
+    const preview = page.getByTestId('remotion-preview')
+    await expect(preview).toContainText('CHANNEL DEFAULT / 述策')
+    await expect(preview).not.toContainText('WEMEDIA')
     expect(sceneReady.scene_plan.scenes).toHaveLength(1)
     expect(sceneReady.scene_plan.scenes[0]).toMatchObject({
       fromWordId: sceneReady.master_audio.word_timings[0].id,
@@ -1428,6 +1466,46 @@ test('real text-video workflow persists from desktop to compact UI', async ({
     expect(sceneReady.render_input.segments[0].id).toBe(
       sceneReady.scene_plan.scenes[0].id,
     )
+
+    await page.getByRole('button', { name: '模板视觉设置' }).click()
+    const templateDialog = page.getByRole('dialog', {
+      name: '模板视觉设置',
+    })
+    await expect(templateDialog).toBeVisible()
+    await expect(
+      templateDialog.getByRole('textbox', { name: '品牌标题' }),
+    ).toHaveValue('CHANNEL DEFAULT')
+    await expect(
+      templateDialog.getByRole('switch', { name: '显示场景编号' }),
+    ).toBeChecked()
+    await expect(
+      templateDialog.getByLabel('模板视觉草稿预览'),
+    ).not.toContainText('WEMEDIA')
+
+    await templateDialog.getByRole('textbox', { name: '品牌标题' })
+      .fill('WORK OVERRIDE')
+    await templateDialog.getByRole('switch', {
+      name: '显示场景编号',
+    }).click()
+    const applyResponse = page.waitForResponse(response => (
+      response.url() === `${harness.apiBase}/text-videos/${saved.id}`
+      && response.request().method() === 'PATCH'
+    ))
+    await templateDialog.getByRole('button', { name: '应用' }).click()
+    expect((await applyResponse).status()).toBe(200)
+    await expect(templateDialog).toBeHidden()
+    const overridden = await harness.waitForProject(
+      saved.id,
+      'work-level template override',
+      project => (
+        project.render_input.templateProps.brandTitle === 'WORK OVERRIDE'
+        && project.render_input.templateProps.showSceneNumber === false
+      ),
+    )
+    expect(overridden.render_input.templateProps).toMatchObject({
+      brandTitle: 'WORK OVERRIDE',
+      showSceneNumber: false,
+    })
 
     await page.reload()
     await expect(page.getByTestId('remotion-preview')).toBeVisible({
@@ -1456,8 +1534,44 @@ test('real text-video workflow persists from desktop to compact UI', async ({
         status: 'ready',
         scenes: sceneReady.scene_plan.scenes,
       }),
-      render_input: sceneReady.render_input,
+      render_input: {
+        ...sceneReady.render_input,
+        templateProps: {
+          ...sceneReady.render_input.templateProps,
+          brandTitle: 'WORK OVERRIDE',
+          showSceneNumber: false,
+        },
+      },
     })
+    expect(reloaded.render_input.templateProps).toMatchObject({
+      brandTitle: 'WORK OVERRIDE',
+      showSceneNumber: false,
+    })
+    await expect(page.getByTestId('remotion-preview'))
+      .toContainText('WORK OVERRIDE / 述策')
+    await expect(page.getByTestId('remotion-preview'))
+      .not.toContainText(/01\s*\/\s*01/u)
+    await expect(page.getByTestId('remotion-preview'))
+      .not.toContainText('WEMEDIA')
+
+    await page.getByRole('button', { name: '模板视觉设置' }).click()
+    const reloadedTemplateDialog = page.getByRole('dialog', {
+      name: '模板视觉设置',
+    })
+    await expect(
+      reloadedTemplateDialog.getByRole('textbox', {
+        name: '品牌标题',
+      }),
+    ).toHaveValue('WORK OVERRIDE')
+    await expect(
+      reloadedTemplateDialog.getByRole('switch', {
+        name: '显示场景编号',
+      }),
+    ).not.toBeChecked()
+    await reloadedTemplateDialog.getByRole('button', {
+      name: '取消',
+    }).click()
+    await expect(reloadedTemplateDialog).toBeHidden()
 
     await page.setViewportSize({ width: 1024, height: 800 })
     await expect(page.getByTestId('editor-shell')).toBeVisible()
