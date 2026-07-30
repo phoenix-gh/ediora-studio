@@ -56,6 +56,7 @@ from models import (
 from text_video_domain import (
     default_speech_segment,
     empty_master_audio,
+    empty_render_state,
     empty_scene_plan,
     merge_editable_project,
     normalize_speech_segments,
@@ -451,6 +452,10 @@ def serialize_project(project: TextVideoProject, *, summary: bool = False) -> di
         "cover_asset_url": project.cover_asset_url,
         "output_asset_url": project.output_asset_url,
         "output_stale": project.output_stale,
+        "render_state": (
+            empty_render_state()
+            | (project.render_state or {})
+        ),
         "revision": project.revision,
         "duration": duration,
         "aspect_ratio": _aspect_ratio(render_input),

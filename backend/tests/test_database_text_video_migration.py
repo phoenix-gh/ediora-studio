@@ -44,6 +44,7 @@ def test_text_video_project_migration_is_idempotent(tmp_path):
         "master_audio",
         "scene_plan",
         "render_input",
+        "render_state",
         "cover_asset_url",
         "output_asset_url",
         "output_stale",
@@ -159,7 +160,8 @@ def test_text_video_project_migration_preserves_authoritative_state_on_restart(t
             await migrate_text_video_project_schema(connection)
             row = (
                 await connection.execute(text(
-                    "SELECT speech_split_mode, master_audio, scene_plan "
+                    "SELECT speech_split_mode, master_audio, scene_plan, "
+                    "render_state "
                     "FROM text_video_projects WHERE id = 1"
                 ))
             ).mappings().one()
@@ -171,6 +173,16 @@ def test_text_video_project_migration_preserves_authoritative_state_on_restart(t
     assert row["speech_split_mode"] == "auto"
     assert json.loads(row["master_audio"])["status"] == "ready"
     assert json.loads(row["scene_plan"])["status"] == "ready"
+    assert json.loads(row["render_state"]) == {
+        "status": "missing",
+        "generation": 0,
+        "source_hash": "",
+        "job_id": None,
+        "applied_job_id": None,
+        "asset_id": None,
+        "progress": 0,
+        "error": "",
+    }
 
 
 def test_text_video_project_migration_normalizes_legacy_template_props_once(

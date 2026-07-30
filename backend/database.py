@@ -283,6 +283,7 @@ async def migrate_text_video_project_schema(conn) -> None:
     had_split_mode = "speech_split_mode" in existing_columns
     had_master_audio = "master_audio" in existing_columns
     had_scene_plan = "scene_plan" in existing_columns
+    had_render_state = "render_state" in existing_columns
 
     await _add_columns(conn, "text_video_projects", {
         "status": "VARCHAR NOT NULL DEFAULT 'draft'",
@@ -294,6 +295,7 @@ async def migrate_text_video_project_schema(conn) -> None:
         "master_audio": f"JSON NOT NULL DEFAULT {json_object_default}",
         "scene_plan": f"JSON NOT NULL DEFAULT {json_object_default}",
         "render_input": f"JSON NOT NULL DEFAULT {json_object_default}",
+        "render_state": f"JSON NOT NULL DEFAULT {json_object_default}",
         "cover_asset_url": "VARCHAR NOT NULL DEFAULT ''",
         "output_asset_url": "VARCHAR NOT NULL DEFAULT ''",
         "output_stale": "BOOLEAN NOT NULL DEFAULT FALSE",
@@ -311,6 +313,7 @@ async def migrate_text_video_project_schema(conn) -> None:
 
     from text_video_domain import (
         empty_master_audio,
+        empty_render_state,
         empty_scene_plan,
         normalize_speech_segments,
     )
@@ -323,7 +326,7 @@ async def migrate_text_video_project_schema(conn) -> None:
         await conn.execute(text(
             "SELECT id, script, paragraphs, speech_split_mode, "
             "master_audio, scene_plan, render_input, output_asset_url, "
-            "output_stale FROM text_video_projects"
+            "output_stale, render_state FROM text_video_projects"
         ))
     ).mappings().all()
 
@@ -340,12 +343,14 @@ async def migrate_text_video_project_schema(conn) -> None:
         "paragraphs = :paragraphs, "
         "speech_split_mode = :speech_split_mode, "
         "master_audio = :master_audio, "
-        "scene_plan = :scene_plan "
+        "scene_plan = :scene_plan, "
+        "render_state = :render_state "
         "WHERE id = :id"
     ).bindparams(
         bindparam("paragraphs", type_=JSON),
         bindparam("master_audio", type_=JSON),
         bindparam("scene_plan", type_=JSON),
+        bindparam("render_state", type_=JSON),
     )
     for row in rows:
         script = str(row["script"] or "")
@@ -368,12 +373,21 @@ async def migrate_text_video_project_schema(conn) -> None:
             if had_scene_plan
             else empty_scene_plan()
         )
+        render_state = (
+            empty_render_state()
+            | decode_json(row["render_state"], {})
+            if had_render_state
+            else empty_render_state()
+        )
+        if not had_render_state and row["output_asset_url"]:
+            render_state["status"] = "stale"
         await conn.execute(update_statement, {
             "id": row["id"],
             "paragraphs": paragraphs,
             "speech_split_mode": split_mode,
             "master_audio": master_audio,
             "scene_plan": scene_plan,
+            "render_state": render_state,
         })
 
         render_input = decode_json(row["render_input"], {})
@@ -403,13 +417,25 @@ async def migrate_text_video_project_schema(conn) -> None:
             text(
                 "UPDATE text_video_projects SET "
                 "render_input = :render_input, "
-                "output_stale = :output_stale "
+                "output_stale = :output_stale, "
+                "render_state = :render_state "
                 "WHERE id = :id"
-            ).bindparams(bindparam("render_input", type_=JSON)),
+            ).bindparams(
+                bindparam("render_input", type_=JSON),
+                bindparam("render_state", type_=JSON),
+            ),
             {
                 "id": row["id"],
                 "render_input": migrated_render_input,
                 "output_stale": bool(row["output_asset_url"]),
+                "render_state": (
+                    render_state
+                    | (
+                        {"status": "stale"}
+                        if row["output_asset_url"]
+                        else {}
+                    )
+                ),
             },
         )
 

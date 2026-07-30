@@ -68,6 +68,29 @@ def empty_scene_plan() -> dict:
     }
 
 
+def empty_render_state() -> dict:
+    return {
+        "status": "missing",
+        "generation": 0,
+        "source_hash": "",
+        "job_id": None,
+        "applied_job_id": None,
+        "asset_id": None,
+        "progress": 0,
+        "error": "",
+    }
+
+
+def render_source_hash(render_input: dict) -> str:
+    payload = json.dumps(
+        render_input,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
 def default_speech_segment(text: str, segment_id: str | None = None) -> dict:
     return {
         "id": segment_id or f"segment-{uuid4().hex}",
@@ -175,6 +198,18 @@ def _mark_downstream_stale(project) -> None:
     render_input = deepcopy(project.render_input or {})
     render_input["audio"] = ""
     project.render_input = render_input
+    _mark_render_stale(project)
+
+
+def _mark_render_stale(project) -> None:
+    state = _document_with_defaults(
+        empty_render_state(),
+        getattr(project, "render_state", None),
+    )
+    if state["status"] != "missing" or project.output_asset_url:
+        state["status"] = "stale"
+    state["error"] = ""
+    project.render_state = state
 
 
 def _sanitize_voice_settings(current: dict, update: dict) -> dict:
@@ -332,6 +367,7 @@ def _apply_visual_edits(
         project.render_input = current_render
         if project.output_asset_url:
             project.output_stale = True
+        _mark_render_stale(project)
         return
 
     master = _ready_master_for_scene_projection(project)
@@ -385,6 +421,7 @@ def _apply_visual_edits(
     project.render_input = render_input
     if project.output_asset_url:
         project.output_stale = True
+    _mark_render_stale(project)
 
 
 def merge_editable_project(project, update: dict, speech_model: str) -> None:

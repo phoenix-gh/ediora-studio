@@ -444,10 +444,21 @@ def test_text_video_project_crud_and_revision_conflict(client):
     assert created["master_audio"]["status"] == "missing"
     assert created["scene_plan"]["status"] == "missing"
     assert created["render_input"]["templateId"] == "tech-text-v1"
+    assert created["render_state"] == {
+        "status": "missing",
+        "generation": 0,
+        "source_hash": "",
+        "job_id": None,
+        "applied_job_id": None,
+        "asset_id": None,
+        "progress": 0,
+        "error": "",
+    }
     assert created["output_stale"] is False
     summary = client.get("/api/text-videos").json()[0]
     assert summary["duration"] == 0
     assert summary["output_stale"] is False
+    assert summary["render_state"] == created["render_state"]
 
     detail = client.get(f"/api/text-videos/{created['id']}")
     assert detail.status_code == 200

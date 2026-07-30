@@ -7,8 +7,10 @@ from tests.text_video_factories import (
     make_text_video_project,
 )
 from text_video_domain import (
+    empty_render_state,
     merge_editable_project,
     normalize_speech_segments,
+    render_source_hash,
     speech_source_hash,
     video_stage_open,
     video_stage_ready,
@@ -57,6 +59,27 @@ def test_source_hash_is_canonical_and_changes_with_generation_settings():
     assert first == reordered
     assert first != changed
     assert len(first) == 64
+
+
+def test_render_source_hash_is_canonical_and_covers_visual_input():
+    first_input = {
+        "templateId": "tech-text-v1",
+        "templateVersion": 1,
+        "audio": "/api/uploads/master.mp3",
+        "segments": [{"id": "scene-1", "start": 0, "end": 2.4}],
+    }
+    reordered_input = {
+        "segments": [{"end": 2.4, "start": 0, "id": "scene-1"}],
+        "audio": "/api/uploads/master.mp3",
+        "templateVersion": 1,
+        "templateId": "tech-text-v1",
+    }
+    changed_input = deepcopy(first_input)
+    changed_input["segments"][0]["end"] = 3
+
+    assert render_source_hash(first_input) == render_source_hash(reordered_input)
+    assert render_source_hash(first_input) != render_source_hash(changed_input)
+    assert len(render_source_hash(first_input)) == 64
 
 
 def test_editing_one_segment_invalidates_only_that_speech_and_all_downstream_timing():
@@ -300,6 +323,13 @@ def test_same_scene_echo_preserves_inflight_scene_job():
 def test_template_change_marks_only_existing_video_output_stale():
     project = _make_video_ready_project()
     project.output_asset_url = "/api/uploads/old.mp4"
+    project.render_state = {
+        **empty_render_state(),
+        "status": "ready",
+        "source_hash": render_source_hash(project.render_input),
+        "asset_id": 19,
+        "progress": 100,
+    }
     merge_editable_project(
         project,
         {
@@ -316,6 +346,9 @@ def test_template_change_marks_only_existing_video_output_stale():
     )
 
     assert project.output_stale is True
+    assert project.output_asset_url == "/api/uploads/old.mp4"
+    assert project.render_state["status"] == "stale"
+    assert project.render_state["asset_id"] == 19
     assert project.master_audio["status"] == "ready"
     assert project.scene_plan["status"] == "ready"
 

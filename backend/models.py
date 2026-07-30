@@ -925,6 +925,7 @@ class TextVideoProject(Base):
     master_audio: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     scene_plan: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     render_input: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    render_state: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     cover_asset_url: Mapped[str] = mapped_column(String, nullable=False, default="")
     output_asset_url: Mapped[str] = mapped_column(String, nullable=False, default="")
     output_stale: Mapped[bool] = mapped_column(
