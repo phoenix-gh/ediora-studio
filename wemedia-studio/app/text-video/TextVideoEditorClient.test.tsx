@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -12,6 +12,7 @@ import { TextVideoEditorClient } from './TextVideoEditorClient'
 const mocks = vi.hoisted(() => ({
   generateScene: vi.fn(),
   runProjectAction: vi.fn(),
+  useAutosave: vi.fn(),
   autosave: {
     saveState: 'saved' as const,
     conflictRevision: null,
@@ -35,7 +36,7 @@ vi.mock('@/lib/api/text-videos', async importOriginal => {
 })
 
 vi.mock('./useTextVideoAutosave', () => ({
-  useTextVideoAutosave: () => mocks.autosave,
+  useTextVideoAutosave: mocks.useAutosave,
 }))
 
 vi.mock('./useTextVideoProjectActions', () => ({
@@ -48,24 +49,29 @@ vi.mock('./useTextVideoProjectActions', () => ({
 
 vi.mock('./TextVideoWorkbench', () => ({
   TextVideoWorkbench: ({
+    projectDocument,
     onGenerateScenePlan,
   }: {
+    projectDocument: { title: string }
     onGenerateScenePlan(input: {
       scope: 'all' | 'selected'
       selected_scene_id: string
       direction: string
     }): Promise<void>
   }) => (
-    <button
-      type="button"
-      onClick={() => void onGenerateScenePlan({
-        scope: 'selected',
-        selected_scene_id: 'scene-stable-2',
-        direction: '强调转折',
-      })}
-    >
-      测试生成分镜
-    </button>
+    <>
+      <p>{projectDocument.title}</p>
+      <button
+        type="button"
+        onClick={() => void onGenerateScenePlan({
+          scope: 'selected',
+          selected_scene_id: 'scene-stable-2',
+          direction: '强调转折',
+        })}
+      >
+        测试生成分镜
+      </button>
+    </>
   ),
 }))
 
@@ -73,6 +79,7 @@ describe('TextVideoEditorClient scene action', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     const project = makeVideoReadyProject()
+    mocks.useAutosave.mockReturnValue(mocks.autosave)
     mocks.generateScene.mockResolvedValue({ jobs: [], project })
     mocks.runProjectAction.mockImplementation(
       async (_key: string, launch: (saved: typeof project) => Promise<unknown>) => {
@@ -102,5 +109,22 @@ describe('TextVideoEditorClient scene action', () => {
       selected_scene_id: 'scene-stable-2',
       direction: '强调转折',
     })
+  })
+
+  it('adopts the canonical project returned by autosave', () => {
+    const project = makeVideoReadyProject({ title: '本地标题' })
+    render(<TextVideoEditorClient initialProject={project} />)
+    const options = mocks.useAutosave.mock.calls[0]?.[0] as {
+      onSavedProject?: (saved: typeof project) => void
+    }
+
+    act(() => {
+      options.onSavedProject?.({
+        ...project,
+        title: '数据库规范标题',
+      })
+    })
+
+    expect(screen.getByText('数据库规范标题')).toBeInTheDocument()
   })
 })

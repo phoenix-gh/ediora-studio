@@ -40,6 +40,7 @@ export function TextVideoEditorClient({
     project,
     save: updateTextVideoProject,
     onRevision,
+    onSavedProject: setProject,
   })
   const actions = useTextVideoProjectActions({
     project,
