@@ -1,4 +1,5 @@
 import asyncio
+import json
 
 import httpx
 import pytest
@@ -271,7 +272,11 @@ def test_transcription_rejects_missing_or_malformed_word_array(
     audio.write_bytes(b"fake-mp3")
 
     async def handler(_request: httpx.Request):
-        return httpx.Response(200, json=payload)
+        return httpx.Response(
+            200,
+            content=json.dumps(payload, allow_nan=True).encode(),
+            headers={"Content-Type": "application/json"},
+        )
 
     async def run():
         async with httpx.AsyncClient(

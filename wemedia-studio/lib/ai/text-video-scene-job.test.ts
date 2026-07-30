@@ -170,6 +170,87 @@ it('asks AI for word IDs only and persists the server-validated proposal', async
   expect(deps.api.completeJob).toHaveBeenCalledWith(41)
 })
 
+it('uses prompt JSON without unsupported response_format for compatible providers', async () => {
+  const previousToken = process.env.WMS_WORKER_TOKEN
+  process.env.WMS_WORKER_TOKEN = 'worker-token-at-least-32-characters'
+  const json = (value: unknown) => new Response(
+    JSON.stringify(value),
+    { headers: { 'Content-Type': 'application/json' } },
+  )
+  const fetchMock = vi.fn(async (
+    input: string | URL | Request,
+    init?: RequestInit,
+  ) => {
+    const url = String(input)
+    if (url.endsWith('/jobs/41') && !init?.method) {
+      return json(makeQueuedJob())
+    }
+    if (url.endsWith('/steps/generate_scene_plan/start')) {
+      return json({ id: 51, attempt: 1 })
+    }
+    if (url.endsWith('/scene-plan/worker-context')) {
+      return json(makeSceneContext())
+    }
+    if (url.endsWith('/settings/ai-runtime')) {
+      return json({
+        api_key: 'test-key',
+        model: 'deepseek-v4-flash',
+        base_url: 'https://api.deepseek.com',
+      })
+    }
+    if (url === 'https://api.deepseek.com/chat/completions') {
+      return json({
+        id: 'scene-provider-1',
+        object: 'chat.completion',
+        created: 1_700_000_000,
+        model: 'deepseek-v4-flash',
+        choices: [{
+          index: 0,
+          message: {
+            role: 'assistant',
+            content: JSON.stringify(validProposal),
+          },
+          finish_reason: 'stop',
+        }],
+        usage: {
+          prompt_tokens: 1,
+          completion_tokens: 1,
+          total_tokens: 2,
+        },
+      })
+    }
+    if (url.endsWith('/scene-plan/worker-validate')) {
+      return json(validatedProposal)
+    }
+    if (url.endsWith('/scene-plan/worker-result')) {
+      return json(readyProject)
+    }
+    if (
+      url.endsWith('/steps/51/succeed')
+      || url.endsWith('/jobs/41/succeed')
+    ) {
+      return json({})
+    }
+    throw new Error(`unexpected fetch: ${url}`)
+  })
+  vi.stubGlobal('fetch', fetchMock)
+
+  try {
+    await expect(runTextVideoSceneJob(41)).resolves.toEqual(readyProject)
+  } finally {
+    vi.unstubAllGlobals()
+    if (previousToken === undefined) delete process.env.WMS_WORKER_TOKEN
+    else process.env.WMS_WORKER_TOKEN = previousToken
+  }
+
+  const providerCall = fetchMock.mock.calls.find(
+    ([input]) => String(input) === 'https://api.deepseek.com/chat/completions',
+  )
+  expect(providerCall).toBeDefined()
+  const requestBody = JSON.parse(String(providerCall?.[1]?.body))
+  expect(requestBody.response_format).toBeUndefined()
+})
+
 it('repairs one 422 with the exact invalid JSON and validation detail', async () => {
   const deps = makeSceneJobDeps()
   const invalid = {

@@ -82,10 +82,86 @@ describe('TextVideoWorkbench', () => {
 
     const videoTab = screen.getByRole('tab', { name: '视频合成' })
     expect(videoTab).toBeDisabled()
-    expect(screen.getByText('还需确认 1 段配音')).toBeVisible()
+    expect(screen.getByText(
+      '还需生成 1 段配音，生成后请试听并确认',
+    )).toBeVisible()
 
     await user.click(screen.getByRole('tab', { name: '配音制作' }))
     expect(screen.getByText('1 / 2 段已确认')).toBeVisible()
+  })
+
+  it.each([
+    {
+      status: 'draft',
+      expected: '还需生成 1 段配音，生成后请试听并确认',
+    },
+    {
+      status: 'generating',
+      expected: '正在生成 1 段配音',
+    },
+    {
+      status: 'ready',
+      expected: '还需确认 1 段配音，确认后将直接复用该段音频',
+    },
+  ] as const)('shows the truthful single-segment $status banner', ({
+    status,
+    expected,
+  }) => {
+    renderWorkbench(makeTextVideoProject({
+      script: '唯一段落',
+      paragraphs: [makeSpeechSegment('only', '唯一段落', { status })],
+    }))
+
+    expect(screen.getByText(expected)).toBeVisible()
+  })
+
+  it('reports both generation and confirmation work for mixed segments', () => {
+    renderWorkbench(makeTextVideoProject({
+      script: '甲。乙。',
+      paragraphs: [
+        makeSpeechSegment('draft', '甲。', { status: 'draft' }),
+        makeSpeechSegment('ready', '乙。', { status: 'ready' }),
+      ],
+    }))
+
+    expect(screen.getByText('还需生成 1 段、确认 1 段配音')).toBeVisible()
+  })
+
+  it('enters audio only after the canonical save resolves', async () => {
+    const user = userEvent.setup()
+    const project = makeTextVideoProject({
+      stage: 'script',
+      script: '段落一',
+      paragraphs: [makeSpeechSegment('one', '段落一')],
+    })
+    let resolveSaved!: (saved: typeof project) => void
+    const onPrepareAudioStage = vi.fn().mockReturnValue(
+      new Promise<typeof project>(resolve => {
+        resolveSaved = resolve
+      }),
+    )
+    renderWorkbench(project, { onPrepareAudioStage })
+
+    await user.click(screen.getByRole('button', { name: '进入配音设置' }))
+    expect(screen.getByRole('heading', { name: '编辑口播稿' })).toBeVisible()
+    expect(screen.queryByText('当前段配音')).not.toBeInTheDocument()
+
+    resolveSaved({ ...project, revision: 4 })
+    expect(await screen.findByText('当前段配音')).toBeVisible()
+  })
+
+  it('describes single-segment confirmation as direct audio reuse', () => {
+    renderWorkbench(makeTextVideoProject({
+      script: '唯一段落',
+      paragraphs: [makeSpeechSegment('only', '唯一段落', {
+        status: 'confirmed',
+      })],
+    }))
+
+    expect(screen.getByText('配音已确认，正在准备成片时间轴'))
+      .toBeVisible()
+    expect(screen.queryByText(/生成主音频和时间轴/))
+      .not.toBeInTheDocument()
   })
 
   it('enters video composition before scenes exist and offers generation', async () => {
@@ -216,5 +292,17 @@ describe('TextVideoWorkbench', () => {
     expect(applyTemplateSettings).toHaveBeenCalledWith(
       expect.objectContaining({ brandTitle: 'WORK LEVEL' }),
     )
+  })
+
+  it('forwards the final MP4 render action from the video stage', async () => {
+    const user = userEvent.setup()
+    const renderVideo = vi.fn()
+
+    renderWorkbench(makeVideoReadyProject(), {
+      onRenderVideo: renderVideo,
+    })
+    await user.click(screen.getByRole('button', { name: '生成视频' }))
+
+    expect(renderVideo).toHaveBeenCalledTimes(1)
   })
 })

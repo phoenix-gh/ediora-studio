@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 
 import { createOpenAI } from '@ai-sdk/openai'
-import { generateObject } from 'ai'
+import { generateText } from 'ai'
 import { z } from 'zod'
 
 import type {
@@ -321,12 +321,15 @@ async function generateScenesWithAi(
     apiKey: config.apiKey,
     baseURL: config.baseURL,
   })
-  const result = await generateObject({
+  const result = await generateText({
     model: provider.chat(config.modelName),
-    schema: input.schema,
     prompt: input.prompt,
   })
-  return input.schema.parse(result.object)
+  const json = result.text
+    .trim()
+    .replace(/^```(?:json)?\s*/iu, '')
+    .replace(/\s*```$/u, '')
+  return input.schema.parse(JSON.parse(json))
 }
 
 const defaultApi: SceneProgressApi = {

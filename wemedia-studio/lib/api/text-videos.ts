@@ -2,6 +2,11 @@ import type { TextVideoRenderInput } from '@/remotion/contract'
 
 import { API_BASE } from './client'
 
+const PUBLIC_API_BASE = (
+  process.env.NEXT_PUBLIC_API_URL
+  ?? 'http://localhost:8000/api'
+).replace(/\/$/, '')
+
 export type TextVideoProjectStatus = 'draft' | 'audio_ready' | 'video_ready' | 'completed' | 'archived'
 export type TextVideoStage = 'script' | 'audio' | 'video'
 export type SpeechSplitMode = 'single' | 'auto' | 'manual'
@@ -83,6 +88,17 @@ export type ScenePlanDocument = {
   error: string
 }
 
+export type TextVideoRenderState = {
+  status: 'missing' | 'queued' | 'rendering' | 'ready' | 'stale' | 'failed'
+  generation: number
+  source_hash: string
+  job_id: number | null
+  applied_job_id: number | null
+  asset_id: number | null
+  progress: number
+  error: string
+}
+
 export type TextVideoProjectSummary = {
   id: number
   title: string
@@ -91,6 +107,7 @@ export type TextVideoProjectSummary = {
   cover_asset_url: string
   output_asset_url: string
   output_stale: boolean
+  render_state: TextVideoRenderState
   revision: number
   duration: number
   aspect_ratio: string
@@ -182,6 +199,15 @@ export type TextVideoSceneJob = {
 
 export type TextVideoSceneResponse = {
   jobs: TextVideoSceneJob[]
+  project: TextVideoProject
+}
+
+export type TextVideoRenderResponse = {
+  jobs: Array<{
+    id: number
+    flow: 'text_video_render'
+    target_id: number
+  }>
   project: TextVideoProject
 }
 
@@ -321,4 +347,18 @@ export function generateTextVideoScenePlan(
     `/text-videos/${projectId}/scene-plan/generate`,
     { method: 'POST', body: JSON.stringify(input) },
   )
+}
+
+export function renderTextVideoProject(
+  projectId: number,
+  revision: number,
+) {
+  return textVideoRequest<TextVideoRenderResponse>(
+    `/text-videos/${projectId}/render`,
+    { method: 'POST', body: JSON.stringify({ revision }) },
+  )
+}
+
+export function textVideoOutputDownloadUrl(projectId: number) {
+  return `${PUBLIC_API_BASE}/text-videos/${projectId}/output/download`
 }

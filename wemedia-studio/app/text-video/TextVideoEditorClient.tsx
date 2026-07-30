@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 
 import {
@@ -18,6 +18,7 @@ import {
   generatePendingTextVideoSpeech,
   generateTextVideoScenePlan,
   generateTextVideoSpeechSegment,
+  renderTextVideoProject,
   updateTextVideoProject,
   type TextVideoProject,
 } from '@/lib/api/text-videos'
@@ -47,6 +48,7 @@ export function TextVideoEditorClient({
     autosave,
     setProject,
   })
+  const autoMasterKeyRef = useRef('')
 
   function changeProject(nextProject: TextVideoProject) {
     autosave.markDirty(nextProject)
@@ -77,9 +79,9 @@ export function TextVideoEditorClient({
     }, 0)
   }
 
-  function reportError(error: unknown) {
+  const reportError = useCallback((error: unknown) => {
     toast.error(error instanceof Error ? error.message : '操作失败')
-  }
+  }, [])
 
   function run(operation: Promise<void>) {
     void operation.catch(reportError)
@@ -121,6 +123,18 @@ export function TextVideoEditorClient({
             source_hash: segment.source_hash,
           },
         )
+        const speakable = confirmed.paragraphs.filter(
+          item => item.text.trim(),
+        )
+        if (
+          speakable.length === 1
+          && speakable[0].status === 'confirmed'
+        ) {
+          return buildTextVideoMasterAudio(
+            confirmed.id,
+            confirmed.revision,
+          )
+        }
         return { jobs: [], project: confirmed }
       },
     ))
@@ -133,12 +147,27 @@ export function TextVideoEditorClient({
     ))
   }
 
-  function realignMasterAudio(jobId: number) {
-    run(actions.retryProjectJob(
+  const speakable = project.paragraphs.filter(item => item.text.trim())
+  const autoMasterKey = (
+    speakable.length === 1
+    && speakable[0].status === 'confirmed'
+    && project.master_audio.status === 'missing'
+    && project.master_audio.job_id === null
+  )
+    ? `${project.id}:${project.revision}:${speakable[0].source_hash}`
+    : ''
+
+  useEffect(() => {
+    if (!autoMasterKey || autoMasterKeyRef.current === autoMasterKey) return
+    autoMasterKeyRef.current = autoMasterKey
+    void actions.runProjectAction(
       'master',
-      jobId,
-      'align_master_timeline',
-    ))
+      async saved => buildTextVideoMasterAudio(saved.id, saved.revision),
+    ).catch(reportError)
+  }, [actions, autoMasterKey, reportError])
+
+  function realignMasterAudio() {
+    buildMasterAudio()
   }
 
   function generateScenePlan(input: SceneDirectionDraft) {
@@ -152,6 +181,13 @@ export function TextVideoEditorClient({
         revision: saved.revision,
       }),
     )
+  }
+
+  function renderVideo() {
+    run(actions.runProjectAction(
+      'render:mp4',
+      async saved => renderTextVideoProject(saved.id, saved.revision),
+    ))
   }
 
   return (
@@ -175,8 +211,12 @@ export function TextVideoEditorClient({
         onPrepareSpeechSplit={async () => (
           await autosave.flush()
         ).project}
+        onPrepareAudioStage={async () => (
+          await autosave.flush()
+        ).project}
         onGenerateScenePlan={generateScenePlan}
         onApplyTemplateSettings={applyTemplateSettings}
+        onRenderVideo={renderVideo}
       />
       <Dialog open={autosave.saveState === 'conflict'}>
         <DialogContent showCloseButton={false}>

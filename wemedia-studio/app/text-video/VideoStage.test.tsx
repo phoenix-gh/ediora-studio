@@ -108,7 +108,7 @@ describe('VideoStage', () => {
     expect(screen.getAllByTestId('scene-card')).toHaveLength(2)
   })
 
-  it('exposes scene generation and an explicit unavailable MP4 state', async () => {
+  it('keeps MP4 generation disabled until the video timeline is ready', async () => {
     const user = userEvent.setup()
     const onOpenSceneDirection = vi.fn()
     const ready = makeVideoReadyProject()
@@ -132,9 +132,102 @@ describe('VideoStage', () => {
 
     await user.click(screen.getByRole('button', { name: 'AI 生成分镜' }))
     expect(onOpenSceneDirection).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole('button', { name: '生成视频' })).toBeDisabled()
+  })
+
+  it('launches MP4 generation and shows durable render progress', async () => {
+    const user = userEvent.setup()
+    const onRenderVideo = vi.fn()
+    const ready = makeVideoReadyProject({
+      render_state: {
+        ...makeVideoReadyProject().render_state,
+        status: 'rendering',
+        job_id: 301,
+        progress: 42,
+      },
+    })
+
+    const { rerender } = render(
+      <VideoStage
+        project={makeVideoReadyProject()}
+        selectedSceneId="scene-1"
+        onSelectScene={vi.fn()}
+        previewAll={false}
+        onPreviewAll={vi.fn()}
+        onProjectChange={vi.fn()}
+        onOpenSceneDirection={vi.fn()}
+        onApplyTemplateSettings={vi.fn()}
+        onRenderVideo={onRenderVideo}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: '生成视频' }))
+    expect(onRenderVideo).toHaveBeenCalledTimes(1)
+
+    rerender(
+      <VideoStage
+        project={ready}
+        selectedSceneId="scene-1"
+        onSelectScene={vi.fn()}
+        previewAll={false}
+        onPreviewAll={vi.fn()}
+        onProjectChange={vi.fn()}
+        onOpenSceneDirection={vi.fn()}
+        onApplyTemplateSettings={vi.fn()}
+        onRenderVideo={onRenderVideo}
+        renderAction={{
+          status: 'running',
+          error: '',
+          retryable: false,
+          jobId: 301,
+          stepKey: '',
+          progress: 42,
+        }}
+      />,
+    )
+
+    expect(screen.getByRole('progressbar')).toHaveAttribute(
+      'aria-valuenow',
+      '42',
+    )
+    expect(screen.getByText('正在渲染 42%')).toBeVisible()
     expect(screen.getByRole('button', {
-      name: 'MP4 渲染暂未开放',
+      name: '正在生成视频',
     })).toBeDisabled()
+  })
+
+  it('plays and downloads the current MP4 result', () => {
+    render(
+      <VideoStage
+        project={makeVideoReadyProject({
+          output_asset_url: '/api/uploads/result.mp4',
+          output_stale: false,
+          render_state: {
+            ...makeVideoReadyProject().render_state,
+            status: 'ready',
+            progress: 100,
+            asset_id: 81,
+          },
+        })}
+        selectedSceneId="scene-1"
+        onSelectScene={vi.fn()}
+        previewAll={false}
+        onPreviewAll={vi.fn()}
+        onProjectChange={vi.fn()}
+        onOpenSceneDirection={vi.fn()}
+        onApplyTemplateSettings={vi.fn()}
+        onRenderVideo={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByLabelText('成片视频')).toHaveAttribute(
+      'src',
+      'http://localhost:8000/api/uploads/result.mp4',
+    )
+    expect(screen.getByRole('link', { name: '下载 MP4' })).toHaveAttribute(
+      'href',
+      'http://localhost:8000/api/text-videos/1/output/download',
+    )
   })
 
   it('opens work-level template settings separately from the AI director', async () => {
@@ -178,6 +271,7 @@ describe('VideoStage', () => {
         onProjectChange={vi.fn()}
         onOpenSceneDirection={vi.fn()}
         onApplyTemplateSettings={vi.fn()}
+        onRenderVideo={vi.fn()}
       />,
     )
 
@@ -185,7 +279,7 @@ describe('VideoStage', () => {
       '模板视觉已更新，当前为上一版成片；重新渲染后更新',
     )
     expect(screen.getByRole('button', {
-      name: 'MP4 渲染暂未开放',
-    })).toBeDisabled()
+      name: '重新生成视频',
+    })).toBeEnabled()
   })
 })

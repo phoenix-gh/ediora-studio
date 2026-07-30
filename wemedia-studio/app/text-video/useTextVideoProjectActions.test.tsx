@@ -901,4 +901,93 @@ describe('useTextVideoProjectActions', () => {
       retryable: false,
     })
   })
+
+  it('publishes live Remotion progress and adopts the completed output', async () => {
+    const project = makeTextVideoProject()
+    const queued = {
+      ...project,
+      render_state: {
+        ...project.render_state,
+        status: 'queued' as const,
+        generation: 1,
+        job_id: 301,
+        source_hash: 'r'.repeat(64),
+      },
+    }
+    const ready = {
+      ...queued,
+      status: 'completed' as const,
+      output_asset_url: '/api/uploads/result.mp4',
+      render_state: {
+        ...queued.render_state,
+        status: 'ready' as const,
+        applied_job_id: 301,
+        asset_id: 81,
+        progress: 100,
+      },
+    }
+    let finishJob!: (job: ContentJob) => void
+    const readJob = vi.fn()
+      .mockResolvedValueOnce(makeJob({
+        id: 301,
+        flow: 'text_video_render',
+        status: 'running',
+        steps: [{
+          id: 901,
+          key: 'render_mp4',
+          attempt: 1,
+          status: 'running',
+          output: { progress: 42 },
+          error: '',
+          retryable: true,
+          created_at: '',
+          started_at: '',
+          completed_at: null,
+        }],
+      }))
+      .mockImplementationOnce(() => new Promise(resolve => {
+        finishJob = resolve
+      }))
+    const { result } = renderHook(() => useHarness({
+      initialProject: project,
+      flush: vi.fn().mockResolvedValue({ project, dirtyVersion: 0 }),
+      readProject: vi.fn().mockResolvedValue(ready),
+      readJob,
+    }))
+
+    let action!: Promise<void>
+    act(() => {
+      action = result.current.actions.runProjectAction(
+        'render:mp4',
+        vi.fn().mockResolvedValue({
+          jobs: [{
+            id: 301,
+            flow: 'text_video_render',
+            target_id: project.id,
+          }],
+          project: queued,
+        }),
+      )
+    })
+
+    await waitFor(() => {
+      expect(result.current.actions.actionStates['render:mp4'])
+        .toMatchObject({ status: 'running', progress: 42, jobId: 301 })
+    })
+    finishJob(makeJob({
+      id: 301,
+      flow: 'text_video_render',
+      status: 'succeeded',
+    }))
+    await act(async () => {
+      await action
+    })
+
+    expect(result.current.project).toMatchObject({
+      output_asset_url: '/api/uploads/result.mp4',
+      render_state: { status: 'ready', progress: 100 },
+    })
+    expect(result.current.actions.actionStates['render:mp4'])
+      .toMatchObject({ status: 'succeeded' })
+  })
 })

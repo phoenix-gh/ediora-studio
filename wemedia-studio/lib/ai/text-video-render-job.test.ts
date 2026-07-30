@@ -159,6 +159,7 @@ it('renders the frozen composition as h264/aac and removes its temp directory', 
       audio: 'http://api:8000/api/uploads/master.mp3',
     }),
     browserExecutable: '/usr/bin/chromium',
+    chromeMode: 'chrome-for-testing',
   })
   expect(deps.renderMedia).toHaveBeenCalledWith(expect.objectContaining({
     codec: 'h264',
@@ -168,6 +169,7 @@ it('renders the frozen composition as h264/aac and removes its temp directory', 
       audio: 'http://api:8000/api/uploads/master.mp3',
     }),
     browserExecutable: '/usr/bin/chromium',
+    chromeMode: 'chrome-for-testing',
   }))
   expect(progress).toEqual([25, 100])
   await expect(access(directory)).rejects.toMatchObject({ code: 'ENOENT' })

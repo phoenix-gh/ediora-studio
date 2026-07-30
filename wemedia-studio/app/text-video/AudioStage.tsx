@@ -51,15 +51,44 @@ function statusVariant(status: SpeechStatus) {
 
 function masterStatusLabel(project: TextVideoProject): string {
   const master = project.master_audio
-  if (master.status === 'building') return '主音频生成中'
-  if (master.status === 'failed') return '主音频生成失败'
-  if (master.status === 'stale') return '主音频已失效'
-  if (master.status !== 'ready') return '主音频未生成'
+  if (master.status === 'building') return '合成音频生成中'
+  if (master.status === 'failed') return '合成音频生成失败'
+  if (master.status === 'stale') return '合成音频已失效'
+  if (master.status !== 'ready') return '合成音频未生成'
   if (master.timeline_status === 'ready') return '时间轴已就绪'
   if (master.timeline_status === 'aligning') return '时间轴生成中'
   if (master.timeline_status === 'failed') return '时间轴生成失败'
   if (master.timeline_status === 'stale') return '时间轴已失效'
   return '等待生成时间轴'
+}
+
+function singleTimelineStatusLabel(
+  project: TextVideoProject,
+  masterBusy: boolean,
+): string {
+  const master = project.master_audio
+  if (master.status === 'failed') return '成片时间轴准备失败'
+  if (master.timeline_status === 'failed') return '成片时间轴生成失败'
+  if (
+    master.status === 'ready'
+    && master.timeline_status === 'ready'
+  ) {
+    return '成片时间轴已就绪'
+  }
+  if (
+    masterBusy
+    || master.status === 'building'
+    || master.timeline_status === 'aligning'
+  ) {
+    return '正在生成成片时间轴'
+  }
+  if (
+    master.status === 'stale'
+    || master.timeline_status === 'stale'
+  ) {
+    return '正在更新成片时间轴'
+  }
+  return '正在生成成片时间轴'
 }
 
 function parseNumber(value: string, fallback: number): number {
@@ -103,6 +132,7 @@ export function AudioStage({
     project.paragraphs.findIndex(segment => segment.id === selected?.id),
   )
   const speakable = project.paragraphs.filter(segment => segment.text.trim())
+  const singleSegment = speakable.length === 1
   const confirmedCount = speakable.filter(
     segment => segment.status === 'confirmed',
   ).length
@@ -316,100 +346,191 @@ export function AudioStage({
               确认当前段
             </Button>
           </div>
+          {(
+            singleSegment
+            && selected.id === speakable[0]?.id
+            && selected.status === 'confirmed'
+          ) ? (
+            <div
+              data-testid="single-segment-timeline-status"
+              className="mt-4 border-t border-border pt-4"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex min-w-0 items-center gap-2">
+                  {(
+                    project.master_audio.status === 'failed'
+                    || project.master_audio.timeline_status === 'failed'
+                  ) ? (
+                    <CircleAlert
+                      aria-hidden
+                      className="size-4 shrink-0 text-destructive"
+                    />
+                  ) : project.master_audio.timeline_status === 'ready' ? (
+                    <Check
+                      aria-hidden
+                      className="size-4 shrink-0 text-success"
+                    />
+                  ) : (
+                    <LoaderCircle
+                      aria-hidden
+                      className="size-4 shrink-0 animate-spin text-primary"
+                    />
+                  )}
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium">
+                      {singleTimelineStatusLabel(project, masterBusy)}
+                    </p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      已直接复用当前段音频，无需再次生成音频。
+                    </p>
+                  </div>
+                </div>
+                {project.master_audio.status === 'failed' ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={
+                      masterBusy
+                      || generationBusy
+                      || !onBuildMasterAudio
+                    }
+                    onClick={onBuildMasterAudio}
+                  >
+                    <RefreshCw data-icon="inline-start" />
+                    重新准备时间轴
+                  </Button>
+                ) : (
+                  project.master_audio.status === 'ready'
+                  && project.master_audio.timeline_status === 'failed'
+                  && project.master_audio.job_id !== null
+                ) ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={
+                      masterBusy
+                      || generationBusy
+                      || !onRealignMasterAudio
+                    }
+                    onClick={() => onRealignMasterAudio?.(
+                      project.master_audio.job_id!,
+                    )}
+                  >
+                    <RefreshCw data-icon="inline-start" />
+                    重新对齐
+                  </Button>
+                ) : null}
+              </div>
+              {project.master_audio.error ? (
+                <p role="alert" className="mt-3 text-sm text-destructive">
+                  {project.master_audio.error}
+                </p>
+              ) : null}
+              {project.master_audio.timeline_error ? (
+                <p role="alert" className="mt-3 text-sm text-destructive">
+                  {project.master_audio.timeline_error}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
         </div>
 
-        <div className="mt-5 rounded-xl border bg-surface p-4">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <p className="text-sm font-medium">主音频与全局时间轴</p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                主音频是视频预览与最终渲染的唯一时间基准。
-              </p>
+        {!singleSegment ? (
+          <div className="mt-5 rounded-xl border bg-surface p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-sm font-medium">
+                  合成音频与成片时间轴
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  合成音频是视频预览与最终渲染的唯一时间基准。
+                </p>
+              </div>
+              <Badge
+                data-testid="master-audio-status"
+                variant={
+                  project.master_audio.timeline_status === 'ready'
+                    ? 'success'
+                    : project.master_audio.status === 'failed'
+                      || project.master_audio.timeline_status === 'failed'
+                      ? 'destructive'
+                      : 'secondary'
+                }
+              >
+                {masterStatusLabel(project)}
+              </Badge>
             </div>
-            <Badge
-              data-testid="master-audio-status"
-              variant={
-                project.master_audio.timeline_status === 'ready'
-                  ? 'success'
-                  : project.master_audio.status === 'failed'
-                    || project.master_audio.timeline_status === 'failed'
-                    ? 'destructive'
-                    : 'secondary'
-              }
-            >
-              {masterStatusLabel(project)}
-            </Badge>
-          </div>
-          {project.master_audio.audio_url.trim() ? (
-            <audio
-              ref={masterAudioRef}
-              data-testid="master-audio"
-              className="mt-4 w-full"
-              controls
-              preload="metadata"
-              src={creativeAssetUrl(project.master_audio.audio_url)}
-            />
-          ) : null}
-          {project.master_audio.error ? (
-            <p role="alert" className="mt-3 text-sm text-destructive">
-              {project.master_audio.error}
-            </p>
-          ) : null}
-          {project.master_audio.timeline_error ? (
-            <p role="alert" className="mt-3 text-sm text-destructive">
-              {project.master_audio.timeline_error}
-            </p>
-          ) : null}
-          <div className="mt-4 flex flex-wrap gap-2">
-            <Button
-              size="sm"
-              disabled={
-                !allConfirmed
-                || masterBusy
-                || generationBusy
-                || !onBuildMasterAudio
-              }
-              onClick={onBuildMasterAudio}
-            >
-              {masterBusy
-                ? <LoaderCircle data-icon="inline-start" className="animate-spin" />
-                : <Volume2 data-icon="inline-start" />}
-              {project.master_audio.status === 'ready'
-                ? '重新生成主音频'
-                : '生成主音频'}
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={!project.master_audio.audio_url.trim()}
-              onClick={playMasterAudio}
-            >
-              <Volume2 data-icon="inline-start" />
-              播放全部
-            </Button>
-            {(
-              project.master_audio.status === 'ready'
-              && project.master_audio.timeline_status === 'failed'
-              && project.master_audio.job_id !== null
-            ) ? (
+            {project.master_audio.audio_url.trim() ? (
+              <audio
+                ref={masterAudioRef}
+                data-testid="master-audio"
+                className="mt-4 w-full"
+                controls
+                preload="metadata"
+                src={creativeAssetUrl(project.master_audio.audio_url)}
+              />
+            ) : null}
+            {project.master_audio.error ? (
+              <p role="alert" className="mt-3 text-sm text-destructive">
+                {project.master_audio.error}
+              </p>
+            ) : null}
+            {project.master_audio.timeline_error ? (
+              <p role="alert" className="mt-3 text-sm text-destructive">
+                {project.master_audio.timeline_error}
+              </p>
+            ) : null}
+            <div className="mt-4 flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                disabled={
+                  !allConfirmed
+                  || masterBusy
+                  || generationBusy
+                  || !onBuildMasterAudio
+                }
+                onClick={onBuildMasterAudio}
+              >
+                {masterBusy
+                  ? <LoaderCircle data-icon="inline-start" className="animate-spin" />
+                  : <Volume2 data-icon="inline-start" />}
+                {project.master_audio.status === 'ready'
+                  ? '重新生成主音频'
+                  : '生成主音频'}
+              </Button>
               <Button
                 size="sm"
                 variant="outline"
-                disabled={
-                  masterBusy
-                  || generationBusy
-                  || !onRealignMasterAudio
-                }
-                onClick={() => onRealignMasterAudio?.(
-                  project.master_audio.job_id!,
-                )}
+                disabled={!project.master_audio.audio_url.trim()}
+                onClick={playMasterAudio}
               >
-                <RefreshCw data-icon="inline-start" />
-                重新对齐
+                <Volume2 data-icon="inline-start" />
+                播放全部
               </Button>
-            ) : null}
+              {(
+                project.master_audio.status === 'ready'
+                && project.master_audio.timeline_status === 'failed'
+                && project.master_audio.job_id !== null
+              ) ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={
+                    masterBusy
+                    || generationBusy
+                    || !onRealignMasterAudio
+                  }
+                  onClick={() => onRealignMasterAudio?.(
+                    project.master_audio.job_id!,
+                  )}
+                >
+                  <RefreshCw data-icon="inline-start" />
+                  重新对齐
+                </Button>
+              ) : null}
+            </div>
           </div>
-        </div>
+        ) : null}
 
         {visibleActionError ? (
           <Alert className="mt-5" variant="destructive">

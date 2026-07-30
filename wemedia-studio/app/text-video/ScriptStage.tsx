@@ -8,6 +8,7 @@ import {
   FileText,
   LoaderCircle,
   Merge,
+  Mic2,
   Scissors,
   Sparkles,
 } from 'lucide-react'
@@ -67,6 +68,7 @@ export function ScriptStage({
   onRequestAiSplit,
   onPrepareSpeechSplit,
   onApplySpeechSplit,
+  onContinueToAudio,
 }: {
   project: TextVideoProject
   selectedSpeechSegmentId: string
@@ -82,6 +84,7 @@ export function ScriptStage({
   onRequestAiSplit?: () => void
   onPrepareSpeechSplit?: () => Promise<TextVideoProject>
   onApplySpeechSplit?: (project: TextVideoProject) => void
+  onContinueToAudio?: () => Promise<void>
 }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const [confirmation, setConfirmation] = useState<Confirmation | null>(null)
@@ -91,6 +94,8 @@ export function ScriptStage({
   >(null)
   const [speechSplitPreparing, setSpeechSplitPreparing] = useState(false)
   const [speechSplitError, setSpeechSplitError] = useState('')
+  const [audioPreparing, setAudioPreparing] = useState(false)
+  const [audioPrepareError, setAudioPrepareError] = useState('')
   const selectedIndex = Math.max(
     0,
     project.paragraphs.findIndex(
@@ -134,6 +139,21 @@ export function ScriptStage({
       )
     } finally {
       setSpeechSplitPreparing(false)
+    }
+  }
+
+  async function continueToAudio() {
+    if (!onContinueToAudio || audioPreparing) return
+    setAudioPreparing(true)
+    setAudioPrepareError('')
+    try {
+      await onContinueToAudio()
+    } catch (error) {
+      setAudioPrepareError(
+        error instanceof Error ? error.message : '保存稿件失败',
+      )
+    } finally {
+      setAudioPreparing(false)
     }
   }
 
@@ -323,7 +343,30 @@ export function ScriptStage({
               下移
             </Button>
           </div>
-          <Button className="mt-5 w-full" disabled>生成配音（下一步）</Button>
+          {audioPrepareError ? (
+            <p role="alert" className="mt-5 text-sm text-destructive">
+              {audioPrepareError}
+            </p>
+          ) : null}
+          <Button
+            className="mt-5 w-full"
+            disabled={
+              !project.paragraphs.some(item => item.text.trim())
+              || !onContinueToAudio
+              || audioPreparing
+            }
+            onClick={() => void continueToAudio()}
+          >
+            {audioPreparing
+              ? (
+                  <LoaderCircle
+                    data-icon="inline-start"
+                    className="animate-spin"
+                  />
+                )
+              : <Mic2 data-icon="inline-start" />}
+            {audioPreparing ? '正在保存…' : '进入配音设置'}
+          </Button>
         </aside>
       </div>
 

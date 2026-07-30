@@ -41,6 +41,7 @@ export type TextVideoActionState = {
   retryable: boolean
   jobId: number | null
   stepKey: string
+  progress?: number
 }
 
 type AutosaveCoordinator = {
@@ -76,6 +77,7 @@ const idleAction: TextVideoActionState = {
   retryable: false,
   jobId: null,
   stepKey: '',
+  progress: 0,
 }
 
 export class TextVideoActionError extends Error {
@@ -115,6 +117,12 @@ function activeProjectJobIds(project: TextVideoProject): number[] {
       : null,
     project.scene_plan.status === 'generating'
       ? project.scene_plan.job_id
+      : null,
+    (
+      project.render_state.status === 'queued'
+      || project.render_state.status === 'rendering'
+    )
+      ? project.render_state.job_id
       : null,
   ]
   return uniqueJobIds(ids)
@@ -304,6 +312,11 @@ function requestStateUnchanged(
         === JSON.stringify(after.paragraphs.map(({ id, text }) => ({ id, text })))
     )
   }
+  if (key.startsWith('render:')) {
+    return JSON.stringify(before.render_state) === JSON.stringify(
+      after.render_state,
+    )
+  }
   return false
 }
 
@@ -405,7 +418,56 @@ function requestSpecificRecoveryProof(
     }
   }
 
+  if (key.startsWith('render:')) {
+    const prior = before.render_state
+    const current = after.render_state
+    const identityChanged = JSON.stringify({
+      status: prior.status,
+      generation: prior.generation,
+      job_id: prior.job_id,
+      applied_job_id: prior.applied_job_id,
+      source_hash: prior.source_hash,
+      asset_id: prior.asset_id,
+    }) !== JSON.stringify({
+      status: current.status,
+      generation: current.generation,
+      job_id: current.job_id,
+      applied_job_id: current.applied_job_id,
+      source_hash: current.source_hash,
+      asset_id: current.asset_id,
+    })
+    return {
+      proven: identityChanged && (
+        (
+          ['queued', 'rendering'].includes(current.status)
+          && current.job_id !== null
+        )
+        || current.status === 'ready'
+        || current.status === 'failed'
+      ),
+      jobIds: uniqueJobIds([current.job_id]),
+      failedError: current.status === 'failed'
+        ? current.error || '视频渲染失败'
+        : '',
+    }
+  }
+
   return { proven: false, jobIds: [], failedError: '' }
+}
+
+function textVideoRenderProgress(jobs: ContentJob[]): number | null {
+  const renderJobs = jobs.filter(job => job.flow === 'text_video_render')
+  if (renderJobs.length === 0) return null
+  let progress = 0
+  for (const job of renderJobs) {
+    for (const step of job.steps) {
+      const value = Number(step.output.progress)
+      if (Number.isFinite(value)) {
+        progress = Math.max(progress, Math.min(100, Math.floor(value)))
+      }
+    }
+  }
+  return progress
 }
 
 export function useTextVideoProjectActions({
@@ -646,6 +708,20 @@ export function useTextVideoProjectActions({
         ...current,
         ...Object.fromEntries(currentJobs.map(job => [String(job.id), job])),
       }))
+      const renderProgress = textVideoRenderProgress(currentJobs)
+      if (
+        renderProgress !== null
+        && currentJobs.some(job => !terminal(job))
+      ) {
+        updateActionState(key, generation, {
+          ...idleAction,
+          status: 'running',
+          jobId: currentJobs.find(
+            job => job.flow === 'text_video_render',
+          )?.id ?? null,
+          progress: renderProgress,
+        })
+      }
 
       if (currentJobs.every(terminal)) {
         await readAndMergeLatest(key, generation, context)

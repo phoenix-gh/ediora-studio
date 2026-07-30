@@ -63,6 +63,34 @@ const ratioDimensions = {
   '1:1': { width: 1080, height: 1080 },
 } as const
 
+function speechWorkflowBanner(project: TextVideoProject): string {
+  const speakable = project.paragraphs.filter(item => item.text.trim())
+  const generationPending = speakable.filter(
+    item => item.status === 'draft' || item.status === 'failed',
+  ).length
+  const generating = speakable.filter(
+    item => item.status === 'generating',
+  ).length
+  const ready = speakable.filter(item => item.status === 'ready').length
+  const single = speakable.length === 1
+
+  if (generationPending > 0 && ready > 0) {
+    return `还需生成 ${generationPending} 段、确认 ${ready} 段配音`
+  }
+  if (generationPending > 0) {
+    return `还需生成 ${generationPending} 段配音，生成后请试听并确认`
+  }
+  if (generating > 0) return `正在生成 ${generating} 段配音`
+  if (ready > 0) {
+    return single
+      ? '还需确认 1 段配音，确认后将直接复用该段音频'
+      : `还需确认 ${ready} 段配音，确认后可生成主音频`
+  }
+  return single
+    ? '配音已确认，正在准备成片时间轴'
+    : '配音已确认，生成主音频和时间轴后可进入视频合成'
+}
+
 export type TextVideoWorkbenchProps = {
   projectDocument: TextVideoProject
   saveState?: TextVideoSaveState
@@ -77,10 +105,12 @@ export type TextVideoWorkbenchProps = {
   onBuildMasterAudio?: () => void
   onRealignMasterAudio?: (jobId: number) => void
   onPrepareSpeechSplit?: () => Promise<TextVideoProject>
+  onPrepareAudioStage?: () => Promise<TextVideoProject>
   onGenerateScenePlan?: (input: SceneDirectionDraft) => Promise<void>
   onApplyTemplateSettings?: (
     templateProps: Record<string, unknown>,
   ) => Promise<void>
+  onRenderVideo?: () => void
 }
 
 export function TextVideoWorkbench({
@@ -95,8 +125,10 @@ export function TextVideoWorkbench({
   onBuildMasterAudio,
   onRealignMasterAudio,
   onPrepareSpeechSplit,
+  onPrepareAudioStage,
   onGenerateScenePlan,
   onApplyTemplateSettings,
+  onRenderVideo,
 }: TextVideoWorkbenchProps) {
   const [selectedSceneId, setSelectedSceneId] = useState(
     () => projectDocument.scene_plan.scenes[0]?.id ?? '',
@@ -121,16 +153,6 @@ export function TextVideoWorkbench({
   )
     ? selectedSceneId
     : projectDocument.scene_plan.scenes[0]?.id ?? ''
-  const speakableSegments = projectDocument.paragraphs.filter(
-    item => item.text.trim(),
-  )
-  const confirmed = speakableSegments.filter(
-    item => item.status === 'confirmed',
-  ).length
-  const allSpeechConfirmed = (
-    speakableSegments.length > 0
-    && confirmed === speakableSegments.length
-  )
   const audioReady = canEnterVideoStage(projectDocument)
   const sceneActionKey = sceneDirectionScope === 'selected' && activeSceneId
     ? `scene:${activeSceneId}`
@@ -353,18 +375,7 @@ export function TextVideoWorkbench({
 
         {!audioReady ? (
           <div className="border-b border-amber-500/20 bg-amber-500/8 px-5 py-1.5 text-center text-xs text-amber-700">
-            {!allSpeechConfirmed ? (
-              <>
-                <span>
-                  还需确认 {speakableSegments.length - confirmed} 段配音
-                </span>
-                ，确认后可生成主音频
-              </>
-            ) : (
-              <span>
-                配音已确认，生成主音频和时间轴后可进入视频合成
-              </span>
-            )}
+            {speechWorkflowBanner(projectDocument)}
           </div>
         ) : null}
 
@@ -385,6 +396,13 @@ export function TextVideoWorkbench({
               onProjectChange ? reorderSpeech : undefined
             }
             onPrepareSpeechSplit={onPrepareSpeechSplit}
+            onContinueToAudio={onPrepareAudioStage ? async () => {
+              const saved = await onPrepareAudioStage()
+              onProjectChange?.({
+                ...saved,
+                stage: 'audio',
+              })
+            } : undefined}
             onApplySpeechSplit={onProjectChange ? next => {
               commitSpeechProject(next, next.paragraphs[0]?.id)
             } : undefined}
@@ -419,6 +437,10 @@ export function TextVideoWorkbench({
               }
               await onApplyTemplateSettings(templateProps)
             }}
+            onRenderVideo={onRenderVideo}
+            renderAction={
+              actionStates?.['render:mp4'] ?? actionStates?.recovery
+            }
           />
         )}
       </div>

@@ -50,6 +50,7 @@ describe('AudioStage', () => {
     const { container } = renderStage()
 
     expect(screen.getAllByTestId('speech-segment-card')).toHaveLength(3)
+    expect(screen.getByText('合成音频与成片时间轴')).toBeVisible()
     expect(screen.getByText('未生成')).toBeVisible()
     expect(screen.getByText('生成中')).toBeVisible()
     expect(screen.getAllByText('待确认').length).toBeGreaterThan(0)
@@ -158,7 +159,17 @@ describe('AudioStage', () => {
         actionStates={{}}
       />,
     )
-    expect(screen.getByRole('button', { name: '生成主音频' })).toBeEnabled()
+    expect(screen.queryByRole('button', { name: '生成主音频' }))
+      .not.toBeInTheDocument()
+    expect(screen.queryByText('主音频与全局时间轴'))
+      .not.toBeInTheDocument()
+    expect(screen.queryByText('合成音频与成片时间轴'))
+      .not.toBeInTheDocument()
+    expect(screen.queryByTestId('master-audio')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '播放全部' }))
+      .not.toBeInTheDocument()
+    expect(screen.getByTestId('single-segment-timeline-status'))
+      .toHaveTextContent('正在生成成片时间轴')
 
     rerender(
       <AudioStage
@@ -175,18 +186,28 @@ describe('AudioStage', () => {
         }}
       />,
     )
-    expect(screen.getByRole('button', { name: '生成主音频' })).toBeDisabled()
+    expect(screen.queryByRole('button', { name: '生成主音频' }))
+      .not.toBeInTheDocument()
+    expect(screen.getByTestId('single-segment-timeline-status'))
+      .toHaveTextContent('正在生成成片时间轴')
   })
 
   it('prevents speech and master generation from overlapping while a launch is pending', () => {
     const project = makeTextVideoProject({
-      script: '甲。',
+      script: '甲。乙。',
       stage: 'audio',
-      paragraphs: [makeSpeechSegment('a', '甲。', {
-        status: 'confirmed',
-        source_hash: 'a'.repeat(64),
-        audio_url: '/api/uploads/a.mp3',
-      })],
+      paragraphs: [
+        makeSpeechSegment('a', '甲。', {
+          status: 'confirmed',
+          source_hash: 'a'.repeat(64),
+          audio_url: '/api/uploads/a.mp3',
+        }),
+        makeSpeechSegment('b', '乙。', {
+          status: 'confirmed',
+          source_hash: 'b'.repeat(64),
+          audio_url: '/api/uploads/b.mp3',
+        }),
+      ],
     })
     const { rerender, props } = renderStage(project, {
       selectedSegmentId: 'a',
@@ -222,14 +243,18 @@ describe('AudioStage', () => {
     expect(screen.getByRole('button', { name: '生成主音频' })).toBeDisabled()
   })
 
-  it('keeps failed alignment audio playable and exposes the exact retry path', async () => {
+  it('keeps single-segment alignment recovery beside the only audio player', async () => {
     const user = userEvent.setup()
     const onRealignMasterAudio = vi.fn()
     const project = makeTextVideoProject({
       script: '甲。',
       stage: 'audio',
       paragraphs: [
-        makeSpeechSegment('a', '甲。', { status: 'confirmed' }),
+        makeSpeechSegment('a', '甲。', {
+          status: 'confirmed',
+          audio_url: '/api/uploads/master.mp3',
+          duration: 1.6,
+        }),
       ],
       master_audio: makeMasterAudio({
         status: 'ready',
@@ -245,15 +270,84 @@ describe('AudioStage', () => {
       onRealignMasterAudio,
     })
 
-    expect(screen.getByTestId('master-audio-status'))
-      .toHaveTextContent('时间轴生成失败')
-    expect(screen.getByText('时间戳与原稿无法对齐')).toBeVisible()
-    expect(container.querySelector('audio[data-testid="master-audio"]'))
+    const timelineStatus = screen.getByTestId(
+      'single-segment-timeline-status',
+    )
+    expect(timelineStatus).toHaveTextContent('成片时间轴生成失败')
+    expect(timelineStatus).toHaveTextContent('时间戳与原稿无法对齐')
+    expect(container.querySelectorAll('audio')).toHaveLength(1)
+    expect(container.querySelector('audio[data-testid="segment-audio"]'))
       .toHaveAttribute(
         'src',
         'http://localhost:8000/api/uploads/master.mp3',
       )
+    expect(screen.queryByTestId('master-audio')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '播放全部' }))
+      .not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: '重新对齐' }))
     expect(onRealignMasterAudio).toHaveBeenCalledWith(73)
+  })
+
+  it('offers single-segment timeline preparation recovery inline', async () => {
+    const user = userEvent.setup()
+    const onBuildMasterAudio = vi.fn()
+    const project = makeTextVideoProject({
+      script: '甲。',
+      stage: 'audio',
+      paragraphs: [makeSpeechSegment('a', '甲。', {
+        status: 'confirmed',
+        source_hash: 'a'.repeat(64),
+        audio_url: '/api/uploads/a.mp3',
+      })],
+      master_audio: makeMasterAudio({
+        status: 'failed',
+        error: '音频文件校验失败',
+      }),
+    })
+    renderStage(project, {
+      selectedSegmentId: 'a',
+      onBuildMasterAudio,
+    })
+
+    expect(screen.queryByRole('button', { name: /生成主音频/ }))
+      .not.toBeInTheDocument()
+    const timelineStatus = screen.getByTestId(
+      'single-segment-timeline-status',
+    )
+    expect(timelineStatus).toHaveTextContent('成片时间轴准备失败')
+    expect(timelineStatus).toHaveTextContent('音频文件校验失败')
+    await user.click(screen.getByRole('button', {
+      name: '重新准备时间轴',
+    }))
+    expect(onBuildMasterAudio).toHaveBeenCalledOnce()
+  })
+
+  it('shows ready single-segment timing inline without duplicate master audio', () => {
+    const project = makeTextVideoProject({
+      script: '甲。',
+      stage: 'audio',
+      paragraphs: [makeSpeechSegment('a', '甲。', {
+        status: 'confirmed',
+        source_hash: 'a'.repeat(64),
+        audio_url: '/api/uploads/a.mp3',
+        duration: 1.6,
+      })],
+      master_audio: makeMasterAudio({
+        status: 'ready',
+        timeline_status: 'ready',
+        audio_url: '/api/uploads/a.mp3',
+        duration: 1.6,
+      }),
+    })
+    const { container } = renderStage(project, {
+      selectedSegmentId: 'a',
+    })
+
+    expect(screen.getByTestId('single-segment-timeline-status'))
+      .toHaveTextContent('成片时间轴已就绪')
+    expect(container.querySelectorAll('audio')).toHaveLength(1)
+    expect(screen.queryByTestId('master-audio')).not.toBeInTheDocument()
+    expect(screen.queryByText('主音频与全局时间轴'))
+      .not.toBeInTheDocument()
   })
 })

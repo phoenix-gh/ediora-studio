@@ -5,6 +5,8 @@ import {
   deleteTextVideoProject,
   generateTextVideoScenePlan,
   listTextVideoProjects,
+  renderTextVideoProject,
+  textVideoOutputDownloadUrl,
   updateTextVideoProject,
   type TextVideoProjectSummary,
 } from './text-videos'
@@ -107,6 +109,37 @@ describe('text-video project API', () => {
         method: 'POST',
         body: JSON.stringify(input),
       }),
+    )
+  })
+
+  it('launches the final render and exposes its attachment URL', async () => {
+    const response = {
+      jobs: [{
+        id: 301,
+        flow: 'text_video_render',
+        target_id: 7,
+      }],
+      project,
+    }
+    const fetchMock = vi.fn().mockResolvedValue(new Response(
+      JSON.stringify(response),
+      {
+        status: 201,
+        headers: { 'Content-Type': 'application/json' },
+      },
+    ))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(renderTextVideoProject(7, 12)).resolves.toEqual(response)
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:8000/api/text-videos/7/render',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ revision: 12 }),
+      }),
+    )
+    expect(textVideoOutputDownloadUrl(7)).toBe(
+      'http://localhost:8000/api/text-videos/7/output/download',
     )
   })
 })

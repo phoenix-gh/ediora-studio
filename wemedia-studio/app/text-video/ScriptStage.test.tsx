@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -172,5 +172,73 @@ describe('ScriptStage', () => {
     resolveSaved({ ...project, revision: 3 })
 
     expect(await screen.findByRole('dialog')).toHaveTextContent('预览修订 3')
+  })
+
+  it('enables a valid script and prevents duplicate continuation clicks', async () => {
+    const user = userEvent.setup()
+    let resolveContinue!: () => void
+    const onContinueToAudio = vi.fn().mockReturnValue(
+      new Promise<void>(resolve => {
+        resolveContinue = resolve
+      }),
+    )
+    render(
+      <ScriptStage
+        project={makeTextVideoProject({
+          script: '段落一',
+          paragraphs: [makeSpeechSegment('one', '段落一')],
+        })}
+        selectedSpeechSegmentId="one"
+        onContinueToAudio={onContinueToAudio}
+      />,
+    )
+
+    const button = screen.getByRole('button', { name: '进入配音设置' })
+    expect(button).toBeEnabled()
+    await user.click(button)
+    expect(onContinueToAudio).toHaveBeenCalledOnce()
+    expect(screen.getByRole('button', { name: '正在保存…' })).toBeDisabled()
+
+    resolveContinue()
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '进入配音设置' }))
+        .toBeEnabled()
+    })
+  })
+
+  it('keeps the script stage actionable after a failed save', async () => {
+    const user = userEvent.setup()
+    render(
+      <ScriptStage
+        project={makeTextVideoProject({
+          script: '段落一',
+          paragraphs: [makeSpeechSegment('one', '段落一')],
+        })}
+        selectedSpeechSegmentId="one"
+        onContinueToAudio={vi.fn().mockRejectedValue(
+          new Error('保存稿件失败'),
+        )}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: '进入配音设置' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('保存稿件失败')
+    expect(screen.getByRole('button', { name: '进入配音设置' })).toBeEnabled()
+  })
+
+  it('does not continue when every speech segment is blank', () => {
+    render(
+      <ScriptStage
+        project={makeTextVideoProject({
+          script: '   ',
+          paragraphs: [makeSpeechSegment('one', '   ')],
+        })}
+        selectedSpeechSegmentId="one"
+        onContinueToAudio={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByRole('button', { name: '进入配音设置' }))
+      .toBeDisabled()
   })
 })

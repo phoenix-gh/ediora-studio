@@ -6,6 +6,8 @@ import {
   ArrowRightFromLine,
   Brush,
   Clapperboard,
+  Download,
+  LoaderCircle,
   Merge,
   Play,
   Scissors,
@@ -19,9 +21,14 @@ import {
   AlertDescription,
 } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
+import { Button, buttonVariants } from '@/components/ui/button'
 import { Field, FieldDescription, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
+import {
+  Progress,
+  ProgressLabel,
+  ProgressValue,
+} from '@/components/ui/progress'
 import {
   Select,
   SelectContent,
@@ -34,6 +41,10 @@ import type {
   ScenePlanSceneDocument,
   TextVideoProject,
 } from '@/lib/api/text-videos'
+import {
+  textVideoOutputDownloadUrl,
+} from '@/lib/api/text-videos'
+import { creativeAssetUrl } from '@/lib/api/assets'
 import {
   applyScenePlanToProject,
   editSceneVisuals,
@@ -48,6 +59,7 @@ import { cn } from '@/lib/utils'
 import { RemotionPreview } from './RemotionPreview'
 import { SceneTimeline } from './SceneTimeline'
 import { TemplateSettingsDialog } from './TemplateSettingsDialog'
+import type { TextVideoActionState } from './useTextVideoProjectActions'
 
 
 export function VideoStage({
@@ -59,6 +71,8 @@ export function VideoStage({
   onProjectChange,
   onOpenSceneDirection,
   onApplyTemplateSettings,
+  onRenderVideo,
+  renderAction,
 }: {
   project: TextVideoProject
   selectedSceneId: string
@@ -70,6 +84,8 @@ export function VideoStage({
   onApplyTemplateSettings(
     templateProps: Record<string, unknown>,
   ): Promise<void>
+  onRenderVideo?: () => void
+  renderAction?: TextVideoActionState
 }) {
   const [templateSettingsOpen, setTemplateSettingsOpen] = useState(false)
   const scenes = project.scene_plan.scenes
@@ -87,6 +103,26 @@ export function VideoStage({
   const previewReady = canPreviewVideo(project)
   const director = directorAction(project, activeSceneId)
   const template = templateDetails(project)
+  const renderRunning = (
+    renderAction?.status === 'running'
+    || project.render_state.status === 'queued'
+    || project.render_state.status === 'rendering'
+  )
+  const renderProgress = Math.max(
+    0,
+    Math.min(
+      100,
+      renderAction?.progress ?? project.render_state.progress,
+    ),
+  )
+  const renderError = renderAction?.error || project.render_state.error
+  const hasOutput = Boolean(project.output_asset_url)
+  const hasCurrentOutput = hasOutput && !project.output_stale
+  const renderLabel = renderRunning
+    ? '正在生成视频'
+    : hasOutput
+      ? '重新生成视频'
+      : '生成视频'
 
   return (
     <div
@@ -278,13 +314,61 @@ export function VideoStage({
             </AlertDescription>
           </Alert>
         ) : null}
+        {hasOutput ? (
+          <div className="mt-3 flex flex-col gap-2 rounded-xl border bg-background/55 p-2">
+            <video
+              aria-label="成片视频"
+              className="aspect-video w-full rounded-lg bg-muted object-contain"
+              controls
+              preload="metadata"
+              src={creativeAssetUrl(project.output_asset_url)}
+            />
+            <a
+              className={buttonVariants({
+                variant: 'outline',
+                size: 'sm',
+              })}
+              href={textVideoOutputDownloadUrl(project.id)}
+              download
+            >
+              <Download data-icon="inline-start" />
+              下载 MP4
+            </a>
+          </div>
+        ) : null}
+        {renderRunning ? (
+          <Progress
+            className="mt-3"
+            value={renderProgress}
+            aria-label="视频渲染进度"
+          >
+            <ProgressLabel>正在渲染 {renderProgress}%</ProgressLabel>
+            <ProgressValue />
+          </Progress>
+        ) : null}
+        {!renderRunning && renderError ? (
+          <Alert variant="danger" className="mt-3">
+            <AlertDescription>{renderError}</AlertDescription>
+          </Alert>
+        ) : null}
         <Button
           className="mt-3 w-full"
-          disabled
-          aria-label="MP4 渲染暂未开放"
+          disabled={!previewReady || !onRenderVideo || renderRunning}
+          aria-label={renderLabel}
+          onClick={onRenderVideo}
         >
-          MP4 渲染暂未开放
+          {renderRunning ? <LoaderCircle data-icon="inline-start" /> : null}
+          {renderLabel}
         </Button>
+        {!previewReady ? (
+          <p className="mt-2 text-xs leading-5 text-muted-foreground">
+            先完成主音频、时间轴与分镜校准，再生成 MP4。
+          </p>
+        ) : hasCurrentOutput ? (
+          <p className="mt-2 text-xs leading-5 text-muted-foreground">
+            当前成片与编辑内容一致，可直接播放或下载。
+          </p>
+        ) : null}
       </aside>
 
       <SceneTimeline

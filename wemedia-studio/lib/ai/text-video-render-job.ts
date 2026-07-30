@@ -405,7 +405,10 @@ export async function runTextVideoRenderJob(
       })
       const browserExecutable = dependencies.browserExecutable()
       const browserOptions = browserExecutable
-        ? { browserExecutable }
+        ? {
+            browserExecutable,
+            chromeMode: 'chrome-for-testing' as const,
+          }
         : {}
       const composition = await dependencies.selectComposition({
         serveUrl,
