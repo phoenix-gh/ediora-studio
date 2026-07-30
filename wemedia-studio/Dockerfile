@@ -1,11 +1,19 @@
-FROM node:22-alpine AS deps
+FROM node:22-bookworm-slim AS deps
 WORKDIR /app
 COPY package.json pnpm-lock.yaml ./
 RUN corepack enable && pnpm install --frozen-lockfile --config.minimumReleaseAge=0 --config.strictDepBuilds=false
 
-FROM node:22-alpine AS runner
+FROM node:22-bookworm-slim AS runner
 WORKDIR /app
 ENV NODE_ENV=production
+ENV REMOTION_BROWSER_EXECUTABLE=/usr/bin/chromium
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    chromium \
+    fonts-noto-cjk \
+    fonts-noto-color-emoji \
+  && rm -rf /var/lib/apt/lists/*
 COPY --from=deps /app/node_modules ./node_modules
 COPY . ./
 RUN ./node_modules/.bin/next build

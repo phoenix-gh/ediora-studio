@@ -31,6 +31,7 @@ import { runXResponseDigestJob, runXResponseJob } from '../lib/ai/x-response-job
 import { runTopicSourceJob } from '../lib/ai/topic-source-job'
 import { runTextVideoSplitJob } from '../lib/ai/text-video-split-job'
 import { runTextVideoMasterJob } from '../lib/ai/text-video-master-job'
+import { runTextVideoRenderJob } from '../lib/ai/text-video-render-job'
 import { runTextVideoSceneJob } from '../lib/ai/text-video-scene-job'
 import { runTextVideoSpeechJob } from '../lib/ai/text-video-speech-job'
 
@@ -135,6 +136,7 @@ export function resolveContentJobRunner(
   }
   if (flow === 'text_video_master_audio') return runTextVideoMasterJob
   if (flow === 'text_video_scene_plan') return runTextVideoSceneJob
+  if (flow === 'text_video_render') return runTextVideoRenderJob
   if (flow.startsWith('text_video_')) {
     return jobId => runUnsupportedTextVideoJob(
       jobId,

@@ -17,7 +17,13 @@ importers:
       '@base-ui/react':
         specifier: ^1.4.1
         version: 1.4.1(@types/react@19.2.14)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
+      '@remotion/bundler':
+        specifier: 4.0.500
+        version: 4.0.500(@swc/helpers@0.5.15)(postcss@8.5.22)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
       '@remotion/player':
+        specifier: 4.0.500
+        version: 4.0.500(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
+      '@remotion/renderer':
         specifier: 4.0.500
         version: 4.0.500(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
       '@uiw/react-md-editor':

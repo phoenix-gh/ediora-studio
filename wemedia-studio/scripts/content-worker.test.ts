@@ -8,6 +8,7 @@ import { runContentJob } from '../lib/ai/content-job'
 import { JobFinalizationError } from '../lib/ai/digital-human-job'
 import { ApiRequestError } from '../lib/ai/job-client'
 import { runTextVideoMasterJob } from '../lib/ai/text-video-master-job'
+import { runTextVideoRenderJob } from '../lib/ai/text-video-render-job'
 import { runTextVideoSceneJob } from '../lib/ai/text-video-scene-job'
 import { runTextVideoSpeechJob } from '../lib/ai/text-video-speech-job'
 import { runTextVideoSplitJob } from '../lib/ai/text-video-split-job'
@@ -177,6 +178,8 @@ describe('content worker dispatch', () => {
       .toBe(runTextVideoMasterJob)
     expect(resolveContentJobRunner('text_video_scene_plan'))
       .toBe(runTextVideoSceneJob)
+    expect(resolveContentJobRunner('text_video_render'))
+      .toBe(runTextVideoRenderJob)
     expect(resolveContentJobRunner('content')).toBe(runContentJob)
   })
 
