@@ -66,6 +66,7 @@ vi.mock('./TextVideoWorkbench', () => ({
     onGenerateScenePlan,
     onProjectChange,
     onRealignMasterAudio,
+    onApplyTemplate,
     onApplyTemplateSettings,
     onPrepareAudioStage,
     onRenderVideo,
@@ -80,6 +81,11 @@ vi.mock('./TextVideoWorkbench', () => ({
     }): Promise<void>
     onProjectChange(project: ReturnType<typeof makeVideoReadyProject>): void
     onApplyTemplateSettings(
+      props: Record<string, unknown>,
+    ): Promise<void>
+    onApplyTemplate(
+      templateId: string,
+      templateVersion: number,
       props: Record<string, unknown>,
     ): Promise<void>
     onPrepareAudioStage(): Promise<ReturnType<typeof makeVideoReadyProject>>
@@ -127,6 +133,23 @@ vi.mock('./TextVideoWorkbench', () => ({
         })}
       >
         测试应用模板视觉
+      </button>
+      <button
+        type="button"
+        onClick={() => void onApplyTemplate(
+          'kinetic-punch-v1',
+          1,
+          {
+            style: 'kinetic-punch',
+            palette: 'night',
+            brandTitle: 'EDIORA',
+            showBrand: true,
+            accentColor: '#D8FF3E',
+            showProgress: true,
+          },
+        )}
+      >
+        测试切换模板
       </button>
       <button
         type="button"
@@ -305,6 +328,36 @@ describe('TextVideoEditorClient scene action', () => {
     expect(mocks.autosave.markDirty.mock.invocationCallOrder[0])
       .toBeLessThan(mocks.autosave.flush.mock.invocationCallOrder[0])
     expect(await screen.findByText('SERVER CANONICAL')).toBeInTheDocument()
+  })
+
+  it('persists a template identity and its matching default props together', async () => {
+    const user = userEvent.setup()
+    const project = makeVideoReadyProject()
+    render(<TextVideoEditorClient initialProject={project} />)
+
+    await user.click(screen.getByRole('button', {
+      name: '测试切换模板',
+    }))
+
+    await waitFor(() => expect(mocks.autosave.flush).toHaveBeenCalledOnce())
+    expect(mocks.autosave.markDirty).toHaveBeenCalledWith(
+      expect.objectContaining({
+        render_input: expect.objectContaining({
+          templateId: 'kinetic-punch-v1',
+          templateVersion: 1,
+          templateProps: {
+            style: 'kinetic-punch',
+            palette: 'night',
+            brandTitle: 'EDIORA',
+            showBrand: true,
+            accentColor: '#D8FF3E',
+            showProgress: true,
+          },
+        }),
+      }),
+    )
+    expect(mocks.autosave.markDirty.mock.invocationCallOrder[0])
+      .toBeLessThan(mocks.autosave.flush.mock.invocationCallOrder[0])
   })
 
   it('automatically reuses a confirmed single segment as master audio', async () => {

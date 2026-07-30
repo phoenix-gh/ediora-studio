@@ -110,6 +110,11 @@ export type TextVideoWorkbenchProps = {
   onApplyTemplateSettings?: (
     templateProps: Record<string, unknown>,
   ) => Promise<void>
+  onApplyTemplate?: (
+    templateId: string,
+    templateVersion: number,
+    templateProps: Record<string, unknown>,
+  ) => Promise<void>
   onRenderVideo?: () => void
 }
 
@@ -128,6 +133,7 @@ export function TextVideoWorkbench({
   onPrepareAudioStage,
   onGenerateScenePlan,
   onApplyTemplateSettings,
+  onApplyTemplate,
   onRenderVideo,
 }: TextVideoWorkbenchProps) {
   const [selectedSceneId, setSelectedSceneId] = useState(
@@ -431,6 +437,7 @@ export function TextVideoWorkbench({
             onPreviewAll={() => setPreviewAll(true)}
             onProjectChange={next => onProjectChange?.(next)}
             onOpenSceneDirection={openSceneDirection}
+            onApplyTemplate={onApplyTemplate}
             onApplyTemplateSettings={async templateProps => {
               if (!onApplyTemplateSettings) {
                 throw new Error('模板视觉保存服务尚未连接')

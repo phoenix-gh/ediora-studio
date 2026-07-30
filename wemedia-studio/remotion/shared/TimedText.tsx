@@ -21,10 +21,12 @@ export function TimedText({
   segment,
   segmentStartFrame,
   accent = '#69F6FF',
+  color = '#F4F8FF',
 }: {
   segment: TextVideoSegment
   segmentStartFrame: number
   accent?: string
+  color?: string
 }) {
   const frame = useCurrentFrame()
   const { fps } = useVideoConfig()
@@ -54,7 +56,7 @@ export function TimedText({
         lineHeight: 1.12,
         textAlign: 'center',
         whiteSpace: 'pre-line',
-        color: '#F4F8FF',
+        color,
       }}
     >
       {highlightedText(segment.text, segment.highlight, accent)}

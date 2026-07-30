@@ -58,10 +58,24 @@ export function TextVideoEditorClient({
   async function applyTemplateSettings(
     templateProps: Record<string, unknown>,
   ) {
+    await applyTemplate(
+      project.render_input.templateId,
+      project.render_input.templateVersion,
+      templateProps,
+    )
+  }
+
+  async function applyTemplate(
+    templateId: string,
+    templateVersion: number,
+    templateProps: Record<string, unknown>,
+  ) {
     const next = {
       ...project,
       render_input: {
         ...project.render_input,
+        templateId,
+        templateVersion,
         templateProps,
       },
     }
@@ -215,6 +229,7 @@ export function TextVideoEditorClient({
           await autosave.flush()
         ).project}
         onGenerateScenePlan={generateScenePlan}
+        onApplyTemplate={applyTemplate}
         onApplyTemplateSettings={applyTemplateSettings}
         onRenderVideo={renderVideo}
       />

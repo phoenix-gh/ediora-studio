@@ -257,6 +257,36 @@ describe('VideoStage', () => {
     expect(onOpenSceneDirection).not.toHaveBeenCalled()
   })
 
+  it('switches to another registered template with that template defaults', async () => {
+    const user = userEvent.setup()
+    const onApplyTemplate = vi.fn().mockResolvedValue(undefined)
+
+    render(
+      <VideoStage
+        project={makeVideoReadyProject()}
+        selectedSceneId="scene-1"
+        onSelectScene={vi.fn()}
+        previewAll={false}
+        onPreviewAll={vi.fn()}
+        onProjectChange={vi.fn()}
+        onOpenSceneDirection={vi.fn()}
+        onApplyTemplateSettings={vi.fn()}
+        onApplyTemplate={onApplyTemplate}
+      />,
+    )
+
+    await user.click(screen.getByRole('combobox', { name: '视频模板' }))
+    await user.click(screen.getByRole('option', { name: '动感大字' }))
+
+    expect(onApplyTemplate).toHaveBeenCalledWith(
+      'kinetic-punch-v1',
+      1,
+      expect.objectContaining({
+        accentColor: expect.any(String),
+      }),
+    )
+  })
+
   it('labels an existing output as the previous render after visuals change', () => {
     render(
       <VideoStage

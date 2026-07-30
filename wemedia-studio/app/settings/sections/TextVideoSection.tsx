@@ -144,7 +144,7 @@ export function TextVideoSection({
                     key={templateKey(template)}
                     value={templateKey(template)}
                   >
-                    {template.name ?? template.id}
+                    {template.name}
                   </SelectItem>
                 ))}
               </SelectGroup>

@@ -159,7 +159,7 @@ export function parseTextVideoRenderInput(
   const manifest = resolveTextVideoTemplate(
     envelope.templateId,
     envelope.templateVersion,
-  )
+  ) as unknown as TextVideoTemplateManifest<Record<string, unknown>>
   return parseTextVideoRenderInputWithManifest(envelope, {
     masterDuration,
     manifest,

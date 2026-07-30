@@ -8,12 +8,28 @@ import {
   createTextVideoDefaultRenderInput,
 } from './Root'
 import { techTextV1Manifest } from './templates/tech-text-v1/manifest'
+import { textVideoTemplates } from './registry'
 import type {
   TextVideoRenderInput,
   TextVideoTemplateManifest,
 } from './types'
 
 describe('text-video Remotion registration', () => {
+  it('registers every built-in template as a renderable composition', () => {
+    const registrations = createTextVideoCompositionRegistrations(
+      textVideoTemplates,
+    )
+
+    expect(registrations.map(item => item.id)).toEqual([
+      'tech-text-v1',
+      'kinetic-punch-v1',
+      'caption-focus-v1',
+      'editorial-card-v1',
+      'voice-pulse-v1',
+    ])
+    expect(registrations).toHaveLength(5)
+  })
+
   it('uses each manifest default composition instead of a portrait fallback', () => {
     function HorizontalComponent({
       segments,

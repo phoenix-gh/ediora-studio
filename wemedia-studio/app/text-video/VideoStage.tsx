@@ -53,7 +53,10 @@ import {
   splitSceneAtWord,
 } from '@/lib/text-video/scene-plan'
 import { canPreviewVideo } from '@/lib/text-video/project-merge'
-import { resolveTextVideoTemplate } from '@/remotion/registry'
+import {
+  resolveTextVideoTemplate,
+  textVideoTemplates,
+} from '@/remotion/registry'
 import { cn } from '@/lib/utils'
 
 import { RemotionPreview } from './RemotionPreview'
@@ -70,6 +73,7 @@ export function VideoStage({
   onPreviewAll,
   onProjectChange,
   onOpenSceneDirection,
+  onApplyTemplate,
   onApplyTemplateSettings,
   onRenderVideo,
   renderAction,
@@ -81,6 +85,11 @@ export function VideoStage({
   onPreviewAll(): void
   onProjectChange(project: TextVideoProject): void
   onOpenSceneDirection(scope: 'all' | 'selected'): void
+  onApplyTemplate?(
+    templateId: string,
+    templateVersion: number,
+    templateProps: Record<string, unknown>,
+  ): Promise<void>
   onApplyTemplateSettings(
     templateProps: Record<string, unknown>,
   ): Promise<void>
@@ -245,18 +254,40 @@ export function VideoStage({
             value={`${project.render_input.templateId}@${
               project.render_input.templateVersion
             }`}
-            disabled
+            disabled={!onApplyTemplate}
+            onValueChange={value => {
+              const nextTemplate = textVideoTemplates.find(
+                item => `${item.id}@${item.version}` === value,
+              )
+              if (!nextTemplate || !onApplyTemplate) return
+              void onApplyTemplate(
+                nextTemplate.id,
+                nextTemplate.version,
+                { ...nextTemplate.defaults },
+              ).catch(error => {
+                toast.error(
+                  error instanceof Error ? error.message : '模板切换失败',
+                )
+              })
+            }}
           >
             <SelectTrigger className="w-full" aria-label="视频模板">
-              <SelectValue />
+              <SelectValue>
+                {value => textVideoTemplates.find(
+                  item => `${item.id}@${item.version}` === value,
+                )?.name ?? template.name}
+              </SelectValue>
             </SelectTrigger>
             <SelectContent>
               <SelectGroup>
-                <SelectItem value={`${project.render_input.templateId}@${
-                  project.render_input.templateVersion
-                }`}>
-                  {template.name}
-                </SelectItem>
+                {textVideoTemplates.map(item => (
+                  <SelectItem
+                    key={`${item.id}@${item.version}`}
+                    value={`${item.id}@${item.version}`}
+                  >
+                    {item.name}
+                  </SelectItem>
+                ))}
               </SelectGroup>
             </SelectContent>
           </Select>
@@ -716,7 +747,7 @@ function templateDetails(project: TextVideoProject): {
       project.render_input.templateVersion,
     )
     return {
-      name: template.name ?? template.id,
+      name: template.name,
       animations: template.animations,
     }
   } catch {

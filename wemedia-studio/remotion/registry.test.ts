@@ -33,7 +33,126 @@ describe('text-video template registry', () => {
       },
       settings: expect.any(Array),
     })
-    expect(textVideoTemplates).toHaveLength(1)
+    expect(textVideoTemplates).toHaveLength(5)
+    expect(textVideoTemplates.map(template => template.id)).toEqual([
+      'tech-text-v1',
+      'kinetic-punch-v1',
+      'caption-focus-v1',
+      'editorial-card-v1',
+      'voice-pulse-v1',
+    ])
+  })
+
+  it.each([
+    ['kinetic-punch-v1', '动感大字'],
+    ['caption-focus-v1', '逐词聚焦字幕'],
+    ['editorial-card-v1', '杂志卡片'],
+    ['voice-pulse-v1', '声波脉冲'],
+  ])('registers the %s preset with editable settings', (id, name) => {
+    const template = resolveTextVideoTemplate(id, 1)
+
+    expect(template).toMatchObject({
+      id,
+      version: 1,
+      compositionId: id,
+      name,
+      aspectRatios: ['9:16', '16:9', '1:1'],
+      defaults: expect.any(Object),
+      settings: expect.any(Array),
+    })
+    expect(template.settings.length).toBeGreaterThan(0)
+  })
+
+  it('locks the render-facing catalog contract for frontend/backend parity', () => {
+    expect(textVideoTemplates.map(template => ({
+      id: template.id,
+      compositionId: template.compositionId,
+      composition: template.defaultComposition,
+      animations: template.animations,
+      transitions: template.transitions,
+      defaults: template.defaults,
+    }))).toEqual([
+      {
+        id: 'tech-text-v1',
+        compositionId: 'tech-text-v1',
+        composition: { width: 1080, height: 1920, fps: 30 },
+        animations: ['fade-up', 'scale'],
+        transitions: ['soft-push'],
+        defaults: {
+          theme: 'tech-blue',
+          font: 'source-han-sans',
+          background: 'dark-grid',
+          transition: 'soft-push',
+          textDensity: 'standard',
+          brandTitle: 'EDIORA',
+          brandSubtitle: '述策',
+          showBrand: true,
+          accentColor: '#69F6FF',
+          showProgress: true,
+          showSceneNumber: true,
+        },
+      },
+      {
+        id: 'kinetic-punch-v1',
+        compositionId: 'kinetic-punch-v1',
+        composition: { width: 1080, height: 1920, fps: 30 },
+        animations: ['scale', 'fade-up'],
+        transitions: ['cut'],
+        defaults: {
+          style: 'kinetic-punch',
+          palette: 'night',
+          brandTitle: 'EDIORA',
+          showBrand: true,
+          accentColor: '#D8FF3E',
+          showProgress: true,
+        },
+      },
+      {
+        id: 'caption-focus-v1',
+        compositionId: 'caption-focus-v1',
+        composition: { width: 1080, height: 1920, fps: 30 },
+        animations: ['fade-up', 'scale'],
+        transitions: ['cut'],
+        defaults: {
+          style: 'caption-focus',
+          palette: 'night',
+          brandTitle: 'EDIORA',
+          showBrand: true,
+          accentColor: '#FF4D8D',
+          showProgress: true,
+        },
+      },
+      {
+        id: 'editorial-card-v1',
+        compositionId: 'editorial-card-v1',
+        composition: { width: 1080, height: 1920, fps: 30 },
+        animations: ['fade-up', 'scale'],
+        transitions: ['cut'],
+        defaults: {
+          style: 'editorial-card',
+          palette: 'light',
+          brandTitle: 'EDIORA JOURNAL',
+          showBrand: true,
+          accentColor: '#D14B32',
+          showProgress: true,
+        },
+      },
+      {
+        id: 'voice-pulse-v1',
+        compositionId: 'voice-pulse-v1',
+        composition: { width: 1080, height: 1920, fps: 30 },
+        animations: ['scale', 'fade-up'],
+        transitions: ['cut'],
+        defaults: {
+          style: 'voice-pulse',
+          palette: 'warm',
+          brandTitle: 'EDIORA VOICE',
+          showBrand: true,
+          accentColor: '#7C5CFF',
+          showProgress: true,
+        },
+      },
+    ])
   })
 
   it.each([

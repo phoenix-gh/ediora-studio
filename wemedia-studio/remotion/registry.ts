@@ -1,4 +1,10 @@
 import { techTextV1Manifest } from './templates/tech-text-v1/manifest'
+import {
+  captionFocusV1Manifest,
+  editorialCardV1Manifest,
+  kineticPunchV1Manifest,
+  voicePulseV1Manifest,
+} from './templates/presets-v1/manifest'
 
 type TemplateIdentity = {
   id: string
@@ -60,7 +66,13 @@ export function createTextVideoTemplateRegistry<const T extends TemplateIdentity
   return templatesByKey
 }
 
-export const textVideoTemplates = [techTextV1Manifest] as const
+export const textVideoTemplates = [
+  techTextV1Manifest,
+  kineticPunchV1Manifest,
+  captionFocusV1Manifest,
+  editorialCardV1Manifest,
+  voicePulseV1Manifest,
+] as const
 
 const templates = createTextVideoTemplateRegistry(textVideoTemplates)
 
