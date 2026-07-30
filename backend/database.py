@@ -243,6 +243,17 @@ async def _add_columns(conn, table_name: str, definitions: dict[str, str]) -> No
             ))
 
 
+async def _drop_tables(conn, table_names: tuple[str, ...]) -> None:
+    """Drop retired tables with CASCADE only where PostgreSQL supports it."""
+    from sqlalchemy import text
+
+    cascade = " CASCADE" if conn.dialect.name == "postgresql" else ""
+    for table_name in table_names:
+        await conn.execute(text(
+            f'DROP TABLE IF EXISTS "{table_name}"{cascade}'
+        ))
+
+
 async def migrate_text_video_project_schema(conn) -> None:
     """Keep early text-video project tables compatible across SQLite and PostgreSQL."""
     import json
@@ -680,16 +691,18 @@ async def init_db():
         # Drop legacy X tables (replaced by new schema). Dev DB only.
         # NOTE: x_posts is no longer dropped here — we keep collected data
         # across restarts and migrate the schema via ALTER TABLE below.
-        await conn.execute(text("DROP TABLE IF EXISTS x_post_metrics CASCADE"))
-        await conn.execute(text("DROP TABLE IF EXISTS x_blogger_candidates CASCADE"))
-        # GitHub issues 功能已整体移除（2026-06）：数据可随时从 GitHub 重新拉取
-        await conn.execute(text("DROP TABLE IF EXISTS github_issues CASCADE"))
-        await conn.execute(text("DROP TABLE IF EXISTS issue_pain_points CASCADE"))
-        # 旧选题链路已整体移除（2026-06）：通用 collector/analyzer + Topic 聚类，产出无人消费
-        await conn.execute(text("DROP TABLE IF EXISTS topics CASCADE"))
-        await conn.execute(text("DROP TABLE IF EXISTS topic_clusters CASCADE"))
-        await conn.execute(text("DROP TABLE IF EXISTS posts CASCADE"))
-        await conn.execute(text("DROP TABLE IF EXISTS accounts CASCADE"))
+        await _drop_tables(conn, (
+            "x_post_metrics",
+            "x_blogger_candidates",
+            # GitHub issues 功能已整体移除（2026-06）：数据可随时从 GitHub 重新拉取
+            "github_issues",
+            "issue_pain_points",
+            # 旧选题链路已整体移除（2026-06）：通用 collector/analyzer + Topic 聚类，产出无人消费
+            "topics",
+            "topic_clusters",
+            "posts",
+            "accounts",
+        ))
 
         if not DATABASE_URL.startswith("sqlite"):
             # Rename tables (idempotent)
@@ -708,15 +721,16 @@ async def init_db():
         await migrate_content_job_idempotency_schema(conn)
         await migrate_text_video_project_schema(conn)
         await migrate_text_video_speech_asset_schema(conn)
-        await conn.execute(text("ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS media_kind VARCHAR NOT NULL DEFAULT ''"))
-        await conn.execute(text("ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS directory VARCHAR NOT NULL DEFAULT ''"))
-        await conn.execute(text("ALTER TABLE creative_assets ADD COLUMN IF NOT EXISTS last_selected_at TIMESTAMP"))
-        await conn.execute(text("ALTER TABLE creative_asset_directories ADD COLUMN IF NOT EXISTS asset_type VARCHAR NOT NULL DEFAULT 'article'"))
-        await conn.execute(text("ALTER TABLE creative_asset_directories ADD COLUMN IF NOT EXISTS parent_id INTEGER"))
-        await conn.execute(text(
-            "ALTER TABLE creative_asset_directories "
-            "ADD COLUMN IF NOT EXISTS system_key VARCHAR"
-        ))
+        await _add_columns(conn, "creative_assets", {
+            "media_kind": "VARCHAR NOT NULL DEFAULT ''",
+            "directory": "VARCHAR NOT NULL DEFAULT ''",
+            "last_selected_at": "TIMESTAMP",
+        })
+        await _add_columns(conn, "creative_asset_directories", {
+            "asset_type": "VARCHAR NOT NULL DEFAULT 'article'",
+            "parent_id": "INTEGER",
+            "system_key": "VARCHAR",
+        })
         if not DATABASE_URL.startswith("sqlite"):
             # The first version used a globally unique name. Directories now
             # have independent article/media trees, so the same name is valid
@@ -730,12 +744,10 @@ async def init_db():
                 "WHERE system_key IS NOT NULL"
             ))
         # x_posts column additions (idempotent)
-        await conn.execute(text(
-            "ALTER TABLE x_posts ADD COLUMN IF NOT EXISTS author_avatar VARCHAR NOT NULL DEFAULT ''"
-        ))
-        await conn.execute(text(
-            "ALTER TABLE x_posts ADD COLUMN IF NOT EXISTS cover_image VARCHAR NOT NULL DEFAULT ''"
-        ))
+        await _add_columns(conn, "x_posts", {
+            "author_avatar": "VARCHAR NOT NULL DEFAULT ''",
+            "cover_image": "VARCHAR NOT NULL DEFAULT ''",
+        })
         if not DATABASE_URL.startswith("sqlite"):
             # X search-subscription + ref-consumer schema (idempotent, PG only)
             await conn.execute(text("ALTER TABLE x_posts ADD COLUMN IF NOT EXISTS possibly_sensitive BOOLEAN NOT NULL DEFAULT FALSE"))
@@ -753,23 +765,34 @@ async def init_db():
             await conn.execute(text("ALTER TABLE reddit_posts ADD COLUMN IF NOT EXISTS comments JSON NOT NULL DEFAULT '[]'::json"))
             await conn.execute(text("ALTER TABLE reddit_posts ADD COLUMN IF NOT EXISTS fetch_status VARCHAR NOT NULL DEFAULT 'ok'"))
         # Lightweight in-place migrations for columns added after the original
-        # table creation. PostgreSQL only — ADD COLUMN IF NOT EXISTS is no-op
-        # when the column is already present.
-        await conn.execute(text(
-            "ALTER TABLE wechat_articles ADD COLUMN IF NOT EXISTS content TEXT NOT NULL DEFAULT ''"
-        ))
-        await conn.execute(text(
-            "ALTER TABLE publish_accounts ADD COLUMN IF NOT EXISTS voice_samples JSON NOT NULL DEFAULT '[]'::json"
-        ))
-        await conn.execute(text(
-            "ALTER TABLE publish_accounts ADD COLUMN IF NOT EXISTS style_rules JSON NOT NULL DEFAULT '[]'::json"
-        ))
-        await conn.execute(text(
-            "ALTER TABLE publish_accounts ADD COLUMN IF NOT EXISTS cover_style JSON NOT NULL DEFAULT '{}'::json"
-        ))
-        await conn.execute(text(
-            "ALTER TABLE publish_accounts ADD COLUMN IF NOT EXISTS daily_quota JSON NOT NULL DEFAULT '{}'::json"
-        ))
+        # table creation.
+        json_object_default = (
+            "'{}'"
+            if conn.dialect.name == "sqlite"
+            else "'{}'::json"
+        )
+        json_array_default = (
+            "'[]'"
+            if conn.dialect.name == "sqlite"
+            else "'[]'::json"
+        )
+        await _add_columns(conn, "wechat_articles", {
+            "content": "TEXT NOT NULL DEFAULT ''",
+        })
+        await _add_columns(conn, "publish_accounts", {
+            "voice_samples": (
+                f"JSON NOT NULL DEFAULT {json_array_default}"
+            ),
+            "style_rules": (
+                f"JSON NOT NULL DEFAULT {json_array_default}"
+            ),
+            "cover_style": (
+                f"JSON NOT NULL DEFAULT {json_object_default}"
+            ),
+            "daily_quota": (
+                f"JSON NOT NULL DEFAULT {json_object_default}"
+            ),
+        })
         await migrate_x_response_claim_schema(conn)
         await migrate_content_response_schema(conn)
         await retire_x_response_decision_schema(conn)
@@ -826,6 +849,8 @@ END $$
 """))
         # plan_updates: created by Base.metadata.create_all above (no raw DDL needed)
 
-        await conn.execute(text("DROP TABLE IF EXISTS ref_seen CASCADE"))
-        await conn.execute(text("DROP TABLE IF EXISTS ref_collect_rules CASCADE"))
-        await conn.execute(text("DROP TABLE IF EXISTS ref_materials CASCADE"))
+        await _drop_tables(conn, (
+            "ref_seen",
+            "ref_collect_rules",
+            "ref_materials",
+        ))
