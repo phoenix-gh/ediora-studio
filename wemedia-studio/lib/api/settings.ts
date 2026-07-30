@@ -21,6 +21,11 @@ export interface WebFetchProviderConfig {
   timeout_seconds: number
 }
 
+export type TextVideoTemplateDefaults = Record<
+  string,
+  Record<string, unknown>
+>
+
 export type TranscriptionProvider =
   | 'local-whisper'
   | 'openai-compatible'
@@ -113,6 +118,7 @@ export interface AppSettings {
   blog_api_token_preview: string
   web_search_providers: WebSearchProviderConfig[]
   web_fetch_providers: WebFetchProviderConfig[]
+  text_video_template_defaults: TextVideoTemplateDefaults
   providers: ProviderInfo[]
 }
 
@@ -185,6 +191,7 @@ export interface SettingsUpdate {
   blog_api_token?: string
   web_search_providers?: WebSearchProviderConfig[]
   web_fetch_providers?: WebFetchProviderConfig[]
+  text_video_template_defaults?: TextVideoTemplateDefaults
 }
 
 export interface FetchModelsRequest {

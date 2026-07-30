@@ -14,6 +14,7 @@ vi.mock('./sections/HeyGenSection', () => ({ HeyGenSection: () => <div>HeyGen se
 vi.mock('./sections/LogsSection', () => ({ LogsSection: () => <div>Logs settings</div> }))
 vi.mock('./sections/PublishAccountsSection', () => ({ PublishAccountsSection: () => <div>Publish settings</div> }))
 vi.mock('./sections/SpeechSection', () => ({ SpeechSection: () => <div>Speech settings</div> }))
+vi.mock('./sections/TextVideoSection', () => ({ TextVideoSection: () => <div>Text video settings</div> }))
 vi.mock('./sections/TranscriptionSection', () => ({ TranscriptionSection: () => <div>Transcription settings</div> }))
 vi.mock('./sections/WebFetchSection', () => ({ WebFetchSection: () => <div>Web fetch settings</div> }))
 vi.mock('./sections/WebSearchSection', () => ({ WebSearchSection: () => <div>Web search settings</div> }))
@@ -63,5 +64,16 @@ describe('SettingsClient', () => {
 
     expect(screen.getByRole('heading', { level: 1, name: '语音合成' })).toBeInTheDocument()
     expect(screen.getByText('Speech settings')).toBeVisible()
+  })
+
+  it('opens text video template and brand settings', () => {
+    render(<SettingsClient initialSettings={null} />)
+
+    fireEvent.click(screen.getByRole('button', { name: /文字视频/ }))
+
+    expect(screen.getByRole('heading', { level: 1, name: '文字视频' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /模板 · 品牌 · 默认视觉/ }))
+      .toHaveAttribute('aria-current', 'page')
+    expect(screen.getByText('Text video settings')).toBeVisible()
   })
 })

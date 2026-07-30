@@ -1,4 +1,5 @@
 import type { AppSettings } from './settings'
+import { TECH_TEXT_V1_DEFAULTS } from '@/remotion/templates/tech-text-v1/config'
 
 export function makeSettings(overrides: Partial<AppSettings> = {}): AppSettings {
   const settings = {
@@ -80,6 +81,9 @@ export function makeSettings(overrides: Partial<AppSettings> = {}): AppSettings 
     blog_api_token_preview: '',
     web_search_providers: [],
     web_fetch_providers: [],
+    text_video_template_defaults: {
+      'tech-text-v1@1': { ...TECH_TEXT_V1_DEFAULTS },
+    },
     providers: [],
     ...overrides,
   } satisfies AppSettings
