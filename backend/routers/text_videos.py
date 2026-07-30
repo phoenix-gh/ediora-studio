@@ -71,6 +71,7 @@ from text_video_jobs import (
 )
 from media_command import MediaCommandError, MediaToolUnavailable
 from speech_upload_boundary import MAX_SPEECH_AUDIO_BYTES
+from storage_paths import UPLOADS_DIR
 from text_video_audio import (
     SUPPORTED_MEDIA_TYPES,
     save_text_video_audio_asset,
@@ -105,7 +106,6 @@ from worker_auth import require_worker_token
 
 
 router = APIRouter(prefix="/text-videos", tags=["text-videos"])
-UPLOADS_DIR = Path(__file__).resolve().parent.parent / "uploads"
 SPEECH_DB_OPERATION_TIMEOUT_SECONDS = min(
     DATABASE_COMMAND_TIMEOUT_SECONDS + 5,
     305,

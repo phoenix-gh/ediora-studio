@@ -45,9 +45,9 @@ from text_video_audio import (
     assemble_master_audio,
 )
 from text_video_domain import empty_master_audio, normalize_speech_segments
+from storage_paths import UPLOADS_DIR
 
 
-UPLOADS_DIR = Path(__file__).resolve().parent / "uploads"
 MASTER_SCHEMA_VERSION = 1
 MASTER_ENCODING = {
     "codec": "mp3",

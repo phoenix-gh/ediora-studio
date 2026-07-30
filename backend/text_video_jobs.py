@@ -26,9 +26,9 @@ from text_video_domain import (
     normalize_speech_segments,
     speech_source_hash,
 )
+from storage_paths import UPLOADS_DIR
 
 
-UPLOADS_DIR = Path(__file__).resolve().parent / "uploads"
 ACTIVE_JOB_STATUSES = {"queued", "running"}
 
 

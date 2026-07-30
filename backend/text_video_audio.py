@@ -17,9 +17,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from media_command import AudioProbe, probe_audio, run_media_command
 from models import CreativeAsset, TextVideoSpeechAsset
+from storage_paths import UPLOADS_DIR
 
 
-UPLOADS_DIR = Path(__file__).resolve().parent / "uploads"
 SUPPORTED_MEDIA_TYPES = {"audio/wav", "audio/mpeg"}
 TARGET_SAMPLE_RATE = 44100
 TARGET_BIT_RATE = 128000

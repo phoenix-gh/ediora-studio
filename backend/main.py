@@ -11,12 +11,14 @@ from log_redaction import install_log_redaction
 install_log_redaction(secure_default_handler=True)
 
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from loguru import logger
 from database import SessionLocal, init_db
 from digital_human_assets import backfill_digital_human_assets
 from speech_upload_boundary import SpeechWorkerUploadBoundary
+from storage_paths import UPLOADS_DIR
 from routers import settings, github, x, x_accounts, x_responses, responses, papers, upload, drafts, writing_plans, youtube, producthunt, wechat, v2ex, kr, juejin, studio, publish_accounts, reddit, assets, dashboard, daily_plan, jobs, chat, digital_humans, talking_videos, text_videos
 from x_credential_store import CredentialFileStore
 from routers.x_accounts import reconcile_x_credential_accounts
@@ -123,11 +125,12 @@ app.include_router(text_videos.router, prefix="/api")
 _mcp_handler = _mcp_http_app.routes[0].endpoint
 app.add_route("/mcp", _mcp_handler, methods=["GET", "POST", "DELETE"])
 
-from fastapi.staticfiles import StaticFiles
-import os as _os
-_uploads_dir = _os.path.join(_os.path.dirname(__file__), "uploads")
-_os.makedirs(_uploads_dir, exist_ok=True)
-app.mount("/api/uploads", StaticFiles(directory=_uploads_dir), name="uploads")
+UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+app.mount(
+    "/api/uploads",
+    StaticFiles(directory=UPLOADS_DIR),
+    name="uploads",
+)
 
 
 @app.get("/health")
