@@ -109,6 +109,37 @@ describe('TextVideoSection', () => {
     expect(toast.success).toHaveBeenCalledWith('文字视频模板默认视觉已保存')
   })
 
+  it('disables template selection and every template field while save is pending', async () => {
+    const settings = makeSettings()
+    const request = deferred<typeof settings>()
+    vi.mocked(updateSettings).mockReturnValue(request.promise)
+    const user = userEvent.setup()
+
+    render(<TextVideoSection settings={settings} onSaved={vi.fn()} />)
+    await user.click(screen.getByRole('button', { name: '保存模板默认值' }))
+
+    await waitFor(() => expect(updateSettings).toHaveBeenCalledOnce())
+    expect(screen.getByRole('combobox', { name: '模板' })).toBeDisabled()
+    expect(screen.getByRole('textbox', { name: '品牌标题' })).toBeDisabled()
+    expect(screen.getByRole('textbox', { name: '品牌副标题' })).toBeDisabled()
+    expect(screen.getByRole('textbox', { name: '强调色' })).toBeDisabled()
+    expect(screen.getByLabelText('选择强调色')).toBeDisabled()
+    for (const control of screen.getAllByRole('switch')) {
+      expect(control).toHaveAttribute('aria-disabled', 'true')
+    }
+    expect(screen.getByRole('combobox', { name: '背景' })).toBeDisabled()
+    expect(screen.getByRole('combobox', { name: '文字密度' })).toBeDisabled()
+
+    const brandTitle = screen.getByRole('textbox', { name: '品牌标题' })
+    await user.type(brandTitle, 'MUTATION')
+    expect(brandTitle).toHaveValue('EDIORA')
+
+    await act(async () => {
+      request.resolve(settings)
+      await request.promise
+    })
+  })
+
   it('shows the schema-normalized values after a successful save', async () => {
     const settings = makeSettings()
     const updated = makeSettings({
@@ -137,6 +168,54 @@ describe('TextVideoSection', () => {
       },
     }))
     expect(brandTitle).toHaveValue('BRAND')
+  })
+
+  it('rebuilds the draft from the canonical server template entry after save', async () => {
+    const settings = makeSettings({
+      text_video_template_defaults: {
+        'legacy-template@1': { title: 'keep me' },
+        'tech-text-v1@1': { ...TECH_TEXT_V1_DEFAULTS },
+      },
+    })
+    const updated = makeSettings({
+      text_video_template_defaults: {
+        'legacy-template@1': { title: 'keep me' },
+        'tech-text-v1@1': {
+          accentColor: '#FF3366',
+        },
+      },
+    })
+    const request = deferred<typeof updated>()
+    vi.mocked(updateSettings).mockReturnValue(request.promise)
+    const onSaved = vi.fn()
+    const user = userEvent.setup()
+
+    render(<TextVideoSection settings={settings} onSaved={onSaved} />)
+    const accentColor = screen.getByRole('textbox', { name: '强调色' })
+    await user.clear(accentColor)
+    await user.type(accentColor, '#ff3366')
+    await user.click(screen.getByRole('button', { name: '保存模板默认值' }))
+
+    await waitFor(() => expect(updateSettings).toHaveBeenCalledWith({
+      text_video_template_defaults: {
+        'legacy-template@1': { title: 'keep me' },
+        'tech-text-v1@1': {
+          ...TECH_TEXT_V1_DEFAULTS,
+          accentColor: '#ff3366',
+        },
+      },
+    }))
+    expect(accentColor).toHaveValue('#ff3366')
+
+    await act(async () => {
+      request.resolve(updated)
+      await request.promise
+    })
+
+    expect(onSaved).toHaveBeenCalledWith(updated)
+    expect(accentColor).toHaveValue('#FF3366')
+    expect(screen.getByRole('textbox', { name: '品牌标题' }))
+      .toHaveValue('EDIORA')
   })
 
   it('keeps unrelated validation errors while correcting one field', async () => {

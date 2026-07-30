@@ -131,8 +131,9 @@ export function TechTextV1Composition(
           background: `linear-gradient(${112 + sceneProgress * 8}deg, rgba(6, 13, 31, 0.05), rgba(20, 226, 255, 0.07), rgba(4, 9, 22, 0.35))`,
         }}
       />
-      {templateProps.showBrand ? (
+      {templateProps.showBrand && brand ? (
         <div
+          data-testid="brand"
           style={{
             position: 'absolute',
             left: portrait ? '8%' : '5%',

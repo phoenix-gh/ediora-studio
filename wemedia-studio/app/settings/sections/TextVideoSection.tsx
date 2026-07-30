@@ -104,7 +104,10 @@ export function TextVideoSection({
         },
       })
       onSaved(updated)
-      setDraft(parsed.data)
+      setDraft(normalizedTemplateDefaults(
+        manifest,
+        updated.text_video_template_defaults[selectedTemplateKey],
+      ))
       setFieldErrors({})
       toast.success('文字视频模板默认视觉已保存')
     } catch (error) {
@@ -122,7 +125,11 @@ export function TextVideoSection({
       <FieldGroup>
         <Field>
           <FieldLabel htmlFor="text-video-template">模板</FieldLabel>
-          <Select value={selectedTemplateKey} onValueChange={selectTemplate}>
+          <Select
+            value={selectedTemplateKey}
+            onValueChange={selectTemplate}
+            disabled={saving}
+          >
             <SelectTrigger id="text-video-template" className="w-full">
               <SelectValue>
                 {value => textVideoTemplates.find(
@@ -163,6 +170,7 @@ export function TextVideoSection({
           })
         }}
         fieldErrors={fieldErrors}
+        disabled={saving}
       />
 
       <div className="flex justify-end">

@@ -77,6 +77,28 @@ describe('TechTextV1Composition', () => {
     expect(view.queryByText('EDIORA / 述策')).not.toBeInTheDocument()
   })
 
+  it('omits the brand accent and container when both brand labels are empty', () => {
+    const view = renderComposition({
+      brandTitle: '',
+      brandSubtitle: '',
+    })
+
+    expect(view.queryByTestId('brand-accent')).not.toBeInTheDocument()
+    expect(view.queryByTestId('brand')).not.toBeInTheDocument()
+  })
+
+  it('omits the brand separator when only the subtitle is empty', () => {
+    const view = renderComposition({
+      brandTitle: 'EDIORA',
+      brandSubtitle: '',
+    })
+
+    const brand = view.getByText('EDIORA')
+    expect(brand).toBeInTheDocument()
+    expect(brand).not.toHaveTextContent('/')
+    expect(view.getByTestId('brand-accent')).toBeInTheDocument()
+  })
+
   it('gates scene numbers and progress independently', () => {
     const hidden = renderComposition({
       showProgress: false,
