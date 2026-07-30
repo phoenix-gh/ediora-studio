@@ -154,10 +154,21 @@ describe('content worker dispatch', () => {
   it('is import-safe and explicitly dispatches every text-video flow', async () => {
     const timeoutSpy = vi.spyOn(globalThis, 'setTimeout')
 
-    const { resolveContentJobRunner } = await import('./content-worker')
+    const {
+      isDirectContentWorkerEntry,
+      resolveContentJobRunner,
+    } = await import('./content-worker')
 
     expect(redisConstructor).not.toHaveBeenCalled()
     expect(timeoutSpy).not.toHaveBeenCalled()
+    expect(isDirectContentWorkerEntry(
+      '/repo/wemedia-studio/scripts/content-worker.ts',
+      '/repo/wemedia-studio/scripts/content-worker.ts',
+    )).toBe(true)
+    expect(isDirectContentWorkerEntry(
+      '/repo/wemedia-studio/node_modules/.bin/playwright',
+      '/repo/wemedia-studio/scripts/content-worker.ts',
+    )).toBe(false)
     expect(resolveContentJobRunner('text_video_split_preview'))
       .toBe(runTextVideoSplitJob)
     expect(resolveContentJobRunner('text_video_speech'))

@@ -7,7 +7,6 @@ import {
   writeFile,
 } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
-import { pathToFileURL } from 'node:url'
 
 import Redis from 'ioredis'
 
@@ -486,11 +485,20 @@ async function runContentWorkerCli() {
   }
 }
 
-const entryPath = process.argv[1]
-if (
-  entryPath
-  && import.meta.url === pathToFileURL(resolve(entryPath)).href
+export function isDirectContentWorkerEntry(
+  entryPath: string | undefined,
+  modulePath: string,
 ) {
+  return Boolean(
+    entryPath
+    && resolve(entryPath) === resolve(modulePath),
+  )
+}
+
+const modulePath = typeof __filename === 'string'
+  ? __filename
+  : resolve(process.cwd(), 'scripts/content-worker.ts')
+if (isDirectContentWorkerEntry(process.argv[1], modulePath)) {
   void runContentWorkerCli().catch(error => {
     console.error('content worker stopped', error)
     process.exitCode = 1
