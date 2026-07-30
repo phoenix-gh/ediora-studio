@@ -73,7 +73,7 @@ export function TranscriptionSection({
             status: 'unavailable',
             model: 'Systran/faster-whisper-large-v3',
             device: 'cuda',
-            compute_type: 'int8_float16',
+            compute_type: 'float16',
             error: error instanceof Error ? error.message : '无法读取服务状态',
           })
         }
@@ -185,7 +185,7 @@ export function TranscriptionSection({
             <AlertDescription className="flex flex-col gap-1">
               <span>{status?.model ?? 'Systran/faster-whisper-large-v3'}</span>
               <span>
-                {(status?.device ?? 'cuda')} · {(status?.compute_type ?? 'int8_float16')}
+                {(status?.device ?? 'cuda')} · {(status?.compute_type ?? 'float16')}
               </span>
               {status?.error ? <span>{status.error}</span> : null}
             </AlertDescription>

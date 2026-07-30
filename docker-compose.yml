@@ -28,7 +28,7 @@ services:
     restart: unless-stopped
     environment:
       WHISPER__INFERENCE_DEVICE: ${WMS_LOCAL_ASR_DEVICE:-cuda}
-      WHISPER__COMPUTE_TYPE: ${WMS_LOCAL_ASR_COMPUTE_TYPE:-int8_float16}
+      WHISPER__COMPUTE_TYPE: ${WMS_LOCAL_ASR_COMPUTE_TYPE:-float16}
     volumes:
       - whisper-model-cache:/home/ubuntu/.cache/huggingface/hub
     deploy:
@@ -69,7 +69,7 @@ services:
       WMS_LOCAL_ASR_URL: ${WMS_LOCAL_ASR_URL:-http://local-asr:8000/v1}
       WMS_LOCAL_ASR_MODEL: ${WMS_LOCAL_ASR_MODEL:-Systran/faster-whisper-large-v3}
       WMS_LOCAL_ASR_DEVICE: ${WMS_LOCAL_ASR_DEVICE:-cuda}
-      WMS_LOCAL_ASR_COMPUTE_TYPE: ${WMS_LOCAL_ASR_COMPUTE_TYPE:-int8_float16}
+      WMS_LOCAL_ASR_COMPUTE_TYPE: ${WMS_LOCAL_ASR_COMPUTE_TYPE:-float16}
       WMS_WORKER_TOKEN: ${WMS_WORKER_TOKEN:-}
       WMS_CORS_ORIGINS: ${WMS_CORS_ORIGINS:-http://localhost:3000}
     volumes:

@@ -66,7 +66,7 @@ describe('TranscriptionSection', () => {
       status: 'ready',
       model: 'Systran/faster-whisper-large-v3',
       device: 'cuda',
-      compute_type: 'int8_float16',
+      compute_type: 'float16',
       error: '',
     })
     vi.mocked(updateSettings).mockResolvedValue(settings)
@@ -78,7 +78,7 @@ describe('TranscriptionSection', () => {
     expect(screen.queryByLabelText('API Key')).not.toBeInTheDocument()
     expect(await screen.findByText('本地转写服务可用')).toBeInTheDocument()
     expect(screen.getByText(/large-v3/)).toBeInTheDocument()
-    expect(screen.getByText(/cuda.*int8_float16/)).toBeInTheDocument()
+    expect(screen.getByText(/cuda.*float16/)).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
 

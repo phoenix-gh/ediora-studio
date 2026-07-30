@@ -24,7 +24,7 @@ def test_local_asr_is_private_gpu_service_with_persistent_model_cache():
     assert service["image"] == "ghcr.io/speaches-ai/speaches:0.8.3-cuda"
     assert not service.get("ports")
     assert service["environment"]["WHISPER__INFERENCE_DEVICE"] == "cuda"
-    assert service["environment"]["WHISPER__COMPUTE_TYPE"] == "int8_float16"
+    assert service["environment"]["WHISPER__COMPUTE_TYPE"] == "float16"
     assert service["deploy"]["resources"]["reservations"]["devices"] == [
         {
             "capabilities": ["gpu"],
@@ -46,5 +46,5 @@ def test_api_uses_local_asr_without_blocking_api_startup():
     assert api["environment"]["WMS_LOCAL_ASR_URL"] == "http://local-asr:8000/v1"
     assert api["environment"]["WMS_LOCAL_ASR_MODEL"] == "Systran/faster-whisper-large-v3"
     assert api["environment"]["WMS_LOCAL_ASR_DEVICE"] == "cuda"
-    assert api["environment"]["WMS_LOCAL_ASR_COMPUTE_TYPE"] == "int8_float16"
+    assert api["environment"]["WMS_LOCAL_ASR_COMPUTE_TYPE"] == "float16"
     assert "local-asr" not in api["depends_on"]

@@ -20,4 +20,4 @@ def test_runtime_settings_default_to_self_hosted_services(monkeypatch):
         "Systran/faster-whisper-large-v3"
     )
     assert settings.local_asr_device == "cuda"
-    assert settings.local_asr_compute_type == "int8_float16"
+    assert settings.local_asr_compute_type == "float16"

@@ -171,7 +171,7 @@ def test_local_transcription_status_reports_runtime_without_internal_url(
         "status": "ready",
         "model": "Systran/faster-whisper-large-v3",
         "device": "cuda",
-        "compute_type": "int8_float16",
+        "compute_type": "float16",
         "error": "",
     }
     assert "local-asr" not in response.text

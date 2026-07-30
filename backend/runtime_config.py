@@ -31,6 +31,6 @@ def get_runtime_settings() -> RuntimeSettings:
         local_asr_device=os.getenv("WMS_LOCAL_ASR_DEVICE", "cuda"),
         local_asr_compute_type=os.getenv(
             "WMS_LOCAL_ASR_COMPUTE_TYPE",
-            "int8_float16",
+            "float16",
         ),
     )

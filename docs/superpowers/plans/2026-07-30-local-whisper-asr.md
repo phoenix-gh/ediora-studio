@@ -11,7 +11,7 @@
 ## Global Constraints
 
 - Run local ASR on the existing NVIDIA GeForce RTX 5060 Ti 16 GB host.
-- Use `large-v3`, CUDA, `int8_float16`, VAD, and word timestamps.
+- Use `large-v3`, CUDA, `float16`, VAD, and word timestamps.
 - Allow only one active local ASR inference across text-video and YouTube.
 - Persist the model cache across container restarts.
 - Do not expose the Speaches port on the host or public network.
@@ -207,7 +207,7 @@ using defaults:
 http://local-asr:8000/v1
 Systran/faster-whisper-large-v3
 cuda
-int8_float16
+float16
 ```
 
 - [ ] **Step 4: Convert the text-video module into a compatibility wrapper**

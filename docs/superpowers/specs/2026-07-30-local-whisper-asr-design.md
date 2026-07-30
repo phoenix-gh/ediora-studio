@@ -10,8 +10,14 @@ transcription to both:
 
 The first release runs on the existing NVIDIA GeForce RTX 5060 Ti 16 GB host.
 It uses Speaches as an isolated OpenAI-compatible server backed by
-`faster-whisper`, with `large-v3`, CUDA, and `int8_float16` as the production
+`faster-whisper`, with `large-v3`, CUDA, and `float16` as the production
 defaults.
+
+Runtime validation on the target RTX 5060 Ti showed that Speaches 0.8.3 pins
+CTranslate2 4.5.0, whose INT8 mixed-precision word-alignment path fails on
+Blackwell with `CUBLAS_STATUS_NOT_SUPPORTED`. The production default therefore
+uses `float16`; the same 28-second project audio completed word alignment with
+the audio asset unchanged.
 
 Local transcription must not require an API key, must not silently fall back to
 a paid cloud provider, and must preserve the existing ability to retry only the
@@ -41,7 +47,7 @@ selection has found no usable caption.
 2. Speaches runs as a separate GPU-enabled Docker service. The API process never
    loads Whisper model weights.
 3. The production model is fixed to `large-v3` in the first release.
-4. The production compute type is `int8_float16`, with one active local ASR
+4. The production compute type is `float16`, with one active local ASR
    request at a time.
 5. The default recognition language is automatic. Callers may provide a
    language hint when the source is already known.
@@ -271,7 +277,7 @@ When `Local Whisper` is selected:
 
 - Base URL and API Key inputs are hidden;
 - model is displayed as the fixed first-release `large-v3`;
-- compute type is displayed as `int8_float16`;
+- compute type is displayed as `float16`;
 - status may be `unavailable`, `preparing`, `ready`, `busy`, or `error`; and
 - the test action sends a bundled short, non-sensitive audio fixture through the
   same transcription path used by production.
@@ -374,7 +380,7 @@ Excluded:
 ### Runtime
 
 - The ASR service sees the RTX 5060 Ti and successfully runs `large-v3` with
-  `int8_float16`.
+  `float16`.
 - Peak ASR model usage fits the 16 GB GPU while the normal desktop workload is
   present.
 - Two simultaneous application requests produce only one active GPU inference.
@@ -394,4 +400,3 @@ Excluded:
 - A YouTube video without captions can be manually transcribed and then reused
   without duplicate work.
 - Browser console and service logs contain no leaked credential or host path.
-
