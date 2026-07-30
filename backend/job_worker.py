@@ -31,9 +31,9 @@ async def run_job(job_id: int, *, session_factory: Callable = SessionLocal) -> N
 
 def main() -> None:
     async def listen() -> None:
-        queue = RedisJobQueue()
-        while True:
-            await run_job(await queue.dequeue())
+        async with RedisJobQueue() as queue:
+            while True:
+                await run_job(await queue.dequeue())
 
     asyncio.run(listen())
 
