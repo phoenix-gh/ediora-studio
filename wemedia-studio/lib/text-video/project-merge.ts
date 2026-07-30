@@ -334,24 +334,34 @@ export function updateProjectVoiceSettings(
 }
 
 export function canEnterVideoStage(project: TextVideoProject): boolean {
+  const master = project.master_audio
+  const speakable = project.paragraphs.filter(segment => segment.text.trim())
+  if (
+    !project.script.trim()
+    || project.paragraphs.map(segment => segment.text).join('')
+      !== project.script
+    || speakable.length === 0
+    || !speakable.every(segment => segment.status === 'confirmed')
+    || master.status !== 'ready'
+    || master.timeline_status !== 'ready'
+    || !master.audio_url.trim()
+    || !master.source_hash.trim()
+    || !Number.isFinite(master.duration)
+    || master.duration <= 0
+    || !validMasterWords(master.word_timings, master.duration)
+  ) {
+    return false
+  }
+  return true
+}
+
+export function canPreviewVideo(project: TextVideoProject): boolean {
   try {
-    const speakable = project.paragraphs.filter(segment => segment.text.trim())
+    if (!canEnterVideoStage(project)) return false
     const master = project.master_audio
     const scenePlan = project.scene_plan
     if (
-      !project.script.trim()
-      || project.paragraphs.map(segment => segment.text).join('')
-        !== project.script
-      || speakable.length === 0
-      || !speakable.every(segment => segment.status === 'confirmed')
-      || master.status !== 'ready'
-      || master.timeline_status !== 'ready'
-      || !master.audio_url.trim()
-      || !master.source_hash.trim()
-      || !Number.isFinite(master.duration)
-      || master.duration <= 0
-      || master.word_timings.length === 0
-      || scenePlan.status !== 'ready'
+      scenePlan.status !== 'ready'
       || scenePlan.master_source_hash !== master.source_hash
       || project.render_input.audio !== master.audio_url
     ) {
@@ -370,6 +380,36 @@ export function canEnterVideoStage(project: TextVideoProject): boolean {
   } catch {
     return false
   }
+}
+
+function validMasterWords(
+  words: GlobalWordTiming[],
+  duration: number,
+): boolean {
+  if (!Array.isArray(words) || words.length === 0) return false
+  const ids = new Set<string>()
+  let previousStart = -1
+  let previousEnd = -1
+  for (const word of words) {
+    if (
+      typeof word.id !== 'string'
+      || !word.id.trim()
+      || ids.has(word.id)
+      || !Number.isFinite(word.start)
+      || !Number.isFinite(word.end)
+      || word.start < 0
+      || word.end < word.start
+      || word.start < previousStart
+      || word.end < previousEnd
+      || word.end > duration + CONTINUITY_EPSILON_SECONDS
+    ) {
+      return false
+    }
+    ids.add(word.id)
+    previousStart = word.start
+    previousEnd = word.end
+  }
+  return true
 }
 
 function projectSceneProjection(

@@ -5,7 +5,10 @@ import {
   parseTextVideoRenderInput,
   parseTextVideoRenderInputWithManifest,
 } from './contract'
-import { findActiveTextVideoSegment } from './templates/tech-text-v1/Composition'
+import {
+  findActiveTextVideoSegment,
+  sceneAnimationFrameRange,
+} from './templates/tech-text-v1/Composition'
 import type { TextVideoTemplateManifest } from './types'
 import { z } from 'zod'
 
@@ -107,6 +110,16 @@ describe('text-video render contract', () => {
         validInput.segments[1],
       ],
     })).toThrow('segments must continuously cover the master audio')
+  })
+
+  it('ceil-aligns animation frames to the authoritative scene boundaries', () => {
+    expect(sceneAnimationFrameRange({
+      start: 2.4001,
+      end: 4.2,
+    }, 30)).toEqual({
+      inFrame: 73,
+      outFrame: 125,
+    })
   })
 
   it('rejects a raw positive scene that collapses after canonicalization', () => {

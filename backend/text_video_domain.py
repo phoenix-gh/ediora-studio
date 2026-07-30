@@ -11,6 +11,7 @@ from text_video_scene_plan import (
     validate_render_input_projection,
     validate_scene_partition,
     validate_template_configuration,
+    validate_word_timeline,
 )
 from text_video_templates import get_text_video_template
 
@@ -62,6 +63,7 @@ def empty_scene_plan() -> dict:
         "master_source_hash": "",
         "scenes": [],
         "job_id": None,
+        "applied_job_id": None,
         "error": "",
     }
 
@@ -361,6 +363,7 @@ def _apply_visual_edits(
         "master_source_hash": master["source_hash"],
         "scenes": validated_scenes,
         "job_id": None,
+        "applied_job_id": None,
         "error": "",
     }
     project.render_input = render_input
@@ -492,7 +495,7 @@ def merge_editable_project(project, update: dict, speech_model: str) -> None:
         update,
     )
 
-def video_stage_ready(project) -> bool:
+def video_stage_open(project) -> bool:
     try:
         segments = normalize_speech_segments(
             str(project.script or ""),
@@ -502,17 +505,13 @@ def video_stage_ready(project) -> bool:
             empty_master_audio(),
             project.master_audio,
         )
-        scene_plan = _document_with_defaults(
-            empty_scene_plan(),
-            project.scene_plan,
-        )
-        render_input = deepcopy(project.render_input or {})
         words = master.get("word_timings")
         duration = master.get("duration")
 
         if not (
             str(project.script or "").strip()
             and segments
+            and any(segment["text"].strip() for segment in segments)
             and all(
                 not segment["text"].strip()
                 or segment["status"] == "confirmed"
@@ -524,7 +523,32 @@ def video_stage_ready(project) -> bool:
             and master.get("source_hash")
             and isinstance(words, list)
             and words
-            and scene_plan["status"] == "ready"
+        ):
+            return False
+
+        validate_word_timeline(words, duration)
+        return True
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return False
+
+
+def video_stage_ready(project) -> bool:
+    try:
+        if not video_stage_open(project):
+            return False
+        master = _document_with_defaults(
+            empty_master_audio(),
+            project.master_audio,
+        )
+        scene_plan = _document_with_defaults(
+            empty_scene_plan(),
+            project.scene_plan,
+        )
+        render_input = deepcopy(project.render_input or {})
+        words = master["word_timings"]
+        duration = master["duration"]
+        if not (
+            scene_plan["status"] == "ready"
             and scene_plan["master_source_hash"] == master["source_hash"]
             and isinstance(render_input, dict)
             and render_input.get("audio") == master["audio_url"]

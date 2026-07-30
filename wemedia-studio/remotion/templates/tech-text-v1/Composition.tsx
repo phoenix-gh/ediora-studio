@@ -6,6 +6,14 @@ import {
   type TextVideoSegment,
 } from '../../types'
 import { TimedText } from '../../shared/TimedText'
+import { sceneFrameRange } from '../../../lib/text-video/scene-range'
+
+export function sceneAnimationFrameRange(
+  scene: Pick<TextVideoSegment, 'start' | 'end'>,
+  fps: number,
+) {
+  return sceneFrameRange(scene, fps)
+}
 
 export function findActiveTextVideoSegment(
   segments: TextVideoSegment[],
@@ -40,10 +48,13 @@ export function TechTextV1Composition(props: TextVideoRenderInput) {
   const segment = findActiveTextVideoSegment(props.segments, seconds)
   const portrait = height > width
   const landscape = width > height
-  const segmentStartFrame = Math.round(segment.start * fps)
+  const {
+    inFrame: segmentStartFrame,
+    outFrame: segmentEndFrame,
+  } = sceneAnimationFrameRange(segment, fps)
   const sceneProgress = interpolate(
     frame,
-    [segmentStartFrame, Math.max(segmentStartFrame + 1, Math.round(segment.end * fps))],
+    [segmentStartFrame, Math.max(segmentStartFrame + 1, segmentEndFrame + 1)],
     [0, 1],
     { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' },
   )
