@@ -71,7 +71,10 @@ from text_video_scene_plan import (
     validate_template_configuration,
     validate_word_timeline,
 )
-from text_video_templates import get_text_video_template
+from text_video_templates import (
+    get_text_video_template,
+    normalize_text_video_template_default_map,
+)
 from text_video_jobs import (
     StaleTextVideoJob,
     assert_current_speech_job,
@@ -524,6 +527,36 @@ async def list_projects(
 @router.post("", status_code=status.HTTP_201_CREATED)
 async def create_project(payload: ProjectCreate, db: AsyncSession = Depends(get_db)):
     title = payload.title.strip() or "未命名文字视频"
+    config = await get_config()
+    try:
+        stored_template_defaults = json.loads(
+            config.get("text_video_template_defaults", "{}"),
+        )
+        template_defaults = normalize_text_video_template_default_map(
+            stored_template_defaults,
+        )
+    except (json.JSONDecodeError, TypeError, ValueError) as error:
+        logger.warning(
+            "Ignoring malformed text video template defaults on creation: {}",
+            error,
+        )
+        template_defaults = normalize_text_video_template_default_map(None)
+    render_input = deepcopy(DEFAULT_RENDER_INPUT)
+    render_input["templateProps"] = deepcopy(
+        template_defaults["tech-text-v1@1"],
+    )
+    try:
+        manifest = get_text_video_template(
+            render_input["templateId"],
+            render_input["templateVersion"],
+        )
+        _, render_input["templateProps"] = validate_template_configuration(
+            manifest=manifest,
+            composition=render_input["composition"],
+            template_props=render_input["templateProps"],
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
     project = TextVideoProject(
         title=title,
         status="draft",
@@ -540,7 +573,7 @@ async def create_project(payload: ProjectCreate, db: AsyncSession = Depends(get_
         speech_split_mode="single",
         master_audio=empty_master_audio(),
         scene_plan=empty_scene_plan(),
-        render_input=deepcopy(DEFAULT_RENDER_INPUT),
+        render_input=render_input,
         revision=1,
     )
     db.add(project)

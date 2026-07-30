@@ -8,6 +8,7 @@ from pathlib import Path
 import tempfile
 from urllib.parse import urlsplit
 import wave
+import logging
 
 from config import (
     PROVIDERS,
@@ -29,8 +30,10 @@ from database import get_db
 from models import PublishAccount
 from sqlalchemy.ext.asyncio import AsyncSession
 from worker_auth import require_worker_token
+from text_video_templates import normalize_text_video_template_default_map
 
 router = APIRouter(prefix="/settings", tags=["settings"])
+logger = logging.getLogger(__name__)
 
 
 # ── Schemas ───────────────────────────────────────────────────────────────────
@@ -130,6 +133,7 @@ class SettingsOut(BaseModel):
     speech_api_key_set: bool
     speech_api_key_preview: str
     speech_default_voice: str
+    text_video_template_defaults: dict[str, dict]
     youtube_cookies_set: bool
     rsshub_base: str
     github_token_set: bool
@@ -203,6 +207,7 @@ class SettingsUpdate(BaseModel):
     speech_api_key: Optional[str] = None
     speech_clear_api_key: Optional[bool] = None
     speech_default_voice: Optional[str] = None
+    text_video_template_defaults: dict[str, dict] | None = None
     youtube_cookies: Optional[str] = None
     rsshub_base: Optional[str] = None
     github_token: Optional[str] = None
@@ -292,6 +297,23 @@ def _build_out(cfg: dict) -> SettingsOut:
         WebFetchProviderConfig.model_validate(provider)
         for provider in raw_fetch_providers if isinstance(provider, dict)
     ] if isinstance(raw_fetch_providers, list) else []
+    try:
+        raw_text_video_template_defaults = json.loads(
+            cfg.get("text_video_template_defaults", "{}"),
+        )
+        text_video_template_defaults = (
+            normalize_text_video_template_default_map(
+                raw_text_video_template_defaults,
+            )
+        )
+    except (json.JSONDecodeError, TypeError, ValueError) as error:
+        logger.warning(
+            "Ignoring malformed text video template defaults: %s",
+            error,
+        )
+        text_video_template_defaults = (
+            normalize_text_video_template_default_map(None)
+        )
     transcription_provider = cfg.get(
         "transcription_provider",
         "local-whisper",
@@ -338,6 +360,7 @@ def _build_out(cfg: dict) -> SettingsOut:
             "speech_default_voice",
             "mimo_default",
         ),
+        text_video_template_defaults=text_video_template_defaults,
         youtube_cookies_set=bool(cfg.get("youtube_cookies", "")),
         github_interval_minutes=max(1, int(cfg.get("github_interval_minutes", 1))),
         github_trending_interval_hours=max(1, int(cfg.get("github_trending_interval_hours", 6))),
@@ -720,6 +743,19 @@ async def update_settings(
     if body.web_fetch_providers is not None:
         updates["web_fetch_providers"] = json.dumps(
             [provider.model_dump() for provider in body.web_fetch_providers], ensure_ascii=False,
+        )
+    if body.text_video_template_defaults is not None:
+        try:
+            normalized_template_defaults = (
+                normalize_text_video_template_default_map(
+                    body.text_video_template_defaults,
+                )
+            )
+        except ValueError as error:
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        updates["text_video_template_defaults"] = json.dumps(
+            normalized_template_defaults,
+            ensure_ascii=False,
         )
     if updates:
         await set_config(updates)
