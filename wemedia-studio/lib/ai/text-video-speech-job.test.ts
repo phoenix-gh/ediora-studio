@@ -306,6 +306,99 @@ describe('text video speech job', () => {
     expect(body.audio.voice).toBe('frozen-voice')
   })
 
+  it('uses the injected fetch only for the MiMo provider request', async () => {
+    const previousToken = process.env.WMS_WORKER_TOKEN
+    process.env.WMS_WORKER_TOKEN = 'worker-token-at-least-32-characters'
+    const json = (value: unknown) => new Response(
+      JSON.stringify(value),
+      { headers: { 'Content-Type': 'application/json' } },
+    )
+    const apiFetch = vi.fn(async (
+      input: string | URL | Request,
+      init?: RequestInit,
+    ) => {
+      const url = String(input)
+      if (url === 'https://api.xiaomimimo.com/v1/chat/completions') {
+        throw new Error('provider request escaped the speechFetch seam')
+      }
+      if (url.endsWith('/jobs/71') && !init?.method) return json(job())
+      if (url.endsWith('/steps/generate_speech/start')) {
+        return json({ id: 91 })
+      }
+      if (url.endsWith('/worker-context')) {
+        return json({
+          project_id: 8,
+          segment_id: 'segment-a',
+          text: '使用注入请求。',
+          generation_revision: 2,
+          source_hash: 'a'.repeat(64),
+          speech_model: 'frozen-model',
+          voice_settings: {
+            voice_id: 'frozen-voice',
+            speed: 1,
+            volume: 1,
+            pitch: 0,
+          },
+          runtime: { default_voice: 'changed-voice' },
+        })
+      }
+      if (url.endsWith('/settings/speech-runtime')) {
+        return json({
+          provider: 'mimo',
+          model: 'changed-model',
+          base_url: 'https://api.xiaomimimo.com/v1',
+          api_key: 'test-key',
+          default_voice: 'changed-voice',
+        })
+      }
+      if (url.endsWith('/worker-result')) {
+        return json({
+          asset_id: 31,
+          audio_url: '/api/uploads/audio.mp3',
+          duration: 1.25,
+        })
+      }
+      if (
+        url.endsWith('/steps/91/succeed')
+        || url.endsWith('/jobs/71/succeed')
+      ) return json({})
+      throw new Error(`unexpected API fetch: ${url}`)
+    })
+    const speechFetch = vi.fn<typeof fetch>().mockResolvedValue(json({
+      id: 'provider-via-seam',
+      choices: [{
+        message: {
+          audio: { data: btoa('RIFF-provider-audio') },
+        },
+      }],
+    }))
+    vi.stubGlobal('fetch', apiFetch)
+
+    try {
+      await expect(runTextVideoSpeechJob(
+        71,
+        undefined,
+        speechFetch,
+      )).resolves.toEqual({
+        asset_id: 31,
+        audio_url: '/api/uploads/audio.mp3',
+        duration: 1.25,
+      })
+    } finally {
+      vi.unstubAllGlobals()
+      if (previousToken === undefined) delete process.env.WMS_WORKER_TOKEN
+      else process.env.WMS_WORKER_TOKEN = previousToken
+    }
+
+    expect(speechFetch).toHaveBeenCalledOnce()
+    expect(speechFetch.mock.calls[0]?.[0]).toBe(
+      'https://api.xiaomimimo.com/v1/chat/completions',
+    )
+    expect(apiFetch.mock.calls.some(
+      ([input]) => String(input).includes('xiaomimimo.com'),
+    )).toBe(false)
+  })
+
   it('refetches durable state after a lost complete-step response', async () => {
     const previousToken = process.env.WMS_WORKER_TOKEN
     process.env.WMS_WORKER_TOKEN = 'worker-token-at-least-32-characters'

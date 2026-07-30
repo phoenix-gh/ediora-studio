@@ -187,7 +187,10 @@ async function saveSpeechResult(
   )
 }
 
-async function defaultDeps(jobId: number): Promise<TextVideoSpeechJobDeps> {
+async function defaultDeps(
+  jobId: number,
+  speechFetch: typeof fetch,
+): Promise<TextVideoSpeechJobDeps> {
   let jobPromise: Promise<DurableJob> | undefined
   const loadJob = () => {
     jobPromise ??= getJob(jobId)
@@ -244,7 +247,7 @@ async function defaultDeps(jobId: number): Promise<TextVideoSpeechJobDeps> {
             ? frozenJob.input.speech_model
             : runtime.model,
           defaultVoice: runtime.default_voice,
-        }).generate(request)
+        }, speechFetch).generate(request)
       },
     },
   }
@@ -321,8 +324,9 @@ function errorRetryable(error: unknown) {
 export async function runTextVideoSpeechJob(
   jobId: number,
   providedDeps?: TextVideoSpeechJobDeps,
+  speechFetch: typeof fetch = fetch,
 ): Promise<SavedSpeechResult> {
-  const deps = providedDeps ?? await defaultDeps(jobId)
+  const deps = providedDeps ?? await defaultDeps(jobId, speechFetch)
   const job = await deps.api.getJob(jobId)
   const existing = latestStep(job.steps, 'generate_speech')
   if (job.status === 'cancelled') throw new Error('任务已取消')
