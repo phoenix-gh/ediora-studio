@@ -8,6 +8,7 @@ import type {
 } from '@/lib/api/text-videos'
 
 import {
+  applyScenePlanToProject,
   editSceneVisuals,
   mergeScene,
   moveSceneBoundary,
@@ -867,5 +868,60 @@ describe('editSceneVisuals', () => {
       'scene-1',
       update,
     )).toThrow()
+  })
+})
+
+describe('applyScenePlanToProject', () => {
+  it('reprojects a word-boundary edit immediately without changing audio', () => {
+    const original = projectForVisualEdit()
+    original.scene_plan = plan([
+      scene('scene-1', 'word-1', 'word-2', '甲乙', [], 'fade-up'),
+    ])
+    original.render_input = {
+      ...original.render_input,
+      segments: [{
+        id: 'scene-1',
+        start: 0,
+        end: 2,
+        text: '甲乙',
+        highlight: [],
+        animation: 'fade-up',
+      }],
+    }
+    const nextPlan = splitSceneAtWord(
+      original.scene_plan,
+      original.master_audio.word_timings,
+      {
+        masterDuration: original.master_audio.duration,
+        fps: original.render_input.composition.fps,
+      },
+      'scene-1',
+      'word-2',
+      () => 'scene-split',
+    )
+
+    const next = applyScenePlanToProject(original, nextPlan)
+
+    expect(next.render_input.segments).toEqual([
+      {
+        id: 'scene-1',
+        start: 0,
+        end: 0.4,
+        text: '甲',
+        highlight: [],
+        animation: 'fade-up',
+      },
+      {
+        id: 'scene-split',
+        start: 0.4,
+        end: 2,
+        text: '乙',
+        highlight: [],
+        animation: 'fade-up',
+      },
+    ])
+    expect(next.master_audio).toBe(original.master_audio)
+    expect(next.paragraphs).toBe(original.paragraphs)
+    expect(next.render_input.audio).toBe(original.master_audio.audio_url)
   })
 })

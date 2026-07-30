@@ -480,3 +480,61 @@ export function editSceneVisuals(
     },
   }
 }
+
+export function applyScenePlanToProject(
+  project: TextVideoProject,
+  plan: ScenePlanDocument,
+): TextVideoProject {
+  ensureEditablePlan(plan)
+  const master = project.master_audio
+  if (
+    master.status !== 'ready'
+    || master.timeline_status !== 'ready'
+    || !master.audio_url.trim()
+    || !master.source_hash.trim()
+    || plan.master_source_hash !== master.source_hash
+  ) {
+    fail('scene plan must match the ready master audio timeline')
+  }
+
+  const timing = {
+    masterDuration: master.duration,
+    fps: project.render_input.composition.fps,
+  }
+  assertProjectableSceneRanges(plan, master.word_timings, timing)
+  const manifest = resolveTextVideoTemplate(
+    project.render_input.templateId,
+    project.render_input.templateVersion,
+  )
+  for (const item of plan.scenes) {
+    validateVisualUpdate(item)
+    if (!(manifest.animations as readonly string[]).includes(item.animation)) {
+      fail(`scene animation is not supported: ${item.animation}`)
+    }
+  }
+
+  const ranges = sceneRanges(plan, master.word_timings)
+  const segments = ranges.map(({ scene, fromIndex }, index) => {
+    const following = ranges[index + 1]
+    return {
+      id: scene.id,
+      start: index === 0 ? 0 : master.word_timings[fromIndex].start,
+      end: following
+        ? master.word_timings[following.fromIndex].start
+        : master.duration,
+      text: scene.displayText,
+      highlight: [...scene.highlight],
+      animation: scene.animation,
+    }
+  })
+
+  return {
+    ...project,
+    scene_plan: plan,
+    render_input: {
+      ...project.render_input,
+      audio: master.audio_url,
+      segments,
+    },
+  }
+}

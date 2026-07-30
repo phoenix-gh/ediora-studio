@@ -57,7 +57,6 @@ export function makeScenePlan(
     job_id: null,
     applied_job_id: null,
     error: '',
-    applied_job_id: null,
     ...overrides,
   }
   return value
@@ -133,4 +132,108 @@ export function makeTextVideoProject(
     updated_at: '2026-07-29T00:00:00Z',
   }
   return { ...base, ...overrides }
+}
+
+export function makeVideoReadyProject(
+  overrides: Partial<TextVideoProject> = {},
+): TextVideoProject {
+  const sourceHash = 'm'.repeat(64)
+  const audioUrl = '/api/uploads/master.mp3'
+  const wordTimings: GlobalWordTiming[] = [
+    {
+      id: 'word-1',
+      text: '甲',
+      start: 0,
+      end: 0.7,
+      speech_segment_id: 'speech-1',
+    },
+    {
+      id: 'word-2',
+      text: '乙',
+      start: 0.8,
+      end: 1.6,
+      speech_segment_id: 'speech-1',
+    },
+    {
+      id: 'word-3',
+      text: '丙',
+      start: 2,
+      end: 2.8,
+      speech_segment_id: 'speech-1',
+    },
+    {
+      id: 'word-4',
+      text: '丁',
+      start: 3,
+      end: 3.8,
+      speech_segment_id: 'speech-1',
+    },
+  ]
+  const scenes = [
+    {
+      id: 'scene-1',
+      fromWordId: 'word-1',
+      throughWordId: 'word-2',
+      displayText: '甲乙',
+      highlight: ['甲'],
+      animation: 'fade-up',
+    },
+    {
+      id: 'scene-2',
+      fromWordId: 'word-3',
+      throughWordId: 'word-4',
+      displayText: '丙丁',
+      highlight: ['丁'],
+      animation: 'scale',
+    },
+  ]
+  const project = makeTextVideoProject({
+    stage: 'video',
+    status: 'video_ready',
+    script: '甲乙丙丁',
+    paragraphs: [makeSpeechSegment('speech-1', '甲乙丙丁', {
+      status: 'confirmed',
+      audio_url: '/api/uploads/speech-1.mp3',
+      duration: 4,
+      source_hash: 's'.repeat(64),
+    })],
+    master_audio: makeMasterAudio({
+      status: 'ready',
+      timeline_status: 'ready',
+      audio_url: audioUrl,
+      duration: 4,
+      source_hash: sourceHash,
+      word_timings: wordTimings,
+      timeline_source: 'provider',
+    }),
+    scene_plan: makeScenePlan({
+      status: 'ready',
+      generation_revision: 1,
+      master_source_hash: sourceHash,
+      scenes,
+    }),
+    render_input: makeRenderInput({
+      audio: audioUrl,
+      segments: [
+        {
+          id: 'scene-1',
+          start: 0,
+          end: 2,
+          text: '甲乙',
+          highlight: ['甲'],
+          animation: 'fade-up',
+        },
+        {
+          id: 'scene-2',
+          start: 2,
+          end: 4,
+          text: '丙丁',
+          highlight: ['丁'],
+          animation: 'scale',
+        },
+      ],
+    }),
+    duration: 4,
+  })
+  return { ...project, ...overrides }
 }

@@ -16,12 +16,14 @@ import {
   buildTextVideoMasterAudio,
   confirmTextVideoSpeechSegment,
   generatePendingTextVideoSpeech,
+  generateTextVideoScenePlan,
   generateTextVideoSpeechSegment,
   updateTextVideoProject,
   type TextVideoProject,
 } from '@/lib/api/text-videos'
 
 import { TextVideoWorkbench } from './TextVideoWorkbench'
+import type { SceneDirectionDraft } from './SceneDirectionDialog'
 import { useTextVideoAutosave } from './useTextVideoAutosave'
 import { useTextVideoProjectActions } from './useTextVideoProjectActions'
 
@@ -123,6 +125,19 @@ export function TextVideoEditorClient({
     ))
   }
 
+  function generateScenePlan(input: SceneDirectionDraft) {
+    const key = input.scope === 'selected'
+      ? `scene:${input.selected_scene_id}`
+      : 'scene:all'
+    return actions.runProjectAction(
+      key,
+      async saved => generateTextVideoScenePlan(saved.id, {
+        ...input,
+        revision: saved.revision,
+      }),
+    )
+  }
+
   return (
     <>
       <TextVideoWorkbench
@@ -144,6 +159,7 @@ export function TextVideoEditorClient({
         onPrepareSpeechSplit={async () => (
           await autosave.flush()
         ).project}
+        onGenerateScenePlan={generateScenePlan}
       />
       <Dialog open={autosave.saveState === 'conflict'}>
         <DialogContent showCloseButton={false}>
