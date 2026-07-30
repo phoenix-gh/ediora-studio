@@ -58,3 +58,120 @@ def test_youtube_cookies_rejects_http_cookie_header(client):
 
     assert response.status_code == 422
     assert response.json()["detail"] == "YouTube Cookie 必须是 Netscape cookies.txt 格式"
+
+
+def test_local_transcription_provider_saves_without_api_key(client):
+    """Catches local mode inheriting cloud credential requirements."""
+    response = client.put(
+        "/api/settings",
+        json={"transcription_provider": "local-whisper"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["transcription_provider"] == "local-whisper"
+    assert response.json()["transcription_model"] == (
+        "Systran/faster-whisper-large-v3"
+    )
+
+
+def test_transcription_provider_rejects_unknown_value(client):
+    """Catches misspelled providers being persisted as unusable config."""
+    response = client.put(
+        "/api/settings",
+        json={"transcription_provider": "local-whispr"},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "不支持的语音转写服务商"
+
+
+def test_local_transcription_test_uses_real_adapter_without_api_key(
+    client,
+    monkeypatch,
+):
+    """Catches the test action only checking a cloud /models endpoint."""
+    import routers.settings as settings_router
+    from transcription_service import TranscriptionResult
+
+    async def transcribe(request, config):
+        assert request.require_word_timestamps is False
+        assert request.audio_path.suffix == ".wav"
+        assert request.audio_path.exists()
+        assert config["transcription_provider"] == "local-whisper"
+        return TranscriptionResult(
+            words=(),
+            segments=(),
+            text="",
+            language="",
+            request_id="local-test",
+        )
+
+    monkeypatch.setattr(
+        settings_router,
+        "transcribe_audio",
+        transcribe,
+        raising=False,
+    )
+    saved = client.put(
+        "/api/settings",
+        json={"transcription_provider": "local-whisper"},
+    )
+    assert saved.status_code == 200
+
+    response = client.post("/api/settings/transcription/test")
+
+    assert response.status_code == 200
+    assert response.json() == {"ok": True, "error": ""}
+
+
+def test_local_transcription_status_reports_runtime_without_internal_url(
+    client,
+    monkeypatch,
+):
+    """Catches the UI status endpoint leaking or misreporting local runtime."""
+    import routers.settings as settings_router
+
+    class FakeClient:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        async def get(self, url):
+            assert url == "http://local-asr:8000/v1/models"
+            return settings_router.httpx.Response(
+                200,
+                json={
+                    "data": [{
+                        "id": "Systran/faster-whisper-large-v3",
+                    }],
+                },
+            )
+
+    monkeypatch.setattr(
+        settings_router.httpx,
+        "AsyncClient",
+        FakeClient,
+    )
+    saved = client.put(
+        "/api/settings",
+        json={"transcription_provider": "local-whisper"},
+    )
+    assert saved.status_code == 200
+
+    response = client.get("/api/settings/transcription/status")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "provider": "local-whisper",
+        "status": "ready",
+        "model": "Systran/faster-whisper-large-v3",
+        "device": "cuda",
+        "compute_type": "int8_float16",
+        "error": "",
+    }
+    assert "local-asr" not in response.text

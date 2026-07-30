@@ -4,7 +4,10 @@ from typing import Literal, Optional
 from datetime import datetime, timezone
 import json
 import httpx
+from pathlib import Path
+import tempfile
 from urllib.parse import urlsplit
+import wave
 
 from config import (
     PROVIDERS,
@@ -15,7 +18,13 @@ from config import (
     set_config,
 )
 from log_redaction import redact_secret_text
+from runtime_config import get_runtime_settings
 import telegram_notifier
+from transcription_service import (
+    TranscriptionError,
+    TranscriptionRequest,
+    transcribe_audio,
+)
 from database import get_db
 from models import PublishAccount
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -163,6 +172,15 @@ class SettingsOut(BaseModel):
     providers: list[ProviderInfo]
 
 
+class TranscriptionStatusOut(BaseModel):
+    provider: Literal["local-whisper", "openai-compatible"]
+    status: Literal["unavailable", "preparing", "ready", "busy", "error"]
+    model: str
+    device: str
+    compute_type: str
+    error: str
+
+
 class SettingsUpdate(BaseModel):
     llm_provider: Optional[str] = None
     llm_model: Optional[str] = None
@@ -274,6 +292,16 @@ def _build_out(cfg: dict) -> SettingsOut:
         WebFetchProviderConfig.model_validate(provider)
         for provider in raw_fetch_providers if isinstance(provider, dict)
     ] if isinstance(raw_fetch_providers, list) else []
+    transcription_provider = cfg.get(
+        "transcription_provider",
+        "local-whisper",
+    )
+    runtime = get_runtime_settings()
+    transcription_model = (
+        runtime.local_asr_model
+        if transcription_provider == "local-whisper"
+        else cfg.get("transcription_model", "whisper-1")
+    )
     return SettingsOut(
         llm_provider=cfg.get("llm_provider", "openai"),
         llm_model=cfg.get("llm_model", ""),
@@ -287,8 +315,8 @@ def _build_out(cfg: dict) -> SettingsOut:
         image_api_key_preview=f"…{image_api_key[-4:]}" if len(image_api_key) >= 4 else "",
         heygen_api_key_set=bool(heygen_api_key),
         heygen_api_key_preview=f"…{heygen_api_key[-4:]}" if len(heygen_api_key) >= 4 else "",
-        transcription_provider=cfg.get("transcription_provider", "openai-compatible"),
-        transcription_model=cfg.get("transcription_model", "whisper-1"),
+        transcription_provider=transcription_provider,
+        transcription_model=transcription_model,
         transcription_base_url=cfg.get("transcription_base_url", "https://api.openai.com/v1"),
         transcription_api_key_set=bool(transcription_api_key),
         transcription_api_key_preview=f"…{transcription_api_key[-4:]}" if len(transcription_api_key) >= 4 else "",
@@ -545,7 +573,16 @@ async def update_settings(
     if body.heygen_api_key is not None:
         updates["heygen_api_key"] = body.heygen_api_key.strip()
     if body.transcription_provider is not None:
-        updates["transcription_provider"] = body.transcription_provider.strip() or "openai-compatible"
+        transcription_provider = body.transcription_provider.strip()
+        if transcription_provider not in {
+            "local-whisper",
+            "openai-compatible",
+        }:
+            raise HTTPException(
+                status_code=422,
+                detail="不支持的语音转写服务商",
+            )
+        updates["transcription_provider"] = transcription_provider
     if body.transcription_model is not None:
         updates["transcription_model"] = body.transcription_model.strip() or "whisper-1"
     if body.transcription_base_url is not None:
@@ -732,9 +769,117 @@ async def test_heygen():
     return {"ok": False, "error": safe_error}
 
 
+@router.get(
+    "/transcription/status",
+    response_model=TranscriptionStatusOut,
+)
+async def get_transcription_status():
+    cfg = await get_config()
+    provider = cfg.get(
+        "transcription_provider",
+        "local-whisper",
+    )
+    if provider != "local-whisper":
+        configured = bool(
+            cfg.get("transcription_api_key", "").strip()
+            and cfg.get("transcription_base_url", "").strip()
+            and cfg.get("transcription_model", "").strip()
+        )
+        return TranscriptionStatusOut(
+            provider="openai-compatible",
+            status="ready" if configured else "error",
+            model=cfg.get("transcription_model", "whisper-1"),
+            device="remote",
+            compute_type="",
+            error="" if configured else "云端转写服务尚未完整配置",
+        )
+
+    runtime = get_runtime_settings()
+    try:
+        async with httpx.AsyncClient(
+            timeout=3,
+            follow_redirects=False,
+        ) as client:
+            response = await client.get(
+                f"{runtime.local_asr_url.rstrip('/')}/models",
+            )
+        if not response.is_success:
+            return TranscriptionStatusOut(
+                provider="local-whisper",
+                status="error",
+                model=runtime.local_asr_model,
+                device=runtime.local_asr_device,
+                compute_type=runtime.local_asr_compute_type,
+                error=f"本地转写服务返回 HTTP {response.status_code}",
+            )
+        payload = response.json()
+        models = payload.get("data", []) if isinstance(payload, dict) else []
+        available = {
+            str(item.get("id") or "")
+            for item in models
+            if isinstance(item, dict)
+        }
+        return TranscriptionStatusOut(
+            provider="local-whisper",
+            status=(
+                "ready"
+                if runtime.local_asr_model in available
+                else "preparing"
+            ),
+            model=runtime.local_asr_model,
+            device=runtime.local_asr_device,
+            compute_type=runtime.local_asr_compute_type,
+            error="",
+        )
+    except Exception:
+        return TranscriptionStatusOut(
+            provider="local-whisper",
+            status="unavailable",
+            model=runtime.local_asr_model,
+            device=runtime.local_asr_device,
+            compute_type=runtime.local_asr_compute_type,
+            error="本地转写服务无法访问",
+        )
+
+
 @router.post("/transcription/test")
 async def test_transcription():
     cfg = await get_config()
+    provider = cfg.get(
+        "transcription_provider",
+        "local-whisper",
+    )
+    if provider == "local-whisper":
+        try:
+            with tempfile.TemporaryDirectory(
+                prefix="wms-local-asr-test-",
+            ) as directory:
+                audio_path = Path(directory) / "connection-test.wav"
+                with wave.open(str(audio_path), "wb") as handle:
+                    handle.setnchannels(1)
+                    handle.setsampwidth(2)
+                    handle.setframerate(16_000)
+                    handle.writeframes(b"\x00\x00" * 4_000)
+                await transcribe_audio(
+                    TranscriptionRequest(
+                        audio_path=audio_path,
+                        duration=0.25,
+                        require_word_timestamps=False,
+                    ),
+                    cfg,
+                )
+            return {"ok": True, "error": ""}
+        except TranscriptionError as exc:
+            return {
+                "ok": False,
+                "error": redact_secret_text(str(exc))[:500],
+            }
+        except Exception as exc:
+            return {
+                "ok": False,
+                "error": redact_secret_text(str(exc))[:500],
+            }
+
     api_key = cfg.get("transcription_api_key", "").strip()
     base_url = cfg.get("transcription_base_url", "").strip().rstrip("/")
     if not api_key or not base_url:
