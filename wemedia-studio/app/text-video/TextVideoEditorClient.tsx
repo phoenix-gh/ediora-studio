@@ -49,8 +49,23 @@ export function TextVideoEditorClient({
   })
 
   function changeProject(nextProject: TextVideoProject) {
+    autosave.markDirty(nextProject)
     setProject(nextProject)
-    autosave.markDirty()
+  }
+
+  async function applyTemplateSettings(
+    templateProps: Record<string, unknown>,
+  ) {
+    const next = {
+      ...project,
+      render_input: {
+        ...project.render_input,
+        templateProps,
+      },
+    }
+    autosave.markDirty(next)
+    setProject(next)
+    await autosave.flush()
   }
 
   function overwriteConflict() {
@@ -161,6 +176,7 @@ export function TextVideoEditorClient({
           await autosave.flush()
         ).project}
         onGenerateScenePlan={generateScenePlan}
+        onApplyTemplateSettings={applyTemplateSettings}
       />
       <Dialog open={autosave.saveState === 'conflict'}>
         <DialogContent showCloseButton={false}>

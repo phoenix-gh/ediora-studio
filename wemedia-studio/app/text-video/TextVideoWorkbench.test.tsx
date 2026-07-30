@@ -5,6 +5,8 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 
+import { getSettings } from '@/lib/api/settings'
+import { makeSettings } from '@/lib/api/settings-test-fixtures'
 import type { TextVideoProject } from '@/lib/api/text-videos'
 import {
   makeScenePlan,
@@ -26,6 +28,11 @@ vi.mock('./RemotionPreview', () => ({
     selectedSceneId: string
   }) => <div>Remotion 预览 · {selectedSceneId || 'empty'}</div>,
 }))
+
+vi.mock('@/lib/api/settings', async importOriginal => {
+  const actual = await importOriginal<typeof import('@/lib/api/settings')>()
+  return { ...actual, getSettings: vi.fn() }
+})
 
 function renderWorkbench(
   initial: TextVideoProject,
@@ -188,5 +195,26 @@ describe('TextVideoWorkbench', () => {
     expect(screen.getByRole('radio', {
       name: /仅调整当前场景/,
     })).toBeChecked()
+  })
+
+  it('forwards validated work-level template settings for immediate save', async () => {
+    vi.mocked(getSettings).mockResolvedValue(makeSettings())
+    const user = userEvent.setup()
+    const applyTemplateSettings = vi.fn().mockResolvedValue(undefined)
+
+    renderWorkbench(makeVideoReadyProject(), {
+      onApplyTemplateSettings: applyTemplateSettings,
+    })
+    await user.click(screen.getByRole('button', {
+      name: '模板视觉设置',
+    }))
+    const title = screen.getByRole('textbox', { name: '品牌标题' })
+    await user.clear(title)
+    await user.type(title, 'WORK LEVEL')
+    await user.click(screen.getByRole('button', { name: '应用' }))
+
+    expect(applyTemplateSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ brandTitle: 'WORK LEVEL' }),
+    )
   })
 })

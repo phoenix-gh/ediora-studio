@@ -108,6 +108,45 @@ describe('useTextVideoAutosave', () => {
     expect(save).not.toHaveBeenCalled()
   })
 
+  it('stages a next project synchronously for a same-tick flush', async () => {
+    const nextProject = {
+      ...project,
+      render_input: {
+        ...project.render_input,
+        templateProps: {
+          ...project.render_input.templateProps,
+          brandTitle: 'SAME TICK',
+        },
+      },
+    }
+    const save = vi.fn().mockResolvedValue({
+      ...nextProject,
+      revision: 2,
+    })
+    const { result } = renderHook(() => useTextVideoAutosave({
+      project,
+      save,
+      onRevision: vi.fn(),
+      debounceMs: 60_000,
+    }))
+
+    act(() => {
+      result.current.markDirty(nextProject)
+    })
+    await act(async () => {
+      await result.current.flush()
+    })
+
+    expect(save).toHaveBeenCalledWith(
+      nextProject.id,
+      expect.objectContaining({
+        template: expect.objectContaining({
+          templateProps: nextProject.render_input.templateProps,
+        }),
+      }),
+    )
+  })
+
   it('serializes concurrent flushes and saves edits that arrive in flight', async () => {
     const first = deferred<typeof project>()
     const second = deferred<typeof project>()

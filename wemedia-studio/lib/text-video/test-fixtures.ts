@@ -125,6 +125,7 @@ export function makeTextVideoProject(
     render_input: makeRenderInput(),
     cover_asset_url: '',
     output_asset_url: '',
+    output_stale: false,
     revision: 1,
     duration: 0,
     aspect_ratio: '9:16',

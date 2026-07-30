@@ -78,6 +78,9 @@ export type TextVideoWorkbenchProps = {
   onRealignMasterAudio?: (jobId: number) => void
   onPrepareSpeechSplit?: () => Promise<TextVideoProject>
   onGenerateScenePlan?: (input: SceneDirectionDraft) => Promise<void>
+  onApplyTemplateSettings?: (
+    templateProps: Record<string, unknown>,
+  ) => Promise<void>
 }
 
 export function TextVideoWorkbench({
@@ -93,6 +96,7 @@ export function TextVideoWorkbench({
   onRealignMasterAudio,
   onPrepareSpeechSplit,
   onGenerateScenePlan,
+  onApplyTemplateSettings,
 }: TextVideoWorkbenchProps) {
   const [selectedSceneId, setSelectedSceneId] = useState(
     () => projectDocument.scene_plan.scenes[0]?.id ?? '',
@@ -409,6 +413,12 @@ export function TextVideoWorkbench({
             onPreviewAll={() => setPreviewAll(true)}
             onProjectChange={next => onProjectChange?.(next)}
             onOpenSceneDirection={openSceneDirection}
+            onApplyTemplateSettings={async templateProps => {
+              if (!onApplyTemplateSettings) {
+                throw new Error('模板视觉保存服务尚未连接')
+              }
+              await onApplyTemplateSettings(templateProps)
+            }}
           />
         )}
       </div>

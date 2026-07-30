@@ -140,7 +140,8 @@ export function useTextVideoAutosave({
     }
   }, [project])
 
-  const markDirty = useCallback(() => {
+  const markDirty = useCallback((nextProject?: TextVideoProject) => {
+    if (nextProject) projectRef.current = nextProject
     dirtyVersionRef.current += 1
     setDirtyVersion(dirtyVersionRef.current)
     setSaveState('dirty')

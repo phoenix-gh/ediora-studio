@@ -90,6 +90,7 @@ export type TextVideoProjectSummary = {
   stage: TextVideoStage
   cover_asset_url: string
   output_asset_url: string
+  output_stale?: boolean
   revision: number
   duration: number
   aspect_ratio: string
