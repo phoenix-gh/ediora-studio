@@ -51,16 +51,23 @@ vi.mock('./TextVideoWorkbench', () => ({
   TextVideoWorkbench: ({
     projectDocument,
     onGenerateScenePlan,
+    onProjectChange,
+    onApplyTemplateSettings,
   }: {
-    projectDocument: { title: string }
+    projectDocument: ReturnType<typeof makeVideoReadyProject>
     onGenerateScenePlan(input: {
       scope: 'all' | 'selected'
       selected_scene_id: string
       direction: string
     }): Promise<void>
+    onProjectChange(project: ReturnType<typeof makeVideoReadyProject>): void
+    onApplyTemplateSettings(
+      props: Record<string, unknown>,
+    ): Promise<void>
   }) => (
     <>
       <p>{projectDocument.title}</p>
+      <p>{String(projectDocument.render_input.templateProps.brandTitle)}</p>
       <button
         type="button"
         onClick={() => void onGenerateScenePlan({
@@ -71,6 +78,24 @@ vi.mock('./TextVideoWorkbench', () => ({
       >
         测试生成分镜
       </button>
+      <button
+        type="button"
+        onClick={() => onProjectChange({
+          ...projectDocument,
+          title: '立即变更',
+        })}
+      >
+        测试普通变更
+      </button>
+      <button
+        type="button"
+        onClick={() => void onApplyTemplateSettings({
+          ...projectDocument.render_input.templateProps,
+          brandTitle: 'WORK LEVEL',
+        })}
+      >
+        测试应用模板视觉
+      </button>
     </>
   ),
 }))
@@ -80,6 +105,10 @@ describe('TextVideoEditorClient scene action', () => {
     vi.clearAllMocks()
     const project = makeVideoReadyProject()
     mocks.useAutosave.mockReturnValue(mocks.autosave)
+    mocks.autosave.flush.mockResolvedValue({
+      project,
+      dirtyVersion: 0,
+    })
     mocks.generateScene.mockResolvedValue({ jobs: [], project })
     mocks.runProjectAction.mockImplementation(
       async (_key: string, launch: (saved: typeof project) => Promise<unknown>) => {
@@ -126,5 +155,66 @@ describe('TextVideoEditorClient scene action', () => {
     })
 
     expect(screen.getByText('数据库规范标题')).toBeInTheDocument()
+  })
+
+  it('stages ordinary project changes before updating React state', async () => {
+    const user = userEvent.setup()
+    const project = makeVideoReadyProject()
+    render(<TextVideoEditorClient initialProject={project} />)
+
+    await user.click(screen.getByRole('button', {
+      name: '测试普通变更',
+    }))
+
+    expect(mocks.autosave.markDirty).toHaveBeenCalledWith(
+      expect.objectContaining({ title: '立即变更' }),
+    )
+    expect(screen.getByText('立即变更')).toBeInTheDocument()
+  })
+
+  it('flushes template settings immediately and keeps the canonical save result', async () => {
+    const user = userEvent.setup()
+    const project = makeVideoReadyProject({
+      output_asset_url: '/api/uploads/previous.mp4',
+      output_stale: true,
+    })
+    render(<TextVideoEditorClient initialProject={project} />)
+    const options = mocks.useAutosave.mock.calls[0]?.[0] as {
+      onSavedProject?: (saved: typeof project) => void
+    }
+    mocks.autosave.flush.mockImplementation(async () => {
+      const canonical = {
+        ...project,
+        revision: 2,
+        render_input: {
+          ...project.render_input,
+          templateProps: {
+            ...project.render_input.templateProps,
+            brandTitle: 'SERVER CANONICAL',
+          },
+        },
+      }
+      options.onSavedProject?.(canonical)
+      return { project: canonical, dirtyVersion: 1 }
+    })
+
+    await user.click(screen.getByRole('button', {
+      name: '测试应用模板视觉',
+    }))
+
+    await waitFor(() => expect(mocks.autosave.flush).toHaveBeenCalledOnce())
+    expect(mocks.autosave.markDirty).toHaveBeenCalledWith(
+      expect.objectContaining({
+        output_asset_url: '/api/uploads/previous.mp4',
+        render_input: expect.objectContaining({
+          templateProps: expect.objectContaining({
+            brandTitle: 'WORK LEVEL',
+          }),
+        }),
+      }),
+    )
+    expect(mocks.autosave.markDirty.mock.invocationCallOrder[0])
+      .toBeLessThan(mocks.autosave.flush.mock.invocationCallOrder[0])
+    expect(await screen.findByText('SERVER CANONICAL')).toBeInTheDocument()
   })
 })

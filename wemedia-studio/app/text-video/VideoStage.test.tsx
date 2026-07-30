@@ -34,6 +34,7 @@ describe('VideoStage', () => {
         onPreviewAll={vi.fn()}
         onProjectChange={vi.fn()}
         onOpenSceneDirection={vi.fn()}
+        onApplyTemplateSettings={vi.fn()}
       />,
     )
 
@@ -56,6 +57,7 @@ describe('VideoStage', () => {
         onPreviewAll={vi.fn()}
         onProjectChange={onProjectChange}
         onOpenSceneDirection={vi.fn()}
+        onApplyTemplateSettings={vi.fn()}
       />,
     )
 
@@ -87,6 +89,7 @@ describe('VideoStage', () => {
           onPreviewAll={vi.fn()}
           onProjectChange={setProject}
           onOpenSceneDirection={vi.fn()}
+          onApplyTemplateSettings={vi.fn()}
         />
       )
     }
@@ -123,11 +126,64 @@ describe('VideoStage', () => {
         onPreviewAll={vi.fn()}
         onProjectChange={vi.fn()}
         onOpenSceneDirection={onOpenSceneDirection}
+        onApplyTemplateSettings={vi.fn()}
       />,
     )
 
     await user.click(screen.getByRole('button', { name: 'AI 生成分镜' }))
     expect(onOpenSceneDirection).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole('button', {
+      name: 'MP4 渲染暂未开放',
+    })).toBeDisabled()
+  })
+
+  it('opens work-level template settings separately from the AI director', async () => {
+    const user = userEvent.setup()
+    const onOpenSceneDirection = vi.fn()
+
+    render(
+      <VideoStage
+        project={makeVideoReadyProject()}
+        selectedSceneId="scene-1"
+        onSelectScene={vi.fn()}
+        previewAll={false}
+        onPreviewAll={vi.fn()}
+        onProjectChange={vi.fn()}
+        onOpenSceneDirection={onOpenSceneDirection}
+        onApplyTemplateSettings={vi.fn()}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', {
+      name: '模板视觉设置',
+    }))
+
+    expect(screen.getByRole('dialog', {
+      name: '模板视觉设置',
+    })).toBeVisible()
+    expect(onOpenSceneDirection).not.toHaveBeenCalled()
+  })
+
+  it('labels an existing output as the previous render after visuals change', () => {
+    render(
+      <VideoStage
+        project={makeVideoReadyProject({
+          output_asset_url: '/api/uploads/previous.mp4',
+          output_stale: true,
+        })}
+        selectedSceneId="scene-1"
+        onSelectScene={vi.fn()}
+        previewAll={false}
+        onPreviewAll={vi.fn()}
+        onProjectChange={vi.fn()}
+        onOpenSceneDirection={vi.fn()}
+        onApplyTemplateSettings={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      '模板视觉已更新，当前为上一版成片；重新渲染后更新',
+    )
     expect(screen.getByRole('button', {
       name: 'MP4 渲染暂未开放',
     })).toBeDisabled()

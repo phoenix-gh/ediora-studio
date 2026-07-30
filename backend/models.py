@@ -927,6 +927,11 @@ class TextVideoProject(Base):
     render_input: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     cover_asset_url: Mapped[str] = mapped_column(String, nullable=False, default="")
     output_asset_url: Mapped[str] = mapped_column(String, nullable=False, default="")
+    output_stale: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+    )
     revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     updated_at: Mapped[datetime] = mapped_column(

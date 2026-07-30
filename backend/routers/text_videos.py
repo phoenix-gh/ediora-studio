@@ -71,7 +71,10 @@ from text_video_scene_plan import (
     validate_template_configuration,
     validate_word_timeline,
 )
-from text_video_templates import get_text_video_template
+from text_video_templates import (
+    get_text_video_template,
+    normalize_text_video_template_default_map,
+)
 from text_video_jobs import (
     StaleTextVideoJob,
     assert_current_speech_job,
@@ -399,8 +402,30 @@ DEFAULT_RENDER_INPUT = {
         "background": "dark-grid",
         "transition": "soft-push",
         "textDensity": "standard",
+        "brandTitle": "EDIORA",
+        "brandSubtitle": "述策",
+        "showBrand": True,
+        "accentColor": "#69F6FF",
+        "showProgress": True,
+        "showSceneNumber": True,
     },
 }
+
+EDITABLE_PROJECT_FIELDS = (
+    "title",
+    "status",
+    "stage",
+    "script",
+    "voice_settings",
+    "paragraphs",
+    "speech_split_mode",
+    "master_audio",
+    "scene_plan",
+    "render_input",
+    "cover_asset_url",
+    "output_asset_url",
+    "output_stale",
+)
 
 
 def serialize_project(project: TextVideoProject, *, summary: bool = False) -> dict[str, Any]:
@@ -425,6 +450,7 @@ def serialize_project(project: TextVideoProject, *, summary: bool = False) -> di
         "stage": project.stage,
         "cover_asset_url": project.cover_asset_url,
         "output_asset_url": project.output_asset_url,
+        "output_stale": project.output_stale,
         "revision": project.revision,
         "duration": duration,
         "aspect_ratio": _aspect_ratio(render_input),
@@ -501,6 +527,36 @@ async def list_projects(
 @router.post("", status_code=status.HTTP_201_CREATED)
 async def create_project(payload: ProjectCreate, db: AsyncSession = Depends(get_db)):
     title = payload.title.strip() or "未命名文字视频"
+    config = await get_config()
+    try:
+        stored_template_defaults = json.loads(
+            config.get("text_video_template_defaults", "{}"),
+        )
+        template_defaults = normalize_text_video_template_default_map(
+            stored_template_defaults,
+        )
+    except (json.JSONDecodeError, TypeError, ValueError) as error:
+        logger.warning(
+            "Ignoring malformed text video template defaults on creation: {}",
+            error,
+        )
+        template_defaults = normalize_text_video_template_default_map(None)
+    render_input = deepcopy(DEFAULT_RENDER_INPUT)
+    render_input["templateProps"] = deepcopy(
+        template_defaults["tech-text-v1@1"],
+    )
+    try:
+        manifest = get_text_video_template(
+            render_input["templateId"],
+            render_input["templateVersion"],
+        )
+        _, render_input["templateProps"] = validate_template_configuration(
+            manifest=manifest,
+            composition=render_input["composition"],
+            template_props=render_input["templateProps"],
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
     project = TextVideoProject(
         title=title,
         status="draft",
@@ -517,7 +573,7 @@ async def create_project(payload: ProjectCreate, db: AsyncSession = Depends(get_
         speech_split_mode="single",
         master_audio=empty_master_audio(),
         scene_plan=empty_scene_plan(),
-        render_input=deepcopy(DEFAULT_RENDER_INPUT),
+        render_input=render_input,
         revision=1,
     )
     db.add(project)
@@ -576,6 +632,10 @@ async def update_project(
         scene_update.pop("generation_revision", None)
     if changes.get("title") is not None:
         changes["title"] = changes["title"].strip() or "未命名文字视频"
+    before = {
+        field: deepcopy(getattr(project, field))
+        for field in EDITABLE_PROJECT_FIELDS
+    }
     try:
         merge_editable_project(
             project,
@@ -587,6 +647,11 @@ async def update_project(
         )
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
+    if all(
+        getattr(project, field) == value
+        for field, value in before.items()
+    ):
+        return serialize_project(project)
     if project.stage == "video" and not video_stage_open(project):
         raise HTTPException(
             status_code=422,

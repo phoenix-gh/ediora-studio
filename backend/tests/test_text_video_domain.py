@@ -297,6 +297,83 @@ def test_same_scene_echo_preserves_inflight_scene_job():
     assert project.render_input == before_render_input
 
 
+def test_template_change_marks_only_existing_video_output_stale():
+    project = _make_video_ready_project()
+    project.output_asset_url = "/api/uploads/old.mp4"
+    merge_editable_project(
+        project,
+        {
+            "template": {
+                "templateId": "tech-text-v1",
+                "templateVersion": 1,
+                "templateProps": (
+                    project.render_input["templateProps"]
+                    | {"accentColor": "#FF3366"}
+                ),
+            },
+        },
+        speech_model="mimo-v2.5-tts",
+    )
+
+    assert project.output_stale is True
+    assert project.master_audio["status"] == "ready"
+    assert project.scene_plan["status"] == "ready"
+
+    project_without_output = _make_video_ready_project()
+    merge_editable_project(
+        project_without_output,
+        {
+            "template": {
+                "templateId": "tech-text-v1",
+                "templateVersion": 1,
+                "templateProps": (
+                    project_without_output.render_input["templateProps"]
+                    | {"accentColor": "#FF3366"}
+                ),
+            },
+        },
+        speech_model="mimo-v2.5-tts",
+    )
+    assert project_without_output.output_stale is False
+
+
+def test_replacing_video_output_clears_stale_state():
+    project = _make_video_ready_project()
+    project.output_asset_url = "/api/uploads/old.mp4"
+    project.output_stale = True
+
+    merge_editable_project(
+        project,
+        {"output_asset_url": "/api/uploads/new.mp4"},
+        speech_model="mimo-v2.5-tts",
+    )
+
+    assert project.output_asset_url == "/api/uploads/new.mp4"
+    assert project.output_stale is False
+
+
+def test_normalized_template_echo_does_not_mark_video_output_stale():
+    project = _make_video_ready_project()
+    project.output_asset_url = "/api/uploads/old.mp4"
+
+    merge_editable_project(
+        project,
+        {
+            "template": {
+                "templateId": "tech-text-v1",
+                "templateVersion": 1,
+                "templateProps": (
+                    project.render_input["templateProps"]
+                    | {"accentColor": "#69f6ff"}
+                ),
+            },
+        },
+        speech_model="mimo-v2.5-tts",
+    )
+
+    assert project.output_stale is False
+
+
 def test_video_stage_requires_current_authoritative_projection():
     project = _make_video_ready_project()
     assert video_stage_open(project) is True

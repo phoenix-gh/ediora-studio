@@ -256,6 +256,7 @@ async def _drop_tables(conn, table_names: tuple[str, ...]) -> None:
 
 async def migrate_text_video_project_schema(conn) -> None:
     """Keep early text-video project tables compatible across SQLite and PostgreSQL."""
+    from copy import deepcopy
     import json
 
     from sqlalchemy import JSON, bindparam, inspect, text
@@ -295,6 +296,7 @@ async def migrate_text_video_project_schema(conn) -> None:
         "render_input": f"JSON NOT NULL DEFAULT {json_object_default}",
         "cover_asset_url": "VARCHAR NOT NULL DEFAULT ''",
         "output_asset_url": "VARCHAR NOT NULL DEFAULT ''",
+        "output_stale": "BOOLEAN NOT NULL DEFAULT FALSE",
         "revision": "INTEGER NOT NULL DEFAULT 1",
         "created_at": timestamp_definition,
         "updated_at": timestamp_definition,
@@ -312,11 +314,16 @@ async def migrate_text_video_project_schema(conn) -> None:
         empty_scene_plan,
         normalize_speech_segments,
     )
+    from text_video_templates import (
+        get_text_video_template,
+        normalize_text_video_template_props,
+    )
 
     rows = (
         await conn.execute(text(
             "SELECT id, script, paragraphs, speech_split_mode, "
-            "master_audio, scene_plan FROM text_video_projects"
+            "master_audio, scene_plan, render_input, output_asset_url, "
+            "output_stale FROM text_video_projects"
         ))
     ).mappings().all()
 
@@ -368,6 +375,43 @@ async def migrate_text_video_project_schema(conn) -> None:
             "master_audio": master_audio,
             "scene_plan": scene_plan,
         })
+
+        render_input = decode_json(row["render_input"], {})
+        if (
+            not isinstance(render_input, dict)
+            or render_input.get("templateId") != "tech-text-v1"
+            or render_input.get("templateVersion") != 1
+        ):
+            continue
+        template_props = render_input.get("templateProps")
+        if not isinstance(template_props, dict):
+            continue
+        manifest = get_text_video_template("tech-text-v1", 1)
+        if not set(manifest["template_props"]) - set(template_props):
+            continue
+        try:
+            normalized_props = normalize_text_video_template_props(
+                manifest,
+                template_props,
+                fill_missing=True,
+            )
+        except ValueError:
+            continue
+        migrated_render_input = deepcopy(render_input)
+        migrated_render_input["templateProps"] = normalized_props
+        await conn.execute(
+            text(
+                "UPDATE text_video_projects SET "
+                "render_input = :render_input, "
+                "output_stale = :output_stale "
+                "WHERE id = :id"
+            ).bindparams(bindparam("render_input", type_=JSON)),
+            {
+                "id": row["id"],
+                "render_input": migrated_render_input,
+                "output_stale": bool(row["output_asset_url"]),
+            },
+        )
 
 
 async def migrate_content_response_schema(conn) -> None:

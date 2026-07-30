@@ -29,6 +29,36 @@ export type TextVideoRenderInput<P = Record<string, unknown>> = {
   templateProps: P
 }
 
+export type TextVideoTemplateSettingField<P> =
+  | {
+    key: Extract<keyof P, string>
+    kind: 'text'
+    label: string
+    maxLength: number
+  }
+  | {
+    key: Extract<keyof P, string>
+    kind: 'boolean'
+    label: string
+  }
+  | {
+    key: Extract<keyof P, string>
+    kind: 'select'
+    label: string
+    options: readonly { value: string; label: string }[]
+  }
+  | {
+    key: Extract<keyof P, string>
+    kind: 'color'
+    label: string
+  }
+
+export type TextVideoTemplateSettingGroup<P> = {
+  id: string
+  label: string
+  fields: readonly TextVideoTemplateSettingField<P>[]
+}
+
 export type TextVideoTemplateManifest<
   P extends Record<string, unknown>,
 > = {
@@ -44,4 +74,5 @@ export type TextVideoTemplateManifest<
   animations: readonly string[]
   transitions: readonly string[]
   defaults: P
+  settings: readonly TextVideoTemplateSettingGroup<P>[]
 }

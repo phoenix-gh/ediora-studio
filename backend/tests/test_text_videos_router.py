@@ -28,6 +28,7 @@ def client(monkeypatch, tmp_path):
             "database",
             "models",
             "routers.jobs",
+            "routers.settings",
             "routers.text_videos",
             "text_video_audio",
             "text_video_jobs",
@@ -37,6 +38,7 @@ def client(monkeypatch, tmp_path):
     from database import Base, SessionLocal, engine, get_db
     import models  # noqa: F401
     import routers.jobs as jobs_module
+    import routers.settings as settings_module
     import routers.text_videos as router_module
 
     async def setup():
@@ -45,6 +47,7 @@ def client(monkeypatch, tmp_path):
 
     asyncio.new_event_loop().run_until_complete(setup())
     app = FastAPI()
+    app.include_router(settings_module.router, prefix="/api")
     app.include_router(router_module.router, prefix="/api")
     app.include_router(jobs_module.router, prefix="/api")
 
@@ -395,6 +398,33 @@ def test_scene_worker_rejects_a_malformed_frozen_job_as_stale(client):
         router_module._validate_scene_job(malformed, project_id=1)
 
 
+def test_new_project_copies_current_platform_defaults(client):
+    existing = client.post("/api/text-videos", json={}).json()
+    saved = client.put("/api/settings", json={
+        "text_video_template_defaults": {
+            "tech-text-v1@1": {
+                "brandTitle": "CHANNEL ONE",
+                "accentColor": "#FF3366",
+            },
+        },
+    })
+
+    assert saved.status_code == 200, saved.text
+    created = client.post("/api/text-videos", json={"title": "继承测试"})
+    assert created.status_code == 201, created.text
+    props = created.json()["render_input"]["templateProps"]
+    assert props["brandTitle"] == "CHANNEL ONE"
+    assert props["accentColor"] == "#FF3366"
+
+    existing_response = client.get(f"/api/text-videos/{existing['id']}")
+    assert existing_response.status_code == 200, existing_response.text
+    assert (
+        existing_response.json()["render_input"]["templateProps"]
+        ["brandTitle"]
+        == "EDIORA"
+    )
+
+
 def test_text_video_project_crud_and_revision_conflict(client):
     assert client.get("/api/text-videos").json() == []
 
@@ -414,7 +444,10 @@ def test_text_video_project_crud_and_revision_conflict(client):
     assert created["master_audio"]["status"] == "missing"
     assert created["scene_plan"]["status"] == "missing"
     assert created["render_input"]["templateId"] == "tech-text-v1"
-    assert client.get("/api/text-videos").json()[0]["duration"] == 0
+    assert created["output_stale"] is False
+    summary = client.get("/api/text-videos").json()[0]
+    assert summary["duration"] == 0
+    assert summary["output_stale"] is False
 
     detail = client.get(f"/api/text-videos/{created['id']}")
     assert detail.status_code == 200
@@ -448,6 +481,25 @@ def test_text_video_project_crud_and_revision_conflict(client):
     deleted = client.delete(f"/api/text-videos/{created['id']}")
     assert deleted.status_code == 204
     assert client.get(f"/api/text-videos/{created['id']}").status_code == 404
+
+
+def test_patch_with_persisted_template_props_keeps_revision_unchanged(client):
+    project = client.post("/api/text-videos", json={}).json()
+
+    response = client.patch(
+        f"/api/text-videos/{project['id']}",
+        json={
+            "revision": project["revision"],
+            "template": {
+                "templateId": project["render_input"]["templateId"],
+                "templateVersion": project["render_input"]["templateVersion"],
+                "templateProps": project["render_input"]["templateProps"],
+            },
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["revision"] == project["revision"]
 
 
 def test_patch_persists_explicit_ai_speech_split_mode(client):

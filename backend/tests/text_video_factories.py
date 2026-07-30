@@ -21,6 +21,12 @@ DEFAULT_RENDER_INPUT = {
         "background": "dark-grid",
         "transition": "soft-push",
         "textDensity": "standard",
+        "brandTitle": "EDIORA",
+        "brandSubtitle": "述策",
+        "showBrand": True,
+        "accentColor": "#69F6FF",
+        "showProgress": True,
+        "showSceneNumber": True,
     },
 }
 
@@ -73,6 +79,7 @@ def make_text_video_project(**overrides):
         "master_audio": make_master_audio(),
         "scene_plan": make_scene_plan(),
         "render_input": deepcopy(DEFAULT_RENDER_INPUT),
+        "output_stale": False,
         "revision": 1,
     }
     return TextVideoProject(**(values | overrides))

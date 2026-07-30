@@ -4,6 +4,7 @@ import { useState } from 'react'
 import {
   ArrowLeftFromLine,
   ArrowRightFromLine,
+  Brush,
   Clapperboard,
   Merge,
   Play,
@@ -13,6 +14,10 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 
+import {
+  Alert,
+  AlertDescription,
+} from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Field, FieldDescription, FieldLabel } from '@/components/ui/field'
@@ -42,6 +47,7 @@ import { cn } from '@/lib/utils'
 
 import { RemotionPreview } from './RemotionPreview'
 import { SceneTimeline } from './SceneTimeline'
+import { TemplateSettingsDialog } from './TemplateSettingsDialog'
 
 
 export function VideoStage({
@@ -52,6 +58,7 @@ export function VideoStage({
   onPreviewAll,
   onProjectChange,
   onOpenSceneDirection,
+  onApplyTemplateSettings,
 }: {
   project: TextVideoProject
   selectedSceneId: string
@@ -60,7 +67,11 @@ export function VideoStage({
   onPreviewAll(): void
   onProjectChange(project: TextVideoProject): void
   onOpenSceneDirection(scope: 'all' | 'selected'): void
+  onApplyTemplateSettings(
+    templateProps: Record<string, unknown>,
+  ): Promise<void>
 }) {
+  const [templateSettingsOpen, setTemplateSettingsOpen] = useState(false)
   const scenes = project.scene_plan.scenes
   const selectedIndex = scenes.findIndex(
     scene => scene.id === selectedSceneId,
@@ -219,6 +230,14 @@ export function VideoStage({
             }
           </FieldDescription>
         </Field>
+        <Button
+          className="mt-3 w-full"
+          variant="outline"
+          onClick={() => setTemplateSettingsOpen(true)}
+        >
+          <Brush data-icon />
+          模板视觉设置
+        </Button>
 
         {selectedScene && planCurrent ? (
           <SceneInspector
@@ -252,6 +271,13 @@ export function VideoStage({
           <WandSparkles data-icon />
           {director.label}
         </Button>
+        {project.output_asset_url && project.output_stale ? (
+          <Alert variant="info" className="mt-3">
+            <AlertDescription>
+              模板视觉已更新，当前为上一版成片；重新渲染后更新
+            </AlertDescription>
+          </Alert>
+        ) : null}
         <Button
           className="mt-3 w-full"
           disabled
@@ -265,6 +291,12 @@ export function VideoStage({
         project={project}
         selectedSceneId={activeSceneId}
         onSelectScene={onSelectScene}
+      />
+      <TemplateSettingsDialog
+        open={templateSettingsOpen}
+        project={project}
+        onOpenChange={setTemplateSettingsOpen}
+        onApply={onApplyTemplateSettings}
       />
     </div>
   )

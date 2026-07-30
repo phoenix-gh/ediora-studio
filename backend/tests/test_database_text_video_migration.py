@@ -46,6 +46,7 @@ def test_text_video_project_migration_is_idempotent(tmp_path):
         "render_input",
         "cover_asset_url",
         "output_asset_url",
+        "output_stale",
         "revision",
         "created_at",
         "updated_at",
@@ -170,3 +171,102 @@ def test_text_video_project_migration_preserves_authoritative_state_on_restart(t
     assert row["speech_split_mode"] == "auto"
     assert json.loads(row["master_audio"])["status"] == "ready"
     assert json.loads(row["scene_plan"])["status"] == "ready"
+
+
+def test_text_video_project_migration_normalizes_legacy_template_props_once(
+    tmp_path,
+):
+    from database import migrate_text_video_project_schema
+
+    engine = create_async_engine(
+        f"sqlite+aiosqlite:///{tmp_path / 'text-video-template-props.db'}",
+    )
+    legacy_render_input = {
+        "templateId": "tech-text-v1",
+        "templateVersion": 1,
+        "templateProps": {
+            "theme": "tech-blue",
+            "font": "source-han-sans",
+            "background": "dark-grid",
+            "transition": "soft-push",
+            "textDensity": "standard",
+        },
+    }
+    complete_render_input = {
+        **legacy_render_input,
+        "templateProps": {
+            **legacy_render_input["templateProps"],
+            "brandTitle": "已完成",
+            "brandSubtitle": "无需迁移",
+            "showBrand": True,
+            "accentColor": "#FF3366",
+            "showProgress": False,
+            "showSceneNumber": False,
+        },
+    }
+
+    async def run():
+        async with engine.begin() as connection:
+            await connection.execute(text(
+                "CREATE TABLE text_video_projects ("
+                "id INTEGER PRIMARY KEY, "
+                "title VARCHAR NOT NULL, "
+                "render_input JSON NOT NULL, "
+                "output_asset_url VARCHAR NOT NULL DEFAULT ''"
+                ")"
+            ))
+            await connection.execute(
+                text(
+                    "INSERT INTO text_video_projects "
+                    "(id, title, render_input, output_asset_url) "
+                    "VALUES (:id, :title, :render_input, :output_asset_url)"
+                ),
+                [
+                    {
+                        "id": 1,
+                        "title": "旧成片",
+                        "render_input": json.dumps(legacy_render_input),
+                        "output_asset_url": "/api/uploads/old.mp4",
+                    },
+                    {
+                        "id": 2,
+                        "title": "旧草稿",
+                        "render_input": json.dumps(legacy_render_input),
+                        "output_asset_url": "",
+                    },
+                    {
+                        "id": 3,
+                        "title": "完整项目",
+                        "render_input": json.dumps(complete_render_input),
+                        "output_asset_url": "/api/uploads/current.mp4",
+                    },
+                ],
+            )
+            await migrate_text_video_project_schema(connection)
+            first_rows = (
+                await connection.execute(text(
+                    "SELECT id, render_input, output_asset_url, output_stale "
+                    "FROM text_video_projects ORDER BY id"
+                ))
+            ).mappings().all()
+            await migrate_text_video_project_schema(connection)
+            second_rows = (
+                await connection.execute(text(
+                    "SELECT id, render_input, output_asset_url, output_stale "
+                    "FROM text_video_projects ORDER BY id"
+                ))
+            ).mappings().all()
+        await engine.dispose()
+        return first_rows, second_rows
+
+    first_rows, second_rows = asyncio.run(run())
+    assert [dict(row) for row in second_rows] == [dict(row) for row in first_rows]
+
+    legacy_with_output, legacy_without_output, complete_project = second_rows
+    assert legacy_with_output["output_asset_url"] == "/api/uploads/old.mp4"
+    assert legacy_with_output["output_stale"] == 1
+    assert legacy_without_output["output_stale"] == 0
+    assert json.loads(legacy_with_output["render_input"])["templateProps"][
+        "brandTitle"
+    ] == "EDIORA"
+    assert complete_project["output_stale"] == 0

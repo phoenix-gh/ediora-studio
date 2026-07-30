@@ -30,6 +30,7 @@ const project = {
   stage: 'script' as const,
   cover_asset_url: '',
   output_asset_url: '',
+  output_stale: false,
   revision: 1,
   duration: 25.3,
   aspect_ratio: '9:16',

@@ -153,6 +153,7 @@ function projectForVisualEdit(): TextVideoProject {
     },
     cover_asset_url: '',
     output_asset_url: '',
+    output_stale: false,
     revision: 12,
     duration: 2,
     aspect_ratio: '9:16',
