@@ -36,6 +36,7 @@ type TemplateSettingsFormProps<P extends Record<string, unknown>> = {
   value: P
   onChange(value: P): void
   fieldErrors: Record<string, string>
+  disabled?: boolean
 }
 
 type TemplateSettingControlProps<P extends Record<string, unknown>> = {
@@ -44,6 +45,7 @@ type TemplateSettingControlProps<P extends Record<string, unknown>> = {
   value: P
   onChange(value: P): void
   error?: string
+  disabled: boolean
 }
 
 function TemplateSettingControl<P extends Record<string, unknown>>({
@@ -52,21 +54,30 @@ function TemplateSettingControl<P extends Record<string, unknown>>({
   value,
   onChange,
   error,
+  disabled,
 }: TemplateSettingControlProps<P>) {
   const invalid = Boolean(error)
   const describedBy = error ? `${fieldId}-error` : undefined
 
   if (field.kind === 'boolean') {
     return (
-      <Field data-invalid={invalid} orientation="horizontal">
+      <Field
+        data-invalid={invalid}
+        data-disabled={disabled}
+        orientation="horizontal"
+      >
         <FieldLabel htmlFor={fieldId}>{field.label}</FieldLabel>
         <Switch
           id={fieldId}
           checked={Boolean(value[field.key])}
-          onCheckedChange={checked => onChange({
-            ...value,
-            [field.key]: checked,
-          })}
+          disabled={disabled}
+          onCheckedChange={checked => {
+            if (disabled) return
+            onChange({
+              ...value,
+              [field.key]: checked,
+            })
+          }}
           aria-invalid={invalid}
           aria-describedby={describedBy}
         />
@@ -79,12 +90,13 @@ function TemplateSettingControl<P extends Record<string, unknown>>({
 
   if (field.kind === 'select') {
     return (
-      <Field data-invalid={invalid}>
+      <Field data-invalid={invalid} data-disabled={disabled}>
         <FieldLabel htmlFor={fieldId}>{field.label}</FieldLabel>
         <Select
           value={String(value[field.key] ?? '')}
+          disabled={disabled}
           onValueChange={nextValue => {
-            if (nextValue !== null) {
+            if (!disabled && nextValue !== null) {
               onChange({ ...value, [field.key]: nextValue })
             }
           }}
@@ -121,7 +133,7 @@ function TemplateSettingControl<P extends Record<string, unknown>>({
   if (field.kind === 'color') {
     const color = String(value[field.key] ?? '')
     return (
-      <Field data-invalid={invalid}>
+      <Field data-invalid={invalid} data-disabled={disabled}>
         <FieldLabel htmlFor={fieldId}>{field.label}</FieldLabel>
         <div className="flex items-center gap-2">
           <Input
@@ -131,10 +143,14 @@ function TemplateSettingControl<P extends Record<string, unknown>>({
             aria-label={`选择${field.label}`}
             aria-invalid={invalid}
             aria-describedby={describedBy}
-            onChange={event => onChange({
-              ...value,
-              [field.key]: event.target.value,
-            })}
+            disabled={disabled}
+            onChange={event => {
+              if (disabled) return
+              onChange({
+                ...value,
+                [field.key]: event.target.value,
+              })
+            }}
             className="size-9 shrink-0"
           />
           <Input
@@ -142,10 +158,14 @@ function TemplateSettingControl<P extends Record<string, unknown>>({
             value={color}
             aria-invalid={invalid}
             aria-describedby={describedBy}
-            onChange={event => onChange({
-              ...value,
-              [field.key]: event.target.value,
-            })}
+            disabled={disabled}
+            onChange={event => {
+              if (disabled) return
+              onChange({
+                ...value,
+                [field.key]: event.target.value,
+              })
+            }}
           />
         </div>
         {error ? (
@@ -156,7 +176,7 @@ function TemplateSettingControl<P extends Record<string, unknown>>({
   }
 
   return (
-    <Field data-invalid={invalid}>
+    <Field data-invalid={invalid} data-disabled={disabled}>
       <FieldLabel htmlFor={fieldId}>{field.label}</FieldLabel>
       <Input
         id={fieldId}
@@ -164,10 +184,14 @@ function TemplateSettingControl<P extends Record<string, unknown>>({
         maxLength={field.maxLength}
         aria-invalid={invalid}
         aria-describedby={describedBy}
-        onChange={event => onChange({
-          ...value,
-          [field.key]: event.target.value,
-        })}
+        disabled={disabled}
+        onChange={event => {
+          if (disabled) return
+          onChange({
+            ...value,
+            [field.key]: event.target.value,
+          })
+        }}
       />
       {error ? (
         <FieldDescription id={describedBy}>{error}</FieldDescription>
@@ -181,13 +205,14 @@ export function TemplateSettingsForm<P extends Record<string, unknown>>({
   value,
   onChange,
   fieldErrors,
+  disabled = false,
 }: TemplateSettingsFormProps<P>) {
   const formId = useId()
 
   return (
     <div className="flex flex-col gap-5">
       {manifest.settings.map(group => (
-        <FieldSet key={group.id}>
+        <FieldSet key={group.id} disabled={disabled}>
           <FieldLegend>{group.label}</FieldLegend>
           <FieldGroup>
             {group.fields.map(field => (
@@ -198,6 +223,7 @@ export function TemplateSettingsForm<P extends Record<string, unknown>>({
                 value={value}
                 onChange={onChange}
                 error={fieldErrors[field.key]}
+                disabled={disabled}
               />
             ))}
           </FieldGroup>

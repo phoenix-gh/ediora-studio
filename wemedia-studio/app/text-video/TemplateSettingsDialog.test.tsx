@@ -158,6 +158,19 @@ describe('TemplateSettingsDialog', () => {
     }))
     expect(screen.getByRole('dialog')).toBeVisible()
     expect(screen.getByRole('button', { name: '正在应用…' })).toBeDisabled()
+    const title = screen.getByRole('textbox', { name: '品牌标题' })
+    expect(title).toBeDisabled()
+    expect(screen.getByRole('combobox', { name: '背景' })).toBeDisabled()
+    expect(screen.getAllByRole('switch').every(control => (
+      control.getAttribute('aria-disabled') === 'true'
+    ))).toBe(true)
+    expect(screen.getByRole('textbox', { name: '强调色' })).toBeDisabled()
+    expect(screen.getByLabelText('选择强调色')).toBeDisabled()
+
+    await user.type(title, 'MUTATED WHILE PENDING')
+    expect(title).toHaveValue('CURRENT')
+    expect(screen.getByTestId('template-draft-preview'))
+      .toHaveTextContent('CURRENT')
 
     await act(async () => {
       request.resolve()
@@ -194,9 +207,41 @@ describe('TemplateSettingsDialog', () => {
     await user.type(title, 'KEEP THIS')
     await user.click(screen.getByRole('button', { name: '应用' }))
 
-    expect(await screen.findByRole('alert'))
-      .toHaveTextContent('保存接口失败')
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('保存接口失败')
+    expect(screen.getByRole('region', {
+      name: '模板视觉设置内容',
+    })).toContainElement(alert)
     expect(screen.getByRole('dialog')).toBeVisible()
     expect(title).toHaveValue('KEEP THIS')
+  })
+
+  it('keeps header and footer reachable around one bounded scroll region', () => {
+    render(
+      <DialogHarness onApply={vi.fn().mockResolvedValue(undefined)} />,
+    )
+
+    const dialog = screen.getByRole('dialog')
+    const heading = screen.getByRole('heading', {
+      name: '模板视觉设置',
+    })
+    const scrollRegion = screen.getByRole('region', {
+      name: '模板视觉设置内容',
+    })
+    const cancel = screen.getByRole('button', { name: '取消' })
+    const footer = cancel.closest('[data-slot="dialog-footer"]')
+
+    expect(dialog).toHaveClass(
+      'h-[calc(100dvh-2rem)]',
+      'grid-rows-[auto_minmax(0,1fr)_auto]',
+      'overflow-hidden',
+    )
+    expect(scrollRegion).toHaveClass('min-h-0', 'overflow-y-auto')
+    expect(footer).not.toBeNull()
+    expect(footer).toHaveClass('shrink-0')
+    expect(scrollRegion).not.toContainElement(heading)
+    expect(scrollRegion).not.toContainElement(cancel)
+    expect(dialog).toContainElement(heading)
+    expect(dialog).toContainElement(cancel)
   })
 })

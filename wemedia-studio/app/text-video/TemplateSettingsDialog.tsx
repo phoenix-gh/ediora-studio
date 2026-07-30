@@ -151,7 +151,7 @@ function TemplateSettingsSession({
         size="lg"
         showCloseButton={!applying}
         aria-busy={applying}
-        className="max-h-[calc(100dvh-2rem)] overflow-hidden"
+        className="h-[calc(100dvh-2rem)] max-h-[calc(100dvh-2rem)] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden sm:h-auto"
       >
         <DialogHeader>
           <DialogTitle>模板视觉设置</DialogTitle>
@@ -160,42 +160,50 @@ function TemplateSettingsSession({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="grid min-h-0 gap-4 md:grid-cols-[minmax(0,1fr)_minmax(300px,0.9fr)]">
-          <div className="max-h-[min(68dvh,680px)] overflow-y-auto pr-3">
-            <TemplateSettingsForm
-              manifest={manifest}
-              value={draft}
-              onChange={changeDraft}
-              fieldErrors={fieldErrors}
-            />
-          </div>
-
-          <section
-            aria-label="模板视觉草稿预览"
-            className="flex min-h-[360px] items-center justify-center overflow-hidden rounded-xl border bg-[#030711] p-3"
-          >
-            <div className="h-[min(58dvh,600px)] max-h-full aspect-[9/16] overflow-hidden rounded-lg">
-              <RemotionPreview
-                project={previewProject}
-                selectedSceneId={project.scene_plan.scenes[0]?.id ?? ''}
-                previewAll
+        <div
+          role="region"
+          aria-label="模板视觉设置内容"
+          tabIndex={0}
+          className="min-h-0 overflow-y-auto pr-1"
+        >
+          <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(300px,0.9fr)]">
+            <div className="pr-2">
+              <TemplateSettingsForm
+                manifest={manifest}
+                value={draft}
+                onChange={changeDraft}
+                fieldErrors={fieldErrors}
+                disabled={applying}
               />
             </div>
-          </section>
+
+            <section
+              aria-label="模板视觉草稿预览"
+              className="flex min-h-[360px] items-center justify-center overflow-hidden rounded-xl border bg-[#030711] p-3"
+            >
+              <div className="h-[min(58dvh,600px)] max-h-full aspect-[9/16] overflow-hidden rounded-lg">
+                <RemotionPreview
+                  project={previewProject}
+                  selectedSceneId={project.scene_plan.scenes[0]?.id ?? ''}
+                  previewAll
+                />
+              </div>
+            </section>
+          </div>
+
+          {loadError ? (
+            <Alert variant="warning" className="mt-4">
+              <AlertDescription>{loadError}</AlertDescription>
+            </Alert>
+          ) : null}
+          {applyError ? (
+            <Alert variant="destructive" className="mt-4">
+              <AlertDescription>{applyError}</AlertDescription>
+            </Alert>
+          ) : null}
         </div>
 
-        {loadError ? (
-          <Alert variant="warning">
-            <AlertDescription>{loadError}</AlertDescription>
-          </Alert>
-        ) : null}
-        {applyError ? (
-          <Alert variant="destructive">
-            <AlertDescription>{applyError}</AlertDescription>
-          </Alert>
-        ) : null}
-
-        <DialogFooter className="sm:justify-between">
+        <DialogFooter className="shrink-0 sm:justify-between">
           <Button
             type="button"
             variant="ghost"

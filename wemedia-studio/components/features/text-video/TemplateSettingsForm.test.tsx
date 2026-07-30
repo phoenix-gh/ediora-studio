@@ -93,9 +93,11 @@ const value: FakeTemplateProps = {
 function ControlledFakeForm({
   onChange,
   fieldErrors = {},
+  disabled = false,
 }: {
   onChange(value: FakeTemplateProps): void
   fieldErrors?: Record<string, string>
+  disabled?: boolean
 }) {
   const [currentValue, setCurrentValue] = useState(value)
 
@@ -108,6 +110,7 @@ function ControlledFakeForm({
         onChange(nextValue)
       }}
       fieldErrors={fieldErrors}
+      disabled={disabled}
     />
   )
 }
@@ -187,6 +190,36 @@ describe('TemplateSettingsForm', () => {
       'true',
     )
     expect(screen.getByText('请输入品牌主标题')).toBeVisible()
+  })
+
+  it('disables every control and blocks draft changes while pending', async () => {
+    const onChange = vi.fn()
+    const user = userEvent.setup()
+    render(<ControlledFakeForm onChange={onChange} disabled />)
+
+    const title = screen.getByRole('textbox', { name: '品牌主标题' })
+    const background = screen.getByRole('combobox', { name: '背景' })
+    const showBrand = screen.getByRole('switch', { name: '显示品牌' })
+    const colorText = screen.getByRole('textbox', { name: '强调色' })
+    const colorPicker = screen.getByLabelText('选择强调色')
+
+    expect(title).toBeDisabled()
+    expect(background).toBeDisabled()
+    expect(showBrand).toHaveAttribute('aria-disabled', 'true')
+    expect(showBrand).toHaveAttribute('data-disabled')
+    expect(colorText).toBeDisabled()
+    expect(colorPicker).toBeDisabled()
+
+    await user.type(title, 'MUTATION')
+    await user.click(background)
+    await user.click(showBrand)
+    await user.type(colorText, '000000')
+    await user.click(colorPicker)
+
+    expect(title).toHaveValue('EDIORA')
+    expect(showBrand).toBeChecked()
+    expect(colorText).toHaveValue('#69F6FF')
+    expect(onChange).not.toHaveBeenCalled()
   })
 })
 

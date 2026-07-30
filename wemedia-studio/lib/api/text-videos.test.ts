@@ -6,10 +6,15 @@ import {
   generateTextVideoScenePlan,
   listTextVideoProjects,
   updateTextVideoProject,
+  type TextVideoProjectSummary,
 } from './text-videos'
 import { makeTextVideoProject } from '@/lib/text-video/test-fixtures'
 
 const project = makeTextVideoProject({ id: 7, title: '测试作品' })
+
+function outputStaleValue(summary: TextVideoProjectSummary): boolean {
+  return summary.output_stale
+}
 
 describe('text-video project API', () => {
   afterEach(() => vi.unstubAllGlobals())
@@ -50,6 +55,7 @@ describe('text-video project API', () => {
   })
 
   it('provides complete authoritative document fixtures', () => {
+    expect(outputStaleValue(project)).toBe(false)
     expect(project.paragraphs[0]).toEqual(expect.objectContaining({
       status: 'draft',
       generation_revision: 0,
