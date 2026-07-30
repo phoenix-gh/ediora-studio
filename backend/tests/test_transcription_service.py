@@ -134,6 +134,57 @@ def test_local_provider_normalizes_words_nested_in_segments(tmp_path):
     ]
 
 
+def test_local_provider_installs_missing_model_then_retries_once(tmp_path):
+    """Catches fresh Speaches volumes failing every first transcription."""
+    audio = tmp_path / "master.mp3"
+    audio.write_bytes(b"fake-mp3")
+    seen_paths = []
+
+    async def handler(request: httpx.Request):
+        seen_paths.append(request.url.raw_path.decode())
+        if len(seen_paths) == 1:
+            return httpx.Response(
+                404,
+                json={
+                    "detail": (
+                        "Model 'Systran/faster-whisper-large-v3' "
+                        "is not installed locally."
+                    ),
+                },
+            )
+        if len(seen_paths) == 2:
+            return httpx.Response(200, json={})
+        return httpx.Response(
+            200,
+            json={
+                "text": "甲",
+                "language": "zh",
+                "words": [
+                    {"word": "甲", "start": 0, "end": 0.5},
+                ],
+            },
+        )
+
+    async def run():
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(handler),
+        ) as client:
+            return await transcribe_audio(
+                TranscriptionRequest(audio_path=audio, duration=0.5),
+                _local_runtime(),
+                client=client,
+            )
+
+    result = asyncio.run(run())
+
+    assert seen_paths == [
+        "/v1/audio/transcriptions",
+        "/v1/models/Systran%2Ffaster-whisper-large-v3",
+        "/v1/audio/transcriptions",
+    ]
+    assert result.text == "甲"
+
+
 def test_production_local_request_holds_gpu_gate_around_http_inference(
     tmp_path,
     monkeypatch,

@@ -23,6 +23,8 @@ def test_local_asr_is_private_gpu_service_with_persistent_model_cache():
 
     assert service["image"] == "ghcr.io/speaches-ai/speaches:0.8.3-cuda"
     assert not service.get("ports")
+    assert service["environment"]["WHISPER__INFERENCE_DEVICE"] == "cuda"
+    assert service["environment"]["WHISPER__COMPUTE_TYPE"] == "int8_float16"
     assert service["deploy"]["resources"]["reservations"]["devices"] == [
         {
             "capabilities": ["gpu"],

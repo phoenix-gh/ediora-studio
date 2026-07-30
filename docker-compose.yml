@@ -26,6 +26,9 @@ services:
   local-asr:
     image: ghcr.io/speaches-ai/speaches:0.8.3-cuda
     restart: unless-stopped
+    environment:
+      WHISPER__INFERENCE_DEVICE: ${WMS_LOCAL_ASR_DEVICE:-cuda}
+      WHISPER__COMPUTE_TYPE: ${WMS_LOCAL_ASR_COMPUTE_TYPE:-int8_float16}
     volumes:
       - whisper-model-cache:/home/ubuntu/.cache/huggingface/hub
     deploy:

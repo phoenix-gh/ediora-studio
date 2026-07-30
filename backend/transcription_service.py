@@ -8,7 +8,7 @@ from dataclasses import dataclass
 import math
 from pathlib import Path
 from typing import AsyncIterator, Mapping
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 import uuid
 
 import httpx
@@ -173,6 +173,19 @@ def _retryable_status(status_code: int) -> bool:
     )
 
 
+def _local_model_is_missing(response: httpx.Response) -> bool:
+    if response.status_code != 404:
+        return False
+    try:
+        payload = response.json()
+    except ValueError:
+        return False
+    return (
+        isinstance(payload, dict)
+        and "not installed locally" in str(payload.get("detail") or "").lower()
+    )
+
+
 @asynccontextmanager
 async def _client_scope(
     client: httpx.AsyncClient | None,
@@ -315,31 +328,51 @@ async def transcribe_audio(
     )
     try:
         audio_bytes = await asyncio.to_thread(request.audio_path.read_bytes)
-        async def post() -> httpx.Response:
+        async def request_transcription() -> httpx.Response:
             async with _client_scope(
                 client,
                 duration=float(duration),
             ) as active:
-                return await active.post(
-                    f"{provider.base_url}/audio/transcriptions",
-                    headers=headers,
-                    data=fields,
-                    files={
-                        "file": (
-                            request.audio_path.name,
-                            audio_bytes,
-                            "audio/mpeg",
-                        ),
-                    },
-                )
+                async def post_audio() -> httpx.Response:
+                    return await active.post(
+                        f"{provider.base_url}/audio/transcriptions",
+                        headers=headers,
+                        data=fields,
+                        files={
+                            "file": (
+                                request.audio_path.name,
+                                audio_bytes,
+                                "audio/mpeg",
+                            ),
+                        },
+                    )
+
+                response = await post_audio()
+                if provider.local and _local_model_is_missing(response):
+                    model_path = quote(provider.model, safe="")
+                    prepared = await active.post(
+                        f"{provider.base_url}/models/{model_path}",
+                        headers=headers,
+                        timeout=3600.0,
+                    )
+                    if not prepared.is_success:
+                        raise TranscriptionError(
+                            "本地转写模型准备失败"
+                            f"（HTTP {prepared.status_code}）",
+                            retryable=_retryable_status(
+                                prepared.status_code,
+                            ),
+                        )
+                    response = await post_audio()
+                return response
 
         if provider.local and client is None:
             async with local_asr_gate(
                 owner=f"asr-{uuid.uuid4().hex}",
             ):
-                response = await post()
+                response = await request_transcription()
         else:
-            response = await post()
+            response = await request_transcription()
     except (LocalAsrBusyError, LocalAsrLeaseLostError) as error:
         raise TranscriptionError(
             str(error),
