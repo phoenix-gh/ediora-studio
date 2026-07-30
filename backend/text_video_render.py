@@ -22,6 +22,10 @@ from text_video_templates import get_text_video_template
 ACTIVE_JOB_STATUSES = {"queued", "running"}
 
 
+class StaleTextVideoRender(ValueError):
+    pass
+
+
 @dataclass(frozen=True)
 class RenderLaunchResult:
     jobs: list[ContentJob]
@@ -34,6 +38,48 @@ def render_state_document(project: TextVideoProject) -> dict:
         project.render_state
         if isinstance(project.render_state, dict)
         else {}
+    )
+
+
+def assert_current_render_job(
+    project: TextVideoProject,
+    job: ContentJob,
+    *,
+    generation: int | None = None,
+    source_hash: str | None = None,
+) -> dict:
+    snapshot = job.input_data if isinstance(job.input_data, dict) else {}
+    state = render_state_document(project)
+    if (
+        job.flow != "text_video_render"
+        or snapshot.get("project_id") != project.id
+        or state.get("job_id") != job.id
+        or state.get("generation") != snapshot.get("render_generation")
+        or state.get("source_hash") != snapshot.get("source_hash")
+        or (
+            generation is not None
+            and generation != snapshot.get("render_generation")
+        )
+        or (
+            source_hash is not None
+            and source_hash != snapshot.get("source_hash")
+        )
+    ):
+        raise StaleTextVideoRender("渲染任务已过期")
+    return snapshot
+
+
+def render_result_already_applied(
+    project: TextVideoProject,
+    job: ContentJob,
+) -> bool:
+    state = render_state_document(project)
+    return bool(
+        state.get("status") == "ready"
+        and state.get("applied_job_id") == job.id
+        and isinstance(state.get("asset_id"), int)
+        and state.get("asset_id") > 0
+        and project.output_asset_url
     )
 
 

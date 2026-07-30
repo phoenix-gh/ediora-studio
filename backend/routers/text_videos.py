@@ -20,6 +20,7 @@ from fastapi import (
     UploadFile,
     status,
 )
+from fastapi.responses import FileResponse
 from loguru import logger
 from pydantic import (
     BaseModel,
@@ -76,7 +77,13 @@ from text_video_templates import (
     get_text_video_template,
     normalize_text_video_template_default_map,
 )
-from text_video_render import launch_text_video_render
+from text_video_render import (
+    StaleTextVideoRender,
+    assert_current_render_job,
+    launch_text_video_render,
+    render_result_already_applied,
+    render_state_document,
+)
 from text_video_jobs import (
     StaleTextVideoJob,
     assert_current_speech_job,
@@ -278,6 +285,23 @@ class ScenePlanWorkerProposalRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     scenes: list[ScenePlanSceneEdit] = Field(min_length=1)
+
+
+class RenderProgressRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    generation: StrictInt = Field(ge=1)
+    source_hash: str = Field(min_length=64, max_length=64)
+    step_id: StrictInt = Field(ge=1)
+    progress: StrictInt = Field(ge=0, le=100)
+
+
+class RenderFailureRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    generation: StrictInt = Field(ge=1)
+    source_hash: str = Field(min_length=64, max_length=64)
+    error: str = Field(min_length=1, max_length=500)
 
 
 class ScenePlanWorkerResultRequest(ScenePlanWorkerProposalRequest):
@@ -2938,6 +2962,352 @@ async def validate_speech_split_preview(
         ],
         "speech_split_mode": "auto",
     }
+
+
+MAX_TEXT_VIDEO_RENDER_BYTES = 500 * 1024 * 1024
+
+
+def _render_asset_payload(asset: CreativeAsset) -> dict:
+    return {
+        "id": asset.id,
+        "asset_type": asset.asset_type,
+        "media_kind": asset.media_kind,
+        "title": asset.title,
+        "url": asset.url,
+        "media_type": asset.media_type,
+        "filename": asset.filename,
+        "source": asset.source,
+    }
+
+
+async def _render_worker_records(
+    db: AsyncSession,
+    *,
+    project_id: int,
+    job_id: int,
+) -> tuple[TextVideoProject, ContentJob]:
+    job = await db.scalar(
+        select(ContentJob)
+        .where(ContentJob.id == job_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    project = await db.scalar(
+        select(TextVideoProject)
+        .where(TextVideoProject.id == project_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if project is None or job is None:
+        raise StaleTextVideoRender("渲染任务或作品不存在")
+    return project, job
+
+
+async def _render_replay_payload(
+    db: AsyncSession,
+    project: TextVideoProject,
+    job: ContentJob,
+) -> dict | None:
+    if not render_result_already_applied(project, job):
+        return None
+    state = render_state_document(project)
+    asset = await db.get(CreativeAsset, state["asset_id"])
+    if asset is None or asset.url != project.output_asset_url:
+        raise StaleTextVideoRender("已保存的渲染资产不存在")
+    return {
+        "project": serialize_project(project),
+        "asset": _render_asset_payload(asset),
+    }
+
+
+async def _stream_text_video_render(video: UploadFile) -> Path:
+    media_type = (video.content_type or "").lower().split(";", 1)[0]
+    if media_type != "video/mp4":
+        raise ValueError("文字视频渲染结果必须是 MP4")
+    temporary_directory = Path(UPLOADS_DIR) / ".text-video-render-tmp"
+    temporary_directory.mkdir(parents=True, exist_ok=True)
+    temporary = temporary_directory / f"{uuid4().hex}.part"
+    total = 0
+    prefix = bytearray()
+    try:
+        with temporary.open("wb") as output:
+            while chunk := await video.read(1024 * 1024):
+                total += len(chunk)
+                if total > MAX_TEXT_VIDEO_RENDER_BYTES:
+                    raise ValueError("文字视频渲染结果超过 500MB")
+                if len(prefix) < 64:
+                    prefix.extend(chunk[:64 - len(prefix)])
+                output.write(chunk)
+        if total <= 0:
+            raise ValueError("文字视频渲染结果为空")
+        if b"ftyp" not in bytes(prefix[:64]):
+            raise ValueError("文字视频渲染结果不是有效 MP4")
+        return temporary
+    except Exception:
+        temporary.unlink(missing_ok=True)
+        raise
+    finally:
+        await video.close()
+
+
+@router.get(
+    "/{project_id}/render/worker-context",
+    dependencies=[Depends(require_worker_token)],
+)
+async def get_text_video_render_worker_context(
+    project_id: int,
+    job_id: int = Header(alias="X-Content-Job-Id"),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        project, job = await _render_worker_records(
+            db,
+            project_id=project_id,
+            job_id=job_id,
+        )
+        replay = await _render_replay_payload(db, project, job)
+        if replay is not None:
+            await db.commit()
+            return {"already_saved": True, **replay}
+        snapshot = assert_current_render_job(project, job)
+        state = render_state_document(project)
+        project.render_state = {
+            **state,
+            "status": "rendering",
+            "progress": max(1, int(state.get("progress") or 0)),
+            "error": "",
+        }
+        await db.commit()
+        return {"already_saved": False, **deepcopy(snapshot)}
+    except StaleTextVideoRender as error:
+        await db.rollback()
+        raise _stale_conflict(error) from error
+
+
+@router.post(
+    "/{project_id}/render/worker-progress",
+    dependencies=[Depends(require_worker_token)],
+)
+async def update_text_video_render_worker_progress(
+    project_id: int,
+    payload: RenderProgressRequest,
+    job_id: int = Header(alias="X-Content-Job-Id"),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        project, job = await _render_worker_records(
+            db,
+            project_id=project_id,
+            job_id=job_id,
+        )
+        assert_current_render_job(
+            project,
+            job,
+            generation=payload.generation,
+            source_hash=payload.source_hash,
+        )
+        step = await db.scalar(
+            select(ContentJobStep)
+            .where(
+                ContentJobStep.id == payload.step_id,
+                ContentJobStep.job_id == job.id,
+            )
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        if step is None or step.status != "running":
+            raise StaleTextVideoRender("渲染进度步骤已失效")
+        state = render_state_document(project)
+        progress = max(
+            int(state.get("progress") or 0),
+            payload.progress,
+        )
+        project.render_state = {
+            **state,
+            "status": "rendering",
+            "progress": progress,
+            "error": "",
+        }
+        step.output_data = {
+            **(step.output_data or {}),
+            "progress": progress,
+        }
+        await db.commit()
+        return {"progress": progress}
+    except StaleTextVideoRender as error:
+        await db.rollback()
+        raise _stale_conflict(error) from error
+
+
+@router.post(
+    "/{project_id}/render/worker-failure",
+    dependencies=[Depends(require_worker_token)],
+)
+async def save_text_video_render_worker_failure(
+    project_id: int,
+    payload: RenderFailureRequest,
+    job_id: int = Header(alias="X-Content-Job-Id"),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        project, job = await _render_worker_records(
+            db,
+            project_id=project_id,
+            job_id=job_id,
+        )
+        if render_result_already_applied(project, job):
+            await db.commit()
+            return serialize_project(project)
+        assert_current_render_job(
+            project,
+            job,
+            generation=payload.generation,
+            source_hash=payload.source_hash,
+        )
+        state = render_state_document(project)
+        project.render_state = {
+            **state,
+            "status": "failed",
+            "error": payload.error,
+        }
+        await db.commit()
+        return serialize_project(project)
+    except StaleTextVideoRender as error:
+        await db.rollback()
+        raise _stale_conflict(error) from error
+
+
+@router.post(
+    "/{project_id}/render/worker-result",
+    dependencies=[Depends(require_worker_token)],
+)
+async def save_text_video_render_worker_result(
+    project_id: int,
+    generation: int = Form(...),
+    source_hash: str = Form(...),
+    video: UploadFile = File(...),
+    job_id: int = Header(alias="X-Content-Job-Id"),
+    db: AsyncSession = Depends(get_db),
+):
+    temporary: Path | None = None
+    final: Path | None = None
+    result_committed = False
+    try:
+        project, job = await _render_worker_records(
+            db,
+            project_id=project_id,
+            job_id=job_id,
+        )
+        replay = await _render_replay_payload(db, project, job)
+        if replay is not None:
+            await db.commit()
+            await video.close()
+            return replay
+        assert_current_render_job(
+            project,
+            job,
+            generation=generation,
+            source_hash=source_hash,
+        )
+        await db.rollback()
+
+        temporary = await _stream_text_video_render(video)
+        project, job = await _render_worker_records(
+            db,
+            project_id=project_id,
+            job_id=job_id,
+        )
+        replay = await _render_replay_payload(db, project, job)
+        if replay is not None:
+            await db.commit()
+            temporary.unlink(missing_ok=True)
+            return replay
+        assert_current_render_job(
+            project,
+            job,
+            generation=generation,
+            source_hash=source_hash,
+        )
+
+        uploads = Path(UPLOADS_DIR)
+        uploads.mkdir(parents=True, exist_ok=True)
+        filename = f"{uuid4().hex}.mp4"
+        final = uploads / filename
+        temporary.replace(final)
+        temporary = None
+        asset = CreativeAsset(
+            asset_type="media",
+            media_kind="video",
+            title=f"{project.title} · 成片",
+            url=f"/api/uploads/{filename}",
+            media_type="video/mp4",
+            filename=filename,
+            source="generated",
+        )
+        db.add(asset)
+        await db.flush()
+        state = render_state_document(project)
+        project.output_asset_url = asset.url
+        project.output_stale = False
+        project.status = "completed"
+        project.render_state = {
+            **state,
+            "status": "ready",
+            "applied_job_id": job.id,
+            "asset_id": asset.id,
+            "progress": 100,
+            "error": "",
+        }
+        project.revision += 1
+        project.updated_at = now_utc()
+        await db.commit()
+        result_committed = True
+        await db.refresh(project)
+        await db.refresh(asset)
+        return {
+            "project": serialize_project(project),
+            "asset": _render_asset_payload(asset),
+        }
+    except StaleTextVideoRender as error:
+        await db.rollback()
+        raise _stale_conflict(error) from error
+    except ValueError as error:
+        await db.rollback()
+        raise HTTPException(
+            422,
+            str(error),
+            headers={"X-WMS-Retryable": "false"},
+        ) from error
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+        if final is not None and not result_committed:
+            final.unlink(missing_ok=True)
+
+
+@router.get("/{project_id}/output/download")
+async def download_text_video_output(
+    project_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    project = await get_project_or_404(db, project_id)
+    prefix = "/api/uploads/"
+    if not project.output_asset_url.startswith(prefix):
+        raise HTTPException(404, "文字视频成片不存在")
+    relative = project.output_asset_url[len(prefix):]
+    root = Path(UPLOADS_DIR).resolve()
+    candidate = (root / relative).resolve()
+    try:
+        candidate.relative_to(root)
+    except ValueError as error:
+        raise HTTPException(404, "文字视频成片不存在") from error
+    if not candidate.is_file() or candidate.suffix.lower() != ".mp4":
+        raise HTTPException(404, "文字视频成片不存在")
+    return FileResponse(
+        candidate,
+        media_type="video/mp4",
+        filename=f"{project.title or '文字视频成片'}.mp4",
+    )
 
 
 @router.post(

@@ -586,6 +586,259 @@ def test_text_video_render_launch_rejects_non_current_scene_plan(
     assert "分镜" in response.text
 
 
+def _prepare_text_video_render_job(client, monkeypatch):
+    import routers.text_videos as router_module
+
+    async def ignore_enqueue(_job_id):
+        return None
+
+    monkeypatch.setattr(router_module, "enqueue_job", ignore_enqueue)
+    created = client.post(
+        "/api/text-videos",
+        json={"title": "Worker 渲染测试"},
+    ).json()
+    ready = _set_video_ready_project(created["id"])
+    launched_response = client.post(
+        f"/api/text-videos/{ready['id']}/render",
+        json={"revision": ready["revision"]},
+    )
+    assert launched_response.status_code == 201, launched_response.text
+    launched = launched_response.json()
+    job_id = launched["jobs"][0]["id"]
+    started = client.post(
+        f"/api/jobs/{job_id}/steps/render_mp4/start",
+    )
+    assert started.status_code == 200, started.text
+    return {
+        "project": launched["project"],
+        "job_id": job_id,
+        "step": started.json(),
+    }
+
+
+def _render_worker_headers(job_id):
+    return {
+        "X-WMS-Worker-Token": "test-worker-token-at-least-32-chars",
+        "X-Content-Job-Id": str(job_id),
+    }
+
+
+def _minimal_mp4_bytes():
+    return (
+        b"\x00\x00\x00\x18ftypisom"
+        b"\x00\x00\x02\x00isomiso2"
+        b"\x00\x00\x00\x08mdat"
+    )
+
+
+def test_text_video_render_worker_progress_is_monotonic_without_revision_bump(
+    client,
+    monkeypatch,
+):
+    case = _prepare_text_video_render_job(client, monkeypatch)
+    project = case["project"]
+    state = project["render_state"]
+    headers = _render_worker_headers(case["job_id"])
+
+    context = client.get(
+        f"/api/text-videos/{project['id']}/render/worker-context",
+        headers=headers,
+    )
+    assert context.status_code == 200, context.text
+    assert context.json()["render_input"] == project["render_input"]
+
+    for progress in (42, 20):
+        response = client.post(
+            f"/api/text-videos/{project['id']}/render/worker-progress",
+            headers=headers,
+            json={
+                "generation": state["generation"],
+                "source_hash": state["source_hash"],
+                "step_id": case["step"]["id"],
+                "progress": progress,
+            },
+        )
+        assert response.status_code == 200, response.text
+
+    current = client.get(
+        f"/api/text-videos/{project['id']}",
+    ).json()
+    assert current["render_state"]["status"] == "rendering"
+    assert current["render_state"]["progress"] == 42
+    assert current["revision"] == project["revision"]
+    job = client.get(f"/api/jobs/{case['job_id']}").json()
+    running_step = next(
+        item for item in job["steps"]
+        if item["id"] == case["step"]["id"]
+    )
+    assert running_step["output"] == {"progress": 42}
+
+
+def test_text_video_render_worker_result_is_idempotent_and_downloadable(
+    client,
+    monkeypatch,
+    tmp_path,
+):
+    import routers.text_videos as router_module
+    from sqlalchemy import func, select
+
+    uploads = tmp_path / "render-uploads"
+    monkeypatch.setattr(router_module, "UPLOADS_DIR", uploads)
+    case = _prepare_text_video_render_job(client, monkeypatch)
+    project = case["project"]
+    state = project["render_state"]
+    headers = _render_worker_headers(case["job_id"])
+    client.get(
+        f"/api/text-videos/{project['id']}/render/worker-context",
+        headers=headers,
+    )
+    data = {
+        "generation": str(state["generation"]),
+        "source_hash": state["source_hash"],
+    }
+
+    first = client.post(
+        f"/api/text-videos/{project['id']}/render/worker-result",
+        headers=headers,
+        data=data,
+        files={
+            "video": (
+                "result.mp4",
+                _minimal_mp4_bytes(),
+                "video/mp4",
+            ),
+        },
+    )
+    assert first.status_code == 200, first.text
+    first_payload = first.json()
+    assert first_payload["project"]["status"] == "completed"
+    assert first_payload["project"]["output_stale"] is False
+    assert first_payload["project"]["render_state"]["status"] == "ready"
+    assert first_payload["project"]["render_state"]["progress"] == 100
+    assert first_payload["asset"]["source"] == "generated"
+
+    second = client.post(
+        f"/api/text-videos/{project['id']}/render/worker-result",
+        headers=headers,
+        data=data,
+        files={
+            "video": (
+                "duplicate.mp4",
+                _minimal_mp4_bytes(),
+                "video/mp4",
+            ),
+        },
+    )
+    assert second.status_code == 200, second.text
+    assert second.json()["asset"]["id"] == first_payload["asset"]["id"]
+
+    from database import SessionLocal
+    from models import CreativeAsset
+
+    async def count_assets():
+        async with SessionLocal() as session:
+            return await session.scalar(
+                select(func.count(CreativeAsset.id))
+                .where(CreativeAsset.media_kind == "video")
+            )
+
+    assert asyncio.new_event_loop().run_until_complete(count_assets()) == 1
+
+    download = client.get(
+        f"/api/text-videos/{project['id']}/output/download",
+    )
+    assert download.status_code == 200, download.text
+    assert download.headers["content-type"] == "video/mp4"
+    assert "attachment" in download.headers["content-disposition"]
+    assert download.content == _minimal_mp4_bytes()
+
+
+def test_text_video_render_worker_rejects_late_result(
+    client,
+    monkeypatch,
+    tmp_path,
+):
+    import routers.text_videos as router_module
+    from database import SessionLocal
+    from models import TextVideoProject
+
+    uploads = tmp_path / "late-render-uploads"
+    monkeypatch.setattr(router_module, "UPLOADS_DIR", uploads)
+    case = _prepare_text_video_render_job(client, monkeypatch)
+    project = case["project"]
+    state = project["render_state"]
+
+    async def supersede():
+        async with SessionLocal() as session:
+            stored = await session.get(TextVideoProject, project["id"])
+            stored.render_state = {
+                **stored.render_state,
+                "status": "queued",
+                "generation": state["generation"] + 1,
+                "source_hash": "d" * 64,
+                "job_id": case["job_id"] + 1000,
+            }
+            await session.commit()
+
+    asyncio.new_event_loop().run_until_complete(supersede())
+    response = client.post(
+        f"/api/text-videos/{project['id']}/render/worker-result",
+        headers=_render_worker_headers(case["job_id"]),
+        data={
+            "generation": str(state["generation"]),
+            "source_hash": state["source_hash"],
+        },
+        files={
+            "video": (
+                "late.mp4",
+                _minimal_mp4_bytes(),
+                "video/mp4",
+            ),
+        },
+    )
+
+    assert response.status_code == 409
+    assert not list(uploads.glob("*.mp4"))
+
+
+def test_text_video_render_worker_failure_preserves_previous_output(
+    client,
+    monkeypatch,
+):
+    from database import SessionLocal
+    from models import TextVideoProject
+
+    case = _prepare_text_video_render_job(client, monkeypatch)
+    project = case["project"]
+    state = project["render_state"]
+
+    async def set_previous_output():
+        async with SessionLocal() as session:
+            stored = await session.get(TextVideoProject, project["id"])
+            stored.output_asset_url = "/api/uploads/previous.mp4"
+            stored.output_stale = True
+            await session.commit()
+
+    asyncio.new_event_loop().run_until_complete(set_previous_output())
+    response = client.post(
+        f"/api/text-videos/{project['id']}/render/worker-failure",
+        headers=_render_worker_headers(case["job_id"]),
+        json={
+            "generation": state["generation"],
+            "source_hash": state["source_hash"],
+            "error": "Chrome 启动失败",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    failed = response.json()
+    assert failed["render_state"]["status"] == "failed"
+    assert failed["render_state"]["error"] == "Chrome 启动失败"
+    assert failed["output_asset_url"] == "/api/uploads/previous.mp4"
+    assert failed["output_stale"] is True
+    assert failed["revision"] == project["revision"]
+
+
 def test_text_video_project_crud_and_revision_conflict(client):
     assert client.get("/api/text-videos").json() == []
 
