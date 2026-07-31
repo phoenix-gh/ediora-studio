@@ -141,7 +141,7 @@ describe('text-video E2E provider', () => {
     })).status).toBe(413)
   })
 
-  it('derives a complete scene proposal from stable prompt word IDs', async () => {
+  it('accepts prompt JSON scene requests without response_format', async () => {
     const server = await startTextVideoProviderServer()
     servers.push(server)
     const response = await postJson(server, {
@@ -156,10 +156,6 @@ describe('text-video E2E provider', () => {
           '口播语义段：[]',
         ].join('\n\n'),
       }],
-      response_format: {
-        type: 'json_schema',
-        json_schema: { name: 'response', schema: { type: 'object' } },
-      },
     })
 
     expect(response.status).toBe(200)

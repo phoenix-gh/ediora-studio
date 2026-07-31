@@ -294,7 +294,8 @@ function sceneWithRange(
   throughIndex: number,
 ): ScenePlanSceneDocument {
   const displayText = exactDisplayText(words, fromIndex, throughIndex)
-  const { motion: _staleMotion, ...sceneWithoutMotion } = item
+  const sceneWithoutMotion = { ...item }
+  delete sceneWithoutMotion.motion
   return {
     ...sceneWithoutMotion,
     fromWordId: words[fromIndex].id,
@@ -573,10 +574,8 @@ export function editSceneVisuals(
     sceneMatch.item.displayText !== update.displayText
     || !sameStrings(sceneMatch.item.highlight, update.highlight)
   )
-  const {
-    motion: _staleMotion,
-    ...sceneWithoutMotion
-  } = sceneMatch.item
+  const sceneWithoutMotion = { ...sceneMatch.item }
+  delete sceneWithoutMotion.motion
   const scenes = [...project.scene_plan.scenes]
   scenes[sceneMatch.index] = {
     ...(contentChanged ? sceneWithoutMotion : sceneMatch.item),
@@ -584,12 +583,10 @@ export function editSceneVisuals(
     highlight: highlights,
     animation: update.animation,
   }
-  const {
-    transition: _staleTransition,
-    intensity: _staleIntensity,
-    chunks: _staleChunks,
-    ...renderWithoutMotion
-  } = renderMatch.item
+  const renderWithoutMotion = { ...renderMatch.item }
+  delete renderWithoutMotion.transition
+  delete renderWithoutMotion.intensity
+  delete renderWithoutMotion.chunks
   const segments = [...project.render_input.segments]
   segments[renderMatch.index] = {
     ...(contentChanged ? renderWithoutMotion : renderMatch.item),

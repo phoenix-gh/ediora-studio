@@ -1,12 +1,13 @@
 import type {
   GlobalWordTiming,
-  ScenePlanSceneDocument,
   TextVideoParagraph,
   TextVideoProject,
   TextVideoVoiceSettings,
 } from '@/lib/api/text-videos'
 import { parseTextVideoRenderInput } from '@/remotion/contract'
 import { CONTINUITY_EPSILON_SECONDS } from '@/remotion/types'
+
+import { applyScenePlanToProject } from './scene-plan'
 
 
 const voiceKeys = [
@@ -371,11 +372,10 @@ export function canPreviewVideo(project: TextVideoProject): boolean {
       return false
     }
 
-    const expectedSegments = projectSceneProjection(
-      scenePlan.scenes,
-      master.word_timings,
-      master.duration,
-    )
+    const expectedSegments = applyScenePlanToProject(
+      project,
+      scenePlan,
+    ).render_input.segments
     const parsed = parseTextVideoRenderInput(project.render_input, {
       masterDuration: master.duration,
     })
@@ -413,73 +413,4 @@ function validMasterWords(
     previousEnd = word.end
   }
   return true
-}
-
-function projectSceneProjection(
-  scenes: ScenePlanSceneDocument[],
-  words: GlobalWordTiming[],
-  masterDuration: number,
-) {
-  const wordIndexes = new Map<string, number>()
-  let previousStart = -1
-  let previousEnd = -1
-  for (const [index, word] of words.entries()) {
-    if (
-      !word.id.trim()
-      || wordIndexes.has(word.id)
-      || !Number.isFinite(word.start)
-      || !Number.isFinite(word.end)
-      || word.start < 0
-      || word.end < word.start
-      || word.start < previousStart
-      || word.end < previousEnd
-      || word.end > masterDuration + CONTINUITY_EPSILON_SECONDS
-    ) {
-      throw new Error('Invalid global word timeline')
-    }
-    wordIndexes.set(word.id, index)
-    previousStart = word.start
-    previousEnd = word.end
-  }
-  if (wordIndexes.size === 0 || scenes.length === 0) {
-    throw new Error('Scene plan must cover the word timeline')
-  }
-
-  let cursor = 0
-  const sceneIds = new Set<string>()
-  const ranges = scenes.map(scene => {
-    const fromIndex = wordIndexes.get(scene.fromWordId)
-    const throughIndex = wordIndexes.get(scene.throughWordId)
-    if (
-      !scene.id.trim()
-      || sceneIds.has(scene.id)
-      || fromIndex === undefined
-      || throughIndex === undefined
-      || fromIndex !== cursor
-      || throughIndex < fromIndex
-    ) {
-      throw new Error('Scene word ranges must be complete and contiguous')
-    }
-    sceneIds.add(scene.id)
-    cursor = throughIndex + 1
-    return { scene, fromIndex }
-  })
-  if (cursor !== words.length) {
-    throw new Error('Scene word ranges must cover every word')
-  }
-
-  return ranges.map(({ scene, fromIndex }, index) => {
-    const next = ranges[index + 1]
-    const start = index === 0 ? 0 : words[fromIndex].start
-    const end = next ? words[next.fromIndex].start : masterDuration
-    if (end <= start) throw new Error('Projected scenes must have positive duration')
-    return {
-      id: scene.id,
-      start,
-      end,
-      text: scene.displayText,
-      highlight: [...scene.highlight],
-      animation: scene.animation,
-    }
-  })
 }

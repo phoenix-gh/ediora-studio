@@ -337,23 +337,37 @@ function validateSpeechRequest(body: JsonRecord): string {
   return messageText(final)
 }
 
-function validateStructuredRequest(body: JsonRecord): string {
+function validateLlmRequest(body: JsonRecord) {
+  const usesResponseFormat = 'response_format' in body
   if (
-    !hasExactKeys(body, ['messages', 'model', 'response_format'])
+    !hasExactKeys(
+      body,
+      usesResponseFormat
+        ? ['messages', 'model', 'response_format']
+        : ['messages', 'model'],
+    )
     || body.model !== E2E_LLM_MODEL
     || !Array.isArray(body.messages)
     || body.messages.length !== 1
-    || !isRecord(body.response_format)
-    || body.response_format.type !== 'json_schema'
-    || !isRecord(body.response_format.json_schema)
+    || (
+      usesResponseFormat
+      && (
+        !isRecord(body.response_format)
+        || body.response_format.type !== 'json_schema'
+        || !isRecord(body.response_format.json_schema)
+      )
+    )
   ) {
-    throw new ProviderRequestError(422, 'invalid structured-output request')
+    throw new ProviderRequestError(422, 'invalid LLM request')
   }
   const message = body.messages[0]
   if (!isRecord(message) || message.role !== 'user') {
-    throw new ProviderRequestError(422, 'structured prompt must be a user message')
+    throw new ProviderRequestError(422, 'LLM prompt must be a user message')
   }
-  return messageText(message)
+  return {
+    prompt: messageText(message),
+    usesResponseFormat,
+  }
 }
 
 function extractSceneWords(prompt: string): Array<{ id: string; text: string }> {
@@ -693,8 +707,14 @@ export async function startTextVideoProviderServer(
         return
       }
 
-      const prompt = validateStructuredRequest(body)
+      const { prompt, usesResponseFormat } = validateLlmRequest(body)
       if (prompt.includes('你是中文口播分段助手')) {
+        if (!usesResponseFormat) {
+          throw new ProviderRequestError(
+            422,
+            'split prompt requires structured output',
+          )
+        }
         callCounts.split += 1
         requestSummaries.push({
           kind: 'split',

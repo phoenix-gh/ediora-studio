@@ -16,6 +16,7 @@ import {
   mergeWorkerProject,
   updateProjectVoiceSettings,
 } from './project-merge'
+import { applyRuleMotionPlan } from './motion-plan'
 import {
   editSpeechSegment,
   reorderSpeechSegment,
@@ -700,6 +701,27 @@ describe('project speech settings and video gate', () => {
     expect(canEnterVideoStage(audioReady)).toBe(true)
     expect(canPreviewVideo(audioReady)).toBe(false)
     expect(canPreviewVideo(canonical)).toBe(true)
+  })
+
+  it('accepts a projected kinetic V2 motion plan', () => {
+    const canonical = makeVideoReadyProject()
+    const kinetic = applyRuleMotionPlan({
+      ...canonical,
+      render_input: {
+        ...canonical.render_input,
+        templateId: 'kinetic-punch-v2',
+        templateProps: {
+          brandTitle: 'EDIORA',
+          showBrand: true,
+          accentColor: '#D8FF3E',
+          showProgress: true,
+          palette: 'night',
+        },
+      },
+    })
+
+    expect(kinetic.render_input.segments[0].chunks).toHaveLength(1)
+    expect(canPreviewVideo(kinetic)).toBe(true)
   })
 
   it.each([

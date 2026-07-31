@@ -116,7 +116,7 @@ export function KineticPunchV2Composition(
         overflow: 'hidden',
       }}
     >
-      <Html5Audio src={props.audio} />
+      {props.audio ? <Html5Audio src={props.audio} /> : null}
 
       {layers.map((layer) => {
         const layout = kineticLayout(
@@ -166,6 +166,7 @@ export function KineticPunchV2Composition(
             style={{ position: 'absolute', inset: 0 }}
           >
             <div
+              data-testid={`kinetic-block-${layer.chunk.id}`}
               style={{
                 position: 'absolute',
                 zIndex: 10 + layer.index,
@@ -200,7 +201,7 @@ export function KineticPunchV2Composition(
               {highlightedText(
                 layer.chunk,
                 cueEmphasis,
-                contrastActive ? pageColor : accentColor,
+                blockColor === accentColor ? pageColor : accentColor,
               )}
             </div>
           </div>

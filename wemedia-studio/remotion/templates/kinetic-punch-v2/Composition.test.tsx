@@ -103,6 +103,17 @@ describe('kineticLayout', () => {
 })
 
 describe('KineticPunchV2Composition', () => {
+  it('supports deterministic still rendering without an audio source', () => {
+    currentFrame = 0
+    const view = render(
+      <KineticPunchV2Composition {...INPUT} audio="" />,
+    )
+
+    expect(view.queryByTestId('kinetic-audio')).not.toBeInTheDocument()
+    expect(view.getByTestId('template-kinetic-punch-v2'))
+      .toBeInTheDocument()
+  })
+
   it('keeps both layers mounted at a chunk boundary without blanking', () => {
     currentFrame = 90
     const view = render(<KineticPunchV2Composition {...INPUT} />)
@@ -114,6 +125,9 @@ describe('KineticPunchV2Composition', () => {
     })
     expect(view.getByTestId('kinetic-text-chunk-b')).toHaveStyle({
       opacity: '0',
+    })
+    expect(view.getByTestId('kinetic-highlight-chunk-b')).toHaveStyle({
+      color: '#10110E',
     })
     expect(view.getByTestId('kinetic-audio')).toHaveAttribute(
       'src',
@@ -131,6 +145,45 @@ describe('KineticPunchV2Composition', () => {
     })
   })
 
+  it.each([
+    [89, '0', true],
+    [90, '0', true],
+    [91, null, true],
+    [96, null, false],
+  ])('keeps continuous layers around frame %i', (
+    frame,
+    expectedOpacity,
+    outgoingMounted,
+  ) => {
+    currentFrame = frame
+    const view = render(<KineticPunchV2Composition {...INPUT} />)
+
+    expect(Boolean(view.queryByTestId('kinetic-text-chunk-a')))
+      .toBe(outgoingMounted)
+    expect(view.getByTestId('kinetic-block-chunk-b')).toBeInTheDocument()
+    const incoming = view.getByTestId('kinetic-text-chunk-b')
+    if (expectedOpacity === null) {
+      expect(incoming.style.opacity).not.toBe('0')
+    } else {
+      expect(incoming.style.opacity).toBe(expectedOpacity)
+    }
+  })
+
+  it('keeps subtle hold movement alive across a long chunk', () => {
+    currentFrame = 30
+    const early = render(<KineticPunchV2Composition {...INPUT} />)
+    const earlyTransform = early.getByTestId('kinetic-text-chunk-a')
+      .style.transform
+    early.unmount()
+
+    currentFrame = 60
+    const later = render(<KineticPunchV2Composition {...INPUT} />)
+    const laterTransform = later.getByTestId('kinetic-text-chunk-a')
+      .style.transform
+
+    expect(laterTransform).not.toBe(earlyTransform)
+  })
+
   it('enlarges highlighted copy during its spoken cue', () => {
     currentFrame = 96
     const before = render(<KineticPunchV2Composition {...INPUT} />)
@@ -145,5 +198,18 @@ describe('KineticPunchV2Composition', () => {
 
     expect(beforeTransform).toContain('scale(1)')
     expect(activeTransform).not.toBe(beforeTransform)
+  })
+
+  it('starts highlight emphasis within one frame of the word cue', () => {
+    currentFrame = 96
+    const atCue = render(<KineticPunchV2Composition {...INPUT} />)
+    expect(atCue.getByTestId('kinetic-highlight-chunk-b').style.transform)
+      .toBe('scale(1)')
+    atCue.unmount()
+
+    currentFrame = 97
+    const nextFrame = render(<KineticPunchV2Composition {...INPUT} />)
+    expect(nextFrame.getByTestId('kinetic-highlight-chunk-b').style.transform)
+      .not.toBe('scale(1)')
   })
 })
