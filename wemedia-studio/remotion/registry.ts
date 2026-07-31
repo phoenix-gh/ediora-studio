@@ -5,6 +5,7 @@ import {
   kineticPunchV1Manifest,
   voicePulseV1Manifest,
 } from './templates/presets-v1/manifest'
+import { kineticPunchV2Manifest } from './templates/kinetic-punch-v2/manifest'
 
 type TemplateIdentity = {
   id: string
@@ -72,6 +73,7 @@ export const textVideoTemplates = [
   captionFocusV1Manifest,
   editorialCardV1Manifest,
   voicePulseV1Manifest,
+  kineticPunchV2Manifest,
 ] as const
 
 const templates = createTextVideoTemplateRegistry(textVideoTemplates)

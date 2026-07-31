@@ -33,14 +33,26 @@ describe('text-video template registry', () => {
       },
       settings: expect.any(Array),
     })
-    expect(textVideoTemplates).toHaveLength(5)
+    expect(textVideoTemplates).toHaveLength(6)
     expect(textVideoTemplates.map(template => template.id)).toEqual([
       'tech-text-v1',
       'kinetic-punch-v1',
       'caption-focus-v1',
       'editorial-card-v1',
       'voice-pulse-v1',
+      'kinetic-punch-v2',
     ])
+  })
+
+  it('registers the versioned kinetic motion template', () => {
+    expect(resolveTextVideoTemplate('kinetic-punch-v2', 1)).toMatchObject({
+      id: 'kinetic-punch-v2',
+      version: 1,
+      compositionId: 'kinetic-punch-v2',
+      name: '动感大字 V2',
+      animations: ['impact', 'reveal', 'contrast'],
+      transitions: ['block-wipe'],
+    })
   })
 
   it.each([
@@ -150,6 +162,20 @@ describe('text-video template registry', () => {
           showBrand: true,
           accentColor: '#7C5CFF',
           showProgress: true,
+        },
+      },
+      {
+        id: 'kinetic-punch-v2',
+        compositionId: 'kinetic-punch-v2',
+        composition: { width: 1080, height: 1920, fps: 30 },
+        animations: ['impact', 'reveal', 'contrast'],
+        transitions: ['block-wipe'],
+        defaults: {
+          brandTitle: 'EDIORA',
+          showBrand: true,
+          accentColor: '#D8FF3E',
+          showProgress: true,
+          palette: 'night',
         },
       },
     ])

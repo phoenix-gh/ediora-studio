@@ -26,8 +26,9 @@ describe('text-video Remotion registration', () => {
       'caption-focus-v1',
       'editorial-card-v1',
       'voice-pulse-v1',
+      'kinetic-punch-v2',
     ])
-    expect(registrations).toHaveLength(5)
+    expect(registrations).toHaveLength(6)
   })
 
   it('uses each manifest default composition instead of a portrait fallback', () => {
