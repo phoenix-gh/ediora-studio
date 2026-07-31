@@ -933,6 +933,96 @@ describe('editSceneVisuals', () => {
 })
 
 describe('applyScenePlanToProject', () => {
+  it('matches repeated cues and does not fallback for normal emphasis', () => {
+    const original = projectForVisualEdit()
+    const wordTimings = words(['AI', 'AI', '结论'])
+    const motionScene: ScenePlanSceneDocument = {
+      id: 'scene-motion',
+      fromWordId: 'word-1',
+      throughWordId: 'word-3',
+      displayText: 'AI AI，结论',
+      highlight: ['AI'],
+      animation: 'reveal',
+      motion: {
+        transition: 'block-wipe',
+        intensity: 0.5,
+        chunks: [{
+          id: 'chunk-repeat',
+          fromWordId: 'word-1',
+          throughWordId: 'word-3',
+          displayText: 'AI AI，结论',
+          highlight: ['AI'],
+          motionPreset: 'reveal',
+          emphasis: 'normal',
+        }],
+      },
+    }
+    const project = {
+      ...original,
+      master_audio: {
+        ...original.master_audio,
+        duration: 1.2,
+        word_timings: wordTimings,
+      },
+      render_input: {
+        ...original.render_input,
+        templateId: 'kinetic-punch-v2',
+        templateVersion: 1,
+        templateProps: {
+          brandTitle: 'EDIORA',
+          showBrand: true,
+          accentColor: '#D8FF3E',
+          showProgress: true,
+          palette: 'night',
+        },
+      },
+    }
+
+    const repeated = applyScenePlanToProject(project, plan([motionScene]))
+    expect(repeated.render_input.segments[0].chunks?.[0].words.map(
+      cue => cue.emphasis,
+    )).toEqual(['highlight', 'highlight', 'normal'])
+
+    const unmatched = applyScenePlanToProject({
+      ...project,
+      master_audio: {
+        ...project.master_audio,
+        word_timings: words(['A', 'I', '结论']),
+      },
+    }, plan([{
+      ...motionScene,
+      motion: {
+        ...motionScene.motion!,
+        chunks: [{
+          ...motionScene.motion!.chunks[0],
+          highlight: ['AI AI'],
+        }],
+      },
+    }]))
+    expect(unmatched.render_input.segments[0].chunks?.[0].words.at(-1))
+      .toMatchObject({ emphasis: 'normal' })
+
+    const punch = applyScenePlanToProject({
+      ...project,
+      master_audio: {
+        ...project.master_audio,
+        word_timings: words(['A', 'I', '结论']),
+      },
+    }, plan([{
+      ...motionScene,
+      motion: {
+        ...motionScene.motion!,
+        chunks: [{
+          ...motionScene.motion!.chunks[0],
+          highlight: ['AI AI'],
+          emphasis: 'punch',
+        }],
+      },
+    }]))
+    expect(punch.render_input.segments[0].chunks?.[0].words.at(-1))
+      .toMatchObject({ emphasis: 'highlight' })
+  })
+
   it('reprojects a word-boundary edit immediately without changing audio', () => {
     const original = projectForVisualEdit()
     original.scene_plan = plan([

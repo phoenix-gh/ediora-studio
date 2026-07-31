@@ -103,6 +103,66 @@ describe('kineticLayout', () => {
 })
 
 describe('KineticPunchV2Composition', () => {
+  it('uses scene intensity to scale deterministic motion', () => {
+    currentFrame = 30
+    const quiet = render(
+      <KineticPunchV2Composition
+        {...INPUT}
+        segments={INPUT.segments.map(segment => ({
+          ...segment,
+          intensity: 0,
+        }))}
+      />,
+    )
+    const quietTransform = quiet.getByTestId('kinetic-text-chunk-a')
+      .style.transform
+    quiet.unmount()
+
+    const strong = render(
+      <KineticPunchV2Composition
+        {...INPUT}
+        segments={INPUT.segments.map(segment => ({
+          ...segment,
+          intensity: 1,
+        }))}
+      />,
+    )
+
+    expect(strong.getByTestId('kinetic-text-chunk-a').style.transform)
+      .not.toBe(quietTransform)
+  })
+
+  it('renders normalized highlighted cues across visual whitespace', () => {
+    currentFrame = 1
+    const view = render(
+      <KineticPunchV2Composition
+        {...INPUT}
+        segments={[{
+          ...INPUT.segments[0],
+          text: 'A I',
+          highlight: ['A I'],
+          chunks: [{
+            id: 'chunk-spaced',
+            start: 0,
+            end: 6,
+            text: 'A I',
+            motionPreset: 'impact',
+            emphasis: 'punch',
+            words: [{
+              text: 'AI',
+              start: 0,
+              end: 1,
+              emphasis: 'highlight',
+            }],
+          }],
+        }]}
+      />,
+    )
+
+    expect(view.getByTestId('kinetic-highlight-chunk-spaced'))
+      .toHaveTextContent('A I')
+  })
+
   it('supports deterministic still rendering without an audio source', () => {
     currentFrame = 0
     const view = render(

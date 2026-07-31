@@ -12,6 +12,7 @@ const MIN_CHUNK_CHARACTERS = 4
 const MAX_CHUNK_CHARACTERS = 10
 const BREAK_PUNCTUATION = /[。！？；，,.!?;]/u
 const STRIP_FOR_MATCHING = /[\s。！？；，,.!?;]/gu
+const STRIPPED_CHARACTER = /[\s。！？；，,.!?;]/u
 const IMPACT_PATTERN = /\d|没|不|却|但|其实|结果|关键|必须|只要/u
 
 function fail(message: string): never {
@@ -115,6 +116,63 @@ function proportionalChunkBoundaries(
     previous = boundary
   }
   return boundaries
+}
+
+export function displayBoundaryForWordSplit(
+  displayText: string,
+  sourceWords: readonly GlobalWordTiming[],
+  leftWordCount: number,
+) {
+  if (
+    sourceWords.length < 2
+    || leftWordCount <= 0
+    || leftWordCount >= sourceWords.length
+  ) {
+    fail('display split must leave words on both sides')
+  }
+  const normalizedDisplay = Array.from(normalized(displayText))
+  if (normalizedDisplay.length < 2) {
+    fail('display split must leave text on both sides')
+  }
+  const normalizedSource = sourceWords.map(word => normalized(word.text))
+    .join('')
+  const exactLeftLength = Array.from(
+    sourceWords.slice(0, leftWordCount)
+      .map(word => normalized(word.text))
+      .join(''),
+  ).length
+  const targetVisible = normalized(displayText) === normalizedSource
+    ? exactLeftLength
+    : Math.round(leftWordCount / sourceWords.length * normalizedDisplay.length)
+  const boundedTarget = Math.min(
+    normalizedDisplay.length - 1,
+    Math.max(1, targetVisible),
+  )
+
+  let rawOffset = 0
+  let visibleCount = 0
+  const characters = Array.from(displayText)
+  for (let index = 0; index < characters.length; index += 1) {
+    const character = characters[index]
+    rawOffset += character.length
+    if (!STRIPPED_CHARACTER.test(character)) visibleCount += 1
+    if (visibleCount !== boundedTarget) continue
+    while (
+      index + 1 < characters.length
+      && STRIPPED_CHARACTER.test(characters[index + 1])
+    ) {
+      index += 1
+      rawOffset += characters[index].length
+    }
+    if (
+      !displayText.slice(0, rawOffset).trim()
+      || !displayText.slice(rawOffset).trim()
+    ) {
+      fail('display split must leave text on both sides')
+    }
+    return rawOffset
+  }
+  fail('display split could not be resolved')
 }
 
 function motionChunk(

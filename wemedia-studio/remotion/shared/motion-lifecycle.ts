@@ -14,8 +14,8 @@ function positiveFrameCount(value: number, fallback: number) {
   return Math.max(1, Math.round(value))
 }
 
-export function motionLayersAtFrame(
-  chunks: readonly KineticRenderChunk[],
+export function motionLayersAtFrame<T extends KineticRenderChunk>(
+  chunks: readonly T[],
   frame: number,
   fps: number,
   overlapFrames = 6,

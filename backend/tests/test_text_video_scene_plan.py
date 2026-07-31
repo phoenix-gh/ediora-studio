@@ -285,6 +285,69 @@ def test_scene_motion_projects_word_ids_to_render_seconds():
     }]
 
 
+def test_motion_projection_marks_repeated_highlights_and_gates_fallback():
+    words = [
+        {"id": "w1", "text": "AI", "start": 0.0, "end": 0.5},
+        {"id": "w2", "text": "AI", "start": 0.5, "end": 1.0},
+        {"id": "w3", "text": "结论", "start": 1.0, "end": 1.5},
+    ]
+    scene = {
+        "id": "repeat",
+        "fromWordId": "w1",
+        "throughWordId": "w3",
+        "displayText": "AI AI，结论",
+        "highlight": ["AI"],
+        "animation": "reveal",
+        "motion": {
+            "transition": "block-wipe",
+            "intensity": 0.5,
+            "chunks": [{
+                "id": "repeat-chunk",
+                "fromWordId": "w1",
+                "throughWordId": "w3",
+                "displayText": "AI AI，结论",
+                "highlight": ["AI"],
+                "motionPreset": "reveal",
+                "emphasis": "normal",
+            }],
+        },
+    }
+
+    segment = resolve_scene_seconds(
+        proposals=[scene],
+        words=words,
+        master_duration=1.5,
+        manifest=KINETIC_MANIFEST,
+    )[0]
+
+    assert [word["emphasis"] for word in segment["chunks"][0]["words"]] == [
+        "highlight",
+        "highlight",
+        "normal",
+    ]
+
+    scene["motion"]["chunks"][0]["highlight"] = ["AI AI"]
+    scene["motion"]["chunks"][0]["displayText"] = "AI AI，结论"
+    words[0]["text"] = "A"
+    words[1]["text"] = "I"
+    segment = resolve_scene_seconds(
+        proposals=[scene],
+        words=words,
+        master_duration=1.5,
+        manifest=KINETIC_MANIFEST,
+    )[0]
+    assert segment["chunks"][0]["words"][-1]["emphasis"] == "normal"
+
+    scene["motion"]["chunks"][0]["emphasis"] = "punch"
+    segment = resolve_scene_seconds(
+        proposals=[scene],
+        words=words,
+        master_duration=1.5,
+        manifest=KINETIC_MANIFEST,
+    )[0]
+    assert segment["chunks"][0]["words"][-1]["emphasis"] == "highlight"
+
+
 def test_v1_scene_retains_motion_document_but_projects_legacy_segment():
     first = {
         **SCENES[0],

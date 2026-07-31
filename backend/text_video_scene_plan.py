@@ -204,6 +204,8 @@ def _validate_scene_motion(
 def _highlighted_word_positions(
     words: list[dict],
     highlights: list[str],
+    *,
+    fallback_to_final: bool,
 ) -> set[int]:
     normalized_words = [_without_whitespace(str(word["text"])) for word in words]
     joined = "".join(normalized_words)
@@ -219,15 +221,15 @@ def _highlighted_word_positions(
         if not needle:
             continue
         start = joined.find(needle)
-        if start < 0:
-            continue
-        end = start + len(needle)
-        positions.update(
-            index
-            for index, (word_start, word_end) in enumerate(spans)
-            if word_start < end and word_end > start
-        )
-    if highlights and not positions and words:
+        while start >= 0:
+            end = start + len(needle)
+            positions.update(
+                index
+                for index, (word_start, word_end) in enumerate(spans)
+                if word_start < end and word_end > start
+            )
+            start = joined.find(needle, start + 1)
+    if fallback_to_final and highlights and not positions and words:
         positions.add(len(words) - 1)
     return positions
 
@@ -610,6 +612,7 @@ def _resolve_motion_chunks(
         highlighted = _highlighted_word_positions(
             source_words,
             chunk["highlight"],
+            fallback_to_final=chunk["emphasis"] == "punch",
         )
         following = chunks[index + 1] if index + 1 < len(chunks) else None
         chunk_start = (

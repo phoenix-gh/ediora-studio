@@ -33,6 +33,7 @@ import type {
 } from '@/lib/api/text-videos'
 import {
   applyRuleMotionPlan,
+  displayBoundaryForWordSplit,
   editSceneMotion,
 } from '@/lib/text-video/motion-plan'
 
@@ -101,52 +102,35 @@ export function MotionPlanEditor({
       ...chunk,
       highlight: [...chunk.highlight],
     }))
-    if (direction === 'left') {
-      if (rightFrom >= rightThrough) return
-      const moved = words[rightFrom].text
-      const splitAt = right.displayText.indexOf(moved)
-      const moveEnd = splitAt >= 0 ? splitAt + moved.length : moved.length
-      const movedText = right.displayText.slice(0, moveEnd)
-      chunks[leftIndex] = {
-        ...left,
-        throughWordId: words[rightFrom].id,
-        displayText: left.displayText + movedText,
-        highlight: left.highlight.filter(item => (
-          (left.displayText + movedText).includes(item)
-        )),
-      }
-      chunks[leftIndex + 1] = {
-        ...right,
-        fromWordId: words[rightFrom + 1].id,
-        displayText: right.displayText.slice(moveEnd),
-        highlight: right.highlight.filter(item => (
-          right.displayText.slice(moveEnd).includes(item)
-        )),
-      }
-    } else {
-      if (leftFrom >= leftThrough) return
-      const moved = words[leftThrough].text
-      const splitAt = left.displayText.lastIndexOf(moved)
-      const moveStart = splitAt >= 0
-        ? splitAt
-        : Math.max(0, left.displayText.length - moved.length)
-      const movedText = left.displayText.slice(moveStart)
-      chunks[leftIndex] = {
-        ...left,
-        throughWordId: words[leftThrough - 1].id,
-        displayText: left.displayText.slice(0, moveStart),
-        highlight: left.highlight.filter(item => (
-          left.displayText.slice(0, moveStart).includes(item)
-        )),
-      }
-      chunks[leftIndex + 1] = {
-        ...right,
-        fromWordId: words[leftThrough].id,
-        displayText: movedText + right.displayText,
-        highlight: right.highlight.filter(item => (
-          (movedText + right.displayText).includes(item)
-        )),
-      }
+    const currentLeftCount = leftThrough - leftFrom + 1
+    const desiredLeftCount = currentLeftCount + (
+      direction === 'left' ? 1 : -1
+    )
+    const adjacentWords = words.slice(leftFrom, rightThrough + 1)
+    if (
+      rightFrom !== leftThrough + 1
+      || desiredLeftCount <= 0
+      || desiredLeftCount >= adjacentWords.length
+    ) return
+    const combinedText = left.displayText + right.displayText
+    const splitAt = displayBoundaryForWordSplit(
+      combinedText,
+      adjacentWords,
+      desiredLeftCount,
+    )
+    const leftText = combinedText.slice(0, splitAt)
+    const rightText = combinedText.slice(splitAt)
+    chunks[leftIndex] = {
+      ...left,
+      throughWordId: adjacentWords[desiredLeftCount - 1].id,
+      displayText: leftText,
+      highlight: left.highlight.filter(item => leftText.includes(item)),
+    }
+    chunks[leftIndex + 1] = {
+      ...right,
+      fromWordId: adjacentWords[desiredLeftCount].id,
+      displayText: rightText,
+      highlight: right.highlight.filter(item => rightText.includes(item)),
     }
     applyMotion({ ...motion, chunks })
   }

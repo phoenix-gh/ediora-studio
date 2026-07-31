@@ -14,6 +14,7 @@ import {
 import {
   applyRuleMotionPlan,
   buildRuleMotionPlan,
+  displayBoundaryForWordSplit,
 } from './motion-plan'
 
 function timeline(tokens: string[]): GlobalWordTiming[] {
@@ -102,6 +103,33 @@ describe('buildRuleMotionPlan', () => {
         emphasis: 'normal',
       }],
     })
+  })
+})
+
+describe('displayBoundaryForWordSplit', () => {
+  it('preserves visual text while proportionally moving either boundary', () => {
+    const sourceWords = timeline(['今天', '制作AI', '视频'])
+    const displayText = '今天做 AI，视频'
+
+    const afterFirst = displayBoundaryForWordSplit(
+      displayText,
+      sourceWords,
+      1,
+    )
+    const afterSecond = displayBoundaryForWordSplit(
+      displayText,
+      sourceWords,
+      2,
+    )
+
+    expect([
+      displayText.slice(0, afterFirst),
+      displayText.slice(afterFirst),
+    ]).toEqual(['今天', '做 AI，视频'])
+    expect([
+      displayText.slice(0, afterSecond),
+      displayText.slice(afterSecond),
+    ]).toEqual(['今天做 AI，', '视频'])
   })
 })
 

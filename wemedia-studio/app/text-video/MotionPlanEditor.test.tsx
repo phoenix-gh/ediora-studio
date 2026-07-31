@@ -169,4 +169,110 @@ describe('MotionPlanEditor', () => {
     expect(screen.getByRole('button', { name: '边界 1 向后一词' }))
       .toBeDisabled()
   })
+
+  it('moves an estimated boundary without corrupting visual whitespace', async () => {
+    const user = userEvent.setup()
+    const original = v2Project()
+    const sourceHash = original.master_audio.source_hash
+    const words = [
+      {
+        id: 'word-a',
+        text: '今天',
+        start: 0,
+        end: 0.6,
+        speech_segment_id: 'speech-1',
+      },
+      {
+        id: 'word-b',
+        text: '制作AI',
+        start: 0.6,
+        end: 1.2,
+        speech_segment_id: 'speech-1',
+      },
+      {
+        id: 'word-c',
+        text: '视频',
+        start: 1.2,
+        end: 2,
+        speech_segment_id: 'speech-1',
+      },
+    ]
+    const scene = {
+      id: 'scene-estimated',
+      fromWordId: 'word-a',
+      throughWordId: 'word-c',
+      displayText: '今天做 AI，视频',
+      highlight: ['做 AI'],
+      animation: 'impact',
+      motion: {
+        transition: 'block-wipe' as const,
+        intensity: 0.8,
+        chunks: [
+          {
+            id: 'chunk-left',
+            fromWordId: 'word-a',
+            throughWordId: 'word-b',
+            displayText: '今天做 AI，',
+            highlight: ['做 AI'],
+            motionPreset: 'impact' as const,
+            emphasis: 'punch' as const,
+          },
+          {
+            id: 'chunk-right',
+            fromWordId: 'word-c',
+            throughWordId: 'word-c',
+            displayText: '视频',
+            highlight: [],
+            motionPreset: 'reveal' as const,
+            emphasis: 'normal' as const,
+          },
+        ],
+      },
+    }
+    const project = applyScenePlanToProject({
+      ...original,
+      master_audio: {
+        ...original.master_audio,
+        duration: 2,
+        source_hash: sourceHash,
+        word_timings: words,
+        timeline_source: 'forced-alignment',
+      },
+      scene_plan: {
+        ...original.scene_plan,
+        master_source_hash: sourceHash,
+        scenes: [scene],
+      },
+    }, {
+      ...original.scene_plan,
+      master_source_hash: sourceHash,
+      scenes: [scene],
+    })
+    const onProjectChange = vi.fn()
+
+    render(
+      <MotionPlanEditor
+        project={project}
+        scene={project.scene_plan.scenes[0]}
+        busy={false}
+        onProjectChange={onProjectChange}
+        onOptimize={vi.fn()}
+      />,
+    )
+    await user.click(screen.getByRole('button', {
+      name: '边界 1 向后一词',
+    }))
+
+    const changed = onProjectChange.mock.calls[0][0]
+    expect(changed.scene_plan.scenes[0].motion?.chunks).toEqual([
+      expect.objectContaining({
+        throughWordId: 'word-a',
+        displayText: '今天',
+      }),
+      expect.objectContaining({
+        fromWordId: 'word-b',
+        displayText: '做 AI，视频',
+      }),
+    ])
+  })
 })
