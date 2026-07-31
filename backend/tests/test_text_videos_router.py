@@ -1544,6 +1544,109 @@ def test_scene_plan_launch_snapshots_ready_timeline_template_and_preserves_rende
     assert launched["project"]["render_input"] == original_render
 
 
+def test_motion_scene_plan_launch_freezes_ready_v2_plan_and_restores_on_failure(
+    client,
+    monkeypatch,
+):
+    import routers.text_videos as router_module
+
+    async def ignore_enqueue(_job_id: int):
+        return None
+
+    monkeypatch.setattr(router_module, "enqueue_job", ignore_enqueue)
+    project = _speech_project(client, "甲乙丙丁")
+    _set_ready_master(project["id"])
+    current = client.get(f"/api/text-videos/{project['id']}").json()
+    switched = client.patch(
+        f"/api/text-videos/{project['id']}",
+        json={
+            "revision": current["revision"],
+            "template": {
+                "templateId": "kinetic-punch-v2",
+                "templateVersion": 1,
+                "templateProps": {
+                    "brandTitle": "EDIORA",
+                    "showBrand": True,
+                    "accentColor": "#D8FF3E",
+                    "showProgress": True,
+                    "palette": "night",
+                },
+            },
+        },
+    )
+    assert switched.status_code == 200, switched.text
+    switched_project = switched.json()
+    scene = {
+        "id": "scene-1",
+        "fromWordId": "word-1",
+        "throughWordId": "word-4",
+        "displayText": "甲乙丙丁",
+        "highlight": ["丙丁"],
+        "animation": "reveal",
+        "motion": {
+            "transition": "block-wipe",
+            "intensity": 0.8,
+            "chunks": [{
+                "id": "scene-1-chunk-1",
+                "fromWordId": "word-1",
+                "throughWordId": "word-4",
+                "displayText": "甲乙丙丁",
+                "highlight": ["丙丁"],
+                "motionPreset": "impact",
+                "emphasis": "punch",
+            }],
+        },
+    }
+    ready_response = client.patch(
+        f"/api/text-videos/{project['id']}",
+        json={
+            "revision": switched_project["revision"],
+            "scene_plan": {
+                "generation_revision": switched_project[
+                    "scene_plan"
+                ]["generation_revision"],
+                "scenes": [scene],
+            },
+        },
+    )
+    assert ready_response.status_code == 200, ready_response.text
+    ready = ready_response.json()
+
+    launched_response = client.post(
+        f"/api/text-videos/{project['id']}/scene-plan/generate",
+        json={
+            "revision": ready["revision"],
+            "mode": "motion",
+            "scope": "all",
+            "selected_scene_id": "",
+            "direction": "加强信息差",
+        },
+    )
+    assert launched_response.status_code == 201, launched_response.text
+    launched = launched_response.json()
+    job_id = launched["jobs"][0]["id"]
+    job = client.get(f"/api/jobs/{job_id}").json()
+    assert job["input"]["generation_mode"] == "motion"
+    assert job["input"]["existing_scenes"] == ready["scene_plan"]["scenes"]
+
+    _, headers = _start_scene_job(
+        client,
+        job_id,
+        project_id=project["id"],
+    )
+    failed = client.post(
+        f"/api/text-videos/{project['id']}/scene-plan/worker-failure",
+        json={"error": "provider unavailable"},
+        headers=headers,
+    )
+    assert failed.status_code == 200, failed.text
+    plan = failed.json()["scene_plan"]
+    assert plan["status"] == "ready"
+    assert plan["job_id"] is None
+    assert plan["scenes"] == ready["scene_plan"]["scenes"]
+    assert plan["error"] == "provider unavailable"
+
+
 def test_scene_worker_context_claim_and_strict_word_only_validation(
     client,
     monkeypatch,

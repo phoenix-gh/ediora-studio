@@ -7,6 +7,7 @@ import {
 } from '@/lib/text-video/test-fixtures'
 
 import {
+  motionProposalSchema,
   runTextVideoSceneJob,
   sceneProposalSchema,
   type TextVideoSceneJobDeps,
@@ -26,6 +27,26 @@ const validProposal = {
 const validatedProposal = {
   ...validProposal,
   validation_token: 'e'.repeat(64),
+}
+
+const motionProposal = {
+  scenes: [{
+    ...validProposal.scenes[0],
+    animation: 'impact' as const,
+    motion: {
+      transition: 'block-wipe' as const,
+      intensity: 0.8,
+      chunks: [{
+        id: 'scene-1-chunk-1',
+        fromWordId: 'word-1',
+        throughWordId: 'word-3',
+        displayText: '做 AI 视频',
+        highlight: ['AI'],
+        motionPreset: 'impact' as const,
+        emphasis: 'punch' as const,
+      }],
+    },
+  }],
 }
 
 const readyProject = makeTextVideoProject({
@@ -168,6 +189,69 @@ it('asks AI for word IDs only and persists the server-validated proposal', async
     { project: readyProject },
   )
   expect(deps.api.completeJob).toHaveBeenCalledWith(41)
+})
+
+it('uses the strict motion schema and freezes scene copy without timestamps', async () => {
+  const deps = makeSceneJobDeps()
+  const context = {
+    ...makeSceneContext(),
+    generation_mode: 'motion' as const,
+    template: {
+      id: 'kinetic-punch-v2',
+      version: 1,
+      animations: ['impact', 'reveal', 'contrast'],
+      transitions: ['block-wipe'],
+    },
+    existing_scenes: [motionProposal.scenes[0]],
+  }
+  vi.mocked(deps.api.getSceneContext).mockResolvedValue(context)
+  vi.mocked(deps.generate).mockResolvedValue(motionProposal)
+  vi.mocked(deps.api.validateScenePlan).mockResolvedValue({
+    ...motionProposal,
+    validation_token: 'e'.repeat(64),
+  })
+
+  await runTextVideoSceneJob(41, deps)
+
+  const generation = vi.mocked(deps.generate).mock.calls[0][0]
+  expect(generation.schema).toBe(motionProposalSchema)
+  expect(generation.prompt).toContain('顶层分镜字段必须原样保留')
+  expect(generation.prompt).toContain('"fromWordId":"word-1"')
+  expect(generation.prompt).not.toContain('"start"')
+  expect(generation.prompt).not.toContain('"end"')
+  expect(motionProposalSchema.safeParse(motionProposal).success).toBe(true)
+})
+
+it('repairs one invalid motion proposal with the motion schema', async () => {
+  const deps = makeSceneJobDeps()
+  vi.mocked(deps.api.getSceneContext).mockResolvedValue({
+    ...makeSceneContext(),
+    generation_mode: 'motion',
+    template: {
+      id: 'kinetic-punch-v2',
+      version: 1,
+      animations: ['impact', 'reveal', 'contrast'],
+      transitions: ['block-wipe'],
+    },
+    existing_scenes: [motionProposal.scenes[0]],
+  })
+  vi.mocked(deps.generate)
+    .mockResolvedValueOnce(motionProposal)
+    .mockResolvedValueOnce(motionProposal)
+  vi.mocked(deps.api.validateScenePlan)
+    .mockRejectedValueOnce(sceneApiError(422, '文字被修改'))
+    .mockResolvedValueOnce({
+      ...motionProposal,
+      validation_token: 'e'.repeat(64),
+    })
+
+  await runTextVideoSceneJob(41, deps)
+
+  expect(deps.generate).toHaveBeenCalledTimes(2)
+  expect(vi.mocked(deps.generate).mock.calls[1][0].schema)
+    .toBe(motionProposalSchema)
+  expect(vi.mocked(deps.generate).mock.calls[1][0].prompt)
+    .toContain('文字被修改')
 })
 
 it('uses prompt JSON without unsupported response_format for compatible providers', async () => {

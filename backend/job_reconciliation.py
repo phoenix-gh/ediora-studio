@@ -270,7 +270,10 @@ def _fail_scene_domain(
         == snapshot.get("scene_generation_revision")
         and plan.get("scenes") == snapshot.get("existing_scenes")
     ):
-        plan["status"] = "failed"
+        motion_mode = snapshot.get("generation_mode") == "motion"
+        plan["status"] = "ready" if motion_mode else "failed"
+        if motion_mode:
+            plan["job_id"] = None
         plan["error"] = INTERRUPTION_ERROR
         project.scene_plan = plan
 

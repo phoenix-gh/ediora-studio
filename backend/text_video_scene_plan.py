@@ -448,6 +448,112 @@ def canonicalize_scene_generation_proposal(
     return validate_scene_partition(merged, words, manifest)
 
 
+def _motion_scene_with_frozen_visuals(
+    proposal: dict,
+    frozen: dict,
+) -> dict:
+    if not isinstance(proposal, dict):
+        raise ValueError("AI 动效分镜格式无效")
+    frozen_visuals = {
+        key: deepcopy(frozen.get(key))
+        for key in (
+            "id",
+            "fromWordId",
+            "throughWordId",
+            "displayText",
+            "highlight",
+            "animation",
+        )
+    }
+    proposal_visuals = {
+        key: deepcopy(proposal.get(key))
+        for key in frozen_visuals
+    }
+    if proposal_visuals != frozen_visuals:
+        raise ValueError("AI 动效不能改变分镜文字、词边界或视觉字段")
+    if proposal.get("motion") is None:
+        raise ValueError("AI 动效结果缺少 motion")
+    return deepcopy(proposal)
+
+
+def canonicalize_motion_generation_proposal(
+    *,
+    proposals: list[dict],
+    words: list[dict],
+    manifest: dict,
+    scope: str,
+    selected_scene_id: str,
+    existing_scenes: list[dict],
+) -> list[dict]:
+    existing = validate_scene_partition(
+        existing_scenes,
+        words,
+        manifest,
+    )
+    if scope == "all":
+        if len(proposals) != len(existing):
+            raise ValueError("AI 动效必须保留完整分镜数量")
+        merged = [
+            _motion_scene_with_frozen_visuals(proposal, frozen)
+            for proposal, frozen in zip(proposals, existing, strict=True)
+        ]
+    elif scope == "selected":
+        if not selected_scene_id or len(proposals) != 1:
+            raise ValueError("选中分镜动效生成必须只返回一个分镜")
+        selected_index = next(
+            (
+                index
+                for index, scene in enumerate(existing)
+                if scene["id"] == selected_scene_id
+            ),
+            None,
+        )
+        if selected_index is None:
+            raise ValueError("目标分镜不存在")
+        merged = deepcopy(existing)
+        merged[selected_index] = _motion_scene_with_frozen_visuals(
+            proposals[0],
+            existing[selected_index],
+        )
+    else:
+        raise ValueError("AI 动效生成范围无效")
+    return validate_scene_partition(merged, words, manifest)
+
+
+def validate_canonical_motion_result(
+    *,
+    proposals: list[dict],
+    words: list[dict],
+    manifest: dict,
+    scope: str,
+    selected_scene_id: str,
+    existing_scenes: list[dict],
+) -> list[dict]:
+    existing = validate_scene_partition(
+        existing_scenes,
+        words,
+        manifest,
+    )
+    if len(proposals) != len(existing):
+        raise ValueError("AI 动效结果必须保留完整分镜计划")
+    for proposal, frozen in zip(proposals, existing, strict=True):
+        if (
+            scope == "selected"
+            and frozen["id"] != selected_scene_id
+            and proposal != frozen
+        ):
+            raise ValueError("非目标分镜不能改变")
+        _motion_scene_with_frozen_visuals(proposal, frozen)
+    if (
+        scope == "selected"
+        and not any(scene["id"] == selected_scene_id for scene in existing)
+    ):
+        raise ValueError("目标分镜不存在")
+    if scope not in {"all", "selected"}:
+        raise ValueError("AI 动效生成范围无效")
+    return validate_scene_partition(proposals, words, manifest)
+
+
 def validate_canonical_scene_result(
     *,
     proposals: list[dict],

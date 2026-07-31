@@ -1091,6 +1091,36 @@ def test_unsafe_running_paid_steps_without_exact_evidence_fail_retryable(
     asyncio.run(run())
 
 
+def test_interrupted_motion_generation_restores_last_ready_scene_plan():
+    from types import SimpleNamespace
+
+    from job_reconciliation import _fail_scene_domain, INTERRUPTION_ERROR
+
+    scenes = [{"id": "scene-1", "motion": {"chunks": []}}]
+    project = SimpleNamespace(scene_plan={
+        "status": "generating",
+        "generation_revision": 4,
+        "scenes": scenes,
+        "job_id": 91,
+        "error": "",
+    })
+    job = SimpleNamespace(
+        id=91,
+        input_data={
+            "generation_mode": "motion",
+            "scene_generation_revision": 4,
+            "existing_scenes": scenes,
+        },
+    )
+
+    _fail_scene_domain(project, job)
+
+    assert project.scene_plan["status"] == "ready"
+    assert project.scene_plan["job_id"] is None
+    assert project.scene_plan["scenes"] == scenes
+    assert project.scene_plan["error"] == INTERRUPTION_ERROR
+
+
 @pytest.mark.parametrize("status", ["succeeded", "cancelled"])
 def test_terminal_jobs_are_noops(reconciliation_env, status):
     from job_reconciliation import reconcile_content_jobs

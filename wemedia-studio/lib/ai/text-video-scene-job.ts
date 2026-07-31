@@ -35,20 +35,61 @@ const sceneSchema = z.object({
   animation: z.string().min(1),
 }).strict()
 
+const motionChunkSchema = z.object({
+  id: z.string().min(1),
+  fromWordId: z.string().min(1),
+  throughWordId: z.string().min(1),
+  displayText: z.string().min(1),
+  highlight: z.array(z.string()),
+  motionPreset: z.enum(['impact', 'reveal', 'contrast']),
+  emphasis: z.enum(['normal', 'punch']),
+}).strict()
+
+const motionSchema = z.object({
+  transition: z.literal('block-wipe'),
+  intensity: z.number().min(0).max(1),
+  chunks: z.array(motionChunkSchema).min(1),
+}).strict()
+
+const motionSceneSchema = z.object({
+  id: z.string().min(1),
+  fromWordId: z.string().min(1),
+  throughWordId: z.string().min(1),
+  displayText: z.string().min(1),
+  highlight: z.array(z.string()),
+  animation: z.enum(['impact', 'reveal', 'contrast']),
+  motion: motionSchema,
+}).strict()
+
 export const sceneProposalSchema = z.object({
   scenes: z.array(sceneSchema).min(1),
 }).strict()
 
-export type AiSceneProposal = z.infer<typeof sceneProposalSchema>
+export const motionProposalSchema = z.object({
+  scenes: z.array(motionSceneSchema).min(1),
+}).strict()
+
+type ProposalSchema = typeof sceneProposalSchema | typeof motionProposalSchema
+
+export type AiSceneProposal = (
+  z.infer<typeof sceneProposalSchema>
+  | z.infer<typeof motionProposalSchema>
+)
 
 export const validatedSceneProposalSchema = z.object({
   scenes: z.array(sceneSchema).min(1),
   validation_token: z.string().regex(/^[a-f0-9]{64}$/iu),
 }).strict()
 
-export type ValidatedSceneProposal = z.infer<
-  typeof validatedSceneProposalSchema
->
+export const validatedMotionProposalSchema = z.object({
+  scenes: z.array(motionSceneSchema).min(1),
+  validation_token: z.string().regex(/^[a-f0-9]{64}$/iu),
+}).strict()
+
+export type ValidatedSceneProposal = (
+  z.infer<typeof validatedSceneProposalSchema>
+  | z.infer<typeof validatedMotionProposalSchema>
+)
 
 export type SceneWorkerClaim = {
   step_id: number
@@ -61,6 +102,7 @@ export type SceneJobContext = {
   master_source_hash: string
   timeline_fingerprint: string
   scene_generation_revision: number
+  generation_mode?: 'scene' | 'motion'
   script: string
   words: GlobalWordTiming[]
   speech_segments: Array<{
@@ -125,9 +167,9 @@ type SceneProgressApi = {
 
 export type TextVideoSceneJobDeps = {
   generate(input: {
-    schema: typeof sceneProposalSchema
+    schema: ProposalSchema
     prompt: string
-  }): Promise<AiSceneProposal>
+  }): Promise<unknown>
   api: SceneProgressApi
   createClaimToken?(): string
 }
@@ -266,6 +308,21 @@ function promptForContext(context: SceneJobContext) {
     text: word.text,
     speechSegmentId: word.speech_segment_id,
   }))
+  if (context.generation_mode === 'motion') {
+    return [
+      '你是文字视频动效导演。只返回符合 schema 的 JSON，不得输出秒数、时间戳或额外字段。',
+      '顶层分镜字段必须原样保留：id、fromWordId、throughWordId、displayText、highlight、animation 均不得修改。',
+      '只能设计 motion；短句必须按有序 word ID 连续、无重叠地覆盖所属分镜，displayText 必须无损覆盖原文。',
+      '只可使用 impact、reveal、contrast，转场只能是 block-wipe，强度必须在 0 到 1 之间。',
+      `生成范围：${context.scope}`,
+      `目标分镜 ID：${context.selected_scene_id || '无'}`,
+      `用户方向：${context.direction || '未提供额外方向'}`,
+      `模板能力：${JSON.stringify(context.template)}`,
+      `有序词 ID 与文本：${JSON.stringify(words)}`,
+      `冻结的分镜：${JSON.stringify(context.existing_scenes)}`,
+      '返回格式示例：{"scenes":[{"id":"scene-1","fromWordId":"word-1","throughWordId":"word-3","displayText":"示例","highlight":[],"animation":"impact","motion":{"transition":"block-wipe","intensity":0.8,"chunks":[{"id":"scene-1-chunk-1","fromWordId":"word-1","throughWordId":"word-3","displayText":"示例","highlight":[],"motionPreset":"impact","emphasis":"punch"}]}}]}',
+    ].join('\n\n')
+  }
   return [
     '你是文字视频分镜导演。只返回符合 schema 的 JSON，不得输出秒数、时间戳或额外字段。',
     '每个分镜只能使用 fromWordId 和 throughWordId 表达范围。',
@@ -285,7 +342,7 @@ function promptForContext(context: SceneJobContext) {
 
 function repairPrompt(
   originalPrompt: string,
-  invalid: AiSceneProposal,
+  invalid: unknown,
   validationError: unknown,
 ) {
   return [
@@ -313,7 +370,7 @@ async function configuredModel(jobId: number) {
 }
 
 async function generateScenesWithAi(
-  input: { schema: typeof sceneProposalSchema; prompt: string },
+  input: { schema: ProposalSchema; prompt: string },
   jobId: number,
 ) {
   const config = await configuredModel(jobId)
@@ -485,22 +542,28 @@ async function validateWithOneRepair(
   deps: TextVideoSceneJobDeps,
 ) {
   const basePrompt = promptForContext(context)
-  const first = sceneProposalSchema.parse(await deps.generate({
-    schema: sceneProposalSchema,
+  const proposalSchema = context.generation_mode === 'motion'
+    ? motionProposalSchema
+    : sceneProposalSchema
+  const validatedSchema = context.generation_mode === 'motion'
+    ? validatedMotionProposalSchema
+    : validatedSceneProposalSchema
+  const first = proposalSchema.parse(await deps.generate({
+    schema: proposalSchema,
     prompt: basePrompt,
   }))
   try {
-    return validatedSceneProposalSchema.parse(
+    return validatedSchema.parse(
       await deps.api.validateScenePlan(projectId, first, jobId, claim),
     )
   } catch (error) {
     if (errorStatus(error) !== 422) throw error
-    const repaired = sceneProposalSchema.parse(await deps.generate({
-      schema: sceneProposalSchema,
+    const repaired = proposalSchema.parse(await deps.generate({
+      schema: proposalSchema,
       prompt: repairPrompt(basePrompt, first, error),
     }))
     try {
-      return validatedSceneProposalSchema.parse(
+      return validatedSchema.parse(
         await deps.api.validateScenePlan(
           projectId,
           repaired,

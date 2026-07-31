@@ -230,6 +230,7 @@ export type TextVideoRenderResponse = {
 
 export type TextVideoSceneGenerateInput = {
   revision: number
+  mode?: 'scene' | 'motion'
   scope: 'all' | 'selected'
   selected_scene_id: string
   direction: string

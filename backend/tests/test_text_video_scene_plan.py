@@ -4,6 +4,7 @@ import pytest
 
 import text_video_scene_plan
 from text_video_scene_plan import (
+    canonicalize_motion_generation_proposal,
     canonicalize_scene_generation_proposal,
     resolve_scene_seconds,
     validate_canonical_scene_result,
@@ -666,6 +667,32 @@ def test_selected_scene_generation_merges_only_visual_intent():
         selected_scene_id="s1",
         existing_scenes=SCENES,
     ) == [selected, SCENES[1]]
+
+
+def test_motion_generation_changes_only_validated_motion_document():
+    frozen = _motion_scene()
+    proposal = _motion_scene()
+    proposal["motion"]["intensity"] = 0.65
+
+    assert canonicalize_motion_generation_proposal(
+        proposals=[proposal],
+        words=WORDS,
+        manifest=KINETIC_MANIFEST,
+        scope="all",
+        selected_scene_id="",
+        existing_scenes=[frozen],
+    ) == [proposal]
+
+    changed_text = _motion_scene(displayText="篡改文字")
+    with pytest.raises(ValueError, match="不能改变"):
+        canonicalize_motion_generation_proposal(
+            proposals=[changed_text],
+            words=WORDS,
+            manifest=KINETIC_MANIFEST,
+            scope="all",
+            selected_scene_id="",
+            existing_scenes=[frozen],
+        )
 
 
 @pytest.mark.parametrize(

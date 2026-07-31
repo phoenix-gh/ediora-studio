@@ -65,9 +65,11 @@ from text_video_domain import (
 )
 from text_video_scene_plan import (
     CONTINUITY_EPSILON_SECONDS,
+    canonicalize_motion_generation_proposal,
     canonicalize_scene_generation_proposal,
     resolve_scene_seconds,
     validate_canonical_scene_result,
+    validate_canonical_motion_result,
     validate_render_input_projection,
     validate_scene_partition,
     validate_template_configuration,
@@ -330,6 +332,7 @@ class ScenePlanGenerateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     revision: StrictInt = Field(ge=1)
+    mode: Literal["scene", "motion"] = "scene"
     scope: Literal["all", "selected"] = "all"
     selected_scene_id: str = Field(default="", max_length=200)
     direction: str = Field(default="", max_length=1_000)
@@ -938,6 +941,7 @@ def _scene_speech_boundaries(words: list[dict]) -> list[dict[str, str]]:
 
 def _scene_request_hash(snapshot: dict[str, Any]) -> str:
     return _canonical_digest({
+        "generation_mode": snapshot["generation_mode"],
         "master_source_hash": snapshot["master_source_hash"],
         "timeline_fingerprint": snapshot["timeline_fingerprint"],
         "scene_generation_revision": snapshot[
@@ -970,6 +974,22 @@ def _freeze_scene_job_input(
     ) = _scene_template_snapshot(project)
     plan = _scene_plan_document(project)
     existing_scenes = deepcopy(plan["scenes"])
+    if payload.mode == "motion":
+        if (
+            manifest["id"] != "kinetic-punch-v2"
+            or manifest["version"] != 1
+        ):
+            raise ValueError("AI 动效优化仅支持动感大字 V2")
+        if (
+            plan["status"] != "ready"
+            or plan["master_source_hash"] != master["source_hash"]
+        ):
+            raise ValueError("AI 动效优化需要当前有效的完整分镜计划")
+        validate_scene_partition(
+            existing_scenes,
+            master["word_timings"],
+            manifest,
+        )
     if payload.scope == "selected":
         if (
             plan["status"] != "ready"
@@ -987,6 +1007,7 @@ def _freeze_scene_job_input(
         ):
             raise ValueError("目标分镜不存在")
     snapshot: dict[str, Any] = {
+        "generation_mode": payload.mode,
         "project_id": project.id,
         "project_revision": project.revision,
         "master_source_hash": master["source_hash"],
@@ -1258,6 +1279,7 @@ def _scene_context(snapshot: dict[str, Any]) -> dict[str, Any]:
         key: deepcopy(snapshot[key])
         for key in (
             "project_id",
+            "generation_mode",
             "master_source_hash",
             "timeline_fingerprint",
             "scene_generation_revision",
@@ -1471,7 +1493,12 @@ async def validate_scene_plan_worker_result(
                 snapshot,
             )
         )
-        scenes = canonicalize_scene_generation_proposal(
+        canonicalizer = (
+            canonicalize_motion_generation_proposal
+            if snapshot["generation_mode"] == "motion"
+            else canonicalize_scene_generation_proposal
+        )
+        scenes = canonicalizer(
             proposals=[
                 item.model_dump(mode="json", exclude_none=True)
                 for item in payload.scenes
@@ -1558,7 +1585,12 @@ async def save_scene_plan_worker_result(
         master, manifest, composition, template_props = (
             _assert_scene_snapshot_current(project, job, snapshot)
         )
-        scenes = validate_canonical_scene_result(
+        result_validator = (
+            validate_canonical_motion_result
+            if snapshot["generation_mode"] == "motion"
+            else validate_canonical_scene_result
+        )
+        scenes = result_validator(
             proposals=raw_scenes,
             words=snapshot["words"],
             manifest=manifest,
@@ -1633,9 +1665,10 @@ async def save_scene_plan_worker_failure(
             raise StaleScenePlanJob("文字视频作品不存在")
         plan = _scene_plan_document(project)
         error_text = redact_secret_text(payload.error)[:500]
+        motion_mode = snapshot["generation_mode"] == "motion"
         if (
-            plan["status"] == "failed"
-            and plan["job_id"] == job.id
+            plan["status"] == ("ready" if motion_mode else "failed")
+            and plan["job_id"] == (None if motion_mode else job.id)
             and plan["generation_revision"]
             == snapshot["scene_generation_revision"]
             and plan["scenes"] == snapshot["existing_scenes"]
@@ -1643,11 +1676,19 @@ async def save_scene_plan_worker_failure(
         ):
             return serialize_project(project)
         _assert_scene_snapshot_current(project, job, snapshot)
-        plan.update({
-            "status": "failed",
-            "job_id": job.id,
-            "error": error_text,
-        })
+        plan.update(
+            {
+                "status": "ready",
+                "job_id": None,
+                "error": error_text,
+            }
+            if motion_mode
+            else {
+                "status": "failed",
+                "job_id": job.id,
+                "error": error_text,
+            }
+        )
         project.scene_plan = plan
         await db.commit()
         await db.refresh(project)
