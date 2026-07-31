@@ -2,6 +2,7 @@ import math
 
 import pytest
 
+import text_video_scene_plan
 from text_video_scene_plan import (
     canonicalize_scene_generation_proposal,
     resolve_scene_seconds,
@@ -14,6 +15,13 @@ from text_video_templates import get_text_video_template
 
 
 MANIFEST = get_text_video_template("tech-text-v1", 1)
+KINETIC_MANIFEST = {
+    **MANIFEST,
+    "id": "kinetic-punch-v2",
+    "composition_id": "kinetic-punch-v2",
+    "animations": ["impact", "reveal", "contrast"],
+    "transitions": ["block-wipe"],
+}
 WORDS = [
     {"id": "word-1", "text": "甲", "start": 0.2, "end": 0.5},
     {"id": "word-2", "text": "乙", "start": 0.7, "end": 1.0},
@@ -38,6 +46,42 @@ SCENES = [
         "animation": "scale",
     },
 ]
+
+
+def _motion_scene(**overrides):
+    scene = {
+        "id": "motion-scene",
+        "fromWordId": "word-1",
+        "throughWordId": "word-4",
+        "displayText": "甲乙丙丁",
+        "highlight": ["丙丁"],
+        "animation": "reveal",
+        "motion": {
+            "transition": "block-wipe",
+            "intensity": 0.8,
+            "chunks": [
+                {
+                    "id": "motion-chunk-1",
+                    "fromWordId": "word-1",
+                    "throughWordId": "word-2",
+                    "displayText": "甲乙",
+                    "highlight": [],
+                    "motionPreset": "reveal",
+                    "emphasis": "normal",
+                },
+                {
+                    "id": "motion-chunk-2",
+                    "fromWordId": "word-3",
+                    "throughWordId": "word-4",
+                    "displayText": "丙丁",
+                    "highlight": ["丙丁"],
+                    "motionPreset": "impact",
+                    "emphasis": "punch",
+                },
+            ],
+        },
+    }
+    return scene | overrides
 
 
 def test_template_manifest_is_versioned_json_safe_and_fails_closed():
@@ -164,6 +208,205 @@ def test_scene_word_partition_resolves_to_continuous_master_seconds():
         },
     ]
     assert resolved[0]["end"] is resolved[1]["start"]
+
+
+def test_scene_motion_projects_word_ids_to_render_seconds():
+    scene = _motion_scene()
+
+    assert validate_scene_partition(
+        proposals=[scene],
+        words=WORDS,
+        manifest=KINETIC_MANIFEST,
+    ) == [scene]
+
+    resolved = resolve_scene_seconds(
+        proposals=[scene],
+        words=WORDS,
+        master_duration=4.2,
+        manifest=KINETIC_MANIFEST,
+    )
+
+    assert resolved == [{
+        "id": "motion-scene",
+        "start": 0.0,
+        "end": 4.2,
+        "text": "甲乙丙丁",
+        "highlight": ["丙丁"],
+        "animation": "reveal",
+        "transition": "block-wipe",
+        "intensity": 0.8,
+        "chunks": [
+            {
+                "id": "motion-chunk-1",
+                "start": 0.0,
+                "end": 2.2,
+                "text": "甲乙",
+                "motionPreset": "reveal",
+                "emphasis": "normal",
+                "words": [
+                    {
+                        "text": "甲",
+                        "start": 0.2,
+                        "end": 0.5,
+                        "emphasis": "normal",
+                    },
+                    {
+                        "text": "乙",
+                        "start": 0.7,
+                        "end": 1.0,
+                        "emphasis": "normal",
+                    },
+                ],
+            },
+            {
+                "id": "motion-chunk-2",
+                "start": 2.2,
+                "end": 4.2,
+                "text": "丙丁",
+                "motionPreset": "impact",
+                "emphasis": "punch",
+                "words": [
+                    {
+                        "text": "丙",
+                        "start": 2.2,
+                        "end": 2.5,
+                        "emphasis": "highlight",
+                    },
+                    {
+                        "text": "丁",
+                        "start": 3.2,
+                        "end": 3.5,
+                        "emphasis": "highlight",
+                    },
+                ],
+            },
+        ],
+    }]
+
+
+def test_v1_scene_retains_motion_document_but_projects_legacy_segment():
+    first = {
+        **SCENES[0],
+        "motion": {
+            "transition": "block-wipe",
+            "intensity": 0.65,
+            "chunks": [{
+                "id": "s1-chunk-1",
+                "fromWordId": "word-1",
+                "throughWordId": "word-2",
+                "displayText": "甲乙",
+                "highlight": ["甲"],
+                "motionPreset": "reveal",
+                "emphasis": "normal",
+            }],
+        },
+    }
+    scenes = [first, SCENES[1]]
+
+    assert validate_scene_partition(
+        proposals=scenes,
+        words=WORDS,
+        manifest=MANIFEST,
+    ) == scenes
+    assert resolve_scene_seconds(
+        proposals=scenes,
+        words=WORDS,
+        master_duration=4.2,
+        manifest=MANIFEST,
+    )[0] == {
+        "id": "s1",
+        "start": 0.0,
+        "end": 2.2,
+        "text": "甲乙",
+        "highlight": ["甲"],
+        "animation": "fade-up",
+    }
+
+
+@pytest.mark.parametrize(
+    ("mutate", "error"),
+    [
+        (
+            lambda scene: scene["motion"].update({"intensity": 1.1}),
+            "强度",
+        ),
+        (
+            lambda scene: scene["motion"].update({"transition": "cut"}),
+            "转场",
+        ),
+        (
+            lambda scene: scene["motion"]["chunks"][0].update(
+                {"throughWordId": "word-3"},
+            ),
+            "完整且连续",
+        ),
+        (
+            lambda scene: scene["motion"]["chunks"][1].update(
+                {"fromWordId": "missing"},
+            ),
+            "完整且连续",
+        ),
+        (
+            lambda scene: scene["motion"]["chunks"][1].update(
+                {"displayText": "改写", "highlight": []},
+            ),
+            "完整覆盖",
+        ),
+        (
+            lambda scene: scene["motion"]["chunks"][1].update(
+                {"highlight": ["不存在"]},
+            ),
+            "高亮",
+        ),
+        (
+            lambda scene: scene["motion"]["chunks"][1].update(
+                {"motionPreset": "spin"},
+            ),
+            "预设",
+        ),
+    ],
+)
+def test_scene_motion_rejects_invalid_contract(mutate, error):
+    scene = _motion_scene()
+    mutate(scene)
+
+    with pytest.raises(ValueError, match=error):
+        validate_scene_partition(
+            proposals=[scene],
+            words=WORDS,
+            manifest=KINETIC_MANIFEST,
+        )
+
+
+def test_render_projection_accepts_v2_motion_fields(monkeypatch):
+    monkeypatch.setattr(
+        text_video_scene_plan,
+        "get_text_video_template",
+        lambda template_id, version: (
+            KINETIC_MANIFEST
+            if (template_id, version) == ("kinetic-punch-v2", 1)
+            else get_text_video_template(template_id, version)
+        ),
+    )
+    segments = resolve_scene_seconds(
+        proposals=[_motion_scene()],
+        words=WORDS,
+        master_duration=4.2,
+        manifest=KINETIC_MANIFEST,
+    )
+    render_input = {
+        "templateId": "kinetic-punch-v2",
+        "templateVersion": 1,
+        "composition": KINETIC_MANIFEST["default_composition"],
+        "audio": "/api/uploads/master.mp3",
+        "segments": segments,
+        "templateProps": KINETIC_MANIFEST["defaults"],
+    }
+
+    assert validate_render_input_projection(
+        render_input,
+        master_duration=4.2,
+    )["segments"] == segments
 
 
 @pytest.mark.parametrize(

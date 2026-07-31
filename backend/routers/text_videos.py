@@ -192,6 +192,39 @@ class CompositionDocument(BaseModel):
         return self
 
 
+class RenderWordCueDocument(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    text: str = Field(min_length=1)
+    start: float = Field(ge=0)
+    end: float = Field(ge=0)
+    emphasis: Literal["normal", "highlight"]
+
+    @model_validator(mode="after")
+    def valid_time_range(self):
+        if self.end < self.start:
+            raise ValueError("动效词结束时间不能早于开始时间")
+        return self
+
+
+class RenderMotionChunkDocument(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(min_length=1)
+    start: float = Field(ge=0)
+    end: float = Field(gt=0)
+    text: str = Field(min_length=1)
+    motionPreset: Literal["impact", "reveal", "contrast"]
+    emphasis: Literal["normal", "punch"]
+    words: list[RenderWordCueDocument] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def valid_time_range(self):
+        if self.end <= self.start:
+            raise ValueError("动效短句结束时间必须晚于开始时间")
+        return self
+
+
 class SegmentDocument(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -201,11 +234,19 @@ class SegmentDocument(BaseModel):
     text: str = Field(min_length=1)
     highlight: list[str] = Field(default_factory=list)
     animation: str = Field(min_length=1)
+    transition: Literal["block-wipe"] | None = None
+    intensity: float | None = Field(default=None, ge=0, le=1)
+    chunks: list[RenderMotionChunkDocument] | None = None
 
     @model_validator(mode="after")
     def valid_time_range(self):
         if self.end <= self.start:
             raise ValueError("分镜结束时间必须晚于开始时间")
+        motion_values = (self.transition, self.intensity, self.chunks)
+        if any(value is not None for value in motion_values) and any(
+            value is None for value in motion_values
+        ):
+            raise ValueError("渲染分镜动效字段必须同时提供")
         return self
 
 
@@ -246,6 +287,26 @@ class TemplateSelectionDocument(BaseModel):
     templateProps: dict[str, Any] = Field(default_factory=dict)
 
 
+class SceneMotionChunkEdit(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(min_length=1)
+    fromWordId: str = Field(min_length=1)
+    throughWordId: str = Field(min_length=1)
+    displayText: str = Field(min_length=1)
+    highlight: list[str] = Field(default_factory=list)
+    motionPreset: Literal["impact", "reveal", "contrast"]
+    emphasis: Literal["normal", "punch"]
+
+
+class SceneMotionEdit(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    transition: Literal["block-wipe"]
+    intensity: float = Field(ge=0, le=1)
+    chunks: list[SceneMotionChunkEdit] = Field(min_length=1)
+
+
 class ScenePlanSceneEdit(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -255,6 +316,7 @@ class ScenePlanSceneEdit(BaseModel):
     displayText: str = Field(min_length=1)
     highlight: list[str] = Field(default_factory=list)
     animation: str = Field(min_length=1)
+    motion: SceneMotionEdit | None = None
 
 
 class ScenePlanEdit(BaseModel):
@@ -1411,7 +1473,7 @@ async def validate_scene_plan_worker_result(
         )
         scenes = canonicalize_scene_generation_proposal(
             proposals=[
-                item.model_dump(mode="json")
+                item.model_dump(mode="json", exclude_none=True)
                 for item in payload.scenes
             ],
             words=snapshot["words"],
@@ -1472,7 +1534,7 @@ async def save_scene_plan_worker_result(
             acquire=False,
         )
         raw_scenes = [
-            item.model_dump(mode="json")
+            item.model_dump(mode="json", exclude_none=True)
             for item in payload.scenes
         ]
         expected_token = _scene_validation_token(

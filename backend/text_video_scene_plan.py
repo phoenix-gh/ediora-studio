@@ -20,6 +20,19 @@ SCENE_FIELDS = {
     "highlight",
     "animation",
 }
+SCENE_OPTIONAL_FIELDS = {"motion"}
+MOTION_FIELDS = {"transition", "intensity", "chunks"}
+MOTION_CHUNK_FIELDS = {
+    "id",
+    "fromWordId",
+    "throughWordId",
+    "displayText",
+    "highlight",
+    "motionPreset",
+    "emphasis",
+}
+MOTION_PRESETS = {"impact", "reveal", "contrast"}
+MOTION_EMPHASIS = {"normal", "punch"}
 RENDER_SEGMENT_FIELDS = {
     "id",
     "start",
@@ -28,6 +41,17 @@ RENDER_SEGMENT_FIELDS = {
     "highlight",
     "animation",
 }
+RENDER_MOTION_FIELDS = {"transition", "intensity", "chunks"}
+RENDER_CHUNK_FIELDS = {
+    "id",
+    "start",
+    "end",
+    "text",
+    "motionPreset",
+    "emphasis",
+    "words",
+}
+RENDER_WORD_FIELDS = {"text", "start", "end", "emphasis"}
 RENDER_INPUT_FIELDS = {
     "templateId",
     "templateVersion",
@@ -65,6 +89,147 @@ def _validate_highlights(
         if highlight and highlight not in display_text:
             raise ValueError("分镜高亮必须出现在展示文字中")
     return deepcopy(highlights)
+
+
+def _without_whitespace(value: str) -> str:
+    return "".join(value.split())
+
+
+def _validate_scene_motion(
+    motion: Any,
+    *,
+    scene: dict,
+    words: list[dict],
+    indexes: dict[str, int],
+) -> dict | None:
+    if motion is None:
+        return None
+    if not isinstance(motion, dict) or set(motion) != MOTION_FIELDS:
+        raise ValueError("动效编排字段无效")
+    if motion.get("transition") != "block-wipe":
+        raise ValueError("动效编排转场无效")
+    intensity = motion.get("intensity")
+    if (
+        not _is_finite_number(intensity)
+        or intensity < 0
+        or intensity > 1
+    ):
+        raise ValueError("动效编排强度必须位于 0 到 1")
+
+    chunks = motion.get("chunks")
+    if not isinstance(chunks, list) or not chunks:
+        raise ValueError("动效短句不能为空")
+    parent_start = indexes[scene["fromWordId"]]
+    parent_end = indexes[scene["throughWordId"]]
+    cursor = parent_start
+    chunk_ids: set[str] = set()
+    validated_chunks: list[dict] = []
+    for chunk in chunks:
+        if not isinstance(chunk, dict) or set(chunk) != MOTION_CHUNK_FIELDS:
+            raise ValueError("动效短句字段无效")
+        chunk_id = _require_nonblank(
+            chunk.get("id"),
+            "动效短句 ID 不能为空",
+        )
+        if chunk_id in chunk_ids:
+            raise ValueError("动效短句 ID 不能重复")
+        chunk_ids.add(chunk_id)
+
+        from_word_id = _require_nonblank(
+            chunk.get("fromWordId"),
+            "动效短句起始词 ID 不能为空",
+        )
+        through_word_id = _require_nonblank(
+            chunk.get("throughWordId"),
+            "动效短句结束词 ID 不能为空",
+        )
+        from_index = indexes.get(from_word_id)
+        through_index = indexes.get(through_word_id)
+        if (
+            from_index is None
+            or through_index is None
+            or from_index != cursor
+            or through_index < from_index
+            or through_index > parent_end
+        ):
+            raise ValueError("动效短句词范围必须完整且连续")
+
+        display_text = _require_nonblank(
+            chunk.get("displayText"),
+            "动效短句展示文字不能为空",
+        )
+        motion_preset = _require_nonblank(
+            chunk.get("motionPreset"),
+            "动效短句预设不能为空",
+        )
+        if motion_preset not in MOTION_PRESETS:
+            raise ValueError(f"动效短句预设无效：{motion_preset}")
+        emphasis = _require_nonblank(
+            chunk.get("emphasis"),
+            "动效短句强调不能为空",
+        )
+        if emphasis not in MOTION_EMPHASIS:
+            raise ValueError(f"动效短句强调无效：{emphasis}")
+
+        validated_chunks.append({
+            "id": chunk_id,
+            "fromWordId": from_word_id,
+            "throughWordId": through_word_id,
+            "displayText": display_text,
+            "highlight": _validate_highlights(
+                chunk.get("highlight"),
+                display_text,
+            ),
+            "motionPreset": motion_preset,
+            "emphasis": emphasis,
+        })
+        cursor = through_index + 1
+
+    if cursor != parent_end + 1:
+        raise ValueError("动效短句词范围必须完整且连续")
+    combined_text = "".join(
+        chunk["displayText"] for chunk in validated_chunks
+    )
+    if _without_whitespace(combined_text) != _without_whitespace(
+        scene["displayText"],
+    ):
+        raise ValueError("动效短句必须完整覆盖分镜展示文字")
+    return {
+        "transition": "block-wipe",
+        "intensity": float(intensity),
+        "chunks": validated_chunks,
+    }
+
+
+def _highlighted_word_positions(
+    words: list[dict],
+    highlights: list[str],
+) -> set[int]:
+    normalized_words = [_without_whitespace(str(word["text"])) for word in words]
+    joined = "".join(normalized_words)
+    spans: list[tuple[int, int]] = []
+    cursor = 0
+    for text in normalized_words:
+        spans.append((cursor, cursor + len(text)))
+        cursor += len(text)
+
+    positions: set[int] = set()
+    for highlight in highlights:
+        needle = _without_whitespace(highlight)
+        if not needle:
+            continue
+        start = joined.find(needle)
+        if start < 0:
+            continue
+        end = start + len(needle)
+        positions.update(
+            index
+            for index, (word_start, word_end) in enumerate(spans)
+            if word_start < end and word_end > start
+        )
+    if highlights and not positions and words:
+        positions.add(len(words) - 1)
+    return positions
 
 
 def _word_indexes(words: list[dict]) -> dict[str, int]:
@@ -171,7 +336,11 @@ def validate_scene_partition(
     scene_ids: set[str] = set()
     validated: list[dict] = []
     for scene in proposals:
-        if not isinstance(scene, dict) or set(scene) != SCENE_FIELDS:
+        if (
+            not isinstance(scene, dict)
+            or not SCENE_FIELDS.issubset(scene)
+            or set(scene) - SCENE_FIELDS - SCENE_OPTIONAL_FIELDS
+        ):
             raise ValueError("分镜仅允许词范围与视觉意图字段")
         scene_id = _require_nonblank(scene.get("id"), "分镜 ID 不能为空")
         if scene_id in scene_ids:
@@ -207,7 +376,7 @@ def validate_scene_partition(
         if animation not in manifest["animations"]:
             raise ValueError(f"当前模板不支持动画：{animation}")
 
-        validated.append({
+        validated_scene = {
             "id": scene_id,
             "fromWordId": from_word_id,
             "throughWordId": through_word_id,
@@ -217,7 +386,16 @@ def validate_scene_partition(
                 display_text,
             ),
             "animation": animation,
-        })
+        }
+        motion = _validate_scene_motion(
+            scene.get("motion"),
+            scene=validated_scene,
+            words=words,
+            indexes=indexes,
+        )
+        if motion is not None:
+            validated_scene["motion"] = motion
+        validated.append(validated_scene)
         cursor = through_index + 1
 
     if cursor != len(words):
@@ -308,6 +486,60 @@ def validate_canonical_scene_result(
     return validate_scene_partition(proposals, words, manifest)
 
 
+def _resolve_motion_chunks(
+    scene: dict,
+    words: list[dict],
+    indexes: dict[str, int],
+    *,
+    scene_start: float,
+    scene_end: float,
+) -> list[dict]:
+    motion = scene["motion"]
+    chunks = motion["chunks"]
+    resolved: list[dict] = []
+    for index, chunk in enumerate(chunks):
+        from_index = indexes[chunk["fromWordId"]]
+        through_index = indexes[chunk["throughWordId"]]
+        source_words = words[from_index:through_index + 1]
+        highlighted = _highlighted_word_positions(
+            source_words,
+            chunk["highlight"],
+        )
+        following = chunks[index + 1] if index + 1 < len(chunks) else None
+        chunk_start = (
+            scene_start
+            if index == 0
+            else float(words[from_index]["start"])
+        )
+        chunk_end = (
+            float(words[indexes[following["fromWordId"]]]["start"])
+            if following is not None
+            else scene_end
+        )
+        resolved.append({
+            "id": chunk["id"],
+            "start": chunk_start,
+            "end": chunk_end,
+            "text": chunk["displayText"],
+            "motionPreset": chunk["motionPreset"],
+            "emphasis": chunk["emphasis"],
+            "words": [
+                {
+                    "text": str(word["text"]),
+                    "start": float(word["start"]),
+                    "end": float(word["end"]),
+                    "emphasis": (
+                        "highlight"
+                        if word_index in highlighted
+                        else "normal"
+                    ),
+                }
+                for word_index, word in enumerate(source_words)
+            ],
+        })
+    return resolved
+
+
 def resolve_scene_seconds(
     proposals: list[dict],
     words: list[dict],
@@ -328,8 +560,9 @@ def resolve_scene_seconds(
         if boundaries[index + 1] <= boundaries[index]:
             raise ValueError("分镜投影后的秒数范围必须为正")
 
-    return [
-        {
+    segments: list[dict] = []
+    for index, scene in enumerate(scenes):
+        segment = {
             "id": scene["id"],
             "start": boundaries[index],
             "end": boundaries[index + 1],
@@ -337,8 +570,148 @@ def resolve_scene_seconds(
             "highlight": deepcopy(scene["highlight"]),
             "animation": scene["animation"],
         }
-        for index, scene in enumerate(scenes)
-    ]
+        if (
+            manifest["id"] == "kinetic-punch-v2"
+            and manifest["version"] == 1
+            and scene.get("motion") is not None
+        ):
+            segment.update({
+                "transition": scene["motion"]["transition"],
+                "intensity": scene["motion"]["intensity"],
+                "chunks": _resolve_motion_chunks(
+                    scene,
+                    words,
+                    indexes,
+                    scene_start=boundaries[index],
+                    scene_end=boundaries[index + 1],
+                ),
+            })
+        segments.append(segment)
+    return segments
+
+
+def _validate_render_words(
+    words: Any,
+    *,
+    chunk_start: float,
+    chunk_end: float,
+) -> list[dict]:
+    if not isinstance(words, list):
+        raise ValueError("渲染动效词时间格式无效")
+    validated: list[dict] = []
+    previous_start = chunk_start
+    previous_end = chunk_start
+    for word in words:
+        if not isinstance(word, dict) or set(word) != RENDER_WORD_FIELDS:
+            raise ValueError("渲染动效词时间字段无效")
+        text = _require_nonblank(
+            word.get("text"),
+            "渲染动效词文字不能为空",
+        )
+        start = word.get("start")
+        end = word.get("end")
+        emphasis = word.get("emphasis")
+        if (
+            not _is_finite_number(start)
+            or not _is_finite_number(end)
+            or start < chunk_start - CONTINUITY_EPSILON_SECONDS
+            or end < start
+            or end > chunk_end + CONTINUITY_EPSILON_SECONDS
+            or start < previous_start
+            or end < previous_end
+        ):
+            raise ValueError("渲染动效词时间必须有序且位于短句内")
+        if emphasis not in {"normal", "highlight"}:
+            raise ValueError("渲染动效词强调无效")
+        validated.append({
+            "text": text,
+            "start": float(start),
+            "end": float(end),
+            "emphasis": emphasis,
+        })
+        previous_start = float(start)
+        previous_end = float(end)
+    return validated
+
+
+def _validate_render_motion(
+    raw: dict,
+    *,
+    segment_start: float,
+    segment_end: float,
+    manifest: dict,
+) -> dict:
+    if manifest["id"] != "kinetic-punch-v2" or manifest["version"] != 1:
+        raise ValueError("当前模板不支持动效短句")
+    if raw.get("transition") not in manifest["transitions"]:
+        raise ValueError("当前模板不支持渲染转场")
+    intensity = raw.get("intensity")
+    if (
+        not _is_finite_number(intensity)
+        or intensity < 0
+        or intensity > 1
+    ):
+        raise ValueError("渲染动效强度必须位于 0 到 1")
+    raw_chunks = raw.get("chunks")
+    if not isinstance(raw_chunks, list) or not raw_chunks:
+        raise ValueError("渲染动效短句不能为空")
+
+    chunks: list[dict] = []
+    ids: set[str] = set()
+    previous_end = segment_start
+    for chunk in raw_chunks:
+        if not isinstance(chunk, dict) or set(chunk) != RENDER_CHUNK_FIELDS:
+            raise ValueError("渲染动效短句字段无效")
+        chunk_id = _require_nonblank(
+            chunk.get("id"),
+            "渲染动效短句 ID 不能为空",
+        )
+        if chunk_id in ids:
+            raise ValueError("渲染动效短句 ID 不能重复")
+        ids.add(chunk_id)
+        start = chunk.get("start")
+        end = chunk.get("end")
+        if (
+            not _is_finite_number(start)
+            or not _is_finite_number(end)
+            or abs(float(start) - previous_end) > CONTINUITY_EPSILON_SECONDS
+            or end <= start
+            or end > segment_end + CONTINUITY_EPSILON_SECONDS
+        ):
+            raise ValueError("渲染动效短句必须连续覆盖分镜")
+        text = _require_nonblank(
+            chunk.get("text"),
+            "渲染动效短句文字不能为空",
+        )
+        motion_preset = chunk.get("motionPreset")
+        if motion_preset not in manifest["animations"]:
+            raise ValueError("当前模板不支持动效短句预设")
+        emphasis = chunk.get("emphasis")
+        if emphasis not in MOTION_EMPHASIS:
+            raise ValueError("渲染动效短句强调无效")
+        chunks.append({
+            "id": chunk_id,
+            "start": float(start),
+            "end": float(end),
+            "text": text,
+            "motionPreset": motion_preset,
+            "emphasis": emphasis,
+            "words": _validate_render_words(
+                chunk.get("words"),
+                chunk_start=float(start),
+                chunk_end=float(end),
+            ),
+        })
+        previous_end = float(end)
+    if abs(previous_end - segment_end) > CONTINUITY_EPSILON_SECONDS:
+        raise ValueError("渲染动效短句必须连续覆盖分镜")
+    chunks[0]["start"] = segment_start
+    chunks[-1]["end"] = segment_end
+    return {
+        "transition": raw["transition"],
+        "intensity": float(intensity),
+        "chunks": chunks,
+    }
 
 
 def validate_render_input_projection(
@@ -379,8 +752,15 @@ def validate_render_input_projection(
     segments: list[dict] = []
     ids: set[str] = set()
     for raw in raw_segments:
-        if not isinstance(raw, dict) or set(raw) != RENDER_SEGMENT_FIELDS:
+        if (
+            not isinstance(raw, dict)
+            or not RENDER_SEGMENT_FIELDS.issubset(raw)
+            or set(raw) - RENDER_SEGMENT_FIELDS - RENDER_MOTION_FIELDS
+        ):
             raise ValueError("渲染分镜字段无效")
+        has_motion = bool(set(raw) & RENDER_MOTION_FIELDS)
+        if has_motion and not RENDER_MOTION_FIELDS.issubset(raw):
+            raise ValueError("渲染分镜动效字段不完整")
         segment_id = _require_nonblank(raw.get("id"), "渲染分镜 ID 不能为空")
         if segment_id in ids:
             raise ValueError("渲染分镜 ID 不能重复")
@@ -401,14 +781,22 @@ def validate_render_input_projection(
         )
         if animation not in manifest["animations"]:
             raise ValueError(f"当前模板不支持动画：{animation}")
-        segments.append({
+        segment = {
             "id": segment_id,
             "start": float(start),
             "end": float(end),
             "text": text,
             "highlight": _validate_highlights(raw.get("highlight"), text),
             "animation": animation,
-        })
+        }
+        if has_motion:
+            segment.update(_validate_render_motion(
+                raw,
+                segment_start=float(start),
+                segment_end=float(end),
+                manifest=manifest,
+            ))
+        segments.append(segment)
 
     if abs(segments[0]["start"]) > CONTINUITY_EPSILON_SECONDS:
         raise ValueError("渲染分镜必须连续覆盖主音频")

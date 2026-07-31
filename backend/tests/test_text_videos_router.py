@@ -1177,6 +1177,85 @@ def test_scene_plan_patch_projects_authoritative_audio_and_seconds(client):
     assert preserved["render_input"] == last_valid["render_input"]
 
 
+def test_scene_plan_patch_persists_motion_without_projecting_it_to_v1(client):
+    project = _speech_project(client, "甲乙丙丁")
+    _set_ready_master(project["id"])
+    scenes = _scene_scenes()
+    scenes[0] = {
+        **scenes[0],
+        "motion": {
+            "transition": "block-wipe",
+            "intensity": 0.65,
+            "chunks": [{
+                "id": "scene-1-chunk-1",
+                "fromWordId": "word-1",
+                "throughWordId": "word-2",
+                "displayText": "甲乙",
+                "highlight": ["甲"],
+                "motionPreset": "reveal",
+                "emphasis": "normal",
+            }],
+        },
+    }
+
+    response = client.patch(
+        f"/api/text-videos/{project['id']}",
+        json={
+            "revision": project["revision"],
+            "scene_plan": {
+                "generation_revision": 0,
+                "scenes": scenes,
+            },
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    updated = response.json()
+    assert updated["scene_plan"]["scenes"][0]["motion"] == scenes[0]["motion"]
+    assert set(updated["render_input"]["segments"][0]) == {
+        "id",
+        "start",
+        "end",
+        "text",
+        "highlight",
+        "animation",
+    }
+
+
+def test_scene_plan_patch_rejects_unknown_motion_fields(client):
+    project = _speech_project(client, "甲乙丙丁")
+    _set_ready_master(project["id"])
+    scenes = _scene_scenes()
+    scenes[0] = {
+        **scenes[0],
+        "motion": {
+            "transition": "block-wipe",
+            "intensity": 0.65,
+            "chunks": [{
+                "id": "scene-1-chunk-1",
+                "fromWordId": "word-1",
+                "throughWordId": "word-2",
+                "displayText": "甲乙",
+                "highlight": ["甲"],
+                "motionPreset": "reveal",
+                "emphasis": "normal",
+                "css": "transform: rotate(90deg)",
+            }],
+        },
+    }
+
+    response = client.patch(
+        f"/api/text-videos/{project['id']}",
+        json={
+            "revision": project["revision"],
+            "scene_plan": {"scenes": scenes},
+        },
+    )
+
+    assert response.status_code == 422
+    assert "css" in response.text
+
+
 def test_scene_plan_patch_rejects_timing_fields_and_preserves_projection(client):
     project = _speech_project(client, "甲乙丙丁")
     _set_ready_master(project["id"])
