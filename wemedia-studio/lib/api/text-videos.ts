@@ -69,6 +69,22 @@ export type MasterAudioDocument = {
   repair_generation?: number
 }
 
+export type KineticMotionChunkDocument = {
+  id: string
+  fromWordId: string
+  throughWordId: string
+  displayText: string
+  highlight: string[]
+  motionPreset: 'impact' | 'reveal' | 'contrast'
+  emphasis: 'normal' | 'punch'
+}
+
+export type KineticSceneMotionPlan = {
+  transition: 'block-wipe'
+  intensity: number
+  chunks: KineticMotionChunkDocument[]
+}
+
 export type ScenePlanSceneDocument = {
   id: string
   fromWordId: string
@@ -76,6 +92,7 @@ export type ScenePlanSceneDocument = {
   displayText: string
   highlight: string[]
   animation: string
+  motion?: KineticSceneMotionPlan
 }
 
 export type ScenePlanDocument = {

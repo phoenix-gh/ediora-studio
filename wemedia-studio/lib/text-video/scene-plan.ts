@@ -5,7 +5,10 @@ import type {
   TextVideoProject,
 } from '@/lib/api/text-videos'
 import { resolveTextVideoTemplate } from '@/remotion/registry'
-import { CONTINUITY_EPSILON_SECONDS } from '@/remotion/types'
+import {
+  CONTINUITY_EPSILON_SECONDS,
+  type KineticRenderChunk,
+} from '@/remotion/types'
 
 import { sceneFrameRange } from './scene-range'
 
@@ -167,6 +170,123 @@ function retainedHighlights(highlight: string[], displayText: string) {
   ))
 }
 
+function normalizedCueText(value: string) {
+  return value.replace(/\s/gu, '')
+}
+
+function highlightedCueIndexes(
+  words: GlobalWordTiming[],
+  highlights: string[],
+) {
+  const source = words.map(word => normalizedCueText(word.text))
+  const offsets: Array<{ start: number; end: number }> = []
+  let cursor = 0
+  for (const text of source) {
+    offsets.push({ start: cursor, end: cursor + text.length })
+    cursor += text.length
+  }
+  const joined = source.join('')
+  const indexes = new Set<number>()
+  for (const rawHighlight of highlights) {
+    const highlight = normalizedCueText(rawHighlight)
+    if (!highlight) continue
+    let match = joined.indexOf(highlight)
+    while (match >= 0) {
+      const matchEnd = match + highlight.length
+      offsets.forEach((offset, index) => {
+        if (offset.start < matchEnd && offset.end > match) indexes.add(index)
+      })
+      match = joined.indexOf(highlight, match + 1)
+    }
+  }
+  return indexes
+}
+
+function projectSceneMotion(
+  scene: ScenePlanSceneDocument,
+  words: GlobalWordTiming[],
+  sceneStart: number,
+  sceneEnd: number,
+): Pick<
+  import('@/remotion/types').TextVideoSegment,
+  'transition' | 'intensity' | 'chunks'
+> | null {
+  if (!scene.motion) return null
+
+  const indexes = wordIndexById(words)
+  const sceneFromIndex = indexes.get(scene.fromWordId)
+  const sceneThroughIndex = indexes.get(scene.throughWordId)
+  if (sceneFromIndex === undefined || sceneThroughIndex === undefined) {
+    fail('scene motion word range is invalid')
+  }
+
+  let wordCursor = sceneFromIndex
+  const chunkIds = new Set<string>()
+  const chunks: KineticRenderChunk[] = scene.motion.chunks.map(
+    (chunk, index) => {
+      const fromIndex = indexes.get(chunk.fromWordId)
+      const throughIndex = indexes.get(chunk.throughWordId)
+      if (
+        !chunk.id.trim()
+        || chunkIds.has(chunk.id)
+        || fromIndex === undefined
+        || throughIndex === undefined
+        || fromIndex !== wordCursor
+        || throughIndex < fromIndex
+        || throughIndex > sceneThroughIndex
+      ) {
+        fail('scene motion chunks must partition the scene word range')
+      }
+      chunkIds.add(chunk.id)
+      wordCursor = throughIndex + 1
+      const following = scene.motion?.chunks[index + 1]
+      const followingIndex = following
+        ? indexes.get(following.fromWordId)
+        : undefined
+      if (following && followingIndex === undefined) {
+        fail('scene motion chunk boundary is invalid')
+      }
+      const chunkWords = words.slice(fromIndex, throughIndex + 1)
+      const emphasized = highlightedCueIndexes(
+        chunkWords,
+        chunk.highlight,
+      )
+      if (
+        chunk.emphasis === 'punch'
+        && emphasized.size === 0
+        && chunkWords.length > 0
+      ) {
+        emphasized.add(chunkWords.length - 1)
+      }
+
+      return {
+        id: chunk.id,
+        start: index === 0 ? sceneStart : words[fromIndex].start,
+        end: followingIndex === undefined
+          ? sceneEnd
+          : words[followingIndex].start,
+        text: chunk.displayText,
+        motionPreset: chunk.motionPreset,
+        emphasis: chunk.emphasis,
+        words: chunkWords.map((word, wordIndex) => ({
+          text: word.text,
+          start: word.start,
+          end: word.end,
+          emphasis: emphasized.has(wordIndex) ? 'highlight' : 'normal',
+        })),
+      }
+    },
+  )
+  if (wordCursor !== sceneThroughIndex + 1 || chunks.length === 0) {
+    fail('scene motion chunks must cover the complete scene')
+  }
+  return {
+    transition: scene.motion.transition,
+    intensity: scene.motion.intensity,
+    chunks,
+  }
+}
+
 function sceneWithRange(
   item: ScenePlanSceneDocument,
   words: GlobalWordTiming[],
@@ -174,8 +294,9 @@ function sceneWithRange(
   throughIndex: number,
 ): ScenePlanSceneDocument {
   const displayText = exactDisplayText(words, fromIndex, throughIndex)
+  const { motion: _staleMotion, ...sceneWithoutMotion } = item
   return {
-    ...item,
+    ...sceneWithoutMotion,
     fromWordId: words[fromIndex].id,
     throughWordId: words[throughIndex].id,
     displayText,
@@ -448,16 +569,30 @@ export function editSceneVisuals(
   if (sceneUnchanged && renderUnchanged) return project
 
   const highlights = [...update.highlight]
+  const contentChanged = (
+    sceneMatch.item.displayText !== update.displayText
+    || !sameStrings(sceneMatch.item.highlight, update.highlight)
+  )
+  const {
+    motion: _staleMotion,
+    ...sceneWithoutMotion
+  } = sceneMatch.item
   const scenes = [...project.scene_plan.scenes]
   scenes[sceneMatch.index] = {
-    ...sceneMatch.item,
+    ...(contentChanged ? sceneWithoutMotion : sceneMatch.item),
     displayText: update.displayText,
     highlight: highlights,
     animation: update.animation,
   }
+  const {
+    transition: _staleTransition,
+    intensity: _staleIntensity,
+    chunks: _staleChunks,
+    ...renderWithoutMotion
+  } = renderMatch.item
   const segments = [...project.render_input.segments]
   segments[renderMatch.index] = {
-    ...renderMatch.item,
+    ...(contentChanged ? renderWithoutMotion : renderMatch.item),
     text: update.displayText,
     highlight: [...highlights],
     animation: update.animation,
@@ -514,17 +649,26 @@ export function applyScenePlanToProject(
   }
 
   const ranges = sceneRanges(plan, master.word_timings)
+  const manifestIdentity: { id: string; version: number } = manifest
+  const isKineticV2 = manifestIdentity.id === 'kinetic-punch-v2'
+    && manifestIdentity.version === 1
   const segments = ranges.map(({ scene, fromIndex }, index) => {
     const following = ranges[index + 1]
+    const start = index === 0 ? 0 : master.word_timings[fromIndex].start
+    const end = following
+      ? master.word_timings[following.fromIndex].start
+      : master.duration
+    const motion = isKineticV2
+      ? projectSceneMotion(scene, master.word_timings, start, end)
+      : null
     return {
       id: scene.id,
-      start: index === 0 ? 0 : master.word_timings[fromIndex].start,
-      end: following
-        ? master.word_timings[following.fromIndex].start
-        : master.duration,
+      start,
+      end,
       text: scene.displayText,
       highlight: [...scene.highlight],
       animation: scene.animation,
+      ...(motion ?? {}),
     }
   })
 

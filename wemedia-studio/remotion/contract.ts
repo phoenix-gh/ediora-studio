@@ -19,6 +19,35 @@ const compositionSchema = z.object({
   fps: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
 }).strict()
 
+const kineticWordCueSchema = z.object({
+  text: z.string().refine(value => value.trim().length > 0, {
+    message: 'word cue text must not be blank',
+  }),
+  start: z.number().finite().nonnegative(),
+  end: z.number().finite().positive(),
+  emphasis: z.enum(['normal', 'highlight']),
+}).strict().refine(cue => cue.end > cue.start, {
+  message: 'word cue end must follow start',
+  path: ['end'],
+})
+
+const kineticRenderChunkSchema = z.object({
+  id: z.string().refine(value => value.trim().length > 0, {
+    message: 'chunk id must not be blank',
+  }),
+  start: z.number().finite().nonnegative(),
+  end: z.number().finite().positive(),
+  text: z.string().refine(value => value.trim().length > 0, {
+    message: 'chunk text must not be blank',
+  }),
+  motionPreset: z.enum(['impact', 'reveal', 'contrast']),
+  emphasis: z.enum(['normal', 'punch']),
+  words: z.array(kineticWordCueSchema).min(1),
+}).strict().refine(chunk => chunk.end > chunk.start, {
+  message: 'chunk end must follow start',
+  path: ['end'],
+})
+
 const textVideoSegmentSchema = z.object({
   id: z.string().refine(value => value.trim().length > 0, {
     message: 'segment id must not be blank',
@@ -30,9 +59,22 @@ const textVideoSegmentSchema = z.object({
   }),
   highlight: z.array(z.string()),
   animation: z.string().min(1),
+  transition: z.literal('block-wipe').optional(),
+  intensity: z.number().finite().min(0).max(1).optional(),
+  chunks: z.array(kineticRenderChunkSchema).min(1).optional(),
 }).strict().refine(segment => segment.end > segment.start, {
   message: 'segment end must follow start',
   path: ['end'],
+}).refine(segment => {
+  const present = [
+    segment.transition !== undefined,
+    segment.intensity !== undefined,
+    segment.chunks !== undefined,
+  ]
+  return present.every(value => value === present[0])
+}, {
+  message: 'segment motion fields must be provided together',
+  path: ['chunks'],
 })
 
 export const textVideoRenderInputSchema = z.object({
@@ -107,6 +149,56 @@ export function parseTextVideoRenderInputWithManifest<
         fail('highlight must occur in segment text')
       }
     }
+    if (segment.chunks) {
+      if (manifest.id !== 'kinetic-punch-v2' || manifest.version !== 1) {
+        fail('segment motion is only supported by kinetic-punch-v2@1')
+      }
+      if (
+        !segment.transition
+        || !(manifest.transitions as readonly string[])
+          .includes(segment.transition)
+      ) {
+        fail(`segment transition is not supported: ${segment.transition}`)
+      }
+
+      const chunkIds = new Set<string>()
+      let chunkCursor = segment.start
+      for (const chunk of segment.chunks) {
+        if (chunkIds.has(chunk.id)) fail('chunk ids must be unique')
+        chunkIds.add(chunk.id)
+        if (
+          !(manifest.animations as readonly string[])
+            .includes(chunk.motionPreset)
+        ) {
+          fail(`chunk motion preset is not supported: ${chunk.motionPreset}`)
+        }
+        if (
+          Math.abs(chunk.start - chunkCursor)
+          > CONTINUITY_EPSILON_SECONDS
+        ) {
+          fail('chunks must continuously cover the segment')
+        }
+
+        let cueCursor = chunk.start
+        for (const cue of chunk.words) {
+          if (
+            cue.start < chunk.start - CONTINUITY_EPSILON_SECONDS
+            || cue.end > chunk.end + CONTINUITY_EPSILON_SECONDS
+            || cue.start < cueCursor - CONTINUITY_EPSILON_SECONDS
+          ) {
+            fail('word cues must be ordered inside their chunk')
+          }
+          cueCursor = cue.end
+        }
+        chunkCursor = chunk.end
+      }
+      if (
+        Math.abs(chunkCursor - segment.end)
+        > CONTINUITY_EPSILON_SECONDS
+      ) {
+        fail('chunks must continuously cover the segment')
+      }
+    }
   }
 
   const first = envelope.segments[0]
@@ -131,6 +223,10 @@ export function parseTextVideoRenderInputWithManifest<
   const segments = envelope.segments.map(segment => ({
     ...segment,
     highlight: [...segment.highlight],
+    chunks: segment.chunks?.map(chunk => ({
+      ...chunk,
+      words: chunk.words.map(cue => ({ ...cue })),
+    })),
   }))
   segments[0].start = 0
   for (let index = 1; index < segments.length; index += 1) {

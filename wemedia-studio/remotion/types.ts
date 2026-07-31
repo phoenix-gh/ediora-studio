@@ -11,6 +11,23 @@ export type TextVideoComposition = {
   fps: number
 }
 
+export type KineticWordCue = {
+  text: string
+  start: number
+  end: number
+  emphasis: 'normal' | 'highlight'
+}
+
+export type KineticRenderChunk = {
+  id: string
+  start: number
+  end: number
+  text: string
+  motionPreset: 'impact' | 'reveal' | 'contrast'
+  emphasis: 'normal' | 'punch'
+  words: KineticWordCue[]
+}
+
 export type TextVideoSegment = {
   id: string
   start: number
@@ -18,6 +35,9 @@ export type TextVideoSegment = {
   text: string
   highlight: string[]
   animation: string
+  transition?: 'block-wipe'
+  intensity?: number
+  chunks?: KineticRenderChunk[]
 }
 
 export type TextVideoRenderInput<P = Record<string, unknown>> = {

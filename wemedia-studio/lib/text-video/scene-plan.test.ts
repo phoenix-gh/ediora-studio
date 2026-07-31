@@ -701,6 +701,56 @@ describe('moveSceneBoundary', () => {
 })
 
 describe('editSceneVisuals', () => {
+  it('clears stale motion when display text or highlights change', () => {
+    const project = projectForVisualEdit()
+    project.scene_plan.scenes[0] = {
+      ...project.scene_plan.scenes[0],
+      motion: {
+        transition: 'block-wipe',
+        intensity: 0.8,
+        chunks: [{
+          id: 'scene-1-chunk-1',
+          fromWordId: 'word-1',
+          throughWordId: 'word-2',
+          displayText: '旧的屏显文字',
+          highlight: ['旧的'],
+          motionPreset: 'impact',
+          emphasis: 'punch',
+        }],
+      },
+    }
+    project.render_input.segments[0] = {
+      ...project.render_input.segments[0],
+      transition: 'block-wipe',
+      intensity: 0.8,
+      chunks: [{
+        id: 'scene-1-chunk-1',
+        start: 0,
+        end: 1,
+        text: '旧的屏显文字',
+        motionPreset: 'impact',
+        emphasis: 'punch',
+        words: [{
+          text: '旧的',
+          start: 0,
+          end: 1,
+          emphasis: 'highlight',
+        }],
+      }],
+    }
+
+    const next = editSceneVisuals(project, 'scene-1', {
+      displayText: '新的屏显文字',
+      highlight: ['新的'],
+      animation: 'scale',
+    })
+
+    expect(next.scene_plan.scenes[0].motion).toBeUndefined()
+    expect(next.render_input.segments[0]).not.toHaveProperty('transition')
+    expect(next.render_input.segments[0]).not.toHaveProperty('intensity')
+    expect(next.render_input.segments[0]).not.toHaveProperty('chunks')
+  })
+
   it('updates only the target plan scene and matching local render visuals', () => {
     const original = projectForVisualEdit()
     original.scene_plan = {
