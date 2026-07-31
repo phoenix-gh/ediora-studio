@@ -287,6 +287,55 @@ describe('VideoStage', () => {
     )
   })
 
+  it('shows motion planning only for kinetic punch v2', () => {
+    const project = makeVideoReadyProject()
+    const v2 = {
+      ...project,
+      render_input: {
+        ...project.render_input,
+        templateId: 'kinetic-punch-v2',
+        templateVersion: 1,
+      },
+      scene_plan: {
+        ...project.scene_plan,
+        scenes: project.scene_plan.scenes.map(scene => ({
+          ...scene,
+          animation: 'reveal',
+        })),
+      },
+    }
+
+    const { rerender } = render(
+      <VideoStage
+        project={project}
+        selectedSceneId="scene-1"
+        onSelectScene={vi.fn()}
+        previewAll={false}
+        onPreviewAll={vi.fn()}
+        onProjectChange={vi.fn()}
+        onOpenSceneDirection={vi.fn()}
+        onApplyTemplateSettings={vi.fn()}
+      />,
+    )
+    expect(screen.queryByRole('button', { name: '自动拆句' }))
+      .not.toBeInTheDocument()
+
+    rerender(
+      <VideoStage
+        project={v2}
+        selectedSceneId="scene-1"
+        onSelectScene={vi.fn()}
+        previewAll={false}
+        onPreviewAll={vi.fn()}
+        onProjectChange={vi.fn()}
+        onOpenSceneDirection={vi.fn()}
+        onApplyTemplateSettings={vi.fn()}
+        onOptimizeMotion={vi.fn()}
+      />,
+    )
+    expect(screen.getByRole('button', { name: '自动拆句' })).toBeEnabled()
+  })
+
   it('labels an existing output as the previous render after visuals change', () => {
     render(
       <VideoStage

@@ -267,6 +267,12 @@ export function editSceneMotion(
   const scenes = [...project.scene_plan.scenes]
   scenes[matches[0].index] = {
     ...matches[0].scene,
+    animation: (
+      project.render_input.templateId === 'kinetic-punch-v2'
+      && project.render_input.templateVersion === 1
+    )
+      ? motion.chunks[0]?.motionPreset ?? matches[0].scene.animation
+      : matches[0].scene.animation,
     motion: cloneMotion(motion),
   }
   const scenePlan = {

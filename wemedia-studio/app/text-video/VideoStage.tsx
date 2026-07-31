@@ -60,6 +60,7 @@ import {
 import { cn } from '@/lib/utils'
 
 import { RemotionPreview } from './RemotionPreview'
+import { MotionPlanEditor } from './MotionPlanEditor'
 import { SceneTimeline } from './SceneTimeline'
 import { TemplateSettingsDialog } from './TemplateSettingsDialog'
 import type { TextVideoActionState } from './useTextVideoProjectActions'
@@ -77,6 +78,8 @@ export function VideoStage({
   onApplyTemplateSettings,
   onRenderVideo,
   renderAction,
+  onOptimizeMotion,
+  motionAction,
 }: {
   project: TextVideoProject
   selectedSceneId: string
@@ -95,6 +98,11 @@ export function VideoStage({
   ): Promise<void>
   onRenderVideo?: () => void
   renderAction?: TextVideoActionState
+  onOptimizeMotion?(
+    scope: 'all' | 'selected',
+    direction: string,
+  ): void | Promise<void>
+  motionAction?: TextVideoActionState
 }) {
   const [templateSettingsOpen, setTemplateSettingsOpen] = useState(false)
   const scenes = project.scene_plan.scenes
@@ -307,16 +315,36 @@ export function VideoStage({
         </Button>
 
         {selectedScene && planCurrent ? (
-          <SceneInspector
-            key={`${selectedScene.id}:${selectedScene.fromWordId}:${
-              selectedScene.throughWordId
-            }:${project.scene_plan.generation_revision}`}
-            project={project}
-            scene={selectedScene}
-            sceneIndex={activeSceneIndex}
-            animations={template.animations}
-            onProjectChange={onProjectChange}
-          />
+          <>
+            <SceneInspector
+              key={`${selectedScene.id}:${selectedScene.fromWordId}:${
+                selectedScene.throughWordId
+              }:${project.scene_plan.generation_revision}`}
+              project={project}
+              scene={selectedScene}
+              sceneIndex={activeSceneIndex}
+              animations={template.animations}
+              onProjectChange={onProjectChange}
+            />
+            {project.render_input.templateId === 'kinetic-punch-v2'
+              && project.render_input.templateVersion === 1 ? (
+                <MotionPlanEditor
+                  project={project}
+                  scene={selectedScene}
+                  busy={
+                    project.scene_plan.status === 'generating'
+                    || motionAction?.status === 'running'
+                  }
+                  onProjectChange={onProjectChange}
+                  onOptimize={(scope, direction) => {
+                    if (!onOptimizeMotion) {
+                      throw new Error('AI 动效优化服务尚未连接')
+                    }
+                    return onOptimizeMotion(scope, direction)
+                  }}
+                />
+              ) : null}
+          </>
         ) : (
           <div className="mt-5 rounded-xl border bg-background/55 p-4 text-xs leading-5 text-muted-foreground">
             {project.scene_plan.status === 'generating'

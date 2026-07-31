@@ -22,6 +22,9 @@ import {
   updateTextVideoProject,
   type TextVideoProject,
 } from '@/lib/api/text-videos'
+import { applyRuleMotionPlan } from '@/lib/text-video/motion-plan'
+import { applyScenePlanToProject } from '@/lib/text-video/scene-plan'
+import { resolveTextVideoTemplate } from '@/remotion/registry'
 
 import { TextVideoWorkbench } from './TextVideoWorkbench'
 import type { SceneDirectionDraft } from './SceneDirectionDialog'
@@ -70,14 +73,45 @@ export function TextVideoEditorClient({
     templateVersion: number,
     templateProps: Record<string, unknown>,
   ) {
-    const next = {
+    const target = resolveTextVideoTemplate(templateId, templateVersion)
+    const changingIdentity = (
+      project.render_input.templateId !== templateId
+      || project.render_input.templateVersion !== templateVersion
+    )
+    const normalizedPlan = project.scene_plan.status === 'ready'
+      ? {
+          ...project.scene_plan,
+          scenes: project.scene_plan.scenes.map(scene => ({
+            ...scene,
+            animation: target.animations.includes(scene.animation as never)
+              ? scene.animation
+              : target.animations[0],
+          })),
+        }
+      : project.scene_plan
+    let next = {
       ...project,
+      scene_plan: normalizedPlan,
       render_input: {
         ...project.render_input,
         templateId,
         templateVersion,
         templateProps,
       },
+    }
+    if (
+      normalizedPlan.status === 'ready'
+      && normalizedPlan.master_source_hash
+        === project.master_audio.source_hash
+    ) {
+      next = applyScenePlanToProject(next, normalizedPlan)
+      if (
+        changingIdentity
+        && templateId === 'kinetic-punch-v2'
+        && templateVersion === 1
+      ) {
+        next = applyRuleMotionPlan(next)
+      }
     }
     autosave.markDirty(next)
     setProject(next)
@@ -185,9 +219,10 @@ export function TextVideoEditorClient({
   }
 
   function generateScenePlan(input: SceneDirectionDraft) {
+    const prefix = input.mode === 'motion' ? 'motion' : 'scene'
     const key = input.scope === 'selected'
-      ? `scene:${input.selected_scene_id}`
-      : 'scene:all'
+      ? `${prefix}:${input.selected_scene_id}`
+      : `${prefix}:all`
     return actions.runProjectAction(
       key,
       async saved => generateTextVideoScenePlan(saved.id, {

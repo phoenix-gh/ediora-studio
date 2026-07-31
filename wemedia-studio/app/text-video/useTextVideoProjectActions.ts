@@ -167,21 +167,24 @@ function isDownstreamAction(
   upstreamKey: string,
   candidateKey: string,
 ): boolean {
+  const isSceneAction = (key: string) => (
+    key.startsWith('scene:') || key.startsWith('motion:')
+  )
   if (upstreamKey.startsWith('speech:')) {
     return (
       candidateKey === 'master'
-      || candidateKey.startsWith('scene:')
+      || isSceneAction(candidateKey)
       || candidateKey.startsWith('render:')
     )
   }
   if (upstreamKey === 'master') {
     return (
-      candidateKey.startsWith('scene:')
+      isSceneAction(candidateKey)
       || candidateKey.startsWith('render:')
     )
   }
   return (
-    upstreamKey.startsWith('scene:')
+    isSceneAction(upstreamKey)
     && candidateKey.startsWith('render:')
   )
 }
@@ -299,7 +302,7 @@ function requestStateUnchanged(
       after.master_audio,
     )
   }
-  if (key.startsWith('scene:')) {
+  if (key.startsWith('scene:') || key.startsWith('motion:')) {
     return JSON.stringify(before.scene_plan) === JSON.stringify(
       after.scene_plan,
     )
@@ -395,7 +398,7 @@ function requestSpecificRecoveryProof(
     }
   }
 
-  if (key.startsWith('scene:')) {
+  if (key.startsWith('scene:') || key.startsWith('motion:')) {
     const prior = before.scene_plan
     const current = after.scene_plan
     return {
