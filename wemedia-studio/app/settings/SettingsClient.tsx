@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { AudioLines, Brain, Rss, GitFork, AtSign, ScrollText, FileText, Megaphone, Globe, Search, Download, Video, Captions, Palette, Clapperboard } from 'lucide-react'
+import { AudioLines, Brain, Rss, GitFork, AtSign, ScrollText, FileText, Megaphone, Globe, Search, Download, Video, Captions, Palette, Clapperboard, Puzzle } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { AppSettings } from '@/lib/api/settings'
 import { PageHeader } from '@/components/layout/PageHeader'
@@ -21,8 +21,9 @@ import { SpeechSection } from './sections/SpeechSection'
 import { YouTubeSection } from './sections/YouTubeSection'
 import { AppearanceSection } from './sections/AppearanceSection'
 import { TextVideoSection } from './sections/TextVideoSection'
+import { SkillsSection } from './sections/SkillsSection'
 
-type SectionId = 'ai' | 'transcription' | 'speech' | 'youtube' | 'heygen' | 'text-video' | 'collect' | 'github' | 'x' | 'arxiv' | 'publish' | 'blog' | 'web-search' | 'web-fetch' | 'appearance' | 'logs'
+type SectionId = 'ai' | 'transcription' | 'speech' | 'youtube' | 'heygen' | 'text-video' | 'skills' | 'collect' | 'github' | 'x' | 'arxiv' | 'publish' | 'blog' | 'web-search' | 'web-fetch' | 'appearance' | 'logs'
 
 const NAV: { id: SectionId; label: string; icon: React.ElementType; desc: string }[] = [
   { id: 'ai',       label: 'AI 大模型',   icon: Brain,     desc: '供应商 · API Key · 模型' },
@@ -31,6 +32,7 @@ const NAV: { id: SectionId; label: string; icon: React.ElementType; desc: string
   { id: 'youtube',  label: 'YouTube',     icon: Video, desc: 'Cookie · 字幕下载稳定性' },
   { id: 'heygen',   label: 'HeyGen',      icon: Video,     desc: '数字人 · 声音克隆 · 视频生成' },
   { id: 'text-video', label: '文字视频', icon: Clapperboard, desc: '模板 · 品牌 · 默认视觉' },
+  { id: 'skills', label: '技能管理', icon: Puzzle, desc: '启用 · 上传 · 删除自定义 Skill' },
   { id: 'collect',  label: '数据采集',    icon: Rss,       desc: 'RSSHub · 采集间隔' },
   { id: 'github',   label: 'GitHub',      icon: GitFork,   desc: 'Token · Issues · Trending' },
   { id: 'x',        label: 'X / Twitter', icon: AtSign,    desc: 'camofox · Cookie · 帖子趋势' },
@@ -50,6 +52,7 @@ const SECTION_TITLE: Record<SectionId, string> = {
   youtube:  'YouTube',
   heygen:   'HeyGen',
   'text-video': '文字视频',
+  skills:    '技能管理',
   collect:  '数据采集',
   github:   'GitHub 集成',
   x:        'X / Twitter 采集',
@@ -119,6 +122,7 @@ export function SettingsClient({ initialSettings }: { initialSettings: AppSettin
             {active === 'youtube'  && <YouTubeSection settings={settings} onSaved={setSettings} />}
             {active === 'heygen'   && <HeyGenSection  settings={settings} onSaved={setSettings} />}
             {active === 'text-video' && <TextVideoSection settings={settings} onSaved={setSettings} />}
+            {active === 'skills' && <SkillsSection />}
             {active === 'collect'  && <CollectSection settings={settings} onSaved={setSettings} />}
             {active === 'github'   && <GitHubSection  settings={settings} onSaved={setSettings} />}
             {active === 'x'        && <XSection       settings={settings} onSaved={setSettings} />}

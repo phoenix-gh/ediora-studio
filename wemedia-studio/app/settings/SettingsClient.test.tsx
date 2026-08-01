@@ -20,6 +20,7 @@ vi.mock('./sections/WebFetchSection', () => ({ WebFetchSection: () => <div>Web f
 vi.mock('./sections/WebSearchSection', () => ({ WebSearchSection: () => <div>Web search settings</div> }))
 vi.mock('./sections/XSection', () => ({ XSection: () => <div>X settings</div> }))
 vi.mock('./sections/YouTubeSection', () => ({ YouTubeSection: () => <div>YouTube settings</div> }))
+vi.mock('./sections/SkillsSection', () => ({ SkillsSection: () => <div>Skills settings</div> }))
 
 describe('SettingsClient', () => {
   afterEach(cleanup)
@@ -75,5 +76,14 @@ describe('SettingsClient', () => {
     expect(screen.getByRole('button', { name: /模板 · 品牌 · 默认视觉/ }))
       .toHaveAttribute('aria-current', 'page')
     expect(screen.getByText('Text video settings')).toBeVisible()
+  })
+
+  it('opens skill management from the settings navigation', () => {
+    render(<SettingsClient initialSettings={null} />)
+
+    fireEvent.click(screen.getByRole('button', { name: /技能管理/ }))
+
+    expect(screen.getByRole('heading', { level: 1, name: '技能管理' })).toBeInTheDocument()
+    expect(screen.getByText('Skills settings')).toBeVisible()
   })
 })
