@@ -137,6 +137,17 @@ describe('Skill registry', () => {
     await expect(installSkillArchive(archive)).rejects.toMatchObject({ code: 'too_large' })
     await expect(access(join(runtimeDir, 'TooBig'))).rejects.toMatchObject({ code: 'ENOENT' })
   })
+
+  it('keeps uploaded content and disabled state available to later registry reads', async () => {
+    await installSkillArchive(zipSync({ 'SKILL.md': strToU8(skillMarkdown('Persistent')) }))
+    await setSkillEnabled('Persistent', false)
+
+    expect(await listSkills()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: 'Persistent', source: 'uploaded', enabled: false }),
+    ]))
+    expect(await getEnabledSkill('Persistent')).toBeNull()
+    expect(await readFile(join(runtimeDir, 'skills-state.json'), 'utf8')).toContain('Persistent')
+  })
 })
 
 function skillMarkdown(name: string) {

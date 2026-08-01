@@ -35,6 +35,7 @@ wemedia-studio/.next/
 wemedia-studio/out/
 wemedia-studio/.turbo/
 wemedia-studio/tsconfig.tsbuildinfo
+wemedia-studio/.runtime/
 
 # ── Dev 服务管理 (dev.sh) ───────────────────────────────
 .run/
