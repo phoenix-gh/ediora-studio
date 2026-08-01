@@ -23,7 +23,7 @@ function archive(name: string) {
 
 function uploadRequest(bytes: Uint8Array) {
   const form = new FormData()
-  form.append('file', new File([bytes], 'skills.zip', { type: 'application/zip' }))
+  form.append('file', new File([new Blob([bytes.buffer as ArrayBuffer])], 'skills.zip', { type: 'application/zip' }))
   return new Request('http://localhost/api/skills/upload', { method: 'POST', body: form })
 }
 
