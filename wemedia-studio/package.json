@@ -25,6 +25,7 @@
     "ai": "^7.0.34",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "fflate": "^0.8.3",
     "ioredis": "^5.11.1",
     "lucide-react": "^1.14.0",
     "marked": "^18.0.3",

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
+import { strFromU8, unzipSync } from 'fflate'
 
 export type SkillSource = 'builtin' | 'uploaded'
 
@@ -47,6 +48,9 @@ type SkillRecord = ManagedSkill & {
 }
 
 const skillNamePattern = /^[A-Za-z0-9._-]{1,80}$/
+export const MAX_ARCHIVE_BYTES = 10 * 1024 * 1024
+export const MAX_UNPACKED_BYTES = 50 * 1024 * 1024
+export const MAX_ARCHIVE_FILES = 500
 let mutationQueue: Promise<void> = Promise.resolve()
 
 function bundledDirectory() {
@@ -212,11 +216,221 @@ export async function deleteUploadedSkill(name: string): Promise<void> {
   })
 }
 
-export async function installSkillArchive(_buffer: Uint8Array): Promise<ManagedSkill[]> {
-  throw new SkillRegistryError('invalid_archive', 'ZIP installation is not enabled yet')
+function configuredLimit(environmentName: string, fallback: number) {
+  const configured = Number(process.env[environmentName])
+  return Number.isSafeInteger(configured) && configured > 0 ? configured : fallback
+}
+
+function invalidArchive(message: string): never {
+  throw new SkillRegistryError('invalid_archive', message)
+}
+
+function validateArchivePath(name: string) {
+  if (!name || name.includes('\\') || name.startsWith('/') || /^[A-Za-z]:/.test(name)) {
+    invalidArchive(`Unsafe ZIP path: ${name}`)
+  }
+  const directory = name.endsWith('/')
+  const parts = name.split('/')
+  if (directory) parts.pop()
+  if (!parts.length || parts.some(part => !part || part === '.' || part === '..')) {
+    invalidArchive(`Unsafe ZIP path: ${name}`)
+  }
+  return { parts, directory }
+}
+
+type CentralEntry = { name: string; originalSize: number; isSymlink: boolean }
+
+function readCentralEntries(buffer: Uint8Array): CentralEntry[] {
+  const view = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength)
+  const minimumEndRecord = 22
+  const start = Math.max(0, buffer.byteLength - 0xffff - minimumEndRecord)
+  let endRecord = -1
+  for (let offset = buffer.byteLength - minimumEndRecord; offset >= start; offset -= 1) {
+    if (view.getUint32(offset, true) === 0x06054b50) {
+      endRecord = offset
+      break
+    }
+  }
+  if (endRecord < 0 || endRecord + 22 > buffer.byteLength) invalidArchive('Invalid ZIP end record')
+
+  const count = view.getUint16(endRecord + 10, true)
+  const centralSize = view.getUint32(endRecord + 12, true)
+  const centralOffset = view.getUint32(endRecord + 16, true)
+  if (count === 0xffff || centralSize === 0xffffffff || centralOffset === 0xffffffff) {
+    invalidArchive('ZIP64 archives are not supported')
+  }
+  if (centralOffset + centralSize > buffer.byteLength) invalidArchive('Invalid ZIP central directory')
+
+  const entries: CentralEntry[] = []
+  let cursor = centralOffset
+  const decoder = new TextDecoder()
+  for (let index = 0; index < count; index += 1) {
+    if (cursor + 46 > buffer.byteLength || view.getUint32(cursor, true) !== 0x02014b50) {
+      invalidArchive('Invalid ZIP central directory entry')
+    }
+    const nameLength = view.getUint16(cursor + 28, true)
+    const extraLength = view.getUint16(cursor + 30, true)
+    const commentLength = view.getUint16(cursor + 32, true)
+    const end = cursor + 46 + nameLength + extraLength + commentLength
+    if (end > buffer.byteLength) invalidArchive('Truncated ZIP central directory entry')
+    const name = decoder.decode(buffer.subarray(cursor + 46, cursor + 46 + nameLength))
+    const madeBy = view.getUint16(cursor + 4, true)
+    const externalAttributes = view.getUint32(cursor + 38, true)
+    const unixMode = (externalAttributes >>> 16) & 0xffff
+    entries.push({
+      name,
+      originalSize: view.getUint32(cursor + 24, true),
+      isSymlink: (madeBy >>> 8) === 3 && (unixMode & 0xf000) === 0xa000,
+    })
+    cursor = end
+  }
+  return entries
+}
+
+type ArchiveSkill = {
+  name: string
+  description: string
+  version: string
+  root: string
+  files: Array<{ relativePath: string; content: Uint8Array }>
+}
+
+function parseArchive(buffer: Uint8Array): ArchiveSkill[] {
+  const maxArchiveBytes = configuredLimit('WMS_SKILLS_MAX_ARCHIVE_BYTES', MAX_ARCHIVE_BYTES)
+  const maxUnpackedBytes = configuredLimit('WMS_SKILLS_MAX_UNPACKED_BYTES', MAX_UNPACKED_BYTES)
+  const maxFiles = configuredLimit('WMS_SKILLS_MAX_FILES', MAX_ARCHIVE_FILES)
+  if (buffer.byteLength > maxArchiveBytes) {
+    throw new SkillRegistryError('too_large', `ZIP exceeds ${maxArchiveBytes} bytes`)
+  }
+
+  const centralEntries = readCentralEntries(buffer)
+  if (centralEntries.length > maxFiles) throw new SkillRegistryError('too_large', `ZIP contains more than ${maxFiles} files`)
+  const seenPaths = new Set<string>()
+  let centralUnpackedBytes = 0
+  for (const entry of centralEntries) {
+    validateArchivePath(entry.name)
+    if (seenPaths.has(entry.name)) invalidArchive(`Duplicate ZIP path: ${entry.name}`)
+    seenPaths.add(entry.name)
+    if (entry.isSymlink) invalidArchive(`ZIP symlinks are not allowed: ${entry.name}`)
+    centralUnpackedBytes += entry.originalSize
+    if (centralUnpackedBytes > maxUnpackedBytes) {
+      throw new SkillRegistryError('too_large', `ZIP expands beyond ${maxUnpackedBytes} bytes`)
+    }
+  }
+
+  let files: Record<string, Uint8Array>
+  try {
+    files = unzipSync(buffer)
+  } catch {
+    invalidArchive('Unable to read ZIP archive')
+  }
+
+  const entries = Object.entries(files)
+  if (entries.length > maxFiles) throw new SkillRegistryError('too_large', `ZIP contains more than ${maxFiles} files`)
+  const skillPaths = entries
+    .map(([name]) => name)
+    .filter(name => !name.endsWith('/') && name.split('/').at(-1) === 'SKILL.md')
+  if (!skillPaths.length) invalidArchive('ZIP must contain at least one SKILL.md')
+
+  const roots = [...new Set(skillPaths.map(path => path.slice(0, -'SKILL.md'.length).replace(/\/$/, '')))]
+  const rootForPath = (path: string) => roots
+    .filter(root => path === (root ? `${root}/SKILL.md` : 'SKILL.md') || path.startsWith(root ? `${root}/` : ''))
+    .sort((left, right) => right.length - left.length)[0]
+  const skills: ArchiveSkill[] = []
+  const names = new Set<string>()
+  for (const root of roots) {
+    const skillPath = root ? `${root}/SKILL.md` : 'SKILL.md'
+    const skillFile = files[skillPath]
+    if (!skillFile) invalidArchive(`Missing Skill file: ${skillPath}`)
+    const metadata = parseSkillMetadata(strFromU8(skillFile))
+    if (!metadata) invalidArchive(`Invalid Skill frontmatter: ${skillPath}`)
+    if (names.has(metadata.name)) invalidArchive(`Duplicate Skill name: ${metadata.name}`)
+    names.add(metadata.name)
+
+    const rootPrefix = root ? `${root}/` : ''
+    const matching = entries.filter(([path]) => !path.endsWith('/') && rootForPath(path) === root)
+    if (!matching.length) invalidArchive(`Skill directory is empty: ${root || '/'}`)
+    skills.push({
+      ...metadata,
+      root,
+      files: matching.filter(([path]) => !path.endsWith('/')).map(([path, content]) => ({
+        relativePath: path.slice(rootPrefix.length),
+        content,
+      })),
+    })
+  }
+
+  for (const [path] of entries) {
+    if (path.endsWith('/')) continue
+    if (rootForPath(path) === undefined) {
+      invalidArchive(`File is not inside a Skill directory: ${path}`)
+    }
+  }
+  return skills
+}
+
+export async function installSkillArchive(buffer: Uint8Array): Promise<ManagedSkill[]> {
+  const parsed = parseArchive(buffer)
+  return withMutation(async () => {
+    const existing = await allRecords()
+    const existingNames = new Set(existing.map(skill => skill.name))
+    for (const skill of parsed) {
+      if (existingNames.has(skill.name)) {
+        throw new SkillRegistryError('conflict', `Skill already exists: ${skill.name}`)
+      }
+    }
+
+    const runtimeRoot = runtimeSkillsDirectory()
+    const stagingRoot = join(runtimeRoot, `.install-${randomUUID()}`)
+    const movedDirectories: string[] = []
+    const originalState = await readState()
+    await mkdir(stagingRoot, { recursive: true })
+    try {
+      for (const skill of parsed) {
+        const destination = join(stagingRoot, skill.name)
+        await mkdir(destination, { recursive: true })
+        for (const file of skill.files) {
+          if (!file.relativePath || file.relativePath.includes('/') && file.relativePath.split('/').some(part => !part || part === '.' || part === '..')) {
+            invalidArchive(`Unsafe Skill file path: ${file.relativePath}`)
+          }
+          const target = join(destination, file.relativePath)
+          await mkdir(dirname(target), { recursive: true })
+          await writeFile(target, file.content)
+        }
+      }
+
+      const state = await readState()
+      for (const skill of parsed) {
+        const target = join(runtimeRoot, skill.name)
+        try {
+          await readdir(target)
+          throw new SkillRegistryError('conflict', `Skill directory already exists: ${skill.name}`)
+        } catch (error) {
+          if (error instanceof SkillRegistryError) throw error
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+        }
+        await rename(join(stagingRoot, skill.name), target)
+        movedDirectories.push(target)
+        state[skill.name] = { source: 'uploaded', enabled: true }
+      }
+      await writeState(state)
+      await rm(stagingRoot, { recursive: true, force: true })
+      return parsed.map(skill => ({
+        name: skill.name,
+        description: skill.description,
+        version: skill.version,
+        source: 'uploaded' as const,
+        enabled: true,
+      }))
+    } catch (error) {
+      for (const directory of movedDirectories) await rm(directory, { recursive: true, force: true })
+      await rm(stagingRoot, { recursive: true, force: true })
+      await writeState(originalState).catch(() => undefined)
+      throw error
+    }
+  })
 }
 
 export function isSkillName(value: string) {
   return skillNamePattern.test(value)
 }
-

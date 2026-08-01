@@ -1,11 +1,13 @@
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { access, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { strToU8, zipSync } from 'fflate'
 
 import {
   deleteUploadedSkill,
   getEnabledSkill,
+  installSkillArchive,
   listEnabledSkills,
   listSkills,
   setSkillEnabled,
@@ -35,6 +37,9 @@ describe('Skill registry', () => {
     delete process.env.WMS_SKILLS_BUNDLED_DIR
     delete process.env.WMS_SKILLS_RUNTIME_DIR
     delete process.env.WMS_SKILLS_STATE_FILE
+    delete process.env.WMS_SKILLS_MAX_ARCHIVE_BYTES
+    delete process.env.WMS_SKILLS_MAX_UNPACKED_BYTES
+    delete process.env.WMS_SKILLS_MAX_FILES
     await Promise.all([
       rm(bundledDir, { recursive: true, force: true }),
       rm(runtimeDir, { recursive: true, force: true }),
@@ -80,4 +85,60 @@ describe('Skill registry', () => {
     expect(await listSkills()).toHaveLength(1)
     await expect(readFile(join(runtimeDir, 'custom', 'SKILL.md'))).rejects.toMatchObject({ code: 'ENOENT' })
   })
+
+  it('installs a root Skill and a wrapped multi-Skill archive as enabled uploads', async () => {
+    const archive = zipSync({
+      'SKILL.md': strToU8(skillMarkdown('Root')),
+      'references/notes.md': strToU8('root notes'),
+      'package/one/SKILL.md': strToU8(skillMarkdown('One')),
+      'package/one/references/rules.md': strToU8('one rules'),
+      'package/two/SKILL.md': strToU8(skillMarkdown('Two')),
+    })
+
+    await expect(installSkillArchive(archive)).resolves.toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: 'Root', source: 'uploaded', enabled: true }),
+      expect.objectContaining({ name: 'One', source: 'uploaded', enabled: true }),
+      expect.objectContaining({ name: 'Two', source: 'uploaded', enabled: true }),
+    ]))
+    await expect(access(join(runtimeDir, 'Root', 'references', 'notes.md'))).resolves.toBeUndefined()
+    expect((await listEnabledSkills()).map(skill => skill.name)).toEqual(expect.arrayContaining(['Root', 'One', 'Two']))
+  })
+
+  it('rejects conflicts, unsafe paths, duplicate names, and rolls back the whole archive', async () => {
+    await writeSkill(runtimeDir, 'existing', 'Existing')
+    const before = await readFile(join(runtimeDir, 'existing', 'SKILL.md'), 'utf8')
+
+    await expect(installSkillArchive(zipSync({ 'new/SKILL.md': strToU8(skillMarkdown('Existing')) })))
+      .rejects.toMatchObject({ code: 'conflict' })
+    await expect(installSkillArchive(zipSync({ '../escape.txt': strToU8('nope'), 'SKILL.md': strToU8(skillMarkdown('Escape')) })))
+      .rejects.toMatchObject({ code: 'invalid_archive' })
+    await expect(installSkillArchive(zipSync({
+      'one/SKILL.md': strToU8(skillMarkdown('Duplicate')),
+      'two/SKILL.md': strToU8(skillMarkdown('Duplicate')),
+    }))).rejects.toMatchObject({ code: 'invalid_archive' })
+
+    expect(await readFile(join(runtimeDir, 'existing', 'SKILL.md'), 'utf8')).toBe(before)
+    await expect(access(join(runtimeDir, 'Escape'))).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('rejects archives containing Unix symlink entries or missing frontmatter names', async () => {
+    const symlinkArchive = zipSync({
+      'link': [strToU8('target'), { os: 3, attrs: 0o120777 << 16 }],
+      'SKILL.md': strToU8(skillMarkdown('Symlink')),
+    })
+    await expect(installSkillArchive(symlinkArchive)).rejects.toMatchObject({ code: 'invalid_archive' })
+    await expect(installSkillArchive(zipSync({ 'SKILL.md': strToU8('---\ndescription: missing name\n---\n') })))
+      .rejects.toMatchObject({ code: 'invalid_archive' })
+  })
+
+  it('enforces configured archive limits before writing', async () => {
+    process.env.WMS_SKILLS_MAX_UNPACKED_BYTES = '100'
+    const archive = zipSync({ 'SKILL.md': strToU8(skillMarkdown('TooBig') + 'x'.repeat(200)) })
+    await expect(installSkillArchive(archive)).rejects.toMatchObject({ code: 'too_large' })
+    await expect(access(join(runtimeDir, 'TooBig'))).rejects.toMatchObject({ code: 'ENOENT' })
+  })
 })
+
+function skillMarkdown(name: string) {
+  return `---\nname: ${name}\ndescription: ${name} description\nversion: 1.0.0\n---\n\n# ${name}\n`
+}
