@@ -163,8 +163,13 @@ async function allRecords() {
 }
 
 function toManagedSkill(record: SkillRecord): ManagedSkill {
-  const { directory: _directory, instructions: _instructions, ...metadata } = record
-  return metadata
+  return {
+    name: record.name,
+    description: record.description,
+    version: record.version,
+    source: record.source,
+    enabled: record.enabled,
+  }
 }
 
 export async function listSkills(): Promise<ManagedSkill[]> {

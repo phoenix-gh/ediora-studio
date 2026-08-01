@@ -16,8 +16,7 @@ export function SkillsSection() {
   const [error, setError] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
-  async function refresh(showLoading = false) {
-    if (showLoading) setLoading(true)
+  async function refresh() {
     try {
       const next = await fetchSkills()
       setSkills(next)
@@ -30,7 +29,22 @@ export function SkillsSection() {
   }
 
   useEffect(() => {
-    void refresh(true)
+    let cancelled = false
+    void fetchSkills()
+      .then(next => {
+        if (cancelled) return
+        setSkills(next)
+        setError(null)
+      })
+      .catch(cause => {
+        if (!cancelled) setError(cause instanceof Error ? cause.message : '加载 Skill 列表失败')
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   async function handleToggle(skill: ManagedSkill, enabled: boolean) {
