@@ -1,6 +1,7 @@
 import { createOpenAI } from '@ai-sdk/openai'
 import { generateImage, generateText, stepCountIs, tool } from 'ai'
 import { readFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import { z } from 'zod'
 
 import { getEnabledSkill } from '../skills/registry'
