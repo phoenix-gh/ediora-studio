@@ -23,8 +23,6 @@ export function SkillsSection() {
       setError(null)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '加载 Skill 列表失败')
-    } finally {
-      if (showLoading) setLoading(false)
     }
   }
 
