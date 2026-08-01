@@ -1,9 +1,9 @@
 import { createOpenAI } from '@ai-sdk/openai'
 import { generateImage, generateText, stepCountIs, tool } from 'ai'
 import { readFile } from 'node:fs/promises'
-import { join } from 'node:path'
 import { z } from 'zod'
 
+import { getEnabledSkill } from '../skills/registry'
 import { workerHeaders } from './job-client'
 
 const apiBase = () => (process.env.WMS_API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000/api').replace(/\/$/, '')
@@ -262,9 +262,10 @@ export function extractBaoyuSkillCore(step: 'cover' | 'illustrations', skill: st
 
 async function loadBaoyuSkillCore(step: 'cover' | 'illustrations') {
   const skillName = step === 'cover' ? 'baoyu-cover-image' : 'baoyu-article-illustrator'
-  const skillPath = join(process.cwd(), 'skills', skillName, 'SKILL.md')
+  const skill = await getEnabledSkill(skillName)
+  if (!skill) throw new Error(`Bundled image skill is unavailable or disabled: ${skillName}`)
   try {
-    return extractBaoyuSkillCore(step, await readFile(skillPath, 'utf8'))
+    return extractBaoyuSkillCore(step, skill.instructions)
   } catch (error) {
     if (error instanceof Error && error.message.includes('core guidance')) throw error
     throw new Error(`Bundled image skill is missing: ${skillName}`)
@@ -273,7 +274,9 @@ async function loadBaoyuSkillCore(step: 'cover' | 'illustrations') {
 
 async function loadBaoyuSkillRules(step: 'cover' | 'illustrations') {
   const skillName = step === 'cover' ? 'baoyu-cover-image' : 'baoyu-article-illustrator'
-  const skillDir = join(process.cwd(), 'skills', skillName)
+  const skill = await getEnabledSkill(skillName)
+  if (!skill) throw new Error(`Bundled image skill is unavailable or disabled: ${skillName}`)
+  const skillDir = skill.directory
   const core = await loadBaoyuSkillCore(step)
   if (step === 'illustrations') return { skillName, rules: core, ruleSources: ['SKILL.md: Three Dimensions'] }
   try {
@@ -285,6 +288,10 @@ async function loadBaoyuSkillRules(step: 'cover' | 'illustrations') {
   } catch {
     throw new Error(`Bundled image skill references are missing: ${skillName}`)
   }
+}
+
+export async function loadBaoyuSkillRulesForTest(step: 'cover' | 'illustrations') {
+  return loadBaoyuSkillRules(step)
 }
 
 async function runImageFlow(job: Awaited<ReturnType<typeof getJob>>, step: 'cover' | 'illustrations') {

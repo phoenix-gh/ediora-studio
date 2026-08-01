@@ -1,6 +1,19 @@
-import { expect, it } from 'vitest'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, expect, it } from 'vitest'
 
-import { illustrationImageInputSchema, insertInlineImage, parseTemplateCandidate, toolsForContentStep } from './content-job'
+import { setSkillEnabled } from '../skills/registry'
+import { illustrationImageInputSchema, insertInlineImage, loadBaoyuSkillRulesForTest, parseTemplateCandidate, toolsForContentStep } from './content-job'
+
+let runtimeDir = ''
+
+afterEach(async () => {
+  delete process.env.WMS_SKILLS_RUNTIME_DIR
+  delete process.env.WMS_SKILLS_STATE_FILE
+  if (runtimeDir) await rm(runtimeDir, { recursive: true, force: true })
+  runtimeDir = ''
+})
 
 it('keeps template extraction free of persistence tools', () => {
   expect(toolsForContentStep('template_extraction')).toEqual([])
@@ -47,4 +60,13 @@ it('normalizes an array of unsuitable cases into display text', () => {
     recommendation: 'create', title: '案例拆解', genre: 'commentary', writing_guide: '先讲现象，再解释原因。',
     title_formula: '[现象] 为什么发生', unsuitable_for: ['纯新闻', '无案例观点'], genericity_check: '未含专有名词', reason: '可复用',
   })).unsuitable_for).toBe('纯新闻\n无案例观点')
+})
+
+it('refuses to load a disabled automatic image Skill', async () => {
+  runtimeDir = await mkdtemp(join(tmpdir(), 'wms-content-skill-'))
+  process.env.WMS_SKILLS_RUNTIME_DIR = runtimeDir
+  process.env.WMS_SKILLS_STATE_FILE = join(runtimeDir, 'skills-state.json')
+
+  await setSkillEnabled('baoyu-cover-image', false)
+  await expect(loadBaoyuSkillRulesForTest('cover')).rejects.toThrow(/unavailable|disabled/i)
 })
