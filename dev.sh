@@ -67,6 +67,9 @@ CONDA_ENV="${WMS_CONDA_ENV:-wems}"
 REDIS_PORT="${WMS_REDIS_PORT:-6379}"
 API_PORT="${WMS_API_PORT:-8000}"
 WEB_PORT="${WMS_WEB_PORT:-3000}"
+POSTGRES_CONTAINER="${WMS_DEV_POSTGRES_CONTAINER:-wms-dev-postgres-copy}"
+POSTGRES_HOST="${WMS_DEV_POSTGRES_HOST:-127.0.0.1}"
+POSTGRES_PORT="${WMS_DEV_POSTGRES_PORT:-55432}"
 HOST_REDIS_URL="redis://127.0.0.1:${REDIS_PORT}/0"
 HOST_API_ROOT="http://127.0.0.1:${API_PORT}"
 HOST_API_URL="${HOST_API_ROOT}/api"
@@ -95,12 +98,13 @@ validate_port() {
 validate_runtime_ports() {
   validate_port WMS_REDIS_PORT "$REDIS_PORT" \
     && validate_port WMS_API_PORT "$API_PORT" \
-    && validate_port WMS_WEB_PORT "$WEB_PORT"
+    && validate_port WMS_WEB_PORT "$WEB_PORT" \
+    && validate_port WMS_DEV_POSTGRES_PORT "$POSTGRES_PORT"
 }
 
 validate_runtime_tools() {
   local tool
-  for tool in bash setsid ps awk grep tr sha256sum conda pnpm; do
+  for tool in bash setsid ps awk grep tr sha256sum conda pnpm docker python3; do
     if ! command -v "$tool" >/dev/null 2>&1; then
       printf '%s is required on PATH to start the local runtime\n' "$tool" >&2
       return 1
@@ -116,6 +120,80 @@ validate_runtime_tools() {
     printf 'redis-cli or python3 is required for Redis readiness checks\n' >&2
     return 1
   fi
+}
+
+postgres_tcp_ready() {
+  python3 - "$POSTGRES_HOST" "$POSTGRES_PORT" <<'PY' >/dev/null 2>&1
+import socket
+import sys
+
+with socket.create_connection((sys.argv[1], int(sys.argv[2])), timeout=1):
+    pass
+PY
+}
+
+postgres_container_state() {
+  local running
+  if ! command -v docker >/dev/null 2>&1; then
+    printf 'unavailable\n'
+    return 1
+  fi
+  if ! docker info >/dev/null 2>&1; then
+    printf 'unavailable\n'
+    return 1
+  fi
+  if ! running="$(
+    docker inspect --format '{{.State.Running}}' "$POSTGRES_CONTAINER" 2>/dev/null
+  )"; then
+    printf 'missing\n'
+    return 1
+  fi
+  if [ "$running" = true ]; then
+    printf 'running\n'
+  else
+    printf 'stopped\n'
+  fi
+}
+
+ensure_postgres_ready() {
+  local state
+  if ! state="$(postgres_container_state)"; then
+    case "$state" in
+      unavailable)
+        printf 'Docker daemon is unavailable; PostgreSQL container %s cannot be checked\n' \
+          "$POSTGRES_CONTAINER" >&2
+        ;;
+      missing)
+        printf 'PostgreSQL container %s does not exist\n' \
+          "$POSTGRES_CONTAINER" >&2
+        ;;
+      *)
+        printf 'PostgreSQL container %s could not be inspected\n' \
+          "$POSTGRES_CONTAINER" >&2
+        ;;
+    esac
+    return 1
+  fi
+
+  if [ "$state" = stopped ]; then
+    if ! docker start "$POSTGRES_CONTAINER" >/dev/null 2>&1; then
+      printf 'PostgreSQL container %s could not be started\n' \
+        "$POSTGRES_CONTAINER" >&2
+      return 1
+    fi
+    printf '  ✓ PostgreSQL container started (%s)\n' "$POSTGRES_CONTAINER"
+  fi
+
+  if ! dev_wait_for \
+    "${WMS_DEV_READY_TIMEOUT_SECONDS:-30}" \
+    "${WMS_DEV_POLL_INTERVAL_SECONDS:-0.1}" \
+    postgres_tcp_ready; then
+    printf 'PostgreSQL did not accept TCP connections at %s:%s before the readiness timeout\n' \
+      "$POSTGRES_HOST" "$POSTGRES_PORT" >&2
+    return 1
+  fi
+  printf '  ✓ PostgreSQL ready (%s at %s:%s)\n' \
+    "$POSTGRES_CONTAINER" "$POSTGRES_HOST" "$POSTGRES_PORT"
 }
 
 validate_worker_token() {
@@ -435,6 +513,7 @@ cmd_start() {
   STARTED_THIS_RUN=()
 
   printf 'Starting WeMedia Studio local runtime...\n'
+  ensure_postgres_ready || return 1
   if ! redis_transport_reusable && application_unit_has_state; then
     printf '  • Stopping API/Worker/Web before replacing Redis\n'
     stop_application_unit || { rollback_start; return 1; }

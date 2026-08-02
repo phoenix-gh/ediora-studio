@@ -9,6 +9,7 @@ import socket
 import subprocess
 import sys
 import textwrap
+import threading
 import time
 import urllib.request
 from pathlib import Path
@@ -35,6 +36,39 @@ def _fake_runtime_tools(
 ) -> Path:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
+
+    _write_executable(
+        bin_dir / "docker",
+        """
+        #!/bin/sh
+        state="${WMS_DEV_TEST_POSTGRES_STATE:-running}"
+        case "${1:-}" in
+          info)
+            [ "$state" != unavailable ] || exit 1
+            ;;
+          inspect)
+            printf 'inspect:postgres\n' >>"$WMS_DEV_TEST_STATE/events"
+            [ "$state" != missing ] || exit 1
+            [ "$state" != unavailable ] || exit 1
+            if [ "$state" = running ]; then
+              printf 'true\n'
+            else
+              printf 'false\n'
+            fi
+            ;;
+          start)
+            printf 'start:postgres\n' >>"$WMS_DEV_TEST_STATE/events"
+            [ "${WMS_DEV_TEST_POSTGRES_START_FAIL:-0}" != 1 ] || exit 17
+            ;;
+          stop)
+            printf 'stop:postgres\n' >>"$WMS_DEV_TEST_STATE/events"
+            ;;
+          *)
+            exit 64
+            ;;
+        esac
+        """,
+    )
 
     if fake_redis:
         _write_executable(
@@ -169,6 +203,8 @@ def _dev_env(tmp_path: Path, bin_dir: Path) -> dict[str, str]:
             "WMS_DEV_STOP_TIMEOUT_SECONDS": "0.6",
             "WMS_DEV_POLL_INTERVAL_SECONDS": "0.05",
             "WMS_DEV_HTTP_SETTLE_SECONDS": "0.2",
+            "WMS_DEV_POSTGRES_PORT": "45432",
+            "WMS_DEV_POSTGRES_TEST_AUTO_READY": "1",
             # The fake services do not bind. Real socket tests replace these
             # values with ports held by their server processes.
             "WMS_REDIS_PORT": "46379",
@@ -185,14 +221,52 @@ def _run_dev(
     *arguments: str,
     timeout: float = 10,
 ) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        [str(DEV_SCRIPT), command, *arguments],
-        cwd=ROOT,
-        env=env,
-        text=True,
-        capture_output=True,
-        timeout=timeout,
-    )
+    listener: socket.socket | None = None
+    server_thread: threading.Thread | None = None
+    stop_server = threading.Event()
+
+    if (
+        env.get("WMS_DEV_POSTGRES_TEST_AUTO_READY") == "1"
+        and command in {"start", "restart", "status"}
+    ):
+        listener = socket.socket()
+        listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        listener.bind(
+            (
+                env.get("WMS_DEV_POSTGRES_HOST", "127.0.0.1"),
+                int(env["WMS_DEV_POSTGRES_PORT"]),
+            )
+        )
+        listener.listen()
+        listener.settimeout(0.05)
+
+        def serve_connections() -> None:
+            assert listener is not None
+            while not stop_server.is_set():
+                try:
+                    connection, _address = listener.accept()
+                except (OSError, TimeoutError):
+                    continue
+                connection.close()
+
+        server_thread = threading.Thread(target=serve_connections, daemon=True)
+        server_thread.start()
+
+    try:
+        return subprocess.run(
+            [str(DEV_SCRIPT), command, *arguments],
+            cwd=ROOT,
+            env=env,
+            text=True,
+            capture_output=True,
+            timeout=timeout,
+        )
+    finally:
+        stop_server.set()
+        if listener is not None:
+            listener.close()
+        if server_thread is not None:
+            server_thread.join(timeout=1)
 
 
 def _run_dev_with_unsignallable_group(
@@ -537,6 +611,90 @@ def test_missing_env_fails_before_spawning_children_without_printing_secrets(
     assert ".env.example" in result.stderr
     assert secret not in result.stdout
     assert secret not in result.stderr
+
+
+def test_stopped_postgres_starts_before_application_processes(
+    tmp_path: Path,
+) -> None:
+    bin_dir = _fake_runtime_tools(tmp_path)
+    env = _dev_env(tmp_path, bin_dir)
+    env["WMS_DEV_TEST_POSTGRES_STATE"] = "stopped"
+
+    try:
+        result = _run_dev(env, "start")
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        events = _events(env)
+        assert events.index("start:postgres") < events.index("start:api")
+        assert "PostgreSQL" in result.stdout
+    finally:
+        _run_dev(env, "stop")
+
+    assert "stop:postgres" not in _events(env)
+
+
+def test_running_postgres_is_not_started_again(tmp_path: Path) -> None:
+    bin_dir = _fake_runtime_tools(tmp_path)
+    env = _dev_env(tmp_path, bin_dir)
+
+    try:
+        result = _run_dev(env, "start")
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "inspect:postgres" in _events(env)
+        assert "start:postgres" not in _events(env)
+    finally:
+        _run_dev(env, "stop")
+
+
+@pytest.mark.parametrize(
+    ("state", "start_fails", "expected_error"),
+    [
+        ("missing", False, "does not exist"),
+        ("unavailable", False, "daemon"),
+        ("stopped", True, "could not be started"),
+    ],
+)
+def test_postgres_container_failures_prevent_application_mutation(
+    tmp_path: Path,
+    state: str,
+    start_fails: bool,
+    expected_error: str,
+) -> None:
+    bin_dir = _fake_runtime_tools(tmp_path)
+    env = _dev_env(tmp_path, bin_dir)
+    env["WMS_DEV_TEST_POSTGRES_STATE"] = state
+    if start_fails:
+        env["WMS_DEV_TEST_POSTGRES_START_FAIL"] = "1"
+
+    try:
+        result = _run_dev(env, "start")
+
+        assert result.returncode != 0
+        assert expected_error in result.stderr
+        assert "start:api" not in _events(env)
+        assert not list(Path(env["WMS_DEV_RUN_DIR"]).glob("*.meta"))
+    finally:
+        _run_dev(env, "stop")
+
+
+def test_postgres_tcp_timeout_prevents_application_mutation(
+    tmp_path: Path,
+) -> None:
+    bin_dir = _fake_runtime_tools(tmp_path)
+    env = _dev_env(tmp_path, bin_dir)
+    env["WMS_DEV_POSTGRES_TEST_AUTO_READY"] = "0"
+    env["WMS_DEV_READY_TIMEOUT_SECONDS"] = "0.2"
+
+    try:
+        result = _run_dev(env, "start")
+
+        assert result.returncode != 0
+        assert "127.0.0.1:45432" in result.stderr
+        assert "start:api" not in _events(env)
+        assert not list(Path(env["WMS_DEV_RUN_DIR"]).glob("*.meta"))
+    finally:
+        _run_dev(env, "stop")
 
 
 def test_start_waits_for_each_service_and_stop_reverses_owned_processes(
