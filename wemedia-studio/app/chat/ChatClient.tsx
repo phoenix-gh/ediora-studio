@@ -32,6 +32,7 @@ import { cn } from '@/lib/utils'
 import { chatComposerColumn, chatConversationColumn } from './chat-layout'
 import { shouldSubmitChatComposerKey } from './chat-composer'
 import { titleFromFirstMessage } from './chat-title'
+import { isChatToolPart } from './chat-tool-parts'
 
 type DisplayMessage = Omit<ChatMessage, 'id'> & { id: string | number }
 
@@ -51,10 +52,6 @@ const toolLabels: Record<string, string> = {
 
 function displayTime(value: string) {
   return new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit' }).format(new Date(value))
-}
-
-function isToolPart(part: ChatPart) {
-  return part.type === 'tool-event' || part.type === 'tool-result' || part.type.startsWith('tool-')
 }
 
 function toolName(part: ToolEventPart) {
@@ -157,7 +154,7 @@ function ToolActivityGroup({ parts, onApproval }: { parts: ToolEventPart[]; onAp
 function MessageBubble({ message, onApproval }: { message: DisplayMessage; onApproval?: (messageId: number, toolCallId: string, approvalId: string, approved: boolean) => void }) {
   const isUser = message.role === 'user'
   const textParts = message.parts.filter(part => part.type === 'text')
-  const toolParts = message.parts.filter(isToolPart) as ToolEventPart[]
+  const toolParts = message.parts.filter(isChatToolPart) as ToolEventPart[]
   const fallbackText = textParts.length === 0 && message.text ? message.text : ''
   const persistedMessageId = typeof message.id === 'number' ? message.id : undefined
 
