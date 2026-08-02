@@ -1,9 +1,16 @@
 // @vitest-environment jsdom
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 
 import { Badge } from './badge'
 import { Button } from './button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from './dropdown-menu'
 import { Input } from './input'
 import { Textarea } from './textarea'
 
@@ -38,4 +45,23 @@ describe('UI primitive contracts', () => {
       expect(screen.getByText(variant)).toHaveAttribute('data-variant', variant)
     },
   )
+
+  it('opens an accessible dropdown menu with destructive action styling', async () => {
+    render(
+      <DropdownMenu>
+        <DropdownMenuTrigger>更多操作</DropdownMenuTrigger>
+        <DropdownMenuContent>
+          <DropdownMenuGroup>
+            <DropdownMenuItem>编辑订阅</DropdownMenuItem>
+            <DropdownMenuItem variant="destructive">删除订阅</DropdownMenuItem>
+          </DropdownMenuGroup>
+        </DropdownMenuContent>
+      </DropdownMenu>,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '更多操作' }))
+
+    expect(await screen.findByRole('menuitem', { name: '编辑订阅' })).toBeVisible()
+    expect(screen.getByRole('menuitem', { name: '删除订阅' })).toHaveAttribute('data-variant', 'destructive')
+  })
 })
