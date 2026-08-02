@@ -9,7 +9,7 @@ import { CHAT_MAX_STEPS, chatToolLoopStep, needsFinalAnswerFallback } from '@/li
 import { baoyuRuntimeInstructions } from '@/lib/ai/content-job'
 import { openGlobalChatTools, type ChatSkillSnapshot } from '@/lib/ai/global-chat-tools'
 import { workerHeaders } from '@/lib/ai/job-client'
-import { getEnabledSkill, listSkillReferences } from '@/lib/skills/registry'
+import { getEnabledSkill, listSkillReferences, loadSkillPreloadContext } from '@/lib/skills/registry'
 
 const requestSchema = z.object({
   sessionId: z.number().int().positive(),
@@ -110,6 +110,7 @@ export async function selectedSkillContext(skillName: string) {
   const skill = await getEnabledSkill(skillName)
   if (!skill) throw new Error('Selected skill is unavailable')
   const references = await listSkillReferences(skillName)
+  const preload = await loadSkillPreloadContext(skillName)
   const catalog = references.length
     ? references.map(reference => `- ${reference.path} (${reference.bytes} bytes)`).join('\n')
     : '- No readable references'
@@ -118,7 +119,10 @@ export async function selectedSkillContext(skillName: string) {
     : skill.name === 'baoyu-article-illustrator'
       ? `${baoyuRuntimeInstructions('illustrations', 1)} Use generateImage to create the illustration for the selected draft.\n\n`
       : ''
-  return `Selected skill: ${skill.name}\n\n${runtime}${skill.instructions}\n\nAvailable Skill references:\n${catalog}\n\nWhen the selected Skill requires one of these files, call readSkillReference with its exact listed path. Do not invent missing reference content.`
+  const preloaded = preload.references.length
+    ? `\n\nPreloaded Skill references:\n${preload.references.map(reference => `## ${reference.path}\n\n${reference.content}`).join('\n\n')}`
+    : ''
+  return `Selected skill: ${skill.name}\n\n${runtime}${skill.instructions}\n\nAvailable Skill references:\n${catalog}${preloaded}\n\nWhen the selected Skill requires a reference that was not preloaded, call readSkillReference with its exact listed path. Do not invent missing reference content.`
 }
 
 async function selectedContext(skillName: string | undefined, draftId: number | undefined, skillContext: string) {
@@ -140,22 +144,6 @@ async function selectedContext(skillName: string | undefined, draftId: number | 
 export function skillAwareStepPolicy(stepNumber: number, skill: ChatSkillSnapshot, instructions: string) {
   const policy = chatToolLoopStep(stepNumber, skill)
   if (!policy) return undefined
-  const missingRequiredReferences = policy.toolChoice === 'none'
-    && Boolean(skill.activeSkillName)
-    && skill.referenceCount > 0
-    && skill.readReferenceCount === 0
-  if (missingRequiredReferences) {
-    return {
-      ...policy,
-      instructions: `${instructions}\n\nThe required Skill references could not be loaded. Do not produce the requested Skill-guided output or claim its rules were followed. Reply with a concise retry message.`,
-    }
-  }
-  if (policy.toolChoice !== 'none') {
-    return {
-      ...policy,
-      instructions: `${instructions}\n\nBefore using other tools or producing task output, read every applicable Skill reference for this request. Use only exact paths from the active Skill catalog.`,
-    }
-  }
   return {
     ...policy,
     instructions: `${instructions}\n\nResearch is complete. No tools are available for this step. Do not emit tool-call markup or XML. Now write the final answer in the user's language, using the evidence already collected.`,

@@ -19,6 +19,11 @@ function runtimeDependencies() {
     getEnabled: async (name: string) => name === 'Alpha' ? alpha : null,
     listReferences: async (name: string) => name === 'Alpha' ? [{ path: 'references/rules.md', bytes: 5 }] : [],
     readReference: async (name: string, path: string) => ({ path, content: `${name} rules`, bytes: 5 }),
+    loadPreloadContext: async (name: string) => ({
+      name,
+      instructions: '# Alpha rules',
+      references: [{ path: 'references/rules.md', content: 'Alpha rules', bytes: 5 }],
+    }),
   }
 }
 
@@ -81,11 +86,12 @@ describe('global Chat tool policy', () => {
     })
 
     expect(runtime.snapshot()).toEqual({
-      source: 'manual', activeSkillName: 'Alpha', referenceCount: 1, readReferenceCount: 0,
+      source: 'manual', activeSkillName: 'Alpha', referenceCount: 1, readReferenceCount: 1,
     })
     expect(runtime.catalogContext).toContain('Selected skill: Alpha')
     expect(runtime.catalogContext).toContain('# Alpha rules')
     expect(runtime.catalogContext).toContain('references/rules.md')
+    expect(runtime.catalogContext).toContain('Alpha rules')
   })
 
   it('loads at most one automatic Skill and scopes subsequent reference reads', async () => {
@@ -97,7 +103,10 @@ describe('global Chat tool policy', () => {
       .rejects.toMatchObject({ code: 'not_found' })
 
     await expect(executeTool(runtime.tools.loadSkill, { name: 'Alpha' })).resolves.toMatchObject({
-      name: 'Alpha', instructions: '# Alpha rules', references: [{ path: 'references/rules.md', bytes: 5 }],
+      name: 'Alpha',
+      instructions: '# Alpha rules',
+      references: [{ path: 'references/rules.md', bytes: 5 }],
+      preloadedReferences: [{ path: 'references/rules.md', content: 'Alpha rules', bytes: 5 }],
     })
     await expect(executeTool(runtime.tools.readSkillReference, { path: 'references/rules.md' })).resolves.toMatchObject({
       path: 'references/rules.md', content: 'Alpha rules',

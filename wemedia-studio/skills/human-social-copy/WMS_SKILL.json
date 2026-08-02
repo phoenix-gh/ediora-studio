@@ -1,0 +1,12 @@
+{
+  "preloadReferences": [
+    "references/adaptive-hooks.md",
+    "references/finance-writing.md",
+    "references/kol-brief-workflow.md",
+    "references/layout-playbook.md",
+    "references/patterns.md",
+    "references/sourcing-playbook.md",
+    "references/voice-system.md",
+    "references/writing-clean-rules.md"
+  ]
+}

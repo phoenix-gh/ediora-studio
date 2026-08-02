@@ -8,12 +8,7 @@ export const CHAT_MAX_STEPS = CHAT_RESEARCH_STEPS + 1
 
 export function chatToolLoopStep(stepNumber: number, skill: ChatSkillSnapshot) {
   if (stepNumber >= CHAT_RESEARCH_STEPS) return { activeTools: [], toolChoice: 'none' as const }
-  if (skill.activeSkillName && skill.referenceCount > 0 && skill.readReferenceCount === 0) {
-    return {
-      activeTools: ['readSkillReference'],
-      toolChoice: { type: 'tool' as const, toolName: 'readSkillReference' },
-    }
-  }
+  void skill
   return undefined
 }
 

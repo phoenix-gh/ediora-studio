@@ -12,21 +12,15 @@ describe('global chat tool loop', () => {
       .toEqual({ activeTools: [], toolChoice: 'none' })
   })
 
-  it('forces reference reading before an active Skill can use ordinary tools', () => {
+  it('does not force provider tool_choice for an active Skill without preloads', () => {
     const unread = {
       source: 'manual' as const,
       activeSkillName: 'Alpha',
       referenceCount: 2,
       readReferenceCount: 0,
     }
-    expect(chatToolLoopStep(0, unread)).toEqual({
-      activeTools: ['readSkillReference'],
-      toolChoice: { type: 'tool', toolName: 'readSkillReference' },
-    })
-    expect(chatToolLoopStep(1, { ...unread, source: 'automatic' })).toEqual({
-      activeTools: ['readSkillReference'],
-      toolChoice: { type: 'tool', toolName: 'readSkillReference' },
-    })
+    expect(chatToolLoopStep(0, unread)).toBeUndefined()
+    expect(chatToolLoopStep(1, { ...unread, source: 'automatic' })).toBeUndefined()
     expect(chatToolLoopStep(1, { ...unread, readReferenceCount: 1 })).toBeUndefined()
   })
 

@@ -6,12 +6,14 @@ import {
   getEnabledSkill,
   listEnabledSkills,
   listSkillReferences,
+  loadSkillPreloadContext,
   readSkillReference,
   skillReferenceContextByteLimit,
   SkillRegistryError,
   type SkillReferenceContent,
   type RegisteredSkill,
   type SkillReference,
+  type SkillContext,
 } from '../skills/registry'
 
 const sensitiveToolVerb = /(^|_)(publish|delete|update|save|create|add|upload)(_|$)/
@@ -63,6 +65,7 @@ type ChatSkillRuntimeOptions = {
   getEnabled?: (name: string) => Promise<RegisteredSkill | null>
   listReferences?: (name: string) => Promise<SkillReference[]>
   readReference?: (name: string, path: string) => Promise<SkillReferenceContent>
+  loadPreloadContext?: (name: string) => Promise<SkillContext>
 }
 
 export type ChatSkillRuntime = {
@@ -86,12 +89,14 @@ export async function createChatSkillRuntime({
   getEnabled = getEnabledSkill,
   listReferences = listSkillReferences,
   readReference = readSkillReference,
+  loadPreloadContext = loadSkillPreloadContext,
 }: ChatSkillRuntimeOptions): Promise<ChatSkillRuntime> {
   const enabledSkills = await listEnabled()
   let activeSkill: RegisteredSkill | undefined
   let source: ChatSkillActivationSource | undefined
   let references: SkillReference[] = []
   let reader: ReturnType<typeof createSkillReferenceReader> | undefined
+  let preloadedReferences: SkillReferenceContent[] = []
   const readPaths = new Set<string>()
 
   async function activate(name: string, activationSource: ChatSkillActivationSource) {
@@ -104,6 +109,8 @@ export async function createChatSkillRuntime({
     activeSkill = skill
     source = activationSource
     references = await listReferences(name)
+    preloadedReferences = (await loadPreloadContext(name)).references
+    for (const reference of preloadedReferences) readPaths.add(reference.path)
     reader = createSkillReferenceReader({ skillName: name, readReference })
     return skill
   }
@@ -123,6 +130,7 @@ export async function createChatSkillRuntime({
           version: skill.version,
           instructions: skill.instructions,
           references,
+          preloadedReferences,
         }
       },
     })
@@ -142,7 +150,7 @@ export async function createChatSkillRuntime({
     ? enabledSkills.map(skill => `- ${skill.name}: ${skill.description}`).join('\n')
     : '- No enabled Skills'
   const catalogContext = activeSkill
-    ? `Selected skill: ${activeSkill.name}\n\n${activeSkill.instructions}\n\nAvailable Skill references:\n${referenceCatalog(references)}`
+    ? `Selected skill: ${activeSkill.name}\n\n${activeSkill.instructions}\n\nAvailable Skill references:\n${referenceCatalog(references)}${preloadedReferences.length ? `\n\nPreloaded Skill references:\n${preloadedReferences.map(reference => `## ${reference.path}\n\n${reference.content}`).join('\n\n')}` : ''}`
     : `Enabled Skills available for automatic activation:\n${automaticCatalog}\n\nCall loadSkill only when exactly one Skill clearly matches the user's task.`
 
   return {

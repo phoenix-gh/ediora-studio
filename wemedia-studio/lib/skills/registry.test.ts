@@ -12,6 +12,7 @@ import {
   listSkillReferences,
   listSkills,
   loadSkillContext,
+  loadSkillPreloadContext,
   readSkillReference,
   setSkillEnabled,
 } from './registry'
@@ -233,6 +234,26 @@ describe('Skill registry', () => {
     await setSkillEnabled('Alpha', false)
     await expect(listSkillReferences('Alpha')).rejects.toMatchObject({ code: 'not_found' })
     await expect(readSkillReference('Alpha', 'references/one.md')).rejects.toMatchObject({ code: 'not_found' })
+  })
+
+  it('loads only references declared in the WMS preload manifest', async () => {
+    await writeSkill(bundledDir, 'alpha', 'Alpha')
+    const skillDir = join(bundledDir, 'alpha')
+    await mkdir(join(skillDir, 'references'), { recursive: true })
+    await writeFile(join(skillDir, 'references', 'core.md'), 'core rules', 'utf8')
+    await writeFile(join(skillDir, 'references', 'optional.md'), 'optional rules', 'utf8')
+    await writeFile(join(skillDir, 'WMS_SKILL.json'), JSON.stringify({
+      preloadReferences: ['references/core.md'],
+    }), 'utf8')
+
+    await expect(loadSkillPreloadContext('Alpha')).resolves.toEqual(expect.objectContaining({
+      name: 'Alpha',
+      references: [{ path: 'references/core.md', content: 'core rules', bytes: 10 }],
+    }))
+    expect((await listSkillReferences('Alpha')).map(reference => reference.path)).toEqual([
+      'references/core.md',
+      'references/optional.md',
+    ])
   })
 })
 

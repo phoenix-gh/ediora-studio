@@ -16,6 +16,14 @@ describe('global chat model history', () => {
     expect(context).not.toContain('# Auto Selection')
   })
 
+  it('embeds declared preload references for a manually selected Skill', async () => {
+    const context = await selectedSkillContext('human-social-copy')
+
+    expect(context).toContain('Preloaded Skill references:')
+    expect(context).toContain('references/finance-writing.md')
+    expect(context).toContain('# 金融与 Crypto 写作')
+  })
+
   it('uses the global MCP registry and image-skill runtime adapter', () => {
     const source = readFileSync(new URL('./route.ts', import.meta.url), 'utf8')
 
@@ -35,19 +43,15 @@ describe('global chat model history', () => {
     })
   })
 
-  it('uses the live Skill runtime state to force reference preflight', () => {
+  it('does not emit provider-incompatible tool_choice during research', () => {
     const policy = skillAwareStepPolicy(0, {
       source: 'manual', activeSkillName: 'human-social-copy', referenceCount: 8, readReferenceCount: 0,
     }, 'base instructions')
 
-    expect(policy).toMatchObject({
-      activeTools: ['readSkillReference'],
-      toolChoice: { type: 'tool', toolName: 'readSkillReference' },
-      instructions: expect.stringContaining('read every applicable Skill reference'),
-    })
+    expect(policy).toBeUndefined()
   })
 
-  it('prevents a final answer from claiming unread Skill references were followed', () => {
+  it('allows on-demand-only Skills to finish without provider-forced reads', () => {
     const policy = skillAwareStepPolicy(4, {
       source: 'automatic', activeSkillName: 'human-social-copy', referenceCount: 8, readReferenceCount: 0,
     }, 'base instructions')
@@ -55,7 +59,7 @@ describe('global chat model history', () => {
     expect(policy).toMatchObject({
       activeTools: [],
       toolChoice: 'none',
-      instructions: expect.stringContaining('could not be loaded'),
+      instructions: expect.stringContaining('write the final answer'),
     })
   })
 

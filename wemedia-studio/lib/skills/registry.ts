@@ -72,6 +72,7 @@ export const MAX_SKILL_REFERENCES = 200
 export const MAX_SKILL_REFERENCE_BYTES = 128 * 1024
 export const MAX_SKILL_REFERENCE_CONTEXT_BYTES = 512 * 1024
 const supportedReferenceExtensions = new Set(['.md', '.txt', '.json', '.yaml', '.yml'])
+const preloadManifestName = 'WMS_SKILL.json'
 let mutationQueue: Promise<void> = Promise.resolve()
 
 function bundledDirectory() {
@@ -283,6 +284,7 @@ export async function listSkillReferences(name: string): Promise<SkillReference[
         entry.isFile()
         && entry.name !== 'SKILL.md'
         && path !== 'UPSTREAM.md'
+        && path !== preloadManifestName
         && supportedReferenceExtensions.has(extname(entry.name).toLowerCase())
       ) {
         references.push({ path, bytes: (await lstat(target)).size })
@@ -329,6 +331,44 @@ export async function loadSkillContext(name: string, referencePaths: string[]): 
     references.push(reference)
   }
   return { name: skill.name, instructions: skill.instructions, references }
+}
+
+export async function loadSkillPreloadContext(name: string): Promise<SkillContext> {
+  const skill = await enabledSkillOrThrow(name)
+  const manifestPath = join(skill.directory, preloadManifestName)
+  let manifestBytes: Buffer
+  try {
+    const metadata = await lstat(manifestPath)
+    if (!metadata.isFile() || metadata.isSymbolicLink()) {
+      referenceError('invalid_reference', 'Invalid Skill preload manifest')
+    }
+    if (metadata.size > MAX_SKILL_REFERENCE_BYTES) {
+      throw new SkillRegistryError('too_large', 'Skill preload manifest is too large')
+    }
+    manifestBytes = await readFile(manifestPath)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return { name: skill.name, instructions: skill.instructions, references: [] }
+    }
+    if (error instanceof SkillRegistryError) throw error
+    referenceError('invalid_reference', 'Unable to read Skill preload manifest')
+  }
+
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(manifestBytes))
+  } catch {
+    referenceError('invalid_reference', 'Invalid Skill preload manifest')
+  }
+  const paths = (parsed as { preloadReferences?: unknown })?.preloadReferences
+  if (!Array.isArray(paths) || paths.some(path => typeof path !== 'string')) {
+    referenceError('invalid_reference', 'Invalid Skill preload manifest')
+  }
+  const uniquePaths = [...new Set(paths as string[])]
+  if (uniquePaths.length > MAX_SKILL_REFERENCES) {
+    throw new SkillRegistryError('too_large', `Skill contains more than ${MAX_SKILL_REFERENCES} preload references`)
+  }
+  return loadSkillContext(name, uniquePaths)
 }
 
 export async function setSkillEnabled(name: string, enabled: boolean): Promise<ManagedSkill> {

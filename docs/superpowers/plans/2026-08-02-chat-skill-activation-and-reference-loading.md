@@ -4,7 +4,7 @@
 
 **Goal:** Support both manual and automatic Chat Skill activation and guarantee a reference-reading preflight before an active Skill can produce task output.
 
-**Architecture:** Add one response-local Skill runtime that owns activation, catalog exposure, scoped reference reads, and audit state. Expose `loadSkill` and `readSkillReference` as AI SDK tools, then drive the model loop with a state-aware `prepareStep` policy: manual Skills begin at reference preflight, automatically loaded Skills enter it on the next step, and a final tool-free answer remains reserved.
+**Architecture:** Add one response-local Skill runtime that owns activation, catalog exposure, scoped reference reads, and audit state. Skills may declare bounded preload paths in `WMS_SKILL.json`; manual selection injects them before model execution and automatic `loadSkill` returns them in its tool result. Other references remain on demand, and the final tool-free answer remains reserved.
 
 **Tech Stack:** Next.js 16 route handlers, AI SDK 7 `streamText`/`tool`/`prepareStep`, TypeScript, Vitest, existing filesystem Skill registry.
 
@@ -13,11 +13,24 @@
 - Explicit `skillName` selection always wins over automatic activation.
 - Without explicit selection, at most one enabled primary Skill may activate per response.
 - Disabled Skills cannot be discovered, loaded, selected, or used for reference reads.
-- Keep progressive disclosure: discovery loads metadata, activation loads `SKILL.md`, and references load only through `readSkillReference`.
+- Keep progressive disclosure: discovery loads metadata, activation loads `SKILL.md` plus only explicitly declared preloads, and other references load through `readSkillReference`.
 - Never concatenate every reference into the base prompt.
-- An active Skill with readable references must complete at least one successful reference read before ordinary tools or final task output become available.
+- Declared preload references must load successfully before an active Skill can produce task output.
 - Preserve current registry byte limits, per-response reference caching, tool approvals, persisted tool parts, and the final-answer fallback.
 - Do not touch unrelated dirty-worktree files or address X weighted-character counting in this change.
+
+---
+
+## Approved Compatibility Revision
+
+Live smoke testing found that the configured provider's thinking mode rejects forced AI SDK `tool_choice`. This revision supersedes Task 2 and Task 3 steps that require `{ type: 'tool', toolName: 'readSkillReference' }`.
+
+- Add `loadSkillPreloadContext(name)` to `lib/skills/registry.ts` and test safe `WMS_SKILL.json` parsing.
+- Seed the response-local runtime with declared preload contents and return them from automatic `loadSkill`.
+- Inject declared preload contents into manually selected context before `streamText`.
+- Keep `prepareStep` only for the final tool-free answer; never force provider tool choice.
+- Add `WMS_SKILL.json` to `human-social-copy` with all eight curated references.
+- Re-run both live smokes and confirm no `Thinking mode does not support this tool_choice` error.
 
 ---
 
