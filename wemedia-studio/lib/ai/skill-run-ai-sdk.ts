@@ -8,7 +8,10 @@ import { completeSkillRun } from './skill-run-orchestrator'
 import { buildSkillPlanPrompt, loadPlannedReferences } from './skill-run-planner'
 
 const skillSelectionSchema = z.object({
-  skillName: z.string().min(1).max(80).nullish().transform(value => value ?? undefined),
+  skillName: z.preprocess(
+    value => value === null || (typeof value === 'string' && value.trim() === '') ? undefined : value,
+    z.string().min(1).max(80).optional(),
+  ),
   continueRestored: z.boolean().default(false),
 }).strict()
 

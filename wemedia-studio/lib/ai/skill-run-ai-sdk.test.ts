@@ -38,6 +38,11 @@ describe('generic SkillRun AI SDK adapter', () => {
       enabledSkills: [alpha], userRequest: 'plain question',
       decide: async () => ({ skillName: null }),
     })).resolves.toBeUndefined()
+
+    await expect(selectSkillForTurn({
+      enabledSkills: [alpha], userRequest: 'plain question',
+      decide: async () => ({ skillName: '' }),
+    })).resolves.toBeUndefined()
   })
 
   it('rejects selector output that is not in the enabled catalog', async () => {
