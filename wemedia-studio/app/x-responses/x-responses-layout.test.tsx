@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest'
 
 const inbox = readFileSync(new URL('./XResponsesClient.tsx', import.meta.url), 'utf8')
 const xSubscriptions = readFileSync(new URL('../x/XClient.tsx', import.meta.url), 'utf8')
+const xSubscriptionRow = readFileSync(new URL('../x/XSubscriptionRow.tsx', import.meta.url), 'utf8')
 const xSettings = readFileSync(new URL('../settings/sections/XSection.tsx', import.meta.url), 'utf8')
 const telegramSettings = readFileSync(new URL('../settings/sections/TelegramSettingsCard.tsx', import.meta.url), 'utf8')
 const sidebar = readFileSync(new URL('../../components/features/Sidebar.tsx', import.meta.url), 'utf8')
@@ -26,8 +27,8 @@ describe('X realtime response UI', () => {
   })
 
   it('uses realtime response wording and hides it for search subscriptions', () => {
-    expect(xSubscriptions).toContain('即时响应')
-    expect(xSubscriptions).toContain("s.kind === 'timeline'")
+    expect(xSubscriptionRow).toContain('即时响应')
+    expect(xSubscriptionRow).toContain("subscription.kind === 'timeline'")
     expect(xSubscriptions).not.toContain('动态通知')
   })
 
