@@ -8,11 +8,9 @@ import { completeSkillRun } from './skill-run-orchestrator'
 import { buildSkillPlanPrompt, loadPlannedReferences } from './skill-run-planner'
 
 const skillSelectionSchema = z.object({
-  skillName: z.string().min(1).max(80).optional(),
-  continueRestored: z.boolean(),
+  skillName: z.string().min(1).max(80).nullish().transform(value => value ?? undefined),
+  continueRestored: z.boolean().default(false),
 }).strict()
-
-type SkillSelectionDecision = z.infer<typeof skillSelectionSchema>
 
 export async function selectSkillForTurn({
   enabledSkills,
@@ -23,11 +21,11 @@ export async function selectSkillForTurn({
   enabledSkills: RegisteredSkill[]
   userRequest: string
   restoredSkillName?: string
-  decide(input: { prompt: string }): Promise<SkillSelectionDecision>
+  decide(input: { prompt: string }): Promise<unknown>
 }): Promise<{ skillName: string; activation: SkillRunActivation } | undefined> {
   const catalog = enabledSkills.map(skill => `- ${skill.name}: ${skill.description}`).join('\n') || '- None'
   const decision = skillSelectionSchema.parse(await decide({
-    prompt: `Select at most one enabled Skill for the current request. Return no skillName when none clearly matches. Continue a restored Skill only when the current request is a related follow-up.\n\nRequest:\n${userRequest}\n\nRestored Skill:\n${restoredSkillName ?? '(none)'}\n\nEnabled Skills:\n${catalog}`,
+    prompt: `Return valid JSON only. Select at most one enabled Skill for the current request. Return no skillName when none clearly matches. Continue a restored Skill only when the current request is a related follow-up.\n\nRequest:\n${userRequest}\n\nRestored Skill:\n${restoredSkillName ?? '(none)'}\n\nEnabled Skills:\n${catalog}`,
   }))
   const enabledNames = new Set(enabledSkills.map(skill => skill.name))
   if (decision.skillName && !enabledNames.has(decision.skillName)) throw new Error('Invalid Skill selection')

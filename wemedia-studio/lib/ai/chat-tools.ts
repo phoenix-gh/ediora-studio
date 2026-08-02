@@ -33,6 +33,24 @@ export function latestClientTurn(messages: unknown[]) {
   return messages.at(-1)
 }
 
+export function latestActivatedSkillName(messages: PersistedChatMessage[]) {
+  for (const message of [...messages].reverse()) {
+    if (message.role !== 'assistant') continue
+    for (const part of [...message.parts].reverse()) {
+      if (!part || typeof part !== 'object') continue
+      const record = part as Record<string, unknown>
+      if (record.type !== 'tool-loadSkill' || record.state !== 'output-available') continue
+      const output = record.output
+      const input = record.input
+      if (!output || typeof output !== 'object' || !input || typeof input !== 'object') continue
+      const outputName = (output as Record<string, unknown>).name
+      const inputName = (input as Record<string, unknown>).name
+      if (typeof outputName === 'string' && outputName === inputName) return outputName
+    }
+  }
+  return undefined
+}
+
 function isTextPart(part: unknown): part is { type: 'text'; text: string } {
   return Boolean(part)
     && typeof part === 'object'

@@ -190,6 +190,11 @@ export function genericSkillRuntimeEnabled() {
   return process.env.WMS_GENERIC_SKILL_RUNTIME !== '0'
 }
 
+export function executionToolsForSelection(tools: ToolSet, genericRuntime: boolean, selected: boolean): ToolSet {
+  if (!genericRuntime || selected) return tools
+  return Object.fromEntries(Object.entries(tools).filter(([name]) => name !== 'loadSkill')) as ToolSet
+}
+
 function planningTools(tools: ToolSet) {
   return Object.entries(tools)
     .filter(([name]) => name !== 'loadSkill' && name !== 'readSkillReference')
@@ -303,6 +308,7 @@ export async function POST(request: NextRequest) {
     registry = runtime
     const context = await selectedContext(selected?.skill.name ?? body.skillName, body.draftId, runtime.catalogContext)
     const instructions = buildChatInstructions(context)
+    const executionTools = executionToolsForSelection(runtime.tools, genericSkillRuntimeEnabled(), Boolean(selected))
 
     if (genericSkillRuntimeEnabled() && selected) {
       const modelMessages = await convertToModelMessages(messages, { tools: runtime.tools, ignoreIncompleteToolCalls: true })
@@ -372,8 +378,8 @@ export async function POST(request: NextRequest) {
     const result = streamText({
       model,
       instructions,
-      messages: await convertToModelMessages(messages, { tools: runtime.tools, ignoreIncompleteToolCalls: true }),
-      tools: runtime.tools,
+      messages: await convertToModelMessages(messages, { tools: executionTools, ignoreIncompleteToolCalls: true }),
+      tools: executionTools,
       stopWhen: stepCountIs(CHAT_MAX_STEPS),
       prepareStep: ({ stepNumber }) => {
         return skillAwareStepPolicy(stepNumber, runtime.snapshot(), instructions)

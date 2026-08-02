@@ -1,9 +1,10 @@
 import { readFileSync } from 'node:fs'
 
+import type { ToolSet } from 'ai'
 import { describe, expect, it } from 'vitest'
 
 import { latestClientTurn, modelHistoryCandidates } from '../../../lib/ai/chat-tools'
-import { genericSkillRuntimeEnabled, skillAwareStepPolicy, selectedSkillContext } from './route'
+import { executionToolsForSelection, genericSkillRuntimeEnabled, skillAwareStepPolicy, selectedSkillContext } from './route'
 
 describe('global chat model history', () => {
   it('describes available references without embedding their content', async () => {
@@ -50,9 +51,19 @@ describe('global chat model history', () => {
 
     expect(source).toContain('executeSkillRunWithAiSdk')
     expect(source).toContain('skillRunAudit(run, revisionCount)')
-    expect(source).toContain('skillRunPlanInputSchema.parse(planned.output)')
-    expect(source).toContain('skillRunValidationSchema.parse(checked.output)')
+    expect(source).toContain('skillRunPlanInputSchema.safeParse(planned.output)')
+    expect(source).toContain('skillRunValidationSchema.safeParse(checked.output)')
     expect(source).not.toMatch(/selected\.skill\.name\s*===/)
+  })
+
+  it('does not expose legacy automatic Skill loading after the selector declines', () => {
+    const loadSkill = { description: 'legacy selector' }
+    const search = { description: 'business tool' }
+    const tools = { loadSkill, search } as unknown as ToolSet
+
+    expect(executionToolsForSelection(tools, true, false)).toEqual({ search })
+    expect(executionToolsForSelection(tools, true, true)).toEqual({ loadSkill, search })
+    expect(executionToolsForSelection(tools, false, false)).toEqual({ loadSkill, search })
   })
 
   it('reserves a tool-free final step for the user-facing answer', () => {

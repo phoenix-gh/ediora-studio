@@ -21,7 +21,7 @@ describe('generic SkillRun AI SDK adapter', () => {
   it('selects only an exact enabled Skill and can decline or continue a restored Skill', async () => {
     await expect(selectSkillForTurn({
       enabledSkills: [alpha, beta], userRequest: 'alpha task',
-      decide: async () => ({ skillName: 'Alpha', continueRestored: false }),
+      decide: async () => ({ skillName: 'Alpha' }),
     })).resolves.toEqual({ skillName: 'Alpha', activation: 'automatic' })
 
     await expect(selectSkillForTurn({
@@ -31,7 +31,12 @@ describe('generic SkillRun AI SDK adapter', () => {
 
     await expect(selectSkillForTurn({
       enabledSkills: [alpha], userRequest: 'unrelated', restoredSkillName: 'Alpha',
-      decide: async () => ({ continueRestored: false }),
+      decide: async () => ({}),
+    })).resolves.toBeUndefined()
+
+    await expect(selectSkillForTurn({
+      enabledSkills: [alpha], userRequest: 'plain question',
+      decide: async () => ({ skillName: null }),
     })).resolves.toBeUndefined()
   })
 

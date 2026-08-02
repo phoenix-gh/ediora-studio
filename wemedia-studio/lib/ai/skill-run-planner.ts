@@ -25,13 +25,13 @@ export function buildSkillPlanPrompt({
   references,
   tools,
 }: SkillPlanPromptInput) {
-  return `Create a bounded execution plan for the active Skill and current user request.
+  return `Create a bounded execution plan for the active Skill and current user request. Return valid JSON only.
 
 Use only exact reference paths and tool names from the catalogs. Include only references and tools that are applicable to this request. Do not treat loading a reference as proof that its rules were followed. User instructions override Skill defaults, but no plan may weaken truthfulness, tool approval, or platform safety.
 
 Return this structured shape:
 - goal: one concrete goal
-- steps: 1 to 12 steps with id, instruction, requiredReferences, and requiredTools
+- steps: 1 to 12 steps with id, instruction, requiredReferences, and requiredTools. Every id must be a string such as "step-1", never a number
 - outputRequirements: requirements that the delivered result must satisfy
 - verificationCriteria: checks that determine whether the result is acceptable
 
