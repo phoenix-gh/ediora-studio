@@ -7,12 +7,12 @@ license: MIT
 metadata:
   hermes:
     tags: [content-creation, article, drafting, research, chinese-content]
-    related_skills: [content-ideation, x-post, humanizer]
+    related_skills: [content-ideation, human-social-copy, humanizer]
 ---
 
 # article-drafting：从素材到初稿的文章写作
 
-帮 MK 收集资料并写出文章初稿。与 `content-ideation`（选题）和 `x-post`（推文）互补，覆盖长文写作场景。
+帮 MK 收集资料并写出文章初稿。与 `content-ideation`（选题）和 `human-social-copy`（社交文案）互补，覆盖长文写作场景。
 
 ---
 
@@ -24,7 +24,7 @@ metadata:
 - 「research + draft an article about X」
 - 「整理下素材，我先看看」
 
-如果用户只要选题不要成品文章，转 `content-ideation`。如果用户要的是推文，转 `x-post`。
+如果用户只要选题不要成品文章，转 `content-ideation`。如果用户要的是社交媒体短内容，转 `human-social-copy`。
 
 ---
 
@@ -130,12 +130,12 @@ metadata:
 ```
 content-ideation（选题）→ article-drafting（素材+初稿）→ humanizer（润色）→ publish
                                                               ↑
-                                                    x-post（如果是推文）
+                                          human-social-copy（如果是社交短内容）
 ```
 
 - 如果用户先选题再写文章：`content-ideation` 输出选题 → 用户选择 → 本 skill 执行
 - 如果文章需要润色：完成后提示可用 `humanizer` 进一步打磨
-- 如果是短内容：直接转 `x-post`
+- 如果是短内容：直接转 `human-social-copy`
 
 ---
 

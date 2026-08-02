@@ -167,6 +167,7 @@ describe('Skill registry', () => {
     await writeFile(join(skillDir, 'references', 'nested', 'config.yaml'), 'tone: direct', 'utf8')
     await writeFile(join(skillDir, 'references', 'image.png'), new Uint8Array([0, 1, 2]))
     await writeFile(join(skillDir, '.hidden', 'secret.md'), 'secret', 'utf8')
+    await writeFile(join(skillDir, 'UPSTREAM.md'), 'provenance', 'utf8')
 
     await expect(listSkillReferences('Alpha')).resolves.toEqual([
       { path: 'references/nested/config.yaml', bytes: 12 },

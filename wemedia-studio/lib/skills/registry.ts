@@ -282,6 +282,7 @@ export async function listSkillReferences(name: string): Promise<SkillReference[
       } else if (
         entry.isFile()
         && entry.name !== 'SKILL.md'
+        && path !== 'UPSTREAM.md'
         && supportedReferenceExtensions.has(extname(entry.name).toLowerCase())
       ) {
         references.push({ path, bytes: (await lstat(target)).size })
