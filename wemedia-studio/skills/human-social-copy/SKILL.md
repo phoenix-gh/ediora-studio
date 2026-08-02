@@ -16,7 +16,7 @@ version: 1.0.0-wms.1
 2. 当前发布账号已有的明确档案或示例。
 3. 没有明确账号信息，或多个账号无法判断时，使用中性、自然、克制的中文表达。
 
-不要猜账号，不要模仿特定作者，也不要编造亲身体验、测试结果、收益、合作关系或读者反馈。需要建立或复用账号声音时，读取 `references/voice-system.md`。
+不要猜账号，不要模仿特定作者，也不要编造亲身体验、测试结果、收益、合作关系或读者反馈。
 
 ## 工作流
 
@@ -28,16 +28,20 @@ version: 1.0.0-wms.1
 
 普通改写不强制输出钩子菜单、结构分析或写作过程；用户要比较方案时再给 2 至 3 个有实质差异的版本。
 
-## 按需读取参考资料
+## 必须执行的参考资料路由
 
-需要详细规则时，通过 `readSkillReference` 只读取相关文件：
+写稿前先判断任务类型，并通过 `readSkillReference` 读取所有适用文件。以下条件明确时不得跳过：
 
-- 清理 AI 味、句式和措辞：`references/writing-clean-rules.md`
-- 按内容类型选结构：`references/patterns.md`
-- 金融、Crypto、数据与风险披露：`references/finance-writing.md`
-- 长短、分段、列表和平台排版：`references/layout-playbook.md`
-- 搜集信源、核验事实和引用：`references/sourcing-playbook.md`
-- 品牌合作、KOL brief 和交付检查：`references/kol-brief-workflow.md`
+- 涉及收益、成本、投资、金融或 Crypto：必须读取 `references/finance-writing.md`
+- 需要可直接发布到 X 或其他平台：必须读取 `references/layout-playbook.md`
+- 改写、润色或去除 AI 味：必须读取 `references/writing-clean-rules.md`
+- 涉及账号声音或发布身份：必须读取 `references/voice-system.md`
+- 需要选择开场或提供钩子方案：必须读取 `references/adaptive-hooks.md`
+- 需要决定教程、观点、新闻、复盘或清单结构：必须读取 `references/patterns.md`
+- 需要检索、核验、引用或补足来源：必须读取 `references/sourcing-playbook.md`
+- 涉及品牌合作、赞助或 KOL brief：必须读取 `references/kol-brief-workflow.md`
+
+一次任务可能同时命中多个条件；必须在同一预读取阶段读完适用文件。不要读取与任务无关的文件，也不要声称使用了尚未成功读取的规则。
 
 ## 交付标准
 

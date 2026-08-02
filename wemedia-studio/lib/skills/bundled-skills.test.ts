@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { discoverSkills } from '../ai/discover-skills'
 import {
   deleteUploadedSkill,
+  getEnabledSkill,
   listSkillReferences,
   listSkills,
   readSkillReference,
@@ -72,5 +73,14 @@ describe('bundled human-social-copy Skill', () => {
     await setSkillEnabled(skillName, true)
     expect((await discoverSkills()).map(skill => skill.name)).toContain(skillName)
     expect(await listSkillReferences(skillName)).toHaveLength(expectedReferences.length)
+  })
+
+  it('requires task-specific references before social copy is drafted', async () => {
+    const skill = await getEnabledSkill(skillName)
+
+    expect(skill?.instructions).toContain('涉及收益、成本、投资、金融或 Crypto：必须读取 `references/finance-writing.md`')
+    expect(skill?.instructions).toContain('需要可直接发布到 X 或其他平台：必须读取 `references/layout-playbook.md`')
+    expect(skill?.instructions).toContain('改写、润色或去除 AI 味：必须读取 `references/writing-clean-rules.md`')
+    expect(skill?.instructions).toContain('涉及账号声音或发布身份：必须读取 `references/voice-system.md`')
   })
 })
