@@ -7,7 +7,7 @@ import { latestClientTurn, modelHistoryCandidates } from '@/lib/ai/chat-tools'
 import { buildChatInstructions } from '@/lib/ai/chat-instructions'
 import { CHAT_MAX_STEPS, chatToolLoopStep, needsFinalAnswerFallback } from '@/lib/ai/chat-loop'
 import { baoyuRuntimeInstructions } from '@/lib/ai/content-job'
-import { openGlobalChatTools } from '@/lib/ai/global-chat-tools'
+import { openGlobalChatTools, type ChatSkillSnapshot } from '@/lib/ai/global-chat-tools'
 import { workerHeaders } from '@/lib/ai/job-client'
 import { getEnabledSkill, listSkillReferences } from '@/lib/skills/registry'
 
@@ -121,10 +121,12 @@ export async function selectedSkillContext(skillName: string) {
   return `Selected skill: ${skill.name}\n\n${runtime}${skill.instructions}\n\nAvailable Skill references:\n${catalog}\n\nWhen the selected Skill requires one of these files, call readSkillReference with its exact listed path. Do not invent missing reference content.`
 }
 
-async function selectedContext(skillName?: string, draftId?: number) {
+async function selectedContext(skillName: string | undefined, draftId: number | undefined, skillContext: string) {
   const context: string[] = []
   if (skillName) {
     context.push(await selectedSkillContext(skillName))
+  } else {
+    context.push(skillContext)
   }
   if (draftId) {
     const response = await fetch(`${apiBase()}/write/drafts/${draftId}`, { cache: 'no-store' })
@@ -133,6 +135,31 @@ async function selectedContext(skillName?: string, draftId?: number) {
     context.push(`Selected draft: ${draft.title}\n\n${draft.content}`)
   }
   return context.join('\n\n---\n\n')
+}
+
+export function skillAwareStepPolicy(stepNumber: number, skill: ChatSkillSnapshot, instructions: string) {
+  const policy = chatToolLoopStep(stepNumber, skill)
+  if (!policy) return undefined
+  const missingRequiredReferences = policy.toolChoice === 'none'
+    && Boolean(skill.activeSkillName)
+    && skill.referenceCount > 0
+    && skill.readReferenceCount === 0
+  if (missingRequiredReferences) {
+    return {
+      ...policy,
+      instructions: `${instructions}\n\nThe required Skill references could not be loaded. Do not produce the requested Skill-guided output or claim its rules were followed. Reply with a concise retry message.`,
+    }
+  }
+  if (policy.toolChoice !== 'none') {
+    return {
+      ...policy,
+      instructions: `${instructions}\n\nBefore using other tools or producing task output, read every applicable Skill reference for this request. Use only exact paths from the active Skill catalog.`,
+    }
+  }
+  return {
+    ...policy,
+    instructions: `${instructions}\n\nResearch is complete. No tools are available for this step. Do not emit tool-call markup or XML. Now write the final answer in the user's language, using the evidence already collected.`,
+  }
 }
 
 function conversationForRecovery(messages: UIMessage[]) {
@@ -187,26 +214,21 @@ export async function POST(request: NextRequest) {
   try {
     if (body.approval) await persistApproval(body.sessionId, body.approval)
     else if (latestMessage) await persistMessage(body.sessionId, { role: 'user', parts: latestMessage.parts })
-    registry = await openGlobalChatTools({ apiBase: apiBase(), sessionId: body.sessionId, draftId: body.draftId, skillName: body.skillName })
+    const runtime = await openGlobalChatTools({ apiBase: apiBase(), sessionId: body.sessionId, draftId: body.draftId, skillName: body.skillName })
+    registry = runtime
     const messages = await persistedModelHistory(body.sessionId, Boolean(body.approval))
     const modelConfig = await configuredTextModel()
-    const context = await selectedContext(body.skillName, body.draftId)
+    const context = await selectedContext(body.skillName, body.draftId, runtime.catalogContext)
     const provider = createOpenAI({ apiKey: modelConfig.apiKey, baseURL: modelConfig.baseURL })
     const instructions = buildChatInstructions(context)
     const result = streamText({
       model: provider.chat(modelConfig.modelName),
       instructions,
-      messages: await convertToModelMessages(messages, { tools: registry.tools, ignoreIncompleteToolCalls: true }),
-      tools: registry.tools,
+      messages: await convertToModelMessages(messages, { tools: runtime.tools, ignoreIncompleteToolCalls: true }),
+      tools: runtime.tools,
       stopWhen: stepCountIs(CHAT_MAX_STEPS),
       prepareStep: ({ stepNumber }) => {
-        const stepPolicy = chatToolLoopStep(stepNumber)
-        if (!stepPolicy) return undefined
-        return {
-          ...stepPolicy,
-          activeTools: [],
-          instructions: `${instructions}\n\nResearch is complete. No tools are available for this step. Do not emit tool-call markup or XML. Now write the final answer in the user's language, using the evidence already collected.`,
-        }
+        return skillAwareStepPolicy(stepNumber, runtime.snapshot(), instructions)
       },
     })
 

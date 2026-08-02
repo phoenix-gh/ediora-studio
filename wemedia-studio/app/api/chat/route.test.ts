@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
 import { latestClientTurn, modelHistoryCandidates } from '../../../lib/ai/chat-tools'
-import { selectedSkillContext } from './route'
+import { skillAwareStepPolicy, selectedSkillContext } from './route'
 
 describe('global chat model history', () => {
   it('describes available references without embedding their content', async () => {
@@ -26,11 +26,37 @@ describe('global chat model history', () => {
   })
 
   it('reserves a tool-free final step for the user-facing answer', () => {
-    const source = readFileSync(new URL('./route.ts', import.meta.url), 'utf8')
+    expect(skillAwareStepPolicy(4, {
+      source: 'manual', activeSkillName: 'Alpha', referenceCount: 1, readReferenceCount: 1,
+    }, 'base instructions')).toMatchObject({
+      activeTools: [],
+      toolChoice: 'none',
+      instructions: expect.stringContaining('write the final answer'),
+    })
+  })
 
-    expect(source).toContain('prepareStep')
-    expect(source).toContain('chatToolLoopStep')
-    expect(source).toContain('activeTools: []')
+  it('uses the live Skill runtime state to force reference preflight', () => {
+    const policy = skillAwareStepPolicy(0, {
+      source: 'manual', activeSkillName: 'human-social-copy', referenceCount: 8, readReferenceCount: 0,
+    }, 'base instructions')
+
+    expect(policy).toMatchObject({
+      activeTools: ['readSkillReference'],
+      toolChoice: { type: 'tool', toolName: 'readSkillReference' },
+      instructions: expect.stringContaining('read every applicable Skill reference'),
+    })
+  })
+
+  it('prevents a final answer from claiming unread Skill references were followed', () => {
+    const policy = skillAwareStepPolicy(4, {
+      source: 'automatic', activeSkillName: 'human-social-copy', referenceCount: 8, readReferenceCount: 0,
+    }, 'base instructions')
+
+    expect(policy).toMatchObject({
+      activeTools: [],
+      toolChoice: 'none',
+      instructions: expect.stringContaining('could not be loaded'),
+    })
   })
 
   it('uses only the new client turn instead of client-supplied history', () => {
