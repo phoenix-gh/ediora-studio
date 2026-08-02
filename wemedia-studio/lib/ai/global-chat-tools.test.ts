@@ -24,6 +24,10 @@ function runtimeDependencies() {
       instructions: '# Alpha rules',
       references: [{ path: 'references/rules.md', content: 'Alpha rules', bytes: 5 }],
     }),
+    loadManifest: async () => ({
+      preloadReferences: ['references/rules.md'],
+      execution: { planRequired: true, verificationRequired: true, maxRevisions: 1 as const },
+    }),
   }
 }
 
@@ -86,12 +90,17 @@ describe('global Chat tool policy', () => {
     })
 
     expect(runtime.snapshot()).toEqual({
-      source: 'manual', activeSkillName: 'Alpha', referenceCount: 1, readReferenceCount: 1,
+      source: 'manual', activeSkillName: 'Alpha', referenceCount: 1, readReferenceCount: 0,
     })
     expect(runtime.catalogContext).toContain('Selected skill: Alpha')
     expect(runtime.catalogContext).toContain('# Alpha rules')
     expect(runtime.catalogContext).toContain('references/rules.md')
     expect(runtime.catalogContext).toContain('Alpha rules')
+    expect(runtime.activeContext()).toMatchObject({ skill: { name: 'Alpha' }, activation: 'manual' })
+    await expect(runtime.readReferences(['references/rules.md'])).resolves.toEqual([
+      { path: 'references/rules.md', content: 'Alpha rules', bytes: 5 },
+    ])
+    expect(runtime.snapshot().readReferenceCount).toBe(1)
   })
 
   it('loads at most one automatic Skill and scopes subsequent reference reads', async () => {
@@ -116,6 +125,35 @@ describe('global Chat tool policy', () => {
     expect(runtime.snapshot()).toEqual({
       source: 'automatic', activeSkillName: 'Alpha', referenceCount: 1, readReferenceCount: 1,
     })
+  })
+
+  it('restores an automatically activated Skill with its preloaded rules on the next turn', async () => {
+    const runtime = await createChatSkillRuntime({
+      restoredSkillName: 'Alpha',
+      baseTools: {},
+      ...runtimeDependencies(),
+    })
+
+    expect(runtime.snapshot()).toEqual({
+      source: 'restored', activeSkillName: 'Alpha', referenceCount: 1, readReferenceCount: 0,
+    })
+    expect(runtime.catalogContext).toContain('Active skill restored from this conversation: Alpha')
+    expect(runtime.catalogContext).toContain('Preloaded Skill references (already loaded; follow these rules)')
+    expect(runtime.catalogContext).toContain('Alpha rules')
+    expect(runtime.catalogContext).toContain('Do not claim that this Skill or these references were not loaded')
+    expect(runtime.tools.loadSkill).toBeUndefined()
+  })
+
+  it('falls back to automatic selection when a previously active Skill is no longer enabled', async () => {
+    const runtime = await createChatSkillRuntime({
+      restoredSkillName: 'Removed',
+      baseTools: {},
+      ...runtimeDependencies(),
+    })
+
+    expect(runtime.snapshot().activeSkillName).toBeUndefined()
+    expect(runtime.catalogContext).toContain('Enabled Skills available for automatic activation')
+    expect(runtime.tools.loadSkill).toBeDefined()
   })
 
   it('accepts only a free-form image prompt', () => {

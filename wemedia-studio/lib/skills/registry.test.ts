@@ -13,6 +13,7 @@ import {
   listSkills,
   loadSkillContext,
   loadSkillPreloadContext,
+  loadSkillManifest,
   readSkillReference,
   setSkillEnabled,
 } from './registry'
@@ -254,6 +255,34 @@ describe('Skill registry', () => {
       'references/core.md',
       'references/optional.md',
     ])
+  })
+
+  it('normalizes optional generic execution hints without enabling executable fields', async () => {
+    await writeSkill(bundledDir, 'alpha', 'Alpha')
+    const manifestPath = join(bundledDir, 'alpha', 'WMS_SKILL.json')
+
+    await expect(loadSkillManifest('Alpha')).resolves.toEqual({
+      preloadReferences: [],
+      execution: { planRequired: true, verificationRequired: true, maxRevisions: 1 },
+    })
+
+    await writeFile(manifestPath, JSON.stringify({
+      preloadReferences: [],
+      execution: { planRequired: false, verificationRequired: true, maxRevisions: 0 },
+    }), 'utf8')
+    await expect(loadSkillManifest('Alpha')).resolves.toEqual({
+      preloadReferences: [],
+      execution: { planRequired: false, verificationRequired: true, maxRevisions: 0 },
+    })
+
+    for (const execution of [
+      { planRequired: true, verificationRequired: true, maxRevisions: 2 },
+      { planRequired: true, verificationRequired: true, maxRevisions: 1, command: 'run.sh' },
+      { planRequired: true, verificationRequired: true, maxRevisions: 1, modulePath: './validator.js' },
+    ]) {
+      await writeFile(manifestPath, JSON.stringify({ preloadReferences: [], execution }), 'utf8')
+      await expect(loadSkillManifest('Alpha')).rejects.toMatchObject({ code: 'invalid_reference' })
+    }
   })
 })
 
