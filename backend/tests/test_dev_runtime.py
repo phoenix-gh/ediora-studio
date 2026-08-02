@@ -627,6 +627,8 @@ def test_stopped_postgres_starts_before_application_processes(
         events = _events(env)
         assert events.index("start:postgres") < events.index("start:api")
         assert "PostgreSQL" in result.stdout
+        assert "Postgres:" in result.stdout
+        assert "wms-dev-postgres-copy (127.0.0.1:45432)" in result.stdout
     finally:
         _run_dev(env, "stop")
 
@@ -1377,10 +1379,43 @@ def test_status_and_log_snapshot_cover_all_runtime_services(tmp_path: Path) -> N
     logs = _run_dev(env, "logs", "--no-follow")
 
     assert status.returncode == 0
-    assert all(name in status.stdout for name in ("Redis", "API", "Worker", "Web"))
+    assert all(
+        name in status.stdout
+        for name in ("Postgres", "Redis", "API", "Worker", "Web")
+    )
+    assert "wms-dev-postgres-copy" in status.stdout
+    assert "127.0.0.1:45432" in status.stdout
     assert "external" in status.stdout.lower()
     assert logs.returncode == 0
     assert all(name in logs.stdout for name in ("Redis", "API", "Worker", "Web"))
+
+
+@pytest.mark.parametrize(
+    ("state", "auto_ready", "expected_status"),
+    [
+        ("stopped", "1", "stopped"),
+        ("missing", "1", "does not exist"),
+        ("unavailable", "1", "Docker unavailable"),
+        ("running", "0", "TCP unavailable"),
+    ],
+)
+def test_postgres_status_is_read_only_and_reports_unhealthy_states(
+    tmp_path: Path,
+    state: str,
+    auto_ready: str,
+    expected_status: str,
+) -> None:
+    bin_dir = _fake_runtime_tools(tmp_path)
+    env = _dev_env(tmp_path, bin_dir)
+    env["WMS_DEV_TEST_POSTGRES_STATE"] = state
+    env["WMS_DEV_POSTGRES_TEST_AUTO_READY"] = auto_ready
+
+    result = _run_dev(env, "status")
+
+    assert result.returncode != 0
+    assert "Postgres" in result.stdout
+    assert expected_status in result.stdout
+    assert "start:postgres" not in _events(env)
 
 
 def test_backend_health_uses_the_runtime_web_origins_for_real_cors_headers(

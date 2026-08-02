@@ -533,11 +533,43 @@ cmd_start() {
 
 print_runtime_summary() {
   printf '\n'
+  printf '  Postgres: %s (%s:%s)\n' \
+    "$POSTGRES_CONTAINER" "$POSTGRES_HOST" "$POSTGRES_PORT"
   printf '  Web:    %s\n' "$HOST_WEB_URL"
   printf '  API:    %s (docs: /docs)\n' "$HOST_API_ROOT"
   printf '  Worker: %s\n' "$WMS_WORKER_QUEUE"
   printf '  Redis:  %s\n' "$HOST_REDIS_URL"
   printf '  Logs:   ./dev.sh logs    Stop: ./dev.sh stop\n'
+}
+
+postgres_status() {
+  local state
+  if ! state="$(postgres_container_state)"; then
+    case "$state" in
+      unavailable)
+        printf '  Postgres Docker unavailable (%s)\n' "$POSTGRES_CONTAINER"
+        ;;
+      missing)
+        printf '  Postgres container does not exist (%s)\n' "$POSTGRES_CONTAINER"
+        ;;
+      *)
+        printf '  Postgres inspection failed (%s)\n' "$POSTGRES_CONTAINER"
+        ;;
+    esac
+    return 1
+  fi
+  if [ "$state" = stopped ]; then
+    printf '  Postgres stopped (%s)\n' "$POSTGRES_CONTAINER"
+    return 1
+  fi
+  if postgres_tcp_ready; then
+    printf '  Postgres ready (%s; %s:%s)\n' \
+      "$POSTGRES_CONTAINER" "$POSTGRES_HOST" "$POSTGRES_PORT"
+    return 0
+  fi
+  printf '  Postgres running but TCP unavailable (%s; %s:%s)\n' \
+    "$POSTGRES_CONTAINER" "$POSTGRES_HOST" "$POSTGRES_PORT"
+  return 1
 }
 
 cmd_stop() {
@@ -600,6 +632,7 @@ service_status() {
 cmd_status() {
   local unhealthy=0 redis_metadata
   validate_runtime_ports || return 1
+  postgres_status || unhealthy=1
   redis_metadata="$(metadata_path redis)"
   if dev_owned_identity_matches redis "$redis_metadata" \
     || dev_owned_group_matches_service redis "$redis_metadata"; then

@@ -45,24 +45,37 @@ WeMediaStudio/
 
 ## 启动方式
 
-宿主机开发推荐从项目根目录使用统一脚本。先确保 conda 环境 `wems`、
-`pnpm` 和 `redis-server`（仅在本机没有可用 Redis 时需要）可从当前
-`PATH` 找到，并配置 API 与内容任务 worker 共用的 32 字符以上 token：
+宿主机开发推荐从项目根目录使用统一脚本。先确保 Docker、conda 环境
+`wems`、`pnpm` 和 `redis-server`（仅在本机没有可用 Redis 时需要）可从
+当前 `PATH` 找到。首次使用时从示例创建根环境文件，并在其中配置 API 与
+内容任务 worker 共用的 32 字符以上 token：
 
 ```bash
-export WMS_WORKER_TOKEN="$(openssl rand -hex 32)"
+cp .env.example .env
+# 编辑 .env，设置 WMS_WORKER_TOKEN
 ./dev.sh
 ```
 
-脚本按 Redis 健康 → API HTTP 就绪 → worker 就绪握手 → Web HTTP 就绪的
+之后日常开发只需执行 `./dev.sh`。脚本会自动加载根 `.env` 并把其中的变量
+导出给所有子进程；命令行显式传入的环境变量优先，例如
+`WMS_WEB_PORT=3001 ./dev.sh` 不会被 `.env` 覆盖。脚本按 PostgreSQL TCP
+就绪 → Redis PING → API HTTP 就绪 → worker 就绪握手 → Web HTTP 就绪的
 顺序启动完整运行时：
 
 ```text
+Postgres: wms-dev-postgres-copy (127.0.0.1:55432)
 Web:    http://localhost:3000
 API:    http://localhost:8000
 Worker: content-jobs queue
 Redis:  redis://127.0.0.1:6379/0
 ```
+
+默认情况下，脚本检查 Docker 容器 `wms-dev-postgres-copy`；若容器已停止则
+自动启动，并等待 `127.0.0.1:55432` 可连接。可分别通过
+`WMS_DEV_POSTGRES_CONTAINER`、`WMS_DEV_POSTGRES_HOST` 和
+`WMS_DEV_POSTGRES_PORT` 覆盖容器名和连接地址。PostgreSQL 是持久化外部
+依赖，不属于脚本拥有的临时进程；`./dev.sh stop` 和启动失败回滚都不会
+停止该容器。
 
 若 `127.0.0.1:6379` 已有能响应 PING 的 Redis，脚本只连接并把它标记为
 `external`，`./dev.sh stop` 不会停止它；否则脚本启动并只管理自己创建的
