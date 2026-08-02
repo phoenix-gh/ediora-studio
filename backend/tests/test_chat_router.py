@@ -132,6 +132,49 @@ def test_replaces_assistant_message_parts_for_tool_approval(client):
     assert response.json()["parts"] == replacement
 
 
+def test_persists_a_bounded_skill_run_audit_without_reference_or_tool_bodies(client):
+    session = client.post("/api/chat/sessions", json={}).json()
+    audit = {
+        "skillName": "Alpha",
+        "activation": "automatic",
+        "steps": [{
+            "id": "read",
+            "status": "completed",
+            "evidence": ["reference:references/rules.md"],
+        }],
+        "loadedReferences": ["references/rules.md"],
+        "toolEvidence": [{
+            "toolName": "search_assets",
+            "toolCallId": "call-1",
+            "state": "succeeded",
+        }],
+        "validation": {"passed": True, "violations": []},
+        "revisionCount": 0,
+    }
+
+    created = client.post(
+        f"/api/chat/sessions/{session['id']}/messages",
+        json={"role": "assistant", "parts": [{"type": "text", "text": "完成"}], "text": "完成", "skill_run": audit},
+    )
+
+    assert created.status_code == 201
+    assert created.json()["skill_run"] == audit
+    detail = client.get(f"/api/chat/sessions/{session['id']}")
+    assert detail.json()["messages"][0]["skill_run"] == audit
+
+    for invalid_audit in [
+        {**audit, "referenceBodies": [{"path": "references/rules.md", "content": "secret"}]},
+        {**audit, "toolOutputs": [{"toolName": "search_assets", "output": {"secret": True}}]},
+        {**audit, "steps": [{"id": "x", "status": "completed", "evidence": ["x" * 501]}]},
+        {**audit, "steps": [{"id": str(index), "status": "completed", "evidence": []} for index in range(13)]},
+    ]:
+        rejected = client.post(
+            f"/api/chat/sessions/{session['id']}/messages",
+            json={"role": "assistant", "skill_run": invalid_audit},
+        )
+        assert rejected.status_code == 422
+
+
 def test_source_search_validates_query_and_returns_writing_plan(client):
     plan_id = _add_searchable_sources(client)
 

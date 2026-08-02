@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
 import { latestClientTurn, modelHistoryCandidates } from '../../../lib/ai/chat-tools'
-import { skillAwareStepPolicy, selectedSkillContext } from './route'
+import { genericSkillRuntimeEnabled, skillAwareStepPolicy, selectedSkillContext } from './route'
 
 describe('global chat model history', () => {
   it('describes available references without embedding their content', async () => {
@@ -19,9 +19,11 @@ describe('global chat model history', () => {
   it('embeds declared preload references for a manually selected Skill', async () => {
     const context = await selectedSkillContext('human-social-copy')
 
-    expect(context).toContain('Preloaded Skill references:')
+    expect(context).toContain('Preloaded Skill references (already loaded; follow these rules):')
     expect(context).toContain('references/finance-writing.md')
     expect(context).toContain('# 金融与 Crypto 写作')
+    expect(context).toContain('already loaded; follow these rules')
+    expect(context).toContain('Do not claim that this Skill or these references were not loaded')
   })
 
   it('uses the global MCP registry and image-skill runtime adapter', () => {
@@ -31,6 +33,26 @@ describe('global chat model history', () => {
     expect(source).toContain('baoyuRuntimeInstructions')
     expect(source).toContain('workerHeaders()')
     expect(source).not.toContain('makeChatTools')
+  })
+
+  it('guards the generic Skill runtime with an opt-out switch', () => {
+    const previous = process.env.WMS_GENERIC_SKILL_RUNTIME
+    delete process.env.WMS_GENERIC_SKILL_RUNTIME
+    expect(genericSkillRuntimeEnabled()).toBe(true)
+    process.env.WMS_GENERIC_SKILL_RUNTIME = '0'
+    expect(genericSkillRuntimeEnabled()).toBe(false)
+    if (previous === undefined) delete process.env.WMS_GENERIC_SKILL_RUNTIME
+    else process.env.WMS_GENERIC_SKILL_RUNTIME = previous
+  })
+
+  it('plans, validates, and persists generic Skill runs without Skill-name branches', () => {
+    const source = readFileSync(new URL('./route.ts', import.meta.url), 'utf8')
+
+    expect(source).toContain('executeSkillRunWithAiSdk')
+    expect(source).toContain('skillRunAudit(run, revisionCount)')
+    expect(source).toContain('skillRunPlanInputSchema.parse(planned.output)')
+    expect(source).toContain('skillRunValidationSchema.parse(checked.output)')
+    expect(source).not.toMatch(/selected\.skill\.name\s*===/)
   })
 
   it('reserves a tool-free final step for the user-facing answer', () => {

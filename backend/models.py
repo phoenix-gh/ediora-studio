@@ -164,6 +164,7 @@ class ChatMessage(Base):
     role: Mapped[str] = mapped_column(String, nullable=False)
     parts: Mapped[list] = mapped_column(JSON, default=list)
     text: Mapped[str] = mapped_column(Text, default="")
+    skill_run: Mapped[dict | None] = mapped_column(JSON, nullable=True, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, index=True)
 
 

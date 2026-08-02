@@ -791,6 +791,9 @@ async def init_db():
         await migrate_content_job_idempotency_schema(conn)
         await migrate_text_video_project_schema(conn)
         await migrate_text_video_speech_asset_schema(conn)
+        await _add_columns(conn, "chat_messages", {
+            "skill_run": "JSON",
+        })
         await _add_columns(conn, "creative_assets", {
             "media_kind": "VARCHAR NOT NULL DEFAULT ''",
             "directory": "VARCHAR NOT NULL DEFAULT ''",

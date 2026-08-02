@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import delete, desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,11 +13,67 @@ from models import ChatMessage, ChatSession, WritingPlan, now_utc
 router = APIRouter(prefix="/chat", tags=["chat"])
 
 
+class SkillRunStepAudit(BaseModel):
+    id: str = Field(min_length=1, max_length=120)
+    status: Literal["pending", "completed", "failed", "skipped"]
+    evidence: list[str] = Field(default_factory=list, max_length=32)
+
+    model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="after")
+    def validate_evidence(self):
+        if any(len(item) > 500 for item in self.evidence):
+            raise ValueError("Skill run evidence is too large")
+        return self
+
+
+class SkillToolEvidenceAudit(BaseModel):
+    toolName: str = Field(min_length=1, max_length=200)
+    toolCallId: str = Field(min_length=1, max_length=200)
+    state: Literal["succeeded", "failed", "approval-pending"]
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class SkillRunViolationAudit(BaseModel):
+    requirement: str = Field(min_length=1, max_length=500)
+    evidence: str = Field(min_length=1, max_length=500)
+    correction: str = Field(min_length=1, max_length=500)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class SkillRunValidationAudit(BaseModel):
+    passed: bool
+    violations: list[SkillRunViolationAudit] = Field(default_factory=list, max_length=24)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class SkillRunAudit(BaseModel):
+    skillName: str = Field(min_length=1, max_length=80)
+    activation: Literal["manual", "automatic", "restored"]
+    steps: list[SkillRunStepAudit] = Field(default_factory=list, max_length=12)
+    loadedReferences: list[str] = Field(default_factory=list, max_length=24)
+    toolEvidence: list[SkillToolEvidenceAudit] = Field(default_factory=list, max_length=24)
+    validation: SkillRunValidationAudit
+    revisionCount: Literal[0, 1]
+
+    model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="after")
+    def validate_reference_paths(self):
+        if any(len(path) > 500 for path in self.loadedReferences):
+            raise ValueError("Skill run reference path is too large")
+        return self
+
+
 class ChatMessageOut(BaseModel):
     id: int
     role: Literal["user", "assistant", "tool"]
     parts: list[dict]
     text: str
+    skill_run: SkillRunAudit | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -48,6 +104,7 @@ class ChatMessageCreate(BaseModel):
     role: Literal["user", "assistant", "tool"]
     parts: list[dict] = Field(default_factory=list)
     text: str = ""
+    skill_run: SkillRunAudit | None = None
 
 
 class ChatMessagePartsUpdate(BaseModel):
@@ -115,7 +172,7 @@ async def create_session(body: ChatSessionCreate, db: AsyncSession = Depends(get
     return session
 
 
-@router.get("/sessions/{session_id}", response_model=ChatSessionDetail)
+@router.get("/sessions/{session_id}", response_model=ChatSessionDetail, response_model_exclude_none=True)
 async def get_session(session_id: int, db: AsyncSession = Depends(get_db)):
     session = await db.get(ChatSession, session_id)
     if not session:
@@ -156,7 +213,7 @@ async def delete_session(session_id: int, db: AsyncSession = Depends(get_db)):
     await db.commit()
 
 
-@router.post("/sessions/{session_id}/messages", response_model=ChatMessageOut, status_code=201)
+@router.post("/sessions/{session_id}/messages", response_model=ChatMessageOut, status_code=201, response_model_exclude_none=True)
 async def append_message(
     session_id: int,
     body: ChatMessageCreate,
