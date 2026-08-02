@@ -471,6 +471,74 @@ def test_short_worker_token_fails_before_spawning_any_child_and_stays_secret(
         _run_dev(env, "stop")
 
 
+def test_start_loads_root_env_without_manually_exported_worker_token(
+    tmp_path: Path,
+) -> None:
+    bin_dir = _fake_runtime_tools(tmp_path)
+    env = _dev_env(tmp_path, bin_dir)
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        f'WMS_WORKER_TOKEN="{REPLACEMENT_TOKEN}"\n',
+        encoding="utf-8",
+    )
+    env["WMS_DEV_ENV_FILE"] = str(env_file)
+    env.pop("WMS_WORKER_TOKEN")
+
+    try:
+        result = _run_dev(env, "start")
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        effective = (
+            Path(env["WMS_DEV_TEST_STATE"]) / "api.env"
+        ).read_text(encoding="utf-8")
+        expected_hash = hashlib.sha256(REPLACEMENT_TOKEN.encode()).hexdigest()
+        assert f"|{expected_hash}|" in effective
+    finally:
+        _run_dev(env, "stop")
+
+
+def test_explicit_environment_overrides_root_env(tmp_path: Path) -> None:
+    bin_dir = _fake_runtime_tools(tmp_path)
+    env = _dev_env(tmp_path, bin_dir)
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        f"WMS_WORKER_TOKEN={REPLACEMENT_TOKEN}\n",
+        encoding="utf-8",
+    )
+    env["WMS_DEV_ENV_FILE"] = str(env_file)
+
+    try:
+        result = _run_dev(env, "start")
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        effective = (
+            Path(env["WMS_DEV_TEST_STATE"]) / "api.env"
+        ).read_text(encoding="utf-8")
+        expected_hash = hashlib.sha256(VALID_TOKEN.encode()).hexdigest()
+        assert f"|{expected_hash}|" in effective
+        assert REPLACEMENT_TOKEN not in result.stdout
+        assert REPLACEMENT_TOKEN not in result.stderr
+    finally:
+        _run_dev(env, "stop")
+
+
+def test_missing_env_fails_before_spawning_children_without_printing_secrets(
+    tmp_path: Path,
+) -> None:
+    bin_dir = _fake_runtime_tools(tmp_path)
+    env = _dev_env(tmp_path, bin_dir)
+    secret = VALID_TOKEN
+    env["WMS_DEV_ENV_FILE"] = str(tmp_path / "missing.env")
+
+    result = _run_dev(env, "start")
+
+    assert result.returncode != 0
+    assert not _events(env)
+    assert ".env.example" in result.stderr
+    assert secret not in result.stdout
+    assert secret not in result.stderr
+
+
 def test_start_waits_for_each_service_and_stop_reverses_owned_processes(
     tmp_path: Path,
 ) -> None:

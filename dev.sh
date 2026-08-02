@@ -6,6 +6,58 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DEV_ENV_FILE="${WMS_DEV_ENV_FILE:-$ROOT/.env}"
+
+load_dev_environment() {
+  local line name source_status had_allexport=0
+  local -a names=()
+  local -A seen=() existing=() existing_values=()
+
+  if [ ! -f "$DEV_ENV_FILE" ]; then
+    printf 'Development environment file not found: %s\n' "$DEV_ENV_FILE" >&2
+    printf 'Create it from %s/.env.example before running ./dev.sh\n' "$ROOT" >&2
+    return 1
+  fi
+
+  while IFS= read -r line || [ -n "$line" ]; do
+    if [[ "$line" =~ ^[[:space:]]*(export[[:space:]]+)?([a-zA-Z_][a-zA-Z0-9_]*)= ]]; then
+      name="${BASH_REMATCH[2]}"
+      if [ -z "${seen[$name]:-}" ]; then
+        names+=("$name")
+        seen["$name"]=1
+        if [[ -v "$name" ]]; then
+          existing["$name"]=1
+          existing_values["$name"]="${!name}"
+        fi
+      fi
+    fi
+  done <"$DEV_ENV_FILE"
+
+  case "$-" in
+    *a*) had_allexport=1 ;;
+  esac
+  set -a
+  # shellcheck disable=SC1090
+  source "$DEV_ENV_FILE"
+  source_status=$?
+  [ "$had_allexport" -eq 1 ] || set +a
+
+  for name in "${names[@]}"; do
+    if [ -n "${existing[$name]:-}" ]; then
+      printf -v "$name" '%s' "${existing_values[$name]}"
+      export "$name"
+    fi
+  done
+
+  if [ "$source_status" -ne 0 ]; then
+    printf 'Failed to load development environment file: %s\n' \
+      "$DEV_ENV_FILE" >&2
+    return "$source_status"
+  fi
+}
+
+load_dev_environment || exit 1
+
 BACKEND_DIR="$ROOT/backend"
 FRONTEND_DIR="$ROOT/wemedia-studio"
 LOG_DIR="${WMS_DEV_LOG_DIR:-$ROOT/logs}"
