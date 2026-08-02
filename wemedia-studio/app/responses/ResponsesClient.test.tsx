@@ -147,16 +147,10 @@ describe('ResponsesClient action source', () => {
     expect(screen.queryByRole('heading', { name: 'Slow video' })).not.toBeInTheDocument()
   })
 
-  it('keeps output creation gated when a list refresh selects a different response', async () => {
+  it('keeps the adopted response creation session active until creation succeeds', async () => {
     const first = detail(38, 'Selected video')
     const second = detail(39, 'Another video')
-    const secondRequest = deferred<ResponseDetail>()
-    let secondCalls = 0
-    api.getResponse.mockImplementation((id: number) => {
-      if (id === first.id) return Promise.resolve(first)
-      secondCalls += 1
-      return secondCalls === 1 ? secondRequest.promise : Promise.resolve(second)
-    })
+    api.getResponse.mockImplementation((id: number) => Promise.resolve(id === first.id ? first : second))
     api.getResponses.mockResolvedValue({ items: [second], total: 1, page: 1, page_size: 30 })
     api.decideResponse.mockResolvedValue({ ...first, decision_status: 'adopted' })
     api.createResponseOutputs.mockResolvedValue({ outputs: [] })
@@ -168,19 +162,40 @@ describe('ResponsesClient action source', () => {
     await user.click(screen.getByRole('button', { name: '采纳创作' }))
     const createButton = await screen.findByRole('button', { name: '创建任务' })
 
-    await waitFor(() => expect(api.getResponse).toHaveBeenCalledWith(39))
-    expect(createButton).toBeDisabled()
-    expect(screen.getByRole('combobox')).toBeDisabled()
-    expect(screen.getByRole('button', { name: '扩写文章' })).toBeDisabled()
+    expect(screen.getByText('将基于：Selected video')).toBeInTheDocument()
+    expect(createButton).toBeEnabled()
+    expect(screen.getByRole('combobox')).toBeEnabled()
+    expect(screen.getByRole('button', { name: '扩写文章' })).toBeEnabled()
     await user.click(createButton)
-    expect(api.createResponseOutputs).not.toHaveBeenCalled()
-
-    await act(async () => {
-      secondRequest.resolve(second)
-      await secondRequest.promise
+    await waitFor(() => expect(api.createResponseOutputs).toHaveBeenCalledWith(first.id, {
+      analysis_run_id: 380,
+      publish_account_id: null,
+      output_types: ['expanded_article'],
+    }))
+    await waitFor(() => {
+      expect(screen.queryByText('将基于：Selected video')).not.toBeInTheDocument()
+      expect(screen.getByRole('heading', { name: 'Another video' })).toBeInTheDocument()
     })
-    expect(screen.getByRole('button', { name: '创建任务' })).toBeDisabled()
-    await user.click(screen.getByRole('button', { name: '创建任务' }))
+  })
+
+  it('selects the next listed response when an adopted creation session is cancelled', async () => {
+    const first = detail(38, 'Selected video')
+    const second = detail(39, 'Another video')
+    api.getResponse.mockImplementation((id: number) => Promise.resolve(id === first.id ? first : second))
+    api.getResponses.mockResolvedValue({ items: [second], total: 1, page: 1, page_size: 30 })
+    api.decideResponse.mockResolvedValue({ ...first, decision_status: 'adopted' })
+
+    render(<ResponsesClient initialItems={[first, second]} initialTotal={2} accounts={[]} initialSelectedId={38} initialSource="" />)
+    const user = userEvent.setup()
+
+    await screen.findByRole('heading', { name: 'Selected video' })
+    await user.click(screen.getByRole('button', { name: '采纳创作' }))
+    expect(await screen.findByText('将基于：Selected video')).toBeInTheDocument()
+    await screen.findByText('1 条内容等待判断与创作')
+    await user.click(screen.getByRole('button', { name: '取消' }))
+
+    expect(screen.queryByText('将基于：Selected video')).not.toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: 'Another video' })).toBeInTheDocument()
     expect(api.createResponseOutputs).not.toHaveBeenCalled()
   })
 

@@ -77,6 +77,7 @@ export function ResponsesClient({
   const [showCreate, setShowCreate] = useState(false)
   const [creationDetail, setCreationDetail] = useState<ResponseDetail | null>(null)
   const [submittingOutputs, setSubmittingOutputs] = useState(false)
+  const itemsRef = useRef(initialItems)
   const selectedIdRef = useRef(selectedId)
   const detailRequestGeneration = useRef(0)
   const detailLoadStateRef = useRef<'idle' | 'loading' | 'ready' | 'error'>(
@@ -123,9 +124,12 @@ export function ResponsesClient({
         decision_status: status,
         search,
       })
+      itemsRef.current = result.items
       setItems(result.items)
       setTotal(result.total)
       const currentId = selectedIdRef.current
+      const creationId = creationDetailRef.current?.id ?? null
+      if (creationId === currentId) return
       const nextId = currentId && result.items.some(item => item.id === currentId)
         ? currentId
         : result.items[0]?.id ?? null
@@ -231,6 +235,12 @@ export function ResponsesClient({
     setSubmittingOutputs(false)
     setCreationDetail(null)
     setShowCreate(false)
+    const currentId = selectedIdRef.current
+    const latestItems = itemsRef.current
+    const nextId = currentId && latestItems.some(item => item.id === currentId)
+      ? currentId
+      : latestItems[0]?.id ?? null
+    if (nextId !== currentId) selectResponse(nextId)
   }
 
   async function decide(action: 'adopt' | 'later' | 'not_valuable' | 'reset') {
