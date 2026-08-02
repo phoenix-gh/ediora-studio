@@ -3,10 +3,15 @@ import { tool, type ToolSet } from 'ai'
 import { z } from 'zod'
 
 import {
+  getEnabledSkill,
+  listEnabledSkills,
+  listSkillReferences,
   readSkillReference,
   skillReferenceContextByteLimit,
   SkillRegistryError,
   type SkillReferenceContent,
+  type RegisteredSkill,
+  type SkillReference,
 } from '../skills/registry'
 
 const sensitiveToolVerb = /(^|_)(publish|delete|update|save|create|add|upload)(_|$)/
@@ -36,6 +41,122 @@ export const imageGenerationInputSchema = z.object({
 export const skillReferenceInputSchema = z.object({
   path: z.string().min(1).max(500),
 }).strict()
+
+export const loadSkillInputSchema = z.object({
+  name: z.string().min(1).max(200),
+}).strict()
+
+export type ChatSkillActivationSource = 'manual' | 'automatic'
+
+export type ChatSkillSnapshot = {
+  source?: ChatSkillActivationSource
+  activeSkillName?: string
+  referenceCount: number
+  readReferenceCount: number
+}
+
+type ChatSkillRuntimeOptions = {
+  selectedSkillName?: string
+  baseTools: ToolSet
+  close?: () => void | Promise<void>
+  listEnabled?: () => Promise<RegisteredSkill[]>
+  getEnabled?: (name: string) => Promise<RegisteredSkill | null>
+  listReferences?: (name: string) => Promise<SkillReference[]>
+  readReference?: (name: string, path: string) => Promise<SkillReferenceContent>
+}
+
+export type ChatSkillRuntime = {
+  tools: ToolSet
+  catalogContext: string
+  snapshot(): ChatSkillSnapshot
+  close(): Promise<void>
+}
+
+function referenceCatalog(references: SkillReference[]) {
+  return references.length
+    ? references.map(reference => `- ${reference.path} (${reference.bytes} bytes)`).join('\n')
+    : '- No readable references'
+}
+
+export async function createChatSkillRuntime({
+  selectedSkillName,
+  baseTools,
+  close = () => undefined,
+  listEnabled = listEnabledSkills,
+  getEnabled = getEnabledSkill,
+  listReferences = listSkillReferences,
+  readReference = readSkillReference,
+}: ChatSkillRuntimeOptions): Promise<ChatSkillRuntime> {
+  const enabledSkills = await listEnabled()
+  let activeSkill: RegisteredSkill | undefined
+  let source: ChatSkillActivationSource | undefined
+  let references: SkillReference[] = []
+  let reader: ReturnType<typeof createSkillReferenceReader> | undefined
+  const readPaths = new Set<string>()
+
+  async function activate(name: string, activationSource: ChatSkillActivationSource) {
+    if (activeSkill) {
+      if (activeSkill.name !== name) throw new SkillRegistryError('conflict', `Skill already active: ${activeSkill.name}`)
+      return activeSkill
+    }
+    const skill = await getEnabled(name)
+    if (!skill) throw new SkillRegistryError('not_found', `Skill unavailable: ${name}`)
+    activeSkill = skill
+    source = activationSource
+    references = await listReferences(name)
+    reader = createSkillReferenceReader({ skillName: name, readReference })
+    return skill
+  }
+
+  if (selectedSkillName) await activate(selectedSkillName, 'manual')
+
+  const tools = { ...baseTools } as ToolSet
+  if (!selectedSkillName) {
+    tools.loadSkill = tool({
+      description: 'Load the one best matching enabled Skill before performing a task that needs its specialized workflow. Activate at most one Skill.',
+      inputSchema: loadSkillInputSchema,
+      execute: async ({ name }) => {
+        const skill = await activate(name, 'automatic')
+        return {
+          name: skill.name,
+          description: skill.description,
+          version: skill.version,
+          instructions: skill.instructions,
+          references,
+        }
+      },
+    })
+  }
+  tools.readSkillReference = tool({
+    description: 'Read one listed reference from the active Skill. Read every reference required by the Skill instructions before producing task output.',
+    inputSchema: skillReferenceInputSchema,
+    execute: async ({ path }) => {
+      if (!activeSkill || !reader) throw new SkillRegistryError('not_found', 'No Skill is active')
+      const reference = await reader({ path })
+      readPaths.add(reference.path)
+      return reference
+    },
+  })
+
+  const automaticCatalog = enabledSkills.length
+    ? enabledSkills.map(skill => `- ${skill.name}: ${skill.description}`).join('\n')
+    : '- No enabled Skills'
+  const catalogContext = activeSkill
+    ? `Selected skill: ${activeSkill.name}\n\n${activeSkill.instructions}\n\nAvailable Skill references:\n${referenceCatalog(references)}`
+    : `Enabled Skills available for automatic activation:\n${automaticCatalog}\n\nCall loadSkill only when exactly one Skill clearly matches the user's task.`
+
+  return {
+    tools,
+    catalogContext,
+    snapshot: () => ({
+      source,
+      activeSkillName: activeSkill?.name,
+      referenceCount: references.length,
+      readReferenceCount: readPaths.size,
+    }),
+    close: async () => { await close() },
+  }
+}
 
 export function createSkillReferenceReader({
   skillName,
@@ -106,13 +227,9 @@ export async function openGlobalChatTools({ apiBase, skillName }: GlobalChatTool
       return createImageJob({ apiBase, prompt })
     },
   })
-  if (skillName) {
-    tools.readSkillReference = tool({
-      description: 'Read one text reference from the currently selected Skill. Use only paths listed in the selected Skill context.',
-      inputSchema: skillReferenceInputSchema,
-      execute: createSkillReferenceReader({ skillName }),
-    })
-  }
-
-  return { tools, close: () => client.close() }
+  return createChatSkillRuntime({
+    selectedSkillName: skillName,
+    baseTools: tools,
+    close: () => client.close(),
+  })
 }

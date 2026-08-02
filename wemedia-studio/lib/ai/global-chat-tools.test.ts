@@ -1,11 +1,30 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
+  createChatSkillRuntime,
   createImageJob,
   createSkillReferenceReader,
   imageGenerationInputSchema,
   requiresToolApproval,
 } from './global-chat-tools'
+
+const alpha = {
+  name: 'Alpha', description: 'Alpha description', version: '1.0.0', source: 'builtin' as const,
+  enabled: true, instructions: '# Alpha rules', directory: '/skills/alpha',
+}
+
+function runtimeDependencies() {
+  return {
+    listEnabled: async () => [alpha],
+    getEnabled: async (name: string) => name === 'Alpha' ? alpha : null,
+    listReferences: async (name: string) => name === 'Alpha' ? [{ path: 'references/rules.md', bytes: 5 }] : [],
+    readReference: async (name: string, path: string) => ({ path, content: `${name} rules`, bytes: 5 }),
+  }
+}
+
+async function executeTool(tool: unknown, input: unknown) {
+  return (tool as { execute: (input: unknown, options: never) => Promise<unknown> }).execute(input, {} as never)
+}
 
 describe('global Chat tool policy', () => {
   afterEach(() => vi.unstubAllGlobals())
@@ -51,6 +70,42 @@ describe('global Chat tool policy', () => {
     await expect(read({ path: 'references/rules.md' })).rejects.toMatchObject({
       code: 'invalid_reference',
       message: 'Unable to read Skill reference',
+    })
+  })
+
+  it('activates a manually selected Skill before the first model step', async () => {
+    const runtime = await createChatSkillRuntime({
+      selectedSkillName: 'Alpha',
+      baseTools: {},
+      ...runtimeDependencies(),
+    })
+
+    expect(runtime.snapshot()).toEqual({
+      source: 'manual', activeSkillName: 'Alpha', referenceCount: 1, readReferenceCount: 0,
+    })
+    expect(runtime.catalogContext).toContain('Selected skill: Alpha')
+    expect(runtime.catalogContext).toContain('# Alpha rules')
+    expect(runtime.catalogContext).toContain('references/rules.md')
+  })
+
+  it('loads at most one automatic Skill and scopes subsequent reference reads', async () => {
+    const runtime = await createChatSkillRuntime({ baseTools: {}, ...runtimeDependencies() })
+
+    expect(runtime.catalogContext).toContain('Alpha: Alpha description')
+    expect(runtime.catalogContext).not.toContain('# Alpha rules')
+    await expect(executeTool(runtime.tools.readSkillReference, { path: 'references/rules.md' }))
+      .rejects.toMatchObject({ code: 'not_found' })
+
+    await expect(executeTool(runtime.tools.loadSkill, { name: 'Alpha' })).resolves.toMatchObject({
+      name: 'Alpha', instructions: '# Alpha rules', references: [{ path: 'references/rules.md', bytes: 5 }],
+    })
+    await expect(executeTool(runtime.tools.readSkillReference, { path: 'references/rules.md' })).resolves.toMatchObject({
+      path: 'references/rules.md', content: 'Alpha rules',
+    })
+    await expect(executeTool(runtime.tools.loadSkill, { name: 'Beta' }))
+      .rejects.toMatchObject({ code: 'conflict' })
+    expect(runtime.snapshot()).toEqual({
+      source: 'automatic', activeSkillName: 'Alpha', referenceCount: 1, readReferenceCount: 1,
     })
   })
 
