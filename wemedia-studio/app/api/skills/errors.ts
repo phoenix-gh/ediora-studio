@@ -7,6 +7,8 @@ const statusByCode = {
   conflict: 409,
   forbidden: 409,
   invalid_archive: 400,
+  invalid_reference: 400,
+  reference_not_found: 404,
   too_large: 413,
 } as const
 

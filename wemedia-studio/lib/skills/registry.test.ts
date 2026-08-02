@@ -1,4 +1,4 @@
-import { access, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { access, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -9,7 +9,10 @@ import {
   getEnabledSkill,
   installSkillArchive,
   listEnabledSkills,
+  listSkillReferences,
   listSkills,
+  loadSkillContext,
+  readSkillReference,
   setSkillEnabled,
 } from './registry'
 
@@ -40,6 +43,9 @@ describe('Skill registry', () => {
     delete process.env.WMS_SKILLS_MAX_ARCHIVE_BYTES
     delete process.env.WMS_SKILLS_MAX_UNPACKED_BYTES
     delete process.env.WMS_SKILLS_MAX_FILES
+    delete process.env.WMS_SKILLS_MAX_REFERENCES
+    delete process.env.WMS_SKILLS_MAX_REFERENCE_BYTES
+    delete process.env.WMS_SKILLS_MAX_REFERENCE_CONTEXT_BYTES
     await Promise.all([
       rm(bundledDir, { recursive: true, force: true }),
       rm(runtimeDir, { recursive: true, force: true }),
@@ -101,6 +107,9 @@ describe('Skill registry', () => {
       expect.objectContaining({ name: 'Two', source: 'uploaded', enabled: true }),
     ]))
     await expect(access(join(runtimeDir, 'Root', 'references', 'notes.md'))).resolves.toBeUndefined()
+    await expect(readSkillReference('Root', 'references/notes.md')).resolves.toEqual({
+      path: 'references/notes.md', content: 'root notes', bytes: 10,
+    })
     expect((await listEnabledSkills()).map(skill => skill.name)).toEqual(expect.arrayContaining(['Root', 'One', 'Two']))
   })
 
@@ -147,6 +156,82 @@ describe('Skill registry', () => {
     ]))
     expect(await getEnabledSkill('Persistent')).toBeNull()
     expect(await readFile(join(runtimeDir, 'skills-state.json'), 'utf8')).toContain('Persistent')
+  })
+
+  it('discovers supported nested references and loads explicit context once per path', async () => {
+    await writeSkill(bundledDir, 'alpha', 'Alpha')
+    const skillDir = join(bundledDir, 'alpha')
+    await mkdir(join(skillDir, 'references', 'nested'), { recursive: true })
+    await mkdir(join(skillDir, '.hidden'), { recursive: true })
+    await writeFile(join(skillDir, 'references', 'rules.md'), 'rules', 'utf8')
+    await writeFile(join(skillDir, 'references', 'nested', 'config.yaml'), 'tone: direct', 'utf8')
+    await writeFile(join(skillDir, 'references', 'image.png'), new Uint8Array([0, 1, 2]))
+    await writeFile(join(skillDir, '.hidden', 'secret.md'), 'secret', 'utf8')
+
+    await expect(listSkillReferences('Alpha')).resolves.toEqual([
+      { path: 'references/nested/config.yaml', bytes: 12 },
+      { path: 'references/rules.md', bytes: 5 },
+    ])
+    await expect(readSkillReference('Alpha', 'references/rules.md')).resolves.toEqual({
+      path: 'references/rules.md', content: 'rules', bytes: 5,
+    })
+    await expect(loadSkillContext('Alpha', [
+      'references/rules.md',
+      'references/nested/config.yaml',
+      'references/rules.md',
+    ])).resolves.toEqual(expect.objectContaining({
+      name: 'Alpha',
+      instructions: expect.stringContaining('# Alpha'),
+      references: [
+        { path: 'references/rules.md', content: 'rules', bytes: 5 },
+        { path: 'references/nested/config.yaml', content: 'tone: direct', bytes: 12 },
+      ],
+    }))
+  })
+
+  it('rejects unsafe, hidden, unsupported, malformed, and symlink reference reads', async () => {
+    await writeSkill(bundledDir, 'alpha', 'Alpha')
+    const skillDir = join(bundledDir, 'alpha')
+    await mkdir(join(skillDir, 'references'), { recursive: true })
+    await writeFile(join(skillDir, 'references', 'rules.md'), 'rules', 'utf8')
+    await writeFile(join(skillDir, 'references', 'bad.md'), new Uint8Array([0xff]))
+    await writeFile(join(skillDir, 'references', 'nul.md'), new Uint8Array([97, 0, 98]))
+    await writeFile(join(skillDir, 'references', 'script.js'), 'alert(1)', 'utf8')
+    await symlink(join(skillDir, 'references', 'rules.md'), join(skillDir, 'references', 'linked.md'))
+
+    for (const path of ['', '/etc/passwd', '../outside.md', 'references\\rules.md', '.hidden/rules.md', 'SKILL.md']) {
+      await expect(readSkillReference('Alpha', path)).rejects.toMatchObject({ code: 'invalid_reference' })
+    }
+    await expect(readSkillReference('Alpha', 'references/script.js')).rejects.toMatchObject({ code: 'invalid_reference' })
+    await expect(readSkillReference('Alpha', 'references/missing.md')).rejects.toMatchObject({ code: 'reference_not_found' })
+    await expect(readSkillReference('Alpha', 'references/linked.md')).rejects.toMatchObject({ code: 'invalid_reference' })
+    await expect(readSkillReference('Alpha', 'references/bad.md')).rejects.toMatchObject({ code: 'invalid_reference' })
+    await expect(readSkillReference('Alpha', 'references/nul.md')).rejects.toMatchObject({ code: 'invalid_reference' })
+  })
+
+  it('enforces catalog, file, and cumulative reference limits and disabled state', async () => {
+    await writeSkill(bundledDir, 'alpha', 'Alpha')
+    const skillDir = join(bundledDir, 'alpha')
+    await mkdir(join(skillDir, 'references'), { recursive: true })
+    await writeFile(join(skillDir, 'references', 'one.md'), '12345', 'utf8')
+    await writeFile(join(skillDir, 'references', 'two.md'), '67890', 'utf8')
+
+    process.env.WMS_SKILLS_MAX_REFERENCES = '1'
+    await expect(listSkillReferences('Alpha')).rejects.toMatchObject({ code: 'too_large' })
+    delete process.env.WMS_SKILLS_MAX_REFERENCES
+
+    process.env.WMS_SKILLS_MAX_REFERENCE_BYTES = '4'
+    await expect(readSkillReference('Alpha', 'references/one.md')).rejects.toMatchObject({ code: 'too_large' })
+    delete process.env.WMS_SKILLS_MAX_REFERENCE_BYTES
+
+    process.env.WMS_SKILLS_MAX_REFERENCE_CONTEXT_BYTES = '9'
+    await expect(loadSkillContext('Alpha', ['references/one.md', 'references/two.md']))
+      .rejects.toMatchObject({ code: 'too_large' })
+    delete process.env.WMS_SKILLS_MAX_REFERENCE_CONTEXT_BYTES
+
+    await setSkillEnabled('Alpha', false)
+    await expect(listSkillReferences('Alpha')).rejects.toMatchObject({ code: 'not_found' })
+    await expect(readSkillReference('Alpha', 'references/one.md')).rejects.toMatchObject({ code: 'not_found' })
   })
 })
 

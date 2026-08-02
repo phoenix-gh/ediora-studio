@@ -7,9 +7,9 @@ import { latestClientTurn, modelHistoryCandidates } from '@/lib/ai/chat-tools'
 import { buildChatInstructions } from '@/lib/ai/chat-instructions'
 import { CHAT_MAX_STEPS, chatToolLoopStep, needsFinalAnswerFallback } from '@/lib/ai/chat-loop'
 import { baoyuRuntimeInstructions } from '@/lib/ai/content-job'
-import { discoverSkills } from '@/lib/ai/discover-skills'
 import { openGlobalChatTools } from '@/lib/ai/global-chat-tools'
 import { workerHeaders } from '@/lib/ai/job-client'
+import { getEnabledSkill, listSkillReferences } from '@/lib/skills/registry'
 
 const requestSchema = z.object({
   sessionId: z.number().int().positive(),
@@ -106,18 +106,25 @@ async function persistApproval(sessionId: number, approval: NonNullable<z.infer<
   if (!updated.ok) throw new Error(`Unable to persist tool approval (${updated.status})`)
 }
 
+export async function selectedSkillContext(skillName: string) {
+  const skill = await getEnabledSkill(skillName)
+  if (!skill) throw new Error('Selected skill is unavailable')
+  const references = await listSkillReferences(skillName)
+  const catalog = references.length
+    ? references.map(reference => `- ${reference.path} (${reference.bytes} bytes)`).join('\n')
+    : '- No readable references'
+  const runtime = skill.name === 'baoyu-cover-image'
+    ? `${baoyuRuntimeInstructions('cover', 1)} Use generateImage to create the cover for the selected draft.\n\n`
+    : skill.name === 'baoyu-article-illustrator'
+      ? `${baoyuRuntimeInstructions('illustrations', 1)} Use generateImage to create the illustration for the selected draft.\n\n`
+      : ''
+  return `Selected skill: ${skill.name}\n\n${runtime}${skill.instructions}\n\nAvailable Skill references:\n${catalog}\n\nWhen the selected Skill requires one of these files, call readSkillReference with its exact listed path. Do not invent missing reference content.`
+}
+
 async function selectedContext(skillName?: string, draftId?: number) {
   const context: string[] = []
   if (skillName) {
-    const skill = (await discoverSkills()).find(item => item.name === skillName)
-    if (!skill) throw new Error('Selected skill is unavailable')
-    if (skill.name === 'baoyu-cover-image') {
-      context.push(`Selected skill: ${skill.name}\n\n${baoyuRuntimeInstructions('cover', 1)} Use generateImage to create the cover for the selected draft.`)
-    } else if (skill.name === 'baoyu-article-illustrator') {
-      context.push(`Selected skill: ${skill.name}\n\n${baoyuRuntimeInstructions('illustrations', 1)} Use generateImage to create the illustration for the selected draft.`)
-    } else {
-      context.push(`Selected skill: ${skill.name}\n\n${skill.instructions}`)
-    }
+    context.push(await selectedSkillContext(skillName))
   }
   if (draftId) {
     const response = await fetch(`${apiBase()}/write/drafts/${draftId}`, { cache: 'no-store' })

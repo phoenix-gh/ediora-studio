@@ -2,11 +2,18 @@ import { createMCPClient } from '@ai-sdk/mcp'
 import { tool, type ToolSet } from 'ai'
 import { z } from 'zod'
 
+import {
+  readSkillReference,
+  skillReferenceContextByteLimit,
+  SkillRegistryError,
+  type SkillReferenceContent,
+} from '../skills/registry'
+
 const sensitiveToolVerb = /(^|_)(publish|delete|update|save|create|add|upload)(_|$)/
 const readOnlyToolPrefix = /^(list|get|search|read|fetch|find)_/
 
 export function requiresToolApproval(name: string) {
-  return name !== 'generateImage' && !readOnlyToolPrefix.test(name) && sensitiveToolVerb.test(name)
+  return name !== 'generateImage' && name !== 'readSkillReference' && !readOnlyToolPrefix.test(name) && sensitiveToolVerb.test(name)
 }
 
 export function mcpUrl(apiBase: string) {
@@ -25,6 +32,40 @@ export type ImageFlow = 'standalone_image'
 export const imageGenerationInputSchema = z.object({
   prompt: z.string().min(1).max(4_000),
 }).strict()
+
+export const skillReferenceInputSchema = z.object({
+  path: z.string().min(1).max(500),
+}).strict()
+
+export function createSkillReferenceReader({
+  skillName,
+  readReference = readSkillReference,
+  maxBytes = skillReferenceContextByteLimit(),
+}: {
+  skillName: string
+  readReference?: (skillName: string, path: string) => Promise<SkillReferenceContent>
+  maxBytes?: number
+}) {
+  const cache = new Map<string, SkillReferenceContent>()
+  let consumedBytes = 0
+  return async ({ path }: { path: string }) => {
+    const cached = cache.get(path)
+    if (cached) return cached
+    let reference: SkillReferenceContent
+    try {
+      reference = await readReference(skillName, path)
+    } catch (error) {
+      if (error instanceof SkillRegistryError) throw error
+      throw new SkillRegistryError('invalid_reference', 'Unable to read Skill reference')
+    }
+    if (consumedBytes + reference.bytes > maxBytes) {
+      throw new SkillRegistryError('too_large', `Skill reference context exceeds ${maxBytes} bytes`)
+    }
+    consumedBytes += reference.bytes
+    cache.set(path, reference)
+    return reference
+  }
+}
 
 export async function createImageJob({
   apiBase,
@@ -47,7 +88,7 @@ export async function createImageJob({
   return { jobId: job.id, flow: job.flow, status: job.status }
 }
 
-export async function openGlobalChatTools({ apiBase }: GlobalChatToolOptions) {
+export async function openGlobalChatTools({ apiBase, skillName }: GlobalChatToolOptions) {
   const client = await createMCPClient({
     transport: { type: 'http', url: mcpUrl(apiBase) },
   })
@@ -65,6 +106,13 @@ export async function openGlobalChatTools({ apiBase }: GlobalChatToolOptions) {
       return createImageJob({ apiBase, prompt })
     },
   })
+  if (skillName) {
+    tools.readSkillReference = tool({
+      description: 'Read one text reference from the currently selected Skill. Use only paths listed in the selected Skill context.',
+      inputSchema: skillReferenceInputSchema,
+      execute: createSkillReferenceReader({ skillName }),
+    })
+  }
 
   return { tools, close: () => client.close() }
 }

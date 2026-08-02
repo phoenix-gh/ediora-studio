@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { createImageJob, imageGenerationInputSchema, requiresToolApproval } from './global-chat-tools'
+import {
+  createImageJob,
+  createSkillReferenceReader,
+  imageGenerationInputSchema,
+  requiresToolApproval,
+} from './global-chat-tools'
 
 describe('global Chat tool policy', () => {
   afterEach(() => vi.unstubAllGlobals())
@@ -14,6 +19,39 @@ describe('global Chat tool policy', () => {
 
   it('does not require approval to create a durable image-generation job', () => {
     expect(requiresToolApproval('generateImage')).toBe(false)
+    expect(requiresToolApproval('readSkillReference')).toBe(false)
+  })
+
+  it('scopes Skill reference reads, caches repeats, and shares one byte budget', async () => {
+    const readReference = vi.fn(async (skillName: string, path: string) => ({
+      path,
+      content: `${skillName}:${path}`,
+      bytes: 3,
+    }))
+    const read = createSkillReferenceReader({ skillName: 'Alpha', readReference, maxBytes: 5 })
+
+    await expect(read({ path: 'references/one.md' })).resolves.toEqual({
+      path: 'references/one.md', content: 'Alpha:references/one.md', bytes: 3,
+    })
+    await expect(read({ path: 'references/one.md' })).resolves.toEqual({
+      path: 'references/one.md', content: 'Alpha:references/one.md', bytes: 3,
+    })
+    await expect(read({ path: 'references/two.md' })).rejects.toMatchObject({ code: 'too_large' })
+    expect(readReference).toHaveBeenCalledTimes(2)
+    expect(readReference).toHaveBeenNthCalledWith(1, 'Alpha', 'references/one.md')
+    expect(readReference).toHaveBeenNthCalledWith(2, 'Alpha', 'references/two.md')
+  })
+
+  it('does not expose unexpected filesystem errors through the Chat reference reader', async () => {
+    const read = createSkillReferenceReader({
+      skillName: 'Alpha',
+      readReference: async () => { throw new Error('EACCES: /private/skill/reference.md') },
+    })
+
+    await expect(read({ path: 'references/rules.md' })).rejects.toMatchObject({
+      code: 'invalid_reference',
+      message: 'Unable to read Skill reference',
+    })
   })
 
   it('accepts only a free-form image prompt', () => {

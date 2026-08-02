@@ -3,8 +3,19 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
 import { latestClientTurn, modelHistoryCandidates } from '../../../lib/ai/chat-tools'
+import { selectedSkillContext } from './route'
 
 describe('global chat model history', () => {
+  it('describes available references without embedding their content', async () => {
+    const context = await selectedSkillContext('baoyu-cover-image')
+
+    expect(context).toContain('Selected skill: baoyu-cover-image')
+    expect(context).toContain('Available Skill references:')
+    expect(context).toContain('references/auto-selection.md')
+    expect(context).toContain('readSkillReference')
+    expect(context).not.toContain('# Auto Selection')
+  })
+
   it('uses the global MCP registry and image-skill runtime adapter', () => {
     const source = readFileSync(new URL('./route.ts', import.meta.url), 'utf8')
 

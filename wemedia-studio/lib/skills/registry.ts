@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
-import { mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
+import { lstat, mkdir, readdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises'
+import { dirname, extname, isAbsolute, join, relative } from 'node:path'
 import { strFromU8, unzipSync } from 'fflate'
 
 export type SkillSource = 'builtin' | 'uploaded'
@@ -18,11 +18,28 @@ export type RegisteredSkill = ManagedSkill & {
   directory: string
 }
 
+export type SkillReference = {
+  path: string
+  bytes: number
+}
+
+export type SkillReferenceContent = SkillReference & {
+  content: string
+}
+
+export type SkillContext = {
+  name: string
+  instructions: string
+  references: SkillReferenceContent[]
+}
+
 export type SkillRegistryErrorCode =
   | 'not_found'
   | 'conflict'
   | 'forbidden'
   | 'invalid_archive'
+  | 'invalid_reference'
+  | 'reference_not_found'
   | 'too_large'
 
 export class SkillRegistryError extends Error {
@@ -51,6 +68,10 @@ const skillNamePattern = /^[A-Za-z0-9._-]{1,80}$/
 export const MAX_ARCHIVE_BYTES = 10 * 1024 * 1024
 export const MAX_UNPACKED_BYTES = 50 * 1024 * 1024
 export const MAX_ARCHIVE_FILES = 500
+export const MAX_SKILL_REFERENCES = 200
+export const MAX_SKILL_REFERENCE_BYTES = 128 * 1024
+export const MAX_SKILL_REFERENCE_CONTEXT_BYTES = 512 * 1024
+const supportedReferenceExtensions = new Set(['.md', '.txt', '.json', '.yaml', '.yml'])
 let mutationQueue: Promise<void> = Promise.resolve()
 
 function bundledDirectory() {
@@ -186,6 +207,127 @@ export async function getEnabledSkill(name: string): Promise<RegisteredSkill | n
   const record = (await allRecords()).find(candidate => candidate.name === name)
   if (!record || !record.enabled) return null
   return { ...record }
+}
+
+function referenceError(code: 'invalid_reference' | 'reference_not_found', message: string): never {
+  throw new SkillRegistryError(code, message)
+}
+
+async function enabledSkillOrThrow(name: string) {
+  const skill = await getEnabledSkill(name)
+  if (!skill) throw new SkillRegistryError('not_found', `Skill unavailable: ${name}`)
+  return skill
+}
+
+function validatedReferenceParts(referencePath: string) {
+  if (!referencePath || referencePath.includes('\0') || referencePath.includes('\\') || isAbsolute(referencePath)) {
+    referenceError('invalid_reference', 'Invalid Skill reference path')
+  }
+  const parts = referencePath.split('/')
+  if (
+    parts.some(part => !part || part === '.' || part === '..' || part.startsWith('.'))
+    || parts.at(-1) === 'SKILL.md'
+    || !supportedReferenceExtensions.has(extname(parts.at(-1) ?? '').toLowerCase())
+  ) referenceError('invalid_reference', 'Invalid Skill reference path')
+  return parts
+}
+
+function isInsideDirectory(root: string, target: string) {
+  const pathFromRoot = relative(root, target)
+  return pathFromRoot !== '' && pathFromRoot !== '..' && !pathFromRoot.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`) && !isAbsolute(pathFromRoot)
+}
+
+async function safeReferenceTarget(skillDirectory: string, referencePath: string) {
+  const parts = validatedReferenceParts(referencePath)
+  let current = skillDirectory
+  for (const [index, part] of parts.entries()) {
+    current = join(current, part)
+    let metadata
+    try {
+      metadata = await lstat(current)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        referenceError('reference_not_found', `Skill reference not found: ${referencePath}`)
+      }
+      throw error
+    }
+    if (metadata.isSymbolicLink()) referenceError('invalid_reference', 'Skill reference symlinks are not allowed')
+    const final = index === parts.length - 1
+    if ((!final && !metadata.isDirectory()) || (final && !metadata.isFile())) {
+      referenceError('reference_not_found', `Skill reference not found: ${referencePath}`)
+    }
+  }
+  const [rootPath, targetPath] = await Promise.all([realpath(skillDirectory), realpath(current)])
+  if (!isInsideDirectory(rootPath, targetPath)) referenceError('invalid_reference', 'Skill reference escapes its Skill directory')
+  return current
+}
+
+export function skillReferenceContextByteLimit() {
+  return configuredLimit('WMS_SKILLS_MAX_REFERENCE_CONTEXT_BYTES', MAX_SKILL_REFERENCE_CONTEXT_BYTES)
+}
+
+export async function listSkillReferences(name: string): Promise<SkillReference[]> {
+  const skill = await enabledSkillOrThrow(name)
+  const maxReferences = configuredLimit('WMS_SKILLS_MAX_REFERENCES', MAX_SKILL_REFERENCES)
+  const references: SkillReference[] = []
+
+  async function visit(directory: string, prefix: string) {
+    const entries = await readdir(directory, { withFileTypes: true })
+    for (const entry of entries) {
+      if (entry.name.startsWith('.') || entry.isSymbolicLink()) continue
+      const path = prefix ? `${prefix}/${entry.name}` : entry.name
+      const target = join(directory, entry.name)
+      if (entry.isDirectory()) {
+        await visit(target, path)
+      } else if (
+        entry.isFile()
+        && entry.name !== 'SKILL.md'
+        && supportedReferenceExtensions.has(extname(entry.name).toLowerCase())
+      ) {
+        references.push({ path, bytes: (await lstat(target)).size })
+        if (references.length > maxReferences) {
+          throw new SkillRegistryError('too_large', `Skill contains more than ${maxReferences} references`)
+        }
+      }
+    }
+  }
+
+  await visit(skill.directory, '')
+  return references.sort((left, right) => left.path.localeCompare(right.path))
+}
+
+export async function readSkillReference(name: string, referencePath: string): Promise<SkillReferenceContent> {
+  const skill = await enabledSkillOrThrow(name)
+  const target = await safeReferenceTarget(skill.directory, referencePath)
+  const bytes = await readFile(target)
+  const maxBytes = configuredLimit('WMS_SKILLS_MAX_REFERENCE_BYTES', MAX_SKILL_REFERENCE_BYTES)
+  if (bytes.byteLength > maxBytes) {
+    throw new SkillRegistryError('too_large', `Skill reference exceeds ${maxBytes} bytes`)
+  }
+  let content: string
+  try {
+    content = new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+  } catch {
+    referenceError('invalid_reference', 'Skill reference must be valid UTF-8')
+  }
+  if (content.includes('\0')) referenceError('invalid_reference', 'Skill reference contains NUL bytes')
+  return { path: referencePath, content, bytes: bytes.byteLength }
+}
+
+export async function loadSkillContext(name: string, referencePaths: string[]): Promise<SkillContext> {
+  const skill = await enabledSkillOrThrow(name)
+  const uniquePaths = [...new Set(referencePaths)]
+  const references: SkillReferenceContent[] = []
+  let totalBytes = 0
+  for (const referencePath of uniquePaths) {
+    const reference = await readSkillReference(name, referencePath)
+    totalBytes += reference.bytes
+    if (totalBytes > skillReferenceContextByteLimit()) {
+      throw new SkillRegistryError('too_large', `Skill reference context exceeds ${skillReferenceContextByteLimit()} bytes`)
+    }
+    references.push(reference)
+  }
+  return { name: skill.name, instructions: skill.instructions, references }
 }
 
 export async function setSkillEnabled(name: string, enabled: boolean): Promise<ManagedSkill> {

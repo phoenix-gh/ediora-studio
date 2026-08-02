@@ -11,6 +11,7 @@ let runtimeDir = ''
 afterEach(async () => {
   delete process.env.WMS_SKILLS_RUNTIME_DIR
   delete process.env.WMS_SKILLS_STATE_FILE
+  delete process.env.WMS_SKILLS_MAX_REFERENCE_BYTES
   if (runtimeDir) await rm(runtimeDir, { recursive: true, force: true })
   runtimeDir = ''
 })
@@ -69,4 +70,10 @@ it('refuses to load a disabled automatic image Skill', async () => {
 
   await setSkillEnabled('baoyu-cover-image', false)
   await expect(loadBaoyuSkillRulesForTest('cover')).rejects.toThrow(/unavailable|disabled/i)
+})
+
+it('applies the shared Skill reference byte limit to background cover rules', async () => {
+  process.env.WMS_SKILLS_MAX_REFERENCE_BYTES = '1'
+
+  await expect(loadBaoyuSkillRulesForTest('cover')).rejects.toMatchObject({ code: 'too_large' })
 })

@@ -1,10 +1,8 @@
 import { createOpenAI } from '@ai-sdk/openai'
 import { generateImage, generateText, stepCountIs, tool } from 'ai'
-import { readFile } from 'node:fs/promises'
-import { join } from 'node:path'
 import { z } from 'zod'
 
-import { getEnabledSkill } from '../skills/registry'
+import { loadSkillContext, SkillRegistryError } from '../skills/registry'
 import { workerHeaders } from './job-client'
 
 const apiBase = () => (process.env.WMS_API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000/api').replace(/\/$/, '')
@@ -30,6 +28,7 @@ export function toolsForContentStep(step: ContentStep): string[] {
 }
 
 export function imageToolNamesForSkill(step: 'cover' | 'illustrations'): string[] {
+  void step
   return ['generateImage']
 }
 
@@ -261,34 +260,24 @@ export function extractBaoyuSkillCore(step: 'cover' | 'illustrations', skill: st
   return skill.slice(start, end).trim()
 }
 
-async function loadBaoyuSkillCore(step: 'cover' | 'illustrations') {
-  const skillName = step === 'cover' ? 'baoyu-cover-image' : 'baoyu-article-illustrator'
-  const skill = await getEnabledSkill(skillName)
-  if (!skill) throw new Error(`Bundled image skill is unavailable or disabled: ${skillName}`)
-  try {
-    return extractBaoyuSkillCore(step, skill.instructions)
-  } catch (error) {
-    if (error instanceof Error && error.message.includes('core guidance')) throw error
-    throw new Error(`Bundled image skill is missing: ${skillName}`)
-  }
-}
-
 async function loadBaoyuSkillRules(step: 'cover' | 'illustrations') {
   const skillName = step === 'cover' ? 'baoyu-cover-image' : 'baoyu-article-illustrator'
-  const skill = await getEnabledSkill(skillName)
-  if (!skill) throw new Error(`Bundled image skill is unavailable or disabled: ${skillName}`)
-  const skillDir = skill.directory
-  const core = await loadBaoyuSkillCore(step)
-  if (step === 'illustrations') return { skillName, rules: core, ruleSources: ['SKILL.md: Three Dimensions'] }
+  const referencePaths = step === 'cover'
+    ? ['references/auto-selection.md', 'references/workflow/prompt-template.md']
+    : []
+  let context
   try {
-    const [autoSelection, promptTemplate] = await Promise.all([
-      readFile(join(skillDir, 'references', 'auto-selection.md'), 'utf8'),
-      readFile(join(skillDir, 'references', 'workflow', 'prompt-template.md'), 'utf8'),
-    ])
-    return { skillName, rules: `${core}\n\n${autoSelection}\n\n${promptTemplate}`, ruleSources: ['SKILL.md: Five Dimensions', 'references/auto-selection.md', 'references/workflow/prompt-template.md'] }
-  } catch {
-    throw new Error(`Bundled image skill references are missing: ${skillName}`)
+    context = await loadSkillContext(skillName, referencePaths)
+  } catch (error) {
+    if (error instanceof SkillRegistryError && error.code === 'not_found') {
+      throw new Error(`Bundled image skill is unavailable or disabled: ${skillName}`)
+    }
+    throw error
   }
+  const core = extractBaoyuSkillCore(step, context.instructions)
+  if (step === 'illustrations') return { skillName, rules: core, ruleSources: ['SKILL.md: Three Dimensions'] }
+  const [autoSelection, promptTemplate] = context.references.map(reference => reference.content)
+  return { skillName, rules: `${core}\n\n${autoSelection}\n\n${promptTemplate}`, ruleSources: ['SKILL.md: Five Dimensions', ...referencePaths] }
 }
 
 export async function loadBaoyuSkillRulesForTest(step: 'cover' | 'illustrations') {
