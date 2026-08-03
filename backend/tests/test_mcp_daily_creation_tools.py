@@ -188,7 +188,31 @@ def test_mcp_saves_one_agent_validated_output_batch(env):
         }],
         self_validation={"passed": True, "summary": "checked"},
     ))
+    replay = run(mcp_server.save_daily_creation_outputs(
+        execution_id=execution_id,
+        run_id=run_id,
+        idempotency_key="mcp-final-1",
+        posts=[{
+            "source_asset_ids": [asset_id],
+            "title": "先验证",
+            "text": "先验证真实需求，再投入完整开发。",
+            "reuse_decision": "fresh",
+            "reuse_explanation": "新内容",
+            "compared_usage_ids": [],
+            "metadata": {},
+        }],
+        self_validation={"passed": True, "summary": "checked"},
+    ))
+
+    async def draft_count():
+        from sqlalchemy import func, select
+        from models import ArticleDraft
+
+        async with SessionLocal() as session:
+            return await session.scalar(select(func.count(ArticleDraft.id)))
 
     assert result["run_id"] == run_id
+    assert replay == result
     assert result["created_count"] == 1
     assert len(result["draft_ids"]) == 1
+    assert run(draft_count()) == 1

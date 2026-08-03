@@ -200,6 +200,12 @@ def test_running_agent_v1_daily_job_is_resumed_but_terminal_history_is_not(
     from job_reconciliation import reconcile_content_jobs
 
     async def run():
+        queued_id, _ = await _seed_job(
+            reconciliation_env,
+            flow="daily_creation",
+            status="queued",
+            input_data={"run_id": 80, "runtime_version": "agent-v1"},
+        )
         agent_id, _ = await _seed_job(
             reconciliation_env,
             flow="daily_creation",
@@ -223,8 +229,8 @@ def test_running_agent_v1_daily_job_is_resumed_but_terminal_history_is_not(
             session_factory=reconciliation_env.SessionLocal,
         )
 
-        assert result == {"enqueued": 1, "job_ids": [agent_id]}
-        assert queue.items == [agent_id]
+        assert result == {"enqueued": 2, "job_ids": [queued_id, agent_id]}
+        assert queue.items == [queued_id, agent_id]
         assert legacy_id not in queue.items
 
     asyncio.run(run())

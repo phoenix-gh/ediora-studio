@@ -63,6 +63,40 @@ async def test_completed_tool_call_replays_without_execution(db):
 
 
 @pytest.mark.asyncio
+async def test_completed_read_tool_replays_after_restart(db):
+    from agent_execution_service import (
+        claim_agent_tool_call,
+        complete_agent_tool_call,
+        ensure_agent_execution,
+    )
+
+    job = await seed_job(db)
+    execution = await ensure_agent_execution(
+        db, job_id=job.id, objective="create posts",
+        skill_mode="auto", skill_name=None,
+    )
+    await claim_agent_tool_call(
+        db, execution_id=execution.id, tool_call_id="read-candidates",
+        tool_name="list_creative_asset_candidates",
+        input_summary={"directory": "搞钱副业"},
+        auto_approved=False, side_effecting=False,
+    )
+    await complete_agent_tool_call(
+        db, execution.id, "read-candidates", [{"id": 381}],
+    )
+
+    replay = await claim_agent_tool_call(
+        db, execution_id=execution.id, tool_call_id="read-candidates",
+        tool_name="list_creative_asset_candidates",
+        input_summary={"directory": "搞钱副业"},
+        auto_approved=False, side_effecting=False,
+    )
+
+    assert replay.action == "replay"
+    assert replay.output == [{"id": 381}]
+
+
+@pytest.mark.asyncio
 async def test_late_failure_cannot_overwrite_a_succeeded_tool_call(db):
     from agent_execution_service import (
         claim_agent_tool_call,
