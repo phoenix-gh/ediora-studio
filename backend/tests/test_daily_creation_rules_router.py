@@ -90,6 +90,8 @@ def test_rule_crud_validates_conditional_fields_and_preserves_history(client):
     rule = created.json()
     assert rule["directory"] == "产品实验"
     assert rule["enabled"] is True
+    assert rule["skill_mode"] == "auto"
+    assert rule["skill_name"] is None
 
     assert client.post(
         "/api/daily-plan/creation-rules",
@@ -118,6 +120,33 @@ def test_rule_crud_validates_conditional_fields_and_preserves_history(client):
     assert client.get(
         f"/api/daily-plan/creation-runs?rule_id={rule['id']}"
     ).status_code == 200
+
+
+def test_rule_manual_skill_round_trips_and_auto_mode_clears_name(client):
+    seed_source()
+    missing = client.post(
+        "/api/daily-plan/creation-rules",
+        json=recurring_payload(skill_mode="manual", skill_name=None),
+    )
+    assert missing.status_code == 422
+
+    created = client.post(
+        "/api/daily-plan/creation-rules",
+        json=recurring_payload(
+            skill_mode="manual", skill_name="human-social-copy",
+        ),
+    )
+    assert created.status_code == 201, created.text
+    assert created.json()["skill_mode"] == "manual"
+    assert created.json()["skill_name"] == "human-social-copy"
+
+    automatic = client.patch(
+        f"/api/daily-plan/creation-rules/{created.json()['id']}",
+        json={"skill_mode": "auto"},
+    )
+    assert automatic.status_code == 200, automatic.text
+    assert automatic.json()["skill_mode"] == "auto"
+    assert automatic.json()["skill_name"] is None
 
 
 def test_rule_accepts_multiple_same_type_directories_and_mirrors_legacy_field(client):

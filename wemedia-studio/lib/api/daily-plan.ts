@@ -62,6 +62,7 @@ export type DailyCreationRule = {
   output_type: 'x_short_post'; target_count: number; execution_mode: 'once' | 'recurring'
   scheduled_date: string | null; scheduled_time: string; timezone: string; lookback_days: number
   delivery_mode: 'drafts' | 'plan_items'; account_id: string | null; instructions: string
+  skill_mode: 'auto' | 'manual'; skill_name: string | null
   enabled: boolean; created_at: string; updated_at: string
 }
 export type DailyCreationRuleInput = Omit<DailyCreationRule, 'id' | 'created_at' | 'updated_at' | 'directories'> & { directories: string[] }

@@ -10,6 +10,7 @@ const rule = {
   execution_mode: 'recurring' as const, scheduled_date: null,
   scheduled_time: '09:30', timezone: 'Asia/Shanghai', lookback_days: 5,
   delivery_mode: 'drafts' as const, account_id: null, instructions: '', enabled: true,
+  skill_mode: 'auto' as const, skill_name: null,
   created_at: '', updated_at: '',
 }
 
@@ -28,4 +29,5 @@ it('keeps run now primary and exposes edit pause and delete actions', () => {
   expect(onEdit).toHaveBeenCalledWith(rule)
   expect(onDelete).toHaveBeenCalledWith(rule)
   expect(screen.getByText(/产品实验、增长资料/)).toBeInTheDocument()
+  expect(screen.getByText(/自动 Skill/)).toBeInTheDocument()
 })

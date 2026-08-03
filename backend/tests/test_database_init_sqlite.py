@@ -271,7 +271,10 @@ def test_init_db_backfills_legacy_creation_rule_directory_list(tmp_path):
 
     assert result.returncode == 0, result.stderr
     with sqlite3.connect(database_path) as connection:
-        assert "directories" in _columns(connection, "daily_creation_rules")
+        assert {"directories", "skill_mode", "skill_name"} <= _columns(
+            connection, "daily_creation_rules"
+        )
         assert connection.execute(
-            "SELECT directories FROM daily_creation_rules WHERE id = 1"
-        ).fetchone() == ('["增长实验"]',)
+            "SELECT directories, skill_mode, skill_name "
+            "FROM daily_creation_rules WHERE id = 1"
+        ).fetchone() == ('["增长实验"]', "auto", None)

@@ -84,6 +84,8 @@ class CreationRuleIn(BaseModel):
     delivery_mode: Literal["drafts", "plan_items"]
     account_id: str | None = None
     instructions: str = Field(default="", max_length=4000)
+    skill_mode: Literal["auto", "manual"] = "auto"
+    skill_name: str | None = Field(default=None, max_length=200)
     enabled: bool = True
 
     @model_validator(mode="after")
@@ -96,6 +98,12 @@ class CreationRuleIn(BaseModel):
         )
         self.directories = normalized
         self.directory = normalized[0]
+        if self.skill_mode == "manual":
+            if not (self.skill_name or "").strip():
+                raise ValueError("skill_name is required in manual mode")
+            self.skill_name = self.skill_name.strip()
+        else:
+            self.skill_name = None
         if self.execution_mode == "once" and self.scheduled_date is None:
             raise ValueError("scheduled_date is required for once rules")
         if self.execution_mode == "recurring" and self.scheduled_date is not None:
@@ -122,6 +130,8 @@ class CreationRulePatch(BaseModel):
     delivery_mode: Literal["drafts", "plan_items"] | None = None
     account_id: str | None = None
     instructions: str | None = Field(default=None, max_length=4000)
+    skill_mode: Literal["auto", "manual"] | None = None
+    skill_name: str | None = Field(default=None, max_length=200)
     enabled: bool | None = None
 
 
@@ -141,6 +151,7 @@ def _rule_out(rule: DailyCreationRule) -> dict:
         "scheduled_time": rule.scheduled_time, "timezone": rule.timezone,
         "lookback_days": rule.lookback_days, "delivery_mode": rule.delivery_mode,
         "account_id": rule.account_id, "instructions": rule.instructions or "",
+        "skill_mode": rule.skill_mode or "auto", "skill_name": rule.skill_name,
         "enabled": rule.enabled,
         "created_at": rule.created_at.isoformat() if rule.created_at else "",
         "updated_at": rule.updated_at.isoformat() if rule.updated_at else "",

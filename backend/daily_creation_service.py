@@ -185,6 +185,8 @@ def snapshot_creation_rule(rule: DailyCreationRule) -> dict:
         "delivery_mode": rule.delivery_mode,
         "account_id": rule.account_id,
         "instructions": rule.instructions or "",
+        "skill_mode": rule.skill_mode or "auto",
+        "skill_name": rule.skill_name,
     }
 
 
