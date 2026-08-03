@@ -15,6 +15,7 @@ from models import (
     DailyCreationRun,
     DailyPlan,
     DailyPlanItem,
+    DailyCreationRule,
 )
 
 
@@ -136,6 +137,73 @@ def _isoformat(value: datetime | None) -> str:
     if value.tzinfo is None:
         value = value.replace(tzinfo=timezone.utc)
     return value.isoformat()
+
+
+def snapshot_creation_rule(rule: DailyCreationRule) -> dict:
+    """Capture every execution-relevant field before a rule can change."""
+    return {
+        "id": rule.id,
+        "name": rule.name,
+        "asset_type": rule.asset_type,
+        "directory": rule.directory,
+        "output_type": rule.output_type,
+        "target_count": rule.target_count,
+        "execution_mode": rule.execution_mode,
+        "scheduled_date": rule.scheduled_date,
+        "scheduled_time": rule.scheduled_time,
+        "timezone": rule.timezone,
+        "lookback_days": rule.lookback_days,
+        "delivery_mode": rule.delivery_mode,
+        "account_id": rule.account_id,
+        "instructions": rule.instructions or "",
+    }
+
+
+async def create_daily_creation_run(
+    session: AsyncSession,
+    *,
+    rule: DailyCreationRule,
+    scheduled_for: datetime,
+    trigger_kind: str,
+) -> tuple[DailyCreationRun, bool]:
+    """Create the run and durable job once; the caller dispatches after commit."""
+    from content_jobs import create_job
+
+    if rule.deleted_at is not None or not rule.enabled:
+        raise ValueError("Daily creation rule is disabled or deleted")
+    if trigger_kind == "explicit":
+        existing = await session.scalar(
+            select(DailyCreationRun).where(
+                DailyCreationRun.rule_id == rule.id,
+                DailyCreationRun.trigger_kind == "explicit",
+                DailyCreationRun.status.in_(("queued", "running")),
+            ).order_by(desc(DailyCreationRun.id)).limit(1)
+        )
+        if existing is not None:
+            return existing, False
+    creation_run = DailyCreationRun(
+        rule_id=rule.id,
+        scheduled_for=scheduled_for,
+        trigger_kind=trigger_kind,
+        status="queued",
+        requested_count=rule.target_count,
+        rule_snapshot=snapshot_creation_rule(rule),
+    )
+    session.add(creation_run)
+    await session.flush()
+    job = await create_job(
+        session,
+        flow="daily_creation",
+        title=rule.name,
+        input_data={"run_id": creation_run.id},
+        idempotency_key=(
+            f"daily-creation:{rule.id}:{scheduled_for.isoformat()}:{trigger_kind}"
+        ),
+        commit=False,
+    )
+    creation_run.content_job_id = job.id
+    await session.flush()
+    return creation_run, True
 
 
 async def _validated_run_asset(
