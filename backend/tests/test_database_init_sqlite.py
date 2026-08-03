@@ -104,6 +104,8 @@ def test_init_db_twice_creates_fresh_sqlite_core_and_text_video_tables(
             "daily_creation_rules",
             "daily_creation_runs",
             "content_usage_ledger",
+            "agent_executions",
+            "agent_tool_calls",
         } <= tables
         assert {
             "origin",

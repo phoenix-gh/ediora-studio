@@ -407,6 +407,57 @@ class ContentJob(Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class AgentExecution(Base):
+    """Durable checkpoint for one Agent-owned content job."""
+    __tablename__ = "agent_executions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    job_id: Mapped[int] = mapped_column(Integer, nullable=False, unique=True, index=True)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="running", index=True)
+    objective: Mapped[str] = mapped_column(Text, nullable=False)
+    skill_mode: Mapped[str] = mapped_column(String, nullable=False, default="auto")
+    skill_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    skill_activation: Mapped[str] = mapped_column(String, nullable=False, default="")
+    phase: Mapped[str] = mapped_column(String, nullable=False, default="prepare")
+    checkpoint_data: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    audit_data: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    completion_evidence: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    final_summary: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    error: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=now_utc, onupdate=now_utc
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class AgentToolCall(Base):
+    """Idempotency and audit record for one Agent tool invocation."""
+    __tablename__ = "agent_tool_calls"
+    __table_args__ = (
+        UniqueConstraint(
+            "execution_id", "tool_call_id", name="uq_agent_tool_call_execution"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    execution_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    tool_call_id: Mapped[str] = mapped_column(String, nullable=False)
+    tool_name: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="running", index=True)
+    auto_approved: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    side_effecting: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    input_summary: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    output_data: Mapped[dict | list | str | int | float | bool | None] = mapped_column(JSON, nullable=True)
+    error: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=now_utc, onupdate=now_utc
+    )
+
+
 class ContentJobStep(Base):
     __tablename__ = "content_job_steps"
     __table_args__ = (UniqueConstraint("job_id", "step_key", "attempt", name="uq_content_job_step_attempt"),)
