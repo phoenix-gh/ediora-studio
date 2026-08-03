@@ -32,7 +32,8 @@ type RunContext = {
   rule: {
     name: string
     asset_type: 'article' | 'media'
-    directory: string
+    directory?: string
+    directories?: string[]
     output_type: 'x_short_post'
     target_count: number
     lookback_days: number
@@ -43,6 +44,13 @@ type RunContext = {
 
 type Candidate = { id: number; title: string; summary: string; tags: string[]; source_url: string; created_at: string; content_length: number }
 type Usage = { id: number; asset_id: number; rule_name: string; topic: string; angle: string; excerpt: string; reuse_decision: string; reuse_explanation: string; created_at: string }
+
+export function normalizeRunDirectories(rule: { directories?: string[]; directory?: string }) {
+  const values = rule.directories?.length ? rule.directories : rule.directory ? [rule.directory] : []
+  const directories = [...new Set(values.map(value => value.trim()).filter(Boolean))]
+  if (directories.length === 0) throw new Error('at least one directory is required for daily creation')
+  return directories
+}
 
 const creationSteps = ['loadCandidates', 'loadUsage', 'select', 'generate', 'validate', 'persist'] as const
 export const dailyCreationStepKeys = [...creationSteps]
@@ -115,6 +123,7 @@ export async function runDailyCreationJob(jobId: number) {
   const runId = Number(job.input.run_id)
   if (!Number.isSafeInteger(runId) || runId <= 0) throw new Error('daily_creation flow requires run_id')
   const context = await apiGet<RunContext>(`/daily-plan/creation-runs/${runId}/context`, workerHeaders())
+  const directories = normalizeRunDirectories(context.rule)
   const config = await modelConfig()
   const provider = createOpenAI({ apiKey: config.apiKey, baseURL: config.baseURL })
   const model = provider.chat(config.model)
@@ -122,7 +131,7 @@ export async function runDailyCreationJob(jobId: number) {
   try {
     const candidatesOutput = await runRecordedStep(job, 'loadCandidates', async () => {
       const result = await client.callTool({ name: 'list_creative_asset_candidates', arguments: {
-        asset_type: context.rule.asset_type, directory: context.rule.directory,
+        asset_type: context.rule.asset_type, directories,
         query: '', limit: Math.min(50, Math.max(context.requested_count * 5, context.requested_count)),
       } })
       return { candidates: mcpValue(result) as Candidate[] }

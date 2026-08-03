@@ -330,7 +330,8 @@ async def get_creative_asset(asset_id: int) -> dict:
 @mcp.tool()
 async def list_creative_asset_candidates(
     asset_type: str,
-    directory: str,
+    directories: list[str] | None = None,
+    directory: str = "",
     query: str = "",
     limit: int = 50,
 ) -> list[dict]:
@@ -343,6 +344,7 @@ async def list_creative_asset_candidates(
         return await list_candidates(
             db,
             asset_type=asset_type,
+            directories=directories,
             directory=directory,
             query=query,
             limit=limit,

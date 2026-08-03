@@ -46,6 +46,11 @@ def seed_context():
                 title="低成本验证", content="先验证需求，再写完整产品。",
                 tags=["产品"], url="https://example.com/validate",
             )
+            second_asset = CreativeAsset(
+                asset_type="article", directory="增长资料",
+                title="增长复盘", content="从另一目录补充增长经验。",
+                tags=["增长"], url="https://example.com/growth",
+            )
             rule = DailyCreationRule(
                 name="产品短帖", asset_type="article", directory="产品实验",
                 output_type="x_short_post", target_count=2,
@@ -53,7 +58,7 @@ def seed_context():
                 timezone="Asia/Shanghai", lookback_days=5,
                 delivery_mode="drafts",
             )
-            session.add_all([asset, rule])
+            session.add_all([asset, second_asset, rule])
             await session.flush()
             creation_run = DailyCreationRun(
                 rule_id=rule.id,
@@ -75,13 +80,13 @@ def seed_context():
                 excerpt="旧内容", reuse_decision="fresh",
             ))
             await session.commit()
-            return asset.id, creation_run.id
+            return asset.id, second_asset.id, creation_run.id
 
     return run(seed())
 
 
 def test_mcp_exposes_compact_candidates_and_global_history(env):
-    asset_id, _ = seed_context()
+    asset_id, _, _ = seed_context()
     import mcp_server
 
     candidates = run(mcp_server.list_creative_asset_candidates(
@@ -105,7 +110,7 @@ def test_mcp_exposes_compact_candidates_and_global_history(env):
 
 
 def test_record_usage_rejects_a_missing_persisted_output(env):
-    asset_id, run_id = seed_context()
+    asset_id, _, run_id = seed_context()
     import mcp_server
 
     with pytest.raises(ValueError, match="not found"):
@@ -115,3 +120,20 @@ def test_record_usage_rejects_a_missing_persisted_output(env):
             topic="验证", angle="新角度", excerpt="不会写入",
             reuse_decision="fresh",
         ))
+
+
+def test_mcp_combines_multiple_directories_and_keeps_legacy_argument(env):
+    first_id, second_id, _ = seed_context()
+    import mcp_server
+
+    combined = run(mcp_server.list_creative_asset_candidates(
+        asset_type="article",
+        directories=["产品实验", "增长资料"],
+        limit=10,
+    ))
+    legacy = run(mcp_server.list_creative_asset_candidates(
+        asset_type="article", directory="产品实验", limit=10,
+    ))
+
+    assert {item["id"] for item in combined} == {first_id, second_id}
+    assert [item["id"] for item in legacy] == [first_id]
