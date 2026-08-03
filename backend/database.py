@@ -869,7 +869,7 @@ async def init_db():
             await conn.execute(text(
                 "UPDATE daily_creation_rules "
                 "SET directories = json_build_array(directory) "
-                "WHERE (directories IS NULL OR directories = '[]'::json) "
+                "WHERE (directories IS NULL OR json_array_length(directories) = 0) "
                 "AND directory <> ''"
             ))
         await _add_columns(conn, "wechat_articles", {

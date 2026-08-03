@@ -62,6 +62,8 @@ it('normalizes common compact AI selection responses without inventing candidate
   expect(parseDailyCreationSelection({ selected_asset_ids: [13] }, candidates).selected[0].asset_id).toBe(13)
   expect(parseDailyCreationSelection({ selection: { selected: [12] } }, candidates).selected[0].asset_id).toBe(12)
   expect(parseDailyCreationSelection({ selections: [{ material_id: 12, reason: '聚焦实际付费' }] }, candidates).selected[0]).toEqual(expect.objectContaining({ asset_id: 12, topic: '需求验证', angle: '聚焦实际付费' }))
+  expect(parseDailyCreationSelection({ selected_items: [{ id: 13, reason: '选择独立主题' }] }, candidates).selected[0]).toEqual(expect.objectContaining({ asset_id: 13, topic: '自动化工作流', angle: '选择独立主题' }))
+  expect(parseDailyCreationSelection({ selected_assets: [{ asset_id: 12, angle: '从验证切入', reuse_decision: 'fresh' }] }, candidates).selected[0]).toEqual(expect.objectContaining({ asset_id: 12, topic: '需求验证', angle: '从验证切入' }))
   expect(parseDailyCreationSelection([13], candidates).selected[0].asset_id).toBe(13)
   expect(() => parseDailyCreationSelection([99], candidates)).toThrow(/invented asset/i)
 })

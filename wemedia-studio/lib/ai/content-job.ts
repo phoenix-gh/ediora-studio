@@ -117,7 +117,7 @@ export function parseDailyCreationSelection(
       value = record
     }
     if (!Array.isArray(record.selected)) {
-      const compact = record.asset_ids ?? record.selected_asset_ids ?? record.selected_ids ?? record.selections
+      const compact = record.asset_ids ?? record.selected_asset_ids ?? record.selected_ids ?? record.selections ?? record.selected_items ?? record.selected_assets
       if (Array.isArray(compact)) value = { ...record, selected: compact }
     }
   }
@@ -127,21 +127,13 @@ export function parseDailyCreationSelection(
       value = {
         ...record,
         selected: record.selected.map(item => {
-          if (typeof item !== 'number') return item
-          const candidate = candidateById.get(item)
-          if (!candidate) throw new Error(`invented asset id: ${item}`)
-          return {
-            asset_id: item,
-            topic: candidate.title,
-            angle: '根据素材提炼独立角度',
-            reuse_decision: 'fresh',
-            reuse_explanation: '',
-            compared_usage_ids: [],
-          }
-        }).map(item => {
-          if (!item || typeof item !== 'object' || Array.isArray(item) || 'asset_id' in item) return item
-          const compact = item as Record<string, unknown>
-          const assetId = compact.material_id ?? compact.id
+          const compact = typeof item === 'number'
+            ? { asset_id: item }
+            : item && typeof item === 'object' && !Array.isArray(item)
+              ? item as Record<string, unknown>
+              : null
+          if (!compact) return item
+          const assetId = compact.asset_id ?? compact.material_id ?? compact.id
           if (typeof assetId !== 'number') return item
           const candidate = candidateById.get(assetId)
           if (!candidate) throw new Error(`invented asset id: ${assetId}`)
