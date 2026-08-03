@@ -392,6 +392,22 @@ async def scheduled_daily_plan():
         await log("daily_plan", "error", "今日计划生成异常", str(e))
 
 
+async def scheduled_daily_creation_rules():
+    """Every minute, dispatch configurable rules whose local schedule is due."""
+    from logger import log
+    try:
+        from daily_planner import dispatch_due_creation_rules
+        result = await dispatch_due_creation_rules()
+        if result["created"]:
+            await log(
+                "daily_creation",
+                "ok",
+                f"已创建并入队 {result['created']} 个创作规则任务",
+            )
+    except Exception as e:
+        await log("daily_creation", "error", "创作规则调度异常", str(e))
+
+
 def register_jobs(scheduler, cfg):
     from datetime import datetime, timedelta
     _load_state()
@@ -423,6 +439,7 @@ def register_jobs(scheduler, cfg):
         (scheduled_topic_source_reconcile,dict(trigger="interval", minutes=5,         id="topic_source_reconcile", next_run_time=datetime.now())),
         (scheduled_x_response_digest,   dict(trigger="cron", hour=18, minute=0, timezone="Asia/Shanghai", id="x_response_digest")),
         (scheduled_daily_plan,          dict(trigger="cron",     hour=8, minute=0,    id="daily_plan")),
+        (scheduled_daily_creation_rules,dict(trigger="interval", minutes=1, id="daily_creation_rules", next_run_time=datetime.now())),
     ]
     for func, kwargs in jobs:
         scheduler.add_job(func, **kwargs)
