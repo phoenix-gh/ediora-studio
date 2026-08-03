@@ -86,6 +86,7 @@ def test_rule_run_ledger_roundtrip_and_planner_origin_defaults(session_factory):
             session.commit()
 
             assert rule.enabled is True
+            assert rule.directories == []
             assert rule.deleted_at is None
             assert creation_run.created_count == 0
             assert creation_run.detail == {}
@@ -108,6 +109,18 @@ def test_rule_run_ledger_roundtrip_and_planner_origin_defaults(session_factory):
             assert persisted_ledger.rule_id == rule.id
 
     run()
+
+
+def test_directory_normalization_preserves_order_and_legacy_fallback():
+    from daily_creation_service import normalize_creation_directories
+
+    assert normalize_creation_directories([" A ", "B", "A"], "legacy") == [
+        "A",
+        "B",
+    ]
+    assert normalize_creation_directories(None, " legacy ") == ["legacy"]
+    with pytest.raises(ValueError, match="at least one directory"):
+        normalize_creation_directories([], "")
 
 
 def test_scheduled_run_identity_is_unique(session_factory):

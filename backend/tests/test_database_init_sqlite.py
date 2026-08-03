@@ -226,3 +226,50 @@ def test_init_db_migrates_existing_daily_plan_items_for_creation_rules(tmp_path)
             "daily_creation_runs",
             "content_usage_ledger",
         } <= tables
+
+
+def test_init_db_backfills_legacy_creation_rule_directory_list(tmp_path):
+    database_path = tmp_path / "legacy-creation-rule.db"
+    with sqlite3.connect(database_path) as connection:
+        connection.executescript(
+            """
+            CREATE TABLE daily_creation_rules (
+                id INTEGER PRIMARY KEY,
+                name VARCHAR NOT NULL,
+                asset_type VARCHAR NOT NULL,
+                directory VARCHAR NOT NULL,
+                output_type VARCHAR NOT NULL,
+                target_count INTEGER NOT NULL,
+                execution_mode VARCHAR NOT NULL,
+                scheduled_date VARCHAR,
+                scheduled_time VARCHAR NOT NULL,
+                timezone VARCHAR NOT NULL,
+                lookback_days INTEGER NOT NULL,
+                delivery_mode VARCHAR NOT NULL,
+                account_id VARCHAR,
+                instructions TEXT NOT NULL DEFAULT '',
+                enabled BOOLEAN NOT NULL DEFAULT 1,
+                deleted_at TIMESTAMP,
+                created_at TIMESTAMP NOT NULL,
+                updated_at TIMESTAMP NOT NULL
+            );
+            INSERT INTO daily_creation_rules (
+                id, name, asset_type, directory, output_type, target_count,
+                execution_mode, scheduled_time, timezone, lookback_days,
+                delivery_mode, created_at, updated_at
+            ) VALUES (
+                1, '旧规则', 'article', '增长实验', 'x_short_post', 2,
+                'recurring', '09:00', 'Asia/Shanghai', 7,
+                'drafts', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+            );
+            """
+        )
+
+    result = _run_init_db_twice(database_path)
+
+    assert result.returncode == 0, result.stderr
+    with sqlite3.connect(database_path) as connection:
+        assert "directories" in _columns(connection, "daily_creation_rules")
+        assert connection.execute(
+            "SELECT directories FROM daily_creation_rules WHERE id = 1"
+        ).fetchone() == ('["增长实验"]',)

@@ -1047,6 +1047,7 @@ class DailyCreationRule(Base):
     name: Mapped[str] = mapped_column(String, nullable=False)
     asset_type: Mapped[str] = mapped_column(String, nullable=False, default="article")
     directory: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    directories: Mapped[list[str]] = mapped_column(JSON, default=list)
     output_type: Mapped[str] = mapped_column(String, nullable=False, default="x_short_post")
     target_count: Mapped[int] = mapped_column(Integer, nullable=False)
     execution_mode: Mapped[str] = mapped_column(String, nullable=False)

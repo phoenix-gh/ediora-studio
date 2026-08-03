@@ -26,6 +26,28 @@ def _bounded(value: int, *, name: str, minimum: int, maximum: int) -> int:
     return parsed
 
 
+def normalize_creation_directories(
+    directories: object,
+    directory: object = "",
+) -> list[str]:
+    """Return one bounded, ordered list while accepting legacy input."""
+    values = directories if isinstance(directories, (list, tuple)) else []
+    if not values and isinstance(directory, str) and directory.strip():
+        values = [directory]
+    normalized: list[str] = []
+    for value in values:
+        if not isinstance(value, str) or not value.strip():
+            continue
+        name = value.strip()
+        if name not in normalized:
+            normalized.append(name)
+    if not normalized:
+        raise ValueError("at least one directory is required")
+    if len(normalized) > 50:
+        raise ValueError("directories must contain at most 50 items")
+    return normalized
+
+
 async def list_creative_asset_candidates(
     session: AsyncSession,
     *,

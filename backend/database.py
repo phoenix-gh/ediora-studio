@@ -855,6 +855,23 @@ async def init_db():
             if conn.dialect.name == "sqlite"
             else "'[]'::json"
         )
+        await _add_columns(conn, "daily_creation_rules", {
+            "directories": f"JSON NOT NULL DEFAULT {json_array_default}",
+        })
+        if conn.dialect.name == "sqlite":
+            await conn.execute(text(
+                "UPDATE daily_creation_rules "
+                "SET directories = json_array(directory) "
+                "WHERE (directories IS NULL OR directories = '[]') "
+                "AND directory <> ''"
+            ))
+        else:
+            await conn.execute(text(
+                "UPDATE daily_creation_rules "
+                "SET directories = json_build_array(directory) "
+                "WHERE (directories IS NULL OR directories = '[]'::json) "
+                "AND directory <> ''"
+            ))
         await _add_columns(conn, "wechat_articles", {
             "content": "TEXT NOT NULL DEFAULT ''",
         })
