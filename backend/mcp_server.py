@@ -328,6 +328,84 @@ async def get_creative_asset(asset_id: int) -> dict:
 
 
 @mcp.tool()
+async def list_creative_asset_candidates(
+    asset_type: str,
+    directory: str,
+    query: str = "",
+    limit: int = 50,
+) -> list[dict]:
+    """List compact, directory-scoped asset candidates for an AI creation run."""
+    from daily_creation_service import (
+        list_creative_asset_candidates as list_candidates,
+    )
+
+    async with SessionLocal() as db:
+        return await list_candidates(
+            db,
+            asset_type=asset_type,
+            directory=directory,
+            query=query,
+            limit=limit,
+        )
+
+
+@mcp.tool()
+async def get_recent_content_usage(
+    lookback_days: int,
+    output_type: str,
+    rule_id: int | None = None,
+    account_id: str | None = None,
+    limit: int = 100,
+) -> list[dict]:
+    """Read bounded global semantic-deduplication history for AI comparison."""
+    from daily_creation_service import get_recent_content_usage as get_usage
+
+    async with SessionLocal() as db:
+        return await get_usage(
+            db,
+            lookback_days=lookback_days,
+            output_type=output_type,
+            rule_id=rule_id,
+            account_id=account_id,
+            limit=limit,
+        )
+
+
+@mcp.tool()
+async def record_content_usage(
+    run_id: int,
+    asset_id: int,
+    output_kind: str,
+    output_id: int,
+    topic: str,
+    angle: str,
+    excerpt: str,
+    reuse_decision: str,
+    reuse_explanation: str = "",
+    account_id: str | None = None,
+) -> dict:
+    """Record evidence for an output that has already been persisted."""
+    from daily_creation_service import record_content_usage as record_usage
+
+    async with SessionLocal() as db:
+        async with db.begin():
+            usage = await record_usage(
+                db,
+                run_id=run_id,
+                asset_id=asset_id,
+                output_kind=output_kind,
+                output_id=output_id,
+                topic=topic,
+                angle=angle,
+                excerpt=excerpt,
+                reuse_decision=reuse_decision,
+                reuse_explanation=reuse_explanation,
+                account_id=account_id,
+            )
+        return {"id": usage.id, "created_at": _fmt_dt(usage.created_at)}
+
+
+@mcp.tool()
 async def update_draft(
     draft_id: int,
     title: Optional[str] = None,
