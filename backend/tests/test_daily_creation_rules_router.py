@@ -202,9 +202,101 @@ def test_run_now_is_idempotent_and_creates_daily_creation_job(client, monkeypatc
 
     creation_run, job = asyncio.run(verify())
     assert job.flow == "daily_creation"
-    assert job.input_data == {"run_id": creation_run.id}
+    assert job.input_data == {
+        "run_id": creation_run.id,
+        "runtime_version": "agent-v1",
+    }
     assert creation_run.rule_snapshot["directory"] == "产品实验"
     assert creation_run.rule_snapshot["directories"] == ["产品实验"]
+
+
+def test_creation_run_projects_bounded_agent_audit_without_tool_payloads(
+    client, monkeypatch,
+):
+    seed_source()
+    async def fake_enqueue(_job_id):
+        return None
+
+    import job_queue
+    monkeypatch.setattr(job_queue, "enqueue_job", fake_enqueue)
+    rule = client.post(
+        "/api/daily-plan/creation-rules",
+        json=recurring_payload(skill_mode="manual", skill_name="human-social-copy"),
+    ).json()
+    creation_run = client.post(
+        f"/api/daily-plan/creation-rules/{rule['id']}/run"
+    ).json()
+
+    from database import SessionLocal
+    from models import AgentExecution, AgentToolCall, DailyCreationRun
+
+    async def seed_audit():
+        async with SessionLocal() as session:
+            run = await session.get(DailyCreationRun, creation_run["id"])
+            run.detail = {
+                "self_validation": {"passed": True, "summary": "checked"},
+                "outputs": [{"draft_id": 192, "output_id": 192}],
+            }
+            execution = AgentExecution(
+                job_id=run.content_job_id,
+                status="succeeded",
+                objective="must never be exposed",
+                skill_mode="manual",
+                skill_name="human-social-copy",
+                skill_activation="automatic",
+                phase="complete",
+                audit_data={
+                    "skillRun": {
+                        "skillName": "human-social-copy",
+                        "activation": "automatic",
+                        "loadedReferences": ["references/finance-writing.md"],
+                    },
+                },
+                completion_evidence={
+                    "toolName": "save_daily_creation_outputs",
+                    "toolCallId": "save-1", "runId": run.id,
+                    "createdCount": 1, "outputIds": [192], "usageIds": [292],
+                },
+            )
+            session.add(execution)
+            await session.flush()
+            session.add_all([
+                AgentToolCall(
+                    execution_id=execution.id, tool_call_id="save-1",
+                    tool_name="save_daily_creation_outputs", status="succeeded",
+                    auto_approved=True, side_effecting=True,
+                    input_summary={"secret": "not exposed"},
+                    output_data={"secret": "not exposed"},
+                ),
+                AgentToolCall(
+                    execution_id=execution.id, tool_call_id="publish-uncertain",
+                    tool_name="save_external_item", status="uncertain",
+                    auto_approved=True, side_effecting=True,
+                    input_summary={"token": "not exposed"},
+                    error="x" * 800,
+                ),
+            ])
+            await session.commit()
+
+    asyncio.run(seed_audit())
+    response = client.get(
+        f"/api/daily-plan/creation-runs/{creation_run['id']}"
+    )
+
+    assert response.status_code == 200, response.text
+    audit = response.json()["agent_execution"]
+    assert audit["skill_name"] == "human-social-copy"
+    assert audit["skill_activation"] == "automatic"
+    assert audit["loaded_references"] == [{
+        "path": "references/finance-writing.md", "bytes": 0,
+    }]
+    assert audit["self_validation"]["passed"] is True
+    assert audit["completion"]["outputIds"] == [192]
+    assert audit["tools"][0]["tool_name"] == "save_daily_creation_outputs"
+    assert audit["tools"][0]["auto_approved"] is True
+    assert len(audit["tools"][1]["error"]) == 500
+    assert "input_summary" not in response.text
+    assert "not exposed" not in response.text
 
 
 def test_worker_context_output_and_completion_require_token(client, monkeypatch):

@@ -66,11 +66,35 @@ export type DailyCreationRule = {
   enabled: boolean; created_at: string; updated_at: string
 }
 export type DailyCreationRuleInput = Omit<DailyCreationRule, 'id' | 'created_at' | 'updated_at' | 'directories'> & { directories: string[] }
+export type AgentExecutionSummary = {
+  status: string
+  phase: string
+  skill_name: string | null
+  skill_activation: 'manual' | 'automatic' | ''
+  loaded_references: Array<{ path: string; bytes: number }>
+  tools: Array<{
+    tool_name: string
+    status: string
+    auto_approved: boolean
+    occurred_at: string
+    error: string
+  }>
+  self_validation: Record<string, unknown>
+  completion: {
+    toolName?: string
+    toolCallId?: string
+    runId?: number
+    createdCount?: number
+    outputIds?: number[]
+    usageIds?: number[]
+  } | null
+}
 export type DailyCreationRun = {
   id: number; rule_id: number; content_job_id: number | null; scheduled_for: string
   trigger_kind: string; status: 'queued' | 'running' | 'failed' | 'partial' | 'succeeded'
   requested_count: number; created_count: number; detail: Record<string, unknown>
   rule: Partial<DailyCreationRule>; created_at: string
+  agent_execution?: AgentExecutionSummary | null
 }
 
 export const listCreationRules = () => apiFetch<DailyCreationRule[]>('/daily-plan/creation-rules')
