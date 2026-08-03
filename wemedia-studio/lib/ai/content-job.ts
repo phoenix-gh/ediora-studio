@@ -49,6 +49,122 @@ export const dailyCreationValidationSchema = z.object({
 export type DailyCreationSelection = z.infer<typeof dailyCreationSelectionSchema>
 export type XPostOutput = z.infer<typeof xPostBatchSchema>[number]
 
+export function parseDailyCreationValidation(raw: unknown, postCount: number) {
+  let value = raw
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    let record = value as Record<string, unknown>
+    if (record.validation && typeof record.validation === 'object' && !Array.isArray(record.validation)) record = record.validation as Record<string, unknown>
+    const accepted = record.accepted_indices ?? record.approved_indices ?? record.accepted ?? record.approved
+    const rejected = record.rejected ?? record.rejections ?? record.issues
+    if (Array.isArray(accepted) || Array.isArray(rejected)) {
+      value = {
+        accepted_indices: Array.isArray(accepted) ? accepted : [],
+        rejected: Array.isArray(rejected) ? rejected.map(item => {
+          if (!item || typeof item !== 'object' || Array.isArray(item)) return item
+          const issue = item as Record<string, unknown>
+          return { index: issue.index ?? issue.post_index, reason: issue.reason ?? issue.explanation }
+        }) : [],
+      }
+    }
+  }
+  const parsed = dailyCreationValidationSchema.safeParse(value)
+  if (!parsed.success) throw new Error(`invalid daily creation validation: ${parsed.error.message}; response=${JSON.stringify(raw).slice(0, 500)}`)
+  for (const index of [...parsed.data.accepted_indices, ...parsed.data.rejected.map(item => item.index)]) {
+    if (index >= postCount) throw new Error(`out-of-range validation index: ${index}`)
+  }
+  return parsed.data
+}
+
+export function parseXPostBatch(
+  raw: unknown,
+  selected: Array<{ asset_id: number; topic: string; angle: string; reuse_decision: 'fresh' | 'reuse_allowed'; reuse_explanation: string }>,
+): XPostOutput[] {
+  let value = raw
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    const record = value as Record<string, unknown>
+    value = record.posts ?? record.tweets ?? record.results ?? value
+  }
+  if (Array.isArray(value)) {
+    value = value.map((item, index) => {
+      const evidence = selected[index]
+      if (typeof item === 'string' && evidence) {
+        return { ...evidence, title: evidence.topic, text: item }
+      }
+      if (item && typeof item === 'object') {
+        const record = item as Record<string, unknown>
+        const nested = record.post ?? record.tweet ?? record.x_post
+        if (nested && typeof nested === 'object' && !Array.isArray(nested)) return nested
+      }
+      return item
+    })
+  }
+  const parsed = xPostBatchSchema.safeParse(value)
+  if (!parsed.success) throw new Error(`invalid X post batch: ${parsed.error.message}; response=${JSON.stringify(raw).slice(0, 500)}`)
+  return parsed.data
+}
+
+export function parseDailyCreationSelection(
+  raw: unknown,
+  candidates: Array<{ id: number; title: string }>,
+): DailyCreationSelection {
+  const candidateById = new Map(candidates.map(candidate => [candidate.id, candidate]))
+  let value = raw
+  if (Array.isArray(value)) value = { selected: value }
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    let record = value as Record<string, unknown>
+    if (record.selection && typeof record.selection === 'object' && !Array.isArray(record.selection)) {
+      record = record.selection as Record<string, unknown>
+      value = record
+    }
+    if (!Array.isArray(record.selected)) {
+      const compact = record.asset_ids ?? record.selected_asset_ids ?? record.selected_ids ?? record.selections
+      if (Array.isArray(compact)) value = { ...record, selected: compact }
+    }
+  }
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    const record = value as Record<string, unknown>
+    if (Array.isArray(record.selected)) {
+      value = {
+        ...record,
+        selected: record.selected.map(item => {
+          if (typeof item !== 'number') return item
+          const candidate = candidateById.get(item)
+          if (!candidate) throw new Error(`invented asset id: ${item}`)
+          return {
+            asset_id: item,
+            topic: candidate.title,
+            angle: '根据素材提炼独立角度',
+            reuse_decision: 'fresh',
+            reuse_explanation: '',
+            compared_usage_ids: [],
+          }
+        }).map(item => {
+          if (!item || typeof item !== 'object' || Array.isArray(item) || 'asset_id' in item) return item
+          const compact = item as Record<string, unknown>
+          const assetId = compact.material_id ?? compact.id
+          if (typeof assetId !== 'number') return item
+          const candidate = candidateById.get(assetId)
+          if (!candidate) throw new Error(`invented asset id: ${assetId}`)
+          return {
+            asset_id: assetId,
+            topic: typeof compact.topic === 'string' ? compact.topic : candidate.title,
+            angle: typeof compact.angle === 'string' ? compact.angle : typeof compact.reason === 'string' ? compact.reason : '根据素材提炼独立角度',
+            reuse_decision: compact.reuse_decision === 'reuse_allowed' ? 'reuse_allowed' : 'fresh',
+            reuse_explanation: typeof compact.reuse_explanation === 'string' ? compact.reuse_explanation : '',
+            compared_usage_ids: Array.isArray(compact.compared_usage_ids) ? compact.compared_usage_ids : [],
+          }
+        }),
+      }
+    }
+  }
+  const parsed = dailyCreationSelectionSchema.safeParse(value)
+  if (!parsed.success) {
+    const preview = JSON.stringify(raw).slice(0, 500)
+    throw new Error(`invalid daily creation selection: ${parsed.error.message}; response=${preview}`)
+  }
+  return parsed.data
+}
+
 export function validateDailyCreationSelection(
   selection: DailyCreationSelection,
   candidateIds: number[],

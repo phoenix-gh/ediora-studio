@@ -6,6 +6,9 @@ import { afterEach, expect, it } from 'vitest'
 import { setSkillEnabled } from '../skills/registry'
 import {
   dailyCreationSelectionSchema,
+  parseDailyCreationSelection,
+  parseDailyCreationValidation,
+  parseXPostBatch,
   illustrationImageInputSchema,
   insertInlineImage,
   loadBaoyuSkillRulesForTest,
@@ -44,6 +47,37 @@ it('accepts daily creation selection evidence only from observed tools', () => {
     .toThrow(/invented asset/i)
   expect(() => validateDailyCreationSelection(selection, [12, 13], [8]))
     .toThrow(/invented usage/i)
+})
+
+it('normalizes common compact AI selection responses without inventing candidate ids', () => {
+  const candidates = [
+    { id: 12, title: '需求验证' },
+    { id: 13, title: '自动化工作流' },
+  ]
+  expect(parseDailyCreationSelection({ selected: [12, 13] }, candidates).selected).toEqual([
+    expect.objectContaining({ asset_id: 12, topic: '需求验证', reuse_decision: 'fresh' }),
+    expect.objectContaining({ asset_id: 13, topic: '自动化工作流', reuse_decision: 'fresh' }),
+  ])
+  expect(parseDailyCreationSelection({ asset_ids: [12] }, candidates).selected[0].asset_id).toBe(12)
+  expect(parseDailyCreationSelection({ selected_asset_ids: [13] }, candidates).selected[0].asset_id).toBe(13)
+  expect(parseDailyCreationSelection({ selection: { selected: [12] } }, candidates).selected[0].asset_id).toBe(12)
+  expect(parseDailyCreationSelection({ selections: [{ material_id: 12, reason: '聚焦实际付费' }] }, candidates).selected[0]).toEqual(expect.objectContaining({ asset_id: 12, topic: '需求验证', angle: '聚焦实际付费' }))
+  expect(parseDailyCreationSelection([13], candidates).selected[0].asset_id).toBe(13)
+  expect(() => parseDailyCreationSelection([99], candidates)).toThrow(/invented asset/i)
+})
+
+it('normalizes wrapped and text-only X post batches against selected evidence', () => {
+  const selected = [{ asset_id: 12, topic: '需求验证', angle: '真实付费', reuse_decision: 'fresh' as const, reuse_explanation: '' }]
+  expect(parseXPostBatch({ posts: [{ asset_id: 12, title: '标题', text: '正文', topic: '需求验证', angle: '真实付费', reuse_decision: 'fresh' }] }, selected)[0].asset_id).toBe(12)
+  expect(parseXPostBatch(['一条完整的短帖正文'], selected)[0]).toEqual(expect.objectContaining({ asset_id: 12, text: '一条完整的短帖正文' }))
+})
+
+it('normalizes common AI validation aliases and rejects out-of-range evidence', () => {
+  expect(parseDailyCreationValidation({ approved_indices: [0], rejections: [{ post_index: 1, reason: '语义重复' }] }, 2)).toEqual({
+    accepted_indices: [0], rejected: [{ index: 1, reason: '语义重复' }],
+  })
+  expect(() => parseDailyCreationValidation({ accepted_indices: [2], rejected: [] }, 2)).toThrow(/out-of-range/i)
+  expect(() => parseDailyCreationValidation({ summary: '都很好' }, 2)).toThrow(/invalid daily creation validation/i)
 })
 
 it('rejects duplicate posts, unjustified reuse, and invented experience', () => {

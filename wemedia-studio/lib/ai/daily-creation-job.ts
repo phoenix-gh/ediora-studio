@@ -1,10 +1,14 @@
 import { createMCPClient } from '@ai-sdk/mcp'
 import { createOpenAI } from '@ai-sdk/openai'
-import { generateText } from 'ai'
+import { generateObject, generateText } from 'ai'
+import type { ZodType } from 'zod'
 
 import {
   dailyCreationSelectionSchema,
   dailyCreationValidationSchema,
+  parseDailyCreationSelection,
+  parseDailyCreationValidation,
+  parseXPostBatch,
   validateDailyCreationSelection,
   validateXPostBatch,
   xPostBatchSchema,
@@ -76,6 +80,17 @@ async function modelConfig() {
   return { apiKey, model: process.env.WMS_LLM_MODEL ?? 'gpt-4o-mini', baseURL: process.env.WMS_LLM_BASE_URL }
 }
 
+async function generateJson<T>(options: { model: Parameters<typeof generateText>[0]['model']; schema: ZodType<T>; system: string; prompt: string }): Promise<unknown> {
+  try {
+    const result = await generateObject(options)
+    return result.object
+  } catch (error) {
+    if (!(error instanceof Error) || !error.message.includes('response_format')) throw error
+    const result = await generateText({ model: options.model, system: `${options.system}\n只返回有效 JSON，不要 Markdown 代码块或解释。`, prompt: options.prompt })
+    return parseJson(result.text)
+  }
+}
+
 async function runRecordedStep<T extends Record<string, unknown>>(
   job: DurableJob,
   key: string,
@@ -122,13 +137,14 @@ export async function runDailyCreationJob(jobId: number) {
     const candidates = candidatesOutput.candidates as Candidate[]
     const usage = usageOutput.usage as Usage[]
     const selectionOutput = await runRecordedStep(job, 'select', async () => {
-      const result = await generateText({
+      const result = await generateJson({
         model,
-        instructions: '你负责通用内容选材和语义去重。只能引用给定候选和历史 ID。已使用素材只有在角度实质不同并说明差异时才可复用。候选不足就少选，不得凑数。只返回 JSON。',
+        schema: dailyCreationSelectionSchema,
+        system: '你负责通用内容选材和语义去重。只能引用给定候选和历史 ID。已使用素材只有在角度实质不同并说明差异时才可复用。候选不足就少选，不得凑数。',
         prompt: JSON.stringify({ requested_count: context.requested_count, rule: context.rule, candidates, recent_global_usage: usage }),
       })
       const selection = validateDailyCreationSelection(
-        dailyCreationSelectionSchema.parse(parseJson(result.text)),
+        parseDailyCreationSelection(result, candidates),
         candidates.map(item => item.id), usage.map(item => item.id),
       )
       return { selection }
@@ -140,12 +156,13 @@ export async function runDailyCreationJob(jobId: number) {
       selectedAssets.push({ selection: selected, asset: mcpValue(result) })
     }
     const generatedOutput = await runRecordedStep(job, 'generate', async () => {
-      const result = await generateText({
+      const result = await generateJson({
         model,
-        instructions: '把素材改写为彼此独立的中文 X 短帖，不写线程，不虚构亲身经历、客户或收益。只返回 JSON 数组。',
+        schema: xPostBatchSchema,
+        system: '把素材改写为彼此独立的中文 X 短帖，不写线程，不虚构亲身经历、客户或收益。每项必须包含 asset_id、title、text、topic、angle、reuse_decision、reuse_explanation。',
         prompt: JSON.stringify({ rule: context.rule, selected_assets: selectedAssets }),
       })
-      const generated = xPostBatchSchema.parse(parseJson(result.text))
+      const generated = parseXPostBatch(result, selection.selected)
       const selectedIds = new Set(selection.selected.map(item => item.asset_id))
       for (const post of generated) {
         if (!selectedIds.has(post.asset_id)) throw new Error(`invented asset id: ${post.asset_id}`)
@@ -155,27 +172,30 @@ export async function runDailyCreationJob(jobId: number) {
     let posts = xPostBatchSchema.parse(generatedOutput.posts)
     const validationOutput = await runRecordedStep(job, 'validate', async () => {
       const deterministic = validateXPostBatch(posts)
-      const result = await generateText({
+      const result = await generateJson({
         model,
-        instructions: '比较候选短帖彼此之间及近期全局历史的语义重复。接受安全且角度清晰的条目，只返回 JSON。',
+        schema: dailyCreationValidationSchema,
+        system: '比较候选短帖彼此之间及近期全局历史的语义重复。接受安全且角度清晰的条目。返回 accepted_indices 数组和 rejected 数组；rejected 每项只含 index 与 reason。',
         prompt: JSON.stringify({ posts, recent_global_usage: usage, deterministic_issues: deterministic }),
       })
-      const validation = dailyCreationValidationSchema.parse(parseJson(result.text))
+      const validation = parseDailyCreationValidation(result, posts.length)
       const rejected = [...deterministic, ...validation.rejected]
       let finalRejected = rejected
       if (rejected.length) {
-        const revision = await generateText({
+        const revision = await generateJson({
           model,
-          instructions: '只修订被拒绝条目一次；无法安全修订就省略。返回完整 JSON 数组。',
+          schema: xPostBatchSchema,
+          system: '只修订被拒绝条目一次；无法安全修订就省略。',
           prompt: JSON.stringify({ posts, rejected, recent_global_usage: usage }),
         })
-        posts = xPostBatchSchema.parse(parseJson(revision.text))
-        const secondPass = await generateText({
+        posts = parseXPostBatch(revision, selection.selected)
+        const secondPass = await generateJson({
           model,
-          instructions: '这是唯一一次修订后的最终复核。比较条目彼此及近期历史，只返回 JSON；仍重复或不可信的条目必须拒绝。',
+          schema: dailyCreationValidationSchema,
+          system: '这是唯一一次修订后的最终复核。比较条目彼此及近期历史；仍重复或不可信的条目必须拒绝。返回 accepted_indices 数组和 rejected 数组；rejected 每项只含 index 与 reason。',
           prompt: JSON.stringify({ posts, recent_global_usage: usage }),
         })
-        const secondValidation = dailyCreationValidationSchema.parse(parseJson(secondPass.text))
+        const secondValidation = parseDailyCreationValidation(secondPass, posts.length)
         finalRejected = secondValidation.rejected
       }
       const finalIssues = validateXPostBatch(posts)

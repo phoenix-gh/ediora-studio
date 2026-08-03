@@ -13,6 +13,7 @@ import {
   toggleSkipItem, updateCreationRule,
 } from '@/lib/api/daily-plan'
 import { listCreativeAssetDirectories } from '@/lib/api/assets'
+import { listPublishAccounts } from '@/lib/api/publish-accounts'
 import { CreationRuleDialog } from './CreationRuleDialog'
 import { CreationRulesPanel } from './CreationRulesPanel'
 import { CreationRunsPanel } from './CreationRunsPanel'
@@ -35,14 +36,16 @@ export function DailyPlanClient({ initialPlan }: { initialPlan: DailyPlan | null
   const [busy, setBusy] = useState(false)
   const [rules, setRules] = useState<DailyCreationRule[]>([])
   const [runs, setRuns] = useState<DailyCreationRun[]>([])
-  const [directories, setDirectories] = useState<Array<{ id: number; name: string }>>([])
+  const [directories, setDirectories] = useState<Array<{ id: number; name: string; asset_type: 'article' | 'media' }>>([])
+  const [accounts, setAccounts] = useState<Array<{ id: string; name: string }>>([])
   const [editingRule, setEditingRule] = useState<DailyCreationRule | null | undefined>(undefined)
 
   const refreshCreation = useCallback(async () => {
-    const [nextRules, nextRuns, nextDirectories] = await Promise.all([
+    const [nextRules, nextRuns, articleDirectories, mediaDirectories, nextAccounts] = await Promise.all([
       listCreationRules(), listCreationRuns(), listCreativeAssetDirectories('article'),
+      listCreativeAssetDirectories('media'), listPublishAccounts(),
     ])
-    setRules(nextRules); setRuns(nextRuns); setDirectories(nextDirectories)
+    setRules(nextRules); setRuns(nextRuns); setDirectories([...articleDirectories, ...mediaDirectories]); setAccounts(nextAccounts.filter(account => account.is_active).map(account => ({ id: account.id, name: account.name })))
   }, [])
 
   useEffect(() => { const timer = setTimeout(() => { void refreshCreation().catch(error => toast.error(error instanceof Error ? error.message : '创作规则加载失败')) }, 0); return () => clearTimeout(timer) }, [refreshCreation])
@@ -137,7 +140,7 @@ export function DailyPlanClient({ initialPlan }: { initialPlan: DailyPlan | null
     <div className="p-6 max-w-5xl mx-auto space-y-5">
       <CreationRunsPanel runs={runs} />
       <CreationRulesPanel rules={rules} activeRuleIds={activeRuleIds} onCreate={() => setEditingRule(null)} onEdit={setEditingRule} onRun={rule => void mutateRule(() => runCreationRule(rule.id), '任务已入队')} onToggle={rule => void mutateRule(() => updateCreationRule(rule.id, { enabled: !rule.enabled }), rule.enabled ? '规则已暂停' : '规则已开启')} onDelete={rule => { if (window.confirm('删除该规则？历史运行和产出会保留。')) void mutateRule(() => deleteCreationRule(rule.id), '规则已删除') }} />
-      {editingRule !== undefined && <CreationRuleDialog key={editingRule?.id ?? 'new'} open initial={editingRule} directories={directories} onClose={() => setEditingRule(undefined)} onSubmit={saveRule} />}
+      {editingRule !== undefined && <CreationRuleDialog key={editingRule?.id ?? 'new'} open initial={editingRule} directories={directories} accounts={accounts} onClose={() => setEditingRule(undefined)} onSubmit={saveRule} />}
       <header className="flex items-center gap-3">
         <CalendarCheck className="w-5 h-5 text-indigo-600" />
         <h1 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
