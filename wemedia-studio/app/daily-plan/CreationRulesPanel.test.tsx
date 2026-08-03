@@ -5,7 +5,7 @@ import { expect, it, vi } from 'vitest'
 import { CreationRulesPanel } from './CreationRulesPanel'
 
 const rule = {
-  id: 1, name: '产品短帖', asset_type: 'article' as const, directory: '产品实验',
+  id: 1, name: '产品短帖', asset_type: 'article' as const, directory: '产品实验', directories: ['产品实验', '增长资料'],
   output_type: 'x_short_post' as const, target_count: 3,
   execution_mode: 'recurring' as const, scheduled_date: null,
   scheduled_time: '09:30', timezone: 'Asia/Shanghai', lookback_days: 5,
@@ -27,4 +27,5 @@ it('keeps run now primary and exposes edit pause and delete actions', () => {
   expect(onToggle).toHaveBeenCalledWith(rule)
   expect(onEdit).toHaveBeenCalledWith(rule)
   expect(onDelete).toHaveBeenCalledWith(rule)
+  expect(screen.getByText(/产品实验、增长资料/)).toBeInTheDocument()
 })

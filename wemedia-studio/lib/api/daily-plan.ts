@@ -58,13 +58,13 @@ export function toggleSkipItem(itemId: number): Promise<{ id: number; status: st
 }
 
 export type DailyCreationRule = {
-  id: number; name: string; asset_type: 'article' | 'media'; directory: string
+  id: number; name: string; asset_type: 'article' | 'media'; directory: string; directories?: string[]
   output_type: 'x_short_post'; target_count: number; execution_mode: 'once' | 'recurring'
   scheduled_date: string | null; scheduled_time: string; timezone: string; lookback_days: number
   delivery_mode: 'drafts' | 'plan_items'; account_id: string | null; instructions: string
   enabled: boolean; created_at: string; updated_at: string
 }
-export type DailyCreationRuleInput = Omit<DailyCreationRule, 'id' | 'created_at' | 'updated_at'>
+export type DailyCreationRuleInput = Omit<DailyCreationRule, 'id' | 'created_at' | 'updated_at' | 'directories'> & { directories: string[] }
 export type DailyCreationRun = {
   id: number; rule_id: number; content_job_id: number | null; scheduled_for: string
   trigger_kind: string; status: 'queued' | 'running' | 'failed' | 'partial' | 'succeeded'
