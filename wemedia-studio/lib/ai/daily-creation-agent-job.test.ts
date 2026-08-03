@@ -134,4 +134,29 @@ describe('daily creation Agent job', () => {
     expect(deps.openRuntime).not.toHaveBeenCalled()
     expect(deps.completeJob).toHaveBeenCalledWith(19)
   })
+
+  it('resumes the existing running Agent step after startup reconciliation', async () => {
+    const deps = dependencies()
+    vi.mocked(deps.getJob).mockResolvedValue({
+      id: 19, flow: 'daily_creation', title: 'daily', status: 'running',
+      input: { run_id: 83, runtime_version: 'agent-v1' },
+      steps: [{
+        id: 75, key: 'agent', attempt: 1, status: 'running', output: {},
+      }],
+    })
+    vi.mocked(deps.listToolCalls).mockResolvedValue([{
+      tool_call_id: 'saved', tool_name: 'save_daily_creation_outputs',
+      status: 'succeeded', output: { structuredContent: { result: {
+        execution_id: 41, run_id: 83, created_count: 1,
+        output_ids: [92], usage_ids: [192],
+      } } },
+    }])
+
+    await runDailyCreationAgentJob(19, deps)
+
+    expect(deps.startStep).not.toHaveBeenCalled()
+    expect(deps.completeStep).toHaveBeenCalledWith(
+      19, 75, expect.objectContaining({ outputIds: [92] }),
+    )
+  })
 })

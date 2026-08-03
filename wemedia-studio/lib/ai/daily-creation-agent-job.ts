@@ -242,7 +242,12 @@ export async function runDailyCreationAgentJob(
     throw new Error('daily_creation agent flow requires run_id')
   }
 
-  const step = await deps.startStep(jobId, 'agent')
+  const runningStep = [...job.steps]
+    .filter(item => item.key === 'agent' && item.status === 'running' && item.id)
+    .sort((left, right) => right.attempt - left.attempt)[0]
+  const step = runningStep?.id
+    ? { id: runningStep.id, attempt: runningStep.attempt }
+    : await deps.startStep(jobId, 'agent')
   let runtime: AgentRuntime | undefined
   try {
     const context = await deps.getContext(runId, jobId)

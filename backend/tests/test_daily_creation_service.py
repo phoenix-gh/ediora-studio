@@ -460,3 +460,33 @@ async def test_duplicate_usage_rolls_back_the_second_draft(db):
             reuse_decision="fresh", reuse_explanation="",
         )
     assert await db.scalar(select(func.count(ArticleDraft.id))) == 0
+
+
+@pytest.mark.asyncio
+async def test_new_daily_creation_jobs_use_agent_v1_runtime(db):
+    from daily_creation_service import create_daily_creation_run
+    from models import ContentJob, DailyCreationRule
+
+    rule = DailyCreationRule(
+        name="Agent 新任务", asset_type="article", directory="增长实验",
+        output_type="x_short_post", target_count=3,
+        execution_mode="recurring", scheduled_time="08:00",
+        timezone="Asia/Shanghai", lookback_days=7,
+        delivery_mode="drafts", enabled=True,
+    )
+    db.add(rule)
+    await db.flush()
+
+    creation_run, created = await create_daily_creation_run(
+        db,
+        rule=rule,
+        scheduled_for=datetime(2026, 8, 5, 0, tzinfo=timezone.utc),
+        trigger_kind="schedule",
+    )
+    job = await db.get(ContentJob, creation_run.content_job_id)
+
+    assert created is True
+    assert job.input_data == {
+        "run_id": creation_run.id,
+        "runtime_version": "agent-v1",
+    }

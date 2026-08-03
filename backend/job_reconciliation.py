@@ -395,6 +395,13 @@ async def _decide_locked(
     if job.status in TERMINAL_STATUSES:
         return _Decision()
     step = await _latest_step_locked(db, job.id)
+    input_data = job.input_data if isinstance(job.input_data, dict) else {}
+    if (
+        job.flow == "daily_creation"
+        and input_data.get("runtime_version") == "agent-v1"
+        and job.status in {"queued", "running"}
+    ):
+        return _Decision(enqueue=True, reason="agent_runtime_resume")
     if (
         job.status == "queued"
         and (step is None or step.status == "queued")

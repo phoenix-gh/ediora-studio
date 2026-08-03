@@ -544,7 +544,10 @@ async def create_daily_creation_run(
         session,
         flow="daily_creation",
         title=rule.name,
-        input_data={"run_id": creation_run.id},
+        input_data={
+            "run_id": creation_run.id,
+            "runtime_version": "agent-v1",
+        },
         idempotency_key=(
             f"daily-creation:{rule.id}:{scheduled_for.isoformat()}:{trigger_kind}"
         ),
