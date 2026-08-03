@@ -333,6 +333,16 @@ async def persist_creation_output(
                 reuse_decision=body.reuse_decision,
                 reuse_explanation=body.reuse_explanation,
             )
+        detail = dict(creation_run.detail or {})
+        outputs = list(detail.get("outputs") or [])
+        outputs.append({
+            "output_kind": usage.output_kind,
+            "output_id": output.id,
+            "draft_id": usage.draft_id,
+            "plan_item_id": usage.plan_item_id,
+        })
+        detail["outputs"] = outputs
+        creation_run.detail = detail
         await db.commit()
     except ValueError as exc:
         await db.rollback()
@@ -368,7 +378,9 @@ async def complete_creation_run(
         raise HTTPException(400, "status and created_count do not match the run")
     creation_run.status = body.status
     creation_run.created_count = body.created_count
-    creation_run.detail = body.detail
+    detail = dict(body.detail)
+    detail["outputs"] = list((creation_run.detail or {}).get("outputs") or [])
+    creation_run.detail = detail
     creation_run.completed_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(creation_run)

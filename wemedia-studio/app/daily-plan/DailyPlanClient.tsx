@@ -7,8 +7,15 @@ import { CalendarCheck, ExternalLink, Loader2, RefreshCw, Send, Users } from 'lu
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import {
-  DailyPlan, DailyPlanItem, enqueuePlanItems, generatePlan, getTodayPlan, toggleSkipItem,
+  createCreationRule, DailyCreationRule, DailyCreationRuleInput, DailyCreationRun,
+  DailyPlan, DailyPlanItem, deleteCreationRule, enqueuePlanItems, generatePlan,
+  getTodayPlan, listCreationRules, listCreationRuns, runCreationRule,
+  toggleSkipItem, updateCreationRule,
 } from '@/lib/api/daily-plan'
+import { listCreativeAssetDirectories } from '@/lib/api/assets'
+import { CreationRuleDialog } from './CreationRuleDialog'
+import { CreationRulesPanel } from './CreationRulesPanel'
+import { CreationRunsPanel } from './CreationRunsPanel'
 
 const TYPE_LABEL: Record<string, string> = {
   long: '长文', short: '短文', story: '微故事', share: '发现',
@@ -26,6 +33,21 @@ export function DailyPlanClient({ initialPlan }: { initialPlan: DailyPlan | null
     new Set((initialPlan?.items ?? []).filter(i => i.status === 'suggested').map(i => i.id)),
   )
   const [busy, setBusy] = useState(false)
+  const [rules, setRules] = useState<DailyCreationRule[]>([])
+  const [runs, setRuns] = useState<DailyCreationRun[]>([])
+  const [directories, setDirectories] = useState<Array<{ id: number; name: string }>>([])
+  const [editingRule, setEditingRule] = useState<DailyCreationRule | null | undefined>(undefined)
+
+  const refreshCreation = useCallback(async () => {
+    const [nextRules, nextRuns, nextDirectories] = await Promise.all([
+      listCreationRules(), listCreationRuns(), listCreativeAssetDirectories('article'),
+    ])
+    setRules(nextRules); setRuns(nextRuns); setDirectories(nextDirectories)
+  }, [])
+
+  useEffect(() => { const timer = setTimeout(() => { void refreshCreation().catch(error => toast.error(error instanceof Error ? error.message : '创作规则加载失败')) }, 0); return () => clearTimeout(timer) }, [refreshCreation])
+  const hasActiveRun = runs.some(run => run.status === 'queued' || run.status === 'running')
+  useEffect(() => { if (!hasActiveRun) return; const timer = setInterval(() => { void refreshCreation() }, 5_000); return () => clearInterval(timer) }, [hasActiveRun, refreshCreation])
 
   const refresh = useCallback(async () => {
     try {
@@ -97,9 +119,25 @@ export function DailyPlanClient({ initialPlan }: { initialPlan: DailyPlan | null
   }
 
   const badge = plan ? STATUS_BADGE[plan.status] : null
+  const activeRuleIds = useMemo(() => new Set(runs.filter(run => run.status === 'queued' || run.status === 'running').map(run => run.rule_id)), [runs])
+
+  async function saveRule(input: DailyCreationRuleInput) {
+    try {
+      if (editingRule) await updateCreationRule(editingRule.id, input)
+      else await createCreationRule(input)
+      setEditingRule(undefined); await refreshCreation(); toast.success('创作规则已保存')
+    } catch (error) { toast.error(error instanceof Error ? error.message : '保存失败') }
+  }
+
+  async function mutateRule(action: () => Promise<unknown>, success: string) {
+    try { await action(); await refreshCreation(); toast.success(success) } catch (error) { toast.error(error instanceof Error ? error.message : '操作失败') }
+  }
 
   return (
     <div className="p-6 max-w-5xl mx-auto space-y-5">
+      <CreationRunsPanel runs={runs} />
+      <CreationRulesPanel rules={rules} activeRuleIds={activeRuleIds} onCreate={() => setEditingRule(null)} onEdit={setEditingRule} onRun={rule => void mutateRule(() => runCreationRule(rule.id), '任务已入队')} onToggle={rule => void mutateRule(() => updateCreationRule(rule.id, { enabled: !rule.enabled }), rule.enabled ? '规则已暂停' : '规则已开启')} onDelete={rule => { if (window.confirm('删除该规则？历史运行和产出会保留。')) void mutateRule(() => deleteCreationRule(rule.id), '规则已删除') }} />
+      {editingRule !== undefined && <CreationRuleDialog key={editingRule?.id ?? 'new'} open initial={editingRule} directories={directories} onClose={() => setEditingRule(undefined)} onSubmit={saveRule} />}
       <header className="flex items-center gap-3">
         <CalendarCheck className="w-5 h-5 text-indigo-600" />
         <h1 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">

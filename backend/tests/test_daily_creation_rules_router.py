@@ -198,6 +198,12 @@ def test_worker_context_output_and_completion_require_token(client, monkeypatch)
     assert completed.status_code == 200
     assert completed.json()["status"] == "succeeded"
     assert completed.json()["created_count"] == 1
+    assert completed.json()["detail"]["outputs"] == [{
+        "output_kind": "draft",
+        "output_id": persisted.json()["output_id"],
+        "draft_id": persisted.json()["draft_id"],
+        "plan_item_id": None,
+    }]
 
 
 def test_planner_replacement_preserves_creation_rule_items(client):
