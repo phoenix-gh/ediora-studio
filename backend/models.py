@@ -1147,6 +1147,30 @@ class DailyCreationRun(Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class DailyCreationOutputBatch(Base):
+    """One atomic, idempotent final-output commit from a daily Agent run."""
+    __tablename__ = "daily_creation_output_batches"
+    __table_args__ = (
+        UniqueConstraint(
+            "run_id", "idempotency_key", name="uq_daily_creation_output_batch_key"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    execution_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    idempotency_key: Mapped[str] = mapped_column(String, nullable=False)
+    input_hash: Mapped[str] = mapped_column(String, nullable=False)
+    posts_data: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    self_validation: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    output_ids: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    draft_ids: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    plan_item_ids: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    usage_ids: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    created_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+
 class ContentUsageLedger(Base):
     """Global semantic-deduplication evidence for persisted creation outputs."""
     __tablename__ = "content_usage_ledger"

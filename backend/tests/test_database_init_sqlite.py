@@ -103,6 +103,7 @@ def test_init_db_twice_creates_fresh_sqlite_core_and_text_video_tables(
         assert {
             "daily_creation_rules",
             "daily_creation_runs",
+            "daily_creation_output_batches",
             "content_usage_ledger",
             "agent_executions",
             "agent_tool_calls",

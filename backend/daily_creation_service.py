@@ -3,20 +3,34 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import hashlib
+import json
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import desc, select
+from sqlalchemy import desc, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models import (
     ArticleDraft,
+    AgentExecution,
+    AgentToolCall,
+    ContentJob,
     ContentUsageLedger,
     CreativeAsset,
     DailyCreationRun,
+    DailyCreationOutputBatch,
     DailyPlan,
     DailyPlanItem,
     DailyCreationRule,
 )
+
+
+_ASSET_EVIDENCE_TOOLS = {
+    "list_creative_asset_candidates",
+    "search_creative_assets",
+    "get_creative_asset",
+}
+_USAGE_EVIDENCE_TOOLS = {"get_recent_content_usage"}
 
 
 def _bounded(value: int, *, name: str, minimum: int, maximum: int) -> int:
@@ -188,6 +202,295 @@ def snapshot_creation_rule(rule: DailyCreationRule) -> dict:
         "skill_mode": rule.skill_mode or "auto",
         "skill_name": rule.skill_name,
     }
+
+
+def _evidence_rows(value: object) -> list[dict]:
+    if isinstance(value, list):
+        return [item for item in value if isinstance(item, dict)]
+    if isinstance(value, dict):
+        if isinstance(value.get("results"), list):
+            return [item for item in value["results"] if isinstance(item, dict)]
+        return [value]
+    return []
+
+
+def _positive_evidence_ids(value: object, key: str) -> set[int]:
+    if not isinstance(value, dict) or not isinstance(value.get(key), list):
+        return set()
+    return {
+        item for item in value[key]
+        if isinstance(item, int) and not isinstance(item, bool) and item > 0
+    }
+
+
+async def _observed_creation_evidence(
+    session: AsyncSession,
+    execution_id: int,
+) -> tuple[set[int], set[int]]:
+    calls = (await session.execute(
+        select(AgentToolCall).where(
+            AgentToolCall.execution_id == execution_id,
+            AgentToolCall.status == "succeeded",
+        )
+    )).scalars().all()
+    asset_ids: set[int] = set()
+    usage_ids: set[int] = set()
+    for call in calls:
+        rows = _evidence_rows(call.output_data)
+        if call.tool_name in _ASSET_EVIDENCE_TOOLS:
+            asset_ids.update(
+                row["id"] for row in rows
+                if isinstance(row.get("id"), int) and row["id"] > 0
+            )
+            asset_ids.update(_positive_evidence_ids(call.output_data, "evidenceIds"))
+        if call.tool_name in _USAGE_EVIDENCE_TOOLS:
+            usage_ids.update(
+                row["id"] for row in rows
+                if isinstance(row.get("id"), int) and row["id"] > 0
+            )
+            asset_ids.update(
+                row["asset_id"] for row in rows
+                if isinstance(row.get("asset_id"), int) and row["asset_id"] > 0
+            )
+            usage_ids.update(_positive_evidence_ids(call.output_data, "evidenceIds"))
+            asset_ids.update(
+                _positive_evidence_ids(call.output_data, "evidenceAssetIds")
+            )
+    return asset_ids, usage_ids
+
+
+def _batch_result(batch: DailyCreationOutputBatch) -> dict:
+    return {
+        "execution_id": batch.execution_id,
+        "run_id": batch.run_id,
+        "created_count": batch.created_count,
+        "output_ids": list(batch.output_ids or []),
+        "draft_ids": list(batch.draft_ids or []),
+        "plan_item_ids": list(batch.plan_item_ids or []),
+        "usage_ids": list(batch.usage_ids or []),
+    }
+
+
+def _normalize_agent_post(post: object) -> dict:
+    if not isinstance(post, dict):
+        raise ValueError("each post must be an object")
+    source_values = post.get("source_asset_ids")
+    if not isinstance(source_values, list):
+        raise ValueError("source_asset_ids must be a non-empty list")
+    source_ids: list[int] = []
+    for value in source_values:
+        if not isinstance(value, int) or value <= 0:
+            raise ValueError("source_asset_ids must contain positive integers")
+        if value not in source_ids:
+            source_ids.append(value)
+    if not source_ids or len(source_ids) > 20:
+        raise ValueError("source_asset_ids must contain between 1 and 20 items")
+    text = post.get("text")
+    if not isinstance(text, str) or not text.strip() or len(text.strip()) > 5_000:
+        raise ValueError("post text must contain between 1 and 5000 characters")
+    title = post.get("title")
+    if title is not None and (not isinstance(title, str) or len(title.strip()) > 300):
+        raise ValueError("post title must contain at most 300 characters")
+    reuse_decision = post.get("reuse_decision")
+    if reuse_decision not in {"fresh", "reuse_allowed"}:
+        raise ValueError("reuse_decision is invalid")
+    reuse_explanation = post.get("reuse_explanation", "")
+    if not isinstance(reuse_explanation, str) or len(reuse_explanation) > 1_000:
+        raise ValueError("reuse_explanation must contain at most 1000 characters")
+    compared_values = post.get("compared_usage_ids", [])
+    if not isinstance(compared_values, list) or any(
+        not isinstance(value, int) or value <= 0 for value in compared_values
+    ):
+        raise ValueError("compared_usage_ids must contain positive integers")
+    compared_ids = list(dict.fromkeys(compared_values))
+    metadata = post.get("metadata", {})
+    if not isinstance(metadata, dict) or any(
+        not isinstance(key, str) or not isinstance(value, str)
+        for key, value in metadata.items()
+    ) or len(json.dumps(metadata, ensure_ascii=False)) > 4_000:
+        raise ValueError("metadata must be a bounded string map")
+    return {
+        "source_asset_ids": source_ids,
+        "title": title.strip() if isinstance(title, str) and title.strip() else None,
+        "text": text.strip(),
+        "reuse_decision": reuse_decision,
+        "reuse_explanation": reuse_explanation.strip(),
+        "compared_usage_ids": compared_ids,
+        "metadata": metadata,
+    }
+
+
+async def persist_daily_creation_output_batch(
+    session: AsyncSession,
+    *,
+    execution_id: int,
+    run_id: int,
+    idempotency_key: str,
+    posts: list[dict],
+    self_validation: dict,
+) -> dict:
+    """Validate evidence and commit one Agent-owned output batch atomically."""
+    normalized_key = idempotency_key.strip()
+    if not normalized_key or len(normalized_key) > 200:
+        raise ValueError("idempotency_key must contain between 1 and 200 characters")
+    if not isinstance(posts, list) or not 1 <= len(posts) <= 50:
+        raise ValueError("posts must contain between 1 and 50 items")
+    if not isinstance(self_validation, dict) or self_validation.get("passed") is not True:
+        raise ValueError("self_validation must explicitly pass")
+    normalized_posts = [_normalize_agent_post(post) for post in posts]
+    request_hash = hashlib.sha256(json.dumps(
+        {"posts": normalized_posts, "self_validation": self_validation},
+        ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+    ).encode("utf-8")).hexdigest()
+
+    existing = await session.scalar(select(DailyCreationOutputBatch).where(
+        DailyCreationOutputBatch.run_id == run_id,
+        DailyCreationOutputBatch.idempotency_key == normalized_key,
+    ))
+    if existing is not None:
+        if existing.input_hash != request_hash:
+            raise ValueError("idempotency key was already used for different output")
+        return _batch_result(existing)
+
+    try:
+        await session.execute(
+            update(DailyCreationRun)
+            .where(DailyCreationRun.id == run_id)
+            .values(status=DailyCreationRun.status)
+        )
+        creation_run = await session.scalar(
+            select(DailyCreationRun)
+            .where(DailyCreationRun.id == run_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        execution = await session.get(AgentExecution, execution_id)
+        if creation_run is None or execution is None:
+            raise ValueError("daily creation run or Agent execution not found")
+        job = await session.get(ContentJob, execution.job_id)
+        if (
+            job is None
+            or creation_run.content_job_id != job.id
+            or job.input_data.get("run_id") != run_id
+        ):
+            raise ValueError("Agent execution does not belong to the creation run")
+        if creation_run.status not in {"queued", "running"}:
+            raise ValueError("daily creation run is not eligible for persistence")
+        if len(normalized_posts) > creation_run.requested_count:
+            raise ValueError("output count exceeds the requested count")
+
+        observed_asset_ids, observed_usage_ids = await _observed_creation_evidence(
+            session, execution_id
+        )
+        requested_asset_ids = {
+            asset_id
+            for post in normalized_posts
+            for asset_id in post["source_asset_ids"]
+        }
+        if not requested_asset_ids <= observed_asset_ids:
+            raise ValueError("one or more source assets were not observed")
+        requested_usage_ids = {
+            usage_id
+            for post in normalized_posts
+            for usage_id in post["compared_usage_ids"]
+        }
+        if not requested_usage_ids <= observed_usage_ids:
+            raise ValueError("one or more usage records were not observed")
+
+        snapshot = creation_run.rule_snapshot or {}
+        output_ids: list[int] = []
+        draft_ids: list[int] = []
+        plan_item_ids: list[int] = []
+        usage_ids: list[int] = []
+        output_details: list[dict] = []
+        for post in normalized_posts:
+            primary_asset_id = post["source_asset_ids"][0]
+            metadata = post["metadata"]
+            title = post["title"] or post["text"][:40]
+            topic = metadata.get("topic") or title[:300]
+            angle = metadata.get("angle") or "Agent validated output"
+            if snapshot.get("delivery_mode") == "drafts":
+                output, usage = await persist_x_draft_with_usage(
+                    session,
+                    run_id=run_id,
+                    asset_id=primary_asset_id,
+                    title=title,
+                    text=post["text"],
+                    topic=topic,
+                    angle=angle,
+                    reuse_decision=post["reuse_decision"],
+                    reuse_explanation=post["reuse_explanation"],
+                    account_id=snapshot.get("account_id"),
+                )
+                assets = (await session.execute(select(CreativeAsset).where(
+                    CreativeAsset.id.in_(post["source_asset_ids"])
+                ))).scalars().all()
+                output.sources = [
+                    {"asset_id": asset.id, "url": asset.url or ""}
+                    for asset in assets
+                ]
+                draft_ids.append(output.id)
+            else:
+                account_id = snapshot.get("account_id")
+                if not account_id:
+                    raise ValueError("account_id is required for plan item delivery")
+                output, usage = await persist_plan_item_with_usage(
+                    session,
+                    run_id=run_id,
+                    asset_id=primary_asset_id,
+                    account_id=account_id,
+                    title=title,
+                    text=post["text"],
+                    topic=topic,
+                    angle=angle,
+                    reuse_decision=post["reuse_decision"],
+                    reuse_explanation=post["reuse_explanation"],
+                )
+                output.sources = [
+                    {"asset_id": asset_id}
+                    for asset_id in post["source_asset_ids"]
+                ]
+                plan_item_ids.append(output.id)
+            output_ids.append(output.id)
+            usage_ids.append(usage.id)
+            output_details.append({
+                "output_kind": usage.output_kind,
+                "output_id": output.id,
+                "draft_id": usage.draft_id,
+                "plan_item_id": usage.plan_item_id,
+            })
+
+        created_count = len(output_ids)
+        batch = DailyCreationOutputBatch(
+            run_id=run_id,
+            execution_id=execution_id,
+            idempotency_key=normalized_key,
+            input_hash=request_hash,
+            posts_data=normalized_posts,
+            self_validation=self_validation,
+            output_ids=output_ids,
+            draft_ids=draft_ids,
+            plan_item_ids=plan_item_ids,
+            usage_ids=usage_ids,
+            created_count=created_count,
+        )
+        session.add(batch)
+        creation_run.created_count = created_count
+        creation_run.status = (
+            "succeeded" if created_count == creation_run.requested_count else "partial"
+        )
+        creation_run.detail = {
+            **(creation_run.detail or {}),
+            "outputs": output_details,
+            "self_validation": self_validation,
+        }
+        creation_run.completed_at = datetime.now(timezone.utc)
+        await session.commit()
+        await session.refresh(batch)
+        return _batch_result(batch)
+    except Exception:
+        await session.rollback()
+        raise
 
 
 async def create_daily_creation_run(

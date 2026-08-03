@@ -107,4 +107,33 @@ describe('Agent tool policy', () => {
     )).rejects.toThrow('write failed')
     expect(audits.at(-1)).toMatchObject({ status: 'failed', error: 'write failed' })
   })
+
+  it('preserves evidence ids when a successful audit result is too large', async () => {
+    const audits: AgentToolAudit[] = []
+    const candidates = Array.from({ length: 50 }, (_, index) => ({
+      id: index + 1,
+      asset_id: index + 101,
+      summary: 'x'.repeat(500),
+    }))
+    const tools = applyAgentToolPolicy({
+      list_creative_asset_candidates: tool({
+        inputSchema: z.object({}),
+        execute: async () => candidates,
+      }),
+    }, {
+      policy: 'automatic',
+      onAudit: event => { audits.push(event) },
+    })
+
+    await executable(tools, 'list_creative_asset_candidates').execute(
+      {}, { toolCallId: 'large-candidates' },
+    )
+
+    expect(audits.at(-1)?.output).toEqual(expect.objectContaining({
+      truncated: true,
+      evidenceIds: Array.from({ length: 50 }, (_, index) => index + 1),
+      evidenceAssetIds: Array.from({ length: 50 }, (_, index) => index + 101),
+    }))
+    expect(JSON.stringify(audits.at(-1)?.output).length).toBeLessThan(8_000)
+  })
 })

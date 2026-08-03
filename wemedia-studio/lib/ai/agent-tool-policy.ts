@@ -10,6 +10,7 @@ const sensitiveToolVerb = /(^|_)(publish|delete|update|save|create|add|upload)(_
 const readOnlyToolPrefix = /^(list|get|search|read|fetch|find)_/
 const auditValueLimit = 8_000
 const auditErrorLimit = 2_000
+const auditEvidenceIdLimit = 500
 
 export function requiresToolApproval(name: string) {
   return name !== 'generateImage'
@@ -28,12 +29,37 @@ type ToolWithExecution = Record<string, unknown> & {
   execute?: (input: unknown, options: { toolCallId?: string }) => Promise<unknown>
 }
 
+function collectEvidenceIds(value: unknown) {
+  const ids = new Set<number>()
+  const assetIds = new Set<number>()
+  const visit = (candidate: unknown) => {
+    if (Array.isArray(candidate)) {
+      candidate.forEach(visit)
+      return
+    }
+    if (!candidate || typeof candidate !== 'object') return
+    for (const [key, nested] of Object.entries(candidate)) {
+      if (typeof nested === 'number' && Number.isSafeInteger(nested) && nested > 0) {
+        if (key === 'id' && ids.size < auditEvidenceIdLimit) ids.add(nested)
+        if (key === 'asset_id' && assetIds.size < auditEvidenceIdLimit) assetIds.add(nested)
+      }
+      visit(nested)
+    }
+  }
+  visit(value)
+  return { evidenceIds: [...ids], evidenceAssetIds: [...assetIds] }
+}
+
 function boundedAuditValue(value: unknown): unknown {
   if (value === undefined) return undefined
   try {
     const serialized = JSON.stringify(value)
     if (serialized.length <= auditValueLimit) return value
-    return { truncated: serialized.slice(0, auditValueLimit), originalBytes: serialized.length }
+    return {
+      truncated: true,
+      originalBytes: serialized.length,
+      ...collectEvidenceIds(value),
+    }
   } catch {
     return { unavailable: true }
   }

@@ -173,6 +173,158 @@ async def _seed_run(db, *, delivery_mode="drafts"):
     return creation_run, asset, other
 
 
+async def _seed_agent_execution(db, creation_run, observed_asset_ids):
+    from models import AgentExecution, AgentToolCall, ContentJob
+
+    job = ContentJob(
+        flow="daily_creation", title="Agent batch",
+        input_data={"run_id": creation_run.id},
+    )
+    db.add(job)
+    await db.flush()
+    creation_run.content_job_id = job.id
+    execution = AgentExecution(
+        job_id=job.id, objective="create posts", skill_mode="auto",
+    )
+    db.add(execution)
+    await db.flush()
+    db.add(AgentToolCall(
+        execution_id=execution.id,
+        tool_call_id="candidate-call",
+        tool_name="list_creative_asset_candidates",
+        status="succeeded",
+        input_summary={},
+        output_data=[{"id": asset_id} for asset_id in observed_asset_ids],
+    ))
+    await db.commit()
+    return execution
+
+
+@pytest.mark.asyncio
+async def test_agent_batch_persistence_is_atomic_and_idempotent(db):
+    from daily_creation_service import persist_daily_creation_output_batch
+    from models import ArticleDraft, ContentUsageLedger, DailyCreationOutputBatch
+
+    creation_run, asset, _ = await _seed_run(db)
+    execution = await _seed_agent_execution(db, creation_run, [asset.id])
+    posts = [
+        {
+            "source_asset_ids": [asset.id],
+            "title": "先卖再做",
+            "text": "口头认可不是需求，真实付费才是。",
+            "reuse_decision": "fresh",
+            "reuse_explanation": "与近期内容的切入点不同",
+            "compared_usage_ids": [],
+            "metadata": {},
+        },
+        {
+            "source_asset_ids": [asset.id],
+            "title": None,
+            "text": "先做最小收费实验，再决定是否扩大投入。",
+            "reuse_decision": "reuse_allowed",
+            "reuse_explanation": "同一素材的新行动框架",
+            "compared_usage_ids": [],
+            "metadata": {"campaign": "validation"},
+        },
+    ]
+
+    first = await persist_daily_creation_output_batch(
+        db,
+        execution_id=execution.id,
+        run_id=creation_run.id,
+        idempotency_key="final-call-1",
+        posts=posts,
+        self_validation={"passed": True, "summary": "checked"},
+    )
+    replay = await persist_daily_creation_output_batch(
+        db,
+        execution_id=execution.id,
+        run_id=creation_run.id,
+        idempotency_key="final-call-1",
+        posts=posts,
+        self_validation={"passed": True, "summary": "checked"},
+    )
+
+    assert replay == first
+    assert first["created_count"] == 2
+    assert len(first["output_ids"]) == 2
+    assert len(first["usage_ids"]) == 2
+    assert await db.scalar(select(func.count(ArticleDraft.id))) == 2
+    assert await db.scalar(select(func.count(ContentUsageLedger.id))) == 2
+    assert await db.scalar(select(func.count(DailyCreationOutputBatch.id))) == 1
+
+
+@pytest.mark.asyncio
+async def test_agent_batch_accepts_ids_preserved_from_truncated_tool_audit(db):
+    from daily_creation_service import persist_daily_creation_output_batch
+    from models import AgentToolCall
+
+    creation_run, asset, _ = await _seed_run(db)
+    execution = await _seed_agent_execution(db, creation_run, [])
+    call = await db.scalar(select(AgentToolCall).where(
+        AgentToolCall.execution_id == execution.id,
+        AgentToolCall.tool_name == "list_creative_asset_candidates",
+    ))
+    call.output_data = {
+        "truncated": True,
+        "originalBytes": 25000,
+        "evidenceIds": [asset.id],
+        "evidenceAssetIds": [],
+    }
+    await db.commit()
+
+    result = await persist_daily_creation_output_batch(
+        db,
+        execution_id=execution.id,
+        run_id=creation_run.id,
+        idempotency_key="truncated-evidence",
+        posts=[{
+            "source_asset_ids": [asset.id], "title": "保留证据",
+            "text": "即使审计输出被压缩，也能验证素材来源。",
+            "reuse_decision": "fresh", "reuse_explanation": "",
+            "compared_usage_ids": [], "metadata": {},
+        }],
+        self_validation={"passed": True, "summary": "checked"},
+    )
+
+    assert result["created_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_agent_batch_rejects_unobserved_assets_and_rolls_back_all_outputs(db):
+    from daily_creation_service import persist_daily_creation_output_batch
+    from models import ArticleDraft, ContentUsageLedger
+
+    creation_run, asset, unobserved = await _seed_run(db)
+    execution = await _seed_agent_execution(
+        db, creation_run, [asset.id, unobserved.id]
+    )
+
+    with pytest.raises(ValueError, match="outside the configured directory"):
+        await persist_daily_creation_output_batch(
+            db,
+            execution_id=execution.id,
+            run_id=creation_run.id,
+            idempotency_key="invalid-call",
+            posts=[
+                {
+                    "source_asset_ids": [asset.id], "title": "valid",
+                    "text": "would otherwise persist", "reuse_decision": "fresh",
+                    "reuse_explanation": "", "compared_usage_ids": [], "metadata": {},
+                },
+                {
+                    "source_asset_ids": [unobserved.id], "title": "invalid",
+                    "text": "must roll everything back", "reuse_decision": "fresh",
+                    "reuse_explanation": "", "compared_usage_ids": [], "metadata": {},
+                },
+            ],
+            self_validation={"passed": True, "summary": "checked"},
+        )
+
+    assert await db.scalar(select(func.count(ArticleDraft.id))) == 0
+    assert await db.scalar(select(func.count(ContentUsageLedger.id))) == 0
+
+
 @pytest.mark.asyncio
 async def test_x_draft_and_usage_are_persisted_atomically(db):
     from daily_creation_service import persist_x_draft_with_usage
