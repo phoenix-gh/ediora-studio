@@ -68,6 +68,34 @@ it('normalizes common compact AI selection responses without inventing candidate
   expect(() => parseDailyCreationSelection([99], candidates)).toThrow(/invented asset/i)
 })
 
+it('uses a compact selection reason when the candidate title is blank', () => {
+  expect(parseDailyCreationSelection({
+    selected: [{ id: 14, reason: '聚焦可以落地的收费方式' }],
+  }, [{ id: 14, title: '' }]).selected[0]).toEqual(expect.objectContaining({
+    asset_id: 14,
+    topic: '聚焦可以落地的收费方式',
+    angle: '聚焦可以落地的收费方式',
+  }))
+})
+
+it('trims selection evidence and prefers candidate summary over reason for topic', () => {
+  expect(parseDailyCreationSelection({
+    selected: [{ id: 15, topic: '  ', angle: '  ', reason: '模型理由' }],
+  }, [{ id: 15, title: '  ', summary: '  素材摘要  ' }]).selected[0]).toEqual(expect.objectContaining({
+    topic: '素材摘要',
+    angle: '模型理由',
+  }))
+})
+
+it('uses an evidence-neutral label when every selection description is blank', () => {
+  expect(parseDailyCreationSelection({ selected: [{ id: 16 }] }, [
+    { id: 16, title: '', summary: '' },
+  ]).selected[0]).toEqual(expect.objectContaining({
+    topic: '素材 16',
+    angle: '素材 16',
+  }))
+})
+
 it('normalizes wrapped and text-only X post batches against selected evidence', () => {
   const selected = [{ asset_id: 12, topic: '需求验证', angle: '真实付费', reuse_decision: 'fresh' as const, reuse_explanation: '' }]
   expect(parseXPostBatch({ posts: [{ asset_id: 12, title: '标题', text: '正文', topic: '需求验证', angle: '真实付费', reuse_decision: 'fresh' }] }, selected)[0].asset_id).toBe(12)

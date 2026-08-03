@@ -103,9 +103,18 @@ export function parseXPostBatch(
   return parsed.data
 }
 
+function firstNonBlankString(...values: unknown[]) {
+  for (const value of values) {
+    if (typeof value !== 'string') continue
+    const normalized = value.trim()
+    if (normalized) return normalized
+  }
+  return ''
+}
+
 export function parseDailyCreationSelection(
   raw: unknown,
-  candidates: Array<{ id: number; title: string }>,
+  candidates: Array<{ id: number; title: string; summary?: string }>,
 ): DailyCreationSelection {
   const candidateById = new Map(candidates.map(candidate => [candidate.id, candidate]))
   let value = raw
@@ -137,10 +146,21 @@ export function parseDailyCreationSelection(
           if (typeof assetId !== 'number') return item
           const candidate = candidateById.get(assetId)
           if (!candidate) throw new Error(`invented asset id: ${assetId}`)
+          const topic = firstNonBlankString(
+            compact.topic,
+            candidate.title,
+            candidate.summary,
+            compact.reason,
+          ) || `素材 ${assetId}`
+          const angle = firstNonBlankString(
+            compact.angle,
+            compact.reason,
+            topic,
+          )
           return {
             asset_id: assetId,
-            topic: typeof compact.topic === 'string' ? compact.topic : candidate.title,
-            angle: typeof compact.angle === 'string' ? compact.angle : typeof compact.reason === 'string' ? compact.reason : '根据素材提炼独立角度',
+            topic,
+            angle,
             reuse_decision: compact.reuse_decision === 'reuse_allowed' ? 'reuse_allowed' : 'fresh',
             reuse_explanation: typeof compact.reuse_explanation === 'string' ? compact.reuse_explanation : '',
             compared_usage_ids: Array.isArray(compact.compared_usage_ids) ? compact.compared_usage_ids : [],
