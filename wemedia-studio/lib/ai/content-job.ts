@@ -43,9 +43,13 @@ export const xPostBatchSchema = z.array(z.object({
 }))
 
 export const dailyCreationValidationSchema = z.object({
-  accepted_indices: z.array(z.number().int().nonnegative()),
+  accepted_indices: z.array(z.number().int().nonnegative()).describe(
+    '通过校验的帖子位置列表；位置从 0 开始，必须来自 valid_indices，不能填写 asset_id。',
+  ),
   rejected: z.array(z.object({
-    index: z.number().int().nonnegative(),
+    index: z.number().int().nonnegative().describe(
+      '被拒绝帖子的数组位置；位置从 0 开始，必须来自 valid_indices，不能填写 asset_id。',
+    ),
     reason: z.string().min(1),
   })),
 })

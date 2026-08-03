@@ -2,6 +2,7 @@ import { expect, it } from 'vitest'
 
 import {
   buildDailyCreationSelectionPrompt,
+  buildDailyCreationValidationPrompt,
   normalizeRunDirectories,
 } from './daily-creation-job'
 
@@ -12,6 +13,50 @@ it('uses current directory lists and falls back to a legacy directory', () => {
   expect(normalizeRunDirectories({ directory: '旧目录' })).toEqual(['旧目录'])
   expect(() => normalizeRunDirectories({ directories: [], directory: '' }))
     .toThrow(/at least one directory/i)
+})
+
+it('emits zero-based validation indices and their exact schema to the provider', () => {
+  const post = {
+    asset_id: 381,
+    title: 'AI 头像服务',
+    text: '短帖正文',
+    topic: 'AI 头像副业',
+    angle: '标准化交付',
+    reuse_decision: 'fresh',
+    reuse_explanation: '',
+  }
+  const payload = JSON.parse(buildDailyCreationValidationPrompt({
+    posts: [post],
+    recent_global_usage: [],
+    deterministic_issues: [],
+  }))
+
+  expect(payload.output_rules).toEqual([
+    '只返回一个 JSON 对象，不要 Markdown 或解释。',
+    '顶层只能包含 accepted_indices 和 rejected，禁止使用任何别名。',
+    '所有 index 都是 indexed_posts 中从 0 开始的帖子位置，绝对不能填写 asset_id。',
+    'index 只能取 valid_indices 中明确列出的值。',
+  ])
+  expect(payload.valid_indices).toEqual([0])
+  expect(payload.indexed_posts).toEqual([{ index: 0, post }])
+  expect(payload.output_schema).toMatchObject({
+    type: 'object',
+    required: expect.arrayContaining(['accepted_indices', 'rejected']),
+    properties: {
+      accepted_indices: {
+        description: expect.stringMatching(/从 0 开始.*不能.*asset_id/),
+      },
+      rejected: {
+        items: {
+          properties: {
+            index: {
+              description: expect.stringMatching(/从 0 开始.*不能.*asset_id/),
+            },
+          },
+        },
+      },
+    },
+  })
 })
 
 it('emits the complete strict selection schema to the provider', () => {

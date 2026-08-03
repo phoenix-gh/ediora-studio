@@ -73,6 +73,28 @@ export function buildDailyCreationSelectionPrompt(input: DailyCreationSelectionP
   })
 }
 
+type DailyCreationValidationPromptInput = {
+  posts: unknown[]
+  recent_global_usage: unknown[]
+  deterministic_issues?: unknown[]
+}
+
+export function buildDailyCreationValidationPrompt(input: DailyCreationValidationPromptInput) {
+  return JSON.stringify({
+    output_rules: [
+      '只返回一个 JSON 对象，不要 Markdown 或解释。',
+      '顶层只能包含 accepted_indices 和 rejected，禁止使用任何别名。',
+      '所有 index 都是 indexed_posts 中从 0 开始的帖子位置，绝对不能填写 asset_id。',
+      'index 只能取 valid_indices 中明确列出的值。',
+    ],
+    output_schema: z.toJSONSchema(dailyCreationValidationSchema),
+    valid_indices: input.posts.map((_post, index) => index),
+    indexed_posts: input.posts.map((post, index) => ({ index, post })),
+    recent_global_usage: input.recent_global_usage,
+    deterministic_issues: input.deterministic_issues ?? [],
+  })
+}
+
 const creationSteps = ['loadCandidates', 'loadUsage', 'select', 'generate', 'validate', 'persist'] as const
 export const dailyCreationStepKeys = [...creationSteps]
 
@@ -210,8 +232,12 @@ export async function runDailyCreationJob(jobId: number) {
       const result = await generateJson({
         model,
         schema: dailyCreationValidationSchema,
-        system: '比较候选短帖彼此之间及近期全局历史的语义重复。接受安全且角度清晰的条目。返回 accepted_indices 数组和 rejected 数组；rejected 每项只含 index 与 reason。',
-        prompt: JSON.stringify({ posts, recent_global_usage: usage, deterministic_issues: deterministic }),
+        system: '严格按照 prompt 中的 output_schema 和 output_rules 校验短帖。比较帖子彼此之间及近期全局历史的语义重复；接受安全且角度清晰的条目。字段名、层级、类型和 index 语义必须完全一致。',
+        prompt: buildDailyCreationValidationPrompt({
+          posts,
+          recent_global_usage: usage,
+          deterministic_issues: deterministic,
+        }),
       })
       const validation = parseDailyCreationValidation(result, posts.length)
       const rejected = [...deterministic, ...validation.rejected]
@@ -227,8 +253,11 @@ export async function runDailyCreationJob(jobId: number) {
         const secondPass = await generateJson({
           model,
           schema: dailyCreationValidationSchema,
-          system: '这是唯一一次修订后的最终复核。比较条目彼此及近期历史；仍重复或不可信的条目必须拒绝。返回 accepted_indices 数组和 rejected 数组；rejected 每项只含 index 与 reason。',
-          prompt: JSON.stringify({ posts, recent_global_usage: usage }),
+          system: '这是唯一一次修订后的最终复核。严格按照 prompt 中的 output_schema 和 output_rules 比较帖子彼此及近期历史；仍重复或不可信的条目必须拒绝。字段名、层级、类型和 index 语义必须完全一致。',
+          prompt: buildDailyCreationValidationPrompt({
+            posts,
+            recent_global_usage: usage,
+          }),
         })
         const secondValidation = parseDailyCreationValidation(secondPass, posts.length)
         finalRejected = secondValidation.rejected
