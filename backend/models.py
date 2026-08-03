@@ -1031,6 +1031,102 @@ class TopicSourceDecision(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
 
 
+class DailyCreationRule(Base):
+    """User-configured one-time or daily content creation rule."""
+    __tablename__ = "daily_creation_rules"
+    __table_args__ = (
+        Index(
+            "ix_daily_creation_rules_dispatch",
+            "enabled",
+            "execution_mode",
+            "deleted_at",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    asset_type: Mapped[str] = mapped_column(String, nullable=False, default="article")
+    directory: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    output_type: Mapped[str] = mapped_column(String, nullable=False, default="x_short_post")
+    target_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    execution_mode: Mapped[str] = mapped_column(String, nullable=False)
+    scheduled_date: Mapped[str | None] = mapped_column(String, nullable=True)
+    scheduled_time: Mapped[str] = mapped_column(String, nullable=False)
+    timezone: Mapped[str] = mapped_column(String, nullable=False, default="Asia/Shanghai")
+    lookback_days: Mapped[int] = mapped_column(Integer, nullable=False)
+    delivery_mode: Mapped[str] = mapped_column(String, nullable=False)
+    account_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    instructions: Mapped[str] = mapped_column(Text, default="")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=now_utc, onupdate=now_utc
+    )
+
+
+class DailyCreationRun(Base):
+    """Durable execution record carrying an immutable rule snapshot."""
+    __tablename__ = "daily_creation_runs"
+    __table_args__ = (
+        UniqueConstraint(
+            "rule_id",
+            "scheduled_for",
+            "trigger_kind",
+            name="uq_daily_creation_run_schedule",
+        ),
+        Index("ix_daily_creation_runs_status_created", "status", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    rule_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    content_job_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    scheduled_for: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    trigger_kind: Mapped[str] = mapped_column(String, nullable=False)
+    status: Mapped[str] = mapped_column(String, default="queued", index=True)
+    requested_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_count: Mapped[int] = mapped_column(Integer, default=0)
+    rule_snapshot: Mapped[dict] = mapped_column(JSON, default=dict)
+    detail: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class ContentUsageLedger(Base):
+    """Global semantic-deduplication evidence for persisted creation outputs."""
+    __tablename__ = "content_usage_ledger"
+    __table_args__ = (
+        UniqueConstraint(
+            "run_id",
+            "output_kind",
+            "output_id",
+            name="uq_content_usage_run_output",
+        ),
+        Index("ix_content_usage_created_at", "created_at"),
+        Index("ix_content_usage_asset_created", "creative_asset_id", "created_at"),
+        Index("ix_content_usage_output", "output_kind", "output_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    rule_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    creative_asset_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    output_type: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    output_kind: Mapped[str] = mapped_column(String, nullable=False)
+    output_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    draft_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    plan_item_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    account_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    rule_name: Mapped[str] = mapped_column(String, default="")
+    topic: Mapped[str] = mapped_column(String, default="")
+    angle: Mapped[str] = mapped_column(Text, default="")
+    excerpt: Mapped[str] = mapped_column(Text, default="")
+    reuse_decision: Mapped[str] = mapped_column(String, default="fresh")
+    reuse_explanation: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+
 class DailyPlan(Base):
     """每日内容计划：8 点总编策划任务的载体，items 确认后入队创作链。"""
     __tablename__ = "daily_plans"
@@ -1061,4 +1157,6 @@ class DailyPlanItem(Base):
     status: Mapped[str] = mapped_column(String, default="suggested", index=True)  # suggested|skipped|enqueued
     pipeline_task_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     draft_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    origin: Mapped[str] = mapped_column(String, default="planner", index=True)
+    creation_run_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)

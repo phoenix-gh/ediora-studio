@@ -100,6 +100,15 @@ def test_init_db_twice_creates_fresh_sqlite_core_and_text_video_tables(
             "sample_count",
             "sample_rate",
         } <= _columns(connection, "text_video_speech_assets")
+        assert {
+            "daily_creation_rules",
+            "daily_creation_runs",
+            "content_usage_ledger",
+        } <= tables
+        assert {
+            "origin",
+            "creation_run_id",
+        } <= _columns(connection, "daily_plan_items")
 
 
 def test_init_db_migrates_legacy_sqlite_columns_and_drops_ref_tables(
@@ -177,3 +186,43 @@ def test_init_db_migrates_legacy_sqlite_columns_and_drops_ref_tables(
             )
         }
         assert remaining_ref_tables == set()
+
+
+def test_init_db_migrates_existing_daily_plan_items_for_creation_rules(tmp_path):
+    database_path = tmp_path / "legacy-daily-plan.db"
+    with sqlite3.connect(database_path) as connection:
+        connection.executescript(
+            """
+            CREATE TABLE daily_plan_items (
+                id INTEGER PRIMARY KEY,
+                plan_id INTEGER NOT NULL,
+                account_id VARCHAR NOT NULL,
+                title VARCHAR NOT NULL
+            );
+            INSERT INTO daily_plan_items (id, plan_id, account_id, title)
+            VALUES (1, 1, 'account-a', 'legacy item');
+            """
+        )
+
+    result = _run_init_db_twice(database_path)
+
+    assert result.returncode == 0, result.stderr
+    with sqlite3.connect(database_path) as connection:
+        assert {"origin", "creation_run_id"} <= _columns(
+            connection,
+            "daily_plan_items",
+        )
+        assert connection.execute(
+            "SELECT origin, creation_run_id FROM daily_plan_items WHERE id = 1"
+        ).fetchone() == ("planner", None)
+        tables = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            )
+        }
+        assert {
+            "daily_creation_rules",
+            "daily_creation_runs",
+            "content_usage_ledger",
+        } <= tables

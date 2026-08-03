@@ -787,6 +787,12 @@ async def init_db():
         # Existing databases may contain duplicate keys, so repair them before
         # metadata.create_all attempts to create the unique partial index.
         await migrate_content_job_idempotency_schema(conn)
+        # Add indexed planner-origin columns before create_all attempts to
+        # create their indexes on an existing daily_plan_items table.
+        await _add_columns(conn, "daily_plan_items", {
+            "origin": "VARCHAR NOT NULL DEFAULT 'planner'",
+            "creation_run_id": "INTEGER",
+        })
         await conn.run_sync(Base.metadata.create_all)
         await migrate_content_job_idempotency_schema(conn)
         await migrate_text_video_project_schema(conn)
