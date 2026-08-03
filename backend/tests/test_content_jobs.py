@@ -1535,6 +1535,44 @@ def test_daily_plan_job_failure_marks_plan_failed(session_factory):
     asyncio.new_event_loop().run_until_complete(run())
 
 
+def test_daily_creation_job_failure_marks_linked_run_failed(session_factory):
+    from datetime import datetime, timezone
+    from content_jobs import create_job, fail_step, start_step
+    from models import DailyCreationRule, DailyCreationRun
+
+    async def run():
+        async with session_factory() as session:
+            rule = DailyCreationRule(
+                name="任意规则", asset_type="article", directory="任意目录",
+                output_type="x_short_post", target_count=2,
+                execution_mode="recurring", scheduled_time="08:00",
+                timezone="Asia/Shanghai", lookback_days=3,
+                delivery_mode="drafts",
+            )
+            session.add(rule)
+            await session.flush()
+            creation_run = DailyCreationRun(
+                rule_id=rule.id, scheduled_for=datetime.now(timezone.utc),
+                trigger_kind="explicit", requested_count=2,
+                rule_snapshot={"name": rule.name},
+            )
+            session.add(creation_run)
+            await session.flush()
+            job = await create_job(
+                session, flow="daily_creation", title="batch",
+                input_data={"run_id": creation_run.id}, commit=False,
+            )
+            creation_run.content_job_id = job.id
+            await session.commit()
+            step = await start_step(session, job.id, "select")
+            await fail_step(session, step.id, "invalid evidence", retryable=True)
+            await session.refresh(creation_run)
+            assert creation_run.status == "failed"
+            assert creation_run.completed_at is not None
+
+    asyncio.new_event_loop().run_until_complete(run())
+
+
 def test_fail_step_redacts_secrets_before_database_persistence(session_factory):
     from content_jobs import create_job, fail_step, start_step
 

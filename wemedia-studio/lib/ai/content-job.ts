@@ -13,6 +13,80 @@ type CoverStyle = Record<string, unknown>
 
 export type ContentStep = 'brief' | 'draft' | 'cover' | 'illustrations' | 'standalone_image' | 'daily_plan' | 'template_extraction'
 
+export const dailyCreationSelectionSchema = z.object({
+  selected: z.array(z.object({
+    asset_id: z.number().int().positive(),
+    topic: z.string().min(1),
+    angle: z.string().min(1),
+    reuse_decision: z.enum(['fresh', 'reuse_allowed']),
+    reuse_explanation: z.string().default(''),
+    compared_usage_ids: z.array(z.number().int().positive()).default([]),
+  })),
+  excluded: z.array(z.object({
+    asset_id: z.number().int().positive(),
+    reason: z.string().min(1),
+  })).default([]),
+})
+
+export const xPostBatchSchema = z.array(z.object({
+  asset_id: z.number().int().positive(),
+  title: z.string().min(1).max(300),
+  text: z.string().min(1).max(5000),
+  topic: z.string().min(1).max(300),
+  angle: z.string().min(1).max(500),
+  reuse_decision: z.enum(['fresh', 'reuse_allowed']),
+  reuse_explanation: z.string().default(''),
+}))
+
+export const dailyCreationValidationSchema = z.object({
+  accepted_indices: z.array(z.number().int().nonnegative()),
+  rejected: z.array(z.object({
+    index: z.number().int().nonnegative(),
+    reason: z.string().min(1),
+  })),
+})
+
+export type DailyCreationSelection = z.infer<typeof dailyCreationSelectionSchema>
+export type XPostOutput = z.infer<typeof xPostBatchSchema>[number]
+
+export function validateDailyCreationSelection(
+  selection: DailyCreationSelection,
+  candidateIds: number[],
+  usageIds: number[],
+) {
+  const candidates = new Set(candidateIds)
+  const usages = new Set(usageIds)
+  for (const item of [...selection.selected, ...selection.excluded]) {
+    if (!candidates.has(item.asset_id)) throw new Error(`invented asset id: ${item.asset_id}`)
+  }
+  for (const item of selection.selected) {
+    for (const usageId of item.compared_usage_ids) {
+      if (!usages.has(usageId)) throw new Error(`invented usage id: ${usageId}`)
+    }
+    if (item.reuse_decision === 'reuse_allowed' && !item.reuse_explanation.trim()) {
+      throw new Error('reuse_allowed requires an explanation')
+    }
+  }
+  return selection
+}
+
+export function validateXPostBatch(posts: XPostOutput[]) {
+  const issues: Array<{ index: number; reason: string }> = []
+  const seen = new Set<string>()
+  posts.forEach((post, index) => {
+    const normalized = post.text.replace(/\s+/g, '').toLowerCase()
+    if (seen.has(normalized)) issues.push({ index, reason: 'within_batch_duplicate' })
+    seen.add(normalized)
+    if (/(我亲自|我测试了|我用了|我的客户|我赚了)/.test(post.text)) {
+      issues.push({ index, reason: 'invented_personal_experience' })
+    }
+    if (post.reuse_decision === 'reuse_allowed' && !post.reuse_explanation.trim()) {
+      issues.push({ index, reason: 'reuse_explanation_required' })
+    }
+  })
+  return issues
+}
+
 const stepToolNames: Record<ContentStep, string[]> = {
   brief: ['loadSource', 'loadAccountContext', 'saveBrief'],
   draft: ['getBrief', 'loadWritingContext', 'saveDraft'],

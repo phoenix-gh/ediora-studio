@@ -17,6 +17,7 @@ from models import (
     ContentResponseEvent,
     ContentResponseItem,
     DailyPlan,
+    DailyCreationRun,
     DigitalHuman,
     TalkingVideoRender,
     TextVideoProject,
@@ -564,6 +565,14 @@ async def fail_locked_step(
             plan = await session.get(DailyPlan, plan_id)
             if plan is not None and plan.status == "planning":
                 plan.status = "failed"
+    elif job.flow == "daily_creation":
+        run_id = job.input_data.get("run_id")
+        if isinstance(run_id, int):
+            creation_run = await session.get(DailyCreationRun, run_id)
+            if creation_run is not None and creation_run.status in {"queued", "running"}:
+                creation_run.status = "failed"
+                creation_run.detail = {"error": step.error}
+                creation_run.completed_at = step.completed_at
     analysis, item = await _analysis_for_job(session, job)
     if analysis is not None:
         analysis.status = "failed"

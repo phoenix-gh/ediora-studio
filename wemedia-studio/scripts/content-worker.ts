@@ -11,6 +11,7 @@ import { dirname, resolve } from 'node:path'
 import Redis from 'ioredis'
 
 import { runContentJob } from '../lib/ai/content-job'
+import { runDailyCreationJob } from '../lib/ai/daily-creation-job'
 import {
   JobFinalizationError,
   runDigitalHumanRenderJob,
@@ -116,6 +117,7 @@ export function resolveContentJobRunner(
   flow: string,
   dependencies: ContentJobRunnerDependencies = {},
 ): ContentJobRunner {
+  if (flow === 'daily_creation') return runDailyCreationJob
   if (flow === 'digital_human_setup') return runDigitalHumanSetupJob
   if (flow === 'digital_human_render') return runDigitalHumanRenderJob
   if (flow === 'content_response_analysis') {

@@ -181,6 +181,7 @@ describe('content worker dispatch', () => {
     expect(resolveContentJobRunner('text_video_render'))
       .toBe(runTextVideoRenderJob)
     expect(resolveContentJobRunner('content')).toBe(runContentJob)
+    expect(resolveContentJobRunner('daily_creation')).not.toBe(runContentJob)
   })
 
   it('durably rejects unknown text-video flows without using the generic runner', async () => {

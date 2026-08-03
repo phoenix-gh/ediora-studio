@@ -4,7 +4,16 @@ import { join } from 'node:path'
 import { afterEach, expect, it } from 'vitest'
 
 import { setSkillEnabled } from '../skills/registry'
-import { illustrationImageInputSchema, insertInlineImage, loadBaoyuSkillRulesForTest, parseTemplateCandidate, toolsForContentStep } from './content-job'
+import {
+  dailyCreationSelectionSchema,
+  illustrationImageInputSchema,
+  insertInlineImage,
+  loadBaoyuSkillRulesForTest,
+  parseTemplateCandidate,
+  validateDailyCreationSelection,
+  validateXPostBatch,
+  toolsForContentStep,
+} from './content-job'
 
 let runtimeDir = ''
 
@@ -18,6 +27,35 @@ afterEach(async () => {
 
 it('keeps template extraction free of persistence tools', () => {
   expect(toolsForContentStep('template_extraction')).toEqual([])
+})
+
+it('accepts daily creation selection evidence only from observed tools', () => {
+  const selection = dailyCreationSelectionSchema.parse({
+    selected: [{
+      asset_id: 12, topic: '需求验证', angle: '真实付费',
+      reuse_decision: 'reuse_allowed',
+      reuse_explanation: '历史讨论问卷，这次讨论实际付款。',
+      compared_usage_ids: [7],
+    }],
+    excluded: [{ asset_id: 13, reason: '与近期内容同角度' }],
+  })
+  expect(validateDailyCreationSelection(selection, [12, 13], [7])).toEqual(selection)
+  expect(() => validateDailyCreationSelection(selection, [99], [7]))
+    .toThrow(/invented asset/i)
+  expect(() => validateDailyCreationSelection(selection, [12, 13], [8]))
+    .toThrow(/invented usage/i)
+})
+
+it('rejects duplicate posts, unjustified reuse, and invented experience', () => {
+  expect(validateXPostBatch([
+    { asset_id: 1, title: 'A', text: '同一条内容', topic: '增长', angle: '成本', reuse_decision: 'fresh', reuse_explanation: '' },
+    { asset_id: 2, title: 'B', text: ' 同一条内容 ', topic: '增长', angle: '效率', reuse_decision: 'fresh', reuse_explanation: '' },
+    { asset_id: 3, title: 'C', text: '我亲自测试了三个月。', topic: '增长', angle: '实践', reuse_decision: 'reuse_allowed', reuse_explanation: '' },
+  ])).toEqual([
+    { index: 1, reason: 'within_batch_duplicate' },
+    { index: 2, reason: 'invented_personal_experience' },
+    { index: 2, reason: 'reuse_explanation_required' },
+  ])
 })
 
 it('inserts an illustration after its matching level-two heading', () => {
