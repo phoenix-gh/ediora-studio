@@ -78,7 +78,7 @@ async function jsonRequest<T>(path: string, init?: RequestInit): Promise<T> {
         : ''
     const retryableHeader = response.headers.get('X-WMS-Retryable')
     const retryable = retryableHeader === null
-      ? true
+      ? response.status !== 409
       : retryableHeader.toLowerCase() === 'true'
     throw new ApiRequestError(
       message || `${path} failed (${response.status})`,
@@ -140,6 +140,18 @@ export function apiPost<T>(
     method: 'POST',
     headers,
     body: body === undefined ? undefined : JSON.stringify(body),
+  })
+}
+
+export function apiPatch<T>(
+  path: string,
+  body: unknown,
+  headers?: HeadersInit,
+) {
+  return jsonRequest<T>(path, {
+    method: 'PATCH',
+    headers,
+    body: JSON.stringify(body),
   })
 }
 

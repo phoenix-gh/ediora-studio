@@ -208,8 +208,23 @@ def _evidence_rows(value: object) -> list[dict]:
     if isinstance(value, list):
         return [item for item in value if isinstance(item, dict)]
     if isinstance(value, dict):
+        if "structuredContent" in value:
+            return _evidence_rows(value["structuredContent"])
+        if "result" in value:
+            return _evidence_rows(value["result"])
         if isinstance(value.get("results"), list):
             return [item for item in value["results"] if isinstance(item, dict)]
+        if isinstance(value.get("content"), list):
+            for item in value["content"]:
+                if (
+                    isinstance(item, dict)
+                    and item.get("type") == "text"
+                    and isinstance(item.get("text"), str)
+                ):
+                    try:
+                        return _evidence_rows(json.loads(item["text"]))
+                    except json.JSONDecodeError:
+                        continue
         return [value]
     return []
 

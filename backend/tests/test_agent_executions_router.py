@@ -137,13 +137,24 @@ def test_agent_execution_route_round_trips_checkpoint_and_tool_replay(client):
     assert replay.json() == {
         "action": "replay", "output": {"id": 17}, "error": None,
     }
+    calls = test_client.get(
+        f"/api/agent-executions/{execution['id']}/tool-calls",
+        headers=headers(),
+    )
+    assert calls.status_code == 200
+    assert calls.json()[0]["tool_call_id"] == "call-save"
+    assert calls.json()[0]["output"] == {"id": 17}
 
     failed_claim_url = (
         f"/api/agent-executions/{execution['id']}"
         "/tool-calls/call-uncertain/claim"
     )
+    failed_claim_body = {
+        **claim_body,
+        "input_summary": {"value": "different"},
+    }
     assert test_client.post(
-        failed_claim_url, headers=headers(), json=claim_body,
+        failed_claim_url, headers=headers(), json=failed_claim_body,
     ).status_code == 200
     failed = test_client.post(
         f"/api/agent-executions/{execution['id']}"

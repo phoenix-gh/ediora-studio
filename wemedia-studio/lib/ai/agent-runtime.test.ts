@@ -160,4 +160,39 @@ describe('shared Agent runtime', () => {
     })
     await runtime.close()
   })
+
+  it('keeps adapter-required tools active even when the Skill plan omits one', async () => {
+    const deps = dependencies()
+    let activeTools: unknown
+    deps.generate = vi.fn(async (input: Record<string, unknown>) => {
+      const prompt = typeof input.prompt === 'string' ? input.prompt : ''
+      if (prompt.startsWith('Create a bounded execution plan')) {
+        return {
+          output: {
+            goal: '完成任务',
+            steps: [{
+              id: 'research', instruction: '检索', requiredReferences: [],
+              requiredTools: ['search_assets'],
+            }],
+            outputRequirements: [], verificationCriteria: [],
+          },
+        }
+      }
+      if (prompt.startsWith('Return valid JSON only in exactly this shape')) {
+        return { output: { passed: true, violations: [] } }
+      }
+      activeTools = input.activeTools
+      return { text: 'done', toolResults: [], content: [] }
+    }) as unknown as AgentRuntimeDependencies['generate']
+    const runtime = await openAgentRuntime({
+      ...openOptions('automatic', deps), skillMode: 'manual', skillName: 'Alpha',
+    })
+
+    await runtime.run({
+      objective: 'Do the alpha task', modelMessages: [], maxSteps: 5,
+      requiredTools: ['save_draft'],
+    })
+
+    expect(activeTools).toEqual(['search_assets', 'save_draft'])
+  })
 })

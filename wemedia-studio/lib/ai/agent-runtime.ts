@@ -52,6 +52,7 @@ export type AgentRunRequest = {
   modelMessages: ModelMessage[]
   selectedContext?: string
   maxSteps: number
+  requiredTools?: string[]
   onStep?: (checkpoint: AgentStepCheckpoint) => void | Promise<void>
 }
 
@@ -190,6 +191,11 @@ export async function openAgentRuntime(
 
   async function run(request: AgentRunRequest): Promise<AgentRunResult> {
     const active = await prepare(request.objective)
+    const adapterRequiredTools = [...new Set(request.requiredTools ?? [])]
+    const unavailableTool = adapterRequiredTools.find(name => !registry.tools[name])
+    if (unavailableTool) {
+      throw new Error(`Required Agent tool is unavailable: ${unavailableTool}`)
+    }
     if (!active) {
       const generated = await deps.generate({
         model: options.model,
@@ -236,12 +242,13 @@ export async function openAgentRuntime(
         return references
       },
       execute: async ({ prompt, requiredTools }) => {
+        const activeTools = [...new Set([...requiredTools, ...adapterRequiredTools])]
         const generated = await deps.generate({
           model: options.model,
           instructions: prompt,
           messages: request.modelMessages,
           tools: registry.tools,
-          activeTools: requiredTools,
+          activeTools,
           stopWhen: stepCountIs(request.maxSteps),
         })
         const parts = executionParts({

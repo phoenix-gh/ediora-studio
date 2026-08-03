@@ -291,6 +291,40 @@ async def test_agent_batch_accepts_ids_preserved_from_truncated_tool_audit(db):
 
 
 @pytest.mark.asyncio
+async def test_agent_batch_accepts_ids_from_wrapped_mcp_tool_result(db):
+    from daily_creation_service import persist_daily_creation_output_batch
+    from models import AgentToolCall
+
+    creation_run, asset, _ = await _seed_run(db)
+    execution = await _seed_agent_execution(db, creation_run, [])
+    call = await db.scalar(select(AgentToolCall).where(
+        AgentToolCall.execution_id == execution.id,
+        AgentToolCall.tool_name == "list_creative_asset_candidates",
+    ))
+    call.output_data = {
+        "structuredContent": {"result": [{"id": asset.id, "title": "素材"}]},
+        "content": [{"type": "text", "text": "ignored duplicate encoding"}],
+    }
+    await db.commit()
+
+    result = await persist_daily_creation_output_batch(
+        db,
+        execution_id=execution.id,
+        run_id=creation_run.id,
+        idempotency_key="wrapped-mcp-evidence",
+        posts=[{
+            "source_asset_ids": [asset.id], "title": "MCP 证据",
+            "text": "工具返回包装结构也必须保留真实素材证据。",
+            "reuse_decision": "fresh", "reuse_explanation": "",
+            "compared_usage_ids": [], "metadata": {},
+        }],
+        self_validation={"passed": True, "summary": "checked"},
+    )
+
+    assert result["created_count"] == 1
+
+
+@pytest.mark.asyncio
 async def test_agent_batch_rejects_unobserved_assets_and_rolls_back_all_outputs(db):
     from daily_creation_service import persist_daily_creation_output_batch
     from models import ArticleDraft, ContentUsageLedger

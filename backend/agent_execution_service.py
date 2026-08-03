@@ -128,6 +128,52 @@ async def claim_agent_tool_call(
         await session.commit()
         return ToolCallClaim("execute")
 
+    if side_effecting:
+        prior_calls = (await session.execute(
+            select(AgentToolCall).where(
+                AgentToolCall.execution_id == execution_id,
+                AgentToolCall.tool_name == tool_name,
+                AgentToolCall.side_effecting.is_(True),
+            ).order_by(AgentToolCall.id.desc())
+        )).scalars().all()
+        prior = next(
+            (item for item in prior_calls if item.input_summary == input_summary),
+            None,
+        )
+        if prior is not None:
+            if prior.status == "succeeded":
+                session.add(AgentToolCall(
+                    execution_id=execution_id,
+                    tool_call_id=tool_call_id,
+                    tool_name=tool_name,
+                    status="succeeded",
+                    input_summary=input_summary,
+                    output_data=prior.output_data,
+                    auto_approved=auto_approved,
+                    side_effecting=True,
+                    completed_at=_now(),
+                ))
+                await session.commit()
+                return ToolCallClaim("replay", output=prior.output_data)
+            if prior.status in {"running", "uncertain"}:
+                error = "prior equivalent side-effecting tool outcome is unknown"
+                session.add(AgentToolCall(
+                    execution_id=execution_id,
+                    tool_call_id=tool_call_id,
+                    tool_name=tool_name,
+                    status="uncertain",
+                    input_summary=input_summary,
+                    error=error,
+                    auto_approved=auto_approved,
+                    side_effecting=True,
+                    completed_at=_now(),
+                ))
+                await session.commit()
+                return ToolCallClaim(
+                    "uncertain",
+                    error=error,
+                )
+
     call = AgentToolCall(
         execution_id=execution_id,
         tool_call_id=tool_call_id,
@@ -180,6 +226,8 @@ async def fail_agent_tool_call(
     )
     if call is None:
         raise KeyError(f"agent tool call {tool_call_id} not found")
+    if call.status == "succeeded":
+        return call
     call.status = "uncertain" if uncertain else "failed"
     call.error = error
     call.completed_at = _now()

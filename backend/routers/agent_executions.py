@@ -132,6 +132,21 @@ async def get_execution_by_job(
     return _execution_payload(execution)
 
 
+@router.get("/{execution_id}/tool-calls")
+async def get_execution_tool_calls(
+    execution_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    if await db.get(AgentExecution, execution_id) is None:
+        raise HTTPException(404, "agent execution not found")
+    calls = (await db.execute(
+        select(AgentToolCall).where(
+            AgentToolCall.execution_id == execution_id
+        ).order_by(AgentToolCall.id)
+    )).scalars().all()
+    return [_tool_call_payload(call) for call in calls]
+
+
 @router.patch("/{execution_id}/checkpoint")
 async def patch_checkpoint(
     execution_id: int,

@@ -63,6 +63,37 @@ async def test_completed_tool_call_replays_without_execution(db):
 
 
 @pytest.mark.asyncio
+async def test_late_failure_cannot_overwrite_a_succeeded_tool_call(db):
+    from agent_execution_service import (
+        claim_agent_tool_call,
+        complete_agent_tool_call,
+        ensure_agent_execution,
+        fail_agent_tool_call,
+    )
+
+    job = await seed_job(db)
+    execution = await ensure_agent_execution(
+        db, job_id=job.id, objective="create posts",
+        skill_mode="auto", skill_name=None,
+    )
+    await claim_agent_tool_call(
+        db, execution_id=execution.id, tool_call_id="save-ack-lost",
+        tool_name="save_item", input_summary={},
+        auto_approved=True, side_effecting=True,
+    )
+    await complete_agent_tool_call(
+        db, execution.id, "save-ack-lost", {"id": 17},
+    )
+
+    preserved = await fail_agent_tool_call(
+        db, execution.id, "save-ack-lost", "response acknowledgement lost", True,
+    )
+
+    assert preserved.status == "succeeded"
+    assert preserved.output_data == {"id": 17}
+
+
+@pytest.mark.asyncio
 async def test_unfinished_write_is_uncertain_but_read_can_be_reclaimed(db):
     from agent_execution_service import (
         claim_agent_tool_call,
@@ -98,6 +129,42 @@ async def test_unfinished_write_is_uncertain_but_read_can_be_reclaimed(db):
         auto_approved=False, side_effecting=False,
     )
     assert reclaimed.action == "execute"
+
+
+@pytest.mark.asyncio
+async def test_same_side_effect_input_replays_across_changed_tool_call_id(db):
+    from agent_execution_service import (
+        claim_agent_tool_call,
+        complete_agent_tool_call,
+        ensure_agent_execution,
+    )
+
+    job = await seed_job(db)
+    execution = await ensure_agent_execution(
+        db, job_id=job.id, objective="create posts",
+        skill_mode="auto", skill_name=None,
+    )
+    await claim_agent_tool_call(
+        db, execution_id=execution.id, tool_call_id="original-call",
+        tool_name="save_item", input_summary={"value": "same"},
+        auto_approved=True, side_effecting=True,
+    )
+    await complete_agent_tool_call(
+        db, execution.id, "original-call", {"id": 23},
+    )
+
+    replay = await claim_agent_tool_call(
+        db, execution_id=execution.id, tool_call_id="new-model-call-id",
+        tool_name="save_item", input_summary={"value": "same"},
+        auto_approved=True, side_effecting=True,
+    )
+
+    assert replay.action == "replay"
+    assert replay.output == {"id": 23}
+    alias = await complete_agent_tool_call(
+        db, execution.id, "new-model-call-id", replay.output,
+    )
+    assert alias.status == "succeeded"
 
 
 @pytest.mark.asyncio
