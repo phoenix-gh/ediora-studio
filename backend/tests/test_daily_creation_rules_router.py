@@ -44,6 +44,8 @@ def seed_source(*, with_account=False):
     async def seed():
         async with SessionLocal() as session:
             session.add(CreativeAssetDirectory(name="产品实验", asset_type="article"))
+            session.add(CreativeAssetDirectory(name="增长资料", asset_type="article"))
+            session.add(CreativeAssetDirectory(name="媒体素材", asset_type="media"))
             asset = CreativeAsset(
                 asset_type="article", directory="产品实验", title="验证需求",
                 content="先确认真实付费，再扩大投入。",
@@ -118,6 +120,26 @@ def test_rule_crud_validates_conditional_fields_and_preserves_history(client):
     ).status_code == 200
 
 
+def test_rule_accepts_multiple_same_type_directories_and_mirrors_legacy_field(client):
+    seed_source()
+    created = client.post(
+        "/api/daily-plan/creation-rules",
+        json=recurring_payload(
+            directories=[" 产品实验 ", "增长资料", "产品实验"],
+        ),
+    )
+
+    assert created.status_code == 201, created.text
+    assert created.json()["directories"] == ["产品实验", "增长资料"]
+    assert created.json()["directory"] == "产品实验"
+    rejected = client.patch(
+        f"/api/daily-plan/creation-rules/{created.json()['id']}",
+        json={"asset_type": "media"},
+    )
+    assert rejected.status_code == 400
+    assert "产品实验" in rejected.text
+
+
 def test_run_now_is_idempotent_and_creates_daily_creation_job(client, monkeypatch):
     seed_source()
     enqueued = []
@@ -153,6 +175,7 @@ def test_run_now_is_idempotent_and_creates_daily_creation_job(client, monkeypatc
     assert job.flow == "daily_creation"
     assert job.input_data == {"run_id": creation_run.id}
     assert creation_run.rule_snapshot["directory"] == "产品实验"
+    assert creation_run.rule_snapshot["directories"] == ["产品实验"]
 
 
 def test_worker_context_output_and_completion_require_token(client, monkeypatch):
@@ -176,6 +199,7 @@ def test_worker_context_output_and_completion_require_token(client, monkeypatch)
     context = client.get(f"{base}/context", headers=headers)
     assert context.status_code == 200
     assert context.json()["rule"]["directory"] == "产品实验"
+    assert context.json()["rule"]["directories"] == ["产品实验"]
     assert "先确认真实付费，再扩大投入。" not in context.text
 
     persisted = client.post(f"{base}/outputs", headers=headers, json={

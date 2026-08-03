@@ -72,7 +72,8 @@ class TodayOut(BaseModel):
 class CreationRuleIn(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     asset_type: Literal["article", "media"] = "article"
-    directory: str = Field(min_length=1, max_length=200)
+    directory: str | None = Field(default=None, min_length=1, max_length=200)
+    directories: list[str] | None = None
     output_type: Literal["x_short_post"] = "x_short_post"
     target_count: int = Field(ge=1, le=50)
     execution_mode: Literal["once", "recurring"]
@@ -87,6 +88,14 @@ class CreationRuleIn(BaseModel):
 
     @model_validator(mode="after")
     def validate_schedule(self):
+        from daily_creation_service import normalize_creation_directories
+
+        normalized = normalize_creation_directories(
+            self.directories,
+            self.directory,
+        )
+        self.directories = normalized
+        self.directory = normalized[0]
         if self.execution_mode == "once" and self.scheduled_date is None:
             raise ValueError("scheduled_date is required for once rules")
         if self.execution_mode == "recurring" and self.scheduled_date is not None:
@@ -102,6 +111,7 @@ class CreationRulePatch(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=120)
     asset_type: Literal["article", "media"] | None = None
     directory: str | None = Field(default=None, min_length=1, max_length=200)
+    directories: list[str] | None = None
     output_type: Literal["x_short_post"] | None = None
     target_count: int | None = Field(default=None, ge=1, le=50)
     execution_mode: Literal["once", "recurring"] | None = None
@@ -116,9 +126,16 @@ class CreationRulePatch(BaseModel):
 
 
 def _rule_out(rule: DailyCreationRule) -> dict:
+    from daily_creation_service import normalize_creation_directories
+
+    directories = normalize_creation_directories(
+        rule.directories,
+        rule.directory,
+    )
     return {
         "id": rule.id, "name": rule.name, "asset_type": rule.asset_type,
-        "directory": rule.directory, "output_type": rule.output_type,
+        "directory": directories[0], "directories": directories,
+        "output_type": rule.output_type,
         "target_count": rule.target_count, "execution_mode": rule.execution_mode,
         "scheduled_date": rule.scheduled_date,
         "scheduled_time": rule.scheduled_time, "timezone": rule.timezone,
@@ -145,14 +162,22 @@ def _run_out(creation_run: DailyCreationRun) -> dict:
 
 
 async def _validate_rule_references(db: AsyncSession, body: CreationRuleIn) -> None:
-    directory_exists = await db.scalar(
-        select(CreativeAssetDirectory.id).where(
+    rows = (await db.execute(
+        select(CreativeAssetDirectory.name).where(
             CreativeAssetDirectory.asset_type == body.asset_type,
-            CreativeAssetDirectory.name == body.directory.strip(),
+            CreativeAssetDirectory.name.in_(body.directories),
         )
+    )).scalars().all()
+    existing = set(rows)
+    missing = next(
+        (name for name in body.directories if name not in existing),
+        None,
     )
-    if directory_exists is None:
-        raise HTTPException(400, "creative asset directory not found")
+    if missing is not None:
+        raise HTTPException(
+            400,
+            f"creative asset directory not found: {missing}",
+        )
     if body.account_id is not None and await db.get(PublishAccount, body.account_id) is None:
         raise HTTPException(400, "publish account not found")
 
@@ -171,7 +196,8 @@ async def create_creation_rule(body: CreationRuleIn, db: AsyncSession = Depends(
     await _validate_rule_references(db, body)
     values = body.model_dump(mode="json")
     values["name"] = body.name.strip()
-    values["directory"] = body.directory.strip()
+    values["directories"] = body.directories
+    values["directory"] = body.directories[0]
     values["scheduled_time"] = body.scheduled_time.strftime("%H:%M")
     values["scheduled_date"] = body.scheduled_date.isoformat() if body.scheduled_date else None
     rule = DailyCreationRule(**values)
@@ -190,6 +216,8 @@ async def update_creation_rule(
         raise HTTPException(404, "creation rule not found")
     current = _rule_out(rule)
     patch = body.model_dump(exclude_unset=True, mode="json")
+    if "directory" in patch and "directories" not in patch:
+        patch["directories"] = [patch["directory"]]
     current.update(patch)
     current.pop("id", None)
     current.pop("created_at", None)
@@ -197,6 +225,8 @@ async def update_creation_rule(
     merged = CreationRuleIn.model_validate(current)
     await _validate_rule_references(db, merged)
     values = merged.model_dump(mode="json")
+    values["directories"] = merged.directories
+    values["directory"] = merged.directories[0]
     values["scheduled_time"] = merged.scheduled_time.strftime("%H:%M")
     values["scheduled_date"] = merged.scheduled_date.isoformat() if merged.scheduled_date else None
     for key, value in values.items():

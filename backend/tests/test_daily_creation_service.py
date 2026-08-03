@@ -46,6 +46,14 @@ async def test_candidates_are_directory_scoped_compact_and_bounded(db):
             tags=["AI"],
             created_at=now,
         ),
+        CreativeAsset(
+            asset_type="article",
+            directory="增长复盘",
+            title="AI 自动化复盘",
+            content="第二个目录中的增长素材",
+            tags=["AI"],
+            created_at=now + timedelta(seconds=1),
+        ),
     ])
     await db.commit()
 
@@ -69,6 +77,17 @@ async def test_candidates_are_directory_scoped_compact_and_bounded(db):
             directory="增长实验",
             limit=51,
         )
+
+    merged = await list_creative_asset_candidates(
+        db,
+        asset_type="article",
+        directories=["增长实验", "增长复盘", "增长实验"],
+        limit=2,
+    )
+    assert [item["title"] for item in merged] == [
+        "AI 自动化复盘",
+        "自动化获客",
+    ]
 
 
 @pytest.mark.asyncio
@@ -190,6 +209,25 @@ async def test_persistence_rejects_out_of_scope_asset_without_partial_draft(db):
         )
     assert await db.scalar(select(func.count(ArticleDraft.id))) == 0
     assert await db.scalar(select(func.count(ContentUsageLedger.id))) == 0
+
+
+@pytest.mark.asyncio
+async def test_persistence_accepts_an_asset_from_any_snapshot_directory(db):
+    from daily_creation_service import persist_x_draft_with_usage
+
+    creation_run, _, second_directory_asset = await _seed_run(db)
+    creation_run.rule_snapshot = {
+        **creation_run.rule_snapshot,
+        "directories": ["增长实验", "其他目录"],
+    }
+    await db.commit()
+
+    draft, usage = await persist_x_draft_with_usage(
+        db, run_id=creation_run.id, asset_id=second_directory_asset.id,
+        title="第二目录", text="允许保存。", topic="范围", angle="多目录",
+        reuse_decision="fresh", reuse_explanation="",
+    )
+    assert draft.id == usage.draft_id
 
 
 @pytest.mark.asyncio

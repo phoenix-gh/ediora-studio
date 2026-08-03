@@ -52,7 +52,8 @@ async def list_creative_asset_candidates(
     session: AsyncSession,
     *,
     asset_type: str,
-    directory: str,
+    directories: list[str] | None = None,
+    directory: str = "",
     query: str = "",
     limit: int = 50,
 ) -> list[dict]:
@@ -60,9 +61,10 @@ async def list_creative_asset_candidates(
     normalized_type = asset_type.strip().lower()
     if normalized_type not in {"article", "media"}:
         raise ValueError("asset_type must be 'article' or 'media'")
-    normalized_directory = directory.strip()
-    if not normalized_directory:
-        raise ValueError("directory is required")
+    normalized_directories = normalize_creation_directories(
+        directories,
+        directory,
+    )
     take = _bounded(limit, name="limit", minimum=1, maximum=50)
     keywords = [part.lower() for part in query.split() if part.strip()]
 
@@ -70,7 +72,7 @@ async def list_creative_asset_candidates(
         select(CreativeAsset)
         .where(
             CreativeAsset.asset_type == normalized_type,
-            CreativeAsset.directory == normalized_directory,
+            CreativeAsset.directory.in_(normalized_directories),
         )
         .order_by(desc(CreativeAsset.updated_at), desc(CreativeAsset.id))
         .limit(500)
@@ -163,11 +165,16 @@ def _isoformat(value: datetime | None) -> str:
 
 def snapshot_creation_rule(rule: DailyCreationRule) -> dict:
     """Capture every execution-relevant field before a rule can change."""
+    directories = normalize_creation_directories(
+        rule.directories,
+        rule.directory,
+    )
     return {
         "id": rule.id,
         "name": rule.name,
         "asset_type": rule.asset_type,
-        "directory": rule.directory,
+        "directory": directories[0],
+        "directories": directories,
         "output_type": rule.output_type,
         "target_count": rule.target_count,
         "execution_mode": rule.execution_mode,
@@ -241,9 +248,13 @@ async def _validated_run_asset(
     if asset is None:
         raise ValueError(f"Creative asset {asset_id} not found")
     snapshot = creation_run.rule_snapshot or {}
+    allowed_directories = normalize_creation_directories(
+        snapshot.get("directories"),
+        snapshot.get("directory"),
+    )
     if (
         asset.asset_type != snapshot.get("asset_type")
-        or asset.directory != snapshot.get("directory")
+        or asset.directory not in allowed_directories
     ):
         raise ValueError("Creative asset is outside the configured directory")
     return creation_run, asset, snapshot
