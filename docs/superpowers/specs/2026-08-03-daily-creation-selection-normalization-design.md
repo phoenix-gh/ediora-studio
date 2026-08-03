@@ -39,24 +39,11 @@ Whitespace-only strings count as blank. Normalized text is trimmed before schema
 - The persisted output schema remains strict and continues to require non-empty topic and angle values.
 - The generic fallback `素材 <asset_id>` guarantees structural validity without inventing a factual claim when all descriptive evidence is blank.
 
-## Prompt Contract
-
-The selection system prompt explicitly requests these fields for each selected item:
-
-- `asset_id`
-- `topic`
-- `angle`
-- `reuse_decision`
-- `reuse_explanation`
-- `compared_usage_ids`
-
-Prompt reinforcement improves provider output but is defense in depth. The deterministic parser remains responsible for compact and partially blank responses from compatible providers.
-
 ## Component Changes
 
 `wemedia-studio/lib/ai/content-job.ts` expands the candidate evidence accepted by `parseDailyCreationSelection` to include optional `summary`. A small internal non-blank-string normalizer implements the fallback order before the existing Zod parse.
 
-`wemedia-studio/lib/ai/daily-creation-job.ts` already supplies candidates containing `summary`; no new API or MCP field is needed. Its selection prompt is strengthened to state the required output fields explicitly.
+`wemedia-studio/lib/ai/daily-creation-job.ts` already supplies candidates containing `summary`; no new API, MCP field, prompt constant, or provider-specific branch is needed.
 
 `wemedia-studio/lib/ai/content-job.test.ts` adds the production failure shape: a candidate with blank title and a compact `{ id, reason }` selection. The test asserts non-empty normalized topic and angle, plus continued rejection of invented candidate IDs.
 
@@ -85,7 +72,6 @@ Retry is an explicit post-deployment action because it invokes the configured AI
 - Parser regression test for blank candidate title plus compact `{ id, reason }` output.
 - Parser test for whitespace trimming and fallback precedence.
 - Parser regression test that invented IDs still fail.
-- Daily creation worker test that the strengthened prompt requests all required evidence fields.
 - Existing content-job and daily-creation worker tests remain green.
 - Runtime verification records the retried job ID, terminal status, created output count, and persisted draft or plan-item IDs.
 

@@ -4,7 +4,7 @@
 
 **Goal:** Normalize compact or partially blank AI selection responses into strict, evidence-backed daily-creation selections, then retry only the latest failed daily-creation job once.
 
-**Architecture:** Keep Zod schemas strict and perform deterministic fallback before validation using the already loaded candidate title, summary, and provider reason. Reinforce the provider prompt as defense in depth, verify the parser with the exact production failure shape, and gate the single runtime retry on zero existing outputs.
+**Architecture:** Keep Zod schemas strict and perform deterministic fallback before validation using the already loaded candidate title, summary, and provider reason. Verify the parser with the exact production failure shape and gate the single runtime retry on zero existing outputs.
 
 **Tech Stack:** TypeScript, Zod 4, Vercel AI SDK 7, Vitest 4, FastAPI job API, Redis worker queue, jq
 
@@ -140,83 +140,32 @@ git commit -m "fix: normalize daily creation selection evidence"
 
 ---
 
-### Task 2: Reinforce the provider selection contract
+### Task 2: Verify the complete frontend test suite
 
 **Files:**
-- Modify: `wemedia-studio/lib/ai/daily-creation-job.ts:138-159`
-- Test: `wemedia-studio/lib/ai/daily-creation-job.test.ts`
+- No additional source files.
 
 **Interfaces:**
-- Produces: exported `DAILY_CREATION_SELECTION_SYSTEM_PROMPT: string`, used by the selection `generateJson` call and testable without invoking a model.
+- Consumes: the parser implementation and regression tests from Task 1.
+- Produces: complete Vitest regression evidence before any runtime retry.
 
-- [ ] **Step 1: Write the failing prompt-contract test**
-
-Import the new constant and assert all required selected-item evidence fields are named:
-
-```typescript
-import {
-  DAILY_CREATION_SELECTION_SYSTEM_PROMPT,
-  normalizeRunDirectories,
-} from './daily-creation-job'
-
-it('requests complete evidence for every selected daily creation asset', () => {
-  for (const field of [
-    'asset_id',
-    'topic',
-    'angle',
-    'reuse_decision',
-    'reuse_explanation',
-    'compared_usage_ids',
-  ]) {
-    expect(DAILY_CREATION_SELECTION_SYSTEM_PROMPT).toContain(field)
-  }
-})
-```
-
-- [ ] **Step 2: Run the focused test and verify RED**
-
-Run:
-
-```bash
-cd wemedia-studio
-pnpm test -- lib/ai/daily-creation-job.test.ts
-```
-
-Expected: FAIL because `DAILY_CREATION_SELECTION_SYSTEM_PROMPT` is not exported.
-
-- [ ] **Step 3: Export and use the reinforced prompt**
-
-Add near the candidate/usage types:
-
-```typescript
-export const DAILY_CREATION_SELECTION_SYSTEM_PROMPT = [
-  '你负责通用内容选材和语义去重。只能引用给定候选和历史 ID。',
-  '每个 selected 条目必须包含 asset_id、topic、angle、reuse_decision、reuse_explanation、compared_usage_ids。',
-  '已使用素材只有在角度实质不同并说明差异时才可复用。候选不足就少选，不得凑数。',
-].join('')
-```
-
-Replace the inline selection system string with `DAILY_CREATION_SELECTION_SYSTEM_PROMPT`. Do not change the schema, prompt payload, model, or generation flow.
-
-- [ ] **Step 4: Run focused and full AI-library tests**
-
-Run:
+- [ ] **Step 1: Run the adjacent daily-creation tests**
 
 ```bash
 cd wemedia-studio
 pnpm test -- lib/ai/content-job.test.ts lib/ai/daily-creation-job.test.ts
+```
+
+Expected: both focused files pass.
+
+- [ ] **Step 2: Run the complete Vitest suite**
+
+```bash
+cd wemedia-studio
 pnpm test
 ```
 
-Expected: both focused files and the complete Vitest suite pass.
-
-- [ ] **Step 5: Commit prompt reinforcement**
-
-```bash
-git add wemedia-studio/lib/ai/daily-creation-job.ts wemedia-studio/lib/ai/daily-creation-job.test.ts
-git diff --cached --check
-git commit -m "fix: reinforce daily creation selection contract"
-```
+Expected: the complete Vitest suite passes. If an unrelated dirty-worktree failure appears, record it and do not retry the live job until the parser-focused suite remains green and the failure is proven unrelated.
 
 ---
 
@@ -307,7 +256,7 @@ Expected: job status is `succeeded`; the run status is `succeeded` or `partial`;
 
 ## Final Verification
 
-- [ ] Confirm the implementation diff touches only the four TypeScript files named above.
+- [ ] Confirm the implementation diff touches only `wemedia-studio/lib/ai/content-job.ts` and `wemedia-studio/lib/ai/content-job.test.ts`.
 - [ ] Confirm the production failure shape failed before the parser fix and passed afterward.
 - [ ] Confirm invented candidate IDs still fail.
 - [ ] Confirm the complete Vitest suite passes.
