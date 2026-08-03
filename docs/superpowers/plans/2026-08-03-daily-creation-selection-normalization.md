@@ -68,7 +68,7 @@ Run:
 
 ```bash
 cd wemedia-studio
-pnpm test -- lib/ai/content-job.test.ts
+pnpm exec vitest run lib/ai/content-job.test.ts
 ```
 
 Expected: FAIL in `normalizes common compact AI selection responses without inventing candidate ids` because the blank candidate title becomes an invalid empty topic.
@@ -125,7 +125,7 @@ Run:
 
 ```bash
 cd wemedia-studio
-pnpm test -- lib/ai/content-job.test.ts
+pnpm exec vitest run lib/ai/content-job.test.ts
 ```
 
 Expected: all tests in `content-job.test.ts` pass, including blank-title, summary, generic fallback, and invented-ID cases.
@@ -153,7 +153,7 @@ git commit -m "fix: normalize daily creation selection evidence"
 
 ```bash
 cd wemedia-studio
-pnpm test -- lib/ai/content-job.test.ts lib/ai/daily-creation-job.test.ts
+pnpm exec vitest run lib/ai/content-job.test.ts lib/ai/daily-creation-job.test.ts
 ```
 
 Expected: both focused files pass.
