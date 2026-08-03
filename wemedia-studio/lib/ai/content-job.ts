@@ -16,8 +16,12 @@ export type ContentStep = 'brief' | 'draft' | 'cover' | 'illustrations' | 'stand
 export const dailyCreationSelectionSchema = z.strictObject({
   selected: z.array(z.strictObject({
     asset_id: z.number().int().positive(),
-    topic: z.string().min(1),
-    angle: z.string().min(1),
+    topic: z.string().min(1).describe(
+      '由模型根据候选素材的 summary 等内容生成的本次短帖主题；不是候选素材已有字段，不得为空。',
+    ),
+    angle: z.string().min(1).describe(
+      '由模型根据候选素材内容生成的本次短帖具体创作切入角度；不是候选素材已有字段，不得为空。',
+    ),
     reuse_decision: z.enum(['fresh', 'reuse_allowed']),
     reuse_explanation: z.string(),
     compared_usage_ids: z.array(z.number().int().positive()),

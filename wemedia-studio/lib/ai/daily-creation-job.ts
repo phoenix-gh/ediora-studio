@@ -65,6 +65,7 @@ export function buildDailyCreationSelectionPrompt(input: DailyCreationSelectionP
       '只返回一个 JSON 对象，不要 Markdown 或解释。',
       '顶层只能包含 selected 和 excluded，禁止使用任何别名。',
       'selected 和 excluded 必须始终返回数组；没有排除项时 excluded 返回空数组。',
+      '候选素材可能没有 title、topic 或 angle；topic 和 angle 不是候选素材已有字段，必须根据 summary 等素材内容生成，且不得为空。',
       '所有 ID 必须来自给定候选或历史用量。',
     ],
     output_schema: z.toJSONSchema(dailyCreationSelectionSchema),
