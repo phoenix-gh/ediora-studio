@@ -143,7 +143,8 @@ async def dispatch_due_creation_rules(*, now: datetime | None = None, enqueue=No
             ).order_by(DailyCreationRule.id)
         )).scalars().all()
         for rule in rules:
-            local_now = reference.astimezone(ZoneInfo(rule.timezone))
+            zone = ZoneInfo(rule.timezone)
+            local_now = reference.astimezone(zone)
             hour, minute = (int(part) for part in rule.scheduled_time.split(":")[:2])
             if rule.execution_mode == "once":
                 if not rule.scheduled_date:
@@ -154,8 +155,14 @@ async def dispatch_due_creation_rules(*, now: datetime | None = None, enqueue=No
             scheduled_local = datetime.combine(
                 local_date,
                 datetime_time(hour=hour, minute=minute),
-                tzinfo=ZoneInfo(rule.timezone),
+                tzinfo=zone,
             )
+            if rule.execution_mode != "once" and scheduled_local > local_now:
+                scheduled_local = datetime.combine(
+                    local_date - timedelta(days=1),
+                    datetime_time(hour=hour, minute=minute),
+                    tzinfo=zone,
+                )
             if scheduled_local > local_now:
                 continue
             scheduled_for = scheduled_local.astimezone(timezone.utc)

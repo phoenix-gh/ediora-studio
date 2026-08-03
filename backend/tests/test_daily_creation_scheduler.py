@@ -81,6 +81,101 @@ def test_dispatches_due_rules_once_across_modes_and_timezones(env):
     asyncio.run(run())
 
 
+def test_recurring_rule_catches_up_latest_previous_local_day(env):
+    from daily_planner import dispatch_due_creation_rules
+    from database import SessionLocal
+    from models import DailyCreationRule, DailyCreationRun
+
+    async def run():
+        async with SessionLocal() as session:
+            session.add(DailyCreationRule(
+                name="夜间创作",
+                asset_type="article",
+                directory="搞钱副业",
+                directories=["搞钱副业"],
+                output_type="x_short_post",
+                target_count=10,
+                execution_mode="recurring",
+                scheduled_time="22:00",
+                timezone="Asia/Shanghai",
+                lookback_days=7,
+                delivery_mode="drafts",
+            ))
+            await session.commit()
+
+        enqueued = []
+
+        async def enqueue(job_id):
+            enqueued.append(job_id)
+
+        now = datetime(2026, 8, 6, 0, 0, tzinfo=timezone.utc)
+        first = await dispatch_due_creation_rules(now=now, enqueue=enqueue)
+        second = await dispatch_due_creation_rules(now=now, enqueue=enqueue)
+
+        assert first["created"] == 1
+        assert second["created"] == 0
+        assert len(enqueued) == 1
+        async with SessionLocal() as session:
+            creation_runs = list((await session.execute(
+                select(DailyCreationRun)
+            )).scalars().all())
+            assert len(creation_runs) == 1
+            scheduled_for = creation_runs[0].scheduled_for
+            if scheduled_for.tzinfo is None:
+                scheduled_for = scheduled_for.replace(tzinfo=timezone.utc)
+            assert scheduled_for == datetime(
+                2026, 8, 5, 14, 0, tzinfo=timezone.utc,
+            )
+
+    asyncio.run(run())
+
+
+def test_recurring_rule_uses_today_after_local_schedule(env):
+    from daily_planner import dispatch_due_creation_rules
+    from database import SessionLocal
+    from models import DailyCreationRule, DailyCreationRun
+
+    async def run():
+        async with SessionLocal() as session:
+            session.add(DailyCreationRule(
+                name="夜间创作",
+                asset_type="article",
+                directory="搞钱副业",
+                directories=["搞钱副业"],
+                output_type="x_short_post",
+                target_count=10,
+                execution_mode="recurring",
+                scheduled_time="22:00",
+                timezone="Asia/Shanghai",
+                lookback_days=7,
+                delivery_mode="drafts",
+            ))
+            await session.commit()
+
+        enqueued = []
+
+        async def enqueue(job_id):
+            enqueued.append(job_id)
+
+        result = await dispatch_due_creation_rules(
+            now=datetime(2026, 8, 6, 15, 0, tzinfo=timezone.utc),
+            enqueue=enqueue,
+        )
+
+        assert result["created"] == 1
+        assert len(enqueued) == 1
+        async with SessionLocal() as session:
+            creation_run = await session.scalar(select(DailyCreationRun))
+            scheduled_for = creation_run.scheduled_for
+            if scheduled_for.tzinfo is None:
+                scheduled_for = scheduled_for.replace(tzinfo=timezone.utc)
+            assert scheduled_for == datetime(
+                2026, 8, 6, 14, 0, tzinfo=timezone.utc,
+            )
+
+    asyncio.run(run())
+
+
 def test_scheduler_registers_creation_dispatch_every_minute(env):
     from scheduler import register_jobs, scheduled_daily_creation_rules
 
