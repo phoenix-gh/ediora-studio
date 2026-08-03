@@ -27,3 +27,9 @@ export type AgentCompletionEvidence = {
   outputIds: number[]
   usageIds: number[]
 }
+
+export type AgentStepCheckpoint = {
+  phase: 'plan' | 'references' | 'execute' | 'validate' | 'revise'
+  parts?: Record<string, unknown>[]
+  detail?: unknown
+}

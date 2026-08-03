@@ -1,5 +1,5 @@
 import { createOpenAI } from '@ai-sdk/openai'
-import { convertToModelMessages, generateText, Output, safeValidateUIMessages, stepCountIs, streamText, type ToolSet, type UIMessage } from 'ai'
+import { convertToModelMessages, createUIMessageStream, createUIMessageStreamResponse, generateText, safeValidateUIMessages, stepCountIs, streamText, type ToolSet, type UIMessage } from 'ai'
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 
@@ -7,11 +7,10 @@ import { latestActivatedSkillName, latestClientTurn, modelHistoryCandidates } fr
 import { buildChatInstructions } from '@/lib/ai/chat-instructions'
 import { CHAT_MAX_STEPS, chatToolLoopStep, needsFinalAnswerFallback } from '@/lib/ai/chat-loop'
 import { baoyuRuntimeInstructions } from '@/lib/ai/content-job'
-import { openGlobalChatTools, type ChatSkillSnapshot } from '@/lib/ai/global-chat-tools'
-import { executeSkillRunWithAiSdk, selectSkillForTurn, skillRunUIResponse } from '@/lib/ai/skill-run-ai-sdk'
-import { skillRunPlanInputSchema, skillRunValidationSchema, type SkillRun, type SkillRunActivation } from '@/lib/ai/skill-run'
+import { agentSkillRunAudit, openAgentRuntime, type AgentRunResult } from '@/lib/ai/agent-runtime'
+import type { ChatSkillSnapshot } from '@/lib/ai/global-chat-tools'
 import { workerHeaders } from '@/lib/ai/job-client'
-import { getEnabledSkill, listEnabledSkills, listSkillReferences, loadSkillPreloadContext, type RegisteredSkill } from '@/lib/skills/registry'
+import { getEnabledSkill, listSkillReferences, loadSkillPreloadContext } from '@/lib/skills/registry'
 
 const requestSchema = z.object({
   sessionId: z.number().int().positive(),
@@ -195,54 +194,30 @@ export function executionToolsForSelection(tools: ToolSet, genericRuntime: boole
   return Object.fromEntries(Object.entries(tools).filter(([name]) => name !== 'loadSkill')) as ToolSet
 }
 
-function planningTools(tools: ToolSet) {
-  return Object.entries(tools)
-    .filter(([name]) => name !== 'loadSkill' && name !== 'readSkillReference')
-    .map(([name, value]) => ({
-    name,
-    description: typeof (value as { description?: unknown }).description === 'string'
-      ? (value as { description: string }).description
-      : '',
-    }))
-}
-
-function executionParts(result: Awaited<ReturnType<typeof generateText>>) {
-  const parts: Record<string, unknown>[] = []
-  for (const item of result.toolResults as Array<Record<string, unknown>>) {
-    if (typeof item.toolName !== 'string' || typeof item.toolCallId !== 'string') continue
-    parts.push({
-      type: 'dynamic-tool', toolName: item.toolName, toolCallId: item.toolCallId,
-      state: 'output-available', output: item.output,
-    })
-  }
-  for (const item of result.content as Array<Record<string, unknown>>) {
-    if (item.type !== 'tool-approval-request' || !item.toolCall || typeof item.toolCall !== 'object') continue
-    const toolCall = item.toolCall as Record<string, unknown>
-    if (typeof toolCall.toolName !== 'string' || typeof toolCall.toolCallId !== 'string' || typeof item.approvalId !== 'string') continue
-    parts.push({
-      type: 'dynamic-tool', toolName: toolCall.toolName, toolCallId: toolCall.toolCallId,
-      state: 'approval-requested', input: toolCall.input, approval: { id: item.approvalId },
-    })
-  }
-  return parts
-}
-
-function skillRunAudit(run: SkillRun, revisionCount: 0 | 1) {
-  return {
-    skillName: run.skillName,
-    activation: run.activation,
-    steps: run.steps.map(step => ({ id: step.id, status: step.status, evidence: step.evidence })),
-    loadedReferences: run.loadedReferences,
-    toolEvidence: run.toolEvidence,
-    validation: run.validation,
-    revisionCount,
-  }
-}
-
-function resultMessageParts(result: { kind: 'completed'; completed: { text: string } } | { kind: 'approval'; parts: unknown[] }) {
-  return result.kind === 'completed'
-    ? [{ type: 'text' as const, text: result.completed?.text ?? '' }]
-    : (result.parts ?? []) as UIMessage['parts']
+export function agentRunUIResponse(result: AgentRunResult) {
+  const stream = createUIMessageStream({
+    execute: ({ writer }) => {
+      if (result.kind === 'completed') {
+        const id = 'agent-run-final'
+        writer.write({ type: 'text-start', id })
+        writer.write({ type: 'text-delta', id, delta: result.text })
+        writer.write({ type: 'text-end', id })
+        return
+      }
+      for (const part of result.parts) {
+        const toolName = typeof part.toolName === 'string' ? part.toolName : undefined
+        const toolCallId = typeof part.toolCallId === 'string' ? part.toolCallId : undefined
+        if (!toolName || !toolCallId) continue
+        writer.write({ type: 'tool-input-available', toolName, toolCallId, input: part.input, dynamic: true })
+        const approval = part.approval
+        const approvalId = approval && typeof approval === 'object'
+          ? (approval as Record<string, unknown>).id
+          : part.approvalId
+        if (typeof approvalId === 'string') writer.write({ type: 'tool-approval-request', toolCallId, approvalId })
+      }
+    },
+  })
+  return createUIMessageStreamResponse({ stream })
 }
 
 export async function POST(request: NextRequest) {
@@ -266,7 +241,7 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  let registry: Awaited<ReturnType<typeof openGlobalChatTools>> | undefined
+  let registry: Awaited<ReturnType<typeof openAgentRuntime>> | undefined
   try {
     if (body.approval) await persistApproval(body.sessionId, body.approval)
     else if (latestMessage) await persistMessage(body.sessionId, { role: 'user', parts: latestMessage.parts })
@@ -278,101 +253,37 @@ export async function POST(request: NextRequest) {
     const model = provider.chat(modelConfig.modelName)
     const currentRequest = [...messages].reverse().find(message => message.role === 'user')
     const currentRequestText = currentRequest ? messageText(currentRequest) : ''
-    let selected: { skill: RegisteredSkill; activation: SkillRunActivation } | undefined
-    if (body.skillName) {
-      const skill = await getEnabledSkill(body.skillName)
-      if (!skill) throw new Error('Selected skill is unavailable')
-      selected = { skill, activation: 'manual' }
-    } else if (genericSkillRuntimeEnabled()) {
-      const enabledSkills = await listEnabledSkills()
-      const choice = await selectSkillForTurn({
-        enabledSkills,
-        userRequest: currentRequestText,
-        restoredSkillName,
-        decide: async ({ prompt }) => {
-          const decision = await generateText({ model, prompt, output: Output.json() })
-          return decision.output as { skillName?: string; continueRestored: boolean }
-        },
-      })
-      if (choice) {
-        const skill = enabledSkills.find(candidate => candidate.name === choice.skillName)
-        if (skill) selected = { skill, activation: choice.activation }
-      }
-    }
-
-    const runtime = await openGlobalChatTools({
-      apiBase: apiBase(), sessionId: body.sessionId, draftId: body.draftId,
-      skillName: selected?.skill.name ?? body.skillName,
-      restoredSkillName: genericSkillRuntimeEnabled() ? undefined : restoredSkillName,
+    const genericRuntime = genericSkillRuntimeEnabled()
+    const runtime = await openAgentRuntime({
+      apiBase: apiBase(), model,
+      approvalPolicy: 'interactive',
+      skillMode: body.skillName ? 'manual' : 'auto',
+      skillName: body.skillName,
+      restoredSkillName,
+      draftId: body.draftId,
+      automaticSelection: genericRuntime,
     })
     registry = runtime
+    const selected = genericRuntime || body.skillName
+      ? await runtime.prepare(currentRequestText)
+      : runtime.selectedSkill
     const context = await selectedContext(selected?.skill.name ?? body.skillName, body.draftId, runtime.catalogContext)
     const instructions = buildChatInstructions(context)
-    const executionTools = executionToolsForSelection(runtime.tools, genericSkillRuntimeEnabled(), Boolean(selected))
+    const executionTools = executionToolsForSelection(runtime.tools, genericRuntime, Boolean(selected))
 
-    if (genericSkillRuntimeEnabled() && selected) {
+    if (genericRuntime && selected) {
       const modelMessages = await convertToModelMessages(messages, { tools: runtime.tools, ignoreIncompleteToolCalls: true })
-      const result = await executeSkillRunWithAiSdk({
-        skill: selected.skill,
-        activation: selected.activation,
-        userRequest: currentRequestText,
+      const result = await runtime.run({
+        objective: currentRequestText,
+        modelMessages,
         selectedContext: body.draftId ? context : '',
-        references: runtime.activeContext()?.references ?? [],
-        tools: planningTools(runtime.tools),
-        plan: async ({ prompt }) => {
-          const planned = await generateText({ model, prompt, output: Output.json() })
-          const parsed = skillRunPlanInputSchema.safeParse(planned.output)
-          if (parsed.success) return parsed.data
-          const repaired = await generateText({
-            model,
-            prompt: `${prompt}\n\nThe previous JSON was invalid. Repair it exactly: every step id must be a string, arrays must use exact listed paths and tools, and no unknown fields are allowed.\n\nPrevious JSON:\n${JSON.stringify(planned.output)}`,
-            output: Output.json(),
-          })
-          return skillRunPlanInputSchema.parse(repaired.output)
-        },
-        readReferences: paths => runtime.readReferences(paths),
-        execute: async ({ prompt, requiredTools }) => {
-          const generated = await generateText({
-            model,
-            instructions: prompt,
-            messages: modelMessages,
-            tools: runtime.tools,
-            activeTools: requiredTools,
-            stopWhen: stepCountIs(CHAT_MAX_STEPS),
-          })
-          return { text: generated.text, parts: executionParts(generated) }
-        },
-        validate: async ({ text, run, loadedReferences }) => {
-          const validationPrompt = `Return valid JSON only in exactly this shape: {"passed": boolean, "violations": [{"requirement": string, "evidence": string, "correction": string}]}. A passing result must use an empty violations array. Validate the candidate strictly against every dynamic requirement and verification criterion. Quote concrete candidate evidence for each violation.\n\nRequirements:\n${JSON.stringify(run.outputRequirements)}\n\nVerification criteria:\n${JSON.stringify(run.verificationCriteria)}\n\nLoaded references:\n${JSON.stringify(loadedReferences)}\n\nCandidate:\n${text}`
-          const checked = await generateText({
-            model,
-            prompt: validationPrompt,
-            output: Output.json(),
-          })
-          const parsed = skillRunValidationSchema.safeParse(checked.output)
-          if (parsed.success) return parsed.data
-          const repaired = await generateText({
-            model,
-            prompt: `${validationPrompt}\n\nThe previous JSON was invalid. Repair its shape without changing the substantive judgment.\n\nPrevious JSON:\n${JSON.stringify(checked.output)}`,
-            output: Output.json(),
-          })
-          return skillRunValidationSchema.parse(repaired.output)
-        },
-        revise: async ({ text, run, loadedReferences, violations }) => {
-          const revised = await generateText({
-            model,
-            prompt: `Revise the candidate once. Use only the supplied evidence, satisfy every requirement, and correct every violation. Return only the revised deliverable.\n\nRequirements:\n${JSON.stringify(run.outputRequirements)}\n\nLoaded references:\n${JSON.stringify(loadedReferences)}\n\nViolations:\n${JSON.stringify(violations)}\n\nCandidate:\n${text}`,
-          })
-          return revised.text
-        },
+        maxSteps: CHAT_MAX_STEPS,
       })
-      const run = result.kind === 'completed' ? result.completed.run : result.run
-      const revisionCount = result.kind === 'completed' ? result.completed.revisionCount : 0
-      const parts = resultMessageParts(result)
-      await persistMessage(body.sessionId, { role: 'assistant', parts }, skillRunAudit(run, revisionCount))
+      const parts = result.parts as UIMessage['parts']
+      await persistMessage(body.sessionId, { role: 'assistant', parts }, agentSkillRunAudit(result))
       await registry.close()
       registry = undefined
-      return skillRunUIResponse(result)
+      return agentRunUIResponse(result)
     }
 
     const result = streamText({
