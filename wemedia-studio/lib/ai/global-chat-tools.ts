@@ -2,6 +2,13 @@ import { createMCPClient } from '@ai-sdk/mcp'
 import { tool, type ToolSet } from 'ai'
 import { z } from 'zod'
 
+import { applyAgentToolPolicy } from './agent-tool-policy'
+import type {
+  AgentApprovalPolicy,
+  AgentToolAudit,
+  AgentToolDecision,
+} from './agent-runtime-types'
+
 import {
   getEnabledSkill,
   listEnabledSkills,
@@ -19,24 +26,24 @@ import {
   type SkillManifest,
 } from '../skills/registry'
 
-const sensitiveToolVerb = /(^|_)(publish|delete|update|save|create|add|upload)(_|$)/
-const readOnlyToolPrefix = /^(list|get|search|read|fetch|find)_/
-
-export function requiresToolApproval(name: string) {
-  return name !== 'generateImage' && name !== 'readSkillReference' && !readOnlyToolPrefix.test(name) && sensitiveToolVerb.test(name)
-}
+export { requiresToolApproval } from './agent-tool-policy'
 
 export function mcpUrl(apiBase: string) {
   return new URL('/mcp', apiBase).toString()
 }
 
-export type GlobalChatToolOptions = {
+export type GlobalAgentToolOptions = {
   apiBase: string
-  sessionId: number
+  sessionId?: number
   draftId?: number
   skillName?: string
   restoredSkillName?: string
+  approvalPolicy?: AgentApprovalPolicy
+  beforeToolExecute?: (event: AgentToolAudit) => Promise<AgentToolDecision>
+  onToolAudit?: (event: AgentToolAudit) => void | Promise<void>
 }
+
+export type GlobalChatToolOptions = GlobalAgentToolOptions
 
 export type ImageFlow = 'standalone_image'
 
@@ -263,17 +270,19 @@ export async function createImageJob({
   return { jobId: job.id, flow: job.flow, status: job.status }
 }
 
-export async function openGlobalChatTools({ apiBase, skillName, restoredSkillName }: GlobalChatToolOptions) {
+export async function openGlobalAgentTools({
+  apiBase,
+  skillName,
+  restoredSkillName,
+  approvalPolicy = 'interactive',
+  beforeToolExecute,
+  onToolAudit,
+}: GlobalAgentToolOptions) {
   const client = await createMCPClient({
     transport: { type: 'http', url: mcpUrl(apiBase) },
   })
   const discovered = await client.tools()
-  const tools = Object.fromEntries(
-    Object.entries(discovered).map(([name, tool]) => [name, {
-      ...tool,
-      needsApproval: requiresToolApproval(name),
-    }]),
-  ) as ToolSet
+  const tools = { ...discovered } as ToolSet
   tools.generateImage = tool({
     description: 'Generate one image from a free-form prompt and save it to Creative Assets.',
     inputSchema: imageGenerationInputSchema,
@@ -281,10 +290,20 @@ export async function openGlobalChatTools({ apiBase, skillName, restoredSkillNam
       return createImageJob({ apiBase, prompt })
     },
   })
-  return createChatSkillRuntime({
+  const runtime = await createChatSkillRuntime({
     selectedSkillName: skillName,
     restoredSkillName,
     baseTools: tools,
     close: () => client.close(),
   })
+  return {
+    ...runtime,
+    tools: applyAgentToolPolicy(runtime.tools, {
+      policy: approvalPolicy,
+      beforeToolExecute,
+      onAudit: onToolAudit,
+    }),
+  }
 }
+
+export const openGlobalChatTools = openGlobalAgentTools

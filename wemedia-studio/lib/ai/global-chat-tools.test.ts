@@ -1,12 +1,25 @@
+import { tool, type ToolSet } from 'ai'
+import { z } from 'zod'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+
+const mcp = vi.hoisted(() => ({
+  tools: vi.fn(),
+  close: vi.fn(),
+}))
+
+vi.mock('@ai-sdk/mcp', () => ({
+  createMCPClient: vi.fn(async () => ({ tools: mcp.tools, close: mcp.close })),
+}))
 
 import {
   createChatSkillRuntime,
   createImageJob,
   createSkillReferenceReader,
   imageGenerationInputSchema,
+  openGlobalAgentTools,
   requiresToolApproval,
 } from './global-chat-tools'
+import type { AgentToolAudit } from './agent-runtime-types'
 
 const alpha = {
   name: 'Alpha', description: 'Alpha description', version: '1.0.0', source: 'builtin' as const,
@@ -36,7 +49,11 @@ async function executeTool(tool: unknown, input: unknown) {
 }
 
 describe('global Chat tool policy', () => {
-  afterEach(() => vi.unstubAllGlobals())
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    mcp.tools.mockReset()
+    mcp.close.mockReset()
+  })
 
   it('requires approval for MCP tools with a sensitive action verb', () => {
     expect(requiresToolApproval('update_draft')).toBe(true)
@@ -48,6 +65,39 @@ describe('global Chat tool policy', () => {
   it('does not require approval to create a durable image-generation job', () => {
     expect(requiresToolApproval('generateImage')).toBe(false)
     expect(requiresToolApproval('readSkillReference')).toBe(false)
+  })
+
+  it('opens one automatic global catalog with sensitive tools auto-approved and audited', async () => {
+    const audits: AgentToolAudit[] = []
+    mcp.tools.mockResolvedValue({
+      save_item: tool({
+        inputSchema: z.object({ value: z.string() }),
+        execute: async ({ value }) => ({ id: 9, value }),
+      }),
+      list_items: tool({
+        inputSchema: z.object({}),
+        execute: async () => [],
+      }),
+    } satisfies ToolSet)
+
+    const runtime = await openGlobalAgentTools({
+      apiBase: 'http://localhost:8000/api',
+      approvalPolicy: 'automatic',
+      onToolAudit: event => { audits.push(event) },
+    })
+    const save = runtime.tools.save_item as {
+      needsApproval?: boolean
+      execute(input: unknown, options: { toolCallId: string }): Promise<unknown>
+    }
+
+    expect(save.needsApproval).toBe(false)
+    await expect(save.execute({ value: 'shared' }, { toolCallId: 'call-global' }))
+      .resolves.toEqual({ id: 9, value: 'shared' })
+    expect(audits.at(-1)).toMatchObject({
+      toolName: 'save_item', autoApproved: true, status: 'succeeded',
+    })
+    await runtime.close()
+    expect(mcp.close).toHaveBeenCalledOnce()
   })
 
   it('scopes Skill reference reads, caches repeats, and shares one byte budget', async () => {
