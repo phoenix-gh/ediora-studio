@@ -1,66 +1,77 @@
-# Daily Creation Selection Normalization Implementation Plan
+# Daily Creation Selection Contract Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Normalize compact or partially blank AI selection responses into strict, evidence-backed daily-creation selections, then retry only the latest failed daily-creation job once.
+**Goal:** Require one complete AI selection JSON structure, reject aliases and incomplete items, and expose the same Zod-derived schema in the provider prompt.
 
-**Architecture:** Keep Zod schemas strict and perform deterministic fallback before validation using the already loaded candidate title, summary, and provider reason. Verify the parser with the exact production failure shape and gate the single runtime retry on zero existing outputs.
+**Architecture:** Make the Zod selection schema fully required and parse provider responses without shape normalization. Build the select-step prompt payload from the same schema as JSON Schema so the provider receives exact root keys, item fields, and evidence constraints before strict application validation.
 
-**Tech Stack:** TypeScript, Zod 4, Vercel AI SDK 7, Vitest 4, FastAPI job API, Redis worker queue, jq
+**Tech Stack:** TypeScript, Zod 4 JSON Schema, Vercel AI SDK 7, Vitest 4
 
 ## Global Constraints
 
-- Do not make persisted `topic` or `angle` optional or allow blank strings.
-- Resolve topic from AI topic, candidate title, candidate summary, provider reason, then `素材 <asset_id>`.
-- Resolve angle from AI angle, provider reason, then normalized topic.
-- Trim whitespace-only strings before deciding whether they are usable.
-- Continue rejecting candidate IDs that were not returned by the candidate tool.
-- Do not change scheduler catch-up, reuse, comparison-ID, exclusion, or global semantic-deduplication semantics.
-- Retry only the latest failed `daily_creation` job, only after confirming its run has `created_count == 0`.
-- The one retry is allowed to invoke the configured AI provider and incur cost; do not automatically retry again if it fails.
-- Preserve unrelated changes in the dirty worktree and stage only the files listed by each implementation task.
+- Accept only root fields `selected` and `excluded`; do not add or retain response-shape aliases in `parseDailyCreationSelection`.
+- Every selected item requires `asset_id`, `topic`, `angle`, `reuse_decision`, `reuse_explanation`, and `compared_usage_ids`.
+- Every excluded item requires `asset_id` and `reason`.
+- Do not repair missing or blank fields in application code.
+- Continue rejecting candidate and usage IDs absent from observed tool evidence.
+- Continue requiring a non-empty explanation when `reuse_decision == "reuse_allowed"`.
+- Do not change scheduler catch-up, generation, validation, persistence, provider, or model behavior.
+- The already consumed retry remains the only runtime retry in this execution. Do not submit another retry without new user authorization.
+- Preserve unrelated dirty-worktree changes and stage only named files.
 
 ---
 
-### Task 1: Normalize non-blank selection evidence
+### Task 1: Enforce the exact selection schema
 
 **Files:**
-- Modify: `wemedia-studio/lib/ai/content-job.ts:106-158`
-- Test: `wemedia-studio/lib/ai/content-job.test.ts:35-65`
+- Modify: `wemedia-studio/lib/ai/content-job.ts:16-29,106-158`
+- Test: `wemedia-studio/lib/ai/content-job.test.ts:35-100`
 
 **Interfaces:**
-- Consumes: `parseDailyCreationSelection(raw, candidates)` and candidates shaped as `{ id: number; title: string; summary?: string }`.
-- Produces: unchanged `DailyCreationSelection`; selected items always contain trimmed, non-empty `topic` and `angle` before strict Zod validation.
+- Produces: `parseDailyCreationSelection(raw: unknown): DailyCreationSelection`, which performs only strict structural parsing.
+- Retains: `validateDailyCreationSelection(selection, candidateIds, usageIds)` for evidence validation.
 
-- [ ] **Step 1: Write the failing production-shape test**
+- [ ] **Step 1: Replace compact acceptance tests with strict-contract tests**
 
-Extend the compact-selection test with the exact failing shape and fallback precedence:
+Add one complete literal fixture and explicit malformed cases:
 
 ```typescript
-  expect(parseDailyCreationSelection({
-    selected: [{ id: 14, reason: '聚焦可以落地的收费方式' }],
-  }, [{ id: 14, title: '' }]).selected[0]).toEqual(expect.objectContaining({
-    asset_id: 14,
-    topic: '聚焦可以落地的收费方式',
-    angle: '聚焦可以落地的收费方式',
-  }))
+const exactSelection = {
+  selected: [{
+    asset_id: 12,
+    topic: '需求验证',
+    angle: '真实付费',
+    reuse_decision: 'fresh',
+    reuse_explanation: '',
+    compared_usage_ids: [],
+  }],
+  excluded: [{ asset_id: 13, reason: '与近期内容同角度' }],
+}
 
-  expect(parseDailyCreationSelection({
-    selected: [{ id: 15, topic: '  ', angle: '  ', reason: '模型理由' }],
-  }, [{ id: 15, title: '  ', summary: '  素材摘要  ' }]).selected[0]).toEqual(expect.objectContaining({
-    topic: '素材摘要',
-    angle: '模型理由',
-  }))
+it('accepts only the complete daily creation selection contract', () => {
+  expect(parseDailyCreationSelection(exactSelection)).toEqual(exactSelection)
+})
 
-  expect(parseDailyCreationSelection({ selected: [{ id: 16 }] }, [
-    { id: 16, title: '', summary: '' },
-  ]).selected[0]).toEqual(expect.objectContaining({
-    topic: '素材 16',
-    angle: '素材 16',
-  }))
+it.each([
+  { selected_candidates: exactSelection.selected, excluded: [] },
+  { selected: [{ id: 12, reason: '紧凑结构' }], excluded: [] },
+  { selected: exactSelection.selected },
+  {
+    selected: [{
+      asset_id: 12,
+      topic: '需求验证',
+      angle: '真实付费',
+      reuse_decision: 'fresh',
+    }],
+    excluded: [],
+  },
+])('rejects a non-contract daily creation selection: %j', malformed => {
+  expect(() => parseDailyCreationSelection(malformed)).toThrow(/invalid daily creation selection/i)
+})
 ```
 
-Retain the existing assertion that candidate ID `99` throws `invented asset`.
+Retain evidence-validation tests for invented asset IDs, invented usage IDs, and unjustified reuse, but construct their selection input with the complete required fields.
 
 - [ ] **Step 2: Run the focused test and verify RED**
 
@@ -71,53 +82,43 @@ cd wemedia-studio
 pnpm exec vitest run lib/ai/content-job.test.ts
 ```
 
-Expected: FAIL in `normalizes common compact AI selection responses without inventing candidate ids` because the blank candidate title becomes an invalid empty topic.
+Expected: FAIL because the current parser accepts compact aliases/defaults and because its signature still requires candidate input.
 
-- [ ] **Step 3: Implement deterministic non-blank fallback**
+- [ ] **Step 3: Implement strict schema and parsing**
 
-Add a local helper and expand the candidate evidence type:
+Remove `.default(...)` from selection fields:
 
 ```typescript
-function firstNonBlankString(...values: unknown[]) {
-  for (const value of values) {
-    if (typeof value !== 'string') continue
-    const normalized = value.trim()
-    if (normalized) return normalized
+export const dailyCreationSelectionSchema = z.object({
+  selected: z.array(z.object({
+    asset_id: z.number().int().positive(),
+    topic: z.string().min(1),
+    angle: z.string().min(1),
+    reuse_decision: z.enum(['fresh', 'reuse_allowed']),
+    reuse_explanation: z.string(),
+    compared_usage_ids: z.array(z.number().int().positive()),
+  })),
+  excluded: z.array(z.object({
+    asset_id: z.number().int().positive(),
+    reason: z.string().min(1),
+  })),
+})
+```
+
+Replace shape normalization with direct parsing:
+
+```typescript
+export function parseDailyCreationSelection(raw: unknown): DailyCreationSelection {
+  const parsed = dailyCreationSelectionSchema.safeParse(raw)
+  if (!parsed.success) {
+    const preview = JSON.stringify(raw).slice(0, 500)
+    throw new Error(`invalid daily creation selection: ${parsed.error.message}; response=${preview}`)
   }
-  return ''
+  return parsed.data
 }
-
-export function parseDailyCreationSelection(
-  raw: unknown,
-  candidates: Array<{ id: number; title: string; summary?: string }>,
-): DailyCreationSelection {
 ```
 
-Inside the existing selected-item normalization, preserve ID lookup and then replace only the topic/angle calculation:
-
-```typescript
-          const topic = firstNonBlankString(
-            compact.topic,
-            candidate.title,
-            candidate.summary,
-            compact.reason,
-          ) || `素材 ${assetId}`
-          const angle = firstNonBlankString(
-            compact.angle,
-            compact.reason,
-            topic,
-          )
-          return {
-            asset_id: assetId,
-            topic,
-            angle,
-            reuse_decision: compact.reuse_decision === 'reuse_allowed' ? 'reuse_allowed' : 'fresh',
-            reuse_explanation: typeof compact.reuse_explanation === 'string' ? compact.reuse_explanation : '',
-            compared_usage_ids: Array.isArray(compact.compared_usage_ids) ? compact.compared_usage_ids : [],
-          }
-```
-
-Do not change the unknown-ID check or the final `dailyCreationSelectionSchema.safeParse`.
+Update the worker call from `parseDailyCreationSelection(result, candidates)` to `parseDailyCreationSelection(result)`. Do not change `validateDailyCreationSelection` arguments.
 
 - [ ] **Step 4: Run focused tests and verify GREEN**
 
@@ -128,138 +129,171 @@ cd wemedia-studio
 pnpm exec vitest run lib/ai/content-job.test.ts
 ```
 
-Expected: all tests in `content-job.test.ts` pass, including blank-title, summary, generic fallback, and invented-ID cases.
+Expected: all content-job tests pass; exact structure succeeds, aliases/incomplete structures fail, and evidence validation remains strict.
 
-- [ ] **Step 5: Commit parser normalization**
+- [ ] **Step 5: Commit strict parsing**
 
 ```bash
-git add wemedia-studio/lib/ai/content-job.ts wemedia-studio/lib/ai/content-job.test.ts
+git add wemedia-studio/lib/ai/content-job.ts wemedia-studio/lib/ai/content-job.test.ts wemedia-studio/lib/ai/daily-creation-job.ts
 git diff --cached --check
-git commit -m "fix: normalize daily creation selection evidence"
+git commit -m "fix: enforce daily creation selection contract"
 ```
 
 ---
 
-### Task 2: Verify the complete frontend test suite
+### Task 2: Emit the exact contract in the provider prompt
 
 **Files:**
-- No additional source files.
+- Modify: `wemedia-studio/lib/ai/daily-creation-job.ts:45-60,148-158`
+- Test: `wemedia-studio/lib/ai/daily-creation-job.test.ts`
 
 **Interfaces:**
-- Consumes: the parser implementation and regression tests from Task 1.
-- Produces: complete Vitest regression evidence before any runtime retry.
+- Produces: `buildDailyCreationSelectionPrompt(input): string`, the exact JSON payload passed to `generateJson` for the select step.
+- Consumes: `dailyCreationSelectionSchema` via `z.toJSONSchema`.
 
-- [ ] **Step 1: Run the adjacent daily-creation tests**
+- [ ] **Step 1: Write the failing provider-boundary test**
+
+```typescript
+import {
+  buildDailyCreationSelectionPrompt,
+  normalizeRunDirectories,
+} from './daily-creation-job'
+
+it('emits the complete strict selection schema to the provider', () => {
+  const payload = JSON.parse(buildDailyCreationSelectionPrompt({
+    requested_count: 10,
+    rule: { name: '夜间创作' },
+    candidates: [{ id: 12, title: '需求验证' }],
+    recent_global_usage: [],
+  }))
+
+  expect(payload.output_rules).toEqual([
+    '只返回一个 JSON 对象，不要 Markdown 或解释。',
+    '顶层只能包含 selected 和 excluded，禁止使用任何别名。',
+    'selected 和 excluded 必须始终返回数组；没有排除项时 excluded 返回空数组。',
+    '所有 ID 必须来自给定候选或历史用量。',
+  ])
+  expect(payload.output_schema).toMatchObject({
+    type: 'object',
+    required: expect.arrayContaining(['selected', 'excluded']),
+    properties: {
+      selected: {
+        type: 'array',
+        items: {
+          required: expect.arrayContaining([
+            'asset_id',
+            'topic',
+            'angle',
+            'reuse_decision',
+            'reuse_explanation',
+            'compared_usage_ids',
+          ]),
+        },
+      },
+    },
+  })
+})
+```
+
+This exercises the real provider-boundary payload rather than checking source text or a mock.
+
+- [ ] **Step 2: Run the focused test and verify RED**
+
+Run:
+
+```bash
+cd wemedia-studio
+pnpm exec vitest run lib/ai/daily-creation-job.test.ts
+```
+
+Expected: FAIL because `buildDailyCreationSelectionPrompt` does not exist.
+
+- [ ] **Step 3: Build and use the schema-backed prompt payload**
+
+Import `z` and add:
+
+```typescript
+type DailyCreationSelectionPromptInput = {
+  requested_count: number
+  rule: unknown
+  candidates: unknown[]
+  recent_global_usage: unknown[]
+}
+
+export function buildDailyCreationSelectionPrompt(input: DailyCreationSelectionPromptInput) {
+  return JSON.stringify({
+    output_rules: [
+      '只返回一个 JSON 对象，不要 Markdown 或解释。',
+      '顶层只能包含 selected 和 excluded，禁止使用任何别名。',
+      'selected 和 excluded 必须始终返回数组；没有排除项时 excluded 返回空数组。',
+      '所有 ID 必须来自给定候选或历史用量。',
+    ],
+    output_schema: z.toJSONSchema(dailyCreationSelectionSchema),
+    ...input,
+  })
+}
+```
+
+Update the select call:
+
+```typescript
+system: '严格按照 prompt 中的 output_schema 和 output_rules 完成通用内容选材与语义去重。字段名、层级和类型必须完全一致。',
+prompt: buildDailyCreationSelectionPrompt({
+  requested_count: context.requested_count,
+  rule: context.rule,
+  candidates,
+  recent_global_usage: usage,
+}),
+```
+
+- [ ] **Step 4: Run focused and complete Vitest suites**
+
+Run:
 
 ```bash
 cd wemedia-studio
 pnpm exec vitest run lib/ai/content-job.test.ts lib/ai/daily-creation-job.test.ts
-```
-
-Expected: both focused files pass.
-
-- [ ] **Step 2: Run the complete Vitest suite**
-
-```bash
-cd wemedia-studio
 pnpm test
 ```
 
-Expected: the complete Vitest suite passes. If an unrelated dirty-worktree failure appears, record it and do not retry the live job until the parser-focused suite remains green and the failure is proven unrelated.
+Expected: both focused files and all Vitest files pass. Run the complete suite outside the restricted sandbox because provider tests bind a local port.
+
+- [ ] **Step 5: Commit the schema-backed prompt**
+
+```bash
+git add wemedia-studio/lib/ai/daily-creation-job.ts wemedia-studio/lib/ai/daily-creation-job.test.ts
+git diff --cached --check
+git commit -m "fix: send strict creation schema to provider"
+```
 
 ---
 
-### Task 3: Retry only the latest failed daily-creation job
+### Task 3: Record runtime state without retrying
 
 **Files:**
-- No source files. This is a guarded runtime operation after Tasks 1 and 2 are committed and verified.
+- No source files.
 
-**Interfaces:**
-- Consumes: `GET /api/jobs?limit=100`, `GET /api/daily-plan/creation-runs/{run_id}`, and `POST /api/jobs/{job_id}/retry` with `{ "step_key": "select" }`.
-- Produces: one retried job reaching a terminal state and its existing `DailyCreationRun` updated with the created output count.
-
-- [ ] **Step 1: Start and verify the normal development environment**
-
-Run:
+- [ ] **Step 1: Verify no outputs were created by the consumed retry**
 
 ```bash
-./dev.sh start
-./dev.sh status
-curl --fail --silent http://127.0.0.1:8000/health | jq .
+curl --fail --silent 'http://127.0.0.1:8000/api/daily-plan/creation-runs/17' \
+  | jq -e '.id == 17 and .content_job_id == 694 and .status == "failed" and .created_count == 0'
 ```
 
-Expected: PostgreSQL, Redis, API, Worker, and Web report ready; `/health` returns a successful JSON response.
+If services are stopped, use the backend database environment for an equivalent read-only query. Do not start services solely to perform another retry.
 
-- [ ] **Step 2: Resolve and inspect the latest failed daily-creation job**
+- [ ] **Step 2: Do not call the retry endpoint**
 
-Run:
-
-```bash
-latest_job_json="$(curl --fail --silent 'http://127.0.0.1:8000/api/jobs?limit=100' \
-  | jq -c '[.jobs[] | select(.flow == "daily_creation" and .status == "failed")] | sort_by(.created_at) | last')"
-printf '%s\n' "$latest_job_json" | jq '{id, status, input, steps}'
-job_id="$(printf '%s\n' "$latest_job_json" | jq -r '.id')"
-run_id="$(printf '%s\n' "$latest_job_json" | jq -r '.input.run_id')"
-run_json="$(curl --fail --silent "http://127.0.0.1:8000/api/daily-plan/creation-runs/$run_id")"
-printf '%s\n' "$run_json" | jq '{id, status, created_count, content_job_id}'
-printf '%s\n' "$latest_job_json" | jq -e '
-  (.id | type == "number" and . > 0)
-  and (.input.run_id | type == "number" and . > 0)
-  and (.steps | last | .key == "select" and .status == "failed" and .retryable == true)
-'
-printf '%s\n' "$run_json" | jq -e \
-  --argjson job_id "$job_id" \
-  '.content_job_id == $job_id and .status == "failed" and .created_count == 0'
-```
-
-Required gate: `job_id` and `run_id` are positive integers, the latest failed step key is `select`, `retryable` is true, `content_job_id == job_id`, and `created_count == 0`. If any condition differs, stop without retrying and report the state.
-
-- [ ] **Step 3: Submit exactly one retry**
-
-Run once:
-
-```bash
-curl --fail --silent \
-  -X POST "http://127.0.0.1:8000/api/jobs/$job_id/retry" \
-  -H 'Content-Type: application/json' \
-  --data '{"step_key":"select"}' \
-  | jq '{id, status, steps}'
-```
-
-Expected: the existing job becomes `queued` with a new queued `select` attempt. Do not repeat this command.
-
-- [ ] **Step 4: Monitor the one retry to a terminal state**
-
-Poll without mutating state:
-
-```bash
-curl --fail --silent "http://127.0.0.1:8000/api/jobs/$job_id" \
-  | jq '{id, status, steps, events}'
-```
-
-Repeat only this GET until status is `succeeded`, `failed`, or `cancelled`. If it fails, capture the new failed step and error and stop; do not retry again.
-
-- [ ] **Step 5: Verify persisted outputs**
-
-On success, run:
-
-```bash
-curl --fail --silent "http://127.0.0.1:8000/api/daily-plan/creation-runs/$run_id" \
-  | jq '{id, status, requested_count, created_count, detail}'
-curl --fail --silent "http://127.0.0.1:8000/api/jobs/$job_id" \
-  | jq '{id, status, persist: [.steps[] | select(.key == "persist" and .status == "succeeded") | .output]}'
-```
-
-Expected: job status is `succeeded`; the run status is `succeeded` or `partial`; `created_count` is greater than zero; the successful persist output contains the created draft or plan-item responses. Report the actual IDs and counts.
+No `POST /api/jobs/694/retry` is permitted in this plan. Report that attempt 2 failed on `selected_candidates`, the run remains at zero outputs, and another retry requires fresh user authorization after integration.
 
 ---
 
 ## Final Verification
 
-- [ ] Confirm the implementation diff touches only `wemedia-studio/lib/ai/content-job.ts` and `wemedia-studio/lib/ai/content-job.test.ts`.
-- [ ] Confirm the production failure shape failed before the parser fix and passed afterward.
-- [ ] Confirm invented candidate IDs still fail.
+- [ ] Confirm no provider-output alias was added.
+- [ ] Confirm the temporary topic/angle fallback implementation and tests were removed.
+- [ ] Confirm exact schema, alias rejection, incomplete-field rejection, and evidence-validation tests pass.
+- [ ] Confirm the provider prompt payload contains the Zod-derived required structure.
 - [ ] Confirm the complete Vitest suite passes.
-- [ ] Confirm exactly one existing failed job was retried and no new daily-creation run was created.
-- [ ] Confirm the retried job's terminal status and persisted output count from the API.
+- [ ] Confirm job `694` was not retried more than the already consumed second attempt.
 - [ ] Confirm unrelated dirty-worktree files remain unstaged.

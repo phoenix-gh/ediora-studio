@@ -13,19 +13,19 @@ type CoverStyle = Record<string, unknown>
 
 export type ContentStep = 'brief' | 'draft' | 'cover' | 'illustrations' | 'standalone_image' | 'daily_plan' | 'template_extraction'
 
-export const dailyCreationSelectionSchema = z.object({
-  selected: z.array(z.object({
+export const dailyCreationSelectionSchema = z.strictObject({
+  selected: z.array(z.strictObject({
     asset_id: z.number().int().positive(),
     topic: z.string().min(1),
     angle: z.string().min(1),
     reuse_decision: z.enum(['fresh', 'reuse_allowed']),
-    reuse_explanation: z.string().default(''),
-    compared_usage_ids: z.array(z.number().int().positive()).default([]),
+    reuse_explanation: z.string(),
+    compared_usage_ids: z.array(z.number().int().positive()),
   })),
-  excluded: z.array(z.object({
+  excluded: z.array(z.strictObject({
     asset_id: z.number().int().positive(),
     reason: z.string().min(1),
-  })).default([]),
+  })),
 })
 
 export const xPostBatchSchema = z.array(z.object({
@@ -103,73 +103,8 @@ export function parseXPostBatch(
   return parsed.data
 }
 
-function firstNonBlankString(...values: unknown[]) {
-  for (const value of values) {
-    if (typeof value !== 'string') continue
-    const normalized = value.trim()
-    if (normalized) return normalized
-  }
-  return ''
-}
-
-export function parseDailyCreationSelection(
-  raw: unknown,
-  candidates: Array<{ id: number; title: string; summary?: string }>,
-): DailyCreationSelection {
-  const candidateById = new Map(candidates.map(candidate => [candidate.id, candidate]))
-  let value = raw
-  if (Array.isArray(value)) value = { selected: value }
-  if (value && typeof value === 'object' && !Array.isArray(value)) {
-    let record = value as Record<string, unknown>
-    if (record.selection && typeof record.selection === 'object' && !Array.isArray(record.selection)) {
-      record = record.selection as Record<string, unknown>
-      value = record
-    }
-    if (!Array.isArray(record.selected)) {
-      const compact = record.asset_ids ?? record.selected_asset_ids ?? record.selected_ids ?? record.selections ?? record.selected_items ?? record.selected_assets
-      if (Array.isArray(compact)) value = { ...record, selected: compact }
-    }
-  }
-  if (value && typeof value === 'object' && !Array.isArray(value)) {
-    const record = value as Record<string, unknown>
-    if (Array.isArray(record.selected)) {
-      value = {
-        ...record,
-        selected: record.selected.map(item => {
-          const compact = typeof item === 'number'
-            ? { asset_id: item }
-            : item && typeof item === 'object' && !Array.isArray(item)
-              ? item as Record<string, unknown>
-              : null
-          if (!compact) return item
-          const assetId = compact.asset_id ?? compact.material_id ?? compact.id
-          if (typeof assetId !== 'number') return item
-          const candidate = candidateById.get(assetId)
-          if (!candidate) throw new Error(`invented asset id: ${assetId}`)
-          const topic = firstNonBlankString(
-            compact.topic,
-            candidate.title,
-            candidate.summary,
-            compact.reason,
-          ) || `素材 ${assetId}`
-          const angle = firstNonBlankString(
-            compact.angle,
-            compact.reason,
-            topic,
-          )
-          return {
-            asset_id: assetId,
-            topic,
-            angle,
-            reuse_decision: compact.reuse_decision === 'reuse_allowed' ? 'reuse_allowed' : 'fresh',
-            reuse_explanation: typeof compact.reuse_explanation === 'string' ? compact.reuse_explanation : '',
-            compared_usage_ids: Array.isArray(compact.compared_usage_ids) ? compact.compared_usage_ids : [],
-          }
-        }),
-      }
-    }
-  }
-  const parsed = dailyCreationSelectionSchema.safeParse(value)
+export function parseDailyCreationSelection(raw: unknown): DailyCreationSelection {
+  const parsed = dailyCreationSelectionSchema.safeParse(raw)
   if (!parsed.success) {
     const preview = JSON.stringify(raw).slice(0, 500)
     throw new Error(`invalid daily creation selection: ${parsed.error.message}; response=${preview}`)

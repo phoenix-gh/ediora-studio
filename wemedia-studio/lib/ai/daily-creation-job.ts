@@ -1,7 +1,7 @@
 import { createMCPClient } from '@ai-sdk/mcp'
 import { createOpenAI } from '@ai-sdk/openai'
 import { generateObject, generateText } from 'ai'
-import type { ZodType } from 'zod'
+import { z, type ZodType } from 'zod'
 
 import {
   dailyCreationSelectionSchema,
@@ -50,6 +50,26 @@ export function normalizeRunDirectories(rule: { directories?: string[]; director
   const directories = [...new Set(values.map(value => value.trim()).filter(Boolean))]
   if (directories.length === 0) throw new Error('at least one directory is required for daily creation')
   return directories
+}
+
+type DailyCreationSelectionPromptInput = {
+  requested_count: number
+  rule: unknown
+  candidates: unknown[]
+  recent_global_usage: unknown[]
+}
+
+export function buildDailyCreationSelectionPrompt(input: DailyCreationSelectionPromptInput) {
+  return JSON.stringify({
+    output_rules: [
+      '只返回一个 JSON 对象，不要 Markdown 或解释。',
+      '顶层只能包含 selected 和 excluded，禁止使用任何别名。',
+      'selected 和 excluded 必须始终返回数组；没有排除项时 excluded 返回空数组。',
+      '所有 ID 必须来自给定候选或历史用量。',
+    ],
+    output_schema: z.toJSONSchema(dailyCreationSelectionSchema),
+    ...input,
+  })
 }
 
 const creationSteps = ['loadCandidates', 'loadUsage', 'select', 'generate', 'validate', 'persist'] as const
@@ -149,11 +169,16 @@ export async function runDailyCreationJob(jobId: number) {
       const result = await generateJson({
         model,
         schema: dailyCreationSelectionSchema,
-        system: '你负责通用内容选材和语义去重。只能引用给定候选和历史 ID。已使用素材只有在角度实质不同并说明差异时才可复用。候选不足就少选，不得凑数。',
-        prompt: JSON.stringify({ requested_count: context.requested_count, rule: context.rule, candidates, recent_global_usage: usage }),
+        system: '严格按照 prompt 中的 output_schema 和 output_rules 完成通用内容选材与语义去重。字段名、层级和类型必须完全一致。已使用素材只有在角度实质不同并说明差异时才可复用；候选不足就少选，不得凑数。',
+        prompt: buildDailyCreationSelectionPrompt({
+          requested_count: context.requested_count,
+          rule: context.rule,
+          candidates,
+          recent_global_usage: usage,
+        }),
       })
       const selection = validateDailyCreationSelection(
-        parseDailyCreationSelection(result, candidates),
+        parseDailyCreationSelection(result),
         candidates.map(item => item.id), usage.map(item => item.id),
       )
       return { selection }

@@ -1,84 +1,103 @@
-# Daily Creation Selection Normalization Design
+# Daily Creation Selection Contract Design
 
 ## Goal
 
-Prevent a daily creation batch from failing when an AI provider returns a compact selection such as `{ id, reason }` for a creative asset whose stored title is blank. Preserve strict evidence validation and retry only the latest failed daily creation task after the fix is verified.
+Require the AI provider to return one explicit daily-creation selection structure instead of adding parser aliases for each provider variation. Keep selection validation strict and retry only the latest failed task after the revised contract is verified.
 
-## Observed Failure
+## Observed Failures
 
-Content job `694` failed in the `select` step before any draft was generated. The provider returned ten valid candidate IDs and non-empty reasons, but no explicit topics. `parseDailyCreationSelection` normalized each ID and used the candidate title as the topic fallback. Those candidates had blank titles, so `dailyCreationSelectionSchema` rejected every selected item at `topic: z.string().min(1)`.
+Content job `694` failed twice in the `select` step before any draft was generated:
 
-The scheduler catch-up change created the due run successfully and the worker consumed it normally. The failure boundary is provider-output normalization, not scheduling, Redis transport, candidate loading, or draft persistence.
+1. Attempt 1 returned compact `{ id, reason }` items and failed because required topics were blank.
+2. After a temporary parser fallback, attempt 2 returned the root key `selected_candidates` instead of `selected` and failed because the standard selected array was absent.
+
+Both responses came from a prompt that described selection and deduplication but did not state the exact JSON root keys or required item fields. Passing a Zod schema to the compatible provider API was not sufficient by itself.
 
 ## Selected Approach
 
-Keep the strict selection schema and add deterministic normalization from observed candidate evidence. Do not make `topic` or `angle` optional and do not rely on prompt wording alone.
+Define one provider-facing output contract and validate it without response-shape normalization.
 
-For each selected item, resolve `topic` from the first non-blank value in this order:
+The response must be a JSON object with exactly these root fields:
 
-1. AI-provided `topic`;
-2. candidate `title`;
-3. candidate `summary`;
-4. AI-provided `reason`;
-5. `素材 <asset_id>`.
+```json
+{
+  "selected": [
+    {
+      "asset_id": 381,
+      "topic": "非空主题",
+      "angle": "非空创作角度",
+      "reuse_decision": "fresh",
+      "reuse_explanation": "",
+      "compared_usage_ids": []
+    }
+  ],
+  "excluded": [
+    {
+      "asset_id": 382,
+      "reason": "非空排除原因"
+    }
+  ]
+}
+```
 
-Resolve `angle` from the first non-blank value in this order:
+`selected_candidates`, `selected_items`, `selected_assets`, `selections`, numeric arrays, `id`, `candidate_id`, and other aliases are not accepted. A provider response that violates the contract fails explicitly.
 
-1. AI-provided `angle`;
-2. AI-provided `reason`;
-3. the normalized topic.
+## Schema and Prompt Source of Truth
 
-Whitespace-only strings count as blank. Normalized text is trimmed before schema validation.
+`dailyCreationSelectionSchema` remains the source of truth and requires every field shown above. Remove defaults from `reuse_explanation`, `compared_usage_ids`, and `excluded` so an incomplete response cannot be silently repaired.
 
-## Trust and Validation Boundary
+The worker builds the provider prompt as JSON containing:
 
-- Candidate IDs remain authoritative. An unknown or invented ID still fails immediately.
-- Candidate title and summary come from the previously loaded MCP candidate list, so they are trusted evidence for deterministic fallback.
-- Provider reason is accepted only for a candidate whose ID exists in that list.
-- `reuse_decision`, comparison IDs, reuse explanations, excluded items, and global semantic-deduplication validation remain unchanged.
-- The persisted output schema remains strict and continues to require non-empty topic and angle values.
-- The generic fallback `素材 <asset_id>` guarantees structural validity without inventing a factual claim when all descriptive evidence is blank.
+- the requested count, rule, candidate evidence, and recent usage;
+- `output_schema`, generated from `dailyCreationSelectionSchema` with Zod's JSON Schema support;
+- concise output rules stating that the top-level object may contain only `selected` and `excluded`, every selected item must contain all six required fields, every excluded item must contain both required fields, IDs must come from the supplied evidence, and no aliases or explanatory prose are allowed.
 
-## Component Changes
+Generating the prompt schema from the validation schema prevents the instructions and runtime validator from drifting apart.
 
-`wemedia-studio/lib/ai/content-job.ts` expands the candidate evidence accepted by `parseDailyCreationSelection` to include optional `summary`. A small internal non-blank-string normalizer implements the fallback order before the existing Zod parse.
+## Parsing and Trust Boundary
 
-`wemedia-studio/lib/ai/daily-creation-job.ts` already supplies candidates containing `summary`; no new API, MCP field, prompt constant, or provider-specific branch is needed.
+`parseDailyCreationSelection` accepts only the raw provider value and applies `dailyCreationSelectionSchema.safeParse` directly. It no longer receives candidates or maps compact output shapes.
 
-`wemedia-studio/lib/ai/content-job.test.ts` adds the production failure shape: a candidate with blank title and a compact `{ id, reason }` selection. The test asserts non-empty normalized topic and angle, plus continued rejection of invented candidate IDs.
+After structural parsing, `validateDailyCreationSelection` retains the evidence checks:
 
-## Retry Behavior
+- every selected and excluded `asset_id` must exist in the candidate list;
+- every `compared_usage_id` must exist in recent usage;
+- `reuse_allowed` requires a non-empty explanation.
 
-After code and regression verification:
+This separates structural responsibility from evidence responsibility: the provider must follow the documented shape, while the application still prevents invented IDs and unjustified reuse.
 
-1. identify the latest failed content job whose flow is `daily_creation`;
-2. confirm its creation run is failed and no outputs were persisted;
-3. retry that one job through the existing job retry endpoint or service path;
-4. do not retry older failed daily creation jobs;
-5. monitor the retried job through selection, generation, validation, persistence, and completion;
-6. verify the expected drafts or plan items and usage-ledger records exist.
+## Components
 
-Retry is an explicit post-deployment action because it invokes the configured AI provider again and may incur cost. The user approved retrying only the latest failed task.
-
-## Error Handling
-
-- If the latest failed task is no longer job `694`, select by durable status and creation time rather than a hard-coded ID, then report the resolved ID before retrying.
-- If the latest failed run already has persisted outputs, do not automatically retry; report the partial state for review.
-- If the retry fails at another step, stop after that single attempt and report the new error. Do not create or retry additional runs.
-- If API or worker services are stopped, start the normal development environment before retrying and verify readiness first.
+- `wemedia-studio/lib/ai/content-job.ts`: make the selection schema fully required and replace compact normalization with strict parsing.
+- `wemedia-studio/lib/ai/content-job.test.ts`: replace compact-response acceptance tests with exact-contract acceptance and malformed/alias rejection tests.
+- `wemedia-studio/lib/ai/daily-creation-job.ts`: add a provider-prompt builder that embeds the generated JSON Schema and explicit output rules, then use it for the select step.
+- `wemedia-studio/lib/ai/daily-creation-job.test.ts`: parse the emitted provider payload and verify its observable `output_schema` and rules at the model boundary.
 
 ## Testing
 
-- Parser regression test for blank candidate title plus compact `{ id, reason }` output.
-- Parser test for whitespace trimming and fallback precedence.
-- Parser regression test that invented IDs still fail.
-- Existing content-job and daily-creation worker tests remain green.
-- Runtime verification records the retried job ID, terminal status, created output count, and persisted draft or plan-item IDs.
+- Exact complete structure parses successfully.
+- `selected_candidates` and compact `{ id, reason }` responses fail.
+- Missing `excluded`, `reuse_explanation`, or `compared_usage_ids` fails.
+- Empty topic and angle values fail.
+- The provider prompt payload contains an object JSON Schema whose required root keys are `selected` and `excluded` and whose selected-item schema requires all six fields.
+- Invented candidate and usage IDs still fail in evidence validation.
+- Focused AI tests and the complete Vitest suite pass.
+
+## Retry Behavior
+
+The first approved retry has already been consumed and failed with `selected_candidates`. It created no output. No further retry occurs without new cost authorization.
+
+After the strict contract is implemented, merged, and deployed:
+
+1. verify the existing run still has `created_count == 0`;
+2. request explicit authorization for one additional AI retry;
+3. if authorized, retry only the latest failed `select` step once;
+4. monitor to a terminal state and never retry automatically after another failure.
 
 ## Out of Scope
 
-- Allowing empty persisted topics or angles.
-- Backfilling titles on existing creative assets.
-- Retrying all historical failed daily creation jobs.
-- Changing scheduler catch-up semantics.
-- Changing AI provider or model configuration.
+- Adding new provider-output aliases.
+- Repairing missing selection fields in application code.
+- Changing scheduler catch-up behavior.
+- Changing the AI provider or model.
+- Retrying historical failed jobs.

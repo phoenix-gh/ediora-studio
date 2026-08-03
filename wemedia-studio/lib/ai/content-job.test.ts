@@ -49,51 +49,68 @@ it('accepts daily creation selection evidence only from observed tools', () => {
     .toThrow(/invented usage/i)
 })
 
-it('normalizes common compact AI selection responses without inventing candidate ids', () => {
-  const candidates = [
-    { id: 12, title: '需求验证' },
-    { id: 13, title: '自动化工作流' },
-  ]
-  expect(parseDailyCreationSelection({ selected: [12, 13] }, candidates).selected).toEqual([
-    expect.objectContaining({ asset_id: 12, topic: '需求验证', reuse_decision: 'fresh' }),
-    expect.objectContaining({ asset_id: 13, topic: '自动化工作流', reuse_decision: 'fresh' }),
-  ])
-  expect(parseDailyCreationSelection({ asset_ids: [12] }, candidates).selected[0].asset_id).toBe(12)
-  expect(parseDailyCreationSelection({ selected_asset_ids: [13] }, candidates).selected[0].asset_id).toBe(13)
-  expect(parseDailyCreationSelection({ selection: { selected: [12] } }, candidates).selected[0].asset_id).toBe(12)
-  expect(parseDailyCreationSelection({ selections: [{ material_id: 12, reason: '聚焦实际付费' }] }, candidates).selected[0]).toEqual(expect.objectContaining({ asset_id: 12, topic: '需求验证', angle: '聚焦实际付费' }))
-  expect(parseDailyCreationSelection({ selected_items: [{ id: 13, reason: '选择独立主题' }] }, candidates).selected[0]).toEqual(expect.objectContaining({ asset_id: 13, topic: '自动化工作流', angle: '选择独立主题' }))
-  expect(parseDailyCreationSelection({ selected_assets: [{ asset_id: 12, angle: '从验证切入', reuse_decision: 'fresh' }] }, candidates).selected[0]).toEqual(expect.objectContaining({ asset_id: 12, topic: '需求验证', angle: '从验证切入' }))
-  expect(parseDailyCreationSelection([13], candidates).selected[0].asset_id).toBe(13)
-  expect(() => parseDailyCreationSelection([99], candidates)).toThrow(/invented asset/i)
+it('accepts only the complete daily creation selection contract', () => {
+  const exactSelection = {
+    selected: [{
+      asset_id: 12,
+      topic: '需求验证',
+      angle: '真实付费',
+      reuse_decision: 'fresh' as const,
+      reuse_explanation: '',
+      compared_usage_ids: [],
+    }],
+    excluded: [{ asset_id: 13, reason: '与近期内容同角度' }],
+  }
+
+  expect(parseDailyCreationSelection(exactSelection)).toEqual(exactSelection)
 })
 
-it('uses a compact selection reason when the candidate title is blank', () => {
-  expect(parseDailyCreationSelection({
-    selected: [{ id: 14, reason: '聚焦可以落地的收费方式' }],
-  }, [{ id: 14, title: '' }]).selected[0]).toEqual(expect.objectContaining({
-    asset_id: 14,
-    topic: '聚焦可以落地的收费方式',
-    angle: '聚焦可以落地的收费方式',
-  }))
-})
-
-it('trims selection evidence and prefers candidate summary over reason for topic', () => {
-  expect(parseDailyCreationSelection({
-    selected: [{ id: 15, topic: '  ', angle: '  ', reason: '模型理由' }],
-  }, [{ id: 15, title: '  ', summary: '  素材摘要  ' }]).selected[0]).toEqual(expect.objectContaining({
-    topic: '素材摘要',
-    angle: '模型理由',
-  }))
-})
-
-it('uses an evidence-neutral label when every selection description is blank', () => {
-  expect(parseDailyCreationSelection({ selected: [{ id: 16 }] }, [
-    { id: 16, title: '', summary: '' },
-  ]).selected[0]).toEqual(expect.objectContaining({
-    topic: '素材 16',
-    angle: '素材 16',
-  }))
+it.each([
+  {
+    selected_candidates: [{
+      asset_id: 12,
+      topic: '需求验证',
+      angle: '真实付费',
+      reuse_decision: 'fresh',
+      reuse_explanation: '',
+      compared_usage_ids: [],
+    }],
+    excluded: [],
+  },
+  {
+    selected: [{
+      asset_id: 12,
+      topic: '需求验证',
+      angle: '真实付费',
+      reuse_decision: 'fresh',
+      reuse_explanation: '',
+      compared_usage_ids: [],
+    }],
+    excluded: [],
+    selected_candidates: [],
+  },
+  { selected: [{ id: 12, reason: '紧凑结构' }], excluded: [] },
+  {
+    selected: [{
+      asset_id: 12,
+      topic: '需求验证',
+      angle: '真实付费',
+      reuse_decision: 'fresh',
+      reuse_explanation: '',
+      compared_usage_ids: [],
+    }],
+  },
+  {
+    selected: [{
+      asset_id: 12,
+      topic: '需求验证',
+      angle: '真实付费',
+      reuse_decision: 'fresh',
+    }],
+    excluded: [],
+  },
+])('rejects a non-contract daily creation selection: %j', malformed => {
+  expect(() => parseDailyCreationSelection(malformed)).toThrow(/invalid daily creation selection/i)
 })
 
 it('normalizes wrapped and text-only X post batches against selected evidence', () => {
