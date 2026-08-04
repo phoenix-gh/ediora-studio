@@ -108,6 +108,55 @@ describe('Agent tool policy', () => {
     expect(audits.at(-1)).toMatchObject({ status: 'failed', error: 'write failed' })
   })
 
+  it('audits an MCP error result as failed while returning it to the model', async () => {
+    const audits: AgentToolAudit[] = []
+    const result = {
+      content: [{
+        type: 'text',
+        text: 'Error executing tool save_item: item is not eligible',
+      }],
+      isError: true,
+    }
+    const tools = applyAgentToolPolicy({
+      save_item: tool({
+        inputSchema: z.object({ value: z.string() }),
+        execute: async () => result,
+      }),
+    }, {
+      policy: 'automatic',
+      onAudit: event => { audits.push(event) },
+    })
+
+    await expect(executable(tools, 'save_item').execute(
+      { value: 'x' }, { toolCallId: 'call-mcp-error' },
+    )).resolves.toEqual(result)
+    expect(audits.at(-1)).toMatchObject({
+      status: 'failed',
+      error: 'Error executing tool save_item: item is not eligible',
+      output: result,
+    })
+  })
+
+  it('audits a replayed MCP error result as failed', async () => {
+    const audits: AgentToolAudit[] = []
+    const result = {
+      content: [{ type: 'text', text: 'stored MCP failure' }],
+      isError: true,
+    }
+    const tools = applyAgentToolPolicy({ save_item: valueTool() }, {
+      policy: 'automatic',
+      beforeToolExecute: async () => ({ action: 'replay', output: result }),
+      onAudit: event => { audits.push(event) },
+    })
+
+    await expect(executable(tools, 'save_item').execute(
+      { value: 'x' }, { toolCallId: 'call-replay-error' },
+    )).resolves.toEqual(result)
+    expect(audits.at(-1)).toMatchObject({
+      status: 'failed', error: 'stored MCP failure', output: result,
+    })
+  })
+
   it('preserves evidence ids when a successful audit result is too large', async () => {
     const audits: AgentToolAudit[] = []
     const candidates = Array.from({ length: 50 }, (_, index) => ({

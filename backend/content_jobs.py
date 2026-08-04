@@ -637,6 +637,14 @@ async def retry_locked_step(
     session.add(step)
     job.status = "queued"
     job.completed_at = None
+    if job.flow == "daily_creation":
+        run_id = job.input_data.get("run_id")
+        if isinstance(run_id, int):
+            creation_run = await session.get(DailyCreationRun, run_id)
+            if creation_run is not None and creation_run.status == "failed":
+                creation_run.status = "queued"
+                creation_run.detail = {}
+                creation_run.completed_at = None
     analysis, item = await _analysis_for_job(session, job)
     if analysis is not None:
         analysis.status = "queued"

@@ -1573,6 +1573,53 @@ def test_daily_creation_job_failure_marks_linked_run_failed(session_factory):
     asyncio.new_event_loop().run_until_complete(run())
 
 
+def test_retrying_daily_creation_job_restores_linked_run(session_factory):
+    from datetime import datetime, timezone
+
+    from content_jobs import create_job, fail_step, retry_step, start_step
+    from models import ContentJob, DailyCreationRule, DailyCreationRun
+
+    async def run():
+        async with session_factory() as session:
+            rule = DailyCreationRule(
+                name="重试规则", asset_type="article", directory="搞钱副业",
+                output_type="x_short_post", target_count=10,
+                execution_mode="recurring", scheduled_time="08:00",
+                timezone="Asia/Shanghai", lookback_days=14,
+                delivery_mode="drafts",
+            )
+            session.add(rule)
+            await session.flush()
+            creation_run = DailyCreationRun(
+                rule_id=rule.id, scheduled_for=datetime.now(timezone.utc),
+                trigger_kind="explicit", requested_count=10,
+                rule_snapshot={"name": rule.name},
+            )
+            session.add(creation_run)
+            await session.flush()
+            job = await create_job(
+                session, flow="daily_creation", title="retry creation",
+                input_data={"run_id": creation_run.id}, commit=False,
+            )
+            creation_run.content_job_id = job.id
+            await session.commit()
+            step = await start_step(session, job.id, "agent")
+            await fail_step(session, step.id, "provider busy", retryable=True)
+
+            retried = await retry_step(session, job.id, "agent")
+            current_job = await session.get(ContentJob, job.id)
+            await session.refresh(creation_run)
+
+            assert current_job.status == "queued"
+            assert retried.status == "queued"
+            assert retried.attempt == 2
+            assert creation_run.status == "queued"
+            assert creation_run.detail == {}
+            assert creation_run.completed_at is None
+
+    asyncio.new_event_loop().run_until_complete(run())
+
+
 def test_fail_step_redacts_secrets_before_database_persistence(session_factory):
     from content_jobs import create_job, fail_step, start_step
 

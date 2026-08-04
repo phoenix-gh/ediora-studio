@@ -70,6 +70,30 @@ function boundedError(error: unknown) {
   return message.slice(0, auditErrorLimit)
 }
 
+function mcpErrorMessage(value: unknown) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const result = value as Record<string, unknown>
+  if (result.isError !== true) return undefined
+  const content = Array.isArray(result.content) ? result.content : []
+  const text = content.find(item => (
+    item && typeof item === 'object'
+    && (item as Record<string, unknown>).type === 'text'
+    && typeof (item as Record<string, unknown>).text === 'string'
+  )) as Record<string, unknown> | undefined
+  return boundedError(text?.text ?? 'MCP tool returned an error')
+}
+
+function completedAudit(started: AgentToolAudit, output: unknown): AgentToolAudit {
+  const error = mcpErrorMessage(output)
+  return {
+    ...started,
+    status: error ? 'failed' : 'succeeded',
+    output: boundedAuditValue(output),
+    ...(error ? { error } : {}),
+    occurredAt: new Date().toISOString(),
+  }
+}
+
 export function applyAgentToolPolicy(
   tools: ToolSet,
   { policy, beforeToolExecute, onAudit }: AgentToolPolicyOptions,
@@ -98,12 +122,7 @@ export function applyAgentToolPolicy(
         ? await beforeToolExecute(started)
         : { action: 'execute' as const }
       if (decision.action === 'replay') {
-        await onAudit?.({
-          ...started,
-          status: 'succeeded',
-          output: boundedAuditValue(decision.output),
-          occurredAt: new Date().toISOString(),
-        })
+        await onAudit?.(completedAudit(started, decision.output))
         return decision.output
       }
       if (decision.action === 'uncertain') {
@@ -119,12 +138,7 @@ export function applyAgentToolPolicy(
       await onAudit?.(started)
       try {
         const output = await source.execute!.call(original, input, options)
-        await onAudit?.({
-          ...started,
-          status: 'succeeded',
-          output: boundedAuditValue(output),
-          occurredAt: new Date().toISOString(),
-        })
+        await onAudit?.(completedAudit(started, output))
         return output
       } catch (error) {
         await onAudit?.({
