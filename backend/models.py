@@ -638,7 +638,7 @@ class ContentResponseEvent(Base):
 
 
 class DraftImage(Base):
-    """Images attached to a draft group, keyed by the root (article) draft ID."""
+    """Images attached to one independent draft."""
     __tablename__ = "draft_images"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)

@@ -372,7 +372,7 @@ async def test_x_draft_and_usage_are_persisted_atomically(db):
         reuse_explanation="", account_id="x-a",
     )
 
-    assert draft.draft_type == "x_post"
+    assert draft.draft_type == "x"
     assert draft.content == "真正省下的是等待时间。"
     assert usage.draft_id == draft.id
     assert usage.output_id == draft.id

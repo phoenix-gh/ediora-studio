@@ -271,7 +271,6 @@ class ArticleDraftOut(BaseModel):
     content: str = ""
     status: str = "drafting"
     draft_type: str = "article"
-    linked_draft_id: Optional[int] = None
     series_id: Optional[int] = None
     series_order: int = 0
     writing_plan_id: Optional[int] = None
@@ -289,7 +288,6 @@ class ArticleDraftCreate(BaseModel):
     content: str = ""
     status: str = "drafting"
     draft_type: str = "article"
-    linked_draft_id: Optional[int] = None
     writing_plan_id: Optional[int] = None
     sources: list = []
 
@@ -305,7 +303,6 @@ class ArticleDraftUpdate(BaseModel):
     content: Optional[str] = None
     status: Optional[str] = None
     draft_type: Optional[str] = None
-    linked_draft_id: Optional[int] = None
     series_id: Optional[int] = None
     series_order: Optional[int] = None
     writing_plan_id: Optional[int] = None

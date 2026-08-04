@@ -186,20 +186,19 @@ async def chat_with_draft(draft_id: int, body: DraftChatRequest, db: AsyncSessio
     return DraftChatResponse(reply=reply, updated_content=updated_content, session_name=session_name)
 
 
-async def _resolve_root_id(draft_id: int, db: AsyncSession) -> int:
-    """Return the root draft ID for any draft in a group."""
+async def _require_draft(draft_id: int, db: AsyncSession) -> ArticleDraft:
     obj = await db.get(ArticleDraft, draft_id)
     if not obj:
         raise HTTPException(404, "Draft not found")
-    return obj.linked_draft_id if obj.linked_draft_id else obj.id
+    return obj
 
 
 @router.get("/drafts/{draft_id}/images")
 async def list_draft_images(draft_id: int, db: AsyncSession = Depends(get_db)):
-    root_id = await _resolve_root_id(draft_id, db)
+    await _require_draft(draft_id, db)
     rows = (await db.execute(
         select(DraftImage)
-        .where(DraftImage.root_draft_id == root_id)
+        .where(DraftImage.draft_id == draft_id)
         .order_by(desc(DraftImage.created_at))
     )).scalars().all()
     return [
@@ -223,7 +222,7 @@ async def upload_draft_image(
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
 ):
-    root_id = await _resolve_root_id(draft_id, db)
+    await _require_draft(draft_id, db)
 
     ct = file.content_type or "image/jpeg"
     if ct not in _ALLOWED_MIME:
@@ -243,7 +242,7 @@ async def upload_draft_image(
 
     url = f"/api/uploads/{filename}"
     img = DraftImage(
-        root_draft_id=root_id,
+        draft_id=draft_id,
         filename=filename,
         original_name=file.filename or "",
         url=url,
@@ -268,9 +267,9 @@ async def upload_draft_image(
 
 @router.delete("/drafts/{draft_id}/images/{image_id}", status_code=204)
 async def delete_draft_image(draft_id: int, image_id: int, db: AsyncSession = Depends(get_db)):
-    root_id = await _resolve_root_id(draft_id, db)
+    await _require_draft(draft_id, db)
     img = await db.get(DraftImage, image_id)
-    if not img or img.root_draft_id != root_id:
+    if not img or img.draft_id != draft_id:
         raise HTTPException(404, "Image not found")
     # Remove file from disk
     filepath = os.path.join(_UPLOADS_DIR, img.filename)
@@ -325,9 +324,8 @@ async def publish_draft_to_wechat(
     if not account.app_id or not account.app_secret:
         raise HTTPException(400, "该账号未配置 AppID/AppSecret，请到设置页补全")
 
-    root_id = await _resolve_root_id(draft_id, db)
     cover = await db.get(DraftImage, body.cover_image_id)
-    if not cover or cover.root_draft_id != root_id:
+    if not cover or cover.draft_id != draft_id:
         raise HTTPException(404, "封面图不存在")
     cover_path = os.path.join(_UPLOADS_DIR, cover.filename)
     if not os.path.isfile(cover_path):
@@ -420,9 +418,8 @@ async def publish_draft_to_blog(
 
     # 封面图：从素材库选的图片转 base64 随稿上传
     if body.cover_image_id is not None:
-        root_id = await _resolve_root_id(draft_id, db)
         cover_img = await db.get(DraftImage, body.cover_image_id)
-        if not cover_img or cover_img.root_draft_id != root_id:
+        if not cover_img or cover_img.draft_id != draft_id:
             raise HTTPException(404, "封面图不存在")
         cover_data, cover_mime = await _load_image_bytes(cover_img.url)
         payload["coverImage"] = {
@@ -455,11 +452,9 @@ async def delete_draft(draft_id: int, db: AsyncSession = Depends(get_db)):
     obj = await db.get(ArticleDraft, draft_id)
     if not obj:
         raise HTTPException(404, "Draft not found")
-    # Clean up images keyed on this draft. `root_draft_id == draft_id` only
-    # matches when this is the group root, so deleting a child (thread)
-    # draft leaves the root's images intact.
+    # Images belong to exactly one independent draft.
     images = (await db.execute(
-        select(DraftImage).where(DraftImage.root_draft_id == draft_id)
+        select(DraftImage).where(DraftImage.draft_id == draft_id)
     )).scalars().all()
     for img in images:
         path = os.path.join(_UPLOADS_DIR, img.filename)

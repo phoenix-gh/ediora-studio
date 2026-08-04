@@ -61,9 +61,8 @@ async def _register_draft_image(
         draft = await db.get(ArticleDraft, draft_id)
         if draft is None:
             raise ValueError(f"Draft {draft_id} not found")
-        root_id = draft.linked_draft_id if draft.linked_draft_id else draft.id
         img = DraftImage(
-            root_draft_id=root_id,
+            draft_id=draft_id,
             filename=filename,
             original_name=original_name,
             url=url,

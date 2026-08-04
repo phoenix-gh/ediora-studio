@@ -20,6 +20,7 @@ def client(monkeypatch, tmp_path):
     from database import Base, SessionLocal, engine, get_db
     import models
     import routers.drafts as drafts_module
+    monkeypatch.setattr(drafts_module, "_UPLOADS_DIR", str(tmp_path / "uploads"))
 
     async def setup():
         async with engine.begin() as connection:
@@ -51,6 +52,36 @@ def _run(coro):
     return asyncio.new_event_loop().run_until_complete(coro)
 
 
+def test_draft_images_belong_only_to_the_selected_draft(client):
+    article = client.post(
+        "/api/write/drafts",
+        json={"topic_id": "article", "title": "文章", "draft_type": "article"},
+    )
+    x_draft = client.post(
+        "/api/write/drafts",
+        json={"topic_id": "x", "title": "短帖", "draft_type": "x"},
+    )
+
+    assert article.status_code == 201
+    assert x_draft.status_code == 201
+    assert "linked_draft_id" not in article.json()
+    assert "linked_draft_id" not in x_draft.json()
+
+    upload = client.post(
+        f"/api/write/drafts/{x_draft.json()['id']}/images",
+        files={"file": ("card.png", b"\x89PNG\r\n\x1a\n", "image/png")},
+    )
+
+    assert upload.status_code == 201
+    assert client.get(
+        f"/api/write/drafts/{article.json()['id']}/images"
+    ).json() == []
+    x_images = client.get(
+        f"/api/write/drafts/{x_draft.json()['id']}/images"
+    ).json()
+    assert [image["id"] for image in x_images] == [upload.json()["id"]]
+
+
 def test_delete_daily_creation_draft_releases_only_its_draft_usage(client):
     from models import (
         ArticleDraft,
@@ -65,7 +96,7 @@ def test_delete_daily_creation_draft_releases_only_its_draft_usage(client):
                 topic_id="daily-creation:1",
                 title="待删除短帖",
                 content="短帖正文",
-                draft_type="x_post",
+                draft_type="x",
             )
             run = DailyCreationRun(
                 rule_id=11,
@@ -151,7 +182,7 @@ def test_delete_normal_draft_preserves_unrelated_daily_creation_usage(client):
             generated_draft = ArticleDraft(
                 topic_id="daily-creation:2",
                 title="另一条任务草稿",
-                draft_type="x_post",
+                draft_type="x",
             )
             session.add_all([normal_draft, generated_draft])
             await session.flush()

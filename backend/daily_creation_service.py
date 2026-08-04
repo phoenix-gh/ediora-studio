@@ -643,7 +643,7 @@ async def persist_x_draft_with_usage(
             title=title.strip(),
             content=text.strip(),
             status="drafting",
-            draft_type="x_post",
+            draft_type="x",
             sources=[{"asset_id": asset.id, "url": asset.url or ""}],
         )
         session.add(draft)
