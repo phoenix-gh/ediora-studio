@@ -75,10 +75,12 @@ export function BulkImageActionDialog({
   useEffect(() => {
     if (!open) return
     let cancelled = false
-    setLoadError('')
     listPublishAccounts()
       .then(list => {
-        if (!cancelled) setAccounts(list.filter(account => account.is_active))
+        if (!cancelled) {
+          setAccounts(list.filter(account => account.is_active))
+          setLoadError('')
+        }
       })
       .catch(() => {
         if (!cancelled) {

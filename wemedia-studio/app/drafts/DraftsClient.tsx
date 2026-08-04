@@ -33,6 +33,7 @@ import {
 } from './BulkImageActionDialog'
 import {
   articleDraftForGroup,
+  deleteDraftGroup,
   runBulkOperations,
   type DraftGroup,
 } from './draft-bulk-operations'
@@ -54,6 +55,15 @@ function buildGroups(drafts: Draft[]): DraftGroup[] {
     }
   })
   return groups
+}
+
+function groupMatchesFilters(group: DraftGroup, status: string, topicId: string) {
+  if (status !== 'all' && group.root.status !== status) return false
+  if (topicId !== 'all') {
+    const expectedTopicId = topicId === 'none' ? null : Number(topicId)
+    if (group.root.writing_plan_id !== expectedTopicId) return false
+  }
+  return true
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
@@ -305,29 +315,35 @@ export function DraftsClient({
 
   // ── Filtering ──────────────────────────────────────────────────────────────
 
-  const filteredGroups = useMemo(() => groups.filter(g => {
-    const root = g.root
-    if (filterStatus !== 'all' && root.status !== filterStatus) return false
-    if (filterTopicId !== 'all') {
-      const tid = filterTopicId === 'none' ? null : Number(filterTopicId)
-      if (root.writing_plan_id !== tid) return false
-    }
-    return true
-  }), [filterStatus, filterTopicId, groups])
+  const filteredGroups = useMemo(
+    () => groups.filter(group => groupMatchesFilters(group, filterStatus, filterTopicId)),
+    [filterStatus, filterTopicId, groups],
+  )
   const visibleGroupIds = useMemo(
     () => new Set(filteredGroups.map(group => group.root.id)),
     [filteredGroups],
   )
 
-  useEffect(() => {
-    setSelectedGroupIds(current => {
-      const next = new Set([...current].filter(id => visibleGroupIds.has(id)))
-      if (next.size === current.size && [...next].every(id => current.has(id))) return current
-      return next
-    })
-  }, [visibleGroupIds])
-
   // ── Handlers ───────────────────────────────────────────────────────────────
+
+  function applyFilters(nextStatus: string, nextTopicId: string) {
+    const nextVisibleIds = new Set(
+      groups
+        .filter(group => groupMatchesFilters(group, nextStatus, nextTopicId))
+        .map(group => group.root.id),
+    )
+    setSelectedGroupIds(current => new Set([...current].filter(id => nextVisibleIds.has(id))))
+  }
+
+  function changeStatusFilter(nextStatus: string) {
+    setFilterStatus(nextStatus)
+    applyFilters(nextStatus, filterTopicId)
+  }
+
+  function changeTopicFilter(nextTopicId: string) {
+    setFilterTopicId(nextTopicId)
+    applyFilters(filterStatus, nextTopicId)
+  }
 
   function activateDraft(next: Draft | null) {
     const outgoingDraftId = selectedDraftIdRef.current
@@ -438,6 +454,56 @@ export function DraftsClient({
         toast.success(message)
         setBulkMode(null)
       }
+    } finally {
+      setBulkRunning(false)
+    }
+  }
+
+  function handleBulkDelete() {
+    const count = selectedGroupIds.size
+    if (count === 0 || bulkRunning) return
+    openConfirm({
+      title: '批量删除',
+      description: `确定删除已选 ${count} 组草稿及其平台版本？此操作不可恢复。`,
+      confirmLabel: '确认删除',
+      danger: true,
+      onConfirm: () => { void doBulkDelete() },
+    })
+  }
+
+  async function doBulkDelete() {
+    if (bulkRunning) return
+    const selectedGroups = filteredGroups.filter(group => selectedGroupIds.has(group.root.id))
+    setBulkRunning(true)
+    setBulkProgress({ completed: 0, total: selectedGroups.length })
+    try {
+      const results = await runBulkOperations(
+        selectedGroups,
+        group => deleteDraftGroup(group, deleteDraft),
+        (completed, total) => setBulkProgress({ completed, total }),
+        3,
+      )
+      const fresh = await getDrafts()
+      const freshGroups = buildGroups(fresh)
+      const freshGroupIds = new Set(freshGroups.map(group => group.root.id))
+      const rejectedIds = new Set(
+        results.filter(result => result.status === 'rejected').map(result => result.groupId),
+      )
+      setDrafts(fresh)
+      setSelectedGroupIds(new Set([...rejectedIds].filter(id => freshGroupIds.has(id))))
+
+      const activeId = selectedDraftIdRef.current
+      const refreshedActive = activeId === null ? null : fresh.find(draft => draft.id === activeId) ?? null
+      if (refreshedActive) setSelected(refreshedActive)
+      else activateDraft(freshGroups[0]?.root ?? null)
+
+      const succeeded = results.filter(result => result.status === 'fulfilled').length
+      const failed = results.length - succeeded
+      const message = `批量删除完成：成功 ${succeeded}，失败 ${failed}`
+      if (failed > 0) toast.error(message)
+      else toast.success(message)
+    } catch {
+      toast.error('批量删除后刷新失败')
     } finally {
       setBulkRunning(false)
     }
@@ -749,7 +815,7 @@ export function DraftsClient({
           <select
             aria-label="按主题筛选"
             value={filterTopicId}
-            onChange={e => setFilterTopicId(e.target.value)}
+            onChange={e => changeTopicFilter(e.target.value)}
             className="flex-1 text-xs px-2 py-1.5 border border-zinc-200 dark:border-zinc-700 rounded-md bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 outline-none focus:border-indigo-400 cursor-pointer min-w-0 truncate"
           >
             <option value="all">全部主题</option>
@@ -761,7 +827,7 @@ export function DraftsClient({
           <select
             aria-label="按状态筛选"
             value={filterStatus}
-            onChange={e => setFilterStatus(e.target.value)}
+            onChange={e => changeStatusFilter(e.target.value)}
             className="text-xs px-2 py-1.5 border border-zinc-200 dark:border-zinc-700 rounded-md bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 outline-none focus:border-indigo-400 cursor-pointer"
           >
             <option value="all">全部状态</option>
@@ -797,6 +863,14 @@ export function DraftsClient({
             {selectedGroupIds.size > 0 ? (
               <div className="flex gap-1">
                 <Button
+                  variant="destructive"
+                  size="xs"
+                  onClick={handleBulkDelete}
+                  disabled={bulkRunning}
+                >
+                  批量删除
+                </Button>
+                <Button
                   variant="outline"
                   size="xs"
                   onClick={() => openBulkImageDialog('cover')}
@@ -812,6 +886,11 @@ export function DraftsClient({
                 >
                   批量插图
                 </Button>
+                {bulkRunning && bulkMode === null ? (
+                  <span className="ml-auto text-xs text-muted-foreground">
+                    {bulkProgress.completed} / {bulkProgress.total}
+                  </span>
+                ) : null}
               </div>
             ) : null}
           </div>
@@ -850,6 +929,7 @@ export function DraftsClient({
                       checked={selectedGroupIds.has(group.root.id)}
                       onCheckedChange={() => toggleGroupSelection(group.root.id)}
                       aria-label={`选择${group.root.title || '（无标题）'}`}
+                      disabled={bulkRunning}
                     />
                   </div>
                   <button

@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   updateDraft: vi.fn(),
   getDrafts: vi.fn(),
   getDraftImages: vi.fn(),
+  deleteDraft: vi.fn(),
   getWritingPlans: vi.fn(),
   regenerateCover: vi.fn(),
   illustrateBody: vi.fn(),
@@ -38,6 +39,7 @@ vi.mock('@/lib/api/drafts', async importOriginal => {
     updateDraft: mocks.updateDraft,
     getDrafts: mocks.getDrafts,
     getDraftImages: mocks.getDraftImages,
+    deleteDraft: mocks.deleteDraft,
   }
 })
 
@@ -158,6 +160,7 @@ beforeEach(() => {
   mocks.getDrafts.mockResolvedValue([draftA, draftB])
   mocks.getDraftImages.mockResolvedValue([])
   mocks.getWritingPlans.mockResolvedValue([])
+  mocks.deleteDraft.mockResolvedValue(undefined)
   mocks.listPublishAccounts.mockResolvedValue([publishAccount])
   mocks.regenerateCover.mockResolvedValue({ task_id: 'cover-task' })
   mocks.illustrateBody.mockResolvedValue({ task_id: 'illustration-task' })
@@ -428,5 +431,70 @@ describe('DraftsClient bulk image dispatch', () => {
     expect(within(dialog).getByText(/缺少文章主版本/)).toBeInTheDocument()
     expect(screen.getByText('已选 1 组')).toBeInTheDocument()
     expect(mocks.toastError).toHaveBeenCalledWith('批量任务已提交：成功 1，失败 1')
+  })
+})
+
+describe('DraftsClient bulk group deletion', () => {
+  it('deletes each group variants-first and refreshes once after all selected groups settle', async () => {
+    const user = userEvent.setup()
+    const xVariant = {
+      ...makeDraft(2, 'X 版本', 'X 正文', 1),
+      draft_type: 'x',
+      linked_draft_id: 1,
+    }
+    const mpVariant = {
+      ...makeDraft(3, '公众号版本', '公众号正文', 1),
+      draft_type: 'mp',
+      linked_draft_id: 1,
+    }
+    const articleB = makeDraft(4, '文章 B', 'B 正文', 1)
+    mocks.getDrafts.mockResolvedValue([])
+    render(
+      <DraftsClient
+        initialDrafts={[draftA, xVariant, mpVariant, articleB]}
+        initialTopics={[]}
+        initialDraftId={draftA.id}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: '全选当前结果' }))
+    await user.click(screen.getByRole('button', { name: '批量删除' }))
+    expect(screen.getByText(/已选 2 组草稿及其平台版本/)).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '确认删除' }))
+
+    await waitFor(() => expect(mocks.deleteDraft).toHaveBeenCalledTimes(4))
+    const calls = mocks.deleteDraft.mock.calls.map(([id]) => id)
+    expect(calls.indexOf(2)).toBeLessThan(calls.indexOf(3))
+    expect(calls.indexOf(3)).toBeLessThan(calls.indexOf(1))
+    expect(calls).toEqual(expect.arrayContaining([1, 2, 3, 4]))
+    expect(mocks.getDrafts).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(screen.getByText('选择一篇草稿开始编辑')).toBeInTheDocument())
+    expect(mocks.toastSuccess).toHaveBeenCalledWith('批量删除完成：成功 2，失败 0')
+  })
+
+  it('reconciles the editor to server truth and retains a surviving failed group', async () => {
+    const user = userEvent.setup()
+    mocks.deleteDraft.mockImplementation(async (id: number) => {
+      if (id === draftB.id) throw new Error('删除被拒绝')
+    })
+    mocks.getDrafts.mockResolvedValue([draftB])
+    render(
+      <DraftsClient
+        initialDrafts={[draftA, draftB]}
+        initialTopics={[]}
+        initialDraftId={draftA.id}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: '全选当前结果' }))
+    await user.click(screen.getByRole('button', { name: '批量删除' }))
+    await user.click(screen.getByRole('button', { name: '确认删除' }))
+
+    await waitFor(() => expect(mocks.getDrafts).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(screen.getByPlaceholderText('标题…')).toHaveValue('草稿 B'))
+    expect(screen.queryByText('草稿 A')).not.toBeInTheDocument()
+    expect(screen.getByText('已选 1 组')).toBeInTheDocument()
+    expect(screen.getByRole('checkbox', { name: '选择草稿 B' })).toBeChecked()
+    expect(mocks.toastError).toHaveBeenCalledWith('批量删除完成：成功 1，失败 1')
   })
 })
