@@ -163,6 +163,81 @@ async def migrate_removed_publication_schema(conn) -> None:
     await conn.execute(text("DROP TABLE IF EXISTS publications"))
 
 
+async def migrate_removed_draft_adaptation_schema(conn) -> None:
+    """Delete retired child adaptations and flatten draft ownership."""
+    from sqlalchemy import inspect, text
+
+    tables = set(await conn.run_sync(
+        lambda sync_connection: inspect(sync_connection).get_table_names()
+    ))
+    if "article_drafts" in tables:
+        columns = {
+            column["name"]
+            for column in await conn.run_sync(
+                lambda sync_connection: inspect(sync_connection)
+                .get_columns("article_drafts")
+            )
+        }
+        if "linked_draft_id" in columns:
+            child_ids = (
+                "SELECT id FROM article_drafts "
+                "WHERE linked_draft_id IS NOT NULL"
+            )
+            if "draft_chat_logs" in tables:
+                await conn.execute(text(
+                    f"DELETE FROM draft_chat_logs WHERE draft_id IN ({child_ids})"
+                ))
+            if "content_usage_ledger" in tables:
+                await conn.execute(text(
+                    "DELETE FROM content_usage_ledger "
+                    "WHERE output_kind = 'draft' "
+                    f"AND draft_id IN ({child_ids})"
+                ))
+            await conn.execute(text(
+                "DELETE FROM article_drafts WHERE linked_draft_id IS NOT NULL"
+            ))
+        await conn.execute(text(
+            "UPDATE article_drafts SET draft_type = 'x' "
+            "WHERE draft_type = 'x_post'"
+        ))
+        if "linked_draft_id" in columns:
+            drop_if_exists = (
+                " IF EXISTS" if conn.dialect.name == "postgresql" else ""
+            )
+            await conn.execute(text(
+                "ALTER TABLE article_drafts "
+                f"DROP COLUMN{drop_if_exists} linked_draft_id"
+            ))
+
+    if "draft_images" not in tables:
+        return
+    image_columns = {
+        column["name"]
+        for column in await conn.run_sync(
+            lambda sync_connection: inspect(sync_connection)
+            .get_columns("draft_images")
+        )
+    }
+    if "root_draft_id" in image_columns and "draft_id" not in image_columns:
+        await conn.execute(text(
+            "ALTER TABLE draft_images "
+            "RENAME COLUMN root_draft_id TO draft_id"
+        ))
+        if conn.dialect.name == "postgresql":
+            await conn.execute(text(
+                "ALTER INDEX IF EXISTS ix_draft_images_root_draft_id "
+                "RENAME TO ix_draft_images_draft_id"
+            ))
+        else:
+            await conn.execute(text(
+                "DROP INDEX IF EXISTS ix_draft_images_root_draft_id"
+            ))
+            await conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_draft_images_draft_id "
+                "ON draft_images (draft_id)"
+            ))
+
+
 async def migrate_content_job_idempotency_schema(conn) -> None:
     """Make every non-empty durable-job key unique without losing history."""
     from sqlalchemy import inspect, text
@@ -784,6 +859,7 @@ async def init_db():
 
         await migrate_removed_hot_topic_schema(conn)
         await migrate_removed_publication_schema(conn)
+        await migrate_removed_draft_adaptation_schema(conn)
         # Existing databases may contain duplicate keys, so repair them before
         # metadata.create_all attempts to create the unique partial index.
         await migrate_content_job_idempotency_schema(conn)

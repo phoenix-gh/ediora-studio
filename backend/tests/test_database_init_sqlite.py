@@ -112,6 +112,9 @@ def test_init_db_twice_creates_fresh_sqlite_core_and_text_video_tables(
             "origin",
             "creation_run_id",
         } <= _columns(connection, "daily_plan_items")
+        assert "linked_draft_id" not in _columns(connection, "article_drafts")
+        assert "draft_id" in _columns(connection, "draft_images")
+        assert "root_draft_id" not in _columns(connection, "draft_images")
 
 
 def test_init_db_migrates_legacy_sqlite_columns_and_drops_ref_tables(

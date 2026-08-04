@@ -358,7 +358,6 @@ class ArticleDraft(Base):
     content: Mapped[str] = mapped_column(Text, default="")
     status: Mapped[str] = mapped_column(String, default="drafting", index=True)
     draft_type: Mapped[str] = mapped_column(String, default="article")  # article | script
-    linked_draft_id: Mapped[int | None] = mapped_column(Integer, nullable=True)  # sibling draft of different type
     series_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     series_order: Mapped[int] = mapped_column(Integer, default=0)
     version: Mapped[int] = mapped_column(Integer, default=1)
@@ -643,7 +642,7 @@ class DraftImage(Base):
     __tablename__ = "draft_images"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    root_draft_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    draft_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     filename: Mapped[str] = mapped_column(String, nullable=False)        # stored filename in uploads/
     original_name: Mapped[str] = mapped_column(String, default="")
     url: Mapped[str] = mapped_column(String, nullable=False)             # /api/uploads/{filename}
