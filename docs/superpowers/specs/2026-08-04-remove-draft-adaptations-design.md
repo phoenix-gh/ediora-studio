@@ -31,13 +31,14 @@ The migration runs in this order:
 
 1. Delete all rows in `article_drafts` whose `linked_draft_id` is not null.
 2. Normalize independent draft rows from `draft_type = 'x_post'` to `draft_type = 'x'`.
-3. Drop the `linked_draft_id` column.
+3. Rename `draft_images.root_draft_id` to `draft_images.draft_id`; existing images remain attached to the former root draft.
+4. Drop the `linked_draft_id` column.
 
 The migration must be idempotent under the repository's existing startup migration model. It must work for both PostgreSQL and SQLite where the project supports them. It must not delete parent drafts or unrelated independent drafts.
 
 ## Backend Contract
 
-`ArticleDraft`, `ArticleDraftOut`, `ArticleDraftCreate`, and `ArticleDraftUpdate` no longer expose `linked_draft_id`. Draft image lookup, upload, and publishing operate on the requested draft ID directly.
+`ArticleDraft`, `ArticleDraftOut`, `ArticleDraftCreate`, and `ArticleDraftUpdate` no longer expose `linked_draft_id`. `DraftImage` stores `draft_id` instead of `root_draft_id`. Draft image lookup, upload, and publishing operate on the requested draft ID directly.
 
 MCP and router helpers must stop resolving a “root” draft. Any code that needs images or content uses the explicit draft ID supplied by the caller.
 
@@ -78,7 +79,7 @@ Bulk selection is per visible draft, not per group. “全选当前结果” sel
 
 ### Backend
 
-- PostgreSQL/SQLite migration coverage proves adapted children are removed, parents survive, `x_post` becomes `x`, and `linked_draft_id` no longer exists.
+- PostgreSQL/SQLite migration coverage proves adapted children are removed, parents survive, `x_post` becomes `x`, `root_draft_id` becomes `draft_id`, and `linked_draft_id` no longer exists.
 - Draft router contract tests prove create/update/read responses no longer depend on the removed field.
 - Daily creation tests expect canonical `draft_type = 'x'`.
 - Image route and MCP tests use the explicit draft ID.
