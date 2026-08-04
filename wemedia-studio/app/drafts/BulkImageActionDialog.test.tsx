@@ -77,6 +77,8 @@ describe('BulkImageActionDialog', () => {
       />,
     )
 
+    expect(screen.getByText('为已选 2 篇草稿统一设置参数。')).toBeInTheDocument()
+    expect(screen.queryByText(/文章主版本/)).not.toBeInTheDocument()
     expect(await screen.findByLabelText('发布账号')).toHaveTextContent('（选择账号）')
     await selectActiveAccount(user)
     expect(screen.queryByText('停用账号')).not.toBeInTheDocument()
@@ -136,7 +138,7 @@ describe('BulkImageActionDialog', () => {
         selectedCount={12}
         running
         progress={{ completed: 3, total: 12 }}
-        failures={[{ title: '失败草稿', reason: '缺少文章主版本' }]}
+        failures={[{ title: '失败草稿', reason: '任务提交失败' }]}
         onClose={onClose}
         onSubmit={onSubmit}
       />,
@@ -144,7 +146,7 @@ describe('BulkImageActionDialog', () => {
 
     expect(screen.getByText('3 / 12')).toBeInTheDocument()
     expect(screen.getByText('失败草稿')).toBeInTheDocument()
-    expect(screen.getByText(/缺少文章主版本/)).toBeInTheDocument()
+    expect(screen.getByText(/任务提交失败/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '开始批量封面' })).toBeDisabled()
     expect(screen.queryByRole('button', { name: 'Close' })).not.toBeInTheDocument()
 

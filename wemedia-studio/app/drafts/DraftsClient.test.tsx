@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import React from 'react'
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -107,7 +107,6 @@ function makeDraft(id: number, title: string, content: string, version: number):
     content,
     status: 'drafting',
     draft_type: 'article',
-    linked_draft_id: null,
     series_id: null,
     series_order: 0,
     version,
@@ -274,7 +273,6 @@ describe('DraftsClient async response identity', () => {
     expect(mocks.getDraftImages).toHaveBeenNthCalledWith(2, draftA.id)
     expect(await screen.findByRole('button', { name: /素材\s*1/ })).toBeTruthy()
 
-    fireEvent.click(screen.getByRole('button', { name: /文章\s*主版本/ }))
     expect((screen.getByPlaceholderText('标题…') as HTMLInputElement).value).toBe('草稿 A 已保存')
     expect((screen.getByLabelText('草稿正文') as HTMLTextAreaElement).value).toBe('A 服务端正文')
   })
@@ -316,8 +314,24 @@ describe('DraftsClient async response identity', () => {
   })
 })
 
-describe('DraftsClient visible group selection', () => {
-  it('selects a group without changing the active editor draft', () => {
+describe('DraftsClient independent draft selection', () => {
+  it('renders every draft independently without adaptation controls', () => {
+    const xDraft = { ...draftB, title: 'X 草稿', draft_type: 'x' }
+    render(
+      <DraftsClient
+        initialDrafts={[draftA, xDraft]}
+        initialTopics={[]}
+        initialDraftId={draftA.id}
+      />,
+    )
+
+    expect(screen.queryByText('适配平台')).not.toBeInTheDocument()
+    expect(screen.queryByText(/同步主版本内容/)).not.toBeInTheDocument()
+    expect(screen.getByRole('checkbox', { name: '选择草稿 A' })).toBeVisible()
+    expect(screen.getByRole('checkbox', { name: '选择X 草稿' })).toBeVisible()
+  })
+
+  it('selects a draft without changing the active editor draft', () => {
     render(
       <DraftsClient
         initialDrafts={[draftA, draftB]}
@@ -328,11 +342,11 @@ describe('DraftsClient visible group selection', () => {
 
     fireEvent.click(screen.getByRole('checkbox', { name: '选择草稿 B' }))
 
-    expect(screen.getByText('已选 1 组')).toBeInTheDocument()
+    expect(screen.getByText('已选 1 篇')).toBeInTheDocument()
     expect(screen.getByPlaceholderText('标题…')).toHaveValue('草稿 A')
   })
 
-  it('selects all current results and removes hidden groups when the status filter changes', async () => {
+  it('selects all current results and removes hidden drafts when the status filter changes', async () => {
     const readyDraftB = { ...draftB, status: 'ready' }
     render(
       <DraftsClient
@@ -343,35 +357,33 @@ describe('DraftsClient visible group selection', () => {
     )
 
     fireEvent.click(screen.getByRole('button', { name: '全选当前结果' }))
-    expect(screen.getByText('已选 2 组')).toBeInTheDocument()
+    expect(screen.getByText('已选 2 篇')).toBeInTheDocument()
 
     fireEvent.change(screen.getByLabelText('按状态筛选'), { target: { value: 'ready' } })
 
-    await waitFor(() => expect(screen.getByText('已选 1 组')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('已选 1 篇')).toBeInTheDocument())
     expect(screen.getByRole('checkbox', { name: '选择草稿 B' })).toBeChecked()
     expect(screen.queryByRole('checkbox', { name: '选择草稿 A' })).not.toBeInTheDocument()
   })
 })
 
 describe('DraftsClient bulk image dispatch', () => {
-  it('submits one shared cover request for each selected article draft', async () => {
+  it('submits one shared cover request for every selected draft', async () => {
     const user = userEvent.setup()
-    const xVariant = {
+    const xDraft = {
       ...makeDraft(2, 'X 版本', 'X 正文', 1),
       draft_type: 'x',
-      linked_draft_id: 1,
     }
-    const articleB = makeDraft(4, '文章 B', 'B 正文', 1)
     render(
       <DraftsClient
-        initialDrafts={[draftA, xVariant, articleB]}
+        initialDrafts={[draftA, xDraft]}
         initialTopics={[]}
         initialDraftId={draftA.id}
       />,
     )
 
     await user.click(screen.getByRole('checkbox', { name: '选择草稿 A' }))
-    await user.click(screen.getByRole('checkbox', { name: '选择文章 B' }))
+    await user.click(screen.getByRole('checkbox', { name: '选择X 版本' }))
     await user.click(screen.getByRole('button', { name: '批量封面' }))
 
     await user.click(await screen.findByLabelText('发布账号'))
@@ -387,25 +399,24 @@ describe('DraftsClient bulk image dispatch', () => {
       cover_style: { palette: 'cool' },
     })
     expect(mocks.regenerateCover).toHaveBeenNthCalledWith(2, {
-      draft_id: 4,
+      draft_id: 2,
       account_id: 'account-a',
       note: '冷色调',
       cover_style: { palette: 'cool' },
     })
-    await waitFor(() => expect(screen.getByText('已选 0 组')).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByText('已选 0 篇')).toBeInTheDocument())
     expect(mocks.toastSuccess).toHaveBeenCalledWith('批量任务已提交：成功 2，失败 0')
   })
 
-  it('keeps an orphan group selected and reports it without sending an illustration request', async () => {
+  it('submits illustration requests directly for article and X drafts', async () => {
     const user = userEvent.setup()
-    const orphan = {
+    const xDraft = {
       ...makeDraft(3, '孤立 X 稿', 'X 正文', 1),
       draft_type: 'x',
-      linked_draft_id: 99,
     }
     render(
       <DraftsClient
-        initialDrafts={[draftA, orphan]}
+        initialDrafts={[draftA, xDraft]}
         initialTopics={[]}
         initialDraftId={draftA.id}
       />,
@@ -419,39 +430,40 @@ describe('DraftsClient bulk image dispatch', () => {
     await user.type(screen.getByLabelText('额外指令'), '解释结构')
     await user.click(screen.getByRole('button', { name: '开始批量插图' }))
 
-    await waitFor(() => expect(mocks.illustrateBody).toHaveBeenCalledTimes(1))
-    expect(mocks.illustrateBody).toHaveBeenCalledWith({
+    await waitFor(() => expect(mocks.illustrateBody).toHaveBeenCalledTimes(2))
+    expect(mocks.illustrateBody).toHaveBeenNthCalledWith(1, {
       draft_id: 1,
       account_id: 'account-a',
       note: '解释结构',
       max_images: 3,
     })
-    const dialog = await screen.findByRole('dialog')
-    expect(within(dialog).getByText(/孤立 X 稿/)).toBeInTheDocument()
-    expect(within(dialog).getByText(/缺少文章主版本/)).toBeInTheDocument()
-    expect(screen.getByText('已选 1 组')).toBeInTheDocument()
-    expect(mocks.toastError).toHaveBeenCalledWith('批量任务已提交：成功 1，失败 1')
+    expect(mocks.illustrateBody).toHaveBeenNthCalledWith(2, {
+      draft_id: 3,
+      account_id: 'account-a',
+      note: '解释结构',
+      max_images: 3,
+    })
+    await waitFor(() => expect(screen.getByText('已选 0 篇')).toBeInTheDocument())
+    expect(mocks.toastSuccess).toHaveBeenCalledWith('批量任务已提交：成功 2，失败 0')
   })
 })
 
-describe('DraftsClient bulk group deletion', () => {
-  it('deletes each group variants-first and refreshes once after all selected groups settle', async () => {
+describe('DraftsClient bulk draft deletion', () => {
+  it('deletes every selected draft once and refreshes once after all settle', async () => {
     const user = userEvent.setup()
-    const xVariant = {
+    const xDraft = {
       ...makeDraft(2, 'X 版本', 'X 正文', 1),
       draft_type: 'x',
-      linked_draft_id: 1,
     }
-    const mpVariant = {
+    const mpDraft = {
       ...makeDraft(3, '公众号版本', '公众号正文', 1),
       draft_type: 'mp',
-      linked_draft_id: 1,
     }
     const articleB = makeDraft(4, '文章 B', 'B 正文', 1)
     mocks.getDrafts.mockResolvedValue([])
     render(
       <DraftsClient
-        initialDrafts={[draftA, xVariant, mpVariant, articleB]}
+        initialDrafts={[draftA, xDraft, mpDraft, articleB]}
         initialTopics={[]}
         initialDraftId={draftA.id}
       />,
@@ -459,20 +471,18 @@ describe('DraftsClient bulk group deletion', () => {
 
     await user.click(screen.getByRole('button', { name: '全选当前结果' }))
     await user.click(screen.getByRole('button', { name: '批量删除' }))
-    expect(screen.getByText(/已选 2 组草稿及其平台版本/)).toBeInTheDocument()
+    expect(screen.getByText(/已选 4 篇草稿/)).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: '确认删除' }))
 
     await waitFor(() => expect(mocks.deleteDraft).toHaveBeenCalledTimes(4))
     const calls = mocks.deleteDraft.mock.calls.map(([id]) => id)
-    expect(calls.indexOf(2)).toBeLessThan(calls.indexOf(3))
-    expect(calls.indexOf(3)).toBeLessThan(calls.indexOf(1))
-    expect(calls).toEqual(expect.arrayContaining([1, 2, 3, 4]))
+    expect(calls.sort((a, b) => a - b)).toEqual([1, 2, 3, 4])
     expect(mocks.getDrafts).toHaveBeenCalledTimes(1)
     await waitFor(() => expect(screen.getByText('选择一篇草稿开始编辑')).toBeInTheDocument())
-    expect(mocks.toastSuccess).toHaveBeenCalledWith('批量删除完成：成功 2，失败 0')
+    expect(mocks.toastSuccess).toHaveBeenCalledWith('批量删除完成：成功 4，失败 0')
   })
 
-  it('reconciles the editor to server truth and retains a surviving failed group', async () => {
+  it('reconciles the editor to server truth and retains a surviving failed draft', async () => {
     const user = userEvent.setup()
     mocks.deleteDraft.mockImplementation(async (id: number) => {
       if (id === draftB.id) throw new Error('删除被拒绝')
@@ -493,7 +503,7 @@ describe('DraftsClient bulk group deletion', () => {
     await waitFor(() => expect(mocks.getDrafts).toHaveBeenCalledTimes(1))
     await waitFor(() => expect(screen.getByPlaceholderText('标题…')).toHaveValue('草稿 B'))
     expect(screen.queryByText('草稿 A')).not.toBeInTheDocument()
-    expect(screen.getByText('已选 1 组')).toBeInTheDocument()
+    expect(screen.getByText('已选 1 篇')).toBeInTheDocument()
     expect(screen.getByRole('checkbox', { name: '选择草稿 B' })).toBeChecked()
     expect(mocks.toastError).toHaveBeenCalledWith('批量删除完成：成功 1，失败 1')
   })

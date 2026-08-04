@@ -149,7 +149,7 @@ export function BulkImageActionDialog({
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>
-            为已选 {selectedCount} 组草稿统一设置参数；任务只派发给文章主版本。
+            为已选 {selectedCount} 篇草稿统一设置参数。
           </DialogDescription>
         </DialogHeader>
 
@@ -253,7 +253,7 @@ export function BulkImageActionDialog({
 
         {failures.length > 0 ? (
           <Alert variant="destructive">
-            <AlertTitle>未完成 {failures.length} 组</AlertTitle>
+            <AlertTitle>未完成 {failures.length} 篇</AlertTitle>
             <AlertDescription>
               <ul className="flex list-disc flex-col gap-1 pl-4">
                 {failures.map(failure => (

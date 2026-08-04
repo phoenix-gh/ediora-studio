@@ -3,9 +3,9 @@
 import { useState, useEffect, useRef, useMemo, useSyncExternalStore } from 'react'
 import {
   BookMarked, Trash2, Save, RefreshCw, FileText, Clock,
-  ChevronRight, Loader2, Plus, X,
-  Link2, ExternalLink, ChevronDown, MessageSquare, Send, CheckCheck,
-  Layers, Images, Upload, GitBranch,
+  ChevronRight, Loader2, Plus,
+  Link2, MessageSquare, Send, CheckCheck,
+  Images, GitBranch,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
@@ -17,7 +17,7 @@ import {
 } from '@/components/ui/dialog'
 import {
   Draft, DraftSource, DraftUpdate, ChatMessage, DraftImage,
-  DRAFT_STATUSES, DRAFT_TYPES,
+  DRAFT_STATUSES, draftTypeInfo,
   getDrafts, updateDraft, deleteDraft, createDraft, chatWithDraft,
   getDraftImages, uploadDraftImage, deleteDraftImage,
 } from '@/lib/api/drafts'
@@ -31,37 +31,14 @@ import {
   type BulkImageMode,
   type BulkImageOptions,
 } from './BulkImageActionDialog'
-import {
-  articleDraftForGroup,
-  deleteDraftGroup,
-  runBulkOperations,
-  type DraftGroup,
-} from './draft-bulk-operations'
+import { runBulkOperations } from './draft-bulk-operations'
 import '@uiw/react-md-editor/markdown-editor.css'
 
-// ── Types ──────────────────────────────────────────────────────────────────────
-
-function buildGroups(drafts: Draft[]): DraftGroup[] {
-  const roots = drafts.filter(d => d.linked_draft_id === null)
-  const rootIds = new Set(roots.map(d => d.id))
-  const groups: DraftGroup[] = roots.map(root => ({
-    root,
-    variants: drafts.filter(d => d.linked_draft_id === root.id),
-  }))
-  // Orphaned variants whose root was deleted
-  drafts.filter(d => d.linked_draft_id !== null && !rootIds.has(d.linked_draft_id!)).forEach(o => {
-    if (!groups.some(g => g.root.id === o.id || g.variants.some(v => v.id === o.id))) {
-      groups.push({ root: o, variants: [] })
-    }
-  })
-  return groups
-}
-
-function groupMatchesFilters(group: DraftGroup, status: string, topicId: string) {
-  if (status !== 'all' && group.root.status !== status) return false
+function draftMatchesFilters(draft: Draft, status: string, topicId: string) {
+  if (status !== 'all' && draft.status !== status) return false
   if (topicId !== 'all') {
     const expectedTopicId = topicId === 'none' ? null : Number(topicId)
-    if (group.root.writing_plan_id !== expectedTopicId) return false
+    if (draft.writing_plan_id !== expectedTopicId) return false
   }
   return true
 }
@@ -78,10 +55,6 @@ const STATUS_STYLES: Record<string, string> = {
 
 function statusLabel(v: string) {
   return DRAFT_STATUSES.find(s => s.value === v)?.label ?? v
-}
-
-function typeInfo(v: string) {
-  return DRAFT_TYPES.find(t => t.value === v) ?? DRAFT_TYPES[0]
 }
 
 function formatDate(iso: string) {
@@ -152,11 +125,6 @@ export function DraftsClient({
   const [drafts, setDrafts] = useState<Draft[]>(initialDrafts)
   const [topicList, setTopicList] = useState<WritingPlan[]>(initialTopics)
 
-  // Group state
-  const groups = useMemo(() => buildGroups(drafts), [drafts])
-  const findGroupForDraft = (draftId: number) =>
-    groups.find(g => g.root.id === draftId || g.variants.some(v => v.id === draftId)) ?? null
-
   const initialDraft = initialDraftId
     ? (initialDrafts.find(d => d.id === initialDraftId) ?? initialDrafts[0] ?? null)
     : (initialDrafts[0] ?? null)
@@ -164,11 +132,10 @@ export function DraftsClient({
   const [selected, setSelected] = useState<Draft | null>(initialDraft)
   const selectedDraftIdRef = useRef<number | null>(initialDraft?.id ?? null)
   const selectionIdentityRef = useRef(0)
-  const selectedGroup = selected ? findGroupForDraft(selected.id) : null
 
   const [filterStatus, setFilterStatus] = useState<string>('all')
   const [filterTopicId, setFilterTopicId] = useState<string>('all')
-  const [selectedGroupIds, setSelectedGroupIds] = useState<Set<number>>(() => new Set())
+  const [selectedDraftIds, setSelectedDraftIds] = useState<Set<number>>(() => new Set())
   const [bulkMode, setBulkMode] = useState<BulkImageMode | null>(null)
   const [bulkRunning, setBulkRunning] = useState(false)
   const [bulkProgress, setBulkProgress] = useState({ completed: 0, total: 0 })
@@ -213,17 +180,13 @@ export function DraftsClient({
   // Image library state
   const [images, setImages] = useState<DraftImage[]>([])
   const [imagesLoading, setImagesLoading] = useState(initialDraft !== null)
-  const [initialImageRootId] = useState(
-    () => initialDraft ? initialDraft.linked_draft_id ?? initialDraft.id : null,
-  )
+  const [initialImageDraftId] = useState(() => initialDraft?.id ?? null)
   const [uploadingImage, setUploadingImage] = useState(false)
   const imageInputRef = useRef<HTMLInputElement>(null)
 
   const [refreshing, setRefreshing] = useState(false)
   const [creating, setCreating] = useState(false)
   const [deleting, setDeleting] = useState(false)
-  const [creatingVariant, setCreatingVariant] = useState(false)
-  const [adaptMenuOpen, setAdaptMenuOpen] = useState(false)
 
   function setChatHistory(history: ChatMessage[]) {
     chatSnapshotRef.current = { ...chatSnapshotRef.current, history }
@@ -274,11 +237,11 @@ export function DraftsClient({
   // Load the initial draft's image library. Later draft changes load from
   // activateDraft(), where the user action also resets the editor state.
   useEffect(() => {
-    if (initialImageRootId === null) return
+    if (initialImageDraftId === null) return
     let cancelled = false
     const requestedDraftId = selectedDraftIdRef.current
     const requestedSelectionIdentity = selectionIdentityRef.current
-    void getDraftImages(initialImageRootId)
+    void getDraftImages(initialImageDraftId)
       .then(items => {
         if (
           !cancelled
@@ -299,40 +262,30 @@ export function DraftsClient({
         }
     })
     return () => { cancelled = true }
-  }, [initialImageRootId])
+  }, [initialImageDraftId])
 
   useEffect(() => { getWritingPlans().then(t => setTopicList(t)).catch(() => {}) }, [])
 
-  // Close adapt dropdown on outside click
-  useEffect(() => {
-    if (!adaptMenuOpen) return
-    const handler = (e: MouseEvent) => {
-      if (!(e.target as HTMLElement).closest('[data-adapt-menu]')) setAdaptMenuOpen(false)
-    }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [adaptMenuOpen])
-
   // ── Filtering ──────────────────────────────────────────────────────────────
 
-  const filteredGroups = useMemo(
-    () => groups.filter(group => groupMatchesFilters(group, filterStatus, filterTopicId)),
-    [filterStatus, filterTopicId, groups],
+  const filteredDrafts = useMemo(
+    () => drafts.filter(draft => draftMatchesFilters(draft, filterStatus, filterTopicId)),
+    [drafts, filterStatus, filterTopicId],
   )
-  const visibleGroupIds = useMemo(
-    () => new Set(filteredGroups.map(group => group.root.id)),
-    [filteredGroups],
+  const visibleDraftIds = useMemo(
+    () => new Set(filteredDrafts.map(draft => draft.id)),
+    [filteredDrafts],
   )
 
   // ── Handlers ───────────────────────────────────────────────────────────────
 
   function applyFilters(nextStatus: string, nextTopicId: string) {
     const nextVisibleIds = new Set(
-      groups
-        .filter(group => groupMatchesFilters(group, nextStatus, nextTopicId))
-        .map(group => group.root.id),
+      drafts
+        .filter(draft => draftMatchesFilters(draft, nextStatus, nextTopicId))
+        .map(draft => draft.id),
     )
-    setSelectedGroupIds(current => new Set([...current].filter(id => nextVisibleIds.has(id))))
+    setSelectedDraftIds(current => new Set([...current].filter(id => nextVisibleIds.has(id))))
   }
 
   function changeStatusFilter(nextStatus: string) {
@@ -379,8 +332,7 @@ export function DraftsClient({
     setDirty(false)
     setImages([])
     setImagesLoading(true)
-    const rootId = next.linked_draft_id ?? next.id
-    void getDraftImages(rootId)
+    void getDraftImages(next.id)
       .then(items => {
         if (selectionIdentityRef.current === selectionIdentity) setImages(items)
       })
@@ -390,36 +342,34 @@ export function DraftsClient({
       })
   }
 
-  function toggleGroupSelection(groupId: number) {
-    setSelectedGroupIds(current => {
+  function toggleDraftSelection(draftId: number) {
+    setSelectedDraftIds(current => {
       const next = new Set(current)
-      if (next.has(groupId)) next.delete(groupId)
-      else next.add(groupId)
+      if (next.has(draftId)) next.delete(draftId)
+      else next.add(draftId)
       return next
     })
   }
 
   function openBulkImageDialog(mode: BulkImageMode) {
     setBulkMode(mode)
-    setBulkProgress({ completed: 0, total: selectedGroupIds.size })
+    setBulkProgress({ completed: 0, total: selectedDraftIds.size })
     setBulkFailures([])
   }
 
   async function handleBulkImageSubmit(options: BulkImageOptions) {
     if (bulkRunning) return
-    const selectedGroups = filteredGroups.filter(group => selectedGroupIds.has(group.root.id))
+    const selectedDrafts = filteredDrafts.filter(draft => selectedDraftIds.has(draft.id))
     setBulkRunning(true)
-    setBulkProgress({ completed: 0, total: selectedGroups.length })
+    setBulkProgress({ completed: 0, total: selectedDrafts.length })
     setBulkFailures([])
     try {
       const results = await runBulkOperations(
-        selectedGroups,
-        async group => {
-          const article = articleDraftForGroup(group)
-          if (!article) throw new Error('缺少文章主版本')
+        selectedDrafts,
+        async draft => {
           if (options.mode === 'cover') {
             await regenerateCover({
-              draft_id: article.id,
+              draft_id: draft.id,
               account_id: options.accountId,
               note: options.note,
               cover_style: options.coverStyle,
@@ -427,7 +377,7 @@ export function DraftsClient({
             return
           }
           await illustrateBody({
-            draft_id: article.id,
+            draft_id: draft.id,
             account_id: options.accountId,
             note: options.note,
             max_images: options.maxImages,
@@ -437,12 +387,12 @@ export function DraftsClient({
         3,
       )
       const fulfilledIds = new Set(
-        results.filter(result => result.status === 'fulfilled').map(result => result.groupId),
+        results.filter(result => result.status === 'fulfilled').map(result => result.draftId),
       )
       const failures = results
         .filter(result => result.status === 'rejected')
         .map(result => ({ title: result.title, reason: result.reason }))
-      setSelectedGroupIds(current => {
+      setSelectedDraftIds(current => {
         const next = new Set(current)
         fulfilledIds.forEach(id => next.delete(id))
         return next
@@ -460,11 +410,11 @@ export function DraftsClient({
   }
 
   function handleBulkDelete() {
-    const count = selectedGroupIds.size
+    const count = selectedDraftIds.size
     if (count === 0 || bulkRunning) return
     openConfirm({
       title: '批量删除',
-      description: `确定删除已选 ${count} 组草稿及其平台版本？此操作不可恢复。`,
+      description: `确定删除已选 ${count} 篇草稿？此操作不可恢复。`,
       confirmLabel: '确认删除',
       danger: true,
       onConfirm: () => { void doBulkDelete() },
@@ -473,29 +423,28 @@ export function DraftsClient({
 
   async function doBulkDelete() {
     if (bulkRunning) return
-    const selectedGroups = filteredGroups.filter(group => selectedGroupIds.has(group.root.id))
+    const selectedDrafts = filteredDrafts.filter(draft => selectedDraftIds.has(draft.id))
     setBulkRunning(true)
-    setBulkProgress({ completed: 0, total: selectedGroups.length })
+    setBulkProgress({ completed: 0, total: selectedDrafts.length })
     try {
       const results = await runBulkOperations(
-        selectedGroups,
-        group => deleteDraftGroup(group, deleteDraft),
+        selectedDrafts,
+        draft => deleteDraft(draft.id),
         (completed, total) => setBulkProgress({ completed, total }),
         3,
       )
       const fresh = await getDrafts()
-      const freshGroups = buildGroups(fresh)
-      const freshGroupIds = new Set(freshGroups.map(group => group.root.id))
+      const freshDraftIds = new Set(fresh.map(draft => draft.id))
       const rejectedIds = new Set(
-        results.filter(result => result.status === 'rejected').map(result => result.groupId),
+        results.filter(result => result.status === 'rejected').map(result => result.draftId),
       )
       setDrafts(fresh)
-      setSelectedGroupIds(new Set([...rejectedIds].filter(id => freshGroupIds.has(id))))
+      setSelectedDraftIds(new Set([...rejectedIds].filter(id => freshDraftIds.has(id))))
 
       const activeId = selectedDraftIdRef.current
       const refreshedActive = activeId === null ? null : fresh.find(draft => draft.id === activeId) ?? null
       if (refreshedActive) setSelected(refreshedActive)
-      else activateDraft(freshGroups[0]?.root ?? null)
+      else activateDraft(fresh[0] ?? null)
 
       const succeeded = results.filter(result => result.status === 'fulfilled').length
       const failed = results.length - succeeded
@@ -509,30 +458,11 @@ export function DraftsClient({
     }
   }
 
-  function doSelectGroup(group: DraftGroup) {
-    const article = [group.root, ...group.variants].find(d => d.draft_type === 'article')
-    activateDraft(article ?? group.root)
-  }
-
-  function handleSelectGroup(group: DraftGroup) {
+  function handleSelectDraft(draft: Draft) {
     if (dirty) {
       openConfirm({
         title: '有未保存的修改',
         description: '切换草稿后当前修改将丢失，确定继续？',
-        confirmLabel: '放弃修改',
-        danger: true,
-        onConfirm: () => doSelectGroup(group),
-      })
-      return
-    }
-    doSelectGroup(group)
-  }
-
-  function handleSelectVariant(draft: Draft) {
-    if (dirty) {
-      openConfirm({
-        title: '有未保存的修改',
-        description: '切换版本后当前修改将丢失，确定继续？',
         confirmLabel: '放弃修改',
         danger: true,
         onConfirm: () => activateDraft(draft),
@@ -591,7 +521,7 @@ export function DraftsClient({
     if (!selected) return
     openConfirm({
       title: '删除草稿',
-      description: `确定删除「${selected.title || typeInfo(selected.draft_type).label + '稿'}」？此操作不可恢复。`,
+      description: `确定删除「${selected.title || draftTypeInfo(selected.draft_type).label + '稿'}」？此操作不可恢复。`,
       confirmLabel: '删除',
       danger: true,
       onConfirm: () => doDelete(),
@@ -605,17 +535,7 @@ export function DraftsClient({
       await deleteDraft(selected.id)
       const nextDrafts = drafts.filter(d => d.id !== selected.id)
       setDrafts(nextDrafts)
-      // Rebuild groups and find next selection
-      const nextGroups = buildGroups(nextDrafts)
-      if (selectedGroup) {
-        const refreshedGroup = nextGroups.find(g => g.root.id === selectedGroup.root.id)
-        if (refreshedGroup) {
-          const remaining = [refreshedGroup.root, ...refreshedGroup.variants]
-          activateDraft(remaining[0] ?? null)
-        } else {
-          activateDraft(nextGroups[0]?.root ?? null)
-        }
-      }
+      activateDraft(nextDrafts[0] ?? null)
       toast.success('已删除')
     } catch {
       toast.error('删除失败')
@@ -630,9 +550,7 @@ export function DraftsClient({
       const draft = await createDraft({ title: '', content: '', draft_type: 'article', status: 'drafting' })
       const fresh = await getDrafts()
       setDrafts(fresh)
-      const freshGroups = buildGroups(fresh)
-      const newGroup = freshGroups.find(g => g.root.id === draft.id)
-      if (newGroup) {
+      if (fresh.some(item => item.id === draft.id)) {
         activateDraft(draft)
       }
       toast.success('已新建草稿')
@@ -662,38 +580,6 @@ export function DraftsClient({
       toast.error('刷新失败')
     } finally {
       setRefreshing(false)
-    }
-  }
-
-  async function handleCreateVariant(targetType: string) {
-    if (!selected || !selectedGroup) return
-    setAdaptMenuOpen(false)
-    setCreatingVariant(true)
-    const typeLabel = typeInfo(targetType).label
-    const rootId = selected.linked_draft_id ?? selected.id
-    try {
-      const variant = await createDraft({
-        topic_id: selected.topic_id,
-        title: selected.title,
-        content: articleDraft?.content ?? selected.content ?? '',
-        draft_type: targetType,
-        linked_draft_id: rootId,
-        writing_plan_id: selected.writing_plan_id,
-        sources: selected.sources,
-      })
-      const fresh = await getDrafts()
-      setDrafts(fresh)
-      const freshGroups = buildGroups(fresh)
-      const newGroup = freshGroups.find(g => g.root.id === rootId) ?? freshGroups.find(g => g.root.id === variant.id)
-      if (newGroup) {
-        const newVariant = fresh.find(d => d.id === variant.id)
-        if (newVariant) { activateDraft(newVariant); setChatOpen(true) }
-      }
-      toast.success(`已创建${typeLabel}版本`)
-    } catch {
-      toast.error('创建失败')
-    } finally {
-      setCreatingVariant(false)
     }
   }
 
@@ -775,18 +661,6 @@ export function DraftsClient({
     toast.success('已开启新对话')
   }
 
-  // Existing types in the current group — article always first
-  const groupDrafts = selectedGroup
-    ? [selectedGroup.root, ...selectedGroup.variants].sort((a, b) => {
-        if (a.draft_type === 'article') return -1
-        if (b.draft_type === 'article') return 1
-        return 0
-      })
-    : []
-  const articleDraft = groupDrafts.find(d => d.draft_type === 'article')
-  const existingTypes = new Set(groupDrafts.map(d => d.draft_type))
-  const availableTypes = DRAFT_TYPES.filter(t => !existingTypes.has(t.value))
-
   return (
     <div className="flex h-full overflow-hidden">
 
@@ -796,7 +670,7 @@ export function DraftsClient({
         <div className="px-4 py-4 border-b border-zinc-100 dark:border-zinc-800 flex items-center gap-2">
           <BookMarked className="w-4 h-4 text-indigo-500" />
           <span className="font-semibold text-sm text-zinc-900 dark:text-zinc-100">草稿箱</span>
-          <span className="ml-auto text-xs text-zinc-400">{groups.length} 篇</span>
+          <span className="ml-auto text-xs text-zinc-400">{drafts.length} 篇</span>
           <button
             onClick={handleCreateDraft}
             disabled={creating}
@@ -837,30 +711,30 @@ export function DraftsClient({
           </select>
         </div>
 
-        {filteredGroups.length > 0 ? (
+        {filteredDrafts.length > 0 ? (
           <div className="flex flex-col gap-1 border-b border-zinc-100 px-3 py-2 dark:border-zinc-800">
             <div className="flex items-center gap-1">
               <Button
                 variant="ghost"
                 size="xs"
-                onClick={() => setSelectedGroupIds(new Set(visibleGroupIds))}
+                onClick={() => setSelectedDraftIds(new Set(visibleDraftIds))}
                 disabled={bulkRunning}
               >
                 全选当前结果
               </Button>
-              <span className="ml-auto text-xs text-muted-foreground">已选 {selectedGroupIds.size} 组</span>
-              {selectedGroupIds.size > 0 ? (
+              <span className="ml-auto text-xs text-muted-foreground">已选 {selectedDraftIds.size} 篇</span>
+              {selectedDraftIds.size > 0 ? (
                 <Button
                   variant="ghost"
                   size="xs"
-                  onClick={() => setSelectedGroupIds(new Set())}
+                  onClick={() => setSelectedDraftIds(new Set())}
                   disabled={bulkRunning}
                 >
                   取消选择
                 </Button>
               ) : null}
             </div>
-            {selectedGroupIds.size > 0 ? (
+            {selectedDraftIds.size > 0 ? (
               <div className="flex gap-1">
                 <Button
                   variant="destructive"
@@ -896,9 +770,9 @@ export function DraftsClient({
           </div>
         ) : null}
 
-        {/* Group list */}
+        {/* Draft list */}
         <div className="flex-1 overflow-y-auto">
-          {filteredGroups.length === 0 ? (
+          {filteredDrafts.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-40 text-zinc-400 gap-2">
               <FileText className="w-8 h-8 opacity-30" />
               <p className="text-xs">暂无草稿</p>
@@ -912,13 +786,13 @@ export function DraftsClient({
               </button>
             </div>
           ) : (
-            filteredGroups.map(group => {
-              const isActive = selectedGroup?.root.id === group.root.id
-              const topicName = flattenTopicsWithDepth(topicList).find(({ plan }) => plan.id === group.root.writing_plan_id)?.plan.title
-              const allInGroup = [group.root, ...group.variants]
+            filteredDrafts.map(draft => {
+              const isActive = selected?.id === draft.id
+              const topicName = flattenTopicsWithDepth(topicList).find(({ plan }) => plan.id === draft.writing_plan_id)?.plan.title
+              const type = draftTypeInfo(draft.draft_type)
               return (
                 <div
-                  key={group.root.id}
+                  key={draft.id}
                   className={cn(
                     'flex border-b border-zinc-100 dark:border-zinc-800',
                     isActive && 'border-l-2 border-l-indigo-400',
@@ -926,14 +800,14 @@ export function DraftsClient({
                 >
                   <div className="flex items-start px-2 py-3">
                     <Checkbox
-                      checked={selectedGroupIds.has(group.root.id)}
-                      onCheckedChange={() => toggleGroupSelection(group.root.id)}
-                      aria-label={`选择${group.root.title || '（无标题）'}`}
+                      checked={selectedDraftIds.has(draft.id)}
+                      onCheckedChange={() => toggleDraftSelection(draft.id)}
+                      aria-label={`选择${draft.title || '（无标题）'}`}
                       disabled={bulkRunning}
                     />
                   </div>
                   <button
-                    onClick={() => handleSelectGroup(group)}
+                    onClick={() => handleSelectDraft(draft)}
                     className={cn(
                       'group flex-1 px-2 py-3 text-left transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-900',
                       isActive && 'bg-indigo-50 dark:bg-indigo-950/30',
@@ -947,29 +821,24 @@ export function DraftsClient({
                         </p>
                       )}
                       <p className={cn('text-xs font-medium truncate', isActive ? 'text-indigo-700 dark:text-indigo-300' : 'text-zinc-800 dark:text-zinc-200')}>
-                        {group.root.title || '（无标题）'}
+                        {draft.title || '（无标题）'}
                       </p>
                       <p className="text-[10px] text-zinc-400 mt-0.5 line-clamp-1 leading-relaxed">
-                        {group.root.content.replace(/#+\s*/g, '').slice(0, 50) || '空内容'}
+                        {draft.content.replace(/#+\s*/g, '').slice(0, 50) || '空内容'}
                       </p>
                       {/* Platform badges row */}
                       <div className="flex items-center gap-1 mt-1.5 flex-wrap">
-                        <span className={cn('text-[10px] px-1.5 py-0.5 rounded-full font-medium', STATUS_STYLES[group.root.status])}>
-                          {statusLabel(group.root.status)}
+                        <span className={cn('text-[10px] px-1.5 py-0.5 rounded-full font-medium', STATUS_STYLES[draft.status])}>
+                          {statusLabel(draft.status)}
                         </span>
-                        {allInGroup.map(d => {
-                          const t = typeInfo(d.draft_type)
-                          return (
-                            <span key={d.id} className={cn('text-[10px] px-1.5 py-0.5 rounded-full font-medium', t.badge, isActive && selected?.id === d.id && 'ring-1 ring-offset-0 ring-current')}>
-                              {t.label}
-                            </span>
-                          )
-                        })}
+                        <span className={cn('text-[10px] px-1.5 py-0.5 rounded-full font-medium', type.badge)}>
+                          {type.label}
+                        </span>
                       </div>
                     </div>
                     <div className="flex flex-col items-end gap-1 flex-shrink-0">
                       <span className="text-[10px] text-zinc-400 flex items-center gap-0.5">
-                        <Clock className="w-2.5 h-2.5" />{formatDate(group.root.updated_at)}
+                        <Clock className="w-2.5 h-2.5" />{formatDate(draft.updated_at)}
                       </span>
                       <ChevronRight className={cn('w-3 h-3 text-zinc-300 group-hover:text-zinc-400 transition-colors', isActive && 'text-indigo-400')} />
                     </div>
@@ -983,61 +852,10 @@ export function DraftsClient({
       </aside>
 
       {/* ── Right: Editor + Chat ──────────────────────────── */}
-      {selected && selectedGroup ? (
+      {selected ? (
         <div className="flex-1 flex overflow-hidden bg-white dark:bg-zinc-950">
           {/* Editor column */}
           <div className="flex-1 flex flex-col overflow-hidden min-w-0">
-
-            {/* Type tabs — article as main version, platforms as adaptations */}
-            <div className="flex items-center gap-1.5 px-4 py-2 border-b border-zinc-100 dark:border-zinc-800 flex-shrink-0 bg-zinc-50 dark:bg-zinc-900">
-              {groupDrafts.map((d, i) => {
-                const t = typeInfo(d.draft_type)
-                const isArticle = d.draft_type === 'article'
-                const isTab = selected.id === d.id
-                return (
-                  <button
-                    key={d.id}
-                    onClick={() => handleSelectVariant(d)}
-                    className={cn(
-                      'text-xs px-3 py-1 rounded-full font-medium transition-colors flex items-center gap-1',
-                      isTab
-                        ? t.badge + ' ring-1 ring-current'
-                        : 'text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800'
-                    )}
-                  >
-                    {t.label}
-                    {isArticle && <span className="text-[9px] opacity-60 font-normal">主版本</span>}
-                  </button>
-                )
-              })}
-              {/* Add new platform adaptation */}
-              {availableTypes.length > 0 && (
-                <div className="relative" data-adapt-menu>
-                  <button
-                    onClick={() => setAdaptMenuOpen(v => !v)}
-                    disabled={creatingVariant}
-                    className="flex items-center gap-1 text-[11px] text-zinc-400 hover:text-indigo-500 px-2 py-1 rounded-full hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors disabled:opacity-40"
-                  >
-                    {creatingVariant ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}
-                    适配平台
-                  </button>
-                  {adaptMenuOpen && (
-                    <div className="absolute left-0 top-full mt-1 z-50 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg shadow-lg py-1 min-w-[120px]">
-                      {availableTypes.map(t => (
-                        <button
-                          key={t.value}
-                          onClick={() => handleCreateVariant(t.value)}
-                          className="w-full text-left px-3 py-1.5 text-xs hover:bg-zinc-50 dark:hover:bg-zinc-800 flex items-center gap-2"
-                        >
-                          <span className={cn('px-1.5 py-0.5 rounded-full font-medium text-[10px]', t.badge)}>{t.label}</span>
-                          <span className="text-[10px] text-zinc-400">适配</span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
 
             {/* Toolbar */}
             <div className="flex items-center gap-3 px-6 py-3 border-b border-zinc-100 dark:border-zinc-800 flex-shrink-0">
@@ -1139,40 +957,6 @@ export function DraftsClient({
 
             {/* Title */}
             <div className="px-6 pt-4 pb-2 flex-shrink-0 border-b border-zinc-100 dark:border-zinc-800">
-              {selected.draft_type !== 'article' && selected.linked_draft_id !== null && (
-                <div className="flex items-center gap-1.5 mb-2 text-[11px] text-zinc-400">
-                  <Layers className="w-3 h-3" />
-                  基于文章主版本的{typeInfo(selected.draft_type).label}适配副本
-                  {articleDraft && (
-                    <button
-                      onClick={() => {
-                        if (!articleDraft) return
-                        const doSync = () => {
-                          setEditTitle(articleDraft.title)
-                          setEditContent(articleDraft.content)
-                          setDirty(true)
-                          toast.success('已同步主版本内容')
-                        }
-                        if (editContent) {
-                          openConfirm({
-                            title: '同步主版本内容',
-                            description: '当前内容将被主版本覆盖，确定继续？',
-                            confirmLabel: '覆盖同步',
-                            danger: false,
-                            onConfirm: doSync,
-                          })
-                        } else {
-                          doSync()
-                        }
-                      }}
-                      className="ml-auto flex items-center gap-1 text-[11px] text-indigo-400 hover:text-indigo-600 dark:hover:text-indigo-300 transition-colors"
-                    >
-                      <RefreshCw className="w-3 h-3" />
-                      同步主版本内容
-                    </button>
-                  )}
-                </div>
-              )}
               <input
                 value={editTitle}
                 onChange={e => { setEditTitle(e.target.value); setDirty(true) }}
@@ -1199,8 +983,8 @@ export function DraftsClient({
                 <div className="flex items-center gap-2 min-w-0">
                   <MessageSquare className="w-3.5 h-3.5 text-violet-500 flex-shrink-0" />
                   <span className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">AI 写作助手</span>
-                  <span className={cn('text-[10px] px-1.5 py-0.5 rounded-full font-medium', typeInfo(selected.draft_type).badge)}>
-                    {typeInfo(selected.draft_type).label}
+                  <span className={cn('text-[10px] px-1.5 py-0.5 rounded-full font-medium', draftTypeInfo(selected.draft_type).badge)}>
+                    {draftTypeInfo(selected.draft_type).label}
                   </span>
                 </div>
                 <button onClick={handleNewChatSession} className="text-[10px] text-zinc-400 hover:text-violet-500 dark:hover:text-violet-400 flex-shrink-0 transition-colors">
@@ -1307,7 +1091,7 @@ export function DraftsClient({
         <BulkImageActionDialog
           open
           mode={bulkMode}
-          selectedCount={selectedGroupIds.size}
+          selectedCount={selectedDraftIds.size}
           running={bulkRunning}
           progress={bulkProgress}
           failures={bulkFailures}
@@ -1325,7 +1109,7 @@ export function DraftsClient({
               open
               onClose={() => setAssetsOpen(false)}
               initialTab={assetsTab}
-              draftId={selected.linked_draft_id ?? selected.id}
+              draftId={selected.id}
               sources={editSources}
               onSourcesChange={next => { setEditSources(next); setDirty(true) }}
               images={images}
@@ -1335,8 +1119,7 @@ export function DraftsClient({
               onDelete={handleImageDelete}
               onInsert={handleInsertImage}
               onRefreshImages={() => {
-                const rootId = selected.linked_draft_id ?? selected.id
-                getDraftImages(rootId).then(setImages).catch(() => {})
+                getDraftImages(selected.id).then(setImages).catch(() => {})
               }}
             />
           )}
