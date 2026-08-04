@@ -3,6 +3,7 @@ import { generateText, Output, stepCountIs, type ModelMessage, type ToolSet } fr
 import { openGlobalAgentTools, type ChatSkillRuntime, type GlobalAgentToolOptions } from './global-chat-tools'
 import { executeSkillRunWithAiSdk, selectSkillForTurn } from './skill-run-ai-sdk'
 import {
+  sanitizeSkillRunPlan,
   skillRunPlanInputSchema,
   skillRunValidationSchema,
   type SkillRun,
@@ -211,24 +212,41 @@ export async function openAgentRuntime(
       return { kind: 'completed', text: generated.text, parts, revisionCount: 0 }
     }
 
+    const activeReferences = registry.activeContext()?.references ?? []
+    const availablePlanningTools = planningTools(registry.tools)
+    const planCatalogs = {
+      referencePaths: activeReferences.map(reference => reference.path),
+      toolNames: availablePlanningTools.map(tool => tool.name),
+    }
+    const validPlan = (input: unknown) => {
+      const parsed = skillRunPlanInputSchema.safeParse(input)
+      if (!parsed.success) return undefined
+      try {
+        sanitizeSkillRunPlan(parsed.data, planCatalogs)
+        return parsed.data
+      } catch {
+        return undefined
+      }
+    }
+
     const result = await executeSkillRunWithAiSdk({
       skill: active.skill,
       activation: active.activation,
       userRequest: request.objective,
       selectedContext: request.selectedContext ?? '',
-      references: registry.activeContext()?.references ?? [],
-      tools: planningTools(registry.tools),
+      references: activeReferences,
+      tools: availablePlanningTools,
       plan: async ({ prompt }) => {
         const planned = await deps.generate({ model: options.model, prompt, output: Output.json() })
-        const parsed = skillRunPlanInputSchema.safeParse(planned.output)
-        let plan: unknown = parsed.success ? parsed.data : undefined
-        if (!parsed.success) {
+        let plan = validPlan(planned.output)
+        if (!plan) {
           const repaired = await deps.generate({
             model: options.model,
-            prompt: `${prompt}\n\nThe previous JSON was invalid. Repair it exactly: every step id must be a string, arrays must use exact listed paths and tools, and no unknown fields are allowed.\n\nPrevious JSON:\n${JSON.stringify(planned.output)}`,
+            prompt: `${prompt}\n\nRepair the previous Skill plan. Its JSON shape or catalog usage was invalid. Every step id must be a string. requiredReferences may contain only these exact paths: ${JSON.stringify(planCatalogs.referencePaths)}. requiredTools may contain only these exact tool names: ${JSON.stringify(planCatalogs.toolNames)}. Reference loading is represented by requiredReferences, never by inventing a reference-loader tool. Remove unknown fields and return the complete repaired plan.\n\nPrevious JSON:\n${JSON.stringify(planned.output)}`,
             output: Output.json(),
           })
-          plan = skillRunPlanInputSchema.parse(repaired.output)
+          plan = validPlan(repaired.output)
+          if (!plan) throw new Error('Invalid Skill plan after repair')
         }
         await request.onStep?.({ phase: 'plan', detail: plan })
         return plan

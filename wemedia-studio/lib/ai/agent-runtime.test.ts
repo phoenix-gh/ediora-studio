@@ -195,4 +195,92 @@ describe('shared Agent runtime', () => {
 
     expect(activeTools).toEqual(['search_assets', 'save_draft'])
   })
+
+  it('repairs a structurally valid Skill plan that uses names outside the active catalogs', async () => {
+    const deps = dependencies()
+    const openTools = deps.openTools
+    deps.openTools = async options => {
+      const runtime = await openTools(options)
+      return {
+        ...runtime,
+        activeContext: () => options.skillName ? {
+          skill: alpha,
+          references: [{ path: 'references/rules.md', bytes: 5 }],
+          activation: 'manual' as const,
+          execution: {
+            planRequired: true,
+            verificationRequired: true,
+            maxRevisions: 1 as const,
+          },
+        } : undefined,
+        readReferences: async (paths: string[]) => paths.map(path => ({
+          path,
+          content: 'rules',
+          bytes: 5,
+        })),
+      }
+    }
+    let planningAttempts = 0
+    deps.generate = vi.fn(async (input: Record<string, unknown>) => {
+      const prompt = typeof input.prompt === 'string' ? input.prompt : ''
+      if (prompt.includes('Repair the previous Skill plan')) {
+        planningAttempts += 1
+        return {
+          output: {
+            goal: '读取规则并完成任务',
+            steps: [{
+              id: 'read',
+              instruction: '读取规则',
+              requiredReferences: ['references/rules.md'],
+              requiredTools: [],
+            }],
+            outputRequirements: ['遵守规则'],
+            verificationCriteria: ['规则已读取'],
+          },
+        }
+      }
+      if (prompt.startsWith('Create a bounded execution plan')) {
+        planningAttempts += 1
+        return {
+          output: {
+            goal: '读取规则并完成任务',
+            steps: [{
+              id: 'read',
+              instruction: '读取规则',
+              requiredReferences: ['references/rules.md'],
+              requiredTools: ['readSkillReference'],
+            }],
+            outputRequirements: ['遵守规则'],
+            verificationCriteria: ['规则已读取'],
+          },
+        }
+      }
+      if (prompt.startsWith('Return valid JSON only in exactly this shape')) {
+        return { output: { passed: true, violations: [] } }
+      }
+      return { text: 'done', toolResults: [], content: [] }
+    }) as unknown as AgentRuntimeDependencies['generate']
+    const runtime = await openAgentRuntime({
+      ...openOptions('automatic', deps),
+      skillMode: 'manual',
+      skillName: 'Alpha',
+    })
+
+    const result = await runtime.run({
+      objective: 'Do the alpha task',
+      modelMessages: [],
+      maxSteps: 5,
+    })
+
+    expect(planningAttempts).toBe(2)
+    expect(result).toMatchObject({
+      kind: 'completed',
+      skillRun: {
+        loadedReferences: ['references/rules.md'],
+        requiredTools: [],
+        validation: { passed: true },
+      },
+    })
+    await runtime.close()
+  })
 })
