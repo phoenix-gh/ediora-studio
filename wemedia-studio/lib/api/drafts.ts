@@ -14,7 +14,6 @@ export interface Draft {
   content: string
   status: string
   draft_type: string
-  linked_draft_id: number | null
   series_id: number | null
   series_order: number
   version: number
@@ -28,7 +27,6 @@ export interface DraftUpdate {
   content?: string
   status?: string
   draft_type?: string
-  linked_draft_id?: number | null
   series_id?: number | null
   series_order?: number
   writing_plan_id?: number | null
@@ -64,6 +62,17 @@ export const DRAFT_TYPES = [
   { value: 'xhs',     label: '小红书',  badge: 'bg-rose-100 text-rose-600 dark:bg-rose-950/40 dark:text-rose-400' },
 ] as const
 
+const UNKNOWN_DRAFT_BADGE =
+  'bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300'
+
+export function draftTypeInfo(value: string) {
+  return DRAFT_TYPES.find(type => type.value === value) ?? {
+    value,
+    label: value || '未知平台',
+    badge: UNKNOWN_DRAFT_BADGE,
+  }
+}
+
 export const DRAFT_STATUSES = [
   { value: 'drafting',  label: '草稿'   },
   { value: 'editing',   label: '编辑中' },
@@ -78,7 +87,6 @@ export interface DraftCreate {
   content?: string
   status?: string
   draft_type?: string
-  linked_draft_id?: number | null
   writing_plan_id?: number | null
   sources?: DraftSource[]
 }
