@@ -150,7 +150,7 @@ it('runs one automatically selected Skill through references, tools, validation,
   const deps: DailyCreationAgentJobDependencies = {
     getJob: vi.fn().mockResolvedValue({
       id: 19, flow: 'daily_creation', title: 'fixture', status: 'queued',
-      input: { run_id: 83, runtime_version: 'agent-v1' }, steps: [],
+      input: { run_id: 83 }, steps: [],
     }),
     getContext: vi.fn().mockResolvedValue({
       id: 83, status: 'queued', requested_count: 10,

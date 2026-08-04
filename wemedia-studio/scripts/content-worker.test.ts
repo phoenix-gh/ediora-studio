@@ -6,7 +6,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { runContentJob } from '../lib/ai/content-job'
 import { runDailyCreationAgentJob } from '../lib/ai/daily-creation-agent-job'
-import { runDailyCreationJob } from '../lib/ai/daily-creation-job'
 import { JobFinalizationError } from '../lib/ai/digital-human-job'
 import { ApiRequestError } from '../lib/ai/job-client'
 import { runTextVideoMasterJob } from '../lib/ai/text-video-master-job'
@@ -20,7 +19,6 @@ const redisConstructor = vi.hoisted(() => vi.fn())
 const genericRunner = vi.hoisted(() => vi.fn())
 const speechRunner = vi.hoisted(() => vi.fn())
 const dailyAgentRunner = vi.hoisted(() => vi.fn())
-const dailyLegacyRunner = vi.hoisted(() => vi.fn())
 
 vi.mock('ioredis', () => ({
   default: class ForbiddenImportRedis {
@@ -44,11 +42,6 @@ vi.mock('../lib/ai/text-video-speech-job', async importOriginal => ({
 vi.mock('../lib/ai/daily-creation-agent-job', async importOriginal => ({
   ...await importOriginal<typeof import('../lib/ai/daily-creation-agent-job')>(),
   runDailyCreationAgentJob: dailyAgentRunner,
-}))
-
-vi.mock('../lib/ai/daily-creation-job', async importOriginal => ({
-  ...await importOriginal<typeof import('../lib/ai/daily-creation-job')>(),
-  runDailyCreationJob: dailyLegacyRunner,
 }))
 
 type QueueItem = [string, string] | null
@@ -195,13 +188,11 @@ describe('content worker dispatch', () => {
     expect(resolveContentJobRunner('text_video_render'))
       .toBe(runTextVideoRenderJob)
     expect(resolveContentJobRunner('content')).toBe(runContentJob)
-    expect(resolveContentJobRunner('daily_creation', { runtimeVersion: 'agent-v1' }))
+    expect(resolveContentJobRunner('daily_creation'))
       .toBe(runDailyCreationAgentJob)
-    expect(resolveContentJobRunner('daily_creation', { runtimeVersion: undefined }))
-      .toBe(runDailyCreationJob)
   })
 
-  it('passes the loaded runtime version into dispatch', async () => {
+  it('dispatches a loaded daily job without a runtime version dependency', async () => {
     const controller = new AbortController()
     const redis = new FakeRedis([
       ['content-jobs', '18'],
@@ -216,13 +207,14 @@ describe('content worker dispatch', () => {
       reconcile: vi.fn().mockResolvedValue({}),
       getJob: vi.fn().mockResolvedValue({
         ...durableJob(18, 'daily_creation'),
-        input: { run_id: 8, runtime_version: 'agent-v1' },
+        input: { run_id: 8 },
       }),
       resolveRunner,
     })
 
-    expect(resolveRunner).toHaveBeenCalledWith('daily_creation',
-      expect.objectContaining({ runtimeVersion: 'agent-v1' }))
+    expect(resolveRunner).toHaveBeenCalledWith('daily_creation', {
+      speechFetch: undefined,
+    })
     expect(runner).toHaveBeenCalledWith(18)
   })
 
@@ -256,25 +248,6 @@ describe('content worker dispatch', () => {
       false,
     )
     expect(genericRunner).not.toHaveBeenCalled()
-  })
-
-  it('durably rejects an unknown daily creation runtime version', async () => {
-    const unsupportedApi = {
-      getJob: vi.fn().mockResolvedValue(durableJob(27, 'daily_creation')),
-      startStep: vi.fn().mockResolvedValue({ id: 72 }),
-      failStep: vi.fn().mockResolvedValue({}),
-    }
-    const { resolveContentJobRunner } = await import('./content-worker')
-
-    await expect(resolveContentJobRunner('daily_creation', {
-      runtimeVersion: 'agent-v2',
-      unsupportedDailyCreationApi: unsupportedApi,
-    })(27)).rejects.toThrow('unsupported daily creation runtime version: agent-v2')
-    expect(unsupportedApi.failStep).toHaveBeenCalledWith(
-      27, 72, expect.any(Error), false,
-    )
-    expect(dailyLegacyRunner).not.toHaveBeenCalled()
-    expect(dailyAgentRunner).not.toHaveBeenCalled()
   })
 
   it('routes speechFetch only through the text-video speech runner seam', async () => {

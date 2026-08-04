@@ -463,7 +463,7 @@ async def test_duplicate_usage_rolls_back_the_second_draft(db):
 
 
 @pytest.mark.asyncio
-async def test_new_daily_creation_jobs_use_agent_v1_runtime(db):
+async def test_new_daily_creation_jobs_use_the_agent_runtime_without_a_version(db):
     from daily_creation_service import create_daily_creation_run
     from models import ContentJob, DailyCreationRule
 
@@ -486,7 +486,4 @@ async def test_new_daily_creation_jobs_use_agent_v1_runtime(db):
     job = await db.get(ContentJob, creation_run.content_job_id)
 
     assert created is True
-    assert job.input_data == {
-        "run_id": creation_run.id,
-        "runtime_version": "agent-v1",
-    }
+    assert job.input_data == {"run_id": creation_run.id}

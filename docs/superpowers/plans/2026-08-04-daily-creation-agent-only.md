@@ -43,6 +43,8 @@
 - Modify: `wemedia-studio/scripts/content-worker.ts`
 - Modify: `wemedia-studio/lib/ai/daily-creation-agent-job.test.ts`
 - Modify: `wemedia-studio/lib/ai/daily-creation-agent-integration.test.ts`
+- Modify: `wemedia-studio/lib/ai/content-job.ts`
+- Modify: `wemedia-studio/lib/ai/content-job.test.ts`
 - Delete: `wemedia-studio/lib/ai/daily-creation-job.ts`
 - Delete: `wemedia-studio/lib/ai/daily-creation-job.test.ts`
 
@@ -55,6 +57,7 @@
 - [ ] Run the focused Vitest file and verify failure against the compatibility branch.
 - [ ] Remove `runtimeVersion`, `UnsupportedDailyCreationRuntimeError`, the legacy import/fallback, and version forwarding.
 - [ ] Update Agent fixtures to `{ run_id }`; delete the legacy Runner and its tests.
+- [ ] Remove legacy daily-selection, batch-parser, and validation helpers from `content-job.ts` together with their obsolete tests.
 - [ ] Re-run worker and Agent tests and verify they pass.
 
 ### Task 3: Verify the code cutover

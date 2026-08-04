@@ -5,16 +5,10 @@ import { afterEach, expect, it } from 'vitest'
 
 import { setSkillEnabled } from '../skills/registry'
 import {
-  dailyCreationSelectionSchema,
-  parseDailyCreationSelection,
-  parseDailyCreationValidation,
-  parseXPostBatch,
   illustrationImageInputSchema,
   insertInlineImage,
   loadBaoyuSkillRulesForTest,
   parseTemplateCandidate,
-  validateDailyCreationSelection,
-  validateXPostBatch,
   toolsForContentStep,
 } from './content-job'
 
@@ -30,113 +24,6 @@ afterEach(async () => {
 
 it('keeps template extraction free of persistence tools', () => {
   expect(toolsForContentStep('template_extraction')).toEqual([])
-})
-
-it('accepts daily creation selection evidence only from observed tools', () => {
-  const selection = dailyCreationSelectionSchema.parse({
-    selected: [{
-      asset_id: 12, topic: '需求验证', angle: '真实付费',
-      reuse_decision: 'reuse_allowed',
-      reuse_explanation: '历史讨论问卷，这次讨论实际付款。',
-      compared_usage_ids: [7],
-    }],
-    excluded: [{ asset_id: 13, reason: '与近期内容同角度' }],
-  })
-  expect(validateDailyCreationSelection(selection, [12, 13], [7])).toEqual(selection)
-  expect(() => validateDailyCreationSelection(selection, [99], [7]))
-    .toThrow(/invented asset/i)
-  expect(() => validateDailyCreationSelection(selection, [12, 13], [8]))
-    .toThrow(/invented usage/i)
-})
-
-it('accepts only the complete daily creation selection contract', () => {
-  const exactSelection = {
-    selected: [{
-      asset_id: 12,
-      topic: '需求验证',
-      angle: '真实付费',
-      reuse_decision: 'fresh' as const,
-      reuse_explanation: '',
-      compared_usage_ids: [],
-    }],
-    excluded: [{ asset_id: 13, reason: '与近期内容同角度' }],
-  }
-
-  expect(parseDailyCreationSelection(exactSelection)).toEqual(exactSelection)
-})
-
-it.each([
-  {
-    selected_candidates: [{
-      asset_id: 12,
-      topic: '需求验证',
-      angle: '真实付费',
-      reuse_decision: 'fresh',
-      reuse_explanation: '',
-      compared_usage_ids: [],
-    }],
-    excluded: [],
-  },
-  {
-    selected: [{
-      asset_id: 12,
-      topic: '需求验证',
-      angle: '真实付费',
-      reuse_decision: 'fresh',
-      reuse_explanation: '',
-      compared_usage_ids: [],
-    }],
-    excluded: [],
-    selected_candidates: [],
-  },
-  { selected: [{ id: 12, reason: '紧凑结构' }], excluded: [] },
-  {
-    selected: [{
-      asset_id: 12,
-      topic: '需求验证',
-      angle: '真实付费',
-      reuse_decision: 'fresh',
-      reuse_explanation: '',
-      compared_usage_ids: [],
-    }],
-  },
-  {
-    selected: [{
-      asset_id: 12,
-      topic: '需求验证',
-      angle: '真实付费',
-      reuse_decision: 'fresh',
-    }],
-    excluded: [],
-  },
-])('rejects a non-contract daily creation selection: %j', malformed => {
-  expect(() => parseDailyCreationSelection(malformed)).toThrow(/invalid daily creation selection/i)
-})
-
-it('normalizes wrapped and text-only X post batches against selected evidence', () => {
-  const selected = [{ asset_id: 12, topic: '需求验证', angle: '真实付费', reuse_decision: 'fresh' as const, reuse_explanation: '' }]
-  expect(parseXPostBatch({ posts: [{ asset_id: 12, title: '标题', text: '正文', topic: '需求验证', angle: '真实付费', reuse_decision: 'fresh' }] }, selected)[0].asset_id).toBe(12)
-  expect(parseXPostBatch(['一条完整的短帖正文'], selected)[0]).toEqual(expect.objectContaining({ asset_id: 12, text: '一条完整的短帖正文' }))
-})
-
-it('normalizes common AI validation aliases and rejects out-of-range evidence', () => {
-  expect(parseDailyCreationValidation({ approved_indices: [0], rejections: [{ post_index: 1, reason: '语义重复' }] }, 2)).toEqual({
-    accepted_indices: [0], rejected: [{ index: 1, reason: '语义重复' }],
-  })
-  expect(() => parseDailyCreationValidation({ accepted_indices: [2], rejected: [] }, 2)).toThrow(/out-of-range/i)
-  expect(() => parseDailyCreationValidation({ summary: '都很好' }, 2)).toThrow(/invalid daily creation validation/i)
-})
-
-it('rejects duplicate posts, unjustified reuse, and invented experience', () => {
-  expect(validateXPostBatch([
-    { asset_id: 1, title: 'A', text: '同一条内容', topic: '增长', angle: '成本', reuse_decision: 'fresh', reuse_explanation: '' },
-    { asset_id: 2, title: 'B', text: ' 同一条内容 ', topic: '增长', angle: '效率', reuse_decision: 'fresh', reuse_explanation: '' },
-    { asset_id: 3, title: 'C', text: '我亲自测试了三个月。', topic: '增长', angle: '实践', reuse_decision: 'reuse_allowed', reuse_explanation: '' },
-  ])).toEqual([
-    { index: 1, reason: 'within_batch_duplicate' },
-    { index: 2, reason: 'invented_personal_experience' },
-    { index: 2, reason: 'reuse_explanation_required' },
-  ])
 })
 
 it('inserts an illustration after its matching level-two heading', () => {

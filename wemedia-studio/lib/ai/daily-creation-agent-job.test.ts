@@ -139,7 +139,7 @@ describe('daily creation Agent job', () => {
     const deps = dependencies()
     vi.mocked(deps.getJob).mockResolvedValue({
       id: 19, flow: 'daily_creation', title: 'daily', status: 'running',
-      input: { run_id: 83, runtime_version: 'agent-v1' },
+      input: { run_id: 83 },
       steps: [{
         id: 75, key: 'agent', attempt: 1, status: 'running', output: {},
       }],

@@ -194,7 +194,7 @@ def test_queued_and_latest_succeeded_are_enqueued_once_across_two_passes(
     asyncio.run(run())
 
 
-def test_running_agent_v1_daily_job_is_resumed_but_terminal_history_is_not(
+def test_active_daily_agent_job_is_resumed_but_terminal_history_is_not(
     reconciliation_env,
 ):
     from job_reconciliation import reconcile_content_jobs
@@ -204,13 +204,13 @@ def test_running_agent_v1_daily_job_is_resumed_but_terminal_history_is_not(
             reconciliation_env,
             flow="daily_creation",
             status="queued",
-            input_data={"run_id": 80, "runtime_version": "agent-v1"},
+            input_data={"run_id": 80},
         )
         agent_id, _ = await _seed_job(
             reconciliation_env,
             flow="daily_creation",
             status="running",
-            input_data={"run_id": 81, "runtime_version": "agent-v1"},
+            input_data={"run_id": 81},
             step_key="agent",
             step_status="running",
         )

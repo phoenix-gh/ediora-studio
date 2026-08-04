@@ -202,10 +202,7 @@ def test_run_now_is_idempotent_and_creates_daily_creation_job(client, monkeypatc
 
     creation_run, job = asyncio.run(verify())
     assert job.flow == "daily_creation"
-    assert job.input_data == {
-        "run_id": creation_run.id,
-        "runtime_version": "agent-v1",
-    }
+    assert job.input_data == {"run_id": creation_run.id}
     assert creation_run.rule_snapshot["directory"] == "产品实验"
     assert creation_run.rule_snapshot["directories"] == ["产品实验"]
 

@@ -12,7 +12,6 @@ import Redis from 'ioredis'
 
 import { runContentJob } from '../lib/ai/content-job'
 import { runDailyCreationAgentJob } from '../lib/ai/daily-creation-agent-job'
-import { runDailyCreationJob } from '../lib/ai/daily-creation-job'
 import {
   JobFinalizationError,
   runDigitalHumanRenderJob,
@@ -81,21 +80,12 @@ type UnsupportedTextVideoApi = {
 export type ContentJobRunnerDependencies = {
   speechFetch?: typeof fetch
   unsupportedTextVideoApi?: UnsupportedTextVideoApi
-  runtimeVersion?: unknown
-  unsupportedDailyCreationApi?: UnsupportedTextVideoApi
 }
 
 export class UnsupportedTextVideoFlowError extends Error {
   constructor(flow: string) {
     super(`Unsupported text-video content flow: ${flow}`)
     this.name = 'UnsupportedTextVideoFlowError'
-  }
-}
-
-export class UnsupportedDailyCreationRuntimeError extends Error {
-  constructor(version: string) {
-    super(`unsupported daily creation runtime version: ${version}`)
-    this.name = 'UnsupportedDailyCreationRuntimeError'
   }
 }
 
@@ -117,19 +107,6 @@ async function runUnsupportedTextVideoJob(
   throw error
 }
 
-async function runUnsupportedDailyCreationJob(
-  jobId: number,
-  version: string,
-  api: UnsupportedTextVideoApi,
-) {
-  const job = await api.getJob(jobId)
-  if (TERMINAL_JOB_STATUSES.has(job.status)) return
-  const step = await api.startStep(jobId, 'unsupported_daily_creation_runtime')
-  const error = new UnsupportedDailyCreationRuntimeError(version)
-  await api.failStep(jobId, step.id, error, false)
-  throw error
-}
-
 const defaultUnsupportedTextVideoApi: UnsupportedTextVideoApi = {
   getJob,
   startStep,
@@ -140,19 +117,7 @@ export function resolveContentJobRunner(
   flow: string,
   dependencies: ContentJobRunnerDependencies = {},
 ): ContentJobRunner {
-  if (flow === 'daily_creation') {
-    const version = dependencies.runtimeVersion
-    if (version === 'agent-v1') return runDailyCreationAgentJob
-    if (version === undefined || version === null || version === '') {
-      return runDailyCreationJob
-    }
-    return jobId => runUnsupportedDailyCreationJob(
-      jobId,
-      String(version),
-      dependencies.unsupportedDailyCreationApi
-        ?? defaultUnsupportedTextVideoApi,
-    )
-  }
+  if (flow === 'daily_creation') return runDailyCreationAgentJob
   if (flow === 'digital_human_setup') return runDigitalHumanSetupJob
   if (flow === 'digital_human_render') return runDigitalHumanRenderJob
   if (flow === 'content_response_analysis') {
@@ -384,7 +349,6 @@ async function runLeasedJob(
     phase = 'running'
     await options.resolveRunner(job.flow, {
       speechFetch: options.speechFetch,
-      runtimeVersion: job.input.runtime_version,
     })(jobId)
   } catch (error) {
     retryError = shouldRequeue(error, phase) ? error : undefined
