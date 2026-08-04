@@ -6,7 +6,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, desc
+from sqlalchemy import delete, select, desc
 from pydantic import BaseModel
 from typing import Optional
 
@@ -14,7 +14,13 @@ import blog_client as blog
 import wechat_api_client as wx
 from config import get_config
 from database import get_db
-from models import ArticleDraft, ArticleSeries, DraftImage, PublishAccount
+from models import (
+    ArticleDraft,
+    ArticleSeries,
+    ContentUsageLedger,
+    DraftImage,
+    PublishAccount,
+)
 
 _UPLOADS_DIR = os.path.join(os.path.dirname(__file__), "..", "uploads")
 _ALLOWED_MIME = {"image/jpeg", "image/png", "image/gif", "image/webp", "image/svg+xml", "image/avif"}
@@ -463,6 +469,12 @@ async def delete_draft(draft_id: int, db: AsyncSession = Depends(get_db)):
             except OSError:
                 pass  # best-effort: don't block the draft delete on filesystem hiccups
         await db.delete(img)
+    await db.execute(
+        delete(ContentUsageLedger).where(
+            ContentUsageLedger.output_kind == "draft",
+            ContentUsageLedger.draft_id == draft_id,
+        )
+    )
     await db.delete(obj)
     await db.commit()
 
