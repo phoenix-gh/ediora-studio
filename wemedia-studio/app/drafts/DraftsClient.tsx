@@ -10,6 +10,7 @@ import {
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
   DialogDescription, DialogFooter,
@@ -21,17 +22,23 @@ import {
   getDraftImages, uploadDraftImage, deleteDraftImage,
 } from '@/lib/api/drafts'
 import { WritingPlan, getWritingPlans, flattenTopicsWithDepth } from '@/lib/api/writing-plans'
+import { illustrateBody, regenerateCover } from '@/lib/api/studio'
 import { MarkdownEditor, MarkdownEditorHandle } from './MarkdownEditor'
 import { PublishDialog } from './PublishDialog'
 import { DraftAssetsDialog } from '@/components/features/DraftAssetsDialog'
+import {
+  BulkImageActionDialog,
+  type BulkImageMode,
+  type BulkImageOptions,
+} from './BulkImageActionDialog'
+import {
+  articleDraftForGroup,
+  runBulkOperations,
+  type DraftGroup,
+} from './draft-bulk-operations'
 import '@uiw/react-md-editor/markdown-editor.css'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
-
-interface DraftGroup {
-  root: Draft          // article (linked_draft_id === null) or orphan variant
-  variants: Draft[]    // platform versions pointing to root
-}
 
 function buildGroups(drafts: Draft[]): DraftGroup[] {
   const roots = drafts.filter(d => d.linked_draft_id === null)
@@ -136,7 +143,7 @@ export function DraftsClient({
   const [topicList, setTopicList] = useState<WritingPlan[]>(initialTopics)
 
   // Group state
-  const groups = buildGroups(drafts)
+  const groups = useMemo(() => buildGroups(drafts), [drafts])
   const findGroupForDraft = (draftId: number) =>
     groups.find(g => g.root.id === draftId || g.variants.some(v => v.id === draftId)) ?? null
 
@@ -151,6 +158,11 @@ export function DraftsClient({
 
   const [filterStatus, setFilterStatus] = useState<string>('all')
   const [filterTopicId, setFilterTopicId] = useState<string>('all')
+  const [selectedGroupIds, setSelectedGroupIds] = useState<Set<number>>(() => new Set())
+  const [bulkMode, setBulkMode] = useState<BulkImageMode | null>(null)
+  const [bulkRunning, setBulkRunning] = useState(false)
+  const [bulkProgress, setBulkProgress] = useState({ completed: 0, total: 0 })
+  const [bulkFailures, setBulkFailures] = useState<Array<{ title: string; reason?: string }>>([])
 
   // Editor state
   const [editTitle, setEditTitle] = useState(selected?.title ?? '')
@@ -293,7 +305,7 @@ export function DraftsClient({
 
   // ── Filtering ──────────────────────────────────────────────────────────────
 
-  const filteredGroups = groups.filter(g => {
+  const filteredGroups = useMemo(() => groups.filter(g => {
     const root = g.root
     if (filterStatus !== 'all' && root.status !== filterStatus) return false
     if (filterTopicId !== 'all') {
@@ -301,7 +313,19 @@ export function DraftsClient({
       if (root.writing_plan_id !== tid) return false
     }
     return true
-  })
+  }), [filterStatus, filterTopicId, groups])
+  const visibleGroupIds = useMemo(
+    () => new Set(filteredGroups.map(group => group.root.id)),
+    [filteredGroups],
+  )
+
+  useEffect(() => {
+    setSelectedGroupIds(current => {
+      const next = new Set([...current].filter(id => visibleGroupIds.has(id)))
+      if (next.size === current.size && [...next].every(id => current.has(id))) return current
+      return next
+    })
+  }, [visibleGroupIds])
 
   // ── Handlers ───────────────────────────────────────────────────────────────
 
@@ -348,6 +372,75 @@ export function DraftsClient({
       .finally(() => {
         if (selectionIdentityRef.current === selectionIdentity) setImagesLoading(false)
       })
+  }
+
+  function toggleGroupSelection(groupId: number) {
+    setSelectedGroupIds(current => {
+      const next = new Set(current)
+      if (next.has(groupId)) next.delete(groupId)
+      else next.add(groupId)
+      return next
+    })
+  }
+
+  function openBulkImageDialog(mode: BulkImageMode) {
+    setBulkMode(mode)
+    setBulkProgress({ completed: 0, total: selectedGroupIds.size })
+    setBulkFailures([])
+  }
+
+  async function handleBulkImageSubmit(options: BulkImageOptions) {
+    if (bulkRunning) return
+    const selectedGroups = filteredGroups.filter(group => selectedGroupIds.has(group.root.id))
+    setBulkRunning(true)
+    setBulkProgress({ completed: 0, total: selectedGroups.length })
+    setBulkFailures([])
+    try {
+      const results = await runBulkOperations(
+        selectedGroups,
+        async group => {
+          const article = articleDraftForGroup(group)
+          if (!article) throw new Error('缺少文章主版本')
+          if (options.mode === 'cover') {
+            await regenerateCover({
+              draft_id: article.id,
+              account_id: options.accountId,
+              note: options.note,
+              cover_style: options.coverStyle,
+            })
+            return
+          }
+          await illustrateBody({
+            draft_id: article.id,
+            account_id: options.accountId,
+            note: options.note,
+            max_images: options.maxImages,
+          })
+        },
+        (completed, total) => setBulkProgress({ completed, total }),
+        3,
+      )
+      const fulfilledIds = new Set(
+        results.filter(result => result.status === 'fulfilled').map(result => result.groupId),
+      )
+      const failures = results
+        .filter(result => result.status === 'rejected')
+        .map(result => ({ title: result.title, reason: result.reason }))
+      setSelectedGroupIds(current => {
+        const next = new Set(current)
+        fulfilledIds.forEach(id => next.delete(id))
+        return next
+      })
+      setBulkFailures(failures)
+      const message = `批量任务已提交：成功 ${fulfilledIds.size}，失败 ${failures.length}`
+      if (failures.length > 0) toast.error(message)
+      else {
+        toast.success(message)
+        setBulkMode(null)
+      }
+    } finally {
+      setBulkRunning(false)
+    }
   }
 
   function doSelectGroup(group: DraftGroup) {
@@ -654,6 +747,7 @@ export function DraftsClient({
         {/* Filters */}
         <div className="px-3 py-2 border-b border-zinc-100 dark:border-zinc-800 flex gap-2">
           <select
+            aria-label="按主题筛选"
             value={filterTopicId}
             onChange={e => setFilterTopicId(e.target.value)}
             className="flex-1 text-xs px-2 py-1.5 border border-zinc-200 dark:border-zinc-700 rounded-md bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 outline-none focus:border-indigo-400 cursor-pointer min-w-0 truncate"
@@ -665,6 +759,7 @@ export function DraftsClient({
             ))}
           </select>
           <select
+            aria-label="按状态筛选"
             value={filterStatus}
             onChange={e => setFilterStatus(e.target.value)}
             className="text-xs px-2 py-1.5 border border-zinc-200 dark:border-zinc-700 rounded-md bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 outline-none focus:border-indigo-400 cursor-pointer"
@@ -675,6 +770,52 @@ export function DraftsClient({
             ))}
           </select>
         </div>
+
+        {filteredGroups.length > 0 ? (
+          <div className="flex flex-col gap-1 border-b border-zinc-100 px-3 py-2 dark:border-zinc-800">
+            <div className="flex items-center gap-1">
+              <Button
+                variant="ghost"
+                size="xs"
+                onClick={() => setSelectedGroupIds(new Set(visibleGroupIds))}
+                disabled={bulkRunning}
+              >
+                全选当前结果
+              </Button>
+              <span className="ml-auto text-xs text-muted-foreground">已选 {selectedGroupIds.size} 组</span>
+              {selectedGroupIds.size > 0 ? (
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  onClick={() => setSelectedGroupIds(new Set())}
+                  disabled={bulkRunning}
+                >
+                  取消选择
+                </Button>
+              ) : null}
+            </div>
+            {selectedGroupIds.size > 0 ? (
+              <div className="flex gap-1">
+                <Button
+                  variant="outline"
+                  size="xs"
+                  onClick={() => openBulkImageDialog('cover')}
+                  disabled={bulkRunning}
+                >
+                  批量封面
+                </Button>
+                <Button
+                  variant="outline"
+                  size="xs"
+                  onClick={() => openBulkImageDialog('illustrations')}
+                  disabled={bulkRunning}
+                >
+                  批量插图
+                </Button>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
 
         {/* Group list */}
         <div className="flex-1 overflow-y-auto">
@@ -697,15 +838,28 @@ export function DraftsClient({
               const topicName = flattenTopicsWithDepth(topicList).find(({ plan }) => plan.id === group.root.writing_plan_id)?.plan.title
               const allInGroup = [group.root, ...group.variants]
               return (
-                <button
+                <div
                   key={group.root.id}
-                  onClick={() => handleSelectGroup(group)}
                   className={cn(
-                    'w-full text-left px-4 py-3 border-b border-zinc-100 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-900 transition-colors group',
-                    isActive && 'bg-indigo-50 dark:bg-indigo-950/30 border-l-2 border-l-indigo-400'
+                    'flex border-b border-zinc-100 dark:border-zinc-800',
+                    isActive && 'border-l-2 border-l-indigo-400',
                   )}
                 >
-                  <div className="flex items-start gap-2">
+                  <div className="flex items-start px-2 py-3">
+                    <Checkbox
+                      checked={selectedGroupIds.has(group.root.id)}
+                      onCheckedChange={() => toggleGroupSelection(group.root.id)}
+                      aria-label={`选择${group.root.title || '（无标题）'}`}
+                    />
+                  </div>
+                  <button
+                    onClick={() => handleSelectGroup(group)}
+                    className={cn(
+                      'group flex-1 px-2 py-3 text-left transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-900',
+                      isActive && 'bg-indigo-50 dark:bg-indigo-950/30',
+                    )}
+                  >
+                    <div className="flex items-start gap-2">
                     <div className="flex-1 min-w-0">
                       {topicName && (
                         <p className="text-[10px] text-indigo-400 mb-0.5 truncate">
@@ -739,8 +893,9 @@ export function DraftsClient({
                       </span>
                       <ChevronRight className={cn('w-3 h-3 text-zinc-300 group-hover:text-zinc-400 transition-colors', isActive && 'text-indigo-400')} />
                     </div>
-                  </div>
-                </button>
+                    </div>
+                  </button>
+                </div>
               )
             })
           )}
@@ -1067,6 +1222,21 @@ export function DraftsClient({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {bulkMode ? (
+        <BulkImageActionDialog
+          open
+          mode={bulkMode}
+          selectedCount={selectedGroupIds.size}
+          running={bulkRunning}
+          progress={bulkProgress}
+          failures={bulkFailures}
+          onClose={() => {
+            if (!bulkRunning) setBulkMode(null)
+          }}
+          onSubmit={options => { void handleBulkImageSubmit(options) }}
+        />
+      ) : null}
 
       {selected && (
         <>

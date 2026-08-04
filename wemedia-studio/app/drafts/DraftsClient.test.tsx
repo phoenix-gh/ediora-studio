@@ -1,16 +1,23 @@
 // @vitest-environment jsdom
 
 import React from 'react'
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { Draft, DraftImage } from '@/lib/api/drafts'
+import type { PublishAccount } from '@/lib/api/publish-accounts'
 
 const mocks = vi.hoisted(() => ({
   updateDraft: vi.fn(),
   getDrafts: vi.fn(),
   getDraftImages: vi.fn(),
   getWritingPlans: vi.fn(),
+  regenerateCover: vi.fn(),
+  illustrateBody: vi.fn(),
+  listPublishAccounts: vi.fn(),
+  toastSuccess: vi.fn(),
+  toastError: vi.fn(),
 }))
 
 const storedValues = new Map<string, string>()
@@ -42,6 +49,20 @@ vi.mock('@/lib/api/writing-plans', async importOriginal => {
   }
 })
 
+vi.mock('@/lib/api/studio', async importOriginal => {
+  const original = await importOriginal<typeof import('@/lib/api/studio')>()
+  return {
+    ...original,
+    regenerateCover: mocks.regenerateCover,
+    illustrateBody: mocks.illustrateBody,
+  }
+})
+
+vi.mock('@/lib/api/publish-accounts', async importOriginal => {
+  const original = await importOriginal<typeof import('@/lib/api/publish-accounts')>()
+  return { ...original, listPublishAccounts: mocks.listPublishAccounts }
+})
+
 vi.mock('./MarkdownEditor', () => ({
   MarkdownEditor: React.forwardRef<
     unknown,
@@ -68,8 +89,8 @@ vi.mock('@/components/features/DraftAssetsDialog', () => ({
 
 vi.mock('sonner', () => ({
   toast: {
-    success: vi.fn(),
-    error: vi.fn(),
+    success: mocks.toastSuccess,
+    error: mocks.toastError,
   },
 }))
 
@@ -102,6 +123,26 @@ function deferred<T>() {
 
 const draftA = makeDraft(1, '草稿 A', 'A 正文', 1)
 const draftB = makeDraft(2, '草稿 B', 'B 正文', 2)
+const publishAccount: PublishAccount = {
+  id: 'account-a',
+  name: '账号 A',
+  platform: 'wechat',
+  positioning: 'AI 工具解读',
+  audience: '开发者',
+  tone: '清晰',
+  topic_focus: ['AI'],
+  taboo: [],
+  word_range: {},
+  daily_quota: {},
+  image_style: 'editorial',
+  cover_style: { palette: 'cool' },
+  voice_samples: [],
+  style_rules: [],
+  app_id: '',
+  app_secret: '',
+  is_active: true,
+  created_at: '2026-08-04T00:00:00Z',
+}
 const refreshedImage = {
   id: 10,
   filename: 'cover.png',
@@ -117,6 +158,9 @@ beforeEach(() => {
   mocks.getDrafts.mockResolvedValue([draftA, draftB])
   mocks.getDraftImages.mockResolvedValue([])
   mocks.getWritingPlans.mockResolvedValue([])
+  mocks.listPublishAccounts.mockResolvedValue([publishAccount])
+  mocks.regenerateCover.mockResolvedValue({ task_id: 'cover-task' })
+  mocks.illustrateBody.mockResolvedValue({ task_id: 'illustration-task' })
 })
 
 afterEach(() => {
@@ -266,5 +310,123 @@ describe('DraftsClient async response identity', () => {
 
     expect(screen.queryByText('旧会话消息')).toBeNull()
     expect(screen.getByText('可以说：')).toBeTruthy()
+  })
+})
+
+describe('DraftsClient visible group selection', () => {
+  it('selects a group without changing the active editor draft', () => {
+    render(
+      <DraftsClient
+        initialDrafts={[draftA, draftB]}
+        initialTopics={[]}
+        initialDraftId={draftA.id}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('checkbox', { name: '选择草稿 B' }))
+
+    expect(screen.getByText('已选 1 组')).toBeInTheDocument()
+    expect(screen.getByPlaceholderText('标题…')).toHaveValue('草稿 A')
+  })
+
+  it('selects all current results and removes hidden groups when the status filter changes', async () => {
+    const readyDraftB = { ...draftB, status: 'ready' }
+    render(
+      <DraftsClient
+        initialDrafts={[draftA, readyDraftB]}
+        initialTopics={[]}
+        initialDraftId={draftA.id}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '全选当前结果' }))
+    expect(screen.getByText('已选 2 组')).toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText('按状态筛选'), { target: { value: 'ready' } })
+
+    await waitFor(() => expect(screen.getByText('已选 1 组')).toBeInTheDocument())
+    expect(screen.getByRole('checkbox', { name: '选择草稿 B' })).toBeChecked()
+    expect(screen.queryByRole('checkbox', { name: '选择草稿 A' })).not.toBeInTheDocument()
+  })
+})
+
+describe('DraftsClient bulk image dispatch', () => {
+  it('submits one shared cover request for each selected article draft', async () => {
+    const user = userEvent.setup()
+    const xVariant = {
+      ...makeDraft(2, 'X 版本', 'X 正文', 1),
+      draft_type: 'x',
+      linked_draft_id: 1,
+    }
+    const articleB = makeDraft(4, '文章 B', 'B 正文', 1)
+    render(
+      <DraftsClient
+        initialDrafts={[draftA, xVariant, articleB]}
+        initialTopics={[]}
+        initialDraftId={draftA.id}
+      />,
+    )
+
+    await user.click(screen.getByRole('checkbox', { name: '选择草稿 A' }))
+    await user.click(screen.getByRole('checkbox', { name: '选择文章 B' }))
+    await user.click(screen.getByRole('button', { name: '批量封面' }))
+
+    await user.click(await screen.findByLabelText('发布账号'))
+    await user.click(await screen.findByRole('option', { name: /账号 A/ }))
+    await user.type(screen.getByLabelText('额外指令'), '冷色调')
+    await user.click(screen.getByRole('button', { name: '开始批量封面' }))
+
+    await waitFor(() => expect(mocks.regenerateCover).toHaveBeenCalledTimes(2))
+    expect(mocks.regenerateCover).toHaveBeenNthCalledWith(1, {
+      draft_id: 1,
+      account_id: 'account-a',
+      note: '冷色调',
+      cover_style: { palette: 'cool' },
+    })
+    expect(mocks.regenerateCover).toHaveBeenNthCalledWith(2, {
+      draft_id: 4,
+      account_id: 'account-a',
+      note: '冷色调',
+      cover_style: { palette: 'cool' },
+    })
+    await waitFor(() => expect(screen.getByText('已选 0 组')).toBeInTheDocument())
+    expect(mocks.toastSuccess).toHaveBeenCalledWith('批量任务已提交：成功 2，失败 0')
+  })
+
+  it('keeps an orphan group selected and reports it without sending an illustration request', async () => {
+    const user = userEvent.setup()
+    const orphan = {
+      ...makeDraft(3, '孤立 X 稿', 'X 正文', 1),
+      draft_type: 'x',
+      linked_draft_id: 99,
+    }
+    render(
+      <DraftsClient
+        initialDrafts={[draftA, orphan]}
+        initialTopics={[]}
+        initialDraftId={draftA.id}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: '全选当前结果' }))
+    await user.click(screen.getByRole('button', { name: '批量插图' }))
+    await user.click(await screen.findByLabelText('发布账号'))
+    await user.click(await screen.findByRole('option', { name: /账号 A/ }))
+    fireEvent.change(screen.getByLabelText('每篇最多插图'), { target: { value: '3' } })
+    await user.type(screen.getByLabelText('额外指令'), '解释结构')
+    await user.click(screen.getByRole('button', { name: '开始批量插图' }))
+
+    await waitFor(() => expect(mocks.illustrateBody).toHaveBeenCalledTimes(1))
+    expect(mocks.illustrateBody).toHaveBeenCalledWith({
+      draft_id: 1,
+      account_id: 'account-a',
+      note: '解释结构',
+      max_images: 3,
+    })
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText(/孤立 X 稿/)).toBeInTheDocument()
+    expect(within(dialog).getByText(/缺少文章主版本/)).toBeInTheDocument()
+    expect(screen.getByText('已选 1 组')).toBeInTheDocument()
+    expect(mocks.toastError).toHaveBeenCalledWith('批量任务已提交：成功 1，失败 1')
   })
 })
