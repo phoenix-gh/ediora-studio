@@ -6,6 +6,53 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
 
+def creation_rule_payload(**overrides):
+    payload = {
+        "name": "增长短帖",
+        "asset_type": "article",
+        "directory": "增长实验",
+        "output_type": "x_short_post",
+        "target_count": 3,
+        "execution_mode": "recurring",
+        "scheduled_time": "09:00",
+        "timezone": "Asia/Shanghai",
+        "lookback_days": 7,
+        "delivery_mode": "drafts",
+    }
+    payload.update(overrides)
+    return payload
+
+
+def test_manual_skill_requires_a_name_and_auto_clears_it():
+    from pydantic import ValidationError
+    from routers.daily_plan import CreationRuleIn
+
+    with pytest.raises(ValidationError, match="skill_name is required"):
+        CreationRuleIn(**creation_rule_payload(
+            skill_mode="manual", skill_name=None,
+        ))
+    automatic = CreationRuleIn(**creation_rule_payload(
+        skill_mode="auto", skill_name="stale-skill",
+    ))
+    assert automatic.skill_name is None
+
+
+def test_snapshot_keeps_manual_skill_selection():
+    from daily_creation_service import snapshot_creation_rule
+    from models import DailyCreationRule
+
+    rule = DailyCreationRule(
+        **creation_rule_payload(),
+        skill_mode="manual",
+        skill_name="human-social-copy",
+    )
+
+    snapshot = snapshot_creation_rule(rule)
+
+    assert snapshot["skill_mode"] == "manual"
+    assert snapshot["skill_name"] == "human-social-copy"
+
+
 @pytest.fixture
 def session_factory(tmp_path):
     database_path = tmp_path / "daily-creation-schema.db"

@@ -137,3 +137,82 @@ def test_mcp_combines_multiple_directories_and_keeps_legacy_argument(env):
 
     assert {item["id"] for item in combined} == {first_id, second_id}
     assert [item["id"] for item in legacy] == [first_id]
+
+
+def test_mcp_saves_one_agent_validated_output_batch(env):
+    asset_id, _, run_id = seed_context()
+    from database import SessionLocal
+    from models import AgentExecution, AgentToolCall, ContentJob, DailyCreationRun
+
+    async def seed_execution():
+        async with SessionLocal() as session:
+            creation_run = await session.get(DailyCreationRun, run_id)
+            job = ContentJob(
+                flow="daily_creation", title="Agent MCP",
+                input_data={"run_id": run_id},
+            )
+            session.add(job)
+            await session.flush()
+            creation_run.content_job_id = job.id
+            execution = AgentExecution(
+                job_id=job.id, objective="create posts", skill_mode="auto",
+            )
+            session.add(execution)
+            await session.flush()
+            session.add(AgentToolCall(
+                execution_id=execution.id,
+                tool_call_id="candidates",
+                tool_name="list_creative_asset_candidates",
+                status="succeeded",
+                input_summary={},
+                output_data=[{"id": asset_id}],
+            ))
+            await session.commit()
+            return execution.id
+
+    execution_id = run(seed_execution())
+    import mcp_server
+
+    result = run(mcp_server.save_daily_creation_outputs(
+        execution_id=execution_id,
+        run_id=run_id,
+        idempotency_key="mcp-final-1",
+        posts=[{
+            "source_asset_ids": [asset_id],
+            "title": "先验证",
+            "text": "先验证真实需求，再投入完整开发。",
+            "reuse_decision": "fresh",
+            "reuse_explanation": "新内容",
+            "compared_usage_ids": [],
+            "metadata": {},
+        }],
+        self_validation={"passed": True, "summary": "checked"},
+    ))
+    replay = run(mcp_server.save_daily_creation_outputs(
+        execution_id=execution_id,
+        run_id=run_id,
+        idempotency_key="mcp-final-1",
+        posts=[{
+            "source_asset_ids": [asset_id],
+            "title": "先验证",
+            "text": "先验证真实需求，再投入完整开发。",
+            "reuse_decision": "fresh",
+            "reuse_explanation": "新内容",
+            "compared_usage_ids": [],
+            "metadata": {},
+        }],
+        self_validation={"passed": True, "summary": "checked"},
+    ))
+
+    async def draft_count():
+        from sqlalchemy import func, select
+        from models import ArticleDraft
+
+        async with SessionLocal() as session:
+            return await session.scalar(select(func.count(ArticleDraft.id)))
+
+    assert result["run_id"] == run_id
+    assert replay == result
+    assert result["created_count"] == 1
+    assert len(result["draft_ids"]) == 1
+    assert run(draft_count()) == 1

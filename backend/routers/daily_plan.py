@@ -12,6 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
 from models import (
+    AgentExecution,
+    AgentToolCall,
     ContentUsageLedger,
     CreativeAssetDirectory,
     DailyCreationRule,
@@ -84,6 +86,8 @@ class CreationRuleIn(BaseModel):
     delivery_mode: Literal["drafts", "plan_items"]
     account_id: str | None = None
     instructions: str = Field(default="", max_length=4000)
+    skill_mode: Literal["auto", "manual"] = "auto"
+    skill_name: str | None = Field(default=None, max_length=200)
     enabled: bool = True
 
     @model_validator(mode="after")
@@ -96,6 +100,12 @@ class CreationRuleIn(BaseModel):
         )
         self.directories = normalized
         self.directory = normalized[0]
+        if self.skill_mode == "manual":
+            if not (self.skill_name or "").strip():
+                raise ValueError("skill_name is required in manual mode")
+            self.skill_name = self.skill_name.strip()
+        else:
+            self.skill_name = None
         if self.execution_mode == "once" and self.scheduled_date is None:
             raise ValueError("scheduled_date is required for once rules")
         if self.execution_mode == "recurring" and self.scheduled_date is not None:
@@ -122,6 +132,8 @@ class CreationRulePatch(BaseModel):
     delivery_mode: Literal["drafts", "plan_items"] | None = None
     account_id: str | None = None
     instructions: str | None = Field(default=None, max_length=4000)
+    skill_mode: Literal["auto", "manual"] | None = None
+    skill_name: str | None = Field(default=None, max_length=200)
     enabled: bool | None = None
 
 
@@ -141,6 +153,7 @@ def _rule_out(rule: DailyCreationRule) -> dict:
         "scheduled_time": rule.scheduled_time, "timezone": rule.timezone,
         "lookback_days": rule.lookback_days, "delivery_mode": rule.delivery_mode,
         "account_id": rule.account_id, "instructions": rule.instructions or "",
+        "skill_mode": rule.skill_mode or "auto", "skill_name": rule.skill_name,
         "enabled": rule.enabled,
         "created_at": rule.created_at.isoformat() if rule.created_at else "",
         "updated_at": rule.updated_at.isoformat() if rule.updated_at else "",
@@ -158,6 +171,114 @@ def _run_out(creation_run: DailyCreationRun) -> dict:
         "detail": creation_run.detail or {},
         "rule": creation_run.rule_snapshot or {},
         "created_at": creation_run.created_at.isoformat() if creation_run.created_at else "",
+    }
+
+
+def _bounded_completion(value: object) -> dict | None:
+    if not isinstance(value, dict) or not value:
+        return None
+    allowed = (
+        "toolName", "toolCallId", "runId", "createdCount",
+        "outputIds", "usageIds",
+    )
+    return {key: value[key] for key in allowed if key in value}
+
+
+def _loaded_reference_summary(audit: dict) -> list[dict]:
+    skill_run = audit.get("skillRun") or audit.get("skill_run") or {}
+    raw = audit.get("loaded_references")
+    if not isinstance(raw, list) and isinstance(skill_run, dict):
+        raw = skill_run.get("loadedReferences") or skill_run.get("loaded_references")
+    if not isinstance(raw, list):
+        return []
+    references: list[dict] = []
+    seen: set[str] = set()
+    for item in raw[:100]:
+        if isinstance(item, str):
+            path, size = item, 0
+        elif isinstance(item, dict):
+            path = item.get("path")
+            size = item.get("bytes", 0)
+        else:
+            continue
+        if not isinstance(path, str) or not path.strip() or path in seen:
+            continue
+        seen.add(path)
+        references.append({
+            "path": path[:500],
+            "bytes": size if isinstance(size, int) and size >= 0 else 0,
+        })
+    return references
+
+
+async def _agent_execution_summary(
+    db: AsyncSession,
+    creation_run: DailyCreationRun,
+) -> dict | None:
+    if creation_run.content_job_id is None:
+        return None
+    execution = await db.scalar(select(AgentExecution).where(
+        AgentExecution.job_id == creation_run.content_job_id
+    ))
+    if execution is None:
+        return None
+    audit = execution.audit_data if isinstance(execution.audit_data, dict) else {}
+    skill_run = audit.get("skillRun") or audit.get("skill_run") or {}
+    skill = audit.get("skill") if isinstance(audit.get("skill"), dict) else {}
+    if not isinstance(skill_run, dict):
+        skill_run = {}
+    skill_name = (
+        execution.skill_name
+        or skill_run.get("skillName")
+        or skill_run.get("skill_name")
+        or skill.get("activeSkillName")
+    )
+    activation = (
+        execution.skill_activation
+        or skill_run.get("activation")
+        or skill.get("source")
+        or ""
+    )
+    if activation not in {"manual", "automatic"}:
+        activation = ""
+    calls = list((await db.execute(
+        select(AgentToolCall).where(
+            AgentToolCall.execution_id == execution.id
+        ).order_by(AgentToolCall.id.desc()).limit(100)
+    )).scalars().all())
+    calls.reverse()
+    tools = [{
+        "tool_name": call.tool_name,
+        "status": call.status,
+        "auto_approved": call.auto_approved,
+        "occurred_at": (
+            call.completed_at or call.started_at
+        ).isoformat() if (call.completed_at or call.started_at) else "",
+        "error": (call.error or "")[:500],
+    } for call in calls]
+    detail = creation_run.detail if isinstance(creation_run.detail, dict) else {}
+    self_validation = detail.get("self_validation")
+    return {
+        "status": execution.status,
+        "phase": execution.phase,
+        "skill_name": skill_name if isinstance(skill_name, str) else None,
+        "skill_activation": activation,
+        "loaded_references": _loaded_reference_summary(audit),
+        "tools": tools,
+        "self_validation": (
+            self_validation if isinstance(self_validation, dict) else {}
+        ),
+        "completion": _bounded_completion(execution.completion_evidence),
+    }
+
+
+async def _run_out_with_agent(
+    db: AsyncSession,
+    creation_run: DailyCreationRun,
+) -> dict:
+    return {
+        **_run_out(creation_run),
+        "agent_execution": await _agent_execution_summary(db, creation_run),
     }
 
 
@@ -266,7 +387,7 @@ async def run_creation_rule(rule_id: int, db: AsyncSession = Depends(get_db)):
         await db.commit()
         await db.refresh(creation_run)
         await enqueue_job(creation_run.content_job_id)
-    return _run_out(creation_run)
+    return await _run_out_with_agent(db, creation_run)
 
 
 @router.get("/creation-runs")
@@ -282,7 +403,7 @@ async def list_creation_runs(
     )).scalars().all()
     if date:
         rows = [row for row in rows if row.scheduled_for.date().isoformat() == date]
-    return [_run_out(row) for row in rows]
+    return [await _run_out_with_agent(db, row) for row in rows]
 
 
 @router.get("/creation-runs/{run_id}")
@@ -290,7 +411,7 @@ async def get_creation_run(run_id: int, db: AsyncSession = Depends(get_db)):
     creation_run = await db.get(DailyCreationRun, run_id)
     if creation_run is None:
         raise HTTPException(404, "creation run not found")
-    return _run_out(creation_run)
+    return await _run_out_with_agent(db, creation_run)
 
 
 @router.get(

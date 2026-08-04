@@ -194,6 +194,48 @@ def test_queued_and_latest_succeeded_are_enqueued_once_across_two_passes(
     asyncio.run(run())
 
 
+def test_running_agent_v1_daily_job_is_resumed_but_terminal_history_is_not(
+    reconciliation_env,
+):
+    from job_reconciliation import reconcile_content_jobs
+
+    async def run():
+        queued_id, _ = await _seed_job(
+            reconciliation_env,
+            flow="daily_creation",
+            status="queued",
+            input_data={"run_id": 80, "runtime_version": "agent-v1"},
+        )
+        agent_id, _ = await _seed_job(
+            reconciliation_env,
+            flow="daily_creation",
+            status="running",
+            input_data={"run_id": 81, "runtime_version": "agent-v1"},
+            step_key="agent",
+            step_status="running",
+        )
+        legacy_id, _ = await _seed_job(
+            reconciliation_env,
+            flow="daily_creation",
+            status="succeeded",
+            input_data={"run_id": 72},
+            step_key="persist",
+            step_status="succeeded",
+        )
+        queue = FakeFencedQueue()
+
+        result = await reconcile_content_jobs(
+            queue,
+            session_factory=reconciliation_env.SessionLocal,
+        )
+
+        assert result == {"enqueued": 2, "job_ids": [queued_id, agent_id]}
+        assert queue.items == [queued_id, agent_id]
+        assert legacy_id not in queue.items
+
+    asyncio.run(run())
+
+
 def test_active_worker_lease_skips_and_expired_lease_is_recovered(
     reconciliation_env,
 ):

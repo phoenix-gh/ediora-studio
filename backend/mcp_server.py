@@ -374,6 +374,34 @@ async def get_recent_content_usage(
 
 
 @mcp.tool()
+async def save_daily_creation_outputs(
+    execution_id: int,
+    run_id: int,
+    idempotency_key: str,
+    posts: list[dict],
+    self_validation: dict,
+) -> dict:
+    """Atomically persist an Agent's final validated daily outputs.
+
+    Use this only for the daily creation execution and run IDs supplied in the
+    task objective. Every source asset and compared usage ID must come from a
+    successful tool result in this Agent execution. A successful response with
+    real output IDs is the only completion evidence; prose is not completion.
+    """
+    from daily_creation_service import persist_daily_creation_output_batch
+
+    async with SessionLocal() as db:
+        return await persist_daily_creation_output_batch(
+            db,
+            execution_id=execution_id,
+            run_id=run_id,
+            idempotency_key=idempotency_key,
+            posts=posts,
+            self_validation=self_validation,
+        )
+
+
+@mcp.tool()
 async def record_content_usage(
     run_id: int,
     asset_id: int,

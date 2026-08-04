@@ -1,10 +1,14 @@
-import { readFileSync } from 'node:fs'
-
 import type { ToolSet } from 'ai'
 import { describe, expect, it } from 'vitest'
 
 import { latestClientTurn, modelHistoryCandidates } from '../../../lib/ai/chat-tools'
-import { executionToolsForSelection, genericSkillRuntimeEnabled, skillAwareStepPolicy, selectedSkillContext } from './route'
+import {
+  agentRunUIResponse,
+  executionToolsForSelection,
+  genericSkillRuntimeEnabled,
+  skillAwareStepPolicy,
+  selectedSkillContext,
+} from './route'
 
 describe('global chat model history', () => {
   it('describes available references without embedding their content', async () => {
@@ -27,15 +31,6 @@ describe('global chat model history', () => {
     expect(context).toContain('Do not claim that this Skill or these references were not loaded')
   })
 
-  it('uses the global MCP registry and image-skill runtime adapter', () => {
-    const source = readFileSync(new URL('./route.ts', import.meta.url), 'utf8')
-
-    expect(source).toContain('openGlobalChatTools')
-    expect(source).toContain('baoyuRuntimeInstructions')
-    expect(source).toContain('workerHeaders()')
-    expect(source).not.toContain('makeChatTools')
-  })
-
   it('guards the generic Skill runtime with an opt-out switch', () => {
     const previous = process.env.WMS_GENERIC_SKILL_RUNTIME
     delete process.env.WMS_GENERIC_SKILL_RUNTIME
@@ -46,14 +41,15 @@ describe('global chat model history', () => {
     else process.env.WMS_GENERIC_SKILL_RUNTIME = previous
   })
 
-  it('plans, validates, and persists generic Skill runs without Skill-name branches', () => {
-    const source = readFileSync(new URL('./route.ts', import.meta.url), 'utf8')
+  it('converts a completed shared Agent result into the Chat UI stream', async () => {
+    const response = agentRunUIResponse({
+      kind: 'completed',
+      text: 'shared validated result',
+      parts: [{ type: 'text', text: 'shared validated result' }],
+      revisionCount: 0,
+    })
 
-    expect(source).toContain('executeSkillRunWithAiSdk')
-    expect(source).toContain('skillRunAudit(run, revisionCount)')
-    expect(source).toContain('skillRunPlanInputSchema.safeParse(planned.output)')
-    expect(source).toContain('skillRunValidationSchema.safeParse(checked.output)')
-    expect(source).not.toMatch(/selected\.skill\.name\s*===/)
+    await expect(response.text()).resolves.toContain('shared validated result')
   })
 
   it('does not expose legacy automatic Skill loading after the selector declines', () => {

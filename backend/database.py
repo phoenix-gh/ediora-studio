@@ -857,6 +857,8 @@ async def init_db():
         )
         await _add_columns(conn, "daily_creation_rules", {
             "directories": f"JSON NOT NULL DEFAULT {json_array_default}",
+            "skill_mode": "VARCHAR NOT NULL DEFAULT 'auto'",
+            "skill_name": "VARCHAR",
         })
         if conn.dialect.name == "sqlite":
             await conn.execute(text(
