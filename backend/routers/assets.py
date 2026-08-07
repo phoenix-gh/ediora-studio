@@ -3,6 +3,7 @@ import uuid
 import re
 import hashlib
 from datetime import datetime
+from pathlib import Path
 from typing import Literal
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
@@ -13,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
 from models import ContentJob, CreativeAsset, CreativeAssetDirectory, TopicSourceDecision, TopicSourceRule, XPost, XSubscription
+from remote_image_import import import_remote_images
 from worker_auth import require_worker_token
 
 router = APIRouter(prefix="/assets", tags=["assets"])
@@ -105,6 +107,21 @@ class TopicSourceAccept(BaseModel):
 class DailyCandidateRequest(BaseModel):
     directory: str = Field(min_length=1, max_length=80)
     limit: int = Field(default=10, ge=1, le=10)
+
+
+class RemoteImageImportBody(BaseModel):
+    urls: list[str] = Field(min_length=1, max_length=20)
+
+
+class RemoteImageImportItem(BaseModel):
+    source_url: str
+    url: str = ""
+    error_code: str = ""
+    error: str = ""
+
+
+class RemoteImageImportOut(BaseModel):
+    items: list[RemoteImageImportItem]
 
 
 def _directory_payload(directory: CreativeAssetDirectory) -> dict:
@@ -286,6 +303,20 @@ async def delete_topic_source_rule(rule_id: int, db: AsyncSession = Depends(get_
         raise HTTPException(404, "主题规则不存在")
     await db.delete(rule)
     await db.commit()
+
+
+@router.post("/images/import", response_model=RemoteImageImportOut)
+async def import_asset_images(body: RemoteImageImportBody):
+    results = await import_remote_images(body.urls, Path(_UPLOADS_DIR))
+    return {"items": [
+        {
+            "source_url": item.source_url,
+            "url": item.url,
+            "error_code": item.error_code,
+            "error": item.error,
+        }
+        for item in results
+    ]}
 
 
 @router.get("/topic-rules/{rule_id}/candidates")
