@@ -203,3 +203,83 @@
     @apply font-sans;
   }
 }
+
+.asset-visual-markdown-editor .milkdown {
+  --crepe-color-background: var(--surface);
+  --crepe-color-on-background: var(--foreground);
+  --crepe-color-surface: var(--surface-muted);
+  --crepe-color-surface-low: var(--muted);
+  --crepe-color-on-surface: var(--foreground);
+  --crepe-color-on-surface-variant: var(--muted-foreground);
+  --crepe-color-outline: var(--border-strong);
+  --crepe-color-primary: var(--primary);
+  --crepe-color-secondary: var(--accent);
+  --crepe-color-on-secondary: var(--accent-foreground);
+  --crepe-color-inverse: var(--foreground);
+  --crepe-color-on-inverse: var(--background);
+  --crepe-color-inline-code: var(--danger);
+  --crepe-color-error: var(--danger);
+  --crepe-color-hover: var(--muted);
+  --crepe-color-selected: var(--accent);
+  --crepe-color-inline-area: var(--border);
+  --crepe-base-font-size: 16px;
+  --crepe-font-title: var(--font-geist-sans), sans-serif;
+  --crepe-font-default: var(--font-geist-sans), sans-serif;
+  --crepe-font-code: var(--font-geist-mono), monospace;
+  --crepe-shadow-1: 0 1px 3px color-mix(in srgb, var(--foreground) 12%, transparent);
+  --crepe-shadow-2: 0 4px 12px color-mix(in srgb, var(--foreground) 16%, transparent);
+  min-height: 100%;
+  background: var(--surface);
+  color: var(--foreground);
+}
+
+.asset-visual-markdown-editor .milkdown .ProseMirror {
+  box-sizing: border-box;
+  min-height: 420px;
+  padding: 1.5rem 2rem 5rem;
+  caret-color: var(--foreground);
+}
+
+.asset-visual-markdown-editor .milkdown .ProseMirror:focus-visible {
+  outline: none;
+}
+
+.asset-visual-markdown-editor .milkdown img {
+  max-width: 100%;
+}
+
+.asset-visual-markdown-editor .asset-image-import-processing {
+  opacity: 0.72;
+}
+
+.asset-visual-markdown-editor .asset-image-import-failed {
+  outline: 2px solid color-mix(in srgb, var(--danger) 65%, transparent);
+  outline-offset: 3px;
+}
+
+.asset-visual-markdown-editor .asset-image-import-status,
+.asset-visual-markdown-editor .asset-image-import-retry {
+  display: inline-flex;
+  align-items: center;
+  margin: 0.35rem 0 0.75rem 0.5rem;
+  border-radius: var(--radius-sm);
+  padding: 0.2rem 0.45rem;
+  font-size: 0.75rem;
+  line-height: 1.25rem;
+}
+
+.asset-visual-markdown-editor .asset-image-import-status {
+  background: var(--muted);
+  color: var(--muted-foreground);
+}
+
+.asset-visual-markdown-editor .asset-image-import-retry {
+  border: 1px solid color-mix(in srgb, var(--danger) 45%, var(--border));
+  background: var(--surface);
+  color: var(--danger);
+  cursor: pointer;
+}
+
+.asset-visual-markdown-editor .asset-image-import-retry:hover {
+  background: color-mix(in srgb, var(--danger) 8%, var(--surface));
+}

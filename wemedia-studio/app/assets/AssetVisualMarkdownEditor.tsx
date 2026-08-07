@@ -4,6 +4,7 @@ import type { ClipboardEvent as ReactClipboardEvent } from 'react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { EditorView } from '@milkdown/kit/prose/view'
 import { toast } from 'sonner'
+import '@milkdown/crepe/theme/common/style.css'
 
 import {
   creativeAssetUrl,

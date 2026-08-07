@@ -25,8 +25,8 @@ vi.mock('@/lib/api/assets', () => ({
   updateCreativeAsset: mocks.updateCreativeAsset,
 }))
 
-vi.mock('@/app/drafts/MarkdownEditor', () => ({
-  MarkdownEditor: ({ onChange, value }: { onChange: (value: string) => void; value: string }) => <textarea aria-label="Markdown content" onChange={event => onChange(event.target.value)} value={value} />,
+vi.mock('./AssetVisualMarkdownEditor', () => ({
+  AssetVisualMarkdownEditor: ({ documentKey, onChange, value }: { documentKey: number; onChange: (value: string) => void; value: string }) => <textarea aria-label="可视化 Markdown 编辑器" data-document-key={documentKey} onChange={event => onChange(event.target.value)} value={value} />,
 }))
 
 import { AssetsClient } from './AssetsClient'
@@ -95,6 +95,15 @@ describe('creative assets workspace', () => {
     expect(screen.getByRole('region', { name: '素材编辑器' })).toBeVisible()
   })
 
+  it('opens the visual Markdown editor for the selected article', () => {
+    render(<AssetsClient initialAssets={[article(1, '第一篇', '正文')]} />)
+
+    expect(screen.getByLabelText('可视化 Markdown 编辑器')).toHaveAttribute(
+      'data-document-key',
+      '1',
+    )
+  })
+
   it('updates the right-hand editor when another article is selected', async () => {
     const user = userEvent.setup()
     render(<AssetsClient initialAssets={[article(1, '第一篇', '正文一'), article(2, '第二篇', '正文二')]} />)
@@ -126,7 +135,7 @@ describe('creative assets workspace', () => {
     const title = screen.getByPlaceholderText('文章标题')
     await user.clear(title)
     await user.type(title, '新标题')
-    const content = screen.getByLabelText('Markdown content')
+    const content = screen.getByLabelText('可视化 Markdown 编辑器')
     await user.clear(content)
     await user.type(content, '新正文')
     const sourceUrl = screen.getByLabelText('来源 URL')
