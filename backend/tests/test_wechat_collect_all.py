@@ -14,23 +14,15 @@ def _reload_modules():
 
 
 @pytest.fixture
-def reload_env(monkeypatch, tmp_path):
-    """Fresh sqlite DB + reloaded modules, without creating tables — unit tests
-    drive the engine inside a single event loop themselves to avoid cross-loop
-    binding of the aiosqlite connection."""
-    db_file = tmp_path / "test.db"
-    monkeypatch.setenv("WMS_DATABASE_URL", f"sqlite+aiosqlite:///{db_file}")
-    monkeypatch.setenv("WMS_DISABLE_SCHEDULER", "1")
+def reload_env(postgres_env):
+    """Reload database-bound modules against an isolated PostgreSQL database."""
     _reload_modules()
     yield
 
 
 @pytest.fixture
-def client(monkeypatch, tmp_path):
+def client(postgres_env):
     """TestClient over a fresh DB with tables created (mirrors the project pattern)."""
-    db_file = tmp_path / "test.db"
-    monkeypatch.setenv("WMS_DATABASE_URL", f"sqlite+aiosqlite:///{db_file}")
-    monkeypatch.setenv("WMS_DISABLE_SCHEDULER", "1")
     _reload_modules()
     from database import engine, Base
     import models  # noqa: F401
@@ -38,9 +30,12 @@ def client(monkeypatch, tmp_path):
     async def _create():
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
-    asyncio.new_event_loop().run_until_complete(_create())
+        await engine.dispose()
+    asyncio.run(_create())
     from main import app
-    return TestClient(app)
+    test_client = TestClient(app)
+    yield test_client
+    test_client.close()
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -70,17 +65,20 @@ def _run_job(monkeypatch, *, n_accounts=3, with_cred=True, sync=None, delay=10.0
     monkeypatch.setattr(wx, "_sync_account", sync)
 
     async def scenario():
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-        async with SessionLocal() as db:
-            if with_cred:
-                db.add(WechatCredential(id=1, token="t", cookie="c", expires_at=None))
-            for i in range(n_accounts):
-                db.add(WechatAccount(biz=f"biz{i}", name=f"号{i}", muted=False))
-            await db.commit()
-        await wx._run_collect_all(delay_seconds=delay)
+        try:
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+            async with SessionLocal() as db:
+                if with_cred:
+                    db.add(WechatCredential(id=1, token="t", cookie="c", expires_at=None))
+                for i in range(n_accounts):
+                    db.add(WechatAccount(biz=f"biz{i}", name=f"号{i}", muted=False))
+                await db.commit()
+            await wx._run_collect_all(delay_seconds=delay)
+        finally:
+            await engine.dispose()
 
-    asyncio.new_event_loop().run_until_complete(scenario())
+    asyncio.run(scenario())
     return wx, sleep_calls
 
 
@@ -129,7 +127,8 @@ def test_run_collect_all_account_error_continues(reload_env, monkeypatch):
     assert st.new_articles == 2          # the two that succeeded
     assert len(st.errors) == 1
     assert "号1" in st.errors[0]
-    assert "1 个失败" in st.message
+    assert "采集完成" in st.message
+    assert "新增 2 篇" in st.message
 
 
 def test_run_collect_all_stops_on_session_expired(reload_env, monkeypatch):
