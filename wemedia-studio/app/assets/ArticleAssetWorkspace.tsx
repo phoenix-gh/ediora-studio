@@ -1,13 +1,12 @@
 import { Trash2 } from 'lucide-react'
 
-import { MarkdownEditor } from '@/app/drafts/MarkdownEditor'
 import { AsyncState } from '@/components/layout/AsyncState'
 import { SplitWorkspace } from '@/components/layout/SplitWorkspace'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 import type { CreativeAsset } from '@/lib/api/assets'
-import '@uiw/react-md-editor/markdown-editor.css'
+import { AssetVisualMarkdownEditor } from './AssetVisualMarkdownEditor'
 
 type ArticleAssetWorkspaceProps = {
   assets: CreativeAsset[]
@@ -40,7 +39,12 @@ export function ArticleAssetWorkspace({ assets, selected, isSaving = false, onSe
           <Input aria-label="来源 URL" onChange={event => onChange({ ...selected, url: event.target.value })} placeholder="来源 URL（可留空）" value={selected.url} />
         </div>
         <div className="mt-4 min-h-0 flex-1 overflow-hidden rounded-lg border border-border bg-surface">
-          <MarkdownEditor minHeight={420} onChange={content => onChange({ ...selected, content })} value={selected.content} />
+          <AssetVisualMarkdownEditor
+            documentKey={selected.id}
+            key={selected.id}
+            onChange={content => onChange({ ...selected, content })}
+            value={selected.content}
+          />
         </div>
       </div> : <AsyncState description="从左侧素材列表选择文章开始编辑。" title="尚未选择素材" variant="empty" />}
     />

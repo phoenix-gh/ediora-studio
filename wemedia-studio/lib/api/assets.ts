@@ -12,6 +12,23 @@ export type CreativeAssetCreate = Omit<Pick<CreativeAsset, 'asset_type' | 'media
 export const createCreativeAsset = (body: CreativeAssetCreate) => apiFetch<CreativeAsset>('/assets', { method: 'POST', body: JSON.stringify(body) })
 export const updateCreativeAsset = (id: number, body: Partial<Pick<CreativeAsset, 'title' | 'content' | 'url' | 'directory' | 'tags'>>) => apiFetch<CreativeAsset>(`/assets/${id}`, { method: 'PATCH', body: JSON.stringify(body) })
 export async function uploadCreativeAsset(mediaKind: 'image' | 'video' | 'audio', file: File) { const body = new FormData(); body.append('file', file); return apiFetch<CreativeAsset>(`/assets/upload?media_kind=${mediaKind}`, { method: 'POST', body, headers: {} }) }
+export type RemoteImageImportItem = { source_url: string; url: string; error_code: string; error: string }
+export const importCreativeAssetImages = async (urls: string[]) => (
+  await apiFetch<{ items: RemoteImageImportItem[] }>('/assets/images/import', {
+    method: 'POST',
+    body: JSON.stringify({ urls }),
+  })
+).items
+export async function uploadInlineAssetImage(file: File) {
+  const body = new FormData()
+  body.append('file', file)
+  const result = await apiFetch<{ url: string }>('/upload/image', {
+    method: 'POST',
+    body,
+    headers: {},
+  })
+  return result.url
+}
 export const deleteCreativeAsset = (id: number) => apiFetch<void>(`/assets/${id}`, { method: 'DELETE' })
 export type TopicSourceRule = { id: number; subscription_id: number; directory: string; keywords: string[]; enabled: boolean; created_at: string; updated_at: string }
 export const listTopicSourceRules = () => apiFetch<TopicSourceRule[]>('/assets/topic-rules')
