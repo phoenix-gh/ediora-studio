@@ -5,6 +5,9 @@ import os
 import uuid
 
 import pytest
+from sqlalchemy.engine import make_url
+from sqlalchemy.ext import asyncio as sqlalchemy_asyncio
+from sqlalchemy.pool import NullPool
 
 from tests.postgres_test_db import (
     create_test_database,
@@ -42,4 +45,19 @@ def postgres_database_url():
 def postgres_env(monkeypatch, postgres_database_url):
     monkeypatch.setenv("WMS_DATABASE_URL", postgres_database_url)
     monkeypatch.setenv("WMS_DISABLE_SCHEDULER", "1")
+    original_create_async_engine = sqlalchemy_asyncio.create_async_engine
+
+    def create_test_async_engine(url, *args, **kwargs):
+        database_name = make_url(url).database or ""
+        if database_name.startswith("wemedia_test_"):
+            kwargs.setdefault("poolclass", NullPool)
+            kwargs.pop("pool_size", None)
+            kwargs.pop("max_overflow", None)
+        return original_create_async_engine(url, *args, **kwargs)
+
+    monkeypatch.setattr(
+        sqlalchemy_asyncio,
+        "create_async_engine",
+        create_test_async_engine,
+    )
     yield postgres_database_url

@@ -1,10 +1,12 @@
 import asyncio
 import os
+import sys
 import uuid
 
 import asyncpg
 import pytest
 from sqlalchemy.engine import make_url
+from sqlalchemy.pool import NullPool
 
 from tests.postgres_test_db import (
     create_test_database,
@@ -102,3 +104,16 @@ def test_postgres_env_points_application_at_isolated_database(postgres_env):
     assert os.environ["WMS_DATABASE_URL"] == postgres_env
     assert make_url(postgres_env).database != "wemedia"
     assert os.environ["WMS_DISABLE_SCHEDULER"] == "1"
+
+
+def test_postgres_env_configures_database_engine_without_cross_loop_pooling(
+    postgres_env,
+):
+    sys.modules.pop("database", None)
+    import database
+
+    try:
+        assert isinstance(database.engine.pool, NullPool)
+    finally:
+        asyncio.run(database.engine.dispose())
+        sys.modules.pop("database", None)
