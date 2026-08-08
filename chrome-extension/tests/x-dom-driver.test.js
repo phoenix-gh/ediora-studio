@@ -144,3 +144,33 @@ test('recognizes the requested schedule from visible date and time text', () => 
   assert.equal(matchesScheduleText('Scheduled for Aug 8, 2026 at 8:30 PM', date), true)
   assert.equal(matchesScheduleText('Scheduled for Aug 8, 2026 at 8:00 PM', date), false)
 })
+
+test('does not insert content twice when execCommand succeeds', async () => {
+  const composer = {
+    innerText: '',
+    textContent: '',
+    focus() {},
+    dispatchEvent(event) {
+      if (event.type === 'beforeinput') {
+        this.textContent += event.data
+        this.innerText = this.textContent
+      }
+    },
+  }
+  const document = {
+    querySelector(selector) {
+      return selector === '[data-testid="tweetTextarea_0"]' ? composer : null
+    },
+    execCommand(command, _showUi, text) {
+      if (command !== 'insertText') return false
+      composer.textContent += text
+      composer.innerText = composer.textContent
+      return true
+    },
+  }
+  const driver = createXDomDriver(document, { location: { hostname: 'x.com' } })
+
+  await driver.writeComposerText('hello')
+
+  assert.equal(await driver.readComposerText(), 'hello')
+})

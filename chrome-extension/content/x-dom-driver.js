@@ -408,11 +408,12 @@ export function createXDomDriver(document, pageWindow = globalThis.window) {
         throw contractError(ERROR_CODES.EXISTING_DRAFT, '编辑器中已有未提交内容')
       }
       if (typeof composer.focus === 'function') composer.focus()
-      dispatchEvent(composer, pageWindow, 'beforeinput', { data: text })
-
       const inserted = typeof document.execCommand === 'function'
         && document.execCommand('insertText', false, text)
-      if (!inserted) writeFallback(composer, pageWindow, text)
+      if (inserted) return
+
+      dispatchEvent(composer, pageWindow, 'beforeinput', { data: text })
+      writeFallback(composer, pageWindow, text)
     },
 
     async clickFinalSubmit() {
