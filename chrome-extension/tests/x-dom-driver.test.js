@@ -174,3 +174,33 @@ test('does not insert content twice when execCommand succeeds', async () => {
 
   assert.equal(await driver.readComposerText(), 'hello')
 })
+
+test('does not run fallback when execCommand inserted content but returned false', async () => {
+  const composer = {
+    innerText: '',
+    textContent: '',
+    focus() {},
+    dispatchEvent(event) {
+      if (event.type === 'beforeinput') {
+        this.textContent += event.data
+        this.innerText = this.textContent
+      }
+    },
+  }
+  const document = {
+    querySelector(selector) {
+      return selector === '[data-testid="tweetTextarea_0"]' ? composer : null
+    },
+    execCommand(command, _showUi, text) {
+      if (command !== 'insertText') return false
+      composer.textContent += text
+      composer.innerText = composer.textContent
+      return false
+    },
+  }
+  const driver = createXDomDriver(document, { location: { hostname: 'x.com' } })
+
+  await driver.writeComposerText('hello')
+
+  assert.equal(await driver.readComposerText(), 'hello')
+})

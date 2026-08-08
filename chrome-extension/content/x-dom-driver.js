@@ -412,6 +412,11 @@ export function createXDomDriver(document, pageWindow = globalThis.window) {
         && document.execCommand('insertText', false, text)
       if (inserted) return
 
+      // Some Chromium/contenteditable combinations insert successfully but
+      // report false. Never append a fallback to content that is already there.
+      const currentText = normalizeText(elementText(composer))
+      if (currentText === normalizeText(text) || currentText) return
+
       dispatchEvent(composer, pageWindow, 'beforeinput', { data: text })
       writeFallback(composer, pageWindow, text)
     },
