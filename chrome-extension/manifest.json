@@ -1,0 +1,43 @@
+{
+  "manifest_version": 3,
+  "name": "述策助手",
+  "version": "0.1.0",
+  "description": "在 X 页面验证单条帖子立即发布和原生安排表发布。",
+  "permissions": [
+    "storage"
+  ],
+  "host_permissions": [
+    "https://x.com/*",
+    "https://twitter.com/*"
+  ],
+  "background": {
+    "service_worker": "background/service-worker.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://x.com/*",
+        "https://twitter.com/*"
+      ],
+      "js": [
+        "content/bridge.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "injected/console-api.js",
+        "content/contracts.js",
+        "content/selectors.js",
+        "content/x-dom-driver.js",
+        "content/publisher.js"
+      ],
+      "matches": [
+        "https://x.com/*",
+        "https://twitter.com/*"
+      ]
+    }
+  ]
+}
