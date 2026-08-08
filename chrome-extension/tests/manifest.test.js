@@ -21,4 +21,12 @@ test('declares the MV3 Shuce extension with X-only host permissions', async () =
   assert.equal(JSON.stringify(manifest).includes('localhost'), false)
   assert.equal(JSON.stringify(manifest).includes('http://'), false)
   assert.equal(manifest.content_scripts[0].js[0], 'content/bridge.js')
+  assert.deepEqual(manifest.web_accessible_resources[0].resources.sort(), [
+    'content/bridge-protocol.js',
+    'content/contracts.js',
+    'content/publisher.js',
+    'content/selectors.js',
+    'content/x-dom-driver.js',
+    'injected/console-api.js',
+  ])
 })

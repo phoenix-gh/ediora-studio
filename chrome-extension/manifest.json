@@ -30,6 +30,7 @@
       "resources": [
         "injected/console-api.js",
         "content/contracts.js",
+        "content/bridge-protocol.js",
         "content/selectors.js",
         "content/x-dom-driver.js",
         "content/publisher.js"
