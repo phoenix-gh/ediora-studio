@@ -1,4 +1,23 @@
+import {
+  API_BASE_STORAGE_KEY,
+  DEFAULT_API_BASE,
+  assertAllowedApiBase,
+  fetchDraftCollection,
+} from './draft-api.js'
+
 const LAST_EXECUTION_KEY = 'lastExecution'
+const DRAFTS_REQUEST_TYPE = 'SHUCE_DRAFTS_REQUEST'
+const DRAFTS_RESULT_TYPE = 'SHUCE_DRAFTS_RESULT'
+const CONFIG_GET_TYPE = 'SHUCE_DRAFTS_CONFIG_GET'
+const CONFIG_SET_TYPE = 'SHUCE_DRAFTS_CONFIG_SET'
+const CONFIG_RESET_TYPE = 'SHUCE_DRAFTS_CONFIG_RESET'
+
+const SAFE_ERROR_MESSAGES = Object.freeze({
+  DRAFT_API_NOT_CONFIGURED: 'API 地址无效',
+  DRAFT_API_HOST_NOT_ALLOWED: '当前扩展只允许本机 8000 端口 API',
+  DRAFT_API_UNAVAILABLE: '草稿 API 暂不可用，请检查服务是否运行',
+  DRAFT_API_INVALID_RESPONSE: '草稿 API 返回格式无效',
+})
 
 chrome.runtime.onInstalled.addListener(() => {
   chrome.storage.local.set({
@@ -6,17 +25,106 @@ chrome.runtime.onInstalled.addListener(() => {
   })
 })
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (message?.type !== 'SHUCE_EXECUTION_RECORDED') return false
+function requestIdOf(message) {
+  return typeof message?.requestId === 'string' ? message.requestId : ''
+}
 
-  const record = {
-    requestId: typeof message.requestId === 'string' ? message.requestId : '',
-    ok: message.ok === true,
-    action: typeof message.action === 'string' ? message.action : '',
-    errorCode: typeof message.errorCode === 'string' ? message.errorCode : '',
-    finishedAt: new Date().toISOString(),
+function safeError(error) {
+  const code = typeof error?.code === 'string' && SAFE_ERROR_MESSAGES[error.code]
+    ? error.code
+    : 'DRAFT_API_UNAVAILABLE'
+  return { code, message: SAFE_ERROR_MESSAGES[code] }
+}
+
+async function readConfiguredApiBase() {
+  const stored = await chrome.storage.local.get(API_BASE_STORAGE_KEY)
+  if (typeof stored?.[API_BASE_STORAGE_KEY] !== 'string') return DEFAULT_API_BASE
+
+  try {
+    return assertAllowedApiBase(stored[API_BASE_STORAGE_KEY])
+  } catch {
+    return DEFAULT_API_BASE
   }
-  chrome.storage.local.set({ [LAST_EXECUTION_KEY]: record })
-  sendResponse({ ok: true })
+}
+
+async function handleDraftsRequest(message) {
+  const configured = await readConfiguredApiBase()
+  const apiBase = typeof message.apiBase === 'string' && message.apiBase.trim()
+    ? message.apiBase
+    : configured
+  return fetchDraftCollection(apiBase)
+}
+
+async function handleDraftMessage(message) {
+  const requestId = requestIdOf(message)
+
+  if (message.type === DRAFTS_REQUEST_TYPE) {
+    const drafts = await handleDraftsRequest(message)
+    return {
+      type: DRAFTS_RESULT_TYPE,
+      requestId,
+      ok: true,
+      drafts,
+    }
+  }
+
+  if (message.type === CONFIG_GET_TYPE) {
+    return {
+      type: DRAFTS_RESULT_TYPE,
+      requestId,
+      ok: true,
+      apiBase: await readConfiguredApiBase(),
+    }
+  }
+
+  if (message.type === CONFIG_SET_TYPE) {
+    const apiBase = assertAllowedApiBase(message.apiBase)
+    await chrome.storage.local.set({ [API_BASE_STORAGE_KEY]: apiBase })
+    return { type: DRAFTS_RESULT_TYPE, requestId, ok: true, apiBase }
+  }
+
+  if (message.type === CONFIG_RESET_TYPE) {
+    await chrome.storage.local.remove(API_BASE_STORAGE_KEY)
+    return {
+      type: DRAFTS_RESULT_TYPE,
+      requestId,
+      ok: true,
+      apiBase: DEFAULT_API_BASE,
+    }
+  }
+
+  return null
+}
+
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.type === 'SHUCE_EXECUTION_RECORDED') {
+    const record = {
+      requestId: typeof message.requestId === 'string' ? message.requestId : '',
+      ok: message.ok === true,
+      action: typeof message.action === 'string' ? message.action : '',
+      errorCode: typeof message.errorCode === 'string' ? message.errorCode : '',
+      finishedAt: new Date().toISOString(),
+    }
+    chrome.storage.local.set({ [LAST_EXECUTION_KEY]: record })
+    sendResponse({ ok: true })
+    return true
+  }
+
+  const draftMessageTypes = new Set([
+    DRAFTS_REQUEST_TYPE,
+    CONFIG_GET_TYPE,
+    CONFIG_SET_TYPE,
+    CONFIG_RESET_TYPE,
+  ])
+  if (!draftMessageTypes.has(message?.type)) return false
+
+  handleDraftMessage(message)
+    .then(sendResponse)
+    .catch(error => sendResponse({
+      type: DRAFTS_RESULT_TYPE,
+      requestId: requestIdOf(message),
+      ok: false,
+      error: safeError(error),
+    }))
   return true
 })
