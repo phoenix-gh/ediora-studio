@@ -13,3 +13,12 @@ test('keeps the content-script bootstrap limited to the extension runtime bounda
   assert.doesNotMatch(source, /\bfetch\s*\(/)
   assert.doesNotMatch(source, /document\.cookie|Authorization|SHUCE_PUBLISH_REQUEST/)
 })
+
+test('anchors the command center and panel to the upper-right corner', async () => {
+  const source = await readFile(resolve(extensionRoot, 'content/workbench-runtime.js'), 'utf8')
+
+  assert.match(source, /\.sw-entry \{[^}]*right: 24px; top: 24px;/s)
+  assert.match(source, /\.sw-panel \{[^}]*right: 24px; top: 84px;/s)
+  assert.match(source, /\.sw-entry \{ right: 16px; top: 16px;/s)
+  assert.match(source, /\.sw-panel \{ right: 8px; top: 74px;/s)
+})
