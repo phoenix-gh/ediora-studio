@@ -52,6 +52,18 @@ export function parseLocalSchedule(value, now = new Date()) {
   return date
 }
 
+export function scheduleParts(date) {
+  const hour24 = date.getHours()
+  return {
+    year: date.getFullYear(),
+    month: date.getMonth() + 1,
+    day: date.getDate(),
+    hour12: hour24 % 12 || 12,
+    minute: date.getMinutes(),
+    period: hour24 < 12 ? 'AM' : 'PM',
+  }
+}
+
 function pad(value) {
   return String(value).padStart(2, '0')
 }

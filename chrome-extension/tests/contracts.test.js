@@ -5,6 +5,7 @@ import {
   ERROR_CODES,
   formatLocalIso,
   parseLocalSchedule,
+  scheduleParts,
   validatePublishRequest,
 } from '../content/contracts.js'
 
@@ -49,4 +50,17 @@ test('formats a local datetime with its actual timezone offset', () => {
     formatLocalIso(new Date(2026, 7, 8, 20, 30)),
     /^2026-08-08T20:30:00[+-]\d{2}:\d{2}$/,
   )
+})
+
+test('converts a local date into X twelve-hour schedule controls', () => {
+  assert.deepEqual(scheduleParts(new Date(2026, 7, 8, 20, 30)), {
+    year: 2026,
+    month: 8,
+    day: 8,
+    hour12: 8,
+    minute: 30,
+    period: 'PM',
+  })
+  assert.equal(scheduleParts(new Date(2026, 7, 8, 0, 5)).hour12, 12)
+  assert.equal(scheduleParts(new Date(2026, 7, 8, 0, 5)).period, 'AM')
 })

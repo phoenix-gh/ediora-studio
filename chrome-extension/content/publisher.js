@@ -1,6 +1,7 @@
 import {
   ERROR_CODES,
   failureResult,
+  scheduleParts,
   successResult,
   validatePublishRequest,
 } from './contracts.js'
@@ -15,6 +16,23 @@ function toFailureResult(error) {
     error instanceof Error ? error.message : '述策助手执行失败',
     error?.details,
   )
+}
+
+async function runScheduled({ driver, request }) {
+  await driver.openScheduler()
+  await driver.setScheduleFields(scheduleParts(request.scheduledAt))
+  await driver.confirmScheduleDialog()
+
+  if (!await driver.verifyComposerSchedule(request.scheduledAt)) {
+    return failureResult(ERROR_CODES.SCHEDULE_CONTROLS_CHANGED, 'X 页面没有确认请求的安排时间')
+  }
+  if (request.dryRun) return successResult('dry-run', request.scheduledAt)
+
+  await driver.clickFinalSubmit('scheduled')
+  if (!await driver.waitForSubmissionEvidence('scheduled')) {
+    return failureResult(ERROR_CODES.SUBMIT_NOT_CONFIRMED, '未观察到 X 的定时发布成功证据')
+  }
+  return successResult('scheduled', request.scheduledAt)
 }
 
 export function createPublisher({ driver, now = () => new Date() }) {
@@ -39,9 +57,7 @@ export function createPublisher({ driver, now = () => new Date() }) {
         return failureResult(ERROR_CODES.TEXT_MISMATCH, '写入后的帖子内容与请求不一致')
       }
 
-      if (request.scheduledAt) {
-        return failureResult(ERROR_CODES.SCHEDULER_UNAVAILABLE, '原生安排表将在下一阶段启用')
-      }
+      if (request.scheduledAt) return await runScheduled({ driver, request })
       if (request.dryRun) return successResult('dry-run')
 
       await driver.clickFinalSubmit('published')
