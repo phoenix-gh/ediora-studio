@@ -8,10 +8,13 @@
   ],
   "host_permissions": [
     "https://x.com/*",
-    "https://twitter.com/*"
+    "https://twitter.com/*",
+    "http://localhost:8000/*",
+    "http://127.0.0.1:8000/*"
   ],
   "background": {
-    "service_worker": "background/service-worker.js"
+    "service_worker": "background/service-worker.js",
+    "type": "module"
   },
   "content_scripts": [
     {
@@ -20,7 +23,8 @@
         "https://twitter.com/*"
       ],
       "js": [
-        "content/bridge.js"
+        "content/bridge.js",
+        "content/workbench.js"
       ],
       "run_at": "document_idle"
     }
@@ -33,7 +37,12 @@
         "content/bridge-protocol.js",
         "content/selectors.js",
         "content/x-dom-driver.js",
-        "content/publisher.js"
+        "content/publisher.js",
+        "content/draft-client.js",
+        "content/draft-model.js",
+        "content/workbench-clipboard.js",
+        "content/workbench-runtime.js",
+        "content/workbench-state.js"
       ],
       "matches": [
         "https://x.com/*",
