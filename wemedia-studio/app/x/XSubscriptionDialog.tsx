@@ -24,6 +24,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
+import { NativeSelect } from '@/components/ui/native-select'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import {
@@ -37,7 +38,6 @@ import {
 } from '@/lib/api/x'
 
 const X_COLLECTION_INTERVAL_OPTIONS = [5, 10, 15, 30, 60, 180, 360, 720, 1440] as const
-const X_DIALOG_SELECT_CLASS = 'h-9 w-full rounded-md border border-input bg-surface px-2 text-sm text-foreground [color-scheme:light] dark:[color-scheme:dark]'
 const X_DIALOG_OPTION_CLASS = 'bg-surface text-foreground'
 
 type DialogMode = 'create' | 'edit'
@@ -293,9 +293,9 @@ export function XSubscriptionDialog({
                 </label>
                 <label className="space-y-1.5 text-xs" htmlFor="x-collection-interval">
                   <span className="flex items-center gap-1.5 font-medium"><Clock3 className="size-3.5" />采集频率</span>
-                  <select id="x-collection-interval" aria-label="采集频率" value={collectInterval} onChange={event => setCollectInterval(Number(event.target.value))} className={X_DIALOG_SELECT_CLASS}>
+                  <NativeSelect id="x-collection-interval" aria-label="采集频率" value={collectInterval} onChange={event => setCollectInterval(Number(event.target.value))} className="rounded-md px-2 text-sm">
                     {frequencyOptions.map(minutes => <option className={X_DIALOG_OPTION_CLASS} key={minutes} value={minutes}>{minutes % 60 === 0 ? `每 ${minutes / 60} 小时` : `每 ${minutes} 分钟`}</option>)}
-                  </select>
+                  </NativeSelect>
                 </label>
               </div>
             ) : null}

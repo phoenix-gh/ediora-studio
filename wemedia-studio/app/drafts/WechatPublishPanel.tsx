@@ -7,6 +7,7 @@ import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
+import { NativeSelect } from '@/components/ui/native-select'
 import { DraftImage, publishDraftToWechat } from '@/lib/api/drafts'
 import { PublishAccount, listPublishAccounts } from '@/lib/api/publish-accounts'
 import {
@@ -273,15 +274,15 @@ export function WechatPublishPanel({
               没有可用的公众号账号。请到「设置 → 发布账号」给 wechat 平台账号配置 AppID/AppSecret。
             </p>
           ) : (
-            <select
+            <NativeSelect
               value={accountId}
               onChange={e => setAccountId(e.target.value)}
-              className="h-8 w-full rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-2 text-sm"
+              className="h-8 rounded-md px-2 text-sm"
             >
               {accounts.map(a => (
                 <option key={a.id} value={a.id}>{a.name}</option>
               ))}
-            </select>
+            </NativeSelect>
           )}
         </div>
 

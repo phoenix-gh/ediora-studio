@@ -4,6 +4,7 @@ import { useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import { GithubRepo, GithubTrendingRepo, GithubRelease } from '@/lib/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { NativeSelect } from '@/components/ui/native-select'
 import {
   GitFork, TrendingUp, Plus, RefreshCw,
   Trash2, VolumeX, Volume2, Star, ExternalLink, ChevronDown, Loader2,
@@ -587,15 +588,15 @@ function ReleasesTab({ repoId, releases: initial, onLoad }: { repoId: string; re
               {dispatchAccounts.length === 0 ? (
                 <p className="text-xs text-zinc-400">加载中…</p>
               ) : (
-                <select
+                <NativeSelect
                   value={dispatchAccountId}
                   onChange={e => setDispatchAccountId(e.target.value)}
-                  className="w-full text-xs border border-zinc-200 dark:border-zinc-700 rounded-md px-2.5 py-1.5 bg-white dark:bg-zinc-900 text-zinc-800 dark:text-zinc-200 outline-none focus:border-indigo-400"
+                  className="h-8 rounded-md px-2.5 py-1.5 text-xs"
                 >
                   {dispatchAccounts.map(a => (
                     <option key={a.id} value={a.id}>{a.name} ({a.platform})</option>
                   ))}
-                </select>
+                </NativeSelect>
               )}
             </div>
             <div>
@@ -603,15 +604,15 @@ function ReleasesTab({ repoId, releases: initial, onLoad }: { repoId: string; re
               {dispatchPlans.length === 0 ? (
                 <p className="text-xs text-zinc-400">加载中…</p>
               ) : (
-                <select
+                <NativeSelect
                   value={dispatchPlanId ?? ''}
                   onChange={e => setDispatchPlanId(Number(e.target.value))}
-                  className="w-full text-xs border border-zinc-200 dark:border-zinc-700 rounded-md px-2.5 py-1.5 bg-white dark:bg-zinc-900 text-zinc-800 dark:text-zinc-200 outline-none focus:border-indigo-400"
+                  className="h-8 rounded-md px-2.5 py-1.5 text-xs"
                 >
                   {dispatchPlans.map(p => (
                     <option key={p.id} value={p.id}>{p.title}</option>
                   ))}
-                </select>
+                </NativeSelect>
               )}
             </div>
           </div>
@@ -935,15 +936,15 @@ export function GithubClient({ initialRepos, initialTrending, initialReleases }:
               {introAccounts.length === 0 ? (
                 <p className="text-xs text-zinc-400">加载中…</p>
               ) : (
-                <select
+                <NativeSelect
                   value={introAccountId}
                   onChange={e => setIntroAccountId(e.target.value)}
-                  className="w-full text-xs border border-zinc-200 dark:border-zinc-700 rounded-md px-2.5 py-1.5 bg-white dark:bg-zinc-900 text-zinc-800 dark:text-zinc-200 outline-none focus:border-indigo-400"
+                  className="h-8 rounded-md px-2.5 py-1.5 text-xs"
                 >
                   {introAccounts.map(a => (
                     <option key={a.id} value={a.id}>{a.name} ({a.platform})</option>
                   ))}
-                </select>
+                </NativeSelect>
               )}
             </div>
             <div>
@@ -951,15 +952,15 @@ export function GithubClient({ initialRepos, initialTrending, initialReleases }:
               {introPlans.length === 0 ? (
                 <p className="text-xs text-zinc-400">加载中…</p>
               ) : (
-                <select
+                <NativeSelect
                   value={introPlanId ?? ''}
                   onChange={e => setIntroPlanId(Number(e.target.value))}
-                  className="w-full text-xs border border-zinc-200 dark:border-zinc-700 rounded-md px-2.5 py-1.5 bg-white dark:bg-zinc-900 text-zinc-800 dark:text-zinc-200 outline-none focus:border-indigo-400"
+                  className="h-8 rounded-md px-2.5 py-1.5 text-xs"
                 >
                   {introPlans.map(p => (
                     <option key={p.id} value={p.id}>{p.title}</option>
                   ))}
-                </select>
+                </NativeSelect>
               )}
             </div>
           </div>

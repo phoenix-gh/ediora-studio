@@ -4,6 +4,7 @@ import { useState, type FormEvent } from 'react'
 
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
+import { NativeSelect } from '@/components/ui/native-select'
 import type { ResponseDetail } from '@/lib/api/responses'
 
 export type DestinationKind = 'creative_asset'
@@ -54,10 +55,10 @@ export function ResponseDestinationDialog({
           </div>
           <label className="block text-sm">
             <span className="mb-2 block font-medium">文章资产目录（可选）</span>
-            <select value={directory} onChange={event => setDirectory(event.target.value)} className="h-10 w-full rounded-lg border border-input bg-background px-3">
+            <NativeSelect value={directory} onChange={event => setDirectory(event.target.value)} className="h-10">
               <option value="">不指定目录</option>
               {directories.map(value => <option key={value} value={value}>{value}</option>)}
-            </select>
+            </NativeSelect>
           </label>
           {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
           <DialogFooter>

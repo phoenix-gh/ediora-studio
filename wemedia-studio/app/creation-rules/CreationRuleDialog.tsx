@@ -13,6 +13,7 @@ import {
 } from '@/components/ui/dialog'
 import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
+import { NativeSelect } from '@/components/ui/native-select'
 import { Textarea } from '@/components/ui/textarea'
 import type { ChatSkill } from '@/lib/api/chat'
 import type { DailyCreationRule, DailyCreationRuleInput } from '@/lib/api/creation-rules'
@@ -156,7 +157,7 @@ export function CreationRuleDialog({
             <div className="grid gap-4 sm:grid-cols-2">
               <Field>
                 <FieldLabel htmlFor="creation-rule-execution-mode">执行方式</FieldLabel>
-                <select id="creation-rule-execution-mode" aria-label="执行方式" value={value.execution_mode} onChange={event => {
+                <NativeSelect id="creation-rule-execution-mode" aria-label="执行方式" value={value.execution_mode} onChange={event => {
                   const executionMode = event.target.value as 'once' | 'recurring'
                   setValue(previous => ({
                     ...previous,
@@ -165,10 +166,10 @@ export function CreationRuleDialog({
                       ? null
                       : previous.scheduled_date,
                   }))
-                }} className="h-9 rounded-lg border border-input bg-transparent px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50">
+                }}>
                   <option value="recurring">每天执行</option>
                   <option value="once">仅执行一次</option>
-                </select>
+                </NativeSelect>
               </Field>
               {value.execution_mode === 'once' ? <Field>
                 <FieldLabel htmlFor="creation-rule-date">执行日期</FieldLabel>
@@ -197,10 +198,10 @@ export function CreationRuleDialog({
                 <div className="grid gap-4 sm:grid-cols-2">
                   <Field>
                     <FieldLabel htmlFor="creation-rule-asset-type">素材类型</FieldLabel>
-                    <select id="creation-rule-asset-type" aria-label="素材类型" value={value.asset_type} onChange={event => setValue(previous => ({ ...previous, asset_type: event.target.value as 'article' | 'media', directory: '', directories: [] }))} className="h-9 rounded-lg border border-input bg-transparent px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50">
+                    <NativeSelect id="creation-rule-asset-type" aria-label="素材类型" value={value.asset_type} onChange={event => setValue(previous => ({ ...previous, asset_type: event.target.value as 'article' | 'media', directory: '', directories: [] }))}>
                       <option value="article">文章</option>
                       <option value="media">媒体</option>
-                    </select>
+                    </NativeSelect>
                   </Field>
                   <Field>
                     <FieldLabel htmlFor="creation-rule-account">发布账号 ID（可选）</FieldLabel>
@@ -241,11 +242,11 @@ export function CreationRuleDialog({
                 </Field>
                 {value.skill_mode === 'manual' ? <Field>
                   <FieldLabel htmlFor="creation-rule-skill">指定 Skill</FieldLabel>
-                  <select id="creation-rule-skill" aria-label="指定 Skill" value={value.skill_name ?? ''} onChange={event => set('skill_name', event.target.value || null)} className="h-9 rounded-lg border border-input bg-transparent px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50">
+                  <NativeSelect id="creation-rule-skill" aria-label="指定 Skill" value={value.skill_name ?? ''} onChange={event => set('skill_name', event.target.value || null)}>
                     <option value="">请选择</option>
                     {value.skill_name && !skills.some(skill => skill.name === value.skill_name) ? <option value={value.skill_name}>{value.skill_name}（不可用）</option> : null}
                     {skills.map(skill => <option key={skill.name} value={skill.name}>{skill.name} · {skill.description}</option>)}
-                  </select>
+                  </NativeSelect>
                 </Field> : null}
                 <Field>
                   <FieldLabel htmlFor="creation-rule-instructions">附加要求</FieldLabel>

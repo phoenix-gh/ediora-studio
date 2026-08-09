@@ -264,7 +264,7 @@ describe('XClient initial feed recovery', () => {
     fireEvent.click(screen.getByRole('button', { name: '编辑订阅：OpenAI 官方账号' }))
 
     const frequencySelect = await screen.findByLabelText('采集频率')
-    expect(frequencySelect).toHaveClass('text-foreground', 'bg-surface')
+    expect(frequencySelect).toHaveClass('text-foreground', 'bg-control')
     expect(frequencySelect.querySelector('option')).toHaveClass('bg-surface', 'text-foreground')
   })
 })

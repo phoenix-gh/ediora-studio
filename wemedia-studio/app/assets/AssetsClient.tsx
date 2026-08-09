@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { NativeSelect } from '@/components/ui/native-select'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { WorkspaceToolbar } from '@/components/layout/WorkspaceToolbar'
@@ -469,7 +470,7 @@ export function AssetsClient({
         <DialogHeader><DialogTitle>新增提示词资产</DialogTitle><DialogDescription>保存提示词文本，并选择后续生成结果的类型。</DialogDescription></DialogHeader>
         <div className="space-y-3">
           <div className="grid gap-1.5"><Label htmlFor="prompt-asset-title">提示词标题</Label><Input aria-describedby={promptDialog?.error ? 'prompt-form-error' : undefined} aria-invalid={Boolean(promptDialog?.error) || undefined} autoFocus disabled={promptDialog?.busy} id="prompt-asset-title" onChange={event => setPromptDialog(value => value ? { ...value, error: '', title: event.target.value } : value)} placeholder="提示词标题" value={promptDialog?.title ?? ''} /></div>
-          <div className="grid gap-1.5"><Label htmlFor="prompt-asset-kind">提示词类型</Label><select aria-label="新提示词类型" className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm" disabled={promptDialog?.busy} id="prompt-asset-kind" onChange={event => setPromptDialog(value => value ? { ...value, error: '', kind: event.target.value as PromptKind } : value)} value={promptDialog?.kind ?? 'image'}><option value="image">图片提示词</option><option value="video">视频提示词</option><option value="other">其他提示词</option></select></div>
+          <div className="grid gap-1.5"><Label htmlFor="prompt-asset-kind">提示词类型</Label><NativeSelect aria-label="新提示词类型" className="rounded-md" disabled={promptDialog?.busy} id="prompt-asset-kind" onChange={event => setPromptDialog(value => value ? { ...value, error: '', kind: event.target.value as PromptKind } : value)} value={promptDialog?.kind ?? 'image'}><option value="image">图片提示词</option><option value="video">视频提示词</option><option value="other">其他提示词</option></NativeSelect></div>
           <div className="grid gap-1.5"><Label htmlFor="prompt-asset-content">提示词正文</Label><Textarea aria-describedby={promptDialog?.error ? 'prompt-form-error' : undefined} aria-invalid={Boolean(promptDialog?.error) || undefined} disabled={promptDialog?.busy} id="prompt-asset-content" onChange={event => setPromptDialog(value => value ? { ...value, content: event.target.value, error: '' } : value)} placeholder="输入完整提示词" value={promptDialog?.content ?? ''} /></div>
           {promptDialog?.error ? <p className="text-xs text-destructive" id="prompt-form-error" role="alert">{promptDialog.error}</p> : null}
         </div>

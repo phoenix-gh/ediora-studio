@@ -23,6 +23,7 @@ import {
 import { WritingPlan, getWritingPlans, flattenTopicsWithDepth } from '@/lib/api/writing-plans'
 import { illustrateBody, regenerateCover } from '@/lib/api/studio'
 import { MarkdownEditor, type MarkdownEditorHandle } from '@/components/MarkdownEditor'
+import { NativeSelect } from '@/components/ui/native-select'
 import { PublishDialog } from './PublishDialog'
 import { DraftAssetsDialog } from '@/components/features/DraftAssetsDialog'
 import {
@@ -781,29 +782,29 @@ export function DraftsClient({
 
         {/* Filters */}
         <div className="px-3 py-2 border-b border-zinc-100 dark:border-zinc-800 flex gap-2">
-          <select
+          <NativeSelect
             aria-label="按主题筛选"
             value={filterTopicId}
             onChange={e => changeTopicFilter(e.target.value)}
-            className="flex-1 text-xs px-2 py-1.5 border border-zinc-200 dark:border-zinc-700 rounded-md bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 outline-none focus:border-indigo-400 cursor-pointer min-w-0 truncate"
+            className="flex-1 min-w-0 truncate cursor-pointer rounded-md px-2 py-1.5 text-xs"
           >
             <option value="all">全部主题</option>
             <option value="none">无主题</option>
             {flattenTopicsWithDepth(topicList).map(({ plan, label }) => (
               <option key={plan.id} value={String(plan.id)}>{label}</option>
             ))}
-          </select>
-          <select
+          </NativeSelect>
+          <NativeSelect
             aria-label="按状态筛选"
             value={filterStatus}
             onChange={e => changeStatusFilter(e.target.value)}
-            className="text-xs px-2 py-1.5 border border-zinc-200 dark:border-zinc-700 rounded-md bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 outline-none focus:border-indigo-400 cursor-pointer"
+            className="w-auto cursor-pointer rounded-md px-2 py-1.5 text-xs"
           >
             <option value="all">全部状态</option>
             {DRAFT_STATUSES.map(s => (
               <option key={s.value} value={s.value}>{s.label}</option>
             ))}
-          </select>
+          </NativeSelect>
         </div>
 
         {filteredDrafts.length > 0 ? (
@@ -963,25 +964,25 @@ export function DraftsClient({
 
             {/* Toolbar */}
             <div className="flex items-center gap-3 px-6 py-3 border-b border-zinc-100 dark:border-zinc-800 flex-shrink-0">
-              <select
+              <NativeSelect
                 value={editStatus}
                 onChange={e => { setEditStatus(e.target.value); setDirty(true) }}
-                className={cn('text-xs px-2 py-1 rounded-full font-medium border-0 cursor-pointer focus:outline-none focus:ring-1 focus:ring-indigo-400', STATUS_STYLES[editStatus])}
+                className={cn('h-7 w-auto cursor-pointer rounded-full border-0 px-2 py-1 text-xs font-medium focus:outline-none focus:ring-1 focus:ring-indigo-400', STATUS_STYLES[editStatus])}
               >
                 {DRAFT_STATUSES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
-              </select>
+              </NativeSelect>
 
-              <select
+              <NativeSelect
                 value={editWritingPlanId ?? ''}
                 onChange={e => { setEditWritingPlanId(e.target.value ? Number(e.target.value) : null); setDirty(true) }}
-                className="text-xs px-2 py-1 rounded-full border border-input bg-surface text-foreground [color-scheme:light] dark:[color-scheme:dark] cursor-pointer focus:outline-none focus:ring-1 focus:ring-indigo-400 max-w-[160px] truncate"
+                className="h-7 w-auto max-w-[160px] cursor-pointer truncate rounded-full px-2 py-1 text-xs"
                 title="关联写作模板"
               >
                 <option className={DRAFT_TEMPLATE_OPTION_CLASS} value="">无写作模板</option>
                 {flattenTopicsWithDepth(topicList).map(({ plan, label }) => (
                   <option className={DRAFT_TEMPLATE_OPTION_CLASS} key={plan.id} value={plan.id}>{label}</option>
                 ))}
-              </select>
+              </NativeSelect>
 
               <span className="text-[11px] text-zinc-400">
                 v{selected.version} · 更新于 {formatDate(selected.updated_at)} · {wordCount} 字
@@ -1202,17 +1203,17 @@ export function DraftsClient({
           </DialogHeader>
           <label className="grid gap-2 text-sm font-medium">
             目标状态
-            <select
+            <NativeSelect
               aria-label="目标状态"
               value={bulkTargetStatus}
               disabled={bulkRunning}
               onChange={event => setBulkTargetStatus(event.target.value)}
-              className="rounded-md border border-input bg-background px-3 py-2"
+              className="rounded-md px-3 py-2"
             >
               {DRAFT_STATUSES.map(status => (
                 <option key={status.value} value={status.value}>{status.label}</option>
               ))}
-            </select>
+            </NativeSelect>
           </label>
           <DialogFooter>
             <Button variant="outline" onClick={() => setBulkStatusOpen(false)} disabled={bulkRunning}>取消</Button>

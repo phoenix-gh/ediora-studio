@@ -420,7 +420,7 @@ describe('DraftsClient themed controls', () => {
     const select = screen.getByTitle('关联写作模板')
 
     expect(select).toHaveClass(
-      'bg-surface',
+      'bg-control',
       'text-foreground',
       '[color-scheme:light]',
       'dark:[color-scheme:dark]',

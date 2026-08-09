@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
+import { NativeSelect } from '@/components/ui/native-select'
 import { listJobs, type ContentJob, type JobKind, type JobStatus } from '@/lib/api/jobs'
 import { JobLogDialog } from './JobLogDialog'
 
@@ -187,20 +188,20 @@ export function TaskLogList({ refreshToken, onRetry, onCancel }: {
       </div>
       <div className="flex flex-wrap gap-2">
         <label className="sr-only" htmlFor="task-log-kind">任务类型</label>
-        <select id="task-log-kind" aria-label="任务类型" className="h-9 rounded-md border bg-background px-2 text-sm" value={filters.kind} onChange={event => changeFilters({ ...filters, kind: event.target.value as FilterKind })}>
+        <NativeSelect id="task-log-kind" aria-label="任务类型" className="w-auto rounded-md px-2" value={filters.kind} onChange={event => changeFilters({ ...filters, kind: event.target.value as FilterKind })}>
           <option value="all">全部类型</option>
           <option value="scheduled">定时任务</option>
           <option value="manual">手动任务</option>
-        </select>
+        </NativeSelect>
         <label className="sr-only" htmlFor="task-log-status">任务状态</label>
-        <select id="task-log-status" aria-label="任务状态" className="h-9 rounded-md border bg-background px-2 text-sm" value={filters.status} onChange={event => changeFilters({ ...filters, status: event.target.value as FilterStatus })}>
+        <NativeSelect id="task-log-status" aria-label="任务状态" className="w-auto rounded-md px-2" value={filters.status} onChange={event => changeFilters({ ...filters, status: event.target.value as FilterStatus })}>
           <option value="all">全部状态</option>
           <option value="queued">排队中</option>
           <option value="running">执行中</option>
           <option value="succeeded">已完成</option>
           <option value="failed">失败</option>
           <option value="cancelled">已取消</option>
-        </select>
+        </NativeSelect>
       </div>
     </div>
     {refreshError && <p className="text-xs text-amber-700">状态刷新失败：{refreshError}</p>}

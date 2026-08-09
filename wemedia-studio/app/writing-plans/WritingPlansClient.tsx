@@ -12,6 +12,7 @@ import { marked } from 'marked'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
+import { NativeSelect } from '@/components/ui/native-select'
 import {
   WritingPlan, PlanTag, PlanSource, DraftSummary, PlanUpdate,
   getWritingPlans, getTags, createWritingPlan, updateWritingPlan, deleteWritingPlan,
@@ -817,13 +818,13 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="text-xs text-zinc-500">文体</span>
-                    <select
+                    <NativeSelect
                       value={editGenre}
                       onChange={e => setEditGenre(e.target.value)}
-                      className="text-xs px-2 py-1 border border-zinc-200 dark:border-zinc-700 rounded bg-white dark:bg-zinc-900 outline-none focus:border-indigo-400 text-zinc-700 dark:text-zinc-300"
+                      className="h-8 w-auto rounded px-2 py-1 text-xs"
                     >
                       {GENRE_OPTIONS.map(g => <option key={g.value} value={g.value}>{g.label}</option>)}
-                    </select>
+                    </NativeSelect>
                     <span className="text-[10px] text-zinc-400">决定 writer 怎么写</span>
                   </div>
                   <div className="space-y-2 border-t border-zinc-100 dark:border-zinc-800 pt-2">
@@ -964,10 +965,10 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
                     <div className="flex gap-2">
                       <input value={sourceForm.url} onChange={e => setSourceForm(f => ({ ...f, url: e.target.value }))} placeholder="链接 URL（可选）"
                         className="flex-1 text-xs px-2 py-1.5 border border-zinc-200 dark:border-zinc-700 rounded bg-white dark:bg-zinc-900 outline-none focus:border-indigo-400" />
-                      <select value={sourceForm.platform} onChange={e => setSourceForm(f => ({ ...f, platform: e.target.value }))}
-                        className="text-xs px-2 py-1.5 border border-zinc-200 dark:border-zinc-700 rounded bg-white dark:bg-zinc-900 outline-none focus:border-indigo-400">
+                      <NativeSelect value={sourceForm.platform} onChange={e => setSourceForm(f => ({ ...f, platform: e.target.value }))}
+                        className="h-8 w-auto rounded px-2 py-1.5 text-xs">
                         {PLATFORMS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
-                      </select>
+                      </NativeSelect>
                     </div>
                     <input value={sourceForm.title} onChange={e => setSourceForm(f => ({ ...f, title: e.target.value }))} placeholder="标题（可选）"
                       className="w-full text-xs px-2 py-1.5 border border-zinc-200 dark:border-zinc-700 rounded bg-white dark:bg-zinc-900 outline-none focus:border-indigo-400" />
@@ -1237,16 +1238,16 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
             {dispatchAccounts.length > 0 && (
               <div className="flex items-center gap-2">
                 <span className="text-xs text-zinc-500 flex-shrink-0">发布账号</span>
-                <select
+                <NativeSelect
                   value={dispatchAccountId}
                   onChange={e => setDispatchAccountId(e.target.value)}
-                  className="flex-1 text-xs px-2 py-1.5 border border-zinc-200 dark:border-zinc-700 rounded bg-white dark:bg-zinc-900 outline-none focus:border-indigo-400 text-zinc-700 dark:text-zinc-300"
+                  className="h-8 flex-1 rounded px-2 py-1.5 text-xs"
                 >
                   <option value="">（不指定）</option>
                   {dispatchAccounts.map(a => (
                     <option key={a.id} value={a.id}>{a.name}（{a.platform}）</option>
                   ))}
-                </select>
+                </NativeSelect>
               </div>
             )}
             <div className="flex items-center gap-2">
