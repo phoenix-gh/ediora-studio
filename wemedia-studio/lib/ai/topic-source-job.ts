@@ -177,6 +177,13 @@ type TopicSourceTrace = {
   messageCount: number
 }
 
+class InvalidTopicSourcePayloadError extends Error {
+  constructor() {
+    super('topic_source flow requires rule_id')
+    this.name = 'InvalidTopicSourcePayloadError'
+  }
+}
+
 async function startTopicSourceTrace(jobId: number): Promise<TopicSourceTrace | undefined> {
   try {
     return {
@@ -342,10 +349,6 @@ async function runLegacyTopicSourceJob(
   jobId: number,
   job: Awaited<ReturnType<typeof getJob>>,
 ) {
-  const ruleId = Number(job.input.rule_id)
-  if (!Number.isSafeInteger(ruleId) || ruleId <= 0) {
-    throw new Error('topic_source flow requires rule_id')
-  }
   const completed = job.steps.find(step => step.key === 'select' && step.status === 'succeeded')
   if (completed) return completed.output
 
@@ -353,6 +356,10 @@ async function runLegacyTopicSourceJob(
   let trace: TopicSourceTrace | undefined
   try {
     step = await startStep(jobId, 'select')
+    const ruleId = Number(job.input.rule_id)
+    if (!Number.isSafeInteger(ruleId) || ruleId <= 0) {
+      throw new InvalidTopicSourcePayloadError()
+    }
     const requestedTweetIds = Array.isArray(job.input.tweet_ids)
       ? job.input.tweet_ids.filter((value): value is string => typeof value === 'string')
       : []
@@ -399,7 +406,14 @@ async function runLegacyTopicSourceJob(
     return output
   } catch (error) {
     await failTopicSourceTrace(jobId, trace, error)
-    if (step) await failStep(jobId, step.id, error, retryableForError(error))
+    if (step) await failStep(
+      jobId,
+      step.id,
+      error,
+      error instanceof InvalidTopicSourcePayloadError
+        ? false
+        : retryableForError(error),
+    )
     throw error
   }
 }

@@ -339,18 +339,22 @@ async def scheduled_topic_source_reconcile():
     try:
         from topic_source_service import reconcile_topic_source_jobs
         result = await reconcile_topic_source_jobs()
+        detail = (
+            f"入队 {result['enqueued']} 个任务，"
+            f"取消 {result['cancelled']} 个非法任务"
+        )
         if result["errors"]:
             await log(
                 "topic_source",
                 "warn",
-                f"主题素材甄选补偿：入队 {result['enqueued']} 个任务",
+                f"主题素材甄选补偿：{detail}",
                 "; ".join(result["errors"]),
             )
-        elif result["enqueued"]:
+        elif result["enqueued"] or result["cancelled"]:
             await log(
                 "topic_source",
                 "ok",
-                f"主题素材甄选补偿：入队 {result['enqueued']} 个任务",
+                f"主题素材甄选补偿：{detail}",
             )
     except Exception as e:
         await log("topic_source", "error", "主题素材甄选补偿异常", str(e))

@@ -115,6 +115,56 @@ def test_reconciliation_reenqueues_topic_job_once_after_queue_failure(service_en
             return job.id, first, second
 
     job_id, first, second = asyncio.run(run())
-    assert first == {"enqueued": 1, "errors": []}
-    assert second == {"enqueued": 0, "errors": []}
+    assert first == {"enqueued": 1, "cancelled": 0, "errors": []}
+    assert second == {"enqueued": 0, "cancelled": 0, "errors": []}
     assert enqueued == [job_id]
+
+
+def test_reconciliation_cancels_invalid_topic_job_even_after_dispatch_event(service_env):
+    from content_jobs import create_job
+    from database import SessionLocal
+    from models import ContentJobEvent
+    from topic_source_service import reconcile_topic_source_jobs
+
+    enqueued: list[int] = []
+
+    async def enqueue(job_id: int):
+        enqueued.append(job_id)
+
+    async def run():
+        async with SessionLocal() as db:
+            job = await create_job(
+                db,
+                flow="topic_source",
+                title="旧主题素材甄选任务",
+                input_data={"tweet_ids": ["legacy-post"]},
+                idempotency_key="topic-source:legacy:invalid",
+            )
+            db.add(ContentJobEvent(
+                job_id=job.id,
+                kind="topic_source_queue_dispatched",
+            ))
+            await db.commit()
+            job_id = job.id
+
+        first = await reconcile_topic_source_jobs(enqueue=enqueue)
+        second = await reconcile_topic_source_jobs(enqueue=enqueue)
+        async with SessionLocal() as db:
+            saved = await db.get(type(job), job_id)
+            events = (await db.execute(
+                select(ContentJobEvent)
+                .where(ContentJobEvent.job_id == job_id)
+                .order_by(ContentJobEvent.id)
+            )).scalars().all()
+        return job_id, first, second, saved, events
+
+    job_id, first, second, saved, events = asyncio.run(run())
+    assert first == {"enqueued": 0, "cancelled": 1, "errors": []}
+    assert second == {"enqueued": 0, "cancelled": 0, "errors": []}
+    assert enqueued == []
+    assert saved.id == job_id
+    assert saved.status == "cancelled"
+    assert events[-1].kind == "job_reconciled"
+    assert events[-1].payload == {
+        "action": "invalid_topic_source_payload_cancelled",
+    }

@@ -40,6 +40,7 @@ from text_video_master import (
     recoverable_master_alignment_project,
     recoverable_master_assembly_result,
 )
+from topic_source_service import is_valid_topic_source_payload
 
 
 INTERRUPTION_ERROR = (
@@ -414,6 +415,28 @@ async def _superseded_digital_human_job(
     return False
 
 
+def _valid_topic_source_payload(job: ContentJob) -> bool:
+    return is_valid_topic_source_payload(job.input_data)
+
+
+async def _cancel_invalid_topic_source_job(
+    db: AsyncSession,
+    job: ContentJob,
+    ensure_fence,
+) -> _Decision:
+    await ensure_fence()
+    job.status = "cancelled"
+    job.completed_at = datetime.now(timezone.utc)
+    await add_locked_job_event(
+        db,
+        job.id,
+        "job_reconciled",
+        payload={"action": "invalid_topic_source_payload_cancelled"},
+    )
+    await db.commit()
+    return _Decision()
+
+
 async def _cancel_superseded_job(
     db: AsyncSession,
     job: ContentJob,
@@ -441,6 +464,16 @@ async def _decide_locked(
         return _Decision()
     if await _superseded_digital_human_job(db, job):
         return await _cancel_superseded_job(
+            db,
+            job,
+            ensure_fence,
+        )
+    if (
+        job.flow == "topic_source"
+        and job.status == "queued"
+        and not _valid_topic_source_payload(job)
+    ):
+        return await _cancel_invalid_topic_source_job(
             db,
             job,
             ensure_fence,

@@ -277,6 +277,86 @@ def test_queued_and_latest_succeeded_are_enqueued_once_across_two_passes(
     asyncio.run(run())
 
 
+def test_invalid_topic_source_job_is_cancelled_instead_of_requeued(
+    reconciliation_env,
+):
+    from job_reconciliation import reconcile_content_jobs
+
+    async def run():
+        invalid_id, _ = await _seed_job(
+            reconciliation_env,
+            flow="topic_source",
+            status="queued",
+            input_data={"tweet_ids": ["legacy-post"]},
+        )
+        async with reconciliation_env.SessionLocal() as db:
+            db.add(reconciliation_env.models.ContentJobEvent(
+                job_id=invalid_id,
+                kind="topic_source_queue_dispatched",
+            ))
+            await db.commit()
+
+        invalid_queue = FakeFencedQueue()
+        first_invalid = await reconcile_content_jobs(
+            invalid_queue,
+            session_factory=reconciliation_env.SessionLocal,
+        )
+        second_invalid = await reconcile_content_jobs(
+            invalid_queue,
+            session_factory=reconciliation_env.SessionLocal,
+        )
+        assert first_invalid == {"enqueued": 0, "job_ids": []}
+        assert second_invalid == {"enqueued": 0, "job_ids": []}
+
+        async with reconciliation_env.SessionLocal() as db:
+            invalid = await db.get(
+                reconciliation_env.models.ContentJob,
+                invalid_id,
+            )
+            assert invalid.status == "cancelled"
+        events = await _events(reconciliation_env, invalid_id)
+        assert events[-1].kind == "job_reconciled"
+        assert events[-1].payload == {
+            "action": "invalid_topic_source_payload_cancelled",
+        }
+
+        legacy_id, _ = await _seed_job(
+            reconciliation_env,
+            flow="topic_source",
+            status="queued",
+            input_data={"rule_id": 7, "tweet_ids": ["legacy-post"]},
+        )
+        merged_id, _ = await _seed_job(
+            reconciliation_env,
+            flow="topic_source",
+            status="queued",
+            input_data={
+                "subscription_id": 3,
+                "directory_ids": [11],
+                "tweet_ids": ["merged-post"],
+            },
+        )
+        valid_queue = FakeFencedQueue()
+        valid = await reconcile_content_jobs(
+            valid_queue,
+            session_factory=reconciliation_env.SessionLocal,
+        )
+        assert valid == {
+            "enqueued": 2,
+            "job_ids": [legacy_id, merged_id],
+        }
+        assert valid_queue.items == [legacy_id, merged_id]
+
+        second_valid = await reconcile_content_jobs(
+            valid_queue,
+            session_factory=reconciliation_env.SessionLocal,
+        )
+        assert second_valid == {"enqueued": 0, "job_ids": []}
+        assert valid_queue.items == [legacy_id, merged_id]
+
+    asyncio.run(run())
+
+
 def test_active_daily_agent_job_is_resumed_but_terminal_history_is_not(
     reconciliation_env,
 ):

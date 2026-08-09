@@ -4,11 +4,17 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import Awaitable, Callable
+from datetime import datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from content_jobs import create_job, record_event
+from content_jobs import (
+    add_locked_job_event,
+    create_job,
+    lock_content_job_row,
+    record_event,
+)
 from job_queue import enqueue_job
 from models import (
     ContentJob,
@@ -21,6 +27,25 @@ def _idempotency_key(subscription_id: int, tweet_ids: list[str]) -> str:
     joined = ",".join(sorted(set(tweet_ids)))
     digest = hashlib.sha256(joined.encode("utf-8")).hexdigest()[:20]
     return f"topic-source:{subscription_id}:{digest}"
+
+
+def _positive_int(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value > 0
+
+
+def is_valid_topic_source_payload(input_data: object) -> bool:
+    """Accept only the current merged payload or the supported legacy shape."""
+    if not isinstance(input_data, dict):
+        return False
+    directory_ids = input_data.get("directory_ids")
+    if (
+        _positive_int(input_data.get("subscription_id"))
+        and isinstance(directory_ids, list)
+        and bool(directory_ids)
+        and all(_positive_int(directory_id) for directory_id in directory_ids)
+    ):
+        return True
+    return _positive_int(input_data.get("rule_id"))
 
 
 async def dispatch_topic_source_posts(
@@ -88,6 +113,7 @@ async def reconcile_topic_source_jobs(
     from models import ContentJobEvent
 
     enqueued = 0
+    cancelled = 0
     errors: list[str] = []
     async with SessionLocal() as db:
         jobs = (await db.execute(
@@ -97,6 +123,21 @@ async def reconcile_topic_source_jobs(
             ).order_by(ContentJob.created_at)
         )).scalars().all()
         for job in jobs:
+            if not is_valid_topic_source_payload(job.input_data):
+                locked_job = await lock_content_job_row(db, job.id)
+                if locked_job is None or locked_job.status != "queued":
+                    continue
+                locked_job.status = "cancelled"
+                locked_job.completed_at = datetime.now(timezone.utc)
+                await add_locked_job_event(
+                    db,
+                    locked_job.id,
+                    "job_reconciled",
+                    payload={"action": "invalid_topic_source_payload_cancelled"},
+                )
+                await db.commit()
+                cancelled += 1
+                continue
             dispatched = await db.scalar(
                 select(ContentJobEvent.id).where(
                     ContentJobEvent.job_id == job.id,
@@ -111,4 +152,4 @@ async def reconcile_topic_source_jobs(
                 enqueued += 1
             except Exception as exc:
                 errors.append(f"任务 {job.id}: {exc}")
-    return {"enqueued": enqueued, "errors": errors}
+    return {"enqueued": enqueued, "cancelled": cancelled, "errors": errors}
