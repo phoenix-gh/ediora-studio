@@ -9,7 +9,8 @@ from typing import Literal
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from models import AgentExecution, AgentToolCall, ContentJob
+from log_redaction import redact_secret_text
+from models import AgentExecution, AgentMessageLog, AgentToolCall, ContentJob
 
 
 class AgentExecutionConflict(RuntimeError):
@@ -53,6 +54,28 @@ async def ensure_agent_execution(
     await session.commit()
     await session.refresh(execution)
     return execution
+
+
+async def append_agent_message(
+    session: AsyncSession,
+    *,
+    execution_id: int,
+    phase: str,
+    direction: str,
+    payload: object,
+) -> AgentMessageLog:
+    if await session.get(AgentExecution, execution_id) is None:
+        raise KeyError(f"agent execution {execution_id} not found")
+    message = AgentMessageLog(
+        execution_id=execution_id,
+        phase=phase,
+        direction=direction,
+        payload_data=payload,
+    )
+    session.add(message)
+    await session.commit()
+    await session.refresh(message)
+    return message
 
 
 async def update_agent_checkpoint(
@@ -250,6 +273,26 @@ async def complete_agent_execution(
     execution.error = ""
     execution.completed_at = _now()
     execution.updated_at = _now()
+    await session.commit()
+    await session.refresh(execution)
+    return execution
+
+
+async def fail_agent_execution(
+    session: AsyncSession,
+    execution_id: int,
+    error: str,
+) -> AgentExecution:
+    execution = await session.get(AgentExecution, execution_id)
+    if execution is None:
+        raise KeyError(f"agent execution {execution_id} not found")
+    if execution.status in {"succeeded", "failed", "cancelled"}:
+        return execution
+    execution.status = "failed"
+    execution.phase = "failed"
+    execution.error = redact_secret_text(str(error))[:2_000]
+    execution.updated_at = _now()
+    execution.completed_at = execution.updated_at
     await session.commit()
     await session.refresh(execution)
     return execution

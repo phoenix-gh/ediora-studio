@@ -7,11 +7,7 @@ from fastapi.testclient import TestClient
 
 
 @pytest.fixture
-def api(monkeypatch, tmp_path):
-    monkeypatch.setenv(
-        "WMS_DATABASE_URL",
-        f"sqlite+aiosqlite:///{tmp_path / 'digital-human-router.db'}",
-    )
+def api(monkeypatch, postgres_env):
     monkeypatch.setenv("HEYGEN_API_KEY", "test-heygen-key")
     monkeypatch.setenv(
         "WMS_WORKER_TOKEN", "test-worker-token-at-least-32-chars"
@@ -275,6 +271,10 @@ def test_stale_setup_job_cannot_overwrite_newer_role_state(api, monkeypatch):
             return new_job.id
 
     new_job_id = asyncio.new_event_loop().run_until_complete(replace_job())
+    stale_context = client.get(
+        f"/api/digital-humans/{role['id']}/worker-context",
+        headers={"X-Content-Job-Id": str(old_job_id)},
+    )
     stale = client.post(
         f"/api/digital-humans/{role['id']}/worker-progress",
         headers={"X-Content-Job-Id": str(old_job_id)},
@@ -286,7 +286,10 @@ def test_stale_setup_job_cannot_overwrite_newer_role_state(api, monkeypatch):
         },
     )
 
+    assert stale_context.status_code == 409
+    assert stale_context.headers["X-WMS-Retryable"] == "false"
     assert stale.status_code == 409
+    assert stale.headers["X-WMS-Retryable"] == "false"
     current = client.get(f"/api/digital-humans/{role['id']}").json()
     assert current["setup_job_id"] == new_job_id
     assert current["provider_state"] == {"new": True}

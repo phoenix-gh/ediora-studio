@@ -1,17 +1,15 @@
 import asyncio
 
-from sqlalchemy import text
+from sqlalchemy import inspect, text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 
-def test_existing_sqlite_response_table_gains_claim_column_and_index_idempotently(
-    tmp_path,
+def test_existing_response_table_gains_claim_column_and_index_idempotently(
+    postgres_database_url,
 ):
     from database import migrate_x_response_claim_schema
 
-    engine = create_async_engine(
-        f"sqlite+aiosqlite:///{tmp_path / 'migration.db'}",
-    )
+    engine = create_async_engine(postgres_database_url)
 
     async def run():
         async with engine.begin() as connection:
@@ -22,22 +20,22 @@ def test_existing_sqlite_response_table_gains_claim_column_and_index_idempotentl
             ))
             await migrate_x_response_claim_schema(connection)
             await migrate_x_response_claim_schema(connection)
-            columns = {
-                row[1]
-                for row in (
-                    await connection.execute(
-                        text("PRAGMA table_info(x_response_decisions)")
-                    )
-                ).all()
-            }
-            indexes = {
-                row[1]
-                for row in (
-                    await connection.execute(
-                        text("PRAGMA index_list(x_response_decisions)")
-                    )
-                ).all()
-            }
+            columns, indexes = await connection.run_sync(
+                lambda sync_connection: (
+                    {
+                        column["name"]
+                        for column in inspect(sync_connection).get_columns(
+                            "x_response_decisions"
+                        )
+                    },
+                    {
+                        index["name"]
+                        for index in inspect(sync_connection).get_indexes(
+                            "x_response_decisions"
+                        )
+                    },
+                )
+            )
         await engine.dispose()
         return columns, indexes
 
@@ -47,33 +45,33 @@ def test_existing_sqlite_response_table_gains_claim_column_and_index_idempotentl
     assert "ix_x_response_decisions_telegram_claim_token" in indexes
 
 
-def test_new_sqlite_schema_contains_claim_column_and_index(tmp_path):
+def test_new_postgres_schema_contains_claim_column_and_index(
+    postgres_database_url,
+):
     import models  # noqa: F401
     from database import Base
 
-    engine = create_async_engine(
-        f"sqlite+aiosqlite:///{tmp_path / 'new.db'}",
-    )
+    engine = create_async_engine(postgres_database_url)
 
     async def run():
         async with engine.begin() as connection:
             await connection.run_sync(Base.metadata.create_all)
-            columns = {
-                row[1]
-                for row in (
-                    await connection.execute(
-                        text("PRAGMA table_info(x_response_decisions)")
-                    )
-                ).all()
-            }
-            indexes = {
-                row[1]
-                for row in (
-                    await connection.execute(
-                        text("PRAGMA index_list(x_response_decisions)")
-                    )
-                ).all()
-            }
+            columns, indexes = await connection.run_sync(
+                lambda sync_connection: (
+                    {
+                        column["name"]
+                        for column in inspect(sync_connection).get_columns(
+                            "x_response_decisions"
+                        )
+                    },
+                    {
+                        index["name"]
+                        for index in inspect(sync_connection).get_indexes(
+                            "x_response_decisions"
+                        )
+                    },
+                )
+            )
         await engine.dispose()
         return columns, indexes
 

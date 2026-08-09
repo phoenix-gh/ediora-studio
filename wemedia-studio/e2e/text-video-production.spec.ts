@@ -1573,47 +1573,6 @@ test('real text-video workflow persists from desktop to compact UI', async ({
     }).click()
     await expect(reloadedTemplateDialog).toBeHidden()
 
-    await page.getByRole('combobox', { name: '视频模板' }).click()
-    const v2Save = page.waitForResponse(response => (
-      response.url() === `${harness.apiBase}/text-videos/${saved.id}`
-      && response.request().method() === 'PATCH'
-    ))
-    await page.getByRole('option', { name: '动感大字 V2' }).click()
-    expect((await v2Save).status()).toBe(200)
-    await expect(page.getByRole('button', { name: '自动拆句' }))
-      .toBeVisible()
-    await expect(page.getByLabel('短句动作').first()).toBeVisible()
-    const v2Project = await harness.waitForProject(
-      saved.id,
-      'persisted kinetic punch v2 motion plan',
-      project => (
-        project.render_input.templateId === 'kinetic-punch-v2'
-        && project.scene_plan.scenes.every(scene => Boolean(scene.motion))
-      ),
-    )
-    expect(v2Project.render_input.templateVersion).toBe(1)
-    expect(v2Project.scene_plan.scenes.every(
-      scene => (scene.motion?.chunks.length ?? 0) > 0,
-    )).toBe(true)
-
-    await page.getByRole('button', { name: 'AI 优化本场' }).click()
-    const motionDialog = page.getByRole('dialog', {
-      name: 'AI 动效优化',
-    })
-    await expect(motionDialog).toBeVisible()
-    await expect(motionDialog.getByLabel('创意方向')).toBeVisible()
-    await motionDialog.getByRole('button', { name: '取消' }).click()
-    await expect(motionDialog).toBeHidden()
-    await page.screenshot({
-      path: '/tmp/kinetic-v2-editor-browser-qa.png',
-      fullPage: false,
-    })
-
-    await page.reload()
-    await expect(page.getByRole('button', { name: '自动拆句' }))
-      .toBeVisible({ timeout: 20_000 })
-    await expect(page.getByLabel('短句动作').first()).toBeVisible()
-
     await page.setViewportSize({ width: 1024, height: 800 })
     await expect(page.getByTestId('editor-shell')).toBeVisible()
     expect(await page.getByTestId('editor-shell').evaluate(

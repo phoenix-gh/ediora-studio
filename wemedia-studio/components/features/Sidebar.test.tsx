@@ -35,6 +35,17 @@ describe('Sidebar in the app shell', () => {
     expect(screen.getByRole('link', { name: '文字视频' })).toHaveAttribute('href', '/text-video')
   })
 
+  it('places the intelligence center immediately above the task board', () => {
+    render(<Sidebar />)
+
+    const nav = screen.getByRole('navigation', { name: '主导航' })
+    const labels = Array.from(nav.querySelectorAll('a')).map((link) => link.textContent?.trim())
+
+    expect(labels).not.toContain('情报站')
+    expect(labels).toContain('情报中心')
+    expect(labels.indexOf('情报中心')).toBe(labels.indexOf('任务看板') - 1)
+  })
+
   it('uses the inclusive 1024px compact breakpoint for every visually-hidden sidebar label', () => {
     const sidebarSource = readFileSync(resolve(process.cwd(), 'components/features/Sidebar.tsx'), 'utf8')
     const globalsSource = readFileSync(resolve(process.cwd(), 'app/globals.css'), 'utf8')

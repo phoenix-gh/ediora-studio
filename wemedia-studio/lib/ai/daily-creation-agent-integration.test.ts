@@ -20,7 +20,7 @@ const fixtureSkill: RegisteredSkill = {
   version: '1.0.0',
   source: 'uploaded',
   enabled: true,
-  instructions: 'Read the finance reference, research assets, deduplicate, validate, and save.',
+  instructions: 'Read the finance reference and save one X draft.',
   directory: '/fixture/fixture-x-writing',
 }
 
@@ -28,44 +28,69 @@ type Executable = {
   execute(input: unknown, options: { toolCallId: string }): Promise<unknown>
 }
 
-it('runs one automatically selected Skill through references, tools, validation, and real save evidence', async () => {
+it('lets a prompt-directed Agent load a Skill and save exactly one X draft', async () => {
   const readReferences: string[] = []
-  const checkpoints: Array<{ phase: string; checkpoint: Record<string, unknown>; audit: Record<string, unknown> }> = []
   const completedCalls: Array<{ toolCallId: string; output: unknown }> = []
-  const posts = Array.from({ length: 10 }, (_, index) => ({
-    source_asset_ids: [index + 1],
-    text: `第 ${index + 1} 条经过校验的短帖`,
-    reuse_decision: 'fresh',
-    reuse_explanation: '与近期内容不同',
-    compared_usage_ids: [],
-  }))
-  const saveResult = {
-    structuredContent: { result: {
-      execution_id: 41,
-      run_id: 83,
-      created_count: 10,
-      output_ids: Array.from({ length: 10 }, (_, index) => index + 101),
-      usage_ids: Array.from({ length: 10 }, (_, index) => index + 201),
-    } },
-  }
+  const checkpoints: Array<{ phase: string; checkpoint: Record<string, unknown>; audit: Record<string, unknown> }> = []
+  let activeSkill = false
+  let saveDraftCalls = 0
+  let recordUsageCalls = 0
 
   const runtimeDeps: AgentRuntimeDependencies = {
     listEnabledSkills: async () => [fixtureSkill],
     getEnabledSkill: async name => name === fixtureSkill.name ? fixtureSkill : null,
     openTools: async (options: GlobalAgentToolOptions) => {
       const baseTools = {
-        list_creative_asset_candidates: tool({
-          description: 'List candidates.', inputSchema: z.object({}),
-          execute: async () => Array.from({ length: 10 }, (_, index) => ({ id: index + 1 })),
+        loadSkill: tool({
+          description: 'Load the one best matching enabled Skill.',
+          inputSchema: z.object({ name: z.string() }),
+          execute: async ({ name }) => {
+            if (name !== fixtureSkill.name) throw new Error(`Unknown Skill: ${name}`)
+            activeSkill = true
+            return { name, description: fixtureSkill.description, instructions: fixtureSkill.instructions }
+          },
         }),
-        get_recent_content_usage: tool({
-          description: 'List recent usage.', inputSchema: z.object({}),
-          execute: async () => [],
+        readSkillReference: tool({
+          description: 'Read a listed Skill reference.',
+          inputSchema: z.object({ path: z.string() }),
+          execute: async ({ path }) => {
+            if (!activeSkill) throw new Error('No Skill is active')
+            readReferences.push(path)
+            return { path, bytes: 321, content: 'Lead with evidence and a concrete action.' }
+          },
         }),
-        save_daily_creation_outputs: tool({
-          description: 'Atomically save outputs.',
-          inputSchema: z.object({ posts: z.array(z.unknown()) }),
-          execute: async () => saveResult,
+        save_draft: tool({
+          description: 'Save one X draft.',
+          inputSchema: z.object({
+            draft_type: z.literal('x'),
+            title: z.string().min(1),
+            content: z.string().min(1),
+          }),
+          execute: async input => {
+            const saved = z.object({
+              draft_type: z.literal('x'),
+              title: z.string().min(1),
+              content: z.string().min(1),
+            }).parse(input)
+            saveDraftCalls += 1
+            return { id: 101, title: saved.title, status: 'drafting' }
+          },
+        }),
+        record_content_usage: tool({
+          description: 'Record usage for one persisted output.',
+          inputSchema: z.object({
+            asset_id: z.number().int().positive(),
+            output_kind: z.literal('draft'),
+            output_id: z.number().int().positive(),
+            topic: z.string(), angle: z.string(), excerpt: z.string(),
+            reuse_decision: z.string(),
+          }),
+          execute: async input => {
+            expect(input).toMatchObject({ asset_id: 7, output_id: 101 })
+            expect(input).not.toHaveProperty('run_id')
+            recordUsageCalls += 1
+            return { id: 202 }
+          },
         }),
       } satisfies ToolSet
       const tools = applyAgentToolPolicy(baseTools, {
@@ -77,12 +102,12 @@ it('runs one automatically selected Skill through references, tools, validation,
         tools,
         catalogContext: 'fixture catalog',
         snapshot: () => ({
-          source: options.skillName ? 'automatic' as const : undefined,
-          activeSkillName: options.skillName,
-          referenceCount: options.skillName ? 1 : 0,
+          source: activeSkill ? 'automatic' as const : undefined,
+          activeSkillName: activeSkill ? fixtureSkill.name : undefined,
+          referenceCount: activeSkill ? 1 : 0,
           readReferenceCount: readReferences.length,
         }),
-        activeContext: () => options.skillName ? {
+        activeContext: () => activeSkill ? {
           skill: fixtureSkill,
           references: [{ path: 'references/finance-writing.md', bytes: 321 }],
           activation: 'automatic' as const,
@@ -102,41 +127,27 @@ it('runs one automatically selected Skill through references, tools, validation,
       }
     },
     generate: vi.fn(async (input: Record<string, unknown>) => {
-      const prompt = typeof input.prompt === 'string' ? input.prompt : ''
-      if (prompt.startsWith('Return valid JSON only. Select at most one enabled Skill')) {
-        return { output: { skillName: fixtureSkill.name, continueRestored: false } }
-      }
-      if (prompt.startsWith('Create a bounded execution plan')) {
-        return { output: {
-          goal: '创作并落库十条短帖',
-          steps: [{
-            id: 'deliver', instruction: '读取规则、研究、去重、自检并落库',
-            requiredReferences: ['references/finance-writing.md'],
-            requiredTools: [
-              'list_creative_asset_candidates',
-              'get_recent_content_usage',
-              'save_daily_creation_outputs',
-            ],
-          }],
-          outputRequirements: ['十条中文 X 短帖必须原子落库'],
-          verificationCriteria: ['保存工具返回十个真实 output ID'],
-        } }
-      }
-      if (prompt.startsWith('Return valid JSON only in exactly this shape')) {
-        return { output: { passed: true, violations: [] } }
-      }
-
       const tools = input.tools as Record<string, Executable>
-      const candidates = await tools.list_creative_asset_candidates.execute({}, { toolCallId: 'candidates-1' })
-      const usage = await tools.get_recent_content_usage.execute({}, { toolCallId: 'usage-1' })
-      const saved = await tools.save_daily_creation_outputs.execute({ posts }, { toolCallId: 'save-1' })
+      const skill = await tools.loadSkill.execute({ name: fixtureSkill.name }, { toolCallId: 'skill-1' })
+      const reference = await tools.readSkillReference.execute({
+        path: 'references/finance-writing.md',
+      }, { toolCallId: 'reference-1' })
+      const saved = await tools.save_draft.execute({
+        draft_type: 'x', title: 'GitHub 日榜观察', content: '今天值得关注的开源项目。',
+      }, { toolCallId: 'save-1' })
+      const usage = await tools.record_content_usage.execute({
+        asset_id: 7, output_kind: 'draft', output_id: 101,
+        topic: 'GitHub 日榜', angle: '今天值得关注', excerpt: '今天值得关注的开源项目。',
+        reuse_decision: 'fresh',
+      }, { toolCallId: 'usage-1' })
       return {
-        text: '十条短帖已校验并落库。',
+        text: '一条 X 草稿已保存。',
         content: [],
         toolResults: [
-          { toolName: 'list_creative_asset_candidates', toolCallId: 'candidates-1', output: candidates },
-          { toolName: 'get_recent_content_usage', toolCallId: 'usage-1', output: usage },
-          { toolName: 'save_daily_creation_outputs', toolCallId: 'save-1', output: saved },
+          { toolName: 'loadSkill', toolCallId: 'skill-1', output: skill },
+          { toolName: 'readSkillReference', toolCallId: 'reference-1', output: reference },
+          { toolName: 'save_draft', toolCallId: 'save-1', output: saved },
+          { toolName: 'record_content_usage', toolCallId: 'usage-1', output: usage },
         ],
       }
     }) as unknown as AgentRuntimeDependencies['generate'],
@@ -147,25 +158,29 @@ it('runs one automatically selected Skill through references, tools, validation,
     skill_mode: 'auto' as const, skill_name: null, phase: 'prepare',
     checkpoint: {}, audit: {}, completion_evidence: {}, version: 1,
   }
+  let runtimeOptions: {
+    automaticSelection?: boolean
+    skillMode?: string
+    dailyCreationRunId?: number
+  } | undefined
   const deps: DailyCreationAgentJobDependencies = {
     getJob: vi.fn().mockResolvedValue({
       id: 19, flow: 'daily_creation', title: 'fixture', status: 'queued',
       input: { run_id: 83 }, steps: [],
     }),
     getContext: vi.fn().mockResolvedValue({
-      id: 83, status: 'queued', requested_count: 10,
+      id: 83, status: 'queued', requested_count: 0,
       rule: {
-        name: '搞钱短帖', asset_type: 'article', directory: '搞钱副业',
-        directories: ['搞钱副业'], output_type: 'x_short_post', target_count: 10,
-        lookback_days: 7, delivery_mode: 'drafts', account_id: null,
-        instructions: '', skill_mode: 'auto', skill_name: null,
+        name: 'GitHub 日报', prompt: '读取 GitHub 日榜后保存一条 X 草稿。',
+        asset_type: 'article', output_type: 'x_short_post', target_count: 0,
+        lookback_days: 0, delivery_mode: 'drafts', skill_mode: 'auto',
       },
     }),
     loadModel: vi.fn().mockResolvedValue('fixture-model' as never),
     ensureExecution: vi.fn().mockResolvedValue(execution),
     checkpointExecution: vi.fn().mockImplementation(async (_jobId, _id, version, update) => {
       checkpoints.push(update)
-      return { ...execution, version: version + 1, phase: update.phase }
+      return { ...execution, version: version + 1, phase: update.phase, checkpoint: update.checkpoint }
     }),
     claimToolCall: vi.fn().mockResolvedValue({ action: 'execute' }),
     listToolCalls: vi.fn().mockResolvedValue([]),
@@ -174,38 +189,39 @@ it('runs one automatically selected Skill through references, tools, validation,
       return {}
     }),
     failToolCall: vi.fn(),
+    failExecution: vi.fn().mockResolvedValue({}),
     completeExecution: vi.fn().mockResolvedValue({}),
     startStep: vi.fn().mockResolvedValue({ id: 71, attempt: 1 }),
     completeStep: vi.fn().mockResolvedValue({}),
     failStep: vi.fn(),
     completeJob: vi.fn().mockResolvedValue({}),
-    openRuntime: options => openAgentRuntime({ ...options, dependencies: runtimeDeps }),
+    openRuntime: options => {
+      runtimeOptions = options
+      return openAgentRuntime({ ...options, dependencies: runtimeDeps })
+    },
     apiRoot: () => 'http://api.test',
   }
 
   const evidence = await runDailyCreationAgentJob(19, deps)
 
   expect(evidence).toMatchObject({
-    toolName: 'save_daily_creation_outputs', toolCallId: 'save-1',
-    runId: 83, createdCount: 10,
-    outputIds: Array.from({ length: 10 }, (_, index) => index + 101),
+    kind: 'agent_run', executionId: 41, finalText: '一条 X 草稿已保存。', toolCallCount: 4,
   })
   expect(readReferences).toEqual(['references/finance-writing.md'])
+  expect(saveDraftCalls).toBe(1)
+  expect(recordUsageCalls).toBe(1)
   expect(completedCalls.map(call => call.toolCallId)).toEqual([
-    'candidates-1', 'usage-1', 'save-1',
+    'skill-1', 'reference-1', 'save-1', 'usage-1',
   ])
-  const finalAudit = checkpoints.at(-1)?.audit as Record<string, unknown>
-  expect(finalAudit.skillRun).toMatchObject({
-    skillName: 'fixture-x-writing', activation: 'automatic',
-    loadedReferences: ['references/finance-writing.md'],
-    validation: { passed: true },
-  })
-  expect(finalAudit.toolCalls).toEqual(expect.arrayContaining([
-    expect.objectContaining({
-      toolName: 'save_daily_creation_outputs', status: 'succeeded',
-      autoApproved: true,
-    }),
-  ]))
+  expect(checkpoints.at(-1)?.checkpoint).toEqual(expect.objectContaining({
+    evidence: expect.objectContaining({ kind: 'agent_run' }),
+  }))
   expect(deps.completeExecution).toHaveBeenCalledWith(19, 41, evidence)
   expect(deps.completeJob).toHaveBeenCalledWith(19)
+  expect(runtimeOptions).toMatchObject({
+    automaticSelection: false, skillMode: 'auto', dailyCreationRunId: 83,
+  })
+  expect(deps.claimToolCall).toHaveBeenCalledWith(19, 41, expect.objectContaining({
+    toolName: 'record_content_usage', sideEffecting: true,
+  }))
 })

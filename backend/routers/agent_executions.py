@@ -4,15 +4,18 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
+from typing import Literal
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agent_execution_service import (
     AgentExecutionConflict,
+    append_agent_message,
     claim_agent_tool_call,
     complete_agent_execution,
     complete_agent_tool_call,
     ensure_agent_execution,
+    fail_agent_execution,
     fail_agent_tool_call,
     update_agent_checkpoint,
 )
@@ -58,8 +61,18 @@ class ToolCallFailureRequest(BaseModel):
     uncertain: bool = False
 
 
+class MessageLogRequest(BaseModel):
+    phase: str = Field(min_length=1, max_length=64)
+    direction: Literal["model_request", "model_response", "model_error"]
+    payload: object
+
+
 class ExecutionCompleteRequest(BaseModel):
     completion_evidence: dict
+
+
+class ExecutionFailureRequest(BaseModel):
+    error: str = Field(min_length=1, max_length=2_000)
 
 
 def _execution_payload(execution: AgentExecution) -> dict:
@@ -145,6 +158,32 @@ async def get_execution_tool_calls(
         ).order_by(AgentToolCall.id)
     )).scalars().all()
     return [_tool_call_payload(call) for call in calls]
+
+
+@router.post("/{execution_id}/messages", status_code=status.HTTP_201_CREATED)
+async def post_execution_message(
+    execution_id: int,
+    body: MessageLogRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        message = await append_agent_message(
+            db,
+            execution_id=execution_id,
+            phase=body.phase,
+            direction=body.direction,
+            payload=body.payload,
+        )
+    except KeyError as error:
+        raise HTTPException(404, str(error)) from None
+    return {
+        "id": message.id,
+        "execution_id": message.execution_id,
+        "phase": message.phase,
+        "direction": message.direction,
+        "payload": message.payload_data,
+        "created_at": message.created_at,
+    }
 
 
 @router.patch("/{execution_id}/checkpoint")
@@ -237,6 +276,19 @@ async def post_execution_complete(
         execution = await complete_agent_execution(
             db, execution_id, body.completion_evidence
         )
+    except KeyError as error:
+        raise HTTPException(404, str(error)) from None
+    return _execution_payload(execution)
+
+
+@router.post("/{execution_id}/fail")
+async def post_execution_failure(
+    execution_id: int,
+    body: ExecutionFailureRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        execution = await fail_agent_execution(db, execution_id, body.error)
     except KeyError as error:
         raise HTTPException(404, str(error)) from None
     return _execution_payload(execution)

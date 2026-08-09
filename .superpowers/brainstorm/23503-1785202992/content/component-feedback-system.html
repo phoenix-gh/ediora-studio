@@ -1,0 +1,164 @@
+<style>
+  .system {
+    font-family: Inter, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color:#172033;
+  }
+  .section-grid {
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:16px;
+    margin-top:20px;
+  }
+  .panel {
+    padding:19px;
+    border:1px solid #e6e9f1;
+    border-radius:15px;
+    background:#fff;
+    box-shadow:0 8px 28px rgba(31,42,72,.05);
+  }
+  .panel h3 {margin:0 0 4px;font-size:15px}
+  .panel > p {margin:0 0 15px;color:#667085;font-size:10px;line-height:1.5}
+  .state-row {
+    display:grid;
+    grid-template-columns:70px 1fr;
+    gap:10px;
+    align-items:center;
+    min-height:49px;
+    border-bottom:1px solid #eef0f4;
+  }
+  .state-row:last-child {border-bottom:0}
+  .state-label {color:#98a2b3;font-size:9px;font-weight:650}
+  .button {
+    display:inline-flex;align-items:center;justify-content:center;gap:6px;
+    height:34px;padding:0 12px;border-radius:8px;font-size:10px;font-weight:680;
+  }
+  .primary {border:1px solid #5b5fe8;background:#5b5fe8;color:#fff}
+  .hover {border:1px solid #4f46e5;background:#4f46e5;color:#fff;box-shadow:0 4px 12px rgba(91,95,232,.22)}
+  .focus {border:1px solid #5b5fe8;background:#fff;color:#4f46e5;box-shadow:0 0 0 3px rgba(91,95,232,.17)}
+  .disabled {border:1px solid #eaecf0;background:#f2f4f7;color:#98a2b3}
+  .spinner {width:10px;height:10px;border:2px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%}
+  .list-demo {overflow:hidden;border:1px solid #e6e9f1;border-radius:11px}
+  .list-row {display:grid;grid-template-columns:9px 1fr auto;gap:9px;align-items:center;padding:11px 12px;border-bottom:1px solid #eef0f4;background:#fff}
+  .list-row:last-child {border-bottom:0}
+  .list-row.hovered {background:#f8f9fc}
+  .list-row.selected {background:#eef0ff;box-shadow:inset 3px 0 #6366f1}
+  .dot {width:7px;height:7px;border-radius:50%;background:#98a2b3}
+  .list-row strong {display:block;font-size:10px}
+  .list-row span {display:block;margin-top:2px;color:#98a2b3;font-size:8px}
+  .tag {padding:3px 7px;border-radius:999px;background:#f2f4f7;color:#667085;font-size:8px;font-weight:650}
+  .selected .tag {background:#fff;color:#4f46e5}
+  .feedback-stack {display:grid;gap:9px}
+  .feedback {display:grid;grid-template-columns:24px 1fr auto;gap:10px;align-items:start;padding:11px;border:1px solid;border-radius:11px}
+  .feedback-icon {width:24px;height:24px;display:grid;place-items:center;border-radius:7px;font-size:11px;font-weight:800}
+  .feedback strong {display:block;font-size:10px}
+  .feedback p {margin:2px 0 0;font-size:8px;line-height:1.45}
+  .feedback button {border:0;background:transparent;font-size:8px;font-weight:700}
+  .info {border-color:#b9e6fe;background:#eff8ff;color:#026aa2}.info .feedback-icon{background:#d9f0ff}
+  .success {border-color:#abefc6;background:#ecfdf3;color:#067647}.success .feedback-icon{background:#d1fadf}
+  .warning {border-color:#fedf89;background:#fffaeb;color:#b54708}.warning .feedback-icon{background:#fef0c7}
+  .danger {border-color:#fecdca;background:#fef3f2;color:#b42318}.danger .feedback-icon{background:#fee4e2}
+  .async-grid {display:grid;grid-template-columns:repeat(3,1fr);gap:9px}
+  .async {
+    min-height:123px;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    padding:12px;border:1px dashed #d9deea;border-radius:12px;background:#fbfcfe;text-align:center;
+  }
+  .async-icon {width:31px;height:31px;display:grid;place-items:center;margin-bottom:8px;border-radius:9px;background:#eef0ff;color:#5b5fe8;font-size:13px}
+  .async strong {font-size:9px}
+  .async p {margin:3px 0 8px;color:#98a2b3;font-size:7px;line-height:1.4}
+  .mini-action {height:24px;padding:0 8px;border:1px solid #dfe3ec;border-radius:6px;background:#fff;color:#475467;font-size:7px}
+  .skeleton {width:80%;height:7px;margin:4px;border-radius:99px;background:linear-gradient(90deg,#eceff4,#f7f8fb,#eceff4)}
+  .dialog-sizes {display:grid;grid-template-columns:repeat(3,1fr);gap:9px}
+  .dialog-size {padding:11px;border:1px solid #e6e9f1;border-radius:11px;background:#fbfcfe}
+  .dialog-visual {height:64px;display:flex;align-items:center;justify-content:center;margin-bottom:8px;border-radius:8px;background:#eef0ff}
+  .dialog-box {height:39px;border:1px solid #cdd2e3;border-radius:7px;background:#fff;box-shadow:0 7px 16px rgba(33,43,72,.12)}
+  .dialog-size strong {display:block;font-size:9px}
+  .dialog-size span {display:block;margin-top:3px;color:#98a2b3;font-size:7px;line-height:1.4}
+  .rules {
+    display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:16px;
+  }
+  .rule {padding:13px;border:1px solid #e6e9f1;border-radius:12px;background:#fff}
+  .rule strong {display:block;font-size:10px}
+  .rule span {display:block;margin-top:4px;color:#667085;font-size:8px;line-height:1.5}
+  .approval {display:flex;gap:10px;margin-top:18px}
+  .approval .option {flex:1;min-height:auto}
+  @media(max-width:950px){
+    .section-grid{grid-template-columns:1fr}
+    .rules{grid-template-columns:1fr 1fr}
+  }
+</style>
+
+<div class="system">
+  <h2>组件状态与反馈规则</h2>
+  <p class="subtitle">同一种状态在全站只有一种视觉表达；错误尽量贴近发生位置，Toast 只报告跨页面或后台任务结果。</p>
+
+  <div class="section-grid">
+    <section class="panel">
+      <h3>交互状态</h3>
+      <p>所有按钮、输入框、列表项和卡片共享同一套 Hover、Focus、Disabled 与 Loading 语法。</p>
+      <div class="state-row"><span class="state-label">Default</span><div><span class="button primary">保存更改</span></div></div>
+      <div class="state-row"><span class="state-label">Hover</span><div><span class="button hover">保存更改</span></div></div>
+      <div class="state-row"><span class="state-label">Focus</span><div><span class="button focus">键盘焦点</span></div></div>
+      <div class="state-row"><span class="state-label">Loading</span><div><span class="button primary"><span class="spinner"></span>正在保存</span></div></div>
+      <div class="state-row"><span class="state-label">Disabled</span><div><span class="button disabled">不可操作</span></div></div>
+    </section>
+
+    <section class="panel">
+      <h3>列表与选中态</h3>
+      <p>选中态统一使用浅靛蓝背景 + 左侧 3px 主色标记；Hover 只改变中性背景，不抢占状态色。</p>
+      <div class="list-demo">
+        <div class="list-row"><span class="dot"></span><div><strong>普通列表项</strong><span>正文、时间和来源信息</span></div><span class="tag">草稿</span></div>
+        <div class="list-row hovered"><span class="dot" style="background:#22c3de"></span><div><strong>鼠标悬停</strong><span>只提供轻微背景反馈</span></div><span class="tag">已采集</span></div>
+        <div class="list-row selected"><span class="dot" style="background:#6366f1"></span><div><strong>当前选中项</strong><span>全站保持相同的选择语义</span></div><span class="tag">编辑中</span></div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h3>反馈与错误</h3>
+      <p>表单错误显示在字段下；页面级问题使用横幅；任务提交结果使用 Toast，并提供明确的下一步。</p>
+      <div class="feedback-stack">
+        <div class="feedback info"><span class="feedback-icon">i</span><div><strong>字幕分析任务已提交</strong><p>可在创作任务中查看进度。</p></div><button>查看任务</button></div>
+        <div class="feedback success"><span class="feedback-icon">✓</span><div><strong>素材已保存</strong><p>已更新到“副业搞钱”目录。</p></div><button>查看</button></div>
+        <div class="feedback warning"><span class="feedback-icon">!</span><div><strong>YouTube Cookie 即将过期</strong><p>更新后可减少字幕获取失败。</p></div><button>去设置</button></div>
+        <div class="feedback danger"><span class="feedback-icon">×</span><div><strong>字幕下载失败</strong><p>保留任务上下文，可只重试字幕步骤。</p></div><button>重试</button></div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h3>加载、空状态与失败状态</h3>
+      <p>统一 AsyncState，任何页面都不再临时写“加载中…”或空白占位。</p>
+      <div class="async-grid">
+        <div class="async"><span class="skeleton"></span><span class="skeleton" style="width:63%"></span><span class="skeleton" style="width:72%"></span><p>保留真实布局轮廓</p></div>
+        <div class="async"><span class="async-icon">＋</span><strong>还没有文章素材</strong><p>手动新增，或从 X 订阅筛选入库。</p><button class="mini-action">新增素材</button></div>
+        <div class="async"><span class="async-icon" style="background:#fef3f2;color:#b42318">!</span><strong>内容加载失败</strong><p>保留筛选条件，可原地重试。</p><button class="mini-action">重新加载</button></div>
+      </div>
+    </section>
+
+    <section class="panel" style="grid-column:1/-1">
+      <h3>Dialog 尺寸与用途</h3>
+      <p>尺寸由任务复杂度决定，不允许每个页面随意指定宽度；移动端统一切换为接近全屏的 Dialog。</p>
+      <div class="dialog-sizes">
+        <div class="dialog-size"><div class="dialog-visual"><div class="dialog-box" style="width:37%"></div></div><strong>Small · 480px</strong><span>确认、重命名、单字段新增和简单配置。</span></div>
+        <div class="dialog-size"><div class="dialog-visual"><div class="dialog-box" style="width:62%"></div></div><strong>Medium · 720px</strong><span>素材选择、账号配置、筛选规则与标准表单。</span></div>
+        <div class="dialog-size"><div class="dialog-visual"><div class="dialog-box" style="width:86%"></div></div><strong>Large · 960px</strong><span>工作流、发布预览、多步骤任务和媒体浏览。</span></div>
+      </div>
+    </section>
+  </div>
+
+  <div class="rules">
+    <div class="rule"><strong>不使用浏览器弹窗</strong><span>彻底移除 prompt、confirm 和 alert，统一为 Dialog / AlertDialog。</span></div>
+    <div class="rule"><strong>状态色不作品牌色</strong><span>红、黄、绿只表示错误、警告和成功，平台图标可保留原色。</span></div>
+    <div class="rule"><strong>焦点必须可见</strong><span>键盘操作获得统一主色 Focus Ring，不能依赖 Hover。</span></div>
+    <div class="rule"><strong>失败可恢复</strong><span>保留用户输入与当前上下文，支持局部重试，不让整页清空。</span></div>
+  </div>
+
+  <div class="approval options">
+    <div class="option" data-choice="system-approved" onclick="toggleSelect(this)">
+      <div class="letter">✓</div>
+      <div class="content"><h3>完整设计可以</h3><p>写入设计规范并开始制定实施计划。</p></div>
+    </div>
+    <div class="option" data-choice="system-adjust" onclick="toggleSelect(this)">
+      <div class="letter">↺</div>
+      <div class="content"><h3>需要调整</h3><p>告诉我状态、反馈或 Dialog 规则中需要修改的部分。</p></div>
+    </div>
+  </div>
+</div>

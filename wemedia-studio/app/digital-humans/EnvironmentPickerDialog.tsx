@@ -102,7 +102,7 @@ export function EnvironmentPickerDialog({
         finished = await getJob(job.id)
       }
       if (finished.status !== 'succeeded') {
-        throw new Error('环境图生成失败，请到创作任务查看详情')
+        throw new Error('环境图生成失败，请到任务看板查看详情')
       }
       const assetId = finished.steps
         .map(step => step.output.asset_id)

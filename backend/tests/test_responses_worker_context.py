@@ -7,13 +7,8 @@ from fastapi.testclient import TestClient
 
 def test_worker_context_uses_its_job_run_before_a_current_analysis_exists(
     monkeypatch,
-    tmp_path,
+    postgres_env,
 ):
-    monkeypatch.setenv(
-        "WMS_DATABASE_URL",
-        f"sqlite+aiosqlite:///{tmp_path / 'responses-worker.db'}",
-    )
-    monkeypatch.setenv("WMS_DISABLE_SCHEDULER", "1")
     monkeypatch.setenv(
         "WMS_WORKER_TOKEN",
         "test-worker-token-at-least-32-chars",
@@ -40,6 +35,11 @@ def test_worker_context_uses_its_job_run_before_a_current_analysis_exists(
                 title="Video",
                 url="https://www.youtube.com/watch?v=video",
                 published_at=datetime.now(timezone.utc),
+                description="完整说明",
+                transcript_status="ready",
+                transcript_language="zh",
+                transcript_text="完整字幕",
+                transcript_segments=[{"start": 0, "end": 1, "text": "完整字幕"}],
             ))
             await db.commit()
             item, _ = await ensure_response_item(db, "youtube_video", "video")
@@ -60,4 +60,8 @@ def test_worker_context_uses_its_job_run_before_a_current_analysis_exists(
     )
 
     assert response.status_code == 200, response.text
-    assert response.json()["item"]["analysis"]["id"] == run_id
+    body = response.json()
+    assert body["item"]["analysis"]["id"] == run_id
+    assert body["source"]["transcript_text"] == "完整字幕"
+    assert body["source"]["transcript_segments"] == [{"start": 0, "end": 1, "text": "完整字幕"}]
+    assert "accounts" not in body

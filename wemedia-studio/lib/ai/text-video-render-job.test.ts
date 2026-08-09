@@ -5,7 +5,6 @@ import { join } from 'node:path'
 import { expect, it, vi } from 'vitest'
 
 import { makeTextVideoProject } from '@/lib/text-video/test-fixtures'
-import auditFixture from '@/remotion/fixtures/kinetic-punch-v2-audit.json'
 
 import {
   resolveTextVideoAssetUrl,
@@ -174,55 +173,4 @@ it('renders the frozen composition as h264/aac and removes its temp directory', 
   }))
   expect(progress).toEqual([25, 100])
   await expect(access(directory)).rejects.toMatchObject({ code: 'ENOENT' })
-})
-
-it('forwards the frozen v2 composition and nested motion chunks unchanged', async () => {
-  const { deps } = await depsForRender()
-  const renderInput = {
-    ...auditFixture,
-    audio: '/api/uploads/master.mp3',
-  }
-  const job = {
-    ...queuedJob(),
-    input: {
-      ...queuedJob().input,
-      composition_id: 'kinetic-punch-v2',
-      render_input: renderInput,
-    },
-  }
-  vi.mocked(deps.api.getJob).mockResolvedValue(job as never)
-  vi.mocked(deps.api.getRenderContext).mockResolvedValue({
-    already_saved: false,
-    ...job.input,
-  } as never)
-  vi.mocked(deps.selectComposition).mockResolvedValue({
-    id: 'kinetic-punch-v2',
-    width: 1920,
-    height: 1080,
-    fps: 30,
-    durationInFrames: 216,
-  } as never)
-
-  await runTextVideoRenderJob(301, deps)
-
-  expect(deps.selectComposition).toHaveBeenCalledWith(
-    expect.objectContaining({
-      id: 'kinetic-punch-v2',
-      inputProps: expect.objectContaining({
-        segments: expect.arrayContaining([
-          expect.objectContaining({
-            chunks: renderInput.segments[0].chunks,
-          }),
-        ]),
-      }),
-    }),
-  )
-  expect(deps.renderMedia).toHaveBeenCalledWith(
-    expect.objectContaining({
-      composition: expect.objectContaining({ id: 'kinetic-punch-v2' }),
-      inputProps: expect.objectContaining({
-        segments: renderInput.segments,
-      }),
-    }),
-  )
 })

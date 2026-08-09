@@ -7,11 +7,7 @@ from fastapi.testclient import TestClient
 
 
 @pytest.fixture
-def api(monkeypatch, tmp_path):
-    monkeypatch.setenv(
-        "WMS_DATABASE_URL",
-        f"sqlite+aiosqlite:///{tmp_path / 'asset-directories.db'}",
-    )
+def api(monkeypatch, postgres_env):
     for module in list(sys.modules):
         if module.startswith(
             ("database", "models", "routers.assets")
@@ -119,6 +115,93 @@ def test_ordinary_directory_can_still_be_renamed_and_deleted(api):
     assert deleted.status_code == 204, deleted.text
 
 
+def test_article_directory_round_trips_ai_ingestion_rule_and_survives_rename(api):
+    client, _ = api
+    created = client.post(
+        "/api/assets/directories",
+        json={"name": "AI 工具", "asset_type": "article"},
+    )
+    directory_id = created.json()["id"]
+
+    saved = client.put(
+        f"/api/assets/directories/{directory_id}/ingestion-rule",
+        json={
+            "enabled": True,
+            "keywords": [" AI ", "工具"],
+            "prompt": "  只接受有实际用法的内容。  ",
+        },
+    )
+    renamed = client.patch(
+        f"/api/assets/directories/{directory_id}",
+        json={"name": "AI 工具新名称", "asset_type": "article"},
+    )
+    listed = client.get("/api/assets/directories?asset_type=article")
+
+    assert saved.status_code == 200, saved.text
+    assert saved.json() == {
+        "directory_id": directory_id,
+        "enabled": True,
+        "keywords": ["AI", "工具"],
+        "prompt": "只接受有实际用法的内容。",
+    }
+    assert renamed.status_code == 200, renamed.text
+    item = next(item for item in listed.json() if item["id"] == directory_id)
+    assert item["name"] == "AI 工具新名称"
+    assert item["ai_ingestion_enabled"] is True
+    assert item["ai_ingestion_keywords"] == ["AI", "工具"]
+    assert item["ai_ingestion_prompt"] == "只接受有实际用法的内容。"
+
+
+def test_media_directory_cannot_configure_ai_article_ingestion(api):
+    client, _ = api
+    created = client.post(
+        "/api/assets/directories",
+        json={"name": "图片目录", "asset_type": "media"},
+    )
+
+    response = client.put(
+        f"/api/assets/directories/{created.json()['id']}/ingestion-rule",
+        json={"enabled": True, "keywords": [], "prompt": "图片规则"},
+    )
+
+    assert response.status_code == 422
+
+
+def test_directory_with_enabled_ai_ingestion_cannot_be_deleted(api):
+    client, _ = api
+    created = client.post(
+        "/api/assets/directories",
+        json={"name": "受保护目录", "asset_type": "article"},
+    )
+    directory_id = created.json()["id"]
+    configured = client.put(
+        f"/api/assets/directories/{directory_id}/ingestion-rule",
+        json={"enabled": True, "keywords": [], "prompt": "只接受相关内容"},
+    )
+    deleted = client.delete(f"/api/assets/directories/{directory_id}")
+
+    assert configured.status_code == 200, configured.text
+    assert deleted.status_code == 409, deleted.text
+
+
+def test_media_upload_can_be_assigned_to_an_existing_directory(api):
+    client, _ = api
+    _seed_directories(_)
+
+    uploaded = client.post(
+        "/api/assets/upload?media_kind=image&directory=%E6%99%AE%E9%80%9A%E7%9B%AE%E5%BD%95",
+        files={"file": ("rank.png", b"fake-png", "image/png")},
+    )
+    rejected = client.post(
+        "/api/assets/upload?media_kind=image&directory=%E4%B8%8D%E5%AD%98%E5%9C%A8",
+        files={"file": ("rank.png", b"fake-png", "image/png")},
+    )
+
+    assert uploaded.status_code == 201, uploaded.text
+    assert uploaded.json()["directory"] == "普通目录"
+    assert rejected.status_code == 422
+
+
 def test_article_content_hash_normalizes_whitespace():
     import routers.assets as router_module
 
@@ -187,15 +270,243 @@ def test_topic_rule_exposes_only_keyword_matched_x_post_snapshots(api):
         "subscription_id": subscription_id,
         "directory": "副业搞钱",
         "keywords": ["副业", "收入"],
+        "screening_prompt": "只接受有具体方法的内容。",
     })
     candidates = client.get(f"/api/assets/topic-rules/{created.json()['id']}/candidates")
 
     assert created.status_code == 201, created.text
     assert candidates.status_code == 200, candidates.text
+    assert candidates.json()["rule"]["screening_prompt"] == "只接受有具体方法的内容。"
     assert candidates.json()["posts"] == [{
         "tweet_id": "matched",
         "content": "副业收入的实操方法",
         "url": "https://x.com/example/status/1",
+    }]
+
+
+def test_merged_ingestion_candidates_and_acceptance_choose_one_folder(api, monkeypatch):
+    client, session_factory = api
+    monkeypatch.setenv("WMS_WORKER_TOKEN", "merged-ingestion-worker-token-long")
+
+    async def seed():
+        from datetime import datetime, timezone
+        from models import (
+            CreativeAssetDirectory,
+            XPost,
+            XSubscription,
+            XSubscriptionIngestionDirectory,
+        )
+
+        async with session_factory() as session:
+            subscription = XSubscription(
+                url="https://x.com/merged-ingestion",
+                label="Merged ingestion",
+            )
+            folders = [
+                CreativeAssetDirectory(
+                    name="AI 工具",
+                    asset_type="article",
+                    ai_ingestion_enabled=True,
+                    ai_ingestion_keywords=["AI"],
+                    ai_ingestion_prompt="只接受 AI 工具实操。",
+                ),
+                CreativeAssetDirectory(
+                    name="副业搞钱",
+                    asset_type="article",
+                    ai_ingestion_enabled=True,
+                    ai_ingestion_keywords=["副业"],
+                    ai_ingestion_prompt="只接受副业方法。",
+                ),
+            ]
+            session.add_all([subscription, *folders])
+            await session.flush()
+            session.add_all([
+                XSubscriptionIngestionDirectory(
+                    subscription_id=subscription.id,
+                    directory_id=folder.id,
+                )
+                for folder in folders
+            ])
+            session.add_all([
+                XPost(
+                    tweet_id="ai-post",
+                    subscription_id=subscription.id,
+                    username="example",
+                    content="AI 工具的实操方法",
+                    url="https://x.com/example/status/ai-post",
+                    published_at=datetime.now(timezone.utc),
+                ),
+                XPost(
+                    tweet_id="side-post",
+                    subscription_id=subscription.id,
+                    username="example",
+                    content="副业收入的实操方法",
+                    url="https://x.com/example/status/side-post",
+                    published_at=datetime.now(timezone.utc),
+                ),
+                XPost(
+                    tweet_id="noise-post",
+                    subscription_id=subscription.id,
+                    username="example",
+                    content="今天的随手记录",
+                    url="https://x.com/example/status/noise-post",
+                    published_at=datetime.now(timezone.utc),
+                ),
+            ])
+            await session.commit()
+            return subscription.id, [folder.id for folder in folders]
+
+    subscription_id, directory_ids = asyncio.new_event_loop().run_until_complete(seed())
+    candidates = client.get(
+        "/api/assets/ingestion/candidates",
+        params=[
+            ("subscription_id", subscription_id),
+            ("directory_ids", directory_ids[0]),
+            ("directory_ids", directory_ids[1]),
+        ],
+    )
+    accepted = client.post(
+        "/api/assets/ingestion/accepted",
+        headers={"X-WMS-Worker-Token": "merged-ingestion-worker-token-long"},
+        json={
+            "subscription_id": subscription_id,
+            "decisions": [
+                {"tweet_id": "ai-post", "directory_id": directory_ids[0]},
+                {"tweet_id": "side-post", "directory_id": None},
+            ],
+        },
+    )
+
+    assert candidates.status_code == 200, candidates.text
+    assert {post["tweet_id"] for post in candidates.json()["posts"]} == {
+        "ai-post",
+        "side-post",
+    }
+    assert [folder["id"] for folder in candidates.json()["directories"]] == directory_ids
+    assert accepted.status_code == 200, accepted.text
+    assert accepted.json() == {"saved": 1, "skipped": 0, "decided": 2}
+    assert client.get("/api/assets?asset_type=article").json()[0]["directory"] == "AI 工具"
+
+
+def test_merged_ingestion_rejects_unassociated_directory(api):
+    client, session_factory = api
+
+    async def seed():
+        from models import CreativeAssetDirectory, XSubscription, XSubscriptionIngestionDirectory
+
+        async with session_factory() as session:
+            subscription = XSubscription(
+                url="https://x.com/merged-invalid-directory",
+                label="Invalid directory",
+            )
+            selected = CreativeAssetDirectory(
+                name="已选目录",
+                asset_type="article",
+                ai_ingestion_enabled=True,
+                ai_ingestion_prompt="相关内容",
+            )
+            other = CreativeAssetDirectory(
+                name="未选目录",
+                asset_type="article",
+                ai_ingestion_enabled=True,
+                ai_ingestion_prompt="其他内容",
+            )
+            session.add_all([subscription, selected, other])
+            await session.flush()
+            session.add(XSubscriptionIngestionDirectory(
+                subscription_id=subscription.id,
+                directory_id=selected.id,
+            ))
+            await session.commit()
+            return subscription.id, other.id
+
+    subscription_id, directory_id = asyncio.new_event_loop().run_until_complete(seed())
+    response = client.get(
+        "/api/assets/ingestion/candidates",
+        params={"subscription_id": subscription_id, "directory_ids": [directory_id]},
+    )
+
+    assert response.status_code == 422, response.text
+
+
+def test_topic_rule_round_trips_ai_screening_prompt(api):
+    client, session_factory = api
+
+    async def seed_subscription():
+        from models import XSubscription
+
+        async with session_factory() as session:
+            subscription = XSubscription(
+                url="https://x.com/screening-prompt",
+                label="Screening prompt",
+            )
+            session.add(subscription)
+            await session.commit()
+            return subscription.id
+
+    subscription_id = asyncio.new_event_loop().run_until_complete(seed_subscription())
+    created = client.post("/api/assets/topic-rules", json={
+        "subscription_id": subscription_id,
+        "directory": "AI 工具",
+        "keywords": ["AI"],
+        "screening_prompt": "  只接受有具体案例的内容。  ",
+    })
+
+    assert created.status_code == 201, created.text
+    assert created.json()["screening_prompt"] == "只接受有具体案例的内容。"
+
+    updated = client.patch(
+        f"/api/assets/topic-rules/{created.json()['id']}",
+        json={"screening_prompt": "只接受可执行的方法。"},
+    )
+    listed = client.get("/api/assets/topic-rules")
+
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["screening_prompt"] == "只接受可执行的方法。"
+    assert listed.json()[0]["screening_prompt"] == "只接受可执行的方法。"
+
+
+def test_updating_topic_rule_keeps_only_selected_directory_enabled(api):
+    client, session_factory = api
+
+    async def seed_subscription():
+        from models import XSubscription
+
+        async with session_factory() as session:
+            subscription = XSubscription(
+                url="https://x.com/directory-switch",
+                label="Directory switch",
+            )
+            session.add(subscription)
+            await session.commit()
+            return subscription.id
+
+    subscription_id = asyncio.new_event_loop().run_until_complete(seed_subscription())
+    old_rule = client.post("/api/assets/topic-rules", json={
+        "subscription_id": subscription_id,
+        "directory": "实用工具",
+        "keywords": [],
+    })
+    selected_rule = client.post("/api/assets/topic-rules", json={
+        "subscription_id": subscription_id,
+        "directory": "搞钱副业",
+        "keywords": ["副业"],
+    })
+
+    response = client.patch(
+        f"/api/assets/topic-rules/{selected_rule.json()['id']}",
+        json={"directory": "搞钱副业", "keywords": ["副业", "变现"]},
+    )
+
+    assert old_rule.status_code == 201, old_rule.text
+    assert selected_rule.status_code == 201, selected_rule.text
+    assert response.status_code == 200, response.text
+    assert response.json()["directory"] == "搞钱副业"
+    rules = client.get("/api/assets/topic-rules").json()
+    enabled = [rule for rule in rules if rule["subscription_id"] == subscription_id and rule["enabled"]]
+    assert enabled == [{
+        **response.json(),
+        "enabled": True,
     }]
 
 

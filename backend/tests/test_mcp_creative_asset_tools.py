@@ -6,9 +6,7 @@ from starlette.testclient import TestClient
 
 
 @pytest.fixture
-def env(monkeypatch, tmp_path):
-    db_file = tmp_path / "creative-assets.db"
-    monkeypatch.setenv("WMS_DATABASE_URL", f"sqlite+aiosqlite:///{db_file}")
+def env(monkeypatch, postgres_env):
     for module in list(sys.modules):
         if module.startswith(("database", "models", "config", "mcp_server")):
             sys.modules.pop(module, None)

@@ -1,4 +1,5 @@
 import base64
+from datetime import datetime
 import mimetypes
 import os
 import uuid
@@ -6,7 +7,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import delete, select, desc
+from sqlalchemy import and_, delete, desc, or_, select
 from pydantic import BaseModel
 from typing import Optional
 
@@ -26,7 +27,7 @@ _UPLOADS_DIR = os.path.join(os.path.dirname(__file__), "..", "uploads")
 _ALLOWED_MIME = {"image/jpeg", "image/png", "image/gif", "image/webp", "image/svg+xml", "image/avif"}
 _MAX_SIZE = 10 * 1024 * 1024
 _BASE_URL = os.getenv("WMS_BASE_URL", "http://localhost:8000")
-from schemas import ArticleDraftOut, ArticleDraftCreate, ArticleDraftUpdate, ArticleSeriesOut, ArticleSeriesCreate, ArticleSeriesUpdate
+from schemas import ArticleDraftOut, ArticleDraftCreate, ArticleDraftPageOut, ArticleDraftUpdate, ArticleSeriesOut, ArticleSeriesCreate, ArticleSeriesUpdate
 
 
 class ChatMessage(BaseModel):
@@ -94,6 +95,56 @@ async def list_drafts(db: AsyncSession = Depends(get_db)):
         select(ArticleDraft).order_by(desc(ArticleDraft.updated_at))
     )).scalars().all()
     return rows
+
+
+def _encode_draft_cursor(draft: ArticleDraft) -> str:
+    value = f"{draft.updated_at.isoformat()}|{draft.id}"
+    return base64.urlsafe_b64encode(value.encode()).decode().rstrip("=")
+
+
+def _decode_draft_cursor(cursor: str) -> tuple[datetime, int]:
+    try:
+        padded = cursor + "=" * (-len(cursor) % 4)
+        updated_at, draft_id = base64.urlsafe_b64decode(padded).decode().rsplit("|", 1)
+        return datetime.fromisoformat(updated_at), int(draft_id)
+    except (TypeError, ValueError, UnicodeDecodeError) as error:
+        raise HTTPException(400, "Invalid draft cursor") from error
+
+
+@router.get("/drafts/page", response_model=ArticleDraftPageOut)
+async def list_draft_page(
+    limit: int = Query(50, ge=1, le=100),
+    cursor: Optional[str] = None,
+    status: Optional[str] = None,
+    writing_plan_id: Optional[int] = None,
+    unassigned: bool = False,
+    db: AsyncSession = Depends(get_db),
+):
+    statement = select(ArticleDraft)
+    if status:
+        statement = statement.where(ArticleDraft.status == status)
+    if unassigned:
+        statement = statement.where(ArticleDraft.writing_plan_id.is_(None))
+    elif writing_plan_id is not None:
+        statement = statement.where(ArticleDraft.writing_plan_id == writing_plan_id)
+    if cursor:
+        updated_at, draft_id = _decode_draft_cursor(cursor)
+        statement = statement.where(
+            or_(
+                ArticleDraft.updated_at < updated_at,
+                and_(ArticleDraft.updated_at == updated_at, ArticleDraft.id < draft_id),
+            )
+        )
+    rows = (await db.execute(
+        statement
+        .order_by(desc(ArticleDraft.updated_at), desc(ArticleDraft.id))
+        .limit(limit + 1)
+    )).scalars().all()
+    items = rows[:limit]
+    return ArticleDraftPageOut(
+        items=items,
+        next_cursor=_encode_draft_cursor(items[-1]) if len(rows) > limit else None,
+    )
 
 
 @router.get("/drafts/{draft_id}", response_model=ArticleDraftOut)

@@ -22,3 +22,20 @@ test('anchors the command center and panel to the upper-right corner', async () 
   assert.match(source, /\.sw-entry \{ right: 16px; top: 16px;/s)
   assert.match(source, /\.sw-panel \{ right: 8px; top: 74px;/s)
 })
+
+test('shows the last X schedule selection inside the workbench', async () => {
+  const source = await readFile(resolve(extensionRoot, 'content/workbench-runtime.js'), 'utf8')
+
+  assert.match(source, /from ['"]\.\/schedule-memory\.js['"]/)
+  assert.match(source, /data-role="last-schedule"/)
+  assert.match(source, /上次安排：未记录/)
+})
+
+test('exposes the publish-and-next action in the workbench runtime', async () => {
+  const source = await readFile(resolve(extensionRoot, 'content/workbench-runtime.js'), 'utf8')
+
+  assert.match(source, /data-action="publish"/)
+  assert.match(source, /发布并下一条/)
+  assert.match(source, /client\.publishDraft\(/)
+  assert.match(source, /publishDraftAndSelectNext/)
+})

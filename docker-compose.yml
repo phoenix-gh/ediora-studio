@@ -71,6 +71,7 @@ services:
       WMS_LOCAL_ASR_DEVICE: ${WMS_LOCAL_ASR_DEVICE:-cuda}
       WMS_LOCAL_ASR_COMPUTE_TYPE: ${WMS_LOCAL_ASR_COMPUTE_TYPE:-float16}
       WMS_WORKER_TOKEN: ${WMS_WORKER_TOKEN:-}
+      WMS_X_SESSION_KEY: ${WMS_X_SESSION_KEY:-}
       WMS_CORS_ORIGINS: ${WMS_CORS_ORIGINS:-http://localhost:3000}
     volumes:
       - uploads-data:/app/uploads

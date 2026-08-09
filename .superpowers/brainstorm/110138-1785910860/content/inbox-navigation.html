@@ -1,0 +1,50 @@
+<h2>情报列表：状态与分类怎么放？</h2>
+<p class="subtitle">“待判断”是尚未做决定的工作状态；“值得写 / 创作资产 / 暂不处理”是做完判断后的内容去向。</p>
+
+<div class="cards">
+  <div class="card" data-choice="status-first" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mockup">
+        <div class="mockup-header">A · 状态优先侧栏</div>
+        <div class="mockup-body" style="display:grid;grid-template-columns:115px 1fr;gap:9px;background:#f8fafc;min-height:250px;padding:9px">
+          <div style="background:#111827;color:white;border-radius:7px;padding:9px;font-size:10px;line-height:2.25"><b>情报站</b><br><span style="background:#4f46e5;padding:3px 5px;border-radius:4px">待判断 38</span><br>值得写 12<br>创作资产 27<br>暂不处理 61<hr style="border:0;border-top:1px solid #475569">来源<br>全部<br>X<br>YouTube</div>
+          <div style="background:white;border:1px solid #e5e7eb;border-radius:8px;padding:11px"><div style="font-size:11px;color:#64748b">待判断 · 按价值排序</div><div style="background:#eef2ff;border-radius:6px;padding:9px;margin-top:11px;font-size:11px"><b>新工具发布</b><br><span style="color:#64748b">AI 评价 86 · 工具 / 实践</span></div><div style="background:#f8fafc;border-radius:6px;padding:9px;margin-top:7px;font-size:11px"><b>行业政策变化</b><br><span style="color:#64748b">AI 评价 72 · 行业动态</span></div></div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body"><h3>A · 状态优先侧栏</h3><p>最适合每天处理：先清空待判断，再进入值得写或创作资产回看。</p></div>
+  </div>
+
+  <div class="card" data-choice="tabs-first" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mockup">
+        <div class="mockup-header">B · 顶部状态标签</div>
+        <div class="mockup-body" style="background:#f8fafc;min-height:250px;padding:10px">
+          <div style="background:white;border-bottom:1px solid #e5e7eb;padding:8px;display:flex;gap:10px;font-size:10px"><b style="color:#4f46e5">待判断 38</b><span>值得写 12</span><span>创作资产 27</span><span>暂不处理 61</span></div>
+          <div style="display:flex;gap:6px;margin-top:12px"><span style="background:#e0e7ff;padding:4px 7px;border-radius:999px;font-size:10px">全部来源</span><span style="background:#f1f5f9;padding:4px 7px;border-radius:999px;font-size:10px">工具</span><span style="background:#f1f5f9;padding:4px 7px;border-radius:999px;font-size:10px">教程</span><input class="mock-input" style="margin-left:auto;width:100px" placeholder="搜索" /></div>
+          <div style="background:white;border:1px solid #e5e7eb;border-radius:7px;padding:10px;margin-top:10px;font-size:11px"><b>新工具发布</b><br><span style="color:#64748b">AI 评价 86 · 工具 / 实践</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body"><h3>B · 顶部状态标签</h3><p>页面更简洁，但状态数量、来源和类型筛选会争夺同一行空间。</p></div>
+  </div>
+
+  <div class="card" data-choice="dashboard" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mockup">
+        <div class="mockup-header">C · 三栏状态看板</div>
+        <div class="mockup-body" style="display:grid;grid-template-columns:repeat(3,1fr);gap:7px;background:#f8fafc;min-height:250px;padding:9px">
+          <div style="background:#f1f5f9;border-radius:6px;padding:7px;font-size:10px"><b>待判断</b><div style="background:white;border-radius:5px;padding:7px;margin-top:8px">新工具<br>86 分</div></div>
+          <div style="background:#eef2ff;border-radius:6px;padding:7px;font-size:10px"><b>值得写</b><div style="background:white;border-radius:5px;padding:7px;margin-top:8px">uvx 实践<br>工具</div></div>
+          <div style="background:#f1f5f9;border-radius:6px;padding:7px;font-size:10px"><b>创作资产</b><div style="background:white;border-radius:5px;padding:7px;margin-top:8px">模型资料<br>研究</div></div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body"><h3>C · 三栏状态看板</h3><p>适合观察整体积累，但会削弱单条阅读和批量筛选，暂时过重。</p></div>
+  </div>
+</div>
+
+<div class="section" style="margin-top:18px">
+  <h3>建议</h3>
+  <p>采用 A：左侧固定状态和来源筛选，主列表按 AI 价值分数排序。内容类型作为标签筛选，不再和内容去向混为一个状态。</p>
+</div>

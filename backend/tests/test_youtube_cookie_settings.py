@@ -11,12 +11,7 @@ NETSCAPE_COOKIES = """# Netscape HTTP Cookie File
 
 
 @pytest.fixture
-def client(monkeypatch, tmp_path):
-    monkeypatch.setenv(
-        "WMS_DATABASE_URL",
-        f"sqlite+aiosqlite:///{tmp_path / 'youtube-cookie-settings.db'}",
-    )
-    monkeypatch.setenv("WMS_DISABLE_SCHEDULER", "1")
+def client(monkeypatch, postgres_env):
     for module in list(sys.modules):
         if module.startswith(("database", "models", "main", "routers", "config")):
             sys.modules.pop(module, None)

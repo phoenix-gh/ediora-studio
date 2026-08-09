@@ -7,7 +7,6 @@ import { CreateTaskButton, CreateTaskDialog } from '@/components/features/Create
 import { AlertsBar } from './AlertsBar'
 import { GenerateDraftButton } from './GenerateDraftButton'
 import { SourceStatusGrid } from './SourceStatusGrid'
-import { TodayPlan } from './TodayPlan'
 
 const { api, jobsApi, navigation, publishApi } = vi.hoisted(() => ({
   api: { apiFetch: vi.fn() },
@@ -22,13 +21,6 @@ vi.mock('@/lib/api/publish-accounts', () => publishApi)
 vi.mock('next/navigation', () => ({ useRouter: () => navigation }))
 
 describe('dashboard components', () => {
-  it('offers the empty today-plan generation action from the today-plan section', () => {
-    render(<TodayPlan plan={null} />)
-
-    expect(screen.getByRole('heading', { level: 2, name: '今日计划' })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: '去生成' })).toHaveAttribute('href', '/daily-plan')
-  })
-
   it('renders warning alerts with semantic alert and action-link styling', () => {
     render(
       <AlertsBar
@@ -102,7 +94,7 @@ describe('dashboard components', () => {
     const user = userEvent.setup()
     publishApi.listPublishAccounts.mockResolvedValueOnce([{
       id: 'account-1', name: 'Ediora', platform: 'wechat', positioning: '', audience: '', tone: '', topic_focus: [], taboo: [],
-      word_range: {}, daily_quota: {}, image_style: '', cover_style: {}, voice_samples: [], style_rules: [], app_id: '', app_secret: '', is_active: true, created_at: '',
+      word_range: {}, image_style: '', cover_style: {}, voice_samples: [], style_rules: [], app_id: '', app_secret: '', is_active: true, created_at: '',
     }])
     render(<CreateTaskDialog open onOpenChange={vi.fn()} />)
 
@@ -126,7 +118,7 @@ describe('dashboard components', () => {
     const onOpenChange = vi.fn()
     publishApi.listPublishAccounts.mockResolvedValueOnce([{
       id: 'account-1', name: 'Ediora', platform: 'wechat', positioning: '', audience: '', tone: '', topic_focus: [], taboo: [],
-      word_range: {}, daily_quota: {}, image_style: '', cover_style: {}, voice_samples: [], style_rules: [], app_id: '', app_secret: '', is_active: true, created_at: '',
+      word_range: {}, image_style: '', cover_style: {}, voice_samples: [], style_rules: [], app_id: '', app_secret: '', is_active: true, created_at: '',
     }])
     jobsApi.createJob.mockResolvedValueOnce({ id: 42 })
     vi.stubGlobal('crypto', { randomUUID: () => 'task-idempotency-key' })

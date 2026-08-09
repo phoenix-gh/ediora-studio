@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { z } from 'zod'
 
 import {
   CONTINUITY_EPSILON_SECONDS,
@@ -9,8 +10,6 @@ import {
   findActiveTextVideoSegment,
   sceneAnimationFrameRange,
 } from './templates/tech-text-v1/Composition'
-import type { TextVideoTemplateManifest } from './types'
-import { z } from 'zod'
 
 const validInput = {
   templateId: 'tech-text-v1',
@@ -48,69 +47,6 @@ const validInput = {
   },
 }
 
-const kineticManifest = {
-  id: 'kinetic-punch-v2',
-  version: 1,
-  compositionId: 'kinetic-punch-v2',
-  component: () => null,
-  propsSchema: z.object({ palette: z.literal('night') }).strict(),
-  defaultComposition: { width: 1920, height: 1080, fps: 30 },
-  aspectRatios: ['16:9'],
-  animations: ['impact', 'reveal', 'contrast'],
-  transitions: ['block-wipe'],
-  defaults: { palette: 'night' },
-  settings: [],
-} as const satisfies TextVideoTemplateManifest<{ palette: 'night' }>
-
-const motionSegment = {
-  id: 'scene-1',
-  start: 0,
-  end: 3,
-  text: '做 AI 视频的，一个月没赚到钱',
-  highlight: ['没赚到钱'],
-  animation: 'reveal',
-  transition: 'block-wipe' as const,
-  intensity: 0.8,
-  chunks: [
-    {
-      id: 'scene-1-chunk-1',
-      start: 0,
-      end: 1.2,
-      text: '做 AI 视频的，',
-      motionPreset: 'reveal' as const,
-      emphasis: 'normal' as const,
-      words: [{
-        text: '做 AI 视频的',
-        start: 0,
-        end: 1.2,
-        emphasis: 'normal' as const,
-      }],
-    },
-    {
-      id: 'scene-1-chunk-2',
-      start: 1.2,
-      end: 3,
-      text: '一个月没赚到钱',
-      motionPreset: 'impact' as const,
-      emphasis: 'punch' as const,
-      words: [
-        {
-          text: '一个月',
-          start: 1.2,
-          end: 1.8,
-          emphasis: 'normal' as const,
-        },
-        {
-          text: '没赚到钱',
-          start: 1.8,
-          end: 3,
-          emphasis: 'highlight' as const,
-        },
-      ],
-    },
-  ],
-}
-
 function parse(value: unknown, masterDuration = 4.2) {
   return parseTextVideoRenderInput(value, { masterDuration })
 }
@@ -119,68 +55,6 @@ describe('text-video render contract', () => {
   it('accepts a valid versioned render input', () => {
     expect(parse(validInput)).toMatchObject(validInput)
     expect(CONTINUITY_EPSILON_SECONDS).toBe(0.001)
-  })
-
-  it('accepts ordered word-timed motion chunks owned by v2', () => {
-    const parsed = parseTextVideoRenderInputWithManifest({
-      templateId: 'kinetic-punch-v2',
-      templateVersion: 1,
-      composition: kineticManifest.defaultComposition,
-      audio: 'voice.mp3',
-      segments: [motionSegment],
-      templateProps: kineticManifest.defaults,
-    }, {
-      masterDuration: 3,
-      manifest: kineticManifest,
-    })
-
-    expect(parsed.segments[0].chunks).toEqual(motionSegment.chunks)
-    expect(parsed.segments[0]).toMatchObject({
-      transition: 'block-wipe',
-      intensity: 0.8,
-    })
-  })
-
-  it.each([
-    [
-      'a chunk gap',
-      [
-        motionSegment.chunks[0],
-        { ...motionSegment.chunks[1], start: 1.3 },
-      ],
-    ],
-    [
-      'an out-of-range cue',
-      [
-        motionSegment.chunks[0],
-        {
-          ...motionSegment.chunks[1],
-          words: [{
-            ...motionSegment.chunks[1].words[0],
-            start: 1.1,
-          }],
-        },
-      ],
-    ],
-    [
-      'an unsupported preset',
-      [
-        motionSegment.chunks[0],
-        { ...motionSegment.chunks[1], motionPreset: 'spin' },
-      ],
-    ],
-  ])('rejects v2 motion with %s', (_name, chunks) => {
-    expect(() => parseTextVideoRenderInputWithManifest({
-      templateId: 'kinetic-punch-v2',
-      templateVersion: 1,
-      composition: kineticManifest.defaultComposition,
-      audio: 'voice.mp3',
-      segments: [{ ...motionSegment, chunks }],
-      templateProps: kineticManifest.defaults,
-    }, {
-      masterDuration: 3,
-      manifest: kineticManifest,
-    })).toThrow()
   })
 
   it('fills configurable template defaults for legacy render input', () => {

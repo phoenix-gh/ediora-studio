@@ -3,8 +3,12 @@ import re
 import json
 import tempfile
 import fcntl
+import base64
+import hashlib
 from dataclasses import dataclass
 from pathlib import Path
+
+from cryptography.fernet import Fernet, InvalidToken
 
 
 def resolve_session_dir() -> Path:
@@ -47,6 +51,55 @@ class CredentialFileQuarantine:
 
 class CredentialFileError(RuntimeError):
     pass
+
+
+def _session_fernet(key: str | bytes | None = None) -> Fernet:
+    configured = key
+    if configured is None:
+        configured = os.getenv("WMS_X_SESSION_KEY", "").strip()
+    if not configured:
+        worker_token = os.getenv("WMS_WORKER_TOKEN", "").strip()
+        if not worker_token:
+            raise CredentialFileError(
+                "X session 加密密钥未配置；请设置 WMS_X_SESSION_KEY"
+            )
+        configured = base64.urlsafe_b64encode(
+            hashlib.sha256(worker_token.encode("utf-8")).digest()
+        )
+    if isinstance(configured, str):
+        configured = configured.encode("ascii", "strict")
+    try:
+        return Fernet(configured)
+    except (TypeError, ValueError) as exc:
+        raise CredentialFileError("X session 加密密钥格式无效") from exc
+
+
+class CredentialSessionVault:
+    """Encrypt and decrypt managed X credentials for database persistence."""
+
+    def __init__(self, key: str | bytes | None = None):
+        self._fernet = _session_fernet(key)
+
+    def encrypt(self, pair: CredentialPair) -> str:
+        payload = json.dumps(
+            {"auth_token": pair.auth_token, "ct0": pair.ct0},
+            separators=(",", ":"),
+        ).encode("utf-8")
+        return self._fernet.encrypt(payload).decode("ascii")
+
+    def decrypt(self, ciphertext: str) -> CredentialPair:
+        try:
+            payload = json.loads(self._fernet.decrypt(ciphertext.encode("ascii")))
+            auth_token = payload["auth_token"]
+            ct0 = payload["ct0"]
+        except (InvalidToken, UnicodeError, json.JSONDecodeError, KeyError, TypeError):
+            raise CredentialFileError("X session 加密内容无效") from None
+        if not isinstance(auth_token, str) or not isinstance(ct0, str):
+            raise CredentialFileError("X session 加密内容无效")
+        pair = CredentialPair(auth_token.strip(), ct0.strip())
+        if not pair.auth_token or not pair.ct0:
+            raise CredentialFileError("X session 加密内容无效")
+        return pair
 
 
 def _payload(pair: CredentialPair) -> bytes:

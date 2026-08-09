@@ -4,10 +4,11 @@ import hashlib
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Any
 
+import httpx
 from fastapi import APIRouter, HTTPException, Query, Depends, BackgroundTasks
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import select, desc
+from sqlalchemy import select, desc, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db, SessionLocal
@@ -91,6 +92,10 @@ class SyncResult(BaseModel):
     biz: str
     new_articles: int
     total_seen: int
+    body_fetched: int = 0
+    body_failed: int = 0
+    body_errors: list[str] = Field(default_factory=list)
+    list_error: str = ""
 
 
 class CollectStatus(BaseModel):
@@ -100,6 +105,8 @@ class CollectStatus(BaseModel):
     done: int = 0
     current: str = ""                       # name of the account currently syncing
     new_articles: int = 0
+    body_fetched: int = 0
+    body_failed: int = 0
     errors: list[str] = Field(default_factory=list)
     started_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
@@ -133,6 +140,7 @@ async def _sync_account(db: AsyncSession, account: WechatAccount,
                         page_size: int = 20) -> SyncResult:
     new_count = 0
     total_seen = 0
+    list_error = ""
     for p in range(pages):
         try:
             articles, _total = await mp.list_articles(
@@ -142,6 +150,9 @@ async def _sync_account(db: AsyncSession, account: WechatAccount,
         except mp.SessionExpired:
             await _mark_credential_expired(db)
             raise HTTPException(401, "公众平台登录已过期，请重新扫码")
+        except mp.RateLimited:
+            list_error = "公众平台访问频繁，已继续补抓已有文章正文"
+            break
         if not articles:
             break
         total_seen += len(articles)
@@ -169,9 +180,53 @@ async def _sync_account(db: AsyncSession, account: WechatAccount,
         # be gentle to avoid risk-control throttling
         if p < pages - 1:
             await asyncio.sleep(2)
-    account.last_collected_at = datetime.now(timezone.utc)
+    await db.flush()
+    empty_articles = (await db.execute(
+        select(WechatArticle).where(
+            WechatArticle.biz == account.biz,
+            or_(WechatArticle.content == "", WechatArticle.content.is_(None)),
+        ).order_by(desc(WechatArticle.published_at))
+    )).scalars().all()
+    body_fetched = 0
+    body_errors: list[str] = []
+    from wechat_collector import fetch_article_body
+
+    async def fetch_one(article: WechatArticle, client: httpx.AsyncClient):
+        last_error: Exception = RuntimeError("正文为空")
+        for attempt in range(2):
+            try:
+                body = await fetch_article_body(article.url, client=client)
+                if body:
+                    return article, body, None
+                last_error = RuntimeError("正文为空")
+            except Exception as error:
+                last_error = error
+            if attempt == 0:
+                await asyncio.sleep(0.25)
+        return article, "", str(last_error)
+
+    async with httpx.AsyncClient(timeout=20, follow_redirects=True, trust_env=False) as client:
+        for start in range(0, len(empty_articles), 3):
+            batch = empty_articles[start:start + 3]
+            results = await asyncio.gather(*(fetch_one(article, client) for article in batch))
+            for article, body, error in results:
+                if error is None:
+                    article.content = body
+                    body_fetched += 1
+                else:
+                    body_errors.append(f"{article.title}: {error}")
+
+    failure_details = body_errors[:20]
+    if len(body_errors) > 20:
+        failure_details.append(f"另有 {len(body_errors) - 20} 篇失败")
+    if not list_error:
+        account.last_collected_at = datetime.now(timezone.utc)
     await db.commit()
-    return SyncResult(biz=account.biz, new_articles=new_count, total_seen=total_seen)
+    return SyncResult(
+        biz=account.biz, new_articles=new_count, total_seen=total_seen,
+        body_fetched=body_fetched, body_failed=len(body_errors),
+        body_errors=failure_details, list_error=list_error,
+    )
 
 
 # ── Articles (existing) ────────────────────────────────────────────────────────
@@ -204,21 +259,10 @@ async def list_articles_endpoint(
 
 @router.get("/articles/{article_id}", response_model=ArticleOut)
 async def get_article(article_id: str, db: AsyncSession = Depends(get_db)):
-    """Get a single article with body. Lazy-fetches the rich_media_content
-    block from mp.weixin.qq.com the first time content is needed."""
+    """Return the stored article without performing outbound collection."""
     art = await db.get(WechatArticle, article_id)
     if not art:
         raise HTTPException(404, "Article not found")
-    if not art.content and art.url:
-        from wechat_collector import fetch_article_body
-        try:
-            body = await fetch_article_body(art.url)
-        except Exception as e:
-            raise HTTPException(502, f"正文抓取失败：{e}")
-        if body:
-            art.content = body
-            await db.commit()
-            await db.refresh(art)
     return art
 
 
@@ -436,6 +480,11 @@ async def _run_collect_all(delay_seconds: float = _COLLECT_DELAY_SECONDS) -> Non
                 try:
                     res = await _sync_account(db, acc, token, cookie, pages=1, page_size=20)
                     st.new_articles += res.new_articles
+                    st.body_fetched += res.body_fetched
+                    st.body_failed += res.body_failed
+                    st.errors.extend(res.body_errors)
+                    if res.list_error:
+                        st.errors.append(f"{acc.name}: {res.list_error}")
                 except Exception as e:
                     # SessionExpired surfaces as HTTPException(401) — stop and ask to re-scan.
                     if "登录已过期" in str(e):
@@ -447,12 +496,13 @@ async def _run_collect_all(delay_seconds: float = _COLLECT_DELAY_SECONDS) -> Non
                 if i < len(accounts) - 1:
                     await asyncio.sleep(delay_seconds)
             if not st.message:
-                if st.errors:
-                    st.message = "采集完成：{0} 个账号，新增 {1} 篇，{2} 个失败".format(
-                        st.total, st.new_articles, len(st.errors))
+                if st.errors or st.body_failed:
+                    st.message = "采集完成：{0} 个账号，新增 {1} 篇，正文成功 {2} 篇，正文失败 {3} 篇".format(
+                        st.total, st.new_articles, st.body_fetched, st.body_failed)
                     await log("wechat", "warn", st.message, "; ".join(st.errors))
                 else:
-                    st.message = "采集完成：{0} 个账号，新增 {1} 篇".format(st.total, st.new_articles)
+                    st.message = "采集完成：{0} 个账号，新增 {1} 篇，正文成功 {2} 篇".format(
+                        st.total, st.new_articles, st.body_fetched)
                     await log("wechat", "ok", st.message)
     except Exception as e:
         st.message = "一键采集异常：{0}".format(e)
@@ -484,6 +534,8 @@ async def collect_all_accounts(
     _collect_status.done = 0
     _collect_status.current = ""
     _collect_status.new_articles = 0
+    _collect_status.body_fetched = 0
+    _collect_status.body_failed = 0
     _collect_status.errors = []
     _collect_status.started_at = datetime.now(timezone.utc)
     _collect_status.finished_at = None

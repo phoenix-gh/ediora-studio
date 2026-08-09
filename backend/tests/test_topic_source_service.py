@@ -9,8 +9,7 @@ from sqlalchemy import select
 
 
 @pytest.fixture
-def service_env(monkeypatch, tmp_path):
-    monkeypatch.setenv("WMS_DATABASE_URL", f"sqlite+aiosqlite:///{tmp_path / 'topic-source.db'}")
+def service_env(monkeypatch, postgres_env):
     for name in list(sys.modules):
         if name.startswith(("database", "models", "topic_source_service", "content_jobs")):
             sys.modules.pop(name, None)
@@ -25,9 +24,14 @@ def service_env(monkeypatch, tmp_path):
     asyncio.run(create_schema())
 
 
-def test_new_x_posts_dispatch_one_topic_job_per_enabled_rule(service_env):
+def test_new_x_posts_dispatch_one_merged_topic_job_per_subscription(service_env):
     from database import SessionLocal
-    from models import ContentJob, TopicSourceRule, XSubscription
+    from models import (
+        ContentJob,
+        CreativeAssetDirectory,
+        XSubscription,
+        XSubscriptionIngestionDirectory,
+    )
     from topic_source_service import dispatch_topic_source_posts
 
     enqueued: list[int] = []
@@ -40,10 +44,31 @@ def test_new_x_posts_dispatch_one_topic_job_per_enabled_rule(service_env):
             subscription = XSubscription(url="https://x.com/example", label="Example")
             db.add(subscription)
             await db.flush()
+            directories = [
+                CreativeAssetDirectory(
+                    name="副业搞钱",
+                    asset_type="article",
+                    ai_ingestion_enabled=True,
+                    ai_ingestion_prompt="副业实操",
+                ),
+                CreativeAssetDirectory(
+                    name="AI",
+                    asset_type="article",
+                    ai_ingestion_enabled=True,
+                    ai_ingestion_prompt="AI 工具",
+                ),
+            ]
+            db.add_all(directories)
+            await db.flush()
             db.add_all([
-                TopicSourceRule(subscription_id=subscription.id, directory="副业搞钱", keywords=["副业"]),
-                TopicSourceRule(subscription_id=subscription.id, directory="AI", keywords=["模型"]),
-                TopicSourceRule(subscription_id=subscription.id, directory="停用", keywords=[], enabled=False),
+                XSubscriptionIngestionDirectory(
+                    subscription_id=subscription.id,
+                    directory_id=directories[0].id,
+                ),
+                XSubscriptionIngestionDirectory(
+                    subscription_id=subscription.id,
+                    directory_id=directories[1].id,
+                ),
             ])
             await db.commit()
 
@@ -54,11 +79,14 @@ def test_new_x_posts_dispatch_one_topic_job_per_enabled_rule(service_env):
 
     first, repeated, jobs = asyncio.run(run())
 
-    assert first == {"created": 2, "enqueued": 2, "errors": []}
+    assert first == {"created": 1, "enqueued": 1, "errors": []}
     assert repeated == {"created": 0, "enqueued": 0, "errors": []}
     assert [job.input_data for job in jobs] == [
-        {"rule_id": 1, "tweet_ids": ["tweet-1", "tweet-2"]},
-        {"rule_id": 2, "tweet_ids": ["tweet-1", "tweet-2"]},
+        {
+            "subscription_id": 1,
+            "directory_ids": [1, 2],
+            "tweet_ids": ["tweet-1", "tweet-2"],
+        },
     ]
     assert enqueued == [job.id for job in jobs]
 

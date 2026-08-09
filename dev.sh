@@ -268,6 +268,28 @@ runtime_fingerprint() {
   printf '%s\0' "$@" | sha256sum | awk '{ print $1 }'
 }
 
+worker_source_fingerprint() {
+  if [ -n "${WMS_DEV_TEST_SOURCE_FINGERPRINT:-}" ]; then
+    printf '%s\n' "$WMS_DEV_TEST_SOURCE_FINGERPRINT"
+    return 0
+  fi
+  {
+    find "$FRONTEND_DIR/lib" -type f -print0
+    printf '%s\0' "$FRONTEND_DIR/scripts/content-worker.ts"
+  } | sort -z | xargs -0 sha256sum | sha256sum | awk '{ print $1 }'
+}
+
+application_config_fingerprint() {
+  runtime_fingerprint \
+    "$HOST_REDIS_URL" \
+    "$WMS_WORKER_QUEUE" \
+    "${WMS_WORKER_TOKEN:-}" \
+    "$HOST_API_URL" \
+    "$HOST_WEB_URL" \
+    "$WMS_CORS_ORIGINS" \
+    "$(worker_source_fingerprint)"
+}
+
 api_owned_http_ready() {
   dev_owned_identity_matches api "$(metadata_path api)" \
     && http_ready "${HOST_API_ROOT}/health"
@@ -501,15 +523,7 @@ cmd_start() {
   export WMS_CORS_ORIGINS="$EFFECTIVE_CORS_ORIGINS"
   export WMS_WORKER_READY_FILE="$WORKER_READY_FILE"
   REDIS_CONFIG_FINGERPRINT="$(runtime_fingerprint "$HOST_REDIS_URL")"
-  APPLICATION_CONFIG_FINGERPRINT="$(
-    runtime_fingerprint \
-      "$HOST_REDIS_URL" \
-      "$WMS_WORKER_QUEUE" \
-      "$WMS_WORKER_TOKEN" \
-      "$HOST_API_URL" \
-      "$HOST_WEB_URL" \
-      "$WMS_CORS_ORIGINS"
-  )"
+  APPLICATION_CONFIG_FINGERPRINT="$(application_config_fingerprint)"
   STARTED_THIS_RUN=()
 
   printf 'Starting WeMedia Studio local runtime...\n'
@@ -632,6 +646,9 @@ service_status() {
 cmd_status() {
   local unhealthy=0 redis_metadata
   validate_runtime_ports || return 1
+  WMS_WORKER_QUEUE="${WMS_WORKER_QUEUE:-content-jobs}"
+  WMS_CORS_ORIGINS="${WMS_CORS_ORIGINS:-$EFFECTIVE_CORS_ORIGINS}"
+  APPLICATION_CONFIG_FINGERPRINT="$(application_config_fingerprint)"
   postgres_status || unhealthy=1
   redis_metadata="$(metadata_path redis)"
   if dev_owned_identity_matches redis "$redis_metadata" \

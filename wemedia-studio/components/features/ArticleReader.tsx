@@ -14,6 +14,7 @@ export interface ReaderMeta {
 }
 
 type Accent = 'blue' | 'orange' | 'green' | 'yellow' | 'indigo'
+type ContentTheme = 'adaptive' | 'paper'
 
 const ACCENT_CLASSES: Record<Accent, string> = {
   blue:    'prose-a:text-blue-600  hover:prose-a:text-blue-700',
@@ -34,11 +35,13 @@ function fmtDate(iso?: string) {
 // ── Inner: header + scrolling body — shared by Modal and Panel ────────────────
 
 function ReaderBody({
-  meta, loading, accent, onClose, centered = false, headerActions,
+  meta, loading, accent, contentTheme, emptyContentMessage, onClose, centered = false, headerActions,
 }: {
   meta: ReaderMeta | null
   loading?: boolean
   accent: Accent
+  contentTheme: ContentTheme
+  emptyContentMessage: string
   onClose: () => void
   /** When true, center the inner content (used by panel mode where width is unbounded). */
   centered?: boolean
@@ -101,19 +104,21 @@ function ReaderBody({
             ) : meta.content ? (
               <article
                 className={cn(
-                  'prose prose-sm max-w-none dark:prose-invert',
+                  'prose prose-sm max-w-none',
                   'prose-p:my-3 prose-p:leading-7',
                   'prose-img:rounded-lg prose-img:mx-auto',
                   'prose-pre:bg-zinc-900 prose-pre:text-zinc-100',
-                  'prose-code:bg-zinc-100 dark:prose-code:bg-zinc-800 prose-code:px-1 prose-code:rounded',
-                  'prose-headings:text-zinc-900 dark:prose-headings:text-zinc-100',
+                  'prose-code:px-1 prose-code:rounded',
+                  contentTheme === 'paper'
+                    ? 'rounded-lg bg-white p-5 text-zinc-900 prose-code:bg-zinc-100 prose-headings:text-zinc-900'
+                    : 'dark:prose-invert prose-code:bg-zinc-100 dark:prose-code:bg-zinc-800 prose-headings:text-zinc-900 dark:prose-headings:text-zinc-100',
                   ACCENT_CLASSES[accent],
                 )}
                 dangerouslySetInnerHTML={{ __html: meta.content }}
               />
             ) : (
               <div className="text-center text-sm text-zinc-400 py-8">
-                暂无正文内容
+                {emptyContentMessage}
                 {meta.url && (
                   <>
                     ，
@@ -146,10 +151,12 @@ interface ModalProps {
   meta: ReaderMeta | null
   loading?: boolean
   accent?: Accent
+  contentTheme?: ContentTheme
+  emptyContentMessage?: string
   headerActions?: React.ReactNode
 }
 
-export function ArticleReaderModal({ open, onClose, meta, loading, accent = 'indigo', headerActions }: ModalProps) {
+export function ArticleReaderModal({ open, onClose, meta, loading, accent = 'indigo', contentTheme = 'adaptive', emptyContentMessage = '暂无正文内容', headerActions }: ModalProps) {
   useEffect(() => {
     if (!open) return
     function onKey(e: KeyboardEvent) { if (e.key === 'Escape') onClose() }
@@ -170,7 +177,7 @@ export function ArticleReaderModal({ open, onClose, meta, loading, accent = 'ind
     <div className="fixed inset-0 z-50 flex items-start justify-center pt-10 pb-8 px-4">
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
       <div className="relative w-full max-w-3xl max-h-full bg-white dark:bg-zinc-950 rounded-xl shadow-2xl border border-zinc-200 dark:border-zinc-800 flex flex-col overflow-hidden">
-        <ReaderBody meta={meta} loading={loading} accent={accent} onClose={onClose} headerActions={headerActions} />
+        <ReaderBody meta={meta} loading={loading} accent={accent} contentTheme={contentTheme} emptyContentMessage={emptyContentMessage} onClose={onClose} headerActions={headerActions} />
       </div>
     </div>
   )
@@ -185,14 +192,16 @@ interface PanelProps {
   meta: ReaderMeta | null
   loading?: boolean
   accent?: Accent
+  contentTheme?: ContentTheme
+  emptyContentMessage?: string
   headerActions?: React.ReactNode
 }
 
-export function ArticleReaderPanel({ open, onClose, meta, loading, accent = 'indigo', headerActions }: PanelProps) {
+export function ArticleReaderPanel({ open, onClose, meta, loading, accent = 'indigo', contentTheme = 'adaptive', emptyContentMessage = '暂无正文内容', headerActions }: PanelProps) {
   return (
     <aside className="flex-1 min-w-0 border-l border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 flex flex-col h-full">
       {open && meta ? (
-        <ReaderBody meta={meta} loading={loading} accent={accent} onClose={onClose} centered headerActions={headerActions} />
+        <ReaderBody meta={meta} loading={loading} accent={accent} contentTheme={contentTheme} emptyContentMessage={emptyContentMessage} onClose={onClose} centered headerActions={headerActions} />
       ) : (
         <div className="flex-1 flex flex-col items-center justify-center text-zinc-400 gap-3">
           <BookOpen className="w-10 h-10 opacity-20" />
@@ -214,6 +223,8 @@ interface ResponsiveProps {
   meta: ReaderMeta | null
   loading?: boolean
   accent?: Accent
+  contentTheme?: ContentTheme
+  emptyContentMessage?: string
   headerActions?: React.ReactNode
 }
 

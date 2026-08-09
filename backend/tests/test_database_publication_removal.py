@@ -4,12 +4,12 @@ from sqlalchemy import inspect, text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 
-def test_removed_publication_schema_drops_rows_and_is_idempotent(tmp_path):
+def test_removed_publication_schema_drops_rows_and_is_idempotent(
+    postgres_database_url,
+):
     from database import migrate_removed_publication_schema
 
-    engine = create_async_engine(
-        f"sqlite+aiosqlite:///{tmp_path / 'publication-removal.db'}",
-    )
+    engine = create_async_engine(postgres_database_url)
 
     async def run():
         async with engine.begin() as connection:
@@ -31,12 +31,12 @@ def test_removed_publication_schema_drops_rows_and_is_idempotent(tmp_path):
     assert "publications" not in asyncio.run(run())
 
 
-def test_removed_publication_schema_accepts_database_without_legacy_table(tmp_path):
+def test_removed_publication_schema_accepts_database_without_legacy_table(
+    postgres_database_url,
+):
     from database import migrate_removed_publication_schema
 
-    engine = create_async_engine(
-        f"sqlite+aiosqlite:///{tmp_path / 'empty.db'}",
-    )
+    engine = create_async_engine(postgres_database_url)
 
     async def run():
         async with engine.begin() as connection:

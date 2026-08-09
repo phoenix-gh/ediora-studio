@@ -16,11 +16,7 @@ WORKER_HEADERS = {
 
 
 @pytest.fixture
-def master_client(monkeypatch, tmp_path):
-    monkeypatch.setenv(
-        "WMS_DATABASE_URL",
-        f"sqlite+aiosqlite:///{tmp_path / 'text-video-master.db'}",
-    )
+def master_client(monkeypatch, tmp_path, postgres_env):
     monkeypatch.setenv(
         "WMS_WORKER_TOKEN",
         "test-worker-token-at-least-32-chars",

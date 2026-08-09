@@ -14,7 +14,7 @@ Add multi-select bulk actions to the draft inbox for deleting draft groups and c
 
 ## User Interface
 
-Each visible draft-group row gains a checkbox. Clicking the checkbox changes only the bulk selection; clicking the rest of the row continues to open that draft group in the editor.
+Each visible draft row remains a single clickable target. A normal click opens that draft in the editor and does not change bulk selection. Ctrl + click toggles that row in the bulk selection (with Cmd + click supported on macOS). There are no checkboxes. Selected rows use a distinct background color, while the active editor row keeps its existing left-border affordance.
 
 A compact toolbar below the existing filters appears when drafts are available. It provides:
 
@@ -51,7 +51,7 @@ The image-task dialog loads active publish accounts using the existing account A
 ## Data Flow
 
 1. The page derives visible groups from the existing topic and status filters.
-2. Checkbox actions store selected group root IDs in a `Set<number>`.
+2. Ctrl/Cmd + click actions store selected draft IDs in a `Set<number>` without changing the active editor selection.
 3. A filter change removes IDs that are no longer visible.
 4. Starting an image action resolves exactly one `draft_type === "article"` target per selected group.
 5. The bounded runner submits up to three group operations at a time and emits completed/total progress.
@@ -77,7 +77,9 @@ Frontend orchestration is not transactional. If deletion fails after some member
 
 Tests cover:
 
-- Selecting individual groups without changing the active editor draft.
+- Ctrl/Cmd + clicking individual rows selects them without changing the active editor draft.
+- Normal clicking a selected row opens it without clearing or changing the bulk selection.
+- Selected rows have the selection background and no checkbox is rendered.
 - Selecting all visible results and clearing selection.
 - Removing hidden IDs when filters change.
 - Deleting every variant before its root.

@@ -7,11 +7,7 @@ from fastapi.testclient import TestClient
 
 
 @pytest.fixture
-def api(monkeypatch, tmp_path):
-    monkeypatch.setenv(
-        "WMS_DATABASE_URL",
-        f"sqlite+aiosqlite:///{tmp_path / 'talking-videos-router.db'}",
-    )
+def api(monkeypatch, postgres_env):
     monkeypatch.setenv("HEYGEN_API_KEY", "test-heygen-key")
     monkeypatch.setenv(
         "WMS_WORKER_TOKEN", "test-worker-token-at-least-32-chars"
@@ -326,3 +322,53 @@ def test_render_progress_requires_local_video_asset_and_detail_is_nested(api):
     listing = client.get("/api/talking-videos").json()
     assert listing[0]["id"] == project["id"]
     assert listing[0]["renders"][0]["id"] == render["id"]
+
+
+def test_replaced_render_job_is_not_retryable(api):
+    client, session_factory, _ = api
+    role_id, _ = _seed(session_factory, ready=True)
+    project = client.post(
+        "/api/talking-videos",
+        json={
+            "title": "作品",
+            "digital_human_id": role_id,
+            "script": "第一版脚本",
+        },
+    ).json()
+    render = client.post(
+        f"/api/talking-videos/{project['id']}/renders"
+    ).json()
+    old_job_id = render["job_id"]
+
+    async def replace_job():
+        from content_jobs import create_job
+        from models import TalkingVideoRender
+
+        async with session_factory() as session:
+            current = await session.get(TalkingVideoRender, render["id"])
+            new_job = await create_job(
+                session,
+                flow="digital_human_render",
+                title="new render",
+                input_data={"render_id": render["id"]},
+                commit=False,
+            )
+            current.job_id = new_job.id
+            await session.commit()
+
+    asyncio.new_event_loop().run_until_complete(replace_job())
+
+    stale_context = client.get(
+        f"/api/talking-videos/renders/{render['id']}/worker-context",
+        headers={"X-Content-Job-Id": str(old_job_id)},
+    )
+    stale_progress = client.post(
+        f"/api/talking-videos/renders/{render['id']}/worker-progress",
+        headers={"X-Content-Job-Id": str(old_job_id)},
+        json={"status": "running"},
+    )
+
+    assert stale_context.status_code == 409
+    assert stale_context.headers["X-WMS-Retryable"] == "false"
+    assert stale_progress.status_code == 409
+    assert stale_progress.headers["X-WMS-Retryable"] == "false"

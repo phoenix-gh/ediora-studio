@@ -348,6 +348,46 @@ def test_motion_projection_marks_repeated_highlights_and_gates_fallback():
     assert segment["chunks"][0]["words"][-1]["emphasis"] == "highlight"
 
 
+def test_punch_motion_projects_final_word_without_explicit_highlight():
+    words = [
+        {"id": "w1", "text": "没有", "start": 0.0, "end": 0.5},
+        {"id": "w2", "text": "高亮", "start": 0.5, "end": 1.0},
+    ]
+    scene = {
+        "id": "punch",
+        "fromWordId": "w1",
+        "throughWordId": "w2",
+        "displayText": "没有高亮",
+        "highlight": [],
+        "animation": "impact",
+        "motion": {
+            "transition": "block-wipe",
+            "intensity": 0.8,
+            "chunks": [{
+                "id": "punch-chunk",
+                "fromWordId": "w1",
+                "throughWordId": "w2",
+                "displayText": "没有高亮",
+                "highlight": [],
+                "motionPreset": "impact",
+                "emphasis": "punch",
+            }],
+        },
+    }
+
+    segment = resolve_scene_seconds(
+        proposals=[scene],
+        words=words,
+        master_duration=1.0,
+        manifest=KINETIC_MANIFEST,
+    )[0]
+
+    assert [word["emphasis"] for word in segment["chunks"][0]["words"]] == [
+        "normal",
+        "highlight",
+    ]
+
+
 def test_v1_scene_retains_motion_document_but_projects_legacy_segment():
     first = {
         **SCENES[0],

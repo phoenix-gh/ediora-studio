@@ -1,9 +1,4 @@
-"""WeChat article body fetcher.
-
-The scheduled mp.weixin.qq.com sync stores stub records (metadata only); the
-lazy GET /wechat/articles/{id} then calls fetch_article_body() on demand to fill
-in the rich-media body the first time an article is read.
-"""
+"""Fetch and extract public WeChat article bodies during collection."""
 
 import re
 from urllib.parse import quote
@@ -122,7 +117,7 @@ async def fetch_article_body(url: str, client: httpx.AsyncClient | None = None) 
     """Fetch the article page and return the rewritten HTML of #js_content."""
     own = client is None
     if own:
-        client = httpx.AsyncClient(timeout=20, follow_redirects=True)
+        client = httpx.AsyncClient(timeout=20, follow_redirects=True, trust_env=False)
     try:
         resp = await client.get(url, headers=_HEADERS)
         resp.raise_for_status()

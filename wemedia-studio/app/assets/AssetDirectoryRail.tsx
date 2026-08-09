@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { Folder, LockKeyhole, Pencil, Plus, Trash2 } from 'lucide-react'
+import { Folder, LockKeyhole, Pencil, Plus, Sparkles, Trash2 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -51,7 +51,11 @@ export function AssetDirectoryRail({
             <DirectoryButton
               active={activeDirectory === directory.name}
               count={count(directory.name)}
-              icon={directory.is_system ? <LockKeyhole aria-label="系统目录" className="size-3.5" /> : <Folder className="size-3.5" />}
+              icon={directory.is_system
+                ? <LockKeyhole aria-label="系统目录" className="size-3.5" />
+                : directory.ai_ingestion_enabled
+                  ? <Sparkles aria-label="已配置 AI 入库" className="size-3.5 text-amber-500" />
+                  : <Folder className="size-3.5" />}
               name={directory.name}
               onClick={() => onDirectoryChange(directory.name)}
             />

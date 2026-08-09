@@ -13,7 +13,17 @@ from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
-from models import ContentJob, CreativeAsset, CreativeAssetDirectory, TopicSourceDecision, TopicSourceRule, XPost, XSubscription
+from models import (
+    AssetIngestionDecision,
+    ContentJob,
+    CreativeAsset,
+    CreativeAssetDirectory,
+    TopicSourceDecision,
+    TopicSourceRule,
+    XPost,
+    XSubscription,
+    XSubscriptionIngestionDirectory,
+)
 from remote_image_import import import_remote_images
 from worker_auth import require_worker_token
 
@@ -70,17 +80,36 @@ class DirectoryOut(BaseModel):
     asset_type: AssetType
     parent_id: int | None
     is_system: bool
+    ai_ingestion_enabled: bool = False
+    ai_ingestion_keywords: list[str] = Field(default_factory=list)
+    ai_ingestion_prompt: str = ""
     created_at: datetime
+
+
+class DirectoryIngestionRulePatch(BaseModel):
+    enabled: bool = False
+    keywords: list[str] = Field(default_factory=list)
+    prompt: str = Field(default="", max_length=4000)
+
+
+class DirectoryIngestionRuleOut(BaseModel):
+    directory_id: int
+    enabled: bool
+    keywords: list[str]
+    prompt: str
 
 
 class TopicSourceRuleCreate(BaseModel):
     subscription_id: int
     directory: str = Field(min_length=1, max_length=80)
     keywords: list[str] = Field(default_factory=list)
+    screening_prompt: str = Field(default="", max_length=4000)
 
 
 class TopicSourceRulePatch(BaseModel):
+    directory: str | None = Field(default=None, min_length=1, max_length=80)
     keywords: list[str] | None = None
+    screening_prompt: str | None = Field(default=None, max_length=4000)
     enabled: bool | None = None
 
 
@@ -89,6 +118,7 @@ class TopicSourceRuleOut(BaseModel):
     subscription_id: int
     directory: str
     keywords: list[str]
+    screening_prompt: str
     enabled: bool
     created_at: datetime
     updated_at: datetime
@@ -102,6 +132,16 @@ class TopicSourceDecisionInput(BaseModel):
 
 class TopicSourceAccept(BaseModel):
     decisions: list[TopicSourceDecisionInput] = Field(default_factory=list)
+
+
+class AssetIngestionDecisionInput(BaseModel):
+    tweet_id: str = Field(min_length=1)
+    directory_id: int | None = None
+
+
+class AssetIngestionAccept(BaseModel):
+    subscription_id: int
+    decisions: list[AssetIngestionDecisionInput] = Field(default_factory=list)
 
 
 class DailyCandidateRequest(BaseModel):
@@ -131,7 +171,19 @@ def _directory_payload(directory: CreativeAssetDirectory) -> dict:
         "asset_type": directory.asset_type,
         "parent_id": directory.parent_id,
         "is_system": bool(directory.system_key),
+        "ai_ingestion_enabled": bool(directory.ai_ingestion_enabled),
+        "ai_ingestion_keywords": list(directory.ai_ingestion_keywords or []),
+        "ai_ingestion_prompt": directory.ai_ingestion_prompt or "",
         "created_at": directory.created_at,
+    }
+
+
+def _directory_ingestion_payload(directory: CreativeAssetDirectory) -> dict:
+    return {
+        "directory_id": directory.id,
+        "enabled": bool(directory.ai_ingestion_enabled),
+        "keywords": list(directory.ai_ingestion_keywords or []),
+        "prompt": directory.ai_ingestion_prompt or "",
     }
 
 
@@ -194,6 +246,68 @@ async def _topic_candidates(
         and _keyword_matches(post.content, rule.keywords)
     ]
 
+
+async def _selected_ingestion_directories(
+    db: AsyncSession,
+    subscription_id: int,
+    directory_ids: list[int],
+) -> list[CreativeAssetDirectory]:
+    subscription = await db.get(XSubscription, subscription_id)
+    if subscription is None:
+        raise HTTPException(404, "X 订阅不存在")
+    requested = list(dict.fromkeys(directory_ids))
+    stmt = (
+        select(CreativeAssetDirectory)
+        .join(
+            XSubscriptionIngestionDirectory,
+            XSubscriptionIngestionDirectory.directory_id == CreativeAssetDirectory.id,
+        )
+        .where(
+            XSubscriptionIngestionDirectory.subscription_id == subscription_id,
+            CreativeAssetDirectory.asset_type == "article",
+        )
+        .order_by(CreativeAssetDirectory.id)
+    )
+    if requested:
+        stmt = stmt.where(CreativeAssetDirectory.id.in_(requested))
+    directories = (await db.execute(stmt)).scalars().all()
+    if requested and {directory.id for directory in directories} != set(requested):
+        raise HTTPException(422, "只能使用该 X 订阅已选择的文章目录")
+    unavailable = [
+        directory.id for directory in directories
+        if not directory.ai_ingestion_enabled
+        or not (directory.ai_ingestion_prompt or "").strip()
+    ]
+    if unavailable:
+        raise HTTPException(422, "所选目录的 AI 素材入库规则未启用")
+    return directories
+
+
+async def _asset_ingestion_candidates(
+    db: AsyncSession,
+    subscription_id: int,
+    directories: list[CreativeAssetDirectory],
+    tweet_ids: list[str] | None = None,
+) -> list[XPost]:
+    posts = (await db.execute(
+        select(XPost)
+        .where(XPost.subscription_id == subscription_id)
+        .order_by(desc(XPost.published_at))
+    )).scalars().all()
+    decided_ids = set((await db.execute(
+        select(AssetIngestionDecision.tweet_id).where(
+            AssetIngestionDecision.subscription_id == subscription_id,
+        )
+    )).scalars().all())
+    requested = set(tweet_ids or [])
+    return [
+        post for post in posts
+        if post.tweet_id not in decided_ids
+        and (not requested or post.tweet_id in requested)
+        and post.content.strip()
+        and any(_keyword_matches(post.content, directory.ai_ingestion_keywords or []) for directory in directories)
+    ]
+
 @router.get("/directories", response_model=list[DirectoryOut])
 async def list_directories(asset_type: AssetType, db: AsyncSession = Depends(get_db)):
     directories = (await db.execute(select(CreativeAssetDirectory).where(CreativeAssetDirectory.asset_type == asset_type).order_by(CreativeAssetDirectory.name))).scalars().all()
@@ -210,6 +324,43 @@ async def create_directory(body: DirectoryBody, db: AsyncSession = Depends(get_d
     try: await db.commit()
     except Exception: await db.rollback(); raise HTTPException(409, "目录已存在")
     await db.refresh(directory); return _directory_payload(directory)
+
+
+@router.get("/directories/{directory_id}/ingestion-rule", response_model=DirectoryIngestionRuleOut)
+async def get_directory_ingestion_rule(
+    directory_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    directory = await db.get(CreativeAssetDirectory, directory_id)
+    if directory is None:
+        raise HTTPException(404, "目录不存在")
+    if directory.asset_type != "article":
+        raise HTTPException(422, "只有文章目录可以配置 AI 素材入库")
+    return _directory_ingestion_payload(directory)
+
+
+@router.put("/directories/{directory_id}/ingestion-rule", response_model=DirectoryIngestionRuleOut)
+async def update_directory_ingestion_rule(
+    directory_id: int,
+    body: DirectoryIngestionRulePatch,
+    db: AsyncSession = Depends(get_db),
+):
+    directory = await db.get(CreativeAssetDirectory, directory_id)
+    if directory is None:
+        raise HTTPException(404, "目录不存在")
+    if directory.asset_type != "article":
+        raise HTTPException(422, "只有文章目录可以配置 AI 素材入库")
+    prompt = body.prompt.strip()
+    if body.enabled and not prompt:
+        raise HTTPException(422, "启用 AI 素材入库时必须填写规则")
+    directory.ai_ingestion_enabled = body.enabled
+    directory.ai_ingestion_keywords = [
+        keyword.strip() for keyword in body.keywords if keyword.strip()
+    ]
+    directory.ai_ingestion_prompt = prompt
+    await db.commit()
+    await db.refresh(directory)
+    return _directory_ingestion_payload(directory)
 
 @router.patch("/directories/{directory_id}", response_model=DirectoryOut)
 async def rename_directory(directory_id: int, body: DirectoryBody, db: AsyncSession = Depends(get_db)):
@@ -242,6 +393,13 @@ async def delete_directory(directory_id: int, db: AsyncSession = Depends(get_db)
             break
         descendants.extend(new_children)
         known_ids.update(child.id for child in new_children)
+    if any(item.ai_ingestion_enabled for item in descendants):
+        raise HTTPException(409, "请先停用该目录的 AI 素材入库规则")
+    association = await db.scalar(select(XSubscriptionIngestionDirectory.id).where(
+        XSubscriptionIngestionDirectory.directory_id.in_(known_ids),
+    ))
+    if association is not None:
+        raise HTTPException(409, "请先解除 X 订阅与该目录的关联")
     names = [item.name for item in descendants]
     assets = (await db.execute(select(CreativeAsset).where(
         CreativeAsset.directory.in_(names),
@@ -271,6 +429,7 @@ async def create_topic_source_rule(body: TopicSourceRuleCreate, db: AsyncSession
         subscription_id=body.subscription_id,
         directory=directory,
         keywords=[keyword.strip() for keyword in body.keywords if keyword.strip()],
+        screening_prompt=body.screening_prompt.strip(),
     )
     db.add(rule)
     try:
@@ -287,10 +446,32 @@ async def update_topic_source_rule(rule_id: int, body: TopicSourceRulePatch, db:
     rule = await db.get(TopicSourceRule, rule_id)
     if rule is None:
         raise HTTPException(404, "主题规则不存在")
+    if body.directory is not None:
+        directory = body.directory.strip()
+        if not directory:
+            raise HTTPException(422, "主题目录不能为空")
+        duplicate = await db.scalar(select(TopicSourceRule).where(
+            TopicSourceRule.subscription_id == rule.subscription_id,
+            TopicSourceRule.directory == directory,
+            TopicSourceRule.id != rule.id,
+        ))
+        if duplicate is not None:
+            raise HTTPException(409, "该订阅已配置此主题目录")
+        rule.directory = directory
     if body.keywords is not None:
         rule.keywords = [keyword.strip() for keyword in body.keywords if keyword.strip()]
+    if body.screening_prompt is not None:
+        rule.screening_prompt = body.screening_prompt.strip()
     if body.enabled is not None:
         rule.enabled = body.enabled
+    if rule.enabled:
+        other_rules = (await db.execute(select(TopicSourceRule).where(
+            TopicSourceRule.subscription_id == rule.subscription_id,
+            TopicSourceRule.id != rule.id,
+            TopicSourceRule.enabled.is_(True),
+        ))).scalars().all()
+        for other_rule in other_rules:
+            other_rule.enabled = False
     await db.commit()
     await db.refresh(rule)
     return rule
@@ -329,7 +510,12 @@ async def topic_source_candidates(
     if rule is None:
         raise HTTPException(404, "主题规则不存在")
     posts = await _topic_candidates(db, rule, tweet_ids)
-    return {"rule": {"id": rule.id, "directory": rule.directory, "keywords": rule.keywords}, "posts": [
+    return {"rule": {
+        "id": rule.id,
+        "directory": rule.directory,
+        "keywords": rule.keywords,
+        "screening_prompt": rule.screening_prompt,
+    }, "posts": [
         {"tweet_id": post.tweet_id, "content": post.content, "url": post.url} for post in posts
     ]}
 
@@ -376,6 +562,117 @@ async def save_topic_source_candidates(
                 tags=[], source="x_topic",
             ))
             saved += 1
+    await db.commit()
+    return {"saved": saved, "skipped": skipped, "decided": decided}
+
+
+@router.get("/ingestion/candidates")
+async def asset_ingestion_candidates(
+    subscription_id: int,
+    directory_ids: list[int] = Query(default=[]),
+    tweet_ids: list[str] = Query(default=[]),
+    db: AsyncSession = Depends(get_db),
+):
+    directories = await _selected_ingestion_directories(
+        db, subscription_id, directory_ids,
+    )
+    posts = await _asset_ingestion_candidates(
+        db, subscription_id, directories, tweet_ids,
+    )
+    return {
+        "directories": [
+            {
+                "id": directory.id,
+                "name": directory.name,
+                "keywords": list(directory.ai_ingestion_keywords or []),
+                "prompt": directory.ai_ingestion_prompt or "",
+            }
+            for directory in directories
+        ],
+        "posts": [
+            {
+                "tweet_id": post.tweet_id,
+                "content": post.content,
+                "url": post.url,
+            }
+            for post in posts
+        ],
+    }
+
+
+@router.post("/ingestion/accepted")
+async def save_asset_ingestion_decisions(
+    body: AssetIngestionAccept,
+    worker_token: str | None = Header(default=None, alias="X-WMS-Worker-Token"),
+    db: AsyncSession = Depends(get_db),
+):
+    require_worker_token(worker_token)
+    directories = await _selected_ingestion_directories(
+        db, body.subscription_id, [],
+    )
+    directory_by_id = {directory.id: directory for directory in directories}
+    for decision in body.decisions:
+        if decision.directory_id is not None and decision.directory_id not in directory_by_id:
+            raise HTTPException(422, "AI 返回了未选择的文章目录")
+
+    posts = await _asset_ingestion_candidates(
+        db, body.subscription_id, directories,
+    )
+    allowed = {post.tweet_id: post for post in posts}
+    existing_ids = set((await db.execute(
+        select(AssetIngestionDecision.tweet_id).where(
+            AssetIngestionDecision.subscription_id == body.subscription_id,
+        )
+    )).scalars().all())
+    seen: set[str] = set()
+    saved = 0
+    skipped = 0
+    decided = 0
+    for decision in body.decisions:
+        if decision.tweet_id in seen:
+            raise HTTPException(422, "同一条帖子不能提交多个分类结果")
+        seen.add(decision.tweet_id)
+        if decision.tweet_id in existing_ids:
+            skipped += 1
+            continue
+        post = allowed.get(decision.tweet_id)
+        if post is None:
+            skipped += 1
+            continue
+        db.add(AssetIngestionDecision(
+            subscription_id=body.subscription_id,
+            tweet_id=post.tweet_id,
+            directory_id=decision.directory_id,
+        ))
+        decided += 1
+        if decision.directory_id is None:
+            continue
+        directory = directory_by_id[decision.directory_id]
+        try:
+            await _ensure_unique_article(
+                db,
+                content=post.content,
+                url=post.url,
+                directory=directory.name,
+            )
+        except HTTPException as exc:
+            if exc.status_code == 409:
+                skipped += 1
+                continue
+            raise
+        db.add(CreativeAsset(
+            asset_type="article",
+            media_kind="",
+            title="",
+            content=post.content,
+            url=post.url,
+            media_type="",
+            filename="",
+            directory=directory.name,
+            tags=[],
+            source="x_topic",
+        ))
+        saved += 1
     await db.commit()
     return {"saved": saved, "skipped": skipped, "decided": decided}
 
@@ -474,6 +771,7 @@ async def upload_asset(
     media_kind: Literal["image", "video", "audio"],
     file: UploadFile = File(...),
     title: str = "",
+    directory: str = "",
     job_id: int | None = Header(default=None, alias="X-Content-Job-Id"),
     worker_token: str | None = Header(
         default=None, alias="X-WMS-Worker-Token"
@@ -495,10 +793,21 @@ async def upload_asset(
             raise HTTPException(409, "内容任务不存在")
         if job.status == "cancelled":
             raise HTTPException(409, "内容任务已取消")
+    directory_name = directory.strip()
+    if directory_name:
+        media_directory = await db.scalar(
+            select(CreativeAssetDirectory).where(
+                CreativeAssetDirectory.asset_type == "media",
+                CreativeAssetDirectory.name == directory_name,
+            )
+        )
+        if media_directory is None:
+            raise HTTPException(422, "多媒体目录不存在")
+        directory_name = media_directory.name
     ext = os.path.splitext(file.filename or "")[1] or ".bin"
     filename = f"{uuid.uuid4().hex}{ext}"
     os.makedirs(_UPLOADS_DIR, exist_ok=True)
     with open(os.path.join(_UPLOADS_DIR, filename), "wb") as output: output.write(data)
-    asset = CreativeAsset(asset_type="media", media_kind=media_kind, title=title or file.filename or filename, url=f"/api/uploads/{filename}", media_type=file.content_type, filename=file.filename or filename, source="upload")
+    asset = CreativeAsset(asset_type="media", media_kind=media_kind, title=title or file.filename or filename, url=f"/api/uploads/{filename}", media_type=file.content_type, filename=file.filename or filename, directory=directory_name, source="upload")
     db.add(asset); await db.commit(); await db.refresh(asset)
     return asset

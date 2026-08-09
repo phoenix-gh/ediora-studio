@@ -5,13 +5,11 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 
 def test_removed_hot_topic_schema_migrates_state_drops_cache_and_is_idempotent(
-    tmp_path,
+    postgres_database_url,
 ):
     from database import migrate_removed_hot_topic_schema
 
-    engine = create_async_engine(
-        f"sqlite+aiosqlite:///{tmp_path / 'hot-topic-removal.db'}",
-    )
+    engine = create_async_engine(postgres_database_url)
 
     async def run():
         async with engine.begin() as connection:
@@ -47,12 +45,12 @@ def test_removed_hot_topic_schema_migrates_state_drops_cache_and_is_idempotent(
     assert "topic_generator_cache" not in tables
 
 
-def test_removed_hot_topic_schema_accepts_database_without_legacy_tables(tmp_path):
+def test_removed_hot_topic_schema_accepts_database_without_legacy_tables(
+    postgres_database_url,
+):
     from database import migrate_removed_hot_topic_schema
 
-    engine = create_async_engine(
-        f"sqlite+aiosqlite:///{tmp_path / 'empty.db'}",
-    )
+    engine = create_async_engine(postgres_database_url)
 
     async def run():
         async with engine.begin() as connection:

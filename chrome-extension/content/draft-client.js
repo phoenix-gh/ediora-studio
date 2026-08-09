@@ -1,5 +1,6 @@
 export const DRAFT_MESSAGE_TYPES = Object.freeze({
   REQUEST: 'SHUCE_DRAFTS_REQUEST',
+  PUBLISH: 'SHUCE_DRAFT_PUBLISH',
   RESULT: 'SHUCE_DRAFTS_RESULT',
   CONFIG_GET: 'SHUCE_DRAFTS_CONFIG_GET',
   CONFIG_SET: 'SHUCE_DRAFTS_CONFIG_SET',
@@ -89,6 +90,14 @@ export function createDraftClient({
         throw createError('DRAFT_API_INVALID_RESPONSE', '草稿 API 返回格式无效')
       }
       return response.drafts
+    },
+
+    async publishDraft(apiBase, draftId) {
+      const response = await sendRequest(DRAFT_MESSAGE_TYPES.PUBLISH, { apiBase, draftId })
+      if (!response.draft || typeof response.draft !== 'object' || Array.isArray(response.draft)) {
+        throw createError('DRAFT_API_INVALID_RESPONSE', '草稿 API 返回格式无效')
+      }
+      return { draft: response.draft }
     },
 
     async getConfig() {

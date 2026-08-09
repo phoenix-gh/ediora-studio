@@ -6,12 +6,7 @@ from fastapi.testclient import TestClient
 
 
 @pytest.fixture
-def client(monkeypatch, tmp_path):
-    monkeypatch.setenv(
-        "WMS_DATABASE_URL",
-        f"sqlite+aiosqlite:///{tmp_path / 'digital-human-e2e.db'}",
-    )
-    monkeypatch.setenv("WMS_DISABLE_SCHEDULER", "1")
+def client(monkeypatch, tmp_path, postgres_env):
     monkeypatch.setenv("HEYGEN_API_KEY", "test-heygen-key")
     monkeypatch.setenv(
         "WMS_WORKER_TOKEN", "test-worker-token-at-least-32-chars"

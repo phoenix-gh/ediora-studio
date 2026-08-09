@@ -1,5 +1,6 @@
 """Explicit, secret-safe health probe for one X credential pair."""
 
+import asyncio
 from dataclasses import dataclass
 
 import httpx
@@ -14,6 +15,27 @@ X_ACCOUNT_SETTINGS_URL = "https://x.com/i/api/1.1/account/settings.json"
 class CredentialProbeResult:
     status: str
     error: str
+
+
+async def _probe_x_via_graphql(pair: CredentialPair) -> CredentialProbeResult:
+    """Use feedgrab's live GraphQL path after X retires legacy REST probes."""
+    try:
+        from feedgrab.fetchers.twitter_graphql import fetch_user_by_screen_name
+    except ImportError:
+        return CredentialProbeResult("failed", "feedgrab 未安装，无法测试 X 凭据")
+
+    try:
+        result = await asyncio.to_thread(
+            fetch_user_by_screen_name,
+            "x",
+            {"auth_token": pair.auth_token, "ct0": pair.ct0},
+        )
+    except Exception:
+        return CredentialProbeResult("failed", "连接 X 失败")
+
+    if isinstance(result, dict) and result.get("user_id"):
+        return CredentialProbeResult("available", "")
+    return CredentialProbeResult("expired", "X 凭据已失效或无权限")
 
 
 async def probe_x_credentials(
@@ -42,9 +64,21 @@ async def probe_x_credentials(
                 )
         else:
             response = await client.get(X_ACCOUNT_SETTINGS_URL, headers=headers)
+    except (ImportError, RuntimeError) as exc:
+        message = str(exc).lower()
+        if "socksio" in message or "using socks proxy" in message:
+            return CredentialProbeResult(
+                "failed",
+                "当前配置使用 SOCKS 代理，但未安装 socksio，请安装 httpx[socks]",
+            )
+        if isinstance(exc, ImportError):
+            return CredentialProbeResult("failed", "X 测试依赖加载失败")
+        raise
     except httpx.RequestError:
         return CredentialProbeResult("failed", "连接 X 失败")
 
+    if response.status_code == 404:
+        return await _probe_x_via_graphql(pair)
     if response.status_code == 429:
         return CredentialProbeResult("rate_limited", "X 账号当前被限流")
     if response.status_code in {401, 403}:

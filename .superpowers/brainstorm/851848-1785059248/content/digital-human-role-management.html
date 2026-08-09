@@ -1,0 +1,82 @@
+<style>
+  .screen{margin-top:20px;border:1px solid #e2e8f0;border-radius:14px;background:white;overflow:hidden}
+  .head{height:58px;display:flex;align-items:center;padding:0 20px;border-bottom:1px solid #e2e8f0}
+  .head strong{color:#1e293b}.tabs{display:flex;gap:22px;margin-left:28px;color:#64748b;font-size:12px}.tab.active{color:#4f46e5;font-weight:750}
+  .create{margin-left:auto;background:#4f46e5;color:#fff;border-radius:7px;padding:8px 12px;font-size:11px}
+  .body{display:grid;grid-template-columns:1.05fr 1.5fr;min-height:470px}
+  .library{padding:18px;border-right:1px solid #e2e8f0;background:#f8fafc}
+  .library-title{font-size:12px;font-weight:750;color:#334155;margin-bottom:12px}
+  .cards{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .role-card{border:1px solid #e2e8f0;border-radius:10px;background:white;overflow:hidden}
+  .portrait{height:105px;background:linear-gradient(145deg,#fde68a,#fecaca 47%,#c7d2fe);display:flex;align-items:flex-end;justify-content:center}
+  .person{width:68px;height:88px;border-radius:30px 30px 0 0;background:linear-gradient(#f2c39f 0 30%,#334155 31%)}
+  .card-info{padding:10px}.role-name{font-size:12px;font-weight:750;color:#334155}.meta{font-size:9px;color:#64748b;margin-top:5px}
+  .ready{display:inline-block;margin-top:7px;padding:3px 6px;border-radius:999px;background:#dcfce7;color:#166534;font-size:8px;font-weight:700}
+  .processing{display:inline-block;margin-top:7px;padding:3px 6px;border-radius:999px;background:#fef3c7;color:#92400e;font-size:8px;font-weight:700}
+  .form{padding:20px 22px}.form h3{margin:0 0 4px;font-size:15px;color:#1e293b}.sub{font-size:10px;color:#94a3b8;margin-bottom:18px}
+  .steps{display:flex;gap:6px;margin-bottom:18px}.step{flex:1;border-radius:7px;background:#f1f5f9;padding:8px;text-align:center;color:#64748b;font-size:9px}.step.active{background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe;font-weight:750}
+  .row{display:grid;grid-template-columns:1fr 1fr;gap:13px}.field{border:1px solid #e2e8f0;border-radius:9px;padding:12px;margin-bottom:12px}
+  .field-title{font-size:10px;color:#334155;font-weight:750;margin-bottom:8px}.upload{height:76px;border:1px dashed #cbd5e1;border-radius:7px;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:9px;background:#f8fafc}
+  .wave{height:36px;border-radius:6px;background:repeating-linear-gradient(90deg,#818cf8 0 2px,transparent 2px 6px),#f1f5f9;opacity:.8}
+  .scene{height:76px;border-radius:7px;background:linear-gradient(140deg,#bfdbfe,#ddd6fe);display:flex;align-items:end;padding:7px;color:#475569;font-size:9px}
+  .actions{display:flex;align-items:center;margin-top:5px}.secondary{font-size:10px;color:#64748b}.primary{margin-left:auto;background:#4f46e5;color:#fff;border-radius:7px;padding:8px 12px;font-size:10px}
+  .rules{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:18px}
+  .rule{border:1px solid #e2e8f0;border-radius:10px;padding:13px;background:#fff}.rule h4{margin:0 0 6px;font-size:11px;color:#334155}.rule p{margin:0;font-size:10px;line-height:1.55;color:#64748b}
+  @media(max-width:950px){.body{grid-template-columns:1fr}.library{border-right:0;border-bottom:1px solid #e2e8f0}.rules{grid-template-columns:1fr}}
+</style>
+
+<h2>设计 2/4 · 数字人角色的创建与管理</h2>
+<p class="subtitle">角色是可复用配置，不承载脚本；创建过程允许异步处理声音，失败时只重试失败步骤。</p>
+
+<div class="screen">
+  <div class="head">
+    <strong>数字人口播</strong>
+    <div class="tabs"><span>口播作品</span><span class="tab active">数字人角色</span></div>
+    <span class="create">＋ 创建角色</span>
+  </div>
+  <div class="body">
+    <div class="library">
+      <div class="library-title">我的数字人角色</div>
+      <div class="cards">
+        <div class="role-card">
+          <div class="portrait"><div class="person"></div></div>
+          <div class="card-info"><div class="role-name">林晓</div><div class="meta">专属声音 · 默认演播室 · 8 个作品</div><span class="ready">可以创作</span></div>
+        </div>
+        <div class="role-card">
+          <div class="portrait" style="background:linear-gradient(145deg,#bae6fd,#ddd6fe)"><div class="person"></div></div>
+          <div class="card-info"><div class="role-name">产品君</div><div class="meta">声音正在克隆 · 暂无作品</div><span class="processing">处理中</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="form">
+      <h3>创建数字人角色</h3>
+      <div class="sub">可先保存角色；形象检查和声音克隆在后台继续处理。</div>
+      <div class="steps"><div class="step active">1 基本信息与形象</div><div class="step">2 克隆声音</div><div class="step">3 默认环境</div><div class="step">4 确认</div></div>
+      <div class="row">
+        <div class="field"><div class="field-title">角色名称</div><div style="height:28px;border:1px solid #e2e8f0;border-radius:6px;padding:6px;font-size:9px;color:#475569">林晓</div></div>
+        <div class="field"><div class="field-title">人物形象 · 一张正面单人照</div><div class="upload">点击上传 JPG / PNG</div></div>
+      </div>
+      <div class="row">
+        <div class="field"><div class="field-title">声音样本 · 上传清晰、无背景音乐的录音</div><div class="wave"></div><div style="font-size:8px;color:#64748b;margin-top:6px">试听　重新上传　克隆状态：已就绪</div></div>
+        <div class="field"><div class="field-title">默认环境图</div><div class="scene">演播室 · 来自创作资产</div><div style="font-size:8px;color:#6366f1;margin-top:6px">上传　从资产选择　AI 生成</div></div>
+      </div>
+      <div class="actions"><span class="secondary">保存为未就绪角色</span><span class="primary">保存并开始处理</span></div>
+    </div>
+  </div>
+</div>
+
+<div class="rules">
+  <div class="rule"><h4>状态与失败处理</h4><p>角色状态为“处理中 / 可以创作 / 处理失败 / 已归档”。声音失败只重试声音，不重新上传形象。</p></div>
+  <div class="rule"><h4>编辑与历史保护</h4><p>修改形象或声音会生成新的角色素材版本；已生成的口播仍保留原输入快照，不随角色变化。</p></div>
+  <div class="rule"><h4>删除策略</h4><p>已有作品的角色只能归档，不能硬删除；归档后不出现在新建口播选择器中，历史作品仍可查看。</p></div>
+</div>
+
+<div class="options" style="margin-top:18px">
+  <div class="option" data-choice="approve-role" onclick="toggleSelect(this)">
+    <div class="letter">✓</div><div class="content"><h3>认可角色设计</h3><p>继续设计三栏口播编辑器及 AI 脚本能力。</p></div>
+  </div>
+  <div class="option" data-choice="revise-role" onclick="toggleSelect(this)">
+    <div class="letter">↺</div><div class="content"><h3>需要调整</h3><p>在终端说明角色字段、流程或状态需要怎样修改。</p></div>
+  </div>
+</div>

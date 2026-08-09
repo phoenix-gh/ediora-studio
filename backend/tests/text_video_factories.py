@@ -93,23 +93,28 @@ def run_async(coroutine):
         loop.close()
 
 
-def fresh_session_factory(monkeypatch, tmp_path, database_name):
+def fresh_session_factory(monkeypatch, postgres_database_url):
     import sys
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from sqlalchemy.pool import NullPool
 
-    monkeypatch.setenv(
-        "WMS_DATABASE_URL",
-        f"sqlite+aiosqlite:///{tmp_path / database_name}",
-    )
+    monkeypatch.setenv("WMS_DATABASE_URL", postgres_database_url)
     for module in list(sys.modules):
         if module.startswith(("database", "models", "routers.text_videos")):
             sys.modules.pop(module, None)
 
-    from database import Base, SessionLocal, engine
+    from database import Base
     import models  # noqa: F401
+
+    engine = create_async_engine(
+        postgres_database_url,
+        poolclass=NullPool,
+    )
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
 
     async def setup():
         async with engine.begin() as connection:
             await connection.run_sync(Base.metadata.create_all)
 
     run_async(setup())
-    return SessionLocal
+    return session_factory

@@ -5,14 +5,13 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from cryptography.fernet import Fernet
 
 
 @pytest.fixture
-def client(monkeypatch, tmp_path):
-    db_file = tmp_path / "test.db"
-    monkeypatch.setenv("WMS_DATABASE_URL", f"sqlite+aiosqlite:///{db_file}")
-    monkeypatch.setenv("WMS_DISABLE_SCHEDULER", "1")
+def client(monkeypatch, tmp_path, postgres_env):
     monkeypatch.setenv("FEEDGRAB_DATA_DIR", str(tmp_path / "sessions"))
+    monkeypatch.setenv("WMS_X_SESSION_KEY", Fernet.generate_key().decode())
 
     for mod in list(sys.modules):
         if mod.startswith(("database", "models", "main", "routers", "config")):
@@ -47,6 +46,124 @@ def test_create_subscription(client):
     assert body["label"] == "@elonmusk"
     assert body["enabled"] is True
     assert body["post_count"] == 0
+    assert body["collect_interval_minutes"] == 15
+
+
+def test_subscription_can_select_and_replace_multiple_ingestion_directories(client):
+    folders = []
+    for name in ("AI 工具", "副业搞钱"):
+        created = client.post(
+            "/api/assets/directories",
+            json={"name": name, "asset_type": "article"},
+        )
+        assert created.status_code == 201, created.text
+        directory_id = created.json()["id"]
+        configured = client.put(
+            f"/api/assets/directories/{directory_id}/ingestion-rule",
+            json={"enabled": True, "keywords": [name], "prompt": f"只接受{name}内容"},
+        )
+        assert configured.status_code == 200, configured.text
+        folders.append(directory_id)
+
+    created = client.post(BASE, json={
+        "url": "https://x.com/multi-folder",
+        "ingestion_directory_ids": folders,
+    })
+    replaced = client.patch(
+        f"{BASE}/{created.json()['id']}",
+        json={"ingestion_directory_ids": [folders[1]]},
+    )
+
+    assert created.status_code == 200, created.text
+    assert created.json()["ingestion_directory_ids"] == folders
+    assert replaced.status_code == 200, replaced.text
+    assert replaced.json()["ingestion_directory_ids"] == [folders[1]]
+
+
+def test_subscription_rejects_unconfigured_ingestion_directory(client):
+    directory = client.post(
+        "/api/assets/directories",
+        json={"name": "未配置目录", "asset_type": "article"},
+    ).json()
+
+    response = client.post(BASE, json={
+        "url": "https://x.com/unconfigured-folder",
+        "ingestion_directory_ids": [directory["id"]],
+    })
+
+    assert response.status_code == 422, response.text
+
+
+def test_delete_subscription_cleans_ingestion_directory_associations(client):
+    from database import SessionLocal
+    from models import XSubscriptionIngestionDirectory
+
+    directory = client.post(
+        "/api/assets/directories",
+        json={"name": "待清理目录", "asset_type": "article"},
+    ).json()
+    client.put(
+        f"/api/assets/directories/{directory['id']}/ingestion-rule",
+        json={"enabled": True, "keywords": [], "prompt": "只接受相关内容"},
+    )
+    subscription = client.post(BASE, json={
+        "url": "https://x.com/association-cleanup",
+        "ingestion_directory_ids": [directory["id"]],
+    }).json()
+
+    deleted = client.delete(f"{BASE}/{subscription['id']}")
+
+    async def read_associations():
+        async with SessionLocal() as session:
+            return (await session.execute(
+                XSubscriptionIngestionDirectory.__table__.select()
+                .where(XSubscriptionIngestionDirectory.subscription_id == subscription["id"])
+            )).mappings().all()
+
+    associations = asyncio.new_event_loop().run_until_complete(read_associations())
+    assert deleted.status_code == 200, deleted.text
+    assert associations == []
+
+
+def test_new_subscription_uses_saved_global_default(client):
+    from database import SessionLocal
+    from models import AppSetting
+
+    async def save_default():
+        async with SessionLocal() as db:
+            db.add(AppSetting(key="x_collect_interval_minutes", value="60"))
+            await db.commit()
+
+    asyncio.new_event_loop().run_until_complete(save_default())
+
+    response = client.post(BASE, json={"url": "https://x.com/global-default"})
+
+    assert response.status_code == 200, response.text
+    assert response.json()["collect_interval_minutes"] == 60
+
+
+def test_subscription_collection_interval_can_be_updated(client):
+    sub = client.post(BASE, json={"url": "https://x.com/interval"}).json()
+
+    response = client.patch(
+        f"{BASE}/{sub['id']}",
+        json={"collect_interval_minutes": 60},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["collect_interval_minutes"] == 60
+
+
+@pytest.mark.parametrize("interval", [4, 1441])
+def test_subscription_collection_interval_rejects_out_of_range(client, interval):
+    sub = client.post(BASE, json={"url": "https://x.com/interval-bound"}).json()
+
+    response = client.patch(
+        f"{BASE}/{sub['id']}",
+        json={"collect_interval_minutes": interval},
+    )
+
+    assert response.status_code == 422
 
 
 def test_create_list_url_default_label(client):
@@ -256,6 +373,64 @@ def test_collect_one_subscription(client):
     assert all(p["subscription_id"] == sub["id"] for p in posts)
 
 
+def test_collection_restores_missing_managed_session_before_feedgrab(client):
+    account = client.post("/api/x/accounts", json={
+        "name": "采集账号 A",
+        "auth_token": "managed-auth-token",
+        "ct0": "managed-csrf-token",
+        "enabled": True,
+    }).json()["accounts"][0]
+    data_dir = Path(os.environ["FEEDGRAB_DATA_DIR"])
+    managed_file = data_dir / "x_1.json"
+    managed_file.unlink()
+    sub = client.post(BASE, json={"url": "https://x.com/restored"}).json()
+    observed = []
+
+    async def fetch(url, **kwargs):
+        observed.append((url, managed_file.read_text()))
+        return []
+
+    with patch("routers.x.grab_timeline", new=AsyncMock(side_effect=fetch)):
+        response = client.post(f"{BASE}/{sub['id']}/collect-sync")
+
+    assert response.status_code == 200, response.text
+    assert observed == [
+        ("https://x.com/restored", '{"auth_token":"managed-auth-token","ct0":"managed-csrf-token"}')
+    ]
+    assert account["id"] == 1
+
+
+def test_collection_does_not_start_when_database_session_cannot_restore(client):
+    client.post("/api/x/accounts", json={
+        "name": "缺失凭据账号",
+        "auth_token": "managed-auth-token",
+        "ct0": "managed-csrf-token",
+        "enabled": True,
+    })
+    from database import SessionLocal
+    from models import XCredentialAccount
+    from sqlalchemy import select
+
+    async def remove_database_session():
+        async with SessionLocal() as db:
+            account = await db.scalar(select(XCredentialAccount))
+            account.session_ciphertext = ""
+            await db.commit()
+
+    asyncio.run(remove_database_session())
+    data_dir = Path(os.environ["FEEDGRAB_DATA_DIR"])
+    (data_dir / "x_1.json").unlink()
+    sub = client.post(BASE, json={"url": "https://x.com/no-session"}).json()
+    grab = AsyncMock(return_value=[])
+
+    with patch("routers.x.grab_timeline", new=grab):
+        response = client.post(f"{BASE}/{sub['id']}/collect-sync")
+
+    assert response.status_code == 502
+    assert "凭据文件" in response.json()["detail"]
+    grab.assert_not_awaited()
+
+
 def test_collect_dispatches_new_posts_to_enabled_topic_source_rules(client):
     sub = client.post(
         "/api/x/subscriptions", json={"url": "https://x.com/topic-source"}).json()
@@ -394,6 +569,40 @@ def test_collect_incremental_passes_hour_aligned_cutoff(client):
     assert kwargs["since"] == seed_at.replace(minute=0, second=0, microsecond=0)
 
 
+def test_backfill_passes_requested_day_cutoff_to_grab(client):
+    sub = client.post(BASE, json={"url": "https://x.com/foo"}).json()
+    mock = AsyncMock(return_value=[_fake_post("backfill-1")])
+
+    with patch("routers.x.grab_timeline", new=mock):
+        response = client.post(f"{BASE}/{sub['id']}/backfill", json={"days": 7})
+
+    assert response.status_code == 200, response.text
+    assert response.json()["new_posts"] == 1
+    _, kwargs = mock.await_args
+    delta = (datetime.now(timezone.utc) - kwargs["since"]).total_seconds()
+    assert 6 * 86400 < delta < 8 * 86400
+
+
+def test_backfill_rejects_search_subscription(client):
+    sub = client.post(BASE, json={
+        "kind": "search", "raw_query": "AI", "max_results": 30,
+    }).json()
+
+    response = client.post(f"{BASE}/{sub['id']}/backfill", json={"days": 7})
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == "仅个人账号订阅支持回溯采集"
+
+
+@pytest.mark.parametrize("days", [0, 91])
+def test_backfill_rejects_out_of_range_days(client, days):
+    sub = client.post(BASE, json={"url": "https://x.com/foo"}).json()
+
+    response = client.post(f"{BASE}/{sub['id']}/backfill", json={"days": days})
+
+    assert response.status_code == 422
+
+
 # ── Search subscriptions ──────────────────────────────────────────────────────
 
 
@@ -478,36 +687,39 @@ def test_create_timeline_with_explicit_label(client):
     assert r.json()["label"] == "马斯克"  # not auto "@elonmusk"
 
 
-# ── 动态通知 ──────────────────────────────────────────────────────────────────
+# ── 情报分析 ──────────────────────────────────────────────────────────────────
 
 
-def test_subscription_notify_defaults_off(client):
+def test_subscription_intelligence_defaults_off(client):
     sub = client.post(BASE, json={"url": "https://x.com/a"}).json()
-    assert sub["notify_new_posts"] is False
+    assert sub["intelligence_enabled"] is False
+    assert sub["intelligence_enabled_at"] is None
 
 
-def test_patch_notify_on_then_off(client):
+def test_patch_intelligence_on_then_off(client):
     sub = client.post(BASE, json={"url": "https://x.com/a"}).json()
-    r = client.patch(f"{BASE}/{sub['id']}", json={"notify_new_posts": True})
+    r = client.patch(f"{BASE}/{sub['id']}", json={"intelligence_enabled": True})
     assert r.status_code == 200, r.text
-    assert r.json()["notify_new_posts"] is True
-    r = client.patch(f"{BASE}/{sub['id']}", json={"notify_new_posts": False})
+    assert r.json()["intelligence_enabled"] is True
+    assert r.json()["intelligence_enabled_at"] is not None
+    r = client.patch(f"{BASE}/{sub['id']}", json={"intelligence_enabled": False})
     assert r.status_code == 200
-    assert r.json()["notify_new_posts"] is False
+    assert r.json()["intelligence_enabled"] is False
+    assert r.json()["intelligence_enabled_at"] is None
 
 
-def test_search_subscription_cannot_enable_realtime_response(client):
+def test_search_subscription_can_enable_intelligence_analysis(client):
     sub = client.post(BASE, json={
         "kind": "search", "raw_query": "AI lang:zh",
     }).json()
 
     response = client.patch(
         f"{BASE}/{sub['id']}",
-        json={"notify_new_posts": True},
+        json={"intelligence_enabled": True},
     )
 
-    assert response.status_code == 400
-    assert "搜索订阅" in response.json()["detail"]
+    assert response.status_code == 200, response.text
+    assert response.json()["intelligence_enabled"] is True
 
 
 def test_repeated_collect_reports_only_genuinely_new_posts(client):
@@ -525,7 +737,7 @@ def test_repeated_collect_reports_only_genuinely_new_posts(client):
 
 def test_collect_dispatches_only_fresh_posts(client):
     sub = client.post(BASE, json={"url": "https://x.com/a"}).json()
-    client.patch(f"{BASE}/{sub['id']}", json={"notify_new_posts": True})
+    client.patch(f"{BASE}/{sub['id']}", json={"intelligence_enabled": True})
 
     dispatched: list[list[str]] = []
 
@@ -538,7 +750,7 @@ def test_collect_dispatches_only_fresh_posts(client):
             _fake_post("original"),
             _fake_post("reply", is_reply=True),
         ])),
-        patch("x_response_service.dispatch_response_posts", new=fake_dispatch),
+        patch("content_response_service.dispatch_intelligence_posts", new=fake_dispatch),
     ):
         response = client.post(f"{BASE}/{sub['id']}/collect-sync")
 
@@ -547,10 +759,10 @@ def test_collect_dispatches_only_fresh_posts(client):
     assert dispatched == [["original", "reply"]]
 
 
-def test_patch_notify_on_stamps_enabled_at(client):
-    """开启动态通知须记录 notify_enabled_at（只推送之后采集的帖子）。"""
+def test_patch_intelligence_on_stamps_enabled_at(client):
+    """开启情报分析须记录生效时间（只分析之后采集的帖子）。"""
     sub = client.post(BASE, json={"url": "https://x.com/a"}).json()
-    client.patch(f"{BASE}/{sub['id']}", json={"notify_new_posts": True})
+    client.patch(f"{BASE}/{sub['id']}", json={"intelligence_enabled": True})
 
     import asyncio as _asyncio
     from database import SessionLocal
@@ -561,10 +773,10 @@ def test_patch_notify_on_stamps_enabled_at(client):
             return await db.get(XSubscription, sub["id"])
 
     row = _asyncio.new_event_loop().run_until_complete(_fetch())
-    assert row.notify_new_posts is True
-    assert row.notify_enabled_at is not None
+    assert row.intelligence_enabled is True
+    assert row.intelligence_enabled_at is not None
 
-    client.patch(f"{BASE}/{sub['id']}", json={"notify_new_posts": False})
+    client.patch(f"{BASE}/{sub['id']}", json={"intelligence_enabled": False})
     row = _asyncio.new_event_loop().run_until_complete(_fetch())
-    assert row.notify_new_posts is False
-    assert row.notify_enabled_at is None
+    assert row.intelligence_enabled is False
+    assert row.intelligence_enabled_at is None

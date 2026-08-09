@@ -134,6 +134,10 @@ export interface WechatSyncResult {
   biz: string
   new_articles: number
   total_seen: number
+  body_fetched: number
+  body_failed: number
+  body_errors: string[]
+  list_error: string
 }
 
 export async function searchWechatAccounts(query: string, begin = 0, count = 5): Promise<WechatAccountCandidate[]> {
@@ -172,6 +176,8 @@ export interface WechatCollectStatus {
   done: number
   current: string
   new_articles: number
+  body_fetched: number
+  body_failed: number
   errors: string[]
   started_at: string | null
   finished_at: string | null

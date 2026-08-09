@@ -1,59 +1,25 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Loader2, Save } from 'lucide-react'
 import { toast } from 'sonner'
 import { AppSettings, updateSettings } from '@/lib/api/settings'
-import { listPublishAccounts, type PublishAccount } from '@/lib/api/publish-accounts'
 import { FormSection } from '@/components/layout/FormSection'
 import { Button } from '@/components/ui/button'
 import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Switch } from '@/components/ui/switch'
 import { TelegramSettingsCard } from './TelegramSettingsCard'
 import { XCredentialAccountsCard } from './XCredentialAccountsCard'
 
-const DEFAULT_ACCOUNT_VALUE = 'default'
-const ACCOUNT_VALUE_PREFIX = 'account:'
-
-function accountSelectValue(accountId: string) {
-  return `${ACCOUNT_VALUE_PREFIX}${encodeURIComponent(accountId)}`
-}
-
-function accountIdFromSelectValue(value: string | null) {
-  if (!value || value === DEFAULT_ACCOUNT_VALUE || !value.startsWith(ACCOUNT_VALUE_PREFIX)) {
-    return null
-  }
-  return decodeURIComponent(value.slice(ACCOUNT_VALUE_PREFIX.length))
-}
-
 export function XSection({ settings, onSaved }: { settings: AppSettings | null; onSaved: (s: AppSettings) => void }) {
   const [xInterval, setXInterval] = useState(settings?.x_collect_interval_minutes ?? 15)
-  const [notifyEnabled, setNotifyEnabled] = useState(settings?.x_notify_enabled ?? true)
-  const [responseAccountId, setResponseAccountId] = useState<string | null>(settings?.x_response_account_id || null)
-  const [accounts, setAccounts] = useState<PublishAccount[]>([])
   const [saving, setSaving] = useState(false)
-
-  useEffect(() => {
-    let cancelled = false
-    listPublishAccounts()
-      .then(nextAccounts => {
-        if (cancelled) return
-        setAccounts(nextAccounts)
-      })
-      .catch(() => { if (!cancelled) setAccounts([]) })
-    return () => { cancelled = true }
-  }, [])
 
   async function handleSave() {
     setSaving(true)
     try {
       const updated = await updateSettings({
         x_collect_interval_minutes: xInterval,
-        x_notify_enabled: notifyEnabled,
-        x_response_account_id: responseAccountId ?? '',
       })
       onSaved(updated)
       toast.success('X 采集配置已保存')
@@ -74,69 +40,29 @@ export function XSection({ settings, onSaved }: { settings: AppSettings | null; 
       <TelegramSettingsCard settings={settings} onSaved={onSaved} />
 
       <FormSection
-        title="采集与响应"
-        description="控制 X 订阅采集频率、即时响应和建议使用的发布账号画像。"
+        title="默认采集配置"
+        description="控制新建 X 订阅的默认采集频率；已有订阅可在订阅管理中单独设置。"
       >
         <FieldGroup>
-          <Field orientation="horizontal">
-            <div>
-              <Label htmlFor="x-notify-enabled">即时响应总开关</Label>
-              <FieldDescription>
-            开启后，已勾选「即时响应」的时间线订阅会生成中文评论或翻译引用建议。高价值建议即时推送，其他候选在 18:00 汇总。
-              </FieldDescription>
-            </div>
-            <Switch
-              id="x-notify-enabled"
-              checked={notifyEnabled}
-              onCheckedChange={setNotifyEnabled}
-            />
-          </Field>
-
           <Field>
-            <FieldLabel htmlFor="x-response-account">建议使用的发布账号画像</FieldLabel>
-            <Select
-              value={responseAccountId === null
-                ? DEFAULT_ACCOUNT_VALUE
-                : accountSelectValue(responseAccountId)}
-              onValueChange={value => setResponseAccountId(accountIdFromSelectValue(value))}
-            >
-              <SelectTrigger id="x-response-account" className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectGroup>
-                  <SelectItem value={DEFAULT_ACCOUNT_VALUE}>使用默认中文科技账号画像</SelectItem>
-                  {accounts
-                    .filter(account => account.is_active && ['x', 'twitter'].includes(account.platform.toLowerCase()))
-                    .map(account => (
-                      <SelectItem key={account.id} value={accountSelectValue(account.id)}>
-                        {account.name}
-                      </SelectItem>
-                    ))}
-                </SelectGroup>
-              </SelectContent>
-            </Select>
-          </Field>
-
-          <Field>
-            <FieldLabel htmlFor="x-collect-interval">X 订阅采集间隔</FieldLabel>
-          <div className="flex items-center gap-2">
-            <Input
+            <FieldLabel htmlFor="x-collect-interval">新订阅默认采集间隔</FieldLabel>
+            <div className="flex items-center gap-2">
+              <Input
                 id="x-collect-interval"
-              type="number" min={1} max={1440}
-              value={xInterval}
-              onChange={e => setXInterval(Math.max(1, Number(e.target.value)))}
+                type="number" min={5} max={1440}
+                value={xInterval}
+                onChange={e => setXInterval(Math.max(5, Number(e.target.value)))}
                 className="w-24"
-            />
+              />
               <span className="text-sm text-muted-foreground">分钟</span>
-          </div>
-            <FieldDescription>多久从 X 订阅拉取一次原始推文（存入 x_posts）。</FieldDescription>
+            </div>
+            <FieldDescription>新建订阅时使用的默认值；保存后不影响已有订阅。</FieldDescription>
           </Field>
 
           <Button onClick={handleSave} disabled={saving}>
             {saving ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <Save data-icon="inline-start" />}
-          保存
-        </Button>
+            保存
+          </Button>
         </FieldGroup>
       </FormSection>
     </div>

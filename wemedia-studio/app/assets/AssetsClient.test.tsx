@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   deleteCreativeAssetDirectory: vi.fn(),
   listCreativeAssetDirectories: vi.fn(),
   renameCreativeAssetDirectory: vi.fn(),
+  updateCreativeAssetDirectoryIngestionRule: vi.fn(),
   updateCreativeAsset: vi.fn(),
 }))
 
@@ -22,11 +23,12 @@ vi.mock('@/lib/api/assets', () => ({
   deleteCreativeAssetDirectory: mocks.deleteCreativeAssetDirectory,
   listCreativeAssetDirectories: mocks.listCreativeAssetDirectories,
   renameCreativeAssetDirectory: mocks.renameCreativeAssetDirectory,
+  updateCreativeAssetDirectoryIngestionRule: mocks.updateCreativeAssetDirectoryIngestionRule,
   updateCreativeAsset: mocks.updateCreativeAsset,
 }))
 
-vi.mock('./AssetVisualMarkdownEditor', () => ({
-  AssetVisualMarkdownEditor: ({ documentKey, onChange, value }: { documentKey: number; onChange: (value: string) => void; value: string }) => <textarea aria-label="可视化 Markdown 编辑器" data-document-key={documentKey} onChange={event => onChange(event.target.value)} value={value} />,
+vi.mock('@/components/MarkdownEditor', () => ({
+  MarkdownEditor: ({ documentKey, onChange, value }: { documentKey: number; onChange: (value: string) => void; value: string }) => <textarea aria-label="可视化 Markdown 编辑器" data-document-key={documentKey} onChange={event => onChange(event.target.value)} value={value} />,
 }))
 
 import { AssetsClient } from './AssetsClient'
@@ -48,12 +50,25 @@ const article = (id: number, title: string, content: string): CreativeAsset => (
   updated_at: '',
 })
 
-const directory = (id: number, name: string, parentId: number | null = null) => ({
+const directory = (
+  id: number,
+  name: string,
+  parentId: number | null = null,
+  ingestion: Partial<{
+    ai_ingestion_enabled: boolean
+    ai_ingestion_keywords: string[]
+    ai_ingestion_prompt: string
+  }> = {},
+) => ({
   id,
   name,
   asset_type: 'article' as const,
   parent_id: parentId,
   is_system: false,
+  ai_ingestion_enabled: false,
+  ai_ingestion_keywords: [],
+  ai_ingestion_prompt: '',
+  ...ingestion,
   created_at: '',
 })
 
@@ -77,6 +92,12 @@ function deferred<T>() {
 beforeEach(() => {
   vi.clearAllMocks()
   mocks.listCreativeAssetDirectories.mockResolvedValue([])
+  mocks.updateCreativeAssetDirectoryIngestionRule.mockResolvedValue({
+    directory_id: 0,
+    enabled: false,
+    keywords: [],
+    prompt: '',
+  })
   mocks.updateCreativeAsset.mockImplementation(async (id, body) => ({ ...article(id, body.title ?? '', body.content ?? ''), url: body.url ?? '' }))
   mocks.createCreativeAsset.mockResolvedValue(article(4, '新文章', '保留的正文'))
 })
@@ -102,6 +123,52 @@ describe('creative assets workspace', () => {
       'data-document-key',
       '1',
     )
+  })
+
+  it('shows each article update time in local date-time format', () => {
+    render(<AssetsClient initialAssets={[{ ...article(1, '第一篇', '正文'), updated_at: '2026-08-04T19:01:25' }]} />)
+
+    expect(screen.getByText('更新于 2026-08-04 19:01')).toBeVisible()
+  })
+
+  it('omits the update label when an article timestamp is invalid', () => {
+    render(<AssetsClient initialAssets={[{ ...article(1, '第一篇', '正文'), updated_at: 'not-a-date' }]} />)
+
+    expect(screen.queryByText(/更新于/)).toBeNull()
+  })
+
+  it('renders a compact selected row without body preview or a redundant type label', () => {
+    render(<AssetsClient initialAssets={[{ ...article(1, '紧凑标题', '列表不可见正文'), updated_at: '2026-08-04T19:01:25' }]} />)
+
+    const list = screen.getByRole('region', { name: '素材列表' })
+    const row = within(list).getByRole('button', { name: /紧凑标题/ })
+    expect(within(list).queryByText('列表不可见正文')).toBeNull()
+    expect(within(list).queryByText('文章')).toBeNull()
+    expect(row).toHaveClass('px-4', 'py-3', 'bg-primary/10')
+    expect(row).not.toHaveClass('px-5', 'py-4')
+  })
+
+  it('prefers the saved title over the first body line', () => {
+    render(<AssetsClient initialAssets={[article(1, '保存标题', '# 正文首行')]} />)
+
+    const list = screen.getByRole('region', { name: '素材列表' })
+    expect(within(list).getByRole('button', { name: '保存标题' })).not.toHaveTextContent('正文首行')
+  })
+
+  it('uses the first non-empty body line without its Markdown heading marker', () => {
+    render(<AssetsClient initialAssets={[article(1, '', '\n\n### 正文首行标题\n后续正文不可见')]} />)
+
+    const list = screen.getByRole('region', { name: '素材列表' })
+    const row = within(list).getByRole('button', { name: '正文首行标题' })
+    expect(row).not.toHaveTextContent('#')
+    expect(row).not.toHaveTextContent('后续正文不可见')
+  })
+
+  it('uses a neutral title when both the saved title and body are blank', () => {
+    render(<AssetsClient initialAssets={[article(1, '   ', '\n  \n')]} />)
+
+    const list = screen.getByRole('region', { name: '素材列表' })
+    expect(within(list).getByRole('button', { name: '未命名文章' })).toBeVisible()
   })
 
   it('updates the right-hand editor when another article is selected', async () => {
@@ -145,8 +212,91 @@ describe('creative assets workspace', () => {
     expect(mocks.updateCreativeAsset).toHaveBeenCalledWith(7, {
       title: '新标题',
       content: '新正文',
+      directory: '',
       url: 'https://example.com/source',
     })
+  })
+
+  it.each([
+    ['Ctrl+S', { ctrlKey: true }],
+    ['Cmd+S', { metaKey: true }],
+  ])('saves the selected article with %s and prevents browser page saving', async (_label, modifier) => {
+    const user = userEvent.setup()
+    render(<AssetsClient initialAssets={[article(7, '原题', '原正文')]} />)
+    await user.clear(screen.getByLabelText('文章标题'))
+    await user.type(screen.getByLabelText('文章标题'), '快捷键标题')
+    const event = new KeyboardEvent('keydown', { ...modifier, cancelable: true, key: 's' })
+
+    act(() => { window.dispatchEvent(event) })
+
+    expect(event.defaultPrevented).toBe(true)
+    await waitFor(() => expect(mocks.updateCreativeAsset).toHaveBeenCalledWith(7, {
+      title: '快捷键标题',
+      content: '原正文',
+      directory: '',
+      url: '',
+    }))
+  })
+
+  it('leaves the article save shortcut inactive while the new-article dialog is open', async () => {
+    const user = userEvent.setup()
+    render(<AssetsClient initialAssets={[article(7, '原题', '原正文')]} />)
+    await user.click(screen.getByRole('button', { name: '新增素材' }))
+    const event = new KeyboardEvent('keydown', { cancelable: true, ctrlKey: true, key: 's' })
+
+    act(() => { window.dispatchEvent(event) })
+
+    expect(event.defaultPrevented).toBe(false)
+    expect(mocks.updateCreativeAsset).not.toHaveBeenCalled()
+    expect(mocks.createCreativeAsset).not.toHaveBeenCalled()
+  })
+
+  it('does not issue a duplicate shortcut save while the selected article is saving', async () => {
+    const request = deferred<ReturnType<typeof article>>()
+    mocks.updateCreativeAsset.mockReturnValue(request.promise)
+    render(<AssetsClient initialAssets={[article(7, '原题', '原正文')]} />)
+    const first = new KeyboardEvent('keydown', { cancelable: true, ctrlKey: true, key: 's' })
+
+    act(() => { window.dispatchEvent(first) })
+    await waitFor(() => expect(mocks.updateCreativeAsset).toHaveBeenCalledTimes(1))
+    const second = new KeyboardEvent('keydown', { cancelable: true, ctrlKey: true, key: 's' })
+    act(() => { window.dispatchEvent(second) })
+
+    expect(mocks.updateCreativeAsset).toHaveBeenCalledTimes(1)
+    request.resolve(article(7, '原题', '原正文'))
+    await waitFor(() => expect(screen.getByRole('button', { name: '保存' })).toBeEnabled())
+  })
+
+  it('moves an article to the directory selected in its editor', async () => {
+    const user = userEvent.setup()
+    mocks.listCreativeAssetDirectories.mockResolvedValue([directory(10, '搞钱副业')])
+    render(<AssetsClient initialAssets={[article(8, '待归档文章', '正文')]} />)
+
+    await user.click(await screen.findByRole('combobox', { name: '所属目录' }))
+    await user.click(screen.getByRole('option', { name: '搞钱副业' }))
+    await user.click(screen.getByRole('button', { name: '保存' }))
+
+    expect(mocks.updateCreativeAsset).toHaveBeenCalledWith(8, {
+      title: '待归档文章',
+      content: '正文',
+      directory: '搞钱副业',
+      url: '',
+    })
+  })
+
+  it('keeps the active directory when an article editor changes that article directory', async () => {
+    const user = userEvent.setup()
+    mocks.listCreativeAssetDirectories.mockResolvedValue([
+      directory(10, '实用工具'),
+      directory(11, '搞钱副业'),
+    ])
+    render(<AssetsClient initialAssets={[{ ...article(12, '待迁移文章', '正文'), directory: '实用工具' }]} />)
+
+    await user.click(await screen.findByRole('button', { name: /实用工具1/ }))
+    await user.click(screen.getByRole('combobox', { name: '所属目录' }))
+    await user.click(await screen.findByRole('option', { name: '搞钱副业' }))
+
+    expect(screen.getByRole('toolbar', { name: '实用工具工作区' })).toBeVisible()
   })
 
   it('keeps entered new-article content visible after missing-title validation', async () => {
@@ -236,6 +386,32 @@ describe('creative assets workspace', () => {
 
     await waitFor(() => expect(screen.getByRole('toolbar', { name: '新目录工作区' })).toBeVisible())
     expect(screen.getByRole('button', { name: /目录文章/ })).toBeVisible()
+  })
+
+  it('saves a folder AI ingestion rule together with the folder edit', async () => {
+    const user = userEvent.setup()
+    mocks.listCreativeAssetDirectories.mockResolvedValue([directory(10, 'AI 工具')])
+    mocks.renameCreativeAssetDirectory.mockResolvedValue(directory(10, 'AI 工具'))
+    mocks.updateCreativeAssetDirectoryIngestionRule.mockResolvedValue({
+      directory_id: 10,
+      enabled: true,
+      keywords: ['AI', '工具'],
+      prompt: '只接受有实际用法的内容。',
+    })
+    render(<AssetsClient initialAssets={[]} />)
+
+    await user.click(await screen.findByRole('button', { name: '重命名AI 工具' }))
+    expect(screen.getByText('AI 素材入库')).toBeVisible()
+    await user.click(screen.getByRole('switch', { name: '启用 AI 素材入库' }))
+    await user.type(screen.getByLabelText('AI 入库关键词'), 'AI，工具')
+    await user.type(screen.getByLabelText('AI 入库规则'), '只接受有实际用法的内容。')
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: '保存' }))
+
+    expect(mocks.updateCreativeAssetDirectoryIngestionRule).toHaveBeenCalledWith(10, {
+      enabled: true,
+      keywords: ['AI', '工具'],
+      prompt: '只接受有实际用法的内容。',
+    })
   })
 
   it('moves a deleted parent subtree assets to uncategorized when a child is active', async () => {

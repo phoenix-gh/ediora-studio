@@ -1,12 +1,10 @@
 import asyncio
 import sys
-
 import pytest
 
 
 @pytest.fixture
-def session_factory(monkeypatch, tmp_path):
-    monkeypatch.setenv("WMS_DATABASE_URL", f"sqlite+aiosqlite:///{tmp_path / 'jobs.db'}")
+def session_factory(monkeypatch, postgres_env):
     for module in list(sys.modules):
         if module.startswith(("database", "models", "content_jobs")):
             sys.modules.pop(module, None)
@@ -41,6 +39,203 @@ def test_retrying_failed_step_preserves_completed_steps(session_factory):
 
     asyncio.new_event_loop().run_until_complete(run())
 
+
+def test_daily_creation_job_failure_marks_linked_run_failed(session_factory):
+    from datetime import datetime, timezone
+    from content_jobs import create_job, fail_step, start_step
+    from models import DailyCreationRule, DailyCreationRun
+
+    async def run():
+        async with session_factory() as session:
+            rule = DailyCreationRule(name="任意规则", asset_type="article", directory="任意目录", output_type="x_short_post", target_count=2, execution_mode="recurring", scheduled_time="08:00", timezone="Asia/Shanghai", lookback_days=3, delivery_mode="drafts")
+            session.add(rule)
+            await session.flush()
+            creation_run = DailyCreationRun(rule_id=rule.id, scheduled_for=datetime.now(timezone.utc), trigger_kind="explicit", requested_count=2, rule_snapshot={"name": rule.name})
+            session.add(creation_run)
+            await session.flush()
+            job = await create_job(session, flow="daily_creation", title="batch", input_data={"run_id": creation_run.id}, commit=False)
+            creation_run.content_job_id = job.id
+            await session.commit()
+            step = await start_step(session, job.id, "select")
+            await fail_step(session, step.id, "invalid evidence", retryable=True)
+            await session.refresh(creation_run)
+            assert creation_run.status == "failed"
+            assert creation_run.completed_at is not None
+
+    asyncio.new_event_loop().run_until_complete(run())
+
+
+def test_starting_daily_creation_job_marks_only_the_linked_run_running(
+    session_factory,
+):
+    from datetime import datetime, timezone
+    from content_jobs import create_job, start_step
+    from models import DailyCreationRule, DailyCreationRun
+
+    async def run():
+        async with session_factory() as session:
+            rule = DailyCreationRule(
+                name="运行规则", asset_type="article", directory="任意目录",
+                output_type="x_short_post", target_count=1,
+                execution_mode="recurring", scheduled_time="08:00",
+                timezone="Asia/Shanghai", lookback_days=3,
+                delivery_mode="drafts",
+            )
+            session.add(rule)
+            await session.flush()
+            creation_run = DailyCreationRun(
+                rule_id=rule.id, scheduled_for=datetime.now(timezone.utc),
+                trigger_kind="explicit", requested_count=0,
+                rule_snapshot={"name": rule.name},
+            )
+            session.add(creation_run)
+            await session.flush()
+            job = await create_job(
+                session, flow="daily_creation", title="prompt-first",
+                input_data={"run_id": creation_run.id}, commit=False,
+            )
+            creation_run.content_job_id = job.id
+            await session.commit()
+
+            step = await start_step(session, job.id, "agent")
+
+            await session.refresh(creation_run)
+            assert creation_run.status == "running"
+            assert creation_run.started_at == step.started_at
+            assert creation_run.completed_at is None
+
+    asyncio.new_event_loop().run_until_complete(run())
+
+
+def test_succeeding_daily_creation_job_marks_linked_run_succeeded(session_factory):
+    from datetime import datetime, timezone
+    from content_jobs import create_job, start_step, succeed_job
+    from models import DailyCreationRule, DailyCreationRun
+
+    async def run():
+        async with session_factory() as session:
+            rule = DailyCreationRule(name="完成规则", asset_type="article", directory="任意目录", output_type="x_short_post", target_count=2, execution_mode="recurring", scheduled_time="08:00", timezone="Asia/Shanghai", lookback_days=3, delivery_mode="drafts")
+            session.add(rule)
+            await session.flush()
+            creation_run = DailyCreationRun(rule_id=rule.id, scheduled_for=datetime.now(timezone.utc), trigger_kind="explicit", requested_count=0, rule_snapshot={"name": rule.name})
+            session.add(creation_run)
+            await session.flush()
+            job = await create_job(session, flow="daily_creation", title="prompt-first", input_data={"run_id": creation_run.id}, commit=False)
+            creation_run.content_job_id = job.id
+            await session.commit()
+
+            await start_step(session, job.id, "agent")
+            succeeded = await succeed_job(session, job.id)
+
+            await session.refresh(creation_run)
+            assert succeeded.status == "succeeded"
+            assert creation_run.status == "succeeded"
+            assert creation_run.completed_at == succeeded.completed_at
+            assert creation_run.created_count == 0
+
+    asyncio.new_event_loop().run_until_complete(run())
+
+
+def test_cancelling_daily_creation_job_marks_linked_run_cancelled(session_factory):
+    from datetime import datetime, timezone
+    from content_jobs import cancel_job, create_job
+    from models import DailyCreationRule, DailyCreationRun
+
+    async def run():
+        async with session_factory() as session:
+            rule = DailyCreationRule(name="取消规则", asset_type="article", directory="搞钱副业", output_type="x_short_post", target_count=10, execution_mode="recurring", scheduled_time="08:00", timezone="Asia/Shanghai", lookback_days=14, delivery_mode="drafts")
+            session.add(rule)
+            await session.flush()
+            creation_run = DailyCreationRun(rule_id=rule.id, scheduled_for=datetime.now(timezone.utc), trigger_kind="explicit", requested_count=10, rule_snapshot={"name": rule.name})
+            session.add(creation_run)
+            await session.flush()
+            job = await create_job(session, flow="daily_creation", title="cancel creation", input_data={"run_id": creation_run.id}, commit=False)
+            creation_run.content_job_id = job.id
+            await session.commit()
+
+            await cancel_job(session, job.id)
+
+            await session.refresh(creation_run)
+            assert creation_run.status == "cancelled"
+            assert creation_run.completed_at is not None
+
+    asyncio.new_event_loop().run_until_complete(run())
+
+
+def test_replaying_cancel_repairs_stale_daily_creation_run(session_factory):
+    from datetime import datetime, timezone
+    from content_jobs import cancel_job, create_job
+    from models import DailyCreationRule, DailyCreationRun
+
+    async def run():
+        async with session_factory() as session:
+            rule = DailyCreationRule(name="历史残留规则", asset_type="article", directory="搞钱副业", output_type="x_short_post", target_count=10, execution_mode="recurring", scheduled_time="08:00", timezone="Asia/Shanghai", lookback_days=14, delivery_mode="drafts")
+            session.add(rule)
+            await session.flush()
+            creation_run = DailyCreationRun(rule_id=rule.id, scheduled_for=datetime.now(timezone.utc), trigger_kind="explicit", requested_count=10, rule_snapshot={"name": rule.name})
+            session.add(creation_run)
+            await session.flush()
+            job = await create_job(session, flow="daily_creation", title="repair cancellation", input_data={"run_id": creation_run.id}, commit=False)
+            creation_run.content_job_id = job.id
+            job.status = "cancelled"
+            job.completed_at = datetime.now(timezone.utc)
+            await session.commit()
+
+            replayed = await cancel_job(session, job.id)
+
+            await session.refresh(creation_run)
+            assert replayed.status == "cancelled"
+            assert creation_run.status == "cancelled"
+            assert creation_run.completed_at == job.completed_at
+
+    asyncio.new_event_loop().run_until_complete(run())
+
+
+def test_retrying_daily_creation_job_restores_linked_run(session_factory):
+    from datetime import datetime, timezone
+    from content_jobs import create_job, fail_step, retry_step, start_step
+    from models import ContentJob, DailyCreationRule, DailyCreationRun
+
+    async def run():
+        async with session_factory() as session:
+            rule = DailyCreationRule(name="重试规则", asset_type="article", directory="搞钱副业", output_type="x_short_post", target_count=10, execution_mode="recurring", scheduled_time="08:00", timezone="Asia/Shanghai", lookback_days=14, delivery_mode="drafts")
+            session.add(rule)
+            await session.flush()
+            creation_run = DailyCreationRun(rule_id=rule.id, scheduled_for=datetime.now(timezone.utc), trigger_kind="explicit", requested_count=10, rule_snapshot={"name": rule.name})
+            session.add(creation_run)
+            await session.flush()
+            job = await create_job(session, flow="daily_creation", title="retry creation", input_data={"run_id": creation_run.id}, commit=False)
+            creation_run.content_job_id = job.id
+            await session.commit()
+            step = await start_step(session, job.id, "agent")
+            await fail_step(session, step.id, "provider busy", retryable=True)
+            retried = await retry_step(session, job.id, "agent")
+            current_job = await session.get(ContentJob, job.id)
+            await session.refresh(creation_run)
+            assert current_job.status == "queued"
+            assert retried.status == "queued"
+            assert retried.attempt == 2
+            assert creation_run.status == "queued"
+            assert creation_run.detail == {}
+            assert creation_run.completed_at is None
+
+    asyncio.new_event_loop().run_until_complete(run())
+
+
+def test_fail_step_redacts_secrets_before_database_persistence(session_factory):
+    from content_jobs import create_job, fail_step, start_step
+
+    async def run():
+        token = "123456:secret-token"
+        async with session_factory() as session:
+            job = await create_job(session, flow="content_response_analysis", title="secret boundary", input_data={})
+            step = await start_step(session, job.id, "analysis")
+            failed = await fail_step(session, step.id, f"POST https://api.telegram.org/bot{token}/sendMessage auth_token=x-secret", retryable=True)
+            assert token not in failed.error
+            assert "x-secret" not in failed.error
+            assert "bot***/sendMessage" in failed.error
+
+    asyncio.new_event_loop().run_until_complete(run())
 
 def test_cancelled_job_cannot_retry_its_previous_failed_step(session_factory):
     from content_jobs import (
@@ -281,12 +476,9 @@ def test_create_or_get_job_reuses_nonempty_key_but_not_empty_keys(
 
 def test_idempotency_migration_rewrites_historical_duplicates_and_keeps_empty(
     monkeypatch,
-    tmp_path,
+    postgres_database_url,
 ):
-    monkeypatch.setenv(
-        "WMS_DATABASE_URL",
-        f"sqlite+aiosqlite:///{tmp_path / 'legacy-idempotency.db'}",
-    )
+    monkeypatch.setenv("WMS_DATABASE_URL", postgres_database_url)
     import sys
     sys.modules.pop("database", None)
     from database import migrate_content_job_idempotency_schema
@@ -295,9 +487,7 @@ def test_idempotency_migration_rewrites_historical_duplicates_and_keeps_empty(
     from sqlalchemy.ext.asyncio import create_async_engine
 
     async def run():
-        engine = create_async_engine(
-            f"sqlite+aiosqlite:///{tmp_path / 'legacy-idempotency.db'}",
-        )
+        engine = create_async_engine(postgres_database_url)
         async with engine.begin() as connection:
             await connection.execute(text(
                 "CREATE TABLE content_jobs ("
@@ -1512,136 +1702,5 @@ def test_cancel_rejects_terminal_digital_human_domain_state(session_factory):
             await session.rollback()
             with pytest.raises(InvalidJobTransition):
                 await cancel_job(session, render_job_id)
-
-    asyncio.new_event_loop().run_until_complete(run())
-
-
-def test_daily_plan_job_failure_marks_plan_failed(session_factory):
-    from content_jobs import create_job, fail_step, start_step
-    from models import DailyPlan
-
-    async def run():
-        async with session_factory() as session:
-            plan = DailyPlan(plan_date="2099-01-01", status="planning")
-            session.add(plan)
-            await session.commit()
-            await session.refresh(plan)
-            job = await create_job(session, flow="daily_plan", title="Plan", input_data={"plan_id": plan.id})
-            step = await start_step(session, job.id, "daily_plan")
-            await fail_step(session, step.id, "invalid key", retryable=True)
-            await session.refresh(plan)
-            assert plan.status == "failed"
-
-    asyncio.new_event_loop().run_until_complete(run())
-
-
-def test_daily_creation_job_failure_marks_linked_run_failed(session_factory):
-    from datetime import datetime, timezone
-    from content_jobs import create_job, fail_step, start_step
-    from models import DailyCreationRule, DailyCreationRun
-
-    async def run():
-        async with session_factory() as session:
-            rule = DailyCreationRule(
-                name="任意规则", asset_type="article", directory="任意目录",
-                output_type="x_short_post", target_count=2,
-                execution_mode="recurring", scheduled_time="08:00",
-                timezone="Asia/Shanghai", lookback_days=3,
-                delivery_mode="drafts",
-            )
-            session.add(rule)
-            await session.flush()
-            creation_run = DailyCreationRun(
-                rule_id=rule.id, scheduled_for=datetime.now(timezone.utc),
-                trigger_kind="explicit", requested_count=2,
-                rule_snapshot={"name": rule.name},
-            )
-            session.add(creation_run)
-            await session.flush()
-            job = await create_job(
-                session, flow="daily_creation", title="batch",
-                input_data={"run_id": creation_run.id}, commit=False,
-            )
-            creation_run.content_job_id = job.id
-            await session.commit()
-            step = await start_step(session, job.id, "select")
-            await fail_step(session, step.id, "invalid evidence", retryable=True)
-            await session.refresh(creation_run)
-            assert creation_run.status == "failed"
-            assert creation_run.completed_at is not None
-
-    asyncio.new_event_loop().run_until_complete(run())
-
-
-def test_retrying_daily_creation_job_restores_linked_run(session_factory):
-    from datetime import datetime, timezone
-
-    from content_jobs import create_job, fail_step, retry_step, start_step
-    from models import ContentJob, DailyCreationRule, DailyCreationRun
-
-    async def run():
-        async with session_factory() as session:
-            rule = DailyCreationRule(
-                name="重试规则", asset_type="article", directory="搞钱副业",
-                output_type="x_short_post", target_count=10,
-                execution_mode="recurring", scheduled_time="08:00",
-                timezone="Asia/Shanghai", lookback_days=14,
-                delivery_mode="drafts",
-            )
-            session.add(rule)
-            await session.flush()
-            creation_run = DailyCreationRun(
-                rule_id=rule.id, scheduled_for=datetime.now(timezone.utc),
-                trigger_kind="explicit", requested_count=10,
-                rule_snapshot={"name": rule.name},
-            )
-            session.add(creation_run)
-            await session.flush()
-            job = await create_job(
-                session, flow="daily_creation", title="retry creation",
-                input_data={"run_id": creation_run.id}, commit=False,
-            )
-            creation_run.content_job_id = job.id
-            await session.commit()
-            step = await start_step(session, job.id, "agent")
-            await fail_step(session, step.id, "provider busy", retryable=True)
-
-            retried = await retry_step(session, job.id, "agent")
-            current_job = await session.get(ContentJob, job.id)
-            await session.refresh(creation_run)
-
-            assert current_job.status == "queued"
-            assert retried.status == "queued"
-            assert retried.attempt == 2
-            assert creation_run.status == "queued"
-            assert creation_run.detail == {}
-            assert creation_run.completed_at is None
-
-    asyncio.new_event_loop().run_until_complete(run())
-
-
-def test_fail_step_redacts_secrets_before_database_persistence(session_factory):
-    from content_jobs import create_job, fail_step, start_step
-
-    async def run():
-        token = "123456:secret-token"
-        async with session_factory() as session:
-            job = await create_job(
-                session,
-                flow="x_response",
-                title="secret boundary",
-                input_data={},
-            )
-            step = await start_step(session, job.id, "notify")
-            failed = await fail_step(
-                session,
-                step.id,
-                f"POST https://api.telegram.org/bot{token}/sendMessage auth_token=x-secret",
-                retryable=True,
-            )
-
-            assert token not in failed.error
-            assert "x-secret" not in failed.error
-            assert "bot***/sendMessage" in failed.error
 
     asyncio.new_event_loop().run_until_complete(run())

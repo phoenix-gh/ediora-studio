@@ -678,9 +678,8 @@ async def _lock_alignment_job_row(
     db: AsyncSession,
     job_id: int,
 ) -> ContentJob | None:
-    # SELECT ... FOR UPDATE is ignored by SQLite. A harmless write gives both
-    # SQLite and PostgreSQL a database-backed exclusion point, so independent
-    # API processes cannot both persist an alignment claim.
+    # A harmless write establishes a database-backed exclusion point before the
+    # row lock, so independent API processes cannot both persist a claim.
     await db.execute(
         update(ContentJob)
         .where(ContentJob.id == job_id)

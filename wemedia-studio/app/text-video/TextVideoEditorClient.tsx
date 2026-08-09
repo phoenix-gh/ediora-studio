@@ -22,7 +22,6 @@ import {
   updateTextVideoProject,
   type TextVideoProject,
 } from '@/lib/api/text-videos'
-import { applyRuleMotionPlan } from '@/lib/text-video/motion-plan'
 import { applyScenePlanToProject } from '@/lib/text-video/scene-plan'
 import { resolveTextVideoTemplate } from '@/remotion/registry'
 
@@ -74,10 +73,6 @@ export function TextVideoEditorClient({
     templateProps: Record<string, unknown>,
   ) {
     const target = resolveTextVideoTemplate(templateId, templateVersion)
-    const changingIdentity = (
-      project.render_input.templateId !== templateId
-      || project.render_input.templateVersion !== templateVersion
-    )
     const normalizedPlan = project.scene_plan.status === 'ready'
       ? {
           ...project.scene_plan,
@@ -99,19 +94,8 @@ export function TextVideoEditorClient({
         templateProps,
       },
     }
-    if (
-      normalizedPlan.status === 'ready'
-      && normalizedPlan.master_source_hash
-        === project.master_audio.source_hash
-    ) {
+    if (normalizedPlan.status === 'ready' && normalizedPlan.master_source_hash === project.master_audio.source_hash) {
       next = applyScenePlanToProject(next, normalizedPlan)
-      if (
-        changingIdentity
-        && templateId === 'kinetic-punch-v2'
-        && templateVersion === 1
-      ) {
-        next = applyRuleMotionPlan(next)
-      }
     }
     autosave.markDirty(next)
     setProject(next)
@@ -219,10 +203,9 @@ export function TextVideoEditorClient({
   }
 
   function generateScenePlan(input: SceneDirectionDraft) {
-    const prefix = input.mode === 'motion' ? 'motion' : 'scene'
     const key = input.scope === 'selected'
-      ? `${prefix}:${input.selected_scene_id}`
-      : `${prefix}:all`
+      ? `scene:${input.selected_scene_id}`
+      : 'scene:all'
     return actions.runProjectAction(
       key,
       async saved => generateTextVideoScenePlan(saved.id, {

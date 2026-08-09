@@ -1,0 +1,41 @@
+<h2>“创作资产”应该保存什么？</h2>
+<p class="subtitle">目标是以后能复用，也能回到原文核对；不是把一篇完整文章提前生成出来。</p>
+
+<div class="cards">
+  <div class="card" data-choice="source-bundle" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mockup">
+        <div class="mockup-header">A · 原文资料包</div>
+        <div class="mockup-body" style="background:#f8fafc;min-height:270px;padding:12px">
+          <div style="background:white;border:1px solid #e5e7eb;border-radius:8px;padding:12px;font-size:11px;line-height:1.9"><b>创作资产：在 GitHub Actions 中使用 uvx</b><br><span style="color:#64748b">类型：工具 / 实践 · 目录：开发者工具</span><hr style="border:0;border-top:1px solid #e5e7eb;margin:10px 0"><b>保存内容</b><br>✓ 原文全文<br>✓ 原文链接和来源<br>✓ AI 摘要与价值判断<br>✓ 证据与风险<br>✓ 分类标签</div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body"><h3>A · 原文资料包</h3><p>最完整，未来可以从资产重新阅读和分析，但内容体积较大。</p></div>
+  </div>
+
+  <div class="card" data-choice="distilled" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mockup">
+        <div class="mockup-header">B · 精炼知识卡</div>
+        <div class="mockup-body" style="background:#f8fafc;min-height:270px;padding:12px"><div style="background:white;border:1px solid #e5e7eb;border-radius:8px;padding:12px;font-size:11px;line-height:1.9"><b>在 GitHub Actions 中使用 uvx</b><br><span style="color:#64748b">工具 · 实践</span><hr style="border:0;border-top:1px solid #e5e7eb;margin:10px 0"><b>核心摘要</b><br>用 uvx 简化 GitHub Actions 中的工具运行与依赖管理。<br><br><b>证据</b><br>来源链接 · 关键原文片段<br><br><button class="mock-button">打开原文</button></div></div>
+      </div>
+    </div>
+    <div class="card-body"><h3>B · 精炼知识卡</h3><p>更适合作为长期素材检索，但会丢失上下文，不利于以后复核。</p></div>
+  </div>
+
+  <div class="card" data-choice="snapshot" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mockup">
+        <div class="mockup-header">C · 原文快照 + 评价快照</div>
+        <div class="mockup-body" style="background:#f8fafc;min-height:270px;padding:12px"><div style="background:white;border:1px solid #e5e7eb;border-radius:8px;padding:12px;font-size:11px;line-height:1.9"><b>创作资产：在 GitHub Actions 中使用 uvx</b><br><span style="color:#64748b">来源：Simon Willison's Weblog · 2026/08/05</span><div style="display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:12px"><div style="background:#f8fafc;padding:8px;border-radius:5px"><b>原文快照</b><br>全文 / 链接 / 来源</div><div style="background:#eef2ff;padding:8px;border-radius:5px"><b>评价快照</b><br>86 分 / 值得写<br>工具 / 实践<br>证据 / 风险</div></div><button class="mock-button" style="margin-top:12px">在资产中打开</button></div></div>
+      </div>
+    </div>
+    <div class="card-body"><h3>C · 原文快照 + 评价快照</h3><p>同时保留原始依据和当时的判断，结构清楚，也方便未来重新评价。我推荐这个方向。</p></div>
+  </div>
+</div>
+
+<div class="section" style="margin-top:18px">
+  <h3>建议</h3>
+  <p>采用 C：写入现有“文章型创作资产”，保存原文链接、来源、原文快照、AI 摘要、价值评分、分类、证据和风险；不创建评论内容，不自动生成完整文章。</p>
+</div>

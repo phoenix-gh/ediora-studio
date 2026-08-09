@@ -6,7 +6,7 @@ import {
 import { applyOutputEvidence, incompleteRequiredSteps } from './skill-run-evidence'
 
 type DraftInput = { run: SkillRun }
-type ValidationInput = { run: SkillRun; text: string }
+type ValidationInput = { run: SkillRun; text: string; toolResults?: unknown[] }
 type RevisionInput = ValidationInput & { violations: SkillRunValidation['violations'] }
 
 type CompleteSkillRunOptions = {

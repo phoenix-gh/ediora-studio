@@ -92,3 +92,41 @@ test('reads, saves, and resets API configuration', async () => {
   )
   assert.equal((await client.resetConfig()).apiBase, 'http://localhost:8000/api')
 })
+
+test('publishes a draft through the service worker message channel', async () => {
+  const runtime = fakeRuntime({
+    SHUCE_DRAFT_PUBLISH: {
+      requestId: 'request-7',
+      ok: true,
+      draft: { id: 7, status: 'published' },
+    },
+  })
+  const client = createDraftClient({ runtime, randomUUID: () => 'request-7' })
+
+  assert.deepEqual(
+    await client.publishDraft('http://localhost:8000/api', 7),
+    { draft: { id: 7, status: 'published' } },
+  )
+  assert.deepEqual(runtime.calls[0], {
+    type: 'SHUCE_DRAFT_PUBLISH',
+    requestId: 'request-7',
+    apiBase: 'http://localhost:8000/api',
+    draftId: 7,
+  })
+})
+
+test('maps service-worker publish errors', async () => {
+  const runtime = fakeRuntime({
+    SHUCE_DRAFT_PUBLISH: {
+      requestId: 'request-8',
+      ok: false,
+      error: { code: 'DRAFT_API_UNAVAILABLE', message: 'API 暂不可用' },
+    },
+  })
+  const client = createDraftClient({ runtime, randomUUID: () => 'request-8' })
+
+  await assert.rejects(
+    client.publishDraft('http://localhost:8000/api', 8),
+    { code: 'DRAFT_API_UNAVAILABLE' },
+  )
+})

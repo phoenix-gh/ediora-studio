@@ -6,13 +6,13 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from cryptography.fernet import Fernet
 
 
 @pytest.fixture
-def client(monkeypatch, tmp_path):
-    monkeypatch.setenv("WMS_DATABASE_URL", f"sqlite+aiosqlite:///{tmp_path / 'x-accounts.db'}")
-    monkeypatch.setenv("WMS_DISABLE_SCHEDULER", "1")
+def client(monkeypatch, tmp_path, postgres_env):
     monkeypatch.setenv("FEEDGRAB_DATA_DIR", str(tmp_path / "sessions"))
+    monkeypatch.setenv("WMS_X_SESSION_KEY", Fernet.generate_key().decode())
     for name in list(sys.modules):
         if name.startswith((
             "database", "models", "main", "routers", "config",
@@ -72,6 +72,26 @@ def test_create_account_writes_file_without_returning_secrets(client):
     assert body["total_accounts"] == 1
     assert body["available_accounts"] == 1
     assert managed_active_file().read_text() == '{"auth_token":"secret-auth","ct0":"secret-csrf"}'
+
+
+def test_create_account_persists_an_encrypted_database_session(client):
+    account = create_account(client)
+    from database import SessionLocal
+    from x_credential_store import CredentialSessionVault
+
+    async def read_ciphertext():
+        from models import XCredentialAccount
+
+        async with SessionLocal() as db:
+            row = await db.get(XCredentialAccount, account["id"])
+            return row.session_ciphertext
+
+    ciphertext = asyncio.run(read_ciphertext())
+
+    assert ciphertext
+    assert "secret-auth" not in ciphertext
+    assert "secret-csrf" not in ciphertext
+    assert CredentialSessionVault().decrypt(ciphertext).auth_token == "secret-auth"
 
 
 def test_invalid_create_credential_response_is_redacted(client):
@@ -266,12 +286,89 @@ def test_delete_restores_owned_file_when_database_commit_fails(client):
     assert managed_active_file().read_bytes() == before
 
 
-def test_reconcile_marks_missing_managed_file_failed(client):
+def test_reconcile_restores_missing_managed_file_from_database_session(client):
     account = create_account(client)
     managed_active_file().unlink()
 
     async def reconcile():
         from database import SessionLocal
+        from routers.x_accounts import reconcile_x_credential_accounts
+        from x_credential_store import CredentialFileStore
+
+        async with SessionLocal() as db:
+            return await reconcile_x_credential_accounts(db, CredentialFileStore(session_dir()))
+
+    errors = asyncio.run(reconcile())
+    assert errors == []
+    assert managed_active_file().read_text() == '{"auth_token":"secret-auth","ct0":"secret-csrf"}'
+
+
+def test_reconcile_database_session_overwrites_tampered_managed_file(client):
+    account = create_account(client)
+    managed_active_file().write_text(
+        '{"auth_token":"tampered-auth","ct0":"tampered-csrf"}'
+    )
+
+    async def reconcile():
+        from database import SessionLocal
+        from routers.x_accounts import reconcile_x_credential_accounts
+        from x_credential_store import CredentialFileStore
+
+        async with SessionLocal() as db:
+            return await reconcile_x_credential_accounts(db, CredentialFileStore(session_dir()))
+
+    assert asyncio.run(reconcile()) == []
+    assert managed_active_file().read_text() == '{"auth_token":"secret-auth","ct0":"secret-csrf"}'
+
+
+def test_reconcile_imports_legacy_managed_file_into_database(client):
+    account = create_account(client)
+    from database import SessionLocal
+    from models import XCredentialAccount
+    from x_credential_store import CredentialSessionVault
+
+    async def clear_database_session():
+        async with SessionLocal() as db:
+            row = await db.get(XCredentialAccount, account["id"])
+            row.session_ciphertext = ""
+            await db.commit()
+
+    asyncio.run(clear_database_session())
+
+    async def reconcile():
+        from routers.x_accounts import reconcile_x_credential_accounts
+        from x_credential_store import CredentialFileStore
+
+        async with SessionLocal() as db:
+            return await reconcile_x_credential_accounts(db, CredentialFileStore(session_dir()))
+
+    assert asyncio.run(reconcile()) == []
+
+    async def read_ciphertext():
+        from x_credential_store import CredentialSessionVault
+
+        async with SessionLocal() as db:
+            row = await db.get(XCredentialAccount, account["id"])
+            return row.session_ciphertext
+
+    assert CredentialSessionVault().decrypt(asyncio.run(read_ciphertext())).ct0 == "secret-csrf"
+
+
+def test_reconcile_marks_missing_managed_file_failed_when_database_session_is_empty(client):
+    account = create_account(client)
+    from database import SessionLocal
+    from models import XCredentialAccount
+
+    async def clear_database_session():
+        async with SessionLocal() as db:
+            row = await db.get(XCredentialAccount, account["id"])
+            row.session_ciphertext = ""
+            await db.commit()
+
+    asyncio.run(clear_database_session())
+    managed_active_file().unlink()
+
+    async def reconcile():
         from routers.x_accounts import reconcile_x_credential_accounts
         from x_credential_store import CredentialFileStore
 
@@ -287,7 +384,7 @@ def test_reconcile_marks_missing_managed_file_failed(client):
     assert result["available_accounts"] == 0
 
 
-def test_reconcile_marks_malformed_managed_file_failed(client):
+def test_reconcile_restores_malformed_managed_file_from_database_session(client):
     account = create_account(client)
     managed_active_file().write_text("not json")
 
@@ -299,16 +396,12 @@ def test_reconcile_marks_malformed_managed_file_failed(client):
         async with SessionLocal() as db:
             return await reconcile_x_credential_accounts(db, CredentialFileStore(session_dir()))
 
-    errors = asyncio.run(reconcile())
-    assert errors == [f"账号 {account['id']} 的凭据文件不存在或状态冲突"]
-    result = client.get("/api/x/accounts").json()
-    row = next(item for item in result["accounts"] if item["id"] == account["id"])
-    assert row["test_status"] == "failed"
-    assert "格式无效" in row["last_test_error"]
+    assert asyncio.run(reconcile()) == []
+    assert managed_active_file().read_text() == '{"auth_token":"secret-auth","ct0":"secret-csrf"}'
 
 
 @pytest.mark.parametrize("malformed", ["[]", "null"])
-def test_reconcile_marks_non_object_json_failed_and_continues(client, malformed):
+def test_reconcile_restores_non_object_json_and_continues(client, malformed):
     broken = create_account(client, "损坏账号")
     healthy = create_account(client, "正常账号")
     managed_active_file().write_text(malformed)
@@ -322,10 +415,9 @@ def test_reconcile_marks_non_object_json_failed_and_continues(client, malformed)
             return await reconcile_x_credential_accounts(db, CredentialFileStore(session_dir()))
 
     errors = asyncio.run(reconcile())
-    assert errors == [f"账号 {broken['id']} 的凭据文件不存在或状态冲突"]
+    assert errors == []
     rows = {row["id"]: row for row in client.get("/api/x/accounts").json()["accounts"]}
-    assert rows[broken["id"]]["test_status"] == "failed"
-    assert "格式无效" in rows[broken["id"]]["last_test_error"]
+    assert rows[broken["id"]]["test_status"] == "untested"
     assert rows[healthy["id"]]["test_status"] == "untested"
 
 

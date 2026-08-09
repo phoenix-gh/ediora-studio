@@ -24,6 +24,13 @@ const expectedReferences = [
   'references/voice-system.md',
   'references/writing-clean-rules.md',
 ]
+const xArticleSkillName = 'x-article-writing'
+const expectedXArticleReferences = [
+  'references/article-structure.md',
+  'references/hooks-and-layout.md',
+  'references/quality-check.md',
+]
+const githubTrendingSkillName = 'github-trending-chart'
 
 let runtimeDir = ''
 
@@ -82,5 +89,65 @@ describe('bundled human-social-copy Skill', () => {
     expect(skill?.instructions).toContain('需要可直接发布到 X 或其他平台：必须读取 `references/layout-playbook.md`')
     expect(skill?.instructions).toContain('改写、润色或去除 AI 味：必须读取 `references/writing-clean-rules.md`')
     expect(skill?.instructions).toContain('涉及账号声音或发布身份：必须读取 `references/voice-system.md`')
+  })
+
+  it('discovers the bundled X Article Skill with its independent format boundary', async () => {
+    expect(await listSkills()).toContainEqual(expect.objectContaining({
+      name: xArticleSkillName,
+      source: 'builtin',
+      enabled: true,
+      version: '1.0.0-wms.1',
+    }))
+    expect((await discoverSkills()).map(skill => skill.name)).toContain(xArticleSkillName)
+    expect((await listSkillReferences(xArticleSkillName)).map(reference => reference.path))
+      .toEqual(expectedXArticleReferences)
+
+    const skill = await getEnabledSkill(xArticleSkillName)
+    expect(skill?.description).toContain('X/Twitter Article')
+    expect(skill?.description).toContain('expanded_article')
+    expect(skill?.instructions).toContain('不适用于普通 X 长帖或 Thread')
+    expect(skill?.instructions).toContain('不得编造')
+    expect(skill?.instructions).toContain('save_draft')
+    for (const referencePath of expectedXArticleReferences) {
+      expect(skill?.instructions).toContain(`readSkillReference`)
+      expect(skill?.instructions).toContain(`\`${referencePath}\``)
+      await expect(readSkillReference(xArticleSkillName, referencePath)).resolves.toEqual(
+        expect.objectContaining({
+          path: referencePath,
+          content: expect.stringMatching(/\S/),
+          bytes: expect.any(Number),
+        }),
+      )
+    }
+  })
+
+  it('can disable and restore the bundled X Article Skill but cannot delete it', async () => {
+    await expect(deleteUploadedSkill(xArticleSkillName)).rejects.toMatchObject({ code: 'forbidden' })
+
+    await setSkillEnabled(xArticleSkillName, false)
+    expect((await discoverSkills()).map(skill => skill.name)).not.toContain(xArticleSkillName)
+    await expect(listSkillReferences(xArticleSkillName)).rejects.toMatchObject({ code: 'not_found' })
+
+    await setSkillEnabled(xArticleSkillName, true)
+    expect((await discoverSkills()).map(skill => skill.name)).toContain(xArticleSkillName)
+    expect(await listSkillReferences(xArticleSkillName)).toHaveLength(expectedXArticleReferences.length)
+  })
+
+  it('discovers the default GitHub daily ranking chart Skill', async () => {
+    expect(await listSkills()).toContainEqual(expect.objectContaining({
+      name: githubTrendingSkillName,
+      source: 'builtin',
+      enabled: true,
+    }))
+    expect(await listSkillReferences(githubTrendingSkillName)).toEqual([])
+    expect((await discoverSkills()).map(skill => skill.name)).toContain(githubTrendingSkillName)
+
+    const skill = await getEnabledSkill(githubTrendingSkillName)
+    expect(skill?.description).toContain('GitHub daily')
+    expect(skill?.instructions).toContain('get_github_daily_trending')
+    expect(skill?.instructions).toContain('project_intro')
+    expect(skill?.instructions).toContain('recommendation')
+    expect(skill?.instructions).toContain('generateImage')
+    expect(skill?.instructions).toContain('临时文件')
   })
 })

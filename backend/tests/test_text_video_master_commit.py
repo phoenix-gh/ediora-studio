@@ -32,9 +32,9 @@ def _saved(asset_id: int = 1):
     }
 
 
-@pytest.mark.parametrize("bind_shape", ["static-pool", "connection"])
+@pytest.mark.parametrize("bind_shape", ["engine", "connection"])
 def test_master_durability_verification_requires_independent_engine(
-    tmp_path,
+    postgres_database_url,
     bind_shape,
 ):
     from models import Base, CreativeAsset, TextVideoProject
@@ -42,12 +42,7 @@ def test_master_durability_verification_requires_independent_engine(
     from text_video_master import _durable_master_matches
 
     async def run():
-        url = (
-            "sqlite+aiosqlite:///:memory:"
-            if bind_shape == "static-pool"
-            else f"sqlite+aiosqlite:///{tmp_path / 'connection.db'}"
-        )
-        engine = create_async_engine(url)
+        engine = create_async_engine(postgres_database_url)
         connection = None
         try:
             async with engine.begin() as setup:
@@ -103,15 +98,13 @@ def test_master_durability_verification_requires_independent_engine(
 
 
 def test_master_verifier_returns_false_for_confirmed_rollback_shape(
-    tmp_path,
+    postgres_database_url,
 ):
     from models import Base, TextVideoProject
     from text_video_master import _durable_master_matches
 
     async def run():
-        engine = create_async_engine(
-            f"sqlite+aiosqlite:///{tmp_path / 'independent.db'}",
-        )
+        engine = create_async_engine(postgres_database_url)
         try:
             async with engine.begin() as setup:
                 await setup.run_sync(Base.metadata.create_all)
@@ -135,7 +128,7 @@ def test_master_verifier_returns_false_for_confirmed_rollback_shape(
 
 @pytest.mark.parametrize("asset_exists", [True, False])
 def test_master_verifier_does_not_accept_replacement_job_state(
-    tmp_path,
+    postgres_database_url,
     asset_exists,
 ):
     from models import Base, CreativeAsset, TextVideoProject
@@ -143,9 +136,7 @@ def test_master_verifier_does_not_accept_replacement_job_state(
     from text_video_master import _durable_master_matches
 
     async def run():
-        engine = create_async_engine(
-            f"sqlite+aiosqlite:///{tmp_path / 'replacement.db'}",
-        )
+        engine = create_async_engine(postgres_database_url)
         try:
             async with engine.begin() as setup:
                 await setup.run_sync(Base.metadata.create_all)
@@ -300,15 +291,16 @@ def test_precommit_master_flush_failure_removes_owned_file(
     assert generated == []
 
 
-def test_master_commit_recovers_durable_write_after_ack_loss(tmp_path):
+def test_master_commit_recovers_durable_write_after_ack_loss(
+    tmp_path,
+    postgres_database_url,
+):
     from models import Base, CreativeAsset, TextVideoProject
     from text_video_domain import empty_master_audio
     from text_video_master import _commit_master
 
     async def run():
-        engine = create_async_engine(
-            f"sqlite+aiosqlite:///{tmp_path / 'ack-loss.db'}",
-        )
+        engine = create_async_engine(postgres_database_url)
         owned = tmp_path / "master.mp3"
         owned.write_bytes(b"master")
         try:
@@ -373,15 +365,14 @@ def test_master_commit_recovers_durable_write_after_ack_loss(tmp_path):
 
 def test_master_commit_deletes_owned_file_only_after_definite_rollback(
     tmp_path,
+    postgres_database_url,
 ):
     from models import Base, CreativeAsset, TextVideoProject
     from text_video_domain import empty_master_audio
     from text_video_master import _commit_master
 
     async def run():
-        engine = create_async_engine(
-            f"sqlite+aiosqlite:///{tmp_path / 'rollback.db'}",
-        )
+        engine = create_async_engine(postgres_database_url)
         owned = tmp_path / "rolled-back.mp3"
         owned.write_bytes(b"master")
         try:
@@ -437,6 +428,7 @@ def test_master_commit_deletes_owned_file_only_after_definite_rollback(
 @pytest.mark.parametrize("interruption", ["timeout", "cancel"])
 def test_durable_master_commit_never_hides_timeout_or_caller_cancellation(
     tmp_path,
+    postgres_database_url,
     monkeypatch,
     interruption,
 ):
@@ -456,9 +448,7 @@ def test_durable_master_commit_never_hides_timeout_or_caller_cancellation(
     )
 
     async def run():
-        engine = create_async_engine(
-            f"sqlite+aiosqlite:///{tmp_path / f'{interruption}.db'}",
-        )
+        engine = create_async_engine(postgres_database_url)
         owned = tmp_path / f"{interruption}.mp3"
         owned.write_bytes(b"master")
         durable = asyncio.Event()
@@ -529,13 +519,24 @@ def test_durable_master_commit_never_hides_timeout_or_caller_cancellation(
 
 def test_unknown_master_commit_state_preserves_owned_file(
     tmp_path,
+    postgres_database_url,
+    monkeypatch,
 ):
     from models import Base, CreativeAsset, TextVideoProject
     from text_video_domain import empty_master_audio
-    from text_video_master import _commit_master
+    import text_video_master
+
+    async def unknown_durability(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(
+        text_video_master,
+        "_durable_master_matches",
+        unknown_durability,
+    )
 
     async def run():
-        engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+        engine = create_async_engine(postgres_database_url)
         owned = tmp_path / "unknown.mp3"
         owned.write_bytes(b"master")
         try:
@@ -575,7 +576,7 @@ def test_unknown_master_commit_state_preserves_owned_file(
 
                 session.commit = fail_before_commit
                 with pytest.raises(ConnectionError, match="unknown"):
-                    await _commit_master(
+                    await text_video_master._commit_master(
                         session,
                         project_id=project_id,
                         saved=saved,

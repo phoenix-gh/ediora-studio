@@ -11,7 +11,7 @@ type ModelConfig = { apiKey: string; modelName: string; baseURL?: string }
 type ImageModelConfig = { apiKey: string; modelName: string; baseURL?: string }
 type CoverStyle = Record<string, unknown>
 
-export type ContentStep = 'brief' | 'draft' | 'cover' | 'illustrations' | 'standalone_image' | 'daily_plan' | 'template_extraction'
+export type ContentStep = 'brief' | 'draft' | 'cover' | 'illustrations' | 'standalone_image' | 'template_extraction'
 
 const stepToolNames: Record<ContentStep, string[]> = {
   brief: ['loadSource', 'loadAccountContext', 'saveBrief'],
@@ -19,12 +19,17 @@ const stepToolNames: Record<ContentStep, string[]> = {
   cover: ['getDraft', 'loadCoverContext', 'saveCoverAsset'],
   illustrations: ['getDraft', 'loadImageContext', 'saveInlineAsset'],
   standalone_image: ['generateImage', 'saveCreativeAsset'],
-  daily_plan: ['loadPlanningContext', 'saveDailyPlan'],
   template_extraction: [],
 }
 
 export function toolsForContentStep(step: ContentStep): string[] {
   return stepToolNames[step]
+}
+
+export function creativeAssetUploadQuery(title: string, directory = '') {
+  const query = new URLSearchParams({ media_kind: 'image', title })
+  if (directory.trim()) query.set('directory', directory.trim())
+  return query.toString()
 }
 
 export function imageToolNamesForSkill(step: 'cover' | 'illustrations'): string[] {
@@ -52,16 +57,6 @@ export function textModelForProvider<T>(provider: { chat: (modelName: string) =>
   return provider.chat(modelName)
 }
 
-const dailyPlanSchema = z.object({
-  note: z.string(),
-  items: z.array(z.object({
-    account_id: z.string(), title: z.string(), angle: z.string(), reason: z.string(),
-    content_type: z.enum(['long', 'short', 'story', 'share']),
-    sources: z.array(z.union([z.record(z.string(), z.unknown()), z.string()])).default([])
-      .transform(sources => sources.map(source => typeof source === 'string' ? { url: source } : source)),
-    group_key: z.string().default(''), is_primary: z.boolean().default(true),
-  })).min(1),
-})
 
 const templateCandidateSchema = z.object({
   recommendation: z.enum(['create', 'merge', 'skip']),
@@ -97,10 +92,6 @@ export const illustrationImageInputSchema = imageGenerationInputSchema.extend({
   anchor_heading: z.string().min(1).max(160),
 })
 
-export function parseDailyPlanText(text: string) {
-  const json = text.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '')
-  return dailyPlanSchema.parse(JSON.parse(json))
-}
 
 async function getJob(jobId: number) {
   const response = await fetch(`${apiBase()}/jobs/${jobId}`, { cache: 'no-store' })
@@ -146,25 +137,18 @@ async function saveDraftImage(jobId: number, draftId: number, filename: string, 
   return response.json() as Promise<{ id: number; url: string }>
 }
 
-async function saveCreativeAssetImage(jobId: number, title: string, filename: string, bytes: Uint8Array, mediaType: string) {
+async function saveCreativeAssetImage(jobId: number, title: string, filename: string, bytes: Uint8Array, mediaType: string, directory = '') {
   const form = new FormData()
   const data = new Uint8Array(bytes.byteLength)
   data.set(bytes)
   form.append('file', new Blob([data], { type: mediaType }), filename)
-  const response = await fetch(`${apiBase()}/assets/upload?media_kind=image&title=${encodeURIComponent(title)}`, {
-    method: 'POST', headers: { 'X-Content-Job-Id': String(jobId) }, body: form,
+  const response = await fetch(`${apiBase()}/assets/upload?${creativeAssetUploadQuery(title, directory)}`, {
+    method: 'POST', headers: workerHeaders(jobId), body: form,
   })
   if (!response.ok) throw new Error(`Creative asset upload failed (${response.status})`)
   return response.json() as Promise<{ id: number; url: string; title: string }>
 }
 
-async function saveDailyPlan(planId: number, items: unknown[], note: string) {
-  const response = await fetch(`${apiBase()}/daily-plan/${planId}/items`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ items, note }),
-  })
-  if (!response.ok) throw new Error(`Daily plan save failed (${response.status})`)
-  return response.json() as Promise<{ items: Array<{ id: number }> }>
-}
 
 async function startStep(jobId: number, step: ContentStep) {
   const response = await fetch(`${apiBase()}/jobs/${jobId}/steps/${step}/start`, { method: 'POST' })
@@ -350,27 +334,17 @@ async function runImageFlow(job: Awaited<ReturnType<typeof getJob>>, step: 'cove
 async function runStandaloneImageFlow(job: Awaited<ReturnType<typeof getJob>>) {
   const prompt = String(job.input.prompt ?? '').trim()
   if (!prompt) throw new Error('standalone_image flow requires prompt')
+  const directory = String(job.input.directory ?? '').trim()
   const image = await configuredImageModel()
   const provider = createOpenAI({ apiKey: image.apiKey, baseURL: image.baseURL })
   await recordJobEvent(job.id, 'generate_image_called', { tool: 'generateImage', prompt, standalone: true })
   const generated = await generateImage({ model: provider.image(image.modelName), prompt, n: 1 })
   const output = generated.images[0]
-  const asset = await saveCreativeAssetImage(job.id, job.title, `chat-image-${job.id}.png`, output.uint8Array, output.mediaType)
-  await recordJobEvent(job.id, 'generate_image_succeeded', { tool: 'generateImage', asset_id: asset.id, asset_url: asset.url, standalone: true })
-  return { asset_id: asset.id, asset_url: asset.url, title: asset.title }
+  const asset = await saveCreativeAssetImage(job.id, job.title, `chat-image-${job.id}.png`, output.uint8Array, output.mediaType, directory)
+  await recordJobEvent(job.id, 'generate_image_succeeded', { tool: 'generateImage', asset_id: asset.id, asset_url: asset.url, directory, standalone: true })
+  return { asset_id: asset.id, asset_url: asset.url, title: asset.title, directory }
 }
 
-async function runDailyPlanFlow(job: Awaited<ReturnType<typeof getJob>>, model: ReturnType<typeof createOpenAI>, modelName: string) {
-  const planId = Number(job.input.plan_id)
-  if (!Number.isSafeInteger(planId) || planId <= 0) throw new Error('daily_plan flow requires plan_id')
-  const result = await generateText({
-    model: textModelForProvider(model, modelName),
-    prompt: `Create today's content plan. Return only a valid JSON object, without Markdown fences. It must have a string note and a non-empty items array. Each item must include account_id, title, angle, reason, content_type (long, short, story, or share), sources (array), group_key (string), and is_primary (boolean). ${JSON.stringify(job.input)}`,
-  })
-  const plan = parseDailyPlanText(result.text)
-  const saved = await saveDailyPlan(planId, plan.items, plan.note)
-  return { plan_id: planId, item_count: saved.items.length }
-}
 
 async function runTemplateExtractionFlow(job: Awaited<ReturnType<typeof getJob>>, model: ReturnType<typeof createOpenAI>, modelName: string) {
   const customPrompt = String(job.input.prompt ?? '')
@@ -399,17 +373,13 @@ export async function runContentJob(jobId: number) {
       await completeJob(job.id)
       return output
     }
-    activeStep = await startStep(job.id, job.flow === 'daily_plan' ? 'daily_plan' : job.flow === 'template_extraction' ? 'template_extraction' : 'brief')
-    const modelConfig = await configuredTextModel()
-    const modelName = modelConfig.modelName
-    const openai = createOpenAI({ apiKey: modelConfig.apiKey, baseURL: modelConfig.baseURL })
-    if (job.flow === 'daily_plan') {
-      const output = await runDailyPlanFlow(job, openai, modelName)
-      await completeStep(job.id, activeStep.id, output)
-      activeStep = undefined
-      await completeJob(job.id)
-      return output
-    }
+    activeStep = await startStep(
+      job.id,
+      job.flow === 'template_extraction' ? 'template_extraction' : 'brief',
+    )
+    const text = await configuredTextModel()
+    const openai = createOpenAI({ apiKey: text.apiKey, baseURL: text.baseURL })
+    const modelName = text.modelName
     if (job.flow === 'template_extraction') {
       const output = await runTemplateExtractionFlow(job, openai, modelName)
       await completeStep(job.id, activeStep.id, output)

@@ -10,13 +10,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from content_jobs import create_job, record_event
 from job_queue import enqueue_job
-from models import ContentJob, TopicSourceRule
+from models import (
+    ContentJob,
+    CreativeAssetDirectory,
+    XSubscriptionIngestionDirectory,
+)
 
 
-def _idempotency_key(rule_id: int, tweet_ids: list[str]) -> str:
+def _idempotency_key(subscription_id: int, tweet_ids: list[str]) -> str:
     joined = ",".join(sorted(set(tweet_ids)))
     digest = hashlib.sha256(joined.encode("utf-8")).hexdigest()[:20]
-    return f"topic-source:{rule_id}:{digest}"
+    return f"topic-source:{subscription_id}:{digest}"
 
 
 async def dispatch_topic_source_posts(
@@ -26,44 +30,52 @@ async def dispatch_topic_source_posts(
     *,
     enqueue: Callable[[int], Awaitable[None]] = enqueue_job,
 ) -> dict:
-    """Create one job per enabled rule for a fresh X-post batch.
-
-    The worker later filters by keywords and persists both accepted and rejected
-    decisions.  Idempotency is based on a rule plus the exact fresh-post batch.
-    """
+    """Create one merged AI classification job for a fresh X-post batch."""
     unique_ids = sorted(set(tweet_ids))
     if not unique_ids:
         return {"created": 0, "enqueued": 0, "errors": []}
-    rules = (await db.execute(
-        select(TopicSourceRule).where(
-            TopicSourceRule.subscription_id == subscription_id,
-            TopicSourceRule.enabled.is_(True),
+    directories = (await db.execute(
+        select(CreativeAssetDirectory)
+        .join(
+            XSubscriptionIngestionDirectory,
+            XSubscriptionIngestionDirectory.directory_id == CreativeAssetDirectory.id,
         )
+        .where(
+            XSubscriptionIngestionDirectory.subscription_id == subscription_id,
+            CreativeAssetDirectory.asset_type == "article",
+            CreativeAssetDirectory.ai_ingestion_enabled.is_(True),
+        )
+        .order_by(CreativeAssetDirectory.id)
     )).scalars().all()
+    if not directories:
+        return {"created": 0, "enqueued": 0, "errors": []}
     created = 0
     enqueued = 0
     errors: list[str] = []
-    for rule in rules:
-        key = _idempotency_key(rule.id, unique_ids)
-        existing = await db.scalar(
-            select(ContentJob.id).where(ContentJob.idempotency_key == key)
-        )
-        if existing is not None:
-            continue
-        job = await create_job(
-            db,
-            flow="topic_source",
-            title=f"{rule.directory}：X 主题素材甄选",
-            input_data={"rule_id": rule.id, "tweet_ids": unique_ids},
-            idempotency_key=key,
-        )
-        created += 1
-        try:
-            await enqueue(job.id)
-            await record_event(db, job.id, "topic_source_queue_dispatched")
-            enqueued += 1
-        except Exception as exc:  # DB job remains queued for reconciliation/retry.
-            errors.append(f"规则 {rule.id}: {exc}")
+    key = _idempotency_key(subscription_id, unique_ids)
+    existing = await db.scalar(
+        select(ContentJob.id).where(ContentJob.idempotency_key == key)
+    )
+    if existing is not None:
+        return {"created": 0, "enqueued": 0, "errors": []}
+    job = await create_job(
+        db,
+        flow="topic_source",
+        title="X：多文件夹 AI 素材归类",
+        input_data={
+            "subscription_id": subscription_id,
+            "directory_ids": [directory.id for directory in directories],
+            "tweet_ids": unique_ids,
+        },
+        idempotency_key=key,
+    )
+    created += 1
+    try:
+        await enqueue(job.id)
+        await record_event(db, job.id, "topic_source_queue_dispatched")
+        enqueued += 1
+    except Exception as exc:  # DB job remains queued for reconciliation/retry.
+        errors.append(f"订阅 {subscription_id}: {exc}")
     return {"created": created, "enqueued": enqueued, "errors": errors}
 
 

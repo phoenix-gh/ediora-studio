@@ -8,11 +8,7 @@ from fastapi.testclient import TestClient
 
 
 @pytest.fixture
-def client(monkeypatch, tmp_path):
-    monkeypatch.setenv(
-        "WMS_DATABASE_URL",
-        f"sqlite+aiosqlite:///{tmp_path / 'drafts-router.db'}",
-    )
+def client(monkeypatch, tmp_path, postgres_env):
     for module in list(sys.modules):
         if module.startswith(("database", "models", "routers.drafts")):
             sys.modules.pop(module, None)
@@ -50,6 +46,40 @@ def client(monkeypatch, tmp_path):
 
 def _run(coro):
     return asyncio.new_event_loop().run_until_complete(coro)
+
+
+def test_draft_page_uses_cursor_and_applies_filters(client):
+    first = client.post(
+        "/api/write/drafts",
+        json={"title": "第一篇", "status": "drafting", "writing_plan_id": 9},
+    ).json()
+    second = client.post(
+        "/api/write/drafts",
+        json={"title": "第二篇", "status": "ready", "writing_plan_id": 9},
+    ).json()
+    third = client.post(
+        "/api/write/drafts",
+        json={"title": "第三篇", "status": "drafting"},
+    ).json()
+
+    first_page = client.get("/api/write/drafts/page", params={"limit": 2})
+
+    assert first_page.status_code == 200
+    assert [draft["id"] for draft in first_page.json()["items"]] == [third["id"], second["id"]]
+    assert first_page.json()["next_cursor"]
+
+    next_page = client.get(
+        "/api/write/drafts/page",
+        params={"limit": 2, "cursor": first_page.json()["next_cursor"]},
+    )
+    assert [draft["id"] for draft in next_page.json()["items"]] == [first["id"]]
+    assert next_page.json()["next_cursor"] is None
+
+    filtered = client.get(
+        "/api/write/drafts/page",
+        params={"status": "drafting", "writing_plan_id": 9},
+    )
+    assert [draft["id"] for draft in filtered.json()["items"]] == [first["id"]]
 
 
 def test_draft_images_belong_only_to_the_selected_draft(client):
@@ -122,7 +152,7 @@ def test_delete_daily_creation_draft_releases_only_its_draft_usage(client):
                 rule_id=11,
                 creative_asset_id=102,
                 output_type="x_short_post",
-                output_kind="plan_item",
+                output_kind="asset",
                 output_id=draft.id,
                 draft_id=draft.id,
             )

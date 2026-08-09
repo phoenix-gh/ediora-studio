@@ -1,12 +1,13 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { WorkspaceToolbar } from '@/components/layout/WorkspaceToolbar'
 import { AssetDirectoryRail } from './AssetDirectoryRail'
@@ -20,6 +21,7 @@ import {
   deleteCreativeAssetDirectory,
   listCreativeAssetDirectories,
   renameCreativeAssetDirectory,
+  updateCreativeAssetDirectoryIngestionRule,
   updateCreativeAsset,
   type CreativeAsset,
   type CreativeAssetDirectory,
@@ -28,15 +30,34 @@ import {
 type AssetType = 'article' | 'media'
 type MediaFilter = 'all' | 'image' | 'video' | 'audio'
 type ArticleDialogState = { busy: boolean; content: string; error: string; id: number; title: string; url: string }
-type DirectoryDialogState = { busy: boolean; error: string; id: number; item: CreativeAssetDirectory | null; name: string }
+type DirectoryDialogState = {
+  aiIngestionEnabled: boolean
+  aiIngestionKeywords: string
+  aiIngestionPrompt: string
+  busy: boolean
+  error: string
+  id: number
+  item: CreativeAssetDirectory | null
+  name: string
+}
 type ConfirmationState = { action: () => Promise<void>; busy: boolean; error: string; message: string }
 
-export function AssetsClient({ initialAssets }: { initialAssets: CreativeAsset[] }) {
+export function AssetsClient({
+  initialAssets,
+  initialSelectedId = null,
+}: {
+  initialAssets: CreativeAsset[]
+  initialSelectedId?: number | null
+}) {
   const [assets, setAssets] = useState(initialAssets)
   const [type, setType] = useState<AssetType>('article')
   const [directory, setDirectory] = useState('')
   const [mediaFilter, setMediaFilter] = useState<MediaFilter>('all')
-  const [selectedId, setSelectedId] = useState<number | null>(initialAssets[0]?.id ?? null)
+  const [selectedId, setSelectedId] = useState<number | null>(
+    initialSelectedId && initialAssets.some(asset => asset.id === initialSelectedId)
+      ? initialSelectedId
+      : initialAssets[0]?.id ?? null,
+  )
   const [previewAsset, setPreviewAsset] = useState<CreativeAsset | null>(null)
   const [directories, setDirectories] = useState<CreativeAssetDirectory[]>([])
   const [articleDialog, setArticleDialog] = useState<ArticleDialogState | null>(null)
@@ -67,6 +88,15 @@ export function AssetsClient({ initialAssets }: { initialAssets: CreativeAsset[]
   const selected = visibleAssets.find(asset => asset.id === selectedId) ?? visibleAssets[0]
   const count = (name: string) => assets.filter(asset => asset.asset_type === type && (!name || asset.directory === name)).length
 
+  const clearOperationError = useCallback((assetId: number) => {
+    setOperationErrors(errors => {
+      if (!errors[assetId]) return errors
+      const next = { ...errors }
+      delete next[assetId]
+      return next
+    })
+  }, [])
+
   function changeType(nextType: AssetType) {
     setType(nextType)
     setDirectory('')
@@ -78,7 +108,30 @@ export function AssetsClient({ initialAssets }: { initialAssets: CreativeAsset[]
 
   function openNewDirectory() {
     if (directoryDialog?.busy) return
-    setDirectoryDialog({ busy: false, error: '', id: ++formId.current, item: null, name: '' })
+    setDirectoryDialog({
+      aiIngestionEnabled: false,
+      aiIngestionKeywords: '',
+      aiIngestionPrompt: '',
+      busy: false,
+      error: '',
+      id: ++formId.current,
+      item: null,
+      name: '',
+    })
+  }
+
+  function openDirectoryEditor(item: CreativeAssetDirectory) {
+    if (directoryDialog?.busy) return
+    setDirectoryDialog({
+      aiIngestionEnabled: item.ai_ingestion_enabled,
+      aiIngestionKeywords: item.ai_ingestion_keywords.join('，'),
+      aiIngestionPrompt: item.ai_ingestion_prompt,
+      busy: false,
+      error: '',
+      id: ++formId.current,
+      item,
+      name: item.name,
+    })
   }
 
   async function saveDirectory() {
@@ -89,19 +142,39 @@ export function AssetsClient({ initialAssets }: { initialAssets: CreativeAsset[]
       setDirectoryDialog(value => value ? { ...value, error: '请输入目录名称。' } : value)
       return
     }
+    const aiIngestionPrompt = form.aiIngestionPrompt.trim()
+    if (type === 'article' && form.aiIngestionEnabled && !aiIngestionPrompt) {
+      setDirectoryDialog(value => value ? { ...value, error: '启用 AI 素材入库时必须填写规则。' } : value)
+      return
+    }
     setDirectoryDialog(value => value?.id === form.id ? { ...value, busy: true, error: '' } : value)
     try {
+      let savedDirectory: CreativeAssetDirectory
       if (form.item) {
         const previous = form.item
-        const updated = await renameCreativeAssetDirectory(previous.id, name)
-        setDirectories(items => items.map(item => item.id === updated.id ? updated : item))
-        setAssets(items => items.map(item => item.asset_type === previous.asset_type && item.directory === previous.name ? { ...item, directory: updated.name } : item))
-        if (directory === previous.name) setDirectory(updated.name)
+        savedDirectory = await renameCreativeAssetDirectory(previous.id, name)
+        setAssets(items => items.map(item => item.asset_type === previous.asset_type && item.directory === previous.name ? { ...item, directory: savedDirectory.name } : item))
+        if (directory === previous.name) setDirectory(savedDirectory.name)
       } else {
         const parent = directories.find(item => item.name === directory)
-        const created = await createCreativeAssetDirectory(name, type, parent?.id ?? null)
-        setDirectories(items => [...items, created])
+        savedDirectory = await createCreativeAssetDirectory(name, type, parent?.id ?? null)
       }
+      if (type === 'article') {
+        const rule = await updateCreativeAssetDirectoryIngestionRule(savedDirectory.id, {
+          enabled: form.aiIngestionEnabled,
+          keywords: form.aiIngestionKeywords.split(/[,，]/).map(value => value.trim()).filter(Boolean),
+          prompt: aiIngestionPrompt,
+        })
+        savedDirectory = {
+          ...savedDirectory,
+          ai_ingestion_enabled: rule.enabled,
+          ai_ingestion_keywords: rule.keywords,
+          ai_ingestion_prompt: rule.prompt,
+        }
+      }
+      setDirectories(items => form.item
+        ? items.map(item => item.id === savedDirectory.id ? savedDirectory : item)
+        : [...items, savedDirectory])
       setDirectoryDialog(value => value?.id === form.id ? null : value)
     } catch {
       setDirectoryDialog(value => value?.id === form.id ? { ...value, busy: false, error: '保存目录失败，请重试。' } : value)
@@ -164,10 +237,10 @@ export function AssetsClient({ initialAssets }: { initialAssets: CreativeAsset[]
     clearOperationError(asset.id)
   }
 
-  async function saveSelectedArticle() {
+  const saveSelectedArticle = useCallback(async () => {
     if (!selected || savingAssetId !== null) return
     const assetId = selected.id
-    const snapshot = { content: selected.content, title: selected.title, url: selected.url }
+    const snapshot = { content: selected.content, directory: selected.directory, title: selected.title, url: selected.url }
     clearOperationError(assetId)
     setSavingAssetId(assetId)
     try {
@@ -175,6 +248,7 @@ export function AssetsClient({ initialAssets }: { initialAssets: CreativeAsset[]
       setAssets(items => items.map(item => item.id !== assetId ? item : {
         ...item,
         content: item.content === snapshot.content ? updated.content : item.content,
+        directory: item.directory === snapshot.directory ? updated.directory : item.directory,
         title: item.title === snapshot.title ? updated.title : item.title,
         updated_at: updated.updated_at,
         url: item.url === snapshot.url ? updated.url : item.url,
@@ -184,19 +258,22 @@ export function AssetsClient({ initialAssets }: { initialAssets: CreativeAsset[]
     } finally {
       setSavingAssetId(value => value === assetId ? null : value)
     }
-  }
+  }, [clearOperationError, savingAssetId, selected])
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 's') return
+      if (articleDialog || !selected) return
+      event.preventDefault()
+      if (savingAssetId !== null) return
+      void saveSelectedArticle()
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [articleDialog, saveSelectedArticle, savingAssetId, selected])
 
   function selectArticle(id: number) {
     setSelectedId(id)
-  }
-
-  function clearOperationError(assetId: number) {
-    setOperationErrors(errors => {
-      if (!errors[assetId]) return errors
-      const next = { ...errors }
-      delete next[assetId]
-      return next
-    })
   }
 
   function requestArticleDelete() {
@@ -233,7 +310,7 @@ export function AssetsClient({ initialAssets }: { initialAssets: CreativeAsset[]
       onAddDirectory={openNewDirectory}
       onDeleteDirectory={requestDirectoryDelete}
       onDirectoryChange={setDirectory}
-      onRenameDirectory={item => setDirectoryDialog({ busy: false, error: '', id: ++formId.current, item, name: item.name })}
+      onRenameDirectory={openDirectoryEditor}
       onTypeChange={changeType}
       type={type}
     />
@@ -253,7 +330,7 @@ export function AssetsClient({ initialAssets }: { initialAssets: CreativeAsset[]
       </div> : null}
       {selected && operationErrors[selected.id] ? <p className="px-7 pt-3 text-sm text-destructive" role="alert">{operationErrors[selected.id]}</p> : null}
       {type === 'article'
-        ? <ArticleAssetWorkspace assets={visibleAssets} isSaving={savingAssetId !== null} onChange={changeSelectedArticle} onDelete={requestArticleDelete} onSave={saveSelectedArticle} onSelect={selectArticle} selected={selected} />
+        ? <ArticleAssetWorkspace assets={visibleAssets} directories={directories} isSaving={savingAssetId !== null} onChange={changeSelectedArticle} onDelete={requestArticleDelete} onSave={saveSelectedArticle} onSelect={selectArticle} selected={selected} />
         : <MediaAssetGrid assets={visibleAssets} onPreview={setPreviewAsset} onSelect={setSelectedId} selectedId={selected?.id ?? null} />}
     </div>
 
@@ -282,7 +359,23 @@ export function AssetsClient({ initialAssets }: { initialAssets: CreativeAsset[]
     <Dialog open={directoryDialog !== null} onOpenChange={open => { if (!open && !directoryDialog?.busy) setDirectoryDialog(null) }}>
       <DialogContent showCloseButton={!directoryDialog?.busy} size="sm">
         <DialogHeader><DialogTitle>{directoryDialog?.item ? '重命名目录' : '新增目录'}</DialogTitle></DialogHeader>
-        <div className="grid gap-1.5"><Label htmlFor="asset-directory-name">目录名称</Label><Input aria-describedby={directoryDialog?.error ? 'directory-form-error' : undefined} aria-invalid={Boolean(directoryDialog?.error) || undefined} autoFocus disabled={directoryDialog?.busy} id="asset-directory-name" onChange={event => setDirectoryDialog(value => value ? { ...value, error: '', name: event.target.value } : value)} placeholder="目录名称" value={directoryDialog?.name ?? ''} /></div>
+        <div className="space-y-4">
+          <div className="grid gap-1.5"><Label htmlFor="asset-directory-name">目录名称</Label><Input aria-describedby={directoryDialog?.error ? 'directory-form-error' : undefined} aria-invalid={Boolean(directoryDialog?.error) || undefined} autoFocus disabled={directoryDialog?.busy} id="asset-directory-name" onChange={event => setDirectoryDialog(value => value ? { ...value, error: '', name: event.target.value } : value)} placeholder="目录名称" value={directoryDialog?.name ?? ''} /></div>
+          {type === 'article' ? (
+            <section className="space-y-3 rounded-lg border border-border p-3">
+              <div>
+                <p className="text-sm font-medium">AI 素材入库</p>
+                <p className="text-xs text-muted-foreground">X 订阅选择这个文件夹后，AI 会按这条规则判断是否归入。</p>
+              </div>
+              <label className="flex items-center justify-between gap-3 rounded-md bg-muted/40 px-3 py-2 text-xs" htmlFor="directory-ai-ingestion-enabled">
+                <span>启用 AI 素材入库</span>
+                <Switch checked={directoryDialog?.aiIngestionEnabled ?? false} disabled={directoryDialog?.busy} id="directory-ai-ingestion-enabled" onCheckedChange={checked => setDirectoryDialog(value => value ? { ...value, aiIngestionEnabled: checked, error: '' } : value)} />
+              </label>
+              <div className="grid gap-1.5"><Label htmlFor="directory-ai-ingestion-keywords">AI 入库关键词</Label><Input disabled={directoryDialog?.busy} id="directory-ai-ingestion-keywords" onChange={event => setDirectoryDialog(value => value ? { ...value, aiIngestionKeywords: event.target.value, error: '' } : value)} placeholder="关键词（逗号分隔，可留空）" value={directoryDialog?.aiIngestionKeywords ?? ''} /></div>
+              <div className="grid gap-1.5"><Label htmlFor="directory-ai-ingestion-prompt">AI 入库规则</Label><Textarea disabled={directoryDialog?.busy} id="directory-ai-ingestion-prompt" maxLength={4000} onChange={event => setDirectoryDialog(value => value ? { ...value, aiIngestionPrompt: event.target.value, error: '' } : value)} placeholder="例如：只接受有具体案例、数据或可执行方法的内容。" rows={4} value={directoryDialog?.aiIngestionPrompt ?? ''} /></div>
+            </section>
+          ) : null}
+        </div>
         {directoryDialog?.error ? <p className="text-xs text-destructive" id="directory-form-error" role="alert">{directoryDialog.error}</p> : null}
         <DialogFooter><Button disabled={directoryDialog?.busy} onClick={() => setDirectoryDialog(null)} variant="outline">取消</Button><Button disabled={directoryDialog?.busy} onClick={() => void saveDirectory()}>{directoryDialog?.busy ? '保存中…' : '保存'}</Button></DialogFooter>
       </DialogContent>

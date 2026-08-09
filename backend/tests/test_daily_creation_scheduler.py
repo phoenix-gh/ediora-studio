@@ -7,10 +7,9 @@ from sqlalchemy import func, select
 
 
 @pytest.fixture
-def env(monkeypatch, tmp_path):
-    monkeypatch.setenv("WMS_DATABASE_URL", f"sqlite+aiosqlite:///{tmp_path / 'creation-scheduler.db'}")
+def env(monkeypatch, postgres_env):
     for name in list(sys.modules):
-        if name.startswith(("database", "models", "daily_planner", "content_jobs")):
+        if name.startswith(("database", "models", "daily_creation_scheduler", "content_jobs")):
             sys.modules.pop(name, None)
     from database import Base, engine
     import models  # noqa: F401
@@ -25,7 +24,7 @@ def env(monkeypatch, tmp_path):
 
 
 def test_dispatches_due_rules_once_across_modes_and_timezones(env):
-    from daily_planner import dispatch_due_creation_rules
+    from daily_creation_scheduler import dispatch_due_creation_rules
     from database import SessionLocal
     from models import ContentJob, DailyCreationRule, DailyCreationRun
 
@@ -82,7 +81,7 @@ def test_dispatches_due_rules_once_across_modes_and_timezones(env):
 
 
 def test_recurring_rule_catches_up_latest_previous_local_day(env):
-    from daily_planner import dispatch_due_creation_rules
+    from daily_creation_scheduler import dispatch_due_creation_rules
     from database import SessionLocal
     from models import DailyCreationRule, DailyCreationRun
 
@@ -131,7 +130,7 @@ def test_recurring_rule_catches_up_latest_previous_local_day(env):
 
 
 def test_recurring_rule_uses_today_after_local_schedule(env):
-    from daily_planner import dispatch_due_creation_rules
+    from daily_creation_scheduler import dispatch_due_creation_rules
     from database import SessionLocal
     from models import DailyCreationRule, DailyCreationRun
 

@@ -2,9 +2,7 @@ import sys, asyncio, pytest
 
 
 @pytest.fixture
-def db_session(monkeypatch, tmp_path):
-    db_file = tmp_path / "t.db"
-    monkeypatch.setenv("WMS_DATABASE_URL", f"sqlite+aiosqlite:///{db_file}")
+def db_session(monkeypatch, postgres_env):
     for mod in list(sys.modules):
         if mod.startswith(("database", "models", "config")):
             sys.modules.pop(mod, None)
@@ -28,6 +26,7 @@ def test_new_columns_exist_with_defaults(db_session):
             db.add(sub); await db.commit(); await db.refresh(sub)
             assert sub.kind == "search" and sub.raw_query == "min_faves:1"
             assert sub.sort == "top" and sub.max_results == 100
+            assert sub.collect_interval_minutes == 15
 
             post = XPost(tweet_id="t1", subscription_id=sub.id, username="u",
                          published_at=datetime.now(timezone.utc), possibly_sensitive=True)

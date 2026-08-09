@@ -1,0 +1,58 @@
+<h2>AI 评价区：情报应该告诉你什么？</h2>
+<p class="subtitle">请选择右侧评价区的重点。原文始终在左侧，评价区只负责帮助你做内容决策。</p>
+
+<div class="cards">
+  <div class="card" data-choice="decision" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mockup">
+        <div class="mockup-header">A · 快速决策卡</div>
+        <div class="mockup-body" style="background:#eef2ff;min-height:270px;padding:13px">
+          <div style="font-size:11px;color:#4f46e5">AI 评价</div>
+          <div style="display:flex;align-items:end;gap:8px;margin-top:7px"><strong style="font-size:35px">86</strong><span style="font-size:11px">高价值</span></div>
+          <div style="display:inline-block;margin-top:8px;background:#4f46e5;color:white;padding:5px 9px;border-radius:999px;font-size:11px">值得写入内容系统</div>
+          <div style="font-size:11px;line-height:1.9;margin-top:14px">类型：工具 / 实践<br>理由：信息增量明确、受众相关<br>建议：整理成方法型文章</div>
+          <button class="mock-button" style="margin-top:14px">写入内容系统</button>
+        </div>
+      </div>
+    </div>
+    <div class="card-body"><h3>A · 快速决策卡</h3><p>最快看懂，但无法充分检查 AI 为什么这样判断，适合纯分拣场景。</p></div>
+  </div>
+
+  <div class="card" data-choice="editorial" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mockup">
+        <div class="mockup-header">B · 编辑判断卡</div>
+        <div class="mockup-body" style="background:#eef2ff;min-height:270px;padding:13px;overflow:hidden">
+          <div style="display:flex;align-items:center;justify-content:space-between"><div style="font-size:11px;color:#4f46e5">AI 评价</div><strong style="font-size:25px">86 <span style="font-size:10px;font-weight:400">/ 100</span></strong></div>
+          <div style="display:flex;gap:5px;margin-top:8px"><span style="background:#4f46e5;color:white;padding:4px 7px;border-radius:999px;font-size:10px">值得写</span><span style="background:#c7d2fe;padding:4px 7px;border-radius:999px;font-size:10px">工具</span><span style="background:#c7d2fe;padding:4px 7px;border-radius:999px;font-size:10px">实践</span></div>
+          <div style="margin-top:12px;font-size:11px;font-weight:700">为什么值得写</div>
+          <p style="font-size:10px;line-height:1.6;margin-top:4px">它把一个复杂流程讲清楚，对开发者有直接帮助，也能沉淀为可复用的方法。</p>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:9px;font-size:10px"><div style="background:white;border-radius:5px;padding:7px"><b>证据</b><br>来源明确<br>可核对</div><div style="background:white;border-radius:5px;padding:7px"><b>风险</b><br>版本可能变化<br>需标注时间</div></div>
+          <div style="margin-top:9px;font-size:10px"><b>建议写法：</b>“从 X 到 Y 的实践方法”</div>
+          <button class="mock-button" style="margin-top:9px">写入内容系统</button>
+        </div>
+      </div>
+    </div>
+    <div class="card-body"><h3>B · 编辑判断卡</h3><p>同时给出结论、依据、风险和写作方向，最适合你判断是否进入自己的内容系统。</p></div>
+  </div>
+
+  <div class="card" data-choice="report" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mockup">
+        <div class="mockup-header">C · 完整分析报告</div>
+        <div class="mockup-body" style="background:#eef2ff;min-height:270px;padding:13px;overflow:hidden">
+          <div style="font-size:11px;color:#4f46e5">AI 评价报告 · 86 分 · 值得写</div>
+          <div style="margin-top:10px;border-top:1px solid #c7d2fe;padding-top:8px;font-size:10px;line-height:1.8">价值维度：新颖度 82 · 实用性 91 · 可信度 78 · 讨论空间 74 · 长期价值 88</div>
+          <div style="margin-top:8px;border-top:1px solid #c7d2fe;padding-top:8px;font-size:10px;line-height:1.8">核心观点<br>关键事实与证据<br>反例与风险<br>关联历史情报<br>可展开角度<br>推荐内容模板</div>
+          <button class="mock-button" style="margin-top:8px">展开全部分析</button>
+        </div>
+      </div>
+    </div>
+    <div class="card-body"><h3>C · 完整分析报告</h3><p>信息最全，但右侧会变得很重，可能让每天的情报处理变慢。</p></div>
+  </div>
+</div>
+
+<div class="section" style="margin-top:18px">
+  <h3>建议</h3>
+  <p>采用 B：首屏显示决策结论和判断依据，价值维度、历史关联和完整分析放进可展开区域，避免每条情报都像一份长报告。</p>
+</div>

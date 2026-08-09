@@ -27,7 +27,6 @@ const activeAccount: PublishAccount = {
   topic_focus: ['AI'],
   taboo: [],
   word_range: {},
-  daily_quota: {},
   image_style: 'editorial',
   cover_style: {
     palette: 'cool',

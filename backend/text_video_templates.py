@@ -162,32 +162,6 @@ TEXT_VIDEO_TEMPLATES: dict[tuple[str, int], dict[str, Any]] = {
             "showProgress": True,
         },
     },
-    ("kinetic-punch-v2", 1): {
-        "id": "kinetic-punch-v2",
-        "version": 1,
-        "composition_id": "kinetic-punch-v2",
-        "default_composition": {"width": 1080, "height": 1920, "fps": 30},
-        "aspect_ratios": ["9:16", "16:9", "1:1"],
-        "animations": ["impact", "reveal", "contrast"],
-        "transitions": ["block-wipe"],
-        "template_props": {
-            "brandTitle": {"type": "string", "maxLength": 40},
-            "showBrand": {"type": "boolean"},
-            "accentColor": {"type": "color"},
-            "showProgress": {"type": "boolean"},
-            "palette": {
-                "type": "enum",
-                "values": ["night", "light"],
-            },
-        },
-        "defaults": {
-            "brandTitle": "EDIORA",
-            "showBrand": True,
-            "accentColor": "#D8FF3E",
-            "showProgress": True,
-            "palette": "night",
-        },
-    },
 }
 
 

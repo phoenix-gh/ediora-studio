@@ -25,6 +25,10 @@ class SessionExpired(Exception):
     """Raised when WeChat returns ret == 200003 (token/cookie no longer valid)."""
 
 
+class RateLimited(Exception):
+    """Raised when WeChat temporarily throttles backend article listing."""
+
+
 def _common_headers(cookie: str | None = None) -> dict[str, str]:
     h = {
         "User-Agent": USER_AGENT,
@@ -87,7 +91,7 @@ async def _start_login_session() -> str:
         "userlang": "zh_CN", "redirect_url": "", "login_type": 3,
         "sessionid": sid, "token": "", "lang": "zh_CN", "f": "json", "ajax": 1,
     }
-    async with httpx.AsyncClient(timeout=20) as client:
+    async with httpx.AsyncClient(timeout=20, trust_env=False) as client:
         resp = await client.post(
             "https://mp.weixin.qq.com/cgi-bin/bizlogin",
             headers={**_common_headers(),
@@ -110,7 +114,7 @@ async def get_qrcode() -> tuple[bytes, str]:
     uuid_cookie = await _start_login_session()
     url = "https://mp.weixin.qq.com/cgi-bin/scanloginqrcode"
     params = {"action": "getqrcode", "random": int(time.time() * 1000)}
-    async with httpx.AsyncClient(timeout=20) as client:
+    async with httpx.AsyncClient(timeout=20, trust_env=False) as client:
         resp = await client.get(url, headers=_common_headers(uuid_cookie), params=params)
         resp.raise_for_status()
         # any new set-cookies during getqrcode get merged in
@@ -129,7 +133,7 @@ async def poll_scan(uuid_cookie: str) -> dict[str, Any]:
     params = {
         "action": "ask", "token": "", "lang": "zh_CN", "f": "json", "ajax": 1,
     }
-    async with httpx.AsyncClient(timeout=20) as client:
+    async with httpx.AsyncClient(timeout=20, trust_env=False) as client:
         resp = await client.get(url, headers=_common_headers(uuid_cookie), params=params)
         resp.raise_for_status()
         return resp.json()
@@ -145,7 +149,7 @@ async def complete_login(uuid_cookie: str) -> tuple[str, str]:
         "cookie_cleaned": 0, "plugin_used": 0, "login_type": 3,
         "token": "", "lang": "zh_CN", "f": "json", "ajax": 1,
     }
-    async with httpx.AsyncClient(timeout=20) as client:
+    async with httpx.AsyncClient(timeout=20, trust_env=False) as client:
         resp = await client.post(
             url,
             headers={**_common_headers(uuid_cookie),
@@ -181,6 +185,8 @@ def _check_ret(payload: dict[str, Any]) -> None:
     ret = base.get("ret", 0)
     if ret == 200003 or ret == -7:   # -7 also seen for invalid session
         raise SessionExpired(base.get("err_msg", "session expired"))
+    if ret == 200013:
+        raise RateLimited(base.get("err_msg", "freq control"))
     if ret != 0:
         raise RuntimeError("mp api ret={0}: {1}".format(ret, base.get("err_msg", "")))
 
@@ -196,7 +202,7 @@ async def search_biz(query: str, token: str, cookie: str,
         "query": query, "token": token,
         "lang": "zh_CN", "f": "json", "ajax": 1,
     }
-    async with httpx.AsyncClient(timeout=20) as client:
+    async with httpx.AsyncClient(timeout=20, trust_env=False) as client:
         resp = await client.get(url, headers=_common_headers(cookie), params=params)
         resp.raise_for_status()
         data = resp.json()
@@ -227,7 +233,7 @@ async def list_articles(fakeid: str, token: str, cookie: str,
         "sub_action": "list_ex",
         "token": token, "lang": "zh_CN", "f": "json", "ajax": 1,
     }
-    async with httpx.AsyncClient(timeout=20) as client:
+    async with httpx.AsyncClient(timeout=20, trust_env=False) as client:
         resp = await client.get(url, headers=_common_headers(cookie), params=params)
         resp.raise_for_status()
         data = resp.json()

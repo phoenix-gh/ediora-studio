@@ -5,6 +5,7 @@ import { afterEach, expect, it } from 'vitest'
 
 import { setSkillEnabled } from '../skills/registry'
 import {
+  creativeAssetUploadQuery,
   illustrationImageInputSchema,
   insertInlineImage,
   loadBaoyuSkillRulesForTest,
@@ -24,6 +25,14 @@ afterEach(async () => {
 
 it('keeps template extraction free of persistence tools', () => {
   expect(toolsForContentStep('template_extraction')).toEqual([])
+})
+
+it('encodes standalone image title and directory for Creative Assets', () => {
+  const query = new URLSearchParams(creativeAssetUploadQuery('GitHub 日榜 2026-08-09', ' 临时文件 '))
+
+  expect(query.get('media_kind')).toBe('image')
+  expect(query.get('title')).toBe('GitHub 日榜 2026-08-09')
+  expect(query.get('directory')).toBe('临时文件')
 })
 
 it('inserts an illustration after its matching level-two heading', () => {

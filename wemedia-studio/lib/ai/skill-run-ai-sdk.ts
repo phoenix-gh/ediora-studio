@@ -15,6 +15,43 @@ const skillSelectionSchema = z.object({
   continueRestored: z.boolean().default(false),
 }).strict()
 
+const skillSelectionToolEnvelopeSchema = z.object({
+  tool: z.literal('loadSkill'),
+  arguments: z.object({
+    name: z.preprocess(
+      value => value === null || (typeof value === 'string' && value.trim() === '') ? undefined : value,
+      z.string().min(1).max(200).optional(),
+    ),
+    skillName: z.preprocess(
+      value => value === null || (typeof value === 'string' && value.trim() === '') ? undefined : value,
+      z.string().min(1).max(80).optional(),
+    ),
+    continueRestored: z.boolean().optional(),
+  }).passthrough(),
+}).strict()
+
+type SkillSelection = z.infer<typeof skillSelectionSchema>
+
+function parseSkillSelection(value: unknown): SkillSelection | undefined {
+  const direct = skillSelectionSchema.safeParse(value)
+  if (direct.success) return direct.data
+
+  const toolEnvelope = skillSelectionToolEnvelopeSchema.safeParse(value)
+  if (!toolEnvelope.success) return undefined
+  return skillSelectionSchema.parse({
+    skillName: toolEnvelope.data.arguments.skillName ?? toolEnvelope.data.arguments.name,
+    continueRestored: toolEnvelope.data.arguments.continueRestored ?? false,
+  })
+}
+
+function serializedSelection(value: unknown) {
+  try {
+    return JSON.stringify(value) ?? String(value)
+  } catch {
+    return String(value)
+  }
+}
+
 export async function selectSkillForTurn({
   enabledSkills,
   userRequest,
@@ -27,9 +64,16 @@ export async function selectSkillForTurn({
   decide(input: { prompt: string }): Promise<unknown>
 }): Promise<{ skillName: string; activation: SkillRunActivation } | undefined> {
   const catalog = enabledSkills.map(skill => `- ${skill.name}: ${skill.description}`).join('\n') || '- None'
-  const decision = skillSelectionSchema.parse(await decide({
-    prompt: `Return valid JSON only. Select at most one enabled Skill for the current request. Return no skillName when none clearly matches. Continue a restored Skill only when the current request is a related follow-up.\n\nRequest:\n${userRequest}\n\nRestored Skill:\n${restoredSkillName ?? '(none)'}\n\nEnabled Skills:\n${catalog}`,
-  }))
+  const prompt = `Return valid JSON only. Select at most one enabled Skill for the current request. Return exactly this shape: {"skillName": string|null, "continueRestored": boolean}. Return no skillName when none clearly matches. Continue a restored Skill only when the current request is a related follow-up. Do not return a tool-call envelope such as {"tool":"loadSkill","arguments":{...}} and do not call tools during Skill selection.\n\nRequest:\n${userRequest}\n\nRestored Skill:\n${restoredSkillName ?? '(none)'}\n\nEnabled Skills:\n${catalog}`
+  const initial = await decide({ prompt })
+  let decision = parseSkillSelection(initial)
+  if (!decision) {
+    const repaired = await decide({
+      prompt: `${prompt}\n\nRepair the previous selector response. Remove unknown fields and return only the exact JSON shape requested above.\n\nPrevious selector response:\n${serializedSelection(initial)}`,
+    })
+    decision = parseSkillSelection(repaired)
+    if (!decision) throw new Error('Invalid Skill selection response after repair')
+  }
   const enabledNames = new Set(enabledSkills.map(skill => skill.name))
   if (decision.skillName && !enabledNames.has(decision.skillName)) throw new Error('Invalid Skill selection')
   if (decision.continueRestored) {
@@ -43,7 +87,7 @@ export async function selectSkillForTurn({
 }
 
 type PlanningTool = { name: string; description: string }
-type ExecutionResult = { text: string; parts: unknown[] }
+type ExecutionResult = { text: string; parts: unknown[]; toolResults?: unknown[] }
 
 type ExecuteSkillRunOptions = {
   skill: RegisteredSkill
@@ -63,11 +107,13 @@ type ExecuteSkillRunOptions = {
     text: string
     run: ReturnType<typeof createSkillRun>
     loadedReferences: SkillReferenceContent[]
+    toolResults: unknown[]
   }): Promise<SkillRunValidation>
   revise(input: {
     text: string
     run: ReturnType<typeof createSkillRun>
     loadedReferences: SkillReferenceContent[]
+    toolResults: unknown[]
     violations: SkillRunValidation['violations']
   }): Promise<string>
 }
@@ -131,9 +177,18 @@ export async function executeSkillRunWithAiSdk(options: ExecuteSkillRunOptions) 
   const completed = await completeSkillRun({
     run,
     draft: async () => execution.text,
-    validate: async ({ run: currentRun, text }) => options.validate({ text, run: currentRun, loadedReferences }),
+    validate: async ({ run: currentRun, text, toolResults }) => options.validate({
+      text,
+      run: currentRun,
+      loadedReferences,
+      toolResults: toolResults ?? execution.toolResults ?? execution.parts,
+    }),
     revise: async ({ run: currentRun, text, violations }) => options.revise({
-      text, run: currentRun, loadedReferences, violations,
+      text,
+      run: currentRun,
+      loadedReferences,
+      toolResults: execution.toolResults ?? execution.parts,
+      violations,
     }),
   })
   return { kind: 'completed' as const, completed }

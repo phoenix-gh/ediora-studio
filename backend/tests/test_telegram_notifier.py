@@ -1,6 +1,5 @@
 import asyncio
 from datetime import datetime, timezone
-from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -16,75 +15,6 @@ def test_render_test_message_is_fixed_chinese_and_shanghai_time():
     assert "WeMedia Studio Telegram 连接测试成功" in message
     assert "2026-07-25 21:06:07" in message
     assert "<script" not in message
-
-
-def _decision(**overrides):
-    data = {
-        "id": 7,
-        "action": "translate_quote",
-        "score": 88,
-        "confidence": 0.91,
-        "reason": "官方发布重要 API <beta>",
-        "summary_cn": "官方发布了新的 API。",
-        "comment_draft": None,
-        "quote_draft": "OpenAI 发布了新的 Responses API。",
-    }
-    data.update(overrides)
-    return SimpleNamespace(**data)
-
-
-def test_immediate_message_escapes_html_and_keeps_copy_block():
-    from telegram_notifier import render_immediate_messages
-
-    messages = render_immediate_messages(
-        _decision(),
-        SimpleNamespace(username="OpenAI", url="https://x.com/OpenAI/status/1"),
-        SimpleNamespace(label="OpenAI"),
-        "http://localhost:3000/x-responses?decision=7",
-    )
-
-    assert len(messages) == 1
-    assert "&lt;beta&gt;" in messages[0]
-    assert "<pre>OpenAI 发布了新的 Responses API。</pre>" in messages[0]
-    assert "https://x.com/OpenAI/status/1" in messages[0]
-    assert len(messages[0]) < 4096
-
-
-def test_long_summary_splits_without_splitting_copyable_draft():
-    from telegram_notifier import render_immediate_messages
-
-    messages = render_immediate_messages(
-        _decision(summary_cn="摘要" * 2200),
-        SimpleNamespace(username="OpenAI", url="https://x.com/OpenAI/status/1"),
-        SimpleNamespace(label="OpenAI"),
-        "http://localhost:3000/x-responses?decision=7",
-    )
-
-    assert len(messages) == 2
-    assert "<pre>" not in messages[0]
-    assert "<pre>OpenAI 发布了新的 Responses API。</pre>" in messages[1]
-    assert all(len(message) < 4096 for message in messages)
-
-
-def test_digest_message_contains_copyable_drafts_and_source_links():
-    from telegram_notifier import render_digest_messages
-
-    rows = [(
-        _decision(score=62, action="comment", comment_draft="这个更新值得关注。", quote_draft=None),
-        SimpleNamespace(username="OpenAI", url="https://x.com/OpenAI/status/1"),
-        SimpleNamespace(label="OpenAI"),
-    )]
-
-    messages = render_digest_messages(
-        rows,
-        "2026-07-25",
-        "http://localhost:3000/x-responses",
-    )
-
-    assert len(messages) == 1
-    assert "18:00 摘要" in messages[0]
-    assert "<pre>这个更新值得关注。</pre>" in messages[0]
-    assert "https://x.com/OpenAI/status/1" in messages[0]
 
 
 def test_send_html_messages_returns_message_ids():

@@ -4,6 +4,7 @@ import {
   checkpointAgentExecution,
   claimAgentToolCall,
   ensureAgentExecution,
+  appendAgentMessage,
   listAgentToolCalls,
 } from './agent-execution-client'
 import { ApiRequestError } from './job-client'
@@ -21,6 +22,7 @@ describe('durable Agent execution client', () => {
       .mockResolvedValueOnce(new Response(JSON.stringify({ id: 31, version: 1 }), { status: 201 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ id: 31, version: 2 }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ action: 'execute' }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: 1 }), { status: 201 }))
     vi.stubGlobal('fetch', fetchMock)
 
     await ensureAgentExecution(17, {
@@ -34,8 +36,12 @@ describe('durable Agent execution client', () => {
       sideEffecting: false, autoApproved: false, status: 'started',
       inputSummary: { directories: ['搞钱副业'] }, occurredAt: '2026-08-04T00:00:00Z',
     })
+    await appendAgentMessage(17, 31, {
+      phase: 'execute', direction: 'model_response',
+      payload: { text: 'done' }, occurredAt: '2026-08-04T00:00:00Z',
+    })
 
-    expect(fetchMock).toHaveBeenCalledTimes(3)
+    expect(fetchMock).toHaveBeenCalledTimes(4)
     for (const call of fetchMock.mock.calls) {
       expect(new Headers(call[1].headers).get('X-Content-Job-Id')).toBe('17')
       expect(new Headers(call[1].headers).get('X-WMS-Worker-Token')).toBeTruthy()

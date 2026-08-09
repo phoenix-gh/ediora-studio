@@ -53,4 +53,35 @@ describe('API client runtime base URL', () => {
       },
     })
   })
+
+  it('shows the first FastAPI field validation message instead of a generic 422', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({
+        detail: [{
+          type: 'value_error',
+          loc: ['body', 'collection_proxy_url'],
+          msg: 'Value error, 采集代理地址必须使用 http、https 或 socks5 协议并包含主机',
+          input: '127.0.0.1:7890',
+        }],
+      }),
+      {
+        status: 422,
+        headers: { 'Content-Type': 'application/json' },
+      },
+    )))
+    const { ApiError, apiFetch } = await import('./client')
+
+    let thrown: unknown
+    try {
+      await apiFetch('/settings', { method: 'PUT' })
+    } catch (error) {
+      thrown = error
+    }
+
+    expect(thrown).toBeInstanceOf(ApiError)
+    expect(thrown).toMatchObject({
+      message: '采集代理地址必须使用 http、https 或 socks5 协议并包含主机',
+      status: 422,
+    })
+  })
 })

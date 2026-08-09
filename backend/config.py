@@ -39,6 +39,7 @@ DEFAULTS: dict[str, str] = {
     ),
     "youtube_cookies": "",
     "rsshub_base": "http://127.0.0.1:1200",
+    "collection_proxy_url": "",
     "github_interval_minutes": "1",
     "github_trending_interval_hours": "6",
     "camofox_url": "http://localhost:9377",
@@ -76,13 +77,11 @@ DEFAULTS: dict[str, str] = {
         "检验方法：去掉所有具体姓名/数字/工具名，剩下的还能作为一类内容的分类标签 → 合格。"
     ),
     "x_collect_interval_minutes": "15",
-    "x_notify_enabled": "1",                 # 全局开关：X 即时响应建议与 Telegram 推送
     "telegram_bot_token": "",
     "telegram_chat_id": "",
     "telegram_test_status": "",
     "telegram_last_tested_at": "",
     "telegram_last_test_error": "",
-    "x_response_account_id": "",
     "wechat_tunnel_enabled": "0",
     "wechat_tunnel_ssh_host": "",
     "wechat_tunnel_ssh_port": "22",

@@ -245,13 +245,13 @@ def test_decoded_duration_excludes_mp3_container_padding(tmp_path):
 def test_save_audio_persists_sample_accurate_asset_and_scales_timings(
     monkeypatch,
     tmp_path,
+    postgres_database_url,
 ):
     for module in ("database", "models", "text_video_audio"):
         sys.modules.pop(module, None)
     session_factory = fresh_session_factory(
         monkeypatch,
-        tmp_path,
-        "save-speech.db",
+        postgres_database_url,
     )
     import text_video_audio
     from models import CreativeAsset, TextVideoSpeechAsset
@@ -317,12 +317,16 @@ def test_save_audio_persists_sample_accurate_asset_and_scales_timings(
         ],
     ],
 )
-def test_save_rejects_invalid_provider_timings(monkeypatch, tmp_path, timings):
+def test_save_rejects_invalid_provider_timings(
+    monkeypatch,
+    tmp_path,
+    postgres_database_url,
+    timings,
+):
     sys.modules.pop("text_video_audio", None)
     session_factory = fresh_session_factory(
         monkeypatch,
-        tmp_path,
-        "invalid-timing.db",
+        postgres_database_url,
     )
     import text_video_audio
     monkeypatch.setattr(text_video_audio, "UPLOADS_DIR", tmp_path / "uploads")
@@ -346,11 +350,11 @@ def test_save_rejects_invalid_provider_timings(monkeypatch, tmp_path, timings):
     run_async(run())
 
 
-def test_speech_asset_migration_adds_sample_metadata(monkeypatch, tmp_path):
-    monkeypatch.setenv(
-        "WMS_DATABASE_URL",
-        f"sqlite+aiosqlite:///{tmp_path / 'legacy-speech.db'}",
-    )
+def test_speech_asset_migration_adds_sample_metadata(
+    monkeypatch,
+    postgres_database_url,
+):
+    monkeypatch.setenv("WMS_DATABASE_URL", postgres_database_url)
     for module in ("database",):
         sys.modules.pop(module, None)
     from database import migrate_text_video_speech_asset_schema
@@ -358,9 +362,7 @@ def test_speech_asset_migration_adds_sample_metadata(monkeypatch, tmp_path):
     from sqlalchemy.ext.asyncio import create_async_engine
 
     async def run():
-        engine = create_async_engine(
-            f"sqlite+aiosqlite:///{tmp_path / 'legacy-speech.db'}",
-        )
+        engine = create_async_engine(postgres_database_url)
         async with engine.begin() as connection:
             await connection.execute(text(
                 "CREATE TABLE text_video_speech_assets ("

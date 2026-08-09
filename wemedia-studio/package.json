@@ -20,7 +20,6 @@
     "@remotion/bundler": "4.0.500",
     "@remotion/player": "4.0.500",
     "@remotion/renderer": "4.0.500",
-    "@uiw/react-md-editor": "^4.1.0",
     "@wenyan-md/core": "^3.0.10",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",

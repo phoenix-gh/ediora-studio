@@ -67,6 +67,9 @@ export interface AppSettings {
   speech_default_voice: string
   youtube_cookies_set: boolean
   rsshub_base: string
+  collection_proxy_url: string
+  collection_proxy_url_set: boolean
+  collection_proxy_url_preview: string
   github_token_set: boolean
   github_token_preview: string
   github_interval_minutes: number
@@ -78,14 +81,12 @@ export interface AppSettings {
   x_collect_enabled: boolean
   x_cookies_set: boolean
   x_collect_interval_minutes: number
-  x_notify_enabled: boolean
   telegram_bot_token_set: boolean
   telegram_bot_token_preview: string
   telegram_chat_id: string
   telegram_test_status: '' | 'success' | 'failed'
   telegram_last_tested_at: string
   telegram_last_test_error: string
-  x_response_account_id: string
   x_follower_threshold: number
   x_post_window_hours: number
   x_post_lookback_hours: number
@@ -146,6 +147,7 @@ export interface SettingsUpdate {
   speech_default_voice?: string
   youtube_cookies?: string
   rsshub_base?: string
+  collection_proxy_url?: string
   github_token?: string
   github_interval_minutes?: number
   github_trending_interval_hours?: number
@@ -156,10 +158,8 @@ export interface SettingsUpdate {
   x_collect_enabled?: boolean
   x_cookies?: string
   x_collect_interval_minutes?: number
-  x_notify_enabled?: boolean
   telegram_bot_token?: string
   telegram_chat_id?: string
-  x_response_account_id?: string
   x_follower_threshold?: number
   x_post_window_hours?: number
   x_post_lookback_hours?: number

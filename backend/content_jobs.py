@@ -16,7 +16,6 @@ from models import (
     ContentJobStep,
     ContentResponseEvent,
     ContentResponseItem,
-    DailyPlan,
     DailyCreationRun,
     DigitalHuman,
     TalkingVideoRender,
@@ -456,6 +455,22 @@ async def start_step(session: AsyncSession, job_id: int, step_key: str) -> Conte
     step.started_at = now
     job.status = "running"
     job.started_at = job.started_at or now
+    if job.flow == "daily_creation":
+        run_id = job.input_data.get("run_id")
+        if isinstance(run_id, int):
+            creation_run = await session.scalar(
+                select(DailyCreationRun)
+                .where(DailyCreationRun.id == run_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+            if (
+                creation_run is not None
+                and creation_run.content_job_id == job.id
+                and creation_run.status == "queued"
+            ):
+                creation_run.status = "running"
+                creation_run.started_at = creation_run.started_at or now
     analysis, item = await _analysis_for_job(session, job)
     if analysis is not None:
         analysis.status = "running"
@@ -559,13 +574,7 @@ async def fail_locked_step(
     step.completed_at = _now()
     job.status = "failed"
     job.completed_at = step.completed_at
-    if job.flow == "daily_plan":
-        plan_id = job.input_data.get("plan_id")
-        if isinstance(plan_id, int):
-            plan = await session.get(DailyPlan, plan_id)
-            if plan is not None and plan.status == "planning":
-                plan.status = "failed"
-    elif job.flow == "daily_creation":
+    if job.flow == "daily_creation":
         run_id = job.input_data.get("run_id")
         if isinstance(run_id, int):
             creation_run = await session.get(DailyCreationRun, run_id)
@@ -672,6 +681,11 @@ async def cancel_job(session: AsyncSession, job_id: int) -> ContentJob:
     job = await lock_content_job_row(session, job_id)
     if job is None:
         raise KeyError(f"job {job_id} not found")
+    if job.status == "cancelled" and job.flow == "daily_creation":
+        await _cancel_linked_daily_creation_run(session, job)
+        await session.commit()
+        await session.refresh(job)
+        return job
     if (
         job.status == "cancelled"
         and job.flow == "text_video_master_audio"
@@ -751,7 +765,9 @@ async def cancel_job(session: AsyncSession, job_id: int) -> ContentJob:
                 )
     job.status = "cancelled"
     job.completed_at = _now()
-    if job.flow == "digital_human_render":
+    if job.flow == "daily_creation":
+        await _cancel_linked_daily_creation_run(session, job)
+    elif job.flow == "digital_human_render":
         render_id = job.input_data.get("render_id")
         if isinstance(render_id, int):
             render = await session.scalar(
@@ -794,6 +810,29 @@ async def cancel_job(session: AsyncSession, job_id: int) -> ContentJob:
     return job
 
 
+async def _cancel_linked_daily_creation_run(
+    session: AsyncSession,
+    job: ContentJob,
+) -> None:
+    run_id = (job.input_data or {}).get("run_id")
+    if not isinstance(run_id, int):
+        return
+    creation_run = await session.scalar(
+        select(DailyCreationRun)
+        .where(DailyCreationRun.id == run_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if (
+        creation_run is None
+        or creation_run.content_job_id != job.id
+        or creation_run.status not in {"queued", "running"}
+    ):
+        return
+    creation_run.status = "cancelled"
+    creation_run.completed_at = job.completed_at or _now()
+
+
 async def succeed_job(session: AsyncSession, job_id: int) -> ContentJob:
     job = await lock_content_job_row(session, job_id)
     if job is None:
@@ -805,6 +844,21 @@ async def succeed_job(session: AsyncSession, job_id: int) -> ContentJob:
         raise InvalidJobTransition(f"cannot succeed {job.status} job")
     job.status = "succeeded"
     job.completed_at = _now()
+    if job.flow == "daily_creation":
+        run_id = (job.input_data or {}).get("run_id")
+        if isinstance(run_id, int):
+            creation_run = await session.scalar(
+                select(DailyCreationRun)
+                .where(DailyCreationRun.id == run_id)
+                .with_for_update()
+            )
+            if (
+                creation_run is not None
+                and creation_run.content_job_id == job.id
+                and creation_run.status in {"queued", "running"}
+            ):
+                creation_run.status = "succeeded"
+                creation_run.completed_at = job.completed_at
     await _event(session, job_id, "job_succeeded")
     await session.commit()
     await session.refresh(job)

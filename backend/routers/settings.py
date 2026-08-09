@@ -18,6 +18,11 @@ from config import (
     get_config,
     set_config,
 )
+from collection_proxy import (
+    apply_collection_proxy,
+    collection_proxy_browser_state,
+    normalize_collection_proxy_url,
+)
 from log_redaction import redact_secret_text
 from runtime_config import get_runtime_settings
 import telegram_notifier
@@ -27,7 +32,6 @@ from transcription_service import (
     transcribe_audio,
 )
 from database import get_db
-from models import PublishAccount
 from sqlalchemy.ext.asyncio import AsyncSession
 from worker_auth import require_worker_token
 from text_video_templates import normalize_text_video_template_default_map
@@ -136,6 +140,9 @@ class SettingsOut(BaseModel):
     text_video_template_defaults: dict[str, dict]
     youtube_cookies_set: bool
     rsshub_base: str
+    collection_proxy_url: str
+    collection_proxy_url_set: bool
+    collection_proxy_url_preview: str
     github_token_set: bool
     github_token_preview: str
     github_interval_minutes: int
@@ -147,14 +154,12 @@ class SettingsOut(BaseModel):
     arxiv_categories: str
     arxiv_collect_interval_hours: int
     x_collect_interval_minutes: int
-    x_notify_enabled: bool
     telegram_bot_token_set: bool
     telegram_bot_token_preview: str
     telegram_chat_id: str
     telegram_test_status: Literal["", "success", "failed"]
     telegram_last_tested_at: str
     telegram_last_test_error: str
-    x_response_account_id: str
     ref_collect_interval_minutes: int
     ref_classify_interval_minutes: int
     clean_batch_size: int
@@ -210,6 +215,7 @@ class SettingsUpdate(BaseModel):
     text_video_template_defaults: dict[str, dict] | None = None
     youtube_cookies: Optional[str] = None
     rsshub_base: Optional[str] = None
+    collection_proxy_url: Optional[str] = None
     github_token: Optional[str] = None
     github_interval_minutes: Optional[int] = None
     github_trending_interval_hours: Optional[int] = None
@@ -220,10 +226,8 @@ class SettingsUpdate(BaseModel):
     arxiv_categories: Optional[str] = None
     arxiv_collect_interval_hours: Optional[int] = None
     x_collect_interval_minutes: Optional[int] = None
-    x_notify_enabled: Optional[bool] = None
     telegram_bot_token: Optional[str] = None
     telegram_chat_id: Optional[str] = None
-    x_response_account_id: Optional[str] = None
     ref_collect_interval_minutes: Optional[int] = None
     ref_classify_interval_minutes: Optional[int] = None
     clean_batch_size: Optional[int] = None
@@ -241,6 +245,13 @@ class SettingsUpdate(BaseModel):
     blog_api_token: Optional[str] = None
     web_search_providers: Optional[list[WebSearchProviderConfig]] = None
     web_fetch_providers: Optional[list[WebFetchProviderConfig]] = None
+
+    @field_validator("collection_proxy_url")
+    @classmethod
+    def validate_collection_proxy_url(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        return normalize_collection_proxy_url(value)
 
 
 class FetchModelsRequest(BaseModel):
@@ -281,6 +292,13 @@ def _build_out(cfg: dict) -> SettingsOut:
     gh_token = cfg.get("github_token", "")
     telegram_token = cfg.get("telegram_bot_token", "")
     blog_base, blog_token = blog_client.effective_blog_config(cfg)
+    try:
+        proxy_url, proxy_set, proxy_preview = collection_proxy_browser_state(
+            cfg.get("collection_proxy_url", ""),
+        )
+    except ValueError:
+        logger.warning("Ignoring malformed collection proxy configuration")
+        proxy_url, proxy_set, proxy_preview = "", False, ""
     try:
         raw_search_providers = json.loads(cfg.get("web_search_providers", "[]"))
     except json.JSONDecodeError:
@@ -365,6 +383,9 @@ def _build_out(cfg: dict) -> SettingsOut:
         github_interval_minutes=max(1, int(cfg.get("github_interval_minutes", 1))),
         github_trending_interval_hours=max(1, int(cfg.get("github_trending_interval_hours", 6))),
         rsshub_base=cfg.get("rsshub_base", "http://127.0.0.1:1200"),
+        collection_proxy_url=proxy_url,
+        collection_proxy_url_set=proxy_set,
+        collection_proxy_url_preview=proxy_preview,
         github_token_set=bool(gh_token),
         github_token_preview=f"…{gh_token[-4:]}" if len(gh_token) >= 4 else "",
         camofox_url=cfg.get("camofox_url", "http://localhost:9377"),
@@ -373,15 +394,13 @@ def _build_out(cfg: dict) -> SettingsOut:
         camofox_novnc_url=cfg.get("camofox_novnc_url", "http://localhost:6080/vnc.html"),
         arxiv_categories=cfg.get("arxiv_categories", "cs.AI,cs.CL,cs.CV,cs.LG"),
         arxiv_collect_interval_hours=max(1, int(cfg.get("arxiv_collect_interval_hours", 6))),
-        x_collect_interval_minutes=max(1, int(cfg.get("x_collect_interval_minutes", 15))),
-        x_notify_enabled=str(cfg.get("x_notify_enabled", "1")).lower() in ("1", "true", "yes", "on"),
+        x_collect_interval_minutes=max(5, min(1440, int(cfg.get("x_collect_interval_minutes", 15)))),
         telegram_bot_token_set=bool(telegram_token),
         telegram_bot_token_preview=f"…{telegram_token[-4:]}" if len(telegram_token) >= 4 else "",
         telegram_chat_id=cfg.get("telegram_chat_id", ""),
         telegram_test_status=cfg.get("telegram_test_status", ""),
         telegram_last_tested_at=cfg.get("telegram_last_tested_at", ""),
         telegram_last_test_error=cfg.get("telegram_last_test_error", ""),
-        x_response_account_id=cfg.get("x_response_account_id", ""),
         ref_collect_interval_minutes=max(1, int(cfg.get("ref_collect_interval_minutes", 15))),
         ref_classify_interval_minutes=max(1, int(cfg.get("ref_classify_interval_minutes", 60))),
         clean_batch_size=max(1, int(cfg.get("clean_batch_size", 20))),
@@ -648,6 +667,8 @@ async def update_settings(
         updates["youtube_cookies"] = _validate_youtube_cookies(body.youtube_cookies)
     if body.rsshub_base is not None:
         updates["rsshub_base"] = body.rsshub_base
+    if body.collection_proxy_url is not None:
+        updates["collection_proxy_url"] = body.collection_proxy_url
     if body.github_token is not None:
         updates["github_token"] = body.github_token
     if body.github_interval_minutes is not None:
@@ -667,9 +688,7 @@ async def update_settings(
     if body.arxiv_collect_interval_hours is not None:
         updates["arxiv_collect_interval_hours"] = str(max(1, body.arxiv_collect_interval_hours))
     if body.x_collect_interval_minutes is not None:
-        updates["x_collect_interval_minutes"] = str(max(1, body.x_collect_interval_minutes))
-    if body.x_notify_enabled is not None:
-        updates["x_notify_enabled"] = "1" if body.x_notify_enabled else "0"
+        updates["x_collect_interval_minutes"] = str(max(5, min(1440, body.x_collect_interval_minutes)))
     telegram_configuration_changed = False
     if body.telegram_bot_token is not None:
         telegram_token = body.telegram_bot_token.strip()
@@ -692,20 +711,6 @@ async def update_settings(
             "telegram_last_tested_at": "",
             "telegram_last_test_error": "",
         })
-    if body.x_response_account_id is not None:
-        account_id = body.x_response_account_id.strip()
-        if account_id:
-            account = await db.get(PublishAccount, account_id)
-            if (
-                account is None
-                or not account.is_active
-                or account.platform.strip().casefold() not in {"x", "twitter"}
-            ):
-                raise HTTPException(
-                    status_code=422,
-                    detail="指定的 X 发布账号不存在、未启用或平台不匹配",
-                )
-        updates["x_response_account_id"] = account_id
     if body.ref_collect_interval_minutes is not None:
         updates["ref_collect_interval_minutes"] = str(max(1, body.ref_collect_interval_minutes))
     if body.ref_classify_interval_minutes is not None:
@@ -759,6 +764,8 @@ async def update_settings(
         )
     if updates:
         await set_config(updates)
+    if "collection_proxy_url" in updates:
+        apply_collection_proxy(updates["collection_proxy_url"])
 
     # Reschedule jobs if intervals changed
     interval_keys = {"github_interval_minutes"}

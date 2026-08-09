@@ -4,12 +4,12 @@ from sqlalchemy import inspect, text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 
-def test_removes_adapted_children_and_legacy_columns_idempotently(tmp_path):
+def test_removes_adapted_children_and_legacy_columns_idempotently(
+    postgres_database_url,
+):
     from database import migrate_removed_draft_adaptation_schema
 
-    engine = create_async_engine(
-        f"sqlite+aiosqlite:///{tmp_path / 'draft-adaptation.db'}",
-    )
+    engine = create_async_engine(postgres_database_url)
 
     async def run():
         async with engine.begin() as connection:
@@ -56,7 +56,7 @@ def test_removes_adapted_children_and_legacy_columns_idempotently(tmp_path):
             await connection.execute(text("""
                 INSERT INTO content_usage_ledger VALUES
                     (1, 'draft', 11),
-                    (2, 'plan_item', 11)
+                    (2, 'asset', 11)
             """))
 
             await migrate_removed_draft_adaptation_schema(connection)
@@ -105,15 +105,13 @@ def test_removes_adapted_children_and_legacy_columns_idempotently(tmp_path):
     assert "draft_id" in image_columns
     assert image == (1, 10)
     assert chat_count == 0
-    assert usage_rows == [(2, "plan_item", 11)]
+    assert usage_rows == [(2, "asset", 11)]
 
 
-def test_accepts_fresh_database_without_legacy_tables(tmp_path):
+def test_accepts_fresh_database_without_legacy_tables(postgres_database_url):
     from database import migrate_removed_draft_adaptation_schema
 
-    engine = create_async_engine(
-        f"sqlite+aiosqlite:///{tmp_path / 'fresh.db'}",
-    )
+    engine = create_async_engine(postgres_database_url)
 
     async def run():
         async with engine.begin() as connection:

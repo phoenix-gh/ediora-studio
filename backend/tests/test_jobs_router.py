@@ -1,5 +1,6 @@
 import asyncio
 import sys
+from datetime import datetime, timezone
 
 import pytest
 from fastapi import FastAPI
@@ -7,8 +8,7 @@ from fastapi.testclient import TestClient
 
 
 @pytest.fixture
-def client(monkeypatch, tmp_path):
-    monkeypatch.setenv("WMS_DATABASE_URL", f"sqlite+aiosqlite:///{tmp_path / 'jobs-router.db'}")
+def client(monkeypatch, postgres_env):
     monkeypatch.setenv(
         "WMS_WORKER_TOKEN",
         "test-worker-token-at-least-32-characters",
@@ -51,6 +51,85 @@ def test_create_job_returns_queued_job(client):
     assert response.status_code == 201
     assert response.json()["status"] == "queued"
     assert response.json()["id"] > 0
+
+
+def test_list_jobs_returns_stable_cursor_pages(client):
+    created_ids = [
+        client.post("/api/jobs", json={"flow": "draft", "title": f"Job {index}", "input": {}}).json()["id"]
+        for index in range(3)
+    ]
+
+    first = client.get("/api/jobs?limit=2")
+    assert first.status_code == 200
+    first_payload = first.json()
+    assert [job["id"] for job in first_payload["jobs"]] == created_ids[::-1][:2]
+    assert first_payload["has_more"] is True
+    assert first_payload["next_cursor"]
+
+    second = client.get(
+        f"/api/jobs?limit=2&cursor={first_payload['next_cursor']}"
+    )
+    assert second.status_code == 200
+    assert [job["id"] for job in second.json()["jobs"]] == [created_ids[0]]
+    assert second.json()["has_more"] is False
+    assert second.json()["next_cursor"] is None
+
+
+def test_list_jobs_filters_scheduled_jobs_and_exposes_schedule_summary(client):
+    scheduled = client.post("/api/jobs", json={
+        "flow": "daily_creation", "title": "定时短帖", "input": {},
+    }).json()
+    manual = client.post("/api/jobs", json={
+        "flow": "draft", "title": "手动草稿", "input": {},
+    }).json()
+
+    from database import SessionLocal
+    from models import DailyCreationRun
+
+    async def seed_schedule():
+        async with SessionLocal() as session:
+            session.add(DailyCreationRun(
+                rule_id=99,
+                content_job_id=scheduled["id"],
+                scheduled_for=datetime(2026, 8, 6, 1, 30, tzinfo=timezone.utc),
+                trigger_kind="schedule",
+                requested_count=3,
+                rule_snapshot={"name": "每日短帖", "directory": "产品实验"},
+            ))
+            await session.commit()
+
+    asyncio.new_event_loop().run_until_complete(seed_schedule())
+
+    scheduled_response = client.get("/api/jobs?kind=scheduled")
+    assert scheduled_response.status_code == 200
+    scheduled_jobs = scheduled_response.json()["jobs"]
+    assert [job["id"] for job in scheduled_jobs] == [scheduled["id"]]
+    assert scheduled_jobs[0]["schedule"] == {
+        "run_id": 1,
+        "rule_name": "每日短帖",
+        "trigger_kind": "schedule",
+        "scheduled_for": "2026-08-06T01:30:00+00:00",
+    }
+
+    manual_response = client.get("/api/jobs?kind=manual")
+    assert manual_response.status_code == 200
+    assert [job["id"] for job in manual_response.json()["jobs"]] == [manual["id"]]
+
+
+def test_list_jobs_filters_by_status_and_rejects_malformed_cursor(client):
+    created = client.post("/api/jobs", json={"flow": "draft", "title": "失败任务", "input": {}}).json()
+    started = client.post(f"/api/jobs/{created['id']}/steps/draft/start").json()
+    client.post(
+        f"/api/jobs/{created['id']}/steps/{started['id']}/fail",
+        json={"error": "failed", "retryable": False},
+    )
+
+    failed = client.get("/api/jobs?status=failed")
+    assert failed.status_code == 200
+    assert [job["id"] for job in failed.json()["jobs"]] == [created["id"]]
+
+    malformed = client.get("/api/jobs?cursor=not-a-valid-cursor")
+    assert malformed.status_code == 400
 
 
 def test_create_job_enqueues_worker_execution(client, monkeypatch):
@@ -115,6 +194,40 @@ def test_job_event_api_persists_auditable_generation_trace(client):
     job = client.get(f"/api/jobs/{created['id']}").json()
     assert job["events"][0]["kind"] == "skill_loaded"
     assert job["events"][0]["payload"] == {"skill": "baoyu-cover-image"}
+
+
+def test_job_agent_log_returns_full_message_timeline(client):
+    created = client.post("/api/jobs", json={"flow": "cover", "title": "Agent log", "input": {}}).json()
+
+    from database import SessionLocal
+    from models import AgentExecution, AgentMessageLog, ContentJob
+
+    async def seed_messages():
+        async with SessionLocal() as session:
+            job = await session.get(ContentJob, created["id"])
+            execution = AgentExecution(
+                job_id=job.id,
+                status="succeeded",
+                objective="create a cover",
+                skill_mode="auto",
+                phase="complete",
+            )
+            session.add(execution)
+            await session.flush()
+            session.add(AgentMessageLog(
+                execution_id=execution.id,
+                phase="execute",
+                direction="model_response",
+                payload_data={"text": "cover ready"},
+            ))
+            await session.commit()
+
+    asyncio.new_event_loop().run_until_complete(seed_messages())
+
+    response = client.get(f"/api/jobs/{created['id']}/agent-log")
+
+    assert response.status_code == 200, response.text
+    assert response.json()["messages"][0]["payload"]["text"] == "cover ready"
 
 
 def test_worker_reconcile_requires_worker_auth_takes_no_body_and_closes_queue(

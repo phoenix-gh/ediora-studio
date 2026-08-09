@@ -191,7 +191,10 @@ def test_installed_patcher_redacts_nested_exception_group_children():
         assert secret not in rendered
 
 
-def test_main_installs_redaction_before_optional_feedgrab_import(tmp_path):
+def test_main_installs_redaction_before_optional_feedgrab_import(
+    tmp_path,
+    postgres_database_url,
+):
     fake_root = tmp_path / "fake-dependency"
     feedgrab_package = fake_root / "feedgrab"
     feedgrab_package.mkdir(parents=True)
@@ -206,7 +209,7 @@ def test_main_installs_redaction_before_optional_feedgrab_import(tmp_path):
     env = os.environ.copy()
     env.update({
         "PYTHONPATH": os.pathsep.join((str(fake_root), str(backend_dir))),
-        "WMS_DATABASE_URL": f"sqlite+aiosqlite:///{tmp_path / 'optional.db'}",
+        "WMS_DATABASE_URL": postgres_database_url,
         "WMS_DISABLE_SCHEDULER": "1",
     })
 
@@ -232,7 +235,10 @@ def test_main_installs_redaction_before_optional_feedgrab_import(tmp_path):
     assert "ct0=***" in result.stderr
 
 
-def test_main_default_handler_does_not_render_diagnose_locals(tmp_path):
+def test_main_default_handler_does_not_render_diagnose_locals(
+    tmp_path,
+    postgres_database_url,
+):
     backend_dir = Path(__file__).resolve().parents[1]
     probe_script = tmp_path / "diagnose_probe.py"
     probe_script.write_text(
@@ -257,7 +263,7 @@ def test_main_default_handler_does_not_render_diagnose_locals(tmp_path):
     env = os.environ.copy()
     env.update({
         "PYTHONPATH": str(backend_dir),
-        "WMS_DATABASE_URL": f"sqlite+aiosqlite:///{tmp_path / 'diagnose.db'}",
+        "WMS_DATABASE_URL": postgres_database_url,
         "WMS_DISABLE_SCHEDULER": "1",
     })
 

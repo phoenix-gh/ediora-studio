@@ -21,7 +21,7 @@ export interface PublishAccount {
   topic_focus: string[]
   taboo: string[]
   word_range: Record<string, number>
-  daily_quota: Record<string, number>
+
   image_style: string
   cover_style: CoverStyle
   voice_samples: string[]

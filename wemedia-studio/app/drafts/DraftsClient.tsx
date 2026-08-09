@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef, useMemo, useSyncExternalStore } from 'react'
+import { useState, useEffect, useRef, useMemo, useSyncExternalStore, useCallback, type MouseEvent } from 'react'
 import {
   BookMarked, Trash2, Save, RefreshCw, FileText, Clock,
   ChevronRight, Loader2, Plus,
@@ -10,7 +10,6 @@ import {
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
-import { Checkbox } from '@/components/ui/checkbox'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
   DialogDescription, DialogFooter,
@@ -18,12 +17,12 @@ import {
 import {
   Draft, DraftSource, DraftUpdate, ChatMessage, DraftImage,
   DRAFT_STATUSES, draftTypeInfo,
-  getDrafts, updateDraft, deleteDraft, createDraft, chatWithDraft,
+  getDraftPage, updateDraft, deleteDraft, createDraft, chatWithDraft,
   getDraftImages, uploadDraftImage, deleteDraftImage,
 } from '@/lib/api/drafts'
 import { WritingPlan, getWritingPlans, flattenTopicsWithDepth } from '@/lib/api/writing-plans'
 import { illustrateBody, regenerateCover } from '@/lib/api/studio'
-import { MarkdownEditor, MarkdownEditorHandle } from './MarkdownEditor'
+import { MarkdownEditor, type MarkdownEditorHandle } from '@/components/MarkdownEditor'
 import { PublishDialog } from './PublishDialog'
 import { DraftAssetsDialog } from '@/components/features/DraftAssetsDialog'
 import {
@@ -32,16 +31,6 @@ import {
   type BulkImageOptions,
 } from './BulkImageActionDialog'
 import { runBulkOperations } from './draft-bulk-operations'
-import '@uiw/react-md-editor/markdown-editor.css'
-
-function draftMatchesFilters(draft: Draft, status: string, topicId: string) {
-  if (status !== 'all' && draft.status !== status) return false
-  if (topicId !== 'all') {
-    const expectedTopicId = topicId === 'none' ? null : Number(topicId)
-    if (draft.writing_plan_id !== expectedTopicId) return false
-  }
-  return true
-}
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -53,8 +42,18 @@ const STATUS_STYLES: Record<string, string> = {
   archived:  'bg-amber-100 text-amber-600 dark:bg-amber-950/50 dark:text-amber-400',
 }
 
+const DRAFT_TEMPLATE_OPTION_CLASS = 'bg-surface text-foreground'
+
 function statusLabel(v: string) {
   return DRAFT_STATUSES.find(s => s.value === v)?.label ?? v
+}
+
+function getDraftPageOptions(status: string, topicId: string) {
+  return {
+    status: status === 'all' ? undefined : status,
+    writingPlanId: topicId !== 'all' && topicId !== 'none' ? Number(topicId) : undefined,
+    unassigned: topicId === 'none',
+  }
 }
 
 function formatDate(iso: string) {
@@ -113,16 +112,20 @@ function loadChatFromStorage(draftId: number): {
 
 export function DraftsClient({
   initialDrafts,
+  initialNextCursor = null,
   initialTopics,
   initialDraftId,
   initialChatOpen = false,
 }: {
   initialDrafts: Draft[]
+  initialNextCursor?: string | null
   initialTopics: WritingPlan[]
   initialDraftId?: number
   initialChatOpen?: boolean
 }) {
   const [drafts, setDrafts] = useState<Draft[]>(initialDrafts)
+  const [nextCursor, setNextCursor] = useState<string | null>(initialNextCursor)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [topicList, setTopicList] = useState<WritingPlan[]>(initialTopics)
 
   const initialDraft = initialDraftId
@@ -137,6 +140,8 @@ export function DraftsClient({
   const [filterTopicId, setFilterTopicId] = useState<string>('all')
   const [selectedDraftIds, setSelectedDraftIds] = useState<Set<number>>(() => new Set())
   const [bulkMode, setBulkMode] = useState<BulkImageMode | null>(null)
+  const [bulkStatusOpen, setBulkStatusOpen] = useState(false)
+  const [bulkTargetStatus, setBulkTargetStatus] = useState<string>(DRAFT_STATUSES[0].value)
   const [bulkRunning, setBulkRunning] = useState(false)
   const [bulkProgress, setBulkProgress] = useState({ completed: 0, total: 0 })
   const [bulkFailures, setBulkFailures] = useState<Array<{ title: string; reason?: string }>>([])
@@ -187,6 +192,9 @@ export function DraftsClient({
   const [refreshing, setRefreshing] = useState(false)
   const [creating, setCreating] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const draftListRef = useRef<HTMLDivElement>(null)
+  const loadMoreSentinelRef = useRef<HTMLDivElement>(null)
+  const pageRequestRef = useRef(0)
 
   function setChatHistory(history: ChatMessage[]) {
     chatSnapshotRef.current = { ...chatSnapshotRef.current, history }
@@ -268,10 +276,7 @@ export function DraftsClient({
 
   // ── Filtering ──────────────────────────────────────────────────────────────
 
-  const filteredDrafts = useMemo(
-    () => drafts.filter(draft => draftMatchesFilters(draft, filterStatus, filterTopicId)),
-    [drafts, filterStatus, filterTopicId],
-  )
+  const filteredDrafts = drafts
   const visibleDraftIds = useMemo(
     () => new Set(filteredDrafts.map(draft => draft.id)),
     [filteredDrafts],
@@ -279,23 +284,56 @@ export function DraftsClient({
 
   // ── Handlers ───────────────────────────────────────────────────────────────
 
-  function applyFilters(nextStatus: string, nextTopicId: string) {
-    const nextVisibleIds = new Set(
-      drafts
-        .filter(draft => draftMatchesFilters(draft, nextStatus, nextTopicId))
-        .map(draft => draft.id),
-    )
-    setSelectedDraftIds(current => new Set([...current].filter(id => nextVisibleIds.has(id))))
+  async function loadFirstPage(status = filterStatus, topicId = filterTopicId) {
+    const requestId = pageRequestRef.current + 1
+    pageRequestRef.current = requestId
+    const page = await getDraftPage(getDraftPageOptions(status, topicId))
+    if (pageRequestRef.current !== requestId) return []
+    setDrafts(page.items)
+    setNextCursor(page.next_cursor)
+    return page.items
   }
+
+  const loadMoreDrafts = useCallback(async () => {
+    const cursor = nextCursor
+    if (!cursor || loadingMore) return
+    const requestId = pageRequestRef.current
+    setLoadingMore(true)
+    try {
+      const page = await getDraftPage({ ...getDraftPageOptions(filterStatus, filterTopicId), cursor })
+      if (pageRequestRef.current !== requestId) return
+      setDrafts(current => {
+        const existingIds = new Set(current.map(draft => draft.id))
+        return [...current, ...page.items.filter(draft => !existingIds.has(draft.id))]
+      })
+      setNextCursor(page.next_cursor)
+    } catch {
+      toast.error('加载更多草稿失败')
+    } finally {
+      setLoadingMore(false)
+    }
+  }, [filterStatus, filterTopicId, loadingMore, nextCursor])
+
+  useEffect(() => {
+    const sentinel = loadMoreSentinelRef.current
+    if (!sentinel || !nextCursor) return
+    const observer = new IntersectionObserver(entries => {
+      if (entries[0]?.isIntersecting) void loadMoreDrafts()
+    }, { root: draftListRef.current, rootMargin: '160px' })
+    observer.observe(sentinel)
+    return () => observer.disconnect()
+  }, [loadMoreDrafts, nextCursor])
 
   function changeStatusFilter(nextStatus: string) {
     setFilterStatus(nextStatus)
-    applyFilters(nextStatus, filterTopicId)
+    setSelectedDraftIds(new Set())
+    void loadFirstPage(nextStatus, filterTopicId).catch(() => toast.error('筛选草稿失败'))
   }
 
   function changeTopicFilter(nextTopicId: string) {
     setFilterTopicId(nextTopicId)
-    applyFilters(filterStatus, nextTopicId)
+    setSelectedDraftIds(new Set())
+    void loadFirstPage(filterStatus, nextTopicId).catch(() => toast.error('筛选草稿失败'))
   }
 
   function activateDraft(next: Draft | null) {
@@ -351,10 +389,69 @@ export function DraftsClient({
     })
   }
 
+  function handleDraftRowClick(event: MouseEvent<HTMLButtonElement>, draft: Draft) {
+    if (event.ctrlKey || event.metaKey) {
+      toggleDraftSelection(draft.id)
+      return
+    }
+    handleSelectDraft(draft)
+  }
+
   function openBulkImageDialog(mode: BulkImageMode) {
     setBulkMode(mode)
     setBulkProgress({ completed: 0, total: selectedDraftIds.size })
     setBulkFailures([])
+  }
+
+  function openBulkStatusDialog() {
+    setBulkTargetStatus(DRAFT_STATUSES[0].value)
+    setBulkFailures([])
+    setBulkStatusOpen(true)
+  }
+
+  async function handleBulkStatusSubmit() {
+    if (bulkRunning) return
+    const selectedDrafts = filteredDrafts.filter(draft => selectedDraftIds.has(draft.id))
+    if (selectedDrafts.length === 0) return
+    const updatedDrafts = new Map<number, Draft>()
+    setBulkRunning(true)
+    setBulkProgress({ completed: 0, total: selectedDrafts.length })
+    setBulkFailures([])
+    try {
+      const results = await runBulkOperations(
+        selectedDrafts,
+        async draft => {
+          updatedDrafts.set(draft.id, await updateDraft(draft.id, { status: bulkTargetStatus }))
+        },
+        (completed, total) => setBulkProgress({ completed, total }),
+        3,
+      )
+      const fulfilledIds = new Set(
+        results.filter(result => result.status === 'fulfilled').map(result => result.draftId),
+      )
+      const failures = results
+        .filter(result => result.status === 'rejected')
+        .map(result => ({ title: result.title, reason: result.reason }))
+      setDrafts(current => current.map(draft => updatedDrafts.get(draft.id) ?? draft))
+      setSelectedDraftIds(current => {
+        const next = new Set(current)
+        fulfilledIds.forEach(id => next.delete(id))
+        return next
+      })
+      const activeId = selectedDraftIdRef.current
+      const updatedActive = activeId === null ? undefined : updatedDrafts.get(activeId)
+      if (updatedActive) {
+        setSelected(updatedActive)
+        setEditStatus(updatedActive.status)
+      }
+      setBulkFailures(failures)
+      const message = `批量状态变更完成：成功 ${fulfilledIds.size}，失败 ${failures.length}`
+      if (failures.length > 0) toast.error(message)
+      else toast.success(message)
+      setBulkStatusOpen(false)
+    } finally {
+      setBulkRunning(false)
+    }
   }
 
   async function handleBulkImageSubmit(options: BulkImageOptions) {
@@ -433,7 +530,7 @@ export function DraftsClient({
         (completed, total) => setBulkProgress({ completed, total }),
         3,
       )
-      const fresh = await getDrafts()
+      const fresh = await loadFirstPage()
       const freshDraftIds = new Set(fresh.map(draft => draft.id))
       const rejectedIds = new Set(
         results.filter(result => result.status === 'rejected').map(result => result.draftId),
@@ -548,8 +645,7 @@ export function DraftsClient({
     setCreating(true)
     try {
       const draft = await createDraft({ title: '', content: '', draft_type: 'article', status: 'drafting' })
-      const fresh = await getDrafts()
-      setDrafts(fresh)
+      const fresh = await loadFirstPage()
       if (fresh.some(item => item.id === draft.id)) {
         activateDraft(draft)
       }
@@ -566,8 +662,7 @@ export function DraftsClient({
     const requestedSelectionIdentity = selectionIdentityRef.current
     setRefreshing(true)
     try {
-      const fresh = await getDrafts()
-      setDrafts(fresh)
+      const fresh = await loadFirstPage()
       if (
         requestedDraftId !== null
         && selectedDraftIdRef.current === requestedDraftId
@@ -737,6 +832,14 @@ export function DraftsClient({
             {selectedDraftIds.size > 0 ? (
               <div className="flex gap-1">
                 <Button
+                  variant="outline"
+                  size="xs"
+                  onClick={openBulkStatusDialog}
+                  disabled={bulkRunning}
+                >
+                  变更状态
+                </Button>
+                <Button
                   variant="destructive"
                   size="xs"
                   onClick={handleBulkDelete}
@@ -771,7 +874,7 @@ export function DraftsClient({
         ) : null}
 
         {/* Draft list */}
-        <div className="flex-1 overflow-y-auto">
+        <div ref={draftListRef} className="flex-1 overflow-y-auto">
           {filteredDrafts.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-40 text-zinc-400 gap-2">
               <FileText className="w-8 h-8 opacity-30" />
@@ -786,31 +889,26 @@ export function DraftsClient({
               </button>
             </div>
           ) : (
-            filteredDrafts.map(draft => {
+            <>
+            {filteredDrafts.map(draft => {
               const isActive = selected?.id === draft.id
+              const isBulkSelected = selectedDraftIds.has(draft.id)
               const topicName = flattenTopicsWithDepth(topicList).find(({ plan }) => plan.id === draft.writing_plan_id)?.plan.title
               const type = draftTypeInfo(draft.draft_type)
               return (
                 <div
                   key={draft.id}
                   className={cn(
-                    'flex border-b border-zinc-100 dark:border-zinc-800',
+                    'border-b border-zinc-100 dark:border-zinc-800',
                     isActive && 'border-l-2 border-l-indigo-400',
                   )}
                 >
-                  <div className="flex items-start px-2 py-3">
-                    <Checkbox
-                      checked={selectedDraftIds.has(draft.id)}
-                      onCheckedChange={() => toggleDraftSelection(draft.id)}
-                      aria-label={`选择${draft.title || '（无标题）'}`}
-                      disabled={bulkRunning}
-                    />
-                  </div>
                   <button
-                    onClick={() => handleSelectDraft(draft)}
+                    onClick={event => handleDraftRowClick(event, draft)}
                     className={cn(
-                      'group flex-1 px-2 py-3 text-left transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-900',
-                      isActive && 'bg-indigo-50 dark:bg-indigo-950/30',
+                      'group w-full px-2 py-3 text-left transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-900',
+                      isBulkSelected && 'bg-sky-50 dark:bg-sky-950/30',
+                      isActive && !isBulkSelected && 'bg-indigo-50 dark:bg-indigo-950/30',
                     )}
                   >
                     <div className="flex items-start gap-2">
@@ -846,7 +944,13 @@ export function DraftsClient({
                   </button>
                 </div>
               )
-            })
+            })}
+            {nextCursor ? (
+              <div ref={loadMoreSentinelRef} className="flex justify-center py-3 text-xs text-zinc-400">
+                {loadingMore ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : '继续向下滚动加载'}
+              </div>
+            ) : null}
+            </>
           )}
         </div>
       </aside>
@@ -870,12 +974,12 @@ export function DraftsClient({
               <select
                 value={editWritingPlanId ?? ''}
                 onChange={e => { setEditWritingPlanId(e.target.value ? Number(e.target.value) : null); setDirty(true) }}
-                className="text-xs px-2 py-1 rounded-full border border-zinc-200 dark:border-zinc-700 bg-transparent cursor-pointer focus:outline-none focus:ring-1 focus:ring-indigo-400 text-zinc-600 dark:text-zinc-400 max-w-[160px] truncate"
+                className="text-xs px-2 py-1 rounded-full border border-input bg-surface text-foreground [color-scheme:light] dark:[color-scheme:dark] cursor-pointer focus:outline-none focus:ring-1 focus:ring-indigo-400 max-w-[160px] truncate"
                 title="关联写作模板"
               >
-                <option value="">无写作模板</option>
+                <option className={DRAFT_TEMPLATE_OPTION_CLASS} value="">无写作模板</option>
                 {flattenTopicsWithDepth(topicList).map(({ plan, label }) => (
-                  <option key={plan.id} value={plan.id}>{label}</option>
+                  <option className={DRAFT_TEMPLATE_OPTION_CLASS} key={plan.id} value={plan.id}>{label}</option>
                 ))}
               </select>
 
@@ -915,7 +1019,7 @@ export function DraftsClient({
                 </Button>
                 <Button
                   variant="outline" size="sm"
-                  onClick={() => { window.location.href = '/jobs' }}
+                  onClick={() => { window.location.href = '/creation-rules' }}
                   className="gap-1.5"
                   title="查看 scout→editor→writer→illustrator 每棒的任务详情"
                 >
@@ -969,6 +1073,7 @@ export function DraftsClient({
             {/* Content editor */}
             <div className="flex-1 overflow-hidden">
               <MarkdownEditor
+                documentKey={selected.id}
                 ref={editorRef}
                 value={editContent}
                 onChange={v => { setEditContent(v); setDirty(true) }}
@@ -1082,6 +1187,37 @@ export function DraftsClient({
               onClick={() => { confirmDialog.onConfirm(); closeConfirm() }}
             >
               {confirmDialog.confirmLabel}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={bulkStatusOpen} onOpenChange={open => {
+        if (!open && !bulkRunning) setBulkStatusOpen(false)
+      }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>批量变更状态</DialogTitle>
+            <DialogDescription>将已选 {selectedDraftIds.size} 篇草稿更新为同一状态。</DialogDescription>
+          </DialogHeader>
+          <label className="grid gap-2 text-sm font-medium">
+            目标状态
+            <select
+              aria-label="目标状态"
+              value={bulkTargetStatus}
+              disabled={bulkRunning}
+              onChange={event => setBulkTargetStatus(event.target.value)}
+              className="rounded-md border border-input bg-background px-3 py-2"
+            >
+              {DRAFT_STATUSES.map(status => (
+                <option key={status.value} value={status.value}>{status.label}</option>
+              ))}
+            </select>
+          </label>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setBulkStatusOpen(false)} disabled={bulkRunning}>取消</Button>
+            <Button onClick={() => { void handleBulkStatusSubmit() }} disabled={bulkRunning}>
+              {bulkRunning ? `${bulkProgress.completed} / ${bulkProgress.total}` : '确认变更状态'}
             </Button>
           </DialogFooter>
         </DialogContent>

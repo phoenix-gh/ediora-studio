@@ -229,7 +229,7 @@ def _highlighted_word_positions(
                 if word_start < end and word_end > start
             )
             start = joined.find(needle, start + 1)
-    if fallback_to_final and highlights and not positions and words:
+    if fallback_to_final and not positions and words:
         positions.add(len(words) - 1)
     return positions
 

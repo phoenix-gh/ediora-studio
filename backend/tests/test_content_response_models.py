@@ -1,14 +1,17 @@
-from sqlalchemy import create_engine, inspect, select
-from sqlalchemy.orm import Session
+from sqlalchemy import inspect, select
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 
-def test_unified_response_schema_and_defaults(tmp_path):
+async def test_unified_response_schema_and_defaults(postgres_database_url):
     import models
     from database import Base
 
-    engine = create_engine(f"sqlite:///{tmp_path / 'responses.db'}")
-    Base.metadata.create_all(engine)
-    tables = set(inspect(engine).get_table_names())
+    engine = create_async_engine(postgres_database_url)
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+        tables = set(await connection.run_sync(
+            lambda sync_connection: inspect(sync_connection).get_table_names()
+        ))
     expected = {
         "content_response_items",
         "content_analysis_runs",
@@ -19,7 +22,8 @@ def test_unified_response_schema_and_defaults(tmp_path):
     }
     assert expected <= tables
 
-    with Session(engine, expire_on_commit=False) as db:
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    async with sessions() as db:
         channel = models.YoutubeChannel(id="channel", name="Channel")
         video = models.YoutubeVideo(
             id="video",
@@ -32,10 +36,10 @@ def test_unified_response_schema_and_defaults(tmp_path):
             source_id=video.id,
         )
         db.add_all([channel, video, item])
-        db.commit()
-        db.refresh(channel)
-        db.refresh(video)
-        db.refresh(item)
+        await db.commit()
+        await db.refresh(channel)
+        await db.refresh(video)
+        await db.refresh(item)
 
         assert channel.auto_analyze_new_videos is False
         assert channel.analysis_enabled_at is None
@@ -47,8 +51,8 @@ def test_unified_response_schema_and_defaults(tmp_path):
 
         run = models.ContentAnalysisRun(response_item_id=item.id, version=1)
         db.add(run)
-        db.commit()
-        db.refresh(run)
+        await db.commit()
+        await db.refresh(run)
         score = models.ContentAccountScore(
             analysis_run_id=run.id,
             publish_account_id="account",
@@ -67,13 +71,15 @@ def test_unified_response_schema_and_defaults(tmp_path):
             event_type="created",
         )
         db.add_all([score, output, notification, event])
-        db.commit()
+        await db.commit()
 
-        assert db.execute(select(models.ContentAccountScore)).scalar_one()
-        assert db.execute(select(models.ContentResponseOutput)).scalar_one()
-        assert db.execute(select(models.ContentResponseNotification)).scalar_one()
-        assert db.execute(select(models.ContentResponseEvent)).scalar_one()
-    engine.dispose()
+        assert (await db.execute(select(models.ContentAccountScore))).scalar_one()
+        assert (await db.execute(select(models.ContentResponseOutput))).scalar_one()
+        assert (
+            await db.execute(select(models.ContentResponseNotification))
+        ).scalar_one()
+        assert (await db.execute(select(models.ContentResponseEvent))).scalar_one()
+    await engine.dispose()
 
 
 def test_response_source_and_analysis_version_are_unique():
@@ -92,3 +98,30 @@ def test_response_source_and_analysis_version_are_unique():
 
     assert ("source_type", "source_id") in item_constraints
     assert ("response_item_id", "version") in run_constraints
+
+
+async def test_intelligence_station_defaults_are_empty_and_pending(
+    postgres_database_url,
+):
+    import models
+    from database import Base
+
+    engine = create_async_engine(postgres_database_url)
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    sessions = async_sessionmaker(engine)
+    async with sessions() as db:
+        item = models.ContentResponseItem(source_type="x_post", source_id="post-1")
+        db.add(item)
+        await db.flush()
+        run = models.ContentAnalysisRun(response_item_id=item.id, version=1)
+        db.add(run)
+        await db.flush()
+
+        assert item.decision_status == "pending"
+        assert item.content_types == []
+        assert item.destination_type is None
+        assert item.destination_id is None
+        assert run.recommended_content_types == []
+        assert run.recommended_disposition == "pending"
+    await engine.dispose()

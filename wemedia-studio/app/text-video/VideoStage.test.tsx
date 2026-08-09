@@ -14,13 +14,48 @@ import {
 import { VideoStage } from './VideoStage'
 
 
+const previewPlayer = vi.hoisted(() => ({
+  play: vi.fn(),
+}))
+
 vi.mock('./RemotionPreview', () => ({
-  RemotionPreview: ({ selectedSceneId }: { selectedSceneId: string }) => (
-    <div>Remotion 预览 · {selectedSceneId || 'empty'}</div>
-  ),
+  RemotionPreview: ({
+    selectedSceneId,
+    playerRef,
+  }: {
+    selectedSceneId: string
+    playerRef?: { current: typeof previewPlayer | null }
+  }) => {
+    if (playerRef) playerRef.current = previewPlayer
+    return <div>Remotion 预览 · {selectedSceneId || 'empty'}</div>
+  },
 }))
 
 describe('VideoStage', () => {
+  it('starts playback when requesting a full preview', async () => {
+    const user = userEvent.setup()
+    const onPreviewAll = vi.fn()
+    previewPlayer.play.mockClear()
+
+    render(
+      <VideoStage
+        project={makeVideoReadyProject()}
+        selectedSceneId="scene-1"
+        onSelectScene={vi.fn()}
+        previewAll={false}
+        onPreviewAll={onPreviewAll}
+        onProjectChange={vi.fn()}
+        onOpenSceneDirection={vi.fn()}
+        onApplyTemplateSettings={vi.fn()}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: '预览全片' }))
+
+    expect(onPreviewAll).toHaveBeenCalledOnce()
+    expect(previewPlayer.play).toHaveBeenCalledOnce()
+  })
+
   it('renders persisted scenes and selects them by stable id', async () => {
     const user = userEvent.setup()
     const onSelectScene = vi.fn()
@@ -285,55 +320,6 @@ describe('VideoStage', () => {
         accentColor: expect.any(String),
       }),
     )
-  })
-
-  it('shows motion planning only for kinetic punch v2', () => {
-    const project = makeVideoReadyProject()
-    const v2 = {
-      ...project,
-      render_input: {
-        ...project.render_input,
-        templateId: 'kinetic-punch-v2',
-        templateVersion: 1,
-      },
-      scene_plan: {
-        ...project.scene_plan,
-        scenes: project.scene_plan.scenes.map(scene => ({
-          ...scene,
-          animation: 'reveal',
-        })),
-      },
-    }
-
-    const { rerender } = render(
-      <VideoStage
-        project={project}
-        selectedSceneId="scene-1"
-        onSelectScene={vi.fn()}
-        previewAll={false}
-        onPreviewAll={vi.fn()}
-        onProjectChange={vi.fn()}
-        onOpenSceneDirection={vi.fn()}
-        onApplyTemplateSettings={vi.fn()}
-      />,
-    )
-    expect(screen.queryByRole('button', { name: '自动拆句' }))
-      .not.toBeInTheDocument()
-
-    rerender(
-      <VideoStage
-        project={v2}
-        selectedSceneId="scene-1"
-        onSelectScene={vi.fn()}
-        previewAll={false}
-        onPreviewAll={vi.fn()}
-        onProjectChange={vi.fn()}
-        onOpenSceneDirection={vi.fn()}
-        onApplyTemplateSettings={vi.fn()}
-        onOptimizeMotion={vi.fn()}
-      />,
-    )
-    expect(screen.getByRole('button', { name: '自动拆句' })).toBeEnabled()
   })
 
   it('labels an existing output as the previous render after visuals change', () => {

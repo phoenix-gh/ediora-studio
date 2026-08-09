@@ -1,8 +1,6 @@
 import { getDashboardOverview, EMPTY_OVERVIEW } from '@/lib/api/dashboard'
-import { getTodayPlan } from '@/lib/api/daily-plan'
 import { CreateTaskButton } from '@/components/features/CreateTaskDialog'
 import { AlertsBar } from '@/components/features/dashboard/AlertsBar'
-import { TodayPlan } from '@/components/features/dashboard/TodayPlan'
 import { ReleasesToday } from '@/components/features/dashboard/ReleasesToday'
 import { SourceStatusGrid } from '@/components/features/dashboard/SourceStatusGrid'
 import { PageHeader } from '@/components/layout/PageHeader'
@@ -10,10 +8,7 @@ import { PageHeader } from '@/components/layout/PageHeader'
 export const dynamic = 'force-dynamic'
 
 export default async function Dashboard() {
-  const [overview, todayPlanResp] = await Promise.all([
-    getDashboardOverview().catch(() => EMPTY_OVERVIEW),
-    getTodayPlan().catch(() => ({ plan: null })),
-  ])
+  const overview = await getDashboardOverview().catch(() => EMPTY_OVERVIEW)
 
   const today = new Date().toLocaleDateString('zh-CN', { month: 'long', day: 'numeric', weekday: 'long' })
 
@@ -27,7 +22,6 @@ export default async function Dashboard() {
       />
       <div className="px-7 pb-8">
         <AlertsBar alerts={overview.alerts} />
-        <TodayPlan plan={todayPlanResp.plan} />
         <ReleasesToday releases={overview.releases_today} />
         <SourceStatusGrid sources={overview.sources} />
       </div>

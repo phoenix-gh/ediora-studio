@@ -1,0 +1,164 @@
+<style>
+  .dialog-system {
+    font-family: Inter, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color:#172033;
+  }
+  .rule-banner {
+    display:flex;
+    align-items:center;
+    gap:13px;
+    margin-top:18px;
+    padding:15px 17px;
+    border:1px solid #dfe2ff;
+    border-radius:13px;
+    background:#f3f4ff;
+  }
+  .rule-icon {
+    width:34px;height:34px;display:grid;place-items:center;
+    border-radius:10px;background:#5b5fe8;color:#fff;font-size:18px;font-weight:800;
+  }
+  .rule-banner strong { display:block;font-size:13px; }
+  .rule-banner span { display:block;margin-top:3px;color:#667085;font-size:11px; }
+  .workspace-preview {
+    position:relative;
+    overflow:hidden;
+    min-height:480px;
+    margin-top:18px;
+    border:1px solid #dfe3ec;
+    border-radius:18px;
+    background:#f7f8fc;
+    box-shadow:0 16px 46px rgba(31,42,72,.08);
+  }
+  .window-top {
+    display:flex;align-items:center;justify-content:space-between;
+    height:40px;padding:0 15px;border-bottom:1px solid #e6e9f1;background:#fff;
+    color:#667085;font-size:9px;
+  }
+  .editor-shell { display:grid;grid-template-columns:135px 210px 1fr;min-height:440px; }
+  .nav {
+    padding:14px 9px;border-right:1px solid #e6e9f1;background:#fff;
+  }
+  .brand {display:flex;align-items:center;gap:7px;margin:0 6px 18px;font-size:10px;font-weight:760}
+  .mark {width:20px;height:20px;display:grid;place-items:center;border-radius:6px;background:linear-gradient(135deg,#22c3de,#5b5fe8 58%,#8b5cf6);color:#fff;font-size:9px}
+  .nav-label {margin:12px 7px 4px;color:#98a2b3;font-size:6px;font-weight:750;letter-spacing:.1em;text-transform:uppercase}
+  .nav-row {padding:7px 8px;margin:2px 0;border-radius:7px;color:#667085;font-size:8px}
+  .nav-row.active {background:#eef0ff;color:#4f46e5;font-weight:700}
+  .list {border-right:1px solid #e6e9f1;background:#fbfcfe}
+  .list-head {height:56px;display:flex;align-items:center;padding:0 14px;border-bottom:1px solid #e6e9f1;font-size:12px;font-weight:730}
+  .list-head span {margin-left:auto;color:#5b5fe8;font-size:8px}
+  .list-row {padding:13px 14px;border-bottom:1px solid #eef0f4}
+  .list-row.active {border-left:3px solid #6366f1;background:#eef0ff;padding-left:11px}
+  .list-row strong {display:block;font-size:8px}
+  .list-row span {display:block;margin-top:4px;color:#98a2b3;font-size:6px}
+  .editor {background:#fff}
+  .toolbar {height:56px;display:flex;align-items:center;gap:7px;padding:0 17px;border-bottom:1px solid #e6e9f1}
+  .toolbar strong {font-size:13px}
+  .spacer {flex:1}
+  .button {height:28px;padding:0 9px;border:1px solid #dfe3ec;border-radius:7px;background:#fff;color:#475467;font-size:7px}
+  .button.primary {border-color:#5b5fe8;background:#5b5fe8;color:#fff;font-weight:700}
+  .body {max-width:670px;padding:28px 30px}
+  .title {padding-bottom:14px;border-bottom:1px solid #edf0f5;font-size:21px;font-weight:740;letter-spacing:-.03em}
+  .body p {color:#667085;font-size:9px;line-height:1.75}
+  .scrim {position:absolute;inset:40px 0 0;background:rgba(23,32,51,.36);backdrop-filter:blur(1px)}
+  .dialog {
+    position:absolute;left:50%;top:54%;width:min(640px,66%);transform:translate(-50%,-50%);
+    overflow:hidden;border:1px solid #dfe3ec;border-radius:16px;background:#fff;
+    box-shadow:0 28px 80px rgba(19,28,48,.22);
+  }
+  .dialog-head {padding:18px 20px 14px;border-bottom:1px solid #eef0f4}
+  .dialog-head strong {display:block;font-size:15px}
+  .dialog-head span {display:block;margin-top:4px;color:#667085;font-size:9px}
+  .dialog-body {display:grid;grid-template-columns:150px 1fr;min-height:190px}
+  .dialog-nav {padding:11px;border-right:1px solid #eef0f4;background:#fbfcfe}
+  .dialog-nav div {padding:8px 9px;margin:2px 0;border-radius:7px;color:#667085;font-size:8px}
+  .dialog-nav div.active {background:#eef0ff;color:#4f46e5;font-weight:700}
+  .dialog-form {padding:16px 18px}
+  .field-label {margin-bottom:5px;color:#475467;font-size:8px;font-weight:650}
+  .field {height:31px;display:flex;align-items:center;margin-bottom:12px;padding:0 10px;border:1px solid #dfe3ec;border-radius:8px;color:#98a2b3;font-size:8px}
+  .choice-grid {display:grid;grid-template-columns:1fr 1fr;gap:7px}
+  .choice {padding:9px;border:1px solid #e2e6ef;border-radius:9px;font-size:8px}
+  .choice.active {border-color:#8b8ef2;background:#f4f4ff;color:#4f46e5}
+  .dialog-foot {display:flex;justify-content:flex-end;gap:7px;padding:12px 18px;border-top:1px solid #eef0f4;background:#fbfcfe}
+  .usage-grid {display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:16px}
+  .usage {padding:14px;border:1px solid #e6e9f1;border-radius:12px;background:#fff}
+  .usage .tag {display:inline-flex;padding:3px 7px;border-radius:999px;background:#eef0ff;color:#4f46e5;font-size:8px;font-weight:700}
+  .usage strong {display:block;margin:9px 0 5px;font-size:11px}
+  .usage p {margin:0;color:#667085;font-size:9px;line-height:1.5}
+  .usage.no {background:#fef3f2;border-color:#fee4e2}
+  .usage.no .tag {background:#fee4e2;color:#b42318}
+  .approval {display:flex;gap:10px;margin-top:18px}
+  .approval .option {flex:1;min-height:auto}
+  @media(max-width:900px){
+    .editor-shell{grid-template-columns:110px 160px 1fr}
+    .usage-grid{grid-template-columns:1fr 1fr}
+    .dialog{width:76%}
+  }
+</style>
+
+<div class="dialog-system">
+  <h2>页面骨架修订：Dialog 优先</h2>
+  <p class="subtitle">固定工作区不因临时操作被挤压。配置、选择、发布和工作流都在居中 Dialog 中完成，关闭后立即回到原位置。</p>
+
+  <div class="rule-banner">
+    <div class="rule-icon">✓</div>
+    <div><strong>桌面端不使用业务侧边抽屉</strong><span>轻量动作原地完成；复杂但短暂的任务进入 Dialog；主编辑器保持完整、稳定。</span></div>
+  </div>
+
+  <div class="workspace-preview">
+    <div class="window-top"><span>创作资产 · 编辑素材</span><span>Dialog 打开时保留工作区上下文</span></div>
+    <div class="editor-shell">
+      <aside class="nav">
+        <div class="brand"><span class="mark">E</span>Ediora</div>
+        <div class="nav-row">今日工作台</div>
+        <div class="nav-label">创作</div>
+        <div class="nav-row">草稿箱</div>
+        <div class="nav-row active">创作资产</div>
+        <div class="nav-row">数字人口播</div>
+        <div class="nav-label">信息源</div>
+        <div class="nav-row">YouTube</div>
+        <div class="nav-row">X</div>
+      </aside>
+      <aside class="list">
+        <div class="list-head">文章素材<span>＋ 新增</span></div>
+        <div class="list-row active"><strong>产品客户信息追踪</strong><span>推荐一个超级好用的 API...</span></div>
+        <div class="list-row"><strong>AI Agent 生态观察</strong><span>开源项目与视频素材...</span></div>
+        <div class="list-row"><strong>副业搞钱素材合集</strong><span>值得二次创作的观点...</span></div>
+      </aside>
+      <main class="editor">
+        <div class="toolbar"><strong>编辑素材</strong><span class="spacer"></span><button class="button">素材</button><button class="button">工作流</button><button class="button">发布</button><button class="button primary">保存</button></div>
+        <div class="body"><div class="title">产品客户信息追踪</div><p>编辑区不会因为打开设置、选择素材或发布配置而改变宽度。所有临时任务在 Dialog 内结束后回到这里。</p></div>
+      </main>
+    </div>
+    <div class="scrim"></div>
+    <section class="dialog">
+      <div class="dialog-head"><strong>配置发布</strong><span>选择平台与发布方式，当前草稿内容不会离开编辑器。</span></div>
+      <div class="dialog-body">
+        <nav class="dialog-nav"><div class="active">发布平台</div><div>内容预览</div><div>平台设置</div></nav>
+        <div class="dialog-form">
+          <div class="field-label">发布账号</div><div class="field">选择已配置账号</div>
+          <div class="field-label">发布方式</div>
+          <div class="choice-grid"><div class="choice active">立即发布</div><div class="choice">复制到平台</div></div>
+        </div>
+      </div>
+      <div class="dialog-foot"><button class="button">取消</button><button class="button primary">继续预览</button></div>
+    </section>
+  </div>
+
+  <div class="usage-grid">
+    <div class="usage"><span class="tag">Inline</span><strong>原地编辑</strong><p>标题、正文、状态、单个开关和少量筛选。</p></div>
+    <div class="usage"><span class="tag">Popover</span><strong>轻量选择</strong><p>排序、日期范围、单选菜单，不承载长表单。</p></div>
+    <div class="usage"><span class="tag">Dialog</span><strong>完整任务</strong><p>新增、配置、素材选择、工作流、发布与多步操作。</p></div>
+    <div class="usage no"><span class="tag">不使用</span><strong>业务侧边抽屉</strong><p>避免遮挡或压缩编辑区，也不制造第三种临时容器。</p></div>
+  </div>
+
+  <div class="approval options">
+    <div class="option" data-choice="dialogs-approved" onclick="toggleSelect(this)">
+      <div class="letter">✓</div>
+      <div class="content"><h3>Dialog 规则可以</h3><p>继续确认组件状态、空页面、加载与错误反馈。</p></div>
+    </div>
+    <div class="option" data-choice="dialogs-adjust" onclick="toggleSelect(this)">
+      <div class="letter">↺</div>
+      <div class="content"><h3>还需调整</h3><p>告诉我哪些操作应该原地完成或改成对话框。</p></div>
+    </div>
+  </div>
+</div>

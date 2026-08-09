@@ -1,5 +1,6 @@
 import type {
   AgentCompletionEvidence,
+  AgentModelMessageEvent,
   AgentSkillMode,
   AgentToolAudit,
   AgentToolDecision,
@@ -38,6 +39,11 @@ export type DurableAgentToolCall = {
   error?: string
   auto_approved?: boolean
   side_effecting?: boolean
+}
+
+export type DurableAgentMessageLog = AgentModelMessageEvent & {
+  id: number
+  execution_id: number
 }
 
 function inputSummary(value: unknown): Record<string, unknown> {
@@ -130,6 +136,22 @@ export function failAgentToolCall(
   )
 }
 
+export function appendAgentMessage(
+  jobId: number,
+  executionId: number,
+  event: AgentModelMessageEvent,
+) {
+  return apiPost<DurableAgentMessageLog>(
+    `/agent-executions/${executionId}/messages`,
+    {
+      phase: event.phase,
+      direction: event.direction,
+      payload: event.payload,
+    },
+    workerHeaders(jobId),
+  )
+}
+
 export function completeAgentExecution(
   jobId: number,
   executionId: number,
@@ -138,6 +160,18 @@ export function completeAgentExecution(
   return apiPost<DurableAgentExecution>(
     `/agent-executions/${executionId}/complete`,
     { completion_evidence: evidence },
+    workerHeaders(jobId),
+  )
+}
+
+export function failAgentExecution(
+  jobId: number,
+  executionId: number,
+  error: string,
+) {
+  return apiPost<DurableAgentExecution>(
+    `/agent-executions/${executionId}/fail`,
+    { error },
     workerHeaders(jobId),
   )
 }

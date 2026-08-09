@@ -1,0 +1,79 @@
+<h2>B 方案：详情工作台的阅读比例</h2>
+<p class="subtitle">原文和 AI 评价都会固定显示。请选择你更习惯的阅读重心。</p>
+
+<div class="cards">
+  <div class="card" data-choice="balanced" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mockup">
+        <div class="mockup-header">A · 50 / 50 平衡双栏</div>
+        <div class="mockup-body" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;background:#f8fafc;min-height:260px">
+          <div style="background:white;border:1px solid #e5e7eb;border-radius:8px;padding:12px;overflow:hidden">
+            <div style="font-size:11px;color:#64748b">原文 · Hacker News</div>
+            <h3 style="margin-top:12px">一个值得关注的新工具</h3>
+            <p style="font-size:11px;color:#64748b;line-height:1.8;margin-top:10px">标题、来源、发布时间和原文正文始终可见。长文区域独立滚动，不被评价卡片挤走。</p>
+            <div style="height:7px;background:#e2e8f0;border-radius:4px;margin-top:12px;width:94%"></div><div style="height:7px;background:#e2e8f0;border-radius:4px;margin-top:8px;width:86%"></div><div style="height:7px;background:#e2e8f0;border-radius:4px;margin-top:8px;width:75%"></div>
+          </div>
+          <div style="background:#eef2ff;border:1px solid #c7d2fe;border-radius:8px;padding:12px;overflow:hidden">
+            <div style="font-size:11px;color:#4f46e5">AI 评价</div>
+            <div style="display:flex;align-items:end;gap:6px;margin-top:8px"><strong style="font-size:30px">86</strong><span style="font-size:11px;color:#4f46e5">内容价值</span></div>
+            <div style="margin-top:8px;font-weight:700">值得写入内容系统</div>
+            <div style="display:flex;gap:5px;margin-top:9px"><span style="background:#c7d2fe;padding:3px 6px;border-radius:999px;font-size:10px">工具</span><span style="background:#c7d2fe;padding:3px 6px;border-radius:999px;font-size:10px">实践</span></div>
+            <p style="font-size:11px;line-height:1.7;color:#475569;margin-top:12px">有明确的信息增量，适合整理为方法型内容。</p>
+            <button class="mock-button" style="margin-top:9px">写入内容系统</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body"><h3>A · 50 / 50 平衡双栏</h3><p>最直接地同时阅读和判断，适合大多数情报条目。</p></div>
+  </div>
+
+  <div class="card" data-choice="source-first" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mockup">
+        <div class="mockup-header">B · 60 / 40 原文优先</div>
+        <div class="mockup-body" style="display:grid;grid-template-columns:1.5fr 1fr;gap:8px;background:#f8fafc;min-height:260px">
+          <div style="background:white;border:1px solid #e5e7eb;border-radius:8px;padding:12px;overflow:hidden">
+            <div style="font-size:11px;color:#64748b">原文阅读区 · 更宽</div>
+            <h3 style="margin-top:12px">一个值得关注的新工具</h3>
+            <p style="font-size:11px;color:#64748b;line-height:1.8;margin-top:10px">适合长文章、YouTube 字幕和需要核对上下文的内容。原文是主阅读区，AI 评价固定在右侧。</p>
+            <div style="height:7px;background:#e2e8f0;border-radius:4px;margin-top:12px;width:96%"></div><div style="height:7px;background:#e2e8f0;border-radius:4px;margin-top:8px;width:90%"></div><div style="height:7px;background:#e2e8f0;border-radius:4px;margin-top:8px;width:82%"></div><div style="height:7px;background:#e2e8f0;border-radius:4px;margin-top:8px;width:72%"></div>
+          </div>
+          <div style="background:#eef2ff;border:1px solid #c7d2fe;border-radius:8px;padding:12px;overflow:hidden">
+            <div style="font-size:11px;color:#4f46e5">AI 评价 · 86 分</div>
+            <div style="margin-top:10px;font-weight:700">值得写</div>
+            <div style="margin-top:10px;font-size:11px;line-height:1.8">类型：工具 / 实践<br>新颖度：82<br>实用性：91<br>证据：充分<br>写作空间：高</div>
+            <button class="mock-button" style="margin-top:14px">写入内容系统</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body"><h3>B · 60 / 40 原文优先</h3><p>更尊重原始材料，适合先读文章再判断，尤其适合长文和复杂来源。</p></div>
+  </div>
+
+  <div class="card" data-choice="analysis-first" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mockup">
+        <div class="mockup-header">C · 40 / 60 评价优先</div>
+        <div class="mockup-body" style="display:grid;grid-template-columns:1fr 1.5fr;gap:8px;background:#f8fafc;min-height:260px">
+          <div style="background:white;border:1px solid #e5e7eb;border-radius:8px;padding:12px;overflow:hidden">
+            <div style="font-size:11px;color:#64748b">原文摘要区</div>
+            <h3 style="margin-top:12px">一个值得关注的新工具</h3>
+            <p style="font-size:11px;color:#64748b;line-height:1.8;margin-top:10px">原文较窄，点击后可展开或打开原始来源。</p>
+          </div>
+          <div style="background:#eef2ff;border:1px solid #c7d2fe;border-radius:8px;padding:12px;overflow:hidden">
+            <div style="font-size:11px;color:#4f46e5">AI 评价 · 决策面板</div>
+            <div style="display:flex;gap:7px;margin-top:10px"><strong style="font-size:29px">86</strong><span style="font-size:11px">值得写</span></div>
+            <div style="font-size:11px;line-height:1.8;margin-top:9px">分类：工具、实践<br>核心判断：有信息增量<br>适合方向：开发者效率<br>风险：需核对版本变化</div>
+            <button class="mock-button" style="margin-top:13px">写入内容系统</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body"><h3>C · 40 / 60 评价优先</h3><p>适合快速批量分拣，但原文阅读空间较小，不符合“自己看原文”的要求。</p></div>
+  </div>
+</div>
+
+<div class="section" style="margin-top:18px">
+  <h3>建议固定显示的 AI 评价</h3>
+  <p>内容价值分数、是否值得写、内容类型、判断理由、证据与风险、建议写作方向；评论/回复生成不再出现。</p>
+</div>

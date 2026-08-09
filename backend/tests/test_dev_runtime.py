@@ -11,7 +11,6 @@ import sys
 import textwrap
 import threading
 import time
-import urllib.request
 from pathlib import Path
 
 import pytest
@@ -203,7 +202,7 @@ def _dev_env(tmp_path: Path, bin_dir: Path) -> dict[str, str]:
             "WMS_DEV_STOP_TIMEOUT_SECONDS": "0.6",
             "WMS_DEV_POLL_INTERVAL_SECONDS": "0.05",
             "WMS_DEV_HTTP_SETTLE_SECONDS": "0.2",
-            "WMS_DEV_POSTGRES_PORT": "45432",
+            "WMS_DEV_POSTGRES_PORT": "0",
             "WMS_DEV_POSTGRES_TEST_AUTO_READY": "1",
             # The fake services do not bind. Real socket tests replace these
             # values with ports held by their server processes.
@@ -225,10 +224,11 @@ def _run_dev(
     server_thread: threading.Thread | None = None
     stop_server = threading.Event()
 
-    if (
+    auto_ready = (
         env.get("WMS_DEV_POSTGRES_TEST_AUTO_READY") == "1"
         and command in {"start", "restart", "status"}
-    ):
+    )
+    if auto_ready:
         listener = socket.socket()
         listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         listener.bind(
@@ -237,6 +237,7 @@ def _run_dev(
                 int(env["WMS_DEV_POSTGRES_PORT"]),
             )
         )
+        env["WMS_DEV_POSTGRES_PORT"] = str(listener.getsockname()[1])
         listener.listen()
         listener.settimeout(0.05)
 
@@ -251,6 +252,10 @@ def _run_dev(
 
         server_thread = threading.Thread(target=serve_connections, daemon=True)
         server_thread.start()
+    elif env.get("WMS_DEV_POSTGRES_PORT") == "0":
+        with socket.socket() as port_probe:
+            port_probe.bind(("127.0.0.1", 0))
+            env["WMS_DEV_POSTGRES_PORT"] = str(port_probe.getsockname()[1])
 
     try:
         return subprocess.run(
@@ -628,7 +633,10 @@ def test_stopped_postgres_starts_before_application_processes(
         assert events.index("start:postgres") < events.index("start:api")
         assert "PostgreSQL" in result.stdout
         assert "Postgres:" in result.stdout
-        assert "wms-dev-postgres-copy (127.0.0.1:45432)" in result.stdout
+        assert (
+            "wms-dev-postgres-copy "
+            f"(127.0.0.1:{env['WMS_DEV_POSTGRES_PORT']})"
+        ) in result.stdout
     finally:
         _run_dev(env, "stop")
 
@@ -686,6 +694,7 @@ def test_postgres_tcp_timeout_prevents_application_mutation(
     bin_dir = _fake_runtime_tools(tmp_path)
     env = _dev_env(tmp_path, bin_dir)
     env["WMS_DEV_POSTGRES_TEST_AUTO_READY"] = "0"
+    env["WMS_DEV_POSTGRES_PORT"] = "45432"
     env["WMS_DEV_READY_TIMEOUT_SECONDS"] = "0.2"
 
     try:
@@ -709,6 +718,10 @@ def test_start_waits_for_each_service_and_stop_reverses_owned_processes(
     try:
         started = _run_dev(env, "start")
         assert started.returncode == 0, started.stdout + started.stderr
+
+        status = _run_dev(env, "status")
+        assert status.returncode == 0, status.stdout + status.stderr
+        assert "unbound variable" not in status.stderr
 
         launch_events = _events(env)
         assert launch_events.index("ready:redis") < launch_events.index("start:api")
@@ -767,7 +780,7 @@ def test_start_waits_for_each_service_and_stop_reverses_owned_processes(
         _run_dev(env, "stop")
 
 
-@pytest.mark.parametrize("drift", ["token", "api", "cors"])
+@pytest.mark.parametrize("drift", ["token", "api", "cors", "worker-source"])
 def test_config_drift_replaces_the_entire_api_worker_web_unit(
     tmp_path: Path,
     drift: str,
@@ -792,8 +805,10 @@ def test_config_drift_replaces_the_entire_api_worker_web_unit(
             replacement_env["WMS_WORKER_TOKEN"] = REPLACEMENT_TOKEN
         elif drift == "api":
             replacement_env["WMS_API_PORT"] = "48001"
-        else:
+        elif drift == "cors":
             replacement_env["WMS_CORS_ORIGINS"] = "https://editor.example.test"
+        else:
+            replacement_env["WMS_DEV_TEST_SOURCE_FINGERPRINT"] = "changed-worker-source"
 
         second = _run_dev(replacement_env, "start")
         assert second.returncode == 0, second.stdout + second.stderr
@@ -1340,19 +1355,9 @@ def test_external_http_cannot_masquerade_as_the_owned_api_process(
     env["WMS_API_PORT"] = str(api_port)
     env["WMS_WEB_PORT"] = str(web_port)
 
-    def external_ready() -> bool:
-        try:
-            return (
-                urllib.request.urlopen(
-                    f"http://127.0.0.1:{api_port}/health", timeout=0.2
-                ).status
-                == 200
-            )
-        except OSError:
-            return False
-
     try:
-        assert _wait_until(external_ready)
+        assert external_api.poll() is None
+        assert external_web.poll() is None
 
         result = _run_dev(env, "start")
 
@@ -1384,7 +1389,7 @@ def test_status_and_log_snapshot_cover_all_runtime_services(tmp_path: Path) -> N
         for name in ("Postgres", "Redis", "API", "Worker", "Web")
     )
     assert "wms-dev-postgres-copy" in status.stdout
-    assert "127.0.0.1:45432" in status.stdout
+    assert f"127.0.0.1:{env['WMS_DEV_POSTGRES_PORT']}" in status.stdout
     assert "external" in status.stdout.lower()
     assert logs.returncode == 0
     assert all(name in logs.stdout for name in ("Redis", "API", "Worker", "Web"))
@@ -1420,6 +1425,7 @@ def test_postgres_status_is_read_only_and_reports_unhealthy_states(
 
 def test_backend_health_uses_the_runtime_web_origins_for_real_cors_headers(
     tmp_path: Path,
+    postgres_database_url: str,
 ) -> None:
     origins = "http://127.0.0.1:43000,http://localhost:43000"
     code = """
@@ -1439,9 +1445,7 @@ assert "access-control-allow-origin" not in blocked.headers
         "PATH": os.environ["PATH"],
         "PYTHON_DOTENV_DISABLED": "1",
         "WMS_CORS_ORIGINS": origins,
-        "WMS_DATABASE_URL": (
-            f"sqlite+aiosqlite:///{tmp_path / 'cors.sqlite3'}"
-        ),
+        "WMS_DATABASE_URL": postgres_database_url,
         "WMS_DISABLE_SCHEDULER": "1",
         "WMS_WORKER_TOKEN": VALID_TOKEN,
         "FEEDGRAB_DATA_DIR": str(tmp_path / "sessions"),

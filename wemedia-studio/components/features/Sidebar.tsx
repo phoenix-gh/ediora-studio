@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
   LayoutDashboard, Settings, GitFork, AtSign, FileText, BookMarked, Tag, Bot,
-  PlaySquare, Rocket, MessageSquare, Globe, Flame, Gem, ListChecks, Hash, CalendarCheck,
+  PlaySquare, Rocket, MessageSquare, Globe, Flame, Gem, ListChecks, Hash,
   MessageSquareReply, PersonStanding, Captions,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -23,8 +23,8 @@ const sections: NavSection[] = [
   {
     items: [
       { href: '/',          label: '今日工作台', icon: LayoutDashboard },
-      { href: '/daily-plan', label: '今日计划',  icon: CalendarCheck },
-      { href: '/jobs',      label: '创作任务',   icon: ListChecks },
+      { href: '/responses', label: '情报中心', icon: MessageSquareReply },
+      { href: '/creation-rules', label: '任务看板', icon: ListChecks },
       { href: '/chat',      label: 'AI 助手',     icon: Bot },
     ],
   },
@@ -36,7 +36,6 @@ const sections: NavSection[] = [
       { href: '/writing-plans', label: '写作模板', icon: Tag },
       { href: '/assets',       label: '创作资产', icon: FileText },
       { href: '/digital-humans', label: '数字人口播', icon: PersonStanding },
-      { href: '/responses',    label: '待响应',   icon: MessageSquareReply },
     ],
   },
   {

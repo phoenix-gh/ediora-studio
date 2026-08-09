@@ -1,0 +1,330 @@
+<style>
+  .architecture {
+    font-family: Inter, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #172033;
+  }
+  .screen {
+    overflow: hidden;
+    margin-top: 20px;
+    border: 1px solid #dfe3ec;
+    border-radius: 18px;
+    background: #f7f8fc;
+    box-shadow: 0 16px 46px rgba(31, 42, 72, .08);
+  }
+  .screen-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 15px;
+    border-bottom: 1px solid #e6e9f1;
+    background: #fff;
+    color: #667085;
+    font-size: 11px;
+  }
+  .window-dots { display: flex; gap: 5px; }
+  .window-dots span { width: 7px; height: 7px; border-radius: 50%; background: #d8dce7; }
+  .app-frame {
+    display: grid;
+    min-height: 420px;
+    grid-template-columns: 142px 176px minmax(0, 1fr);
+  }
+  .app-nav {
+    padding: 14px 10px;
+    border-right: 1px solid #e6e9f1;
+    background: #fff;
+  }
+  .mini-brand {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin: 0 5px 18px;
+    font-size: 11px;
+    font-weight: 760;
+  }
+  .mini-mark {
+    width: 20px;
+    height: 20px;
+    display: grid;
+    place-items: center;
+    border-radius: 6px;
+    background: linear-gradient(135deg,#22c3de,#5b5fe8 58%,#8b5cf6);
+    color: white;
+    font-size: 9px;
+  }
+  .nav-section {
+    margin: 13px 7px 5px;
+    color: #98a2b3;
+    font-size: 6px;
+    font-weight: 760;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+  }
+  .nav-item {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 7px 8px;
+    margin: 2px 0;
+    border-radius: 7px;
+    color: #667085;
+    font-size: 8px;
+  }
+  .nav-item.active { background:#eef0ff; color:#4f46e5; font-weight:700; }
+  .nav-icon { width: 10px; height: 10px; border: 1.5px solid currentColor; border-radius: 3px; }
+  .rail {
+    border-right: 1px solid #e6e9f1;
+    background: #fbfcfe;
+  }
+  .rail-head {
+    padding: 17px 13px 12px;
+    border-bottom: 1px solid #e6e9f1;
+  }
+  .rail-title { font-size: 12px; font-weight: 730; }
+  .rail-meta { margin-top: 3px; color:#98a2b3; font-size:7px; }
+  .rail-search {
+    display: flex;
+    align-items: center;
+    height: 28px;
+    margin: 10px 10px 6px;
+    padding: 0 9px;
+    border: 1px solid #dfe3ec;
+    border-radius: 7px;
+    background: #fff;
+    color: #98a2b3;
+    font-size: 7px;
+  }
+  .rail-row {
+    margin: 2px 7px;
+    padding: 9px 9px;
+    border-radius: 8px;
+  }
+  .rail-row.active { background:#eef0ff; }
+  .rail-row strong { display:block; color:#344054; font-size:8px; }
+  .rail-row span { display:block; margin-top:3px; color:#98a2b3; font-size:6px; }
+  .work-area { min-width:0; background:#f7f8fc; }
+  .work-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 58px;
+    padding: 0 17px;
+    border-bottom: 1px solid #e6e9f1;
+    background: #fff;
+  }
+  .work-toolbar .title { font-size:14px; font-weight:740; }
+  .count { padding:3px 7px; border-radius:999px; background:#f2f4f7; color:#667085; font-size:7px; }
+  .toolbar-space { flex:1; }
+  .tool {
+    display:flex;
+    align-items:center;
+    height:28px;
+    padding:0 9px;
+    border:1px solid #dfe3ec;
+    border-radius:7px;
+    background:#fff;
+    color:#475467;
+    font-size:7px;
+  }
+  .tool.primary { border-color:#5b5fe8; background:#5b5fe8; color:white; font-weight:700; }
+  .content-pad { padding: 15px 17px; }
+  .filter-row { display:flex; gap:5px; margin-bottom:11px; }
+  .filter {
+    padding:5px 8px;
+    border-radius:6px;
+    color:#667085;
+    font-size:7px;
+  }
+  .filter.active { background:#eef0ff; color:#4f46e5; font-weight:700; }
+  .cards {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+  }
+  .content-card {
+    overflow:hidden;
+    border:1px solid #e3e7ef;
+    border-radius:11px;
+    background:#fff;
+  }
+  .thumb {
+    height:83px;
+    position:relative;
+    background:linear-gradient(135deg,#cdd4e4,#eef1f7);
+  }
+  .thumb::after {
+    content:"";
+    position:absolute;
+    inset:17px 28px;
+    border-radius:8px;
+    background:linear-gradient(135deg,#6370ac,#1e2948);
+    opacity:.75;
+  }
+  .card-copy { padding:10px; }
+  .card-copy strong { display:block; font-size:8px; line-height:1.45; }
+  .card-copy span { display:block; margin-top:5px; color:#98a2b3; font-size:6px; }
+  .editor-frame {
+    display:grid;
+    min-height:430px;
+    grid-template-columns:142px 205px minmax(0,1fr);
+  }
+  .asset-list {
+    border-right:1px solid #e6e9f1;
+    background:#fbfcfe;
+  }
+  .asset-head { padding:16px 13px 10px; border-bottom:1px solid #e6e9f1; }
+  .asset-head strong { font-size:12px; }
+  .asset-head span { float:right; color:#5b5fe8; font-size:8px; }
+  .asset-item { padding:12px 13px; border-bottom:1px solid #eef0f4; }
+  .asset-item.active { background:#eef0ff; border-left:3px solid #6366f1; padding-left:10px; }
+  .asset-item strong { display:block; font-size:8px; line-height:1.35; }
+  .asset-item p { margin:4px 0 0; color:#98a2b3; font-size:6px; line-height:1.4; }
+  .editor {
+    min-width:0;
+    background:#fff;
+  }
+  .editor-toolbar {
+    display:flex;
+    align-items:center;
+    gap:7px;
+    height:58px;
+    padding:0 18px;
+    border-bottom:1px solid #e6e9f1;
+  }
+  .editor-toolbar strong { font-size:14px; }
+  .editor-body { max-width:700px; padding:26px 32px; }
+  .title-field {
+    padding-bottom:15px;
+    border-bottom:1px solid #edf0f5;
+    color:#172033;
+    font-size:22px;
+    font-weight:740;
+    letter-spacing:-.03em;
+  }
+  .source-field {
+    margin-top:13px;
+    padding:9px 11px;
+    border:1px solid #e2e6ef;
+    border-radius:8px;
+    color:#98a2b3;
+    font-size:8px;
+  }
+  .markdown {
+    margin-top:22px;
+    color:#475467;
+    font-size:9px;
+    line-height:1.8;
+  }
+  .markdown h4 { margin:0 0 9px; color:#172033; font-size:14px; }
+  .markdown p { margin:0 0 10px; }
+  .template-strip {
+    display:grid;
+    grid-template-columns:repeat(5,1fr);
+    gap:9px;
+    margin-top:18px;
+  }
+  .template {
+    padding:13px;
+    border:1px solid #e6e9f1;
+    border-radius:12px;
+    background:#fff;
+  }
+  .template strong { display:block; color:#344054; font-size:11px; }
+  .template span { display:block; margin-top:4px; color:#98a2b3; font-size:8px; line-height:1.45; }
+  .approval { display:flex; gap:10px; margin-top:18px; }
+  .approval .option { flex:1; min-height:auto; }
+  @media(max-width:1050px) {
+    .app-frame,.editor-frame { grid-template-columns:110px 160px minmax(0,1fr); }
+    .cards { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  }
+</style>
+
+<div class="architecture">
+  <h2>统一页面骨架</h2>
+  <p class="subtitle">固定一级导航，页面按任务再提供二级栏。顶部工具栏永远承担“标题、筛选、主操作”，内容区只保留一种滚动上下文。</p>
+
+  <div class="screen">
+    <div class="screen-bar"><span>模板 01 · 信息源</span><span class="window-dots"><span></span><span></span><span></span></span></div>
+    <div class="app-frame">
+      <aside class="app-nav">
+        <div class="mini-brand"><span class="mini-mark">E</span>Ediora</div>
+        <div class="nav-item"><span class="nav-icon"></span>今日工作台</div>
+        <div class="nav-section">创作</div>
+        <div class="nav-item"><span class="nav-icon"></span>草稿箱</div>
+        <div class="nav-item"><span class="nav-icon"></span>创作资产</div>
+        <div class="nav-section">信息源</div>
+        <div class="nav-item active"><span class="nav-icon"></span>YouTube</div>
+        <div class="nav-item"><span class="nav-icon"></span>GitHub</div>
+        <div class="nav-item"><span class="nav-icon"></span>X</div>
+      </aside>
+      <aside class="rail">
+        <div class="rail-head"><div class="rail-title">订阅频道</div><div class="rail-meta">5 个频道 · 46 条视频</div></div>
+        <div class="rail-search">⌕ 搜索频道</div>
+        <div class="rail-row active"><strong>全部频道</strong><span>46 条视频</span></div>
+        <div class="rail-row"><strong>Matt Wolfe</strong><span>12 条 · 10 分钟前</span></div>
+        <div class="rail-row"><strong>Two Minute Papers</strong><span>8 条 · 昨天</span></div>
+        <div class="rail-row"><strong>Sabrina Ramonov</strong><span>16 条 · 刚刚</span></div>
+      </aside>
+      <main class="work-area">
+        <div class="work-toolbar"><span class="title">YouTube</span><span class="count">46 条</span><span class="toolbar-space"></span><button class="tool">搜索</button><button class="tool">筛选</button><button class="tool primary">立即采集</button></div>
+        <div class="content-pad">
+          <div class="filter-row"><span class="filter active">最近</span><span class="filter">7 天</span><span class="filter">30 天</span><span class="filter">全部</span></div>
+          <div class="cards">
+            <article class="content-card"><div class="thumb"></div><div class="card-copy"><strong>AI Agent Systems Are Changing How We Work</strong><span>Matt Wolfe · 18.5K 浏览</span></div></article>
+            <article class="content-card"><div class="thumb" style="background:linear-gradient(135deg,#e6d1ce,#f7ece7)"></div><div class="card-copy"><strong>6 Prompts to Unlock 10× Productivity</strong><span>Sabrina Ramonov · 3.1K 浏览</span></div></article>
+            <article class="content-card"><div class="thumb" style="background:linear-gradient(135deg,#c9d8d4,#eef5f2)"></div><div class="card-copy"><strong>A New Model Has Big AI Labs Panicking</strong><span>字幕已提取 · 待分析</span></div></article>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <div class="screen">
+    <div class="screen-bar"><span>模板 02 · 创作工作台</span><span>列表约 25% · 编辑区约 75%</span></div>
+    <div class="editor-frame">
+      <aside class="app-nav">
+        <div class="mini-brand"><span class="mini-mark">E</span>Ediora</div>
+        <div class="nav-item"><span class="nav-icon"></span>今日工作台</div>
+        <div class="nav-section">创作</div>
+        <div class="nav-item"><span class="nav-icon"></span>草稿箱</div>
+        <div class="nav-item active"><span class="nav-icon"></span>创作资产</div>
+        <div class="nav-item"><span class="nav-icon"></span>数字人口播</div>
+        <div class="nav-section">信息源</div>
+        <div class="nav-item"><span class="nav-icon"></span>YouTube</div>
+        <div class="nav-item"><span class="nav-icon"></span>X</div>
+      </aside>
+      <aside class="asset-list">
+        <div class="asset-head"><strong>文章素材</strong><span>＋ 新增</span></div>
+        <div class="asset-item active"><strong>产品客户信息追踪</strong><p>推荐一个超级好用的 API，不用注册...</p></div>
+        <div class="asset-item"><strong>AI Agent 生态观察</strong><p>从开源项目和视频中整理的行业脉络...</p></div>
+        <div class="asset-item"><strong>副业搞钱素材合集</strong><p>值得二次创作的原始素材与观点...</p></div>
+      </aside>
+      <main class="editor">
+        <div class="editor-toolbar"><strong>编辑素材</strong><span class="toolbar-space"></span><button class="tool">更多</button><button class="tool" style="color:#b42318">删除</button><button class="tool primary">保存</button></div>
+        <div class="editor-body">
+          <div class="title-field">产品客户信息追踪</div>
+          <div class="source-field">https://x.com/example/status/2054…</div>
+          <div class="markdown"><h4>核心观点</h4><p>推荐一个适合产品团队使用的信息追踪方案。它不要求复杂注册，也不依赖额外密钥，可以直接获取公开内容。</p><p>编辑区使用统一 Markdown 工具栏；灵感、素材、工作流和发布等次级操作放进顶部工具条或侧边抽屉。</p></div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <div class="template-strip">
+    <div class="template"><strong>概览页</strong><span>页面标题 + 指标 + 工作队列，不堆叠无意义卡片。</span></div>
+    <div class="template"><strong>信息源页</strong><span>二级来源栏 + 统一工具栏 + 列表或媒体网格。</span></div>
+    <div class="template"><strong>创作页</strong><span>25% 列表 + 75% 编辑器，扩展操作使用抽屉。</span></div>
+    <div class="template"><strong>阅读页</strong><span>内容流 + 统一 460px 阅读器，可折叠而非随页面各写一套。</span></div>
+    <div class="template"><strong>设置页</strong><span>240px 设置导航 + 760px 表单列，统一 FormSection。</span></div>
+  </div>
+
+  <div class="approval options">
+    <div class="option" data-choice="architecture-approved" onclick="toggleSelect(this)">
+      <div class="letter">✓</div>
+      <div class="content"><h3>页面骨架可以</h3><p>继续确认组件状态与交互规则。</p></div>
+    </div>
+    <div class="option" data-choice="architecture-adjust" onclick="toggleSelect(this)">
+      <div class="letter">↺</div>
+      <div class="content"><h3>需要调整</h3><p>告诉我哪类页面的栏宽、密度或工具栏需要修改。</p></div>
+    </div>
+  </div>
+</div>

@@ -11,6 +11,7 @@ import type { PublishAccount } from '@/lib/api/publish-accounts'
 const mocks = vi.hoisted(() => ({
   updateDraft: vi.fn(),
   getDrafts: vi.fn(),
+  getDraftPage: vi.fn(),
   getDraftImages: vi.fn(),
   deleteDraft: vi.fn(),
   getWritingPlans: vi.fn(),
@@ -38,6 +39,7 @@ vi.mock('@/lib/api/drafts', async importOriginal => {
     ...original,
     updateDraft: mocks.updateDraft,
     getDrafts: mocks.getDrafts,
+    getDraftPage: mocks.getDraftPage,
     getDraftImages: mocks.getDraftImages,
     deleteDraft: mocks.deleteDraft,
   }
@@ -65,15 +67,16 @@ vi.mock('@/lib/api/publish-accounts', async importOriginal => {
   return { ...original, listPublishAccounts: mocks.listPublishAccounts }
 })
 
-vi.mock('./MarkdownEditor', () => ({
+vi.mock('@/components/MarkdownEditor', () => ({
   MarkdownEditor: React.forwardRef<
-    unknown,
-    { value: string; onChange: (value: string) => void }
-  >(function MarkdownEditor({ value, onChange }, ref) {
-    void ref
+    { insert: (markdown: string) => void },
+    { documentKey: number; value: string; onChange: (value: string) => void }
+  >(function MarkdownEditor({ documentKey, value, onChange }, ref) {
+    React.useImperativeHandle(ref, () => ({ insert: () => {} }), [])
     return (
       <textarea
         aria-label="草稿正文"
+        data-document-key={documentKey}
         value={value}
         onChange={event => onChange(event.target.value)}
       />
@@ -134,7 +137,6 @@ const publishAccount: PublishAccount = {
   topic_focus: ['AI'],
   taboo: [],
   word_range: {},
-  daily_quota: {},
   image_style: 'editorial',
   cover_style: { palette: 'cool' },
   voice_samples: [],
@@ -157,6 +159,7 @@ const refreshedImage = {
 
 beforeEach(() => {
   mocks.getDrafts.mockResolvedValue([draftA, draftB])
+  mocks.getDraftPage.mockResolvedValue({ items: [draftA, draftB], next_cursor: null })
   mocks.getDraftImages.mockResolvedValue([])
   mocks.getWritingPlans.mockResolvedValue([])
   mocks.deleteDraft.mockResolvedValue(undefined)
@@ -172,6 +175,18 @@ afterEach(() => {
 })
 
 describe('DraftsClient async response identity', () => {
+  it('passes the active draft id to the shared Markdown editor', () => {
+    render(
+      <DraftsClient
+        initialDrafts={[draftA]}
+        initialTopics={[]}
+        initialDraftId={draftA.id}
+      />,
+    )
+
+    expect(screen.getByLabelText('草稿正文')).toHaveAttribute('data-document-key', '1')
+  })
+
   it('does not let a stale A save response reclaim selection after switching to B', async () => {
     const pendingSave = deferred<Draft>()
     mocks.updateDraft.mockReturnValue(pendingSave.promise)
@@ -205,8 +220,8 @@ describe('DraftsClient async response identity', () => {
   })
 
   it('does not let a stale A refresh response reclaim selection after switching to B', async () => {
-    const pendingRefresh = deferred<Draft[]>()
-    mocks.getDrafts.mockReturnValue(pendingRefresh.promise)
+    const pendingRefresh = deferred<{ items: Draft[]; next_cursor: string | null }>()
+    mocks.getDraftPage.mockReturnValue(pendingRefresh.promise)
     const { container } = render(
       <DraftsClient
         initialDrafts={[draftA, draftB]}
@@ -220,10 +235,10 @@ describe('DraftsClient async response identity', () => {
     fireEvent.click(screen.getByText('草稿 B').closest('button')!)
 
     await act(async () => {
-      pendingRefresh.resolve([
-        { ...draftA, title: '草稿 A 已刷新', content: 'A 刷新正文', version: 3 },
-        draftB,
-      ])
+      pendingRefresh.resolve({
+        items: [{ ...draftA, title: '草稿 A 已刷新', content: 'A 刷新正文', version: 3 }, draftB],
+        next_cursor: null,
+      })
       await pendingRefresh.promise
     })
 
@@ -327,11 +342,12 @@ describe('DraftsClient independent draft selection', () => {
 
     expect(screen.queryByText('适配平台')).not.toBeInTheDocument()
     expect(screen.queryByText(/同步主版本内容/)).not.toBeInTheDocument()
-    expect(screen.getByRole('checkbox', { name: '选择草稿 A' })).toBeVisible()
-    expect(screen.getByRole('checkbox', { name: '选择X 草稿' })).toBeVisible()
+    expect(screen.queryAllByRole('checkbox')).toHaveLength(0)
+    expect(screen.getByText('草稿 A').closest('button')).toBeVisible()
+    expect(screen.getByText('X 草稿').closest('button')).toBeVisible()
   })
 
-  it('selects a draft without changing the active editor draft', () => {
+  it('Ctrl/Cmd clicks select a draft without changing the active editor draft', () => {
     render(
       <DraftsClient
         initialDrafts={[draftA, draftB]}
@@ -340,14 +356,37 @@ describe('DraftsClient independent draft selection', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('checkbox', { name: '选择草稿 B' }))
+    const draftBRow = screen.getByText('草稿 B').closest('button')!
+    fireEvent.click(draftBRow, { ctrlKey: true })
 
     expect(screen.getByText('已选 1 篇')).toBeInTheDocument()
     expect(screen.getByPlaceholderText('标题…')).toHaveValue('草稿 A')
+    expect(draftBRow).toHaveClass('bg-sky-50')
+
+    fireEvent.click(draftBRow, { metaKey: true })
+    expect(screen.getByText('已选 0 篇')).toBeInTheDocument()
   })
 
-  it('selects all current results and removes hidden drafts when the status filter changes', async () => {
+  it('opens a Ctrl-selected draft without changing bulk selection on a normal click', () => {
+    render(
+      <DraftsClient
+        initialDrafts={[draftA, draftB]}
+        initialTopics={[]}
+        initialDraftId={draftA.id}
+      />,
+    )
+
+    const draftBRow = screen.getByText('草稿 B').closest('button')!
+    fireEvent.click(draftBRow, { ctrlKey: true })
+    fireEvent.click(draftBRow)
+
+    expect(screen.getByPlaceholderText('标题…')).toHaveValue('草稿 B')
+    expect(screen.getByText('已选 1 篇')).toBeInTheDocument()
+  })
+
+  it('clears the batch selection and reloads the server result when the status filter changes', async () => {
     const readyDraftB = { ...draftB, status: 'ready' }
+    mocks.getDraftPage.mockResolvedValue({ items: [readyDraftB], next_cursor: null })
     render(
       <DraftsClient
         initialDrafts={[draftA, readyDraftB]}
@@ -356,14 +395,37 @@ describe('DraftsClient independent draft selection', () => {
       />,
     )
 
-    fireEvent.click(screen.getByRole('button', { name: '全选当前结果' }))
+    fireEvent.click(screen.getByText('草稿 A').closest('button')!, { ctrlKey: true })
+    fireEvent.click(screen.getByText('草稿 B').closest('button')!, { ctrlKey: true })
     expect(screen.getByText('已选 2 篇')).toBeInTheDocument()
 
     fireEvent.change(screen.getByLabelText('按状态筛选'), { target: { value: 'ready' } })
 
-    await waitFor(() => expect(screen.getByText('已选 1 篇')).toBeInTheDocument())
-    expect(screen.getByRole('checkbox', { name: '选择草稿 B' })).toBeChecked()
-    expect(screen.queryByRole('checkbox', { name: '选择草稿 A' })).not.toBeInTheDocument()
+    await waitFor(() => expect(screen.getByText('草稿 B')).toBeInTheDocument())
+    expect(screen.queryByText('已选 1 篇')).not.toBeInTheDocument()
+    expect(screen.queryByText('草稿 A')).not.toBeInTheDocument()
+  })
+})
+
+describe('DraftsClient themed controls', () => {
+  it('uses semantic theme colors for the header writing-template select', () => {
+    render(
+      <DraftsClient
+        initialDrafts={[draftA]}
+        initialTopics={[]}
+        initialDraftId={draftA.id}
+      />,
+    )
+
+    const select = screen.getByTitle('关联写作模板')
+
+    expect(select).toHaveClass(
+      'bg-surface',
+      'text-foreground',
+      '[color-scheme:light]',
+      'dark:[color-scheme:dark]',
+    )
+    expect(select.querySelector('option')).toHaveClass('bg-surface', 'text-foreground')
   })
 })
 
@@ -382,8 +444,8 @@ describe('DraftsClient bulk image dispatch', () => {
       />,
     )
 
-    await user.click(screen.getByRole('checkbox', { name: '选择草稿 A' }))
-    await user.click(screen.getByRole('checkbox', { name: '选择X 版本' }))
+    fireEvent.click(screen.getByText('草稿 A').closest('button')!, { ctrlKey: true })
+    fireEvent.click(screen.getByText('X 版本').closest('button')!, { ctrlKey: true })
     await user.click(screen.getByRole('button', { name: '批量封面' }))
 
     await user.click(await screen.findByLabelText('发布账号'))
@@ -448,6 +510,54 @@ describe('DraftsClient bulk image dispatch', () => {
   })
 })
 
+describe('DraftsClient bulk status change', () => {
+  it('changes every selected draft to an existing status and clears successful selections', async () => {
+    const user = userEvent.setup()
+    mocks.updateDraft.mockImplementation(async (id: number, body: { status: string }) => ({
+      ...(id === draftA.id ? draftA : draftB),
+      status: body.status,
+    }))
+    render(
+      <DraftsClient
+        initialDrafts={[draftA, draftB]}
+        initialTopics={[]}
+        initialDraftId={draftA.id}
+      />,
+    )
+
+    fireEvent.click(screen.getByText('草稿 A').closest('button')!, { ctrlKey: true })
+    fireEvent.click(screen.getByText('草稿 B').closest('button')!, { ctrlKey: true })
+    await user.click(screen.getByRole('button', { name: '变更状态' }))
+    await user.selectOptions(screen.getByLabelText('目标状态'), 'ready')
+    await user.click(screen.getByRole('button', { name: '确认变更状态' }))
+
+    await waitFor(() => expect(mocks.updateDraft).toHaveBeenCalledTimes(2))
+    expect(mocks.updateDraft).toHaveBeenNthCalledWith(1, draftA.id, { status: 'ready' })
+    expect(mocks.updateDraft).toHaveBeenNthCalledWith(2, draftB.id, { status: 'ready' })
+    expect(screen.getByText('已选 0 篇')).toBeInTheDocument()
+    expect(mocks.toastSuccess).toHaveBeenCalledWith('批量状态变更完成：成功 2，失败 0')
+  })
+
+  it('keeps failed status changes selected and reports a partial failure', async () => {
+    const user = userEvent.setup()
+    mocks.updateDraft.mockImplementation(async (id: number, body: { status: string }) => {
+      if (id === draftB.id) throw new Error('状态更新被拒绝')
+      return { ...draftA, status: body.status }
+    })
+    render(<DraftsClient initialDrafts={[draftA, draftB]} initialTopics={[]} initialDraftId={draftA.id} />)
+
+    await user.click(screen.getByRole('button', { name: '全选当前结果' }))
+    await user.click(screen.getByRole('button', { name: '变更状态' }))
+    await user.selectOptions(screen.getByLabelText('目标状态'), 'archived')
+    await user.click(screen.getByRole('button', { name: '确认变更状态' }))
+
+    await waitFor(() => expect(mocks.updateDraft).toHaveBeenCalledTimes(2))
+    expect(screen.getByText('已选 1 篇')).toBeInTheDocument()
+    expect(screen.getByText('草稿 B').closest('button')).toHaveClass('bg-sky-50')
+    expect(mocks.toastError).toHaveBeenCalledWith('批量状态变更完成：成功 1，失败 1')
+  })
+})
+
 describe('DraftsClient bulk draft deletion', () => {
   it('deletes every selected draft once and refreshes once after all settle', async () => {
     const user = userEvent.setup()
@@ -460,7 +570,7 @@ describe('DraftsClient bulk draft deletion', () => {
       draft_type: 'mp',
     }
     const articleB = makeDraft(4, '文章 B', 'B 正文', 1)
-    mocks.getDrafts.mockResolvedValue([])
+    mocks.getDraftPage.mockResolvedValue({ items: [], next_cursor: null })
     render(
       <DraftsClient
         initialDrafts={[draftA, xDraft, mpDraft, articleB]}
@@ -477,7 +587,7 @@ describe('DraftsClient bulk draft deletion', () => {
     await waitFor(() => expect(mocks.deleteDraft).toHaveBeenCalledTimes(4))
     const calls = mocks.deleteDraft.mock.calls.map(([id]) => id)
     expect(calls.sort((a, b) => a - b)).toEqual([1, 2, 3, 4])
-    expect(mocks.getDrafts).toHaveBeenCalledTimes(1)
+    expect(mocks.getDraftPage).toHaveBeenCalledTimes(1)
     await waitFor(() => expect(screen.getByText('选择一篇草稿开始编辑')).toBeInTheDocument())
     expect(mocks.toastSuccess).toHaveBeenCalledWith('批量删除完成：成功 4，失败 0')
   })
@@ -487,7 +597,7 @@ describe('DraftsClient bulk draft deletion', () => {
     mocks.deleteDraft.mockImplementation(async (id: number) => {
       if (id === draftB.id) throw new Error('删除被拒绝')
     })
-    mocks.getDrafts.mockResolvedValue([draftB])
+    mocks.getDraftPage.mockResolvedValue({ items: [draftB], next_cursor: null })
     render(
       <DraftsClient
         initialDrafts={[draftA, draftB]}
@@ -500,11 +610,46 @@ describe('DraftsClient bulk draft deletion', () => {
     await user.click(screen.getByRole('button', { name: '批量删除' }))
     await user.click(screen.getByRole('button', { name: '确认删除' }))
 
-    await waitFor(() => expect(mocks.getDrafts).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(mocks.getDraftPage).toHaveBeenCalledTimes(1))
     await waitFor(() => expect(screen.getByPlaceholderText('标题…')).toHaveValue('草稿 B'))
     expect(screen.queryByText('草稿 A')).not.toBeInTheDocument()
     expect(screen.getByText('已选 1 篇')).toBeInTheDocument()
-    expect(screen.getByRole('checkbox', { name: '选择草稿 B' })).toBeChecked()
+    expect(screen.getByText('草稿 B').closest('button')).toHaveClass('bg-sky-50')
     expect(mocks.toastError).toHaveBeenCalledWith('批量删除完成：成功 1，失败 1')
+  })
+})
+
+describe('DraftsClient incremental loading', () => {
+  it('loads and renders the next page when the list sentinel becomes visible', async () => {
+    let onIntersect: IntersectionObserverCallback | undefined
+    class TestIntersectionObserver {
+      constructor(callback: IntersectionObserverCallback) {
+        onIntersect = callback
+      }
+      observe() {}
+      disconnect() {}
+      unobserve() {}
+      takeRecords() { return [] }
+      root = null
+      rootMargin = ''
+      thresholds = []
+    }
+    vi.stubGlobal('IntersectionObserver', TestIntersectionObserver)
+    mocks.getDraftPage.mockResolvedValue({ items: [draftB], next_cursor: null })
+
+    render(
+      <DraftsClient
+        initialDrafts={[draftA]}
+        initialNextCursor="next-page"
+        initialTopics={[]}
+        initialDraftId={draftA.id}
+      />,
+    )
+
+    await act(async () => {
+      onIntersect?.([{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver)
+    })
+
+    await waitFor(() => expect(screen.getByText('草稿 B')).toBeInTheDocument())
   })
 })

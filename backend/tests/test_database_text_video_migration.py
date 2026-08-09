@@ -5,12 +5,10 @@ from sqlalchemy import inspect, text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 
-def test_text_video_project_migration_is_idempotent(tmp_path):
+def test_text_video_project_migration_is_idempotent(postgres_database_url):
     from database import migrate_text_video_project_schema
 
-    engine = create_async_engine(
-        f"sqlite+aiosqlite:///{tmp_path / 'text-video-migration.db'}",
-    )
+    engine = create_async_engine(postgres_database_url)
 
     async def run():
         async with engine.begin() as connection:
@@ -54,12 +52,12 @@ def test_text_video_project_migration_is_idempotent(tmp_path):
     } <= columns
 
 
-def test_text_video_project_migration_normalizes_legacy_speech_documents(tmp_path):
+def test_text_video_project_migration_normalizes_legacy_speech_documents(
+    postgres_database_url,
+):
     from database import migrate_text_video_project_schema
 
-    engine = create_async_engine(
-        f"sqlite+aiosqlite:///{tmp_path / 'text-video-documents.db'}",
-    )
+    engine = create_async_engine(postgres_database_url)
 
     async def run():
         async with engine.begin() as connection:
@@ -108,10 +106,10 @@ def test_text_video_project_migration_normalizes_legacy_speech_documents(tmp_pat
 
     rows = asyncio.run(run())
 
-    first_paragraphs = json.loads(rows[0]["paragraphs"])
-    second_paragraphs = json.loads(rows[1]["paragraphs"])
-    first_master = json.loads(rows[0]["master_audio"])
-    second_master = json.loads(rows[1]["master_audio"])
+    first_paragraphs = rows[0]["paragraphs"]
+    second_paragraphs = rows[1]["paragraphs"]
+    first_master = rows[0]["master_audio"]
+    second_master = rows[1]["master_audio"]
     assert rows[0]["speech_split_mode"] == "single"
     assert [item["text"] for item in first_paragraphs] == ["第一句。\n第二句。"]
     assert rows[1]["speech_split_mode"] == "manual"
@@ -120,12 +118,12 @@ def test_text_video_project_migration_normalizes_legacy_speech_documents(tmp_pat
     assert second_master["status"] == "missing"
 
 
-def test_text_video_project_migration_preserves_authoritative_state_on_restart(tmp_path):
+def test_text_video_project_migration_preserves_authoritative_state_on_restart(
+    postgres_database_url,
+):
     from database import migrate_text_video_project_schema
 
-    engine = create_async_engine(
-        f"sqlite+aiosqlite:///{tmp_path / 'text-video-restart.db'}",
-    )
+    engine = create_async_engine(postgres_database_url)
 
     async def run():
         async with engine.begin() as connection:
@@ -171,9 +169,9 @@ def test_text_video_project_migration_preserves_authoritative_state_on_restart(t
     row = asyncio.run(run())
 
     assert row["speech_split_mode"] == "auto"
-    assert json.loads(row["master_audio"])["status"] == "ready"
-    assert json.loads(row["scene_plan"])["status"] == "ready"
-    assert json.loads(row["render_state"]) == {
+    assert row["master_audio"]["status"] == "ready"
+    assert row["scene_plan"]["status"] == "ready"
+    assert row["render_state"] == {
         "status": "missing",
         "generation": 0,
         "source_hash": "",
@@ -186,13 +184,11 @@ def test_text_video_project_migration_preserves_authoritative_state_on_restart(t
 
 
 def test_text_video_project_migration_normalizes_legacy_template_props_once(
-    tmp_path,
+    postgres_database_url,
 ):
     from database import migrate_text_video_project_schema
 
-    engine = create_async_engine(
-        f"sqlite+aiosqlite:///{tmp_path / 'text-video-template-props.db'}",
-    )
+    engine = create_async_engine(postgres_database_url)
     legacy_render_input = {
         "templateId": "tech-text-v1",
         "templateVersion": 1,
@@ -276,9 +272,9 @@ def test_text_video_project_migration_normalizes_legacy_template_props_once(
 
     legacy_with_output, legacy_without_output, complete_project = second_rows
     assert legacy_with_output["output_asset_url"] == "/api/uploads/old.mp4"
-    assert legacy_with_output["output_stale"] == 1
-    assert legacy_without_output["output_stale"] == 0
-    assert json.loads(legacy_with_output["render_input"])["templateProps"][
+    assert legacy_with_output["output_stale"] is True
+    assert legacy_without_output["output_stale"] is False
+    assert legacy_with_output["render_input"]["templateProps"][
         "brandTitle"
     ] == "EDIORA"
-    assert complete_project["output_stale"] == 0
+    assert complete_project["output_stale"] is False

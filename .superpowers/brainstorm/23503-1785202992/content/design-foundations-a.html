@@ -1,0 +1,295 @@
+<style>
+  .foundation-wrap {
+    font-family: Inter, "PingFang SC", "Microsoft YaHei", sans-serif;
+    color: #172033;
+  }
+  .foundation-grid {
+    display: grid;
+    grid-template-columns: 1.08fr .92fr;
+    gap: 18px;
+    margin-top: 22px;
+  }
+  .spec-card {
+    padding: 21px;
+    border: 1px solid #e6e9f1;
+    border-radius: 16px;
+    background: #fff;
+    box-shadow: 0 8px 26px rgba(30, 39, 65, .05);
+  }
+  .spec-card h3 {
+    margin: 0 0 5px;
+    font-size: 17px;
+    letter-spacing: -.02em;
+  }
+  .spec-card > p {
+    margin: 0 0 18px;
+    color: #667085;
+    font-size: 12px;
+    line-height: 1.55;
+  }
+  .palette-title {
+    margin: 17px 0 8px;
+    color: #667085;
+    font-size: 10px;
+    font-weight: 750;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+  }
+  .palette-row {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 7px;
+  }
+  .color-chip {
+    overflow: hidden;
+    border: 1px solid #e6e9f1;
+    border-radius: 10px;
+    background: #fff;
+  }
+  .color {
+    height: 49px;
+  }
+  .color-meta {
+    padding: 7px;
+    font-size: 9px;
+  }
+  .color-meta strong {
+    display: block;
+    margin-bottom: 2px;
+    color: #344054;
+    font-size: 9px;
+  }
+  .color-meta span {
+    color: #98a2b3;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 8px;
+  }
+  .semantic-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 7px;
+  }
+  .semantic {
+    padding: 10px;
+    border-radius: 10px;
+    font-size: 10px;
+    font-weight: 700;
+  }
+  .type-sample {
+    display: grid;
+    grid-template-columns: 86px 1fr auto;
+    gap: 10px;
+    align-items: baseline;
+    padding: 11px 0;
+    border-bottom: 1px solid #eef0f4;
+  }
+  .type-sample:last-child { border-bottom: 0; }
+  .type-name { color: #667085; font-size: 10px; }
+  .type-size { color: #98a2b3; font-family: ui-monospace, monospace; font-size: 9px; }
+  .components {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    padding: 14px;
+    border: 1px solid #e6e9f1;
+    border-radius: 12px;
+    background: #f8f9fc;
+  }
+  .button-primary, .button-secondary, .button-quiet {
+    height: 36px;
+    padding: 0 13px;
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 680;
+  }
+  .button-primary {
+    border: 1px solid #5b5fe8;
+    background: #5b5fe8;
+    color: #fff;
+  }
+  .button-secondary {
+    border: 1px solid #d9deea;
+    background: #fff;
+    color: #344054;
+  }
+  .button-quiet {
+    border: 1px solid transparent;
+    background: transparent;
+    color: #5b5fe8;
+  }
+  .field {
+    display: flex;
+    align-items: center;
+    width: 165px;
+    height: 36px;
+    padding: 0 11px;
+    border: 1px solid #d9deea;
+    border-radius: 8px;
+    background: #fff;
+    color: #98a2b3;
+    font-size: 11px;
+  }
+  .badge {
+    padding: 4px 8px;
+    border-radius: 999px;
+    background: #f2f4f7;
+    color: #667085;
+    font-size: 10px;
+    font-weight: 650;
+  }
+  .badge-ai { background: #f4ebff; color: #7c3aed; }
+  .badge-data { background: #e8fbff; color: #078ca5; }
+  .dimension-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+    margin-top: 14px;
+  }
+  .dimension {
+    padding: 11px;
+    border: 1px solid #e6e9f1;
+    border-radius: 11px;
+    background: #fff;
+  }
+  .dimension strong { display: block; font-size: 15px; color: #344054; }
+  .dimension span { font-size: 9px; color: #98a2b3; }
+  .mode-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-top: 17px;
+  }
+  .mode {
+    min-height: 118px;
+    padding: 12px;
+    border-radius: 12px;
+  }
+  .mode.light {
+    border: 1px solid #e6e9f1;
+    background: #f7f8fc;
+    color: #172033;
+  }
+  .mode.dark {
+    border: 1px solid #272f42;
+    background: #0e111b;
+    color: #f0f2f8;
+  }
+  .mode-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 13px;
+    font-size: 10px;
+    font-weight: 700;
+  }
+  .mode-panel {
+    display: flex;
+    gap: 7px;
+    align-items: center;
+    padding: 9px;
+    border-radius: 8px;
+    font-size: 9px;
+  }
+  .light .mode-panel { border: 1px solid #e6e9f1; background: #fff; }
+  .dark .mode-panel { border: 1px solid #272f42; background: #151a27; }
+  .mode-dot { width: 7px; height: 7px; border-radius: 50%; background:#6366f1; }
+  .approval {
+    display: flex;
+    gap: 10px;
+    margin-top: 20px;
+  }
+  .approval .option {
+    flex: 1;
+    min-height: auto;
+  }
+  @media (max-width: 900px) {
+    .foundation-grid { grid-template-columns: 1fr; }
+  }
+</style>
+
+<div class="foundation-wrap">
+  <h2>A 方案 · 设计基础</h2>
+  <p class="subtitle">主色只负责操作，青色只表达采集与数据，紫色只表达 AI。所有页面不再直接使用平台色作为主操作色。</p>
+
+  <div class="foundation-grid">
+    <div class="spec-card">
+      <h3>色彩系统</h3>
+      <p>低饱和冷白作为画布，纯白承载工作区；深墨蓝代替纯黑，降低长时间阅读疲劳。</p>
+
+      <div class="palette-title">品牌与操作</div>
+      <div class="palette-row">
+        <div class="color-chip"><div class="color" style="background:#5b5fe8"></div><div class="color-meta"><strong>Primary</strong><span>#5B5FE8</span></div></div>
+        <div class="color-chip"><div class="color" style="background:#eef0ff"></div><div class="color-meta"><strong>Selected</strong><span>#EEF0FF</span></div></div>
+        <div class="color-chip"><div class="color" style="background:#22c3de"></div><div class="color-meta"><strong>Data</strong><span>#22C3DE</span></div></div>
+        <div class="color-chip"><div class="color" style="background:#8b5cf6"></div><div class="color-meta"><strong>AI</strong><span>#8B5CF6</span></div></div>
+        <div class="color-chip"><div class="color" style="background:#172033"></div><div class="color-meta"><strong>Ink</strong><span>#172033</span></div></div>
+      </div>
+
+      <div class="palette-title">中性色</div>
+      <div class="palette-row">
+        <div class="color-chip"><div class="color" style="background:#f7f8fc"></div><div class="color-meta"><strong>Canvas</strong><span>#F7F8FC</span></div></div>
+        <div class="color-chip"><div class="color" style="background:#ffffff"></div><div class="color-meta"><strong>Surface</strong><span>#FFFFFF</span></div></div>
+        <div class="color-chip"><div class="color" style="background:#e6e9f1"></div><div class="color-meta"><strong>Border</strong><span>#E6E9F1</span></div></div>
+        <div class="color-chip"><div class="color" style="background:#667085"></div><div class="color-meta"><strong>Muted</strong><span>#667085</span></div></div>
+        <div class="color-chip"><div class="color" style="background:#98a2b3"></div><div class="color-meta"><strong>Subtle</strong><span>#98A2B3</span></div></div>
+      </div>
+
+      <div class="palette-title">状态色只表达状态</div>
+      <div class="semantic-row">
+        <div class="semantic" style="background:#ecfdf3;color:#067647">成功</div>
+        <div class="semantic" style="background:#fffaeb;color:#b54708">警告</div>
+        <div class="semantic" style="background:#fef3f2;color:#b42318">错误</div>
+        <div class="semantic" style="background:#eff8ff;color:#026aa2">信息</div>
+      </div>
+
+      <div class="mode-grid">
+        <div class="mode light"><div class="mode-head"><span>Light</span><span style="color:#667085">默认</span></div><div class="mode-panel"><span class="mode-dot"></span><span>清晰、轻盈的内容工作区</span></div></div>
+        <div class="mode dark"><div class="mode-head"><span>Dark</span><span style="color:#98a2b3">完整映射</span></div><div class="mode-panel"><span class="mode-dot"></span><span>不是简单颜色反转</span></div></div>
+      </div>
+    </div>
+
+    <div>
+      <div class="spec-card">
+        <h3>字体与信息层级</h3>
+        <p>中文优先系统字体，英文与数字使用 Geist Sans；只保留 5 个层级，取消 9–11px 的碎片字号。</p>
+        <div class="type-sample"><span class="type-name">页面标题</span><strong style="font-size:28px;line-height:34px;letter-spacing:-.03em">今日工作台</strong><span class="type-size">28 / 34</span></div>
+        <div class="type-sample"><span class="type-name">区块标题</span><strong style="font-size:18px;line-height:26px">优先事项</strong><span class="type-size">18 / 26</span></div>
+        <div class="type-sample"><span class="type-name">列表标题</span><strong style="font-size:14px;line-height:20px">AI Agent 行业观察</strong><span class="type-size">14 / 20</span></div>
+        <div class="type-sample"><span class="type-name">正文</span><span style="font-size:14px;line-height:22px">用于表单、说明与内容摘要</span><span class="type-size">14 / 22</span></div>
+        <div class="type-sample"><span class="type-name">辅助信息</span><span style="font-size:12px;line-height:18px;color:#667085">2 分钟前 · 已采集 18 条</span><span class="type-size">12 / 18</span></div>
+      </div>
+
+      <div class="spec-card" style="margin-top:18px">
+        <h3>控件语言与密度</h3>
+        <p>默认中等密度；信息流可用紧凑行，但字号不再缩小。按钮、输入框、标签统一视觉语法。</p>
+        <div class="components">
+          <button class="button-primary">发起任务</button>
+          <button class="button-secondary">筛选</button>
+          <button class="button-quiet">查看全部</button>
+          <div class="field">搜索标题或频道</div>
+          <span class="badge">草稿</span>
+          <span class="badge badge-data">已采集</span>
+          <span class="badge badge-ai">AI 分析</span>
+        </div>
+        <div class="dimension-grid">
+          <div class="dimension"><strong>32px</strong><span>紧凑控件</span></div>
+          <div class="dimension"><strong>36px</strong><span>默认控件</span></div>
+          <div class="dimension"><strong>8px</strong><span>控件圆角</span></div>
+          <div class="dimension"><strong>12px</strong><span>面板圆角</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="approval options">
+    <div class="option" data-choice="foundation-approved" onclick="toggleSelect(this)">
+      <div class="letter">✓</div>
+      <div class="content"><h3>这一层可以</h3><p>继续看页面骨架与创作编辑器布局。</p></div>
+    </div>
+    <div class="option" data-choice="foundation-adjust" onclick="toggleSelect(this)">
+      <div class="letter">↺</div>
+      <div class="content"><h3>需要调整</h3><p>告诉我想改颜色、字体或界面密度中的哪一项。</p></div>
+    </div>
+  </div>
+</div>

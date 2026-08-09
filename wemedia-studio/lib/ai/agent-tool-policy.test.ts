@@ -2,7 +2,7 @@ import { tool, type ToolSet } from 'ai'
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
 
-import { applyAgentToolPolicy } from './agent-tool-policy'
+import { applyAgentToolPolicy, requiresToolApproval } from './agent-tool-policy'
 import type { AgentToolAudit } from './agent-runtime-types'
 
 type ExecutableTool = {
@@ -26,6 +26,10 @@ function valueTool(onExecute: (value: string) => void = () => undefined) {
 }
 
 describe('Agent tool policy', () => {
+  it('classifies usage-ledger recording as a fenced side effect', () => {
+    expect(requiresToolApproval('record_content_usage')).toBe(true)
+  })
+
   it('automatically approves a sensitive tool and audits its real result', async () => {
     const audits: AgentToolAudit[] = []
     const tools = applyAgentToolPolicy({ save_item: valueTool() }, {

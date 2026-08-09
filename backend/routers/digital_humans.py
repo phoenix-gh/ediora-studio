@@ -282,7 +282,11 @@ async def role_worker_context(
 ):
     role = await _get_role(db, role_id)
     if role.setup_job_id != job_id:
-        raise HTTPException(409, "该数字人任务已被更新任务替代")
+        raise HTTPException(
+            409,
+            "该数字人任务已被更新任务替代",
+            headers={"X-WMS-Retryable": "false"},
+        )
     portrait = await db.get(CreativeAsset, role.portrait_asset_id)
     voice = await db.get(CreativeAsset, role.voice_sample_asset_id)
     environment = await db.get(CreativeAsset, role.default_environment_asset_id)
@@ -319,7 +323,11 @@ async def role_worker_progress(
         raise HTTPException(409, "数字人任务不存在")
     role = await _get_role(db, role_id, for_update=True)
     if role.setup_job_id != job_id:
-        raise HTTPException(409, "该数字人任务已被更新任务替代")
+        raise HTTPException(
+            409,
+            "该数字人任务已被更新任务替代",
+            headers={"X-WMS-Retryable": "false"},
+        )
     if job.status == "cancelled":
         if role.status == "processing":
             role.status = "failed"

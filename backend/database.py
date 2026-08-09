@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import math
 import os
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
@@ -7,6 +8,7 @@ from sqlalchemy.orm import DeclarativeBase
 _MAX_DATABASE_TIMEOUT_SECONDS = 300.0
 _DEFERRED_SESSION_TASKS_KEY = "wms_deferred_session_tasks"
 _BACKGROUND_DATABASE_TASKS: set[asyncio.Task] = set()
+logger = logging.getLogger(__name__)
 
 
 def _parse_database_timeout_seconds(value: str) -> float:
@@ -33,15 +35,15 @@ def _database_engine_kwargs(
     database_url: str,
     command_timeout_seconds: float,
 ) -> dict:
+    if not database_url.startswith("postgresql+asyncpg://"):
+        raise ValueError(
+            "WMS_DATABASE_URL must use PostgreSQL with the asyncpg driver"
+        )
     options: dict = {"echo": False, "pool_pre_ping": True}
-    if database_url.startswith("sqlite"):
-        options["connect_args"] = {"timeout": command_timeout_seconds}
-    else:
-        options.update(pool_size=10, max_overflow=20)
-        if database_url.startswith("postgresql+asyncpg"):
-            options["connect_args"] = {
-                "command_timeout": command_timeout_seconds,
-            }
+    options.update(pool_size=10, max_overflow=20)
+    options["connect_args"] = {
+        "command_timeout": command_timeout_seconds,
+    }
     return options
 
 
@@ -113,26 +115,13 @@ async def get_db() -> AsyncSession:
             await session.close()
 
 async def migrate_x_response_claim_schema(conn) -> None:
-    """Add the delivery-claim column/index on both SQLite and PostgreSQL."""
+    """Add the delivery-claim column and index."""
     from sqlalchemy import text
 
-    if conn.dialect.name == "sqlite":
-        rows = (
-            await conn.execute(text("PRAGMA table_info(x_response_decisions)"))
-        ).all()
-        if not rows:
-            return
-        columns = {row[1] for row in rows}
-        if "telegram_claim_token" not in columns:
-            await conn.execute(text(
-                "ALTER TABLE x_response_decisions "
-                "ADD COLUMN telegram_claim_token VARCHAR"
-            ))
-    else:
-        await conn.execute(text(
-            "ALTER TABLE x_response_decisions "
-            "ADD COLUMN IF NOT EXISTS telegram_claim_token VARCHAR"
-        ))
+    await conn.execute(text(
+        "ALTER TABLE x_response_decisions "
+        "ADD COLUMN IF NOT EXISTS telegram_claim_token VARCHAR"
+    ))
     await conn.execute(text(
         "CREATE INDEX IF NOT EXISTS "
         "ix_x_response_decisions_telegram_claim_token "
@@ -238,6 +227,199 @@ async def migrate_removed_draft_adaptation_schema(conn) -> None:
             ))
 
 
+async def migrate_topic_source_rule_single_directory(conn) -> None:
+    """Keep one active material directory per X subscription.
+
+    Older UI versions appended a rule when the directory selection changed.
+    Preserve those rows and their decision history, but retain only the newest
+    active rule so future X posts cannot enter a stale directory.
+    """
+    from sqlalchemy import bindparam, inspect, text
+
+    tables = set(await conn.run_sync(
+        lambda sync_connection: inspect(sync_connection).get_table_names()
+    ))
+    if "topic_source_rules" not in tables:
+        return
+    rows = (await conn.execute(text(
+        "SELECT id, subscription_id FROM topic_source_rules "
+        "WHERE enabled = TRUE "
+        "ORDER BY subscription_id ASC, updated_at DESC, id DESC"
+    ))).mappings().all()
+    retained_subscriptions: set[int] = set()
+    stale_rule_ids: list[int] = []
+    for row in rows:
+        subscription_id = row["subscription_id"]
+        if subscription_id in retained_subscriptions:
+            stale_rule_ids.append(row["id"])
+        else:
+            retained_subscriptions.add(subscription_id)
+    if stale_rule_ids:
+        await conn.execute(
+            text("UPDATE topic_source_rules SET enabled = FALSE WHERE id IN :ids")
+            .bindparams(bindparam("ids", expanding=True)),
+            {"ids": stale_rule_ids},
+        )
+
+
+async def migrate_asset_ingestion_schema(conn) -> None:
+    """Move subscription rules into folder-owned AI ingestion settings."""
+    from datetime import datetime, timezone
+    import json
+    from sqlalchemy import inspect, text
+
+    tables = set(await conn.run_sync(
+        lambda sync_connection: inspect(sync_connection).get_table_names()
+    ))
+    required = {
+        "creative_asset_directories",
+        "topic_source_rules",
+        "topic_source_decisions",
+        "x_subscription_ingestion_directories",
+        "asset_ingestion_decisions",
+    }
+    if not required <= tables:
+        return
+
+    now = datetime.now(timezone.utc)
+    directory_ids: dict[str, int] = {}
+    rule_directory_ids: dict[int, int] = {}
+    rule_subscriptions: dict[int, int] = {}
+    configured_directory_ids: set[int] = set()
+
+    rows = (await conn.execute(text(
+        "SELECT id, subscription_id, directory, keywords, screening_prompt, "
+        "enabled, updated_at FROM topic_source_rules "
+        "ORDER BY updated_at DESC NULLS LAST, id DESC"
+    ))).mappings().all()
+
+    for row in rows:
+        name = str(row["directory"] or "").strip()
+        if not name:
+            continue
+        folder_id = directory_ids.get(name)
+        if folder_id is None:
+            existing = (await conn.execute(text(
+                "SELECT id, ai_ingestion_enabled, ai_ingestion_prompt "
+                "FROM creative_asset_directories "
+                "WHERE asset_type = 'article' AND name = :name LIMIT 1"
+            ), {"name": name})).mappings().first()
+            if existing is None:
+                inserted = await conn.execute(text(
+                    "INSERT INTO creative_asset_directories "
+                    "(name, asset_type, ai_ingestion_enabled, "
+                    "ai_ingestion_keywords, ai_ingestion_prompt, created_at) "
+                    "VALUES (:name, 'article', FALSE, '[]', '', :created_at) "
+                    "RETURNING id"
+                ), {"name": name, "created_at": now})
+                folder_id = inserted.scalar_one()
+                existing = {
+                    "id": folder_id,
+                    "ai_ingestion_enabled": False,
+                    "ai_ingestion_prompt": "",
+                }
+            else:
+                folder_id = existing["id"]
+            directory_ids[name] = folder_id
+            if existing["ai_ingestion_enabled"] and str(
+                existing["ai_ingestion_prompt"] or ""
+            ).strip():
+                configured_directory_ids.add(folder_id)
+
+        rule_id = row["id"]
+        rule_directory_ids[rule_id] = folder_id
+        rule_subscriptions[rule_id] = row["subscription_id"]
+
+        if row["enabled"] and folder_id not in configured_directory_ids:
+            keywords = [
+                str(keyword).strip()
+                for keyword in (row["keywords"] or [])
+                if str(keyword).strip()
+            ]
+            prompt = str(row["screening_prompt"] or "").strip()
+            if not prompt:
+                prompt = f"只保留与“{name}”主题直接相关、适合后续创作的内容。"
+            await conn.execute(text(
+                "UPDATE creative_asset_directories SET "
+                "ai_ingestion_enabled = TRUE, "
+                "ai_ingestion_keywords = :keywords, "
+                "ai_ingestion_prompt = :prompt WHERE id = :directory_id"
+            ), {
+                "directory_id": folder_id,
+                "keywords": json.dumps(keywords, ensure_ascii=False),
+                "prompt": prompt,
+            })
+            configured_directory_ids.add(folder_id)
+
+        if row["enabled"] and folder_id in configured_directory_ids:
+            await conn.execute(text(
+                "INSERT INTO x_subscription_ingestion_directories "
+                "(subscription_id, directory_id, created_at) "
+                "VALUES (:subscription_id, :directory_id, :created_at) "
+                "ON CONFLICT (subscription_id, directory_id) DO NOTHING"
+            ), {
+                "subscription_id": row["subscription_id"],
+                "directory_id": folder_id,
+                "created_at": now,
+            })
+
+    old_decisions = (await conn.execute(text(
+        "SELECT rule_id, tweet_id, accepted, created_at "
+        "FROM topic_source_decisions"
+    ))).mappings().all()
+    for decision in old_decisions:
+        rule_id = decision["rule_id"]
+        directory_id = rule_directory_ids.get(rule_id)
+        subscription_id = rule_subscriptions.get(rule_id)
+        if directory_id is None or subscription_id is None:
+            continue
+        await conn.execute(text(
+            "INSERT INTO asset_ingestion_decisions "
+            "(subscription_id, tweet_id, directory_id, created_at) "
+            "VALUES (:subscription_id, :tweet_id, :directory_id, :created_at) "
+            "ON CONFLICT (subscription_id, tweet_id) DO NOTHING"
+        ), {
+            "subscription_id": subscription_id,
+            "tweet_id": decision["tweet_id"],
+            "directory_id": directory_id if decision["accepted"] else None,
+            "created_at": decision["created_at"] or now,
+        })
+
+
+async def migrate_x_subscription_collection_schema(conn) -> None:
+    """Add per-subscription collection intervals and preserve the old default."""
+    from sqlalchemy import inspect, text
+
+    tables = set(await conn.run_sync(
+        lambda sync_connection: inspect(sync_connection).get_table_names()
+    ))
+    if "x_subscriptions" not in tables:
+        return
+    columns = {
+        column["name"]
+        for column in await conn.run_sync(
+            lambda sync_connection: inspect(sync_connection).get_columns("x_subscriptions")
+        )
+    }
+    if "collect_interval_minutes" in columns:
+        return
+    await _add_columns(conn, "x_subscriptions", {
+        "collect_interval_minutes": "INTEGER NOT NULL DEFAULT 15",
+    })
+    if "app_settings" not in tables:
+        return
+    raw_value = (await conn.execute(text(
+        "SELECT value FROM app_settings WHERE key = 'x_collect_interval_minutes'"
+    ))).scalar_one_or_none()
+    try:
+        interval = max(5, min(1440, int(raw_value)))
+    except (TypeError, ValueError):
+        return
+    await conn.execute(text(
+        "UPDATE x_subscriptions SET collect_interval_minutes = :interval"
+    ), {"interval": interval})
+
+
 async def migrate_content_job_idempotency_schema(conn) -> None:
     """Make every non-empty durable-job key unique without losing history."""
     from sqlalchemy import inspect, text
@@ -297,7 +479,7 @@ async def migrate_text_video_speech_asset_schema(conn) -> None:
 
 
 async def _add_columns(conn, table_name: str, definitions: dict[str, str]) -> None:
-    """Add missing columns on SQLite and PostgreSQL without rebuilding tables."""
+    """Add missing PostgreSQL columns without rebuilding tables."""
     from sqlalchemy import inspect, text
 
     tables = set(await conn.run_sync(
@@ -318,6 +500,40 @@ async def _add_columns(conn, table_name: str, definitions: dict[str, str]) -> No
             ))
 
 
+async def migrate_daily_creation_prompt_schema(conn) -> None:
+    """Add canonical prompts and safely backfill legacy creation rules."""
+    from sqlalchemy import text
+
+    from daily_creation_prompt import build_legacy_creation_prompt
+
+    await _add_columns(conn, "daily_creation_rules", {
+        "prompt": "TEXT NOT NULL DEFAULT ''",
+    })
+    rows = (
+        await conn.execute(text(
+            "SELECT id, asset_type, directory, directories, target_count, "
+            "lookback_days, account_id, instructions, skill_mode, skill_name "
+            "FROM daily_creation_rules WHERE trim(prompt) = ''"
+        ))
+    ).mappings().all()
+    for row in rows:
+        try:
+            prompt = build_legacy_creation_prompt(row)
+        except (TypeError, ValueError) as error:
+            await conn.execute(text(
+                "UPDATE daily_creation_rules SET enabled = FALSE, prompt = '' "
+                "WHERE id = :rule_id"
+            ), {"rule_id": row["id"]})
+            logger.warning(
+                "Disabled daily creation rule %s during prompt backfill (%s)",
+                row["id"], type(error).__name__,
+            )
+            continue
+        await conn.execute(text(
+            "UPDATE daily_creation_rules SET prompt = :prompt WHERE id = :rule_id"
+        ), {"prompt": prompt, "rule_id": row["id"]})
+
+
 async def _drop_tables(conn, table_names: tuple[str, ...]) -> None:
     """Drop retired tables with CASCADE only where PostgreSQL supports it."""
     from sqlalchemy import text
@@ -329,20 +545,39 @@ async def _drop_tables(conn, table_names: tuple[str, ...]) -> None:
         ))
 
 
+async def _drop_columns(conn, table_name: str, column_names: tuple[str, ...]) -> None:
+    """Drop retired columns only when an existing table still has them."""
+    from sqlalchemy import inspect, text
+
+    tables = set(await conn.run_sync(
+        lambda sync_connection: inspect(sync_connection).get_table_names()
+    ))
+    if table_name not in tables:
+        return
+    columns = {
+        column["name"]
+        for column in await conn.run_sync(
+            lambda sync_connection: inspect(sync_connection).get_columns(table_name)
+        )
+    }
+    suffix = " IF EXISTS" if conn.dialect.name == "postgresql" else ""
+    for column_name in column_names:
+        if column_name in columns:
+            await conn.execute(text(
+                f'ALTER TABLE "{table_name}" DROP COLUMN{suffix} "{column_name}"'
+            ))
+
+
 async def migrate_text_video_project_schema(conn) -> None:
-    """Keep early text-video project tables compatible across SQLite and PostgreSQL."""
+    """Keep early text-video project tables compatible with current schema."""
     from copy import deepcopy
     import json
 
     from sqlalchemy import JSON, bindparam, inspect, text
 
-    json_object_default = "'{}'" if conn.dialect.name == "sqlite" else "'{}'::json"
-    json_array_default = "'[]'" if conn.dialect.name == "sqlite" else "'[]'::json"
-    timestamp_definition = (
-        "TIMESTAMP"
-        if conn.dialect.name == "sqlite"
-        else "TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP"
-    )
+    json_object_default = "'{}'::json"
+    json_array_default = "'[]'::json"
+    timestamp_definition = "TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP"
     tables = set(await conn.run_sync(
         lambda sync_connection: inspect(sync_connection).get_table_names()
     ))
@@ -378,13 +613,6 @@ async def migrate_text_video_project_schema(conn) -> None:
         "created_at": timestamp_definition,
         "updated_at": timestamp_definition,
     })
-
-    if conn.dialect.name == "sqlite":
-        await conn.execute(text(
-            "UPDATE text_video_projects "
-            "SET created_at = COALESCE(created_at, CURRENT_TIMESTAMP), "
-            "updated_at = COALESCE(updated_at, CURRENT_TIMESTAMP)"
-        ))
 
     from text_video_domain import (
         empty_master_audio,
@@ -527,7 +755,7 @@ async def migrate_content_response_schema(conn) -> None:
         XResponseDecision,
     )
 
-    json_default = "'[]'" if conn.dialect.name == "sqlite" else "'[]'::json"
+    json_default = "'[]'::json"
     await _add_columns(conn, "youtube_channels", {
         "auto_analyze_new_videos": "BOOLEAN NOT NULL DEFAULT FALSE",
         "analysis_enabled_at": "TIMESTAMP",
@@ -569,10 +797,11 @@ async def migrate_content_response_schema(conn) -> None:
                 source_title=((post or {}).get("content", "") or "")[:500],
                 source_author=(post or {}).get("username", ""),
                 source_published_at=(post or {}).get("published_at"),
+                subscription_id=decision["subscription_id"],
                 workflow_status="ready",
                 decision_status={
-                    "used": "adopted",
-                    "ignored": "rejected",
+                    "used": "worth_writing",
+                    "ignored": "not_processed",
                 }.get(decision["workflow_status"], "pending"),
                 created_at=decision["created_at"],
                 updated_at=decision["updated_at"],
@@ -717,6 +946,73 @@ async def migrate_content_response_schema(conn) -> None:
             )
 
 
+async def migrate_intelligence_station_schema(conn) -> None:
+    """Add Intelligence Station fields and map old unified dispositions."""
+    from sqlalchemy import text
+
+    json_default = "'[]'::json"
+    await _add_columns(conn, "content_response_items", {
+        "content_types": f"JSON NOT NULL DEFAULT {json_default}",
+        "destination_type": "VARCHAR",
+        "destination_id": "INTEGER",
+        "subscription_id": "INTEGER",
+    })
+    await _add_columns(conn, "content_analysis_runs", {
+        "suggested_title": "TEXT NOT NULL DEFAULT ''",
+        "suggested_angle": "TEXT NOT NULL DEFAULT ''",
+        "target_reader": "TEXT NOT NULL DEFAULT ''",
+        "suggested_structure": f"JSON NOT NULL DEFAULT {json_default}",
+        "recommended_content_types": f"JSON NOT NULL DEFAULT {json_default}",
+        "recommended_disposition": "VARCHAR NOT NULL DEFAULT 'pending'",
+    })
+    await conn.execute(text(
+        "UPDATE content_response_items "
+        "SET decision_status = CASE decision_status "
+        "WHEN 'adopted' THEN 'worth_writing' "
+        "WHEN 'rejected' THEN 'not_processed' "
+        "WHEN 'later' THEN 'pending' "
+        "ELSE decision_status END "
+        "WHERE decision_status IN ('adopted', 'rejected', 'later')"
+    ))
+
+
+async def migrate_intelligence_subscription_schema(conn) -> None:
+    """Replace the retired realtime-response subscription flags."""
+    from sqlalchemy import inspect, text
+
+    await _add_columns(conn, "x_subscriptions", {
+        "intelligence_enabled": "BOOLEAN NOT NULL DEFAULT FALSE",
+        "intelligence_enabled_at": "TIMESTAMP",
+    })
+    await _drop_columns(
+        conn,
+        "x_subscriptions",
+        ("notify_new_posts", "notify_enabled_at"),
+    )
+    await _drop_columns(
+        conn,
+        "x_posts",
+        ("x_reply_score", "x_reply_draft", "x_reply_notified_at"),
+    )
+    tables = set(await conn.run_sync(
+        lambda sync_connection: inspect(sync_connection).get_table_names()
+    ))
+    if "app_settings" in tables:
+        await conn.execute(text(
+            "DELETE FROM app_settings "
+            "WHERE key IN ('x_notify_enabled', 'x_response_account_id')"
+        ))
+
+
+async def migrate_daily_creation_output_batch_schema(conn) -> None:
+    """Remove the retired daily-plan linkage from creation output batches."""
+    await _drop_columns(
+        conn,
+        "daily_creation_output_batches",
+        ("plan_item_ids",),
+    )
+
+
 async def retire_x_response_decision_schema(conn) -> None:
     """Drop the legacy X decision table only after row-by-row parity checks."""
     from sqlalchemy import inspect, select, text
@@ -758,8 +1054,8 @@ async def retire_x_response_decision_schema(conn) -> None:
         snapshot = (run or {}).get("source_snapshot") or {}
         x_snapshot = snapshot.get("x_response") or {}
         expected_decision_status = {
-            "used": "adopted",
-            "ignored": "rejected",
+            "used": "worth_writing",
+            "ignored": "not_processed",
         }.get(decision["workflow_status"], "pending")
         run_matches = bool(
             run
@@ -849,13 +1145,12 @@ async def init_db():
             "accounts",
         ))
 
-        if not DATABASE_URL.startswith("sqlite"):
-            # Rename tables (idempotent)
-            await conn.execute(text("ALTER TABLE IF EXISTS content_topics RENAME TO writing_plans"))
-            await conn.execute(text("ALTER TABLE IF EXISTS topic_tags RENAME TO plan_tags"))
-            await conn.execute(text("ALTER TABLE IF EXISTS content_topic_tags RENAME TO writing_plan_tags"))
-            await conn.execute(text("ALTER TABLE IF EXISTS topic_sources RENAME TO plan_sources"))
-            await conn.execute(text("ALTER TABLE IF EXISTS topic_updates RENAME TO plan_updates"))
+        # Rename tables (idempotent)
+        await conn.execute(text("ALTER TABLE IF EXISTS content_topics RENAME TO writing_plans"))
+        await conn.execute(text("ALTER TABLE IF EXISTS topic_tags RENAME TO plan_tags"))
+        await conn.execute(text("ALTER TABLE IF EXISTS content_topic_tags RENAME TO writing_plan_tags"))
+        await conn.execute(text("ALTER TABLE IF EXISTS topic_sources RENAME TO plan_sources"))
+        await conn.execute(text("ALTER TABLE IF EXISTS topic_updates RENAME TO plan_updates"))
 
         await migrate_removed_hot_topic_schema(conn)
         await migrate_removed_publication_schema(conn)
@@ -863,13 +1158,14 @@ async def init_db():
         # Existing databases may contain duplicate keys, so repair them before
         # metadata.create_all attempts to create the unique partial index.
         await migrate_content_job_idempotency_schema(conn)
-        # Add indexed planner-origin columns before create_all attempts to
-        # create their indexes on an existing daily_plan_items table.
-        await _add_columns(conn, "daily_plan_items", {
-            "origin": "VARCHAR NOT NULL DEFAULT 'planner'",
-            "creation_run_id": "INTEGER",
-        })
+        await _drop_tables(conn, ("daily_plan_items", "daily_plans"))
         await conn.run_sync(Base.metadata.create_all)
+        await _drop_columns(conn, "publish_accounts", ("daily_quota",))
+        await migrate_topic_source_rule_single_directory(conn)
+        await migrate_x_subscription_collection_schema(conn)
+        await _add_columns(conn, "topic_source_rules", {
+            "screening_prompt": "TEXT NOT NULL DEFAULT ''",
+        })
         await migrate_content_job_idempotency_schema(conn)
         await migrate_text_video_project_schema(conn)
         await migrate_text_video_speech_asset_schema(conn)
@@ -885,71 +1181,65 @@ async def init_db():
             "asset_type": "VARCHAR NOT NULL DEFAULT 'article'",
             "parent_id": "INTEGER",
             "system_key": "VARCHAR",
+            "ai_ingestion_enabled": "BOOLEAN NOT NULL DEFAULT FALSE",
+            "ai_ingestion_keywords": "JSON NOT NULL DEFAULT '[]'",
+            "ai_ingestion_prompt": "TEXT NOT NULL DEFAULT ''",
         })
-        if not DATABASE_URL.startswith("sqlite"):
-            # The first version used a globally unique name. Directories now
-            # have independent article/media trees, so the same name is valid
-            # once in each tree.
-            await conn.execute(text("ALTER TABLE creative_asset_directories DROP CONSTRAINT IF EXISTS creative_asset_directories_name_key"))
-            await conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_creative_asset_directories_asset_type_name ON creative_asset_directories (asset_type, name)"))
-            await conn.execute(text(
-                "CREATE UNIQUE INDEX IF NOT EXISTS "
-                "uq_creative_asset_directories_system_key "
-                "ON creative_asset_directories (system_key) "
-                "WHERE system_key IS NOT NULL"
-            ))
+        await migrate_asset_ingestion_schema(conn)
+        await _add_columns(conn, "x_credential_accounts", {
+            "session_ciphertext": "TEXT NOT NULL DEFAULT ''",
+        })
+        # The first version used a globally unique name. Directories now
+        # have independent article/media trees, so the same name is valid
+        # once in each tree.
+        await conn.execute(text("ALTER TABLE creative_asset_directories DROP CONSTRAINT IF EXISTS creative_asset_directories_name_key"))
+        await conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_creative_asset_directories_asset_type_name ON creative_asset_directories (asset_type, name)"))
+        await conn.execute(text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS "
+            "uq_creative_asset_directories_system_key "
+            "ON creative_asset_directories (system_key) "
+            "WHERE system_key IS NOT NULL"
+        ))
         # x_posts column additions (idempotent)
         await _add_columns(conn, "x_posts", {
             "author_avatar": "VARCHAR NOT NULL DEFAULT ''",
             "cover_image": "VARCHAR NOT NULL DEFAULT ''",
         })
-        if not DATABASE_URL.startswith("sqlite"):
-            # X search-subscription + ref-consumer schema (idempotent, PG only)
-            await conn.execute(text("ALTER TABLE x_posts ADD COLUMN IF NOT EXISTS possibly_sensitive BOOLEAN NOT NULL DEFAULT FALSE"))
-            await conn.execute(text("ALTER TABLE x_subscriptions ADD COLUMN IF NOT EXISTS kind VARCHAR NOT NULL DEFAULT 'timeline'"))
-            await conn.execute(text("ALTER TABLE x_subscriptions ADD COLUMN IF NOT EXISTS raw_query VARCHAR NOT NULL DEFAULT ''"))
-            await conn.execute(text("ALTER TABLE x_subscriptions ADD COLUMN IF NOT EXISTS min_faves INTEGER NOT NULL DEFAULT 0"))
-            await conn.execute(text("ALTER TABLE x_subscriptions ADD COLUMN IF NOT EXISTS min_retweets INTEGER NOT NULL DEFAULT 0"))
-            await conn.execute(text("ALTER TABLE x_subscriptions ADD COLUMN IF NOT EXISTS lang VARCHAR NOT NULL DEFAULT ''"))
-            await conn.execute(text("ALTER TABLE x_subscriptions ADD COLUMN IF NOT EXISTS days INTEGER NOT NULL DEFAULT 1"))
-            await conn.execute(text("ALTER TABLE x_subscriptions ADD COLUMN IF NOT EXISTS extra_terms VARCHAR NOT NULL DEFAULT ''"))
-            await conn.execute(text("ALTER TABLE x_subscriptions ADD COLUMN IF NOT EXISTS sort VARCHAR NOT NULL DEFAULT 'top'"))
-            await conn.execute(text("ALTER TABLE x_subscriptions ADD COLUMN IF NOT EXISTS max_results INTEGER NOT NULL DEFAULT 100"))
-            await conn.execute(text("ALTER TABLE x_subscriptions ALTER COLUMN url DROP NOT NULL"))
-            await conn.execute(text("ALTER TABLE reddit_posts ADD COLUMN IF NOT EXISTS body TEXT NOT NULL DEFAULT ''"))
-            await conn.execute(text("ALTER TABLE reddit_posts ADD COLUMN IF NOT EXISTS comments JSON NOT NULL DEFAULT '[]'::json"))
-            await conn.execute(text("ALTER TABLE reddit_posts ADD COLUMN IF NOT EXISTS fetch_status VARCHAR NOT NULL DEFAULT 'ok'"))
+        # X search-subscription + ref-consumer schema (idempotent)
+        await conn.execute(text("ALTER TABLE x_posts ADD COLUMN IF NOT EXISTS possibly_sensitive BOOLEAN NOT NULL DEFAULT FALSE"))
+        await conn.execute(text("ALTER TABLE x_subscriptions ADD COLUMN IF NOT EXISTS kind VARCHAR NOT NULL DEFAULT 'timeline'"))
+        await conn.execute(text("ALTER TABLE x_subscriptions ADD COLUMN IF NOT EXISTS raw_query VARCHAR NOT NULL DEFAULT ''"))
+        await conn.execute(text("ALTER TABLE x_subscriptions ADD COLUMN IF NOT EXISTS min_faves INTEGER NOT NULL DEFAULT 0"))
+        await conn.execute(text("ALTER TABLE x_subscriptions ADD COLUMN IF NOT EXISTS min_retweets INTEGER NOT NULL DEFAULT 0"))
+        await conn.execute(text("ALTER TABLE x_subscriptions ADD COLUMN IF NOT EXISTS lang VARCHAR NOT NULL DEFAULT ''"))
+        await conn.execute(text("ALTER TABLE x_subscriptions ADD COLUMN IF NOT EXISTS days INTEGER NOT NULL DEFAULT 1"))
+        await conn.execute(text("ALTER TABLE x_subscriptions ADD COLUMN IF NOT EXISTS extra_terms VARCHAR NOT NULL DEFAULT ''"))
+        await conn.execute(text("ALTER TABLE x_subscriptions ADD COLUMN IF NOT EXISTS sort VARCHAR NOT NULL DEFAULT 'top'"))
+        await conn.execute(text("ALTER TABLE x_subscriptions ADD COLUMN IF NOT EXISTS max_results INTEGER NOT NULL DEFAULT 100"))
+        await conn.execute(text("ALTER TABLE x_subscriptions ALTER COLUMN url DROP NOT NULL"))
+        await conn.execute(text("ALTER TABLE reddit_posts ADD COLUMN IF NOT EXISTS body TEXT NOT NULL DEFAULT ''"))
+        await conn.execute(text("ALTER TABLE reddit_posts ADD COLUMN IF NOT EXISTS comments JSON NOT NULL DEFAULT '[]'::json"))
+        await conn.execute(text("ALTER TABLE reddit_posts ADD COLUMN IF NOT EXISTS fetch_status VARCHAR NOT NULL DEFAULT 'ok'"))
         # Lightweight in-place migrations for columns added after the original
         # table creation.
-        json_object_default = (
-            "'{}'"
-            if conn.dialect.name == "sqlite"
-            else "'{}'::json"
-        )
-        json_array_default = (
-            "'[]'"
-            if conn.dialect.name == "sqlite"
-            else "'[]'::json"
-        )
+        json_object_default = "'{}'::json"
+        json_array_default = "'[]'::json"
         await _add_columns(conn, "daily_creation_rules", {
             "directories": f"JSON NOT NULL DEFAULT {json_array_default}",
             "skill_mode": "VARCHAR NOT NULL DEFAULT 'auto'",
             "skill_name": "VARCHAR",
         })
-        if conn.dialect.name == "sqlite":
-            await conn.execute(text(
-                "UPDATE daily_creation_rules "
-                "SET directories = json_array(directory) "
-                "WHERE (directories IS NULL OR directories = '[]') "
-                "AND directory <> ''"
-            ))
-        else:
-            await conn.execute(text(
-                "UPDATE daily_creation_rules "
-                "SET directories = json_build_array(directory) "
-                "WHERE (directories IS NULL OR json_array_length(directories) = 0) "
-                "AND directory <> ''"
-            ))
+        await conn.execute(text(
+            "UPDATE daily_creation_rules SET delivery_mode = 'drafts' "
+            "WHERE delivery_mode = 'plan_items'"
+        ))
+        await conn.execute(text(
+            "UPDATE daily_creation_rules "
+            "SET directories = json_build_array(directory) "
+            "WHERE (directories IS NULL OR json_array_length(directories) = 0) "
+            "AND directory <> ''"
+        ))
+        await migrate_daily_creation_prompt_schema(conn)
         await _add_columns(conn, "wechat_articles", {
             "content": "TEXT NOT NULL DEFAULT ''",
         })
@@ -963,15 +1253,15 @@ async def init_db():
             "cover_style": (
                 f"JSON NOT NULL DEFAULT {json_object_default}"
             ),
-            "daily_quota": (
-                f"JSON NOT NULL DEFAULT {json_object_default}"
-            ),
         })
         await migrate_x_response_claim_schema(conn)
+        await migrate_intelligence_station_schema(conn)
         await migrate_content_response_schema(conn)
+        await migrate_intelligence_subscription_schema(conn)
+        await migrate_daily_creation_output_batch_schema(conn)
         await retire_x_response_decision_schema(conn)
 
-        if not DATABASE_URL.startswith("sqlite"):
+        if DATABASE_URL.startswith("postgresql+asyncpg://"):
             # Writing plans brief field (added in redesign; idempotent)
             await conn.execute(text(
                 "ALTER TABLE writing_plans ADD COLUMN IF NOT EXISTS brief TEXT NOT NULL DEFAULT ''"

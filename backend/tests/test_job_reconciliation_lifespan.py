@@ -6,13 +6,8 @@ from fastapi import FastAPI
 
 def test_scheduler_disabled_lifespan_still_runs_reconciliation_and_closes_redis(
     monkeypatch,
-    tmp_path,
+    postgres_env,
 ):
-    monkeypatch.setenv(
-        "WMS_DATABASE_URL",
-        f"sqlite+aiosqlite:///{tmp_path / 'lifespan.db'}",
-    )
-    monkeypatch.setenv("WMS_DISABLE_SCHEDULER", "1")
     for name in list(sys.modules):
         if name in {"main", "database", "models", "job_reconciliation"}:
             sys.modules.pop(name, None)
@@ -24,6 +19,9 @@ def test_scheduler_disabled_lifespan_still_runs_reconciliation_and_closes_redis(
 
     async def no_op(*_args, **_kwargs):
         return []
+
+    async def empty_config():
+        return {}
 
     class FakeSession:
         async def __aenter__(self):
@@ -61,10 +59,16 @@ def test_scheduler_disabled_lifespan_still_runs_reconciliation_and_closes_redis(
     )
     monkeypatch.setattr(
         main,
+        "ensure_temporary_asset_directory",
+        no_op,
+    )
+    monkeypatch.setattr(
+        main,
         "reconcile_x_credential_accounts",
         no_op,
     )
-    monkeypatch.setattr(config, "get_config", no_op)
+    monkeypatch.setattr(config, "get_config", empty_config)
+    monkeypatch.setattr(main, "apply_collection_proxy", lambda _value: None)
     monkeypatch.setattr(main, "JobReconciler", FakeReconciler)
 
     def scheduler_must_not_start():

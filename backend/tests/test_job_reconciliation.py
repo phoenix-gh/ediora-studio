@@ -14,11 +14,7 @@ INTERRUPTION_ERROR = (
 
 
 @pytest.fixture
-def reconciliation_env(monkeypatch, tmp_path):
-    monkeypatch.setenv(
-        "WMS_DATABASE_URL",
-        f"sqlite+aiosqlite:///{tmp_path / 'reconciliation.db'}",
-    )
+def reconciliation_env(monkeypatch, tmp_path, postgres_env):
     for name in list(sys.modules):
         if name.startswith((
             "database",
@@ -145,6 +141,93 @@ async def _events(env, job_id: int):
                 .order_by(env.models.ContentJobEvent.id),
             )
         ).all()
+
+
+def test_superseded_digital_human_jobs_are_cancelled_not_requeued(
+    reconciliation_env,
+):
+    from job_reconciliation import reconcile_content_jobs
+
+    async def run():
+        async with reconciliation_env.SessionLocal() as db:
+            setup_job = reconciliation_env.models.ContentJob(
+                flow="digital_human_setup",
+                title="old setup",
+                status="queued",
+                input_data={"digital_human_id": 1},
+            )
+            render_job = reconciliation_env.models.ContentJob(
+                flow="digital_human_render",
+                title="old render",
+                status="queued",
+                input_data={"render_id": 1},
+            )
+            replacement_setup = reconciliation_env.models.ContentJob(
+                flow="digital_human_setup",
+                title="new setup",
+                status="queued",
+                input_data={"digital_human_id": 1},
+            )
+            replacement_render = reconciliation_env.models.ContentJob(
+                flow="digital_human_render",
+                title="new render",
+                status="queued",
+                input_data={"render_id": 1},
+            )
+            db.add_all([
+                setup_job,
+                render_job,
+                replacement_setup,
+                replacement_render,
+            ])
+            await db.flush()
+            db.add(reconciliation_env.models.DigitalHuman(
+                id=1,
+                name="林晓",
+                portrait_asset_id=1,
+                voice_sample_asset_id=2,
+                default_environment_asset_id=3,
+                setup_job_id=replacement_setup.id,
+            ))
+            db.add(reconciliation_env.models.TalkingVideoRender(
+                id=1,
+                project_id=1,
+                version=1,
+                job_id=replacement_render.id,
+                script_snapshot="测试",
+                environment_asset_id=3,
+            ))
+            await db.commit()
+            old_ids = [setup_job.id, render_job.id]
+
+        queue = FakeFencedQueue()
+        result = await reconcile_content_jobs(
+            queue,
+            session_factory=reconciliation_env.SessionLocal,
+        )
+
+        assert result == {
+            "enqueued": 2,
+            "job_ids": [replacement_setup.id, replacement_render.id],
+        }
+        assert queue.items == [replacement_setup.id, replacement_render.id]
+        async with reconciliation_env.SessionLocal() as db:
+            statuses = [
+                await db.get(reconciliation_env.models.ContentJob, job_id)
+                for job_id in old_ids
+            ]
+            assert [job.status for job in statuses] == [
+                "cancelled",
+                "cancelled",
+            ]
+        for job_id in old_ids:
+            events = await _events(reconciliation_env, job_id)
+            assert events[-1].kind == "job_reconciled"
+            assert events[-1].payload == {
+                "action": "superseded_cancelled",
+            }
+
+    asyncio.run(run())
 
 
 def test_queued_and_latest_succeeded_are_enqueued_once_across_two_passes(

@@ -4,6 +4,7 @@ import builtins
 import httpx
 import pytest
 
+import x_credential_probe
 from x_credential_probe import CredentialProbeResult, probe_x_credentials
 from x_credential_store import CredentialPair
 
@@ -96,3 +97,58 @@ def test_probe_fails_x_operation_clearly_when_feedgrab_is_missing(monkeypatch):
         "failed",
         "feedgrab 未安装，无法测试 X 凭据",
     )
+
+
+def test_probe_maps_missing_socks_support_to_safe_failure(monkeypatch):
+    def missing_socksio(**_kwargs):
+        raise ImportError(
+            "Using SOCKS proxy, but the 'socksio' package is not installed."
+        )
+
+    monkeypatch.setattr(httpx, "AsyncClient", missing_socksio)
+
+    result = asyncio.run(
+        probe_x_credentials(CredentialPair("secret-auth", "secret-csrf"))
+    )
+
+    assert result == CredentialProbeResult(
+        "failed",
+        "当前配置使用 SOCKS 代理，但未安装 socksio，请安装 httpx[socks]",
+    )
+
+
+def test_probe_maps_cached_missing_socks_support_to_safe_failure(monkeypatch):
+    def missing_socksio(**_kwargs):
+        raise RuntimeError(
+            "Attempted to use SOCKS support, but the `socksio` package is not installed."
+        )
+
+    monkeypatch.setattr(httpx, "AsyncClient", missing_socksio)
+
+    result = asyncio.run(
+        probe_x_credentials(CredentialPair("secret-auth", "secret-csrf"))
+    )
+
+    assert result == CredentialProbeResult(
+        "failed",
+        "当前配置使用 SOCKS 代理，但未安装 socksio，请安装 httpx[socks]",
+    )
+
+
+def test_probe_uses_graphql_when_legacy_account_endpoint_is_gone(monkeypatch):
+    async def successful_graphql_probe(_pair):
+        return CredentialProbeResult("available", "")
+
+    monkeypatch.setattr(
+        x_credential_probe,
+        "_probe_x_via_graphql",
+        successful_graphql_probe,
+        raising=False,
+    )
+    transport = httpx.MockTransport(
+        lambda _request: httpx.Response(404, json={"errors": []})
+    )
+
+    result = asyncio.run(run_probe(transport))
+
+    assert result == CredentialProbeResult("available", "")

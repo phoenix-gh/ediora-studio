@@ -36,6 +36,7 @@ export type GlobalAgentToolOptions = {
   apiBase: string
   sessionId?: number
   draftId?: number
+  dailyCreationRunId?: number
   skillName?: string
   restoredSkillName?: string
   approvalPolicy?: AgentApprovalPolicy
@@ -47,8 +48,35 @@ export type GlobalChatToolOptions = GlobalAgentToolOptions
 
 export type ImageFlow = 'standalone_image'
 
+type ImageJobSnapshot = {
+  id: number
+  flow: string
+  title?: string
+  status: string
+  input?: Record<string, unknown>
+  steps?: Array<{
+    key?: string
+    status?: string
+    output?: Record<string, unknown>
+    error?: string
+  }>
+}
+
+export type ImageJobResult = {
+  jobId: number
+  flow: ImageFlow
+  status: string
+  assetId?: number
+  assetUrl?: string
+  title?: string
+  directory?: string
+  error?: string
+}
+
 export const imageGenerationInputSchema = z.object({
   prompt: z.string().min(1).max(4_000),
+  title: z.string().trim().min(1).max(200).optional(),
+  directory: z.string().trim().min(1).max(80).optional(),
 }).strict()
 
 export const skillReferenceInputSchema = z.object({
@@ -252,17 +280,26 @@ export function createSkillReferenceReader({
 export async function createImageJob({
   apiBase,
   prompt,
+  title,
+  directory,
 }: {
   apiBase: string
   prompt: string
+  title?: string
+  directory?: string
 }) {
+  const normalizedTitle = title?.trim() || 'Chat 生图'
+  const normalizedDirectory = directory?.trim()
   const response = await fetch(`${apiBase.replace(/\/$/, '')}/jobs`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       flow: 'standalone_image',
-      title: 'Chat 生图',
-      input: { prompt },
+      title: normalizedTitle,
+      input: {
+        prompt,
+        ...(normalizedDirectory ? { directory: normalizedDirectory } : {}),
+      },
     }),
   })
   if (!response.ok) throw new Error(`Unable to create image job (${response.status})`)
@@ -270,24 +307,109 @@ export async function createImageJob({
   return { jobId: job.id, flow: job.flow, status: job.status }
 }
 
+function imageJobResult(job: ImageJobSnapshot): ImageJobResult {
+  const step = [...(job.steps ?? [])]
+    .reverse()
+    .find(candidate => candidate.key === 'standalone_image' || candidate.status === 'succeeded' || candidate.status === 'failed')
+  const output = step?.output ?? {}
+  const inputDirectory = typeof job.input?.directory === 'string' ? job.input.directory : undefined
+  const directory = typeof output.directory === 'string' ? output.directory : inputDirectory
+  const assetId = typeof output.asset_id === 'number' ? output.asset_id : undefined
+  const assetUrl = typeof output.asset_url === 'string' ? output.asset_url : undefined
+  const title = typeof output.title === 'string' ? output.title : job.title
+  const error = typeof step?.error === 'string' && step.error ? step.error : undefined
+
+  return {
+    jobId: job.id,
+    flow: 'standalone_image',
+    status: job.status,
+    ...(assetId === undefined ? {} : { assetId }),
+    ...(assetUrl === undefined ? {} : { assetUrl }),
+    ...(title === undefined ? {} : { title }),
+    ...(directory === undefined ? {} : { directory }),
+    ...(error === undefined ? {} : { error }),
+  }
+}
+
+export async function waitForImageJob({
+  apiBase,
+  jobId,
+  timeoutMs = 10 * 60 * 1_000,
+  pollIntervalMs = 1_000,
+  sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms)),
+}: {
+  apiBase: string
+  jobId: number
+  timeoutMs?: number
+  pollIntervalMs?: number
+  sleep?: (ms: number) => Promise<void>
+}): Promise<ImageJobResult> {
+  const base = apiBase.replace(/\/$/, '')
+  const deadline = Date.now() + timeoutMs
+
+  while (true) {
+    const response = await fetch(`${base}/jobs/${jobId}`, { cache: 'no-store' })
+    if (!response.ok) throw new Error(`Unable to read image job (${response.status})`)
+    const job = await response.json() as ImageJobSnapshot
+    if (job.status === 'succeeded' || job.status === 'failed' || job.status === 'cancelled') {
+      return imageJobResult(job)
+    }
+    if (Date.now() >= deadline) throw new Error(`Image job ${jobId} did not finish before the timeout`)
+    await sleep(pollIntervalMs)
+  }
+}
+
+export async function createImageJobAndWait({
+  timeoutMs,
+  pollIntervalMs,
+  sleep,
+  ...input
+}: Parameters<typeof createImageJob>[0] & {
+  timeoutMs?: number
+  pollIntervalMs?: number
+  sleep?: (ms: number) => Promise<void>
+}): Promise<ImageJobResult> {
+  const created = await createImageJob(input)
+  return waitForImageJob({
+    apiBase: input.apiBase,
+    jobId: created.jobId,
+    timeoutMs,
+    pollIntervalMs,
+    sleep,
+  })
+}
+
 export async function openGlobalAgentTools({
   apiBase,
+  dailyCreationRunId,
   skillName,
   restoredSkillName,
   approvalPolicy = 'interactive',
   beforeToolExecute,
   onToolAudit,
 }: GlobalAgentToolOptions) {
+  if (
+    dailyCreationRunId !== undefined
+    && (!Number.isSafeInteger(dailyCreationRunId) || dailyCreationRunId <= 0)
+  ) {
+    throw new Error('daily creation run identity must be a positive integer')
+  }
   const client = await createMCPClient({
-    transport: { type: 'http', url: mcpUrl(apiBase) },
+    transport: {
+      type: 'http',
+      url: mcpUrl(apiBase),
+      ...(dailyCreationRunId === undefined ? {} : {
+        headers: { 'X-WMS-Daily-Creation-Run-Id': String(dailyCreationRunId) },
+      }),
+    },
   })
   const discovered = await client.tools()
   const tools = { ...discovered } as ToolSet
   tools.generateImage = tool({
-    description: 'Generate one image from a free-form prompt and save it to Creative Assets.',
+    description: 'Generate one image from a prompt, wait until the durable image job reaches a terminal status, and return its job ID, status, and saved asset details. Optionally provide a title and an existing media directory for the asset.',
     inputSchema: imageGenerationInputSchema,
-    execute: async ({ prompt }) => {
-      return createImageJob({ apiBase, prompt })
+    execute: async ({ prompt, title, directory }) => {
+      return createImageJobAndWait({ apiBase, prompt, title, directory })
     },
   })
   const runtime = await createChatSkillRuntime({

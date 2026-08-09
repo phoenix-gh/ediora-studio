@@ -6,8 +6,7 @@ from fastapi.testclient import TestClient
 
 
 @pytest.fixture
-def client(monkeypatch, tmp_path):
-    monkeypatch.setenv("WMS_DATABASE_URL", f"sqlite+aiosqlite:///{tmp_path / 'chat-router.db'}")
+def client(monkeypatch, postgres_env):
     for module in list(sys.modules):
         if module.startswith(("database", "models", "routers.chat")):
             sys.modules.pop(module, None)

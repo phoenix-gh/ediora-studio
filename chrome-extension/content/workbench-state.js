@@ -20,6 +20,7 @@ export function createWorkbenchState({ apiBase = DEFAULT_WORKBENCH_API_BASE } = 
     settingsOpen: false,
     apiBase,
     copyState: 'idle',
+    publishingId: null,
   }
 }
 
@@ -50,6 +51,21 @@ export function setWorkbenchFilter(state, patch = {}) {
 export function selectDraft(state, id) {
   if (!state.drafts.some(draft => sameId(draft.id, id))) return state
   return { ...state, selectedId: id, copyState: 'idle' }
+}
+
+export function publishDraftAndSelectNext(state, draftId) {
+  const visible = getVisibleDrafts(state)
+  const index = visible.findIndex(draft => sameId(draft.id, draftId))
+  if (index < 0) return state
+
+  return {
+    ...state,
+    drafts: state.drafts.filter(draft => !sameId(draft.id, draftId)),
+    selectedId: visible[index + 1]?.id ?? null,
+    copyState: 'idle',
+    publishingId: null,
+    error: null,
+  }
 }
 
 export function getVisibleDrafts(state) {

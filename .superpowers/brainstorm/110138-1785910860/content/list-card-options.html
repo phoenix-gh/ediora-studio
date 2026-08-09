@@ -1,0 +1,55 @@
+<h2>情报列表卡片：不打开详情先看什么？</h2>
+<p class="subtitle">主列表按 AI 内容价值排序，卡片只展示做下一步判断所需的信息。</p>
+
+<div class="cards">
+  <div class="card" data-choice="decision-summary" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mockup">
+        <div class="mockup-header">A · 决策摘要卡</div>
+        <div class="mockup-body" style="background:#f8fafc;min-height:250px;padding:10px">
+          <div style="background:white;border:1px solid #c7d2fe;border-radius:8px;padding:12px">
+            <div style="display:flex;align-items:center;gap:7px"><strong style="font-size:25px;color:#4f46e5">86</strong><span style="font-size:10px;color:#64748b">内容价值</span><span style="margin-left:auto;background:#eef2ff;color:#4338ca;padding:4px 7px;border-radius:999px;font-size:10px">待判断</span></div>
+            <div style="font-size:14px;font-weight:700;margin-top:9px">一个值得关注的新工具</div>
+            <div style="display:flex;gap:5px;margin-top:7px"><span style="background:#e0e7ff;padding:3px 6px;border-radius:999px;font-size:10px">工具</span><span style="background:#e0e7ff;padding:3px 6px;border-radius:999px;font-size:10px">实践</span><span style="font-size:10px;color:#64748b;padding-top:3px">Hacker News · 2 小时前</span></div>
+            <p style="font-size:11px;color:#475569;line-height:1.6;margin-top:9px">信息增量明确，能整理成开发者可复用的方法。</p>
+          </div>
+          <div style="background:white;border:1px solid #e5e7eb;border-radius:8px;padding:12px;margin-top:7px"><strong style="font-size:19px;color:#64748b">72</strong><span style="font-size:12px;font-weight:700;margin-left:8px">行业政策变化</span><div style="font-size:10px;color:#64748b;margin-top:6px">行业动态 · 需要核对来源</div></div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body"><h3>A · 决策摘要卡</h3><p>价值分数、分类、来源、时间和一句 AI 判断都在卡片上，适合批量分拣。</p></div>
+  </div>
+
+  <div class="card" data-choice="source-rich" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mockup">
+        <div class="mockup-header">B · 原文摘要卡</div>
+        <div class="mockup-body" style="background:#f8fafc;min-height:250px;padding:10px">
+          <div style="background:white;border:1px solid #e5e7eb;border-radius:8px;padding:12px;font-size:11px;line-height:1.7"><div style="color:#64748b">Hacker News · 2 小时前</div><div style="font-size:15px;font-weight:700;margin-top:8px">一个值得关注的新工具</div><p style="color:#475569;margin-top:8px">原文摘要：它通过一种新的方式解决了开发者工作流中的常见问题……</p><div style="border-top:1px solid #e5e7eb;margin-top:9px;padding-top:9px;color:#4f46e5">AI：86 分 · 值得写 · 工具 / 实践</div></div>
+          <div style="background:white;border:1px solid #e5e7eb;border-radius:8px;padding:12px;margin-top:7px;font-size:11px"><div style="color:#64748b">YouTube · 昨天</div><div style="font-size:14px;font-weight:700;margin-top:6px">一套新的工作方法</div><p style="color:#475569;margin-top:6px">原文摘要占据更多空间，卡片更高。</p></div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body"><h3>B · 原文摘要卡</h3><p>更接近阅读器，但列表会变长，不利于快速扫描大量情报。</p></div>
+  </div>
+
+  <div class="card" data-choice="score-grid" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mockup">
+        <div class="mockup-header">C · 分数网格卡</div>
+        <div class="mockup-body" style="display:grid;grid-template-columns:1fr 1fr;gap:7px;background:#f8fafc;min-height:250px;padding:10px">
+          <div style="background:white;border:1px solid #e5e7eb;border-radius:7px;padding:10px"><strong style="font-size:23px;color:#4f46e5">86</strong><div style="font-size:11px;font-weight:700;margin-top:8px">新工具</div><span style="font-size:10px;color:#64748b">工具 · 值得写</span></div>
+          <div style="background:white;border:1px solid #e5e7eb;border-radius:7px;padding:10px"><strong style="font-size:23px;color:#4f46e5">81</strong><div style="font-size:11px;font-weight:700;margin-top:8px">研究发现</div><span style="font-size:10px;color:#64748b">研究 · 创作资产</span></div>
+          <div style="background:white;border:1px solid #e5e7eb;border-radius:7px;padding:10px"><strong style="font-size:23px;color:#64748b">72</strong><div style="font-size:11px;font-weight:700;margin-top:8px">政策变化</div><span style="font-size:10px;color:#64748b">动态 · 待判断</span></div>
+          <div style="background:white;border:1px solid #e5e7eb;border-radius:7px;padding:10px"><strong style="font-size:23px;color:#64748b">65</strong><div style="font-size:11px;font-weight:700;margin-top:8px">访谈视频</div><span style="font-size:10px;color:#64748b">观点 · 待判断</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body"><h3>C · 分数网格卡</h3><p>密度最高，但标题、来源和 AI 判断的层次不够清晰。</p></div>
+  </div>
+</div>
+
+<div class="section" style="margin-top:18px">
+  <h3>建议</h3>
+  <p>采用 A：默认按内容价值从高到低，用户也可以切换最新；卡片展示价值分数、处理状态、内容类型、来源时间和一句 AI 判断。</p>
+</div>

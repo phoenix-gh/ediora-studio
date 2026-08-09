@@ -5,8 +5,7 @@ import pytest
 
 
 @pytest.fixture
-def session_factory(monkeypatch, tmp_path):
-    monkeypatch.setenv("WMS_DATABASE_URL", f"sqlite+aiosqlite:///{tmp_path / 'worker.db'}")
+def session_factory(monkeypatch, postgres_env):
     for module in list(sys.modules):
         if module.startswith(("database", "models", "content_jobs", "content_flows", "job_worker")):
             sys.modules.pop(module, None)

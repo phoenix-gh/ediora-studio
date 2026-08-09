@@ -47,23 +47,25 @@ export function assertAllowedApiBase(value) {
 export function sanitizeDraftCollection(value) {
   if (!Array.isArray(value)) throw createError('DRAFT_API_INVALID_RESPONSE', '草稿 API 响应不是数组')
 
-  return value.map(raw => {
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-      throw createError('DRAFT_API_INVALID_RESPONSE', '草稿 API 返回了无效条目')
-    }
-    if (raw.id === undefined || raw.id === null || String(raw.id).trim() === '') {
-      throw createError('DRAFT_API_INVALID_RESPONSE', '草稿 API 条目缺少 id')
-    }
+  return value.map(sanitizeDraft)
+}
 
-    return Object.fromEntries(SAFE_FIELDS.map(field => {
-      if (field === 'id') return [field, raw[field]]
-      if (field === 'content') return [field, String(raw.content ?? raw.draft ?? '')]
-      if (field === 'title') return [field, String(raw.title ?? '')]
-      if (field === 'status') return [field, String(raw.status ?? '')]
-      if (field === 'draft_type') return [field, String(raw.draft_type ?? 'article')]
-      return [field, String(raw.updated_at ?? '')]
-    }))
-  })
+function sanitizeDraft(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw createError('DRAFT_API_INVALID_RESPONSE', '草稿 API 返回了无效条目')
+  }
+  if (raw.id === undefined || raw.id === null || String(raw.id).trim() === '') {
+    throw createError('DRAFT_API_INVALID_RESPONSE', '草稿 API 条目缺少 id')
+  }
+
+  return Object.fromEntries(SAFE_FIELDS.map(field => {
+    if (field === 'id') return [field, raw[field]]
+    if (field === 'content') return [field, String(raw.content ?? raw.draft ?? '')]
+    if (field === 'title') return [field, String(raw.title ?? '')]
+    if (field === 'status') return [field, String(raw.status ?? '')]
+    if (field === 'draft_type') return [field, String(raw.draft_type ?? 'article')]
+    return [field, String(raw.updated_at ?? '')]
+  }))
 }
 
 export async function fetchDraftCollection(apiBase, {
@@ -102,4 +104,49 @@ export async function fetchDraftCollection(apiBase, {
     throw createError('DRAFT_API_INVALID_RESPONSE', '草稿 API 返回的 JSON 无效')
   }
   return sanitizeDraftCollection(payload)
+}
+
+export async function publishDraft(apiBase, draftId, {
+  fetchImpl = globalThis.fetch,
+  timeoutMs = 10_000,
+} = {}) {
+  const normalized = assertAllowedApiBase(apiBase)
+  if (!Number.isInteger(draftId) || draftId <= 0) {
+    throw createError('DRAFT_API_INVALID_REQUEST', '草稿编号无效')
+  }
+  if (typeof fetchImpl !== 'function') throw createError('DRAFT_API_UNAVAILABLE', '当前环境不支持网络请求')
+
+  const controller = typeof AbortController === 'function' ? new AbortController() : null
+  const timer = setTimeout(() => controller?.abort(), timeoutMs)
+
+  let response
+  try {
+    response = await fetchImpl(`${normalized}/write/drafts/${draftId}`, {
+      method: 'PATCH',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ status: 'published' }),
+      cache: 'no-store',
+      ...(controller ? { signal: controller.signal } : {}),
+    })
+  } catch {
+    throw createError('DRAFT_API_UNAVAILABLE', '草稿 API 暂不可用，请检查服务是否运行')
+  } finally {
+    clearTimeout(timer)
+  }
+
+  if (!response?.ok) {
+    const status = Number.isFinite(response?.status) ? `（HTTP ${response.status}）` : ''
+    throw createError('DRAFT_API_UNAVAILABLE', `草稿 API 暂不可用${status}`)
+  }
+
+  let payload
+  try {
+    payload = await response.json()
+  } catch {
+    throw createError('DRAFT_API_INVALID_RESPONSE', '草稿 API 返回的 JSON 无效')
+  }
+  return sanitizeDraft(payload)
 }

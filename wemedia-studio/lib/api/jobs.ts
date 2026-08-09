@@ -1,6 +1,15 @@
 import { API_BASE, apiFetch } from './client'
+import type { DailyCreationAgentLog } from './creation-rules'
 
 export type JobStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'
+export type JobKind = 'scheduled' | 'manual'
+
+export interface JobScheduleSummary {
+  run_id: number
+  rule_name: string
+  trigger_kind: string
+  scheduled_for: string
+}
 
 export interface ContentJobStep {
   id: number
@@ -27,11 +36,26 @@ export interface ContentJob {
   flow: string
   title: string
   status: JobStatus
+  input?: Record<string, unknown>
+  schedule?: JobScheduleSummary | null
   created_at: string
   started_at: string | null
   completed_at: string | null
   steps: ContentJobStep[]
   events: ContentJobEvent[]
+}
+
+export interface JobListOptions {
+  limit?: number
+  cursor?: string | null
+  kind?: JobKind
+  status?: JobStatus
+}
+
+export interface JobListPage {
+  jobs: ContentJob[]
+  next_cursor: string | null
+  has_more: boolean
 }
 
 export function imageUrlsForJob(job: ContentJob) {
@@ -43,11 +67,18 @@ export function imageUrlsForJob(job: ContentJob) {
   }).map(url => new URL(url, apiOrigin).toString())
 }
 
-export function listJobs() { return apiFetch<{ jobs: ContentJob[] }>('/jobs') }
+export function listJobs(options: JobListOptions = {}) {
+  const params = new URLSearchParams({ limit: String(options.limit ?? 30) })
+  if (options.cursor) params.set('cursor', options.cursor)
+  if (options.kind) params.set('kind', options.kind)
+  if (options.status) params.set('status', options.status)
+  return apiFetch<JobListPage>(`/jobs?${params.toString()}`)
+}
 export function createJob(body: { flow: string; title: string; input: Record<string, unknown>; idempotency_key?: string }) {
   return apiFetch<ContentJob>('/jobs', { method: 'POST', body: JSON.stringify(body) })
 }
 export function getJob(id: number) { return apiFetch<ContentJob>(`/jobs/${id}`) }
+export function getJobAgentLog(id: number) { return apiFetch<DailyCreationAgentLog>(`/jobs/${id}/agent-log`) }
 export function cancelJob(id: number) { return apiFetch<ContentJob>(`/jobs/${id}/cancel`, { method: 'POST' }) }
 export function retryJobStep(id: number, stepKey: string) {
   return apiFetch<ContentJob>(`/jobs/${id}/retry`, { method: 'POST', body: JSON.stringify({ step_key: stepKey }) })

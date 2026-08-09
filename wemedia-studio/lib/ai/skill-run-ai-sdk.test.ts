@@ -52,6 +52,26 @@ describe('generic SkillRun AI SDK adapter', () => {
     })).rejects.toThrow('Invalid Skill selection')
   })
 
+  it('accepts a loadSkill tool envelope returned by the selector model', async () => {
+    await expect(selectSkillForTurn({
+      enabledSkills: [alpha],
+      userRequest: 'alpha task',
+      decide: async () => ({ tool: 'loadSkill', arguments: { name: 'Alpha' } }),
+    })).resolves.toEqual({ skillName: 'Alpha', activation: 'automatic' })
+  })
+
+  it('repairs one malformed selector response before failing', async () => {
+    const decide = vi.fn()
+      .mockResolvedValueOnce({ tool: 'unknown', arguments: { name: 'Alpha' } })
+      .mockResolvedValueOnce({ skillName: 'Alpha', continueRestored: false })
+
+    await expect(selectSkillForTurn({
+      enabledSkills: [alpha], userRequest: 'alpha task', decide,
+    })).resolves.toEqual({ skillName: 'Alpha', activation: 'automatic' })
+    expect(decide).toHaveBeenCalledTimes(2)
+    expect(decide.mock.calls[1][0].prompt).toContain('Repair')
+  })
+
   it('runs plan, progressive load, execution, and validation without forcing tool choice', async () => {
     const calls: string[] = []
     const execute = vi.fn(async (input: Record<string, unknown>) => {

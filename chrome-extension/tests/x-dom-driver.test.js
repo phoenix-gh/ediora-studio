@@ -9,6 +9,7 @@ import {
   matchesScheduleText,
   setSelectValue,
 } from '../content/x-dom-driver.js'
+import { SCHEDULE_MEMORY_KEY } from '../content/schedule-memory.js'
 
 test('recognizes only the approved X hosts', () => {
   assert.equal(isXHost('x.com'), true)
@@ -99,6 +100,7 @@ test('writes all six X schedule selects with the current dialog order', async ()
 test('writes direct X date and time fields when the scheduler exposes them', async () => {
   const dateInput = { value: '', events: [], dispatchEvent(event) { this.events.push(event.type) } }
   const timeInput = { value: '', events: [], dispatchEvent(event) { this.events.push(event.type) } }
+  const stored = new Map()
   const dialog = {
     querySelector(selector) {
       if (selector === '[data-testid="scheduledDateField"]') return dateInput
@@ -111,7 +113,13 @@ test('writes direct X date and time fields when the scheduler exposes them', asy
     querySelector(selector) { return selector === '[role="dialog"]' ? dialog : null },
     querySelectorAll() { return [] },
   }
-  const driver = createXDomDriver(document, { location: { hostname: 'x.com' } })
+  const driver = createXDomDriver(document, {
+    location: { hostname: 'x.com' },
+    localStorage: {
+      getItem(key) { return stored.get(key) || null },
+      setItem(key, value) { stored.set(key, value) },
+    },
+  })
 
   await driver.setScheduleFields({ year: 2026, month: 8, day: 8, hour12: 8, minute: 30, period: 'PM' })
 
@@ -119,6 +127,7 @@ test('writes direct X date and time fields when the scheduler exposes them', asy
   assert.equal(timeInput.value, '20:30')
   assert.deepEqual(dateInput.events, ['input', 'change'])
   assert.deepEqual(timeInput.events, ['input', 'change'])
+  assert.equal(stored.has(SCHEDULE_MEMORY_KEY), false)
 })
 
 test('uses an enabled submit fallback when the first X button is disabled', async () => {

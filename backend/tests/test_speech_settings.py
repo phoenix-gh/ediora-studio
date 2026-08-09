@@ -17,12 +17,7 @@ def worker_headers(worker_token):
 
 
 @pytest.fixture
-def client(monkeypatch, tmp_path, worker_token):
-    monkeypatch.setenv(
-        "WMS_DATABASE_URL",
-        f"sqlite+aiosqlite:///{tmp_path / 'speech-settings.db'}",
-    )
-    monkeypatch.setenv("WMS_DISABLE_SCHEDULER", "1")
+def client(monkeypatch, worker_token, postgres_env):
     monkeypatch.setenv("WMS_WORKER_TOKEN", worker_token)
     for name in (
         "WMS_SPEECH_PROVIDER",

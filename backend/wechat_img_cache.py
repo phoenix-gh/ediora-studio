@@ -47,7 +47,7 @@ async def fetch_and_cache(url: str) -> Path | None:
     if hit:
         return hit
     key = _key(url)
-    async with httpx.AsyncClient(follow_redirects=True, timeout=_TIMEOUT) as client:
+    async with httpx.AsyncClient(follow_redirects=True, timeout=_TIMEOUT, trust_env=False) as client:
         try:
             r = await client.get(url, headers=_HEADERS)
         except Exception:

@@ -12,6 +12,7 @@ import asyncio
 import json
 import os
 import time
+from datetime import datetime, timedelta, timezone
 from typing import Awaitable, Callable
 
 from database import SessionLocal
@@ -21,6 +22,9 @@ STATE_FILE = os.path.join(os.path.dirname(__file__), ".scheduler_state.json")
 
 # Wall-clock timestamps (time.time()) keyed by job_key, persisted across restarts.
 _last_ts: dict[str, float] = {}
+
+X_COLLECTION_MIN_INTERVAL_MINUTES = 5
+X_COLLECTION_MAX_INTERVAL_MINUTES = 1440
 
 
 def _load_state() -> None:
@@ -49,6 +53,25 @@ def _should_run(job_key: str, interval_seconds: float) -> bool:
     _last_ts[job_key] = now
     _save_state()
     return True
+
+
+def _is_x_subscription_due(sub, now: datetime | None = None) -> bool:
+    """Return whether an enabled X subscription is ready for auto-collection."""
+    last_collected_at = sub.last_collected_at
+    if last_collected_at is None:
+        return True
+    if last_collected_at.tzinfo is None:
+        last_collected_at = last_collected_at.replace(tzinfo=timezone.utc)
+    now = now or datetime.now(timezone.utc)
+    try:
+        interval = int(sub.collect_interval_minutes)
+    except (TypeError, ValueError):
+        interval = 15
+    interval = max(
+        X_COLLECTION_MIN_INTERVAL_MINUTES,
+        min(X_COLLECTION_MAX_INTERVAL_MINUTES, interval),
+    )
+    return now - last_collected_at >= timedelta(minutes=interval)
 
 
 async def scheduled_github():
@@ -195,11 +218,18 @@ async def scheduled_wechat():
                 return
             token, cookie = cred.token, cred.cookie
             new_total = 0
+            body_fetched = 0
+            body_failed = 0
             errors: list[str] = []
             for acc in accounts:
                 try:
                     res = await _sync_account(db, acc, token, cookie, pages=1, page_size=10)
                     new_total += res.new_articles
+                    body_fetched += res.body_fetched
+                    body_failed += res.body_failed
+                    errors.extend(res.body_errors)
+                    if res.list_error:
+                        errors.append(f"{acc.name}: {res.list_error}")
                 except Exception as e:
                     # SessionExpired bubbles up as HTTPException(401) — stop and ask user to re-scan
                     if "登录已过期" in str(e):
@@ -208,14 +238,15 @@ async def scheduled_wechat():
                     errors.append("{0}: {1}".format(acc.name, e))
                 # gentle pacing across accounts
                 await asyncio.sleep(2)
-            if errors:
+            if errors or body_failed:
                 await log("wechat", "warn",
-                          "公众号采集：{0} 个账号，新增 {1} 篇，{2} 个失败".format(
-                              len(accounts), new_total, len(errors)),
+                          "公众号采集：{0} 个账号，新增 {1} 篇，正文成功 {2} 篇，正文失败 {3} 篇".format(
+                              len(accounts), new_total, body_fetched, body_failed),
                           "; ".join(errors))
             elif new_total:
                 await log("wechat", "ok",
-                          "公众号采集：{0} 个账号，新增 {1} 篇".format(len(accounts), new_total))
+                          "公众号采集：{0} 个账号，新增 {1} 篇，正文成功 {2} 篇".format(
+                              len(accounts), new_total, body_fetched))
     except Exception as e:
         await log("wechat", "error", "公众号采集异常", str(e))
 
@@ -244,26 +275,28 @@ async def scheduled_juejin():
 
 
 async def scheduled_x_collect():
-    """定时：采集所有启用 XSubscription；间隔由 x_collect_interval_minutes 控制。"""
+    """定时：只采集已到达各自间隔的启用 XSubscription。"""
     from logger import log
-    from config import get_config
     from sqlalchemy import select
     from models import XSubscription
-    from routers.x import _collect_one
+    from routers.x import _collect_one, ensure_x_credential_sessions
 
     try:
-        cfg = await get_config()
-        minutes = max(1, int(cfg.get("x_collect_interval_minutes", 15)))
-        if not _should_run("x_collect", minutes * 60):
+        if not _should_run("x_collect", 60):
             return
+        now = datetime.now(timezone.utc)
         async with SessionLocal() as db:
             rows = (await db.execute(
                 select(XSubscription).where(XSubscription.enabled == True)
             )).scalars().all()
+            due_rows = [row for row in rows if _is_x_subscription_due(row, now)]
+            if not due_rows:
+                return
+            await ensure_x_credential_sessions(db)
             ok = 0
             failed = 0
             new_total = 0
-            for sub in rows:
+            for sub in due_rows:
                 try:
                     new_total += await _collect_one(db, sub)
                     ok += 1
@@ -299,34 +332,6 @@ async def scheduled_reddit():
         await log("reddit", "error", "Reddit 采集异常", str(e))
 
 
-async def scheduled_x_response_reconcile():
-    """每五分钟补偿已入库但尚未创建即时响应任务的新帖。"""
-    from logger import log
-    from config import get_config
-
-    try:
-        cfg = await get_config()
-        if str(cfg.get("x_notify_enabled", "1")).lower() not in ("1", "true", "yes", "on"):
-            return
-        from x_response_service import reconcile_response_jobs
-        result = await reconcile_response_jobs()
-        if result["errors"]:
-            await log(
-                "x_response",
-                "warn",
-                f"即时响应补偿：创建 {result['created']}，入队 {result['enqueued']}",
-                "; ".join(result["errors"]),
-            )
-        elif result["created"]:
-            await log(
-                "x_response",
-                "ok",
-                f"即时响应补偿：创建并入队 {result['enqueued']} 个任务",
-            )
-    except Exception as e:
-        await log("x_response", "error", "即时响应补偿异常", str(e))
-
-
 async def scheduled_topic_source_reconcile():
     """每五分钟补偿已落库但未成功投递到 AI worker 的主题素材任务。"""
     from logger import log
@@ -351,52 +356,11 @@ async def scheduled_topic_source_reconcile():
         await log("topic_source", "error", "主题素材甄选补偿异常", str(e))
 
 
-async def scheduled_x_response_digest():
-    """每天 18:00（Asia/Shanghai）创建并投递一次中等价值摘要任务。"""
-    from datetime import datetime
-    from zoneinfo import ZoneInfo
-    from logger import log
-    from config import get_config
-
-    try:
-        cfg = await get_config()
-        if str(cfg.get("x_notify_enabled", "1")).lower() not in ("1", "true", "yes", "on"):
-            return
-        from job_queue import enqueue_job
-        from x_response_service import (
-            create_response_digest_job,
-            enqueue_content_job_once,
-        )
-        date_key = datetime.now(ZoneInfo("Asia/Shanghai")).date().isoformat()
-        async with SessionLocal() as db:
-            job, _created = await create_response_digest_job(date_key, db=db)
-            enqueued = await enqueue_content_job_once(
-                db,
-                job,
-                enqueue=enqueue_job,
-            )
-        if enqueued:
-            await log("x_response", "ok", f"即时响应摘要已入队：{date_key}")
-    except Exception as e:
-        await log("x_response", "error", "即时响应摘要入队异常", str(e))
-
-
-async def scheduled_daily_plan():
-    """每天 8 点：为每个 active 账号生成今日内容计划。
-    create_today_plan 自带「当天已有计划则跳过」幂等守卫，重启重跑安全。"""
-    from logger import log
-    try:
-        from daily_planner import create_today_plan
-        await create_today_plan()
-    except Exception as e:
-        await log("daily_plan", "error", "今日计划生成异常", str(e))
-
-
 async def scheduled_daily_creation_rules():
     """Every minute, dispatch configurable rules whose local schedule is due."""
     from logger import log
     try:
-        from daily_planner import dispatch_due_creation_rules
+        from daily_creation_scheduler import dispatch_due_creation_rules
         result = await dispatch_due_creation_rules()
         if result["created"]:
             await log(
@@ -433,12 +397,9 @@ def register_jobs(scheduler, cfg):
         (scheduled_kr,                  dict(trigger="interval", minutes=10,          id="kr_collect",        next_run_time=_first_run(10,  "kr"))),
         (scheduled_juejin,              dict(trigger="interval", minutes=10,          id="juejin_collect",    next_run_time=_first_run(10,  "juejin"))),
         (scheduled_wechat,              dict(trigger="interval", minutes=15,          id="wechat_collect",    next_run_time=_first_run(15,  "wechat"))),
-        (scheduled_x_collect,           dict(trigger="interval", minutes=5,           id="x_collect_hourly",  next_run_time=_first_run(5,   "x_collect"))),
+        (scheduled_x_collect,           dict(trigger="interval", minutes=1,           id="x_collect_hourly",  next_run_time=_first_run(1,   "x_collect"))),
         (scheduled_reddit,              dict(trigger="interval", minutes=60,          id="reddit_collect",    next_run_time=_first_run(60,  "reddit"))),
-        (scheduled_x_response_reconcile,dict(trigger="interval", minutes=5,           id="x_response_reconcile", next_run_time=datetime.now())),
         (scheduled_topic_source_reconcile,dict(trigger="interval", minutes=5,         id="topic_source_reconcile", next_run_time=datetime.now())),
-        (scheduled_x_response_digest,   dict(trigger="cron", hour=18, minute=0, timezone="Asia/Shanghai", id="x_response_digest")),
-        (scheduled_daily_plan,          dict(trigger="cron",     hour=8, minute=0,    id="daily_plan")),
         (scheduled_daily_creation_rules,dict(trigger="interval", minutes=1, id="daily_creation_rules", next_run_time=datetime.now())),
     ]
     for func, kwargs in jobs:

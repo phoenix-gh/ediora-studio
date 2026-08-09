@@ -12,6 +12,10 @@ const alpha: RegisteredSkill = {
   enabled: true, instructions: '# Alpha workflow', directory: '/skills/alpha',
 }
 
+type Executable = {
+  execute(input: unknown, options: { toolCallId: string }): Promise<unknown>
+}
+
 function dependencies(selection: { skillName?: string; continueRestored?: boolean } = {}): AgentRuntimeDependencies {
   return {
     listEnabledSkills: async () => [alpha],
@@ -73,6 +77,36 @@ describe('shared Agent runtime', () => {
     await background.close()
   })
 
+  it('hides tools outside an explicit Agent tool allowlist', async () => {
+    const deps = dependencies()
+    const openTools = deps.openTools
+    deps.openTools = async options => {
+      const runtime = await openTools(options)
+      return {
+        ...runtime,
+        tools: {
+          ...runtime.tools,
+          update_draft: tool({
+            inputSchema: z.object({}),
+            execute: async () => ({ id: 9 }),
+          }),
+        },
+      }
+    }
+    const runtime = await openAgentRuntime({
+      ...openOptions('automatic', deps),
+      automaticSelection: false,
+      allowedToolNames: ['search_assets', 'save_draft'],
+    })
+
+    expect(Object.keys(runtime.tools).sort()).toEqual(['save_draft', 'search_assets'])
+    await expect(runtime.run({
+      objective: '只允许读取素材并保存草稿', modelMessages: [], maxSteps: 1,
+      requiredTools: ['update_draft'],
+    })).rejects.toThrow('Required Agent tool is unavailable: update_draft')
+    await runtime.close()
+  })
+
   it('fails before model execution when a manually selected Skill is unavailable', async () => {
     const deps = dependencies()
 
@@ -105,8 +139,131 @@ describe('shared Agent runtime', () => {
     await runtime.close()
   })
 
+  it('passes the Skill catalog to delegated automatic execution', async () => {
+    let active = false
+    let executionInstructions = ''
+    const deps = dependencies()
+    deps.openTools = async () => ({
+      tools: {
+        loadSkill: tool({
+          description: 'Load an enabled Skill.',
+          inputSchema: z.object({ name: z.string() }),
+          execute: async ({ name }) => {
+            active = name === alpha.name
+            return { name, instructions: alpha.instructions }
+          },
+        }),
+      } satisfies ToolSet,
+      catalogContext: 'Enabled Skills available for automatic activation:\n- Alpha: Handles alpha work',
+      snapshot: () => ({
+        source: active ? 'automatic' as const : undefined,
+        activeSkillName: active ? alpha.name : undefined,
+        referenceCount: 0,
+        readReferenceCount: 0,
+      }),
+      activeContext: () => active ? {
+        skill: alpha,
+        references: [],
+        activation: 'automatic' as const,
+        execution: { planRequired: true, verificationRequired: true, maxRevisions: 1 as const },
+      } : undefined,
+      readReferences: async () => [],
+      close: async () => undefined,
+    })
+    deps.generate = vi.fn(async (input: Record<string, unknown>) => {
+      executionInstructions = String(input.instructions ?? '')
+      const loadSkill = (input.tools as Record<string, Executable>).loadSkill
+      const output = await loadSkill.execute({ name: alpha.name }, { toolCallId: 'skill-1' })
+      return {
+        text: 'done',
+        toolResults: [{ toolName: 'loadSkill', toolCallId: 'skill-1', output }],
+        content: [],
+      }
+    }) as unknown as AgentRuntimeDependencies['generate']
+
+    const runtime = await openAgentRuntime({
+      ...openOptions('automatic', deps),
+      automaticSelection: false,
+    })
+    await runtime.run({ objective: '写作任务', modelMessages: [], maxSteps: 5 })
+
+    expect(executionInstructions).toContain('Enabled Skills available for automatic activation:')
+    expect(executionInstructions).toContain(
+      'Decide yourself whether a Skill is relevant to the task.',
+    )
+    expect(executionInstructions).toContain('Skill selection is not a prerequisite for completing the task.')
+    expect(runtime.snapshot()).toMatchObject({ activeSkillName: 'Alpha', source: 'automatic' })
+    await runtime.close()
+  })
+
+  it('lets delegated execution complete without loading a Skill', async () => {
+    let saveCalled = false
+    let executionInstructions = ''
+    const deps = dependencies()
+    deps.generate = vi.fn(async (input: Record<string, unknown>) => {
+      executionInstructions = String(input.instructions ?? '')
+      const saveDraft = (input.tools as Record<string, Executable>).save_draft
+      const output = await saveDraft.execute({}, { toolCallId: 'save-1' })
+      saveCalled = true
+      return {
+        text: '已完成',
+        toolResults: [{ toolName: 'save_draft', toolCallId: 'save-1', output }],
+        content: [],
+      }
+    }) as unknown as AgentRuntimeDependencies['generate']
+
+    const runtime = await openAgentRuntime({
+      ...openOptions('automatic', deps),
+      automaticSelection: false,
+    })
+    const result = await runtime.run({
+      objective: '用户提到 human-social-copy，但是否使用由你自行判断。',
+      modelMessages: [], maxSteps: 5, requiredTools: ['save_draft'],
+    })
+
+    expect(saveCalled).toBe(true)
+    expect(result.selectedSkill).toBeUndefined()
+    expect(runtime.selectedSkill).toBeUndefined()
+    expect(executionInstructions).toContain(
+      'Skill selection is not a prerequisite for completing the task.',
+    )
+    await runtime.close()
+  })
+
+  it('records each delegated model request and response', async () => {
+    const messages: Array<{ phase: string; direction: string; payload: Record<string, unknown> }> = []
+    const deps = dependencies()
+    deps.generate = vi.fn(async (input: Record<string, unknown>) => ({
+      text: 'done',
+      content: [{ type: 'text', text: 'done' }],
+      toolResults: [],
+      output: { decision: 'continue' },
+      request: input,
+    })) as unknown as AgentRuntimeDependencies['generate']
+
+    const runtime = await openAgentRuntime({
+      ...openOptions('automatic', deps),
+      automaticSelection: false,
+      onMessage: event => { messages.push(event) },
+    })
+    await runtime.run({ objective: '记录这次执行', modelMessages: [], maxSteps: 5 })
+
+    expect(messages.map(message => [message.phase, message.direction])).toEqual([
+      ['execute', 'model_request'],
+      ['execute', 'model_response'],
+    ])
+    expect(messages[0].payload).toMatchObject({
+      instructions: expect.stringContaining('Skill selection is not a prerequisite'),
+    })
+    expect(messages[1].payload).toMatchObject({
+      text: 'done', output: { decision: 'continue' },
+    })
+    await runtime.close()
+  })
+
   it('runs an activated Skill through plan, execution, validation, and shared audit', async () => {
     const deps = dependencies()
+    let validationPrompt = ''
     deps.generate = vi.fn(async (input: Record<string, unknown>) => {
       const prompt = typeof input.prompt === 'string' ? input.prompt : ''
       if (prompt.startsWith('Create a bounded execution plan')) {
@@ -123,12 +280,15 @@ describe('shared Agent runtime', () => {
         }
       }
       if (prompt.startsWith('Return valid JSON only in exactly this shape')) {
+        validationPrompt = prompt
         return { output: { passed: true, violations: [] } }
       }
       return {
         text: 'validated output',
         toolResults: [{
-          toolName: 'search_assets', toolCallId: 'call-search', output: [{ id: 11 }],
+          toolName: 'search_assets', toolCallId: 'call-search',
+          input: { prompt: '来自工具的真实输入' },
+          output: [{ id: 11, description: '来自工具的真实字段' }],
         }],
         content: [],
       }
@@ -158,6 +318,8 @@ describe('shared Agent runtime', () => {
       skillName: 'Alpha', activation: 'manual', revisionCount: 0,
       toolEvidence: [{ toolName: 'search_assets', state: 'succeeded' }],
     })
+    expect(validationPrompt).toContain('来自工具的真实字段')
+    expect(validationPrompt).toContain('来自工具的真实输入')
     await runtime.close()
   })
 
@@ -194,6 +356,51 @@ describe('shared Agent runtime', () => {
     })
 
     expect(activeTools).toEqual(['search_assets', 'save_draft'])
+  })
+
+  it('reports the final finish reason and executed step count without an active Skill', async () => {
+    const deps = dependencies()
+    deps.generate = vi.fn(async () => ({
+      text: '', toolResults: [], content: [], finishReason: 'tool-calls',
+      steps: Array.from({ length: 5 }, () => ({})),
+    })) as unknown as AgentRuntimeDependencies['generate']
+    const runtime = await openAgentRuntime({
+      ...openOptions('automatic', deps), automaticSelection: false,
+    })
+
+    await expect(runtime.run({
+      objective: 'Keep researching', modelMessages: [], maxSteps: 5,
+    })).resolves.toMatchObject({
+      kind: 'completed', finishReason: 'tool-calls', stepCount: 5,
+    })
+  })
+
+  it('passes run identity only to the tool transport, not to the model request', async () => {
+    const deps = dependencies()
+    const openTools = vi.fn(deps.openTools)
+    deps.openTools = openTools
+    deps.generate = vi.fn(async () => ({
+      text: 'done', toolResults: [], content: [], finishReason: 'stop', steps: [{}],
+    })) as unknown as AgentRuntimeDependencies['generate']
+    const runtime = await openAgentRuntime({
+      ...openOptions('automatic', deps),
+      automaticSelection: false,
+      dailyCreationRunId: 83,
+    })
+    const objective = '只按这条保存的提示词执行。'
+
+    await runtime.run({
+      objective,
+      modelMessages: [{ role: 'user', content: objective }],
+      maxSteps: 5,
+    })
+
+    expect(openTools).toHaveBeenCalledWith(expect.objectContaining({
+      dailyCreationRunId: 83,
+    }))
+    const modelInput = vi.mocked(deps.generate).mock.calls[0]?.[0]
+    expect(modelInput?.messages).toEqual([{ role: 'user', content: objective }])
+    expect(modelInput).not.toHaveProperty('dailyCreationRunId')
   })
 
   it('repairs a structurally valid Skill plan that uses names outside the active catalogs', async () => {

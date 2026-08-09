@@ -44,9 +44,8 @@ def _run_job(monkeypatch, *, n_accounts=3, with_cred=True, sync=None, delay=10.0
     """Create tables, seed cred + accounts, then run _run_collect_all — all inside
     one event loop. `sync` overrides _sync_account. Returns (wx module, sleep_calls).
 
-    The credential is seeded with expires_at=None (never-expiring): dev/prod run
-    Postgres where DateTime(timezone=True) round-trips as tz-aware, but the sqlite
-    used here returns naive datetimes, which would break the aware expiry compare.
+    The credential is seeded with expires_at=None so expiry behavior does not
+    distract from the collect-all workflow assertions.
     """
     import routers.wechat as wx
     from routers.wechat import SyncResult
@@ -129,6 +128,28 @@ def test_run_collect_all_account_error_continues(reload_env, monkeypatch):
     assert "号1" in st.errors[0]
     assert "采集完成" in st.message
     assert "新增 2 篇" in st.message
+
+
+def test_run_collect_all_reports_partial_listing_errors(reload_env, monkeypatch):
+    from routers.wechat import SyncResult
+
+    async def sync(db, acc, token, cookie, pages=1, page_size=20):
+        return SyncResult(
+            biz=acc.biz,
+            new_articles=0,
+            total_seen=0,
+            body_fetched=2,
+            list_error="公众平台访问频繁，已继续补抓已有文章正文",
+        )
+
+    wx, _ = _run_job(monkeypatch, n_accounts=1, sync=sync)
+    st = wx._collect_status
+
+    assert st.body_fetched == 2
+    assert len(st.errors) == 1
+    assert "号0" in st.errors[0]
+    assert "访问频繁" in st.errors[0]
+    assert "正文成功 2 篇" in st.message
 
 
 def test_run_collect_all_stops_on_session_expired(reload_env, monkeypatch):

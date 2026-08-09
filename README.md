@@ -223,13 +223,25 @@ Telegram 消息使用 HTML `<pre>` 块承载草稿，便于手机端长按复制
 
 ### 数据库
 
-默认 PostgreSQL，通过 WMS_DATABASE_URL 覆盖：
+运行时只支持 PostgreSQL，通过 `WMS_DATABASE_URL` 覆盖：
 
-```
+```dotenv
 postgresql+asyncpg://postgres:123456@127.0.0.1:5432/wemedia
 ```
 
-旧版 SQLite 迁移：运行 backend/migrate_sqlite_to_pg.py。
+后端测试同样使用 PostgreSQL。测试夹具会为每条数据库测试创建独立的
+`wemedia_test_<随机后缀>` 数据库，并在测试结束后删除，不会复用或清空开发库。
+管理连接默认取自 `WMS_TEST_DATABASE_ADMIN_URL`，未设置时使用：
+
+```dotenv
+WMS_TEST_DATABASE_ADMIN_URL=postgresql+asyncpg://wemedia:wemedia@127.0.0.1:55432/postgres
+```
+
+该账号需要具备 `CREATEDB` 权限。运行全部后端测试：
+
+```bash
+/home/violet/miniconda3/envs/wems/bin/python -m pytest backend/tests -q
+```
 
 ### 前端环境
 

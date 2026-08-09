@@ -3,13 +3,11 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 
 @pytest.fixture
-async def db(tmp_path):
+async def db(postgres_database_url):
     from database import Base
     import models  # noqa: F401
 
-    engine = create_async_engine(
-        f"sqlite+aiosqlite:///{tmp_path / 'agent-execution-service.db'}"
-    )
+    engine = create_async_engine(postgres_database_url)
     sessions = async_sessionmaker(engine, expire_on_commit=False)
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
@@ -60,6 +58,39 @@ async def test_completed_tool_call_replays_without_execution(db):
     assert replay.action == "replay"
     assert replay.output == {"id": 7}
     assert replay.error is None
+
+
+@pytest.mark.asyncio
+async def test_agent_message_log_preserves_model_turns_in_order(db):
+    from agent_execution_service import (
+        append_agent_message,
+        ensure_agent_execution,
+    )
+
+    job = await seed_job(db)
+    execution = await ensure_agent_execution(
+        db, job_id=job.id, objective="create posts",
+        skill_mode="auto", skill_name=None,
+    )
+
+    request = await append_agent_message(
+        db,
+        execution_id=execution.id,
+        phase="execute",
+        direction="model_request",
+        payload={"messages": [{"role": "user", "content": "create posts"}]},
+    )
+    response = await append_agent_message(
+        db,
+        execution_id=execution.id,
+        phase="execute",
+        direction="model_response",
+        payload={"text": "done", "toolResults": []},
+    )
+
+    assert request.id < response.id
+    assert request.payload_data["messages"][0]["content"] == "create posts"
+    assert response.payload_data["text"] == "done"
 
 
 @pytest.mark.asyncio
@@ -235,3 +266,33 @@ async def test_checkpoint_updates_are_optimistic_and_completion_is_durable(db):
     )
     assert completed.status == "succeeded"
     assert completed.completion_evidence["created_count"] == 2
+
+
+@pytest.mark.asyncio
+async def test_agent_execution_failure_is_terminal_and_idempotent(db):
+    from agent_execution_service import (
+        ensure_agent_execution,
+        fail_agent_execution,
+    )
+
+    job = await seed_job(db)
+    execution = await ensure_agent_execution(
+        db, job_id=job.id, objective="create posts",
+        skill_mode="auto", skill_name=None,
+    )
+
+    failed = await fail_agent_execution(
+        db, execution.id,
+        "save_daily_creation_outputs failed with a secret=token-value",
+    )
+    failed_again = await fail_agent_execution(
+        db, execution.id, "a later error must not overwrite the first failure",
+    )
+
+    assert failed.status == "failed"
+    assert failed.phase == "failed"
+    assert failed.error == "save_daily_creation_outputs failed with a secret=token-value"
+    assert failed.completed_at is not None
+    assert failed_again.status == "failed"
+    assert failed_again.error == failed.error
+    assert failed_again.completed_at == failed.completed_at

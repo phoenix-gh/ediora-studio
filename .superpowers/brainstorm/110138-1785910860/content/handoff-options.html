@@ -1,0 +1,63 @@
+<h2>情报处理结果如何进入现有内容系统？</h2>
+<p class="subtitle">当前项目已有“草稿箱”和“创作资产”。请选择情报站点击去向后的承接方式。</p>
+
+<div class="cards">
+  <div class="card" data-choice="direct" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mockup">
+        <div class="mockup-header">A · 一键直达</div>
+        <div class="mockup-body" style="background:#f8fafc;min-height:260px;padding:13px">
+          <div style="background:white;border:1px solid #e5e7eb;border-radius:8px;padding:12px;font-size:11px;line-height:1.8">
+            <b>值得写</b><br>点击后直接创建一篇草稿<br><span style="color:#64748b">标题、摘要、原文链接自动带入</span>
+            <button class="mock-button" style="display:block;margin-top:12px">打开草稿箱</button>
+            <hr style="border:0;border-top:1px solid #e5e7eb;margin:15px 0">
+            <b>创作资产</b><br>点击后直接保存到文章资产<br><span style="color:#64748b">原文、摘要、证据、标签自动带入</span>
+            <button class="mock-button" style="display:block;margin-top:12px">打开创作资产</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body"><h3>A · 一键直达</h3><p>最快，但用户不容易在点击前确认将保存哪些内容。</p></div>
+  </div>
+
+  <div class="card" data-choice="confirm" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mockup">
+        <div class="mockup-header">B · 轻量确认抽屉</div>
+        <div class="mockup-body" style="background:#f8fafc;min-height:260px;padding:13px">
+          <div style="background:white;border:1px solid #e5e7eb;border-radius:8px;padding:12px;font-size:11px;line-height:1.8">
+            <div style="color:#4f46e5;font-weight:700">写入内容系统</div>
+            <div style="margin-top:9px"><b>目标：</b>文章草稿</div>
+            <div><b>标题：</b>从 X 到 Y 的实践方法</div>
+            <div><b>带入：</b>AI 摘要、原文链接、证据清单</div>
+            <div><b>状态：</b>草稿，不自动发布</div>
+            <div style="display:flex;gap:7px;margin-top:14px"><button class="mock-button">确认写入</button><button class="mock-button" style="background:#e2e8f0;color:#334155">取消</button></div>
+            <hr style="border:0;border-top:1px solid #e5e7eb;margin:14px 0">
+            <div style="color:#4f46e5;font-weight:700">保存为创作资产</div>
+            <div>保存原文、摘要、证据和标签，不生成文章。</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body"><h3>B · 轻量确认抽屉</h3><p>点击后确认目标和带入内容，仍然很快，但不会悄悄生成错误的草稿或资产。</p></div>
+  </div>
+
+  <div class="card" data-choice="workspace" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mockup">
+        <div class="mockup-header">C · 独立处理向导</div>
+        <div class="mockup-body" style="background:#f8fafc;min-height:260px;padding:13px">
+          <div style="background:white;border:1px solid #e5e7eb;border-radius:8px;padding:12px;font-size:11px;line-height:2">
+            <b>1 选择目标</b><br>□ 文章草稿　□ 创作资产<br><br><b>2 选择模板</b><br>□ 方法型　□ 新闻解读　□ 资料卡<br><br><b>3 确认并创建</b><br><button class="mock-button">下一步</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body"><h3>C · 独立处理向导</h3><p>扩展性最好，但会让情报判断变成一个新的复杂流程，暂时不推荐。</p></div>
+  </div>
+</div>
+
+<div class="section" style="margin-top:18px">
+  <h3>建议</h3>
+  <p>采用 B：值得写时确认创建文章草稿，创作资产时确认保存材料；两者都明确“不自动发布”，并保留来源链接和 AI 评价。</p>
+</div>

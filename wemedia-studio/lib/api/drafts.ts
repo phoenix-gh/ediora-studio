@@ -33,6 +33,19 @@ export interface DraftUpdate {
   sources?: DraftSource[]
 }
 
+export interface DraftPage {
+  items: Draft[]
+  next_cursor: string | null
+}
+
+export interface DraftPageOptions {
+  cursor?: string
+  limit?: number
+  status?: string
+  writingPlanId?: number
+  unassigned?: boolean
+}
+
 export interface Series {
   id: number
   name: string
@@ -100,6 +113,17 @@ export async function createDraft(body: DraftCreate): Promise<Draft> {
 
 export async function getDrafts(): Promise<Draft[]> {
   return apiFetch<Draft[]>('/write/drafts')
+}
+
+export async function getDraftPage(options: DraftPageOptions = {}): Promise<DraftPage> {
+  const params = new URLSearchParams()
+  if (options.cursor) params.set('cursor', options.cursor)
+  if (options.limit) params.set('limit', String(options.limit))
+  if (options.status) params.set('status', options.status)
+  if (options.writingPlanId !== undefined) params.set('writing_plan_id', String(options.writingPlanId))
+  if (options.unassigned) params.set('unassigned', 'true')
+  const query = params.toString()
+  return apiFetch<DraftPage>(`/write/drafts/page${query ? `?${query}` : ''}`)
 }
 
 export async function updateDraft(id: number, body: DraftUpdate): Promise<Draft> {

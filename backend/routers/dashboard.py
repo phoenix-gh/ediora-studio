@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
 from models import (
-    ArticleDraft, CollectLog, DailyPlan, DailyPlanItem, GithubRelease, JuejinArticle,
+    ArticleDraft, CollectLog, GithubRelease, JuejinArticle,
     KrArticle, Paper, ProductHuntPost, PublishAccount, RedditPost,
     V2exTopic, WechatAccount, WechatArticle,
     WechatCredential, XPost, YoutubeVideo,
@@ -109,7 +109,7 @@ def _today_start_utc(now: datetime | None = None) -> datetime:
 
 
 def _as_utc(dt: datetime | None) -> datetime | None:
-    """sqlite 取回的是 naive UTC；PG 是 aware。统一成 aware UTC。"""
+    """Normalize database timestamps to aware UTC values."""
     if dt is None:
         return None
     if dt.tzinfo is None:
@@ -144,12 +144,18 @@ async def _latest_logs(db: AsyncSession) -> dict[str, CollectLog]:
 
 def _interval_seconds(cfg: dict, interval: tuple) -> int:
     cfg_key, default, unit = interval
+    if cfg_key == "x_collect_interval_minutes":
+        # The scheduler polls every minute; each X subscription decides when
+        # it is due from its own collect_interval_minutes value.
+        return 60
     val = max(1, int(cfg.get(cfg_key, default)))
     return val * 3600 if unit == "hour" else val * 60
 
 
 def _schedule_label(cfg: dict, interval: tuple) -> str:
     cfg_key, default, unit = interval
+    if cfg_key == "x_collect_interval_minutes":
+        return "按订阅设置"
     val = max(1, int(cfg.get(cfg_key, default)))
     return f"{val} 小时" if unit == "hour" else f"{val} 分钟"
 
@@ -281,28 +287,6 @@ async def _build_alerts(
                             text="公众号发布凭证未配置，无法推送草稿箱：" + "、".join(missing),
                             action_label="去配置", href="/settings"))
 
-    # 6. 今日计划：就绪待确认 / 生成失败
-    try:
-        import daily_planner
-        plan = (await db.execute(
-            select(DailyPlan).where(DailyPlan.plan_date == daily_planner.today_str())
-        )).scalar_one_or_none()
-        if plan is not None and plan.status == "ready":
-            pending = (await db.execute(
-                select(func.count()).select_from(DailyPlanItem)
-                .where(DailyPlanItem.plan_id == plan.id,
-                       DailyPlanItem.status == "suggested")
-            )).scalar_one()
-            if pending:
-                alerts.append(Alert(severity="info",
-                                    text=f"今日计划已就绪，{pending} 条待确认",
-                                    action_label="去确认", href="/daily-plan"))
-        elif plan is not None and plan.status == "failed":
-            alerts.append(Alert(severity="warn", text="今日计划生成失败",
-                                action_label="重新生成", href="/daily-plan"))
-    except Exception:
-        pass
-
     alerts.sort(key=lambda a: _SEVERITY_ORDER.get(a.severity, 9))
     return alerts
 
@@ -349,9 +333,7 @@ async def get_overview(db: AsyncSession = Depends(get_db)):
 
     try:
         today_output = TodayOutput(
-            topics=(await db.execute(
-                select(func.count()).select_from(DailyPlanItem).where(DailyPlanItem.created_at >= today_start)
-            )).scalar_one(),
+            topics=0,
             drafts=(await db.execute(
                 select(func.count()).select_from(ArticleDraft).where(ArticleDraft.created_at >= today_start)
             )).scalar_one(),

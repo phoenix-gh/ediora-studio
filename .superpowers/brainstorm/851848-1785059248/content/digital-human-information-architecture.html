@@ -1,0 +1,102 @@
+<style>
+  .ia-grid { display:grid; grid-template-columns:230px minmax(0,1fr); gap:20px; margin-top:20px; }
+  .nav-shell,.canvas { border:1px solid #e2e8f0; border-radius:14px; background:#fff; overflow:hidden; }
+  .nav-brand { padding:16px; font-weight:750; color:#1e293b; border-bottom:1px solid #e2e8f0; }
+  .nav-section { padding:14px 12px 6px; font-size:10px; letter-spacing:.12em; color:#94a3b8; font-weight:700; }
+  .nav-item { margin:3px 8px; padding:9px 11px; border-radius:7px; color:#64748b; font-size:12px; }
+  .nav-item.active { background:#eef2ff; color:#4338ca; font-weight:700; border:1px solid #c7d2fe; }
+  .canvas-head { display:flex; align-items:center; padding:15px 18px; border-bottom:1px solid #e2e8f0; }
+  .canvas-head strong { color:#1e293b; }
+  .tabs { margin-left:22px; display:flex; gap:18px; font-size:12px; color:#64748b; }
+  .tab.active { color:#4f46e5; font-weight:700; border-bottom:2px solid #4f46e5; padding-bottom:13px; margin-bottom:-15px; }
+  .new-btn { margin-left:auto; border-radius:7px; background:#4f46e5; color:white; padding:7px 11px; font-size:11px; }
+  .flow { padding:24px 20px 16px; display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:10px; align-items:stretch; }
+  .node { position:relative; border:1px solid #dbe3ef; border-radius:10px; padding:13px 11px; background:#f8fafc; min-height:112px; }
+  .node:not(:last-child)::after { content:'→'; position:absolute; right:-15px; top:43%; color:#818cf8; font-size:18px; z-index:2; }
+  .num { width:22px;height:22px;border-radius:50%;background:#e0e7ff;color:#4338ca;font-size:10px;font-weight:800;display:flex;align-items:center;justify-content:center;margin-bottom:8px; }
+  .node h4 { margin:0 0 6px; font-size:12px; color:#1e293b; }
+  .node p { margin:0; font-size:10px; line-height:1.55; color:#64748b; }
+  .model-row { display:grid;grid-template-columns:1fr 1.25fr 1fr;gap:12px;padding:12px 20px 22px; }
+  .model { border-radius:10px;padding:13px;border:1px solid #e2e8f0;background:#fff; }
+  .model.primary { border-color:#a5b4fc;background:#f5f7ff; }
+  .model-title { font-size:12px;font-weight:750;color:#334155;margin-bottom:7px; }
+  .tag { display:inline-block;margin:2px 3px 2px 0;padding:3px 6px;border-radius:999px;background:#f1f5f9;color:#64748b;font-size:9px; }
+  .primary .tag { background:#e0e7ff;color:#4338ca; }
+  .note { margin:0 20px 20px;padding:12px 14px;border-left:3px solid #6366f1;background:#f8fafc;border-radius:6px;color:#475569;font-size:12px;line-height:1.6; }
+  @media(max-width:950px){.ia-grid{grid-template-columns:1fr}.flow{grid-template-columns:1fr}.node:not(:last-child)::after{content:'↓';right:50%;top:auto;bottom:-19px}.model-row{grid-template-columns:1fr}}
+</style>
+
+<h2>设计 1/4 · 信息架构与核心流程</h2>
+<p class="subtitle">新增一个创作菜单入口，把“人物管理”和“视频创作”放在同一业务空间，但数据上保持分离。</p>
+
+<div class="ia-grid">
+  <div class="nav-shell">
+    <div class="nav-brand">WeMedia Studio</div>
+    <div class="nav-item">今日工作台</div>
+    <div class="nav-item">创作任务</div>
+    <div class="nav-section">创作</div>
+    <div class="nav-item">草稿箱</div>
+    <div class="nav-item">写作模板</div>
+    <div class="nav-item">创作资产</div>
+    <div class="nav-item active">◉ 数字人</div>
+    <div class="nav-item">热点选题</div>
+    <div class="nav-item">发布</div>
+  </div>
+
+  <div class="canvas">
+    <div class="canvas-head">
+      <strong>数字人</strong>
+      <div class="tabs"><span class="tab active">口播创作</span><span class="tab">数字人管理</span></div>
+      <span class="new-btn">＋ 新建口播</span>
+    </div>
+
+    <div class="flow">
+      <div class="node">
+        <div class="num">1</div><h4>创建数字人</h4>
+        <p>上传正面照<br>上传声音样本<br>克隆并试听声音<br>设置默认环境</p>
+      </div>
+      <div class="node">
+        <div class="num">2</div><h4>新建口播项目</h4>
+        <p>选择数字人<br>自动带入默认环境<br>可换成资产或 AI 生图</p>
+      </div>
+      <div class="node">
+        <div class="num">3</div><h4>完成脚本</h4>
+        <p>手动编写<br>AI 辅助生成<br>从草稿转换<br>自动保存当前脚本</p>
+      </div>
+      <div class="node">
+        <div class="num">4</div><h4>生成口播</h4>
+        <p>冻结输入快照<br>异步合成声音与口型<br>页面显示任务进度</p>
+      </div>
+      <div class="node">
+        <div class="num">5</div><h4>管理成片版本</h4>
+        <p>预览与下载<br>比较历史结果<br>设为当前版本<br>视频进入创作资产</p>
+      </div>
+    </div>
+
+    <div class="model-row">
+      <div class="model">
+        <div class="model-title">数字人档案</div>
+        <span class="tag">形象图</span><span class="tag">克隆声音</span><span class="tag">默认环境图</span>
+      </div>
+      <div class="model primary">
+        <div class="model-title">口播项目 · 核心对象</div>
+        <span class="tag">项目标题</span><span class="tag">当前脚本</span><span class="tag">所选数字人</span><span class="tag">环境覆盖</span><span class="tag">当前成片</span>
+      </div>
+      <div class="model">
+        <div class="model-title">成片版本</div>
+        <span class="tag">脚本快照</span><span class="tag">素材快照</span><span class="tag">供应商记录</span><span class="tag">视频资产</span>
+      </div>
+    </div>
+
+    <div class="note"><strong>首版原则：</strong>脚本只属于口播项目，不建立独立脚本库；AI 生成环境图自动进入创作资产；创建数字人和生成成片都是异步任务，页面离开后仍可继续。</div>
+  </div>
+</div>
+
+<div class="options" style="margin-top:20px">
+  <div class="option" data-choice="approve-ia" onclick="toggleSelect(this)">
+    <div class="letter">✓</div><div class="content"><h3>认可这一层设计</h3><p>继续设计数字人管理与创建流程。</p></div>
+  </div>
+  <div class="option" data-choice="revise-ia" onclick="toggleSelect(this)">
+    <div class="letter">↺</div><div class="content"><h3>需要调整</h3><p>在终端告诉我需要改动的菜单、页面或流程。</p></div>
+  </div>
+</div>

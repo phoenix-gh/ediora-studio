@@ -19,14 +19,32 @@ export type AgentToolAudit = {
   occurredAt: string
 }
 
-export type AgentCompletionEvidence = {
-  toolName: 'save_daily_creation_outputs'
-  toolCallId: string
-  runId: number
-  createdCount: number
-  outputIds: number[]
-  usageIds: number[]
+export type AgentModelMessageEvent = {
+  phase: string
+  direction: 'model_request' | 'model_response' | 'model_error'
+  payload: Record<string, unknown>
+  occurredAt: string
 }
+
+export type AgentCompletionEvidence =
+  | {
+      kind: 'agent_run'
+      executionId: number
+      finalText: string
+      toolCallCount: number
+    }
+  | {
+      kind: 'model_evaluation'
+      executionId: number
+      flow: string
+      messageCount: number
+    }
+  | {
+      toolName: 'save_draft'
+      toolCallId: string
+      draftId: number
+      responseItemId: number
+    }
 
 export type AgentStepCheckpoint = {
   phase: 'plan' | 'references' | 'execute' | 'validate' | 'revise'

@@ -14,5 +14,4 @@
 
 XActions 仓库中的 Apache License, Version 2.0 和 MIT License 文本及完整版权声明以其参考提交中的原始文件为准。本仓库没有复制 XActions 的完整运行时，也没有引入其网络服务、任务调度、登录凭据处理或线程发布功能。
 
-述策助手的实现是经过修改的、范围受限的独立 Manifest V3 插件：发布器运行在 X 页面隔离桥接中，控制台 API 只是当前版本的临时入口；插件不连接 WeMediaStudio，不读取 Cookie/Token，不访问第三方 API，并提供 dry-run 和写入回读校验。
-
+述策助手的实现是经过修改的、范围受限的独立 Manifest V3 插件：内部 X DOM 驱动保留了安排表选择器和输入回读校验思路，但当前版本不加载页面桥接、不注入控制台 API，也不创建 `window.Shuce`。插件不读取 Cookie/Token，不访问第三方 API；草稿读取仅通过用户配置的本机 WeMediaStudio API 完成。

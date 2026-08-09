@@ -126,7 +126,6 @@ def test_default_map_uses_code_defaults_and_normalizes_known_template_entries():
         "caption-focus-v1@1",
         "editorial-card-v1@1",
         "voice-pulse-v1@1",
-        "kinetic-punch-v2@1",
     ]
     assert defaults["tech-text-v1@1"] == text_video_template_defaults(manifest)
 
@@ -137,7 +136,7 @@ def test_default_map_uses_code_defaults_and_normalizes_known_template_entries():
         text_video_template_defaults(manifest)
         | {"brandTitle": "CHANNEL ONE"}
     )
-    assert len(customized) == 6
+    assert len(customized) == 5
 
 
 @pytest.mark.parametrize(
@@ -147,7 +146,6 @@ def test_default_map_uses_code_defaults_and_normalizes_known_template_entries():
         ("caption-focus-v1", "caption-focus-v1"),
         ("editorial-card-v1", "editorial-card-v1"),
         ("voice-pulse-v1", "voice-pulse-v1"),
-        ("kinetic-punch-v2", "kinetic-punch-v2"),
     ],
 )
 def test_additional_templates_have_valid_normalizable_defaults(
@@ -181,7 +179,6 @@ def test_render_facing_catalog_contract_stays_in_frontend_parity():
             get_text_video_template("caption-focus-v1", 1),
             get_text_video_template("editorial-card-v1", 1),
             get_text_video_template("voice-pulse-v1", 1),
-            get_text_video_template("kinetic-punch-v2", 1),
         )
     ]
 
@@ -264,20 +261,6 @@ def test_render_facing_catalog_contract_stays_in_frontend_parity():
                 "showBrand": True,
                 "accentColor": "#7C5CFF",
                 "showProgress": True,
-            },
-        },
-        {
-            "id": "kinetic-punch-v2",
-            "composition_id": "kinetic-punch-v2",
-            "composition": {"width": 1080, "height": 1920, "fps": 30},
-            "animations": ["impact", "reveal", "contrast"],
-            "transitions": ["block-wipe"],
-            "defaults": {
-                "brandTitle": "EDIORA",
-                "showBrand": True,
-                "accentColor": "#D8FF3E",
-                "showProgress": True,
-                "palette": "night",
             },
         },
     ]

@@ -28,7 +28,6 @@ import {
 } from '../lib/ai/job-client'
 import { runContentResponseAnalysisJob } from '../lib/ai/content-response-job'
 import { runContentResponseOutputJob } from '../lib/ai/content-response-output-job'
-import { runXResponseDigestJob, runXResponseJob } from '../lib/ai/x-response-job'
 import { runTopicSourceJob } from '../lib/ai/topic-source-job'
 import { runTextVideoSplitJob } from '../lib/ai/text-video-split-job'
 import { runTextVideoMasterJob } from '../lib/ai/text-video-master-job'
@@ -124,8 +123,6 @@ export function resolveContentJobRunner(
     return runContentResponseAnalysisJob
   }
   if (flow === 'content_response_output') return runContentResponseOutputJob
-  if (flow === 'x_response') return runXResponseJob
-  if (flow === 'x_response_digest') return runXResponseDigestJob
   if (flow === 'topic_source') return runTopicSourceJob
   if (flow === 'text_video_split_preview') return runTextVideoSplitJob
   if (flow === 'text_video_speech') {

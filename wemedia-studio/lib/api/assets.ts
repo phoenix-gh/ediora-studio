@@ -30,14 +30,26 @@ export async function uploadInlineAssetImage(file: File) {
   return result.url
 }
 export const deleteCreativeAsset = (id: number) => apiFetch<void>(`/assets/${id}`, { method: 'DELETE' })
-export type TopicSourceRule = { id: number; subscription_id: number; directory: string; keywords: string[]; enabled: boolean; created_at: string; updated_at: string }
+export type TopicSourceRule = { id: number; subscription_id: number; directory: string; keywords: string[]; screening_prompt: string; enabled: boolean; created_at: string; updated_at: string }
 export const listTopicSourceRules = () => apiFetch<TopicSourceRule[]>('/assets/topic-rules')
-export const createTopicSourceRule = (body: Pick<TopicSourceRule, 'subscription_id' | 'directory' | 'keywords'>) => apiFetch<TopicSourceRule>('/assets/topic-rules', { method: 'POST', body: JSON.stringify(body) })
-export const updateTopicSourceRule = (id: number, body: Partial<Pick<TopicSourceRule, 'keywords' | 'enabled'>>) => apiFetch<TopicSourceRule>(`/assets/topic-rules/${id}`, { method: 'PATCH', body: JSON.stringify(body) })
+export const createTopicSourceRule = (body: Pick<TopicSourceRule, 'subscription_id' | 'directory' | 'keywords' | 'screening_prompt'>) => apiFetch<TopicSourceRule>('/assets/topic-rules', { method: 'POST', body: JSON.stringify(body) })
+export const updateTopicSourceRule = (id: number, body: Partial<Pick<TopicSourceRule, 'directory' | 'keywords' | 'screening_prompt' | 'enabled'>>) => apiFetch<TopicSourceRule>(`/assets/topic-rules/${id}`, { method: 'PATCH', body: JSON.stringify(body) })
 export const dailyArticleCandidates = (directory: string) => apiFetch<{ assets: CreativeAsset[] }>(`/assets/daily-candidates?directory=${encodeURIComponent(directory)}`)
 export const selectDailyArticleCandidates = (directory: string) => apiFetch<{ assets: CreativeAsset[] }>('/assets/daily-candidates', { method: 'POST', body: JSON.stringify({ directory }) })
-export type CreativeAssetDirectory = { id: number; name: string; asset_type: 'article' | 'media'; parent_id: number | null; is_system: boolean; created_at: string }
+export type CreativeAssetDirectory = {
+  id: number
+  name: string
+  asset_type: 'article' | 'media'
+  parent_id: number | null
+  is_system: boolean
+  ai_ingestion_enabled: boolean
+  ai_ingestion_keywords: string[]
+  ai_ingestion_prompt: string
+  created_at: string
+}
 export const listCreativeAssetDirectories = (assetType: 'article' | 'media') => apiFetch<CreativeAssetDirectory[]>(`/assets/directories?asset_type=${assetType}`)
 export const createCreativeAssetDirectory = (name: string, assetType: 'article' | 'media', parentId: number | null = null) => apiFetch<CreativeAssetDirectory>('/assets/directories', { method: 'POST', body: JSON.stringify({ name, asset_type: assetType, parent_id: parentId }) })
 export const renameCreativeAssetDirectory = (id: number, name: string) => apiFetch<CreativeAssetDirectory>(`/assets/directories/${id}`, { method: 'PATCH', body: JSON.stringify({ name }) })
 export const deleteCreativeAssetDirectory = (id: number) => apiFetch<void>(`/assets/directories/${id}`, { method: 'DELETE' })
+export type CreativeAssetDirectoryIngestionRule = { directory_id: number; enabled: boolean; keywords: string[]; prompt: string }
+export const updateCreativeAssetDirectoryIngestionRule = (id: number, body: Pick<CreativeAssetDirectoryIngestionRule, 'enabled' | 'keywords' | 'prompt'>) => apiFetch<CreativeAssetDirectoryIngestionRule>(`/assets/directories/${id}/ingestion-rule`, { method: 'PUT', body: JSON.stringify(body) })

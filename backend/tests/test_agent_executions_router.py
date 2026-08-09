@@ -10,11 +10,7 @@ TOKEN = "agent-execution-worker-token-at-least-32-chars"
 
 
 @pytest.fixture
-def client(monkeypatch, tmp_path):
-    monkeypatch.setenv(
-        "WMS_DATABASE_URL",
-        f"sqlite+aiosqlite:///{tmp_path / 'agent-executions-router.db'}",
-    )
+def client(monkeypatch, postgres_env):
     monkeypatch.setenv("WMS_WORKER_TOKEN", TOKEN)
     for module_name in list(sys.modules):
         if module_name.startswith((
@@ -183,3 +179,64 @@ def test_agent_execution_route_round_trips_checkpoint_and_tool_replay(client):
     )
     assert loaded.status_code == 200
     assert loaded.json()["phase"] == "complete"
+
+
+def test_agent_execution_route_persists_message_log(client):
+    test_client, job_id = client
+    created = test_client.post(
+        "/api/agent-executions",
+        headers=headers(),
+        json={
+            "job_id": job_id,
+            "objective": "create posts",
+            "skill_mode": "auto",
+            "skill_name": None,
+        },
+    )
+    execution_id = created.json()["id"]
+
+    message = test_client.post(
+        f"/api/agent-executions/{execution_id}/messages",
+        headers=headers(),
+        json={
+            "phase": "execute",
+            "direction": "model_request",
+            "payload": {"messages": [{"role": "user", "content": "create posts"}]},
+        },
+    )
+
+    assert message.status_code == 201, message.text
+    assert message.json()["payload"]["messages"][0]["content"] == "create posts"
+
+
+def test_agent_execution_failure_route_is_idempotent(client):
+    test_client, job_id = client
+    created = test_client.post(
+        "/api/agent-executions",
+        headers=headers(),
+        json={
+            "job_id": job_id,
+            "objective": "create posts",
+            "skill_mode": "auto",
+            "skill_name": None,
+        },
+    )
+    execution_id = created.json()["id"]
+
+    first = test_client.post(
+        f"/api/agent-executions/{execution_id}/fail",
+        headers=headers(),
+        json={"error": "save failed auth_token=secret"},
+    )
+    second = test_client.post(
+        f"/api/agent-executions/{execution_id}/fail",
+        headers=headers(),
+        json={"error": "a later error"},
+    )
+
+    assert first.status_code == 200, first.text
+    assert second.status_code == 200, second.text
+    assert first.json()["status"] == "failed"
+    assert first.json()["phase"] == "failed"
+    assert first.json()["error"] == "save failed auth_token=***"
+    assert second.json()["error"] == first.json()["error"]

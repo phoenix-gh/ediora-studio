@@ -27,6 +27,7 @@ class XCredentialAccount(Base):
     credential_slot: Mapped[int] = mapped_column(Integer, nullable=False, unique=True)
     auth_token_preview: Mapped[str] = mapped_column(String, default="")
     ct0_preview: Mapped[str] = mapped_column(String, default="")
+    session_ciphertext: Mapped[str] = mapped_column(Text, default="")
     test_status: Mapped[str] = mapped_column(String, default="untested", index=True)
     last_tested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_test_error: Mapped[str] = mapped_column(Text, default="")
@@ -54,7 +55,6 @@ class PublishAccount(Base):
     style_rules: Mapped[list] = mapped_column(JSON, default=list)
     app_id: Mapped[str] = mapped_column(String, default="")       # 公众号开发者 AppID
     app_secret: Mapped[str] = mapped_column(String, default="")   # 仅用于发布到草稿箱
-    daily_quota: Mapped[dict] = mapped_column(JSON, default=dict)  # {"long":1,"short":2}；空=不参与每日计划
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
 
@@ -187,10 +187,10 @@ class XSubscription(Base):
     extra_terms: Mapped[str] = mapped_column(String, default="")
     sort: Mapped[str] = mapped_column(String, default="top")
     max_results: Mapped[int] = mapped_column(Integer, default=100)
-    # 动态通知：勾选后该订阅的新帖经 LLM 评估并推送 Telegram；
-    # notify_enabled_at 记录开启时刻，只推送之后采集到的帖子
-    notify_new_posts: Mapped[bool] = mapped_column(Boolean, default=False)
-    notify_enabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    collect_interval_minutes: Mapped[int] = mapped_column(Integer, nullable=False, default=15)
+    # 情报分析：只分析开启时刻之后采集到的新帖。
+    intelligence_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    intelligence_enabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_collected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_error: Mapped[str] = mapped_column(String, default="")
     added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, index=True)
@@ -217,11 +217,6 @@ class XPost(Base):
     possibly_sensitive: Mapped[bool] = mapped_column(Boolean, default=False)
     is_reply: Mapped[bool] = mapped_column(Boolean, default=False)
     raw_markdown: Mapped[str] = mapped_column(Text, default="")
-    x_reply_score: Mapped[float | None] = mapped_column(Float, nullable=True)
-    x_reply_draft: Mapped[str | None] = mapped_column(Text, nullable=True)
-    x_reply_notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-
-
 class XResponseDecision(Base):
     """One durable realtime-response decision for one collected X post."""
     __tablename__ = "x_response_decisions"
@@ -350,6 +345,9 @@ class PlanUpdate(Base):
 
 class ArticleDraft(Base):
     __tablename__ = "article_drafts"
+    __table_args__ = (
+        Index("ix_article_drafts_updated_at_id", "updated_at", "id"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     topic_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
@@ -390,7 +388,6 @@ class ContentJob(Base):
             "uq_content_jobs_idempotency_nonempty",
             "idempotency_key",
             unique=True,
-            sqlite_where=text("idempotency_key <> ''"),
             postgresql_where=text("idempotency_key <> ''"),
         ),
     )
@@ -407,7 +404,7 @@ class ContentJob(Base):
 
 
 class AgentExecution(Base):
-    """Durable checkpoint for one Agent-owned content job."""
+    """Durable checkpoint for one AI-owned content job."""
     __tablename__ = "agent_executions"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -457,6 +454,20 @@ class AgentToolCall(Base):
     )
 
 
+class AgentMessageLog(Base):
+    """One persisted model request/response in an AI execution timeline."""
+    __tablename__ = "agent_message_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    execution_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    phase: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    direction: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    payload_data: Mapped[dict | list | str | int | float | bool | None] = mapped_column(
+        JSON, nullable=False, default=dict
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, index=True)
+
+
 class ContentJobStep(Base):
     __tablename__ = "content_job_steps"
     __table_args__ = (UniqueConstraint("job_id", "step_key", "attempt", name="uq_content_job_step_attempt"),)
@@ -500,8 +511,12 @@ class ContentResponseItem(Base):
     source_title: Mapped[str] = mapped_column(String, default="")
     source_author: Mapped[str] = mapped_column(String, default="")
     source_published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    subscription_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     workflow_status: Mapped[str] = mapped_column(String, default="queued", index=True)
     decision_status: Mapped[str] = mapped_column(String, default="pending", index=True)
+    content_types: Mapped[list] = mapped_column(JSON, default=list)
+    destination_type: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    destination_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     current_analysis_run_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     selected_publish_account_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
     selected_output_types: Mapped[list] = mapped_column(JSON, default=list)
@@ -529,6 +544,10 @@ class ContentAnalysisRun(Base):
     value_dimensions: Mapped[dict] = mapped_column(JSON, default=dict)
     summary_cn: Mapped[str] = mapped_column(Text, default="")
     core_thesis: Mapped[str] = mapped_column(Text, default="")
+    suggested_title: Mapped[str] = mapped_column(Text, default="")
+    suggested_angle: Mapped[str] = mapped_column(Text, default="")
+    target_reader: Mapped[str] = mapped_column(Text, default="")
+    suggested_structure: Mapped[list] = mapped_column(JSON, default=list)
     key_points: Mapped[list] = mapped_column(JSON, default=list)
     evidence: Mapped[list] = mapped_column(JSON, default=list)
     value_points: Mapped[list] = mapped_column(JSON, default=list)
@@ -538,6 +557,8 @@ class ContentAnalysisRun(Base):
     article_outlines: Mapped[list] = mapped_column(JSON, default=list)
     comment_angles: Mapped[list] = mapped_column(JSON, default=list)
     recommended_output_types: Mapped[list] = mapped_column(JSON, default=list)
+    recommended_content_types: Mapped[list] = mapped_column(JSON, default=list)
+    recommended_disposition: Mapped[str] = mapped_column(String, default="pending", index=True)
     recommended_action: Mapped[str] = mapped_column(String, default="")
     recommendation_reason: Mapped[str] = mapped_column(Text, default="")
     recommended_publish_account_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
@@ -1046,6 +1067,9 @@ class CreativeAssetDirectory(Base):
     system_key: Mapped[str | None] = mapped_column(
         String, nullable=True, unique=True, index=True
     )
+    ai_ingestion_enabled: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    ai_ingestion_keywords: Mapped[list] = mapped_column(JSON, default=list)
+    ai_ingestion_prompt: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
 
 
@@ -1060,6 +1084,7 @@ class TopicSourceRule(Base):
     subscription_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     directory: Mapped[str] = mapped_column(String, nullable=False, index=True)
     keywords: Mapped[list] = mapped_column(JSON, default=list)
+    screening_prompt: Mapped[str] = mapped_column(Text, default="")
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     updated_at: Mapped[datetime] = mapped_column(
@@ -1078,6 +1103,41 @@ class TopicSourceDecision(Base):
     rule_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     tweet_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
     accepted: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+
+class XSubscriptionIngestionDirectory(Base):
+    """An X subscription's selected article directories for AI ingestion."""
+    __tablename__ = "x_subscription_ingestion_directories"
+    __table_args__ = (
+        UniqueConstraint(
+            "subscription_id",
+            "directory_id",
+            name="uq_x_subscription_ingestion_directory",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    subscription_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    directory_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+
+class AssetIngestionDecision(Base):
+    """The final one-directory AI verdict for one X post under one subscription."""
+    __tablename__ = "asset_ingestion_decisions"
+    __table_args__ = (
+        UniqueConstraint(
+            "subscription_id",
+            "tweet_id",
+            name="uq_asset_ingestion_decision_subscription_tweet",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    subscription_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    tweet_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    directory_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
 
 
@@ -1108,6 +1168,7 @@ class DailyCreationRule(Base):
     delivery_mode: Mapped[str] = mapped_column(String, nullable=False)
     account_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
     instructions: Mapped[str] = mapped_column(Text, default="")
+    prompt: Mapped[str] = mapped_column(Text, nullable=False, default="")
     skill_mode: Mapped[str] = mapped_column(String, nullable=False, default="auto")
     skill_name: Mapped[str | None] = mapped_column(String, nullable=True)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
@@ -1164,7 +1225,6 @@ class DailyCreationOutputBatch(Base):
     self_validation: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     output_ids: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     draft_ids: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
-    plan_item_ids: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     usage_ids: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     created_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
@@ -1193,7 +1253,6 @@ class ContentUsageLedger(Base):
     output_kind: Mapped[str] = mapped_column(String, nullable=False)
     output_id: Mapped[int] = mapped_column(Integer, nullable=False)
     draft_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
-    plan_item_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     account_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
     rule_name: Mapped[str] = mapped_column(String, default="")
     topic: Mapped[str] = mapped_column(String, default="")
@@ -1201,39 +1260,4 @@ class ContentUsageLedger(Base):
     excerpt: Mapped[str] = mapped_column(Text, default="")
     reuse_decision: Mapped[str] = mapped_column(String, default="fresh")
     reuse_explanation: Mapped[str] = mapped_column(Text, default="")
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
-
-
-class DailyPlan(Base):
-    """每日内容计划：8 点总编策划任务的载体，items 确认后入队创作链。"""
-    __tablename__ = "daily_plans"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    plan_date: Mapped[str] = mapped_column(String, nullable=False, unique=True, index=True)  # 本地日期 "YYYY-MM-DD"
-    status: Mapped[str] = mapped_column(String, default="planning", index=True)  # planning|ready|failed
-    kanban_task_id: Mapped[str] = mapped_column(String, default="")
-    planner_note: Mapped[str] = mapped_column(Text, default="")  # 总编留言
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
-
-
-class DailyPlanItem(Base):
-    """计划里的一条选题，是入队创作及撞题共享稿件的锚点。"""
-    __tablename__ = "daily_plan_items"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    plan_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
-    account_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
-    title: Mapped[str] = mapped_column(String, nullable=False)
-    angle: Mapped[str] = mapped_column(Text, default="")
-    reason: Mapped[str] = mapped_column(Text, default="")
-    content_type: Mapped[str] = mapped_column(String, default="long")  # long|short|story|share
-    sources: Mapped[list] = mapped_column(JSON, default=list)  # [{platform,title,url}]
-    group_key: Mapped[str] = mapped_column(String, default="", index=True)  # 非空=撞题组，共享一稿
-    is_primary: Mapped[bool] = mapped_column(Boolean, default=True)  # 组内主笔（用谁的画像写）
-    status: Mapped[str] = mapped_column(String, default="suggested", index=True)  # suggested|skipped|enqueued
-    pipeline_task_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    draft_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    origin: Mapped[str] = mapped_column(String, default="planner", index=True)
-    creation_run_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)

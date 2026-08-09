@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -8,19 +8,22 @@ import { ResponsesClient } from './ResponsesClient'
 import type { ResponseDetail, ResponseItem } from '@/lib/api/responses'
 
 const api = vi.hoisted(() => ({
+  createResponseDestination: vi.fn(),
   createResponseOutputs: vi.fn(),
   decideResponse: vi.fn(),
   getResponse: vi.fn(),
   getResponseEvents: vi.fn(),
   getResponses: vi.fn(),
-  getTranscript: vi.fn(),
+  updateResponseClassification: vi.fn(),
 }))
-const notifications = vi.hoisted(() => ({
-  error: vi.fn(),
-  success: vi.fn(),
-}))
+const assets = vi.hoisted(() => ({ listCreativeAssetDirectories: vi.fn() }))
+const notifications = vi.hoisted(() => ({ error: vi.fn(), success: vi.fn() }))
 
-vi.mock('@/lib/api/responses', () => api)
+vi.mock('@/lib/api/responses', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/api/responses')>('@/lib/api/responses')
+  return { ...actual, ...api }
+})
+vi.mock('@/lib/api/assets', () => assets)
 vi.mock('sonner', () => ({ toast: notifications }))
 
 afterEach(() => {
@@ -28,315 +31,383 @@ afterEach(() => {
   vi.clearAllMocks()
 })
 
-function deferred<T>() {
-  let resolve!: (value: T) => void
-  let reject!: (reason?: unknown) => void
-  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
-    resolve = resolvePromise
-    reject = rejectPromise
-  })
-  return { promise, resolve, reject }
-}
-
-function item(id: number, title: string, decision_status: ResponseItem['decision_status'] = 'pending'): ResponseItem {
-  return {
+function detail(id: number, sourceType: 'x_post' | 'youtube_video' = 'x_post'): ResponseDetail {
+  const item: ResponseItem = {
     id,
-    source_type: 'youtube_video',
-    source_id: `video-${id}`,
-    source_url: `https://youtube.com/watch?v=video-${id}`,
-    source_title: title,
-    source_author: 'Channel',
-    source_published_at: null,
+    source_type: sourceType,
+    source_id: sourceType === 'x_post' ? `post-${id}` : `video-${id}`,
+    source_url: sourceType === 'x_post' ? 'https://x.com/post' : 'https://youtube.com/watch?v=video',
+    source_title: sourceType === 'x_post' ? 'X 原文标题' : 'YouTube 视频标题',
+    source_author: '作者',
+    source_published_at: '2026-08-05T00:00:00Z',
+    subscription_id: sourceType === 'x_post' ? 1 : null,
     workflow_status: 'ready',
-    decision_status,
+    decision_status: 'pending',
+    content_types: ['research'],
+    destination: null,
     current_analysis_run_id: id * 10,
-    selected_publish_account_id: null,
-    selected_output_types: [],
     feedback_reason: '',
+    created_at: '2026-08-05T00:00:00Z',
+    updated_at: '2026-08-05T00:00:00Z',
     analysis: {
-      id,
+      id: id * 10,
       version: 1,
-      status: 'ready',
+      status: 'succeeded',
       job_id: null,
-      content_value_score: 90,
-      value_dimensions: {},
+      content_value_score: 88,
+      value_dimensions: {
+        novelty: { score: 90, reason: '新角度' },
+        practicality: { score: 80, reason: '可执行' },
+        credibility: { score: 85, reason: '有来源' },
+        writing_space: { score: 88, reason: '有展开空间' },
+        evergreen_value: { score: 70, reason: '可长期参考' },
+      },
       summary_cn: '摘要',
-      core_thesis: '核心观点',
-      key_points: [],
-      evidence: [],
-      value_points: [],
-      risks: [],
-      verification_items: [],
-      personal_angles: [],
-      article_outlines: [],
-      comment_angles: [],
-      recommended_output_types: ['expanded_article'],
-      recommended_action: '建议创作',
-      recommendation_reason: '有价值',
-      recommended_publish_account_id: null,
-      created_at: '2026-07-27T00:00:00Z',
-      completed_at: '2026-07-27T00:00:00Z',
+      core_thesis: '核心判断',
+      suggested_title: '建议标题',
+      suggested_angle: '从实践路径切入',
+      target_reader: '内容创作者',
+      suggested_structure: ['开篇', '论证', '结论'],
+      value_points: ['价值点'],
+      evidence: [{ text: '原文证据', type: 'source_claim' }],
+      risks: ['需要核验'],
+      verification_items: ['查证来源'],
+      recommended_content_types: ['research'],
+      recommended_disposition: 'worth_writing',
+      recommendation_reason: '适合写入内容系统',
+      created_at: '2026-08-05T00:00:00Z',
+      completed_at: '2026-08-05T00:01:00Z',
     },
+  }
+  return {
+    ...item,
+    source: sourceType === 'x_post'
+      ? {
+          type: 'x_post', id: item.source_id, url: item.source_url, title: item.source_title,
+          author: item.source_author, published_at: item.source_published_at, available: true,
+          unavailable_reason: '', content: '完整 X 原文正文', raw_markdown: '完整 X Markdown',
+        }
+      : {
+          type: 'youtube_video', id: item.source_id, url: item.source_url, title: item.source_title,
+          author: item.source_author, published_at: item.source_published_at, available: true,
+          unavailable_reason: '', description: '视频说明', transcript_status: 'ready',
+          transcript_language: 'zh', transcript_text: '完整 YouTube 字幕', transcript_segments: [],
+        },
+    outputs: [],
   }
 }
 
-function detail(id: number, title: string, decision_status: ResponseItem['decision_status'] = 'pending'): ResponseDetail {
-  return { ...item(id, title, decision_status), account_scores: [], outputs: [] }
+function listResult(value: ResponseDetail) {
+  return {
+    items: [value],
+    counts: { all: 1, pending: 1, worth_writing: 0, creative_asset: 0, not_processed: 0 },
+    total: 1,
+    page: 1,
+    page_size: 30,
+  }
 }
 
-describe('ResponsesClient action source', () => {
-  it('disables decisions while the selected detail is loading and decides only the matching response', async () => {
-    const first = detail(38, 'Selected video')
-    const second = detail(39, 'Another video')
-    const secondRequest = deferred<ResponseDetail>()
-    let secondCalls = 0
-    api.getResponse.mockImplementation((id: number) => {
-      if (id === first.id) return Promise.resolve(first)
-      secondCalls += 1
-      return secondCalls === 1 ? secondRequest.promise : Promise.resolve(second)
-    })
-    api.getResponses.mockResolvedValue({ items: [first, second], total: 2, page: 1, page_size: 30 })
-    api.decideResponse.mockResolvedValue({ ...second, decision_status: 'later' })
+function listPage(items: ResponseItem[], total: number, page: number) {
+  return {
+    items,
+    counts: { all: total, pending: total, worth_writing: 0, creative_asset: 0, not_processed: 0 },
+    total,
+    page,
+    page_size: 30,
+  }
+}
 
-    render(<ResponsesClient initialItems={[first, second]} initialTotal={2} accounts={[]} initialSelectedId={38} initialSource="" />)
-    const user = userEvent.setup()
+describe('Intelligence Station workbench', () => {
+  it('renders the original source and AI evaluation together', async () => {
+    const value = detail(1)
+    api.getResponse.mockResolvedValue(value)
+    api.getResponses.mockResolvedValue(listResult(value))
 
-    await screen.findByRole('heading', { name: 'Selected video' })
-    await user.click(screen.getByText('Another video'))
+    render(<ResponsesClient initialItems={[value]} initialTotal={1} initialSelectedId={value.id} initialSource="" />)
 
-    const adoptButton = screen.getByRole('button', { name: '采纳创作' })
-    expect(adoptButton).toBeDisabled()
-    expect(screen.getAllByRole('button', { name: '稍后处理' }).at(-1)).toBeDisabled()
-    expect(screen.getAllByRole('button', { name: '不值得' }).at(-1)).toBeDisabled()
-    expect(screen.getByPlaceholderText('可选：记录不值得或稍后处理的原因')).toBeDisabled()
-    await user.click(adoptButton)
-    expect(api.decideResponse).not.toHaveBeenCalled()
-
-    await act(async () => {
-      secondRequest.resolve(second)
-      await secondRequest.promise
-    })
-    await waitFor(() => expect(screen.getAllByRole('button', { name: '稍后处理' }).at(-1)).toBeEnabled())
-    await user.click(screen.getAllByRole('button', { name: '稍后处理' }).at(-1)!)
-
-    await waitFor(() => expect(api.decideResponse).toHaveBeenCalledWith(39, 'later', ''))
+    expect(await screen.findByRole('heading', { name: value.source_title })).toBeInTheDocument()
+    expect(screen.getByText('AI 评价')).toBeInTheDocument()
+    expect(screen.getByText('完整 X Markdown')).toBeInTheDocument()
+    expect(screen.getAllByText('适合写入内容系统').length).toBeGreaterThan(0)
+    expect(screen.getByTestId('response-source-scroll').className).toContain('overflow-y-auto')
+    expect(screen.queryByText('评论')).not.toBeInTheDocument()
+    expect(screen.queryByText('回复')).not.toBeInTheDocument()
   })
 
-  it('ignores a stale detail response that resolves after a newer selection', async () => {
-    const first = detail(38, 'Slow video')
-    const second = detail(39, 'Current video')
-    const firstRequest = deferred<ResponseDetail>()
-    api.getResponse.mockImplementation((id: number) => (
-      id === first.id ? firstRequest.promise : Promise.resolve(second)
-    ))
-    api.getResponses.mockResolvedValue({ items: [first, second], total: 2, page: 1, page_size: 30 })
+  it('keeps complete YouTube transcript visible with its evaluation', async () => {
+    const value = detail(2, 'youtube_video')
+    api.getResponse.mockResolvedValue(value)
+    api.getResponses.mockResolvedValue(listResult(value))
 
-    render(<ResponsesClient initialItems={[first, second]} initialTotal={2} accounts={[]} initialSelectedId={38} initialSource="" />)
-    const user = userEvent.setup()
+    render(<ResponsesClient initialItems={[value]} initialTotal={1} initialSelectedId={value.id} initialSource="" />)
 
-    await waitFor(() => expect(api.getResponse).toHaveBeenCalledWith(38))
-    await user.click(screen.getByText('Current video'))
-    await screen.findByRole('heading', { name: 'Current video' })
-
-    await act(async () => {
-      firstRequest.resolve(first)
-      await firstRequest.promise
-    })
-
-    expect(screen.getByRole('heading', { name: 'Current video' })).toBeInTheDocument()
-    expect(screen.queryByRole('heading', { name: 'Slow video' })).not.toBeInTheDocument()
+    expect(await screen.findByText('完整 YouTube 字幕')).toBeInTheDocument()
+    expect(screen.getAllByText('视频说明').length).toBeGreaterThan(0)
+    expect(screen.getByText('AI 评价')).toBeInTheDocument()
   })
 
-  it('keeps the adopted response creation session active until creation succeeds', async () => {
-    const first = detail(38, 'Selected video')
-    const second = detail(39, 'Another video')
-    api.getResponse.mockImplementation((id: number) => Promise.resolve(id === first.id ? first : second))
-    api.getResponses.mockResolvedValue({ items: [second], total: 1, page: 1, page_size: 30 })
-    api.decideResponse.mockResolvedValue({ ...first, decision_status: 'adopted' })
-    api.createResponseOutputs.mockResolvedValue({ outputs: [] })
+  it('keeps the selected detail visible when the same item is clicked again', async () => {
+    const value = detail(11)
+    api.getResponse.mockResolvedValue(value)
+    api.getResponses.mockResolvedValue(listResult(value))
 
-    render(<ResponsesClient initialItems={[first, second]} initialTotal={2} accounts={[]} initialSelectedId={38} initialSource="" />)
+    render(<ResponsesClient initialItems={[value]} initialTotal={1} initialSelectedId={value.id} initialSource="" />)
     const user = userEvent.setup()
+    await screen.findByText('AI 评价')
 
-    await screen.findByRole('heading', { name: 'Selected video' })
-    await user.click(screen.getByRole('button', { name: '采纳创作' }))
-    const createButton = await screen.findByRole('button', { name: '创建任务' })
+    await user.click(screen.getByRole('button', { name: /X 原文标题/ }))
 
-    expect(screen.getByText('将基于：Selected video')).toBeInTheDocument()
-    expect(createButton).toBeEnabled()
-    expect(screen.getByRole('combobox')).toBeEnabled()
-    expect(screen.getByRole('button', { name: '扩写文章' })).toBeEnabled()
-    await user.click(createButton)
-    await waitFor(() => expect(api.createResponseOutputs).toHaveBeenCalledWith(first.id, {
-      analysis_run_id: 380,
-      publish_account_id: null,
-      output_types: ['expanded_article'],
-    }))
-    await waitFor(() => {
-      expect(screen.queryByText('将基于：Selected video')).not.toBeInTheDocument()
-      expect(screen.getByRole('heading', { name: 'Another video' })).toBeInTheDocument()
-    })
+    expect(screen.getByText('AI 评价')).toBeInTheDocument()
+    expect(screen.queryByText('正在加载原文与 AI 评价…')).not.toBeInTheDocument()
+    expect(api.getResponse).toHaveBeenCalledTimes(1)
   })
 
-  it('selects the next listed response when an adopted creation session is cancelled', async () => {
-    const first = detail(38, 'Selected video')
-    const second = detail(39, 'Another video')
-    api.getResponse.mockImplementation((id: number) => Promise.resolve(id === first.id ? first : second))
-    api.getResponses.mockResolvedValue({ items: [second], total: 1, page: 1, page_size: 30 })
-    api.decideResponse.mockResolvedValue({ ...first, decision_status: 'adopted' })
+  it('uses the default three-day window and resets to page one when the window changes', async () => {
+    const value = detail(12)
+    api.getResponse.mockResolvedValue(value)
+    api.getResponses.mockResolvedValue(listResult(value))
 
-    render(<ResponsesClient initialItems={[first, second]} initialTotal={2} accounts={[]} initialSelectedId={38} initialSource="" />)
+    render(<ResponsesClient initialItems={[value]} initialTotal={1} initialSelectedId={value.id} initialSource="" />)
     const user = userEvent.setup()
+    await screen.findByText('AI 评价')
 
-    await screen.findByRole('heading', { name: 'Selected video' })
-    await user.click(screen.getByRole('button', { name: '采纳创作' }))
-    expect(await screen.findByText('将基于：Selected video')).toBeInTheDocument()
-    await screen.findByText('1 条内容等待判断与创作')
-    await user.click(screen.getByRole('button', { name: '取消' }))
+    await waitFor(() => expect(api.getResponses).toHaveBeenCalledWith(expect.objectContaining({ days: 3, page: 1 })))
+    await user.click(screen.getByRole('button', { name: '筛选：7天内' }))
 
-    expect(screen.queryByText('将基于：Selected video')).not.toBeInTheDocument()
-    expect(await screen.findByRole('heading', { name: 'Another video' })).toBeInTheDocument()
-    expect(api.createResponseOutputs).not.toHaveBeenCalled()
+    await waitFor(() => expect(api.getResponses).toHaveBeenLastCalledWith(expect.objectContaining({ days: 7, page: 1 })))
   })
 
-  it('uses the loaded detail sources and synchronously blocks same-tick duplicate output creation', async () => {
-    const first = detail(38, 'Selected video')
-    const createRequest = deferred<{ outputs: [] }>()
+  it('loads and appends the next page when the list sentinel becomes visible', async () => {
+    let onIntersect: IntersectionObserverCallback | undefined
+    class TestIntersectionObserver {
+      constructor(callback: IntersectionObserverCallback) {
+        onIntersect = callback
+      }
+      observe() {}
+      disconnect() {}
+      unobserve() {}
+      takeRecords() { return [] }
+      root = null
+      rootMargin = ''
+      thresholds = []
+    }
+    vi.stubGlobal('IntersectionObserver', TestIntersectionObserver)
+
+    const first = detail(13)
+    const secondBase = detail(14)
+    const second = {
+      ...secondBase,
+      source_title: '第二页 X 原文标题',
+      source: { ...secondBase.source, title: '第二页 X 原文标题' },
+    }
     api.getResponse.mockResolvedValue(first)
-    api.getResponses.mockResolvedValue({ items: [first], total: 1, page: 1, page_size: 30 })
-    api.decideResponse.mockResolvedValue({ ...first, decision_status: 'adopted' })
-    api.createResponseOutputs.mockReturnValue(createRequest.promise)
+    api.getResponses.mockImplementation((params: { page?: number }) => (
+      params.page === 2
+        ? Promise.resolve(listPage([second], 2, 2))
+        : Promise.resolve(listPage([first], 2, 1))
+    ))
 
-    render(<ResponsesClient initialItems={[first]} initialTotal={1} accounts={[]} initialSelectedId={38} initialSource="" />)
-    const user = userEvent.setup()
-
-    await screen.findByRole('heading', { name: 'Selected video' })
-    await user.click(screen.getByRole('button', { name: '采纳创作' }))
-    await screen.findByText('将基于：Selected video')
-    expect(api.decideResponse).toHaveBeenCalledWith(first.id, 'adopt', '')
-
-    const createButton = screen.getByRole('button', { name: '创建任务' })
-    act(() => {
-      createButton.click()
-      createButton.click()
-    })
-
-    expect(api.createResponseOutputs).toHaveBeenCalledTimes(1)
-    expect(api.createResponseOutputs).toHaveBeenCalledWith(first.id, {
-      analysis_run_id: 380,
-      publish_account_id: null,
-      output_types: ['expanded_article'],
-    })
-    expect(screen.getByRole('button', { name: '创建中…' })).toBeDisabled()
+    render(<ResponsesClient initialItems={[first]} initialTotal={2} initialSelectedId={first.id} initialSource="" />)
+    await screen.findByText('AI 评价')
 
     await act(async () => {
-      createRequest.resolve({ outputs: [] })
-      await createRequest.promise
+      onIntersect?.([{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver)
     })
-    await waitFor(() => expect(screen.queryByText('将基于：Selected video')).not.toBeInTheDocument())
+
+    await waitFor(() => expect(screen.getByText(second.source_title)).toBeInTheDocument())
+    expect(api.getResponses).toHaveBeenCalledWith(expect.objectContaining({ days: 3, page: 2 }))
   })
 
-  it('keeps a newer creation session and its busy payload intact when an older submit completes', async () => {
-    const first = detail(38, 'First video')
-    const second = detail(39, 'Second video')
-    second.analysis!.recommended_output_types = ['commentary']
-    const firstCreate = deferred<{ outputs: [] }>()
-    const secondCreate = deferred<{ outputs: [] }>()
-    api.getResponse.mockImplementation((id: number) => Promise.resolve(id === first.id ? first : second))
-    api.getResponses.mockResolvedValue({ items: [first, second], total: 2, page: 1, page_size: 30 })
-    api.decideResponse.mockImplementation((id: number) => Promise.resolve({
-      ...(id === first.id ? first : second),
-      decision_status: 'adopted',
+  it('uses the same button interaction for content type filters as other filters', async () => {
+    const value = detail(7)
+    api.getResponse.mockResolvedValue(value)
+    api.getResponses.mockResolvedValue(listResult(value))
+
+    render(<ResponsesClient initialItems={[value]} initialTotal={1} initialSelectedId={value.id} initialSource="" />)
+    const user = userEvent.setup()
+    await screen.findByText('AI 评价')
+    await user.click(screen.getByRole('button', { name: '筛选：教程' }))
+
+    await waitFor(() => expect(api.getResponses).toHaveBeenLastCalledWith(expect.objectContaining({ content_type: 'tutorial' })))
+  })
+
+  it('updates content classification without changing the destination decision', async () => {
+    const value = detail(3)
+    api.getResponse.mockResolvedValue(value)
+    api.getResponses.mockResolvedValue(listResult(value))
+    api.updateResponseClassification.mockResolvedValue({ ...value, content_types: ['research', 'tutorial'] })
+
+    render(<ResponsesClient initialItems={[value]} initialTotal={1} initialSelectedId={value.id} initialSource="" />)
+    const user = userEvent.setup()
+    await screen.findByText('AI 评价')
+    await user.click(screen.getByRole('button', { name: '教程' }))
+
+    await waitFor(() => expect(api.updateResponseClassification).toHaveBeenCalledWith(3, ['research', 'tutorial']))
+  })
+
+  it('starts a full article writing job without opening a draft seed dialog', async () => {
+    const value = detail(4)
+    api.getResponse.mockResolvedValue(value)
+    api.getResponses.mockResolvedValue(listResult(value))
+    api.createResponseOutputs.mockResolvedValue({
+      outputs: [{ id: 41, output_type: 'expanded_article', status: 'queued', job_id: 42, created: true }],
+    })
+
+    render(<ResponsesClient initialItems={[value]} initialTotal={1} initialSelectedId={value.id} initialSource="" />)
+    const user = userEvent.setup()
+    await screen.findByText('AI 评价')
+    await user.click(screen.getByRole('button', { name: '值得写' }))
+
+    await waitFor(() => expect(api.createResponseOutputs).toHaveBeenCalledWith(4, {
+      analysis_run_id: 40,
+      output_types: ['expanded_article'],
     }))
-    api.createResponseOutputs
-      .mockReturnValueOnce(firstCreate.promise)
-      .mockReturnValueOnce(secondCreate.promise)
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(notifications.success).toHaveBeenCalledWith('写作任务已启动')
+  })
 
-    render(<ResponsesClient initialItems={[first, second]} initialTotal={2} accounts={[]} initialSelectedId={38} initialSource="" />)
+  it('keeps the queued writing status visible when the pending list no longer contains the item', async () => {
+    const value = detail(15)
+    const queuedDetail: ResponseDetail = {
+      ...value,
+      decision_status: 'worth_writing',
+      outputs: [{
+        id: 151,
+        output_type: 'expanded_article',
+        status: 'queued',
+        job_id: 152,
+        job_status: 'queued',
+        article_draft_id: null,
+        content: '',
+        error_code: '',
+        error: '',
+      }],
+    }
+    api.getResponse.mockResolvedValueOnce(value).mockResolvedValueOnce(queuedDetail)
+    let listCalls = 0
+    api.getResponses.mockImplementation(() => {
+      listCalls += 1
+      return Promise.resolve(listCalls === 1 ? listResult(value) : listPage([], 0, 1))
+    })
+    api.createResponseOutputs.mockResolvedValue({
+      outputs: [{ id: 151, output_type: 'expanded_article', status: 'queued', job_id: 152, created: true }],
+    })
+
+    render(<ResponsesClient initialItems={[value]} initialTotal={1} initialSelectedId={value.id} initialSource="" />)
     const user = userEvent.setup()
+    await screen.findByText('AI 评价')
+    await user.click(screen.getByRole('button', { name: '值得写' }))
 
-    await screen.findByRole('heading', { name: 'First video' })
-    await user.click(screen.getByRole('button', { name: '采纳创作' }))
-    await user.click(await screen.findByRole('button', { name: '创建任务' }))
-    await waitFor(() => expect(api.createResponseOutputs).toHaveBeenCalledTimes(1))
+    expect(await screen.findByTestId('response-writing-status')).toHaveTextContent('文章写作中')
+    expect(screen.getByText(/写作完成后会自动创建完整文章草稿/)).toBeInTheDocument()
+  })
 
-    await user.click(screen.getByRole('button', { name: '取消' }))
-    await user.click(screen.getByText('Second video'))
-    await screen.findByRole('heading', { name: 'Second video' })
-    await user.click(screen.getByRole('button', { name: '采纳创作' }))
-    expect(await screen.findByText('将基于：Second video')).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: '创建任务' }))
+  it('links a completed writing output to the generated draft', async () => {
+    const value: ResponseDetail = {
+      ...detail(16),
+      decision_status: 'worth_writing',
+      outputs: [{
+        id: 161,
+        output_type: 'expanded_article',
+        status: 'draft_ready',
+        job_id: 162,
+        job_status: 'succeeded',
+        article_draft_id: 163,
+        content: '# 完整文章',
+        error_code: '',
+        error: '',
+      }],
+    }
+    api.getResponse.mockResolvedValue(value)
+    api.getResponses.mockResolvedValue(listResult(value))
 
-    await waitFor(() => expect(api.createResponseOutputs).toHaveBeenCalledTimes(2))
-    expect(api.decideResponse).toHaveBeenNthCalledWith(1, first.id, 'adopt', '')
-    expect(api.decideResponse).toHaveBeenNthCalledWith(2, second.id, 'adopt', '')
-    expect(api.createResponseOutputs).toHaveBeenNthCalledWith(1, first.id, {
-      analysis_run_id: 380,
-      publish_account_id: null,
+    render(<ResponsesClient initialItems={[value]} initialTotal={1} initialSelectedId={value.id} initialSource="" />)
+
+    expect(await screen.findByTestId('response-writing-status')).toHaveTextContent('写作完成，已进入草稿箱')
+    expect(screen.getByRole('link', { name: /打开草稿箱/ })).toHaveAttribute('href', '/drafts?draft=163')
+  })
+
+  it('keeps the asset dialog open and retryable after a destination failure', async () => {
+    const value = detail(5)
+    api.getResponse.mockResolvedValue(value)
+    api.getResponses.mockResolvedValue(listResult(value))
+    assets.listCreativeAssetDirectories.mockResolvedValue([{ id: 1, name: '研究' }])
+    api.createResponseDestination.mockRejectedValueOnce(new Error('保存失败'))
+
+    render(<ResponsesClient initialItems={[value]} initialTotal={1} initialSelectedId={value.id} initialSource="" />)
+    const user = userEvent.setup()
+    await screen.findByText('AI 评价')
+    await user.click(screen.getByRole('button', { name: '创作资产' }))
+    await user.click(screen.getByRole('dialog').querySelector('button[type="submit"]')!)
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('保存失败')
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+  })
+
+  it('sends a direct not-processed decision and can reset it', async () => {
+    const value = detail(6)
+    api.getResponse.mockResolvedValue(value)
+    api.getResponses.mockResolvedValue(listResult(value))
+    api.decideResponse.mockResolvedValue({ ...value, decision_status: 'not_processed' })
+
+    render(<ResponsesClient initialItems={[value]} initialTotal={1} initialSelectedId={value.id} initialSource="" />)
+    const user = userEvent.setup()
+    await screen.findByText('AI 评价')
+    await user.click(screen.getByRole('button', { name: '暂不处理' }))
+    await waitFor(() => expect(api.decideResponse).toHaveBeenCalledWith(6, 'not_processed'))
+  })
+
+  it('uses 1 to start writing and 2 to open the asset dialog', async () => {
+    const value = detail(8)
+    api.getResponse.mockResolvedValue(value)
+    api.getResponses.mockResolvedValue(listResult(value))
+    assets.listCreativeAssetDirectories.mockResolvedValue([{ id: 1, name: '研究' }])
+    api.createResponseOutputs.mockResolvedValue({
+      outputs: [{ id: 81, output_type: 'expanded_article', status: 'queued', job_id: 82, created: true }],
+    })
+
+    render(<ResponsesClient initialItems={[value]} initialTotal={1} initialSelectedId={value.id} initialSource="" />)
+    const user = userEvent.setup()
+    await screen.findByText('AI 评价')
+
+    await user.keyboard('1')
+    await waitFor(() => expect(api.createResponseOutputs).toHaveBeenCalledWith(8, {
+      analysis_run_id: 80,
       output_types: ['expanded_article'],
-    })
-    expect(api.createResponseOutputs).toHaveBeenNthCalledWith(2, second.id, {
-      analysis_run_id: 390,
-      publish_account_id: null,
-      output_types: ['commentary'],
-    })
+    }))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
 
-    await act(async () => {
-      firstCreate.resolve({ outputs: [] })
-      await firstCreate.promise
-    })
-
-    expect(screen.getByText('将基于：Second video')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '创建中…' })).toBeDisabled()
-
-    await act(async () => {
-      secondCreate.resolve({ outputs: [] })
-      await secondCreate.promise
-    })
-    await waitFor(() => expect(screen.queryByText('将基于：Second video')).not.toBeInTheDocument())
+    await user.keyboard('2')
+    expect(await screen.findByRole('dialog')).toHaveTextContent('保存为创作资产')
+    expect(assets.listCreativeAssetDirectories).toHaveBeenCalledWith('article')
   })
 
-  it('ends the creation session after mutation success even when the detail refresh fails', async () => {
-    const first = detail(38, 'Selected video')
-    api.getResponse
-      .mockResolvedValueOnce(first)
-      .mockResolvedValueOnce(first)
-      .mockRejectedValueOnce(new Error('refresh offline'))
-    api.getResponses.mockResolvedValue({ items: [first], total: 1, page: 1, page_size: 30 })
-    api.decideResponse.mockResolvedValue({ ...first, decision_status: 'adopted' })
-    api.createResponseOutputs.mockResolvedValue({ outputs: [] })
+  it('uses 3 to mark the selected pending item as not processed', async () => {
+    const value = detail(9)
+    api.getResponse.mockResolvedValue(value)
+    api.getResponses.mockResolvedValue(listResult(value))
+    api.decideResponse.mockResolvedValue({ ...value, decision_status: 'not_processed' })
 
-    render(<ResponsesClient initialItems={[first]} initialTotal={1} accounts={[]} initialSelectedId={38} initialSource="" />)
+    render(<ResponsesClient initialItems={[value]} initialTotal={1} initialSelectedId={value.id} initialSource="" />)
     const user = userEvent.setup()
+    await screen.findByText('AI 评价')
+    await user.keyboard('3')
 
-    await screen.findByRole('heading', { name: 'Selected video' })
-    await user.click(screen.getByRole('button', { name: '采纳创作' }))
-    const completedSessionButton = await screen.findByRole('button', { name: '创建任务' })
-    await user.click(completedSessionButton)
-
-    await waitFor(() => expect(screen.queryByText('将基于：Selected video')).not.toBeInTheDocument())
-    expect(screen.queryByRole('button', { name: '创建任务' })).not.toBeInTheDocument()
-    fireEvent.click(completedSessionButton)
-    expect(api.createResponseOutputs).toHaveBeenCalledTimes(1)
-    expect(notifications.success).toHaveBeenCalledWith('创作任务已创建')
-    expect(notifications.error).toHaveBeenCalledWith('详情刷新失败：refresh offline')
-    expect(notifications.error).not.toHaveBeenCalledWith(expect.stringContaining('创作任务创建失败'))
+    await waitFor(() => expect(api.decideResponse).toHaveBeenCalledWith(9, 'not_processed'))
   })
 
-  it('shows a detail load error and retries the same selected row', async () => {
-    const first = detail(38, 'Retry video')
-    api.getResponse
-      .mockRejectedValueOnce(new Error('offline'))
-      .mockResolvedValueOnce(first)
-    api.getResponses.mockResolvedValue({ items: [first], total: 1, page: 1, page_size: 30 })
+  it('does not trigger shortcuts while an editable control is focused', async () => {
+    const value = detail(10)
+    api.getResponse.mockResolvedValue(value)
+    api.getResponses.mockResolvedValue(listResult(value))
 
-    render(<ResponsesClient initialItems={[first]} initialTotal={1} accounts={[]} initialSelectedId={38} initialSource="" />)
+    render(<ResponsesClient initialItems={[value]} initialTotal={1} initialSelectedId={value.id} initialSource="" />)
     const user = userEvent.setup()
+    await screen.findByText('AI 评价')
+    await user.click(screen.getByPlaceholderText('搜索标题或作者'))
+    await user.keyboard('3')
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('详情加载失败：offline')
-    await user.click(screen.getByText('Retry video'))
-
-    expect(await screen.findByRole('heading', { name: 'Retry video' })).toBeInTheDocument()
-    expect(api.getResponse).toHaveBeenCalledTimes(2)
+    expect(api.decideResponse).not.toHaveBeenCalled()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 })

@@ -11,16 +11,19 @@ import {
   createWorkbenchState,
   getSelectedDraft,
   getVisibleDrafts,
+  publishDraftAndSelectNext,
   selectDraft,
   setWorkbenchFilter,
   setWorkbenchSettingsOpen,
 } from './workbench-state.js'
+import { createScheduleMemory, formatScheduleSelection } from './schedule-memory.js'
 
 const HOST_ID = 'shuce-floating-draft-workbench'
 
 const SAFE_UI_MESSAGES = Object.freeze({
   DRAFT_API_NOT_CONFIGURED: 'API 地址无效，请在设置中检查',
   DRAFT_API_HOST_NOT_ALLOWED: '当前扩展只允许本机 8000 端口 API',
+  DRAFT_API_INVALID_REQUEST: '发布请求无效',
   DRAFT_API_UNAVAILABLE: '草稿 API 暂不可用，请检查服务是否运行',
   DRAFT_API_INVALID_RESPONSE: '草稿 API 返回格式无效',
 })
@@ -44,6 +47,8 @@ const STATIC_UI = [
   '.sw-subtitle { margin-top: 5px; color: #8290aa; font-size: 11px; }',
   '.sw-summary { display: flex; align-items: center; gap: 7px; padding: 8px 10px; border: 1px solid rgba(125, 211, 252, .18); border-radius: 11px; color: #b8f4ff; background: rgba(8, 47, 73, .38); font-size: 11px; white-space: nowrap; }',
   '.sw-summary-dot { width: 6px; height: 6px; border-radius: 50%; background: #5eead4; box-shadow: 0 0 10px #5eead4; }',
+  '.sw-schedule-memory { display: flex; flex-direction: column; gap: 3px; min-width: 145px; padding: 7px 9px; border: 1px solid rgba(192, 132, 252, .24); border-radius: 10px; color: #aebbd1; background: rgba(49, 46, 129, .24); font-size: 10px; white-space: nowrap; }',
+  '.sw-schedule-memory strong { overflow: hidden; color: #e8ddff; font-size: 11px; font-weight: 700; text-overflow: ellipsis; }',
   '.sw-actions { display: flex; gap: 5px; }',
   '.sw-icon-button, .sw-ghost-button, .sw-primary-button { border: 1px solid transparent; border-radius: 9px; color: #9eacc5; background: transparent; cursor: pointer; transition: color .15s ease, background .15s ease, border-color .15s ease, transform .15s ease; }',
   '.sw-icon-button { width: 32px; height: 32px; font-size: 16px; }',
@@ -85,6 +90,7 @@ const STATIC_UI = [
   '.sw-preview-empty { display: grid; place-items: center; flex: 1; color: #71819b; font-size: 12px; }',
   '.sw-preview-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 11px; border-top: 1px solid rgba(148, 163, 184, .13); }',
   '.sw-char-count { color: #71819b; font-size: 10px; font-variant-numeric: tabular-nums; }',
+  '.sw-preview-actions { display: flex; align-items: center; gap: 8px; }',
   '.sw-primary-button { min-width: 100px; padding: 8px 13px; border-color: rgba(103, 232, 249, .32); color: #07111f; background: linear-gradient(135deg, #67e8f9, #a5b4fc); font-size: 11px; font-weight: 760; }',
   '.sw-primary-button:hover { border-color: transparent; box-shadow: 0 7px 20px rgba(34, 211, 238, .18); }',
   '.sw-primary-button:disabled { opacity: .35; cursor: not-allowed; box-shadow: none; }',
@@ -113,6 +119,7 @@ const STATIC_UI = [
   '<header class="sw-header">',
   '<div class="sw-heading"><h1 class="sw-title">述策发布指挥台</h1><div class="sw-subtitle">从草稿箱挑选内容，复制后交给 X 发布</div></div>',
   '<div class="sw-summary"><span class="sw-summary-dot"></span><span data-role="summary">0 条待发布</span></div>',
+  '<div class="sw-schedule-memory" data-role="last-schedule">上次安排：未记录</div>',
   '<div class="sw-actions">',
   '<button class="sw-icon-button" type="button" data-action="refresh" title="刷新草稿">↻</button>',
   '<button class="sw-icon-button" type="button" data-action="settings" title="API 设置">⚙</button>',
@@ -131,7 +138,7 @@ const STATIC_UI = [
   '<div class="sw-preview-head"><h2 class="sw-preview-title" data-role="preview-title"></h2><div class="sw-preview-meta"><span class="sw-type-pill" data-role="preview-type"></span><span data-role="preview-time"></span></div></div>',
   '<div class="sw-preview-divider"></div>',
   '<div class="sw-preview-content"><pre data-role="preview-content"></pre></div>',
-  '<footer class="sw-preview-footer"><span class="sw-char-count" data-role="char-count">0 字</span><button class="sw-primary-button" type="button" data-action="copy" disabled>复制内容</button></footer>',
+  '<footer class="sw-preview-footer"><span class="sw-char-count" data-role="char-count">0 字</span><div class="sw-preview-actions"><button class="sw-ghost-button" type="button" data-action="copy" disabled>复制内容</button><button class="sw-primary-button" type="button" data-action="publish" disabled>发布并下一条</button></div></footer>',
   '</article>',
   '</main>',
   '</div>',
@@ -182,6 +189,7 @@ export function mountWorkbench({ document, window, chromeApi = globalThis.chrome
   const entryLabel = query('[data-role="entry-label"]')
   const badge = query('[data-role="badge"]')
   const summary = query('[data-role="summary"]')
+  const lastSchedule = query('[data-role="last-schedule"]')
   const search = query('[data-role="search"]')
   const filters = query('[data-role="filters"]')
   const list = query('[data-role="list"]')
@@ -193,6 +201,9 @@ export function mountWorkbench({ document, window, chromeApi = globalThis.chrome
   const previewContent = query('[data-role="preview-content"]')
   const charCount = query('[data-role="char-count"]')
   const copyButton = query('[data-action="copy"]')
+  const publishButton = query('[data-action="publish"]')
+  const refreshButton = query('[data-action="refresh"]')
+  const settingsButton = query('[data-action="settings"]')
   const settings = query('[data-role="settings"]')
   const apiInput = query('[data-role="api-input"]')
   const settingsStatus = query('[data-role="settings-status"]')
@@ -204,6 +215,16 @@ export function mountWorkbench({ document, window, chromeApi = globalThis.chrome
   let loadSequence = 0
   let hasLoaded = false
   let toastTimer
+  const scheduleMemory = createScheduleMemory({
+    document,
+    window,
+    onChange: renderLastSchedule,
+  })
+
+  function renderLastSchedule(selection = scheduleMemory.readStored()) {
+    const formatted = formatScheduleSelection(selection)
+    lastSchedule.textContent = formatted ? `上次安排：${formatted}` : '上次安排：未记录'
+  }
 
   function renderFilters() {
     filters.replaceChildren()
@@ -211,6 +232,7 @@ export function mountWorkbench({ document, window, chromeApi = globalThis.chrome
     options.forEach(type => {
       const button = createElement(document, 'button', 'sw-filter', type === 'all' ? '全部' : getDraftTypeLabel(type))
       button.type = 'button'
+      button.disabled = state.publishingId !== null
       button.dataset.type = type
       button.dataset.active = String(state.type === type)
       filters.appendChild(button)
@@ -254,6 +276,7 @@ export function mountWorkbench({ document, window, chromeApi = globalThis.chrome
     visible.forEach(draft => {
       const row = createElement(document, 'button', 'sw-draft-row')
       row.type = 'button'
+      row.disabled = state.publishingId !== null
       row.dataset.draftId = String(draft.id)
       row.dataset.selected = String(String(draft.id) === String(state.selectedId))
       row.appendChild(createElement(document, 'span', 'sw-draft-title', getDraftTitle(draft)))
@@ -273,6 +296,9 @@ export function mountWorkbench({ document, window, chromeApi = globalThis.chrome
     preview.hidden = !draft
     if (!draft) {
       copyButton.disabled = true
+      publishButton.disabled = true
+      copyButton.textContent = '复制内容'
+      publishButton.textContent = '发布并下一条'
       return
     }
 
@@ -281,8 +307,14 @@ export function mountWorkbench({ document, window, chromeApi = globalThis.chrome
     previewTime.textContent = formatRelativeTime(draft.updated_at)
     previewContent.textContent = draft.content
     charCount.textContent = Array.from(draft.content).length + ' 字'
-    copyButton.disabled = !draft.content
+    const visible = getVisibleDrafts(state)
+    const visibleSelection = visible.some(item => String(item.id) === String(draft.id))
+    const publishing = state.publishingId !== null
+      && String(state.publishingId) === String(draft.id)
+    copyButton.disabled = !draft.content || state.publishingId !== null
+    publishButton.disabled = !draft.content || !visibleSelection || state.publishingId !== null
     copyButton.textContent = state.copyState === 'success' ? '已复制' : '复制内容'
+    publishButton.textContent = publishing ? '发布中…' : '发布并下一条'
   }
 
   function render() {
@@ -292,8 +324,12 @@ export function mountWorkbench({ document, window, chromeApi = globalThis.chrome
     badge.textContent = state.loading ? '…' : String(state.drafts.length)
     summary.textContent = state.drafts.length + ' 条待发布'
     search.value = state.query
+    search.disabled = state.publishingId !== null
     apiInput.value = settingsDraft
     settings.hidden = !state.settingsOpen
+    refreshButton.disabled = state.publishingId !== null
+    settingsButton.disabled = state.publishingId !== null
+    renderLastSchedule()
     renderFilters()
     renderList()
     renderPreview()
@@ -366,7 +402,7 @@ export function mountWorkbench({ document, window, chromeApi = globalThis.chrome
 
   async function copySelected() {
     const draft = getSelectedDraft(state)
-    if (!draft?.content) return
+    if (!draft?.content || state.publishingId !== null) return
     try {
       await copyText(draft.content, {
         document,
@@ -388,6 +424,26 @@ export function mountWorkbench({ document, window, chromeApi = globalThis.chrome
     }
   }
 
+  async function publishSelected() {
+    const draft = getSelectedDraft(state)
+    if (!draft?.content || state.publishingId !== null) return
+
+    const draftId = draft.id
+    state = { ...state, publishingId: draftId, error: null }
+    render()
+
+    try {
+      await client.publishDraft(state.apiBase, draftId)
+      state = publishDraftAndSelectNext(state, draftId)
+      render()
+      notify('已标记为已发布，已进入下一条')
+    } catch (error) {
+      state = { ...state, publishingId: null }
+      render()
+      notify(safeMessage(error))
+    }
+  }
+
   function togglePanel() {
     state = { ...state, open: !state.open }
     render()
@@ -406,8 +462,11 @@ export function mountWorkbench({ document, window, chromeApi = globalThis.chrome
     state = { ...state, open: false, settingsOpen: false }
     render()
   })
-  query('[data-action="refresh"]').addEventListener('click', () => void loadDrafts())
+  query('[data-action="refresh"]').addEventListener('click', () => {
+    if (state.publishingId === null) void loadDrafts()
+  })
   query('[data-action="settings"]').addEventListener('click', () => {
+    if (state.publishingId !== null) return
     settingsDraft = state.apiBase
     state = setWorkbenchSettingsOpen(state, !state.settingsOpen)
     render()
@@ -415,7 +474,9 @@ export function mountWorkbench({ document, window, chromeApi = globalThis.chrome
   query('[data-action="save-config"]').addEventListener('click', () => void saveConfig())
   query('[data-action="reset-config"]').addEventListener('click', () => void resetConfig())
   copyButton.addEventListener('click', () => void copySelected())
+  publishButton.addEventListener('click', () => void publishSelected())
   search.addEventListener('input', event => {
+    if (state.publishingId !== null) return
     state = setWorkbenchFilter(state, { query: event.target.value })
     render()
   })
@@ -423,12 +484,14 @@ export function mountWorkbench({ document, window, chromeApi = globalThis.chrome
     settingsDraft = event.target.value
   })
   filters.addEventListener('click', event => {
+    if (state.publishingId !== null) return
     const button = event.target.closest('[data-type]')
     if (!button) return
     state = setWorkbenchFilter(state, { type: button.dataset.type })
     render()
   })
   list.addEventListener('click', event => {
+    if (state.publishingId !== null) return
     const row = event.target.closest('[data-draft-id]')
     if (!row) return
     state = selectDraft(state, row.dataset.draftId)
@@ -443,9 +506,11 @@ export function mountWorkbench({ document, window, chromeApi = globalThis.chrome
   host.__shuceWorkbenchDestroy = () => {
     window.removeEventListener('keydown', onKeyDown)
     window.clearTimeout(toastTimer)
+    scheduleMemory.stop()
     host.remove()
   }
   render()
+  scheduleMemory.start()
   void initialize()
 
   return { destroy: host.__shuceWorkbenchDestroy }

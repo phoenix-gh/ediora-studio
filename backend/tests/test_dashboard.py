@@ -9,10 +9,7 @@ from fastapi.testclient import TestClient
 
 
 @pytest.fixture
-def client(monkeypatch, tmp_path):
-    db_file = tmp_path / "test.db"
-    monkeypatch.setenv("WMS_DATABASE_URL", f"sqlite+aiosqlite:///{db_file}")
-    monkeypatch.setenv("WMS_DISABLE_SCHEDULER", "1")
+def client(monkeypatch, tmp_path, postgres_env):
 
     for mod in list(sys.modules):
         if mod.startswith(("database", "models", "main", "routers", "config", "scheduler", "logger")):
@@ -76,6 +73,7 @@ def test_overview_empty_db(client):
         assert s["today_new"] == 0
         assert s["last_status"] is None
         assert s["last_run_at"] is None
+    assert _source(body, "x")["schedule"] == "按订阅设置"
     assert body["alerts"] == []
     assert body["releases_today"] == []
     assert body["today_output"] == {"topics": 0, "drafts": 0}
@@ -298,15 +296,15 @@ def test_release_today_without_draft(client):
 
 
 def test_today_output_counts(client):
-    from models import DailyPlanItem, ArticleDraft
+    from models import ArticleDraft
 
     async def seed(db):
-        db.add(DailyPlanItem(plan_id=1, account_id="acc1", title="今天的选题"))
-        db.add(ArticleDraft(topic_id="t1", title="今天的草稿"))
+        db.add(ArticleDraft(topic_id="daily-creation:1", title="今日草稿"))
+
     _run_db(seed)
 
     body = _get(client)
-    assert body["today_output"] == {"topics": 1, "drafts": 1}
+    assert body["today_output"] == {"topics": 0, "drafts": 1}
 
 
 def test_partial_failure_isolation(client, monkeypatch):

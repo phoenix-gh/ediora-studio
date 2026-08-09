@@ -1,645 +1,546 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import {
-  Check, Clock3, ExternalLink, FileText, MessageCircle, RefreshCw,
-  Search, Sparkles, AtSign, Video, XCircle,
-} from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { AtSign, ExternalLink, PlaySquare, RotateCcw, Search, SlidersHorizontal } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { Badge } from '@/components/ui/badge'
-import { Button, buttonVariants } from '@/components/ui/button'
+import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import type { PublishAccount } from '@/lib/api/publish-accounts'
 import {
+  contentTypeLabels,
+  createResponseDestination,
   createResponseOutputs,
   decideResponse,
+  dispositionLabels,
   getResponse,
   getResponseEvents,
   getResponses,
-  getTranscript,
+  updateResponseClassification,
+  type ContentType,
   type ResponseDetail,
+  type ResponseDisposition,
   type ResponseItem,
-  type Transcript,
+  type ResponseOutput,
 } from '@/lib/api/responses'
+import { listCreativeAssetDirectories } from '@/lib/api/assets'
 import { cn } from '@/lib/utils'
+import { ResponseDestinationDialog, type DestinationKind } from './ResponseDestinationDialog'
+import { ResponseEvaluationPane } from './ResponseEvaluationPane'
+import { ResponseSourcePane } from './ResponseSourcePane'
 
+const statuses: Array<{ value: ResponseDisposition | ''; label: string }> = [
+  { value: 'pending', label: '待判断' },
+  { value: 'worth_writing', label: '值得写' },
+  { value: 'creative_asset', label: '创作资产' },
+  { value: 'not_processed', label: '暂不处理' },
+  { value: '', label: '全部' },
+]
 
-const outputLabels: Record<string, string> = {
-  expanded_article: '扩写文章',
-  commentary: '观点评论',
-  x_share: '分享到 X',
-  x_reply: 'X 回复',
-  x_quote: 'X 引用',
+const sources = [
+  { value: '', label: '全部来源' },
+  { value: 'x_post', label: 'X' },
+  { value: 'youtube_video', label: 'YouTube' },
+]
+
+const timeRanges = [
+  { value: 1, label: '1天内' },
+  { value: 3, label: '3天内' },
+  { value: 7, label: '7天内' },
+  { value: 30, label: '30天内' },
+  { value: 90, label: '90天内' },
+  { value: 0, label: '不限' },
+]
+
+function formatDate(value: string | null) {
+  if (!value) return '时间未知'
+  return new Intl.DateTimeFormat('zh-CN', {
+    month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+    timeZone: 'Asia/Shanghai',
+  }).format(new Date(value))
 }
 
-const decisionLabels = {
-  pending: '待处理',
-  adopted: '已采纳',
-  later: '稍后处理',
-  rejected: '不值得',
+function isEditableTarget(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) return false
+  return (
+    target.isContentEditable
+    || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)
+    || Boolean(target.closest('[contenteditable="true"]'))
+  )
 }
 
 export function ResponsesClient({
   initialItems,
   initialTotal,
-  accounts,
   initialSelectedId,
   initialSource,
 }: {
   initialItems: ResponseItem[]
   initialTotal: number
-  accounts: PublishAccount[]
   initialSelectedId: number | null
   initialSource: string
 }) {
   const [items, setItems] = useState(initialItems)
   const [total, setTotal] = useState(initialTotal)
-  const [selectedId, setSelectedId] = useState<number | null>(
-    initialSelectedId ?? initialItems[0]?.id ?? null,
-  )
+  const [selectedId, setSelectedId] = useState<number | null>(initialSelectedId ?? initialItems[0]?.id ?? null)
   const [detail, setDetail] = useState<ResponseDetail | null>(null)
   const [detailLoading, setDetailLoading] = useState(selectedId !== null)
   const [detailError, setDetailError] = useState('')
-  const [detailRetryVersion, setDetailRetryVersion] = useState(0)
-  const [source, setSource] = useState(initialSource)
-  const [status, setStatus] = useState('pending')
+  const [status, setStatus] = useState<ResponseDisposition | ''>('pending')
+  const [sourceFilter, setSourceFilter] = useState(initialSource)
+  const [contentType, setContentType] = useState<ContentType | ''>('')
+  const [days, setDays] = useState(3)
   const [search, setSearch] = useState('')
+  const [sort, setSort] = useState<'score' | 'newest'>('score')
   const [loading, setLoading] = useState(false)
-  const [transcript, setTranscript] = useState<Transcript | null>(null)
-  const [events, setEvents] = useState<Array<{
-    id: number; event_type: string; actor: string; created_at: string
-  }>>([])
-  const [reason, setReason] = useState('')
-  const [accountId, setAccountId] = useState('')
-  const [outputTypes, setOutputTypes] = useState<string[]>([])
-  const [showCreate, setShowCreate] = useState(false)
-  const [creationDetail, setCreationDetail] = useState<ResponseDetail | null>(null)
-  const [submittingOutputs, setSubmittingOutputs] = useState(false)
-  const itemsRef = useRef(initialItems)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [classificationBusy, setClassificationBusy] = useState(false)
+  const [destination, setDestination] = useState<DestinationKind | null>(null)
+  const [directories, setDirectories] = useState<string[]>([])
+  const [destinationBusy, setDestinationBusy] = useState(false)
+  const [destinationError, setDestinationError] = useState('')
+  const [events, setEvents] = useState<Array<{ id: number; event_type: string; created_at: string }>>([])
+
   const selectedIdRef = useRef(selectedId)
   const detailRequestGeneration = useRef(0)
-  const detailLoadStateRef = useRef<'idle' | 'loading' | 'ready' | 'error'>(
-    selectedId === null ? 'idle' : 'loading',
-  )
-  const creationDetailRef = useRef(creationDetail)
-  const creationSessionRef = useRef(0)
-  const outputSubmitBusyRef = useRef(false)
-  const accountsRef = useRef(accounts)
-
-  useEffect(() => {
-    creationDetailRef.current = creationDetail
-  }, [creationDetail])
-
-  useEffect(() => {
-    accountsRef.current = accounts
-  }, [accounts])
+  const destinationSessionRef = useRef(0)
+  const destinationBusyRef = useRef(false)
+  const itemsRef = useRef(items)
+  const listEndRef = useRef<HTMLDivElement | null>(null)
+  const listScrollRef = useRef<HTMLDivElement | null>(null)
+  const listPageRef = useRef(1)
+  const listRequestGeneration = useRef(0)
+  const loadingMoreRef = useRef(false)
 
   const selectResponse = useCallback((nextId: number | null) => {
-    if (selectedIdRef.current === nextId) {
-      if (nextId !== null && detailLoadStateRef.current === 'error') {
-        detailLoadStateRef.current = 'loading'
-        detailRequestGeneration.current += 1
-        setDetailError('')
-        setDetailLoading(true)
-        setDetailRetryVersion(current => current + 1)
-      }
-      return
-    }
+    if (nextId === selectedIdRef.current) return
+
     selectedIdRef.current = nextId
     detailRequestGeneration.current += 1
-    detailLoadStateRef.current = nextId === null ? 'idle' : 'loading'
-    setDetailError('')
-    setDetailLoading(nextId !== null)
-    if (nextId === null) setDetail(null)
     setSelectedId(nextId)
+    setDetail(null)
+    setDetailError('')
+    setEvents([])
+    setDetailLoading(nextId !== null)
   }, [])
 
-  const loadList = useCallback(async () => {
+  const loadList = useCallback(async (options: { preserveSelectedId?: number } = {}) => {
+    const generation = ++listRequestGeneration.current
+    listPageRef.current = 1
+    loadingMoreRef.current = false
     setLoading(true)
+    setLoadingMore(false)
     try {
       const result = await getResponses({
-        source_type: source,
+        source_type: sourceFilter,
         decision_status: status,
+        content_type: contentType,
+        days,
         search,
+        sort,
+        page: 1,
       })
+      if (generation !== listRequestGeneration.current) return
       itemsRef.current = result.items
       setItems(result.items)
       setTotal(result.total)
-      const currentId = selectedIdRef.current
-      const creationId = creationDetailRef.current?.id ?? null
-      if (creationId === currentId) return
-      const nextId = currentId && result.items.some(item => item.id === currentId)
-        ? currentId
+      const current = selectedIdRef.current
+      const next = current && (
+        result.items.some(item => item.id === current)
+        || options.preserveSelectedId === current
+      )
+        ? current
         : result.items[0]?.id ?? null
-      if (nextId !== currentId) selectResponse(nextId)
+      if (next !== current) selectResponse(next)
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : '待响应加载失败')
+      if (generation === listRequestGeneration.current) {
+        toast.error(error instanceof Error ? error.message : '情报中心加载失败')
+      }
     } finally {
-      setLoading(false)
+      if (generation === listRequestGeneration.current) setLoading(false)
     }
-  }, [search, selectResponse, source, status])
+  }, [contentType, days, search, selectResponse, sort, sourceFilter, status])
 
   useEffect(() => {
-    const timer = window.setTimeout(() => { void loadList() }, 250)
+    const timer = window.setTimeout(() => { void loadList() }, 220)
     return () => window.clearTimeout(timer)
   }, [loadList])
 
-  useEffect(() => {
-    if (!selectedId) return
-    const requestedId = selectedId
-    const generation = ++detailRequestGeneration.current
-    void getResponse(selectedId).then(next => {
-      if (
-        detailRequestGeneration.current !== generation
-        || selectedIdRef.current !== requestedId
-        || next.id !== requestedId
-      ) return
-      detailLoadStateRef.current = 'ready'
-      setDetailError('')
-      setTranscript(null)
-      setEvents([])
-      setDetail(next)
-      if (creationDetailRef.current) return
-      setAccountId(
-        next.analysis?.recommended_publish_account_id
-        ?? next.selected_publish_account_id
-        ?? accountsRef.current[0]?.id
-        ?? '',
-      )
-      setOutputTypes(
-        next.analysis?.recommended_output_types.length
-          ? next.analysis.recommended_output_types
-          : ['expanded_article'],
-      )
-    }).catch(error => {
-      if (detailRequestGeneration.current !== generation) return
-      const message = `详情加载失败：${error instanceof Error ? error.message : '未知错误'}`
-      detailLoadStateRef.current = 'error'
-      setDetailError(message)
-      toast.error(message)
-    }).finally(() => {
-      if (detailRequestGeneration.current === generation) setDetailLoading(false)
-    })
-    return () => {
-      if (detailRequestGeneration.current === generation) {
-        detailRequestGeneration.current += 1
-      }
-    }
-  }, [detailRetryVersion, selectedId])
-
-  const selected = useMemo(
-    () => items.find(item => item.id === selectedId)
-      ?? (detail?.id === selectedId ? detail : null),
-    [detail, items, selectedId],
-  )
-  const detailReady = (
-    !detailLoading
-    && !detailError
-    && selectedId !== null
-    && detail?.id === selectedId
-  )
-  const outputCreationMatches = (
-    detailReady
-    && creationDetail?.id === selectedId
-    && creationDetail.current_analysis_run_id !== null
-    && outputTypes.length > 0
-  )
-  const outputCreationReady = outputCreationMatches && !submittingOutputs
-
-  function openCreationSession(next: ResponseDetail) {
-    creationSessionRef.current += 1
-    creationDetailRef.current = next
-    outputSubmitBusyRef.current = false
-    setSubmittingOutputs(false)
-    setCreationDetail(next)
-    setAccountId(
-      next.analysis?.recommended_publish_account_id
-      ?? next.selected_publish_account_id
-      ?? accountsRef.current[0]?.id
-      ?? '',
-    )
-    setOutputTypes(
-      next.analysis?.recommended_output_types.length
-        ? next.analysis.recommended_output_types
-        : ['expanded_article'],
-    )
-    setShowCreate(true)
-  }
-
-  function closeCreationSession() {
-    creationSessionRef.current += 1
-    creationDetailRef.current = null
-    outputSubmitBusyRef.current = false
-    setSubmittingOutputs(false)
-    setCreationDetail(null)
-    setShowCreate(false)
-    const currentId = selectedIdRef.current
-    const latestItems = itemsRef.current
-    const nextId = currentId && latestItems.some(item => item.id === currentId)
-      ? currentId
-      : latestItems[0]?.id ?? null
-    if (nextId !== currentId) selectResponse(nextId)
-  }
-
-  async function decide(action: 'adopt' | 'later' | 'not_valuable' | 'reset') {
-    if (
-      !detailReady
-      || !detail
-      || selectedId === null
-      || detail.id !== selectedId
-      || selectedIdRef.current !== detail.id
-    ) return
-    const responseId = detail.id
-    const generation = detailRequestGeneration.current
+  const loadMore = useCallback(async () => {
+    if (loading || loadingMoreRef.current || itemsRef.current.length >= total) return
+    const generation = listRequestGeneration.current
+    const nextPage = listPageRef.current + 1
+    loadingMoreRef.current = true
+    setLoadingMore(true)
     try {
-      await decideResponse(responseId, action, reason)
-      const updated = await getResponse(responseId)
-      if (
-        detailRequestGeneration.current === generation
-        && selectedIdRef.current === responseId
-        && updated.id === responseId
-      ) {
-        setDetail(updated)
-        if (action === 'adopt') {
-          openCreationSession(updated)
-        }
-      }
-      await loadList()
-      toast.success('处理状态已保存')
+      const result = await getResponses({
+        source_type: sourceFilter,
+        decision_status: status,
+        content_type: contentType,
+        days,
+        search,
+        sort,
+        page: nextPage,
+      })
+      if (generation !== listRequestGeneration.current) return
+      const existingIds = new Set(itemsRef.current.map(item => item.id))
+      const nextItems = result.items.filter(item => !existingIds.has(item.id))
+      itemsRef.current = [...itemsRef.current, ...nextItems]
+      setItems(itemsRef.current)
+      setTotal(result.total)
+      listPageRef.current = nextPage
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : '保存失败')
-    }
-  }
-
-  async function openTranscript() {
-    if (!detailReady || !detail || detail.source_type !== 'youtube_video' || transcript) return
-    const responseId = detail.id
-    const generation = detailRequestGeneration.current
-    try {
-      const nextTranscript = await getTranscript(detail.source_id)
-      if (
-        detailRequestGeneration.current === generation
-        && selectedIdRef.current === responseId
-      ) setTranscript(nextTranscript)
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : '字幕加载失败')
-    }
-  }
-
-  async function openHistory() {
-    if (!detailReady || selectedId === null || events.length) return
-    const responseId = selectedId
-    const generation = detailRequestGeneration.current
-    try {
-      const nextEvents = (await getResponseEvents(responseId)).items
-      if (
-        detailRequestGeneration.current === generation
-        && selectedIdRef.current === responseId
-      ) setEvents(nextEvents)
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : '历史加载失败')
-    }
-  }
-
-  async function submitOutputs() {
-    if (
-      outputSubmitBusyRef.current
-      || !outputCreationMatches
-      || !creationDetail
-      || !detail
-      || selectedId === null
-      || detail.id !== selectedId
-      || creationDetail.id !== selectedId
-      || selectedIdRef.current !== creationDetail.id
-      || creationDetailRef.current !== creationDetail
-    ) return
-    const analysisRunId = creationDetail.current_analysis_run_id
-    if (analysisRunId === null) return
-    const responseId = creationDetail.id
-    const generation = detailRequestGeneration.current
-    const creationSession = creationSessionRef.current
-    outputSubmitBusyRef.current = true
-    setSubmittingOutputs(true)
-
-    try {
-      try {
-        await createResponseOutputs(responseId, {
-          analysis_run_id: analysisRunId,
-          publish_account_id: accountId || null,
-          output_types: outputTypes,
-        })
-      } catch (error) {
-        toast.error(error instanceof Error ? error.message : '创作任务创建失败')
-        return
-      }
-
-      if (creationSessionRef.current === creationSession) closeCreationSession()
-      toast.success('创作任务已创建')
-
-      try {
-        const updated = await getResponse(responseId)
-        if (
-          detailRequestGeneration.current === generation
-          && selectedIdRef.current === responseId
-          && updated.id === responseId
-        ) setDetail(updated)
-      } catch (error) {
-        toast.error(`详情刷新失败：${error instanceof Error ? error.message : '未知错误'}`)
+      if (generation === listRequestGeneration.current) {
+        toast.error(error instanceof Error ? error.message : '加载更多情报失败')
       }
     } finally {
-      if (creationSessionRef.current === creationSession) {
-        outputSubmitBusyRef.current = false
-        setSubmittingOutputs(false)
+      loadingMoreRef.current = false
+      if (generation === listRequestGeneration.current) setLoadingMore(false)
+    }
+  }, [contentType, days, loading, search, sort, sourceFilter, status, total])
+
+  useEffect(() => {
+    const sentinel = listEndRef.current
+    if (!sentinel || typeof IntersectionObserver === 'undefined') return
+    const observer = new IntersectionObserver(entries => {
+      if (entries[0]?.isIntersecting) void loadMore()
+    }, { root: listScrollRef.current, rootMargin: '160px' })
+    observer.observe(sentinel)
+    return () => observer.disconnect()
+  }, [loadMore])
+
+  useEffect(() => {
+    if (selectedId === null) return
+    const requestedId = selectedId
+    const generation = ++detailRequestGeneration.current
+    void getResponse(requestedId).then(next => {
+      if (generation !== detailRequestGeneration.current || selectedIdRef.current !== requestedId) return
+      setDetail(next)
+      setDetailError('')
+      setEvents([])
+    }).catch(error => {
+      if (generation !== detailRequestGeneration.current || selectedIdRef.current !== requestedId) return
+      setDetailError(error instanceof Error ? error.message : '详情加载失败')
+    }).finally(() => {
+      if (generation === detailRequestGeneration.current) setDetailLoading(false)
+    })
+    return () => {
+      if (generation === detailRequestGeneration.current) detailRequestGeneration.current += 1
+    }
+  }, [selectedId])
+
+  const selected = useMemo(
+    () => items.find(item => item.id === selectedId) ?? (detail?.id === selectedId ? detail : null),
+    [detail, items, selectedId],
+  )
+
+  const refreshDetail = useCallback(async (responseId: number, generation: number) => {
+    const next = await getResponse(responseId)
+    if (detailRequestGeneration.current === generation && selectedIdRef.current === responseId) {
+      setDetail(next)
+    }
+  }, [])
+
+  async function updateClassification(next: ContentType[]) {
+    if (!detail || selectedIdRef.current !== detail.id || classificationBusy) return
+    const responseId = detail.id
+    const generation = detailRequestGeneration.current
+    setClassificationBusy(true)
+    try {
+      const updated = await updateResponseClassification(responseId, next)
+      if (generation === detailRequestGeneration.current && selectedIdRef.current === responseId) {
+        setDetail(current => current ? { ...current, ...updated } : current)
       }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '分类保存失败')
+    } finally {
+      setClassificationBusy(false)
+    }
+  }
+
+  const changeDecision = useCallback(async (action: 'not_processed' | 'reset') => {
+    if (!detail || selectedIdRef.current !== detail.id || detailLoading) return
+    const responseId = detail.id
+    const generation = detailRequestGeneration.current
+    try {
+      await decideResponse(responseId, action)
+      await refreshDetail(responseId, generation)
+      await loadList()
+      toast.success(action === 'reset' ? '已恢复到待判断' : '已移入暂不处理')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '状态保存失败')
+    }
+  }, [detail, detailLoading, loadList, refreshDetail])
+
+  const openDestination = useCallback(async (nextDestination: DestinationKind) => {
+    if (!detail?.analysis || detail.current_analysis_run_id === null || destinationBusyRef.current) return
+    setDestinationError('')
+    setDestination(nextDestination)
+    try {
+      const result = await listCreativeAssetDirectories('article')
+      if (selectedIdRef.current === detail.id) setDirectories(result.map(item => item.name))
+    } catch (error) {
+      setDestinationError(error instanceof Error ? error.message : '目录加载失败')
+    }
+  }, [detail])
+
+  const startWritingJob = useCallback(async () => {
+    if (
+      !detail?.analysis
+      || detail.current_analysis_run_id === null
+      || selectedIdRef.current !== detail.id
+      || detailLoading
+      || destinationBusyRef.current
+    ) return
+    const responseId = detail.id
+    const generation = detailRequestGeneration.current
+    const session = ++destinationSessionRef.current
+    destinationBusyRef.current = true
+    setDestinationBusy(true)
+    try {
+      const result = await createResponseOutputs(responseId, {
+        analysis_run_id: detail.current_analysis_run_id,
+        output_types: ['expanded_article'],
+      })
+      if (session !== destinationSessionRef.current || selectedIdRef.current !== responseId) return
+      await refreshDetail(responseId, generation)
+      await loadList({ preserveSelectedId: responseId })
+      const created = result.outputs.some(output => output.created)
+      toast.success(created ? '写作任务已启动' : '写作任务已在队列中')
+    } catch (error) {
+      if (session === destinationSessionRef.current) {
+        toast.error(error instanceof Error ? error.message : '写作任务启动失败')
+      }
+    } finally {
+      if (session === destinationSessionRef.current) {
+        destinationBusyRef.current = false
+        setDestinationBusy(false)
+      }
+    }
+  }, [detail, detailLoading, loadList, refreshDetail])
+
+  useEffect(() => {
+    const handleShortcut = (event: KeyboardEvent) => {
+      if (
+        event.repeat
+        || event.metaKey
+        || event.ctrlKey
+        || event.altKey
+        || event.shiftKey
+        || destination !== null
+        || destinationBusy
+        || detailLoading
+        || !detail
+        || detail.decision_status !== 'pending'
+        || isEditableTarget(event.target)
+      ) return
+
+      if (event.key === '1' && detail.analysis) {
+        event.preventDefault()
+        void startWritingJob()
+      } else if (event.key === '2' && detail.analysis) {
+        event.preventDefault()
+        void openDestination('creative_asset')
+      } else if (event.key === '3') {
+        event.preventDefault()
+        void changeDecision('not_processed')
+      }
+    }
+    window.addEventListener('keydown', handleShortcut)
+    return () => window.removeEventListener('keydown', handleShortcut)
+  }, [changeDecision, destination, destinationBusy, detail, detailLoading, openDestination, startWritingJob])
+
+  async function submitDestination(value: { destination: DestinationKind; analysis_run_id: number; directory: string | null }) {
+    if (!detail || detail.id !== selectedIdRef.current || destinationBusyRef.current) return
+    const responseId = detail.id
+    const generation = detailRequestGeneration.current
+    const session = ++destinationSessionRef.current
+    destinationBusyRef.current = true
+    setDestinationBusy(true)
+    setDestinationError('')
+    try {
+      await createResponseDestination(responseId, value)
+      if (session !== destinationSessionRef.current || selectedIdRef.current !== responseId) return
+      await refreshDetail(responseId, generation)
+      await loadList()
+      setDestination(null)
+      toast.success('已保存创作资产')
+    } catch (error) {
+      if (session === destinationSessionRef.current) setDestinationError(error instanceof Error ? error.message : '保存失败')
+    } finally {
+      if (session === destinationSessionRef.current) {
+        destinationBusyRef.current = false
+        setDestinationBusy(false)
+      }
+    }
+  }
+
+  async function loadHistory() {
+    if (!detail || events.length) return
+    try {
+      const result = await getResponseEvents(detail.id)
+      if (selectedIdRef.current === detail.id) setEvents(result.items)
+    } catch {
+      // History is supplemental; the source and evaluation remain usable.
     }
   }
 
   return (
-    <div className="flex h-screen min-h-0 bg-zinc-50/60 dark:bg-zinc-950">
-      <aside className="w-52 shrink-0 border-r bg-white p-4 dark:bg-zinc-950">
-        <div className="mb-6">
-          <h1 className="text-lg font-semibold">待响应</h1>
-          <p className="mt-1 text-xs text-zinc-500">{total} 条内容等待判断与创作</p>
+    <div className="flex h-screen min-h-0 flex-col bg-background">
+      <header className="flex shrink-0 items-center justify-between border-b border-border bg-card px-5 py-4 lg:px-8">
+        <div>
+          <h1 className="text-xl font-semibold tracking-tight">情报中心</h1>
+          <p className="mt-1 text-xs text-muted-foreground">先看原文，再判断它是否值得进入内容系统</p>
         </div>
-        <div className="space-y-5">
+        <div className="hidden items-center gap-2 text-xs text-muted-foreground sm:flex">
+          <span className="size-2 rounded-full bg-emerald-500" /> {total} 条内容
+        </div>
+      </header>
+
+      <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
+        <aside className="shrink-0 border-b border-border bg-card p-4 lg:w-52 lg:border-b-0 lg:border-r lg:overflow-y-auto">
+          <div className="mb-4 flex items-center gap-2 text-xs font-semibold text-muted-foreground"><SlidersHorizontal className="size-3.5" />筛选</div>
+          <FilterGroup title="状态">
+            {statuses.map(option => <FilterButton key={option.value} active={status === option.value} onClick={() => setStatus(option.value)}>{option.label}</FilterButton>)}
+          </FilterGroup>
           <FilterGroup title="来源">
-            {[['', '全部'], ['youtube_video', 'YouTube'], ['x_post', 'X']].map(([value, label]) => (
-              <FilterButton key={value} active={source === value} onClick={() => setSource(value)}>
+            {sources.map(option => <FilterButton key={option.value} active={sourceFilter === option.value} onClick={() => setSourceFilter(option.value)}>{option.label}</FilterButton>)}
+          </FilterGroup>
+          <FilterGroup title="时间">
+            {timeRanges.map(option => <FilterButton key={option.value} active={days === option.value} onClick={() => setDays(option.value)}>{option.label}</FilterButton>)}
+          </FilterGroup>
+          <FilterGroup title="内容类型">
+            <FilterButton active={contentType === ''} onClick={() => setContentType('')}>全部类型</FilterButton>
+            {Object.entries(contentTypeLabels).map(([value, label]) => (
+              <FilterButton key={value} active={contentType === value} onClick={() => setContentType(value as ContentType)}>
                 {label}
               </FilterButton>
             ))}
           </FilterGroup>
-          <FilterGroup title="状态">
-            {Object.entries({ pending: '待处理', later: '稍后处理', adopted: '已采纳', rejected: '不值得', '': '全部' })
-              .map(([value, label]) => (
-                <FilterButton key={value} active={status === value} onClick={() => setStatus(value)}>
-                  {label}
-                </FilterButton>
-              ))}
+          <FilterGroup title="排序">
+            <div className="flex rounded-lg border border-border p-0.5">
+              {(['score', 'newest'] as const).map(value => <button key={value} type="button" onClick={() => setSort(value)} className={cn('flex-1 rounded-md px-2 py-1.5 text-xs', sort === value && 'bg-muted font-medium')}>{value === 'score' ? '价值评分' : '最新'}</button>)}
+            </div>
           </FilterGroup>
-        </div>
-      </aside>
+        </aside>
 
-      <section className="w-[370px] shrink-0 border-r bg-white dark:bg-zinc-950">
-        <div className="border-b p-4">
-          <div className="relative">
-            <Search className="absolute left-3 top-2.5 size-4 text-zinc-400" />
-            <Input
-              value={search}
-              onChange={event => setSearch(event.target.value)}
-              placeholder="搜索标题或频道"
-              className="pl-9"
-            />
-          </div>
-        </div>
-        <div className="h-[calc(100vh-73px)] overflow-y-auto">
-          {loading && !items.length && <p className="p-8 text-center text-sm text-zinc-400">正在加载…</p>}
-          {!loading && !items.length && <p className="p-8 text-center text-sm text-zinc-400">暂无符合条件的内容</p>}
-          {items.map(item => (
-            <button
-              key={item.id}
-              onClick={() => selectResponse(item.id)}
-              className={cn(
-                'w-full border-b px-4 py-4 text-left transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-900',
-                selectedId === item.id && 'bg-indigo-50/70 dark:bg-indigo-950/30',
-              )}
-            >
-              <div className="mb-2 flex items-center gap-2">
-                {item.source_type === 'youtube_video'
-                  ? <Video className="size-4 text-red-500" />
-                  : <AtSign className="size-4 text-sky-500" />}
-                <span className="truncate text-xs text-zinc-500">{item.source_author}</span>
-                <Badge variant="outline" className="ml-auto text-[10px]">
-                  {decisionLabels[item.decision_status]}
-                </Badge>
-              </div>
-              <p className="line-clamp-2 text-sm font-medium leading-5">{item.source_title}</p>
-              <div className="mt-3 flex items-center gap-2 text-xs text-zinc-500">
-                <span className="font-semibold text-zinc-800 dark:text-zinc-200">
-                  {item.analysis ? `${item.analysis.content_value_score} 分` : '待分析'}
-                </span>
-                <span>·</span>
-                <span className="truncate">{item.analysis?.recommended_action || item.workflow_status}</span>
-              </div>
-            </button>
-          ))}
-        </div>
-      </section>
-
-      <main className="min-w-0 flex-1 overflow-y-auto">
-        {!selected && <div className="grid h-full place-items-center text-sm text-zinc-400">选择一条内容查看分析</div>}
-        {selected && !detail && !detailError && <div className="grid h-full place-items-center text-sm text-zinc-400">正在加载详情…</div>}
-        {selected && !detail && detailError && (
-          <div className="grid h-full place-items-center">
-            <div role="alert" className="text-center text-sm text-red-500">
-              <p>{detailError}</p>
-              <Button className="mt-3" variant="outline" size="sm" onClick={() => selectResponse(selectedId)}>
-                重试加载详情
-              </Button>
+        <section className="flex min-h-[260px] shrink-0 flex-col border-b border-border bg-card lg:w-[360px] lg:border-b-0 lg:border-r">
+          <div className="border-b border-border p-4">
+            <div className="relative">
+              <Search className="absolute left-3 top-2.5 size-4 text-muted-foreground" />
+              <Input value={search} onChange={event => setSearch(event.target.value)} placeholder="搜索标题或作者" className="pl-9" />
             </div>
           </div>
-        )}
-        {detail && (
-          <div className="mx-auto max-w-4xl p-7" aria-busy={detailLoading}>
-            {!detailReady && (
-              detailError ? (
-                <div role="alert" className="mb-4 flex items-center gap-3 text-sm text-red-500">
-                  <span>{detailError}</span>
-                  <Button variant="outline" size="sm" onClick={() => selectResponse(selectedId)}>
-                    重试加载详情
-                  </Button>
-                </div>
-              ) : (
-                <p role="status" className="mb-4 text-sm text-zinc-400">正在加载详情…</p>
-              )
-            )}
-            <div className="mb-5 flex items-start gap-4">
-              <div className="min-w-0 flex-1">
-                <div className="mb-2 flex items-center gap-2 text-xs text-zinc-500">
-                  <span>{detail.source_author}</span>
-                  <span>·</span>
-                  <span>{detail.source_type === 'youtube_video' ? 'YouTube' : 'X'}</span>
-                </div>
-                <h2 className="text-xl font-semibold leading-8">{detail.source_title}</h2>
-              </div>
-              <a
-                href={detail.source_url}
-                target="_blank"
-                rel="noreferrer"
-                className={buttonVariants({ variant: 'outline', size: 'sm' })}
-              >
-                原文 <ExternalLink className="ml-1 size-3.5" />
-              </a>
-            </div>
+          <div ref={listScrollRef} className="min-h-0 flex-1 overflow-y-auto">
+            {loading && !items.length && <p className="p-8 text-center text-sm text-muted-foreground">正在加载…</p>}
+            {!loading && !items.length && <p className="p-8 text-center text-sm text-muted-foreground">暂无符合条件的内容</p>}
+            {items.map(item => <ResponseListItem key={item.id} item={item} selected={item.id === selectedId} onClick={() => selectResponse(item.id)} />)}
+            <div ref={listEndRef} data-testid="responses-list-sentinel" aria-hidden="true" className="h-px" />
+            {loadingMore && <p className="p-3 text-center text-xs text-muted-foreground">正在加载更多…</p>}
+          </div>
+        </section>
 
-            <Tabs defaultValue="overview">
-              <TabsList>
-                <TabsTrigger value="overview">概览</TabsTrigger>
-                {detail.source_type === 'youtube_video' && (
-                  <TabsTrigger value="transcript" onClick={() => void openTranscript()}>字幕</TabsTrigger>
+        <main className="min-h-0 min-w-0 flex-1 overflow-y-auto bg-muted/20 p-4 lg:p-6">
+          {!selected && <div className="grid h-full min-h-64 place-items-center text-sm text-muted-foreground">选择一条内容开始判断</div>}
+          {selected && detailLoading && !detail && <div className="grid h-full min-h-64 place-items-center text-sm text-muted-foreground">正在加载原文与 AI 评价…</div>}
+          {selected && detailError && !detail && <div className="grid h-full min-h-64 place-items-center text-sm text-destructive" role="alert">{detailError}</div>}
+          {detail && (
+            <div className="mx-auto grid max-w-[1500px] gap-5 xl:grid-cols-[3fr_2fr]">
+              <ResponseSourcePane detail={detail} />
+              <div className="space-y-4">
+                <ResponseEvaluationPane detail={detail} onClassification={updateClassification} classificationBusy={classificationBusy} history={events} />
+                {detail.outputs?.map(output => output.output_type === 'expanded_article' && (
+                  <WritingJobStatus key={output.id} output={output} />
+                ))}
+                {detail.destination && (
+                  <a href={detail.destination.url} className="flex items-center justify-between rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/20 dark:text-emerald-300">
+                    <span>已进入{detail.destination.type === 'draft' ? '草稿箱' : '创作资产'}</span><ExternalLink className="size-4" />
+                  </a>
                 )}
-                <TabsTrigger value="accounts">账号适配</TabsTrigger>
-                <TabsTrigger value="history" onClick={() => void openHistory()}>分析历史</TabsTrigger>
-              </TabsList>
-              <TabsContent value="overview" className="mt-5 space-y-5">
-                <ScoreOverview detail={detail} />
-              </TabsContent>
-              <TabsContent value="transcript" className="mt-5">
-                <div className="rounded-xl border bg-white p-5 dark:bg-zinc-950">
-                  {!transcript && <p className="text-sm text-zinc-400">正在加载字幕…</p>}
-                  {transcript && (
+                <div className="flex flex-wrap gap-2 rounded-2xl border border-border bg-card p-4">
+                  {detail.decision_status === 'pending' && (
                     <>
-                      <div className="mb-4 flex gap-2 text-xs text-zinc-500">
-                        <Badge variant="outline">{transcript.source || transcript.status}</Badge>
-                        {transcript.language && <Badge variant="outline">{transcript.language}</Badge>}
-                      </div>
-                      <p className="whitespace-pre-wrap text-sm leading-7">{transcript.text || transcript.error || '暂无字幕'}</p>
+                      <Button onClick={() => void startWritingJob()} disabled={!detail.analysis || destinationBusy}>值得写</Button>
+                      <Button variant="outline" onClick={() => void openDestination('creative_asset')} disabled={!detail.analysis || destinationBusy}>创作资产</Button>
+                      <Button variant="ghost" onClick={() => void changeDecision('not_processed')} disabled={detailLoading}>暂不处理</Button>
+                      <span className="basis-full text-xs text-muted-foreground">快捷键：<kbd className="rounded border border-border bg-muted px-1 py-0.5">1</kbd> 值得写 · <kbd className="rounded border border-border bg-muted px-1 py-0.5">2</kbd> 创作资产 · <kbd className="rounded border border-border bg-muted px-1 py-0.5">3</kbd> 暂不处理</span>
                     </>
                   )}
+                  {detail.decision_status === 'not_processed' && (
+                    <Button variant="outline" onClick={() => void changeDecision('reset')} disabled={detailLoading}><RotateCcw className="mr-1 size-4" />恢复待判断</Button>
+                  )}
+                  {detail.decision_status !== 'pending' && detail.decision_status !== 'not_processed' && !detail.destination && (
+                    <Button variant="outline" onClick={() => void changeDecision('reset')} disabled={detailLoading}><RotateCcw className="mr-1 size-4" />重新判断</Button>
+                  )}
+                  <button type="button" className="ml-auto text-xs text-muted-foreground underline-offset-4 hover:underline" onClick={() => void loadHistory()}>查看处理记录</button>
                 </div>
-              </TabsContent>
-              <TabsContent value="accounts" className="mt-5 space-y-3">
-                {detail.account_scores.map(score => (
-                  <div key={score.publish_account_id} className="rounded-xl border bg-white p-4 dark:bg-zinc-950">
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium">{score.account_snapshot.name || score.publish_account_id}</span>
-                      <Badge className="ml-auto">{score.score} 分</Badge>
-                    </div>
-                    <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">{score.audience_value}</p>
-                    {!!score.fit_reasons.length && <p className="mt-2 text-xs text-zinc-500">{score.fit_reasons.join(' · ')}</p>}
-                    {score.has_hard_conflict && <p className="mt-2 text-xs text-red-500">禁区冲突：{score.taboo_risks.join('、')}</p>}
-                  </div>
-                ))}
-                {!detail.account_scores.length && <p className="text-sm text-zinc-400">暂无启用的发布账号</p>}
-              </TabsContent>
-              <TabsContent value="history" className="mt-5 space-y-3">
-                {events.map(event => (
-                  <div key={event.id} className="flex gap-3 rounded-lg border bg-white p-3 text-sm dark:bg-zinc-950">
-                    <Clock3 className="mt-0.5 size-4 text-zinc-400" />
-                    <div><p>{event.event_type}</p><p className="text-xs text-zinc-400">{new Date(event.created_at).toLocaleString('zh-CN')}</p></div>
-                  </div>
-                ))}
-              </TabsContent>
-            </Tabs>
-
-            <div className="sticky bottom-4 mt-8 rounded-2xl border bg-white/95 p-4 shadow-lg backdrop-blur dark:bg-zinc-950/95">
-              {showCreate ? (
-                <div className="space-y-4">
-                  <div className="flex items-center gap-2"><Sparkles className="size-4 text-indigo-500" /><span className="font-medium">选择创作形式</span></div>
-                  {creationDetail && <p className="text-sm text-zinc-500">将基于：{creationDetail.source_title}</p>}
-                  <select
-                    value={accountId}
-                    disabled={!outputCreationReady}
-                    onChange={event => setAccountId(event.target.value)}
-                    className="h-9 w-full rounded-md border bg-transparent px-3 text-sm"
-                  >
-                    <option value="">不指定账号</option>
-                    {accounts.map(account => <option key={account.id} value={account.id}>{account.name} · {account.platform}</option>)}
-                  </select>
-                  <div className="flex flex-wrap gap-2">
-                    {['expanded_article', 'commentary', 'x_share'].map(type => (
-                      <button
-                        key={type}
-                        disabled={!outputCreationReady}
-                        onClick={() => setOutputTypes(current => current.includes(type) ? current.filter(value => value !== type) : [...current, type])}
-                        className={cn('rounded-full border px-3 py-1.5 text-sm', outputTypes.includes(type) && 'border-indigo-500 bg-indigo-50 text-indigo-700')}
-                      >
-                        {outputLabels[type]}
-                      </button>
-                    ))}
-                  </div>
-                  <div className="flex justify-end gap-2">
-                    <Button variant="ghost" onClick={closeCreationSession}>取消</Button>
-                    <Button
-                      aria-busy={submittingOutputs}
-                      onClick={() => void submitOutputs()}
-                      disabled={!outputCreationReady}
-                    >
-                      {submittingOutputs ? '创建中…' : '创建任务'}
-                    </Button>
-                  </div>
-                </div>
-              ) : (
-                <>
-                  <div className="mb-3 flex gap-2">
-                    <Button size="sm" disabled={!detailReady} onClick={() => void decide('adopt')}><Check className="mr-1 size-4" />采纳创作</Button>
-                    <Button size="sm" variant="outline" disabled={!detailReady} onClick={() => void decide('later')}><Clock3 className="mr-1 size-4" />稍后处理</Button>
-                    <Button size="sm" variant="ghost" disabled={!detailReady} onClick={() => void decide('not_valuable')}><XCircle className="mr-1 size-4" />不值得</Button>
-                    <Button size="sm" variant="ghost" className="ml-auto" aria-label="重置处理状态" disabled={!detailReady} onClick={() => void decide('reset')}><RefreshCw className="size-4" /></Button>
-                  </div>
-                  <Input value={reason} disabled={!detailReady} onChange={event => setReason(event.target.value)} placeholder="可选：记录不值得或稍后处理的原因" />
-                </>
-              )}
-              {!!detail.outputs.length && (
-                <div className="mt-3 flex flex-wrap gap-2 border-t pt-3">
-                  {detail.outputs.map(output => (
-                    <Badge key={output.id} variant="outline">
-                      {outputLabels[output.output_type] ?? output.output_type} · {output.status}
-                    </Badge>
-                  ))}
-                </div>
-              )}
+              </div>
             </div>
-          </div>
-        )}
-      </main>
+          )}
+        </main>
+      </div>
+
+      <ResponseDestinationDialog
+        key={destination ?? 'closed'}
+        open={destination !== null}
+        destination={destination}
+        detail={detail}
+        directories={directories}
+        busy={destinationBusy}
+        error={destinationError}
+        onOpenChange={open => { if (!open && !destinationBusy) setDestination(null) }}
+        onConfirm={value => void submitDestination(value)}
+      />
     </div>
   )
 }
 
-function FilterGroup({ title, children }: { title: string; children: React.ReactNode }) {
-  return <div><p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-zinc-400">{title}</p><div className="space-y-1">{children}</div></div>
-}
-
-function FilterButton({ active, onClick, children }: { active: boolean; onClick(): void; children: React.ReactNode }) {
-  return <button onClick={onClick} className={cn('w-full rounded-md px-2.5 py-1.5 text-left text-sm text-zinc-500 hover:bg-zinc-100', active && 'bg-zinc-100 font-medium text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100')}>{children}</button>
-}
-
-function ScoreOverview({ detail }: { detail: ResponseDetail }) {
-  const analysis = detail.analysis
-  if (!analysis) return <div className="rounded-xl border bg-white p-6 text-sm text-zinc-400 dark:bg-zinc-950">分析任务状态：{detail.workflow_status}</div>
+function ResponseListItem({ item, selected, onClick }: { item: ResponseItem; selected: boolean; onClick: () => void }) {
   return (
-    <>
-      <div className="grid gap-4 md:grid-cols-[130px_1fr]">
-        <div className="rounded-xl border bg-white p-5 text-center dark:bg-zinc-950">
-          <p className="text-4xl font-semibold">{analysis.content_value_score}</p>
-          <p className="mt-1 text-xs text-zinc-500">内容价值</p>
-        </div>
-        <div className="rounded-xl border bg-white p-5 dark:bg-zinc-950">
-          <p className="text-xs font-medium text-zinc-400">核心思想</p>
-          <p className="mt-2 text-base font-medium">{analysis.core_thesis}</p>
-          <p className="mt-3 text-sm leading-6 text-zinc-600 dark:text-zinc-400">{analysis.summary_cn}</p>
-        </div>
+    <button type="button" onClick={onClick} className={cn('w-full border-b border-border px-4 py-4 text-left transition-colors hover:bg-muted/60', selected && 'bg-primary/5')}>
+      <div className="flex items-center gap-2">
+        {item.source_type === 'youtube_video' ? <PlaySquare className="size-4 text-red-500" /> : <AtSign className="size-4 text-sky-600" />}
+        <span className="truncate text-xs text-muted-foreground">{item.source_author || '未知作者'}</span>
+        <Badge variant="outline" className="ml-auto text-[10px]">{dispositionLabels[item.decision_status]}</Badge>
       </div>
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-        {Object.entries(analysis.value_dimensions).map(([key, value]) => (
-          <div key={key} className="rounded-xl border bg-white p-3 dark:bg-zinc-950">
-            <div className="flex items-center"><span className="truncate text-xs text-zinc-500">{key}</span><strong className="ml-auto">{value.score}</strong></div>
-            <p className="mt-2 text-xs leading-5 text-zinc-500">{value.reason}</p>
-          </div>
-        ))}
+      <p className="mt-2 line-clamp-2 text-sm font-medium leading-5">{item.source_title || '未命名内容'}</p>
+      <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
+        <span className="font-semibold text-foreground">{item.analysis ? `${item.analysis.content_value_score} 分` : '待分析'}</span>
+        {item.content_types.slice(0, 2).map(type => <span key={type} className="rounded bg-muted px-1.5 py-0.5">{contentTypeLabels[type]}</span>)}
+        <span className="ml-auto whitespace-nowrap">{formatDate(item.source_published_at || item.created_at)}</span>
       </div>
-      <div className="grid gap-4 md:grid-cols-2">
-        <InfoCard icon={<FileText className="size-4" />} title="价值点" items={analysis.value_points} />
-        <InfoCard icon={<MessageCircle className="size-4" />} title="可加入的观点" items={analysis.personal_angles} />
-      </div>
-      <div className="rounded-xl border bg-indigo-50/50 p-4 dark:bg-indigo-950/20">
-        <p className="text-sm font-medium">建议：{analysis.recommended_action}</p>
-        <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">{analysis.recommendation_reason}</p>
-      </div>
-    </>
+      {item.analysis?.recommendation_reason && <p className="mt-2 line-clamp-1 text-xs text-muted-foreground">{item.analysis.recommendation_reason}</p>}
+    </button>
   )
 }
 
-function InfoCard({ icon, title, items }: { icon: React.ReactNode; title: string; items: string[] }) {
+function WritingJobStatus({ output }: { output: ResponseOutput }) {
+  const ready = output.status === 'draft_ready' && output.article_draft_id !== null
+  const failed = output.job_status === 'failed' || output.status === 'failed'
+  const draftUrl = ready ? `/drafts?draft=${output.article_draft_id}` : null
   return (
-    <div className="rounded-xl border bg-white p-5 dark:bg-zinc-950">
-      <div className="mb-3 flex items-center gap-2 text-sm font-medium">{icon}{title}</div>
-      <ul className="space-y-2 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-        {items.map((item, index) => <li key={`${index}-${item}`} className="flex gap-2"><span>•</span><span>{item}</span></li>)}
-      </ul>
+    <div data-testid="response-writing-status" className={cn(
+      'rounded-xl border px-4 py-3 text-sm',
+      ready && 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/20 dark:text-emerald-300',
+      failed && 'border-destructive/30 bg-destructive/5 text-destructive',
+      !ready && !failed && 'border-sky-200 bg-sky-50 text-sky-800 dark:border-sky-900 dark:bg-sky-950/20 dark:text-sky-300',
+    )}>
+      <div className="flex items-center justify-between gap-3">
+        <span className="font-medium">
+          {ready ? '写作完成，已进入草稿箱' : failed ? '写作任务失败' : '文章写作中…'}
+        </span>
+        {draftUrl && <a href={draftUrl} className="inline-flex items-center gap-1 underline underline-offset-4">打开草稿箱<ExternalLink className="size-3.5" /></a>}
+      </div>
+      {failed && <p className="mt-1 text-xs">{output.error || '请前往任务看板查看日志并重试。'}</p>}
+      {!ready && !failed && <p className="mt-1 text-xs opacity-80">写作完成后会自动创建完整文章草稿，不会自动发布。</p>}
     </div>
   )
+}
+
+function FilterGroup({ title, children }: { title: string; children: ReactNode }) {
+  return <div className="mb-5"><p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">{title}</p>{children}</div>
+}
+
+function FilterButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: ReactNode }) {
+  return <button type="button" aria-label={`筛选：${String(children)}`} onClick={onClick} className={cn('w-full rounded-lg px-2.5 py-2 text-left text-sm text-muted-foreground hover:bg-muted', active && 'bg-muted font-medium text-foreground')}>{children}</button>
 }

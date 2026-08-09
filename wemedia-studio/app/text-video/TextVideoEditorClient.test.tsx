@@ -153,22 +153,6 @@ vi.mock('./TextVideoWorkbench', () => ({
       </button>
       <button
         type="button"
-        onClick={() => void onApplyTemplate(
-          'kinetic-punch-v2',
-          1,
-          {
-            brandTitle: 'EDIORA',
-            showBrand: true,
-            accentColor: '#D8FF3E',
-            showProgress: true,
-            palette: 'night',
-          },
-        )}
-      >
-        测试升级 V2
-      </button>
-      <button
-        type="button"
         onClick={() => onRealignMasterAudio(316)}
       >
         测试重新对齐
@@ -374,29 +358,6 @@ describe('TextVideoEditorClient scene action', () => {
     )
     expect(mocks.autosave.markDirty.mock.invocationCallOrder[0])
       .toBeLessThan(mocks.autosave.flush.mock.invocationCallOrder[0])
-  })
-
-  it('creates and persists one rule motion plan when selecting v2', async () => {
-    const user = userEvent.setup()
-    const project = makeVideoReadyProject()
-    render(<TextVideoEditorClient initialProject={project} />)
-
-    await user.click(screen.getByRole('button', { name: '测试升级 V2' }))
-
-    await waitFor(() => expect(mocks.autosave.flush).toHaveBeenCalledOnce())
-    const staged = mocks.autosave.markDirty.mock.calls.at(-1)?.[0]
-    expect(staged).toMatchObject({
-      render_input: {
-        templateId: 'kinetic-punch-v2',
-        templateVersion: 1,
-      },
-      scene_plan: {
-        scenes: expect.arrayContaining([
-          expect.objectContaining({ motion: expect.any(Object) }),
-        ]),
-      },
-    })
-    expect(mocks.autosave.markDirty).toHaveBeenCalledOnce()
   })
 
   it('automatically reuses a confirmed single segment as master audio', async () => {

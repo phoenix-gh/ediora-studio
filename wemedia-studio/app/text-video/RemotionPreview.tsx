@@ -1,7 +1,7 @@
 'use client'
 
-import type { ComponentType } from 'react'
-import { Player } from '@remotion/player'
+import type { ComponentType, Ref } from 'react'
+import { type PlayerRef, Player } from '@remotion/player'
 
 import { creativeAssetUrl } from '@/lib/api/assets'
 import type { TextVideoProject } from '@/lib/api/text-videos'
@@ -18,10 +18,12 @@ export function RemotionPreview({
   project,
   selectedSceneId,
   previewAll,
+  playerRef,
 }: {
   project: TextVideoProject
   selectedSceneId: string
   previewAll: boolean
+  playerRef?: Ref<PlayerRef>
 }) {
   const sceneState = project.scene_plan.status
   if (sceneState === 'missing') {
@@ -53,6 +55,7 @@ export function RemotionPreview({
   return (
     <div data-testid="remotion-preview" className="h-full w-full">
       <Player
+        ref={playerRef}
         component={prepared.component}
         inputProps={prepared.inputProps}
         durationInFrames={prepared.durationInFrames}

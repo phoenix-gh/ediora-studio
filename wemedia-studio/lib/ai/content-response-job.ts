@@ -19,21 +19,7 @@ import {
 const dimensionSchema = z.object({
   score: z.number().int().min(0).max(100),
   reason: z.string().min(1),
-})
-
-const accountScoreSchema = z.object({
-  publish_account_id: z.string().min(1),
-  score: z.number().int().min(0).max(100),
-  rank: z.number().int().min(1),
-  fit_reasons: z.array(z.string()),
-  audience_value: z.string(),
-  recommended_tone: z.string(),
-  recommended_output_types: z.array(z.enum([
-    'expanded_article', 'commentary', 'x_share', 'x_reply', 'x_quote',
-  ])),
-  taboo_risks: z.array(z.string()),
-  has_hard_conflict: z.boolean(),
-})
+}).strict()
 
 export const contentResponseAnalysisSchema = z.object({
   content_value_score: z.number().int().min(0).max(100),
@@ -41,48 +27,31 @@ export const contentResponseAnalysisSchema = z.object({
     novelty: dimensionSchema,
     practicality: dimensionSchema,
     credibility: dimensionSchema,
-    discussion_value: dimensionSchema,
+    writing_space: dimensionSchema,
     evergreen_value: dimensionSchema,
-  }),
+  }).strict(),
   summary_cn: z.string().min(1),
   core_thesis: z.string().min(1),
-  key_points: z.array(z.string()),
+  value_points: z.array(z.string()),
   evidence: z.array(z.object({
     text: z.string().min(1),
     type: z.enum(['fact', 'source_claim', 'model_inference']),
     source: z.string().optional(),
-  })),
-  value_points: z.array(z.string()),
+  }).strict()),
   risks: z.array(z.string()),
   verification_items: z.array(z.string()),
-  personal_angles: z.array(z.string()),
-  article_outlines: z.array(z.object({
-    title: z.string(),
-    sections: z.array(z.string()),
-  })),
-  comment_angles: z.array(z.string()),
-  recommended_output_types: z.array(z.enum([
-    'expanded_article', 'commentary', 'x_share', 'x_reply', 'x_quote',
+  recommended_content_types: z.array(z.enum([
+    'tool', 'industry_update', 'case', 'tutorial', 'research',
   ])),
-  recommended_action: z.string(),
+  recommended_disposition: z.enum([
+    'worth_writing', 'creative_asset', 'not_processed',
+  ]),
   recommendation_reason: z.string().min(1),
-  recommended_publish_account_id: z.string().nullable(),
-  account_scores: z.array(accountScoreSchema),
-}).superRefine((value, context) => {
-  const ids = new Set(value.account_scores.map(score => score.publish_account_id))
-  if (ids.size !== value.account_scores.length) {
-    context.addIssue({ code: 'custom', message: 'duplicate account score' })
-  }
-  const recommended = value.account_scores.find(
-    score => score.publish_account_id === value.recommended_publish_account_id,
-  )
-  if (recommended?.has_hard_conflict) {
-    context.addIssue({ code: 'custom', message: 'recommended account has hard conflict' })
-  }
-  if (value.recommended_publish_account_id && !recommended) {
-    context.addIssue({ code: 'custom', message: 'recommended account is not scored' })
-  }
-})
+  suggested_title: z.string().min(1),
+  suggested_angle: z.string().min(1),
+  target_reader: z.string().min(1),
+  suggested_structure: z.array(z.string().min(1)),
+}).strict()
 
 export type ContentResponseAnalysis = z.infer<typeof contentResponseAnalysisSchema>
 
@@ -91,50 +60,33 @@ export function parseContentResponseAnalysis(text: string): ContentResponseAnaly
   return contentResponseAnalysisSchema.parse(JSON.parse(json))
 }
 
-export function contentResponseContractExample(
-  accountIds: string[],
-): ContentResponseAnalysis {
+export function contentResponseContractExample(): ContentResponseAnalysis {
   return {
     content_value_score: 70,
     value_dimensions: {
       novelty: { score: 70, reason: '说明新颖性判断' },
       practicality: { score: 70, reason: '说明实用性判断' },
       credibility: { score: 70, reason: '说明可信度判断' },
-      discussion_value: { score: 70, reason: '说明讨论价值判断' },
+      writing_space: { score: 70, reason: '说明写作空间判断' },
       evergreen_value: { score: 70, reason: '说明长期价值判断' },
     },
     summary_cn: '中文摘要',
     core_thesis: '核心思想',
-    key_points: ['关键观点'],
+    value_points: ['价值点'],
     evidence: [{
       text: '原始内容中的证据或来源说法',
       type: 'source_claim',
       source: '原始内容',
     }],
-    value_points: ['价值点'],
     risks: [],
     verification_items: [],
-    personal_angles: ['可加入的个人角度'],
-    article_outlines: [{
-      title: '文章标题方向',
-      sections: ['开篇', '论证', '结论'],
-    }],
-    comment_angles: ['评论角度'],
-    recommended_output_types: ['expanded_article'],
-    recommended_action: '建议动作',
+    recommended_content_types: ['research', 'tutorial'],
+    recommended_disposition: 'worth_writing',
     recommendation_reason: '建议理由',
-    recommended_publish_account_id: null,
-    account_scores: accountIds.map((publishAccountId, index) => ({
-      publish_account_id: publishAccountId,
-      score: 70,
-      rank: index + 1,
-      fit_reasons: ['适配理由'],
-      audience_value: '对该账号受众的价值',
-      recommended_tone: '建议语气',
-      recommended_output_types: ['expanded_article'],
-      taboo_risks: [],
-      has_hard_conflict: false,
-    })),
+    suggested_title: '文章标题方向',
+    suggested_angle: '可展开的切入角度',
+    target_reader: '目标读者',
+    suggested_structure: ['开篇', '论证', '结论'],
   }
 }
 
@@ -142,7 +94,6 @@ const stepOrder = [
   'prepare_source',
   'extract_content',
   'analyze_value',
-  'score_accounts',
   'persist_response',
 ] as const
 type AnalysisStep = typeof stepOrder[number]
@@ -182,22 +133,13 @@ async function configuredModel() {
 async function analyze(context: Record<string, unknown>) {
   const config = await configuredModel()
   const provider = createOpenAI({ apiKey: config.apiKey, baseURL: config.baseURL })
-  const instructions = `你是中文内容研究与创作编辑。分析原始内容，不发布任何内容。
-必须区分事实(fact)、来源观点(source_claim)和模型推断(model_inference)。
-内容价值与账号适配必须分开打分。即使内容价值低，也要如实输出完整分析。
-必须给 accounts 中每个启用账号一条 account_scores；硬禁区冲突时 has_hard_conflict=true，不能推荐该账号。
-五个价值维度固定为 novelty、practicality、credibility、discussion_value、evergreen_value。
-分析、理由、建议使用中文；原文专有名词可保留。只返回严格 JSON，不要 Markdown。`
-  const accountIds = Array.isArray(context.accounts)
-    ? context.accounts
-      .map(account => (
-        account && typeof account === 'object' && 'id' in account
-          ? String(account.id)
-          : ''
-      ))
-      .filter(Boolean)
-    : []
-  const contractExample = contentResponseContractExample(accountIds)
+  const instructions = `你是中文内容研究与创作编辑。分析原始内容，判断它是否值得进入内容系统，不发布任何内容。
+必须区分事实(fact)、来源观点(source_claim)和模型推断(model_inference)，证据必须标注类型。
+即使内容价值低，也要如实输出完整分析。推荐去向只能是 worth_writing、creative_asset、not_processed。
+五个价值维度固定为 novelty、practicality、credibility、writing_space、evergreen_value。
+内容类型只能从 tool、industry_update、case、tutorial、research 中选择，可多选。
+分析、理由、标题、角度和结构使用中文；原文专有名词可保留。只返回严格 JSON，不要 Markdown。`
+  const contractExample = contentResponseContractExample()
   const prompt = JSON.stringify({
     task: '分析 source，并严格按 required_output_shape 的字段和嵌套类型返回 JSON。示例值仅用于说明合同，必须替换为真实分析。',
     required_output_shape: contractExample,
@@ -285,6 +227,10 @@ export async function runContentResponseAnalysisJob(jobId: number) {
         )
       }
       extracted = context
+      const availableSource = extracted.source as Record<string, unknown>
+      if (availableSource.available === false || !String(availableSource.body ?? '').trim()) {
+        throw new Error('原文正文不可用，无法进行可靠分析')
+      }
       await completeStep(job.id, activeStep.id, extracted)
       activeStep = undefined
       job = await getJob(job.id)
@@ -295,23 +241,6 @@ export async function runContentResponseAnalysisJob(jobId: number) {
       activeStep = await startStep(job.id, 'analyze_value')
       analysisOutput = await analyze(extracted)
       await completeStep(job.id, activeStep.id, analysisOutput)
-      activeStep = undefined
-      job = await getJob(job.id)
-    }
-
-    let accountOutput = succeededOutput(job, 'score_accounts')
-    if (!accountOutput) {
-      activeStep = await startStep(job.id, 'score_accounts')
-      const parsed = analysisOutput as {
-        analysis: ContentResponseAnalysis
-      }
-      const accounts = (extracted.accounts ?? []) as Array<{ id: string }>
-      const supplied = new Set(parsed.analysis.account_scores.map(score => score.publish_account_id))
-      if (accounts.some(account => !supplied.has(account.id)) || supplied.size !== accounts.length) {
-        throw new Error('AI 账号评分未覆盖全部启用账号')
-      }
-      accountOutput = { account_scores: parsed.analysis.account_scores }
-      await completeStep(job.id, activeStep.id, accountOutput)
       activeStep = undefined
       job = await getJob(job.id)
     }

@@ -7,6 +7,8 @@ def test_unified_response_router_exposes_required_paths():
     assert "/responses/{item_id}" in paths
     assert "/responses/{item_id}/analyze" in paths
     assert "/responses/{item_id}/decision" in paths
+    assert "/responses/{item_id}/classification" in paths
+    assert "/responses/{item_id}/destination" in paths
     assert "/responses/{item_id}/outputs" in paths
     assert "/responses/{item_id}/events" in paths
     assert "/responses/{item_id}/analyses" in paths

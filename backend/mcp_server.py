@@ -10,10 +10,10 @@ import uuid
 from dataclasses import asdict
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from typing import Optional
-from mcp.server.fastmcp import FastMCP
+from typing import Literal, Optional
+from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
-from sqlalchemy import select, desc, delete as sa_delete
+from sqlalchemy import select, desc, delete as sa_delete, func
 from database import SessionLocal
 from web_search import WebSearchProviderError, search_web as run_web_search
 from web_fetch import WebFetchProviderError, fetch_web_url as run_web_fetch
@@ -34,7 +34,6 @@ mcp = FastMCP(
         allowed_hosts=["api:8000", "localhost:8000", "127.0.0.1:8000"],
     ),
 )
-
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -154,6 +153,115 @@ async def get_content_directions() -> list[dict]:
             })
 
     return result
+
+
+@mcp.tool()
+async def get_github_daily_trending() -> dict:
+    """Return the latest GitHub daily Trending snapshot and rank changes.
+
+    This tool is intentionally argument-free: the Agent must use the daily
+    snapshot already collected by WeMedia Studio and cannot switch to weekly
+    data or invent a different source.
+    """
+    from models import GithubTrendingRepo
+
+    empty = {
+        "period": "daily",
+        "trending_date": "",
+        "previous_trending_date": "",
+        "source_url": "https://github.com/trending?since=daily",
+        "items": [],
+        "summary": {
+            "count": 0,
+            "new_count": None,
+            "top_languages": [],
+        },
+    }
+
+    async with SessionLocal() as db:
+        latest = await db.scalar(
+            select(func.max(GithubTrendingRepo.trending_date)).where(
+                GithubTrendingRepo.period == "daily"
+            )
+        )
+        if not latest:
+            return empty
+
+        previous = await db.scalar(
+            select(func.max(GithubTrendingRepo.trending_date)).where(
+                GithubTrendingRepo.period == "daily",
+                GithubTrendingRepo.trending_date < latest,
+            )
+        )
+        rows = (
+            await db.execute(
+                select(GithubTrendingRepo)
+                .where(
+                    GithubTrendingRepo.period == "daily",
+                    GithubTrendingRepo.trending_date == latest,
+                )
+                .order_by(GithubTrendingRepo.position)
+            )
+        ).scalars().all()
+        previous_rows = []
+        if previous:
+            previous_rows = (
+                await db.execute(
+                    select(GithubTrendingRepo).where(
+                        GithubTrendingRepo.period == "daily",
+                        GithubTrendingRepo.trending_date == previous,
+                    )
+                )
+            ).scalars().all()
+
+    previous_positions = {
+        f"{row.owner}/{row.repo}": row.position for row in previous_rows
+    }
+    language_counts: dict[str, int] = {}
+    items: list[dict] = []
+    for row in rows:
+        full_name = f"{row.owner}/{row.repo}"
+        previous_rank = previous_positions.get(full_name)
+        language = row.language or ""
+        if language:
+            language_counts[language] = language_counts.get(language, 0) + 1
+        items.append({
+            "rank": row.position,
+            "full_name": full_name,
+            "owner": row.owner,
+            "repo": row.repo,
+            "description": row.description or "",
+            "language": language,
+            "stars": row.stars,
+            "stars_gained": row.stars_gained,
+            "forks": row.forks,
+            "url": row.url or f"https://github.com/{full_name}",
+            "previous_rank": previous_rank,
+            "rank_delta": (
+                previous_rank - row.position
+                if previous_rank is not None else None
+            ),
+            "is_new": (previous_rank is None if previous else None),
+        })
+
+    top_languages = sorted(
+        language_counts.items(), key=lambda item: (-item[1], item[0])
+    )[:5]
+    return {
+        "period": "daily",
+        "trending_date": latest,
+        "previous_trending_date": previous or "",
+        "source_url": "https://github.com/trending?since=daily",
+        "items": items,
+        "summary": {
+            "count": len(items),
+            "new_count": sum(1 for item in items if item["is_new"] is True) if previous else None,
+            "top_languages": [
+                {"language": language, "count": count}
+                for language, count in top_languages
+            ],
+        },
+    }
 
 
 @mcp.tool()
@@ -373,48 +481,34 @@ async def get_recent_content_usage(
 
 
 @mcp.tool()
-async def save_daily_creation_outputs(
-    execution_id: int,
-    run_id: int,
-    idempotency_key: str,
-    posts: list[dict],
-    self_validation: dict,
-) -> dict:
-    """Atomically persist an Agent's final validated daily outputs.
-
-    Use this only for the daily creation execution and run IDs supplied in the
-    task objective. Every source asset and compared usage ID must come from a
-    successful tool result in this Agent execution. A successful response with
-    real output IDs is the only completion evidence; prose is not completion.
-    """
-    from daily_creation_service import persist_daily_creation_output_batch
-
-    async with SessionLocal() as db:
-        return await persist_daily_creation_output_batch(
-            db,
-            execution_id=execution_id,
-            run_id=run_id,
-            idempotency_key=idempotency_key,
-            posts=posts,
-            self_validation=self_validation,
-        )
-
-
-@mcp.tool()
 async def record_content_usage(
-    run_id: int,
     asset_id: int,
-    output_kind: str,
+    output_kind: Literal["draft"],
     output_id: int,
     topic: str,
     angle: str,
     excerpt: str,
-    reuse_decision: str,
+    reuse_decision: Literal["fresh", "reuse_allowed"],
+    ctx: Context,
     reuse_explanation: str = "",
     account_id: str | None = None,
 ) -> dict:
-    """Record evidence for an output that has already been persisted."""
+    """Record persisted draft usage.
+
+    ``output_kind`` must be ``draft`` and ``reuse_decision`` must be either
+    ``fresh`` or ``reuse_allowed``.
+    """
     from daily_creation_service import record_content_usage as record_usage
+
+    request = getattr(ctx.request_context, "request", None)
+    headers = getattr(request, "headers", {})
+    raw_run_id = headers.get("x-wms-daily-creation-run-id")
+    try:
+        run_id = int(raw_run_id)
+    except (TypeError, ValueError) as error:
+        raise ValueError("scheduled Agent run identity is missing") from error
+    if run_id <= 0:
+        raise ValueError("scheduled Agent run identity is invalid")
 
     async with SessionLocal() as db:
         async with db.begin():
@@ -1110,7 +1204,7 @@ async def save_draft(
     topic_id: str = "agent",
     status: str = "drafting",
     pipeline_task_id: Optional[int] = None,
-    draft_type: str = "article",
+    draft_type: Literal["article", "script", "x"] = "article",
 ) -> dict:
     """
     Save a new article draft to WeMedia Studio's draft box.
@@ -1123,7 +1217,7 @@ async def save_draft(
         status: Initial status — "drafting" (default) or "review".
         pipeline_task_id: Optional pipeline_task_id from the task body (links this
                           draft to its pipeline run record for timeline tracking).
-        draft_type: "article"（默认）或 "script"。
+        draft_type: "article"（默认）、"script" 或 "x"。
 
     Returns: id, title, status, created_at of the newly created draft.
     """
@@ -1155,6 +1249,7 @@ async def save_draft(
         "id": obj.id,
         "title": obj.title,
         "status": obj.status,
+        "draft_type": obj.draft_type,
         "created_at": _fmt_dt(obj.created_at),
     }
 
@@ -1226,216 +1321,3 @@ async def get_account_profile(pub_id: str) -> dict:
             "style_rules": acc.style_rules or [],
             "is_active": acc.is_active,
         }
-
-
-# ── 每日内容计划（daily_plan 总编任务专用） ────────────────────────────────────
-
-@mcp.tool()
-async def get_topic_candidates(
-    sources: Optional[list[str]] = None,
-    limit_per_source: int = 10,
-) -> list[dict]:
-    """
-    统一选题候选池：近 24h 各信息源高热内容 + 写作方案。
-
-    供每日计划总编（daily_plan 任务）调用。统一结构：
-    {source, title, summary, url, heat, published_at}
-    source ∈ x / github_release / paper / kr / juejin / v2ex / reddit /
-             producthunt / youtube / wechat / writing_plan
-    sources 传子集可只拉部分源；limit_per_source 每源上限（X 固定 50，写作方案固定 20）。
-    """
-    from models import (XPost, GithubRelease, Paper, KrArticle, JuejinArticle,
-                        V2exTopic, RedditPost, ProductHuntPost, YoutubeVideo,
-                        WechatArticle, WritingPlan)
-
-    since = datetime.now(timezone.utc) - timedelta(hours=24)
-    lim = max(1, min(int(limit_per_source), 50))
-    want = set(sources) if sources else None
-
-    def _on(key: str) -> bool:
-        return want is None or key in want
-
-    def _c(source, title, summary, url, heat, published_at) -> dict:
-        return {"source": source, "title": (title or "")[:120],
-                "summary": (summary or "")[:300], "url": url or "",
-                "heat": int(heat or 0), "published_at": _fmt_dt(published_at)}
-
-    out: list[dict] = []
-    async with SessionLocal() as db:
-        if _on("x"):
-            rows = (await db.execute(
-                select(XPost)
-                .where(XPost.published_at >= since, XPost.is_reply == False)  # noqa: E712
-                .order_by(desc(XPost.likes + XPost.reposts)).limit(50)
-            )).scalars().all()
-            out += [_c("x", f"@{p.username}: {p.content[:80]}", p.content, p.url,
-                       p.likes + p.reposts, p.published_at) for p in rows]
-
-        if _on("github_release"):
-            rows = (await db.execute(
-                select(GithubRelease).where(GithubRelease.published_at >= since)
-                .order_by(desc(GithubRelease.published_at)).limit(lim)
-            )).scalars().all()
-            out += [_c("github_release", f"{r.repo_id} {r.tag_name}", r.body,
-                       r.html_url, 0, r.published_at) for r in rows]
-
-        if _on("paper"):
-            rows = (await db.execute(
-                select(Paper).where(Paper.collected_at >= since)
-                .order_by(desc(Paper.collected_at)).limit(lim)
-            )).scalars().all()
-            out += [_c("paper", p.title_cn or p.title, p.abstract_cn or p.abstract,
-                       p.arxiv_url, 0, p.submitted_at) for p in rows]
-
-        if _on("kr"):
-            rows = (await db.execute(
-                select(KrArticle).where(KrArticle.published_at >= since)
-                .order_by(desc(KrArticle.stat_read)).limit(lim)
-            )).scalars().all()
-            out += [_c("kr", a.title, a.summary, a.url, a.stat_read, a.published_at)
-                    for a in rows]
-
-        if _on("juejin"):
-            rows = (await db.execute(
-                select(JuejinArticle).where(JuejinArticle.published_at >= since)
-                .order_by(desc(JuejinArticle.view_count)).limit(lim)
-            )).scalars().all()
-            out += [_c("juejin", a.title, a.brief, a.url, a.view_count, a.published_at)
-                    for a in rows]
-
-        if _on("v2ex"):
-            rows = (await db.execute(
-                select(V2exTopic).where(V2exTopic.published_at >= since)
-                .order_by(desc(V2exTopic.replies)).limit(lim)
-            )).scalars().all()
-            out += [_c("v2ex", t.title, t.content, t.url, t.replies, t.published_at)
-                    for t in rows]
-
-        if _on("reddit"):
-            rows = (await db.execute(
-                select(RedditPost).where(RedditPost.published_at >= since)
-                .order_by(desc(RedditPost.score)).limit(lim)
-            )).scalars().all()
-            out += [_c("reddit", p.title, p.body, p.url, p.score, p.published_at)
-                    for p in rows]
-
-        if _on("producthunt"):
-            rows = (await db.execute(
-                select(ProductHuntPost).where(ProductHuntPost.published_at >= since)
-                .order_by(desc(ProductHuntPost.votes)).limit(lim)
-            )).scalars().all()
-            out += [_c("producthunt", f"{p.title} — {p.tagline}", p.description,
-                       p.url, p.votes, p.published_at) for p in rows]
-
-        if _on("youtube"):
-            rows = (await db.execute(
-                select(YoutubeVideo).where(YoutubeVideo.published_at >= since)
-                .order_by(desc(YoutubeVideo.views)).limit(lim)
-            )).scalars().all()
-            out += [_c("youtube", f"[{v.channel_name}] {v.title}", v.description,
-                       v.url, v.views, v.published_at) for v in rows]
-
-        if _on("wechat"):
-            rows = (await db.execute(
-                select(WechatArticle).where(WechatArticle.published_at >= since)
-                .order_by(desc(WechatArticle.published_at)).limit(lim)
-            )).scalars().all()
-            out += [_c("wechat", f"[{a.account_name}] {a.title}", a.digest, a.url, 0, a.published_at)
-                    for a in rows]
-
-        if _on("writing_plan"):
-            rows = (await db.execute(
-                select(WritingPlan).where(WritingPlan.status == "active")
-                .order_by(WritingPlan.priority).limit(20)
-            )).scalars().all()
-            out += [_c("writing_plan", w.title, w.strategy, "", 0, w.updated_at)
-                    for w in rows]
-
-    return out
-
-
-_PLAN_CONTENT_TYPES = {"long", "short", "story", "share"}
-
-
-@mcp.tool()
-async def save_daily_plan(plan_id: int, items: list[dict], note: str = "") -> dict:
-    """
-    写回今日计划（daily_plan 总编任务的产出）。重复调用整体替换（幂等），成功后计划置 ready。
-
-    items 每条：{account_id, title, angle, reason, content_type, sources, group_key, is_primary}
-    - content_type ∈ long|short|story|share
-    - 撞题公用：同 group_key 的 items 共享一稿，必须同 content_type，且恰好一条 is_primary=true
-    - 无 group_key 的 item 各自独立（is_primary 自动置 true）
-    校验失败返回 {"error": "..."}，不落任何数据。
-    """
-    from models import DailyPlan, DailyPlanItem, PublishAccount
-
-    async with SessionLocal() as db:
-        plan = await db.get(DailyPlan, plan_id)
-        if plan is None:
-            return {"error": f"daily plan {plan_id} not found"}
-
-        acc_ids = set((await db.execute(select(PublishAccount.id))).scalars().all())
-
-        groups: dict[str, list[dict]] = {}
-        for i, it in enumerate(items):
-            if not (it.get("title") or "").strip():
-                return {"error": f"items[{i}]: title 不能为空"}
-            if it.get("account_id") not in acc_ids:
-                return {"error": f"items[{i}]: account_id '{it.get('account_id')}' 不存在"}
-            ct = it.get("content_type", "long")
-            if ct not in _PLAN_CONTENT_TYPES:
-                return {"error": f"items[{i}]: content_type '{ct}' 非法（long|short|story|share）"}
-            gk = (it.get("group_key") or "").strip()
-            if gk:
-                groups.setdefault(gk, []).append(it)
-
-        for gk, members in groups.items():
-            if len({m.get("content_type", "long") for m in members}) > 1:
-                return {"error": f"group '{gk}' 内 content_type 不一致（同组必须同体裁）"}
-            primaries = [m for m in members if m.get("is_primary")]
-            if len(primaries) != 1:
-                return {"error": f"group '{gk}' 必须恰好一条 is_primary=true（当前 {len(primaries)} 条）"}
-
-        await db.execute(sa_delete(DailyPlanItem).where(DailyPlanItem.plan_id == plan_id))
-        for it in items:
-            gk = (it.get("group_key") or "").strip()
-            db.add(DailyPlanItem(
-                plan_id=plan_id,
-                account_id=it["account_id"],
-                title=it["title"].strip(),
-                angle=(it.get("angle") or "").strip(),
-                reason=(it.get("reason") or "").strip(),
-                content_type=it.get("content_type", "long"),
-                sources=it.get("sources") or [],
-                group_key=gk,
-                is_primary=bool(it.get("is_primary")) if gk else True,
-            ))
-        plan.status = "ready"
-        plan.planner_note = note or ""
-        await db.commit()
-        return {"ok": True, "plan_id": plan_id, "item_count": len(items)}
-
-
-@mcp.tool()
-async def get_recent_outputs(days: int = 7) -> list[dict]:
-    """
-    近 N 天已计划/已产出的标题清单（查重用）。daily_plan 任务书里通常已附，此工具备查。
-    返回 [{type: "plan_item"|"draft", title}]。
-    """
-    from models import ArticleDraft, DailyPlanItem
-
-    cutoff = datetime.now(timezone.utc) - timedelta(days=max(1, min(int(days), 30)))
-    out: list[dict] = []
-    async with SessionLocal() as db:
-        for t in (await db.execute(
-            select(DailyPlanItem.title).where(DailyPlanItem.created_at >= cutoff)
-        )).scalars().all():
-            if t and t.strip():
-                out.append({"type": "plan_item", "title": t})
-        for t in (await db.execute(
-            select(ArticleDraft.title).where(ArticleDraft.created_at >= cutoff)
-        )).scalars().all():
-            if t and t.strip():
-                out.append({"type": "draft", "title": t})
-    return out

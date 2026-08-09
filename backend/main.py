@@ -17,11 +17,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from loguru import logger
 from database import SessionLocal, init_db
+from collection_proxy import apply_collection_proxy
 from digital_human_assets import backfill_digital_human_assets
+from temporary_asset_directory import ensure_temporary_asset_directory
 from job_reconciliation import JobReconciler
 from speech_upload_boundary import SpeechWorkerUploadBoundary
 from storage_paths import UPLOADS_DIR
-from routers import agent_executions, settings, github, x, x_accounts, x_responses, responses, papers, upload, drafts, writing_plans, youtube, producthunt, wechat, v2ex, kr, juejin, studio, publish_accounts, reddit, assets, dashboard, daily_plan, jobs, chat, digital_humans, talking_videos, text_videos
+from routers import agent_executions, settings, github, x, x_accounts, responses, papers, upload, drafts, writing_plans, youtube, producthunt, wechat, v2ex, kr, juejin, studio, publish_accounts, reddit, assets, dashboard, creation_rules, jobs, chat, digital_humans, talking_videos, text_videos
 from x_credential_store import CredentialFileStore
 from routers.x_accounts import reconcile_x_credential_accounts
 import scheduler as job_registry
@@ -41,8 +43,12 @@ scheduler = AsyncIOScheduler(
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
+    from config import get_config
+    cfg = await get_config()
+    apply_collection_proxy(cfg.get("collection_proxy_url", ""))
     async with SessionLocal() as db:
         await backfill_digital_human_assets(db)
+        await ensure_temporary_asset_directory(db)
         await db.commit()
     try:
         async with SessionLocal() as db:
@@ -61,8 +67,6 @@ async def lifespan(app: FastAPI):
     scheduler_started = False
     try:
         if os.getenv("WMS_DISABLE_SCHEDULER") != "1":
-            from config import get_config
-            cfg = await get_config()
             job_registry.register_jobs(scheduler, cfg)
             scheduler.start()
             scheduler_started = True
@@ -116,7 +120,6 @@ app.include_router(settings.router, prefix="/api")
 app.include_router(github.router, prefix="/api")
 app.include_router(x.router, prefix="/api")
 app.include_router(x_accounts.router, prefix="/api")
-app.include_router(x_responses.router, prefix="/api")
 app.include_router(responses.router, prefix="/api")
 app.include_router(papers.router, prefix="/api")
 app.include_router(upload.router, prefix="/api")
@@ -133,7 +136,7 @@ app.include_router(publish_accounts.router, prefix="/api")
 app.include_router(reddit.router, prefix="/api")
 app.include_router(assets.router, prefix="/api")
 app.include_router(dashboard.router, prefix="/api")
-app.include_router(daily_plan.router, prefix="/api")
+app.include_router(creation_rules.router, prefix="/api")
 app.include_router(jobs.router, prefix="/api")
 app.include_router(agent_executions.router, prefix="/api")
 app.include_router(chat.router, prefix="/api")

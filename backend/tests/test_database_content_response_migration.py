@@ -6,7 +6,7 @@ from sqlalchemy import inspect, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 
-def _run_migration(tmp_path, *, migrate: bool):
+def _run_migration(postgres_database_url, *, migrate: bool):
     import models
     from database import (
         Base,
@@ -14,9 +14,7 @@ def _run_migration(tmp_path, *, migrate: bool):
         retire_x_response_decision_schema,
     )
 
-    engine = create_async_engine(
-        f"sqlite+aiosqlite:///{tmp_path / 'content-response.db'}",
-    )
+    engine = create_async_engine(postgres_database_url)
     sessions = async_sessionmaker(engine, expire_on_commit=False)
 
     async def run():
@@ -98,20 +96,67 @@ def _run_migration(tmp_path, *, migrate: bool):
     return asyncio.run(run())
 
 
-def test_legacy_x_decisions_migrate_then_table_is_retired(tmp_path):
-    error, tables, item, run = _run_migration(tmp_path, migrate=True)
+def test_legacy_x_decisions_migrate_then_table_is_retired(
+    postgres_database_url,
+):
+    error, tables, item, run = _run_migration(
+        postgres_database_url,
+        migrate=True,
+    )
 
     assert error is None
     assert "x_response_decisions" not in tables
-    assert item["decision_status"] == "adopted"
+    assert item["decision_status"] == "worth_writing"
     assert run["content_value_score"] == 82
     assert run["source_snapshot"]["x_response"]["confidence"] == 0.88
 
 
-def test_legacy_x_table_is_preserved_when_parity_check_fails(tmp_path):
-    error, tables, item, run = _run_migration(tmp_path, migrate=False)
+def test_legacy_x_table_is_preserved_when_parity_check_fails(
+    postgres_database_url,
+):
+    error, tables, item, run = _run_migration(
+        postgres_database_url,
+        migrate=False,
+    )
 
     assert "missing unified item" in error
     assert "x_response_decisions" in tables
     assert item is None
     assert run is None
+
+
+def test_intelligence_station_migration_maps_legacy_decision_statuses(
+    postgres_database_url,
+):
+    import models
+    from database import Base, migrate_intelligence_station_schema
+
+    engine = create_async_engine(postgres_database_url)
+
+    async def run():
+        async with engine.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all)
+            await connection.execute(models.ContentResponseItem.__table__.insert(), [
+                {"source_type": "x_post", "source_id": "pending", "decision_status": "pending"},
+                {"source_type": "x_post", "source_id": "adopted", "decision_status": "adopted"},
+                {"source_type": "x_post", "source_id": "rejected", "decision_status": "rejected"},
+                {"source_type": "x_post", "source_id": "later", "decision_status": "later"},
+            ])
+            await migrate_intelligence_station_schema(connection)
+            await migrate_intelligence_station_schema(connection)
+
+        async with engine.connect() as connection:
+            rows = (await connection.execute(
+                models.ContentResponseItem.__table__.select().order_by(
+                    models.ContentResponseItem.__table__.c.source_id,
+                )
+            )).mappings().all()
+        await engine.dispose()
+        return {row["source_id"]: row["decision_status"] for row in rows}
+
+    assert asyncio.run(run()) == {
+        "adopted": "worth_writing",
+        "later": "pending",
+        "pending": "pending",
+        "rejected": "not_processed",
+    }

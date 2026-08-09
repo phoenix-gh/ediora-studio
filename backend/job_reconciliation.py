@@ -1,6 +1,6 @@
 """Reconcile durable content jobs after worker interruption.
 
-Postgres/SQLite job rows are authoritative. Redis only transports job IDs, and
+PostgreSQL job rows are authoritative. Redis only transports job IDs, and
 the worker/reconciler shared lease prevents paid work from racing recovery.
 """
 
@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 from copy import deepcopy
 from dataclasses import dataclass
+from datetime import datetime, timezone
 import os
 from typing import Any
 from uuid import uuid4
@@ -27,7 +28,13 @@ from content_jobs import (
 from database import SessionLocal
 from job_queue import RedisJobQueue
 from log_redaction import redact_secret_text
-from models import ContentJob, ContentJobStep, TextVideoProject
+from models import (
+    ContentJob,
+    ContentJobStep,
+    DigitalHuman,
+    TalkingVideoRender,
+    TextVideoProject,
+)
 from text_video_jobs import recoverable_speech_asset_result
 from text_video_master import (
     recoverable_master_alignment_project,
@@ -387,6 +394,44 @@ async def _recover_failed_assembly(
     )
 
 
+async def _superseded_digital_human_job(
+    db: AsyncSession,
+    job: ContentJob,
+) -> bool:
+    input_data = job.input_data if isinstance(job.input_data, dict) else {}
+    if job.flow == "digital_human_setup":
+        role_id = input_data.get("digital_human_id")
+        if not isinstance(role_id, int):
+            return False
+        role = await db.get(DigitalHuman, role_id)
+        return role is None or role.setup_job_id != job.id
+    if job.flow == "digital_human_render":
+        render_id = input_data.get("render_id")
+        if not isinstance(render_id, int):
+            return False
+        render = await db.get(TalkingVideoRender, render_id)
+        return render is None or render.job_id != job.id
+    return False
+
+
+async def _cancel_superseded_job(
+    db: AsyncSession,
+    job: ContentJob,
+    ensure_fence,
+) -> _Decision:
+    await ensure_fence()
+    job.status = "cancelled"
+    job.completed_at = datetime.now(timezone.utc)
+    await add_locked_job_event(
+        db,
+        job.id,
+        "job_reconciled",
+        payload={"action": "superseded_cancelled"},
+    )
+    await db.commit()
+    return _Decision()
+
+
 async def _decide_locked(
     db: AsyncSession,
     job: ContentJob,
@@ -394,6 +439,12 @@ async def _decide_locked(
 ) -> _Decision:
     if job.status in TERMINAL_STATUSES:
         return _Decision()
+    if await _superseded_digital_human_job(db, job):
+        return await _cancel_superseded_job(
+            db,
+            job,
+            ensure_fence,
+        )
     step = await _latest_step_locked(db, job.id)
     if (
         job.flow == "daily_creation"

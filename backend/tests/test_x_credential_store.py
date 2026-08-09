@@ -7,6 +7,25 @@ from models import XCredentialAccount
 from x_credential_store import CredentialFileError, CredentialFileStore, CredentialPair
 
 
+def test_session_vault_round_trips_without_exposing_credentials(monkeypatch):
+    from cryptography.fernet import Fernet
+    from x_credential_store import CredentialSessionVault
+
+    monkeypatch.setenv("WMS_X_SESSION_KEY", Fernet.generate_key().decode())
+    pair = CredentialPair("auth-token-secret", "csrf-token-secret")
+
+    ciphertext = CredentialSessionVault().encrypt(pair)
+
+    assert "auth-token-secret" not in ciphertext
+    assert "csrf-token-secret" not in ciphertext
+    restored = CredentialSessionVault().decrypt(ciphertext)
+    assert (restored.auth_token, restored.ct0) == (pair.auth_token, pair.ct0)
+
+
+def test_x_account_model_has_encrypted_session_storage():
+    assert "session_ciphertext" in XCredentialAccount.__table__.columns
+
+
 def test_allocate_slot_skips_database_and_external_files(tmp_path):
     (tmp_path / "x_1.json").write_text('{"auth_token":"external","ct0":"csrf"}')
     store = CredentialFileStore(tmp_path)

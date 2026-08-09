@@ -3,10 +3,11 @@ import {
   DEFAULT_API_BASE,
   assertAllowedApiBase,
   fetchDraftCollection,
+  publishDraft,
 } from './draft-api.js'
 
-const LAST_EXECUTION_KEY = 'lastExecution'
 const DRAFTS_REQUEST_TYPE = 'SHUCE_DRAFTS_REQUEST'
+const DRAFT_PUBLISH_TYPE = 'SHUCE_DRAFT_PUBLISH'
 const DRAFTS_RESULT_TYPE = 'SHUCE_DRAFTS_RESULT'
 const CONFIG_GET_TYPE = 'SHUCE_DRAFTS_CONFIG_GET'
 const CONFIG_SET_TYPE = 'SHUCE_DRAFTS_CONFIG_SET'
@@ -15,14 +16,9 @@ const CONFIG_RESET_TYPE = 'SHUCE_DRAFTS_CONFIG_RESET'
 const SAFE_ERROR_MESSAGES = Object.freeze({
   DRAFT_API_NOT_CONFIGURED: 'API 地址无效',
   DRAFT_API_HOST_NOT_ALLOWED: '当前扩展只允许本机 8000 端口 API',
+  DRAFT_API_INVALID_REQUEST: '发布请求无效',
   DRAFT_API_UNAVAILABLE: '草稿 API 暂不可用，请检查服务是否运行',
   DRAFT_API_INVALID_RESPONSE: '草稿 API 返回格式无效',
-})
-
-chrome.runtime.onInstalled.addListener(() => {
-  chrome.storage.local.set({
-    [LAST_EXECUTION_KEY]: null,
-  })
 })
 
 function requestIdOf(message) {
@@ -55,6 +51,14 @@ async function handleDraftsRequest(message) {
   return fetchDraftCollection(apiBase)
 }
 
+async function handleDraftPublishRequest(message) {
+  const configured = await readConfiguredApiBase()
+  const apiBase = typeof message.apiBase === 'string' && message.apiBase.trim()
+    ? message.apiBase
+    : configured
+  return publishDraft(apiBase, message.draftId)
+}
+
 async function handleDraftMessage(message) {
   const requestId = requestIdOf(message)
 
@@ -65,6 +69,16 @@ async function handleDraftMessage(message) {
       requestId,
       ok: true,
       drafts,
+    }
+  }
+
+  if (message.type === DRAFT_PUBLISH_TYPE) {
+    const draft = await handleDraftPublishRequest(message)
+    return {
+      type: DRAFTS_RESULT_TYPE,
+      requestId,
+      ok: true,
+      draft,
     }
   }
 
@@ -97,21 +111,9 @@ async function handleDraftMessage(message) {
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (message?.type === 'SHUCE_EXECUTION_RECORDED') {
-    const record = {
-      requestId: typeof message.requestId === 'string' ? message.requestId : '',
-      ok: message.ok === true,
-      action: typeof message.action === 'string' ? message.action : '',
-      errorCode: typeof message.errorCode === 'string' ? message.errorCode : '',
-      finishedAt: new Date().toISOString(),
-    }
-    chrome.storage.local.set({ [LAST_EXECUTION_KEY]: record })
-    sendResponse({ ok: true })
-    return true
-  }
-
   const draftMessageTypes = new Set([
     DRAFTS_REQUEST_TYPE,
+    DRAFT_PUBLISH_TYPE,
     CONFIG_GET_TYPE,
     CONFIG_SET_TYPE,
     CONFIG_RESET_TYPE,

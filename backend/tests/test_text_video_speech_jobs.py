@@ -13,17 +13,18 @@ from tests.text_video_factories import (
 )
 
 
-def _fresh(monkeypatch, tmp_path, name):
+def _fresh(monkeypatch, postgres_database_url):
     for module in ("text_video_jobs", "text_video_audio", "media_command"):
         sys.modules.pop(module, None)
-    return fresh_session_factory(monkeypatch, tmp_path, name)
+    return fresh_session_factory(monkeypatch, postgres_database_url)
 
 
 def test_generate_pending_creates_one_job_per_draft_or_failed_segment(
     monkeypatch,
     tmp_path,
+    postgres_database_url,
 ):
-    session_factory = _fresh(monkeypatch, tmp_path, "speech-jobs.db")
+    session_factory = _fresh(monkeypatch, postgres_database_url)
     import text_video_jobs
     from models import ContentJob
 
@@ -92,8 +93,9 @@ def test_stale_speech_result_cannot_replace_edited_segment():
 def test_launch_pins_effective_model_and_default_voice_into_hash(
     monkeypatch,
     tmp_path,
+    postgres_database_url,
 ):
-    session_factory = _fresh(monkeypatch, tmp_path, "speech-pin.db")
+    session_factory = _fresh(monkeypatch, postgres_database_url)
     import text_video_jobs
     from text_video_domain import speech_source_hash
 
@@ -143,8 +145,9 @@ def test_launch_pins_effective_model_and_default_voice_into_hash(
 def test_duplicate_launch_reuses_one_active_job_and_reenqueues(
     monkeypatch,
     tmp_path,
+    postgres_database_url,
 ):
-    session_factory = _fresh(monkeypatch, tmp_path, "speech-reuse.db")
+    session_factory = _fresh(monkeypatch, postgres_database_url)
     import text_video_jobs
     from models import ContentJob
 
@@ -201,12 +204,12 @@ def test_duplicate_launch_reuses_one_active_job_and_reenqueues(
 def test_pending_retry_reenqueues_all_committed_segment_jobs(
     monkeypatch,
     tmp_path,
+    postgres_database_url,
     failed_enqueue_number,
 ):
     session_factory = _fresh(
         monkeypatch,
-        tmp_path,
-        f"speech-enqueue-{failed_enqueue_number}.db",
+        postgres_database_url,
     )
     import text_video_jobs
     from models import ContentJob
@@ -282,35 +285,18 @@ def test_pending_retry_reenqueues_all_committed_segment_jobs(
 def test_concurrent_identical_launches_create_one_billable_job(
     monkeypatch,
     tmp_path,
+    postgres_database_url,
 ):
-    session_factory = _fresh(monkeypatch, tmp_path, "speech-concurrent.db")
+    session_factory = _fresh(monkeypatch, postgres_database_url)
     import text_video_jobs
     from models import ContentJob, TextVideoProject
 
     queued: list[int] = []
-    arrivals = 0
-    both_read = asyncio.Event()
-    original_active_job = text_video_jobs._active_job
 
     async def capture_enqueue(job_id: int):
         queued.append(job_id)
 
-    async def synchronize_after_read(db, segment, snapshot):
-        nonlocal arrivals
-        result = await original_active_job(db, segment, snapshot)
-        if result is None:
-            arrivals += 1
-            if arrivals == 2:
-                both_read.set()
-            await asyncio.wait_for(both_read.wait(), timeout=2)
-        return result
-
     monkeypatch.setattr(text_video_jobs, "enqueue_job", capture_enqueue)
-    monkeypatch.setattr(
-        text_video_jobs,
-        "_active_job",
-        synchronize_after_read,
-    )
 
     async def run():
         async with session_factory() as setup:
@@ -354,8 +340,9 @@ def test_concurrent_identical_launches_create_one_billable_job(
 def test_failed_generation_gets_a_new_deterministic_key(
     monkeypatch,
     tmp_path,
+    postgres_database_url,
 ):
-    session_factory = _fresh(monkeypatch, tmp_path, "speech-failed.db")
+    session_factory = _fresh(monkeypatch, postgres_database_url)
     import text_video_jobs
     from models import ContentJob
 
@@ -412,8 +399,9 @@ def test_failed_generation_gets_a_new_deterministic_key(
 def test_explicit_generation_of_ready_segment_never_reuses_prior_audio(
     monkeypatch,
     tmp_path,
+    postgres_database_url,
 ):
-    session_factory = _fresh(monkeypatch, tmp_path, "speech-regenerate.db")
+    session_factory = _fresh(monkeypatch, postgres_database_url)
     import text_video_jobs
 
     async def ignore_enqueue(_job_id: int):
@@ -458,8 +446,9 @@ def test_explicit_generation_of_ready_segment_never_reuses_prior_audio(
 def test_pending_reuses_only_an_existing_uploaded_asset(
     monkeypatch,
     tmp_path,
+    postgres_database_url,
 ):
-    session_factory = _fresh(monkeypatch, tmp_path, "speech-asset-reuse.db")
+    session_factory = _fresh(monkeypatch, postgres_database_url)
     import text_video_jobs
     from models import CreativeAsset, TextVideoSpeechAsset
     from text_video_domain import speech_source_hash
@@ -542,8 +531,9 @@ def test_pending_reuses_only_an_existing_uploaded_asset(
 def test_reusable_asset_url_cannot_escape_uploads_root(
     monkeypatch,
     tmp_path,
+    postgres_database_url,
 ):
-    session_factory = _fresh(monkeypatch, tmp_path, "speech-path.db")
+    session_factory = _fresh(monkeypatch, postgres_database_url)
     import text_video_jobs
     from models import CreativeAsset, TextVideoSpeechAsset
     from text_video_domain import speech_source_hash

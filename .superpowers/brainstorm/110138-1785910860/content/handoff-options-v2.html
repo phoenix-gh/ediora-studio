@@ -1,0 +1,43 @@
+<h2>内容系统承接 · 对话框版</h2>
+<p class="subtitle">保留轻量确认，但统一使用居中的标准对话框，不引入抽屉式交互。</p>
+
+<div class="mockup">
+  <div class="mockup-header">情报详情 · 右侧 AI 评价卡</div>
+  <div class="mockup-body" style="display:grid;grid-template-columns:1fr 250px;gap:10px;background:#f8fafc;min-height:330px;padding:13px">
+    <div style="background:white;border:1px solid #e5e7eb;border-radius:8px;padding:13px">
+      <div style="font-size:11px;color:#64748b">原文主区</div>
+      <h3 style="margin-top:12px">从 X 到 Y 的实践方法</h3>
+      <div style="height:7px;background:#e2e8f0;border-radius:4px;margin-top:16px;width:93%"></div><div style="height:7px;background:#e2e8f0;border-radius:4px;margin-top:8px;width:85%"></div><div style="height:7px;background:#e2e8f0;border-radius:4px;margin-top:8px;width:75%"></div>
+    </div>
+    <div style="background:#eef2ff;border:1px solid #c7d2fe;border-radius:8px;padding:12px">
+      <div style="font-size:11px;color:#4f46e5">AI 评价 · 86 分</div>
+      <div style="font-weight:700;margin-top:10px">值得写入内容系统</div>
+      <div style="font-size:11px;line-height:1.8;margin-top:10px">类型：工具 / 实践<br>写作空间：高<br>风险：版本需核对</div>
+      <button class="mock-button" style="margin-top:15px">写入内容系统</button>
+    </div>
+    <div style="position:absolute;inset:0;background:rgba(15,23,42,.28);display:flex;align-items:center;justify-content:center">
+      <div style="width:360px;background:white;border-radius:10px;box-shadow:0 18px 45px rgba(15,23,42,.25);padding:16px">
+        <div style="font-size:14px;font-weight:700">写入内容系统</div>
+        <div style="font-size:11px;color:#64748b;margin-top:4px">将为这条情报创建一篇文章草稿</div>
+        <div style="margin-top:14px;font-size:11px;line-height:1.9"><b>标题</b><br><span style="display:block;background:#f1f5f9;border-radius:5px;padding:5px">从 X 到 Y 的实践方法</span><br><b>将带入</b><br>AI 摘要、原文链接、证据清单和分类标签<br><br><b>状态</b><br>草稿，不自动发布</div>
+        <div style="display:flex;justify-content:flex-end;gap:7px;margin-top:15px"><button class="mock-button" style="background:#e2e8f0;color:#334155">取消</button><button class="mock-button">确认写入</button></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="split" style="margin-top:18px">
+  <div class="mockup">
+    <div class="mockup-header">“值得写”对话框</div>
+    <div class="mockup-body" style="padding:12px;font-size:11px;line-height:1.8;min-height:145px">目标：创建文章草稿<br>带入：标题、AI 摘要、原文链接、证据、分类标签<br>不执行：自动写完整文章、自动发布</div>
+  </div>
+  <div class="mockup">
+    <div class="mockup-header">“创作资产”对话框</div>
+    <div class="mockup-body" style="padding:12px;font-size:11px;line-height:1.8;min-height:145px">目标：保存文章型创作资产<br>带入：原文、摘要、证据、来源、分类标签<br>不执行：创建文章草稿、自动发布</div>
+  </div>
+</div>
+
+<div class="section" style="margin-top:18px">
+  <h3>交互约束</h3>
+  <p>对话框确认后才写入；关闭或取消不改变分类。创建成功后显示已写入的草稿/资产链接，情报本身保留原文与 AI 评价。</p>
+</div>

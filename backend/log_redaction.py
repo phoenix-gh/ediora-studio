@@ -20,6 +20,11 @@ def redact_secret_text(value: str) -> str:
     return TELEGRAM_BOT_URL.sub(r"\1***", redacted)
 
 
+def redact_log_value(value):
+    """Redact known secrets recursively before exposing a persisted log value."""
+    return _redact_log_value(value)
+
+
 def _redact_log_value(
     value,
     *,

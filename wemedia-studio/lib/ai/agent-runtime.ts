@@ -11,6 +11,7 @@ import {
 } from './skill-run'
 import type {
   AgentApprovalPolicy,
+  AgentModelMessageEvent,
   AgentSkillMode,
   AgentStepCheckpoint,
   AgentToolAudit,
@@ -43,8 +44,11 @@ export type OpenAgentRuntimeOptions = {
   restoredSkillName?: string
   automaticSelection?: boolean
   draftId?: number
+  dailyCreationRunId?: number
+  allowedToolNames?: readonly string[]
   beforeToolExecute?: (event: AgentToolAudit) => Promise<AgentToolDecision>
   onToolAudit?: (event: AgentToolAudit) => void | Promise<void>
+  onMessage?: (event: AgentModelMessageEvent) => void | Promise<void>
   dependencies?: AgentRuntimeDependencies
 }
 
@@ -61,6 +65,8 @@ export type AgentRunResult = {
   kind: 'completed' | 'approval'
   text: string
   parts: Record<string, unknown>[]
+  finishReason?: string
+  stepCount?: number
   skillRun?: SkillRun
   revisionCount: 0 | 1
   selectedSkill?: { name: string; activation: SkillRunActivation }
@@ -153,6 +159,7 @@ export async function openAgentRuntime(
   const toolOptions = (skillName?: string, restoredSkillName?: string): GlobalAgentToolOptions => ({
     apiBase: options.apiBase,
     draftId: options.draftId,
+    dailyCreationRunId: options.dailyCreationRunId,
     skillName,
     restoredSkillName,
     approvalPolicy: options.approvalPolicy,
@@ -164,6 +171,81 @@ export async function openAgentRuntime(
     !automaticSelection && !selected ? options.restoredSkillName : undefined,
   ))
 
+  const visibleTools = () => {
+    if (!options.allowedToolNames) return registry.tools
+    const allowed = new Set(options.allowedToolNames)
+    return Object.fromEntries(
+      Object.entries(registry.tools).filter(([name]) => allowed.has(name)),
+    ) as ToolSet
+  }
+
+  type GenerateInput = Parameters<typeof generateText>[0]
+
+  const jsonSafe = (value: unknown): unknown => {
+    if (value === undefined) return undefined
+    try {
+      return JSON.parse(JSON.stringify(value))
+    } catch {
+      return String(value)
+    }
+  }
+
+  const modelRequestPayload = (input: GenerateInput): Record<string, unknown> => {
+    const record = input as Record<string, unknown>
+    const tools = record.tools
+    return {
+      system: jsonSafe(record.system),
+      prompt: jsonSafe(record.prompt),
+      instructions: jsonSafe(record.instructions),
+      messages: jsonSafe(record.messages),
+      activeTools: jsonSafe(record.activeTools),
+      toolNames: tools && typeof tools === 'object' ? Object.keys(tools) : [],
+      structuredOutput: record.output !== undefined,
+    }
+  }
+
+  const modelResponsePayload = (result: unknown): Record<string, unknown> => {
+    const record = result as Record<string, unknown>
+    return {
+      text: jsonSafe(record.text),
+      output: jsonSafe(record.output),
+      content: jsonSafe(record.content),
+      reasoning: jsonSafe(record.reasoning),
+      toolCalls: jsonSafe(record.toolCalls),
+      toolResults: jsonSafe(record.toolResults),
+      finishReason: jsonSafe(record.finishReason),
+      usage: jsonSafe(record.usage),
+    }
+  }
+
+  const emitMessage = async (
+    phase: string,
+    direction: AgentModelMessageEvent['direction'],
+    payload: Record<string, unknown>,
+  ) => {
+    try {
+      await options.onMessage?.({
+        phase, direction, payload, occurredAt: new Date().toISOString(),
+      })
+    } catch {
+      // Observability must not turn a successful Agent operation into a failed job.
+    }
+  }
+
+  const generateWithMessageLog = async (input: GenerateInput, phase: string) => {
+    await emitMessage(phase, 'model_request', modelRequestPayload(input))
+    try {
+      const result = await deps.generate(input)
+      await emitMessage(phase, 'model_response', modelResponsePayload(result))
+      return result
+    } catch (error) {
+      await emitMessage(phase, 'model_error', {
+        error: error instanceof Error ? error.message : String(error),
+      })
+      throw error
+    }
+  }
+
   async function prepare(objective: string) {
     if (prepared) return selected
     const enabledSkills = await deps.listEnabledSkills()
@@ -172,11 +254,11 @@ export async function openAgentRuntime(
       userRequest: objective,
       restoredSkillName: options.restoredSkillName,
       decide: async ({ prompt }) => {
-        const decision = await deps.generate({
+        const decision = await generateWithMessageLog({
           model: options.model,
           prompt,
           output: Output.json(),
-        })
+        }, 'skill_selection')
         return decision.output
       },
     })
@@ -193,27 +275,37 @@ export async function openAgentRuntime(
   async function run(request: AgentRunRequest): Promise<AgentRunResult> {
     const active = await prepare(request.objective)
     const adapterRequiredTools = [...new Set(request.requiredTools ?? [])]
-    const unavailableTool = adapterRequiredTools.find(name => !registry.tools[name])
+    const tools = visibleTools()
+    const unavailableTool = adapterRequiredTools.find(name => !tools[name])
     if (unavailableTool) {
       throw new Error(`Required Agent tool is unavailable: ${unavailableTool}`)
     }
     if (!active) {
-      const generated = await deps.generate({
+      const generated = await generateWithMessageLog({
         model: options.model,
+        instructions: `The enabled Skill catalog is available below. Decide yourself whether a Skill is relevant to the task. Call loadSkill only when it helps; otherwise continue without activating a Skill. Skill selection is not a prerequisite for completing the task.\n\n${registry.catalogContext}`,
         messages: request.modelMessages,
-        tools: registry.tools,
+        tools,
         stopWhen: stepCountIs(request.maxSteps),
-      })
+      }, 'execute')
       const parts = executionParts({
         toolResults: generated.toolResults as Array<Record<string, unknown>>,
         content: generated.content as Array<Record<string, unknown>>,
       })
       await request.onStep?.({ phase: 'execute', parts })
-      return { kind: 'completed', text: generated.text, parts, revisionCount: 0 }
+      const selectedAfterExecution = registry.activeContext()
+      return {
+        kind: 'completed', text: generated.text, parts, revisionCount: 0,
+        finishReason: generated.finishReason,
+        stepCount: Array.isArray(generated.steps) ? generated.steps.length : 0,
+        selectedSkill: selectedAfterExecution
+          ? { name: selectedAfterExecution.skill.name, activation: selectedAfterExecution.activation }
+          : undefined,
+      }
     }
 
     const activeReferences = registry.activeContext()?.references ?? []
-    const availablePlanningTools = planningTools(registry.tools)
+    const availablePlanningTools = planningTools(tools)
     const planCatalogs = {
       referencePaths: activeReferences.map(reference => reference.path),
       toolNames: availablePlanningTools.map(tool => tool.name),
@@ -237,14 +329,16 @@ export async function openAgentRuntime(
       references: activeReferences,
       tools: availablePlanningTools,
       plan: async ({ prompt }) => {
-        const planned = await deps.generate({ model: options.model, prompt, output: Output.json() })
+        const planned = await generateWithMessageLog(
+          { model: options.model, prompt, output: Output.json() }, 'plan',
+        )
         let plan = validPlan(planned.output)
         if (!plan) {
-          const repaired = await deps.generate({
+          const repaired = await generateWithMessageLog({
             model: options.model,
             prompt: `${prompt}\n\nRepair the previous Skill plan. Its JSON shape or catalog usage was invalid. Every step id must be a string. requiredReferences may contain only these exact paths: ${JSON.stringify(planCatalogs.referencePaths)}. requiredTools may contain only these exact tool names: ${JSON.stringify(planCatalogs.toolNames)}. Reference loading is represented by requiredReferences, never by inventing a reference-loader tool. Remove unknown fields and return the complete repaired plan.\n\nPrevious JSON:\n${JSON.stringify(planned.output)}`,
             output: Output.json(),
-          })
+          }, 'plan')
           plan = validPlan(repaired.output)
           if (!plan) throw new Error('Invalid Skill plan after repair')
         }
@@ -261,43 +355,49 @@ export async function openAgentRuntime(
       },
       execute: async ({ prompt, requiredTools }) => {
         const activeTools = [...new Set([...requiredTools, ...adapterRequiredTools])]
-        const generated = await deps.generate({
+        const generated = await generateWithMessageLog({
           model: options.model,
           instructions: prompt,
           messages: request.modelMessages,
-          tools: registry.tools,
+          tools,
           activeTools,
           stopWhen: stepCountIs(request.maxSteps),
-        })
+        }, 'execute')
         const parts = executionParts({
           toolResults: generated.toolResults as Array<Record<string, unknown>>,
           content: generated.content as Array<Record<string, unknown>>,
         })
         await request.onStep?.({ phase: 'execute', parts })
-        return { text: generated.text, parts }
+        return {
+          text: generated.text,
+          parts,
+          toolResults: generated.toolResults as unknown[],
+        }
       },
-      validate: async ({ text, run, loadedReferences }) => {
-        const prompt = `Return valid JSON only in exactly this shape: {"passed": boolean, "violations": [{"requirement": string, "evidence": string, "correction": string}]}. A passing result must use an empty violations array. Validate the candidate strictly against every dynamic requirement and verification criterion. Quote concrete candidate evidence for each violation.\n\nRequirements:\n${JSON.stringify(run.outputRequirements)}\n\nVerification criteria:\n${JSON.stringify(run.verificationCriteria)}\n\nLoaded references:\n${JSON.stringify(loadedReferences)}\n\nCandidate:\n${text}`
-        const checked = await deps.generate({ model: options.model, prompt, output: Output.json() })
+      validate: async ({ text, run, loadedReferences, toolResults }) => {
+        const prompt = `Return valid JSON only in exactly this shape: {"passed": boolean, "violations": [{"requirement": string, "evidence": string, "correction": string}]}. A passing result must use an empty violations array. Validate the candidate strictly against every dynamic requirement and verification criterion. Use the actual runtime tool audit and tool results below as evidence; do not claim that a tool result is unavailable when it is present. Quote concrete candidate or tool-result evidence for each violation.\n\nRequirements:\n${JSON.stringify(run.outputRequirements)}\n\nVerification criteria:\n${JSON.stringify(run.verificationCriteria)}\n\nLoaded references:\n${JSON.stringify(loadedReferences)}\n\nTool audit:\n${JSON.stringify(run.toolEvidence)}\n\nTool results:\n${JSON.stringify(toolResults)}\n\nCandidate:\n${text}`
+        const checked = await generateWithMessageLog(
+          { model: options.model, prompt, output: Output.json() }, 'validate',
+        )
         const parsed = skillRunValidationSchema.safeParse(checked.output)
         let validation
         if (parsed.success) validation = parsed.data
         else {
-          const repaired = await deps.generate({
+          const repaired = await generateWithMessageLog({
             model: options.model,
             prompt: `${prompt}\n\nThe previous JSON was invalid. Repair its shape without changing the substantive judgment.\n\nPrevious JSON:\n${JSON.stringify(checked.output)}`,
             output: Output.json(),
-          })
+          }, 'validate')
           validation = skillRunValidationSchema.parse(repaired.output)
         }
         await request.onStep?.({ phase: 'validate', detail: validation })
         return validation
       },
-      revise: async ({ text, run, loadedReferences, violations }) => {
-        const revised = await deps.generate({
+      revise: async ({ text, run, loadedReferences, toolResults, violations }) => {
+        const revised = await generateWithMessageLog({
           model: options.model,
-          prompt: `Revise the candidate once. Use only the supplied evidence, satisfy every requirement, and correct every violation. Return only the revised deliverable.\n\nRequirements:\n${JSON.stringify(run.outputRequirements)}\n\nLoaded references:\n${JSON.stringify(loadedReferences)}\n\nViolations:\n${JSON.stringify(violations)}\n\nCandidate:\n${text}`,
-        })
+          prompt: `Revise the candidate once. Use only the supplied evidence, satisfy every requirement, and correct every violation. Return only the revised deliverable.\n\nRequirements:\n${JSON.stringify(run.outputRequirements)}\n\nVerification criteria:\n${JSON.stringify(run.verificationCriteria)}\n\nLoaded references:\n${JSON.stringify(loadedReferences)}\n\nTool audit:\n${JSON.stringify(run.toolEvidence)}\n\nTool results:\n${JSON.stringify(toolResults)}\n\nViolations:\n${JSON.stringify(violations)}\n\nCandidate:\n${text}`,
+        }, 'revise')
         await request.onStep?.({ phase: 'revise', detail: { text: revised.text } })
         return revised.text
       },
@@ -318,7 +418,7 @@ export async function openAgentRuntime(
   }
 
   return {
-    get tools() { return registry.tools },
+    get tools() { return visibleTools() },
     get catalogContext() { return registry.catalogContext },
     get selectedSkill() { return selected },
     prepare,

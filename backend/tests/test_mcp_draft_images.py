@@ -5,11 +5,7 @@ import pytest
 
 
 @pytest.fixture
-def env(monkeypatch, tmp_path):
-    monkeypatch.setenv(
-        "WMS_DATABASE_URL",
-        f"sqlite+aiosqlite:///{tmp_path / 'mcp-draft-images.db'}",
-    )
+def env(monkeypatch, postgres_env):
     for module_name in list(sys.modules):
         if module_name.startswith(("database", "models", "config", "mcp_server")):
             sys.modules.pop(module_name, None)

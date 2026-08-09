@@ -1,0 +1,45 @@
+<h2>原文区：如何保证自己看见原始材料？</h2>
+<p class="subtitle">原文区占详情主空间，AI 评价只做旁边的判断层，不改写、不替代原文。</p>
+
+<div class="cards">
+  <div class="card" data-choice="full-source" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mockup">
+        <div class="mockup-header">A · 完整原文阅读</div>
+        <div class="mockup-body" style="display:grid;grid-template-columns:1fr 230px;gap:9px;background:#f8fafc;min-height:270px;padding:10px">
+          <div style="background:white;border:1px solid #e5e7eb;border-radius:8px;padding:12px;overflow:hidden"><div style="font-size:10px;color:#64748b">原文 · Simon Willison's Weblog · 2026/08/05</div><h3 style="margin-top:10px">在 GitHub Actions 中使用 uvx</h3><div style="font-size:11px;line-height:1.8;color:#334155;margin-top:11px">原文正文完整展示。长文章和 YouTube 字幕在本区域独立滚动，顶部固定来源信息，右上角提供打开原文。</div><div style="height:7px;background:#e2e8f0;border-radius:4px;margin-top:12px;width:96%"></div><div style="height:7px;background:#e2e8f0;border-radius:4px;margin-top:8px;width:86%"></div><div style="height:7px;background:#e2e8f0;border-radius:4px;margin-top:8px;width:75%"></div><div style="height:7px;background:#e2e8f0;border-radius:4px;margin-top:8px;width:91%"></div></div>
+          <div style="background:#eef2ff;border:1px solid #c7d2fe;border-radius:8px;padding:11px;font-size:10px;line-height:1.8"><b>原文辅助</b><br>语言：English<br>正文长度：4,218 字<br>来源：RSS<br><br><button class="mock-button">打开原文</button><br><button class="mock-button" style="margin-top:7px;background:#e2e8f0;color:#334155">复制原文链接</button></div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body"><h3>A · 完整原文阅读</h3><p>原文始终可见且独立滚动，最符合核对 AI 判断的需求，我推荐这个方向。</p></div>
+  </div>
+
+  <div class="card" data-choice="evidence-highlight" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mockup">
+        <div class="mockup-header">B · AI 证据高亮</div>
+        <div class="mockup-body" style="display:grid;grid-template-columns:1fr 230px;gap:9px;background:#f8fafc;min-height:270px;padding:10px">
+          <div style="background:white;border:1px solid #e5e7eb;border-radius:8px;padding:12px;overflow:hidden"><div style="font-size:10px;color:#64748b">原文 · 关键句已标注</div><h3 style="margin-top:10px">在 GitHub Actions 中使用 uvx</h3><div style="font-size:11px;line-height:2;color:#334155;margin-top:11px">原文正文中<span style="background:#fef08a">被 AI 认为是证据的句子</span>会有颜色标记。<span style="background:#bfdbfe">相关段落</span>也会被提示。</div><div style="height:7px;background:#e2e8f0;border-radius:4px;margin-top:12px;width:90%"></div><div style="height:7px;background:#fef08a;border-radius:4px;margin-top:8px;width:78%"></div><div style="height:7px;background:#bfdbfe;border-radius:4px;margin-top:8px;width:83%"></div></div>
+          <div style="background:#eef2ff;border:1px solid #c7d2fe;border-radius:8px;padding:11px;font-size:10px;line-height:1.8"><b>证据 3 条</b><br><span style="background:#fef08a;padding:2px">事实依据 2</span><br><span style="background:#bfdbfe;padding:2px">观点判断 1</span><br><br>点击标记查看 AI 如何使用这段原文。</div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body"><h3>B · AI 证据高亮</h3><p>更容易理解 AI 依据，但高亮可能干扰自然阅读，也容易让 AI 解释看起来像原文事实。</p></div>
+  </div>
+
+  <div class="card" data-choice="excerpt" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mockup">
+        <div class="mockup-header">C · 摘要优先，原文展开</div>
+        <div class="mockup-body" style="background:#f8fafc;min-height:270px;padding:10px"><div style="background:white;border:1px solid #e5e7eb;border-radius:8px;padding:12px"><div style="font-size:10px;color:#64748b">AI 提取摘要 · 原文未展开</div><h3 style="margin-top:11px">在 GitHub Actions 中使用 uvx</h3><p style="font-size:11px;line-height:1.8;color:#475569;margin-top:10px">这里先展示 AI 摘要和关键段落，点击“查看完整原文”后再打开全部材料。</p><button class="mock-button" style="margin-top:12px">查看完整原文</button></div></div>
+      </div>
+    </div>
+    <div class="card-body"><h3>C · 摘要优先</h3><p>列表处理更快，但用户需要额外点击，不能保证第一时间看到原始依据。</p></div>
+  </div>
+</div>
+
+<div class="section" style="margin-top:18px">
+  <h3>建议</h3>
+  <p>采用 A：完整原文固定在主区，AI 评价中的证据只用“证据列表 + 原文定位”表达，不直接覆盖或改写原文。</p>
+</div>

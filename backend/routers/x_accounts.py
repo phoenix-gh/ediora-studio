@@ -14,7 +14,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from database import get_db
 from log_redaction import redact_secret_text
 from models import XCredentialAccount
-from x_credential_store import CredentialFileError, CredentialFileStore, CredentialPair
+from x_credential_store import (
+    CredentialFileError,
+    CredentialFileStore,
+    CredentialPair,
+    CredentialSessionVault,
+)
 from x_credential_probe import probe_x_credentials
 
 
@@ -176,12 +181,14 @@ async def create_x_account(
         )).scalars())
         slot = store.allocate_slot(reserved_slots)
         pair = CredentialPair(body.auth_token, body.ct0)
+        session_ciphertext = CredentialSessionVault().encrypt(pair)
         account = XCredentialAccount(
             name=body.name,
             enabled=body.enabled,
             credential_slot=slot,
             auth_token_preview=credential_preview(pair.auth_token),
             ct0_preview=credential_preview(pair.ct0),
+            session_ciphertext=session_ciphertext,
         )
         db.add(account)
         snapshot = None
@@ -215,9 +222,11 @@ async def patch_x_account(
         try:
             if replacing_credentials:
                 pair = CredentialPair(body.auth_token.strip(), body.ct0.strip())
+                session_ciphertext = CredentialSessionVault().encrypt(pair)
                 snapshot = store.write(account.credential_slot, next_enabled, pair)
                 account.auth_token_preview = credential_preview(pair.auth_token)
                 account.ct0_preview = credential_preview(pair.ct0)
+                account.session_ciphertext = session_ciphertext
                 reset_test_status(account)
             elif changing_enabled:
                 snapshot = store.set_enabled(account.credential_slot, next_enabled)
@@ -260,6 +269,8 @@ async def test_x_account(account_id: int, db: AsyncSession = Depends(get_db)):
         raise HTTPException(404, "account not found")
 
     store = CredentialFileStore()
+    await ensure_x_credential_sessions(db, store)
+    account = await db.get(XCredentialAccount, account_id)
     pair = store.read(account.credential_slot)
     result = await probe_x_credentials(pair)
     account.test_status = result.status
@@ -272,48 +283,115 @@ async def test_x_account(account_id: int, db: AsyncSession = Depends(get_db)):
 async def reconcile_x_credential_accounts(
     db: AsyncSession,
     store: CredentialFileStore,
+    *,
+    strict_enabled: bool = False,
 ) -> list[str]:
-    """Repair only DB-owned files and report inconsistent account records."""
+    """Synchronize DB-owned session files from the database authority."""
     errors: list[str] = []
+    fatal_errors: list[str] = []
     snapshots = []
     accounts = await _accounts(db)
     managed_slots = {account.credential_slot for account in accounts}
     errors.extend(store.reconcile_quarantines(managed_slots))
-    for account in accounts:
-        try:
-            pair = store.read(account.credential_slot)
-        except CredentialFileError as exc:
-            account.test_status = "failed"
-            account.last_test_error = str(exc)
-            errors.append(f"账号 {account.id} 的凭据文件不存在或状态冲突")
-            continue
-
-        if (
-            account.auth_token_preview
-            and account.auth_token_preview != credential_preview(pair.auth_token)
-        ) or (
-            account.ct0_preview and account.ct0_preview != credential_preview(pair.ct0)
-        ):
-            account.test_status = "failed"
-            account.last_test_error = "凭据文件与账号预览不匹配"
-            errors.append(f"账号 {account.id} 的凭据文件冲突")
-            continue
-
-        previous = store.snapshot(account.credential_slot)
-        current_enabled = previous.active is not None
-        if current_enabled != account.enabled:
-            try:
-                snapshots.append(store.set_enabled(account.credential_slot, account.enabled))
-            except CredentialFileError:
-                account.test_status = "failed"
-                account.last_test_error = "凭据文件状态冲突"
-                errors.append(f"账号 {account.id} 的凭据文件状态冲突")
-
     try:
-        await db.commit()
+        async with _credential_mutation_lock(store):
+            vault = CredentialSessionVault()
+            for account in accounts:
+                pair: CredentialPair | None = None
+                if account.session_ciphertext:
+                    try:
+                        pair = vault.decrypt(account.session_ciphertext)
+                    except CredentialFileError as exc:
+                        issue = f"账号 {account.id} 的凭据文件状态冲突"
+                        account.test_status = "failed"
+                        account.last_test_error = str(exc)
+                        errors.append(issue)
+                        if account.enabled:
+                            fatal_errors.append(issue)
+                        continue
+                else:
+                    try:
+                        pair = store.read(account.credential_slot)
+                    except CredentialFileError as exc:
+                        issue = f"账号 {account.id} 的凭据文件不存在或状态冲突"
+                        account.test_status = "failed"
+                        account.last_test_error = str(exc)
+                        errors.append(issue)
+                        if account.enabled:
+                            fatal_errors.append(issue)
+                        continue
+                    if (
+                        account.auth_token_preview
+                        and account.auth_token_preview != credential_preview(pair.auth_token)
+                    ) or (
+                        account.ct0_preview
+                        and account.ct0_preview != credential_preview(pair.ct0)
+                    ):
+                        issue = f"账号 {account.id} 的凭据文件冲突"
+                        account.test_status = "failed"
+                        account.last_test_error = "凭据文件与账号预览不匹配"
+                        errors.append(issue)
+                        if account.enabled:
+                            fatal_errors.append(issue)
+                        continue
+                    account.session_ciphertext = vault.encrypt(pair)
+
+                if (
+                    account.auth_token_preview
+                    and account.auth_token_preview != credential_preview(pair.auth_token)
+                ) or (
+                    account.ct0_preview and account.ct0_preview != credential_preview(pair.ct0)
+                ):
+                    issue = f"账号 {account.id} 的凭据文件冲突"
+                    account.test_status = "failed"
+                    account.last_test_error = "数据库 session 与账号预览不匹配"
+                    errors.append(issue)
+                    if account.enabled:
+                        fatal_errors.append(issue)
+                    continue
+
+                snapshot = store.snapshot(account.credential_slot)
+                current_pair = None
+                try:
+                    current_pair = store.read(account.credential_slot)
+                except CredentialFileError:
+                    pass
+                current_enabled = snapshot.active is not None
+                if (
+                    current_pair != pair
+                    or current_enabled != account.enabled
+                    or (snapshot.active is not None and snapshot.disabled is not None)
+                ):
+                    snapshots.append(store.write(
+                        account.credential_slot,
+                        account.enabled,
+                        pair,
+                    ))
+
+                if (
+                    account.test_status == "failed"
+                    and account.last_test_error.startswith("凭据文件")
+                ):
+                    reset_test_status(account)
+
+            await db.commit()
     except Exception:
         await db.rollback()
         for snapshot in reversed(snapshots):
             store.restore(snapshot)
         raise
+    if strict_enabled and fatal_errors:
+        raise CredentialFileError("；".join(fatal_errors))
     return errors
+
+
+async def ensure_x_credential_sessions(
+    db: AsyncSession,
+    store: CredentialFileStore | None = None,
+) -> None:
+    """Materialize all enabled database sessions before an X collection."""
+    await reconcile_x_credential_accounts(
+        db,
+        store or CredentialFileStore(),
+        strict_enabled=True,
+    )

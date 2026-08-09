@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "述策助手",
   "version": "0.1.0",
-  "description": "在 X 页面验证单条帖子立即发布和原生安排表发布。",
+  "description": "在 X 页面查看 WeMediaStudio 草稿并记住原生安排表的最后选择。",
   "permissions": [
     "storage"
   ],
@@ -23,7 +23,6 @@
         "https://twitter.com/*"
       ],
       "js": [
-        "content/bridge.js",
         "content/workbench.js"
       ],
       "run_at": "document_idle"
@@ -32,17 +31,13 @@
   "web_accessible_resources": [
     {
       "resources": [
-        "injected/console-api.js",
-        "content/contracts.js",
-        "content/bridge-protocol.js",
         "content/selectors.js",
-        "content/x-dom-driver.js",
-        "content/publisher.js",
         "content/draft-client.js",
         "content/draft-model.js",
         "content/workbench-clipboard.js",
         "content/workbench-runtime.js",
-        "content/workbench-state.js"
+        "content/workbench-state.js",
+        "content/schedule-memory.js"
       ],
       "matches": [
         "https://x.com/*",

@@ -247,7 +247,14 @@ function SubscriptionsDialog({
     setActingBiz(a.biz)
     try {
       const r = await syncWechatAccount(a.biz, 1)
-      toast.success(`${a.name}：扫描 ${r.total_seen} 篇，新增 ${r.new_articles} 篇`)
+      const bodySummary = `正文成功 ${r.body_fetched} 篇，失败 ${r.body_failed} 篇`
+      if (r.list_error) {
+        toast.warning(`${a.name}：${r.list_error}；${bodySummary}`)
+      } else if (r.body_failed) {
+        toast.warning(`${a.name}：扫描 ${r.total_seen} 篇，新增 ${r.new_articles} 篇；${bodySummary}`)
+      } else {
+        toast.success(`${a.name}：扫描 ${r.total_seen} 篇，新增 ${r.new_articles} 篇；${bodySummary}`)
+      }
       await refreshSubscribed()
       onChanged()
     } catch (e) {
@@ -871,6 +878,8 @@ export function WechatClient({ initialArticles }: { initialArticles: WechatArtic
         meta={readerMeta}
         loading={readerLoading}
         accent="green"
+        contentTheme="paper"
+        emptyContentMessage="正文尚未采集成功"
         headerActions={readerMeta && (
           <PushToStudioPopover
             url={readerMeta.url}

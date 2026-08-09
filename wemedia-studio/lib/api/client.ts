@@ -25,11 +25,20 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
   if (!res.ok) {
     let detail: unknown = ''
     try { detail = (await res.json()).detail ?? '' } catch { /* ignore */ }
-    const message = typeof detail === 'string'
+    const validationMessage = Array.isArray(detail)
+      ? detail.find((item): item is { msg: string } => (
+          typeof item === 'object'
+          && item !== null
+          && 'msg' in item
+          && typeof item.msg === 'string'
+        ))?.msg ?? ''
+      : ''
+    const rawMessage = typeof detail === 'string'
       ? detail
       : typeof detail === 'object' && detail && 'message' in detail
         ? String(detail.message)
-        : ''
+        : validationMessage
+    const message = rawMessage.replace(/^Value error,\s*/i, '')
     throw new ApiError(
       message || `API ${path} → ${res.status}`,
       res.status,

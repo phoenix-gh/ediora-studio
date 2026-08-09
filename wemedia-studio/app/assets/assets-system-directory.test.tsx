@@ -59,6 +59,14 @@ beforeEach(() => {
       is_system: false,
       created_at: '',
     },
+    {
+      id: 3,
+      name: '临时文件',
+      asset_type: 'media',
+      parent_id: null,
+      is_system: true,
+      created_at: '',
+    },
   ])
 })
 
@@ -75,12 +83,19 @@ describe('digital human system asset directory', () => {
 
     fireEvent.click(screen.getByRole('tab', { name: '多媒体' }))
 
-    expect(await screen.findByLabelText('系统目录')).toBeTruthy()
+    expect((await screen.findAllByLabelText('系统目录')).length).toBe(2)
     expect(screen.queryByRole('button', {
       name: '重命名数字人资产',
     })).toBeNull()
     expect(screen.queryByRole('button', {
       name: '删除数字人资产',
+    })).toBeNull()
+    expect(screen.getByRole('button', { name: /临时文件/ })).toBeTruthy()
+    expect(screen.queryByRole('button', {
+      name: '重命名临时文件',
+    })).toBeNull()
+    expect(screen.queryByRole('button', {
+      name: '删除临时文件',
     })).toBeNull()
     expect(screen.getByRole('button', {
       name: '重命名普通目录',

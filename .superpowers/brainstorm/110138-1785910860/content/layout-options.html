@@ -1,0 +1,74 @@
+<h2>情报站：原文与 AI 评价如何共存？</h2>
+<p class="subtitle">请选择你更希望每天使用的工作台结构。三种方案都保留原文、AI 评价、内容分类和“写入内容系统”入口。</p>
+
+<div class="cards">
+  <div class="card" data-choice="a" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mockup">
+        <div class="mockup-header">A · 原文 / AI 双栏</div>
+        <div class="mockup-body" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;min-height:210px;background:#f8fafc">
+          <div style="background:white;border:1px solid #e5e7eb;border-radius:8px;padding:12px">
+            <div style="font-size:11px;color:#64748b">原文 · Simon Willison's Weblog</div>
+            <div style="font-size:16px;font-weight:700;margin-top:10px">在 GitHub Actions 中使用 uvx</div>
+            <div style="height:7px;background:#e2e8f0;border-radius:4px;margin-top:14px;width:95%"></div>
+            <div style="height:7px;background:#e2e8f0;border-radius:4px;margin-top:8px;width:82%"></div>
+            <div style="height:7px;background:#e2e8f0;border-radius:4px;margin-top:8px;width:88%"></div>
+            <div style="height:7px;background:#e2e8f0;border-radius:4px;margin-top:8px;width:66%"></div>
+          </div>
+          <div style="background:#eef2ff;border:1px solid #c7d2fe;border-radius:8px;padding:12px">
+            <div style="font-size:11px;color:#4f46e5">AI 评价 · 86 分</div>
+            <div style="font-size:15px;font-weight:700;margin-top:10px">值得写入内容系统</div>
+            <div style="margin-top:10px;display:flex;gap:5px;flex-wrap:wrap"><span style="background:#c7d2fe;padding:3px 6px;border-radius:999px;font-size:10px">工具</span><span style="background:#c7d2fe;padding:3px 6px;border-radius:999px;font-size:10px">实践</span></div>
+            <div style="height:7px;background:#c7d2fe;border-radius:4px;margin-top:16px;width:88%"></div>
+            <div style="height:7px;background:#c7d2fe;border-radius:4px;margin-top:8px;width:76%"></div>
+            <button class="mock-button" style="margin-top:18px">写入内容系统</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body"><h3>A · 原文 / AI 双栏</h3><p>阅读和判断同时完成，最适合核对 AI 是否误读原文。原文与评价都不需要切换。</p></div>
+  </div>
+
+  <div class="card" data-choice="b" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mockup">
+        <div class="mockup-header">B · 情报列表 + 详情工作台</div>
+        <div class="mockup-body" style="display:grid;grid-template-columns:92px 1fr;gap:8px;min-height:210px;background:#f8fafc">
+          <div style="background:#111827;color:white;border-radius:7px;padding:9px;font-size:10px;line-height:2.1">全部<br>待判断<br><b>值得写</b><br>跟踪<br>收藏<br>主题标签</div>
+          <div style="background:white;border:1px solid #e5e7eb;border-radius:8px;padding:11px">
+            <div style="font-size:11px;color:#64748b">情报详情 · 值得写 24 条</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:11px">
+              <div style="height:125px;background:#f1f5f9;border-radius:6px;padding:8px;font-size:11px">原文阅读区<br><br>标题与来源<br>正文滚动阅读</div>
+              <div style="height:125px;background:#eef2ff;border-radius:6px;padding:8px;font-size:11px">价值判断<br><br>类型：工具 / 实践<br>状态：值得写<br><br><button class="mock-button">写入</button></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body"><h3>B · 情报列表 + 详情工作台</h3><p>先按“值得写、跟踪、收藏”筛选，再进入原文和评价详情。适合大量信息的日常处理。</p></div>
+  </div>
+
+  <div class="card" data-choice="c" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="mockup">
+        <div class="mockup-header">C · QMReader 式标签页</div>
+        <div class="mockup-body" style="min-height:210px;background:#f8fafc;padding:10px">
+          <div style="background:white;border:1px solid #e5e7eb;border-radius:8px;padding:11px">
+            <div style="display:flex;gap:10px;font-size:11px;border-bottom:1px solid #e5e7eb;padding-bottom:8px"><b>原文</b><span>AI 评价</span><span>历史</span></div>
+            <div style="font-size:16px;font-weight:700;margin-top:16px">在 GitHub Actions 中使用 uvx</div>
+            <div style="height:7px;background:#e2e8f0;border-radius:4px;margin-top:15px;width:92%"></div>
+            <div style="height:7px;background:#e2e8f0;border-radius:4px;margin-top:8px;width:80%"></div>
+            <div style="height:7px;background:#e2e8f0;border-radius:4px;margin-top:8px;width:70%"></div>
+            <div style="margin-top:18px;text-align:right"><button class="mock-button">查看 AI 评价</button></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body"><h3>C · QMReader 式标签页</h3><p>界面最干净，也最接近参考网站，但原文与 AI 评价需要来回切换，不利于快速判断。</p></div>
+  </div>
+</div>
+
+<div class="section" style="margin-top:18px">
+  <h3>我的建议</h3>
+  <p>优先考虑 B 的信息组织，再采用 A 的双栏详情：左侧是情报队列和分类，右侧打开后固定同时显示原文与 AI 评价。这样既能批量处理，也不会隐藏原始依据。</p>
+</div>

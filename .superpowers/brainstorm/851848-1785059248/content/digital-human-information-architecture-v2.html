@@ -1,0 +1,66 @@
+<style>
+  .shell{display:grid;grid-template-columns:220px 1fr;gap:18px;margin-top:20px}
+  .sidebar,.main{border:1px solid #e2e8f0;border-radius:14px;background:white;overflow:hidden}
+  .brand{padding:16px;border-bottom:1px solid #e2e8f0;font-weight:750;color:#1e293b}
+  .section-label{padding:15px 18px 6px;color:#94a3b8;font-size:10px;font-weight:750;letter-spacing:.12em}
+  .item{margin:3px 9px;padding:9px 11px;border-radius:7px;color:#64748b;font-size:12px}
+  .item.active{background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe;font-weight:750}
+  .head{display:flex;align-items:center;padding:16px 18px;border-bottom:1px solid #e2e8f0}
+  .title{font-weight:750;color:#1e293b}
+  .tabs{display:flex;gap:24px;margin-left:28px;font-size:12px;color:#64748b}
+  .tab.active{color:#4f46e5;font-weight:750}
+  .button{margin-left:auto;background:#4f46e5;color:white;border-radius:7px;padding:7px 11px;font-size:11px}
+  .flow{padding:28px 22px;display:grid;grid-template-columns:repeat(5,1fr);gap:11px}
+  .node{position:relative;border:1px solid #dbe3ef;background:#f8fafc;border-radius:10px;padding:13px 11px;min-height:115px}
+  .node:not(:last-child):after{content:'→';position:absolute;right:-16px;top:43%;color:#818cf8;font-size:18px;z-index:2}
+  .num{width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:#e0e7ff;color:#4338ca;font-size:10px;font-weight:800;margin-bottom:8px}
+  .node h4{margin:0 0 6px;color:#1e293b;font-size:12px}.node p{margin:0;color:#64748b;font-size:10px;line-height:1.55}
+  .roles{display:grid;grid-template-columns:1fr 1.3fr 1fr;gap:12px;padding:0 22px 22px}
+  .role{border:1px solid #e2e8f0;border-radius:10px;padding:13px}.role.core{border-color:#a5b4fc;background:#f5f7ff}
+  .role strong{font-size:12px;color:#334155}.role p{font-size:10px;line-height:1.6;color:#64748b;margin:7px 0 0}
+  .rename{margin:0 22px 22px;padding:13px 15px;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:9px;color:#065f46;font-size:12px}
+  @media(max-width:950px){.shell{grid-template-columns:1fr}.flow{grid-template-columns:1fr}.node:not(:last-child):after{content:'↓';right:50%;top:auto;bottom:-19px}.roles{grid-template-columns:1fr}}
+</style>
+
+<h2>设计 1/4 · 信息架构（修订版）</h2>
+<p class="subtitle">一级菜单描述业务能力，内部页签再区分作品和角色，避免“数字人”同时指人物与功能。</p>
+
+<div class="shell">
+  <div class="sidebar">
+    <div class="brand">WeMedia Studio</div>
+    <div class="item">今日工作台</div><div class="item">创作任务</div>
+    <div class="section-label">创作</div>
+    <div class="item">草稿箱</div><div class="item">写作模板</div><div class="item">创作资产</div>
+    <div class="item active">◉ 数字人口播</div>
+    <div class="item">热点选题</div><div class="item">发布</div>
+  </div>
+  <div class="main">
+    <div class="head">
+      <span class="title">数字人口播</span>
+      <div class="tabs"><span class="tab active">口播作品</span><span class="tab">数字人角色</span></div>
+      <span class="button">＋ 新建口播</span>
+    </div>
+    <div class="flow">
+      <div class="node"><div class="num">1</div><h4>创建角色</h4><p>正面形象图<br>克隆声音<br>默认环境图</p></div>
+      <div class="node"><div class="num">2</div><h4>新建口播</h4><p>选择角色<br>带入默认环境<br>可按项目覆盖</p></div>
+      <div class="node"><div class="num">3</div><h4>编辑脚本</h4><p>手动编写<br>AI 辅助<br>草稿转脚本</p></div>
+      <div class="node"><div class="num">4</div><h4>异步生成</h4><p>冻结输入快照<br>声音与口型合成<br>展示任务进度</p></div>
+      <div class="node"><div class="num">5</div><h4>成片版本</h4><p>预览与下载<br>比较和切换<br>进入创作资产</p></div>
+    </div>
+    <div class="roles">
+      <div class="role"><strong>数字人角色</strong><p>长期复用的人物形象、专属声音和默认环境。</p></div>
+      <div class="role core"><strong>口播作品 · 核心对象</strong><p>保存当前脚本、所选角色、项目环境和当前成片。</p></div>
+      <div class="role"><strong>成片版本</strong><p>保存每次生成的视频及完整输入快照，旧结果不覆盖。</p></div>
+    </div>
+    <div class="rename"><strong>命名已修正：</strong>创作菜单使用“数字人口播”；页面内使用“口播作品 / 数字人角色”。</div>
+  </div>
+</div>
+
+<div class="options">
+  <div class="option" data-choice="approve-ia-v2" onclick="toggleSelect(this)">
+    <div class="letter">✓</div><div class="content"><h3>认可修订后的信息架构</h3><p>继续设计数字人角色的创建和管理。</p></div>
+  </div>
+  <div class="option" data-choice="revise-ia-v2" onclick="toggleSelect(this)">
+    <div class="letter">↺</div><div class="content"><h3>仍需调整</h3><p>在终端说明需要修改的部分。</p></div>
+  </div>
+</div>

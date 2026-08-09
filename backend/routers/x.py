@@ -1,13 +1,21 @@
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select, func, desc, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
-from models import XCredentialAccount, XSubscription, XPost
+from models import (
+    AppSetting,
+    CreativeAssetDirectory,
+    XCredentialAccount,
+    XPost,
+    XSubscription,
+    XSubscriptionIngestionDirectory,
+)
+from routers.x_accounts import ensure_x_credential_sessions
 
 router = APIRouter(prefix="/x", tags=["x"])
 
@@ -28,11 +36,14 @@ class SubscriptionOut(BaseModel):
     extra_terms: str = ""
     sort: str = "top"
     max_results: int = 100
-    notify_new_posts: bool = False
+    collect_interval_minutes: int
+    intelligence_enabled: bool = False
+    intelligence_enabled_at: Optional[datetime] = None
     last_collected_at: Optional[datetime]
     last_error: str
     added_at: datetime
     post_count: int = 0
+    ingestion_directory_ids: list[int] = Field(default_factory=list)
     model_config = {"from_attributes": True}
 
 
@@ -48,6 +59,8 @@ class SubscriptionCreate(BaseModel):
     extra_terms: str = ""
     sort: str = "top"
     max_results: int = 100
+    collect_interval_minutes: Optional[int] = Field(default=None, ge=5, le=1440)
+    ingestion_directory_ids: list[int] = Field(default_factory=list)
 
 
 class SubscriptionPatch(BaseModel):
@@ -55,7 +68,13 @@ class SubscriptionPatch(BaseModel):
     label: Optional[str] = None
     raw_query: Optional[str] = None
     max_results: Optional[int] = None
-    notify_new_posts: Optional[bool] = None
+    collect_interval_minutes: Optional[int] = Field(default=None, ge=5, le=1440)
+    intelligence_enabled: Optional[bool] = None
+    ingestion_directory_ids: Optional[list[int]] = None
+
+
+class TimelineBackfillRequest(BaseModel):
+    days: int = Field(default=7, ge=1, le=90)
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -67,18 +86,73 @@ def _default_label(url: str) -> str:
     return "@" + url.rsplit("/", 1)[-1]
 
 
+async def _default_collect_interval(db: AsyncSession) -> int:
+    value = await db.scalar(
+        select(AppSetting.value).where(AppSetting.key == "x_collect_interval_minutes")
+    )
+    try:
+        return max(5, min(1440, int(value))) if value is not None else 15
+    except (TypeError, ValueError):
+        return 15
+
+
+async def _replace_ingestion_directories(
+    db: AsyncSession,
+    subscription_id: int,
+    directory_ids: list[int],
+) -> list[int]:
+    unique_ids = list(dict.fromkeys(directory_ids))
+    if unique_ids:
+        directories = (await db.execute(
+            select(CreativeAssetDirectory).where(
+                CreativeAssetDirectory.id.in_(unique_ids),
+            )
+        )).scalars().all()
+        by_id = {directory.id: directory for directory in directories}
+        invalid = [
+            directory_id for directory_id in unique_ids
+            if directory_id not in by_id
+            or by_id[directory_id].asset_type != "article"
+            or not by_id[directory_id].ai_ingestion_enabled
+            or not (by_id[directory_id].ai_ingestion_prompt or "").strip()
+        ]
+        if invalid:
+            raise HTTPException(422, "只能选择已启用 AI 入库规则的文章目录")
+
+    await db.execute(delete(XSubscriptionIngestionDirectory).where(
+        XSubscriptionIngestionDirectory.subscription_id == subscription_id,
+    ))
+    db.add_all([
+        XSubscriptionIngestionDirectory(
+            subscription_id=subscription_id,
+            directory_id=directory_id,
+        )
+        for directory_id in unique_ids
+    ])
+    return unique_ids
+
+
 async def _to_out(db: AsyncSession, sub: XSubscription) -> SubscriptionOut:
     cnt = (await db.execute(
         select(func.count(XPost.tweet_id))
         .where(XPost.subscription_id == sub.id)
     )).scalar() or 0
+    ingestion_directory_ids = list((await db.execute(
+        select(XSubscriptionIngestionDirectory.directory_id)
+        .where(XSubscriptionIngestionDirectory.subscription_id == sub.id)
+        .order_by(XSubscriptionIngestionDirectory.id)
+    )).scalars().all())
     return SubscriptionOut(
         id=sub.id, url=sub.url, label=sub.label, kind=sub.kind, enabled=sub.enabled,
         raw_query=sub.raw_query, min_faves=sub.min_faves, min_retweets=sub.min_retweets,
         lang=sub.lang, days=sub.days, extra_terms=sub.extra_terms, sort=sub.sort,
-        max_results=sub.max_results, notify_new_posts=sub.notify_new_posts,
+        max_results=sub.max_results,
+        collect_interval_minutes=sub.collect_interval_minutes,
+        intelligence_enabled=sub.intelligence_enabled,
+        intelligence_enabled_at=sub.intelligence_enabled_at,
         last_collected_at=sub.last_collected_at, last_error=sub.last_error,
         added_at=sub.added_at, post_count=int(cnt),
+        ingestion_directory_ids=ingestion_directory_ids,
     )
 
 
@@ -96,6 +170,11 @@ async def list_subscriptions(db: AsyncSession = Depends(get_db)):
 async def create_subscription(
     body: SubscriptionCreate, db: AsyncSession = Depends(get_db),
 ):
+    collect_interval_minutes = (
+        body.collect_interval_minutes
+        if body.collect_interval_minutes is not None
+        else await _default_collect_interval(db)
+    )
     if body.kind == "search":
         if not body.raw_query.strip():
             raise HTTPException(400, "搜索订阅需要 raw_query")
@@ -108,9 +187,14 @@ async def create_subscription(
             raw_query=body.raw_query.strip(), min_faves=body.min_faves,
             min_retweets=body.min_retweets, lang=body.lang, days=body.days,
             extra_terms=body.extra_terms, sort="live", max_results=body.max_results,
+            collect_interval_minutes=collect_interval_minutes,
             added_at=datetime.now(timezone.utc),
         )
         db.add(sub)
+        await db.flush()
+        await _replace_ingestion_directories(
+            db, sub.id, body.ingestion_directory_ids,
+        )
         await db.commit()
         await db.refresh(sub)
         return await _to_out(db, sub)
@@ -136,9 +220,14 @@ async def create_subscription(
 
     sub = XSubscription(
         kind="timeline", url=url, label=label,
-        enabled=True, added_at=datetime.now(timezone.utc),
+        enabled=True, collect_interval_minutes=collect_interval_minutes,
+        added_at=datetime.now(timezone.utc),
     )
     db.add(sub)
+    await db.flush()
+    await _replace_ingestion_directories(
+        db, sub.id, body.ingestion_directory_ids,
+    )
     await db.commit()
     await db.refresh(sub)
     return await _to_out(db, sub)
@@ -165,13 +254,17 @@ async def patch_subscription(
         sub.raw_query = rq
     if body.max_results is not None:
         sub.max_results = max(1, min(500, body.max_results))
-    if body.notify_new_posts is not None and body.notify_new_posts != sub.notify_new_posts:
-        if body.notify_new_posts and sub.kind != "timeline":
-            raise HTTPException(400, "搜索订阅不能开启即时响应")
-        sub.notify_new_posts = body.notify_new_posts
-        # 只在开启时刻起算，避免把开启前积压的旧帖推送出去
-        sub.notify_enabled_at = (
-            datetime.now(timezone.utc) if body.notify_new_posts else None
+    if body.collect_interval_minutes is not None:
+        sub.collect_interval_minutes = body.collect_interval_minutes
+    if body.intelligence_enabled is not None and body.intelligence_enabled != sub.intelligence_enabled:
+        sub.intelligence_enabled = body.intelligence_enabled
+        # 只在开启时刻起算，避免把开启前积压的旧帖送入情报站。
+        sub.intelligence_enabled_at = (
+            datetime.now(timezone.utc) if body.intelligence_enabled else None
+        )
+    if body.ingestion_directory_ids is not None:
+        await _replace_ingestion_directories(
+            db, sub.id, body.ingestion_directory_ids,
         )
     await db.commit()
     await db.refresh(sub)
@@ -185,6 +278,9 @@ async def delete_subscription(
     sub = await db.get(XSubscription, sub_id)
     if not sub:
         raise HTTPException(404, "订阅不存在")
+    await db.execute(delete(XSubscriptionIngestionDirectory).where(
+        XSubscriptionIngestionDirectory.subscription_id == sub_id,
+    ))
     await db.execute(delete(XPost).where(XPost.subscription_id == sub_id))
     await db.delete(sub)
     await db.commit()
@@ -196,7 +292,6 @@ async def delete_subscription(
 from datetime import timedelta
 
 from sqlalchemy.dialects.postgresql import insert as _pg_insert
-from sqlalchemy.dialects.sqlite import insert as _sl_insert
 
 
 class PostOut(BaseModel):
@@ -244,9 +339,7 @@ async def list_posts(
 # ─── Upsert helper ──────────────────────────────────────────────────────────
 
 def _upsert_post_stmt(db: AsyncSession, sub_id: int, p):
-    dialect = db.bind.dialect.name if db.bind else "postgresql"
-    insert_fn = _sl_insert if dialect == "sqlite" else _pg_insert
-    stmt = insert_fn(XPost).values(
+    stmt = _pg_insert(XPost).values(
         tweet_id=p.tweet_id, subscription_id=sub_id,
         username=p.username, display_name=p.display_name,
         content=p.content, url=p.url,
@@ -296,7 +389,11 @@ async def _compute_collect_cutoff(db: AsyncSession, sub_id: int) -> datetime:
     return latest.replace(minute=0, second=0, microsecond=0)
 
 
-async def _collect_one(db: AsyncSession, sub: XSubscription) -> int:
+async def _collect_one(
+    db: AsyncSession,
+    sub: XSubscription,
+    cutoff: datetime | None = None,
+) -> int:
     try:
         if sub.kind == "search":
             posts = await search_top(
@@ -307,8 +404,8 @@ async def _collect_one(db: AsyncSession, sub: XSubscription) -> int:
         else:
             # Cutoff is pushed into feedgrab's paginator so it stops fetching
             # once it crosses the boundary — no after-the-fact filtering needed.
-            cutoff = await _compute_collect_cutoff(db, sub.id)
-            posts = await grab_timeline(sub.url, since=cutoff)
+            effective_cutoff = cutoff or await _compute_collect_cutoff(db, sub.id)
+            posts = await grab_timeline(sub.url, since=effective_cutoff)
     except Exception as e:
         sub.last_error = str(e)[:500]
         await db.commit()
@@ -326,14 +423,14 @@ async def _collect_one(db: AsyncSession, sub: XSubscription) -> int:
     sub.last_error = ""
     await db.commit()
     if fresh_ids:
-        from x_response_service import dispatch_response_posts
-        dispatch = await dispatch_response_posts(db, sub, fresh_ids)
+        from content_response_service import dispatch_intelligence_posts
+        dispatch = await dispatch_intelligence_posts(db, sub, fresh_ids)
         if dispatch["errors"]:
             from logger import log
             await log(
-                "x_response",
+                "content_response_analysis",
                 "warn",
-                f"{sub.label} 新帖已入库，但即时响应任务入队失败",
+                f"{sub.label} 新帖已入库，但情报站分析任务入队失败",
                 "; ".join(dispatch["errors"]),
             )
         from topic_source_service import dispatch_topic_source_posts
@@ -355,6 +452,7 @@ async def collect_one_sync(sub_id: int, db: AsyncSession = Depends(get_db)):
     if not sub:
         raise HTTPException(404, "订阅不存在")
     try:
+        await ensure_x_credential_sessions(db)
         n = await _collect_one(db, sub)
     except Exception as e:
         raise HTTPException(502, str(e))
@@ -367,11 +465,35 @@ async def collect_one(sub_id: int, db: AsyncSession = Depends(get_db)):
     return await collect_one_sync(sub_id, db)
 
 
+@router.post("/subscriptions/{sub_id}/backfill")
+async def backfill_timeline_subscription(
+    sub_id: int,
+    body: TimelineBackfillRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    sub = await db.get(XSubscription, sub_id)
+    if not sub:
+        raise HTTPException(404, "订阅不存在")
+    if sub.kind != "timeline":
+        raise HTTPException(422, "仅个人账号订阅支持回溯采集")
+    cutoff = datetime.now(timezone.utc) - timedelta(days=body.days)
+    try:
+        await ensure_x_credential_sessions(db)
+        new_posts = await _collect_one(db, sub, cutoff=cutoff)
+    except Exception as e:
+        raise HTTPException(502, str(e))
+    return {"ok": True, "new_posts": new_posts}
+
+
 @router.post("/collect-all")
 async def collect_all(db: AsyncSession = Depends(get_db)):
     rows = (await db.execute(
         select(XSubscription).where(XSubscription.enabled == True)
     )).scalars().all()
+    try:
+        await ensure_x_credential_sessions(db)
+    except Exception as e:
+        raise HTTPException(502, str(e))
     new_total = 0
     failed: list[str] = []
     for sub in rows:

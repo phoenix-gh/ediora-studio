@@ -1,4 +1,5 @@
 import { tool, type ToolSet } from 'ai'
+import { createMCPClient } from '@ai-sdk/mcp'
 import { z } from 'zod'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -98,6 +99,25 @@ describe('global Chat tool policy', () => {
     })
     await runtime.close()
     expect(mcp.close).toHaveBeenCalledOnce()
+  })
+
+  it('sends scheduled-run identity as an MCP transport header only', async () => {
+    mcp.tools.mockResolvedValue({})
+
+    const runtime = await openGlobalAgentTools({
+      apiBase: 'http://localhost:8000/api',
+      approvalPolicy: 'automatic',
+      dailyCreationRunId: 83,
+    })
+
+    expect(vi.mocked(createMCPClient)).toHaveBeenLastCalledWith({
+      transport: {
+        type: 'http',
+        url: 'http://localhost:8000/mcp',
+        headers: { 'X-WMS-Daily-Creation-Run-Id': '83' },
+      },
+    })
+    await runtime.close()
   })
 
   it('scopes Skill reference reads, caches repeats, and shares one byte budget', async () => {
@@ -206,9 +226,15 @@ describe('global Chat tool policy', () => {
     expect(runtime.tools.loadSkill).toBeDefined()
   })
 
-  it('accepts only a free-form image prompt', () => {
+  it('accepts a strict image prompt with optional asset title and directory', () => {
     expect(imageGenerationInputSchema.safeParse({ prompt: 'x'.repeat(4_000) }).success).toBe(true)
+    expect(imageGenerationInputSchema.safeParse({
+      prompt: 'daily ranking chart',
+      title: 'GitHub 日榜 2026-08-09',
+      directory: '临时文件',
+    }).success).toBe(true)
     expect(imageGenerationInputSchema.safeParse({ kind: 'cover', note: 'x' }).success).toBe(false)
+    expect(imageGenerationInputSchema.safeParse({ prompt: 'x', directory: '临时文件', extra: true }).success).toBe(false)
   })
 
   it('creates an independent image job without a draft or image category', async () => {
@@ -235,5 +261,66 @@ describe('global Chat tool policy', () => {
       method: 'POST',
       body: expect.stringContaining('"prompt":"一张极简风格的月球基地插画"'),
     }))
+  })
+
+  it('passes the requested title and asset directory to the image job', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: 53, flow: 'standalone_image', status: 'queued' }), { status: 201 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(createImageJob({
+      apiBase: 'http://localhost:8000/api',
+      prompt: 'GitHub daily ranking chart',
+      title: 'GitHub 日榜 2026-08-09',
+      directory: '临时文件',
+    })).resolves.toEqual({ jobId: 53, flow: 'standalone_image', status: 'queued' })
+
+    expect(fetchMock).toHaveBeenCalledWith('http://localhost:8000/api/jobs', expect.objectContaining({
+      method: 'POST',
+      body: expect.stringContaining('"title":"GitHub 日榜 2026-08-09"'),
+    }))
+    expect(fetchMock).toHaveBeenCalledWith('http://localhost:8000/api/jobs', expect.objectContaining({
+      body: expect.stringContaining('"directory":"临时文件"'),
+    }))
+  })
+
+  it('waits for the image job to finish before returning generateImage evidence', async () => {
+    mcp.tools.mockResolvedValue({})
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: 54, flow: 'standalone_image', status: 'queued' }), { status: 201 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        id: 54,
+        flow: 'standalone_image',
+        title: 'GitHub 日榜 2026-08-09',
+        status: 'succeeded',
+        input: { prompt: 'daily ranking chart', directory: '临时文件' },
+        steps: [{
+          key: 'standalone_image',
+          status: 'succeeded',
+          output: {
+            asset_id: 99,
+            asset_url: '/api/uploads/chart.png',
+            title: 'GitHub 日榜 2026-08-09',
+            directory: '临时文件',
+          },
+        }],
+      }), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const runtime = await openGlobalAgentTools({
+      apiBase: 'http://localhost:8000/api',
+      approvalPolicy: 'automatic',
+    })
+    await expect(executeTool(runtime.tools.generateImage, {
+      prompt: 'daily ranking chart',
+      title: 'GitHub 日榜 2026-08-09',
+      directory: '临时文件',
+    })).resolves.toMatchObject({
+      jobId: 54,
+      status: 'succeeded',
+      assetId: 99,
+      directory: '临时文件',
+    })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    await runtime.close()
   })
 })

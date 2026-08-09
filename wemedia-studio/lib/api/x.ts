@@ -16,7 +16,10 @@ export interface XSubscription {
   extra_terms: string
   sort: string
   max_results: number
-  notify_new_posts: boolean
+  collect_interval_minutes: number
+  intelligence_enabled: boolean
+  intelligence_enabled_at: string | null
+  ingestion_directory_ids: number[]
   last_collected_at: string | null
   last_error: string
   added_at: string
@@ -35,7 +38,14 @@ export interface CreateXSubscriptionInput {
   extra_terms?: string
   sort?: string
   max_results?: number
+  collect_interval_minutes?: number
+  ingestion_directory_ids?: number[]
 }
+
+export type XSubscriptionPatch = Partial<Pick<
+  XSubscription,
+  'enabled' | 'label' | 'raw_query' | 'max_results' | 'collect_interval_minutes' | 'intelligence_enabled' | 'ingestion_directory_ids'
+>>
 
 export interface XPost {
   tweet_id: string
@@ -111,7 +121,7 @@ export async function createXSubscription(
 
 export async function patchXSubscription(
   id: number,
-  body: Partial<Pick<XSubscription, 'enabled' | 'label' | 'raw_query' | 'max_results' | 'notify_new_posts'>>,
+  body: XSubscriptionPatch,
 ): Promise<XSubscription> {
   return apiFetch<XSubscription>(`/x/subscriptions/${id}`, {
     method: 'PATCH',
@@ -127,6 +137,13 @@ export async function deleteXSubscription(id: number): Promise<void> {
 
 export async function collectXSubscription(id: number): Promise<XCollectResult> {
   return apiFetch<XCollectResult>(`/x/subscriptions/${id}/collect`, { method: 'POST' })
+}
+
+export async function backfillXSubscription(id: number, days: number): Promise<XCollectResult> {
+  return apiFetch<XCollectResult>(`/x/subscriptions/${id}/backfill`, {
+    method: 'POST',
+    body: JSON.stringify({ days }),
+  })
 }
 
 export async function collectAllXSubscriptions(): Promise<XCollectAllResult> {

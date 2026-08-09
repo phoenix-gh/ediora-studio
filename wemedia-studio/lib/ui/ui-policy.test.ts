@@ -9,7 +9,6 @@ const MIGRATED_FILES = [
   'components/features/Sidebar.tsx',
   'components/features/CreateTaskDialog.tsx',
   'components/features/dashboard/AlertsBar.tsx',
-  'components/features/dashboard/TodayPlan.tsx',
   'components/features/dashboard/ReleasesToday.tsx',
   'components/features/dashboard/SourceStatusGrid.tsx',
 ]

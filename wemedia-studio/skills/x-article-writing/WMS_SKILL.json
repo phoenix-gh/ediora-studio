@@ -1,0 +1,8 @@
+{
+  "preloadReferences": [],
+  "execution": {
+    "planRequired": true,
+    "verificationRequired": true,
+    "maxRevisions": 1
+  }
+}

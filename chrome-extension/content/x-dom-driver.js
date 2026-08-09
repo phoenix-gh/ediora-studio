@@ -354,12 +354,18 @@ export function createXDomDriver(document, pageWindow = globalThis.window) {
       const root = schedulerRoot(document)
       const dateField = resolveInput(findFirst(root, SELECTORS.scheduleDate))
       const timeField = resolveInput(findFirst(root, SELECTORS.scheduleTime))
+      const targetDate = new Date(
+        parts.year,
+        parts.month - 1,
+        parts.day,
+        parts.period === 'AM' ? parts.hour12 % 12 : (parts.hour12 % 12) + 12,
+        parts.minute,
+      )
 
       if (dateField || timeField) {
         if (!dateField || !timeField) {
           throw contractError(ERROR_CODES.SCHEDULE_CONTROLS_CHANGED, 'X 安排表输入控件不完整')
         }
-        const targetDate = new Date(parts.year, parts.month - 1, parts.day, parts.period === 'AM' ? parts.hour12 % 12 : (parts.hour12 % 12) + 12, parts.minute)
         setInputValue(dateField, dateValue(targetDate), pageWindow)
         setInputValue(timeField, timeValue(targetDate), pageWindow)
         return

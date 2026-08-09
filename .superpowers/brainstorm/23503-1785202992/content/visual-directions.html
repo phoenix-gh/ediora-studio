@@ -1,0 +1,394 @@
+<style>
+  .direction-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 18px;
+    margin-top: 24px;
+  }
+  .direction {
+    overflow: hidden;
+    border: 1px solid #dbe0e8;
+    border-radius: 18px;
+    background: #fff;
+    cursor: pointer;
+    transition: .2s ease;
+  }
+  .direction:hover {
+    transform: translateY(-2px);
+    border-color: #7c83f5;
+    box-shadow: 0 16px 36px rgba(20, 28, 52, .10);
+  }
+  .direction.selected {
+    border-color: #6366f1;
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, .16), 0 18px 44px rgba(40, 45, 95, .14);
+  }
+  .preview {
+    height: 390px;
+    display: grid;
+    grid-template-columns: 86px 1fr;
+    font-family: Inter, "PingFang SC", "Microsoft YaHei", sans-serif;
+  }
+  .mini-sidebar {
+    padding: 13px 9px;
+    border-right: 1px solid;
+    font-size: 7px;
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin-bottom: 18px;
+    font-weight: 750;
+    font-size: 8px;
+  }
+  .brand-mark {
+    width: 16px;
+    height: 16px;
+    display: grid;
+    place-items: center;
+    border-radius: 5px;
+    color: white;
+    font-size: 8px;
+    font-weight: 800;
+  }
+  .nav-label {
+    margin: 12px 5px 5px;
+    font-size: 5px;
+    font-weight: 700;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    opacity: .48;
+  }
+  .nav-row {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    padding: 6px 7px;
+    margin: 2px 0;
+    border-radius: 6px;
+  }
+  .nav-dot {
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+  }
+  .mini-main {
+    padding: 16px;
+  }
+  .topbar {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    margin-bottom: 15px;
+  }
+  .eyeline {
+    margin-bottom: 4px;
+    font-size: 6px;
+    opacity: .56;
+  }
+  .page-title {
+    font-size: 16px;
+    font-weight: 720;
+    letter-spacing: -.03em;
+  }
+  .primary-button {
+    border: 0;
+    border-radius: 7px;
+    padding: 7px 9px;
+    color: white;
+    font-size: 6px;
+    font-weight: 700;
+  }
+  .summary {
+    display: grid;
+    grid-template-columns: 1.1fr 1fr 1fr;
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+  .metric {
+    min-height: 67px;
+    padding: 10px;
+    border: 1px solid;
+    border-radius: 10px;
+  }
+  .metric-label {
+    font-size: 6px;
+    opacity: .58;
+  }
+  .metric-value {
+    margin-top: 5px;
+    font-size: 19px;
+    font-weight: 720;
+    letter-spacing: -.04em;
+  }
+  .metric-meta {
+    margin-top: 5px;
+    font-size: 5px;
+    opacity: .58;
+  }
+  .workspace {
+    display: grid;
+    grid-template-columns: 1.1fr .9fr;
+    gap: 8px;
+  }
+  .panel {
+    min-height: 212px;
+    padding: 10px;
+    border: 1px solid;
+    border-radius: 11px;
+  }
+  .panel-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+    font-size: 7px;
+    font-weight: 720;
+  }
+  .task {
+    display: grid;
+    grid-template-columns: 5px 1fr auto;
+    gap: 7px;
+    align-items: center;
+    padding: 8px 0;
+    border-bottom: 1px solid;
+    font-size: 6px;
+  }
+  .task-status {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+  }
+  .task-title {
+    margin-bottom: 2px;
+    font-weight: 650;
+  }
+  .task-meta {
+    font-size: 5px;
+    opacity: .5;
+  }
+  .pill {
+    border-radius: 999px;
+    padding: 3px 5px;
+    font-size: 5px;
+  }
+  .source {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 7px;
+    margin-bottom: 6px;
+    border-radius: 8px;
+    font-size: 6px;
+  }
+  .source-icon {
+    width: 18px;
+    height: 18px;
+    display: grid;
+    place-items: center;
+    border-radius: 6px;
+    font-weight: 800;
+  }
+  .source strong {
+    display: block;
+    font-size: 6px;
+  }
+  .source span {
+    font-size: 5px;
+    opacity: .55;
+  }
+  .direction-copy {
+    padding: 16px 17px 18px;
+    border-top: 1px solid #e6e9ef;
+  }
+  .direction-copy h3 {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0 0 6px;
+    font-size: 16px;
+  }
+  .recommend {
+    padding: 3px 7px;
+    border-radius: 999px;
+    background: #eef2ff;
+    color: #4f46e5;
+    font-size: 10px;
+    font-weight: 700;
+  }
+  .direction-copy p {
+    min-height: 44px;
+    margin: 0;
+    color: #687083;
+    font-size: 12px;
+    line-height: 1.55;
+  }
+  .swatches {
+    display: flex;
+    gap: 6px;
+    margin-top: 13px;
+  }
+  .swatch {
+    width: 23px;
+    height: 23px;
+    border: 2px solid rgba(255,255,255,.8);
+    border-radius: 7px;
+    box-shadow: 0 0 0 1px rgba(20,25,40,.09);
+  }
+  @media (max-width: 1100px) {
+    .direction-grid { grid-template-columns: 1fr; }
+    .preview { height: 430px; grid-template-columns: 96px 1fr; }
+  }
+</style>
+
+<h2>Ediora · 述策，哪套视觉方向更合适？</h2>
+<p class="subtitle">三套方案都保留当前信息架构，区别在于品牌气质、工作区密度和强调色。点击卡片选择；我推荐 A。</p>
+
+<div class="direction-grid">
+  <div class="direction" data-choice="a" onclick="toggleSelect(this)">
+    <div class="preview" style="background:#f7f8fc;color:#172033">
+      <div class="mini-sidebar" style="background:#ffffff;border-color:#e6e9f1;color:#566078">
+        <div class="brand" style="color:#172033"><span class="brand-mark" style="background:linear-gradient(135deg,#18b9d6,#6366f1 58%,#8b5cf6)">E</span>Ediora</div>
+        <div class="nav-row" style="background:#eef0ff;color:#4f46e5;font-weight:700"><span class="nav-dot" style="background:#6366f1"></span>今日工作台</div>
+        <div class="nav-row"><span class="nav-dot" style="background:#a8afbf"></span>今日计划</div>
+        <div class="nav-row"><span class="nav-dot" style="background:#a8afbf"></span>创作任务</div>
+        <div class="nav-label">创作</div>
+        <div class="nav-row"><span class="nav-dot" style="background:#a8afbf"></span>草稿箱</div>
+        <div class="nav-row"><span class="nav-dot" style="background:#a8afbf"></span>创作资产</div>
+        <div class="nav-row"><span class="nav-dot" style="background:#8b5cf6"></span>数字人口播</div>
+        <div class="nav-label">信息源</div>
+        <div class="nav-row"><span class="nav-dot" style="background:#a8afbf"></span>GitHub</div>
+        <div class="nav-row"><span class="nav-dot" style="background:#a8afbf"></span>YouTube</div>
+        <div class="nav-row"><span class="nav-dot" style="background:#a8afbf"></span>X</div>
+      </div>
+      <div class="mini-main">
+        <div class="topbar">
+          <div><div class="eyeline">7 月 28 日 · 星期二</div><div class="page-title">今日工作台</div></div>
+          <button class="primary-button" style="background:#5b5fe8">＋ 发起创作任务</button>
+        </div>
+        <div class="summary">
+          <div class="metric" style="background:linear-gradient(135deg,#eef0ff,#f7f3ff);border-color:#dfe2ff"><div class="metric-label">待响应内容</div><div class="metric-value" style="color:#4f46e5">18</div><div class="metric-meta">AI 已甄选 · 7 条高价值</div></div>
+          <div class="metric" style="background:#fff;border-color:#e5e8ef"><div class="metric-label">进行中任务</div><div class="metric-value">6</div><div class="metric-meta">2 个任务即将完成</div></div>
+          <div class="metric" style="background:#fff;border-color:#e5e8ef"><div class="metric-label">今日入库</div><div class="metric-value">121</div><div class="metric-meta" style="color:#059669">较昨日 +22%</div></div>
+        </div>
+        <div class="workspace">
+          <div class="panel" style="background:#fff;border-color:#e5e8ef">
+            <div class="panel-head"><span>今日优先事项</span><span style="color:#5b5fe8">查看全部 →</span></div>
+            <div class="task" style="border-color:#edf0f5"><span class="task-status" style="background:#6366f1"></span><div><div class="task-title">整理 AI Agent 行业观察</div><div class="task-meta">文章 · 已完成素材甄选</div></div><span class="pill" style="background:#eef0ff;color:#4f46e5">写作中</span></div>
+            <div class="task" style="border-color:#edf0f5"><span class="task-status" style="background:#22c3de"></span><div><div class="task-title">YouTube 字幕价值分析</div><div class="task-meta">视频 · 6 条待确认</div></div><span class="pill" style="background:#e8fbff;color:#078ca5">待响应</span></div>
+            <div class="task" style="border-color:#edf0f5"><span class="task-status" style="background:#f59e0b"></span><div><div class="task-title">数字人口播脚本</div><div class="task-meta">口播 · 等待配图</div></div><span class="pill" style="background:#fff7e5;color:#b45309">待处理</span></div>
+          </div>
+          <div class="panel" style="background:#fff;border-color:#e5e8ef">
+            <div class="panel-head"><span>信息源状态</span><span style="color:#5b5fe8">管理</span></div>
+            <div class="source" style="background:#f7f8fb"><div class="source-icon" style="background:#e9ecf4">GH</div><div><strong>GitHub</strong><span>新增 9 · 8 分钟前</span></div></div>
+            <div class="source" style="background:#f7f8fb"><div class="source-icon" style="background:#e8fbff;color:#078ca5">X</div><div><strong>X 订阅</strong><span>新增 101 · 刚刚</span></div></div>
+            <div class="source" style="background:#f7f8fb"><div class="source-icon" style="background:#fff0f0;color:#dc2626">YT</div><div><strong>YouTube</strong><span>字幕任务 3 · 22 分钟前</span></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="direction-copy">
+      <h3>A · 智性靛蓝 <span class="recommend">推荐</span></h3>
+      <p>专业、克制、带一点 AI 科技感。靛蓝负责操作，青色只作数据与采集提示，紫色专属于 AI 能力。</p>
+      <div class="swatches"><span class="swatch" style="background:#f7f8fc"></span><span class="swatch" style="background:#172033"></span><span class="swatch" style="background:#6366f1"></span><span class="swatch" style="background:#22c3de"></span><span class="swatch" style="background:#8b5cf6"></span></div>
+    </div>
+  </div>
+
+  <div class="direction" data-choice="b" onclick="toggleSelect(this)">
+    <div class="preview" style="background:#f5f7f8;color:#162226">
+      <div class="mini-sidebar" style="background:#edf2f2;border-color:#dce5e5;color:#526164">
+        <div class="brand" style="color:#162226"><span class="brand-mark" style="background:#0f766e">E</span>Ediora</div>
+        <div class="nav-row" style="background:#dcebea;color:#0f625c;font-weight:700"><span class="nav-dot" style="background:#0f766e"></span>今日工作台</div>
+        <div class="nav-row"><span class="nav-dot" style="background:#91a1a3"></span>今日计划</div>
+        <div class="nav-row"><span class="nav-dot" style="background:#91a1a3"></span>创作任务</div>
+        <div class="nav-label">创作</div>
+        <div class="nav-row"><span class="nav-dot" style="background:#91a1a3"></span>草稿箱</div>
+        <div class="nav-row"><span class="nav-dot" style="background:#91a1a3"></span>创作资产</div>
+        <div class="nav-row"><span class="nav-dot" style="background:#91a1a3"></span>数字人口播</div>
+        <div class="nav-label">信息源</div>
+        <div class="nav-row"><span class="nav-dot" style="background:#91a1a3"></span>GitHub</div>
+        <div class="nav-row"><span class="nav-dot" style="background:#91a1a3"></span>YouTube</div>
+        <div class="nav-row"><span class="nav-dot" style="background:#91a1a3"></span>X</div>
+      </div>
+      <div class="mini-main">
+        <div class="topbar">
+          <div><div class="eyeline">7 月 28 日 · 星期二</div><div class="page-title">今日工作台</div></div>
+          <button class="primary-button" style="background:#0f766e">＋ 发起创作任务</button>
+        </div>
+        <div class="summary">
+          <div class="metric" style="background:#e8f1f0;border-color:#d0e2e0"><div class="metric-label">待响应内容</div><div class="metric-value" style="color:#0f766e">18</div><div class="metric-meta">AI 已甄选 · 7 条高价值</div></div>
+          <div class="metric" style="background:#fff;border-color:#dde4e5"><div class="metric-label">进行中任务</div><div class="metric-value">6</div><div class="metric-meta">2 个任务即将完成</div></div>
+          <div class="metric" style="background:#fff;border-color:#dde4e5"><div class="metric-label">今日入库</div><div class="metric-value">121</div><div class="metric-meta" style="color:#0f766e">较昨日 +22%</div></div>
+        </div>
+        <div class="workspace">
+          <div class="panel" style="background:#fff;border-color:#dde4e5">
+            <div class="panel-head"><span>今日优先事项</span><span style="color:#0f766e">查看全部 →</span></div>
+            <div class="task" style="border-color:#e8eded"><span class="task-status" style="background:#0f766e"></span><div><div class="task-title">整理 AI Agent 行业观察</div><div class="task-meta">文章 · 已完成素材甄选</div></div><span class="pill" style="background:#dcebea;color:#0f625c">写作中</span></div>
+            <div class="task" style="border-color:#e8eded"><span class="task-status" style="background:#5b8f89"></span><div><div class="task-title">YouTube 字幕价值分析</div><div class="task-meta">视频 · 6 条待确认</div></div><span class="pill" style="background:#e8f1f0;color:#416d68">待响应</span></div>
+            <div class="task" style="border-color:#e8eded"><span class="task-status" style="background:#d08a35"></span><div><div class="task-title">数字人口播脚本</div><div class="task-meta">口播 · 等待配图</div></div><span class="pill" style="background:#faf0df;color:#9a5b16">待处理</span></div>
+          </div>
+          <div class="panel" style="background:#fff;border-color:#dde4e5">
+            <div class="panel-head"><span>信息源状态</span><span style="color:#0f766e">管理</span></div>
+            <div class="source" style="background:#f2f5f5"><div class="source-icon" style="background:#e2e9e9">GH</div><div><strong>GitHub</strong><span>新增 9 · 8 分钟前</span></div></div>
+            <div class="source" style="background:#f2f5f5"><div class="source-icon" style="background:#dcebea;color:#0f625c">X</div><div><strong>X 订阅</strong><span>新增 101 · 刚刚</span></div></div>
+            <div class="source" style="background:#f2f5f5"><div class="source-icon" style="background:#f5e9e8;color:#a84b45">YT</div><div><strong>YouTube</strong><span>字幕任务 3 · 22 分钟前</span></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="direction-copy">
+      <h3>B · 松石编辑部</h3>
+      <p>更安静、更像专业编辑与研究工具。阅读舒适、长期耐看，但品牌科技感和操作辨识度稍弱。</p>
+      <div class="swatches"><span class="swatch" style="background:#f5f7f8"></span><span class="swatch" style="background:#162226"></span><span class="swatch" style="background:#0f766e"></span><span class="swatch" style="background:#7aa6a0"></span><span class="swatch" style="background:#d08a35"></span></div>
+    </div>
+  </div>
+
+  <div class="direction" data-choice="c" onclick="toggleSelect(this)">
+    <div class="preview" style="background:#0e111b;color:#f0f2f8">
+      <div class="mini-sidebar" style="background:#121724;border-color:#232b3d;color:#9ca8bd">
+        <div class="brand" style="color:#f0f2f8"><span class="brand-mark" style="background:linear-gradient(135deg,#22d3ee,#7c3aed)">E</span>Ediora</div>
+        <div class="nav-row" style="background:#252345;color:#c9c8ff;font-weight:700"><span class="nav-dot" style="background:#8b8cff"></span>今日工作台</div>
+        <div class="nav-row"><span class="nav-dot" style="background:#657086"></span>今日计划</div>
+        <div class="nav-row"><span class="nav-dot" style="background:#657086"></span>创作任务</div>
+        <div class="nav-label">创作</div>
+        <div class="nav-row"><span class="nav-dot" style="background:#657086"></span>草稿箱</div>
+        <div class="nav-row"><span class="nav-dot" style="background:#657086"></span>创作资产</div>
+        <div class="nav-row"><span class="nav-dot" style="background:#a78bfa"></span>数字人口播</div>
+        <div class="nav-label">信息源</div>
+        <div class="nav-row"><span class="nav-dot" style="background:#657086"></span>GitHub</div>
+        <div class="nav-row"><span class="nav-dot" style="background:#657086"></span>YouTube</div>
+        <div class="nav-row"><span class="nav-dot" style="background:#657086"></span>X</div>
+      </div>
+      <div class="mini-main">
+        <div class="topbar">
+          <div><div class="eyeline">7 月 28 日 · 星期二</div><div class="page-title">今日工作台</div></div>
+          <button class="primary-button" style="background:#6d6ff2">＋ 发起创作任务</button>
+        </div>
+        <div class="summary">
+          <div class="metric" style="background:linear-gradient(135deg,#202445,#261d3f);border-color:#363a66"><div class="metric-label">待响应内容</div><div class="metric-value" style="color:#a5a6ff">18</div><div class="metric-meta">AI 已甄选 · 7 条高价值</div></div>
+          <div class="metric" style="background:#151a27;border-color:#272f42"><div class="metric-label">进行中任务</div><div class="metric-value">6</div><div class="metric-meta">2 个任务即将完成</div></div>
+          <div class="metric" style="background:#151a27;border-color:#272f42"><div class="metric-label">今日入库</div><div class="metric-value">121</div><div class="metric-meta" style="color:#4ade80">较昨日 +22%</div></div>
+        </div>
+        <div class="workspace">
+          <div class="panel" style="background:#151a27;border-color:#272f42">
+            <div class="panel-head"><span>今日优先事项</span><span style="color:#a5a6ff">查看全部 →</span></div>
+            <div class="task" style="border-color:#252d40"><span class="task-status" style="background:#8b8cff"></span><div><div class="task-title">整理 AI Agent 行业观察</div><div class="task-meta">文章 · 已完成素材甄选</div></div><span class="pill" style="background:#27264c;color:#c1c1ff">写作中</span></div>
+            <div class="task" style="border-color:#252d40"><span class="task-status" style="background:#22d3ee"></span><div><div class="task-title">YouTube 字幕价值分析</div><div class="task-meta">视频 · 6 条待确认</div></div><span class="pill" style="background:#153642;color:#74e7f5">待响应</span></div>
+            <div class="task" style="border-color:#252d40"><span class="task-status" style="background:#f59e0b"></span><div><div class="task-title">数字人口播脚本</div><div class="task-meta">口播 · 等待配图</div></div><span class="pill" style="background:#392d18;color:#ffd277">待处理</span></div>
+          </div>
+          <div class="panel" style="background:#151a27;border-color:#272f42">
+            <div class="panel-head"><span>信息源状态</span><span style="color:#a5a6ff">管理</span></div>
+            <div class="source" style="background:#1c2231"><div class="source-icon" style="background:#282f40">GH</div><div><strong>GitHub</strong><span>新增 9 · 8 分钟前</span></div></div>
+            <div class="source" style="background:#1c2231"><div class="source-icon" style="background:#153642;color:#74e7f5">X</div><div><strong>X 订阅</strong><span>新增 101 · 刚刚</span></div></div>
+            <div class="source" style="background:#1c2231"><div class="source-icon" style="background:#3c232b;color:#ff8f98">YT</div><div><strong>YouTube</strong><span>字幕任务 3 · 22 分钟前</span></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="direction-copy">
+      <h3>C · 曜石控制台</h3>
+      <p>暗色优先、科技感最强，适合长时间监控和任务控制；但文章阅读、编辑和大量白底内容的负担更高。</p>
+      <div class="swatches"><span class="swatch" style="background:#0e111b"></span><span class="swatch" style="background:#f0f2f8"></span><span class="swatch" style="background:#6d6ff2"></span><span class="swatch" style="background:#22d3ee"></span><span class="swatch" style="background:#a78bfa"></span></div>
+    </div>
+  </div>
+</div>

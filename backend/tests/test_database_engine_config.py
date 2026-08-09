@@ -19,26 +19,27 @@ def test_database_timeout_accepts_finite_positive_values():
     assert _parse_database_timeout_seconds("300") == 300
 
 
-def test_database_engine_options_are_driver_specific():
+def test_database_engine_options_are_postgresql_specific():
     from database import _database_engine_kwargs
 
     postgres = _database_engine_kwargs(
         "postgresql+asyncpg://postgres@example.test/wemedia",
         12.5,
     )
-    sqlite = _database_engine_kwargs(
-        "sqlite+aiosqlite:////tmp/wemedia.db",
-        12.5,
-    )
-    other = _database_engine_kwargs(
-        "mysql+aiomysql://root@example.test/wemedia",
-        12.5,
-    )
-
     assert postgres["connect_args"] == {"command_timeout": 12.5}
     assert postgres["pool_size"] == 10
     assert postgres["max_overflow"] == 20
-    assert sqlite["connect_args"] == {"timeout": 12.5}
-    assert "pool_size" not in sqlite
-    assert "max_overflow" not in sqlite
-    assert "connect_args" not in other
+
+
+@pytest.mark.parametrize(
+    "database_url",
+    [
+        "postgresql+psycopg://postgres@example.test/wemedia",
+        "mysql+aiomysql://root@example.test/wemedia",
+    ],
+)
+def test_database_engine_rejects_unsupported_dialects(database_url):
+    from database import _database_engine_kwargs
+
+    with pytest.raises(ValueError, match="PostgreSQL"):
+        _database_engine_kwargs(database_url, 12.5)

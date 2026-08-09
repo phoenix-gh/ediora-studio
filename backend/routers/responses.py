@@ -2,18 +2,27 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 from typing import Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import desc, func, or_, select
+from sqlalchemy import String, desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from content_response_service import (
+    CONTENT_TYPES,
     create_analysis_run,
     create_outputs,
     persist_analysis,
     set_decision,
+)
+from content_response_handoff import (
+    DestinationConflictError,
+    SourceUnavailableError,
+    StaleAnalysisError,
+    create_or_get_destination,
+    get_response_source,
 )
 from database import get_db
 from job_queue import enqueue_job
@@ -40,8 +49,18 @@ class AnalyzeIn(BaseModel):
 
 
 class DecisionIn(BaseModel):
-    action: Literal["adopt", "later", "not_valuable", "reset"]
+    action: Literal["not_processed", "reset"]
     reason: str = Field(default="", max_length=1000)
+
+
+class ClassificationIn(BaseModel):
+    content_types: list[str] = Field(default_factory=list, max_length=5)
+
+
+class DestinationIn(BaseModel):
+    destination: Literal["creative_asset"]
+    analysis_run_id: int
+    directory: str | None = None
 
 
 class OutputsIn(BaseModel):
@@ -61,6 +80,10 @@ class WorkerOutputResultIn(BaseModel):
     source_attribution: dict = Field(default_factory=dict)
 
 
+class WorkerLinkIn(BaseModel):
+    article_draft_id: int = Field(gt=0)
+
+
 def _analysis_payload(run: ContentAnalysisRun | None) -> dict | None:
     if run is None:
         return None
@@ -73,18 +96,17 @@ def _analysis_payload(run: ContentAnalysisRun | None) -> dict | None:
         "value_dimensions": run.value_dimensions,
         "summary_cn": run.summary_cn,
         "core_thesis": run.core_thesis,
-        "key_points": run.key_points,
-        "evidence": run.evidence,
+        "suggested_title": run.suggested_title,
+        "suggested_angle": run.suggested_angle,
+        "target_reader": run.target_reader,
+        "suggested_structure": run.suggested_structure,
         "value_points": run.value_points,
+        "evidence": run.evidence,
         "risks": run.risks,
         "verification_items": run.verification_items,
-        "personal_angles": run.personal_angles,
-        "article_outlines": run.article_outlines,
-        "comment_angles": run.comment_angles,
-        "recommended_output_types": run.recommended_output_types,
-        "recommended_action": run.recommended_action,
+        "recommended_content_types": run.recommended_content_types,
+        "recommended_disposition": run.recommended_disposition,
         "recommendation_reason": run.recommendation_reason,
-        "recommended_publish_account_id": run.recommended_publish_account_id,
         "model_provider": run.model_provider,
         "model_name": run.model_name,
         "prompt_version": run.prompt_version,
@@ -110,8 +132,19 @@ def _item_payload(
         "source_title": item.source_title,
         "source_author": item.source_author,
         "source_published_at": item.source_published_at,
+        "subscription_id": item.subscription_id,
         "workflow_status": item.workflow_status,
         "decision_status": item.decision_status,
+        "content_types": item.content_types,
+        "destination": None if not item.destination_type else {
+            "type": item.destination_type,
+            "id": item.destination_id,
+            "url": (
+                f"/drafts?draft={item.destination_id}"
+                if item.destination_type == "draft"
+                else f"/assets?selected={item.destination_id}"
+            ),
+        },
         "current_analysis_run_id": item.current_analysis_run_id,
         "selected_publish_account_id": item.selected_publish_account_id,
         "selected_output_types": item.selected_output_types,
@@ -170,10 +203,11 @@ async def list_responses(
     source_type: str | None = None,
     decision_status: str | None = None,
     workflow_status: str | None = None,
+    content_type: str | None = None,
     min_score: int | None = Query(default=None, ge=0, le=100),
-    account_id: str | None = None,
+    days: int = Query(default=3, ge=0, le=3650),
     search: str = "",
-    sort: Literal["priority", "score", "newest"] = "priority",
+    sort: Literal["score", "newest"] = "score",
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=30, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
@@ -194,11 +228,22 @@ async def list_responses(
         query = query.where(ContentResponseItem.workflow_status == workflow_status)
     if min_score is not None:
         query = query.where(ContentAnalysisRun.content_value_score >= min_score)
-    if account_id:
-        query = query.join(
-            ContentAccountScore,
-            ContentAccountScore.analysis_run_id == ContentAnalysisRun.id,
-        ).where(ContentAccountScore.publish_account_id == account_id)
+    if days:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        query = query.where(
+            func.coalesce(
+                ContentResponseItem.source_published_at,
+                ContentResponseItem.created_at,
+            ) >= cutoff
+        )
+    if content_type:
+        if content_type not in CONTENT_TYPES:
+            raise HTTPException(422, "invalid content type")
+        query = query.where(
+            func.cast(ContentResponseItem.content_types, String).like(
+                f'%"{content_type}"%'
+            )
+        )
     if search.strip():
         pattern = f"%{search.strip()}%"
         query = query.where(or_(
@@ -206,23 +251,39 @@ async def list_responses(
             ContentResponseItem.source_author.ilike(pattern),
         ))
     order = {
-        "score": (desc(ContentAnalysisRun.content_value_score), desc(ContentResponseItem.source_published_at)),
-        "newest": (desc(ContentResponseItem.source_published_at), desc(ContentResponseItem.id)),
-        "priority": (
-            ContentResponseItem.decision_status != "pending",
-            ContentResponseItem.workflow_status != "ready",
+        "score": (
             desc(ContentAnalysisRun.content_value_score),
             desc(ContentResponseItem.source_published_at),
+            desc(ContentResponseItem.id),
         ),
+        "newest": (desc(ContentResponseItem.source_published_at), desc(ContentResponseItem.id)),
     }[sort]
     filtered = query.order_by(*order)
     rows = (await db.execute(
         filtered.offset((page - 1) * page_size).limit(page_size)
     )).all()
-    count_query = select(func.count()).select_from(query.order_by(None).subquery())
-    total = int((await db.scalar(count_query)) or 0)
+    filtered_subquery = query.order_by(None).subquery()
+    total = int((await db.scalar(
+        select(func.count()).select_from(filtered_subquery)
+    )) or 0)
+    count_rows = (await db.execute(
+        select(
+            filtered_subquery.c.decision_status,
+            func.count().label("count"),
+        )
+        .group_by(filtered_subquery.c.decision_status)
+    )).all()
+    counts = {
+        "all": total,
+        "pending": 0,
+        "worth_writing": 0,
+        "creative_asset": 0,
+        "not_processed": 0,
+    }
+    counts.update({status: int(count) for status, count in count_rows})
     return {
         "items": [_item_payload(item, run, job=job) for item, run, job in rows],
+        "counts": counts,
         "page": page,
         "page_size": page_size,
         "total": total,
@@ -284,10 +345,35 @@ async def output_worker_result(
     body: WorkerOutputResultIn,
     db: AsyncSession = Depends(get_db),
 ):
-    output = await db.get(ContentResponseOutput, output_id)
+    output = await db.scalar(
+        select(ContentResponseOutput)
+        .where(ContentResponseOutput.id == output_id)
+        .with_for_update()
+    )
     if output is None:
         raise HTTPException(404, "response output not found")
+    item = await db.get(ContentResponseItem, output.response_item_id)
+    if item is None:
+        raise HTTPException(409, "response output item is missing")
     if output.status == "draft_ready":
+        if output.article_draft_id and (
+            item.destination_type != "draft"
+            or item.destination_id != output.article_draft_id
+        ):
+            item.destination_type = "draft"
+            item.destination_id = output.article_draft_id
+            db.add(ContentResponseEvent(
+                response_item_id=item.id,
+                analysis_run_id=output.analysis_run_id,
+                event_type="destination_created",
+                actor="worker",
+                payload={
+                    "destination": "draft",
+                    "destination_id": output.article_draft_id,
+                    "output_id": output.id,
+                },
+            ))
+            await db.commit()
         return {"id": output.id, "status": output.status, "article_draft_id": output.article_draft_id}
     if output.output_type in {"expanded_article", "commentary"}:
         draft = ArticleDraft(
@@ -305,8 +391,106 @@ async def output_worker_result(
     output.status = "draft_ready"
     output.error_code = ""
     output.error = ""
+    if output.article_draft_id is not None and item.destination_type is None:
+        item.destination_type = "draft"
+        item.destination_id = output.article_draft_id
+        db.add(ContentResponseEvent(
+            response_item_id=item.id,
+            analysis_run_id=output.analysis_run_id,
+            event_type="destination_created",
+            actor="worker",
+            payload={
+                "destination": "draft",
+                "destination_id": output.article_draft_id,
+                "output_id": output.id,
+            },
+        ))
     await db.commit()
     return {"id": output.id, "status": output.status, "article_draft_id": output.article_draft_id}
+
+
+@router.post("/outputs/{output_id}/worker-link", dependencies=[Depends(require_worker_token)])
+async def output_worker_link(
+    output_id: int,
+    body: WorkerLinkIn,
+    db: AsyncSession = Depends(get_db),
+):
+    output = await db.scalar(
+        select(ContentResponseOutput)
+        .where(ContentResponseOutput.id == output_id)
+        .with_for_update()
+    )
+    if output is None:
+        raise HTTPException(404, "response output not found")
+    if output.output_type not in {"expanded_article", "commentary"}:
+        raise HTTPException(422, "worker link requires an article output")
+
+    item = await db.get(ContentResponseItem, output.response_item_id)
+    if item is None:
+        raise HTTPException(409, "response output item is missing")
+    draft = await db.get(ArticleDraft, body.article_draft_id)
+    if draft is None:
+        raise HTTPException(404, "article draft not found")
+    if draft.topic_id != f"response:{item.id}":
+        raise HTTPException(409, "article draft topic_id does not belong to this response item")
+    if draft.draft_type != "article":
+        raise HTTPException(422, "worker link requires an article draft")
+    if not draft.content.strip():
+        raise HTTPException(422, "article draft content is empty")
+    if item.destination_type and (
+        item.destination_type != "draft" or item.destination_id != draft.id
+    ):
+        raise HTTPException(409, "response item already has another destination")
+
+    if output.status == "draft_ready":
+        if output.article_draft_id != draft.id:
+            raise HTTPException(409, "response output is already linked to another draft")
+        if item.destination_type != "draft" or item.destination_id != draft.id:
+            item.destination_type = "draft"
+            item.destination_id = draft.id
+            db.add(ContentResponseEvent(
+                response_item_id=item.id,
+                analysis_run_id=output.analysis_run_id,
+                event_type="destination_created",
+                actor="worker",
+                payload={
+                    "destination": "draft",
+                    "destination_id": draft.id,
+                    "output_id": output.id,
+                },
+            ))
+            await db.commit()
+        return {"id": output.id, "status": output.status, "article_draft_id": draft.id}
+
+    source_attribution = {
+        "url": item.source_url or "",
+        "title": item.source_title or "",
+    }
+    sources = list(draft.sources or [])
+    if source_attribution not in sources:
+        sources.append(source_attribution)
+    draft.sources = sources
+    output.article_draft_id = draft.id
+    output.source_attribution = source_attribution
+    output.status = "draft_ready"
+    output.error_code = ""
+    output.error = ""
+    if item.destination_type is None:
+        item.destination_type = "draft"
+        item.destination_id = draft.id
+        db.add(ContentResponseEvent(
+            response_item_id=item.id,
+            analysis_run_id=output.analysis_run_id,
+            event_type="destination_created",
+            actor="worker",
+            payload={
+                "destination": "draft",
+                "destination_id": draft.id,
+                "output_id": output.id,
+            },
+        ))
+    await db.commit()
+    return {"id": output.id, "status": output.status, "article_draft_id": draft.id}
 
 
 @router.get("/{item_id}")
@@ -318,10 +502,11 @@ async def get_response(item_id: int, db: AsyncSession = Depends(get_db)):
         .order_by(ContentAccountScore.rank, desc(ContentAccountScore.score))
     )).scalars().all() if item.current_analysis_run_id else []
     outputs = (await db.execute(
-        select(ContentResponseOutput)
+        select(ContentResponseOutput, ContentJob)
+        .outerjoin(ContentJob, ContentJob.id == ContentResponseOutput.job_id)
         .where(ContentResponseOutput.response_item_id == item.id)
         .order_by(desc(ContentResponseOutput.created_at))
-    )).scalars().all()
+    )).all()
     payload = _item_payload(item, run, job=job)
     payload["account_scores"] = [{
         "publish_account_id": score.publish_account_id,
@@ -340,11 +525,15 @@ async def get_response(item_id: int, db: AsyncSession = Depends(get_db)):
         "output_type": output.output_type,
         "status": output.status,
         "job_id": output.job_id,
+        "job_status": output_job.status if output_job is not None else None,
         "article_draft_id": output.article_draft_id,
         "content": output.content,
         "error_code": output.error_code,
         "error": output.error,
-    } for output in outputs]
+    } for output, output_job in outputs]
+    source = await get_response_source(db, item)
+    source.pop("body", None)
+    payload["source"] = source
     return payload
 
 
@@ -388,6 +577,61 @@ async def decide_response(
         raise HTTPException(422, str(exc)) from exc
 
 
+@router.post("/{item_id}/classification")
+async def classify_response(
+    item_id: int,
+    body: ClassificationIn,
+    db: AsyncSession = Depends(get_db),
+):
+    if any(content_type not in CONTENT_TYPES for content_type in body.content_types):
+        raise HTTPException(422, "invalid content type")
+    if len(set(body.content_types)) != len(body.content_types):
+        raise HTTPException(422, "duplicate content type")
+    item = await db.get(ContentResponseItem, item_id)
+    if item is None:
+        raise HTTPException(404, "response item not found")
+    item.content_types = list(body.content_types)
+    db.add(ContentResponseEvent(
+        response_item_id=item.id,
+        analysis_run_id=item.current_analysis_run_id,
+        event_type="classification_changed",
+        actor="user",
+        payload={"content_types": item.content_types},
+    ))
+    await db.commit()
+    await db.refresh(item)
+    return _item_payload(item)
+
+
+@router.post("/{item_id}/destination")
+async def create_response_destination(
+    item_id: int,
+    body: DestinationIn,
+    db: AsyncSession = Depends(get_db),
+):
+    item, run, _job = await _item_with_run(db, item_id)
+    if run is None or run.id != body.analysis_run_id:
+        raise HTTPException(409, "analysis run is stale")
+    try:
+        return await create_or_get_destination(
+            db,
+            item=item,
+            run=run,
+            destination=body.destination,
+            directory=body.directory,
+        )
+    except StaleAnalysisError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except DestinationConflictError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except SourceUnavailableError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
 @router.post("/{item_id}/outputs")
 async def post_outputs(
     item_id: int,
@@ -413,7 +657,14 @@ async def post_outputs(
         if created:
             await enqueue_job(job.id)
     return {"outputs": [
-        {"id": output.id, "output_type": output.output_type, "status": output.status, "job_id": job.id, "created": created}
+        {
+            "id": output.id,
+            "output_type": output.output_type,
+            "status": output.status,
+            "job_id": job.id,
+            "job_status": job.status,
+            "created": created,
+        }
         for output, job, created in outputs
     ]}
 
@@ -473,54 +724,10 @@ async def worker_context(
     db: AsyncSession = Depends(get_db),
 ):
     item, run, job = await _item_with_job_run(db, item_id, worker_job_id)
-    accounts = (await db.execute(
-        select(PublishAccount)
-        .where(PublishAccount.is_active.is_(True))
-        .order_by(PublishAccount.name)
-    )).scalars().all()
-    source: dict = {}
-    if item.source_type == "youtube_video":
-        video = await db.get(YoutubeVideo, item.source_id)
-        if video is None:
-            raise HTTPException(404, "youtube video not found")
-        source = {
-            "title": video.title,
-            "url": video.url,
-            "author": video.channel_name,
-            "description": video.description,
-            "published_at": video.published_at,
-            "transcript_status": video.transcript_status,
-            "transcript_language": video.transcript_language,
-            "transcript_text": video.transcript_text,
-            "transcript_segments": video.transcript_segments,
-            "transcript_content_hash": video.transcript_content_hash,
-        }
-    elif item.source_type == "x_post":
-        post = await db.get(XPost, item.source_id)
-        if post is None:
-            raise HTTPException(404, "x post not found")
-        source = {
-            "title": post.content[:500],
-            "url": post.url,
-            "author": post.username,
-            "content": post.content,
-            "raw_markdown": post.raw_markdown,
-            "published_at": post.published_at,
-        }
+    source = await get_response_source(db, item)
     return {
         "item": _item_payload(item, run, job=job),
         "source": source,
-        "accounts": [{
-            "id": account.id,
-            "name": account.name,
-            "platform": account.platform,
-            "positioning": account.positioning,
-            "audience": account.audience,
-            "tone": account.tone,
-            "topic_focus": account.topic_focus,
-            "taboo": account.taboo,
-            "style_rules": account.style_rules,
-        } for account in accounts],
     }
 
 

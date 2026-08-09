@@ -163,9 +163,6 @@ export function TextVideoWorkbench({
   const sceneActionKey = sceneDirectionScope === 'selected' && activeSceneId
     ? `scene:${activeSceneId}`
     : 'scene:all'
-  const selectedMotionActionKey = activeSceneId
-    ? `motion:${activeSceneId}`
-    : 'motion:all'
 
   function changeDocument(
     update: (current: TextVideoProject) => TextVideoProject,
@@ -451,23 +448,6 @@ export function TextVideoWorkbench({
             renderAction={
               actionStates?.['render:mp4'] ?? actionStates?.recovery
             }
-            motionAction={
-              actionStates?.[selectedMotionActionKey]
-              ?? actionStates?.['motion:all']
-            }
-            onOptimizeMotion={async (scope, direction) => {
-              if (!onGenerateScenePlan) {
-                throw new Error('AI 动效优化服务尚未连接')
-              }
-              await onGenerateScenePlan({
-                mode: 'motion',
-                scope,
-                selected_scene_id: scope === 'selected'
-                  ? activeSceneId
-                  : '',
-                direction,
-              })
-            }}
           />
         )}
       </div>

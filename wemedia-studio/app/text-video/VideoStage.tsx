@@ -1,6 +1,7 @@
 'use client'
 
-import { useState } from 'react'
+import { useRef, useState } from 'react'
+import type { PlayerRef } from '@remotion/player'
 import {
   ArrowLeftFromLine,
   ArrowRightFromLine,
@@ -60,7 +61,6 @@ import {
 import { cn } from '@/lib/utils'
 
 import { RemotionPreview } from './RemotionPreview'
-import { MotionPlanEditor } from './MotionPlanEditor'
 import { SceneTimeline } from './SceneTimeline'
 import { TemplateSettingsDialog } from './TemplateSettingsDialog'
 import type { TextVideoActionState } from './useTextVideoProjectActions'
@@ -78,8 +78,6 @@ export function VideoStage({
   onApplyTemplateSettings,
   onRenderVideo,
   renderAction,
-  onOptimizeMotion,
-  motionAction,
 }: {
   project: TextVideoProject
   selectedSceneId: string
@@ -98,13 +96,9 @@ export function VideoStage({
   ): Promise<void>
   onRenderVideo?: () => void
   renderAction?: TextVideoActionState
-  onOptimizeMotion?(
-    scope: 'all' | 'selected',
-    direction: string,
-  ): void | Promise<void>
-  motionAction?: TextVideoActionState
 }) {
   const [templateSettingsOpen, setTemplateSettingsOpen] = useState(false)
+  const previewPlayerRef = useRef<PlayerRef>(null)
   const scenes = project.scene_plan.scenes
   const selectedIndex = scenes.findIndex(
     scene => scene.id === selectedSceneId,
@@ -140,6 +134,11 @@ export function VideoStage({
     : hasOutput
       ? '重新生成视频'
       : '生成视频'
+
+  function previewWholeVideo() {
+    onPreviewAll()
+    previewPlayerRef.current?.play()
+  }
 
   return (
     <div
@@ -223,7 +222,7 @@ export function VideoStage({
             size="sm"
             variant="outline"
             disabled={!previewReady}
-            onClick={onPreviewAll}
+            onClick={previewWholeVideo}
           >
             <Play data-icon />
             预览全片
@@ -246,6 +245,7 @@ export function VideoStage({
               project={project}
               selectedSceneId={activeSceneId}
               previewAll={previewAll}
+              playerRef={previewPlayerRef}
             />
           </div>
         </div>
@@ -326,24 +326,6 @@ export function VideoStage({
               animations={template.animations}
               onProjectChange={onProjectChange}
             />
-            {project.render_input.templateId === 'kinetic-punch-v2'
-              && project.render_input.templateVersion === 1 ? (
-                <MotionPlanEditor
-                  project={project}
-                  scene={selectedScene}
-                  busy={
-                    project.scene_plan.status === 'generating'
-                    || motionAction?.status === 'running'
-                  }
-                  onProjectChange={onProjectChange}
-                  onOptimize={(scope, direction) => {
-                    if (!onOptimizeMotion) {
-                      throw new Error('AI 动效优化服务尚未连接')
-                    }
-                    return onOptimizeMotion(scope, direction)
-                  }}
-                />
-              ) : null}
           </>
         ) : (
           <div className="mt-5 rounded-xl border bg-background/55 p-4 text-xs leading-5 text-muted-foreground">

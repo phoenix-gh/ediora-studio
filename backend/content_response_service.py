@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Awaitable, Callable
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from content_jobs import create_job
 from models import (
-    ContentAccountScore,
     ContentAnalysisRun,
     ContentJob,
     ContentResponseEvent,
@@ -26,8 +25,20 @@ VALUE_DIMENSIONS = {
     "novelty",
     "practicality",
     "credibility",
-    "discussion_value",
+    "writing_space",
     "evergreen_value",
+}
+CONTENT_TYPES = {
+    "tool",
+    "industry_update",
+    "case",
+    "tutorial",
+    "research",
+}
+DISPOSITIONS = {
+    "worth_writing",
+    "creative_asset",
+    "not_processed",
 }
 OUTPUT_TYPES = {
     "expanded_article",
@@ -59,30 +70,55 @@ def validate_analysis_payload(payload: dict[str, Any]) -> dict[str, Any]:
         ):
             raise ValueError(f"value_dimensions.{name} is invalid")
 
-    account_scores = payload.get("account_scores", [])
-    if not isinstance(account_scores, list):
-        raise ValueError("account_scores must be a list")
-    account_ids: set[str] = set()
-    blocked_ids: set[str] = set()
-    for account in account_scores:
-        account_id = str(account.get("publish_account_id") or "").strip()
-        if not account_id or account_id in account_ids:
-            raise ValueError("account_scores contains an invalid or duplicate account")
-        account_ids.add(account_id)
-        account_score = account.get("score")
-        if (
-            not isinstance(account_score, int)
-            or isinstance(account_score, bool)
-            or not 0 <= account_score <= 100
+    def string_list(name: str) -> list[str]:
+        value = payload.get(name)
+        if not isinstance(value, list) or any(
+            not isinstance(entry, str) or not entry.strip() for entry in value
         ):
-            raise ValueError("account score must be an integer from 0 to 100")
-        if account.get("has_hard_conflict"):
-            blocked_ids.add(account_id)
-    recommended_id = payload.get("recommended_publish_account_id")
-    if recommended_id and recommended_id in blocked_ids:
-        raise ValueError("recommended account has a hard conflict")
-    if recommended_id and recommended_id not in account_ids:
-        raise ValueError("recommended account is missing from account_scores")
+            raise ValueError(f"{name} must be a list of non-empty strings")
+        return value
+
+    string_list("value_points")
+    string_list("risks")
+    string_list("verification_items")
+    string_list("suggested_structure")
+    for name in ("summary_cn", "core_thesis", "recommendation_reason", "suggested_title", "suggested_angle", "target_reader"):
+        if not isinstance(payload.get(name), str) or not payload[name].strip():
+            raise ValueError(f"{name} must be a non-empty string")
+
+    content_types = payload.get("recommended_content_types")
+    if not isinstance(content_types, list) or any(
+        not isinstance(content_type, str) or content_type not in CONTENT_TYPES
+        for content_type in content_types
+    ) or len(set(content_types)) != len(content_types):
+        raise ValueError("recommended content type is invalid")
+    disposition = payload.get("recommended_disposition")
+    if disposition not in DISPOSITIONS:
+        raise ValueError("recommended disposition is invalid")
+
+    evidence = payload.get("evidence")
+    if not isinstance(evidence, list):
+        raise ValueError("evidence must be a list")
+    for entry in evidence:
+        if not isinstance(entry, dict) or not str(entry.get("text") or "").strip():
+            raise ValueError("evidence entry is invalid")
+        if entry.get("type") not in {"fact", "source_claim", "model_inference"}:
+            raise ValueError("evidence type is invalid")
+        if "source" in entry and not isinstance(entry["source"], str):
+            raise ValueError("evidence source is invalid")
+
+    removed_fields = {
+        "comment_angles",
+        "recommended_output_types",
+        "recommended_action",
+        "recommended_publish_account_id",
+        "account_scores",
+        "key_points",
+        "personal_angles",
+        "article_outlines",
+    }
+    if removed_fields.intersection(payload):
+        raise ValueError("analysis contains removed comment or account fields")
     return payload
 
 
@@ -124,6 +160,7 @@ async def ensure_response_item(
     db: AsyncSession,
     source_type: str,
     source_id: str,
+    subscription_id: int | None = None,
 ) -> tuple[ContentResponseItem, bool]:
     item = (await db.execute(
         select(ContentResponseItem).where(
@@ -132,6 +169,9 @@ async def ensure_response_item(
         )
     )).scalar_one_or_none()
     if item is not None:
+        if subscription_id is not None and item.subscription_id is None:
+            item.subscription_id = subscription_id
+            await db.flush()
         return item, False
     snapshot = await _source_snapshot(db, source_type, source_id)
     item = ContentResponseItem(
@@ -141,6 +181,7 @@ async def ensure_response_item(
         source_title=snapshot["source_title"],
         source_author=snapshot["source_author"],
         source_published_at=snapshot["source_published_at"],
+        subscription_id=subscription_id,
     )
     db.add(item)
     await db.flush()
@@ -200,6 +241,84 @@ async def create_analysis_run(
     return run, job, True
 
 
+async def _enqueue_analysis_job_once(
+    db: AsyncSession,
+    job: ContentJob,
+    *,
+    enqueue: Callable[[int], Awaitable[None]] | None = None,
+) -> bool:
+    """Enqueue one analysis job once and leave an auditable event marker."""
+    from models import ContentJobEvent
+
+    dispatched = (await db.execute(
+        select(ContentJobEvent.id)
+        .where(ContentJobEvent.job_id == job.id)
+        .where(ContentJobEvent.kind == "queue_dispatched")
+        .limit(1)
+    )).scalar_one_or_none()
+    if job.status != "queued" or dispatched is not None:
+        return False
+    if enqueue is None:
+        from job_queue import enqueue_job
+        enqueue = enqueue_job
+    await enqueue(job.id)
+    db.add(ContentJobEvent(job_id=job.id, kind="queue_dispatched"))
+    await db.commit()
+    return True
+
+
+async def dispatch_intelligence_posts(
+    db: AsyncSession,
+    subscription: Any,
+    source_ids: list[str],
+    *,
+    enqueue: Callable[[int], Awaitable[None]] | None = None,
+) -> dict[str, Any]:
+    """Create unified analysis jobs for freshly collected original X posts."""
+    result: dict[str, Any] = {"created": 0, "enqueued": 0, "errors": []}
+    if (
+        not source_ids
+        or not subscription.enabled
+        or not subscription.intelligence_enabled
+        or subscription.intelligence_enabled_at is None
+    ):
+        return result
+    posts = (await db.execute(
+        select(XPost).where(XPost.tweet_id.in_(source_ids))
+    )).scalars().all()
+    for post in posts:
+        enabled_at = subscription.intelligence_enabled_at
+        collected_at = post.collected_at
+        if enabled_at.tzinfo is None:
+            enabled_at = enabled_at.replace(tzinfo=timezone.utc)
+        if collected_at.tzinfo is None:
+            collected_at = collected_at.replace(tzinfo=timezone.utc)
+        if post.is_reply or collected_at < enabled_at:
+            continue
+        try:
+            item, _ = await ensure_response_item(
+                db,
+                "x_post",
+                post.tweet_id,
+                subscription_id=subscription.id,
+            )
+            current_run = (
+                await db.get(ContentAnalysisRun, item.current_analysis_run_id)
+                if item.current_analysis_run_id else None
+            )
+            if current_run is not None and current_run.status == "succeeded":
+                continue
+            run, job, created = await create_analysis_run(db, item)
+            if not created:
+                continue
+            result["created"] += 1
+            if await _enqueue_analysis_job_once(db, job, enqueue=enqueue):
+                result["enqueued"] += 1
+        except Exception as exc:
+            result["errors"].append(f"{post.tweet_id}: {exc}")
+    return result
+
+
 async def persist_analysis(
     db: AsyncSession,
     item_id: int,
@@ -212,63 +331,26 @@ async def persist_analysis(
     run = await db.get(ContentAnalysisRun, run_id)
     if item is None or run is None or run.response_item_id != item.id:
         raise KeyError("response item or analysis run not found")
-    active_accounts = (await db.execute(
-        select(PublishAccount).where(PublishAccount.is_active.is_(True))
-    )).scalars().all()
-    active_ids = {account.id for account in active_accounts}
-    supplied_ids = {
-        str(score["publish_account_id"])
-        for score in data.get("account_scores", [])
-    }
-    if supplied_ids != active_ids:
-        raise ValueError("account_scores must cover every active publish account")
-
-    await db.execute(delete(ContentAccountScore).where(
-        ContentAccountScore.analysis_run_id == run.id
-    ))
-    accounts = {account.id: account for account in active_accounts}
-    for score in data.get("account_scores", []):
-        account = accounts[score["publish_account_id"]]
-        db.add(ContentAccountScore(
-            analysis_run_id=run.id,
-            publish_account_id=account.id,
-            account_snapshot={
-                "name": account.name,
-                "platform": account.platform,
-                "positioning": account.positioning,
-                "audience": account.audience,
-                "tone": account.tone,
-                "topic_focus": account.topic_focus,
-                "taboo": account.taboo,
-            },
-            score=score["score"],
-            rank=score.get("rank", 0),
-            fit_reasons=score.get("fit_reasons", []),
-            audience_value=score.get("audience_value", ""),
-            recommended_tone=score.get("recommended_tone", ""),
-            recommended_output_types=score.get("recommended_output_types", []),
-            taboo_risks=score.get("taboo_risks", []),
-            has_hard_conflict=bool(score.get("has_hard_conflict")),
-        ))
     for field in (
         "content_value_score",
         "value_dimensions",
         "summary_cn",
         "core_thesis",
-        "key_points",
-        "evidence",
         "value_points",
+        "evidence",
         "risks",
         "verification_items",
-        "personal_angles",
-        "article_outlines",
-        "comment_angles",
-        "recommended_output_types",
-        "recommended_action",
+        "recommended_content_types",
+        "recommended_disposition",
         "recommendation_reason",
-        "recommended_publish_account_id",
+        "suggested_title",
+        "suggested_angle",
+        "target_reader",
+        "suggested_structure",
     ):
         setattr(run, field, data.get(field, getattr(run, field)))
+    if not item.content_types:
+        item.content_types = list(data["recommended_content_types"])
     meta = metadata or {}
     for field in ("source_content_hash", "source_snapshot", "model_provider", "model_name", "prompt_version", "policy_version"):
         if field in meta:
@@ -298,9 +380,7 @@ async def set_decision(
     feedback_reason: str = "",
 ) -> ContentResponseItem:
     status_by_action = {
-        "adopt": "adopted",
-        "later": "later",
-        "not_valuable": "rejected",
+        "not_processed": "not_processed",
         "reset": "pending",
     }
     if action not in status_by_action:
@@ -329,6 +409,14 @@ async def create_outputs(
 ) -> list[tuple[ContentResponseOutput, ContentJob, bool]]:
     if not output_types or any(output_type not in OUTPUT_TYPES for output_type in output_types):
         raise ValueError("invalid output types")
+    locked_item = await db.scalar(
+        select(ContentResponseItem)
+        .where(ContentResponseItem.id == item.id)
+        .with_for_update()
+    )
+    if locked_item is None:
+        raise ValueError("response item not found")
+    item = locked_item
     if publish_account_id:
         account = await db.get(PublishAccount, publish_account_id)
         if account is None or not account.is_active:
@@ -365,7 +453,10 @@ async def create_outputs(
         )
         output.job_id = job.id
         results.append((output, job, True))
-    item.decision_status = "adopted"
+    # The user decision is the response-domain value shown by the Intelligence
+    # Center.  Keep it aligned with the public status contract; "adopted" was
+    # a legacy value that made a queued writing job disappear from the UI.
+    item.decision_status = "worth_writing"
     item.selected_publish_account_id = publish_account_id
     item.selected_output_types = list(dict.fromkeys(output_types))
     item.decided_at = now_utc()
