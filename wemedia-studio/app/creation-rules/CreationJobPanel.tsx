@@ -10,9 +10,9 @@ const statusText: Record<string, string> = {
 }
 
 function statusClass(status: string) {
-  if (status === 'succeeded') return 'bg-emerald-100 text-emerald-700'
-  if (status === 'failed') return 'bg-red-100 text-red-700'
-  if (status === 'running') return 'bg-blue-100 text-blue-700'
+  if (status === 'succeeded') return 'bg-success/10 text-success'
+  if (status === 'failed') return 'bg-danger/10 text-danger'
+  if (status === 'running') return 'bg-info/10 text-info'
   return 'bg-muted text-muted-foreground'
 }
 

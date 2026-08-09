@@ -23,11 +23,11 @@ type Filters = { kind: FilterKind; status: FilterStatus }
 type LoadMode = 'initial' | 'refresh' | 'append'
 
 function statusClass(status: string) {
-  if (status === 'succeeded') return 'bg-emerald-100 text-emerald-700'
-  if (status === 'failed') return 'bg-red-100 text-red-700'
-  if (status === 'running') return 'bg-blue-100 text-blue-700'
+  if (status === 'succeeded') return 'bg-success/10 text-success'
+  if (status === 'failed') return 'bg-danger/10 text-danger'
+  if (status === 'running') return 'bg-info/10 text-info'
   if (status === 'cancelled') return 'bg-muted text-muted-foreground'
-  return 'bg-amber-100 text-amber-700'
+  return 'bg-warning/10 text-warning'
 }
 
 function formatTime(value: string | null | undefined) {
@@ -55,7 +55,7 @@ function TaskRow({ job, onOpen, onCancel }: { job: ContentJob; onOpen: () => voi
         <div className="flex flex-wrap items-center gap-2">
           <h3 className="font-medium">{job.title}</h3>
           <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">{kindText[kind]}</span>
-          {job.schedule && <span className="rounded-full bg-violet-100 px-2 py-0.5 text-[11px] text-violet-700">{job.schedule.rule_name}</span>}
+          {job.schedule && <span className="rounded-full bg-ai-subtle px-2 py-0.5 text-[11px] text-ai-foreground">{job.schedule.rule_name}</span>}
         </div>
         <p className="mt-1 text-xs text-muted-foreground">
           Job #{job.id} · 创建于 {formatTime(job.created_at)}
@@ -204,14 +204,14 @@ export function TaskLogList({ refreshToken, onRetry, onCancel }: {
         </NativeSelect>
       </div>
     </div>
-    {refreshError && <p className="text-xs text-amber-700">状态刷新失败：{refreshError}</p>}
+    {refreshError && <p className="text-xs text-warning">状态刷新失败：{refreshError}</p>}
     <div ref={scrollRef} data-testid="task-log-scroll" className="max-h-[min(70vh,720px)] overflow-y-auto rounded-xl border bg-card">
       {initialLoading && jobs.length === 0 && <p className="p-8 text-center text-sm text-muted-foreground">任务日志加载中…</p>}
-      {!initialLoading && initialError && jobs.length === 0 && <div className="space-y-3 p-8 text-center text-sm"><p className="text-red-600">{initialError}</p><Button variant="outline" size="sm" onClick={() => { setInitialLoading(true); void loadPage(filters, null, 'initial') }}>重新加载</Button></div>}
+      {!initialLoading && initialError && jobs.length === 0 && <div className="space-y-3 p-8 text-center text-sm"><p className="text-danger">{initialError}</p><Button variant="outline" size="sm" onClick={() => { setInitialLoading(true); void loadPage(filters, null, 'initial') }}>重新加载</Button></div>}
       {!initialLoading && !initialError && jobs.length === 0 && <p className="p-8 text-center text-sm text-muted-foreground">没有符合条件的任务</p>}
       {jobs.map(job => <TaskRow key={job.id} job={job} onOpen={() => setSelectedJobId(job.id)} onCancel={() => onCancel(job.id)} />)}
       {appendLoading && <p className="p-4 text-center text-xs text-muted-foreground">正在加载更多…</p>}
-      {appendError && <div className="space-y-2 p-4 text-center text-xs"><p className="text-red-600">{appendError}</p><Button variant="outline" size="sm" onClick={() => { void loadMore() }}>重试加载</Button></div>}
+      {appendError && <div className="space-y-2 p-4 text-center text-xs"><p className="text-danger">{appendError}</p><Button variant="outline" size="sm" onClick={() => { void loadMore() }}>重试加载</Button></div>}
       {!appendLoading && !appendError && hasMore && jobs.length > 0 && <div className="p-3 text-center"><Button variant="ghost" size="sm" onClick={() => { void loadMore() }}>加载更多</Button></div>}
       {!hasMore && jobs.length > 0 && <p className="p-3 text-center text-xs text-muted-foreground">已加载全部任务</p>}
       <div ref={sentinelRef} aria-hidden="true" className="h-1" />

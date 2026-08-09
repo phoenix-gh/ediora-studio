@@ -18,10 +18,10 @@ function statusLabel(status: string) {
 }
 
 function statusClass(status: string) {
-  if (status === 'succeeded') return 'bg-emerald-100 text-emerald-700'
-  if (status === 'failed') return 'bg-red-100 text-red-700'
-  if (status === 'partial') return 'bg-amber-100 text-amber-700'
-  if (status === 'running') return 'bg-blue-100 text-blue-700'
+  if (status === 'succeeded') return 'bg-success/10 text-success'
+  if (status === 'failed') return 'bg-danger/10 text-danger'
+  if (status === 'partial') return 'bg-warning/10 text-warning'
+  if (status === 'running') return 'bg-info/10 text-info'
   return 'bg-muted text-muted-foreground'
 }
 
@@ -44,7 +44,7 @@ export function AgentMessageTimeline({ log, loading, error }: { log: DailyCreati
       <p className="text-muted-foreground">包含模型请求、模型响应、Skill 阶段和错误；敏感字段已脱敏。</p>
     </div>
     {loading && <p className="text-muted-foreground">完整消息加载中…</p>}
-    {error && <p className="text-red-600">{error}</p>}
+    {error && <p className="text-danger">{error}</p>}
     {!loading && !error && log && <>
       {log.execution?.objective && <details className="rounded border bg-muted/30 p-2">
         <summary className="cursor-pointer font-medium">任务目标</summary>
@@ -90,7 +90,7 @@ function RunDetail({ run, schedulerLogs, agentLog, agentLogLoading, agentLogErro
           <div className="flex flex-wrap items-center gap-2">
             <code>{step.key}</code><span>第 {step.attempt} 次</span><span className={`rounded-full px-2 py-0.5 ${statusClass(step.status)}`}>{statusLabel(step.status)}</span>
           </div>
-          {step.error && <p className="mt-1 text-red-600">{step.error}</p>}
+          {step.error && <p className="mt-1 text-danger">{step.error}</p>}
         </div>)}
       </div>
       {job.events.length > 0 && <div className="mt-3 space-y-1">
@@ -106,22 +106,22 @@ function RunDetail({ run, schedulerLogs, agentLog, agentLogLoading, agentLogErro
       {agent.tools.length > 0 && <div className="mt-2 space-y-1.5">
         <p className="font-medium">工具调用摘要</p>
         {agent.tools.map((tool, index) => <div key={`${tool.tool_name}-${tool.occurred_at}-${index}`} className="rounded border bg-background p-2">
-          <div className="flex flex-wrap items-center gap-2"><code>{tool.tool_name}</code><span className="text-muted-foreground">{statusLabel(tool.status)}</span>{tool.auto_approved && <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-emerald-700">自动批准</span>}</div>
-          {tool.error && <p className="mt-1 text-red-600">{tool.error}</p>}
+          <div className="flex flex-wrap items-center gap-2"><code>{tool.tool_name}</code><span className="text-muted-foreground">{statusLabel(tool.status)}</span>{tool.auto_approved && <span className="rounded-full bg-success/10 px-2 py-0.5 text-success">自动批准</span>}</div>
+          {tool.error && <p className="mt-1 text-danger">{tool.error}</p>}
         </div>)}
       </div>}
       {typeof agent.self_validation.summary === 'string' && agent.self_validation.summary && <p className="mt-2">自检：{agent.self_validation.summary}</p>}
     </div>}
     {run.content_job_id && <AgentMessageTimeline log={agentLog} loading={agentLogLoading} error={agentLogError} />}
-    {outputs.length > 0 && <p className="text-emerald-700">已记录 {outputs.length} 条产出</p>}
-    {run.status === 'failed' && !job && <p className="text-red-600">任务失败，但没有找到关联 Job 记录。</p>}
+    {outputs.length > 0 && <p className="text-success">已记录 {outputs.length} 条产出</p>}
+    {run.status === 'failed' && !job && <p className="text-danger">任务失败，但没有找到关联 Job 记录。</p>}
     {schedulerLogs.length > 0 && <section className="space-y-2">
       <h3 className="font-medium">调度日志</h3>
       <div className="space-y-2">{schedulerLogs.map((log, index) => <div key={`${log.created_at}-${index}`} className="flex flex-wrap gap-x-3 gap-y-1 rounded-lg bg-muted/40 p-3">
-        <span className={`rounded-full px-2 py-0.5 ${log.status === 'error' ? 'bg-red-100 text-red-700' : 'bg-muted text-muted-foreground'}`}>{log.status}</span>
+        <span className={`rounded-full px-2 py-0.5 ${log.status === 'error' ? 'bg-danger/10 text-danger' : 'bg-muted text-muted-foreground'}`}>{log.status}</span>
         <span>{log.message}</span>
         <span className="text-muted-foreground">{formatTime(log.created_at)}</span>
-        {log.detail && <span className="text-red-600">{log.detail}</span>}
+        {log.detail && <span className="text-danger">{log.detail}</span>}
       </div>)}</div>
     </section>}
   </div>

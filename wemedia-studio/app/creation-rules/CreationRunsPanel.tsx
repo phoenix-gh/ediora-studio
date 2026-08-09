@@ -42,7 +42,7 @@ export function CreationRunsPanel({ runs }: { runs: DailyCreationRun[] }) {
               <div className="flex flex-wrap items-center gap-2">
                 <span className="font-medium">Agent · {agent.phase}</span>
                 {agent.skill_name && <span className="rounded-md border bg-background px-2 py-1">{agent.skill_name}</span>}
-                {agent.skill_activation && <span className="rounded-full bg-indigo-100 px-2 py-1 text-indigo-700">
+                {agent.skill_activation && <span className="rounded-full bg-ai-subtle px-2 py-1 text-ai-foreground">
                   {agent.skill_activation === 'automatic' ? '自动触发' : '手动指定'}
                 </span>}
               </div>
@@ -59,19 +59,19 @@ export function CreationRunsPanel({ runs }: { runs: DailyCreationRun[] }) {
                     <div className="flex flex-wrap items-center gap-2">
                       <code>{item.tool_name}</code>
                       <span className="text-muted-foreground">{item.status}</span>
-                      {item.auto_approved && <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-emerald-700">自动批准</span>}
+                      {item.auto_approved && <span className="rounded-full bg-success/10 px-2 py-0.5 text-success">自动批准</span>}
                     </div>
-                    {item.error && <p className="mt-1 text-red-600">{item.error}</p>}
+                    {item.error && <p className="mt-1 text-danger">{item.error}</p>}
                   </div>)}
                 </div>
               </div>}
               {validationSummary && <p>自检：{validationSummary}</p>}
-              {agent.completion?.createdCount !== undefined && <p className="font-medium text-emerald-700">已落库 {agent.completion.createdCount} 条</p>}
+              {agent.completion?.createdCount !== undefined && <p className="font-medium text-success">已落库 {agent.completion.createdCount} 条</p>}
             </div>}
             {excluded.map((item, index) => <p key={index} className="text-muted-foreground">{item.reason}</p>)}
             <div className="flex flex-wrap gap-3">
               {outputs.map((item, index) => item.draft_id
-                ? <Link key={index} href="/drafts" className="text-indigo-600">草稿 #{item.draft_id}</Link>
+                ? <Link key={index} href="/drafts" className="text-primary">草稿 #{item.draft_id}</Link>
                 : null)}
             </div>
           </div>

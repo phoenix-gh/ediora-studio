@@ -26,7 +26,7 @@ function StepRow({ step, onRetry }: { step: ContentJobStep; onRetry: () => void 
       <span className="rounded-full bg-muted px-2 py-0.5">{statusText[step.status] ?? step.status}</span>
       {step.status === 'failed' && step.retryable && <Button variant="outline" size="sm" onClick={onRetry}>重试</Button>}
     </div>
-    {step.error && <p className="mt-2 text-red-600">{step.error}</p>}
+    {step.error && <p className="mt-2 text-danger">{step.error}</p>}
     <p className="mt-2 text-xs text-muted-foreground">开始：{formatTime(step.started_at)} · 结束：{formatTime(step.completed_at)}</p>
   </div>
 }
