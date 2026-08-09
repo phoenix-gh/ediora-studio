@@ -391,7 +391,7 @@ export function ChatClient() {
   return (
     <div className="flex h-full min-h-0 bg-surface">
       <aside className="flex w-72 shrink-0 flex-col border-r border-border bg-surface">
-        <div className="flex min-h-[var(--app-header-height)] items-center border-b border-border px-4 py-4">
+        <div className="flex h-[var(--app-header-height)] min-h-[var(--app-header-height)] items-center border-b border-border px-4 py-3">
           <div className="flex items-center justify-between gap-3">
             <div><h1 className="font-semibold text-foreground">AI 助手</h1><p className="mt-0.5 text-xs text-muted-foreground">搜索并阅读本地信息源</p></div>
             <Button size="icon-sm" title="新建对话" onClick={startNewConversation}><Plus /></Button>

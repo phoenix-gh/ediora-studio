@@ -359,7 +359,7 @@ export function RedditClient({
     <div className="flex h-screen overflow-hidden">
       {/* Left sidebar */}
       <aside className="w-52 shrink-0 border-r border-border flex flex-col overflow-hidden">
-        <div className="flex min-h-[var(--app-header-height)] items-center px-3 py-3 border-b border-border gap-2">
+        <div className="flex h-[var(--app-header-height)] min-h-[var(--app-header-height)] items-center px-3 py-3 border-b border-border gap-2">
           <span className="font-semibold text-sm flex-1">Reddit</span>
           <button
             onClick={handleRefreshAll}

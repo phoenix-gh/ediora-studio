@@ -41,6 +41,7 @@ it('uses the shared workspace surface and borderless assistant replies', () => {
   const source = readFileSync(new URL('./ChatClient.tsx', import.meta.url), 'utf8')
 
   expect(source).toContain('flex h-full min-h-0 bg-surface')
+  expect(source).toContain('flex h-[var(--app-header-height)] min-h-[var(--app-header-height)] items-center border-b border-border px-4 py-3')
   expect(source).toContain("? 'rounded-tr-sm bg-primary text-primary-foreground'\n              : 'text-foreground'")
 })
 

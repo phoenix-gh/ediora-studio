@@ -201,7 +201,7 @@ export function XClient({
   return (
     <div className="flex h-full">
       <div className="flex w-56 shrink-0 flex-col border-r border-border bg-surface">
-        <div className="flex min-h-[var(--app-header-height)] items-center border-b border-border px-3 py-3">
+        <div className="flex h-[var(--app-header-height)] min-h-[var(--app-header-height)] items-center border-b border-border px-3 py-3">
           <p className="px-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">X 订阅</p>
         </div>
         <div className="flex-1 overflow-y-auto px-2 py-2">

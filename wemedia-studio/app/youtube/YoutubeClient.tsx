@@ -641,7 +641,7 @@ export function YoutubeClient({
     <div className="flex h-full">
       {/* Sidebar */}
       <div className="w-56 border-r border-border flex flex-col flex-shrink-0">
-        <div className="flex min-h-[var(--app-header-height)] items-center px-3 py-3 border-b border-border">
+        <div className="flex h-[var(--app-header-height)] min-h-[var(--app-header-height)] items-center px-3 py-3 border-b border-border">
           <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-1">订阅频道</p>
         </div>
         <div className="flex-1 overflow-y-auto px-2 py-2">

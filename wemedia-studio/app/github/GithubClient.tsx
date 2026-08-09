@@ -278,7 +278,7 @@ function TrendingTab({ items }: { items: GithubTrendingRepo[] }) {
 
   return (
     <div className="flex-1 overflow-y-auto">
-      <div className="flex min-h-[var(--app-header-height)] items-center px-6 py-3 border-b border-border gap-3">
+      <div className="flex h-[var(--app-header-height)] min-h-[var(--app-header-height)] items-center px-6 py-3 border-b border-border gap-3">
         <div className="flex gap-1 bg-muted rounded-lg p-0.5">
           {(['daily', 'weekly'] as const).map(p => (
             <button
@@ -468,7 +468,7 @@ function ReleasesTab({ repoId, releases: initial, onLoad }: { repoId: string; re
 
   return (
     <div className="flex-1 overflow-y-auto">
-      <div className="flex min-h-[var(--app-header-height)] items-center px-6 py-3 border-b border-border gap-3">
+      <div className="flex h-[var(--app-header-height)] min-h-[var(--app-header-height)] items-center px-6 py-3 border-b border-border gap-3">
         <span className="text-xs text-foreground-subtle">{releases.length} 条发布记录</span>
         <Button size="sm" variant="outline" className="ml-auto h-7 text-xs gap-1" onClick={handleCollect} disabled={collecting}>
           <RefreshCw className={cn('w-3.5 h-3.5', collecting && 'animate-spin')} />刷新
@@ -849,7 +849,7 @@ export function GithubClient({ initialRepos, initialTrending, initialReleases }:
       {/* Main content */}
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Tab bar */}
-        <div className="flex min-h-[var(--app-header-height)] flex-shrink-0 items-center border-b border-border bg-surface px-6">
+        <div className="flex h-[var(--app-header-height)] min-h-[var(--app-header-height)] flex-shrink-0 items-center border-b border-border bg-surface px-6">
           <div className="flex items-center gap-1 h-11">
             {tabs.map(t => {
               const disabled = t.id !== 'trending' && !selected

@@ -57,7 +57,7 @@ function ReaderBody({
   return (
     <>
       {/* Header */}
-      <div className="flex min-h-[var(--app-header-height)] flex-shrink-0 items-center justify-between gap-3 px-5 py-3 border-b border-border bg-surface-muted">
+      <div className="flex h-[var(--app-header-height)] min-h-[var(--app-header-height)] flex-shrink-0 items-center justify-between gap-3 px-5 py-3 border-b border-border bg-surface-muted">
         <div className="min-w-0 flex-1">
           <p className="text-[11px] text-foreground-subtle truncate">
             {meta?.source && <span>{meta.source}</span>}
