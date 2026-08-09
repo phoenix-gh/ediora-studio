@@ -11,7 +11,7 @@ type ModelConfig = { apiKey: string; modelName: string; baseURL?: string }
 type ImageModelConfig = { apiKey: string; modelName: string; baseURL?: string }
 type CoverStyle = Record<string, unknown>
 
-export type ContentStep = 'brief' | 'draft' | 'cover' | 'illustrations' | 'standalone_image' | 'template_extraction'
+export type ContentStep = 'brief' | 'draft' | 'cover' | 'illustrations' | 'standalone_image' | 'prompt_image_generation' | 'template_extraction'
 
 const stepToolNames: Record<ContentStep, string[]> = {
   brief: ['loadSource', 'loadAccountContext', 'saveBrief'],
@@ -19,6 +19,7 @@ const stepToolNames: Record<ContentStep, string[]> = {
   cover: ['getDraft', 'loadCoverContext', 'saveCoverAsset'],
   illustrations: ['getDraft', 'loadImageContext', 'saveInlineAsset'],
   standalone_image: ['generateImage', 'saveCreativeAsset'],
+  prompt_image_generation: ['generateImage', 'saveCreativeAsset'],
   template_extraction: [],
 }
 
@@ -346,6 +347,101 @@ async function runStandaloneImageFlow(job: Awaited<ReturnType<typeof getJob>>) {
 }
 
 
+async function completePromptGeneration(
+  jobId: number,
+  generationId: number,
+  mediaAssetId: number,
+  provider: string,
+  model: string,
+) {
+  const response = await fetch(
+    `${apiBase()}/assets/generations/${generationId}/succeed`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...workerHeaders(jobId) },
+      body: JSON.stringify({
+        media_asset_id: mediaAssetId,
+        provider,
+        model,
+      }),
+    },
+  )
+  if (!response.ok) throw new Error(`Prompt generation completion failed (${response.status})`)
+}
+
+async function failPromptGeneration(jobId: number, generationId: number, error: unknown) {
+  const message = error instanceof Error ? error.message : String(error)
+  const response = await fetch(
+    `${apiBase()}/assets/generations/${generationId}/fail`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...workerHeaders(jobId) },
+      body: JSON.stringify({ error: message.slice(0, 500) }),
+    },
+  )
+  if (!response.ok) throw new Error(`Prompt generation failure update failed (${response.status})`)
+}
+
+export async function runPromptImageGenerationFlow(job: Awaited<ReturnType<typeof getJob>>) {
+  const generationId = Number(job.input.generation_id)
+  if (!Number.isSafeInteger(generationId) || generationId <= 0) {
+    throw new Error('prompt_image_generation flow requires generation_id')
+  }
+  const prompt = String(job.input.prompt_snapshot ?? '').trim()
+  if (!prompt) throw new Error('prompt_image_generation flow requires prompt_snapshot')
+  const title = String(job.input.title_snapshot ?? job.title).trim() || `提示词图片 ${job.id}`
+
+  try {
+    const image = await configuredImageModel()
+    const provider = createOpenAI({ apiKey: image.apiKey, baseURL: image.baseURL })
+    await recordJobEvent(job.id, 'generate_image_called', {
+      tool: 'generateImage',
+      prompt,
+      prompt_asset_id: Number(job.input.prompt_asset_id),
+      generation_id: generationId,
+    })
+    const generated = await generateImage({
+      model: provider.image(image.modelName),
+      prompt,
+      n: 1,
+    })
+    const output = generated.images[0]
+    if (!output) throw new Error('Image model returned no image')
+    const asset = await saveCreativeAssetImage(
+      job.id,
+      title,
+      `prompt-image-${job.id}.png`,
+      output.uint8Array,
+      output.mediaType,
+    )
+    await recordJobEvent(job.id, 'generate_image_succeeded', {
+      tool: 'generateImage',
+      asset_id: asset.id,
+      asset_url: asset.url,
+      prompt_asset_id: Number(job.input.prompt_asset_id),
+      generation_id: generationId,
+      model: image.modelName,
+    })
+    await completePromptGeneration(
+      job.id,
+      generationId,
+      asset.id,
+      'openai-compatible',
+      image.modelName,
+    )
+    return {
+      generation_id: generationId,
+      asset_id: asset.id,
+      asset_url: asset.url,
+      model: image.modelName,
+    }
+  } catch (error) {
+    await failPromptGeneration(job.id, generationId, error)
+    throw error
+  }
+}
+
+
 async function runTemplateExtractionFlow(job: Awaited<ReturnType<typeof getJob>>, model: ReturnType<typeof createOpenAI>, modelName: string) {
   const customPrompt = String(job.input.prompt ?? '')
   const override = job.input.template_extraction_override === true
@@ -363,11 +459,13 @@ export async function runContentJob(jobId: number) {
   if (draftStep?.output?.draft_id) return draftStep.output
   let activeStep: { id: number } | undefined
   try {
-    if (job.flow === 'cover' || job.flow === 'illustrations' || job.flow === 'standalone_image') {
+    if (job.flow === 'cover' || job.flow === 'illustrations' || job.flow === 'standalone_image' || job.flow === 'prompt_image_generation') {
       activeStep = await startStep(job.id, job.flow)
       const output = job.flow === 'standalone_image'
         ? await runStandaloneImageFlow(job)
-        : await runImageFlow(job, job.flow)
+        : job.flow === 'prompt_image_generation'
+          ? await runPromptImageGenerationFlow(job)
+          : await runImageFlow(job, job.flow)
       await completeStep(job.id, activeStep.id, output)
       activeStep = undefined
       await completeJob(job.id)

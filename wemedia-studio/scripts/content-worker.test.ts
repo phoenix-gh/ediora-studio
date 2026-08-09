@@ -188,6 +188,7 @@ describe('content worker dispatch', () => {
     expect(resolveContentJobRunner('text_video_render'))
       .toBe(runTextVideoRenderJob)
     expect(resolveContentJobRunner('content')).toBe(runContentJob)
+    expect(resolveContentJobRunner('prompt_image_generation')).toBe(runContentJob)
     expect(resolveContentJobRunner('daily_creation'))
       .toBe(runDailyCreationAgentJob)
   })
