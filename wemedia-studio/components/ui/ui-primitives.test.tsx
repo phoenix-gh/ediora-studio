@@ -12,6 +12,13 @@ import {
   DropdownMenuTrigger,
 } from './dropdown-menu'
 import { Input } from './input'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from './select'
 import { Textarea } from './textarea'
 
 describe('UI primitive contracts', () => {
@@ -35,6 +42,24 @@ describe('UI primitive contracts', () => {
 
     expect(screen.getByLabelText('Title')).toHaveClass('h-9')
     expect(screen.getByLabelText('Body')).toHaveClass('text-sm')
+  })
+
+  it('uses the themed control surface for Base UI select triggers', () => {
+    render(
+      <Select defaultValue="light">
+        <SelectTrigger aria-label="主题">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="light">浅色</SelectItem>
+        </SelectContent>
+      </Select>,
+    )
+
+    expect(screen.getByRole('combobox', { name: '主题' })).toHaveClass(
+      'bg-control',
+      'hover:bg-control-hover',
+    )
   })
 
   it.each(['data', 'ai', 'success', 'warning', 'info'] as const)(

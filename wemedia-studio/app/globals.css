@@ -212,6 +212,11 @@
   html {
     @apply font-sans;
   }
+
+  [data-slot='native-select'] option {
+    background-color: var(--surface);
+    color: var(--foreground);
+  }
 }
 
 .asset-visual-markdown-editor .milkdown {
