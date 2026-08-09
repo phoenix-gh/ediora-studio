@@ -926,6 +926,7 @@ class CreativeAsset(Base):
     __tablename__ = "creative_assets"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     asset_type: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    prompt_kind: Mapped[str] = mapped_column(String, default="")
     media_kind: Mapped[str] = mapped_column(String, default="")
     title: Mapped[str] = mapped_column(String, default="")
     content: Mapped[str] = mapped_column(Text, default="")
@@ -940,6 +941,27 @@ class CreativeAsset(Base):
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+
+
+class PromptGeneration(Base):
+    __tablename__ = "prompt_generations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    prompt_asset_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    media_asset_id: Mapped[int | None] = mapped_column(
+        Integer, nullable=True, index=True
+    )
+    provider: Mapped[str] = mapped_column(String, default="")
+    model: Mapped[str] = mapped_column(String, default="")
+    status: Mapped[str] = mapped_column(String, default="queued", index=True)
+    job_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    error: Mapped[str] = mapped_column(Text, default="")
+    generated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=now_utc, index=True
+    )
 
 
 class DigitalHuman(Base):

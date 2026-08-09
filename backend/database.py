@@ -500,6 +500,22 @@ async def _add_columns(conn, table_name: str, definitions: dict[str, str]) -> No
             ))
 
 
+async def migrate_prompt_asset_schema(conn) -> None:
+    """Add prompt metadata and the prompt-to-media generation history table."""
+    await _add_columns(conn, "creative_assets", {
+        "prompt_kind": "VARCHAR NOT NULL DEFAULT ''",
+    })
+
+    from models import PromptGeneration
+
+    await conn.run_sync(
+        lambda sync_connection: PromptGeneration.__table__.create(
+            sync_connection,
+            checkfirst=True,
+        )
+    )
+
+
 async def migrate_daily_creation_prompt_schema(conn) -> None:
     """Add canonical prompts and safely backfill legacy creation rules."""
     from sqlalchemy import text
@@ -1177,6 +1193,7 @@ async def init_db():
             "directory": "VARCHAR NOT NULL DEFAULT ''",
             "last_selected_at": "TIMESTAMP",
         })
+        await migrate_prompt_asset_schema(conn)
         await _add_columns(conn, "creative_asset_directories", {
             "asset_type": "VARCHAR NOT NULL DEFAULT 'article'",
             "parent_id": "INTEGER",
