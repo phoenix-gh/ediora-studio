@@ -28,6 +28,8 @@ describe('layout components', () => {
 
     expect(screen.getByRole('heading', { level: 1, name: '创作资产' })).toBeTruthy()
     expect(screen.getByRole('group', { name: '页面操作' })).toBeTruthy()
+    expect(screen.getByRole('banner')).toHaveAttribute('data-slot', 'page-header')
+    expect(screen.getByRole('banner')).toHaveClass('min-h-[var(--app-header-height)]')
   })
 
   it('exposes stable list and editor regions', () => {

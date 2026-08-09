@@ -21,6 +21,13 @@ describe('Sidebar in the app shell', () => {
     expect(screen.getByRole('link', { name: '创作资产' })).toHaveAttribute('aria-current', 'page')
   })
 
+  it('uses the shared application header height for the brand area', () => {
+    render(<Sidebar />)
+
+    expect(screen.getByTestId('app-brand-header')).toHaveClass('h-[var(--app-header-height)]')
+    expect(screen.getByTestId('app-brand-header')).toHaveAttribute('data-slot', 'app-brand-header')
+  })
+
   it('keeps navigation link names available in compact mode', () => {
     render(<Sidebar />)
 

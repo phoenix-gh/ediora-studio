@@ -58,6 +58,9 @@ const REQUIRED_TOKENS = [
   '--warning:',
   '--danger:',
   '--info:',
+  '--control:',
+  '--control-hover:',
+  '--app-header-height:',
 ]
 
 describe('Ediora design tokens', () => {

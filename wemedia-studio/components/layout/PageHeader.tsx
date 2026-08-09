@@ -16,7 +16,7 @@ export function PageHeader({
   actions,
 }: PageHeaderProps) {
   return (
-    <header className="flex flex-wrap items-start justify-between gap-4 px-7 py-5">
+    <header data-slot="page-header" className="flex min-h-[var(--app-header-height)] flex-wrap items-center justify-between gap-4 px-7 py-4">
       <div className="min-w-0">
         {eyebrow ? <p className="text-xs/[18px] font-medium text-muted-foreground">{eyebrow}</p> : null}
         <div className="flex flex-wrap items-center gap-2">

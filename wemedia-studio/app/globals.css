@@ -10,6 +10,8 @@
   --color-foreground: var(--foreground);
   --color-surface: var(--surface);
   --color-surface-muted: var(--surface-muted);
+  --color-control: var(--control);
+  --color-control-hover: var(--control-hover);
   --color-foreground-subtle: var(--foreground-subtle);
   --color-border-strong: var(--border-strong);
   --color-data: var(--data);
@@ -69,6 +71,8 @@
   --foreground: #172033;
   --surface: #ffffff;
   --surface-muted: #fbfcfe;
+  --control: #ffffff;
+  --control-hover: #fbfcfe;
   --card: #ffffff;
   --card-foreground: #172033;
   --popover: #ffffff;
@@ -99,6 +103,7 @@
   --info: #026aa2;
   --radius: 0.5rem;
   --sidebar-width: 14rem;
+  --app-header-height: 72px;
   --chart-1: var(--data);
   --chart-2: var(--ai);
   --chart-3: var(--primary);
@@ -151,6 +156,8 @@
   --foreground: #f0f2f8;
   --surface: #151a27;
   --surface-muted: #1c2231;
+  --control: #1c2231;
+  --control-hover: #252c3e;
   --card: #151a27;
   --card-foreground: #f0f2f8;
   --popover: #151a27;
@@ -184,6 +191,7 @@
   --chart-3: var(--primary);
   --chart-4: var(--info);
   --chart-5: var(--success);
+  --app-header-height: 72px;
   --sidebar: var(--surface);
   --sidebar-foreground: var(--foreground);
   --sidebar-primary: var(--primary);
