@@ -2,14 +2,14 @@ import os
 import uuid
 import re
 import hashlib
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
-from sqlalchemy import desc, select
+from sqlalchemy import delete, desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
@@ -18,6 +18,7 @@ from models import (
     ContentJob,
     CreativeAsset,
     CreativeAssetDirectory,
+    PromptGeneration,
     TopicSourceDecision,
     TopicSourceRule,
     XPost,
@@ -25,15 +26,18 @@ from models import (
     XSubscriptionIngestionDirectory,
 )
 from remote_image_import import import_remote_images
+from content_jobs import create_job
+from job_queue import enqueue_job
 from worker_auth import require_worker_token
 
 router = APIRouter(prefix="/assets", tags=["assets"])
-AssetType = Literal["article", "media"]
+AssetType = Literal["article", "media", "prompt"]
 _UPLOADS_DIR = os.path.join(os.path.dirname(__file__), "..", "uploads")
 
 class AssetOut(BaseModel):
     id: int
     asset_type: AssetType
+    prompt_kind: str = ""
     media_kind: str = ""
     title: str
     content: str
@@ -49,6 +53,7 @@ class AssetOut(BaseModel):
 
 class AssetCreate(BaseModel):
     asset_type: AssetType
+    prompt_kind: Literal["image", "video", "other"] | None = None
     media_kind: Literal["image", "video", "audio"] | None = None
     title: str = ""
     content: str = ""
@@ -63,6 +68,7 @@ class AssetListOut(BaseModel):
     assets: list[AssetOut]
 
 class AssetUpdate(BaseModel):
+    prompt_kind: Literal["image", "video", "other"] | None = None
     title: str | None = None
     content: str | None = None
     url: str | None = None
@@ -84,6 +90,36 @@ class DirectoryOut(BaseModel):
     ai_ingestion_keywords: list[str] = Field(default_factory=list)
     ai_ingestion_prompt: str = ""
     created_at: datetime
+
+
+class PromptGenerationAttach(BaseModel):
+    media_asset_id: int
+    provider: str = Field(default="", max_length=200)
+    model: str = Field(default="", max_length=200)
+
+
+class PromptGenerationSucceed(BaseModel):
+    media_asset_id: int
+    provider: str = Field(min_length=1, max_length=200)
+    model: str = Field(min_length=1, max_length=200)
+
+
+class PromptGenerationFail(BaseModel):
+    error: str = Field(min_length=1, max_length=2000)
+
+
+class PromptGenerationOut(BaseModel):
+    id: int
+    prompt_asset_id: int
+    media_asset_id: int | None
+    provider: str
+    model: str
+    status: Literal["queued", "running", "succeeded", "failed"]
+    job_id: int | None
+    error: str
+    generated_at: datetime | None
+    created_at: datetime
+    media: AssetOut | None = None
 
 
 class DirectoryIngestionRulePatch(BaseModel):
@@ -202,6 +238,68 @@ def _normalized_content(value: str) -> str:
 
 def _article_content_hash(value: str) -> str:
     return hashlib.sha256(_normalized_content(value).encode("utf-8")).hexdigest()
+
+
+def _asset_payload(asset: CreativeAsset | None) -> AssetOut | None:
+    if asset is None:
+        return None
+    return AssetOut.model_validate(asset)
+
+
+def _generation_payload(
+    generation: PromptGeneration,
+    media: CreativeAsset | None = None,
+) -> dict:
+    return {
+        "id": generation.id,
+        "prompt_asset_id": generation.prompt_asset_id,
+        "media_asset_id": generation.media_asset_id,
+        "provider": generation.provider,
+        "model": generation.model,
+        "status": generation.status,
+        "job_id": generation.job_id,
+        "error": generation.error,
+        "generated_at": generation.generated_at,
+        "created_at": generation.created_at,
+        "media": _asset_payload(media),
+    }
+
+
+async def _prompt_asset(
+    db: AsyncSession,
+    asset_id: int,
+) -> CreativeAsset:
+    asset = await db.get(CreativeAsset, asset_id)
+    if asset is None:
+        raise HTTPException(404, "提示词资产不存在")
+    if asset.asset_type != "prompt":
+        raise HTTPException(422, "该资产不是提示词资产")
+    return asset
+
+
+async def _prompt_history_limit() -> int:
+    try:
+        from config import get_config
+
+        raw_value = (await get_config()).get(
+            "prompt_generation_history_limit",
+            "3",
+        )
+        return max(1, min(20, int(raw_value)))
+    except (TypeError, ValueError, RuntimeError):
+        return 3
+
+
+def _validate_prompt_media(
+    prompt: CreativeAsset,
+    media: CreativeAsset,
+) -> None:
+    if media.asset_type != "media":
+        raise HTTPException(422, "只能关联多媒体资产")
+    if prompt.prompt_kind not in {"image", "video"}:
+        raise HTTPException(422, "其他提示词不能关联生成媒体")
+    if media.media_kind != prompt.prompt_kind:
+        raise HTTPException(422, "提示词类型与媒体类型不匹配")
 
 
 async def _ensure_unique_article(db: AsyncSession, *, content: str, url: str, directory: str, exclude_id: int | None = None):
@@ -676,6 +774,208 @@ async def save_asset_ingestion_decisions(
     await db.commit()
     return {"saved": saved, "skipped": skipped, "decided": decided}
 
+
+@router.get(
+    "/{prompt_asset_id}/generations",
+    response_model=list[PromptGenerationOut],
+)
+async def list_prompt_generations(
+    prompt_asset_id: int,
+    limit: int | None = Query(default=None, ge=1, le=20),
+    db: AsyncSession = Depends(get_db),
+):
+    await _prompt_asset(db, prompt_asset_id)
+    history_limit = limit or await _prompt_history_limit()
+    generations = (
+        await db.execute(
+            select(PromptGeneration)
+            .where(PromptGeneration.prompt_asset_id == prompt_asset_id)
+            .order_by(
+                desc(PromptGeneration.created_at),
+                desc(PromptGeneration.id),
+            )
+            .limit(history_limit)
+        )
+    ).scalars().all()
+    media_ids = {
+        generation.media_asset_id
+        for generation in generations
+        if generation.media_asset_id is not None
+    }
+    media_by_id = {}
+    if media_ids:
+        media_by_id = {
+            asset.id: asset
+            for asset in (
+                await db.execute(
+                    select(CreativeAsset).where(CreativeAsset.id.in_(media_ids))
+                )
+            ).scalars().all()
+        }
+    return [
+        _generation_payload(generation, media_by_id.get(generation.media_asset_id))
+        for generation in generations
+    ]
+
+
+@router.post(
+    "/{prompt_asset_id}/generations",
+    response_model=PromptGenerationOut,
+    status_code=201,
+)
+async def create_prompt_generation(
+    prompt_asset_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    prompt = await _prompt_asset(db, prompt_asset_id)
+    if prompt.prompt_kind != "image":
+        raise HTTPException(422, "第一版只支持图片提示词直接生成")
+
+    generation = PromptGeneration(
+        prompt_asset_id=prompt.id,
+        provider="openai-compatible",
+        model="",
+        status="queued",
+    )
+    db.add(generation)
+    await db.flush()
+    job = await create_job(
+        db,
+        flow="prompt_image_generation",
+        title=f"[提示词图片] {prompt.title or prompt.id}",
+        input_data={
+            "prompt_asset_id": prompt.id,
+            "generation_id": generation.id,
+            "prompt_snapshot": prompt.content.strip(),
+            "title_snapshot": prompt.title,
+        },
+        commit=False,
+    )
+    generation.job_id = job.id
+    await db.commit()
+    await db.refresh(generation)
+    await enqueue_job(job.id)
+    return _generation_payload(generation)
+
+
+@router.post(
+    "/{prompt_asset_id}/generations/attach",
+    response_model=PromptGenerationOut,
+    status_code=201,
+)
+async def attach_prompt_generation(
+    prompt_asset_id: int,
+    body: PromptGenerationAttach,
+    db: AsyncSession = Depends(get_db),
+):
+    prompt = await _prompt_asset(db, prompt_asset_id)
+    media = await db.get(CreativeAsset, body.media_asset_id)
+    if media is None:
+        raise HTTPException(404, "多媒体资产不存在")
+    _validate_prompt_media(prompt, media)
+    generation = PromptGeneration(
+        prompt_asset_id=prompt.id,
+        media_asset_id=media.id,
+        provider=body.provider.strip() or "manual",
+        model=body.model.strip() or "手动补录",
+        status="succeeded",
+        generated_at=datetime.now(timezone.utc),
+    )
+    db.add(generation)
+    await db.commit()
+    await db.refresh(generation)
+    return _generation_payload(generation, media)
+
+
+@router.post(
+    "/generations/{generation_id}/succeed",
+    response_model=PromptGenerationOut,
+)
+async def succeed_prompt_generation(
+    generation_id: int,
+    body: PromptGenerationSucceed,
+    worker_token: str | None = Header(default=None, alias="X-WMS-Worker-Token"),
+    db: AsyncSession = Depends(get_db),
+):
+    require_worker_token(worker_token)
+    generation = await db.get(PromptGeneration, generation_id)
+    if generation is None:
+        raise HTTPException(404, "提示词生成记录不存在")
+    prompt = await _prompt_asset(db, generation.prompt_asset_id)
+    media = await db.get(CreativeAsset, body.media_asset_id)
+    if media is None:
+        raise HTTPException(404, "多媒体资产不存在")
+    _validate_prompt_media(prompt, media)
+    if generation.status == "failed":
+        raise HTTPException(409, "生成记录已失败，不能标记成功")
+    if generation.status == "succeeded" and generation.media_asset_id != media.id:
+        raise HTTPException(409, "生成记录已经关联其他媒体")
+    provider = body.provider.strip()
+    model = body.model.strip()
+    if not provider or not model:
+        raise HTTPException(422, "必须记录实际生成服务和模型")
+    generation.media_asset_id = media.id
+    generation.provider = provider
+    generation.model = model
+    generation.status = "succeeded"
+    generation.error = ""
+    generation.generated_at = generation.generated_at or datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(generation)
+    return _generation_payload(generation, media)
+
+
+@router.post(
+    "/generations/{generation_id}/fail",
+    response_model=PromptGenerationOut,
+)
+async def fail_prompt_generation(
+    generation_id: int,
+    body: PromptGenerationFail,
+    worker_token: str | None = Header(default=None, alias="X-WMS-Worker-Token"),
+    db: AsyncSession = Depends(get_db),
+):
+    require_worker_token(worker_token)
+    generation = await db.get(PromptGeneration, generation_id)
+    if generation is None:
+        raise HTTPException(404, "提示词生成记录不存在")
+    if generation.status == "succeeded":
+        raise HTTPException(409, "生成记录已成功，不能标记失败")
+    generation.status = "failed"
+    generation.error = body.error.strip()[:500]
+    generation.generated_at = None
+    await db.commit()
+    await db.refresh(generation)
+    media = (
+        await db.get(CreativeAsset, generation.media_asset_id)
+        if generation.media_asset_id is not None
+        else None
+    )
+    return _generation_payload(generation, media)
+
+
+@router.delete(
+    "/{prompt_asset_id}/generations/{generation_id}",
+    status_code=204,
+)
+async def delete_prompt_generation(
+    prompt_asset_id: int,
+    generation_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    await _prompt_asset(db, prompt_asset_id)
+    generation = await db.scalar(
+        select(PromptGeneration).where(
+            PromptGeneration.id == generation_id,
+            PromptGeneration.prompt_asset_id == prompt_asset_id,
+        )
+    )
+    if generation is None:
+        raise HTTPException(404, "提示词生成记录不存在")
+    await db.delete(generation)
+    await db.commit()
+
+
 @router.get("", response_model=list[AssetOut])
 async def list_assets(asset_type: AssetType | None = None, media_kind: Literal["image", "video", "audio"] | None = None, directory: str = "", q: str = "", db: AsyncSession = Depends(get_db)):
     stmt = select(CreativeAsset).order_by(desc(CreativeAsset.updated_at), desc(CreativeAsset.id))
@@ -729,11 +1029,37 @@ async def select_daily_article_candidates(
 
 @router.post("", response_model=AssetOut, status_code=201)
 async def create_asset(body: AssetCreate, db: AsyncSession = Depends(get_db)):
-    if body.asset_type == "article" and not body.content.strip(): raise HTTPException(422, "文章资产需要内容")
-    if body.asset_type != "article" and (not body.url or not body.media_kind): raise HTTPException(422, "多媒体资产需要文件和类型")
-    if body.asset_type == "article":
+    if body.asset_type == "prompt":
+        if body.prompt_kind not in {"image", "video", "other"}:
+            raise HTTPException(422, "提示词类型无效")
+        if not body.content.strip():
+            raise HTTPException(422, "提示词内容不能为空")
+        prompt_kind = body.prompt_kind
+        media_kind = ""
+    elif body.asset_type == "article":
+        if not body.content.strip():
+            raise HTTPException(422, "文章资产需要内容")
+        prompt_kind = ""
+        media_kind = ""
         await _ensure_unique_article(db, content=body.content, url=body.url, directory=body.directory)
-    asset = CreativeAsset(**body.model_dump(), source="manual")
+    else:
+        if not body.url or not body.media_kind:
+            raise HTTPException(422, "多媒体资产需要文件和类型")
+        prompt_kind = ""
+        media_kind = body.media_kind
+    asset = CreativeAsset(
+        asset_type=body.asset_type,
+        prompt_kind=prompt_kind,
+        media_kind=media_kind,
+        title=body.title,
+        content=body.content,
+        url=body.url,
+        media_type=body.media_type,
+        filename=body.filename,
+        directory=body.directory,
+        tags=body.tags,
+        source="manual",
+    )
     db.add(asset); await db.commit(); await db.refresh(asset)
     return asset
 
@@ -742,8 +1068,19 @@ async def update_asset(asset_id: int, body: AssetUpdate, db: AsyncSession = Depe
     asset = await db.get(CreativeAsset, asset_id)
     if not asset: raise HTTPException(404, "创作资产不存在")
     values = body.model_dump(exclude_none=True)
-    if asset.asset_type == "article":
+    if asset.asset_type == "prompt":
+        prompt_kind = values.get("prompt_kind", asset.prompt_kind)
+        content = str(values.get("content", asset.content))
+        if prompt_kind not in {"image", "video", "other"}:
+            raise HTTPException(422, "提示词类型无效")
+        if not content.strip():
+            raise HTTPException(422, "提示词内容不能为空")
+    elif asset.asset_type == "article":
+        if "prompt_kind" in values:
+            raise HTTPException(422, "文章资产不能设置提示词类型")
         await _ensure_unique_article(db, content=str(values.get("content", asset.content)), url=str(values.get("url", asset.url)), directory=str(values.get("directory", asset.directory)), exclude_id=asset.id)
+    elif "prompt_kind" in values:
+        raise HTTPException(422, "多媒体资产不能设置提示词类型")
     for key, value in values.items(): setattr(asset, key, value)
     await db.commit(); await db.refresh(asset)
     return asset
@@ -753,6 +1090,12 @@ async def delete_asset(asset_id: int, db: AsyncSession = Depends(get_db)):
     asset = await db.get(CreativeAsset, asset_id)
     if not asset: raise HTTPException(404, "创作资产不存在")
     upload_path = ""
+    if asset.asset_type == "prompt":
+        await db.execute(
+            delete(PromptGeneration).where(
+                PromptGeneration.prompt_asset_id == asset.id,
+            )
+        )
     if asset.source == "upload" and asset.url.startswith("/api/uploads/"):
         stored_name = os.path.basename(asset.url)
         candidate = os.path.abspath(os.path.join(_UPLOADS_DIR, stored_name))
