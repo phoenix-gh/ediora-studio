@@ -1,30 +1,40 @@
 // @vitest-environment jsdom
 
-import { act, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
+  attachPromptGeneration: vi.fn(),
   createCreativeAsset: vi.fn(),
   createCreativeAssetDirectory: vi.fn(),
+  createPromptGeneration: vi.fn(),
+  deletePromptGeneration: vi.fn(),
   deleteCreativeAsset: vi.fn(),
   deleteCreativeAssetDirectory: vi.fn(),
+  listPromptGenerations: vi.fn(),
   listCreativeAssetDirectories: vi.fn(),
   renameCreativeAssetDirectory: vi.fn(),
   updateCreativeAssetDirectoryIngestionRule: vi.fn(),
   updateCreativeAsset: vi.fn(),
+  uploadCreativeAsset: vi.fn(),
 }))
 
 vi.mock('@/lib/api/assets', () => ({
+  attachPromptGeneration: mocks.attachPromptGeneration,
   createCreativeAsset: mocks.createCreativeAsset,
   createCreativeAssetDirectory: mocks.createCreativeAssetDirectory,
+  createPromptGeneration: mocks.createPromptGeneration,
+  deletePromptGeneration: mocks.deletePromptGeneration,
   creativeAssetUrl: (url: string) => new URL(url, 'http://media.test').toString(),
   deleteCreativeAsset: mocks.deleteCreativeAsset,
   deleteCreativeAssetDirectory: mocks.deleteCreativeAssetDirectory,
+  listPromptGenerations: mocks.listPromptGenerations,
   listCreativeAssetDirectories: mocks.listCreativeAssetDirectories,
   renameCreativeAssetDirectory: mocks.renameCreativeAssetDirectory,
   updateCreativeAssetDirectoryIngestionRule: mocks.updateCreativeAssetDirectoryIngestionRule,
   updateCreativeAsset: mocks.updateCreativeAsset,
+  uploadCreativeAsset: mocks.uploadCreativeAsset,
 }))
 
 vi.mock('@/components/MarkdownEditor', () => ({
@@ -79,6 +89,12 @@ const image = {
   url: '/api/uploads/cover.png',
 }
 
+const prompt = (id = 20): CreativeAsset => ({
+  ...article(id, '城市海报提示词', '未来城市，霓虹灯，电影感。'),
+  asset_type: 'prompt',
+  prompt_kind: 'image',
+})
+
 function deferred<T>() {
   let reject!: (error: Error) => void
   let resolve!: (value: T) => void
@@ -92,6 +108,7 @@ function deferred<T>() {
 beforeEach(() => {
   vi.clearAllMocks()
   mocks.listCreativeAssetDirectories.mockResolvedValue([])
+  mocks.listPromptGenerations.mockResolvedValue([])
   mocks.updateCreativeAssetDirectoryIngestionRule.mockResolvedValue({
     directory_id: 0,
     enabled: false,
@@ -101,6 +118,8 @@ beforeEach(() => {
   mocks.updateCreativeAsset.mockImplementation(async (id, body) => ({ ...article(id, body.title ?? '', body.content ?? ''), url: body.url ?? '' }))
   mocks.createCreativeAsset.mockResolvedValue(article(4, '新文章', '保留的正文'))
 })
+
+afterEach(() => cleanup())
 
 describe('creative assets workspace', () => {
   it('fills its definite parent and delegates overflow to workspace regions', () => {
@@ -657,5 +676,53 @@ describe('creative assets workspace', () => {
     updateRequest.resolve({ ...article(70, '服务端标题', '服务端正文'), directory: '旧目录', tags: ['stale-tag'] })
     await waitFor(() => expect(screen.getByRole('button', { name: '保存' })).toBeEnabled())
     await waitFor(() => expect(screen.getByRole('button', { name: /服务端标题/ })).toBeVisible())
+  })
+
+  it('opens the prompt asset workspace and saves prompt metadata', async () => {
+    const user = userEvent.setup()
+    render(<AssetsClient initialAssets={[prompt()]} />)
+
+    await user.click(screen.getByRole('tab', { name: '提示词' }))
+    expect(screen.getByRole('region', { name: '提示词列表' })).toBeVisible()
+    expect(screen.getByRole('region', { name: '提示词编辑器' })).toBeVisible()
+    await waitFor(() => expect(mocks.listPromptGenerations).toHaveBeenCalledWith(20))
+
+    const title = screen.getByLabelText('提示词标题')
+    await user.clear(title)
+    await user.type(title, '更新后的提示词')
+    await user.click(screen.getByRole('button', { name: '保存' }))
+
+    await waitFor(() => expect(mocks.updateCreativeAsset).toHaveBeenCalledWith(20, {
+      content: '未来城市，霓虹灯，电影感。',
+      directory: '',
+      prompt_kind: 'image',
+      title: '更新后的提示词',
+    }))
+  })
+
+  it('creates a prompt asset from the prompt dialog', async () => {
+    const user = userEvent.setup()
+    mocks.createCreativeAsset.mockResolvedValue(prompt(50))
+    render(<AssetsClient initialAssets={[]} />)
+
+    await user.click(screen.getByRole('tab', { name: '提示词' }))
+    await user.click(screen.getByRole('button', { name: '新增提示词' }))
+    await user.type(screen.getByLabelText('提示词标题'), '新提示词')
+    await user.type(screen.getByLabelText('提示词正文'), '一张产品海报')
+    await user.selectOptions(screen.getByLabelText('新提示词类型'), 'video')
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: '保存' }))
+
+    await waitFor(() => expect(mocks.createCreativeAsset).toHaveBeenCalledWith({
+      asset_type: 'prompt',
+      content: '一张产品海报',
+      directory: '',
+      filename: '',
+      media_kind: null,
+      media_type: '',
+      prompt_kind: 'video',
+      tags: [],
+      title: '新提示词',
+      url: '',
+    }))
   })
 })

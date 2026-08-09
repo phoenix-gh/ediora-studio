@@ -13,6 +13,7 @@ import { WorkspaceToolbar } from '@/components/layout/WorkspaceToolbar'
 import { AssetDirectoryRail } from './AssetDirectoryRail'
 import { ArticleAssetWorkspace } from './ArticleAssetWorkspace'
 import { MediaAssetGrid } from './MediaAssetGrid'
+import { PromptAssetWorkspace } from './PromptAssetWorkspace'
 import {
   createCreativeAsset,
   createCreativeAssetDirectory,
@@ -25,11 +26,14 @@ import {
   updateCreativeAsset,
   type CreativeAsset,
   type CreativeAssetDirectory,
+  type CreativeAssetType,
+  type PromptKind,
 } from '@/lib/api/assets'
 
-type AssetType = 'article' | 'media'
+type AssetType = CreativeAssetType
 type MediaFilter = 'all' | 'image' | 'video' | 'audio'
 type ArticleDialogState = { busy: boolean; content: string; error: string; id: number; title: string; url: string }
+type PromptDialogState = { busy: boolean; content: string; error: string; id: number; kind: PromptKind; title: string }
 type DirectoryDialogState = {
   aiIngestionEnabled: boolean
   aiIngestionKeywords: string
@@ -61,6 +65,7 @@ export function AssetsClient({
   const [previewAsset, setPreviewAsset] = useState<CreativeAsset | null>(null)
   const [directories, setDirectories] = useState<CreativeAssetDirectory[]>([])
   const [articleDialog, setArticleDialog] = useState<ArticleDialogState | null>(null)
+  const [promptDialog, setPromptDialog] = useState<PromptDialogState | null>(null)
   const [directoryDialog, setDirectoryDialog] = useState<DirectoryDialogState | null>(null)
   const [confirmation, setConfirmation] = useState<ConfirmationState | null>(null)
   const [directoryLoadError, setDirectoryLoadError] = useState('')
@@ -100,10 +105,14 @@ export function AssetsClient({
   function changeType(nextType: AssetType) {
     setType(nextType)
     setDirectory('')
+    setMediaFilter('all')
     setDirectories([])
     setDirectoryLoadError('')
     setSelectedId(null)
     setOperationErrors({})
+    setArticleDialog(null)
+    setPromptDialog(null)
+    setDirectoryDialog(null)
   }
 
   function openNewDirectory() {
@@ -152,7 +161,7 @@ export function AssetsClient({
       let savedDirectory: CreativeAssetDirectory
       if (form.item) {
         const previous = form.item
-        savedDirectory = await renameCreativeAssetDirectory(previous.id, name)
+        savedDirectory = await renameCreativeAssetDirectory(previous.id, name, previous.asset_type)
         setAssets(items => items.map(item => item.asset_type === previous.asset_type && item.directory === previous.name ? { ...item, directory: savedDirectory.name } : item))
         if (directory === previous.name) setDirectory(savedDirectory.name)
       } else {
@@ -232,7 +241,48 @@ export function AssetsClient({
     }
   }
 
+  function openNewPrompt() {
+    if (promptDialog?.busy) return
+    setPromptDialog({ busy: false, content: '', error: '', id: ++formId.current, kind: 'image', title: '' })
+  }
+
+  async function saveNewPrompt() {
+    if (!promptDialog || promptDialog.busy) return
+    const form = promptDialog
+    const title = form.title.trim()
+    const content = form.content.trim()
+    if (!title || !content) {
+      setPromptDialog(value => value ? { ...value, error: '请填写提示词标题和正文。' } : value)
+      return
+    }
+    setPromptDialog(value => value?.id === form.id ? { ...value, busy: true, error: '' } : value)
+    try {
+      const created = await createCreativeAsset({
+        asset_type: 'prompt',
+        content,
+        directory,
+        filename: '',
+        media_kind: null,
+        media_type: '',
+        prompt_kind: form.kind,
+        tags: [],
+        title,
+        url: '',
+      })
+      setAssets(items => [created, ...items])
+      setSelectedId(created.id)
+      setPromptDialog(value => value?.id === form.id ? null : value)
+    } catch {
+      setPromptDialog(value => value?.id === form.id ? { ...value, busy: false, error: '保存提示词资产失败，请重试。' } : value)
+    }
+  }
+
   function changeSelectedArticle(asset: CreativeAsset) {
+    setAssets(items => items.map(item => item.id === asset.id ? asset : item))
+    clearOperationError(asset.id)
+  }
+
+  function changeSelectedPrompt(asset: CreativeAsset) {
     setAssets(items => items.map(item => item.id === asset.id ? asset : item))
     clearOperationError(asset.id)
   }
@@ -260,17 +310,48 @@ export function AssetsClient({
     }
   }, [clearOperationError, savingAssetId, selected])
 
+  const saveSelectedPrompt = useCallback(async () => {
+    if (!selected || selected.asset_type !== 'prompt' || savingAssetId !== null) return
+    const assetId = selected.id
+    const snapshot = {
+      content: selected.content,
+      directory: selected.directory,
+      prompt_kind: selected.prompt_kind === 'image' || selected.prompt_kind === 'video' || selected.prompt_kind === 'other'
+        ? selected.prompt_kind
+        : 'other' as const,
+      title: selected.title,
+    }
+    clearOperationError(assetId)
+    setSavingAssetId(assetId)
+    try {
+      const updated = await updateCreativeAsset(assetId, snapshot)
+      setAssets(items => items.map(item => item.id !== assetId ? item : {
+        ...item,
+        content: item.content === snapshot.content ? updated.content : item.content,
+        directory: item.directory === snapshot.directory ? updated.directory : item.directory,
+        prompt_kind: item.prompt_kind === snapshot.prompt_kind ? updated.prompt_kind : item.prompt_kind,
+        title: item.title === snapshot.title ? updated.title : item.title,
+        updated_at: updated.updated_at,
+      }))
+    } catch {
+      setOperationErrors(errors => ({ ...errors, [assetId]: '更新提示词资产失败，请重试。' }))
+    } finally {
+      setSavingAssetId(value => value === assetId ? null : value)
+    }
+  }, [clearOperationError, savingAssetId, selected])
+
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 's') return
-      if (articleDialog || !selected) return
+      if (articleDialog || promptDialog || !selected) return
       event.preventDefault()
       if (savingAssetId !== null) return
-      void saveSelectedArticle()
+      if (type === 'article') void saveSelectedArticle()
+      if (type === 'prompt') void saveSelectedPrompt()
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [articleDialog, saveSelectedArticle, savingAssetId, selected])
+  }, [articleDialog, promptDialog, saveSelectedArticle, saveSelectedPrompt, savingAssetId, selected, type])
 
   function selectArticle(id: number) {
     setSelectedId(id)
@@ -290,6 +371,27 @@ export function AssetsClient({
       },
     })
   }
+
+  function requestPromptDelete() {
+    if (!selected || selected.asset_type !== 'prompt') return
+    setConfirmation({
+      busy: false,
+      error: '',
+      message: '删除这个提示词资产？生成历史关联会删除，但已生成的媒体资产会保留。',
+      action: async () => {
+        await deleteCreativeAsset(selected.id)
+        setAssets(items => items.filter(item => item.id !== selected.id))
+        clearOperationError(selected.id)
+        setSelectedId(null)
+      },
+    })
+  }
+
+  const registerMediaAsset = useCallback((asset: CreativeAsset) => {
+    setAssets(items => items.some(item => item.id === asset.id)
+      ? items.map(item => item.id === asset.id ? asset : item)
+      : [asset, ...items])
+  }, [])
 
   async function confirmDeletion() {
     if (!confirmation || confirmation.busy) return
@@ -316,7 +418,11 @@ export function AssetsClient({
     />
     <div className="flex min-w-0 flex-1 flex-col">
       <WorkspaceToolbar
-        actions={type === 'article' ? <Button onClick={openNewArticle} size="sm">新增素材</Button> : undefined}
+        actions={type === 'article'
+          ? <Button onClick={openNewArticle} size="sm">新增素材</Button>
+          : type === 'prompt'
+            ? <Button onClick={openNewPrompt} size="sm">新增提示词</Button>
+            : undefined}
         count={`${visibleAssets.length} 项`}
         title={directory || '全部资产'}
       >
@@ -331,7 +437,9 @@ export function AssetsClient({
       {selected && operationErrors[selected.id] ? <p className="px-7 pt-3 text-sm text-destructive" role="alert">{operationErrors[selected.id]}</p> : null}
       {type === 'article'
         ? <ArticleAssetWorkspace assets={visibleAssets} directories={directories} isSaving={savingAssetId !== null} onChange={changeSelectedArticle} onDelete={requestArticleDelete} onSave={saveSelectedArticle} onSelect={selectArticle} selected={selected} />
-        : <MediaAssetGrid assets={visibleAssets} onPreview={setPreviewAsset} onSelect={setSelectedId} selectedId={selected?.id ?? null} />}
+        : type === 'prompt'
+          ? <PromptAssetWorkspace assets={visibleAssets} directories={directories} isSaving={savingAssetId !== null} onChange={changeSelectedPrompt} onDelete={requestPromptDelete} onMediaAsset={registerMediaAsset} onSave={saveSelectedPrompt} onSelect={selectArticle} selected={selected} />
+          : <MediaAssetGrid assets={visibleAssets} onPreview={setPreviewAsset} onSelect={setSelectedId} selectedId={selected?.id ?? null} />}
     </div>
 
     <Dialog open={previewAsset !== null} onOpenChange={open => { if (!open) setPreviewAsset(null) }}>
@@ -353,6 +461,19 @@ export function AssetsClient({
           {articleDialog?.error ? <p className="text-xs text-destructive" id="article-form-error" role="alert">{articleDialog.error}</p> : null}
         </div>
         <DialogFooter><Button disabled={articleDialog?.busy} onClick={() => setArticleDialog(null)} variant="outline">取消</Button><Button disabled={articleDialog?.busy} onClick={() => void saveNewArticle()}>{articleDialog?.busy ? '保存中…' : '保存'}</Button></DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <Dialog open={promptDialog !== null} onOpenChange={open => { if (!open && !promptDialog?.busy) setPromptDialog(null) }}>
+      <DialogContent showCloseButton={!promptDialog?.busy} size="md">
+        <DialogHeader><DialogTitle>新增提示词资产</DialogTitle><DialogDescription>保存提示词文本，并选择后续生成结果的类型。</DialogDescription></DialogHeader>
+        <div className="space-y-3">
+          <div className="grid gap-1.5"><Label htmlFor="prompt-asset-title">提示词标题</Label><Input aria-describedby={promptDialog?.error ? 'prompt-form-error' : undefined} aria-invalid={Boolean(promptDialog?.error) || undefined} autoFocus disabled={promptDialog?.busy} id="prompt-asset-title" onChange={event => setPromptDialog(value => value ? { ...value, error: '', title: event.target.value } : value)} placeholder="提示词标题" value={promptDialog?.title ?? ''} /></div>
+          <div className="grid gap-1.5"><Label htmlFor="prompt-asset-kind">提示词类型</Label><select aria-label="新提示词类型" className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm" disabled={promptDialog?.busy} id="prompt-asset-kind" onChange={event => setPromptDialog(value => value ? { ...value, error: '', kind: event.target.value as PromptKind } : value)} value={promptDialog?.kind ?? 'image'}><option value="image">图片提示词</option><option value="video">视频提示词</option><option value="other">其他提示词</option></select></div>
+          <div className="grid gap-1.5"><Label htmlFor="prompt-asset-content">提示词正文</Label><Textarea aria-describedby={promptDialog?.error ? 'prompt-form-error' : undefined} aria-invalid={Boolean(promptDialog?.error) || undefined} disabled={promptDialog?.busy} id="prompt-asset-content" onChange={event => setPromptDialog(value => value ? { ...value, content: event.target.value, error: '' } : value)} placeholder="输入完整提示词" value={promptDialog?.content ?? ''} /></div>
+          {promptDialog?.error ? <p className="text-xs text-destructive" id="prompt-form-error" role="alert">{promptDialog.error}</p> : null}
+        </div>
+        <DialogFooter><Button disabled={promptDialog?.busy} onClick={() => setPromptDialog(null)} variant="outline">取消</Button><Button disabled={promptDialog?.busy} onClick={() => void saveNewPrompt()}>{promptDialog?.busy ? '保存中…' : '保存'}</Button></DialogFooter>
       </DialogContent>
     </Dialog>
 

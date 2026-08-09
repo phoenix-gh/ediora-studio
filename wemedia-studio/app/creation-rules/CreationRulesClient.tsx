@@ -30,7 +30,13 @@ export function CreationRulesClient() {
       listChatSkills(),
     ])
     setDashboard(nextDashboard)
-    setDirectories([...article, ...media])
+    setDirectories([...article, ...media]
+      .filter(directory => directory.asset_type !== 'prompt')
+      .map(({ id, name, asset_type }) => ({
+        id,
+        name,
+        asset_type: asset_type as 'article' | 'media',
+      })))
     setSkills(nextSkills)
   }, [])
 

@@ -4,14 +4,14 @@ import { Folder, LockKeyhole, Pencil, Plus, Sparkles, Trash2 } from 'lucide-reac
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { cn } from '@/lib/utils'
-import type { CreativeAssetDirectory } from '@/lib/api/assets'
+import type { CreativeAssetDirectory, CreativeAssetType } from '@/lib/api/assets'
 
 type AssetDirectoryRailProps = {
-  type: 'article' | 'media'
+  type: CreativeAssetType
   activeDirectory: string
   directories: CreativeAssetDirectory[]
   count: (name: string) => number
-  onTypeChange: (type: 'article' | 'media') => void
+  onTypeChange: (type: CreativeAssetType) => void
   onDirectoryChange: (name: string) => void
   onAddDirectory: () => void
   onRenameDirectory: (directory: CreativeAssetDirectory) => void
@@ -34,10 +34,11 @@ export function AssetDirectoryRail({
   return (
     <aside className="flex w-60 shrink-0 flex-col border-r border-border bg-surface-muted">
       <div className="px-4 py-4"><h2 className="text-sm font-semibold">创作资产</h2></div>
-      <Tabs value={type} onValueChange={value => onTypeChange(value as 'article' | 'media')} className="px-3 pb-3">
+      <Tabs value={type} onValueChange={value => onTypeChange(value as CreativeAssetType)} className="px-3 pb-3">
         <TabsList className="w-full" variant="line">
           <TabsTrigger className="flex-1" value="article">文章</TabsTrigger>
           <TabsTrigger className="flex-1" value="media">多媒体</TabsTrigger>
+          <TabsTrigger className="flex-1" value="prompt">提示词</TabsTrigger>
         </TabsList>
       </Tabs>
       <div className="flex items-center px-4 py-2 text-xs font-medium text-muted-foreground">
