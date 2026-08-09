@@ -50,6 +50,7 @@ export interface AppSettings {
   image_base_url: string
   image_api_key_set: boolean
   image_api_key_preview: string
+  prompt_generation_history_limit: number
   heygen_api_key_set: boolean
   heygen_api_key_preview: string
   transcription_provider: TranscriptionProvider
@@ -131,6 +132,7 @@ export interface SettingsUpdate {
   image_model?: string
   image_api_key?: string
   image_base_url?: string
+  prompt_generation_history_limit?: number
   heygen_api_key?: string
   transcription_provider?: TranscriptionProvider
   transcription_model?: string

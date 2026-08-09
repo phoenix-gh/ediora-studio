@@ -16,6 +16,7 @@ DEFAULTS: dict[str, str] = {
     "image_api_key": "",
     "image_base_url": "",
     "image_model": "gpt-image-1",
+    "prompt_generation_history_limit": "3",
     "heygen_api_key": "",
     "transcription_provider": "local-whisper",
     "transcription_model": "Systran/faster-whisper-large-v3",

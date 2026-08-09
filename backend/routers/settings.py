@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
-from pydantic import BaseModel, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import Literal, Optional
 from datetime import datetime, timezone
 import json
@@ -122,6 +122,7 @@ class SettingsOut(BaseModel):
     image_base_url: str
     image_api_key_set: bool
     image_api_key_preview: str
+    prompt_generation_history_limit: int
     heygen_api_key_set: bool
     heygen_api_key_preview: str
     transcription_provider: str
@@ -198,6 +199,11 @@ class SettingsUpdate(BaseModel):
     image_model: Optional[str] = None
     image_api_key: Optional[str] = None
     image_base_url: Optional[str] = None
+    prompt_generation_history_limit: Optional[int] = Field(
+        default=None,
+        ge=1,
+        le=20,
+    )
     heygen_api_key: Optional[str] = None
     transcription_provider: Optional[str] = None
     transcription_model: Optional[str] = None
@@ -282,6 +288,14 @@ class SpeechRuntimeConfig(BaseModel):
     default_voice: str
 
 
+def _prompt_generation_history_limit(cfg: dict) -> int:
+    try:
+        value = int(cfg.get("prompt_generation_history_limit", "3"))
+    except (TypeError, ValueError):
+        return 3
+    return value if 1 <= value <= 20 else 3
+
+
 def _build_out(cfg: dict) -> SettingsOut:
     import blog_client
     api_key = cfg.get("llm_api_key", "")
@@ -353,6 +367,7 @@ def _build_out(cfg: dict) -> SettingsOut:
         image_base_url=cfg.get("image_base_url", ""),
         image_api_key_set=bool(image_api_key),
         image_api_key_preview=f"…{image_api_key[-4:]}" if len(image_api_key) >= 4 else "",
+        prompt_generation_history_limit=_prompt_generation_history_limit(cfg),
         heygen_api_key_set=bool(heygen_api_key),
         heygen_api_key_preview=f"…{heygen_api_key[-4:]}" if len(heygen_api_key) >= 4 else "",
         transcription_provider=transcription_provider,
@@ -612,6 +627,10 @@ async def update_settings(
         updates["image_api_key"] = body.image_api_key.strip()
     if body.image_base_url is not None:
         updates["image_base_url"] = body.image_base_url.strip()
+    if body.prompt_generation_history_limit is not None:
+        updates["prompt_generation_history_limit"] = str(
+            body.prompt_generation_history_limit
+        )
     if body.heygen_api_key is not None:
         updates["heygen_api_key"] = body.heygen_api_key.strip()
     if body.transcription_provider is not None:

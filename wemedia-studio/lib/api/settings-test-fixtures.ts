@@ -13,6 +13,7 @@ export function makeSettings(overrides: Partial<AppSettings> = {}): AppSettings 
     image_base_url: '',
     image_api_key_set: false,
     image_api_key_preview: '',
+    prompt_generation_history_limit: 3,
     heygen_api_key_set: false,
     heygen_api_key_preview: '',
     transcription_provider: 'local-whisper',

@@ -113,7 +113,22 @@ describe('AISection', () => {
       llm_base_url: 'https://api.openai.com/v1',
       image_base_url: 'https://images.example/v1',
       image_model: 'gpt-image-1',
+      prompt_generation_history_limit: 3,
     }))
+  })
+
+  it('saves the prompt generation history limit with the AI settings', async () => {
+    vi.mocked(updateSettings).mockResolvedValue(settings)
+    render(<AISection settings={settings} onSaved={vi.fn()} />)
+
+    fireEvent.change(screen.getByLabelText('提示词生成历史'), {
+      target: { value: '10' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+
+    await waitFor(() => expect(updateSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ prompt_generation_history_limit: 10 }),
+    ))
   })
 
   it('tests only the currently saved LLM configuration', async () => {
@@ -272,6 +287,7 @@ describe('AISection', () => {
       llm_base_url: 'https://api.openai.com/v1',
       image_base_url: 'https://images.example/v1',
       image_model: 'gpt-image-2',
+      prompt_generation_history_limit: 3,
     }))
   })
 })

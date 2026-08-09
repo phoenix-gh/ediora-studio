@@ -26,6 +26,9 @@ export function AISection({ settings, onSaved }: { settings: AppSettings | null;
   const [imageBaseUrl, setImageBaseUrl] = useState(settings?.image_base_url ?? '')
   const [imageApiKey, setImageApiKey] = useState('')
   const [imageModel, setImageModel] = useState(settings?.image_model ?? 'gpt-image-1')
+  const [promptHistoryLimit, setPromptHistoryLimit] = useState(
+    settings?.prompt_generation_history_limit ?? 3,
+  )
   const [showKey, setShowKey]   = useState(false)
   const [saving, setSaving]     = useState(false)
 
@@ -117,6 +120,7 @@ export function AISection({ settings, onSaved }: { settings: AppSettings | null;
         ...(apiKey ? { llm_api_key: apiKey } : {}),
         image_base_url: imageBaseUrl.trim(),
         image_model: imageModel.trim() || 'gpt-image-1',
+        prompt_generation_history_limit: Number(promptHistoryLimit),
         ...(imageApiKey ? { image_api_key: imageApiKey } : {}),
       })
       onSaved(updated)
@@ -419,6 +423,18 @@ export function AISection({ settings, onSaved }: { settings: AppSettings | null;
               placeholder="gpt-image-1"
               className="font-mono"
             />
+          </Field>
+          <Field>
+            <FieldLabel htmlFor="prompt-generation-history">提示词生成历史</FieldLabel>
+            <Input
+              id="prompt-generation-history"
+              type="number"
+              min={1}
+              max={20}
+              value={promptHistoryLimit}
+              onChange={event => setPromptHistoryLimit(Number(event.target.value))}
+            />
+            <FieldDescription>默认保留最近 3 条成功结果，范围为 1–20 条。</FieldDescription>
           </Field>
         </FieldGroup>
       </FormSection>
