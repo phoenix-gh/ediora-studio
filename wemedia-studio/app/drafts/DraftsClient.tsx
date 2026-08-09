@@ -36,7 +36,7 @@ import { runBulkOperations } from './draft-bulk-operations'
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 const STATUS_STYLES: Record<string, string> = {
-  drafting:  'bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400',
+  drafting:  'bg-muted text-muted-foreground',
   editing:   'bg-blue-100 text-blue-600 dark:bg-blue-950/50 dark:text-blue-400',
   ready:     'bg-emerald-100 text-emerald-600 dark:bg-emerald-950/50 dark:text-emerald-400',
   published: 'bg-indigo-100 text-indigo-600 dark:bg-indigo-950/50 dark:text-indigo-400',
@@ -761,27 +761,27 @@ export function DraftsClient({
     <div className="flex h-full overflow-hidden">
 
       {/* ── Left sidebar ───────────────────────────────────── */}
-      <aside className="w-72 flex-shrink-0 border-r border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 flex flex-col">
+      <aside className="w-72 flex-shrink-0 border-r border-border bg-surface flex flex-col">
         {/* Header */}
-        <div className="px-4 py-4 border-b border-zinc-100 dark:border-zinc-800 flex items-center gap-2">
+        <div data-slot="page-header" className="flex h-[var(--app-header-height)] min-h-[var(--app-header-height)] items-center px-4 py-4 border-b border-border gap-2">
           <BookMarked className="w-4 h-4 text-indigo-500" />
-          <span className="font-semibold text-sm text-zinc-900 dark:text-zinc-100">草稿箱</span>
-          <span className="ml-auto text-xs text-zinc-400">{drafts.length} 篇</span>
+          <span className="font-semibold text-sm text-foreground">草稿箱</span>
+          <span className="ml-auto text-xs text-foreground-subtle">{drafts.length} 篇</span>
           <button
             onClick={handleCreateDraft}
             disabled={creating}
             title="新建草稿"
-            className="text-zinc-400 hover:text-indigo-500 dark:hover:text-indigo-400 disabled:opacity-40 transition-colors"
+            className="text-foreground-subtle hover:text-indigo-500 dark:hover:text-indigo-400 disabled:opacity-40 transition-colors"
           >
             {creating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
           </button>
-          <button onClick={handleRefresh} disabled={refreshing} className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 disabled:opacity-40">
+          <button onClick={handleRefresh} disabled={refreshing} className="text-foreground-subtle hover:text-foreground disabled:opacity-40">
             <RefreshCw className={cn('w-3.5 h-3.5', refreshing && 'animate-spin')} />
           </button>
         </div>
 
         {/* Filters */}
-        <div className="px-3 py-2 border-b border-zinc-100 dark:border-zinc-800 flex gap-2">
+        <div className="px-3 py-2 border-b border-border flex gap-2">
           <NativeSelect
             aria-label="按主题筛选"
             value={filterTopicId}
@@ -808,7 +808,7 @@ export function DraftsClient({
         </div>
 
         {filteredDrafts.length > 0 ? (
-          <div className="flex flex-col gap-1 border-b border-zinc-100 px-3 py-2 dark:border-zinc-800">
+          <div className="flex flex-col gap-1 border-b border-border px-3 py-2">
             <div className="flex items-center gap-1">
               <Button
                 variant="ghost"
@@ -877,7 +877,7 @@ export function DraftsClient({
         {/* Draft list */}
         <div ref={draftListRef} className="flex-1 overflow-y-auto">
           {filteredDrafts.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-40 text-zinc-400 gap-2">
+            <div className="flex flex-col items-center justify-center h-40 text-foreground-subtle gap-2">
               <FileText className="w-8 h-8 opacity-30" />
               <p className="text-xs">暂无草稿</p>
               <button
@@ -900,14 +900,14 @@ export function DraftsClient({
                 <div
                   key={draft.id}
                   className={cn(
-                    'border-b border-zinc-100 dark:border-zinc-800',
+                    'border-b border-border',
                     isActive && 'border-l-2 border-l-indigo-400',
                   )}
                 >
                   <button
                     onClick={event => handleDraftRowClick(event, draft)}
                     className={cn(
-                      'group w-full px-2 py-3 text-left transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-900',
+                      'group w-full px-2 py-3 text-left transition-colors hover:bg-surface-muted',
                       isBulkSelected && 'bg-sky-50 dark:bg-sky-950/30',
                       isActive && !isBulkSelected && 'bg-indigo-50 dark:bg-indigo-950/30',
                     )}
@@ -919,10 +919,10 @@ export function DraftsClient({
                           {topicName}
                         </p>
                       )}
-                      <p className={cn('text-xs font-medium truncate', isActive ? 'text-indigo-700 dark:text-indigo-300' : 'text-zinc-800 dark:text-zinc-200')}>
+                      <p className={cn('text-xs font-medium truncate', isActive ? 'text-indigo-700 dark:text-indigo-300' : 'text-foreground')}>
                         {draft.title || '（无标题）'}
                       </p>
-                      <p className="text-[10px] text-zinc-400 mt-0.5 line-clamp-1 leading-relaxed">
+                      <p className="text-[10px] text-foreground-subtle mt-0.5 line-clamp-1 leading-relaxed">
                         {draft.content.replace(/#+\s*/g, '').slice(0, 50) || '空内容'}
                       </p>
                       {/* Platform badges row */}
@@ -936,10 +936,10 @@ export function DraftsClient({
                       </div>
                     </div>
                     <div className="flex flex-col items-end gap-1 flex-shrink-0">
-                      <span className="text-[10px] text-zinc-400 flex items-center gap-0.5">
+                      <span className="text-[10px] text-foreground-subtle flex items-center gap-0.5">
                         <Clock className="w-2.5 h-2.5" />{formatDate(draft.updated_at)}
                       </span>
-                      <ChevronRight className={cn('w-3 h-3 text-zinc-300 group-hover:text-zinc-400 transition-colors', isActive && 'text-indigo-400')} />
+                      <ChevronRight className={cn('w-3 h-3 text-foreground-subtle group-hover:text-muted-foreground transition-colors', isActive && 'text-indigo-400')} />
                     </div>
                     </div>
                   </button>
@@ -947,7 +947,7 @@ export function DraftsClient({
               )
             })}
             {nextCursor ? (
-              <div ref={loadMoreSentinelRef} className="flex justify-center py-3 text-xs text-zinc-400">
+              <div ref={loadMoreSentinelRef} className="flex justify-center py-3 text-xs text-foreground-subtle">
                 {loadingMore ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : '继续向下滚动加载'}
               </div>
             ) : null}
@@ -958,12 +958,12 @@ export function DraftsClient({
 
       {/* ── Right: Editor + Chat ──────────────────────────── */}
       {selected ? (
-        <div className="flex-1 flex overflow-hidden bg-white dark:bg-zinc-950">
+        <div className="flex-1 flex overflow-hidden bg-surface">
           {/* Editor column */}
           <div className="flex-1 flex flex-col overflow-hidden min-w-0">
 
             {/* Toolbar */}
-            <div className="flex items-center gap-3 px-6 py-3 border-b border-zinc-100 dark:border-zinc-800 flex-shrink-0">
+            <div data-slot="page-header" className="flex h-[var(--app-header-height)] min-h-[var(--app-header-height)] items-center gap-3 px-6 py-3 border-b border-border flex-shrink-0">
               <NativeSelect
                 value={editStatus}
                 onChange={e => { setEditStatus(e.target.value); setDirty(true) }}
@@ -984,7 +984,7 @@ export function DraftsClient({
                 ))}
               </NativeSelect>
 
-              <span className="text-[11px] text-zinc-400">
+              <span className="text-[11px] text-foreground-subtle">
                 v{selected.version} · 更新于 {formatDate(selected.updated_at)} · {wordCount} 字
               </span>
 
@@ -1061,12 +1061,12 @@ export function DraftsClient({
             </div>
 
             {/* Title */}
-            <div className="px-6 pt-4 pb-2 flex-shrink-0 border-b border-zinc-100 dark:border-zinc-800">
+            <div className="px-6 pt-4 pb-2 flex-shrink-0 border-b border-border">
               <input
                 value={editTitle}
                 onChange={e => { setEditTitle(e.target.value); setDirty(true) }}
                 placeholder="标题…"
-                className="w-full text-xl font-bold text-zinc-900 dark:text-zinc-100 bg-transparent border-0 outline-none placeholder:text-zinc-300 dark:placeholder:text-zinc-700"
+                className="w-full text-xl font-bold text-foreground bg-transparent border-0 outline-none placeholder:text-foreground-subtle"
               />
             </div>
 
@@ -1084,28 +1084,28 @@ export function DraftsClient({
 
           {/* ── Chat panel ──────────────────────────────────── */}
           {chatOpen && (
-            <div className="w-80 flex-shrink-0 border-l border-zinc-200 dark:border-zinc-800 flex flex-col bg-white dark:bg-zinc-950">
-              <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-100 dark:border-zinc-800 flex-shrink-0">
+            <div className="w-80 flex-shrink-0 border-l border-border flex flex-col bg-surface">
+              <div className="flex items-center justify-between px-4 py-3 border-b border-border flex-shrink-0">
                 <div className="flex items-center gap-2 min-w-0">
                   <MessageSquare className="w-3.5 h-3.5 text-violet-500 flex-shrink-0" />
-                  <span className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">AI 写作助手</span>
+                  <span className="text-xs font-semibold text-foreground">AI 写作助手</span>
                   <span className={cn('text-[10px] px-1.5 py-0.5 rounded-full font-medium', draftTypeInfo(selected.draft_type).badge)}>
                     {draftTypeInfo(selected.draft_type).label}
                   </span>
                 </div>
-                <button onClick={handleNewChatSession} className="text-[10px] text-zinc-400 hover:text-violet-500 dark:hover:text-violet-400 flex-shrink-0 transition-colors">
+                <button onClick={handleNewChatSession} className="text-[10px] text-foreground-subtle hover:text-violet-500 dark:hover:text-violet-400 flex-shrink-0 transition-colors">
                   新对话
                 </button>
               </div>
 
               <div className="flex-1 overflow-y-auto px-3 py-3 space-y-3">
                 {chatHistory.length === 0 && (
-                  <div className="text-center text-zinc-400 text-xs py-6 space-y-2">
+                  <div className="text-center text-foreground-subtle text-xs py-6 space-y-2">
                     <MessageSquare className="w-7 h-7 mx-auto opacity-30" />
                     <p>可以说：</p>
                     <div className="space-y-1">
                       {['帮我润色开头', '把语气改得更有力', '压缩到 500 字', '帮我补充一个结尾'].map(s => (
-                        <button key={s} onClick={() => setChatInput(s)} className="block w-full text-left px-2 py-1 rounded hover:bg-zinc-50 dark:hover:bg-zinc-900 transition-colors">{s}</button>
+                        <button key={s} onClick={() => setChatInput(s)} className="block w-full text-left px-2 py-1 rounded hover:bg-surface-muted transition-colors">{s}</button>
                       ))}
                     </div>
                   </div>
@@ -1113,13 +1113,13 @@ export function DraftsClient({
                 {chatHistory.map((m, i) => (
                   <div key={i} className={cn('flex flex-col', m.role === 'user' ? 'items-end' : 'items-start')}>
                     <div className={cn('max-w-[90%] rounded-xl px-3 py-2 text-xs leading-relaxed whitespace-pre-wrap',
-                      m.role === 'user' ? 'bg-violet-500 text-white rounded-br-sm' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-200 rounded-bl-sm')}>
+                      m.role === 'user' ? 'bg-violet-500 text-white rounded-br-sm' : 'bg-muted text-foreground rounded-bl-sm')}>
                       {m.content}
                     </div>
                     {m.role === 'assistant' && (
                       <button
                         onClick={() => { setEditContent(m.content); setDirty(true); toast.success('已应用到草稿，记得保存') }}
-                        className="mt-1 text-[10px] text-zinc-400 hover:text-violet-500 dark:hover:text-violet-400 transition-colors px-1"
+                        className="mt-1 text-[10px] text-foreground-subtle hover:text-violet-500 dark:hover:text-violet-400 transition-colors px-1"
                       >
                         用作草稿
                       </button>
@@ -1128,8 +1128,8 @@ export function DraftsClient({
                 ))}
                 {chatLoading && (
                   <div className="flex justify-start">
-                    <div className="bg-zinc-100 dark:bg-zinc-800 rounded-xl rounded-bl-sm px-3 py-2">
-                      <Loader2 className="w-3.5 h-3.5 animate-spin text-zinc-400" />
+                    <div className="bg-muted rounded-xl rounded-bl-sm px-3 py-2">
+                      <Loader2 className="w-3.5 h-3.5 animate-spin text-foreground-subtle" />
                     </div>
                   </div>
                 )}
@@ -1140,13 +1140,13 @@ export function DraftsClient({
                       onClick={() => { setEditContent(pendingContent); setDirty(true); setPendingContent(null); toast.success('已应用修改，记得保存') }}>
                       <CheckCheck className="w-3.5 h-3.5" />应用到草稿
                     </Button>
-                    <button onClick={() => setPendingContent(null)} className="text-[10px] text-zinc-400 hover:text-zinc-600 w-full text-center">忽略</button>
+                    <button onClick={() => setPendingContent(null)} className="text-[10px] text-foreground-subtle hover:text-foreground w-full text-center">忽略</button>
                   </div>
                 )}
                 <div ref={chatEndRef} />
               </div>
 
-              <div className="flex-shrink-0 border-t border-zinc-100 dark:border-zinc-800 p-3">
+              <div className="flex-shrink-0 border-t border-border p-3">
                 <div className="flex gap-2">
                   <textarea
                     value={chatInput}
@@ -1154,23 +1154,23 @@ export function DraftsClient({
                     onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleChatSend() } }}
                     placeholder="输入修改需求… (Enter 发送)"
                     rows={2}
-                    className="flex-1 text-xs px-2 py-1.5 border border-zinc-200 dark:border-zinc-700 rounded-lg bg-transparent outline-none focus:border-violet-400 resize-none text-zinc-800 dark:text-zinc-200 placeholder:text-zinc-400"
+                    className="flex-1 text-xs px-2 py-1.5 border border-input rounded-lg bg-control outline-none focus:border-violet-400 resize-none text-foreground placeholder:text-foreground-subtle"
                   />
                   <button onClick={handleChatSend} disabled={!chatInput.trim() || chatLoading}
                     className="self-end p-2 rounded-lg bg-violet-500 hover:bg-violet-600 disabled:opacity-40 disabled:cursor-not-allowed text-white transition-colors">
                     <Send className="w-3.5 h-3.5" />
                   </button>
                 </div>
-                <p className="text-[10px] text-zinc-400 mt-1.5">Shift+Enter 换行</p>
+                <p className="text-[10px] text-foreground-subtle mt-1.5">Shift+Enter 换行</p>
               </div>
             </div>
           )}
         </div>
       ) : (
-        <div className="flex-1 flex flex-col items-center justify-center text-zinc-400 gap-3">
+        <div className="flex-1 flex flex-col items-center justify-center text-foreground-subtle gap-3">
           <BookMarked className="w-12 h-12 opacity-20" />
           <p className="text-sm">选择一篇草稿开始编辑</p>
-          <p className="text-xs text-zinc-300">从写作模板参考创作后会自动进入草稿箱</p>
+          <p className="text-xs text-foreground-subtle">从写作模板参考创作后会自动进入草稿箱</p>
         </div>
       )}
 

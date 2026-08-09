@@ -387,10 +387,10 @@ export function ResponsesClient({
 
   return (
     <div className="flex h-screen min-h-0 flex-col bg-background">
-      <header className="flex shrink-0 items-center justify-between border-b border-border bg-card px-5 py-4 lg:px-8">
-        <div>
+      <header data-slot="page-header" className="flex h-[var(--app-header-height)] min-h-[var(--app-header-height)] shrink-0 items-center justify-between border-b border-border bg-card px-5 lg:px-8">
+        <div className="flex min-w-0 items-center gap-3">
           <h1 className="text-xl font-semibold tracking-tight">情报中心</h1>
-          <p className="mt-1 text-xs text-muted-foreground">先看原文，再判断它是否值得进入内容系统</p>
+          <p className="truncate text-xs text-muted-foreground">先看原文，再判断它是否值得进入内容系统</p>
         </div>
         <div className="hidden items-center gap-2 text-xs text-muted-foreground sm:flex">
           <span className="size-2 rounded-full bg-emerald-500" /> {total} 条内容

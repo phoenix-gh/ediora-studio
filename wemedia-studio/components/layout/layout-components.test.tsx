@@ -29,7 +29,7 @@ describe('layout components', () => {
     expect(screen.getByRole('heading', { level: 1, name: '创作资产' })).toBeTruthy()
     expect(screen.getByRole('group', { name: '页面操作' })).toBeTruthy()
     expect(screen.getByRole('banner')).toHaveAttribute('data-slot', 'page-header')
-    expect(screen.getByRole('banner')).toHaveClass('min-h-[var(--app-header-height)]')
+    expect(screen.getByRole('banner')).toHaveClass('h-[var(--app-header-height)]', 'min-h-[var(--app-header-height)]')
   })
 
   it('exposes stable list and editor regions', () => {
@@ -74,6 +74,7 @@ describe('layout components', () => {
     render(<WorkspaceToolbar title="素材" count="12" actions={<button>上传</button>}>筛选器</WorkspaceToolbar>)
 
     expect(screen.getByRole('toolbar', { name: '素材工作区' })).toHaveTextContent('12')
+    expect(screen.getByRole('toolbar', { name: '素材工作区' })).toHaveClass('h-[var(--app-header-height)]', 'min-h-[var(--app-header-height)]')
     expect(screen.getByRole('group', { name: '工作区操作' })).toBeTruthy()
   })
 

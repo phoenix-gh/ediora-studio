@@ -32,9 +32,9 @@ marked.setOptions({ breaks: true, gfm: true })
 const PRIORITY_LABELS: Record<number, { label: string; cls: string }> = {
   1: { label: 'P1', cls: 'bg-red-100 text-red-600 dark:bg-red-950/40 dark:text-red-400' },
   2: { label: 'P2', cls: 'bg-orange-100 text-orange-600 dark:bg-orange-950/40 dark:text-orange-400' },
-  3: { label: 'P3', cls: 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400' },
-  4: { label: 'P4', cls: 'bg-zinc-100 text-zinc-400 dark:bg-zinc-800 dark:text-zinc-500' },
-  5: { label: 'P5', cls: 'bg-zinc-100 text-zinc-300 dark:bg-zinc-800 dark:text-zinc-600' },
+  3: { label: 'P3', cls: 'bg-muted text-muted-foreground' },
+  4: { label: 'P4', cls: 'bg-muted text-foreground-subtle' },
+  5: { label: 'P5', cls: 'bg-muted text-foreground-subtle' },
 }
 
 const GENRE_OPTIONS: { value: string; label: string }[] = [
@@ -90,20 +90,20 @@ function SourceRow({ source, onDelete, onPreview, onCreateDraft, isActive, creat
     <div
       onClick={() => onPreview(source)}
       className={cn(
-        'flex items-start gap-3 px-4 py-3 border-b border-zinc-100 dark:border-zinc-800 group transition-colors cursor-pointer',
-        isActive ? 'bg-indigo-50/60 dark:bg-indigo-950/20' : 'hover:bg-zinc-50 dark:hover:bg-zinc-900/50'
+        'flex items-start gap-3 px-4 py-3 border-b border-border group transition-colors cursor-pointer',
+        isActive ? 'bg-indigo-50/60 dark:bg-indigo-950/20' : 'hover:bg-surface-muted'
       )}
     >
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 mb-0.5">
-          <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400">
+          <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
             {platformLabel(source.platform)}
           </span>
-          <span className="text-[10px] text-zinc-400">{formatDate(source.created_at)}</span>
-          {source.content && <FileText className="w-3 h-3 text-zinc-300 dark:text-zinc-600 ml-auto flex-shrink-0" />}
+          <span className="text-[10px] text-foreground-subtle">{formatDate(source.created_at)}</span>
+          {source.content && <FileText className="w-3 h-3 text-foreground-subtle ml-auto flex-shrink-0" />}
         </div>
-        {source.title && <p className="text-xs font-medium text-zinc-800 dark:text-zinc-200 truncate">{source.title}</p>}
-        {source.note && <p className="text-[11px] text-zinc-400 dark:text-zinc-500 mt-0.5 italic">{source.note}</p>}
+        {source.title && <p className="text-xs font-medium text-foreground truncate">{source.title}</p>}
+        {source.note && <p className="text-[11px] text-muted-foreground mt-0.5 italic">{source.note}</p>}
       </div>
       <div className="flex items-center gap-0.5 flex-shrink-0">
         {source.url && source.title && (
@@ -114,14 +114,14 @@ function SourceRow({ source, onDelete, onPreview, onCreateDraft, isActive, creat
         <button
           onClick={e => { e.stopPropagation(); onCreateDraft(source, 'article') }}
           disabled={!!creating}
-          className="opacity-0 group-hover:opacity-100 transition-opacity disabled:cursor-wait text-zinc-400 hover:text-indigo-500 dark:hover:text-indigo-400 p-0.5"
+          className="opacity-0 group-hover:opacity-100 transition-opacity disabled:cursor-wait text-foreground-subtle hover:text-indigo-500 dark:hover:text-indigo-400 p-0.5"
           title="创作文章"
         >
           {creating === 'article' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <PenLine className="w-3.5 h-3.5" />}
         </button>
         <button
           onClick={e => { e.stopPropagation(); onDelete() }}
-          className="opacity-0 group-hover:opacity-100 transition-opacity text-zinc-300 hover:text-red-500 dark:text-zinc-600 dark:hover:text-red-400 p-0.5"
+          className="opacity-0 group-hover:opacity-100 transition-opacity text-foreground-subtle hover:text-red-500 dark:hover:text-red-400 p-0.5"
         >
           <Trash2 className="w-3 h-3" />
         </button>
@@ -136,16 +136,16 @@ function SourcePreview({ source, onClose }: { source: PlanSource; onClose: () =>
   const body = source.content || source.note || ''
   const html = useMemo(() => marked(body) as string, [body])
   return (
-    <div className="w-96 flex-shrink-0 border-l border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 flex flex-col overflow-hidden">
-      <div className="flex items-center gap-2 px-4 py-3 border-b border-zinc-100 dark:border-zinc-800 flex-shrink-0">
+    <div className="w-96 flex-shrink-0 border-l border-border bg-surface flex flex-col overflow-hidden">
+      <div className="flex items-center gap-2 px-4 py-3 border-b border-border flex-shrink-0">
         <FileText className="w-3.5 h-3.5 text-indigo-400 flex-shrink-0" />
-        <span className="flex-1 text-xs font-semibold text-zinc-700 dark:text-zinc-300 truncate">{source.title || '线索预览'}</span>
+        <span className="flex-1 text-xs font-semibold text-foreground truncate">{source.title || '线索预览'}</span>
         {source.url && (
-          <a href={source.url} target="_blank" rel="noopener noreferrer" className="text-zinc-400 hover:text-indigo-500 flex-shrink-0">
+          <a href={source.url} target="_blank" rel="noopener noreferrer" className="text-foreground-subtle hover:text-indigo-500 flex-shrink-0">
             <ExternalLink className="w-3.5 h-3.5" />
           </a>
         )}
-        <button onClick={onClose} className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 flex-shrink-0">
+        <button onClick={onClose} className="text-foreground-subtle hover:text-foreground flex-shrink-0">
           <X className="w-4 h-4" />
         </button>
       </div>
@@ -163,11 +163,11 @@ function SourcePreview({ source, onClose }: { source: PlanSource; onClose: () =>
         )}
         {body ? (
           <div
-            className="prose prose-sm dark:prose-invert max-w-none prose-headings:font-semibold prose-p:text-zinc-700 dark:prose-p:text-zinc-300 prose-p:leading-relaxed prose-a:text-indigo-500 prose-a:no-underline hover:prose-a:underline prose-code:text-pink-500 prose-code:bg-zinc-100 dark:prose-code:bg-zinc-800 prose-code:px-1 prose-code:rounded prose-pre:bg-zinc-100 dark:prose-pre:bg-zinc-900 prose-pre:rounded-lg prose-strong:text-zinc-900 dark:prose-strong:text-zinc-100"
+            className="prose prose-sm dark:prose-invert max-w-none prose-headings:font-semibold prose-p:text-foreground prose-p:leading-relaxed prose-a:text-indigo-500 prose-a:no-underline hover:prose-a:underline prose-code:text-pink-500 prose-code:bg-muted prose-code:px-1 prose-code:rounded prose-pre:bg-muted prose-pre:rounded-lg prose-strong:text-foreground"
             dangerouslySetInnerHTML={{ __html: html }}
           />
         ) : (
-          <p className="text-xs text-zinc-400">暂无内容</p>
+          <p className="text-xs text-foreground-subtle">暂无内容</p>
         )}
       </div>
     </div>
@@ -656,31 +656,34 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
   return (
     <div className="flex h-full overflow-hidden">
       {/* ── Left: tag filter + card list ─────────────────────── */}
-      <aside className="w-72 flex-shrink-0 border-r border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 flex flex-col">
-        <div className="px-4 py-4 border-b border-zinc-100 dark:border-zinc-800 space-y-3">
+      <aside className="w-72 flex-shrink-0 border-r border-border bg-surface flex flex-col">
+        <div className="border-b border-border">
+          <div data-slot="page-header" className="flex h-[var(--app-header-height)] min-h-[var(--app-header-height)] items-center px-4">
           <div className="flex items-center gap-2">
             <Tag className="w-4 h-4 text-indigo-500" />
-            <span className="font-semibold text-sm text-zinc-900 dark:text-zinc-100">写作模板</span>
+            <span className="font-semibold text-sm text-foreground">写作模板</span>
             <div className="ml-auto flex items-center gap-1">
-              <button onClick={handleRefresh} disabled={refreshing} className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 disabled:opacity-40">
+              <button onClick={handleRefresh} disabled={refreshing} className="text-foreground-subtle hover:text-foreground disabled:opacity-40">
                 <RefreshCw className={cn('w-3.5 h-3.5', refreshing && 'animate-spin')} />
               </button>
-              <button onClick={() => setAnalyzeOpen(true)} className="text-zinc-400 hover:text-indigo-500 transition-colors" title="分析文章 → 提炼方案">
+              <button onClick={() => setAnalyzeOpen(true)} className="text-foreground-subtle hover:text-indigo-500 transition-colors" title="分析文章 → 提炼方案">
                 <SendHorizonal className="w-3.5 h-3.5" />
               </button>
-              <button onClick={openPromptEditor} className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors" title="编辑模板提炼补充规则">
+              <button onClick={openPromptEditor} className="text-foreground-subtle hover:text-foreground transition-colors" title="编辑模板提炼补充规则">
                 <Settings className="w-3.5 h-3.5" />
               </button>
-              <button onClick={() => setShowNewForm(true)} className="text-zinc-400 hover:text-indigo-500 transition-colors">
+              <button onClick={() => setShowNewForm(true)} className="text-foreground-subtle hover:text-indigo-500 transition-colors">
                 <Plus className="w-3.5 h-3.5" />
               </button>
             </div>
           </div>
+          </div>
+          <div className="space-y-3 px-4 pb-4">
           <input
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
             placeholder="搜索方案…"
-            className="w-full text-xs px-2.5 py-1.5 border border-zinc-200 dark:border-zinc-700 rounded-lg bg-transparent outline-none focus:border-indigo-400 text-zinc-700 dark:text-zinc-300 placeholder:text-zinc-400"
+            className="w-full text-xs px-2.5 py-1.5 border border-input rounded-lg bg-control outline-none focus:border-indigo-400 text-foreground placeholder:text-foreground-subtle"
           />
           {availableTags.length > 0 && (
             <div ref={tagFilterRef} className="relative">
@@ -690,7 +693,7 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
                   'w-full flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border transition-colors',
                   filterTagNames.length > 0
                     ? 'border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-950/30 text-indigo-700 dark:text-indigo-300'
-                    : 'border-zinc-200 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400 hover:border-zinc-300 bg-transparent'
+                    : 'border-input text-muted-foreground hover:border-border-strong bg-transparent'
                 )}
               >
                 <Tag className="w-3 h-3 flex-shrink-0" />
@@ -712,20 +715,20 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
               </button>
 
               {tagFilterOpen && (
-                <div className="absolute z-20 top-full left-0 right-0 mt-1 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg shadow-lg overflow-hidden max-h-52 overflow-y-auto">
+                <div className="absolute z-20 top-full left-0 right-0 mt-1 bg-surface border border-border rounded-lg shadow-lg overflow-hidden max-h-52 overflow-y-auto">
                   {availableTags.map(tag => {
                     const active = filterTagNames.includes(tag.name)
                     return (
                       <button
                         key={tag.id}
                         onClick={() => toggleFilterTag(tag.name)}
-                        className="w-full flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors text-left"
+                        className="w-full flex items-center gap-2 px-3 py-1.5 text-xs hover:bg-muted transition-colors text-left"
                       >
                         <span
                           className="w-2 h-2 rounded-full flex-shrink-0"
                           style={{ backgroundColor: tag.color }}
                         />
-                        <span className="flex-1 text-zinc-700 dark:text-zinc-300">{tag.name}</span>
+                        <span className="flex-1 text-foreground">{tag.name}</span>
                         {active && <Check className="w-3 h-3 text-indigo-500 flex-shrink-0" />}
                       </button>
                     )
@@ -734,11 +737,12 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
               )}
             </div>
           )}
+          </div>
         </div>
 
         <div className="flex-1 overflow-y-auto py-2 px-2 space-y-1">
           {visiblePlans.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-40 text-zinc-400 gap-2">
+            <div className="flex flex-col items-center justify-center h-40 text-foreground-subtle gap-2">
               <BookMarked className="w-8 h-8 opacity-20" />
               <p className="text-xs">暂无方案</p>
               <button onClick={() => setShowNewForm(true)} className="text-xs text-indigo-500 hover:underline">新建方案</button>
@@ -755,32 +759,32 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
                     'px-3 py-2.5 rounded-lg cursor-pointer transition-colors border',
                     isSelected
                       ? 'bg-indigo-50 dark:bg-indigo-950/30 border-indigo-200 dark:border-indigo-800'
-                      : 'bg-white dark:bg-zinc-950 border-zinc-100 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-900'
+                      : 'bg-surface border-border hover:bg-surface-muted'
                   )}
                 >
                   <div className="flex items-center gap-1.5 mb-1">
                     <span className={cn('text-[9px] px-1.5 py-0.5 rounded font-bold flex-shrink-0', pr.cls)}>{pr.label}</span>
-                    <span className="text-xs font-medium text-zinc-800 dark:text-zinc-200 truncate flex-1">{p.title}</span>
-                    {p.status === 'archived' && <span className="text-[9px] text-zinc-400 flex-shrink-0">归档</span>}
+                    <span className="text-xs font-medium text-foreground truncate flex-1">{p.title}</span>
+                    {p.status === 'archived' && <span className="text-[9px] text-foreground-subtle flex-shrink-0">归档</span>}
                   </div>
                   {p.tags.length > 0 && (
                     <div className="flex flex-wrap gap-1 mb-1">
                       {p.tags.slice(0, 3).map(tag => <TagChip key={tag.id} tag={tag} />)}
-                      {p.tags.length > 3 && <span className="text-[10px] text-zinc-400">+{p.tags.length - 3}</span>}
+                      {p.tags.length > 3 && <span className="text-[10px] text-foreground-subtle">+{p.tags.length - 3}</span>}
                     </div>
                   )}
                   {p.strategy && (
-                    <p className="text-[11px] text-zinc-400 dark:text-zinc-500 line-clamp-2 leading-relaxed">{p.strategy.slice(0, 100)}</p>
+                    <p className="text-[11px] text-muted-foreground line-clamp-2 leading-relaxed">{p.strategy.slice(0, 100)}</p>
                   )}
                   <div className="flex items-center gap-2 mt-1.5">
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400">
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
                       {GENRE_LABEL[p.genre ?? 'commentary']}
                     </span>
                     {p.source_count > 0 && (
-                      <span className="text-[10px] text-zinc-400"><span className="font-medium text-zinc-600 dark:text-zinc-400">{p.source_count}</span> 条线索</span>
+                      <span className="text-[10px] text-foreground-subtle"><span className="font-medium text-muted-foreground">{p.source_count}</span> 条线索</span>
                     )}
                     {p.draft_count > 0 && (
-                      <span className="text-[10px] text-zinc-400"><span className="font-medium text-zinc-600 dark:text-zinc-400">{p.draft_count}</span> 篇产出</span>
+                      <span className="text-[10px] text-foreground-subtle"><span className="font-medium text-muted-foreground">{p.draft_count}</span> 篇产出</span>
                     )}
                   </div>
                 </div>
@@ -792,9 +796,17 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
 
       {/* ── Right: detail ────────────────────────────────────── */}
       {selected ? (
-        <div className="flex-1 flex flex-col overflow-hidden bg-white dark:bg-zinc-950">
+        <div className="flex-1 flex flex-col overflow-hidden bg-surface">
           {/* Header */}
-          <div className="flex items-start gap-3 px-6 py-4 border-b border-zinc-100 dark:border-zinc-800 flex-shrink-0">
+          <div
+            data-slot="page-header"
+            className={cn(
+              'flex items-center gap-3 border-b border-border flex-shrink-0 px-6',
+              editingTitle
+                ? 'min-h-[var(--app-header-height)] py-4'
+                : 'h-[var(--app-header-height)] min-h-[var(--app-header-height)] overflow-hidden py-2',
+            )}
+          >
             {editingTitle ? (
               <div className="flex-1 flex items-start gap-2">
                 <div className="flex-1 space-y-2">
@@ -803,21 +815,21 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
                     value={editTitle}
                     onChange={e => setEditTitle(e.target.value)}
                     onKeyDown={e => { if (e.key === 'Enter') handleSaveMeta(); if (e.key === 'Escape') setEditingTitle(false) }}
-                    className="w-full text-lg font-bold bg-transparent border-b border-indigo-400 outline-none text-zinc-900 dark:text-zinc-100"
+                    className="w-full text-lg font-bold bg-transparent border-b border-indigo-400 outline-none text-foreground"
                   />
                   <div className="flex items-center gap-2">
-                    <span className="text-xs text-zinc-500">优先级</span>
+                    <span className="text-xs text-muted-foreground">优先级</span>
                     {[1,2,3,4,5].map(p => {
                       const { label, cls } = PRIORITY_LABELS[p]
                       return (
                         <button key={p} onClick={() => setEditPriority(p)}
-                          className={cn('text-[11px] px-2 py-0.5 rounded font-semibold transition-all', editPriority === p ? cls : 'bg-zinc-50 text-zinc-400 dark:bg-zinc-900')}
+                          className={cn('text-[11px] px-2 py-0.5 rounded font-semibold transition-all', editPriority === p ? cls : 'bg-surface-muted text-foreground-subtle')}
                         >{label}</button>
                       )
                     })}
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className="text-xs text-zinc-500">文体</span>
+                    <span className="text-xs text-muted-foreground">文体</span>
                     <NativeSelect
                       value={editGenre}
                       onChange={e => setEditGenre(e.target.value)}
@@ -825,15 +837,15 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
                     >
                       {GENRE_OPTIONS.map(g => <option key={g.value} value={g.value}>{g.label}</option>)}
                     </NativeSelect>
-                    <span className="text-[10px] text-zinc-400">决定 writer 怎么写</span>
+                    <span className="text-[10px] text-foreground-subtle">决定 writer 怎么写</span>
                   </div>
-                  <div className="space-y-2 border-t border-zinc-100 dark:border-zinc-800 pt-2">
-                    <div className="text-[11px] font-medium text-zinc-500">视觉设计（留空 = 继承账号默认）</div>
+                  <div className="space-y-2 border-t border-border pt-2">
+                    <div className="text-[11px] font-medium text-muted-foreground">视觉设计（留空 = 继承账号默认）</div>
                     <input
                       value={editImageStyle}
                       onChange={e => setEditImageStyle(e.target.value)}
                       placeholder="插图风格 image_style（覆盖账号）"
-                      className="w-full text-xs px-2 py-1.5 border border-zinc-200 dark:border-zinc-700 rounded bg-white dark:bg-zinc-900 outline-none focus:border-indigo-400 text-zinc-700 dark:text-zinc-300"
+                      className="w-full text-xs px-2 py-1.5 border border-input rounded bg-control outline-none focus:border-indigo-400 text-foreground"
                     />
                     <CoverStyleEditor
                       coverStyle={editCoverStyle}
@@ -849,23 +861,23 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
                   <button onClick={handleSaveMeta} disabled={savingMeta} className="text-indigo-500 hover:text-indigo-600 p-1">
                     {savingMeta ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
                   </button>
-                  <button onClick={() => setEditingTitle(false)} className="text-zinc-400 hover:text-zinc-600 p-1"><X className="w-4 h-4" /></button>
+                  <button onClick={() => setEditingTitle(false)} className="text-foreground-subtle hover:text-foreground p-1"><X className="w-4 h-4" /></button>
                 </div>
               </div>
             ) : (
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 mb-2">
-                  <h1 className="text-lg font-bold text-zinc-900 dark:text-zinc-100 truncate">{selected.title}</h1>
+                  <h1 className="text-lg font-bold text-foreground truncate">{selected.title}</h1>
                   <span className={cn('text-[10px] px-1.5 py-0.5 rounded font-semibold flex-shrink-0', PRIORITY_LABELS[selected.priority]?.cls)}>
                     {PRIORITY_LABELS[selected.priority]?.label}
                   </span>
                   {selected.status === 'archived' && (
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-100 text-zinc-400 dark:bg-zinc-800">已归档</span>
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-foreground-subtle">已归档</span>
                   )}
-                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400 flex-shrink-0">
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground flex-shrink-0">
                     {GENRE_LABEL[selected.genre ?? 'commentary']}
                   </span>
-                  <button onClick={openEdit} className="ml-1 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 p-1 rounded hover:bg-zinc-50 dark:hover:bg-zinc-900">
+                  <button onClick={openEdit} className="ml-1 text-foreground-subtle hover:text-foreground p-1 rounded hover:bg-surface-muted">
                     <Pencil className="w-3 h-3" />
                   </button>
                   <div className="ml-auto flex items-center gap-1.5 flex-shrink-0">
@@ -893,7 +905,7 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
                       }
                     }}
                     placeholder="添加标签…"
-                    className="text-[10px] px-1.5 py-0.5 border border-dashed border-zinc-300 dark:border-zinc-600 rounded-full outline-none focus:border-indigo-400 bg-transparent text-zinc-500 placeholder:text-zinc-400 w-20"
+                    className="text-[10px] px-1.5 py-0.5 border border-dashed border-border-strong rounded-full outline-none focus:border-indigo-400 bg-transparent text-muted-foreground placeholder:text-foreground-subtle w-20"
                     list="tag-suggestions"
                   />
                   <datalist id="tag-suggestions">
@@ -905,7 +917,7 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
           </div>
 
           {/* Tabs */}
-          <div className="flex border-b border-zinc-100 dark:border-zinc-800 px-6 flex-shrink-0">
+          <div className="flex border-b border-border px-6 flex-shrink-0">
             {(['strategy', 'sources', 'drafts', 'updates'] as ActiveTab[]).map(tab => (
               <button
                 key={tab}
@@ -914,7 +926,7 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
                   'text-xs py-2.5 px-1 mr-6 font-medium border-b-2 transition-colors',
                   activeTab === tab
                     ? 'border-indigo-500 text-indigo-600 dark:text-indigo-400'
-                    : 'border-transparent text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'
+                    : 'border-transparent text-muted-foreground hover:text-foreground'
                 )}
               >
                 {tab === 'strategy' ? 'Strategy'
@@ -933,20 +945,20 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
                   value={strategyDraft}
                   onChange={e => setStrategyDraft(e.target.value)}
                   placeholder={`## 文章模式\n这类文章的固定写法是什么样的。\n例：第一人称，讲一个普通人用某工具做到某件具体事的真实故事，有数字，500字左右。\n\n## 标题公式\n标题的固定结构 + 举例。\n例：「[时间] + [具体动作] + [具体结果]」→「花3周用Claude做了个工具，月入8000」\n\n## 找素材的方法\n- 搜索关键词：\n- 素材来源：（平台/网站）\n- 好素材的判断标准：有什么特征才值得写\n\n## 禁区\n不写什么，避开哪些角度`}
-                  className="flex-1 text-sm font-mono bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg px-4 py-3 outline-none focus:border-indigo-400 resize-none text-zinc-800 dark:text-zinc-200 placeholder:text-zinc-300 dark:placeholder:text-zinc-600 leading-relaxed"
+                  className="flex-1 text-sm font-mono bg-control border border-input rounded-lg px-4 py-3 outline-none focus:border-indigo-400 resize-none text-foreground placeholder:text-foreground-subtle leading-relaxed"
                 />
                 <div className="flex items-center gap-2 mt-3 flex-shrink-0">
                   <Button size="sm" onClick={handleSaveBrief} disabled={savingBrief || strategyDraft === selected.strategy} className="gap-1 text-xs h-8">
                     {savingBrief ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />} 保存
                   </Button>
-                  <Button size="sm" variant="outline" onClick={() => setReanalyzeOpen(true)} className="gap-1 text-xs h-8 text-zinc-600 dark:text-zinc-400">
+                  <Button size="sm" variant="outline" onClick={() => setReanalyzeOpen(true)} className="gap-1 text-xs h-8 text-muted-foreground">
                     <RotateCcw className="w-3.5 h-3.5" /> 重新提炼
                   </Button>
                   <Button size="sm" variant="outline" onClick={openDispatchConfirm} disabled={!strategyDraft.trim()} className="gap-1 text-xs h-8 text-indigo-600 border-indigo-300 hover:bg-indigo-50">
                     <Rocket className="w-3.5 h-3.5" /> 创建创作任务
                   </Button>
                   {strategyDraft !== selected.strategy && (
-                    <span className="text-[11px] text-zinc-400 ml-auto">未保存</span>
+                    <span className="text-[11px] text-foreground-subtle ml-auto">未保存</span>
                   )}
                 </div>
               </div>
@@ -954,28 +966,28 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
 
             {activeTab === 'sources' && (
               <div className="flex-1 overflow-y-auto flex flex-col">
-                <div className="flex items-center gap-2 px-4 py-3 border-b border-zinc-100 dark:border-zinc-800 flex-shrink-0">
-                  <span className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">参考线索</span>
+                <div className="flex items-center gap-2 px-4 py-3 border-b border-border flex-shrink-0">
+                  <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">参考线索</span>
                   <button onClick={() => setShowSourceForm(v => !v)} className="ml-auto flex items-center gap-1 text-xs text-indigo-500 hover:text-indigo-600">
                     <Plus className="w-3.5 h-3.5" /> 添加线索
                   </button>
                 </div>
                 {showSourceForm && (
-                  <div className="px-4 py-3 border-b border-zinc-100 dark:border-zinc-800 bg-indigo-50/40 dark:bg-indigo-950/10 space-y-2">
+                  <div className="px-4 py-3 border-b border-border bg-indigo-50/40 dark:bg-indigo-950/10 space-y-2">
                     <div className="flex gap-2">
                       <input value={sourceForm.url} onChange={e => setSourceForm(f => ({ ...f, url: e.target.value }))} placeholder="链接 URL（可选）"
-                        className="flex-1 text-xs px-2 py-1.5 border border-zinc-200 dark:border-zinc-700 rounded bg-white dark:bg-zinc-900 outline-none focus:border-indigo-400" />
+                        className="flex-1 text-xs px-2 py-1.5 border border-input rounded bg-control outline-none focus:border-indigo-400" />
                       <NativeSelect value={sourceForm.platform} onChange={e => setSourceForm(f => ({ ...f, platform: e.target.value }))}
                         className="h-8 w-auto rounded px-2 py-1.5 text-xs">
                         {PLATFORMS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
                       </NativeSelect>
                     </div>
                     <input value={sourceForm.title} onChange={e => setSourceForm(f => ({ ...f, title: e.target.value }))} placeholder="标题（可选）"
-                      className="w-full text-xs px-2 py-1.5 border border-zinc-200 dark:border-zinc-700 rounded bg-white dark:bg-zinc-900 outline-none focus:border-indigo-400" />
+                      className="w-full text-xs px-2 py-1.5 border border-input rounded bg-control outline-none focus:border-indigo-400" />
                     <textarea value={sourceForm.content} onChange={e => setSourceForm(f => ({ ...f, content: e.target.value }))} placeholder="线索正文内容…" rows={4}
-                      className="w-full text-xs px-2 py-1.5 border border-zinc-200 dark:border-zinc-700 rounded bg-white dark:bg-zinc-900 outline-none focus:border-indigo-400 resize-y" />
+                      className="w-full text-xs px-2 py-1.5 border border-input rounded bg-control outline-none focus:border-indigo-400 resize-y" />
                     <textarea value={sourceForm.note} onChange={e => setSourceForm(f => ({ ...f, note: e.target.value }))} placeholder="备注…" rows={2}
-                      className="w-full text-xs px-2 py-1.5 border border-zinc-200 dark:border-zinc-700 rounded bg-white dark:bg-zinc-900 outline-none focus:border-indigo-400 resize-none" />
+                      className="w-full text-xs px-2 py-1.5 border border-input rounded bg-control outline-none focus:border-indigo-400 resize-none" />
                     <div className="flex gap-2">
                       <Button size="sm" onClick={handleAddSource} disabled={addingSource} className="text-xs h-7 gap-1">
                         {addingSource ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />} 保存
@@ -985,7 +997,7 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
                   </div>
                 )}
                 {selected.sources.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center h-40 text-zinc-400 gap-2">
+                  <div className="flex flex-col items-center justify-center h-40 text-foreground-subtle gap-2">
                     <Link2 className="w-8 h-8 opacity-20" />
                     <p className="text-xs">暂无线索</p>
                   </div>
@@ -1007,32 +1019,32 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
               <div className="flex-1 overflow-y-auto">
                 {loadingDrafts ? (
                   <div className="flex items-center justify-center h-40">
-                    <Loader2 className="w-6 h-6 animate-spin text-zinc-400" />
+                    <Loader2 className="w-6 h-6 animate-spin text-foreground-subtle" />
                   </div>
                 ) : drafts.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center h-40 text-zinc-400 gap-2">
+                  <div className="flex flex-col items-center justify-center h-40 text-foreground-subtle gap-2">
                     <FileText className="w-8 h-8 opacity-20" />
                     <p className="text-xs">暂无产出</p>
-                    <p className="text-[11px] text-zinc-300">从线索创作草稿，或在草稿页关联此方案</p>
+                    <p className="text-[11px] text-foreground-subtle">从线索创作草稿，或在草稿页关联此方案</p>
                   </div>
                 ) : (
-                  <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                  <div className="divide-y divide-border">
                     {drafts.map(d => (
                       <div
                         key={d.id}
                         onClick={() => router.push(`/drafts?draft=${d.id}`)}
-                        className="flex items-center gap-3 px-4 py-3 hover:bg-zinc-50 dark:hover:bg-zinc-900/50 cursor-pointer group"
+                        className="flex items-center gap-3 px-4 py-3 hover:bg-surface-muted cursor-pointer group"
                       >
-                        <FileText className="w-4 h-4 text-zinc-300 dark:text-zinc-600 flex-shrink-0" />
+                        <FileText className="w-4 h-4 text-foreground-subtle flex-shrink-0" />
                         <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium text-zinc-800 dark:text-zinc-200 truncate">
+                          <p className="text-sm font-medium text-foreground truncate">
                             {d.title || '（无标题）'}
                           </p>
-                          <p className="text-[11px] text-zinc-400 mt-0.5">
+                          <p className="text-[11px] text-foreground-subtle mt-0.5">
                             {d.draft_type === 'article' ? '文章' : '脚本'} · {d.status} · {formatDate(d.created_at)}
                           </p>
                         </div>
-                        <ExternalLink className="w-3.5 h-3.5 text-zinc-300 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
+                        <ExternalLink className="w-3.5 h-3.5 text-foreground-subtle opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
                       </div>
                     ))}
                   </div>
@@ -1044,22 +1056,22 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
               <div className="flex-1 overflow-y-auto px-4 py-3">
                 {loadingUpdates ? (
                   <div className="flex items-center justify-center h-40">
-                    <Loader2 className="w-6 h-6 animate-spin text-zinc-400" />
+                    <Loader2 className="w-6 h-6 animate-spin text-foreground-subtle" />
                   </div>
                 ) : planUpdates.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center h-40 text-zinc-400 gap-2">
+                  <div className="flex flex-col items-center justify-center h-40 text-foreground-subtle gap-2">
                     <RefreshCw className="w-8 h-8 opacity-20" />
                     <p className="text-xs">暂无更新记录</p>
-                    <p className="text-[11px] text-zinc-300">Scout 分析文章后会在此记录变更</p>
+                    <p className="text-[11px] text-foreground-subtle">Scout 分析文章后会在此记录变更</p>
                   </div>
                 ) : (
                   <div className="space-y-3">
                     {planUpdates.map(u => (
-                      <div key={u.id} className="rounded-lg border border-zinc-100 dark:border-zinc-800 p-3 space-y-1.5">
-                        <p className="text-[11px] text-zinc-400">
+                      <div key={u.id} className="rounded-lg border border-border p-3 space-y-1.5">
+                        <p className="text-[11px] text-foreground-subtle">
                           {new Date(u.created_at).toLocaleString('zh-CN')}
                         </p>
-                        <p className="text-sm text-zinc-700 dark:text-zinc-300">{u.description}</p>
+                        <p className="text-sm text-foreground">{u.description}</p>
                         {u.source_url && (
                           <a
                             href={u.source_url}
@@ -1084,7 +1096,7 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
           </div>
         </div>
       ) : (
-        <div className="flex-1 flex flex-col items-center justify-center text-zinc-400 gap-3">
+        <div className="flex-1 flex flex-col items-center justify-center text-foreground-subtle gap-3">
           <BookMarked className="w-12 h-12 opacity-20" />
           <p className="text-sm">选择一个方案查看详情</p>
           <button onClick={() => setShowNewForm(true)} className="text-xs text-indigo-500 hover:underline flex items-center gap-1">
@@ -1096,22 +1108,22 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
       {/* ── Analyze article modal ───────────────────────────── */}
       {candidate && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setCandidate(null)}>
-          <div className="w-[620px] space-y-4 rounded-xl bg-white p-6 shadow-xl dark:bg-zinc-900" onClick={event => event.stopPropagation()}>
-            <div><h3 className="font-semibold text-zinc-900 dark:text-zinc-100">提炼候选模板</h3><p className="mt-1 text-xs text-zinc-500">请确认它描述的是可复用写法，而不是这篇文章的主题或案例。</p></div>
-            <div className="space-y-2 rounded-lg bg-zinc-50 p-3 text-sm dark:bg-zinc-800"><p><span className="text-zinc-500">名称：</span>{candidate.title}</p><p><span className="text-zinc-500">文体：</span>{GENRE_LABEL[candidate.genre] ?? candidate.genre}</p><p className="whitespace-pre-wrap"><span className="text-zinc-500">写作说明：</span>{candidate.writing_guide}</p><p><span className="text-zinc-500">标题规律：</span>{candidate.title_formula}</p><p><span className="text-zinc-500">不适用：</span>{candidate.unsuitable_for}</p><p className="text-xs text-zinc-500">泛化检查：{candidate.genericity_check}</p></div>
-            <p className="text-xs text-zinc-500">建议：{candidate.recommendation === 'merge' ? '合并更新现有模板' : candidate.recommendation === 'skip' ? '仅作为素材，不保存模板' : '新建模板'}。{candidate.reason}</p>
+          <div className="w-[620px] space-y-4 rounded-xl bg-surface p-6 shadow-xl" onClick={event => event.stopPropagation()}>
+            <div><h3 className="font-semibold text-foreground">提炼候选模板</h3><p className="mt-1 text-xs text-muted-foreground">请确认它描述的是可复用写法，而不是这篇文章的主题或案例。</p></div>
+            <div className="space-y-2 rounded-lg bg-surface-muted p-3 text-sm"><p><span className="text-muted-foreground">名称：</span>{candidate.title}</p><p><span className="text-muted-foreground">文体：</span>{GENRE_LABEL[candidate.genre] ?? candidate.genre}</p><p className="whitespace-pre-wrap"><span className="text-muted-foreground">写作说明：</span>{candidate.writing_guide}</p><p><span className="text-muted-foreground">标题规律：</span>{candidate.title_formula}</p><p><span className="text-muted-foreground">不适用：</span>{candidate.unsuitable_for}</p><p className="text-xs text-muted-foreground">泛化检查：{candidate.genericity_check}</p></div>
+            <p className="text-xs text-muted-foreground">建议：{candidate.recommendation === 'merge' ? '合并更新现有模板' : candidate.recommendation === 'skip' ? '仅作为素材，不保存模板' : '新建模板'}。{candidate.reason}</p>
             <div className="flex justify-end gap-2"><Button variant="outline" onClick={() => { void recordJobEvent(candidate.jobId, 'template_candidate_resolved', { action: 'ignored' }); setCandidate(null) }}>忽略</Button>{candidate.recommendation !== 'skip' && <Button onClick={confirmCandidate} disabled={candidateSaving}>{candidateSaving ? <Loader2 className="animate-spin" /> : '确认保存'}</Button>}</div>
           </div>
         </div>
       )}
       {analyzeOpen && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={() => setAnalyzeOpen(false)}>
-          <div className="bg-white dark:bg-zinc-900 rounded-xl shadow-xl p-6 w-[520px] space-y-4" onClick={e => e.stopPropagation()}>
+          <div className="bg-surface rounded-xl shadow-xl p-6 w-[520px] space-y-4" onClick={e => e.stopPropagation()}>
             <div className="flex items-center gap-2">
               <SendHorizonal className="w-4 h-4 text-indigo-500" />
-              <h3 className="font-semibold text-zinc-900 dark:text-zinc-100">分析文章 → 提炼方案</h3>
+              <h3 className="font-semibold text-foreground">分析文章 → 提炼方案</h3>
             </div>
-            <p className="text-xs text-zinc-500">Scout 会分析文章，在写作方案库中查找相似方案，决定更新/跳过/新建，并在“更新历史”记录决策。</p>
+            <p className="text-xs text-muted-foreground">Scout 会分析文章，在写作方案库中查找相似方案，决定更新/跳过/新建，并在“更新历史”记录决策。</p>
             <div className="flex gap-2">
               {(['url', 'text'] as const).map(t => (
                 <button
@@ -1121,7 +1133,7 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
                     'text-xs px-3 py-1 rounded-full font-medium border transition-colors',
                     analyzeTab === t
                       ? 'bg-indigo-500 text-white border-indigo-500'
-                      : 'border-zinc-200 dark:border-zinc-700 text-zinc-500 hover:border-zinc-300'
+                      : 'border-input text-muted-foreground hover:border-border-strong'
                   )}
                 >
                   {t === 'url' ? 'URL' : '粘贴文本'}
@@ -1135,7 +1147,7 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
                 onChange={e => setAnalyzeUrl(e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter') handleAnalyze() }}
                 placeholder="https://..."
-                className="w-full px-3 py-2 text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg bg-transparent outline-none focus:border-indigo-400"
+                className="w-full px-3 py-2 text-sm border border-input rounded-lg bg-control outline-none focus:border-indigo-400"
               />
             ) : (
               <textarea
@@ -1144,7 +1156,7 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
                 onChange={e => setAnalyzeText(e.target.value)}
                 placeholder="粘贴文章正文…"
                 rows={6}
-                className="w-full px-3 py-2 text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg bg-zinc-50 dark:bg-zinc-900 outline-none focus:border-indigo-400 resize-y"
+                className="w-full px-3 py-2 text-sm border border-input rounded-lg bg-control outline-none focus:border-indigo-400 resize-y"
               />
             )}
             <div className="flex gap-2 justify-end pt-1">
@@ -1164,23 +1176,23 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
       {/* ── Reanalyze modal ────────────────────────────────── */}
       {reanalyzeOpen && selected && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={() => setReanalyzeOpen(false)}>
-          <div className="bg-white dark:bg-zinc-900 rounded-xl shadow-xl p-6 w-[480px] space-y-4" onClick={e => e.stopPropagation()}>
+          <div className="bg-surface rounded-xl shadow-xl p-6 w-[480px] space-y-4" onClick={e => e.stopPropagation()}>
             <div className="flex items-center gap-2">
               <RotateCcw className="w-4 h-4 text-indigo-500" />
-              <h3 className="font-semibold text-zinc-900 dark:text-zinc-100">重新提炼方案</h3>
+              <h3 className="font-semibold text-foreground">重新提炼方案</h3>
             </div>
-            <p className="text-xs text-zinc-500">
+            <p className="text-xs text-muted-foreground">
               Scout 会根据当前策略内容重新提炼，去掉过于具体的内容（产品名/人名/数字），保留可复用的写法框架。
             </p>
             <div className="space-y-1.5">
-              <label className="text-xs font-medium text-zinc-500">修改建议（可选）</label>
+              <label className="text-xs font-medium text-muted-foreground">修改建议（可选）</label>
               <textarea
                 autoFocus
                 value={reanalyzeSuggestions}
                 onChange={e => setReanalyzeSuggestions(e.target.value)}
                 placeholder="例：标题公式太具体，找素材的方法要更通用，禁区写得不够清晰…"
                 rows={4}
-                className="w-full px-3 py-2 text-sm border border-zinc-200 dark:border-zinc-700 rounded-lg bg-zinc-50 dark:bg-zinc-900 outline-none focus:border-indigo-400 resize-none"
+                className="w-full px-3 py-2 text-sm border border-input rounded-lg bg-control outline-none focus:border-indigo-400 resize-none"
               />
             </div>
             <div className="flex gap-2 justify-end pt-1">
@@ -1196,15 +1208,15 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
       {/* ── Prompt editor modal ─────────────────────────────── */}
       {promptEditorOpen && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={() => setPromptEditorOpen(false)}>
-          <div className="bg-white dark:bg-zinc-900 rounded-xl shadow-xl p-6 w-[640px] space-y-4" onClick={e => e.stopPropagation()}>
+          <div className="bg-surface rounded-xl shadow-xl p-6 w-[640px] space-y-4" onClick={e => e.stopPropagation()}>
             <div className="flex items-center gap-2">
-              <Settings className="w-4 h-4 text-zinc-500" />
-              <h3 className="font-semibold text-zinc-900 dark:text-zinc-100">模板提炼补充规则</h3>
-              <span className="ml-auto text-[11px] text-zinc-400">用于补充泛化与质量要求，不可要求模型自动写入模板</span>
+              <Settings className="w-4 h-4 text-muted-foreground" />
+              <h3 className="font-semibold text-foreground">模板提炼补充规则</h3>
+              <span className="ml-auto text-[11px] text-foreground-subtle">用于补充泛化与质量要求，不可要求模型自动写入模板</span>
             </div>
             {promptEditorLoading ? (
               <div className="flex items-center justify-center h-48">
-                <Loader2 className="w-5 h-5 animate-spin text-zinc-400" />
+                <Loader2 className="w-5 h-5 animate-spin text-foreground-subtle" />
               </div>
             ) : (<>
               <textarea
@@ -1212,9 +1224,9 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
                 value={promptEditorContent}
                 onChange={e => setPromptEditorContent(e.target.value)}
                 rows={18}
-                className="w-full px-3 py-2.5 text-xs font-mono border border-zinc-200 dark:border-zinc-700 rounded-lg bg-zinc-50 dark:bg-zinc-900 outline-none focus:border-indigo-400 resize-y leading-relaxed"
+                className="w-full px-3 py-2.5 text-xs font-mono border border-input rounded-lg bg-control outline-none focus:border-indigo-400 resize-y leading-relaxed"
               />
-              <label className="flex items-center gap-2 text-xs text-zinc-600 dark:text-zinc-300"><input type="checkbox" checked={promptEditorOverride} onChange={event => setPromptEditorOverride(event.target.checked)} />覆盖系统提炼规则（仍须输出候选 JSON）</label>
+              <label className="flex items-center gap-2 text-xs text-muted-foreground"><input type="checkbox" checked={promptEditorOverride} onChange={event => setPromptEditorOverride(event.target.checked)} />覆盖系统提炼规则（仍须输出候选 JSON）</label>
             </>)}
             <div className="flex gap-2 justify-end pt-1">
               <Button variant="outline" onClick={() => setPromptEditorOpen(false)} className="text-xs h-8">取消</Button>
@@ -1229,15 +1241,15 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
       {/* ── Dispatch confirm modal ──────────────────────────── */}
       {showDispatchConfirm && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={() => setShowDispatchConfirm(false)}>
-          <div className="bg-white dark:bg-zinc-900 rounded-xl shadow-xl p-6 w-[560px] space-y-4" onClick={e => e.stopPropagation()}>
+          <div className="bg-surface rounded-xl shadow-xl p-6 w-[560px] space-y-4" onClick={e => e.stopPropagation()}>
             <div className="flex items-center gap-2">
               <Rocket className="w-4 h-4 text-indigo-500" />
-              <h3 className="font-semibold text-zinc-900 dark:text-zinc-100">派发给 Editor → 出稿</h3>
+              <h3 className="font-semibold text-foreground">派发给 Editor → 出稿</h3>
             </div>
-            <p className="text-xs text-zinc-500">以下写作方案指引将发送给 editor。Editor 会读懂方案的角度，自行搜索真实素材，出创作 brief，再交 writer 写稿。可在下方编辑指引后再派发。</p>
+            <p className="text-xs text-muted-foreground">以下写作方案指引将发送给 editor。Editor 会读懂方案的角度，自行搜索真实素材，出创作 brief，再交 writer 写稿。可在下方编辑指引后再派发。</p>
             {dispatchAccounts.length > 0 && (
               <div className="flex items-center gap-2">
-                <span className="text-xs text-zinc-500 flex-shrink-0">发布账号</span>
+                <span className="text-xs text-muted-foreground flex-shrink-0">发布账号</span>
                 <NativeSelect
                   value={dispatchAccountId}
                   onChange={e => setDispatchAccountId(e.target.value)}
@@ -1251,18 +1263,18 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
               </div>
             )}
             <div className="flex items-center gap-2">
-              <span className="text-xs text-zinc-500 flex-shrink-0">本次目标</span>
+              <span className="text-xs text-muted-foreground flex-shrink-0">本次目标</span>
               <input
                 value={dispatchAngle}
                 onChange={e => setDispatchAngle(e.target.value)}
                 placeholder="本次切入角度（可选，覆盖『自己找角度』）"
-                className="flex-1 text-xs px-2 py-1.5 border border-zinc-200 dark:border-zinc-700 rounded bg-white dark:bg-zinc-900 outline-none focus:border-indigo-400 text-zinc-700 dark:text-zinc-300"
+                className="flex-1 text-xs px-2 py-1.5 border border-input rounded bg-control outline-none focus:border-indigo-400 text-foreground"
               />
               <div className="flex gap-1 flex-shrink-0">
                 {(['article', 'script'] as const).map(t => (
                   <button key={t} type="button" onClick={() => setDispatchDraftType(t)}
                     className={cn('px-2 py-1 rounded border text-xs',
-                      dispatchDraftType === t ? 'border-indigo-500 text-indigo-600 dark:text-indigo-400' : 'border-zinc-200 dark:border-zinc-700 text-zinc-400')}>
+                      dispatchDraftType === t ? 'border-indigo-500 text-indigo-600 dark:text-indigo-400' : 'border-input text-foreground-subtle')}>
                     {t === 'article' ? '文章' : '脚本'}
                   </button>
                 ))}
@@ -1272,7 +1284,7 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
               value={dispatchBrief}
               onChange={e => setDispatchBrief(e.target.value)}
               rows={10}
-              className="w-full text-xs font-mono px-3 py-2 border border-zinc-200 dark:border-zinc-700 rounded-lg bg-zinc-50 dark:bg-zinc-900 outline-none focus:border-indigo-400 resize-none"
+              className="w-full text-xs font-mono px-3 py-2 border border-input rounded-lg bg-control outline-none focus:border-indigo-400 resize-none"
             />
             <div className="flex gap-2 justify-end pt-1">
               <Button variant="outline" onClick={() => setShowDispatchConfirm(false)} className="text-xs h-8">取消</Button>
@@ -1287,23 +1299,23 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
       {/* ── New plan modal ─────────────────────────────────── */}
       {showNewForm && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={() => setShowNewForm(false)}>
-          <div className="bg-white dark:bg-zinc-900 rounded-xl shadow-xl p-6 w-96 space-y-4" onClick={e => e.stopPropagation()}>
-              <h3 className="font-semibold text-zinc-900 dark:text-zinc-100">新建写作模板</h3>
+          <div className="bg-surface rounded-xl shadow-xl p-6 w-96 space-y-4" onClick={e => e.stopPropagation()}>
+              <h3 className="font-semibold text-foreground">新建写作模板</h3>
             <input
               ref={newTitleRef}
               value={newTitle}
               onChange={e => setNewTitle(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') handleCreate(); if (e.key === 'Escape') setShowNewForm(false) }}
               placeholder="模板名称…"
-              className="w-full px-3 py-2 border border-zinc-200 dark:border-zinc-700 rounded-lg bg-transparent outline-none focus:border-indigo-400 text-sm"
+              className="w-full px-3 py-2 border border-input rounded-lg bg-control outline-none focus:border-indigo-400 text-sm"
             />
             <div className="flex items-center gap-2">
-              <span className="text-xs text-zinc-500">优先级</span>
+              <span className="text-xs text-muted-foreground">优先级</span>
               {[1,2,3,4,5].map(p => {
                 const { label, cls } = PRIORITY_LABELS[p]
                 return (
                   <button key={p} onClick={() => setNewPriority(p)}
-                    className={cn('text-[11px] px-2 py-0.5 rounded font-semibold transition-all', newPriority === p ? cls : 'bg-zinc-50 text-zinc-400 dark:bg-zinc-900')}
+                    className={cn('text-[11px] px-2 py-0.5 rounded font-semibold transition-all', newPriority === p ? cls : 'bg-surface-muted text-foreground-subtle')}
                   >{label}</button>
                 )
               })}

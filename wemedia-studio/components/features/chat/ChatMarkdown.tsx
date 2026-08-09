@@ -29,7 +29,7 @@ function renderInline(token: Token): ReactNode {
     case 'del':
       return <del>{inline(nestedTokens(token))}</del>
     case 'codespan':
-      return <code className="rounded bg-zinc-100 px-1 py-0.5 font-mono text-[0.85em] text-zinc-800 dark:bg-zinc-800 dark:text-zinc-100">{token.text}</code>
+      return <code className="rounded bg-muted px-1 py-0.5 font-mono text-[0.85em] text-foreground">{token.text}</code>
     case 'link': {
       const href = safeHref(token.href)
       return href
@@ -68,7 +68,7 @@ function renderBlock(token: Token, index: number): ReactNode {
     case 'paragraph':
       return <p key={`${token.raw}-${index}`} className="my-2 first:mt-0 last:mb-0">{inline(nestedTokens(token))}</p>
     case 'blockquote':
-      return <blockquote key={`${token.raw}-${index}`} className="my-3 border-l-2 border-indigo-300 pl-3 text-zinc-600 dark:border-indigo-700 dark:text-zinc-300">{blocks(nestedTokens(token))}</blockquote>
+      return <blockquote key={`${token.raw}-${index}`} className="my-3 border-l-2 border-indigo-300 pl-3 text-muted-foreground dark:border-indigo-700">{blocks(nestedTokens(token))}</blockquote>
     case 'code':
       return <pre key={`${token.raw}-${index}`} className="my-3 overflow-x-auto rounded-lg bg-zinc-950 p-3 text-xs leading-5 text-zinc-100"><code>{token.text}</code></pre>
     case 'list': {
@@ -77,10 +77,10 @@ function renderBlock(token: Token, index: number): ReactNode {
     }
     case 'table': {
       const table = token as Tokens.Table
-      return <div key={`${token.raw}-${index}`} className="my-3 overflow-x-auto"><table className="w-full border-collapse text-left text-xs"><thead><tr>{table.header.map((cell, cellIndex) => <th key={cellIndex} className="border border-zinc-200 bg-zinc-50 px-2 py-1.5 font-semibold dark:border-zinc-700 dark:bg-zinc-800" style={{ textAlign: textAlign(cell.align) }}>{inline(cell.tokens)}</th>)}</tr></thead><tbody>{table.rows.map((row, rowIndex) => <tr key={rowIndex}>{row.map((cell, cellIndex) => <td key={cellIndex} className="border border-zinc-200 px-2 py-1.5 align-top dark:border-zinc-700" style={{ textAlign: textAlign(cell.align) }}>{inline(cell.tokens)}</td>)}</tr>)}</tbody></table></div>
+      return <div key={`${token.raw}-${index}`} className="my-3 overflow-x-auto"><table className="w-full border-collapse text-left text-xs"><thead><tr>{table.header.map((cell, cellIndex) => <th key={cellIndex} className="border border-border bg-surface-muted px-2 py-1.5 font-semibold" style={{ textAlign: textAlign(cell.align) }}>{inline(cell.tokens)}</th>)}</tr></thead><tbody>{table.rows.map((row, rowIndex) => <tr key={rowIndex}>{row.map((cell, cellIndex) => <td key={cellIndex} className="border border-border px-2 py-1.5 align-top" style={{ textAlign: textAlign(cell.align) }}>{inline(cell.tokens)}</td>)}</tr>)}</tbody></table></div>
     }
     case 'hr':
-      return <hr key={`${token.raw}-${index}`} className="my-4 border-zinc-200 dark:border-zinc-700" />
+      return <hr key={`${token.raw}-${index}`} className="my-4 border-border" />
     case 'html':
       return <p key={`${token.raw}-${index}`} className="my-2 whitespace-pre-wrap">{token.raw}</p>
     default:

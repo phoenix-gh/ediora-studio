@@ -280,7 +280,8 @@ export function TextVideoWorkbench({
       <div data-testid="editor-shell" className="min-w-[1120px]">
         <header
           data-testid="editor-topbar"
-          className="flex h-[72px] items-center border-b border-border bg-surface px-4"
+          data-slot="page-header"
+          className="flex h-[var(--app-header-height)] min-h-[var(--app-header-height)] items-center border-b border-border bg-surface px-4"
         >
           <div className="flex w-[28%] min-w-0 items-center gap-2 pr-4">
             <Link

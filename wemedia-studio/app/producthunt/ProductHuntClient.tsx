@@ -29,14 +29,14 @@ function ImageCarousel({ images, title }: { images: string[]; title: string }) {
 
   if (!images.length || (validImages.length === 0)) {
     return (
-      <div className="w-full aspect-video bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center flex-shrink-0">
+        <div className="w-full aspect-video bg-muted flex items-center justify-center flex-shrink-0">
         <Rocket className="w-10 h-10 text-orange-300 dark:text-orange-700" />
       </div>
     )
   }
 
   return (
-    <div className="relative w-full aspect-video bg-zinc-100 dark:bg-zinc-800 overflow-hidden flex-shrink-0 group/carousel">
+    <div className="relative w-full aspect-video bg-muted overflow-hidden flex-shrink-0 group/carousel">
       {/* Current image */}
       {!hasErr && current ? (
         <img
@@ -93,7 +93,7 @@ function ImageCarousel({ images, title }: { images: string[]; title: string }) {
 
 function ProductCard({ post }: { post: ProductHuntPost }) {
   return (
-    <div className="group flex flex-col rounded-xl border border-zinc-100 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-600 hover:shadow-md transition-all overflow-hidden bg-white dark:bg-zinc-900">
+    <div className="group flex flex-col rounded-xl border border-border hover:border-border-strong hover:shadow-md transition-all overflow-hidden bg-surface">
       <a href={post.url} target="_blank" rel="noopener noreferrer" className="block">
         <ImageCarousel images={post.images?.length ? post.images : (post.thumbnail_url ? [post.thumbnail_url] : [])} title={post.title} />
       </a>
@@ -104,13 +104,13 @@ function ProductCard({ post }: { post: ProductHuntPost }) {
           href={post.url}
           target="_blank"
           rel="noopener noreferrer"
-          className="text-[13px] font-semibold text-zinc-900 dark:text-zinc-100 truncate leading-snug hover:text-orange-600 dark:hover:text-orange-400 transition-colors"
+          className="text-[13px] font-semibold text-foreground truncate leading-snug hover:text-orange-600 dark:hover:text-orange-400 transition-colors"
         >
           {post.title}
         </a>
 
         {post.tagline && (
-          <p className="text-[12px] text-zinc-500 dark:text-zinc-400 line-clamp-2 leading-relaxed">
+          <p className="text-[12px] text-muted-foreground line-clamp-2 leading-relaxed">
             {post.tagline}
           </p>
         )}
@@ -127,7 +127,7 @@ function ProductCard({ post }: { post: ProductHuntPost }) {
 
         {/* Footer: time left · action right */}
         <div className="flex items-center mt-auto pt-1.5">
-          <span className="text-[11px] text-zinc-400">{fmtDate(post.published_at)}</span>
+          <span className="text-[11px] text-foreground-subtle">{fmtDate(post.published_at)}</span>
           <div className="ml-auto flex items-center gap-0.5">
             <AddToTopicPopover
               url={post.url}
@@ -202,21 +202,21 @@ export function ProductHuntClient({ initialPosts }: { initialPosts: ProductHuntP
   return (
     <div className="flex flex-col h-full">
       {/* Toolbar */}
-      <div className="border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 px-6 py-3 flex-shrink-0">
-        <div className="flex items-center justify-between gap-4 flex-wrap">
-          <div className="flex items-center gap-2">
+      <div className="flex-shrink-0 border-b border-border bg-surface">
+        <div data-slot="page-header" className="flex h-[var(--app-header-height)] min-h-[var(--app-header-height)] items-center justify-between gap-4 overflow-hidden px-6">
+          <div className="flex min-w-0 items-center gap-2">
             <div className="w-6 h-6 rounded bg-orange-500 flex items-center justify-center flex-shrink-0">
               <Rocket className="w-3.5 h-3.5 text-white" />
             </div>
-            <span className="text-sm font-semibold text-zinc-800 dark:text-zinc-200">Product Hunt</span>
-            <span className="text-xs text-zinc-400 bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 rounded-full">
+            <span className="text-sm font-semibold text-foreground">Product Hunt</span>
+            <span className="text-xs text-foreground-subtle bg-muted px-2 py-0.5 rounded-full">
               {filtered.length} 个产品
             </span>
           </div>
 
-          <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex shrink-0 items-center gap-2">
             <div className="relative">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-400" />
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-foreground-subtle" />
               <Input
                 value={search}
                 onChange={e => { setSearch(e.target.value); resetScroll() }}
@@ -238,8 +238,8 @@ export function ProductHuntClient({ initialPosts }: { initialPosts: ProductHuntP
         </div>
 
         {/* Days filter */}
-        <div className="flex items-center gap-1 mt-2.5">
-          <span className="text-xs text-zinc-400">最近</span>
+        <div className="flex items-center gap-1 px-6 pb-3">
+          <span className="text-xs text-foreground-subtle">最近</span>
           {DAYS_OPTIONS.map(d => (
             <button
               key={d}
@@ -249,7 +249,7 @@ export function ProductHuntClient({ initialPosts }: { initialPosts: ProductHuntP
                 'px-2 py-0.5 rounded text-xs transition-colors disabled:opacity-40',
                 days === d
                   ? 'bg-orange-100 dark:bg-orange-950/50 text-orange-700 dark:text-orange-300 font-medium'
-                  : 'text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800',
+                  : 'text-foreground-subtle hover:text-foreground hover:bg-muted',
               )}
             >
               {d}天
@@ -261,9 +261,9 @@ export function ProductHuntClient({ initialPosts }: { initialPosts: ProductHuntP
       {/* Grid */}
       <div className="flex-1 overflow-y-auto px-6 py-5">
         {loading ? (
-          <div className="flex items-center justify-center h-32 text-sm text-zinc-400">加载中…</div>
+          <div className="flex items-center justify-center h-32 text-sm text-foreground-subtle">加载中…</div>
         ) : filtered.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-48 gap-3 text-zinc-400">
+          <div className="flex flex-col items-center justify-center h-48 gap-3 text-foreground-subtle">
             <Rocket className="w-10 h-10 opacity-20 text-orange-500" />
             <p className="text-sm">暂无数据，点击「立即采集」获取 Product Hunt 最新产品</p>
           </div>
@@ -275,7 +275,7 @@ export function ProductHuntClient({ initialPosts }: { initialPosts: ProductHuntP
               ))}
             </div>
             <div ref={sentinelRef} className="flex items-center justify-center py-6">
-              {hasMore && <span className="text-xs text-zinc-400">加载中…</span>}
+              {hasMore && <span className="text-xs text-foreground-subtle">加载中…</span>}
             </div>
           </>
         )}

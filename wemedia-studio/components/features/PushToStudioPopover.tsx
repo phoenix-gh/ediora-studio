@@ -80,7 +80,7 @@ export function PushToStudioPopover({ url, title, summary = "", content = "", pl
             title={done ? "已推送到工作室" : "推送到工作室"}
             onClick={e => e.stopPropagation()}
             className={cn(
-              "inline-flex items-center justify-center rounded-md text-zinc-400 hover:text-emerald-500 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors",
+              "inline-flex items-center justify-center rounded-md text-foreground-subtle hover:text-emerald-500 hover:bg-muted transition-colors",
               label ? "gap-1 h-7 px-2 text-[11px]" : "w-7 h-7",
               done && "text-emerald-500",
               className,
@@ -98,14 +98,14 @@ export function PushToStudioPopover({ url, title, summary = "", content = "", pl
       >
         <div className="space-y-3">
           <div>
-            <div className="text-xs font-medium text-zinc-500 mb-1.5">发布账号</div>
-            <div className="max-h-48 overflow-y-auto border border-zinc-200 dark:border-zinc-800 rounded-md">
+            <div className="text-xs font-medium text-muted-foreground mb-1.5">发布账号</div>
+            <div className="max-h-48 overflow-y-auto border border-border rounded-md">
               {accounts === null ? (
-                <div className="p-3 text-center text-xs text-zinc-400 flex items-center justify-center gap-1">
+                <div className="p-3 text-center text-xs text-foreground-subtle flex items-center justify-center gap-1">
                   <Loader2 className="w-3 h-3 animate-spin" /> 加载中
                 </div>
               ) : accounts.length === 0 ? (
-                <div className="p-3 text-center text-xs text-zinc-400">
+                <div className="p-3 text-center text-xs text-foreground-subtle">
                   暂无启用账号 · 去「设置 → 发布账号」配置
                 </div>
               ) : (
@@ -115,12 +115,12 @@ export function PushToStudioPopover({ url, title, summary = "", content = "", pl
                     type="button"
                     onClick={() => setAccountId(a.id)}
                     className={cn(
-                      "w-full text-left px-2 py-1.5 text-xs hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors",
+                      "w-full text-left px-2 py-1.5 text-xs hover:bg-muted transition-colors",
                       accountId === a.id && "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300",
                     )}
                   >
                     <div className="font-medium truncate">{a.name}</div>
-                    <div className="text-[10px] text-zinc-400 truncate">
+                    <div className="text-[10px] text-foreground-subtle truncate">
                       {a.platform} · {a.positioning || "（无定位描述）"}
                     </div>
                   </button>
@@ -130,7 +130,7 @@ export function PushToStudioPopover({ url, title, summary = "", content = "", pl
           </div>
 
           <div>
-            <div className="text-xs font-medium text-zinc-500 mb-1.5">备注（可选）</div>
+            <div className="text-xs font-medium text-muted-foreground mb-1.5">备注（可选）</div>
             <Input
               placeholder="给 scout 的额外指令，比如「侧重批判视角」"
               value={note}

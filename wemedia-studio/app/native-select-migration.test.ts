@@ -14,8 +14,9 @@ function sourceFiles(directory: string): string[] {
 
 describe('native select migration', () => {
   it('routes every application native select through the themed control', () => {
-    const appRoot = resolve(process.cwd(), 'app')
-    const violations = sourceFiles(appRoot)
+    const roots = [resolve(process.cwd(), 'app'), resolve(process.cwd(), 'components')]
+    const violations = roots.flatMap(sourceFiles)
+      .filter(path => path !== resolve(process.cwd(), 'components/ui/native-select.tsx'))
       .filter(path => readFileSync(path, 'utf8').includes('<select'))
       .map(path => relative(process.cwd(), path))
 

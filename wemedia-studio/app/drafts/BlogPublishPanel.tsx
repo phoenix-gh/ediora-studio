@@ -98,9 +98,9 @@ export function BlogPublishPanel({
   return (
     <div className="flex-1 flex gap-4 overflow-hidden min-h-0">
       {/* ── 预览 ── */}
-      <div className="flex-1 min-w-0 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 overflow-y-auto">
+      <div className="flex-1 min-w-0 rounded-lg border border-border bg-surface overflow-y-auto">
         {!body.trim() ? (
-          <div className="h-full flex items-center justify-center text-sm text-zinc-400">
+          <div className="h-full flex items-center justify-center text-sm text-foreground-subtle">
             草稿内容为空
           </div>
         ) : (
@@ -112,11 +112,11 @@ export function BlogPublishPanel({
                 <img src={img.hosted_url} alt={img.original_name || '封面'} className="w-full rounded-xl mb-6 object-cover aspect-video" />
               ) : null
             })()}
-            <h1 className="text-[26px] font-bold leading-snug text-zinc-900 dark:text-zinc-50">
+            <h1 className="text-[26px] font-bold leading-snug text-foreground">
               {pubTitle || '（无标题）'}
             </h1>
             {description.trim() && (
-              <p className="mt-3 text-sm text-zinc-500 dark:text-zinc-400">{description}</p>
+            <p className="mt-3 text-sm text-muted-foreground">{description}</p>
             )}
             <div
               className="prose dark:prose-invert mt-6 max-w-none prose-img:rounded-xl"
@@ -134,8 +134,8 @@ export function BlogPublishPanel({
           </p>
         )}
 
-        <div className="rounded-md border border-zinc-200 dark:border-zinc-700 px-2.5 py-2 space-y-1 text-[11px] text-zinc-500 dark:text-zinc-400">
-          <div className="flex items-center gap-1 font-medium text-zinc-600 dark:text-zinc-300">
+        <div className="rounded-md border border-border px-2.5 py-2 space-y-1 text-[11px] text-muted-foreground">
+          <div className="flex items-center gap-1 font-medium text-foreground">
             <Info className="w-3 h-3" /> 投稿流程
           </div>
           <p>提交后文章进入博客后台 review 状态，人工审核确认后发布。正文里的本站图片会自动上传到博客图床。</p>
@@ -156,14 +156,14 @@ export function BlogPublishPanel({
             value={description}
             onChange={e => setDescription(e.target.value)}
             rows={3}
-            className="w-full resize-none rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
+            className="w-full resize-none rounded-lg border border-input bg-control px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
           />
         </div>
 
         <div className="space-y-1">
           <Label className="text-xs">封面图（可选）</Label>
           {images.length === 0 ? (
-            <div className="flex items-center gap-2 text-[11px] text-zinc-400 border border-zinc-200 dark:border-zinc-700 rounded-md px-2.5 py-2">
+            <div className="flex items-center gap-2 text-[11px] text-foreground-subtle border border-border rounded-md px-2.5 py-2">
               <ImageOff className="w-3.5 h-3.5 flex-shrink-0" />
               素材库没有图片，可先在「素材」里上传
             </div>
@@ -177,7 +177,7 @@ export function BlogPublishPanel({
                   'aspect-square rounded-md border-2 transition-colors flex items-center justify-center',
                   effectiveCoverId === null || coverId === -1
                     ? 'border-indigo-400 bg-indigo-50 dark:bg-indigo-950/30'
-                    : 'border-zinc-200 dark:border-zinc-700 hover:border-zinc-300 text-zinc-400',
+                    : 'border-border hover:border-border-strong text-foreground-subtle',
                 )}
               >
                 <ImageOff className="w-4 h-4" />
@@ -191,7 +191,7 @@ export function BlogPublishPanel({
                     'aspect-square rounded-md overflow-hidden border-2 transition-colors',
                     effectiveCoverId === img.id && coverId !== -1
                       ? 'border-indigo-400'
-                      : 'border-transparent hover:border-zinc-300',
+                      : 'border-transparent hover:border-border-strong',
                   )}
                 >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -239,7 +239,7 @@ export function BlogPublishPanel({
             onChange={e => setNotes(e.target.value)}
             rows={2}
             placeholder="给人工审核看的说明"
-            className="w-full resize-none rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
+            className="w-full resize-none rounded-lg border border-input bg-control px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
           />
         </div>
 

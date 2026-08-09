@@ -57,9 +57,9 @@ function ReaderBody({
   return (
     <>
       {/* Header */}
-      <div className="flex-shrink-0 flex items-center justify-between gap-3 px-5 py-3 border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/50">
+      <div className="flex min-h-[var(--app-header-height)] flex-shrink-0 items-center justify-between gap-3 px-5 py-3 border-b border-border bg-surface-muted">
         <div className="min-w-0 flex-1">
-          <p className="text-[11px] text-zinc-400 truncate">
+          <p className="text-[11px] text-foreground-subtle truncate">
             {meta?.source && <span>{meta.source}</span>}
             {meta?.author && <> · {meta.author}</>}
             {meta?.published_at && <> · {fmtDate(meta.published_at)}</>}
@@ -72,7 +72,7 @@ function ReaderBody({
               href={meta.url}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex items-center gap-1 text-xs px-2 py-1 rounded text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors"
+              className="flex items-center gap-1 text-xs px-2 py-1 rounded text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
             >
               <ExternalLink className="w-3.5 h-3.5" />
               原文
@@ -80,7 +80,7 @@ function ReaderBody({
           )}
           <button
             onClick={onClose}
-            className="p-1.5 rounded text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-700 transition-colors"
+            className="p-1.5 rounded text-foreground-subtle hover:bg-muted hover:text-foreground transition-colors"
             title="关闭"
           >
             <X className="w-4 h-4" />
@@ -92,15 +92,15 @@ function ReaderBody({
       <div ref={bodyRef} className="flex-1 overflow-y-auto">
         <div className={cn('px-6 py-5', centered && 'max-w-3xl mx-auto')}>
         {!meta ? (
-          <div className="text-center text-sm text-zinc-400 py-12">加载中…</div>
+          <div className="text-center text-sm text-foreground-subtle py-12">加载中…</div>
         ) : (
           <>
-            <h1 className="text-xl font-semibold leading-snug text-zinc-900 dark:text-zinc-100 mb-4">
+            <h1 className="text-xl font-semibold leading-snug text-foreground mb-4">
               {meta.title}
             </h1>
 
             {loading ? (
-              <div className="text-center text-sm text-zinc-400 py-12">正在抓取正文…</div>
+              <div className="text-center text-sm text-foreground-subtle py-12">正在抓取正文…</div>
             ) : meta.content ? (
               <article
                 className={cn(
@@ -117,7 +117,7 @@ function ReaderBody({
                 dangerouslySetInnerHTML={{ __html: meta.content }}
               />
             ) : (
-              <div className="text-center text-sm text-zinc-400 py-8">
+              <div className="text-center text-sm text-foreground-subtle py-8">
                 {emptyContentMessage}
                 {meta.url && (
                   <>
@@ -176,7 +176,7 @@ export function ArticleReaderModal({ open, onClose, meta, loading, accent = 'ind
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center pt-10 pb-8 px-4">
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full max-w-3xl max-h-full bg-white dark:bg-zinc-950 rounded-xl shadow-2xl border border-zinc-200 dark:border-zinc-800 flex flex-col overflow-hidden">
+      <div className="relative w-full max-w-3xl max-h-full bg-surface rounded-xl shadow-2xl border border-border flex flex-col overflow-hidden">
         <ReaderBody meta={meta} loading={loading} accent={accent} contentTheme={contentTheme} emptyContentMessage={emptyContentMessage} onClose={onClose} headerActions={headerActions} />
       </div>
     </div>
@@ -199,11 +199,11 @@ interface PanelProps {
 
 export function ArticleReaderPanel({ open, onClose, meta, loading, accent = 'indigo', contentTheme = 'adaptive', emptyContentMessage = '暂无正文内容', headerActions }: PanelProps) {
   return (
-    <aside className="flex-1 min-w-0 border-l border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 flex flex-col h-full">
+    <aside className="flex-1 min-w-0 border-l border-border bg-surface flex flex-col h-full">
       {open && meta ? (
         <ReaderBody meta={meta} loading={loading} accent={accent} contentTheme={contentTheme} emptyContentMessage={emptyContentMessage} onClose={onClose} centered headerActions={headerActions} />
       ) : (
-        <div className="flex-1 flex flex-col items-center justify-center text-zinc-400 gap-3">
+        <div className="flex-1 flex flex-col items-center justify-center text-foreground-subtle gap-3">
           <BookOpen className="w-10 h-10 opacity-20" />
           <p className="text-sm">从左侧选择一篇文章查看</p>
         </div>

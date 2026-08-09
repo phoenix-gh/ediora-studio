@@ -200,9 +200,9 @@ export function XClient({
 
   return (
     <div className="flex h-full">
-      <div className="flex w-56 shrink-0 flex-col border-r border-zinc-200 dark:border-zinc-800">
-        <div className="border-b border-zinc-100 px-3 py-3 dark:border-zinc-800">
-          <p className="px-1 text-xs font-semibold uppercase tracking-wider text-zinc-500">X 订阅</p>
+      <div className="flex w-56 shrink-0 flex-col border-r border-border bg-surface">
+        <div className="flex min-h-[var(--app-header-height)] items-center border-b border-border px-3 py-3">
+          <p className="px-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">X 订阅</p>
         </div>
         <div className="flex-1 overflow-y-auto px-2 py-2">
           <SidebarRow
@@ -212,7 +212,7 @@ export function XClient({
             active={selection.kind === 'search'}
             onClick={() => selectFeed({ kind: 'search' })}
           />
-          <div className="mb-1 mt-3 px-2 text-[11px] uppercase tracking-wider text-zinc-400">
+          <div className="mb-1 mt-3 px-2 text-[11px] uppercase tracking-wider text-foreground-subtle">
             已订阅 · {subs.length}
           </div>
           <SidebarRow
@@ -224,13 +224,13 @@ export function XClient({
             onClick={() => selectFeed({ kind: 'all' })}
           />
           {subs.length === 0 ? (
-            <p className="mt-2 px-3 text-center text-xs text-zinc-400">点右上角「新增订阅」添加</p>
+            <p className="mt-2 px-3 text-center text-xs text-foreground-subtle">点右上角「新增订阅」添加</p>
           ) : (
             subs.map(subscription => (
               <SidebarRow
                 key={subscription.id}
                 icon={Bird}
-                iconColor={subscription.enabled ? 'text-sky-500' : 'text-zinc-400'}
+                iconColor={subscription.enabled ? 'text-sky-500' : 'text-foreground-subtle'}
                 label={subscription.label}
                 badge={subscription.post_count > 0 ? String(subscription.post_count) : undefined}
                 active={selection.kind === 'sub' && selection.id === subscription.id}
@@ -245,16 +245,16 @@ export function XClient({
       </div>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <div className="border-b border-zinc-200 bg-white px-6 py-3 dark:border-zinc-800 dark:bg-zinc-950">
-          <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="flex-shrink-0 border-b border-border bg-surface">
+          <div data-slot="page-header" className="flex h-[var(--app-header-height)] min-h-[var(--app-header-height)] items-center justify-between gap-4 overflow-hidden px-6">
             <div className="flex min-w-0 items-center gap-2">
               <Bird className="size-4 shrink-0 text-sky-500" />
-              <span className="truncate text-sm font-medium text-zinc-700 dark:text-zinc-300">{headerTitle}</span>
+              <span className="truncate text-sm font-medium text-foreground">{headerTitle}</span>
               {selection.kind !== 'search' ? (
-                <span className="shrink-0 rounded-full bg-zinc-100 px-2 py-0.5 text-xs text-zinc-400 dark:bg-zinc-800">{posts.length} 帖</span>
+                <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-xs text-foreground-subtle">{posts.length} 帖</span>
               ) : null}
             </div>
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex shrink-0 items-center gap-2">
               {selection.kind !== 'search' ? (
                 <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={handleCollectAll} disabled={collectingAll}>
                   <RefreshCw className={cn('size-3.5', collectingAll && 'animate-spin')} />
@@ -274,8 +274,8 @@ export function XClient({
           </div>
 
           {selection.kind !== 'search' ? (
-            <div className="mt-2.5 flex items-center gap-1">
-              <span className="mr-1 text-xs text-zinc-400">最近</span>
+            <div className="flex items-center gap-1 overflow-x-auto px-6 pb-3">
+              <span className="mr-1 text-xs text-foreground-subtle">最近</span>
               {HOURS_OPTIONS.map(({ v, label }) => (
                 <button
                   key={v}
@@ -284,8 +284,8 @@ export function XClient({
                   className={cn(
                     'rounded px-2 py-0.5 text-xs transition-colors',
                     hours === v
-                      ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900'
-                      : 'text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800',
+                      ? 'bg-primary text-primary-foreground'
+                      : 'text-muted-foreground hover:bg-muted',
                   )}
                 >
                   {label}
@@ -347,14 +347,14 @@ function SidebarRow({
       'mb-0.5 flex w-full items-center gap-1 rounded transition-colors',
       active
         ? 'bg-sky-50 text-sky-700 dark:bg-sky-950/40 dark:text-sky-300'
-        : 'hover:bg-zinc-50 dark:hover:bg-zinc-900',
+        : 'hover:bg-surface-muted',
       muted && 'opacity-50',
     )}>
       <button type="button" onClick={onClick} className="flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-left">
         <Icon className={cn('size-4 shrink-0', iconColor)} />
         <span className="flex-1 truncate text-xs font-medium">{label}</span>
         {hasError ? <span className="size-1.5 shrink-0 rounded-full bg-red-500" /> : null}
-        {badge ? <span className="shrink-0 rounded-full bg-zinc-100 px-1.5 py-0.5 text-[10px] text-zinc-400 dark:bg-zinc-800">{badge}</span> : null}
+        {badge ? <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-foreground-subtle">{badge}</span> : null}
       </button>
       {onEdit ? (
         <button
@@ -365,7 +365,7 @@ function SidebarRow({
             event.stopPropagation()
             onEdit()
           }}
-          className="mr-1 rounded p-1 text-zinc-400 transition-colors hover:bg-zinc-200 hover:text-sky-500 dark:hover:bg-zinc-800"
+          className="mr-1 rounded p-1 text-foreground-subtle transition-colors hover:bg-muted hover:text-sky-500"
         >
           <Pencil className="size-3.5" />
         </button>
@@ -375,10 +375,10 @@ function SidebarRow({
 }
 
 function FeedPanel({ posts, loading, subsCount }: { posts: XPost[]; loading: boolean; subsCount: number }) {
-  if (loading && posts.length === 0) return <div className="flex h-32 items-center justify-center text-sm text-zinc-400">加载中…</div>
+  if (loading && posts.length === 0) return <div className="flex h-32 items-center justify-center text-sm text-foreground-subtle">加载中…</div>
   if (posts.length === 0) {
     return (
-      <div className="flex h-48 flex-col items-center justify-center gap-3 text-zinc-400">
+      <div className="flex h-48 flex-col items-center justify-center gap-3 text-foreground-subtle">
         <Bird className="size-10 text-sky-500 opacity-20" />
         <p className="text-sm">{subsCount === 0 ? '点右上角「新增订阅」添加 X URL 开始' : '该范围暂无帖子，试试「立即采集」或换时间窗'}</p>
       </div>
@@ -410,10 +410,10 @@ function SearchPanel() {
 
   return (
     <div className="max-w-3xl space-y-4">
-      <div className="flex items-center gap-2 text-xs text-zinc-400"><ListFilter className="size-3.5" /><span>实时通过 feedgrab 查询 X · 结果不入库</span></div>
+      <div className="flex items-center gap-2 text-xs text-foreground-subtle"><ListFilter className="size-3.5" /><span>实时通过 feedgrab 查询 X · 结果不入库</span></div>
       <div className="flex gap-2">
         <div className="relative flex-1">
-          <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-zinc-400" />
+          <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-foreground-subtle" />
           <Input value={query} onChange={event => setQuery(event.target.value)} placeholder="输入关键词，例如：AI agent" className="h-8 pl-8 text-sm" onKeyDown={event => { if (event.key === 'Enter') void run() }} />
         </div>
         <Button size="sm" className="h-8 gap-1.5 text-xs" onClick={() => void run()} disabled={loading}>
@@ -422,8 +422,8 @@ function SearchPanel() {
         </Button>
       </div>
       {error ? <div className="rounded border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-600 dark:border-red-900 dark:bg-red-950/30 dark:text-red-400">{error}</div> : null}
-      {results.length > 0 ? <div className="space-y-2"><p className="text-xs text-zinc-400">{results.length} 条结果</p>{results.map(post => <PostCard key={post.tweet_id} post={post} />)}</div> : null}
-      {!loading && !error && results.length === 0 ? <p className="text-xs text-zinc-400">输入关键词后回车搜索</p> : null}
+      {results.length > 0 ? <div className="space-y-2"><p className="text-xs text-foreground-subtle">{results.length} 条结果</p>{results.map(post => <PostCard key={post.tweet_id} post={post} />)}</div> : null}
+      {!loading && !error && results.length === 0 ? <p className="text-xs text-foreground-subtle">输入关键词后回车搜索</p> : null}
     </div>
   )
 }
@@ -433,22 +433,22 @@ function PostCard({ post }: { post: XPost | XSearchPost }) {
   const sourceUrl = externalHttpUrl(post.url)
 
   return (
-    <div className="rounded-lg border border-zinc-200 px-4 py-3 transition-colors hover:bg-zinc-50 dark:border-zinc-800 dark:hover:bg-zinc-900/50">
+      <div className="rounded-lg border border-border bg-surface px-4 py-3 transition-colors hover:bg-surface-muted">
       <div className="flex items-start gap-3">
         <a href={`https://x.com/${post.username}`} target="_blank" rel="noreferrer" className="shrink-0">
-          <img src={avatar} alt={post.username} loading="lazy" referrerPolicy="no-referrer" className="size-10 rounded-full bg-zinc-100 object-cover dark:bg-zinc-800" onError={event => { event.currentTarget.style.visibility = 'hidden' }} />
+          <img src={avatar} alt={post.username} loading="lazy" referrerPolicy="no-referrer" className="size-10 rounded-full bg-muted object-cover" onError={event => { event.currentTarget.style.visibility = 'hidden' }} />
         </a>
         <div className="min-w-0 flex-1">
           <div className="mb-1.5 flex items-center justify-between">
             <div className="flex min-w-0 items-center gap-1.5 text-sm">
-              <span className="truncate font-medium text-zinc-800 dark:text-zinc-200">{post.display_name || post.username}</span>
-              <span className="truncate text-xs text-zinc-400">@{post.username}</span>
+              <span className="truncate font-medium text-foreground">{post.display_name || post.username}</span>
+              <span className="truncate text-xs text-foreground-subtle">@{post.username}</span>
             </div>
-            {sourceUrl ? <a href={sourceUrl} target="_blank" rel="noreferrer" className="flex shrink-0 items-center gap-1 text-xs text-zinc-400 hover:text-sky-500" title={fmtDateTime(post.published_at)}>{fmtRelTime(post.published_at)}<ExternalLink className="size-3" /></a> : <span className="shrink-0 text-xs text-zinc-400" title={fmtDateTime(post.published_at)}>{fmtRelTime(post.published_at)}</span>}
+            {sourceUrl ? <a href={sourceUrl} target="_blank" rel="noreferrer" className="flex shrink-0 items-center gap-1 text-xs text-foreground-subtle hover:text-sky-500" title={fmtDateTime(post.published_at)}>{fmtRelTime(post.published_at)}<ExternalLink className="size-3" /></a> : <span className="shrink-0 text-xs text-foreground-subtle" title={fmtDateTime(post.published_at)}>{fmtRelTime(post.published_at)}</span>}
           </div>
-          <p className="mb-2 whitespace-pre-wrap text-sm text-zinc-700 dark:text-zinc-300">{post.content}</p>
-          {post.cover_image && sourceUrl ? <a href={sourceUrl} target="_blank" rel="noreferrer" className="mb-2 block overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-800"><img src={post.cover_image} alt="" loading="lazy" referrerPolicy="no-referrer" className="max-h-[420px] w-full object-cover" onError={event => { (event.currentTarget.parentElement as HTMLElement).style.display = 'none' }} /></a> : null}
-          <div className="flex items-center gap-4 text-xs text-zinc-400">
+          <p className="mb-2 whitespace-pre-wrap text-sm text-foreground">{post.content}</p>
+          {post.cover_image && sourceUrl ? <a href={sourceUrl} target="_blank" rel="noreferrer" className="mb-2 block overflow-hidden rounded-lg border border-border"><img src={post.cover_image} alt="" loading="lazy" referrerPolicy="no-referrer" className="max-h-[420px] w-full object-cover" onError={event => { (event.currentTarget.parentElement as HTMLElement).style.display = 'none' }} /></a> : null}
+          <div className="flex items-center gap-4 text-xs text-foreground-subtle">
             <span className="flex items-center gap-1"><Eye className="size-3" />{post.views.toLocaleString()}</span>
             <span className="flex items-center gap-1"><Repeat2 className="size-3" />{post.reposts.toLocaleString()}</span>
             <span className="flex items-center gap-1"><Heart className="size-3" />{post.likes.toLocaleString()}</span>

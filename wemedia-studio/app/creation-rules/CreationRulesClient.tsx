@@ -86,8 +86,8 @@ export function CreationRulesClient() {
   const runs = dashboard?.runs ?? []
   const activeRuleIds = new Set(runs.filter(run => run.status === 'queued' || run.status === 'running').map(run => run.rule_id))
 
-  return <div className="mx-auto max-w-7xl space-y-6 p-6">
-    <header><h1 className="text-2xl font-semibold">任务看板</h1><p className="mt-1 text-sm text-muted-foreground">统一查看规则安排、定时 Job 运行状态和实际创作产出。</p></header>
+  return <div className="mx-auto max-w-7xl space-y-6 px-7 pb-8">
+    <header data-slot="page-header" className="flex h-[var(--app-header-height)] min-h-[var(--app-header-height)] flex-col justify-center"><h1 className="text-2xl font-semibold">任务看板</h1><p className="mt-1 text-sm text-muted-foreground">统一查看规则安排、定时 Job 运行状态和实际创作产出。</p></header>
     {dashboard ? <>
       <CreationDashboardCards summary={dashboard.summary} date={dashboard.date} />
       <CreationRulesPanel rules={rules} runs={runs} activeRuleIds={activeRuleIds} onCreate={() => setEditingRule(null)} onEdit={setEditingRule} onRun={rule => void mutate(() => runCreationRule(rule.id))} onToggle={rule => void mutate(() => updateCreationRule(rule.id, { enabled: !rule.enabled }))} onDelete={rule => { if (window.confirm('删除该规则？历史运行和产出会保留。')) void mutate(() => deleteCreationRule(rule.id)) }} />

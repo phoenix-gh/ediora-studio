@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { NativeSelect } from "@/components/ui/native-select"
 import { cn } from "@/lib/utils"
 import { DraftImage, DraftSource } from "@/lib/api/drafts"
 import { CoverStyle, listPublishAccounts, PublishAccount } from "@/lib/api/publish-accounts"
@@ -160,12 +161,12 @@ export function DraftAssetsDialog({
         <DialogHeader>
           <DialogTitle>素材</DialogTitle>
           <DialogDescription className="text-xs">
-            灵感来源 · 图片素材 · 封面（命名以 <code className="bg-zinc-100 dark:bg-zinc-800 px-1 rounded">cover</code> 开头的图自动作为封面）
+            灵感来源 · 图片素材 · 封面（命名以 <code className="bg-muted px-1 rounded">cover</code> 开头的图自动作为封面）
           </DialogDescription>
         </DialogHeader>
 
         {/* Tabs */}
-        <div className="flex border-b border-zinc-200 dark:border-zinc-800 -mx-6 px-6">
+        <div className="flex border-b border-border -mx-6 px-6">
           {([
             { key: "sources" as const, label: "灵感来源", icon: Link2, count: sources.length },
             { key: "images"  as const, label: "图片素材", icon: Images, count: images.length },
@@ -177,7 +178,7 @@ export function DraftAssetsDialog({
                 "flex items-center gap-1.5 px-4 py-2 text-xs font-medium border-b-2 -mb-px transition-colors",
                 tab === key
                   ? "border-indigo-500 text-indigo-600 dark:text-indigo-400"
-                  : "border-transparent text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200",
+                  : "border-transparent text-muted-foreground hover:text-foreground",
               )}
             >
               <Icon className="w-3.5 h-3.5" />
@@ -187,7 +188,7 @@ export function DraftAssetsDialog({
                   "text-[10px] px-1.5 py-0.5 rounded-full font-medium",
                   tab === key
                     ? "bg-indigo-100 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400"
-                    : "bg-zinc-100 dark:bg-zinc-800 text-zinc-500",
+                    : "bg-muted text-muted-foreground",
                 )}>
                   {count}
                 </span>
@@ -200,25 +201,25 @@ export function DraftAssetsDialog({
           {tab === "sources" ? (
             <div className="space-y-2">
               {sources.length === 0 && (
-                <p className="text-center text-xs text-zinc-400 py-4">还没有添加任何来源</p>
+                <p className="text-center text-xs text-foreground-subtle py-4">还没有添加任何来源</p>
               )}
               {sources.map((s, i) => (
-                <div key={i} className="flex items-start gap-2 group text-xs border border-zinc-100 dark:border-zinc-800 rounded-md px-2.5 py-2">
+                <div key={i} className="flex items-start gap-2 group text-xs border border-border rounded-md px-2.5 py-2 bg-surface">
                   <ExternalLink className="w-3 h-3 text-indigo-400 flex-shrink-0 mt-0.5" />
                   <div className="flex-1 min-w-0">
                     <a href={s.url} target="_blank" rel="noopener noreferrer"
                       className="text-indigo-500 hover:text-indigo-700 dark:hover:text-indigo-300 hover:underline truncate block">
                       {s.title || s.url}
                     </a>
-                    {s.note && <p className="text-zinc-400 mt-0.5 text-[11px]">{s.note}</p>}
+                    {s.note && <p className="text-foreground-subtle mt-0.5 text-[11px]">{s.note}</p>}
                   </div>
                   <button onClick={() => removeSource(i)}
-                    className="opacity-0 group-hover:opacity-100 text-zinc-400 hover:text-red-500 transition-opacity flex-shrink-0">
+                    className="opacity-0 group-hover:opacity-100 text-foreground-subtle hover:text-red-500 transition-opacity flex-shrink-0">
                     <X className="w-3 h-3" />
                   </button>
                 </div>
               ))}
-              <div className="pt-2 border-t border-zinc-100 dark:border-zinc-800 space-y-1.5">
+              <div className="pt-2 border-t border-border space-y-1.5">
                 <Input value={newUrl} onChange={e => setNewUrl(e.target.value)}
                   placeholder="来源 URL…" className="h-8 text-xs" />
                 <div className="flex gap-1.5">
@@ -238,7 +239,7 @@ export function DraftAssetsDialog({
               <section>
                 <div className="flex items-center gap-2 mb-2">
                   <ImagePlus className="w-3.5 h-3.5 text-emerald-500" />
-                  <span className="text-[11px] uppercase tracking-wider text-zinc-500 font-semibold">预览</span>
+                  <span className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold">预览</span>
                   {activePreviewImg && isCover(activePreviewImg) && (
                     <span className="text-[10px] bg-emerald-100 dark:bg-emerald-950/50 text-emerald-600 dark:text-emerald-400 px-1.5 py-0.5 rounded-full font-medium">
                       封面
@@ -261,7 +262,7 @@ export function DraftAssetsDialog({
                 </div>
 
                 {activePreviewImg ? (
-                  <div className="relative w-full aspect-[16/9] rounded-md overflow-hidden bg-zinc-100 dark:bg-zinc-800 ring-1 ring-zinc-200 dark:ring-zinc-800">
+                  <div className="relative w-full aspect-[16/9] rounded-md overflow-hidden bg-muted ring-1 ring-border">
                     <img src={activePreviewImg.hosted_url} alt={activePreviewImg.original_name} className="w-full h-full object-contain" />
                     <div className="absolute bottom-0 left-0 right-0 flex items-center justify-between px-2 py-1.5 bg-gradient-to-t from-black/60 to-transparent">
                       <span className="text-white text-[10px] truncate max-w-[60%]">
@@ -278,25 +279,25 @@ export function DraftAssetsDialog({
                     </div>
                   </div>
                 ) : !imagesLoading ? (
-                  <p className="text-[11px] text-zinc-400 border border-dashed border-zinc-200 dark:border-zinc-800 rounded-md py-6 text-center">
+                  <p className="text-[11px] text-foreground-subtle border border-dashed border-border rounded-md py-6 text-center">
                     {cover ? "" : "还没有封面 · "}「AI 生成封面」让 illustrator 出一张，或上传以 cover 开头命名的图
                   </p>
                 ) : null}
 
                 {regenOpen && (
-                  <div className="mt-2 p-3 border border-zinc-200 dark:border-zinc-800 rounded-md bg-zinc-50 dark:bg-zinc-900 space-y-2">
-                    <div className="text-xs font-medium text-zinc-700 dark:text-zinc-300">
+                  <div className="mt-2 p-3 border border-border rounded-md bg-surface-muted space-y-2">
+                    <div className="text-xs font-medium text-foreground">
                       让 illustrator 按账号画像出一张
                     </div>
                     <div>
-                      <div className="text-xs font-medium text-zinc-500 mb-1.5">发布账号</div>
-                      <div className="max-h-32 overflow-y-auto border border-zinc-200 dark:border-zinc-800 rounded-md bg-white dark:bg-zinc-950">
+                    <div className="text-xs font-medium text-muted-foreground mb-1.5">发布账号</div>
+                      <div className="max-h-32 overflow-y-auto border border-border rounded-md bg-surface">
                         {accounts === null ? (
-                          <div className="p-3 text-center text-xs text-zinc-400 flex items-center justify-center gap-1">
+                          <div className="p-3 text-center text-xs text-foreground-subtle flex items-center justify-center gap-1">
                             <Loader2 className="w-3 h-3 animate-spin" /> 加载中
                           </div>
                         ) : accounts.length === 0 ? (
-                          <div className="p-3 text-center text-xs text-zinc-400">
+                          <div className="p-3 text-center text-xs text-foreground-subtle">
                             暂无启用账号 · 去「设置 → 发布账号」配置
                           </div>
                         ) : accounts.map(a => (
@@ -305,12 +306,12 @@ export function DraftAssetsDialog({
                             type="button"
                             onClick={() => selectAccount(a.id)}
                             className={cn(
-                              "w-full text-left px-2 py-1.5 text-xs hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors",
+                              "w-full text-left px-2 py-1.5 text-xs hover:bg-muted transition-colors",
                               accountId === a.id && "bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300",
                             )}
                           >
                             <div className="font-medium truncate">{a.name}</div>
-                            <div className="text-[10px] text-zinc-400 truncate">
+                            <div className="text-[10px] text-foreground-subtle truncate">
                               {a.platform} · {a.image_style || a.positioning || "（无画像描述）"}
                             </div>
                           </button>
@@ -318,11 +319,11 @@ export function DraftAssetsDialog({
                       </div>
                     </div>
                     {accountId && (
-                      <details className="rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900">
-                        <summary className="cursor-pointer select-none px-3 py-2 text-xs font-medium text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800">
+                      <details className="rounded-lg border border-border bg-surface">
+                        <summary className="cursor-pointer select-none px-3 py-2 text-xs font-medium text-muted-foreground hover:bg-surface-muted">
                           封面风格覆盖（cover_style）
                         </summary>
-                        <div className="px-3 py-3 border-t border-zinc-200 dark:border-zinc-700">
+                        <div className="px-3 py-3 border-t border-border">
                           <CoverStyleEditor
                             coverStyle={coverStyle}
                             onCoverStyleChange={setCoverStyle}
@@ -347,31 +348,31 @@ export function DraftAssetsDialog({
                 )}
 
                 {illusOpen && (
-                  <div className="mt-2 p-3 border border-zinc-200 dark:border-zinc-800 rounded-md bg-zinc-50 dark:bg-zinc-900 space-y-2">
-                    <div className="text-xs font-medium text-zinc-700 dark:text-zinc-300">
+                  <div className="mt-2 p-3 border border-border rounded-md bg-surface-muted space-y-2">
+                    <div className="text-xs font-medium text-foreground">
                       让 illustrator 分析章节，给正文插图（重跑会先清掉上一轮自动插图）
                     </div>
                     <div>
-                      <div className="text-xs font-medium text-zinc-500 mb-1.5">发布账号</div>
-                      <select
+                      <div className="text-xs font-medium text-muted-foreground mb-1.5">发布账号</div>
+                      <NativeSelect
                         value={accountId ?? ""}
                         onChange={e => selectAccount(e.target.value || null)}
-                        className="w-full text-xs px-2 py-1.5 border border-zinc-200 dark:border-zinc-700 rounded bg-white dark:bg-zinc-950 outline-none focus:border-violet-400 text-zinc-700 dark:text-zinc-300"
+                        className="h-8 w-full cursor-pointer rounded-md px-2 py-1.5 text-xs"
                       >
                         <option value="">（选择账号）</option>
                         {(accounts ?? []).map(a => (
                           <option key={a.id} value={a.id}>{a.name}（{a.platform}）</option>
                         ))}
-                      </select>
+                      </NativeSelect>
                     </div>
                     <div className="flex items-center gap-2">
-                      <span className="text-xs text-zinc-500">最多插图</span>
+                      <span className="text-xs text-muted-foreground">最多插图</span>
                       <input
                         type="number" min={1} max={12} value={illusMax}
                         onChange={e => setIllusMax(Math.max(1, Math.min(12, Number(e.target.value) || 1)))}
-                        className="w-16 text-xs px-2 py-1 border border-zinc-200 dark:border-zinc-700 rounded bg-white dark:bg-zinc-950 outline-none focus:border-violet-400"
+                        className="w-16 text-xs px-2 py-1 border border-input rounded bg-control outline-none focus:border-violet-400"
                       />
-                      <span className="text-[10px] text-zinc-400">张（护栏，agent 在此上限内按内容决定）</span>
+                      <span className="text-[10px] text-foreground-subtle">张（护栏，agent 在此上限内按内容决定）</span>
                     </div>
                     <Input
                       placeholder="额外指令（可选），比如「偏插画、少用照片」"
@@ -394,7 +395,7 @@ export function DraftAssetsDialog({
               <section>
                 <div className="flex items-center gap-2 mb-2">
                   <Images className="w-3.5 h-3.5 text-violet-500" />
-                  <span className="text-[11px] uppercase tracking-wider text-zinc-500 font-semibold">图片素材</span>
+                  <span className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold">图片素材</span>
                   <input
                     ref={fileInputRef}
                     type="file"
@@ -411,11 +412,11 @@ export function DraftAssetsDialog({
                     {uploading ? <Loader2 className="w-3 h-3 animate-spin" /> : <Upload className="w-3 h-3" />}
                     上传
                   </button>
-                  {imagesLoading && <Loader2 className="w-3 h-3 animate-spin text-zinc-400" />}
+                  {imagesLoading && <Loader2 className="w-3 h-3 animate-spin text-foreground-subtle" />}
                 </div>
 
                 {images.length === 0 && !imagesLoading ? (
-                  <p className="text-[11px] text-zinc-400 py-3 text-center border border-dashed border-zinc-200 dark:border-zinc-800 rounded-md">
+                  <p className="text-[11px] text-foreground-subtle py-3 text-center border border-dashed border-border rounded-md">
                     暂无图片，上传后可插入编辑器
                   </p>
                 ) : (
@@ -425,7 +426,7 @@ export function DraftAssetsDialog({
                       return (
                         <div key={img.id}
                           className={cn(
-                            "group relative aspect-square rounded overflow-hidden bg-zinc-100 dark:bg-zinc-800 cursor-pointer border-2 transition-colors",
+                            "group relative aspect-square rounded overflow-hidden bg-muted cursor-pointer border-2 transition-colors",
                             isCover(img)
                               ? selected ? "border-emerald-500" : "border-emerald-300"
                               : selected ? "border-indigo-500" : "border-transparent hover:border-indigo-300",

@@ -48,19 +48,19 @@ function KrCard({
   }[accent]
 
   return (
-    <div className="group relative w-full text-left flex gap-4 py-4 px-3 -mx-3 rounded-xl border-b border-zinc-100 dark:border-zinc-900 last:border-0 hover:bg-zinc-50/70 dark:hover:bg-zinc-900/40 transition-colors">
+    <div className="group relative w-full text-left flex gap-4 py-4 px-3 -mx-3 rounded-xl border-b border-border last:border-0 hover:bg-surface-muted/70 transition-colors">
       {rank != null && (
         <div className="flex-shrink-0 flex flex-col items-center pt-1 w-7">
           <span className={cn(
             'text-base font-bold tabular-nums leading-none',
-            isTopRank ? rankColor : 'text-zinc-300 dark:text-zinc-600',
+            isTopRank ? rankColor : 'text-foreground-subtle',
           )}>
             {rank}
           </span>
         </div>
       )}
 
-      <div className="flex-shrink-0 w-28 h-20 rounded-lg overflow-hidden bg-zinc-100 dark:bg-zinc-800/60 ring-1 ring-zinc-200/60 dark:ring-zinc-800 flex items-center justify-center">
+      <div className="flex-shrink-0 w-28 h-20 rounded-lg overflow-hidden bg-muted ring-1 ring-border flex items-center justify-center">
         {article.image_url ? (
           <img
             src={article.image_url}
@@ -68,24 +68,24 @@ function KrCard({
             className="w-full h-full object-cover group-hover:scale-[1.03] transition-transform duration-300"
           />
         ) : (
-          <PlaceholderIcon className="w-6 h-6 text-zinc-300 dark:text-zinc-700" />
+          <PlaceholderIcon className="w-6 h-6 text-foreground-subtle" />
         )}
       </div>
 
       <div className="flex-1 min-w-0 flex flex-col justify-between py-0.5">
         <h3 className={cn(
-          'text-[14px] font-semibold text-zinc-900 dark:text-zinc-100 truncate leading-snug transition-colors',
+          'text-[14px] font-semibold text-foreground truncate leading-snug transition-colors',
           hoverTitle,
         )}>
           {article.title}
         </h3>
 
-        <div className="flex items-center gap-2 text-[11px] text-zinc-400 dark:text-zinc-500 flex-wrap min-w-0">
+        <div className="flex items-center gap-2 text-[11px] text-foreground-subtle flex-wrap min-w-0">
           <span>{fmtRelTime(article.published_at)}</span>
           {article.author && (
             <>
-              <span className="text-zinc-300 dark:text-zinc-700">·</span>
-              <span className="text-zinc-600 dark:text-zinc-300 font-medium truncate max-w-[140px]">
+              <span className="text-foreground-subtle">·</span>
+              <span className="text-muted-foreground font-medium truncate max-w-[140px]">
                 {article.author}
               </span>
             </>
@@ -93,7 +93,7 @@ function KrCard({
         </div>
 
         <div className="flex items-center">
-          <div className="flex items-center gap-2.5 text-[11px] text-zinc-400 dark:text-zinc-500">
+          <div className="flex items-center gap-2.5 text-[11px] text-foreground-subtle">
             {article.stat_read > 0 && (
               <span className="flex items-center gap-1"><Eye className="w-3.5 h-3.5" />{fmtNum(article.stat_read)}</span>
             )}
@@ -276,22 +276,22 @@ export function KrClient({ initial }: { initial: KrArticle[] }) {
       <div className={cn(
         'flex flex-col',
         useSidePanel
-          ? 'w-[460px] flex-shrink-0 border-r border-zinc-200 dark:border-zinc-800'
+          ? 'w-[460px] flex-shrink-0 border-r border-border'
           : 'flex-1 min-w-0',
       )}>
       {/* Toolbar */}
-      <div className="border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 px-6 py-3 flex-shrink-0">
-        <div className="flex items-center justify-between gap-4 flex-wrap">
-          <div className="flex items-center gap-2">
+      <div className="flex-shrink-0 border-b border-border bg-surface">
+        <div data-slot="page-header" className="flex h-[var(--app-header-height)] min-h-[var(--app-header-height)] items-center justify-between gap-4 overflow-hidden px-6">
+          <div className="flex min-w-0 items-center gap-2">
             <TabIcon className={cn('w-4 h-4', tabMeta.color)} />
-            <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">36 氪 · {tabMeta.label}</span>
-            <span className="text-xs text-zinc-400 bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 rounded-full">
+            <span className="text-sm font-medium text-foreground">36 氪 · {tabMeta.label}</span>
+            <span className="text-xs text-foreground-subtle bg-muted px-2 py-0.5 rounded-full">
               {filtered.length} 条
             </span>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex shrink-0 items-center gap-2">
             <div className="relative">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-400" />
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-foreground-subtle" />
               <Input
                 value={search}
                 onChange={e => { setSearch(e.target.value); resetScroll() }}
@@ -308,7 +308,7 @@ export function KrClient({ initial }: { initial: KrArticle[] }) {
         </div>
 
         {/* Tab pills */}
-        <div className="flex items-center gap-1 mt-2.5">
+        <div className="flex items-center gap-1 px-6 pb-3">
           {TABS.map(t => {
             const Icon = t.icon
             const active = t.key === activeTab
@@ -323,8 +323,8 @@ export function KrClient({ initial }: { initial: KrArticle[] }) {
                 className={cn(
                   'flex items-center gap-1.5 px-3 py-1 rounded-full text-xs transition-colors',
                   active
-                    ? 'bg-zinc-200 dark:bg-zinc-700 text-zinc-900 dark:text-zinc-100 font-medium'
-                    : 'text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100 dark:hover:bg-zinc-800',
+                    ? 'bg-muted text-foreground font-medium'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-muted',
                 )}
               >
                 <Icon className={cn('w-3.5 h-3.5', active && t.color)} />
@@ -338,9 +338,9 @@ export function KrClient({ initial }: { initial: KrArticle[] }) {
       {/* List */}
       <div className="flex-1 overflow-y-auto px-6 py-4">
         {loading ? (
-          <div className="flex items-center justify-center h-32 text-sm text-zinc-400">加载中…</div>
+          <div className="flex items-center justify-center h-32 text-sm text-foreground-subtle">加载中…</div>
         ) : filtered.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-48 gap-3 text-zinc-400">
+          <div className="flex flex-col items-center justify-center h-48 gap-3 text-foreground-subtle">
             <TabIcon className={cn('w-10 h-10 opacity-20', tabMeta.color)} />
             <p className="text-sm">点击「立即采集」获取最新数据</p>
           </div>
@@ -354,7 +354,7 @@ export function KrClient({ initial }: { initial: KrArticle[] }) {
               })}
             </div>
             <div ref={sentinelRef} className="py-4">
-              {hasMore && <span className="text-xs text-zinc-400">加载中…</span>}
+              {hasMore && <span className="text-xs text-foreground-subtle">加载中…</span>}
             </div>
           </>
         )}

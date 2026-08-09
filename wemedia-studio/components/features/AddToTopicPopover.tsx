@@ -106,7 +106,7 @@ export function AddToTopicPopover({ url, title, summary = "", platform, classNam
             title={done ? "已加为线索" : "加为写作方案线索"}
             onClick={e => e.stopPropagation()}
             className={cn(
-              "inline-flex items-center justify-center rounded-md text-zinc-400 hover:text-indigo-500 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors",
+              "inline-flex items-center justify-center rounded-md text-foreground-subtle hover:text-indigo-500 hover:bg-muted transition-colors",
               label ? "gap-1 h-7 px-2 text-[11px]" : "w-7 h-7",
               done && "text-indigo-500",
               className,
@@ -124,20 +124,20 @@ export function AddToTopicPopover({ url, title, summary = "", platform, classNam
       >
         <div className="space-y-3">
           <div>
-            <div className="text-xs font-medium text-zinc-500 mb-1.5">写作方案</div>
+            <div className="text-xs font-medium text-muted-foreground mb-1.5">写作方案</div>
             <Input
               placeholder="搜索写作方案…"
               value={query}
               onChange={e => setQuery(e.target.value)}
               className="h-8 text-xs mb-1.5"
             />
-            <div className="max-h-40 overflow-y-auto border border-zinc-200 dark:border-zinc-800 rounded-md">
+            <div className="max-h-40 overflow-y-auto border border-border rounded-md">
               {plans === null ? (
-                <div className="p-3 text-center text-xs text-zinc-400 flex items-center justify-center gap-1">
+                <div className="p-3 text-center text-xs text-foreground-subtle flex items-center justify-center gap-1">
                   <Loader2 className="w-3 h-3 animate-spin" /> 加载中
                 </div>
               ) : flatPlans.length === 0 ? (
-                <div className="p-3 text-center text-xs text-zinc-400">无匹配写作方案</div>
+                <div className="p-3 text-center text-xs text-foreground-subtle">无匹配写作方案</div>
               ) : (
                 flatPlans.map(({ plan, depth }) => (
                   <button
@@ -145,7 +145,7 @@ export function AddToTopicPopover({ url, title, summary = "", platform, classNam
                     type="button"
                     onClick={() => { setPlanId(plan.id); setDraftId(null) }}
                     className={cn(
-                      "w-full text-left px-2 py-1.5 text-xs hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors truncate",
+                      "w-full text-left px-2 py-1.5 text-xs hover:bg-muted transition-colors truncate",
                       planId === plan.id && "bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400",
                     )}
                     style={{ paddingLeft: `${8 + depth * 12}px` }}
@@ -159,10 +159,10 @@ export function AddToTopicPopover({ url, title, summary = "", platform, classNam
 
           {planId != null && (
             <div>
-              <div className="text-xs font-medium text-zinc-500 mb-1.5">草稿（可选）</div>
-              <div className="max-h-32 overflow-y-auto border border-zinc-200 dark:border-zinc-800 rounded-md">
+              <div className="text-xs font-medium text-muted-foreground mb-1.5">草稿（可选）</div>
+              <div className="max-h-32 overflow-y-auto border border-border rounded-md">
                 {planDrafts.length === 0 ? (
-                  <div className="p-2 text-center text-xs text-zinc-400">该写作方案下暂无进行中草稿</div>
+                  <div className="p-2 text-center text-xs text-foreground-subtle">该写作方案下暂无进行中草稿</div>
                 ) : (
                   planDrafts.map(d => (
                     <button
@@ -170,7 +170,7 @@ export function AddToTopicPopover({ url, title, summary = "", platform, classNam
                       type="button"
                       onClick={() => setDraftId(draftId === d.id ? null : d.id)}
                       className={cn(
-                        "w-full text-left px-2 py-1.5 text-xs hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors truncate",
+                        "w-full text-left px-2 py-1.5 text-xs hover:bg-muted transition-colors truncate",
                         draftId === d.id && "bg-indigo-50 dark:bg-indigo-950/40 text-indigo-600 dark:text-indigo-400",
                       )}
                     >
@@ -183,7 +183,7 @@ export function AddToTopicPopover({ url, title, summary = "", platform, classNam
           )}
 
           <div>
-            <div className="text-xs font-medium text-zinc-500 mb-1.5">备注（可选）</div>
+            <div className="text-xs font-medium text-muted-foreground mb-1.5">备注（可选）</div>
             <Input
               placeholder="对这条线索的备注"
               value={note}

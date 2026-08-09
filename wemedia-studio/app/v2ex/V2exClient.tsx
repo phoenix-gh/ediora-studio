@@ -25,7 +25,7 @@ const KIND_META: Record<V2exKind, { label: string; icon: typeof Hash; color: str
   node: { label: '节点', icon: Hash, color: 'text-blue-500' },
   user: { label: '用户', icon: User, color: 'text-purple-500' },
   tab:  { label: 'Tab', icon: Layers, color: 'text-orange-500' },
-  all:  { label: '全站', icon: Globe, color: 'text-gray-500' },
+  all:  { label: '全站', icon: Globe, color: 'text-muted-foreground' },
 }
 
 const DAYS_OPTIONS = [3, 7, 14, 30]
@@ -97,7 +97,7 @@ function SubscribeDialog({
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-2">
-          <div className="grid grid-cols-4 gap-1 p-0.5 bg-zinc-100 dark:bg-zinc-900 rounded-md">
+          <div className="grid grid-cols-4 gap-1 p-0.5 bg-muted rounded-md">
             {(Object.keys(KIND_META) as V2exKind[]).map(k => {
               const Icon = KIND_META[k].icon
               return (
@@ -108,8 +108,8 @@ function SubscribeDialog({
                   className={cn(
                     'flex items-center justify-center gap-1 px-2 py-1 text-xs rounded transition-colors',
                     kind === k
-                      ? 'bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 font-medium shadow-sm'
-                      : 'text-zinc-500 hover:text-zinc-700'
+                      ? 'bg-surface-muted text-foreground font-medium shadow-sm'
+                      : 'text-muted-foreground hover:text-foreground'
                   )}
                 >
                   <Icon className={cn('w-3 h-3', kind === k && KIND_META[k].color)} />
@@ -132,7 +132,7 @@ function SubscribeDialog({
                         'px-2 py-0.5 rounded-full text-xs transition-colors',
                         key === p.key
                           ? 'bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 font-medium'
-                          : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 hover:bg-zinc-200 dark:hover:bg-zinc-700',
+                          : 'bg-muted text-muted-foreground hover:bg-surface-muted',
                       )}>
                       {p.label}
                     </button>
@@ -155,27 +155,27 @@ function SubscribeDialog({
         </form>
 
         <div>
-          <div className="text-[11px] uppercase tracking-wider text-zinc-400 mb-1.5 px-0.5">
+            <div className="text-[11px] uppercase tracking-wider text-foreground-subtle mb-1.5 px-0.5">
             已订阅 · {subs.length}
           </div>
           {subs.length === 0 ? (
-            <div className="text-xs text-zinc-400 py-6 text-center border border-dashed rounded-md">
+            <div className="text-xs text-foreground-subtle py-6 text-center border border-dashed rounded-md">
               暂无订阅。从上方选 kind + key 后点击「添加」。
             </div>
           ) : (
-            <div className="border border-zinc-200 dark:border-zinc-800 rounded-md max-h-60 overflow-y-auto">
+            <div className="border border-border rounded-md max-h-60 overflow-y-auto">
               {subs.map(s => {
                 const Icon = KIND_META[s.kind].icon
                 return (
                   <div key={s.id}
                     className={cn(
-                      'flex items-center gap-2 px-2.5 py-1.5 border-b border-zinc-100 dark:border-zinc-800 last:border-0',
+                      'flex items-center gap-2 px-2.5 py-1.5 border-b border-border last:border-0',
                       s.muted && 'opacity-50'
                     )}>
                     <Icon className={cn('w-4 h-4 flex-shrink-0', KIND_META[s.kind].color)} />
                     <div className="flex-1 min-w-0">
                       <div className="text-xs font-medium truncate">{s.label}</div>
-                      <div className="text-[11px] text-zinc-400 truncate">
+                      <div className="text-[11px] text-foreground-subtle truncate">
                         {KIND_META[s.kind].label}{s.key && ` · ${s.key}`} · {s.group}
                       </div>
                     </div>
@@ -238,19 +238,19 @@ function SubList({
         onClick={() => onSelect(null)}
         className={cn(
           'w-full text-left flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors',
-          selectedId === null
-            ? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 font-medium'
-            : 'text-zinc-500 hover:text-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-900',
+            selectedId === null
+            ? 'bg-muted text-foreground font-medium'
+            : 'text-muted-foreground hover:text-foreground hover:bg-surface-muted',
         )}
       >
         <Globe className="w-4 h-4 flex-shrink-0 text-indigo-500" />
         <span className="truncate">全部订阅</span>
-        <span className="ml-auto text-[10px] text-zinc-400">{subs.length}</span>
+        <span className="ml-auto text-[10px] text-foreground-subtle">{subs.length}</span>
       </button>
 
       {grouped.map(([group, items]) => (
         <div key={group} className="pt-2">
-          <p className="text-[10px] font-semibold text-zinc-400 uppercase tracking-wider px-3 pb-1">{group}</p>
+          <p className="text-[10px] font-semibold text-foreground-subtle uppercase tracking-wider px-3 pb-1">{group}</p>
           {items.map(s => {
             const meta = KIND_META[s.kind as V2exKind]
             const Icon = meta?.icon || Hash
@@ -260,26 +260,26 @@ function SubList({
                 className={cn(
                   'group flex items-center gap-2 px-2 py-1.5 rounded-md text-sm transition-colors cursor-pointer',
                   selectedId === s.id
-                    ? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100'
-                    : 'text-zinc-500 hover:text-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-900',
+                    ? 'bg-muted text-foreground'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-surface-muted',
                   s.muted && 'opacity-50',
                 )}
                 onClick={() => onSelect(s.id)}
               >
                 <Icon className={cn('w-3.5 h-3.5 flex-shrink-0', meta?.color)} />
                 <span className="truncate flex-1 min-w-0">{s.label}</span>
-                <span className="hidden group-hover:hidden text-[10px] text-zinc-400">{s.topic_count}</span>
+                <span className="hidden group-hover:hidden text-[10px] text-foreground-subtle">{s.topic_count}</span>
                 <div className="hidden group-hover:flex items-center gap-0.5">
                   <button
                     onClick={e => { e.stopPropagation(); onCollect(s) }}
-                    className="p-1 rounded hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
+                    className="p-1 rounded hover:bg-muted transition-colors"
                     title="立即采集"
                   >
                     <RefreshCw className="w-3 h-3" />
                   </button>
                   <button
                     onClick={e => { e.stopPropagation(); onMute(s) }}
-                    className="p-1 rounded hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
+                    className="p-1 rounded hover:bg-muted transition-colors"
                     title={s.muted ? '取消静音' : '静音'}
                   >
                     {s.muted ? <Volume2 className="w-3 h-3" /> : <VolumeX className="w-3 h-3" />}
@@ -311,27 +311,27 @@ function TopicCard({ topic, onOpen }: { topic: V2exTopic; onOpen: () => void }) 
       tabIndex={0}
       onClick={onOpen}
       onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen() } }}
-      className="relative w-full text-left block py-3 px-2 -mx-2 rounded-lg border-b border-zinc-100 dark:border-zinc-800 last:border-0 hover:bg-zinc-50 dark:hover:bg-zinc-900/50 transition-colors group cursor-pointer"
+      className="relative w-full text-left block py-3 px-2 -mx-2 rounded-lg border-b border-border last:border-0 hover:bg-surface-muted transition-colors group cursor-pointer"
     >
-      <p className="text-[13px] font-medium text-zinc-900 dark:text-zinc-100 line-clamp-2 leading-snug
+      <p className="text-[13px] font-medium text-foreground line-clamp-2 leading-snug
                     group-hover:text-blue-700 dark:group-hover:text-blue-400 transition-colors">
         {topic.title}
       </p>
       {excerpt && (
-        <p className="mt-1 text-[11px] text-zinc-400 line-clamp-2 leading-relaxed">{excerpt}</p>
+        <p className="mt-1 text-[11px] text-foreground-subtle line-clamp-2 leading-relaxed">{excerpt}</p>
       )}
-      <div className="mt-1.5 flex items-center gap-2 text-[11px] text-zinc-400">
+      <div className="mt-1.5 flex items-center gap-2 text-[11px] text-foreground-subtle">
         {topic.author && (
           <>
             <User className="w-3 h-3 flex-shrink-0" />
-            <span className="text-zinc-500 truncate max-w-[160px]">{topic.author}</span>
+            <span className="text-muted-foreground truncate max-w-[160px]">{topic.author}</span>
           </>
         )}
         <span>·</span>
         <span>{fmtRelTime(topic.published_at)}</span>
       </div>
 
-      <div className="mt-2 flex items-center text-[11px] text-zinc-400">
+      <div className="mt-2 flex items-center text-[11px] text-foreground-subtle">
         <span className="flex items-center gap-1">
           <MessageCircle className="w-3.5 h-3.5" />
           {topic.replies}
@@ -343,7 +343,7 @@ function TopicCard({ topic, onOpen }: { topic: V2exTopic; onOpen: () => void }) 
             rel="noopener noreferrer"
             onClick={e => e.stopPropagation()}
             title="查看原帖"
-            className="inline-flex items-center justify-center w-7 h-7 rounded-md text-zinc-400 hover:text-blue-500 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+            className="inline-flex items-center justify-center w-7 h-7 rounded-md text-foreground-subtle hover:text-blue-500 hover:bg-muted transition-colors"
           >
             <ExternalLink className="w-3.5 h-3.5" />
           </a>
@@ -508,13 +508,13 @@ export function V2exClient({
   return (
     <div className="flex h-full">
       {/* Sidebar */}
-      <div className="w-56 border-r border-zinc-200 dark:border-zinc-800 flex flex-col flex-shrink-0">
-        <div className="px-3 py-3 border-b border-zinc-100 dark:border-zinc-800">
-          <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider px-1">V2EX 订阅</p>
+      <div className="w-56 border-r border-border flex flex-col flex-shrink-0">
+        <div className="flex min-h-[var(--app-header-height)] items-center px-3 py-3 border-b border-border">
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-1">V2EX 订阅</p>
         </div>
         <div className="flex-1 overflow-y-auto px-2 py-2">
           {subs.length === 0 ? (
-            <p className="text-xs text-zinc-400 text-center mt-6 px-3">还没有订阅，点右上角添加</p>
+            <p className="text-xs text-foreground-subtle text-center mt-6 px-3">还没有订阅，点右上角添加</p>
           ) : (
             <SubList
               subs={subs}
@@ -532,23 +532,23 @@ export function V2exClient({
       <div className={cn(
         'flex flex-col relative',
         useSidePanel
-          ? 'w-[440px] flex-shrink-0 border-r border-zinc-200 dark:border-zinc-800'
+          ? 'w-[440px] flex-shrink-0 border-r border-border'
           : 'flex-1 min-w-0',
       )}>
-        <div className="border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 px-6 py-3">
-          <div className="flex items-center justify-between gap-4 flex-wrap">
+        <div className="flex-shrink-0 border-b border-border bg-surface">
+          <div data-slot="page-header" className="flex h-[var(--app-header-height)] min-h-[var(--app-header-height)] items-center justify-between gap-4 px-6">
             <div className="flex items-center gap-2">
               <Globe className="w-4 h-4 text-indigo-500" />
-              <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
+              <span className="text-sm font-medium text-foreground">
                 {selectedSub ? selectedSub.label : 'V2EX 订阅'}
               </span>
-              <span className="text-xs text-zinc-400 bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 rounded-full">
+              <span className="text-xs text-foreground-subtle bg-muted px-2 py-0.5 rounded-full">
                 {filtered.length} 个主题
               </span>
             </div>
             <div className="flex items-center gap-2 flex-wrap">
               <div className="relative">
-                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-400" />
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-foreground-subtle" />
                 <Input
                   value={search}
                   onChange={e => { setSearch(e.target.value); resetScroll() }}
@@ -574,8 +574,8 @@ export function V2exClient({
             </div>
           </div>
 
-          <div className="flex items-center gap-1 mt-2.5">
-            <span className="text-xs text-zinc-400">最近</span>
+          <div className="flex items-center gap-1 px-6 pb-3">
+            <span className="text-xs text-foreground-subtle">最近</span>
             {DAYS_OPTIONS.map(d => (
               <button
                 key={d}
@@ -583,8 +583,8 @@ export function V2exClient({
                 className={cn(
                   'px-2 py-0.5 rounded text-xs transition-colors',
                   days === d
-                    ? 'bg-zinc-200 dark:bg-zinc-700 text-zinc-900 dark:text-zinc-100 font-medium'
-                    : 'text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800',
+                    ? 'bg-muted text-foreground font-medium'
+                    : 'text-foreground-subtle hover:text-foreground hover:bg-muted',
                 )}
               >
                 {d}天
@@ -595,9 +595,9 @@ export function V2exClient({
 
         <div className="flex-1 overflow-y-auto px-6 py-4">
           {loading ? (
-            <div className="flex items-center justify-center h-32 text-sm text-zinc-400">加载中…</div>
+            <div className="flex items-center justify-center h-32 text-sm text-foreground-subtle">加载中…</div>
           ) : filtered.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-48 gap-3 text-zinc-400">
+            <div className="flex flex-col items-center justify-center h-48 gap-3 text-foreground-subtle">
               <Globe className="w-10 h-10 opacity-20 text-indigo-500" />
               <p className="text-sm">
                 {subs.length === 0 ? '点击右上角「添加订阅」开始' : '该订阅暂无主题，尝试「立即采集」'}
@@ -609,7 +609,7 @@ export function V2exClient({
                 {visible.map(t => <TopicCard key={t.id} topic={t} onOpen={() => openReader(t)} />)}
               </div>
               <div ref={sentinelRef} className="py-4">
-                {hasMore && <span className="text-xs text-zinc-400">加载中…</span>}
+                {hasMore && <span className="text-xs text-foreground-subtle">加载中…</span>}
               </div>
             </>
           )}

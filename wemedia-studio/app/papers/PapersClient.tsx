@@ -47,20 +47,20 @@ function PaperCard({ paper }: { paper: Paper }) {
   const shortAbstractCn = abstractCn.length > 200 ? abstractCn.slice(0, 200) + '…' : abstractCn
 
   return (
-    <div className="border border-zinc-200 dark:border-zinc-800 rounded-lg p-4 hover:border-zinc-300 dark:hover:border-zinc-700 transition-colors">
+    <div className="border border-border rounded-lg p-4 hover:border-border-strong transition-colors bg-surface">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
           <a
             href={paper.arxiv_url}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-sm font-medium text-zinc-900 dark:text-zinc-100 hover:text-indigo-600 dark:hover:text-indigo-400 line-clamp-2 leading-snug"
+            className="text-sm font-medium text-foreground hover:text-indigo-600 dark:hover:text-indigo-400 line-clamp-2 leading-snug"
           >
             {titleCn}
           </a>
           <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-            <span className="text-[11px] text-zinc-400">{date}</span>
-            {authors && <span className="text-[11px] text-zinc-400 truncate max-w-[280px]">{authors}</span>}
+            <span className="text-[11px] text-foreground-subtle">{date}</span>
+            {authors && <span className="text-[11px] text-foreground-subtle truncate max-w-[280px]">{authors}</span>}
           </div>
           <div className="flex gap-1 mt-2 flex-wrap">
             {paper.categories.slice(0, 5).map(cat => (
@@ -75,7 +75,7 @@ function PaperCard({ paper }: { paper: Paper }) {
             href={paper.arxiv_url}
             target="_blank"
             rel="noopener noreferrer"
-            className="p-1.5 rounded text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+            className="p-1.5 rounded text-foreground-subtle hover:text-foreground hover:bg-muted transition-colors"
             title="在 arXiv 查看"
           >
             <ExternalLink className="w-3.5 h-3.5" />
@@ -85,7 +85,7 @@ function PaperCard({ paper }: { paper: Paper }) {
               href={paper.pdf_url}
               target="_blank"
               rel="noopener noreferrer"
-              className="p-1.5 rounded text-zinc-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950 transition-colors"
+              className="p-1.5 rounded text-foreground-subtle hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950 transition-colors"
               title="下载 PDF"
             >
               <Download className="w-3.5 h-3.5" />
@@ -102,13 +102,13 @@ function PaperCard({ paper }: { paper: Paper }) {
 
       {abstractCn && (
         <div className="mt-2.5">
-          <p className="text-[12px] text-zinc-600 dark:text-zinc-400 leading-relaxed">
+          <p className="text-[12px] text-muted-foreground leading-relaxed">
             {expanded ? abstractCn : shortAbstractCn}
           </p>
           {abstractCn.length > 200 && (
             <button
               onClick={() => setExpanded(v => !v)}
-              className="mt-1 flex items-center gap-0.5 text-[11px] text-zinc-400 hover:text-zinc-600 transition-colors"
+              className="mt-1 flex items-center gap-0.5 text-[11px] text-foreground-subtle hover:text-muted-foreground transition-colors"
             >
               {expanded ? <><ChevronUp className="w-3 h-3" />收起</> : <><ChevronDown className="w-3 h-3" />展开摘要</>}
             </button>
@@ -179,18 +179,18 @@ export function PapersClient({ initialPapers }: { initialPapers: Paper[] }) {
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 px-6 py-4">
-        <div className="flex items-center justify-between gap-4">
+      <div className="flex-shrink-0 border-b border-border bg-surface">
+        <div data-slot="page-header" className="flex h-[var(--app-header-height)] min-h-[var(--app-header-height)] items-center justify-between gap-4 px-6">
           <div className="flex items-center gap-2">
-            <FileText className="w-5 h-5 text-zinc-400" />
-            <h1 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">论文追踪</h1>
-            <span className="text-xs text-zinc-400 bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 rounded-full">
+            <FileText className="w-5 h-5 text-foreground-subtle" />
+            <h1 className="text-base font-semibold text-foreground">论文追踪</h1>
+            <span className="text-xs text-foreground-subtle bg-muted px-2 py-0.5 rounded-full">
               {filtered.length} 篇
             </span>
           </div>
           <div className="flex items-center gap-2">
             <div className="relative">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-400" />
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-foreground-subtle" />
               <Input
                 value={search}
                 onChange={e => setSearch(e.target.value)}
@@ -212,7 +212,7 @@ export function PapersClient({ initialPapers }: { initialPapers: Paper[] }) {
         </div>
 
         {/* Category + Days filters */}
-        <div className="flex items-center gap-4 mt-3">
+        <div className="flex items-center gap-4 px-6 pb-3">
           <div className="flex gap-1 flex-wrap">
             {CATEGORIES.map(cat => (
               <button
@@ -222,7 +222,7 @@ export function PapersClient({ initialPapers }: { initialPapers: Paper[] }) {
                   'px-2.5 py-1 rounded-md text-xs font-medium transition-colors',
                   category === cat
                     ? 'bg-indigo-600 text-white'
-                    : 'text-zinc-500 hover:text-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-800'
+                    : 'text-muted-foreground hover:text-foreground hover:bg-muted'
                 )}
               >
                 {cat === '全部' ? cat : catLabel(cat)}
@@ -230,7 +230,7 @@ export function PapersClient({ initialPapers }: { initialPapers: Paper[] }) {
             ))}
           </div>
           <div className="flex items-center gap-1 ml-auto">
-            <span className="text-xs text-zinc-400">最近</span>
+            <span className="text-xs text-foreground-subtle">最近</span>
             {DAYS_OPTIONS.map(d => (
               <button
                 key={d}
@@ -238,8 +238,8 @@ export function PapersClient({ initialPapers }: { initialPapers: Paper[] }) {
                 className={cn(
                   'px-2 py-0.5 rounded text-xs transition-colors',
                   days === d
-                    ? 'bg-zinc-200 dark:bg-zinc-700 text-zinc-900 dark:text-zinc-100 font-medium'
-                    : 'text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800'
+                    ? 'bg-muted text-foreground font-medium'
+                    : 'text-foreground-subtle hover:text-foreground hover:bg-muted'
                 )}
               >
                 {d}天
@@ -252,9 +252,9 @@ export function PapersClient({ initialPapers }: { initialPapers: Paper[] }) {
       {/* List */}
       <div className="flex-1 overflow-y-auto px-6 py-4">
         {loading ? (
-          <div className="flex items-center justify-center h-32 text-sm text-zinc-400">加载中…</div>
+          <div className="flex items-center justify-center h-32 text-sm text-foreground-subtle">加载中…</div>
         ) : filtered.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-32 gap-2 text-zinc-400">
+          <div className="flex flex-col items-center justify-center h-32 gap-2 text-foreground-subtle">
             <FileText className="w-8 h-8 opacity-30" />
             <p className="text-sm">暂无论文数据，点击「立即采集」抓取 arXiv 最新论文</p>
           </div>

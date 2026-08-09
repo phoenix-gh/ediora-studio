@@ -144,28 +144,28 @@ function SubscribeDialog({
           {subs.map(s => (
             <div key={s.id} className={cn(
               'flex items-center gap-2 px-3 py-2 rounded-md text-sm',
-              'hover:bg-zinc-50 dark:hover:bg-zinc-900',
+              'hover:bg-surface-muted',
               s.muted && 'opacity-50',
             )}>
               <Hash className="w-3.5 h-3.5 text-orange-500 shrink-0" />
               <span className="flex-1 font-medium truncate">{s.label}</span>
-              <span className="text-zinc-400 text-xs">{s.post_count} 帖</span>
+              <span className="text-foreground-subtle text-xs">{s.post_count} 帖</span>
               {actingId === s.id
-                ? <Loader2 className="w-3.5 h-3.5 animate-spin text-zinc-400" />
+                ? <Loader2 className="w-3.5 h-3.5 animate-spin text-foreground-subtle" />
                 : <>
                   <button
                     onClick={() => wrap(s, onCollect)}
-                    className="text-zinc-400 hover:text-blue-500"
+                    className="text-foreground-subtle hover:text-blue-500"
                     title="立即采集"
                   ><RefreshCw className="w-3.5 h-3.5" /></button>
                   <button
                     onClick={() => wrap(s, onMute)}
-                    className="text-zinc-400 hover:text-yellow-500"
+                    className="text-foreground-subtle hover:text-yellow-500"
                     title={s.muted ? '取消静音' : '静音'}
                   >{s.muted ? <Volume2 className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}</button>
                   <button
                     onClick={() => wrap(s, onDelete)}
-                    className="text-zinc-400 hover:text-red-500"
+                    className="text-foreground-subtle hover:text-red-500"
                     title="删除"
                   ><Trash2 className="w-3.5 h-3.5" /></button>
                 </>
@@ -173,7 +173,7 @@ function SubscribeDialog({
             </div>
           ))}
           {subs.length === 0 && (
-            <p className="text-center text-zinc-400 text-sm py-6">还没有订阅任何版块</p>
+            <p className="text-center text-foreground-subtle text-sm py-6">还没有订阅任何版块</p>
           )}
         </div>
       </DialogContent>
@@ -194,24 +194,24 @@ function PostCard({
     <button
       onClick={onClick}
       className={cn(
-        'w-full text-left px-4 py-3 border-b border-zinc-100 dark:border-zinc-800',
-        'hover:bg-zinc-50 dark:hover:bg-zinc-900 transition-colors',
+        'w-full text-left px-4 py-3 border-b border-border',
+        'hover:bg-surface-muted transition-colors',
         active && 'bg-indigo-50 dark:bg-indigo-950/30',
       )}
     >
       <div className="flex items-start gap-2">
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium line-clamp-2 text-zinc-900 dark:text-zinc-100 leading-snug">
+          <p className="text-sm font-medium line-clamp-2 text-foreground leading-snug">
             {post.title}
           </p>
-          <div className="flex items-center gap-3 mt-1.5 text-xs text-zinc-400">
+          <div className="flex items-center gap-3 mt-1.5 text-xs text-foreground-subtle">
             <span className="flex items-center gap-0.5">
               <ArrowUp className="w-3 h-3" />{post.score.toLocaleString()}
             </span>
             <span className="flex items-center gap-0.5">
               <MessageCircle className="w-3 h-3" />{post.comment_count}
             </span>
-            <span className="text-zinc-300">r/{post.subreddit}</span>
+            <span className="text-foreground-subtle">r/{post.subreddit}</span>
             {post.flair && (
               <span className="px-1.5 py-0.5 rounded bg-orange-100 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400">
                 {post.flair}
@@ -221,7 +221,7 @@ function PostCard({
           </div>
         </div>
         {!post.is_self && post.linked_url && (
-          <ExternalLink className="w-3.5 h-3.5 text-zinc-300 shrink-0 mt-0.5" />
+          <ExternalLink className="w-3.5 h-3.5 text-foreground-subtle shrink-0 mt-0.5" />
         )}
       </div>
     </button>
@@ -358,20 +358,20 @@ export function RedditClient({
   return (
     <div className="flex h-screen overflow-hidden">
       {/* Left sidebar */}
-      <aside className="w-52 shrink-0 border-r border-zinc-200 dark:border-zinc-800 flex flex-col overflow-hidden">
-        <div className="px-3 py-3 border-b border-zinc-100 dark:border-zinc-800 flex items-center gap-2">
+      <aside className="w-52 shrink-0 border-r border-border flex flex-col overflow-hidden">
+        <div className="flex min-h-[var(--app-header-height)] items-center px-3 py-3 border-b border-border gap-2">
           <span className="font-semibold text-sm flex-1">Reddit</span>
           <button
             onClick={handleRefreshAll}
             disabled={refreshing}
-            className="text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"
+            className="text-foreground-subtle hover:text-foreground"
             title="全量采集"
           >
             <RefreshCw className={cn('w-3.5 h-3.5', refreshing && 'animate-spin')} />
           </button>
           <button
             onClick={() => setDialogOpen(true)}
-            className="text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"
+            className="text-foreground-subtle hover:text-foreground"
             title="管理订阅"
           >
             <Settings className="w-3.5 h-3.5" />
@@ -384,7 +384,7 @@ export function RedditClient({
               'w-full text-left px-3 py-2 text-sm rounded-md mx-1',
               selectedSubId === null
                 ? 'bg-indigo-50 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300 font-medium'
-                : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-900',
+                : 'text-muted-foreground hover:bg-surface-muted',
             )}
           >
             全部版块
@@ -397,7 +397,7 @@ export function RedditClient({
                 'w-full text-left px-3 py-2 text-sm rounded-md mx-1 flex items-center gap-1.5',
                 selectedSubId === s.id
                   ? 'bg-indigo-50 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300 font-medium'
-                  : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-900',
+                  : 'text-muted-foreground hover:bg-surface-muted',
                 s.muted && 'opacity-40',
               )}
             >
@@ -411,8 +411,8 @@ export function RedditClient({
       {/* Post list */}
       <main className="flex-1 flex flex-col overflow-hidden">
         {/* Toolbar */}
-        <div className="flex items-center gap-2 px-4 py-2.5 border-b border-zinc-100 dark:border-zinc-800 shrink-0">
-          <div className="flex rounded-md overflow-hidden border border-zinc-200 dark:border-zinc-700 text-xs">
+        <div data-slot="page-header" className="flex h-[var(--app-header-height)] min-h-[var(--app-header-height)] items-center gap-2 px-4 py-2.5 border-b border-border bg-surface shrink-0">
+          <div className="flex rounded-md overflow-hidden border border-input text-xs">
             {(['hot', 'new'] as RedditView[]).map(v => (
               <button
                 key={v}
@@ -421,7 +421,7 @@ export function RedditClient({
                   'px-3 py-1.5 flex items-center gap-1',
                   view === v
                     ? 'bg-indigo-600 text-white'
-                    : 'text-zinc-600 hover:bg-zinc-50 dark:text-zinc-400 dark:hover:bg-zinc-800',
+                    : 'text-muted-foreground hover:bg-muted',
                 )}
               >
                 {v === 'hot' ? <TrendingUp className="w-3 h-3" /> : <Clock className="w-3 h-3" />}
@@ -430,21 +430,21 @@ export function RedditClient({
             ))}
           </div>
           <div className="relative flex-1 max-w-xs">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-400" />
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-foreground-subtle" />
             <input
               value={search}
               onChange={e => setSearch(e.target.value)}
               placeholder="搜索标题…"
-              className="w-full pl-8 pr-3 py-1.5 text-sm border border-zinc-200 dark:border-zinc-700 rounded-md bg-transparent outline-none focus:ring-1 focus:ring-indigo-500"
+              className="w-full pl-8 pr-3 py-1.5 text-sm border border-input rounded-md bg-control outline-none focus:ring-1 focus:ring-indigo-500"
             />
           </div>
-          <span className="text-xs text-zinc-400">{filteredPosts.length} 帖</span>
+          <span className="text-xs text-foreground-subtle">{filteredPosts.length} 帖</span>
         </div>
 
         {/* Post list */}
         <div className="flex-1 overflow-y-auto">
           {visiblePosts.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-40 text-zinc-400 text-sm gap-2">
+            <div className="flex flex-col items-center justify-center h-40 text-foreground-subtle text-sm gap-2">
               <Hash className="w-8 h-8 opacity-30" />
               <span>{subs.length === 0 ? '先在左侧订阅一个版块' : '暂无帖子，点击刷新按钮采集'}</span>
             </div>

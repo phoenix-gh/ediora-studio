@@ -139,22 +139,22 @@ function SubscribeDialog({
         </form>
 
         <div>
-          <div className="text-[11px] uppercase tracking-wider text-zinc-400 mb-1.5 px-0.5">
+          <div className="text-[11px] uppercase tracking-wider text-foreground-subtle mb-1.5 px-0.5">
             已订阅 · {repos.length}
           </div>
           {repos.length === 0 ? (
-            <div className="text-xs text-zinc-400 py-6 text-center border border-dashed rounded-md">
+            <div className="text-xs text-foreground-subtle py-6 text-center border border-dashed rounded-md">
               暂无追踪仓库。输入 owner/repo 后点击「添加」。
             </div>
           ) : (
-            <div className="border border-zinc-200 dark:border-zinc-800 rounded-md max-h-72 overflow-y-auto">
+            <div className="border border-border rounded-md max-h-72 overflow-y-auto">
               {repos.map(r => (
-                <div key={r.id} className={cn('border-b border-zinc-100 dark:border-zinc-800 last:border-0', r.muted && 'opacity-50')}>
+                <div key={r.id} className={cn('border-b border-border last:border-0', r.muted && 'opacity-50')}>
                   <div className="flex items-center gap-2 px-2.5 py-1.5">
-                  <GitFork className="w-4 h-4 text-zinc-400 flex-shrink-0" />
+                  <GitFork className="w-4 h-4 text-foreground-subtle flex-shrink-0" />
                   <div className="flex-1 min-w-0">
                     <div className="text-xs font-medium truncate">{r.id}</div>
-                    <div className="text-[11px] text-zinc-400 truncate">
+                    <div className="text-[11px] text-foreground-subtle truncate">
                       <Star className="w-2.5 h-2.5 inline -mt-0.5" /> {formatStars(r.stars)}
                       {r.language && <> · {r.language}</>} · {r.collect_interval_minutes}m
                       {r.last_collected_at && <> · 最近 {formatRelative(r.last_collected_at)}</>}
@@ -186,14 +186,14 @@ function SubscribeDialog({
                   </Button>
                   </div>
                 {expandedRepoId === r.id && (
-                  <div className="px-2.5 py-2 bg-zinc-50 dark:bg-zinc-900 border-t border-zinc-100 dark:border-zinc-800 flex items-center gap-3 flex-wrap">
-                    <span className="text-[11px] text-zinc-500">发布稿</span>
+                  <div className="px-2.5 py-2 bg-surface-muted border-t border-border flex items-center gap-3 flex-wrap">
+                    <span className="text-[11px] text-muted-foreground">发布稿</span>
                     <button
                       className={cn(
                         'text-[11px] px-2 py-0.5 rounded border transition-colors',
                         r.release_draft_enabled
                           ? 'bg-indigo-50 border-indigo-200 text-indigo-600 dark:bg-indigo-950 dark:border-indigo-800 dark:text-indigo-400'
-                          : 'bg-zinc-100 border-zinc-200 text-zinc-500 dark:bg-zinc-800 dark:border-zinc-700'
+                          : 'bg-muted border-border text-muted-foreground'
                       )}
                       onClick={async () => {
                         const u = await updateGithubRepo(r.owner, r.repo, { release_draft_enabled: !r.release_draft_enabled })
@@ -214,7 +214,7 @@ function SubscribeDialog({
                                 'text-[11px] px-2 py-0.5 rounded border transition-colors',
                                 active
                                   ? 'bg-emerald-50 border-emerald-200 text-emerald-600 dark:bg-emerald-950 dark:border-emerald-800 dark:text-emerald-400'
-                                  : 'bg-zinc-100 border-zinc-200 text-zinc-500 dark:bg-zinc-800 dark:border-zinc-700'
+                                  : 'bg-muted border-border text-muted-foreground'
                               )}
                               onClick={async () => {
                                 const current = r.release_draft_types ?? ['tech', 'product']
@@ -278,8 +278,8 @@ function TrendingTab({ items }: { items: GithubTrendingRepo[] }) {
 
   return (
     <div className="flex-1 overflow-y-auto">
-      <div className="px-6 py-3 border-b border-zinc-100 dark:border-zinc-800 flex items-center gap-3">
-        <div className="flex gap-1 bg-zinc-100 dark:bg-zinc-800 rounded-lg p-0.5">
+      <div className="flex min-h-[var(--app-header-height)] items-center px-6 py-3 border-b border-border gap-3">
+        <div className="flex gap-1 bg-muted rounded-lg p-0.5">
           {(['daily', 'weekly'] as const).map(p => (
             <button
               key={p}
@@ -287,15 +287,15 @@ function TrendingTab({ items }: { items: GithubTrendingRepo[] }) {
               className={cn(
                 'px-3 py-1 rounded-md text-xs font-medium transition-colors',
                 period === p
-                  ? 'bg-white dark:bg-zinc-700 text-zinc-900 dark:text-zinc-100 shadow-sm'
-                  : 'text-zinc-500 hover:text-zinc-700'
+                  ? 'bg-surface-muted text-foreground shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground'
               )}
             >
               {p === 'daily' ? '今日' : '本周'}
             </button>
           ))}
         </div>
-        <span className="text-xs text-zinc-400">{localItems.length} 个仓库</span>
+        <span className="text-xs text-foreground-subtle">{localItems.length} 个仓库</span>
         <Button size="sm" variant="outline" className="ml-auto h-7 text-xs gap-1" onClick={handleRefresh} disabled={loading}>
           <RefreshCw className={cn('w-3.5 h-3.5', loading && 'animate-spin')} />刷新
         </Button>
@@ -303,17 +303,17 @@ function TrendingTab({ items }: { items: GithubTrendingRepo[] }) {
 
       {localItems.length === 0 ? (
         <div className="flex flex-col items-center justify-center h-64 text-center gap-3">
-          <GitFork className="w-10 h-10 text-zinc-300 dark:text-zinc-700" />
-          <p className="text-sm text-zinc-500">暂无趋势数据</p>
-          <p className="text-xs text-zinc-400">点击「刷新」从 RSSHub 获取 GitHub Trending</p>
+          <GitFork className="w-10 h-10 text-foreground-subtle" />
+          <p className="text-sm text-muted-foreground">暂无趋势数据</p>
+          <p className="text-xs text-foreground-subtle">点击「刷新」从 RSSHub 获取 GitHub Trending</p>
         </div>
       ) : (
-        <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
+        <div className="divide-y divide-border">
           {localItems.map((r, i) => (
-            <div key={r.id} className="flex items-center gap-4 px-6 py-3 hover:bg-zinc-50/80 dark:hover:bg-zinc-800/30 transition-colors">
+            <div key={r.id} className="flex items-center gap-4 px-6 py-3 hover:bg-surface-muted transition-colors">
               <span className={cn(
                 'text-xs font-bold tabular-nums w-5 text-center flex-shrink-0',
-                i < 3 ? 'text-amber-500' : 'text-zinc-400'
+                i < 3 ? 'text-amber-500' : 'text-foreground-subtle'
               )}>#{i + 1}</span>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 mb-0.5">
@@ -321,18 +321,18 @@ function TrendingTab({ items }: { items: GithubTrendingRepo[] }) {
                     href={r.url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-sm font-medium text-zinc-900 dark:text-zinc-100 hover:text-indigo-600 transition-colors flex items-center gap-1"
+                    className="text-sm font-medium text-foreground hover:text-indigo-600 transition-colors flex items-center gap-1"
                   >
                     {r.owner}/{r.repo}
                     <ExternalLink className="w-3 h-3 opacity-50" />
                   </a>
                   {r.language && (
-                    <span className="text-[10px] bg-zinc-100 dark:bg-zinc-800 text-zinc-500 px-1.5 py-0.5 rounded">{r.language}</span>
+                    <span className="text-[10px] bg-muted text-muted-foreground px-1.5 py-0.5 rounded">{r.language}</span>
                   )}
                 </div>
-                <p className="text-xs text-zinc-500 truncate">{r.description}</p>
+                <p className="text-xs text-muted-foreground truncate">{r.description}</p>
               </div>
-              <div className="flex items-center gap-3 flex-shrink-0 text-xs text-zinc-400">
+              <div className="flex items-center gap-3 flex-shrink-0 text-xs text-foreground-subtle">
                 <span className="flex items-center gap-1"><Star className="w-3.5 h-3.5" />{formatStars(r.stars)}</span>
                 {r.stars_gained > 0 && (
                   <span className="flex items-center gap-0.5 text-emerald-600 dark:text-emerald-400 font-medium">
@@ -468,8 +468,8 @@ function ReleasesTab({ repoId, releases: initial, onLoad }: { repoId: string; re
 
   return (
     <div className="flex-1 overflow-y-auto">
-      <div className="px-6 py-3 border-b border-zinc-100 dark:border-zinc-800 flex items-center gap-3">
-        <span className="text-xs text-zinc-400">{releases.length} 条发布记录</span>
+      <div className="flex min-h-[var(--app-header-height)] items-center px-6 py-3 border-b border-border gap-3">
+        <span className="text-xs text-foreground-subtle">{releases.length} 条发布记录</span>
         <Button size="sm" variant="outline" className="ml-auto h-7 text-xs gap-1" onClick={handleCollect} disabled={collecting}>
           <RefreshCw className={cn('w-3.5 h-3.5', collecting && 'animate-spin')} />刷新
         </Button>
@@ -477,19 +477,19 @@ function ReleasesTab({ repoId, releases: initial, onLoad }: { repoId: string; re
 
       {releases.length === 0 ? (
         <div className="flex flex-col items-center justify-center h-64 gap-3 text-center">
-          <Tag className="w-10 h-10 text-zinc-300 dark:text-zinc-700" />
-          <p className="text-sm text-zinc-500">暂无发布记录</p>
-          <p className="text-xs text-zinc-400">点击「刷新」从 GitHub 拉取</p>
+          <Tag className="w-10 h-10 text-foreground-subtle" />
+          <p className="text-sm text-muted-foreground">暂无发布记录</p>
+          <p className="text-xs text-foreground-subtle">点击「刷新」从 GitHub 拉取</p>
         </div>
       ) : (
-        <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
+        <div className="divide-y divide-border">
           {releases.map(rel => {
             const isOpen = expanded === rel.id
             return (
-              <div key={rel.id} className="px-6 py-4 hover:bg-zinc-50/80 dark:hover:bg-zinc-800/30 transition-colors">
+              <div key={rel.id} className="px-6 py-4 hover:bg-surface-muted transition-colors">
                 <div className="flex items-start gap-3">
-                  <div className="w-8 h-8 rounded-lg bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center flex-shrink-0 mt-0.5">
-                    <Tag className="w-3.5 h-3.5 text-zinc-500" />
+                  <div className="w-8 h-8 rounded-lg bg-muted flex items-center justify-center flex-shrink-0 mt-0.5">
+                    <Tag className="w-3.5 h-3.5 text-muted-foreground" />
                   </div>
                   <div className="flex-1 min-w-0">
                     {/* Header */}
@@ -498,12 +498,12 @@ function ReleasesTab({ repoId, releases: initial, onLoad }: { repoId: string; re
                         href={rel.html_url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 hover:text-indigo-600 transition-colors font-mono"
+                        className="text-sm font-semibold text-foreground hover:text-indigo-600 transition-colors font-mono"
                       >
                         {rel.tag_name}
                       </a>
                       {rel.name && rel.name !== rel.tag_name && (
-                        <span className="text-sm text-zinc-600 dark:text-zinc-400 truncate">{rel.name}</span>
+                        <span className="text-sm text-muted-foreground truncate">{rel.name}</span>
                       )}
                       {rel.is_prerelease && (
                         <span className="text-[10px] font-medium border px-1.5 py-0.5 rounded-full text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950 border-amber-200 dark:border-amber-800">
@@ -518,7 +518,7 @@ function ReleasesTab({ repoId, releases: initial, onLoad }: { repoId: string; re
                           草稿已生成
                         </a>
                       )}
-                      <span className="ml-auto flex items-center gap-1 text-[11px] text-zinc-400 flex-shrink-0">
+                      <span className="ml-auto flex items-center gap-1 text-[11px] text-foreground-subtle flex-shrink-0">
                         <Clock className="w-3 h-3" />
                         {formatRelative(rel.published_at)}
                       </span>
@@ -528,7 +528,7 @@ function ReleasesTab({ repoId, releases: initial, onLoad }: { repoId: string; re
                     {rel.body && (
                       <div>
                         <p className={cn(
-                          'text-xs text-zinc-500 leading-relaxed whitespace-pre-wrap',
+                          'text-xs text-muted-foreground leading-relaxed whitespace-pre-wrap',
                           !isOpen && 'line-clamp-3'
                         )}>
                           {rel.body}
@@ -536,7 +536,7 @@ function ReleasesTab({ repoId, releases: initial, onLoad }: { repoId: string; re
                         {rel.body.length > 200 && (
                           <button
                             onClick={() => setExpanded(isOpen ? null : rel.id)}
-                            className="mt-1 flex items-center gap-0.5 text-[11px] text-zinc-400 hover:text-indigo-500"
+                            className="mt-1 flex items-center gap-0.5 text-[11px] text-foreground-subtle hover:text-indigo-500"
                           >
                             <ChevronDown className={cn('w-3 h-3 transition-transform', isOpen && 'rotate-180')} />
                             {isOpen ? '收起' : '查看完整 Changelog'}
@@ -550,13 +550,13 @@ function ReleasesTab({ repoId, releases: initial, onLoad }: { repoId: string; re
                         href={rel.html_url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 text-[11px] text-zinc-400 hover:text-indigo-500 transition-colors"
+                        className="inline-flex items-center gap-1 text-[11px] text-foreground-subtle hover:text-indigo-500 transition-colors"
                       >
                         <ExternalLink className="w-3 h-3" />在 GitHub 查看
                       </a>
                       <button
                         onClick={() => openDispatch(rel)}
-                        className="inline-flex items-center gap-1 text-[11px] text-zinc-400 hover:text-indigo-600 transition-colors"
+                        className="inline-flex items-center gap-1 text-[11px] text-foreground-subtle hover:text-indigo-600 transition-colors"
                       >
                         <FileText className="w-3 h-3" />
                         创建稿件
@@ -584,9 +584,9 @@ function ReleasesTab({ repoId, releases: initial, onLoad }: { repoId: string; re
           </DialogHeader>
           <div className="space-y-3 py-1">
             <div>
-              <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400 mb-1 block">发布账号</label>
+              <label className="text-xs font-medium text-muted-foreground mb-1 block">发布账号</label>
               {dispatchAccounts.length === 0 ? (
-                <p className="text-xs text-zinc-400">加载中…</p>
+                <p className="text-xs text-foreground-subtle">加载中…</p>
               ) : (
                 <NativeSelect
                   value={dispatchAccountId}
@@ -600,9 +600,9 @@ function ReleasesTab({ repoId, releases: initial, onLoad }: { repoId: string; re
               )}
             </div>
             <div>
-              <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400 mb-1 block">写作方案</label>
+              <label className="text-xs font-medium text-muted-foreground mb-1 block">写作方案</label>
               {dispatchPlans.length === 0 ? (
-                <p className="text-xs text-zinc-400">加载中…</p>
+                <p className="text-xs text-foreground-subtle">加载中…</p>
               ) : (
                 <NativeSelect
                   value={dispatchPlanId ?? ''}
@@ -624,7 +624,7 @@ function ReleasesTab({ repoId, releases: initial, onLoad }: { repoId: string; re
                 onChange={e => setDispatchWithCover(e.target.checked)}
                 className="rounded"
               />
-              <span className="text-xs text-zinc-600 dark:text-zinc-400">同时配封面</span>
+              <span className="text-xs text-muted-foreground">同时配封面</span>
             </label>
             <div className="ml-auto flex gap-2">
               <Button variant="outline" size="sm" className="text-xs h-8" onClick={() => setDispatchTarget(null)}>
@@ -743,12 +743,12 @@ export function GithubClient({ initialRepos, initialTrending, initialReleases }:
   return (
     <div className="flex h-full overflow-hidden">
       {/* Left sidebar */}
-      <aside className="w-60 flex-shrink-0 border-r border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 flex flex-col overflow-hidden">
-        <div className="px-4 py-3 border-b border-zinc-100 dark:border-zinc-800 flex items-center gap-2">
-          <GitFork className="w-4 h-4 text-zinc-600 dark:text-zinc-400" />
+      <aside className="w-60 flex-shrink-0 border-r border-border bg-surface flex flex-col overflow-hidden">
+        <div data-slot="page-header" className="flex h-[var(--app-header-height)] min-h-[var(--app-header-height)] items-center px-4 py-3 border-b border-border gap-2">
+          <GitFork className="w-4 h-4 text-muted-foreground" />
           <div className="flex-1 min-w-0">
-            <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">GitHub 雷达</h2>
-            <p className="text-[11px] text-zinc-400">{repos.length} 个跟踪仓库</p>
+            <h2 className="text-sm font-semibold text-foreground">GitHub 雷达</h2>
+            <p className="text-[11px] text-foreground-subtle">{repos.length} 个跟踪仓库</p>
           </div>
           <Button size="sm" variant="outline" className="h-7 w-7 p-0"
             title="订阅管理" onClick={() => setSubsOpen(true)}>
@@ -764,17 +764,17 @@ export function GithubClient({ initialRepos, initialTrending, initialReleases }:
               'w-full flex items-center gap-2.5 px-4 py-2 text-xs transition-colors',
               !selectedId
                 ? 'bg-indigo-50 text-indigo-700 dark:bg-indigo-950/50 dark:text-indigo-300'
-                : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800'
+                : 'text-muted-foreground hover:bg-surface-muted'
             )}
           >
             <TrendingUp className="w-3.5 h-3.5 flex-shrink-0" />
             <span className="font-medium">热门趋势</span>
-            <span className="ml-auto text-zinc-400">{initialTrending.length}</span>
+            <span className="ml-auto text-foreground-subtle">{initialTrending.length}</span>
           </button>
 
           {repos.length > 0 && (
             <>
-              <div className="px-4 py-1.5 mt-1 text-[11px] font-semibold uppercase tracking-wide text-zinc-400">
+              <div className="px-4 py-1.5 mt-1 text-[11px] font-semibold uppercase tracking-wide text-foreground-subtle">
                 跟踪仓库
               </div>
               {repos.map(repo => (
@@ -784,22 +784,22 @@ export function GithubClient({ initialRepos, initialTrending, initialReleases }:
                     'group relative flex items-center gap-2 px-4 py-1.5 cursor-pointer transition-colors',
                     selectedId === repo.id
                       ? 'bg-indigo-50 dark:bg-indigo-950/50'
-                      : 'hover:bg-zinc-50 dark:hover:bg-zinc-800',
+                      : 'hover:bg-surface-muted',
                     repo.muted && 'opacity-40'
                   )}
                   onClick={() => handleSelectRepo(repo.id)}
                 >
-                  <GitFork className="w-3.5 h-3.5 text-zinc-400 flex-shrink-0" />
+                  <GitFork className="w-3.5 h-3.5 text-foreground-subtle flex-shrink-0" />
                   <div className="flex-1 min-w-0">
                     <p className={cn(
                       'text-xs truncate',
                       selectedId === repo.id
                         ? 'text-indigo-700 dark:text-indigo-300 font-medium'
-                        : 'text-zinc-700 dark:text-zinc-300'
+                        : 'text-muted-foreground'
                     )}>
                       {repo.owner}/{repo.repo}
                     </p>
-                    <p className="text-[10px] text-zinc-400 flex items-center gap-1">
+                    <p className="text-[10px] text-foreground-subtle flex items-center gap-1">
                       <Star className="w-2.5 h-2.5" />{formatStars(repo.stars)}
                       {repo.language && <span>· {repo.language}</span>}
                       <span>· {repo.collect_interval_minutes}m</span>
@@ -811,14 +811,14 @@ export function GithubClient({ initialRepos, initialTrending, initialReleases }:
                   >
                     <button
                       onClick={() => openIntroDispatch(repo)}
-                      className="p-1 rounded hover:bg-indigo-100 dark:hover:bg-indigo-950 text-zinc-400 hover:text-indigo-600"
+                      className="p-1 rounded hover:bg-indigo-100 dark:hover:bg-indigo-950 text-foreground-subtle hover:text-indigo-600"
                       title="写简介"
                     >
                       <BookOpen className="w-3 h-3" />
                     </button>
                     <button
                       onClick={() => handleToggleMute(repo)}
-                      className="p-1 rounded hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-400 hover:text-zinc-700"
+                      className="p-1 rounded hover:bg-muted text-foreground-subtle hover:text-foreground"
                       title={repo.muted ? '取消静音' : '静音'}
                     >
                       <VolumeX className="w-3 h-3" />
@@ -826,7 +826,7 @@ export function GithubClient({ initialRepos, initialTrending, initialReleases }:
                     <button
                       onClick={() => handleDelete(repo)}
                       disabled={deletingId === repo.id}
-                      className="p-1 rounded hover:bg-red-100 dark:hover:bg-red-950 text-zinc-400 hover:text-red-500"
+                      className="p-1 rounded hover:bg-red-100 dark:hover:bg-red-950 text-foreground-subtle hover:text-red-500"
                       title="移除"
                     >
                       <Trash2 className="w-3 h-3" />
@@ -839,7 +839,7 @@ export function GithubClient({ initialRepos, initialTrending, initialReleases }:
 
           {repos.length === 0 && (
             <div className="px-4 py-6 text-center">
-              <p className="text-xs text-zinc-400">还没有跟踪仓库</p>
+              <p className="text-xs text-foreground-subtle">还没有跟踪仓库</p>
             </div>
           )}
         </div>
@@ -849,7 +849,7 @@ export function GithubClient({ initialRepos, initialTrending, initialReleases }:
       {/* Main content */}
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Tab bar */}
-        <div className="flex-shrink-0 border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-6">
+        <div className="flex min-h-[var(--app-header-height)] flex-shrink-0 items-center border-b border-border bg-surface px-6">
           <div className="flex items-center gap-1 h-11">
             {tabs.map(t => {
               const disabled = t.id !== 'trending' && !selected
@@ -862,14 +862,14 @@ export function GithubClient({ initialRepos, initialTrending, initialReleases }:
                     'flex items-center gap-1.5 px-3 py-2 text-xs font-medium border-b-2 transition-colors h-full',
                     tab === t.id
                       ? 'border-indigo-500 text-indigo-600 dark:text-indigo-400'
-                      : 'border-transparent text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300',
+                      : 'border-transparent text-muted-foreground hover:text-foreground',
                     disabled && 'opacity-40 cursor-not-allowed'
                   )}
                 >
                   <t.icon className="w-3.5 h-3.5" />
                   {t.label}
                   {t.id !== 'trending' && selected && (
-                    <span className="text-[10px] text-zinc-400">
+                    <span className="text-[10px] text-foreground-subtle">
                       ({repoReleases.length})
                     </span>
                   )}
@@ -881,7 +881,7 @@ export function GithubClient({ initialRepos, initialTrending, initialReleases }:
                 href={`https://github.com/${selected.id}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="ml-auto flex items-center gap-1 text-xs text-zinc-400 hover:text-indigo-500 transition-colors"
+                className="ml-auto flex items-center gap-1 text-xs text-foreground-subtle hover:text-indigo-500 transition-colors"
               >
                 <GitFork className="w-3.5 h-3.5" />
                 {selected.id}
@@ -903,7 +903,7 @@ export function GithubClient({ initialRepos, initialTrending, initialReleases }:
         )}
         {tab !== 'trending' && !selected && (
           <div className="flex-1 flex items-center justify-center">
-            <p className="text-sm text-zinc-400">请先在左侧选择一个仓库</p>
+            <p className="text-sm text-foreground-subtle">请先在左侧选择一个仓库</p>
           </div>
         )}
       </div>
@@ -932,9 +932,9 @@ export function GithubClient({ initialRepos, initialTrending, initialReleases }:
           </DialogHeader>
           <div className="space-y-3 py-1">
             <div>
-              <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400 mb-1 block">发布账号</label>
+              <label className="text-xs font-medium text-muted-foreground mb-1 block">发布账号</label>
               {introAccounts.length === 0 ? (
-                <p className="text-xs text-zinc-400">加载中…</p>
+                <p className="text-xs text-foreground-subtle">加载中…</p>
               ) : (
                 <NativeSelect
                   value={introAccountId}
@@ -948,9 +948,9 @@ export function GithubClient({ initialRepos, initialTrending, initialReleases }:
               )}
             </div>
             <div>
-              <label className="text-xs font-medium text-zinc-600 dark:text-zinc-400 mb-1 block">写作方案</label>
+              <label className="text-xs font-medium text-muted-foreground mb-1 block">写作方案</label>
               {introPlans.length === 0 ? (
-                <p className="text-xs text-zinc-400">加载中…</p>
+                <p className="text-xs text-foreground-subtle">加载中…</p>
               ) : (
                 <NativeSelect
                   value={introPlanId ?? ''}
@@ -972,7 +972,7 @@ export function GithubClient({ initialRepos, initialTrending, initialReleases }:
                 onChange={e => setIntroWithCover(e.target.checked)}
                 className="rounded"
               />
-              <span className="text-xs text-zinc-600 dark:text-zinc-400">同时配封面</span>
+              <span className="text-xs text-muted-foreground">同时配封面</span>
             </label>
             <div className="ml-auto flex gap-2">
               <Button variant="outline" size="sm" className="text-xs h-8" onClick={() => setIntroTargetRepo(null)}>

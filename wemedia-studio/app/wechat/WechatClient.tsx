@@ -145,16 +145,16 @@ function LoginDialog({
           </DialogDescription>
         </DialogHeader>
         <div className="flex flex-col items-center justify-center py-2 gap-3">
-          <div className="size-64 flex items-center justify-center bg-zinc-50 dark:bg-zinc-900 rounded-md border border-zinc-200 dark:border-zinc-800">
+          <div className="size-64 flex items-center justify-center bg-surface-muted rounded-md border border-border">
             {busy && !qr ? (
-              <Loader2 className="w-7 h-7 animate-spin text-zinc-400" />
+              <Loader2 className="w-7 h-7 animate-spin text-foreground-subtle" />
             ) : qr ? (
               <img src={qr} alt="qrcode" className="w-full h-full object-contain p-2" />
             ) : (
-              <ScanLine className="w-10 h-10 text-zinc-400 opacity-40" />
+              <ScanLine className="w-10 h-10 text-foreground-subtle opacity-40" />
             )}
           </div>
-          <p className="text-xs text-zinc-500 min-h-[1.25rem]">{msg}</p>
+          <p className="text-xs text-muted-foreground min-h-[1.25rem]">{msg}</p>
           <Button size="sm" variant="outline" className="h-7 text-xs gap-1.5"
             onClick={start} disabled={busy}>
             <RefreshCw className="w-3 h-3" />
@@ -278,7 +278,7 @@ function SubscriptionsDialog({
 
         <form onSubmit={doSearch} className="flex items-center gap-2">
           <div className="relative flex-1">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-400" />
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-foreground-subtle" />
             <Input value={q} onChange={e => setQ(e.target.value)}
               placeholder="输入公众号名称…" className="h-8 text-xs pl-8" />
           </div>
@@ -288,20 +288,20 @@ function SubscriptionsDialog({
         </form>
 
         {candidates.length > 0 && (
-          <div className="border border-zinc-200 dark:border-zinc-800 rounded-md max-h-44 overflow-y-auto">
+          <div className="border border-border rounded-md max-h-44 overflow-y-auto">
             {candidates.map(c => (
               <div key={c.fakeid}
-                className="flex items-center gap-2 px-2.5 py-1.5 border-b border-zinc-100 dark:border-zinc-800 last:border-0">
+                className="flex items-center gap-2 px-2.5 py-1.5 border-b border-border last:border-0">
                 {c.round_head_img && (
                   <img src={wechatImg(c.round_head_img)} alt="" referrerPolicy="no-referrer"
                     className="w-7 h-7 rounded-full object-cover flex-shrink-0" />
                 )}
                 <div className="flex-1 min-w-0">
                   <div className="text-xs font-medium truncate">{c.nickname}</div>
-                  {c.alias && <div className="text-[11px] text-zinc-400 truncate">{c.alias}</div>}
+                  {c.alias && <div className="text-[11px] text-foreground-subtle truncate">{c.alias}</div>}
                 </div>
                 {subscribedIds.has(c.fakeid) ? (
-                  <span className="text-[11px] text-zinc-400">已订阅</span>
+                  <span className="text-[11px] text-foreground-subtle">已订阅</span>
                 ) : (
                   <Button size="sm" variant="outline" className="h-7 text-xs gap-1"
                     disabled={actingBiz === c.fakeid}
@@ -318,25 +318,25 @@ function SubscriptionsDialog({
         )}
 
         <div>
-          <div className="text-[11px] uppercase tracking-wider text-zinc-400 mb-1.5 px-0.5">
+          <div className="text-[11px] uppercase tracking-wider text-foreground-subtle mb-1.5 px-0.5">
             已订阅 · {subscribed.length}
           </div>
           {subscribed.length === 0 ? (
-            <div className="text-xs text-zinc-400 py-6 text-center border border-dashed rounded-md">
+            <div className="text-xs text-foreground-subtle py-6 text-center border border-dashed rounded-md">
               暂无订阅。搜索公众号后点击「订阅」开始自动同步。
             </div>
           ) : (
-            <div className="border border-zinc-200 dark:border-zinc-800 rounded-md max-h-60 overflow-y-auto">
+            <div className="border border-border rounded-md max-h-60 overflow-y-auto">
               {subscribed.map(a => (
                 <div key={a.biz}
-                  className="flex items-center gap-2 px-2.5 py-1.5 border-b border-zinc-100 dark:border-zinc-800 last:border-0">
+                  className="flex items-center gap-2 px-2.5 py-1.5 border-b border-border last:border-0">
                   {a.avatar_url && (
                     <img src={wechatImg(a.avatar_url)} alt="" referrerPolicy="no-referrer"
                       className="w-7 h-7 rounded-full object-cover flex-shrink-0" />
                   )}
                   <div className="flex-1 min-w-0">
                     <div className="text-xs font-medium truncate">{a.name}</div>
-                    <div className="text-[11px] text-zinc-400 truncate">
+                    <div className="text-[11px] text-foreground-subtle truncate">
                       {a.last_collected_at ? `最近同步：${fmtFullDate(a.last_collected_at)}` : '尚未同步'}
                     </div>
                   </div>
@@ -388,7 +388,7 @@ function AuthPillClock({ state, onLogin, onLogout }: AuthPillProps) {
 
   if (!state) {
     return (
-      <span className="text-[11px] text-zinc-400 px-2 py-0.5">登录态加载中…</span>
+      <span className="text-[11px] text-foreground-subtle px-2 py-0.5">登录态加载中…</span>
     )
   }
   if (!state.logged_in) {
@@ -431,9 +431,9 @@ function ArticleCard({
       tabIndex={0}
       onClick={onOpen}
       onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen() } }}
-      className="group relative w-full text-left flex gap-4 py-4 px-3 -mx-3 rounded-xl border-b border-zinc-100 dark:border-zinc-900 last:border-0 hover:bg-zinc-50/70 dark:hover:bg-zinc-900/40 transition-colors cursor-pointer"
+      className="group relative w-full text-left flex gap-4 py-4 px-3 -mx-3 rounded-xl border-b border-border last:border-0 hover:bg-surface-muted/70 transition-colors cursor-pointer"
     >
-      <div className="flex-shrink-0 w-28 h-20 rounded-lg overflow-hidden bg-zinc-100 dark:bg-zinc-800/60 ring-1 ring-zinc-200/60 dark:ring-zinc-800 flex items-center justify-center">
+      <div className="flex-shrink-0 w-28 h-20 rounded-lg overflow-hidden bg-muted ring-1 ring-border flex items-center justify-center">
         {article.cover_url ? (
           <img
             src={wechatImg(article.cover_url)}
@@ -442,22 +442,22 @@ function ArticleCard({
             className="w-full h-full object-cover group-hover:scale-[1.03] transition-transform duration-300"
           />
         ) : (
-          <MessageSquare className="w-6 h-6 text-zinc-300 dark:text-zinc-700" />
+          <MessageSquare className="w-6 h-6 text-foreground-subtle" />
         )}
       </div>
 
       <div className="flex-1 min-w-0 flex flex-col justify-between py-0.5">
-        <h3 className="text-[14px] font-semibold text-zinc-900 dark:text-zinc-100 truncate leading-snug
+        <h3 className="text-[14px] font-semibold text-foreground truncate leading-snug
                        group-hover:text-green-700 dark:group-hover:text-green-400 transition-colors">
           {article.title}
         </h3>
 
-        <div className="flex items-center gap-2 text-[11px] text-zinc-400 dark:text-zinc-500 flex-wrap min-w-0">
+        <div className="flex items-center gap-2 text-[11px] text-foreground-subtle flex-wrap min-w-0">
           <span>{fmtFullDate(article.published_at)}</span>
           {article.account_name && (
             <>
-              <span className="text-zinc-300 dark:text-zinc-700">·</span>
-              <span className="text-zinc-600 dark:text-zinc-300 font-medium truncate max-w-[160px] flex items-center gap-1">
+              <span className="text-foreground-subtle">·</span>
+              <span className="text-muted-foreground font-medium truncate max-w-[160px] flex items-center gap-1">
                 <MessageSquare className="w-3 h-3 text-green-500 flex-shrink-0" />
                 {article.account_name}
               </span>
@@ -466,7 +466,7 @@ function ArticleCard({
         </div>
 
         <div className="flex items-center" onClick={e => e.stopPropagation()}>
-          <div className="flex items-center gap-2.5 text-[11px] text-zinc-400 dark:text-zinc-500" />
+          <div className="flex items-center gap-2.5 text-[11px] text-foreground-subtle" />
           <div className="ml-auto flex items-center gap-0.5">
             <AddToTopicPopover
               url={article.url}
@@ -477,7 +477,7 @@ function ArticleCard({
             <button
               type="button"
               onClick={onDelete}
-              className="inline-flex items-center justify-center w-7 h-7 rounded-md text-zinc-400 hover:text-red-500 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+              className="inline-flex items-center justify-center w-7 h-7 rounded-md text-foreground-subtle hover:text-red-500 hover:bg-muted transition-colors"
               title="删除"
             >
               <Trash2 className="w-3.5 h-3.5" />
@@ -519,13 +519,13 @@ function AccountFilter({
         render={
           <button
             type="button"
-            className="flex items-center gap-1.5 h-8 px-2.5 rounded-md border border-zinc-200 dark:border-zinc-800 text-xs text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-900 transition-colors max-w-[180px]"
+            className="flex items-center gap-1.5 h-8 px-2.5 rounded-md border border-border text-xs text-muted-foreground hover:bg-surface-muted transition-colors max-w-[180px]"
           />
         }
       >
         <MessageSquare className="w-3.5 h-3.5 text-green-500 flex-shrink-0" />
         <span className="truncate">{selected ?? '全部公众号'}</span>
-        <ChevronDown className="w-3.5 h-3.5 text-zinc-400 flex-shrink-0 ml-auto" />
+        <ChevronDown className="w-3.5 h-3.5 text-foreground-subtle flex-shrink-0 ml-auto" />
       </PopoverTrigger>
       <PopoverContent align="start" className="w-64 p-2">
         <Input
@@ -539,7 +539,7 @@ function AccountFilter({
             type="button"
             onClick={() => pick(null)}
             className={cn(
-              'w-full flex items-center gap-2 text-left px-2 py-1.5 text-xs rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors',
+              'w-full flex items-center gap-2 text-left px-2 py-1.5 text-xs rounded-md hover:bg-muted transition-colors',
               selected === null && 'text-green-600 dark:text-green-400 font-medium',
             )}
           >
@@ -552,7 +552,7 @@ function AccountFilter({
               type="button"
               onClick={() => pick(a)}
               className={cn(
-                'w-full flex items-center gap-2 text-left px-2 py-1.5 text-xs rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors',
+                'w-full flex items-center gap-2 text-left px-2 py-1.5 text-xs rounded-md hover:bg-muted transition-colors',
                 selected === a && 'text-green-600 dark:text-green-400 font-medium',
               )}
             >
@@ -561,7 +561,7 @@ function AccountFilter({
             </button>
           ))}
           {filtered.length === 0 && (
-            <div className="px-2 py-3 text-center text-xs text-zinc-400">无匹配公众号</div>
+            <div className="px-2 py-3 text-center text-xs text-foreground-subtle">无匹配公众号</div>
           )}
         </div>
       </PopoverContent>
@@ -768,16 +768,16 @@ export function WechatClient({ initialArticles }: { initialArticles: WechatArtic
       <div className={cn(
         'flex flex-col',
         useSidePanel
-          ? 'w-[460px] flex-shrink-0 border-r border-zinc-200 dark:border-zinc-800'
+          ? 'w-[460px] flex-shrink-0 border-r border-border'
           : 'flex-1 min-w-0',
       )}>
         {/* Toolbar */}
-        <div className="border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 px-6 py-3 flex-shrink-0">
-          <div className="flex items-center justify-between gap-4 flex-wrap">
+        <div className="flex-shrink-0 border-b border-border bg-surface">
+          <div data-slot="page-header" className="flex h-[var(--app-header-height)] min-h-[var(--app-header-height)] items-center justify-between gap-4 px-6">
             <div className="flex items-center gap-2">
               <MessageSquare className="w-4 h-4 text-green-500" />
-              <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">公众号文章</span>
-              <span className="text-xs text-zinc-400 bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 rounded-full">
+              <span className="text-sm font-medium text-foreground">公众号文章</span>
+              <span className="text-xs text-foreground-subtle bg-muted px-2 py-0.5 rounded-full">
                 {filtered.length} 篇
               </span>
             </div>
@@ -808,7 +808,7 @@ export function WechatClient({ initialArticles }: { initialArticles: WechatArtic
                 onSelect={a => { setSelectedAccount(a); resetScroll() }}
               />
               <div className="relative">
-                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-400" />
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-foreground-subtle" />
                 <Input
                   value={search}
                   onChange={e => { setSearch(e.target.value); resetScroll() }}
@@ -820,8 +820,8 @@ export function WechatClient({ initialArticles }: { initialArticles: WechatArtic
           </div>
 
           {collecting && collect && (
-            <div className="mt-2.5">
-              <div className="flex items-center justify-between gap-3 text-[11px] text-zinc-500 mb-1">
+            <div className="px-6 pb-3">
+              <div className="flex items-center justify-between gap-3 text-[11px] text-muted-foreground mb-1">
                 <span className="flex items-center gap-1.5 min-w-0">
                   <Loader2 className="w-3 h-3 animate-spin text-green-500 flex-shrink-0" />
                   <span className="truncate">
@@ -833,7 +833,7 @@ export function WechatClient({ initialArticles }: { initialArticles: WechatArtic
                   已新增 {collect.new_articles} 篇
                 </span>
               </div>
-              <div className="h-1 w-full rounded-full bg-zinc-100 dark:bg-zinc-800 overflow-hidden">
+              <div className="h-1 w-full rounded-full bg-muted overflow-hidden">
                 <div
                   className="h-full bg-green-500 transition-all duration-500"
                   style={{ width: `${collect.total ? Math.round((collect.done / collect.total) * 100) : 0}%` }}
@@ -846,7 +846,7 @@ export function WechatClient({ initialArticles }: { initialArticles: WechatArtic
         {/* List */}
         <div className="flex-1 overflow-y-auto px-6 py-4">
           {filtered.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-48 gap-3 text-zinc-400">
+            <div className="flex flex-col items-center justify-center h-48 gap-3 text-foreground-subtle">
               <MessageSquare className="w-10 h-10 opacity-20 text-green-500" />
               <p className="text-sm">
                 {articles.length === 0
@@ -864,7 +864,7 @@ export function WechatClient({ initialArticles }: { initialArticles: WechatArtic
                 ))}
               </div>
               <div ref={sentinelRef} className="py-4">
-                {hasMore && <span className="text-xs text-zinc-400">加载中…</span>}
+                {hasMore && <span className="text-xs text-foreground-subtle">加载中…</span>}
               </div>
             </>
           )}

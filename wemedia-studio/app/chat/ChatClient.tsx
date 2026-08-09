@@ -104,7 +104,7 @@ function ImageJobPreview({ jobId }: { jobId: number }) {
 
   return <>
     {urls.length > 0 ? <div className="mt-3 grid gap-2 sm:grid-cols-2">
-      {urls.map(url => <button type="button" onClick={() => setSelectedImage(url)} key={url} className="block overflow-hidden rounded-lg border border-indigo-100 bg-white text-left dark:border-indigo-900 dark:bg-zinc-900">
+      {urls.map(url => <button type="button" onClick={() => setSelectedImage(url)} key={url} className="block overflow-hidden rounded-lg border border-indigo-100 bg-surface text-left dark:border-indigo-900">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src={url} alt="AI 生成图片" className="aspect-video w-full object-cover" />
       </button>)}
@@ -170,8 +170,8 @@ function MessageBubble({ message, onApproval }: { message: DisplayMessage; onApp
             'break-words rounded-2xl px-3 py-2 text-sm leading-6',
             isUser && 'whitespace-pre-wrap',
             isUser
-              ? 'rounded-tr-sm bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900'
-              : 'text-zinc-800 dark:text-zinc-100',
+              ? 'rounded-tr-sm bg-primary text-primary-foreground'
+              : 'text-foreground',
           )}>
             {isUser
               ? (textParts.length > 0 ? textParts.map((part, index) => <span key={`${message.id}-text-${index}`}>{String(part.text ?? '')}</span>) : fallbackText)
@@ -181,7 +181,7 @@ function MessageBubble({ message, onApproval }: { message: DisplayMessage; onApp
           </div>
         )}
         {toolParts.length > 0 && <ToolActivityGroup parts={toolParts} onApproval={persistedMessageId ? (toolCallId, approvalId, approved) => onApproval?.(persistedMessageId, toolCallId, approvalId, approved) : undefined} />}
-        <time className={cn('block px-1 text-[11px] text-zinc-400', isUser && 'text-right')}>{displayTime(message.created_at)}</time>
+        <time className={cn('block px-1 text-[11px] text-foreground-subtle', isUser && 'text-right')}>{displayTime(message.created_at)}</time>
       </div>
     </article>
   )
@@ -389,17 +389,17 @@ export function ChatClient() {
   }
 
   return (
-    <div className="flex h-full min-h-0 bg-white dark:bg-zinc-950">
-      <aside className="flex w-72 shrink-0 flex-col border-r border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
-        <div className="border-b border-zinc-100 px-4 py-4 dark:border-zinc-800">
+    <div className="flex h-full min-h-0 bg-surface">
+      <aside className="flex w-72 shrink-0 flex-col border-r border-border bg-surface">
+        <div className="flex min-h-[var(--app-header-height)] items-center border-b border-border px-4 py-4">
           <div className="flex items-center justify-between gap-3">
-            <div><h1 className="font-semibold text-zinc-900 dark:text-zinc-100">AI 助手</h1><p className="mt-0.5 text-xs text-zinc-500">搜索并阅读本地信息源</p></div>
+            <div><h1 className="font-semibold text-foreground">AI 助手</h1><p className="mt-0.5 text-xs text-muted-foreground">搜索并阅读本地信息源</p></div>
             <Button size="icon-sm" title="新建对话" onClick={startNewConversation}><Plus /></Button>
           </div>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto p-2">
-          {loading ? <div className="flex items-center gap-2 px-3 py-4 text-sm text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" />加载会话…</div> : sessions.length === 0 ? (
-            <div className="px-3 py-8 text-center text-sm text-zinc-500">还没有对话。<br />开始提问即可新建。</div>
+          {loading ? <div className="flex items-center gap-2 px-3 py-4 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />加载会话…</div> : sessions.length === 0 ? (
+            <div className="px-3 py-8 text-center text-sm text-muted-foreground">还没有对话。<br />开始提问即可新建。</div>
           ) : sessions.map(session => (
             <div key={session.id} className="group relative mb-1">
               {editingSessionId === session.id ? (
@@ -414,17 +414,17 @@ export function ChatClient() {
                 </div>
               ) : (
                 <button type="button" onClick={() => void openSession(session.id)}
-                  className={cn('w-full rounded-lg px-3 py-2.5 pr-16 text-left transition-colors', activeSessionId === session.id ? 'bg-indigo-50 text-indigo-950 dark:bg-indigo-950/40 dark:text-indigo-100' : 'text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-900')}>
+                  className={cn('w-full rounded-lg px-3 py-2.5 pr-16 text-left transition-colors', activeSessionId === session.id ? 'bg-indigo-50 text-indigo-950 dark:bg-indigo-950/40 dark:text-indigo-100' : 'text-muted-foreground hover:bg-muted')}>
                   <span className="block truncate text-sm font-medium">{session.title || '新对话'}</span>
-                  <span className="mt-1 block text-[11px] text-zinc-400">{displayTime(session.updated_at)}</span>
+                  <span className="mt-1 block text-[11px] text-foreground-subtle">{displayTime(session.updated_at)}</span>
                 </button>
               )}
               {editingSessionId !== session.id && <button type="button" title="重命名会话" aria-label={`重命名会话：${session.title || '新对话'}`} onClick={event => { event.stopPropagation(); setEditingSessionId(session.id); setEditingTitle(session.title || '') }}
-                className="absolute right-8 top-1/2 -translate-y-1/2 rounded p-1 text-zinc-400 opacity-0 transition hover:bg-zinc-200 hover:text-indigo-600 group-hover:opacity-100 focus:opacity-100 dark:hover:bg-zinc-800">
+                className="absolute right-8 top-1/2 -translate-y-1/2 rounded p-1 text-foreground-subtle opacity-0 transition hover:bg-muted hover:text-indigo-600 group-hover:opacity-100 focus:opacity-100">
                 <Pencil className="h-3.5 w-3.5" />
               </button>}
               <button type="button" title="删除会话" aria-label={`删除会话：${session.title || '新对话'}`} onClick={event => { event.stopPropagation(); void removeSession(session) }}
-                className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-zinc-400 opacity-0 transition hover:bg-zinc-200 hover:text-red-600 group-hover:opacity-100 focus:opacity-100 dark:hover:bg-zinc-800">
+                className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-foreground-subtle opacity-0 transition hover:bg-muted hover:text-red-600 group-hover:opacity-100 focus:opacity-100">
                 <Trash2 className="h-3.5 w-3.5" />
               </button>
             </div>
@@ -433,31 +433,31 @@ export function ChatClient() {
       </aside>
 
       <section className="flex min-w-0 flex-1 flex-col">
-        <header className="py-4">
+        <header data-slot="page-header" className="flex h-[var(--app-header-height)] min-h-[var(--app-header-height)] items-center py-4">
           <div className={cn(chatConversationColumn, 'flex items-center gap-3')}>
             <FileSearch className="h-5 w-5 text-indigo-600" />
-            <div><h2 className="font-medium text-zinc-900 dark:text-zinc-100">全局研究助手</h2><p className="text-xs text-zinc-500">可检索写作方案；所有工具调用均会记录。</p></div>
+            <div><h2 className="font-medium text-foreground">全局研究助手</h2><p className="text-xs text-muted-foreground">可检索写作方案；所有工具调用均会记录。</p></div>
           </div>
         </header>
 
         <div className="min-h-0 flex-1 overflow-y-auto py-6">
           <div className={cn(chatConversationColumn, 'flex flex-col gap-5')}>
             {messages.length === 0 && !loading && (
-              <div className="rounded-2xl border border-dashed border-zinc-300 bg-white px-6 py-10 text-center dark:border-zinc-700 dark:bg-zinc-900">
+              <div className="rounded-2xl border border-dashed border-border bg-surface px-6 py-10 text-center">
                 <Bot className="mx-auto h-8 w-8 text-indigo-500" />
-                <h3 className="mt-3 font-medium text-zinc-900 dark:text-zinc-100">从本地信息源开始研究</h3>
-                <p className="mx-auto mt-1 max-w-md text-sm leading-6 text-zinc-500">例如：“有哪些适合 AI 编程主题的写作方案？” 我会在需要时调用只读搜索工具。</p>
+                <h3 className="mt-3 font-medium text-foreground">从本地信息源开始研究</h3>
+                <p className="mx-auto mt-1 max-w-md text-sm leading-6 text-muted-foreground">例如：“有哪些适合 AI 编程主题的写作方案？” 我会在需要时调用只读搜索工具。</p>
               </div>
             )}
             {messages.map(message => <MessageBubble key={String(message.id)} message={message} onApproval={respondToApproval} />)}
-            {sending && <div className="flex items-center gap-2 text-sm text-zinc-500"><Loader2 className="h-4 w-4 animate-spin" />正在思考并检索资料…</div>}
+            {sending && <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />正在思考并检索资料…</div>}
             <div ref={bottomRef} />
           </div>
         </div>
 
         <form onSubmit={submit} className="py-4">
           <div className={chatComposerColumn}>
-            <div className="flex flex-col gap-2 rounded-xl border border-zinc-200 bg-white p-3 transition-colors focus-within:border-indigo-400 dark:border-zinc-700 dark:bg-zinc-900">
+            <div className="flex flex-col gap-2 rounded-xl border border-border bg-control p-3 transition-colors focus-within:border-indigo-400">
               <div className="flex">
                 <textarea value={input} onChange={event => setInput(event.target.value)} disabled={sending} rows={2}
                   onKeyDown={event => {
@@ -466,7 +466,7 @@ export function ChatClient() {
                     event.currentTarget.form?.requestSubmit()
                   }}
                   placeholder="问问本地信息源里的内容…"
-                  className="max-h-40 min-h-12 flex-1 resize-none bg-transparent py-1 text-sm leading-6 outline-none placeholder:text-zinc-400 disabled:cursor-not-allowed" />
+                  className="max-h-40 min-h-12 flex-1 resize-none bg-transparent py-1 text-sm leading-6 outline-none placeholder:text-foreground-subtle disabled:cursor-not-allowed" />
               </div>
               <ChatContextPicker
                 skills={skills}
@@ -481,7 +481,7 @@ export function ChatClient() {
                 onDraftIdChange={draft => setDraftId(draft ? String(draft) : '')}
               />
             </div>
-            <p className="mt-2 flex items-center gap-1.5 text-[11px] text-zinc-400"><MessageSquarePlus className="h-3 w-3" />新对话会在发送第一条消息时创建。</p>
+            <p className="mt-2 flex items-center gap-1.5 text-[11px] text-foreground-subtle"><MessageSquarePlus className="h-3 w-3" />新对话会在发送第一条消息时创建。</p>
           </div>
         </form>
       </section>

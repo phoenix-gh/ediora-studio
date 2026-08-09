@@ -37,18 +37,18 @@ it('renders assistant replies at the full message-column width', () => {
   expect(source).toContain("isUser ? 'min-w-0 max-w-3xl space-y-2' : 'w-full min-w-0 space-y-2'")
 })
 
-it('uses a white workspace and borderless assistant replies', () => {
+it('uses the shared workspace surface and borderless assistant replies', () => {
   const source = readFileSync(new URL('./ChatClient.tsx', import.meta.url), 'utf8')
 
-  expect(source).toContain('flex h-full min-h-0 bg-white dark:bg-zinc-950')
-  expect(source).toContain("? 'rounded-tr-sm bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900'\n              : 'text-zinc-800 dark:text-zinc-100'")
+  expect(source).toContain('flex h-full min-h-0 bg-surface')
+  expect(source).toContain("? 'rounded-tr-sm bg-primary text-primary-foreground'\n              : 'text-foreground'")
 })
 
 it('keeps message and composer padding compact and aligned', () => {
   const source = readFileSync(new URL('./ChatClient.tsx', import.meta.url), 'utf8')
 
   expect(source).toContain("'break-words rounded-2xl px-3 py-2 text-sm leading-6'")
-  expect(source).toContain('rounded-xl border border-zinc-200 bg-white p-3')
+  expect(source).toContain('rounded-xl border border-border bg-control p-3')
 })
 
 it('collapses assistant tool activity and hides audit-only messages', () => {
@@ -91,7 +91,7 @@ it('uses one context picker instead of permanent select controls', () => {
   expect(source).toContain('draftId: draftId ? Number(draftId) : undefined')
   expect(source).not.toContain('<select value={skillName}')
   expect(source).not.toContain('<select value={draftId}')
-  expect(source).toContain('flex flex-col gap-2 rounded-xl border border-zinc-200 bg-white p-3')
+  expect(source).toContain('flex flex-col gap-2 rounded-xl border border-border bg-control p-3')
   expect(source.indexOf('<ChatContextPicker')).toBeGreaterThan(source.indexOf('<textarea'))
   expect(source.indexOf('<ChatContextPicker')).toBeLessThan(source.indexOf('<Button type="submit"'))
   expect(source).toContain('setSkillName(\'\')')

@@ -87,7 +87,7 @@ export function XArticlePanel({
         )}
       >
         {!content.trim() ? (
-          <div className="h-full flex items-center justify-center text-sm text-zinc-400">
+          <div className="h-full flex items-center justify-center text-sm text-foreground-subtle">
             草稿内容为空
           </div>
         ) : (
@@ -121,8 +121,8 @@ export function XArticlePanel({
 
       {/* ── 操作面板 ── */}
       <div className="w-72 flex-shrink-0 overflow-y-auto space-y-4 pr-1">
-        <div className="rounded-md border border-zinc-200 dark:border-zinc-700 px-2.5 py-2 space-y-1 text-[11px] text-zinc-500 dark:text-zinc-400">
-          <div className="flex items-center gap-1 font-medium text-zinc-600 dark:text-zinc-300">
+        <div className="rounded-md border border-border px-2.5 py-2 space-y-1 text-[11px] text-muted-foreground">
+          <div className="flex items-center gap-1 font-medium text-foreground">
             <Info className="w-3 h-3" /> 手动发布流程
           </div>
           <p>X 没有长文发布接口：复制内容后，到 x.com 文章编辑器（Premium「Articles」）粘贴。</p>
@@ -155,7 +155,7 @@ export function XArticlePanel({
                 'flex items-center justify-center gap-1 py-1.5 rounded-md border text-xs transition-colors',
                 !dark
                   ? 'border-indigo-400 bg-indigo-50 dark:bg-indigo-950/30 text-indigo-700 dark:text-indigo-300 font-medium'
-                  : 'border-zinc-200 dark:border-zinc-700 text-zinc-500 hover:border-zinc-300 dark:hover:border-zinc-600',
+                  : 'border-input text-muted-foreground hover:border-border-strong',
               )}
             >
               <Sun className="w-3 h-3" /> 浅色
@@ -167,7 +167,7 @@ export function XArticlePanel({
                 'flex items-center justify-center gap-1 py-1.5 rounded-md border text-xs transition-colors',
                 dark
                   ? 'border-indigo-400 bg-indigo-50 dark:bg-indigo-950/30 text-indigo-700 dark:text-indigo-300 font-medium'
-                  : 'border-zinc-200 dark:border-zinc-700 text-zinc-500 hover:border-zinc-300 dark:hover:border-zinc-600',
+                  : 'border-input text-muted-foreground hover:border-border-strong',
               )}
             >
               <Moon className="w-3 h-3" /> 深色
@@ -175,7 +175,7 @@ export function XArticlePanel({
           </div>
         </div>
 
-        <p className="text-[11px] text-zinc-400">纯文本约 {plainText.replace(/\s/g, '').length} 字</p>
+        <p className="text-[11px] text-foreground-subtle">纯文本约 {plainText.replace(/\s/g, '').length} 字</p>
 
         <div className="space-y-2 pt-1">
           <Button

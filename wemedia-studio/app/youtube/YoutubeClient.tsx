@@ -89,19 +89,19 @@ function SubscribeDialog({
         </form>
 
         <div>
-          <div className="text-[11px] uppercase tracking-wider text-zinc-400 mb-1.5 px-0.5">
+          <div className="text-[11px] uppercase tracking-wider text-foreground-subtle mb-1.5 px-0.5">
             已订阅 · {channels.length}
           </div>
           {channels.length === 0 ? (
-            <div className="text-xs text-zinc-400 py-6 text-center border border-dashed rounded-md">
+            <div className="text-xs text-foreground-subtle py-6 text-center border border-dashed rounded-md">
               暂无订阅。输入 Channel ID 后点击「添加」。
             </div>
           ) : (
-            <div className="border border-zinc-200 dark:border-zinc-800 rounded-md max-h-72 overflow-y-auto">
+            <div className="border border-border rounded-md max-h-72 overflow-y-auto">
               {channels.map(c => (
                 <div key={c.id}
                   className={cn(
-                    'flex items-center gap-2 px-2.5 py-1.5 border-b border-zinc-100 dark:border-zinc-800 last:border-0',
+                    'flex items-center gap-2 px-2.5 py-1.5 border-b border-border last:border-0',
                     c.muted && 'opacity-50'
                   )}>
                   {c.avatar_url ? (
@@ -112,7 +112,7 @@ function SubscribeDialog({
                   )}
                   <div className="flex-1 min-w-0">
                     <div className="text-xs font-medium truncate">{c.name}</div>
-                    <div className="text-[11px] text-zinc-400 truncate">
+                    <div className="text-[11px] text-foreground-subtle truncate">
                       {c.group}
                       {c.last_collected_at && <> · 最近 {new Date(c.last_collected_at).toLocaleString('zh-CN')}</>}
                     </div>
@@ -165,13 +165,13 @@ function ChannelList({
         className={cn(
           'w-full text-left flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors',
           selectedId === null
-            ? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 font-medium'
-            : 'text-zinc-500 hover:text-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-900',
+            ? 'bg-muted text-foreground font-medium'
+            : 'text-muted-foreground hover:text-foreground hover:bg-surface-muted',
         )}
       >
         <PlaySquare className="w-4 h-4 flex-shrink-0 text-red-500" />
         <span className="truncate">全部频道</span>
-        <span className="ml-auto text-[10px] text-zinc-400">{channels.length}</span>
+        <span className="ml-auto text-[10px] text-foreground-subtle">{channels.length}</span>
       </button>
       {channels.map(ch => (
         <div
@@ -179,8 +179,8 @@ function ChannelList({
           className={cn(
             'group flex items-center gap-2 px-2 py-1.5 rounded-md text-sm transition-colors cursor-pointer',
             selectedId === ch.id
-              ? 'bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100'
-              : 'text-zinc-500 hover:text-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-900',
+              ? 'bg-muted text-foreground'
+              : 'text-muted-foreground hover:text-foreground hover:bg-surface-muted',
             ch.muted && 'opacity-50',
           )}
           onClick={() => onSelect(ch.id)}
@@ -188,22 +188,22 @@ function ChannelList({
           {ch.avatar_url ? (
             <img src={ch.avatar_url} alt="" className="w-6 h-6 rounded-full flex-shrink-0 object-cover" />
           ) : (
-            <div className="w-6 h-6 rounded-full flex-shrink-0 bg-zinc-200 dark:bg-zinc-700 flex items-center justify-center">
-              <PlaySquare className="w-3.5 h-3.5 text-zinc-400" />
+            <div className="w-6 h-6 rounded-full flex-shrink-0 bg-muted flex items-center justify-center">
+              <PlaySquare className="w-3.5 h-3.5 text-foreground-subtle" />
             </div>
           )}
           <span className="truncate flex-1 min-w-0">{ch.name}</span>
           <div className="hidden group-hover:flex items-center gap-0.5">
             <button
               onClick={e => { e.stopPropagation(); onCollect(ch) }}
-              className="p-1 rounded hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
+              className="p-1 rounded hover:bg-muted transition-colors"
               title="立即采集"
             >
               <RefreshCw className="w-3 h-3" />
             </button>
             <button
               onClick={e => { e.stopPropagation(); onMute(ch) }}
-              className="p-1 rounded hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
+              className="p-1 rounded hover:bg-muted transition-colors"
               title={ch.muted ? '取消静音' : '静音'}
             >
               {ch.muted ? <Volume2 className="w-3 h-3" /> : <VolumeX className="w-3 h-3" />}
@@ -255,17 +255,17 @@ function ChannelHeader({
   const desc = channel.description_cn || channel.description
 
   return (
-    <div className="border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/50 px-6 py-4">
+    <div className="border-b border-border bg-surface-muted px-6 py-4">
       <div className="flex items-start gap-4">
         {channel.avatar_url ? (
           <img
             src={channel.avatar_url}
             alt={channel.name}
-            className="w-14 h-14 rounded-full flex-shrink-0 object-cover bg-zinc-200 dark:bg-zinc-800"
+            className="w-14 h-14 rounded-full flex-shrink-0 object-cover bg-muted"
           />
         ) : (
-          <div className="w-14 h-14 rounded-full flex-shrink-0 bg-zinc-200 dark:bg-zinc-800 flex items-center justify-center">
-            <PlaySquare className="w-7 h-7 text-zinc-400" />
+          <div className="w-14 h-14 rounded-full flex-shrink-0 bg-muted flex items-center justify-center">
+            <PlaySquare className="w-7 h-7 text-foreground-subtle" />
           </div>
         )}
         <div className="flex-1 min-w-0">
@@ -274,20 +274,20 @@ function ChannelHeader({
               href={`https://www.youtube.com/channel/${channel.id}`}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-base font-semibold text-zinc-900 dark:text-zinc-100 hover:text-red-600 dark:hover:text-red-400 transition-colors"
+              className="text-base font-semibold text-foreground hover:text-red-600 dark:hover:text-red-400 transition-colors"
             >
               {channel.name}
             </a>
-            <ExternalLink className="w-3.5 h-3.5 text-zinc-400" />
+            <ExternalLink className="w-3.5 h-3.5 text-foreground-subtle" />
             {channel.group !== '未分组' && (
-              <span className="text-[11px] px-1.5 py-0.5 rounded bg-zinc-200 dark:bg-zinc-700 text-zinc-500">
+              <span className="text-[11px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
                 {channel.group}
               </span>
             )}
           </div>
 
           {desc && (
-            <p className="text-[12px] text-zinc-500 dark:text-zinc-400 mt-1 line-clamp-2 leading-relaxed">
+            <p className="text-[12px] text-muted-foreground mt-1 line-clamp-2 leading-relaxed">
               {desc}
             </p>
           )}
@@ -317,7 +317,7 @@ function ChannelHeader({
                 </button>
                 <button
                   onClick={handleCancel}
-                  className="p-1 rounded hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-400 transition-colors"
+                  className="p-1 rounded hover:bg-muted text-foreground-subtle transition-colors"
                   title="取消"
                 >
                   <X className="w-3.5 h-3.5" />
@@ -326,11 +326,11 @@ function ChannelHeader({
             ) : (
               <button
                 onClick={() => { setDraft(channel.note); setEditing(true) }}
-                className="flex items-center gap-1.5 text-[12px] text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300 transition-colors group/note"
+                className="flex items-center gap-1.5 text-[12px] text-foreground-subtle hover:text-foreground transition-colors group/note"
               >
                 <Pencil className="w-3 h-3 opacity-0 group-hover/note:opacity-100 transition-opacity" />
                 {channel.note
-                  ? <span className="text-zinc-600 dark:text-zinc-300">{channel.note}</span>
+                  ? <span className="text-muted-foreground">{channel.note}</span>
                   : <span className="italic">添加备注…</span>
                 }
               </button>
@@ -344,7 +344,7 @@ function ChannelHeader({
             />
             <div>
               <p className="text-xs font-medium">自动分析新视频</p>
-              <p className="text-[11px] text-zinc-400">只分析开启后新采集的视频，不补跑历史；历史视频可逐条手动分析。</p>
+              <p className="text-[11px] text-foreground-subtle">只分析开启后新采集的视频，不补跑历史；历史视频可逐条手动分析。</p>
             </div>
           </div>
         </div>
@@ -373,13 +373,13 @@ function VideoCard({
   }
 
   return (
-    <div className="group flex flex-col rounded-xl overflow-hidden hover:bg-zinc-50 dark:hover:bg-zinc-900 transition-colors">
+    <div className="group flex flex-col rounded-xl overflow-hidden hover:bg-surface-muted transition-colors">
       {/* Thumbnail — 16:9 */}
       <a
         href={video.url}
         target="_blank"
         rel="noopener noreferrer"
-        className="relative block w-full aspect-video rounded-xl overflow-hidden bg-zinc-100 dark:bg-zinc-800"
+        className="relative block w-full aspect-video rounded-xl overflow-hidden bg-muted"
       >
         {video.thumbnail_url ? (
           <img
@@ -389,7 +389,7 @@ function VideoCard({
           />
         ) : (
           <div className="w-full h-full flex items-center justify-center">
-            <PlaySquare className="w-10 h-10 text-zinc-300" />
+            <PlaySquare className="w-10 h-10 text-foreground-subtle" />
           </div>
         )}
       </a>
@@ -400,8 +400,8 @@ function VideoCard({
           {channel?.avatar_url ? (
             <img src={channel.avatar_url} alt="" className="w-8 h-8 rounded-full object-cover" />
           ) : (
-            <div className="w-8 h-8 rounded-full bg-zinc-200 dark:bg-zinc-700 flex items-center justify-center">
-              <PlaySquare className="w-4 h-4 text-zinc-400" />
+            <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center">
+              <PlaySquare className="w-4 h-4 text-foreground-subtle" />
             </div>
           )}
         </div>
@@ -411,11 +411,11 @@ function VideoCard({
             href={video.url}
             target="_blank"
             rel="noopener noreferrer"
-            className="block text-[13px] font-medium text-zinc-900 dark:text-zinc-100 line-clamp-2 leading-snug hover:text-red-600 dark:hover:text-red-400 transition-colors"
+            className="block text-[13px] font-medium text-foreground line-clamp-2 leading-snug hover:text-red-600 dark:hover:text-red-400 transition-colors"
           >
             {video.title}
           </a>
-          <p className="mt-1 text-[11px] text-zinc-500 dark:text-zinc-400 truncate">
+          <p className="mt-1 text-[11px] text-muted-foreground truncate">
             {video.channel_name}
           </p>
         </div>
@@ -423,7 +423,7 @@ function VideoCard({
 
       {/* Footer: stats left · action right */}
       <div className="flex items-center pt-1.5 px-0.5 pb-1">
-        <div className="flex items-center gap-2.5 text-[11px] text-zinc-400 dark:text-zinc-500">
+        <div className="flex items-center gap-2.5 text-[11px] text-foreground-subtle">
           {video.views > 0 && (
             <span className="flex items-center gap-1"><Eye className="w-3.5 h-3.5" />{fmtViews(video.views)}</span>
           )}
@@ -640,9 +640,9 @@ export function YoutubeClient({
   return (
     <div className="flex h-full">
       {/* Sidebar */}
-      <div className="w-56 border-r border-zinc-200 dark:border-zinc-800 flex flex-col flex-shrink-0">
-        <div className="px-3 py-3 border-b border-zinc-100 dark:border-zinc-800">
-          <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider px-1">订阅频道</p>
+      <div className="w-56 border-r border-border flex flex-col flex-shrink-0">
+        <div className="flex min-h-[var(--app-header-height)] items-center px-3 py-3 border-b border-border">
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-1">订阅频道</p>
         </div>
         <div className="flex-1 overflow-y-auto px-2 py-2">
           <ChannelList
@@ -668,20 +668,20 @@ export function YoutubeClient({
         )}
 
         {/* Toolbar */}
-        <div className="border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 px-6 py-3">
-          <div className="flex items-center justify-between gap-4 flex-wrap">
-            <div className="flex items-center gap-2">
+        <div className="flex-shrink-0 border-b border-border bg-surface">
+          <div data-slot="page-header" className="flex h-[var(--app-header-height)] min-h-[var(--app-header-height)] items-center justify-between gap-4 overflow-hidden px-6">
+            <div className="flex min-w-0 items-center gap-2">
               {!selectedChannel && <PlaySquare className="w-4 h-4 text-red-500" />}
-              <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
+              <span className="text-sm font-medium text-foreground">
                 {selectedChannel ? selectedChannel.name : 'YouTube 订阅'}
               </span>
-              <span className="text-xs text-zinc-400 bg-zinc-100 dark:bg-zinc-800 px-2 py-0.5 rounded-full">
+              <span className="text-xs text-foreground-subtle bg-muted px-2 py-0.5 rounded-full">
                 {filtered.length} 个视频
               </span>
             </div>
-            <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex shrink-0 items-center gap-2">
               <div className="relative">
-                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-400" />
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-foreground-subtle" />
                 <Input
                   value={search}
                   onChange={e => { setSearch(e.target.value); resetScroll() }}
@@ -708,8 +708,8 @@ export function YoutubeClient({
           </div>
 
           {/* Days filter */}
-          <div className="flex items-center gap-1 mt-2.5">
-            <span className="text-xs text-zinc-400">最近</span>
+          <div className="flex items-center gap-1 px-6 pb-3">
+            <span className="text-xs text-foreground-subtle">最近</span>
             {DAYS_OPTIONS.map(d => (
               <button
                 key={d}
@@ -717,8 +717,8 @@ export function YoutubeClient({
                 className={cn(
                   'px-2 py-0.5 rounded text-xs transition-colors',
                   days === d
-                    ? 'bg-zinc-200 dark:bg-zinc-700 text-zinc-900 dark:text-zinc-100 font-medium'
-                    : 'text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-800',
+                    ? 'bg-muted text-foreground font-medium'
+                    : 'text-foreground-subtle hover:text-foreground hover:bg-muted',
                 )}
               >
                 {d}天
@@ -730,9 +730,9 @@ export function YoutubeClient({
         {/* Video grid */}
         <div className="flex-1 overflow-y-auto px-6 py-5">
           {loading ? (
-            <div className="flex items-center justify-center h-32 text-sm text-zinc-400">加载中…</div>
+            <div className="flex items-center justify-center h-32 text-sm text-foreground-subtle">加载中…</div>
           ) : filtered.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-48 gap-3 text-zinc-400">
+            <div className="flex flex-col items-center justify-center h-48 gap-3 text-foreground-subtle">
               <PlaySquare className="w-10 h-10 opacity-20 text-red-500" />
               <p className="text-sm">
                 {channels.length === 0
@@ -749,7 +749,7 @@ export function YoutubeClient({
               </div>
               <div ref={sentinelRef} className="flex items-center justify-center py-6">
                 {hasMore && (
-                  <span className="text-xs text-zinc-400">加载中…</span>
+                  <span className="text-xs text-foreground-subtle">加载中…</span>
                 )}
               </div>
             </>

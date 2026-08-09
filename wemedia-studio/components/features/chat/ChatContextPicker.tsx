@@ -82,27 +82,27 @@ export function ChatContextPicker({
         <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
           <PopoverTrigger
             disabled={disabled}
-            render={<button type="button" className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-xs text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-zinc-800 disabled:pointer-events-none disabled:opacity-50 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100" />}
+            render={<button type="button" className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50" />}
           >
             <Plus className="h-3.5 w-3.5" />添加上下文
           </PopoverTrigger>
           <PopoverContent align="start" className="w-80 p-2">
-            <div className="px-1 pb-2 pt-1 text-xs font-medium text-zinc-500">技能</div>
+            <div className="px-1 pb-2 pt-1 text-xs font-medium text-muted-foreground">技能</div>
             <div className="relative mb-1.5">
-              <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-zinc-400" />
+              <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-foreground-subtle" />
               <Input value={skillQuery} onChange={event => setSkillQuery(event.target.value)} placeholder="搜索技能…" className="h-8 pl-7 text-xs" />
             </div>
             <div className="max-h-40 overflow-y-auto">
               {visibleSkills.map(skill => (
-                <button key={skill.name} type="button" onClick={() => chooseSkill(skill.name)} className={cn('flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-zinc-100 dark:hover:bg-zinc-800', selectedSkill?.name === skill.name && 'bg-violet-50 text-violet-800 dark:bg-violet-950/50 dark:text-violet-200')}>
+                <button key={skill.name} type="button" onClick={() => chooseSkill(skill.name)} className={cn('flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-muted', selectedSkill?.name === skill.name && 'bg-violet-50 text-violet-800 dark:bg-violet-950/50 dark:text-violet-200')}>
                   <Check className={cn('mt-0.5 h-3.5 w-3.5 shrink-0', selectedSkill?.name === skill.name ? 'opacity-100' : 'opacity-0')} />
-                  <span className="min-w-0"><span className="block truncate font-medium">{skill.name}</span>{skill.description && <span className="mt-0.5 block line-clamp-2 text-zinc-500 dark:text-zinc-400">{skill.description}</span>}</span>
+                  <span className="min-w-0"><span className="block truncate font-medium">{skill.name}</span>{skill.description && <span className="mt-0.5 block line-clamp-2 text-muted-foreground">{skill.description}</span>}</span>
                 </button>
               ))}
-              {visibleSkills.length === 0 && <div className="px-2 py-3 text-center text-xs text-zinc-400">没有匹配的技能</div>}
+              {visibleSkills.length === 0 && <div className="px-2 py-3 text-center text-xs text-foreground-subtle">没有匹配的技能</div>}
             </div>
-            <div className="my-2 border-t border-zinc-100 dark:border-zinc-800" />
-            <button type="button" onClick={openDraftDialog} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs font-medium text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-zinc-800">
+            <div className="my-2 border-t border-border" />
+            <button type="button" onClick={openDraftDialog} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs font-medium text-foreground hover:bg-muted">
               <FileText className="h-3.5 w-3.5 text-sky-600" />选择草稿…
             </button>
           </PopoverContent>
@@ -117,18 +117,18 @@ export function ChatContextPicker({
             <DialogDescription>草稿正文只会在发送时由服务端读取。</DialogDescription>
           </DialogHeader>
           <div className="relative">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" />
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-foreground-subtle" />
             <Input autoFocus value={draftQuery} onChange={event => setDraftQuery(event.target.value)} placeholder="搜索草稿" className="pl-9" />
           </div>
-          <div className="max-h-72 overflow-y-auto rounded-lg border border-zinc-100 p-1 dark:border-zinc-800">
+          <div className="max-h-72 overflow-y-auto rounded-lg border border-border p-1">
             {visibleDrafts.map(draft => (
-              <button key={draft.id} type="button" disabled={disabled} onClick={() => chooseDraft(draft.id)} className={cn('flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm hover:bg-zinc-100 disabled:pointer-events-none disabled:opacity-50 dark:hover:bg-zinc-800', selectedDraft?.id === draft.id && 'bg-sky-50 text-sky-900 dark:bg-sky-950/50 dark:text-sky-100')}>
+              <button key={draft.id} type="button" disabled={disabled} onClick={() => chooseDraft(draft.id)} className={cn('flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm hover:bg-muted disabled:pointer-events-none disabled:opacity-50', selectedDraft?.id === draft.id && 'bg-sky-50 text-sky-900 dark:bg-sky-950/50 dark:text-sky-100')}>
                 <FileText className="h-4 w-4 shrink-0 text-sky-600" />
                 <span className="truncate">{draft.title || `草稿 #${draft.id}`}</span>
                 {selectedDraft?.id === draft.id && <Check className="ml-auto h-4 w-4 shrink-0" />}
               </button>
             ))}
-            {visibleDrafts.length === 0 && <div className="px-3 py-8 text-center text-sm text-zinc-400">没有匹配的草稿</div>}
+            {visibleDrafts.length === 0 && <div className="px-3 py-8 text-center text-sm text-foreground-subtle">没有匹配的草稿</div>}
           </div>
         </DialogContent>
       </Dialog>

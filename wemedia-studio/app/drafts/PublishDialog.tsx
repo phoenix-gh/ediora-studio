@@ -71,7 +71,7 @@ export function PublishDialog({
                     'text-xs px-3 py-1 rounded-full font-medium transition-colors',
                     tab === t.value
                       ? 'bg-indigo-50 text-indigo-700 ring-1 ring-indigo-400 dark:bg-indigo-950/40 dark:text-indigo-300'
-                      : 'text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800',
+                      : 'text-muted-foreground hover:text-foreground hover:bg-muted',
                   )}
                 >
                   {t.label}

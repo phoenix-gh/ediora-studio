@@ -250,9 +250,9 @@ export function WechatPublishPanel({
   return (
     <div className="flex-1 flex gap-4 overflow-hidden min-h-0">
       {/* ── 预览 ── */}
-      <div className="flex-1 min-w-0 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-100 dark:bg-zinc-900 flex justify-center overflow-hidden">
+      <div className="flex-1 min-w-0 rounded-lg border border-border bg-surface-muted flex justify-center overflow-hidden">
         {!html ? (
-          <div className="flex items-center gap-2 text-zinc-400 text-sm">
+          <div className="flex items-center gap-2 text-foreground-subtle text-sm">
             <Loader2 className="w-4 h-4 animate-spin" /> 渲染中…
           </div>
         ) : (
@@ -297,17 +297,17 @@ export function WechatPublishPanel({
                   'w-full text-left px-2.5 py-1.5 rounded-md border text-xs transition-colors',
                   themeId === t.id
                     ? 'border-indigo-400 bg-indigo-50 dark:bg-indigo-950/30 text-indigo-700 dark:text-indigo-300'
-                    : 'border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 hover:border-zinc-300 dark:hover:border-zinc-600',
+                    : 'border-input text-muted-foreground hover:border-border-strong',
                 )}
               >
                 <span className="font-medium">{t.name}</span>
                 {t.description && (
-                  <span className="block text-[10px] text-zinc-400 truncate">{t.description}</span>
+                  <span className="block text-[10px] text-foreground-subtle truncate">{t.description}</span>
                 )}
               </button>
             ))}
             {themes.length === 0 && (
-              <p className="text-[11px] text-zinc-400">主题加载中…</p>
+              <p className="text-[11px] text-foreground-subtle">主题加载中…</p>
             )}
           </div>
         </div>
@@ -329,7 +329,7 @@ export function WechatPublishPanel({
             maxLength={120}
             onChange={e => setDigest(e.target.value)}
             rows={3}
-            className="w-full resize-none rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
+            className="w-full resize-none rounded-lg border border-input bg-control px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
           />
         </div>
 
@@ -349,7 +349,7 @@ export function WechatPublishPanel({
                   title={img.original_name}
                   className={cn(
                     'aspect-square rounded-md overflow-hidden border-2 transition-colors',
-                    effectiveCoverId === img.id ? 'border-indigo-400' : 'border-transparent hover:border-zinc-300',
+                    effectiveCoverId === img.id ? 'border-indigo-400' : 'border-transparent hover:border-border-strong',
                   )}
                 >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -367,14 +367,14 @@ export function WechatPublishPanel({
               {previewImages.map((img, index) => {
                 const copying = copyingImageSrc === img.copySrc
                 return (
-                  <div key={img.copySrc} className="flex items-center gap-2 rounded-md border border-zinc-200 dark:border-zinc-700 p-1.5">
-                    <div className="h-10 w-10 flex-shrink-0 overflow-hidden rounded bg-zinc-100 dark:bg-zinc-800">
+                  <div key={img.copySrc} className="flex items-center gap-2 rounded-md border border-border p-1.5 bg-surface">
+                    <div className="h-10 w-10 flex-shrink-0 overflow-hidden rounded bg-muted">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img src={img.copySrc} alt={img.alt} className="h-full w-full object-cover" />
                     </div>
                     <div className="min-w-0 flex-1">
-                      <div className="truncate text-xs text-zinc-700 dark:text-zinc-200">{img.alt}</div>
-                      <div className="text-[10px] text-zinc-400">第 {index + 1} 张</div>
+                      <div className="truncate text-xs text-foreground">{img.alt}</div>
+                      <div className="text-[10px] text-foreground-subtle">第 {index + 1} 张</div>
                     </div>
                     <Button
                       type="button"
