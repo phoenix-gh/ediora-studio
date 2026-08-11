@@ -36,6 +36,24 @@ export interface YoutubeVideo {
   analysis_status: string | null
 }
 
+export interface YoutubeTranscriptSegment {
+  start: number
+  end: number
+  text: string
+}
+
+export interface YoutubeTranscript {
+  status: string
+  source: string
+  language: string
+  text: string
+  segments: YoutubeTranscriptSegment[]
+  content_hash: string
+  fetched_at: string | null
+  error_code: string
+  error: string
+}
+
 export async function getYoutubeChannels(): Promise<YoutubeChannel[]> {
   return apiFetch<YoutubeChannel[]>('/youtube/channels')
 }
@@ -92,4 +110,8 @@ export async function analyzeYoutubeVideo(id: string, force = false): Promise<{
   return apiFetch(`/youtube/videos/${id}/analyze?force=${force ? 'true' : 'false'}`, {
     method: 'POST',
   })
+}
+
+export async function getYoutubeTranscript(id: string): Promise<YoutubeTranscript> {
+  return apiFetch<YoutubeTranscript>(`/youtube/videos/${encodeURIComponent(id)}/transcript`)
 }
