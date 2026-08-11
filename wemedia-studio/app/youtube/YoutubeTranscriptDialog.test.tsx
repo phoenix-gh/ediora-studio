@@ -69,6 +69,33 @@ describe('YoutubeTranscriptDialog', () => {
     )
     expect(buildYoutubeTimestampUrl(video.url, -1)).toBeNull()
     expect(buildYoutubeTimestampUrl('not-a-url', 10)).toBeNull()
+    expect(buildYoutubeTimestampUrl('javascript:alert(1)', 10)).toBeNull()
+    expect(buildYoutubeTimestampUrl('data:text/html,unsafe', 10)).toBeNull()
+    expect(buildYoutubeTimestampUrl('https://example.com/watch?v=video-1', 10)).toBeNull()
+    expect(buildYoutubeTimestampUrl('https://evil.youtube.com/watch?v=video-1', 10)).toBeNull()
+  })
+
+  it('ignores a stale request after closing and reopening', async () => {
+    let resolveFirst!: (value: typeof timestampedTranscript) => void
+    const firstRequest = new Promise<typeof timestampedTranscript>(resolve => {
+      resolveFirst = resolve
+    })
+    vi.mocked(getYoutubeTranscript)
+      .mockReturnValueOnce(firstRequest)
+      .mockResolvedValueOnce({ ...timestampedTranscript, text: '最新内容', segments: [] })
+    const user = userEvent.setup()
+    render(<YoutubeTranscriptDialog video={video} />)
+
+    await user.click(screen.getByRole('button', { name: '逐字稿' }))
+    await user.click(screen.getByRole('button', { name: 'Close' }))
+    await user.click(screen.getByRole('button', { name: '逐字稿' }))
+    expect(await screen.findByText('最新内容')).toBeInTheDocument()
+
+    resolveFirst({ ...timestampedTranscript, text: '过期内容', segments: [] })
+    await Promise.resolve()
+
+    expect(screen.queryByText('过期内容')).not.toBeInTheDocument()
+    expect(screen.getByText('最新内容')).toBeInTheDocument()
   })
 
   it('does not expose the viewer before a transcript is ready', () => {
@@ -148,6 +175,21 @@ describe('YoutubeTranscriptDialog', () => {
     vi.mocked(getYoutubeTranscript).mockResolvedValue({
       ...timestampedTranscript,
       text: '',
+      segments: [],
+    })
+    const user = userEvent.setup()
+    render(<YoutubeTranscriptDialog video={video} />)
+
+    await user.click(screen.getByRole('button', { name: '逐字稿' }))
+
+    expect(await screen.findByText('逐字稿内容为空')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '复制全文' })).toBeDisabled()
+  })
+
+  it('does not allow copying whitespace-only transcript text', async () => {
+    vi.mocked(getYoutubeTranscript).mockResolvedValue({
+      ...timestampedTranscript,
+      text: '   \n',
       segments: [],
     })
     const user = userEvent.setup()

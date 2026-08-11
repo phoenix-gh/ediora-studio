@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import { Captions, Copy, LoaderCircle, RotateCcw } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -38,6 +38,9 @@ export function buildYoutubeTimestampUrl(videoUrl: string, seconds: number): str
   if (!Number.isFinite(seconds) || seconds < 0) return null
   try {
     const url = new URL(videoUrl)
+    const hostname = url.hostname.toLowerCase()
+    const isYoutubeHost = ['youtu.be', 'youtube.com', 'www.youtube.com', 'm.youtube.com'].includes(hostname)
+    if (!['http:', 'https:'].includes(url.protocol) || !isYoutubeHost) return null
     url.searchParams.set('t', String(Math.floor(seconds)))
     return url.toString()
   } catch {
@@ -50,17 +53,22 @@ export function YoutubeTranscriptDialog({ video }: { video: YoutubeVideo }) {
   const [loading, setLoading] = useState(false)
   const [transcript, setTranscript] = useState<YoutubeTranscript | null>(null)
   const [failed, setFailed] = useState(false)
+  const requestIdRef = useRef(0)
 
   const load = useCallback(async () => {
+    const requestId = ++requestIdRef.current
     setLoading(true)
     setFailed(false)
     try {
-      setTranscript(await getYoutubeTranscript(video.id))
+      const nextTranscript = await getYoutubeTranscript(video.id)
+      if (requestId !== requestIdRef.current) return
+      setTranscript(nextTranscript)
     } catch {
+      if (requestId !== requestIdRef.current) return
       setTranscript(null)
       setFailed(true)
     } finally {
-      setLoading(false)
+      if (requestId === requestIdRef.current) setLoading(false)
     }
   }, [video.id])
 
@@ -68,11 +76,16 @@ export function YoutubeTranscriptDialog({ video }: { video: YoutubeVideo }) {
 
   function handleOpenChange(nextOpen: boolean) {
     setOpen(nextOpen)
-    if (nextOpen) void load()
+    if (nextOpen) {
+      void load()
+    } else {
+      requestIdRef.current += 1
+      setLoading(false)
+    }
   }
 
   async function copyTranscript() {
-    if (!transcript?.text) return
+    if (!transcript?.text.trim()) return
     try {
       await navigator.clipboard.writeText(transcript.text)
       toast.success('逐字稿已复制')
@@ -106,7 +119,7 @@ export function YoutubeTranscriptDialog({ video }: { video: YoutubeVideo }) {
         </DialogHeader>
 
         <ScrollArea className="min-h-0 flex-1 rounded-lg border border-border">
-          <div className="p-4">
+          <div className="p-4" role="status" aria-live="polite">
             {loading ? (
               <Empty className="min-h-64 border-0">
                 <EmptyMedia variant="icon">
@@ -171,7 +184,7 @@ export function YoutubeTranscriptDialog({ video }: { video: YoutubeVideo }) {
         <DialogFooter>
           <Button
             variant="outline"
-            disabled={!transcript?.text}
+            disabled={!transcript?.text.trim()}
             onClick={() => void copyTranscript()}
           >
             <Copy data-icon="inline-start" />
