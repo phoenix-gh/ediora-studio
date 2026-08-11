@@ -164,7 +164,9 @@ describe('YoutubeTranscriptDialog', () => {
     render(<YoutubeTranscriptDialog video={{ ...video, id: 'video-2' }} />)
 
     await user.click(screen.getByRole('button', { name: '逐字稿' }))
-    expect(await screen.findByText('逐字稿加载失败')).toBeInTheDocument()
+    expect(await screen.findByText('逐字稿加载失败', {
+      selector: '[data-slot="empty-title"]',
+    })).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: '重新加载' }))
 
     expect(await screen.findByText('重试成功')).toBeInTheDocument()
