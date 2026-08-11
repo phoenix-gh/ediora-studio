@@ -77,6 +77,17 @@ Redis:  redis://127.0.0.1:6379/0
 依赖，不属于脚本拥有的临时进程；`./dev.sh stop` 和启动失败回滚都不会
 停止该容器。
 
+本地语音转写使用独立的 GPU 容器，不依赖整套 Docker Compose。首次运行或
+容器被手动停止后执行：
+
+```bash
+./scripts/local-asr.sh start
+```
+
+容器名为 `wemedia-local-asr`，使用 `restart=unless-stopped`，只在宿主机
+`127.0.0.1:8001` 暴露服务；开发模式 API 默认连接
+`http://127.0.0.1:8001/v1`。模型缓存保存在独立 Docker volume 中。
+
 若 `127.0.0.1:6379` 已有能响应 PING 的 Redis，脚本只连接并把它标记为
 `external`，`./dev.sh stop` 不会停止它；否则脚本启动并只管理自己创建的
 临时 Redis。API、worker 与 Web 作为一个配置单元，共享同一个宿主机

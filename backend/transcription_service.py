@@ -191,6 +191,7 @@ async def _client_scope(
     client: httpx.AsyncClient | None,
     *,
     duration: float,
+    trust_env: bool,
 ) -> AsyncIterator[httpx.AsyncClient]:
     if client is not None:
         yield client
@@ -199,6 +200,7 @@ async def _client_scope(
     async with httpx.AsyncClient(
         timeout=timeout,
         follow_redirects=False,
+        trust_env=trust_env,
     ) as owned:
         yield owned
 
@@ -332,6 +334,7 @@ async def transcribe_audio(
             async with _client_scope(
                 client,
                 duration=float(duration),
+                trust_env=not provider.local,
             ) as active:
                 async def post_audio() -> httpx.Response:
                     return await active.post(

@@ -61,7 +61,7 @@ def test_local_provider_posts_word_request_without_authorization(tmp_path):
     result = asyncio.run(run())
 
     assert seen["url"] == (
-        "http://local-asr:8000/v1/audio/transcriptions"
+        "http://127.0.0.1:8001/v1/audio/transcriptions"
     )
     assert seen["authorization"] is None
     assert b"Systran/faster-whisper-large-v3" in seen["body"]
@@ -218,8 +218,9 @@ def test_production_local_request_holds_gpu_gate_around_http_inference(
             )
 
     @asynccontextmanager
-    async def fake_client_scope(_client, *, duration):
+    async def fake_client_scope(_client, *, duration, trust_env):
         assert duration == 0.5
+        assert trust_env is False
         yield FakeClient()
 
     monkeypatch.setattr(transcription_service, "local_asr_gate", fake_gate)

@@ -127,8 +127,8 @@ def test_local_transcription_status_reports_runtime_without_internal_url(
     import routers.settings as settings_router
 
     class FakeClient:
-        def __init__(self, *_args, **_kwargs):
-            pass
+        def __init__(self, *_args, **kwargs):
+            assert kwargs["trust_env"] is False
 
         async def __aenter__(self):
             return self
@@ -137,7 +137,7 @@ def test_local_transcription_status_reports_runtime_without_internal_url(
             return False
 
         async def get(self, url):
-            assert url == "http://local-asr:8000/v1/models"
+            assert url == "http://127.0.0.1:8001/v1/models"
             return settings_router.httpx.Response(
                 200,
                 json={

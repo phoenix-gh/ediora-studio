@@ -22,7 +22,7 @@ def get_runtime_settings() -> RuntimeSettings:
         worker_queue=os.getenv("WMS_WORKER_QUEUE", "content-jobs"),
         local_asr_url=os.getenv(
             "WMS_LOCAL_ASR_URL",
-            "http://local-asr:8000/v1",
+            "http://127.0.0.1:8001/v1",
         ),
         local_asr_model=os.getenv(
             "WMS_LOCAL_ASR_MODEL",

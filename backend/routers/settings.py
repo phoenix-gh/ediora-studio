@@ -861,6 +861,7 @@ async def get_transcription_status():
         async with httpx.AsyncClient(
             timeout=3,
             follow_redirects=False,
+            trust_env=False,
         ) as client:
             response = await client.get(
                 f"{runtime.local_asr_url.rstrip('/')}/models",
@@ -893,14 +894,19 @@ async def get_transcription_status():
             compute_type=runtime.local_asr_compute_type,
             error="",
         )
-    except Exception:
+    except Exception as exc:
+        logger.warning(
+            "Local transcription status check failed for %s: %s",
+            runtime.local_asr_url,
+            exc,
+        )
         return TranscriptionStatusOut(
             provider="local-whisper",
             status="unavailable",
             model=runtime.local_asr_model,
             device=runtime.local_asr_device,
             compute_type=runtime.local_asr_compute_type,
-            error="本地转写服务无法访问",
+            error=f"本地转写服务无法访问：{redact_secret_text(str(exc))[:200]}",
         )
 
 

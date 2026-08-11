@@ -15,7 +15,7 @@ def test_runtime_settings_default_to_self_hosted_services(monkeypatch):
 
     assert settings.redis_url == "redis://redis:6379/0"
     assert settings.worker_queue == "content-jobs"
-    assert settings.local_asr_url == "http://local-asr:8000/v1"
+    assert settings.local_asr_url == "http://127.0.0.1:8001/v1"
     assert settings.local_asr_model == (
         "Systran/faster-whisper-large-v3"
     )
