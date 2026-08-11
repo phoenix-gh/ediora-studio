@@ -42,16 +42,20 @@ export interface YoutubeTranscriptSegment {
   text: string
 }
 
-export interface YoutubeTranscript {
-  status: string
+export interface YoutubeTranscriptVersion {
   source: string
   language: string
   text: string
   segments: YoutubeTranscriptSegment[]
   content_hash: string
+}
+
+export interface YoutubeTranscript extends YoutubeTranscriptVersion {
+  status: string
   fetched_at: string | null
   error_code: string
   error: string
+  chinese?: YoutubeTranscriptVersion | null
 }
 
 export async function getYoutubeChannels(): Promise<YoutubeChannel[]> {

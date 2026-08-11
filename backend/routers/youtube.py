@@ -210,11 +210,16 @@ async def analyze_video(
     }
 
 
-@router.get("/videos/{video_id}/transcript")
-async def get_video_transcript(video_id: str, db: AsyncSession = Depends(get_db)):
-    video = await db.get(YoutubeVideo, video_id)
-    if video is None:
-        raise HTTPException(404, "Video not found")
+def transcript_payload(video: YoutubeVideo) -> dict:
+    chinese = None
+    if video.transcript_zh_text or video.transcript_zh_segments:
+        chinese = {
+            "source": video.transcript_zh_source,
+            "language": video.transcript_zh_language,
+            "text": video.transcript_zh_text,
+            "segments": video.transcript_zh_segments,
+            "content_hash": video.transcript_zh_content_hash,
+        }
     return {
         "status": video.transcript_status,
         "source": video.transcript_source,
@@ -225,7 +230,16 @@ async def get_video_transcript(video_id: str, db: AsyncSession = Depends(get_db)
         "fetched_at": video.transcript_fetched_at,
         "error_code": video.transcript_error_code,
         "error": video.transcript_error,
+        "chinese": chinese,
     }
+
+
+@router.get("/videos/{video_id}/transcript")
+async def get_video_transcript(video_id: str, db: AsyncSession = Depends(get_db)):
+    video = await db.get(YoutubeVideo, video_id)
+    if video is None:
+        raise HTTPException(404, "Video not found")
+    return transcript_payload(video)
 
 
 @router.post("/videos/{video_id}/transcript/retry")
@@ -270,6 +284,12 @@ async def extract_video_transcript(video_id: str, db: AsyncSession = Depends(get
     video.transcript_text = result["text"]
     video.transcript_segments = result["segments"]
     video.transcript_content_hash = result["content_hash"]
+    chinese = result.get("chinese") or {}
+    video.transcript_zh_source = chinese.get("source", "")
+    video.transcript_zh_language = chinese.get("language", "")
+    video.transcript_zh_text = chinese.get("text", "")
+    video.transcript_zh_segments = chinese.get("segments", [])
+    video.transcript_zh_content_hash = chinese.get("content_hash", "")
     video.transcript_fetched_at = datetime.now(timezone.utc)
     video.transcript_error_code = ""
     video.transcript_error = ""

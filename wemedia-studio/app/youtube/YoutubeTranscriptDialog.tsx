@@ -21,7 +21,6 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from '@/components/ui/empty'
-import { ScrollArea } from '@/components/ui/scroll-area'
 import {
   getYoutubeTranscript,
   type YoutubeTranscript,
@@ -53,6 +52,7 @@ export function YoutubeTranscriptDialog({ video }: { video: YoutubeVideo }) {
   const [loading, setLoading] = useState(false)
   const [transcript, setTranscript] = useState<YoutubeTranscript | null>(null)
   const [failed, setFailed] = useState(false)
+  const [selectedVersion, setSelectedVersion] = useState<'original' | 'chinese'>('original')
   const requestIdRef = useRef(0)
 
   const load = useCallback(async () => {
@@ -63,6 +63,7 @@ export function YoutubeTranscriptDialog({ video }: { video: YoutubeVideo }) {
       const nextTranscript = await getYoutubeTranscript(video.id)
       if (requestId !== requestIdRef.current) return
       setTranscript(nextTranscript)
+      setSelectedVersion('original')
     } catch {
       if (requestId !== requestIdRef.current) return
       setTranscript(null)
@@ -85,17 +86,20 @@ export function YoutubeTranscriptDialog({ video }: { video: YoutubeVideo }) {
   }
 
   async function copyTranscript() {
-    if (!transcript?.text.trim()) return
+    if (!currentTranscript?.text.trim()) return
     try {
-      await navigator.clipboard.writeText(transcript.text)
+      await navigator.clipboard.writeText(currentTranscript.text)
       toast.success('逐字稿已复制')
     } catch {
       toast.error('逐字稿复制失败')
     }
   }
 
-  const segments = transcript?.segments ?? []
-  const empty = transcript !== null && !transcript.text.trim() && segments.length === 0
+  const currentTranscript = selectedVersion === 'chinese' && transcript?.chinese
+    ? transcript.chinese
+    : transcript
+  const segments = currentTranscript?.segments ?? []
+  const empty = currentTranscript !== null && !currentTranscript?.text.trim() && segments.length === 0
   const accessibilityStatus = loading
     ? '正在加载逐字稿'
     : failed
@@ -121,15 +125,39 @@ export function YoutubeTranscriptDialog({ video }: { video: YoutubeVideo }) {
         <DialogHeader>
           <DialogTitle>{video.title}</DialogTitle>
           <DialogDescription>
-            {transcript?.language || '未知语言'} · {transcript?.source || '未知来源'}
+            {currentTranscript?.language || '未知语言'} · {currentTranscript?.source || '未知来源'}
           </DialogDescription>
         </DialogHeader>
+
+        {transcript?.chinese ? (
+          <div className="flex w-fit rounded-lg bg-muted p-1" aria-label="逐字稿版本">
+            <Button
+              size="sm"
+              variant={selectedVersion === 'original' ? 'default' : 'ghost'}
+              aria-pressed={selectedVersion === 'original'}
+              onClick={() => setSelectedVersion('original')}
+            >
+              原文
+            </Button>
+            <Button
+              size="sm"
+              variant={selectedVersion === 'chinese' ? 'default' : 'ghost'}
+              aria-pressed={selectedVersion === 'chinese'}
+              onClick={() => setSelectedVersion('chinese')}
+            >
+              中文
+            </Button>
+          </div>
+        ) : null}
 
         <p className="sr-only" role="status" aria-live="polite">
           {accessibilityStatus}
         </p>
 
-        <ScrollArea className="min-h-0 flex-1 rounded-lg border border-border">
+        <div
+          data-testid="transcript-scroll-region"
+          className="min-h-0 flex-1 overflow-y-auto rounded-lg border border-border"
+        >
           <div className="p-4">
             {loading ? (
               <Empty className="min-h-64 border-0">
@@ -186,16 +214,16 @@ export function YoutubeTranscriptDialog({ video }: { video: YoutubeVideo }) {
                   )
                 })}
               </div>
-            ) : transcript?.text ? (
-              <p className="whitespace-pre-wrap leading-7">{transcript.text}</p>
+            ) : currentTranscript?.text ? (
+              <p className="whitespace-pre-wrap leading-7">{currentTranscript.text}</p>
             ) : null}
           </div>
-        </ScrollArea>
+        </div>
 
         <DialogFooter>
           <Button
             variant="outline"
-            disabled={!transcript?.text.trim()}
+            disabled={!currentTranscript?.text.trim()}
             onClick={() => void copyTranscript()}
           >
             <Copy data-icon="inline-start" />

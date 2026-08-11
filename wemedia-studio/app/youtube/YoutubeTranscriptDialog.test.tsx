@@ -52,6 +52,20 @@ const timestampedTranscript = {
   error: '',
 }
 
+const bilingualTranscript = {
+  ...timestampedTranscript,
+  language: 'en',
+  text: 'Original transcript',
+  segments: [{ start: 0, end: 2, text: 'Original transcript' }],
+  chinese: {
+    source: 'auto',
+    language: 'zh-Hans',
+    text: '中文字幕',
+    segments: [{ start: 0, end: 2, text: '中文字幕' }],
+    content_hash: 'hash-zh',
+  },
+}
+
 beforeAll(() => {
   Object.defineProperty(HTMLElement.prototype, 'getAnimations', {
     configurable: true,
@@ -137,6 +151,41 @@ describe('YoutubeTranscriptDialog', () => {
     await user.click(screen.getByRole('button', { name: '复制全文' }))
 
     expect(writeText).toHaveBeenCalledWith('第一段\n第二段')
+  })
+
+  it('defaults to original and switches the displayed and copied version to Chinese', async () => {
+    vi.mocked(getYoutubeTranscript).mockResolvedValue(bilingualTranscript)
+    const user = userEvent.setup()
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    })
+    render(<YoutubeTranscriptDialog video={video} />)
+
+    await user.click(screen.getByRole('button', { name: '逐字稿' }))
+    expect(await screen.findByText('Original transcript')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '原文' })).toHaveAttribute('aria-pressed', 'true')
+
+    await user.click(screen.getByRole('button', { name: '中文' }))
+    expect(screen.getByText('中文字幕')).toBeInTheDocument()
+    expect(screen.queryByText('Original transcript')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '复制全文' }))
+    expect(writeText).toHaveBeenCalledWith('中文字幕')
+  })
+
+  it('hides version controls without Chinese and gives the body a bounded scroll region', async () => {
+    vi.mocked(getYoutubeTranscript).mockResolvedValue(timestampedTranscript)
+    const user = userEvent.setup()
+    render(<YoutubeTranscriptDialog video={video} />)
+
+    await user.click(screen.getByRole('button', { name: '逐字稿' }))
+    await screen.findByText('第二段')
+
+    expect(screen.queryByRole('button', { name: '原文' })).not.toBeInTheDocument()
+    expect(screen.getByTestId('transcript-scroll-region')).toHaveClass(
+      'min-h-0', 'flex-1', 'overflow-y-auto',
+    )
   })
 
   it('falls back to the complete plain text when segments are absent', async () => {

@@ -137,28 +137,47 @@ def _is_english_caption(language: str) -> bool:
     return language.lower().replace("_", "-").startswith("en")
 
 
-def select_caption(
+def _matching_languages(collection: dict[str, list[dict]], preferred_language: str) -> list[str]:
+    preferred = preferred_language.lower().replace("_", "-")
+    exact = [language for language in collection if language.lower().replace("_", "-") == preferred]
+    if exact:
+        return exact
+    base = preferred.split("-", 1)[0]
+    return [
+        language for language in collection
+        if language.lower().replace("_", "-").split("-", 1)[0] == base
+    ]
+
+
+def select_original_caption(
     manual: dict[str, list[dict]],
     automatic: dict[str, list[dict]],
     preferred_language: str = "",
 ) -> tuple[str, str, str] | None:
-    collections = (("manual", manual), ("auto", automatic))
-    for predicate in (_is_chinese_caption, _is_english_caption):
-        for source, collection in collections:
-            for language, formats in collection.items():
-                if predicate(language):
-                    url = _caption_url(formats)
-                    if url:
-                        return source, language, url
-    for source, collection in collections:
-        languages = ([preferred_language] if preferred_language in collection else []) + [
-            language for language in collection if language != preferred_language
-        ]
+    for source, collection in (("manual", manual), ("auto", automatic)):
+        languages = _matching_languages(collection, preferred_language) if preferred_language else list(collection)
         for language in languages:
             url = _caption_url(collection.get(language, []))
             if url:
                 return source, language, url
     return None
+
+
+def select_chinese_caption(
+    manual: dict[str, list[dict]],
+    automatic: dict[str, list[dict]],
+) -> tuple[str, str, str] | None:
+    for source, collection in (("manual", manual), ("auto", automatic)):
+        for language, formats in collection.items():
+            if _is_chinese_caption(language):
+                url = _caption_url(formats)
+                if url:
+                    return source, language, url
+    return None
+
+
+# Compatibility for callers outside this module. New extraction uses the explicit selectors.
+select_caption = select_original_caption
 
 
 async def _ensure_public_http_url(url: str) -> None:
@@ -289,13 +308,12 @@ async def extract_youtube_transcript(
         if video_duration > max_duration:
             raise TranscriptError("video_too_long", "视频时长超过转写上限")
         preferred = str(metadata.get("language") or metadata.get("original_language") or "")
-        caption = select_caption(
-            metadata.get("subtitles") or {},
-            metadata.get("automatic_captions") or {},
-            preferred,
-        )
-        if caption:
-            source, language, _caption_url = caption
+        manual = metadata.get("subtitles") or {}
+        automatic = metadata.get("automatic_captions") or {}
+        caption = select_original_caption(manual, automatic, preferred)
+
+        async def download_caption(selected: tuple[str, str, str]) -> dict[str, Any]:
+            source, language, _caption_url = selected
             with tempfile.TemporaryDirectory(prefix="wms-youtube-captions-") as directory:
                 template = str(Path(directory) / "%(id)s.%(ext)s")
                 await command(
@@ -317,6 +335,18 @@ async def extract_youtube_transcript(
                 segments = parse_vtt(subtitle_files[0].read_text(encoding="utf-8", errors="replace"))
                 if segments:
                     return build_transcript(source, language, segments)
+                raise TranscriptError("caption_download_failed", "字幕文件内容为空", retryable=True)
+
+        if caption:
+            original = await download_caption(caption)
+            if not _is_chinese_caption(original["language"]):
+                chinese_caption = select_chinese_caption(manual, automatic)
+                if chinese_caption:
+                    try:
+                        original["chinese"] = await download_caption(chinese_caption)
+                    except TranscriptError:
+                        pass
+            return original
 
         max_bytes = int(config.get("transcription_max_audio_bytes", str(25 * 1024 * 1024)))
         with tempfile.TemporaryDirectory(prefix="wms-youtube-") as directory:
@@ -337,8 +367,16 @@ async def extract_youtube_transcript(
             audio = files[0]
             if audio.stat().st_size > max_bytes:
                 raise TranscriptError("audio_too_large", "压缩音频超过转写上限")
-            return await _transcribe_audio(
+            original = await _transcribe_audio(
                 audio,
                 config,
                 duration=video_duration,
             )
+            if not _is_chinese_caption(str(original.get("language") or "")):
+                chinese_caption = select_chinese_caption(manual, automatic)
+                if chinese_caption:
+                    try:
+                        original["chinese"] = await download_caption(chinese_caption)
+                    except TranscriptError:
+                        pass
+            return original

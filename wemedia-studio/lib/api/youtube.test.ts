@@ -19,6 +19,13 @@ describe('getYoutubeTranscript', () => {
       fetched_at: '2026-08-11T02:00:00Z',
       error_code: '',
       error: '',
+      chinese: {
+        source: 'auto',
+        language: 'zh-Hans',
+        text: '中文字幕',
+        segments: [{ start: 0.4, end: 2.1, text: '中文字幕' }],
+        content_hash: 'hash-zh',
+      },
     }), { status: 200 }))
     vi.stubGlobal('fetch', fetchMock)
 
@@ -32,5 +39,6 @@ describe('getYoutubeTranscript', () => {
       }),
     )
     expect(transcript.segments[1]).toEqual({ start: 2.1, end: 4.8, text: '第二段' })
+    expect(transcript.chinese?.text).toBe('中文字幕')
   })
 })

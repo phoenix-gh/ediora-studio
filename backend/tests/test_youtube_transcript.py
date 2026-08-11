@@ -46,22 +46,22 @@ def test_validate_youtube_url_rejects_untrusted_sources(url):
         validate_youtube_url(url)
 
 
-def test_caption_selection_prefers_manual_then_auto():
-    from youtube_transcript import select_caption
+def test_original_caption_selection_prefers_video_language_manual_then_auto():
+    from youtube_transcript import select_original_caption
 
     manual = {"en": [{"ext": "vtt", "url": "https://caption.test/manual"}]}
     automatic = {"en": [{"ext": "vtt", "url": "https://caption.test/auto"}]}
 
-    assert select_caption(manual, automatic, "en") == (
+    assert select_original_caption(manual, automatic, "en") == (
         "manual", "en", "https://caption.test/manual",
     )
-    assert select_caption({}, automatic, "en") == (
+    assert select_original_caption({}, automatic, "en") == (
         "auto", "en", "https://caption.test/auto",
     )
 
 
-def test_caption_selection_prefers_chinese_across_caption_sources():
-    from youtube_transcript import select_caption
+def test_original_caption_selection_does_not_replace_english_with_chinese():
+    from youtube_transcript import select_original_caption
 
     manual = {"en-US": [{"ext": "vtt", "url": "https://caption.test/manual-en"}]}
     automatic = {
@@ -69,24 +69,24 @@ def test_caption_selection_prefers_chinese_across_caption_sources():
         "zh-Hans": [{"ext": "vtt", "url": "https://caption.test/auto-zh"}],
     }
 
-    assert select_caption(manual, automatic, "en-US") == (
-        "auto", "zh-Hans", "https://caption.test/auto-zh",
-    )
-
-
-def test_caption_selection_falls_back_to_english_without_chinese():
-    from youtube_transcript import select_caption
-
-    manual = {"en-US": [{"ext": "vtt", "url": "https://caption.test/manual-en"}]}
-    automatic = {"ab": [{"ext": "vtt", "url": "https://caption.test/auto-ab"}]}
-
-    assert select_caption(manual, automatic, "ab") == (
+    assert select_original_caption(manual, automatic, "en-US") == (
         "manual", "en-US", "https://caption.test/manual-en",
     )
 
 
+def test_chinese_caption_selection_is_independent_and_manual_first():
+    from youtube_transcript import select_chinese_caption
+
+    manual = {"zh-Hant": [{"ext": "vtt", "url": "https://caption.test/manual-zh"}]}
+    automatic = {"zh-Hans": [{"ext": "vtt", "url": "https://caption.test/auto-zh"}]}
+
+    assert select_chinese_caption(manual, automatic) == (
+        "manual", "zh-Hant", "https://caption.test/manual-zh",
+    )
+
+
 @pytest.mark.asyncio
-async def test_extract_downloads_selected_chinese_caption_with_ytdlp(monkeypatch):
+async def test_extract_downloads_original_and_chinese_captions_with_ytdlp(monkeypatch):
     from youtube_transcript import extract_youtube_transcript
 
     metadata = {
@@ -104,10 +104,11 @@ async def test_extract_downloads_selected_chinese_caption_with_ytdlp(monkeypatch
         commands.append(argv)
         if "--dump-single-json" in argv:
             return json.dumps(metadata)
-        if "--write-auto-subs" in argv:
+        if "--write-subs" in argv or "--write-auto-subs" in argv:
             template = argv[argv.index("-o") + 1]
             subtitle = Path(template.replace("%(id)s", "video-id").replace("%(ext)s", "vtt"))
-            subtitle.write_text(VTT, encoding="utf-8")
+            language = argv[argv.index("--sub-langs") + 1]
+            subtitle.write_text(VTT.replace("Build agents", f"{language} text"), encoding="utf-8")
             return ""
         raise AssertionError(f"unexpected command: {argv}")
 
@@ -127,12 +128,16 @@ async def test_extract_downloads_selected_chinese_caption_with_ytdlp(monkeypatch
         "https://www.youtube.com/watch?v=video-id", {}, command=command
     )
 
-    assert result["source"] == "auto"
-    assert result["language"] == "zh-Hans"
-    assert result["text"] == "Build agents with tools & memory"
+    assert result["source"] == "manual"
+    assert result["language"] == "en"
+    assert result["text"].startswith("en text")
+    assert result["chinese"]["source"] == "auto"
+    assert result["chinese"]["language"] == "zh-Hans"
+    assert result["chinese"]["text"].startswith("zh-Hans text")
     assert commands[1][0:2] == ("yt-dlp", "--skip-download")
     assert "--ignore-no-formats-error" in commands[1]
-    assert commands[1][commands[1].index("--sub-langs") + 1] == "zh-Hans"
+    assert commands[1][commands[1].index("--sub-langs") + 1] == "en"
+    assert commands[2][commands[2].index("--sub-langs") + 1] == "zh-Hans"
     assert all("--cookies" not in command for command in commands)
 
 
@@ -143,7 +148,7 @@ async def test_extract_passes_one_temporary_cookie_file_to_metadata_and_subtitle
     metadata = {
         "id": "video-id",
         "duration": 7,
-        "language": "en",
+        "language": "zh-Hans",
         "automatic_captions": {
             "zh-Hans": [{"ext": "vtt", "url": "https://caption.test/zh"}],
         },
@@ -170,6 +175,7 @@ async def test_extract_passes_one_temporary_cookie_file_to_metadata_and_subtitle
     )
 
     assert result["language"] == "zh-Hans"
+    assert "chinese" not in result
     assert len(commands) == 2
     assert len(set(cookie_paths)) == 1
     assert "--ignore-no-formats-error" in commands[0]
@@ -213,6 +219,51 @@ async def test_extract_passes_cookie_file_to_audio_fallback(monkeypatch):
     assert result["source"] == "whisper"
     assert len(commands) == 2
     assert all("--cookies" in command for command in commands)
+
+
+@pytest.mark.asyncio
+async def test_audio_original_fallback_still_collects_available_chinese_caption(monkeypatch):
+    import youtube_transcript
+
+    metadata = {
+        "id": "video-id",
+        "duration": 7,
+        "language": "ja",
+        "automatic_captions": {
+            "zh-Hans": [{"ext": "vtt", "url": "https://caption.test/zh"}],
+        },
+    }
+
+    async def command(*argv: str, timeout: float) -> str:
+        if "--dump-single-json" in argv:
+            return json.dumps(metadata)
+        template = argv[argv.index("-o") + 1]
+        if "--write-auto-subs" in argv:
+            Path(template.replace("%(id)s", "video-id").replace("%(ext)s", "vtt")).write_text(
+                VTT, encoding="utf-8"
+            )
+        else:
+            Path(template.replace("%(ext)s", "mp3")).write_bytes(b"audio")
+        return ""
+
+    async def transcribe(_audio, _config, *, duration):
+        return {
+            "source": "whisper",
+            "language": "ja",
+            "text": "original audio",
+            "segments": [{"start": 0, "end": 1, "text": "original audio"}],
+            "content_hash": "original-hash",
+        }
+
+    monkeypatch.setattr(youtube_transcript, "_transcribe_audio", transcribe)
+
+    result = await youtube_transcript.extract_youtube_transcript(
+        "https://www.youtube.com/watch?v=video-id", {}, command=command
+    )
+
+    assert result["text"] == "original audio"
+    assert result["chinese"]["language"] == "zh-Hans"
+    assert result["chinese"]["text"] == "Build agents with tools & memory"
 
 
 @pytest.mark.asyncio
