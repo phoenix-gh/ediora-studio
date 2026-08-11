@@ -96,6 +96,13 @@ export function YoutubeTranscriptDialog({ video }: { video: YoutubeVideo }) {
 
   const segments = transcript?.segments ?? []
   const empty = transcript !== null && !transcript.text.trim() && segments.length === 0
+  const accessibilityStatus = loading
+    ? '正在加载逐字稿'
+    : failed
+      ? '逐字稿加载失败'
+      : transcript
+        ? '逐字稿加载完成'
+        : ''
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -118,8 +125,12 @@ export function YoutubeTranscriptDialog({ video }: { video: YoutubeVideo }) {
           </DialogDescription>
         </DialogHeader>
 
+        <p className="sr-only" role="status" aria-live="polite">
+          {accessibilityStatus}
+        </p>
+
         <ScrollArea className="min-h-0 flex-1 rounded-lg border border-border">
-          <div className="p-4" role="status" aria-live="polite">
+          <div className="p-4">
             {loading ? (
               <Empty className="min-h-64 border-0">
                 <EmptyMedia variant="icon">
