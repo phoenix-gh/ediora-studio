@@ -2,7 +2,7 @@ import asyncio
 from datetime import datetime, timezone
 
 import pytest
-from sqlalchemy import inspect, select
+from sqlalchemy import inspect, select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 
@@ -160,3 +160,54 @@ def test_intelligence_station_migration_maps_legacy_decision_statuses(
         "pending": "pending",
         "rejected": "not_processed",
     }
+
+
+def test_youtube_transcript_variant_migration_defaults_existing_rows(
+    postgres_database_url,
+):
+    from database import migrate_content_response_schema
+
+    engine = create_async_engine(postgres_database_url)
+
+    async def run():
+        async with engine.begin() as connection:
+            await connection.execute(text("CREATE TABLE youtube_channels (id VARCHAR PRIMARY KEY)"))
+            await connection.execute(text(
+                "CREATE TABLE youtube_videos ("
+                "id VARCHAR PRIMARY KEY, transcript_text TEXT NOT NULL DEFAULT '', "
+                "transcript_segments JSON NOT NULL DEFAULT '[]'::json)"
+            ))
+            await connection.execute(text(
+                "INSERT INTO youtube_videos (id, transcript_text) VALUES ('legacy-video', 'original')"
+            ))
+            await migrate_content_response_schema(connection)
+
+        async with engine.connect() as connection:
+            columns = {
+                column["name"]
+                for column in await connection.run_sync(
+                    lambda sync_connection: inspect(sync_connection).get_columns("youtube_videos")
+                )
+            }
+            row = (await connection.execute(text(
+                "SELECT transcript_zh_source, transcript_zh_language, transcript_zh_text, "
+                "transcript_zh_segments, transcript_zh_content_hash "
+                "FROM youtube_videos WHERE id = 'legacy-video'"
+            ))).mappings().one()
+        await engine.dispose()
+        return columns, row
+
+    columns, row = asyncio.run(run())
+
+    assert {
+        "transcript_zh_source",
+        "transcript_zh_language",
+        "transcript_zh_text",
+        "transcript_zh_segments",
+        "transcript_zh_content_hash",
+    }.issubset(columns)
+    assert row["transcript_zh_source"] == ""
+    assert row["transcript_zh_language"] == ""
+    assert row["transcript_zh_text"] == ""
+    assert row["transcript_zh_segments"] == []
+    assert row["transcript_zh_content_hash"] == ""

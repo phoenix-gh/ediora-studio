@@ -130,7 +130,8 @@ def _caption_url(formats: list[dict]) -> str:
 
 
 def _is_chinese_caption(language: str) -> bool:
-    return language.lower().replace("_", "-").startswith("zh")
+    base = language.lower().replace("_", "-").split("-", 1)[0]
+    return base in {"zh", "cmn", "yue"}
 
 
 def _is_english_caption(language: str) -> bool:
@@ -154,8 +155,10 @@ def select_original_caption(
     automatic: dict[str, list[dict]],
     preferred_language: str = "",
 ) -> tuple[str, str, str] | None:
+    if not preferred_language:
+        return None
     for source, collection in (("manual", manual), ("auto", automatic)):
-        languages = _matching_languages(collection, preferred_language) if preferred_language else list(collection)
+        languages = _matching_languages(collection, preferred_language)
         for language in languages:
             url = _caption_url(collection.get(language, []))
             if url:
@@ -308,6 +311,7 @@ async def extract_youtube_transcript(
         if video_duration > max_duration:
             raise TranscriptError("video_too_long", "视频时长超过转写上限")
         preferred = str(metadata.get("language") or metadata.get("original_language") or "")
+        video_original_is_chinese = _is_chinese_caption(preferred)
         manual = metadata.get("subtitles") or {}
         automatic = metadata.get("automatic_captions") or {}
         caption = select_original_caption(manual, automatic, preferred)
@@ -339,12 +343,12 @@ async def extract_youtube_transcript(
 
         if caption:
             original = await download_caption(caption)
-            if not _is_chinese_caption(original["language"]):
+            if not video_original_is_chinese and not _is_chinese_caption(original["language"]):
                 chinese_caption = select_chinese_caption(manual, automatic)
                 if chinese_caption:
                     try:
                         original["chinese"] = await download_caption(chinese_caption)
-                    except TranscriptError:
+                    except Exception:
                         pass
             return original
 
@@ -372,11 +376,11 @@ async def extract_youtube_transcript(
                 config,
                 duration=video_duration,
             )
-            if not _is_chinese_caption(str(original.get("language") or "")):
+            if not video_original_is_chinese and not _is_chinese_caption(str(original.get("language") or "")):
                 chinese_caption = select_chinese_caption(manual, automatic)
                 if chinese_caption:
                     try:
                         original["chinese"] = await download_caption(chinese_caption)
-                    except TranscriptError:
+                    except Exception:
                         pass
             return original

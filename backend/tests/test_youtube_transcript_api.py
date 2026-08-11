@@ -44,3 +44,17 @@ def test_transcript_payload_exposes_populated_chinese_variant():
         "segments": [{"start": 0, "end": 1, "text": "中文字幕"}],
         "content_hash": "zh-hash",
     }
+
+
+def test_video_list_payload_excludes_all_full_transcript_content():
+    from routers.youtube import video_list_payload
+
+    payload = video_list_payload(make_video(
+        transcript_zh_text="中文字幕",
+        transcript_zh_segments=[{"start": 0, "end": 1, "text": "中文字幕"}],
+    ), None)
+
+    assert "transcript_text" not in payload
+    assert "transcript_segments" not in payload
+    assert "transcript_zh_text" not in payload
+    assert "transcript_zh_segments" not in payload

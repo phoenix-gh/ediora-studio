@@ -67,6 +67,18 @@ class VideoOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+def video_list_payload(video: YoutubeVideo, item: ContentResponseItem | None) -> dict:
+    return {
+        **{
+            field: getattr(video, field)
+            for field in VideoOut.model_fields
+            if field not in {"response_item_id", "analysis_status"}
+        },
+        "response_item_id": item.id if item else None,
+        "analysis_status": item.workflow_status if item else None,
+    }
+
+
 # ── Channels ───────────────────────────────────────────────────────────────────
 
 @router.get("/channels", response_model=list[ChannelOut])
@@ -175,15 +187,7 @@ async def list_videos(
     if search:
         q = q.where(YoutubeVideo.title.contains(search))
     rows = (await db.execute(q)).all()
-    return [{
-        **{
-            column.name: getattr(video, column.name)
-            for column in YoutubeVideo.__table__.columns
-            if column.name != "transcript_text" and column.name != "transcript_segments"
-        },
-        "response_item_id": item.id if item else None,
-        "analysis_status": item.workflow_status if item else None,
-    } for video, item in rows]
+    return [video_list_payload(video, item) for video, item in rows]
 
 
 @router.post("/videos/{video_id}/analyze")
