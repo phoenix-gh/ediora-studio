@@ -20,6 +20,7 @@ import { fmtShortDate } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { useInfiniteScroll } from '@/lib/use-infinite-scroll'
 import { Switch } from '@/components/ui/switch'
+import { YoutubeTranscriptDialog } from './YoutubeTranscriptDialog'
 
 const DAYS_OPTIONS = [7, 14, 30, 90]
 const PAGE_SIZE = 24
@@ -451,6 +452,7 @@ function VideoCard({
               {video.response_item_id ? '重新分析' : '提取字幕并分析'}
             </Button>
           )}
+          <YoutubeTranscriptDialog video={video} />
           <AddToTopicPopover
             url={video.url}
             title={video.title}
