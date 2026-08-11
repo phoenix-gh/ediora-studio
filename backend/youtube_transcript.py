@@ -43,6 +43,15 @@ _TIMING = re.compile(
     r"(?P<end>\d{2}:\d{2}:\d{2}\.\d{3})"
 )
 _TAGS = re.compile(r"<[^>]+>")
+_SENTENCE_PARTS = re.compile(r".*?[。！？.!?]+[\"'”’」』】）)]*", re.DOTALL)
+_SENTENCE_END = re.compile(r"[。！？.!?]+[\"'”’」』】）)]*$")
+_CJK = re.compile(r"[\u3400-\u9fff\uf900-\ufaff]")
+_NO_SPACE_BEFORE = re.compile(r"^[,.;:!?，。；：！？、）】》」』”’]")
+_NO_SPACE_AFTER = re.compile(r"[（【《「『“‘]$")
+_MAX_SENTENCE_SECONDS = 15.0
+_MAX_CHINESE_CHARS = 60
+_MAX_OTHER_CHARS = 140
+_SILENCE_BREAK_SECONDS = 1.0
 
 
 def validate_youtube_url(url: str) -> str:
@@ -107,14 +116,87 @@ def parse_vtt(value: str) -> list[dict[str, float | str]]:
     return result
 
 
+def _join_sentence_text(previous: str, current: str) -> str:
+    if not previous:
+        return current
+    if not current:
+        return previous
+    if (
+        _CJK.search(previous[-1])
+        or _CJK.search(current[0])
+        or _NO_SPACE_BEFORE.search(current)
+        or _NO_SPACE_AFTER.search(previous)
+    ):
+        return f"{previous}{current}"
+    return f"{previous} {current}"
+
+
+def _split_sentence_parts(value: str) -> list[str]:
+    parts: list[str] = []
+    offset = 0
+    for match in _SENTENCE_PARTS.finditer(value):
+        part = match.group(0).strip()
+        if part:
+            parts.append(part)
+        offset = match.end()
+    remainder = value[offset:].strip()
+    if remainder:
+        parts.append(remainder)
+    return parts
+
+
+def _sentence_segments(
+    language: str,
+    segments: list[dict],
+) -> list[dict[str, float | str]]:
+    result: list[dict[str, float | str]] = []
+    text = ""
+    start = 0.0
+    end = 0.0
+    max_chars = _MAX_CHINESE_CHARS if _is_chinese_caption(language) else _MAX_OTHER_CHARS
+
+    def flush() -> None:
+        nonlocal text, start, end
+        if text:
+            result.append({"start": start, "end": end, "text": text})
+        text = ""
+        start = 0.0
+        end = 0.0
+
+    for segment in segments:
+        source_text = _clean_text(str(segment.get("text") or ""))
+        if not source_text:
+            continue
+        segment_start = float(segment.get("start") or 0)
+        segment_end = float(segment.get("end") or segment_start)
+        combined = _join_sentence_text(text, source_text)
+        if text and (
+            segment_start - end > _SILENCE_BREAK_SECONDS
+            or segment_end - start > _MAX_SENTENCE_SECONDS
+            or len(combined) > max_chars
+        ):
+            flush()
+
+        for part in _split_sentence_parts(source_text):
+            if not text:
+                start = segment_start
+            text = _join_sentence_text(text, part)
+            end = segment_end
+            if _SENTENCE_END.search(part):
+                flush()
+
+    flush()
+    return result
+
+
 def build_transcript(source: str, language: str, segments: list[dict]) -> dict[str, Any]:
-    text = " ".join(str(segment.get("text") or "").strip() for segment in segments).strip()
-    normalized = re.sub(r"\s+", " ", text)
+    normalized_segments = _sentence_segments(language, segments)
+    normalized = "\n".join(str(segment["text"]) for segment in normalized_segments)
     return {
         "source": source,
         "language": language,
         "text": normalized,
-        "segments": segments,
+        "segments": normalized_segments,
         "content_hash": hashlib.sha256(normalized.encode("utf-8")).hexdigest(),
     }
 

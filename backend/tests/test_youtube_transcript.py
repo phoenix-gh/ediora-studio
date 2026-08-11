@@ -419,6 +419,109 @@ def test_transcript_result_has_stable_content_hash():
     assert first["content_hash"] == second["content_hash"]
 
 
+def test_build_transcript_merges_caption_fragments_into_sentence_lines():
+    """Catches display-cue boundaries leaking into the stored transcript."""
+    from youtube_transcript import build_transcript
+
+    result = build_transcript("manual", "en", [
+        {"start": 0, "end": 1, "text": "Build agents"},
+        {"start": 1, "end": 2, "text": "with tools."},
+        {"start": 2, "end": 3, "text": "Keep the source"},
+        {"start": 3, "end": 4, "text": "unchanged!"},
+    ])
+
+    assert result["segments"] == [
+        {"start": 0.0, "end": 2.0, "text": "Build agents with tools."},
+        {"start": 2.0, "end": 4.0, "text": "Keep the source unchanged!"},
+    ]
+    assert result["text"] == "Build agents with tools.\nKeep the source unchanged!"
+
+
+def test_build_transcript_joins_chinese_fragments_without_inserting_spaces():
+    """Catches cue normalization changing Chinese source text."""
+    from youtube_transcript import build_transcript
+
+    result = build_transcript("auto", "zh-Hans", [
+        {"start": 0, "end": 1, "text": "这是第一"},
+        {"start": 1, "end": 2, "text": "句话。"},
+        {"start": 2, "end": 3, "text": "这是第二句话！"},
+    ])
+
+    assert result["text"] == "这是第一句话。\n这是第二句话！"
+    assert [segment["text"] for segment in result["segments"]] == [
+        "这是第一句话。",
+        "这是第二句话！",
+    ]
+
+
+def test_build_transcript_splits_multiple_sentences_inside_one_source_segment():
+    """Catches a long ASR segment remaining as several sentences on one line."""
+    from youtube_transcript import build_transcript
+
+    result = build_transcript("whisper", "en", [
+        {"start": 4.2, "end": 8.8, "text": "First sentence. Second sentence?"},
+    ])
+
+    assert result["segments"] == [
+        {"start": 4.2, "end": 8.8, "text": "First sentence."},
+        {"start": 4.2, "end": 8.8, "text": "Second sentence?"},
+    ]
+    assert result["text"] == "First sentence.\nSecond sentence?"
+
+
+def test_build_transcript_breaks_unpunctuated_text_at_a_silence_gap():
+    """Catches punctuation-free speech being stored as one unbounded line."""
+    from youtube_transcript import build_transcript
+
+    result = build_transcript("whisper", "en", [
+        {"start": 0, "end": 2, "text": "before the pause"},
+        {"start": 3.2, "end": 5, "text": "after the pause"},
+    ])
+
+    assert result["segments"] == [
+        {"start": 0.0, "end": 2.0, "text": "before the pause"},
+        {"start": 3.2, "end": 5.0, "text": "after the pause"},
+    ]
+    assert result["text"] == "before the pause\nafter the pause"
+
+
+@pytest.mark.parametrize(
+    ("language", "first", "second"),
+    [
+        ("en", "a" * 100, "b" * 41),
+        ("zh-Hans", "甲" * 40, "乙" * 21),
+    ],
+)
+def test_build_transcript_bounds_unpunctuated_lines_by_language_length(
+    language, first, second
+):
+    """Catches long punctuation-free captions overflowing one transcript line."""
+    from youtube_transcript import build_transcript
+
+    result = build_transcript("auto", language, [
+        {"start": 0, "end": 4, "text": first},
+        {"start": 4, "end": 8, "text": second},
+    ])
+
+    assert [segment["text"] for segment in result["segments"]] == [first, second]
+    assert result["text"] == f"{first}\n{second}"
+
+
+def test_build_transcript_bounds_unpunctuated_lines_by_duration():
+    """Catches a punctuation-free sentence spanning beyond the duration cap."""
+    from youtube_transcript import build_transcript
+
+    result = build_transcript("whisper", "en", [
+        {"start": 0, "end": 8, "text": "first part"},
+        {"start": 8, "end": 16, "text": "second part"},
+    ])
+
+    assert result["segments"] == [
+        {"start": 0.0, "end": 8.0, "text": "first part"},
+        {"start": 8.0, "end": 16.0, "text": "second part"},
+    ]
+
+
 @pytest.mark.asyncio
 async def test_official_caption_url_survives_dns_proxy_fake_ip(monkeypatch):
     from youtube_transcript import _ensure_public_http_url
