@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import { Captions, Copy, LoaderCircle, RotateCcw } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -24,8 +24,118 @@ import {
 import {
   getYoutubeTranscript,
   type YoutubeTranscript,
+  type YoutubeTranscriptSegment,
   type YoutubeVideo,
 } from '@/lib/api/youtube'
+
+export interface BilingualTranscriptGroup {
+  original: YoutubeTranscriptSegment | null
+  chinese: YoutubeTranscriptSegment[]
+}
+
+const BILINGUAL_ALIGNMENT_TOLERANCE_SECONDS = 1.5
+
+function hasValidTimeRange(segment: YoutubeTranscriptSegment): boolean {
+  return Number.isFinite(segment.start)
+    && Number.isFinite(segment.end)
+    && segment.start >= 0
+    && segment.end >= segment.start
+}
+
+function segmentOverlap(
+  first: YoutubeTranscriptSegment,
+  second: YoutubeTranscriptSegment,
+): number {
+  return Math.max(0, Math.min(first.end, second.end) - Math.max(first.start, second.start))
+}
+
+function segmentDistance(
+  first: YoutubeTranscriptSegment,
+  second: YoutubeTranscriptSegment,
+): number {
+  if (segmentOverlap(first, second) > 0) return 0
+  if (first.end <= second.start) return second.start - first.end
+  return first.start - second.end
+}
+
+export function alignBilingualSegments(
+  original: YoutubeTranscriptSegment[],
+  chinese: YoutubeTranscriptSegment[],
+  toleranceSeconds = BILINGUAL_ALIGNMENT_TOLERANCE_SECONDS,
+): BilingualTranscriptGroup[] {
+  const originalGroups: BilingualTranscriptGroup[] = original.map(segment => ({
+    original: segment,
+    chinese: [],
+  }))
+  const unmatched: Array<{ segment: YoutubeTranscriptSegment; order: number }> = []
+
+  chinese.forEach((chineseSegment, order) => {
+    if (!hasValidTimeRange(chineseSegment)) {
+      unmatched.push({ segment: chineseSegment, order })
+      return
+    }
+
+    let targetIndex = -1
+    let largestOverlap = 0
+    original.forEach((originalSegment, index) => {
+      if (!hasValidTimeRange(originalSegment)) return
+      const overlap = segmentOverlap(originalSegment, chineseSegment)
+      if (overlap > largestOverlap) {
+        largestOverlap = overlap
+        targetIndex = index
+      }
+    })
+
+    if (targetIndex < 0) {
+      let shortestDistance = Number.POSITIVE_INFINITY
+      original.forEach((originalSegment, index) => {
+        if (!hasValidTimeRange(originalSegment)) return
+        const distance = segmentDistance(originalSegment, chineseSegment)
+        if (distance < shortestDistance) {
+          shortestDistance = distance
+          targetIndex = index
+        }
+      })
+      if (shortestDistance > toleranceSeconds) targetIndex = -1
+    }
+
+    if (targetIndex >= 0) {
+      originalGroups[targetIndex].chinese.push(chineseSegment)
+    } else {
+      unmatched.push({ segment: chineseSegment, order })
+    }
+  })
+
+  return [
+    ...originalGroups.map((group, order) => {
+      const originalSegment = group.original
+      return {
+        group,
+        time: originalSegment && hasValidTimeRange(originalSegment)
+          ? originalSegment.start
+          : Number.POSITIVE_INFINITY,
+        order,
+      }
+    }),
+    ...unmatched.map(({ segment, order }) => ({
+      group: { original: null, chinese: [segment] },
+      time: hasValidTimeRange(segment) ? segment.start : Number.POSITIVE_INFINITY,
+      order: original.length + order,
+    })),
+  ]
+    .sort((first, second) => first.time - second.time || first.order - second.order)
+    .map(item => item.group)
+}
+
+export function formatBilingualTranscript(groups: BilingualTranscriptGroup[]): string {
+  return groups
+    .map(group => [
+      group.original?.text.trim(),
+      ...group.chinese.map(segment => segment.text.trim()),
+    ].filter(Boolean).join('\n'))
+    .filter(Boolean)
+    .join('\n\n')
+}
 
 export function formatTranscriptTime(seconds: number): string {
   const wholeSeconds = Math.floor(Math.max(0, seconds))
@@ -52,7 +162,7 @@ export function YoutubeTranscriptDialog({ video }: { video: YoutubeVideo }) {
   const [loading, setLoading] = useState(false)
   const [transcript, setTranscript] = useState<YoutubeTranscript | null>(null)
   const [failed, setFailed] = useState(false)
-  const [selectedVersion, setSelectedVersion] = useState<'original' | 'chinese'>('original')
+  const [selectedVersion, setSelectedVersion] = useState<'original' | 'chinese' | 'bilingual'>('original')
   const requestIdRef = useRef(0)
 
   const load = useCallback(async () => {
@@ -73,6 +183,15 @@ export function YoutubeTranscriptDialog({ video }: { video: YoutubeVideo }) {
     }
   }, [video.id])
 
+  const bilingualGroups = useMemo(() => {
+    if (!transcript?.chinese) return []
+    return alignBilingualSegments(transcript.segments, transcript.chinese.segments)
+  }, [transcript])
+  const bilingualText = useMemo(
+    () => formatBilingualTranscript(bilingualGroups),
+    [bilingualGroups],
+  )
+
   if (video.transcript_status !== 'ready') return null
 
   function handleOpenChange(nextOpen: boolean) {
@@ -86,9 +205,9 @@ export function YoutubeTranscriptDialog({ video }: { video: YoutubeVideo }) {
   }
 
   async function copyTranscript() {
-    if (!currentTranscript?.text.trim()) return
+    if (!copyText.trim()) return
     try {
-      await navigator.clipboard.writeText(currentTranscript.text)
+      await navigator.clipboard.writeText(copyText)
       toast.success('逐字稿已复制')
     } catch {
       toast.error('逐字稿复制失败')
@@ -98,8 +217,14 @@ export function YoutubeTranscriptDialog({ video }: { video: YoutubeVideo }) {
   const currentTranscript = selectedVersion === 'chinese' && transcript?.chinese
     ? transcript.chinese
     : transcript
-  const segments = currentTranscript?.segments ?? []
-  const empty = currentTranscript !== null && !currentTranscript?.text.trim() && segments.length === 0
+  const segments = selectedVersion === 'bilingual' ? [] : currentTranscript?.segments ?? []
+  const copyText = selectedVersion === 'bilingual' ? bilingualText : currentTranscript?.text ?? ''
+  const empty = currentTranscript !== null && !copyText.trim()
+    && segments.length === 0
+    && (selectedVersion !== 'bilingual' || bilingualGroups.length === 0)
+  const transcriptDescription = selectedVersion === 'bilingual' && transcript?.chinese
+    ? `${transcript.language || '未知语言'} / ${transcript.chinese.language || '未知语言'} · ${transcript.source || '未知来源'} / ${transcript.chinese.source || '未知来源'}`
+    : `${currentTranscript?.language || '未知语言'} · ${currentTranscript?.source || '未知来源'}`
   const accessibilityStatus = loading
     ? '正在加载逐字稿'
     : failed
@@ -125,7 +250,7 @@ export function YoutubeTranscriptDialog({ video }: { video: YoutubeVideo }) {
         <DialogHeader>
           <DialogTitle>{video.title}</DialogTitle>
           <DialogDescription>
-            {currentTranscript?.language || '未知语言'} · {currentTranscript?.source || '未知来源'}
+            {transcriptDescription}
           </DialogDescription>
         </DialogHeader>
 
@@ -146,6 +271,14 @@ export function YoutubeTranscriptDialog({ video }: { video: YoutubeVideo }) {
               onClick={() => setSelectedVersion('chinese')}
             >
               中文
+            </Button>
+            <Button
+              size="sm"
+              variant={selectedVersion === 'bilingual' ? 'default' : 'ghost'}
+              aria-pressed={selectedVersion === 'bilingual'}
+              onClick={() => setSelectedVersion('bilingual')}
+            >
+              中英
             </Button>
           </div>
         ) : null}
@@ -188,6 +321,52 @@ export function YoutubeTranscriptDialog({ video }: { video: YoutubeVideo }) {
                   <EmptyTitle>逐字稿内容为空</EmptyTitle>
                 </EmptyHeader>
               </Empty>
+            ) : selectedVersion === 'bilingual' && bilingualGroups.length > 0 ? (
+              <div className="flex flex-col gap-4">
+                {bilingualGroups.map((group, index) => {
+                  const primarySegment = group.original ?? group.chinese[0]
+                  const href = buildYoutubeTimestampUrl(video.url, primarySegment.start)
+                  const label = Number.isFinite(primarySegment.start) && primarySegment.start >= 0
+                    ? formatTranscriptTime(primarySegment.start)
+                    : '--:--'
+                  return (
+                    <div
+                      key={`${primarySegment.start}-${index}`}
+                      className="grid grid-cols-[3.5rem_1fr] gap-3"
+                    >
+                      {href ? (
+                        <a
+                          href={href}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-xs font-medium text-primary hover:underline"
+                        >
+                          {label}
+                        </a>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">{label}</span>
+                      )}
+                      <div className="min-w-0 space-y-1.5">
+                        {group.original ? (
+                          <p className="whitespace-pre-wrap leading-6">{group.original.text}</p>
+                        ) : (
+                          <span className="inline-flex rounded bg-muted px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground">
+                            仅中文
+                          </span>
+                        )}
+                        {group.chinese.map((segment, chineseIndex) => (
+                          <p
+                            key={`${segment.start}-${chineseIndex}`}
+                            className="whitespace-pre-wrap text-sm leading-6 text-muted-foreground"
+                          >
+                            {segment.text}
+                          </p>
+                        ))}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
             ) : segments.length > 0 ? (
               <div className="flex flex-col gap-3">
                 {segments.map((segment, index) => {
@@ -223,7 +402,7 @@ export function YoutubeTranscriptDialog({ video }: { video: YoutubeVideo }) {
         <DialogFooter>
           <Button
             variant="outline"
-            disabled={!currentTranscript?.text.trim()}
+            disabled={!copyText.trim()}
             onClick={() => void copyTranscript()}
           >
             <Copy data-icon="inline-start" />

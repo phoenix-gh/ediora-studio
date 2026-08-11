@@ -30,23 +30,23 @@
 - Produces: `formatBilingualTranscript(groups): string`。
 - `BilingualTranscriptGroup` 包含 `original: YoutubeTranscriptSegment | null` 与 `chinese: YoutubeTranscriptSegment[]`。
 
-- [ ] **Step 1: Write failing pure-function tests**
+- [x] **Step 1: Write failing pure-function tests**
 
 新增字面量测试数据，断言：中文选择最大重叠原文、一条原文接收多条中文、同一中文不重复、无重叠但距离不超过 1.5 秒时匹配、距离更远或时间非法时成为独立组，并断言复制文本为“原文行 + 中文行 + 组间空行”。
 
-- [ ] **Step 2: Run tests and verify RED**
+- [x] **Step 2: Run tests and verify RED**
 
-Run: `cd wemedia-studio && pnpm test -- app/youtube/YoutubeTranscriptDialog.test.tsx`
+Run: `cd wemedia-studio && pnpm exec vitest run app/youtube/YoutubeTranscriptDialog.test.tsx`
 
 Expected: FAIL because `alignBilingualSegments` and `formatBilingualTranscript` are not exported.
 
-- [ ] **Step 3: Implement pure functions**
+- [x] **Step 3: Implement pure functions**
 
 实现有限时间范围校验、区间重叠、区间距离、稳定的最大值选择和按时间顺序合并独立中文组。默认容差固定为 `1.5` 秒；相同重叠或距离选择更早的原文索引。
 
-- [ ] **Step 4: Run tests and verify GREEN**
+- [x] **Step 4: Run tests and verify GREEN**
 
-Run: `cd wemedia-studio && pnpm test -- app/youtube/YoutubeTranscriptDialog.test.tsx`
+Run: `cd wemedia-studio && pnpm exec vitest run app/youtube/YoutubeTranscriptDialog.test.tsx`
 
 Expected: pure-function tests pass.
 
@@ -60,29 +60,28 @@ Expected: pure-function tests pass.
 - Consumes: Task 1 的 `alignBilingualSegments()` 和 `formatBilingualTranscript()`。
 - Produces: `selectedVersion: 'original' | 'chinese' | 'bilingual'` 三态交互。
 
-- [ ] **Step 1: Write failing component tests**
+- [x] **Step 1: Write failing component tests**
 
 扩展双语 fixture，断言存在“中英”按钮；点击后按原文、中文顺序渲染；一对多中文均出现；独立中文显示“仅中文”；复制按钮写入 Task 1 生成的双语文本；无中文时不显示“中英”。
 
-- [ ] **Step 2: Run tests and verify RED**
+- [x] **Step 2: Run tests and verify RED**
 
-Run: `cd wemedia-studio && pnpm test -- app/youtube/YoutubeTranscriptDialog.test.tsx`
+Run: `cd wemedia-studio && pnpm exec vitest run app/youtube/YoutubeTranscriptDialog.test.tsx`
 
 Expected: FAIL because the bilingual control and view do not exist.
 
-- [ ] **Step 3: Implement the bilingual view**
+- [x] **Step 3: Implement the bilingual view**
 
 增加第三个切换按钮。双语模式使用现有时间戳链接函数；配对组显示原文正文和次要样式中文行，独立组显示“仅中文”。描述区域显示“原文语言 / 中文”；复制与禁用状态改为使用当前模式生成的文本。
 
-- [ ] **Step 4: Run focused tests and lint**
+- [x] **Step 4: Run focused tests and lint**
 
-Run: `cd wemedia-studio && pnpm test -- app/youtube/YoutubeTranscriptDialog.test.tsx app/youtube/YoutubeClient.test.tsx`
+Run: `cd wemedia-studio && pnpm exec vitest run app/youtube/YoutubeTranscriptDialog.test.tsx app/youtube/YoutubeClient.test.tsx`
 
 Run: `cd wemedia-studio && pnpm exec eslint app/youtube/YoutubeTranscriptDialog.tsx app/youtube/YoutubeTranscriptDialog.test.tsx`
 
 Expected: all tests pass and ESLint exits 0.
 
-- [ ] **Step 5: Check patch hygiene**
+- [x] **Step 5: Check patch hygiene**
 
 Run: `git diff --check -- wemedia-studio/app/youtube/YoutubeTranscriptDialog.tsx wemedia-studio/app/youtube/YoutubeTranscriptDialog.test.tsx docs/superpowers/plans/2026-08-11-youtube-bilingual-transcript.md`
-

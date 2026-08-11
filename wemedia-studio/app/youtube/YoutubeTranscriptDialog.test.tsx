@@ -6,7 +6,9 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { getYoutubeTranscript, type YoutubeVideo } from '@/lib/api/youtube'
 import {
+  alignBilingualSegments,
   buildYoutubeTimestampUrl,
+  formatBilingualTranscript,
   formatTranscriptTime,
   YoutubeTranscriptDialog,
 } from './YoutubeTranscriptDialog'
@@ -66,10 +68,109 @@ const bilingualTranscript = {
   },
 }
 
+const alignedBilingualTranscript = {
+  ...bilingualTranscript,
+  text: 'English first.\nEnglish second.',
+  segments: [
+    { start: 0, end: 4, text: 'English first.' },
+    { start: 10, end: 12, text: 'English second.' },
+  ],
+  chinese: {
+    ...bilingualTranscript.chinese,
+    text: '中文第一句。\n中文补充句。\n独立中文。\n中文第二句。',
+    segments: [
+      { start: 0, end: 2, text: '中文第一句。' },
+      { start: 2, end: 4, text: '中文补充句。' },
+      { start: 6, end: 7, text: '独立中文。' },
+      { start: 10, end: 12, text: '中文第二句。' },
+    ],
+  },
+}
+
 beforeAll(() => {
   Object.defineProperty(HTMLElement.prototype, 'getAnimations', {
     configurable: true,
     value: vi.fn(() => []),
+  })
+})
+
+describe('bilingual transcript alignment', () => {
+  it('assigns each Chinese segment once to the original with the largest overlap', () => {
+    const groups = alignBilingualSegments(
+      [
+        { start: 0, end: 5, text: 'Original A' },
+        { start: 4, end: 10, text: 'Original B' },
+      ],
+      [
+        { start: 4.5, end: 6, text: '中文一' },
+        { start: 6, end: 7, text: '中文二' },
+      ],
+    )
+
+    expect(groups).toEqual([
+      {
+        original: { start: 0, end: 5, text: 'Original A' },
+        chinese: [],
+      },
+      {
+        original: { start: 4, end: 10, text: 'Original B' },
+        chinese: [
+          { start: 4.5, end: 6, text: '中文一' },
+          { start: 6, end: 7, text: '中文二' },
+        ],
+      },
+    ])
+  })
+
+  it('uses the nearest original within 1.5 seconds and preserves unmatched Chinese', () => {
+    const groups = alignBilingualSegments(
+      [
+        { start: 0, end: 3, text: 'Original A' },
+        { start: 10, end: 13, text: 'Original B' },
+      ],
+      [
+        { start: 4.2, end: 5, text: '附近中文' },
+        { start: 7, end: 8, text: '独立中文' },
+        { start: Number.NaN, end: 9, text: '时间无效中文' },
+      ],
+    )
+
+    expect(groups).toEqual([
+      {
+        original: { start: 0, end: 3, text: 'Original A' },
+        chinese: [{ start: 4.2, end: 5, text: '附近中文' }],
+      },
+      {
+        original: null,
+        chinese: [{ start: 7, end: 8, text: '独立中文' }],
+      },
+      {
+        original: { start: 10, end: 13, text: 'Original B' },
+        chinese: [],
+      },
+      {
+        original: null,
+        chinese: [{ start: Number.NaN, end: 9, text: '时间无效中文' }],
+      },
+    ])
+  })
+
+  it('formats original and all assigned Chinese lines with blank lines between groups', () => {
+    expect(formatBilingualTranscript([
+      {
+        original: { start: 0, end: 2, text: 'Original sentence.' },
+        chinese: [
+          { start: 0, end: 1, text: '中文第一行。' },
+          { start: 1, end: 2, text: '中文第二行。' },
+        ],
+      },
+      {
+        original: null,
+        chinese: [{ start: 5, end: 6, text: '独立中文。' }],
+      },
+    ])).toBe(
+      'Original sentence.\n中文第一行。\n中文第二行。\n\n独立中文。',
+    )
   })
 })
 
@@ -166,12 +267,44 @@ describe('YoutubeTranscriptDialog', () => {
     await user.click(screen.getByRole('button', { name: '逐字稿' }))
     expect(await screen.findByText('Original transcript')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '原文' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: '中英' })).toHaveAttribute('aria-pressed', 'false')
 
     await user.click(screen.getByRole('button', { name: '中文' }))
     expect(screen.getByText('中文字幕')).toBeInTheDocument()
     expect(screen.queryByText('Original transcript')).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: '复制全文' }))
     expect(writeText).toHaveBeenCalledWith('中文字幕')
+  })
+
+  it('renders aligned English then Chinese and copies the bilingual layout', async () => {
+    vi.mocked(getYoutubeTranscript).mockResolvedValue(alignedBilingualTranscript)
+    const user = userEvent.setup()
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    })
+    render(<YoutubeTranscriptDialog video={video} />)
+
+    await user.click(screen.getByRole('button', { name: '逐字稿' }))
+    await user.click(await screen.findByRole('button', { name: '中英' }))
+
+    const englishFirst = screen.getByText('English first.')
+    const chineseFirst = screen.getByText('中文第一句。')
+    const chineseExtra = screen.getByText('中文补充句。')
+    const chineseOnly = screen.getByText('独立中文。')
+    const englishSecond = screen.getByText('English second.')
+    expect(englishFirst.compareDocumentPosition(chineseFirst)).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+    expect(chineseFirst.compareDocumentPosition(chineseExtra)).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+    expect(chineseExtra.compareDocumentPosition(chineseOnly)).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+    expect(chineseOnly.compareDocumentPosition(englishSecond)).toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+    expect(screen.getByText('仅中文')).toBeInTheDocument()
+    expect(screen.getByText('en / zh-Hans · manual / auto')).toBeInTheDocument()
+
+    await user.click(screen.getByRole('button', { name: '复制全文' }))
+    expect(writeText).toHaveBeenCalledWith(
+      'English first.\n中文第一句。\n中文补充句。\n\n独立中文。\n\nEnglish second.\n中文第二句。',
+    )
   })
 
   it('hides version controls without Chinese and gives the body a bounded scroll region', async () => {
@@ -183,6 +316,7 @@ describe('YoutubeTranscriptDialog', () => {
     await screen.findByText('第二段')
 
     expect(screen.queryByRole('button', { name: '原文' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '中英' })).not.toBeInTheDocument()
     expect(screen.getByTestId('transcript-scroll-region')).toHaveClass(
       'min-h-0', 'flex-1', 'overflow-y-auto',
     )
