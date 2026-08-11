@@ -46,6 +46,40 @@ def test_transcript_payload_exposes_populated_chinese_variant():
     }
 
 
+def test_transcript_payload_normalizes_legacy_cue_segments_for_bilingual_view():
+    """Catches old stored caption cues bypassing sentence-level display."""
+    from routers.youtube import transcript_payload
+
+    payload = transcript_payload(make_video(
+        transcript_text="First sentence. Second sentence!",
+        transcript_segments=[
+            {"start": 0, "end": 1, "text": "First"},
+            {"start": 1, "end": 2, "text": "sentence."},
+            {"start": 2, "end": 3, "text": "Second"},
+            {"start": 3, "end": 4, "text": "sentence!"},
+        ],
+        transcript_zh_source="auto",
+        transcript_zh_language="zh-Hans",
+        transcript_zh_text="第一句话。第二句话！",
+        transcript_zh_segments=[
+            {"start": 0, "end": 1, "text": "第一"},
+            {"start": 1, "end": 2, "text": "句话。"},
+            {"start": 2, "end": 3, "text": "第二句话！"},
+        ],
+    ))
+
+    assert payload["text"] == "First sentence.\nSecond sentence!"
+    assert payload["segments"] == [
+        {"start": 0.0, "end": 2.0, "text": "First sentence."},
+        {"start": 2.0, "end": 4.0, "text": "Second sentence!"},
+    ]
+    assert payload["chinese"]["text"] == "第一句话。\n第二句话！"
+    assert payload["chinese"]["segments"] == [
+        {"start": 0.0, "end": 2.0, "text": "第一句话。"},
+        {"start": 2.0, "end": 3.0, "text": "第二句话！"},
+    ]
+
+
 def test_video_list_payload_excludes_all_full_transcript_content():
     from routers.youtube import video_list_payload
 

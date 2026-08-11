@@ -43,10 +43,17 @@ _TIMING = re.compile(
     r"(?P<end>\d{2}:\d{2}:\d{2}\.\d{3})"
 )
 _TAGS = re.compile(r"<[^>]+>")
-_SENTENCE_PARTS = re.compile(r".*?[。！？.!?]+[\"'”’」』】）)]*", re.DOTALL)
-_SENTENCE_END = re.compile(r"[。！？.!?]+[\"'”’」』】）)]*$")
+_SENTENCE_END_CHARS = "。！？.!?…⋯｡．﹒︒﹖︖﹗︕"
+_SENTENCE_END_CLASS = re.escape(_SENTENCE_END_CHARS)
+_SENTENCE_PARTS = re.compile(
+    rf".*?[{_SENTENCE_END_CLASS}]+[\"'”’」』】）)]*",
+    re.DOTALL,
+)
+_SENTENCE_END = re.compile(rf"[{_SENTENCE_END_CLASS}]+[\"'”’」』】）)]*$")
 _CJK = re.compile(r"[\u3400-\u9fff\uf900-\ufaff]")
-_NO_SPACE_BEFORE = re.compile(r"^[,.;:!?，。；：！？、）】》」』”’]")
+_NO_SPACE_BEFORE = re.compile(
+    rf"^[,;:，；：、）】》」』”’{_SENTENCE_END_CLASS}]"
+)
 _NO_SPACE_AFTER = re.compile(r"[（【《「『“‘]$")
 _MAX_SENTENCE_SECONDS = 15.0
 _MAX_CHINESE_CHARS = 60

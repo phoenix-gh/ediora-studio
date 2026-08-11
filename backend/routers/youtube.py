@@ -214,23 +214,50 @@ async def analyze_video(
     }
 
 
+def _transcript_version_payload(
+    source: str,
+    language: str,
+    text: str,
+    segments: list[dict],
+    content_hash: str,
+) -> dict:
+    stored = {
+        "source": source,
+        "language": language,
+        "text": text,
+        "segments": segments,
+        "content_hash": content_hash,
+    }
+    if not segments:
+        return stored
+    from youtube_transcript import build_transcript
+
+    normalized = build_transcript(source, language, segments)
+    if normalized["text"] == text and normalized["segments"] == segments:
+        return stored
+    return normalized
+
+
 def transcript_payload(video: YoutubeVideo) -> dict:
+    original = _transcript_version_payload(
+        video.transcript_source,
+        video.transcript_language,
+        video.transcript_text,
+        video.transcript_segments,
+        video.transcript_content_hash,
+    )
     chinese = None
     if video.transcript_zh_text or video.transcript_zh_segments:
-        chinese = {
-            "source": video.transcript_zh_source,
-            "language": video.transcript_zh_language,
-            "text": video.transcript_zh_text,
-            "segments": video.transcript_zh_segments,
-            "content_hash": video.transcript_zh_content_hash,
-        }
+        chinese = _transcript_version_payload(
+            video.transcript_zh_source,
+            video.transcript_zh_language,
+            video.transcript_zh_text,
+            video.transcript_zh_segments,
+            video.transcript_zh_content_hash,
+        )
     return {
         "status": video.transcript_status,
-        "source": video.transcript_source,
-        "language": video.transcript_language,
-        "text": video.transcript_text,
-        "segments": video.transcript_segments,
-        "content_hash": video.transcript_content_hash,
+        **original,
         "fetched_at": video.transcript_fetched_at,
         "error_code": video.transcript_error_code,
         "error": video.transcript_error,

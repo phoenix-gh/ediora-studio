@@ -454,6 +454,27 @@ def test_build_transcript_joins_chinese_fragments_without_inserting_spaces():
     ]
 
 
+@pytest.mark.parametrize(
+    "sentence_end",
+    ["……", "⋯⋯", "｡", "．", "﹒", "︒", "﹖", "︖", "﹗", "︕"],
+)
+def test_build_transcript_recognizes_common_cjk_sentence_end_variants(sentence_end):
+    """Catches Chinese Unicode punctuation variants being merged into the next sentence."""
+    from youtube_transcript import build_transcript
+
+    first = f"第一句话{sentence_end}"
+    result = build_transcript("auto", "zh-Hans", [
+        {"start": 0, "end": 1, "text": first},
+        {"start": 1, "end": 2, "text": "第二句话。"},
+    ])
+
+    assert result["text"] == f"{first}\n第二句话。"
+    assert [segment["text"] for segment in result["segments"]] == [
+        first,
+        "第二句话。",
+    ]
+
+
 def test_build_transcript_splits_multiple_sentences_inside_one_source_segment():
     """Catches a long ASR segment remaining as several sentences on one line."""
     from youtube_transcript import build_transcript
