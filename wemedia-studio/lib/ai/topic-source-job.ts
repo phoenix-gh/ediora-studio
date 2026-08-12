@@ -27,10 +27,31 @@ const classificationSchema = z.object({
   })),
 })
 
-type TopicCandidate = { tweet_id: string; content: string; url: string }
+const promptAssetSchema = z.object({
+  tweet_id: z.string(),
+  directory_id: z.number().int().positive(),
+  prompt_kind: z.enum(['image', 'video', 'other']),
+  title: z.string().default(''),
+  content: z.string().refine(value => value.trim().length > 0, {
+    message: 'Prompt content must not be empty',
+  }),
+  media_indexes: z.array(z.number().int().nonnegative()).default([]),
+})
+
+const evaluationSchema = classificationSchema.extend({
+  prompt_assets: z.array(promptAssetSchema).default([]),
+})
+
+type TopicCandidate = {
+  tweet_id: string
+  content: string
+  url: string
+  media: { index: number; kind: 'image' | 'video'; url: string }[]
+}
 type TopicIngestionDirectory = {
   id: number
   name: string
+  asset_type?: 'article' | 'prompt'
   keywords: string[]
   prompt: string
 }
@@ -117,16 +138,23 @@ export function buildTopicSourceInstructions(
 ) {
   if (Array.isArray(screeningPrompt)) {
     const folders = screeningPrompt.map(directory => (
-      `- directory_id=${directory.id}; 文件夹=${directory.name}; `
+      `- directory_id=${directory.id}; 类型=${directory.asset_type === 'prompt' ? '提示词目录' : '文章目录'}; 文件夹=${directory.name}; `
       + `关键词=${directory.keywords.join('、') || '无'}; 规则=${directory.prompt}`
     )).join('\n')
-    return `你是主题素材库编辑。判断每条 X 原始内容最适合归入哪个候选文件夹；宁缺毋滥。不要改写内容，不要评价作者。
+    return `你是 X 内容采集后的创作资产编辑。对每条帖子同时做文章归类和提示词提取；宁缺毋滥。不要评价作者，不要编造帖子中不存在的提示词。
 
 【候选文件夹及各自入库规则】
 ${folders}
 【候选文件夹及各自入库规则结束】
 
-每条帖子只能选择一个候选文件夹的 directory_id；如果所有规则都不匹配，返回 null。只能选择一个目录或 null，不得返回文件夹名称、候选列表或多个目录。只返回合法 JSON：classifications（每项包含 tweet_id 和 directory_id）。`
+帖子输入中的 media 是附件数组，每项包含 index、kind（image/video）和 url；只能使用帖子自身的 index，不能猜测或替换 URL。
+
+【处理规则】
+1. classifications 只处理文章目录：每条帖子最多选择一个文章目录的 directory_id；如果文章规则都不匹配，返回 null。只能选择一个目录或 null。
+2. 如果帖子正文中确实包含可复用的图片/视频/其他提示词，才在 prompt_assets 中输出一项；没有完整提示词就不要输出。每条帖子最多提取一个提示词。
+3. prompt_assets 的 directory_id 必须来自提示词目录；content 必须是帖子中实际出现的完整提示词，不能为空，不要根据图片内容臆造提示词。prompt_kind 必须是 image、video 或 other。
+4. media_indexes 只能引用该帖子 media 数组中的 index；图片提示词只能关联 kind=image，视频提示词只能关联 kind=video，other 不关联媒体。没有媒体也可以是有效提示词。
+5. 只返回合法 JSON，不要 Markdown 代码块。格式必须是：{"classifications":[{"tweet_id":"...","directory_id":1或null}],"prompt_assets":[{"tweet_id":"...","directory_id":2,"prompt_kind":"image|video|other","title":"可选标题","content":"完整提示词","media_indexes":[0]}]}。`
   }
   const supplemental = screeningPrompt.trim() || '未配置额外筛选要求。'
   return `你是主题素材库编辑。判断每条 X 原始内容是否真正适合主题目录；宁缺毋滥。不要改写内容，不要评价作者。
@@ -151,6 +179,31 @@ export function parseTopicSourceClassification(text: string) {
       throw new Error(`Duplicate classification for tweet ${item.tweet_id}`)
     }
     seen.add(item.tweet_id)
+  }
+  return parsed
+}
+
+export function parseTopicSourceEvaluation(text: string) {
+  const parsed = evaluationSchema.parse(JSON.parse(cleanJsonText(text)))
+  const seenClassifications = new Set<string>()
+  for (const item of parsed.classifications) {
+    if (seenClassifications.has(item.tweet_id)) {
+      throw new Error(`Duplicate classification for tweet ${item.tweet_id}`)
+    }
+    seenClassifications.add(item.tweet_id)
+  }
+  const seenPrompts = new Set<string>()
+  for (const item of parsed.prompt_assets) {
+    if (seenPrompts.has(item.tweet_id)) {
+      throw new Error(`Duplicate prompt asset for tweet ${item.tweet_id}`)
+    }
+    seenPrompts.add(item.tweet_id)
+    if (new Set(item.media_indexes).size !== item.media_indexes.length) {
+      throw new Error(`Duplicate media index for tweet ${item.tweet_id}`)
+    }
+    if (item.prompt_kind === 'other' && item.media_indexes.length > 0) {
+      throw new Error(`Other prompt cannot reference media for tweet ${item.tweet_id}`)
+    }
   }
   return parsed
 }
@@ -188,7 +241,7 @@ async function startTopicSourceTrace(jobId: number): Promise<TopicSourceTrace | 
   try {
     return {
       execution: await ensureAgentExecution(jobId, {
-        objective: '情报中心：分析 X 订阅内容，并判断是否进入创作资产及其归属文件夹。',
+        objective: '情报中心：分析 X 订阅内容，归类文章并提取可复用提示词及其原帖媒体。',
         skillMode: 'auto',
         skillName: null,
       }),
@@ -290,7 +343,7 @@ async function runMergedTopicSourceJob(
       posts: TopicCandidate[]
     }>(`/assets/ingestion/candidates?${queryParts.join('&')}`, workerHeaders(jobId))
     if (!context.posts.length) {
-      const output = { candidate_count: 0, accepted_count: 0, saved: 0, skipped: 0, decided: 0 }
+      const output = { candidate_count: 0, accepted_count: 0, prompt_count: 0, saved: 0, skipped: 0, decided: 0 }
       await completeStep(jobId, step.id, output)
       step = undefined
       await completeJob(jobId)
@@ -306,31 +359,57 @@ async function runMergedTopicSourceJob(
     }, {
       onMessage: event => appendTopicSourceTrace(jobId, trace, event),
     })
-    const classification = parseTopicSourceClassification(response.text)
+    const evaluation = parseTopicSourceEvaluation(response.text)
     const allowedTweets = new Set(context.posts.map(post => post.tweet_id))
-    const allowedDirectories = new Set(context.directories.map(directory => directory.id))
-    const byTweet = new Map(classification.classifications.map(item => [item.tweet_id, item]))
-    for (const item of classification.classifications) {
+    const articleDirectories = new Set(
+      context.directories.filter(directory => directory.asset_type === 'article').map(directory => directory.id),
+    )
+    const promptDirectories = new Set(
+      context.directories.filter(directory => directory.asset_type === 'prompt').map(directory => directory.id),
+    )
+    const byTweet = new Map(evaluation.classifications.map(item => [item.tweet_id, item]))
+    const postsById = new Map(context.posts.map(post => [post.tweet_id, post]))
+    for (const item of evaluation.classifications) {
       if (!allowedTweets.has(item.tweet_id)) {
         throw new Error(`AI returned an unknown tweet_id: ${item.tweet_id}`)
       }
-      if (item.directory_id !== null && !allowedDirectories.has(item.directory_id)) {
-        throw new Error(`AI returned an unknown directory_id: ${item.directory_id}`)
+      if (item.directory_id !== null && !articleDirectories.has(item.directory_id)) {
+        throw new Error(`AI returned a non-article directory_id: ${item.directory_id}`)
+      }
+    }
+    for (const item of evaluation.prompt_assets) {
+      if (!allowedTweets.has(item.tweet_id)) {
+        throw new Error(`AI returned an unknown prompt tweet_id: ${item.tweet_id}`)
+      }
+      if (!promptDirectories.has(item.directory_id)) {
+        throw new Error(`AI returned a non-prompt directory_id: ${item.directory_id}`)
+      }
+      const post = postsById.get(item.tweet_id)
+      if (!post) throw new Error(`AI returned an unknown prompt tweet_id: ${item.tweet_id}`)
+      const mediaByIndex = new Map((post.media ?? []).map(media => [media.index, media]))
+      for (const index of item.media_indexes) {
+        const media = mediaByIndex.get(index)
+        if (!media) throw new Error(`AI returned an unknown media index: ${index}`)
+        if (media.kind !== item.prompt_kind) {
+          throw new Error(`AI returned media with the wrong kind for tweet ${item.tweet_id}`)
+        }
       }
     }
     const decisions = context.posts.map(post => ({
       tweet_id: post.tweet_id,
       directory_id: byTweet.get(post.tweet_id)?.directory_id ?? null,
     }))
-    const saved = await apiPost<{ saved: number; skipped: number; decided: number }>(
+    const saved = await apiPost<{ saved: number; skipped: number; decided: number; prompt_saved?: number }>(
       '/assets/ingestion/accepted', {
         subscription_id: subscriptionId,
         decisions,
+        prompt_assets: evaluation.prompt_assets,
       }, workerHeaders(jobId),
     )
     const output = {
       candidate_count: context.posts.length,
       accepted_count: decisions.filter(item => item.directory_id !== null).length,
+      prompt_count: evaluation.prompt_assets.length,
       ...saved,
     }
     await completeStep(jobId, step.id, output)

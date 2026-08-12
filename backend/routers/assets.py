@@ -175,9 +175,19 @@ class AssetIngestionDecisionInput(BaseModel):
     directory_id: int | None = None
 
 
+class PromptAssetIngestionInput(BaseModel):
+    tweet_id: str = Field(min_length=1)
+    directory_id: int = Field(gt=0)
+    prompt_kind: Literal["image", "video", "other"]
+    title: str = Field(default="", max_length=300)
+    content: str = Field(min_length=1, max_length=100000)
+    media_indexes: list[int] = Field(default_factory=list)
+
+
 class AssetIngestionAccept(BaseModel):
     subscription_id: int
     decisions: list[AssetIngestionDecisionInput] = Field(default_factory=list)
+    prompt_assets: list[PromptAssetIngestionInput] = Field(default_factory=list)
 
 
 class DailyCandidateRequest(BaseModel):
@@ -362,7 +372,7 @@ async def _selected_ingestion_directories(
         )
         .where(
             XSubscriptionIngestionDirectory.subscription_id == subscription_id,
-            CreativeAssetDirectory.asset_type == "article",
+            CreativeAssetDirectory.asset_type.in_(("article", "prompt")),
         )
         .order_by(CreativeAssetDirectory.id)
     )
@@ -370,7 +380,7 @@ async def _selected_ingestion_directories(
         stmt = stmt.where(CreativeAssetDirectory.id.in_(requested))
     directories = (await db.execute(stmt)).scalars().all()
     if requested and {directory.id for directory in directories} != set(requested):
-        raise HTTPException(422, "只能使用该 X 订阅已选择的文章目录")
+        raise HTTPException(422, "只能使用该 X 订阅已选择的文章或提示词目录")
     unavailable = [
         directory.id for directory in directories
         if not directory.ai_ingestion_enabled
@@ -406,6 +416,32 @@ async def _asset_ingestion_candidates(
         and any(_keyword_matches(post.content, directory.ai_ingestion_keywords or []) for directory in directories)
     ]
 
+
+def _post_media(post: XPost) -> list[dict]:
+    """Return stable, indexed attachment metadata for AI prompt extraction."""
+    raw_media = post.media or []
+    media: list[dict] = []
+    seen_urls: set[str] = set()
+    for item in raw_media:
+        if not isinstance(item, dict):
+            continue
+        kind = str(item.get("kind") or "").strip().lower()
+        url = str(item.get("url") or "").strip()
+        if kind not in {"image", "video"} or not url or url in seen_urls:
+            continue
+        seen_urls.add(url)
+        media.append({"index": len(media), "kind": kind, "url": url})
+    # Posts collected before the media JSON column was introduced still have a
+    # usable cover_image. Preserve it as an image candidate instead of silently
+    # making their prompt attachments disappear.
+    if not media and (post.cover_image or "").strip():
+        media.append({
+            "index": 0,
+            "kind": "image",
+            "url": post.cover_image.strip(),
+        })
+    return media
+
 @router.get("/directories", response_model=list[DirectoryOut])
 async def list_directories(asset_type: AssetType, db: AsyncSession = Depends(get_db)):
     directories = (await db.execute(select(CreativeAssetDirectory).where(CreativeAssetDirectory.asset_type == asset_type).order_by(CreativeAssetDirectory.name))).scalars().all()
@@ -432,8 +468,8 @@ async def get_directory_ingestion_rule(
     directory = await db.get(CreativeAssetDirectory, directory_id)
     if directory is None:
         raise HTTPException(404, "目录不存在")
-    if directory.asset_type != "article":
-        raise HTTPException(422, "只有文章目录可以配置 AI 素材入库")
+    if directory.asset_type not in {"article", "prompt"}:
+        raise HTTPException(422, "只有文章或提示词目录可以配置 AI 素材入库")
     return _directory_ingestion_payload(directory)
 
 
@@ -446,8 +482,8 @@ async def update_directory_ingestion_rule(
     directory = await db.get(CreativeAssetDirectory, directory_id)
     if directory is None:
         raise HTTPException(404, "目录不存在")
-    if directory.asset_type != "article":
-        raise HTTPException(422, "只有文章目录可以配置 AI 素材入库")
+    if directory.asset_type not in {"article", "prompt"}:
+        raise HTTPException(422, "只有文章或提示词目录可以配置 AI 素材入库")
     prompt = body.prompt.strip()
     if body.enabled and not prompt:
         raise HTTPException(422, "启用 AI 素材入库时必须填写规则")
@@ -682,6 +718,7 @@ async def asset_ingestion_candidates(
             {
                 "id": directory.id,
                 "name": directory.name,
+                "asset_type": directory.asset_type,
                 "keywords": list(directory.ai_ingestion_keywords or []),
                 "prompt": directory.ai_ingestion_prompt or "",
             }
@@ -692,6 +729,7 @@ async def asset_ingestion_candidates(
                 "tweet_id": post.tweet_id,
                 "content": post.content,
                 "url": post.url,
+                "media": _post_media(post),
             }
             for post in posts
         ],
@@ -710,8 +748,24 @@ async def save_asset_ingestion_decisions(
     )
     directory_by_id = {directory.id: directory for directory in directories}
     for decision in body.decisions:
-        if decision.directory_id is not None and decision.directory_id not in directory_by_id:
-            raise HTTPException(422, "AI 返回了未选择的文章目录")
+        directory = directory_by_id.get(decision.directory_id) if decision.directory_id is not None else None
+        if decision.directory_id is not None and directory is None:
+            raise HTTPException(422, "AI 返回了未选择的文章或提示词目录")
+        if directory is not None and directory.asset_type != "article":
+            raise HTTPException(422, "文章分类只能选择文章目录")
+
+    prompt_by_tweet: dict[str, PromptAssetIngestionInput] = {}
+    for prompt_input in body.prompt_assets:
+        if prompt_input.tweet_id in prompt_by_tweet:
+            raise HTTPException(422, "同一条帖子只能提取一个提示词资产")
+        prompt_directory = directory_by_id.get(prompt_input.directory_id)
+        if prompt_directory is None:
+            raise HTTPException(422, "AI 返回了未选择的提示词目录")
+        if prompt_directory.asset_type != "prompt":
+            raise HTTPException(422, "提示词资产只能选择提示词目录")
+        if not prompt_input.content.strip():
+            raise HTTPException(422, "提示词正文不能为空")
+        prompt_by_tweet[prompt_input.tweet_id] = prompt_input
 
     posts = await _asset_ingestion_candidates(
         db, body.subscription_id, directories,
@@ -722,57 +776,138 @@ async def save_asset_ingestion_decisions(
             AssetIngestionDecision.subscription_id == body.subscription_id,
         )
     )).scalars().all())
-    seen: set[str] = set()
     saved = 0
     skipped = 0
     decided = 0
+    prompt_saved = 0
+    media_saved = 0
+    prompt_skipped = 0
+    decision_by_tweet: dict[str, AssetIngestionDecisionInput] = {}
     for decision in body.decisions:
-        if decision.tweet_id in seen:
+        if decision.tweet_id in decision_by_tweet:
             raise HTTPException(422, "同一条帖子不能提交多个分类结果")
-        seen.add(decision.tweet_id)
-        if decision.tweet_id in existing_ids:
+        decision_by_tweet[decision.tweet_id] = decision
+
+    ordered_tweet_ids = list(decision_by_tweet)
+    ordered_tweet_ids.extend(
+        tweet_id for tweet_id in prompt_by_tweet if tweet_id not in decision_by_tweet
+    )
+    for tweet_id in ordered_tweet_ids:
+        decision = decision_by_tweet.get(tweet_id)
+        if tweet_id in existing_ids:
             skipped += 1
+            if tweet_id in prompt_by_tweet:
+                prompt_skipped += 1
             continue
-        post = allowed.get(decision.tweet_id)
+        post = allowed.get(tweet_id)
         if post is None:
             skipped += 1
+            if tweet_id in prompt_by_tweet:
+                prompt_skipped += 1
             continue
         db.add(AssetIngestionDecision(
             subscription_id=body.subscription_id,
             tweet_id=post.tweet_id,
-            directory_id=decision.directory_id,
+            directory_id=decision.directory_id if decision is not None else None,
         ))
         decided += 1
-        if decision.directory_id is None:
+        if decision is not None and decision.directory_id is not None:
+            directory = directory_by_id[decision.directory_id]
+            try:
+                await _ensure_unique_article(
+                    db,
+                    content=post.content,
+                    url=post.url,
+                    directory=directory.name,
+                )
+            except HTTPException as exc:
+                if exc.status_code == 409:
+                    skipped += 1
+                else:
+                    raise
+            else:
+                db.add(CreativeAsset(
+                    asset_type="article",
+                    media_kind="",
+                    title="",
+                    content=post.content,
+                    url=post.url,
+                    media_type="",
+                    filename="",
+                    directory=directory.name,
+                    tags=[],
+                    source="x_topic",
+                ))
+                saved += 1
+
+        prompt_input = prompt_by_tweet.get(tweet_id)
+        if prompt_input is None:
             continue
-        directory = directory_by_id[decision.directory_id]
-        try:
-            await _ensure_unique_article(
-                db,
-                content=post.content,
-                url=post.url,
-                directory=directory.name,
-            )
-        except HTTPException as exc:
-            if exc.status_code == 409:
-                skipped += 1
-                continue
-            raise
-        db.add(CreativeAsset(
-            asset_type="article",
+        post_media = _post_media(post)
+        selected_indexes = list(dict.fromkeys(prompt_input.media_indexes))
+        if len(selected_indexes) != len(prompt_input.media_indexes):
+            raise HTTPException(422, "同一个媒体不能重复关联到提示词")
+        if prompt_input.prompt_kind == "other" and selected_indexes:
+            raise HTTPException(422, "其他提示词不能关联图片或视频")
+        selected_media: list[dict] = []
+        for index in selected_indexes:
+            if index < 0 or index >= len(post_media):
+                raise HTTPException(422, "AI 返回了不存在的帖子媒体索引")
+            media = post_media[index]
+            if media["kind"] != prompt_input.prompt_kind:
+                raise HTTPException(422, "提示词类型与关联媒体类型不匹配")
+            selected_media.append(media)
+        prompt_directory = directory_by_id[prompt_input.directory_id]
+        prompt_asset = CreativeAsset(
+            asset_type="prompt",
+            prompt_kind=prompt_input.prompt_kind,
             media_kind="",
-            title="",
-            content=post.content,
+            title=prompt_input.title.strip() or post.content.strip().splitlines()[0][:120],
+            content=prompt_input.content.strip(),
             url=post.url,
             media_type="",
             filename="",
-            directory=directory.name,
+            directory=prompt_directory.name,
             tags=[],
             source="x_topic",
-        ))
-        saved += 1
+        )
+        db.add(prompt_asset)
+        await db.flush()
+        for index, media in enumerate(selected_media):
+            media_asset = CreativeAsset(
+                asset_type="media",
+                prompt_kind="",
+                media_kind=media["kind"],
+                title=f"X 原帖附件 {index + 1}",
+                content="",
+                url=media["url"],
+                media_type=f"{media['kind']}/*",
+                filename="",
+                directory="",
+                tags=[],
+                source="x_topic",
+            )
+            db.add(media_asset)
+            await db.flush()
+            db.add(PromptGeneration(
+                prompt_asset_id=prompt_asset.id,
+                media_asset_id=media_asset.id,
+                provider="x",
+                model="原帖附件",
+                status="succeeded",
+                generated_at=datetime.now(timezone.utc),
+            ))
+            media_saved += 1
+        prompt_saved += 1
     await db.commit()
-    return {"saved": saved, "skipped": skipped, "decided": decided}
+    result = {"saved": saved, "skipped": skipped, "decided": decided}
+    if body.prompt_assets:
+        result.update({
+            "prompt_saved": prompt_saved,
+            "media_saved": media_saved,
+            "prompt_skipped": prompt_skipped,
+        })
+    return result
 
 
 @router.get(

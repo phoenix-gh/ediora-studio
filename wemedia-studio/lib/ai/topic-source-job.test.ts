@@ -4,6 +4,7 @@ import type { generateText } from 'ai'
 import {
   buildTopicSourceInstructions,
   generateTopicSourceText,
+  parseTopicSourceEvaluation,
   parseTopicSourceClassification,
   parseTopicSourceDecision,
 } from './topic-source-job'
@@ -48,6 +49,8 @@ describe('topic source AI decision contract', () => {
     expect(instructions).toContain('只接受工具实操。')
     expect(instructions).toContain('只能选择一个目录或 null')
     expect(instructions).toContain('directory_id')
+    expect(instructions).toContain('prompt_assets')
+    expect(instructions).toContain('media_indexes')
   })
 
   it('parses one-folder classifications and rejects duplicate or invalid directory values', () => {
@@ -65,6 +68,28 @@ describe('topic source AI decision contract', () => {
     expect(() => parseTopicSourceClassification(
       '{"classifications":[{"tweet_id":"a","directory_id":"11"}]}',
     )).toThrow()
+  })
+
+  it('requires prompt text and validates one prompt folder plus attached media indexes', () => {
+    const parsed = parseTopicSourceEvaluation(JSON.stringify({
+      classifications: [{ tweet_id: 'a', directory_id: null }],
+      prompt_assets: [{
+        tweet_id: 'a',
+        directory_id: 21,
+        prompt_kind: 'image',
+        title: '海报提示词',
+        content: '电影感未来城市海报',
+        media_indexes: [0],
+      }],
+    }))
+
+    expect(parsed.prompt_assets[0].content).toBe('电影感未来城市海报')
+    expect(() => parseTopicSourceEvaluation(JSON.stringify({
+      classifications: [],
+      prompt_assets: [{
+        tweet_id: 'a', directory_id: 21, prompt_kind: 'image', content: ' ', media_indexes: [],
+      }],
+    }))).toThrow()
   })
 
   it('persists the model request and response around topic source evaluation', async () => {

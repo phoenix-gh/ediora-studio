@@ -12,6 +12,7 @@ import {
   setWorkbenchSettingsOpen,
 } from '../content/workbench-state.js'
 import { copyText } from '../content/workbench-clipboard.js'
+import * as workbenchRuntime from '../content/workbench-runtime.js'
 
 const rawDrafts = [
   {
@@ -128,4 +129,17 @@ test('copies without leaking body text on failure', async () => {
       return true
     },
   )
+})
+
+test('fully hides the empty preview once a short draft is selected', () => {
+  assert.equal(typeof workbenchRuntime.syncPreviewVisibility, 'function')
+
+  const previewEmpty = { hidden: false, style: { display: '' } }
+  const preview = { hidden: true }
+
+  workbenchRuntime.syncPreviewVisibility({ previewEmpty, preview, hasDraft: true })
+
+  assert.equal(previewEmpty.hidden, true)
+  assert.equal(previewEmpty.style.display, 'none')
+  assert.equal(preview.hidden, false)
 })

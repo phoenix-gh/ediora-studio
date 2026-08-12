@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -87,6 +87,20 @@ beforeEach(() => {
   mocks.deletePromptGeneration.mockResolvedValue(undefined)
 })
 
+function renderPromptWorkspace(selected = prompt()) {
+  return render(
+    <PromptAssetWorkspace
+      assets={[selected]}
+      directories={[]}
+      selected={selected}
+      onChange={vi.fn()}
+      onDelete={vi.fn()}
+      onSave={vi.fn()}
+      onSelect={vi.fn()}
+    />,
+  )
+}
+
 describe('PromptAssetWorkspace', () => {
   it('renders prompt editing fields and recent generation history', async () => {
     mocks.listPromptGenerations.mockResolvedValue([
@@ -112,6 +126,39 @@ describe('PromptAssetWorkspace', () => {
       'http://media.test/api/uploads/generated.png',
     )
     expect(screen.getByText('模型：gpt-image-1')).toBeVisible()
+  })
+
+  it('renders each generation with the current prompt beside an uncropped image', async () => {
+    mocks.listPromptGenerations.mockResolvedValue([
+      generation({ status: 'succeeded', media_asset_id: media.id, media }),
+    ])
+    renderPromptWorkspace()
+
+    const promptPanel = (await screen.findByText('当前提示词')).parentElement
+    expect(promptPanel).toBeVisible()
+    expect(within(promptPanel!).getByText('一张未来城市海报')).toBeVisible()
+    expect(await screen.findByRole('img', { name: '生成图片' })).toHaveClass('object-contain')
+    expect(screen.getByRole('img', { name: '生成图片' })).not.toHaveClass('object-cover')
+  })
+
+  it('opens a complete image preview and changes zoom with the wheel', async () => {
+    const user = userEvent.setup()
+    mocks.listPromptGenerations.mockResolvedValue([
+      generation({ status: 'succeeded', media_asset_id: media.id, media }),
+    ])
+    renderPromptWorkspace()
+
+    await user.click(await screen.findByRole('button', { name: '预览图片 生成图片' }))
+    const preview = await screen.findByRole('dialog')
+    const viewport = within(preview).getByLabelText('图片预览区域')
+    const previewImage = within(preview).getByRole('img', { name: '生成图片' })
+    expect(previewImage).toHaveClass('object-contain')
+
+    fireEvent.wheel(viewport, { deltaY: -100 })
+    expect(previewImage).toHaveAttribute('data-scale', '1.2')
+
+    await user.click(within(preview).getByRole('button', { name: '重置缩放' }))
+    expect(previewImage).toHaveAttribute('data-scale', '1')
   })
 
   it('starts image generation and does not expose it for video prompts', async () => {

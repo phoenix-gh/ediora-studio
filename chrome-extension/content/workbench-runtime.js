@@ -167,6 +167,12 @@ function createElement(document, tag, className, text) {
   return element
 }
 
+export function syncPreviewVisibility({ previewEmpty, preview, hasDraft }) {
+  previewEmpty.hidden = hasDraft
+  previewEmpty.style.display = hasDraft ? 'none' : ''
+  preview.hidden = !hasDraft
+}
+
 export function mountWorkbench({ document, window, chromeApi = globalThis.chrome }) {
   if (!document || !window || !chromeApi?.runtime) return { destroy() {} }
 
@@ -292,8 +298,7 @@ export function mountWorkbench({ document, window, chromeApi = globalThis.chrome
 
   function renderPreview() {
     const draft = getSelectedDraft(state)
-    previewEmpty.hidden = Boolean(draft)
-    preview.hidden = !draft
+    syncPreviewVisibility({ previewEmpty, preview, hasDraft: Boolean(draft) })
     if (!draft) {
       copyButton.disabled = true
       publishButton.disabled = true

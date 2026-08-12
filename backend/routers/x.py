@@ -77,6 +77,10 @@ class TimelineBackfillRequest(BaseModel):
     days: int = Field(default=7, ge=1, le=90)
 
 
+class TimelineIngestionBackfillRequest(BaseModel):
+    days: int = Field(default=7, ge=1, le=90)
+
+
 # ─── Helpers ─────────────────────────────────────────────────────────────────
 
 def _default_label(url: str) -> str:
@@ -112,12 +116,12 @@ async def _replace_ingestion_directories(
         invalid = [
             directory_id for directory_id in unique_ids
             if directory_id not in by_id
-            or by_id[directory_id].asset_type != "article"
+            or by_id[directory_id].asset_type not in {"article", "prompt"}
             or not by_id[directory_id].ai_ingestion_enabled
             or not (by_id[directory_id].ai_ingestion_prompt or "").strip()
         ]
         if invalid:
-            raise HTTPException(422, "只能选择已启用 AI 入库规则的文章目录")
+            raise HTTPException(422, "只能选择已启用 AI 入库规则的文章或提示词目录")
 
     await db.execute(delete(XSubscriptionIngestionDirectory).where(
         XSubscriptionIngestionDirectory.subscription_id == subscription_id,
@@ -309,6 +313,7 @@ class PostOut(BaseModel):
     views: int
     author_avatar: str = ""
     cover_image: str = ""
+    media: list[dict] = Field(default_factory=list)
     is_reply: bool = False
     model_config = {"from_attributes": True}
 
@@ -348,6 +353,7 @@ def _upsert_post_stmt(db: AsyncSession, sub_id: int, p):
         replies=p.replies, reposts=p.reposts,
         likes=p.likes, views=p.views,
         author_avatar=p.author_avatar, cover_image=p.cover_image,
+        media=getattr(p, "media", []),
         possibly_sensitive=getattr(p, "possibly_sensitive", False),
         is_reply=getattr(p, "is_reply", False),
         raw_markdown=p.raw_markdown,
@@ -361,6 +367,7 @@ def _upsert_post_stmt(db: AsyncSession, sub_id: int, p):
             "views": stmt.excluded.views,
             "author_avatar": stmt.excluded.author_avatar,
             "cover_image": stmt.excluded.cover_image,
+            "media": stmt.excluded.media,
             "collected_at": stmt.excluded.collected_at,
             "is_reply": stmt.excluded.is_reply,
         },
@@ -483,6 +490,27 @@ async def backfill_timeline_subscription(
     except Exception as e:
         raise HTTPException(502, str(e))
     return {"ok": True, "new_posts": new_posts}
+
+
+@router.post("/subscriptions/{sub_id}/ingestion-backfill")
+async def backfill_subscription_ingestion(
+    sub_id: int,
+    body: TimelineIngestionBackfillRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    sub = await db.get(XSubscription, sub_id)
+    if not sub:
+        raise HTTPException(404, "订阅不存在")
+    from topic_source_service import (
+        TopicSourceConfigurationError,
+        dispatch_topic_source_backfill,
+    )
+
+    try:
+        result = await dispatch_topic_source_backfill(db, sub_id, body.days)
+    except TopicSourceConfigurationError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return {"ok": True, "days": body.days, **result}
 
 
 @router.post("/collect-all")

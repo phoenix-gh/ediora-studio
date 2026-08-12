@@ -153,7 +153,7 @@ export function AssetsClient({
       return
     }
     const aiIngestionPrompt = form.aiIngestionPrompt.trim()
-    if (type === 'article' && form.aiIngestionEnabled && !aiIngestionPrompt) {
+    if ((type === 'article' || type === 'prompt') && form.aiIngestionEnabled && !aiIngestionPrompt) {
       setDirectoryDialog(value => value ? { ...value, error: '启用 AI 素材入库时必须填写规则。' } : value)
       return
     }
@@ -169,7 +169,7 @@ export function AssetsClient({
         const parent = directories.find(item => item.name === directory)
         savedDirectory = await createCreativeAssetDirectory(name, type, parent?.id ?? null)
       }
-      if (type === 'article') {
+      if (type === 'article' || type === 'prompt') {
         const rule = await updateCreativeAssetDirectoryIngestionRule(savedDirectory.id, {
           enabled: form.aiIngestionEnabled,
           keywords: form.aiIngestionKeywords.split(/[,，]/).map(value => value.trim()).filter(Boolean),
@@ -321,6 +321,7 @@ export function AssetsClient({
         ? selected.prompt_kind
         : 'other' as const,
       title: selected.title,
+      url: selected.url,
     }
     clearOperationError(assetId)
     setSavingAssetId(assetId)
@@ -333,6 +334,7 @@ export function AssetsClient({
         prompt_kind: item.prompt_kind === snapshot.prompt_kind ? updated.prompt_kind : item.prompt_kind,
         title: item.title === snapshot.title ? updated.title : item.title,
         updated_at: updated.updated_at,
+        url: item.url === snapshot.url ? updated.url : item.url,
       }))
     } catch {
       setOperationErrors(errors => ({ ...errors, [assetId]: '更新提示词资产失败，请重试。' }))
@@ -483,18 +485,18 @@ export function AssetsClient({
         <DialogHeader><DialogTitle>{directoryDialog?.item ? '重命名目录' : '新增目录'}</DialogTitle></DialogHeader>
         <div className="space-y-4">
           <div className="grid gap-1.5"><Label htmlFor="asset-directory-name">目录名称</Label><Input aria-describedby={directoryDialog?.error ? 'directory-form-error' : undefined} aria-invalid={Boolean(directoryDialog?.error) || undefined} autoFocus disabled={directoryDialog?.busy} id="asset-directory-name" onChange={event => setDirectoryDialog(value => value ? { ...value, error: '', name: event.target.value } : value)} placeholder="目录名称" value={directoryDialog?.name ?? ''} /></div>
-          {type === 'article' ? (
+          {type === 'article' || type === 'prompt' ? (
             <section className="space-y-3 rounded-lg border border-border p-3">
               <div>
                 <p className="text-sm font-medium">AI 素材入库</p>
-                <p className="text-xs text-muted-foreground">X 订阅选择这个文件夹后，AI 会按这条规则判断是否归入。</p>
+                <p className="text-xs text-muted-foreground">X 订阅选择这个文件夹后，AI 会按这条规则判断是否归入{type === 'prompt' ? '并提取提示词' : ''}。</p>
               </div>
               <label className="flex items-center justify-between gap-3 rounded-md bg-muted/40 px-3 py-2 text-xs" htmlFor="directory-ai-ingestion-enabled">
                 <span>启用 AI 素材入库</span>
                 <Switch checked={directoryDialog?.aiIngestionEnabled ?? false} disabled={directoryDialog?.busy} id="directory-ai-ingestion-enabled" onCheckedChange={checked => setDirectoryDialog(value => value ? { ...value, aiIngestionEnabled: checked, error: '' } : value)} />
               </label>
               <div className="grid gap-1.5"><Label htmlFor="directory-ai-ingestion-keywords">AI 入库关键词</Label><Input disabled={directoryDialog?.busy} id="directory-ai-ingestion-keywords" onChange={event => setDirectoryDialog(value => value ? { ...value, aiIngestionKeywords: event.target.value, error: '' } : value)} placeholder="关键词（逗号分隔，可留空）" value={directoryDialog?.aiIngestionKeywords ?? ''} /></div>
-              <div className="grid gap-1.5"><Label htmlFor="directory-ai-ingestion-prompt">AI 入库规则</Label><Textarea disabled={directoryDialog?.busy} id="directory-ai-ingestion-prompt" maxLength={4000} onChange={event => setDirectoryDialog(value => value ? { ...value, aiIngestionPrompt: event.target.value, error: '' } : value)} placeholder="例如：只接受有具体案例、数据或可执行方法的内容。" rows={4} value={directoryDialog?.aiIngestionPrompt ?? ''} /></div>
+              <div className="grid gap-1.5"><Label htmlFor="directory-ai-ingestion-prompt">AI 入库规则</Label><Textarea disabled={directoryDialog?.busy} id="directory-ai-ingestion-prompt" maxLength={4000} onChange={event => setDirectoryDialog(value => value ? { ...value, aiIngestionPrompt: event.target.value, error: '' } : value)} placeholder={type === 'prompt' ? '例如：只接受帖子中完整、可直接复用的图片或视频提示词。' : '例如：只接受有具体案例、数据或可执行方法的内容。'} rows={4} value={directoryDialog?.aiIngestionPrompt ?? ''} /></div>
             </section>
           ) : null}
         </div>

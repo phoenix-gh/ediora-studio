@@ -37,6 +37,7 @@ import {
   collectXSubscription,
   collectAllXSubscriptions,
   backfillXSubscription,
+  backfillXSubscriptionIngestion,
 } from '@/lib/api/x'
 import { externalHttpUrl } from './x-post-url'
 import { XSubscriptionDialog } from './XSubscriptionDialog'
@@ -164,6 +165,18 @@ export function XClient({
   const handleBackfill = async (subscription: XSubscription, days: number) => {
     const result = await backfillXSubscription(subscription.id, days)
     toast.success(`@${subscription.label}：回溯 ${days} 天，新增 ${result.new_posts} 帖`)
+    await Promise.all([reloadSubs(), reloadPosts()])
+  }
+
+  const handleIngestExisting = async (subscription: XSubscription, days: number) => {
+    const result = await backfillXSubscriptionIngestion(subscription.id, days)
+    if (result.candidate_count === 0) {
+      toast.success(`@${subscription.label}：最近 ${days} 天没有待处理的帖子（已跳过 ${result.skipped_count} 条）`)
+    } else {
+      toast.success(
+        `@${subscription.label}：待处理 ${result.candidate_count} 条，跳过 ${result.skipped_count} 条，已创建 ${result.created} 个任务`,
+      )
+    }
     await Promise.all([reloadSubs(), reloadPosts()])
   }
 
@@ -315,6 +328,7 @@ export function XClient({
           onDelete={handleDelete}
           onCollect={handleCollectOne}
           onBackfill={handleBackfill}
+          onIngestExisting={handleIngestExisting}
         />
       ) : null}
     </div>

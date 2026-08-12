@@ -20,7 +20,7 @@ Real feedgrab tweet dict shape (from feedgrab.fetchers.twitter_graphql.extract_t
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -39,6 +39,7 @@ class ParsedPost:
     views: int = 0
     author_avatar: str = ""    # profile image URL from feedgrab's _raw_result
     cover_image: str = ""      # first attached image (tweets with photos)
+    media: list[dict] = field(default_factory=list)  # all attached images/videos
     raw_markdown: str = ""
     possibly_sensitive: bool = False
     is_reply: bool = False     # in_reply_to_status_id 非空 ⇒ 这条是对别人帖子的回复
@@ -127,8 +128,24 @@ def _tweet_dict_to_parsed_post(d: dict) -> Optional[ParsedPost]:
     views = int(d.get("views", 0) or 0)
 
     author_avatar = _extract_author_avatar(d)
-    images = d.get("images") or []
-    cover_image = images[0] if images and isinstance(images[0], str) else ""
+    media: list[dict] = []
+    seen_media: set[str] = set()
+    for kind, values in (("image", d.get("images")), ("video", d.get("videos"))):
+        for value in values or []:
+            if isinstance(value, str):
+                media_url = value.strip()
+            elif isinstance(value, dict):
+                media_url = str(value.get("url") or value.get("src") or "").strip()
+            else:
+                media_url = ""
+            if not media_url or media_url in seen_media:
+                continue
+            seen_media.add(media_url)
+            media.append({"kind": kind, "url": media_url})
+    cover_image = next(
+        (item["url"] for item in media if item["kind"] == "image"),
+        "",
+    )
 
     raw_markdown = _render_markdown(d)
 
@@ -145,6 +162,7 @@ def _tweet_dict_to_parsed_post(d: dict) -> Optional[ParsedPost]:
         views=views,
         author_avatar=author_avatar,
         cover_image=cover_image,
+        media=media,
         raw_markdown=raw_markdown,
         possibly_sensitive=bool(d.get("possibly_sensitive", False)),
         is_reply=bool(str(d.get("in_reply_to_status_id", "") or "").strip()),

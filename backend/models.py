@@ -214,6 +214,7 @@ class XPost(Base):
     views: Mapped[int] = mapped_column(Integer, default=0)
     author_avatar: Mapped[str] = mapped_column(String, default="")
     cover_image: Mapped[str] = mapped_column(String, default="")
+    media: Mapped[list] = mapped_column(JSON, default=list)
     possibly_sensitive: Mapped[bool] = mapped_column(Boolean, default=False)
     is_reply: Mapped[bool] = mapped_column(Boolean, default=False)
     raw_markdown: Mapped[str] = mapped_column(Text, default="")
@@ -1134,7 +1135,7 @@ class TopicSourceDecision(Base):
 
 
 class XSubscriptionIngestionDirectory(Base):
-    """An X subscription's selected article directories for AI ingestion."""
+    """An X subscription's selected article or prompt directories for AI ingestion."""
     __tablename__ = "x_subscription_ingestion_directories"
     __table_args__ = (
         UniqueConstraint(

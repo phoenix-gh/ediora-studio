@@ -1226,6 +1226,7 @@ async def init_db():
         await _add_columns(conn, "x_posts", {
             "author_avatar": "VARCHAR NOT NULL DEFAULT ''",
             "cover_image": "VARCHAR NOT NULL DEFAULT ''",
+            "media": "JSON NOT NULL DEFAULT '[]'::json",
         })
         # X search-subscription + ref-consumer schema (idempotent)
         await conn.execute(text("ALTER TABLE x_posts ADD COLUMN IF NOT EXISTS possibly_sensitive BOOLEAN NOT NULL DEFAULT FALSE"))

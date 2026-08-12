@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import Awaitable, Callable
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from content_jobs import (
@@ -17,10 +17,16 @@ from content_jobs import (
 )
 from job_queue import enqueue_job
 from models import (
+    AssetIngestionDecision,
     ContentJob,
     CreativeAssetDirectory,
+    XPost,
     XSubscriptionIngestionDirectory,
 )
+
+
+class TopicSourceConfigurationError(ValueError):
+    """The subscription has no usable AI material-ingestion directory."""
 
 
 def _idempotency_key(subscription_id: int, tweet_ids: list[str]) -> str:
@@ -55,7 +61,7 @@ async def dispatch_topic_source_posts(
     *,
     enqueue: Callable[[int], Awaitable[None]] = enqueue_job,
 ) -> dict:
-    """Create one merged AI classification job for a fresh X-post batch."""
+    """Create one merged AI classification and prompt-extraction job for fresh X posts."""
     unique_ids = sorted(set(tweet_ids))
     if not unique_ids:
         return {"created": 0, "enqueued": 0, "errors": []}
@@ -67,7 +73,7 @@ async def dispatch_topic_source_posts(
         )
         .where(
             XSubscriptionIngestionDirectory.subscription_id == subscription_id,
-            CreativeAssetDirectory.asset_type == "article",
+            CreativeAssetDirectory.asset_type.in_(("article", "prompt")),
             CreativeAssetDirectory.ai_ingestion_enabled.is_(True),
         )
         .order_by(CreativeAssetDirectory.id)
@@ -86,7 +92,7 @@ async def dispatch_topic_source_posts(
     job = await create_job(
         db,
         flow="topic_source",
-        title="X：多文件夹 AI 素材归类",
+        title="X：AI 素材归类与提示词提取",
         input_data={
             "subscription_id": subscription_id,
             "directory_ids": [directory.id for directory in directories],
@@ -102,6 +108,72 @@ async def dispatch_topic_source_posts(
     except Exception as exc:  # DB job remains queued for reconciliation/retry.
         errors.append(f"订阅 {subscription_id}: {exc}")
     return {"created": created, "enqueued": enqueued, "errors": errors}
+
+
+async def dispatch_topic_source_backfill(
+    db: AsyncSession,
+    subscription_id: int,
+    days: int,
+    *,
+    enqueue: Callable[[int], Awaitable[None]] = enqueue_job,
+) -> dict:
+    """Dispatch locally stored, undecided X posts from a recent time window."""
+    directories = (await db.execute(
+        select(CreativeAssetDirectory)
+        .join(
+            XSubscriptionIngestionDirectory,
+            XSubscriptionIngestionDirectory.directory_id == CreativeAssetDirectory.id,
+        )
+        .where(
+            XSubscriptionIngestionDirectory.subscription_id == subscription_id,
+            CreativeAssetDirectory.asset_type.in_(("article", "prompt")),
+            CreativeAssetDirectory.ai_ingestion_enabled.is_(True),
+        )
+    )).scalars().all()
+    if not any((directory.ai_ingestion_prompt or "").strip() for directory in directories):
+        raise TopicSourceConfigurationError(
+            "X 订阅未配置有效的 AI 素材入库目录"
+        )
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    window = (
+        XPost.subscription_id == subscription_id,
+        XPost.published_at >= cutoff,
+    )
+    total_count = int((await db.scalar(
+        select(func.count(XPost.tweet_id)).where(*window)
+    )) or 0)
+    pending_ids = list((await db.execute(
+        select(XPost.tweet_id)
+        .where(
+            *window,
+            ~select(AssetIngestionDecision.id)
+            .where(
+                AssetIngestionDecision.subscription_id == subscription_id,
+                AssetIngestionDecision.tweet_id == XPost.tweet_id,
+            )
+            .exists(),
+        )
+        .order_by(desc(XPost.published_at), desc(XPost.tweet_id))
+    )).scalars().all())
+    result = {
+        "candidate_count": len(pending_ids),
+        "skipped_count": max(0, total_count - len(pending_ids)),
+        "created": 0,
+        "enqueued": 0,
+        "errors": [],
+    }
+    for start in range(0, len(pending_ids), 50):
+        dispatched = await dispatch_topic_source_posts(
+            db,
+            subscription_id,
+            pending_ids[start:start + 50],
+            enqueue=enqueue,
+        )
+        result["created"] += dispatched["created"]
+        result["enqueued"] += dispatched["enqueued"]
+        result["errors"].extend(dispatched["errors"])
+    return result
 
 
 async def reconcile_topic_source_jobs(

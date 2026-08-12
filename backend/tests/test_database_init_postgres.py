@@ -81,6 +81,26 @@ def test_init_db_twice_creates_postgresql_core_tables(postgres_env):
         "scene_plan",
         "render_input",
     } <= tables["text_video_projects"]
+    assert "media" in tables["x_posts"]
+
+
+def test_init_db_repairs_missing_x_post_media_column(postgres_env):
+    _reload_database_modules()
+    import models  # noqa: F401
+    from database import engine, init_db
+
+    async def run():
+        await init_db()
+        async with engine.begin() as connection:
+            await connection.execute(text("ALTER TABLE x_posts DROP COLUMN media"))
+        await init_db()
+        async with engine.connect() as connection:
+            snapshot = await _table_snapshot(connection)
+        await engine.dispose()
+        return snapshot
+
+    tables = asyncio.run(run())
+    assert "media" in tables["x_posts"]
     assert {"sample_count", "sample_rate"} <= tables[
         "text_video_speech_assets"
     ]

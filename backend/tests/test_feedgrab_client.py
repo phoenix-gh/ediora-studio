@@ -57,6 +57,24 @@ def test_parses_basic_tweet():
     assert "Mars by 2030" in p.raw_markdown
 
 
+def test_parses_all_attached_images_and_videos_for_prompt_ingestion():
+    tweet = _tweet_dict("media-post")
+    tweet["images"] = [
+        "https://pbs.twimg.com/media/one.jpg",
+        "https://pbs.twimg.com/media/two.jpg",
+    ]
+    tweet["videos"] = ["https://video.twimg.com/ext_tw_video/three.mp4"]
+
+    parsed = _tweet_dict_to_parsed_post(tweet)
+
+    assert parsed.cover_image == "https://pbs.twimg.com/media/one.jpg"
+    assert parsed.media == [
+        {"kind": "image", "url": "https://pbs.twimg.com/media/one.jpg"},
+        {"kind": "image", "url": "https://pbs.twimg.com/media/two.jpg"},
+        {"kind": "video", "url": "https://video.twimg.com/ext_tw_video/three.mp4"},
+    ]
+
+
 def test_is_reply_flag_from_in_reply_to_status_id():
     d = _tweet_dict("222")
     d["in_reply_to_status_id"] = "111"

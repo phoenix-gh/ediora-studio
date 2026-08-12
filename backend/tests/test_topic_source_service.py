@@ -2,7 +2,7 @@
 
 import asyncio
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import select
@@ -57,6 +57,12 @@ def test_new_x_posts_dispatch_one_merged_topic_job_per_subscription(service_env)
                     ai_ingestion_enabled=True,
                     ai_ingestion_prompt="AI 工具",
                 ),
+                CreativeAssetDirectory(
+                    name="图片提示词",
+                    asset_type="prompt",
+                    ai_ingestion_enabled=True,
+                    ai_ingestion_prompt="只接受可复用的图片提示词",
+                ),
             ]
             db.add_all(directories)
             await db.flush()
@@ -68,6 +74,10 @@ def test_new_x_posts_dispatch_one_merged_topic_job_per_subscription(service_env)
                 XSubscriptionIngestionDirectory(
                     subscription_id=subscription.id,
                     directory_id=directories[1].id,
+                ),
+                XSubscriptionIngestionDirectory(
+                    subscription_id=subscription.id,
+                    directory_id=directories[2].id,
                 ),
             ])
             await db.commit()
@@ -84,11 +94,227 @@ def test_new_x_posts_dispatch_one_merged_topic_job_per_subscription(service_env)
     assert [job.input_data for job in jobs] == [
         {
             "subscription_id": 1,
-            "directory_ids": [1, 2],
+            "directory_ids": [1, 2, 3],
             "tweet_ids": ["tweet-1", "tweet-2"],
         },
     ]
     assert enqueued == [job.id for job in jobs]
+
+
+def test_backfill_dispatches_only_undecided_posts_inside_window(service_env):
+    from database import SessionLocal
+    from models import (
+        AssetIngestionDecision,
+        ContentJob,
+        CreativeAssetDirectory,
+        XPost,
+        XSubscription,
+        XSubscriptionIngestionDirectory,
+    )
+    from topic_source_service import dispatch_topic_source_backfill
+
+    enqueued: list[int] = []
+
+    async def enqueue(job_id: int):
+        enqueued.append(job_id)
+
+    async def run():
+        async with SessionLocal() as db:
+            now = datetime.now(timezone.utc)
+            subscription = XSubscription(
+                url="https://x.com/backfill-window",
+                label="Backfill window",
+            )
+            directory = CreativeAssetDirectory(
+                name="回填文章",
+                asset_type="article",
+                ai_ingestion_enabled=True,
+                ai_ingestion_prompt="只接受可复用的文章素材",
+            )
+            db.add_all([subscription, directory])
+            await db.flush()
+            db.add(XSubscriptionIngestionDirectory(
+                subscription_id=subscription.id,
+                directory_id=directory.id,
+            ))
+            db.add_all([
+                XPost(
+                    tweet_id="decided-accepted",
+                    subscription_id=subscription.id,
+                    username="author",
+                    content="已处理的文章",
+                    url="https://x.com/author/status/1",
+                    published_at=now - timedelta(days=2),
+                ),
+                XPost(
+                    tweet_id="decided-rejected",
+                    subscription_id=subscription.id,
+                    username="author",
+                    content="已判断不入库的文章",
+                    url="https://x.com/author/status/2",
+                    published_at=now - timedelta(days=3),
+                ),
+                XPost(
+                    tweet_id="pending-new",
+                    subscription_id=subscription.id,
+                    username="author",
+                    content="等待处理的新文章",
+                    url="https://x.com/author/status/3",
+                    published_at=now - timedelta(days=1),
+                ),
+                XPost(
+                    tweet_id="pending-old",
+                    subscription_id=subscription.id,
+                    username="author",
+                    content="等待处理的旧文章",
+                    url="https://x.com/author/status/4",
+                    published_at=now - timedelta(days=8),
+                ),
+                XPost(
+                    tweet_id="pending-second",
+                    subscription_id=subscription.id,
+                    username="author",
+                    content="等待处理的第二篇文章",
+                    url="https://x.com/author/status/5",
+                    published_at=now - timedelta(days=4),
+                ),
+            ])
+            await db.flush()
+            db.add_all([
+                AssetIngestionDecision(
+                    subscription_id=subscription.id,
+                    tweet_id="decided-accepted",
+                    directory_id=directory.id,
+                ),
+                AssetIngestionDecision(
+                    subscription_id=subscription.id,
+                    tweet_id="decided-rejected",
+                    directory_id=None,
+                ),
+            ])
+            await db.commit()
+
+            first = await dispatch_topic_source_backfill(
+                db, subscription.id, 7, enqueue=enqueue,
+            )
+            jobs_after_first = (await db.execute(
+                select(ContentJob).order_by(ContentJob.id)
+            )).scalars().all()
+
+            db.add_all([
+                AssetIngestionDecision(
+                    subscription_id=subscription.id,
+                    tweet_id="pending-new",
+                    directory_id=directory.id,
+                ),
+                AssetIngestionDecision(
+                    subscription_id=subscription.id,
+                    tweet_id="pending-second",
+                    directory_id=None,
+                ),
+            ])
+            await db.commit()
+            repeated = await dispatch_topic_source_backfill(
+                db, subscription.id, 7, enqueue=enqueue,
+            )
+            jobs_after_repeat = (await db.execute(
+                select(ContentJob).order_by(ContentJob.id)
+            )).scalars().all()
+            return first, repeated, jobs_after_first, jobs_after_repeat
+
+    first, repeated, jobs_after_first, jobs_after_repeat = asyncio.run(run())
+
+    assert first == {
+        "candidate_count": 2,
+        "skipped_count": 2,
+        "created": 1,
+        "enqueued": 1,
+        "errors": [],
+    }
+    assert repeated == {
+        "candidate_count": 0,
+        "skipped_count": 4,
+        "created": 0,
+        "enqueued": 0,
+        "errors": [],
+    }
+    assert len(jobs_after_first) == len(jobs_after_repeat) == 1
+    assert jobs_after_first[0].input_data["tweet_ids"] == [
+        "pending-new",
+        "pending-second",
+    ]
+
+
+def test_backfill_splits_pending_posts_into_fifty_item_jobs(service_env):
+    from database import SessionLocal
+    from models import (
+        ContentJob,
+        CreativeAssetDirectory,
+        XPost,
+        XSubscription,
+        XSubscriptionIngestionDirectory,
+    )
+    from topic_source_service import dispatch_topic_source_backfill
+
+    enqueued: list[int] = []
+
+    async def enqueue(job_id: int):
+        enqueued.append(job_id)
+
+    async def run():
+        async with SessionLocal() as db:
+            now = datetime.now(timezone.utc)
+            subscription = XSubscription(
+                url="https://x.com/backfill-batches",
+                label="Backfill batches",
+            )
+            directory = CreativeAssetDirectory(
+                name="批量回填",
+                asset_type="article",
+                ai_ingestion_enabled=True,
+                ai_ingestion_prompt="只接受相关内容",
+            )
+            db.add_all([subscription, directory])
+            await db.flush()
+            db.add(XSubscriptionIngestionDirectory(
+                subscription_id=subscription.id,
+                directory_id=directory.id,
+            ))
+            db.add_all([
+                XPost(
+                    tweet_id=f"batch-{index:03d}",
+                    subscription_id=subscription.id,
+                    username="author",
+                    content=f"批量帖子 {index}",
+                    url=f"https://x.com/author/status/{index}",
+                    published_at=now - timedelta(minutes=index),
+                )
+                for index in range(51)
+            ])
+            await db.commit()
+
+            result = await dispatch_topic_source_backfill(
+                db, subscription.id, 7, enqueue=enqueue,
+            )
+            jobs = (await db.execute(
+                select(ContentJob).order_by(ContentJob.id)
+            )).scalars().all()
+            return result, jobs
+
+    result, jobs = asyncio.run(run())
+
+    assert result == {
+        "candidate_count": 51,
+        "skipped_count": 0,
+        "created": 2,
+        "enqueued": 2,
+        "errors": [],
+    }
+    assert len(jobs) == 2
+    assert sorted(
+        len(job.input_data["tweet_ids"]) for job in jobs
+    ) == [1, 50]
+    assert len(enqueued) == 2
 
 
 def test_reconciliation_reenqueues_topic_job_once_after_queue_failure(service_env):

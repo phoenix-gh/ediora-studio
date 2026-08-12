@@ -433,6 +433,32 @@ describe('creative assets workspace', () => {
     })
   })
 
+  it('allows prompt folders to configure the same AI ingestion rule', async () => {
+    const user = userEvent.setup()
+    const promptDirectory = { ...directory(12, '图片提示词'), asset_type: 'prompt' as const }
+    mocks.listCreativeAssetDirectories.mockResolvedValue([promptDirectory])
+    mocks.renameCreativeAssetDirectory.mockResolvedValue(promptDirectory)
+    mocks.updateCreativeAssetDirectoryIngestionRule.mockResolvedValue({
+      directory_id: 12,
+      enabled: true,
+      keywords: [],
+      prompt: '只接受帖子中完整可复用的图片提示词。',
+    })
+    render(<AssetsClient initialAssets={[]} />)
+
+    await user.click(screen.getByRole('tab', { name: '提示词' }))
+    await user.click(await screen.findByRole('button', { name: '重命名图片提示词' }))
+    await user.click(screen.getByRole('switch', { name: '启用 AI 素材入库' }))
+    await user.type(screen.getByLabelText('AI 入库规则'), '只接受帖子中完整可复用的图片提示词。')
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: '保存' }))
+
+    expect(mocks.updateCreativeAssetDirectoryIngestionRule).toHaveBeenCalledWith(12, {
+      enabled: true,
+      keywords: [],
+      prompt: '只接受帖子中完整可复用的图片提示词。',
+    })
+  })
+
   it('moves a deleted parent subtree assets to uncategorized when a child is active', async () => {
     const user = userEvent.setup()
     mocks.listCreativeAssetDirectories.mockResolvedValue([directory(10, '父目录'), directory(11, '子目录', 10)])
@@ -697,6 +723,7 @@ describe('creative assets workspace', () => {
       directory: '',
       prompt_kind: 'image',
       title: '更新后的提示词',
+      url: '',
     }))
   })
 

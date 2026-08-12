@@ -62,6 +62,7 @@ export interface XPost {
   views: number
   author_avatar: string
   cover_image: string
+  media?: Array<{ index: number; kind: 'image' | 'video'; url: string }>
   is_reply: boolean
 }
 
@@ -92,6 +93,16 @@ export interface XAuthStatus {
 export interface XCollectResult {
   ok: boolean
   new_posts: number
+}
+
+export interface XIngestionBackfillResult {
+  ok: boolean
+  days: number
+  candidate_count: number
+  skipped_count: number
+  created: number
+  enqueued: number
+  errors: string[]
 }
 
 export interface XCollectAllResult {
@@ -141,6 +152,16 @@ export async function collectXSubscription(id: number): Promise<XCollectResult> 
 
 export async function backfillXSubscription(id: number, days: number): Promise<XCollectResult> {
   return apiFetch<XCollectResult>(`/x/subscriptions/${id}/backfill`, {
+    method: 'POST',
+    body: JSON.stringify({ days }),
+  })
+}
+
+export async function backfillXSubscriptionIngestion(
+  id: number,
+  days: number,
+): Promise<XIngestionBackfillResult> {
+  return apiFetch<XIngestionBackfillResult>(`/x/subscriptions/${id}/ingestion-backfill`, {
     method: 'POST',
     body: JSON.stringify({ days }),
   })

@@ -167,6 +167,23 @@ def test_media_directory_cannot_configure_ai_article_ingestion(api):
     assert response.status_code == 422
 
 
+def test_prompt_directory_round_trips_ai_ingestion_rule(api):
+    client, _ = api
+    created = client.post(
+        "/api/assets/directories",
+        json={"name": "图片提示词", "asset_type": "prompt"},
+    )
+
+    response = client.put(
+        f"/api/assets/directories/{created.json()['id']}/ingestion-rule",
+        json={"enabled": True, "keywords": ["提示词"], "prompt": "只接受可直接复用的图片提示词"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["enabled"] is True
+    assert response.json()["keywords"] == ["提示词"]
+
+
 def test_directory_with_enabled_ai_ingestion_cannot_be_deleted(api):
     client, _ = api
     created = client.post(
@@ -376,7 +393,6 @@ def test_merged_ingestion_candidates_and_acceptance_choose_one_folder(api, monke
             ],
         },
     )
-
     assert candidates.status_code == 200, candidates.text
     assert {post["tweet_id"] for post in candidates.json()["posts"]} == {
         "ai-post",
@@ -386,6 +402,133 @@ def test_merged_ingestion_candidates_and_acceptance_choose_one_folder(api, monke
     assert accepted.status_code == 200, accepted.text
     assert accepted.json() == {"saved": 1, "skipped": 0, "decided": 2}
     assert client.get("/api/assets?asset_type=article").json()[0]["directory"] == "AI 工具"
+
+
+def test_merged_ingestion_extracts_prompt_and_attaches_post_media(api, monkeypatch):
+    client, session_factory = api
+    monkeypatch.setenv("WMS_WORKER_TOKEN", "prompt-ingestion-worker-token-long")
+
+    async def seed():
+        from datetime import datetime, timezone
+        from models import (
+            CreativeAssetDirectory,
+            XPost,
+            XSubscription,
+            XSubscriptionIngestionDirectory,
+        )
+
+        async with session_factory() as session:
+            subscription = XSubscription(
+                url="https://x.com/prompt-ingestion",
+                label="Prompt ingestion",
+            )
+            article_directory = CreativeAssetDirectory(
+                name="AI 文章",
+                asset_type="article",
+                ai_ingestion_enabled=True,
+                ai_ingestion_prompt="只接受有方法的文章",
+            )
+            prompt_directory = CreativeAssetDirectory(
+                name="图片提示词",
+                asset_type="prompt",
+                ai_ingestion_enabled=True,
+                ai_ingestion_keywords=["提示词"],
+                ai_ingestion_prompt="只接受可复用的图片提示词",
+            )
+            session.add_all([subscription, article_directory, prompt_directory])
+            await session.flush()
+            session.add_all([
+                XSubscriptionIngestionDirectory(
+                    subscription_id=subscription.id,
+                    directory_id=article_directory.id,
+                ),
+                XSubscriptionIngestionDirectory(
+                    subscription_id=subscription.id,
+                    directory_id=prompt_directory.id,
+                ),
+                XPost(
+                    tweet_id="prompt-post",
+                    subscription_id=subscription.id,
+                    username="example",
+                    content="一个可复用的图片提示词",
+                    url="https://x.com/example/status/prompt-post",
+                    media=[
+                        {"kind": "image", "url": "https://pbs.twimg.com/media/prompt.jpg"},
+                        {"kind": "video", "url": "https://video.twimg.com/prompt.mp4"},
+                    ],
+                    published_at=datetime.now(timezone.utc),
+                ),
+            ])
+            await session.commit()
+            return subscription.id, article_directory.id, prompt_directory.id
+
+    subscription_id, article_id, prompt_id = asyncio.new_event_loop().run_until_complete(seed())
+    candidates = client.get(
+        "/api/assets/ingestion/candidates",
+        params={"subscription_id": subscription_id},
+    )
+    accepted = client.post(
+        "/api/assets/ingestion/accepted",
+        headers={"X-WMS-Worker-Token": "prompt-ingestion-worker-token-long"},
+        json={
+            "subscription_id": subscription_id,
+            "decisions": [{"tweet_id": "prompt-post", "directory_id": None}],
+            "prompt_assets": [{
+                "tweet_id": "prompt-post",
+                "directory_id": prompt_id,
+                "prompt_kind": "image",
+                "title": "图片提示词",
+                "content": "一张电影感的未来城市海报",
+                "media_indexes": [0],
+            }],
+        },
+    )
+    repeated = client.post(
+        "/api/assets/ingestion/accepted",
+        headers={"X-WMS-Worker-Token": "prompt-ingestion-worker-token-long"},
+        json={
+            "subscription_id": subscription_id,
+            "decisions": [{"tweet_id": "prompt-post", "directory_id": None}],
+            "prompt_assets": [{
+                "tweet_id": "prompt-post",
+                "directory_id": prompt_id,
+                "prompt_kind": "image",
+                "content": "一张电影感的未来城市海报",
+                "media_indexes": [0],
+            }],
+        },
+    )
+
+    assert candidates.status_code == 200, candidates.text
+    assert {item["asset_type"] for item in candidates.json()["directories"]} == {"article", "prompt"}
+    assert candidates.json()["posts"][0]["media"] == [
+        {"index": 0, "kind": "image", "url": "https://pbs.twimg.com/media/prompt.jpg"},
+        {"index": 1, "kind": "video", "url": "https://video.twimg.com/prompt.mp4"},
+    ]
+    assert accepted.status_code == 200, accepted.text
+    assert accepted.json() == {
+        "saved": 0,
+        "skipped": 0,
+        "decided": 1,
+        "prompt_saved": 1,
+        "media_saved": 1,
+        "prompt_skipped": 0,
+    }
+    assert repeated.status_code == 200, repeated.text
+    assert repeated.json() == {
+        "saved": 0,
+        "skipped": 1,
+        "decided": 0,
+        "prompt_saved": 0,
+        "media_saved": 0,
+        "prompt_skipped": 1,
+    }
+    prompt_assets = client.get("/api/assets?asset_type=prompt").json()
+    assert prompt_assets[0]["directory"] == "图片提示词"
+    assert prompt_assets[0]["url"] == "https://x.com/example/status/prompt-post"
+    generations = client.get(f"/api/assets/{prompt_assets[0]['id']}/generations").json()
+    assert generations[0]["media"]["url"] == "https://pbs.twimg.com/media/prompt.jpg"
+    assert generations[0]["media"]["directory"] == ""
 
 
 def test_merged_ingestion_rejects_unassociated_directory(api):

@@ -52,6 +52,7 @@ export type XSubscriptionDialogProps = {
   onDelete: (subscription: XSubscription) => Promise<void>
   onCollect: (subscription: XSubscription) => Promise<void>
   onBackfill: (subscription: XSubscription, days: number) => Promise<void>
+  onIngestExisting: (subscription: XSubscription, days: number) => Promise<void>
 }
 
 const sinceDays = (days: number) =>
@@ -69,7 +70,7 @@ const QUICK_TOKENS: { label: string; token: string | (() => string) }[] = [
 ]
 
 const directoryIsReady = (directory: CreativeAssetDirectory) =>
-  directory.asset_type === 'article'
+  (directory.asset_type === 'article' || directory.asset_type === 'prompt')
   && directory.ai_ingestion_enabled
   && directory.ai_ingestion_prompt.trim().length > 0
 
@@ -83,6 +84,7 @@ export function XSubscriptionDialog({
   onDelete,
   onCollect,
   onBackfill,
+  onIngestExisting,
 }: XSubscriptionDialogProps) {
   const editing = mode === 'edit' && subscription !== null
   const [kind, setKind] = useState<'timeline' | 'search'>(subscription?.kind ?? 'timeline')
@@ -98,18 +100,26 @@ export function XSubscriptionDialog({
   const [backfillDays, setBackfillDays] = useState('7')
   const [backfilling, setBackfilling] = useState(false)
   const [backfillError, setBackfillError] = useState('')
+  const [ingestionBackfillDays, setIngestionBackfillDays] = useState('7')
+  const [ingestionBackfilling, setIngestionBackfilling] = useState(false)
+  const [ingestionBackfillError, setIngestionBackfillError] = useState('')
   const [deleting, setDeleting] = useState(false)
   const [deleteConfirm, setDeleteConfirm] = useState(false)
-  const [articleDirectories, setArticleDirectories] = useState<CreativeAssetDirectory[]>([])
+  const [ingestionDirectories, setIngestionDirectories] = useState<CreativeAssetDirectory[]>([])
   const [selectedDirectoryIds, setSelectedDirectoryIds] = useState<number[]>(subscription?.ingestion_directory_ids ?? [])
 
   useEffect(() => {
     if (!open) return
     let cancelled = false
-    void Promise.resolve(listCreativeAssetDirectories('article')).then(directories => {
+    void Promise.all([
+      listCreativeAssetDirectories('article'),
+      listCreativeAssetDirectories('prompt'),
+    ]).then(groups => {
       if (cancelled) return
-      const nextDirectories = directories ?? []
-      setArticleDirectories(nextDirectories)
+      const nextDirectories = Array.from(new Map(
+        groups.flat().map(directory => [directory.id, directory]),
+      ).values())
+      setIngestionDirectories(nextDirectories)
       const readyIds = new Set(nextDirectories.filter(directoryIsReady).map(directory => directory.id))
       setSelectedDirectoryIds((subscription?.ingestion_directory_ids ?? []).filter(id => readyIds.has(id)))
     }).catch(() => {
@@ -212,6 +222,24 @@ export function XSubscriptionDialog({
       setBackfillError((error as Error).message || '回溯采集失败，请重试')
     } finally {
       setBackfilling(false)
+    }
+  }
+
+  const ingestExisting = async () => {
+    if (!subscription || ingestionBackfilling) return
+    const days = Number(ingestionBackfillDays)
+    if (!Number.isInteger(days) || days < 1 || days > 90) {
+      setIngestionBackfillError('请输入 1–90 的整数天数')
+      return
+    }
+    setIngestionBackfilling(true)
+    setIngestionBackfillError('')
+    try {
+      await onIngestExisting(subscription, days)
+    } catch (error) {
+      setIngestionBackfillError((error as Error).message || '补处理失败，请重试')
+    } finally {
+      setIngestionBackfilling(false)
     }
   }
 
@@ -322,12 +350,12 @@ export function XSubscriptionDialog({
               <FolderInput className="size-4 text-emerald-500" />
               AI 素材入库
             </div>
-            <p className="text-[11px] text-muted-foreground">可选择多个文章文件夹；每个文件夹的 AI 入库规则会一起交给 AI，由 AI 为每条帖子选择唯一归属文件夹。</p>
-            {articleDirectories.length === 0 ? (
-              <p className="text-xs text-amber-600">请先在创作资产中创建文章文件夹，并配置 AI 入库规则。</p>
+            <p className="text-[11px] text-muted-foreground">可选择多个文章或提示词文件夹；每个文件夹的 AI 入库规则会一起交给 AI，由 AI 为每条帖子选择文章归属，并提取可复用提示词。</p>
+            {ingestionDirectories.length === 0 ? (
+              <p className="text-xs text-amber-600">请先在创作资产中创建文章或提示词文件夹，并配置 AI 入库规则。</p>
             ) : (
               <div className="grid gap-2 sm:grid-cols-2">
-                {articleDirectories.map(item => {
+                {ingestionDirectories.map(item => {
                   const ready = directoryIsReady(item)
                   const checked = selectedDirectoryIds.includes(item.id)
                   return (
@@ -342,7 +370,7 @@ export function XSubscriptionDialog({
                         onCheckedChange={value => toggleDirectory(item.id, value === true)}
                       />
                       <span className="min-w-0 space-y-1">
-                        <span className="block truncate font-medium text-foreground">{item.name}</span>
+                        <span className="block truncate font-medium text-foreground">{item.name}<span className="ml-1 text-[10px] font-normal text-muted-foreground">{item.asset_type === 'prompt' ? '提示词' : '文章'}</span></span>
                         {ready ? (
                           <span className="block truncate text-[11px] text-muted-foreground">
                             {item.ai_ingestion_keywords.length > 0 ? `关键词：${item.ai_ingestion_keywords.join('、')}` : '已配置 AI 入库规则'}
@@ -356,7 +384,7 @@ export function XSubscriptionDialog({
                 })}
               </div>
             )}
-            <p className="text-[11px] text-muted-foreground">不选择文件夹则不执行素材入库；选中的文件夹只负责提供规则，最终每条帖子最多落入一个文件夹。</p>
+            <p className="text-[11px] text-muted-foreground">不选择文件夹则不执行素材入库；文章和提示词各自最多落入一个文件夹，提示词正文必须来自原帖。</p>
           </section>
 
           {editing && subscription ? (
@@ -385,6 +413,38 @@ export function XSubscriptionDialog({
                   ) : null}
                 </div>
                 {backfillError ? <p role="alert" className="text-xs text-destructive">{backfillError}</p> : null}
+                <div className="space-y-2 rounded-md bg-muted/40 p-2.5">
+                  <div className="flex items-center gap-2 text-xs font-medium text-foreground">
+                    <FolderInput className="size-3.5 text-emerald-500" />
+                    补处理已有帖子
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">
+                    不重新采集 X，只处理本地已保存的帖子；已有素材入库决策的帖子会自动跳过。
+                  </p>
+                  <div className="flex flex-wrap items-end gap-2">
+                    <label className="space-y-1 text-[11px] text-muted-foreground" htmlFor="x-ingestion-backfill-days">
+                      补处理天数
+                      <Input
+                        id="x-ingestion-backfill-days"
+                        aria-label="补处理天数"
+                        type="number"
+                        min={1}
+                        max={90}
+                        value={ingestionBackfillDays}
+                        onChange={event => {
+                          setIngestionBackfillDays(event.target.value)
+                          setIngestionBackfillError('')
+                        }}
+                        className="h-8 w-20"
+                      />
+                    </label>
+                    <Button type="button" size="sm" variant="outline" disabled={ingestionBackfilling} onClick={() => void ingestExisting()}>
+                      {ingestionBackfilling ? <Loader2 className="animate-spin" /> : <FolderInput />}
+                      {ingestionBackfilling ? '补处理中…' : '补处理已有帖子'}
+                    </Button>
+                  </div>
+                  {ingestionBackfillError ? <p role="alert" className="text-xs text-destructive">{ingestionBackfillError}</p> : null}
+                </div>
               </section>
 
               <section className="rounded-lg border border-destructive/30 bg-destructive/5 p-3">

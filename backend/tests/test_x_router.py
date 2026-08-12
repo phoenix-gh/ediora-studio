@@ -94,6 +94,25 @@ def test_subscription_rejects_unconfigured_ingestion_directory(client):
     assert response.status_code == 422, response.text
 
 
+def test_subscription_can_select_prompt_ingestion_directory(client):
+    directory = client.post(
+        "/api/assets/directories",
+        json={"name": "提示词目录", "asset_type": "prompt"},
+    ).json()
+    configured = client.put(
+        f"/api/assets/directories/{directory['id']}/ingestion-rule",
+        json={"enabled": True, "keywords": [], "prompt": "只接受图片提示词"},
+    )
+    subscription = client.post(BASE, json={
+        "url": "https://x.com/prompt-folder",
+        "ingestion_directory_ids": [directory["id"]],
+    })
+
+    assert configured.status_code == 200, configured.text
+    assert subscription.status_code == 200, subscription.text
+    assert subscription.json()["ingestion_directory_ids"] == [directory["id"]]
+
+
 def test_delete_subscription_cleans_ingestion_directory_associations(client):
     from database import SessionLocal
     from models import XSubscriptionIngestionDirectory
@@ -241,7 +260,7 @@ from datetime import datetime, timezone, timedelta
 from unittest.mock import ANY, patch, AsyncMock
 
 
-def _fake_post(tid="111", views=100, published_at=None, is_reply=False):
+def _fake_post(tid="111", views=100, published_at=None, is_reply=False, media=None):
     from feedgrab_client import ParsedPost
     # Default to "now" so the post falls inside the 24h cutoff window
     # used by _collect_one's first-time collect path.
@@ -256,6 +275,7 @@ def _fake_post(tid="111", views=100, published_at=None, is_reply=False):
         published_at=published_at,
         replies=1, reposts=2, likes=5, views=views,
         raw_markdown="raw",
+        media=media or [],
         is_reply=is_reply,
     )
 
@@ -270,6 +290,20 @@ def test_collect_stores_is_reply_flag(client):
     posts = {p["tweet_id"]: p for p in client.get("/api/x/posts").json()}
     assert posts["orig"]["is_reply"] is False
     assert posts["rep"]["is_reply"] is True
+
+
+def test_collect_stores_all_post_media_for_prompt_analysis(client):
+    sub = client.post(BASE, json={"url": "https://x.com/media-source"}).json()
+    media = [
+        {"kind": "image", "url": "https://pbs.twimg.com/media/one.jpg"},
+        {"kind": "video", "url": "https://video.twimg.com/two.mp4"},
+    ]
+    with patch("routers.x.grab_timeline", new=AsyncMock(return_value=[_fake_post("media", media=media)])):
+        response = client.post(f"/api/x/subscriptions/{sub['id']}/collect-sync")
+
+    assert response.status_code == 200, response.text
+    post = client.get(f"/api/x/posts?subscription_id={sub['id']}").json()[0]
+    assert post["media"] == media
 
 
 def test_recollect_corrects_stale_is_reply_flag(client):
@@ -445,6 +479,83 @@ def test_collect_dispatches_new_posts_to_enabled_topic_source_rules(client):
 
     assert response.status_code == 200, response.text
     dispatch.assert_awaited_once_with(ANY, sub["id"], ["topic-1"])
+
+
+def test_ingestion_backfill_dispatches_existing_posts(client):
+    sub = client.post(
+        BASE, json={"url": "https://x.com/ingestion-backfill"}
+    ).json()
+    directory = client.post(
+        "/api/assets/directories",
+        json={"name": "补处理目录", "asset_type": "article"},
+    ).json()
+    configured = client.put(
+        f"/api/assets/directories/{directory['id']}/ingestion-rule",
+        json={"enabled": True, "keywords": [], "prompt": "只接受相关内容"},
+    )
+    assert configured.status_code == 200, configured.text
+    saved = client.patch(
+        f"{BASE}/{sub['id']}",
+        json={"ingestion_directory_ids": [directory["id"]]},
+    )
+    assert saved.status_code == 200, saved.text
+
+    result = {
+        "candidate_count": 12,
+        "skipped_count": 4,
+        "created": 1,
+        "enqueued": 1,
+        "errors": [],
+    }
+    with patch(
+        "topic_source_service.dispatch_topic_source_backfill",
+        new=AsyncMock(return_value=result),
+    ) as dispatch:
+        response = client.post(
+            f"{BASE}/{sub['id']}/ingestion-backfill",
+            json={"days": 3},
+        )
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {"ok": True, "days": 3, **result}
+    dispatch.assert_awaited_once_with(ANY, sub["id"], 3)
+
+
+def test_ingestion_backfill_returns_404_for_missing_subscription(client):
+    response = client.post(
+        f"{BASE}/99999/ingestion-backfill",
+        json={"days": 7},
+    )
+
+    assert response.status_code == 404
+
+
+def test_ingestion_backfill_requires_a_configured_ingestion_directory(client):
+    sub = client.post(
+        BASE, json={"url": "https://x.com/ingestion-backfill-no-rule"}
+    ).json()
+
+    response = client.post(
+        f"{BASE}/{sub['id']}/ingestion-backfill",
+        json={"days": 7},
+    )
+
+    assert response.status_code == 422, response.text
+    assert "AI 素材入库" in response.json()["detail"]
+
+
+@pytest.mark.parametrize("days", [0, 91])
+def test_ingestion_backfill_rejects_days_outside_range(client, days):
+    sub = client.post(
+        BASE, json={"url": f"https://x.com/ingestion-backfill-{days}"}
+    ).json()
+
+    response = client.post(
+        f"{BASE}/{sub['id']}/ingestion-backfill",
+        json={"days": days},
+    )
+
+    assert response.status_code == 422, response.text
 
 
 def test_collect_one_records_error_on_failure(client):

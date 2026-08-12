@@ -67,6 +67,7 @@ const callbacks = () => ({
   onDelete: vi.fn().mockResolvedValue(undefined),
   onCollect: vi.fn().mockResolvedValue(undefined),
   onBackfill: vi.fn().mockResolvedValue(undefined),
+  onIngestExisting: vi.fn().mockResolvedValue(undefined),
 })
 
 afterEach(() => {
@@ -260,5 +261,82 @@ describe('XSubscriptionDialog', () => {
         ingestion_directory_ids: [5, 6],
       }))
     })
+  })
+
+  it('loads and submits a configured prompt folder alongside article folders', async () => {
+    mocks.listCreativeAssetDirectories.mockImplementation(async (assetType: string) => assetType === 'prompt' ? [{
+      id: 21,
+      name: '图片提示词',
+      asset_type: 'prompt',
+      parent_id: null,
+      is_system: false,
+      ai_ingestion_enabled: true,
+      ai_ingestion_keywords: ['提示词'],
+      ai_ingestion_prompt: '只接受可直接复用的提示词。',
+      created_at: '2026-08-01T00:00:00Z',
+    }] : [])
+    const actions = callbacks()
+
+    render(
+      <XSubscriptionDialog
+        open
+        mode="create"
+        subscription={null}
+        {...actions}
+      />,
+    )
+
+    fireEvent.click(await screen.findByRole('checkbox', { name: /图片提示词/ }))
+    fireEvent.change(screen.getByLabelText('时间线 URL'), { target: { value: 'https://x.com/prompt-source' } })
+    fireEvent.click(screen.getByRole('button', { name: '添加时间线订阅' }))
+
+    await waitFor(() => {
+      expect(actions.onAdd).toHaveBeenCalledWith(expect.objectContaining({
+        ingestion_directory_ids: [21],
+      }))
+    })
+  })
+
+  it('submits the selected day window for existing-post ingestion', async () => {
+    mocks.listCreativeAssetDirectories.mockResolvedValue([])
+    const actions = callbacks()
+
+    render(
+      <XSubscriptionDialog
+        open
+        mode="edit"
+        subscription={subscription}
+        {...actions}
+      />,
+    )
+
+    const days = screen.getByLabelText('补处理天数')
+    expect(days).toHaveValue(7)
+    fireEvent.change(days, { target: { value: '3' } })
+    fireEvent.click(screen.getByRole('button', { name: '补处理已有帖子' }))
+
+    await waitFor(() => {
+      expect(actions.onIngestExisting).toHaveBeenCalledWith(subscription, 3)
+    })
+  })
+
+  it('rejects an invalid existing-post ingestion day window', async () => {
+    mocks.listCreativeAssetDirectories.mockResolvedValue([])
+    const actions = callbacks()
+
+    render(
+      <XSubscriptionDialog
+        open
+        mode="edit"
+        subscription={subscription}
+        {...actions}
+      />,
+    )
+
+    fireEvent.change(screen.getByLabelText('补处理天数'), { target: { value: '0' } })
+    fireEvent.click(screen.getByRole('button', { name: '补处理已有帖子' }))
+
+    expect(screen.getByRole('alert')).toHaveTextContent('请输入 1–90 的整数天数')
+    expect(actions.onIngestExisting).not.toHaveBeenCalled()
   })
 })
