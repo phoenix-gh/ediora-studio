@@ -437,12 +437,11 @@ async def get_creative_asset(asset_id: int) -> dict:
 @mcp.tool()
 async def list_creative_asset_candidates(
     asset_type: str,
-    directories: list[str] | None = None,
-    directory: str = "",
+    directories: list[str],
     query: str = "",
     limit: int = 50,
 ) -> list[dict]:
-    """List compact, directory-scoped asset candidates for an AI creation run."""
+    """List compact candidates from task-specified creative-asset directories."""
     from daily_creation_service import (
         list_creative_asset_candidates as list_candidates,
     )
@@ -452,7 +451,6 @@ async def list_creative_asset_candidates(
             db,
             asset_type=asset_type,
             directories=directories,
-            directory=directory,
             query=query,
             limit=limit,
         )

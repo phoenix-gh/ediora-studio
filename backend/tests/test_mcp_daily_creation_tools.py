@@ -98,7 +98,7 @@ def test_mcp_exposes_compact_candidates_and_global_history(env):
     import mcp_server
 
     candidates = run(mcp_server.list_creative_asset_candidates(
-        asset_type="article", directory="产品实验", query="验证", limit=10,
+        asset_type="article", directories=["产品实验"], query="验证", limit=10,
     ))
     history = run(mcp_server.get_recent_content_usage(
         lookback_days=5, output_type="x_short_post",
@@ -115,6 +115,15 @@ def test_mcp_exposes_compact_candidates_and_global_history(env):
     }]
     assert history[0]["asset_id"] == asset_id
     assert history[0]["angle"] == "先卖再做"
+
+
+def test_candidate_tool_requires_directories(env):
+    import mcp_server
+
+    tools = {tool.name: tool for tool in run(mcp_server.mcp.list_tools())}
+    schema = tools["list_creative_asset_candidates"].inputSchema
+
+    assert "directories" in schema["required"]
 
 
 def test_daily_batch_save_tool_is_not_registered(env):
@@ -221,7 +230,7 @@ def test_record_usage_is_idempotent_and_not_limited_by_legacy_rule_scope(env):
     assert rows[0].topic == "增长复盘"
 
 
-def test_mcp_combines_multiple_directories_and_keeps_legacy_argument(env):
+def test_mcp_combines_multiple_directories(env):
     first_id, second_id, _ = seed_context()
     import mcp_server
 
@@ -230,9 +239,5 @@ def test_mcp_combines_multiple_directories_and_keeps_legacy_argument(env):
         directories=["产品实验", "增长资料"],
         limit=10,
     ))
-    legacy = run(mcp_server.list_creative_asset_candidates(
-        asset_type="article", directory="产品实验", limit=10,
-    ))
 
     assert {item["id"] for item in combined} == {first_id, second_id}
-    assert [item["id"] for item in legacy] == [first_id]
