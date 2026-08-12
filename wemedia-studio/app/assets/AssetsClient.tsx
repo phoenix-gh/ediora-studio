@@ -412,6 +412,23 @@ export function AssetsClient({
     setMediaRenameDialog({ asset: selected, busy: false, error: '', name: selected.title })
   }
 
+  function requestMediaDelete() {
+    if (!selected || selected.asset_type !== 'media') return
+    const asset = selected
+    setConfirmation({
+      busy: false,
+      error: '',
+      message: '删除这个多媒体资产？此操作无法撤销。',
+      action: async () => {
+        await deleteCreativeAsset(asset.id)
+        setAssets(items => items.filter(item => item.id !== asset.id))
+        setPreviewAsset(value => value?.id === asset.id ? null : value)
+        clearOperationError(asset.id)
+        setSelectedId(null)
+      },
+    })
+  }
+
   async function saveMediaRename() {
     if (!mediaRenameDialog || mediaRenameDialog.busy) return
     const form = mediaRenameDialog
@@ -462,6 +479,7 @@ export function AssetsClient({
             ? <Button onClick={openNewPrompt} size="sm">新增提示词</Button>
             : <div className="flex gap-2">
               {selected?.asset_type === 'media' ? <Button onClick={openMediaRename} size="sm" variant="outline">重命名</Button> : null}
+              {selected?.asset_type === 'media' ? <Button onClick={requestMediaDelete} size="sm" variant="destructive">删除</Button> : null}
               <Button onClick={openMediaUpload} size="sm"><Upload data-icon="inline-start" />上传</Button>
             </div>}
         count={`${visibleAssets.length} 项`}

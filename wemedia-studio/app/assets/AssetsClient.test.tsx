@@ -467,6 +467,46 @@ describe('creative assets workspace', () => {
     expect(screen.getByRole('dialog', { name: '重命名多媒体' })).toBeVisible()
   })
 
+  it('deletes the selected media asset only after confirmation', async () => {
+    const user = userEvent.setup()
+    render(<AssetsClient initialAssets={[image]} />)
+
+    await user.click(screen.getByRole('tab', { name: '多媒体' }))
+    await user.click(screen.getByRole('button', { name: '删除' }))
+
+    expect(screen.getByRole('alertdialog')).toHaveTextContent('删除这个多媒体资产？此操作无法撤销。')
+    expect(mocks.deleteCreativeAsset).not.toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: '确认' }))
+
+    expect(mocks.deleteCreativeAsset).toHaveBeenCalledWith(3)
+    await waitFor(() => expect(screen.queryByRole('button', { name: /封面图/ })).toBeNull())
+  })
+
+  it('keeps media deletion confirmation open when deletion fails', async () => {
+    const user = userEvent.setup()
+    mocks.deleteCreativeAsset.mockRejectedValue(new Error('network'))
+    render(<AssetsClient initialAssets={[image]} />)
+
+    await user.click(screen.getByRole('tab', { name: '多媒体' }))
+    await user.click(screen.getByRole('button', { name: '删除' }))
+    await user.click(screen.getByRole('button', { name: '确认' }))
+
+    expect(await screen.findByRole('alertdialog')).toBeVisible()
+    expect(screen.getByRole('alert')).toHaveTextContent('删除失败，请重试。')
+    await user.click(screen.getByRole('button', { name: '取消' }))
+    expect(screen.getByRole('button', { name: /封面图/ })).toBeVisible()
+  })
+
+  it('hides media rename and delete actions when no media asset is visible', async () => {
+    const user = userEvent.setup()
+    render(<AssetsClient initialAssets={[]} />)
+
+    await user.click(screen.getByRole('tab', { name: '多媒体' }))
+
+    expect(screen.queryByRole('button', { name: '重命名' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '删除' })).toBeNull()
+  })
+
   it('opens media-only uploads with a directory snapshot and registers successful assets', async () => {
     const user = userEvent.setup()
     const mediaDirectory = { ...directory(12, '人物参考'), asset_type: 'media' as const }
