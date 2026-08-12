@@ -13,7 +13,21 @@ export const listCreativeAssets = (assetType?: CreativeAsset['asset_type']) => a
 export type CreativeAssetCreate = { asset_type: CreativeAssetType; prompt_kind?: PromptKind; media_kind: CreativeAsset['media_kind'] | null; title: string; content: string; url: string; media_type: string; filename: string; directory: string; tags: string[] }
 export const createCreativeAsset = (body: CreativeAssetCreate) => apiFetch<CreativeAsset>('/assets', { method: 'POST', body: JSON.stringify(body) })
 export const updateCreativeAsset = (id: number, body: Partial<Pick<CreativeAsset, 'prompt_kind' | 'title' | 'content' | 'url' | 'directory' | 'tags'>>) => apiFetch<CreativeAsset>(`/assets/${id}`, { method: 'PATCH', body: JSON.stringify(body) })
-export async function uploadCreativeAsset(mediaKind: 'image' | 'video' | 'audio', file: File) { const body = new FormData(); body.append('file', file); return apiFetch<CreativeAsset>(`/assets/upload?media_kind=${mediaKind}`, { method: 'POST', body, headers: {} }) }
+export async function uploadCreativeAsset(
+  mediaKind: 'image' | 'video' | 'audio',
+  file: File,
+  directory = '',
+) {
+  const body = new FormData()
+  body.append('file', file)
+  const query = new URLSearchParams({ media_kind: mediaKind })
+  if (directory) query.set('directory', directory)
+  return apiFetch<CreativeAsset>(`/assets/upload?${query.toString()}`, {
+    method: 'POST',
+    body,
+    headers: {},
+  })
+}
 export type RemoteImageImportItem = { source_url: string; url: string; error_code: string; error: string }
 export const importCreativeAssetImages = async (urls: string[]) => (
   await apiFetch<{ items: RemoteImageImportItem[] }>('/assets/images/import', {

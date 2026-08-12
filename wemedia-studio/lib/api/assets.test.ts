@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
   importCreativeAssetImages,
+  uploadCreativeAsset,
   uploadInlineAssetImage,
 } from './assets'
 
@@ -80,6 +81,37 @@ describe('creative asset inline image APIs', () => {
     expect(requestUrl).toBe('http://localhost:8000/api/upload/image')
     expect(init).toMatchObject({ method: 'POST' })
     expect(init.body).toBeInstanceOf(FormData)
+    expect((init.body as FormData).get('file')).toBe(file)
+    expect(init.headers).toEqual({})
+  })
+
+  it('uploads media into an encoded creative-asset directory', async () => {
+    const asset = {
+      id: 91,
+      asset_type: 'media',
+      media_kind: 'image',
+      title: '街拍.png',
+      content: '',
+      url: '/api/uploads/street.png',
+      media_type: 'image/png',
+      filename: '街拍.png',
+      directory: '人物 参考',
+      tags: [],
+      source: 'upload',
+      created_at: '',
+      updated_at: '',
+    }
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(asset), {
+      status: 201,
+      headers: { 'Content-Type': 'application/json' },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+    const file = new File(['image'], '街拍.png', { type: 'image/png' })
+
+    await uploadCreativeAsset('image', file, '人物 参考')
+
+    const [requestUrl, init] = fetchMock.mock.calls[0]
+    expect(requestUrl).toBe('http://localhost:8000/api/assets/upload?media_kind=image&directory=%E4%BA%BA%E7%89%A9+%E5%8F%82%E8%80%83')
     expect((init.body as FormData).get('file')).toBe(file)
     expect(init.headers).toEqual({})
   })
