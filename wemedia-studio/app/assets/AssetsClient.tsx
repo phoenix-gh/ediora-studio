@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Upload } from 'lucide-react'
 
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
@@ -14,6 +15,7 @@ import { WorkspaceToolbar } from '@/components/layout/WorkspaceToolbar'
 import { AssetDirectoryRail } from './AssetDirectoryRail'
 import { ArticleAssetWorkspace } from './ArticleAssetWorkspace'
 import { MediaAssetGrid } from './MediaAssetGrid'
+import { MediaUploadDialog } from './MediaUploadDialog'
 import { PromptAssetWorkspace } from './PromptAssetWorkspace'
 import {
   createCreativeAsset,
@@ -64,6 +66,7 @@ export function AssetsClient({
       : initialAssets[0]?.id ?? null,
   )
   const [previewAsset, setPreviewAsset] = useState<CreativeAsset | null>(null)
+  const [mediaUploadDirectory, setMediaUploadDirectory] = useState<string | null>(null)
   const [directories, setDirectories] = useState<CreativeAssetDirectory[]>([])
   const [articleDialog, setArticleDialog] = useState<ArticleDialogState | null>(null)
   const [promptDialog, setPromptDialog] = useState<PromptDialogState | null>(null)
@@ -396,6 +399,10 @@ export function AssetsClient({
       : [asset, ...items])
   }, [])
 
+  function openMediaUpload() {
+    setMediaUploadDirectory(directory)
+  }
+
   async function confirmDeletion() {
     if (!confirmation || confirmation.busy) return
     setConfirmation(value => value ? { ...value, busy: true, error: '' } : value)
@@ -425,7 +432,7 @@ export function AssetsClient({
           ? <Button onClick={openNewArticle} size="sm">新增素材</Button>
           : type === 'prompt'
             ? <Button onClick={openNewPrompt} size="sm">新增提示词</Button>
-            : undefined}
+            : <Button onClick={openMediaUpload} size="sm"><Upload />上传</Button>}
         count={`${visibleAssets.length} 项`}
         title={directory || '全部资产'}
       >
@@ -444,6 +451,13 @@ export function AssetsClient({
           ? <PromptAssetWorkspace assets={visibleAssets} directories={directories} isSaving={savingAssetId !== null} onChange={changeSelectedPrompt} onDelete={requestPromptDelete} onMediaAsset={registerMediaAsset} onSave={saveSelectedPrompt} onSelect={selectArticle} selected={selected} />
           : <MediaAssetGrid assets={visibleAssets} onPreview={setPreviewAsset} onSelect={setSelectedId} selectedId={selected?.id ?? null} />}
     </div>
+
+    <MediaUploadDialog
+      directory={mediaUploadDirectory ?? ''}
+      onAssetUploaded={registerMediaAsset}
+      onClose={() => setMediaUploadDirectory(null)}
+      open={mediaUploadDirectory !== null}
+    />
 
     <Dialog open={previewAsset !== null} onOpenChange={open => { if (!open) setPreviewAsset(null) }}>
       <DialogContent size="lg">

@@ -18,6 +18,12 @@ const mocks = vi.hoisted(() => ({
   updateCreativeAssetDirectoryIngestionRule: vi.fn(),
   updateCreativeAsset: vi.fn(),
   uploadCreativeAsset: vi.fn(),
+  mediaUploadProps: undefined as undefined | {
+    directory: string
+    onAssetUploaded: (asset: CreativeAsset) => void
+    onClose: () => void
+    open: boolean
+  },
 }))
 
 vi.mock('@/lib/api/assets', () => ({
@@ -39,6 +45,22 @@ vi.mock('@/lib/api/assets', () => ({
 
 vi.mock('@/components/MarkdownEditor', () => ({
   MarkdownEditor: ({ documentKey, onChange, value }: { documentKey: number; onChange: (value: string) => void; value: string }) => <textarea aria-label="可视化 Markdown 编辑器" data-document-key={documentKey} onChange={event => onChange(event.target.value)} value={value} />,
+}))
+
+vi.mock('./MediaUploadDialog', () => ({
+  MediaUploadDialog: (props: {
+    directory: string
+    onAssetUploaded: (asset: CreativeAsset) => void
+    onClose: () => void
+    open: boolean
+  }) => {
+    mocks.mediaUploadProps = props
+    return props.open ? <div role="dialog" aria-label="模拟多媒体上传">
+      <span>目标目录：{props.directory || '未分类'}</span>
+      <button onClick={() => props.onAssetUploaded({ ...image, id: 99, title: '新上传图片', directory: props.directory })} type="button">模拟上传完成</button>
+      <button onClick={props.onClose} type="button">模拟关闭上传</button>
+    </div> : null
+  },
 }))
 
 import { AssetsClient } from './AssetsClient'
@@ -107,6 +129,7 @@ function deferred<T>() {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  mocks.mediaUploadProps = undefined
   mocks.listCreativeAssetDirectories.mockResolvedValue([])
   mocks.listPromptGenerations.mockResolvedValue([])
   mocks.updateCreativeAssetDirectoryIngestionRule.mockResolvedValue({
@@ -388,6 +411,29 @@ describe('creative assets workspace', () => {
     expect(audioFilter).toHaveAttribute('aria-pressed', 'true')
     expect(screen.getByRole('button', { name: /采访录音/ })).toBeVisible()
     expect(screen.queryByRole('button', { name: /封面图/ })).toBeNull()
+  })
+
+  it('opens media-only uploads with a directory snapshot and registers successful assets', async () => {
+    const user = userEvent.setup()
+    const mediaDirectory = { ...directory(12, '人物参考'), asset_type: 'media' as const }
+    mocks.listCreativeAssetDirectories.mockResolvedValue([mediaDirectory])
+    render(<AssetsClient initialAssets={[]} />)
+
+    expect(screen.queryByRole('button', { name: '上传' })).toBeNull()
+    await user.click(screen.getByRole('tab', { name: '多媒体' }))
+    await user.click(await screen.findByRole('button', { name: /人物参考0/ }))
+    await user.click(screen.getByRole('button', { name: '上传' }))
+
+    expect(screen.getByRole('dialog', { name: '模拟多媒体上传' })).toHaveTextContent('目标目录：人物参考')
+    await user.click(screen.getByRole('button', { name: /全部资产0/ }))
+    expect(mocks.mediaUploadProps?.directory).toBe('人物参考')
+
+    await user.click(screen.getByRole('button', { name: '模拟上传完成' }))
+    await user.click(screen.getByRole('button', { name: /人物参考1/ }))
+    expect(screen.getByRole('button', { name: /新上传图片/ })).toBeVisible()
+
+    await user.click(screen.getByRole('tab', { name: '文章' }))
+    expect(screen.queryByRole('button', { name: '上传' })).toBeNull()
   })
 
   it('renames active directory assets locally after server rename succeeds', async () => {
