@@ -6,6 +6,7 @@ import { Upload } from 'lucide-react'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Field, FieldError, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { NativeSelect } from '@/components/ui/native-select'
@@ -37,6 +38,7 @@ type AssetType = CreativeAssetType
 type MediaFilter = 'all' | 'image' | 'video' | 'audio'
 type ArticleDialogState = { busy: boolean; content: string; error: string; id: number; title: string; url: string }
 type PromptDialogState = { busy: boolean; content: string; error: string; id: number; kind: PromptKind; title: string }
+type MediaRenameDialogState = { asset: CreativeAsset; busy: boolean; error: string; name: string }
 type DirectoryDialogState = {
   aiIngestionEnabled: boolean
   aiIngestionKeywords: string
@@ -67,6 +69,7 @@ export function AssetsClient({
   )
   const [previewAsset, setPreviewAsset] = useState<CreativeAsset | null>(null)
   const [mediaUploadDirectory, setMediaUploadDirectory] = useState<string | null>(null)
+  const [mediaRenameDialog, setMediaRenameDialog] = useState<MediaRenameDialogState | null>(null)
   const [directories, setDirectories] = useState<CreativeAssetDirectory[]>([])
   const [articleDialog, setArticleDialog] = useState<ArticleDialogState | null>(null)
   const [promptDialog, setPromptDialog] = useState<PromptDialogState | null>(null)
@@ -116,6 +119,7 @@ export function AssetsClient({
     setOperationErrors({})
     setArticleDialog(null)
     setPromptDialog(null)
+    setMediaRenameDialog(null)
     setDirectoryDialog(null)
   }
 
@@ -403,6 +407,30 @@ export function AssetsClient({
     setMediaUploadDirectory(directory)
   }
 
+  function openMediaRename() {
+    if (!selected || selected.asset_type !== 'media') return
+    setMediaRenameDialog({ asset: selected, busy: false, error: '', name: selected.title })
+  }
+
+  async function saveMediaRename() {
+    if (!mediaRenameDialog || mediaRenameDialog.busy) return
+    const form = mediaRenameDialog
+    const name = form.name.trim()
+    if (!name) {
+      setMediaRenameDialog(value => value?.asset.id === form.asset.id ? { ...value, error: '请输入名称。' } : value)
+      return
+    }
+    setMediaRenameDialog(value => value?.asset.id === form.asset.id ? { ...value, busy: true, error: '' } : value)
+    try {
+      const updated = await updateCreativeAsset(form.asset.id, { title: name })
+      setAssets(items => items.map(item => item.id === updated.id ? updated : item))
+      setPreviewAsset(value => value?.id === updated.id ? updated : value)
+      setMediaRenameDialog(value => value?.asset.id === form.asset.id ? null : value)
+    } catch {
+      setMediaRenameDialog(value => value?.asset.id === form.asset.id ? { ...value, busy: false, error: '重命名失败，请重试。' } : value)
+    }
+  }
+
   async function confirmDeletion() {
     if (!confirmation || confirmation.busy) return
     setConfirmation(value => value ? { ...value, busy: true, error: '' } : value)
@@ -432,7 +460,10 @@ export function AssetsClient({
           ? <Button onClick={openNewArticle} size="sm">新增素材</Button>
           : type === 'prompt'
             ? <Button onClick={openNewPrompt} size="sm">新增提示词</Button>
-            : <Button onClick={openMediaUpload} size="sm"><Upload />上传</Button>}
+            : <div className="flex gap-2">
+              {selected?.asset_type === 'media' ? <Button onClick={openMediaRename} size="sm" variant="outline">重命名</Button> : null}
+              <Button onClick={openMediaUpload} size="sm"><Upload data-icon="inline-start" />上传</Button>
+            </div>}
         count={`${visibleAssets.length} 项`}
         title={directory || '全部资产'}
       >
@@ -465,6 +496,18 @@ export function AssetsClient({
         {previewAsset?.media_kind === 'image' ? <img alt={previewAsset.title} className="max-h-[75vh] w-full object-contain" src={creativeAssetUrl(previewAsset.url)} /> : null}
         {previewAsset?.media_kind === 'video' ? <video autoPlay className="max-h-[75vh] w-full" controls src={creativeAssetUrl(previewAsset.url)} /> : null}
         {previewAsset?.media_kind === 'audio' ? <audio autoPlay className="w-full" controls src={creativeAssetUrl(previewAsset.url)} /> : null}
+      </DialogContent>
+    </Dialog>
+
+    <Dialog open={mediaRenameDialog !== null} onOpenChange={open => { if (!open && !mediaRenameDialog?.busy) setMediaRenameDialog(null) }}>
+      <DialogContent showCloseButton={!mediaRenameDialog?.busy} size="sm">
+        <DialogHeader><DialogTitle>重命名多媒体</DialogTitle><DialogDescription>修改这个多媒体资产在创作资产中的显示名称。</DialogDescription></DialogHeader>
+        <Field data-invalid={Boolean(mediaRenameDialog?.error) || undefined}>
+          <FieldLabel htmlFor="media-asset-name">名称</FieldLabel>
+          <Input aria-invalid={Boolean(mediaRenameDialog?.error) || undefined} autoFocus disabled={mediaRenameDialog?.busy} id="media-asset-name" onChange={event => setMediaRenameDialog(value => value ? { ...value, error: '', name: event.target.value } : value)} value={mediaRenameDialog?.name ?? ''} />
+          <FieldError>{mediaRenameDialog?.error}</FieldError>
+        </Field>
+        <DialogFooter><Button disabled={mediaRenameDialog?.busy} onClick={() => setMediaRenameDialog(null)} variant="outline">取消</Button><Button disabled={mediaRenameDialog?.busy} onClick={() => void saveMediaRename()}>{mediaRenameDialog?.busy ? '保存中…' : '保存'}</Button></DialogFooter>
       </DialogContent>
     </Dialog>
 

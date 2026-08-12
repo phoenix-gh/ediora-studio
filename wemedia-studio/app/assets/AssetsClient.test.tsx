@@ -413,6 +413,60 @@ describe('creative assets workspace', () => {
     expect(screen.queryByRole('button', { name: /封面图/ })).toBeNull()
   })
 
+  it('renames the selected media asset with a trimmed title', async () => {
+    const user = userEvent.setup()
+    mocks.updateCreativeAsset.mockResolvedValue({ ...image, title: '新封面' })
+    render(<AssetsClient initialAssets={[image]} />)
+
+    expect(screen.queryByRole('button', { name: '重命名' })).toBeNull()
+    await user.click(screen.getByRole('tab', { name: '多媒体' }))
+    await user.click(screen.getByRole('button', { name: '重命名' }))
+    const dialog = screen.getByRole('dialog', { name: '重命名多媒体' })
+    const input = within(dialog).getByLabelText('名称')
+    expect(input).toHaveValue('封面图')
+
+    await user.clear(input)
+    await user.type(input, ' 新封面 ')
+    await user.click(within(dialog).getByRole('button', { name: '保存' }))
+
+    expect(mocks.updateCreativeAsset).toHaveBeenCalledWith(3, { title: '新封面' })
+    expect(await screen.findByRole('button', { name: /新封面/ })).toBeVisible()
+    expect(screen.queryByRole('dialog', { name: '重命名多媒体' })).toBeNull()
+  })
+
+  it('rejects an empty media name without calling the server', async () => {
+    const user = userEvent.setup()
+    render(<AssetsClient initialAssets={[image]} />)
+
+    await user.click(screen.getByRole('tab', { name: '多媒体' }))
+    await user.click(screen.getByRole('button', { name: '重命名' }))
+    const dialog = screen.getByRole('dialog', { name: '重命名多媒体' })
+    await user.clear(within(dialog).getByLabelText('名称'))
+    await user.type(within(dialog).getByLabelText('名称'), '   ')
+    await user.click(within(dialog).getByRole('button', { name: '保存' }))
+
+    expect(within(dialog).getByRole('alert')).toHaveTextContent('请输入名称。')
+    expect(mocks.updateCreativeAsset).not.toHaveBeenCalled()
+  })
+
+  it('keeps the media rename dialog and value when the server rejects it', async () => {
+    const user = userEvent.setup()
+    mocks.updateCreativeAsset.mockRejectedValue(new Error('network'))
+    render(<AssetsClient initialAssets={[image]} />)
+
+    await user.click(screen.getByRole('tab', { name: '多媒体' }))
+    await user.click(screen.getByRole('button', { name: '重命名' }))
+    const dialog = screen.getByRole('dialog', { name: '重命名多媒体' })
+    const input = within(dialog).getByLabelText('名称')
+    await user.clear(input)
+    await user.type(input, '仍待重命名')
+    await user.click(within(dialog).getByRole('button', { name: '保存' }))
+
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('重命名失败，请重试。')
+    expect(input).toHaveValue('仍待重命名')
+    expect(screen.getByRole('dialog', { name: '重命名多媒体' })).toBeVisible()
+  })
+
   it('opens media-only uploads with a directory snapshot and registers successful assets', async () => {
     const user = userEvent.setup()
     const mediaDirectory = { ...directory(12, '人物参考'), asset_type: 'media' as const }
