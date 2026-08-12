@@ -315,7 +315,7 @@ describe('creative assets workspace', () => {
     render(<AssetsClient initialAssets={[article(8, '待归档文章', '正文')]} />)
 
     await user.click(await screen.findByRole('combobox', { name: '所属目录' }))
-    await user.click(screen.getByRole('option', { name: '搞钱副业' }))
+    await user.click(await screen.findByRole('option', { name: '搞钱副业' }))
     await user.click(screen.getByRole('button', { name: '保存' }))
 
     expect(mocks.updateCreativeAsset).toHaveBeenCalledWith(8, {
