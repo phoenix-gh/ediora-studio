@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import {
   buildDailyCreationAgentObjective,
+  firstBlockingToolAudit,
   runDailyCreationAgentJob,
   type DailyCreationAgentContext,
   type DailyCreationAgentJobDependencies,
@@ -9,6 +10,22 @@ import {
 import type { AgentToolAudit } from './agent-runtime-types'
 
 const prompt = '检查今天的 GitHub 日榜，并把结论保存到临时文件。'
+
+function audit(
+  toolName: string,
+  status: AgentToolAudit['status'],
+  sideEffecting: boolean,
+): AgentToolAudit {
+  return {
+    toolName,
+    toolCallId: `${toolName}-${status}`,
+    sideEffecting,
+    autoApproved: true,
+    status,
+    inputSummary: {},
+    occurredAt: '2026-08-12T00:00:00Z',
+  }
+}
 
 const context: DailyCreationAgentContext = {
   id: 83,
@@ -89,6 +106,41 @@ function dependencies({
 }
 
 describe('daily creation Agent job', () => {
+  it('reports the unresolved failure after a recovered read-only failure', () => {
+    const failed = audit('list_creative_asset_candidates', 'failed', false)
+    const recovered = audit('list_creative_asset_candidates', 'succeeded', false)
+    const unresolved = audit('generateImage', 'failed', false)
+
+    expect(firstBlockingToolAudit([failed, recovered, unresolved])).toBe(unresolved)
+  })
+
+  it('keeps an unrecovered read-only failure blocking', () => {
+    expect(firstBlockingToolAudit([audit('read', 'failed', false)]))
+      .toMatchObject({ toolName: 'read', status: 'failed' })
+  })
+
+  it('never recovers side-effecting failures or uncertain audits', () => {
+    expect(firstBlockingToolAudit([
+      audit('write', 'failed', true),
+      audit('write', 'succeeded', true),
+    ])).toMatchObject({ toolName: 'write', status: 'failed' })
+    expect(firstBlockingToolAudit([
+      audit('read', 'uncertain', false),
+      audit('read', 'succeeded', false),
+    ])).toMatchObject({ toolName: 'read', status: 'uncertain' })
+  })
+
+  it('surfaces the first unresolved tool failure at the job boundary', async () => {
+    const { deps } = dependencies({ toolAudits: [
+      audit('list_creative_asset_candidates', 'failed', false),
+      audit('list_creative_asset_candidates', 'succeeded', false),
+      audit('generateImage', 'failed', false),
+    ] })
+
+    await expect(runDailyCreationAgentJob(19, deps))
+      .rejects.toThrow('Agent tool audit is failed: generateImage')
+  })
+
   it('passes the saved prompt to the Agent without business instructions', () => {
     expect(buildDailyCreationAgentObjective({
       id: 83,

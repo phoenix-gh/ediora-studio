@@ -70,6 +70,17 @@ export function buildDailyCreationAgentObjective(context: ObjectiveContext) {
   return prompt
 }
 
+export function firstBlockingToolAudit(audits: AgentToolAudit[]) {
+  return audits.find((audit, index) => {
+    if (audit.status === 'uncertain') return true
+    if (audit.status !== 'failed') return false
+    if (audit.sideEffecting) return true
+    return !audits.slice(index + 1).some(later => (
+      later.toolName === audit.toolName && later.status === 'succeeded'
+    ))
+  })
+}
+
 const agentRunEvidenceSchema = z.object({
   kind: z.literal('agent_run'),
   executionId: z.number().int().positive(),
@@ -295,9 +306,7 @@ export async function runDailyCreationAgentJob(
         toolCalls: audits,
       }),
     })
-    const failedAudit = audits.find(audit => (
-      audit.status === 'failed' || audit.status === 'uncertain'
-    ))
+    const failedAudit = firstBlockingToolAudit(audits)
     if (failedAudit) {
       throw new Error(`Agent tool audit is ${failedAudit.status}: ${failedAudit.toolName}`)
     }
