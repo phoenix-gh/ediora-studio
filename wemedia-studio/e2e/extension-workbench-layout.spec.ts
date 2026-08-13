@@ -99,6 +99,7 @@ for (const viewport of viewports) test(`keeps preview actions visible while a lo
 
   await expect(panel).toBeVisible()
   await expect(panel.getByRole('heading', { name: '超长文章布局验证' })).toBeVisible()
+  await expect(panel.getByRole('checkbox', { name: '自动填入发布时间' })).toBeVisible()
   await expect(footer.getByRole('button', { name: '复制内容' })).toBeVisible()
   await expect(footer.getByRole('button', { name: '发布并下一条' })).toBeVisible()
   await panel.evaluate(async element => {

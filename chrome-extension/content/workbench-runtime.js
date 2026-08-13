@@ -49,6 +49,8 @@ const STATIC_UI = [
   '.sw-summary-dot { width: 6px; height: 6px; border-radius: 50%; background: #5eead4; box-shadow: 0 0 10px #5eead4; }',
   '.sw-schedule-memory { display: flex; flex-direction: column; gap: 3px; min-width: 145px; padding: 7px 9px; border: 1px solid rgba(192, 132, 252, .24); border-radius: 10px; color: #aebbd1; background: rgba(49, 46, 129, .24); font-size: 10px; white-space: nowrap; }',
   '.sw-schedule-memory strong { overflow: hidden; color: #e8ddff; font-size: 11px; font-weight: 700; text-overflow: ellipsis; }',
+  '.sw-auto-schedule { display: inline-flex; align-items: center; gap: 5px; color: #c5d0e2; cursor: pointer; font-size: 10px; }',
+  '.sw-auto-schedule input { width: 12px; height: 12px; margin: 0; accent-color: #67e8f9; cursor: pointer; }',
   '.sw-actions { display: flex; gap: 5px; }',
   '.sw-icon-button, .sw-ghost-button, .sw-primary-button { border: 1px solid transparent; border-radius: 9px; color: #9eacc5; background: transparent; cursor: pointer; transition: color .15s ease, background .15s ease, border-color .15s ease, transform .15s ease; }',
   '.sw-icon-button { width: 32px; height: 32px; font-size: 16px; }',
@@ -121,7 +123,7 @@ const STATIC_UI = [
   '<header class="sw-header">',
   '<div class="sw-heading"><h1 class="sw-title">述策发布指挥台</h1><div class="sw-subtitle">从草稿箱挑选内容，复制后交给 X 发布</div></div>',
   '<div class="sw-summary"><span class="sw-summary-dot"></span><span data-role="summary">0 条待发布</span></div>',
-  '<div class="sw-schedule-memory" data-role="last-schedule">上次安排：未记录</div>',
+  '<div class="sw-schedule-memory"><strong data-role="last-schedule">上次安排：未记录</strong><label class="sw-auto-schedule"><input type="checkbox" data-role="auto-schedule"><span>自动填入发布时间</span></label></div>',
   '<div class="sw-actions">',
   '<button class="sw-icon-button" type="button" data-action="refresh" title="刷新草稿">↻</button>',
   '<button class="sw-icon-button" type="button" data-action="settings" title="API 设置">⚙</button>',
@@ -198,6 +200,7 @@ export function mountWorkbench({ document, window, chromeApi = globalThis.chrome
   const badge = query('[data-role="badge"]')
   const summary = query('[data-role="summary"]')
   const lastSchedule = query('[data-role="last-schedule"]')
+  const autoSchedule = query('[data-role="auto-schedule"]')
   const search = query('[data-role="search"]')
   const filters = query('[data-role="filters"]')
   const list = query('[data-role="list"]')
@@ -334,6 +337,7 @@ export function mountWorkbench({ document, window, chromeApi = globalThis.chrome
     search.disabled = state.publishingId !== null
     apiInput.value = settingsDraft
     settings.hidden = !state.settingsOpen
+    autoSchedule.checked = scheduleMemory.readAutoFillEnabled()
     refreshButton.disabled = state.publishingId !== null
     settingsButton.disabled = state.publishingId !== null
     renderLastSchedule()
@@ -489,6 +493,10 @@ export function mountWorkbench({ document, window, chromeApi = globalThis.chrome
   })
   apiInput.addEventListener('input', event => {
     settingsDraft = event.target.value
+  })
+  autoSchedule.addEventListener('change', () => {
+    scheduleMemory.setAutoFillEnabled(autoSchedule.checked)
+    render()
   })
   filters.addEventListener('click', event => {
     if (state.publishingId !== null) return

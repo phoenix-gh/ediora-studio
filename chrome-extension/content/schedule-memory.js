@@ -1,6 +1,7 @@
 import { findFirst, inferScheduleControls, SELECTORS } from './selectors.js'
 
 export const SCHEDULE_MEMORY_KEY = 'x_schedule_last_selection_v3'
+export const SCHEDULE_AUTO_FILL_KEY = 'x_schedule_auto_fill_enabled_v1'
 
 const DEFAULT_INTERVAL_MS = 300
 const DEFAULT_RESTORE_DELAY_MS = 200
@@ -44,12 +45,27 @@ export function normalizeScheduleSelection(value) {
   }
 }
 
-function storageValue(storage) {
+function storageValue(storage, key = SCHEDULE_MEMORY_KEY) {
   if (!storage || typeof storage.getItem !== 'function') return null
   try {
-    return storage.getItem(SCHEDULE_MEMORY_KEY)
+    return storage.getItem(key)
   } catch {
     return null
+  }
+}
+
+export function readScheduleAutoFillEnabled(storage) {
+  return storageValue(storage, SCHEDULE_AUTO_FILL_KEY) === 'true'
+}
+
+export function writeScheduleAutoFillEnabled(storage, enabled) {
+  if (!storage || typeof storage.setItem !== 'function') return false
+  const value = enabled === true
+  try {
+    storage.setItem(SCHEDULE_AUTO_FILL_KEY, String(value))
+    return value
+  } catch {
+    return false
   }
 }
 
@@ -87,6 +103,70 @@ export function scheduleSelectionFromDate(date) {
     minute: date.getMinutes(),
     period: hour24 < 12 ? 'AM' : 'PM',
   })
+}
+
+function dateFromScheduleSelection(selection) {
+  const normalized = normalizeScheduleSelection(selection)
+  if (!normalized) return null
+
+  let hour = Number(normalized.hour)
+  if (normalized.period) {
+    hour %= 12
+    if (normalized.period === 'PM') hour += 12
+  }
+
+  const date = new Date(
+    Number(normalized.year),
+    Number(normalized.month) - 1,
+    Number(normalized.day),
+    hour,
+    Number(normalized.minute),
+    0,
+    0,
+  )
+  return Number.isFinite(date.getTime()) ? date : null
+}
+
+function legacyScheduleSelectionFromDate(date) {
+  return {
+    year: String(date.getFullYear()),
+    month: String(date.getMonth() + 1),
+    day: String(date.getDate()),
+    hour: String(date.getHours()),
+    minute: String(date.getMinutes()),
+  }
+}
+
+export function nextScheduleSelection({ previous, now = new Date(), random = Math.random } = {}) {
+  const normalizedPrevious = normalizeScheduleSelection(previous)
+  const previousDate = dateFromScheduleSelection(normalizedPrevious)
+  const currentDate = now instanceof Date && Number.isFinite(now.getTime())
+    ? new Date(now.getTime())
+    : new Date()
+  const date = previousDate || currentDate
+  const rawRandom = Number(random?.())
+  const minute = Math.min(15, Math.max(0, Math.floor(rawRandom * 16) || 0))
+  date.setHours(date.getHours() + 1, minute, 0, 0)
+
+  return previousDate && !normalizedPrevious.period
+    ? legacyScheduleSelectionFromDate(date)
+    : scheduleSelectionFromDate(date)
+}
+
+function selectionForControls(selection, controls) {
+  const normalized = normalizeScheduleSelection(selection)
+  if (!normalized) return null
+  if (controls?.period) {
+    if (!normalized.period) {
+      const date = dateFromScheduleSelection(normalized)
+      return date ? scheduleSelectionFromDate(date) : normalized
+    }
+    return normalized
+  }
+  if (!normalized.period) return normalized
+
+  const date = dateFromScheduleSelection(normalized)
+  return date ? legacyScheduleSelectionFromDate(date) : normalized
 }
 
 function pad(value, width = 2) {
@@ -269,6 +349,8 @@ export function createScheduleMemory({
   onChange = () => {},
   intervalMs = DEFAULT_INTERVAL_MS,
   restoreDelayMs = DEFAULT_RESTORE_DELAY_MS,
+  now: nowValue = () => new Date(),
+  random = Math.random,
 } = {}) {
   const storage = storageFor(pageWindow)
   let timer = null
@@ -296,12 +378,11 @@ export function createScheduleMemory({
     return save(read())
   }
 
-  async function restore() {
-    const saved = readStored()
-    if (!saved) return null
+  async function applySelection(selection) {
+    if (!selection) return null
 
     const dialog = getScheduleDialog(document)
-    if (!dialog) return saved
+    if (!dialog) return selection
 
     restoring = true
     try {
@@ -309,38 +390,54 @@ export function createScheduleMemory({
       const timeInput = resolveInput(findFirst(dialog, SELECTORS.scheduleTime))
       if (dateInput || timeInput) {
         if (dateInput && timeInput) {
-          setInput(
-            dateInput,
-            `${saved.year}-${pad(saved.month)}-${pad(saved.day)}`,
-            pageWindow,
-          )
-          setInput(
-            timeInput,
-            `${pad(saved.period ? Number(saved.hour) % 12 + (saved.period === 'PM' ? 12 : 0) : saved.hour)}:${pad(saved.minute)}`,
-            pageWindow,
-          )
+          const date = dateFromScheduleSelection(selection)
+          if (date) {
+            setInput(
+              dateInput,
+              `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`,
+              pageWindow,
+            )
+            setInput(
+              timeInput,
+              `${pad(date.getHours())}:${pad(date.getMinutes())}`,
+              pageWindow,
+            )
+          }
         }
       } else {
         const selects = Array.from(dialog.querySelectorAll?.('select') ?? [])
         const controls = inferScheduleControls(selects)
+        const formatted = selectionForControls(selection, controls)
         const fields = [
-          ['year', saved.year],
-          ['month', saved.month],
-          ['day', saved.day],
-          ['hour', saved.hour],
-          ['minute', saved.minute],
-          ...(saved.period && controls.period ? [['period', saved.period]] : []),
+          ['year', formatted?.year],
+          ['month', formatted?.month],
+          ['day', formatted?.day],
+          ['hour', formatted?.hour],
+          ['minute', formatted?.minute],
+          ...(formatted?.period && controls.period ? [['period', formatted.period]] : []),
         ]
         for (const [kind, value] of fields) {
           if (!setSelect(controls[kind], value, pageWindow)) break
           await wait(restoreDelayMs, pageWindow)
         }
       }
-      lastState = JSON.stringify(saved)
-      return saved
+      return selection
     } finally {
       restoring = false
     }
+  }
+
+  async function restore() {
+    return applySelection(readStored())
+  }
+
+  async function fillNext() {
+    const current = typeof nowValue === 'function' ? nowValue() : nowValue
+    return applySelection(nextScheduleSelection({
+      previous: readStored(),
+      now: current,
+      random,
+    }))
   }
 
   async function poll() {
@@ -348,7 +445,8 @@ export function createScheduleMemory({
     if (isOpen && !wasOpen) {
       wasOpen = true
       await wait(restoreDelayMs, pageWindow)
-      await restore()
+      if (readScheduleAutoFillEnabled(storage)) await fillNext()
+      else await restore()
     }
 
     if (!isOpen) wasOpen = false
@@ -362,7 +460,7 @@ export function createScheduleMemory({
     if (timer !== null) return
     document?.addEventListener?.('click', handleClick, true)
     const setTimer = pageWindow?.setInterval || globalThis.setInterval
-    timer = setTimer(() => { void poll() }, intervalMs)
+    timer = setTimer(() => poll(), intervalMs)
   }
 
   function stop() {
@@ -378,9 +476,15 @@ export function createScheduleMemory({
   return {
     read,
     readStored,
+    readAutoFillEnabled: () => readScheduleAutoFillEnabled(storage),
+    setAutoFillEnabled: enabled => {
+      writeScheduleAutoFillEnabled(storage, enabled)
+      return readScheduleAutoFillEnabled(storage)
+    },
     save,
     saveCurrent,
     restore,
+    fillNext,
     start,
     stop,
   }
