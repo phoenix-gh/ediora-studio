@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
 import {
@@ -142,4 +143,14 @@ test('fully hides the empty preview once a short draft is selected', () => {
   assert.equal(previewEmpty.hidden, true)
   assert.equal(previewEmpty.style.display, 'none')
   assert.equal(preview.hidden, false)
+})
+
+test('uses the markdown renderer and rich markdown copy in the preview', async () => {
+  const source = await readFile(new URL('../content/workbench-runtime.js', import.meta.url), 'utf8')
+
+  assert.match(source, /import \{ renderMarkdown \} from ['"]\.\/markdown-renderer\.js['"]/)
+  assert.match(source, /import \{ copyMarkdown \} from ['"]\.\/workbench-clipboard\.js['"]/)
+  assert.match(source, /<div class="sw-preview-content">/)
+  assert.match(source, /<div data-role="preview-content"><\/div>/)
+  assert.match(source, /复制 Markdown/)
 })

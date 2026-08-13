@@ -5,7 +5,8 @@ import {
   getDraftTypeOptions,
 } from './draft-model.js'
 import { createDraftClient } from './draft-client.js'
-import { copyText } from './workbench-clipboard.js'
+import { copyMarkdown } from './workbench-clipboard.js'
+import { renderMarkdown } from './markdown-renderer.js'
 import {
   applyDrafts,
   createWorkbenchState,
@@ -90,7 +91,25 @@ const STATIC_UI = [
   '.sw-type-pill { padding: 3px 7px; border: 1px solid rgba(103, 232, 249, .22); border-radius: 6px; color: #a5f3fc; background: rgba(8, 47, 73, .42); }',
   '.sw-preview-divider { height: 1px; flex-shrink: 0; background: linear-gradient(90deg, rgba(103, 232, 249, .38), rgba(99, 102, 241, .18), transparent); }',
   '.sw-preview-content { min-height: 0; flex: 1; overflow-y: auto; padding: 18px 4px 18px 0; scrollbar-color: rgba(100, 116, 139, .42) transparent; scrollbar-width: thin; }',
-  '.sw-preview-content pre { margin: 0; color: #d9e3f2; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 12px; line-height: 1.82; white-space: pre-wrap; overflow-wrap: anywhere; }',
+  '.sw-markdown { color: #d9e3f2; font-size: 13px; line-height: 1.78; overflow-wrap: anywhere; }',
+  '.sw-markdown > :first-child { margin-top: 0; }',
+  '.sw-markdown > :last-child { margin-bottom: 0; }',
+  '.sw-markdown-heading { margin: 20px 0 9px; color: #f6f9ff; font-weight: 760; line-height: 1.4; }',
+  '.sw-markdown h1 { font-size: 21px; }',
+  '.sw-markdown h2 { font-size: 18px; }',
+  '.sw-markdown h3 { font-size: 16px; }',
+  '.sw-markdown h4, .sw-markdown h5, .sw-markdown h6 { font-size: 14px; }',
+  '.sw-markdown-paragraph { margin: 0 0 14px; }',
+  '.sw-markdown-list { margin: 0 0 14px; padding-left: 24px; }',
+  '.sw-markdown-list li + li { margin-top: 4px; }',
+  '.sw-markdown-blockquote { margin: 0 0 14px; padding: 8px 13px; border-left: 3px solid rgba(103, 232, 249, .6); color: #aebbd1; background: rgba(15, 23, 42, .55); }',
+  '.sw-markdown-rule { margin: 20px 0; border: 0; border-top: 1px solid rgba(148, 163, 184, .24); }',
+  '.sw-markdown-inline-code { padding: 2px 5px; border-radius: 5px; color: #d9f99d; background: rgba(30, 41, 59, .86); font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: .9em; }',
+  '.sw-markdown-code-block { margin: 0 0 14px; padding: 12px 13px; overflow-x: auto; border: 1px solid rgba(100, 116, 139, .22); border-radius: 9px; color: #d9e3f2; background: rgba(2, 6, 23, .7); font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 11px; line-height: 1.65; white-space: pre-wrap; }',
+  '.sw-markdown-link { color: #67e8f9; text-decoration: underline; text-decoration-color: rgba(103, 232, 249, .45); text-underline-offset: 2px; }',
+  '.sw-markdown-link:hover { color: #cffafe; }',
+  '.sw-markdown-image { display: block; width: auto; max-width: 100%; height: auto; margin: 13px 0 17px; border: 1px solid rgba(148, 163, 184, .2); border-radius: 10px; background: rgba(15, 23, 42, .48); object-fit: contain; }',
+  '.sw-markdown-image-error { display: inline-flex; margin: 6px 0 12px; padding: 7px 9px; border: 1px solid rgba(251, 113, 133, .3); border-radius: 7px; color: #fda4af; background: rgba(127, 29, 29, .2); font-size: 11px; }',
   '.sw-preview-empty { display: grid; place-items: center; flex: 1; color: #71819b; font-size: 12px; }',
   '.sw-preview-footer { display: flex; flex-shrink: 0; align-items: center; justify-content: space-between; gap: 12px; padding-top: 11px; border-top: 1px solid rgba(148, 163, 184, .13); }',
   '.sw-char-count { color: #71819b; font-size: 10px; font-variant-numeric: tabular-nums; }',
@@ -141,8 +160,8 @@ const STATIC_UI = [
   '<article class="sw-preview-article" data-role="preview" hidden>',
   '<div class="sw-preview-head"><h2 class="sw-preview-title" data-role="preview-title"></h2><div class="sw-preview-meta"><span class="sw-type-pill" data-role="preview-type"></span><span data-role="preview-time"></span></div></div>',
   '<div class="sw-preview-divider"></div>',
-  '<div class="sw-preview-content"><pre data-role="preview-content"></pre></div>',
-  '<footer class="sw-preview-footer"><span class="sw-char-count" data-role="char-count">0 字</span><div class="sw-preview-actions"><button class="sw-ghost-button" type="button" data-action="copy" disabled>复制内容</button><button class="sw-primary-button" type="button" data-action="publish" disabled>发布并下一条</button></div></footer>',
+  '<div class="sw-preview-content"><div data-role="preview-content"></div></div>',
+  '<footer class="sw-preview-footer"><span class="sw-char-count" data-role="char-count">0 字</span><div class="sw-preview-actions"><button class="sw-ghost-button" type="button" data-action="copy" disabled>复制 Markdown</button><button class="sw-primary-button" type="button" data-action="publish" disabled>发布并下一条</button></div></footer>',
   '</article>',
   '</main>',
   '</div>',
@@ -307,7 +326,7 @@ export function mountWorkbench({ document, window, chromeApi = globalThis.chrome
     if (!draft) {
       copyButton.disabled = true
       publishButton.disabled = true
-      copyButton.textContent = '复制内容'
+      copyButton.textContent = '复制 Markdown'
       publishButton.textContent = '发布并下一条'
       return
     }
@@ -315,7 +334,10 @@ export function mountWorkbench({ document, window, chromeApi = globalThis.chrome
     previewTitle.textContent = getDraftTitle(draft)
     previewType.textContent = getDraftTypeLabel(draft.draft_type)
     previewTime.textContent = formatRelativeTime(draft.updated_at)
-    previewContent.textContent = draft.content
+    previewContent.replaceChildren(renderMarkdown(draft.content, {
+      document,
+      apiBase: state.apiBase,
+    }).element)
     charCount.textContent = Array.from(draft.content).length + ' 字'
     const visible = getVisibleDrafts(state)
     const visibleSelection = visible.some(item => String(item.id) === String(draft.id))
@@ -323,7 +345,7 @@ export function mountWorkbench({ document, window, chromeApi = globalThis.chrome
       && String(state.publishingId) === String(draft.id)
     copyButton.disabled = !draft.content || state.publishingId !== null
     publishButton.disabled = !draft.content || !visibleSelection || state.publishingId !== null
-    copyButton.textContent = state.copyState === 'success' ? '已复制' : '复制内容'
+    copyButton.textContent = state.copyState === 'success' ? '已复制 Markdown' : '复制 Markdown'
     publishButton.textContent = publishing ? '发布中…' : '发布并下一条'
   }
 
@@ -415,13 +437,20 @@ export function mountWorkbench({ document, window, chromeApi = globalThis.chrome
     const draft = getSelectedDraft(state)
     if (!draft?.content || state.publishingId !== null) return
     try {
-      await copyText(draft.content, {
+      const rendered = renderMarkdown(draft.content, {
+        document,
+        apiBase: state.apiBase,
+      })
+      await copyMarkdown(draft.content, {
+        html: rendered.html,
         document,
         clipboard: window.navigator?.clipboard,
+        clipboardItemClass: window.ClipboardItem,
+        blobClass: window.Blob,
       })
       state = { ...state, copyState: 'success' }
       renderPreview()
-      notify('正文已复制到剪贴板')
+      notify('Markdown 已复制到剪贴板')
       window.setTimeout(() => {
         if (state.copyState === 'success') {
           state = { ...state, copyState: 'idle' }

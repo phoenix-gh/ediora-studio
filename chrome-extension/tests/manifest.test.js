@@ -16,6 +16,7 @@ async function readRuntimeSources() {
     'content/contracts.js',
     'content/draft-client.js',
     'content/draft-model.js',
+    'content/markdown-renderer.js',
     'content/publisher.js',
     'content/schedule-memory.js',
     'content/selectors.js',
@@ -47,6 +48,7 @@ test('declares the MV3 Shuce extension with X-only host permissions', async () =
   assert.deepEqual(manifest.web_accessible_resources[0].resources.sort(), [
     'content/draft-client.js',
     'content/draft-model.js',
+    'content/markdown-renderer.js',
     'content/schedule-memory.js',
     'content/selectors.js',
     'content/workbench-clipboard.js',
@@ -74,7 +76,7 @@ test('ships the operating guide and auditable XActions notices', async () => {
   assert.doesNotMatch(readme, /控制台命令/)
   assert.match(readme, /悬浮发布指挥台/)
   assert.match(readme, /status=ready/)
-  assert.match(readme, /复制内容/)
+  assert.match(readme, /复制 Markdown/)
   assert.match(readme, /发布并下一条/)
   assert.match(readme, /status=published/)
   assert.match(readme, /不执行 X 的实际发布动作/)
