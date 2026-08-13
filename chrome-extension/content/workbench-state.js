@@ -40,6 +40,15 @@ export function applyDrafts(state, rawDrafts) {
   }
 }
 
+export function shuffleDrafts(state, random = Math.random) {
+  const drafts = [...state.drafts]
+  for (let index = drafts.length - 1; index > 0; index -= 1) {
+    const target = Math.floor(random() * (index + 1))
+    ;[drafts[index], drafts[target]] = [drafts[target], drafts[index]]
+  }
+  return { ...state, drafts }
+}
+
 export function setWorkbenchFilter(state, patch = {}) {
   return {
     ...state,

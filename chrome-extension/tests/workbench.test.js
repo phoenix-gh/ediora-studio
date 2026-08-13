@@ -9,6 +9,7 @@ import {
   getVisibleDrafts,
   publishDraftAndSelectNext,
   selectDraft,
+  shuffleDrafts,
   setWorkbenchFilter,
   setWorkbenchSettingsOpen,
 } from '../content/workbench-state.js'
@@ -52,6 +53,35 @@ test('selects newest ready draft and applies filters', () => {
 
   state = setWorkbenchFilter(state, { query: '', type: 'x' })
   assert.deepEqual(getVisibleDrafts(state).map(draft => draft.id), [2])
+})
+
+test('shuffles current order without changing selection or filters', () => {
+  let state = applyDrafts(createWorkbenchState(), [rawDrafts[0], rawDrafts[1]])
+  state = setWorkbenchFilter(selectDraft(state, 1), { query: 'Agent', type: 'article' })
+  const shuffled = shuffleDrafts(state, () => 0)
+
+  assert.deepEqual(shuffled.drafts.map(draft => draft.id), [1, 2])
+  assert.equal(shuffled.selectedId, 1)
+  assert.equal(shuffled.query, 'Agent')
+  assert.equal(shuffled.type, 'article')
+  assert.notEqual(shuffled.drafts, state.drafts)
+})
+
+test('publishing after a shuffle keeps the remaining shuffled order', () => {
+  const third = { ...rawDrafts[0], id: 4, title: '第三条', updated_at: '2026-08-08T09:00:00Z' }
+  let state = applyDrafts(createWorkbenchState(), [rawDrafts[0], rawDrafts[1], third])
+  state = shuffleDrafts(state, () => 0)
+  state = selectDraft(state, state.drafts[1].id)
+  const next = publishDraftAndSelectNext(state, state.selectedId)
+
+  assert.deepEqual(next.drafts.map(draft => draft.id), [1, 2])
+})
+
+test('refreshing with applyDrafts restores server time order after a shuffle', () => {
+  let state = shuffleDrafts(applyDrafts(createWorkbenchState(), rawDrafts), () => 0)
+  state = applyDrafts(state, [...rawDrafts].reverse())
+
+  assert.deepEqual(state.drafts.map(draft => draft.id), [2, 1])
 })
 
 test('preserves selection across refresh and toggles settings', () => {
