@@ -16,11 +16,12 @@ import {
   selectDraft,
   shuffleDrafts,
   setWorkbenchFilter,
+  setWorkbenchLayout,
   setWorkbenchSettingsOpen,
+  WORKBENCH_LAYOUT_STORAGE_KEY,
 } from './workbench-state.js'
-import { createScheduleMemory, formatScheduleSelection } from './schedule-memory.js'
-
-const HOST_ID = 'shuce-floating-draft-workbench'
+import { createScheduleClient, emptyScheduleSnapshot } from './schedule-bridge.js'
+import { formatScheduleSelection } from './schedule-memory.js'
 
 const SAFE_UI_MESSAGES = Object.freeze({
   DRAFT_API_NOT_CONFIGURED: 'API 地址无效，请在设置中检查',
@@ -34,14 +35,8 @@ const STATIC_UI = [
   '<style>',
   ':host { color-scheme: dark; }',
   '* { box-sizing: border-box; }',
-  '.sw-root { position: fixed; inset: 0; z-index: 2147483647; pointer-events: none; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #e8eefc; }',
-  '.sw-entry { position: fixed; right: 24px; top: 24px; display: inline-flex; align-items: center; gap: 9px; min-height: 46px; padding: 0 14px 0 10px; border: 1px solid rgba(121, 152, 255, .42); border-radius: 16px; color: #eef4ff; background: linear-gradient(135deg, rgba(27, 41, 82, .96), rgba(36, 24, 79, .96)); box-shadow: 0 18px 42px rgba(2, 6, 23, .42), inset 0 1px rgba(255, 255, 255, .12); cursor: pointer; pointer-events: auto; transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease; }',
-  '.sw-entry:hover { transform: translateY(-2px); border-color: rgba(94, 234, 212, .72); box-shadow: 0 22px 48px rgba(2, 6, 23, .52), 0 0 28px rgba(59, 130, 246, .18); }',
-  '.sw-entry-mark { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 9px; color: #07111f; background: linear-gradient(135deg, #67e8f9, #a78bfa); font-size: 11px; font-weight: 900; letter-spacing: -1px; }',
-  '.sw-entry-label { font-size: 13px; font-weight: 760; letter-spacing: .02em; }',
-  '.sw-badge { display: grid; place-items: center; min-width: 24px; height: 22px; padding: 0 6px; border: 1px solid rgba(125, 211, 252, .26); border-radius: 8px; color: #b9f5ff; background: rgba(8, 47, 73, .74); font-size: 11px; font-variant-numeric: tabular-nums; }',
-  '.sw-panel { position: fixed; right: 24px; top: 84px; width: 760px; height: 640px; max-width: calc(100vw - 32px); max-height: calc(100vh - 108px); padding: 1px; overflow: hidden; border-radius: 22px; background: linear-gradient(145deg, rgba(103, 232, 249, .75), rgba(99, 102, 241, .5) 42%, rgba(192, 132, 252, .72)); box-shadow: 0 30px 90px rgba(2, 6, 23, .62), 0 0 48px rgba(59, 130, 246, .16); pointer-events: auto; animation: sw-rise .2s ease-out; }',
-  '.sw-panel[hidden] { display: none; }',
+  '.sw-root { position: fixed; inset: 0; pointer-events: auto; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #e8eefc; }',
+  '.sw-panel { position: absolute; inset: 0; width: auto; height: auto; max-width: none; max-height: none; padding: 1px; overflow: hidden; border-radius: 0; background: linear-gradient(145deg, rgba(103, 232, 249, .75), rgba(99, 102, 241, .5) 42%, rgba(192, 132, 252, .72)); box-shadow: 0 30px 90px rgba(2, 6, 23, .62), 0 0 48px rgba(59, 130, 246, .16); pointer-events: auto; animation: sw-rise .2s ease-out; }',
   '.sw-panel-inner { display: flex; flex-direction: column; width: 100%; height: 100%; overflow: hidden; border-radius: 21px; background: radial-gradient(circle at 95% 0%, rgba(79, 70, 229, .2), transparent 34%), #0b1020; }',
   '.sw-header { display: flex; align-items: center; gap: 14px; min-height: 78px; padding: 17px 18px 15px 22px; border-bottom: 1px solid rgba(148, 163, 184, .15); }',
   '.sw-heading { min-width: 0; flex: 1; }',
@@ -58,7 +53,10 @@ const STATIC_UI = [
   '.sw-icon-button { width: 32px; height: 32px; font-size: 16px; }',
   '.sw-icon-button:hover, .sw-ghost-button:hover { color: #e8fbff; border-color: rgba(125, 211, 252, .25); background: rgba(51, 65, 85, .46); }',
   '.sw-icon-button:active, .sw-primary-button:active { transform: scale(.96); }',
-  '.sw-body { display: grid; grid-template-columns: 270px minmax(0, 1fr); min-height: 0; flex: 1; }',
+  '.sw-body { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(180px, 38%) minmax(0, 1fr); min-height: 0; flex: 1; }',
+  '.sw-body[data-layout="split"] { grid-template-columns: minmax(140px, 38%) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }',
+  '.sw-body[data-layout="stack"] { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(180px, 38%) minmax(0, 1fr); }',
+  '.sw-body[data-layout="stack"] .sw-sidebar { border-right: 0; border-bottom: 1px solid rgba(148, 163, 184, .14); }',
   '.sw-sidebar { display: flex; flex-direction: column; min-width: 0; min-height: 0; padding: 15px 12px 13px 14px; border-right: 1px solid rgba(148, 163, 184, .14); background: rgba(15, 23, 42, .43); }',
   '.sw-search-wrap { position: relative; }',
   '.sw-search-icon { position: absolute; top: 9px; left: 11px; color: #65748e; font-size: 13px; pointer-events: none; }',
@@ -130,15 +128,9 @@ const STATIC_UI = [
   '.sw-toast.is-visible { opacity: 1; transform: translateY(0); }',
   '@keyframes sw-rise { from { opacity: 0; transform: translateY(8px) scale(.985); } to { opacity: 1; transform: translateY(0) scale(1); } }',
   '@keyframes sw-shimmer { 0% { background-position: 100% 0; } 100% { background-position: -100% 0; } }',
-  '@media (max-width: 720px) { .sw-entry { right: 16px; top: 16px; } .sw-panel { right: 8px; top: 74px; width: calc(100vw - 16px); height: calc(100vh - 90px); max-width: none; max-height: none; } .sw-body { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(205px, 34%) minmax(0, 1fr); } .sw-sidebar { border-right: 0; border-bottom: 1px solid rgba(148, 163, 184, .14); } .sw-preview { padding: 19px 17px 16px; } .sw-settings { right: 8px; left: 8px; width: auto; } }',
+  '@media (max-width: 720px) { .sw-preview { padding: 19px 17px 16px; } .sw-settings { right: 8px; left: 8px; width: auto; } }',
   '</style>',
-  '<div class="sw-root">',
-  '<button class="sw-entry" type="button" data-action="toggle" aria-expanded="false">',
-  '<span class="sw-entry-mark">述策</span>',
-  '<span class="sw-entry-label" data-role="entry-label">发布指挥台</span>',
-  '<span class="sw-badge" data-role="badge">0</span>',
-  '</button>',
-  '<section class="sw-panel" data-role="panel" hidden aria-label="述策发布指挥台">',
+  '<section class="sw-panel" data-role="panel" aria-label="述策发布指挥台">',
   '<div class="sw-panel-inner">',
   '<header class="sw-header">',
   '<div class="sw-heading"><h1 class="sw-title">述策发布指挥台</h1><div class="sw-subtitle">从草稿箱挑选内容，复制后交给 X 发布</div></div>',
@@ -148,10 +140,10 @@ const STATIC_UI = [
   '<button class="sw-icon-button" type="button" data-action="refresh" title="刷新草稿">↻</button>',
   '<button class="sw-icon-button" type="button" data-action="shuffle" title="重新排序">⤨</button>',
   '<button class="sw-icon-button" type="button" data-action="settings" title="API 设置">⚙</button>',
-  '<button class="sw-icon-button" type="button" data-action="close" title="收起">×</button>',
+  '<button class="sw-icon-button" type="button" data-action="layout" title="左右布局" aria-label="左右布局">☰</button>',
   '</div>',
   '</header>',
-  '<div class="sw-body">',
+  '<div class="sw-body" data-role="body">',
   '<aside class="sw-sidebar">',
   '<div class="sw-search-wrap"><span class="sw-search-icon">⌕</span><input class="sw-search" data-role="search" type="search" placeholder="搜索标题或正文" aria-label="搜索标题或正文"></div>',
   '<div class="sw-filters" data-role="filters"></div>',
@@ -177,7 +169,6 @@ const STATIC_UI = [
   '<div class="sw-toast" data-role="toast" aria-live="polite"></div>',
   '</div>',
   '</section>',
-  '</div>',
 ].join('')
 
 function safeMessage(error) {
@@ -207,27 +198,17 @@ export function syncPreviewVisibility({ previewEmpty, preview, hasDraft }) {
   preview.hidden = !hasDraft
 }
 
-export function mountWorkbench({ document, window, chromeApi = globalThis.chrome }) {
+export function mountWorkbench({ document, window, chromeApi = globalThis.chrome, surface } = {}) {
+  if (surface !== 'sidepanel') return { destroy() {} }
   if (!document || !window || !chromeApi?.runtime) return { destroy() {} }
 
-  const existing = document.getElementById(HOST_ID)
-  if (existing?.__shuceWorkbenchDestroy) return { destroy: existing.__shuceWorkbenchDestroy }
-
-  const host = document.createElement('div')
-  host.id = HOST_ID
-  host.style.position = 'fixed'
-  host.style.inset = '0'
-  host.style.zIndex = '2147483647'
-  host.style.pointerEvents = 'none'
-  const shadow = host.attachShadow({ mode: 'open' })
-  shadow.innerHTML = STATIC_UI
-  ;(document.documentElement || document.body).appendChild(host)
-
-  const query = selector => shadow.querySelector(selector)
-  const entry = query('[data-action="toggle"]')
+  const root = document.createElement('div')
+  root.className = 'sw-root'
+  root.innerHTML = STATIC_UI
+  document.body.appendChild(root)
+  const query = selector => root.querySelector(selector)
   const panel = query('[data-role="panel"]')
-  const entryLabel = query('[data-role="entry-label"]')
-  const badge = query('[data-role="badge"]')
+  const body = query('[data-role="body"]')
   const summary = query('[data-role="summary"]')
   const lastSchedule = query('[data-role="last-schedule"]')
   const autoSchedule = query('[data-role="auto-schedule"]')
@@ -246,29 +227,40 @@ export function mountWorkbench({ document, window, chromeApi = globalThis.chrome
   const refreshButton = query('[data-action="refresh"]')
   const shuffleButton = query('[data-action="shuffle"]')
   const settingsButton = query('[data-action="settings"]')
+  const layoutButton = query('[data-action="layout"]')
   const settings = query('[data-role="settings"]')
   const apiInput = query('[data-role="api-input"]')
   const settingsStatus = query('[data-role="settings-status"]')
   const toast = query('[data-role="toast"]')
 
   const client = createDraftClient({ runtime: chromeApi.runtime })
+  const scheduleClient = createScheduleClient({ runtime: chromeApi.runtime })
+  let scheduleSnapshot = emptyScheduleSnapshot()
   let state = createWorkbenchState()
   let settingsDraft = state.apiBase
   let loadSequence = 0
-  let hasLoaded = false
   let toastTimer
   let previewMountKey = ''
   const previewImageCache = new Map()
-  const scheduleMemory = createScheduleMemory({
-    document,
-    window,
-    onChange: renderLastSchedule,
-  })
 
-  function renderLastSchedule(selection = scheduleMemory.readStored()) {
+  function renderLastSchedule(selection = scheduleSnapshot.selection) {
     const formatted = formatScheduleSelection(selection)
     lastSchedule.textContent = formatted ? `上次安排：${formatted}` : '上次安排：未记录'
   }
+
+  async function refreshSchedule() {
+    scheduleSnapshot = await scheduleClient.getSnapshot()
+    renderLastSchedule(scheduleSnapshot.selection)
+    autoSchedule.checked = scheduleSnapshot.autoFillEnabled === true
+    autoSchedule.disabled = scheduleSnapshot.available !== true
+  }
+
+  scheduleClient.subscribe(snapshot => {
+    scheduleSnapshot = snapshot
+    renderLastSchedule(snapshot.selection)
+    autoSchedule.checked = snapshot.autoFillEnabled === true
+    autoSchedule.disabled = snapshot.available !== true
+  })
 
   function renderFilters() {
     filters.replaceChildren()
@@ -378,16 +370,19 @@ export function mountWorkbench({ document, window, chromeApi = globalThis.chrome
   }
 
   function render() {
-    entry.setAttribute('aria-expanded', String(state.open))
-    panel.hidden = !state.open
-    entryLabel.textContent = state.open ? '收起' : '发布指挥台'
-    badge.textContent = state.loading ? '…' : String(state.drafts.length)
+    root.dataset.layout = state.layout
+    body.dataset.layout = state.layout
+    const layoutLabel = state.layout === 'split' ? '上下布局' : '左右布局'
+    layoutButton.title = layoutLabel
+    layoutButton.setAttribute('aria-label', layoutLabel)
+    panel.hidden = false
     summary.textContent = state.drafts.length + ' 条待发布'
     search.value = state.query
     search.disabled = state.publishingId !== null
     apiInput.value = settingsDraft
     settings.hidden = !state.settingsOpen
-    autoSchedule.checked = scheduleMemory.readAutoFillEnabled()
+    autoSchedule.checked = scheduleSnapshot.autoFillEnabled === true
+    autoSchedule.disabled = scheduleSnapshot.available !== true
     refreshButton.disabled = state.publishingId !== null
     shuffleButton.disabled = state.publishingId !== null
     settingsButton.disabled = state.publishingId !== null
@@ -412,17 +407,20 @@ export function mountWorkbench({ document, window, chromeApi = globalThis.chrome
     try {
       const rawDrafts = await client.fetchDrafts(state.apiBase)
       if (sequence !== loadSequence) return
-      hasLoaded = true
       state = applyDrafts(state, rawDrafts)
     } catch (error) {
       if (sequence !== loadSequence) return
-      hasLoaded = true
       state = { ...state, loading: false, error: { message: safeMessage(error) } }
     }
     render()
   }
 
   async function initialize() {
+    try {
+      const stored = await chromeApi.storage?.local?.get?.(WORKBENCH_LAYOUT_STORAGE_KEY)
+      state = setWorkbenchLayout(state, stored?.[WORKBENCH_LAYOUT_STORAGE_KEY])
+    } catch {}
+    await refreshSchedule()
     try {
       const config = await client.getConfig()
       state = { ...state, apiBase: config.apiBase }
@@ -514,24 +512,6 @@ export function mountWorkbench({ document, window, chromeApi = globalThis.chrome
     }
   }
 
-  function togglePanel() {
-    state = { ...state, open: !state.open }
-    render()
-    if (state.open && !state.loading && hasLoaded) void loadDrafts()
-  }
-
-  function onKeyDown(event) {
-    if (event.key === 'Escape' && state.open) {
-      state = { ...state, open: false, settingsOpen: false }
-      render()
-    }
-  }
-
-  entry.addEventListener('click', togglePanel)
-  query('[data-action="close"]').addEventListener('click', () => {
-    state = { ...state, open: false, settingsOpen: false }
-    render()
-  })
   query('[data-action="refresh"]').addEventListener('click', () => {
     if (state.publishingId === null) void loadDrafts()
   })
@@ -546,6 +526,13 @@ export function mountWorkbench({ document, window, chromeApi = globalThis.chrome
     state = setWorkbenchSettingsOpen(state, !state.settingsOpen)
     render()
   })
+  query('[data-action="layout"]').addEventListener('click', () => {
+    state = setWorkbenchLayout(state, state.layout === 'split' ? 'stack' : 'split')
+    render()
+    void chromeApi.storage?.local?.set?.({
+      [WORKBENCH_LAYOUT_STORAGE_KEY]: state.layout,
+    }).catch?.(() => {})
+  })
   query('[data-action="save-config"]').addEventListener('click', () => void saveConfig())
   query('[data-action="reset-config"]').addEventListener('click', () => void resetConfig())
   copyButton.addEventListener('click', () => void copySelected())
@@ -559,8 +546,7 @@ export function mountWorkbench({ document, window, chromeApi = globalThis.chrome
     settingsDraft = event.target.value
   })
   autoSchedule.addEventListener('change', () => {
-    scheduleMemory.setAutoFillEnabled(autoSchedule.checked)
-    render()
+    void scheduleClient.setAutoFillEnabled(autoSchedule.checked).then(refreshSchedule)
   })
   filters.addEventListener('click', event => {
     if (state.publishingId !== null) return
@@ -580,17 +566,14 @@ export function mountWorkbench({ document, window, chromeApi = globalThis.chrome
     const action = event.target.closest('[data-action]')?.dataset.action
     if (action === 'retry' || action === 'refresh') void loadDrafts()
   })
-  window.addEventListener('keydown', onKeyDown)
 
-  host.__shuceWorkbenchDestroy = () => {
-    window.removeEventListener('keydown', onKeyDown)
+  function destroy() {
     window.clearTimeout(toastTimer)
-    scheduleMemory.stop()
-    host.remove()
+    scheduleClient.destroy()
+    root.remove()
   }
   render()
-  scheduleMemory.start()
   void initialize()
 
-  return { destroy: host.__shuceWorkbenchDestroy }
+  return { destroy }
 }

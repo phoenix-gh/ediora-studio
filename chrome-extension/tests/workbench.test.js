@@ -243,3 +243,10 @@ test('provides an in-memory draft shuffle control', async () => {
   assert.match(source, /title="重新排序"/)
   assert.match(source, /shuffleDrafts\(state\)/)
 })
+
+test('exposes a persisted layout toggle in the side panel runtime', async () => {
+  const source = await readFile(new URL('../content/workbench-runtime.js', import.meta.url), 'utf8')
+  assert.match(source, /WORKBENCH_LAYOUT_STORAGE_KEY/)
+  assert.match(source, /setWorkbenchLayout/)
+  assert.match(source, /data-action="layout"/)
+})
