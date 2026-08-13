@@ -4,7 +4,8 @@
   "version": "0.1.0",
   "description": "在 X 页面查看 WeMediaStudio 草稿并记住原生安排表的最后选择。",
   "permissions": [
-    "storage"
+    "storage",
+    "sidePanel"
   ],
   "host_permissions": [
     "https://x.com/*",
@@ -12,6 +13,22 @@
     "http://localhost:8000/*",
     "http://127.0.0.1:8000/*"
   ],
+  "action": {
+    "default_title": "述策发布指挥台",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png"
+  },
+  "side_panel": {
+    "default_path": "sidepanel/index.html"
+  },
   "background": {
     "service_worker": "background/service-worker.js",
     "type": "module"
@@ -31,14 +48,10 @@
   "web_accessible_resources": [
     {
       "resources": [
-        "content/selectors.js",
-        "content/draft-client.js",
-        "content/draft-model.js",
-        "content/markdown-renderer.js",
-        "content/workbench-clipboard.js",
-        "content/workbench-runtime.js",
-        "content/workbench-state.js",
-        "content/schedule-memory.js"
+        "content/schedule-host.js",
+        "content/schedule-bridge.js",
+        "content/schedule-memory.js",
+        "content/selectors.js"
       ],
       "matches": [
         "https://x.com/*",

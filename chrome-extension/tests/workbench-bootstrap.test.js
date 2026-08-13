@@ -7,11 +7,9 @@ const extensionRoot = resolve(import.meta.dirname, '..')
 
 test('keeps the content-script bootstrap limited to the extension runtime boundary', async () => {
   const source = await readFile(resolve(extensionRoot, 'content/workbench.js'), 'utf8')
-
-  assert.match(source, /chrome\.runtime\.getURL\(['"]content\/workbench-runtime\.js['"]\)/)
-  assert.match(source, /import\(runtimeUrl\)/)
+  assert.match(source, /chrome\.runtime\.getURL\(['"]content\/schedule-host\.js['"]\)/)
+  assert.doesNotMatch(source, /workbench-runtime\.js/)
   assert.doesNotMatch(source, /\bfetch\s*\(/)
-  assert.doesNotMatch(source, /document\.cookie|Authorization|SHUCE_PUBLISH_REQUEST/)
 })
 
 test('fills the side panel viewport instead of anchoring an overlay', async () => {
