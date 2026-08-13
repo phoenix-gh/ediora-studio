@@ -40,3 +40,31 @@ export async function copyText(text, {
     textarea?.remove?.()
   }
 }
+
+export async function copyMarkdown(markdown, {
+  html = '',
+  clipboard = globalThis.navigator?.clipboard,
+  document = globalThis.document,
+  clipboardItemClass = globalThis.ClipboardItem,
+  blobClass = globalThis.Blob,
+} = {}) {
+  const value = String(markdown ?? '')
+  const rendered = String(html ?? '')
+
+  if (clipboard && typeof clipboard.write === 'function'
+    && typeof clipboardItemClass === 'function' && typeof blobClass === 'function') {
+    try {
+      const item = new clipboardItemClass({
+        'text/plain': new blobClass([value], { type: 'text/plain' }),
+        'text/html': new blobClass([rendered], { type: 'text/html' }),
+      })
+      await clipboard.write([item])
+      return 'rich'
+    } catch {
+      // Fall back to the plain Markdown path when rich clipboard is unavailable.
+    }
+  }
+
+  await copyText(value, { clipboard, document })
+  return 'plain'
+}
