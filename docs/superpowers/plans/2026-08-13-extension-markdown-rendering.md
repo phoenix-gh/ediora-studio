@@ -29,7 +29,7 @@
 - Produces `normalizeMarkdownUrl(source, apiBase): string | null`：返回通过协议检查且已补全的 URL，拒绝 `javascript:`、`data:`、空值和无效 URL。
 - Produces `renderMarkdown(markdown, options): { element: HTMLElement, html: string }`，其中 `options = { document, apiBase }`；`element` 是 class 为 `sw-markdown` 的安全 DOM 根节点，`html` 是同一结果的序列化 HTML。
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 在 `markdown-renderer.test.js` 中使用 `jsdom` 创建 document，先写这些行为断言：
 
@@ -63,13 +63,13 @@ test('does not execute raw html or unsafe image and link protocols', () => {
 })
 ```
 
-- [ ] **Step 2: Run the renderer tests and verify the expected failure**
+- [x] **Step 2: Run the renderer tests and verify the expected failure**
 
 Run: `node --test chrome-extension/tests/markdown-renderer.test.js`
 
 Expected: FAIL because `../content/markdown-renderer.js` does not exist yet.
 
-- [ ] **Step 3: Implement the minimal renderer**
+- [x] **Step 3: Implement the minimal renderer**
 
 Implement `normalizeMarkdownUrl` with `new URL(source, apiBase)`, accepting only `http:` and `https:`. For `/api/uploads/...`, resolve against `new URL(apiBase).origin` so `http://localhost:8000/api` becomes `http://localhost:8000/api/uploads/...` without duplicating `/api`.
 
@@ -77,13 +77,13 @@ Implement a line-based block parser that creates DOM nodes for `#`–`######` he
 
 For images, create `img.sw-markdown-image` with `alt`, `src`, `loading="lazy"`, and `decoding="async"`; attach an `error` listener that replaces the image with a `span.sw-markdown-image-error` containing the alt text and “图片加载失败”。For links, create `a` with `target="_blank"` and `rel="noreferrer noopener"` only after URL validation.
 
-- [ ] **Step 4: Run the renderer tests and verify they pass**
+- [x] **Step 4: Run the renderer tests and verify they pass**
 
 Run: `node --test chrome-extension/tests/markdown-renderer.test.js`
 
 Expected: PASS with both tests green and no console errors.
 
-- [ ] **Step 5: Commit the isolated renderer**
+- [x] **Step 5: Commit the isolated renderer**
 
 ```bash
 git add chrome-extension/content/markdown-renderer.js chrome-extension/tests/markdown-renderer.test.js
@@ -100,7 +100,7 @@ git commit -m "feat: add safe extension markdown renderer"
 - Produces `copyMarkdown(markdown, { html, clipboard, document, clipboardItemClass, blobClass }): Promise<'rich' | 'plain'>`。
 - Consumes the existing `copyText` fallback and the `renderMarkdown(...).html` output from Task 1。
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```js
 test('copies original markdown and rendered html when rich clipboard is available', async () => {
@@ -134,13 +134,13 @@ test('falls back to copying original markdown as plain text', async () => {
 })
 ```
 
-- [ ] **Step 2: Run the clipboard tests and verify the expected failure**
+- [x] **Step 2: Run the clipboard tests and verify the expected failure**
 
 Run: `node --test chrome-extension/tests/workbench-clipboard.test.js`
 
 Expected: FAIL because `copyMarkdown` is not exported yet.
 
-- [ ] **Step 3: Implement `copyMarkdown`**
+- [x] **Step 3: Implement `copyMarkdown`**
 
 When `clipboard.write`, `clipboardItemClass`, and `blobClass` are available, construct one item with:
 
@@ -153,13 +153,13 @@ When `clipboard.write`, `clipboardItemClass`, and `blobClass` are available, con
 
 Call `clipboard.write([item])` and return `'rich'`. If any rich path prerequisite is missing or the write rejects, call `copyText(markdown, { clipboard, document })` and return `'plain'`; preserve `CLIPBOARD_FAILED` when both paths fail so the existing UI can show its safe error message.
 
-- [ ] **Step 4: Run the clipboard tests and the existing extension tests**
+- [x] **Step 4: Run the clipboard tests and the existing extension tests**
 
 Run: `node --test chrome-extension/tests/workbench-clipboard.test.js chrome-extension/tests/workbench.test.js`
 
 Expected: all tests PASS.
 
-- [ ] **Step 5: Commit the clipboard change**
+- [x] **Step 5: Commit the clipboard change**
 
 ```bash
 git add chrome-extension/content/workbench-clipboard.js chrome-extension/tests/workbench-clipboard.test.js
@@ -178,17 +178,17 @@ git commit -m "feat: copy extension drafts as markdown and html"
 - Consumes `renderMarkdown` from `content/markdown-renderer.js` and `copyMarkdown` from `content/workbench-clipboard.js`。
 - Keeps `copySelected` using the normalized draft content as `text/plain` and uses `state.apiBase` for local image URLs。
 
-- [ ] **Step 1: Write the failing integration assertions**
+- [x] **Step 1: Write the failing integration assertions**
 
 Extend `workbench.test.js` with a source-level contract assertion that the runtime imports `renderMarkdown` and `copyMarkdown`, uses `data-role="preview-content"` as a `div` rather than a `pre`, and labels the action “复制 Markdown”。Keep the existing `syncPreviewVisibility` behavior test unchanged.
 
-- [ ] **Step 2: Run the integration test and verify it fails**
+- [x] **Step 2: Run the integration test and verify it fails**
 
 Run: `node --test chrome-extension/tests/workbench.test.js`
 
 Expected: FAIL because the runtime still contains `<pre>`, `copyText`, and does not import the renderer.
 
-- [ ] **Step 3: Implement the preview integration**
+- [x] **Step 3: Implement the preview integration**
 
 In `workbench-runtime.js`:
 
@@ -201,13 +201,13 @@ In `workbench-runtime.js`:
 
 In `manifest.json`, add `content/markdown-renderer.js` to `web_accessible_resources`. In the README, replace the statement that Markdown is not parsed with the rendered-preview and dual-format-copy behavior.
 
-- [ ] **Step 4: Run the integration tests and verify they pass**
+- [x] **Step 4: Run the integration tests and verify they pass**
 
 Run: `node --test chrome-extension/tests/workbench.test.js chrome-extension/tests/workbench-clipboard.test.js chrome-extension/tests/markdown-renderer.test.js`
 
 Expected: all extension unit tests PASS.
 
-- [ ] **Step 5: Commit the preview integration**
+- [x] **Step 5: Commit the preview integration**
 
 ```bash
 git add chrome-extension/content/workbench-runtime.js chrome-extension/manifest.json chrome-extension/README.md chrome-extension/tests/workbench.test.js
@@ -223,21 +223,21 @@ git commit -m "feat: render markdown in extension draft preview"
 **Interfaces:**
 - Consumes the mounted workbench from Tasks 1–3; no backend or API schema changes。
 
-- [ ] **Step 1: Extend the harness with Markdown and a deterministic image**
+- [x] **Step 1: Extend the harness with Markdown and a deterministic image**
 
 Add a Markdown heading and `![预览图](/api/uploads/test.png)` to the harness draft. Route `http://localhost:8000/api/uploads/test.png` to a tiny valid PNG response. Keep the existing 420-line body so the preview must still scroll.
 
-- [ ] **Step 2: Add the visible-image assertions**
+- [x] **Step 2: Add the visible-image assertions**
 
 After selecting the draft, assert `.sw-markdown-image` is visible and its `src` equals `http://localhost:8000/api/uploads/test.png`; retain the existing footer visibility and scroll position assertions.
 
-- [ ] **Step 3: Run the focused browser test**
+- [x] **Step 3: Run the focused browser test**
 
 Run: `pnpm exec playwright test e2e/extension-workbench-layout.spec.ts`
 
 Expected: desktop and narrow viewport cases PASS, with no page errors or console warnings.
 
-- [ ] **Step 4: Run final checks**
+- [x] **Step 4: Run final checks**
 
 Run:
 
@@ -252,7 +252,7 @@ git diff --check
 
 Expected: all extension tests, focused browser tests, syntax checks, and diff checks pass. Any unrelated pre-existing repository-wide TypeScript failures must be reported separately and not treated as part of this feature.
 
-- [ ] **Step 5: Commit the end-to-end regression**
+- [x] **Step 5: Commit the end-to-end regression**
 
 ```bash
 git add wemedia-studio/e2e/extension-workbench-layout.spec.ts chrome-extension/tests/manifest.test.js
