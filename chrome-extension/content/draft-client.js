@@ -1,5 +1,6 @@
 export const DRAFT_MESSAGE_TYPES = Object.freeze({
   REQUEST: 'SHUCE_DRAFTS_REQUEST',
+  IMAGE_REQUEST: 'SHUCE_DRAFT_IMAGE_REQUEST',
   PUBLISH: 'SHUCE_DRAFT_PUBLISH',
   RESULT: 'SHUCE_DRAFTS_RESULT',
   CONFIG_GET: 'SHUCE_DRAFTS_CONFIG_GET',
@@ -90,6 +91,18 @@ export function createDraftClient({
         throw createError('DRAFT_API_INVALID_RESPONSE', '草稿 API 返回格式无效')
       }
       return response.drafts
+    },
+
+    async fetchImage(apiBase, imageUrl) {
+      const response = await sendRequest(DRAFT_MESSAGE_TYPES.IMAGE_REQUEST, {
+        apiBase,
+        imageUrl,
+      })
+      if (typeof response.dataUrl !== 'string'
+        || !/^data:image\/(?:avif|gif|jpeg|png|svg\+xml|webp);base64,/i.test(response.dataUrl)) {
+        throw createError('DRAFT_API_INVALID_RESPONSE', '图片 API 返回格式无效')
+      }
+      return { dataUrl: response.dataUrl }
     },
 
     async publishDraft(apiBase, draftId) {

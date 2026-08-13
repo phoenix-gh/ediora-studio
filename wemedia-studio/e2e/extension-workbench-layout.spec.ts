@@ -62,6 +62,14 @@ function harnessHtml() {
                 drafts: [draft],
               }
             }
+            if (message.type === 'SHUCE_DRAFT_IMAGE_REQUEST') {
+              return {
+                type: 'SHUCE_DRAFTS_RESULT',
+                requestId: message.requestId,
+                ok: true,
+                dataUrl: 'data:image/png;base64,' + ${JSON.stringify(testPng.toString('base64'))},
+              }
+            }
             throw new Error('Unexpected extension message: ' + message.type)
           },
         },
@@ -87,7 +95,13 @@ for (const viewport of viewports) test(`keeps preview actions visible while a lo
   await page.route(`${origin}/**`, async route => {
     const url = new URL(route.request().url())
     if (url.pathname === '/' || url.pathname === '/harness.html') {
-      await route.fulfill({ contentType: 'text/html', body: harnessHtml() })
+      await route.fulfill({
+        contentType: 'text/html',
+        headers: {
+          'content-security-policy': "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:",
+        },
+        body: harnessHtml(),
+      })
       return
     }
 
@@ -116,7 +130,8 @@ for (const viewport of viewports) test(`keeps preview actions visible while a lo
   await expect(panel.getByRole('heading', { name: '超长文章布局验证' })).toBeVisible()
   const markdownImage = panel.locator('.sw-markdown-image')
   await expect(markdownImage).toBeVisible()
-  await expect(markdownImage).toHaveAttribute('src', 'http://localhost:8000/api/uploads/test.png')
+  await expect(markdownImage).toHaveAttribute('src', /^data:image\/png;base64,/)
+  await expect(markdownImage).not.toHaveAttribute('data-sw-image-src')
   await expect(panel.getByRole('checkbox', { name: '自动填入发布时间' })).toBeVisible()
   await expect(footer.getByRole('button', { name: '复制 Markdown' })).toBeVisible()
   await expect(footer.getByRole('button', { name: '发布并下一条' })).toBeVisible()

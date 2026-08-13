@@ -178,11 +178,50 @@ test('fully hides the empty preview once a short draft is selected', () => {
 test('uses the markdown renderer and rich markdown copy in the preview', async () => {
   const source = await readFile(new URL('../content/workbench-runtime.js', import.meta.url), 'utf8')
 
-  assert.match(source, /import \{ renderMarkdown \} from ['"]\.\/markdown-renderer\.js['"]/)
+  assert.match(source, /import \{ hydrateMarkdownImages, renderMarkdown \} from ['"]\.\/markdown-renderer\.js['"]/)
+  assert.match(source, /hydrateMarkdownImages\(rendered\.element/)
   assert.match(source, /import \{ copyMarkdown \} from ['"]\.\/workbench-clipboard\.js['"]/)
   assert.match(source, /<div class="sw-preview-content">/)
   assert.match(source, /<div data-role="preview-content"><\/div>/)
   assert.match(source, /复制 Markdown/)
+})
+
+test('only remounts preview markdown when the selected draft body or API base changes', () => {
+  const draft = { id: 9, content: '![封面](/api/uploads/cover.png)' }
+  const apiBase = 'http://localhost:8000/api'
+  const key = workbenchRuntime.getPreviewMountKey(draft, apiBase)
+
+  assert.equal(
+    workbenchRuntime.getPreviewMountKey({ ...draft, title: '新标题' }, apiBase),
+    key,
+  )
+  assert.equal(
+    workbenchRuntime.shouldRemountPreview(key, workbenchRuntime.getPreviewMountKey(draft, apiBase)),
+    false,
+  )
+  assert.equal(
+    workbenchRuntime.shouldRemountPreview(
+      key,
+      workbenchRuntime.getPreviewMountKey({ ...draft, content: '改过的正文' }, apiBase),
+    ),
+    true,
+  )
+  assert.equal(
+    workbenchRuntime.shouldRemountPreview(
+      key,
+      workbenchRuntime.getPreviewMountKey(draft, 'http://127.0.0.1:8000/api'),
+    ),
+    true,
+  )
+  assert.equal(workbenchRuntime.getPreviewMountKey(null, apiBase), '')
+})
+
+test('skips remounting hydrated preview images on unrelated chrome updates', async () => {
+  const source = await readFile(new URL('../content/workbench-runtime.js', import.meta.url), 'utf8')
+
+  assert.match(source, /getPreviewMountKey\(draft, state\.apiBase\)/)
+  assert.match(source, /shouldRemountPreview\(previewMountKey, nextKey\)/)
+  assert.match(source, /cache:\s*previewImageCache/)
 })
 
 test('provides an in-memory draft shuffle control', async () => {

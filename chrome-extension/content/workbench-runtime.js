@@ -6,7 +6,7 @@ import {
 } from './draft-model.js'
 import { createDraftClient } from './draft-client.js'
 import { copyMarkdown } from './workbench-clipboard.js'
-import { renderMarkdown } from './markdown-renderer.js'
+import { hydrateMarkdownImages, renderMarkdown } from './markdown-renderer.js'
 import {
   applyDrafts,
   createWorkbenchState,
@@ -192,6 +192,15 @@ function createElement(document, tag, className, text) {
   return element
 }
 
+export function getPreviewMountKey(draft, apiBase = '') {
+  if (!draft || draft.id === undefined || draft.id === null) return ''
+  return `${String(draft.id)}\u0000${String(draft.content ?? '')}\u0000${String(apiBase ?? '')}`
+}
+
+export function shouldRemountPreview(previousKey, nextKey) {
+  return previousKey !== nextKey
+}
+
 export function syncPreviewVisibility({ previewEmpty, preview, hasDraft }) {
   previewEmpty.hidden = hasDraft
   previewEmpty.style.display = hasDraft ? 'none' : ''
@@ -248,6 +257,8 @@ export function mountWorkbench({ document, window, chromeApi = globalThis.chrome
   let loadSequence = 0
   let hasLoaded = false
   let toastTimer
+  let previewMountKey = ''
+  const previewImageCache = new Map()
   const scheduleMemory = createScheduleMemory({
     document,
     window,
@@ -327,6 +338,10 @@ export function mountWorkbench({ document, window, chromeApi = globalThis.chrome
     const draft = getSelectedDraft(state)
     syncPreviewVisibility({ previewEmpty, preview, hasDraft: Boolean(draft) })
     if (!draft) {
+      if (shouldRemountPreview(previewMountKey, '')) {
+        previewMountKey = ''
+        previewContent.replaceChildren()
+      }
       copyButton.disabled = true
       publishButton.disabled = true
       copyButton.textContent = '复制 Markdown'
@@ -337,10 +352,20 @@ export function mountWorkbench({ document, window, chromeApi = globalThis.chrome
     previewTitle.textContent = getDraftTitle(draft)
     previewType.textContent = getDraftTypeLabel(draft.draft_type)
     previewTime.textContent = formatRelativeTime(draft.updated_at)
-    previewContent.replaceChildren(renderMarkdown(draft.content, {
-      document,
-      apiBase: state.apiBase,
-    }).element)
+    const nextKey = getPreviewMountKey(draft, state.apiBase)
+    if (shouldRemountPreview(previewMountKey, nextKey)) {
+      previewMountKey = nextKey
+      const rendered = renderMarkdown(draft.content, {
+        document,
+        apiBase: state.apiBase,
+      })
+      previewContent.replaceChildren(rendered.element)
+      const apiBase = state.apiBase
+      void hydrateMarkdownImages(rendered.element, {
+        fetchImage: imageUrl => client.fetchImage(apiBase, imageUrl),
+        cache: previewImageCache,
+      })
+    }
     charCount.textContent = Array.from(draft.content).length + ' 字'
     const visible = getVisibleDrafts(state)
     const visibleSelection = visible.some(item => String(item.id) === String(draft.id))
@@ -444,6 +469,7 @@ export function mountWorkbench({ document, window, chromeApi = globalThis.chrome
       const rendered = renderMarkdown(draft.content, {
         document,
         apiBase: state.apiBase,
+        deferLocalImages: false,
       })
       await copyMarkdown(draft.content, {
         html: rendered.html,

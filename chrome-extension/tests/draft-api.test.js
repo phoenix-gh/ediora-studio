@@ -4,6 +4,7 @@ import test from 'node:test'
 import {
   DEFAULT_API_BASE,
   assertAllowedApiBase,
+  fetchDraftImage,
   fetchDraftCollection,
   normalizeApiBase,
   publishDraft,
@@ -52,6 +53,61 @@ test('fetches the existing endpoint and strips unrelated fields', async () => {
     draft_type: 'article',
     updated_at: 'now',
   }])
+})
+
+test('fetches a local upload and returns a CSP-compatible data URL', async () => {
+  const calls = []
+  const result = await fetchDraftImage(
+    DEFAULT_API_BASE,
+    'http://localhost:8000/api/uploads/cover.png',
+    {
+      fetchImpl: async (url, init) => {
+        calls.push({ url, init })
+        return new Response(Uint8Array.from([137, 80, 78, 71]), {
+          status: 200,
+          headers: { 'content-type': 'image/png' },
+        })
+      },
+    },
+  )
+
+  assert.equal(calls[0].url, 'http://localhost:8000/api/uploads/cover.png')
+  assert.equal(calls[0].init.headers.Accept, 'image/*')
+  assert.deepEqual(result, { dataUrl: 'data:image/png;base64,iVBORw==' })
+})
+
+test('rewrites a sibling local upload host onto the configured API origin', async () => {
+  const calls = []
+  const result = await fetchDraftImage(
+    'http://127.0.0.1:8000/api',
+    'http://localhost:8000/api/uploads/cover.png',
+    {
+      fetchImpl: async (url, init) => {
+        calls.push({ url, init })
+        return new Response(Uint8Array.from([137, 80, 78, 71]), {
+          status: 200,
+          headers: { 'content-type': 'image/png' },
+        })
+      },
+    },
+  )
+
+  assert.equal(calls[0].url, 'http://127.0.0.1:8000/api/uploads/cover.png')
+  assert.deepEqual(result, { dataUrl: 'data:image/png;base64,iVBORw==' })
+})
+
+test('does not proxy an image outside the configured local upload path', async () => {
+  let called = false
+  await assert.rejects(
+    fetchDraftImage(DEFAULT_API_BASE, 'https://example.com/cover.png', {
+      fetchImpl: async () => {
+        called = true
+        return new Response('not used')
+      },
+    }),
+    { code: 'DRAFT_API_INVALID_REQUEST' },
+  )
+  assert.equal(called, false)
 })
 
 test('hides error response bodies and rejects malformed payloads', async () => {

@@ -2,11 +2,13 @@ import {
   API_BASE_STORAGE_KEY,
   DEFAULT_API_BASE,
   assertAllowedApiBase,
+  fetchDraftImage,
   fetchDraftCollection,
   publishDraft,
 } from './draft-api.js'
 
 const DRAFTS_REQUEST_TYPE = 'SHUCE_DRAFTS_REQUEST'
+const DRAFT_IMAGE_REQUEST_TYPE = 'SHUCE_DRAFT_IMAGE_REQUEST'
 const DRAFT_PUBLISH_TYPE = 'SHUCE_DRAFT_PUBLISH'
 const DRAFTS_RESULT_TYPE = 'SHUCE_DRAFTS_RESULT'
 const CONFIG_GET_TYPE = 'SHUCE_DRAFTS_CONFIG_GET'
@@ -51,6 +53,14 @@ async function handleDraftsRequest(message) {
   return fetchDraftCollection(apiBase)
 }
 
+async function handleDraftImageRequest(message) {
+  const configured = await readConfiguredApiBase()
+  const apiBase = typeof message.apiBase === 'string' && message.apiBase.trim()
+    ? message.apiBase
+    : configured
+  return fetchDraftImage(apiBase, message.imageUrl)
+}
+
 async function handleDraftPublishRequest(message) {
   const configured = await readConfiguredApiBase()
   const apiBase = typeof message.apiBase === 'string' && message.apiBase.trim()
@@ -69,6 +79,16 @@ async function handleDraftMessage(message) {
       requestId,
       ok: true,
       drafts,
+    }
+  }
+
+  if (message.type === DRAFT_IMAGE_REQUEST_TYPE) {
+    const image = await handleDraftImageRequest(message)
+    return {
+      type: DRAFTS_RESULT_TYPE,
+      requestId,
+      ok: true,
+      ...image,
     }
   }
 
@@ -113,6 +133,7 @@ async function handleDraftMessage(message) {
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   const draftMessageTypes = new Set([
     DRAFTS_REQUEST_TYPE,
+    DRAFT_IMAGE_REQUEST_TYPE,
     DRAFT_PUBLISH_TYPE,
     CONFIG_GET_TYPE,
     CONFIG_SET_TYPE,

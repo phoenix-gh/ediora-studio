@@ -35,6 +35,31 @@ test('sends a correlated request and returns drafts', async () => {
   })
 })
 
+test('fetches a preview image through the service worker message channel', async () => {
+  const runtime = fakeRuntime({
+    SHUCE_DRAFT_IMAGE_REQUEST: {
+      requestId: 'request-image-1',
+      ok: true,
+      dataUrl: 'data:image/png;base64,AAAA',
+    },
+  })
+  const client = createDraftClient({ runtime, randomUUID: () => 'request-image-1' })
+
+  assert.deepEqual(
+    await client.fetchImage(
+      'http://localhost:8000/api',
+      'http://localhost:8000/api/uploads/cover.png',
+    ),
+    { dataUrl: 'data:image/png;base64,AAAA' },
+  )
+  assert.deepEqual(runtime.calls[0], {
+    type: 'SHUCE_DRAFT_IMAGE_REQUEST',
+    requestId: 'request-image-1',
+    apiBase: 'http://localhost:8000/api',
+    imageUrl: 'http://localhost:8000/api/uploads/cover.png',
+  })
+})
+
 test('maps service-worker errors and timeouts', async () => {
   const runtime = fakeRuntime({
     SHUCE_DRAFTS_REQUEST: {
