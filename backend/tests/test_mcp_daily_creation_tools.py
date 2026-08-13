@@ -133,6 +133,7 @@ def test_daily_batch_save_tool_is_not_registered(env):
 
     assert "save_daily_creation_outputs" not in names
     assert "save_draft" in names
+    assert "attach_creative_asset_to_draft" in names
     assert "record_content_usage" in names
     usage_schema = mcp_server.mcp._tool_manager._tools[
         "record_content_usage"

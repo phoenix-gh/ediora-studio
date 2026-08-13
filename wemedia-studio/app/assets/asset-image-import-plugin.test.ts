@@ -47,9 +47,9 @@ function imageDocument(id: string) {
   ])
 }
 
-function createView(id: string) {
+function createView(id: string, onDocumentChange = vi.fn()) {
   const onRetry = vi.fn()
-  const plugin = createAssetImageImportPlugin({ onRetry })
+  const plugin = createAssetImageImportPlugin({ onRetry, onDocumentChange })
   const state = EditorState.create({
     schema,
     doc: imageDocument(id),
@@ -59,11 +59,28 @@ function createView(id: string) {
   document.body.append(root)
   return {
     onRetry,
+    onDocumentChange,
     view: new EditorView(root, { state }),
   }
 }
 
 describe('asset image import plugin', () => {
+  it('reports document changes without treating metadata-only actions as edits', () => {
+    const onDocumentChange = vi.fn()
+    const { view } = createView('image-change', onDocumentChange)
+
+    dispatchAssetImageImportAction(view, {
+      type: 'register',
+      id: 'image-change',
+      sourceUrl: 'https://img.example/original.png',
+    })
+    expect(onDocumentChange).not.toHaveBeenCalled()
+
+    view.dispatch(view.state.tr.insertText('新增', 1))
+    expect(onDocumentChange).toHaveBeenCalledTimes(1)
+    view.destroy()
+  })
+
   it('maps the image position through edits and updates only the matching node', () => {
     const { view } = createView('image-a')
     dispatchAssetImageImportAction(view, {

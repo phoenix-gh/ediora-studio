@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   destroy: vi.fn(),
   importCreativeAssetImages: vi.fn(),
   insertions: [] as string[],
+  documentChangeListener: undefined as undefined | (() => void),
   markdownListener: undefined as undefined | ((ctx: unknown, markdown: string) => void),
   toastWarning: vi.fn(),
   uploadInlineAssetImage: vi.fn(),
@@ -50,7 +51,7 @@ vi.mock('@milkdown/crepe', () => ({
 }))
 
 vi.mock('@milkdown/kit/utils', () => ({
-  $prose: vi.fn((factory: () => unknown) => factory),
+  $prose: vi.fn((factory: () => unknown) => factory()),
   insert: vi.fn((markdown: string) => () => {
     mocks.insertions.push(markdown)
   }),
@@ -61,7 +62,10 @@ vi.mock('@milkdown/kit/core', () => ({
 }))
 
 vi.mock('@/app/assets/asset-image-import-plugin', () => ({
-  createAssetImageImportPlugin: vi.fn(() => ({ key: 'image-import-plugin' })),
+  createAssetImageImportPlugin: vi.fn(({ onDocumentChange }: { onDocumentChange?: () => void } = {}) => {
+    mocks.documentChangeListener = onDocumentChange
+    return { key: 'image-import-plugin' }
+  }),
   dispatchAssetImageImportAction: vi.fn((_view: unknown, action: Record<string, unknown>) => {
     mocks.actions.push(action)
   }),
@@ -109,6 +113,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   mocks.actions.length = 0
   mocks.insertions.length = 0
+  mocks.documentChangeListener = undefined
   mocks.markdownListener = undefined
   mocks.create.mockResolvedValue(undefined)
   mocks.destroy.mockResolvedValue(undefined)
@@ -158,6 +163,30 @@ describe('MarkdownEditor', () => {
     )
 
     expect(onChange).toHaveBeenCalledWith('正文\n\n![图](https://img.example/a.png)')
+  })
+
+  it('does not emit the initialization transaction as a content change', async () => {
+    const onChange = vi.fn()
+    mocks.create.mockImplementationOnce(async () => { mocks.documentChangeListener?.() })
+
+    render(<MarkdownEditor documentKey={7} onChange={onChange} value="# 原文" />)
+
+    await waitFor(() => expect(mocks.create).toHaveBeenCalled())
+    mocks.markdownListener?.({}, '# 原文')
+    expect(onChange).not.toHaveBeenCalled()
+  })
+
+  it('emits a document change after initialization has settled', async () => {
+    const onChange = vi.fn()
+    mocks.create.mockImplementationOnce(async () => { mocks.documentChangeListener?.() })
+
+    render(<MarkdownEditor documentKey={7} onChange={onChange} value="# 原文" />)
+
+    await waitFor(() => expect(mocks.create).toHaveBeenCalled())
+    mocks.documentChangeListener?.()
+    mocks.markdownListener?.({}, '# 修改')
+
+    expect(onChange).toHaveBeenCalledWith('# 修改')
   })
 
   it('pastes webpage structure and applies ordered per-image results', async () => {

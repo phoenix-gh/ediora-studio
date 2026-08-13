@@ -14,7 +14,6 @@ vi.mock('@ai-sdk/mcp', () => ({
 
 import {
   createChatSkillRuntime,
-  createImageJob,
   createSkillReferenceReader,
   imageGenerationInputSchema,
   openGlobalAgentTools,
@@ -58,12 +57,13 @@ describe('global Chat tool policy', () => {
 
   it('requires approval for MCP tools with a sensitive action verb', () => {
     expect(requiresToolApproval('update_draft')).toBe(true)
+    expect(requiresToolApproval('attach_creative_asset_to_draft')).toBe(true)
     expect(requiresToolApproval('upload_image_from_url')).toBe(true)
     expect(requiresToolApproval('search_ref_materials')).toBe(false)
     expect(requiresToolApproval('list_publish_accounts')).toBe(false)
   })
 
-  it('does not require approval to create a durable image-generation job', () => {
+  it('does not require approval for direct image generation', () => {
     expect(requiresToolApproval('generateImage')).toBe(false)
     expect(requiresToolApproval('readSkillReference')).toBe(false)
   })
@@ -82,7 +82,8 @@ describe('global Chat tool policy', () => {
     } satisfies ToolSet)
 
     const runtime = await openGlobalAgentTools({
-      apiBase: 'http://localhost:8000/api',
+      mcpEndpoint: 'http://localhost:8000/mcp',
+      imageGenerator: { generate: vi.fn() },
       approvalPolicy: 'automatic',
       onToolAudit: event => { audits.push(event) },
     })
@@ -105,7 +106,8 @@ describe('global Chat tool policy', () => {
     mcp.tools.mockResolvedValue({})
 
     const runtime = await openGlobalAgentTools({
-      apiBase: 'http://localhost:8000/api',
+      mcpEndpoint: 'http://localhost:8000/mcp',
+      imageGenerator: { generate: vi.fn() },
       approvalPolicy: 'automatic',
       dailyCreationRunId: 83,
     })
@@ -117,6 +119,26 @@ describe('global Chat tool policy', () => {
         headers: { 'X-WMS-Daily-Creation-Run-Id': '83' },
       },
     })
+    await runtime.close()
+  })
+
+  it('hides remote image upload tools from scheduled Agents', async () => {
+    mcp.tools.mockResolvedValue({
+      upload_image_from_url: tool({ inputSchema: z.object({}), execute: async () => ({}) }),
+      upload_image_from_path: tool({ inputSchema: z.object({}), execute: async () => ({}) }),
+      attach_creative_asset_to_draft: tool({ inputSchema: z.object({}), execute: async () => ({}) }),
+    })
+
+    const runtime = await openGlobalAgentTools({
+      mcpEndpoint: 'http://localhost:8000/mcp',
+      imageGenerator: { generate: vi.fn() },
+      approvalPolicy: 'automatic',
+      dailyCreationRunId: 83,
+    })
+
+    expect(runtime.tools.upload_image_from_url).toBeUndefined()
+    expect(runtime.tools.upload_image_from_path).toBeUndefined()
+    expect(runtime.tools.attach_creative_asset_to_draft).toBeDefined()
     await runtime.close()
   })
 
@@ -237,90 +259,37 @@ describe('global Chat tool policy', () => {
     expect(imageGenerationInputSchema.safeParse({ prompt: 'x', directory: '临时文件', extra: true }).success).toBe(false)
   })
 
-  it('creates an independent image job without a draft or image category', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: 51, flow: 'standalone_image', status: 'queued' }), { status: 201 }))
-    vi.stubGlobal('fetch', fetchMock)
-
-    await expect(createImageJob({ apiBase: 'http://localhost:8000/api', prompt: 'minimal editorial cover' }))
-      .resolves.toEqual({ jobId: 51, flow: 'standalone_image', status: 'queued' })
-
-    expect(fetchMock).toHaveBeenCalledWith('http://localhost:8000/api/jobs', expect.objectContaining({
-      method: 'POST',
-      body: expect.stringContaining('"prompt":"minimal editorial cover"'),
-    }))
-  })
-
-  it('uses the same independent image job for every prompt', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: 52, flow: 'standalone_image', status: 'queued' }), { status: 201 }))
-    vi.stubGlobal('fetch', fetchMock)
-
-    await expect(createImageJob({ apiBase: 'http://localhost:8000/api', prompt: '一张极简风格的月球基地插画' }))
-      .resolves.toEqual({ jobId: 52, flow: 'standalone_image', status: 'queued' })
-
-    expect(fetchMock).toHaveBeenCalledWith('http://localhost:8000/api/jobs', expect.objectContaining({
-      method: 'POST',
-      body: expect.stringContaining('"prompt":"一张极简风格的月球基地插画"'),
-    }))
-  })
-
-  it('passes the requested title and asset directory to the image job', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ id: 53, flow: 'standalone_image', status: 'queued' }), { status: 201 }))
-    vi.stubGlobal('fetch', fetchMock)
-
-    await expect(createImageJob({
-      apiBase: 'http://localhost:8000/api',
-      prompt: 'GitHub daily ranking chart',
-      title: 'GitHub 日榜 2026-08-09',
-      directory: '临时文件',
-    })).resolves.toEqual({ jobId: 53, flow: 'standalone_image', status: 'queued' })
-
-    expect(fetchMock).toHaveBeenCalledWith('http://localhost:8000/api/jobs', expect.objectContaining({
-      method: 'POST',
-      body: expect.stringContaining('"title":"GitHub 日榜 2026-08-09"'),
-    }))
-    expect(fetchMock).toHaveBeenCalledWith('http://localhost:8000/api/jobs', expect.objectContaining({
-      body: expect.stringContaining('"directory":"临时文件"'),
-    }))
-  })
-
-  it('waits for the image job to finish before returning generateImage evidence', async () => {
+  it('delegates generateImage to the direct host generator instead of creating a job', async () => {
     mcp.tools.mockResolvedValue({})
+    const imageGenerator = {
+      generate: vi.fn().mockResolvedValue({
+        asset_id: 100,
+        asset_url: '/api/uploads/direct.png',
+        title: 'GitHub 日榜',
+        directory: '临时文件',
+        model: 'gpt-image-1',
+      }),
+    }
     const fetchMock = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({ id: 54, flow: 'standalone_image', status: 'queued' }), { status: 201 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        id: 54,
-        flow: 'standalone_image',
-        title: 'GitHub 日榜 2026-08-09',
-        status: 'succeeded',
-        input: { prompt: 'daily ranking chart', directory: '临时文件' },
-        steps: [{
-          key: 'standalone_image',
-          status: 'succeeded',
-          output: {
-            asset_id: 99,
-            asset_url: '/api/uploads/chart.png',
-            title: 'GitHub 日榜 2026-08-09',
-            directory: '临时文件',
-          },
-        }],
-      }), { status: 200 }))
     vi.stubGlobal('fetch', fetchMock)
 
     const runtime = await openGlobalAgentTools({
-      apiBase: 'http://localhost:8000/api',
+      mcpEndpoint: 'http://localhost:8000/mcp',
+      imageGenerator,
       approvalPolicy: 'automatic',
     })
+
     await expect(executeTool(runtime.tools.generateImage, {
       prompt: 'daily ranking chart',
-      title: 'GitHub 日榜 2026-08-09',
+      title: 'GitHub 日榜',
       directory: '临时文件',
-    })).resolves.toMatchObject({
-      jobId: 54,
-      status: 'succeeded',
-      assetId: 99,
+    })).resolves.toMatchObject({ asset_id: 100, asset_url: '/api/uploads/direct.png' })
+    expect(imageGenerator.generate).toHaveBeenCalledWith({
+      prompt: 'daily ranking chart',
+      title: 'GitHub 日榜',
       directory: '临时文件',
     })
-    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(fetchMock).not.toHaveBeenCalled()
     await runtime.close()
   })
 })

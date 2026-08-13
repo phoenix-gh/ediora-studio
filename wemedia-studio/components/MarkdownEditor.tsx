@@ -47,6 +47,9 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
   const onChangeRef = useRef(onChange)
   const initialValueRef = useRef(value)
   const sessionRef = useRef(0)
+  const documentChangeCountRef = useRef(0)
+  const initializedDocumentChangeCountRef = useRef<number | null>(null)
+  const suppressInitialChangeRef = useRef(false)
   const pendingInsertionsRef = useRef<string[]>([])
   const remoteImagesRef = useRef(new Map<string, ClipboardRemoteImage>())
   const retryRef = useRef<(id: string) => void>(() => undefined)
@@ -117,6 +120,9 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
   useEffect(() => {
     const session = sessionRef.current + 1
     sessionRef.current = session
+    documentChangeCountRef.current = 0
+    initializedDocumentChangeCountRef.current = null
+    suppressInitialChangeRef.current = false
     let active = true
     let ownedCrepe: CrepeInstance | null = null
     const remoteImages = remoteImagesRef.current
@@ -163,12 +169,20 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
         ownedCrepe = crepe
         crepe.editor.use($prose(() => createAssetImageImportPlugin({
           onRetry: id => retryRef.current(id),
+          onDocumentChange: () => {
+            documentChangeCountRef.current += 1
+          },
         })))
         crepe.on(listener => {
           listener.markdownUpdated((_ctx, markdown) => {
-            if (active && sessionRef.current === session) {
-              onChangeRef.current(stripImageImportMarkers(markdown))
+            if (!active || sessionRef.current !== session) return
+            const initializedDocumentChangeCount = initializedDocumentChangeCountRef.current
+            if (initializedDocumentChangeCount === null) return
+            if (suppressInitialChangeRef.current) {
+              if (documentChangeCountRef.current <= initializedDocumentChangeCount) return
+              suppressInitialChangeRef.current = false
             }
+            onChangeRef.current(stripImageImportMarkers(markdown))
           })
         })
         await crepe.create()
@@ -176,6 +190,8 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
           await crepe.destroy()
           return
         }
+        initializedDocumentChangeCountRef.current = documentChangeCountRef.current
+        suppressInitialChangeRef.current = documentChangeCountRef.current > 0
         crepeRef.current = crepe
         insertRef.current = insert
         viewRef.current = crepe.editor.action(ctx => ctx.get(editorViewCtx))

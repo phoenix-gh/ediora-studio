@@ -6,7 +6,7 @@ import type {
   AgentToolDecision,
 } from './agent-runtime-types'
 
-const sensitiveToolVerb = /(^|_)(publish|delete|update|save|create|add|upload|record)(_|$)/
+const sensitiveToolVerb = /(^|_)(publish|delete|update|save|create|add|attach|upload|record)(_|$)/
 const readOnlyToolPrefix = /^(list|get|search|read|fetch|find)_/
 const auditValueLimit = 8_000
 const auditErrorLimit = 2_000

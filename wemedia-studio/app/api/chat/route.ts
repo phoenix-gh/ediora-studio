@@ -8,7 +8,7 @@ import { buildChatInstructions } from '@/lib/ai/chat-instructions'
 import { CHAT_MAX_STEPS, chatToolLoopStep, needsFinalAnswerFallback } from '@/lib/ai/chat-loop'
 import { baoyuRuntimeInstructions } from '@/lib/ai/content-job'
 import { agentSkillRunAudit, openAgentRuntime, type AgentRunResult } from '@/lib/ai/agent-runtime'
-import type { ChatSkillSnapshot } from '@/lib/ai/global-chat-tools'
+import { createDirectImageGenerator, mcpUrl, type ChatSkillSnapshot } from '@/lib/ai/global-chat-tools'
 import { workerHeaders } from '@/lib/ai/job-client'
 import { getEnabledSkill, listSkillReferences, loadSkillPreloadContext } from '@/lib/skills/registry'
 
@@ -255,7 +255,9 @@ export async function POST(request: NextRequest) {
     const currentRequestText = currentRequest ? messageText(currentRequest) : ''
     const genericRuntime = genericSkillRuntimeEnabled()
     const runtime = await openAgentRuntime({
-      apiBase: apiBase(), model,
+      mcpEndpoint: mcpUrl(apiBase()),
+      imageGenerator: createDirectImageGenerator(apiBase()),
+      model,
       approvalPolicy: 'interactive',
       skillMode: body.skillName ? 'manual' : 'auto',
       skillName: body.skillName,

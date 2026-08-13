@@ -3,12 +3,17 @@ import { generateImage, generateText, stepCountIs, tool } from 'ai'
 import { z } from 'zod'
 
 import { loadSkillContext, SkillRegistryError } from '../skills/registry'
+import {
+  configuredImageModel,
+  generateAndSaveImage,
+  recordJobEvent,
+  saveCreativeAssetImage,
+} from './image-generation'
 import { workerHeaders } from './job-client'
 
 const apiBase = () => (process.env.WMS_API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000/api').replace(/\/$/, '')
 
 type ModelConfig = { apiKey: string; modelName: string; baseURL?: string }
-type ImageModelConfig = { apiKey: string; modelName: string; baseURL?: string }
 type CoverStyle = Record<string, unknown>
 
 export type ContentStep = 'brief' | 'draft' | 'cover' | 'illustrations' | 'standalone_image' | 'prompt_image_generation' | 'template_extraction'
@@ -27,11 +32,7 @@ export function toolsForContentStep(step: ContentStep): string[] {
   return stepToolNames[step]
 }
 
-export function creativeAssetUploadQuery(title: string, directory = '') {
-  const query = new URLSearchParams({ media_kind: 'image', title })
-  if (directory.trim()) query.set('directory', directory.trim())
-  return query.toString()
-}
+export { creativeAssetUploadQuery } from './image-generation'
 
 export function imageToolNamesForSkill(step: 'cover' | 'illustrations'): string[] {
   void step
@@ -138,19 +139,6 @@ async function saveDraftImage(jobId: number, draftId: number, filename: string, 
   return response.json() as Promise<{ id: number; url: string }>
 }
 
-async function saveCreativeAssetImage(jobId: number, title: string, filename: string, bytes: Uint8Array, mediaType: string, directory = '') {
-  const form = new FormData()
-  const data = new Uint8Array(bytes.byteLength)
-  data.set(bytes)
-  form.append('file', new Blob([data], { type: mediaType }), filename)
-  const response = await fetch(`${apiBase()}/assets/upload?${creativeAssetUploadQuery(title, directory)}`, {
-    method: 'POST', headers: workerHeaders(jobId), body: form,
-  })
-  if (!response.ok) throw new Error(`Creative asset upload failed (${response.status})`)
-  return response.json() as Promise<{ id: number; url: string; title: string }>
-}
-
-
 async function startStep(jobId: number, step: ContentStep) {
   const response = await fetch(`${apiBase()}/jobs/${jobId}/steps/${step}/start`, { method: 'POST' })
   if (!response.ok) throw new Error(`Unable to start ${step} step`)
@@ -179,13 +167,6 @@ async function completeJob(jobId: number) {
   if (!response.ok) throw new Error('Unable to complete content job')
 }
 
-async function recordJobEvent(jobId: number, kind: string, payload: Record<string, unknown>) {
-  const response = await fetch(`${apiBase()}/jobs/${jobId}/events`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ kind, payload }),
-  })
-  if (!response.ok) throw new Error(`Unable to record ${kind} event`)
-}
-
 async function configuredTextModel(): Promise<ModelConfig> {
   try {
     const response = await fetch(`${apiBase()}/settings/ai-runtime`, {
@@ -202,22 +183,6 @@ async function configuredTextModel(): Promise<ModelConfig> {
   const apiKey = process.env.WMS_LLM_API_KEY
   if (!apiKey) throw new Error('No LLM API key is configured in Settings or WMS_LLM_API_KEY')
   return { apiKey, modelName: process.env.WMS_LLM_MODEL ?? 'gpt-4o-mini', baseURL: process.env.WMS_LLM_BASE_URL }
-}
-
-async function configuredImageModel(): Promise<ImageModelConfig> {
-  const response = await fetch(`${apiBase()}/settings/ai-runtime`, {
-    cache: 'no-store',
-    headers: workerHeaders(),
-  })
-  if (response.ok) {
-    const settings = await response.json() as { image?: { api_key: string; model: string; base_url: string } }
-    if (settings.image?.api_key) {
-      return { apiKey: settings.image.api_key, modelName: settings.image.model || 'gpt-image-1', baseURL: settings.image.base_url || undefined }
-    }
-  }
-  const apiKey = process.env.WMS_IMAGE_API_KEY
-  if (!apiKey) throw new Error('Image model is not configured. Set an image API key in Settings.')
-  return { apiKey, modelName: process.env.WMS_IMAGE_MODEL ?? 'gpt-image-1', baseURL: process.env.WMS_IMAGE_BASE_URL }
 }
 
 export function baoyuRuntimeInstructions(step: 'cover' | 'illustrations', maxImages: number) {
@@ -336,14 +301,9 @@ async function runStandaloneImageFlow(job: Awaited<ReturnType<typeof getJob>>) {
   const prompt = String(job.input.prompt ?? '').trim()
   if (!prompt) throw new Error('standalone_image flow requires prompt')
   const directory = String(job.input.directory ?? '').trim()
-  const image = await configuredImageModel()
-  const provider = createOpenAI({ apiKey: image.apiKey, baseURL: image.baseURL })
-  await recordJobEvent(job.id, 'generate_image_called', { tool: 'generateImage', prompt, standalone: true })
-  const generated = await generateImage({ model: provider.image(image.modelName), prompt, n: 1 })
-  const output = generated.images[0]
-  const asset = await saveCreativeAssetImage(job.id, job.title, `chat-image-${job.id}.png`, output.uint8Array, output.mediaType, directory)
-  await recordJobEvent(job.id, 'generate_image_succeeded', { tool: 'generateImage', asset_id: asset.id, asset_url: asset.url, directory, standalone: true })
-  return { asset_id: asset.id, asset_url: asset.url, title: asset.title, directory }
+  return generateAndSaveImage({
+    apiBase: apiBase(), jobId: job.id, prompt, title: job.title, directory,
+  })
 }
 
 

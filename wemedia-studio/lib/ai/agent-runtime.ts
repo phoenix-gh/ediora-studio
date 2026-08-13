@@ -1,6 +1,11 @@
 import { generateText, Output, stepCountIs, type ModelMessage, type ToolSet } from 'ai'
 
-import { openGlobalAgentTools, type ChatSkillRuntime, type GlobalAgentToolOptions } from './global-chat-tools'
+import {
+  openGlobalAgentTools,
+  type ChatSkillRuntime,
+  type GlobalAgentToolOptions,
+  type ImageGenerator,
+} from './global-chat-tools'
 import { executeSkillRunWithAiSdk, selectSkillForTurn } from './skill-run-ai-sdk'
 import {
   sanitizeSkillRunPlan,
@@ -36,7 +41,8 @@ export type AgentRuntimeDependencies = {
 }
 
 export type OpenAgentRuntimeOptions = {
-  apiBase: string
+  mcpEndpoint: string
+  imageGenerator: ImageGenerator
   model: Parameters<typeof generateText>[0]['model']
   approvalPolicy: AgentApprovalPolicy
   skillMode: AgentSkillMode
@@ -157,7 +163,8 @@ export async function openAgentRuntime(
   }
 
   const toolOptions = (skillName?: string, restoredSkillName?: string): GlobalAgentToolOptions => ({
-    apiBase: options.apiBase,
+    mcpEndpoint: options.mcpEndpoint,
+    imageGenerator: options.imageGenerator,
     draftId: options.draftId,
     dailyCreationRunId: options.dailyCreationRunId,
     skillName,

@@ -57,7 +57,16 @@ function openOptions(
   deps: AgentRuntimeDependencies,
 ) {
   return {
-    apiBase: 'http://localhost:8000/api',
+    mcpEndpoint: 'http://localhost:8000/mcp',
+    imageGenerator: {
+      generate: async () => ({
+        asset_id: 1,
+        asset_url: '/api/uploads/direct.png',
+        title: 'direct',
+        directory: '',
+        model: 'gpt-image-1',
+      }),
+    },
     model: 'fake-model' as never,
     approvalPolicy,
     skillMode: 'auto' as const,

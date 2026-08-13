@@ -11,6 +11,7 @@ from dataclasses import asdict
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Literal, Optional
+from urllib.parse import unquote, urlparse
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 from sqlalchemy import select, desc, delete as sa_delete, func
@@ -1068,25 +1069,44 @@ async def upload_image_from_url(
         content_type: Detected MIME type.
         draft_image_id: ID of the DraftImage record (only present when draft_id was given).
     """
-    import httpx
-
     _ALLOWED = {"image/jpeg", "image/png", "image/gif", "image/webp", "image/svg+xml", "image/avif"}
     _MAX = 10 * 1024 * 1024
 
-    async with httpx.AsyncClient(follow_redirects=True, timeout=20) as client:
+    parsed = urlparse(url)
+    base = urlparse(_BASE_URL)
+    local_path: Path | None = None
+    if parsed.path.startswith("/api/uploads/") and (
+        not parsed.netloc or parsed.netloc.lower() == base.netloc.lower()
+    ):
+        filename = unquote(parsed.path.removeprefix("/api/uploads/"))
+        candidate = (_UPLOADS_DIR / filename).resolve()
         try:
-            r = await client.get(url, headers={"User-Agent": "WeMediaStudio/1.0"})
-        except Exception as exc:
-            raise ValueError(f"Failed to fetch image: {exc}")
+            candidate.relative_to(_UPLOADS_DIR.resolve())
+        except ValueError:
+            candidate = None
+        if candidate is not None and candidate.is_file():
+            local_path = candidate
 
-    if r.status_code != 200:
-        raise ValueError(f"Remote server returned HTTP {r.status_code}")
+    if local_path is not None:
+        data = local_path.read_bytes()
+        ct = mimetypes.guess_type(local_path.name)[0] or "image/jpeg"
+    else:
+        import httpx
 
-    ct = r.headers.get("content-type", "").split(";")[0].strip() or "image/jpeg"
+        async with httpx.AsyncClient(follow_redirects=True, timeout=20) as client:
+            try:
+                response = await client.get(url, headers={"User-Agent": "WeMediaStudio/1.0"})
+            except Exception as exc:
+                raise ValueError(f"Failed to fetch image: {exc}")
+
+        if response.status_code != 200:
+            raise ValueError(f"Remote server returned HTTP {response.status_code}")
+        ct = response.headers.get("content-type", "").split(";")[0].strip() or "image/jpeg"
+        data = response.content
+
     if ct not in _ALLOWED:
         raise ValueError(f"Unsupported content type: {ct} — allowed: {', '.join(_ALLOWED)}")
 
-    data = r.content
     if len(data) > _MAX:
         raise ValueError(f"Image too large ({len(data)} bytes, max 10 MB)")
     if len(data) < 64:
@@ -1193,6 +1213,82 @@ async def upload_image_from_path(
         result["draft_image_id"] = img_id
 
     return result
+
+
+@mcp.tool()
+async def attach_creative_asset_to_draft(
+    draft_id: int,
+    asset_id: int,
+) -> dict:
+    """Attach an already stored local image asset to a draft without copying it.
+
+    ``generateImage`` already persists its output as a CreativeAsset. Use this
+    tool after ``save_draft`` when the image should appear in that draft's image
+    library. It is intentionally idempotent and never downloads or enqueues a
+    second image job.
+    """
+    from models import ArticleDraft, CreativeAsset, DraftImage
+
+    async with SessionLocal() as db:
+        draft = await db.get(ArticleDraft, draft_id)
+        if draft is None:
+            raise ValueError(f"Draft {draft_id} not found")
+        asset = await db.get(CreativeAsset, asset_id)
+        if asset is None:
+            raise ValueError(f"Creative asset {asset_id} not found")
+        if asset.asset_type != "media" or asset.media_kind != "image":
+            raise ValueError(f"Creative asset {asset_id} is not an image asset")
+
+        parsed = urlparse(asset.url or "")
+        if not parsed.path.startswith("/api/uploads/"):
+            raise ValueError(f"Creative asset {asset_id} is not a local uploaded image")
+        filename = unquote(parsed.path.removeprefix("/api/uploads/"))
+        candidate = (_UPLOADS_DIR / filename).resolve()
+        try:
+            candidate.relative_to(Path(_UPLOADS_DIR).resolve())
+        except ValueError:
+            raise ValueError("Creative asset image path is invalid") from None
+        if not candidate.is_file():
+            raise ValueError(f"Creative asset image file is missing: {filename}")
+
+        existing = await db.scalar(
+            select(DraftImage).where(
+                DraftImage.draft_id == draft_id,
+                DraftImage.url == asset.url,
+            )
+        )
+        if existing is not None:
+            return {
+                "draft_image_id": existing.id,
+                "draft_id": draft_id,
+                "asset_id": asset_id,
+                "url": existing.url,
+                "filename": existing.filename,
+                "size_bytes": existing.size_bytes,
+                "mime_type": existing.mime_type,
+            }
+
+        image = DraftImage(
+            draft_id=draft_id,
+            filename=filename,
+            original_name=asset.filename or filename,
+            url=asset.url,
+            size_bytes=candidate.stat().st_size,
+            mime_type=asset.media_type or mimetypes.guess_type(filename)[0] or "image/jpeg",
+        )
+        db.add(image)
+        await db.commit()
+        await db.refresh(image)
+
+        return {
+            "draft_image_id": image.id,
+            "draft_id": draft_id,
+            "asset_id": asset_id,
+            "url": image.url,
+            "filename": image.filename,
+            "size_bytes": image.size_bytes,
+            "mime_type": image.mime_type,
+        }
 
 
 @mcp.tool()

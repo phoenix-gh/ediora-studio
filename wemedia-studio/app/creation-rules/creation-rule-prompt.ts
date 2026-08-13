@@ -35,6 +35,8 @@ export function buildCreationRulePrompt(input: CreationRulePromptBuilder) {
   }
 
   lines.push('每条完成后调用 save_draft 保存到草稿箱，参数必须使用 status="drafting"、draft_type="x"。')
+  lines.push('generateImage 会同步生成并保存 CreativeAsset；生成结果已经是本地图片，不要再调用 upload_image_from_url 或 upload_image_from_path 重复上传。')
+  lines.push('save_draft 返回草稿 id 后，如正文包含生成图片，使用对应的 asset_id 调用 attach_creative_asset_to_draft 关联到草稿图片库。')
   lines.push('仅在 save_draft 成功并返回真实草稿 id 后，调用 record_content_usage 记录该草稿实际使用的素材。')
 
   const instructions = input.instructions.trim()

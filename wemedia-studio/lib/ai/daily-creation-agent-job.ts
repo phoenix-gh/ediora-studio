@@ -21,6 +21,7 @@ import {
   type AgentRuntime,
   type OpenAgentRuntimeOptions,
 } from './agent-runtime'
+import { createDirectImageGenerator, mcpUrl } from './global-chat-tools'
 import type {
   AgentCompletionEvidence,
   AgentModelMessageEvent,
@@ -29,6 +30,7 @@ import type {
 } from './agent-runtime-types'
 import {
   apiGet,
+  apiBase,
   completeJob,
   completeStep,
   failStep,
@@ -121,8 +123,7 @@ export type DailyCreationAgentJobDependencies = {
 }
 
 function defaultApiRoot() {
-  return (process.env.WMS_API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000/api')
-    .replace(/\/api\/?$/, '')
+  return apiBase()
 }
 
 async function configuredModel(jobId: number): Promise<Model> {
@@ -257,8 +258,10 @@ export async function runDailyCreationAgentJob(
       )
     }
 
+    const apiRoot = deps.apiRoot()
     runtime = await deps.openRuntime({
-      apiBase: deps.apiRoot(),
+      mcpEndpoint: mcpUrl(apiRoot),
+      imageGenerator: createDirectImageGenerator(apiRoot, jobId),
       model,
       dailyCreationRunId: runId,
       approvalPolicy: 'automatic',

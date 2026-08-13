@@ -153,14 +153,17 @@ function importDecorations(
 
 export function createAssetImageImportPlugin({
   onRetry,
+  onDocumentChange,
 }: {
   onRetry: (id: string) => void
+  onDocumentChange?: () => void
 }) {
   return new Plugin<AssetImageImportPluginState>({
     key: assetImageImportPluginKey,
     state: {
       init: () => ({ entries: new Map() }),
       apply(transaction, previous, _oldState, newState) {
+        if (transaction.docChanged) onDocumentChange?.()
         const entries = mapEntries(transaction, previous.entries)
         const action = transaction.getMeta(assetImageImportPluginKey) as AssetImageImportAction | undefined
         if (action) applyAction(action, entries, newState)
