@@ -60,6 +60,21 @@ export type ResponseArticleContext = {
   [key: string]: unknown
 }
 
+const responseWritingTargets: Record<string, { label: string; draftType: string }> = {
+  x_short_post: { label: 'X 短帖', draftType: 'x' },
+  x_article: { label: 'X Article', draftType: 'x_article' },
+  wechat_article: { label: '公众号文章', draftType: 'mp' },
+  expanded_article: { label: '通用文章', draftType: 'article' },
+  commentary: { label: '评论文章', draftType: 'article' },
+}
+
+export function responseWritingTarget(outputType: string) {
+  return responseWritingTargets[outputType] ?? {
+    label: outputType || '通用文章',
+    draftType: 'article',
+  }
+}
+
 export function outputInstructions(outputType: string) {
   const common = '只生成可编辑草稿，不得发布，不得调用任何发布接口。保留来源归因，不编造原文没有的事实。'
   if (outputType === 'expanded_article') {
@@ -109,17 +124,23 @@ export function buildResponseArticleAgentObjective(
   const responseItemId = item.id
   const source = context.source ?? {}
   const analysis = item.analysis ?? {}
+  const target = responseWritingTarget(context.output.output_type)
+  const fullArticleRequirement = context.output.output_type === 'expanded_article'
+    ? '必须交付完整中文 Markdown 文章，而不是提纲、摘要、分析报告、写作建议或待补充模板。文章需要有明确标题、完整正文、清晰结构和有信息增量的个人判断。'
+    : '必须交付该目标内容形态的完整成稿，而不是提纲、摘要、分析报告、写作建议或待补充模板。'
   const executionLine = executionId
     ? `固定执行标识：job_id 将由运行框架提供，execution_id=${executionId}，response_item_id=${responseItemId}。`
     : `固定 response_item_id=${responseItemId}；execution_id 将由运行框架提供。`
 
-  return `你是 WeMediaStudio 情报中心的文章写作 Agent。你要把一条已经被人工判定为“值得写”的情报，写成可以直接进入草稿箱的完整中文 Markdown 文章。
+  return `你是 WeMediaStudio 情报中心的写作 Agent。你要把一条已经被人工判定为“值得写”的情报，创作成可以直接进入草稿箱的成稿。
 
-交付要求：必须交付完整中文 Markdown 文章，而不是提纲、摘要、分析报告、写作建议或待补充模板。文章需要有明确标题、完整正文、清晰结构和有信息增量的个人判断；只能使用工作上下文中的原文和 AI评价作为事实依据，不得臆造原文没有的事实。文章中应保留来源归因和原文链接。不得发布、不得调用任何发布接口。
+目标内容形态：${target.label}
 
-你可以根据上下文自主判断是否使用 Skill；只有相关时才调用 loadSkill，并遵循所加载 Skill 的要求，不要把 Skill 当成完成任务的硬性前置条件。你可以使用允许的只读工具补充必要信息，但最终交付必须由真实的 save_draft 工具完成。
+交付要求：${fullArticleRequirement}只能使用工作上下文中的原文和 AI评价作为事实依据，不得臆造原文没有的事实。成稿应保留来源归因和原文链接。不得发布、不得调用任何发布接口。
 
-最终保存时必须只调用一次 save_draft，参数必须满足：topic_id=response:${responseItemId}、status="drafting"、draft_type="article"；title 是文章标题，content 是完整 Markdown 正文。不要调用不存在的 save_response_article，也不要把文章只放在模型回复中。只有 save_draft 返回的真实草稿 id 才表示写作完成。
+你可以自主判断是否使用 Skill，并应根据目标内容形态和上下文自主判断并加载相关 Skill；只有相关时才调用 loadSkill，并遵循所加载 Skill 的要求，不要把 Skill 当成完成任务的硬性前置条件。平台的篇幅、结构、语气、标题和排版由相关 Skill 决定。你可以使用允许的只读工具补充必要信息，但最终交付必须由真实的 save_draft 工具完成。
+
+最终保存时必须只调用一次 save_draft，参数必须满足：topic_id=response:${responseItemId}、status="drafting"、draft_type="${target.draftType}"；title 是便于在草稿箱识别的标题，content 是完整成稿。不要调用不存在的 save_response_article，也不要把成稿只放在模型回复中。只有 save_draft 返回的真实草稿 id 才表示写作完成。
 
 ${executionLine}
 

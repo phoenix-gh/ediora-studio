@@ -255,6 +255,126 @@ def test_worth_writing_queues_one_expanded_article_job_and_exposes_status(client
     }]
 
 
+def test_multi_platform_writing_creates_one_job_per_request_target_and_allows_later_variants(client):
+    item_id, run_id = _seed_response()
+
+    first = client.post(
+        f"/api/responses/{item_id}/outputs",
+        json={
+            "analysis_run_id": run_id,
+            "output_types": [
+                "x_short_post",
+                "x_article",
+                "wechat_article",
+                "x_short_post",
+            ],
+        },
+    )
+
+    assert first.status_code == 200, first.text
+    first_outputs = first.json()["outputs"]
+    assert [row["output_type"] for row in first_outputs] == [
+        "x_short_post",
+        "x_article",
+        "wechat_article",
+    ]
+    assert len({row["id"] for row in first_outputs}) == 3
+    assert len({row["job_id"] for row in first_outputs}) == 3
+    assert all(row["created"] is True for row in first_outputs)
+
+    second = client.post(
+        f"/api/responses/{item_id}/outputs",
+        json={"analysis_run_id": run_id, "output_types": ["x_short_post"]},
+    )
+
+    assert second.status_code == 200, second.text
+    second_output = second.json()["outputs"][0]
+    assert second_output["created"] is True
+    assert second_output["id"] not in {row["id"] for row in first_outputs}
+    assert second_output["job_id"] not in {row["job_id"] for row in first_outputs}
+
+    detail = client.get(f"/api/responses/{item_id}")
+    assert detail.status_code == 200, detail.text
+    body = detail.json()
+    assert body["decision_status"] == "worth_writing"
+    assert len(body["outputs"]) == 4
+    assert [row["output_type"] for row in body["outputs"]].count("x_short_post") == 2
+
+
+def test_platform_writing_outputs_link_independent_drafts_with_exact_markers(client):
+    item_id, run_id = _seed_response()
+    headers = {"X-WMS-Worker-Token": "test-worker-token-at-least-32-chars"}
+    targets = [
+        ("x_short_post", "x"),
+        ("x_article", "x_article"),
+        ("wechat_article", "mp"),
+    ]
+    linked: list[tuple[int, int, str]] = []
+
+    for output_type, draft_type in targets:
+        queued = client.post(
+            f"/api/responses/{item_id}/outputs",
+            json={"analysis_run_id": run_id, "output_types": [output_type]},
+        )
+        assert queued.status_code == 200, queued.text
+        output_id = queued.json()["outputs"][0]["id"]
+        draft = client.post("/api/write/drafts", json={
+            "topic_id": f"response:{item_id}",
+            "title": f"{output_type} 独立草稿",
+            "content": f"{output_type} 完整正文",
+            "status": "drafting",
+            "draft_type": draft_type,
+        })
+        assert draft.status_code == 201, draft.text
+        draft_id = draft.json()["id"]
+
+        response = client.post(
+            f"/api/responses/outputs/{output_id}/worker-link",
+            headers=headers,
+            json={"article_draft_id": draft_id},
+        )
+        assert response.status_code == 200, response.text
+        assert response.json() == {
+            "id": output_id,
+            "status": "draft_ready",
+            "article_draft_id": draft_id,
+        }
+        linked.append((output_id, draft_id, output_type))
+
+    detail = client.get(f"/api/responses/{item_id}")
+    assert detail.status_code == 200, detail.text
+    outputs = {row["id"]: row for row in detail.json()["outputs"]}
+    for output_id, draft_id, output_type in linked:
+        assert outputs[output_id]["output_type"] == output_type
+        assert outputs[output_id]["article_draft_id"] == draft_id
+
+
+def test_platform_writing_output_rejects_the_wrong_draft_marker(client):
+    item_id, run_id = _seed_response()
+    queued = client.post(
+        f"/api/responses/{item_id}/outputs",
+        json={"analysis_run_id": run_id, "output_types": ["x_article"]},
+    )
+    assert queued.status_code == 200, queued.text
+    output_id = queued.json()["outputs"][0]["id"]
+    draft = client.post("/api/write/drafts", json={
+        "topic_id": f"response:{item_id}",
+        "title": "错误平台草稿",
+        "content": "完整正文",
+        "draft_type": "x",
+    })
+    assert draft.status_code == 201, draft.text
+
+    response = client.post(
+        f"/api/responses/outputs/{output_id}/worker-link",
+        headers={"X-WMS-Worker-Token": "test-worker-token-at-least-32-chars"},
+        json={"article_draft_id": draft.json()["id"]},
+    )
+
+    assert response.status_code == 422, response.text
+    assert "x_article" in response.json()["detail"]
+
+
 def test_worker_result_creates_one_complete_draft_and_links_response_item(client):
     item_id, run_id = _seed_response()
     queued = client.post(

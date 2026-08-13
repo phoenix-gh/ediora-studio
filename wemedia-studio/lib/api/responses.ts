@@ -87,6 +87,20 @@ export type ResponseOutputType =
   | 'x_share'
   | 'x_reply'
   | 'x_quote'
+  | 'x_short_post'
+  | 'x_article'
+  | 'wechat_article'
+
+export const responseOutputLabels: Record<ResponseOutputType, string> = {
+  expanded_article: '通用文章',
+  commentary: '评论文章',
+  x_share: 'X 分享',
+  x_reply: 'X 回复',
+  x_quote: 'X 引用帖',
+  x_short_post: 'X 短帖',
+  x_article: 'X Article',
+  wechat_article: '公众号文章',
+}
 
 export type ResponseOutput = {
   id: number

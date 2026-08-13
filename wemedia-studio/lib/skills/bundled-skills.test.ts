@@ -25,6 +25,7 @@ const expectedReferences = [
   'references/writing-clean-rules.md',
 ]
 const xArticleSkillName = 'x-article-writing'
+const wechatArticleSkillName = 'wechat-article-writing'
 const expectedXArticleReferences = [
   'references/article-structure.md',
   'references/hooks-and-layout.md',
@@ -104,6 +105,7 @@ describe('bundled human-social-copy Skill', () => {
 
     const skill = await getEnabledSkill(xArticleSkillName)
     expect(skill?.description).toContain('X/Twitter Article')
+    expect(skill?.description).toContain('x_article')
     expect(skill?.description).toContain('expanded_article')
     expect(skill?.instructions).toContain('不适用于普通 X 长帖或 Thread')
     expect(skill?.instructions).toContain('不得编造')
@@ -119,6 +121,26 @@ describe('bundled human-social-copy Skill', () => {
         }),
       )
     }
+  })
+
+  it('discovers the bundled WeChat Article Skill with the intelligence draft contract', async () => {
+    expect(await listSkills()).toContainEqual(expect.objectContaining({
+      name: wechatArticleSkillName,
+      source: 'builtin',
+      enabled: true,
+      version: '1.0.0-wms.1',
+    }))
+    expect((await discoverSkills()).map(skill => skill.name)).toContain(wechatArticleSkillName)
+    expect((await listSkillReferences(wechatArticleSkillName)).map(reference => reference.path))
+      .toEqual(['agents/openai.yaml'])
+
+    const skill = await getEnabledSkill(wechatArticleSkillName)
+    expect(skill?.description).toContain('微信公众号文章')
+    expect(skill?.description).toContain('wechat_article')
+    expect(skill?.instructions).toContain('不得编造')
+    expect(skill?.instructions).toContain('save_draft')
+    expect(skill?.instructions).toContain('draft_type=mp')
+    expect(skill?.instructions).toContain('不得发布')
   })
 
   it('can disable and restore the bundled X Article Skill but cannot delete it', async () => {

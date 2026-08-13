@@ -69,8 +69,9 @@ export interface SeriesUpdate {
 
 export const DRAFT_TYPES = [
   { value: 'article', label: '文章',   badge: 'bg-sky-100 text-sky-600 dark:bg-sky-950/40 dark:text-sky-400' },
-  { value: 'x',       label: 'X',      badge: 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300' },
-  { value: 'mp',      label: '公众号',  badge: 'bg-emerald-100 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400' },
+  { value: 'x',       label: 'X 短帖',  badge: 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300' },
+  { value: 'x_article', label: 'X Article', badge: 'bg-violet-100 text-violet-600 dark:bg-violet-950/40 dark:text-violet-400' },
+  { value: 'mp',      label: '公众号文章', badge: 'bg-emerald-100 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400' },
   { value: 'bili',    label: 'B站',    badge: 'bg-blue-100 text-blue-600 dark:bg-blue-950/40 dark:text-blue-400' },
   { value: 'xhs',     label: '小红书',  badge: 'bg-rose-100 text-rose-600 dark:bg-rose-950/40 dark:text-rose-400' },
 ] as const

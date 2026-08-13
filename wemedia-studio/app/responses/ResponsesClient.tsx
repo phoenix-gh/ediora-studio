@@ -16,18 +16,21 @@ import {
   getResponse,
   getResponseEvents,
   getResponses,
+  responseOutputLabels,
   updateResponseClassification,
   type ContentType,
   type ResponseDetail,
   type ResponseDisposition,
   type ResponseItem,
   type ResponseOutput,
+  type ResponseOutputType,
 } from '@/lib/api/responses'
 import { listCreativeAssetDirectories } from '@/lib/api/assets'
 import { cn } from '@/lib/utils'
 import { ResponseDestinationDialog, type DestinationKind } from './ResponseDestinationDialog'
 import { ResponseEvaluationPane } from './ResponseEvaluationPane'
 import { ResponseSourcePane } from './ResponseSourcePane'
+import { ResponseWritingDialog } from './ResponseWritingDialog'
 
 const statuses: Array<{ value: ResponseDisposition | ''; label: string }> = [
   { value: 'pending', label: '待判断' },
@@ -50,6 +53,14 @@ const timeRanges = [
   { value: 30, label: '30天内' },
   { value: 90, label: '90天内' },
   { value: 0, label: '不限' },
+]
+
+const draftWritingOutputTypes: ResponseOutputType[] = [
+  'expanded_article',
+  'commentary',
+  'x_short_post',
+  'x_article',
+  'wechat_article',
 ]
 
 function formatDate(value: string | null) {
@@ -99,6 +110,8 @@ export function ResponsesClient({
   const [directories, setDirectories] = useState<string[]>([])
   const [destinationBusy, setDestinationBusy] = useState(false)
   const [destinationError, setDestinationError] = useState('')
+  const [writingOpen, setWritingOpen] = useState(false)
+  const [writingError, setWritingError] = useState('')
   const [events, setEvents] = useState<Array<{ id: number; event_type: string; created_at: string }>>([])
 
   const selectedIdRef = useRef(selectedId)
@@ -284,9 +297,22 @@ export function ResponsesClient({
     }
   }, [detail])
 
-  const startWritingJob = useCallback(async () => {
+  const openWritingDialog = useCallback(() => {
     if (
       !detail?.analysis
+      || detail.current_analysis_run_id === null
+      || selectedIdRef.current !== detail.id
+      || detailLoading
+      || destinationBusyRef.current
+    ) return
+    setWritingError('')
+    setWritingOpen(true)
+  }, [detail, detailLoading])
+
+  const submitWritingTargets = useCallback(async (outputTypes: ResponseOutputType[]) => {
+    if (
+      outputTypes.length === 0
+      || !detail?.analysis
       || detail.current_analysis_run_id === null
       || selectedIdRef.current !== detail.id
       || detailLoading
@@ -297,19 +323,21 @@ export function ResponsesClient({
     const session = ++destinationSessionRef.current
     destinationBusyRef.current = true
     setDestinationBusy(true)
+    setWritingError('')
     try {
       const result = await createResponseOutputs(responseId, {
         analysis_run_id: detail.current_analysis_run_id,
-        output_types: ['expanded_article'],
+        output_types: [...new Set(outputTypes)],
       })
       if (session !== destinationSessionRef.current || selectedIdRef.current !== responseId) return
+      setWritingOpen(false)
       await refreshDetail(responseId, generation)
       await loadList({ preserveSelectedId: responseId })
       const created = result.outputs.some(output => output.created)
       toast.success(created ? '写作任务已启动' : '写作任务已在队列中')
     } catch (error) {
       if (session === destinationSessionRef.current) {
-        toast.error(error instanceof Error ? error.message : '写作任务启动失败')
+        setWritingError(error instanceof Error ? error.message : '写作任务启动失败')
       }
     } finally {
       if (session === destinationSessionRef.current) {
@@ -328,6 +356,7 @@ export function ResponsesClient({
         || event.altKey
         || event.shiftKey
         || destination !== null
+        || writingOpen
         || destinationBusy
         || detailLoading
         || !detail
@@ -337,7 +366,7 @@ export function ResponsesClient({
 
       if (event.key === '1' && detail.analysis) {
         event.preventDefault()
-        void startWritingJob()
+        openWritingDialog()
       } else if (event.key === '2' && detail.analysis) {
         event.preventDefault()
         void openDestination('creative_asset')
@@ -348,7 +377,7 @@ export function ResponsesClient({
     }
     window.addEventListener('keydown', handleShortcut)
     return () => window.removeEventListener('keydown', handleShortcut)
-  }, [changeDecision, destination, destinationBusy, detail, detailLoading, openDestination, startWritingJob])
+  }, [changeDecision, destination, destinationBusy, detail, detailLoading, openDestination, openWritingDialog, writingOpen])
 
   async function submitDestination(value: { destination: DestinationKind; analysis_run_id: number; directory: string | null }) {
     if (!detail || detail.id !== selectedIdRef.current || destinationBusyRef.current) return
@@ -449,9 +478,9 @@ export function ResponsesClient({
               <ResponseSourcePane detail={detail} />
               <div className="space-y-4">
                 <ResponseEvaluationPane detail={detail} onClassification={updateClassification} classificationBusy={classificationBusy} history={events} />
-                {detail.outputs?.map(output => output.output_type === 'expanded_article' && (
-                  <WritingJobStatus key={output.id} output={output} />
-                ))}
+                {detail.outputs
+                  ?.filter(output => draftWritingOutputTypes.includes(output.output_type))
+                  .map(output => <WritingJobStatus key={output.id} output={output} />)}
                 {detail.destination && (
                   <a href={detail.destination.url} className="flex items-center justify-between rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/20 dark:text-emerald-300">
                     <span>已进入{detail.destination.type === 'draft' ? '草稿箱' : '创作资产'}</span><ExternalLink className="size-4" />
@@ -460,11 +489,14 @@ export function ResponsesClient({
                 <div className="flex flex-wrap gap-2 rounded-2xl border border-border bg-card p-4">
                   {detail.decision_status === 'pending' && (
                     <>
-                      <Button onClick={() => void startWritingJob()} disabled={!detail.analysis || destinationBusy}>值得写</Button>
+                      <Button onClick={openWritingDialog} disabled={!detail.analysis || destinationBusy}>值得写</Button>
                       <Button variant="outline" onClick={() => void openDestination('creative_asset')} disabled={!detail.analysis || destinationBusy}>创作资产</Button>
                       <Button variant="ghost" onClick={() => void changeDecision('not_processed')} disabled={detailLoading}>暂不处理</Button>
                       <span className="basis-full text-xs text-muted-foreground">快捷键：<kbd className="rounded border border-border bg-muted px-1 py-0.5">1</kbd> 值得写 · <kbd className="rounded border border-border bg-muted px-1 py-0.5">2</kbd> 创作资产 · <kbd className="rounded border border-border bg-muted px-1 py-0.5">3</kbd> 暂不处理</span>
                     </>
+                  )}
+                  {detail.decision_status === 'worth_writing' && (
+                    <Button variant="outline" onClick={openWritingDialog} disabled={!detail.analysis || destinationBusy}>继续创作</Button>
                   )}
                   {detail.decision_status === 'not_processed' && (
                     <Button variant="outline" onClick={() => void changeDecision('reset')} disabled={detailLoading}><RotateCcw className="mr-1 size-4" />恢复待判断</Button>
@@ -479,6 +511,16 @@ export function ResponsesClient({
           )}
         </main>
       </div>
+
+      {writingOpen ? (
+        <ResponseWritingDialog
+          open
+          busy={destinationBusy}
+          error={writingError}
+          onOpenChange={setWritingOpen}
+          onConfirm={outputTypes => void submitWritingTargets(outputTypes)}
+        />
+      ) : null}
 
       <ResponseDestinationDialog
         key={destination ?? 'closed'}
@@ -518,6 +560,8 @@ function WritingJobStatus({ output }: { output: ResponseOutput }) {
   const ready = output.status === 'draft_ready' && output.article_draft_id !== null
   const failed = output.job_status === 'failed' || output.status === 'failed'
   const draftUrl = ready ? `/drafts?draft=${output.article_draft_id}` : null
+  const label = responseOutputLabels[output.output_type]
+  const legacyExpandedArticle = output.output_type === 'expanded_article'
   return (
     <div data-testid="response-writing-status" className={cn(
       'rounded-xl border px-4 py-3 text-sm',
@@ -527,12 +571,12 @@ function WritingJobStatus({ output }: { output: ResponseOutput }) {
     )}>
       <div className="flex items-center justify-between gap-3">
         <span className="font-medium">
-          {ready ? '写作完成，已进入草稿箱' : failed ? '写作任务失败' : '文章写作中…'}
+          {ready ? `${label}写作完成，已进入草稿箱` : failed ? `${label}写作任务失败` : `${label}写作中…`}
         </span>
-        {draftUrl && <a href={draftUrl} className="inline-flex items-center gap-1 underline underline-offset-4">打开草稿箱<ExternalLink className="size-3.5" /></a>}
+        {draftUrl && <a href={draftUrl} className="inline-flex items-center gap-1 underline underline-offset-4">{legacyExpandedArticle ? '打开草稿箱' : `打开 ${label} 草稿`}<ExternalLink className="size-3.5" /></a>}
       </div>
       {failed && <p className="mt-1 text-xs">{output.error || '请前往任务看板查看日志并重试。'}</p>}
-      {!ready && !failed && <p className="mt-1 text-xs opacity-80">写作完成后会自动创建完整文章草稿，不会自动发布。</p>}
+      {!ready && !failed && <p className="mt-1 text-xs opacity-80">写作完成后会自动创建独立草稿，不会自动发布。</p>}
     </div>
   )
 }

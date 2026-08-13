@@ -245,12 +245,15 @@ describe('Intelligence Station workbench', () => {
     await waitFor(() => expect(api.updateResponseClassification).toHaveBeenCalledWith(3, ['research', 'tutorial']))
   })
 
-  it('starts a full article writing job without opening a draft seed dialog', async () => {
+  it('opens a multi-select writing dialog and creates every selected target', async () => {
     const value = detail(4)
     api.getResponse.mockResolvedValue(value)
     api.getResponses.mockResolvedValue(listResult(value))
     api.createResponseOutputs.mockResolvedValue({
-      outputs: [{ id: 41, output_type: 'expanded_article', status: 'queued', job_id: 42, created: true }],
+      outputs: [
+        { id: 41, output_type: 'x_short_post', status: 'queued', job_id: 42, created: true },
+        { id: 43, output_type: 'wechat_article', status: 'queued', job_id: 44, created: true },
+      ],
     })
 
     render(<ResponsesClient initialItems={[value]} initialTotal={1} initialSelectedId={value.id} initialSource="" />)
@@ -258,12 +261,48 @@ describe('Intelligence Station workbench', () => {
     await screen.findByText('AI 评价')
     await user.click(screen.getByRole('button', { name: '值得写' }))
 
+    const dialog = screen.getByRole('dialog')
+    expect(dialog).toHaveTextContent('选择创作目标')
+    expect(screen.getByRole('button', { name: '开始创作' })).toBeDisabled()
+    await user.click(screen.getByRole('checkbox', { name: 'X 短帖' }))
+    await user.click(screen.getByRole('checkbox', { name: '公众号文章' }))
+    await user.click(screen.getByRole('button', { name: '开始创作' }))
+
     await waitFor(() => expect(api.createResponseOutputs).toHaveBeenCalledWith(4, {
       analysis_run_id: 40,
-      output_types: ['expanded_article'],
+      output_types: ['x_short_post', 'wechat_article'],
     }))
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     expect(notifications.success).toHaveBeenCalledWith('写作任务已启动')
+  })
+
+  it('allows a later submission to create another draft for the same target', async () => {
+    const value = detail(17)
+    api.getResponse.mockResolvedValue(value)
+    api.getResponses.mockResolvedValue(listResult(value))
+    api.createResponseOutputs.mockResolvedValue({
+      outputs: [{ id: 171, output_type: 'x_short_post', status: 'queued', job_id: 172, created: true }],
+    })
+
+    render(<ResponsesClient initialItems={[value]} initialTotal={1} initialSelectedId={value.id} initialSource="" />)
+    const user = userEvent.setup()
+    await screen.findByText('AI 评价')
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      await user.click(screen.getByRole('button', { name: '值得写' }))
+      await user.click(screen.getByRole('checkbox', { name: 'X 短帖' }))
+      await user.click(screen.getByRole('button', { name: '开始创作' }))
+      await waitFor(() => expect(api.createResponseOutputs).toHaveBeenCalledTimes(attempt + 1))
+    }
+
+    expect(api.createResponseOutputs).toHaveBeenNthCalledWith(1, 17, {
+      analysis_run_id: 170,
+      output_types: ['x_short_post'],
+    })
+    expect(api.createResponseOutputs).toHaveBeenNthCalledWith(2, 17, {
+      analysis_run_id: 170,
+      output_types: ['x_short_post'],
+    })
   })
 
   it('keeps the queued writing status visible when the pending list no longer contains the item', async () => {
@@ -273,7 +312,7 @@ describe('Intelligence Station workbench', () => {
       decision_status: 'worth_writing',
       outputs: [{
         id: 151,
-        output_type: 'expanded_article',
+        output_type: 'x_short_post',
         status: 'queued',
         job_id: 152,
         job_status: 'queued',
@@ -290,16 +329,18 @@ describe('Intelligence Station workbench', () => {
       return Promise.resolve(listCalls === 1 ? listResult(value) : listPage([], 0, 1))
     })
     api.createResponseOutputs.mockResolvedValue({
-      outputs: [{ id: 151, output_type: 'expanded_article', status: 'queued', job_id: 152, created: true }],
+      outputs: [{ id: 151, output_type: 'x_short_post', status: 'queued', job_id: 152, created: true }],
     })
 
     render(<ResponsesClient initialItems={[value]} initialTotal={1} initialSelectedId={value.id} initialSource="" />)
     const user = userEvent.setup()
     await screen.findByText('AI 评价')
     await user.click(screen.getByRole('button', { name: '值得写' }))
+    await user.click(screen.getByRole('checkbox', { name: 'X 短帖' }))
+    await user.click(screen.getByRole('button', { name: '开始创作' }))
 
-    expect(await screen.findByTestId('response-writing-status')).toHaveTextContent('文章写作中')
-    expect(screen.getByText(/写作完成后会自动创建完整文章草稿/)).toBeInTheDocument()
+    expect(await screen.findByTestId('response-writing-status')).toHaveTextContent('X 短帖写作中')
+    expect(screen.getByText(/写作完成后会自动创建独立草稿/)).toBeInTheDocument()
   })
 
   it('links a completed writing output to the generated draft', async () => {
@@ -325,6 +366,48 @@ describe('Intelligence Station workbench', () => {
 
     expect(await screen.findByTestId('response-writing-status')).toHaveTextContent('写作完成，已进入草稿箱')
     expect(screen.getByRole('link', { name: /打开草稿箱/ })).toHaveAttribute('href', '/drafts?draft=163')
+  })
+
+  it('shows every independent platform output with its own status and draft link', async () => {
+    const value: ResponseDetail = {
+      ...detail(18),
+      decision_status: 'worth_writing',
+      outputs: [
+        {
+          id: 181,
+          output_type: 'x_article',
+          status: 'draft_ready',
+          job_id: 182,
+          job_status: 'succeeded',
+          article_draft_id: 183,
+          content: '',
+          error_code: '',
+          error: '',
+        },
+        {
+          id: 184,
+          output_type: 'wechat_article',
+          status: 'failed',
+          job_id: 185,
+          job_status: 'failed',
+          article_draft_id: null,
+          content: '',
+          error_code: 'agent_failed',
+          error: '模型调用失败',
+        },
+      ],
+    }
+    api.getResponse.mockResolvedValue(value)
+    api.getResponses.mockResolvedValue(listResult(value))
+
+    render(<ResponsesClient initialItems={[value]} initialTotal={1} initialSelectedId={value.id} initialSource="" />)
+
+    const statuses = await screen.findAllByTestId('response-writing-status')
+    expect(statuses).toHaveLength(2)
+    expect(screen.getByText(/X Article写作完成/)).toBeInTheDocument()
+    expect(screen.getByText(/公众号文章写作任务失败/)).toBeInTheDocument()
+    expect(screen.getByText('模型调用失败')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /打开 X Article 草稿/ })).toHaveAttribute('href', '/drafts?draft=183')
   })
 
   it('keeps the asset dialog open and retryable after a destination failure', async () => {
@@ -357,25 +440,20 @@ describe('Intelligence Station workbench', () => {
     await waitFor(() => expect(api.decideResponse).toHaveBeenCalledWith(6, 'not_processed'))
   })
 
-  it('uses 1 to start writing and 2 to open the asset dialog', async () => {
+  it('uses 1 to open writing targets and 2 to open the asset dialog', async () => {
     const value = detail(8)
     api.getResponse.mockResolvedValue(value)
     api.getResponses.mockResolvedValue(listResult(value))
     assets.listCreativeAssetDirectories.mockResolvedValue([{ id: 1, name: '研究' }])
-    api.createResponseOutputs.mockResolvedValue({
-      outputs: [{ id: 81, output_type: 'expanded_article', status: 'queued', job_id: 82, created: true }],
-    })
 
     render(<ResponsesClient initialItems={[value]} initialTotal={1} initialSelectedId={value.id} initialSource="" />)
     const user = userEvent.setup()
     await screen.findByText('AI 评价')
 
     await user.keyboard('1')
-    await waitFor(() => expect(api.createResponseOutputs).toHaveBeenCalledWith(8, {
-      analysis_run_id: 80,
-      output_types: ['expanded_article'],
-    }))
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(await screen.findByRole('dialog')).toHaveTextContent('选择创作目标')
+    expect(api.createResponseOutputs).not.toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: '取消' }))
 
     await user.keyboard('2')
     expect(await screen.findByRole('dialog')).toHaveTextContent('保存为创作资产')

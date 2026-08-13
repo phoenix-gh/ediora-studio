@@ -1,6 +1,6 @@
 ---
 name: x-article-writing
-description: "Use when writing, rewriting, or expanding an independent X/Twitter Article, including an intelligence-center expanded_article based on an X post, research item, product release, or industry update; not for ordinary X posts, long posts, Threads, replies, or general social copy."
+description: "Use when writing, rewriting, or expanding an independent X/Twitter Article, including an intelligence-center x_article or legacy expanded_article based on an X post, research item, product release, or industry update; not for ordinary X posts, long posts, Threads, replies, or general social copy."
 version: 1.0.0-wms.1
 ---
 
@@ -10,7 +10,7 @@ version: 1.0.0-wms.1
 
 ## 适用边界
 
-只在目标产物明确是 X/Twitter Article 时使用，包括情报中心以该形态生成的 `expanded_article`。
+只在目标产物明确是 X/Twitter Article 时使用，包括情报中心的 `x_article` 和旧版 `expanded_article`。
 
 本 Skill 不适用于普通 X 长帖或 Thread，也不适用于短帖、回复、评论和其他社交文案；这些任务使用 `human-social-copy`。
 
@@ -26,7 +26,7 @@ version: 1.0.0-wms.1
    使用 `readSkillReference` 读取需要的文件；不要声称采用尚未成功读取的规则。
 5. **先兑现再扩展**：前 280 字符交代主题、核心判断和阅读收益，正文用证据、解释、限制与可执行价值逐层兑现。传播性不能凌驾于准确性。
 6. **交付完整成稿**：输出标题和完整 Markdown 正文，而不是提纲、摘要、分析报告、写作建议或待补模板。除非任务明确要求，不附带多个标题、配图方案、发布运营建议、评论模板或创作过程。
-7. **按业务工具保存**：使用当前工作流指定的真实保存工具，不自行发布。情报中心 `expanded_article` 默认只调用一次 `save_draft`，保存一个标题和一篇完整 Markdown 正文；只有工具返回真实草稿 ID 才算完成。
+7. **按业务工具保存**：使用当前工作流指定的真实保存工具，不自行发布。情报中心 `x_article` 或旧版 `expanded_article` 默认只调用一次 `save_draft`，保存一个标题和一篇完整 Markdown 正文；只有工具返回真实草稿 ID 才算完成。
 
 ## 事实与声音
 

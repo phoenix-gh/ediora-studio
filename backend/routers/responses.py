@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from content_response_service import (
     CONTENT_TYPES,
+    DRAFT_OUTPUT_TYPES,
     create_analysis_run,
     create_outputs,
     persist_analysis,
@@ -356,10 +357,7 @@ async def output_worker_result(
     if item is None:
         raise HTTPException(409, "response output item is missing")
     if output.status == "draft_ready":
-        if output.article_draft_id and (
-            item.destination_type != "draft"
-            or item.destination_id != output.article_draft_id
-        ):
+        if output.article_draft_id and item.destination_type is None:
             item.destination_type = "draft"
             item.destination_id = output.article_draft_id
             db.add(ContentResponseEvent(
@@ -375,11 +373,13 @@ async def output_worker_result(
             ))
             await db.commit()
         return {"id": output.id, "status": output.status, "article_draft_id": output.article_draft_id}
-    if output.output_type in {"expanded_article", "commentary"}:
+    expected_draft_type = DRAFT_OUTPUT_TYPES.get(output.output_type)
+    if expected_draft_type is not None:
         draft = ArticleDraft(
             topic_id=f"response:{output.response_item_id}",
             title=body.title,
             content=body.content,
+            draft_type=expected_draft_type,
             sources=[body.source_attribution],
         )
         db.add(draft)
@@ -422,8 +422,9 @@ async def output_worker_link(
     )
     if output is None:
         raise HTTPException(404, "response output not found")
-    if output.output_type not in {"expanded_article", "commentary"}:
-        raise HTTPException(422, "worker link requires an article output")
+    expected_draft_type = DRAFT_OUTPUT_TYPES.get(output.output_type)
+    if expected_draft_type is None:
+        raise HTTPException(422, "worker link requires a draft output")
 
     item = await db.get(ContentResponseItem, output.response_item_id)
     if item is None:
@@ -433,19 +434,17 @@ async def output_worker_link(
         raise HTTPException(404, "article draft not found")
     if draft.topic_id != f"response:{item.id}":
         raise HTTPException(409, "article draft topic_id does not belong to this response item")
-    if draft.draft_type != "article":
-        raise HTTPException(422, "worker link requires an article draft")
+    if draft.draft_type != expected_draft_type:
+        raise HTTPException(
+            422,
+            f"worker link requires draft_type={expected_draft_type}",
+        )
     if not draft.content.strip():
         raise HTTPException(422, "article draft content is empty")
-    if item.destination_type and (
-        item.destination_type != "draft" or item.destination_id != draft.id
-    ):
-        raise HTTPException(409, "response item already has another destination")
-
     if output.status == "draft_ready":
         if output.article_draft_id != draft.id:
             raise HTTPException(409, "response output is already linked to another draft")
-        if item.destination_type != "draft" or item.destination_id != draft.id:
+        if item.destination_type is None:
             item.destination_type = "draft"
             item.destination_id = draft.id
             db.add(ContentResponseEvent(

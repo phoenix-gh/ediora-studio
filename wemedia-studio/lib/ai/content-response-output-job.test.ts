@@ -106,6 +106,23 @@ describe('content response output instructions', () => {
 })
 
 describe('content response Agent writing job', () => {
+  it.each([
+    ['x_short_post', 'X 短帖', 'x'],
+    ['x_article', 'X Article', 'x_article'],
+    ['wechat_article', '公众号文章', 'mp'],
+  ])('targets %s as %s and saves draft type %s', (outputType, label, draftType) => {
+    const objective = buildResponseArticleAgentObjective({
+      ...context,
+      output: { ...context.output, output_type: outputType },
+    }, 41)
+
+    expect(objective).toContain(`目标内容形态：${label}`)
+    expect(objective).toContain(`draft_type="${draftType}"`)
+    expect(objective).toContain('自主判断并加载相关 Skill')
+    expect(objective).not.toContain('280 字符')
+    expect(objective).not.toContain('固定小标题')
+  })
+
   it('builds an objective for full article writing and direct save_draft persistence', () => {
     const objective = buildResponseArticleAgentObjective(context, 41)
 

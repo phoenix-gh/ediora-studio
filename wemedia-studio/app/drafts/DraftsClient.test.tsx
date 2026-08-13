@@ -330,6 +330,24 @@ describe('DraftsClient async response identity', () => {
 })
 
 describe('DraftsClient independent draft selection', () => {
+  it('renders the exact writing target badge on every independent draft', () => {
+    const xDraft = { ...draftA, id: 21, title: 'X 短帖草稿', draft_type: 'x' }
+    const xArticleDraft = { ...draftA, id: 22, title: 'X Article 草稿', draft_type: 'x_article' }
+    const wechatDraft = { ...draftA, id: 23, title: '公众号文章草稿', draft_type: 'mp' }
+
+    render(
+      <DraftsClient
+        initialDrafts={[xDraft, xArticleDraft, wechatDraft]}
+        initialTopics={[]}
+        initialDraftId={xDraft.id}
+      />,
+    )
+
+    expect(screen.getAllByText('X 短帖').length).toBeGreaterThan(0)
+    expect(screen.getByText('X Article')).toBeInTheDocument()
+    expect(screen.getByText('公众号文章')).toBeInTheDocument()
+  })
+
   it('renders every draft independently without adaptation controls', () => {
     const xDraft = { ...draftB, title: 'X 草稿', draft_type: 'x' }
     render(

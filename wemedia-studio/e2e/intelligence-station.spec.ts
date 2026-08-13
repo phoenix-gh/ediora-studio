@@ -74,17 +74,33 @@ const nextItem = {
   analysis: { ...item.analysis, id: 102 },
 }
 
-test('triages an X item and starts a full article writing job', async ({ page }) => {
+test('selects multiple writing targets and starts independent draft jobs', async ({ page }) => {
   const requests: Array<{ url: string; method: string; body: string }> = []
   const listRequests: string[] = []
+  const consoleProblems: string[] = []
+  page.on('console', message => {
+    if (message.type() === 'error' || message.type() === 'warning') consoleProblems.push(message.text())
+  })
+  page.on('pageerror', error => consoleProblems.push(error.message))
+  let writingStarted = false
   await page.route('**/api/responses/1/outputs', async route => {
     requests.push({ url: route.request().url(), method: route.request().method(), body: route.request().postData() ?? '' })
+    writingStarted = true
     await route.fulfill({ json: {
-      outputs: [{ id: 55, output_type: 'expanded_article', status: 'queued', job_id: 56, job_status: 'queued', created: true }],
+      outputs: [
+        { id: 55, output_type: 'x_short_post', status: 'queued', job_id: 56, job_status: 'queued', created: true },
+        { id: 57, output_type: 'wechat_article', status: 'queued', job_id: 58, job_status: 'queued', created: true },
+      ],
     } })
   })
   await page.route('**/api/responses/1', async route => {
-    await route.fulfill({ json: detail })
+    await route.fulfill({ json: {
+      ...detail,
+      outputs: writingStarted ? [
+        { id: 55, output_type: 'x_short_post', status: 'queued', article_draft_id: null, job_status: 'queued', error: '' },
+        { id: 57, output_type: 'wechat_article', status: 'queued', article_draft_id: null, job_status: 'queued', error: '' },
+      ] : [],
+    } })
   })
   await page.route('**/api/responses?*', async route => {
     listRequests.push(route.request().url())
@@ -114,10 +130,25 @@ test('triages an X item and starts a full article writing job', async ({ page })
   await expect.poll(() => listRequests.some(url => new URL(url).searchParams.get('page') === '2')).toBe(true)
 
   await page.getByRole('button', { name: '值得写', exact: true }).click()
+  await expect(page.getByRole('dialog', { name: '选择创作目标' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '开始创作' })).toBeDisabled()
+  await page.getByRole('checkbox', { name: 'X 短帖' }).check()
+  await page.getByRole('checkbox', { name: '公众号文章' }).check()
+  if (process.env.WMS_PLAYWRIGHT_DIALOG_SCREENSHOT) {
+    await page.screenshot({ path: process.env.WMS_PLAYWRIGHT_DIALOG_SCREENSHOT, fullPage: false })
+  }
+  await page.getByRole('button', { name: '开始创作' }).click()
   await expect.poll(() => requests.length).toBe(1)
   expect(JSON.parse(requests[0].body)).toEqual({
     analysis_run_id: 101,
-    output_types: ['expanded_article'],
+    output_types: ['x_short_post', 'wechat_article'],
   })
   expect(requests.some(request => request.url.includes('/publish'))).toBe(false)
+  await expect(page.getByText('X 短帖写作中…')).toBeVisible()
+  await expect(page.getByText('公众号文章写作中…')).toBeVisible()
+  await expect(page.getByText('写作完成后会自动创建独立草稿，不会自动发布。')).toHaveCount(2)
+  if (process.env.WMS_PLAYWRIGHT_SCREENSHOT) {
+    await page.screenshot({ path: process.env.WMS_PLAYWRIGHT_SCREENSHOT, fullPage: false })
+  }
+  expect(consoleProblems).toEqual([])
 })

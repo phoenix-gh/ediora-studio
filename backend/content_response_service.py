@@ -40,12 +40,26 @@ DISPOSITIONS = {
     "creative_asset",
     "not_processed",
 }
-OUTPUT_TYPES = {
+LEGACY_OUTPUT_TYPES = {
     "expanded_article",
     "commentary",
     "x_share",
     "x_reply",
     "x_quote",
+}
+WRITING_TARGETS = {
+    "x_short_post": {"label": "X 短帖", "draft_type": "x"},
+    "x_article": {"label": "X Article", "draft_type": "x_article"},
+    "wechat_article": {"label": "公众号文章", "draft_type": "mp"},
+}
+OUTPUT_TYPES = LEGACY_OUTPUT_TYPES | set(WRITING_TARGETS)
+DRAFT_OUTPUT_TYPES = {
+    "expanded_article": "article",
+    "commentary": "article",
+    **{
+        output_type: target["draft_type"]
+        for output_type, target in WRITING_TARGETS.items()
+    },
 }
 
 
@@ -423,22 +437,25 @@ async def create_outputs(
             raise ValueError("publish account is not active")
     results: list[tuple[ContentResponseOutput, ContentJob, bool]] = []
     for output_type in dict.fromkeys(output_types):
-        output = (await db.execute(
-            select(ContentResponseOutput).where(
-                ContentResponseOutput.analysis_run_id == analysis_run_id,
-                ContentResponseOutput.publish_account_id == publish_account_id,
-                ContentResponseOutput.output_type == output_type,
-            )
-        )).scalar_one_or_none()
-        if output is not None:
-            job = await db.get(ContentJob, output.job_id) if output.job_id else None
-            if job is not None:
-                results.append((output, job, False))
-                continue
+        target = WRITING_TARGETS.get(output_type)
+        output_publish_account_id = None if target else publish_account_id
+        if target is None:
+            output = (await db.execute(
+                select(ContentResponseOutput).where(
+                    ContentResponseOutput.analysis_run_id == analysis_run_id,
+                    ContentResponseOutput.publish_account_id == output_publish_account_id,
+                    ContentResponseOutput.output_type == output_type,
+                )
+            )).scalar_one_or_none()
+            if output is not None:
+                job = await db.get(ContentJob, output.job_id) if output.job_id else None
+                if job is not None:
+                    results.append((output, job, False))
+                    continue
         output = ContentResponseOutput(
             response_item_id=item.id,
             analysis_run_id=analysis_run_id,
-            publish_account_id=publish_account_id,
+            publish_account_id=output_publish_account_id,
             output_type=output_type,
         )
         db.add(output)
@@ -446,7 +463,7 @@ async def create_outputs(
         job = await create_job(
             db,
             flow="content_response_output",
-            title=f"生成 {output_type}：{item.source_title[:80]}",
+            title=f"生成 {target['label'] if target else output_type}：{item.source_title[:80]}",
             input_data={"response_output_id": output.id},
             idempotency_key=f"content-response-output:{output.id}",
             commit=False,
