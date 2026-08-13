@@ -162,7 +162,9 @@ if (globalThis.chrome?.sidePanel) {
     const tab = await chrome.tabs.get(tabId).catch(() => null)
     void syncSidePanelForTab(tabId, tab?.url)
   })
+}
 
+if (globalThis.chrome?.runtime) {
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     const draftMessageTypes = new Set([
       DRAFTS_REQUEST_TYPE,
