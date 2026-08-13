@@ -3,14 +3,17 @@ import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
 import {
+  WORKBENCH_LAYOUT_STORAGE_KEY,
   applyDrafts,
   createWorkbenchState,
   getSelectedDraft,
   getVisibleDrafts,
+  normalizeWorkbenchLayout,
   publishDraftAndSelectNext,
   selectDraft,
   shuffleDrafts,
   setWorkbenchFilter,
+  setWorkbenchLayout,
   setWorkbenchSettingsOpen,
 } from '../content/workbench-state.js'
 import { copyText } from '../content/workbench-clipboard.js'
@@ -42,6 +45,15 @@ const rawDrafts = [
     updated_at: '2026-08-08T12:00:00Z',
   },
 ]
+
+test('normalizes and stores stack or split layout', () => {
+  assert.equal(WORKBENCH_LAYOUT_STORAGE_KEY, 'shuceWorkbenchLayout')
+  assert.equal(normalizeWorkbenchLayout('split'), 'split')
+  assert.equal(normalizeWorkbenchLayout('stack'), 'stack')
+  assert.equal(normalizeWorkbenchLayout('weird'), 'stack')
+  assert.equal(createWorkbenchState().layout, 'stack')
+  assert.equal(setWorkbenchLayout(createWorkbenchState(), 'split').layout, 'split')
+})
 
 test('selects newest ready draft and applies filters', () => {
   let state = applyDrafts(createWorkbenchState(), rawDrafts)

@@ -1,11 +1,20 @@
 import { filterDrafts, selectReadyDrafts } from './draft-model.js'
 
 export const DEFAULT_WORKBENCH_API_BASE = 'http://localhost:8000/api'
+export const WORKBENCH_LAYOUT_STORAGE_KEY = 'shuceWorkbenchLayout'
 
 function sameId(left, right) {
   return left !== null && left !== undefined
     && right !== null && right !== undefined
     && String(left) === String(right)
+}
+
+export function normalizeWorkbenchLayout(value) {
+  return value === 'split' ? 'split' : 'stack'
+}
+
+export function setWorkbenchLayout(state, layout) {
+  return { ...state, layout: normalizeWorkbenchLayout(layout) }
 }
 
 export function createWorkbenchState({ apiBase = DEFAULT_WORKBENCH_API_BASE } = {}) {
@@ -21,6 +30,7 @@ export function createWorkbenchState({ apiBase = DEFAULT_WORKBENCH_API_BASE } = 
     apiBase,
     copyState: 'idle',
     publishingId: null,
+    layout: 'stack',
   }
 }
 
