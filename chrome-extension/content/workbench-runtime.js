@@ -14,6 +14,7 @@ import {
   getVisibleDrafts,
   publishDraftAndSelectNext,
   selectDraft,
+  shuffleDrafts,
   setWorkbenchFilter,
   setWorkbenchSettingsOpen,
 } from './workbench-state.js'
@@ -145,6 +146,7 @@ const STATIC_UI = [
   '<div class="sw-schedule-memory"><strong data-role="last-schedule">上次安排：未记录</strong><label class="sw-auto-schedule"><input type="checkbox" data-role="auto-schedule"><span>自动填入发布时间</span></label></div>',
   '<div class="sw-actions">',
   '<button class="sw-icon-button" type="button" data-action="refresh" title="刷新草稿">↻</button>',
+  '<button class="sw-icon-button" type="button" data-action="shuffle" title="重新排序">⤨</button>',
   '<button class="sw-icon-button" type="button" data-action="settings" title="API 设置">⚙</button>',
   '<button class="sw-icon-button" type="button" data-action="close" title="收起">×</button>',
   '</div>',
@@ -233,6 +235,7 @@ export function mountWorkbench({ document, window, chromeApi = globalThis.chrome
   const copyButton = query('[data-action="copy"]')
   const publishButton = query('[data-action="publish"]')
   const refreshButton = query('[data-action="refresh"]')
+  const shuffleButton = query('[data-action="shuffle"]')
   const settingsButton = query('[data-action="settings"]')
   const settings = query('[data-role="settings"]')
   const apiInput = query('[data-role="api-input"]')
@@ -361,6 +364,7 @@ export function mountWorkbench({ document, window, chromeApi = globalThis.chrome
     settings.hidden = !state.settingsOpen
     autoSchedule.checked = scheduleMemory.readAutoFillEnabled()
     refreshButton.disabled = state.publishingId !== null
+    shuffleButton.disabled = state.publishingId !== null
     settingsButton.disabled = state.publishingId !== null
     renderLastSchedule()
     renderFilters()
@@ -504,6 +508,11 @@ export function mountWorkbench({ document, window, chromeApi = globalThis.chrome
   })
   query('[data-action="refresh"]').addEventListener('click', () => {
     if (state.publishingId === null) void loadDrafts()
+  })
+  shuffleButton.addEventListener('click', () => {
+    if (state.publishingId !== null) return
+    state = shuffleDrafts(state)
+    render()
   })
   query('[data-action="settings"]').addEventListener('click', () => {
     if (state.publishingId !== null) return

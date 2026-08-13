@@ -184,3 +184,11 @@ test('uses the markdown renderer and rich markdown copy in the preview', async (
   assert.match(source, /<div data-role="preview-content"><\/div>/)
   assert.match(source, /复制 Markdown/)
 })
+
+test('provides an in-memory draft shuffle control', async () => {
+  const source = await readFile(new URL('../content/workbench-runtime.js', import.meta.url), 'utf8')
+
+  assert.match(source, /data-action="shuffle"/)
+  assert.match(source, /title="重新排序"/)
+  assert.match(source, /shuffleDrafts\(state\)/)
+})
