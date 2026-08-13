@@ -9,10 +9,22 @@ const viewports = [
   { name: 'desktop', width: 1280, height: 800 },
   { name: 'narrow', width: 640, height: 760 },
 ] as const
-const longArticle = Array.from(
-  { length: 420 },
-  (_, index) => `第 ${index + 1} 行：用于验证插件长文章正文可以独立滚动。`,
-).join('\n')
+const longArticle = [
+  '# Markdown 文章预览',
+  '',
+  '正文中的图片应该被插件渲染出来。',
+  '',
+  '![预览图](/api/uploads/test.png)',
+  '',
+  ...Array.from(
+    { length: 420 },
+    (_, index) => `第 ${index + 1} 行：用于验证插件长文章正文可以独立滚动。`,
+  ),
+].join('\n')
+const testPng = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+  'base64',
+)
 
 function harnessHtml() {
   return `<!doctype html>
@@ -69,6 +81,9 @@ for (const viewport of viewports) test(`keeps preview actions visible while a lo
   page.on('pageerror', error => consoleProblems.push(error.message))
 
   await page.setViewportSize({ width: viewport.width, height: viewport.height })
+  await page.route('http://localhost:8000/api/uploads/test.png', async route => {
+    await route.fulfill({ contentType: 'image/png', body: testPng })
+  })
   await page.route(`${origin}/**`, async route => {
     const url = new URL(route.request().url())
     if (url.pathname === '/' || url.pathname === '/harness.html') {
@@ -99,8 +114,11 @@ for (const viewport of viewports) test(`keeps preview actions visible while a lo
 
   await expect(panel).toBeVisible()
   await expect(panel.getByRole('heading', { name: '超长文章布局验证' })).toBeVisible()
+  const markdownImage = panel.locator('.sw-markdown-image')
+  await expect(markdownImage).toBeVisible()
+  await expect(markdownImage).toHaveAttribute('src', 'http://localhost:8000/api/uploads/test.png')
   await expect(panel.getByRole('checkbox', { name: '自动填入发布时间' })).toBeVisible()
-  await expect(footer.getByRole('button', { name: '复制内容' })).toBeVisible()
+  await expect(footer.getByRole('button', { name: '复制 Markdown' })).toBeVisible()
   await expect(footer.getByRole('button', { name: '发布并下一条' })).toBeVisible()
   await panel.evaluate(async element => {
     await Promise.all(element.getAnimations({ subtree: true }).map(animation => animation.finished))
