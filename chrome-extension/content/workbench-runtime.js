@@ -33,22 +33,22 @@ const SAFE_UI_MESSAGES = Object.freeze({
 
 const STATIC_UI = [
   '<style>',
-  ':host { color-scheme: dark; }',
+  'html, :root, .sw-root { color-scheme: dark; }',
   '* { box-sizing: border-box; }',
   '.sw-root { position: fixed; inset: 0; pointer-events: auto; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #e8eefc; }',
   '.sw-panel { position: absolute; inset: 0; width: auto; height: auto; max-width: none; max-height: none; padding: 1px; overflow: hidden; border-radius: 0; background: linear-gradient(145deg, rgba(103, 232, 249, .75), rgba(99, 102, 241, .5) 42%, rgba(192, 132, 252, .72)); box-shadow: 0 30px 90px rgba(2, 6, 23, .62), 0 0 48px rgba(59, 130, 246, .16); pointer-events: auto; animation: sw-rise .2s ease-out; }',
-  '.sw-panel-inner { display: flex; flex-direction: column; width: 100%; height: 100%; overflow: hidden; border-radius: 21px; background: radial-gradient(circle at 95% 0%, rgba(79, 70, 229, .2), transparent 34%), #0b1020; }',
-  '.sw-header { display: flex; align-items: center; gap: 14px; min-height: 78px; padding: 17px 18px 15px 22px; border-bottom: 1px solid rgba(148, 163, 184, .15); }',
-  '.sw-heading { min-width: 0; flex: 1; }',
+  '.sw-panel-inner { display: flex; flex-direction: column; width: 100%; height: 100%; overflow: hidden; border-radius: 0; background: radial-gradient(circle at 95% 0%, rgba(79, 70, 229, .2), transparent 34%), #0b1020; }',
+  '.sw-header { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 12px; min-height: 0; padding: 14px 14px 12px 16px; border-bottom: 1px solid rgba(148, 163, 184, .15); }',
+  '.sw-heading { min-width: min(100%, 160px); flex: 1 1 160px; }',
   '.sw-title { margin: 0; color: #f8fbff; font-size: 16px; font-weight: 780; letter-spacing: .02em; }',
   '.sw-subtitle { margin-top: 5px; color: #8290aa; font-size: 11px; }',
-  '.sw-summary { display: flex; align-items: center; gap: 7px; padding: 8px 10px; border: 1px solid rgba(125, 211, 252, .18); border-radius: 11px; color: #b8f4ff; background: rgba(8, 47, 73, .38); font-size: 11px; white-space: nowrap; }',
+  '.sw-summary { display: flex; align-items: center; gap: 7px; flex: 0 1 auto; padding: 8px 10px; border: 1px solid rgba(125, 211, 252, .18); border-radius: 11px; color: #b8f4ff; background: rgba(8, 47, 73, .38); font-size: 11px; white-space: nowrap; }',
   '.sw-summary-dot { width: 6px; height: 6px; border-radius: 50%; background: #5eead4; box-shadow: 0 0 10px #5eead4; }',
-  '.sw-schedule-memory { display: flex; flex-direction: column; gap: 3px; min-width: 145px; padding: 7px 9px; border: 1px solid rgba(192, 132, 252, .24); border-radius: 10px; color: #aebbd1; background: rgba(49, 46, 129, .24); font-size: 10px; white-space: nowrap; }',
+  '.sw-schedule-memory { display: flex; flex-direction: column; gap: 3px; flex: 1 1 145px; min-width: 0; padding: 7px 9px; border: 1px solid rgba(192, 132, 252, .24); border-radius: 10px; color: #aebbd1; background: rgba(49, 46, 129, .24); font-size: 10px; white-space: nowrap; }',
   '.sw-schedule-memory strong { overflow: hidden; color: #e8ddff; font-size: 11px; font-weight: 700; text-overflow: ellipsis; }',
   '.sw-auto-schedule { display: inline-flex; align-items: center; gap: 5px; color: #c5d0e2; cursor: pointer; font-size: 10px; }',
   '.sw-auto-schedule input { width: 12px; height: 12px; margin: 0; accent-color: #67e8f9; cursor: pointer; }',
-  '.sw-actions { display: flex; gap: 5px; }',
+  '.sw-actions { display: flex; flex: 0 0 auto; gap: 5px; margin-left: auto; }',
   '.sw-icon-button, .sw-ghost-button, .sw-primary-button { border: 1px solid transparent; border-radius: 9px; color: #9eacc5; background: transparent; cursor: pointer; transition: color .15s ease, background .15s ease, border-color .15s ease, transform .15s ease; }',
   '.sw-icon-button { width: 32px; height: 32px; font-size: 16px; }',
   '.sw-icon-button:hover, .sw-ghost-button:hover { color: #e8fbff; border-color: rgba(125, 211, 252, .25); background: rgba(51, 65, 85, .46); }',
@@ -129,6 +129,7 @@ const STATIC_UI = [
   '@keyframes sw-rise { from { opacity: 0; transform: translateY(8px) scale(.985); } to { opacity: 1; transform: translateY(0) scale(1); } }',
   '@keyframes sw-shimmer { 0% { background-position: 100% 0; } 100% { background-position: -100% 0; } }',
   '@media (max-width: 720px) { .sw-preview { padding: 19px 17px 16px; } .sw-settings { right: 8px; left: 8px; width: auto; } }',
+  '@media (max-width: 420px) { .sw-heading { flex: 1 1 100%; } .sw-schedule-memory { flex: 1 1 auto; min-width: 0; } .sw-actions { margin-left: auto; } }',
   '</style>',
   '<section class="sw-panel" data-role="panel" aria-label="述策发布指挥台">',
   '<div class="sw-panel-inner">',
@@ -386,6 +387,7 @@ export function mountWorkbench({ document, window, chromeApi = globalThis.chrome
     refreshButton.disabled = state.publishingId !== null
     shuffleButton.disabled = state.publishingId !== null
     settingsButton.disabled = state.publishingId !== null
+    layoutButton.disabled = state.publishingId !== null
     renderLastSchedule()
     renderFilters()
     renderList()
@@ -527,6 +529,7 @@ export function mountWorkbench({ document, window, chromeApi = globalThis.chrome
     render()
   })
   query('[data-action="layout"]').addEventListener('click', () => {
+    if (state.publishingId !== null) return
     state = setWorkbenchLayout(state, state.layout === 'split' ? 'stack' : 'split')
     render()
     void chromeApi.storage?.local?.set?.({

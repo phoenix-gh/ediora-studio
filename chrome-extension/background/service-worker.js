@@ -155,8 +155,17 @@ async function handleDraftMessage(message) {
 if (globalThis.chrome?.sidePanel) {
   chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {})
   chrome.sidePanel.setOptions({ enabled: false }).catch(() => {})
-  chrome.tabs.onUpdated.addListener((tabId, _info, tab) => {
-    void syncSidePanelForTab(tabId, tab?.url)
+  chrome.tabs.query({ url: ['https://x.com/*', 'https://twitter.com/*'] })
+    .then(tabs => {
+      for (const tab of Array.isArray(tabs) ? tabs : []) {
+        void syncSidePanelForTab(tab.id, tab.url)
+      }
+    })
+    .catch(() => {})
+  chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+    if (changeInfo.url || changeInfo.status === 'complete') {
+      void syncSidePanelForTab(tabId, tab?.url)
+    }
   })
   chrome.tabs.onActivated.addListener(async ({ tabId }) => {
     const tab = await chrome.tabs.get(tabId).catch(() => null)

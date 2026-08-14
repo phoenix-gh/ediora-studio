@@ -27,12 +27,17 @@ function snapshotFromResponse(response) {
   }
 }
 
+function requestIdFrom(message) {
+  return typeof message?.requestId === 'string' ? { requestId: message.requestId } : {}
+}
+
 export function handleScheduleHostMessage(message, memory) {
   if (!message || typeof message !== 'object') return null
 
   if (message.type === SCHEDULE_MESSAGE_TYPES.GET) {
     return {
       type: SCHEDULE_MESSAGE_TYPES.RESULT,
+      ...requestIdFrom(message),
       ok: true,
       selection: memory.readStored(),
       autoFillEnabled: memory.readAutoFillEnabled() === true,
@@ -44,6 +49,7 @@ export function handleScheduleHostMessage(message, memory) {
     memory.setAutoFillEnabled(message.enabled)
     return {
       type: SCHEDULE_MESSAGE_TYPES.RESULT,
+      ...requestIdFrom(message),
       ok: true,
       selection: memory.readStored(),
       autoFillEnabled: memory.readAutoFillEnabled() === true,
@@ -72,7 +78,12 @@ export async function routeScheduleRequest(message, { queryTabs, sendToTab, isXS
     }
   }
 
-  const response = await sendToTab(tab.id, message)
+  let response
+  try {
+    response = await sendToTab(tab.id, message)
+  } catch {
+    response = null
+  }
   if (!response || typeof response !== 'object') {
     return {
       type: SCHEDULE_MESSAGE_TYPES.RESULT,

@@ -40,6 +40,10 @@ test('host returns stored schedule and writes autofill', () => {
     },
   )
   assert.equal(handleScheduleHostMessage({ type: 'OTHER' }, memory), null)
+  assert.equal(
+    handleScheduleHostMessage({ type: SCHEDULE_MESSAGE_TYPES.GET, requestId: 'host-1' }, memory).requestId,
+    'host-1',
+  )
 })
 
 test('router returns an empty snapshot when no active X tab exists', async () => {
@@ -54,6 +58,23 @@ test('router returns an empty snapshot when no active X tab exists', async () =>
   assert.deepEqual(result, {
     type: SCHEDULE_MESSAGE_TYPES.RESULT,
     requestId: 'r1',
+    ok: true,
+    ...emptyScheduleSnapshot(),
+  })
+})
+
+test('router returns an empty snapshot when sendToTab rejects', async () => {
+  const result = await routeScheduleRequest(
+    { type: SCHEDULE_MESSAGE_TYPES.GET, requestId: 'r-reject' },
+    {
+      queryTabs: async () => [{ id: 9, url: 'https://x.com/home' }],
+      sendToTab: async () => { throw new Error('no receiving end') },
+      isXSiteUrl: url => url.includes('x.com'),
+    },
+  )
+  assert.deepEqual(result, {
+    type: SCHEDULE_MESSAGE_TYPES.RESULT,
+    requestId: 'r-reject',
     ok: true,
     ...emptyScheduleSnapshot(),
   })

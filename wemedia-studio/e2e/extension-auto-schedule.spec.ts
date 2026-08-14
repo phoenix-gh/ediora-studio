@@ -20,13 +20,14 @@ function harnessHtml() {
   <body>
     <main><h1>插件测试页面</h1></main>
     <script type="module">
+      import { startScheduleHost } from '/content/schedule-host.js'
+      import { mountWorkbench } from '/content/workbench-runtime.js'
+
       Math.random = () => 0.45
       const previous = ${JSON.stringify(previousSelection)}
       if (!localStorage.getItem('x_schedule_last_selection_v3')) {
         localStorage.setItem('x_schedule_last_selection_v3', JSON.stringify(previous))
       }
-
-      import { mountWorkbench } from '/content/workbench-runtime.js'
 
       const draft = {
         id: 902,
@@ -36,6 +37,8 @@ function harnessHtml() {
         draft_type: 'article',
         updated_at: '2026-08-13T00:00:00Z',
       }
+      const listeners = new Set()
+      const storage = new Map()
       const chromeApi = {
         runtime: {
           sendMessage: async message => {
@@ -45,15 +48,48 @@ function harnessHtml() {
             if (message.type === 'SHUCE_DRAFTS_REQUEST') {
               return { type: 'SHUCE_DRAFTS_RESULT', requestId: message.requestId, ok: true, drafts: [draft] }
             }
+            let response
+            for (const listener of [...listeners]) {
+              listener(message, {}, value => { response = value })
+            }
+            if (message.type === 'SHUCE_SCHEDULE_GET' || message.type === 'SHUCE_SCHEDULE_SET_AUTOFILL') {
+              return response ?? {
+                type: 'SHUCE_SCHEDULE_RESULT',
+                requestId: message.requestId,
+                ok: true,
+                selection: null,
+                autoFillEnabled: false,
+                available: false,
+              }
+            }
+            if (message.type === 'SHUCE_SCHEDULE_CHANGED') return
             throw new Error('Unexpected extension message: ' + message.type)
+          },
+          onMessage: {
+            addListener(listener) { listeners.add(listener) },
+            removeListener(listener) { listeners.delete(listener) },
+          },
+        },
+        storage: {
+          local: {
+            async get(key) { return { [key]: storage.get(key) } },
+            async set(values) { Object.entries(values).forEach(([key, value]) => storage.set(key, value)) },
           },
         },
       }
 
-      window.__workbench = mountWorkbench({ document, window, chromeApi })
+      window.__host = startScheduleHost({ document, window, chromeApi })
+      window.__workbench = mountWorkbench({ document, window, chromeApi, surface: 'sidepanel' })
       window.__addScheduleDialog = () => {
         const dialog = document.createElement('div')
         dialog.setAttribute('role', 'dialog')
+        dialog.style.position = 'fixed'
+        dialog.style.zIndex = '10000'
+        dialog.style.right = '16px'
+        dialog.style.bottom = '16px'
+        dialog.style.padding = '12px'
+        dialog.style.background = '#fff'
+        dialog.style.color = '#111'
         const createSelect = (name, values, value) => {
           const select = document.createElement('select')
           select.name = name
@@ -115,8 +151,9 @@ test('persists the auto-fill switch and fills the next X schedule time', async (
 
   await page.goto(`${origin}/harness.html`)
   await expect(page).toHaveTitle('述策自动安排测试')
-  await page.getByRole('button', { name: /发布指挥台/ }).click()
+  await expect(page.getByRole('button', { name: /发布指挥台/ })).toHaveCount(0)
   const panel = page.getByRole('region', { name: '述策发布指挥台' })
+  await expect(panel).toBeVisible()
   const autoFill = panel.getByRole('checkbox', { name: '自动填入发布时间' })
   await expect(autoFill).toBeVisible()
   await expect(autoFill).not.toBeChecked()
@@ -125,8 +162,8 @@ test('persists the auto-fill switch and fills the next X schedule time', async (
   await expect.poll(() => page.evaluate(() => localStorage.getItem('x_schedule_auto_fill_enabled_v1'))).toBe('true')
 
   await page.reload()
-  await page.getByRole('button', { name: /发布指挥台/ }).click()
   const reloadedPanel = page.getByRole('region', { name: '述策发布指挥台' })
+  await expect(reloadedPanel).toBeVisible()
   await expect(reloadedPanel.getByRole('checkbox', { name: '自动填入发布时间' })).toBeChecked()
 
   await page.evaluate(() => (window as Window & { __addScheduleDialog: () => unknown }).__addScheduleDialog())

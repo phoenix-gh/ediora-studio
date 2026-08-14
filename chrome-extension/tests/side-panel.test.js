@@ -34,7 +34,11 @@ function topLevelIfBlock(source, header) {
 test('wires site gating and schedule routing without auto-opening', async () => {
   const source = await readFile(new URL('../background/service-worker.js', import.meta.url), 'utf8')
   assert.match(source, /setPanelBehavior\(\{ openPanelOnActionClick: true \}\)/)
+  assert.match(source, /setOptions\(\{ enabled: false \}\)/)
+  assert.match(source, /tabs\.query\(\{ url: \['https:\/\/x\.com\/\*', 'https:\/\/twitter\.com\/\*'\] \}\)/)
   assert.match(source, /tabs\.onUpdated/)
+  assert.match(source, /changeInfo\.url/)
+  assert.match(source, /changeInfo\.status === ['"]complete['"]/)
   assert.match(source, /tabs\.onActivated/)
   assert.match(source, /SHUCE_SCHEDULE_GET/)
   assert.match(source, /routeScheduleRequest/)

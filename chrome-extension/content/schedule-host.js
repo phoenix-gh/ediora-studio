@@ -10,26 +10,28 @@ export function startScheduleHost({ document, window, chromeApi = globalThis.chr
     document,
     window,
     onChange(selection) {
-      runtime?.sendMessage?.({
+      Promise.resolve(runtime?.sendMessage?.({
         type: SCHEDULE_MESSAGE_TYPES.CHANGED,
         selection,
         autoFillEnabled: memory.readAutoFillEnabled(),
         available: true,
-      })
+      })).catch(() => {})
     },
   })
   memory.start()
 
-  runtime?.onMessage?.addListener((message, _sender, sendResponse) => {
+  const onMessage = (message, _sender, sendResponse) => {
     const result = handleScheduleHostMessage(message, memory)
     if (!result) return false
     sendResponse(result)
     return true
-  })
+  }
+  runtime?.onMessage?.addListener(onMessage)
 
   return {
     destroy() {
       memory.stop()
+      runtime?.onMessage?.removeListener?.(onMessage)
     },
   }
 }
