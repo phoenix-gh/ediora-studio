@@ -1,0 +1,23 @@
+{
+  "1": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": ""
+    }
+  },
+  "2": {
+    "class_type": "MiniMaxH3ImageToVideo",
+    "inputs": {
+      "first_frame": ["1", 0],
+      "prompt": "",
+      "length": 5,
+      "seed": 0
+    }
+  },
+  "3": {
+    "class_type": "SaveVideo",
+    "inputs": {
+      "video": ["2", 0]
+    }
+  }
+}

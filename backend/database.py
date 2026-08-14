@@ -486,6 +486,13 @@ async def migrate_digital_human_comfyui_schema(conn) -> None:
         "ALTER TABLE digital_humans "
         "ALTER COLUMN voice_sample_asset_id DROP NOT NULL"
     ))
+    await _add_columns(conn, "talking_video_projects", {
+        "look_asset_id": "INTEGER",
+        "shots": "JSON NOT NULL DEFAULT '[]'::json",
+    })
+    await _add_columns(conn, "talking_video_renders", {
+        "shots_snapshot": "JSON NOT NULL DEFAULT '[]'::json",
+    })
 
 
 async def migrate_text_video_speech_asset_schema(conn) -> None:

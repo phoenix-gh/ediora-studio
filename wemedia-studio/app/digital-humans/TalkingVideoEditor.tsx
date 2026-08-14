@@ -39,9 +39,13 @@ import { creativeAssetUrl, type CreativeAsset } from '@/lib/api/assets'
 import {
   createTalkingVideoRender,
   getTalkingVideo,
+  renderTalkingVideoShot,
+  saveTalkingVideoShots,
+  stitchTalkingVideo,
   updateTalkingVideo,
   type DigitalHuman,
   type TalkingVideoProject,
+  type TalkingVideoShot,
   type TalkingVideoUpdate,
 } from '@/lib/api/digital-humans'
 
@@ -62,6 +66,8 @@ export function TalkingVideoEditor({
   saveProject?: typeof updateTalkingVideo
 }) {
   const [script, setScript] = useState(project.script)
+  const [shots, setShots] = useState<TalkingVideoShot[]>(project.shots ?? [])
+  const [activeShotId, setActiveShotId] = useState(project.shots?.[0]?.id ?? '')
   const [roleId, setRoleId] = useState(project.digital_human_id)
   const [environment, setEnvironment] = useState<CreativeAsset | null>(
     project.effective_environment,
@@ -85,9 +91,10 @@ export function TalkingVideoEditor({
   }, [onProjectChange, saveProject])
 
   const role = roles.find(item => item.id === roleId) ?? null
+  const isComfy = (role?.provider ?? project.role.provider) === 'comfyui'
   const hasActiveRender = project.renders.some(
     render => render.status === 'queued' || render.status === 'running',
-  )
+  ) || shots.some(shot => shot.status === 'queued' || shot.status === 'running')
 
   useEffect(() => {
     if (!hasActiveRender) return
@@ -157,6 +164,41 @@ export function TalkingVideoEditor({
     && Boolean(script.trim())
     && environment !== null
     && !hasActiveRender
+    && !isComfy
+  const allShotsReady = shots.length > 0
+    && shots.every(shot => shot.status === 'succeeded' && shot.clip_asset_id)
+  const activeShot = shots.find(shot => shot.id === activeShotId) ?? shots[0] ?? null
+
+  async function persistShots(next: TalkingVideoShot[]) {
+    setShots(next)
+    const updated = await saveTalkingVideoShots(project.id, next)
+    setShots(updated.shots)
+    onProjectChange?.(updated)
+    return updated
+  }
+
+  async function handleRenderShot(shotId: string) {
+    try {
+      await flushSave()
+      const updated = await renderTalkingVideoShot(project.id, shotId)
+      setShots(updated.shots)
+      onProjectChange?.(updated)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '镜头生成失败')
+    }
+  }
+
+  async function handleStitch() {
+    try {
+      await flushSave()
+      await stitchTalkingVideo(project.id)
+      const updated = await getTalkingVideo(project.id)
+      setShots(updated.shots)
+      onProjectChange?.(updated)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '拼接失败')
+    }
+  }
 
   async function generateRender() {
     setRendering(true)
@@ -243,42 +285,103 @@ export function TalkingVideoEditor({
         >
           <Card className="min-h-0 flex-1">
             <CardHeader>
-              <CardTitle>脚本编辑器</CardTitle>
+              <CardTitle>{isComfy ? '镜头列表' : '脚本编辑器'}</CardTitle>
               <CardDescription>
-                自动保存到当前口播作品，不进入独立脚本库。
+                {isComfy
+                  ? '按镜编辑口播句和时长，单镜不超过本机上限。'
+                  : '自动保存到当前口播作品，不进入独立脚本库。'}
               </CardDescription>
             </CardHeader>
             <CardContent className="flex min-h-0 flex-1 flex-col gap-3">
-              <Field className="min-h-0 flex-1">
-                <FieldLabel htmlFor="talking-script">口播脚本</FieldLabel>
-                <Textarea
-                  id="talking-script"
-                  value={script}
-                  onChange={event => {
-                    const value = event.target.value
-                    setScript(value)
-                    setScriptSource('manual')
-                    scheduleSave({
-                      script: value,
-                      script_source: 'manual',
-                      source_draft_id: null,
-                    })
-                  }}
-                  placeholder="在这里输入最终口播内容……"
-                  className="min-h-96 flex-1 resize-none text-base leading-7"
-                />
-              </Field>
-              <div className="flex items-center justify-between gap-3">
-                <span className="text-xs text-muted-foreground">
-                  {script.length} 字 · {scriptSource === 'draft'
-                    ? '来自草稿'
-                    : scriptSource === 'ai' ? 'AI 辅助' : '手动编辑'}
-                </span>
-                <Button variant="outline" onClick={() => setAssistantOpen(true)}>
-                  <Sparkles data-icon="inline-start" />
-                  AI 辅助
-                </Button>
-              </div>
+              {isComfy ? (
+                <div className="flex flex-col gap-3">
+                  {shots.map((shot, index) => (
+                    <button
+                      key={shot.id}
+                      type="button"
+                      data-testid={`talking-shot-${shot.id}`}
+                      className="rounded-lg border p-3 text-left"
+                      onClick={() => setActiveShotId(shot.id)}
+                    >
+                      <div className="mb-2 text-xs text-muted-foreground">
+                        镜 {index + 1} · {shot.duration_sec}s · {shot.framing} · {shot.status}
+                      </div>
+                      <Textarea
+                        aria-label={`镜头 ${index + 1} 口播句`}
+                        value={shot.spoken_text}
+                        onChange={event => {
+                          const next = shots.map(item => (
+                            item.id === shot.id
+                              ? { ...item, spoken_text: event.target.value, status: 'draft' as const }
+                              : item
+                          ))
+                          setShots(next)
+                          void persistShots(next).catch(() => toast.error('镜头保存失败'))
+                        }}
+                      />
+                    </button>
+                  ))}
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      const next = [
+                        ...shots,
+                        {
+                          id: crypto.randomUUID(),
+                          duration_sec: 5,
+                          framing: 'medium' as const,
+                          spoken_text: '',
+                          motion_prompt: '',
+                          first_frame_asset_id: null,
+                          clip_asset_id: null,
+                          status: 'draft' as const,
+                          job_id: null,
+                          error: '',
+                          workflow_version: '',
+                          seed: null,
+                          provider_state: {},
+                        },
+                      ]
+                      void persistShots(next).catch(() => toast.error('镜头保存失败'))
+                    }}
+                  >
+                    添加镜头
+                  </Button>
+                </div>
+              ) : (
+                <>
+                  <Field className="min-h-0 flex-1">
+                    <FieldLabel htmlFor="talking-script">口播脚本</FieldLabel>
+                    <Textarea
+                      id="talking-script"
+                      value={script}
+                      onChange={event => {
+                        const value = event.target.value
+                        setScript(value)
+                        setScriptSource('manual')
+                        scheduleSave({
+                          script: value,
+                          script_source: 'manual',
+                          source_draft_id: null,
+                        })
+                      }}
+                      placeholder="在这里输入最终口播内容……"
+                      className="min-h-96 flex-1 resize-none text-base leading-7"
+                    />
+                  </Field>
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-xs text-muted-foreground">
+                      {script.length} 字 · {scriptSource === 'draft'
+                        ? '来自草稿'
+                        : scriptSource === 'ai' ? 'AI 辅助' : '手动编辑'}
+                    </span>
+                    <Button variant="outline" onClick={() => setAssistantOpen(true)}>
+                      <Sparkles data-icon="inline-start" />
+                      AI 辅助
+                    </Button>
+                  </div>
+                </>
+              )}
             </CardContent>
           </Card>
         </main>
@@ -306,17 +409,37 @@ export function TalkingVideoEditor({
                 </div>
               )}
               {hasActiveRender ? (
-                <Badge variant="secondary">HeyGen 正在生成</Badge>
+                <Badge variant="secondary">
+                  {isComfy ? '镜头正在生成' : 'HeyGen 正在生成'}
+                </Badge>
               ) : null}
-              <Button
-                disabled={!canRender || rendering}
-                onClick={() => setConfirmRender(true)}
-              >
-                {rendering
-                  ? <Loader2 data-icon="inline-start" />
-                  : <Play data-icon="inline-start" />}
-                生成新版本
-              </Button>
+              {isComfy ? (
+                <>
+                  <Button
+                    disabled={!activeShot || hasActiveRender}
+                    onClick={() => activeShot && void handleRenderShot(activeShot.id)}
+                  >
+                    <Play data-icon="inline-start" />
+                    生成这一镜
+                  </Button>
+                  <Button
+                    disabled={!allShotsReady || hasActiveRender}
+                    onClick={() => void handleStitch()}
+                  >
+                    生成成片
+                  </Button>
+                </>
+              ) : (
+                <Button
+                  disabled={!canRender || rendering}
+                  onClick={() => setConfirmRender(true)}
+                >
+                  {rendering
+                    ? <Loader2 data-icon="inline-start" />
+                    : <Play data-icon="inline-start" />}
+                  生成新版本
+                </Button>
+              )}
             </CardContent>
           </Card>
           <Card>

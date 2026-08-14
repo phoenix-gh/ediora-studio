@@ -25,9 +25,18 @@ import {
   type CreativeAsset,
 } from '@/lib/api/assets'
 import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import {
   createDigitalHuman,
   updateDigitalHuman,
   type DigitalHuman,
+  type DigitalHumanProvider,
 } from '@/lib/api/digital-humans'
 
 import { EnvironmentPickerDialog } from './EnvironmentPickerDialog'
@@ -147,6 +156,9 @@ export function RoleEditorDialog({
   onCreated: (role: DigitalHuman) => void
 }) {
   const [name, setName] = useState(role?.name ?? '')
+  const [provider, setProvider] = useState<DigitalHumanProvider>(
+    role?.provider ?? 'heygen',
+  )
   const [portrait, setPortrait] = useState<CreativeAsset | null>(role?.portrait ?? null)
   const [voice, setVoice] = useState<CreativeAsset | null>(role?.voice_sample ?? null)
   const [environment, setEnvironment] = useState<CreativeAsset | null>(
@@ -157,13 +169,15 @@ export function RoleEditorDialog({
   const [saving, setSaving] = useState(false)
 
   async function handleSave() {
-    if (!name.trim() || !portrait || !voice || !environment) return
+    if (!name.trim() || !portrait || !environment) return
+    if (provider === 'heygen' && !voice) return
     setSaving(true)
     try {
       const input = {
         name: name.trim(),
+        provider,
         portrait_asset_id: portrait.id,
-        voice_sample_asset_id: voice.id,
+        voice_sample_asset_id: voice?.id ?? null,
         default_environment_asset_id: environment.id,
       }
       const saved = role
@@ -173,7 +187,9 @@ export function RoleEditorDialog({
       onClose()
       toast.success(role
         ? '数字人角色已保存'
-        : '数字人已创建，正在处理形象和声音')
+        : provider === 'comfyui'
+          ? '数字人已创建，正在合成定妆图'
+          : '数字人已创建，正在处理形象和声音')
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '创建失败')
     } finally {
@@ -191,11 +207,34 @@ export function RoleEditorDialog({
             </DialogTitle>
             <DialogDescription>
               {role
-                ? '更换人物形象或声音后，HeyGen 会重新处理对应资源。'
-                : '上传一张正面照和一段清晰录音，HeyGen 将创建可复用形象与克隆声音。'}
+                ? '更换人物形象或声音后会重新处理对应资源。'
+                : '选择渲染后端。HeyGen 需要录音克隆声音；ComfyUI 只合成定妆图。'}
             </DialogDescription>
           </DialogHeader>
           <FieldGroup>
+            <Field>
+              <FieldLabel>渲染后端</FieldLabel>
+              <Select
+                value={provider}
+                onValueChange={value => setProvider(value as DigitalHumanProvider)}
+                disabled={Boolean(role)}
+              >
+                <SelectTrigger aria-label="渲染后端">
+                  <SelectValue>
+                    {value => value === 'comfyui' ? 'ComfyUI / MiniMax H3' : 'HeyGen'}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    <SelectItem value="heygen">HeyGen</SelectItem>
+                    <SelectItem value="comfyui">ComfyUI / MiniMax H3</SelectItem>
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+              <FieldDescription>
+                {role ? '创建后不可更改。' : '本机 H3 分镜请选 ComfyUI。'}
+              </FieldDescription>
+            </Field>
             <Field>
               <FieldLabel htmlFor="role-name">角色名称</FieldLabel>
               <Input
@@ -216,17 +255,28 @@ export function RoleEditorDialog({
               </Button>
               <FieldDescription>正面、光线均匀、无遮挡，PNG/JPEG。</FieldDescription>
             </Field>
-            <Field>
-              <FieldLabel>声音样本</FieldLabel>
-              <Button
-                variant="outline"
-                onClick={() => setPicker('voice')}
-              >
-                <Mic data-icon="inline-start" />
-                {voice?.title || '选择声音样本'}
-              </Button>
-              <FieldDescription>安静环境中的单人录音，MP3/WAV。</FieldDescription>
-            </Field>
+            {provider === 'heygen' || voice ? (
+              <Field>
+                <FieldLabel>声音样本</FieldLabel>
+                <Button
+                  variant="outline"
+                  onClick={() => setPicker('voice')}
+                >
+                  <Mic data-icon="inline-start" />
+                  {voice?.title || '选择声音样本'}
+                </Button>
+                <FieldDescription>
+                  {provider === 'comfyui'
+                    ? 'ComfyUI 路径可选，H3 会自带声音。'
+                    : '安静环境中的单人录音，MP3/WAV。'}
+                </FieldDescription>
+              </Field>
+            ) : (
+              <Field>
+                <FieldLabel>声音样本</FieldLabel>
+                <FieldDescription>ComfyUI 路径不需要录音。</FieldDescription>
+              </Field>
+            )}
             <Field>
               <FieldLabel>默认环境</FieldLabel>
               <Button
@@ -239,7 +289,13 @@ export function RoleEditorDialog({
             </Field>
             <Button
               onClick={handleSave}
-              disabled={saving || !name.trim() || !portrait || !voice || !environment}
+              disabled={
+                saving
+                || !name.trim()
+                || !portrait
+                || !environment
+                || (provider === 'heygen' && !voice)
+              }
             >
               {saving
                 ? <Loader2 data-icon="inline-start" />

@@ -92,6 +92,8 @@ const project = {
   script_source: 'manual',
   source_draft_id: null,
   environment_asset_id: null,
+  look_asset_id: null,
+  shots: [],
   effective_environment_asset_id: 4,
   current_render_id: null,
   role: readyRole,

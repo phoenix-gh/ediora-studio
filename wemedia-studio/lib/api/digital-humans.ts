@@ -42,6 +42,22 @@ export interface DigitalHuman {
   project_count?: number
 }
 
+export type TalkingVideoShot = {
+  id: string
+  duration_sec: number
+  framing: 'wide' | 'medium' | 'close'
+  spoken_text: string
+  motion_prompt: string
+  first_frame_asset_id: number | null
+  clip_asset_id: number | null
+  status: 'draft' | 'queued' | 'running' | 'succeeded' | 'failed'
+  job_id: number | null
+  error: string
+  workflow_version: string
+  seed: number | null
+  provider_state: Record<string, unknown>
+}
+
 export interface TalkingVideoRender {
   id: number
   project_id: number
@@ -52,10 +68,13 @@ export interface TalkingVideoRender {
   digital_human_snapshot: {
     id: number
     name: string
-    heygen_avatar_group_id: string
-    heygen_avatar_id: string
-    heygen_voice_id: string
+    provider?: DigitalHumanProvider
+    look_asset_id?: number | null
+    heygen_avatar_group_id?: string
+    heygen_avatar_id?: string
+    heygen_voice_id?: string
   }
+  shots_snapshot?: TalkingVideoShot[]
   environment_asset_id: number
   provider_state: Record<string, unknown>
   heygen_environment_asset_id: string
@@ -75,6 +94,8 @@ export interface TalkingVideoProject {
   script_source: 'manual' | 'ai' | 'draft'
   source_draft_id: number | null
   environment_asset_id: number | null
+  look_asset_id: number | null
+  shots: TalkingVideoShot[]
   effective_environment_asset_id: number
   current_render_id: number | null
   role: Pick<
@@ -82,8 +103,10 @@ export interface TalkingVideoProject {
     | 'id'
     | 'name'
     | 'status'
+    | 'provider'
     | 'portrait_asset_id'
     | 'default_environment_asset_id'
+    | 'look_asset_id'
   >
   effective_environment: CreativeAsset | null
   renders: TalkingVideoRender[]
@@ -183,6 +206,34 @@ export const deleteTalkingVideo = (id: number) =>
 export const createTalkingVideoRender = (projectId: number) =>
   apiFetch<TalkingVideoRender>(
     `/talking-videos/${projectId}/renders`,
+    { method: 'POST' },
+  )
+
+export const saveTalkingVideoShots = (
+  projectId: number,
+  shots: TalkingVideoShot[],
+) => apiFetch<TalkingVideoProject>(`/talking-videos/${projectId}/shots`, {
+  method: 'PUT',
+  body: JSON.stringify({ shots }),
+})
+
+export const renderTalkingVideoShot = (
+  projectId: number,
+  shotId: string,
+) => apiFetch<TalkingVideoProject>(
+  `/talking-videos/${projectId}/shots/${shotId}/render`,
+  { method: 'POST' },
+)
+
+export const renderPendingTalkingVideoShots = (projectId: number) =>
+  apiFetch<TalkingVideoProject>(
+    `/talking-videos/${projectId}/shots/render-pending`,
+    { method: 'POST' },
+  )
+
+export const stitchTalkingVideo = (projectId: number) =>
+  apiFetch<TalkingVideoRender>(
+    `/talking-videos/${projectId}/stitch`,
     { method: 'POST' },
   )
 

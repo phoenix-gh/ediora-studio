@@ -372,3 +372,132 @@ def test_replaced_render_job_is_not_retryable(api):
     assert stale_context.headers["X-WMS-Retryable"] == "false"
     assert stale_progress.status_code == 409
     assert stale_progress.headers["X-WMS-Retryable"] == "false"
+
+
+def _seed_comfyui(session_factory):
+    async def run():
+        from models import CreativeAsset, DigitalHuman
+
+        async with session_factory() as session:
+            environment = CreativeAsset(
+                asset_type="media",
+                media_kind="image",
+                title="environment",
+                url="/api/uploads/environment.jpg",
+                media_type="image/jpeg",
+                filename="environment.jpg",
+            )
+            portrait = CreativeAsset(
+                asset_type="media",
+                media_kind="image",
+                title="portrait",
+                url="/api/uploads/portrait.png",
+                media_type="image/png",
+                filename="portrait.png",
+            )
+            look = CreativeAsset(
+                asset_type="media",
+                media_kind="image",
+                title="look",
+                url="/api/uploads/look.jpg",
+                media_type="image/jpeg",
+                filename="look.jpg",
+            )
+            session.add_all([environment, portrait, look])
+            await session.flush()
+            role = DigitalHuman(
+                name="林晓",
+                status="ready",
+                provider="comfyui",
+                portrait_asset_id=portrait.id,
+                default_environment_asset_id=environment.id,
+                look_asset_id=look.id,
+            )
+            session.add(role)
+            await session.commit()
+            return role.id, look.id
+
+    return asyncio.new_event_loop().run_until_complete(run())
+
+
+def test_comfyui_project_uses_shots_and_rejects_heygen_render(api, monkeypatch):
+    client, session_factory, _ = api
+    monkeypatch.setenv("COMFYUI_BASE_URL", "http://127.0.0.1:8188")
+    role_id, _ = _seed_comfyui(session_factory)
+    created = client.post(
+        "/api/talking-videos",
+        json={"title": "分镜作品", "digital_human_id": role_id},
+    )
+    assert created.status_code == 201, created.text
+    shots = created.json()["shots"]
+    assert len(shots) == 1
+    assert shots[0]["duration_sec"] == 5
+
+    heygen_render = client.post(f"/api/talking-videos/{created.json()['id']}/renders")
+    assert heygen_render.status_code == 409
+
+    saved = client.put(
+        f"/api/talking-videos/{created.json()['id']}/shots",
+        json={
+            "shots": [
+                {
+                    **shots[0],
+                    "spoken_text": "今天只讲一件事",
+                    "duration_sec": 4,
+                    "framing": "close",
+                }
+            ]
+        },
+    )
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["script"] == "今天只讲一件事"
+
+    queued = client.post(
+        f"/api/talking-videos/{created.json()['id']}/shots/{shots[0]['id']}/render",
+    )
+    assert queued.status_code == 201, queued.text
+    assert queued.json()["shots"][0]["status"] == "queued"
+
+    incomplete = client.post(f"/api/talking-videos/{created.json()['id']}/stitch")
+    assert incomplete.status_code == 409
+
+
+def test_comfyui_stitch_requires_successful_clips(api, monkeypatch):
+    client, session_factory, _ = api
+    monkeypatch.setenv("COMFYUI_BASE_URL", "http://127.0.0.1:8188")
+    role_id, _ = _seed_comfyui(session_factory)
+    created = client.post(
+        "/api/talking-videos",
+        json={"title": "分镜作品", "digital_human_id": role_id},
+    ).json()
+    shot = created["shots"][0]
+    clip_id = _create_environment(session_factory, "clip.mp4")
+
+    async def mark_clip_video():
+        from models import CreativeAsset
+
+        async with session_factory() as session:
+            asset = await session.get(CreativeAsset, clip_id)
+            asset.media_kind = "video"
+            asset.media_type = "video/mp4"
+            await session.commit()
+
+    asyncio.new_event_loop().run_until_complete(mark_clip_video())
+    saved = client.put(
+        f"/api/talking-videos/{created['id']}/shots",
+        json={
+            "shots": [
+                {
+                    **shot,
+                    "spoken_text": "今天只讲一件事",
+                    "status": "succeeded",
+                    "clip_asset_id": clip_id,
+                }
+            ]
+        },
+    )
+    assert saved.status_code == 200, saved.text
+    stitched = client.post(f"/api/talking-videos/{created['id']}/stitch")
+    assert stitched.status_code == 201, stitched.text
+    assert stitched.json()["version"] == 1
+    assert stitched.json()["shots_snapshot"][0]["clip_asset_id"] == clip_id

@@ -9,6 +9,11 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from content_jobs import create_job
+from config import (
+    effective_comfyui_base_url,
+    effective_comfyui_shot_seconds,
+    get_config,
+)
 from digital_human_assets import archive_digital_human_asset_ids
 from models import (
     ContentJob,
@@ -152,12 +157,19 @@ async def create_talking_project(
         await archive_digital_human_asset_ids(
             session, {environment_asset_id}
         )
+    shots: list = []
+    if (role.provider or "heygen") == "comfyui":
+        from digital_human_shots import new_blank_shot
+
+        _, max_seconds = effective_comfyui_shot_seconds(await get_config())
+        shots = [new_blank_shot(max_seconds)]
     project = TalkingVideoProject(
         title=title.strip(),
         digital_human_id=digital_human_id,
         environment_asset_id=environment_asset_id,
         source_draft_id=source_draft_id,
         script_source="draft" if source_draft_id is not None else "manual",
+        shots=shots,
     )
     session.add(project)
     await session.commit()
@@ -183,6 +195,8 @@ async def create_render(
     role = await session.get(DigitalHuman, project.digital_human_id)
     if role is None or role.status != "ready":
         raise InvalidTalkingVideo("数字人角色尚未就绪")
+    if (role.provider or "heygen") == "comfyui":
+        raise InvalidTalkingVideo("ComfyUI 作品请按镜头生成后再拼接成片")
     if not role.heygen_avatar_id or not role.heygen_voice_id:
         raise InvalidTalkingVideo("数字人角色缺少 HeyGen 形象或声音")
     environment_asset_id = (
@@ -276,3 +290,146 @@ async def select_render(
     await session.commit()
     await session.refresh(project)
     return project
+
+
+async def save_project_shots(
+    session: AsyncSession,
+    project_id: int,
+    raw_shots: list,
+) -> TalkingVideoProject:
+    from digital_human_shots import normalize_shots, script_from_shots
+
+    project = await session.scalar(
+        select(TalkingVideoProject)
+        .where(TalkingVideoProject.id == project_id)
+        .with_for_update()
+    )
+    if project is None:
+        raise InvalidTalkingVideo("口播作品不存在")
+    role = await session.get(DigitalHuman, project.digital_human_id)
+    if role is None or (role.provider or "heygen") != "comfyui":
+        raise InvalidTalkingVideo("只有 ComfyUI 作品使用镜头列表")
+    min_seconds, max_seconds = effective_comfyui_shot_seconds(await get_config())
+    project.shots = normalize_shots(raw_shots, min_seconds, max_seconds)
+    project.script = script_from_shots(project.shots)
+    await session.commit()
+    await session.refresh(project)
+    return project
+
+
+async def enqueue_shot_render(
+    session: AsyncSession,
+    project_id: int,
+    shot_id: str,
+) -> tuple[dict, ContentJob]:
+    from digital_human_shots import find_shot, replace_shot
+
+    if not effective_comfyui_base_url(await get_config()):
+        raise InvalidTalkingVideo("请先配置 ComfyUI 地址")
+    project = await session.scalar(
+        select(TalkingVideoProject)
+        .where(TalkingVideoProject.id == project_id)
+        .with_for_update()
+    )
+    if project is None:
+        raise InvalidTalkingVideo("口播作品不存在")
+    role = await session.get(DigitalHuman, project.digital_human_id)
+    if role is None or role.status != "ready" or not role.look_asset_id:
+        raise InvalidTalkingVideo("数字人角色尚未就绪")
+    shot = find_shot(list(project.shots or []), shot_id)
+    if shot["status"] == "running":
+        raise InvalidTalkingVideo("该镜头正在生成")
+    job = await create_job(
+        session,
+        flow="digital_human_shot_render",
+        title=f"生成口播镜头 · {project.title or f'作品 {project.id}'}",
+        input_data={"project_id": project.id, "shot_id": shot_id},
+        commit=False,
+    )
+    project.shots = replace_shot(
+        list(project.shots or []),
+        shot_id,
+        {"status": "queued", "job_id": job.id, "error": ""},
+    )
+    await session.commit()
+    await session.refresh(project)
+    return find_shot(list(project.shots or []), shot_id), job
+
+
+async def enqueue_pending_shot_renders(
+    session: AsyncSession,
+    project_id: int,
+) -> list[ContentJob]:
+    project = await session.get(TalkingVideoProject, project_id)
+    if project is None:
+        raise InvalidTalkingVideo("口播作品不存在")
+    jobs: list[ContentJob] = []
+    for shot in list(project.shots or []):
+        if shot.get("status") in {"draft", "failed"}:
+            _, job = await enqueue_shot_render(
+                session, project_id, str(shot["id"])
+            )
+            jobs.append(job)
+    return jobs
+
+
+async def create_stitch(
+    session: AsyncSession,
+    project_id: int,
+) -> tuple[TalkingVideoRender, ContentJob]:
+    from digital_human_shots import script_from_shots
+
+    project = await session.scalar(
+        select(TalkingVideoProject)
+        .where(TalkingVideoProject.id == project_id)
+        .with_for_update()
+    )
+    if project is None:
+        raise InvalidTalkingVideo("口播作品不存在")
+    role = await session.get(DigitalHuman, project.digital_human_id)
+    if role is None or role.status != "ready":
+        raise InvalidTalkingVideo("数字人角色尚未就绪")
+    shots = list(project.shots or [])
+    if not shots:
+        raise InvalidTalkingVideo("请先添加镜头")
+    for shot in shots:
+        if shot.get("status") != "succeeded" or not shot.get("clip_asset_id"):
+            raise InvalidTalkingVideo("还有镜头未生成成功")
+        if shot.get("status") == "running":
+            raise InvalidTalkingVideo("还有镜头正在生成")
+    environment_asset_id = (
+        project.environment_asset_id or role.default_environment_asset_id
+    )
+    latest = await session.scalar(
+        select(func.max(TalkingVideoRender.version)).where(
+            TalkingVideoRender.project_id == project_id
+        )
+    )
+    render = TalkingVideoRender(
+        project_id=project.id,
+        version=(latest or 0) + 1,
+        status="queued",
+        script_snapshot=script_from_shots(shots),
+        digital_human_snapshot={
+            "id": role.id,
+            "name": role.name,
+            "provider": role.provider or "comfyui",
+            "look_asset_id": role.look_asset_id,
+        },
+        shots_snapshot=shots,
+        environment_asset_id=environment_asset_id,
+    )
+    session.add(render)
+    await session.flush()
+    job = await create_job(
+        session,
+        flow="digital_human_stitch",
+        title=f"拼接口播成片 · {project.title or f'作品 {project.id}'} · V{render.version}",
+        input_data={"render_id": render.id},
+        idempotency_key=f"talking-stitch:{render.id}",
+        commit=False,
+    )
+    render.job_id = job.id
+    await session.commit()
+    await session.refresh(render)
+    return render, job

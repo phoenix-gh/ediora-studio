@@ -17,6 +17,8 @@ import {
   runDigitalHumanRenderJob,
   runDigitalHumanSetupJob,
 } from '../lib/ai/digital-human-job'
+import { runDigitalHumanShotRenderJob } from '../lib/ai/digital-human-shot-job'
+import { runDigitalHumanStitchJob } from '../lib/ai/digital-human-stitch-job'
 import {
   apiPost,
   ApiRequestError,
@@ -119,6 +121,8 @@ export function resolveContentJobRunner(
   if (flow === 'daily_creation') return runDailyCreationAgentJob
   if (flow === 'digital_human_setup') return runDigitalHumanSetupJob
   if (flow === 'digital_human_render') return runDigitalHumanRenderJob
+  if (flow === 'digital_human_shot_render') return runDigitalHumanShotRenderJob
+  if (flow === 'digital_human_stitch') return runDigitalHumanStitchJob
   if (flow === 'content_response_analysis') {
     return runContentResponseAnalysisJob
   }

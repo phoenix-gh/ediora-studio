@@ -82,7 +82,9 @@ export function createComfyUIClient(config: ComfyUIConfig) {
       overwrite = true,
     ) {
       const body = new FormData()
-      body.set('image', new Blob([bytes]), filename)
+      const upload = new Uint8Array(bytes.byteLength)
+      upload.set(bytes)
+      body.set('image', new Blob([upload]), filename)
       body.set('overwrite', overwrite ? 'true' : 'false')
       const response = await request('/upload/image', {
         method: 'POST',

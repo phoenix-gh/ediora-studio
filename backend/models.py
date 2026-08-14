@@ -1006,6 +1006,8 @@ class TalkingVideoProject(Base):
     script_source: Mapped[str] = mapped_column(String(20), default="manual")
     source_draft_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     environment_asset_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    look_asset_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    shots: Mapped[list] = mapped_column(JSON, default=list)
     current_render_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     updated_at: Mapped[datetime] = mapped_column(
@@ -1077,6 +1079,7 @@ class TalkingVideoRender(Base):
     job_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     script_snapshot: Mapped[str] = mapped_column(Text, nullable=False)
     digital_human_snapshot: Mapped[dict] = mapped_column(JSON, default=dict)
+    shots_snapshot: Mapped[list] = mapped_column(JSON, default=list)
     environment_asset_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     provider_state: Mapped[dict] = mapped_column(JSON, default=dict)
     heygen_environment_asset_id: Mapped[str] = mapped_column(String, default="")

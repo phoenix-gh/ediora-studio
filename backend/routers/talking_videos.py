@@ -15,8 +15,12 @@ from digital_human_assets import archive_digital_human_asset_ids
 from digital_human_service import (
     InvalidTalkingVideo,
     create_render,
+    create_stitch,
     create_talking_project,
+    enqueue_pending_shot_renders,
+    enqueue_shot_render,
     require_media_asset,
+    save_project_shots,
     select_render,
 )
 from job_queue import enqueue_job
@@ -79,8 +83,10 @@ def _role_payload(role: DigitalHuman) -> dict:
         "id": role.id,
         "name": role.name,
         "status": role.status,
+        "provider": role.provider or "heygen",
         "portrait_asset_id": role.portrait_asset_id,
         "default_environment_asset_id": role.default_environment_asset_id,
+        "look_asset_id": role.look_asset_id,
     }
 
 
@@ -100,6 +106,7 @@ async def _render_payload(
         "job_id": render.job_id,
         "script_snapshot": render.script_snapshot,
         "digital_human_snapshot": render.digital_human_snapshot,
+        "shots_snapshot": render.shots_snapshot or [],
         "environment_asset_id": render.environment_asset_id,
         "provider_state": render.provider_state,
         "heygen_environment_asset_id": render.heygen_environment_asset_id,
@@ -130,6 +137,8 @@ async def _project_payload(
         "script_source": project.script_source,
         "source_draft_id": project.source_draft_id,
         "environment_asset_id": project.environment_asset_id,
+        "look_asset_id": project.look_asset_id,
+        "shots": list(project.shots or []),
         "effective_environment_asset_id": environment_id,
         "current_render_id": project.current_render_id,
         "role": _role_payload(role),
@@ -217,6 +226,12 @@ async def render_worker_context(
     environment = await db.get(CreativeAsset, render.environment_asset_id)
     if environment is None:
         raise HTTPException(409, "环境图素材不存在")
+    clips = []
+    for shot in render.shots_snapshot or []:
+        clip_id = shot.get("clip_asset_id")
+        clip = await db.get(CreativeAsset, clip_id) if clip_id else None
+        if clip is not None:
+            clips.append(_asset_payload(clip))
     return {
         "id": render.id,
         "project_id": render.project_id,
@@ -225,6 +240,8 @@ async def render_worker_context(
         "script": render.script_snapshot,
         "digital_human": render.digital_human_snapshot,
         "environment": _asset_payload(environment),
+        "shots_snapshot": render.shots_snapshot or [],
+        "clips": clips,
         "provider_state": render.provider_state,
         "heygen_environment_asset_id": render.heygen_environment_asset_id,
         "heygen_video_id": render.heygen_video_id,
@@ -371,6 +388,10 @@ async def remove_project(
 async def post_render(
     project_id: int, db: AsyncSession = Depends(get_db)
 ):
+    project = await _get_project(db, project_id)
+    role = await db.get(DigitalHuman, project.digital_human_id)
+    if role is not None and (role.provider or "heygen") == "comfyui":
+        raise HTTPException(409, "ComfyUI 作品请按镜头生成后再拼接成片")
     if not effective_heygen_api_key(await get_config()):
         raise HTTPException(409, "请先配置 HeyGen API Key")
     try:
@@ -413,3 +434,155 @@ async def remove_render(
         raise HTTPException(409, "当前成片需先切换后再删除")
     await db.delete(render)
     await db.commit()
+
+
+class ShotsUpdate(BaseModel):
+    shots: list[dict]
+
+
+class ShotWorkerProgress(BaseModel):
+    status: Literal["queued", "running", "succeeded", "failed"]
+    clip_asset_id: int | None = None
+    error: str = ""
+    workflow_version: str = ""
+    seed: int | None = None
+    provider_state: dict = Field(default_factory=dict)
+
+
+@router.put("/{project_id}/shots")
+async def put_shots(
+    project_id: int, body: ShotsUpdate, db: AsyncSession = Depends(get_db)
+):
+    try:
+        project = await save_project_shots(db, project_id, body.shots)
+    except InvalidTalkingVideo as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return await _project_payload(db, project, detail=True)
+
+
+@router.post("/{project_id}/shots/render-pending", status_code=status.HTTP_201_CREATED)
+async def post_pending_shot_renders(
+    project_id: int, db: AsyncSession = Depends(get_db)
+):
+    try:
+        jobs = await enqueue_pending_shot_renders(db, project_id)
+    except InvalidTalkingVideo as exc:
+        raise HTTPException(409, str(exc)) from exc
+    for job in jobs:
+        await enqueue_job(job.id)
+    return await _project_payload(db, await _get_project(db, project_id), detail=True)
+
+
+@router.post(
+    "/{project_id}/shots/{shot_id}/render",
+    status_code=status.HTTP_201_CREATED,
+)
+async def post_shot_render(
+    project_id: int, shot_id: str, db: AsyncSession = Depends(get_db)
+):
+    try:
+        _, job = await enqueue_shot_render(db, project_id, shot_id)
+    except InvalidTalkingVideo as exc:
+        raise HTTPException(409, str(exc)) from exc
+    await enqueue_job(job.id)
+    return await _project_payload(db, await _get_project(db, project_id), detail=True)
+
+
+@router.post("/{project_id}/stitch", status_code=status.HTTP_201_CREATED)
+async def post_stitch(project_id: int, db: AsyncSession = Depends(get_db)):
+    try:
+        render, job = await create_stitch(db, project_id)
+    except InvalidTalkingVideo as exc:
+        raise HTTPException(409, str(exc)) from exc
+    await enqueue_job(job.id)
+    return await _render_payload(db, render)
+
+
+@router.get(
+    "/{project_id}/shots/{shot_id}/worker-context",
+    dependencies=[Depends(require_worker_token)],
+)
+async def shot_worker_context(
+    project_id: int,
+    shot_id: str,
+    job_id: int = Header(alias="X-Content-Job-Id"),
+    db: AsyncSession = Depends(get_db),
+):
+    from digital_human_shots import find_shot
+
+    project = await _get_project(db, project_id)
+    role = await db.get(DigitalHuman, project.digital_human_id)
+    if role is None:
+        raise HTTPException(409, "作品关联的数字人角色不存在")
+    try:
+        shot = find_shot(list(project.shots or []), shot_id)
+    except InvalidTalkingVideo as exc:
+        raise HTTPException(404, str(exc)) from exc
+    if shot.get("job_id") != job_id:
+        raise HTTPException(409, "该镜头任务已被更新任务替代")
+    first_frame_id = (
+        shot.get("first_frame_asset_id")
+        or project.look_asset_id
+        or role.look_asset_id
+    )
+    first_frame = (
+        await db.get(CreativeAsset, first_frame_id) if first_frame_id else None
+    )
+    if first_frame is None:
+        raise HTTPException(409, "镜头缺少首帧定妆图")
+    return {
+        "project_id": project.id,
+        "shot": shot,
+        "first_frame": _asset_payload(first_frame),
+        "role": _role_payload(role),
+    }
+
+
+@router.post(
+    "/{project_id}/shots/{shot_id}/worker-progress",
+    dependencies=[Depends(require_worker_token)],
+)
+async def shot_worker_progress(
+    project_id: int,
+    shot_id: str,
+    body: ShotWorkerProgress,
+    job_id: int = Header(alias="X-Content-Job-Id"),
+    db: AsyncSession = Depends(get_db),
+):
+    from digital_human_shots import find_shot, replace_shot
+
+    project = await session_project_for_update(db, project_id)
+    try:
+        shot = find_shot(list(project.shots or []), shot_id)
+    except InvalidTalkingVideo as exc:
+        raise HTTPException(404, str(exc)) from exc
+    if shot.get("job_id") != job_id:
+        raise HTTPException(409, "该镜头任务已被更新任务替代")
+    updates = {
+        "status": body.status,
+        "error": body.error[:500],
+        "provider_state": body.provider_state,
+    }
+    if body.clip_asset_id:
+        updates["clip_asset_id"] = body.clip_asset_id
+    if body.workflow_version:
+        updates["workflow_version"] = body.workflow_version
+    if body.seed is not None:
+        updates["seed"] = body.seed
+    project.shots = replace_shot(list(project.shots or []), shot_id, updates)
+    await db.commit()
+    await db.refresh(project)
+    return await _project_payload(db, project, detail=False)
+
+
+async def session_project_for_update(
+    db: AsyncSession, project_id: int
+) -> TalkingVideoProject:
+    project = await db.scalar(
+        select(TalkingVideoProject)
+        .where(TalkingVideoProject.id == project_id)
+        .with_for_update()
+    )
+    if project is None:
+        raise HTTPException(404, "口播作品不存在")
+    return project

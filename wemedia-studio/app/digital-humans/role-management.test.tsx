@@ -115,6 +115,7 @@ describe('digital-human role creation', () => {
     await waitFor(() => {
       expect(mocks.createDigitalHuman).toHaveBeenCalledWith({
         name: '林晓',
+        provider: 'heygen',
         portrait_asset_id: assets.portrait.id,
         voice_sample_asset_id: assets.voice.id,
         default_environment_asset_id: assets.environment.id,
@@ -187,6 +188,7 @@ describe('digital-human role creation', () => {
     await waitFor(() => {
       expect(mocks.updateDigitalHuman).toHaveBeenCalledWith(8, {
         name: '林晓（新版）',
+        provider: 'heygen',
         portrait_asset_id: assets.portrait.id,
         voice_sample_asset_id: assets.voice.id,
         default_environment_asset_id: assets.environment.id,
