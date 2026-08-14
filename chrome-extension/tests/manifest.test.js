@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { inflateSync } from 'node:zlib'
 import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import test from 'node:test'
@@ -61,6 +62,35 @@ test('declares the MV3 Shuce extension with X-only host permissions', async () =
     'content/selectors.js',
   ])
   assert.equal(JSON.stringify(manifest).includes('console-api'), false)
+})
+
+test('ships complete PNG toolbar icons at the declared sizes', async () => {
+  for (const [size, relativePath] of Object.entries({
+    16: 'icons/icon-16.png',
+    32: 'icons/icon-32.png',
+    48: 'icons/icon-48.png',
+  })) {
+    const bytes = await readFile(resolve(extensionRoot, relativePath))
+    assert.deepEqual([...bytes.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10], relativePath)
+    const width = bytes.readUInt32BE(16)
+    const height = bytes.readUInt32BE(20)
+    assert.equal(width, Number(size), relativePath)
+    assert.equal(height, Number(size), relativePath)
+
+    const idat = []
+    let offset = 8
+    while (offset + 12 <= bytes.length) {
+      const length = bytes.readUInt32BE(offset)
+      const type = bytes.subarray(offset + 4, offset + 8).toString('binary')
+      const data = bytes.subarray(offset + 8, offset + 8 + length)
+      if (type === 'IDAT') idat.push(data)
+      if (type === 'IEND') break
+      offset += 12 + length
+    }
+    const raw = inflateSync(Buffer.concat(idat))
+    assert.equal(raw.length, Number(size) * (1 + Number(size) * 4), relativePath)
+    assert.ok(raw.some(value => value !== 0), relativePath)
+  }
 })
 
 test('keeps runtime access X-only and free of browser credentials', async () => {
