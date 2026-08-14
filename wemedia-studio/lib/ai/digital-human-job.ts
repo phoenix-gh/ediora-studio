@@ -36,8 +36,11 @@ type RoleContext = {
   id: number
   name: string
   status: string
+  provider?: 'heygen' | 'comfyui'
   portrait: LocalAsset
-  voice_sample: LocalAsset
+  voice_sample: LocalAsset | null
+  look?: LocalAsset | null
+  look_asset_id?: number | null
   provider_state: Record<string, unknown>
   heygen_avatar_group_id: string
   heygen_avatar_id: string
@@ -78,6 +81,10 @@ type ProgressApi = {
   ): Promise<unknown>
   completeJob(jobId: number): Promise<unknown>
   getRoleContext(roleId: number, jobId: number): Promise<RoleContext>
+  composeLook(
+    roleId: number,
+    jobId: number,
+  ): Promise<{ look_asset_id: number; url: string }>
   updateRole(
     roleId: number,
     body: Record<string, unknown>,
@@ -101,7 +108,7 @@ type ProgressApi = {
 
 export type DigitalHumanJobDeps = {
   api: ProgressApi
-  heygen: HeyGenClient
+  heygen?: HeyGenClient
   sleep(ms: number): Promise<void>
 }
 
@@ -196,6 +203,11 @@ const defaultApi: ProgressApi = {
     `/digital-humans/${roleId}/worker-context`,
     workerHeaders(jobId),
   ),
+  composeLook: (roleId, jobId) => apiPost(
+    `/digital-humans/${roleId}/compose-look`,
+    {},
+    workerHeaders(jobId),
+  ),
   updateRole: (roleId, body, jobId) => apiPost(
     `/digital-humans/${roleId}/worker-progress`,
     body,
@@ -252,6 +264,14 @@ function numberInput(value: unknown, name: string) {
 function stringState(state: Record<string, unknown>, key: string) {
   const value = state[key]
   return typeof value === 'string' ? value : ''
+}
+
+
+function numberState(state: Record<string, unknown>, key: string) {
+  const value = state[key]
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0
+    ? value
+    : 0
 }
 
 
@@ -362,14 +382,83 @@ async function poll<T>(
 }
 
 
+async function runComfyUISetupJob(
+  jobId: number,
+  roleId: number,
+  context: RoleContext,
+  deps: DigitalHumanJobDeps,
+) {
+  const state = { ...context.provider_state }
+  let domainSucceeded = context.status === 'ready'
+  try {
+    const look = await runStep(
+      jobId,
+      'compose_look',
+      deps,
+      async () => {
+        const existing = context.look_asset_id
+          || numberState(state, 'look_asset_id')
+        if (existing) return { look_asset_id: existing }
+        const composed = await deps.api.composeLook(roleId, jobId)
+        state.look_asset_id = composed.look_asset_id
+        await deps.api.updateRole(roleId, {
+          status: 'processing',
+          look_asset_id: composed.look_asset_id,
+          provider_state: state,
+        }, jobId)
+        return composed
+      },
+    )
+    await runStep(
+      jobId,
+      'finalize_digital_human',
+      deps,
+      async () => {
+        const updated = await deps.api.updateRole(roleId, {
+          status: 'ready',
+          look_asset_id: look.look_asset_id,
+          provider_state: state,
+          error: '',
+        }, jobId)
+        if (updated?.status === 'failed') throw new JobCancelledError()
+        domainSucceeded = true
+        return { digital_human_id: roleId }
+      },
+    )
+    await finalizeJob(jobId, deps)
+  } catch (error) {
+    if (!domainSucceeded && !(error instanceof JobFinalizationError)) {
+      await deps.api.updateRole(roleId, {
+        status: 'failed',
+        provider_state: state,
+        error: error instanceof Error ? error.message : String(error),
+      }, jobId).catch(() => undefined)
+    }
+    throw error
+  }
+}
+
+
 export async function runDigitalHumanSetupJob(
   jobId: number,
   providedDeps?: DigitalHumanJobDeps,
 ) {
-  const deps = providedDeps ?? await defaultDeps()
-  const job = await deps.api.getJob(jobId)
+  const jobApi = providedDeps?.api ?? defaultApi
+  const job = await jobApi.getJob(jobId)
   const roleId = numberInput(job.input.digital_human_id, 'digital_human_id')
-  const context = await deps.api.getRoleContext(roleId, jobId)
+  const context = await jobApi.getRoleContext(roleId, jobId)
+  if ((context.provider || 'heygen') === 'comfyui') {
+    await runComfyUISetupJob(
+      jobId,
+      roleId,
+      context,
+      providedDeps ?? { api: defaultApi, sleep },
+    )
+    return
+  }
+  const deps = providedDeps ?? await defaultDeps()
+  if (!deps.heygen) throw new Error('请先在设置中填写 HeyGen API Key')
+  const heygen = deps.heygen
   const state = { ...context.provider_state }
   let domainSucceeded = context.status === 'ready'
   try {
@@ -387,7 +476,7 @@ export async function runDigitalHumanSetupJob(
               context.portrait.url,
               context.portrait,
             )
-            const uploaded = await deps.heygen.uploadAsset(
+            const uploaded = await heygen.uploadAsset(
               portrait.bytes,
               portrait.mediaType,
               portrait.filename,
@@ -400,7 +489,7 @@ export async function runDigitalHumanSetupJob(
               provider_state: state,
             }, jobId)
           }
-          const created = await deps.heygen.createPhotoAvatar({
+          const created = await heygen.createPhotoAvatar({
             name: context.name,
             assetId: portraitAssetId,
             idempotencyKey: `digital-human:${roleId}:setup:${jobId}:avatar`,
@@ -417,7 +506,7 @@ export async function runDigitalHumanSetupJob(
         const completed = await poll(
           jobId,
           deps,
-          () => deps.heygen.getAvatar(groupId, avatarId),
+          () => heygen.getAvatar(groupId, avatarId),
           value => value.status,
           value => value.error,
         )
@@ -439,11 +528,14 @@ export async function runDigitalHumanSetupJob(
         if (!voiceId) {
           let voiceAssetId = stringState(state, 'voice_asset_id')
           if (!voiceAssetId) {
+            if (!context.voice_sample) {
+              throw new Error('数字人缺少声音样本')
+            }
             const sample = await deps.api.fetchLocalAsset(
               context.voice_sample.url,
               context.voice_sample,
             )
-            const uploaded = await deps.heygen.uploadAsset(
+            const uploaded = await heygen.uploadAsset(
               sample.bytes,
               sample.mediaType,
               sample.filename,
@@ -456,7 +548,7 @@ export async function runDigitalHumanSetupJob(
               provider_state: state,
             }, jobId)
           }
-          const cloned = await deps.heygen.cloneVoice({
+          const cloned = await heygen.cloneVoice({
             name: context.name,
             assetId: voiceAssetId,
           })
@@ -470,7 +562,7 @@ export async function runDigitalHumanSetupJob(
         const completed = await poll(
           jobId,
           deps,
-          () => deps.heygen.getVoice(voiceId),
+          () => heygen.getVoice(voiceId),
           value => value.status,
           value => value.error,
         )
@@ -535,6 +627,8 @@ export async function runDigitalHumanRenderJob(
   providedDeps?: DigitalHumanJobDeps,
 ) {
   const deps = providedDeps ?? await defaultDeps()
+  if (!deps.heygen) throw new Error('请先在设置中填写 HeyGen API Key')
+  const heygen = deps.heygen
   const job = await deps.api.getJob(jobId)
   const renderId = numberInput(job.input.render_id, 'render_id')
   const context = await deps.api.getRenderContext(renderId, jobId)
@@ -553,7 +647,7 @@ export async function runDigitalHumanRenderJob(
             context.environment.url,
             context.environment,
           )
-          const uploaded = await deps.heygen.uploadAsset(
+          const uploaded = await heygen.uploadAsset(
             environment.bytes,
             environment.mediaType,
             environment.filename,
@@ -570,7 +664,7 @@ export async function runDigitalHumanRenderJob(
         let videoId = stringState(state, 'video_id')
           || context.heygen_video_id
         if (!videoId) {
-          const created = await deps.heygen.createVideo({
+          const created = await heygen.createVideo({
             title: `${context.digital_human.name} V${context.version}`,
             avatarId: context.digital_human.heygen_avatar_id,
             voiceId: context.digital_human.heygen_voice_id,
@@ -590,7 +684,7 @@ export async function runDigitalHumanRenderJob(
         const completed = await poll(
           jobId,
           deps,
-          () => deps.heygen.getVideo(videoId),
+          () => heygen.getVideo(videoId),
           value => value.status,
           value => value.error,
         )
@@ -621,7 +715,7 @@ export async function runDigitalHumanRenderJob(
         const refreshed = await poll(
           jobId,
           deps,
-          () => deps.heygen.getVideo(result.video_id),
+          () => heygen.getVideo(result.video_id),
           value => value.status,
           value => value.error,
         )

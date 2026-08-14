@@ -470,6 +470,24 @@ async def migrate_content_job_idempotency_schema(conn) -> None:
     ))
 
 
+async def migrate_digital_human_comfyui_schema(conn) -> None:
+    """Add ComfyUI role fields and allow roles without a cloned voice sample."""
+    from sqlalchemy import text
+
+    await _add_columns(conn, "digital_humans", {
+        "provider": "VARCHAR(20) NOT NULL DEFAULT 'heygen'",
+        "look_asset_id": "INTEGER",
+    })
+    await conn.execute(text(
+        "UPDATE digital_humans SET provider = 'heygen' "
+        "WHERE provider IS NULL OR provider = ''"
+    ))
+    await conn.execute(text(
+        "ALTER TABLE digital_humans "
+        "ALTER COLUMN voice_sample_asset_id DROP NOT NULL"
+    ))
+
+
 async def migrate_text_video_speech_asset_schema(conn) -> None:
     """Add sample-accurate metadata to speech assets created before this release."""
     await _add_columns(conn, "text_video_speech_assets", {
@@ -1190,6 +1208,7 @@ async def init_db():
         await migrate_content_job_idempotency_schema(conn)
         await migrate_text_video_project_schema(conn)
         await migrate_text_video_speech_asset_schema(conn)
+        await migrate_digital_human_comfyui_schema(conn)
         await _add_columns(conn, "chat_messages", {
             "skill_run": "JSON",
         })

@@ -15,16 +15,21 @@ export type RenderStatus =
   | 'failed'
   | 'cancelled'
 
+export type DigitalHumanProvider = 'heygen' | 'comfyui'
+
 export interface DigitalHuman {
   id: number
   name: string
   status: DigitalHumanStatus
+  provider: DigitalHumanProvider
   portrait_asset_id: number
-  voice_sample_asset_id: number
+  voice_sample_asset_id: number | null
   default_environment_asset_id: number
+  look_asset_id: number | null
   portrait: CreativeAsset | null
   voice_sample: CreativeAsset | null
   default_environment: CreativeAsset | null
+  look: CreativeAsset | null
   heygen_avatar_group_id: string
   heygen_avatar_id: string
   heygen_voice_id: string
@@ -88,8 +93,9 @@ export interface TalkingVideoProject {
 
 export type DigitalHumanCreate = {
   name: string
+  provider?: DigitalHumanProvider
   portrait_asset_id: number
-  voice_sample_asset_id: number
+  voice_sample_asset_id?: number | null
   default_environment_asset_id: number
 }
 

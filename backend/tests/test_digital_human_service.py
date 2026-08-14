@@ -83,6 +83,28 @@ def test_create_role_and_setup_job_are_committed_together(session_factory):
             assert job.flow == "digital_human_setup"
             assert job.input_data == {"digital_human_id": role.id}
             assert job.idempotency_key == f"digital-human-setup:{role.id}:1"
+            assert role.provider == "heygen"
+
+    asyncio.new_event_loop().run_until_complete(run())
+
+
+def test_comfyui_role_can_be_created_without_voice(session_factory):
+    async def run():
+        from digital_human_service import create_digital_human
+
+        async with session_factory() as session:
+            portrait, _, environment = await _create_media_assets(session)
+            role, job = await create_digital_human(
+                session,
+                name="林晓",
+                provider="comfyui",
+                portrait_asset_id=portrait.id,
+                default_environment_asset_id=environment.id,
+            )
+
+            assert role.provider == "comfyui"
+            assert role.voice_sample_asset_id is None
+            assert job.flow == "digital_human_setup"
 
     asyncio.new_event_loop().run_until_complete(run())
 

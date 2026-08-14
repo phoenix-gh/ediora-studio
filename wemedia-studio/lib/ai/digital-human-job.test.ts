@@ -24,6 +24,7 @@ function jobApi(flow: string, input: Record<string, unknown>) {
     failStep: vi.fn().mockResolvedValue(undefined),
     completeJob: vi.fn().mockResolvedValue(undefined),
     getRoleContext: vi.fn(),
+    composeLook: vi.fn(),
     updateRole: vi.fn().mockResolvedValue(undefined),
     getRenderContext: vi.fn(),
     updateRender: vi.fn().mockResolvedValue(undefined),
@@ -1054,5 +1055,48 @@ describe('digital-human durable jobs', () => {
 
     expect(api.updateRender).toHaveBeenCalledTimes(1)
     expect(api.failStep).not.toHaveBeenCalled()
+  })
+
+  it('composes a look still for ComfyUI roles instead of cloning HeyGen assets', async () => {
+    const api = jobApi('digital_human_setup', { digital_human_id: 7 })
+    api.getRoleContext.mockResolvedValue({
+      id: 7,
+      name: '林晓',
+      status: 'processing',
+      provider: 'comfyui',
+      portrait: {
+        url: '/api/uploads/portrait.png',
+        media_type: 'image/png',
+        filename: 'portrait.png',
+      },
+      voice_sample: null,
+      look_asset_id: null,
+      provider_state: {},
+      heygen_avatar_group_id: '',
+      heygen_avatar_id: '',
+      heygen_voice_id: '',
+    })
+    api.composeLook.mockResolvedValue({
+      look_asset_id: 44,
+      url: '/api/uploads/look.jpg',
+    })
+    api.updateRole.mockResolvedValue({ status: 'ready', look_asset_id: 44 })
+    const heygen = heygenMock()
+    const deps = {
+      api,
+      heygen,
+      sleep: vi.fn().mockResolvedValue(undefined),
+    } as unknown as DigitalHumanJobDeps
+
+    await runDigitalHumanSetupJob(41, deps)
+
+    expect(api.composeLook).toHaveBeenCalledWith(7, 41)
+    expect(heygen.uploadAsset).not.toHaveBeenCalled()
+    expect(api.updateRole).toHaveBeenCalledWith(7, {
+      status: 'ready',
+      look_asset_id: 44,
+      provider_state: { look_asset_id: 44 },
+      error: '',
+    }, 41)
   })
 })

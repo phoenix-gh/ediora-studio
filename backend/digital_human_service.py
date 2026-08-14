@@ -68,24 +68,31 @@ async def create_digital_human(
     *,
     name: str,
     portrait_asset_id: int,
-    voice_sample_asset_id: int,
     default_environment_asset_id: int,
+    voice_sample_asset_id: int | None = None,
+    provider: str = "heygen",
 ) -> tuple[DigitalHuman, ContentJob]:
     clean_name = name.strip()
     if not clean_name:
         raise InvalidTalkingVideo("数字人名称不能为空")
+    clean_provider = provider.strip() or "heygen"
+    if clean_provider not in {"heygen", "comfyui"}:
+        raise InvalidTalkingVideo("不支持的数字人渲染后端")
     await require_media_asset(
         session,
         portrait_asset_id,
         {"image/png", "image/jpeg"},
         32 * 1024 * 1024,
     )
-    await require_media_asset(
-        session,
-        voice_sample_asset_id,
-        {"audio/mpeg", "audio/wav", "audio/x-wav"},
-        32 * 1024 * 1024,
-    )
+    if clean_provider == "heygen" or voice_sample_asset_id is not None:
+        if voice_sample_asset_id is None:
+            raise InvalidTalkingVideo("HeyGen 数字人需要声音样本")
+        await require_media_asset(
+            session,
+            voice_sample_asset_id,
+            {"audio/mpeg", "audio/wav", "audio/x-wav"},
+            32 * 1024 * 1024,
+        )
     await require_media_asset(
         session,
         default_environment_asset_id,
@@ -103,6 +110,7 @@ async def create_digital_human(
     role = DigitalHuman(
         name=clean_name,
         status="processing",
+        provider=clean_provider,
         portrait_asset_id=portrait_asset_id,
         voice_sample_asset_id=voice_sample_asset_id,
         default_environment_asset_id=default_environment_asset_id,

@@ -976,9 +976,13 @@ class DigitalHuman(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     status: Mapped[str] = mapped_column(String(20), default="processing", index=True)
+    provider: Mapped[str] = mapped_column(String(20), default="heygen", index=True)
     portrait_asset_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
-    voice_sample_asset_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    voice_sample_asset_id: Mapped[int | None] = mapped_column(
+        Integer, nullable=True, index=True
+    )
     default_environment_asset_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    look_asset_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     heygen_avatar_group_id: Mapped[str] = mapped_column(String, default="")
     heygen_avatar_id: Mapped[str] = mapped_column(String, default="")
     heygen_voice_id: Mapped[str] = mapped_column(String, default="")

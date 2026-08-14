@@ -141,6 +141,70 @@ def test_create_role_enqueues_setup_job(api, monkeypatch):
     ) == ["数字人资产", "数字人资产", "数字人资产"]
 
 
+def test_create_comfyui_role_does_not_require_heygen(api, monkeypatch):
+    client, session_factory, router_module = api
+    portrait, _, environment = _create_media_assets(session_factory)
+    monkeypatch.delenv("HEYGEN_API_KEY")
+    queued = []
+
+    async def capture_enqueue(job_id: int):
+        queued.append(job_id)
+
+    monkeypatch.setattr(router_module, "enqueue_job", capture_enqueue)
+    response = client.post(
+        "/api/digital-humans",
+        json={
+            "name": "林晓",
+            "provider": "comfyui",
+            "portrait_asset_id": portrait,
+            "default_environment_asset_id": environment,
+        },
+    )
+
+    assert response.status_code == 201, response.text
+    assert response.json()["provider"] == "comfyui"
+    assert response.json()["voice_sample_asset_id"] is None
+    assert queued == [response.json()["setup_job_id"]]
+
+
+def test_comfyui_role_ready_requires_look_asset(api, monkeypatch):
+    client, session_factory, router_module = api
+    portrait, _, environment = _create_media_assets(session_factory)
+
+    async def no_op(_job_id: int):
+        return None
+
+    monkeypatch.setattr(router_module, "enqueue_job", no_op)
+    role = client.post(
+        "/api/digital-humans",
+        json={
+            "name": "林晓",
+            "provider": "comfyui",
+            "portrait_asset_id": portrait,
+            "default_environment_asset_id": environment,
+        },
+    ).json()
+    missing = client.post(
+        f"/api/digital-humans/{role['id']}/worker-progress",
+        headers=_job_headers(role),
+        json={"status": "ready", "provider_state": {}},
+    )
+    assert missing.status_code == 422
+
+    ready = client.post(
+        f"/api/digital-humans/{role['id']}/worker-progress",
+        headers=_job_headers(role),
+        json={
+            "status": "ready",
+            "look_asset_id": portrait,
+            "provider_state": {},
+        },
+    )
+    assert ready.status_code == 200
+    assert ready.json()["look_asset_id"] == portrait
+    assert ready.json()["status"] == "ready"
+
+
 def test_create_role_rejects_missing_heygen_configuration(api, monkeypatch):
     client, session_factory, _ = api
     portrait, voice, environment = _create_media_assets(session_factory)

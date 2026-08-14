@@ -79,6 +79,7 @@ async def backfill_digital_human_assets(session: AsyncSession) -> None:
                 DigitalHuman.portrait_asset_id,
                 DigitalHuman.voice_sample_asset_id,
                 DigitalHuman.default_environment_asset_id,
+                DigitalHuman.look_asset_id,
             )
         )
     ).all()

@@ -10,6 +10,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import effective_heygen_api_key, get_config
+from digital_human_look import compose_role_look
 from content_jobs import create_job
 from database import get_db
 from digital_human_assets import archive_digital_human_asset_ids
@@ -31,8 +32,9 @@ router = APIRouter(prefix="/digital-humans", tags=["digital-humans"])
 
 class RoleCreate(BaseModel):
     name: str = Field(min_length=1, max_length=100)
+    provider: Literal["heygen", "comfyui"] = "heygen"
     portrait_asset_id: int
-    voice_sample_asset_id: int
+    voice_sample_asset_id: int | None = None
     default_environment_asset_id: int
 
 
@@ -48,6 +50,7 @@ class RoleWorkerProgress(BaseModel):
     heygen_avatar_group_id: str = ""
     heygen_avatar_id: str = ""
     heygen_voice_id: str = ""
+    look_asset_id: int | None = None
     provider_state: dict = Field(default_factory=dict)
     error: str = ""
 
@@ -65,8 +68,17 @@ def _asset_payload(asset: CreativeAsset) -> dict:
 
 async def _role_payload(db: AsyncSession, role: DigitalHuman) -> dict:
     portrait = await db.get(CreativeAsset, role.portrait_asset_id)
-    voice = await db.get(CreativeAsset, role.voice_sample_asset_id)
+    voice = (
+        await db.get(CreativeAsset, role.voice_sample_asset_id)
+        if role.voice_sample_asset_id
+        else None
+    )
     environment = await db.get(CreativeAsset, role.default_environment_asset_id)
+    look = (
+        await db.get(CreativeAsset, role.look_asset_id)
+        if role.look_asset_id
+        else None
+    )
     project_count = await db.scalar(
         select(func.count(TalkingVideoProject.id)).where(
             TalkingVideoProject.digital_human_id == role.id
@@ -76,12 +88,15 @@ async def _role_payload(db: AsyncSession, role: DigitalHuman) -> dict:
         "id": role.id,
         "name": role.name,
         "status": role.status,
+        "provider": role.provider or "heygen",
         "portrait_asset_id": role.portrait_asset_id,
         "voice_sample_asset_id": role.voice_sample_asset_id,
         "default_environment_asset_id": role.default_environment_asset_id,
+        "look_asset_id": role.look_asset_id,
         "portrait": _asset_payload(portrait) if portrait else None,
         "voice_sample": _asset_payload(voice) if voice else None,
         "default_environment": _asset_payload(environment) if environment else None,
+        "look": _asset_payload(look) if look else None,
         "heygen_avatar_group_id": role.heygen_avatar_group_id,
         "heygen_avatar_id": role.heygen_avatar_id,
         "heygen_voice_id": role.heygen_voice_id,
@@ -145,12 +160,14 @@ async def list_roles(
 
 @router.post("", status_code=status.HTTP_201_CREATED)
 async def post_role(body: RoleCreate, db: AsyncSession = Depends(get_db)):
-    if not effective_heygen_api_key(await get_config()):
+    cfg = await get_config()
+    if body.provider == "heygen" and not effective_heygen_api_key(cfg):
         raise HTTPException(409, "请先配置 HeyGen API Key")
     try:
         role, job = await create_digital_human(
             db,
             name=body.name,
+            provider=body.provider,
             portrait_asset_id=body.portrait_asset_id,
             voice_sample_asset_id=body.voice_sample_asset_id,
             default_environment_asset_id=body.default_environment_asset_id,
@@ -200,7 +217,12 @@ async def patch_role(
             await require_media_asset(db, value, media_types, 32 * 1024 * 1024)
             if getattr(role, field) != value:
                 setattr(role, field, value)
-                if field in {"portrait_asset_id", "voice_sample_asset_id"}:
+                setup_fields = (
+                    {"portrait_asset_id", "default_environment_asset_id"}
+                    if role.provider == "comfyui"
+                    else {"portrait_asset_id", "voice_sample_asset_id"}
+                )
+                if field in setup_fields:
                     changed_provider_inputs.add(field)
     except InvalidTalkingVideo as exc:
         raise HTTPException(422, str(exc)) from exc
@@ -217,6 +239,7 @@ async def patch_role(
         raise HTTPException(409, "数字人正在处理，请完成后再更换形象或声音")
     if (
         changed_provider_inputs
+        and role.provider != "comfyui"
         and not effective_heygen_api_key(await get_config())
     ):
         await db.rollback()
@@ -264,11 +287,47 @@ async def retry_role(role_id: int, db: AsyncSession = Depends(get_db)):
     role = await _get_role(db, role_id, for_update=True)
     if role.status != "failed":
         raise HTTPException(409, "只能重试处理失败的数字人")
-    if not effective_heygen_api_key(await get_config()):
+    if (
+        role.provider != "comfyui"
+        and not effective_heygen_api_key(await get_config())
+    ):
         raise HTTPException(409, "请先配置 HeyGen API Key")
     await _queue_setup(db, role)
     await db.refresh(role)
     return await _role_payload(db, role)
+
+
+@router.post(
+    "/{role_id}/compose-look",
+    dependencies=[Depends(require_worker_token)],
+)
+async def compose_look(
+    role_id: int,
+    job_id: int = Header(alias="X-Content-Job-Id"),
+    db: AsyncSession = Depends(get_db),
+):
+    role = await _get_role(db, role_id)
+    if role.setup_job_id != job_id:
+        raise HTTPException(
+            409,
+            "该数字人任务已被更新任务替代",
+            headers={"X-WMS-Retryable": "false"},
+        )
+    if role.provider != "comfyui":
+        raise HTTPException(409, "只有 ComfyUI 数字人需要合成定妆图")
+    try:
+        asset = await compose_role_look(db, role)
+    except FileNotFoundError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    role.look_asset_id = asset.id
+    await db.commit()
+    await db.refresh(asset)
+    return {
+        "look_asset_id": asset.id,
+        "url": asset.url,
+        "filename": asset.filename,
+        "media_type": asset.media_type,
+    }
 
 
 @router.get(
@@ -288,17 +347,31 @@ async def role_worker_context(
             headers={"X-WMS-Retryable": "false"},
         )
     portrait = await db.get(CreativeAsset, role.portrait_asset_id)
-    voice = await db.get(CreativeAsset, role.voice_sample_asset_id)
     environment = await db.get(CreativeAsset, role.default_environment_asset_id)
-    if portrait is None or voice is None or environment is None:
+    voice = (
+        await db.get(CreativeAsset, role.voice_sample_asset_id)
+        if role.voice_sample_asset_id
+        else None
+    )
+    look = (
+        await db.get(CreativeAsset, role.look_asset_id)
+        if role.look_asset_id
+        else None
+    )
+    if portrait is None or environment is None:
+        raise HTTPException(409, "数字人本地素材不完整")
+    if role.provider != "comfyui" and voice is None:
         raise HTTPException(409, "数字人本地素材不完整")
     return {
         "id": role.id,
         "name": role.name,
         "status": role.status,
+        "provider": role.provider or "heygen",
         "portrait": _asset_payload(portrait),
-        "voice_sample": _asset_payload(voice),
+        "voice_sample": _asset_payload(voice) if voice else None,
         "default_environment": _asset_payload(environment),
+        "look": _asset_payload(look) if look else None,
+        "look_asset_id": role.look_asset_id,
         "provider_state": role.provider_state,
         "heygen_avatar_group_id": role.heygen_avatar_group_id,
         "heygen_avatar_id": role.heygen_avatar_id,
@@ -338,11 +411,18 @@ async def role_worker_progress(
     if role.status == "ready":
         return await _role_payload(db, role)
     if body.status == "ready":
-        if not body.heygen_avatar_id or not body.heygen_voice_id:
-            raise HTTPException(422, "就绪状态必须同时包含 HeyGen 形象和声音")
-        role.heygen_avatar_group_id = body.heygen_avatar_group_id
-        role.heygen_avatar_id = body.heygen_avatar_id
-        role.heygen_voice_id = body.heygen_voice_id
+        if role.provider == "comfyui":
+            if not body.look_asset_id:
+                raise HTTPException(422, "就绪状态必须包含定妆图")
+            role.look_asset_id = body.look_asset_id
+        else:
+            if not body.heygen_avatar_id or not body.heygen_voice_id:
+                raise HTTPException(422, "就绪状态必须同时包含 HeyGen 形象和声音")
+            role.heygen_avatar_group_id = body.heygen_avatar_group_id
+            role.heygen_avatar_id = body.heygen_avatar_id
+            role.heygen_voice_id = body.heygen_voice_id
+    elif body.look_asset_id:
+        role.look_asset_id = body.look_asset_id
     role.status = body.status
     role.provider_state = body.provider_state
     role.error = body.error[:500]
