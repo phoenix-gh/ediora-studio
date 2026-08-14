@@ -1,4 +1,5 @@
 const URL_PROTOCOLS = new Set(['http:', 'https:'])
+const LOCAL_API_HOSTS = new Set(['localhost:8000', '127.0.0.1:8000'])
 
 function asText(value) {
   return String(value ?? '')
@@ -13,7 +14,7 @@ function appendText(document, parent, value) {
   if (value) parent.appendChild(document.createTextNode(value))
 }
 
-function appendInline(document, parent, value, apiBase) {
+function appendInline(document, parent, value, apiBase, deferLocalImages) {
   const text = asText(value)
   let cursor = 0
   let plainStart = 0
@@ -36,7 +37,11 @@ function appendInline(document, parent, value, apiBase) {
         if (src) {
           const image = document.createElement('img')
           image.className = 'sw-markdown-image'
-          image.setAttribute('src', src)
+          if (deferLocalImages && isLocalUploadUrl(src, apiBase)) {
+            image.setAttribute('data-sw-image-src', src)
+          } else {
+            image.setAttribute('src', src)
+          }
           image.setAttribute('alt', match[1])
           image.setAttribute('loading', 'lazy')
           image.setAttribute('decoding', 'async')
@@ -66,11 +71,11 @@ function appendInline(document, parent, value, apiBase) {
           link.setAttribute('href', href)
           link.setAttribute('target', '_blank')
           link.setAttribute('rel', 'noreferrer noopener')
-          appendInline(document, link, match[1], apiBase)
+          appendInline(document, link, match[1], apiBase, deferLocalImages)
           if (match[3]) link.setAttribute('title', match[3])
           parent.appendChild(link)
         } else {
-          appendInline(document, parent, match[1], apiBase)
+          appendInline(document, parent, match[1], apiBase, deferLocalImages)
         }
         moveTo(cursor + match[0].length)
         continue
@@ -101,7 +106,7 @@ function appendInline(document, parent, value, apiBase) {
         const tag = pairMarker === '~~' ? 'del' : 'strong'
         const element = document.createElement(tag)
         element.className = tag === 'del' ? 'sw-markdown-del' : 'sw-markdown-strong'
-        appendInline(document, element, text.slice(cursor + pairMarker.length, end), apiBase)
+        appendInline(document, element, text.slice(cursor + pairMarker.length, end), apiBase, deferLocalImages)
         parent.appendChild(element)
         moveTo(end + pairMarker.length)
         continue
@@ -116,7 +121,7 @@ function appendInline(document, parent, value, apiBase) {
         flushPlain(cursor)
         const emphasis = document.createElement('em')
         emphasis.className = 'sw-markdown-em'
-        appendInline(document, emphasis, text.slice(cursor + 1, end), apiBase)
+        appendInline(document, emphasis, text.slice(cursor + 1, end), apiBase, deferLocalImages)
         parent.appendChild(emphasis)
         moveTo(end + 1)
         continue
@@ -133,17 +138,17 @@ function isBlank(line) {
   return /^\s*$/.test(line)
 }
 
-function createParagraph(document, lines, apiBase) {
+function createParagraph(document, lines, apiBase, deferLocalImages) {
   const paragraph = document.createElement('p')
   paragraph.className = 'sw-markdown-paragraph'
   lines.forEach((line, index) => {
     if (index > 0) paragraph.appendChild(document.createElement('br'))
-    appendInline(document, paragraph, line, apiBase)
+    appendInline(document, paragraph, line, apiBase, deferLocalImages)
   })
   return paragraph
 }
 
-function createList(document, lines, ordered, apiBase) {
+function createList(document, lines, ordered, apiBase, deferLocalImages) {
   const list = document.createElement(ordered ? 'ol' : 'ul')
   list.className = ordered ? 'sw-markdown-list sw-markdown-list-ordered' : 'sw-markdown-list'
   const pattern = ordered ? /^\s*\d+[.)]\s+(.+)$/ : /^\s*[-*+]\s+(.+)$/
@@ -151,18 +156,18 @@ function createList(document, lines, ordered, apiBase) {
     const match = pattern.exec(line)
     if (!match) return
     const item = document.createElement('li')
-    appendInline(document, item, match[1], apiBase)
+    appendInline(document, item, match[1], apiBase, deferLocalImages)
     list.appendChild(item)
   })
   return list
 }
 
-function createBlockquote(document, lines, apiBase) {
+function createBlockquote(document, lines, apiBase, deferLocalImages) {
   const quote = document.createElement('blockquote')
   quote.className = 'sw-markdown-blockquote'
   lines.forEach((line, index) => {
     if (index > 0) quote.appendChild(document.createElement('br'))
-    appendInline(document, quote, line.replace(/^\s{0,3}>\s?/, ''), apiBase)
+    appendInline(document, quote, line.replace(/^\s{0,3}>\s?/, ''), apiBase, deferLocalImages)
   })
   return quote
 }
@@ -197,7 +202,7 @@ function isFence(line) {
   return /^\s{0,3}```/.test(line)
 }
 
-function appendBlocks(document, root, markdown, apiBase) {
+function appendBlocks(document, root, markdown, apiBase, deferLocalImages) {
   const lines = asText(markdown).replace(/\r\n?/g, '\n').split('\n')
   let index = 0
 
@@ -225,7 +230,7 @@ function appendBlocks(document, root, markdown, apiBase) {
     if (heading) {
       const element = document.createElement(`h${heading[1].length}`)
       element.className = 'sw-markdown-heading'
-      appendInline(document, element, heading[2], apiBase)
+      appendInline(document, element, heading[2], apiBase, deferLocalImages)
       root.appendChild(element)
       index += 1
       continue
@@ -248,7 +253,7 @@ function appendBlocks(document, root, markdown, apiBase) {
         listLines.push(lines[index])
         index += 1
       }
-      root.appendChild(createList(document, listLines, ordered, apiBase))
+      root.appendChild(createList(document, listLines, ordered, apiBase, deferLocalImages))
       continue
     }
 
@@ -259,7 +264,7 @@ function appendBlocks(document, root, markdown, apiBase) {
         quoteLines.push(lines[index])
         index += 1
       }
-      root.appendChild(createBlockquote(document, quoteLines, apiBase))
+      root.appendChild(createBlockquote(document, quoteLines, apiBase, deferLocalImages))
       continue
     }
 
@@ -271,7 +276,7 @@ function appendBlocks(document, root, markdown, apiBase) {
       paragraphLines.push(lines[index])
       index += 1
     }
-    root.appendChild(createParagraph(document, paragraphLines, apiBase))
+    root.appendChild(createParagraph(document, paragraphLines, apiBase, deferLocalImages))
   }
 }
 
@@ -289,13 +294,66 @@ export function normalizeMarkdownUrl(source, apiBase = '') {
   }
 }
 
-export function renderMarkdown(markdown, { document, apiBase = '' } = {}) {
+export function isLocalUploadUrl(source, apiBase = '') {
+  try {
+    const url = new URL(source)
+    const base = new URL(apiBase)
+    const basePath = base.pathname.replace(/\/+$/, '')
+    return LOCAL_API_HOSTS.has(url.host) && url.pathname.startsWith(`${basePath}/uploads/`)
+  } catch {
+    return false
+  }
+}
+
+const DATA_IMAGE_URL = /^data:image\/(?:avif|gif|jpeg|png|svg\+xml|webp);base64,/i
+
+function asDataImageUrl(value) {
+  const dataUrl = typeof value === 'string' ? value : value?.dataUrl
+  return DATA_IMAGE_URL.test(dataUrl || '') ? dataUrl : null
+}
+
+export async function hydrateMarkdownImages(root, { fetchImage, cache } = {}) {
+  if (!root?.querySelectorAll || typeof fetchImage !== 'function') return 0
+
+  const images = [...root.querySelectorAll('img[data-sw-image-src]')]
+  let hydrated = 0
+  await Promise.all(images.map(async image => {
+    const source = image.getAttribute('data-sw-image-src')
+    if (!source) return
+
+    try {
+      let dataUrl = asDataImageUrl(cache?.get?.(source))
+      if (!dataUrl) {
+        dataUrl = asDataImageUrl(await fetchImage(source))
+        if (!dataUrl) throw new Error('Image response is invalid')
+        cache?.set?.(source, dataUrl)
+      }
+      image.setAttribute('src', dataUrl)
+      image.removeAttribute('data-sw-image-src')
+      hydrated += 1
+    } catch {
+      const document = image.ownerDocument
+      const fallback = document?.createElement?.('span')
+      if (!fallback) return
+      fallback.className = 'sw-markdown-image-error'
+      fallback.textContent = `${image.getAttribute('alt') || '图片'}：图片加载失败`
+      image.parentNode?.replaceChild(fallback, image)
+    }
+  }))
+  return hydrated
+}
+
+export function renderMarkdown(markdown, {
+  document,
+  apiBase = '',
+  deferLocalImages = true,
+} = {}) {
   if (!document?.createElement || !document?.createTextNode) {
     throw new TypeError('Markdown renderer requires a DOM document')
   }
 
   const element = document.createElement('div')
   element.className = 'sw-markdown'
-  appendBlocks(document, element, markdown, apiBase)
+  appendBlocks(document, element, markdown, apiBase, deferLocalImages)
   return { element, html: element.innerHTML }
 }

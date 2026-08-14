@@ -6,6 +6,15 @@ export const ALLOWED_API_BASES = Object.freeze([
 ])
 
 const SAFE_FIELDS = Object.freeze(['id', 'title', 'content', 'status', 'draft_type', 'updated_at'])
+const IMAGE_MEDIA_TYPES = new Set([
+  'image/avif',
+  'image/gif',
+  'image/jpeg',
+  'image/png',
+  'image/svg+xml',
+  'image/webp',
+])
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024
 
 function createError(code, message) {
   const error = new Error(message)
@@ -15,6 +24,14 @@ function createError(code, message) {
 
 function invalidConfig(message = 'API 地址格式无效') {
   return createError('DRAFT_API_NOT_CONFIGURED', message)
+}
+
+function invalidRequest(message = '图片地址无效') {
+  return createError('DRAFT_API_INVALID_REQUEST', message)
+}
+
+function imageResponseError(message = '图片 API 返回格式无效') {
+  return createError('DRAFT_API_INVALID_RESPONSE', message)
 }
 
 export function normalizeApiBase(value) {
@@ -42,6 +59,33 @@ export function assertAllowedApiBase(value) {
   const allowed = ALLOWED_API_BASES.some(base => new URL(base).origin === origin)
   if (!allowed) throw createError('DRAFT_API_HOST_NOT_ALLOWED', '当前扩展只允许本机 8000 端口 API')
   return normalized
+}
+
+function localUploadUrl(apiBase, source) {
+  const normalized = assertAllowedApiBase(apiBase)
+  let url
+  try {
+    url = new URL(source, normalized + '/')
+  } catch {
+    throw invalidRequest()
+  }
+
+  const base = new URL(normalized)
+  const basePath = base.pathname.replace(/\/+$/, '')
+  const allowedOrigins = new Set(ALLOWED_API_BASES.map(item => new URL(item).origin))
+  if (!allowedOrigins.has(url.origin) || !url.pathname.startsWith(`${basePath}/uploads/`)) {
+    throw invalidRequest()
+  }
+  return new URL(`${url.pathname}${url.search}${url.hash}`, base.origin).href
+}
+
+function bytesToBase64(bytes) {
+  let binary = ''
+  const chunkSize = 0x8000
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize))
+  }
+  return btoa(binary)
 }
 
 export function sanitizeDraftCollection(value) {
@@ -104,6 +148,49 @@ export async function fetchDraftCollection(apiBase, {
     throw createError('DRAFT_API_INVALID_RESPONSE', '草稿 API 返回的 JSON 无效')
   }
   return sanitizeDraftCollection(payload)
+}
+
+export async function fetchDraftImage(apiBase, source, {
+  fetchImpl = globalThis.fetch,
+  timeoutMs = 10_000,
+} = {}) {
+  const url = localUploadUrl(apiBase, source)
+  if (typeof fetchImpl !== 'function') throw createError('DRAFT_API_UNAVAILABLE', '当前环境不支持网络请求')
+
+  const controller = typeof AbortController === 'function' ? new AbortController() : null
+  const timer = setTimeout(() => controller?.abort(), timeoutMs)
+
+  let response
+  try {
+    response = await fetchImpl(url, {
+      method: 'GET',
+      headers: { Accept: 'image/*' },
+      cache: 'no-store',
+      ...(controller ? { signal: controller.signal } : {}),
+    })
+  } catch {
+    throw createError('DRAFT_API_UNAVAILABLE', '图片 API 暂不可用，请检查服务是否运行')
+  } finally {
+    clearTimeout(timer)
+  }
+
+  if (!response?.ok) {
+    const status = Number.isFinite(response?.status) ? `（HTTP ${response.status}）` : ''
+    throw createError('DRAFT_API_UNAVAILABLE', `图片 API 暂不可用${status}`)
+  }
+
+  const mediaType = (response.headers?.get?.('content-type') || '').split(';', 1)[0].trim().toLowerCase()
+  if (!IMAGE_MEDIA_TYPES.has(mediaType)) throw imageResponseError('图片 API 返回了不支持的媒体类型')
+
+  let bytes
+  try {
+    bytes = new Uint8Array(await response.arrayBuffer())
+  } catch {
+    throw imageResponseError('图片 API 返回了无效的二进制内容')
+  }
+  if (bytes.byteLength > MAX_IMAGE_BYTES) throw imageResponseError('图片超过 10MB 限制')
+
+  return { dataUrl: `data:${mediaType};base64,${bytesToBase64(bytes)}` }
 }
 
 export async function publishDraft(apiBase, draftId, {

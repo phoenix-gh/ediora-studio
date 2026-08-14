@@ -2,11 +2,18 @@ import {
   API_BASE_STORAGE_KEY,
   DEFAULT_API_BASE,
   assertAllowedApiBase,
+  fetchDraftImage,
   fetchDraftCollection,
   publishDraft,
 } from './draft-api.js'
+import { isXSiteUrl } from './x-site.js'
+import {
+  routeScheduleRequest,
+  SCHEDULE_MESSAGE_TYPES,
+} from '../content/schedule-bridge.js'
 
 const DRAFTS_REQUEST_TYPE = 'SHUCE_DRAFTS_REQUEST'
+const DRAFT_IMAGE_REQUEST_TYPE = 'SHUCE_DRAFT_IMAGE_REQUEST'
 const DRAFT_PUBLISH_TYPE = 'SHUCE_DRAFT_PUBLISH'
 const DRAFTS_RESULT_TYPE = 'SHUCE_DRAFTS_RESULT'
 const CONFIG_GET_TYPE = 'SHUCE_DRAFTS_CONFIG_GET'
@@ -20,6 +27,23 @@ const SAFE_ERROR_MESSAGES = Object.freeze({
   DRAFT_API_UNAVAILABLE: '草稿 API 暂不可用，请检查服务是否运行',
   DRAFT_API_INVALID_RESPONSE: '草稿 API 返回格式无效',
 })
+
+const {
+  GET: SHUCE_SCHEDULE_GET,
+  SET_AUTOFILL: SHUCE_SCHEDULE_SET_AUTOFILL,
+} = SCHEDULE_MESSAGE_TYPES
+
+export function sidePanelOptionsForUrl(url) {
+  return {
+    path: 'sidepanel/index.html',
+    enabled: isXSiteUrl(url),
+  }
+}
+
+export async function syncSidePanelForTab(tabId, url, sidePanel = globalThis.chrome?.sidePanel) {
+  if (!sidePanel || !Number.isInteger(tabId)) return
+  await sidePanel.setOptions({ tabId, ...sidePanelOptionsForUrl(url) })
+}
 
 function requestIdOf(message) {
   return typeof message?.requestId === 'string' ? message.requestId : ''
@@ -51,6 +75,14 @@ async function handleDraftsRequest(message) {
   return fetchDraftCollection(apiBase)
 }
 
+async function handleDraftImageRequest(message) {
+  const configured = await readConfiguredApiBase()
+  const apiBase = typeof message.apiBase === 'string' && message.apiBase.trim()
+    ? message.apiBase
+    : configured
+  return fetchDraftImage(apiBase, message.imageUrl)
+}
+
 async function handleDraftPublishRequest(message) {
   const configured = await readConfiguredApiBase()
   const apiBase = typeof message.apiBase === 'string' && message.apiBase.trim()
@@ -69,6 +101,16 @@ async function handleDraftMessage(message) {
       requestId,
       ok: true,
       drafts,
+    }
+  }
+
+  if (message.type === DRAFT_IMAGE_REQUEST_TYPE) {
+    const image = await handleDraftImageRequest(message)
+    return {
+      type: DRAFTS_RESULT_TYPE,
+      requestId,
+      ok: true,
+      ...image,
     }
   }
 
@@ -110,23 +152,54 @@ async function handleDraftMessage(message) {
   return null
 }
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  const draftMessageTypes = new Set([
-    DRAFTS_REQUEST_TYPE,
-    DRAFT_PUBLISH_TYPE,
-    CONFIG_GET_TYPE,
-    CONFIG_SET_TYPE,
-    CONFIG_RESET_TYPE,
-  ])
-  if (!draftMessageTypes.has(message?.type)) return false
+if (globalThis.chrome?.sidePanel) {
+  chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {})
+  chrome.sidePanel.setOptions({ enabled: false }).catch(() => {})
+  chrome.tabs.query({ url: ['https://x.com/*', 'https://twitter.com/*'] })
+    .then(tabs => {
+      for (const tab of Array.isArray(tabs) ? tabs : []) {
+        void syncSidePanelForTab(tab.id, tab.url)
+      }
+    })
+    .catch(() => {})
+  chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+    if (changeInfo.url || changeInfo.status === 'complete') {
+      void syncSidePanelForTab(tabId, tab?.url)
+    }
+  })
+  chrome.tabs.onActivated.addListener(async ({ tabId }) => {
+    const tab = await chrome.tabs.get(tabId).catch(() => null)
+    void syncSidePanelForTab(tabId, tab?.url)
+  })
+}
 
-  handleDraftMessage(message)
-    .then(sendResponse)
-    .catch(error => sendResponse({
-      type: DRAFTS_RESULT_TYPE,
-      requestId: requestIdOf(message),
-      ok: false,
-      error: safeError(error),
-    }))
-  return true
-})
+if (globalThis.chrome?.runtime) {
+  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    const draftMessageTypes = new Set([
+      DRAFTS_REQUEST_TYPE,
+      DRAFT_IMAGE_REQUEST_TYPE,
+      DRAFT_PUBLISH_TYPE,
+      CONFIG_GET_TYPE,
+      CONFIG_SET_TYPE,
+      CONFIG_RESET_TYPE,
+    ])
+    if (message?.type === SHUCE_SCHEDULE_GET || message?.type === SHUCE_SCHEDULE_SET_AUTOFILL) {
+      return routeScheduleRequest(message, {
+        queryTabs: query => chrome.tabs.query(query),
+        sendToTab: (tabId, payload) => chrome.tabs.sendMessage(tabId, payload),
+        isXSiteUrl,
+      })
+    }
+    if (!draftMessageTypes.has(message?.type)) return false
+
+    handleDraftMessage(message)
+      .then(sendResponse)
+      .catch(error => sendResponse({
+        type: DRAFTS_RESULT_TYPE,
+        requestId: requestIdOf(message),
+        ok: false,
+        error: safeError(error),
+      }))
+    return true
+  })
+}

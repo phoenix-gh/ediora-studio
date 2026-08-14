@@ -45,17 +45,21 @@ test('declares the MV3 Shuce extension with X-only host permissions', async () =
   assert.equal(manifest.background.type, 'module')
   assert.deepEqual(manifest.content_scripts[0].js, ['content/workbench.js'])
   assert.equal(JSON.stringify(manifest).includes('<all_urls>'), false)
+  assert.ok(manifest.permissions.includes('sidePanel'))
+  assert.equal(manifest.action.default_title, '述策发布指挥台')
+  assert.equal(manifest.side_panel.default_path, 'sidepanel/index.html')
+  assert.deepEqual(manifest.action.default_icon, {
+    16: 'icons/icon-16.png',
+    32: 'icons/icon-32.png',
+    48: 'icons/icon-48.png',
+  })
+  assert.equal(manifest.permissions.includes('tabs'), false)
   assert.deepEqual(manifest.web_accessible_resources[0].resources.sort(), [
-    'content/draft-client.js',
-    'content/draft-model.js',
-    'content/markdown-renderer.js',
+    'content/schedule-bridge.js',
+    'content/schedule-host.js',
     'content/schedule-memory.js',
     'content/selectors.js',
-    'content/workbench-clipboard.js',
-    'content/workbench-runtime.js',
-    'content/workbench-state.js',
   ])
-  assert.equal(JSON.stringify(manifest).includes('bridge'), false)
   assert.equal(JSON.stringify(manifest).includes('console-api'), false)
 })
 
@@ -74,7 +78,8 @@ test('ships the operating guide and auditable XActions notices', async () => {
   assert.doesNotMatch(readme, /Shuce\.publish/)
   assert.doesNotMatch(readme, /dryRun/)
   assert.doesNotMatch(readme, /控制台命令/)
-  assert.match(readme, /悬浮发布指挥台/)
+  assert.match(readme, /Side Panel/)
+  assert.match(readme, /工具栏/)
   assert.match(readme, /status=ready/)
   assert.match(readme, /复制 Markdown/)
   assert.match(readme, /发布并下一条/)

@@ -3,14 +3,17 @@ import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
 import {
+  WORKBENCH_LAYOUT_STORAGE_KEY,
   applyDrafts,
   createWorkbenchState,
   getSelectedDraft,
   getVisibleDrafts,
+  normalizeWorkbenchLayout,
   publishDraftAndSelectNext,
   selectDraft,
   shuffleDrafts,
   setWorkbenchFilter,
+  setWorkbenchLayout,
   setWorkbenchSettingsOpen,
 } from '../content/workbench-state.js'
 import { copyText } from '../content/workbench-clipboard.js'
@@ -42,6 +45,15 @@ const rawDrafts = [
     updated_at: '2026-08-08T12:00:00Z',
   },
 ]
+
+test('normalizes and stores stack or split layout', () => {
+  assert.equal(WORKBENCH_LAYOUT_STORAGE_KEY, 'shuceWorkbenchLayout')
+  assert.equal(normalizeWorkbenchLayout('split'), 'split')
+  assert.equal(normalizeWorkbenchLayout('stack'), 'stack')
+  assert.equal(normalizeWorkbenchLayout('weird'), 'stack')
+  assert.equal(createWorkbenchState().layout, 'stack')
+  assert.equal(setWorkbenchLayout(createWorkbenchState(), 'split').layout, 'split')
+})
 
 test('selects newest ready draft and applies filters', () => {
   let state = applyDrafts(createWorkbenchState(), rawDrafts)
@@ -178,11 +190,50 @@ test('fully hides the empty preview once a short draft is selected', () => {
 test('uses the markdown renderer and rich markdown copy in the preview', async () => {
   const source = await readFile(new URL('../content/workbench-runtime.js', import.meta.url), 'utf8')
 
-  assert.match(source, /import \{ renderMarkdown \} from ['"]\.\/markdown-renderer\.js['"]/)
+  assert.match(source, /import \{ hydrateMarkdownImages, renderMarkdown \} from ['"]\.\/markdown-renderer\.js['"]/)
+  assert.match(source, /hydrateMarkdownImages\(rendered\.element/)
   assert.match(source, /import \{ copyMarkdown \} from ['"]\.\/workbench-clipboard\.js['"]/)
   assert.match(source, /<div class="sw-preview-content">/)
   assert.match(source, /<div data-role="preview-content"><\/div>/)
   assert.match(source, /复制 Markdown/)
+})
+
+test('only remounts preview markdown when the selected draft body or API base changes', () => {
+  const draft = { id: 9, content: '![封面](/api/uploads/cover.png)' }
+  const apiBase = 'http://localhost:8000/api'
+  const key = workbenchRuntime.getPreviewMountKey(draft, apiBase)
+
+  assert.equal(
+    workbenchRuntime.getPreviewMountKey({ ...draft, title: '新标题' }, apiBase),
+    key,
+  )
+  assert.equal(
+    workbenchRuntime.shouldRemountPreview(key, workbenchRuntime.getPreviewMountKey(draft, apiBase)),
+    false,
+  )
+  assert.equal(
+    workbenchRuntime.shouldRemountPreview(
+      key,
+      workbenchRuntime.getPreviewMountKey({ ...draft, content: '改过的正文' }, apiBase),
+    ),
+    true,
+  )
+  assert.equal(
+    workbenchRuntime.shouldRemountPreview(
+      key,
+      workbenchRuntime.getPreviewMountKey(draft, 'http://127.0.0.1:8000/api'),
+    ),
+    true,
+  )
+  assert.equal(workbenchRuntime.getPreviewMountKey(null, apiBase), '')
+})
+
+test('skips remounting hydrated preview images on unrelated chrome updates', async () => {
+  const source = await readFile(new URL('../content/workbench-runtime.js', import.meta.url), 'utf8')
+
+  assert.match(source, /getPreviewMountKey\(draft, state\.apiBase\)/)
+  assert.match(source, /shouldRemountPreview\(previewMountKey, nextKey\)/)
+  assert.match(source, /cache:\s*previewImageCache/)
 })
 
 test('provides an in-memory draft shuffle control', async () => {
@@ -191,4 +242,11 @@ test('provides an in-memory draft shuffle control', async () => {
   assert.match(source, /data-action="shuffle"/)
   assert.match(source, /title="重新排序"/)
   assert.match(source, /shuffleDrafts\(state\)/)
+})
+
+test('exposes a persisted layout toggle in the side panel runtime', async () => {
+  const source = await readFile(new URL('../content/workbench-runtime.js', import.meta.url), 'utf8')
+  assert.match(source, /WORKBENCH_LAYOUT_STORAGE_KEY/)
+  assert.match(source, /setWorkbenchLayout/)
+  assert.match(source, /data-action="layout"/)
 })
