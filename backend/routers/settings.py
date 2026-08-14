@@ -13,6 +13,9 @@ import logging
 from config import (
     PROVIDERS,
     effective_base_url,
+    effective_comfyui_auth_token,
+    effective_comfyui_base_url,
+    effective_comfyui_shot_seconds,
     effective_heygen_api_key,
     effective_model,
     get_config,
@@ -125,6 +128,11 @@ class SettingsOut(BaseModel):
     prompt_generation_history_limit: int
     heygen_api_key_set: bool
     heygen_api_key_preview: str
+    comfyui_base_url: str
+    comfyui_auth_token_set: bool
+    comfyui_auth_token_preview: str
+    comfyui_min_shot_seconds: int
+    comfyui_max_shot_seconds: int
     transcription_provider: str
     transcription_model: str
     transcription_base_url: str
@@ -205,6 +213,10 @@ class SettingsUpdate(BaseModel):
         le=20,
     )
     heygen_api_key: Optional[str] = None
+    comfyui_base_url: Optional[str] = None
+    comfyui_auth_token: Optional[str] = None
+    comfyui_min_shot_seconds: Optional[int] = Field(default=None, ge=1, le=15)
+    comfyui_max_shot_seconds: Optional[int] = Field(default=None, ge=1, le=15)
     transcription_provider: Optional[str] = None
     transcription_model: Optional[str] = None
     transcription_base_url: Optional[str] = None
@@ -301,6 +313,8 @@ def _build_out(cfg: dict) -> SettingsOut:
     api_key = cfg.get("llm_api_key", "")
     image_api_key = cfg.get("image_api_key", "")
     heygen_api_key = effective_heygen_api_key(cfg)
+    comfyui_auth_token = effective_comfyui_auth_token(cfg)
+    comfyui_min_seconds, comfyui_max_seconds = effective_comfyui_shot_seconds(cfg)
     transcription_api_key = cfg.get("transcription_api_key", "")
     speech_api_key = cfg.get("speech_api_key", "")
     gh_token = cfg.get("github_token", "")
@@ -370,6 +384,13 @@ def _build_out(cfg: dict) -> SettingsOut:
         prompt_generation_history_limit=_prompt_generation_history_limit(cfg),
         heygen_api_key_set=bool(heygen_api_key),
         heygen_api_key_preview=f"…{heygen_api_key[-4:]}" if len(heygen_api_key) >= 4 else "",
+        comfyui_base_url=effective_comfyui_base_url(cfg),
+        comfyui_auth_token_set=bool(comfyui_auth_token),
+        comfyui_auth_token_preview=(
+            f"…{comfyui_auth_token[-4:]}" if len(comfyui_auth_token) >= 4 else ""
+        ),
+        comfyui_min_shot_seconds=comfyui_min_seconds,
+        comfyui_max_shot_seconds=comfyui_max_seconds,
         transcription_provider=transcription_provider,
         transcription_model=transcription_model,
         transcription_base_url=cfg.get("transcription_base_url", "https://api.openai.com/v1"),
@@ -561,6 +582,22 @@ async def get_heygen_runtime_config():
 
 
 @router.get(
+    "/comfyui-runtime",
+    include_in_schema=False,
+    dependencies=[Depends(require_worker_token)],
+)
+async def get_comfyui_runtime_config():
+    cfg = await get_config()
+    min_seconds, max_seconds = effective_comfyui_shot_seconds(cfg)
+    return {
+        "base_url": effective_comfyui_base_url(cfg),
+        "auth_token": effective_comfyui_auth_token(cfg),
+        "min_shot_seconds": min_seconds,
+        "max_shot_seconds": max_seconds,
+    }
+
+
+@router.get(
     "/transcription-runtime",
     include_in_schema=False,
     dependencies=[Depends(require_worker_token)],
@@ -633,6 +670,36 @@ async def update_settings(
         )
     if body.heygen_api_key is not None:
         updates["heygen_api_key"] = body.heygen_api_key.strip()
+    if body.comfyui_base_url is not None:
+        comfyui_base_url = body.comfyui_base_url.strip().rstrip("/")
+        if comfyui_base_url:
+            parsed = urlsplit(comfyui_base_url)
+            if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+                raise HTTPException(422, "ComfyUI 地址必须是 HTTP(S) URL")
+        updates["comfyui_base_url"] = comfyui_base_url
+    if body.comfyui_auth_token is not None:
+        updates["comfyui_auth_token"] = body.comfyui_auth_token.strip()
+    if (
+        body.comfyui_min_shot_seconds is not None
+        or body.comfyui_max_shot_seconds is not None
+    ):
+        current_min, current_max = effective_comfyui_shot_seconds(saved_cfg)
+        next_min = (
+            body.comfyui_min_shot_seconds
+            if body.comfyui_min_shot_seconds is not None
+            else current_min
+        )
+        next_max = (
+            body.comfyui_max_shot_seconds
+            if body.comfyui_max_shot_seconds is not None
+            else current_max
+        )
+        if next_min > next_max:
+            raise HTTPException(422, "单镜下限不能大于上限")
+        if body.comfyui_min_shot_seconds is not None:
+            updates["comfyui_min_shot_seconds"] = str(next_min)
+        if body.comfyui_max_shot_seconds is not None:
+            updates["comfyui_max_shot_seconds"] = str(next_max)
     if body.transcription_provider is not None:
         transcription_provider = body.transcription_provider.strip()
         if transcription_provider not in {
@@ -829,6 +896,40 @@ async def test_heygen():
         error = str(exc)
     safe_error = redact_secret_text(error).replace(api_key, "***")[:500]
     return {"ok": False, "error": safe_error}
+
+
+@router.post("/comfyui/test")
+async def test_comfyui():
+    cfg = await get_config()
+    base_url = effective_comfyui_base_url(cfg)
+    auth_token = effective_comfyui_auth_token(cfg)
+    if not base_url:
+        return {"ok": False, "error": "请先填写 ComfyUI 地址"}
+    headers = {}
+    if auth_token:
+        headers["Authorization"] = f"Bearer {auth_token}"
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            response = await client.get(
+                f"{base_url}/system_stats",
+                headers=headers,
+            )
+        if response.status_code in {401, 403}:
+            return {"ok": False, "error": "ComfyUI 鉴权失败"}
+        response.raise_for_status()
+        try:
+            response.json()
+        except ValueError:
+            return {"ok": False, "error": "ComfyUI 响应异常"}
+        return {"ok": True, "error": ""}
+    except httpx.HTTPStatusError as exc:
+        error = f"ComfyUI HTTP {exc.response.status_code}: {exc.response.text[:200]}"
+    except Exception as exc:
+        error = str(exc)
+    safe_error = redact_secret_text(error)
+    if auth_token:
+        safe_error = safe_error.replace(auth_token, "***")
+    return {"ok": False, "error": safe_error[:500]}
 
 
 @router.get(

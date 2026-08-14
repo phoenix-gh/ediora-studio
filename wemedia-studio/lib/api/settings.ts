@@ -53,6 +53,11 @@ export interface AppSettings {
   prompt_generation_history_limit: number
   heygen_api_key_set: boolean
   heygen_api_key_preview: string
+  comfyui_base_url: string
+  comfyui_auth_token_set: boolean
+  comfyui_auth_token_preview: string
+  comfyui_min_shot_seconds: number
+  comfyui_max_shot_seconds: number
   transcription_provider: TranscriptionProvider
   transcription_model: string
   transcription_base_url: string
@@ -134,6 +139,10 @@ export interface SettingsUpdate {
   image_base_url?: string
   prompt_generation_history_limit?: number
   heygen_api_key?: string
+  comfyui_base_url?: string
+  comfyui_auth_token?: string
+  comfyui_min_shot_seconds?: number
+  comfyui_max_shot_seconds?: number
   transcription_provider?: TranscriptionProvider
   transcription_model?: string
   transcription_base_url?: string
@@ -240,6 +249,10 @@ export async function testLLM(): Promise<{ ok: boolean; response?: string; error
 
 export async function testHeyGen(): Promise<{ ok: boolean; error: string }> {
   return apiFetch('/settings/heygen/test', { method: 'POST' })
+}
+
+export async function testComfyUI(): Promise<{ ok: boolean; error: string }> {
+  return apiFetch('/settings/comfyui/test', { method: 'POST' })
 }
 
 export async function testTranscription(): Promise<{ ok: boolean; error: string }> {

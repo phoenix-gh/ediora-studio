@@ -18,6 +18,10 @@ DEFAULTS: dict[str, str] = {
     "image_model": "gpt-image-1",
     "prompt_generation_history_limit": "3",
     "heygen_api_key": "",
+    "comfyui_base_url": "",
+    "comfyui_auth_token": "",
+    "comfyui_min_shot_seconds": "4",
+    "comfyui_max_shot_seconds": "5",
     "transcription_provider": "local-whisper",
     "transcription_model": "Systran/faster-whisper-large-v3",
     "transcription_base_url": "https://api.openai.com/v1",
@@ -135,6 +139,34 @@ def effective_heygen_api_key(cfg: dict[str, str]) -> str:
         cfg.get("heygen_api_key", "").strip()
         or os.getenv("HEYGEN_API_KEY", "").strip()
     )
+
+
+def effective_comfyui_base_url(cfg: dict[str, str]) -> str:
+    return (
+        cfg.get("comfyui_base_url", "").strip().rstrip("/")
+        or os.getenv("COMFYUI_BASE_URL", "").strip().rstrip("/")
+    )
+
+
+def effective_comfyui_auth_token(cfg: dict[str, str]) -> str:
+    return (
+        cfg.get("comfyui_auth_token", "").strip()
+        or os.getenv("COMFYUI_AUTH_TOKEN", "").strip()
+    )
+
+
+def effective_comfyui_shot_seconds(cfg: dict[str, str]) -> tuple[int, int]:
+    try:
+        minimum = int(cfg.get("comfyui_min_shot_seconds", "4"))
+    except (TypeError, ValueError):
+        minimum = 4
+    try:
+        maximum = int(cfg.get("comfyui_max_shot_seconds", "5"))
+    except (TypeError, ValueError):
+        maximum = 5
+    minimum = min(max(minimum, 1), 15)
+    maximum = min(max(maximum, 1), 15)
+    return minimum, maximum
 
 
 # ── Cache ─────────────────────────────────────────────────────────────────────

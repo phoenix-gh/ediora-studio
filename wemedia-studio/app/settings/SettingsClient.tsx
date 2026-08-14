@@ -16,6 +16,7 @@ import { BlogSection }     from './sections/BlogSection'
 import { WebSearchSection } from './sections/WebSearchSection'
 import { WebFetchSection } from './sections/WebFetchSection'
 import { HeyGenSection } from './sections/HeyGenSection'
+import { ComfyUISection } from './sections/ComfyUISection'
 import { TranscriptionSection } from './sections/TranscriptionSection'
 import { SpeechSection } from './sections/SpeechSection'
 import { YouTubeSection } from './sections/YouTubeSection'
@@ -23,7 +24,7 @@ import { AppearanceSection } from './sections/AppearanceSection'
 import { TextVideoSection } from './sections/TextVideoSection'
 import { SkillsSection } from './sections/SkillsSection'
 
-type SectionId = 'ai' | 'transcription' | 'speech' | 'youtube' | 'heygen' | 'text-video' | 'skills' | 'collect' | 'github' | 'x' | 'arxiv' | 'publish' | 'blog' | 'web-search' | 'web-fetch' | 'appearance' | 'logs'
+type SectionId = 'ai' | 'transcription' | 'speech' | 'youtube' | 'heygen' | 'comfyui' | 'text-video' | 'skills' | 'collect' | 'github' | 'x' | 'arxiv' | 'publish' | 'blog' | 'web-search' | 'web-fetch' | 'appearance' | 'logs'
 
 const NAV: { id: SectionId; label: string; icon: React.ElementType; desc: string }[] = [
   { id: 'ai',       label: 'AI 大模型',   icon: Brain,     desc: '供应商 · API Key · 模型' },
@@ -31,6 +32,7 @@ const NAV: { id: SectionId; label: string; icon: React.ElementType; desc: string
   { id: 'speech', label: '语音合成', icon: AudioLines, desc: 'MiMo · 音色 · TTS 密钥' },
   { id: 'youtube',  label: 'YouTube',     icon: Video, desc: 'Cookie · 字幕下载稳定性' },
   { id: 'heygen',   label: 'HeyGen',      icon: Video,     desc: '数字人 · 声音克隆 · 视频生成' },
+  { id: 'comfyui',  label: 'ComfyUI',     icon: Clapperboard, desc: 'H3 分镜 · 本机出片 · 单镜上限' },
   { id: 'text-video', label: '文字视频', icon: Clapperboard, desc: '模板 · 品牌 · 默认视觉' },
   { id: 'skills', label: '技能管理', icon: Puzzle, desc: '启用 · 上传 · 删除自定义 Skill' },
   { id: 'collect',  label: '数据采集',    icon: Rss,       desc: 'RSSHub · 采集间隔' },
@@ -51,6 +53,7 @@ const SECTION_TITLE: Record<SectionId, string> = {
   speech: '语音合成',
   youtube:  'YouTube',
   heygen:   'HeyGen',
+  comfyui:  'ComfyUI',
   'text-video': '文字视频',
   skills:    '技能管理',
   collect:  '数据采集',
@@ -121,6 +124,7 @@ export function SettingsClient({ initialSettings }: { initialSettings: AppSettin
             {active === 'speech' && <SpeechSection settings={settings} onSaved={setSettings} />}
             {active === 'youtube'  && <YouTubeSection settings={settings} onSaved={setSettings} />}
             {active === 'heygen'   && <HeyGenSection  settings={settings} onSaved={setSettings} />}
+            {active === 'comfyui'  && <ComfyUISection settings={settings} onSaved={setSettings} />}
             {active === 'text-video' && <TextVideoSection settings={settings} onSaved={setSettings} />}
             {active === 'skills' && <SkillsSection />}
             {active === 'collect'  && <CollectSection settings={settings} onSaved={setSettings} />}
