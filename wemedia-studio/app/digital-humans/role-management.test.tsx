@@ -180,6 +180,7 @@ describe('digital-human role creation', () => {
     expect(screen.getByRole('button', { name: '正面形象照' })).toBeTruthy()
     expect(screen.getByRole('button', { name: '声音样本' })).toBeTruthy()
     expect(screen.getByRole('button', { name: '明亮演播室' })).toBeTruthy()
+    expect(screen.queryByAltText('林晓 定妆图')).toBeNull()
     fireEvent.change(screen.getByLabelText('角色名称'), {
       target: { value: '林晓（新版）' },
     })
@@ -194,5 +195,49 @@ describe('digital-human role creation', () => {
         default_environment_asset_id: assets.environment.id,
       })
     })
+  })
+
+  it('shows the composed look after ComfyUI setup finishes', () => {
+    const look = {
+      ...assets.portrait,
+      id: 9,
+      title: '林晓 定妆图',
+      url: '/api/uploads/look.jpg',
+    }
+    render(
+      <RoleEditorDialog
+        open
+        role={{
+          id: 8,
+          name: '林晓',
+          status: 'ready',
+          provider: 'comfyui',
+          portrait_asset_id: assets.portrait.id,
+          voice_sample_asset_id: assets.voice.id,
+          default_environment_asset_id: assets.environment.id,
+          look_asset_id: look.id,
+          portrait: assets.portrait as CreativeAsset,
+          voice_sample: assets.voice as CreativeAsset,
+          default_environment: assets.environment as CreativeAsset,
+          look: look as CreativeAsset,
+          heygen_avatar_group_id: '',
+          heygen_avatar_id: '',
+          heygen_voice_id: '',
+          provider_state: {},
+          setup_job_id: 10,
+          error: '',
+          archived_at: null,
+          created_at: '',
+          updated_at: '',
+        }}
+        onClose={vi.fn()}
+        onCreated={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByAltText('林晓 定妆图')).toHaveAttribute(
+      'src',
+      '/api/uploads/look.jpg',
+    )
   })
 })

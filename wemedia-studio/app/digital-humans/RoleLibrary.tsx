@@ -91,10 +91,10 @@ export function RoleLibrary({
     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
       {roles.map(role => (
         <Card key={role.id}>
-          {role.portrait ? (
+          {role.look || role.portrait ? (
             <img
-              src={creativeAssetUrl(role.portrait.url)}
-              alt={role.name}
+              src={creativeAssetUrl((role.look ?? role.portrait)!.url)}
+              alt={role.look ? `${role.name} 定妆图` : role.name}
               className="aspect-[4/3] w-full object-cover"
             />
           ) : null}

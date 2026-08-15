@@ -20,6 +20,7 @@ import {
 } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import {
+  creativeAssetUrl,
   listCreativeAssets,
   uploadCreativeAsset,
   type CreativeAsset,
@@ -279,6 +280,24 @@ export function RoleEditorDialog({
                 {environment?.title || '选择默认环境'}
               </Button>
             </Field>
+            {role?.look ? (
+              <Field>
+                <FieldLabel>定妆图</FieldLabel>
+                <img
+                  src={creativeAssetUrl(role.look.url)}
+                  alt={`${role.name} 定妆图`}
+                  className="aspect-video w-full rounded-lg object-cover"
+                />
+                <FieldDescription>
+                  由人物形象和环境自动合成，生成口播时作为参考图。
+                </FieldDescription>
+              </Field>
+            ) : role?.provider === 'comfyui' && role.status === 'processing' ? (
+              <Field>
+                <FieldLabel>定妆图</FieldLabel>
+                <FieldDescription>正在合成，完成后会显示在这里。</FieldDescription>
+              </Field>
+            ) : null}
             <Button
               onClick={handleSave}
               disabled={
