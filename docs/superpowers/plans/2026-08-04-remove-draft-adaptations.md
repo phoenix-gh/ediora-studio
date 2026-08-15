@@ -362,10 +362,10 @@ git commit -m "refactor: flatten draft backend contracts"
 ### Task 3: Convert frontend types and bulk runner to independent drafts
 
 **Files:**
-- Modify: `wemedia-studio/lib/api/drafts.ts`
-- Create: `wemedia-studio/lib/api/drafts.test.ts`
-- Modify: `wemedia-studio/app/drafts/draft-bulk-operations.ts`
-- Modify: `wemedia-studio/app/drafts/draft-bulk-operations.test.ts`
+- Modify: `web/lib/api/drafts.ts`
+- Create: `web/lib/api/drafts.test.ts`
+- Modify: `web/app/drafts/draft-bulk-operations.ts`
+- Modify: `web/app/drafts/draft-bulk-operations.test.ts`
 
 **Interfaces:**
 - Produces: `draftTypeInfo(value: string)` that never maps unknown values to `article`.
@@ -395,7 +395,7 @@ Delete tests for `articleDraftForGroup` and `deleteDraftGroup`.
 - [ ] **Step 2: Run tests and verify RED**
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm vitest run lib/api/drafts.test.ts \
   app/drafts/draft-bulk-operations.test.ts
 ```
@@ -476,7 +476,7 @@ Store `draftId: draft.id` and remove `DraftGroup`, `articleDraftForGroup`, and `
 - [ ] **Step 5: Run tests and verify GREEN**
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm vitest run lib/api/drafts.test.ts \
   app/drafts/draft-bulk-operations.test.ts
 ```
@@ -486,9 +486,9 @@ Expected: all selected tests PASS.
 - [ ] **Step 6: Commit Task 3**
 
 ```bash
-git add wemedia-studio/lib/api/drafts.ts wemedia-studio/lib/api/drafts.test.ts \
-  wemedia-studio/app/drafts/draft-bulk-operations.ts \
-  wemedia-studio/app/drafts/draft-bulk-operations.test.ts
+git add web/lib/api/drafts.ts web/lib/api/drafts.test.ts \
+  web/app/drafts/draft-bulk-operations.ts \
+  web/app/drafts/draft-bulk-operations.test.ts
 git commit -m "refactor: make draft bulk operations flat"
 ```
 
@@ -497,10 +497,10 @@ git commit -m "refactor: make draft bulk operations flat"
 ### Task 4: Flatten the drafts UI and remove adaptation controls
 
 **Files:**
-- Modify: `wemedia-studio/app/drafts/DraftsClient.tsx`
-- Modify: `wemedia-studio/app/drafts/DraftsClient.test.tsx`
-- Modify: `wemedia-studio/app/drafts/BulkImageActionDialog.tsx`
-- Modify: `wemedia-studio/app/drafts/BulkImageActionDialog.test.tsx`
+- Modify: `web/app/drafts/DraftsClient.tsx`
+- Modify: `web/app/drafts/DraftsClient.test.tsx`
+- Modify: `web/app/drafts/BulkImageActionDialog.tsx`
+- Modify: `web/app/drafts/BulkImageActionDialog.test.tsx`
 
 **Interfaces:**
 - Consumes: `draftTypeInfo` and flat `runBulkOperations` from Task 3.
@@ -530,7 +530,7 @@ Add bulk cover and illustration tests asserting direct calls for both IDs. Chang
 - [ ] **Step 2: Run UI tests and verify RED**
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm vitest run app/drafts/DraftsClient.test.tsx \
   app/drafts/BulkImageActionDialog.test.tsx
 ```
@@ -619,7 +619,7 @@ Keep account selection, style overrides, image limits, progress, and failure det
 - [ ] **Step 7: Run focused tests and verify GREEN**
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm vitest run app/drafts/draft-bulk-operations.test.ts \
   app/drafts/BulkImageActionDialog.test.tsx \
   app/drafts/DraftsClient.test.tsx lib/api/drafts.test.ts
@@ -635,10 +635,10 @@ rg -n "适配平台|linked_draft_id|articleDraftForGroup|DraftGroup|平台版本
 - [ ] **Step 8: Commit Task 4**
 
 ```bash
-git add wemedia-studio/app/drafts/DraftsClient.tsx \
-  wemedia-studio/app/drafts/DraftsClient.test.tsx \
-  wemedia-studio/app/drafts/BulkImageActionDialog.tsx \
-  wemedia-studio/app/drafts/BulkImageActionDialog.test.tsx
+git add web/app/drafts/DraftsClient.tsx \
+  web/app/drafts/DraftsClient.test.tsx \
+  web/app/drafts/BulkImageActionDialog.tsx \
+  web/app/drafts/BulkImageActionDialog.test.tsx
 git commit -m "refactor: remove draft adaptation UI"
 ```
 
@@ -671,7 +671,7 @@ Expected: all tests PASS; never report an interrupted or blank run as green.
 - [ ] **Step 2: Run frontend verification**
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm lint
 pnpm test
 pnpm build
@@ -684,7 +684,7 @@ Expected: lint exits zero, all Vitest files pass, and the production build compl
 ```bash
 cd ..
 rg -n "linked_draft_id|root_draft_id|适配平台|同步主版本内容" \
-  backend wemedia-studio
+  backend web
 ```
 
 Expected: no application-code matches; historical docs may retain explanatory references.

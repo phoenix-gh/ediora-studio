@@ -93,11 +93,11 @@
 ### Task 3: Replace the subscription UI control
 
 **Files:**
-- Modify: `wemedia-studio/lib/api/x.ts`
-- Modify: `wemedia-studio/app/x/XSubscriptionRow.tsx`
-- Modify: `wemedia-studio/app/x/XSubscriptionRow.test.tsx`
-- Modify: `wemedia-studio/app/x/XClient.tsx` if it references the old fields
-- Modify: `wemedia-studio/app/x-responses/x-responses-layout.test.tsx` to remove old wording assertions
+- Modify: `web/lib/api/x.ts`
+- Modify: `web/app/x/XSubscriptionRow.tsx`
+- Modify: `web/app/x/XSubscriptionRow.test.tsx`
+- Modify: `web/app/x/XClient.tsx` if it references the old fields
+- Modify: `web/app/x-responses/x-responses-layout.test.tsx` to remove old wording assertions
 
 **Interfaces:**
 - The row renders one action labeled `开启情报分析` or `关闭情报分析` based on `intelligence_enabled`.
@@ -131,7 +131,7 @@
 **Files:**
 - Modify: `backend/main.py` to remove active `x_responses` router registration if no compatibility route remains
 - Modify/delete: `backend/routers/x_responses.py`, `backend/x_response_service.py`, `backend/x_response_links.py` and their active tests according to imports
-- Modify/delete: `wemedia-studio/lib/ai/x-response-job.ts`, `wemedia-studio/lib/api/x-responses.ts`, and old X response tests
+- Modify/delete: `web/lib/ai/x-response-job.ts`, `web/lib/api/x-responses.ts`, and old X response tests
 - Keep: unified `/api/responses` routes and historical database migration functions needed for existing installations
 - Test: `backend/tests/test_x_notify_scout.py`, `backend/tests/test_x_responses_router.py`, `backend/tests/test_x_response_end_to_end.py`, related frontend tests
 
@@ -175,7 +175,7 @@
 
 - [ ] **Step 3: Search for retired production references**
 
-  Run: `rg -n "notify_new_posts|notify_enabled_at|即时响应|dispatch_response_posts" backend wemedia-studio --glob '!**/*.test.*' --glob '!**/node_modules/**'`
+  Run: `rg -n "notify_new_posts|notify_enabled_at|即时响应|dispatch_response_posts" backend web --glob '!**/*.test.*' --glob '!**/node_modules/**'`
 
   Expected: no active production references; historical migration code and explicitly retained compatibility documentation must be reviewed individually.
 

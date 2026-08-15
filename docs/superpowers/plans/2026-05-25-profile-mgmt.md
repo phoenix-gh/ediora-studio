@@ -4,7 +4,7 @@
 
 **Goal:** Add a `/profiles` page that lets the user list all Hermes profiles, edit each profile's `SOUL.md`, and toggle its built-in toolsets and MCP servers. The currently-active `default` profile is read-only. Skills are listed read-only in Phase 1.
 
-**Architecture:** New FastAPI router `backend/routers/profiles.py` talks to Hermes by (a) reading `~/.hermes/profiles/<name>/{SOUL.md,config.yaml}` for state, (b) shelling out to `HERMES_HOME=<profile-dir> hermes …` for any state mutation that has a non-interactive CLI (tools/MCP). `SOUL.md` is the one file we read/write directly. We never write `config.yaml` ourselves — the official CLI does that. A new top-level Next.js page `wemedia-studio/app/profiles/` provides the UI: left-side profile list, right-side detail panel with three tabs (SOUL / Tools / Skills).
+**Architecture:** New FastAPI router `backend/routers/profiles.py` talks to Hermes by (a) reading `~/.hermes/profiles/<name>/{SOUL.md,config.yaml}` for state, (b) shelling out to `HERMES_HOME=<profile-dir> hermes …` for any state mutation that has a non-interactive CLI (tools/MCP). `SOUL.md` is the one file we read/write directly. We never write `config.yaml` ourselves — the official CLI does that. A new top-level Next.js page `web/app/profiles/` provides the UI: left-side profile list, right-side detail panel with three tabs (SOUL / Tools / Skills).
 
 **Tech Stack:** FastAPI (Python 3.11, conda env `wems`), PyYAML for read-only config parsing, `subprocess` for `hermes` CLI calls, Next.js App Router (non-standard — consult `node_modules/next/dist/docs/` before editing routing), Tailwind + shadcn/ui (`Button`, `Input`, `Textarea`, `Switch`, `Tabs`).
 
@@ -14,7 +14,7 @@
 
 **Conventions reminders** (read before coding):
 - Every backend command must run inside `conda run -n wems …` (see `memory/project_env.md`).
-- Frontend uses a *forked* Next.js with breaking changes — read `wemedia-studio/node_modules/next/dist/docs/` before adding routes (see `wemedia-studio/AGENTS.md`).
+- Frontend uses a *forked* Next.js with breaking changes — read `web/node_modules/next/dist/docs/` before adding routes (see `web/AGENTS.md`).
 
 ---
 
@@ -28,15 +28,15 @@
 - `backend/main.py:7` — add `profiles` to the routers import list and `app.include_router(profiles.router, prefix="/api")`.
 
 **Frontend (new):**
-- `wemedia-studio/app/profiles/page.tsx` — server component, just renders `<ProfilesClient />`.
-- `wemedia-studio/app/profiles/ProfilesClient.tsx` — main client component: profile list + detail panel.
-- `wemedia-studio/app/profiles/SoulEditor.tsx` — textarea + save button for `SOUL.md`.
-- `wemedia-studio/app/profiles/ToolsPanel.tsx` — toolsets + MCP servers as Switch rows.
-- `wemedia-studio/app/profiles/SkillsPanel.tsx` — read-only skill list grouped by category, with search.
-- `wemedia-studio/lib/api/profiles.ts` — typed fetch wrappers.
+- `web/app/profiles/page.tsx` — server component, just renders `<ProfilesClient />`.
+- `web/app/profiles/ProfilesClient.tsx` — main client component: profile list + detail panel.
+- `web/app/profiles/SoulEditor.tsx` — textarea + save button for `SOUL.md`.
+- `web/app/profiles/ToolsPanel.tsx` — toolsets + MCP servers as Switch rows.
+- `web/app/profiles/SkillsPanel.tsx` — read-only skill list grouped by category, with search.
+- `web/lib/api/profiles.ts` — typed fetch wrappers.
 
 **Frontend (modify):**
-- `wemedia-studio/components/features/Sidebar.tsx:23` (the "今日工作台" group): insert `{ href: '/profiles', label: 'Profile', icon: UserCog }` after `/studio`. Add `UserCog` to the lucide-react import.
+- `web/components/features/Sidebar.tsx:23` (the "今日工作台" group): insert `{ href: '/profiles', label: 'Profile', icon: UserCog }` after `/studio`. Add `UserCog` to the lucide-react import.
 
 ---
 
@@ -104,7 +104,7 @@ def _fixture_home(tmp_path: Path) -> Path:
         "model:\n  default: deepseek-v4-flash\n"
         "toolsets:\n  - hermes-cli\n"
         "agent:\n  disabled_toolsets: [browser, web]\n"
-        "mcp_servers:\n  wemedia-studio:\n    url: http://localhost:8000/mcp\n"
+        "mcp_servers:\n  web:\n    url: http://localhost:8000/mcp\n"
         "skills:\n  disabled: []\n"
     )
     (home / "SOUL.md").write_text("default soul\n")
@@ -133,7 +133,7 @@ def test_get_profile_detail_parses_toolsets_and_mcp(tmp_path, monkeypatch):
     skills_ts = next(t for t in detail["toolsets"] if t["name"] == "skills")
     assert skills_ts["enabled"] is True
     mcp = detail["mcp_servers"]
-    assert mcp[0]["name"] == "wemedia-studio"
+    assert mcp[0]["name"] == "web"
     assert mcp[0]["enabled"] is True
 
 def test_safe_name_rejects_traversal():
@@ -530,13 +530,13 @@ git commit -m "feat(profiles): add /api/profiles router (list, detail, soul, too
 ## Task 3: Frontend API client + sidebar entry
 
 **Files:**
-- Create: `wemedia-studio/lib/api/profiles.ts`
-- Modify: `wemedia-studio/components/features/Sidebar.tsx` (imports + first group)
+- Create: `web/lib/api/profiles.ts`
+- Modify: `web/components/features/Sidebar.tsx` (imports + first group)
 
 - [ ] **Step 1: Add the API client**
 
 ```ts
-// wemedia-studio/lib/api/profiles.ts
+// web/lib/api/profiles.ts
 import { apiFetch } from './fetcher' // verify exact helper name in lib/api/
 
 export interface ProfileSummary {
@@ -588,7 +588,7 @@ Verify the actual fetcher helper name by reading one existing `lib/api/*.ts` (e.
 
 - [ ] **Step 2: Add sidebar entry**
 
-Modify `wemedia-studio/components/features/Sidebar.tsx`:
+Modify `web/components/features/Sidebar.tsx`:
 - Add `UserCog` to the lucide-react import line at the top.
 - Inside the first sidebar group (around line 23, the one starting with `今日工作台`), insert immediately after the `/studio` entry:
   ```ts
@@ -597,13 +597,13 @@ Modify `wemedia-studio/components/features/Sidebar.tsx`:
 
 - [ ] **Step 3: Lint-check**
 
-Run: `cd wemedia-studio && npm run lint -- --max-warnings=0` (or the project's standard lint command — check `package.json`).
+Run: `cd web && npm run lint -- --max-warnings=0` (or the project's standard lint command — check `package.json`).
 Expected: no errors related to new files.
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add wemedia-studio/lib/api/profiles.ts wemedia-studio/components/features/Sidebar.tsx
+git add web/lib/api/profiles.ts web/components/features/Sidebar.tsx
 git commit -m "feat(profiles): add profiles API client + sidebar entry"
 ```
 
@@ -612,16 +612,16 @@ git commit -m "feat(profiles): add profiles API client + sidebar entry"
 ## Task 4: Frontend page — profile list + SOUL editor
 
 **Files:**
-- Create: `wemedia-studio/app/profiles/page.tsx`
-- Create: `wemedia-studio/app/profiles/ProfilesClient.tsx`
-- Create: `wemedia-studio/app/profiles/SoulEditor.tsx`
+- Create: `web/app/profiles/page.tsx`
+- Create: `web/app/profiles/ProfilesClient.tsx`
+- Create: `web/app/profiles/SoulEditor.tsx`
 
-**Pre-step:** Read `wemedia-studio/node_modules/next/dist/docs/` for this fork's routing conventions (per `wemedia-studio/AGENTS.md`). Confirm whether `page.tsx` requires `'use server'` or any non-standard directive.
+**Pre-step:** Read `web/node_modules/next/dist/docs/` for this fork's routing conventions (per `web/AGENTS.md`). Confirm whether `page.tsx` requires `'use server'` or any non-standard directive.
 
 - [ ] **Step 1: Server page shell**
 
 ```tsx
-// wemedia-studio/app/profiles/page.tsx
+// web/app/profiles/page.tsx
 import { ProfilesClient } from './ProfilesClient'
 
 export default function Page() {
@@ -632,7 +632,7 @@ export default function Page() {
 - [ ] **Step 2: Client container with list + detail layout**
 
 ```tsx
-// wemedia-studio/app/profiles/ProfilesClient.tsx
+// web/app/profiles/ProfilesClient.tsx
 'use client'
 
 import { useEffect, useState } from 'react'
@@ -714,7 +714,7 @@ export function ProfilesClient() {
 - [ ] **Step 3: SOUL editor component**
 
 ```tsx
-// wemedia-studio/app/profiles/SoulEditor.tsx
+// web/app/profiles/SoulEditor.tsx
 'use client'
 
 import { useEffect, useState } from 'react'
@@ -768,13 +768,13 @@ export function SoulEditor({ profile, initial, readonly, onSaved }: Props) {
 
 - [ ] **Step 4: Manual smoke**
 
-Run: `cd wemedia-studio && npm run dev` in one terminal and `conda run -n wems uvicorn main:app --reload --app-dir backend` in another.
+Run: `cd web && npm run dev` in one terminal and `conda run -n wems uvicorn main:app --reload --app-dir backend` in another.
 Visit `http://localhost:3000/profiles`. Expected: profile list on the left (`default` greyed/readonly hint, plus `wms_*`); selecting `wms_writer` shows the SOUL editor with current content. Edit + save → toast success → re-select → content persists. Try saving on `default` → button disabled.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add wemedia-studio/app/profiles/
+git add web/app/profiles/
 git commit -m "feat(profiles): profile list page with SOUL editor"
 ```
 
@@ -783,8 +783,8 @@ git commit -m "feat(profiles): profile list page with SOUL editor"
 ## Task 5: Tools panel — toolset + MCP toggles
 
 **Files:**
-- Create: `wemedia-studio/app/profiles/ToolsPanel.tsx`
-- Modify: `wemedia-studio/app/profiles/ProfilesClient.tsx` (mount the panel)
+- Create: `web/app/profiles/ToolsPanel.tsx`
+- Modify: `web/app/profiles/ProfilesClient.tsx` (mount the panel)
 
 **Pre-step:** Verify `hermes mcp enable/disable <server>` exists. If not, fall back path: read-only MCP list with a UI hint that toggling needs `hermes mcp` CLI. (The plan ships disabling capability either way — only the *channel* changes.)
 
@@ -795,7 +795,7 @@ Run: `source ~/.zshrc && hermes mcp --help` and confirm an `enable`/`disable` su
 - [ ] **Step 1: Build ToolsPanel**
 
 ```tsx
-// wemedia-studio/app/profiles/ToolsPanel.tsx
+// web/app/profiles/ToolsPanel.tsx
 'use client'
 
 import { useState } from 'react'
@@ -893,12 +893,12 @@ In `ProfilesClient.tsx`:
 
 - [ ] **Step 3: Manual test**
 
-Start backend + frontend. On `wms_writer`, flip `web` toolset → confirm UI reflects, then verify on disk: `grep -A3 "disabled_toolsets" ~/.hermes/profiles/wms_writer/config.yaml`. Flip the `wemedia-studio` MCP → verify either via `hermes mcp list` or by inspecting config.yaml. Flip back. Try toggling on `default` profile → switches disabled.
+Start backend + frontend. On `wms_writer`, flip `web` toolset → confirm UI reflects, then verify on disk: `grep -A3 "disabled_toolsets" ~/.hermes/profiles/wms_writer/config.yaml`. Flip the `web` MCP → verify either via `hermes mcp list` or by inspecting config.yaml. Flip back. Try toggling on `default` profile → switches disabled.
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add wemedia-studio/app/profiles/ToolsPanel.tsx wemedia-studio/app/profiles/ProfilesClient.tsx
+git add web/app/profiles/ToolsPanel.tsx web/app/profiles/ProfilesClient.tsx
 git commit -m "feat(profiles): tools + mcp toggle panel"
 ```
 
@@ -907,13 +907,13 @@ git commit -m "feat(profiles): tools + mcp toggle panel"
 ## Task 6: Skills panel — read-only listing with grouping + search
 
 **Files:**
-- Create: `wemedia-studio/app/profiles/SkillsPanel.tsx`
-- Modify: `wemedia-studio/app/profiles/ProfilesClient.tsx`
+- Create: `web/app/profiles/SkillsPanel.tsx`
+- Modify: `web/app/profiles/ProfilesClient.tsx`
 
 - [ ] **Step 1: Build SkillsPanel**
 
 ```tsx
-// wemedia-studio/app/profiles/SkillsPanel.tsx
+// web/app/profiles/SkillsPanel.tsx
 'use client'
 
 import { useMemo, useState } from 'react'
@@ -981,7 +981,7 @@ Open `wms_writer` → Skills tab. Should see ~111 skills grouped by category (`a
 - [ ] **Step 4: Commit**
 
 ```bash
-git add wemedia-studio/app/profiles/SkillsPanel.tsx wemedia-studio/app/profiles/ProfilesClient.tsx
+git add web/app/profiles/SkillsPanel.tsx web/app/profiles/ProfilesClient.tsx
 git commit -m "feat(profiles): read-only skills listing with search + category grouping"
 ```
 
@@ -1001,18 +1001,18 @@ With backend + frontend running:
 2. Select `default` → SOUL textarea readonly, save button disabled, switches disabled.
 3. Select `wms_writer` → edit a line in SOUL, save, reload page, content persists.
 4. Toggle `web` toolset on → off → verify with `HERMES_HOME=~/.hermes/profiles/wms_writer hermes tools list | grep web`.
-5. Toggle MCP server `wemedia-studio` and revert.
+5. Toggle MCP server `web` and revert.
 6. Skills tab: searches and groupings work, count matches `hermes skills list | wc -l`.
 
 - [ ] **Step 3: Update memory index**
 
-Add one line to `/home/violet/.claude/projects/-workspace-projects-WeMediaStudio/memory/MEMORY.md`:
+Add one line to `/home/violet/.claude/projects/-workspace-projects-Ediora/memory/MEMORY.md`:
 ```
 - [Profile 管理页面](project_profile_mgmt.md) — /profiles 页面：SOUL 编辑 + toolsets/MCP 开关；skills Phase 1 只读
 ```
 And create `project_profile_mgmt.md` with type `project`, body:
 ```
-/profiles 页面在 wemedia-studio/app/profiles/，后端 backend/routers/profiles.py + backend/profile_manager.py。
+/profiles 页面在 web/app/profiles/，后端 backend/routers/profiles.py + backend/profile_manager.py。
 SOUL 直接读写文件；toolsets/MCP 通过 `HERMES_HOME=<dir> hermes tools|mcp enable/disable` CLI 修改。
 Skills 因 hermes skills 仅有交互式 TUI，Phase 1 只读列表。
 
@@ -1023,7 +1023,7 @@ Skills 因 hermes skills 仅有交互式 TUI，Phase 1 只读列表。
 - [ ] **Step 4: Final commit**
 
 ```bash
-git add /home/violet/.claude/projects/-workspace-projects-WeMediaStudio/memory/
+git add /home/violet/.claude/projects/-workspace-projects-Ediora/memory/
 git commit -m "docs(memory): record /profiles page architecture"
 ```
 

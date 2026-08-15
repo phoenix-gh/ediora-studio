@@ -1,6 +1,6 @@
 # 述策助手
 
-这是一个独立的 Manifest V3 Chrome 插件，用于在已经登录的 X 页面中查看和处理 WeMediaStudio 草稿，并辅助确认 X 原生安排表的最后一次时间选择。当前版本把指挥台放在浏览器 Side Panel，不提供 DevTools 发布命令或 `window.Shuce` 接口。
+这是一个独立的 Manifest V3 Chrome 插件，用于在已经登录的 X 页面中查看和处理 Ediora 草稿，并辅助确认 X 原生安排表的最后一次时间选择。当前版本把指挥台放在浏览器 Side Panel，不提供 DevTools 发布命令或 `window.Shuce` 接口。
 
 插件不读取 Cookie、Token 或其他登录凭据。草稿通过 service worker 访问本机 API，正文只保存在当前页面内存；安排表记忆保存在 X 页面自己的 `localStorage` 中，不写入后端或扩展存储。
 

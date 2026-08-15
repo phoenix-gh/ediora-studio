@@ -68,10 +68,10 @@ This separates structural responsibility from evidence responsibility: the provi
 
 ## Components
 
-- `wemedia-studio/lib/ai/content-job.ts`: make the selection schema fully required and replace compact normalization with strict parsing.
-- `wemedia-studio/lib/ai/content-job.test.ts`: replace compact-response acceptance tests with exact-contract acceptance and malformed/alias rejection tests.
-- `wemedia-studio/lib/ai/daily-creation-job.ts`: add a provider-prompt builder that embeds the generated JSON Schema and explicit output rules, then use it for the select step.
-- `wemedia-studio/lib/ai/daily-creation-job.test.ts`: parse the emitted provider payload and verify its observable `output_schema` and rules at the model boundary.
+- `web/lib/ai/content-job.ts`: make the selection schema fully required and replace compact normalization with strict parsing.
+- `web/lib/ai/content-job.test.ts`: replace compact-response acceptance tests with exact-contract acceptance and malformed/alias rejection tests.
+- `web/lib/ai/daily-creation-job.ts`: add a provider-prompt builder that embeds the generated JSON Schema and explicit output rules, then use it for the select step.
+- `web/lib/ai/daily-creation-job.test.ts`: parse the emitted provider payload and verify its observable `output_schema` and rules at the model boundary.
 
 ## Testing
 

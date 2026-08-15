@@ -18,8 +18,8 @@
 - `backend/routers/studio.py` — 新增 `IllustrateBodyIn` + `POST /studio/illustrate-body`
 - `backend/tests/test_inline_illus.py` — `strip_inline_illus` + pipeline 纯函数单测(新建)
 - `backend/tests/test_studio_illustrate.py` — 端点集成测试(新建,自带 fixture)
-- `wemedia-studio/lib/api/studio.ts` — `IllustrateBodyIn` + `illustrateBody()`
-- `wemedia-studio/components/features/DraftAssetsDialog.tsx` — 「自动配图」按钮 + 面板 + handler
+- `web/lib/api/studio.ts` — `IllustrateBodyIn` + `illustrateBody()`
+- `web/components/features/DraftAssetsDialog.tsx` — 「自动配图」按钮 + 面板 + handler
 
 ---
 
@@ -386,13 +386,13 @@ git commit -m "feat(studio): POST /studio/illustrate-body inline illustration en
 ## Task 4: 前端 API 客户端
 
 **Files:**
-- Modify: `wemedia-studio/lib/api/studio.ts`
+- Modify: `web/lib/api/studio.ts`
 
 > 前端无 JS 测试框架,Task 4-5 用 `tsc --noEmit` + 手动验证。
 
 - [ ] **Step 1: 加 `IllustrateBodyIn` + `illustrateBody()`**
 
-`wemedia-studio/lib/api/studio.ts`,在 `regenerateCover`（以 `}` 结束）之后插入:
+`web/lib/api/studio.ts`,在 `regenerateCover`（以 `}` 结束）之后插入:
 
 ```ts
 export interface IllustrateBodyIn {
@@ -413,13 +413,13 @@ export async function illustrateBody(body: IllustrateBodyIn): Promise<{ task_id:
 
 - [ ] **Step 2: 类型检查**
 
-Run: `cd wemedia-studio && pnpm exec tsc --noEmit`
+Run: `cd web && pnpm exec tsc --noEmit`
 Expected: 无错。
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add wemedia-studio/lib/api/studio.ts
+git add web/lib/api/studio.ts
 git commit -m "feat(ui-api): illustrateBody client"
 ```
 
@@ -428,7 +428,7 @@ git commit -m "feat(ui-api): illustrateBody client"
 ## Task 5: `DraftAssetsDialog` 「自动配图」动作
 
 **Files:**
-- Modify: `wemedia-studio/components/features/DraftAssetsDialog.tsx`
+- Modify: `web/components/features/DraftAssetsDialog.tsx`
 
 镜像现有封面重生成(`regenOpen` / `handleRegen`,`:64-135`、`:227-309`)。
 
@@ -559,14 +559,14 @@ import { regenerateCover, illustrateBody } from "@/lib/api/studio"
 
 - [ ] **Step 6: 类型检查 + 手动验证**
 
-Run: `cd wemedia-studio && pnpm exec tsc --noEmit`
+Run: `cd web && pnpm exec tsc --noEmit`
 Expected: 无错。
 手动:草稿箱打开某长文的图片/素材弹窗 → 点「自动配图」→ 选账号、设最多 3 张、填备注 → 开始配图 → toast 给出 task_id。后端日志看到 `wms_illustrator` 任务 body 含「≤ 3 个」和 wms-illus 壳说明;若该 draft 正文原有 wms-illus 旧块,DB 里已被剥除。
 
 - [ ] **Step 7: Commit**
 
 ```bash
-git add wemedia-studio/components/features/DraftAssetsDialog.tsx
+git add web/components/features/DraftAssetsDialog.tsx
 git commit -m "feat(ui): 自动配图 action in DraftAssetsDialog"
 ```
 
@@ -575,7 +575,7 @@ git commit -m "feat(ui): 自动配图 action in DraftAssetsDialog"
 ## 收尾验证
 
 - [ ] 后端:`cd backend && conda run -n wems pytest tests/test_inline_illus.py tests/test_studio_illustrate.py tests/test_writing_plans.py tests/test_pipeline_template_topic.py -q` → 全绿
-- [ ] 前端类型:`cd wemedia-studio && pnpm exec tsc --noEmit` → 无错
+- [ ] 前端类型:`cd web && pnpm exec tsc --noEmit` → 无错
 - [ ] 端到端手测:对一篇含/不含旧自动插图的长文触发「自动配图」,确认(a)旧块被剥、(b)新任务派出、(c)重复触发不会越堆越多
 
 ## Self-Review 备注（已核对）

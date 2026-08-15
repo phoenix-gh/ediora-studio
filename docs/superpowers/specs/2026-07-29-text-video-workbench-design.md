@@ -21,7 +21,7 @@ Video composition is locked until every speech paragraph is confirmed. Editing n
 Remotion code lives inside the existing Node/React application so the browser preview and final renderer use the same components:
 
 ```text
-wemedia-studio/
+web/
 ├── app/text-video/                 # Workbench route and client UI
 ├── lib/text-video/                 # Contracts and workbench domain helpers
 └── remotion/
@@ -34,7 +34,7 @@ wemedia-studio/
         └── tech-text-v1/           # First template
 ```
 
-A later `video-renderer` Docker service uses the same `wemedia-studio` build context with a renderer-specific Dockerfile. It owns Chromium/FFmpeg rendering and does not add those runtime requirements to the Web container.
+A later `video-renderer` Docker service uses the same `web` build context with a renderer-specific Dockerfile. It owns Chromium/FFmpeg rendering and does not add those runtime requirements to the Web container.
 
 ## Domain boundaries
 

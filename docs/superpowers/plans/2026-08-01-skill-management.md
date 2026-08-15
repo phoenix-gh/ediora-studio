@@ -4,7 +4,7 @@
 
 **Goal:** Add a persistent Skill registry and Settings UI that can enable/disable every Skill, upload validated ZIP packages, and delete uploaded Skills while protecting bundled Skills and rejecting name conflicts.
 
-**Architecture:** A server-only `SkillRegistry` is the single source of truth. It reads bundled Skills from `wemedia-studio/skills/`, uploaded Skills from `wemedia-studio/.runtime/skills/`, and atomically persists enablement in `.runtime/skills-state.json`; chat discovery and automatic image flows consume the registry so disabled Skills are unavailable everywhere. Next Route Handlers expose metadata-only management operations, and a client Settings section drives them.
+**Architecture:** A server-only `SkillRegistry` is the single source of truth. It reads bundled Skills from `web/skills/`, uploaded Skills from `web/.runtime/skills/`, and atomically persists enablement in `.runtime/skills-state.json`; chat discovery and automatic image flows consume the registry so disabled Skills are unavailable everywhere. Next Route Handlers expose metadata-only management operations, and a client Settings section drives them.
 
 **Tech Stack:** Next.js 16 Route Handlers, TypeScript, Node `fs/promises`, `fflate` for dependency-free ZIP parsing, Vitest/Testing Library, ESLint, Playwright smoke checks.
 
@@ -21,26 +21,26 @@
 
 ## File Map
 
-- Create `wemedia-studio/lib/skills/registry.ts`: server-only registry types, discovery, state persistence, ZIP validation/install, enable/disable/delete operations.
-- Create `wemedia-studio/lib/skills/registry.test.ts`: registry, persistence, security, and rollback tests using temporary fixture directories.
-- Modify `wemedia-studio/lib/ai/discover-skills.ts`: delegate enabled discovery to the registry while preserving the existing public shape.
-- Modify `wemedia-studio/lib/ai/content-job.ts`: resolve Baoyu Skill files through the registry so disabled Skills cannot be loaded and uploaded Skill directories can be resolved safely.
-- Create `wemedia-studio/app/api/skills/route.ts`, `app/api/skills/[name]/route.ts`, and `app/api/skills/upload/route.ts`: metadata list, toggle, delete, and multipart ZIP endpoints.
-- Create `wemedia-studio/app/api/skills/route.test.ts`: Route Handler success/error contract tests.
-- Create `wemedia-studio/lib/api/skills.ts`: typed browser API client for management operations.
-- Create `wemedia-studio/app/settings/sections/SkillsSection.tsx` and its test: list, toggle, upload, source labels, and deletion confirmation.
-- Modify `wemedia-studio/app/settings/SettingsClient.tsx`: add the “技能管理” navigation item and render the section.
-- Modify `wemedia-studio/lib/ai/discover-skills.test.ts` and relevant chat/content-job tests: disabled Skill regressions.
-- Modify `wemedia-studio/package.json`, `wemedia-studio/pnpm-lock.yaml`: add `fflate`.
-- Modify `.gitignore`: ignore `wemedia-studio/.runtime/`.
+- Create `web/lib/skills/registry.ts`: server-only registry types, discovery, state persistence, ZIP validation/install, enable/disable/delete operations.
+- Create `web/lib/skills/registry.test.ts`: registry, persistence, security, and rollback tests using temporary fixture directories.
+- Modify `web/lib/ai/discover-skills.ts`: delegate enabled discovery to the registry while preserving the existing public shape.
+- Modify `web/lib/ai/content-job.ts`: resolve Baoyu Skill files through the registry so disabled Skills cannot be loaded and uploaded Skill directories can be resolved safely.
+- Create `web/app/api/skills/route.ts`, `app/api/skills/[name]/route.ts`, and `app/api/skills/upload/route.ts`: metadata list, toggle, delete, and multipart ZIP endpoints.
+- Create `web/app/api/skills/route.test.ts`: Route Handler success/error contract tests.
+- Create `web/lib/api/skills.ts`: typed browser API client for management operations.
+- Create `web/app/settings/sections/SkillsSection.tsx` and its test: list, toggle, upload, source labels, and deletion confirmation.
+- Modify `web/app/settings/SettingsClient.tsx`: add the “技能管理” navigation item and render the section.
+- Modify `web/lib/ai/discover-skills.test.ts` and relevant chat/content-job tests: disabled Skill regressions.
+- Modify `web/package.json`, `web/pnpm-lock.yaml`: add `fflate`.
+- Modify `.gitignore`: ignore `web/.runtime/`.
 
 ---
 
 ### Task 1: Add the registry contract and bundled-state discovery
 
 **Files:**
-- Create: `wemedia-studio/lib/skills/registry.test.ts`
-- Create: `wemedia-studio/lib/skills/registry.ts`
+- Create: `web/lib/skills/registry.test.ts`
+- Create: `web/lib/skills/registry.ts`
 
 **Interfaces:**
 - `type SkillSource = 'builtin' | 'uploaded'`
@@ -80,7 +80,7 @@ it('does not allow deleting a bundled Skill and allows deleting an uploaded Skil
 
 - [ ] **Step 2: Run the focused test and verify RED**
 
-Run `cd wemedia-studio && pnpm vitest run lib/skills/registry.test.ts`.
+Run `cd web && pnpm vitest run lib/skills/registry.test.ts`.
 Expected: FAIL because `lib/skills/registry.ts` and its exported functions do not exist.
 
 - [ ] **Step 3: Implement the minimal registry and state file**
@@ -89,22 +89,22 @@ Implement frontmatter parsing compatible with the current discovery parser, deri
 
 - [ ] **Step 4: Run registry tests and verify GREEN**
 
-Run `cd wemedia-studio && pnpm vitest run lib/skills/registry.test.ts`.
+Run `cd web && pnpm vitest run lib/skills/registry.test.ts`.
 Expected: all default-enable, persistence, enabled lookup, bundled-protection, and uploaded-delete tests pass.
 
 - [ ] **Step 5: Commit the registry slice**
 
 ```bash
-git add wemedia-studio/lib/skills/registry.ts wemedia-studio/lib/skills/registry.test.ts
+git add web/lib/skills/registry.ts web/lib/skills/registry.test.ts
 git commit -m "feat: add persistent skill registry"
 ```
 
 ### Task 2: Make all existing Skill consumers honor enablement
 
 **Files:**
-- Modify: `wemedia-studio/lib/ai/discover-skills.ts`
-- Modify: `wemedia-studio/lib/ai/content-job.ts`
-- Modify: `wemedia-studio/lib/ai/discover-skills.test.ts`
+- Modify: `web/lib/ai/discover-skills.ts`
+- Modify: `web/lib/ai/content-job.ts`
+- Modify: `web/lib/ai/discover-skills.test.ts`
 - Test/modify: the existing content-job test file covering Baoyu image steps
 
 **Interfaces:** Consume `listEnabledSkills()` and `getEnabledSkill()` from Task 1; preserve `discoverSkills(): Promise<DiscoveredSkill[]>`.
@@ -120,7 +120,7 @@ await expect(loadBaoyuSkillRulesForTest(step)).rejects.toThrow(/unavailable|disa
 
 - [ ] **Step 2: Run tests and verify RED**
 
-Run `cd wemedia-studio && pnpm vitest run lib/ai/discover-skills.test.ts <content-job-test-file>`.
+Run `cd web && pnpm vitest run lib/ai/discover-skills.test.ts <content-job-test-file>`.
 Expected: the disabled discovery test still returns the Skill and the content loader still reads the direct path.
 
 - [ ] **Step 3: Implement registry-backed consumers**
@@ -129,22 +129,22 @@ Replace `discoverSkills` directory scanning with `listEnabledSkills`, mapping on
 
 - [ ] **Step 4: Run focused tests and verify GREEN**
 
-Run `cd wemedia-studio && pnpm vitest run lib/ai/discover-skills.test.ts <content-job-test-file> app/api/chat/route.test.ts`.
+Run `cd web && pnpm vitest run lib/ai/discover-skills.test.ts <content-job-test-file> app/api/chat/route.test.ts`.
 Expected: bundled discovery shape remains unchanged, disabled Skills disappear, selected disabled Skills are rejected, and enabled Baoyu references still load.
 
 - [ ] **Step 5: Commit the consumer integration**
 
 ```bash
-git add wemedia-studio/lib/ai/discover-skills.ts wemedia-studio/lib/ai/discover-skills.test.ts wemedia-studio/lib/ai/content-job.ts <content-job-test-file>
+git add web/lib/ai/discover-skills.ts web/lib/ai/discover-skills.test.ts web/lib/ai/content-job.ts <content-job-test-file>
 git commit -m "feat: enforce skill enablement across ai flows"
 ```
 
 ### Task 3: Add safe ZIP installation with atomic rollback
 
 **Files:**
-- Modify: `wemedia-studio/lib/skills/registry.test.ts`
-- Modify: `wemedia-studio/lib/skills/registry.ts`
-- Modify: `wemedia-studio/package.json`, `wemedia-studio/pnpm-lock.yaml`
+- Modify: `web/lib/skills/registry.test.ts`
+- Modify: `web/lib/skills/registry.ts`
+- Modify: `web/package.json`, `web/pnpm-lock.yaml`
 
 **Interfaces:** `installSkillArchive(buffer)` returns all newly installed metadata and leaves both existing files and state unchanged on any validation failure.
 
@@ -161,33 +161,33 @@ await expect(installSkillArchive(archive)).resolves.toEqual([
 
 - [ ] **Step 2: Run ZIP tests and verify RED**
 
-Run `cd wemedia-studio && pnpm vitest run lib/skills/registry.test.ts -t "archive|ZIP|upload"`.
+Run `cd web && pnpm vitest run lib/skills/registry.test.ts -t "archive|ZIP|upload"`.
 Expected: FAIL because `fflate` is not installed and `installSkillArchive` is not implemented.
 
 - [ ] **Step 3: Add `fflate` and implement validation/install**
 
-Run `cd wemedia-studio && pnpm add fflate`. Parse with `unzipSync(new Uint8Array(buffer))`; reject unsafe path components, directory/symlink entries, unsupported file layout, duplicate names, invalid names (`^[A-Za-z0-9._-]{1,80}$`), archive bytes over 10 MiB, more than 500 files, or expanded bytes over 50 MiB. Stage each Skill in a unique runtime temp directory, copy only regular validated files, verify `SKILL.md`, then rename staged directories into the runtime root and persist all state in one serialized mutation. On conflict or any error, remove only the staging directory and do not mutate existing content.
+Run `cd web && pnpm add fflate`. Parse with `unzipSync(new Uint8Array(buffer))`; reject unsafe path components, directory/symlink entries, unsupported file layout, duplicate names, invalid names (`^[A-Za-z0-9._-]{1,80}$`), archive bytes over 10 MiB, more than 500 files, or expanded bytes over 50 MiB. Stage each Skill in a unique runtime temp directory, copy only regular validated files, verify `SKILL.md`, then rename staged directories into the runtime root and persist all state in one serialized mutation. On conflict or any error, remove only the staging directory and do not mutate existing content.
 
 - [ ] **Step 4: Run ZIP tests and verify GREEN**
 
-Run `cd wemedia-studio && pnpm vitest run lib/skills/registry.test.ts`.
+Run `cd web && pnpm vitest run lib/skills/registry.test.ts`.
 Expected: all valid layouts install, malicious/invalid archives fail with stable error codes, conflicts return `conflict`, and rollback leaves prior state intact.
 
 - [ ] **Step 5: Commit ZIP support**
 
 ```bash
-git add wemedia-studio/lib/skills/registry.ts wemedia-studio/lib/skills/registry.test.ts wemedia-studio/package.json wemedia-studio/pnpm-lock.yaml
+git add web/lib/skills/registry.ts web/lib/skills/registry.test.ts web/package.json web/pnpm-lock.yaml
 git commit -m "feat: safely install uploaded skills"
 ```
 
 ### Task 4: Expose management Route Handlers and typed client API
 
 **Files:**
-- Create: `wemedia-studio/app/api/skills/route.ts`
-- Create: `wemedia-studio/app/api/skills/[name]/route.ts`
-- Create: `wemedia-studio/app/api/skills/upload/route.ts`
-- Create: `wemedia-studio/app/api/skills/route.test.ts`
-- Create: `wemedia-studio/lib/api/skills.ts`
+- Create: `web/app/api/skills/route.ts`
+- Create: `web/app/api/skills/[name]/route.ts`
+- Create: `web/app/api/skills/upload/route.ts`
+- Create: `web/app/api/skills/route.test.ts`
+- Create: `web/lib/api/skills.ts`
 
 **Interfaces:**
 - `GET /api/skills -> ManagedSkill[]`
@@ -202,7 +202,7 @@ Mock/fixture the registry roots and assert GET metadata excludes `instructions`,
 
 - [ ] **Step 2: Run Route Handler tests and verify RED**
 
-Run `cd wemedia-studio && pnpm vitest run app/api/skills/route.test.ts`.
+Run `cd web && pnpm vitest run app/api/skills/route.test.ts`.
 Expected: FAIL because the route modules and client do not exist.
 
 - [ ] **Step 3: Implement handlers and client**
@@ -211,22 +211,22 @@ Use `NextResponse.json`, `request.formData()`, and `file.arrayBuffer()`. Decode 
 
 - [ ] **Step 4: Run Route Handler tests and verify GREEN**
 
-Run `cd wemedia-studio && pnpm vitest run app/api/skills/route.test.ts`.
+Run `cd web && pnpm vitest run app/api/skills/route.test.ts`.
 Expected: all list/toggle/upload/delete status and payload assertions pass.
 
 - [ ] **Step 5: Commit the API slice**
 
 ```bash
-git add wemedia-studio/app/api/skills wemedia-studio/lib/api/skills.ts
+git add web/app/api/skills web/lib/api/skills.ts
 git commit -m "feat: add skill management api"
 ```
 
 ### Task 5: Build the Settings “技能管理” section
 
 **Files:**
-- Create: `wemedia-studio/app/settings/sections/SkillsSection.tsx`
-- Create: `wemedia-studio/app/settings/sections/SkillsSection.test.tsx`
-- Modify: `wemedia-studio/app/settings/SettingsClient.tsx`
+- Create: `web/app/settings/sections/SkillsSection.tsx`
+- Create: `web/app/settings/sections/SkillsSection.test.tsx`
+- Modify: `web/app/settings/SettingsClient.tsx`
 
 **Interfaces:** `SkillsSection` renders management metadata, calls Task 4 client methods, and exposes accessible controls with stable labels/test IDs.
 
@@ -243,7 +243,7 @@ expect(updateSkillEnabled).toHaveBeenCalledWith('Custom', false)
 
 - [ ] **Step 2: Run component tests and verify RED**
 
-Run `cd wemedia-studio && pnpm vitest run app/settings/sections/SkillsSection.test.tsx`.
+Run `cd web && pnpm vitest run app/settings/sections/SkillsSection.test.tsx`.
 Expected: FAIL because `SkillsSection` and its Settings navigation entry do not exist.
 
 - [ ] **Step 3: Implement the section and navigation**
@@ -252,13 +252,13 @@ Use existing `FormSection`, `Switch`, `Button`, and lucide icons. Load on mount,
 
 - [ ] **Step 4: Run component tests and verify GREEN**
 
-Run `cd wemedia-studio && pnpm vitest run app/settings/sections/SkillsSection.test.tsx`.
+Run `cd web && pnpm vitest run app/settings/sections/SkillsSection.test.tsx`.
 Expected: all labels, switch, upload, error, empty-state, and delete-confirmation assertions pass.
 
 - [ ] **Step 5: Commit the Settings UI**
 
 ```bash
-git add wemedia-studio/app/settings/sections/SkillsSection.tsx wemedia-studio/app/settings/sections/SkillsSection.test.tsx wemedia-studio/app/settings/SettingsClient.tsx
+git add web/app/settings/sections/SkillsSection.tsx web/app/settings/sections/SkillsSection.test.tsx web/app/settings/SettingsClient.tsx
 git commit -m "feat: add skill management settings"
 ```
 
@@ -266,7 +266,7 @@ git commit -m "feat: add skill management settings"
 
 **Files:**
 - Modify: `.gitignore`
-- Modify: `wemedia-studio/lib/ai/discover-skills.test.ts`, chat/content-job tests as needed
+- Modify: `web/lib/ai/discover-skills.test.ts`, chat/content-job tests as needed
 - Create/modify: any small route/client regression tests needed to cover restart persistence
 
 - [ ] **Step 1: Add the failing persistence and boundary tests**
@@ -275,12 +275,12 @@ Add a test that writes an uploaded Skill and disabled state, clears the module c
 
 - [ ] **Step 2: Run the tests and verify RED**
 
-Run `cd wemedia-studio && pnpm vitest run lib/skills/registry.test.ts lib/ai/discover-skills.test.ts app/api/chat/route.test.ts <content-job-test-file>`.
+Run `cd web && pnpm vitest run lib/skills/registry.test.ts lib/ai/discover-skills.test.ts app/api/chat/route.test.ts <content-job-test-file>`.
 Expected: at least the persistence/reload and disabled automatic-flow assertions fail before final boundary wiring.
 
 - [ ] **Step 3: Apply ignore rule and minimal boundary fixes**
 
-Add exactly `wemedia-studio/.runtime/` to `.gitignore`; ensure all registry state and uploaded content are under that directory, no route writes to bundled paths, and all consumers use enabled registry lookups. Do not alter unrelated runtime/database files.
+Add exactly `web/.runtime/` to `.gitignore`; ensure all registry state and uploaded content are under that directory, no route writes to bundled paths, and all consumers use enabled registry lookups. Do not alter unrelated runtime/database files.
 
 - [ ] **Step 4: Run the boundary tests and verify GREEN**
 
@@ -289,7 +289,7 @@ Run the same focused Vitest command. Expected: restart persistence, disabled cha
 - [ ] **Step 5: Commit persistence and ignore rules**
 
 ```bash
-git add .gitignore wemedia-studio/lib/skills wemedia-studio/lib/ai wemedia-studio/app/api/chat
+git add .gitignore web/lib/skills web/lib/ai web/app/api/chat
 git commit -m "fix: persist skill management boundaries"
 ```
 
@@ -299,12 +299,12 @@ git commit -m "fix: persist skill management boundaries"
 
 - [ ] **Step 1: Run all frontend tests**
 
-Run `cd wemedia-studio && pnpm test`.
+Run `cd web && pnpm test`.
 Expected: Vitest exits 0 with no failed or skipped required tests.
 
 - [ ] **Step 2: Run lint and production build**
 
-Run `cd wemedia-studio && pnpm lint && pnpm build`.
+Run `cd web && pnpm lint && pnpm build`.
 Expected: ESLint and Next production build both exit 0.
 
 - [ ] **Step 3: Exercise the live Settings page**

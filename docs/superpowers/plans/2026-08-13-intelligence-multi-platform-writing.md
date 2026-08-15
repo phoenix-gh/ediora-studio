@@ -110,8 +110,8 @@ Expected: PASS.
 ### Task 2: Target-aware Agent objective and persistence contract
 
 **Files:**
-- Modify: `wemedia-studio/lib/ai/content-response-output-job.ts`
-- Modify: `wemedia-studio/lib/ai/content-response-output-job.test.ts`
+- Modify: `web/lib/ai/content-response-output-job.ts`
+- Modify: `web/lib/ai/content-response-output-job.test.ts`
 
 **Interfaces:**
 - Consumes: `context.output.output_type`, Agent runtime Skill tools, and `save_draft`.
@@ -166,10 +166,10 @@ Expected: PASS, including prose-only failure, saved tool evidence, worker linkin
 ### Task 3: Multi-select “值得写” interaction and per-output status
 
 **Files:**
-- Create: `wemedia-studio/app/responses/ResponseWritingDialog.tsx`
-- Modify: `wemedia-studio/app/responses/ResponsesClient.tsx`
-- Modify: `wemedia-studio/app/responses/ResponsesClient.test.tsx`
-- Modify: `wemedia-studio/lib/api/responses.ts`
+- Create: `web/app/responses/ResponseWritingDialog.tsx`
+- Modify: `web/app/responses/ResponsesClient.tsx`
+- Modify: `web/app/responses/ResponsesClient.test.tsx`
+- Modify: `web/lib/api/responses.ts`
 
 **Interfaces:**
 - Consumes: `createResponseOutputs(id, { analysis_run_id, output_types })`.
@@ -212,9 +212,9 @@ Expected: PASS.
 ### Task 4: Draft platform badges and completion verification
 
 **Files:**
-- Modify: `wemedia-studio/lib/api/drafts.ts`
-- Modify: `wemedia-studio/app/drafts/DraftsClient.test.tsx`
-- Test: `wemedia-studio/app/drafts/DraftsClient.tsx`
+- Modify: `web/lib/api/drafts.ts`
+- Modify: `web/app/drafts/DraftsClient.test.tsx`
+- Test: `web/app/drafts/DraftsClient.tsx`
 
 **Interfaces:**
 - Consumes: persisted `ArticleDraft.draft_type`.

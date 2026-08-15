@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 import httpx
 
+from collection_proxy import collection_client_kwargs
 from x_credential_store import CredentialPair
 
 
@@ -57,7 +58,9 @@ async def probe_x_credentials(
     }
     try:
         if client is None:
-            async with httpx.AsyncClient(timeout=15.0) as owned_client:
+            async with httpx.AsyncClient(**await collection_client_kwargs(
+                timeout=15.0,
+            )) as owned_client:
                 response = await owned_client.get(
                     X_ACCOUNT_SETTINGS_URL,
                     headers=headers,

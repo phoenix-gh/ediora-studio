@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from collection_proxy import collection_client_kwargs
 from models import V2exSubscription, V2exTopic, now_utc
 
 _BASE = "https://www.v2ex.com"
@@ -77,7 +78,10 @@ def _parse_dt(entry) -> datetime:
 async def fetch_feed(kind: str, key: str) -> dict:
     """Fetch and parse a V2EX feed. Returns {title, entries: list[dict]}."""
     url = build_feed_url(kind, key)
-    async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
+    async with httpx.AsyncClient(**await collection_client_kwargs(
+        timeout=20,
+        follow_redirects=True,
+    )) as client:
         resp = await client.get(url, headers=_HEADERS)
         resp.raise_for_status()
         body = resp.text

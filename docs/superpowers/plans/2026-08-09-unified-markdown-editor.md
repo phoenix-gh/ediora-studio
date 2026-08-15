@@ -22,9 +22,9 @@
 ### Task 1: Define the shared editor contract with failing tests
 
 **Files:**
-- Create: `wemedia-studio/components/MarkdownEditor.test.tsx`
-- Modify: `wemedia-studio/app/assets/AssetsClient.test.tsx`
-- Modify: `wemedia-studio/app/drafts/DraftsClient.test.tsx`
+- Create: `web/components/MarkdownEditor.test.tsx`
+- Modify: `web/app/assets/AssetsClient.test.tsx`
+- Modify: `web/app/drafts/DraftsClient.test.tsx`
 
 **Interfaces:**
 - Produces the shared test contract for `MarkdownEditor`:
@@ -61,7 +61,7 @@ Change the `AssetsClient` mock from `./AssetVisualMarkdownEditor` to `@/componen
 
 - [ ] **Step 3: Run the focused tests and verify the RED phase**
 
-Run from `wemedia-studio`:
+Run from `web`:
 
 ```bash
 pnpm exec vitest run components/MarkdownEditor.test.tsx app/assets/AssetsClient.test.tsx app/drafts/DraftsClient.test.tsx
@@ -72,10 +72,10 @@ Expected result: failure because `@/components/MarkdownEditor` does not exist ye
 ### Task 2: Extract the Milkdown editor and migrate the asset workspace
 
 **Files:**
-- Create: `wemedia-studio/components/MarkdownEditor.tsx`
-- Modify: `wemedia-studio/app/assets/ArticleAssetWorkspace.tsx`
-- Delete: `wemedia-studio/app/assets/AssetVisualMarkdownEditor.tsx`
-- Delete: `wemedia-studio/app/assets/AssetVisualMarkdownEditor.test.tsx`
+- Create: `web/components/MarkdownEditor.tsx`
+- Modify: `web/app/assets/ArticleAssetWorkspace.tsx`
+- Delete: `web/app/assets/AssetVisualMarkdownEditor.tsx`
+- Delete: `web/app/assets/AssetVisualMarkdownEditor.test.tsx`
 
 **Interfaces:**
 - `MarkdownEditor` accepts `value`, `onChange`, and `documentKey: string | number`.
@@ -108,12 +108,12 @@ Expected result: all shared editor and asset workspace tests pass, including the
 ### Task 3: Migrate DraftsClient and remove the obsolete editor dependency
 
 **Files:**
-- Modify: `wemedia-studio/app/drafts/DraftsClient.tsx`
-- Modify: `wemedia-studio/app/drafts/DraftsClient.test.tsx`
-- Delete: `wemedia-studio/app/drafts/MarkdownEditor.tsx`
-- Delete: `wemedia-studio/app/drafts/MarkdownEditor.test.tsx`
-- Modify: `wemedia-studio/package.json`
-- Modify: `wemedia-studio/pnpm-lock.yaml`
+- Modify: `web/app/drafts/DraftsClient.tsx`
+- Modify: `web/app/drafts/DraftsClient.test.tsx`
+- Delete: `web/app/drafts/MarkdownEditor.tsx`
+- Delete: `web/app/drafts/MarkdownEditor.test.tsx`
+- Modify: `web/package.json`
+- Modify: `web/pnpm-lock.yaml`
 
 **Interfaces:**
 - `DraftsClient` keeps `editorRef` typed as `MarkdownEditorHandle` imported from `@/components/MarkdownEditor`.
@@ -198,4 +198,4 @@ If the targeted existing spec cannot cover `/drafts`, use a temporary Playwright
 
 - [ ] **Step 4: Review the final diff and report exact evidence**
 
-Confirm `rg -n "@uiw/react-md-editor|AssetVisualMarkdownEditor|app/drafts/MarkdownEditor" wemedia-studio` returns no production references, and report focused test counts, lint/type results, rendered-flow result, and any environment limitation without claiming a full-suite pass.
+Confirm `rg -n "@uiw/react-md-editor|AssetVisualMarkdownEditor|app/drafts/MarkdownEditor" web` returns no production references, and report focused test counts, lint/type results, rendered-flow result, and any environment limitation without claiming a full-suite pass.

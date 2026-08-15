@@ -23,8 +23,8 @@
 ### Task 1: Truthful Audio Workflow Banner
 
 **Files:**
-- Modify: `wemedia-studio/app/text-video/TextVideoWorkbench.tsx`
-- Test: `wemedia-studio/app/text-video/TextVideoWorkbench.test.tsx`
+- Modify: `web/app/text-video/TextVideoWorkbench.tsx`
+- Test: `web/app/text-video/TextVideoWorkbench.test.tsx`
 
 **Interfaces:**
 - Consumes: `TextVideoProject['paragraphs'][number]['status']`
@@ -78,7 +78,7 @@ it('reports both generation and confirmation work for mixed segments', () => {
 Run:
 
 ```bash
-cd wemedia-studio
+cd web
 npm test -- app/text-video/TextVideoWorkbench.test.tsx
 ```
 
@@ -128,7 +128,7 @@ video-stage readiness predicate.
 Run:
 
 ```bash
-cd wemedia-studio
+cd web
 npm test -- app/text-video/TextVideoWorkbench.test.tsx
 ```
 
@@ -138,11 +138,11 @@ Expected: all `TextVideoWorkbench` tests pass.
 
 ```bash
 git add \
-  wemedia-studio/app/text-video/TextVideoWorkbench.tsx \
-  wemedia-studio/app/text-video/TextVideoWorkbench.test.tsx
+  web/app/text-video/TextVideoWorkbench.tsx \
+  web/app/text-video/TextVideoWorkbench.test.tsx
 git commit --only -m "fix: clarify text video speech status" -- \
-  wemedia-studio/app/text-video/TextVideoWorkbench.tsx \
-  wemedia-studio/app/text-video/TextVideoWorkbench.test.tsx
+  web/app/text-video/TextVideoWorkbench.tsx \
+  web/app/text-video/TextVideoWorkbench.test.tsx
 ```
 
 ---
@@ -150,12 +150,12 @@ git commit --only -m "fix: clarify text video speech status" -- \
 ### Task 2: Save and Enter the Audio Stage
 
 **Files:**
-- Modify: `wemedia-studio/app/text-video/ScriptStage.tsx`
-- Test: `wemedia-studio/app/text-video/ScriptStage.test.tsx`
-- Modify: `wemedia-studio/app/text-video/TextVideoWorkbench.tsx`
-- Test: `wemedia-studio/app/text-video/TextVideoWorkbench.test.tsx`
-- Modify: `wemedia-studio/app/text-video/TextVideoEditorClient.tsx`
-- Test: `wemedia-studio/app/text-video/TextVideoEditorClient.test.tsx`
+- Modify: `web/app/text-video/ScriptStage.tsx`
+- Test: `web/app/text-video/ScriptStage.test.tsx`
+- Modify: `web/app/text-video/TextVideoWorkbench.tsx`
+- Test: `web/app/text-video/TextVideoWorkbench.test.tsx`
+- Modify: `web/app/text-video/TextVideoEditorClient.tsx`
+- Test: `web/app/text-video/TextVideoEditorClient.test.tsx`
 
 **Interfaces:**
 - `ScriptStage.onContinueToAudio?: () => Promise<void>`
@@ -278,7 +278,7 @@ it('flushes the current draft before preparing the audio stage', async () => {
 Run:
 
 ```bash
-cd wemedia-studio
+cd web
 npm test -- \
   app/text-video/ScriptStage.test.tsx \
   app/text-video/TextVideoWorkbench.test.tsx \
@@ -374,7 +374,7 @@ script stage and display the error.
 Run:
 
 ```bash
-cd wemedia-studio
+cd web
 npm test -- \
   app/text-video/ScriptStage.test.tsx \
   app/text-video/TextVideoWorkbench.test.tsx \
@@ -388,7 +388,7 @@ Expected: all three files pass with no unhandled promise rejections.
 Run:
 
 ```bash
-cd wemedia-studio
+cd web
 npm test
 npm run lint -- \
   app/text-video/ScriptStage.tsx \
@@ -424,16 +424,16 @@ Verify with Playwright:
 
 ```bash
 git add \
-  wemedia-studio/app/text-video/ScriptStage.tsx \
-  wemedia-studio/app/text-video/ScriptStage.test.tsx \
-  wemedia-studio/app/text-video/TextVideoWorkbench.tsx \
-  wemedia-studio/app/text-video/TextVideoWorkbench.test.tsx \
-  wemedia-studio/app/text-video/TextVideoEditorClient.tsx \
-  wemedia-studio/app/text-video/TextVideoEditorClient.test.tsx
+  web/app/text-video/ScriptStage.tsx \
+  web/app/text-video/ScriptStage.test.tsx \
+  web/app/text-video/TextVideoWorkbench.tsx \
+  web/app/text-video/TextVideoWorkbench.test.tsx \
+  web/app/text-video/TextVideoEditorClient.tsx \
+  web/app/text-video/TextVideoEditorClient.test.tsx
 git commit --only -m "fix: enable text video audio transition" -- \
-  wemedia-studio/app/text-video/ScriptStage.tsx \
-  wemedia-studio/app/text-video/ScriptStage.test.tsx \
-  wemedia-studio/app/text-video/TextVideoWorkbench.tsx \
-  wemedia-studio/app/text-video/TextVideoWorkbench.test.tsx \
-  wemedia-studio/app/text-video/TextVideoEditorClient.tsx \
-  wemedia-studio/app/text-video/TextVideoEditorClient.test.tsx
+  web/app/text-video/ScriptStage.tsx \
+  web/app/text-video/ScriptStage.test.tsx \
+  web/app/text-video/TextVideoWorkbench.tsx \
+  web/app/text-video/TextVideoWorkbench.test.tsx \
+  web/app/text-video/TextVideoEditorClient.tsx \
+  web/app/text-video/TextVideoEditorClient.test.tsx

@@ -5,7 +5,7 @@ Status: Approved in conversation; pending written-spec review
 
 ## Goal
 
-Remove the draft adaptation/version model from WeMediaStudio. Every draft becomes an independent record. `draft_type` remains only as a publishing-platform marker and must not imply parent/child relationships or restrict image generation.
+Remove the draft adaptation/version model from Ediora. Every draft becomes an independent record. `draft_type` remains only as a publishing-platform marker and must not imply parent/child relationships or restrict image generation.
 
 ## Scope
 

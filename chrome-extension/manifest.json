@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "述策助手",
   "version": "0.1.0",
-  "description": "在 X 页面查看 WeMediaStudio 草稿并记住原生安排表的最后选择。",
+  "description": "在 X 页面查看 Ediora 草稿并记住原生安排表的最后选择。",
   "permissions": [
     "storage",
     "sidePanel"

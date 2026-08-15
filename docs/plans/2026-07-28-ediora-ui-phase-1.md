@@ -43,12 +43,12 @@
 ### Task 1: Design Tokens and Unified Theme Source
 
 **Files:**
-- Create: `wemedia-studio/app/design-system-tokens.test.ts`
-- Create: `wemedia-studio/components/providers/ThemeProvider.tsx`
-- Create: `wemedia-studio/components/providers/ThemeProvider.test.tsx`
-- Modify: `wemedia-studio/app/globals.css`
-- Modify: `wemedia-studio/app/layout.tsx`
-- Modify: `wemedia-studio/components/ui/sonner.tsx`
+- Create: `web/app/design-system-tokens.test.ts`
+- Create: `web/components/providers/ThemeProvider.tsx`
+- Create: `web/components/providers/ThemeProvider.test.tsx`
+- Modify: `web/app/globals.css`
+- Modify: `web/app/layout.tsx`
+- Modify: `web/components/ui/sonner.tsx`
 
 **Interfaces:**
 - Produces: CSS variables `--surface`, `--surface-muted`, `--foreground-subtle`, `--border-strong`, `--data`, `--data-foreground`, `--data-subtle`, `--ai`, `--ai-foreground`, `--ai-subtle`, `--success`, `--warning`, `--danger`, `--info`.
@@ -306,11 +306,11 @@ Expected: both focused tests PASS; full suite remains green.
 - [ ] **Step 8: Commit Task 1**
 
 ```bash
-git add wemedia-studio/app/globals.css wemedia-studio/app/layout.tsx \
-  wemedia-studio/app/design-system-tokens.test.ts \
-  wemedia-studio/components/providers/ThemeProvider.tsx \
-  wemedia-studio/components/providers/ThemeProvider.test.tsx \
-  wemedia-studio/components/ui/sonner.tsx
+git add web/app/globals.css web/app/layout.tsx \
+  web/app/design-system-tokens.test.ts \
+  web/components/providers/ThemeProvider.tsx \
+  web/components/providers/ThemeProvider.test.tsx \
+  web/components/ui/sonner.tsx
 git commit -m "feat: add Ediora design tokens and themes"
 ```
 
@@ -319,20 +319,20 @@ git commit -m "feat: add Ediora design tokens and themes"
 ### Task 2: UI Primitive Contracts
 
 **Files:**
-- Create: `wemedia-studio/test/setup-dom.ts`
-- Create: `wemedia-studio/components/ui/ui-primitives.test.tsx`
-- Create: `wemedia-studio/components/ui/dialog.test.tsx`
-- Modify: `wemedia-studio/vitest.config.ts`
-- Modify: `wemedia-studio/components/ui/button.tsx`
-- Modify: `wemedia-studio/components/ui/input.tsx`
-- Modify: `wemedia-studio/components/ui/textarea.tsx`
-- Modify: `wemedia-studio/components/ui/select.tsx`
-- Modify: `wemedia-studio/components/ui/badge.tsx`
-- Modify: `wemedia-studio/components/ui/card.tsx`
-- Modify: `wemedia-studio/components/ui/dialog.tsx`
-- Modify: `wemedia-studio/components/ui/alert-dialog.tsx`
-- Modify: `wemedia-studio/components/ui/tabs.tsx`
-- Modify: `wemedia-studio/components/ui/switch.tsx`
+- Create: `web/test/setup-dom.ts`
+- Create: `web/components/ui/ui-primitives.test.tsx`
+- Create: `web/components/ui/dialog.test.tsx`
+- Modify: `web/vitest.config.ts`
+- Modify: `web/components/ui/button.tsx`
+- Modify: `web/components/ui/input.tsx`
+- Modify: `web/components/ui/textarea.tsx`
+- Modify: `web/components/ui/select.tsx`
+- Modify: `web/components/ui/badge.tsx`
+- Modify: `web/components/ui/card.tsx`
+- Modify: `web/components/ui/dialog.tsx`
+- Modify: `web/components/ui/alert-dialog.tsx`
+- Modify: `web/components/ui/tabs.tsx`
+- Modify: `web/components/ui/switch.tsx`
 
 **Interfaces:**
 - Produces: `Button` sizes `sm=32px`, `default=36px`, `lg=40px`.
@@ -529,8 +529,8 @@ Expected: all tests PASS.
 - [ ] **Step 9: Commit Task 2**
 
 ```bash
-git add wemedia-studio/test/setup-dom.ts wemedia-studio/vitest.config.ts \
-  wemedia-studio/components/ui
+git add web/test/setup-dom.ts web/vitest.config.ts \
+  web/components/ui
 git commit -m "feat: standardize Ediora UI primitives"
 ```
 
@@ -539,18 +539,18 @@ git commit -m "feat: standardize Ediora UI primitives"
 ### Task 3: App Shell and Shared Layout Components
 
 **Files:**
-- Create: `wemedia-studio/components/layout/AppShell.tsx`
-- Create: `wemedia-studio/components/layout/PageHeader.tsx`
-- Create: `wemedia-studio/components/layout/WorkspaceToolbar.tsx`
-- Create: `wemedia-studio/components/layout/SplitWorkspace.tsx`
-- Create: `wemedia-studio/components/layout/FormSection.tsx`
-- Create: `wemedia-studio/components/layout/AsyncState.tsx`
-- Create: `wemedia-studio/components/layout/StatusBadge.tsx`
-- Create: `wemedia-studio/components/layout/layout-components.test.tsx`
-- Create: `wemedia-studio/components/features/Sidebar.test.tsx`
-- Modify: `wemedia-studio/app/layout.tsx`
-- Modify: `wemedia-studio/components/features/Sidebar.tsx`
-- Modify: `wemedia-studio/components/features/sidebar-digital-human.test.ts`
+- Create: `web/components/layout/AppShell.tsx`
+- Create: `web/components/layout/PageHeader.tsx`
+- Create: `web/components/layout/WorkspaceToolbar.tsx`
+- Create: `web/components/layout/SplitWorkspace.tsx`
+- Create: `web/components/layout/FormSection.tsx`
+- Create: `web/components/layout/AsyncState.tsx`
+- Create: `web/components/layout/StatusBadge.tsx`
+- Create: `web/components/layout/layout-components.test.tsx`
+- Create: `web/components/features/Sidebar.test.tsx`
+- Modify: `web/app/layout.tsx`
+- Modify: `web/components/features/Sidebar.tsx`
+- Modify: `web/components/features/sidebar-digital-human.test.ts`
 
 **Interfaces:**
 - Produces: `AppShell({ sidebar, children })`.
@@ -696,10 +696,10 @@ Expected: all tests PASS.
 - [ ] **Step 8: Commit Task 3**
 
 ```bash
-git add wemedia-studio/components/layout wemedia-studio/components/features/Sidebar.tsx \
-  wemedia-studio/components/features/Sidebar.test.tsx \
-  wemedia-studio/components/features/sidebar-digital-human.test.ts \
-  wemedia-studio/app/layout.tsx wemedia-studio/app/globals.css
+git add web/components/layout web/components/features/Sidebar.tsx \
+  web/components/features/Sidebar.test.tsx \
+  web/components/features/sidebar-digital-human.test.ts \
+  web/app/layout.tsx web/app/globals.css
 git commit -m "feat: add unified Ediora app shell"
 ```
 
@@ -708,15 +708,15 @@ git commit -m "feat: add unified Ediora app shell"
 ### Task 4: Dashboard Pilot
 
 **Files:**
-- Create: `wemedia-studio/components/features/dashboard/dashboard-components.test.tsx`
-- Modify: `wemedia-studio/app/page.tsx`
-- Modify: `wemedia-studio/components/features/dashboard/AlertsBar.tsx`
-- Modify: `wemedia-studio/components/features/dashboard/TodayPlan.tsx`
-- Modify: `wemedia-studio/components/features/dashboard/ReleasesToday.tsx`
-- Modify: `wemedia-studio/components/features/dashboard/SourceStatusGrid.tsx`
-- Modify: `wemedia-studio/components/features/dashboard/GenerateDraftButton.tsx`
-- Modify: `wemedia-studio/components/features/CreateTaskDialog.tsx`
-- Modify: `wemedia-studio/components/ui/alert.tsx`
+- Create: `web/components/features/dashboard/dashboard-components.test.tsx`
+- Modify: `web/app/page.tsx`
+- Modify: `web/components/features/dashboard/AlertsBar.tsx`
+- Modify: `web/components/features/dashboard/TodayPlan.tsx`
+- Modify: `web/components/features/dashboard/ReleasesToday.tsx`
+- Modify: `web/components/features/dashboard/SourceStatusGrid.tsx`
+- Modify: `web/components/features/dashboard/GenerateDraftButton.tsx`
+- Modify: `web/components/features/CreateTaskDialog.tsx`
+- Modify: `web/components/ui/alert.tsx`
 
 **Interfaces:**
 - Consumes: `PageHeader`, `AsyncState`, `StatusBadge`, semantic `Alert`, updated `Button`, `Textarea`, and sized `DialogContent`.
@@ -775,9 +775,9 @@ Expected: tests PASS and dashboard route returns 200.
 - [ ] **Step 5: Commit Task 4**
 
 ```bash
-git add wemedia-studio/app/page.tsx \
-  wemedia-studio/components/features/CreateTaskDialog.tsx \
-  wemedia-studio/components/features/dashboard
+git add web/app/page.tsx \
+  web/components/features/CreateTaskDialog.tsx \
+  web/components/features/dashboard
 git commit -m "feat: restyle Ediora dashboard"
 ```
 
@@ -786,13 +786,13 @@ git commit -m "feat: restyle Ediora dashboard"
 ### Task 5: Creative Assets Pilot
 
 **Files:**
-- Create: `wemedia-studio/app/assets/AssetDirectoryRail.tsx`
-- Create: `wemedia-studio/app/assets/ArticleAssetWorkspace.tsx`
-- Create: `wemedia-studio/app/assets/MediaAssetGrid.tsx`
-- Create: `wemedia-studio/app/assets/AssetsClient.test.tsx`
-- Modify: `wemedia-studio/app/assets/AssetsClient.tsx`
-- Modify: `wemedia-studio/app/assets/assets-layout.test.ts`
-- Modify: `wemedia-studio/app/assets/assets-system-directory.test.tsx`
+- Create: `web/app/assets/AssetDirectoryRail.tsx`
+- Create: `web/app/assets/ArticleAssetWorkspace.tsx`
+- Create: `web/app/assets/MediaAssetGrid.tsx`
+- Create: `web/app/assets/AssetsClient.test.tsx`
+- Modify: `web/app/assets/AssetsClient.tsx`
+- Modify: `web/app/assets/assets-layout.test.ts`
+- Modify: `web/app/assets/assets-system-directory.test.tsx`
 
 **Interfaces:**
 - Consumes: `WorkspaceToolbar`, `SplitWorkspace`, `AsyncState`, `Button`, `Tabs`, `DialogContent size`, and `AlertDialog`.
@@ -896,7 +896,7 @@ Expected: all asset and full tests PASS.
 - [ ] **Step 6: Commit Task 5**
 
 ```bash
-git add wemedia-studio/app/assets
+git add web/app/assets
 git commit -m "feat: rebuild creative assets workspace"
 ```
 
@@ -905,23 +905,23 @@ git commit -m "feat: rebuild creative assets workspace"
 ### Task 6: Settings Pilot and Appearance Control
 
 **Files:**
-- Create: `wemedia-studio/app/settings/SettingsClient.test.tsx`
-- Create: `wemedia-studio/app/settings/sections/AppearanceSection.tsx`
-- Create: `wemedia-studio/app/settings/sections/AppearanceSection.test.tsx`
-- Modify: `wemedia-studio/app/settings/SettingsClient.tsx`
-- Modify: `wemedia-studio/app/settings/sections/AISection.tsx`
-- Modify: `wemedia-studio/app/settings/sections/ArxivSection.tsx`
-- Modify: `wemedia-studio/app/settings/sections/BlogSection.tsx`
-- Modify: `wemedia-studio/app/settings/sections/CollectSection.tsx`
-- Modify: `wemedia-studio/app/settings/sections/GitHubSection.tsx`
-- Modify: `wemedia-studio/app/settings/sections/HeyGenSection.tsx`
-- Modify: `wemedia-studio/app/settings/sections/LogsSection.tsx`
-- Modify: `wemedia-studio/app/settings/sections/PublishAccountsSection.tsx`
-- Modify: `wemedia-studio/app/settings/sections/TranscriptionSection.tsx`
-- Modify: `wemedia-studio/app/settings/sections/WebFetchSection.tsx`
-- Modify: `wemedia-studio/app/settings/sections/WebSearchSection.tsx`
-- Modify: `wemedia-studio/app/settings/sections/XSection.tsx`
-- Modify: `wemedia-studio/app/settings/sections/YouTubeSection.tsx`
+- Create: `web/app/settings/SettingsClient.test.tsx`
+- Create: `web/app/settings/sections/AppearanceSection.tsx`
+- Create: `web/app/settings/sections/AppearanceSection.test.tsx`
+- Modify: `web/app/settings/SettingsClient.tsx`
+- Modify: `web/app/settings/sections/AISection.tsx`
+- Modify: `web/app/settings/sections/ArxivSection.tsx`
+- Modify: `web/app/settings/sections/BlogSection.tsx`
+- Modify: `web/app/settings/sections/CollectSection.tsx`
+- Modify: `web/app/settings/sections/GitHubSection.tsx`
+- Modify: `web/app/settings/sections/HeyGenSection.tsx`
+- Modify: `web/app/settings/sections/LogsSection.tsx`
+- Modify: `web/app/settings/sections/PublishAccountsSection.tsx`
+- Modify: `web/app/settings/sections/TranscriptionSection.tsx`
+- Modify: `web/app/settings/sections/WebFetchSection.tsx`
+- Modify: `web/app/settings/sections/WebSearchSection.tsx`
+- Modify: `web/app/settings/sections/XSection.tsx`
+- Modify: `web/app/settings/sections/YouTubeSection.tsx`
 
 **Interfaces:**
 - Consumes: `PageHeader`, `FormSection`, semantic controls and `useTheme()`.
@@ -1021,7 +1021,7 @@ Expected: all settings and full tests PASS.
 - [ ] **Step 6: Commit Task 6**
 
 ```bash
-git add wemedia-studio/app/settings
+git add web/app/settings
 git commit -m "feat: unify Ediora settings experience"
 ```
 
@@ -1030,15 +1030,15 @@ git commit -m "feat: unify Ediora settings experience"
 ### Task 7: UI Policy Guard and Browser Verification
 
 **Files:**
-- Create: `wemedia-studio/lib/ui/ui-policy.test.ts`
-- Create: `wemedia-studio/playwright.config.ts`
-- Create: `wemedia-studio/e2e/ui-foundations.spec.ts`
-- Modify: `wemedia-studio/.gitignore`
-- Modify: `wemedia-studio/components/features/Sidebar.tsx`
-- Modify: `wemedia-studio/next.config.ts`
-- Modify: `wemedia-studio/package.json`
-- Modify: `wemedia-studio/pnpm-lock.yaml`
-- Modify: `wemedia-studio/vitest.config.ts`
+- Create: `web/lib/ui/ui-policy.test.ts`
+- Create: `web/playwright.config.ts`
+- Create: `web/e2e/ui-foundations.spec.ts`
+- Modify: `web/.gitignore`
+- Modify: `web/components/features/Sidebar.tsx`
+- Modify: `web/next.config.ts`
+- Modify: `web/package.json`
+- Modify: `web/pnpm-lock.yaml`
+- Modify: `web/vitest.config.ts`
 
 **Interfaces:**
 - Produces: migration-scope policy guard for Phase 1 files.
@@ -1199,12 +1199,12 @@ Continue correcting visual mismatches until no material mismatch remains.
 - [ ] **Step 8: Commit Task 7**
 
 ```bash
-git add wemedia-studio/lib/ui/ui-policy.test.ts \
-  wemedia-studio/playwright.config.ts \
-  wemedia-studio/e2e/ui-foundations.spec.ts \
-  wemedia-studio/.gitignore wemedia-studio/components/features/Sidebar.tsx \
-  wemedia-studio/next.config.ts wemedia-studio/vitest.config.ts \
-  wemedia-studio/package.json wemedia-studio/pnpm-lock.yaml
+git add web/lib/ui/ui-policy.test.ts \
+  web/playwright.config.ts \
+  web/e2e/ui-foundations.spec.ts \
+  web/.gitignore web/components/features/Sidebar.tsx \
+  web/next.config.ts web/vitest.config.ts \
+  web/package.json web/pnpm-lock.yaml
 git commit -m "test: verify Ediora UI foundations"
 ```
 

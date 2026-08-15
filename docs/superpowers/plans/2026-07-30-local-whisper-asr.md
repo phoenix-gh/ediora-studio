@@ -50,10 +50,10 @@
 
 ### Modified frontend files
 
-- `wemedia-studio/lib/api/settings.ts` — provider/status types and API calls.
-- `wemedia-studio/lib/api/settings-test-fixtures.ts` — local provider fixture defaults.
-- `wemedia-studio/app/settings/sections/TranscriptionSection.tsx` — local/cloud selector, conditional fields, status, test action.
-- `wemedia-studio/app/settings/sections/TranscriptionSection.test.tsx` — provider switching and local status behavior.
+- `web/lib/api/settings.ts` — provider/status types and API calls.
+- `web/lib/api/settings-test-fixtures.ts` — local provider fixture defaults.
+- `web/app/settings/sections/TranscriptionSection.tsx` — local/cloud selector, conditional fields, status, test action.
+- `web/app/settings/sections/TranscriptionSection.test.tsx` — provider switching and local status behavior.
 
 ---
 
@@ -623,10 +623,10 @@ git commit --only -m "feat: configure local whisper runtime" -- \
 ### Task 5: Settings UI for local and cloud transcription
 
 **Files:**
-- Modify: `wemedia-studio/lib/api/settings.ts`
-- Modify: `wemedia-studio/lib/api/settings-test-fixtures.ts`
-- Modify: `wemedia-studio/app/settings/sections/TranscriptionSection.tsx`
-- Modify: `wemedia-studio/app/settings/sections/TranscriptionSection.test.tsx`
+- Modify: `web/lib/api/settings.ts`
+- Modify: `web/lib/api/settings-test-fixtures.ts`
+- Modify: `web/app/settings/sections/TranscriptionSection.tsx`
+- Modify: `web/app/settings/sections/TranscriptionSection.test.tsx`
 
 **Interfaces:**
 - Consumes: `GET /api/settings/transcription/status`,
@@ -667,7 +667,7 @@ connection test behavior are preserved.
 Run:
 
 ```bash
-cd wemedia-studio
+cd web
 npm test -- app/settings/sections/TranscriptionSection.test.tsx
 ```
 
@@ -717,7 +717,7 @@ error       -> 本地转写服务异常
 Run:
 
 ```bash
-cd wemedia-studio
+cd web
 npm test -- app/settings/sections/TranscriptionSection.test.tsx \
   lib/api/settings-telegram.test.ts
 npx tsc --noEmit
@@ -728,15 +728,15 @@ Expected: focused tests and type checking pass.
 - [ ] **Step 6: Commit only Task 5 files**
 
 ```bash
-git add wemedia-studio/lib/api/settings.ts \
-  wemedia-studio/lib/api/settings-test-fixtures.ts \
-  wemedia-studio/app/settings/sections/TranscriptionSection.tsx \
-  wemedia-studio/app/settings/sections/TranscriptionSection.test.tsx
+git add web/lib/api/settings.ts \
+  web/lib/api/settings-test-fixtures.ts \
+  web/app/settings/sections/TranscriptionSection.tsx \
+  web/app/settings/sections/TranscriptionSection.test.tsx
 git commit --only -m "feat: add local whisper settings ui" -- \
-  wemedia-studio/lib/api/settings.ts \
-  wemedia-studio/lib/api/settings-test-fixtures.ts \
-  wemedia-studio/app/settings/sections/TranscriptionSection.tsx \
-  wemedia-studio/app/settings/sections/TranscriptionSection.test.tsx
+  web/lib/api/settings.ts \
+  web/lib/api/settings-test-fixtures.ts \
+  web/app/settings/sections/TranscriptionSection.tsx \
+  web/app/settings/sections/TranscriptionSection.test.tsx
 ```
 
 ---
@@ -872,7 +872,7 @@ Expected: all selected tests pass with no warnings attributable to this feature.
 Run:
 
 ```bash
-cd wemedia-studio
+cd web
 npm test -- app/settings/sections/TranscriptionSection.test.tsx \
   app/text-video/AudioStage.test.tsx \
   app/text-video/TextVideoEditorClient.test.tsx \

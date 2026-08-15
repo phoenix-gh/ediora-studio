@@ -22,8 +22,8 @@
 ### Task 1: Build the isolated context-picker component
 
 **Files:**
-- Create: `wemedia-studio/components/features/chat/ChatContextPicker.tsx`
-- Create: `wemedia-studio/components/features/chat/ChatContextPicker.test.tsx`
+- Create: `web/components/features/chat/ChatContextPicker.tsx`
+- Create: `web/components/features/chat/ChatContextPicker.test.tsx`
 
 **Interfaces:**
 - Consumes: `ChatSkill`, `ChatDraft`, selected `skillName` / `draftId`, `disabled`, and selection callbacks.
@@ -78,13 +78,13 @@ Expected: PASS.
 
 - [ ] **Step 5: Commit the isolated picker**
 
-Run: `git add wemedia-studio/components/features/chat/ChatContextPicker.tsx wemedia-studio/components/features/chat/ChatContextPicker.test.tsx && git commit -m "feat(chat): add context picker component"`
+Run: `git add web/components/features/chat/ChatContextPicker.tsx web/components/features/chat/ChatContextPicker.test.tsx && git commit -m "feat(chat): add context picker component"`
 
 ### Task 2: Wire the picker into the Chat composer
 
 **Files:**
-- Modify: `wemedia-studio/app/chat/ChatClient.tsx`
-- Modify: `wemedia-studio/app/chat/chat-layout.test.ts`
+- Modify: `web/app/chat/ChatClient.tsx`
+- Modify: `web/app/chat/chat-layout.test.ts`
 
 **Interfaces:**
 - Consumes: `ChatContextPicker` and existing `skills`, `drafts`, `skillName`, `draftId`, `sending` states.
@@ -137,4 +137,4 @@ Browser plugin is not available. Run `pnpm exec playwright --version`; if availa
 
 - [ ] **Step 6: Commit the integration**
 
-Run: `git add wemedia-studio/app/chat/ChatClient.tsx wemedia-studio/app/chat/chat-layout.test.ts && git commit -m "feat(chat): use unified context picker"`
+Run: `git add web/app/chat/ChatClient.tsx web/app/chat/chat-layout.test.ts && git commit -m "feat(chat): use unified context picker"`

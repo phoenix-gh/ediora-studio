@@ -1,6 +1,6 @@
 # Self-hosted deployment
 
-WeMedia Studio runs as a single-user application with no login requirement.
+Ediora runs as a single-user application with no login requirement.
 It does not require Hermes, agent profiles, a Kanban board, or a local terminal
 agent.
 

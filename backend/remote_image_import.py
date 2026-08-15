@@ -33,7 +33,7 @@ ERROR_MESSAGES = {
 _REDIRECT_STATUSES = {301, 302, 303, 307, 308}
 _REQUEST_HEADERS = {
     "Accept": "image/avif,image/webp,image/png,image/jpeg,image/gif,*/*;q=0.5",
-    "User-Agent": "WeMediaStudio/1.0",
+    "User-Agent": "Ediora/1.0",
 }
 
 

@@ -148,7 +148,7 @@ def test_real_save_draft_contract_accepts_x_drafts(env):
     schema = mcp_server.mcp._tool_manager._tools["save_draft"].parameters
 
     assert schema["properties"]["draft_type"]["enum"] == [
-        "article", "script", "x",
+        "article", "script", "x", "x_article", "mp",
     ]
 
 

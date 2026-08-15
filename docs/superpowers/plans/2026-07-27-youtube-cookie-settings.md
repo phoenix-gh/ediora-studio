@@ -153,11 +153,11 @@ Run: `git add backend/youtube_transcript.py backend/tests/test_youtube_transcrip
 ### Task 3: Add the YouTube settings UI
 
 **Files:**
-- Modify: `wemedia-studio/lib/api/settings.ts:AppSettings`, `SettingsUpdate`
-- Modify: `wemedia-studio/lib/api/settings-test-fixtures.ts`
-- Modify: `wemedia-studio/app/settings/SettingsClient.tsx:SectionId`, `NAV`, `SECTION_TITLE`, render branch
-- Create: `wemedia-studio/app/settings/sections/YouTubeSection.tsx`
-- Create: `wemedia-studio/app/settings/sections/YouTubeSection.test.tsx`
+- Modify: `web/lib/api/settings.ts:AppSettings`, `SettingsUpdate`
+- Modify: `web/lib/api/settings-test-fixtures.ts`
+- Modify: `web/app/settings/SettingsClient.tsx:SectionId`, `NAV`, `SECTION_TITLE`, render branch
+- Create: `web/app/settings/sections/YouTubeSection.tsx`
+- Create: `web/app/settings/sections/YouTubeSection.test.tsx`
 
 **Interfaces:**
 - Consumes `AppSettings.youtube_cookies_set: boolean` and `updateSettings({ youtube_cookies: string })`.
@@ -184,7 +184,7 @@ it('clears a configured cookie explicitly', async () => {
 
 - [ ] **Step 2: Run UI tests and verify RED**
 
-Run: `pnpm --dir wemedia-studio test -- app/settings/sections/YouTubeSection.test.tsx`
+Run: `pnpm --dir web test -- app/settings/sections/YouTubeSection.test.tsx`
 
 Expected: FAIL because `YouTubeSection` does not exist.
 
@@ -208,17 +208,17 @@ Follow existing Card, Field, Button, toast, and `updateSettings` patterns. Inclu
 
 - [ ] **Step 4: Run UI tests and type check**
 
-Run: `pnpm --dir wemedia-studio test -- app/settings/sections/YouTubeSection.test.tsx`
+Run: `pnpm --dir web test -- app/settings/sections/YouTubeSection.test.tsx`
 
 Expected: PASS.
 
-Run: `pnpm --dir wemedia-studio exec tsc --noEmit`
+Run: `pnpm --dir web exec tsc --noEmit`
 
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
-Run: `git add wemedia-studio/lib/api/settings.ts wemedia-studio/lib/api/settings-test-fixtures.ts wemedia-studio/app/settings/SettingsClient.tsx wemedia-studio/app/settings/sections/YouTubeSection.tsx wemedia-studio/app/settings/sections/YouTubeSection.test.tsx && git commit -m "feat: add YouTube cookie settings UI"`
+Run: `git add web/lib/api/settings.ts web/lib/api/settings-test-fixtures.ts web/app/settings/SettingsClient.tsx web/app/settings/sections/YouTubeSection.tsx web/app/settings/sections/YouTubeSection.test.tsx && git commit -m "feat: add YouTube cookie settings UI"`
 
 ### Task 4: Run end-to-end verification
 
@@ -232,7 +232,7 @@ Expected: PASS.
 
 - [ ] **Step 2: Run frontend tests and production build**
 
-Run: `pnpm --dir wemedia-studio test && pnpm --dir wemedia-studio build`
+Run: `pnpm --dir web test && pnpm --dir web build`
 
 Expected: PASS.
 

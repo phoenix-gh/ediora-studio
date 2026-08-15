@@ -95,7 +95,7 @@ services:
         condition: service_healthy
 
   worker:
-    build: ./wemedia-studio
+    build: ./web
     command:
       - sh
       - -ec
@@ -123,7 +123,7 @@ services:
         condition: service_healthy
 
   web:
-    build: ./wemedia-studio
+    build: ./web
     environment:
       NEXT_PUBLIC_API_URL: http://localhost:8000/api
       WMS_API_URL: http://api:8000/api

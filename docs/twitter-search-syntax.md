@@ -140,7 +140,7 @@ from:OpenAI -filter:retweets -filter:replies
 
 ---
 
-## 在 WeMedia Studio 中的用法
+## 在 Ediora 中的用法
 
 `设置 → X → 搜索关键词` 字段支持完整的高级搜索语法，每个条目用逗号分隔。每个条目会作为独立查询发送。
 

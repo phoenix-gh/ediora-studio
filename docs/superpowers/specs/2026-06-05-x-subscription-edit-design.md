@@ -35,7 +35,7 @@ X 订阅当前有两个缺口：
 
 ### 2. 新建表单加可选「名称」输入
 
-文件：`wemedia-studio/app/x/XClient.tsx`（`SubscribeDialog`），类型在 `wemedia-studio/lib/api/x.ts`
+文件：`web/app/x/XClient.tsx`（`SubscribeDialog`），类型在 `web/lib/api/x.ts`
 
 - 后端 `SubscriptionCreate.label` 与前端 `CreateXSubscriptionInput.label` 已支持，无需改类型。
 - `SubscribeDialog` 新增 `const [label, setLabel] = useState('')`。
@@ -44,7 +44,7 @@ X 订阅当前有两个缺口：
 
 ### 3. 搜索订阅的 ✏️ 改为「完整编辑」（复用顶部表单）
 
-文件：`wemedia-studio/app/x/XClient.tsx`，类型在 `wemedia-studio/lib/api/x.ts`
+文件：`web/app/x/XClient.tsx`，类型在 `web/lib/api/x.ts`
 
 - **时间线行**：✏️ 保持现有的行内改名（label-only）。
 - **搜索行**：点 ✏️ → 顶部表单进入「编辑模式」：
@@ -56,7 +56,7 @@ X 订阅当前有两个缺口：
 
 ### 4. API 层类型
 
-文件：`wemedia-studio/lib/api/x.ts`
+文件：`web/lib/api/x.ts`
 
 - `patchXSubscription` 的 body 类型从 `Partial<Pick<XSubscription, 'enabled' | 'label'>>` 扩成 `Partial<Pick<XSubscription, 'enabled' | 'label' | 'raw_query' | 'max_results'>>`。
 

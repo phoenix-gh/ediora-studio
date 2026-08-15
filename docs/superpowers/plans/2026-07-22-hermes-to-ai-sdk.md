@@ -25,7 +25,7 @@
 **Files:**
 - Create: `docker-compose.yml`
 - Create: `backend/Dockerfile`
-- Create: `wemedia-studio/Dockerfile`
+- Create: `web/Dockerfile`
 - Create: `backend/requirements.txt`
 - Modify: `.gitignore`
 - Modify: `README.md`
@@ -67,7 +67,7 @@ Expected: tests pass and Compose validates without mentioning Hermes.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add .gitignore README.md docker-compose.yml backend/Dockerfile backend/requirements.txt backend/runtime_config.py backend/tests/test_runtime_config.py wemedia-studio/Dockerfile
+git add .gitignore README.md docker-compose.yml backend/Dockerfile backend/requirements.txt backend/runtime_config.py backend/tests/test_runtime_config.py web/Dockerfile
 git commit -m "feat(runtime): add self-hosted service topology"
 ```
 
@@ -258,11 +258,11 @@ git commit -m "feat(jobs): run content flow in durable worker"
 ### Task 5: Add Vercel AI SDK orchestration for bounded draft creation
 
 **Files:**
-- Modify: `wemedia-studio/package.json`
-- Modify: `wemedia-studio/pnpm-lock.yaml`
-- Create: `wemedia-studio/lib/ai/content-job.ts`
-- Create: `wemedia-studio/app/api/jobs/[jobId]/run/route.ts`
-- Test: `wemedia-studio/lib/ai/content-job.test.ts`
+- Modify: `web/package.json`
+- Modify: `web/pnpm-lock.yaml`
+- Create: `web/lib/ai/content-job.ts`
+- Create: `web/app/api/jobs/[jobId]/run/route.ts`
+- Test: `web/lib/ai/content-job.test.ts`
 
 **Interfaces:**
 - Consumes: a Python job ID and server-only model provider configuration.
@@ -279,7 +279,7 @@ it('limits draft orchestration to its declared tools', async () => {
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `cd wemedia-studio && pnpm exec vitest run lib/ai/content-job.test.ts`
+Run: `cd web && pnpm exec vitest run lib/ai/content-job.test.ts`
 
 Expected: FAIL because the module and Vitest setup do not exist.
 
@@ -301,27 +301,27 @@ it('records a tool failure without exposing provider internals', async () => {
 })
 ```
 
-Run: `cd wemedia-studio && pnpm exec vitest run lib/ai/content-job.test.ts && pnpm lint`
+Run: `cd web && pnpm exec vitest run lib/ai/content-job.test.ts && pnpm lint`
 
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add wemedia-studio/package.json wemedia-studio/pnpm-lock.yaml wemedia-studio/lib/ai/content-job.ts wemedia-studio/lib/ai/content-job.test.ts wemedia-studio/app/api/jobs/[jobId]/run/route.ts
+git add web/package.json web/pnpm-lock.yaml web/lib/ai/content-job.ts web/lib/ai/content-job.test.ts web/app/api/jobs/[jobId]/run/route.ts
 git commit -m "feat(ai): orchestrate bounded content jobs"
 ```
 
 ### Task 6: Replace the Hermes Studio board with a persistent Jobs interface
 
 **Files:**
-- Create: `wemedia-studio/app/jobs/page.tsx`
-- Create: `wemedia-studio/app/jobs/JobsClient.tsx`
-- Create: `wemedia-studio/app/jobs/JobDrawer.tsx`
-- Create: `wemedia-studio/lib/api/jobs.ts`
-- Modify: `wemedia-studio/components/features/Sidebar.tsx`
-- Modify: `wemedia-studio/components/features/CreateTaskDialog.tsx`
-- Test: `wemedia-studio/app/jobs/JobsClient.test.tsx`
+- Create: `web/app/jobs/page.tsx`
+- Create: `web/app/jobs/JobsClient.tsx`
+- Create: `web/app/jobs/JobDrawer.tsx`
+- Create: `web/lib/api/jobs.ts`
+- Modify: `web/components/features/Sidebar.tsx`
+- Modify: `web/components/features/CreateTaskDialog.tsx`
+- Test: `web/app/jobs/JobsClient.test.tsx`
 
 **Interfaces:**
 - Consumes: `GET /api/jobs`, `GET /api/jobs/{id}`, cancel/retry endpoints, and job event summaries.
@@ -339,7 +339,7 @@ it('shows a retry action only for a failed retryable step', async () => {
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `cd wemedia-studio && pnpm exec vitest run app/jobs/JobsClient.test.tsx`
+Run: `cd web && pnpm exec vitest run app/jobs/JobsClient.test.tsx`
 
 Expected: FAIL because Jobs components and client API do not exist.
 
@@ -354,14 +354,14 @@ it('stops polling a succeeded job', async () => { ... })
 it('sends cancellation for a queued job', async () => { ... })
 ```
 
-Run: `cd wemedia-studio && pnpm exec vitest run app/jobs/JobsClient.test.tsx && pnpm lint`
+Run: `cd web && pnpm exec vitest run app/jobs/JobsClient.test.tsx && pnpm lint`
 
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add wemedia-studio/app/jobs wemedia-studio/lib/api/jobs.ts wemedia-studio/components/features/Sidebar.tsx wemedia-studio/components/features/CreateTaskDialog.tsx
+git add web/app/jobs web/lib/api/jobs.ts web/components/features/Sidebar.tsx web/components/features/CreateTaskDialog.tsx
 git commit -m "feat(jobs-ui): replace agent board with job tracking"
 ```
 
@@ -489,10 +489,10 @@ git commit -m "feat(images): run cover generation without local skills"
 - Delete: `backend/routers/retro.py`
 - Delete: `backend/routers/profiles.py`
 - Delete: `backend/routers/skills.py`
-- Delete: `wemedia-studio/app/studio/StudioClient.tsx`
-- Delete: `wemedia-studio/app/studio/TaskDrawer.tsx`
-- Delete: `wemedia-studio/app/studio/page.tsx`
-- Delete: `wemedia-studio/components/features/RetroTerminalDialog.tsx`
+- Delete: `web/app/studio/StudioClient.tsx`
+- Delete: `web/app/studio/TaskDrawer.tsx`
+- Delete: `web/app/studio/page.tsx`
+- Delete: `web/components/features/RetroTerminalDialog.tsx`
 - Modify: `backend/main.py`
 - Modify: `backend/models.py`
 - Modify: `README.md`
@@ -531,9 +531,9 @@ Remove the Hermes client, profiles, skills manager, retro terminal, Agent profil
 Run:
 
 ```bash
-! rg -n -i 'hermes|kanban_complete|wms_(scout|editor|writer|illustrator)' backend wemedia-studio README.md
+! rg -n -i 'hermes|kanban_complete|wms_(scout|editor|writer|illustrator)' backend web README.md
 conda run -n wems pytest backend/tests -q
-cd wemedia-studio && pnpm lint && pnpm build
+cd web && pnpm lint && pnpm build
 docker compose config -q
 ```
 
@@ -542,7 +542,7 @@ Expected: no search matches, Python tests pass, frontend lint/build pass, and Co
 - [ ] **Step 5: Commit**
 
 ```bash
-git add -A backend wemedia-studio README.md
+git add -A backend web README.md
 git commit -m "refactor: remove Hermes agent runtime"
 ```
 
@@ -583,7 +583,7 @@ Run:
 
 ```bash
 conda run -n wems pytest backend/tests -q
-cd wemedia-studio && pnpm lint && pnpm build
+cd web && pnpm lint && pnpm build
 cd .. && docker compose config -q
 ./scripts/verify-self-hosted.sh
 ```

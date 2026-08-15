@@ -22,10 +22,10 @@
 ### Task 1: Add an MCP-backed global Chat tool registry
 
 **Files:**
-- Modify: `wemedia-studio/package.json`
-- Modify: `wemedia-studio/pnpm-lock.yaml`
-- Create: `wemedia-studio/lib/ai/global-chat-tools.ts`
-- Create: `wemedia-studio/lib/ai/global-chat-tools.test.ts`
+- Modify: `web/package.json`
+- Modify: `web/pnpm-lock.yaml`
+- Create: `web/lib/ai/global-chat-tools.ts`
+- Create: `web/lib/ai/global-chat-tools.test.ts`
 
 **Interfaces:**
 - Consumes: API base URL, Chat session ID, optional selected draft/skill context.
@@ -73,15 +73,15 @@ Expected: policy tests pass; MCP endpoint responds through its Streamable HTTP p
 
 - [ ] **Step 5: Commit**
 
-Run: `git add wemedia-studio/package.json wemedia-studio/pnpm-lock.yaml wemedia-studio/lib/ai/global-chat-tools.ts wemedia-studio/lib/ai/global-chat-tools.test.ts && git commit -m "feat(chat): discover global MCP tools"`
+Run: `git add web/package.json web/pnpm-lock.yaml web/lib/ai/global-chat-tools.ts web/lib/ai/global-chat-tools.test.ts && git commit -m "feat(chat): discover global MCP tools"`
 
 ### Task 2: Add durable image generation to the global registry
 
 **Files:**
-- Modify: `wemedia-studio/lib/ai/global-chat-tools.ts`
-- Modify: `wemedia-studio/lib/ai/global-chat-tools.test.ts`
-- Modify: `wemedia-studio/app/api/chat/route.ts`
-- Modify: `wemedia-studio/app/api/chat/route.test.ts`
+- Modify: `web/lib/ai/global-chat-tools.ts`
+- Modify: `web/lib/ai/global-chat-tools.test.ts`
+- Modify: `web/app/api/chat/route.ts`
+- Modify: `web/app/api/chat/route.test.ts`
 
 **Interfaces:**
 - Produces: native `generateImage({ kind, note? })` tool.
@@ -125,17 +125,17 @@ parts through the assistant response message.
 
 Run: `pnpm exec vitest run lib/ai/global-chat-tools.test.ts app/api/chat/route.test.ts && pnpm exec tsc --noEmit`
 
-Run: `git add wemedia-studio/lib/ai/global-chat-tools.ts wemedia-studio/lib/ai/global-chat-tools.test.ts wemedia-studio/app/api/chat/route.ts wemedia-studio/app/api/chat/route.test.ts && git commit -m "feat(chat): add durable image tool"`
+Run: `git add web/lib/ai/global-chat-tools.ts web/lib/ai/global-chat-tools.test.ts web/app/api/chat/route.ts web/app/api/chat/route.test.ts && git commit -m "feat(chat): add durable image tool"`
 
 ### Task 3: Persist and resume tool approvals
 
 **Files:**
 - Modify: `backend/routers/chat.py`
 - Modify: `backend/tests/test_chat_router.py`
-- Modify: `wemedia-studio/app/api/chat/route.ts`
-- Modify: `wemedia-studio/app/api/chat/route.test.ts`
-- Modify: `wemedia-studio/lib/api/chat.ts`
-- Modify: `wemedia-studio/lib/api/chat.test.ts`
+- Modify: `web/app/api/chat/route.ts`
+- Modify: `web/app/api/chat/route.test.ts`
+- Modify: `web/lib/api/chat.ts`
+- Modify: `web/lib/api/chat.test.ts`
 
 **Interfaces:**
 - Produces: `PATCH /api/chat/sessions/{sessionId}/messages/{messageId}` to replace persisted assistant `parts` after an approval decision.
@@ -174,13 +174,13 @@ The client sends no new user message when replying to an approval request.
 
 Run: `conda run -n wems pytest tests/test_chat_router.py -q && pnpm exec vitest run app/api/chat/route.test.ts lib/api/chat.test.ts && pnpm exec tsc --noEmit`
 
-Run: `git add backend/routers/chat.py backend/tests/test_chat_router.py wemedia-studio/app/api/chat/route.ts wemedia-studio/app/api/chat/route.test.ts wemedia-studio/lib/api/chat.ts wemedia-studio/lib/api/chat.test.ts && git commit -m "feat(chat): approve sensitive tools"`
+Run: `git add backend/routers/chat.py backend/tests/test_chat_router.py web/app/api/chat/route.ts web/app/api/chat/route.test.ts web/lib/api/chat.ts web/lib/api/chat.test.ts && git commit -m "feat(chat): approve sensitive tools"`
 
 ### Task 4: Render global tool state and approval controls
 
 **Files:**
-- Modify: `wemedia-studio/app/chat/ChatClient.tsx`
-- Modify: `wemedia-studio/app/chat/chat-layout.test.ts`
+- Modify: `web/app/chat/ChatClient.tsx`
+- Modify: `web/app/chat/chat-layout.test.ts`
 
 **Interfaces:**
 - Consumes: assistant `tool-*` parts with optional `approval` state.
@@ -217,4 +217,4 @@ Run: `pnpm test && pnpm exec tsc --noEmit && pnpm build && conda run -n wems pyt
 
 Expected: all suites pass and `/chat` plus `/api/chat/skills` build successfully.
 
-Run: `git add wemedia-studio/app/chat/ChatClient.tsx wemedia-studio/app/chat/chat-layout.test.ts && git commit -m "feat(chat): confirm sensitive global tools"`
+Run: `git add web/app/chat/ChatClient.tsx web/app/chat/chat-layout.test.ts && git commit -m "feat(chat): confirm sensitive global tools"`

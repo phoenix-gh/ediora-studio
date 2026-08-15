@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add a complete “数字人口播” workflow that creates reusable single-photo HeyGen avatars with cloned voices, edits AI-assisted scripts, renders versioned talking videos with environment images, and persists completed MP4 files in WeMediaStudio creative assets.
+**Goal:** Add a complete “数字人口播” workflow that creates reusable single-photo HeyGen avatars with cloned voices, edits AI-assisted scripts, renders versioned talking videos with environment images, and persists completed MP4 files in Ediora creative assets.
 
 **Architecture:** Python/FastAPI owns the digital-human, talking-project, render-version, settings, and creative-asset domain records in Postgres. The existing Redis-backed Node worker executes two new durable flows against a focused HeyGen V3 TypeScript client, while a dedicated Next.js AI route returns editable script candidates. The existing Next.js UI adds a role library and three-column talking-video editor.
 
@@ -397,8 +397,8 @@ git commit -m "feat(digital-human): expose role and talking-video APIs"
 ### Task 4: Implement a typed HeyGen V3 client with retry classification
 
 **Files:**
-- Create: `wemedia-studio/lib/heygen/client.ts`
-- Create: `wemedia-studio/lib/heygen/client.test.ts`
+- Create: `web/lib/heygen/client.ts`
+- Create: `web/lib/heygen/client.test.ts`
 
 **Interfaces:**
 - Produces:
@@ -460,7 +460,7 @@ it.each([
 
 - [ ] **Step 2: Run client tests and verify failure**
 
-Run: `cd wemedia-studio && pnpm test -- lib/heygen/client.test.ts`
+Run: `cd web && pnpm test -- lib/heygen/client.test.ts`
 
 Expected: FAIL because the client does not exist.
 
@@ -489,14 +489,14 @@ Use `/v3/assets`, `/v3/avatars`, `/v3/avatars/${groupId}`, `/v3/avatars/looks/${
 
 - [ ] **Step 5: Run HeyGen client tests**
 
-Run: `cd wemedia-studio && pnpm test -- lib/heygen/client.test.ts`
+Run: `cd web && pnpm test -- lib/heygen/client.test.ts`
 
 Expected: PASS.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add wemedia-studio/lib/heygen/client.ts wemedia-studio/lib/heygen/client.test.ts
+git add web/lib/heygen/client.ts web/lib/heygen/client.test.ts
 git commit -m "feat(heygen): add typed V3 API client"
 ```
 
@@ -505,11 +505,11 @@ git commit -m "feat(heygen): add typed V3 API client"
 ### Task 5: Execute role setup and video render as durable worker flows
 
 **Files:**
-- Create: `wemedia-studio/lib/ai/digital-human-job.ts`
-- Create: `wemedia-studio/lib/ai/digital-human-job.test.ts`
-- Modify: `wemedia-studio/scripts/content-worker.ts`
-- Modify: `wemedia-studio/lib/ai/job-client.ts`
-- Modify: `wemedia-studio/lib/api/jobs.ts`
+- Create: `web/lib/ai/digital-human-job.ts`
+- Create: `web/lib/ai/digital-human-job.test.ts`
+- Modify: `web/scripts/content-worker.ts`
+- Modify: `web/lib/ai/job-client.ts`
+- Modify: `web/lib/api/jobs.ts`
 
 **Interfaces:**
 - Consumes: Task 3 worker APIs and Task 4 HeyGen client.
@@ -567,7 +567,7 @@ it('downloads HeyGen output and saves a local creative video asset', async () =>
 
 - [ ] **Step 3: Run job tests to verify failure**
 
-Run: `cd wemedia-studio && pnpm test -- lib/ai/digital-human-job.test.ts`
+Run: `cd web && pnpm test -- lib/ai/digital-human-job.test.ts`
 
 Expected: FAIL because the orchestration module is missing.
 
@@ -617,7 +617,7 @@ else if (job.flow === 'x_response') ...
 Run:
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm test -- lib/ai/digital-human-job.test.ts lib/ai/content-job.test.ts lib/ai/job-client-retryability.test.ts
 ```
 
@@ -626,7 +626,7 @@ Expected: PASS.
 - [ ] **Step 8: Commit**
 
 ```bash
-git add wemedia-studio/lib/ai/digital-human-job.ts wemedia-studio/lib/ai/digital-human-job.test.ts wemedia-studio/scripts/content-worker.ts wemedia-studio/lib/ai/job-client.ts wemedia-studio/lib/api/jobs.ts
+git add web/lib/ai/digital-human-job.ts web/lib/ai/digital-human-job.test.ts web/scripts/content-worker.ts web/lib/ai/job-client.ts web/lib/api/jobs.ts
 git commit -m "feat(heygen): run durable avatar and render jobs"
 ```
 
@@ -635,10 +635,10 @@ git commit -m "feat(heygen): run durable avatar and render jobs"
 ### Task 6: Add AI script generation, draft conversion, and rewriting
 
 **Files:**
-- Create: `wemedia-studio/app/api/digital-human/script/route.ts`
-- Create: `wemedia-studio/app/api/digital-human/script/route.test.ts`
-- Create: `wemedia-studio/lib/ai/talking-script.ts`
-- Create: `wemedia-studio/lib/ai/talking-script.test.ts`
+- Create: `web/app/api/digital-human/script/route.ts`
+- Create: `web/app/api/digital-human/script/route.test.ts`
+- Create: `web/lib/ai/talking-script.ts`
+- Create: `web/lib/ai/talking-script.test.ts`
 
 **Interfaces:**
 - Consumes: hidden `/settings/ai-runtime` and current configured OpenAI-compatible provider.
@@ -677,7 +677,7 @@ Route tests mock `generateText`, configured model loading, and draft fetch. They
 
 - [ ] **Step 2: Run script tests and verify failure**
 
-Run: `cd wemedia-studio && pnpm test -- lib/ai/talking-script.test.ts app/api/digital-human/script/route.test.ts`
+Run: `cd web && pnpm test -- lib/ai/talking-script.test.ts app/api/digital-human/script/route.test.ts`
 
 Expected: FAIL because the route/helpers do not exist.
 
@@ -691,14 +691,14 @@ Load the selected draft from `GET /write/drafts/{draftId}` only for `convert_dra
 
 - [ ] **Step 5: Run tests**
 
-Run: `cd wemedia-studio && pnpm test -- lib/ai/talking-script.test.ts app/api/digital-human/script/route.test.ts`
+Run: `cd web && pnpm test -- lib/ai/talking-script.test.ts app/api/digital-human/script/route.test.ts`
 
 Expected: PASS.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add wemedia-studio/app/api/digital-human/script/route.ts wemedia-studio/app/api/digital-human/script/route.test.ts wemedia-studio/lib/ai/talking-script.ts wemedia-studio/lib/ai/talking-script.test.ts
+git add web/app/api/digital-human/script/route.ts web/app/api/digital-human/script/route.test.ts web/lib/ai/talking-script.ts web/lib/ai/talking-script.test.ts
 git commit -m "feat(digital-human): add AI talking-script assistance"
 ```
 
@@ -707,14 +707,14 @@ git commit -m "feat(digital-human): add AI talking-script assistance"
 ### Task 7: Add frontend API contracts, HeyGen settings UI, and navigation
 
 **Files:**
-- Create: `wemedia-studio/lib/api/digital-humans.ts`
-- Create: `wemedia-studio/lib/api/digital-humans.test.ts`
-- Modify: `wemedia-studio/lib/api/settings.ts`
-- Modify: `wemedia-studio/lib/api/settings-test-fixtures.ts`
-- Create: `wemedia-studio/app/settings/sections/HeyGenSection.tsx`
-- Modify: `wemedia-studio/app/settings/SettingsClient.tsx`
-- Modify: `wemedia-studio/components/features/Sidebar.tsx`
-- Create: `wemedia-studio/components/features/sidebar-digital-human.test.ts`
+- Create: `web/lib/api/digital-humans.ts`
+- Create: `web/lib/api/digital-humans.test.ts`
+- Modify: `web/lib/api/settings.ts`
+- Modify: `web/lib/api/settings-test-fixtures.ts`
+- Create: `web/app/settings/sections/HeyGenSection.tsx`
+- Modify: `web/app/settings/SettingsClient.tsx`
+- Modify: `web/components/features/Sidebar.tsx`
+- Create: `web/components/features/sidebar-digital-human.test.ts`
 
 **Interfaces:**
 - Produces typed API functions for roles/projects/renders plus `generateTalkingScript()`.
@@ -742,7 +742,7 @@ it('uses the unambiguous creation menu label', () => {
 
 - [ ] **Step 2: Run frontend API tests and verify failure**
 
-Run: `cd wemedia-studio && pnpm test -- lib/api/digital-humans.test.ts components/features/sidebar-digital-human.test.ts`
+Run: `cd web && pnpm test -- lib/api/digital-humans.test.ts components/features/sidebar-digital-human.test.ts`
 
 Expected: FAIL because the API module/menu item are missing.
 
@@ -769,7 +769,7 @@ Place `{ href: '/digital-humans', label: '数字人口播', icon: PersonStanding
 Run:
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm test -- lib/api/digital-humans.test.ts components/features/sidebar-digital-human.test.ts
 pnpm exec tsc --noEmit
 ```
@@ -779,7 +779,7 @@ Expected: PASS.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add wemedia-studio/lib/api/digital-humans.ts wemedia-studio/lib/api/digital-humans.test.ts wemedia-studio/lib/api/settings.ts wemedia-studio/lib/api/settings-test-fixtures.ts wemedia-studio/app/settings/sections/HeyGenSection.tsx wemedia-studio/app/settings/SettingsClient.tsx wemedia-studio/components/features/Sidebar.tsx wemedia-studio/components/features/sidebar-digital-human.test.ts
+git add web/lib/api/digital-humans.ts web/lib/api/digital-humans.test.ts web/lib/api/settings.ts web/lib/api/settings-test-fixtures.ts web/app/settings/sections/HeyGenSection.tsx web/app/settings/SettingsClient.tsx web/components/features/Sidebar.tsx web/components/features/sidebar-digital-human.test.ts
 git commit -m "feat(ui): configure and navigate HeyGen talking videos"
 ```
 
@@ -788,12 +788,12 @@ git commit -m "feat(ui): configure and navigate HeyGen talking videos"
 ### Task 8: Build the digital-human role library and creation workflow
 
 **Files:**
-- Create: `wemedia-studio/app/digital-humans/page.tsx`
-- Create: `wemedia-studio/app/digital-humans/DigitalHumansClient.tsx`
-- Create: `wemedia-studio/app/digital-humans/RoleLibrary.tsx`
-- Create: `wemedia-studio/app/digital-humans/RoleEditorDialog.tsx`
-- Create: `wemedia-studio/app/digital-humans/EnvironmentPickerDialog.tsx`
-- Create: `wemedia-studio/app/digital-humans/role-management.test.tsx`
+- Create: `web/app/digital-humans/page.tsx`
+- Create: `web/app/digital-humans/DigitalHumansClient.tsx`
+- Create: `web/app/digital-humans/RoleLibrary.tsx`
+- Create: `web/app/digital-humans/RoleEditorDialog.tsx`
+- Create: `web/app/digital-humans/EnvironmentPickerDialog.tsx`
+- Create: `web/app/digital-humans/role-management.test.tsx`
 
 **Interfaces:**
 - Consumes: Task 7 API module, creative assets API, and `standalone_image` job.
@@ -832,7 +832,7 @@ it('offers upload asset and AI generation for environment images', () => {
 
 - [ ] **Step 2: Run component tests and verify failure**
 
-Run: `cd wemedia-studio && pnpm test -- app/digital-humans/role-management.test.tsx`
+Run: `cd web && pnpm test -- app/digital-humans/role-management.test.tsx`
 
 Expected: FAIL because the components are missing.
 
@@ -862,7 +862,7 @@ Create `standalone_image` with the free-text prompt, poll the job, extract `asse
 Run:
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm test -- app/digital-humans/role-management.test.tsx
 pnpm exec tsc --noEmit
 ```
@@ -872,7 +872,7 @@ Expected: PASS.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add wemedia-studio/app/digital-humans/page.tsx wemedia-studio/app/digital-humans/DigitalHumansClient.tsx wemedia-studio/app/digital-humans/RoleLibrary.tsx wemedia-studio/app/digital-humans/RoleEditorDialog.tsx wemedia-studio/app/digital-humans/EnvironmentPickerDialog.tsx wemedia-studio/app/digital-humans/role-management.test.tsx
+git add web/app/digital-humans/page.tsx web/app/digital-humans/DigitalHumansClient.tsx web/app/digital-humans/RoleLibrary.tsx web/app/digital-humans/RoleEditorDialog.tsx web/app/digital-humans/EnvironmentPickerDialog.tsx web/app/digital-humans/role-management.test.tsx
 git commit -m "feat(ui): create and manage digital-human roles"
 ```
 
@@ -881,12 +881,12 @@ git commit -m "feat(ui): create and manage digital-human roles"
 ### Task 9: Build the three-column talking-video editor and render versions
 
 **Files:**
-- Create: `wemedia-studio/app/digital-humans/TalkingProjectList.tsx`
-- Create: `wemedia-studio/app/digital-humans/TalkingVideoEditor.tsx`
-- Create: `wemedia-studio/app/digital-humans/ScriptAssistantDialog.tsx`
-- Create: `wemedia-studio/app/digital-humans/RenderVersionsPanel.tsx`
-- Create: `wemedia-studio/app/digital-humans/talking-video-editor.test.tsx`
-- Create: `wemedia-studio/app/digital-humans/talking-video-layout.test.ts`
+- Create: `web/app/digital-humans/TalkingProjectList.tsx`
+- Create: `web/app/digital-humans/TalkingVideoEditor.tsx`
+- Create: `web/app/digital-humans/ScriptAssistantDialog.tsx`
+- Create: `web/app/digital-humans/RenderVersionsPanel.tsx`
+- Create: `web/app/digital-humans/talking-video-editor.test.tsx`
+- Create: `web/app/digital-humans/talking-video-layout.test.ts`
 
 **Interfaces:**
 - Consumes: Tasks 6–8.
@@ -923,7 +923,7 @@ it('keeps earlier successful versions after generating another render', async ()
 
 - [ ] **Step 2: Run editor tests and verify failure**
 
-Run: `cd wemedia-studio && pnpm test -- app/digital-humans/talking-video-editor.test.tsx app/digital-humans/talking-video-layout.test.ts`
+Run: `cd web && pnpm test -- app/digital-humans/talking-video-editor.test.tsx app/digital-humans/talking-video-layout.test.ts`
 
 Expected: FAIL because the editor components are missing.
 
@@ -967,7 +967,7 @@ Poll the project every 3 seconds while any render is queued/running. Display loc
 Run:
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm test -- app/digital-humans/talking-video-editor.test.tsx app/digital-humans/talking-video-layout.test.ts
 pnpm test
 pnpm exec tsc --noEmit
@@ -978,7 +978,7 @@ Expected: PASS.
 - [ ] **Step 9: Commit**
 
 ```bash
-git add wemedia-studio/app/digital-humans/TalkingProjectList.tsx wemedia-studio/app/digital-humans/TalkingVideoEditor.tsx wemedia-studio/app/digital-humans/ScriptAssistantDialog.tsx wemedia-studio/app/digital-humans/RenderVersionsPanel.tsx wemedia-studio/app/digital-humans/talking-video-editor.test.tsx wemedia-studio/app/digital-humans/talking-video-layout.test.ts
+git add web/app/digital-humans/TalkingProjectList.tsx web/app/digital-humans/TalkingVideoEditor.tsx web/app/digital-humans/ScriptAssistantDialog.tsx web/app/digital-humans/RenderVersionsPanel.tsx web/app/digital-humans/talking-video-editor.test.tsx web/app/digital-humans/talking-video-layout.test.ts
 git commit -m "feat(ui): add HeyGen talking-video workbench"
 ```
 
@@ -990,9 +990,9 @@ git commit -m "feat(ui): add HeyGen talking-video workbench"
 - Modify: `docker-compose.yml`
 - Modify: `.env.example`
 - Modify: `README.md`
-- Modify: `wemedia-studio/README.md`
+- Modify: `web/README.md`
 - Create: `backend/tests/test_digital_human_end_to_end.py`
-- Create: `wemedia-studio/lib/ai/digital-human-live-smoke.ts`
+- Create: `web/lib/ai/digital-human-live-smoke.ts`
 
 **Interfaces:**
 - Consumes all prior tasks.
@@ -1083,7 +1083,7 @@ Run:
 
 ```bash
 conda run -n wems pytest backend/tests/test_digital_human_service.py backend/tests/test_heygen_settings.py backend/tests/test_digital_humans_router.py backend/tests/test_talking_videos_router.py backend/tests/test_digital_human_end_to_end.py -q
-cd wemedia-studio
+cd web
 pnpm test
 pnpm exec tsc --noEmit
 pnpm build
@@ -1099,10 +1099,10 @@ Start API, Redis/worker, and frontend with the host Redis URL:
 cd backend
 WMS_REDIS_URL=redis://127.0.0.1:6379/0 conda run -n wems uvicorn main:app --host 0.0.0.0 --port 8000
 
-cd wemedia-studio
+cd web
 WMS_REDIS_URL=redis://127.0.0.1:6379/0 WMS_API_URL=http://127.0.0.1:8000/api pnpm jobs:worker
 
-cd wemedia-studio
+cd web
 pnpm dev
 ```
 
@@ -1121,7 +1121,7 @@ Verify at `/digital-humans`:
 Run:
 
 ```bash
-cd wemedia-studio
+cd web
 HEYGEN_API_KEY="$HEYGEN_API_KEY" \
 HEYGEN_SMOKE_PORTRAIT="$HEYGEN_SMOKE_PORTRAIT" \
 HEYGEN_SMOKE_VOICE="$HEYGEN_SMOKE_VOICE" \
@@ -1134,7 +1134,7 @@ Expected: avatar and voice reach ready/complete, video reaches completed, downlo
 - [ ] **Step 8: Commit**
 
 ```bash
-git add docker-compose.yml .env.example README.md wemedia-studio/README.md backend/tests/test_digital_human_end_to_end.py wemedia-studio/lib/ai/digital-human-live-smoke.ts
+git add docker-compose.yml .env.example README.md web/README.md backend/tests/test_digital_human_end_to_end.py web/lib/ai/digital-human-live-smoke.ts
 git commit -m "docs(digital-human): verify HeyGen talking-video workflow"
 ```
 
@@ -1144,7 +1144,7 @@ git commit -m "docs(digital-human): verify HeyGen talking-video workflow"
 
 Before claiming completion, collect current evidence for every item:
 
-1. `rg "数字人口播|口播作品|数字人角色" wemedia-studio` proves approved copy is wired.
+1. `rg "数字人口播|口播作品|数字人角色" web` proves approved copy is wired.
 2. Backend tests prove role/project/render persistence, snapshots, versions, deletion rules, and settings secrecy.
 3. HeyGen client tests prove exact V3 paths, bodies, idempotency, and retry classification.
 4. Worker tests prove setup and render flows resume from persisted provider state.

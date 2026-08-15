@@ -23,16 +23,16 @@
 ### Task 1: Add the typed transcript API contract
 
 **Files:**
-- Create: `wemedia-studio/lib/api/youtube.test.ts`
-- Modify: `wemedia-studio/lib/api/youtube.ts`
+- Create: `web/lib/api/youtube.test.ts`
+- Modify: `web/lib/api/youtube.ts`
 
 **Interfaces:**
-- Consumes: existing `apiFetch<T>(path, init?)` from `wemedia-studio/lib/api/client.ts`.
+- Consumes: existing `apiFetch<T>(path, init?)` from `web/lib/api/client.ts`.
 - Produces: `YoutubeTranscriptSegment`, `YoutubeTranscript`, and `getYoutubeTranscript(videoId: string): Promise<YoutubeTranscript>`.
 
 - [ ] **Step 1: Write the failing API test**
 
-Create `wemedia-studio/lib/api/youtube.test.ts` with a fetch-backed contract test:
+Create `web/lib/api/youtube.test.ts` with a fetch-backed contract test:
 
 ```ts
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -77,7 +77,7 @@ describe('getYoutubeTranscript', () => {
 Run:
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm test -- lib/api/youtube.test.ts
 ```
 
@@ -85,7 +85,7 @@ Expected: FAIL because `getYoutubeTranscript` is not exported.
 
 - [ ] **Step 3: Add the minimal response types and reader**
 
-Append to `wemedia-studio/lib/api/youtube.ts`:
+Append to `web/lib/api/youtube.ts`:
 
 ```ts
 export interface YoutubeTranscriptSegment {
@@ -116,7 +116,7 @@ export async function getYoutubeTranscript(id: string): Promise<YoutubeTranscrip
 Run:
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm test -- lib/api/youtube.test.ts
 ```
 
@@ -125,7 +125,7 @@ Expected: PASS with one test and no warnings.
 - [ ] **Step 5: Commit the API contract**
 
 ```bash
-git add wemedia-studio/lib/api/youtube.ts wemedia-studio/lib/api/youtube.test.ts
+git add web/lib/api/youtube.ts web/lib/api/youtube.test.ts
 git commit -m "feat: add youtube transcript client"
 ```
 
@@ -134,8 +134,8 @@ git commit -m "feat: add youtube transcript client"
 ### Task 2: Build the ready-only transcript dialog
 
 **Files:**
-- Create: `wemedia-studio/app/youtube/YoutubeTranscriptDialog.tsx`
-- Create: `wemedia-studio/app/youtube/YoutubeTranscriptDialog.test.tsx`
+- Create: `web/app/youtube/YoutubeTranscriptDialog.tsx`
+- Create: `web/app/youtube/YoutubeTranscriptDialog.test.tsx`
 
 **Interfaces:**
 - Consumes: `YoutubeVideo`, `YoutubeTranscript`, and `getYoutubeTranscript(videoId)` from `@/lib/api/youtube`.
@@ -252,7 +252,7 @@ describe('YoutubeTranscriptDialog', () => {
 Run:
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm test -- app/youtube/YoutubeTranscriptDialog.test.tsx
 ```
 
@@ -402,7 +402,7 @@ Segment links use `target="_blank"` and `rel="noopener noreferrer"`; invalid tim
 Run:
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm test -- app/youtube/YoutubeTranscriptDialog.test.tsx
 ```
 
@@ -415,7 +415,7 @@ Temporarily remove the `ready` guard and confirm the failed-status test fails; r
 - [ ] **Step 6: Commit the transcript dialog**
 
 ```bash
-git add wemedia-studio/app/youtube/YoutubeTranscriptDialog.tsx wemedia-studio/app/youtube/YoutubeTranscriptDialog.test.tsx
+git add web/app/youtube/YoutubeTranscriptDialog.tsx web/app/youtube/YoutubeTranscriptDialog.test.tsx
 git commit -m "feat: add youtube transcript dialog"
 ```
 
@@ -424,9 +424,9 @@ git commit -m "feat: add youtube transcript dialog"
 ### Task 3: Wire the dialog into video cards and verify the feature
 
 **Files:**
-- Modify: `wemedia-studio/app/youtube/YoutubeClient.tsx:1-18`
-- Modify: `wemedia-studio/app/youtube/YoutubeClient.tsx:358-463`
-- Create: `wemedia-studio/app/youtube/YoutubeClient.test.tsx`
+- Modify: `web/app/youtube/YoutubeClient.tsx:1-18`
+- Modify: `web/app/youtube/YoutubeClient.tsx:358-463`
+- Create: `web/app/youtube/YoutubeClient.test.tsx`
 
 **Interfaces:**
 - Consumes: `YoutubeTranscriptDialog({ video })` from Task 2.
@@ -481,7 +481,7 @@ describe('YoutubeClient transcript integration', () => {
 Run the exact test file selected in Step 1:
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm test -- app/youtube/YoutubeClient.test.tsx
 ```
 
@@ -508,7 +508,7 @@ Do not alter the existing `查看分析`, `重新分析`, `提取字幕并分析
 Run:
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm test -- lib/api/youtube.test.ts app/youtube/YoutubeTranscriptDialog.test.tsx app/youtube/YoutubeClient.test.tsx
 ```
 
@@ -519,10 +519,10 @@ Expected: all selected files PASS with zero failed tests.
 Run:
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm exec eslint lib/api/youtube.ts lib/api/youtube.test.ts app/youtube/YoutubeClient.tsx app/youtube/YoutubeTranscriptDialog.tsx app/youtube/YoutubeTranscriptDialog.test.tsx app/youtube/YoutubeClient.test.tsx
 cd ..
-git diff --check -- wemedia-studio/lib/api/youtube.ts wemedia-studio/lib/api/youtube.test.ts wemedia-studio/app/youtube/YoutubeClient.tsx wemedia-studio/app/youtube/YoutubeTranscriptDialog.tsx wemedia-studio/app/youtube/YoutubeTranscriptDialog.test.tsx wemedia-studio/app/youtube/YoutubeClient.test.tsx
+git diff --check -- web/lib/api/youtube.ts web/lib/api/youtube.test.ts web/app/youtube/YoutubeClient.tsx web/app/youtube/YoutubeTranscriptDialog.tsx web/app/youtube/YoutubeTranscriptDialog.test.tsx web/app/youtube/YoutubeClient.test.tsx
 ```
 
 Expected: ESLint exits 0 with no new errors; `git diff --check` prints nothing.
@@ -543,6 +543,6 @@ If no stored ready video is available, use the component tests as the controlled
 - [ ] **Step 7: Commit the integration**
 
 ```bash
-git add wemedia-studio/app/youtube/YoutubeClient.tsx wemedia-studio/app/youtube/YoutubeClient.test.tsx
+git add web/app/youtube/YoutubeClient.tsx web/app/youtube/YoutubeClient.test.tsx
 git commit -m "feat: show transcripts on youtube videos"
 ```

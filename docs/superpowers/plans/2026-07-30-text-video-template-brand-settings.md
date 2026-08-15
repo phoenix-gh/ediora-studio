@@ -43,31 +43,31 @@
 
 ### Frontend and Remotion
 
-- `wemedia-studio/remotion/types.ts`：增加模板设置字段和分组描述类型。
-- `wemedia-studio/remotion/templates/tech-text-v1/config.ts`：第一模板 Zod schema、默认值、设置描述与背景枚举。
-- `wemedia-studio/remotion/templates/tech-text-v1/manifest.ts`：组装组件与独立配置。
-- `wemedia-studio/remotion/templates/tech-text-v1/Composition.tsx`：只根据已校验参数渲染品牌、背景和辅助元素。
-- `wemedia-studio/remotion/templates/tech-text-v1/Composition.test.tsx`：品牌、开关、背景和强调色渲染测试。
-- `wemedia-studio/remotion/contract.test.ts`：旧参数补齐、严格字段和描述一致性测试。
-- `wemedia-studio/components/features/text-video/TemplateSettingsForm.tsx`：设置页和作品对话框共享的清单驱动表单。
-- `wemedia-studio/components/features/text-video/TemplateSettingsForm.test.tsx`：通用控件和字段错误测试。
-- `wemedia-studio/app/settings/sections/TextVideoSection.tsx`：平台模板默认值编辑。
-- `wemedia-studio/app/settings/sections/TextVideoSection.test.tsx`：读取、修改和保存默认值。
-- `wemedia-studio/app/settings/SettingsClient.tsx`：增加“文字视频”设置入口。
-- `wemedia-studio/app/settings/SettingsClient.test.tsx`：设置导航回归。
-- `wemedia-studio/lib/api/settings.ts`：设置 API 类型。
-- `wemedia-studio/lib/api/settings-test-fixtures.ts`：前端设置测试默认数据。
-- `wemedia-studio/lib/api/text-videos.ts`：公开 `output_stale`。
-- `wemedia-studio/lib/text-video/test-fixtures.ts`：前端文字视频测试数据。
-- `wemedia-studio/app/text-video/TemplateSettingsDialog.tsx`：作品级设置草稿、预览、恢复默认和确认保存。
-- `wemedia-studio/app/text-video/TemplateSettingsDialog.test.tsx`：取消、预览、恢复和错误行为。
-- `wemedia-studio/app/text-video/VideoStage.tsx`：模板设置入口与上一版成片提示。
-- `wemedia-studio/app/text-video/VideoStage.test.tsx`：入口和过期状态测试。
-- `wemedia-studio/app/text-video/TextVideoWorkbench.tsx`：把作品设置保存动作传递给视频阶段。
-- `wemedia-studio/app/text-video/TextVideoEditorClient.tsx`：原子更新本地项目并立即 flush。
-- `wemedia-studio/app/text-video/useTextVideoAutosave.ts`：允许 `markDirty(nextProject)` 同步更新保存快照。
-- `wemedia-studio/app/text-video/useTextVideoAutosave.test.tsx`：同一交互周期内立即保存新项目快照。
-- `wemedia-studio/e2e/text-video-production.spec.ts`：真实页面对话框与持久化回归。
+- `web/remotion/types.ts`：增加模板设置字段和分组描述类型。
+- `web/remotion/templates/tech-text-v1/config.ts`：第一模板 Zod schema、默认值、设置描述与背景枚举。
+- `web/remotion/templates/tech-text-v1/manifest.ts`：组装组件与独立配置。
+- `web/remotion/templates/tech-text-v1/Composition.tsx`：只根据已校验参数渲染品牌、背景和辅助元素。
+- `web/remotion/templates/tech-text-v1/Composition.test.tsx`：品牌、开关、背景和强调色渲染测试。
+- `web/remotion/contract.test.ts`：旧参数补齐、严格字段和描述一致性测试。
+- `web/components/features/text-video/TemplateSettingsForm.tsx`：设置页和作品对话框共享的清单驱动表单。
+- `web/components/features/text-video/TemplateSettingsForm.test.tsx`：通用控件和字段错误测试。
+- `web/app/settings/sections/TextVideoSection.tsx`：平台模板默认值编辑。
+- `web/app/settings/sections/TextVideoSection.test.tsx`：读取、修改和保存默认值。
+- `web/app/settings/SettingsClient.tsx`：增加“文字视频”设置入口。
+- `web/app/settings/SettingsClient.test.tsx`：设置导航回归。
+- `web/lib/api/settings.ts`：设置 API 类型。
+- `web/lib/api/settings-test-fixtures.ts`：前端设置测试默认数据。
+- `web/lib/api/text-videos.ts`：公开 `output_stale`。
+- `web/lib/text-video/test-fixtures.ts`：前端文字视频测试数据。
+- `web/app/text-video/TemplateSettingsDialog.tsx`：作品级设置草稿、预览、恢复默认和确认保存。
+- `web/app/text-video/TemplateSettingsDialog.test.tsx`：取消、预览、恢复和错误行为。
+- `web/app/text-video/VideoStage.tsx`：模板设置入口与上一版成片提示。
+- `web/app/text-video/VideoStage.test.tsx`：入口和过期状态测试。
+- `web/app/text-video/TextVideoWorkbench.tsx`：把作品设置保存动作传递给视频阶段。
+- `web/app/text-video/TextVideoEditorClient.tsx`：原子更新本地项目并立即 flush。
+- `web/app/text-video/useTextVideoAutosave.ts`：允许 `markDirty(nextProject)` 同步更新保存快照。
+- `web/app/text-video/useTextVideoAutosave.test.tsx`：同一交互周期内立即保存新项目快照。
+- `web/e2e/text-video-production.spec.ts`：真实页面对话框与持久化回归。
 
 ---
 
@@ -432,14 +432,14 @@ git commit --only -m "feat: persist text video template defaults" -- \
 ### Task 4: Frontend Manifest Contract and Remotion Rendering
 
 **Files:**
-- Modify: `wemedia-studio/remotion/types.ts`
-- Create: `wemedia-studio/remotion/templates/tech-text-v1/config.ts`
-- Modify: `wemedia-studio/remotion/templates/tech-text-v1/manifest.ts`
-- Modify: `wemedia-studio/remotion/templates/tech-text-v1/Composition.tsx`
-- Create: `wemedia-studio/remotion/templates/tech-text-v1/Composition.test.tsx`
-- Modify: `wemedia-studio/remotion/contract.test.ts`
-- Modify: `wemedia-studio/remotion/registry.test.ts`
-- Modify: `wemedia-studio/remotion/Root.test.ts`
+- Modify: `web/remotion/types.ts`
+- Create: `web/remotion/templates/tech-text-v1/config.ts`
+- Modify: `web/remotion/templates/tech-text-v1/manifest.ts`
+- Modify: `web/remotion/templates/tech-text-v1/Composition.tsx`
+- Create: `web/remotion/templates/tech-text-v1/Composition.test.tsx`
+- Modify: `web/remotion/contract.test.ts`
+- Modify: `web/remotion/registry.test.ts`
+- Modify: `web/remotion/Root.test.ts`
 
 **Interfaces:**
 - Produces: `TextVideoTemplateSettingField<P>` and `TextVideoTemplateSettingGroup<P>`
@@ -476,7 +476,7 @@ Mock Remotion frame/config hooks and render the composition. Assert default text
 Run:
 
 ```bash
-cd wemedia-studio
+cd web
 npm test -- \
   remotion/contract.test.ts \
   remotion/templates/tech-text-v1/Composition.test.tsx
@@ -539,7 +539,7 @@ No user string may be interpolated into a raw CSS declaration other than the val
 Run:
 
 ```bash
-cd wemedia-studio
+cd web
 npm test -- \
   remotion/contract.test.ts \
   remotion/registry.test.ts \
@@ -552,23 +552,23 @@ Expected: all pass.
 - [ ] **Step 7: Commit the rendering contract**
 
 ```bash
-git add wemedia-studio/remotion/types.ts \
-  wemedia-studio/remotion/templates/tech-text-v1/config.ts \
-  wemedia-studio/remotion/templates/tech-text-v1/manifest.ts \
-  wemedia-studio/remotion/templates/tech-text-v1/Composition.tsx \
-  wemedia-studio/remotion/templates/tech-text-v1/Composition.test.tsx \
-  wemedia-studio/remotion/contract.test.ts \
-  wemedia-studio/remotion/registry.test.ts \
-  wemedia-studio/remotion/Root.test.ts
+git add web/remotion/types.ts \
+  web/remotion/templates/tech-text-v1/config.ts \
+  web/remotion/templates/tech-text-v1/manifest.ts \
+  web/remotion/templates/tech-text-v1/Composition.tsx \
+  web/remotion/templates/tech-text-v1/Composition.test.tsx \
+  web/remotion/contract.test.ts \
+  web/remotion/registry.test.ts \
+  web/remotion/Root.test.ts
 git commit --only -m "feat: make first text video template configurable" -- \
-  wemedia-studio/remotion/types.ts \
-  wemedia-studio/remotion/templates/tech-text-v1/config.ts \
-  wemedia-studio/remotion/templates/tech-text-v1/manifest.ts \
-  wemedia-studio/remotion/templates/tech-text-v1/Composition.tsx \
-  wemedia-studio/remotion/templates/tech-text-v1/Composition.test.tsx \
-  wemedia-studio/remotion/contract.test.ts \
-  wemedia-studio/remotion/registry.test.ts \
-  wemedia-studio/remotion/Root.test.ts
+  web/remotion/types.ts \
+  web/remotion/templates/tech-text-v1/config.ts \
+  web/remotion/templates/tech-text-v1/manifest.ts \
+  web/remotion/templates/tech-text-v1/Composition.tsx \
+  web/remotion/templates/tech-text-v1/Composition.test.tsx \
+  web/remotion/contract.test.ts \
+  web/remotion/registry.test.ts \
+  web/remotion/Root.test.ts
 ```
 
 ---
@@ -576,14 +576,14 @@ git commit --only -m "feat: make first text video template configurable" -- \
 ### Task 5: Shared Form and Platform Settings Page
 
 **Files:**
-- Create: `wemedia-studio/components/features/text-video/TemplateSettingsForm.tsx`
-- Create: `wemedia-studio/components/features/text-video/TemplateSettingsForm.test.tsx`
-- Create: `wemedia-studio/app/settings/sections/TextVideoSection.tsx`
-- Create: `wemedia-studio/app/settings/sections/TextVideoSection.test.tsx`
-- Modify: `wemedia-studio/app/settings/SettingsClient.tsx`
-- Modify: `wemedia-studio/app/settings/SettingsClient.test.tsx`
-- Modify: `wemedia-studio/lib/api/settings.ts`
-- Modify: `wemedia-studio/lib/api/settings-test-fixtures.ts`
+- Create: `web/components/features/text-video/TemplateSettingsForm.tsx`
+- Create: `web/components/features/text-video/TemplateSettingsForm.test.tsx`
+- Create: `web/app/settings/sections/TextVideoSection.tsx`
+- Create: `web/app/settings/sections/TextVideoSection.test.tsx`
+- Modify: `web/app/settings/SettingsClient.tsx`
+- Modify: `web/app/settings/SettingsClient.test.tsx`
+- Modify: `web/lib/api/settings.ts`
+- Modify: `web/lib/api/settings-test-fixtures.ts`
 
 **Interfaces:**
 - Consumes: `manifest.settings`, `manifest.propsSchema`, and `manifest.defaults`
@@ -615,7 +615,7 @@ Add settings-section tests that save a changed map through `updateSettings`.
 Run:
 
 ```bash
-cd wemedia-studio
+cd web
 npm test -- \
   components/features/text-video/TemplateSettingsForm.test.tsx \
   app/settings/sections/TextVideoSection.test.tsx \
@@ -670,7 +670,7 @@ Add `text-video` to `SectionId`, navigation, title map, imports, and render swit
 Run:
 
 ```bash
-cd wemedia-studio
+cd web
 npm test -- \
   components/features/text-video/TemplateSettingsForm.test.tsx \
   app/settings/sections/TextVideoSection.test.tsx \
@@ -683,23 +683,23 @@ Expected: all pass.
 - [ ] **Step 8: Commit the shared UI and settings page**
 
 ```bash
-git add wemedia-studio/components/features/text-video/TemplateSettingsForm.tsx \
-  wemedia-studio/components/features/text-video/TemplateSettingsForm.test.tsx \
-  wemedia-studio/app/settings/sections/TextVideoSection.tsx \
-  wemedia-studio/app/settings/sections/TextVideoSection.test.tsx \
-  wemedia-studio/app/settings/SettingsClient.tsx \
-  wemedia-studio/app/settings/SettingsClient.test.tsx \
-  wemedia-studio/lib/api/settings.ts \
-  wemedia-studio/lib/api/settings-test-fixtures.ts
+git add web/components/features/text-video/TemplateSettingsForm.tsx \
+  web/components/features/text-video/TemplateSettingsForm.test.tsx \
+  web/app/settings/sections/TextVideoSection.tsx \
+  web/app/settings/sections/TextVideoSection.test.tsx \
+  web/app/settings/SettingsClient.tsx \
+  web/app/settings/SettingsClient.test.tsx \
+  web/lib/api/settings.ts \
+  web/lib/api/settings-test-fixtures.ts
 git commit --only -m "feat: configure default text video visuals" -- \
-  wemedia-studio/components/features/text-video/TemplateSettingsForm.tsx \
-  wemedia-studio/components/features/text-video/TemplateSettingsForm.test.tsx \
-  wemedia-studio/app/settings/sections/TextVideoSection.tsx \
-  wemedia-studio/app/settings/sections/TextVideoSection.test.tsx \
-  wemedia-studio/app/settings/SettingsClient.tsx \
-  wemedia-studio/app/settings/SettingsClient.test.tsx \
-  wemedia-studio/lib/api/settings.ts \
-  wemedia-studio/lib/api/settings-test-fixtures.ts
+  web/components/features/text-video/TemplateSettingsForm.tsx \
+  web/components/features/text-video/TemplateSettingsForm.test.tsx \
+  web/app/settings/sections/TextVideoSection.tsx \
+  web/app/settings/sections/TextVideoSection.test.tsx \
+  web/app/settings/SettingsClient.tsx \
+  web/app/settings/SettingsClient.test.tsx \
+  web/lib/api/settings.ts \
+  web/lib/api/settings-test-fixtures.ts
 ```
 
 ---
@@ -707,18 +707,18 @@ git commit --only -m "feat: configure default text video visuals" -- \
 ### Task 6: Work-Level Settings Dialog and Atomic Save
 
 **Files:**
-- Create: `wemedia-studio/app/text-video/TemplateSettingsDialog.tsx`
-- Create: `wemedia-studio/app/text-video/TemplateSettingsDialog.test.tsx`
-- Modify: `wemedia-studio/app/text-video/VideoStage.tsx`
-- Modify: `wemedia-studio/app/text-video/VideoStage.test.tsx`
-- Modify: `wemedia-studio/app/text-video/TextVideoWorkbench.tsx`
-- Modify: `wemedia-studio/app/text-video/TextVideoWorkbench.test.tsx`
-- Modify: `wemedia-studio/app/text-video/TextVideoEditorClient.tsx`
-- Modify: `wemedia-studio/app/text-video/TextVideoEditorClient.test.tsx`
-- Modify: `wemedia-studio/app/text-video/useTextVideoAutosave.ts`
-- Modify: `wemedia-studio/app/text-video/useTextVideoAutosave.test.tsx`
-- Modify: `wemedia-studio/lib/api/text-videos.ts`
-- Modify: `wemedia-studio/lib/text-video/test-fixtures.ts`
+- Create: `web/app/text-video/TemplateSettingsDialog.tsx`
+- Create: `web/app/text-video/TemplateSettingsDialog.test.tsx`
+- Modify: `web/app/text-video/VideoStage.tsx`
+- Modify: `web/app/text-video/VideoStage.test.tsx`
+- Modify: `web/app/text-video/TextVideoWorkbench.tsx`
+- Modify: `web/app/text-video/TextVideoWorkbench.test.tsx`
+- Modify: `web/app/text-video/TextVideoEditorClient.tsx`
+- Modify: `web/app/text-video/TextVideoEditorClient.test.tsx`
+- Modify: `web/app/text-video/useTextVideoAutosave.ts`
+- Modify: `web/app/text-video/useTextVideoAutosave.test.tsx`
+- Modify: `web/lib/api/text-videos.ts`
+- Modify: `web/lib/text-video/test-fixtures.ts`
 
 **Interfaces:**
 - Consumes: shared `TemplateSettingsForm` and `getSettings()`
@@ -761,7 +761,7 @@ Dialog tests must cover:
 Run:
 
 ```bash
-cd wemedia-studio
+cd web
 npm test -- \
   app/text-video/useTextVideoAutosave.test.tsx \
   app/text-video/TemplateSettingsDialog.test.tsx \
@@ -829,7 +829,7 @@ Add `output_stale` to API and fixture types. If both `output_asset_url` and `out
 Run:
 
 ```bash
-cd wemedia-studio
+cd web
 npm test -- \
   app/text-video/useTextVideoAutosave.test.tsx \
   app/text-video/TemplateSettingsDialog.test.tsx \
@@ -844,31 +844,31 @@ Expected: all pass.
 - [ ] **Step 8: Commit the work-level UI**
 
 ```bash
-git add wemedia-studio/app/text-video/TemplateSettingsDialog.tsx \
-  wemedia-studio/app/text-video/TemplateSettingsDialog.test.tsx \
-  wemedia-studio/app/text-video/VideoStage.tsx \
-  wemedia-studio/app/text-video/VideoStage.test.tsx \
-  wemedia-studio/app/text-video/TextVideoWorkbench.tsx \
-  wemedia-studio/app/text-video/TextVideoWorkbench.test.tsx \
-  wemedia-studio/app/text-video/TextVideoEditorClient.tsx \
-  wemedia-studio/app/text-video/TextVideoEditorClient.test.tsx \
-  wemedia-studio/app/text-video/useTextVideoAutosave.ts \
-  wemedia-studio/app/text-video/useTextVideoAutosave.test.tsx \
-  wemedia-studio/lib/api/text-videos.ts \
-  wemedia-studio/lib/text-video/test-fixtures.ts
+git add web/app/text-video/TemplateSettingsDialog.tsx \
+  web/app/text-video/TemplateSettingsDialog.test.tsx \
+  web/app/text-video/VideoStage.tsx \
+  web/app/text-video/VideoStage.test.tsx \
+  web/app/text-video/TextVideoWorkbench.tsx \
+  web/app/text-video/TextVideoWorkbench.test.tsx \
+  web/app/text-video/TextVideoEditorClient.tsx \
+  web/app/text-video/TextVideoEditorClient.test.tsx \
+  web/app/text-video/useTextVideoAutosave.ts \
+  web/app/text-video/useTextVideoAutosave.test.tsx \
+  web/lib/api/text-videos.ts \
+  web/lib/text-video/test-fixtures.ts
 git commit --only -m "feat: edit template visuals per text video" -- \
-  wemedia-studio/app/text-video/TemplateSettingsDialog.tsx \
-  wemedia-studio/app/text-video/TemplateSettingsDialog.test.tsx \
-  wemedia-studio/app/text-video/VideoStage.tsx \
-  wemedia-studio/app/text-video/VideoStage.test.tsx \
-  wemedia-studio/app/text-video/TextVideoWorkbench.tsx \
-  wemedia-studio/app/text-video/TextVideoWorkbench.test.tsx \
-  wemedia-studio/app/text-video/TextVideoEditorClient.tsx \
-  wemedia-studio/app/text-video/TextVideoEditorClient.test.tsx \
-  wemedia-studio/app/text-video/useTextVideoAutosave.ts \
-  wemedia-studio/app/text-video/useTextVideoAutosave.test.tsx \
-  wemedia-studio/lib/api/text-videos.ts \
-  wemedia-studio/lib/text-video/test-fixtures.ts
+  web/app/text-video/TemplateSettingsDialog.tsx \
+  web/app/text-video/TemplateSettingsDialog.test.tsx \
+  web/app/text-video/VideoStage.tsx \
+  web/app/text-video/VideoStage.test.tsx \
+  web/app/text-video/TextVideoWorkbench.tsx \
+  web/app/text-video/TextVideoWorkbench.test.tsx \
+  web/app/text-video/TextVideoEditorClient.tsx \
+  web/app/text-video/TextVideoEditorClient.test.tsx \
+  web/app/text-video/useTextVideoAutosave.ts \
+  web/app/text-video/useTextVideoAutosave.test.tsx \
+  web/lib/api/text-videos.ts \
+  web/lib/text-video/test-fixtures.ts
 ```
 
 ---
@@ -876,7 +876,7 @@ git commit --only -m "feat: edit template visuals per text video" -- \
 ### Task 7: End-to-End Verification and Visual QA
 
 **Files:**
-- Modify: `wemedia-studio/e2e/text-video-production.spec.ts`
+- Modify: `web/e2e/text-video-production.spec.ts`
 - Modify only if verification exposes a defect: files owned by Tasks 1–6
 
 **Interfaces:**
@@ -919,7 +919,7 @@ Expected: all pass with no skipped feature tests.
 Run:
 
 ```bash
-cd wemedia-studio
+cd web
 npm test -- \
   remotion \
   components/features/text-video \
@@ -935,7 +935,7 @@ Expected: all pass.
 Run:
 
 ```bash
-cd wemedia-studio
+cd web
 npm run lint -- \
   remotion \
   components/features/text-video \
@@ -953,7 +953,7 @@ Expected: zero lint errors and a successful Next.js production build.
 With the API and web services using the current checkout:
 
 ```bash
-cd wemedia-studio
+cd web
 npx playwright test e2e/text-video-production.spec.ts
 ```
 
@@ -972,9 +972,9 @@ Confirm safe-area placement, no clipped text, readable contrast, dialog scrollin
 - [ ] **Step 7: Commit only the end-to-end test if changed**
 
 ```bash
-git add wemedia-studio/e2e/text-video-production.spec.ts
+git add web/e2e/text-video-production.spec.ts
 git commit --only -m "test: cover text video template settings flow" -- \
-  wemedia-studio/e2e/text-video-production.spec.ts
+  web/e2e/text-video-production.spec.ts
 ```
 
 - [ ] **Step 8: Record final evidence**

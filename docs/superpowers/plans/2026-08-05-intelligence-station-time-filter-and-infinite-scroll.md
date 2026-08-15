@@ -62,10 +62,10 @@ Expected: all tests pass.
 ### Task 2: Add the client API and time-filter controls
 
 **Files:**
-- Modify: `wemedia-studio/lib/api/responses.ts`
-- Modify: `wemedia-studio/app/responses/page.tsx`
-- Modify: `wemedia-studio/app/responses/ResponsesClient.tsx`
-- Test: `wemedia-studio/app/responses/ResponsesClient.test.tsx`
+- Modify: `web/lib/api/responses.ts`
+- Modify: `web/app/responses/page.tsx`
+- Modify: `web/app/responses/ResponsesClient.tsx`
+- Test: `web/app/responses/ResponsesClient.test.tsx`
 
 **Interfaces:**
 - `getResponses` accepts `days?: number` and `page?: number`.
@@ -94,9 +94,9 @@ Expected: all tests pass.
 ### Task 3: Append paginated results with infinite scrolling
 
 **Files:**
-- Modify: `wemedia-studio/app/responses/ResponsesClient.tsx`
-- Test: `wemedia-studio/app/responses/ResponsesClient.test.tsx`
-- Modify: `wemedia-studio/e2e/intelligence-station.spec.ts`
+- Modify: `web/app/responses/ResponsesClient.tsx`
+- Test: `web/app/responses/ResponsesClient.test.tsx`
+- Modify: `web/e2e/intelligence-station.spec.ts`
 
 **Interfaces:**
 - The list sentinel triggers `GET /api/responses?page=2` when more results exist.

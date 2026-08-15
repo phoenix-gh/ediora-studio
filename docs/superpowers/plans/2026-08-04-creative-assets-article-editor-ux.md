@@ -27,9 +27,9 @@
 ### Task 1: Scope the Markdown Preview Default
 
 **Files:**
-- Modify: `wemedia-studio/app/drafts/MarkdownEditor.tsx`
-- Test: `wemedia-studio/app/drafts/MarkdownEditor.test.tsx`
-- Modify: `wemedia-studio/app/assets/ArticleAssetWorkspace.tsx`
+- Modify: `web/app/drafts/MarkdownEditor.tsx`
+- Test: `web/app/drafts/MarkdownEditor.test.tsx`
+- Modify: `web/app/assets/ArticleAssetWorkspace.tsx`
 
 **Interfaces:**
 - Consumes: `@uiw/react-md-editor` preview values `'live' | 'edit' | 'preview'`.
@@ -97,8 +97,8 @@ Run `git diff --check` and confirm no unrelated hunk was added to the already-mo
 ### Task 2: Show Article Update Times
 
 **Files:**
-- Modify: `wemedia-studio/app/assets/ArticleAssetWorkspace.tsx`
-- Test: `wemedia-studio/app/assets/AssetsClient.test.tsx`
+- Modify: `web/app/assets/ArticleAssetWorkspace.tsx`
+- Test: `web/app/assets/AssetsClient.test.tsx`
 
 **Interfaces:**
 - Consumes: `CreativeAsset.updated_at: string`.
@@ -151,8 +151,8 @@ Run `git diff --check` and inspect only the article-row formatter/rendering hunk
 ### Task 3: Save the Selected Article with Ctrl/Cmd+S
 
 **Files:**
-- Modify: `wemedia-studio/app/assets/AssetsClient.tsx`
-- Test: `wemedia-studio/app/assets/AssetsClient.test.tsx`
+- Modify: `web/app/assets/AssetsClient.tsx`
+- Test: `web/app/assets/AssetsClient.test.tsx`
 
 **Interfaces:**
 - Consumes: existing `saveSelectedArticle(): Promise<void>`, `articleDialog`, and `savingAssetId` state.
@@ -225,8 +225,8 @@ Run `git diff --check` and `git status --short`. Report the exact verification r
 ### Task 4: Compact the Article List Rows
 
 **Files:**
-- Modify: `wemedia-studio/app/assets/ArticleAssetWorkspace.tsx`
-- Test: `wemedia-studio/app/assets/AssetsClient.test.tsx`
+- Modify: `web/app/assets/ArticleAssetWorkspace.tsx`
+- Test: `web/app/assets/AssetsClient.test.tsx`
 
 **Interfaces:**
 - Consumes: `CreativeAsset.title`, `CreativeAsset.content`, and the existing formatted update time.
@@ -295,8 +295,8 @@ Run `git diff --check` and inspect the target hunks. Keep implementation changes
 ### Task 5: Derive Missing List Titles from the First Body Line
 
 **Files:**
-- Modify: `wemedia-studio/app/assets/ArticleAssetWorkspace.tsx`
-- Test: `wemedia-studio/app/assets/AssetsClient.test.tsx`
+- Modify: `web/app/assets/ArticleAssetWorkspace.tsx`
+- Test: `web/app/assets/AssetsClient.test.tsx`
 
 **Interfaces:**
 - Consumes: `CreativeAsset.title: string` and `CreativeAsset.content: string`.

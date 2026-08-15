@@ -290,8 +290,8 @@ Background:
 工作流模板放在：
 
 ```text
-wemedia-studio/lib/comfyui/workflows/h3-ref2va-v1.json
-wemedia-studio/lib/comfyui/workflows/h3-ref2va-v1.meta.json
+web/lib/comfyui/workflows/h3-ref2va-v1.json
+web/lib/comfyui/workflows/h3-ref2va-v1.meta.json
 ```
 
 `meta.json` 固定输入输出映射，禁止在代码里硬编码 ComfyUI 节点数字 ID：
@@ -510,7 +510,7 @@ TypeScript：
 
 ### PR 1 — ComfyUI 设置与客户端
 
-- 影响：`backend/config.py`、`backend/routers/settings.py`、`wemedia-studio/app/settings/**`、`wemedia-studio/lib/comfyui/client.ts`、对应测试
+- 影响：`backend/config.py`、`backend/routers/settings.py`、`web/app/settings/**`、`web/lib/comfyui/client.ts`、对应测试
 - 依赖：无
 - 保存/脱敏/runtime/连通性测试；尚不接业务 job
 

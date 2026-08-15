@@ -6,16 +6,16 @@
 
 **Architecture:** 新增 `TodayPlan` dashboard 区块组件（镜像现有 `ReleasesToday`），把现成的 `getTodayPlan()` 并进 `app/page.tsx` 的服务端数据获取，渲染在 AlertsBar 之后、ReleasesToday 之前。零后端改动、零新接口。
 
-**Tech Stack:** Next.js App Router（前端目录 `wemedia-studio/`，pnpm）、Tailwind、lucide-react。无前端单测框架——自动化验证用 `pnpm exec tsc --noEmit`，再手动冒烟。
+**Tech Stack:** Next.js App Router（前端目录 `web/`，pnpm）、Tailwind、lucide-react。无前端单测框架——自动化验证用 `pnpm exec tsc --noEmit`，再手动冒烟。
 
-**约定：** Bash 先 `source ~/.zshrc`；前端命令在 `wemedia-studio/` 下用 `pnpm`。设计见 `docs/superpowers/specs/2026-06-14-home-today-plan-section-design.md`。⚠️ 本项目 Next.js 为非标准 pin 版——镜像现有页面/组件写法，别自创模式。
+**约定：** Bash 先 `source ~/.zshrc`；前端命令在 `web/` 下用 `pnpm`。设计见 `docs/superpowers/specs/2026-06-14-home-today-plan-section-design.md`。⚠️ 本项目 Next.js 为非标准 pin 版——镜像现有页面/组件写法，别自创模式。
 
 ---
 
 ## File Structure
 
-- `wemedia-studio/components/features/dashboard/TodayPlan.tsx` — 新建。今日计划只读区块（header + 列表/空卡）。Props `{ plan: DailyPlan | null }`。
-- `wemedia-studio/app/page.tsx` — 修改。并入 `getTodayPlan()`、渲染 `<TodayPlan>`。
+- `web/components/features/dashboard/TodayPlan.tsx` — 新建。今日计划只读区块（header + 列表/空卡）。Props `{ plan: DailyPlan | null }`。
+- `web/app/page.tsx` — 修改。并入 `getTodayPlan()`、渲染 `<TodayPlan>`。
 
 依赖（均已存在，勿改）：`lib/api/daily-plan.ts`（`getTodayPlan`、`DailyPlan`、`DailyPlanItem` 类型）、`components/features/dashboard/ReleasesToday.tsx`（镜像样式参照）。
 
@@ -24,11 +24,11 @@
 ## Task 1: TodayPlan 区块组件
 
 **Files:**
-- Create: `wemedia-studio/components/features/dashboard/TodayPlan.tsx`
+- Create: `web/components/features/dashboard/TodayPlan.tsx`
 
 - [ ] **Step 1: 创建组件**
 
-新建 `wemedia-studio/components/features/dashboard/TodayPlan.tsx`：
+新建 `web/components/features/dashboard/TodayPlan.tsx`：
 
 ```tsx
 import Link from 'next/link'
@@ -110,13 +110,13 @@ export function TodayPlan({ plan }: { plan: DailyPlan | null }) {
 
 - [ ] **Step 2: 类型检查**
 
-Run: `source ~/.zshrc; cd /workspace/projects/WeMediaStudio/wemedia-studio && pnpm exec tsc --noEmit`
+Run: `source ~/.zshrc; cd /workspace/projects/WeMediaStudio/web && pnpm exec tsc --noEmit`
 Expected: 无 TypeScript 错误输出（忽略 zsh glob 噪音）。组件自洽（只依赖已存在的 `daily-plan.ts` 类型），即使尚未被引用也应通过。
 
 - [ ] **Step 3: Commit**
 
 ```bash
-cd /workspace/projects/WeMediaStudio && git add wemedia-studio/components/features/dashboard/TodayPlan.tsx && git commit -m "feat(home-today-plan): TodayPlan 今日计划区块组件"
+cd /workspace/projects/WeMediaStudio && git add web/components/features/dashboard/TodayPlan.tsx && git commit -m "feat(home-today-plan): TodayPlan 今日计划区块组件"
 ```
 
 ---
@@ -124,11 +124,11 @@ cd /workspace/projects/WeMediaStudio && git add wemedia-studio/components/featur
 ## Task 2: 接入首页 page.tsx
 
 **Files:**
-- Modify: `wemedia-studio/app/page.tsx`
+- Modify: `web/app/page.tsx`
 
 - [ ] **Step 1: 替换 page.tsx**
 
-把 `wemedia-studio/app/page.tsx` 整文件替换为（并入 `getTodayPlan`，渲染 `<TodayPlan>` 在 AlertsBar 后、ReleasesToday 前；注意计划结果命名 `todayPlanResp`，避免与已有日期变量 `today` 冲突）：
+把 `web/app/page.tsx` 整文件替换为（并入 `getTodayPlan`，渲染 `<TodayPlan>` 在 AlertsBar 后、ReleasesToday 前；注意计划结果命名 `todayPlanResp`，避免与已有日期变量 `today` 冲突）：
 
 ```tsx
 import { getDashboardOverview, EMPTY_OVERVIEW } from '@/lib/api/dashboard'
@@ -178,20 +178,20 @@ export default async function Dashboard() {
 
 - [ ] **Step 2: 类型检查**
 
-Run: `source ~/.zshrc; cd /workspace/projects/WeMediaStudio/wemedia-studio && pnpm exec tsc --noEmit`
+Run: `source ~/.zshrc; cd /workspace/projects/WeMediaStudio/web && pnpm exec tsc --noEmit`
 Expected: 无 TypeScript 错误输出。
 
 - [ ] **Step 3: Commit**
 
 ```bash
-cd /workspace/projects/WeMediaStudio && git add wemedia-studio/app/page.tsx && git commit -m "feat(home-today-plan): 首页接入今日计划区"
+cd /workspace/projects/WeMediaStudio && git add web/app/page.tsx && git commit -m "feat(home-today-plan): 首页接入今日计划区"
 ```
 
 ---
 
 ## 收尾验证
 
-- [ ] **类型检查**：`source ~/.zshrc; cd /workspace/projects/WeMediaStudio/wemedia-studio && pnpm exec tsc --noEmit` → 零错误。
+- [ ] **类型检查**：`source ~/.zshrc; cd /workspace/projects/WeMediaStudio/web && pnpm exec tsc --noEmit` → 零错误。
 - [ ] **手动冒烟**：起前后端，访问首页 `/`：
   - 当天已有计划（多条不同状态）→ 「今日计划」区在「今日可写 GitHub」上方，条目按 待入队→已入队→已跳过 排序，体裁/状态徽标正确，已跳过项标题带删除线；点 header「去今日计划」跳 `/daily-plan`。
   - 当天无计划（plan=null，可临时停掉 8 点 cron 或新库）→ 显示虚线空卡「今日计划尚未生成 · 去生成」，点击跳 `/daily-plan`。

@@ -20,8 +20,8 @@
 ### Task 1: Markdown 插入工具
 
 **Files:**
-- Modify: `wemedia-studio/lib/ai/content-job.ts`
-- Test: `wemedia-studio/lib/ai/content-job.test.ts`
+- Modify: `web/lib/ai/content-job.ts`
+- Test: `web/lib/ai/content-job.test.ts`
 
 **Interfaces:** Produces `insertInlineImage(content, imageUrl, anchorHeading) => { content, placement }`。
 
@@ -51,13 +51,13 @@ Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
-Run: `git add wemedia-studio/lib/ai/content-job.ts wemedia-studio/lib/ai/content-job.test.ts && git commit -m "feat: add idempotent inline image insertion"`
+Run: `git add web/lib/ai/content-job.ts web/lib/ai/content-job.test.ts && git commit -m "feat: add idempotent inline image insertion"`
 
 ### Task 2: 自动任务写回正文
 
 **Files:**
-- Modify: `wemedia-studio/lib/ai/content-job.ts`
-- Test: `wemedia-studio/lib/ai/content-job.test.ts`
+- Modify: `web/lib/ai/content-job.ts`
+- Test: `web/lib/ai/content-job.test.ts`
 
 **Interfaces:** Consumes Task 1 and existing draft GET/PATCH; produces `placements: Array<{ asset_id; asset_url; anchor_heading; placement }>` in an `illustrations` step output.
 
@@ -84,16 +84,16 @@ Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
-Run: `git add wemedia-studio/lib/ai/content-job.ts wemedia-studio/lib/ai/content-job.test.ts && git commit -m "feat: insert generated illustrations into drafts"`
+Run: `git add web/lib/ai/content-job.ts web/lib/ai/content-job.test.ts && git commit -m "feat: insert generated illustrations into drafts"`
 
 ### Task 3: 补插入已有插图
 
 **Files:**
 - Modify: `backend/routers/drafts.py`
 - Modify: `backend/tests/test_drafts_router.py`
-- Modify: `wemedia-studio/lib/api/drafts.ts`
-- Modify: `wemedia-studio/app/drafts/DraftAssetsDialog.tsx`
-- Test: `wemedia-studio/app/drafts/DraftAssetsDialog.test.tsx`
+- Modify: `web/lib/api/drafts.ts`
+- Modify: `web/app/drafts/DraftAssetsDialog.tsx`
+- Test: `web/app/drafts/DraftAssetsDialog.test.tsx`
 
 **Interfaces:** Produces `POST /write/drafts/{draft_id}/images/insert` with `{ image_id, anchor_heading }` and `{ draft, placement }`.
 
@@ -122,7 +122,7 @@ Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
-Run: `git add backend/routers/drafts.py backend/tests/test_drafts_router.py wemedia-studio/lib/api/drafts.ts wemedia-studio/app/drafts/DraftAssetsDialog.tsx wemedia-studio/app/drafts/DraftAssetsDialog.test.tsx && git commit -m "feat: support inserting existing draft illustrations"`
+Run: `git add backend/routers/drafts.py backend/tests/test_drafts_router.py web/lib/api/drafts.ts web/app/drafts/DraftAssetsDialog.tsx web/app/drafts/DraftAssetsDialog.test.tsx && git commit -m "feat: support inserting existing draft illustrations"`
 
 ### Task 4: Full verification and deployment
 

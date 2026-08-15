@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from collection_proxy import collection_client_kwargs
 from models import KrArticle, now_utc
 
 _UA = (
@@ -56,7 +57,10 @@ async def fetch_article_body(url: str, client: httpx.AsyncClient | None = None) 
     """Fetch a 36Kr article page and return its full HTML body."""
     owns_client = client is None
     if owns_client:
-        client = httpx.AsyncClient(timeout=15, follow_redirects=True)
+        client = httpx.AsyncClient(**await collection_client_kwargs(
+            timeout=15,
+            follow_redirects=True,
+        ))
     try:
         resp = await client.get(url, headers={"User-Agent": _UA})
         if resp.status_code != 200:
@@ -87,7 +91,10 @@ async def _enrich_with_bodies(items: list[dict], concurrency: int = 5) -> None:
     if not article_items:
         return
     sem = asyncio.Semaphore(concurrency)
-    async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
+    async with httpx.AsyncClient(**await collection_client_kwargs(
+        timeout=15,
+        follow_redirects=True,
+    )) as client:
         async def one(item):
             async with sem:
                 item["content"] = await fetch_article_body(item["url"], client)
@@ -108,7 +115,7 @@ async def _fetch_hot() -> list[dict]:
         "param": {"siteId": 1, "platformId": 2, "hotlistName": "web_top_hot"},
         "timestamp": 0,
     }
-    async with httpx.AsyncClient(timeout=20) as client:
+    async with httpx.AsyncClient(**await collection_client_kwargs(timeout=20)) as client:
         resp = await client.post(_HOT_API, headers=headers, json=body)
         resp.raise_for_status()
         data = resp.json()
@@ -188,7 +195,10 @@ def _parse_rss_items(body: str, feed_type: str) -> list[dict]:
 
 
 async def _fetch_rss(url: str, feed_type: str) -> list[dict]:
-    async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
+    async with httpx.AsyncClient(**await collection_client_kwargs(
+        timeout=20,
+        follow_redirects=True,
+    )) as client:
         resp = await client.get(url, headers={"User-Agent": _UA})
         resp.raise_for_status()
     return _parse_rss_items(resp.text, feed_type)

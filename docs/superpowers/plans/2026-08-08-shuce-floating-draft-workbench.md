@@ -13,7 +13,7 @@
 - 只使用现有 GET /api/write/drafts，不新增后端 endpoint。
 - 草稿正文只保存在当前页面内存，不写入 chrome.storage.local，service worker 不打印正文。
 - 只允许 http://localhost:8000/*、http://127.0.0.1:8000/* 作为 MVP API host permission，不使用 <all_urls>。
-- 不读取 Cookie、X Token、Authorization header 或 WeMediaStudio 登录凭据。
+- 不读取 Cookie、X Token、Authorization header 或 Ediora 登录凭据。
 - 所有草稿正文必须通过 textContent、value 或 pre 文本节点写入，禁止把正文当 HTML 注入。
 - 本次不自动发布、不修改草稿、不增加发布按钮；Shuce.publish() 保持现有行为。
 - 不引入 React、构建工具或第三方 UI 组件库。

@@ -30,12 +30,12 @@ backend/.scheduler_state.json
 # ── Node / pnpm ─────────────────────────────────────────
 node_modules/
 .pnpm-store/
-wemedia-studio/node_modules/
-wemedia-studio/.next/
-wemedia-studio/out/
-wemedia-studio/.turbo/
-wemedia-studio/tsconfig.tsbuildinfo
-wemedia-studio/.runtime/
+web/node_modules/
+web/.next/
+web/out/
+web/.turbo/
+web/tsconfig.tsbuildinfo
+web/.runtime/
 
 # ── Dev 服务管理 (dev.sh) ───────────────────────────────
 .run/

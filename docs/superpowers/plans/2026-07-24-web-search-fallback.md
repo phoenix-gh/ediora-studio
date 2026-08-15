@@ -148,10 +148,10 @@ git commit -m "feat(chat): expose web search tool"
 ### Task 4: Settings UI
 
 **Files:**
-- Modify: `wemedia-studio/lib/api/settings.ts`
-- Modify: `wemedia-studio/app/settings/SettingsClient.tsx`
-- Create: `wemedia-studio/app/settings/sections/WebSearchSection.tsx`
-- Create: `wemedia-studio/app/settings/sections/WebSearchSection.test.tsx`
+- Modify: `web/lib/api/settings.ts`
+- Modify: `web/app/settings/SettingsClient.tsx`
+- Create: `web/app/settings/sections/WebSearchSection.tsx`
+- Create: `web/app/settings/sections/WebSearchSection.test.tsx`
 
 **Interfaces:** The section consumes `AppSettings.web_search_providers`, then saves `{ web_search_providers }` with `updateSettings`.
 
@@ -181,6 +181,6 @@ Add API types, a `web-search` navigation item, and `WebSearchSection` with SearX
 Run: `pnpm exec vitest run app/settings/sections/WebSearchSection.test.tsx && pnpm exec tsc --noEmit && pnpm build`
 
 ```bash
-git add wemedia-studio/lib/api/settings.ts wemedia-studio/app/settings/SettingsClient.tsx wemedia-studio/app/settings/sections/WebSearchSection.tsx wemedia-studio/app/settings/sections/WebSearchSection.test.tsx
+git add web/lib/api/settings.ts web/app/settings/SettingsClient.tsx web/app/settings/sections/WebSearchSection.tsx web/app/settings/sections/WebSearchSection.test.tsx
 git commit -m "feat(settings): add web search configuration"
 ```

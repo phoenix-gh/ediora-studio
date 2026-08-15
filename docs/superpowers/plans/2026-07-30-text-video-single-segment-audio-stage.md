@@ -22,8 +22,8 @@
 ### Task 1: 单段时间轴状态内联
 
 **Files:**
-- Modify: `wemedia-studio/app/text-video/AudioStage.test.tsx`
-- Modify: `wemedia-studio/app/text-video/AudioStage.tsx`
+- Modify: `web/app/text-video/AudioStage.test.tsx`
+- Modify: `web/app/text-video/AudioStage.tsx`
 
 **Interfaces:**
 - Consumes: `TextVideoProject.master_audio`、`onBuildMasterAudio()`、`onRealignMasterAudio(jobId)`
@@ -52,7 +52,7 @@ expect(screen.getByTestId('single-segment-timeline-status'))
 Run:
 
 ```bash
-cd wemedia-studio
+cd web
 npm test -- app/text-video/AudioStage.test.tsx
 ```
 
@@ -94,7 +94,7 @@ failed -> '成片时间轴准备失败'
 Run:
 
 ```bash
-cd wemedia-studio
+cd web
 npm test -- app/text-video/AudioStage.test.tsx
 ```
 
@@ -106,7 +106,7 @@ Run:
 
 ```bash
 git diff --check
-git diff -- wemedia-studio/app/text-video/AudioStage.tsx wemedia-studio/app/text-video/AudioStage.test.tsx
+git diff -- web/app/text-video/AudioStage.tsx web/app/text-video/AudioStage.test.tsx
 ```
 
 Expected: `git diff --check` exit 0；差异仅包含单段内联状态、多段卡片命名及测试。
@@ -114,10 +114,10 @@ Expected: `git diff --check` exit 0；差异仅包含单段内联状态、多段
 ### Task 2: 工作台回归验证
 
 **Files:**
-- Verify: `wemedia-studio/app/text-video/TextVideoWorkbench.test.tsx`
-- Verify: `wemedia-studio/app/text-video/TextVideoEditorClient.test.tsx`
-- Verify: `wemedia-studio/app/text-video/TextVideoWorkbench.tsx`
-- Verify: `wemedia-studio/app/text-video/TextVideoEditorClient.tsx`
+- Verify: `web/app/text-video/TextVideoWorkbench.test.tsx`
+- Verify: `web/app/text-video/TextVideoEditorClient.test.tsx`
+- Verify: `web/app/text-video/TextVideoWorkbench.tsx`
+- Verify: `web/app/text-video/TextVideoEditorClient.tsx`
 
 **Interfaces:**
 - Consumes: `AudioStage`、`canEnterVideoStage(project)`、单段确认后的自动构建动作
@@ -128,7 +128,7 @@ Expected: `git diff --check` exit 0；差异仅包含单段内联状态、多段
 Run:
 
 ```bash
-cd wemedia-studio
+cd web
 npm test -- app/text-video/AudioStage.test.tsx app/text-video/TextVideoWorkbench.test.tsx app/text-video/TextVideoEditorClient.test.tsx
 ```
 
@@ -139,7 +139,7 @@ Expected: PASS；单段确认后仍自动准备时间轴，多段仍需显式生
 Run:
 
 ```bash
-cd wemedia-studio
+cd web
 npx eslint app/text-video/AudioStage.tsx app/text-video/AudioStage.test.tsx app/text-video/TextVideoWorkbench.tsx app/text-video/TextVideoWorkbench.test.tsx
 ```
 
@@ -150,7 +150,7 @@ Expected: exit 0，无 ESLint error。
 Run:
 
 ```bash
-cd wemedia-studio
+cd web
 npm test
 ```
 

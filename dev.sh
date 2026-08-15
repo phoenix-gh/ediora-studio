@@ -59,7 +59,7 @@ load_dev_environment() {
 load_dev_environment || exit 1
 
 BACKEND_DIR="$ROOT/backend"
-FRONTEND_DIR="$ROOT/wemedia-studio"
+FRONTEND_DIR="$ROOT/web"
 LOG_DIR="${WMS_DEV_LOG_DIR:-$ROOT/logs}"
 RUN_DIR="${WMS_DEV_RUN_DIR:-$ROOT/.run}"
 CONDA_ENV="${WMS_CONDA_ENV:-wems}"
@@ -526,7 +526,7 @@ cmd_start() {
   APPLICATION_CONFIG_FINGERPRINT="$(application_config_fingerprint)"
   STARTED_THIS_RUN=()
 
-  printf 'Starting WeMedia Studio local runtime...\n'
+  printf 'Starting Ediora local runtime...\n'
   ensure_postgres_ready || return 1
   if ! redis_transport_reusable && application_unit_has_state; then
     printf '  • Stopping API/Worker/Web before replacing Redis\n'
@@ -589,7 +589,7 @@ postgres_status() {
 cmd_stop() {
   local failed=0
   validate_runtime_ports || return 1
-  printf 'Stopping WeMedia Studio local runtime...\n'
+  printf 'Stopping Ediora local runtime...\n'
   stop_application_unit || failed=1
   if [ -e "$(metadata_path redis)" ]; then
     dev_stop_owned_service redis Redis "$(metadata_path redis)" || failed=1

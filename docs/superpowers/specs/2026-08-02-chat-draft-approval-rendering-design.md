@@ -8,7 +8,7 @@
 
 ## 方案
 
-在 `wemedia-studio/app/chat/ChatClient.tsx` 中让工具部件判定同时接受 `dynamic-tool`。继续复用已有 `ToolActivityGroup`、`respondToApproval()` 和服务端 `persistApproval()`，不新增绕过审批的写回通道。
+在 `web/app/chat/ChatClient.tsx` 中让工具部件判定同时接受 `dynamic-tool`。继续复用已有 `ToolActivityGroup`、`respondToApproval()` 和服务端 `persistApproval()`，不新增绕过审批的写回通道。
 
 不自动批准历史请求，不直接修改草稿 185，不改变 `requiresToolApproval("update_draft") === true` 的策略。修复上线后，重新打开会话即可看到历史待批准操作的按钮，由用户决定批准或拒绝。
 

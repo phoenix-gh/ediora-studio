@@ -35,8 +35,8 @@
 ### Task 2: Audit MCP Error Results as Failed
 
 **Files:**
-- Modify: `wemedia-studio/lib/ai/agent-tool-policy.test.ts`
-- Modify: `wemedia-studio/lib/ai/agent-tool-policy.ts`
+- Modify: `web/lib/ai/agent-tool-policy.test.ts`
+- Modify: `web/lib/ai/agent-tool-policy.ts`
 
 **Interfaces:**
 - Consumes: a tool execution result shaped as `{ isError: true, content: [...] }`.

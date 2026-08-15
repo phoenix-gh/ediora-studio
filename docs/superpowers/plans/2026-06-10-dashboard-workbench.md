@@ -833,15 +833,15 @@ git commit -m "feat(dashboard): 今日 Release（关联草稿）+ 今日产出�
 ## Task 7: 前端 — API 封装 + 三个组件
 
 **Files:**
-- Create: `wemedia-studio/lib/api/dashboard.ts`
-- Create: `wemedia-studio/components/features/dashboard/AlertsBar.tsx`
-- Create: `wemedia-studio/components/features/dashboard/SourceStatusGrid.tsx`
-- Create: `wemedia-studio/components/features/dashboard/ReleasesToday.tsx`
-- Create: `wemedia-studio/components/features/dashboard/GenerateDraftButton.tsx`
+- Create: `web/lib/api/dashboard.ts`
+- Create: `web/components/features/dashboard/AlertsBar.tsx`
+- Create: `web/components/features/dashboard/SourceStatusGrid.tsx`
+- Create: `web/components/features/dashboard/ReleasesToday.tsx`
+- Create: `web/components/features/dashboard/GenerateDraftButton.tsx`
 
 - [x] **Step 7.0: 按 AGENTS.md 要求先读本仓库 Next.js 文档**
 
-`ls wemedia-studio/node_modules/next/dist/docs/`，读 server/client components 与 app router 相关篇目（重点确认：server component 取数写法、`'use client'` 边界、`useRouter`/`router.refresh()` 是否仍来自 `next/navigation`）。与下面代码冲突时**以文档为准**改代码。
+`ls web/node_modules/next/dist/docs/`，读 server/client components 与 app router 相关篇目（重点确认：server component 取数写法、`'use client'` 边界、`useRouter`/`router.refresh()` 是否仍来自 `next/navigation`）。与下面代码冲突时**以文档为准**改代码。
 
 - [x] **Step 7.1: `lib/api/dashboard.ts`**
 
@@ -1099,7 +1099,7 @@ export function ReleasesToday({ releases }: { releases: ReleaseToday[] }) {
 - [x] **Step 7.6: 提交**
 
 ```bash
-git add wemedia-studio/lib/api/dashboard.ts wemedia-studio/components/features/dashboard/
+git add web/lib/api/dashboard.ts web/components/features/dashboard/
 git commit -m "feat(dashboard): 前端 API 封装 + 提醒条/Release/采集网格组件"
 ```
 
@@ -1108,7 +1108,7 @@ git commit -m "feat(dashboard): 前端 API 封装 + 提醒条/Release/采集网�
 ## Task 8: 前端 — 首页接入
 
 **Files:**
-- Modify: `wemedia-studio/app/page.tsx`
+- Modify: `web/app/page.tsx`
 
 - [x] **Step 8.1: 改造 page.tsx（推荐选题区块整段保留不动，只调整外层）**
 
@@ -1169,7 +1169,7 @@ export default async function Dashboard() {
 
 - [x] **Step 8.2: 类型检查 / 构建**
 
-Run: `source ~/.zshrc && cd wemedia-studio && npx tsc --noEmit 2>&1 | tail -5`（若项目无独立 tsc 配置则 `npm run build`）
+Run: `source ~/.zshrc && cd web && npx tsc --noEmit 2>&1 | tail -5`（若项目无独立 tsc 配置则 `npm run build`）
 Expected: 无类型错误。
 
 - [x] **Step 8.3: 后端起服务冒烟**
@@ -1183,7 +1183,7 @@ Expected: JSON 含 `"sources":[...13 项...]`。
 - [x] **Step 8.4: 提交**
 
 ```bash
-git add wemedia-studio/app/page.tsx
+git add web/app/page.tsx
 git commit -m "feat(dashboard): 首页工作台接入提醒区/今日 Release/采集状态网格"
 ```
 

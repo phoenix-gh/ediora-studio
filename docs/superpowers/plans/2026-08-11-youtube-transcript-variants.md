@@ -56,10 +56,10 @@
 ### Task 3: Add transcript version switching and reliable scrolling
 
 **Files:**
-- Modify: `wemedia-studio/lib/api/youtube.ts`
-- Modify: `wemedia-studio/lib/api/youtube.test.ts`
-- Modify: `wemedia-studio/app/youtube/YoutubeTranscriptDialog.tsx`
-- Modify: `wemedia-studio/app/youtube/YoutubeTranscriptDialog.test.tsx`
+- Modify: `web/lib/api/youtube.ts`
+- Modify: `web/lib/api/youtube.test.ts`
+- Modify: `web/app/youtube/YoutubeTranscriptDialog.tsx`
+- Modify: `web/app/youtube/YoutubeTranscriptDialog.test.tsx`
 
 **Interfaces:**
 - Consumes optional `YoutubeTranscript.chinese`.

@@ -150,8 +150,8 @@ disabled={selectedCount === 0 || enqueueing || accountId === '__none__'}
 |------|------|
 | `backend/pipeline_template.py` | 新增 `TOPIC_LONG_PIPELINE`、`TOPIC_SHORT_PIPELINE`，注册到 `PIPELINES` |
 | `backend/routers/topic_generator.py` | `EnqueueRequest.account_id` 必填，入队逻辑改用完整 pipeline 链，`EnqueueResponse` 增加 `pipeline_task_ids` |
-| `wemedia-studio/lib/api/topic-generator.ts` | `EnqueueRequest` 类型更新，`EnqueueResponse` 增加 `pipeline_task_ids` |
-| `wemedia-studio/app/trend-topics/TopicGeneratorClient.tsx` | 入队按钮增加账号校验，成功 toast 增加「查看看板」跳转 |
+| `web/lib/api/topic-generator.ts` | `EnqueueRequest` 类型更新，`EnqueueResponse` 增加 `pipeline_task_ids` |
+| `web/app/trend-topics/TopicGeneratorClient.tsx` | 入队按钮增加账号校验，成功 toast 增加「查看看板」跳转 |
 
 ---
 

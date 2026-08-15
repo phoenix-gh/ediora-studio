@@ -294,16 +294,16 @@ git commit -m "refactor(api): remove hot topic generator routes"
 ### Task 3: Remove frontend feature surfaces
 
 **Files:**
-- Modify: `wemedia-studio/app/x-responses/x-responses-layout.test.tsx`
-- Modify: `wemedia-studio/app/x-responses/XResponsesClient.tsx`
-- Modify: `wemedia-studio/lib/api/x-responses.ts`
-- Modify: `wemedia-studio/components/features/Sidebar.tsx`
+- Modify: `web/app/x-responses/x-responses-layout.test.tsx`
+- Modify: `web/app/x-responses/XResponsesClient.tsx`
+- Modify: `web/lib/api/x-responses.ts`
+- Modify: `web/components/features/Sidebar.tsx`
 - Modify: `README.md`
-- Delete: `wemedia-studio/app/trend-topics/TopicGeneratorClient.tsx`
-- Delete: `wemedia-studio/app/trend-topics/page.tsx`
-- Delete: `wemedia-studio/app/trend-topics/converted-responses.ts`
-- Delete: `wemedia-studio/app/trend-topics/converted-responses.test.ts`
-- Delete: `wemedia-studio/lib/api/topic-generator.ts`
+- Delete: `web/app/trend-topics/TopicGeneratorClient.tsx`
+- Delete: `web/app/trend-topics/page.tsx`
+- Delete: `web/app/trend-topics/converted-responses.ts`
+- Delete: `web/app/trend-topics/converted-responses.test.ts`
+- Delete: `web/lib/api/topic-generator.ts`
 
 **Interfaces:**
 - Removes: `/trend-topics`
@@ -312,7 +312,7 @@ git commit -m "refactor(api): remove hot topic generator routes"
 
 - [ ] **Step 1: Write failing frontend absence assertions**
 
-Update `wemedia-studio/app/x-responses/x-responses-layout.test.tsx` to read the
+Update `web/app/x-responses/x-responses-layout.test.tsx` to read the
 sidebar and X API sources and assert:
 
 ```typescript
@@ -329,7 +329,7 @@ expect(xResponseApi).not.toContain("'converted'")
 Run:
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm test app/x-responses/x-responses-layout.test.tsx
 ```
 
@@ -365,7 +365,7 @@ In `README.md`, remove “热点选题” from the active route list.
 Run:
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm test app/x-responses/x-responses-layout.test.tsx \
   app/x-responses/x-response-telegram-status.test.tsx
 pnpm exec tsc --noEmit
@@ -376,11 +376,11 @@ Expected: tests and TypeScript check pass.
 - [ ] **Step 5: Commit frontend removal**
 
 ```bash
-git add README.md wemedia-studio/app/x-responses \
-  wemedia-studio/lib/api/x-responses.ts \
-  wemedia-studio/components/features/Sidebar.tsx
-git rm -r wemedia-studio/app/trend-topics \
-  wemedia-studio/lib/api/topic-generator.ts
+git add README.md web/app/x-responses \
+  web/lib/api/x-responses.ts \
+  web/components/features/Sidebar.tsx
+git rm -r web/app/trend-topics \
+  web/lib/api/topic-generator.ts
 git commit -m "refactor(ui): remove hot topic generator"
 ```
 
@@ -401,7 +401,7 @@ Run:
 ```bash
 rg -n -i \
   "topic-generator|trend-topics|TopicGeneratorCache|转为选题|热点选题" \
-  backend wemedia-studio README.md \
+  backend web README.md \
   --glob '!**/node_modules/**' --glob '!**/.next/**'
 ```
 
@@ -423,7 +423,7 @@ Expected: all tests pass with zero failures.
 Run:
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm test
 pnpm exec tsc --noEmit
 pnpm build

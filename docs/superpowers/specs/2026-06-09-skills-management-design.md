@@ -7,7 +7,7 @@
 
 ## Goal
 
-WeMedia Studio 的 Hermes agent 技能由项目统一维护，通过 Profile 管理页面按需分配给各 agent。技能文件版本化在项目 Git 中，安装为 symlink，修改立即生效。
+Ediora 的 Hermes agent 技能由项目统一维护，通过 Profile 管理页面按需分配给各 agent。技能文件版本化在项目 Git 中，安装为 symlink，修改立即生效。
 
 ---
 
@@ -16,7 +16,7 @@ WeMedia Studio 的 Hermes agent 技能由项目统一维护，通过 Profile 管
 ### 项目侧（source of truth）
 
 ```
-WeMediaStudio/skills/
+Ediora/skills/
   article-drafting/
     SKILL.md
     references/          # 现有子目录保留
@@ -37,8 +37,8 @@ WeMediaStudio/skills/
 Per-profile 安装目标：
 ```
 ~/.hermes/profiles/{profile}/skills/wemedia/
-  article-drafting  →  symlink → WeMediaStudio/skills/article-drafting/
-  content-ideation  →  symlink → WeMediaStudio/skills/content-ideation/
+  article-drafting  →  symlink → Ediora/skills/article-drafting/
+  content-ideation  →  symlink → Ediora/skills/content-ideation/
 ```
 
 `wemedia/` 子目录作为命名空间，将项目技能与 profile 内其他技能隔离。
@@ -55,7 +55,7 @@ Per-profile 安装目标：
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
-| `GET` | `/skills/` | 列出所有可用项目技能（扫描 `WeMediaStudio/skills/`，解析 SKILL.md frontmatter） |
+| `GET` | `/skills/` | 列出所有可用项目技能（扫描 `Ediora/skills/`，解析 SKILL.md frontmatter） |
 
 响应结构：
 ```json
@@ -78,7 +78,7 @@ Per-profile 安装目标：
 | `DELETE` | `/profiles/{name}/project-skills/{skill}` | 卸载技能（删除 symlink） |
 
 **安装逻辑：**
-1. 确认 `WeMediaStudio/skills/{skill}/` 存在
+1. 确认 `Ediora/skills/{skill}/` 存在
 2. 确认 `~/.hermes/profiles/{profile}/skills/wemedia/` 目录存在（不存在则创建）
 3. `ln -s <project_skills_dir>/{skill} <profile_skills_dir>/wemedia/{skill}`
 4. 目标已存在但不是正确 symlink → 报错，不覆盖
@@ -124,7 +124,7 @@ Per-profile 安装目标：
   SOUL  |  工具集  |  项目技能          ← 新增 section
 
   项目技能
-  来自 WeMediaStudio/skills/
+  来自 Ediora/skills/
 
   ☑  article-drafting    从素材到初稿的文章写作
   ☑  content-ideation    从热点到选题的内容策划
@@ -152,7 +152,7 @@ Per-profile 安装目标：
 
 ## Migration
 
-将现有 `~/.hermes/skills/custom/` 中的 5 个技能文件复制到 `WeMediaStudio/skills/`：
+将现有 `~/.hermes/skills/custom/` 中的 5 个技能文件复制到 `Ediora/skills/`：
 - `article-drafting/`
 - `content-ideation/`
 - `x-post/`

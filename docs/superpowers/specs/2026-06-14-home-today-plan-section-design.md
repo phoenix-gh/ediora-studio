@@ -20,8 +20,8 @@
 
 ## 架构
 
-- 新增组件 `wemedia-studio/components/features/dashboard/TodayPlan.tsx`，镜像现有 `ReleasesToday.tsx` 的结构与样式（section + header + 列表/空卡）。
-- `wemedia-studio/app/page.tsx`：把 `getTodayPlan()` 并进现有 `Promise.all`，渲染 `<TodayPlan plan={...} />`，**位置在 `<AlertsBar>` 之后、`<ReleasesToday>` 之前**。
+- 新增组件 `web/components/features/dashboard/TodayPlan.tsx`，镜像现有 `ReleasesToday.tsx` 的结构与样式（section + header + 列表/空卡）。
+- `web/app/page.tsx`：把 `getTodayPlan()` 并进现有 `Promise.all`，渲染 `<TodayPlan plan={...} />`，**位置在 `<AlertsBar>` 之后、`<ReleasesToday>` 之前**。
 
 ## 组件 `TodayPlan`
 
@@ -60,5 +60,5 @@ const [overview, today] = await Promise.all([
 
 ## 影响的文件
 
-- 新增：`wemedia-studio/components/features/dashboard/TodayPlan.tsx`
-- 修改：`wemedia-studio/app/page.tsx`（import + Promise.all + 渲染）
+- 新增：`web/components/features/dashboard/TodayPlan.tsx`
+- 修改：`web/app/page.tsx`（import + Promise.all + 渲染）

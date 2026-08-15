@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Replace user-facing WeMedia Studio branding with Ediora · 述策, then create and integrate a selected project-local logo.
+**Goal:** Replace user-facing Ediora branding with Ediora · 述策, then create and integrate a selected project-local logo.
 
 **Architecture:** Keep all operational `wemedia` identifiers untouched. Centralize the user-visible product name in a small frontend branding module so the root layout and sidebar cannot drift; update the project README as the external documentation surface. Logo exploration is a separate approval gate and only the selected vector asset is wired into the sidebar.
 
@@ -14,7 +14,7 @@
 - Chinese descriptor: `AI 内容工作台`.
 - English descriptor: `AI Content Operations` for English-only copy.
 - Browser title: `Ediora · 述策 — AI 内容工作台`.
-- Do not rename `wemedia-studio`, database names, API paths, environment variables, local URLs, or internal code symbols.
+- Do not rename `web`, database names, API paths, environment variables, local URLs, or internal code symbols.
 - Do not stage or alter the existing untracked `.superpowers/brainstorm/` directory.
 - Do not create or integrate a logo until the user selects a presented direction.
 
@@ -24,10 +24,10 @@
 
 **Files:**
 
-- Create: `wemedia-studio/lib/branding.ts`
-- Create: `wemedia-studio/lib/branding.test.ts`
-- Modify: `wemedia-studio/app/layout.tsx:15-19`
-- Modify: `wemedia-studio/components/features/Sidebar.tsx:9-10,65-71`
+- Create: `web/lib/branding.ts`
+- Create: `web/lib/branding.test.ts`
+- Modify: `web/app/layout.tsx:15-19`
+- Modify: `web/components/features/Sidebar.tsx:9-10,65-71`
 
 **Interfaces:**
 
@@ -71,7 +71,7 @@ Expected: FAIL because `./branding` does not exist.
 - [ ] **Step 3: Write the minimal implementation**
 
 ```ts
-// wemedia-studio/lib/branding.ts
+// web/lib/branding.ts
 export const PRODUCT_NAME = 'Ediora · 述策'
 export const PRODUCT_DESCRIPTOR_ZH = 'AI 内容工作台'
 export const PRODUCT_DESCRIPTOR_EN = 'AI Content Operations'
@@ -89,7 +89,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add wemedia-studio/lib/branding.ts wemedia-studio/lib/branding.test.ts wemedia-studio/app/layout.tsx wemedia-studio/components/features/Sidebar.tsx
+git add web/lib/branding.ts web/lib/branding.test.ts web/app/layout.tsx web/components/features/Sidebar.tsx
 git commit -m "feat: rename visible product brand"
 ```
 
@@ -114,7 +114,7 @@ Change the README heading and product description to:
 AI 内容工作台：集信息采集、价值甄选、AI 创作与发布辅助于一体。
 ```
 
-Keep the repository tree label `WeMediaStudio/` and `wemedia-studio/` command paths unchanged because they are technical identifiers.
+Keep the repository tree label `Ediora/` and `web/` command paths unchanged because they are technical identifiers.
 
 - [ ] **Step 2: Run focused and full frontend verification**
 
@@ -124,14 +124,14 @@ Expected: all Vitest tests pass and Next.js production build completes.
 
 - [ ] **Step 3: Confirm the replacement boundary**
 
-Run: `rg -n -i 'WeMedia Studio' README.md wemedia-studio/app wemedia-studio/components`
+Run: `rg -n -i 'Ediora' README.md web/app web/components`
 
 Expected: no output. Do not search or change technical folders, package metadata, backend user agents, database names, or local URLs as part of this requirement.
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add README.md wemedia-studio/lib/branding.test.ts
+git add README.md web/lib/branding.test.ts
 git commit -m "docs: present Ediora product name"
 ```
 
@@ -139,9 +139,9 @@ git commit -m "docs: present Ediora product name"
 
 **Files:**
 
-- Create: `wemedia-studio/public/brand/ediora-mark.svg` after user selection
-- Modify: `wemedia-studio/components/features/Sidebar.tsx:65-71` after user selection
-- Test: `wemedia-studio/lib/branding.test.ts`
+- Create: `web/public/brand/ediora-mark.svg` after user selection
+- Modify: `web/components/features/Sidebar.tsx:65-71` after user selection
+- Test: `web/lib/branding.test.ts`
 
 **Interfaces:**
 
@@ -188,6 +188,6 @@ Expected: PASS and a successful production build.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add wemedia-studio/public/brand/ediora-mark.svg wemedia-studio/components/features/Sidebar.tsx wemedia-studio/lib/branding.test.ts
+git add web/public/brand/ediora-mark.svg web/components/features/Sidebar.tsx web/lib/branding.test.ts
 git commit -m "feat: add Ediora brand mark"
 ```

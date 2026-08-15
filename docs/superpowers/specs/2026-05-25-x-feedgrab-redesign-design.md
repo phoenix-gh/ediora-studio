@@ -25,7 +25,7 @@
 - `backend/post_classifier.py`（若仅 X 使用）删除。
 
 ### 前端
-- `wemedia-studio/app/x/XClient.tsx`、`XPostsPanel.tsx`、`page.tsx` 全部重写。
+- `web/app/x/XClient.tsx`、`XPostsPanel.tsx`、`page.tsx` 全部重写。
 - 设置页 X 区块（cookies / threshold / queries / classify prompt 等）整段删除。
 
 ### 数据

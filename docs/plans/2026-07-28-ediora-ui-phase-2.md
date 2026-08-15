@@ -59,7 +59,7 @@ interface in its own task and obtain an independent review before reusing it.
 
 ## Execution Convention and Dependencies
 
-- All `pnpm` commands run from `wemedia-studio/`.
+- All `pnpm` commands run from `web/`.
 - All backend `pytest` commands run from `backend/` with the `wems` conda
   environment.
 - All `git add` and `git commit` commands run from the repository root.
@@ -95,14 +95,14 @@ Information-source pages remain Phase 3.
 
 **Files:**
 
-- Create: `wemedia-studio/app/drafts/DraftsClient.contract.test.tsx`
-- Create: `wemedia-studio/app/drafts/PublishDialog.contract.test.tsx`
-- Create: `wemedia-studio/app/chat/ChatClient.contract.test.tsx`
-- Create: `wemedia-studio/app/writing-plans/WritingPlansClient.contract.test.tsx`
-- Create: `wemedia-studio/app/jobs/JobsClient.contract.test.tsx`
-- Modify: `wemedia-studio/app/digital-humans/talking-video-editor.test.tsx`
-- Modify: `wemedia-studio/app/responses/ResponsesClient.test.tsx`
-- Modify: `wemedia-studio/lib/ai/global-chat-tools.test.ts`
+- Create: `web/app/drafts/DraftsClient.contract.test.tsx`
+- Create: `web/app/drafts/PublishDialog.contract.test.tsx`
+- Create: `web/app/chat/ChatClient.contract.test.tsx`
+- Create: `web/app/writing-plans/WritingPlansClient.contract.test.tsx`
+- Create: `web/app/jobs/JobsClient.contract.test.tsx`
+- Modify: `web/app/digital-humans/talking-video-editor.test.tsx`
+- Modify: `web/app/responses/ResponsesClient.test.tsx`
+- Modify: `web/lib/ai/global-chat-tools.test.ts`
 
 **Contracts to freeze:**
 
@@ -174,14 +174,14 @@ pnpm exec tsc --noEmit --incremental false
 
 ```bash
 git add \
-  wemedia-studio/app/drafts/DraftsClient.contract.test.tsx \
-  wemedia-studio/app/drafts/PublishDialog.contract.test.tsx \
-  wemedia-studio/app/chat/ChatClient.contract.test.tsx \
-  wemedia-studio/app/writing-plans/WritingPlansClient.contract.test.tsx \
-  wemedia-studio/app/jobs/JobsClient.contract.test.tsx \
-  wemedia-studio/app/digital-humans/talking-video-editor.test.tsx \
-  wemedia-studio/app/responses/ResponsesClient.test.tsx \
-  wemedia-studio/lib/ai/global-chat-tools.test.ts
+  web/app/drafts/DraftsClient.contract.test.tsx \
+  web/app/drafts/PublishDialog.contract.test.tsx \
+  web/app/chat/ChatClient.contract.test.tsx \
+  web/app/writing-plans/WritingPlansClient.contract.test.tsx \
+  web/app/jobs/JobsClient.contract.test.tsx \
+  web/app/digital-humans/talking-video-editor.test.tsx \
+  web/app/responses/ResponsesClient.test.tsx \
+  web/lib/ai/global-chat-tools.test.ts
 git commit -m "test: freeze Phase 2 creation contracts"
 ```
 
@@ -191,10 +191,10 @@ git commit -m "test: freeze Phase 2 creation contracts"
 
 **Files:**
 
-- Create: `wemedia-studio/app/drafts/DraftsClient.workspace.test.tsx`
-- Create: `wemedia-studio/app/drafts/DraftWorkspace.tsx`
-- Modify: `wemedia-studio/app/drafts/DraftsClient.tsx`
-- Modify: `wemedia-studio/app/drafts/page.tsx`
+- Create: `web/app/drafts/DraftsClient.workspace.test.tsx`
+- Create: `web/app/drafts/DraftWorkspace.tsx`
+- Modify: `web/app/drafts/DraftsClient.tsx`
+- Modify: `web/app/drafts/page.tsx`
 
 **Interfaces:**
 
@@ -260,10 +260,10 @@ pnpm exec eslint app/drafts
 
 ```bash
 git add \
-  wemedia-studio/app/drafts/DraftsClient.workspace.test.tsx \
-  wemedia-studio/app/drafts/DraftWorkspace.tsx \
-  wemedia-studio/app/drafts/DraftsClient.tsx \
-  wemedia-studio/app/drafts/page.tsx
+  web/app/drafts/DraftsClient.workspace.test.tsx \
+  web/app/drafts/DraftWorkspace.tsx \
+  web/app/drafts/DraftsClient.tsx \
+  web/app/drafts/page.tsx
 git commit -m "feat: unify Ediora draft workspace"
 ```
 
@@ -273,13 +273,13 @@ git commit -m "feat: unify Ediora draft workspace"
 
 **Files:**
 
-- Create: `wemedia-studio/components/features/DraftAssetsDialog.test.tsx`
-- Create: `wemedia-studio/app/drafts/PublishingDialogs.test.tsx`
-- Modify: `wemedia-studio/components/features/DraftAssetsDialog.tsx`
-- Modify: `wemedia-studio/app/drafts/PublishDialog.tsx`
-- Modify: `wemedia-studio/app/drafts/WechatPublishPanel.tsx`
-- Modify: `wemedia-studio/app/drafts/XArticlePanel.tsx`
-- Modify: `wemedia-studio/app/drafts/BlogPublishPanel.tsx`
+- Create: `web/components/features/DraftAssetsDialog.test.tsx`
+- Create: `web/app/drafts/PublishingDialogs.test.tsx`
+- Modify: `web/components/features/DraftAssetsDialog.tsx`
+- Modify: `web/app/drafts/PublishDialog.tsx`
+- Modify: `web/app/drafts/WechatPublishPanel.tsx`
+- Modify: `web/app/drafts/XArticlePanel.tsx`
+- Modify: `web/app/drafts/BlogPublishPanel.tsx`
 
 **Interfaces:**
 
@@ -345,13 +345,13 @@ The backend tests mock external platforms and must not publish real content.
 
 ```bash
 git add \
-  wemedia-studio/components/features/DraftAssetsDialog.tsx \
-  wemedia-studio/components/features/DraftAssetsDialog.test.tsx \
-  wemedia-studio/app/drafts/PublishDialog.tsx \
-  wemedia-studio/app/drafts/PublishingDialogs.test.tsx \
-  wemedia-studio/app/drafts/WechatPublishPanel.tsx \
-  wemedia-studio/app/drafts/XArticlePanel.tsx \
-  wemedia-studio/app/drafts/BlogPublishPanel.tsx
+  web/components/features/DraftAssetsDialog.tsx \
+  web/components/features/DraftAssetsDialog.test.tsx \
+  web/app/drafts/PublishDialog.tsx \
+  web/app/drafts/PublishingDialogs.test.tsx \
+  web/app/drafts/WechatPublishPanel.tsx \
+  web/app/drafts/XArticlePanel.tsx \
+  web/app/drafts/BlogPublishPanel.tsx
 git commit -m "feat: unify draft assets and publishing dialogs"
 ```
 
@@ -361,12 +361,12 @@ git commit -m "feat: unify draft assets and publishing dialogs"
 
 **Files:**
 
-- Modify: `wemedia-studio/app/writing-plans/WritingPlansClient.test.tsx`
-- Create: `wemedia-studio/app/writing-plans/WritingPlansWorkspace.test.tsx`
-- Create: `wemedia-studio/app/writing-plans/WritingPlanList.tsx`
-- Create: `wemedia-studio/app/writing-plans/WritingPlanEditor.tsx`
-- Modify: `wemedia-studio/app/writing-plans/WritingPlansClient.tsx`
-- Modify: `wemedia-studio/app/writing-plans/page.tsx`
+- Modify: `web/app/writing-plans/WritingPlansClient.test.tsx`
+- Create: `web/app/writing-plans/WritingPlansWorkspace.test.tsx`
+- Create: `web/app/writing-plans/WritingPlanList.tsx`
+- Create: `web/app/writing-plans/WritingPlanEditor.tsx`
+- Modify: `web/app/writing-plans/WritingPlansClient.tsx`
+- Modify: `web/app/writing-plans/page.tsx`
 
 **Interfaces:**
 
@@ -413,12 +413,12 @@ pnpm exec eslint app/writing-plans
 
 ```bash
 git add \
-  wemedia-studio/app/writing-plans/WritingPlansClient.test.tsx \
-  wemedia-studio/app/writing-plans/WritingPlansWorkspace.test.tsx \
-  wemedia-studio/app/writing-plans/WritingPlanList.tsx \
-  wemedia-studio/app/writing-plans/WritingPlanEditor.tsx \
-  wemedia-studio/app/writing-plans/WritingPlansClient.tsx \
-  wemedia-studio/app/writing-plans/page.tsx
+  web/app/writing-plans/WritingPlansClient.test.tsx \
+  web/app/writing-plans/WritingPlansWorkspace.test.tsx \
+  web/app/writing-plans/WritingPlanList.tsx \
+  web/app/writing-plans/WritingPlanEditor.tsx \
+  web/app/writing-plans/WritingPlansClient.tsx \
+  web/app/writing-plans/page.tsx
 git commit -m "feat: rebuild Ediora writing-plan workspace"
 ```
 
@@ -428,14 +428,14 @@ git commit -m "feat: rebuild Ediora writing-plan workspace"
 
 **Files:**
 
-- Create: `wemedia-studio/app/writing-plans/WritingPlanDialogs.test.tsx`
-- Create: `wemedia-studio/app/writing-plans/dialogs/CandidateDialog.tsx`
-- Create: `wemedia-studio/app/writing-plans/dialogs/AnalysisDialog.tsx`
-- Create: `wemedia-studio/app/writing-plans/dialogs/ReanalysisDialog.tsx`
-- Create: `wemedia-studio/app/writing-plans/dialogs/PromptDialog.tsx`
-- Create: `wemedia-studio/app/writing-plans/dialogs/DispatchDialog.tsx`
-- Create: `wemedia-studio/app/writing-plans/dialogs/NewPlanDialog.tsx`
-- Modify: `wemedia-studio/app/writing-plans/WritingPlansClient.tsx`
+- Create: `web/app/writing-plans/WritingPlanDialogs.test.tsx`
+- Create: `web/app/writing-plans/dialogs/CandidateDialog.tsx`
+- Create: `web/app/writing-plans/dialogs/AnalysisDialog.tsx`
+- Create: `web/app/writing-plans/dialogs/ReanalysisDialog.tsx`
+- Create: `web/app/writing-plans/dialogs/PromptDialog.tsx`
+- Create: `web/app/writing-plans/dialogs/DispatchDialog.tsx`
+- Create: `web/app/writing-plans/dialogs/NewPlanDialog.tsx`
+- Modify: `web/app/writing-plans/WritingPlansClient.tsx`
 
 **Interfaces:**
 
@@ -483,14 +483,14 @@ pnpm exec eslint app/writing-plans
 
 ```bash
 git add \
-  wemedia-studio/app/writing-plans/WritingPlanDialogs.test.tsx \
-  wemedia-studio/app/writing-plans/dialogs/CandidateDialog.tsx \
-  wemedia-studio/app/writing-plans/dialogs/AnalysisDialog.tsx \
-  wemedia-studio/app/writing-plans/dialogs/ReanalysisDialog.tsx \
-  wemedia-studio/app/writing-plans/dialogs/PromptDialog.tsx \
-  wemedia-studio/app/writing-plans/dialogs/DispatchDialog.tsx \
-  wemedia-studio/app/writing-plans/dialogs/NewPlanDialog.tsx \
-  wemedia-studio/app/writing-plans/WritingPlansClient.tsx
+  web/app/writing-plans/WritingPlanDialogs.test.tsx \
+  web/app/writing-plans/dialogs/CandidateDialog.tsx \
+  web/app/writing-plans/dialogs/AnalysisDialog.tsx \
+  web/app/writing-plans/dialogs/ReanalysisDialog.tsx \
+  web/app/writing-plans/dialogs/PromptDialog.tsx \
+  web/app/writing-plans/dialogs/DispatchDialog.tsx \
+  web/app/writing-plans/dialogs/NewPlanDialog.tsx \
+  web/app/writing-plans/WritingPlansClient.tsx
 git commit -m "feat: standardize writing-plan dialogs"
 ```
 
@@ -500,12 +500,12 @@ git commit -m "feat: standardize writing-plan dialogs"
 
 **Files:**
 
-- Create: `wemedia-studio/app/chat/ChatClient.test.tsx`
-- Modify: `wemedia-studio/app/chat/ChatClient.tsx`
-- Modify: `wemedia-studio/app/chat/chat-layout.test.ts`
-- Modify: `wemedia-studio/app/chat/chat-composer.test.ts`
-- Modify: `wemedia-studio/components/features/chat/ChatContextPicker.tsx`
-- Modify: `wemedia-studio/components/features/chat/ChatMarkdown.tsx`
+- Create: `web/app/chat/ChatClient.test.tsx`
+- Modify: `web/app/chat/ChatClient.tsx`
+- Modify: `web/app/chat/chat-layout.test.ts`
+- Modify: `web/app/chat/chat-composer.test.ts`
+- Modify: `web/components/features/chat/ChatContextPicker.tsx`
+- Modify: `web/components/features/chat/ChatMarkdown.tsx`
 
 **Interfaces:**
 
@@ -556,12 +556,12 @@ pnpm exec eslint app/chat components/features/chat
 
 ```bash
 git add \
-  wemedia-studio/app/chat/ChatClient.test.tsx \
-  wemedia-studio/app/chat/ChatClient.tsx \
-  wemedia-studio/app/chat/chat-layout.test.ts \
-  wemedia-studio/app/chat/chat-composer.test.ts \
-  wemedia-studio/components/features/chat/ChatContextPicker.tsx \
-  wemedia-studio/components/features/chat/ChatMarkdown.tsx
+  web/app/chat/ChatClient.test.tsx \
+  web/app/chat/ChatClient.tsx \
+  web/app/chat/chat-layout.test.ts \
+  web/app/chat/chat-composer.test.ts \
+  web/components/features/chat/ChatContextPicker.tsx \
+  web/components/features/chat/ChatMarkdown.tsx
 git commit -m "feat: unify Ediora AI assistant workspace"
 ```
 
@@ -571,16 +571,16 @@ git commit -m "feat: unify Ediora AI assistant workspace"
 
 **Files:**
 
-- Create: `wemedia-studio/app/digital-humans/DigitalHumansClient.test.tsx`
-- Create: `wemedia-studio/app/digital-humans/EnvironmentPickerDialog.test.tsx`
-- Modify: `wemedia-studio/app/digital-humans/DigitalHumansClient.tsx`
-- Modify: `wemedia-studio/app/digital-humans/RoleLibrary.tsx`
-- Modify: `wemedia-studio/app/digital-humans/RoleEditorDialog.tsx`
-- Modify: `wemedia-studio/app/digital-humans/EnvironmentPickerDialog.tsx`
-- Modify: `wemedia-studio/app/digital-humans/TalkingProjectList.tsx`
-- Modify: `wemedia-studio/app/digital-humans/TalkingVideoEditor.tsx`
-- Modify: `wemedia-studio/app/digital-humans/ScriptAssistantDialog.tsx`
-- Modify: `wemedia-studio/app/digital-humans/RenderVersionsPanel.tsx`
+- Create: `web/app/digital-humans/DigitalHumansClient.test.tsx`
+- Create: `web/app/digital-humans/EnvironmentPickerDialog.test.tsx`
+- Modify: `web/app/digital-humans/DigitalHumansClient.tsx`
+- Modify: `web/app/digital-humans/RoleLibrary.tsx`
+- Modify: `web/app/digital-humans/RoleEditorDialog.tsx`
+- Modify: `web/app/digital-humans/EnvironmentPickerDialog.tsx`
+- Modify: `web/app/digital-humans/TalkingProjectList.tsx`
+- Modify: `web/app/digital-humans/TalkingVideoEditor.tsx`
+- Modify: `web/app/digital-humans/ScriptAssistantDialog.tsx`
+- Modify: `web/app/digital-humans/RenderVersionsPanel.tsx`
 
 **Interfaces:**
 
@@ -650,16 +650,16 @@ pnpm exec eslint app/digital-humans
 
 ```bash
 git add \
-  wemedia-studio/app/digital-humans/DigitalHumansClient.test.tsx \
-  wemedia-studio/app/digital-humans/EnvironmentPickerDialog.test.tsx \
-  wemedia-studio/app/digital-humans/DigitalHumansClient.tsx \
-  wemedia-studio/app/digital-humans/RoleLibrary.tsx \
-  wemedia-studio/app/digital-humans/RoleEditorDialog.tsx \
-  wemedia-studio/app/digital-humans/EnvironmentPickerDialog.tsx \
-  wemedia-studio/app/digital-humans/TalkingProjectList.tsx \
-  wemedia-studio/app/digital-humans/TalkingVideoEditor.tsx \
-  wemedia-studio/app/digital-humans/ScriptAssistantDialog.tsx \
-  wemedia-studio/app/digital-humans/RenderVersionsPanel.tsx
+  web/app/digital-humans/DigitalHumansClient.test.tsx \
+  web/app/digital-humans/EnvironmentPickerDialog.test.tsx \
+  web/app/digital-humans/DigitalHumansClient.tsx \
+  web/app/digital-humans/RoleLibrary.tsx \
+  web/app/digital-humans/RoleEditorDialog.tsx \
+  web/app/digital-humans/EnvironmentPickerDialog.tsx \
+  web/app/digital-humans/TalkingProjectList.tsx \
+  web/app/digital-humans/TalkingVideoEditor.tsx \
+  web/app/digital-humans/ScriptAssistantDialog.tsx \
+  web/app/digital-humans/RenderVersionsPanel.tsx
 git commit -m "feat: unify Ediora digital-human studio"
 ```
 
@@ -669,9 +669,9 @@ git commit -m "feat: unify Ediora digital-human studio"
 
 **Files:**
 
-- Create: `wemedia-studio/app/jobs/JobsClient.test.tsx`
-- Modify: `wemedia-studio/app/jobs/JobsClient.tsx`
-- Modify: `wemedia-studio/app/jobs/page.tsx`
+- Create: `web/app/jobs/JobsClient.test.tsx`
+- Modify: `web/app/jobs/JobsClient.tsx`
+- Modify: `web/app/jobs/page.tsx`
 
 **Interfaces:**
 
@@ -718,9 +718,9 @@ pnpm exec eslint app/jobs
 
 ```bash
 git add \
-  wemedia-studio/app/jobs/JobsClient.test.tsx \
-  wemedia-studio/app/jobs/JobsClient.tsx \
-  wemedia-studio/app/jobs/page.tsx
+  web/app/jobs/JobsClient.test.tsx \
+  web/app/jobs/JobsClient.tsx \
+  web/app/jobs/page.tsx
 git commit -m "feat: restyle Ediora creation jobs"
 ```
 
@@ -730,11 +730,11 @@ git commit -m "feat: restyle Ediora creation jobs"
 
 **Files:**
 
-- Modify: `wemedia-studio/app/responses/ResponsesClient.test.tsx`
-- Create: `wemedia-studio/app/responses/ResponsesWorkspace.test.tsx`
-- Create: `wemedia-studio/app/responses/ResponseOutputDialog.tsx`
-- Modify: `wemedia-studio/app/responses/ResponsesClient.tsx`
-- Modify: `wemedia-studio/app/responses/page.tsx`
+- Modify: `web/app/responses/ResponsesClient.test.tsx`
+- Create: `web/app/responses/ResponsesWorkspace.test.tsx`
+- Create: `web/app/responses/ResponseOutputDialog.tsx`
+- Modify: `web/app/responses/ResponsesClient.tsx`
+- Modify: `web/app/responses/page.tsx`
 
 **Interfaces:**
 
@@ -789,11 +789,11 @@ pnpm exec eslint app/responses
 
 ```bash
 git add \
-  wemedia-studio/app/responses/ResponsesClient.test.tsx \
-  wemedia-studio/app/responses/ResponsesWorkspace.test.tsx \
-  wemedia-studio/app/responses/ResponseOutputDialog.tsx \
-  wemedia-studio/app/responses/ResponsesClient.tsx \
-  wemedia-studio/app/responses/page.tsx
+  web/app/responses/ResponsesClient.test.tsx \
+  web/app/responses/ResponsesWorkspace.test.tsx \
+  web/app/responses/ResponseOutputDialog.tsx \
+  web/app/responses/ResponsesClient.tsx \
+  web/app/responses/page.tsx
 git commit -m "feat: unify Ediora response inbox"
 ```
 
@@ -803,11 +803,11 @@ git commit -m "feat: unify Ediora response inbox"
 
 **Files:**
 
-- Create: `wemedia-studio/lib/ui/ui-policy-phase2.test.ts`
-- Create: `wemedia-studio/e2e/creation-workspaces.spec.ts`
-- Create: `wemedia-studio/e2e/fixtures/creation-workspaces.ts`
-- Create: `wemedia-studio/e2e/phase2-global-teardown.ts`
-- Create: `wemedia-studio/playwright.creation.config.ts`
+- Create: `web/lib/ui/ui-policy-phase2.test.ts`
+- Create: `web/e2e/creation-workspaces.spec.ts`
+- Create: `web/e2e/fixtures/creation-workspaces.ts`
+- Create: `web/e2e/phase2-global-teardown.ts`
+- Create: `web/playwright.creation.config.ts`
 - Create: `backend/scripts/phase2_e2e_db.py`
 - Create: `backend/tests/test_phase2_e2e_db.py`
 - Create: `docker-compose.phase2-e2e.yml`
@@ -1054,11 +1054,11 @@ routes and, when available, the optional snapshot. Inspect:
 
 ```bash
 git add \
-  wemedia-studio/lib/ui/ui-policy-phase2.test.ts \
-  wemedia-studio/e2e/creation-workspaces.spec.ts \
-  wemedia-studio/e2e/fixtures/creation-workspaces.ts \
-  wemedia-studio/e2e/phase2-global-teardown.ts \
-  wemedia-studio/playwright.creation.config.ts \
+  web/lib/ui/ui-policy-phase2.test.ts \
+  web/e2e/creation-workspaces.spec.ts \
+  web/e2e/fixtures/creation-workspaces.ts \
+  web/e2e/phase2-global-teardown.ts \
+  web/playwright.creation.config.ts \
   backend/scripts/phase2_e2e_db.py \
   backend/tests/test_phase2_e2e_db.py \
   docker-compose.phase2-e2e.yml

@@ -21,9 +21,9 @@ All `conda run -n wems` or `source ~/.zshrc` prefixes are needed when running co
 | `backend/schemas.py` | Modify | Add `TopicTagCreate/Out`, `ArticleDraftSummary`, `DispatchResponse`; update ContentTopic schemas |
 | `backend/routers/content_topics.py` | Modify | Flat list + tag filter; tag CRUD; drafts endpoint; dispatch |
 | `backend/tests/test_content_topics.py` | Create | Tag CRUD, flat list + filter, drafts list, dispatch (mocked Hermes) |
-| `wemedia-studio/lib/api/content-topics.ts` | Modify | Update types; add tag/dispatch/drafts API functions |
-| `wemedia-studio/app/topics/page.tsx` | Modify | Fetch topics + all tags; pass both to client |
-| `wemedia-studio/app/topics/TopicsClient.tsx` | Modify | Full redesign: card list + tag filter + Brief/Sources/Drafts tabs |
+| `web/lib/api/content-topics.ts` | Modify | Update types; add tag/dispatch/drafts API functions |
+| `web/app/topics/page.tsx` | Modify | Fetch topics + all tags; pass both to client |
+| `web/app/topics/TopicsClient.tsx` | Modify | Full redesign: card list + tag filter + Brief/Sources/Drafts tabs |
 
 ---
 
@@ -836,7 +836,7 @@ git commit -m "test(content_topics): add tag CRUD, flat list, drafts, dispatch t
 ## Task 6: Frontend API Layer
 
 **Files:**
-- Modify: `wemedia-studio/lib/api/content-topics.ts`
+- Modify: `web/lib/api/content-topics.ts`
 
 - [ ] **Step 1: Replace the file contents**
 
@@ -985,7 +985,7 @@ export async function deleteSource(topicId: number, sourceId: number): Promise<v
 - [ ] **Step 2: Commit**
 
 ```bash
-git add wemedia-studio/lib/api/content-topics.ts
+git add web/lib/api/content-topics.ts
 git commit -m "feat(frontend): update content-topics API types and add tag/dispatch/drafts functions"
 ```
 
@@ -994,12 +994,12 @@ git commit -m "feat(frontend): update content-topics API types and add tag/dispa
 ## Task 7: Frontend Page + UI Redesign
 
 **Files:**
-- Modify: `wemedia-studio/app/topics/page.tsx`
-- Modify: `wemedia-studio/app/topics/TopicsClient.tsx`
+- Modify: `web/app/topics/page.tsx`
+- Modify: `web/app/topics/TopicsClient.tsx`
 
 - [ ] **Step 1: Update `page.tsx` to fetch topics and tags**
 
-Replace `wemedia-studio/app/topics/page.tsx` with:
+Replace `web/app/topics/page.tsx` with:
 
 ```tsx
 import { getTopics, getTags } from '@/lib/api/content-topics'
@@ -1015,7 +1015,7 @@ export default async function TopicsPage() {
 
 - [ ] **Step 2: Rewrite `TopicsClient.tsx`**
 
-Replace the entire contents of `wemedia-studio/app/topics/TopicsClient.tsx` with:
+Replace the entire contents of `web/app/topics/TopicsClient.tsx` with:
 
 ```tsx
 'use client'
@@ -1894,7 +1894,7 @@ export function TopicsClient({ initialTopics, initialTags }: {
 - [ ] **Step 3: Check TypeScript compiles**
 
 ```bash
-source ~/.zshrc && cd wemedia-studio && npm run build 2>&1 | grep -E "error|Error|warning" | head -30
+source ~/.zshrc && cd web && npm run build 2>&1 | grep -E "error|Error|warning" | head -30
 ```
 
 Fix any TypeScript errors before continuing.
@@ -1902,7 +1902,7 @@ Fix any TypeScript errors before continuing.
 - [ ] **Step 4: Commit**
 
 ```bash
-git add wemedia-studio/app/topics/page.tsx wemedia-studio/app/topics/TopicsClient.tsx
+git add web/app/topics/page.tsx web/app/topics/TopicsClient.tsx
 git commit -m "feat(frontend): redesign topic library — cards, tags, brief editor, dispatch, drafts tab"
 ```
 
@@ -1921,7 +1921,7 @@ Expected: all tests pass.
 - [ ] **Step 2: Start the dev server and verify the UI**
 
 ```bash
-source ~/.zshrc && cd wemedia-studio && npm run dev
+source ~/.zshrc && cd web && npm run dev
 ```
 
 Open http://localhost:3000/topics and verify:

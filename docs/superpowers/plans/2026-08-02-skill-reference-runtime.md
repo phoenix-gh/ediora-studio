@@ -23,8 +23,8 @@
 ### Task 1: Add the bounded Skill-reference registry API
 
 **Files:**
-- Modify: `wemedia-studio/lib/skills/registry.ts`
-- Modify: `wemedia-studio/lib/skills/registry.test.ts`
+- Modify: `web/lib/skills/registry.ts`
+- Modify: `web/lib/skills/registry.test.ts`
 
 **Interfaces:**
 - Produces: `SkillReference`, `SkillReferenceContent`, `SkillContext`, `listSkillReferences(name)`, `readSkillReference(name, path)`, and `loadSkillContext(name, paths)`.
@@ -37,7 +37,7 @@ Create nested supported and unsupported files under a temporary bundled Skill. A
 - [ ] **Step 2: Run the registry tests and verify RED**
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm test lib/skills/registry.test.ts
 ```
 
@@ -54,10 +54,10 @@ Run the Step 2 command. Expected: all registry tests pass.
 ### Task 2: Add a request-scoped Chat reference tool and catalog
 
 **Files:**
-- Modify: `wemedia-studio/lib/ai/global-chat-tools.ts`
-- Modify: `wemedia-studio/lib/ai/global-chat-tools.test.ts`
-- Modify: `wemedia-studio/app/api/chat/route.ts`
-- Modify: `wemedia-studio/app/api/chat/route.test.ts`
+- Modify: `web/lib/ai/global-chat-tools.ts`
+- Modify: `web/lib/ai/global-chat-tools.test.ts`
+- Modify: `web/app/api/chat/route.ts`
+- Modify: `web/app/api/chat/route.test.ts`
 
 **Interfaces:**
 - Consumes: `listSkillReferences`, `readSkillReference`, and configured context-byte limit from Task 1.
@@ -74,7 +74,7 @@ Extract/export a small `selectedSkillContext(skillName)` helper from the route. 
 - [ ] **Step 3: Run focused tests and verify RED**
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm test lib/ai/global-chat-tools.test.ts app/api/chat/route.test.ts
 ```
 
@@ -91,8 +91,8 @@ Run the Step 3 command. Expected: all focused tests pass.
 ### Task 3: Migrate deterministic background Skill consumers
 
 **Files:**
-- Modify: `wemedia-studio/lib/ai/content-job.ts`
-- Modify: `wemedia-studio/lib/ai/content-job.test.ts`
+- Modify: `web/lib/ai/content-job.ts`
+- Modify: `web/lib/ai/content-job.test.ts`
 
 **Interfaces:**
 - Consumes: `loadSkillContext(name, referencePaths)` from Task 1.
@@ -105,7 +105,7 @@ Mock or spy on the shared registry loader and assert cover rules request exactly
 - [ ] **Step 2: Run focused content-job tests and verify RED**
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm test lib/ai/content-job.test.ts
 ```
 
@@ -123,8 +123,8 @@ Run the Step 2 command. Expected: all content-job tests pass.
 
 **Files:**
 - Verify all files modified in Tasks 1-3.
-- Modify: `wemedia-studio/app/api/skills/errors.ts`
-- Create: `wemedia-studio/app/api/skills/errors.test.ts`
+- Modify: `web/app/api/skills/errors.ts`
+- Create: `web/app/api/skills/errors.test.ts`
 - Modify only tests listed above if verification exposes a regression caused by this feature.
 
 **Interfaces:**
@@ -134,21 +134,21 @@ Run the Step 2 command. Expected: all content-job tests pass.
 - [ ] **Step 1: Run all focused Skill and Chat tests**
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm test lib/skills/registry.test.ts lib/ai/discover-skills.test.ts lib/ai/global-chat-tools.test.ts app/api/chat/route.test.ts lib/ai/content-job.test.ts
 ```
 
 - [ ] **Step 2: Run changed-file lint**
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm exec eslint lib/skills/registry.ts lib/skills/registry.test.ts lib/ai/global-chat-tools.ts lib/ai/global-chat-tools.test.ts app/api/chat/route.ts app/api/chat/route.test.ts lib/ai/content-job.ts lib/ai/content-job.test.ts
 ```
 
 - [ ] **Step 3: Run the full frontend suite**
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm test
 ```
 
@@ -161,7 +161,7 @@ If TypeScript reports that new `SkillRegistryErrorCode` members are absent from 
 - [ ] **Step 4: Run TypeScript validation**
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm exec tsc --noEmit
 ```
 
@@ -170,7 +170,7 @@ Expected: no new errors in changed files. Record existing unrelated dirty-worktr
 - [ ] **Step 5: Review and commit only scoped files**
 
 ```bash
-git diff --check -- docs/superpowers/plans/2026-08-02-skill-reference-runtime.md wemedia-studio/lib/skills/registry.ts wemedia-studio/lib/skills/registry.test.ts wemedia-studio/lib/ai/global-chat-tools.ts wemedia-studio/lib/ai/global-chat-tools.test.ts wemedia-studio/app/api/chat/route.ts wemedia-studio/app/api/chat/route.test.ts wemedia-studio/lib/ai/content-job.ts wemedia-studio/lib/ai/content-job.test.ts
-git add docs/superpowers/plans/2026-08-02-skill-reference-runtime.md wemedia-studio/lib/skills/registry.ts wemedia-studio/lib/skills/registry.test.ts wemedia-studio/lib/ai/global-chat-tools.ts wemedia-studio/lib/ai/global-chat-tools.test.ts wemedia-studio/app/api/chat/route.ts wemedia-studio/app/api/chat/route.test.ts wemedia-studio/app/api/skills/errors.ts wemedia-studio/app/api/skills/errors.test.ts wemedia-studio/lib/ai/content-job.ts wemedia-studio/lib/ai/content-job.test.ts
+git diff --check -- docs/superpowers/plans/2026-08-02-skill-reference-runtime.md web/lib/skills/registry.ts web/lib/skills/registry.test.ts web/lib/ai/global-chat-tools.ts web/lib/ai/global-chat-tools.test.ts web/app/api/chat/route.ts web/app/api/chat/route.test.ts web/lib/ai/content-job.ts web/lib/ai/content-job.test.ts
+git add docs/superpowers/plans/2026-08-02-skill-reference-runtime.md web/lib/skills/registry.ts web/lib/skills/registry.test.ts web/lib/ai/global-chat-tools.ts web/lib/ai/global-chat-tools.test.ts web/app/api/chat/route.ts web/app/api/chat/route.test.ts web/app/api/skills/errors.ts web/app/api/skills/errors.test.ts web/lib/ai/content-job.ts web/lib/ai/content-job.test.ts
 git commit -m "feat: load skill references safely"
 ```

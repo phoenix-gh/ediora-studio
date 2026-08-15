@@ -119,9 +119,9 @@ writer body 默认值保证其它流程(topic / rewrite)无 genre → commentary
 
 ### ⑤ 前端
 
-`wemedia-studio/lib/api/writing-plans.ts`:`WritingPlan / WritingPlanCreate / WritingPlanUpdate` 接口加 `genre?: string`。
+`web/lib/api/writing-plans.ts`:`WritingPlan / WritingPlanCreate / WritingPlanUpdate` 接口加 `genre?: string`。
 
-`wemedia-studio/app/writing-plans/WritingPlansClient.tsx`:
+`web/app/writing-plans/WritingPlansClient.tsx`:
 
 - 方案编辑区加 4 选 1 `Select`(教程 / 评论 / 故事 / 测评),`updateWritingPlan({ genre })` 保存。
 - 方案卡片挂文体小徽章(label)。

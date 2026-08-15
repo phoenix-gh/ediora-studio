@@ -17,10 +17,10 @@
 | 新增 | `backend/routers/topic_generator.py` |
 | 修改 | `backend/main.py` |
 | 新增 | `backend/tests/test_topic_generator.py` |
-| 新增 | `wemedia-studio/lib/api/topic-generator.ts` |
-| 新增 | `wemedia-studio/app/trend-topics/page.tsx` |
-| 新增 | `wemedia-studio/app/trend-topics/TopicGeneratorClient.tsx` |
-| 修改 | `wemedia-studio/components/features/Sidebar.tsx` |
+| 新增 | `web/lib/api/topic-generator.ts` |
+| 新增 | `web/app/trend-topics/page.tsx` |
+| 新增 | `web/app/trend-topics/TopicGeneratorClient.tsx` |
+| 修改 | `web/components/features/Sidebar.tsx` |
 | 修改 | `~/.hermes/profiles/wms_editor/SOUL.md` |
 
 ---
@@ -453,12 +453,12 @@ git commit -m "feat(topic-generator): add enqueue endpoint + register router"
 ## Task 3: 前端 API 客户端
 
 **Files:**
-- Create: `wemedia-studio/lib/api/topic-generator.ts`
+- Create: `web/lib/api/topic-generator.ts`
 
 - [ ] **Step 1: 创建 API 客户端**
 
 ```typescript
-// wemedia-studio/lib/api/topic-generator.ts
+// web/lib/api/topic-generator.ts
 import { apiFetch } from './client'
 
 export interface SourcePost {
@@ -508,7 +508,7 @@ export async function enqueueTopics(opts: {
 - [ ] **Step 2: Commit**
 
 ```bash
-git add wemedia-studio/lib/api/topic-generator.ts
+git add web/lib/api/topic-generator.ts
 git commit -m "feat(topic-generator): add frontend API client"
 ```
 
@@ -517,15 +517,15 @@ git commit -m "feat(topic-generator): add frontend API client"
 ## Task 4: 前端页面
 
 **Files:**
-- Create: `wemedia-studio/app/trend-topics/page.tsx`
-- Create: `wemedia-studio/app/trend-topics/TopicGeneratorClient.tsx`
+- Create: `web/app/trend-topics/page.tsx`
+- Create: `web/app/trend-topics/TopicGeneratorClient.tsx`
 
 需要用到的 shadcn 组件（项目已有）：`Button`、`Badge`、`Checkbox`、`Select`、`Card`、`Collapsible`、`Sonner toast`。
 
 - [ ] **Step 1: 创建 Server Component 壳**
 
 ```typescript
-// wemedia-studio/app/trend-topics/page.tsx
+// web/app/trend-topics/page.tsx
 export const dynamic = 'force-dynamic'
 
 import { TopicGeneratorClient } from './TopicGeneratorClient'
@@ -547,7 +547,7 @@ export default async function TrendTopicsPage() {
 - [ ] **Step 2: 创建 Client Component**
 
 ```typescript
-// wemedia-studio/app/trend-topics/TopicGeneratorClient.tsx
+// web/app/trend-topics/TopicGeneratorClient.tsx
 'use client'
 
 import { useState } from 'react'
@@ -755,7 +755,7 @@ export function TopicGeneratorClient({ accounts }: { accounts: PublishAccount[] 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add wemedia-studio/app/trend-topics/
+git add web/app/trend-topics/
 git commit -m "feat(topic-generator): add /trend-topics page with card selection UI"
 ```
 
@@ -764,7 +764,7 @@ git commit -m "feat(topic-generator): add /trend-topics page with card selection
 ## Task 5: 侧边栏入口
 
 **Files:**
-- Modify: `wemedia-studio/components/features/Sidebar.tsx`
+- Modify: `web/components/features/Sidebar.tsx`
 
 - [ ] **Step 1: 在 Sidebar 添加 Lightbulb import 和导航项**
 
@@ -804,7 +804,7 @@ import {
 - [ ] **Step 2: 验证前端编译无报错**
 
 ```bash
-cd /workspace/projects/WeMediaStudio/wemedia-studio
+cd /workspace/projects/WeMediaStudio/web
 pnpm build 2>&1 | tail -20
 ```
 预期：`✓ Compiled successfully` 或 `Route (app)` 表格里有 `/trend-topics`
@@ -820,7 +820,7 @@ pnpm build 2>&1 | tail -20
 - [ ] **Step 4: Commit**
 
 ```bash
-git add wemedia-studio/components/features/Sidebar.tsx
+git add web/components/features/Sidebar.tsx
 git commit -m "feat(topic-generator): add trend-topics sidebar entry"
 ```
 

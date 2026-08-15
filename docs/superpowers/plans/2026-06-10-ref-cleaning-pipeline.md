@@ -33,10 +33,10 @@
 | `backend/config.py` | 修改 | DEFAULTS 增 5 删 1 |
 | `backend/routers/settings.py` | 修改 | ref_clean_interval_minutes→ref_classify_interval_minutes |
 | `backend/routers/materials.py` | 修改 | clean-batch→classify-batch；collect 返回值；collect-all 接 scout |
-| `wemedia-studio/lib/api/materials.ts` | 修改 | classifyBatch/类型连动 |
-| `wemedia-studio/lib/api/settings.ts` | 修改 | 字段改名 |
-| `wemedia-studio/app/settings/sections/XSection.tsx` | 修改 | 绑定改名后的字段 |
-| `wemedia-studio/app/materials/MaterialsClient.tsx` | 修改 | 按钮/徽章/文案 |
+| `web/lib/api/materials.ts` | 修改 | classifyBatch/类型连动 |
+| `web/lib/api/settings.ts` | 修改 | 字段改名 |
+| `web/app/settings/sections/XSection.tsx` | 修改 | 绑定改名后的字段 |
+| `web/app/materials/MaterialsClient.tsx` | 修改 | 按钮/徽章/文案 |
 | `backend/tests/test_ref_signals.py` | 新建 | 打分单测 |
 | `backend/tests/test_text_dedupe.py` | 新建 | 去重单测 |
 | `backend/tests/test_reply_scout.py` | 新建 | 神回复单测 |
@@ -1509,12 +1509,12 @@ git -C /workspace/projects/WeMediaStudio commit -m "feat(ref): ref_classify 调�
 ## Task 9: 前端连动
 
 **Files:**
-- Modify: `wemedia-studio/lib/api/materials.ts`（cleanBatch ~92-105、getRawCount ~87-91、collectRule/collectAll ~80-86）
-- Modify: `wemedia-studio/lib/api/settings.ts`（ref_clean_interval_minutes 字段）
-- Modify: `wemedia-studio/app/settings/sections/XSection.tsx`（绑定改名）
-- Modify: `wemedia-studio/app/materials/MaterialsClient.tsx`（按钮/计数/徽章/文案）
+- Modify: `web/lib/api/materials.ts`（cleanBatch ~92-105、getRawCount ~87-91、collectRule/collectAll ~80-86）
+- Modify: `web/lib/api/settings.ts`（ref_clean_interval_minutes 字段）
+- Modify: `web/app/settings/sections/XSection.tsx`（绑定改名）
+- Modify: `web/app/materials/MaterialsClient.tsx`（按钮/计数/徽章/文案）
 
-写前端代码前先读 `wemedia-studio/node_modules/next/dist/docs/` 中相关约定（项目 AGENTS.md 要求）。
+写前端代码前先读 `web/node_modules/next/dist/docs/` 中相关约定（项目 AGENTS.md 要求）。
 
 - [ ] **Step 1: materials.ts 接口连动**
 
@@ -1578,19 +1578,19 @@ export async function classifyBatch(size?: number): Promise<ClassifyBatchResult>
 - [ ] **Step 3: settings.ts + XSection.tsx 改名**
 
 ```bash
-grep -rn "ref_clean_interval_minutes" wemedia-studio/lib/api/settings.ts wemedia-studio/app/settings/
+grep -rn "ref_clean_interval_minutes" web/lib/api/settings.ts web/app/settings/
 ```
 全部 `ref_clean_interval_minutes` → `ref_classify_interval_minutes`；XSection 中对应 label 文案「清洗间隔」→「分类间隔」（以实际文案为准）。
 
 - [ ] **Step 4: 类型检查**
 
-Run: `cd /workspace/projects/WeMediaStudio/wemedia-studio && npx tsc --noEmit`
+Run: `cd /workspace/projects/WeMediaStudio/web && npx tsc --noEmit`
 Expected: 无错误
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git -C /workspace/projects/WeMediaStudio add wemedia-studio/
+git -C /workspace/projects/WeMediaStudio add web/
 git -C /workspace/projects/WeMediaStudio commit -m "feat(ref): 前端连动——补分类按钮/神回复徽章/热度分文案/设置项改名"
 ```
 
@@ -1605,7 +1605,7 @@ git -C /workspace/projects/WeMediaStudio commit -m "feat(ref): 前端连动—�
 
 ```bash
 grep -rn "classify_ref_posts\|clean_batch\|clean-batch\|new_raw\|ref_clean" \
-  /workspace/projects/WeMediaStudio/backend /workspace/projects/WeMediaStudio/wemedia-studio \
+  /workspace/projects/WeMediaStudio/backend /workspace/projects/WeMediaStudio/web \
   --include="*.py" --include="*.ts" --include="*.tsx" | grep -v node_modules | grep -v __pycache__
 ```
 Expected: 仅剩 `clean_batch_size`（保留的 config key）与历史注释；其余出现处逐一修复。
@@ -1618,7 +1618,7 @@ Expected: **0 failed**（既存 13 失败中：writing_plans 9 个不属于本�
 
 - [ ] **Step 3: 前端 tsc**
 
-Run: `cd /workspace/projects/WeMediaStudio/wemedia-studio && npx tsc --noEmit`
+Run: `cd /workspace/projects/WeMediaStudio/web && npx tsc --noEmit`
 Expected: 无错误
 
 - [ ] **Step 4: 手动冒烟（真实环境）**

@@ -4,6 +4,7 @@ import feedparser
 import calendar
 from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
+from collection_proxy import collection_client_kwargs
 from models import Paper
 
 # arXiv API supports any day (RSS only updates Mon-Fri)
@@ -63,9 +64,12 @@ async def collect_papers(db: AsyncSession, categories: list[str] | None = None) 
                 "sortBy": "submittedDate",
                 "sortOrder": "descending",
             }
-            async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+            async with httpx.AsyncClient(**await collection_client_kwargs(
+                timeout=30,
+                follow_redirects=True,
+            )) as client:
                 resp = await client.get(_ARXIV_API, params=params,
-                                        headers={"User-Agent": "WeMediaStudio/1.0"})
+                                        headers={"User-Agent": "Ediora/1.0"})
                 resp.raise_for_status()
                 content = resp.text
 

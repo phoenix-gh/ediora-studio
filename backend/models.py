@@ -983,6 +983,7 @@ class DigitalHuman(Base):
     )
     default_environment_asset_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     look_asset_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    look_prompt: Mapped[str] = mapped_column(Text, default="")
     heygen_avatar_group_id: Mapped[str] = mapped_column(String, default="")
     heygen_avatar_id: Mapped[str] = mapped_column(String, default="")
     heygen_voice_id: Mapped[str] = mapped_column(String, default="")

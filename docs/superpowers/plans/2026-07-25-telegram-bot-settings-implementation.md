@@ -36,12 +36,12 @@
 
 ### Frontend
 
-- Modify `wemedia-studio/lib/api/settings.ts`: add safe metadata and test/clear functions.
-- Create `wemedia-studio/lib/api/settings-test-fixtures.ts`: complete `AppSettings` factory shared only by settings tests.
-- Create `wemedia-studio/lib/api/settings-telegram.test.ts`: request and response contracts.
-- Create `wemedia-studio/app/settings/sections/TelegramSettingsCard.tsx`: form, save/test/clear, dirty-state protection.
-- Create `wemedia-studio/app/settings/sections/TelegramSettingsCard.test.tsx`: rendered actions and safety behavior.
-- Modify `wemedia-studio/app/settings/sections/XSection.tsx`: compose the Telegram card and remove inline Telegram state.
+- Modify `web/lib/api/settings.ts`: add safe metadata and test/clear functions.
+- Create `web/lib/api/settings-test-fixtures.ts`: complete `AppSettings` factory shared only by settings tests.
+- Create `web/lib/api/settings-telegram.test.ts`: request and response contracts.
+- Create `web/app/settings/sections/TelegramSettingsCard.tsx`: form, save/test/clear, dirty-state protection.
+- Create `web/app/settings/sections/TelegramSettingsCard.test.tsx`: rendered actions and safety behavior.
+- Modify `web/app/settings/sections/XSection.tsx`: compose the Telegram card and remove inline Telegram state.
 
 ### Documentation
 
@@ -75,7 +75,7 @@
 def test_render_test_message_is_fixed_chinese_and_shanghai_time():
     tested_at = datetime(2026, 7, 25, 13, 6, 7, tzinfo=timezone.utc)
     message = render_test_message(tested_at)
-    assert "WeMedia Studio Telegram 连接测试成功" in message
+    assert "Ediora Telegram 连接测试成功" in message
     assert "2026-07-25 21:06:07" in message
     assert "<script" not in message
 ```
@@ -97,7 +97,7 @@ def render_test_message(tested_at: datetime) -> str:
     shanghai = tested_at.astimezone(ZoneInfo("Asia/Shanghai"))
     stamp = shanghai.strftime("%Y-%m-%d %H:%M:%S")
     return (
-        "✅ <b>WeMedia Studio Telegram 连接测试成功</b>\n"
+        "✅ <b>Ediora Telegram 连接测试成功</b>\n"
         f"测试时间：{stamp}（Asia/Shanghai）"
     )
 ```
@@ -299,9 +299,9 @@ git commit -m "feat(telegram): add saved-configuration self-test"
 ### Task 2: Telegram Frontend API Contract
 
 **Files:**
-- Modify: `wemedia-studio/lib/api/settings.ts`
-- Create: `wemedia-studio/lib/api/settings-test-fixtures.ts`
-- Create: `wemedia-studio/lib/api/settings-telegram.test.ts`
+- Modify: `web/lib/api/settings.ts`
+- Create: `web/lib/api/settings-test-fixtures.ts`
+- Create: `web/lib/api/settings-telegram.test.ts`
 
 **Interfaces:**
 - Consumes: Task 1 endpoints.
@@ -347,7 +347,7 @@ it('tests and clears only the saved Telegram configuration', async () => {
 Run:
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm test lib/api/settings-telegram.test.ts
 ```
 
@@ -452,9 +452,9 @@ Commit:
 
 ```bash
 git add \
-  wemedia-studio/lib/api/settings.ts \
-  wemedia-studio/lib/api/settings-test-fixtures.ts \
-  wemedia-studio/lib/api/settings-telegram.test.ts
+  web/lib/api/settings.ts \
+  web/lib/api/settings-test-fixtures.ts \
+  web/lib/api/settings-telegram.test.ts
 git commit -m "feat(telegram): add settings client actions"
 ```
 
@@ -463,9 +463,9 @@ git commit -m "feat(telegram): add settings client actions"
 ### Task 3: Telegram Settings Card and Full Verification
 
 **Files:**
-- Create: `wemedia-studio/app/settings/sections/TelegramSettingsCard.tsx`
-- Create: `wemedia-studio/app/settings/sections/TelegramSettingsCard.test.tsx`
-- Modify: `wemedia-studio/app/settings/sections/XSection.tsx`
+- Create: `web/app/settings/sections/TelegramSettingsCard.tsx`
+- Create: `web/app/settings/sections/TelegramSettingsCard.test.tsx`
+- Modify: `web/app/settings/sections/XSection.tsx`
 - Modify: `README.md`
 
 **Interfaces:**
@@ -537,7 +537,7 @@ Add a separate test for test-success/test-failure loading and rendered metadata.
 Run:
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm test app/settings/sections/TelegramSettingsCard.test.tsx
 ```
 
@@ -596,7 +596,7 @@ Document:
 Run:
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm test
 pnpm exec tsc --noEmit
 pnpm build
@@ -695,9 +695,9 @@ The temporary script must:
 
 ```bash
 git add \
-  wemedia-studio/app/settings/sections/TelegramSettingsCard.tsx \
-  wemedia-studio/app/settings/sections/TelegramSettingsCard.test.tsx \
-  wemedia-studio/app/settings/sections/XSection.tsx README.md
+  web/app/settings/sections/TelegramSettingsCard.tsx \
+  web/app/settings/sections/TelegramSettingsCard.test.tsx \
+  web/app/settings/sections/XSection.tsx README.md
 git commit -m "feat(telegram): complete bot settings UI"
 ```
 

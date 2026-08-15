@@ -298,11 +298,11 @@ git commit -m "refactor(api): remove publication record routes"
 ### Task 3: Remove the publication-record frontend
 
 **Files:**
-- Modify: `wemedia-studio/components/features/Sidebar.tsx`
+- Modify: `web/components/features/Sidebar.tsx`
 - Modify: `README.md`
-- Delete: `wemedia-studio/app/published/page.tsx`
-- Delete: `wemedia-studio/app/published/PublishedClient.tsx`
-- Delete: `wemedia-studio/lib/api/published.ts`
+- Delete: `web/app/published/page.tsx`
+- Delete: `web/app/published/PublishedClient.tsx`
+- Delete: `web/lib/api/published.ts`
 
 **Interfaces:**
 - Removes: the `/published` Next.js route and publication-record API client.
@@ -322,9 +322,9 @@ would fail the desired 404 contract.
 
 - [ ] **Step 2: Delete the frontend record-management layer**
 
-- Delete `wemedia-studio/app/published/page.tsx`.
-- Delete `wemedia-studio/app/published/PublishedClient.tsx`.
-- Delete `wemedia-studio/lib/api/published.ts`.
+- Delete `web/app/published/page.tsx`.
+- Delete `web/app/published/PublishedClient.tsx`.
+- Delete `web/lib/api/published.ts`.
 - Remove the `/published` item from `Sidebar.tsx`.
 - Remove the now-unused `Send` import from `Sidebar.tsx`.
 - In `README.md`, change the page list from:
@@ -344,7 +344,7 @@ to:
 Run:
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm exec next typegen
 pnpm exec tsc --noEmit
 curl -sS -o /dev/null -w '%{http_code}\n' \
@@ -360,9 +360,9 @@ retained draft publishing surface from accidental deletion.
 
 ```bash
 git add README.md \
-  wemedia-studio/components/features/Sidebar.tsx
-git add -u wemedia-studio/app/published \
-  wemedia-studio/lib/api/published.ts
+  web/components/features/Sidebar.tsx
+git add -u web/app/published \
+  web/lib/api/published.ts
 git commit -m "refactor(ui): remove publication records page"
 ```
 
@@ -426,7 +426,7 @@ Expected: exit 0 with no failures.
 Run:
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm test
 pnpm exec next typegen
 pnpm exec tsc --noEmit
@@ -466,7 +466,7 @@ Run:
 
 ```bash
 rg -n "published-articles|Publication(Create|Update|Out)?|href: '/published'" \
-  backend wemedia-studio README.md \
+  backend web README.md \
   --glob '!backend/tests/**' \
   --glob '!**/*.test.*' \
   --glob '!**/.next/**' \

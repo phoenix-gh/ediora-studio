@@ -20,8 +20,8 @@
 ### Task 1: Preserve the creation-bound selection through list refresh
 
 **Files:**
-- Modify: `wemedia-studio/app/responses/ResponsesClient.test.tsx`
-- Modify: `wemedia-studio/app/responses/ResponsesClient.tsx`
+- Modify: `web/app/responses/ResponsesClient.test.tsx`
+- Modify: `web/app/responses/ResponsesClient.tsx`
 
 **Interfaces:**
 - Consumes: existing `creationDetailRef`, `selectedIdRef`, `loadList`, and `selectResponse` state coordination.
@@ -46,7 +46,7 @@ After success, assert that the creation panel closes and the heading becomes `An
 Run:
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm test app/responses/ResponsesClient.test.tsx -t 'keeps the adopted response creation session active until creation succeeds'
 ```
 
@@ -93,8 +93,8 @@ Run the Step 2 command. Expected: PASS; output creation targets response 38 and 
 ### Task 2: Verify cancellation and surrounding response-session behavior
 
 **Files:**
-- Modify: `wemedia-studio/app/responses/ResponsesClient.test.tsx`
-- Verify: `wemedia-studio/app/responses/ResponsesClient.tsx`
+- Modify: `web/app/responses/ResponsesClient.test.tsx`
+- Verify: `web/app/responses/ResponsesClient.tsx`
 
 **Interfaces:**
 - Consumes: the close-time selection reconciliation from Task 1.
@@ -115,7 +115,7 @@ expect(api.createResponseOutputs).not.toHaveBeenCalled()
 Run:
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm test app/responses/ResponsesClient.test.tsx -t 'selects the next listed response when an adopted creation session is cancelled'
 ```
 
@@ -126,7 +126,7 @@ Expected: PASS.
 Run:
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm test app/responses/ResponsesClient.test.tsx
 ```
 
@@ -135,8 +135,8 @@ Expected: all response interaction, stale-request, duplicate-submit, and failure
 ### Task 3: Validate the frontend change
 
 **Files:**
-- Verify: `wemedia-studio/app/responses/ResponsesClient.tsx`
-- Verify: `wemedia-studio/app/responses/ResponsesClient.test.tsx`
+- Verify: `web/app/responses/ResponsesClient.tsx`
+- Verify: `web/app/responses/ResponsesClient.test.tsx`
 
 **Interfaces:**
 - Consumes: completed response-session behavior and tests.
@@ -145,7 +145,7 @@ Expected: all response interaction, stale-request, duplicate-submit, and failure
 - [ ] **Step 1: Run lint on the changed source and test files**
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm exec eslint app/responses/ResponsesClient.tsx app/responses/ResponsesClient.test.tsx
 ```
 
@@ -154,7 +154,7 @@ Expected: exit 0 with no new findings.
 - [ ] **Step 2: Run the frontend test suite**
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm test
 ```
 
@@ -163,7 +163,7 @@ Expected: all frontend tests pass. If unrelated dirty-worktree tests fail, recor
 - [ ] **Step 3: Run TypeScript validation**
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm exec tsc --noEmit
 ```
 
@@ -176,8 +176,8 @@ Use browser automation against `/responses`. Adopt one pending item, verify the 
 - [ ] **Step 5: Review the final diff and commit only scoped files**
 
 ```bash
-git diff --check -- docs/superpowers/specs/2026-08-02-response-creation-session-selection-design.md docs/superpowers/plans/2026-08-02-response-creation-session-selection.md wemedia-studio/app/responses/ResponsesClient.tsx wemedia-studio/app/responses/ResponsesClient.test.tsx
-git diff -- docs/superpowers/specs/2026-08-02-response-creation-session-selection-design.md docs/superpowers/plans/2026-08-02-response-creation-session-selection.md wemedia-studio/app/responses/ResponsesClient.tsx wemedia-studio/app/responses/ResponsesClient.test.tsx
-git add docs/superpowers/specs/2026-08-02-response-creation-session-selection-design.md docs/superpowers/plans/2026-08-02-response-creation-session-selection.md wemedia-studio/app/responses/ResponsesClient.tsx wemedia-studio/app/responses/ResponsesClient.test.tsx
+git diff --check -- docs/superpowers/specs/2026-08-02-response-creation-session-selection-design.md docs/superpowers/plans/2026-08-02-response-creation-session-selection.md web/app/responses/ResponsesClient.tsx web/app/responses/ResponsesClient.test.tsx
+git diff -- docs/superpowers/specs/2026-08-02-response-creation-session-selection-design.md docs/superpowers/plans/2026-08-02-response-creation-session-selection.md web/app/responses/ResponsesClient.tsx web/app/responses/ResponsesClient.test.tsx
+git add docs/superpowers/specs/2026-08-02-response-creation-session-selection-design.md docs/superpowers/plans/2026-08-02-response-creation-session-selection.md web/app/responses/ResponsesClient.tsx web/app/responses/ResponsesClient.test.tsx
 git commit -m "fix: keep response creation session active"
 ```

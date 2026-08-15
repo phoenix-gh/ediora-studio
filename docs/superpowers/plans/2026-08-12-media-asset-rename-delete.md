@@ -24,8 +24,8 @@
 ### Task 1: Selected Media Rename
 
 **Files:**
-- Modify: `wemedia-studio/app/assets/AssetsClient.test.tsx`
-- Modify: `wemedia-studio/app/assets/AssetsClient.tsx`
+- Modify: `web/app/assets/AssetsClient.test.tsx`
+- Modify: `web/app/assets/AssetsClient.tsx`
 
 **Interfaces:**
 - Consumes: `updateCreativeAsset(id: number, body: { title: string }): Promise<CreativeAsset>` and the existing `selected` visible-asset derivation.
@@ -54,7 +54,7 @@ Add separate assertions that an all-whitespace value displays `请输入名称�
 Run:
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm exec vitest run app/assets/AssetsClient.test.tsx
 ```
 
@@ -94,15 +94,15 @@ Expected: all `AssetsClient` tests PASS.
 - [ ] **Step 5: Commit the rename slice**
 
 ```bash
-git add wemedia-studio/app/assets/AssetsClient.tsx wemedia-studio/app/assets/AssetsClient.test.tsx
+git add web/app/assets/AssetsClient.tsx web/app/assets/AssetsClient.test.tsx
 git commit -m "feat: rename selected media assets"
 ```
 
 ### Task 2: Selected Media Delete and Regression Verification
 
 **Files:**
-- Modify: `wemedia-studio/app/assets/AssetsClient.test.tsx`
-- Modify: `wemedia-studio/app/assets/AssetsClient.tsx`
+- Modify: `web/app/assets/AssetsClient.test.tsx`
+- Modify: `web/app/assets/AssetsClient.tsx`
 
 **Interfaces:**
 - Consumes: `deleteCreativeAsset(id: number): Promise<void>`, `ConfirmationState`, `confirmDeletion()`, and current visible-media selection.
@@ -177,6 +177,6 @@ On `/assets`, switch to `多媒体`, select an asset, rename it, reopen its prev
 - [ ] **Step 6: Commit the delete slice**
 
 ```bash
-git add wemedia-studio/app/assets/AssetsClient.tsx wemedia-studio/app/assets/AssetsClient.test.tsx
+git add web/app/assets/AssetsClient.tsx web/app/assets/AssetsClient.test.tsx
 git commit -m "feat: delete selected media assets"
 ```

@@ -71,11 +71,11 @@ Run the command from Step 2 and the existing scheduler registration tests. Expec
 ### Task 3: Add the per-subscription settings dialog
 
 **Files:**
-- Modify: `wemedia-studio/lib/api/x.ts`
-- Modify: `wemedia-studio/app/x/XSubscriptionRow.tsx`
-- Modify: `wemedia-studio/app/x/XClient.tsx`
-- Modify: `wemedia-studio/app/x/XSubscriptionRow.test.tsx`
-- Modify: `wemedia-studio/app/x/XClient.test.tsx`
+- Modify: `web/lib/api/x.ts`
+- Modify: `web/app/x/XSubscriptionRow.tsx`
+- Modify: `web/app/x/XClient.tsx`
+- Modify: `web/app/x/XSubscriptionRow.test.tsx`
+- Modify: `web/app/x/XClient.test.tsx`
 
 - [x] **Step 1: Write failing UI tests**
 
@@ -84,7 +84,7 @@ Assert the row exposes “设置采集频率”, invokes its callback, and the d
 - [x] **Step 2: Run the X UI tests and observe the missing action/field failures**
 
 ```bash
-cd wemedia-studio && pnpm exec vitest run app/x/XSubscriptionRow.test.tsx app/x/XClient.test.tsx
+cd web && pnpm exec vitest run app/x/XSubscriptionRow.test.tsx app/x/XClient.test.tsx
 ```
 
 - [x] **Step 3: Implement the API type, row action, display, and dialog**
@@ -98,8 +98,8 @@ Run the command from Step 2. Expected: all selected tests pass.
 ### Task 4: Clarify the global default setting and run regression checks
 
 **Files:**
-- Modify: `wemedia-studio/app/settings/sections/XSection.tsx`
-- Modify: `wemedia-studio/app/settings/sections/XSection.test.tsx`
+- Modify: `web/app/settings/sections/XSection.tsx`
+- Modify: `web/app/settings/sections/XSection.test.tsx`
 - Modify: `backend/routers/settings.py`
 
 - [x] **Step 1: Update the setting copy and validation**
@@ -109,7 +109,7 @@ Rename the field to “新订阅默认采集间隔”, keep the API key for comp
 - [x] **Step 2: Run focused frontend and backend checks**
 
 ```bash
-cd wemedia-studio && pnpm exec vitest run app/x app/settings/sections/XSection.test.tsx
+cd web && pnpm exec vitest run app/x app/settings/sections/XSection.test.tsx
 /home/violet/miniconda3/envs/wems/bin/python -m py_compile backend/models.py backend/database.py backend/routers/x.py backend/scheduler.py backend/routers/settings.py
 git diff --check
 ```

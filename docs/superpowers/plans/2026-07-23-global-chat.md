@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build a no-login, multi-session global research chat that streams AI replies and can read WeMedia Studio information sources through auditable read-only tools.
+**Goal:** Build a no-login, multi-session global research chat that streams AI replies and can read Ediora information sources through auditable read-only tools.
 
 **Architecture:** Next.js owns the chat API, model loop, streaming response, and tool definitions. FastAPI owns persisted sessions/messages and source-search/read endpoints; every tool call is recorded with the assistant message. The first release has no mutating tools and no Redis dependency.
 
@@ -56,9 +56,9 @@
 ### Task 3: Streaming AI route with audited tools
 
 **Files:**
-- Create: `wemedia-studio/app/api/chat/route.ts`
-- Create: `wemedia-studio/lib/ai/chat-tools.ts`
-- Test: `wemedia-studio/lib/ai/chat-tools.test.ts`
+- Create: `web/app/api/chat/route.ts`
+- Create: `web/lib/ai/chat-tools.ts`
+- Test: `web/lib/ai/chat-tools.test.ts`
 
 **Interfaces:**
 - `makeChatTools({apiBase, sessionId})` returns `searchInformationSources` and `readInformationSource` tools.
@@ -73,10 +73,10 @@
 ### Task 4: Global Chat UI and navigation entry
 
 **Files:**
-- Create: `wemedia-studio/app/chat/page.tsx`
-- Create: `wemedia-studio/app/chat/ChatClient.tsx`
-- Create: `wemedia-studio/lib/api/chat.ts`
-- Modify: `wemedia-studio/components/features/Sidebar.tsx`
+- Create: `web/app/chat/page.tsx`
+- Create: `web/app/chat/ChatClient.tsx`
+- Create: `web/lib/api/chat.ts`
+- Modify: `web/components/features/Sidebar.tsx`
 
 **Interfaces:**
 - `/chat` lists sessions, creates a session, loads its messages, streams replies, and renders tool-call/result parts.

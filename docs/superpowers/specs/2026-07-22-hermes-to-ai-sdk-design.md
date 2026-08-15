@@ -2,7 +2,7 @@
 
 ## Goal
 
-Ship an open-source, self-hosted, single-user version of WeMedia Studio that
+Ship an open-source, self-hosted, single-user version of Ediora that
 does not require Hermes, Hermes profiles, a Kanban CLI, or local agent
 sessions. Preserve the existing collection, content, publishing, and data
 assets, while making the runtime suitable for a later SaaS migration.

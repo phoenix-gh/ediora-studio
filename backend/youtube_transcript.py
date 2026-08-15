@@ -17,6 +17,7 @@ from urllib.parse import urlparse
 
 import httpx
 
+from collection_proxy import collection_ytdlp_proxy_args
 from transcription_service import (
     TranscriptionError,
     TranscriptionRequest,
@@ -365,9 +366,15 @@ def youtube_cookies_file(cookies: str) -> Iterator[str | None]:
         yield str(path)
 
 
-def ytdlp_argv(*args: str, cookie_path: str | None, url: str) -> tuple[str, ...]:
+def ytdlp_argv(
+    *args: str,
+    cookie_path: str | None,
+    url: str,
+    proxy_url: str = "",
+) -> tuple[str, ...]:
     return (
         "yt-dlp",
+        *collection_ytdlp_proxy_args(proxy_url),
         *args,
         *(("--cookies", cookie_path) if cookie_path else ()),
         url,
@@ -382,12 +389,14 @@ async def extract_youtube_transcript(
 ) -> dict[str, Any]:
     """Extract subtitles, falling back to a bounded audio-only transcription."""
     validate_youtube_url(url)
+    proxy_url = config.get("collection_proxy_url", "")
     with youtube_cookies_file(config.get("youtube_cookies", "")) as cookie_path:
         metadata_raw = await command(
             *ytdlp_argv(
                 "--dump-single-json", "--skip-download", "--ignore-no-formats-error", "--no-playlist",
                 cookie_path=cookie_path,
                 url=url,
+                proxy_url=proxy_url,
             ),
             timeout=60,
         )
@@ -419,6 +428,7 @@ async def extract_youtube_transcript(
                         "-o", template,
                         cookie_path=cookie_path,
                         url=url,
+                        proxy_url=proxy_url,
                     ),
                     timeout=120,
                 )
@@ -451,6 +461,7 @@ async def extract_youtube_transcript(
                     "-o", template,
                     cookie_path=cookie_path,
                     url=url,
+                    proxy_url=proxy_url,
                 ),
                 timeout=300,
             )

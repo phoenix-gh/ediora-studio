@@ -101,8 +101,8 @@ git commit -m "fix: require directories for asset candidates"
 ### Task 2: Ignore Recovered Read-Only Audit Failures
 
 **Files:**
-- Modify: `wemedia-studio/lib/ai/daily-creation-agent-job.ts`
-- Modify: `wemedia-studio/lib/ai/daily-creation-agent-job.test.ts`
+- Modify: `web/lib/ai/daily-creation-agent-job.ts`
+- Modify: `web/lib/ai/daily-creation-agent-job.test.ts`
 
 **Interfaces:**
 - Consumes: ordered `AgentToolAudit[]` with `toolName`, `status`, and `sideEffecting`.
@@ -142,7 +142,7 @@ Also add a job-level test proving a failed candidate call followed by a successf
 Run:
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm exec vitest run lib/ai/daily-creation-agent-job.test.ts
 ```
 
@@ -180,7 +180,7 @@ Expected: all selected tests PASS.
 - [ ] **Step 5: Commit the audit slice**
 
 ```bash
-git add wemedia-studio/lib/ai/daily-creation-agent-job.ts wemedia-studio/lib/ai/daily-creation-agent-job.test.ts
+git add web/lib/ai/daily-creation-agent-job.ts web/lib/ai/daily-creation-agent-job.test.ts
 git commit -m "fix: recover read-only agent tool audits"
 ```
 
@@ -199,7 +199,7 @@ Run:
 
 ```bash
 /home/violet/miniconda3/envs/wems/bin/python -m pytest backend/tests/test_mcp_daily_creation_tools.py backend/tests/test_daily_creation_service.py backend/tests/test_agent_execution_service.py -q
-cd wemedia-studio
+cd web
 pnpm exec vitest run lib/ai/daily-creation-agent-job.test.ts lib/ai/agent-runtime.test.ts lib/ai/agent-tool-policy.test.ts lib/ai/agent-execution-client.test.ts
 pnpm exec eslint lib/ai/daily-creation-agent-job.ts lib/ai/daily-creation-agent-job.test.ts
 ```

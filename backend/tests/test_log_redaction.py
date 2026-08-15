@@ -224,7 +224,7 @@ def test_main_installs_redaction_before_optional_feedgrab_import(
     )
 
     assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == "WeMedia Studio API"
+    assert result.stdout.strip() == "Ediora API"
     for secret in (
         "import-auth-secret",
         "import-csrf-secret",

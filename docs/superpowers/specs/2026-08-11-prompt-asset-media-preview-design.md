@@ -6,9 +6,9 @@
 
 ## 范围
 
-- 修改 `wemedia-studio/app/assets/PromptAssetWorkspace.tsx` 的生成历史展示。
+- 修改 `web/app/assets/PromptAssetWorkspace.tsx` 的生成历史展示。
 - 增加生成历史媒体预览交互：图片点击打开对话框，滚轮缩放，放大后拖动平移，支持重置与关闭。
-- 更新 `wemedia-studio/app/assets/PromptAssetWorkspace.test.tsx`，覆盖布局、完整显示和预览交互。
+- 更新 `web/app/assets/PromptAssetWorkspace.test.tsx`，覆盖布局、完整显示和预览交互。
 - 不修改数据库、API 和 `PromptGeneration` 数据结构。
 
 ## 交互设计

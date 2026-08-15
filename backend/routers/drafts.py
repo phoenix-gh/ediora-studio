@@ -452,7 +452,7 @@ async def publish_draft_to_blog(
         "title": body.title.strip(),
         "description": body.description.strip(),
         "contentMarkdown": body.content_markdown,
-        "agentName": "wemedia-studio",
+        "agentName": "ediora",
     }
     if body.slug.strip():
         payload["slug"] = body.slug.strip()

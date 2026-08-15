@@ -1854,10 +1854,10 @@ git commit -m "feat(daily-plan): 工作台提醒——今日计划就绪/失败"
 ### Task 11: 前端 — API 封装 + 导航 + /daily-plan 页面
 
 **Files:**
-- Create: `wemedia-studio/lib/api/daily-plan.ts`
-- Create: `wemedia-studio/app/daily-plan/page.tsx`
-- Create: `wemedia-studio/app/daily-plan/DailyPlanClient.tsx`
-- Modify: `wemedia-studio/components/features/Sidebar.tsx:5-27`（icon import + 导航项）
+- Create: `web/lib/api/daily-plan.ts`
+- Create: `web/app/daily-plan/page.tsx`
+- Create: `web/app/daily-plan/DailyPlanClient.tsx`
+- Modify: `web/components/features/Sidebar.tsx:5-27`（icon import + 导航项）
 
 - [ ] **Step 1: lib/api/daily-plan.ts**
 
@@ -2176,14 +2176,14 @@ export function DailyPlanClient({ initialPlan }: { initialPlan: DailyPlan | null
 
 - [ ] **Step 5: 构建验证**
 
-Run: `source ~/.zshrc && cd /workspace/projects/WeMediaStudio/wemedia-studio && pnpm build`
+Run: `source ~/.zshrc && cd /workspace/projects/WeMediaStudio/web && pnpm build`
 Expected: build 成功，无 type error（出现 `/daily-plan` 路由）
 
 - [ ] **Step 6: Commit**
 
 ```bash
 cd /workspace/projects/WeMediaStudio
-git add wemedia-studio/lib/api/daily-plan.ts wemedia-studio/app/daily-plan wemedia-studio/components/features/Sidebar.tsx
+git add web/lib/api/daily-plan.ts web/app/daily-plan web/components/features/Sidebar.tsx
 git commit -m "feat(daily-plan): 今日计划独立页——勾选入队/跳过/重新生成 + 导航项"
 ```
 
@@ -2192,8 +2192,8 @@ git commit -m "feat(daily-plan): 今日计划独立页——勾选入队/跳过/
 ### Task 12: 设置页账号表单加 daily_quota
 
 **Files:**
-- Modify: `wemedia-studio/lib/api/publish-accounts.ts:14-34`（接口加字段）
-- Modify: `wemedia-studio/app/settings/sections/PublishAccountsSection.tsx`（EditState/EMPTY_EDIT/accountToEdit/editToInput + 表单 UI）
+- Modify: `web/lib/api/publish-accounts.ts:14-34`（接口加字段）
+- Modify: `web/app/settings/sections/PublishAccountsSection.tsx`（EditState/EMPTY_EDIT/accountToEdit/editToInput + 表单 UI）
 
 - [ ] **Step 1: publish-accounts.ts**
 
@@ -2266,14 +2266,14 @@ git commit -m "feat(daily-plan): 今日计划独立页——勾选入队/跳过/
 
 - [ ] **Step 4: 构建验证**
 
-Run: `source ~/.zshrc && cd /workspace/projects/WeMediaStudio/wemedia-studio && pnpm build`
+Run: `source ~/.zshrc && cd /workspace/projects/WeMediaStudio/web && pnpm build`
 Expected: build 成功
 
 - [ ] **Step 5: Commit**
 
 ```bash
 cd /workspace/projects/WeMediaStudio
-git add wemedia-studio/lib/api/publish-accounts.ts wemedia-studio/app/settings/sections/PublishAccountsSection.tsx
+git add web/lib/api/publish-accounts.ts web/app/settings/sections/PublishAccountsSection.tsx
 git commit -m "feat(daily-plan): 账号设置表单支持每日配额 daily_quota"
 ```
 
@@ -2291,7 +2291,7 @@ Run: `cd /workspace/projects/WeMediaStudio/backend && conda run -n wems python -
 
 - [ ] **Step 2: 前端 build**
 
-Run: `source ~/.zshrc && cd /workspace/projects/WeMediaStudio/wemedia-studio && pnpm build`
+Run: `source ~/.zshrc && cd /workspace/projects/WeMediaStudio/web && pnpm build`
 Expected: 成功
 
 - [ ] **Step 3: 提醒用户线上 PG 手动 ALTER**

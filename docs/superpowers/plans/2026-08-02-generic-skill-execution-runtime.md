@@ -25,8 +25,8 @@
 ### Task 1: Define the generic SkillRun contract and plan sanitizer
 
 **Files:**
-- Create: `wemedia-studio/lib/ai/skill-run.ts`
-- Create: `wemedia-studio/lib/ai/skill-run.test.ts`
+- Create: `web/lib/ai/skill-run.ts`
+- Create: `web/lib/ai/skill-run.test.ts`
 
 **Interfaces:**
 - Consumes: exact reference paths from the registry and tool names from the current `ToolSet`.
@@ -57,7 +57,7 @@ Also test duplicate step IDs, empty goals, unknown tool names, unlisted referenc
 
 - [ ] **Step 2: Run the focused test and verify RED**
 
-Run: `cd wemedia-studio && pnpm exec vitest run lib/ai/skill-run.test.ts`
+Run: `cd web && pnpm exec vitest run lib/ai/skill-run.test.ts`
 
 Expected: FAIL because `skill-run.ts` does not exist.
 
@@ -90,14 +90,14 @@ Use strict Zod schemas, normalize duplicates without changing order, and reject 
 
 - [ ] **Step 4: Run the focused test and verify GREEN**
 
-Run: `cd wemedia-studio && pnpm exec vitest run lib/ai/skill-run.test.ts`
+Run: `cd web && pnpm exec vitest run lib/ai/skill-run.test.ts`
 
 Expected: PASS.
 
 - [ ] **Step 5: Commit the domain contract**
 
 ```bash
-git add wemedia-studio/lib/ai/skill-run.ts wemedia-studio/lib/ai/skill-run.test.ts
+git add web/lib/ai/skill-run.ts web/lib/ai/skill-run.test.ts
 git commit -m "feat: define generic skill run contract"
 ```
 
@@ -106,12 +106,12 @@ git commit -m "feat: define generic skill run contract"
 ### Task 2: Build a generic plan prompt and progressive reference loader
 
 **Files:**
-- Create: `wemedia-studio/lib/ai/skill-run-planner.ts`
-- Create: `wemedia-studio/lib/ai/skill-run-planner.test.ts`
-- Modify: `wemedia-studio/lib/ai/global-chat-tools.ts`
-- Modify: `wemedia-studio/lib/ai/global-chat-tools.test.ts`
-- Modify: `wemedia-studio/lib/skills/registry.ts`
-- Modify: `wemedia-studio/lib/skills/registry.test.ts`
+- Create: `web/lib/ai/skill-run-planner.ts`
+- Create: `web/lib/ai/skill-run-planner.test.ts`
+- Modify: `web/lib/ai/global-chat-tools.ts`
+- Modify: `web/lib/ai/global-chat-tools.test.ts`
+- Modify: `web/lib/skills/registry.ts`
+- Modify: `web/lib/skills/registry.test.ts`
 
 **Interfaces:**
 - Consumes: `RegisteredSkill`, `SkillReference[]`, current user text, selected context, and tool metadata.
@@ -143,7 +143,7 @@ An absent manifest or absent `execution` field uses `{ planRequired: true, verif
 
 - [ ] **Step 2: Run tests and verify RED**
 
-Run: `cd wemedia-studio && pnpm exec vitest run lib/ai/skill-run-planner.test.ts lib/ai/global-chat-tools.test.ts lib/skills/registry.test.ts`
+Run: `cd web && pnpm exec vitest run lib/ai/skill-run-planner.test.ts lib/ai/global-chat-tools.test.ts lib/skills/registry.test.ts`
 
 Expected: FAIL because the planner and active Skill accessors do not exist.
 
@@ -171,14 +171,14 @@ Extend the existing strict `WMS_SKILL.json` parser with `execution?: SkillExecut
 
 - [ ] **Step 4: Run tests and verify GREEN**
 
-Run: `cd wemedia-studio && pnpm exec vitest run lib/ai/skill-run-planner.test.ts lib/ai/global-chat-tools.test.ts lib/skills/registry.test.ts`
+Run: `cd web && pnpm exec vitest run lib/ai/skill-run-planner.test.ts lib/ai/global-chat-tools.test.ts lib/skills/registry.test.ts`
 
 Expected: PASS.
 
 - [ ] **Step 5: Commit planning and progressive loading**
 
 ```bash
-git add wemedia-studio/lib/ai/skill-run-planner.ts wemedia-studio/lib/ai/skill-run-planner.test.ts wemedia-studio/lib/ai/global-chat-tools.ts wemedia-studio/lib/ai/global-chat-tools.test.ts wemedia-studio/lib/skills/registry.ts wemedia-studio/lib/skills/registry.test.ts
+git add web/lib/ai/skill-run-planner.ts web/lib/ai/skill-run-planner.test.ts web/lib/ai/global-chat-tools.ts web/lib/ai/global-chat-tools.test.ts web/lib/skills/registry.ts web/lib/skills/registry.test.ts
 git commit -m "feat: plan generic skill runs"
 ```
 
@@ -187,8 +187,8 @@ git commit -m "feat: plan generic skill runs"
 ### Task 3: Record workflow evidence without trusting model claims
 
 **Files:**
-- Create: `wemedia-studio/lib/ai/skill-run-evidence.ts`
-- Create: `wemedia-studio/lib/ai/skill-run-evidence.test.ts`
+- Create: `web/lib/ai/skill-run-evidence.ts`
+- Create: `web/lib/ai/skill-run-evidence.test.ts`
 
 **Interfaces:**
 - Consumes: sanitized plan, loaded reference paths, and AI SDK UI tool parts.
@@ -208,7 +208,7 @@ Assert `output-error`, `approval-requested`, `approval-responded` without comple
 
 - [ ] **Step 2: Run the focused test and verify RED**
 
-Run: `cd wemedia-studio && pnpm exec vitest run lib/ai/skill-run-evidence.test.ts`
+Run: `cd web && pnpm exec vitest run lib/ai/skill-run-evidence.test.ts`
 
 Expected: FAIL because evidence reducers do not exist.
 
@@ -218,14 +218,14 @@ Store compact identifiers and states, never full tool outputs. A step completes 
 
 - [ ] **Step 4: Run the focused test and verify GREEN**
 
-Run: `cd wemedia-studio && pnpm exec vitest run lib/ai/skill-run-evidence.test.ts`
+Run: `cd web && pnpm exec vitest run lib/ai/skill-run-evidence.test.ts`
 
 Expected: PASS.
 
 - [ ] **Step 5: Commit evidence tracking**
 
 ```bash
-git add wemedia-studio/lib/ai/skill-run-evidence.ts wemedia-studio/lib/ai/skill-run-evidence.test.ts
+git add web/lib/ai/skill-run-evidence.ts web/lib/ai/skill-run-evidence.test.ts
 git commit -m "feat: track skill workflow evidence"
 ```
 
@@ -234,8 +234,8 @@ git commit -m "feat: track skill workflow evidence"
 ### Task 4: Add generic validation, one revision, and fail-closed behavior
 
 **Files:**
-- Create: `wemedia-studio/lib/ai/skill-run-orchestrator.ts`
-- Create: `wemedia-studio/lib/ai/skill-run-orchestrator.test.ts`
+- Create: `web/lib/ai/skill-run-orchestrator.ts`
+- Create: `web/lib/ai/skill-run-orchestrator.test.ts`
 
 **Interfaces:**
 - Consumes: `SkillRun`, loaded reference content, tool evidence, and injected `draft`, `validate`, and `revise` callbacks.
@@ -259,7 +259,7 @@ Add tests for immediate pass, incomplete required evidence preventing draft deli
 
 - [ ] **Step 2: Run the focused test and verify RED**
 
-Run: `cd wemedia-studio && pnpm exec vitest run lib/ai/skill-run-orchestrator.test.ts`
+Run: `cd web && pnpm exec vitest run lib/ai/skill-run-orchestrator.test.ts`
 
 Expected: FAIL because the orchestrator does not exist.
 
@@ -279,14 +279,14 @@ Reject empty draft/revision text. Validation prompts receive the current text, e
 
 - [ ] **Step 4: Run the focused test and verify GREEN**
 
-Run: `cd wemedia-studio && pnpm exec vitest run lib/ai/skill-run-orchestrator.test.ts`
+Run: `cd web && pnpm exec vitest run lib/ai/skill-run-orchestrator.test.ts`
 
 Expected: PASS.
 
 - [ ] **Step 5: Commit the lifecycle**
 
 ```bash
-git add wemedia-studio/lib/ai/skill-run-orchestrator.ts wemedia-studio/lib/ai/skill-run-orchestrator.test.ts
+git add web/lib/ai/skill-run-orchestrator.ts web/lib/ai/skill-run-orchestrator.test.ts
 git commit -m "feat: validate and revise skill outputs"
 ```
 
@@ -295,10 +295,10 @@ git commit -m "feat: validate and revise skill outputs"
 ### Task 5: Implement the AI SDK adapter without provider-forced tool choice
 
 **Files:**
-- Create: `wemedia-studio/lib/ai/skill-run-ai-sdk.ts`
-- Create: `wemedia-studio/lib/ai/skill-run-ai-sdk.test.ts`
-- Modify: `wemedia-studio/lib/ai/chat-loop.ts`
-- Modify: `wemedia-studio/lib/ai/chat-loop.test.ts`
+- Create: `web/lib/ai/skill-run-ai-sdk.ts`
+- Create: `web/lib/ai/skill-run-ai-sdk.test.ts`
+- Modify: `web/lib/ai/chat-loop.ts`
+- Modify: `web/lib/ai/chat-loop.test.ts`
 
 **Interfaces:**
 - Consumes: AI SDK language model, messages, active runtime, plan/validation schemas, and existing tools.
@@ -310,7 +310,7 @@ Assert automatic mode first returns either one exact enabled Skill name or no se
 
 - [ ] **Step 2: Run the focused tests and verify RED**
 
-Run: `cd wemedia-studio && pnpm exec vitest run lib/ai/skill-run-ai-sdk.test.ts lib/ai/chat-loop.test.ts`
+Run: `cd web && pnpm exec vitest run lib/ai/skill-run-ai-sdk.test.ts lib/ai/chat-loop.test.ts`
 
 Expected: FAIL because the adapter does not exist.
 
@@ -326,14 +326,14 @@ Use AI SDK `createUIMessageStream` and `createUIMessageStreamResponse` to emit o
 
 - [ ] **Step 5: Run adapter tests and verify GREEN**
 
-Run: `cd wemedia-studio && pnpm exec vitest run lib/ai/skill-run-ai-sdk.test.ts lib/ai/chat-loop.test.ts`
+Run: `cd web && pnpm exec vitest run lib/ai/skill-run-ai-sdk.test.ts lib/ai/chat-loop.test.ts`
 
 Expected: PASS with no provider-specific forced tool choice in recorded calls.
 
 - [ ] **Step 6: Commit the AI SDK adapter**
 
 ```bash
-git add wemedia-studio/lib/ai/skill-run-ai-sdk.ts wemedia-studio/lib/ai/skill-run-ai-sdk.test.ts wemedia-studio/lib/ai/chat-loop.ts wemedia-studio/lib/ai/chat-loop.test.ts
+git add web/lib/ai/skill-run-ai-sdk.ts web/lib/ai/skill-run-ai-sdk.test.ts web/lib/ai/chat-loop.ts web/lib/ai/chat-loop.test.ts
 git commit -m "feat: orchestrate verified skill runs"
 ```
 
@@ -345,8 +345,8 @@ git commit -m "feat: orchestrate verified skill runs"
 - Modify: `backend/database.py`
 - Modify: `backend/routers/chat.py`
 - Modify: `backend/tests/test_chat_router.py`
-- Modify: `wemedia-studio/app/api/chat/route.ts`
-- Modify: `wemedia-studio/app/api/chat/route.test.ts`
+- Modify: `web/app/api/chat/route.ts`
+- Modify: `web/app/api/chat/route.test.ts`
 
 **Interfaces:**
 - Consumes: `executeSkillRunWithAiSdk`, existing persisted session messages, and `WMS_GENERIC_SKILL_RUNTIME`.
@@ -406,7 +406,7 @@ Run:
 
 ```bash
 ./.conda-env/bin/python -m pytest backend/tests/test_chat_router.py -q
-cd wemedia-studio && pnpm exec vitest run app/api/chat/route.test.ts lib/ai/skill-run*.test.ts lib/ai/global-chat-tools.test.ts
+cd web && pnpm exec vitest run app/api/chat/route.test.ts lib/ai/skill-run*.test.ts lib/ai/global-chat-tools.test.ts
 ```
 
 Expected: PASS.
@@ -414,7 +414,7 @@ Expected: PASS.
 - [ ] **Step 7: Commit integration**
 
 ```bash
-git add backend/database.py backend/routers/chat.py backend/tests/test_chat_router.py wemedia-studio/app/api/chat/route.ts wemedia-studio/app/api/chat/route.test.ts
+git add backend/database.py backend/routers/chat.py backend/tests/test_chat_router.py web/app/api/chat/route.ts web/app/api/chat/route.test.ts
 git commit -m "feat: persist verified skill runs"
 ```
 
@@ -423,8 +423,8 @@ git commit -m "feat: persist verified skill runs"
 ### Task 7: Verify domain independence and live compatibility
 
 **Files:**
-- Modify: `wemedia-studio/lib/ai/skill-run-ai-sdk.test.ts`
-- Modify: `wemedia-studio/lib/skills/bundled-skills.test.ts`
+- Modify: `web/lib/ai/skill-run-ai-sdk.test.ts`
+- Modify: `web/lib/skills/bundled-skills.test.ts`
 - Modify: `docs/superpowers/specs/2026-08-02-generic-skill-execution-runtime-design.md` only if live findings require an approved compatibility note.
 
 **Interfaces:**
@@ -438,7 +438,7 @@ Run the same synthetic workflow under two different Skill names and assert ident
 - [ ] **Step 2: Run focused and full frontend verification**
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm exec vitest run lib/ai/skill-run*.test.ts lib/ai/global-chat-tools.test.ts app/api/chat/route.test.ts lib/skills/bundled-skills.test.ts
 pnpm exec eslint lib/ai/skill-run*.ts lib/ai/global-chat-tools.ts app/api/chat/route.ts
 pnpm exec tsc --noEmit
@@ -463,6 +463,6 @@ Use a temporary synthetic Skill with an intentionally impossible verification cr
 - [ ] **Step 5: Commit verification coverage**
 
 ```bash
-git add wemedia-studio/lib/ai/skill-run-ai-sdk.test.ts wemedia-studio/lib/skills/bundled-skills.test.ts
+git add web/lib/ai/skill-run-ai-sdk.test.ts web/lib/skills/bundled-skills.test.ts
 git commit -m "test: verify generic skill execution runtime"
 ```

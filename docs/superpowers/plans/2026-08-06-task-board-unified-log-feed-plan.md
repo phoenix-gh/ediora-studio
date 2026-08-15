@@ -20,9 +20,9 @@
 
 **Files:**
 - Modify: `backend/routers/jobs.py`
-- Modify: `wemedia-studio/lib/api/jobs.ts`
+- Modify: `web/lib/api/jobs.ts`
 - Test: `backend/tests/test_jobs_router.py`
-- Test: `wemedia-studio/lib/api/jobs.test.ts`
+- Test: `web/lib/api/jobs.test.ts`
 
 **Interfaces:**
 - `GET /api/jobs?limit=30&cursor=<opaque>&kind=scheduled|manual&status=<status>` returns `{ jobs: ContentJob[], next_cursor: string | null, has_more: boolean }`.
@@ -39,10 +39,10 @@
 ### Task 2: Build the unified scrollable task log list
 
 **Files:**
-- Create: `wemedia-studio/app/creation-rules/TaskLogList.tsx`
-- Test: `wemedia-studio/app/creation-rules/TaskLogList.test.tsx`
-- Modify: `wemedia-studio/app/creation-rules/CreationRulesClient.tsx`
-- Modify: `wemedia-studio/app/creation-rules/CreationJobPanel.tsx`
+- Create: `web/app/creation-rules/TaskLogList.tsx`
+- Test: `web/app/creation-rules/TaskLogList.test.tsx`
+- Modify: `web/app/creation-rules/CreationRulesClient.tsx`
+- Modify: `web/app/creation-rules/CreationJobPanel.tsx`
 
 **Interfaces:**
 - `TaskLogList({ refreshToken, onRetry, onCancel }: { refreshToken: number; onRetry: (jobId: number, stepKey: string) => void; onCancel: (jobId: number) => void })` owns list state and renders `JobLogDialog`.
@@ -59,11 +59,11 @@
 ### Task 3: Remove duplicate log presentation and preserve actions
 
 **Files:**
-- Modify: `wemedia-studio/app/creation-rules/CreationRulesClient.tsx`
-- Modify: `wemedia-studio/app/creation-rules/CreationJobPanel.tsx` or remove it after reference checks
-- Modify/Delete: `wemedia-studio/app/creation-rules/CreationRunLog.tsx` and its test if no longer referenced
-- Modify: `wemedia-studio/app/creation-rules/CreationRulesClient.test.tsx`
-- Modify: `wemedia-studio/app/creation-rules/CreationRunLog.test.tsx` if the component is removed
+- Modify: `web/app/creation-rules/CreationRulesClient.tsx`
+- Modify: `web/app/creation-rules/CreationJobPanel.tsx` or remove it after reference checks
+- Modify/Delete: `web/app/creation-rules/CreationRunLog.tsx` and its test if no longer referenced
+- Modify: `web/app/creation-rules/CreationRulesClient.test.tsx`
+- Modify: `web/app/creation-rules/CreationRunLog.test.tsx` if the component is removed
 
 **Interfaces:**
 - The page renders exactly one heading for the task log list: `任务日志`.
@@ -79,7 +79,7 @@
 ### Task 4: Validate rendered desktop/mobile behavior
 
 **Files:**
-- Modify: `wemedia-studio/app/creation-rules/TaskLogList.tsx` only if visual QA exposes layout issues.
+- Modify: `web/app/creation-rules/TaskLogList.tsx` only if visual QA exposes layout issues.
 - Test: existing Playwright/e2e surface if available; otherwise use a temporary `/tmp` Playwright script.
 
 - [ ] **Step 1: Start/check the local app at `http://127.0.0.1:3000/creation-rules`.**

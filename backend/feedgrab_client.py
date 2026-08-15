@@ -1,4 +1,4 @@
-"""Adapter between WeMedia Studio and feedgrab for X/Twitter content.
+"""Adapter between Ediora and feedgrab for X/Twitter content.
 
 This module is split into two layers:
 

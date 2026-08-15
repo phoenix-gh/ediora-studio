@@ -807,9 +807,9 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 ### Task 5: 前端 API 封装 + 依赖入库
 
 **Files:**
-- Modify: `wemedia-studio/lib/api/publish-accounts.ts`（interface PublishAccount, L14）
-- Modify: `wemedia-studio/lib/api/drafts.ts`（文件末尾）
-- Modify: `wemedia-studio/package.json` + `pnpm-lock.yaml`（`@wenyan-md/core` 已装好，本 task 入库）
+- Modify: `web/lib/api/publish-accounts.ts`（interface PublishAccount, L14）
+- Modify: `web/lib/api/drafts.ts`（文件末尾）
+- Modify: `web/package.json` + `pnpm-lock.yaml`（`@wenyan-md/core` 已装好，本 task 入库）
 
 - [ ] **Step 1: PublishAccount 接口加字段**
 
@@ -847,14 +847,14 @@ export async function publishDraftToWechat(
 - [ ] **Step 3: 验证编译**
 
 ```bash
-source ~/.zshrc && cd /workspace/projects/WeMediaStudio/wemedia-studio && pnpm lint 2>&1 | tail -5
+source ~/.zshrc && cd /workspace/projects/WeMediaStudio/web && pnpm lint 2>&1 | tail -5
 ```
 预期：无新增 error（warning 不阻塞）。
 
 - [ ] **Step 4: Commit**
 
 ```bash
-source ~/.zshrc && cd /workspace/projects/WeMediaStudio && git add wemedia-studio/lib/api/publish-accounts.ts wemedia-studio/lib/api/drafts.ts wemedia-studio/package.json wemedia-studio/pnpm-lock.yaml && git commit -m "feat(publish): 前端公众号发布 API 封装 + @wenyan-md/core 依赖
+source ~/.zshrc && cd /workspace/projects/WeMediaStudio && git add web/lib/api/publish-accounts.ts web/lib/api/drafts.ts web/package.json web/pnpm-lock.yaml && git commit -m "feat(publish): 前端公众号发布 API 封装 + @wenyan-md/core 依赖
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 ```
@@ -864,7 +864,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 ### Task 6: 设置页发布账号表单加 AppID/AppSecret
 
 **Files:**
-- Modify: `wemedia-studio/app/settings/sections/PublishAccountsSection.tsx`
+- Modify: `web/app/settings/sections/PublishAccountsSection.tsx`
 
 - [ ] **Step 1: EditState 与转换函数**
 
@@ -934,14 +934,14 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 - [ ] **Step 3: 验证**
 
 ```bash
-source ~/.zshrc && cd /workspace/projects/WeMediaStudio/wemedia-studio && pnpm lint 2>&1 | tail -5
+source ~/.zshrc && cd /workspace/projects/WeMediaStudio/web && pnpm lint 2>&1 | tail -5
 ```
 预期：无新增 error。
 
 - [ ] **Step 4: Commit**
 
 ```bash
-source ~/.zshrc && cd /workspace/projects/WeMediaStudio && git add wemedia-studio/app/settings/sections/PublishAccountsSection.tsx && git commit -m "feat(publish): 设置页公众号账号表单加 AppID/AppSecret
+source ~/.zshrc && cd /workspace/projects/WeMediaStudio && git add web/app/settings/sections/PublishAccountsSection.tsx && git commit -m "feat(publish): 设置页公众号账号表单加 AppID/AppSecret
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 ```
@@ -951,13 +951,13 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 ### Task 7: WechatPublishDialog 发布对话框
 
 **Files:**
-- Create: `wemedia-studio/app/drafts/WechatPublishDialog.tsx`
+- Create: `web/app/drafts/WechatPublishDialog.tsx`
 
 布局（设计已确认）：左侧 390px 手机宽 iframe 预览，右侧账号/主题/标题/摘要/封面/按钮。
 
 - [ ] **Step 1: 创建组件**
 
-新建 `wemedia-studio/app/drafts/WechatPublishDialog.tsx`：
+新建 `web/app/drafts/WechatPublishDialog.tsx`：
 
 ```tsx
 'use client'
@@ -1291,14 +1291,14 @@ export function WechatPublishDialog({
 - [ ] **Step 2: 验证**
 
 ```bash
-source ~/.zshrc && cd /workspace/projects/WeMediaStudio/wemedia-studio && pnpm lint 2>&1 | tail -5
+source ~/.zshrc && cd /workspace/projects/WeMediaStudio/web && pnpm lint 2>&1 | tail -5
 ```
 预期：无新增 error。
 
 - [ ] **Step 3: Commit**
 
 ```bash
-source ~/.zshrc && cd /workspace/projects/WeMediaStudio && git add wemedia-studio/app/drafts/WechatPublishDialog.tsx && git commit -m "feat(publish): 公众号发布对话框 — wenyan 渲染/主题切换/预览/封面摘要
+source ~/.zshrc && cd /workspace/projects/WeMediaStudio && git add web/app/drafts/WechatPublishDialog.tsx && git commit -m "feat(publish): 公众号发布对话框 — wenyan 渲染/主题切换/预览/封面摘要
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 ```
@@ -1308,7 +1308,7 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 ### Task 8: DraftsClient 接线 + 构建验证
 
 **Files:**
-- Modify: `wemedia-studio/app/drafts/DraftsClient.tsx`
+- Modify: `web/app/drafts/DraftsClient.tsx`
 
 - [ ] **Step 1: 接线**
 
@@ -1355,15 +1355,15 @@ const [publishOpen, setPublishOpen] = useState(false)
 - [ ] **Step 2: lint + 生产构建验证**
 
 ```bash
-source ~/.zshrc && cd /workspace/projects/WeMediaStudio/wemedia-studio && pnpm lint 2>&1 | tail -5 && pnpm build 2>&1 | tail -15
+source ~/.zshrc && cd /workspace/projects/WeMediaStudio/web && pnpm lint 2>&1 | tail -5 && pnpm build 2>&1 | tail -15
 ```
 预期：lint 无新增 error；`next build` 成功（@wenyan-md/core 为动态 import，不应进首屏 bundle）。
-若 build 因 wenyan ESM 报错，按 `wemedia-studio/AGENTS.md` 要求查 `node_modules/next/dist/docs/` 中关于动态 import / 客户端组件的指南再修。
+若 build 因 wenyan ESM 报错，按 `web/AGENTS.md` 要求查 `node_modules/next/dist/docs/` 中关于动态 import / 客户端组件的指南再修。
 
 - [ ] **Step 3: Commit**
 
 ```bash
-source ~/.zshrc && cd /workspace/projects/WeMediaStudio && git add wemedia-studio/app/drafts/DraftsClient.tsx && git commit -m "feat(publish): 草稿工具栏接入公众号发布对话框
+source ~/.zshrc && cd /workspace/projects/WeMediaStudio && git add web/app/drafts/DraftsClient.tsx && git commit -m "feat(publish): 草稿工具栏接入公众号发布对话框
 
 Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 ```

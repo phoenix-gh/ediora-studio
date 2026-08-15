@@ -1,5 +1,5 @@
 """
-WeMedia Studio MCP Server
+Ediora MCP Server
 Exposes key data as tools for AI agents via Streamable HTTP transport.
 Mount at /mcp in main.py: app.mount("/mcp", mcp.streamable_http_app())
 """
@@ -27,7 +27,7 @@ _UPLOADS_DIR.mkdir(exist_ok=True)
 _BASE_URL = os.getenv("WMS_BASE_URL", "http://localhost:8000")
 
 mcp = FastMCP(
-    "WeMedia Studio",
+    "Ediora",
     transport_security=TransportSecuritySettings(
         # The Next.js AI route calls this service through Docker Compose's
         # internal DNS name. Keep DNS-rebinding protection on, but allow that
@@ -108,7 +108,7 @@ async def fetch_url(url: str, max_chars: int = 12_000) -> dict:
 @mcp.tool()
 async def get_content_directions() -> list[dict]:
     """
-    Return all content directions configured in WeMedia Studio, along with
+    Return all content directions configured in Ediora, along with
     their child strategies.
 
     A direction is a broad content domain (e.g. "AI 工具评测").
@@ -161,7 +161,7 @@ async def get_github_daily_trending() -> dict:
     """Return the latest GitHub daily Trending snapshot and rank changes.
 
     This tool is intentionally argument-free: the Agent must use the daily
-    snapshot already collected by WeMedia Studio and cannot switch to weekly
+    snapshot already collected by Ediora and cannot switch to weekly
     data or invent a different source.
     """
     from models import GithubTrendingRepo
@@ -271,7 +271,7 @@ async def list_drafts(
     status: Optional[str] = None,
 ) -> list[dict]:
     """
-    List article drafts stored in WeMedia Studio.
+    List article drafts stored in Ediora.
 
     Args:
         limit: Maximum number of drafts to return (max 50).
@@ -535,7 +535,7 @@ async def update_draft(
     status: Optional[str] = None,
 ) -> dict:
     """
-    Update an existing draft in WeMedia Studio's draft box.
+    Update an existing draft in Ediora's draft box.
 
     Args:
         draft_id: The integer ID of the draft to update (from list_drafts).
@@ -1045,7 +1045,7 @@ async def upload_image_from_url(
     draft_id: Optional[int] = None,
 ) -> dict:
     """
-    Fetch an image from a remote URL and host it on WeMedia Studio's server.
+    Fetch an image from a remote URL and host it on Ediora's server.
 
     Use this when you want to embed an externally hosted image in an article
     but need a stable, locally served URL (e.g. the original host may block
@@ -1061,7 +1061,7 @@ async def upload_image_from_url(
                   share the library — any member ID works.
 
     Returns:
-        hosted_url: Absolute URL to serve the image from WeMedia Studio,
+        hosted_url: Absolute URL to serve the image from Ediora,
                     e.g. "http://localhost:8000/api/uploads/abc123.jpg".
                     Embed this directly in Markdown: ![alt](hosted_url)
         filename: The stored filename (e.g. "abc123.jpg").
@@ -1095,7 +1095,7 @@ async def upload_image_from_url(
 
         async with httpx.AsyncClient(follow_redirects=True, timeout=20) as client:
             try:
-                response = await client.get(url, headers={"User-Agent": "WeMediaStudio/1.0"})
+                response = await client.get(url, headers={"User-Agent": "Ediora/1.0"})
             except Exception as exc:
                 raise ValueError(f"Failed to fetch image: {exc}")
 
@@ -1147,7 +1147,7 @@ async def upload_image_from_path(
     draft_id: Optional[int] = None,
 ) -> dict:
     """
-    Read a local image file from disk and host it on WeMedia Studio's server.
+    Read a local image file from disk and host it on Ediora's server.
 
     Use this (NOT upload_image_from_base64) when you have a locally generated
     image file — for example after running the codex_imagegen skill. Reading
@@ -1162,7 +1162,7 @@ async def upload_image_from_path(
                   image panel.
 
     Returns:
-        hosted_url: Absolute URL to serve the image from WeMedia Studio.
+        hosted_url: Absolute URL to serve the image from Ediora.
         filename: The stored filename.
         size_bytes: Size of the stored file in bytes.
         content_type: Detected MIME type.
@@ -1298,10 +1298,10 @@ async def save_draft(
     topic_id: str = "agent",
     status: str = "drafting",
     pipeline_task_id: Optional[int] = None,
-    draft_type: Literal["article", "script", "x"] = "article",
+    draft_type: Literal["article", "script", "x", "x_article", "mp"] = "article",
 ) -> dict:
     """
-    Save a new article draft to WeMedia Studio's draft box.
+    Save a new article draft to Ediora's draft box.
 
     Args:
         title: Article title.
@@ -1311,7 +1311,7 @@ async def save_draft(
         status: Initial status — "drafting" (default) or "review".
         pipeline_task_id: Optional pipeline_task_id from the task body (links this
                           draft to its pipeline run record for timeline tracking).
-        draft_type: "article"（默认）、"script" 或 "x"。
+        draft_type: "article"（默认）、"script"、"x"、"x_article" 或 "mp"。
 
     Returns: id, title, status, created_at of the newly created draft.
     """

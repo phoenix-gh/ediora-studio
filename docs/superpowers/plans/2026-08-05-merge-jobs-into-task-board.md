@@ -20,9 +20,9 @@
 ### Task 1: Add failing tests for merged jobs and log dialogs
 
 **Files:**
-- Modify: `wemedia-studio/app/creation-rules/CreationRulesClient.test.tsx`
-- Modify: `wemedia-studio/app/creation-rules/CreationRunLog.test.tsx`
-- Create: `wemedia-studio/app/creation-rules/CreationJobPanel.test.tsx`
+- Modify: `web/app/creation-rules/CreationRulesClient.test.tsx`
+- Modify: `web/app/creation-rules/CreationRunLog.test.tsx`
+- Create: `web/app/creation-rules/CreationJobPanel.test.tsx`
 
 **Interfaces:**
 - Consumes: `listJobs`, `cancelJob`, `retryJobStep`, `ContentJob`.
@@ -36,8 +36,8 @@
 ### Task 2: Build the generic Job panel and dialog
 
 **Files:**
-- Create: `wemedia-studio/app/creation-rules/CreationJobPanel.tsx`
-- Create: `wemedia-studio/app/creation-rules/JobLogDialog.tsx`
+- Create: `web/app/creation-rules/CreationJobPanel.tsx`
+- Create: `web/app/creation-rules/JobLogDialog.tsx`
 
 **Interfaces:**
 - `CreationJobPanel({ jobs, onCancel, onRetry })` renders Job summaries and opens `JobLogDialog`.
@@ -52,8 +52,8 @@
 ### Task 3: Convert scheduled run details to dialogs
 
 **Files:**
-- Modify: `wemedia-studio/app/creation-rules/CreationRunLog.tsx`
-- Modify: `wemedia-studio/app/creation-rules/CreationRunLog.test.tsx`
+- Modify: `web/app/creation-rules/CreationRunLog.tsx`
+- Modify: `web/app/creation-rules/CreationRunLog.test.tsx`
 
 **Interfaces:**
 - `CreationRunLog({ runs, schedulerLogs })` keeps summary rows and opens a run-detail Dialog from `查看日志`.
@@ -66,13 +66,13 @@
 ### Task 4: Wire all Jobs into the task board and remove `/jobs`
 
 **Files:**
-- Modify: `wemedia-studio/app/creation-rules/CreationRulesClient.tsx`
-- Modify: `wemedia-studio/app/creation-rules/CreationRulesClient.test.tsx`
-- Modify: `wemedia-studio/components/features/Sidebar.tsx`
-- Modify: `wemedia-studio/app/drafts/DraftsClient.tsx`
-- Modify: `wemedia-studio/app/digital-humans/EnvironmentPickerDialog.tsx`
-- Delete: `wemedia-studio/app/jobs/page.tsx`
-- Delete: `wemedia-studio/app/jobs/JobsClient.tsx`
+- Modify: `web/app/creation-rules/CreationRulesClient.tsx`
+- Modify: `web/app/creation-rules/CreationRulesClient.test.tsx`
+- Modify: `web/components/features/Sidebar.tsx`
+- Modify: `web/app/drafts/DraftsClient.tsx`
+- Modify: `web/app/digital-humans/EnvironmentPickerDialog.tsx`
+- Delete: `web/app/jobs/page.tsx`
+- Delete: `web/app/jobs/JobsClient.tsx`
 
 **Interfaces:**
 - `CreationRulesClient` loads `getCreationDashboard`, directories, skills and `listJobs` in parallel.

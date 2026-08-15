@@ -151,7 +151,7 @@ def test_publish_blog_happy_path(client, uploads_dir, blog_mock):
     assert sent["contentMarkdown"] == md
     assert sent["series"] == "落地手记"
     assert sent["tags"] == ["agent", "cms"]
-    assert sent["agentName"] == "wemedia-studio"
+    assert sent["agentName"] == "ediora"
     # 未传 cover_image_id，不带 coverImage 字段
     assert "coverImage" not in sent
     # 本地 uploads 图片随稿 base64 上传，外链不带

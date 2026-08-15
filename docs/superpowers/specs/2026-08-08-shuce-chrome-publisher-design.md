@@ -5,7 +5,7 @@
 
 ## 目标
 
-在项目根目录新增一个独立的 Chrome Manifest V3 插件，显示名称为“述策助手”。第一版用于验证浏览器内自动发布 X 帖子的可行性，不连接 WeMediaStudio 后端，也不轮询发布任务。
+在项目根目录新增一个独立的 Chrome Manifest V3 插件，显示名称为“述策助手”。第一版用于验证浏览器内自动发布 X 帖子的可行性，不连接 Ediora 后端，也不轮询发布任务。
 
 用户登录 X 后，在开发者控制台调用 `Shuce.publish()`：
 
@@ -54,7 +54,7 @@ chrome-extension/
 ### 组件职责
 
 - `manifest.json`：Manifest V3 配置，只声明 X/Twitter 页面所需的最小权限。
-- `background/service-worker.js`：记录插件启动、最近执行状态和错误。MVP 不请求 WeMediaStudio，也不创建轮询定时器。
+- `background/service-worker.js`：记录插件启动、最近执行状态和错误。MVP 不请求 Ediora，也不创建轮询定时器。
 - `injected/console-api.js`：临时暴露 `Shuce.publish()`，生成请求 ID，通过页面消息发送请求并等待对应结果。
 - `content/bridge.js`：校验消息来源、请求结构和请求 ID，将请求交给发布内核，并把结构化结果返回给控制台调用方。
 - `content/publisher.js`：执行页面识别、内容填充、立即发布、原生定时发布、成功确认和错误分类。它运行在 Chrome isolated world，不导出页面全局对象。
@@ -132,7 +132,7 @@ XActions 的 `src/schedulePosts.js` 提供了安排表入口与部分选择器�
 
 - Host permissions 仅允许 `https://x.com/*` 和 `https://twitter.com/*`。
 - 不读取、导出或保存 X Cookie、Token 和页面私密数据。
-- 不访问 WeMediaStudio、本地网络或第三方服务。
+- 不访问 Ediora、本地网络或第三方服务。
 - 页面消息必须带固定来源标识、随机请求 ID，并由 bridge 校验结构；结果只响应当前页面发起的已登记请求。
 - 日志不得包含 Cookie、Authorization 信息；帖子正文只在当前页面内处理。
 - 临时 `window.Shuce` 入口在正式版中整体删除。正式版只保留后台消息、isolated-world bridge 和 publisher 内核。
@@ -179,4 +179,4 @@ XActions 的 `src/schedulePosts.js` 提供了安排表入口与部分选择器�
 
 ## 后续正式接入
 
-本 MVP 验证通过后，再单独设计 WeMediaStudio 对接：后台服务领取具有租约和幂等键的发布任务，通过 Chrome 消息触发 publisher，最后回写可审计的状态和证据。该阶段删除 `injected/console-api.js`、web-accessible console 资源及所有 `window.Shuce` 相关代码，不沿用页面全局接口。
+本 MVP 验证通过后，再单独设计 Ediora 对接：后台服务领取具有租约和幂等键的发布任务，通过 Chrome 消息触发 publisher，最后回写可审计的状态和证据。该阶段删除 `injected/console-api.js`、web-accessible console 资源及所有 `window.Shuce` 相关代码，不沿用页面全局接口。

@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** WeMedia Studio 项目内维护一批 Hermes 技能，通过 Profiles 页面把它们以 symlink 形式按需安装到各 agent 的 `skills/wemedia/` 目录。
+**Goal:** Ediora 项目内维护一批 Hermes 技能，通过 Profiles 页面把它们以 symlink 形式按需安装到各 agent 的 `skills/wemedia/` 目录。
 
-**Architecture:** 技能源文件版本化在 `WeMediaStudio/skills/`。后端 `profile_manager.py` 提供扫描/解析/安装/卸载的纯文件系统函数（symlink），通过新的 `skills` router 和 `profiles` router 扩展端点暴露。前端在 Profiles 页面新增「项目技能」tab，列出可用技能并用开关控制安装状态。已安装技能（symlink 在 `skills/wemedia/` 下）会被现有 `_read_skills` 自动识别为 `wemedia` category，照常出现在 SKILLS tab 的 enable/disable 列表中。
+**Architecture:** 技能源文件版本化在 `Ediora/skills/`。后端 `profile_manager.py` 提供扫描/解析/安装/卸载的纯文件系统函数（symlink），通过新的 `skills` router 和 `profiles` router 扩展端点暴露。前端在 Profiles 页面新增「项目技能」tab，列出可用技能并用开关控制安装状态。已安装技能（symlink 在 `skills/wemedia/` 下）会被现有 `_read_skills` 自动识别为 `wemedia` category，照常出现在 SKILLS tab 的 enable/disable 列表中。
 
 **Tech Stack:** FastAPI、Pydantic、pytest（`conda run -n wems`）、Next.js（非标准版本，写前端代码前读 `node_modules/next/dist/docs/`）、shadcn/ui、sonner。
 
@@ -14,16 +14,16 @@
 
 | 文件 | 责任 |
 |------|------|
-| `WeMediaStudio/skills/{skill}/` | 技能源文件（source of truth），从 `~/.hermes/skills/custom/` 迁移 |
+| `Ediora/skills/{skill}/` | 技能源文件（source of truth），从 `~/.hermes/skills/custom/` 迁移 |
 | `backend/profile_manager.py` | 新增：`_project_skills_root`、`parse_skill_frontmatter`、`list_project_skills`、`list_project_skills_for_profile`、`install_project_skill`、`uninstall_project_skill` |
 | `backend/routers/skills.py` | 新建：`GET /skills/` 列出全部项目技能元数据 |
 | `backend/routers/profiles.py` | 扩展：`GET/POST/DELETE /profiles/{name}/project-skills[/{skill}]` |
 | `backend/main.py` | 注册 skills router |
 | `backend/tests/test_project_skills.py` | 新建：覆盖 profile_manager 新函数 |
 | `backend/tests/test_skills_router.py` | 新建：覆盖 router 端点 |
-| `wemedia-studio/lib/api/skills.ts` | 新建：项目技能 API 封装 + `ProjectSkill` 类型 |
-| `wemedia-studio/app/profiles/ProjectSkillsPanel.tsx` | 新建：安装管理 UI |
-| `wemedia-studio/app/profiles/ProfilesClient.tsx` | 扩展：新增 `project` tab |
+| `web/lib/api/skills.ts` | 新建：项目技能 API 封装 + `ProjectSkill` 类型 |
+| `web/app/profiles/ProjectSkillsPanel.tsx` | 新建：安装管理 UI |
+| `web/app/profiles/ProfilesClient.tsx` | 扩展：新增 `project` tab |
 
 **关键复用：** `profile_manager.py` 已有 `_hermes_root()`（env `HERMES_HOME_ROOT` override）、`_profile_dir()`、`_safe_name()`、`_NAME_RE`、`import yaml`。新代码沿用这些。`_read_skills`（:132）已遍历 category 子目录，无需改动。
 
@@ -34,7 +34,7 @@
 把 `~/.hermes/skills/custom/` 下 5 个技能复制进项目，作为 source of truth。用 cp 保留原件（`codex_imagegen` 仍被 `profile_manager.py:328` 的 avatar 逻辑按旧路径引用，本次不动）。
 
 **Files:**
-- Create: `WeMediaStudio/skills/article-drafting/`、`content-ideation/`、`x-post/`、`cover-image/`、`codex_imagegen/`
+- Create: `Ediora/skills/article-drafting/`、`content-ideation/`、`x-post/`、`cover-image/`、`codex_imagegen/`
 
 - [ ] **Step 1: 复制技能目录**
 
@@ -572,11 +572,11 @@ git commit -m "feat(skills): skills router + profiles 项目技能端点"
 ## Task 5: 前端 — API 封装
 
 **Files:**
-- Create: `wemedia-studio/lib/api/skills.ts`
+- Create: `web/lib/api/skills.ts`
 
 - [ ] **Step 1: 创建 API 封装**
 
-Create `wemedia-studio/lib/api/skills.ts`:
+Create `web/lib/api/skills.ts`:
 
 ```typescript
 import { apiFetch } from './client'
@@ -609,13 +609,13 @@ export const uninstallProjectSkill = (profile: string, skill: string) =>
 
 - [ ] **Step 2: 类型检查**
 
-Run: `cd wemedia-studio && npx tsc --noEmit`
+Run: `cd web && npx tsc --noEmit`
 Expected: 无错误（无输出）
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add wemedia-studio/lib/api/skills.ts
+git add web/lib/api/skills.ts
 git commit -m "feat(skills): 前端项目技能 API 封装"
 ```
 
@@ -624,12 +624,12 @@ git commit -m "feat(skills): 前端项目技能 API 封装"
 ## Task 6: 前端 — ProjectSkillsPanel + tab 集成
 
 **Files:**
-- Create: `wemedia-studio/app/profiles/ProjectSkillsPanel.tsx`
-- Modify: `wemedia-studio/app/profiles/ProfilesClient.tsx`
+- Create: `web/app/profiles/ProjectSkillsPanel.tsx`
+- Modify: `web/app/profiles/ProfilesClient.tsx`
 
 - [ ] **Step 1: 创建 ProjectSkillsPanel 组件**
 
-Create `wemedia-studio/app/profiles/ProjectSkillsPanel.tsx`:
+Create `web/app/profiles/ProjectSkillsPanel.tsx`:
 
 ```tsx
 'use client'
@@ -680,12 +680,12 @@ export function ProjectSkillsPanel({ profile, readonly }: Props) {
 
   if (loading) return <p className="text-sm text-muted-foreground">加载中…</p>
   if (skills.length === 0)
-    return <p className="text-sm text-muted-foreground">项目暂无可安装技能（WeMediaStudio/skills/）</p>
+    return <p className="text-sm text-muted-foreground">项目暂无可安装技能（Ediora/skills/）</p>
 
   return (
     <div className="space-y-3">
       <p className="text-sm text-muted-foreground">
-        来自 WeMediaStudio/skills/ · 安装后 symlink 到该 profile 的 skills/wemedia/
+        来自 Ediora/skills/ · 安装后 symlink 到该 profile 的 skills/wemedia/
       </p>
       <ul className="space-y-2">
         {skills.map(s => (
@@ -726,7 +726,7 @@ export function ProjectSkillsPanel({ profile, readonly }: Props) {
 
 - [ ] **Step 2: 在 ProfilesClient 集成 tab**
 
-`wemedia-studio/app/profiles/ProfilesClient.tsx` 改动：
+`web/app/profiles/ProfilesClient.tsx` 改动：
 
 (a) import 段（`:15` `import { SkillsPanel }` 之后）加：
 ```tsx
@@ -770,7 +770,7 @@ import { ProjectSkillsPanel } from './ProjectSkillsPanel'
 
 - [ ] **Step 3: 类型检查**
 
-Run: `cd wemedia-studio && npx tsc --noEmit`
+Run: `cd web && npx tsc --noEmit`
 Expected: 无错误
 
 - [ ] **Step 4: 手动验证**
@@ -789,7 +789,7 @@ Expected: 无错误
 - [ ] **Step 5: Commit**
 
 ```bash
-git add wemedia-studio/app/profiles/ProjectSkillsPanel.tsx wemedia-studio/app/profiles/ProfilesClient.tsx
+git add web/app/profiles/ProjectSkillsPanel.tsx web/app/profiles/ProfilesClient.tsx
 git commit -m "feat(skills): Profiles 页面项目技能安装 tab"
 ```
 

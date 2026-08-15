@@ -382,10 +382,10 @@ git commit -m "feat: archive digital human workflow assets"
 
 **Files:**
 - Create: `backend/tests/test_asset_directories_router.py`
-- Create: `wemedia-studio/app/assets/assets-system-directory.test.tsx`
+- Create: `web/app/assets/assets-system-directory.test.tsx`
 - Modify: `backend/routers/assets.py`
-- Modify: `wemedia-studio/lib/api/assets.ts`
-- Modify: `wemedia-studio/app/assets/AssetsClient.tsx`
+- Modify: `web/lib/api/assets.ts`
+- Modify: `web/app/assets/AssetsClient.tsx`
 
 **Interfaces:**
 - Consumes: `CreativeAssetDirectory.system_key` from Task 1.
@@ -511,7 +511,7 @@ expect(screen.getByRole('button', {
 Run:
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm exec vitest run app/assets/assets-system-directory.test.tsx
 ```
 
@@ -539,7 +539,7 @@ Import `LockKeyhole` and render it with `aria-label="系统目录"` for system r
 Run:
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm exec vitest run \
   app/assets/assets-system-directory.test.tsx \
   app/assets/assets-layout.test.ts
@@ -551,7 +551,7 @@ Expected: tests and TypeScript pass.
 - [ ] **Step 9: Commit**
 
 ```bash
-git add backend/routers/assets.py backend/tests/test_asset_directories_router.py wemedia-studio/lib/api/assets.ts wemedia-studio/app/assets/AssetsClient.tsx wemedia-studio/app/assets/assets-system-directory.test.tsx
+git add backend/routers/assets.py backend/tests/test_asset_directories_router.py web/lib/api/assets.ts web/app/assets/AssetsClient.tsx web/app/assets/assets-system-directory.test.tsx
 git commit -m "feat: lock digital human asset folder"
 ```
 
@@ -572,7 +572,7 @@ Run:
 
 ```bash
 conda run -n wems pytest -q backend
-cd wemedia-studio
+cd web
 pnpm test
 pnpm exec tsc --noEmit
 ```

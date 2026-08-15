@@ -37,10 +37,10 @@
 ### Task 2: Frontend “值得写” submission and status
 
 **Files:**
-- Modify: `wemedia-studio/lib/api/responses.ts`
-- Modify: `wemedia-studio/app/responses/ResponsesClient.tsx`
-- Modify: `wemedia-studio/app/responses/ResponseDestinationDialog.tsx`
-- Test: `wemedia-studio/app/responses/ResponsesClient.test.tsx`
+- Modify: `web/lib/api/responses.ts`
+- Modify: `web/app/responses/ResponsesClient.tsx`
+- Modify: `web/app/responses/ResponseDestinationDialog.tsx`
+- Test: `web/app/responses/ResponsesClient.test.tsx`
 
 **Interfaces:**
 - Consumes: `createResponseOutputs(id, { analysis_run_id, output_types: ['expanded_article'] })` and response detail output status.

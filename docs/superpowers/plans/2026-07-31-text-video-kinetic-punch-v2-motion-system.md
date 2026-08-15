@@ -266,14 +266,14 @@ git commit -m "feat: project word-timed text video motion"
 ### Task 2: Frontend Motion Contract and Deterministic Rule Planner
 
 **Files:**
-- Modify: `wemedia-studio/remotion/types.ts`
-- Modify: `wemedia-studio/remotion/contract.ts`
-- Modify: `wemedia-studio/remotion/contract.test.ts`
-- Modify: `wemedia-studio/lib/api/text-videos.ts`
-- Create: `wemedia-studio/lib/text-video/motion-plan.ts`
-- Create: `wemedia-studio/lib/text-video/motion-plan.test.ts`
-- Modify: `wemedia-studio/lib/text-video/scene-plan.ts`
-- Modify: `wemedia-studio/lib/text-video/scene-plan.test.ts`
+- Modify: `web/remotion/types.ts`
+- Modify: `web/remotion/contract.ts`
+- Modify: `web/remotion/contract.test.ts`
+- Modify: `web/lib/api/text-videos.ts`
+- Create: `web/lib/text-video/motion-plan.ts`
+- Create: `web/lib/text-video/motion-plan.test.ts`
+- Modify: `web/lib/text-video/scene-plan.ts`
+- Modify: `web/lib/text-video/scene-plan.test.ts`
 
 **Interfaces:**
 - Produces: `KineticSceneMotionPlan`, `KineticMotionChunkDocument`,
@@ -321,7 +321,7 @@ highlights; display-text edits clearing stale motion; and
 Run:
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm test -- remotion/contract.test.ts \
   lib/text-video/motion-plan.test.ts \
   lib/text-video/scene-plan.test.ts
@@ -427,14 +427,14 @@ Expected: all selected Vitest files pass with no snapshot updates.
 - [ ] **Step 7: Commit Task 2**
 
 ```bash
-git add wemedia-studio/remotion/types.ts \
-  wemedia-studio/remotion/contract.ts \
-  wemedia-studio/remotion/contract.test.ts \
-  wemedia-studio/lib/api/text-videos.ts \
-  wemedia-studio/lib/text-video/motion-plan.ts \
-  wemedia-studio/lib/text-video/motion-plan.test.ts \
-  wemedia-studio/lib/text-video/scene-plan.ts \
-  wemedia-studio/lib/text-video/scene-plan.test.ts
+git add web/remotion/types.ts \
+  web/remotion/contract.ts \
+  web/remotion/contract.test.ts \
+  web/lib/api/text-videos.ts \
+  web/lib/text-video/motion-plan.ts \
+  web/lib/text-video/motion-plan.test.ts \
+  web/lib/text-video/scene-plan.ts \
+  web/lib/text-video/scene-plan.test.ts
 git commit -m "feat: add deterministic text motion plans"
 ```
 
@@ -443,8 +443,8 @@ git commit -m "feat: add deterministic text motion plans"
 ### Task 3: Shared Frame Lifecycle and Boundary Continuity
 
 **Files:**
-- Create: `wemedia-studio/remotion/shared/motion-lifecycle.ts`
-- Create: `wemedia-studio/remotion/shared/motion-lifecycle.test.ts`
+- Create: `web/remotion/shared/motion-lifecycle.ts`
+- Create: `web/remotion/shared/motion-lifecycle.test.ts`
 
 **Interfaces:**
 - Produces: `motionLayersAtFrame(chunks, frame, fps, overlapFrames?)`.
@@ -482,7 +482,7 @@ missing cues, negative frames, and repeated calls returning equal objects.
 - [ ] **Step 2: Run the lifecycle test and verify RED**
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm test -- remotion/shared/motion-lifecycle.test.ts
 ```
 
@@ -536,8 +536,8 @@ Expected: all lifecycle edge cases pass.
 - [ ] **Step 5: Commit Task 3**
 
 ```bash
-git add wemedia-studio/remotion/shared/motion-lifecycle.ts \
-  wemedia-studio/remotion/shared/motion-lifecycle.test.ts
+git add web/remotion/shared/motion-lifecycle.ts \
+  web/remotion/shared/motion-lifecycle.test.ts
 git commit -m "feat: add deterministic remotion scene lifecycles"
 ```
 
@@ -546,14 +546,14 @@ git commit -m "feat: add deterministic remotion scene lifecycles"
 ### Task 4: Kinetic Punch V2 Composition and Template Registration
 
 **Files:**
-- Create: `wemedia-studio/remotion/templates/kinetic-punch-v2/config.ts`
-- Create: `wemedia-studio/remotion/templates/kinetic-punch-v2/layout.ts`
-- Create: `wemedia-studio/remotion/templates/kinetic-punch-v2/Composition.tsx`
-- Create: `wemedia-studio/remotion/templates/kinetic-punch-v2/Composition.test.tsx`
-- Create: `wemedia-studio/remotion/templates/kinetic-punch-v2/manifest.ts`
-- Modify: `wemedia-studio/remotion/registry.ts`
-- Modify: `wemedia-studio/remotion/registry.test.ts`
-- Modify: `wemedia-studio/remotion/Root.test.ts`
+- Create: `web/remotion/templates/kinetic-punch-v2/config.ts`
+- Create: `web/remotion/templates/kinetic-punch-v2/layout.ts`
+- Create: `web/remotion/templates/kinetic-punch-v2/Composition.tsx`
+- Create: `web/remotion/templates/kinetic-punch-v2/Composition.test.tsx`
+- Create: `web/remotion/templates/kinetic-punch-v2/manifest.ts`
+- Modify: `web/remotion/registry.ts`
+- Modify: `web/remotion/registry.test.ts`
+- Modify: `web/remotion/Root.test.ts`
 - Modify: `backend/text_video_templates.py`
 - Modify: `backend/tests/test_text_video_templates.py`
 
@@ -587,7 +587,7 @@ a larger transform during its cue. Test layout output for 1080×1920, 1920×1080
 - [ ] **Step 2: Run focused tests and verify RED**
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm test -- remotion/registry.test.ts remotion/Root.test.ts \
   remotion/templates/kinetic-punch-v2/Composition.test.tsx
 
@@ -711,10 +711,10 @@ Expected: frontend and backend catalogs agree and every V2 composition assertion
 - [ ] **Step 7: Commit Task 4**
 
 ```bash
-git add wemedia-studio/remotion/templates/kinetic-punch-v2 \
-  wemedia-studio/remotion/registry.ts \
-  wemedia-studio/remotion/registry.test.ts \
-  wemedia-studio/remotion/Root.test.ts \
+git add web/remotion/templates/kinetic-punch-v2 \
+  web/remotion/registry.ts \
+  web/remotion/registry.test.ts \
+  web/remotion/Root.test.ts \
   backend/text_video_templates.py backend/tests/test_text_video_templates.py
 git commit -m "feat: add kinetic punch v2 remotion template"
 ```
@@ -729,9 +729,9 @@ git commit -m "feat: add kinetic punch v2 remotion template"
 - Modify: `backend/job_reconciliation.py`
 - Modify: `backend/tests/test_text_videos_router.py`
 - Modify: `backend/tests/test_job_reconciliation.py`
-- Modify: `wemedia-studio/lib/ai/text-video-scene-job.ts`
-- Modify: `wemedia-studio/lib/ai/text-video-scene-job.test.ts`
-- Modify: `wemedia-studio/lib/api/text-videos.ts`
+- Modify: `web/lib/ai/text-video-scene-job.ts`
+- Modify: `web/lib/ai/text-video-scene-job.test.ts`
+- Modify: `web/lib/api/text-videos.ts`
 
 **Interfaces:**
 - Extends: `POST /api/text-videos/{id}/scene-plan/generate` with `mode: 'scene' | 'motion'`.
@@ -769,7 +769,7 @@ cd backend
   tests/test_text_videos_router.py \
   tests/test_job_reconciliation.py -q
 
-cd ../wemedia-studio
+cd ../web
 pnpm test -- lib/ai/text-video-scene-job.test.ts
 ```
 
@@ -851,9 +851,9 @@ Expected: all selected tests pass; a failed motion job leaves the previous plan 
 git add backend/routers/text_videos.py backend/text_video_scene_plan.py \
   backend/tests/test_text_videos_router.py \
   backend/tests/test_job_reconciliation.py \
-  wemedia-studio/lib/ai/text-video-scene-job.ts \
-  wemedia-studio/lib/ai/text-video-scene-job.test.ts \
-  wemedia-studio/lib/api/text-videos.ts
+  web/lib/ai/text-video-scene-job.ts \
+  web/lib/ai/text-video-scene-job.test.ts \
+  web/lib/api/text-videos.ts
 git add -p backend/job_reconciliation.py
 git commit -m "feat: let ai optimize text video motion"
 ```
@@ -866,14 +866,14 @@ confirm it contains only the `generation_mode=="motion"` recovery branch.
 ### Task 6: Motion Planning Editor and Template Upgrade Flow
 
 **Files:**
-- Create: `wemedia-studio/app/text-video/MotionPlanEditor.tsx`
-- Create: `wemedia-studio/app/text-video/MotionPlanEditor.test.tsx`
-- Modify: `wemedia-studio/app/text-video/VideoStage.tsx`
-- Modify: `wemedia-studio/app/text-video/VideoStage.test.tsx`
-- Modify: `wemedia-studio/app/text-video/TextVideoEditorClient.tsx`
-- Modify: `wemedia-studio/app/text-video/TextVideoEditorClient.test.tsx`
-- Modify: `wemedia-studio/app/text-video/useTextVideoProjectActions.ts`
-- Modify: `wemedia-studio/app/text-video/useTextVideoProjectActions.test.tsx`
+- Create: `web/app/text-video/MotionPlanEditor.tsx`
+- Create: `web/app/text-video/MotionPlanEditor.test.tsx`
+- Modify: `web/app/text-video/VideoStage.tsx`
+- Modify: `web/app/text-video/VideoStage.test.tsx`
+- Modify: `web/app/text-video/TextVideoEditorClient.tsx`
+- Modify: `web/app/text-video/TextVideoEditorClient.test.tsx`
+- Modify: `web/app/text-video/useTextVideoProjectActions.ts`
+- Modify: `web/app/text-video/useTextVideoProjectActions.test.tsx`
 
 **Interfaces:**
 - Produces: inline `MotionPlanEditor` for V2 scenes.
@@ -912,7 +912,7 @@ provider cues are unavailable, and no browser `prompt()` call.
 - [ ] **Step 2: Run focused UI tests and verify RED**
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm test -- app/text-video/MotionPlanEditor.test.tsx \
   app/text-video/VideoStage.test.tsx \
   app/text-video/TextVideoEditorClient.test.tsx \
@@ -972,14 +972,14 @@ Expected: all UI interactions pass and only one save occurs during template upgr
 - [ ] **Step 7: Commit Task 6**
 
 ```bash
-git add wemedia-studio/app/text-video/MotionPlanEditor.tsx \
-  wemedia-studio/app/text-video/MotionPlanEditor.test.tsx \
-  wemedia-studio/app/text-video/VideoStage.tsx \
-  wemedia-studio/app/text-video/VideoStage.test.tsx \
-  wemedia-studio/app/text-video/TextVideoEditorClient.tsx \
-  wemedia-studio/app/text-video/TextVideoEditorClient.test.tsx \
-  wemedia-studio/app/text-video/useTextVideoProjectActions.ts \
-  wemedia-studio/app/text-video/useTextVideoProjectActions.test.tsx
+git add web/app/text-video/MotionPlanEditor.tsx \
+  web/app/text-video/MotionPlanEditor.test.tsx \
+  web/app/text-video/VideoStage.tsx \
+  web/app/text-video/VideoStage.test.tsx \
+  web/app/text-video/TextVideoEditorClient.tsx \
+  web/app/text-video/TextVideoEditorClient.test.tsx \
+  web/app/text-video/useTextVideoProjectActions.ts \
+  web/app/text-video/useTextVideoProjectActions.test.tsx
 git commit -m "feat: edit and optimize text video motion"
 ```
 
@@ -988,9 +988,9 @@ git commit -m "feat: edit and optimize text video motion"
 ### Task 7: Render Regression, Frame Audit, and End-to-End Verification
 
 **Files:**
-- Create: `wemedia-studio/remotion/fixtures/kinetic-punch-v2-audit.json`
-- Modify: `wemedia-studio/lib/ai/text-video-render-job.test.ts`
-- Modify: `wemedia-studio/remotion/templates/kinetic-punch-v2/Composition.test.tsx`
+- Create: `web/remotion/fixtures/kinetic-punch-v2-audit.json`
+- Modify: `web/lib/ai/text-video-render-job.test.ts`
+- Modify: `web/remotion/templates/kinetic-punch-v2/Composition.test.tsx`
 
 **Interfaces:**
 - Consumes: final `kinetic-punch-v2@1` composition and canonical render worker.
@@ -1129,7 +1129,7 @@ highlight envelope begins within two frames of its word cue.
 cd backend
 /home/violet/miniconda3/envs/wems/bin/python -m pytest -q
 
-cd ../wemedia-studio
+cd ../web
 pnpm test
 pnpm lint
 pnpm build
@@ -1140,7 +1140,7 @@ production build completes.
 
 - [ ] **Step 4: Render boundary stills in all three aspect ratios**
 
-From `wemedia-studio`, create exact ratio variants and render the same boundary:
+From `web`, create exact ratio variants and render the same boundary:
 
 ```bash
 jq '.composition = {width: 1920, height: 1080, fps: 30}' \
@@ -1221,9 +1221,9 @@ Open the text-video project and verify:
 - [ ] **Step 7: Commit Task 7**
 
 ```bash
-git add wemedia-studio/remotion/fixtures/kinetic-punch-v2-audit.json \
-  wemedia-studio/lib/ai/text-video-render-job.test.ts \
-  wemedia-studio/remotion/templates/kinetic-punch-v2/Composition.test.tsx
+git add web/remotion/fixtures/kinetic-punch-v2-audit.json \
+  web/lib/ai/text-video-render-job.test.ts \
+  web/remotion/templates/kinetic-punch-v2/Composition.test.tsx
 git commit -m "test: verify kinetic punch v2 rendering"
 ```
 

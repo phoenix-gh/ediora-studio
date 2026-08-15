@@ -25,7 +25,7 @@
 - Video composition is available only when all non-empty speech segments are confirmed and both master audio and its timeline are ready.
 - Use shared application Dialog and AlertDialog components. Do not add a side drawer, `window.prompt`, `window.confirm`, or `window.alert`.
 - Voice cloning, freeform millisecond editing, multitrack audio, arbitrary keyframes, server-side MP4 rendering, publishing, collaboration, and automatic paid TTS after AI splitting remain out of scope.
-- Before changing Next.js code, read `wemedia-studio/node_modules/next/dist/docs/01-app/01-getting-started/05-server-and-client-components.md` and `wemedia-studio/node_modules/next/dist/docs/01-app/01-getting-started/06-fetching-data.md`.
+- Before changing Next.js code, read `web/node_modules/next/dist/docs/01-app/01-getting-started/05-server-and-client-components.md` and `web/node_modules/next/dist/docs/01-app/01-getting-started/06-fetching-data.md`.
 
 ---
 
@@ -48,29 +48,29 @@
 
 ### Node worker and providers
 
-- `wemedia-studio/lib/mimo/speech-client.ts`: provider-neutral speech interface and MiMo `/v1/chat/completions` adapter.
-- `wemedia-studio/lib/ai/text-video-split-job.ts`: structured AI boundary selection and validated preview.
-- `wemedia-studio/lib/ai/text-video-speech-job.ts`: one billed TTS call for one frozen speech-segment snapshot.
-- `wemedia-studio/lib/ai/text-video-master-job.ts`: resumable backend assembly and alignment steps.
-- `wemedia-studio/lib/ai/text-video-scene-job.ts`: structured AI word partition, one repair attempt, and authoritative backend persistence.
-- `wemedia-studio/scripts/content-worker.ts`: explicit dispatch for all four text-video flows.
+- `web/lib/mimo/speech-client.ts`: provider-neutral speech interface and MiMo `/v1/chat/completions` adapter.
+- `web/lib/ai/text-video-split-job.ts`: structured AI boundary selection and validated preview.
+- `web/lib/ai/text-video-speech-job.ts`: one billed TTS call for one frozen speech-segment snapshot.
+- `web/lib/ai/text-video-master-job.ts`: resumable backend assembly and alignment steps.
+- `web/lib/ai/text-video-scene-job.ts`: structured AI word partition, one repair attempt, and authoritative backend persistence.
+- `web/scripts/content-worker.ts`: explicit dispatch for all four text-video flows.
 
 ### Next.js editor and Remotion
 
-- `wemedia-studio/lib/api/text-videos.ts`: complete project documents and production-action API contracts.
-- `wemedia-studio/lib/text-video/speech-segments.ts`: immutable split, merge, reorder, edit, invalidation, and exact reconstruction functions.
-- `wemedia-studio/lib/text-video/project-merge.ts`: field-level merge of worker state into locally edited state.
-- `wemedia-studio/lib/text-video/scene-plan.ts`: immutable scene split, merge, and word-boundary movement.
-- `wemedia-studio/lib/text-video/test-fixtures.ts`: complete typed project/word fixtures shared only by text-video frontend tests.
-- `wemedia-studio/app/text-video/useTextVideoAutosave.ts`: flush returns the saved snapshot and exposes dirty-version state.
-- `wemedia-studio/app/text-video/useTextVideoProjectActions.ts`: shared flush, launch, poll, and safe-refresh coordinator.
-- `wemedia-studio/app/text-video/SpeechSplitPreviewDialog.tsx`: explicit AI split preview and confirmation.
-- `wemedia-studio/app/text-video/SceneDirectionDialog.tsx`: selected-scene or full-plan AI direction.
-- `wemedia-studio/app/text-video/ScriptStage.tsx`: real master-script and speech-segment editing.
-- `wemedia-studio/app/text-video/AudioStage.tsx`: truthful segment/master audio generation, playback, confirmation, and errors.
-- `wemedia-studio/app/text-video/VideoStage.tsx` and `SceneTimeline.tsx`: word-boundary scene editing and proportional master timeline.
-- `wemedia-studio/remotion/contract.ts`: canonical continuous render-input validation.
-- `wemedia-studio/remotion/registry.ts` and template manifests: versioned template schemas and capability allowlists.
+- `web/lib/api/text-videos.ts`: complete project documents and production-action API contracts.
+- `web/lib/text-video/speech-segments.ts`: immutable split, merge, reorder, edit, invalidation, and exact reconstruction functions.
+- `web/lib/text-video/project-merge.ts`: field-level merge of worker state into locally edited state.
+- `web/lib/text-video/scene-plan.ts`: immutable scene split, merge, and word-boundary movement.
+- `web/lib/text-video/test-fixtures.ts`: complete typed project/word fixtures shared only by text-video frontend tests.
+- `web/app/text-video/useTextVideoAutosave.ts`: flush returns the saved snapshot and exposes dirty-version state.
+- `web/app/text-video/useTextVideoProjectActions.ts`: shared flush, launch, poll, and safe-refresh coordinator.
+- `web/app/text-video/SpeechSplitPreviewDialog.tsx`: explicit AI split preview and confirmation.
+- `web/app/text-video/SceneDirectionDialog.tsx`: selected-scene or full-plan AI direction.
+- `web/app/text-video/ScriptStage.tsx`: real master-script and speech-segment editing.
+- `web/app/text-video/AudioStage.tsx`: truthful segment/master audio generation, playback, confirmation, and errors.
+- `web/app/text-video/VideoStage.tsx` and `SceneTimeline.tsx`: word-boundary scene editing and proportional master timeline.
+- `web/remotion/contract.ts`: canonical continuous render-input validation.
+- `web/remotion/registry.ts` and template manifests: versioned template schemas and capability allowlists.
 
 ---
 
@@ -85,9 +85,9 @@
 - Modify: `backend/routers/text_videos.py`
 - Modify: `backend/tests/test_database_text_video_migration.py`
 - Modify: `backend/tests/test_text_videos_router.py`
-- Modify: `wemedia-studio/lib/api/text-videos.ts`
-- Modify: `wemedia-studio/lib/api/text-videos.test.ts`
-- Create: `wemedia-studio/lib/text-video/test-fixtures.ts`
+- Modify: `web/lib/api/text-videos.ts`
+- Modify: `web/lib/api/text-videos.test.ts`
+- Create: `web/lib/text-video/test-fixtures.ts`
 
 **Interfaces:**
 - Consumes: Existing `TextVideoProject`, revision-checked PATCH semantics, `DEFAULT_RENDER_INPUT`, and current project serialization.
@@ -391,7 +391,7 @@ export type TextVideoProjectUpdate = {
 }
 ```
 
-Add `wemedia-studio/lib/text-video/test-fixtures.ts`:
+Add `web/lib/text-video/test-fixtures.ts`:
 
 ```ts
 export function makeTextVideoProject(
@@ -435,7 +435,7 @@ conda run -n wems pytest \
   tests/test_text_video_domain.py \
   tests/test_database_text_video_migration.py \
   tests/test_text_videos_router.py -q
-cd ../wemedia-studio
+cd ../web
 pnpm exec vitest run lib/api/text-videos.test.ts
 ```
 
@@ -453,9 +453,9 @@ git add \
   backend/routers/text_videos.py \
   backend/tests/test_database_text_video_migration.py \
   backend/tests/test_text_videos_router.py \
-  wemedia-studio/lib/api/text-videos.ts \
-  wemedia-studio/lib/api/text-videos.test.ts \
-  wemedia-studio/lib/text-video/test-fixtures.ts
+  web/lib/api/text-videos.ts \
+  web/lib/api/text-videos.test.ts \
+  web/lib/text-video/test-fixtures.ts
 git commit -m "feat: persist text video speech domain"
 ```
 
@@ -464,12 +464,12 @@ git commit -m "feat: persist text video speech domain"
 ### Task 2: Add Lossless Manual Speech Segmentation
 
 **Files:**
-- Create: `wemedia-studio/lib/text-video/speech-segments.ts`
-- Create: `wemedia-studio/lib/text-video/speech-segments.test.ts`
-- Modify: `wemedia-studio/app/text-video/TextVideoWorkbench.tsx`
-- Modify: `wemedia-studio/app/text-video/TextVideoWorkbench.test.tsx`
-- Modify: `wemedia-studio/app/text-video/ScriptStage.tsx`
-- Create: `wemedia-studio/app/text-video/ScriptStage.test.tsx`
+- Create: `web/lib/text-video/speech-segments.ts`
+- Create: `web/lib/text-video/speech-segments.test.ts`
+- Modify: `web/app/text-video/TextVideoWorkbench.tsx`
+- Modify: `web/app/text-video/TextVideoWorkbench.test.tsx`
+- Modify: `web/app/text-video/ScriptStage.tsx`
+- Create: `web/app/text-video/ScriptStage.test.tsx`
 
 **Interfaces:**
 - Consumes: `TextVideoProject`, `TextVideoParagraph`, `SpeechSplitMode`, and server-owned invalidation rules from Task 1.
@@ -480,8 +480,8 @@ git commit -m "feat: persist text video speech domain"
 Run:
 
 ```bash
-sed -n '1,240p' wemedia-studio/node_modules/next/dist/docs/01-app/01-getting-started/05-server-and-client-components.md
-sed -n '1,220p' wemedia-studio/node_modules/next/dist/docs/01-app/01-getting-started/06-fetching-data.md
+sed -n '1,240p' web/node_modules/next/dist/docs/01-app/01-getting-started/05-server-and-client-components.md
+sed -n '1,220p' web/node_modules/next/dist/docs/01-app/01-getting-started/06-fetching-data.md
 ```
 
 Expected: confirm that the editor remains a Client Component and that production action calls stay in client event handlers rather than render.
@@ -533,7 +533,7 @@ it('rejects a whitespace-only side of a split', () => {
 Run:
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm exec vitest run lib/text-video/speech-segments.test.ts
 ```
 
@@ -608,7 +608,7 @@ In `ScriptStage`, provide **保持整篇**, **AI 自动分段**, **从此处分�
 Run:
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm exec vitest run \
   lib/text-video/speech-segments.test.ts \
   app/text-video/ScriptStage.test.tsx \
@@ -621,12 +621,12 @@ Expected: all tests pass, including exact whitespace preservation and stable sel
 
 ```bash
 git add \
-  wemedia-studio/lib/text-video/speech-segments.ts \
-  wemedia-studio/lib/text-video/speech-segments.test.ts \
-  wemedia-studio/app/text-video/TextVideoWorkbench.tsx \
-  wemedia-studio/app/text-video/TextVideoWorkbench.test.tsx \
-  wemedia-studio/app/text-video/ScriptStage.tsx \
-  wemedia-studio/app/text-video/ScriptStage.test.tsx
+  web/lib/text-video/speech-segments.ts \
+  web/lib/text-video/speech-segments.test.ts \
+  web/app/text-video/TextVideoWorkbench.tsx \
+  web/app/text-video/TextVideoWorkbench.test.tsx \
+  web/app/text-video/ScriptStage.tsx \
+  web/app/text-video/ScriptStage.test.tsx
 git commit -m "feat: add lossless speech segmentation"
 ```
 
@@ -640,14 +640,14 @@ git commit -m "feat: add lossless speech segmentation"
 - Create: `backend/tests/test_speech_settings.py`
 - Modify: `.env.example`
 - Modify: `docker-compose.yml`
-- Create: `wemedia-studio/lib/mimo/speech-client.ts`
-- Create: `wemedia-studio/lib/mimo/speech-client.test.ts`
-- Create: `wemedia-studio/app/settings/sections/SpeechSection.tsx`
-- Create: `wemedia-studio/app/settings/sections/SpeechSection.test.tsx`
-- Modify: `wemedia-studio/app/settings/SettingsClient.tsx`
-- Modify: `wemedia-studio/app/settings/SettingsClient.test.tsx`
-- Modify: `wemedia-studio/lib/api/settings.ts`
-- Modify: `wemedia-studio/lib/api/settings-test-fixtures.ts`
+- Create: `web/lib/mimo/speech-client.ts`
+- Create: `web/lib/mimo/speech-client.test.ts`
+- Create: `web/app/settings/sections/SpeechSection.tsx`
+- Create: `web/app/settings/sections/SpeechSection.test.tsx`
+- Modify: `web/app/settings/SettingsClient.tsx`
+- Modify: `web/app/settings/SettingsClient.test.tsx`
+- Modify: `web/lib/api/settings.ts`
+- Modify: `web/lib/api/settings-test-fixtures.ts`
 
 **Interfaces:**
 - Consumes: Existing encrypted/write-only settings behavior, protected worker-runtime endpoints, worker headers, and `fetch`.
@@ -732,7 +732,7 @@ Run:
 ```bash
 cd backend
 conda run -n wems pytest tests/test_speech_settings.py -q
-cd ../wemedia-studio
+cd ../web
 pnpm exec vitest run \
   lib/mimo/speech-client.test.ts \
   app/settings/sections/SpeechSection.test.tsx
@@ -821,7 +821,7 @@ Run:
 ```bash
 cd backend
 conda run -n wems pytest tests/test_speech_settings.py -q
-cd ../wemedia-studio
+cd ../web
 pnpm exec vitest run \
   lib/mimo/speech-client.test.ts \
   app/settings/sections/SpeechSection.test.tsx \
@@ -839,14 +839,14 @@ git add \
   backend/tests/test_speech_settings.py \
   .env.example \
   docker-compose.yml \
-  wemedia-studio/lib/mimo/speech-client.ts \
-  wemedia-studio/lib/mimo/speech-client.test.ts \
-  wemedia-studio/app/settings/sections/SpeechSection.tsx \
-  wemedia-studio/app/settings/sections/SpeechSection.test.tsx \
-  wemedia-studio/app/settings/SettingsClient.tsx \
-  wemedia-studio/app/settings/SettingsClient.test.tsx \
-  wemedia-studio/lib/api/settings.ts \
-  wemedia-studio/lib/api/settings-test-fixtures.ts
+  web/lib/mimo/speech-client.ts \
+  web/lib/mimo/speech-client.test.ts \
+  web/app/settings/sections/SpeechSection.tsx \
+  web/app/settings/sections/SpeechSection.test.tsx \
+  web/app/settings/SettingsClient.tsx \
+  web/app/settings/SettingsClient.test.tsx \
+  web/lib/api/settings.ts \
+  web/lib/api/settings-test-fixtures.ts
 git commit -m "feat: configure MiMo speech synthesis"
 ```
 
@@ -859,13 +859,13 @@ git commit -m "feat: configure MiMo speech synthesis"
 - Create: `backend/tests/test_text_video_segmentation.py`
 - Modify: `backend/routers/text_videos.py`
 - Modify: `backend/tests/test_text_videos_router.py`
-- Create: `wemedia-studio/lib/ai/text-video-split-job.ts`
-- Create: `wemedia-studio/lib/ai/text-video-split-job.test.ts`
-- Modify: `wemedia-studio/scripts/content-worker.ts`
-- Modify: `wemedia-studio/lib/api/text-videos.ts`
-- Create: `wemedia-studio/app/text-video/SpeechSplitPreviewDialog.tsx`
-- Create: `wemedia-studio/app/text-video/SpeechSplitPreviewDialog.test.tsx`
-- Modify: `wemedia-studio/app/text-video/ScriptStage.tsx`
+- Create: `web/lib/ai/text-video-split-job.ts`
+- Create: `web/lib/ai/text-video-split-job.test.ts`
+- Modify: `web/scripts/content-worker.ts`
+- Modify: `web/lib/api/text-videos.ts`
+- Create: `web/app/text-video/SpeechSplitPreviewDialog.tsx`
+- Create: `web/app/text-video/SpeechSplitPreviewDialog.test.tsx`
+- Modify: `web/app/text-video/ScriptStage.tsx`
 
 **Interfaces:**
 - Consumes: Task 1 documents, Task 2 exact segment operations, existing `ContentJob`, `enqueue_job()`, AI runtime, `generateObject`, and public `getJob()`.
@@ -994,7 +994,7 @@ cd backend
 conda run -n wems pytest \
   tests/test_text_video_segmentation.py \
   tests/test_text_videos_router.py -q
-cd ../wemedia-studio
+cd ../web
 pnpm exec vitest run \
   lib/ai/text-video-split-job.test.ts \
   app/text-video/SpeechSplitPreviewDialog.test.tsx \
@@ -1011,13 +1011,13 @@ git add \
   backend/tests/test_text_video_segmentation.py \
   backend/routers/text_videos.py \
   backend/tests/test_text_videos_router.py \
-  wemedia-studio/lib/ai/text-video-split-job.ts \
-  wemedia-studio/lib/ai/text-video-split-job.test.ts \
-  wemedia-studio/scripts/content-worker.ts \
-  wemedia-studio/lib/api/text-videos.ts \
-  wemedia-studio/app/text-video/SpeechSplitPreviewDialog.tsx \
-  wemedia-studio/app/text-video/SpeechSplitPreviewDialog.test.tsx \
-  wemedia-studio/app/text-video/ScriptStage.tsx
+  web/lib/ai/text-video-split-job.ts \
+  web/lib/ai/text-video-split-job.test.ts \
+  web/scripts/content-worker.ts \
+  web/lib/api/text-videos.ts \
+  web/app/text-video/SpeechSplitPreviewDialog.tsx \
+  web/app/text-video/SpeechSplitPreviewDialog.test.tsx \
+  web/app/text-video/ScriptStage.tsx
 git commit -m "feat: preview AI speech segmentation"
 ```
 
@@ -1034,10 +1034,10 @@ git commit -m "feat: preview AI speech segmentation"
 - Modify: `backend/tests/test_text_videos_router.py`
 - Modify: `backend/content_jobs.py`
 - Modify: `backend/tests/test_content_jobs.py`
-- Create: `wemedia-studio/lib/ai/text-video-speech-job.ts`
-- Create: `wemedia-studio/lib/ai/text-video-speech-job.test.ts`
-- Modify: `wemedia-studio/scripts/content-worker.ts`
-- Modify: `wemedia-studio/lib/api/text-videos.ts`
+- Create: `web/lib/ai/text-video-speech-job.ts`
+- Create: `web/lib/ai/text-video-speech-job.test.ts`
+- Modify: `web/scripts/content-worker.ts`
+- Modify: `web/lib/api/text-videos.ts`
 
 **Interfaces:**
 - Consumes: `speech_source_hash()`, current segment `generation_revision`, Task 3 `SpeechProvider`, durable job step APIs, Redis queue, and worker authentication.
@@ -1267,7 +1267,7 @@ conda run -n wems pytest \
   tests/test_text_video_speech_jobs.py \
   tests/test_text_videos_router.py \
   tests/test_content_jobs.py -q
-cd ../wemedia-studio
+cd ../web
 pnpm exec vitest run \
   lib/mimo/speech-client.test.ts \
   lib/ai/text-video-speech-job.test.ts
@@ -1287,10 +1287,10 @@ git add \
   backend/tests/test_text_videos_router.py \
   backend/content_jobs.py \
   backend/tests/test_content_jobs.py \
-  wemedia-studio/lib/ai/text-video-speech-job.ts \
-  wemedia-studio/lib/ai/text-video-speech-job.test.ts \
-  wemedia-studio/scripts/content-worker.ts \
-  wemedia-studio/lib/api/text-videos.ts
+  web/lib/ai/text-video-speech-job.ts \
+  web/lib/ai/text-video-speech-job.test.ts \
+  web/scripts/content-worker.ts \
+  web/lib/api/text-videos.ts
 git commit -m "feat: generate speech by segment"
 ```
 
@@ -1469,10 +1469,10 @@ git commit -m "feat: normalize text video speech audio"
 - Modify: `backend/routers/text_videos.py`
 - Modify: `backend/tests/test_text_videos_router.py`
 - Modify: `backend/content_jobs.py`
-- Create: `wemedia-studio/lib/ai/text-video-master-job.ts`
-- Create: `wemedia-studio/lib/ai/text-video-master-job.test.ts`
-- Modify: `wemedia-studio/scripts/content-worker.ts`
-- Modify: `wemedia-studio/lib/api/text-videos.ts`
+- Create: `web/lib/ai/text-video-master-job.ts`
+- Create: `web/lib/ai/text-video-master-job.test.ts`
+- Modify: `web/scripts/content-worker.ts`
+- Modify: `web/lib/api/text-videos.ts`
 
 **Interfaces:**
 - Consumes: Confirmed normalized segment assets, validated local timings, existing transcription runtime, durable job steps, and media functions from Task 6.
@@ -1641,7 +1641,7 @@ conda run -n wems pytest \
   tests/test_text_video_audio.py \
   tests/test_text_videos_router.py \
   tests/test_content_jobs.py -q
-cd ../wemedia-studio
+cd ../web
 pnpm exec vitest run lib/ai/text-video-master-job.test.ts
 ```
 
@@ -1658,10 +1658,10 @@ git add \
   backend/routers/text_videos.py \
   backend/tests/test_text_videos_router.py \
   backend/content_jobs.py \
-  wemedia-studio/lib/ai/text-video-master-job.ts \
-  wemedia-studio/lib/ai/text-video-master-job.test.ts \
-  wemedia-studio/scripts/content-worker.ts \
-  wemedia-studio/lib/api/text-videos.ts
+  web/lib/ai/text-video-master-job.ts \
+  web/lib/ai/text-video-master-job.test.ts \
+  web/scripts/content-worker.ts \
+  web/lib/api/text-videos.ts
 git commit -m "feat: build text video master timeline"
 ```
 
@@ -1670,16 +1670,16 @@ git commit -m "feat: build text video master timeline"
 ### Task 8: Coordinate Autosave, Jobs, and the Real Audio Workbench
 
 **Files:**
-- Create: `wemedia-studio/lib/text-video/project-merge.ts`
-- Create: `wemedia-studio/lib/text-video/project-merge.test.ts`
-- Modify: `wemedia-studio/app/text-video/useTextVideoAutosave.ts`
-- Modify: `wemedia-studio/app/text-video/useTextVideoAutosave.test.tsx`
-- Create: `wemedia-studio/app/text-video/useTextVideoProjectActions.ts`
-- Create: `wemedia-studio/app/text-video/useTextVideoProjectActions.test.tsx`
-- Modify: `wemedia-studio/app/text-video/TextVideoEditorClient.tsx`
-- Modify: `wemedia-studio/app/text-video/TextVideoWorkbench.tsx`
-- Modify: `wemedia-studio/app/text-video/AudioStage.tsx`
-- Create: `wemedia-studio/app/text-video/AudioStage.test.tsx`
+- Create: `web/lib/text-video/project-merge.ts`
+- Create: `web/lib/text-video/project-merge.test.ts`
+- Modify: `web/app/text-video/useTextVideoAutosave.ts`
+- Modify: `web/app/text-video/useTextVideoAutosave.test.tsx`
+- Create: `web/app/text-video/useTextVideoProjectActions.ts`
+- Create: `web/app/text-video/useTextVideoProjectActions.test.tsx`
+- Modify: `web/app/text-video/TextVideoEditorClient.tsx`
+- Modify: `web/app/text-video/TextVideoWorkbench.tsx`
+- Modify: `web/app/text-video/AudioStage.tsx`
+- Create: `web/app/text-video/AudioStage.test.tsx`
 
 **Interfaces:**
 - Consumes: Production endpoints from Tasks 5 and 7, public `getJob()`, `creativeAssetUrl()`, Task 1 stable document IDs, and existing 800 ms autosave.
@@ -1733,7 +1733,7 @@ Add a hook test where TTS completes while the user types in another segment. Ass
 Run:
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm exec vitest run \
   lib/text-video/project-merge.test.ts \
   app/text-video/useTextVideoAutosave.test.tsx \
@@ -1816,7 +1816,7 @@ Use `data-testid="speech-segment-card"` and truthful labels `未生成`, `生成
 Run:
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm exec vitest run \
   lib/text-video/project-merge.test.ts \
   app/text-video/useTextVideoAutosave.test.tsx \
@@ -1831,16 +1831,16 @@ Expected: all focused tests pass, including relative audio URLs resolving to the
 
 ```bash
 git add \
-  wemedia-studio/lib/text-video/project-merge.ts \
-  wemedia-studio/lib/text-video/project-merge.test.ts \
-  wemedia-studio/app/text-video/useTextVideoAutosave.ts \
-  wemedia-studio/app/text-video/useTextVideoAutosave.test.tsx \
-  wemedia-studio/app/text-video/useTextVideoProjectActions.ts \
-  wemedia-studio/app/text-video/useTextVideoProjectActions.test.tsx \
-  wemedia-studio/app/text-video/TextVideoEditorClient.tsx \
-  wemedia-studio/app/text-video/TextVideoWorkbench.tsx \
-  wemedia-studio/app/text-video/AudioStage.tsx \
-  wemedia-studio/app/text-video/AudioStage.test.tsx
+  web/lib/text-video/project-merge.ts \
+  web/lib/text-video/project-merge.test.ts \
+  web/app/text-video/useTextVideoAutosave.ts \
+  web/app/text-video/useTextVideoAutosave.test.tsx \
+  web/app/text-video/useTextVideoProjectActions.ts \
+  web/app/text-video/useTextVideoProjectActions.test.tsx \
+  web/app/text-video/TextVideoEditorClient.tsx \
+  web/app/text-video/TextVideoWorkbench.tsx \
+  web/app/text-video/AudioStage.tsx \
+  web/app/text-video/AudioStage.test.tsx
 git commit -m "feat: connect text video audio workbench"
 ```
 
@@ -1849,14 +1849,14 @@ git commit -m "feat: connect text video audio workbench"
 ### Task 9: Version the Remotion Template Contract and Enforce Continuous Timing
 
 **Files:**
-- Create: `wemedia-studio/remotion/types.ts`
-- Modify: `wemedia-studio/remotion/contract.ts`
-- Modify: `wemedia-studio/remotion/contract.test.ts`
-- Modify: `wemedia-studio/remotion/registry.ts`
-- Modify: `wemedia-studio/remotion/registry.test.ts`
-- Modify: `wemedia-studio/remotion/Root.tsx`
-- Modify: `wemedia-studio/remotion/templates/tech-text-v1/manifest.ts`
-- Modify: `wemedia-studio/remotion/templates/tech-text-v1/Composition.tsx`
+- Create: `web/remotion/types.ts`
+- Modify: `web/remotion/contract.ts`
+- Modify: `web/remotion/contract.test.ts`
+- Modify: `web/remotion/registry.ts`
+- Modify: `web/remotion/registry.test.ts`
+- Modify: `web/remotion/Root.tsx`
+- Modify: `web/remotion/templates/tech-text-v1/manifest.ts`
+- Modify: `web/remotion/templates/tech-text-v1/Composition.tsx`
 - Create: `backend/text_video_templates.py`
 - Create: `backend/text_video_scene_plan.py`
 - Create: `backend/tests/test_text_video_scene_plan.py`
@@ -1923,7 +1923,7 @@ def test_scene_word_partition_resolves_to_continuous_master_seconds():
 Run:
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm exec vitest run remotion/contract.test.ts remotion/registry.test.ts
 cd ../backend
 conda run -n wems pytest tests/test_text_video_scene_plan.py -q
@@ -2038,7 +2038,7 @@ Add `ScenePlanEditDocument` to `ProjectUpdate`. Browser scene edits may send onl
 Run:
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm exec vitest run remotion/contract.test.ts remotion/registry.test.ts
 pnpm exec remotion compositions remotion/index.ts
 cd ../backend
@@ -2053,14 +2053,14 @@ Expected: contracts reject gaps/overlaps/wrong versions and Remotion still lists
 
 ```bash
 git add \
-  wemedia-studio/remotion/types.ts \
-  wemedia-studio/remotion/contract.ts \
-  wemedia-studio/remotion/contract.test.ts \
-  wemedia-studio/remotion/registry.ts \
-  wemedia-studio/remotion/registry.test.ts \
-  wemedia-studio/remotion/Root.tsx \
-  wemedia-studio/remotion/templates/tech-text-v1/manifest.ts \
-  wemedia-studio/remotion/templates/tech-text-v1/Composition.tsx \
+  web/remotion/types.ts \
+  web/remotion/contract.ts \
+  web/remotion/contract.test.ts \
+  web/remotion/registry.ts \
+  web/remotion/registry.test.ts \
+  web/remotion/Root.tsx \
+  web/remotion/templates/tech-text-v1/manifest.ts \
+  web/remotion/templates/tech-text-v1/Composition.tsx \
   backend/text_video_templates.py \
   backend/text_video_scene_plan.py \
   backend/tests/test_text_video_scene_plan.py \
@@ -2078,10 +2078,10 @@ git commit -m "feat: enforce text video scene contracts"
 - Modify: `backend/text_video_scene_plan.py`
 - Modify: `backend/tests/test_text_video_scene_plan.py`
 - Modify: `backend/content_jobs.py`
-- Create: `wemedia-studio/lib/ai/text-video-scene-job.ts`
-- Create: `wemedia-studio/lib/ai/text-video-scene-job.test.ts`
-- Modify: `wemedia-studio/scripts/content-worker.ts`
-- Modify: `wemedia-studio/lib/api/text-videos.ts`
+- Create: `web/lib/ai/text-video-scene-job.ts`
+- Create: `web/lib/ai/text-video-scene-job.test.ts`
+- Modify: `web/scripts/content-worker.ts`
+- Modify: `web/lib/api/text-videos.ts`
 
 **Interfaces:**
 - Consumes: Ready master timeline, Task 9 versioned manifest and resolver, AI runtime, durable job runner pattern, and current scene visual intent.
@@ -2190,7 +2190,7 @@ conda run -n wems pytest \
   tests/test_text_video_scene_plan.py \
   tests/test_text_videos_router.py \
   tests/test_content_jobs.py -q
-cd ../wemedia-studio
+cd ../web
 pnpm exec vitest run lib/ai/text-video-scene-job.test.ts
 ```
 
@@ -2306,7 +2306,7 @@ conda run -n wems pytest \
   tests/test_text_video_scene_plan.py \
   tests/test_text_videos_router.py \
   tests/test_content_jobs.py -q
-cd ../wemedia-studio
+cd ../web
 pnpm exec vitest run lib/ai/text-video-scene-job.test.ts
 ```
 
@@ -2321,10 +2321,10 @@ git add \
   backend/text_video_scene_plan.py \
   backend/tests/test_text_video_scene_plan.py \
   backend/content_jobs.py \
-  wemedia-studio/lib/ai/text-video-scene-job.ts \
-  wemedia-studio/lib/ai/text-video-scene-job.test.ts \
-  wemedia-studio/scripts/content-worker.ts \
-  wemedia-studio/lib/api/text-videos.ts
+  web/lib/ai/text-video-scene-job.ts \
+  web/lib/ai/text-video-scene-job.test.ts \
+  web/scripts/content-worker.ts \
+  web/lib/api/text-videos.ts
 git commit -m "feat: direct text video scenes with AI"
 ```
 
@@ -2333,16 +2333,16 @@ git commit -m "feat: direct text video scenes with AI"
 ### Task 11: Add Word-Boundary Scene Editing and the Real Video Timeline
 
 **Files:**
-- Create: `wemedia-studio/lib/text-video/scene-plan.ts`
-- Create: `wemedia-studio/lib/text-video/scene-plan.test.ts`
-- Create: `wemedia-studio/app/text-video/SceneDirectionDialog.tsx`
-- Create: `wemedia-studio/app/text-video/SceneDirectionDialog.test.tsx`
-- Modify: `wemedia-studio/app/text-video/VideoStage.tsx`
-- Create: `wemedia-studio/app/text-video/VideoStage.test.tsx`
-- Modify: `wemedia-studio/app/text-video/SceneTimeline.tsx`
-- Create: `wemedia-studio/app/text-video/SceneTimeline.test.tsx`
-- Modify: `wemedia-studio/app/text-video/RemotionPreview.tsx`
-- Modify: `wemedia-studio/app/text-video/TextVideoWorkbench.tsx`
+- Create: `web/lib/text-video/scene-plan.ts`
+- Create: `web/lib/text-video/scene-plan.test.ts`
+- Create: `web/app/text-video/SceneDirectionDialog.tsx`
+- Create: `web/app/text-video/SceneDirectionDialog.test.tsx`
+- Modify: `web/app/text-video/VideoStage.tsx`
+- Create: `web/app/text-video/VideoStage.test.tsx`
+- Modify: `web/app/text-video/SceneTimeline.tsx`
+- Create: `web/app/text-video/SceneTimeline.test.tsx`
+- Modify: `web/app/text-video/RemotionPreview.tsx`
+- Modify: `web/app/text-video/TextVideoWorkbench.tsx`
 
 **Interfaces:**
 - Consumes: Stable global word IDs, persisted scene word ranges, Task 9 render projection, Task 10 scene generation, and `creativeAssetUrl()`.
@@ -2412,7 +2412,7 @@ it('visual edits do not invalidate speech or master audio', () => {
 Run:
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm exec vitest run \
   lib/text-video/scene-plan.test.ts \
   app/text-video/VideoStage.test.tsx \
@@ -2489,7 +2489,7 @@ Render one master-audio lane with truthful duration and scene intervals. Do not 
 Run:
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm exec vitest run \
   lib/text-video/scene-plan.test.ts \
   app/text-video/SceneDirectionDialog.test.tsx \
@@ -2505,16 +2505,16 @@ Expected: all tests pass; narration assets remain unchanged after every visual-o
 
 ```bash
 git add \
-  wemedia-studio/lib/text-video/scene-plan.ts \
-  wemedia-studio/lib/text-video/scene-plan.test.ts \
-  wemedia-studio/app/text-video/SceneDirectionDialog.tsx \
-  wemedia-studio/app/text-video/SceneDirectionDialog.test.tsx \
-  wemedia-studio/app/text-video/VideoStage.tsx \
-  wemedia-studio/app/text-video/VideoStage.test.tsx \
-  wemedia-studio/app/text-video/SceneTimeline.tsx \
-  wemedia-studio/app/text-video/SceneTimeline.test.tsx \
-  wemedia-studio/app/text-video/RemotionPreview.tsx \
-  wemedia-studio/app/text-video/TextVideoWorkbench.tsx
+  web/lib/text-video/scene-plan.ts \
+  web/lib/text-video/scene-plan.test.ts \
+  web/app/text-video/SceneDirectionDialog.tsx \
+  web/app/text-video/SceneDirectionDialog.test.tsx \
+  web/app/text-video/VideoStage.tsx \
+  web/app/text-video/VideoStage.test.tsx \
+  web/app/text-video/SceneTimeline.tsx \
+  web/app/text-video/SceneTimeline.test.tsx \
+  web/app/text-video/RemotionPreview.tsx \
+  web/app/text-video/TextVideoWorkbench.tsx
 git commit -m "feat: calibrate text video scenes by word"
 ```
 
@@ -2523,13 +2523,13 @@ git commit -m "feat: calibrate text video scenes by word"
 ### Task 12: Verify Recovery, Runtime Services, and End-to-End Production Flow
 
 **Files:**
-- Create: `wemedia-studio/e2e/text-video-production.spec.ts`
-- Create: `wemedia-studio/e2e/text-video-provider-server.ts`
+- Create: `web/e2e/text-video-production.spec.ts`
+- Create: `web/e2e/text-video-provider-server.ts`
 - Modify: `dev.sh`
 - Modify: `README.md`
 - Modify: `backend/tests/test_content_jobs.py`
 - Modify: `backend/tests/test_text_videos_router.py`
-- Create: `wemedia-studio/scripts/content-worker.test.ts`
+- Create: `web/scripts/content-worker.test.ts`
 
 **Interfaces:**
 - Consumes: All production APIs, worker flows, editor stages, Redis queue, backend FFmpeg, existing service scripts, and the Browser plugin when connected.
@@ -2667,7 +2667,7 @@ conda run -n wems pytest \
   tests/test_text_video_scene_plan.py \
   tests/test_text_videos_router.py \
   tests/test_content_jobs.py -q
-cd ../wemedia-studio
+cd ../web
 pnpm test
 pnpm lint
 pnpm build
@@ -2687,7 +2687,7 @@ First check whether the Browser plugin is connected and use it when available. I
 
 ```bash
 WMS_WORKER_TOKEN=ediora-e2e-worker-token-0000000001 ./dev.sh restart
-cd wemedia-studio
+cd web
 pnpm exec playwright test e2e/text-video-production.spec.ts
 cd ..
 ./dev.sh stop
@@ -2708,13 +2708,13 @@ Manually inspect desktop and compact widths for all three stages. Verify:
 
 ```bash
 git add \
-  wemedia-studio/e2e/text-video-production.spec.ts \
-  wemedia-studio/e2e/text-video-provider-server.ts \
+  web/e2e/text-video-production.spec.ts \
+  web/e2e/text-video-provider-server.ts \
   dev.sh \
   README.md \
   backend/tests/test_content_jobs.py \
   backend/tests/test_text_videos_router.py \
-  wemedia-studio/scripts/content-worker.test.ts
+  web/scripts/content-worker.test.ts
 git commit -m "test: verify text video production workflow"
 ```
 

@@ -153,7 +153,7 @@ Priority order (from `twitter_cookies.py` docstring):
 Multi-account rotation: place `sessions/x.json`, `sessions/x_2.json`, etc.
 On 429, call `mark_cookie_rate_limited()` — the loader skips that token for 15 min.
 
-For WeMedia Studio integration: set `X_AUTH_TOKEN` + `X_CT0` as env vars,
+For Ediora integration: set `X_AUTH_TOKEN` + `X_CT0` as env vars,
 or write `sessions/x.json` from stored credentials.
 
 ---

@@ -909,7 +909,7 @@ async def test_comfyui():
     if auth_token:
         headers["Authorization"] = f"Bearer {auth_token}"
     try:
-        async with httpx.AsyncClient(timeout=15) as client:
+        async with httpx.AsyncClient(timeout=15, trust_env=False) as client:
             response = await client.get(
                 f"{base_url}/system_stats",
                 headers=headers,
@@ -924,6 +924,12 @@ async def test_comfyui():
         return {"ok": True, "error": ""}
     except httpx.HTTPStatusError as exc:
         error = f"ComfyUI HTTP {exc.response.status_code}: {exc.response.text[:200]}"
+    except httpx.TimeoutException:
+        error = "连接 ComfyUI 超时"
+    except httpx.ConnectError:
+        error = "无法连接到 ComfyUI。请确认地址对本服务可达，且 ComfyUI 已启动。"
+    except httpx.RemoteProtocolError:
+        error = "ComfyUI 在响应前断开了连接"
     except Exception as exc:
         error = str(exc)
     safe_error = redact_secret_text(error)

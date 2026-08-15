@@ -14,7 +14,7 @@ Make the shared Agent runtime the only execution path for `daily_creation` jobs.
 
 ## Removed code
 
-- Delete `wemedia-studio/lib/ai/daily-creation-job.ts` and its dedicated tests.
+- Delete `web/lib/ai/daily-creation-job.ts` and its dedicated tests.
 - Remove the legacy selection, batch parsing, validation, and prompt-contract helpers that were only consumed by that Runner.
 - Remove the legacy Runner import, dependency option, error class, dispatch branch, and version propagation from `content-worker.ts`.
 - Update tests and fixtures so a daily job has `{ run_id }` and always resolves to the Agent Runner.

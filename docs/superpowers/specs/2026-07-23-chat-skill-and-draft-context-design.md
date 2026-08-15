@@ -8,7 +8,7 @@ full draft context.
 
 ## Skill Discovery
 
-The application scans `wemedia-studio/skills/*/SKILL.md` at request time and
+The application scans `web/skills/*/SKILL.md` at request time and
 parses each file's YAML frontmatter. Every discoverable skill appears in the
 Chat skill selector using its `name`, `description`, and `version`; no custom
 metadata, allowlist, or per-skill frontend registration is required.

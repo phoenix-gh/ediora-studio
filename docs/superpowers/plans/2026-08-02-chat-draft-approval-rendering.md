@@ -21,9 +21,9 @@
 ### Task 1: Recognize AI SDK dynamic tool parts
 
 **Files:**
-- Create: `wemedia-studio/app/chat/chat-tool-parts.ts`
-- Create: `wemedia-studio/app/chat/chat-tool-parts.test.ts`
-- Modify: `wemedia-studio/app/chat/ChatClient.tsx:56-58`
+- Create: `web/app/chat/chat-tool-parts.ts`
+- Create: `web/app/chat/chat-tool-parts.test.ts`
+- Modify: `web/app/chat/ChatClient.tsx:56-58`
 
 **Interfaces:**
 - Consumes: an object with a string `type` field.
@@ -57,7 +57,7 @@ describe('isChatToolPart', () => {
 - [ ] **Step 2: Run the unit test and verify RED**
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm test app/chat/chat-tool-parts.test.ts
 ```
 
@@ -81,7 +81,7 @@ Import `isChatToolPart` in `ChatClient.tsx`, remove its private `isToolPart`, an
 - [ ] **Step 4: Run focused tests and verify GREEN**
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm test app/chat/chat-tool-parts.test.ts app/chat/chat-layout.test.ts
 ```
 
@@ -90,7 +90,7 @@ Expected: both test files pass.
 - [ ] **Step 5: Run frontend regression checks**
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm test
 pnpm exec tsc --noEmit
 ```
@@ -105,9 +105,9 @@ Open `/chat`, select the latest session, and confirm the persisted `update_draft
 
 ```bash
 git add \
-  wemedia-studio/app/chat/chat-tool-parts.ts \
-  wemedia-studio/app/chat/chat-tool-parts.test.ts \
-  wemedia-studio/app/chat/ChatClient.tsx \
+  web/app/chat/chat-tool-parts.ts \
+  web/app/chat/chat-tool-parts.test.ts \
+  web/app/chat/ChatClient.tsx \
   docs/superpowers/plans/2026-08-02-chat-draft-approval-rendering.md
 git commit -m "fix: render chat draft approval controls"
 ```

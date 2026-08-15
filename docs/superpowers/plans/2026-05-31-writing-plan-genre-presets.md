@@ -20,8 +20,8 @@
 - `backend/routers/writing_plans.py` — `create_plan` 持久化 genre;`dispatch_plan` 透传 genre 进 ctx/goal/editor body
 - `backend/tests/test_genre_profiles.py` — 新建,纯函数单测
 - `backend/tests/test_writing_plans.py` — 追加 dispatch 集成测试
-- `wemedia-studio/lib/api/writing-plans.ts` — 接口加 `genre`
-- `wemedia-studio/app/writing-plans/WritingPlansClient.tsx` — genre `Select` + 卡片徽章
+- `web/lib/api/writing-plans.ts` — 接口加 `genre`
+- `web/app/writing-plans/WritingPlansClient.tsx` — genre `Select` + 卡片徽章
 
 ---
 
@@ -637,13 +637,13 @@ git commit -m "feat(dispatch): thread plan.genre into editor/writer body + goal"
 ## Task 7: 前端 API 客户端 genre
 
 **Files:**
-- Modify: `wemedia-studio/lib/api/writing-plans.ts`
+- Modify: `web/lib/api/writing-plans.ts`
 
 > 提示:前端无 JS 测试框架,Task 7-8 用 `tsc --noEmit` + 手动验证;改动遵循文件既有写法。先 Read 文件确认接口字段顺序。
 
 - [ ] **Step 1: 接口加 genre**
 
-`wemedia-studio/lib/api/writing-plans.ts`:`WritingPlan` 接口里(`cover_style`/`image_style` 同区域)加:
+`web/lib/api/writing-plans.ts`:`WritingPlan` 接口里(`cover_style`/`image_style` 同区域)加:
 ```ts
   genre?: string
 ```
@@ -651,13 +651,13 @@ git commit -m "feat(dispatch): thread plan.genre into editor/writer body + goal"
 
 - [ ] **Step 2: 类型检查**
 
-Run: `cd wemedia-studio && pnpm exec tsc --noEmit`
+Run: `cd web && pnpm exec tsc --noEmit`
 Expected: 无新错(本文件改动不引入错误)。
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add wemedia-studio/lib/api/writing-plans.ts
+git add web/lib/api/writing-plans.ts
 git commit -m "feat(ui-api): WritingPlan genre field"
 ```
 
@@ -666,7 +666,7 @@ git commit -m "feat(ui-api): WritingPlan genre field"
 ## Task 8: 前端 方案编辑 genre Select + 卡片徽章
 
 **Files:**
-- Modify: `wemedia-studio/app/writing-plans/WritingPlansClient.tsx`
+- Modify: `web/app/writing-plans/WritingPlansClient.tsx`
 
 > 先 Read 文件:定位方案元信息编辑区(参照 `editPriority` / `image_style` 保存逻辑)与方案卡片渲染处。复用项目已有的 shadcn `Select`(`@/components/ui/select`,看 `PublishAccountsSection` 等既有用法)。
 
@@ -733,14 +733,14 @@ const GENRE_LABEL: Record<string, string> = Object.fromEntries(
 
 - [ ] **Step 5: 类型检查 + 手动验证**
 
-Run: `cd wemedia-studio && pnpm exec tsc --noEmit`
+Run: `cd web && pnpm exec tsc --noEmit`
 Expected: 无错。
 手动:打开 `/writing-plans` 选一个方案 → 文体下拉改「教程」→ 刷新页面值仍在、卡片徽章显示「教程」。
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add wemedia-studio/app/writing-plans/WritingPlansClient.tsx
+git add web/app/writing-plans/WritingPlansClient.tsx
 git commit -m "feat(ui): plan genre selector + card badge"
 ```
 
@@ -749,7 +749,7 @@ git commit -m "feat(ui): plan genre selector + card badge"
 ## 收尾验证
 
 - [ ] 后端全测:`cd backend && conda run -n wems pytest tests/test_genre_profiles.py tests/test_writing_plans.py tests/test_pipeline_template_topic.py -q` → 全绿
-- [ ] 前端类型:`cd wemedia-studio && pnpm exec tsc --noEmit` → 无错
+- [ ] 前端类型:`cd web && pnpm exec tsc --noEmit` → 无错
 - [ ] 端到端手测:把那篇《跨境金融账户远程开通教程》方案文体设为「教程」→ 派发 → 草稿箱产出应是中立、编号步骤、无「我觉得/当下感受」
 - [ ] commentary 回归手测:任一现有评论类方案派发 → 产出风格与改动前一致
 

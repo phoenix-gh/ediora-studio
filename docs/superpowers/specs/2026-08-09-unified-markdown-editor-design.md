@@ -14,7 +14,7 @@
 
 ## 组件契约
 
-共享组件放在 `wemedia-studio/components/MarkdownEditor.tsx`，提供：
+共享组件放在 `web/components/MarkdownEditor.tsx`，提供：
 
 ```ts
 export interface MarkdownEditorHandle {
@@ -36,7 +36,7 @@ type MarkdownEditorProps = {
 
 ## 文件调整
 
-- 创建 `wemedia-studio/components/MarkdownEditor.tsx` 及其测试。
+- 创建 `web/components/MarkdownEditor.tsx` 及其测试。
 - 删除 `app/assets/AssetVisualMarkdownEditor.tsx` 和 `app/drafts/MarkdownEditor.tsx`，将原有测试迁移/合并到共享组件测试。
 - 更新 `ArticleAssetWorkspace`、`DraftsClient` 及其测试的导入和 mock 路径。
 - 从 `package.json` 与 lockfile 移除 `@uiw/react-md-editor`。

@@ -32,11 +32,11 @@
 - Modify `backend/main.py`: restore persisted proxy during startup before scheduler registration.
 - Modify `backend/tests/test_job_reconciliation_lifespan.py`: update the existing lifespan fixture for the newly unconditional settings read.
 - Create `backend/tests/test_collection_proxy_lifespan.py`: prove startup ordering and scheduler-disabled restoration.
-- Modify `wemedia-studio/lib/api/settings.ts`: add browser API types.
-- Modify `wemedia-studio/lib/api/settings-test-fixtures.ts`: add proxy defaults.
-- Create `wemedia-studio/app/settings/sections/CollectionProxyForm.tsx`: focused proxy editor with save/clear behavior.
-- Create `wemedia-studio/app/settings/sections/CollectionProxyForm.test.tsx`: component contract tests.
-- Modify `wemedia-studio/app/settings/sections/CollectSection.tsx`: compose RSSHub and collection-proxy sections.
+- Modify `web/lib/api/settings.ts`: add browser API types.
+- Modify `web/lib/api/settings-test-fixtures.ts`: add proxy defaults.
+- Create `web/app/settings/sections/CollectionProxyForm.tsx`: focused proxy editor with save/clear behavior.
+- Create `web/app/settings/sections/CollectionProxyForm.test.tsx`: component contract tests.
+- Modify `web/app/settings/sections/CollectSection.tsx`: compose RSSHub and collection-proxy sections.
 
 ---
 
@@ -459,11 +459,11 @@ git commit -m "feat: restore collection proxy at startup"
 ### Task 4: Data Collection Settings UI
 
 **Files:**
-- Modify: `wemedia-studio/lib/api/settings.ts`
-- Modify: `wemedia-studio/lib/api/settings-test-fixtures.ts`
-- Create: `wemedia-studio/app/settings/sections/CollectionProxyForm.tsx`
-- Create: `wemedia-studio/app/settings/sections/CollectionProxyForm.test.tsx`
-- Modify: `wemedia-studio/app/settings/sections/CollectSection.tsx`
+- Modify: `web/lib/api/settings.ts`
+- Modify: `web/lib/api/settings-test-fixtures.ts`
+- Create: `web/app/settings/sections/CollectionProxyForm.tsx`
+- Create: `web/app/settings/sections/CollectionProxyForm.test.tsx`
+- Modify: `web/app/settings/sections/CollectSection.tsx`
 
 **Interfaces:**
 - Consumes: `AppSettings.collection_proxy_url`, `collection_proxy_url_set`, and `collection_proxy_url_preview` from Task 2.
@@ -544,7 +544,7 @@ Also assert the form includes `X / feedgrab`、`Reddit`、`YouTube`、`GitHub`�
 
 Run: `pnpm test -- app/settings/sections/CollectionProxyForm.test.tsx`
 
-Working directory: `wemedia-studio`
+Working directory: `web`
 
 Expected: FAIL because `CollectionProxyForm` does not exist.
 
@@ -620,14 +620,14 @@ Run: `pnpm test -- app/settings/sections/CollectionProxyForm.test.tsx app/settin
 
 Run: `pnpm exec tsc --noEmit`
 
-Working directory: `wemedia-studio`
+Working directory: `web`
 
 Expected: all tests PASS and TypeScript reports no errors.
 
 - [ ] **Step 7: Commit the settings UI**
 
 ```bash
-git add wemedia-studio/lib/api/settings.ts wemedia-studio/lib/api/settings-test-fixtures.ts wemedia-studio/app/settings/sections/CollectionProxyForm.tsx wemedia-studio/app/settings/sections/CollectionProxyForm.test.tsx wemedia-studio/app/settings/sections/CollectSection.tsx
+git add web/lib/api/settings.ts web/lib/api/settings-test-fixtures.ts web/app/settings/sections/CollectionProxyForm.tsx web/app/settings/sections/CollectionProxyForm.test.tsx web/app/settings/sections/CollectSection.tsx
 git commit -m "feat: add collection proxy settings UI"
 ```
 
@@ -660,7 +660,7 @@ Expected: all tests PASS. If an unrelated pre-existing fixture or local-binding 
 
 - [ ] **Step 2: Run the complete focused frontend suite**
 
-Working directory: `wemedia-studio`
+Working directory: `web`
 
 Run:
 
@@ -683,7 +683,7 @@ Run:
 ```bash
 git diff --check
 git status --short
-git diff -- backend/collection_proxy.py backend/config.py backend/main.py backend/routers/settings.py backend/tests/test_collection_proxy.py backend/tests/test_collection_proxy_settings.py backend/tests/test_collection_proxy_lifespan.py backend/tests/test_job_reconciliation_lifespan.py wemedia-studio/lib/api/settings.ts wemedia-studio/lib/api/settings-test-fixtures.ts wemedia-studio/app/settings/sections/CollectionProxyForm.tsx wemedia-studio/app/settings/sections/CollectionProxyForm.test.tsx wemedia-studio/app/settings/sections/CollectSection.tsx
+git diff -- backend/collection_proxy.py backend/config.py backend/main.py backend/routers/settings.py backend/tests/test_collection_proxy.py backend/tests/test_collection_proxy_settings.py backend/tests/test_collection_proxy_lifespan.py backend/tests/test_job_reconciliation_lifespan.py web/lib/api/settings.ts web/lib/api/settings-test-fixtures.ts web/app/settings/sections/CollectionProxyForm.tsx web/app/settings/sections/CollectionProxyForm.test.tsx web/app/settings/sections/CollectSection.tsx
 ```
 
 Expected: no whitespace errors; only the planned feature files contain newly introduced proxy changes. Existing unrelated worktree changes remain untouched.

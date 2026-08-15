@@ -12,7 +12,7 @@ def test_render_test_message_is_fixed_chinese_and_shanghai_time():
 
     message = render_test_message(tested_at)
 
-    assert "WeMedia Studio Telegram 连接测试成功" in message
+    assert "Ediora Telegram 连接测试成功" in message
     assert "2026-07-25 21:06:07" in message
     assert "<script" not in message
 

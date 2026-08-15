@@ -116,11 +116,11 @@ Expected: all selected tests pass, including existing atomic/idempotency tests.
 **Files:**
 - Modify: backend/agent_execution_service.py
 - Modify: backend/routers/agent_executions.py
-- Modify: wemedia-studio/lib/ai/agent-execution-client.ts
-- Modify: wemedia-studio/lib/ai/daily-creation-agent-job.ts
+- Modify: web/lib/ai/agent-execution-client.ts
+- Modify: web/lib/ai/daily-creation-agent-job.ts
 - Test: backend/tests/test_agent_execution_service.py
 - Test: backend/tests/test_agent_executions_router.py
-- Test: wemedia-studio/lib/ai/daily-creation-agent-job.test.ts
+- Test: web/lib/ai/daily-creation-agent-job.test.ts
 
 **Interfaces:**
 - Consumes: existing worker-only Agent execution routes and runDailyCreationAgentJob dependency injection.
@@ -157,7 +157,7 @@ Expected: all selected tests pass and the daily Agent test verifies failExecutio
 
 **Files:**
 - Modify: backend/routers/creation_rules.py
-- Modify: wemedia-studio/lib/api/creation-rules.ts
+- Modify: web/lib/api/creation-rules.ts
 - Test: backend/tests/test_daily_creation_rules_router.py
 
 **Interfaces:**
@@ -197,12 +197,12 @@ Expected: all selected tests pass.
 ### Task 5: Refactor /creation-rules into the “任务看板”
 
 **Files:**
-- Modify: wemedia-studio/app/creation-rules/CreationRulesClient.tsx
-- Modify: wemedia-studio/app/creation-rules/CreationRulesPanel.tsx
-- Create: wemedia-studio/app/creation-rules/CreationDashboard.tsx
-- Create: wemedia-studio/app/creation-rules/CreationRunLog.tsx
-- Modify: wemedia-studio/app/creation-rules/CreationRulesClient.test.tsx
-- Create: wemedia-studio/app/creation-rules/CreationRunLog.test.tsx
+- Modify: web/app/creation-rules/CreationRulesClient.tsx
+- Modify: web/app/creation-rules/CreationRulesPanel.tsx
+- Create: web/app/creation-rules/CreationDashboard.tsx
+- Create: web/app/creation-rules/CreationRunLog.tsx
+- Modify: web/app/creation-rules/CreationRulesClient.test.tsx
+- Create: web/app/creation-rules/CreationRunLog.test.tsx
 
 **Interfaces:**
 - Consumes: getCreationDashboard, existing rule mutation APIs, directory/Skill APIs, and current dialog props.

@@ -30,11 +30,11 @@
 - `backend/digital_human_shots.py` — 镜头校验、脚本派生、时长区间
 - `backend/digital_human_service.py` — 按 provider 创建角色、按镜任务、拼接
 - `backend/routers/digital_humans.py` / `talking_videos.py` — 公开与 worker API
-- `wemedia-studio/lib/comfyui/client.ts` — ComfyUI HTTP 客户端
-- `wemedia-studio/lib/comfyui/workflows/h3-i2v-v1.json` + `.meta.json`
-- `wemedia-studio/lib/ai/digital-human-job.ts` — setup 分支、shot、stitch
-- `wemedia-studio/app/settings/sections/ComfyUISection.tsx`
-- `wemedia-studio/app/digital-humans/*` — 角色后端选择与镜头编辑器
+- `web/lib/comfyui/client.ts` — ComfyUI HTTP 客户端
+- `web/lib/comfyui/workflows/h3-i2v-v1.json` + `.meta.json`
+- `web/lib/ai/digital-human-job.ts` — setup 分支、shot、stitch
+- `web/app/settings/sections/ComfyUISection.tsx`
+- `web/app/digital-humans/*` — 角色后端选择与镜头编辑器
 
 ---
 
@@ -42,14 +42,14 @@
 
 **Files:**
 - Create: `backend/tests/test_comfyui_settings.py`
-- Create: `wemedia-studio/lib/comfyui/client.ts`
-- Create: `wemedia-studio/lib/comfyui/client.test.ts`
-- Create: `wemedia-studio/app/settings/sections/ComfyUISection.tsx`
+- Create: `web/lib/comfyui/client.ts`
+- Create: `web/lib/comfyui/client.test.ts`
+- Create: `web/app/settings/sections/ComfyUISection.tsx`
 - Modify: `backend/config.py`
 - Modify: `backend/routers/settings.py`
-- Modify: `wemedia-studio/lib/api/settings.ts`
-- Modify: `wemedia-studio/lib/api/settings-test-fixtures.ts`
-- Modify: `wemedia-studio/app/settings/SettingsClient.tsx`
+- Modify: `web/lib/api/settings.ts`
+- Modify: `web/lib/api/settings-test-fixtures.ts`
+- Modify: `web/app/settings/SettingsClient.tsx`
 
 **Interfaces:**
 - Produces: `effective_comfyui_base_url(cfg) -> str`, `effective_comfyui_auth_token(cfg) -> str`
@@ -75,9 +75,9 @@
 - Modify: `backend/routers/digital_humans.py`
 - Modify: `backend/tests/test_digital_human_service.py`
 - Modify: `backend/tests/test_digital_humans_router.py`
-- Modify: `wemedia-studio/lib/ai/digital-human-job.ts`
-- Modify: `wemedia-studio/lib/ai/digital-human-job.test.ts`
-- Modify: `wemedia-studio/lib/api/digital-humans.ts`
+- Modify: `web/lib/ai/digital-human-job.ts`
+- Modify: `web/lib/ai/digital-human-job.test.ts`
+- Modify: `web/lib/api/digital-humans.ts`
 
 **Interfaces:**
 - Consumes: Task 1 runtime (setup 合成本身不调 ComfyUI)
@@ -98,16 +98,16 @@
 **Files:**
 - Create: `backend/digital_human_shots.py`
 - Create: `backend/tests/test_digital_human_shots.py`
-- Create: `wemedia-studio/lib/comfyui/workflows/h3-i2v-v1.json`
-- Create: `wemedia-studio/lib/comfyui/workflows/h3-i2v-v1.meta.json`
-- Create: `wemedia-studio/lib/comfyui/workflow.ts`
-- Create: `wemedia-studio/lib/ai/digital-human-shot-job.ts`
-- Create: `wemedia-studio/lib/ai/digital-human-shot-job.test.ts`
+- Create: `web/lib/comfyui/workflows/h3-i2v-v1.json`
+- Create: `web/lib/comfyui/workflows/h3-i2v-v1.meta.json`
+- Create: `web/lib/comfyui/workflow.ts`
+- Create: `web/lib/ai/digital-human-shot-job.ts`
+- Create: `web/lib/ai/digital-human-shot-job.test.ts`
 - Modify: `backend/models.py` (`TalkingVideoProject.shots`, `look_asset_id`)
 - Modify: `backend/routers/talking_videos.py`
 - Modify: `backend/digital_human_service.py`
-- Modify: `wemedia-studio/scripts/content-worker.ts`
-- Modify: `wemedia-studio/lib/api/digital-humans.ts`
+- Modify: `web/scripts/content-worker.ts`
+- Modify: `web/lib/api/digital-humans.ts`
 
 **Interfaces:**
 - Produces: `normalize_shots(raw, min_seconds, max_seconds) -> list[dict]`
@@ -129,12 +129,12 @@
 
 **Files:**
 - Create: `backend/tests/test_talking_video_stitch.py`
-- Create: `wemedia-studio/lib/ai/digital-human-stitch-job.ts`
-- Create: `wemedia-studio/lib/ai/digital-human-stitch-job.test.ts`
+- Create: `web/lib/ai/digital-human-stitch-job.ts`
+- Create: `web/lib/ai/digital-human-stitch-job.test.ts`
 - Modify: `backend/models.py` (`TalkingVideoRender.shots_snapshot`)
 - Modify: `backend/digital_human_service.py`
 - Modify: `backend/routers/talking_videos.py`
-- Modify: `wemedia-studio/scripts/content-worker.ts`
+- Modify: `web/scripts/content-worker.ts`
 
 **Interfaces:**
 - Produces: `POST /api/talking-videos/{id}/stitch`
@@ -149,12 +149,12 @@
 ### Task 5: 镜头编辑页与脚本 AI
 
 **Files:**
-- Modify: `wemedia-studio/app/digital-humans/RoleEditorDialog.tsx`
-- Modify: `wemedia-studio/app/digital-humans/TalkingVideoEditor.tsx`
-- Modify: `wemedia-studio/app/digital-humans/ScriptAssistantDialog.tsx`
-- Modify: `wemedia-studio/app/digital-humans/talking-video-editor.test.tsx`
-- Modify: `wemedia-studio/app/digital-humans/role-management.test.tsx`
-- Modify: `wemedia-studio/app/api/digital-human/script/route.ts` (or existing script route)
+- Modify: `web/app/digital-humans/RoleEditorDialog.tsx`
+- Modify: `web/app/digital-humans/TalkingVideoEditor.tsx`
+- Modify: `web/app/digital-humans/ScriptAssistantDialog.tsx`
+- Modify: `web/app/digital-humans/talking-video-editor.test.tsx`
+- Modify: `web/app/digital-humans/role-management.test.tsx`
+- Modify: `web/app/api/digital-human/script/route.ts` (or existing script route)
 
 **Interfaces:**
 - Consumes: shots APIs from Task 3–4

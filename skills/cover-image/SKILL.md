@@ -187,8 +187,8 @@ The formula for any target ratio W:H from source W_src×H_src:
 ### User will notice wrong dimensions
 Users expect the requested aspect ratio. Delivering a 3:2 image when 5:2 or 16:9 was requested breaks trust. Always verify and fix before reporting.
 
-### Upload to WeMedia Studio for X post embedding
-After generating and cropping, images need a public URL to embed in X posts. MK uses WeMedia Studio for this. See `references/wemedia-upload.md` for the upload workflow.
+### Upload to Ediora for X post embedding
+After generating and cropping, images need a public URL to embed in X posts. MK uses Ediora for this. See `references/ediora-upload.md` for the upload workflow.
 
 ---
 

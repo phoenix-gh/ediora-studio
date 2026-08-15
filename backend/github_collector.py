@@ -5,6 +5,7 @@ from datetime import datetime, timezone, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
+from collection_proxy import collection_client_kwargs
 from models import GithubRepo, GithubTrendingRepo, GithubRelease
 
 GITHUB_API = "https://api.github.com"
@@ -50,8 +51,11 @@ async def collect_trending(db: AsyncSession) -> int:
     for period in ("daily", "weekly"):
         url = f"https://github.com/trending?since={period}"
         try:
-            async with httpx.AsyncClient(timeout=20, follow_redirects=True,
-                                         headers={"User-Agent": "WeMediaStudio/1.0"}) as client:
+            async with httpx.AsyncClient(**await collection_client_kwargs(
+                timeout=20,
+                follow_redirects=True,
+                headers={"User-Agent": "Ediora/1.0"},
+            )) as client:
                 resp = await client.get(url)
                 resp.raise_for_status()
                 html = resp.text
@@ -141,7 +145,10 @@ async def collect_trending(db: AsyncSession) -> int:
 async def fetch_repo_meta(owner: str, repo: str, token: str = "") -> dict:
     """Fetch basic repo metadata from GitHub API."""
     headers = _api_headers(token)
-    async with httpx.AsyncClient(timeout=15, headers=headers) as client:
+    async with httpx.AsyncClient(**await collection_client_kwargs(
+        timeout=15,
+        headers=headers,
+    )) as client:
         resp = await client.get(f"{GITHUB_API}/repos/{owner}/{repo}")
         resp.raise_for_status()
         return resp.json()
@@ -156,7 +163,10 @@ async def collect_repo_releases(repo: GithubRepo, db: AsyncSession) -> int:
     headers = _api_headers(token)
 
     try:
-        async with httpx.AsyncClient(timeout=20, headers=headers) as client:
+        async with httpx.AsyncClient(**await collection_client_kwargs(
+            timeout=20,
+            headers=headers,
+        )) as client:
             resp = await client.get(
                 f"{GITHUB_API}/repos/{repo.owner}/{repo.repo}/releases",
                 params={"per_page": 20},

@@ -22,8 +22,8 @@
 **Files:**
 - Modify: `backend/routers/assets.py`
 - Modify: `backend/tests/test_asset_directories_router.py`
-- Modify: `wemedia-studio/lib/api/assets.ts`
-- Modify: `wemedia-studio/app/assets/AssetsClient.tsx`
+- Modify: `web/lib/api/assets.ts`
+- Modify: `web/app/assets/AssetsClient.tsx`
 
 - [ ] **Step 1: 写出 URL 规范化和无 URL 内容哈希去重的失败测试。**
 - [ ] **Step 2: 运行 `pytest backend/tests/test_asset_directories_router.py -q`，确认新断言失败。**
@@ -38,9 +38,9 @@
 - Modify: `backend/models.py`
 - Modify: `backend/routers/assets.py`
 - Modify: `backend/tests/test_asset_directories_router.py`
-- Modify: `wemedia-studio/lib/api/assets.ts`
-- Create: `wemedia-studio/lib/ai/topic-source-job.ts`
-- Modify: `wemedia-studio/scripts/content-worker.ts`
+- Modify: `web/lib/api/assets.ts`
+- Create: `web/lib/ai/topic-source-job.ts`
+- Modify: `web/scripts/content-worker.ts`
 
 - [ ] **Step 1: 写出规则创建、关键词预筛和 worker 回写素材的失败 API 测试。**
 - [ ] **Step 2: 运行对应 pytest，确认失败原因是缺少规则/端点。**
@@ -52,9 +52,9 @@
 
 **Files:**
 - Modify: `backend/routers/assets.py`
-- Modify: `wemedia-studio/lib/api/assets.ts`
-- Modify: `wemedia-studio/app/assets/AssetsClient.tsx`
-- Test: `wemedia-studio/app/assets/assets-system-directory.test.tsx`
+- Modify: `web/lib/api/assets.ts`
+- Modify: `web/app/assets/AssetsClient.tsx`
+- Test: `web/app/assets/assets-system-directory.test.tsx`
 
 - [ ] **Step 1: 写出每日候选端点只返回当前主题最多十条文章素材的失败测试。**
 - [ ] **Step 2: 实现候选查询与规则配置 UI。**

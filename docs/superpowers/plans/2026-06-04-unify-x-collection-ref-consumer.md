@@ -14,7 +14,7 @@
 
 - 后端测试运行：`cd backend && conda run -n wems python -m pytest <path> -v`
 - 所有 Bash 命令先 `source ~/.zshrc`。
-- 前端校验：`cd wemedia-studio && npm run build`（无单测框架，用 build/tsc 把关）。
+- 前端校验：`cd web && npm run build`（无单测框架，用 build/tsc 把关）。
 
 ---
 
@@ -585,8 +585,8 @@ git commit -m "feat(migrate): old collect rules -> search subscriptions + backfi
 ## Task 5: 前端 API 客户端字段（x.ts / materials.ts）
 
 **Files:**
-- Modify: `wemedia-studio/lib/api/x.ts`（`XSubscription` interface、create 入参）
-- Modify: `wemedia-studio/lib/api/materials.ts`（`CollectRule` interface、create/patch 入参）
+- Modify: `web/lib/api/x.ts`（`XSubscription` interface、create 入参）
+- Modify: `web/lib/api/materials.ts`（`CollectRule` interface、create/patch 入参）
 
 - [ ] **Step 1: x.ts — XSubscription 加字段**
 
@@ -612,13 +612,13 @@ git commit -m "feat(migrate): old collect rules -> search subscriptions + backfi
 
 - [ ] **Step 3: typecheck**
 
-Run: `source ~/.zshrc; cd wemedia-studio && npx tsc --noEmit`
+Run: `source ~/.zshrc; cd web && npx tsc --noEmit`
 Expected: 无新增类型错误（若仓库本就有既存错误，确认未新增与本改动相关者）
 
 - [ ] **Step 4: 提交**
 
 ```bash
-git add wemedia-studio/lib/api/x.ts wemedia-studio/lib/api/materials.ts
+git add web/lib/api/x.ts web/lib/api/materials.ts
 git commit -m "feat(ui-api): X subscription kind+search fields; CollectRule source_subscription_id"
 ```
 
@@ -627,7 +627,7 @@ git commit -m "feat(ui-api): X subscription kind+search fields; CollectRule sour
 ## Task 6: X 订阅管理抽屉支持「搜索订阅」（XClient.tsx）
 
 **Files:**
-- Modify: `wemedia-studio/app/x/XClient.tsx`（订阅管理 Dialog 510+、添加订阅表单、列表项徽标）
+- Modify: `web/app/x/XClient.tsx`（订阅管理 Dialog 510+、添加订阅表单、列表项徽标）
 
 - [ ] **Step 1: 在订阅管理 Dialog 里加「类型」切换**
 
@@ -641,13 +641,13 @@ git commit -m "feat(ui-api): X subscription kind+search fields; CollectRule sour
 
 - [ ] **Step 3: 手测 + build**
 
-Run: `source ~/.zshrc; cd wemedia-studio && npm run build`
+Run: `source ~/.zshrc; cd web && npm run build`
 Expected: build 成功。随后跑起服务（见 dev.sh），在 X 页「订阅管理」新建一个搜索订阅，点「立即采集」，确认 x_posts 有新帖（或 toast 显示新增数）。
 
 - [ ] **Step 4: 提交**
 
 ```bash
-git add wemedia-studio/app/x/XClient.tsx
+git add web/app/x/XClient.tsx
 git commit -m "feat(ui): X subscription manager supports search-type subscriptions"
 ```
 
@@ -656,7 +656,7 @@ git commit -m "feat(ui): X subscription manager supports search-type subscriptio
 ## Task 7: 参考库采集抽屉改为「选取规则」（MaterialsClient.tsx）
 
 **Files:**
-- Modify: `wemedia-studio/app/materials/MaterialsClient.tsx`（`RulesDrawer` 180-300）
+- Modify: `web/app/materials/MaterialsClient.tsx`（`RulesDrawer` 180-300）
 
 - [ ] **Step 1: 新建规则表单换成订阅选择器**
 
@@ -668,13 +668,13 @@ git commit -m "feat(ui): X subscription manager supports search-type subscriptio
 
 - [ ] **Step 3: build + 手测**
 
-Run: `source ~/.zshrc; cd wemedia-studio && npm run build`
+Run: `source ~/.zshrc; cd web && npm run build`
 Expected: build 成功。手测：在参考文案库「选取规则」新建一条指向某搜索订阅的规则，点「立即采集」，确认 toast 显示新增条数、参考库出现精炼条目。
 
 - [ ] **Step 4: 提交**
 
 ```bash
-git add wemedia-studio/app/materials/MaterialsClient.tsx
+git add web/app/materials/MaterialsClient.tsx
 git commit -m "feat(ui): materials collect rules -> selection rules picking a source subscription"
 ```
 

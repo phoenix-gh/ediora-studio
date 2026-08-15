@@ -162,10 +162,10 @@ git commit -m "feat: manage daily creation rules"
 ### Task 4: Generic AI Selection and X Draft Batch Flow
 
 **Files:**
-- Modify: `wemedia-studio/lib/ai/content-job.ts`
-- Modify: `wemedia-studio/lib/ai/content-job.test.ts`
-- Modify: `wemedia-studio/scripts/content-worker.ts`
-- Modify: `wemedia-studio/scripts/content-worker.test.ts`
+- Modify: `web/lib/ai/content-job.ts`
+- Modify: `web/lib/ai/content-job.test.ts`
+- Modify: `web/scripts/content-worker.ts`
+- Modify: `web/scripts/content-worker.test.ts`
 - Modify: `backend/content_jobs.py`
 - Modify: `backend/tests/test_content_jobs.py`
 
@@ -208,7 +208,7 @@ Update requested/created counts, compact exclusions, and status: zero persisted 
 Run the Task 4 commands, then stage only the flow-owned hunks and commit:
 
 ```bash
-git add -p wemedia-studio/lib/ai/content-job.ts wemedia-studio/lib/ai/content-job.test.ts wemedia-studio/scripts/content-worker.ts wemedia-studio/scripts/content-worker.test.ts backend/content_jobs.py backend/tests/test_content_jobs.py
+git add -p web/lib/ai/content-job.ts web/lib/ai/content-job.test.ts web/scripts/content-worker.ts web/scripts/content-worker.test.ts backend/content_jobs.py backend/tests/test_content_jobs.py
 git commit -m "feat: execute AI deduplicated creation batches"
 ```
 
@@ -245,15 +245,15 @@ git commit -m "feat: schedule daily creation rules"
 ### Task 6: Daily Plan Rule Management and Run UI
 
 **Files:**
-- Modify: `wemedia-studio/lib/api/daily-plan.ts`
-- Create: `wemedia-studio/app/daily-plan/CreationRuleDialog.tsx`
-- Create: `wemedia-studio/app/daily-plan/CreationRuleDialog.test.tsx`
-- Create: `wemedia-studio/app/daily-plan/CreationRulesPanel.tsx`
-- Create: `wemedia-studio/app/daily-plan/CreationRulesPanel.test.tsx`
-- Create: `wemedia-studio/app/daily-plan/CreationRunsPanel.tsx`
-- Create: `wemedia-studio/app/daily-plan/CreationRunsPanel.test.tsx`
-- Modify: `wemedia-studio/app/daily-plan/DailyPlanClient.tsx`
-- Create: `wemedia-studio/app/daily-plan/DailyPlanClient.test.tsx`
+- Modify: `web/lib/api/daily-plan.ts`
+- Create: `web/app/daily-plan/CreationRuleDialog.tsx`
+- Create: `web/app/daily-plan/CreationRuleDialog.test.tsx`
+- Create: `web/app/daily-plan/CreationRulesPanel.tsx`
+- Create: `web/app/daily-plan/CreationRulesPanel.test.tsx`
+- Create: `web/app/daily-plan/CreationRunsPanel.tsx`
+- Create: `web/app/daily-plan/CreationRunsPanel.test.tsx`
+- Modify: `web/app/daily-plan/DailyPlanClient.tsx`
+- Create: `web/app/daily-plan/DailyPlanClient.test.tsx`
 
 **Interfaces:**
 - Produces typed rule/run CRUD API functions matching Task 3.
@@ -286,8 +286,8 @@ Run the Task 6 Vitest command and scoped ESLint for every changed frontend file.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add wemedia-studio/lib/api/daily-plan.ts wemedia-studio/app/daily-plan/CreationRuleDialog.tsx wemedia-studio/app/daily-plan/CreationRuleDialog.test.tsx wemedia-studio/app/daily-plan/CreationRulesPanel.tsx wemedia-studio/app/daily-plan/CreationRulesPanel.test.tsx wemedia-studio/app/daily-plan/CreationRunsPanel.tsx wemedia-studio/app/daily-plan/CreationRunsPanel.test.tsx wemedia-studio/app/daily-plan/DailyPlanClient.test.tsx
-git add -p wemedia-studio/app/daily-plan/DailyPlanClient.tsx
+git add web/lib/api/daily-plan.ts web/app/daily-plan/CreationRuleDialog.tsx web/app/daily-plan/CreationRuleDialog.test.tsx web/app/daily-plan/CreationRulesPanel.tsx web/app/daily-plan/CreationRulesPanel.test.tsx web/app/daily-plan/CreationRunsPanel.tsx web/app/daily-plan/CreationRunsPanel.test.tsx web/app/daily-plan/DailyPlanClient.test.tsx
+git add -p web/app/daily-plan/DailyPlanClient.tsx
 git commit -m "feat: configure daily creation rules"
 ```
 

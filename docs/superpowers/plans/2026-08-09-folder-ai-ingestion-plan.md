@@ -33,13 +33,13 @@ Tech Stack: FastAPI, SQLAlchemy async, PostgreSQL, Next.js/React, TypeScript, Vi
 
 ### Frontend
 
-- Modify: wemedia-studio/lib/api/assets.ts — 文件夹规则类型和保存 API。
-- Modify: wemedia-studio/lib/api/x.ts — ingestion_directory_ids 类型和订阅输入。
-- Modify: wemedia-studio/app/assets/AssetsClient.tsx — 文件夹新增/编辑对话框中的 AI 配置。
-- Modify: wemedia-studio/app/assets/AssetDirectoryRail.tsx — 可选的 AI 规则状态标识。
-- Modify: wemedia-studio/app/x/XSubscriptionDialog.tsx — 多文件夹选择，删除旧内嵌规则编辑器。
-- Modify: wemedia-studio/app/x/XClient.test.tsx, wemedia-studio/app/x/XSubscriptionDialog.test.tsx, wemedia-studio/app/assets/AssetsClient.test.tsx。
-- Modify: wemedia-studio/lib/ai/topic-source-job.ts, wemedia-studio/lib/ai/topic-source-job.test.ts — 合并提示词和单目录分类协议。
+- Modify: web/lib/api/assets.ts — 文件夹规则类型和保存 API。
+- Modify: web/lib/api/x.ts — ingestion_directory_ids 类型和订阅输入。
+- Modify: web/app/assets/AssetsClient.tsx — 文件夹新增/编辑对话框中的 AI 配置。
+- Modify: web/app/assets/AssetDirectoryRail.tsx — 可选的 AI 规则状态标识。
+- Modify: web/app/x/XSubscriptionDialog.tsx — 多文件夹选择，删除旧内嵌规则编辑器。
+- Modify: web/app/x/XClient.test.tsx, web/app/x/XSubscriptionDialog.test.tsx, web/app/assets/AssetsClient.test.tsx。
+- Modify: web/lib/ai/topic-source-job.ts, web/lib/ai/topic-source-job.test.ts — 合并提示词和单目录分类协议。
 
 ## Task 1: Durable schema and old-data migration
 
@@ -169,7 +169,7 @@ Run the same focused backend command and confirm one merged job and single-folde
 
 ## Task 5: AI worker classification protocol
 
-Files: wemedia-studio/lib/ai/topic-source-job.ts, wemedia-studio/lib/ai/topic-source-job.test.ts。
+Files: web/lib/ai/topic-source-job.ts, web/lib/ai/topic-source-job.test.ts。
 
 Interfaces:
 
@@ -186,7 +186,7 @@ Test valid JSON, non-integer directory rejection, duplicate tweet classification
 
 - [ ] Step 2: Verify RED
 
-Run cd wemedia-studio && pnpm exec vitest run lib/ai/topic-source-job.test.ts. New parser/instruction assertions must fail because the worker expects accepted_tweet_ids.
+Run cd web && pnpm exec vitest run lib/ai/topic-source-job.test.ts. New parser/instruction assertions must fail because the worker expects accepted_tweet_ids.
 
 - [ ] Step 3: Implement the new path with legacy fallback
 
@@ -198,7 +198,7 @@ Run the same Vitest command and confirm all selected worker tests pass.
 
 ## Task 6: Assets folder rule UI
 
-Files: wemedia-studio/lib/api/assets.ts, wemedia-studio/app/assets/AssetsClient.tsx, wemedia-studio/app/assets/AssetDirectoryRail.tsx, wemedia-studio/app/assets/AssetsClient.test.tsx。
+Files: web/lib/api/assets.ts, web/app/assets/AssetsClient.tsx, web/app/assets/AssetDirectoryRail.tsx, web/app/assets/AssetsClient.test.tsx。
 
 Interfaces:
 
@@ -211,7 +211,7 @@ Assert article-folder edit shows enable/keyword/prompt controls, saving calls th
 
 - [ ] Step 2: Verify RED
 
-Run cd wemedia-studio && pnpm exec vitest run app/assets/AssetsClient.test.tsx. New assertions must fail.
+Run cd web && pnpm exec vitest run app/assets/AssetsClient.test.tsx. New assertions must fail.
 
 - [ ] Step 3: Implement folder configuration
 
@@ -219,11 +219,11 @@ Extend directory dialog state from existing directory payloads, render AI contro
 
 - [ ] Step 4: Verify GREEN and lint
 
-Run the focused Vitest command, then cd wemedia-studio && pnpm exec eslint app/assets/AssetsClient.tsx app/assets/AssetDirectoryRail.tsx lib/api/assets.ts.
+Run the focused Vitest command, then cd web && pnpm exec eslint app/assets/AssetsClient.tsx app/assets/AssetDirectoryRail.tsx lib/api/assets.ts.
 
 ## Task 7: X multi-folder selector UI
 
-Files: wemedia-studio/lib/api/x.ts, wemedia-studio/app/x/XSubscriptionDialog.tsx, wemedia-studio/app/x/XClient.tsx, wemedia-studio/app/x/XSubscriptionDialog.test.tsx, wemedia-studio/app/x/XClient.test.tsx。
+Files: web/lib/api/x.ts, web/app/x/XSubscriptionDialog.tsx, web/app/x/XClient.tsx, web/app/x/XSubscriptionDialog.test.tsx, web/app/x/XClient.test.tsx。
 
 Interfaces:
 
@@ -237,7 +237,7 @@ Mock two enabled folders and one unavailable folder. Assert enabled folders are 
 
 - [ ] Step 2: Verify RED
 
-Run cd wemedia-studio && pnpm exec vitest run app/x/XSubscriptionDialog.test.tsx app/x/XClient.test.tsx. New assertions must fail because the dialog still uses TopicSourceRule.
+Run cd web && pnpm exec vitest run app/x/XSubscriptionDialog.test.tsx app/x/XClient.test.tsx. New assertions must fail because the dialog still uses TopicSourceRule.
 
 - [ ] Step 3: Implement the selector
 
@@ -245,7 +245,7 @@ Load listCreativeAssetDirectories('article') when the dialog opens. Remove old t
 
 - [ ] Step 4: Verify GREEN and lint
 
-Run the focused Vitest command, then cd wemedia-studio && pnpm exec eslint app/x/XSubscriptionDialog.tsx app/x/XClient.tsx lib/api/x.ts.
+Run the focused Vitest command, then cd web && pnpm exec eslint app/x/XSubscriptionDialog.tsx app/x/XClient.tsx lib/api/x.ts.
 
 ## Task 8: Focused integration verification
 
@@ -266,7 +266,7 @@ Expected: selected tests pass; unrelated baseline failures are reported separate
 - [ ] Step 2: Run focused frontend verification
 
 ~~~bash
-cd wemedia-studio && pnpm exec vitest run \
+cd web && pnpm exec vitest run \
   lib/ai/topic-source-job.test.ts \
   app/assets/AssetsClient.test.tsx \
   app/x/XSubscriptionDialog.test.tsx \

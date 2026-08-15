@@ -22,7 +22,7 @@
 - Historical comment-related rows may remain read-only and hidden from new controls; the first migration must not destructively delete them.
 - Existing selected-item and creation-session identity guards remain in place across list refreshes and async responses.
 - New destination requests must verify the current successful `analysis_run_id` and be idempotent for the same item and destination.
-- Backend tests run from `backend/` with `/home/violet/miniconda3/envs/wems/bin/python -m pytest`; frontend commands run from `wemedia-studio/` with `pnpm`.
+- Backend tests run from `backend/` with `/home/violet/miniconda3/envs/wems/bin/python -m pytest`; frontend commands run from `web/` with `pnpm`.
 
 ---
 
@@ -43,31 +43,31 @@
 - `backend/tests/test_responses_worker_context.py` — assert source payloads remain complete for X and YouTube.
 - `backend/tests/test_x_router.py` — assert new X collection dispatches the unified analysis flow.
 - `backend/tests/test_x_notify_scout.py` — remove assertions for new comment-response scheduling and cover unified reconciliation behavior.
-- `wemedia-studio/lib/api/responses.ts` — replace old decision/output types with Intelligence Station types and destination methods.
-- `wemedia-studio/lib/ai/content-response-job.ts` — replace `discussion_value` and comment-oriented output fields with editorial value fields.
-- `wemedia-studio/lib/ai/content-response-job.test.ts` — test the revised Zod contract and prompt example.
-- `wemedia-studio/app/responses/page.tsx` — pass status, type, sort, and selected query state into the client.
-- `wemedia-studio/app/responses/ResponsesClient.tsx` — orchestrate filters, selected-item identity, source/evaluation panes, direct not-processed/reset actions, and dialogs.
-- `wemedia-studio/app/responses/ResponsesClient.test.tsx` — replace old creation-task tests with source pane, filter, dialog, handoff, and race-condition tests.
-- `wemedia-studio/components/features/Sidebar.tsx` — rename the navigation item to `情报站`.
-- `wemedia-studio/app/x-responses/x-responses-layout.test.tsx` — assert the compatibility route and new navigation wording.
-- `wemedia-studio/app/assets/page.tsx` — accept an optional selected asset query parameter.
-- `wemedia-studio/app/assets/AssetsClient.tsx` — honor the selected article asset when opened from an Intelligence Station handoff.
-- `wemedia-studio/app/drafts/page.tsx` — retain and verify the existing `draft` query handoff.
+- `web/lib/api/responses.ts` — replace old decision/output types with Intelligence Station types and destination methods.
+- `web/lib/ai/content-response-job.ts` — replace `discussion_value` and comment-oriented output fields with editorial value fields.
+- `web/lib/ai/content-response-job.test.ts` — test the revised Zod contract and prompt example.
+- `web/app/responses/page.tsx` — pass status, type, sort, and selected query state into the client.
+- `web/app/responses/ResponsesClient.tsx` — orchestrate filters, selected-item identity, source/evaluation panes, direct not-processed/reset actions, and dialogs.
+- `web/app/responses/ResponsesClient.test.tsx` — replace old creation-task tests with source pane, filter, dialog, handoff, and race-condition tests.
+- `web/components/features/Sidebar.tsx` — rename the navigation item to `情报站`.
+- `web/app/x-responses/x-responses-layout.test.tsx` — assert the compatibility route and new navigation wording.
+- `web/app/assets/page.tsx` — accept an optional selected asset query parameter.
+- `web/app/assets/AssetsClient.tsx` — honor the selected article asset when opened from an Intelligence Station handoff.
+- `web/app/drafts/page.tsx` — retain and verify the existing `draft` query handoff.
 
 ### Create
 
 - `backend/content_response_handoff.py` — deterministic draft/asset seed builders and locked idempotent destination creation.
 - `backend/tests/test_content_response_handoff.py` — test draft seed, creative-asset snapshot, duplicate submission, stale analysis, and failed-source behavior.
 - `backend/tests/test_responses_router.py` — API integration tests for list/detail/filter/classification/destination behavior.
-- `wemedia-studio/app/responses/ResponseSourcePane.tsx` — complete original source reader with its own scroll container.
-- `wemedia-studio/app/responses/ResponseEvaluationPane.tsx` — first-screen editorial evaluation and expandable dimensions/history.
-- `wemedia-studio/app/responses/ResponseDestinationDialog.tsx` — centered draft/creative-asset confirmation dialog with retry-safe submission.
-- `wemedia-studio/e2e/intelligence-station.spec.ts` — browser acceptance coverage for X/YouTube triage and destination handoff.
+- `web/app/responses/ResponseSourcePane.tsx` — complete original source reader with its own scroll container.
+- `web/app/responses/ResponseEvaluationPane.tsx` — first-screen editorial evaluation and expandable dimensions/history.
+- `web/app/responses/ResponseDestinationDialog.tsx` — centered draft/creative-asset confirmation dialog with retry-safe submission.
+- `web/e2e/intelligence-station.spec.ts` — browser acceptance coverage for X/YouTube triage and destination handoff.
 
 ### Leave as compatibility-only
 
-- `backend/x_response_service.py`, `backend/routers/x_responses.py`, `wemedia-studio/lib/api/x-responses.ts`, and `wemedia-studio/app/x-responses/XResponsesClient.tsx` remain available only for historical/legacy compatibility during this rollout. They are no longer an entry point for new collection jobs, and the unified Intelligence Station must not render their comment controls or create their output rows.
+- `backend/x_response_service.py`, `backend/routers/x_responses.py`, `web/lib/api/x-responses.ts`, and `web/app/x-responses/XResponsesClient.tsx` remain available only for historical/legacy compatibility during this rollout. They are no longer an entry point for new collection jobs, and the unified Intelligence Station must not render their comment controls or create their output rows.
 
 ---
 
@@ -161,8 +161,8 @@ git commit -m "feat: add intelligence station persistence contract"
 
 **Files:**
 - Modify: `backend/content_response_service.py:25-86, 203-290`
-- Modify: `wemedia-studio/lib/ai/content-response-job.ts:19-139, 182-240`
-- Modify: `wemedia-studio/lib/ai/content-response-job.test.ts`
+- Modify: `web/lib/ai/content-response-job.ts:19-139, 182-240`
+- Modify: `web/lib/ai/content-response-job.test.ts`
 - Modify: `backend/tests/test_content_response_service.py`
 
 **Interfaces:**
@@ -214,7 +214,7 @@ it('does not accept the removed discussion dimension', () => {
 })
 ```
 
-Run: `cd wemedia-studio && pnpm exec vitest run lib/ai/content-response-job.test.ts`
+Run: `cd web && pnpm exec vitest run lib/ai/content-response-job.test.ts`
 
 Expected: FAIL until the schema is changed.
 
@@ -237,12 +237,12 @@ Run: `cd backend && /home/violet/miniconda3/envs/wems/bin/python -m pytest tests
 - [ ] **Step 6: Run both focused suites and commit.**
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm exec vitest run lib/ai/content-response-job.test.ts
 cd ../backend
 /home/violet/miniconda3/envs/wems/bin/python -m pytest tests/test_content_response_service.py -q
 cd ..
-git add backend/content_response_service.py backend/tests/test_content_response_service.py wemedia-studio/lib/ai/content-response-job.ts wemedia-studio/lib/ai/content-response-job.test.ts
+git add backend/content_response_service.py backend/tests/test_content_response_service.py web/lib/ai/content-response-job.ts web/lib/ai/content-response-job.test.ts
 git commit -m "feat: replace response analysis with editorial value contract"
 ```
 
@@ -394,15 +394,15 @@ git commit -m "feat: add intelligence station source and destination APIs"
 ## Task 5: Replace frontend response types and build the source-first workbench
 
 **Files:**
-- Create: `wemedia-studio/app/responses/ResponseSourcePane.tsx`
-- Create: `wemedia-studio/app/responses/ResponseEvaluationPane.tsx`
-- Create: `wemedia-studio/app/responses/ResponseDestinationDialog.tsx`
-- Modify: `wemedia-studio/lib/api/responses.ts`
-- Modify: `wemedia-studio/app/responses/page.tsx`
-- Modify: `wemedia-studio/app/responses/ResponsesClient.tsx`
-- Modify: `wemedia-studio/app/responses/ResponsesClient.test.tsx`
-- Modify: `wemedia-studio/components/features/Sidebar.tsx`
-- Modify: `wemedia-studio/app/x-responses/x-responses-layout.test.tsx`
+- Create: `web/app/responses/ResponseSourcePane.tsx`
+- Create: `web/app/responses/ResponseEvaluationPane.tsx`
+- Create: `web/app/responses/ResponseDestinationDialog.tsx`
+- Modify: `web/lib/api/responses.ts`
+- Modify: `web/app/responses/page.tsx`
+- Modify: `web/app/responses/ResponsesClient.tsx`
+- Modify: `web/app/responses/ResponsesClient.test.tsx`
+- Modify: `web/components/features/Sidebar.tsx`
+- Modify: `web/app/x-responses/x-responses-layout.test.tsx`
 
 **Interfaces:**
 - `ResponseDisposition = 'pending' | 'worth_writing' | 'creative_asset' | 'not_processed'`.
@@ -451,7 +451,7 @@ Change the sidebar label to `情报站`, use the existing `/responses` route, an
 - [ ] **Step 7: Run focused frontend tests and commit the workbench.**
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm exec vitest run app/responses/ResponsesClient.test.tsx app/x-responses/x-responses-layout.test.tsx
 pnpm exec eslint app/responses lib/api/responses.ts components/features/Sidebar.tsx
 cd ..
@@ -464,12 +464,12 @@ git commit -m "feat: build intelligence station source-first workbench"
 ## Task 6: Add centered destination dialogs and open the existing workspaces
 
 **Files:**
-- Modify: `wemedia-studio/app/responses/ResponseDestinationDialog.tsx`
-- Modify: `wemedia-studio/app/responses/ResponsesClient.tsx`
-- Modify: `wemedia-studio/app/responses/ResponsesClient.test.tsx`
-- Modify: `wemedia-studio/app/assets/page.tsx`
-- Modify: `wemedia-studio/app/assets/AssetsClient.tsx`
-- Modify: `wemedia-studio/app/drafts/page.tsx`
+- Modify: `web/app/responses/ResponseDestinationDialog.tsx`
+- Modify: `web/app/responses/ResponsesClient.tsx`
+- Modify: `web/app/responses/ResponsesClient.test.tsx`
+- Modify: `web/app/assets/page.tsx`
+- Modify: `web/app/assets/AssetsClient.tsx`
+- Modify: `web/app/drafts/page.tsx`
 
 **Interfaces:**
 - `ResponseDestinationDialogProps` receives `open`, `destination`, `detail`, `directories`, `busy`, `error`, `onOpenChange`, and `onConfirm`.
@@ -517,7 +517,7 @@ Pass `initialDraftId` from `app/drafts/page.tsx` into `DraftsClient` as already 
 - [ ] **Step 6: Run frontend dialog and workspace tests and commit.**
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm exec vitest run app/responses/ResponsesClient.test.tsx app/assets/AssetsClient.test.tsx app/drafts/DraftsClient.test.tsx
 pnpm exec eslint app/responses app/assets/page.tsx app/assets/AssetsClient.tsx app/drafts/page.tsx
 cd ..
@@ -530,9 +530,9 @@ git commit -m "feat: add intelligence station destination dialogs"
 ## Task 7: Add end-to-end acceptance coverage and remove reachable comment UI
 
 **Files:**
-- Create: `wemedia-studio/e2e/intelligence-station.spec.ts`
-- Modify: `wemedia-studio/app/responses/ResponsesClient.test.tsx`
-- Modify: `wemedia-studio/lib/ai/content-response-job.test.ts`
+- Create: `web/e2e/intelligence-station.spec.ts`
+- Modify: `web/app/responses/ResponsesClient.test.tsx`
+- Modify: `web/lib/ai/content-response-job.test.ts`
 - Modify: `backend/tests/test_x_response_end_to_end.py` only where the old new-flow assumption conflicts with the unified X cutover
 - Modify: `backend/tests/test_content_jobs.py` if old flow registration assertions require marking old jobs as compatibility-only
 
@@ -560,7 +560,7 @@ Run a targeted search over `app/responses`, `lib/api/responses.ts`, and `lib/ai/
 
 ```bash
 cd backend && /home/violet/miniconda3/envs/wems/bin/python -m pytest tests/test_content_response_models.py tests/test_content_response_service.py tests/test_database_content_response_migration.py tests/test_content_response_handoff.py tests/test_responses_router.py tests/test_responses_router_contract.py tests/test_responses_worker_context.py tests/test_x_router.py tests/test_x_notify_scout.py -q
-cd ../wemedia-studio && pnpm exec vitest run app/responses lib/ai/content-response-job.test.ts app/assets/AssetsClient.test.tsx app/drafts/DraftsClient.test.tsx
+cd ../web && pnpm exec vitest run app/responses lib/ai/content-response-job.test.ts app/assets/AssetsClient.test.tsx app/drafts/DraftsClient.test.tsx
 pnpm exec tsc --noEmit --incremental false
 pnpm exec eslint app/responses lib/api/responses.ts lib/ai/content-response-job.ts app/assets/page.tsx app/assets/AssetsClient.tsx app/drafts/page.tsx components/features/Sidebar.tsx
 pnpm exec playwright test e2e/intelligence-station.spec.ts --project=chromium
@@ -570,7 +570,7 @@ pnpm exec playwright test e2e/intelligence-station.spec.ts --project=chromium
 
 ```bash
 cd ..
-git add backend/tests/test_x_response_end_to_end.py backend/tests/test_content_jobs.py wemedia-studio/e2e/intelligence-station.spec.ts wemedia-studio/app/responses/ResponsesClient.test.tsx wemedia-studio/lib/ai/content-response-job.test.ts
+git add backend/tests/test_x_response_end_to_end.py backend/tests/test_content_jobs.py web/e2e/intelligence-station.spec.ts web/app/responses/ResponsesClient.test.tsx web/lib/ai/content-response-job.test.ts
 git commit -m "test: verify intelligence station triage flow"
 ```
 

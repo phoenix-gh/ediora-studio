@@ -24,8 +24,8 @@
 ### Task 1: Tested Bulk Operation Primitives
 
 **Files:**
-- Create: `wemedia-studio/app/drafts/draft-bulk-operations.ts`
-- Create: `wemedia-studio/app/drafts/draft-bulk-operations.test.ts`
+- Create: `web/app/drafts/draft-bulk-operations.ts`
+- Create: `web/app/drafts/draft-bulk-operations.test.ts`
 
 **Interfaces:**
 - Consumes: `Draft` from `@/lib/api/drafts` and an injected `(id: number) => Promise<void>` delete function.
@@ -57,7 +57,7 @@ it('deletes variants before the group root', async () => {
 Run:
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm test app/drafts/draft-bulk-operations.test.ts
 ```
 
@@ -170,7 +170,7 @@ Run:
 
 ```bash
 pnpm test app/drafts/draft-bulk-operations.test.ts
-git add wemedia-studio/app/drafts/draft-bulk-operations.ts wemedia-studio/app/drafts/draft-bulk-operations.test.ts
+git add web/app/drafts/draft-bulk-operations.ts web/app/drafts/draft-bulk-operations.test.ts
 git commit -m "feat: add draft bulk operation runner"
 ```
 
@@ -179,8 +179,8 @@ Expected: all focused tests PASS and only the two task files are committed.
 ### Task 2: Bulk Image Action Dialog
 
 **Files:**
-- Create: `wemedia-studio/app/drafts/BulkImageActionDialog.tsx`
-- Create: `wemedia-studio/app/drafts/BulkImageActionDialog.test.tsx`
+- Create: `web/app/drafts/BulkImageActionDialog.tsx`
+- Create: `web/app/drafts/BulkImageActionDialog.test.tsx`
 
 **Interfaces:**
 - Consumes: `listPublishAccounts`, `CoverStyleEditor`, and `buildCoverStyleFromEditor`.
@@ -257,15 +257,15 @@ Run the focused test. Expected: PASS with no React act warnings or console error
 - [ ] **Step 5: Commit the dialog**
 
 ```bash
-git add wemedia-studio/app/drafts/BulkImageActionDialog.tsx wemedia-studio/app/drafts/BulkImageActionDialog.test.tsx
+git add web/app/drafts/BulkImageActionDialog.tsx web/app/drafts/BulkImageActionDialog.test.tsx
 git commit -m "feat: add draft bulk image dialog"
 ```
 
 ### Task 3: Visible Selection and Bulk Image Dispatch
 
 **Files:**
-- Modify: `wemedia-studio/app/drafts/DraftsClient.tsx:17-50, 130-170, 296-304, 631-748, 1052-1102`
-- Modify: `wemedia-studio/app/drafts/DraftsClient.test.tsx`
+- Modify: `web/app/drafts/DraftsClient.tsx:17-50, 130-170, 296-304, 631-748, 1052-1102`
+- Modify: `web/app/drafts/DraftsClient.test.tsx`
 
 **Interfaces:**
 - Consumes: Task 1's `DraftGroup`, `articleDraftForGroup`, `runBulkOperations`; Task 2's dialog and `BulkImageOptions`; existing `regenerateCover` and `illustrateBody` APIs.
@@ -359,15 +359,15 @@ Add `bulkMode`, `bulkRunning`, `bulkProgress`, and `bulkFailures` state. On subm
 
 ```bash
 pnpm test app/drafts/DraftsClient.test.tsx app/drafts/BulkImageActionDialog.test.tsx app/drafts/draft-bulk-operations.test.ts
-git add wemedia-studio/app/drafts/DraftsClient.tsx wemedia-studio/app/drafts/DraftsClient.test.tsx
+git add web/app/drafts/DraftsClient.tsx web/app/drafts/DraftsClient.test.tsx
 git commit -m "feat: add draft multi-select image actions"
 ```
 
 ### Task 4: Whole-Group Bulk Delete and Full Verification
 
 **Files:**
-- Modify: `wemedia-studio/app/drafts/DraftsClient.tsx:431-466, 631-748, 1052-1069`
-- Modify: `wemedia-studio/app/drafts/DraftsClient.test.tsx`
+- Modify: `web/app/drafts/DraftsClient.tsx:431-466, 631-748, 1052-1069`
+- Modify: `web/app/drafts/DraftsClient.test.tsx`
 
 **Interfaces:**
 - Consumes: Task 1's `deleteDraftGroup` and `runBulkOperations`, existing `deleteDraft`, `getDrafts`, and confirm dialog.
@@ -432,9 +432,9 @@ Expected: all tests pass, ESLint exits zero, and the Next.js production build su
 Run:
 
 ```bash
-git diff --check -- wemedia-studio/app/drafts/DraftsClient.tsx wemedia-studio/app/drafts/DraftsClient.test.tsx wemedia-studio/app/drafts/BulkImageActionDialog.tsx wemedia-studio/app/drafts/BulkImageActionDialog.test.tsx wemedia-studio/app/drafts/draft-bulk-operations.ts wemedia-studio/app/drafts/draft-bulk-operations.test.ts
+git diff --check -- web/app/drafts/DraftsClient.tsx web/app/drafts/DraftsClient.test.tsx web/app/drafts/BulkImageActionDialog.tsx web/app/drafts/BulkImageActionDialog.test.tsx web/app/drafts/draft-bulk-operations.ts web/app/drafts/draft-bulk-operations.test.ts
 git status --short
-git diff -- wemedia-studio/app/drafts/DraftsClient.tsx wemedia-studio/app/drafts/DraftsClient.test.tsx wemedia-studio/app/drafts/BulkImageActionDialog.tsx wemedia-studio/app/drafts/BulkImageActionDialog.test.tsx wemedia-studio/app/drafts/draft-bulk-operations.ts wemedia-studio/app/drafts/draft-bulk-operations.test.ts
+git diff -- web/app/drafts/DraftsClient.tsx web/app/drafts/DraftsClient.test.tsx web/app/drafts/BulkImageActionDialog.tsx web/app/drafts/BulkImageActionDialog.test.tsx web/app/drafts/draft-bulk-operations.ts web/app/drafts/draft-bulk-operations.test.ts
 ```
 
 Confirm no backend, text-video, assets, X, database WAL, or other pre-existing changes are included.
@@ -442,7 +442,7 @@ Confirm no backend, text-video, assets, X, database WAL, or other pre-existing c
 - [ ] **Step 8: Commit the completed deletion integration**
 
 ```bash
-git add wemedia-studio/app/drafts/DraftsClient.tsx wemedia-studio/app/drafts/DraftsClient.test.tsx
+git add web/app/drafts/DraftsClient.tsx web/app/drafts/DraftsClient.test.tsx
 git commit -m "feat: add draft bulk group deletion"
 ```
 

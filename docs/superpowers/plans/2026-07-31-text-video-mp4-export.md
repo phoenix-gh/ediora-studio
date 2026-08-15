@@ -374,14 +374,14 @@ git commit -m "feat: commit text video render outputs"
 ### Task 4: Remotion Worker Runner and Production Browser
 
 **Files:**
-- Modify: `wemedia-studio/package.json`
-- Modify: `wemedia-studio/pnpm-lock.yaml`
-- Modify: `wemedia-studio/Dockerfile`
+- Modify: `web/package.json`
+- Modify: `web/pnpm-lock.yaml`
+- Modify: `web/Dockerfile`
 - Modify: `docker-compose.yml`
-- Create: `wemedia-studio/lib/ai/text-video-render-job.ts`
-- Create: `wemedia-studio/lib/ai/text-video-render-job.test.ts`
-- Modify: `wemedia-studio/scripts/content-worker.ts`
-- Modify: `wemedia-studio/scripts/content-worker.test.ts`
+- Create: `web/lib/ai/text-video-render-job.ts`
+- Create: `web/lib/ai/text-video-render-job.test.ts`
+- Modify: `web/scripts/content-worker.ts`
+- Modify: `web/scripts/content-worker.test.ts`
 
 **Interfaces:**
 - Produces: `runTextVideoRenderJob(jobId: number, deps?: RenderDependencies)`
@@ -427,7 +427,7 @@ it('routes text_video_render to the Remotion runner', () => {
 - [ ] **Step 3: Run worker tests and verify RED**
 
 ```bash
-cd wemedia-studio
+cd web
 npm test -- \
   lib/ai/text-video-render-job.test.ts \
   scripts/content-worker.test.ts --reporter=dot
@@ -440,7 +440,7 @@ Expected: module and flow routing are missing.
 Add exact version `4.0.500` for `@remotion/bundler` and `@remotion/renderer`, then run:
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm install --config.minimumReleaseAge=0
 ```
 
@@ -505,28 +505,28 @@ Expected: image build succeeds and `remotion browser ensure` completes.
 - [ ] **Step 9: Commit only Task 4 files**
 
 ```bash
-git add wemedia-studio/package.json wemedia-studio/pnpm-lock.yaml \
-  wemedia-studio/Dockerfile docker-compose.yml \
-  wemedia-studio/lib/ai/text-video-render-job.ts \
-  wemedia-studio/lib/ai/text-video-render-job.test.ts \
-  wemedia-studio/scripts/content-worker.ts \
-  wemedia-studio/scripts/content-worker.test.ts
+git add web/package.json web/pnpm-lock.yaml \
+  web/Dockerfile docker-compose.yml \
+  web/lib/ai/text-video-render-job.ts \
+  web/lib/ai/text-video-render-job.test.ts \
+  web/scripts/content-worker.ts \
+  web/scripts/content-worker.test.ts
 git commit -m "feat: render text videos with remotion worker"
 ```
 
 ### Task 5: Render Controls, Progress, Playback, and Download
 
 **Files:**
-- Modify: `wemedia-studio/lib/api/text-videos.ts`
-- Modify: `wemedia-studio/lib/api/text-videos.test.ts`
-- Modify: `wemedia-studio/app/text-video/useTextVideoProjectActions.ts`
-- Modify: `wemedia-studio/app/text-video/useTextVideoProjectActions.test.tsx`
-- Modify: `wemedia-studio/app/text-video/VideoStage.tsx`
-- Modify: `wemedia-studio/app/text-video/VideoStage.test.tsx`
-- Modify: `wemedia-studio/app/text-video/TextVideoWorkbench.tsx`
-- Modify: `wemedia-studio/app/text-video/TextVideoWorkbench.test.tsx`
-- Modify: `wemedia-studio/app/text-video/TextVideoEditorClient.tsx`
-- Modify: `wemedia-studio/app/text-video/TextVideoEditorClient.test.tsx`
+- Modify: `web/lib/api/text-videos.ts`
+- Modify: `web/lib/api/text-videos.test.ts`
+- Modify: `web/app/text-video/useTextVideoProjectActions.ts`
+- Modify: `web/app/text-video/useTextVideoProjectActions.test.tsx`
+- Modify: `web/app/text-video/VideoStage.tsx`
+- Modify: `web/app/text-video/VideoStage.test.tsx`
+- Modify: `web/app/text-video/TextVideoWorkbench.tsx`
+- Modify: `web/app/text-video/TextVideoWorkbench.test.tsx`
+- Modify: `web/app/text-video/TextVideoEditorClient.tsx`
+- Modify: `web/app/text-video/TextVideoEditorClient.test.tsx`
 
 **Interfaces:**
 - Produces: `renderTextVideo(projectId, revision) -> TextVideoRenderResponse`
@@ -573,7 +573,7 @@ it('offers playback, attachment download, and rerender after success', () => {
 - [ ] **Step 2: Run focused frontend tests and verify RED**
 
 ```bash
-cd wemedia-studio
+cd web
 npm test -- \
   lib/api/text-videos.test.ts \
   app/text-video/useTextVideoProjectActions.test.tsx \
@@ -636,16 +636,16 @@ Run the command from Step 2.
 - [ ] **Step 8: Commit only Task 5 files**
 
 ```bash
-git add wemedia-studio/lib/api/text-videos.ts \
-  wemedia-studio/lib/api/text-videos.test.ts \
-  wemedia-studio/app/text-video/useTextVideoProjectActions.ts \
-  wemedia-studio/app/text-video/useTextVideoProjectActions.test.tsx \
-  wemedia-studio/app/text-video/VideoStage.tsx \
-  wemedia-studio/app/text-video/VideoStage.test.tsx \
-  wemedia-studio/app/text-video/TextVideoWorkbench.tsx \
-  wemedia-studio/app/text-video/TextVideoWorkbench.test.tsx \
-  wemedia-studio/app/text-video/TextVideoEditorClient.tsx \
-  wemedia-studio/app/text-video/TextVideoEditorClient.test.tsx
+git add web/lib/api/text-videos.ts \
+  web/lib/api/text-videos.test.ts \
+  web/app/text-video/useTextVideoProjectActions.ts \
+  web/app/text-video/useTextVideoProjectActions.test.tsx \
+  web/app/text-video/VideoStage.tsx \
+  web/app/text-video/VideoStage.test.tsx \
+  web/app/text-video/TextVideoWorkbench.tsx \
+  web/app/text-video/TextVideoWorkbench.test.tsx \
+  web/app/text-video/TextVideoEditorClient.tsx \
+  web/app/text-video/TextVideoEditorClient.test.tsx
 git commit -m "feat: export and download text video mp4"
 ```
 
@@ -668,14 +668,14 @@ cd backend
 - [ ] **Step 2: Run the complete frontend/worker suite**
 
 ```bash
-cd wemedia-studio
+cd web
 npm test -- --reporter=dot
 ```
 
 - [ ] **Step 3: Run scoped lint and production build**
 
 ```bash
-cd wemedia-studio
+cd web
 npm exec eslint -- \
   lib/ai/text-video-render-job.ts \
   lib/ai/text-video-render-job.test.ts \

@@ -37,8 +37,8 @@ Live smoke testing found that the configured provider's thinking mode rejects fo
 ### Task 1: Response-local Skill activation runtime
 
 **Files:**
-- Modify: `wemedia-studio/lib/ai/global-chat-tools.ts`
-- Modify: `wemedia-studio/lib/ai/global-chat-tools.test.ts`
+- Modify: `web/lib/ai/global-chat-tools.ts`
+- Modify: `web/lib/ai/global-chat-tools.test.ts`
 
 **Interfaces:**
 - Consumes: `listEnabledSkills`, `getEnabledSkill`, `listSkillReferences`, `readSkillReference` from `lib/skills/registry`.
@@ -61,7 +61,7 @@ For automatic mode, execute the real `loadSkill` tool and assert it returns `SKI
 Run:
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm test lib/ai/global-chat-tools.test.ts
 ```
 
@@ -94,7 +94,7 @@ export type ChatSkillRuntime = {
 - [ ] **Step 4: Run the focused test and verify GREEN**
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm test lib/ai/global-chat-tools.test.ts
 ```
 
@@ -103,7 +103,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit the runtime**
 
 ```bash
-git add wemedia-studio/lib/ai/global-chat-tools.ts wemedia-studio/lib/ai/global-chat-tools.test.ts
+git add web/lib/ai/global-chat-tools.ts web/lib/ai/global-chat-tools.test.ts
 git commit -m "feat: add chat skill activation runtime"
 ```
 
@@ -112,8 +112,8 @@ git commit -m "feat: add chat skill activation runtime"
 ### Task 2: State-aware reference preflight and loop budget
 
 **Files:**
-- Modify: `wemedia-studio/lib/ai/chat-loop.ts`
-- Modify: `wemedia-studio/lib/ai/chat-loop.test.ts`
+- Modify: `web/lib/ai/chat-loop.ts`
+- Modify: `web/lib/ai/chat-loop.test.ts`
 
 **Interfaces:**
 - Consumes: `ChatSkillSnapshot` from `global-chat-tools.ts`.
@@ -144,7 +144,7 @@ Also assert that an active Skill with zero references and an active Skill with o
 - [ ] **Step 2: Run the focused test and verify RED**
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm test lib/ai/chat-loop.test.ts
 ```
 
@@ -157,7 +157,7 @@ Use the snapshot, not prompt keyword heuristics. Before the final reserved step,
 - [ ] **Step 4: Run the focused test and verify GREEN**
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm test lib/ai/chat-loop.test.ts
 ```
 
@@ -166,7 +166,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit the loop policy**
 
 ```bash
-git add wemedia-studio/lib/ai/chat-loop.ts wemedia-studio/lib/ai/chat-loop.test.ts
+git add web/lib/ai/chat-loop.ts web/lib/ai/chat-loop.test.ts
 git commit -m "fix: require skill reference preflight"
 ```
 
@@ -175,10 +175,10 @@ git commit -m "fix: require skill reference preflight"
 ### Task 3: Wire manual and automatic activation into the Chat route
 
 **Files:**
-- Modify: `wemedia-studio/app/api/chat/route.ts`
-- Modify: `wemedia-studio/app/api/chat/route.test.ts`
-- Modify: `wemedia-studio/lib/ai/chat-instructions.ts`
-- Modify: `wemedia-studio/lib/ai/chat-instructions.test.ts`
+- Modify: `web/app/api/chat/route.ts`
+- Modify: `web/app/api/chat/route.test.ts`
+- Modify: `web/lib/ai/chat-instructions.ts`
+- Modify: `web/lib/ai/chat-instructions.test.ts`
 
 **Interfaces:**
 - Consumes: `createChatSkillRuntime`, `runtime.snapshot()`, and state-aware `chatToolLoopStep`.
@@ -191,7 +191,7 @@ Test manual context contains full instructions and the reference catalog but not
 - [ ] **Step 2: Run the route tests and verify RED**
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm test app/api/chat/route.test.ts lib/ai/chat-instructions.test.ts
 ```
 
@@ -217,7 +217,7 @@ At the reserved final step, if an active Skill has references but no successful 
 - [ ] **Step 5: Run route tests and verify GREEN**
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm test app/api/chat/route.test.ts lib/ai/chat-instructions.test.ts lib/ai/chat-loop.test.ts lib/ai/global-chat-tools.test.ts
 ```
 
@@ -226,7 +226,7 @@ Expected: PASS.
 - [ ] **Step 6: Commit route integration**
 
 ```bash
-git add wemedia-studio/app/api/chat/route.ts wemedia-studio/app/api/chat/route.test.ts wemedia-studio/lib/ai/chat-instructions.ts wemedia-studio/lib/ai/chat-instructions.test.ts
+git add web/app/api/chat/route.ts web/app/api/chat/route.test.ts web/lib/ai/chat-instructions.ts web/lib/ai/chat-instructions.test.ts
 git commit -m "feat: activate skills automatically in chat"
 ```
 
@@ -235,8 +235,8 @@ git commit -m "feat: activate skills automatically in chat"
 ### Task 4: Strengthen human-social-copy reference routing
 
 **Files:**
-- Modify: `wemedia-studio/skills/human-social-copy/SKILL.md`
-- Modify: `wemedia-studio/lib/skills/bundled-skills.test.ts`
+- Modify: `web/skills/human-social-copy/SKILL.md`
+- Modify: `web/lib/skills/bundled-skills.test.ts`
 
 **Interfaces:**
 - Consumes: mandatory reference-preflight runtime.
@@ -249,7 +249,7 @@ Extend the bundled Skill acceptance test to load the real Skill through the Chat
 - [ ] **Step 2: Run the test and verify RED**
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm test lib/skills/bundled-skills.test.ts
 ```
 
@@ -262,7 +262,7 @@ Rewrite the routing section with `必须读取` rules for finance/earnings, plat
 - [ ] **Step 4: Run the test and verify GREEN**
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm test lib/skills/bundled-skills.test.ts
 ```
 
@@ -271,7 +271,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit the bundled Skill routing update**
 
 ```bash
-git add wemedia-studio/skills/human-social-copy/SKILL.md wemedia-studio/lib/skills/bundled-skills.test.ts
+git add web/skills/human-social-copy/SKILL.md web/lib/skills/bundled-skills.test.ts
 git commit -m "fix: require social copy references"
 ```
 
@@ -289,7 +289,7 @@ git commit -m "fix: require social copy references"
 - [ ] **Step 1: Run focused tests and lint**
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm test lib/ai/global-chat-tools.test.ts lib/ai/chat-loop.test.ts lib/ai/chat-instructions.test.ts app/api/chat/route.test.ts lib/skills/bundled-skills.test.ts lib/skills/registry.test.ts
 pnpm exec eslint lib/ai/global-chat-tools.ts lib/ai/global-chat-tools.test.ts lib/ai/chat-loop.ts lib/ai/chat-loop.test.ts lib/ai/chat-instructions.ts lib/ai/chat-instructions.test.ts app/api/chat/route.ts app/api/chat/route.test.ts lib/skills/bundled-skills.test.ts
 ```
@@ -297,7 +297,7 @@ pnpm exec eslint lib/ai/global-chat-tools.ts lib/ai/global-chat-tools.test.ts li
 - [ ] **Step 2: Run the full frontend suite and TypeScript check**
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm test
 pnpm exec tsc --noEmit
 ```

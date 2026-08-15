@@ -207,6 +207,97 @@ def test_comfyui_role_ready_requires_look_asset(api, monkeypatch):
     assert ready.json()["status"] == "ready"
 
 
+def test_changing_comfyui_look_prompt_clears_look_and_requeues_setup(
+    api, monkeypatch,
+):
+    client, session_factory, router_module = api
+    portrait, voice, environment = _create_media_assets(session_factory)
+    queued = []
+
+    async def capture(job_id: int):
+        queued.append(job_id)
+
+    monkeypatch.setattr(router_module, "enqueue_job", capture)
+    role = client.post(
+        "/api/digital-humans",
+        json={
+            "name": "林晓",
+            "provider": "comfyui",
+            "portrait_asset_id": portrait,
+            "voice_sample_asset_id": voice,
+            "default_environment_asset_id": environment,
+            "look_prompt": "站着面对镜头",
+        },
+    ).json()
+    assert role["look_prompt"] == "站着面对镜头"
+    client.post(
+        f"/api/digital-humans/{role['id']}/worker-progress",
+        headers=_job_headers(role),
+        json={
+            "status": "ready",
+            "look_asset_id": portrait,
+            "provider_state": {"look_asset_id": portrait},
+        },
+    )
+
+    updated = client.patch(
+        f"/api/digital-humans/{role['id']}",
+        json={"look_prompt": "坐在桌前，双手放在键盘上"},
+    )
+
+    assert updated.status_code == 200, updated.text
+    body = updated.json()
+    assert body["look_prompt"] == "坐在桌前，双手放在键盘上"
+    assert body["status"] == "processing"
+    assert body["look_asset_id"] is None
+    assert queued == [role["setup_job_id"], body["setup_job_id"]]
+
+
+def test_changing_comfyui_environment_clears_look_and_requeues_setup(
+    api, monkeypatch,
+):
+    client, session_factory, router_module = api
+    portrait, voice, environment = _create_media_assets(session_factory)
+    _, _, replacement = _create_media_assets(session_factory)
+    queued = []
+
+    async def capture(job_id: int):
+        queued.append(job_id)
+
+    monkeypatch.setattr(router_module, "enqueue_job", capture)
+    role = client.post(
+        "/api/digital-humans",
+        json={
+            "name": "林晓",
+            "provider": "comfyui",
+            "portrait_asset_id": portrait,
+            "voice_sample_asset_id": voice,
+            "default_environment_asset_id": environment,
+        },
+    ).json()
+    client.post(
+        f"/api/digital-humans/{role['id']}/worker-progress",
+        headers=_job_headers(role),
+        json={
+            "status": "ready",
+            "look_asset_id": portrait,
+            "provider_state": {"look_asset_id": portrait},
+        },
+    )
+
+    updated = client.patch(
+        f"/api/digital-humans/{role['id']}",
+        json={"default_environment_asset_id": replacement},
+    )
+
+    assert updated.status_code == 200, updated.text
+    body = updated.json()
+    assert body["status"] == "processing"
+    assert body["look_asset_id"] is None
+    assert "look_asset_id" not in body["provider_state"]
+    assert queued == [role["setup_job_id"], body["setup_job_id"]]
+
+
 def test_create_role_rejects_missing_heygen_configuration(api, monkeypatch):
     client, session_factory, _ = api
     portrait, voice, environment = _create_media_assets(session_factory)

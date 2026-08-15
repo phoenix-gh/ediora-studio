@@ -29,8 +29,8 @@
 - Modify backend/routers/creation_rules.py and backend/daily_creation_service.py: prompt-first API and immutable run snapshots.
 - Modify backend/content_jobs.py: generic job success completes the linked daily run.
 - Modify backend/mcp_server.py: remove DailyCreationPostInput and save_daily_creation_outputs.
-- Modify wemedia-studio/lib/ai/agent-runtime-types.ts and daily-creation-agent-job.ts: generic completion and prompt execution.
-- Create wemedia-studio/app/creation-rules/creation-rule-prompt.ts: deterministic quick prompt generator.
+- Modify web/lib/ai/agent-runtime-types.ts and daily-creation-agent-job.ts: generic completion and prompt execution.
+- Create web/app/creation-rules/creation-rule-prompt.ts: deterministic quick prompt generator.
 - Modify CreationRuleDialog.tsx, CreationRulesPanel.tsx, and API types: prompt-first UI.
 - Update focused backend and frontend tests named in each task.
 
@@ -219,10 +219,10 @@ git commit -m "feat: make scheduled rules prompt first"
 ### Task 3: Generic Scheduled-Agent Execution and Crash-Safe Completion
 
 **Files:**
-- Modify: wemedia-studio/lib/ai/agent-runtime-types.ts:29
-- Modify: wemedia-studio/lib/ai/daily-creation-agent-job.ts
-- Modify: wemedia-studio/lib/ai/daily-creation-agent-job.test.ts
-- Modify: wemedia-studio/lib/ai/daily-creation-agent-integration.test.ts
+- Modify: web/lib/ai/agent-runtime-types.ts:29
+- Modify: web/lib/ai/daily-creation-agent-job.ts
+- Modify: web/lib/ai/daily-creation-agent-job.test.ts
+- Modify: web/lib/ai/daily-creation-agent-integration.test.ts
 
 **Interfaces:**
 - Consumes: DailyCreationAgentContext.rule.prompt.
@@ -260,7 +260,7 @@ Also add tests proving requiredTools is undefined, a finalizing checkpoint recov
 pnpm test -- lib/ai/daily-creation-agent-job.test.ts lib/ai/daily-creation-agent-integration.test.ts
 ~~~
 
-Run from wemedia-studio. Expected: fixed X objective and batch evidence assertions fail.
+Run from web. Expected: fixed X objective and batch evidence assertions fail.
 
 - [ ] **Step 3: Replace daily batch evidence with generic evidence**
 
@@ -302,7 +302,7 @@ Run the Task 3 command again. Expected: zero failures.
 - [ ] **Step 8: Commit Task 3**
 
 ~~~bash
-git add wemedia-studio/lib/ai/agent-runtime-types.ts wemedia-studio/lib/ai/daily-creation-agent-job.ts wemedia-studio/lib/ai/daily-creation-agent-job.test.ts wemedia-studio/lib/ai/daily-creation-agent-integration.test.ts
+git add web/lib/ai/agent-runtime-types.ts web/lib/ai/daily-creation-agent-job.ts web/lib/ai/daily-creation-agent-job.test.ts web/lib/ai/daily-creation-agent-integration.test.ts
 git commit -m "feat: run scheduled tasks from Agent prompts"
 ~~~
 
@@ -393,12 +393,12 @@ git commit -m "refactor: remove daily batch save tool"
 ### Task 5: Editable Prompt UI with Quick Generator
 
 **Files:**
-- Create: wemedia-studio/app/creation-rules/creation-rule-prompt.ts
-- Create: wemedia-studio/app/creation-rules/creation-rule-prompt.test.ts
-- Modify: wemedia-studio/app/creation-rules/CreationRuleDialog.tsx
-- Modify: wemedia-studio/app/creation-rules/CreationRulesPanel.tsx
-- Modify: wemedia-studio/app/creation-rules/CreationRulesClient.test.tsx
-- Modify: wemedia-studio/lib/api/creation-rules.ts
+- Create: web/app/creation-rules/creation-rule-prompt.ts
+- Create: web/app/creation-rules/creation-rule-prompt.test.ts
+- Modify: web/app/creation-rules/CreationRuleDialog.tsx
+- Modify: web/app/creation-rules/CreationRulesPanel.tsx
+- Modify: web/app/creation-rules/CreationRulesClient.test.tsx
+- Modify: web/lib/api/creation-rules.ts
 
 **Interfaces:**
 - Consumes: builder fields represented by DailyCreationRuleInput.
@@ -437,7 +437,7 @@ Add dialog tests proving manual prompt submission works without a directory, the
 pnpm test -- app/creation-rules/creation-rule-prompt.test.ts app/creation-rules/CreationRulesClient.test.tsx
 ~~~
 
-Run from wemedia-studio. Expected: helper and prompt editor are missing.
+Run from web. Expected: helper and prompt editor are missing.
 
 - [ ] **Step 3: Implement the pure generator**
 
@@ -476,7 +476,7 @@ Run the Task 5 command again. Expected: zero failures.
 - [ ] **Step 7: Commit Task 5**
 
 ~~~bash
-git add wemedia-studio/app/creation-rules/creation-rule-prompt.ts wemedia-studio/app/creation-rules/creation-rule-prompt.test.ts wemedia-studio/app/creation-rules/CreationRuleDialog.tsx wemedia-studio/app/creation-rules/CreationRulesPanel.tsx wemedia-studio/app/creation-rules/CreationRulesClient.test.tsx wemedia-studio/lib/api/creation-rules.ts
+git add web/app/creation-rules/creation-rule-prompt.ts web/app/creation-rules/creation-rule-prompt.test.ts web/app/creation-rules/CreationRuleDialog.tsx web/app/creation-rules/CreationRulesPanel.tsx web/app/creation-rules/CreationRulesClient.test.tsx web/lib/api/creation-rules.ts
 git commit -m "feat: add prompt-first scheduled task editor"
 ~~~
 
@@ -505,12 +505,12 @@ Expected: zero failures. PostgreSQL availability failures must be reported separ
 pnpm test -- app/creation-rules lib/ai/daily-creation-agent-job.test.ts lib/ai/daily-creation-agent-integration.test.ts lib/ai/agent-runtime.test.ts scripts/content-worker.test.ts
 ~~~
 
-Run from wemedia-studio. Expected: zero failures.
+Run from web. Expected: zero failures.
 
 - [ ] **Step 3: Verify retired runtime references**
 
 ~~~bash
-rg -n "save_daily_creation_outputs" backend wemedia-studio/lib wemedia-studio/app wemedia-studio/scripts
+rg -n "save_daily_creation_outputs" backend web/lib web/app web/scripts
 ~~~
 
 Expected: no production runtime reference. One explicit historical compatibility fixture is allowed.
@@ -522,7 +522,7 @@ pnpm lint
 pnpm build
 ~~~
 
-Run from wemedia-studio. Expected: both commands exit 0. If sandboxing blocks a required operation, rerun with approval and report the exact limitation.
+Run from web. Expected: both commands exit 0. If sandboxing blocks a required operation, rerun with approval and report the exact limitation.
 
 - [ ] **Step 5: Inspect the final diff**
 

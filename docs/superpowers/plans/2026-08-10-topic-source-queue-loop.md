@@ -17,7 +17,7 @@
 
 ### Task 1: Reproduce malformed historical jobs in tests
 
-**Files:** `backend/tests/test_job_reconciliation.py`, `wemedia-studio/lib/ai/topic-source-job.test.ts`
+**Files:** `backend/tests/test_job_reconciliation.py`, `web/lib/ai/topic-source-job.test.ts`
 
 - Add a backend test for an invalid queued topic-source payload and assert cancellation without enqueue.
 - Add a TypeScript test for missing `rule_id`/merged fields and assert a durable non-retryable step failure.
@@ -25,7 +25,7 @@
 
 ### Task 2: Implement durable terminal handling
 
-**Files:** `backend/job_reconciliation.py`, `backend/topic_source_service.py`, `backend/scheduler.py`, `wemedia-studio/lib/ai/topic-source-job.ts`
+**Files:** `backend/job_reconciliation.py`, `backend/topic_source_service.py`, `backend/scheduler.py`, `web/lib/ai/topic-source-job.ts`
 
 - Validate the two supported topic-source payload shapes in the reconciler.
 - Cancel invalid queued historical jobs with an explicit `job_reconciled` audit action.

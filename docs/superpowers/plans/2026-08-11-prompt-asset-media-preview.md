@@ -22,7 +22,7 @@
 ### Task 1: Add failing coverage for the prompt/media history layout and preview interaction
 
 **Files:**
-- Modify: `wemedia-studio/app/assets/PromptAssetWorkspace.test.tsx`
+- Modify: `web/app/assets/PromptAssetWorkspace.test.tsx`
 
 **Interfaces:**
 - Consumes: existing `PromptAssetWorkspace` props and mocked `PromptGeneration` media result.
@@ -73,7 +73,7 @@ Add a `renderPromptWorkspace(selected = prompt())` helper that renders `PromptAs
 Run:
 
 ```bash
-cd wemedia-studio && pnpm exec vitest run app/assets/PromptAssetWorkspace.test.tsx
+cd web && pnpm exec vitest run app/assets/PromptAssetWorkspace.test.tsx
 ```
 
 Expected: FAIL because the current generation card has no “当前提示词” region, uses `object-cover`, and does not expose an image preview button/dialog.
@@ -81,7 +81,7 @@ Expected: FAIL because the current generation card has no “当前提示词” 
 ### Task 2: Implement the responsive history layout and zoomable image preview
 
 **Files:**
-- Modify: `wemedia-studio/app/assets/PromptAssetWorkspace.tsx`
+- Modify: `web/app/assets/PromptAssetWorkspace.tsx`
 
 **Interfaces:**
 - Consumes: `PromptGeneration`, `CreativeAsset`, `creativeAssetUrl`, existing `Dialog` primitives, and `selected.content`.
@@ -130,7 +130,7 @@ Keep the preview component in `PromptAssetWorkspace.tsx` unless the file becomes
 Run:
 
 ```bash
-cd wemedia-studio && pnpm exec vitest run app/assets/PromptAssetWorkspace.test.tsx
+cd web && pnpm exec vitest run app/assets/PromptAssetWorkspace.test.tsx
 ```
 
 Expected: all prompt workspace tests pass, including the new layout and wheel zoom assertions.
@@ -138,8 +138,8 @@ Expected: all prompt workspace tests pass, including the new layout and wheel zo
 ### Task 3: Run focused frontend verification
 
 **Files:**
-- Verify: `wemedia-studio/app/assets/PromptAssetWorkspace.tsx`
-- Verify: `wemedia-studio/app/assets/PromptAssetWorkspace.test.tsx`
+- Verify: `web/app/assets/PromptAssetWorkspace.tsx`
+- Verify: `web/app/assets/PromptAssetWorkspace.test.tsx`
 
 **Interfaces:**
 - Consumes: the completed prompt asset workspace implementation.
@@ -148,13 +148,13 @@ Expected: all prompt workspace tests pass, including the new layout and wheel zo
 - [ ] **Step 1: Run the focused test file again**
 
 ```bash
-cd wemedia-studio && pnpm exec vitest run app/assets/PromptAssetWorkspace.test.tsx
+cd web && pnpm exec vitest run app/assets/PromptAssetWorkspace.test.tsx
 ```
 
 - [ ] **Step 2: Run the project TypeScript check**
 
 ```bash
-cd wemedia-studio && pnpm exec tsc --noEmit
+cd web && pnpm exec tsc --noEmit
 ```
 
 Record any pre-existing unrelated errors separately; do not broaden the change to fix unrelated type failures.
@@ -168,7 +168,7 @@ git diff --check
 - [ ] **Step 4: Review the final diff**
 
 ```bash
-git diff -- wemedia-studio/app/assets/PromptAssetWorkspace.tsx wemedia-studio/app/assets/PromptAssetWorkspace.test.tsx
+git diff -- web/app/assets/PromptAssetWorkspace.tsx web/app/assets/PromptAssetWorkspace.test.tsx
 ```
 
 Confirm that the diff does not modify API calls, generation polling, upload/attach behavior, or unrelated worktree files.

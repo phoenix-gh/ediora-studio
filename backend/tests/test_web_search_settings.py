@@ -92,7 +92,7 @@ def test_telegram_test_uses_only_saved_credentials_and_persists_success(client, 
     assert captured["token"] == "saved-token"
     assert captured["chat_id"] == "-100123"
     assert len(captured["messages"]) == 1
-    assert "WeMedia Studio Telegram 连接测试成功" in captured["messages"][0]
+    assert "Ediora Telegram 连接测试成功" in captured["messages"][0]
     body = response.json()
     assert body["telegram_test_status"] == "success"
     assert body["telegram_last_tested_at"]

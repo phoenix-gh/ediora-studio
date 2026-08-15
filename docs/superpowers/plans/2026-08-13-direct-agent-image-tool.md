@@ -18,9 +18,9 @@
 ### Task 1: Extract direct image generation service
 
 **Files:**
-- Create: `wemedia-studio/lib/ai/image-generation.ts`
-- Modify: `wemedia-studio/lib/ai/content-job.ts`
-- Test: `wemedia-studio/lib/ai/image-generation.test.ts`
+- Create: `web/lib/ai/image-generation.ts`
+- Modify: `web/lib/ai/content-job.ts`
+- Test: `web/lib/ai/image-generation.test.ts`
 
 - [x] Write a failing test proving a direct call loads image settings, calls the image provider once, uploads one CreativeAsset, and returns the saved asset.
 - [x] Run the focused test and confirm it fails because the service does not exist.
@@ -31,12 +31,12 @@
 ### Task 2: Wire Agent `generateImage` to the direct service
 
 **Files:**
-- Modify: `wemedia-studio/lib/ai/global-chat-tools.ts`
-- Modify: `wemedia-studio/lib/ai/daily-creation-agent-job.ts`
-- Modify: `wemedia-studio/lib/ai/content-response-output-job.ts`
-- Modify: `wemedia-studio/app/api/chat/route.ts`
-- Modify: `wemedia-studio/lib/ai/agent-runtime.ts`
-- Test: `wemedia-studio/lib/ai/global-chat-tools.test.ts`
+- Modify: `web/lib/ai/global-chat-tools.ts`
+- Modify: `web/lib/ai/daily-creation-agent-job.ts`
+- Modify: `web/lib/ai/content-response-output-job.ts`
+- Modify: `web/app/api/chat/route.ts`
+- Modify: `web/lib/ai/agent-runtime.ts`
+- Test: `web/lib/ai/global-chat-tools.test.ts`
 
 - [x] Add a failing tool test asserting `generateImage` invokes the direct host generator and never calls `/jobs`.
 - [x] Replace `ImageJobClient`/HTTP and inline child-job clients with a direct `ImageGenerator` dependency.

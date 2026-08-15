@@ -21,9 +21,9 @@
 | Create | `backend/tests/test_release_drafter.py` | Unit tests for drafter logic |
 | Modify | `backend/scheduler.py` | Call `generate_pending_drafts()` after collect |
 | Modify | `backend/routers/github.py` | PATCH handler uses new `GithubRepoUpdate` fields |
-| Modify | `wemedia-studio/lib/types.ts` | Add new fields to `GithubRelease` and `GithubRepo` interfaces |
-| Modify | `wemedia-studio/lib/api/github.ts` | Extend `updateGithubRepo` body type |
-| Modify | `wemedia-studio/app/github/GithubClient.tsx` | Draft badge on release cards + draft settings in repo dialog |
+| Modify | `web/lib/types.ts` | Add new fields to `GithubRelease` and `GithubRepo` interfaces |
+| Modify | `web/lib/api/github.ts` | Extend `updateGithubRepo` body type |
+| Modify | `web/app/github/GithubClient.tsx` | Draft badge on release cards + draft settings in repo dialog |
 
 ---
 
@@ -41,7 +41,7 @@ conda run -n wems python -c "
 import asyncio, os
 from sqlalchemy.ext.asyncio import create_async_engine
 
-url = os.getenv('WMS_DATABASE_URL', 'postgresql+asyncpg://localhost/wemedia_studio')
+url = os.getenv('WMS_DATABASE_URL', 'postgresql+asyncpg://localhost/ediora')
 
 async def migrate():
     engine = create_async_engine(url)
@@ -885,8 +885,8 @@ git commit -m "feat(scheduler): call generate_pending_drafts after GitHub releas
 ## Task 8: Frontend Types and API
 
 **Files:**
-- Modify: `wemedia-studio/lib/types.ts` (lines 51–101)
-- Modify: `wemedia-studio/lib/api/github.ts` (lines 16–25)
+- Modify: `web/lib/types.ts` (lines 51–101)
+- Modify: `web/lib/api/github.ts` (lines 16–25)
 
 - [ ] **Step 1: Update `GithubRepo` interface** in `lib/types.ts`
 
@@ -978,7 +978,7 @@ export async function updateGithubRepo(
 - [ ] **Step 4: Commit**
 
 ```bash
-git add wemedia-studio/lib/types.ts wemedia-studio/lib/api/github.ts
+git add web/lib/types.ts web/lib/api/github.ts
 git commit -m "feat(frontend): add release draft fields to GithubRepo and GithubRelease types"
 ```
 
@@ -987,7 +987,7 @@ git commit -m "feat(frontend): add release draft fields to GithubRepo and Github
 ## Task 9: Frontend UI
 
 **Files:**
-- Modify: `wemedia-studio/app/github/GithubClient.tsx`
+- Modify: `web/app/github/GithubClient.tsx`
 
 There are two UI changes: (A) draft badge on release cards, (B) draft settings toggles in the repo management dialog.
 
@@ -1094,7 +1094,7 @@ In `GithubClient.tsx`, find the lucide-react import line (near the top) and add 
 - [ ] **Step 5: Verify TypeScript compiles**
 
 ```bash
-cd /workspace/projects/WeMediaStudio/wemedia-studio && source ~/.zshrc && npm run build 2>&1 | tail -20
+cd /workspace/projects/WeMediaStudio/web && source ~/.zshrc && npm run build 2>&1 | tail -20
 ```
 
 Fix any TypeScript errors before committing.
@@ -1102,7 +1102,7 @@ Fix any TypeScript errors before committing.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add wemedia-studio/app/github/GithubClient.tsx
+git add web/app/github/GithubClient.tsx
 git commit -m "feat(ui): add release draft badge and per-repo draft settings to GitHub page"
 ```
 

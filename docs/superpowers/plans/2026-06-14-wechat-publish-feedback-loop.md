@@ -8,7 +8,7 @@
 
 **Tech Stack:** FastAPI + SQLAlchemy async（conda env `wems`，命令加 `conda run -n wems`）、Pydantic v2、pytest（sqlite+aiosqlite）、Next.js App Router + shadcn/ui。
 
-**约定：** 所有 Bash 先 `source ~/.zshrc`；后端命令在 `backend/` 下加 `WMS_DISABLE_SCHEDULER=1 conda run -n wems`；前端在 `wemedia-studio/` 下 `pnpm`。设计见 `docs/superpowers/specs/2026-06-14-wechat-publish-feedback-loop-design.md`。
+**约定：** 所有 Bash 先 `source ~/.zshrc`；后端命令在 `backend/` 下加 `WMS_DISABLE_SCHEDULER=1 conda run -n wems`；前端在 `web/` 下 `pnpm`。设计见 `docs/superpowers/specs/2026-06-14-wechat-publish-feedback-loop-design.md`。
 
 ---
 
@@ -24,9 +24,9 @@
 - `backend/tests/test_published.py` — 新建，路由/模型测试
 - `backend/tests/test_wechat_publish.py` — +发布自动建记录测试
 - `backend/tests/test_mcp_daily_plan_tools.py` — +`get_recent_performance` 测试
-- `wemedia-studio/lib/api/published.ts` — 新建，API 客户端
-- `wemedia-studio/app/published/page.tsx` + `PublishedClient.tsx` — 新建，发布表现页
-- `wemedia-studio/components/features/Sidebar.tsx` — 导航加「发布」
+- `web/lib/api/published.ts` — 新建，API 客户端
+- `web/app/published/page.tsx` + `PublishedClient.tsx` — 新建，发布表现页
+- `web/components/features/Sidebar.tsx` — 导航加「发布」
 
 ---
 
@@ -580,11 +580,11 @@ git commit -m "feat(publish-feedback): 总编选题前读 get_recent_performance
 ## Task 6: 前端 API 客户端 published.ts
 
 **Files:**
-- Create: `wemedia-studio/lib/api/published.ts`
+- Create: `web/lib/api/published.ts`
 
 - [ ] **Step 1: 写客户端**
 
-新建 `wemedia-studio/lib/api/published.ts`：
+新建 `web/lib/api/published.ts`：
 
 ```typescript
 import { apiFetch } from './client'
@@ -631,13 +631,13 @@ export function deletePublication(id: number): Promise<void> {
 
 - [ ] **Step 2: 类型检查**
 
-Run: `cd wemedia-studio && pnpm exec tsc --noEmit`
+Run: `cd web && pnpm exec tsc --noEmit`
 Expected: 无错误输出
 
 - [ ] **Step 3: Commit**
 
 ```bash
-git add wemedia-studio/lib/api/published.ts
+git add web/lib/api/published.ts
 git commit -m "feat(publish-feedback): 前端 published API 客户端"
 ```
 
@@ -646,12 +646,12 @@ git commit -m "feat(publish-feedback): 前端 published API 客户端"
 ## Task 7: 前端 /published 页（录入 + 表现榜）
 
 **Files:**
-- Create: `wemedia-studio/app/published/page.tsx`
-- Create: `wemedia-studio/app/published/PublishedClient.tsx`
+- Create: `web/app/published/page.tsx`
+- Create: `web/app/published/PublishedClient.tsx`
 
 - [ ] **Step 1: 服务端页面**
 
-新建 `wemedia-studio/app/published/page.tsx`：
+新建 `web/app/published/page.tsx`：
 
 ```tsx
 import { getPublications } from '@/lib/api/published'
@@ -675,7 +675,7 @@ export default async function PublishedPage() {
 
 - [ ] **Step 2: 客户端组件**
 
-新建 `wemedia-studio/app/published/PublishedClient.tsx`：
+新建 `web/app/published/PublishedClient.tsx`：
 
 ```tsx
 'use client'
@@ -790,13 +790,13 @@ export function PublishedClient({ initial }: { initial: Publication[] }) {
 
 - [ ] **Step 3: 类型检查**
 
-Run: `cd wemedia-studio && pnpm exec tsc --noEmit`
+Run: `cd web && pnpm exec tsc --noEmit`
 Expected: 无错误输出（若报 `Input`/`Button` 路径错，确认 `components/ui/input` 与 `components/ui/button` 存在——它们在别处已被引用）
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add wemedia-studio/app/published/
+git add web/app/published/
 git commit -m "feat(publish-feedback): /published 发布表现页"
 ```
 
@@ -805,11 +805,11 @@ git commit -m "feat(publish-feedback): /published 发布表现页"
 ## Task 8: 侧边栏导航加「发布」
 
 **Files:**
-- Modify: `wemedia-studio/components/features/Sidebar.tsx`
+- Modify: `web/components/features/Sidebar.tsx`
 
 - [ ] **Step 1: 加图标 import**
 
-`wemedia-studio/components/features/Sidebar.tsx` 顶部 lucide 引入里加 `Send`：把
+`web/components/features/Sidebar.tsx` 顶部 lucide 引入里加 `Send`：把
 
 ```tsx
   PlaySquare, Rocket, MessageSquare, Globe, Flame, Gem, Bot, UserCog, Hash, Lightbulb, CalendarCheck,
@@ -838,13 +838,13 @@ git commit -m "feat(publish-feedback): /published 发布表现页"
 
 - [ ] **Step 3: 类型检查**
 
-Run: `cd wemedia-studio && pnpm exec tsc --noEmit`
+Run: `cd web && pnpm exec tsc --noEmit`
 Expected: 无错误输出
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add wemedia-studio/components/features/Sidebar.tsx
+git add web/components/features/Sidebar.tsx
 git commit -m "feat(publish-feedback): 侧边栏加「发布」入口"
 ```
 
@@ -853,7 +853,7 @@ git commit -m "feat(publish-feedback): 侧边栏加「发布」入口"
 ## 收尾验证
 
 - [ ] **后端全量**：`cd backend && WMS_DISABLE_SCHEDULER=1 conda run -n wems python -m pytest -q --tb=no -p no:cacheprovider` —— 新增 test_published / 发布钩子 / get_recent_performance 全绿；既存 12 个失败不变（writing_plans/wechat_publish/ref flake，参 [[feedback_preexisting_test_failures]]，多为隔离污染，单文件跑均过）。
-- [ ] **前端**：`cd wemedia-studio && pnpm exec tsc --noEmit` 零错误。
+- [ ] **前端**：`cd web && pnpm exec tsc --noEmit` 零错误。
 - [ ] **手动冒烟**：起后端 + 前端，发布一篇到公众号 → /published 出现一条草稿箱记录 → 标已发布 + 填阅读量 → 保存 → 刷新仍在、按阅读排序。
 
 ---

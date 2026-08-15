@@ -137,7 +137,7 @@ Run `npm test` from `chrome-extension/` and expect all plugin test files to pass
 **Files:**
 - Modify: `chrome-extension/content/workbench-runtime.js`
 - Modify: `chrome-extension/README.md`
-- Create: `wemedia-studio/e2e/extension-auto-schedule.spec.ts`
+- Create: `web/e2e/extension-auto-schedule.spec.ts`
 
 **Interfaces:**
 - Consumes `scheduleMemory.readAutoFillEnabled()` and `scheduleMemory.setAutoFillEnabled(enabled)`.
@@ -151,7 +151,7 @@ The test must also assert no page error or console warning/error occurs.
 
 - [ ] **Step 2: Run the Chromium test and verify RED**
 
-Run from `wemedia-studio/`:
+Run from `web/`:
 
 ```bash
 pnpm exec playwright test e2e/extension-auto-schedule.spec.ts --project=chromium
@@ -183,7 +183,7 @@ cd chrome-extension
 npm test
 node --check content/schedule-memory.js
 node --check content/workbench-runtime.js
-cd ../wemedia-studio
+cd ../web
 pnpm exec playwright test e2e/extension-auto-schedule.spec.ts e2e/extension-workbench-layout.spec.ts --project=chromium
 pnpm exec eslint e2e/extension-auto-schedule.spec.ts e2e/extension-workbench-layout.spec.ts
 ```
@@ -193,6 +193,6 @@ Then run `git diff --check` from the repository root. Expected: all commands pas
 - [ ] **Step 6: Commit the implementation**
 
 ```bash
-git add chrome-extension/content/schedule-memory.js chrome-extension/content/workbench-runtime.js chrome-extension/tests/schedule-memory.test.js chrome-extension/README.md wemedia-studio/e2e/extension-auto-schedule.spec.ts
+git add chrome-extension/content/schedule-memory.js chrome-extension/content/workbench-runtime.js chrome-extension/tests/schedule-memory.test.js chrome-extension/README.md web/e2e/extension-auto-schedule.spec.ts
 git commit -m "feat: auto-fill the next X schedule time"
 ```

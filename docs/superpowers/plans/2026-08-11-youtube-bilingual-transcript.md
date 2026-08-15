@@ -21,8 +21,8 @@
 ### Task 1: 时间轴对齐与复制文本
 
 **Files:**
-- Modify: `wemedia-studio/app/youtube/YoutubeTranscriptDialog.tsx`
-- Test: `wemedia-studio/app/youtube/YoutubeTranscriptDialog.test.tsx`
+- Modify: `web/app/youtube/YoutubeTranscriptDialog.tsx`
+- Test: `web/app/youtube/YoutubeTranscriptDialog.test.tsx`
 
 **Interfaces:**
 - Consumes: `YoutubeTranscriptSegment[]` 原文与中文字幕数组。
@@ -36,7 +36,7 @@
 
 - [x] **Step 2: Run tests and verify RED**
 
-Run: `cd wemedia-studio && pnpm exec vitest run app/youtube/YoutubeTranscriptDialog.test.tsx`
+Run: `cd web && pnpm exec vitest run app/youtube/YoutubeTranscriptDialog.test.tsx`
 
 Expected: FAIL because `alignBilingualSegments` and `formatBilingualTranscript` are not exported.
 
@@ -46,15 +46,15 @@ Expected: FAIL because `alignBilingualSegments` and `formatBilingualTranscript` 
 
 - [x] **Step 4: Run tests and verify GREEN**
 
-Run: `cd wemedia-studio && pnpm exec vitest run app/youtube/YoutubeTranscriptDialog.test.tsx`
+Run: `cd web && pnpm exec vitest run app/youtube/YoutubeTranscriptDialog.test.tsx`
 
 Expected: pure-function tests pass.
 
 ### Task 2: 三模式展示与复制
 
 **Files:**
-- Modify: `wemedia-studio/app/youtube/YoutubeTranscriptDialog.tsx`
-- Test: `wemedia-studio/app/youtube/YoutubeTranscriptDialog.test.tsx`
+- Modify: `web/app/youtube/YoutubeTranscriptDialog.tsx`
+- Test: `web/app/youtube/YoutubeTranscriptDialog.test.tsx`
 
 **Interfaces:**
 - Consumes: Task 1 的 `alignBilingualSegments()` 和 `formatBilingualTranscript()`。
@@ -66,7 +66,7 @@ Expected: pure-function tests pass.
 
 - [x] **Step 2: Run tests and verify RED**
 
-Run: `cd wemedia-studio && pnpm exec vitest run app/youtube/YoutubeTranscriptDialog.test.tsx`
+Run: `cd web && pnpm exec vitest run app/youtube/YoutubeTranscriptDialog.test.tsx`
 
 Expected: FAIL because the bilingual control and view do not exist.
 
@@ -76,12 +76,12 @@ Expected: FAIL because the bilingual control and view do not exist.
 
 - [x] **Step 4: Run focused tests and lint**
 
-Run: `cd wemedia-studio && pnpm exec vitest run app/youtube/YoutubeTranscriptDialog.test.tsx app/youtube/YoutubeClient.test.tsx`
+Run: `cd web && pnpm exec vitest run app/youtube/YoutubeTranscriptDialog.test.tsx app/youtube/YoutubeClient.test.tsx`
 
-Run: `cd wemedia-studio && pnpm exec eslint app/youtube/YoutubeTranscriptDialog.tsx app/youtube/YoutubeTranscriptDialog.test.tsx`
+Run: `cd web && pnpm exec eslint app/youtube/YoutubeTranscriptDialog.tsx app/youtube/YoutubeTranscriptDialog.test.tsx`
 
 Expected: all tests pass and ESLint exits 0.
 
 - [x] **Step 5: Check patch hygiene**
 
-Run: `git diff --check -- wemedia-studio/app/youtube/YoutubeTranscriptDialog.tsx wemedia-studio/app/youtube/YoutubeTranscriptDialog.test.tsx docs/superpowers/plans/2026-08-11-youtube-bilingual-transcript.md`
+Run: `git diff --check -- web/app/youtube/YoutubeTranscriptDialog.tsx web/app/youtube/YoutubeTranscriptDialog.test.tsx docs/superpowers/plans/2026-08-11-youtube-bilingual-transcript.md`

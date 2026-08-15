@@ -21,7 +21,7 @@
 首版不做视频抽帧和视觉理解。参考
 [`bradautomates/claude-video`](https://github.com/bradautomates/claude-video)
 的字幕优先、VTT 时间戳解析、YouTube 滚动字幕去重和 Whisper 兜底经验，但在
-WeMediaStudio 中实现为持久化领域流程，而不是临时命令行 Skill。
+Ediora 中实现为持久化领域流程，而不是临时命令行 Skill。
 
 ## 2. 已确认的产品决策
 

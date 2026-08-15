@@ -75,8 +75,8 @@ Expected: all selected tests pass, including the existing single-directory migra
 ### Task 2: Include the supplemental requirement in the AI request
 
 **Files:**
-- Modify: `wemedia-studio/lib/ai/topic-source-job.ts`
-- Test: `wemedia-studio/lib/ai/topic-source-job.test.ts`
+- Modify: `web/lib/ai/topic-source-job.ts`
+- Test: `web/lib/ai/topic-source-job.test.ts`
 
 **Interfaces:**
 - Candidate context rule shape: `{ directory: string; keywords: string[]; screening_prompt: string }`.
@@ -91,7 +91,7 @@ Add tests asserting the helper includes a configured supplemental requirement, c
 Run:
 
 ```bash
-cd wemedia-studio && pnpm exec vitest run lib/ai/topic-source-job.test.ts
+cd web && pnpm exec vitest run lib/ai/topic-source-job.test.ts
 ```
 
 Expected: FAIL because the helper does not exist.
@@ -107,9 +107,9 @@ Run the command from Step 2. Expected: all topic-source worker tests pass.
 ### Task 3: Add the setting to the X configuration dialog
 
 **Files:**
-- Modify: `wemedia-studio/lib/api/assets.ts:16-19`
-- Modify: `wemedia-studio/app/x/XClient.tsx:22,539-582,830-855`
-- Test: `wemedia-studio/app/x/XClient.test.tsx`
+- Modify: `web/lib/api/assets.ts:16-19`
+- Modify: `web/app/x/XClient.tsx:22,539-582,830-855`
+- Test: `web/app/x/XClient.test.tsx`
 
 **Interfaces:**
 - `TopicSourceRule` includes `screening_prompt: string`.
@@ -125,7 +125,7 @@ Add a test fixture with a rule containing `screening_prompt`, open the configura
 Run:
 
 ```bash
-cd wemedia-studio && pnpm exec vitest run app/x/XClient.test.tsx
+cd web && pnpm exec vitest run app/x/XClient.test.tsx
 ```
 
 Expected: FAIL because the API type, dialog state, and field are not present.
@@ -155,15 +155,15 @@ Run the command from Step 2. Expected: all X client tests pass.
 - [ ] **Step 2: Run the complete focused frontend X suite**
 
 ```bash
-cd wemedia-studio && pnpm exec vitest run app/x lib/ai/topic-source-job.test.ts
+cd web && pnpm exec vitest run app/x lib/ai/topic-source-job.test.ts
 ```
 
 - [ ] **Step 3: Inspect the final diff**
 
 ```bash
 git diff -- backend/models.py backend/routers/assets.py backend/database.py \
-  wemedia-studio/lib/ai/topic-source-job.ts \
-  wemedia-studio/lib/api/assets.ts wemedia-studio/app/x/XClient.tsx
+  web/lib/ai/topic-source-job.ts \
+  web/lib/api/assets.ts web/app/x/XClient.tsx
 ```
 
 Confirm that only the new rule field, migration, worker prompt boundary, dialog, and their tests are included; do not stage or alter unrelated worktree files.

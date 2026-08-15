@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
+from collection_proxy import collection_client_kwargs
 from models import YoutubeChannel, YoutubeVideo
 
 
@@ -79,7 +80,10 @@ async def fetch_channel_feed(channel_id: str) -> dict:
 
     Returns {"name", "avatar_url", "description", "description_cn", "videos"}.
     """
-    async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
+    async with httpx.AsyncClient(**await collection_client_kwargs(
+        timeout=20,
+        follow_redirects=True,
+    )) as client:
         feed_resp = await client.get(_feed_url(channel_id))
         feed_resp.raise_for_status()
         profile = await _fetch_channel_profile(channel_id, client)

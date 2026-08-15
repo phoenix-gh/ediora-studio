@@ -7,7 +7,7 @@
 
 ## 概述
 
-在 WeMedia Studio 新增「一键生成选题」功能：读取过去 24 小时已采集的 X 帖子，调 LLM 聚合分析，生成 10 条候选选题（区分长文 / 短文），用户勾选后一键入队到 Hermes Kanban 链路。
+在 Ediora 新增「一键生成选题」功能：读取过去 24 小时已采集的 X 帖子，调 LLM 聚合分析，生成 10 条候选选题（区分长文 / 短文），用户勾选后一键入队到 Hermes Kanban 链路。
 
 ---
 
@@ -124,10 +124,10 @@ task = await kanban.create_task(
 |------|------|------|
 | 新增 | `backend/routers/topics.py` | `POST /api/topics/generate` |
 | 修改 | `backend/main.py` | 注册新 router |
-| 新增 | `wemedia-studio/app/topics/page.tsx` | 选题生成页面（Server Component 壳） |
-| 新增 | `wemedia-studio/app/topics/TopicsClient.tsx` | 客户端交互组件 |
-| 新增 | `wemedia-studio/lib/api/topics.ts` | 前端 API 封装 |
-| 修改 | `wemedia-studio/components/sidebar.tsx` | 新增 /topics 导航入口 |
+| 新增 | `web/app/topics/page.tsx` | 选题生成页面（Server Component 壳） |
+| 新增 | `web/app/topics/TopicsClient.tsx` | 客户端交互组件 |
+| 新增 | `web/lib/api/topics.ts` | 前端 API 封装 |
+| 修改 | `web/components/sidebar.tsx` | 新增 /topics 导航入口 |
 | 修改 | `~/.hermes/profiles/wms_editor/SOUL.md` | 新增「读 content_type / word_range」步骤 |
 
 ---

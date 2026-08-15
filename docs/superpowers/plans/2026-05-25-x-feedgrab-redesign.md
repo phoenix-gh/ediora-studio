@@ -29,10 +29,10 @@
 - Modify: `backend/main.py`（如有 X import 清理）
 - Delete: `backend/x_collector.py`
 - Delete: `backend/post_classifier.py`（确认仅 X 使用后）
-- Rewrite: `wemedia-studio/app/x/XClient.tsx`
-- Rewrite: `wemedia-studio/app/x/XPostsPanel.tsx`（拆成 SubscriptionsTab + SearchTab + PostList 三个组件）
-- Modify: `wemedia-studio/app/x/page.tsx`（简化 props）
-- Rewrite: `wemedia-studio/app/settings/sections/XSection.tsx`（极简）
+- Rewrite: `web/app/x/XClient.tsx`
+- Rewrite: `web/app/x/XPostsPanel.tsx`（拆成 SubscriptionsTab + SearchTab + PostList 三个组件）
+- Modify: `web/app/x/page.tsx`（简化 props）
+- Rewrite: `web/app/settings/sections/XSection.tsx`（极简）
 
 ---
 
@@ -383,7 +383,7 @@ cd backend && WMS_DISABLE_SCHEDULER=1 conda run -n wems pytest tests/test_feedgr
 - [ ] **Step 3: 实现 `feedgrab_client.py`（dataclass + 解析）**
 
 ```python
-"""Adapter between WeMedia Studio and feedgrab for X/Twitter content.
+"""Adapter between Ediora and feedgrab for X/Twitter content.
 
 Two public coroutines:
   - grab_timeline(url): collect posts from a subscription URL
@@ -1349,14 +1349,14 @@ EOF
 **目标：** 加 X 相关 TypeScript 类型与 API 客户端函数。
 
 **Files:**
-- Modify: `wemedia-studio/lib/api.ts`（或同等位置）
+- Modify: `web/lib/api.ts`（或同等位置）
 
 - [ ] **Step 1: 定位现有 api client**
 
 ```bash
 source ~/.zshrc
-grep -rn "fetch\|api/\|export async function" wemedia-studio/lib --include="*.ts" | head
-ls wemedia-studio/lib
+grep -rn "fetch\|api/\|export async function" web/lib --include="*.ts" | head
+ls web/lib
 ```
 
 记录现有 api client 文件路径与导出风格。
@@ -1433,7 +1433,7 @@ export const xApi = {
 
 ```bash
 source ~/.zshrc
-cd wemedia-studio && conda run -n wems npm run build 2>&1 | tail -20
+cd web && conda run -n wems npm run build 2>&1 | tail -20
 ```
 
 （如果 build 太慢，可改用 `npx tsc --noEmit` 仅类型检查。）
@@ -1443,7 +1443,7 @@ cd wemedia-studio && conda run -n wems npm run build 2>&1 | tail -20
 - [ ] **Step 4: Commit**
 
 ```bash
-git add wemedia-studio/lib
+git add web/lib
 git commit -m "$(cat <<'EOF'
 feat(x): add X API client types and helpers
 
@@ -1462,9 +1462,9 @@ EOF
 **目标：** 重写 `XClient.tsx`，实现订阅管理 + 帖子列表。
 
 **Files:**
-- Rewrite: `wemedia-studio/app/x/XClient.tsx`
-- Modify: `wemedia-studio/app/x/page.tsx`
-- Delete: `wemedia-studio/app/x/XPostsPanel.tsx`
+- Rewrite: `web/app/x/XClient.tsx`
+- Modify: `web/app/x/page.tsx`
+- Delete: `web/app/x/XPostsPanel.tsx`
 
 - [ ] **Step 1: 简化 `page.tsx`**
 
@@ -1479,12 +1479,12 @@ export default function XPage() {
 - [ ] **Step 2: 删除旧 `XPostsPanel.tsx`**
 
 ```bash
-rm wemedia-studio/app/x/XPostsPanel.tsx
+rm web/app/x/XPostsPanel.tsx
 ```
 
 - [ ] **Step 3: 重写 `XClient.tsx` 含订阅 Tab**
 
-完全覆盖 `wemedia-studio/app/x/XClient.tsx`：
+完全覆盖 `web/app/x/XClient.tsx`：
 
 ```typescript
 "use client"
@@ -1613,7 +1613,7 @@ export function XClient() {
 
 ```bash
 source ~/.zshrc
-cd wemedia-studio && conda run -n wems npm run dev
+cd web && conda run -n wems npm run dev
 ```
 
 打开 `http://localhost:3000/x`，验证：
@@ -1624,7 +1624,7 @@ cd wemedia-studio && conda run -n wems npm run dev
 - [ ] **Step 5: Commit**
 
 ```bash
-git add wemedia-studio/app/x
+git add web/app/x
 git commit -m "$(cat <<'EOF'
 feat(x): rewrite /x page with subscriptions tab
 
@@ -1643,7 +1643,7 @@ EOF
 **目标：** 在 `XClient.tsx` 实现 SearchTab。
 
 **Files:**
-- Modify: `wemedia-studio/app/x/XClient.tsx`
+- Modify: `web/app/x/XClient.tsx`
 
 - [ ] **Step 1: 替换 `SearchTab` 实现**
 
@@ -1710,7 +1710,7 @@ function SearchTab() {
 - [ ] **Step 3: Commit**
 
 ```bash
-git add wemedia-studio/app/x/XClient.tsx
+git add web/app/x/XClient.tsx
 git commit -m "$(cat <<'EOF'
 feat(x): keyword search tab with live feedgrab queries
 
@@ -1728,7 +1728,7 @@ EOF
 **目标：** `XSection.tsx` 改成只显示 feedgrab auth 状态 + 登录命令提示。
 
 **Files:**
-- Rewrite: `wemedia-studio/app/settings/sections/XSection.tsx`
+- Rewrite: `web/app/settings/sections/XSection.tsx`
 
 - [ ] **Step 1: 完全覆盖 `XSection.tsx`**
 
@@ -1771,7 +1771,7 @@ export X_CT0=...`}
 
 ```bash
 source ~/.zshrc
-grep -n "XSection" wemedia-studio/app/settings/SettingsClient.tsx
+grep -n "XSection" web/app/settings/SettingsClient.tsx
 ```
 
 改成 `<XSection />`（移除 props）。
@@ -1780,7 +1780,7 @@ grep -n "XSection" wemedia-studio/app/settings/SettingsClient.tsx
 
 ```bash
 source ~/.zshrc
-cd wemedia-studio && conda run -n wems npx tsc --noEmit
+cd web && conda run -n wems npx tsc --noEmit
 ```
 
 预期：无 `XSection`、`xApi`、未用变量相关报错。
@@ -1788,7 +1788,7 @@ cd wemedia-studio && conda run -n wems npx tsc --noEmit
 - [ ] **Step 4: Commit**
 
 ```bash
-git add wemedia-studio/app/settings/sections/XSection.tsx wemedia-studio/app/settings/SettingsClient.tsx
+git add web/app/settings/sections/XSection.tsx web/app/settings/SettingsClient.tsx
 git commit -m "$(cat <<'EOF'
 feat(x): simplify settings X section to auth-status indicator
 
@@ -1828,7 +1828,7 @@ cd backend && conda run -n wems feedgrab login twitter
 
 ```bash
 source ~/.zshrc
-cd wemedia-studio && conda run -n wems npm run dev
+cd web && conda run -n wems npm run dev
 ```
 
 - [ ] **Step 4: 设置页验证 auth-status**
@@ -1871,7 +1871,7 @@ git status
 ## 完成标准
 
 - 所有 backend 测试通过：`pytest -x` 在 `backend/` 下绿。
-- `npx tsc --noEmit` 在 `wemedia-studio/` 下无错。
+- `npx tsc --noEmit` 在 `web/` 下无错。
 - Task 14 手工验证全部勾选。
 - `git log refactor/project-optimization` 看到本计划全部 14 个 commit。
 - 旧的 X 文件已物理删除，可通过 `git status` 确认无残留。

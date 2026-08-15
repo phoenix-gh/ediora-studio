@@ -17,8 +17,8 @@
 | `backend/ref_collector.py` | Modify | 删除 LLM 调用；新增 `_upsert_raw`、`clean_batch` |
 | `backend/routers/materials.py` | Modify | 新增 `/clean-batch` 端点；`GET /materials` 加 status 参数；collect 返回字段改名 |
 | `backend/tests/test_materials_router.py` | Modify | 更新 collect 断言；新增 clean-batch 测试 |
-| `wemedia-studio/lib/api/materials.ts` | Modify | 新增 `cleanBatch`、`getRawCount` 函数；更新 collectRule/collectAll 返回类型 |
-| `wemedia-studio/app/materials/MaterialsClient.tsx` | Modify | raw 计数提示条 + 清洗按钮 |
+| `web/lib/api/materials.ts` | Modify | 新增 `cleanBatch`、`getRawCount` 函数；更新 collectRule/collectAll 返回类型 |
+| `web/app/materials/MaterialsClient.tsx` | Modify | raw 计数提示条 + 清洗按钮 |
 
 ---
 
@@ -415,12 +415,12 @@ git commit --allow-empty -m "ops: 已在 prod DB 建 ix_refmaterial_status 索�
 ## Task 5：前端——API 函数 + raw 计数 + 清洗按钮
 
 **Files:**
-- Modify: `wemedia-studio/lib/api/materials.ts`
-- Modify: `wemedia-studio/app/materials/MaterialsClient.tsx`
+- Modify: `web/lib/api/materials.ts`
+- Modify: `web/app/materials/MaterialsClient.tsx`
 
 - [ ] **Step 1: 更新 `materials.ts` 的返回类型和新增函数**
 
-打开 `wemedia-studio/lib/api/materials.ts`。
+打开 `web/lib/api/materials.ts`。
 
 **修改 `collectRule` 返回类型**（约第 80 行）：
 
@@ -463,7 +463,7 @@ export async function cleanBatch(size?: number): Promise<CleanBatchResult> {
 
 - [ ] **Step 2: 找到 `MaterialsClient.tsx` 中需要修改的位置**
 
-打开 `wemedia-studio/app/materials/MaterialsClient.tsx`。
+打开 `web/app/materials/MaterialsClient.tsx`。
 
 找到现有 import 行，补充 `getRawCount` 和 `cleanBatch`：
 
@@ -545,7 +545,7 @@ async function handleCleanBatch() {
 - [ ] **Step 6: 验证 TypeScript 编译无错误**
 
 ```bash
-source ~/.zshrc && cd /workspace/projects/WeMediaStudio/wemedia-studio && npx tsc --noEmit
+source ~/.zshrc && cd /workspace/projects/WeMediaStudio/web && npx tsc --noEmit
 ```
 
 预期：无报错。
@@ -553,7 +553,7 @@ source ~/.zshrc && cd /workspace/projects/WeMediaStudio/wemedia-studio && npx ts
 - [ ] **Step 7: Commit**
 
 ```bash
-git add wemedia-studio/lib/api/materials.ts wemedia-studio/app/materials/MaterialsClient.tsx
+git add web/lib/api/materials.ts web/app/materials/MaterialsClient.tsx
 git commit -m "feat(materials): 前端 raw 计数提示 + 一键清洗按钮"
 ```
 

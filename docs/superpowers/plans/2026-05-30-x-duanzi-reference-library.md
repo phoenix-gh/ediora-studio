@@ -13,7 +13,7 @@
 - 后端无迁移框架：新表靠 `Base.metadata.create_all`（在 `database.py:init_db`）自动建；金句数据迁移放进 `init_db` 的幂等 raw SQL（沿用现有 `ALTER ... IF NOT EXISTS` / `UPDATE ... WHERE` 风格）。
 - API 前缀 `/api`。测试沿用 `tests/test_x_router.py` 的 inline `client` fixture（sqlite + `WMS_DISABLE_SCHEDULER=1`）。
 - spec：`docs/superpowers/specs/2026-05-30-x-hot-duanzi-reference-library-design.md`；spike：`docs/superpowers/spikes/2026-05-30-x-top-search-operator-only.md`。
-- 前端无测试框架 → 前端任务用「跑 dev server 手工验证」代替单测。先读 `wemedia-studio/AGENTS.md`（Next.js 有 breaking changes）。
+- 前端无测试框架 → 前端任务用「跑 dev server 手工验证」代替单测。先读 `web/AGENTS.md`（Next.js 有 breaking changes）。
 
 ---
 
@@ -36,7 +36,7 @@
 - `backend/routers/quotes.py` — 删除。
 
 **前端（新建/修改）**
-- `wemedia-studio/lib/api/materials.ts`（新）、`app/materials/page.tsx`（新）、`app/materials/MaterialsClient.tsx`（新）
+- `web/lib/api/materials.ts`（新）、`app/materials/page.tsx`（新）、`app/materials/MaterialsClient.tsx`（新）
 - `components/features/Sidebar.tsx`（改名 + 路由）；删 `app/quotes/*`、`lib/api/quotes.ts`
 
 ---
@@ -1515,7 +1515,7 @@ git commit -m "refactor(mcp): repoint list_quotes/save_quote to ref_materials"
 
 **Files:**
 - Modify: `backend/main.py`（移除 quotes import + include）
-- Delete: `backend/routers/quotes.py`、`wemedia-studio/app/quotes/`、`wemedia-studio/lib/api/quotes.ts`
+- Delete: `backend/routers/quotes.py`、`web/app/quotes/`、`web/lib/api/quotes.ts`
 
 - [ ] **Step 1: 从 main.py 移除 quotes**
 
@@ -1535,13 +1535,13 @@ Expected: 全绿（金句能力已由 /materials + MCP 接管）。
 - [ ] **Step 4: 删除前端 quotes 模块（前端将由 Task 12 的 materials 页接管）**
 
 ```bash
-cd /workspace/projects/WeMediaStudio && rm -rf wemedia-studio/app/quotes wemedia-studio/lib/api/quotes.ts
+cd /workspace/projects/WeMediaStudio && rm -rf web/app/quotes web/lib/api/quotes.ts
 ```
 
 - [ ] **Step 5: 提交**
 
 ```bash
-cd /workspace/projects/WeMediaStudio && git add -A backend/main.py backend/routers/ wemedia-studio/app wemedia-studio/lib
+cd /workspace/projects/WeMediaStudio && git add -A backend/main.py backend/routers/ web/app web/lib
 git commit -m "refactor: retire quotes router/page (absorbed into materials)"
 ```
 
@@ -1549,17 +1549,17 @@ git commit -m "refactor: retire quotes router/page (absorbed into materials)"
 
 ## Phase 3 — 前端统一「参考文案库」
 
-> 前端无测试框架；每个任务以「跑 dev server 手工验证」收尾。先读 `wemedia-studio/AGENTS.md`、参考 `app/x/XClient.tsx` 与（被删前的）`QuotesClient.tsx` 设计语言（已删的可从 git 历史 `git show HEAD~1:wemedia-studio/app/quotes/QuotesClient.tsx` 取回参考）。
+> 前端无测试框架；每个任务以「跑 dev server 手工验证」收尾。先读 `web/AGENTS.md`、参考 `app/x/XClient.tsx` 与（被删前的）`QuotesClient.tsx` 设计语言（已删的可从 git 历史 `git show HEAD~1:web/app/quotes/QuotesClient.tsx` 取回参考）。
 
 ### Task 11: `lib/api/materials.ts`
 
 **Files:**
-- Create: `wemedia-studio/lib/api/materials.ts`
+- Create: `web/lib/api/materials.ts`
 
 - [ ] **Step 1: 实现 API client**
 
 ```typescript
-// wemedia-studio/lib/api/materials.ts
+// web/lib/api/materials.ts
 import { apiFetch } from './client'
 
 export interface Material {
@@ -1648,13 +1648,13 @@ export async function collectAll(): Promise<{ new_materials: number; failed: str
 
 - [ ] **Step 2: 类型检查**
 
-Run: `source ~/.zshrc && cd /workspace/projects/WeMediaStudio/wemedia-studio && npx tsc --noEmit`
+Run: `source ~/.zshrc && cd /workspace/projects/WeMediaStudio/web && npx tsc --noEmit`
 Expected: 无 materials.ts 相关报错。
 
 - [ ] **Step 3: 提交**
 
 ```bash
-cd /workspace/projects/WeMediaStudio && git add wemedia-studio/lib/api/materials.ts
+cd /workspace/projects/WeMediaStudio && git add web/lib/api/materials.ts
 git commit -m "feat(ui-api): materials client"
 ```
 
@@ -1663,13 +1663,13 @@ git commit -m "feat(ui-api): materials client"
 ### Task 12: `/materials` 页面（浏览 + 双维过滤 + 手工录入 + 采集规则）
 
 **Files:**
-- Create: `wemedia-studio/app/materials/page.tsx`
-- Create: `wemedia-studio/app/materials/MaterialsClient.tsx`
+- Create: `web/app/materials/page.tsx`
+- Create: `web/app/materials/MaterialsClient.tsx`
 
 - [ ] **Step 1: page.tsx（server component，仿 quotes/page.tsx）**
 
 ```tsx
-// wemedia-studio/app/materials/page.tsx
+// web/app/materials/page.tsx
 import { getMaterials, getCategories } from '@/lib/api/materials'
 import { getWritingPlans } from '@/lib/api/writing-plans'
 import { MaterialsClient } from './MaterialsClient'
@@ -1686,7 +1686,7 @@ export default async function MaterialsPage() {
 
 - [ ] **Step 2: MaterialsClient.tsx**
 
-实现一个客户端组件，结构参考被删的 `QuotesClient`（`git show HEAD~3:wemedia-studio/app/quotes/QuotesClient.tsx` 可取回；HEAD 偏移按实际提交数调整）。要点（必须包含）：
+实现一个客户端组件，结构参考被删的 `QuotesClient`（`git show HEAD~3:web/app/quotes/QuotesClient.tsx` 可取回；HEAD 偏移按实际提交数调整）。要点（必须包含）：
 - 顶部来源切换：全部 / 手工(`platform=manual,agent` → 前端按 `platform!=='x'` 归为手工，过滤参数用 `platform=manual` 与 `agent` 两次或前端筛) / X(`platform=x`)。简化：来源筛 chips = [全部, 手工, X]，「手工」前端过滤 `m.platform !== 'x'`，「X」过滤 `m.platform === 'x'`。
 - 左侧两组过滤：**使用场景**（`SCENE_TAGS`，带计数，沿用配色）+ **内容分类**（`categories`，带计数）。
 - 工具栏：搜索框 + 排序下拉（时间/段子分/流量）+「添加文案」按钮 +「采集规则」按钮。
@@ -1704,7 +1704,7 @@ export default async function MaterialsPage() {
 # 后端（若未跑）
 source ~/.zshrc && cd /workspace/projects/WeMediaStudio/backend && conda run -n wems uvicorn main:app --reload --port 8000 &
 # 前端
-source ~/.zshrc && cd /workspace/projects/WeMediaStudio/wemedia-studio && npm run dev
+source ~/.zshrc && cd /workspace/projects/WeMediaStudio/web && npm run dev
 ```
 浏览器开 `/materials`，确认：
 - 迁移来的金句以「手工」来源出现，使用场景过滤可用、计数正确。
@@ -1715,7 +1715,7 @@ source ~/.zshrc && cd /workspace/projects/WeMediaStudio/wemedia-studio && npm ru
 - [ ] **Step 4: 提交**
 
 ```bash
-cd /workspace/projects/WeMediaStudio && git add wemedia-studio/app/materials
+cd /workspace/projects/WeMediaStudio && git add web/app/materials
 git commit -m "feat(ui): unified 参考文案库 page (browse + manual + collect rules)"
 ```
 
@@ -1724,7 +1724,7 @@ git commit -m "feat(ui): unified 参考文案库 page (browse + manual + collect
 ### Task 13: Sidebar 改名 + 路由
 
 **Files:**
-- Modify: `wemedia-studio/components/features/Sidebar.tsx`
+- Modify: `web/components/features/Sidebar.tsx`
 
 - [ ] **Step 1: 改「创作」组里的金句库项**
 
@@ -1745,7 +1745,7 @@ dev server 下点侧边栏「参考文案库」→ 跳 `/materials`；旧 `/quot
 - [ ] **Step 3: 提交**
 
 ```bash
-cd /workspace/projects/WeMediaStudio && git add wemedia-studio/components/features/Sidebar.tsx
+cd /workspace/projects/WeMediaStudio && git add web/components/features/Sidebar.tsx
 git commit -m "feat(ui): sidebar 金句库 → 参考文案库 (/materials)"
 ```
 

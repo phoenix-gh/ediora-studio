@@ -108,5 +108,5 @@
 
 ## 影响的文件
 
-新增：`backend/routers/published.py`、`wemedia-studio/lib/api/published.ts`、`wemedia-studio/app/published/*`、对应测试。
+新增：`backend/routers/published.py`、`web/lib/api/published.ts`、`web/app/published/*`、对应测试。
 修改：`models.py`(+Publication)、`schemas.py`、`main.py`(挂路由)、`routers/drafts.py`(发布钩子)、`mcp_server.py`(+工具)、`pipeline_template.py`(总编指令)、`Sidebar.tsx`(导航)。

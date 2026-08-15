@@ -36,6 +36,7 @@ class RoleCreate(BaseModel):
     portrait_asset_id: int
     voice_sample_asset_id: int
     default_environment_asset_id: int
+    look_prompt: str = Field(default="", max_length=500)
 
 
 class RoleUpdate(BaseModel):
@@ -43,6 +44,7 @@ class RoleUpdate(BaseModel):
     portrait_asset_id: int | None = None
     voice_sample_asset_id: int | None = None
     default_environment_asset_id: int | None = None
+    look_prompt: str | None = Field(default=None, max_length=500)
 
 
 class RoleWorkerProgress(BaseModel):
@@ -93,6 +95,7 @@ async def _role_payload(db: AsyncSession, role: DigitalHuman) -> dict:
         "voice_sample_asset_id": role.voice_sample_asset_id,
         "default_environment_asset_id": role.default_environment_asset_id,
         "look_asset_id": role.look_asset_id,
+        "look_prompt": role.look_prompt or "",
         "portrait": _asset_payload(portrait) if portrait else None,
         "voice_sample": _asset_payload(voice) if voice else None,
         "default_environment": _asset_payload(environment) if environment else None,
@@ -171,6 +174,7 @@ async def post_role(body: RoleCreate, db: AsyncSession = Depends(get_db)):
             portrait_asset_id=body.portrait_asset_id,
             voice_sample_asset_id=body.voice_sample_asset_id,
             default_environment_asset_id=body.default_environment_asset_id,
+            look_prompt=body.look_prompt,
         )
     except InvalidTalkingVideo as exc:
         raise HTTPException(422, str(exc)) from exc
@@ -193,6 +197,12 @@ async def patch_role(
     if body.name is not None:
         role.name = body.name.strip()
     changed_provider_inputs: set[str] = set()
+    if body.look_prompt is not None:
+        next_prompt = body.look_prompt.strip()
+        if next_prompt != (role.look_prompt or ""):
+            role.look_prompt = next_prompt
+            if role.provider == "comfyui":
+                changed_provider_inputs.add("look_prompt")
     validations = (
         (
             "portrait_asset_id",
@@ -255,6 +265,11 @@ async def patch_role(
             state.pop(key, None)
         role.provider_state = state
     if changed_provider_inputs:
+        if role.provider == "comfyui":
+            role.look_asset_id = None
+            state = dict(role.provider_state or {})
+            state.pop("look_asset_id", None)
+            role.provider_state = state
         await db.flush()
         await _queue_setup(db, role)
     else:
@@ -372,6 +387,7 @@ async def role_worker_context(
         "default_environment": _asset_payload(environment),
         "look": _asset_payload(look) if look else None,
         "look_asset_id": role.look_asset_id,
+        "look_prompt": role.look_prompt or "",
         "provider_state": role.provider_state,
         "heygen_avatar_group_id": role.heygen_avatar_group_id,
         "heygen_avatar_id": role.heygen_avatar_id,

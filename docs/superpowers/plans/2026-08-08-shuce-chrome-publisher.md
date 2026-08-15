@@ -4,7 +4,7 @@
 
 **Goal:** Build the standalone Manifest V3 “述策助手” extension that exposes a temporary `Shuce.publish()` console command for immediate single-post publishing and X-native scheduled publishing.
 
-**Architecture:** A temporary page-world console adapter sends request-ID-correlated messages to an isolated-world content bridge. The bridge delegates to a testable publisher orchestrator and X DOM driver; the service worker stores status-only execution summaries. There is no WeMediaStudio API traffic or task polling in this MVP.
+**Architecture:** A temporary page-world console adapter sends request-ID-correlated messages to an isolated-world content bridge. The bridge delegates to a testable publisher orchestrator and X DOM driver; the service worker stores status-only execution summaries. There is no Ediora API traffic or task polling in this MVP.
 
 **Tech Stack:** Chrome Manifest V3, vanilla JavaScript ES modules, `window.postMessage`, Chrome storage/runtime APIs, Node.js built-in test runner.
 
@@ -17,7 +17,7 @@
 - Accept only `YYYY-MM-DD HH:mm` and `YYYY-MM-DDTHH:mm`; reject timezone suffixes and seconds.
 - `dryRun: true` may fill the composer and configure X’s schedule dialog but must never click the final publish/schedule button.
 - The console adapter is temporary. The publisher and DOM driver must not read `window.Shuce` or export page-world globals.
-- Request only `https://x.com/*` and `https://twitter.com/*`; do not read cookies/tokens or contact WeMediaStudio, localhost, or third-party APIs.
+- Request only `https://x.com/*` and `https://twitter.com/*`; do not read cookies/tokens or contact Ediora, localhost, or third-party APIs.
 - Keep XActions attribution for the exact reference commit and files described in the approved design.
 - Preserve all unrelated existing workspace changes and stage only files created under `chrome-extension/` plus this plan.
 
@@ -561,7 +561,7 @@ State clearly that X DOM changes may break selectors and that automation may be 
 
 - [ ] **Step 4: Write third-party notices**
 
-Record XActions author `nichxbt`, repository URL, exact reference commit, each referenced file, its applicable Apache-2.0 or MIT notice, and that WeMediaStudio’s implementation is modified and purpose-limited.
+Record XActions author `nichxbt`, repository URL, exact reference commit, each referenced file, its applicable Apache-2.0 or MIT notice, and that Ediora’s implementation is modified and purpose-limited.
 
 - [ ] **Step 5: Run all extension tests and static checks**
 

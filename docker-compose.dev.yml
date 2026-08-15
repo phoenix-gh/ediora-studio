@@ -9,5 +9,5 @@ services:
       NODE_ENV: development
       WATCHPACK_POLLING: "true"
     volumes:
-      - ./wemedia-studio:/app
+      - ./web:/app
       - /app/node_modules

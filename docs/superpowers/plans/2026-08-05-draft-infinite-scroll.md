@@ -20,10 +20,10 @@ active query changes.
 
 ## Task 2: Frontend page client
 
-**Files:** `wemedia-studio/lib/api/drafts.ts`,
-`wemedia-studio/app/drafts/page.tsx`,
-`wemedia-studio/app/drafts/DraftsClient.tsx`,
-`wemedia-studio/app/drafts/DraftsClient.test.tsx`
+**Files:** `web/lib/api/drafts.ts`,
+`web/app/drafts/page.tsx`,
+`web/app/drafts/DraftsClient.tsx`,
+`web/app/drafts/DraftsClient.test.tsx`
 
 1. Add a failing component test that reaching the list sentinel fetches and
    renders the next page.

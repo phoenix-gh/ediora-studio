@@ -2,7 +2,7 @@
 
 ## 目标
 
-在 WeMediaStudio 设置页提供一个采集代理地址。保存后，后端将该地址同时设置为运行进程的 `HTTP_PROXY` 与 `HTTPS_PROXY`，供以下采集链路使用：
+在 Ediora 设置页提供一个采集代理地址。保存后，后端将该地址同时设置为运行进程的 `HTTP_PROXY` 与 `HTTPS_PROXY`，供以下采集链路使用：
 
 - feedgrab / X
 - Reddit

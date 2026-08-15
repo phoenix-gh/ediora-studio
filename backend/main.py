@@ -98,7 +98,7 @@ async def lifespan_with_mcp(app: FastAPI):
             yield
 
 
-app = FastAPI(title="WeMedia Studio API", lifespan=lifespan_with_mcp)
+app = FastAPI(title="Ediora API", lifespan=lifespan_with_mcp)
 
 cors_origins = [
     origin.strip()

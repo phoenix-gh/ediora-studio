@@ -56,11 +56,11 @@
 ### Task 3: Frontend API and management route
 
 **Files:**
-- Create: `wemedia-studio/lib/api/text-videos.ts`
-- Create: `wemedia-studio/lib/api/text-videos.test.ts`
-- Replace: `wemedia-studio/app/text-video/page.tsx`
-- Create: `wemedia-studio/app/text-video/TextVideoProjectsClient.tsx`
-- Create: `wemedia-studio/app/text-video/TextVideoProjectsClient.test.tsx`
+- Create: `web/lib/api/text-videos.ts`
+- Create: `web/lib/api/text-videos.test.ts`
+- Replace: `web/app/text-video/page.tsx`
+- Create: `web/app/text-video/TextVideoProjectsClient.tsx`
+- Create: `web/app/text-video/TextVideoProjectsClient.test.tsx`
 
 **Interfaces:**
 - Produces typed list/create/get/update/delete client functions and the project-management UI.
@@ -74,11 +74,11 @@
 ### Task 4: Project editor route and autosave
 
 **Files:**
-- Create: `wemedia-studio/app/text-video/[projectId]/page.tsx`
-- Create: `wemedia-studio/app/text-video/TextVideoEditorClient.tsx`
-- Create: `wemedia-studio/app/text-video/useTextVideoAutosave.ts`
-- Create: `wemedia-studio/app/text-video/useTextVideoAutosave.test.tsx`
-- Modify: `wemedia-studio/app/text-video/TextVideoWorkbench.tsx`
+- Create: `web/app/text-video/[projectId]/page.tsx`
+- Create: `web/app/text-video/TextVideoEditorClient.tsx`
+- Create: `web/app/text-video/useTextVideoAutosave.ts`
+- Create: `web/app/text-video/useTextVideoAutosave.test.tsx`
+- Modify: `web/app/text-video/TextVideoWorkbench.tsx`
 - Modify: stage components as required.
 
 **Interfaces:**
@@ -95,11 +95,11 @@
 ### Task 5: Editor layout fidelity
 
 **Files:**
-- Modify: `wemedia-studio/app/text-video/TextVideoWorkbench.tsx`
-- Modify: `wemedia-studio/app/text-video/ScriptStage.tsx`
-- Modify: `wemedia-studio/app/text-video/AudioStage.tsx`
-- Modify: `wemedia-studio/app/text-video/VideoStage.tsx`
-- Create: `wemedia-studio/app/text-video/SceneTimeline.tsx`
+- Modify: `web/app/text-video/TextVideoWorkbench.tsx`
+- Modify: `web/app/text-video/ScriptStage.tsx`
+- Modify: `web/app/text-video/AudioStage.tsx`
+- Modify: `web/app/text-video/VideoStage.tsx`
+- Create: `web/app/text-video/SceneTimeline.tsx`
 - Modify: relevant component tests.
 
 **Interfaces:**

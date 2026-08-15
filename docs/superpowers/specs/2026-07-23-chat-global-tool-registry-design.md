@@ -2,7 +2,7 @@
 
 ## Goal
 
-Make Chat a global, tool-using interface for WeMedia Studio. Every tool
+Make Chat a global, tool-using interface for Ediora. Every tool
 registered by the local MCP server becomes available automatically, while Chat
 also exposes application-native image generation. A selected skill guides tool
 use; it no longer merely supplies inert text instructions.

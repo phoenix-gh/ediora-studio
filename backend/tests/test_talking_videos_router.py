@@ -429,6 +429,70 @@ def _seed_comfyui(session_factory):
     return asyncio.new_event_loop().run_until_complete(run())
 
 
+def test_comfyui_shot_render_requires_voice_sample(api, monkeypatch):
+    client, session_factory, _ = api
+    monkeypatch.setenv("COMFYUI_BASE_URL", "http://127.0.0.1:8188")
+
+    async def seed_without_voice():
+        from models import CreativeAsset, DigitalHuman
+
+        async with session_factory() as session:
+            environment = CreativeAsset(
+                asset_type="media",
+                media_kind="image",
+                title="environment",
+                url="/api/uploads/environment.jpg",
+                media_type="image/jpeg",
+                filename="environment.jpg",
+            )
+            portrait = CreativeAsset(
+                asset_type="media",
+                media_kind="image",
+                title="portrait",
+                url="/api/uploads/portrait.png",
+                media_type="image/png",
+                filename="portrait.png",
+            )
+            look = CreativeAsset(
+                asset_type="media",
+                media_kind="image",
+                title="look",
+                url="/api/uploads/look.jpg",
+                media_type="image/jpeg",
+                filename="look.jpg",
+            )
+            session.add_all([environment, portrait, look])
+            await session.flush()
+            role = DigitalHuman(
+                name="MK",
+                status="ready",
+                provider="comfyui",
+                portrait_asset_id=portrait.id,
+                voice_sample_asset_id=None,
+                default_environment_asset_id=environment.id,
+                look_asset_id=look.id,
+            )
+            session.add(role)
+            await session.commit()
+            return role.id
+
+    role_id = asyncio.new_event_loop().run_until_complete(seed_without_voice())
+    created = client.post(
+        "/api/talking-videos",
+        json={"title": "缺声音", "digital_human_id": role_id},
+    )
+    assert created.status_code == 201, created.text
+    assert created.json()["role"]["voice_sample_asset_id"] is None
+    shot_id = created.json()["shots"][0]["id"]
+
+    response = client.post(
+        f"/api/talking-videos/{created.json()['id']}/shots/{shot_id}/render",
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "请先为数字人上传 2–15 秒声音样本"
+
+
 def test_comfyui_project_uses_shots_and_rejects_heygen_render(api, monkeypatch):
     client, session_factory, _ = api
     monkeypatch.setenv("COMFYUI_BASE_URL", "http://127.0.0.1:8188")

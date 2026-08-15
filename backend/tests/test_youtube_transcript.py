@@ -160,6 +160,38 @@ async def test_extract_downloads_original_and_chinese_captions_with_ytdlp(monkey
 
 
 @pytest.mark.asyncio
+async def test_extract_passes_collection_proxy_to_ytdlp():
+    from youtube_transcript import extract_youtube_transcript
+
+    commands: list[tuple[str, ...]] = []
+
+    async def command(*argv: str, timeout: float) -> str:
+        commands.append(argv)
+        if "--dump-single-json" in argv:
+            return json.dumps({
+                "id": "video-id",
+                "duration": 7,
+                "language": "en",
+                "subtitles": {"en": [{"ext": "vtt", "url": "https://caption.test/en"}]},
+            })
+        template = argv[argv.index("-o") + 1]
+        subtitle = Path(template.replace("%(id)s", "video-id").replace("%(ext)s", "vtt"))
+        subtitle.write_text(VTT, encoding="utf-8")
+        return ""
+
+    await extract_youtube_transcript(
+        "https://www.youtube.com/watch?v=video-id",
+        {"collection_proxy_url": "socks5://127.0.0.1:1080"},
+        command=command,
+    )
+
+    assert all(
+        argv[argv.index("--proxy") + 1] == "socks5://127.0.0.1:1080"
+        for argv in commands
+    )
+
+
+@pytest.mark.asyncio
 async def test_extract_passes_one_temporary_cookie_file_to_metadata_and_subtitles():
     from youtube_transcript import extract_youtube_transcript
 

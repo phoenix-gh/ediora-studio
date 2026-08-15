@@ -11,6 +11,7 @@ from pydantic import ValidationError
 def settings_runtime(monkeypatch):
     monkeypatch.setenv("HTTP_PROXY", "http://startup-http:8000")
     monkeypatch.setenv("HTTPS_PROXY", "http://startup-https:8443")
+    monkeypatch.delenv("FEEDGRAB_PROXY", raising=False)
     for module_name in list(sys.modules):
         if module_name in {"collection_proxy", "config", "routers.settings"}:
             sys.modules.pop(module_name, None)
@@ -48,8 +49,9 @@ def test_collection_proxy_save_persists_and_applies_immediately(settings_runtime
     assert body["collection_proxy_url"] == "http://127.0.0.1:7890"
     assert body["collection_proxy_url_set"] is True
     assert body["collection_proxy_url_preview"] == "http://127.0.0.1:7890"
-    assert os.environ["HTTP_PROXY"] == "http://127.0.0.1:7890"
-    assert os.environ["HTTPS_PROXY"] == "http://127.0.0.1:7890"
+    assert os.environ["HTTP_PROXY"] == "http://startup-http:8000"
+    assert os.environ["HTTPS_PROXY"] == "http://startup-https:8443"
+    assert os.environ["FEEDGRAB_PROXY"] == "http://127.0.0.1:7890"
     fetched = asyncio.run(settings_runtime.router.get_settings()).model_dump()
     assert fetched["collection_proxy_url"] == "http://127.0.0.1:7890"
 
@@ -139,6 +141,7 @@ def test_collection_proxy_clear_restores_startup_environment(settings_runtime):
     assert response.collection_proxy_url_set is False
     assert os.environ["HTTP_PROXY"] == "http://startup-http:8000"
     assert os.environ["HTTPS_PROXY"] == "http://startup-https:8443"
+    assert "FEEDGRAB_PROXY" not in os.environ
 
 
 def test_settings_get_survives_malformed_legacy_proxy_value(settings_runtime):

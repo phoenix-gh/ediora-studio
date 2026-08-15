@@ -86,9 +86,14 @@ async def _fetch_product_images(client, url: str) -> list[str]:
 
 async def collect_producthunt(db) -> int:
     import httpx
+    from collection_proxy import collection_client_kwargs
     from models import ProductHuntPost
 
-    async with httpx.AsyncClient(timeout=30, follow_redirects=True, headers=_HEADERS) as client:
+    async with httpx.AsyncClient(**await collection_client_kwargs(
+        timeout=30,
+        follow_redirects=True,
+        headers=_HEADERS,
+    )) as client:
         resp = await client.get(FEED_URL)
         resp.raise_for_status()
 

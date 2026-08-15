@@ -18,8 +18,8 @@
 | `backend/routers/topic_generator.py` | `EnqueueRequest.account_id` required; new enqueue logic using pipelines + PipelineTask; `EnqueueResponse` adds `pipeline_task_ids` |
 | `backend/tests/test_pipeline_template_topic.py` | New — tests for the two new pipelines |
 | `backend/tests/test_topic_generator.py` | Update existing `test_enqueue_topic`; add new tests for full pipeline behavior |
-| `wemedia-studio/lib/api/topic-generator.ts` | `EnqueueRequest.account_id: string`; `EnqueueResponse` adds `pipeline_task_ids: number[]` |
-| `wemedia-studio/app/trend-topics/TopicGeneratorClient.tsx` | Lock enqueue button when no account; success toast with "查看看板" action |
+| `web/lib/api/topic-generator.ts` | `EnqueueRequest.account_id: string`; `EnqueueResponse` adds `pipeline_task_ids: number[]` |
+| `web/app/trend-topics/TopicGeneratorClient.tsx` | Lock enqueue button when no account; success toast with "查看看板" action |
 
 ---
 
@@ -651,7 +651,7 @@ git commit -m "feat(topic-generator): enqueue creates full pipeline chain per to
 ## Task 3: Update frontend TypeScript API types
 
 **Files:**
-- Modify: `wemedia-studio/lib/api/topic-generator.ts`
+- Modify: `web/lib/api/topic-generator.ts`
 
 - [ ] **Step 3.1: Update `EnqueueResponse` and `enqueueTopics` signature**
 
@@ -678,7 +678,7 @@ export async function enqueueTopics(opts: {
 - [ ] **Step 3.2: Verify TypeScript compiles**
 
 ```bash
-cd /workspace/projects/WeMediaStudio/wemedia-studio
+cd /workspace/projects/WeMediaStudio/web
 source ~/.zshrc && pnpm tsc --noEmit 2>&1 | grep -v "node_modules" | head -30
 ```
 
@@ -687,7 +687,7 @@ Expected: no errors related to `topic-generator.ts` or `TopicGeneratorClient.tsx
 - [ ] **Step 3.3: Commit**
 
 ```bash
-git add wemedia-studio/lib/api/topic-generator.ts
+git add web/lib/api/topic-generator.ts
 git commit -m "feat(frontend): update topic-generator API types for pipeline enqueue"
 ```
 
@@ -696,7 +696,7 @@ git commit -m "feat(frontend): update topic-generator API types for pipeline enq
 ## Task 4: Update `TopicGeneratorClient.tsx` — lock button + success toast
 
 **Files:**
-- Modify: `wemedia-studio/app/trend-topics/TopicGeneratorClient.tsx`
+- Modify: `web/app/trend-topics/TopicGeneratorClient.tsx`
 
 - [ ] **Step 4.1: Lock the enqueue button when no account is selected**
 
@@ -760,7 +760,7 @@ async function handleEnqueue() {
 - [ ] **Step 4.3: Verify TypeScript compiles**
 
 ```bash
-cd /workspace/projects/WeMediaStudio/wemedia-studio
+cd /workspace/projects/WeMediaStudio/web
 source ~/.zshrc && pnpm tsc --noEmit 2>&1 | grep -v "node_modules" | head -30
 ```
 
@@ -769,7 +769,7 @@ Expected: no errors.
 - [ ] **Step 4.4: Commit**
 
 ```bash
-git add wemedia-studio/app/trend-topics/TopicGeneratorClient.tsx
+git add web/app/trend-topics/TopicGeneratorClient.tsx
 git commit -m "feat(topic-generator): lock enqueue button without account, add kanban link on success"
 ```
 

@@ -2,7 +2,7 @@
 
 ## Summary
 
-WeMediaStudio currently discovers a Skill by reading only its `SKILL.md`. Files under `references/` survive ZIP installation but are unavailable to the general Chat runtime, while a small number of background content jobs read selected files through bespoke filesystem code.
+Ediora currently discovers a Skill by reading only its `SKILL.md`. Files under `references/` survive ZIP installation but are unavailable to the general Chat runtime, while a small number of background content jobs read selected files through bespoke filesystem code.
 
 This change introduces one secure Skill-reference runtime shared by Chat and background jobs. The main `SKILL.md` remains the automatically loaded entrypoint. Chat discovers available references and lets the model read only the files needed for the current turn. Background jobs explicitly declare and preload the references required for deterministic execution.
 

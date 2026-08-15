@@ -25,8 +25,8 @@
 ### Task 1: Enforce the exact selection schema
 
 **Files:**
-- Modify: `wemedia-studio/lib/ai/content-job.ts:16-29,106-158`
-- Test: `wemedia-studio/lib/ai/content-job.test.ts:35-100`
+- Modify: `web/lib/ai/content-job.ts:16-29,106-158`
+- Test: `web/lib/ai/content-job.test.ts:35-100`
 
 **Interfaces:**
 - Produces: `parseDailyCreationSelection(raw: unknown): DailyCreationSelection`, which performs only strict structural parsing.
@@ -78,7 +78,7 @@ Retain evidence-validation tests for invented asset IDs, invented usage IDs, and
 Run:
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm exec vitest run lib/ai/content-job.test.ts
 ```
 
@@ -125,7 +125,7 @@ Update the worker call from `parseDailyCreationSelection(result, candidates)` to
 Run:
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm exec vitest run lib/ai/content-job.test.ts
 ```
 
@@ -134,7 +134,7 @@ Expected: all content-job tests pass; exact structure succeeds, aliases/incomple
 - [ ] **Step 5: Commit strict parsing**
 
 ```bash
-git add wemedia-studio/lib/ai/content-job.ts wemedia-studio/lib/ai/content-job.test.ts wemedia-studio/lib/ai/daily-creation-job.ts
+git add web/lib/ai/content-job.ts web/lib/ai/content-job.test.ts web/lib/ai/daily-creation-job.ts
 git diff --cached --check
 git commit -m "fix: enforce daily creation selection contract"
 ```
@@ -144,8 +144,8 @@ git commit -m "fix: enforce daily creation selection contract"
 ### Task 2: Emit the exact contract in the provider prompt
 
 **Files:**
-- Modify: `wemedia-studio/lib/ai/daily-creation-job.ts:45-60,148-158`
-- Test: `wemedia-studio/lib/ai/daily-creation-job.test.ts`
+- Modify: `web/lib/ai/daily-creation-job.ts:45-60,148-158`
+- Test: `web/lib/ai/daily-creation-job.test.ts`
 
 **Interfaces:**
 - Produces: `buildDailyCreationSelectionPrompt(input): string`, the exact JSON payload passed to `generateJson` for the select step.
@@ -202,7 +202,7 @@ This exercises the real provider-boundary payload rather than checking source te
 Run:
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm exec vitest run lib/ai/daily-creation-job.test.ts
 ```
 
@@ -251,7 +251,7 @@ prompt: buildDailyCreationSelectionPrompt({
 Run:
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm exec vitest run lib/ai/content-job.test.ts lib/ai/daily-creation-job.test.ts
 pnpm test
 ```
@@ -261,7 +261,7 @@ Expected: both focused files and all Vitest files pass. Run the complete suite o
 - [ ] **Step 5: Commit the schema-backed prompt**
 
 ```bash
-git add wemedia-studio/lib/ai/daily-creation-job.ts wemedia-studio/lib/ai/daily-creation-job.test.ts
+git add web/lib/ai/daily-creation-job.ts web/lib/ai/daily-creation-job.test.ts
 git diff --cached --check
 git commit -m "fix: send strict creation schema to provider"
 ```

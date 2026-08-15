@@ -92,8 +92,8 @@ Expected: all X router tests pass; existing incremental-cutoff tests retain thei
 ### Task 2: Add the backfill request to the frontend API client
 
 **Files:**
-- Modify: `wemedia-studio/lib/api/x.ts:126-133`
-- Test: `wemedia-studio/lib/api/x.test.ts`
+- Modify: `web/lib/api/x.ts:126-133`
+- Test: `web/lib/api/x.test.ts`
 
 **Interfaces:**
 - Consumes: `apiFetch` and the new router endpoint from Task 1.
@@ -136,8 +136,8 @@ Expected: pass.
 ### Task 3: Add the subscription-management backfill dialog
 
 **Files:**
-- Modify: `wemedia-studio/app/x/XClient.tsx:20-24, 43-124, 493-920`
-- Test: `wemedia-studio/app/x/XClient.test.tsx`
+- Modify: `web/app/x/XClient.tsx:20-24, 43-124, 493-920`
+- Test: `web/app/x/XClient.test.tsx`
 
 **Interfaces:**
 - Consumes: `backfillXSubscription(id, days)` from Task 2 and current Dialog/Input/Button/toast conventions.
@@ -210,7 +210,7 @@ Expected: tests and Next.js TypeScript build pass.
 
 - [ ] **Step 1: Run full relevant automated tests**
 
-Run: `pytest -q backend/tests/test_x_router.py && pnpm --dir wemedia-studio test -- app/x/XClient.test.tsx`
+Run: `pytest -q backend/tests/test_x_router.py && pnpm --dir web test -- app/x/XClient.test.tsx`
 
 Expected: both suites pass with no test failures.
 

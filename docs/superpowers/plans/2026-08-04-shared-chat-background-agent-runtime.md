@@ -23,27 +23,27 @@
 
 ## File and Responsibility Map
 
-- `wemedia-studio/lib/ai/agent-runtime-types.ts`: shared request, result, audit, and completion contracts.
-- `wemedia-studio/lib/ai/agent-tool-policy.ts`: interactive versus automatic approval and audit wrapping.
-- `wemedia-studio/lib/ai/agent-runtime.ts`: shared Skill selection and plan/execute/validate/revise orchestration.
+- `web/lib/ai/agent-runtime-types.ts`: shared request, result, audit, and completion contracts.
+- `web/lib/ai/agent-tool-policy.ts`: interactive versus automatic approval and audit wrapping.
+- `web/lib/ai/agent-runtime.ts`: shared Skill selection and plan/execute/validate/revise orchestration.
 - `backend/agent_execution_service.py`: checkpoints, optimistic versioning, and tool-call idempotency.
 - `backend/routers/agent_executions.py`: worker-authenticated Agent execution API.
 - `backend/daily_creation_service.py`: atomic batch persistence and evidence validation.
 - `backend/mcp_server.py`: global `save_daily_creation_outputs` tool.
-- `wemedia-studio/lib/ai/daily-creation-agent-job.ts`: background adapter.
-- `wemedia-studio/app/daily-plan/CreationRuleDialog.tsx`: Skill configuration.
-- `wemedia-studio/app/daily-plan/CreationRunsPanel.tsx`: bounded Agent audit display.
+- `web/lib/ai/daily-creation-agent-job.ts`: background adapter.
+- `web/app/daily-plan/CreationRuleDialog.tsx`: Skill configuration.
+- `web/app/daily-plan/CreationRunsPanel.tsx`: bounded Agent audit display.
 
 ---
 
 ### Task 1: Shared Agent Tool Approval and Audit Policy
 
 **Files:**
-- Create: `wemedia-studio/lib/ai/agent-runtime-types.ts`
-- Create: `wemedia-studio/lib/ai/agent-tool-policy.ts`
-- Test: `wemedia-studio/lib/ai/agent-tool-policy.test.ts`
-- Modify: `wemedia-studio/lib/ai/global-chat-tools.ts`
-- Test: `wemedia-studio/lib/ai/global-chat-tools.test.ts`
+- Create: `web/lib/ai/agent-runtime-types.ts`
+- Create: `web/lib/ai/agent-tool-policy.ts`
+- Test: `web/lib/ai/agent-tool-policy.test.ts`
+- Modify: `web/lib/ai/global-chat-tools.ts`
+- Test: `web/lib/ai/global-chat-tools.test.ts`
 
 **Interfaces:**
 - Produces: `AgentApprovalPolicy`, `AgentToolAudit`, and `applyAgentToolPolicy(tools, options): ToolSet`.
@@ -87,7 +87,7 @@ Add companion assertions that interactive `save_item` has
 - [ ] **Step 2: Run the focused test and verify RED**
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm exec vitest run lib/ai/agent-tool-policy.test.ts
 ```
 
@@ -165,7 +165,7 @@ Default to `interactive`, preserving Chat behavior.
 - [ ] **Step 6: Run focused tool tests and verify GREEN**
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm exec vitest run lib/ai/agent-tool-policy.test.ts lib/ai/global-chat-tools.test.ts
 ```
 
@@ -174,7 +174,7 @@ Expected: both files pass, including existing Skill and reference tests.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add wemedia-studio/lib/ai/agent-runtime-types.ts wemedia-studio/lib/ai/agent-tool-policy.ts wemedia-studio/lib/ai/agent-tool-policy.test.ts wemedia-studio/lib/ai/global-chat-tools.ts wemedia-studio/lib/ai/global-chat-tools.test.ts
+git add web/lib/ai/agent-runtime-types.ts web/lib/ai/agent-tool-policy.ts web/lib/ai/agent-tool-policy.test.ts web/lib/ai/global-chat-tools.ts web/lib/ai/global-chat-tools.test.ts
 git diff --cached --check
 git commit -m "refactor: share agent tool policy"
 ```
@@ -184,10 +184,10 @@ git commit -m "refactor: share agent tool policy"
 ### Task 2: Extract the Shared Agent Runtime from Chat
 
 **Files:**
-- Create: `wemedia-studio/lib/ai/agent-runtime.ts`
-- Test: `wemedia-studio/lib/ai/agent-runtime.test.ts`
-- Modify: `wemedia-studio/app/api/chat/route.ts`
-- Test: `wemedia-studio/app/api/chat/route.test.ts`
+- Create: `web/lib/ai/agent-runtime.ts`
+- Test: `web/lib/ai/agent-runtime.test.ts`
+- Modify: `web/app/api/chat/route.ts`
+- Test: `web/app/api/chat/route.test.ts`
 
 **Interfaces:**
 - Consumes: `openGlobalAgentTools`, `selectSkillForTurn`, `executeSkillRunWithAiSdk`, and Task 1 contracts.
@@ -214,7 +214,7 @@ Also test automatic match and automatic no-match.
 - [ ] **Step 2: Run and verify RED**
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm exec vitest run lib/ai/agent-runtime.test.ts
 ```
 
@@ -281,7 +281,7 @@ general streaming path. Close it on every terminal path.
 - [ ] **Step 6: Run runtime and Chat tests**
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm exec vitest run lib/ai/agent-runtime.test.ts lib/ai/global-chat-tools.test.ts app/api/chat/route.test.ts lib/ai/skill-run-ai-sdk.test.ts
 ```
 
@@ -290,7 +290,7 @@ Expected: all pass and Chat approval behavior is unchanged.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add wemedia-studio/lib/ai/agent-runtime.ts wemedia-studio/lib/ai/agent-runtime.test.ts wemedia-studio/app/api/chat/route.ts wemedia-studio/app/api/chat/route.test.ts
+git add web/lib/ai/agent-runtime.ts web/lib/ai/agent-runtime.test.ts web/app/api/chat/route.ts web/app/api/chat/route.test.ts
 git diff --cached --check
 git commit -m "refactor: extract shared agent runtime"
 ```
@@ -417,13 +417,13 @@ git commit -m "feat: persist durable agent executions"
 - Test: `backend/tests/test_daily_creation_rule_schema.py`
 - Test: `backend/tests/test_daily_creation_rules_router.py`
 - Test: `backend/tests/test_daily_creation_service.py`
-- Modify: `wemedia-studio/lib/api/daily-plan.ts`
-- Modify: `wemedia-studio/app/daily-plan/DailyPlanClient.tsx`
-- Modify: `wemedia-studio/app/daily-plan/CreationRuleDialog.tsx`
-- Modify: `wemedia-studio/app/daily-plan/CreationRulesPanel.tsx`
-- Test: `wemedia-studio/app/daily-plan/DailyPlanClient.test.tsx`
-- Test: `wemedia-studio/app/daily-plan/CreationRuleDialog.test.tsx`
-- Test: `wemedia-studio/app/daily-plan/CreationRulesPanel.test.tsx`
+- Modify: `web/lib/api/daily-plan.ts`
+- Modify: `web/app/daily-plan/DailyPlanClient.tsx`
+- Modify: `web/app/daily-plan/CreationRuleDialog.tsx`
+- Modify: `web/app/daily-plan/CreationRulesPanel.tsx`
+- Test: `web/app/daily-plan/DailyPlanClient.test.tsx`
+- Test: `web/app/daily-plan/CreationRuleDialog.test.tsx`
+- Test: `web/app/daily-plan/CreationRulesPanel.test.tsx`
 
 **Interfaces:**
 - Produces: rule fields `skill_mode: "auto" | "manual"` and `skill_name: string | null`.
@@ -508,7 +508,7 @@ silently presenting an empty manual selector.
 
 ```bash
 conda run -n wems python -m pytest backend/tests/test_daily_creation_rule_schema.py backend/tests/test_daily_creation_rules_router.py backend/tests/test_daily_creation_service.py -q
-cd wemedia-studio
+cd web
 pnpm exec vitest run app/daily-plan/DailyPlanClient.test.tsx app/daily-plan/CreationRuleDialog.test.tsx app/daily-plan/CreationRulesPanel.test.tsx
 ```
 
@@ -517,7 +517,7 @@ Expected: all pass.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add backend/models.py backend/database.py backend/routers/daily_plan.py backend/daily_creation_service.py backend/tests/test_daily_creation_rule_schema.py backend/tests/test_daily_creation_rules_router.py backend/tests/test_daily_creation_service.py wemedia-studio/lib/api/daily-plan.ts wemedia-studio/app/daily-plan/DailyPlanClient.tsx wemedia-studio/app/daily-plan/CreationRuleDialog.tsx wemedia-studio/app/daily-plan/CreationRulesPanel.tsx wemedia-studio/app/daily-plan/DailyPlanClient.test.tsx wemedia-studio/app/daily-plan/CreationRuleDialog.test.tsx wemedia-studio/app/daily-plan/CreationRulesPanel.test.tsx
+git add backend/models.py backend/database.py backend/routers/daily_plan.py backend/daily_creation_service.py backend/tests/test_daily_creation_rule_schema.py backend/tests/test_daily_creation_rules_router.py backend/tests/test_daily_creation_service.py web/lib/api/daily-plan.ts web/app/daily-plan/DailyPlanClient.tsx web/app/daily-plan/CreationRuleDialog.tsx web/app/daily-plan/CreationRulesPanel.tsx web/app/daily-plan/DailyPlanClient.test.tsx web/app/daily-plan/CreationRuleDialog.test.tsx web/app/daily-plan/CreationRulesPanel.test.tsx
 git diff --cached --check
 git commit -m "feat: configure skills for daily agents"
 ```
@@ -643,11 +643,11 @@ git commit -m "feat: persist agent creation outputs atomically"
 ### Task 6: Durable Background Agent Adapter
 
 **Files:**
-- Create: `wemedia-studio/lib/ai/agent-execution-client.ts`
-- Test: `wemedia-studio/lib/ai/agent-execution-client.test.ts`
-- Create: `wemedia-studio/lib/ai/daily-creation-agent-job.ts`
-- Test: `wemedia-studio/lib/ai/daily-creation-agent-job.test.ts`
-- Modify: `wemedia-studio/lib/ai/job-client.ts`
+- Create: `web/lib/ai/agent-execution-client.ts`
+- Test: `web/lib/ai/agent-execution-client.test.ts`
+- Create: `web/lib/ai/daily-creation-agent-job.ts`
+- Test: `web/lib/ai/daily-creation-agent-job.test.ts`
+- Modify: `web/lib/ai/job-client.ts`
 
 **Interfaces:**
 - Consumes: Tasks 2-5 shared runtime, Agent APIs, atomic persistence tool, and immutable rule snapshots.
@@ -674,7 +674,7 @@ successful save-tool result completes the job.
 - [ ] **Step 2: Run focused tests and verify RED**
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm exec vitest run lib/ai/agent-execution-client.test.ts lib/ai/daily-creation-agent-job.test.ts
 ```
 
@@ -733,7 +733,7 @@ step and leave the creation run status consistent with any committed batch.
 - [ ] **Step 7: Run adapter tests**
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm exec vitest run lib/ai/agent-execution-client.test.ts lib/ai/daily-creation-agent-job.test.ts lib/ai/agent-runtime.test.ts
 ```
 
@@ -743,7 +743,7 @@ tool replay, and completion evidence tests all pass.
 - [ ] **Step 8: Commit**
 
 ```bash
-git add wemedia-studio/lib/ai/agent-execution-client.ts wemedia-studio/lib/ai/agent-execution-client.test.ts wemedia-studio/lib/ai/daily-creation-agent-job.ts wemedia-studio/lib/ai/daily-creation-agent-job.test.ts wemedia-studio/lib/ai/job-client.ts
+git add web/lib/ai/agent-execution-client.ts web/lib/ai/agent-execution-client.test.ts web/lib/ai/daily-creation-agent-job.ts web/lib/ai/daily-creation-agent-job.test.ts web/lib/ai/job-client.ts
 git diff --cached --check
 git commit -m "feat: run daily creation through shared agent"
 ```
@@ -755,8 +755,8 @@ git commit -m "feat: run daily creation through shared agent"
 **Files:**
 - Modify: `backend/daily_creation_service.py`
 - Test: `backend/tests/test_daily_creation_service.py`
-- Modify: `wemedia-studio/scripts/content-worker.ts`
-- Test: `wemedia-studio/scripts/content-worker.test.ts`
+- Modify: `web/scripts/content-worker.ts`
+- Test: `web/scripts/content-worker.test.ts`
 - Modify: `backend/job_reconciliation.py`
 - Test: `backend/tests/test_job_reconciliation.py`
 
@@ -785,7 +785,7 @@ expect(resolveContentJobRunner('daily_creation', { runtimeVersion: undefined }))
 
 ```bash
 conda run -n wems python -m pytest backend/tests/test_daily_creation_service.py backend/tests/test_job_reconciliation.py -q
-cd wemedia-studio
+cd web
 pnpm exec vitest run scripts/content-worker.test.ts
 ```
 
@@ -813,7 +813,7 @@ Startup catch-up creates versioned new jobs without modifying existing jobs.
 
 ```bash
 conda run -n wems python -m pytest backend/tests/test_daily_creation_service.py backend/tests/test_job_reconciliation.py backend/tests/test_daily_creation_scheduler.py -q
-cd wemedia-studio
+cd web
 pnpm exec vitest run scripts/content-worker.test.ts lib/ai/daily-creation-agent-job.test.ts
 ```
 
@@ -822,7 +822,7 @@ Expected: all pass.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add backend/daily_creation_service.py backend/tests/test_daily_creation_service.py backend/job_reconciliation.py backend/tests/test_job_reconciliation.py wemedia-studio/scripts/content-worker.ts wemedia-studio/scripts/content-worker.test.ts
+git add backend/daily_creation_service.py backend/tests/test_daily_creation_service.py backend/job_reconciliation.py backend/tests/test_job_reconciliation.py web/scripts/content-worker.ts web/scripts/content-worker.test.ts
 git diff --cached --check
 git commit -m "feat: cut daily runs over to agent runtime"
 ```
@@ -834,9 +834,9 @@ git commit -m "feat: cut daily runs over to agent runtime"
 **Files:**
 - Modify: `backend/routers/daily_plan.py`
 - Test: `backend/tests/test_daily_creation_rules_router.py`
-- Modify: `wemedia-studio/lib/api/daily-plan.ts`
-- Modify: `wemedia-studio/app/daily-plan/CreationRunsPanel.tsx`
-- Test: `wemedia-studio/app/daily-plan/CreationRunsPanel.test.tsx`
+- Modify: `web/lib/api/daily-plan.ts`
+- Modify: `web/app/daily-plan/CreationRunsPanel.tsx`
+- Test: `web/app/daily-plan/CreationRunsPanel.test.tsx`
 
 **Interfaces:**
 - Consumes: Agent execution and tool-call audit records.
@@ -858,7 +858,7 @@ Also test an `自动批准` badge and uncertain-side-effect failure text.
 
 ```bash
 conda run -n wems python -m pytest backend/tests/test_daily_creation_rules_router.py -q
-cd wemedia-studio
+cd web
 pnpm exec vitest run app/daily-plan/CreationRunsPanel.test.tsx
 ```
 
@@ -898,7 +898,7 @@ output IDs. Legacy runs continue to render existing step/detail data.
 
 ```bash
 conda run -n wems python -m pytest backend/tests/test_daily_creation_rules_router.py -q
-cd wemedia-studio
+cd web
 pnpm exec vitest run app/daily-plan/CreationRunsPanel.test.tsx app/daily-plan/DailyPlanClient.test.tsx
 ```
 
@@ -907,7 +907,7 @@ Expected: all pass.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/routers/daily_plan.py backend/tests/test_daily_creation_rules_router.py wemedia-studio/lib/api/daily-plan.ts wemedia-studio/app/daily-plan/CreationRunsPanel.tsx wemedia-studio/app/daily-plan/CreationRunsPanel.test.tsx
+git add backend/routers/daily_plan.py backend/tests/test_daily_creation_rules_router.py web/lib/api/daily-plan.ts web/app/daily-plan/CreationRunsPanel.tsx web/app/daily-plan/CreationRunsPanel.test.tsx
 git diff --cached --check
 git commit -m "feat: show daily agent execution audit"
 ```
@@ -917,7 +917,7 @@ git commit -m "feat: show daily agent execution audit"
 ### Task 9: Integration, Failure Recovery, and Release Verification
 
 **Files:**
-- Create: `wemedia-studio/lib/ai/daily-creation-agent-integration.test.ts`
+- Create: `web/lib/ai/daily-creation-agent-integration.test.ts`
 - Modify: `backend/tests/test_job_reconciliation.py`
 - Modify: `backend/tests/test_mcp_daily_creation_tools.py`
 - Modify: `docs/superpowers/specs/2026-08-04-shared-chat-background-agent-runtime-design.md` only when verified behavior requires clarification.
@@ -949,7 +949,7 @@ Cover these exact cases:
 
 ```bash
 conda run -n wems python -m pytest backend/tests/test_agent_execution_service.py backend/tests/test_agent_executions_router.py backend/tests/test_daily_creation_service.py backend/tests/test_mcp_daily_creation_tools.py backend/tests/test_job_reconciliation.py backend/tests/test_daily_creation_scheduler.py -q
-cd wemedia-studio
+cd web
 pnpm exec vitest run lib/ai/agent-runtime.test.ts lib/ai/agent-tool-policy.test.ts lib/ai/daily-creation-agent-job.test.ts lib/ai/daily-creation-agent-integration.test.ts app/api/chat/route.test.ts app/daily-plan/CreationRuleDialog.test.tsx app/daily-plan/CreationRunsPanel.test.tsx scripts/content-worker.test.ts
 ```
 
@@ -961,7 +961,7 @@ Run outside restricted networking where provider tests need loopback listeners:
 
 ```bash
 conda run -n wems python -m pytest backend/tests -q
-cd wemedia-studio
+cd web
 pnpm test
 ```
 
@@ -971,7 +971,7 @@ partial run successful.
 - [ ] **Step 5: Run lint and production build**
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm exec eslint app/api/chat/route.ts app/daily-plan/CreationRuleDialog.tsx app/daily-plan/CreationRunsPanel.tsx lib/ai/agent-runtime.ts lib/ai/agent-tool-policy.ts lib/ai/agent-execution-client.ts lib/ai/daily-creation-agent-job.ts lib/ai/global-chat-tools.ts scripts/content-worker.ts
 pnpm build
 ```
@@ -989,7 +989,7 @@ success, and no duplicate after a Worker restart.
 - [ ] **Step 7: Commit integration coverage**
 
 ```bash
-git add wemedia-studio/lib/ai/daily-creation-agent-integration.test.ts backend/tests/test_job_reconciliation.py backend/tests/test_mcp_daily_creation_tools.py docs/superpowers/specs/2026-08-04-shared-chat-background-agent-runtime-design.md
+git add web/lib/ai/daily-creation-agent-integration.test.ts backend/tests/test_job_reconciliation.py backend/tests/test_mcp_daily_creation_tools.py docs/superpowers/specs/2026-08-04-shared-chat-background-agent-runtime-design.md
 git diff --cached --check
 git commit -m "test: verify shared daily agent runtime"
 ```

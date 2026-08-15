@@ -20,8 +20,8 @@
 ### Task 1: Define and test the shared Chat content column
 
 **Files:**
-- Create: `wemedia-studio/app/chat/chat-layout.ts`
-- Create: `wemedia-studio/app/chat/chat-layout.test.ts`
+- Create: `web/app/chat/chat-layout.ts`
+- Create: `web/app/chat/chat-layout.test.ts`
 
 **Interfaces:**
 - Produces: `chatContentColumn: string` for the inner conversation and composer wrappers.
@@ -62,15 +62,15 @@ Expected: PASS with 1 test.
 - [ ] **Step 5: Commit the contract and test**
 
 ```bash
-git add wemedia-studio/app/chat/chat-layout.ts wemedia-studio/app/chat/chat-layout.test.ts
+git add web/app/chat/chat-layout.ts web/app/chat/chat-layout.test.ts
 git commit -m "test(chat): define workspace column contract"
 ```
 
 ### Task 2: Apply the shared column to conversation and composer
 
 **Files:**
-- Modify: `wemedia-studio/app/chat/ChatClient.tsx:1-360`
-- Test: `wemedia-studio/app/chat/chat-layout.test.ts`
+- Modify: `web/app/chat/ChatClient.tsx:1-360`
+- Test: `web/app/chat/chat-layout.test.ts`
 
 **Interfaces:**
 - Consumes: `chatContentColumn` from Task 1.
@@ -124,6 +124,6 @@ Expected: focused layout test, full frontend suite, TypeScript, and production b
 - [ ] **Step 5: Commit the visual integration**
 
 ```bash
-git add wemedia-studio/app/chat/ChatClient.tsx wemedia-studio/app/chat/chat-layout.test.ts
+git add web/app/chat/ChatClient.tsx web/app/chat/chat-layout.test.ts
 git commit -m "fix(chat): unify workspace layout"
 ```

@@ -21,20 +21,20 @@
 
 ## File Structure
 
-- Modify `wemedia-studio/lib/api/assets.ts`: add the optional upload directory query parameter.
-- Modify `wemedia-studio/lib/api/assets.test.ts`: verify directory encoding and multipart preservation.
-- Create `wemedia-studio/app/assets/MediaUploadDialog.tsx`: own accepted-file parsing, queue UI, paste/drop listeners, concurrency, retry, close confirmation, and object-URL cleanup.
-- Create `wemedia-studio/app/assets/MediaUploadDialog.test.tsx`: exercise the Dialog as a user and verify queue/upload behavior.
-- Modify `wemedia-studio/app/assets/AssetsClient.tsx`: expose the media upload action, snapshot the directory, and register successful assets.
-- Modify `wemedia-studio/app/assets/AssetsClient.test.tsx`: verify scope, directory snapshot, and immediate grid refresh.
+- Modify `web/lib/api/assets.ts`: add the optional upload directory query parameter.
+- Modify `web/lib/api/assets.test.ts`: verify directory encoding and multipart preservation.
+- Create `web/app/assets/MediaUploadDialog.tsx`: own accepted-file parsing, queue UI, paste/drop listeners, concurrency, retry, close confirmation, and object-URL cleanup.
+- Create `web/app/assets/MediaUploadDialog.test.tsx`: exercise the Dialog as a user and verify queue/upload behavior.
+- Modify `web/app/assets/AssetsClient.tsx`: expose the media upload action, snapshot the directory, and register successful assets.
+- Modify `web/app/assets/AssetsClient.test.tsx`: verify scope, directory snapshot, and immediate grid refresh.
 
 ---
 
 ### Task 1: Directory-aware single-file upload API
 
 **Files:**
-- Modify: `wemedia-studio/lib/api/assets.ts`
-- Test: `wemedia-studio/lib/api/assets.test.ts`
+- Modify: `web/lib/api/assets.ts`
+- Test: `web/lib/api/assets.test.ts`
 
 **Interfaces:**
 - Consumes: existing backend `POST /api/assets/upload?media_kind=<kind>&directory=<name>`.
@@ -73,7 +73,7 @@ it('uploads media into an encoded creative-asset directory', async () => {
 Run:
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm test lib/api/assets.test.ts
 ```
 
@@ -108,7 +108,7 @@ Keep the third parameter optional so `PromptAssetWorkspace`, `EnvironmentPickerD
 Run:
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm test lib/api/assets.test.ts app/assets/PromptAssetWorkspace.test.tsx app/digital-humans/role-management.test.tsx
 ```
 
@@ -117,7 +117,7 @@ Expected: all tests pass; existing two-argument callers remain valid.
 - [ ] **Step 5: Commit the API contract change**
 
 ```bash
-git add wemedia-studio/lib/api/assets.ts wemedia-studio/lib/api/assets.test.ts
+git add web/lib/api/assets.ts web/lib/api/assets.test.ts
 git commit -m "feat: upload media assets into selected directory"
 ```
 
@@ -126,8 +126,8 @@ git commit -m "feat: upload media assets into selected directory"
 ### Task 2: Batch upload queue Dialog
 
 **Files:**
-- Create: `wemedia-studio/app/assets/MediaUploadDialog.tsx`
-- Create: `wemedia-studio/app/assets/MediaUploadDialog.test.tsx`
+- Create: `web/app/assets/MediaUploadDialog.tsx`
+- Create: `web/app/assets/MediaUploadDialog.test.tsx`
 
 **Interfaces:**
 - Consumes: `uploadCreativeAsset(kind, file, directory)` from Task 1.
@@ -167,7 +167,7 @@ Use `fireEvent.drop(screen.getByTestId('media-upload-dropzone'), { dataTransfer:
 Run:
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm test app/assets/MediaUploadDialog.test.tsx
 ```
 
@@ -221,7 +221,7 @@ Keep `DialogContent size="md"`; use existing Button, Dialog, AlertDialog, Progre
 Run:
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm test app/assets/MediaUploadDialog.test.tsx
 ```
 
@@ -279,7 +279,7 @@ Implement the nested AlertDialog and route overlay close, close icon, and Cancel
 Run:
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm test app/assets/MediaUploadDialog.test.tsx
 pnpm exec eslint app/assets/MediaUploadDialog.tsx app/assets/MediaUploadDialog.test.tsx
 ```
@@ -289,7 +289,7 @@ Expected: all component tests pass and ESLint exits 0.
 - [ ] **Step 11: Commit the isolated Dialog**
 
 ```bash
-git add wemedia-studio/app/assets/MediaUploadDialog.tsx wemedia-studio/app/assets/MediaUploadDialog.test.tsx
+git add web/app/assets/MediaUploadDialog.tsx web/app/assets/MediaUploadDialog.test.tsx
 git commit -m "feat: add media batch upload dialog"
 ```
 
@@ -298,8 +298,8 @@ git commit -m "feat: add media batch upload dialog"
 ### Task 3: Wire the upload flow into creative assets
 
 **Files:**
-- Modify: `wemedia-studio/app/assets/AssetsClient.tsx`
-- Test: `wemedia-studio/app/assets/AssetsClient.test.tsx`
+- Modify: `web/app/assets/AssetsClient.tsx`
+- Test: `web/app/assets/AssetsClient.test.tsx`
 
 **Interfaces:**
 - Consumes: `MediaUploadDialogProps` and its `onAssetUploaded` callback from Task 2.
@@ -324,7 +324,7 @@ For directory capture, load a media directory named `人物参考`, select it, o
 Run:
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm test app/assets/AssetsClient.test.tsx
 ```
 
@@ -360,7 +360,7 @@ Do not bind the Dialog’s directory prop directly to live `directory`; the capt
 Run:
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm test app/assets/AssetsClient.test.tsx app/assets/MediaUploadDialog.test.tsx app/assets/assets-layout.test.ts app/assets/assets-system-directory.test.tsx
 pnpm exec eslint app/assets/AssetsClient.tsx app/assets/AssetsClient.test.tsx
 ```
@@ -370,7 +370,7 @@ Expected: all tests pass; compact grid and preview regressions remain green.
 - [ ] **Step 5: Commit the workspace integration**
 
 ```bash
-git add wemedia-studio/app/assets/AssetsClient.tsx wemedia-studio/app/assets/AssetsClient.test.tsx
+git add web/app/assets/AssetsClient.tsx web/app/assets/AssetsClient.test.tsx
 git commit -m "feat: expose media uploads in creative assets"
 ```
 
@@ -388,7 +388,7 @@ git commit -m "feat: expose media uploads in creative assets"
 - [ ] **Step 1: Run all focused automated regressions**
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm test lib/api/assets.test.ts app/assets/MediaUploadDialog.test.tsx app/assets/AssetsClient.test.tsx app/assets/PromptAssetWorkspace.test.tsx app/assets/assets-layout.test.ts app/assets/assets-system-directory.test.tsx app/digital-humans/role-management.test.tsx
 pnpm exec eslint lib/api/assets.ts lib/api/assets.test.ts app/assets/MediaUploadDialog.tsx app/assets/MediaUploadDialog.test.tsx app/assets/AssetsClient.tsx app/assets/AssetsClient.test.tsx
 ```
@@ -427,7 +427,7 @@ Use disposable test media only. Record exact observed counts and any media type 
 ```bash
 git diff --check
 git status --short
-git diff -- wemedia-studio/lib/api/assets.ts wemedia-studio/lib/api/assets.test.ts wemedia-studio/app/assets/MediaUploadDialog.tsx wemedia-studio/app/assets/MediaUploadDialog.test.tsx wemedia-studio/app/assets/AssetsClient.tsx wemedia-studio/app/assets/AssetsClient.test.tsx
+git diff -- web/lib/api/assets.ts web/lib/api/assets.test.ts web/app/assets/MediaUploadDialog.tsx web/app/assets/MediaUploadDialog.test.tsx web/app/assets/AssetsClient.tsx web/app/assets/AssetsClient.test.tsx
 ```
 
 Expected: no whitespace errors; only intended upload changes are reviewed, while unrelated existing worktree changes remain untouched.

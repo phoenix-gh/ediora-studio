@@ -100,12 +100,12 @@ MK 选定方向后，切换到 `human-social-copy` skill：先确认发布账号
 
 ---
 
-## 存档到 WeMedia Studio
+## 存档到 Ediora
 
-选题可以存入 WeMedia Studio 选题库（优先 MCP 工具）：
+选题可以存入 Ediora 选题库（优先 MCP 工具）：
 - 用 `create_content_topic` 创建选题
 - 用 `add_topic_source` 关联源文章 URL
-- 归入对应分类（参考 wemedia-studio skill 的分类体系）
+- 归入对应分类（参考 Ediora skill 的分类体系）
 
 ---
 

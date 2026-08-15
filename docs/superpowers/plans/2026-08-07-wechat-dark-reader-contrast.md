@@ -20,9 +20,9 @@
 ### Task 1: Add the paper content theme and enable it for WeChat
 
 **Files:**
-- Create: `wemedia-studio/components/features/ArticleReader.test.tsx`
-- Modify: `wemedia-studio/components/features/ArticleReader.tsx`
-- Modify: `wemedia-studio/app/wechat/WechatClient.tsx`
+- Create: `web/components/features/ArticleReader.test.tsx`
+- Modify: `web/components/features/ArticleReader.tsx`
+- Modify: `web/app/wechat/WechatClient.tsx`
 
 **Interfaces:**
 - Produces: `contentTheme?: 'adaptive' | 'paper'` on article reader modal, panel, and responsive props.
@@ -53,7 +53,7 @@ Run:
 ```bash
 pnpm test components/features/ArticleReader.test.tsx app/wechat/WechatClient.test.tsx
 pnpm exec eslint components/features/ArticleReader.tsx components/features/ArticleReader.test.tsx app/wechat/WechatClient.tsx
-git diff --check -- wemedia-studio/components/features/ArticleReader.tsx wemedia-studio/components/features/ArticleReader.test.tsx wemedia-studio/app/wechat/WechatClient.tsx
+git diff --check -- web/components/features/ArticleReader.tsx web/components/features/ArticleReader.test.tsx web/app/wechat/WechatClient.tsx
 ```
 
 Expected: focused tests pass, ESLint exits zero, and `git diff --check` reports no errors.
@@ -70,6 +70,6 @@ Use Playwright because the Browser plugin is unavailable. Open `http://127.0.0.1
 - [ ] **Step 7: Commit only the scoped implementation files**
 
 ```bash
-git add -- wemedia-studio/components/features/ArticleReader.tsx wemedia-studio/components/features/ArticleReader.test.tsx wemedia-studio/app/wechat/WechatClient.tsx
+git add -- web/components/features/ArticleReader.tsx web/components/features/ArticleReader.test.tsx web/app/wechat/WechatClient.tsx
 git commit -m "fix: keep WeChat articles readable in dark mode"
 ```

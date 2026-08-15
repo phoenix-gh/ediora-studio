@@ -217,7 +217,7 @@ git commit -m "feat: render markdown in extension draft preview"
 ### Task 4: 端到端图片与滚动回归
 
 **Files:**
-- Modify: `wemedia-studio/e2e/extension-workbench-layout.spec.ts`
+- Modify: `web/e2e/extension-workbench-layout.spec.ts`
 - Modify: `chrome-extension/tests/manifest.test.js` only if the manifest contract needs an explicit renderer resource assertion.
 
 **Interfaces:**
@@ -255,6 +255,6 @@ Expected: all extension tests, focused browser tests, syntax checks, and diff ch
 - [x] **Step 5: Commit the end-to-end regression**
 
 ```bash
-git add wemedia-studio/e2e/extension-workbench-layout.spec.ts chrome-extension/tests/manifest.test.js
+git add web/e2e/extension-workbench-layout.spec.ts chrome-extension/tests/manifest.test.js
 git commit -m "test: cover extension markdown image preview"
 ```

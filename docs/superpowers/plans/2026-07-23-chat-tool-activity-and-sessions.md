@@ -22,8 +22,8 @@
 **Files:**
 - Modify: `backend/routers/chat.py:95-145`
 - Modify: `backend/tests/test_chat_router.py`
-- Modify: `wemedia-studio/lib/api/chat.ts`
-- Modify: `wemedia-studio/lib/api/chat.test.ts`
+- Modify: `web/lib/api/chat.ts`
+- Modify: `web/lib/api/chat.test.ts`
 
 **Interfaces:**
 - Produces: `DELETE /api/chat/sessions/{session_id}` returning HTTP 204.
@@ -87,15 +87,15 @@ export async function deleteChatSession(sessionId: number) {
 Run: `conda run -n wems pytest tests/test_chat_router.py -q && pnpm exec vitest run lib/api/chat.test.ts`
 
 ```bash
-git add backend/routers/chat.py backend/tests/test_chat_router.py wemedia-studio/lib/api/chat.ts wemedia-studio/lib/api/chat.test.ts
+git add backend/routers/chat.py backend/tests/test_chat_router.py web/lib/api/chat.ts web/lib/api/chat.test.ts
 git commit -m "feat(chat): delete persisted sessions"
 ```
 
 ### Task 2: Collapse tool activity into one concise UI group
 
 **Files:**
-- Modify: `wemedia-studio/app/chat/ChatClient.tsx:20-140`
-- Modify: `wemedia-studio/app/chat/chat-layout.test.ts`
+- Modify: `web/app/chat/ChatClient.tsx:20-140`
+- Modify: `web/app/chat/chat-layout.test.ts`
 
 **Interfaces:**
 - Produces: `ToolActivityGroup({ parts }: { parts: ToolEventPart[] })`.
@@ -136,15 +136,15 @@ Render details collapsed by default. The details list shows each mapped tool lab
 Run: `pnpm exec vitest run app/chat/chat-layout.test.ts && pnpm test && pnpm exec tsc --noEmit`
 
 ```bash
-git add wemedia-studio/app/chat/ChatClient.tsx wemedia-studio/app/chat/chat-layout.test.ts
+git add web/app/chat/ChatClient.tsx web/app/chat/chat-layout.test.ts
 git commit -m "feat(chat): collapse tool activity"
 ```
 
 ### Task 3: Add sidebar deletion and lazy new-conversation state
 
 **Files:**
-- Modify: `wemedia-studio/app/chat/ChatClient.tsx:145-340`
-- Modify: `wemedia-studio/app/chat/chat-layout.test.ts`
+- Modify: `web/app/chat/ChatClient.tsx:145-340`
+- Modify: `web/app/chat/chat-layout.test.ts`
 
 **Interfaces:**
 - Consumes: `deleteChatSession` from Task 1.
@@ -186,6 +186,6 @@ active.
 Run: `pnpm exec vitest run app/chat/chat-layout.test.ts && pnpm test && pnpm exec tsc --noEmit && pnpm build && conda run -n wems pytest tests/test_chat_router.py -q`
 
 ```bash
-git add wemedia-studio/app/chat/ChatClient.tsx wemedia-studio/app/chat/chat-layout.test.ts
+git add web/app/chat/ChatClient.tsx web/app/chat/chat-layout.test.ts
 git commit -m "feat(chat): manage lazy sessions"
 ```

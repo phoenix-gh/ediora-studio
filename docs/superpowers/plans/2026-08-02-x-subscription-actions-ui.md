@@ -22,8 +22,8 @@
 ### Task 1: Accessible Menu Primitive
 
 **Files:**
-- Create: `wemedia-studio/components/ui/dropdown-menu.tsx`
-- Modify: `wemedia-studio/components/ui/ui-primitives.test.tsx`
+- Create: `web/components/ui/dropdown-menu.tsx`
+- Modify: `web/components/ui/ui-primitives.test.tsx`
 
 **Interfaces:**
 - Consumes: `@base-ui/react/menu`, `cn()` from `@/lib/utils`.
@@ -52,16 +52,16 @@ Expected: all primitive tests PASS.
 - [ ] **Step 5: Commit the primitive**
 
 ```bash
-git add wemedia-studio/components/ui/dropdown-menu.tsx wemedia-studio/components/ui/ui-primitives.test.tsx
+git add web/components/ui/dropdown-menu.tsx web/components/ui/ui-primitives.test.tsx
 git commit -m "feat: add accessible dropdown menu primitive"
 ```
 
 ### Task 2: Compact Subscription Row
 
 **Files:**
-- Create: `wemedia-studio/app/x/XSubscriptionRow.tsx`
-- Create: `wemedia-studio/app/x/XSubscriptionRow.test.tsx`
-- Modify: `wemedia-studio/app/x/XClient.tsx`
+- Create: `web/app/x/XSubscriptionRow.tsx`
+- Create: `web/app/x/XSubscriptionRow.test.tsx`
+- Modify: `web/app/x/XClient.tsx`
 
 **Interfaces:**
 - Consumes: `XSubscription`, `TopicSourceRule`, `busy`, `collecting`, `screening`, and callback props for toggle, collect, edit, notification, ingestion, screening, backfill, and delete.
@@ -98,15 +98,15 @@ Expected: all tests PASS.
 - [ ] **Step 7: Commit the row redesign**
 
 ```bash
-git add wemedia-studio/app/x/XSubscriptionRow.tsx wemedia-studio/app/x/XSubscriptionRow.test.tsx wemedia-studio/app/x/XClient.tsx
+git add web/app/x/XSubscriptionRow.tsx web/app/x/XSubscriptionRow.test.tsx web/app/x/XClient.tsx
 git commit -m "feat: compact X subscription row actions"
 ```
 
 ### Task 3: Responsive and Regression Verification
 
 **Files:**
-- Modify only if verification finds an issue: `wemedia-studio/app/x/XSubscriptionRow.tsx`
-- Modify only if a regression assertion is missing: `wemedia-studio/app/x/XSubscriptionRow.test.tsx`
+- Modify only if verification finds an issue: `web/app/x/XSubscriptionRow.tsx`
+- Modify only if a regression assertion is missing: `web/app/x/XSubscriptionRow.test.tsx`
 
 **Interfaces:**
 - Consumes: the completed dropdown primitive and subscription row.
@@ -144,6 +144,6 @@ Capture the desktop and narrow dialog states, inspect the screenshots for alignm
 - [ ] **Step 6: Commit any verification fixes**
 
 ```bash
-git add wemedia-studio/app/x/XSubscriptionRow.tsx wemedia-studio/app/x/XSubscriptionRow.test.tsx
+git add web/app/x/XSubscriptionRow.tsx web/app/x/XSubscriptionRow.test.tsx
 git commit -m "fix: polish responsive X subscription actions"
 ```

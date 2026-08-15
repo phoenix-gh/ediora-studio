@@ -39,14 +39,14 @@
 ### Task 2: Make Agent dispatch unconditional
 
 **Files:**
-- Modify: `wemedia-studio/scripts/content-worker.test.ts`
-- Modify: `wemedia-studio/scripts/content-worker.ts`
-- Modify: `wemedia-studio/lib/ai/daily-creation-agent-job.test.ts`
-- Modify: `wemedia-studio/lib/ai/daily-creation-agent-integration.test.ts`
-- Modify: `wemedia-studio/lib/ai/content-job.ts`
-- Modify: `wemedia-studio/lib/ai/content-job.test.ts`
-- Delete: `wemedia-studio/lib/ai/daily-creation-job.ts`
-- Delete: `wemedia-studio/lib/ai/daily-creation-job.test.ts`
+- Modify: `web/scripts/content-worker.test.ts`
+- Modify: `web/scripts/content-worker.ts`
+- Modify: `web/lib/ai/daily-creation-agent-job.test.ts`
+- Modify: `web/lib/ai/daily-creation-agent-integration.test.ts`
+- Modify: `web/lib/ai/content-job.ts`
+- Modify: `web/lib/ai/content-job.test.ts`
+- Delete: `web/lib/ai/daily-creation-job.ts`
+- Delete: `web/lib/ai/daily-creation-job.test.ts`
 
 **Interfaces:**
 - Consumes: `resolveContentJobRunner(flow, dependencies)`.

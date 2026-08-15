@@ -2,7 +2,7 @@
 
 ## 目标
 
-把 `/mnt/d/prompts/prompt_X爆款长文章Article.md` 整理为 WeMediaStudio 内置 Skill，使 Agent 在创作 X/Twitter Article 独立长文章时能够自主发现并加载它。Skill 的系统标识为 `x-article-writing`，标题语义为 “X Article Writing”。
+把 `/mnt/d/prompts/prompt_X爆款长文章Article.md` 整理为 Ediora 内置 Skill，使 Agent 在创作 X/Twitter Article 独立长文章时能够自主发现并加载它。Skill 的系统标识为 `x-article-writing`，标题语义为 “X Article Writing”。
 
 本 Skill 只服务 X/Twitter Article，不覆盖普通中文长推、Thread 或社交媒体短帖；后者继续由 `human-social-copy` 处理。
 
@@ -56,7 +56,7 @@ Skill 描述必须明确覆盖以下任务：
 
 ## 系统接入
 
-Skill 放入 `wemedia-studio/skills/x-article-writing/`，由现有技能注册表自动发现。Skill 采用内置来源，默认启用，可在技能管理页关闭，但不能作为上传 Skill 删除。
+Skill 放入 `web/skills/x-article-writing/`，由现有技能注册表自动发现。Skill 采用内置来源，默认启用，可在技能管理页关闭，但不能作为上传 Skill 删除。
 
 `WMS_SKILL.json` 只声明通用执行提示，不预加载全部参考资料，避免每次加载占用不必要上下文；Agent 根据 `SKILL.md` 的可观察条件调用 `readSkillReference`。
 

@@ -16,8 +16,8 @@
 
 - `backend/routers/x.py` — `SubscriptionPatch` schema 加 2 字段；`patch_subscription` handler 应用并校验。
 - `backend/tests/test_x_router.py` — 新增 4 条 PATCH/create 测试。
-- `wemedia-studio/lib/api/x.ts` — `patchXSubscription` body 类型扩字段。
-- `wemedia-studio/app/x/XClient.tsx` — 新建表单名称框；搜索行 ✏️ 编辑模式；提交分发到 patch。
+- `web/lib/api/x.ts` — `patchXSubscription` body 类型扩字段。
+- `web/app/x/XClient.tsx` — 新建表单名称框；搜索行 ✏️ 编辑模式；提交分发到 patch。
 
 ---
 
@@ -165,11 +165,11 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 ## Task 3: 前端 API 类型扩字段
 
 **Files:**
-- Modify: `wemedia-studio/lib/api/x.ts:106-114` (`patchXSubscription`)
+- Modify: `web/lib/api/x.ts:106-114` (`patchXSubscription`)
 
 - [ ] **Step 1: 扩 body 类型**
 
-`wemedia-studio/lib/api/x.ts` 把：
+`web/lib/api/x.ts` 把：
 
 ```ts
 export async function patchXSubscription(
@@ -189,13 +189,13 @@ export async function patchXSubscription(
 
 - [ ] **Step 2: 类型检查**
 
-Run: `source ~/.zshrc && cd wemedia-studio && npx tsc --noEmit`
+Run: `source ~/.zshrc && cd web && npx tsc --noEmit`
 Expected: 无新增报错（此改动只放宽类型）
 
 - [ ] **Step 3: 提交**
 
 ```bash
-git add wemedia-studio/lib/api/x.ts
+git add web/lib/api/x.ts
 git commit -m "feat(x): patchXSubscription accepts raw_query/max_results
 
 Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
@@ -206,7 +206,7 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 ## Task 4: 新建表单加可选「名称」输入
 
 **Files:**
-- Modify: `wemedia-studio/app/x/XClient.tsx`（`SubscribeDialog`，state 区 ~480、`submit` ~504、表单 JSX ~548-584）
+- Modify: `web/app/x/XClient.tsx`（`SubscribeDialog`，state 区 ~480、`submit` ~504、表单 JSX ~548-584）
 
 - [ ] **Step 1: 加 label state**
 
@@ -248,13 +248,13 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 
 - [ ] **Step 4: 类型检查**
 
-Run: `source ~/.zshrc && cd wemedia-studio && npx tsc --noEmit`
+Run: `source ~/.zshrc && cd web && npx tsc --noEmit`
 Expected: 无新增报错（`CreateXSubscriptionInput.label` 已存在）
 
 - [ ] **Step 5: 提交**
 
 ```bash
-git add wemedia-studio/app/x/XClient.tsx
+git add web/app/x/XClient.tsx
 git commit -m "feat(x): optional name field when creating a subscription
 
 Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
@@ -265,7 +265,7 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 ## Task 5: 搜索行 ✏️ 接管顶部表单进入编辑模式
 
 **Files:**
-- Modify: `wemedia-studio/app/x/XClient.tsx`（`SubscribeDialog`：state、submit、表单标题/按钮、搜索行 ✏️ onClick）
+- Modify: `web/app/x/XClient.tsx`（`SubscribeDialog`：state、submit、表单标题/按钮、搜索行 ✏️ onClick）
 
 设计：新增 `editingSearchId` 表示「顶部表单处于搜索编辑模式」。点搜索行 ✏️ → 预填 `rawQuery`/`maxResults`/`name`、强制 `kind='search'`、记录 id。提交时若 `editingSearchId != null` 走 `patchXSubscription` 而非 `onAdd`。提供「取消」退出。时间线行 ✏️ 维持现有行内改名不变。
 
@@ -398,7 +398,7 @@ Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
 
 - [ ] **Step 6: 类型检查**
 
-Run: `source ~/.zshrc && cd wemedia-studio && npx tsc --noEmit`
+Run: `source ~/.zshrc && cd web && npx tsc --noEmit`
 Expected: 无报错
 
 - [ ] **Step 7: 手动验证（启动应用）**
@@ -413,7 +413,7 @@ Expected: 无报错
 - [ ] **Step 8: 提交**
 
 ```bash
-git add wemedia-studio/app/x/XClient.tsx
+git add web/app/x/XClient.tsx
 git commit -m "feat(x): edit a search subscription's query/max_results via the top form
 
 Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"

@@ -85,6 +85,7 @@ def _role_payload(role: DigitalHuman) -> dict:
         "status": role.status,
         "provider": role.provider or "heygen",
         "portrait_asset_id": role.portrait_asset_id,
+        "voice_sample_asset_id": role.voice_sample_asset_id,
         "default_environment_asset_id": role.default_environment_asset_id,
         "look_asset_id": role.look_asset_id,
     }

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { JSDOM } from '../../wemedia-studio/node_modules/jsdom/lib/api.js'
+import { JSDOM } from '../../web/node_modules/jsdom/lib/api.js'
 
 import {
   hydrateMarkdownImages,

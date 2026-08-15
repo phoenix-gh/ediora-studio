@@ -151,7 +151,7 @@ Bot Token 仍是只写字段，设置输出只包含是否已配置和末四位�
 
 `POST /api/settings/telegram/test`
 
-只使用已保存配置发送固定中文消息，内容说明“WeMedia Studio Telegram 连接测试成功”并包含北京时间。成功后保存状态和测试时间；失败时保存清理后的错误，不改变 Token 或 Chat ID。
+只使用已保存配置发送固定中文消息，内容说明“Ediora Telegram 连接测试成功”并包含北京时间。成功后保存状态和测试时间；失败时保存清理后的错误，不改变 Token 或 Chat ID。
 
 `DELETE /api/settings/telegram`
 

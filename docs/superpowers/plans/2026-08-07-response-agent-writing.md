@@ -107,8 +107,8 @@ Expected: new link tests and existing worker-result idempotency tests pass.
 ### Task 2: 给共享 Agent runtime 增加工具可见性过滤
 
 **Files:**
-- Modify: `wemedia-studio/lib/ai/agent-runtime.ts:25-55,120-310`
-- Modify: `wemedia-studio/lib/ai/agent-runtime.test.ts`
+- Modify: `web/lib/ai/agent-runtime.ts:25-55,120-310`
+- Modify: `web/lib/ai/agent-runtime.test.ts`
 
 **Interfaces:**
 - Consumes: existing `ChatSkillRuntime.tools` and `OpenAgentRuntimeOptions`。
@@ -129,7 +129,7 @@ allowedToolNames: ['search_assets', 'save_draft']
 Run:
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm test -- lib/ai/agent-runtime.test.ts -t "allowed tool"
 ```
 
@@ -162,7 +162,7 @@ const visibleTools = () => {
 - [ ] **Step 4: Run the test to verify it passes**
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm test -- lib/ai/agent-runtime.test.ts
 ```
 
@@ -173,9 +173,9 @@ Expected: all shared runtime tests pass, including existing automatic Skill sele
 ### Task 3: 把 response output Worker 改成 Agent runner
 
 **Files:**
-- Modify: `wemedia-studio/lib/ai/agent-runtime-types.ts:29-36`
-- Modify: `wemedia-studio/lib/ai/content-response-output-job.ts:1-133`
-- Test: `wemedia-studio/lib/ai/content-response-output-job.test.ts`
+- Modify: `web/lib/ai/agent-runtime-types.ts:29-36`
+- Modify: `web/lib/ai/content-response-output-job.ts:1-133`
+- Test: `web/lib/ai/content-response-output-job.test.ts`
 
 **Interfaces:**
 - Consumes: `GET /responses/outputs/{output_id}/worker-context`、现有 Agent execution client、MCP `save_draft`。
@@ -209,7 +209,7 @@ Expected: all shared runtime tests pass, including existing automatic Skill sele
 - [ ] **Step 2: Run the tests to verify they fail**
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm test -- lib/ai/content-response-output-job.test.ts -t "Agent|save_draft|draft link"
 ```
 
@@ -267,7 +267,7 @@ linkDraft(jobId: number, outputId: number, draftId: number): Promise<Record<stri
 - [ ] **Step 5: Run the response Agent tests to verify they pass**
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm test -- lib/ai/content-response-output-job.test.ts
 ```
 
@@ -295,7 +295,7 @@ Expected: all focused response tests pass.
 - [ ] **Step 2: Run the focused TypeScript suite**
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm test -- \
   lib/ai/agent-runtime.test.ts \
   lib/ai/content-response-output-job.test.ts \
@@ -307,7 +307,7 @@ Expected: all selected Agent/runtime/worker tests pass, including the existing r
 - [ ] **Step 3: Run lint and static checks for changed TypeScript**
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm exec eslint lib/ai/agent-runtime.ts lib/ai/agent-runtime-types.ts lib/ai/content-response-output-job.ts lib/ai/content-response-output-job.test.ts scripts/content-worker.ts scripts/content-worker.test.ts
 pnpm exec tsc --noEmit --pretty false
 ```
@@ -319,7 +319,7 @@ Expected: changed files have no ESLint errors; any pre-existing unrelated type e
 ```bash
 git diff --check
 git status --short
-git diff -- backend/routers/responses.py backend/tests/test_responses_router.py wemedia-studio/lib/ai/agent-runtime.ts wemedia-studio/lib/ai/agent-runtime-types.ts wemedia-studio/lib/ai/content-response-output-job.ts wemedia-studio/scripts/content-worker.ts
+git diff -- backend/routers/responses.py backend/tests/test_responses_router.py web/lib/ai/agent-runtime.ts web/lib/ai/agent-runtime-types.ts web/lib/ai/content-response-output-job.ts web/scripts/content-worker.ts
 ```
 
 Confirm only the requested response Agent implementation and its tests are included; do not stage or commit in this session.

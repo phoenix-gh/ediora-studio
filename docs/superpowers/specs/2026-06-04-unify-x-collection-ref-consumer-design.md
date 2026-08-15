@@ -150,12 +150,12 @@ ALTER TABLE ref_collect_rules ADD COLUMN source_subscription_id INTEGER;
 
 ## 前端变更
 
-### X 订阅管理抽屉（`wemedia-studio/app/x/XClient.tsx`）
+### X 订阅管理抽屉（`web/app/x/XClient.tsx`）
 
 - URL 输入区旁增加「搜索订阅」表单：`raw_query`（或 query/min_faves/lang/days 结构化输入），提交时带 `kind="search"`。
 - 订阅列表项显示 `kind` 徽标（时间线 / 搜索）。
 
-### 参考库采集抽屉（`wemedia-studio/app/materials/MaterialsClient.tsx` `RulesDrawer`）
+### 参考库采集抽屉（`web/app/materials/MaterialsClient.tsx` `RulesDrawer`）
 
 - 标题与文案从「采集规则（X 泛流量）」改为「选取规则」。
 - 新建规则表单：把 `raw_query` 输入替换为**来源订阅选择器**（必选一个 X 订阅）+ 阈值（min_faves / days / max_results）+ exclude_sensitive。
@@ -163,8 +163,8 @@ ALTER TABLE ref_collect_rules ADD COLUMN source_subscription_id INTEGER;
 
 ### API 客户端
 
-- `wemedia-studio/lib/api/x.ts`：`SubscriptionOut` 加 `kind`；create 支持 `kind` + 搜索参数。
-- `wemedia-studio/lib/api/materials.ts`：`CollectRule` 加 `source_subscription_id`，create/patch 支持。
+- `web/lib/api/x.ts`：`SubscriptionOut` 加 `kind`；create 支持 `kind` + 搜索参数。
+- `web/lib/api/materials.ts`：`CollectRule` 加 `source_subscription_id`，create/patch 支持。
 
 ## 测试
 

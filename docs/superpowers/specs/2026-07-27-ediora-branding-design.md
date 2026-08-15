@@ -17,7 +17,7 @@ Replace the user-facing WeMedia Studio product name with **Ediora · 述策** an
 
 ### Technical identifiers that remain unchanged
 
-Do not rename the `wemedia-studio` package directory or package name, database names, API paths, environment variables, user-agent strings, local URLs, or internal code symbols. They are operational identifiers and renaming them would introduce migration and compatibility work without changing the product experience.
+Do not rename database names, API paths, environment variables, local URLs, or internal code symbols. They are operational identifiers and renaming them would introduce migration and compatibility work without changing the product experience. The frontend directory and package were later renamed from `wemedia-studio` to `web` / `ediora`.
 
 ## Approaches considered
 

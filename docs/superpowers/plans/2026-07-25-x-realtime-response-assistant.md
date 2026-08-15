@@ -35,14 +35,14 @@ Create `feat/x-realtime-response-assistant` from tag `current-version-20260725-a
 - `backend/routers/x.py`: identify genuinely new posts and dispatch eligible response jobs after commit.
 - `backend/scheduler.py`: replace legacy reply scout with reconciliation and 18:00 digest scheduling.
 - `backend/config.py`, `backend/routers/settings.py`: Telegram credentials and target X account settings.
-- `wemedia-studio/lib/ai/job-client.ts`: shared durable job API helpers.
-- `wemedia-studio/lib/ai/x-response-job.ts`: Zod decision contract and resumable AI flow.
-- `wemedia-studio/lib/ai/content-job.ts`, `wemedia-studio/scripts/content-worker.ts`: route `x_response` and `x_response_digest` jobs.
-- `wemedia-studio/lib/api/x-responses.ts`: typed inbox API.
-- `wemedia-studio/app/x-responses/`: server page, client inbox, and UI tests.
-- `wemedia-studio/app/x/XClient.tsx`: rename the subscription toggle to “即时响应”.
-- `wemedia-studio/app/settings/sections/XSection.tsx`: configure Telegram and target X account.
-- `wemedia-studio/components/features/Sidebar.tsx`: add “待响应”.
+- `web/lib/ai/job-client.ts`: shared durable job API helpers.
+- `web/lib/ai/x-response-job.ts`: Zod decision contract and resumable AI flow.
+- `web/lib/ai/content-job.ts`, `web/scripts/content-worker.ts`: route `x_response` and `x_response_digest` jobs.
+- `web/lib/api/x-responses.ts`: typed inbox API.
+- `web/app/x-responses/`: server page, client inbox, and UI tests.
+- `web/app/x/XClient.tsx`: rename the subscription toggle to “即时响应”.
+- `web/app/settings/sections/XSection.tsx`: configure Telegram and target X account.
+- `web/components/features/Sidebar.tsx`: add “待响应”.
 
 ---
 
@@ -319,11 +319,11 @@ git commit -m "feat(x): expose realtime response APIs"
 ### Task 5: Resumable AI SDK response flow
 
 **Files:**
-- Create: `wemedia-studio/lib/ai/job-client.ts`
-- Create: `wemedia-studio/lib/ai/x-response-job.ts`
-- Create: `wemedia-studio/lib/ai/x-response-job.test.ts`
-- Modify: `wemedia-studio/lib/ai/content-job.ts`
-- Modify: `wemedia-studio/scripts/content-worker.ts`
+- Create: `web/lib/ai/job-client.ts`
+- Create: `web/lib/ai/x-response-job.ts`
+- Create: `web/lib/ai/x-response-job.test.ts`
+- Modify: `web/lib/ai/content-job.ts`
+- Modify: `web/scripts/content-worker.ts`
 
 **Interfaces:**
 - Produces: `xResponseDecisionSchema`
@@ -353,7 +353,7 @@ it('accepts a Chinese quote translation', () => {
 - [ ] **Step 2: Run tests and confirm failure**
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm test -- lib/ai/x-response-job.test.ts
 ```
 
@@ -380,7 +380,7 @@ The worker loads the job once and dispatches `x_response` to `runXResponseJob`, 
 - [ ] **Step 6: Run AI and regression tests**
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm test -- lib/ai/x-response-job.test.ts lib/ai/content-job.test.ts
 pnpm exec tsc --noEmit
 ```
@@ -390,7 +390,7 @@ Expected: PASS.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add wemedia-studio/lib/ai/job-client.ts wemedia-studio/lib/ai/x-response-job.ts wemedia-studio/lib/ai/x-response-job.test.ts wemedia-studio/lib/ai/content-job.ts wemedia-studio/scripts/content-worker.ts
+git add web/lib/ai/job-client.ts web/lib/ai/x-response-job.ts web/lib/ai/x-response-job.test.ts web/lib/ai/content-job.ts web/scripts/content-worker.ts
 git commit -m "feat(x): run realtime response AI jobs"
 ```
 
@@ -453,16 +453,16 @@ git commit -m "feat(x): dispatch realtime response jobs after collection"
 ### Task 7: Settings and response inbox UI
 
 **Files:**
-- Modify: `wemedia-studio/lib/api/settings.ts`
-- Modify: `wemedia-studio/app/settings/sections/XSection.tsx`
-- Modify: `wemedia-studio/app/x/XClient.tsx`
-- Create: `wemedia-studio/lib/api/x-responses.ts`
-- Create: `wemedia-studio/lib/api/x-responses.test.ts`
-- Create: `wemedia-studio/app/x-responses/page.tsx`
-- Create: `wemedia-studio/app/x-responses/XResponsesClient.tsx`
-- Create: `wemedia-studio/app/x-responses/x-responses-layout.test.tsx`
-- Modify: `wemedia-studio/app/trend-topics/page.tsx`
-- Modify: `wemedia-studio/components/features/Sidebar.tsx`
+- Modify: `web/lib/api/settings.ts`
+- Modify: `web/app/settings/sections/XSection.tsx`
+- Modify: `web/app/x/XClient.tsx`
+- Create: `web/lib/api/x-responses.ts`
+- Create: `web/lib/api/x-responses.test.ts`
+- Create: `web/app/x-responses/page.tsx`
+- Create: `web/app/x-responses/XResponsesClient.tsx`
+- Create: `web/app/x-responses/x-responses-layout.test.tsx`
+- Modify: `web/app/trend-topics/page.tsx`
+- Modify: `web/components/features/Sidebar.tsx`
 
 **Interfaces:**
 - Produces: `XResponseDecision` TypeScript type.
@@ -475,7 +475,7 @@ Assert that the X subscription copy says “即时响应”, search subscription
 - [ ] **Step 2: Run tests and confirm failure**
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm test -- lib/api/x-responses.test.ts app/x-responses/x-responses-layout.test.tsx
 ```
 
@@ -498,7 +498,7 @@ Fetch `workflow_status=converted`, map each response to a `TopicSuggestion` with
 - [ ] **Step 7: Add sidebar navigation and run tests**
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm test
 pnpm exec tsc --noEmit
 ```
@@ -508,7 +508,7 @@ Expected: PASS.
 - [ ] **Step 8: Commit**
 
 ```bash
-git add wemedia-studio/lib/api/settings.ts wemedia-studio/app/settings/sections/XSection.tsx wemedia-studio/app/x/XClient.tsx wemedia-studio/lib/api/x-responses.ts wemedia-studio/lib/api/x-responses.test.ts wemedia-studio/app/x-responses wemedia-studio/app/trend-topics/page.tsx wemedia-studio/components/features/Sidebar.tsx
+git add web/lib/api/settings.ts web/app/settings/sections/XSection.tsx web/app/x/XClient.tsx web/lib/api/x-responses.ts web/lib/api/x-responses.test.ts web/app/x-responses web/app/trend-topics/page.tsx web/components/features/Sidebar.tsx
 git commit -m "feat(x): add realtime response inbox"
 ```
 
@@ -533,7 +533,7 @@ Ensure `Base.metadata.create_all` creates the response table. Keep legacy `x_rep
 Run:
 
 ```bash
-rg -n "hermes send|assess_x_reply|x_reply_score\\s*=|x_reply_draft\\s*=|x_reply_notified_at\\s*=" backend wemedia-studio
+rg -n "hermes send|assess_x_reply|x_reply_score\\s*=|x_reply_draft\\s*=|x_reply_notified_at\\s*=" backend web
 ```
 
 Expected: no runtime caller or write path; legacy model declarations may remain.
@@ -546,7 +546,7 @@ Document Telegram bot creation/configuration, Chat ID, target X account profile,
 
 ```bash
 conda run -n wems pytest backend/tests -q
-cd wemedia-studio
+cd web
 pnpm test
 pnpm exec tsc --noEmit
 pnpm build
@@ -575,7 +575,7 @@ Record the publication, collection, enqueue, decision, and notification timestam
 ```bash
 git diff --check
 git status --short
-git add README.md docker-compose.yml backend wemedia-studio
+git add README.md docker-compose.yml backend web
 git commit -m "feat(x): complete realtime response assistant"
 ```
 

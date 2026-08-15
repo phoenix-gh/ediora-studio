@@ -46,12 +46,12 @@
 
 ### Frontend
 
-- Create `wemedia-studio/lib/api/x-accounts.ts`: X account-pool types and API functions.
-- Create `wemedia-studio/lib/api/x-accounts.test.ts`: request serialization and response safety tests.
-- Create `wemedia-studio/app/settings/sections/XCredentialAccountsCard.tsx`: pool summary, account table, credential dialog, and actions.
-- Create `wemedia-studio/app/settings/sections/XCredentialAccountsCard.test.tsx`: rendered CRUD/test/enable/disable interactions.
-- Modify `wemedia-studio/app/settings/sections/XSection.tsx`: compose the account card and keep collection/response-profile settings distinct.
-- Modify `wemedia-studio/lib/api/x.ts`: extend the backwards-compatible `XAuthStatus` aggregate fields.
+- Create `web/lib/api/x-accounts.ts`: X account-pool types and API functions.
+- Create `web/lib/api/x-accounts.test.ts`: request serialization and response safety tests.
+- Create `web/app/settings/sections/XCredentialAccountsCard.tsx`: pool summary, account table, credential dialog, and actions.
+- Create `web/app/settings/sections/XCredentialAccountsCard.test.tsx`: rendered CRUD/test/enable/disable interactions.
+- Modify `web/app/settings/sections/XSection.tsx`: compose the account card and keep collection/response-profile settings distinct.
+- Modify `web/lib/api/x.ts`: extend the backwards-compatible `XAuthStatus` aggregate fields.
 
 ### Deployment and documentation
 
@@ -972,9 +972,9 @@ git commit -m "feat(x): test and monitor credential pool"
 ### Task 4: Frontend X Account API Client
 
 **Files:**
-- Create: `wemedia-studio/lib/api/x-accounts.ts`
-- Create: `wemedia-studio/lib/api/x-accounts.test.ts`
-- Modify: `wemedia-studio/lib/api/x.ts`
+- Create: `web/lib/api/x-accounts.ts`
+- Create: `web/lib/api/x-accounts.test.ts`
+- Modify: `web/lib/api/x.ts`
 
 **Interfaces:**
 - Consumes: backend endpoints from Tasks 2–3 and shared `apiFetch`.
@@ -1069,7 +1069,7 @@ it('does not define raw credentials on returned account types', () => {
 Run:
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm test lib/api/x-accounts.test.ts
 ```
 
@@ -1123,7 +1123,7 @@ Expected: API tests and TypeScript pass.
 Commit:
 
 ```bash
-git add wemedia-studio/lib/api/x-accounts.ts wemedia-studio/lib/api/x-accounts.test.ts wemedia-studio/lib/api/x.ts
+git add web/lib/api/x-accounts.ts web/lib/api/x-accounts.test.ts web/lib/api/x.ts
 git commit -m "feat(x): add credential pool client"
 ```
 
@@ -1132,9 +1132,9 @@ git commit -m "feat(x): add credential pool client"
 ### Task 5: X Credential Pool Settings UI
 
 **Files:**
-- Create: `wemedia-studio/app/settings/sections/XCredentialAccountsCard.tsx`
-- Create: `wemedia-studio/app/settings/sections/XCredentialAccountsCard.test.tsx`
-- Modify: `wemedia-studio/app/settings/sections/XSection.tsx`
+- Create: `web/app/settings/sections/XCredentialAccountsCard.tsx`
+- Create: `web/app/settings/sections/XCredentialAccountsCard.test.tsx`
+- Modify: `web/app/settings/sections/XSection.tsx`
 
 **Interfaces:**
 - Consumes: all Task 4 API functions and existing shadcn `Button`, `Input`, `Label`, `Switch`, and `Dialog`.
@@ -1226,7 +1226,7 @@ Add separate tests for:
 Run:
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm test app/settings/sections/XCredentialAccountsCard.test.tsx
 ```
 
@@ -1346,9 +1346,9 @@ Expected: component tests, typecheck, and rendered interaction pass.
 
 ```bash
 git add \
-  wemedia-studio/app/settings/sections/XCredentialAccountsCard.tsx \
-  wemedia-studio/app/settings/sections/XCredentialAccountsCard.test.tsx \
-  wemedia-studio/app/settings/sections/XSection.tsx
+  web/app/settings/sections/XCredentialAccountsCard.tsx \
+  web/app/settings/sections/XCredentialAccountsCard.test.tsx \
+  web/app/settings/sections/XSection.tsx
 git commit -m "feat(x): manage collection accounts in settings"
 ```
 
@@ -1431,7 +1431,7 @@ Run:
 ```bash
 conda run -n wems pytest backend/tests -q
 conda run -n wems python -m compileall -q backend
-cd wemedia-studio
+cd web
 pnpm test
 pnpm exec tsc --noEmit
 pnpm build

@@ -133,6 +133,48 @@ def test_collect_all_repos_collects_releases(client, monkeypatch):
     assert results[0]["new_releases"] == 1
 
 
+def test_github_requests_use_collection_proxy_not_process_env(monkeypatch):
+    import github_collector as gc
+
+    captured: dict = {}
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+        async def get(self, *_args, **_kwargs):
+            class Response:
+                status_code = 200
+                headers = {}
+
+                def raise_for_status(self):
+                    return None
+
+                def json(self):
+                    return {"stargazers_count": 1}
+
+            return Response()
+
+    async def fake_kwargs(**kwargs):
+        kwargs["trust_env"] = False
+        kwargs["proxy"] = "http://proxy.test:7890"
+        return kwargs
+
+    monkeypatch.setattr(gc.httpx, "AsyncClient", FakeClient)
+    monkeypatch.setattr(gc, "collection_client_kwargs", fake_kwargs)
+
+    asyncio.new_event_loop().run_until_complete(gc.fetch_repo_meta("o", "r"))
+
+    assert captured["trust_env"] is False
+    assert captured["proxy"] == "http://proxy.test:7890"
+
+
 def test_collect_all_repos_oldest_first(client, monkeypatch):
     # 配额耗尽时迭代靠后的库会被跳过，所以必须最久未采的优先：
     # 从未采集(NULL) → 最旧 → 较新。

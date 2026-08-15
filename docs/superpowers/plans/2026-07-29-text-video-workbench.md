@@ -4,7 +4,7 @@
 
 **Goal:** Ship the first `/text-video` milestone with a three-stage workbench, a validated reusable render contract, one versioned Remotion template, and full/selected-scene browser preview.
 
-**Architecture:** Remotion lives inside `wemedia-studio/remotion` so the Next.js workbench and future renderer share one Composition implementation. Video projects are typed data fixtures in this milestone; a template registry resolves a versioned Composition and validates common plus template-specific props before `@remotion/player` receives them.
+**Architecture:** Remotion lives inside `web/remotion` so the Next.js workbench and future renderer share one Composition implementation. Video projects are typed data fixtures in this milestone; a template registry resolves a versioned Composition and validates common plus template-specific props before `@remotion/player` receives them.
 
 **Tech Stack:** Next.js 16.2.4, React 19.2.4, TypeScript, Zod 4.4.3, Remotion 4.0.500, `@remotion/player` 4.0.500, `@remotion/cli` 4.0.500, Vitest, Testing Library, Playwright.
 
@@ -24,11 +24,11 @@
 ### Task 1: Install Remotion and define the validated render contract
 
 **Files:**
-- Modify: `wemedia-studio/package.json`
-- Modify: `wemedia-studio/pnpm-lock.yaml`
-- Create: `wemedia-studio/remotion/contract.ts`
-- Create: `wemedia-studio/remotion/contract.test.ts`
-- Create: `wemedia-studio/lib/text-video/fixture.ts`
+- Modify: `web/package.json`
+- Modify: `web/pnpm-lock.yaml`
+- Create: `web/remotion/contract.ts`
+- Create: `web/remotion/contract.test.ts`
+- Create: `web/lib/text-video/fixture.ts`
 
 **Interfaces:**
 - Produces `textVideoRenderInputSchema`, `TextVideoRenderInput`, `techTextV1PropsSchema`, and `TEXT_VIDEO_FIXTURE`.
@@ -129,20 +129,20 @@ Expected: contract tests pass.
 - [ ] **Step 6: Commit Task 1**
 
 ```bash
-git add wemedia-studio/package.json wemedia-studio/pnpm-lock.yaml wemedia-studio/remotion/contract.ts wemedia-studio/remotion/contract.test.ts wemedia-studio/lib/text-video/fixture.ts
+git add web/package.json web/pnpm-lock.yaml web/remotion/contract.ts web/remotion/contract.test.ts web/lib/text-video/fixture.ts
 git commit -m "feat: define text video render contract"
 ```
 
 ### Task 2: Build the template registry and `tech-text-v1` Composition
 
 **Files:**
-- Create: `wemedia-studio/remotion/registry.ts`
-- Create: `wemedia-studio/remotion/registry.test.ts`
-- Create: `wemedia-studio/remotion/shared/TimedText.tsx`
-- Create: `wemedia-studio/remotion/templates/tech-text-v1/Composition.tsx`
-- Create: `wemedia-studio/remotion/templates/tech-text-v1/manifest.ts`
-- Create: `wemedia-studio/remotion/Root.tsx`
-- Create: `wemedia-studio/remotion/index.ts`
+- Create: `web/remotion/registry.ts`
+- Create: `web/remotion/registry.test.ts`
+- Create: `web/remotion/shared/TimedText.tsx`
+- Create: `web/remotion/templates/tech-text-v1/Composition.tsx`
+- Create: `web/remotion/templates/tech-text-v1/manifest.ts`
+- Create: `web/remotion/Root.tsx`
+- Create: `web/remotion/index.ts`
 
 **Interfaces:**
 - Consumes `TextVideoRenderInput` and `techTextV1PropsSchema` from Task 1.
@@ -226,21 +226,21 @@ Expected: registry tests pass and the CLI lists `tech-text-v1` without bundle or
 - [ ] **Step 7: Commit Task 2**
 
 ```bash
-git add wemedia-studio/remotion
+git add web/remotion
 git commit -m "feat: add first Remotion text video template"
 ```
 
 ### Task 3: Add navigation and the three-stage workbench shell
 
 **Files:**
-- Modify: `wemedia-studio/components/features/Sidebar.tsx`
-- Modify: `wemedia-studio/components/features/Sidebar.test.tsx`
-- Create: `wemedia-studio/app/text-video/page.tsx`
-- Create: `wemedia-studio/app/text-video/TextVideoWorkbench.tsx`
-- Create: `wemedia-studio/app/text-video/TextVideoWorkbench.test.tsx`
-- Create: `wemedia-studio/app/text-video/ScriptStage.tsx`
-- Create: `wemedia-studio/app/text-video/AudioStage.tsx`
-- Create: `wemedia-studio/app/text-video/VideoStage.tsx`
+- Modify: `web/components/features/Sidebar.tsx`
+- Modify: `web/components/features/Sidebar.test.tsx`
+- Create: `web/app/text-video/page.tsx`
+- Create: `web/app/text-video/TextVideoWorkbench.tsx`
+- Create: `web/app/text-video/TextVideoWorkbench.test.tsx`
+- Create: `web/app/text-video/ScriptStage.tsx`
+- Create: `web/app/text-video/AudioStage.tsx`
+- Create: `web/app/text-video/VideoStage.tsx`
 
 **Interfaces:**
 - Consumes `TEXT_VIDEO_FIXTURE`, template manifest, and shared UI primitives.
@@ -298,19 +298,19 @@ Expected: navigation, stage rendering, and gate tests pass.
 - [ ] **Step 6: Commit Task 3**
 
 ```bash
-git add wemedia-studio/components/features/Sidebar.tsx wemedia-studio/components/features/Sidebar.test.tsx wemedia-studio/app/text-video
+git add web/components/features/Sidebar.tsx web/components/features/Sidebar.test.tsx web/app/text-video
 git commit -m "feat: add text video workbench shell"
 ```
 
 ### Task 4: Embed full and selected-scene Remotion previews
 
 **Files:**
-- Modify: `wemedia-studio/app/text-video/TextVideoWorkbench.tsx`
-- Modify: `wemedia-studio/app/text-video/VideoStage.tsx`
-- Modify: `wemedia-studio/app/text-video/TextVideoWorkbench.test.tsx`
-- Create: `wemedia-studio/app/text-video/RemotionPreview.tsx`
-- Create: `wemedia-studio/app/text-video/scene-range.ts`
-- Create: `wemedia-studio/app/text-video/scene-range.test.ts`
+- Modify: `web/app/text-video/TextVideoWorkbench.tsx`
+- Modify: `web/app/text-video/VideoStage.tsx`
+- Modify: `web/app/text-video/TextVideoWorkbench.test.tsx`
+- Create: `web/app/text-video/RemotionPreview.tsx`
+- Create: `web/app/text-video/scene-range.ts`
+- Create: `web/app/text-video/scene-range.test.ts`
 
 **Interfaces:**
 - Consumes `TechTextV1Composition`, `TextVideoRenderInput`, and `@remotion/player`.
@@ -363,7 +363,7 @@ Expected: focused preview tests and the complete Vitest suite pass.
 - [ ] **Step 7: Commit Task 4**
 
 ```bash
-git add wemedia-studio/app/text-video
+git add web/app/text-video
 git commit -m "feat: preview Remotion text video scenes"
 ```
 

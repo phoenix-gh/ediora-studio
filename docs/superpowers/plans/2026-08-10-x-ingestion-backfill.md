@@ -114,10 +114,10 @@ Expected: all route tests pass.
 ### Task 3: Add the API client and dialog operation
 
 **Files:**
-- Modify: `wemedia-studio/lib/api/x.ts`
-- Modify: `wemedia-studio/app/x/XClient.tsx`
-- Modify: `wemedia-studio/app/x/XSubscriptionDialog.tsx`
-- Test: `wemedia-studio/app/x/XSubscriptionDialog.test.tsx`
+- Modify: `web/lib/api/x.ts`
+- Modify: `web/app/x/XClient.tsx`
+- Modify: `web/app/x/XSubscriptionDialog.tsx`
+- Test: `web/app/x/XSubscriptionDialog.test.tsx`
 
 **Interfaces:**
 - Adds `backfillXSubscriptionIngestion(id, days) -> XIngestionBackfillResult`.
@@ -194,7 +194,7 @@ Run:
 
 ```bash
 git diff --check
-git diff -- backend/topic_source_service.py backend/routers/x.py wemedia-studio/lib/api/x.ts wemedia-studio/app/x/XClient.tsx wemedia-studio/app/x/XSubscriptionDialog.tsx
+git diff -- backend/topic_source_service.py backend/routers/x.py web/lib/api/x.ts web/app/x/XClient.tsx web/app/x/XSubscriptionDialog.tsx
 ```
 
 Confirm that the diff contains only the requested backfill behavior and focused tests.

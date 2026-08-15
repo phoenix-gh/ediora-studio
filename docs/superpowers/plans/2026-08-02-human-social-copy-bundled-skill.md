@@ -22,7 +22,7 @@
 ### Task 1: Define failing bundled-Skill acceptance tests
 
 **Files:**
-- Create: `wemedia-studio/lib/skills/bundled-skills.test.ts`
+- Create: `web/lib/skills/bundled-skills.test.ts`
 
 **Interfaces:**
 - Consumes: real `listSkills`, `listSkillReferences`, `readSkillReference`, `setSkillEnabled`, `deleteUploadedSkill`, and `discoverSkills` APIs.
@@ -35,7 +35,7 @@ Assert that the real registry reports `human-social-copy` as enabled `builtin` v
 - [ ] **Step 2: Run the test and verify RED**
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm test lib/skills/bundled-skills.test.ts
 ```
 
@@ -44,17 +44,17 @@ Expected: FAIL because `human-social-copy` is not bundled and `skills/x-post` st
 ### Task 2: Author and validate the curated Skill package
 
 **Files:**
-- Create: `wemedia-studio/skills/human-social-copy/SKILL.md`
-- Create: `wemedia-studio/skills/human-social-copy/LICENSE`
-- Create: `wemedia-studio/skills/human-social-copy/UPSTREAM.md`
-- Create: `wemedia-studio/skills/human-social-copy/references/adaptive-hooks.md`
-- Create: `wemedia-studio/skills/human-social-copy/references/writing-clean-rules.md`
-- Create: `wemedia-studio/skills/human-social-copy/references/patterns.md`
-- Create: `wemedia-studio/skills/human-social-copy/references/finance-writing.md`
-- Create: `wemedia-studio/skills/human-social-copy/references/layout-playbook.md`
-- Create: `wemedia-studio/skills/human-social-copy/references/sourcing-playbook.md`
-- Create: `wemedia-studio/skills/human-social-copy/references/kol-brief-workflow.md`
-- Create: `wemedia-studio/skills/human-social-copy/references/voice-system.md`
+- Create: `web/skills/human-social-copy/SKILL.md`
+- Create: `web/skills/human-social-copy/LICENSE`
+- Create: `web/skills/human-social-copy/UPSTREAM.md`
+- Create: `web/skills/human-social-copy/references/adaptive-hooks.md`
+- Create: `web/skills/human-social-copy/references/writing-clean-rules.md`
+- Create: `web/skills/human-social-copy/references/patterns.md`
+- Create: `web/skills/human-social-copy/references/finance-writing.md`
+- Create: `web/skills/human-social-copy/references/layout-playbook.md`
+- Create: `web/skills/human-social-copy/references/sourcing-playbook.md`
+- Create: `web/skills/human-social-copy/references/kol-brief-workflow.md`
+- Create: `web/skills/human-social-copy/references/voice-system.md`
 
 **Interfaces:**
 - Consumes: the shared reference catalog/read tool and upstream MIT material.
@@ -98,7 +98,7 @@ Replace `x-post` related-skill metadata and prose in `article-drafting`; route s
 
 - [ ] **Step 2: Delete the complete legacy directory**
 
-Delete exactly `skills/x-post/SKILL.md` and its ten reference files. Do not touch `wemedia-studio/app/x/x-post-url.ts` or historical `docs/superpowers` references.
+Delete exactly `skills/x-post/SKILL.md` and its ten reference files. Do not touch `web/app/x/x-post-url.ts` or historical `docs/superpowers` references.
 
 - [ ] **Step 3: Run acceptance tests and verify GREEN**
 
@@ -120,14 +120,14 @@ Use the writing-skills validation method on representative prompts: ordinary rew
 - [ ] **Step 2: Run focused automated tests**
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm test lib/skills/bundled-skills.test.ts lib/skills/registry.test.ts lib/ai/discover-skills.test.ts app/api/chat/skills/route.test.ts app/api/skills/route.test.ts
 ```
 
 - [ ] **Step 3: Run changed-file lint and Markdown checks**
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm exec eslint lib/skills/bundled-skills.test.ts
 git diff --check -- ../skills/article-drafting/SKILL.md ../skills/content-ideation/SKILL.md skills/human-social-copy
 ```
@@ -135,7 +135,7 @@ git diff --check -- ../skills/article-drafting/SKILL.md ../skills/content-ideati
 - [ ] **Step 4: Run the full frontend suite and TypeScript validation**
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm test
 pnpm exec tsc --noEmit
 ```

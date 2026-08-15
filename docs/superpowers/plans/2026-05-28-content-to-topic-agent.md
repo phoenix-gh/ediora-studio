@@ -23,8 +23,8 @@ All `conda run -n wems` or `source ~/.zshrc` prefixes are needed when running co
 | `backend/mcp_server.py` | Modify | Update 3 existing tools; add `search_topics_by_keywords`, `update_content_topic`, `add_topic_update` |
 | `/home/violet/.hermes/profiles/wms_scout/SOUL.md` | Modify | Add content-to-topic capability section |
 | `backend/tests/test_content_topics.py` | Modify | Add tests for search, analyze, updates endpoints |
-| `wemedia-studio/lib/api/content-topics.ts` | Modify | Add `TopicUpdate`, analyze/updates API functions |
-| `wemedia-studio/app/topics/TopicsClient.tsx` | Modify | Add analyze dialog + updates tab |
+| `web/lib/api/content-topics.ts` | Modify | Add `TopicUpdate`, analyze/updates API functions |
+| `web/app/topics/TopicsClient.tsx` | Modify | Add analyze dialog + updates tab |
 
 ---
 
@@ -851,7 +851,7 @@ Note: SOUL.md is outside the git repo, changes take effect immediately (Hermes r
 ## Task 7: Frontend TypeScript Types + API Functions
 
 **Files:**
-- Modify: `wemedia-studio/lib/api/content-topics.ts`
+- Modify: `web/lib/api/content-topics.ts`
 
 - [ ] **Step 1: Add `TopicUpdate` interface and new functions**
 
@@ -895,7 +895,7 @@ export async function getTopicUpdates(topicId: number): Promise<TopicUpdate[]> {
 - [ ] **Step 2: Verify TypeScript compiles**
 
 ```bash
-source ~/.zshrc && cd /workspace/projects/WeMediaStudio/wemedia-studio && npm run build 2>&1 | tail -20
+source ~/.zshrc && cd /workspace/projects/WeMediaStudio/web && npm run build 2>&1 | tail -20
 ```
 Expected: Build succeeds (or only pre-existing errors in StudioClient.tsx).
 
@@ -903,7 +903,7 @@ Expected: Build succeeds (or only pre-existing errors in StudioClient.tsx).
 
 ```bash
 cd /workspace/projects/WeMediaStudio
-git add wemedia-studio/lib/api/content-topics.ts
+git add web/lib/api/content-topics.ts
 git commit -m "feat(frontend): add TopicUpdate type and analyzeTopic/getTopicUpdates API functions"
 ```
 
@@ -912,11 +912,11 @@ git commit -m "feat(frontend): add TopicUpdate type and analyzeTopic/getTopicUpd
 ## Task 8: Frontend UI
 
 **Files:**
-- Modify: `wemedia-studio/app/topics/TopicsClient.tsx`
+- Modify: `web/app/topics/TopicsClient.tsx`
 
 - [ ] **Step 1: Read current TopicsClient.tsx**
 
-Read `wemedia-studio/app/topics/TopicsClient.tsx` to understand the current structure before making changes.
+Read `web/app/topics/TopicsClient.tsx` to understand the current structure before making changes.
 
 - [ ] **Step 2: Add imports**
 
@@ -1100,7 +1100,7 @@ Add the content panel:
 - [ ] **Step 9: Verify TypeScript build**
 
 ```bash
-source ~/.zshrc && cd /workspace/projects/WeMediaStudio/wemedia-studio && npm run build 2>&1 | tail -30
+source ~/.zshrc && cd /workspace/projects/WeMediaStudio/web && npm run build 2>&1 | tail -30
 ```
 Expected: Build succeeds or only pre-existing errors.
 
@@ -1108,7 +1108,7 @@ Expected: Build succeeds or only pre-existing errors.
 
 ```bash
 cd /workspace/projects/WeMediaStudio
-git add wemedia-studio/app/topics/TopicsClient.tsx
+git add web/app/topics/TopicsClient.tsx
 git commit -m "feat(ui): add 分析文章 dialog and 更新历史 tab to topics page"
 ```
 
@@ -1126,7 +1126,7 @@ Expected: All ~20 tests pass.
 - [ ] **Step 2: Full frontend build**
 
 ```bash
-source ~/.zshrc && cd /workspace/projects/WeMediaStudio/wemedia-studio && npm run build 2>&1 | grep -E "(error|Error|warn)" | grep -v "StudioClient" | head -20
+source ~/.zshrc && cd /workspace/projects/WeMediaStudio/web && npm run build 2>&1 | grep -E "(error|Error|warn)" | grep -v "StudioClient" | head -20
 ```
 Expected: No new errors beyond the pre-existing StudioClient issue.
 

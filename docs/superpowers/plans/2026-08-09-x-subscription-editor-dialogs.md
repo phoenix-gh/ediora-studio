@@ -20,7 +20,7 @@
 ### Task 1: Add failing interaction coverage
 
 **Files:**
-- Modify: `wemedia-studio/app/x/XClient.test.tsx`
+- Modify: `web/app/x/XClient.test.tsx`
 
 - [ ] Assert that the header exposes `新增订阅` and no longer exposes `订阅管理`.
 - [ ] Assert that a sidebar edit button opens a single-subscription dialog.
@@ -30,8 +30,8 @@
 ### Task 2: Implement the dialog split
 
 **Files:**
-- Create: `wemedia-studio/app/x/XSubscriptionDialog.tsx`
-- Modify: `wemedia-studio/app/x/XClient.tsx`
+- Create: `web/app/x/XSubscriptionDialog.tsx`
+- Modify: `web/app/x/XClient.tsx`
 
 - [ ] Add create mode for timeline/search subscriptions.
 - [ ] Add edit mode with current subscription values, save, enable, frequency, intelligence, ingestion rule, collection, backfill, screening, and delete actions.
@@ -42,8 +42,8 @@
 ### Task 3: Remove obsolete aggregate row path
 
 **Files:**
-- Delete: `wemedia-studio/app/x/XSubscriptionRow.tsx`
-- Delete: `wemedia-studio/app/x/XSubscriptionRow.test.tsx`
+- Delete: `web/app/x/XSubscriptionRow.tsx`
+- Delete: `web/app/x/XSubscriptionRow.test.tsx`
 
 - [ ] Remove the old list-row action menu and its tests after the new editor owns those actions.
 

@@ -176,7 +176,7 @@ POST   /materials/collect-all
 - **卡片**：`text_clean` 优先（可展开看原文）+ 作者/出处 + 使用场景 chips + 分类 chip；`platform=x` 时多显示流量 + 段子分徽章 + 配图 + 「查看原推」；操作：复制/编辑/改类/归档/删除 + 写作方案关联（金句沿用）。
 - **手工录入表单**：迁移金句库现成 `QuoteForm`（text/author/source/url + 使用场景 + 写作方案），并入本页「添加文案」。
 - **采集规则**抽屉/Tab：规则 CRUD + 每条「立即采集」+「全部采集」。
-- 栈：shadcn/ui + tailwind + sonner + lucide。注意 `wemedia-studio/AGENTS.md`：Next.js 有 breaking changes，写前查 `node_modules/next/dist/docs/`。
+- 栈：shadcn/ui + tailwind + sonner + lucide。注意 `web/AGENTS.md`：Next.js 有 breaking changes，写前查 `node_modules/next/dist/docs/`。
 
 ## 9. 金句库合并 / 迁移（一次性）
 

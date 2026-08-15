@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Replace the Creative Assets article source editor with a single-pane visual Markdown editor that preserves pasted webpage structure and stores pasted remote images in WeMediaStudio without blocking saves when an image import fails.
+**Goal:** Replace the Creative Assets article source editor with a single-pane visual Markdown editor that preserves pasted webpage structure and stores pasted remote images in Ediora without blocking saves when an image import fails.
 
 **Architecture:** A Crepe/Milkdown client-only editor continues to emit standard Markdown into the existing `CreativeAsset.content` state. Pure clipboard conversion code sanitizes HTML and marks external images with stable import IDs; a small ProseMirror plugin maps asynchronous results back to the correct image nodes. A new backend service downloads public images with explicit SSRF, redirect, type, size, timeout, and proxy controls, while the assets router exposes per-item batch results.
 
@@ -188,12 +188,12 @@ git commit -m "feat: expose asset image import API"
 ### Task 3: Clipboard Conversion and Frontend Image APIs
 
 **Files:**
-- Modify: `wemedia-studio/package.json`
-- Modify: `wemedia-studio/pnpm-lock.yaml`
-- Modify: `wemedia-studio/lib/api/assets.ts`
-- Create: `wemedia-studio/app/assets/asset-paste.ts`
-- Create: `wemedia-studio/app/assets/asset-paste.test.ts`
-- Create: `wemedia-studio/lib/api/assets.test.ts`
+- Modify: `web/package.json`
+- Modify: `web/pnpm-lock.yaml`
+- Modify: `web/lib/api/assets.ts`
+- Create: `web/app/assets/asset-paste.ts`
+- Create: `web/app/assets/asset-paste.test.ts`
+- Create: `web/lib/api/assets.test.ts`
 
 **Interfaces:**
 - Produces: `type RemoteImageImportItem = { source_url: string; url: string; error_code: string; error: string }`.
@@ -205,7 +205,7 @@ git commit -m "feat: expose asset image import API"
 
 - [ ] **Step 1: Add the Markdown-native editor and conversion dependencies**
 
-Working directory: `wemedia-studio`
+Working directory: `web`
 
 Run: `pnpm add @milkdown/crepe @milkdown/kit turndown turndown-plugin-gfm`
 
@@ -249,7 +249,7 @@ Parse with `DOMParser`, remove `script, style, noscript, template, iframe, objec
 
 - [ ] **Step 6: Run conversion and API tests**
 
-Working directory: `wemedia-studio`
+Working directory: `web`
 
 Run: `pnpm test -- app/assets/asset-paste.test.ts lib/api/assets.test.ts`
 
@@ -258,7 +258,7 @@ Expected: PASS.
 - [ ] **Step 7: Commit frontend foundations**
 
 ```bash
-git add wemedia-studio/package.json wemedia-studio/pnpm-lock.yaml wemedia-studio/lib/api/assets.ts wemedia-studio/lib/api/assets.test.ts wemedia-studio/app/assets/asset-paste.ts wemedia-studio/app/assets/asset-paste.test.ts
+git add web/package.json web/pnpm-lock.yaml web/lib/api/assets.ts web/lib/api/assets.test.ts web/app/assets/asset-paste.ts web/app/assets/asset-paste.test.ts
 git commit -m "feat: prepare rich asset paste pipeline"
 ```
 
@@ -267,10 +267,10 @@ git commit -m "feat: prepare rich asset paste pipeline"
 ### Task 4: Visual Markdown Editor and Async Image State
 
 **Files:**
-- Create: `wemedia-studio/app/assets/AssetVisualMarkdownEditor.tsx`
-- Create: `wemedia-studio/app/assets/asset-image-import-plugin.ts`
-- Create: `wemedia-studio/app/assets/AssetVisualMarkdownEditor.test.tsx`
-- Create: `wemedia-studio/app/assets/asset-image-import-plugin.test.ts`
+- Create: `web/app/assets/AssetVisualMarkdownEditor.tsx`
+- Create: `web/app/assets/asset-image-import-plugin.ts`
+- Create: `web/app/assets/AssetVisualMarkdownEditor.test.tsx`
+- Create: `web/app/assets/asset-image-import-plugin.test.ts`
 
 **Interfaces:**
 - Consumes: Task 3 conversion/API functions.
@@ -317,7 +317,7 @@ Keep a per-editor `AbortController`. Ignore all completion callbacks whose captu
 
 - [ ] **Step 5: Run editor tests**
 
-Working directory: `wemedia-studio`
+Working directory: `web`
 
 Run: `pnpm test -- app/assets/asset-image-import-plugin.test.ts app/assets/AssetVisualMarkdownEditor.test.tsx`
 
@@ -326,7 +326,7 @@ Expected: PASS.
 - [ ] **Step 6: Commit the editor**
 
 ```bash
-git add wemedia-studio/app/assets/AssetVisualMarkdownEditor.tsx wemedia-studio/app/assets/AssetVisualMarkdownEditor.test.tsx wemedia-studio/app/assets/asset-image-import-plugin.ts wemedia-studio/app/assets/asset-image-import-plugin.test.ts
+git add web/app/assets/AssetVisualMarkdownEditor.tsx web/app/assets/AssetVisualMarkdownEditor.test.tsx web/app/assets/asset-image-import-plugin.ts web/app/assets/asset-image-import-plugin.test.ts
 git commit -m "feat: add visual creative asset editor"
 ```
 
@@ -335,9 +335,9 @@ git commit -m "feat: add visual creative asset editor"
 ### Task 5: Asset Workspace Integration, Themes, and Regression Verification
 
 **Files:**
-- Modify: `wemedia-studio/app/assets/ArticleAssetWorkspace.tsx`
-- Modify: `wemedia-studio/app/assets/AssetsClient.test.tsx`
-- Modify: `wemedia-studio/app/globals.css`
+- Modify: `web/app/assets/ArticleAssetWorkspace.tsx`
+- Modify: `web/app/assets/AssetsClient.test.tsx`
+- Modify: `web/app/globals.css`
 
 **Interfaces:**
 - Consumes: `AssetVisualMarkdownEditor` from Task 4.
@@ -374,7 +374,7 @@ Import Crepe common styles and the light/dark frame theme from the editor module
 
 - [ ] **Step 4: Run focused frontend regressions**
 
-Working directory: `wemedia-studio`
+Working directory: `web`
 
 Run: `pnpm test -- app/assets/AssetsClient.test.tsx app/assets/AssetVisualMarkdownEditor.test.tsx app/assets/asset-paste.test.ts lib/api/assets.test.ts`
 
@@ -390,7 +390,7 @@ Expected: PASS.
 
 - [ ] **Step 6: Run lint and production build**
 
-Working directory: `wemedia-studio`
+Working directory: `web`
 
 Run: `pnpm lint -- app/assets/ArticleAssetWorkspace.tsx app/assets/AssetVisualMarkdownEditor.tsx app/assets/asset-image-import-plugin.ts app/assets/asset-paste.ts lib/api/assets.ts`
 
@@ -407,6 +407,6 @@ Open `/assets` in both light and dark themes. Paste a standalone image file, a s
 - [ ] **Step 8: Commit integration**
 
 ```bash
-git add wemedia-studio/app/assets/ArticleAssetWorkspace.tsx wemedia-studio/app/assets/AssetsClient.test.tsx wemedia-studio/app/globals.css
+git add web/app/assets/ArticleAssetWorkspace.tsx web/app/assets/AssetsClient.test.tsx web/app/globals.css
 git commit -m "feat: enable visual editing for creative assets"
 ```

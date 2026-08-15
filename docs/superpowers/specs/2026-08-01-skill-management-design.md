@@ -2,7 +2,7 @@
 
 ## 背景
 
-当前 `wemedia-studio/skills/` 下的预制 Skill 由 Next.js 运行时扫描，聊天选择器和封面/配图自动流程直接读取 `SKILL.md`。系统没有持久化的启用状态，也没有用户上传或删除自定义 Skill 的入口。
+当前 `web/skills/` 下的预制 Skill 由 Next.js 运行时扫描，聊天选择器和封面/配图自动流程直接读取 `SKILL.md`。系统没有持久化的启用状态，也没有用户上传或删除自定义 Skill 的入口。
 
 ## 目标
 
@@ -29,9 +29,9 @@
 设置页
   └─ Next API /api/skills
        └─ SkillRegistry
-            ├─ 预制目录: wemedia-studio/skills/
-            ├─ 自定义目录: wemedia-studio/.runtime/skills/
-            └─ 状态文件: wemedia-studio/.runtime/skills-state.json
+            ├─ 预制目录: web/skills/
+            ├─ 自定义目录: web/.runtime/skills/
+            └─ 状态文件: web/.runtime/skills-state.json
 ```
 
 预制 Skill 通过代码随应用发布；上传 Skill 写入 `.runtime/skills/`。`.runtime/` 纳入现有忽略规则，避免用户 Skill、启用状态和临时文件进入 Git。状态文件只保存 Skill 名称、来源和 `enabled`，不存在记录的预制 Skill 默认启用，新上传 Skill 默认启用。

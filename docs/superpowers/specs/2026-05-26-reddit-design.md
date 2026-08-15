@@ -8,7 +8,7 @@
 
 ## 目标
 
-为 WeMedia Studio 添加 Reddit 版块（subreddit）订阅功能，采集热帖（hot）和最新帖（new），评论随帖子一起存储，UI 与 V2EX / X 页面风格对齐。
+为 Ediora 添加 Reddit 版块（subreddit）订阅功能，采集热帖（hot）和最新帖（new），评论随帖子一起存储，UI 与 V2EX / X 页面风格对齐。
 
 ---
 
@@ -113,7 +113,7 @@ collect_all(db)
 ### 文件
 
 ```
-wemedia-studio/
+web/
   lib/api/reddit.ts             # API 客户端类型 + 函数
   app/reddit/page.tsx           # Server Component 入口
   app/reddit/RedditClient.tsx   # 主 Client Component（~500行）

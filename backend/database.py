@@ -477,6 +477,7 @@ async def migrate_digital_human_comfyui_schema(conn) -> None:
     await _add_columns(conn, "digital_humans", {
         "provider": "VARCHAR(20) NOT NULL DEFAULT 'heygen'",
         "look_asset_id": "INTEGER",
+        "look_prompt": "TEXT NOT NULL DEFAULT ''",
     })
     await conn.execute(text(
         "UPDATE digital_humans SET provider = 'heygen' "

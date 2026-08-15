@@ -18,7 +18,7 @@
 
 ### Task 1: Retire the reference-material library
 
-**Files:** `backend/models.py`, `backend/database.py`, `backend/main.py`, `backend/config.py`, `backend/routers/materials.py`, `backend/routers/chat.py`, `backend/routers/dashboard.py`, `backend/mcp_server.py`, `backend/scheduler.py`, `wemedia-studio/app/materials/*`, `wemedia-studio/lib/api/materials.ts`, `wemedia-studio/components/features/Sidebar.tsx`, related tests.
+**Files:** `backend/models.py`, `backend/database.py`, `backend/main.py`, `backend/config.py`, `backend/routers/materials.py`, `backend/routers/chat.py`, `backend/routers/dashboard.py`, `backend/mcp_server.py`, `backend/scheduler.py`, `web/app/materials/*`, `web/lib/api/materials.ts`, `web/components/features/Sidebar.tsx`, related tests.
 
 - [ ] Add failing assertions that `/materials` is absent and Chat source search returns only writing plans.
 - [ ] Remove material routes, models, collectors, scheduler/config/dashboard references, page/API/sidebar entry and Chat reference-material branches.
@@ -35,7 +35,7 @@
 
 ### Task 3: Add the asset library UI and draft reuse
 
-**Files:** `wemedia-studio/app/assets/*`, `wemedia-studio/lib/api/assets.ts`, `wemedia-studio/components/features/Sidebar.tsx`, `wemedia-studio/components/features/DraftAssetsDialog.tsx`, `wemedia-studio/app/drafts/DraftsClient.tsx`, tests.
+**Files:** `web/app/assets/*`, `web/lib/api/assets.ts`, `web/components/features/Sidebar.tsx`, `web/components/features/DraftAssetsDialog.tsx`, `web/app/drafts/DraftsClient.tsx`, tests.
 
 - [ ] Add failing frontend tests for asset API serialization and asset insertion mapping.
 - [ ] Build the asset list/upload/create UI and a draft-dialog asset picker that inserts article Markdown, image Markdown, or video link Markdown.

@@ -137,8 +137,8 @@ git commit -m "feat: validate multi-directory creation rules"
 **Files:**
 - Modify: `backend/mcp_server.py`
 - Modify: `backend/tests/test_mcp_daily_creation_tools.py`
-- Modify: `wemedia-studio/lib/ai/daily-creation-job.ts`
-- Modify: `wemedia-studio/lib/ai/content-job.test.ts`
+- Modify: `web/lib/ai/daily-creation-job.ts`
+- Modify: `web/lib/ai/content-job.test.ts`
 
 **Interfaces:**
 - MCP tool: `list_creative_asset_candidates(asset_type: str, directories: list[str] | None = None, directory: str = "", query: str = "", limit: int = 50)`.
@@ -152,7 +152,7 @@ Assert the MCP tool merges candidates from two directories and still accepts the
 
 ```bash
 /home/violet/miniconda3/envs/wems/bin/python -m pytest tests/test_mcp_daily_creation_tools.py -q
-cd ../wemedia-studio && pnpm exec vitest run lib/ai/content-job.test.ts scripts/content-worker.test.ts
+cd ../web && pnpm exec vitest run lib/ai/content-job.test.ts scripts/content-worker.test.ts
 ```
 
 Expected: MCP signature and worker context assertions fail.
@@ -176,7 +176,7 @@ Run the commands from Step 2. Expected: all selected tests pass.
 - [ ] **Step 5: Commit Task 3**
 
 ```bash
-git add backend/mcp_server.py backend/tests/test_mcp_daily_creation_tools.py wemedia-studio/lib/ai/daily-creation-job.ts wemedia-studio/lib/ai/content-job.test.ts
+git add backend/mcp_server.py backend/tests/test_mcp_daily_creation_tools.py web/lib/ai/daily-creation-job.ts web/lib/ai/content-job.test.ts
 git commit -m "feat: execute creation rules across directories"
 ```
 
@@ -185,15 +185,15 @@ git commit -m "feat: execute creation rules across directories"
 ### Task 4: Add Accessible Multi-Select Rule UI
 
 **Files:**
-- Modify: `wemedia-studio/lib/api/daily-plan.ts`
-- Modify: `wemedia-studio/app/daily-plan/CreationRuleDialog.tsx`
-- Modify: `wemedia-studio/app/daily-plan/CreationRuleDialog.test.tsx`
-- Create: `wemedia-studio/app/daily-plan/directory-summary.ts`
-- Create: `wemedia-studio/app/daily-plan/directory-summary.test.ts`
-- Modify: `wemedia-studio/app/daily-plan/CreationRulesPanel.tsx`
-- Modify: `wemedia-studio/app/daily-plan/CreationRulesPanel.test.tsx`
-- Modify: `wemedia-studio/app/daily-plan/CreationRunsPanel.tsx`
-- Modify: `wemedia-studio/app/daily-plan/CreationRunsPanel.test.tsx`
+- Modify: `web/lib/api/daily-plan.ts`
+- Modify: `web/app/daily-plan/CreationRuleDialog.tsx`
+- Modify: `web/app/daily-plan/CreationRuleDialog.test.tsx`
+- Create: `web/app/daily-plan/directory-summary.ts`
+- Create: `web/app/daily-plan/directory-summary.test.ts`
+- Modify: `web/app/daily-plan/CreationRulesPanel.tsx`
+- Modify: `web/app/daily-plan/CreationRulesPanel.test.tsx`
+- Modify: `web/app/daily-plan/CreationRunsPanel.tsx`
+- Modify: `web/app/daily-plan/CreationRunsPanel.test.tsx`
 
 **Interfaces:**
 - `DailyCreationRule.directories: string[]` and legacy `directory: string`.
@@ -232,7 +232,7 @@ Expected: tests and lint pass.
 - [ ] **Step 6: Commit Task 4**
 
 ```bash
-git add wemedia-studio/lib/api/daily-plan.ts wemedia-studio/app/daily-plan/CreationRuleDialog.tsx wemedia-studio/app/daily-plan/CreationRuleDialog.test.tsx wemedia-studio/app/daily-plan/directory-summary.ts wemedia-studio/app/daily-plan/directory-summary.test.ts wemedia-studio/app/daily-plan/CreationRulesPanel.tsx wemedia-studio/app/daily-plan/CreationRulesPanel.test.tsx wemedia-studio/app/daily-plan/CreationRunsPanel.tsx wemedia-studio/app/daily-plan/CreationRunsPanel.test.tsx
+git add web/lib/api/daily-plan.ts web/app/daily-plan/CreationRuleDialog.tsx web/app/daily-plan/CreationRuleDialog.test.tsx web/app/daily-plan/directory-summary.ts web/app/daily-plan/directory-summary.test.ts web/app/daily-plan/CreationRulesPanel.tsx web/app/daily-plan/CreationRulesPanel.test.tsx web/app/daily-plan/CreationRunsPanel.tsx web/app/daily-plan/CreationRunsPanel.test.tsx
 git commit -m "feat: select multiple creation directories"
 ```
 
@@ -263,7 +263,7 @@ Expected: all selected backend tests pass.
 - [ ] **Step 2: Run the full relevant frontend and worker suite**
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm exec vitest run \
   app/daily-plan/CreationRuleDialog.test.tsx \
   app/daily-plan/directory-summary.test.ts \

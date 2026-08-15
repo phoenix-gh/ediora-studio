@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 统一 WeMediaStudio 全应用的语义配色、原生下拉框和页面顶部高度，并用浅色/深色渲染证据验证。
+**Goal:** 统一 Ediora 全应用的语义配色、原生下拉框和页面顶部高度，并用浅色/深色渲染证据验证。
 
 **Architecture:** 在现有 `globals.css` token 层增加控件和顶部高度契约；通过一个共享 `NativeSelect` 组件迁移所有原生 `<select>`，并调整 Base UI Select；通过 `PageHeader`/`data-slot="page-header"` 和 Sidebar 品牌区统一首行高度。旧页面只迁移中性色表面和文字，保留状态色、代码块和媒体专用色。
 
@@ -22,12 +22,12 @@
 ### Task 1: Extend theme tokens and layout height contract
 
 **Files:**
-- Modify: `wemedia-studio/app/globals.css`
-- Modify: `wemedia-studio/components/features/Sidebar.tsx`
-- Modify: `wemedia-studio/components/layout/PageHeader.tsx`
-- Test: `wemedia-studio/app/design-system-tokens.test.ts`
-- Test: `wemedia-studio/components/features/Sidebar.test.tsx`
-- Test: `wemedia-studio/components/layout/layout-components.test.tsx`
+- Modify: `web/app/globals.css`
+- Modify: `web/components/features/Sidebar.tsx`
+- Modify: `web/components/layout/PageHeader.tsx`
+- Test: `web/app/design-system-tokens.test.ts`
+- Test: `web/components/features/Sidebar.test.tsx`
+- Test: `web/components/layout/layout-components.test.tsx`
 
 **Interfaces:**
 - Produces CSS variables `--control`, `--control-hover`, `--app-header-height` in both themes.
@@ -42,11 +42,11 @@
 ### Task 2: Add shared native select styling and align Base UI Select
 
 **Files:**
-- Create: `wemedia-studio/components/ui/native-select.tsx`
-- Modify: `wemedia-studio/components/ui/select.tsx`
-- Test: `wemedia-studio/components/ui/ui-primitives.test.tsx`
-- Test: `wemedia-studio/components/ui/native-select.test.tsx`
-- Modify: `wemedia-studio/app/globals.css`
+- Create: `web/components/ui/native-select.tsx`
+- Modify: `web/components/ui/select.tsx`
+- Test: `web/components/ui/ui-primitives.test.tsx`
+- Test: `web/components/ui/native-select.test.tsx`
+- Modify: `web/app/globals.css`
 
 **Interfaces:**
 - `NativeSelect(props: React.ComponentProps<'select'>)` renders a native select with `data-slot="native-select"`.
@@ -61,16 +61,16 @@
 ### Task 3: Migrate all application native selects
 
 **Files:**
-- Modify: `wemedia-studio/app/assets/AssetsClient.tsx`
-- Modify: `wemedia-studio/app/creation-rules/CreationRuleDialog.tsx`
-- Modify: `wemedia-studio/app/creation-rules/TaskLogList.tsx`
-- Modify: `wemedia-studio/app/drafts/DraftsClient.tsx`
-- Modify: `wemedia-studio/app/drafts/WechatPublishPanel.tsx`
-- Modify: `wemedia-studio/app/github/GithubClient.tsx`
-- Modify: `wemedia-studio/app/responses/ResponseDestinationDialog.tsx`
-- Modify: `wemedia-studio/app/writing-plans/WritingPlansClient.tsx`
-- Modify: `wemedia-studio/app/x/XSubscriptionDialog.tsx`
-- Test: affected existing component tests plus `wemedia-studio/e2e/theme-native-select.spec.ts`
+- Modify: `web/app/assets/AssetsClient.tsx`
+- Modify: `web/app/creation-rules/CreationRuleDialog.tsx`
+- Modify: `web/app/creation-rules/TaskLogList.tsx`
+- Modify: `web/app/drafts/DraftsClient.tsx`
+- Modify: `web/app/drafts/WechatPublishPanel.tsx`
+- Modify: `web/app/github/GithubClient.tsx`
+- Modify: `web/app/responses/ResponseDestinationDialog.tsx`
+- Modify: `web/app/writing-plans/WritingPlansClient.tsx`
+- Modify: `web/app/x/XSubscriptionDialog.tsx`
+- Test: affected existing component tests plus `web/e2e/theme-native-select.spec.ts`
 
 **Interfaces:**
 - Every application native `<select>` is either `NativeSelect` or explicitly has `data-slot="native-select"` and `nativeSelectClass`.
@@ -84,24 +84,24 @@
 ### Task 4: Migrate page shells, headers, and neutral surfaces
 
 **Files:**
-- Modify: `wemedia-studio/app/creation-rules/CreationRulesClient.tsx`
-- Modify: `wemedia-studio/app/digital-humans/DigitalHumansClient.tsx`
-- Modify: `wemedia-studio/app/responses/ResponsesClient.tsx`
-- Modify: `wemedia-studio/app/chat/ChatClient.tsx`
-- Modify: `wemedia-studio/app/assets/AssetsClient.tsx`
-- Modify: `wemedia-studio/app/github/GithubClient.tsx`
-- Modify: `wemedia-studio/app/papers/PapersClient.tsx`
-- Modify: `wemedia-studio/app/wechat/WechatClient.tsx`
-- Modify: `wemedia-studio/app/youtube/YoutubeClient.tsx`
-- Modify: `wemedia-studio/app/reddit/RedditClient.tsx`
-- Modify: `wemedia-studio/app/juejin/JuejinClient.tsx`
-- Modify: `wemedia-studio/app/kr/KrClient.tsx`
-- Modify: `wemedia-studio/app/producthunt/ProductHuntClient.tsx`
-- Modify: `wemedia-studio/app/v2ex/V2exClient.tsx`
-- Modify: `wemedia-studio/app/writing-plans/WritingPlansClient.tsx`
-- Modify: `wemedia-studio/app/drafts/DraftsClient.tsx`
-- Modify: `wemedia-studio/app/text-video/TextVideoWorkbench.tsx`
-- Test: `wemedia-studio/e2e/ui-foundations.spec.ts`
+- Modify: `web/app/creation-rules/CreationRulesClient.tsx`
+- Modify: `web/app/digital-humans/DigitalHumansClient.tsx`
+- Modify: `web/app/responses/ResponsesClient.tsx`
+- Modify: `web/app/chat/ChatClient.tsx`
+- Modify: `web/app/assets/AssetsClient.tsx`
+- Modify: `web/app/github/GithubClient.tsx`
+- Modify: `web/app/papers/PapersClient.tsx`
+- Modify: `web/app/wechat/WechatClient.tsx`
+- Modify: `web/app/youtube/YoutubeClient.tsx`
+- Modify: `web/app/reddit/RedditClient.tsx`
+- Modify: `web/app/juejin/JuejinClient.tsx`
+- Modify: `web/app/kr/KrClient.tsx`
+- Modify: `web/app/producthunt/ProductHuntClient.tsx`
+- Modify: `web/app/v2ex/V2exClient.tsx`
+- Modify: `web/app/writing-plans/WritingPlansClient.tsx`
+- Modify: `web/app/drafts/DraftsClient.tsx`
+- Modify: `web/app/text-video/TextVideoWorkbench.tsx`
+- Test: `web/e2e/ui-foundations.spec.ts`
 - Test: focused tests for modified clients
 
 **Interfaces:**
@@ -117,8 +117,8 @@
 ### Task 5: Rendered theme and responsive verification
 
 **Files:**
-- Modify: `wemedia-studio/e2e/ui-foundations.spec.ts`
-- Create: `wemedia-studio/e2e/theme-consistency.spec.ts`
+- Modify: `web/e2e/ui-foundations.spec.ts`
+- Create: `web/e2e/theme-consistency.spec.ts`
 
 **Interfaces:**
 - The audit covers `/`, `/assets`, `/settings`, `/github`, `/writing-plans`, `/creation-rules`, `/x`, `/wechat` at 1440px and 1024px in light and dark themes.

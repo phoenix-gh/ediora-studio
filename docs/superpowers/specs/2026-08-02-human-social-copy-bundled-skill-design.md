@@ -2,7 +2,7 @@
 
 ## Summary
 
-WeMediaStudio will replace the legacy project-level `x-post` Skill with a curated, bundled `human-social-copy` Skill derived from [0xMulight/human-social-copy](https://github.com/0xMulight/human-social-copy). The new Skill will use the shared reference runtime, preserve generally useful Chinese social-copy guidance, and remove upstream author-specific and Hermes-specific behavior.
+Ediora will replace the legacy project-level `x-post` Skill with a curated, bundled `human-social-copy` Skill derived from [0xMulight/human-social-copy](https://github.com/0xMulight/human-social-copy). The new Skill will use the shared reference runtime, preserve generally useful Chinese social-copy guidance, and remove upstream author-specific and Hermes-specific behavior.
 
 The bundled Skill is intended for any configured publishing account. It uses an explicitly available account voice profile when one exists. If no account is selected, no usable voice profile exists, or multiple accounts are present without a clear selection, it must not guess; it writes in a neutral, human, information-dense Chinese style.
 
@@ -38,12 +38,12 @@ The bundled directory includes:
 - `LICENSE`: the upstream MIT license and copyright notice without modification.
 - `UPSTREAM.md`: repository URL, pinned commit, adaptation date, and a concise list of material changes.
 
-The Skill frontmatter uses version `1.0.0-wms.1` to identify the first WeMediaStudio adaptation rather than claiming to ship an unmodified upstream release.
+The Skill frontmatter uses version `1.0.0-wms.1` to identify the first Ediora adaptation rather than claiming to ship an unmodified upstream release.
 
 ## Directory structure
 
 ```text
-wemedia-studio/skills/human-social-copy/
+web/skills/human-social-copy/
   SKILL.md
   LICENSE
   UPSTREAM.md
@@ -156,11 +156,11 @@ Update current, executable Skill references:
 - `skills/article-drafting/SKILL.md`: replace routing and related-Skill references from `x-post` to `human-social-copy`.
 - `skills/content-ideation/SKILL.md`: replace the handoff workflow from `x-post` to `human-social-copy` and remove references to the deleted Skill's private skeleton/voice sequence.
 
-Historical documents under `docs/superpowers/` are not rewritten. Files such as `wemedia-studio/app/x/x-post-url.ts` are unrelated URL helpers and remain unchanged.
+Historical documents under `docs/superpowers/` are not rewritten. Files such as `web/app/x/x-post-url.ts` are unrelated URL helpers and remain unchanged.
 
 ## Runtime behavior
 
-Placing the adapted Skill under `wemedia-studio/skills/` makes it a bundled Skill through the existing registry:
+Placing the adapted Skill under `web/skills/` makes it a bundled Skill through the existing registry:
 
 - enabled by default;
 - visible in Skill management and Chat selection;

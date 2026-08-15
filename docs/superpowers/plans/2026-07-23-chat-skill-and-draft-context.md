@@ -20,8 +20,8 @@
 ### Task 1: Discover local skills and expose selectable draft context
 
 **Files:**
-- Create: `wemedia-studio/lib/ai/discover-skills.ts`
-- Create: `wemedia-studio/lib/ai/discover-skills.test.ts`
+- Create: `web/lib/ai/discover-skills.ts`
+- Create: `web/lib/ai/discover-skills.test.ts`
 - Modify: `backend/routers/chat.py`
 - Modify: `backend/tests/test_chat_router.py`
 
@@ -44,10 +44,10 @@ git commit -m "feat(chat): discover skills and draft context"
 ### Task 2: Validate and load selected server-side context
 
 **Files:**
-- Modify: `wemedia-studio/app/api/chat/route.ts`
-- Modify: `wemedia-studio/app/api/chat/route.test.ts`
-- Modify: `wemedia-studio/lib/api/chat.ts`
-- Modify: `wemedia-studio/lib/api/chat.test.ts`
+- Modify: `web/app/api/chat/route.ts`
+- Modify: `web/app/api/chat/route.test.ts`
+- Modify: `web/lib/api/chat.ts`
+- Modify: `web/lib/api/chat.test.ts`
 
 **Interfaces:**
 - Extends Chat request with optional `skillName?: string`, `draftId?: number`.
@@ -68,9 +68,9 @@ git commit -m "feat(chat): load selected skill and draft context"
 ### Task 3: Add composer selectors
 
 **Files:**
-- Modify: `wemedia-studio/app/chat/ChatClient.tsx`
-- Modify: `wemedia-studio/app/chat/chat-layout.test.ts`
-- Modify: `wemedia-studio/lib/api/chat.ts`
+- Modify: `web/app/chat/ChatClient.tsx`
+- Modify: `web/app/chat/chat-layout.test.ts`
+- Modify: `web/lib/api/chat.ts`
 
 **Interfaces:**
 - Consumes: `GET /api/chat/skills`, `GET /api/chat/drafts`, and optional selection identifiers.

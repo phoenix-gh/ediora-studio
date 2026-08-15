@@ -4,9 +4,9 @@
 
 **Goal:** Add a bundled `x-article-writing` Skill that Agents can autonomously discover and load for independent X/Twitter Article writing and matching intelligence-center `expanded_article` jobs.
 
-**Architecture:** Add one bundled Skill package under the existing `wemedia-studio/skills` registry root. Keep the main `SKILL.md` concise and route detailed structure, opening/layout, and quality guidance into three on-demand Markdown references; extend the bundled-skill integration test to verify discovery, boundaries, readable references, and lifecycle behavior.
+**Architecture:** Add one bundled Skill package under the existing `web/skills` registry root. Keep the main `SKILL.md` concise and route detailed structure, opening/layout, and quality guidance into three on-demand Markdown references; extend the bundled-skill integration test to verify discovery, boundaries, readable references, and lifecycle behavior.
 
-**Tech Stack:** Markdown Agent Skills, `WMS_SKILL.json`, TypeScript, Vitest, existing WeMediaStudio Skill registry.
+**Tech Stack:** Markdown Agent Skills, `WMS_SKILL.json`, TypeScript, Vitest, existing Ediora Skill registry.
 
 ## Global Constraints
 
@@ -23,7 +23,7 @@
 ### Task 1: Define the bundled Skill contract with a failing integration test
 
 **Files:**
-- Modify: `wemedia-studio/lib/skills/bundled-skills.test.ts`
+- Modify: `web/lib/skills/bundled-skills.test.ts`
 
 **Interfaces:**
 - Consumes: `listSkills()`, `discoverSkills()`, `listSkillReferences()`, `readSkillReference()`, `getEnabledSkill()`, `setSkillEnabled()`, and `deleteUploadedSkill()` from the existing registry.
@@ -62,7 +62,7 @@ Load the Skill and assert its metadata/body contains `X/Twitter Article`, `expan
 Run:
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm exec vitest run lib/skills/bundled-skills.test.ts
 ```
 
@@ -73,12 +73,12 @@ Expected: FAIL because `x-article-writing` is absent from bundled discovery.
 ### Task 2: Add the concise Skill package and references
 
 **Files:**
-- Create: `wemedia-studio/skills/x-article-writing/SKILL.md`
-- Create: `wemedia-studio/skills/x-article-writing/WMS_SKILL.json`
-- Create: `wemedia-studio/skills/x-article-writing/references/article-structure.md`
-- Create: `wemedia-studio/skills/x-article-writing/references/hooks-and-layout.md`
-- Create: `wemedia-studio/skills/x-article-writing/references/quality-check.md`
-- Test: `wemedia-studio/lib/skills/bundled-skills.test.ts`
+- Create: `web/skills/x-article-writing/SKILL.md`
+- Create: `web/skills/x-article-writing/WMS_SKILL.json`
+- Create: `web/skills/x-article-writing/references/article-structure.md`
+- Create: `web/skills/x-article-writing/references/hooks-and-layout.md`
+- Create: `web/skills/x-article-writing/references/quality-check.md`
+- Test: `web/lib/skills/bundled-skills.test.ts`
 
 **Interfaces:**
 - Consumes: Existing folder-based bundled discovery and `loadSkill`/`readSkillReference` Agent tools.
@@ -128,7 +128,7 @@ References remain on demand so the Agent only loads guidance relevant to the cur
 Run:
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm exec vitest run lib/skills/bundled-skills.test.ts lib/skills/registry.test.ts
 ```
 
@@ -139,10 +139,10 @@ Expected: both files pass, including the new Skill contract.
 Run:
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm exec eslint lib/skills/bundled-skills.test.ts
 cd ..
-git diff --check -- wemedia-studio/skills/x-article-writing wemedia-studio/lib/skills/bundled-skills.test.ts
+git diff --check -- web/skills/x-article-writing web/lib/skills/bundled-skills.test.ts
 ```
 
 Expected: exit code 0 with no warnings or whitespace errors.
@@ -152,8 +152,8 @@ Expected: exit code 0 with no warnings or whitespace errors.
 ### Task 3: Verify runtime discovery and Agent-facing catalog text
 
 **Files:**
-- Verify: `wemedia-studio/skills/x-article-writing/**`
-- Verify: `wemedia-studio/lib/ai/discover-skills.ts`
+- Verify: `web/skills/x-article-writing/**`
+- Verify: `web/lib/ai/discover-skills.ts`
 
 **Interfaces:**
 - Consumes: `discoverSkills()` and `getEnabledSkill('x-article-writing')`.
@@ -168,7 +168,7 @@ Use a focused Vitest assertion or the existing test environment to verify that t
 Run:
 
 ```bash
-rg -n "编造|95%|150|4\.0|保证爆款|必须.*配图|五个标题" wemedia-studio/skills/x-article-writing
+rg -n "编造|95%|150|4\.0|保证爆款|必须.*配图|五个标题" web/skills/x-article-writing
 ```
 
 Expected: only explicit anti-fabrication language may match; no unsupported metric or unconditional extras remain.

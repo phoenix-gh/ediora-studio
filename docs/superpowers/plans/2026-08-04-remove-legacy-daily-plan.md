@@ -78,7 +78,7 @@ Re-run Step 2. Commit scoped files as `refactor: isolate creation rule APIs` whe
 **Files:**
 
 - Modify: `backend/content_jobs.py`, `backend/mcp_server.py`, `backend/routers/dashboard.py`, `backend/routers/publish_accounts.py`
-- Modify: `wemedia-studio/lib/ai/content-job.ts`, `wemedia-studio/lib/api/publish-accounts.ts`, `wemedia-studio/app/settings/sections/PublishAccountsSection.tsx`
+- Modify: `web/lib/ai/content-job.ts`, `web/lib/api/publish-accounts.ts`, `web/app/settings/sections/PublishAccountsSection.tsx`
 - Modify: relevant dashboard/content-job/account tests
 
 **Interfaces:** No `daily_plan` content flow/MCP tools/dashboard alert and no `daily_quota` wire value or setting.
@@ -89,7 +89,7 @@ Assert planner-ready fixtures produce no dashboard alert, publish-account JSON o
 
 - [ ] **Step 2: Verify RED**
 
-Run focused backend dashboard/content-job tests and `cd wemedia-studio && pnpm test app/settings/sections/PublishAccountsSection.test.tsx`. Expected: FAIL because integrations remain.
+Run focused backend dashboard/content-job tests and `cd web && pnpm test app/settings/sections/PublishAccountsSection.test.tsx`. Expected: FAIL because integrations remain.
 
 - [ ] **Step 3: Remove integrations**
 
@@ -103,9 +103,9 @@ Re-run Step 2 and commit scoped files as `refactor: remove planner integrations`
 
 **Files:**
 
-- Create: `wemedia-studio/app/creation-rules/page.tsx`, `wemedia-studio/app/creation-rules/CreationRulesClient.tsx`, `wemedia-studio/app/creation-rules/CreationRulesClient.test.tsx`, `wemedia-studio/lib/api/creation-rules.ts`
-- Delete: `wemedia-studio/app/daily-plan/`, `wemedia-studio/components/features/dashboard/TodayPlan.tsx`
-- Modify: `wemedia-studio/app/page.tsx`, `wemedia-studio/components/features/Sidebar.tsx`, dashboard tests
+- Create: `web/app/creation-rules/page.tsx`, `web/app/creation-rules/CreationRulesClient.tsx`, `web/app/creation-rules/CreationRulesClient.test.tsx`, `web/lib/api/creation-rules.ts`
+- Delete: `web/app/daily-plan/`, `web/components/features/dashboard/TodayPlan.tsx`
+- Modify: `web/app/page.tsx`, `web/components/features/Sidebar.tsx`, dashboard tests
 
 **Interfaces:** The `/creation-rules` page loads only rules/runs and has no planning controls. Sidebar links there; dashboard does not fetch/render a plan.
 
@@ -115,7 +115,7 @@ Render `CreationRulesClient`; assert headings `今日创作任务` and `创作�
 
 - [ ] **Step 2: Verify RED**
 
-Run `cd wemedia-studio && pnpm test app/creation-rules/CreationRulesClient.test.tsx components/features/dashboard/dashboard-components.test.tsx`. Expected: FAIL because the new page/client does not exist.
+Run `cd web && pnpm test app/creation-rules/CreationRulesClient.test.tsx components/features/dashboard/dashboard-components.test.tsx`. Expected: FAIL because the new page/client does not exist.
 
 - [ ] **Step 3: Implement product migration**
 
@@ -133,7 +133,7 @@ Run `cd backend && python -m pytest -q`. Record exact unrelated failures separat
 
 - [ ] **Step 2: Run frontend tests and build**
 
-Run `cd wemedia-studio && pnpm test && pnpm lint && pnpm build`.
+Run `cd web && pnpm test && pnpm lint && pnpm build`.
 
 - [ ] **Step 3: Verify route outcomes**
 

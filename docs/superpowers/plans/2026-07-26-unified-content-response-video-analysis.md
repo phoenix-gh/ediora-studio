@@ -301,17 +301,17 @@ git commit -m "feat: trigger youtube response analysis"
 
 **Files:**
 
-- Create: `wemedia-studio/lib/ai/content-response-schema.ts`
-- Create: `wemedia-studio/lib/ai/content-response-job.ts`
-- Create: `wemedia-studio/lib/ai/content-response-output-job.ts`
-- Modify: `wemedia-studio/scripts/content-worker.ts`
-- Modify: `wemedia-studio/lib/ai/job-client.ts`
-- Create: `wemedia-studio/lib/ai/content-response-job.test.ts`
-- Create: `wemedia-studio/lib/ai/content-response-output-job.test.ts`
+- Create: `web/lib/ai/content-response-schema.ts`
+- Create: `web/lib/ai/content-response-job.ts`
+- Create: `web/lib/ai/content-response-output-job.ts`
+- Modify: `web/scripts/content-worker.ts`
+- Modify: `web/lib/ai/job-client.ts`
+- Create: `web/lib/ai/content-response-job.test.ts`
+- Create: `web/lib/ai/content-response-output-job.test.ts`
 
 **Step 1: Read the local Next.js/API guide relevant to worker TypeScript**
 
-Read only the applicable files under `wemedia-studio/node_modules/next/dist/docs/` before editing Next.js code, as required by `wemedia-studio/AGENTS.md`.
+Read only the applicable files under `web/node_modules/next/dist/docs/` before editing Next.js code, as required by `web/AGENTS.md`.
 
 **Step 2: Write failing schema and orchestration tests**
 
@@ -328,7 +328,7 @@ Test one controlled JSON repair attempt, low-value persistence, no-account compl
 Run:
 
 ```bash
-cd wemedia-studio && pnpm test -- lib/ai/content-response-job.test.ts
+cd web && pnpm test -- lib/ai/content-response-job.test.ts
 ```
 
 Expected: FAIL because the worker flow does not exist.
@@ -370,8 +370,8 @@ Add dispatch branches for both new flows while preserving digital-human and dige
 **Step 6: Verify and commit**
 
 ```bash
-cd wemedia-studio && pnpm test -- lib/ai/content-response-job.test.ts lib/ai/content-response-output-job.test.ts lib/ai/x-response-job.test.ts
-git add wemedia-studio/lib/ai/content-response-schema.ts wemedia-studio/lib/ai/content-response-job.ts wemedia-studio/lib/ai/content-response-output-job.ts wemedia-studio/scripts/content-worker.ts wemedia-studio/lib/ai/job-client.ts wemedia-studio/lib/ai/content-response-job.test.ts wemedia-studio/lib/ai/content-response-output-job.test.ts
+cd web && pnpm test -- lib/ai/content-response-job.test.ts lib/ai/content-response-output-job.test.ts lib/ai/x-response-job.test.ts
+git add web/lib/ai/content-response-schema.ts web/lib/ai/content-response-job.ts web/lib/ai/content-response-output-job.ts web/scripts/content-worker.ts web/lib/ai/job-client.ts web/lib/ai/content-response-job.test.ts web/lib/ai/content-response-output-job.test.ts
 git commit -m "feat: analyze and expand unified response content"
 ```
 
@@ -383,11 +383,11 @@ git commit -m "feat: analyze and expand unified response content"
 
 - Modify: `backend/x_response_service.py`
 - Modify: `backend/routers/x_responses.py`
-- Modify: `wemedia-studio/lib/ai/x-response-job.ts`
+- Modify: `web/lib/ai/x-response-job.ts`
 - Modify: `backend/tests/test_x_response_service.py`
 - Modify: `backend/tests/test_x_responses_router.py`
 - Modify: `backend/tests/test_x_response_end_to_end.py`
-- Modify: `wemedia-studio/lib/ai/x-response-job.test.ts`
+- Modify: `web/lib/ai/x-response-job.test.ts`
 
 **Step 1: Write failing compatibility tests**
 
@@ -420,8 +420,8 @@ Route X structured analysis through unified worker persistence while preserving 
 
 ```bash
 cd backend && pytest -q tests/test_x_response_service.py tests/test_x_responses_router.py tests/test_x_response_end_to_end.py tests/test_x_notify_scout.py tests/test_telegram_notifier.py
-cd ../wemedia-studio && pnpm test -- lib/ai/x-response-job.test.ts lib/api/x-responses.test.ts
-git add backend/x_response_service.py backend/routers/x_responses.py backend/tests/test_x_response_service.py backend/tests/test_x_responses_router.py backend/tests/test_x_response_end_to_end.py wemedia-studio/lib/ai/x-response-job.ts wemedia-studio/lib/ai/x-response-job.test.ts
+cd ../web && pnpm test -- lib/ai/x-response-job.test.ts lib/api/x-responses.test.ts
+git add backend/x_response_service.py backend/routers/x_responses.py backend/tests/test_x_response_service.py backend/tests/test_x_responses_router.py backend/tests/test_x_response_end_to_end.py web/lib/ai/x-response-job.ts web/lib/ai/x-response-job.test.ts
 git commit -m "refactor: move x responses to unified storage"
 ```
 
@@ -431,14 +431,14 @@ git commit -m "refactor: move x responses to unified storage"
 
 **Files:**
 
-- Create: `wemedia-studio/lib/api/responses.ts`
-- Create: `wemedia-studio/lib/api/responses.test.ts`
-- Create: `wemedia-studio/app/responses/page.tsx`
-- Create: `wemedia-studio/app/responses/ResponsesClient.tsx`
-- Create: `wemedia-studio/app/responses/responses-layout.test.tsx`
-- Modify: `wemedia-studio/app/x-responses/page.tsx`
-- Modify: `wemedia-studio/components/features/Sidebar.tsx`
-- Modify: `wemedia-studio/app/globals.css`
+- Create: `web/lib/api/responses.ts`
+- Create: `web/lib/api/responses.test.ts`
+- Create: `web/app/responses/page.tsx`
+- Create: `web/app/responses/ResponsesClient.tsx`
+- Create: `web/app/responses/responses-layout.test.tsx`
+- Modify: `web/app/x-responses/page.tsx`
+- Modify: `web/components/features/Sidebar.tsx`
+- Modify: `web/app/globals.css`
 
 **Step 1: Read applicable Next.js 16 guides**
 
@@ -460,7 +460,7 @@ Test typed query encoding, detail lazy loading, decision/output mutations, `/x-r
 Run:
 
 ```bash
-cd wemedia-studio && pnpm test -- lib/api/responses.test.ts app/responses/responses-layout.test.tsx
+cd web && pnpm test -- lib/api/responses.test.ts app/responses/responses-layout.test.tsx
 ```
 
 Expected: FAIL because the route and client do not exist.
@@ -478,8 +478,8 @@ Keep full transcript out of initial server payload. Mutations update local state
 **Step 4: Verify and commit**
 
 ```bash
-cd wemedia-studio && pnpm test -- lib/api/responses.test.ts app/responses/responses-layout.test.tsx app/x-responses/x-responses-layout.test.tsx
-git add wemedia-studio/lib/api/responses.ts wemedia-studio/lib/api/responses.test.ts wemedia-studio/app/responses wemedia-studio/app/x-responses/page.tsx wemedia-studio/components/features/Sidebar.tsx wemedia-studio/app/globals.css
+cd web && pnpm test -- lib/api/responses.test.ts app/responses/responses-layout.test.tsx app/x-responses/x-responses-layout.test.tsx
+git add web/lib/api/responses.ts web/lib/api/responses.test.ts web/app/responses web/app/x-responses/page.tsx web/components/features/Sidebar.tsx web/app/globals.css
 git commit -m "feat: add unified response workbench"
 ```
 
@@ -489,14 +489,14 @@ git commit -m "feat: add unified response workbench"
 
 **Files:**
 
-- Modify: `wemedia-studio/lib/api/youtube.ts`
-- Modify: `wemedia-studio/lib/api/settings.ts`
-- Modify: `wemedia-studio/lib/api/settings-test-fixtures.ts`
-- Modify: `wemedia-studio/app/youtube/YoutubeClient.tsx`
-- Create: `wemedia-studio/app/youtube/youtube-analysis.test.tsx`
-- Create: `wemedia-studio/app/settings/sections/TranscriptionSection.tsx`
-- Modify: `wemedia-studio/app/settings/SettingsClient.tsx`
-- Create: `wemedia-studio/app/settings/sections/TranscriptionSection.test.tsx`
+- Modify: `web/lib/api/youtube.ts`
+- Modify: `web/lib/api/settings.ts`
+- Modify: `web/lib/api/settings-test-fixtures.ts`
+- Modify: `web/app/youtube/YoutubeClient.tsx`
+- Create: `web/app/youtube/youtube-analysis.test.tsx`
+- Create: `web/app/settings/sections/TranscriptionSection.tsx`
+- Modify: `web/app/settings/SettingsClient.tsx`
+- Create: `web/app/settings/sections/TranscriptionSection.test.tsx`
 
 **Step 1: Write failing UI tests**
 
@@ -512,7 +512,7 @@ Cover:
 Run:
 
 ```bash
-cd wemedia-studio && pnpm test -- app/youtube/youtube-analysis.test.tsx app/settings/sections/TranscriptionSection.test.tsx
+cd web && pnpm test -- app/youtube/youtube-analysis.test.tsx app/settings/sections/TranscriptionSection.test.tsx
 ```
 
 Expected: FAIL before UI implementation.
@@ -524,8 +524,8 @@ Update DTOs and mutations. Channel toggle updates only the selected channel. Vid
 **Step 3: Verify and commit**
 
 ```bash
-cd wemedia-studio && pnpm test -- app/youtube/youtube-analysis.test.tsx app/settings/sections/TranscriptionSection.test.tsx lib/api/settings-telegram.test.ts
-git add wemedia-studio/lib/api/youtube.ts wemedia-studio/lib/api/settings.ts wemedia-studio/lib/api/settings-test-fixtures.ts wemedia-studio/app/youtube/YoutubeClient.tsx wemedia-studio/app/youtube/youtube-analysis.test.tsx wemedia-studio/app/settings/sections/TranscriptionSection.tsx wemedia-studio/app/settings/SettingsClient.tsx wemedia-studio/app/settings/sections/TranscriptionSection.test.tsx
+cd web && pnpm test -- app/youtube/youtube-analysis.test.tsx app/settings/sections/TranscriptionSection.test.tsx lib/api/settings-telegram.test.ts
+git add web/lib/api/youtube.ts web/lib/api/settings.ts web/lib/api/settings-test-fixtures.ts web/app/youtube/YoutubeClient.tsx web/app/youtube/youtube-analysis.test.tsx web/app/settings/sections/TranscriptionSection.tsx web/app/settings/SettingsClient.tsx web/app/settings/sections/TranscriptionSection.test.tsx
 git commit -m "feat: add youtube analysis controls"
 ```
 
@@ -543,7 +543,7 @@ git commit -m "feat: add youtube analysis controls"
 **Step 1: Prove no legacy writers remain**
 
 ```bash
-rg -n "XResponseDecision\\(|update\\(XResponseDecision\\)|insert.*x_response_decisions" backend wemedia-studio --glob '!backend/tests/**' --glob '!wemedia-studio/node_modules/**'
+rg -n "XResponseDecision\\(|update\\(XResponseDecision\\)|insert.*x_response_decisions" backend web --glob '!backend/tests/**' --glob '!web/node_modules/**'
 ```
 
 Expected: no runtime writer matches.
@@ -563,9 +563,9 @@ Expected: all backend tests pass.
 **Step 4: Run frontend verification**
 
 ```bash
-cd wemedia-studio && pnpm test
-cd wemedia-studio && pnpm lint
-cd wemedia-studio && pnpm build
+cd web && pnpm test
+cd web && pnpm lint
+cd web && pnpm build
 ```
 
 Expected: tests, lint, type checking, and production build pass.

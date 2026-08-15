@@ -15,8 +15,8 @@
 - `backend/tests/test_temporary_asset_directory.py`：测试“临时文件”系统目录幂等创建和同名普通目录升级。
 - `backend/tests/test_mcp_github_trending_tools.py`：种入两天 daily 数据和一条 weekly 数据，验证 MCP 只读出最新 daily、排名变化和 NEW，并暴露严格无参数 schema。
 - `backend/tests/test_asset_directories_router.py`：验证媒体上传可按目录归档、未知目录被拒绝；保留旧上传调用兼容性。
-- `wemedia-studio/lib/skills/bundled-skills.test.ts`：验证 `github-trending-chart` 默认发现、启用、无额外引用，并包含日榜/简介/推荐/工具/目录约束。
-- `wemedia-studio/lib/ai/global-chat-tools.test.ts`：验证图片输入 schema 接受严格的 `title`/`directory`，创建任务请求会传递这两个字段且仍拒绝未知字段。
+- `web/lib/skills/bundled-skills.test.ts`：验证 `github-trending-chart` 默认发现、启用、无额外引用，并包含日榜/简介/推荐/工具/目录约束。
+- `web/lib/ai/global-chat-tools.test.ts`：验证图片输入 schema 接受严格的 `title`/`directory`，创建任务请求会传递这两个字段且仍拒绝未知字段。
 
 运行后端测试使用 `/home/violet/miniconda3/envs/wems/bin/python`；前端测试使用项目现有 pnpm/Vitest 命令。记录环境导致的 fixture 阻塞，不把阻塞当作通过。
 
@@ -35,14 +35,14 @@
 
 ### 4. 图片任务目录传递
 
-- 在 `wemedia-studio/lib/ai/global-chat-tools.ts` 扩展图片输入 schema 和 `createImageJob` 参数，保留 strict schema。
-- 在 `wemedia-studio/lib/ai/content-job.ts` 读取任务输入中的目录，并将其作为 upload query 参数传给资产 API。
+- 在 `web/lib/ai/global-chat-tools.ts` 扩展图片输入 schema 和 `createImageJob` 参数，保留 strict schema。
+- 在 `web/lib/ai/content-job.ts` 读取任务输入中的目录，并将其作为 upload query 参数传给资产 API。
 - 保持默认标题/未指定目录的兼容行为，更新对应测试。
 
 ### 5. 默认 Skill
 
-- 按 skill-creator 规范运行 `init_skill.py github-trending-chart --path wemedia-studio/skills/github-trending-chart`，然后清理模板中的无关占位文件。
-- 用 `wemedia-studio/skills/github-trending-chart/SKILL.md` 写入已确认的 Agent 工作流、图构图、事实边界、工具参数与资产归档要求。
+- 按 skill-creator 规范运行 `init_skill.py github-trending-chart --path web/skills/github-trending-chart`，然后清理模板中的无关占位文件。
+- 用 `web/skills/github-trending-chart/SKILL.md` 写入已确认的 Agent 工作流、图构图、事实边界、工具参数与资产归档要求。
 - Skill 使用自动发现，不增加手工注册表；遵循 skill-creator 的标准 frontmatter。
 
 ### 6. 验证

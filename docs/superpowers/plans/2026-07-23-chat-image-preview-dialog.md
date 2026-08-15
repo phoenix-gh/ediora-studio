@@ -20,8 +20,8 @@
 ### Task 1: Add the preview Dialog to the Chat generated-image result
 
 **Files:**
-- Modify: `wemedia-studio/app/chat/chat-layout.test.ts:59-61`
-- Modify: `wemedia-studio/app/chat/ChatClient.tsx:69-105`
+- Modify: `web/app/chat/chat-layout.test.ts:59-61`
+- Modify: `web/app/chat/ChatClient.tsx:69-105`
 
 **Interfaces:**
 - Consumes: `urls: string[]` resolved by `imageUrlsForJob(job)`.
@@ -67,6 +67,6 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add wemedia-studio/app/chat/ChatClient.tsx wemedia-studio/app/chat/chat-layout.test.ts
+git add web/app/chat/ChatClient.tsx web/app/chat/chat-layout.test.ts
 git commit -m "feat(chat): preview generated images in dialog"
 ```

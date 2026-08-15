@@ -23,7 +23,7 @@
 ### Task 1: Test Modifier-Based Row Selection
 
 **Files:**
-- Modify: `wemedia-studio/app/drafts/DraftsClient.test.tsx`
+- Modify: `web/app/drafts/DraftsClient.test.tsx`
 
 **Interfaces:**
 - Consumes: rendered `DraftsClient` list rows by their existing visible draft titles.
@@ -73,7 +73,7 @@ Replace checkbox interaction assertions with Ctrl-click actions and assert the h
 Run:
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm test app/drafts/DraftsClient.test.tsx
 ```
 
@@ -82,8 +82,8 @@ Expected: FAIL because checkbox controls still render and the row click handler 
 ### Task 2: Implement Row Gesture and Visual State
 
 **Files:**
-- Modify: `wemedia-studio/app/drafts/DraftsClient.tsx`
-- Test: `wemedia-studio/app/drafts/DraftsClient.test.tsx`
+- Modify: `web/app/drafts/DraftsClient.tsx`
+- Test: `web/app/drafts/DraftsClient.test.tsx`
 
 **Interfaces:**
 - Consumes: `React.MouseEvent<HTMLButtonElement>` from each draft row and the existing `toggleDraftSelection(draftId)` / `handleSelectDraft(draft)` functions.
@@ -134,7 +134,7 @@ Add `isBulkSelected && 'bg-sky-50 dark:bg-sky-950/30'` to the existing button `c
 Run:
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm test app/drafts/DraftsClient.test.tsx
 ```
 
@@ -145,7 +145,7 @@ Expected: PASS, including existing bulk dispatch and deletion tests updated to s
 Run:
 
 ```bash
-cd wemedia-studio
+cd web
 pnpm test app/drafts/DraftsClient.test.tsx app/drafts/BulkImageActionDialog.test.tsx app/drafts/draft-bulk-operations.test.ts
 pnpm lint
 git diff --check -- app/drafts/DraftsClient.tsx app/drafts/DraftsClient.test.tsx

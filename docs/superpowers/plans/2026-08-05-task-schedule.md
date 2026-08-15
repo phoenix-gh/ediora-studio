@@ -60,11 +60,11 @@ Expected: PASS.
 ### Task 2: Render task-arrangement list only
 
 **Files:**
-- Modify: `wemedia-studio/lib/api/creation-rules.ts`
-- Modify: `wemedia-studio/app/creation-rules/CreationRulesClient.tsx`
-- Modify: `wemedia-studio/app/creation-rules/CreationRulesPanel.tsx`
-- Modify: `wemedia-studio/components/features/Sidebar.tsx`
-- Test: `wemedia-studio/app/creation-rules/CreationRulesClient.test.tsx`
+- Modify: `web/lib/api/creation-rules.ts`
+- Modify: `web/app/creation-rules/CreationRulesClient.tsx`
+- Modify: `web/app/creation-rules/CreationRulesPanel.tsx`
+- Modify: `web/components/features/Sidebar.tsx`
+- Test: `web/app/creation-rules/CreationRulesClient.test.tsx`
 
 **Interfaces:**
 - Consumes: `DailyCreationRule.last_run_at` and `DailyCreationRule.next_run_at` from Task 1.

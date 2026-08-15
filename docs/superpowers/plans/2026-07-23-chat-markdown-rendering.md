@@ -20,8 +20,8 @@
 ### Task 1: Add a safe Markdown message component
 
 **Files:**
-- Create: `wemedia-studio/components/features/chat/ChatMarkdown.tsx`
-- Create: `wemedia-studio/components/features/chat/ChatMarkdown.test.tsx`
+- Create: `web/components/features/chat/ChatMarkdown.tsx`
+- Create: `web/components/features/chat/ChatMarkdown.test.tsx`
 
 **Interfaces:**
 - Produces: `ChatMarkdown({ content }: { content: string }): JSX.Element`.
@@ -76,15 +76,15 @@ Expected: PASS with 2 tests.
 - [ ] **Step 5: Commit the component and tests**
 
 ```bash
-git add wemedia-studio/components/features/chat/ChatMarkdown.tsx wemedia-studio/components/features/chat/ChatMarkdown.test.tsx
+git add web/components/features/chat/ChatMarkdown.tsx web/components/features/chat/ChatMarkdown.test.tsx
 git commit -m "feat(chat): render assistant markdown safely"
 ```
 
 ### Task 2: Use Markdown rendering for assistant bubbles
 
 **Files:**
-- Modify: `wemedia-studio/app/chat/ChatClient.tsx:1-130`
-- Test: `wemedia-studio/components/features/chat/ChatMarkdown.test.tsx`
+- Modify: `web/app/chat/ChatClient.tsx:1-130`
+- Test: `web/components/features/chat/ChatMarkdown.test.tsx`
 
 **Interfaces:**
 - Consumes: `ChatMarkdown` from Task 1.
@@ -128,6 +128,6 @@ Expected: focused Markdown tests, all frontend tests, TypeScript, and Next produ
 - [ ] **Step 5: Commit the integration**
 
 ```bash
-git add wemedia-studio/app/chat/ChatClient.tsx wemedia-studio/components/features/chat/ChatMarkdown.test.tsx
+git add web/app/chat/ChatClient.tsx web/components/features/chat/ChatMarkdown.test.tsx
 git commit -m "feat(chat): display markdown replies"
 ```

@@ -123,10 +123,10 @@ Expected: all tests pass.
 **Files:**
 - Modify: `backend/routers/wechat.py`
 - Create: `backend/tests/test_wechat_article_detail.py`
-- Modify: `wemedia-studio/lib/api/wechat.ts`
-- Modify: `wemedia-studio/components/features/ArticleReader.tsx`
-- Modify: `wemedia-studio/app/wechat/WechatClient.tsx`
-- Modify: `wemedia-studio/components/features/ArticleReader.test.tsx`
+- Modify: `web/lib/api/wechat.ts`
+- Modify: `web/components/features/ArticleReader.tsx`
+- Modify: `web/app/wechat/WechatClient.tsx`
+- Modify: `web/components/features/ArticleReader.test.tsx`
 
 **Interfaces:**
 - Produces: `GET /api/wechat/articles/{id}` returns stored `ArticleOut` without calling `fetch_article_body`.

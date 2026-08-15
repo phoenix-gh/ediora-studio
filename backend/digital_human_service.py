@@ -122,6 +122,7 @@ async def create_digital_human(
     portrait_asset_id: int,
     default_environment_asset_id: int,
     voice_sample_asset_id: int | None = None,
+    look_prompt: str = "",
     provider: str = "heygen",
 ) -> tuple[DigitalHuman, ContentJob]:
     clean_name = name.strip()
@@ -169,6 +170,7 @@ async def create_digital_human(
         portrait_asset_id=portrait_asset_id,
         voice_sample_asset_id=voice_sample_asset_id,
         default_environment_asset_id=default_environment_asset_id,
+        look_prompt=look_prompt.strip(),
     )
     session.add(role)
     await session.flush()
@@ -384,13 +386,12 @@ async def enqueue_shot_render(
     if project is None:
         raise InvalidTalkingVideo("口播作品不存在")
     role = await session.get(DigitalHuman, project.digital_human_id)
-    if (
-        role is None
-        or role.status != "ready"
-        or not role.look_asset_id
-        or not role.voice_sample_asset_id
-    ):
+    if role is None or role.status != "ready":
         raise InvalidTalkingVideo("数字人角色尚未就绪")
+    if not role.look_asset_id:
+        raise InvalidTalkingVideo("请先完成定妆图合成")
+    if not role.voice_sample_asset_id:
+        raise InvalidTalkingVideo("请先为数字人上传 2–15 秒声音样本")
     shot = find_shot(list(project.shots or []), shot_id)
     if shot["status"] == "running":
         raise InvalidTalkingVideo("该镜头正在生成")

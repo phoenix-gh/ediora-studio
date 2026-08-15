@@ -20,7 +20,7 @@
 ### Task 1: Constrain the preview and verify long-content scrolling
 
 **Files:**
-- Create: `wemedia-studio/e2e/extension-workbench-layout.spec.ts`
+- Create: `web/e2e/extension-workbench-layout.spec.ts`
 - Modify: `chrome-extension/content/workbench-runtime.js:82-91,137`
 
 **Interfaces:**
@@ -47,7 +47,7 @@ Also assert the footer bottom does not exceed the preview bottom and collect con
 
 - [ ] **Step 2: Run the focused test and verify RED**
 
-Run from `wemedia-studio/`:
+Run from `web/`:
 
 ```bash
 pnpm exec playwright test e2e/extension-workbench-layout.spec.ts --project=chromium
@@ -69,7 +69,7 @@ Keep `.sw-preview-content { min-height: 0; flex: 1; overflow-y: auto; ... }` and
 
 - [ ] **Step 4: Run focused verification and verify GREEN**
 
-Run from `wemedia-studio/`:
+Run from `web/`:
 
 ```bash
 pnpm exec playwright test e2e/extension-workbench-layout.spec.ts --project=chromium
@@ -100,6 +100,6 @@ Then run `git diff --check` from the repository root. Expected: all tests and sy
 - [ ] **Step 6: Commit the implementation**
 
 ```bash
-git add chrome-extension/content/workbench-runtime.js wemedia-studio/e2e/extension-workbench-layout.spec.ts
+git add chrome-extension/content/workbench-runtime.js web/e2e/extension-workbench-layout.spec.ts
 git commit -m "fix: keep extension preview actions visible"
 ```

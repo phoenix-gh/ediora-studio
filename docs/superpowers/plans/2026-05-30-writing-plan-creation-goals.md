@@ -21,8 +21,8 @@
 - `backend/mcp_server.py` — `save_draft` 加 `draft_type` 参数
 - `backend/tests/test_design_merge.py` — `resolve_effective_design` 单测(新建)
 - `backend/tests/test_writing_plans.py` — dispatch merge / angle / goal 集成测试(追加)
-- `wemedia-studio/lib/api/writing-plans.ts` — 接口与 `dispatchPlan` 签名
-- `wemedia-studio/app/writing-plans/WritingPlansClient.tsx` — 方案编辑加 CoverStyleEditor;派发加 angle/draft_type/override
+- `web/lib/api/writing-plans.ts` — 接口与 `dispatchPlan` 签名
+- `web/app/writing-plans/WritingPlansClient.tsx` — 方案编辑加 CoverStyleEditor;派发加 angle/draft_type/override
 
 ---
 
@@ -482,13 +482,13 @@ git commit -m "feat(draft): pass draft_type through save_draft + writer body"
 ## Task 6: 前端 API 客户端
 
 **Files:**
-- Modify: `wemedia-studio/lib/api/writing-plans.ts`
+- Modify: `web/lib/api/writing-plans.ts`
 
 > 提示:本仓库前端无 JS 测试框架,Task 6-8 用类型检查 + 手动验证;改动遵循文件既有写法。改 Next 前若涉新 API 先看 `node_modules/next/dist/docs/`。
 
 - [ ] **Step 1: 接口加设计字段**
 
-`wemedia-studio/lib/api/writing-plans.ts` 顶部 import 加 `CoverStyle`:
+`web/lib/api/writing-plans.ts` 顶部 import 加 `CoverStyle`:
 ```ts
 import { CoverStyle } from './publish-accounts'
 ```
@@ -523,13 +523,13 @@ export async function dispatchPlan(
 
 - [ ] **Step 3: 类型检查**
 
-Run: `cd wemedia-studio && pnpm exec tsc --noEmit`
+Run: `cd web && pnpm exec tsc --noEmit`
 Expected: 报错仅出现在 `WritingPlansClient.tsx`(旧 `dispatchPlan(id, accountId)` 调用方式),Task 7 修复;`writing-plans.ts` 本身无错。
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add wemedia-studio/lib/api/writing-plans.ts
+git add web/lib/api/writing-plans.ts
 git commit -m "feat(ui-api): plan design fields + dispatchPlan goal options"
 ```
 
@@ -538,9 +538,9 @@ git commit -m "feat(ui-api): plan design fields + dispatchPlan goal options"
 ## Task 7: 方案编辑 — cover_style / image_style
 
 **Files:**
-- Modify: `wemedia-studio/app/writing-plans/WritingPlansClient.tsx`
+- Modify: `web/app/writing-plans/WritingPlansClient.tsx`
 
-参照 `wemedia-studio/app/settings/sections/PublishAccountsSection.tsx:476` 的 `CoverStyleEditor` 用法(import、state、`buildCoverStyleFromEditor`)。
+参照 `web/app/settings/sections/PublishAccountsSection.tsx:476` 的 `CoverStyleEditor` 用法(import、state、`buildCoverStyleFromEditor`)。
 
 - [ ] **Step 1: import 编辑器**
 
@@ -604,13 +604,13 @@ import type { CoverStyle } from '@/lib/api/publish-accounts'
 
 - [ ] **Step 4: 类型检查 + 手动验证**
 
-Run: `cd wemedia-studio && pnpm exec tsc --noEmit`(本任务相关无错)
+Run: `cd web && pnpm exec tsc --noEmit`(本任务相关无错)
 手动:打开 `/writing-plans`,选方案,改封面 type/palette + image_style,保存,刷新页面值仍在。
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add wemedia-studio/app/writing-plans/WritingPlansClient.tsx
+git add web/app/writing-plans/WritingPlansClient.tsx
 git commit -m "feat(ui): edit plan-level cover_style/image_style"
 ```
 
@@ -619,7 +619,7 @@ git commit -m "feat(ui): edit plan-level cover_style/image_style"
 ## Task 8: 派发 — angle / draft_type / 本次设计覆盖
 
 **Files:**
-- Modify: `wemedia-studio/app/writing-plans/WritingPlansClient.tsx`(已有 `showDispatchConfirm` 派发确认流程,`:186-188`)
+- Modify: `web/app/writing-plans/WritingPlansClient.tsx`(已有 `showDispatchConfirm` 派发确认流程,`:186-188`)
 
 - [ ] **Step 1: 加派发目标 state**
 
@@ -666,14 +666,14 @@ git commit -m "feat(ui): edit plan-level cover_style/image_style"
 
 - [ ] **Step 4: 类型检查 + 手动验证**
 
-Run: `cd wemedia-studio && pnpm exec tsc --noEmit`
+Run: `cd web && pnpm exec tsc --noEmit`
 Expected: 无错(Task 6 的旧调用报错此处消除)。
 手动:在 `/writing-plans` 选方案 → 派发,填 angle、选脚本 → 确认。后端日志看到 editor body 含角度块,`pipeline_tasks.goal` 有值。
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add wemedia-studio/app/writing-plans/WritingPlansClient.tsx
+git add web/app/writing-plans/WritingPlansClient.tsx
 git commit -m "feat(ui): dispatch with angle + draft_type goals"
 ```
 
@@ -682,7 +682,7 @@ git commit -m "feat(ui): dispatch with angle + draft_type goals"
 ## 收尾验证
 
 - [ ] 后端全测:`cd backend && conda run -n wems pytest tests/test_design_merge.py tests/test_writing_plans.py tests/test_pipeline_template_topic.py -q` → 全绿
-- [ ] 前端类型:`cd wemedia-studio && pnpm exec tsc --noEmit` → 无错
+- [ ] 前端类型:`cd web && pnpm exec tsc --noEmit` → 无错
 - [ ] 端到端手测:方案设封面/插图 → 派发(带 angle/draft_type)→ editor/illustrator body 体现 merged 设计 + 角度;产出 draft 的 `draft_type` 正确
 
 ## Self-Review 备注(已核对)

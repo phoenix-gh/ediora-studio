@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from collection_proxy import collection_client_kwargs
 from models import JuejinArticle, now_utc
 
 _UA = (
@@ -94,7 +95,10 @@ async def fetch_article_body(url: str, client: httpx.AsyncClient | None = None) 
     """Fetch a Juejin post page and return the inner HTML of div.markdown-body."""
     owns = client is None
     if owns:
-        client = httpx.AsyncClient(timeout=15, follow_redirects=True)
+        client = httpx.AsyncClient(**await collection_client_kwargs(
+            timeout=15,
+            follow_redirects=True,
+        ))
     try:
         resp = await client.get(url, headers={"User-Agent": _UA})
         if resp.status_code != 200:
@@ -110,7 +114,7 @@ async def fetch_article_body(url: str, client: httpx.AsyncClient | None = None) 
 
 
 async def _fetch(url: str, body: dict) -> list[dict]:
-    async with httpx.AsyncClient(timeout=20) as client:
+    async with httpx.AsyncClient(**await collection_client_kwargs(timeout=20)) as client:
         resp = await client.post(url, headers=_HEADERS, json=body)
         resp.raise_for_status()
         data = resp.json()

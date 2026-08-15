@@ -13,7 +13,7 @@ AI 内容工作台：集信息采集、价值甄选、AI 创作与发布辅助�
 ## 目录结构
 
 ```
-WeMediaStudio/
+Ediora/
 ├── backend/
 │   ├── main.py                 应用入口（瘦版本，94 行）
 │   ├── scheduler.py            APScheduler 任务注册 + 节流
@@ -29,7 +29,7 @@ WeMediaStudio/
 │   ├── mcp_server.py           MCP streamable HTTP server
 │   └── routers/                FastAPI 路由（统一 prefix=/<module>，main 处加 /api）
 │
-├── wemedia-studio/
+├── web/
 │   ├── app/                    页面（drafts/topics/quotes/github/papers/...）
 │   ├── components/
 │   │   ├── features/           业务组件（Sidebar/ArticleReader/...）
@@ -84,7 +84,7 @@ Redis:  redis://127.0.0.1:6379/0
 ./scripts/local-asr.sh start
 ```
 
-容器名为 `wemedia-local-asr`，使用 `restart=unless-stopped`，只在宿主机
+容器名为 `ediora-local-asr`，使用 `restart=unless-stopped`，只在宿主机
 `127.0.0.1:8001` 暴露服务；开发模式 API 默认连接
 `http://127.0.0.1:8001/v1`。模型缓存保存在独立 Docker volume 中。
 
@@ -178,7 +178,7 @@ Remotion 预览，**不包含 MP4 文件渲染，也不包含音色克隆**。
 真实 HeyGen 冒烟测试是显式可选操作，会产生 API 用量：
 
 ```bash
-cd wemedia-studio
+cd web
 HEYGEN_API_KEY=... \
 HEYGEN_SMOKE_PORTRAIT=/absolute/path/portrait.png \
 HEYGEN_SMOKE_VOICE=/absolute/path/voice.wav \
@@ -256,7 +256,7 @@ WMS_TEST_DATABASE_ADMIN_URL=postgresql+asyncpg://wemedia:wemedia@127.0.0.1:55432
 
 ### 前端环境
 
-wemedia-studio/.env.local：
+web/.env.local：
 
 ```
 NEXT_PUBLIC_API_URL=http://localhost:8000/api

@@ -62,7 +62,7 @@ def _validate_public_url(value: str) -> str:
 
 
 async def _get_text(url: str, *, timeout_seconds: int) -> tuple[str, str]:
-    headers = {"User-Agent": "WeMediaStudio/1.0 (+https://github.com)"}
+    headers = {"User-Agent": "Ediora/1.0 (+https://github.com)"}
     try:
         async with httpx.AsyncClient(timeout=timeout_seconds, follow_redirects=True, headers=headers) as client:
             response = await client.get(url)

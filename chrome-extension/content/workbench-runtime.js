@@ -161,7 +161,7 @@ const STATIC_UI = [
   '</main>',
   '</div>',
   '<div class="sw-settings" data-role="settings" hidden>',
-  '<div class="sw-settings-title">连接 WeMediaStudio</div>',
+  '<div class="sw-settings-title">连接 Ediora</div>',
   '<div class="sw-settings-hint">只允许本机 8000 端口；修改后保存并重新读取草稿。</div>',
   '<input class="sw-settings-input" data-role="api-input" type="url" spellcheck="false" aria-label="API 地址">',
   '<div class="sw-settings-status" data-role="settings-status"></div>',

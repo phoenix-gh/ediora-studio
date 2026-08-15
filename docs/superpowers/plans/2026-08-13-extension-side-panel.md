@@ -36,7 +36,7 @@
 - Test: `chrome-extension/tests/workbench.test.js`
 - Test: `chrome-extension/tests/manifest.test.js`
 - Test: `chrome-extension/tests/workbench-bootstrap.test.js`
-- Test: `wemedia-studio/e2e/extension-workbench-layout.spec.ts`
+- Test: `web/e2e/extension-workbench-layout.spec.ts`
 
 ---
 
@@ -833,7 +833,7 @@ git commit -m "feat: ship the X-only Chrome side panel shell"
 ### Task 7: 端到端布局、README 和回归
 
 **Files:**
-- Modify: `wemedia-studio/e2e/extension-workbench-layout.spec.ts`
+- Modify: `web/e2e/extension-workbench-layout.spec.ts`
 - Modify: `chrome-extension/README.md`
 - Modify: `chrome-extension/tests/manifest.test.js` 里的 README 断言
 
@@ -920,7 +920,7 @@ await expect(panel.getByRole('button', { name: '上下布局' })).toBeVisible()
 
 - [ ] **Step 2: Run the e2e and confirm the old overlay flow fails first if you have not updated the spec yet**
 
-Run: `cd wemedia-studio && pnpm exec playwright test e2e/extension-workbench-layout.spec.ts --reporter=line`
+Run: `cd web && pnpm exec playwright test e2e/extension-workbench-layout.spec.ts --reporter=line`
 
 Expected after the rewrite: PASS, 2 tests.
 
@@ -942,7 +942,7 @@ Run:
 
 ```bash
 cd chrome-extension && node --test tests/*.test.js
-cd ../wemedia-studio && pnpm exec playwright test e2e/extension-workbench-layout.spec.ts --reporter=line
+cd ../web && pnpm exec playwright test e2e/extension-workbench-layout.spec.ts --reporter=line
 ```
 
 Expected: all extension unit tests PASS; Playwright 2 passed.
@@ -950,7 +950,7 @@ Expected: all extension unit tests PASS; Playwright 2 passed.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add wemedia-studio/e2e/extension-workbench-layout.spec.ts chrome-extension/README.md chrome-extension/tests/manifest.test.js
+git add web/e2e/extension-workbench-layout.spec.ts chrome-extension/README.md chrome-extension/tests/manifest.test.js
 git commit -m "test: cover the side-panel workbench layout"
 ```
 

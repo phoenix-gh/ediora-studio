@@ -149,3 +149,85 @@ def test_comfyui_connection_succeeds_without_exposing_token(client, monkeypatch)
 
     assert response.json() == {"ok": True, "error": ""}
     assert "cfy_secret_1234" not in response.text
+
+
+def _serve_json(path: str, payload: dict) -> tuple[str, object]:
+    import json
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            if self.path != path:
+                self.send_error(404)
+                return
+            body = json.dumps(payload).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *_args):
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    host, port = server.server_address[:2]
+    return f"http://{host}:{port}", server
+
+
+def _serve_immediate_close() -> tuple[str, object]:
+    import socket
+    import threading
+
+    listener = socket.socket()
+    listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(8)
+
+    def run() -> None:
+        while True:
+            try:
+                conn, _addr = listener.accept()
+            except OSError:
+                return
+            conn.close()
+
+    threading.Thread(target=run, daemon=True).start()
+    host, port = listener.getsockname()[:2]
+    return f"http://{host}:{port}", listener
+
+
+def test_comfyui_connection_ignores_process_http_proxy(client, monkeypatch):
+    base_url, comfy_server = _serve_json("/system_stats", {"system": {}})
+    proxy_url, proxy_socket = _serve_immediate_close()
+    try:
+        client.put("/api/settings", json={"comfyui_base_url": base_url})
+        monkeypatch.setenv("HTTP_PROXY", proxy_url)
+        monkeypatch.setenv("HTTPS_PROXY", proxy_url)
+
+        response = client.post("/api/settings/comfyui/test")
+
+        assert response.status_code == 200
+        assert response.json() == {"ok": True, "error": ""}
+    finally:
+        comfy_server.shutdown()
+        comfy_server.server_close()
+        proxy_socket.close()
+
+
+def test_comfyui_connection_classifies_unreachable_server(client):
+    client.put(
+        "/api/settings",
+        json={"comfyui_base_url": "http://127.0.0.1:9"},
+    )
+
+    response = client.post("/api/settings/comfyui/test")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "ok": False,
+        "error": "无法连接到 ComfyUI。请确认地址对本服务可达，且 ComfyUI 已启动。",
+    }
