@@ -32,10 +32,12 @@ describe('H3 Ref2VA prompt', () => {
       duration: 5,
       seed: 7,
     }) as Record<string, { inputs?: Record<string, unknown> }>
-    expect(graph['1']?.inputs?.image).toBe('look.jpg')
-    expect(graph['2']?.inputs?.image).toBe('env.jpg')
-    expect(graph['4']?.inputs?.audio).toBe('voice.wav')
-    expect(graph['5']?.inputs?.length).toBe(5)
-    expect(graph['5']?.inputs?.seed).toBe(7)
+    expect(graph['137']?.inputs?.image).toBe('look.jpg')
+    expect(graph['139']?.inputs?.image).toBe('env.jpg')
+    expect(graph['142']?.inputs?.image).toBe('look.jpg')
+    expect(graph['143']?.inputs?.audio).toBe('voice.wav')
+    expect(graph['138']?.inputs?.value).toBe('Video Description:')
+    expect(graph['132']?.inputs?.value).toBe(5)
+    expect(graph['129']?.inputs?.noise_seed).toBe(7)
   })
 })

@@ -85,10 +85,12 @@ describe('digital-human shot render job', () => {
     expect(comfyui.uploadImage).toHaveBeenCalledTimes(3)
     expect(comfyui.uploadAudio).toHaveBeenCalled()
     expect(comfyui.queuePrompt).toHaveBeenCalled()
-    const prompt = comfyui.queuePrompt.mock.calls[0]?.[0] as Record<string, { inputs?: { prompt?: string; length?: number } }>
-    expect(prompt['5']?.inputs?.length).toBe(5)
-    expect(prompt['5']?.inputs?.prompt).toContain('今天只讲一件事')
-    expect(prompt['5']?.inputs?.prompt).toContain("Uses <Audio 1>'s voice.")
+    const prompt = comfyui.queuePrompt.mock.calls[0]?.[0] as Record<string, { inputs?: Record<string, unknown> }>
+    expect(prompt['132']?.inputs?.value).toBe(5)
+    expect(prompt['138']?.inputs?.value).toContain('今天只讲一件事')
+    expect(prompt['138']?.inputs?.value).toContain("Uses <Audio 1>'s voice.")
+    expect(prompt['137']?.inputs?.image).toBe('look.jpg')
+    expect(prompt['143']?.inputs?.audio).toBe('voice.wav')
     expect(api.saveVideoAsset).toHaveBeenCalled()
     expect(api.updateShot).toHaveBeenCalledWith(
       9,

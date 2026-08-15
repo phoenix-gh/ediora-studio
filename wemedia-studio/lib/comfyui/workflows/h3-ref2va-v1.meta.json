@@ -5,13 +5,13 @@
   "width": 1344,
   "height": 768,
   "inputs": {
-    "image_1": "1:image",
-    "image_2": "2:image",
-    "image_3": "3:image",
-    "audio_1": "4:audio",
-    "prompt": "5:prompt",
-    "duration": "5:length",
-    "seed": "5:seed"
+    "image_1": "137:image",
+    "image_2": "139:image",
+    "image_3": "142:image",
+    "audio_1": "143:audio",
+    "prompt": "138:value",
+    "duration": "132:value",
+    "seed": "129:noise_seed"
   },
-  "output_node": "6"
+  "output_node": "92"
 }
