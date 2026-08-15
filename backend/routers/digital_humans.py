@@ -34,7 +34,7 @@ class RoleCreate(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     provider: Literal["heygen", "comfyui"] = "heygen"
     portrait_asset_id: int
-    voice_sample_asset_id: int | None = None
+    voice_sample_asset_id: int
     default_environment_asset_id: int
 
 

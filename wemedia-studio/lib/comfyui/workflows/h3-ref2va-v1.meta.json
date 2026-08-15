@@ -1,0 +1,17 @@
+{
+  "workflow_version": "h3-ref2va-v1",
+  "min_seconds": 4,
+  "max_seconds": 15,
+  "width": 1344,
+  "height": 768,
+  "inputs": {
+    "image_1": "1:image",
+    "image_2": "2:image",
+    "image_3": "3:image",
+    "audio_1": "4:audio",
+    "prompt": "5:prompt",
+    "duration": "5:length",
+    "seed": "5:seed"
+  },
+  "output_node": "6"
+}

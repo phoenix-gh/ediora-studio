@@ -1,0 +1,36 @@
+{
+  "1": {
+    "class_type": "LoadImage",
+    "inputs": { "image": "" }
+  },
+  "2": {
+    "class_type": "LoadImage",
+    "inputs": { "image": "" }
+  },
+  "3": {
+    "class_type": "LoadImage",
+    "inputs": { "image": "" }
+  },
+  "4": {
+    "class_type": "LoadAudio",
+    "inputs": { "audio": "" }
+  },
+  "5": {
+    "class_type": "MiniMaxH3ReferenceToVideo",
+    "inputs": {
+      "image_1": ["1", 0],
+      "image_2": ["2", 0],
+      "image_3": ["3", 0],
+      "audio_1": ["4", 0],
+      "prompt": "",
+      "length": 5,
+      "seed": 0
+    }
+  },
+  "6": {
+    "class_type": "SaveVideo",
+    "inputs": {
+      "video": ["5", 0]
+    }
+  }
+}

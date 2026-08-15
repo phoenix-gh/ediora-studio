@@ -520,20 +520,35 @@ async def shot_worker_context(
         raise HTTPException(404, str(exc)) from exc
     if shot.get("job_id") != job_id:
         raise HTTPException(409, "该镜头任务已被更新任务替代")
-    first_frame_id = (
+    picture_1_id = (
         shot.get("first_frame_asset_id")
         or project.look_asset_id
         or role.look_asset_id
     )
-    first_frame = (
-        await db.get(CreativeAsset, first_frame_id) if first_frame_id else None
+    picture_2_id = (
+        project.environment_asset_id or role.default_environment_asset_id
     )
-    if first_frame is None:
-        raise HTTPException(409, "镜头缺少首帧定妆图")
+    picture_3_id = (
+        role.portrait_asset_id if shot.get("framing") == "close" else None
+    )
+    picture_1 = await db.get(CreativeAsset, picture_1_id) if picture_1_id else None
+    picture_2 = await db.get(CreativeAsset, picture_2_id) if picture_2_id else None
+    picture_3 = await db.get(CreativeAsset, picture_3_id) if picture_3_id else None
+    audio_1 = (
+        await db.get(CreativeAsset, role.voice_sample_asset_id)
+        if role.voice_sample_asset_id
+        else None
+    )
+    if picture_1 is None or picture_2 is None or audio_1 is None:
+        raise HTTPException(409, "镜头缺少参考图或音色样本")
     return {
         "project_id": project.id,
         "shot": shot,
-        "first_frame": _asset_payload(first_frame),
+        "picture_1": _asset_payload(picture_1),
+        "picture_2": _asset_payload(picture_2),
+        "picture_3": _asset_payload(picture_3),
+        "audio_1": _asset_payload(audio_1),
+        "first_frame": _asset_payload(picture_1),
         "role": _role_payload(role),
     }
 

@@ -118,7 +118,7 @@ export type DigitalHumanCreate = {
   name: string
   provider?: DigitalHumanProvider
   portrait_asset_id: number
-  voice_sample_asset_id?: number | null
+  voice_sample_asset_id: number
   default_environment_asset_id: number
 }
 

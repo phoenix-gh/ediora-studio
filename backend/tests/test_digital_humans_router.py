@@ -143,7 +143,7 @@ def test_create_role_enqueues_setup_job(api, monkeypatch):
 
 def test_create_comfyui_role_does_not_require_heygen(api, monkeypatch):
     client, session_factory, router_module = api
-    portrait, _, environment = _create_media_assets(session_factory)
+    portrait, voice, environment = _create_media_assets(session_factory)
     monkeypatch.delenv("HEYGEN_API_KEY")
     queued = []
 
@@ -157,19 +157,20 @@ def test_create_comfyui_role_does_not_require_heygen(api, monkeypatch):
             "name": "林晓",
             "provider": "comfyui",
             "portrait_asset_id": portrait,
+            "voice_sample_asset_id": voice,
             "default_environment_asset_id": environment,
         },
     )
 
     assert response.status_code == 201, response.text
     assert response.json()["provider"] == "comfyui"
-    assert response.json()["voice_sample_asset_id"] is None
+    assert response.json()["voice_sample_asset_id"] == voice
     assert queued == [response.json()["setup_job_id"]]
 
 
 def test_comfyui_role_ready_requires_look_asset(api, monkeypatch):
     client, session_factory, router_module = api
-    portrait, _, environment = _create_media_assets(session_factory)
+    portrait, voice, environment = _create_media_assets(session_factory)
 
     async def no_op(_job_id: int):
         return None
@@ -181,6 +182,7 @@ def test_comfyui_role_ready_requires_look_asset(api, monkeypatch):
             "name": "林晓",
             "provider": "comfyui",
             "portrait_asset_id": portrait,
+            "voice_sample_asset_id": voice,
             "default_environment_asset_id": environment,
         },
     ).json()

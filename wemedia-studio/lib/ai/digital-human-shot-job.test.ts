@@ -29,10 +29,20 @@ function jobApi() {
         provider_state: {},
         status: 'queued',
       },
-      first_frame: {
+      picture_1: {
         url: '/api/uploads/look.jpg',
         media_type: 'image/jpeg',
         filename: 'look.jpg',
+      },
+      picture_2: {
+        url: '/api/uploads/env.jpg',
+        media_type: 'image/jpeg',
+        filename: 'env.jpg',
+      },
+      audio_1: {
+        url: '/api/uploads/voice.wav',
+        media_type: 'audio/wav',
+        filename: 'voice.wav',
       },
     }),
     updateShot: vi.fn().mockResolvedValue(undefined),
@@ -50,7 +60,11 @@ describe('digital-human shot render job', () => {
   it('uploads the look, queues H3, and saves the clip', async () => {
     const api = jobApi()
     const comfyui = {
-      uploadImage: vi.fn().mockResolvedValue({ name: 'look.jpg', subfolder: '', type: 'input' }),
+      uploadImage: vi.fn()
+        .mockResolvedValueOnce({ name: 'look.jpg', subfolder: '', type: 'input' })
+        .mockResolvedValueOnce({ name: 'env.jpg', subfolder: '', type: 'input' })
+        .mockResolvedValueOnce({ name: 'look.jpg', subfolder: '', type: 'input' }),
+      uploadAudio: vi.fn().mockResolvedValue({ name: 'voice.wav', subfolder: '', type: 'input' }),
       queuePrompt: vi.fn().mockResolvedValue('prompt-1'),
       getHistory: vi.fn().mockResolvedValue({
         status: { completed: true },
@@ -68,11 +82,13 @@ describe('digital-human shot render job', () => {
 
     await runDigitalHumanShotRenderJob(12, deps)
 
-    expect(comfyui.uploadImage).toHaveBeenCalled()
+    expect(comfyui.uploadImage).toHaveBeenCalledTimes(3)
+    expect(comfyui.uploadAudio).toHaveBeenCalled()
     expect(comfyui.queuePrompt).toHaveBeenCalled()
     const prompt = comfyui.queuePrompt.mock.calls[0]?.[0] as Record<string, { inputs?: { prompt?: string; length?: number } }>
-    expect(prompt['2']?.inputs?.length).toBe(5)
-    expect(prompt['2']?.inputs?.prompt).toContain('今天只讲一件事')
+    expect(prompt['5']?.inputs?.length).toBe(5)
+    expect(prompt['5']?.inputs?.prompt).toContain('今天只讲一件事')
+    expect(prompt['5']?.inputs?.prompt).toContain("Uses <Audio 1>'s voice.")
     expect(api.saveVideoAsset).toHaveBeenCalled()
     expect(api.updateShot).toHaveBeenCalledWith(
       9,
@@ -80,7 +96,7 @@ describe('digital-human shot render job', () => {
       expect.objectContaining({
         status: 'succeeded',
         clip_asset_id: 77,
-        workflow_version: 'h3-i2v-v1',
+        workflow_version: 'h3-ref2va-v1',
       }),
       12,
     )
@@ -100,14 +116,25 @@ describe('digital-human shot render job', () => {
         provider_state: { prompt_id: 'prompt-old' },
         status: 'running',
       },
-      first_frame: {
+      picture_1: {
         url: '/api/uploads/look.jpg',
         media_type: 'image/jpeg',
         filename: 'look.jpg',
       },
+      picture_2: {
+        url: '/api/uploads/env.jpg',
+        media_type: 'image/jpeg',
+        filename: 'env.jpg',
+      },
+      audio_1: {
+        url: '/api/uploads/voice.wav',
+        media_type: 'audio/wav',
+        filename: 'voice.wav',
+      },
     })
     const comfyui = {
       uploadImage: vi.fn(),
+      uploadAudio: vi.fn(),
       queuePrompt: vi.fn(),
       getHistory: vi.fn().mockRejectedValue(new Error('CUDA out of memory')),
       viewFile: vi.fn(),

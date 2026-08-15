@@ -12,8 +12,14 @@ import {
   type DurableJob,
 } from './job-client'
 import { createComfyUIClient, ComfyUIError, type ComfyUIClient } from '../comfyui/client'
-import { buildShotPrompt, H3_I2V_META, h3I2vPrompt } from '../comfyui/workflow'
+import { buildShotPrompt, H3_REF2VA_META, h3Ref2vaPrompt } from '../comfyui/workflow'
 
+
+type MediaRef = {
+  url: string
+  media_type: string
+  filename: string
+}
 
 type ShotContext = {
   project_id: number
@@ -28,11 +34,10 @@ type ShotContext = {
     clip_asset_id?: number | null
     status: string
   }
-  first_frame: {
-    url: string
-    media_type: string
-    filename: string
-  }
+  picture_1: MediaRef
+  picture_2: MediaRef
+  picture_3?: MediaRef | null
+  audio_1: MediaRef
 }
 
 type ShotJobApi = {
@@ -250,21 +255,30 @@ export async function runDigitalHumanShotRenderJob(
     )
     const generated = await runStep(
       jobId,
-      'comfyui_i2v',
+      'comfyui_ref2va',
       deps,
       async () => {
         let promptId = typeof state.prompt_id === 'string' ? state.prompt_id : ''
         if (!promptId) {
-          const frame = await deps.api.fetchLocalAsset(
-            context.first_frame.url,
-            context.first_frame,
-          )
-          const uploaded = await deps.comfyui.uploadImage(
-            frame.bytes,
-            `shot-${shotId}-${context.first_frame.filename}`,
-          )
-          promptId = await deps.comfyui.queuePrompt(h3I2vPrompt({
-            image: uploaded.name,
+          const [look, environment, voice] = await Promise.all([
+            deps.api.fetchLocalAsset(context.picture_1.url, context.picture_1),
+            deps.api.fetchLocalAsset(context.picture_2.url, context.picture_2),
+            deps.api.fetchLocalAsset(context.audio_1.url, context.audio_1),
+          ])
+          const close = context.picture_3
+            ? await deps.api.fetchLocalAsset(context.picture_3.url, context.picture_3)
+            : look
+          const [image1, image2, image3, audio1] = await Promise.all([
+            deps.comfyui.uploadImage(look.bytes, `look-${projectId}-${look.filename}`),
+            deps.comfyui.uploadImage(environment.bytes, `env-${projectId}-${environment.filename}`),
+            deps.comfyui.uploadImage(close.bytes, `face-${projectId}-${close.filename}`),
+            deps.comfyui.uploadAudio(voice.bytes, `voice-${projectId}-${voice.filename}`),
+          ])
+          promptId = await deps.comfyui.queuePrompt(h3Ref2vaPrompt({
+            image_1: image1.name,
+            image_2: image2.name,
+            image_3: image3.name,
+            audio_1: audio1.name,
             prompt: buildShotPrompt({
               framing: context.shot.framing,
               spokenText: context.shot.spoken_text,
@@ -306,7 +320,7 @@ export async function runDigitalHumanShotRenderJob(
         await deps.api.updateShot(projectId, shotId, {
           status: 'succeeded',
           clip_asset_id: asset.id,
-          workflow_version: H3_I2V_META.workflow_version,
+          workflow_version: H3_REF2VA_META.workflow_version,
           seed: prepared.seed,
           provider_state: state,
           error: '',

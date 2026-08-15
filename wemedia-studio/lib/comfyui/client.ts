@@ -70,6 +70,23 @@ export function createComfyUIClient(config: ComfyUIConfig) {
     return response
   }
 
+  async function uploadInput(
+    bytes: Uint8Array,
+    filename: string,
+    overwrite = true,
+  ) {
+    const body = new FormData()
+    const upload = new Uint8Array(bytes.byteLength)
+    upload.set(bytes)
+    body.set('image', new Blob([upload]), filename)
+    body.set('overwrite', overwrite ? 'true' : 'false')
+    const response = await request('/upload/image', {
+      method: 'POST',
+      body,
+    })
+    return response.json() as Promise<{ name: string; subfolder: string; type: string }>
+  }
+
   return {
     async systemStats() {
       const response = await request('/system_stats')
@@ -81,16 +98,15 @@ export function createComfyUIClient(config: ComfyUIConfig) {
       filename: string,
       overwrite = true,
     ) {
-      const body = new FormData()
-      const upload = new Uint8Array(bytes.byteLength)
-      upload.set(bytes)
-      body.set('image', new Blob([upload]), filename)
-      body.set('overwrite', overwrite ? 'true' : 'false')
-      const response = await request('/upload/image', {
-        method: 'POST',
-        body,
-      })
-      return response.json() as Promise<{ name: string; subfolder: string; type: string }>
+      return uploadInput(bytes, filename, overwrite)
+    },
+
+    async uploadAudio(
+      bytes: Uint8Array,
+      filename: string,
+      overwrite = true,
+    ) {
+      return uploadInput(bytes, filename, overwrite)
     },
 
     async queuePrompt(prompt: Record<string, unknown>, clientId?: string) {

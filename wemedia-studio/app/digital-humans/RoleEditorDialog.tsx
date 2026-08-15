@@ -169,8 +169,7 @@ export function RoleEditorDialog({
   const [saving, setSaving] = useState(false)
 
   async function handleSave() {
-    if (!name.trim() || !portrait || !environment) return
-    if (provider === 'heygen' && !voice) return
+    if (!name.trim() || !portrait || !voice || !environment) return
     setSaving(true)
     try {
       const input = {
@@ -255,28 +254,21 @@ export function RoleEditorDialog({
               </Button>
               <FieldDescription>正面、光线均匀、无遮挡，PNG/JPEG。</FieldDescription>
             </Field>
-            {provider === 'heygen' || voice ? (
-              <Field>
-                <FieldLabel>声音样本</FieldLabel>
-                <Button
-                  variant="outline"
-                  onClick={() => setPicker('voice')}
-                >
-                  <Mic data-icon="inline-start" />
-                  {voice?.title || '选择声音样本'}
-                </Button>
-                <FieldDescription>
-                  {provider === 'comfyui'
-                    ? 'ComfyUI 路径可选，H3 会自带声音。'
-                    : '安静环境中的单人录音，MP3/WAV。'}
-                </FieldDescription>
-              </Field>
-            ) : (
-              <Field>
-                <FieldLabel>声音样本</FieldLabel>
-                <FieldDescription>ComfyUI 路径不需要录音。</FieldDescription>
-              </Field>
-            )}
+            <Field>
+              <FieldLabel>声音样本</FieldLabel>
+              <Button
+                variant="outline"
+                onClick={() => setPicker('voice')}
+              >
+                <Mic data-icon="inline-start" />
+                {voice?.title || '选择声音样本'}
+              </Button>
+              <FieldDescription>
+                {provider === 'comfyui'
+                  ? '2–15 秒清晰单人录音，每镜都作为音色参考。'
+                  : '安静环境中的单人录音，MP3/WAV。'}
+              </FieldDescription>
+            </Field>
             <Field>
               <FieldLabel>默认环境</FieldLabel>
               <Button
@@ -293,8 +285,8 @@ export function RoleEditorDialog({
                 saving
                 || !name.trim()
                 || !portrait
+                || !voice
                 || !environment
-                || (provider === 'heygen' && !voice)
               }
             >
               {saving

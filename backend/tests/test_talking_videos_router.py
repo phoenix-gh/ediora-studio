@@ -395,6 +395,14 @@ def _seed_comfyui(session_factory):
                 media_type="image/png",
                 filename="portrait.png",
             )
+            voice = CreativeAsset(
+                asset_type="media",
+                media_kind="audio",
+                title="voice",
+                url="/api/uploads/voice.wav",
+                media_type="audio/wav",
+                filename="voice.wav",
+            )
             look = CreativeAsset(
                 asset_type="media",
                 media_kind="image",
@@ -403,13 +411,14 @@ def _seed_comfyui(session_factory):
                 media_type="image/jpeg",
                 filename="look.jpg",
             )
-            session.add_all([environment, portrait, look])
+            session.add_all([environment, portrait, voice, look])
             await session.flush()
             role = DigitalHuman(
                 name="林晓",
                 status="ready",
                 provider="comfyui",
                 portrait_asset_id=portrait.id,
+                voice_sample_asset_id=voice.id,
                 default_environment_asset_id=environment.id,
                 look_asset_id=look.id,
             )

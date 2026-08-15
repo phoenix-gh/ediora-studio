@@ -36,6 +36,53 @@ class InvalidTalkingVideo(ValueError):
 _UPLOADS_DIR = os.path.join(os.path.dirname(__file__), "uploads")
 
 
+def _local_audio_duration_seconds(asset: CreativeAsset) -> float | None:
+    import subprocess
+    import wave
+
+    path = urlparse(asset.url).path
+    prefix = "/api/uploads/"
+    if not path.startswith(prefix):
+        return None
+    filename = os.path.basename(path.removeprefix(prefix))
+    local_path = os.path.join(_UPLOADS_DIR, filename)
+    if not filename or not os.path.isfile(local_path):
+        return None
+    try:
+        with wave.open(local_path, "rb") as handle:
+            rate = handle.getframerate()
+            if rate <= 0:
+                return None
+            return handle.getnframes() / float(rate)
+    except wave.Error:
+        pass
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
+                local_path,
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+    try:
+        return float(result.stdout.strip())
+    except ValueError:
+        return None
+
+
 def _local_asset_size(asset: CreativeAsset) -> int | None:
     path = urlparse(asset.url).path
     prefix = "/api/uploads/"
@@ -89,15 +136,18 @@ async def create_digital_human(
         {"image/png", "image/jpeg"},
         32 * 1024 * 1024,
     )
-    if clean_provider == "heygen" or voice_sample_asset_id is not None:
-        if voice_sample_asset_id is None:
-            raise InvalidTalkingVideo("HeyGen 数字人需要声音样本")
-        await require_media_asset(
-            session,
-            voice_sample_asset_id,
-            {"audio/mpeg", "audio/wav", "audio/x-wav"},
-            32 * 1024 * 1024,
-        )
+    if voice_sample_asset_id is None:
+        raise InvalidTalkingVideo("数字人需要声音样本")
+    voice = await require_media_asset(
+        session,
+        voice_sample_asset_id,
+        {"audio/mpeg", "audio/wav", "audio/x-wav"},
+        32 * 1024 * 1024,
+    )
+    if clean_provider == "comfyui":
+        duration = _local_audio_duration_seconds(voice)
+        if duration is not None and not 2 <= duration <= 15:
+            raise InvalidTalkingVideo("ComfyUI 声音样本须为 2–15 秒")
     await require_media_asset(
         session,
         default_environment_asset_id,
@@ -334,7 +384,12 @@ async def enqueue_shot_render(
     if project is None:
         raise InvalidTalkingVideo("口播作品不存在")
     role = await session.get(DigitalHuman, project.digital_human_id)
-    if role is None or role.status != "ready" or not role.look_asset_id:
+    if (
+        role is None
+        or role.status != "ready"
+        or not role.look_asset_id
+        or not role.voice_sample_asset_id
+    ):
         raise InvalidTalkingVideo("数字人角色尚未就绪")
     shot = find_shot(list(project.shots or []), shot_id)
     if shot["status"] == "running":

@@ -88,22 +88,38 @@ def test_create_role_and_setup_job_are_committed_together(session_factory):
     asyncio.new_event_loop().run_until_complete(run())
 
 
-def test_comfyui_role_can_be_created_without_voice(session_factory):
+def test_comfyui_role_requires_voice(session_factory):
     async def run():
-        from digital_human_service import create_digital_human
+        from digital_human_service import (
+            InvalidTalkingVideo,
+            create_digital_human,
+        )
 
         async with session_factory() as session:
-            portrait, _, environment = await _create_media_assets(session)
+            portrait, voice, environment = await _create_media_assets(session)
+            try:
+                await create_digital_human(
+                    session,
+                    name="林晓",
+                    provider="comfyui",
+                    portrait_asset_id=portrait.id,
+                    default_environment_asset_id=environment.id,
+                )
+            except InvalidTalkingVideo as exc:
+                assert "声音样本" in str(exc)
+            else:
+                raise AssertionError("expected missing voice to fail")
+
             role, job = await create_digital_human(
                 session,
                 name="林晓",
                 provider="comfyui",
                 portrait_asset_id=portrait.id,
+                voice_sample_asset_id=voice.id,
                 default_environment_asset_id=environment.id,
             )
-
             assert role.provider == "comfyui"
-            assert role.voice_sample_asset_id is None
+            assert role.voice_sample_asset_id == voice.id
             assert job.flow == "digital_human_setup"
 
     asyncio.new_event_loop().run_until_complete(run())
