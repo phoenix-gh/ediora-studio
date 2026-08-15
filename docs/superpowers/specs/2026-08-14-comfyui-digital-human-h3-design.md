@@ -10,13 +10,15 @@
 数字人角色 → 口播作品 → 不可变成片版本 → 异步任务
 ```
 
-H3 负责「人像首帧 + 提示词 → 带原生声音的短视频」，不负责脚本逐字对口型，也不克隆音色。
+H3 负责「同一组参考图 + 角色音色样本 + 本镜口播句 → 4–5 秒短视频」。工作流是 Ref2VA，不是首帧 I2V，也不是逐帧对口型。音色来自角色上那一条 2–15 秒录音，每镜都作为 `<Audio 1>` 重复提交；对白只写在提示词里。
 
 ## 已确认的产品边界
 
 - HeyGen 继续可用。已有角色、作品、成片和 `digital_human_render` 流程不迁移、不删除。
 - 角色创建时选择渲染后端 `heygen` 或 `comfyui`，创建后不可改。
-- ComfyUI 路径用 MiniMax H3 的图生视频（I2V），不是 LivePortrait / MuseTalk 式对口型。
+- ComfyUI 路径用 MiniMax H3 **Ref2VA**（多图 + 一条音色参考），不是首帧 I2V，也不是 LivePortrait / MuseTalk 式对口型。
+- 参考音频是角色声音样本，全程同一条。不按镜切对白音轨，不把整集旁白喂给 H3。
+- 每镜参考包：`<Picture 1>` 定妆/身份、`<Picture 2>` 环境、可选 `<Picture 3>` 近景脸；`<Audio 1>` 角色录音。第一期不传上一镜视频。
 - 作品按镜头列表编辑，不在后台把一整段脚本悄悄切开。
 - 单镜时长可调；上限来自设置中的本机预算，默认 5 秒。下限以钉死的 H3 工作流为准，第一期按 4 秒。
 - 默认硬切拼接。不把上一段尾帧自动当作下一段首帧。
@@ -40,7 +42,7 @@ H3 负责「人像首帧 + 提示词 → 带原生声音的短视频」，不负
 
 侧边栏和「口播作品 / 数字人角色」页签不变。
 
-角色编辑增加「渲染后端」。HeyGen 角色仍要求人像、录音、环境。ComfyUI 角色要求人像和环境，录音可空。
+角色编辑增加「渲染后端」。HeyGen 与 ComfyUI 都要求人像、录音、环境。ComfyUI 的录音不拿去克隆供应商音色，只作为每镜的 `<Audio 1>`。
 
 口播作品编辑页仍是三栏。中栏按角色后端切换：
 
@@ -72,13 +74,13 @@ ComfyUI 角色：镜头列表
 | 字段 | 说明 |
 | --- | --- |
 | `provider` | `heygen` 或 `comfyui`。创建后不可改。存量行回填 `heygen`。 |
-| `voice_sample_asset_id` | 改为可空。HeyGen 必填，ComfyUI 可空。 |
+| `voice_sample_asset_id` | 两种后端都必填。HeyGen 用于克隆；ComfyUI 作为全程 `<Audio 1>`，长度须在 2–15 秒。 |
 | `look_asset_id` | ComfyUI 定妆图。16:9 本地合成结果。HeyGen 为空。 |
 
 `ready` 条件：
 
 - HeyGen：已有 `heygen_avatar_id` 和 `heygen_voice_id`。
-- ComfyUI：已有 `look_asset_id`，且指向存在的本地图片资产。
+- ComfyUI：已有 `look_asset_id` 和 `voice_sample_asset_id`。
 
 `provider_state` 继续承载可恢复的供应商中间态。ComfyUI setup 可记录合成参数；不要再增加 `comfyui_*` 列。
 
@@ -171,7 +173,7 @@ HeyGen 成片字段保持不变。ComfyUI 成片额外在快照里冻结镜头�
 ### 创建 ComfyUI 角色
 
 1. 选择渲染后端 `comfyui`。
-2. 上传或选择人像和环境图；录音可跳过。
+2. 上传或选择人像、2–15 秒录音和环境图。
 3. 后端创建本地角色，并创建 `digital_human_setup` job。
 4. Worker 把人像合成到环境上，得到 16:9 定妆图，写入创作资产并归档到「数字人资产」。
 5. 角色变为 `ready`。页面仍轮询本地状态。
@@ -198,7 +200,7 @@ AI 提示必须明确：
 1. 用户点「生成这一镜」或「生成全部未完成镜头」。
 2. 后端校验角色 `ready`、ComfyUI 已配置、时长合法、首帧存在。
 3. 每一镜一个 `digital_human_shot_render` job，串行进入现有 Redis 队列。
-4. Worker 用钉死的 H3 I2V 模板出片，下载到本地资产，更新该镜 `clip_asset_id`。
+4. Worker 用钉死的 H3 Ref2VA 模板出片：上传同一组参考图和同一条音色样本，只换本镜六段式提示词。下载到本地资产，更新该镜 `clip_asset_id`。
 5. 同一镜再次生成：旧 clip 先留着，新任务成功后才替换指针；失败不丢旧 clip。
 
 ### 拼接成片
@@ -226,22 +228,51 @@ AI 提示必须明确：
 
 换人像或默认环境后重跑角色 setup。作品覆盖环境只生成作品级定妆图，不改角色 `look_asset_id`。清空覆盖环境时清空作品 `look_asset_id`，各镜重新回退到角色定妆图。
 
+## 整片分段（Ref2VA）
+
+全文不一次进模型。按口播意群拆成 4–5 秒一镜，串行生成，硬切拼接。
+
+每镜提交的参考包固定，只换提示词里的对白和景别：
+
+| 槽位 | 资产 | 是否每镜变化 |
+| --- | --- | --- |
+| `<Picture 1>` | 角色定妆图（身份 + 服装） | 否 |
+| `<Picture 2>` | 作品环境或角色默认环境 | 否（换作品环境则整片换） |
+| `<Picture 3>` | 可选近景脸；`framing=close` 时带上 | 仅近景镜 |
+| `<Audio 1>` | 角色 `voice_sample_asset_id` | 否，全程同一条 |
+| `<Video N>` | 第一期不传 | — |
+
+Ref2VA 上限：图 ≤ 9、视频 ≤ 3、音频 ≤ 3，合计 ≤ 12；每段音/视频 2–15 秒。本机输出锁在预算内（默认最多 5 秒）。因此禁止：整集旁白当音频参考、上一镜 5 秒成片当视频参考、一次请求超过预算的 duration。
+
+H3 仍会重新生成该镜的声音。`<Audio 1>` 只锚定音色，不保证逐字、不保留原波形。对白以镜头 `spoken_text` 为准，写进 Video Description 的引号，并写 `Uses <Audio 1>'s voice.`
+
 ## 提示词组装
 
-Worker 把一镜打成单段英文/中文混合提示词，写入模板的 text 输入。固定模板：
+Worker 按官方 Ref2VA 六段英文 IR 组装，对白保持中文原文。时长不写进提示词。
 
 ```text
-The same person from the first frame talks to camera.
-Keep identity, clothing, and background stable.
-Framing: {framing_label}.
-{motion_prompt}
-The person says: "{spoken_text}"
-Natural speech motion, no subtitles, no captions, no on-screen text.
+Video Description:
+<Subject 1> stands in <Background 1> and speaks to camera. {motion_prompt}
+He/she says, "{spoken_text}"
+Uses <Audio 1>'s voice. No music. No on-screen text, captions, logos, or subtitles.
+
+Camera Movement:
+Static locked-off camera. Eye-level. No pan, tilt, or zoom.
+
+Shot Type:
+{framing_label}, 16:9.
+
+Style:
+Clean studio presentation. Soft key from camera-left, natural skin texture.
+
+Subjects:
+<Subject 1> is the person in <Picture 1>, same face, hair, clothing, and body proportions.
+
+Background:
+<Background 1> is the environment in <Picture 2>, unchanged lighting and set dressing.
 ```
 
-`framing_label`：`wide` → wide shot；`medium` → medium shot；`close` → close-up.
-
-`motion_prompt` 为空则省略该行。不要把时长写进提示词；时长只写进工作流节点。
+`framing_label`：`wide` → wide shot；`medium` → medium shot；`close` → close-up。`close` 时 Camera 可改为 very slow push-in，Shot Type 改为 close-up。`motion_prompt` 为空则删掉该句。
 
 ## ComfyUI 客户端和工作流
 
@@ -259,21 +290,24 @@ Natural speech motion, no subtitles, no captions, no on-screen text.
 工作流模板放在：
 
 ```text
-wemedia-studio/lib/comfyui/workflows/h3-i2v-v1.json
-wemedia-studio/lib/comfyui/workflows/h3-i2v-v1.meta.json
+wemedia-studio/lib/comfyui/workflows/h3-ref2va-v1.json
+wemedia-studio/lib/comfyui/workflows/h3-ref2va-v1.meta.json
 ```
 
 `meta.json` 固定输入输出映射，禁止在代码里硬编码 ComfyUI 节点数字 ID：
 
 ```json
 {
-  "workflow_version": "h3-i2v-v1",
+  "workflow_version": "h3-ref2va-v1",
   "min_seconds": 4,
   "max_seconds": 15,
   "width": 1344,
   "height": 768,
   "inputs": {
-    "image": "<node_id>:<input_name>",
+    "image_1": "<node_id>:<input_name>",
+    "image_2": "<node_id>:<input_name>",
+    "image_3": "<node_id>:<input_name>",
+    "audio_1": "<node_id>:<input_name>",
     "prompt": "<node_id>:<input_name>",
     "duration": "<node_id>:<input_name>",
     "seed": "<node_id>:<input_name>"
@@ -282,7 +316,7 @@ wemedia-studio/lib/comfyui/workflows/h3-i2v-v1.meta.json
 }
 ```
 
-仓库提交一份可在 ComfyUI 0.30+ 加载的官方 H3 I2V API 格式模板。实现时按本机已安装的 Comfy-Org MiniMax H3 节点填映射；映射变更必须升版本号（`h3-i2v-v2`），旧 clip 和旧成片继续记录旧版本。
+仓库提交一份可在 ComfyUI 0.30+ 加载的官方 H3 Ref2VA API 格式模板。实现时按本机已安装的 Comfy-Org MiniMax H3 节点填映射；映射变更必须升版本号（`h3-ref2va-v2`），旧 clip 和旧成片继续记录旧版本。
 
 提交前把本机预算上限写入 duration，即使模板支持 15 秒。seed 在第一次提交时随机生成并写入镜头 `provider_state`；重试同一 job 复用该 seed。用户点「重跑这一镜」创建新 job 时换新 seed。
 
@@ -347,7 +381,7 @@ Worker 每个轮询周期重读本地 job。取消后停止本地轮询和保存
 
 ```text
 provider: "heygen" | "comfyui"
-voice_sample_asset_id?: number   # HeyGen 必填
+voice_sample_asset_id: number    # HeyGen 与 ComfyUI 都必填
 ```
 
 公开领域 API 增加：
@@ -384,7 +418,8 @@ Next.js 脚本 route `POST /api/digital-human/script` 增加 ComfyUI 模式：�
 - 定妆图、单镜 clip、拼接成片都归档到「数字人资产」。
 - 单镜 clip 和成片必须是可播放的 MP4。H3 若输出 webm 或其他容器，worker 用 ffmpeg 转成 H.264 + AAC 再入库。
 - Worker 通过内部 API origin 读本地资产，不能把浏览器 localhost URL 交给 ComfyUI。
-- 上传到 ComfyUI 的首帧用内部 multipart，文件名带 `look-{roleId}` 或 `shot-{shotId}`，避免和工作室其他任务撞名。
+- 上传到 ComfyUI 的参考图/音频用内部 multipart，文件名带 `look-{roleId}`、`env-{id}`、`voice-{roleId}`，避免撞名。同一角色的参考在一次 worker 生命周期内可复用已上传文件名，不必每镜重传文件内容。
+- 声音样本只接受 MP3/WAV，时长 2–15 秒；超长须先裁切，不能整集旁白当 `<Audio 1>`。
 
 ## 删除和归档
 
@@ -399,7 +434,7 @@ Next.js 脚本 route `POST /api/digital-human/script` 增加 ComfyUI 模式：�
 后端：
 
 - `provider` 回填和不可变；
-- ComfyUI 角色允许空录音，HeyGen 角色拒绝空录音；
+- ComfyUI 与 HeyGen 角色都拒绝空录音；ComfyUI 录音须 2–15 秒；
 - 创建 ComfyUI 角色时原子创建 setup job；
 - 镜头时长上下限、拆镜校验；
 - `PUT /shots` 重写 `script`；
@@ -411,8 +446,9 @@ Next.js 脚本 route `POST /api/digital-human/script` 增加 ComfyUI 模式：�
 TypeScript：
 
 - ComfyUI 客户端路径、上传、提交、history 复用 `prompt_id`；
-- 提示词组装；
-- setup 只走 `compose_look`；
+- 六段式 Ref2VA 提示词组装，对白保持中文，声明 Uses Audio 1；
+- setup 合成定妆图，不克隆 HeyGen 音色；
+- shot job 每镜上传同一组图和同一条音频，不传上一镜视频；
 - shot job 成功、失败、取消、重试不重复提交；
 - OOM 不可自动改参；
 - stitch 按 snapshot 顺序拼接，音频 120ms 淡化；
@@ -444,7 +480,8 @@ TypeScript：
 
 - 用 H3 做静图主路径（封面、环境图仍走现有图片 provider）；
 - 脚本 + TTS + 对口型；
-- 尾帧续接长镜头；
+- 按镜切开对白音轨再送给 H3；
+- 尾帧续接或把上一镜成片当视频参考；
 - 用户编辑 ComfyUI 图；
 - H3-Context-IR / 2K regenerate；
 - 字幕、配乐、B-roll、多轨时间轴；
@@ -458,15 +495,16 @@ TypeScript：
 2. **ComfyUI 路径按镜头工作，不按整段脚本。** 与本机 5 秒上限一致，也和短视频切镜习惯一致。
 3. **默认硬切，不用尾帧续接。** 降低身份漂和糊尾帧累积。
 4. **时长按镜可调，上限是本机预算而不是产品常量。** 默认上限 5 秒，下限跟工作流走。
-5. **H3 自带声音，ComfyUI 角色不要求录音。** 不把 HeyGen 的声音克隆契约套到 H3 上。
-6. **定妆图本地合成，不出 ComfyUI。** GPU 只用来出 4–5 秒片子。
-7. **按镜 job 与拼接 job 分开。** 单镜失败可单独重试；成片版本仍然不可变。
-8. **工作流模板进仓库并用 meta 映射节点。** 换图必须升版本，旧成片可追溯。
-9. **OOM 不自动降级重跑。** 避免静默改长度或分辨率，结果和用户提交不一致。
+5. **ComfyUI 也要录音，但全程复用同一条当 `<Audio 1>`。** 对白只写在六段式 IR 里。H3 仍会生成该镜声音，不锁原波形。
+6. **生成走 Ref2VA，不走首帧 I2V。** 身份靠 `<Picture 1>`，环境靠 `<Picture 2>`，近景可选 `<Picture 3>`。
+7. **定妆图本地合成，不出 ComfyUI。** GPU 只用来出 4–5 秒片子。
+8. **按镜 job 与拼接 job 分开。** 单镜失败可单独重试；成片版本仍然不可变。
+9. **工作流模板进仓库并用 meta 映射节点。** 换图必须升版本，旧成片可追溯。
+10. **OOM 不自动降级重跑。** 避免静默改长度或分辨率，结果和用户提交不一致。
 
 ## Open Questions
 
-无。时长上下限、切镜交互、job 切分和编辑页布局已在设计对话中确认。
+无。分段方式、Ref2VA 参考包和「全程同一条音色样本」已确认。
 
 ## PR Plan
 
@@ -476,15 +514,15 @@ TypeScript：
 - 依赖：无
 - 保存/脱敏/runtime/连通性测试；尚不接业务 job
 
-### PR 2 — 角色 provider、定妆图、可空录音
+### PR 2 — 角色 provider、定妆图、录音必填
 
 - 影响：`backend/models.py`、迁移、`digital_human_service.py`、`routers/digital_humans.py`、角色 UI、setup job 分支 `compose_look`
-- 依赖：PR 1（setup 合成本身不依赖 ComfyUI，但 runtime 与设置分区应已存在）
-- 存量角色回填 `heygen`；ComfyUI 角色可 `ready`
+- 依赖：PR 1
+- 存量角色回填 `heygen`；ComfyUI 角色也要声音样本才能 `ready`
 
 ### PR 3 — 镜头模型与按镜生成
 
-- 影响：`TalkingVideoProject.shots`、`TalkingVideoProject.look_asset_id`、shots API、环境覆盖时同步合成作品定妆图、`lib/comfyui/workflows/h3-i2v-v1.*`、`digital_human_shot_render` worker、脚本 AI 镜头模式
+- 影响：`TalkingVideoProject.shots`、`TalkingVideoProject.look_asset_id`、shots API、环境覆盖时同步合成作品定妆图、`lib/comfyui/workflows/h3-ref2va-v1.*`、`digital_human_shot_render` worker（Ref2VA + 同一 `<Audio 1>`）、脚本 AI 镜头模式
 - 依赖：PR 1、PR 2
 - 不含拼接
 
