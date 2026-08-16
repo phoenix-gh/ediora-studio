@@ -7,6 +7,8 @@ const TYPE_LABELS = Object.freeze({
 })
 
 const KNOWN_TYPE_ORDER = Object.freeze(['article', 'x', 'mp', 'bili', 'xhs'])
+const MARKDOWN_IMAGE = /!\[[^\]]*]\(\S+?\)/
+const HTML_IMAGE = /<img\b/i
 
 function invalidResponseError(message) {
   const error = new Error(message)
@@ -46,6 +48,11 @@ export function selectReadyDrafts(rawDrafts) {
   return normalizeDrafts(rawDrafts)
     .filter(draft => draft.status === 'ready')
     .sort((left, right) => toTimestamp(right.updated_at) - toTimestamp(left.updated_at))
+}
+
+export function draftHasMedia(draft) {
+  const content = String(draft?.content ?? '')
+  return MARKDOWN_IMAGE.test(content) || HTML_IMAGE.test(content)
 }
 
 export function filterDrafts(drafts, { query = '', type = 'all' } = {}) {

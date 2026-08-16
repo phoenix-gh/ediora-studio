@@ -1,4 +1,4 @@
-import { filterDrafts, selectReadyDrafts } from './draft-model.js'
+import { draftHasMedia, filterDrafts, selectReadyDrafts } from './draft-model.js'
 
 export const DEFAULT_WORKBENCH_API_BASE = 'http://localhost:8000/api'
 export const WORKBENCH_LAYOUT_STORAGE_KEY = 'shuceWorkbenchLayout'
@@ -50,13 +50,63 @@ export function applyDrafts(state, rawDrafts) {
   }
 }
 
-export function shuffleDrafts(state, random = Math.random) {
-  const drafts = [...state.drafts]
-  for (let index = drafts.length - 1; index > 0; index -= 1) {
+function shuffleInPlace(items, random) {
+  for (let index = items.length - 1; index > 0; index -= 1) {
     const target = Math.floor(random() * (index + 1))
-    ;[drafts[index], drafts[target]] = [drafts[target], drafts[index]]
+    ;[items[index], items[target]] = [items[target], items[index]]
   }
-  return { ...state, drafts }
+  return items
+}
+
+function interleaveByExistingRatio(media, text) {
+  const result = []
+  let mediaUsed = 0
+  let textUsed = 0
+  const mediaTotal = media.length
+  const textTotal = text.length
+  const total = mediaTotal + textTotal
+
+  for (let index = 0; index < total; index += 1) {
+    const mediaLeft = mediaTotal - mediaUsed
+    const textLeft = textTotal - textUsed
+    if (mediaLeft === 0) {
+      result.push(text[textUsed])
+      textUsed += 1
+      continue
+    }
+    if (textLeft === 0) {
+      result.push(media[mediaUsed])
+      mediaUsed += 1
+      continue
+    }
+
+    const mediaShare = mediaUsed / mediaTotal
+    const textShare = textUsed / textTotal
+    const pickMedia = mediaShare < textShare
+      || (mediaShare === textShare && mediaLeft > textLeft)
+
+    if (pickMedia) {
+      result.push(media[mediaUsed])
+      mediaUsed += 1
+    } else {
+      result.push(text[textUsed])
+      textUsed += 1
+    }
+  }
+
+  return result
+}
+
+export function shuffleDrafts(state, random = Math.random) {
+  const media = []
+  const text = []
+  for (const draft of state.drafts) {
+    if (draftHasMedia(draft)) media.push(draft)
+    else text.push(draft)
+  }
+  shuffleInPlace(media, random)
+  shuffleInPlace(text, random)
+  return { ...state, drafts: interleaveByExistingRatio(media, text) }
 }
 
 export function setWorkbenchFilter(state, patch = {}) {

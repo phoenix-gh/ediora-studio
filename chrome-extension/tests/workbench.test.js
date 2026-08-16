@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
+import { draftHasMedia } from '../content/draft-model.js'
 import {
   WORKBENCH_LAYOUT_STORAGE_KEY,
   applyDrafts,
@@ -94,6 +95,64 @@ test('refreshing with applyDrafts restores server time order after a shuffle', (
   state = applyDrafts(state, [...rawDrafts].reverse())
 
   assert.deepEqual(state.drafts.map(draft => draft.id), [2, 1])
+})
+
+function maxRun(values, wanted) {
+  let longest = 0
+  let current = 0
+  for (const value of values) {
+    if (value === wanted) {
+      current += 1
+      longest = Math.max(longest, current)
+    } else {
+      current = 0
+    }
+  }
+  return longest
+}
+
+test('interleaves multimedia and text drafts at the current list ratio', () => {
+  const drafts = [
+    { id: 'm1', content: '![a](http://x/a.png)', status: 'ready' },
+    { id: 'm2', content: '![b](http://x/b.png)', status: 'ready' },
+    { id: 't1', content: '纯文字一', status: 'ready' },
+    { id: 't2', content: '纯文字二', status: 'ready' },
+    { id: 't3', content: '纯文字三', status: 'ready' },
+    { id: 't4', content: '纯文字四', status: 'ready' },
+  ]
+  const state = { ...createWorkbenchState(), drafts, selectedId: 'm1', query: '封面' }
+  const shuffled = shuffleDrafts(state, () => 0)
+
+  assert.deepEqual(shuffled.drafts.map(draft => draft.id), ['t2', 'm2', 't3', 't4', 'm1', 't1'])
+  assert.equal(shuffled.selectedId, 'm1')
+  assert.equal(shuffled.query, '封面')
+  assert.notEqual(shuffled.drafts, state.drafts)
+})
+
+test('keeps media and text run lengths within the existing frequency', () => {
+  const drafts = [
+    { id: 'm1', content: '![a](http://x/a.png)', status: 'ready' },
+    { id: 'm2', content: '![b](http://x/b.png)', status: 'ready' },
+    { id: 'm3', content: '<img src="http://x/c.png">', status: 'ready' },
+    { id: 't1', content: '纯文字一', status: 'ready' },
+    { id: 't2', content: '纯文字二', status: 'ready' },
+    { id: 't3', content: '纯文字三', status: 'ready' },
+    { id: 't4', content: '纯文字四', status: 'ready' },
+    { id: 't5', content: '纯文字五', status: 'ready' },
+    { id: 't6', content: '纯文字六', status: 'ready' },
+    { id: 't7', content: '纯文字七', status: 'ready' },
+  ]
+  const shuffled = shuffleDrafts({ ...createWorkbenchState(), drafts }, () => 0.31)
+  const kinds = shuffled.drafts.map(draft => (draftHasMedia(draft) ? 'm' : 't'))
+
+  assert.equal(kinds.filter(kind => kind === 'm').length, 3)
+  assert.equal(kinds.filter(kind => kind === 't').length, 7)
+  assert.ok(maxRun(kinds, 'm') <= 1)
+  assert.ok(maxRun(kinds, 't') <= 3)
+  assert.deepEqual(
+    shuffled.drafts.map(draft => draft.id).sort(),
+    drafts.map(draft => draft.id).sort(),
+  )
 })
 
 test('preserves selection across refresh and toggles settings', () => {
@@ -240,7 +299,7 @@ test('provides an in-memory draft shuffle control', async () => {
   const source = await readFile(new URL('../content/workbench-runtime.js', import.meta.url), 'utf8')
 
   assert.match(source, /data-action="shuffle"/)
-  assert.match(source, /title="重新排序"/)
+  assert.match(source, /title="按图文比例重新排序"/)
   assert.match(source, /shuffleDrafts\(state\)/)
 })
 

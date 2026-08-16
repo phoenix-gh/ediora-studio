@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  draftHasMedia,
   filterDrafts,
   getDraftTitle,
   getDraftTypeOptions,
@@ -61,4 +62,11 @@ test('uses labels and safe title fallback', () => {
 
 test('supports legacy draft field when content is absent', () => {
   assert.equal(selectReadyDrafts(drafts)[1].content, '公众号正文')
+})
+
+test('treats markdown or html images as multimedia drafts', () => {
+  assert.equal(draftHasMedia({ content: '纯文字说明' }), false)
+  assert.equal(draftHasMedia({ content: '![封面](/api/uploads/cover.png) 正文' }), true)
+  assert.equal(draftHasMedia({ content: '<img src="/api/uploads/cover.png" alt="封面">' }), true)
+  assert.equal(draftHasMedia({ content: '![空地址]()' }), false)
 })

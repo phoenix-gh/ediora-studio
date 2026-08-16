@@ -139,7 +139,7 @@ const STATIC_UI = [
   '<div class="sw-schedule-memory"><strong data-role="last-schedule">上次安排：未记录</strong><label class="sw-auto-schedule"><input type="checkbox" data-role="auto-schedule"><span>自动填入发布时间</span></label></div>',
   '<div class="sw-actions">',
   '<button class="sw-icon-button" type="button" data-action="refresh" title="刷新草稿">↻</button>',
-  '<button class="sw-icon-button" type="button" data-action="shuffle" title="重新排序">⤨</button>',
+  '<button class="sw-icon-button" type="button" data-action="shuffle" title="按图文比例重新排序">⤨</button>',
   '<button class="sw-icon-button" type="button" data-action="settings" title="API 设置">⚙</button>',
   '<button class="sw-icon-button" type="button" data-action="layout" title="左右布局" aria-label="左右布局">☰</button>',
   '</div>',
