@@ -49,8 +49,11 @@ export type TalkingVideoShot = {
   framing: 'wide' | 'medium' | 'close'
   spoken_text: string
   motion_prompt: string
+  delivery?: string
+  render_prompt?: string
   first_frame_asset_id: number | null
   clip_asset_id: number | null
+  clip_asset?: CreativeAsset | null
   status: 'draft' | 'queued' | 'running' | 'succeeded' | 'failed'
   job_id: number | null
   error: string
@@ -92,6 +95,8 @@ export interface TalkingVideoProject {
   title: string
   digital_human_id: number
   script: string
+  delivery?: string
+  presence?: string
   script_source: 'manual' | 'ai' | 'draft'
   source_draft_id: number | null
   environment_asset_id: number | null
@@ -112,6 +117,8 @@ export interface TalkingVideoProject {
   >
   effective_environment: CreativeAsset | null
   renders: TalkingVideoRender[]
+  min_shot_seconds?: number
+  max_shot_seconds?: number
   created_at: string
   updated_at: string
 }
@@ -140,6 +147,8 @@ export type TalkingVideoUpdate = Partial<
     | 'title'
     | 'digital_human_id'
     | 'script'
+    | 'delivery'
+    | 'presence'
     | 'script_source'
     | 'source_draft_id'
     | 'environment_asset_id'
@@ -211,6 +220,17 @@ export const createTalkingVideoRender = (projectId: number) =>
     `/talking-videos/${projectId}/renders`,
     { method: 'POST' },
   )
+
+export const planTalkingVideoShots = (
+  projectId: number,
+  script: string,
+) => apiFetch<TalkingVideoProject>(
+  `/talking-videos/${projectId}/shots/plan`,
+  {
+    method: 'POST',
+    body: JSON.stringify({ script }),
+  },
+)
 
 export const saveTalkingVideoShots = (
   projectId: number,

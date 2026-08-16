@@ -99,8 +99,8 @@ export function DigitalHumansClient({
   }
 
   return (
-    <div className="flex min-h-full flex-col gap-6 px-7 pb-8">
-      <header data-slot="page-header" className="flex h-[var(--app-header-height)] min-h-[var(--app-header-height)] items-center justify-between gap-4">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden px-7">
+      <header data-slot="page-header" className="flex h-[var(--app-header-height)] shrink-0 items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold">数字人口播</h1>
           <p className="mt-1 text-sm text-muted-foreground">
@@ -115,13 +115,13 @@ export function DigitalHumansClient({
           创建数字人
         </Button>
       </header>
-      <Tabs defaultValue="projects">
-        <TabsList variant="line">
+      <Tabs defaultValue="projects" className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        <TabsList variant="line" className="shrink-0">
           <TabsTrigger value="projects">口播作品</TabsTrigger>
           <TabsTrigger value="roles">数字人角色</TabsTrigger>
         </TabsList>
-        <TabsContent value="projects">
-          <div className="grid gap-4 lg:grid-cols-[220px_minmax(0,1fr)]">
+        <TabsContent value="projects" className="min-h-0 flex-1 overflow-hidden">
+          <div className="grid h-full min-h-0 gap-4 overflow-hidden lg:grid-cols-[220px_minmax(0,1fr)]">
             <TalkingProjectList
               projects={projects}
               roles={roles}
@@ -143,7 +143,7 @@ export function DigitalHumansClient({
             )}
           </div>
         </TabsContent>
-        <TabsContent value="roles">
+        <TabsContent value="roles" className="min-h-0 flex-1 overflow-y-auto">
           <RoleLibrary
             roles={roles}
             onCreate={() => {

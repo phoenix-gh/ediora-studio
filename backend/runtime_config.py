@@ -10,6 +10,7 @@ from dataclasses import dataclass
 class RuntimeSettings:
     redis_url: str
     worker_queue: str
+    video_worker_queue: str
     local_asr_url: str
     local_asr_model: str
     local_asr_device: str
@@ -20,6 +21,10 @@ def get_runtime_settings() -> RuntimeSettings:
     return RuntimeSettings(
         redis_url=os.getenv("WMS_REDIS_URL", "redis://redis:6379/0"),
         worker_queue=os.getenv("WMS_WORKER_QUEUE", "content-jobs"),
+        video_worker_queue=os.getenv(
+            "WMS_VIDEO_WORKER_QUEUE",
+            "content-jobs:video",
+        ),
         local_asr_url=os.getenv(
             "WMS_LOCAL_ASR_URL",
             "http://127.0.0.1:8001/v1",

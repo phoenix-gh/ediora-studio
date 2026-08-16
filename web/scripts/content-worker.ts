@@ -40,6 +40,23 @@ import { runTextVideoSpeechJob } from '../lib/ai/text-video-speech-job'
 
 const TERMINAL_JOB_STATUSES = new Set(['succeeded', 'cancelled', 'failed'])
 const UNSUPPORTED_TEXT_VIDEO_STEP = 'unsupported_text_video_flow'
+export const LONG_VIDEO_FLOWS = new Set([
+  'digital_human_shot_render',
+  'digital_human_stitch',
+  'digital_human_render',
+  'text_video_render',
+])
+
+export function isLongVideoFlow(flow: string) {
+  return LONG_VIDEO_FLOWS.has(flow)
+}
+
+export function workerQueueForFlow(
+  flow: string,
+  queues: { defaultQueue: string; videoQueue: string },
+) {
+  return isLongVideoFlow(flow) ? queues.videoQueue : queues.defaultQueue
+}
 const DEFAULT_LEASE_TTL_MS = 30_000
 const DEFAULT_LEASE_REFRESH_INTERVAL_MS = 10_000
 const DEFAULT_BLOCK_TIMEOUT_SECONDS = 1
@@ -189,6 +206,8 @@ export type RunContentWorkerOptions = {
   leaseTtlMs?: number
   leaseRefreshIntervalMs?: number
   blockTimeoutSeconds?: number
+  videoQueueName?: string
+  defaultQueueName?: string
 }
 
 export type WorkerReconcileResult = {
@@ -323,7 +342,10 @@ async function runLeasedJob(
     | 'resolveRunner'
     | 'leaseTtlMs'
     | 'leaseRefreshIntervalMs'
-  >> & Pick<RunContentWorkerOptions, 'speechFetch'>,
+  >> & Pick<
+    RunContentWorkerOptions,
+    'speechFetch' | 'videoQueueName' | 'defaultQueueName'
+  >,
 ) {
   const key = leaseKey(options.queueName, jobId)
   const owner = randomUUID()
@@ -347,6 +369,14 @@ async function runLeasedJob(
   try {
     const job = await options.getJob(jobId)
     if (TERMINAL_JOB_STATUSES.has(job.status)) return
+    const targetQueue = workerQueueForFlow(job.flow, {
+      defaultQueue: options.defaultQueueName ?? options.queueName,
+      videoQueue: options.videoQueueName ?? options.queueName,
+    })
+    if (targetQueue !== options.queueName) {
+      await enqueueOnce(options.redis, targetQueue, jobId)
+      return
+    }
     phase = 'running'
     await options.resolveRunner(job.flow, {
       speechFetch: options.speechFetch,
@@ -379,6 +409,8 @@ export async function runContentWorker({
   leaseTtlMs = DEFAULT_LEASE_TTL_MS,
   leaseRefreshIntervalMs = DEFAULT_LEASE_REFRESH_INTERVAL_MS,
   blockTimeoutSeconds = DEFAULT_BLOCK_TIMEOUT_SECONDS,
+  videoQueueName,
+  defaultQueueName,
 }: RunContentWorkerOptions) {
   await redis.ping()
   await reconcile()
@@ -398,6 +430,8 @@ export async function runContentWorker({
       leaseTtlMs,
       leaseRefreshIntervalMs,
       speechFetch,
+      videoQueueName,
+      defaultQueueName,
     })
   }
 }
@@ -461,32 +495,54 @@ export function createWorkerReadyFilePublisher({
 async function runContentWorkerCli() {
   const redisUrl = process.env.WMS_REDIS_URL ?? 'redis://redis:6379/0'
   const queueName = process.env.WMS_WORKER_QUEUE ?? 'content-jobs'
+  const videoQueueName = process.env.WMS_VIDEO_WORKER_QUEUE ?? 'content-jobs:video'
+  const listenVideoQueue = process.env.WMS_LISTEN_VIDEO_QUEUE !== '0'
+    && videoQueueName !== queueName
   const ready = createWorkerReadyFilePublisher({
     readyFile: process.env.WMS_WORKER_READY_FILE,
     marker: process.env.WMS_DEV_SERVICE_MARKER,
     configFingerprint: process.env.WMS_DEV_CONFIG_FINGERPRINT,
   })
   const redis = new Redis(redisUrl)
+  const videoRedis = listenVideoQueue ? new Redis(redisUrl) : undefined
   const controller = new AbortController()
   const abort = () => controller.abort()
   process.once('SIGINT', abort)
   process.once('SIGTERM', abort)
   try {
-    await runContentWorker({
-      redis,
-      queueName,
-      signal: controller.signal,
-      speechFetch: fetch,
-      onReady: ready.publish,
-      reconcile: reconcileContentJobs,
-      getJob,
-      resolveRunner: resolveContentJobRunner,
-    })
+    await Promise.all([
+      runContentWorker({
+        redis,
+        queueName,
+        videoQueueName,
+        defaultQueueName: queueName,
+        signal: controller.signal,
+        speechFetch: fetch,
+        onReady: ready.publish,
+        reconcile: reconcileContentJobs,
+        getJob,
+        resolveRunner: resolveContentJobRunner,
+      }),
+      videoRedis
+        ? runContentWorker({
+            redis: videoRedis,
+            queueName: videoQueueName,
+            videoQueueName,
+            defaultQueueName: queueName,
+            signal: controller.signal,
+            speechFetch: fetch,
+            reconcile: async () => ({ enqueued: 0, job_ids: [] }),
+            getJob,
+            resolveRunner: resolveContentJobRunner,
+          })
+        : Promise.resolve(),
+    ])
   } finally {
     process.off('SIGINT', abort)
     process.off('SIGTERM', abort)
     await ready.cleanup()
     redis.disconnect()
+    videoRedis?.disconnect()
   }
 }
 

@@ -57,25 +57,85 @@ const FRAMING_LABEL: Record<string, string> = {
   close: 'close-up',
 }
 
+export const DEFAULT_DELIVERY =
+  'calm tutorial host; warm assured emotion; medium conversational speaking rate; clear Mandarin'
+
+export const DEFAULT_PRESENCE =
+  'seated upright facing camera, torso still, slight head nods on clause ends, one-hand open-palm beat on key words, eyes on lens'
+
+export const CHARS_PER_SECOND = 5
+
+
+export function estimateShotSeconds(
+  text: string,
+  minSeconds: number,
+  maxSeconds: number,
+) {
+  const chars = [...text].filter(char => !/\s/.test(char)).length
+  if (chars <= 0) return minSeconds
+  const guessed = Math.max(minSeconds, Math.ceil(chars / CHARS_PER_SECOND))
+  return Math.min(maxSeconds, guessed)
+}
+
+
+export function effectiveDelivery(shotDelivery = '', baseDelivery = '') {
+  return shotDelivery.trim() || baseDelivery.trim() || DEFAULT_DELIVERY
+}
+
+
+export function dialogueLanguageTag(text: string) {
+  return /[\u4e00-\u9fff]/.test(text) ? 'Chinese' : 'English'
+}
+
 
 export function buildShotPrompt(input: {
   framing: string
   spokenText: string
   motionPrompt?: string
+  delivery?: string
+  baseDelivery?: string
+  presence?: string
+  hasFirstFrameReference?: boolean
+  hasPoseReference?: boolean
 }) {
   const framingLabel = FRAMING_LABEL[input.framing] || 'medium shot'
   const spoken = input.spokenText.trim()
   const motion = input.motionPrompt?.trim()
+  const tone = effectiveDelivery(input.delivery, input.baseDelivery)
+  const performance = input.presence?.trim() || DEFAULT_PRESENCE
   const camera = input.framing === 'close'
     ? 'Very slow push-in. Eye-level. No shake.'
     : 'Static locked-off camera. Eye-level. No pan, tilt, or zoom.'
   const action = motion
     ? `${motion} `
     : ''
+  const lang = dialogueLanguageTag(spoken)
+  const hasFirstFrame = Boolean(
+    input.hasFirstFrameReference ?? input.hasPoseReference,
+  )
+  const subjects = [
+    '<Subject 1> is the person in <Picture 1>, same face, hair, clothing, and body proportions.',
+  ]
+  if (hasFirstFrame) {
+    subjects.push(
+      '<Picture 3> is the last frame of the previous clip and the first frame of this shot.',
+    )
+  }
+  const opening = hasFirstFrame
+    ? `At 0.00 seconds, <Picture 3> is fully referenced as the first frame. <Subject 1> faces the camera in <Background 1>, matching that opening pose. ${action}<Subject 1> (S1) uses a ${tone} delivery. Emotion, cadence, and speaking rate come from this prompt, not from <Audio 1>.`
+    : `<Subject 1> faces the camera in <Background 1> and is already speaking. ${action}<Subject 1> (S1) uses a ${tone} delivery. Emotion, cadence, and speaking rate come from this prompt, not from <Audio 1>.`
+  const onset = hasFirstFrame
+    ? 'Start speaking from that exact pose; the first syllable begins immediately after the opening frame, with no long still hold.'
+    : 'Already talking at the first frame; no silent intro and no fade-in from a still pose.'
   return [
     'Video Description:',
-    `<Subject 1> stands in <Background 1> and speaks to camera. ${action}He/she says, "${spoken}"`,
-    "Uses <Audio 1>'s voice. No music. No on-screen text, captions, logos, or subtitles.",
+    opening,
+    `<Subject 1> (S1) says ONLY this quoted line and then stops: <d>[${lang}] ${spoken}</d>`,
+    `Performance: ${performance}. Gestures stay small and speech-synced: a slight head nod or one-hand open-palm beat on stressed words; shoulders stay settled; no standing up, walking, or waving.`,
+    onset,
+    'No extra words, no filler, no humming, and no invented syllables after the line ends.',
+    'Exactly as the last word ends, lips meet, the jaw stops, and the talking pose holds in silence.',
+    'Uses <Audio 1> only as voice timbre. Do not copy words, emotion, rhythm, or pace from <Audio 1>. No music. No on-screen text, captions, logos, or subtitles.',
     '',
     'Camera Movement:',
     camera,
@@ -87,7 +147,7 @@ export function buildShotPrompt(input: {
     'Clean studio presentation. Soft key from camera-left, natural skin texture.',
     '',
     'Subjects:',
-    '<Subject 1> is the person in <Picture 1>, same face, hair, clothing, and body proportions.',
+    ...subjects,
     '',
     'Background:',
     '<Background 1> is the environment in <Picture 2>, unchanged lighting and set dressing.',

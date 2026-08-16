@@ -14,6 +14,7 @@ import {
   CardTitle,
 } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
+import { cancelJob } from '@/lib/api/jobs'
 import {
   deleteTalkingVideoRender,
   selectTalkingVideoRender,
@@ -49,6 +50,16 @@ export function RenderVersionsPanel({
       onChanged?.(await selectTalkingVideoRender(projectId, render.id))
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '版本选择失败')
+    }
+  }
+
+  async function stop(render: TalkingVideoRender) {
+    try {
+      if (render.job_id) await cancelJob(render.job_id)
+      onChanged?.()
+    } catch (error) {
+      onChanged?.()
+      toast.error(error instanceof Error ? error.message : '停止失败')
     }
   }
 
@@ -106,10 +117,17 @@ export function RenderVersionsPanel({
                 </Button>
               ) : null}
               {['queued', 'running'].includes(render.status) ? (
-                <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                  <Clock3 />
-                  HeyGen 正在处理
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                    <Clock3 />
+                    {render.digital_human_snapshot?.provider === 'comfyui'
+                      ? '正在拼接成片'
+                      : 'HeyGen 正在处理'}
+                  </span>
+                  <Button size="sm" variant="outline" onClick={() => void stop(render)}>
+                    停止
+                  </Button>
+                </div>
               ) : null}
             </CardContent>
           </Card>

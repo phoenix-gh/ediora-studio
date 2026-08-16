@@ -283,6 +283,7 @@ application_config_fingerprint() {
   runtime_fingerprint \
     "$HOST_REDIS_URL" \
     "$WMS_WORKER_QUEUE" \
+    "${WMS_VIDEO_WORKER_QUEUE:-content-jobs:video}" \
     "${WMS_WORKER_TOKEN:-}" \
     "$HOST_API_URL" \
     "$HOST_WEB_URL" \
@@ -520,6 +521,7 @@ cmd_start() {
   export WMS_API_URL="$HOST_API_URL"
   export NEXT_PUBLIC_API_URL="$HOST_API_URL"
   export WMS_WORKER_QUEUE="${WMS_WORKER_QUEUE:-content-jobs}"
+  export WMS_VIDEO_WORKER_QUEUE="${WMS_VIDEO_WORKER_QUEUE:-content-jobs:video}"
   export WMS_CORS_ORIGINS="$EFFECTIVE_CORS_ORIGINS"
   export WMS_WORKER_READY_FILE="$WORKER_READY_FILE"
   REDIS_CONFIG_FINGERPRINT="$(runtime_fingerprint "$HOST_REDIS_URL")"
@@ -551,7 +553,7 @@ print_runtime_summary() {
     "$POSTGRES_CONTAINER" "$POSTGRES_HOST" "$POSTGRES_PORT"
   printf '  Web:    %s\n' "$HOST_WEB_URL"
   printf '  API:    %s (docs: /docs)\n' "$HOST_API_ROOT"
-  printf '  Worker: %s\n' "$WMS_WORKER_QUEUE"
+  printf '  Worker: %s + %s\n' "$WMS_WORKER_QUEUE" "$WMS_VIDEO_WORKER_QUEUE"
   printf '  Redis:  %s\n' "$HOST_REDIS_URL"
   printf '  Logs:   ./dev.sh logs    Stop: ./dev.sh stop\n'
 }
@@ -647,6 +649,7 @@ cmd_status() {
   local unhealthy=0 redis_metadata
   validate_runtime_ports || return 1
   WMS_WORKER_QUEUE="${WMS_WORKER_QUEUE:-content-jobs}"
+  WMS_VIDEO_WORKER_QUEUE="${WMS_VIDEO_WORKER_QUEUE:-content-jobs:video}"
   WMS_CORS_ORIGINS="${WMS_CORS_ORIGINS:-$EFFECTIVE_CORS_ORIGINS}"
   APPLICATION_CONFIG_FINGERPRINT="$(application_config_fingerprint)"
   postgres_status || unhealthy=1

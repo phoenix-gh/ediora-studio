@@ -194,6 +194,9 @@ def test_enqueue_job_owns_and_closes_its_redis_client(monkeypatch):
     calls: list[object] = []
 
     class FakeQueue:
+        def __init__(self, *args, **kwargs):
+            calls.append(("init", kwargs))
+
         async def __aenter__(self):
             calls.append("enter")
             return self
@@ -207,7 +210,41 @@ def test_enqueue_job_owns_and_closes_its_redis_client(monkeypatch):
     monkeypatch.setattr(job_queue, "RedisJobQueue", FakeQueue)
 
     asyncio.new_event_loop().run_until_complete(
-        job_queue.enqueue_job(17),
+        job_queue.enqueue_job(17, flow="draft"),
     )
 
-    assert calls == ["enter", 17, "close"]
+    assert calls == [
+        ("init", {"queue_name": "content-jobs"}),
+        "enter",
+        17,
+        "close",
+    ]
+
+
+def test_enqueue_job_uses_video_queue_for_long_video_flows(monkeypatch):
+    import job_queue
+
+    names: list[str] = []
+
+    class FakeQueue:
+        def __init__(self, *args, **kwargs):
+            names.append(kwargs.get("queue_name", ""))
+
+        async def __aenter__(self):
+            return self
+
+        async def enqueue_once(self, job_id):
+            names.append(str(job_id))
+
+        async def __aexit__(self, *_args):
+            return None
+
+    monkeypatch.setattr(job_queue, "RedisJobQueue", FakeQueue)
+
+    asyncio.new_event_loop().run_until_complete(
+        job_queue.enqueue_job(91, flow="digital_human_shot_render"),
+    )
+
+    assert names == ["content-jobs:video", "91"]
+    assert job_queue.is_long_video_flow("text_video_render")
+    assert not job_queue.is_long_video_flow("daily_creation")

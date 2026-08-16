@@ -1577,6 +1577,56 @@ def test_cancelling_setup_job_immediately_marks_linked_role_failed(
     asyncio.new_event_loop().run_until_complete(run())
 
 
+def test_cancelling_shot_render_job_marks_linked_shot_failed(
+    session_factory,
+):
+    from content_jobs import cancel_job, create_job
+    from models import TalkingVideoProject
+
+    async def run():
+        async with session_factory() as session:
+            project = TalkingVideoProject(
+                title="测试",
+                digital_human_id=1,
+                shots=[
+                    {
+                        "id": "shot-1",
+                        "status": "running",
+                        "job_id": None,
+                        "error": "",
+                    }
+                ],
+            )
+            session.add(project)
+            await session.flush()
+            job = await create_job(
+                session,
+                flow="digital_human_shot_render",
+                title="shot",
+                input_data={"project_id": project.id, "shot_id": "shot-1"},
+                commit=False,
+            )
+            project.shots = [
+                {
+                    "id": "shot-1",
+                    "status": "running",
+                    "job_id": job.id,
+                    "error": "",
+                }
+            ]
+            await session.commit()
+
+            await cancel_job(session, job.id)
+            await session.refresh(project)
+
+            shot = project.shots[0]
+            assert shot["status"] == "failed"
+            assert shot["error"] == "任务已取消"
+            assert shot["job_id"] == job.id
+
+    asyncio.new_event_loop().run_until_complete(run())
+
+
 def test_completed_step_cannot_be_started_again(session_factory):
     from content_jobs import InvalidJobTransition, create_job, start_step, succeed_step
 

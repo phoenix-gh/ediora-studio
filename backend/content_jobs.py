@@ -18,6 +18,7 @@ from models import (
     ContentResponseItem,
     DailyCreationRun,
     DigitalHuman,
+    TalkingVideoProject,
     TalkingVideoRender,
     TextVideoProject,
 )
@@ -694,7 +695,7 @@ async def cancel_job(session: AsyncSession, job_id: int) -> ContentJob:
         return job
     if job.status in {"succeeded", "cancelled"}:
         raise InvalidJobTransition(f"cannot cancel {job.status} job")
-    if job.flow == "digital_human_render":
+    if job.flow in {"digital_human_render", "digital_human_stitch"}:
         render_id = job.input_data.get("render_id")
         if isinstance(render_id, int):
             render = await session.scalar(
@@ -767,7 +768,7 @@ async def cancel_job(session: AsyncSession, job_id: int) -> ContentJob:
     job.completed_at = _now()
     if job.flow == "daily_creation":
         await _cancel_linked_daily_creation_run(session, job)
-    elif job.flow == "digital_human_render":
+    elif job.flow in {"digital_human_render", "digital_human_stitch"}:
         render_id = job.input_data.get("render_id")
         if isinstance(render_id, int):
             render = await session.scalar(
@@ -798,6 +799,8 @@ async def cancel_job(session: AsyncSession, job_id: int) -> ContentJob:
             ):
                 role.status = "failed"
                 role.error = "任务已取消"
+    elif job.flow == "digital_human_shot_render":
+        await _cancel_current_shot_render(session, job)
     elif job.flow == "text_video_speech":
         await _cancel_current_speech_segment(session, job)
     elif job.flow == "text_video_master_audio":
@@ -831,6 +834,36 @@ async def _cancel_linked_daily_creation_run(
         return
     creation_run.status = "cancelled"
     creation_run.completed_at = job.completed_at or _now()
+
+
+async def _cancel_current_shot_render(
+    session: AsyncSession,
+    job: ContentJob,
+) -> None:
+    from digital_human_shots import replace_shot
+
+    project_id = (job.input_data or {}).get("project_id")
+    shot_id = str((job.input_data or {}).get("shot_id") or "")
+    if not isinstance(project_id, int) or not shot_id:
+        return
+    project = await session.scalar(
+        select(TalkingVideoProject)
+        .where(TalkingVideoProject.id == project_id)
+        .with_for_update()
+    )
+    if project is None:
+        return
+    shots = list(project.shots or [])
+    current = next((item for item in shots if str(item.get("id")) == shot_id), None)
+    if current is None or current.get("job_id") != job.id:
+        return
+    if current.get("status") not in {"queued", "running"}:
+        return
+    project.shots = replace_shot(
+        shots,
+        shot_id,
+        {"status": "failed", "error": "任务已取消"},
+    )
 
 
 async def succeed_job(session: AsyncSession, job_id: int) -> ContentJob:

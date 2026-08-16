@@ -9,7 +9,11 @@ from pydantic import BaseModel, Field
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from config import effective_heygen_api_key, get_config
+from config import (
+    effective_comfyui_shot_seconds,
+    effective_heygen_api_key,
+    get_config,
+)
 from database import get_db
 from digital_human_assets import archive_digital_human_asset_ids
 from digital_human_service import (
@@ -19,6 +23,7 @@ from digital_human_service import (
     create_talking_project,
     enqueue_pending_shot_renders,
     enqueue_shot_render,
+    plan_project_shots,
     require_media_asset,
     save_project_shots,
     select_render,
@@ -42,6 +47,8 @@ class ProjectCreate(BaseModel):
     title: str = Field(default="", max_length=300)
     digital_human_id: int
     script: str = ""
+    delivery: str = Field(default="", max_length=200)
+    presence: str = Field(default="", max_length=200)
     script_source: Literal["manual", "ai", "draft"] = "manual"
     source_draft_id: int | None = None
     environment_asset_id: int | None = None
@@ -51,6 +58,8 @@ class ProjectUpdate(BaseModel):
     title: str | None = Field(default=None, max_length=300)
     digital_human_id: int | None = None
     script: str | None = None
+    delivery: str | None = Field(default=None, max_length=200)
+    presence: str | None = Field(default=None, max_length=200)
     script_source: Literal["manual", "ai", "draft"] | None = None
     source_draft_id: int | None = None
     environment_asset_id: int | None = None
@@ -63,6 +72,24 @@ class RenderWorkerProgress(BaseModel):
     video_asset_id: int | None = None
     provider_state: dict = Field(default_factory=dict)
     error: str = ""
+
+
+async def _shots_with_clips(db: AsyncSession, shots: list) -> list:
+    attached: list = []
+    cache: dict[int, dict | None] = {}
+    for shot in shots or []:
+        item = dict(shot)
+        clip_id = item.get("clip_asset_id")
+        if not isinstance(clip_id, int):
+            item["clip_asset"] = None
+            attached.append(item)
+            continue
+        if clip_id not in cache:
+            asset = await db.get(CreativeAsset, clip_id)
+            cache[clip_id] = _asset_payload(asset)
+        item["clip_asset"] = cache[clip_id]
+        attached.append(item)
+    return attached
 
 
 def _asset_payload(asset: CreativeAsset | None) -> dict | None:
@@ -91,9 +118,31 @@ def _role_payload(role: DigitalHuman) -> dict:
     }
 
 
+async def _reconcile_render_status(
+    db: AsyncSession, render: TalkingVideoRender
+) -> TalkingVideoRender:
+    if render.status not in {"queued", "running"} or not render.job_id:
+        return render
+    job = await db.get(ContentJob, render.job_id)
+    if job is None or job.status not in {"failed", "cancelled", "succeeded"}:
+        return render
+    if job.status == "succeeded" and render.video_asset_id:
+        return render
+    render.status = "cancelled" if job.status == "cancelled" else "failed"
+    if job.status == "succeeded" and not render.video_asset_id:
+        render.error = render.error or "成片未保存"
+    elif not render.error:
+        render.error = "拼接失败" if job.flow == "digital_human_stitch" else "生成失败"
+    render.completed_at = job.completed_at or now_utc()
+    await db.commit()
+    await db.refresh(render)
+    return render
+
+
 async def _render_payload(
     db: AsyncSession, render: TalkingVideoRender
 ) -> dict:
+    render = await _reconcile_render_status(db, render)
     video_asset = (
         await db.get(CreativeAsset, render.video_asset_id)
         if render.video_asset_id
@@ -130,20 +179,27 @@ async def _project_payload(
         project.environment_asset_id or role.default_environment_asset_id
     )
     environment = await db.get(CreativeAsset, environment_id)
+    min_shot_seconds, max_shot_seconds = effective_comfyui_shot_seconds(
+        await get_config()
+    )
     payload = {
         "id": project.id,
         "title": project.title,
         "digital_human_id": project.digital_human_id,
         "script": project.script,
+        "delivery": project.delivery or "",
+        "presence": getattr(project, "presence", "") or "",
         "script_source": project.script_source,
         "source_draft_id": project.source_draft_id,
         "environment_asset_id": project.environment_asset_id,
         "look_asset_id": project.look_asset_id,
-        "shots": list(project.shots or []),
+        "shots": await _shots_with_clips(db, list(project.shots or [])),
         "effective_environment_asset_id": environment_id,
         "current_render_id": project.current_render_id,
         "role": _role_payload(role),
         "effective_environment": _asset_payload(environment),
+        "min_shot_seconds": min_shot_seconds,
+        "max_shot_seconds": max_shot_seconds,
         "created_at": project.created_at,
         "updated_at": project.updated_at,
     }
@@ -201,6 +257,10 @@ async def post_project(
         raise HTTPException(422, str(exc)) from exc
     project.script = body.script
     project.script_source = body.script_source
+    from digital_human_shots import normalize_delivery
+
+    project.delivery = normalize_delivery(body.delivery)
+    project.presence = normalize_delivery(body.presence)
     await db.commit()
     await db.refresh(project)
     return await _project_payload(db, project, detail=True)
@@ -360,6 +420,13 @@ async def patch_project(
         await archive_digital_human_asset_ids(
             db, {values["environment_asset_id"]}
         )
+    if "delivery" in values or "presence" in values:
+        from digital_human_shots import normalize_delivery
+
+        if "delivery" in values:
+            values["delivery"] = normalize_delivery(values["delivery"])
+        if "presence" in values:
+            values["presence"] = normalize_delivery(values["presence"])
     for key, value in values.items():
         setattr(project, key, value)
     await db.commit()
@@ -441,13 +508,35 @@ class ShotsUpdate(BaseModel):
     shots: list[dict]
 
 
+class ShotsPlan(BaseModel):
+    script: str | None = None
+
+
 class ShotWorkerProgress(BaseModel):
     status: Literal["queued", "running", "succeeded", "failed"]
     clip_asset_id: int | None = None
     error: str = ""
     workflow_version: str = ""
     seed: int | None = None
+    render_prompt: str = ""
     provider_state: dict = Field(default_factory=dict)
+
+
+@router.post("/{project_id}/shots/plan")
+async def post_shot_plan(
+    project_id: int, body: ShotsPlan, db: AsyncSession = Depends(get_db)
+):
+    try:
+        project = await plan_project_shots(db, project_id, body.script)
+    except InvalidTalkingVideo as exc:
+        message = str(exc)
+        code = (
+            status.HTTP_409_CONFLICT
+            if "正在生成" in message or "镜头规划" in message
+            else status.HTTP_422_UNPROCESSABLE_ENTITY
+        )
+        raise HTTPException(code, message) from exc
+    return await _project_payload(db, project, detail=True)
 
 
 @router.put("/{project_id}/shots")
@@ -509,7 +598,11 @@ async def shot_worker_context(
     job_id: int = Header(alias="X-Content-Job-Id"),
     db: AsyncSession = Depends(get_db),
 ):
-    from digital_human_shots import find_shot
+    from digital_human_shots import (
+        find_shot,
+        previous_succeeded_clip_id,
+        shot_requires_previous_clip,
+    )
 
     project = await _get_project(db, project_id)
     role = await db.get(DigitalHuman, project.digital_human_id)
@@ -542,6 +635,11 @@ async def shot_worker_context(
     )
     if picture_1 is None or picture_2 is None or audio_1 is None:
         raise HTTPException(409, "镜头缺少参考图或音色样本")
+    previous_clip = None
+    previous_clip_id = previous_succeeded_clip_id(list(project.shots or []), shot_id)
+    if previous_clip_id:
+        previous_asset = await db.get(CreativeAsset, previous_clip_id)
+        previous_clip = _asset_payload(previous_asset)
     return {
         "project_id": project.id,
         "shot": shot,
@@ -549,6 +647,11 @@ async def shot_worker_context(
         "picture_2": _asset_payload(picture_2),
         "picture_3": _asset_payload(picture_3),
         "audio_1": _asset_payload(audio_1),
+        "previous_clip": previous_clip,
+        "needs_previous_clip": shot_requires_previous_clip(
+            list(project.shots or []),
+            shot_id,
+        ),
         "first_frame": _asset_payload(picture_1),
         "role": _role_payload(role),
     }
@@ -585,6 +688,8 @@ async def shot_worker_progress(
         updates["workflow_version"] = body.workflow_version
     if body.seed is not None:
         updates["seed"] = body.seed
+    if body.render_prompt:
+        updates["render_prompt"] = body.render_prompt
     project.shots = replace_shot(list(project.shots or []), shot_id, updates)
     await db.commit()
     await db.refresh(project)

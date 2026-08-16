@@ -1004,6 +1004,8 @@ class TalkingVideoProject(Base):
     title: Mapped[str] = mapped_column(String(300), default="")
     digital_human_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     script: Mapped[str] = mapped_column(Text, default="")
+    delivery: Mapped[str] = mapped_column(Text, default="")
+    presence: Mapped[str] = mapped_column(Text, default="")
     script_source: Mapped[str] = mapped_column(String(20), default="manual")
     source_draft_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     environment_asset_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)

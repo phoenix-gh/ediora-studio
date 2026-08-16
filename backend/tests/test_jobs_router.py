@@ -241,18 +241,22 @@ def test_worker_reconcile_requires_worker_auth_takes_no_body_and_closes_queue(
     class FakeQueue:
         def __init__(self, *args, **kwargs):
             assert args == ()
-            assert kwargs == {}
-            calls.append("queue-created-from-runtime-settings")
+            self.kwargs = kwargs
+            calls.append(("queue-created", kwargs))
+
+        @property
+        def name(self):
+            return self.kwargs.get("queue_name") or "api-private-content-jobs"
 
         async def __aenter__(self):
-            calls.append("queue-open")
+            calls.append(("queue-open", self.name))
             return self
 
         async def __aexit__(self, *_args):
-            calls.append("queue-closed")
+            calls.append(("queue-closed", self.name))
 
-    async def reconcile(queue):
-        calls.append(queue)
+    async def reconcile(queue, video_queue=None, **_kwargs):
+        calls.append(("reconcile", queue.name, getattr(video_queue, "name", None)))
         return {"enqueued": 2, "job_ids": [7, 8]}
 
     monkeypatch.setattr(jobs_router, "RedisJobQueue", FakeQueue)
@@ -274,11 +278,15 @@ def test_worker_reconcile_requires_worker_auth_takes_no_body_and_closes_queue(
     )
     assert response.status_code == 200
     assert response.json() == {"enqueued": 2, "job_ids": [7, 8]}
-    assert calls[0:2] == [
-        "queue-created-from-runtime-settings",
-        "queue-open",
+    assert calls == [
+        ("queue-created", {}),
+        ("queue-open", "api-private-content-jobs"),
+        ("queue-created", {"queue_name": "content-jobs:video"}),
+        ("queue-open", "content-jobs:video"),
+        ("reconcile", "api-private-content-jobs", "content-jobs:video"),
+        ("queue-closed", "content-jobs:video"),
+        ("queue-closed", "api-private-content-jobs"),
     ]
-    assert calls[-1] == "queue-closed"
     operation = client.app.openapi()["paths"][
         "/api/jobs/worker-reconcile"
     ]["post"]

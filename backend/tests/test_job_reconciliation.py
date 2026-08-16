@@ -230,6 +230,40 @@ def test_superseded_digital_human_jobs_are_cancelled_not_requeued(
     asyncio.run(run())
 
 
+def test_long_video_jobs_are_requeued_onto_the_video_queue(
+    reconciliation_env,
+):
+    from job_reconciliation import reconcile_content_jobs
+
+    async def run():
+        draft_id, _ = await _seed_job(
+            reconciliation_env,
+            flow="draft",
+            status="queued",
+        )
+        video_id, _ = await _seed_job(
+            reconciliation_env,
+            flow="digital_human_shot_render",
+            status="queued",
+        )
+        default_queue = FakeFencedQueue()
+        video_queue = FakeFencedQueue()
+        result = await reconcile_content_jobs(
+            default_queue,
+            video_queue=video_queue,
+            session_factory=reconciliation_env.SessionLocal,
+        )
+
+        assert result == {
+            "enqueued": 2,
+            "job_ids": [draft_id, video_id],
+        }
+        assert default_queue.items == [draft_id]
+        assert video_queue.items == [video_id]
+
+    asyncio.run(run())
+
+
 def test_queued_and_latest_succeeded_are_enqueued_once_across_two_passes(
     reconciliation_env,
 ):

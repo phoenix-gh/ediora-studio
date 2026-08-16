@@ -344,6 +344,236 @@ async def select_render(
     return project
 
 
+_PLAN_LLM_TIMEOUT_SEC = 60
+
+
+def _shot_plan_prompt(
+    script: str,
+    min_seconds: int,
+    max_seconds: int,
+    base_delivery: str = "",
+) -> str:
+    from digital_human_shots import CHARS_PER_SECOND, DEFAULT_DELIVERY, effective_delivery
+
+    max_chars = max(1, max_seconds * CHARS_PER_SECOND)
+    tone = effective_delivery("", base_delivery)
+    return (
+        "你是口播分镜规划器。先根据全文提炼本篇数字人该怎么说、该是什么状态，"
+        "再把全文切成镜头。\n"
+        "所有镜头的 text 按顺序拼接后必须与全文完全一致，"
+        "禁止增删改任何字、标点、空格或换行。\n"
+        "只输出一个 JSON 对象，不要 markdown，不要解释。\n\n"
+        "全文口播在两个标记之间：\n"
+        "<<<SCRIPT\n"
+        f"{script}\n"
+        "SCRIPT>>>\n\n"
+        "delivery：本篇整体说话语气，短英文，必须同时写清情绪和语速，"
+        f"例如 {tone or DEFAULT_DELIVERY}。"
+        "不要只写抽象 mood，不要把参考音频里的情绪或语速抄进来。\n"
+        "presence：本篇整体肢体，短英文，写可见动作："
+        "坐姿、头、手、肩、视线，"
+        "例如 seated upright facing camera, torso still, "
+        "slight head nods, one-hand open-palm beat on key words。\n"
+        "每镜 delivery 只微调情绪或语速，例如 "
+        "slightly brighter hook / slower measured caution / "
+        "warmer softer close。"
+        "相邻镜头不要跳太大。不要为了语气改 text。\n"
+        f"每段尽量不超过 {max_chars} 个非空白字"
+        f"（约 {max_seconds} 秒，按每秒 {CHARS_PER_SECOND} 字）。"
+        f"不要无故短于约 {min_seconds} 秒。"
+        "优先在。！？；…或换行处切开，必要时再用，、。"
+        "framing 只能是 wide、medium、close。\n"
+        "输出格式："
+        '{"delivery":"...","presence":"...","shots":'
+        '[{"text":"...","framing":"medium","delivery":"measured tutorial pace"}]}'
+    )
+
+
+def _piece_voice_prompt(script: str) -> str:
+    from digital_human_shots import DEFAULT_DELIVERY, DEFAULT_PRESENCE
+
+    return (
+        "你是口播语气提炼器。根据全文判断数字人本篇该用什么语气、什么状态说话。\n"
+        "只输出 JSON 对象，不要 markdown，不要镜头列表。\n"
+        '格式：{"delivery":"短英文语气","presence":"短英文状态"}\n'
+        f"delivery 示例：{DEFAULT_DELIVERY}\n"
+        f"presence 示例：{DEFAULT_PRESENCE}\n"
+        "delivery 必须同时写清情绪和语速，例如 warm assured; medium conversational speaking rate。\n"
+        "presence 必须写可见肢体：坐姿、头、手、肩、视线，不要只写 relaxed/natural。\n\n"
+        "全文口播：\n<<<SCRIPT\n"
+        f"{script}\n"
+        "SCRIPT>>>"
+    )
+
+
+async def _extract_piece_voice(script: str) -> tuple[str, str]:
+    import asyncio
+
+    from digital_human_shots import DEFAULT_DELIVERY, DEFAULT_PRESENCE, parse_piece_voice
+    from llm import _call
+
+    try:
+        raw = await asyncio.wait_for(
+            _call(_piece_voice_prompt(script), max_tokens=400),
+            timeout=30,
+        )
+    except Exception:
+        return DEFAULT_DELIVERY, DEFAULT_PRESENCE
+    delivery, presence = parse_piece_voice(raw)
+    return delivery or DEFAULT_DELIVERY, presence or DEFAULT_PRESENCE
+
+
+async def _request_shot_plan_text(
+    script: str,
+    min_seconds: int,
+    max_seconds: int,
+    base_delivery: str = "",
+) -> str:
+    import asyncio
+
+    from llm import _call
+
+    try:
+        return await asyncio.wait_for(
+            _call(
+                _shot_plan_prompt(script, min_seconds, max_seconds, base_delivery),
+                max_tokens=8000,
+            ),
+            timeout=_PLAN_LLM_TIMEOUT_SEC,
+        )
+    except RuntimeError as exc:
+        raise InvalidTalkingVideo("请先在设置里配置大模型") from exc
+    except TimeoutError as exc:
+        raise InvalidTalkingVideo("模型规划超时") from exc
+    except Exception as exc:
+        raise InvalidTalkingVideo(f"模型规划失败：{str(exc)[:200]}") from exc
+
+
+def _shots_from_plan_text(
+    script: str,
+    raw: str,
+    min_seconds: int,
+    max_seconds: int,
+    base_delivery: str = "",
+    presence: str = "",
+) -> tuple[list, str, str]:
+    from digital_human_shots import (
+        apply_planned_segments,
+        fallback_plan_segments,
+        parse_shot_plan_document,
+    )
+
+    try:
+        document = parse_shot_plan_document(raw)
+        extracted_delivery = document["delivery"] or base_delivery
+        extracted_presence = document["presence"] or presence
+        return (
+            apply_planned_segments(
+                script,
+                document["shots"],
+                min_seconds,
+                max_seconds,
+                base_delivery=extracted_delivery,
+                presence=extracted_presence,
+            ),
+            extracted_delivery,
+            extracted_presence,
+        )
+    except InvalidTalkingVideo:
+        return (
+            apply_planned_segments(
+                script,
+                fallback_plan_segments(script, max_seconds),
+                min_seconds,
+                max_seconds,
+                base_delivery=base_delivery,
+                presence=presence,
+            ),
+            base_delivery,
+            presence,
+        )
+
+
+async def plan_project_shots(
+    session: AsyncSession,
+    project_id: int,
+    script: str | None = None,
+) -> TalkingVideoProject:
+    from digital_human_shots import apply_planned_segments, fallback_plan_segments
+
+    project = await session.get(TalkingVideoProject, project_id)
+    if project is None:
+        raise InvalidTalkingVideo("口播作品不存在")
+    role = await session.get(DigitalHuman, project.digital_human_id)
+    if role is None or (role.provider or "heygen") != "comfyui":
+        raise InvalidTalkingVideo("只有 ComfyUI 作品使用镜头规划")
+    if any(
+        shot.get("status") in {"queued", "running"}
+        for shot in list(project.shots or [])
+    ):
+        raise InvalidTalkingVideo("还有镜头正在生成，请稍后再规划")
+    source = project.script if script is None else script
+    if not str(source or "").strip():
+        raise InvalidTalkingVideo("请先填写全文口播")
+    from digital_human_shots import normalize_delivery
+
+    base_delivery = normalize_delivery(getattr(project, "delivery", ""))
+    base_presence = normalize_delivery(getattr(project, "presence", ""))
+    min_seconds, max_seconds = effective_comfyui_shot_seconds(await get_config())
+    await session.rollback()
+
+    extracted_delivery, extracted_presence = await _extract_piece_voice(source)
+    if not extracted_delivery:
+        extracted_delivery = base_delivery
+    if not extracted_presence:
+        extracted_presence = base_presence
+    try:
+        raw = await _request_shot_plan_text(
+            source, min_seconds, max_seconds, extracted_delivery
+        )
+        shots, plan_delivery, plan_presence = _shots_from_plan_text(
+            source,
+            raw,
+            min_seconds,
+            max_seconds,
+            extracted_delivery,
+            extracted_presence,
+        )
+        extracted_delivery = plan_delivery or extracted_delivery
+        extracted_presence = plan_presence or extracted_presence
+    except InvalidTalkingVideo:
+        shots = apply_planned_segments(
+            source,
+            fallback_plan_segments(source, max_seconds),
+            min_seconds,
+            max_seconds,
+            base_delivery=extracted_delivery,
+            presence=extracted_presence,
+        )
+
+    project = await session.scalar(
+        select(TalkingVideoProject)
+        .where(TalkingVideoProject.id == project_id)
+        .with_for_update()
+    )
+    if project is None:
+        raise InvalidTalkingVideo("口播作品不存在")
+    if any(
+        shot.get("status") in {"queued", "running"}
+        for shot in list(project.shots or [])
+    ):
+        raise InvalidTalkingVideo("还有镜头正在生成，请稍后再规划")
+    project.shots = shots
+    project.script = source
+    from digital_human_shots import DEFAULT_DELIVERY, DEFAULT_PRESENCE
+
+    project.delivery = extracted_delivery or DEFAULT_DELIVERY
+    project.presence = extracted_presence or DEFAULT_PRESENCE
+    await session.commit()
+    await session.refresh(project)
+    return project
+
+
 async def save_project_shots(
     session: AsyncSession,
     project_id: int,
@@ -374,7 +604,12 @@ async def enqueue_shot_render(
     project_id: int,
     shot_id: str,
 ) -> tuple[dict, ContentJob]:
-    from digital_human_shots import find_shot, replace_shot
+    from digital_human_shots import (
+        find_shot,
+        previous_succeeded_clip_id,
+        replace_shot,
+        shot_requires_previous_clip,
+    )
 
     if not effective_comfyui_base_url(await get_config()):
         raise InvalidTalkingVideo("请先配置 ComfyUI 地址")
@@ -392,9 +627,15 @@ async def enqueue_shot_render(
         raise InvalidTalkingVideo("请先完成定妆图合成")
     if not role.voice_sample_asset_id:
         raise InvalidTalkingVideo("请先为数字人上传 2–15 秒声音样本")
-    shot = find_shot(list(project.shots or []), shot_id)
-    if shot["status"] == "running":
+    shots = list(project.shots or [])
+    shot = find_shot(shots, shot_id)
+    if shot["status"] in {"queued", "running"}:
         raise InvalidTalkingVideo("该镜头正在生成")
+    if (
+        shot_requires_previous_clip(shots, shot_id)
+        and previous_succeeded_clip_id(shots, shot_id) is None
+    ):
+        raise InvalidTalkingVideo("上一镜成片不存在，先生成上一镜再继续")
     job = await create_job(
         session,
         flow="digital_human_shot_render",
@@ -402,10 +643,18 @@ async def enqueue_shot_render(
         input_data={"project_id": project.id, "shot_id": shot_id},
         commit=False,
     )
+    state = dict(shot.get("provider_state") or {})
+    state.pop("prompt_id", None)
     project.shots = replace_shot(
         list(project.shots or []),
         shot_id,
-        {"status": "queued", "job_id": job.id, "error": ""},
+        {
+            "status": "queued",
+            "job_id": job.id,
+            "error": "",
+            "seed": None,
+            "provider_state": state,
+        },
     )
     await session.commit()
     await session.refresh(project)
@@ -419,13 +668,30 @@ async def enqueue_pending_shot_renders(
     project = await session.get(TalkingVideoProject, project_id)
     if project is None:
         raise InvalidTalkingVideo("口播作品不存在")
+    from digital_human_shots import (
+        previous_succeeded_clip_id,
+        shot_requires_previous_clip,
+    )
+
     jobs: list[ContentJob] = []
-    for shot in list(project.shots or []):
-        if shot.get("status") in {"draft", "failed"}:
-            _, job = await enqueue_shot_render(
-                session, project_id, str(shot["id"])
-            )
-            jobs.append(job)
+    shots = list(project.shots or [])
+    for shot in shots:
+        shot_id = str(shot["id"])
+        if shot.get("status") not in {"draft", "failed"}:
+            continue
+        if (
+            shot_requires_previous_clip(shots, shot_id)
+            and previous_succeeded_clip_id(shots, shot_id) is None
+        ):
+            continue
+        _, job = await enqueue_shot_render(
+            session, project_id, shot_id
+        )
+        jobs.append(job)
+        for item in shots:
+            if str(item.get("id")) == shot_id:
+                item["status"] = "queued"
+                break
     return jobs
 
 

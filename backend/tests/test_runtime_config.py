@@ -4,6 +4,7 @@ import importlib
 def test_runtime_settings_default_to_self_hosted_services(monkeypatch):
     monkeypatch.delenv("WMS_REDIS_URL", raising=False)
     monkeypatch.delenv("WMS_WORKER_QUEUE", raising=False)
+    monkeypatch.delenv("WMS_VIDEO_WORKER_QUEUE", raising=False)
     monkeypatch.delenv("WMS_LOCAL_ASR_URL", raising=False)
     monkeypatch.delenv("WMS_LOCAL_ASR_MODEL", raising=False)
     monkeypatch.delenv("WMS_LOCAL_ASR_DEVICE", raising=False)
@@ -15,6 +16,7 @@ def test_runtime_settings_default_to_self_hosted_services(monkeypatch):
 
     assert settings.redis_url == "redis://redis:6379/0"
     assert settings.worker_queue == "content-jobs"
+    assert settings.video_worker_queue == "content-jobs:video"
     assert settings.local_asr_url == "http://127.0.0.1:8001/v1"
     assert settings.local_asr_model == (
         "Systran/faster-whisper-large-v3"

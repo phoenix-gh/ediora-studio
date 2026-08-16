@@ -18,7 +18,7 @@ Open `http://localhost:3000`. The API health endpoint is
 ## Services
 
 - `web`: Next.js UI, Jobs page, and Vercel AI SDK orchestration.
-- `worker`: Node worker that consumes content jobs and calls the configured LLM.
+- `worker`: Node worker that consumes content jobs and calls the configured LLM. Long video jobs (`digital_human_shot_render`, `digital_human_stitch`, `digital_human_render`, `text_video_render`) go to `WMS_VIDEO_WORKER_QUEUE` (`content-jobs:video` by default) so they do not block drafts, daily creation, or image jobs. The same worker process listens to both queues.
 - `api`: Python collection, publishing, assets, and durable job-state service.
 - `postgres`: persistent business and job data.
 - `redis`: work-queue transport only; job state remains in Postgres.

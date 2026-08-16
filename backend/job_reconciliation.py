@@ -26,7 +26,7 @@ from content_jobs import (
     succeed_locked_step,
 )
 from database import SessionLocal
-from job_queue import RedisJobQueue
+from job_queue import RedisJobQueue, is_long_video_flow
 from log_redaction import redact_secret_text
 from models import (
     ContentJob,
@@ -638,26 +638,35 @@ async def _reconcile_one(
     return True
 
 
+def _queue_for_flow(queue: Any, video_queue: Any | None, flow: str) -> Any:
+    if video_queue is not None and is_long_video_flow(flow):
+        return video_queue
+    return queue
+
+
 async def reconcile_content_jobs(
     queue: Any,
     *,
+    video_queue: Any | None = None,
     session_factory: async_sessionmaker = SessionLocal,
     lease_ttl_ms: int = DEFAULT_RECONCILIATION_LEASE_TTL_MS,
 ) -> dict:
     """Run one independent reconciliation pass for the configured queue."""
     async with session_factory() as db:
-        job_ids = list(
-            await db.scalars(
-                select(ContentJob.id)
-                .where(ContentJob.status.in_(RECONCILABLE_STATUSES))
-                .order_by(ContentJob.id),
-            ),
+        jobs = list(
+            (
+                await db.execute(
+                    select(ContentJob.id, ContentJob.flow)
+                    .where(ContentJob.status.in_(RECONCILABLE_STATUSES))
+                    .order_by(ContentJob.id),
+                )
+            ).all(),
         )
         await db.rollback()
     enqueued: list[int] = []
-    for job_id in job_ids:
+    for job_id, flow in jobs:
         if await _reconcile_one(
-            queue,
+            _queue_for_flow(queue, video_queue, flow),
             session_factory,
             job_id,
             lease_ttl_ms=lease_ttl_ms,
@@ -673,11 +682,24 @@ class JobReconciler:
         self,
         *,
         queue: RedisJobQueue | None = None,
+        video_queue: RedisJobQueue | None = None,
         session_factory: async_sessionmaker = SessionLocal,
         interval_seconds: float | None = None,
         lease_ttl_ms: int = DEFAULT_RECONCILIATION_LEASE_TTL_MS,
     ) -> None:
+        from runtime_config import get_runtime_settings
+
+        settings = get_runtime_settings()
         self._queue = queue or RedisJobQueue()
+        if video_queue is not None:
+            self._video_queue = video_queue
+        elif self._queue.name == settings.video_worker_queue:
+            self._video_queue = self._queue
+        else:
+            self._video_queue = RedisJobQueue(
+                queue_name=settings.video_worker_queue,
+            )
+        self._owns_video_queue = self._video_queue is not self._queue
         self._session_factory = session_factory
         self._interval_seconds = (
             interval_seconds
@@ -692,6 +714,7 @@ class JobReconciler:
     async def run_once(self) -> dict:
         return await reconcile_content_jobs(
             self._queue,
+            video_queue=self._video_queue,
             session_factory=self._session_factory,
             lease_ttl_ms=self._lease_ttl_ms,
         )
@@ -713,4 +736,6 @@ class JobReconciler:
         if self._closed:
             return
         self._closed = True
+        if self._owns_video_queue:
+            await self._video_queue.close()
         await self._queue.close()

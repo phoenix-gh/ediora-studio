@@ -58,6 +58,8 @@ it('collapses assistant tool activity and hides audit-only messages', () => {
   expect(source).toContain('return `已检索本地资料，并阅读 ${reads} 条相关内容`')
   expect(source).toContain("if (message.role === 'tool') {\n    return null\n  }")
   expect(source).toContain('<ToolActivityGroup parts={toolParts} onApproval=')
+  expect(source).toContain('function GeneratedImagePreview({ urls }: { urls: string[] })')
+  expect(source).toContain('<GeneratedImagePreview urls={imageUrls} />')
   expect(source).toContain('function ImageJobPreview({ jobId }: { jobId: number })')
   expect(source).toContain('<ImageJobPreview key={jobId} jobId={jobId} />')
   expect(source).toContain("import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'")

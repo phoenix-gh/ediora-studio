@@ -193,6 +193,73 @@ describe('content worker dispatch', () => {
       .toBe(runDailyCreationAgentJob)
   })
 
+  it('routes long video flows onto the dedicated video queue', async () => {
+    const { isLongVideoFlow, workerQueueForFlow } = await import('./content-worker')
+
+    expect(isLongVideoFlow('digital_human_shot_render')).toBe(true)
+    expect(isLongVideoFlow('digital_human_stitch')).toBe(true)
+    expect(isLongVideoFlow('digital_human_render')).toBe(true)
+    expect(isLongVideoFlow('text_video_render')).toBe(true)
+    expect(isLongVideoFlow('daily_creation')).toBe(false)
+    expect(workerQueueForFlow('digital_human_shot_render', {
+      defaultQueue: 'content-jobs',
+      videoQueue: 'content-jobs:video',
+    })).toBe('content-jobs:video')
+    expect(workerQueueForFlow('daily_creation', {
+      defaultQueue: 'content-jobs',
+      videoQueue: 'content-jobs:video',
+    })).toBe('content-jobs')
+  })
+
+  it('requeues a long video job from the default worker without running it', async () => {
+    const controller = new AbortController()
+    const redis = new FakeRedis([
+      ['content-jobs', '88'],
+      stopOnNextPop(controller),
+    ])
+    const runner = vi.fn()
+    const { runContentWorker } = await import('./content-worker')
+
+    await runContentWorker({
+      redis,
+      queueName: 'content-jobs',
+      videoQueueName: 'content-jobs:video',
+      defaultQueueName: 'content-jobs',
+      signal: controller.signal,
+      reconcile: vi.fn().mockResolvedValue({}),
+      getJob: vi.fn().mockResolvedValue(durableJob(88, 'digital_human_shot_render')),
+      resolveRunner: () => runner,
+    })
+
+    expect(runner).not.toHaveBeenCalled()
+    expect(redis.state.events).toContain('enqueue:content-jobs:video:88')
+    expect(redis.state.leases.size).toBe(0)
+  })
+
+  it('runs a long video job when the video worker owns it', async () => {
+    const controller = new AbortController()
+    const redis = new FakeRedis([
+      ['content-jobs:video', '89'],
+      stopOnNextPop(controller),
+    ])
+    const runner = vi.fn()
+    const { runContentWorker } = await import('./content-worker')
+
+    await runContentWorker({
+      redis,
+      queueName: 'content-jobs:video',
+      videoQueueName: 'content-jobs:video',
+      defaultQueueName: 'content-jobs',
+      signal: controller.signal,
+      reconcile: vi.fn().mockResolvedValue({}),
+      getJob: vi.fn().mockResolvedValue(durableJob(89, 'digital_human_shot_render')),
+      resolveRunner: () => runner,
+    })
+
+    expect(runner).toHaveBeenCalledWith(89)
+    expect(redis.state.events.filter(event => event.startsWith('enqueue:'))).toEqual([])
+  })
+
   it('dispatches a loaded daily job without a runtime version dependency', async () => {
     const controller = new AbortController()
     const redis = new FakeRedis([

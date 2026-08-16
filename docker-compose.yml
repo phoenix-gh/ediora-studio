@@ -57,6 +57,7 @@ services:
       WMS_DATABASE_URL: postgresql+asyncpg://wemedia:${POSTGRES_PASSWORD:-wemedia}@postgres:5432/wemedia
       WMS_REDIS_URL: redis://redis:6379/0
       WMS_WORKER_QUEUE: ${WMS_WORKER_QUEUE:-content-jobs}
+      WMS_VIDEO_WORKER_QUEUE: ${WMS_VIDEO_WORKER_QUEUE:-content-jobs:video}
       WMS_DISABLE_SCHEDULER: "0"
       FEEDGRAB_DATA_DIR: /app/sessions
       HEYGEN_API_KEY: ${HEYGEN_API_KEY:-}
@@ -105,6 +106,7 @@ services:
     environment:
       WMS_REDIS_URL: redis://redis:6379/0
       WMS_WORKER_QUEUE: ${WMS_WORKER_QUEUE:-content-jobs}
+      WMS_VIDEO_WORKER_QUEUE: ${WMS_VIDEO_WORKER_QUEUE:-content-jobs:video}
       WMS_API_URL: http://api:8000/api
       WMS_LLM_API_KEY: ${WMS_LLM_API_KEY:-}
       WMS_LLM_MODEL: ${WMS_LLM_MODEL:-gpt-4o-mini}

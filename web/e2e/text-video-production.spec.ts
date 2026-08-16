@@ -344,6 +344,7 @@ class TextVideoHarness {
       WMS_UPLOADS_DIR: this.uploadsRoot,
       WMS_REDIS_URL: this.redisUrl,
       WMS_WORKER_QUEUE: this.queueName,
+      WMS_VIDEO_WORKER_QUEUE: this.queueName,
       WMS_API_URL: this.apiBase,
       NEXT_PUBLIC_API_URL: this.apiBase,
       WMS_PLAYWRIGHT_BASE_URL: this.webOrigin,

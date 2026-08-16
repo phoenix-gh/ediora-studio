@@ -3,6 +3,8 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
+import { resolveWorkerAssetUrl } from './digital-human-shot-job'
+import { buildHardCutFilter, safeTrimLeadingTrailingSilence } from '../media/clip-join'
 import {
   apiBase,
   apiGet,
@@ -46,9 +48,6 @@ export type StitchJobDeps = {
   concat(files: string[], output: string): Promise<void>
 }
 
-const AUDIO_FADE_SECONDS = 0.12
-
-
 function latestStep(job: DurableJob, key: string) {
   return job.steps
     .filter(step => step.key === key)
@@ -80,15 +79,8 @@ async function runStep<T extends Record<string, unknown>>(
 }
 
 
-export function buildAcrossfadeFilter(count: number, fade = AUDIO_FADE_SECONDS) {
-  const video = Array.from({ length: count }, (_, index) => `[${index}:v]`).join('')
-    + `concat=n=${count}:v=1:a=0[v]`
-  if (count === 1) return { video: '[0:v]copy[v]', audio: '[0:a]acopy[a]' }
-  let audio = `[0:a][1:a]acrossfade=d=${fade}[a1]`
-  for (let index = 2; index < count; index += 1) {
-    audio += `;[a${index - 1}][${index}:a]acrossfade=d=${fade}[a${index}]`
-  }
-  return { video, audio: `${audio};[a${count - 1}]acopy[a]` }
+export function buildAcrossfadeFilter(count: number) {
+  return { video: buildHardCutFilter(count), audio: '' }
 }
 
 
@@ -97,12 +89,11 @@ export async function concatWithFfmpeg(files: string[], output: string) {
     await runFfmpeg(['-y', '-i', files[0], '-c', 'copy', output])
     return
   }
-  const filter = buildAcrossfadeFilter(files.length)
   await runFfmpeg([
     '-y',
     ...files.flatMap(file => ['-i', file]),
     '-filter_complex',
-    `${filter.video};${filter.audio}`,
+    buildHardCutFilter(files.length),
     '-map', '[v]',
     '-map', '[a]',
     '-c:v', 'libx264',
@@ -142,7 +133,7 @@ const defaultApi: StitchApi = {
     workerHeaders(jobId),
   ),
   async fetchLocalAsset(url, fallback) {
-    const response = await fetch(url.startsWith('http') ? url : `${apiBase()}${url}`, {
+    const response = await fetch(resolveWorkerAssetUrl(url), {
       headers: workerHeaders(),
     })
     if (!response.ok) throw new Error(`无法读取镜头成片 (${response.status})`)
@@ -170,41 +161,56 @@ export async function runDigitalHumanStitchJob(
   const deps = providedDeps ?? { api: defaultApi, concat: concatWithFfmpeg }
   const job = await deps.api.getJob(jobId)
   const renderId = Number(job.input.render_id)
-  const context = await deps.api.getRenderContext(renderId, jobId)
-  if (!context.clips?.length) throw new Error('成片没有可拼接的镜头')
-  await deps.api.updateRender(renderId, { status: 'running' }, jobId)
-  const result = await runStep(jobId, 'concat_shots', deps, async () => {
-    if (context.video_asset_id) return { video_asset_id: context.video_asset_id }
-    const directory = await mkdtemp(join(tmpdir(), 'wms-stitch-'))
-    try {
-      const files: string[] = []
-      for (const [index, clip] of context.clips.entries()) {
-        const downloaded = await deps.api.fetchLocalAsset(clip.url, clip)
-        const file = join(directory, `${index}.mp4`)
-        await writeFile(file, downloaded.bytes)
-        files.push(file)
+  try {
+    const context = await deps.api.getRenderContext(renderId, jobId)
+    if (!context.clips?.length) throw new Error('成片没有可拼接的镜头')
+    await deps.api.updateRender(renderId, { status: 'running' }, jobId)
+    const result = await runStep(jobId, 'concat_shots', deps, async () => {
+      if (context.video_asset_id) return { video_asset_id: context.video_asset_id }
+      const directory = await mkdtemp(join(tmpdir(), 'wms-stitch-'))
+      try {
+        const files: string[] = []
+        for (const [index, clip] of context.clips.entries()) {
+          const downloaded = await deps.api.fetchLocalAsset(clip.url, clip)
+          const trimmed = await safeTrimLeadingTrailingSilence(downloaded.bytes)
+          const file = join(directory, `${index}.mp4`)
+          await writeFile(file, trimmed)
+          files.push(file)
+        }
+        const output = join(directory, 'out.mp4')
+        await deps.concat(files, output)
+        const { readFile } = await import('node:fs/promises')
+        const bytes = await readFile(output)
+        const asset = await deps.api.saveVideoAsset(
+          jobId,
+          `talking-video-${renderId}.mp4`,
+          new Uint8Array(bytes),
+        )
+        return { video_asset_id: asset.id }
+      } finally {
+        await rm(directory, { recursive: true, force: true })
       }
-      const output = join(directory, 'out.mp4')
-      await deps.concat(files, output)
-      const { readFile } = await import('node:fs/promises')
-      const bytes = await readFile(output)
-      const asset = await deps.api.saveVideoAsset(
-        jobId,
-        `talking-video-${renderId}.mp4`,
-        new Uint8Array(bytes),
-      )
-      return { video_asset_id: asset.id }
-    } finally {
-      await rm(directory, { recursive: true, force: true })
+    })
+    await runStep(jobId, 'save_talking_video', deps, async () => {
+      await deps.api.updateRender(renderId, {
+        status: 'succeeded',
+        video_asset_id: result.video_asset_id,
+        error: '',
+      }, jobId)
+      return result
+    })
+    await deps.api.completeJob(jobId)
+  } catch (error) {
+    if (Number.isSafeInteger(renderId) && renderId > 0) {
+      try {
+        await deps.api.updateRender(renderId, {
+          status: 'failed',
+          error: error instanceof Error ? error.message : String(error),
+        }, jobId)
+      } catch {
+        // Preserve the original stitch failure if status update fails.
+      }
     }
-  })
-  await runStep(jobId, 'save_talking_video', deps, async () => {
-    await deps.api.updateRender(renderId, {
-      status: 'succeeded',
-      video_asset_id: result.video_asset_id,
-      error: '',
-    }, jobId)
-    return result
-  })
-  await deps.api.completeJob(jobId)
+    throw error
+  }
 }

@@ -8,6 +8,34 @@ from typing import Any
 from runtime_config import get_runtime_settings
 
 
+LONG_VIDEO_FLOWS = frozenset({
+    "digital_human_shot_render",
+    "digital_human_stitch",
+    "digital_human_render",
+    "text_video_render",
+})
+
+
+def is_long_video_flow(flow: str) -> bool:
+    return flow in LONG_VIDEO_FLOWS
+
+
+def queue_name_for_flow(flow: str) -> str:
+    settings = get_runtime_settings()
+    if is_long_video_flow(flow):
+        return settings.video_worker_queue
+    return settings.worker_queue
+
+
+async def lookup_job_flow(job_id: int) -> str:
+    from database import SessionLocal
+    from models import ContentJob
+
+    async with SessionLocal() as session:
+        job = await session.get(ContentJob, job_id)
+        return job.flow if job is not None else ""
+
+
 ENQUEUE_ONCE_SCRIPT = """
 local existing = redis.call('LPOS', KEYS[1], ARGV[1])
 if existing then
@@ -68,6 +96,10 @@ class RedisJobQueue:
             )
         self._client = client
         self._queue = queue_name or settings.worker_queue
+
+    @property
+    def name(self) -> str:
+        return self._queue
 
     async def enqueue(self, job_id: int) -> None:
         await self.enqueue_once(job_id)
@@ -204,6 +236,7 @@ class RedisJobQueue:
         await self.close()
 
 
-async def enqueue_job(job_id: int) -> None:
-    async with RedisJobQueue() as queue:
+async def enqueue_job(job_id: int, *, flow: str | None = None) -> None:
+    resolved = flow if flow is not None else await lookup_job_flow(job_id)
+    async with RedisJobQueue(queue_name=queue_name_for_flow(resolved)) as queue:
         await queue.enqueue_once(job_id)

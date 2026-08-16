@@ -4,6 +4,8 @@ import {
   createTalkingVideoRender,
   generateTalkingScript,
   listDigitalHumans,
+  planTalkingVideoShots,
+  renderPendingTalkingVideoShots,
 } from './digital-humans'
 
 
@@ -62,6 +64,30 @@ describe('digital-human API', () => {
         method: 'POST',
         body: JSON.stringify({ mode: 'generate', topic: 'AI 工作流' }),
       }),
+    )
+  })
+
+  it('plans shots and enqueues pending clips through the talking-video API', async () => {
+    vi.stubGlobal('fetch', fetchMock)
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ id: 5, shots: [] }))
+      .mockResolvedValueOnce(jsonResponse({ id: 5, shots: [] }, 201))
+
+    await planTalkingVideoShots(5, '今天讲本地部署。')
+    await renderPendingTalkingVideoShots(5)
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      expect.stringContaining('/talking-videos/5/shots/plan'),
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ script: '今天讲本地部署。' }),
+      }),
+    )
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      expect.stringContaining('/talking-videos/5/shots/render-pending'),
+      expect.objectContaining({ method: 'POST' }),
     )
   })
 })

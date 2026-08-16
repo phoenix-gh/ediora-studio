@@ -496,6 +496,13 @@ async def migrate_digital_human_comfyui_schema(conn) -> None:
     })
 
 
+async def migrate_talking_video_delivery_schema(conn) -> None:
+    await _add_columns(conn, "talking_video_projects", {
+        "delivery": "TEXT NOT NULL DEFAULT ''",
+        "presence": "TEXT NOT NULL DEFAULT ''",
+    })
+
+
 async def migrate_text_video_speech_asset_schema(conn) -> None:
     """Add sample-accurate metadata to speech assets created before this release."""
     await _add_columns(conn, "text_video_speech_assets", {
@@ -1217,6 +1224,7 @@ async def init_db():
         await migrate_text_video_project_schema(conn)
         await migrate_text_video_speech_asset_schema(conn)
         await migrate_digital_human_comfyui_schema(conn)
+        await migrate_talking_video_delivery_schema(conn)
         await _add_columns(conn, "chat_messages", {
             "skill_run": "JSON",
         })

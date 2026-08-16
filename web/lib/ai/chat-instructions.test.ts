@@ -7,6 +7,10 @@ describe('buildChatInstructions', () => {
     expect(buildChatInstructions()).toContain('Do not claim that a sensitive action has succeeded before the user approves it and the tool reports success.')
   })
 
+  it('tells the assistant to use generateImage for drawing requests', () => {
+    expect(buildChatInstructions()).toContain('generateImage')
+  })
+
   it('explains metadata-only automatic Skill activation without preloading instructions', () => {
     const instructions = buildChatInstructions('Enabled Skills available for automatic activation:\n- Alpha: Writes alpha copy')
 

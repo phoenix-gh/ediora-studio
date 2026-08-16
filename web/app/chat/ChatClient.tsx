@@ -32,7 +32,7 @@ import { cn } from '@/lib/utils'
 import { chatComposerColumn, chatConversationColumn } from './chat-layout'
 import { shouldSubmitChatComposerKey } from './chat-composer'
 import { titleFromFirstMessage } from './chat-title'
-import { isChatToolPart } from './chat-tool-parts'
+import { chatToolName, generatedImageUrls, isChatToolPart, legacyImageJobId } from './chat-tool-parts'
 
 type DisplayMessage = Omit<ChatMessage, 'id'> & { id: string | number }
 
@@ -48,36 +48,52 @@ type ToolEventPart = ChatPart & {
 const toolLabels: Record<string, string> = {
   searchInformationSources: '检索信息源',
   readInformationSource: '读取信息源',
+  generateImage: '生成图片',
 }
 
 function displayTime(value: string) {
   return new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit' }).format(new Date(value))
 }
 
-function toolName(part: ToolEventPart) {
-  if (typeof part.toolName === 'string') return part.toolName
-  return part.type.startsWith('tool-') ? part.type.slice('tool-'.length) : '工具调用'
-}
-
 function activitySummary(parts: ToolEventPart[]) {
-  const searches = parts.filter(part => toolName(part) === 'searchInformationSources').length
-  const reads = parts.filter(part => toolName(part) === 'readInformationSource').length
+  const searches = parts.filter(part => chatToolName(part) === 'searchInformationSources').length
+  const reads = parts.filter(part => chatToolName(part) === 'readInformationSource').length
+  const images = parts.filter(part => chatToolName(part) === 'generateImage').length
   if (searches && reads) return `已检索本地资料，并阅读 ${reads} 条相关内容`
   if (searches) return '已检索本地资料'
   if (reads) return `已阅读 ${reads} 条资料`
+  if (images) return `已生成 ${images} 张图片`
   return `已调用 ${parts.length} 项工具`
 }
 
-function imageJobId(part: ToolEventPart) {
-  if (toolName(part) !== 'generateImage' || !part.output || typeof part.output !== 'object') return null
-  const jobId = (part.output as { jobId?: unknown }).jobId
-  return typeof jobId === 'number' ? jobId : null
+function GeneratedImagePreview({ urls }: { urls: string[] }) {
+  const [selectedImage, setSelectedImage] = useState<string | null>(null)
+  if (urls.length === 0) return null
+  return <>
+    <div className="mt-3 grid gap-2 sm:grid-cols-2">
+      {urls.map(url => <button type="button" onClick={() => setSelectedImage(url)} key={url} className="block overflow-hidden rounded-lg border border-indigo-100 bg-surface text-left dark:border-indigo-900">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={url} alt="AI 生成图片" className="aspect-video w-full object-cover" />
+      </button>)}
+    </div>
+    <Dialog open={selectedImage !== null} onOpenChange={open => !open && setSelectedImage(null)}>
+      <DialogContent className="max-w-5xl p-3">
+        <DialogHeader className="sr-only">
+          <DialogTitle>AI 生成图片预览</DialogTitle>
+          <DialogDescription>点击遮罩或关闭按钮返回聊天。</DialogDescription>
+        </DialogHeader>
+        {selectedImage && <>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={selectedImage} alt="AI 生成图片预览" className="max-h-[80vh] w-full object-contain" />
+        </>}
+      </DialogContent>
+    </Dialog>
+  </>
 }
 
 function ImageJobPreview({ jobId }: { jobId: number }) {
   const [status, setStatus] = useState<JobStatus | 'loading'>('loading')
   const [urls, setUrls] = useState<string[]>([])
-  const [selectedImage, setSelectedImage] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -102,32 +118,16 @@ function ImageJobPreview({ jobId }: { jobId: number }) {
     }
   }, [jobId])
 
-  return <>
-    {urls.length > 0 ? <div className="mt-3 grid gap-2 sm:grid-cols-2">
-      {urls.map(url => <button type="button" onClick={() => setSelectedImage(url)} key={url} className="block overflow-hidden rounded-lg border border-indigo-100 bg-surface text-left dark:border-indigo-900">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={url} alt="AI 生成图片" className="aspect-video w-full object-cover" />
-      </button>)}
-    </div> : status === 'failed' || status === 'cancelled'
-      ? <p className="mt-2 text-xs text-red-600">图片生成失败</p>
-      : <p className="mt-2 text-xs text-indigo-600">图片生成中…</p>}
-    <Dialog open={selectedImage !== null} onOpenChange={open => !open && setSelectedImage(null)}>
-      <DialogContent className="max-w-5xl p-3">
-        <DialogHeader className="sr-only">
-          <DialogTitle>AI 生成图片预览</DialogTitle>
-          <DialogDescription>点击遮罩或关闭按钮返回聊天。</DialogDescription>
-        </DialogHeader>
-        {selectedImage && <>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={selectedImage} alt="AI 生成图片预览" className="max-h-[80vh] w-full object-contain" />
-        </>}
-      </DialogContent>
-    </Dialog>
-  </>
+  if (urls.length > 0) return <GeneratedImagePreview urls={urls} />
+  if (status === 'failed' || status === 'cancelled') {
+    return <p className="mt-2 text-xs text-red-600">图片生成失败</p>
+  }
+  return <p className="mt-2 text-xs text-indigo-600">图片生成中…</p>
 }
 
 function ToolActivityGroup({ parts, onApproval }: { parts: ToolEventPart[]; onApproval?: (toolCallId: string, approvalId: string, approved: boolean) => void }) {
-  const imageJobIds = [...new Set(parts.map(imageJobId).filter((jobId): jobId is number => jobId !== null))]
+  const imageUrls = [...new Set(parts.flatMap(generatedImageUrls))]
+  const imageJobIds = [...new Set(parts.map(legacyImageJobId).filter((jobId): jobId is number => jobId !== null))]
   const hasPendingApproval = parts.some(part => part.state === 'approval-requested' && part.toolCallId && part.approval?.id)
   return (
     <div>
@@ -139,13 +139,15 @@ function ToolActivityGroup({ parts, onApproval }: { parts: ToolEventPart[]; onAp
         </summary>
         <ul className="mt-2 space-y-1 text-indigo-700 dark:text-indigo-200">
           {parts.map((part, index) => {
-            const label = toolLabels[toolName(part)] ?? toolName(part)
+            const name = chatToolName(part)
+            const label = toolLabels[name] ?? name
             const pending = part.state === 'approval-requested' && part.toolCallId && part.approval?.id
             const status = pending ? '等待你确认' : part.state === 'running' ? '进行中' : part.state === 'approval-responded' ? (part.approval?.approved ? '已批准' : '已拒绝') : '已完成'
             return <li key={part.toolCallId ?? `${part.type}-${index}`} className="flex flex-wrap items-center justify-between gap-3"><span>{label}</span>{pending && onApproval ? <span className="flex items-center gap-1"><Button type="button" size="xs" onClick={() => onApproval(part.toolCallId!, part.approval!.id!, true)}>批准</Button><Button type="button" size="xs" variant="outline" onClick={() => onApproval(part.toolCallId!, part.approval!.id!, false)}>拒绝</Button></span> : <span className="text-indigo-500">{status}</span>}</li>
           })}
         </ul>
       </details>
+      {imageUrls.length > 0 ? <GeneratedImagePreview urls={imageUrls} /> : null}
       {imageJobIds.map(jobId => <ImageJobPreview key={jobId} jobId={jobId} />)}
     </div>
   )
@@ -446,7 +448,7 @@ export function ChatClient() {
               <div className="rounded-2xl border border-dashed border-border bg-surface px-6 py-10 text-center">
                 <Bot className="mx-auto h-8 w-8 text-indigo-500" />
                 <h3 className="mt-3 font-medium text-foreground">从本地信息源开始研究</h3>
-                <p className="mx-auto mt-1 max-w-md text-sm leading-6 text-muted-foreground">例如：“有哪些适合 AI 编程主题的写作方案？” 我会在需要时调用只读搜索工具。</p>
+                <p className="mx-auto mt-1 max-w-md text-sm leading-6 text-muted-foreground">例如：“有哪些适合 AI 编程主题的写作方案？” 或 “帮我画一张封面”。需要时会检索资料或生成图片。</p>
               </div>
             )}
             {messages.map(message => <MessageBubble key={String(message.id)} message={message} onApproval={respondToApproval} />)}

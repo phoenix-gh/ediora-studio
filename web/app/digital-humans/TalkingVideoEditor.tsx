@@ -1,7 +1,16 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Image, Loader2, Play, Sparkles, UserRound } from 'lucide-react'
+import {
+  ChevronDown,
+  ChevronUp,
+  Image,
+  Loader2,
+  Play,
+  Sparkles,
+  Trash2,
+  UserRound,
+} from 'lucide-react'
 import { toast } from 'sonner'
 
 import { Badge } from '@/components/ui/badge'
@@ -34,11 +43,21 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { Input } from '@/components/ui/input'
+import { NativeSelect } from '@/components/ui/native-select'
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import { creativeAssetUrl, type CreativeAsset } from '@/lib/api/assets'
 import {
   createTalkingVideoRender,
   getTalkingVideo,
+  planTalkingVideoShots,
+  renderPendingTalkingVideoShots,
   renderTalkingVideoShot,
   saveTalkingVideoShots,
   stitchTalkingVideo,
@@ -49,9 +68,64 @@ import {
   type TalkingVideoUpdate,
 } from '@/lib/api/digital-humans'
 
+import {
+  buildShotPrompt,
+  DEFAULT_DELIVERY,
+  DEFAULT_PRESENCE,
+  estimateShotSeconds,
+} from '@/lib/comfyui/workflow'
+
 import { EnvironmentPickerDialog } from './EnvironmentPickerDialog'
 import { RenderVersionsPanel } from './RenderVersionsPanel'
 import { ScriptAssistantDialog } from './ScriptAssistantDialog'
+
+
+function previousShotHasClip(shots: TalkingVideoShot[], shot: TalkingVideoShot) {
+  const index = shots.findIndex(item => item.id === shot.id)
+  if (index <= 0) return false
+  return shots.slice(0, index).some(item => (
+    item.status === 'succeeded' && Boolean(item.clip_asset_id || item.clip_asset)
+  ))
+}
+
+
+function displayShotPrompt(
+  shot: TalkingVideoShot,
+  baseDelivery = '',
+  presence = '',
+  shots: TalkingVideoShot[] = [],
+) {
+  return shot.render_prompt?.trim()
+    ? shot.render_prompt
+    : buildShotPrompt({
+        framing: shot.framing,
+        spokenText: shot.spoken_text,
+        motionPrompt: shot.motion_prompt,
+        delivery: shot.delivery,
+        baseDelivery,
+        presence,
+        hasFirstFrameReference: previousShotHasClip(shots, shot),
+      })
+}
+
+function lastSubmittedPrompt(shot: TalkingVideoShot) {
+  const value = shot.provider_state?.submitted_prompt
+  return typeof value === 'string' ? value : ''
+}
+
+const SHOT_STATUS_LABEL: Record<TalkingVideoShot['status'], string> = {
+  draft: '草稿',
+  queued: '排队',
+  running: '生成中',
+  succeeded: '完成',
+  failed: '失败',
+}
+
+const FRAMING_LABEL = {
+  wide: '远景',
+  medium: '中景',
+  close: '近景',
+} as const
 
 
 export function TalkingVideoEditor({
@@ -66,6 +140,8 @@ export function TalkingVideoEditor({
   saveProject?: typeof updateTalkingVideo
 }) {
   const [script, setScript] = useState(project.script)
+  const [delivery, setDelivery] = useState(project.delivery ?? '')
+  const [presence, setPresence] = useState(project.presence ?? '')
   const [shots, setShots] = useState<TalkingVideoShot[]>(project.shots ?? [])
   const [activeShotId, setActiveShotId] = useState(project.shots?.[0]?.id ?? '')
   const [roleId, setRoleId] = useState(project.digital_human_id)
@@ -79,9 +155,17 @@ export function TalkingVideoEditor({
   const [assistantOpen, setAssistantOpen] = useState(false)
   const [environmentOpen, setEnvironmentOpen] = useState(false)
   const [confirmRender, setConfirmRender] = useState(false)
+  const [confirmRegenShot, setConfirmRegenShot] = useState(false)
   const [rendering, setRendering] = useState(false)
+  const [planning, setPlanning] = useState(false)
+  const [enqueueing, setEnqueueing] = useState(false)
+  const [workbench, setWorkbench] = useState<'script' | 'shots'>('script')
+  const [shotPane, setShotPane] = useState<'spoken' | 'prompt'>('spoken')
+  const [previewPane, setPreviewPane] = useState<'shot' | 'final'>('shot')
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pendingSave = useRef<TalkingVideoUpdate | null>(null)
+  const shotSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const pendingShotSave = useRef<TalkingVideoShot[] | null>(null)
   const saveProjectRef = useRef(saveProject)
   const onProjectChangeRef = useRef(onProjectChange)
 
@@ -98,9 +182,17 @@ export function TalkingVideoEditor({
     : missingComfyVoice
       ? '还缺 2–15 秒声音样本，请先到角色里补上'
       : '形象和声音已就绪'
-  const hasActiveRender = project.renders.some(
+  const hasActiveShot = shots.some(
+    shot => shot.status === 'queued' || shot.status === 'running',
+  )
+  const hasActiveStitch = project.renders.some(
     render => render.status === 'queued' || render.status === 'running',
-  ) || shots.some(shot => shot.status === 'queued' || shot.status === 'running')
+  )
+  const hasActiveRender = hasActiveShot || hasActiveStitch
+
+  useEffect(() => {
+    setShots(project.shots ?? [])
+  }, [project.shots])
 
   useEffect(() => {
     if (!hasActiveRender) return
@@ -115,10 +207,19 @@ export function TalkingVideoEditor({
     const body = pendingSave.current
     pendingSave.current = null
     saveTimer.current = null
-    if (!body) return
-    void saveProjectRef.current(project.id, body)
-      .then(updated => onProjectChangeRef.current?.(updated))
-      .catch(() => toast.error('作品自动保存失败'))
+    if (body) {
+      void saveProjectRef.current(project.id, body)
+        .then(updated => onProjectChangeRef.current?.(updated))
+        .catch(() => toast.error('作品自动保存失败'))
+    }
+    if (shotSaveTimer.current !== null) clearTimeout(shotSaveTimer.current)
+    const queuedShots = pendingShotSave.current
+    pendingShotSave.current = null
+    shotSaveTimer.current = null
+    if (queuedShots) {
+      void saveTalkingVideoShots(project.id, queuedShots)
+        .catch(() => toast.error('镜头保存失败'))
+    }
   }, [project.id])
 
   function scheduleSave(update: TalkingVideoUpdate) {
@@ -143,9 +244,15 @@ export function TalkingVideoEditor({
     saveTimer.current = null
     const body = pendingSave.current
     pendingSave.current = null
-    if (!body) return
-    const updated = await saveProject(project.id, body)
-    onProjectChange?.(updated)
+    if (body) {
+      const updated = await saveProject(project.id, body)
+      onProjectChange?.(updated)
+    }
+    if (shotSaveTimer.current !== null) clearTimeout(shotSaveTimer.current)
+    shotSaveTimer.current = null
+    const nextShots = pendingShotSave.current
+    pendingShotSave.current = null
+    if (nextShots) await persistShots(nextShots)
   }
 
   function changeRole(value: string | null) {
@@ -173,7 +280,15 @@ export function TalkingVideoEditor({
     && !isComfy
   const allShotsReady = shots.length > 0
     && shots.every(shot => shot.status === 'succeeded' && shot.clip_asset_id)
+  const pendingShots = shots.filter(
+    shot => shot.status === 'draft' || shot.status === 'failed',
+  )
+  const minShotSeconds = project.min_shot_seconds ?? 4
+  const maxShotSeconds = project.max_shot_seconds ?? 5
   const activeShot = shots.find(shot => shot.id === activeShotId) ?? shots[0] ?? null
+  const previewClip = isComfy && previewPane !== 'final'
+    ? activeShot?.clip_asset ?? null
+    : currentRender?.video_asset ?? null
 
   async function persistShots(next: TalkingVideoShot[]) {
     setShots(next)
@@ -183,15 +298,88 @@ export function TalkingVideoEditor({
     return updated
   }
 
+  function patchShot(shotId: string, patch: Partial<TalkingVideoShot>) {
+    setShots(current => {
+      const next = current.map(item => (
+        item.id === shotId
+          ? { ...item, ...patch, status: 'draft' as const }
+          : item
+      ))
+      pendingShotSave.current = next
+      if (shotSaveTimer.current !== null) clearTimeout(shotSaveTimer.current)
+      shotSaveTimer.current = setTimeout(() => {
+        const body = pendingShotSave.current
+        pendingShotSave.current = null
+        shotSaveTimer.current = null
+        if (!body) return
+        void persistShots(body).catch(() => toast.error('镜头保存失败'))
+      }, 400)
+      return next
+    })
+  }
+
+  async function handlePlanShots() {
+    setPlanning(true)
+    const toastId = toast.loading('正在规划分镜，请稍候…')
+    try {
+      await flushSave()
+      const updated = await planTalkingVideoShots(project.id, script)
+      setShots(updated.shots)
+      setActiveShotId(updated.shots[0]?.id ?? '')
+      setDelivery(updated.delivery ?? '')
+      setPresence(updated.presence ?? '')
+      setWorkbench('shots')
+      setShotPane('spoken')
+      onProjectChange?.(updated)
+      toast.success(`已按全文重新规划 ${updated.shots.length} 个镜头`, { id: toastId })
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '分镜规划失败', { id: toastId })
+    } finally {
+      setPlanning(false)
+    }
+  }
+
+  async function handleEnqueuePending() {
+    setEnqueueing(true)
+    try {
+      await flushSave()
+      const updated = await renderPendingTalkingVideoShots(project.id)
+      setShots(updated.shots)
+      onProjectChange?.(updated)
+      toast.success('未完成镜头已全部入队')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '入队失败')
+    } finally {
+      setEnqueueing(false)
+    }
+  }
+
+  const thisShotBusy = activeShot?.status === 'queued' || activeShot?.status === 'running'
+  const canGenerateThisShot = Boolean(activeShot)
+    && !thisShotBusy
+    && !missingComfyVoice
+    && role?.status === 'ready'
+  const thisShotHasClip = Boolean(activeShot?.clip_asset_id || activeShot?.clip_asset)
+
   async function handleRenderShot(shotId: string) {
     try {
       await flushSave()
       const updated = await renderTalkingVideoShot(project.id, shotId)
       setShots(updated.shots)
       onProjectChange?.(updated)
+      setConfirmRegenShot(false)
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '镜头生成失败')
     }
+  }
+
+  function requestGenerateThisShot() {
+    if (!activeShot) return
+    if (thisShotHasClip) {
+      setConfirmRegenShot(true)
+      return
+    }
+    void handleRenderShot(activeShot.id)
   }
 
   async function handleStitch() {
@@ -200,6 +388,7 @@ export function TalkingVideoEditor({
       await stitchTalkingVideo(project.id)
       const updated = await getTalkingVideo(project.id)
       setShots(updated.shots)
+      setPreviewPane('final')
       onProjectChange?.(updated)
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '拼接失败')
@@ -223,10 +412,10 @@ export function TalkingVideoEditor({
 
   return (
     <>
-      <div className="grid min-w-0 gap-4 min-[1360px]:grid-cols-[200px_minmax(320px,1fr)_280px]">
+      <div className="grid h-full min-h-0 min-w-0 gap-4 overflow-hidden min-[1360px]:grid-cols-[200px_minmax(320px,1fr)_280px]">
         <aside
           data-testid="talking-config-column"
-          className="flex flex-col gap-4"
+          className="flex min-h-0 flex-col gap-4 overflow-y-auto"
         >
           <Card>
             <CardHeader>
@@ -280,6 +469,44 @@ export function TalkingVideoEditor({
                     {environment ? '替换环境图' : '选择环境图'}
                   </Button>
                 </Field>
+                {isComfy ? (
+                  <Field>
+                    <FieldLabel htmlFor="talking-delivery">整片语气</FieldLabel>
+                    <Textarea
+                      id="talking-delivery"
+                      value={delivery}
+                      onChange={event => {
+                        const value = event.target.value
+                        setDelivery(value)
+                        scheduleSave({ delivery: value })
+                      }}
+                      placeholder={DEFAULT_DELIVERY}
+                      className="min-h-20 resize-none text-sm leading-6"
+                    />
+                    <FieldDescription>
+                      写清情绪和语速。规划分镜时会按整稿提炼。参考音频只借音色，不抄它的情绪或快慢。
+                    </FieldDescription>
+                  </Field>
+                ) : null}
+                {isComfy ? (
+                  <Field>
+                    <FieldLabel htmlFor="talking-presence">整片状态</FieldLabel>
+                    <Textarea
+                      id="talking-presence"
+                      value={presence}
+                      onChange={event => {
+                        const value = event.target.value
+                        setPresence(value)
+                        scheduleSave({ presence: value })
+                      }}
+                      placeholder={DEFAULT_PRESENCE}
+                      className="min-h-20 resize-none text-sm leading-6"
+                    />
+                    <FieldDescription>
+                      写可见肢体：坐姿、头、手、肩、视线。规划时一并提炼。
+                    </FieldDescription>
+                  </Field>
+                ) : null}
               </FieldGroup>
             </CardContent>
           </Card>
@@ -287,79 +514,329 @@ export function TalkingVideoEditor({
 
         <main
           data-testid="talking-script-column"
-          className="flex min-h-[68vh] flex-col"
+          className="flex min-h-0 min-w-0 flex-col overflow-hidden"
         >
-          <Card className="min-h-0 flex-1">
-            <CardHeader>
-              <CardTitle>{isComfy ? '镜头列表' : '脚本编辑器'}</CardTitle>
+          <Card className="flex min-h-0 flex-1 flex-col overflow-hidden">
+            <CardHeader className="shrink-0">
+              <CardTitle>{isComfy ? '口播工作台' : '脚本编辑器'}</CardTitle>
               <CardDescription>
                 {isComfy
-                  ? '按镜编辑口播句和时长，单镜不超过本机上限。'
+                  ? '整稿、分镜和提示词分开改。规划会整表替换，已生成片段一并作废。'
                   : '自动保存到当前口播作品，不进入独立脚本库。'}
               </CardDescription>
             </CardHeader>
-            <CardContent className="flex min-h-0 flex-1 flex-col gap-3">
+            <CardContent className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden">
               {isComfy ? (
-                <div className="flex flex-col gap-3">
-                  {shots.map((shot, index) => (
-                    <button
-                      key={shot.id}
-                      type="button"
-                      data-testid={`talking-shot-${shot.id}`}
-                      className="rounded-lg border p-3 text-left"
-                      onClick={() => setActiveShotId(shot.id)}
-                    >
-                      <div className="mb-2 text-xs text-muted-foreground">
-                        镜 {index + 1} · {shot.duration_sec}s · {shot.framing} · {shot.status}
-                      </div>
-                      {shot.status === 'failed' && shot.error ? (
-                        <p className="mb-2 text-xs text-destructive">{shot.error}</p>
-                      ) : null}
+                <Tabs
+                  value={workbench}
+                  onValueChange={value => setWorkbench(value as 'script' | 'shots')}
+                  className="flex min-h-0 flex-1 flex-col overflow-hidden"
+                >
+                  <div className="flex shrink-0 flex-wrap items-center justify-between gap-2">
+                    <TabsList>
+                      <TabsTrigger value="script">整稿</TabsTrigger>
+                      <TabsTrigger value="shots">
+                        分镜{shots.length ? ` ${shots.length}` : ''}
+                      </TabsTrigger>
+                    </TabsList>
+                    <span className="text-xs text-muted-foreground">
+                      {script.length} 字 · 单镜 {minShotSeconds}–{maxShotSeconds} 秒
+                    </span>
+                  </div>
+                  <TabsContent value="script" className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden">
+                    <Field className="flex min-h-0 flex-1 flex-col">
+                      <FieldLabel htmlFor="talking-full-script">全文口播</FieldLabel>
                       <Textarea
-                        aria-label={`镜头 ${index + 1} 口播句`}
-                        value={shot.spoken_text}
+                        id="talking-full-script"
+                        value={script}
                         onChange={event => {
-                          const next = shots.map(item => (
-                            item.id === shot.id
-                              ? { ...item, spoken_text: event.target.value, status: 'draft' as const }
-                              : item
-                          ))
-                          setShots(next)
-                          void persistShots(next).catch(() => toast.error('镜头保存失败'))
+                          const value = event.target.value
+                          setScript(value)
+                          setScriptSource('manual')
+                          scheduleSave({
+                            script: value,
+                            script_source: 'manual',
+                            source_draft_id: null,
+                          })
                         }}
+                        placeholder="粘贴或输入整段口播，再规划分镜……"
+                        className="min-h-0 flex-1 resize-none overflow-y-auto text-base leading-7"
                       />
-                    </button>
-                  ))}
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      const next = [
-                        ...shots,
-                        {
-                          id: crypto.randomUUID(),
-                          duration_sec: 5,
-                          framing: 'medium' as const,
-                          spoken_text: '',
-                          motion_prompt: '',
-                          first_frame_asset_id: null,
-                          clip_asset_id: null,
-                          status: 'draft' as const,
-                          job_id: null,
-                          error: '',
-                          workflow_version: '',
-                          seed: null,
-                          provider_state: {},
-                        },
-                      ]
-                      void persistShots(next).catch(() => toast.error('镜头保存失败'))
-                    }}
-                  >
-                    添加镜头
-                  </Button>
-                </div>
+                    </Field>
+                    <Button
+                      disabled={planning || !script.trim() || hasActiveShot}
+                      onClick={() => void handlePlanShots()}
+                    >
+                      {planning
+                        ? <Loader2 data-icon="inline-start" className="animate-spin" />
+                        : <Sparkles data-icon="inline-start" />}
+                      {planning ? '规划中…' : 'AI 规划分镜'}
+                    </Button>
+                  </TabsContent>
+                  <TabsContent value="shots" className="min-h-0 flex-1 overflow-hidden">
+                    <div className="grid h-full min-h-0 gap-3 overflow-hidden lg:grid-cols-[220px_minmax(0,1fr)]">
+                      <div className="flex min-h-0 flex-col gap-2">
+                        <div className="min-h-0 flex-1 space-y-1 overflow-y-auto pr-1">
+                          {shots.map((shot, index) => {
+                            const active = shot.id === (activeShot?.id ?? '')
+                            return (
+                              <button
+                                key={shot.id}
+                                type="button"
+                                data-testid={`talking-shot-${shot.id}`}
+                                className={`w-full rounded-lg border px-2.5 py-2 text-left ${
+                                  active ? 'border-foreground/40 bg-accent' : 'hover:bg-muted/60'
+                                }`}
+                                onClick={() => setActiveShotId(shot.id)}
+                              >
+                                <div className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
+                                  <span>镜 {index + 1} · {shot.duration_sec}s · {FRAMING_LABEL[shot.framing]}</span>
+                                  <span>{shot.clip_asset ? '可试看' : SHOT_STATUS_LABEL[shot.status]}</span>
+                                </div>
+                                <p className="mt-1 line-clamp-2 text-sm leading-5">
+                                  {shot.spoken_text.trim() || '（空口播）'}
+                                </p>
+                              </button>
+                            )
+                          })}
+                        </div>
+                        <Button
+                          variant="outline"
+                          onClick={() => {
+                            const created = {
+                              id: crypto.randomUUID(),
+                              duration_sec: maxShotSeconds,
+                              framing: 'medium' as const,
+                              spoken_text: '',
+                              motion_prompt: '',
+                              delivery: '',
+                              render_prompt: '',
+                              first_frame_asset_id: null,
+                              clip_asset_id: null,
+                              status: 'draft' as const,
+                              job_id: null,
+                              error: '',
+                              workflow_version: '',
+                              seed: null,
+                              provider_state: {},
+                            }
+                            const next = [...shots, created]
+                            setActiveShotId(created.id)
+                            void persistShots(next).catch(() => toast.error('镜头保存失败'))
+                          }}
+                        >
+                          添加镜头
+                        </Button>
+                      </div>
+                      {activeShot ? (
+                        <div className="flex min-h-0 flex-col gap-3 overflow-hidden">
+                          {activeShot.status === 'failed' && activeShot.error ? (
+                            <p className="text-xs text-destructive">{activeShot.error}</p>
+                          ) : null}
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Field className="w-24">
+                              <FieldLabel htmlFor="talking-shot-duration">时长</FieldLabel>
+                              <NativeSelect
+                                id="talking-shot-duration"
+                                aria-label={`镜头 ${shots.indexOf(activeShot) + 1} 时长`}
+                                value={activeShot.duration_sec}
+                                onChange={event => {
+                                  patchShot(activeShot.id, {
+                                    duration_sec: Number(event.target.value),
+                                  })
+                                }}
+                              >
+                                {Array.from(
+                                  { length: maxShotSeconds - minShotSeconds + 1 },
+                                  (_, index) => minShotSeconds + index,
+                                ).map(seconds => (
+                                  <option key={seconds} value={seconds}>{seconds} 秒</option>
+                                ))}
+                              </NativeSelect>
+                            </Field>
+                            <Field className="w-28">
+                              <FieldLabel htmlFor="talking-shot-framing">景别</FieldLabel>
+                              <NativeSelect
+                                id="talking-shot-framing"
+                                aria-label={`镜头 ${shots.indexOf(activeShot) + 1} 景别`}
+                                value={activeShot.framing}
+                                onChange={event => {
+                                  patchShot(activeShot.id, {
+                                    framing: event.target.value as TalkingVideoShot['framing'],
+                                    render_prompt: '',
+                                  })
+                                }}
+                              >
+                                <option value="wide">远景</option>
+                                <option value="medium">中景</option>
+                                <option value="close">近景</option>
+                              </NativeSelect>
+                            </Field>
+                            <div className="ml-auto flex gap-1">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                disabled={shots[0]?.id === activeShot.id}
+                                onClick={() => {
+                                  const index = shots.findIndex(item => item.id === activeShot.id)
+                                  if (index <= 0) return
+                                  const next = [...shots]
+                                  ;[next[index - 1], next[index]] = [next[index], next[index - 1]]
+                                  void persistShots(next).catch(() => toast.error('镜头保存失败'))
+                                }}
+                              >
+                                <ChevronUp />
+                                上移
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                disabled={shots[shots.length - 1]?.id === activeShot.id}
+                                onClick={() => {
+                                  const index = shots.findIndex(item => item.id === activeShot.id)
+                                  if (index < 0 || index >= shots.length - 1) return
+                                  const next = [...shots]
+                                  ;[next[index], next[index + 1]] = [next[index + 1], next[index]]
+                                  void persistShots(next).catch(() => toast.error('镜头保存失败'))
+                                }}
+                              >
+                                <ChevronDown />
+                                下移
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                disabled={shots.length <= 1}
+                                onClick={() => {
+                                  const next = shots.filter(item => item.id !== activeShot.id)
+                                  setActiveShotId(next[0]?.id ?? '')
+                                  void persistShots(next).catch(() => toast.error('镜头保存失败'))
+                                }}
+                              >
+                                <Trash2 />
+                                删除
+                              </Button>
+                            </div>
+                          </div>
+                          <Tabs
+                            value={shotPane}
+                            onValueChange={value => setShotPane(value as 'spoken' | 'prompt')}
+                            className="flex min-h-0 flex-1 flex-col overflow-hidden"
+                          >
+                            <TabsList>
+                              <TabsTrigger value="spoken">本镜口播</TabsTrigger>
+                              <TabsTrigger value="prompt">提示词</TabsTrigger>
+                            </TabsList>
+                            <TabsContent value="spoken" className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden">
+                              <Field className="flex min-h-0 flex-1 flex-col">
+                                <FieldLabel htmlFor={`talking-shot-spoken-${activeShot.id}`}>
+                                  口播句
+                                </FieldLabel>
+                                <Textarea
+                                  id={`talking-shot-spoken-${activeShot.id}`}
+                                  aria-label={`镜头 ${shots.indexOf(activeShot) + 1} 口播句`}
+                                  value={activeShot.spoken_text}
+                                  onChange={event => {
+                                    patchShot(activeShot.id, {
+                                      spoken_text: event.target.value,
+                                      duration_sec: estimateShotSeconds(
+                                        event.target.value,
+                                        minShotSeconds,
+                                        maxShotSeconds,
+                                      ),
+                                    })
+                                  }}
+                                  className="min-h-0 flex-1 resize-none overflow-y-auto text-base leading-7"
+                                />
+                              </Field>
+                              <Field>
+                                <FieldLabel htmlFor={`talking-shot-delivery-${activeShot.id}`}>
+                                  本镜语气
+                                </FieldLabel>
+                                <Input
+                                  id={`talking-shot-delivery-${activeShot.id}`}
+                                  aria-label={`镜头 ${shots.indexOf(activeShot) + 1} 语气`}
+                                  value={activeShot.delivery ?? ''}
+                                  onChange={event => {
+                                    patchShot(activeShot.id, {
+                                      delivery: event.target.value,
+                                      render_prompt: '',
+                                    })
+                                  }}
+                                  placeholder={delivery.trim() || DEFAULT_DELIVERY}
+                                />
+                              </Field>
+                            </TabsContent>
+                            <TabsContent value="prompt" className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden">
+                              <Field className="flex min-h-0 flex-1 flex-col">
+                                <FieldLabel htmlFor={`talking-shot-prompt-${activeShot.id}`}>
+                                  H3 提示词
+                                </FieldLabel>
+                                <Textarea
+                                  id={`talking-shot-prompt-${activeShot.id}`}
+                                  aria-label={`镜头 ${shots.indexOf(activeShot) + 1} 提示词`}
+                                  value={displayShotPrompt(activeShot, delivery, presence, shots)}
+                                  onChange={event => {
+                                    patchShot(activeShot.id, { render_prompt: event.target.value })
+                                  }}
+                                  className="min-h-0 flex-1 resize-none overflow-y-auto font-mono text-xs leading-5"
+                                />
+                              </Field>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  onClick={() => {
+                                    patchShot(activeShot.id, {
+                                      duration_sec: estimateShotSeconds(
+                                        activeShot.spoken_text,
+                                        minShotSeconds,
+                                        maxShotSeconds,
+                                      ),
+                                      render_prompt: buildShotPrompt({
+                                        framing: activeShot.framing,
+                                        spokenText: activeShot.spoken_text,
+                                        motionPrompt: activeShot.motion_prompt,
+                                        delivery: activeShot.delivery,
+                                        baseDelivery: delivery,
+                                        presence,
+                                        hasFirstFrameReference: previousShotHasClip(shots, activeShot),
+                                      }),
+                                    })
+                                  }}
+                                >
+                                  按口播重填提示词
+                                </Button>
+                                {activeShot.seed != null ? (
+                                  <span className="text-xs text-muted-foreground">
+                                    seed {activeShot.seed}
+                                  </span>
+                                ) : null}
+                              </div>
+                              {lastSubmittedPrompt(activeShot)
+                                && lastSubmittedPrompt(activeShot) !== displayShotPrompt(activeShot, delivery, presence, shots)
+                                ? (
+                                  <details className="rounded-md bg-muted/50 p-2 text-xs">
+                                    <summary className="cursor-pointer text-muted-foreground">
+                                      上次提交的提示词
+                                    </summary>
+                                    <pre className="mt-2 whitespace-pre-wrap font-mono leading-5">
+                                      {lastSubmittedPrompt(activeShot)}
+                                    </pre>
+                                  </details>
+                                ) : null}
+                            </TabsContent>
+                          </Tabs>
+                        </div>
+                      ) : (
+                        <p className="text-sm text-muted-foreground">先添加或选择一个镜头。</p>
+                      )}
+                    </div>
+                  </TabsContent>
+                </Tabs>
               ) : (
                 <>
-                  <Field className="min-h-0 flex-1">
+                  <Field className="flex min-h-0 flex-1 flex-col">
                     <FieldLabel htmlFor="talking-script">口播脚本</FieldLabel>
                     <Textarea
                       id="talking-script"
@@ -375,7 +852,7 @@ export function TalkingVideoEditor({
                         })
                       }}
                       placeholder="在这里输入最终口播内容……"
-                      className="min-h-96 flex-1 resize-none text-base leading-7"
+                      className="min-h-0 flex-1 resize-none overflow-y-auto text-base leading-7"
                     />
                   </Field>
                   <div className="flex items-center justify-between gap-3">
@@ -397,24 +874,49 @@ export function TalkingVideoEditor({
 
         <aside
           data-testid="talking-render-column"
-          className="flex flex-col gap-4"
+          className="flex min-h-0 flex-col gap-4 overflow-y-auto"
         >
           <Card>
             <CardHeader>
-              <CardTitle>成片预览</CardTitle>
-              <CardDescription>16:9 · MP4 · 无字幕与配乐</CardDescription>
+              <CardTitle>{isComfy && previewPane !== 'final' ? '本镜预览' : '成片预览'}</CardTitle>
+              <CardDescription>
+                {isComfy && previewPane !== 'final'
+                  ? activeShot
+                    ? `镜 ${shots.indexOf(activeShot) + 1} · ${SHOT_STATUS_LABEL[activeShot.status]}`
+                    : '选中镜头后在这里试看'
+                  : currentRender
+                    ? `版本 ${currentRender.version} · 16:9 · MP4`
+                    : '16:9 · MP4 · 无字幕与配乐'}
+              </CardDescription>
             </CardHeader>
             <CardContent className="flex flex-col gap-3">
-              {currentRender?.video_asset ? (
+              {isComfy ? (
+                <Tabs
+                  value={previewPane}
+                  onValueChange={value => setPreviewPane(value as 'shot' | 'final')}
+                >
+                  <TabsList>
+                    <TabsTrigger value="shot">本镜</TabsTrigger>
+                    <TabsTrigger value="final">成片</TabsTrigger>
+                  </TabsList>
+                </Tabs>
+              ) : null}
+              {previewClip ? (
                 <video
-                  src={creativeAssetUrl(currentRender.video_asset.url)}
+                  key={previewClip.url}
+                  src={creativeAssetUrl(previewClip.url)}
                   controls
                   preload="metadata"
+                  aria-label={isComfy && previewPane !== 'final' ? '本镜预览' : '成片预览'}
                   className="aspect-video w-full rounded-lg bg-muted"
                 />
               ) : (
-                <div className="flex aspect-video items-center justify-center rounded-lg bg-muted text-muted-foreground">
-                  <UserRound />
+                <div className="flex aspect-video items-center justify-center rounded-lg bg-muted px-3 text-center text-sm text-muted-foreground">
+                  {isComfy && previewPane !== 'final'
+                    ? '这一镜还没有成片，生成后可在这里试看'
+                    : isComfy
+                      ? '还没有成片，各镜都完成后点「生成成片」'
+                      : <UserRound />}
                 </div>
               )}
               {hasActiveRender ? (
@@ -425,14 +927,30 @@ export function TalkingVideoEditor({
               {isComfy ? (
                 <>
                   <Button
-                    disabled={!activeShot || hasActiveRender || missingComfyVoice || role?.status !== 'ready'}
-                    onClick={() => activeShot && void handleRenderShot(activeShot.id)}
+                    disabled={!canGenerateThisShot}
+                    onClick={() => requestGenerateThisShot()}
                   >
                     <Play data-icon="inline-start" />
-                    生成这一镜
+                    {thisShotHasClip ? '重新生成这一镜' : '生成这一镜'}
                   </Button>
                   <Button
-                    disabled={!allShotsReady || hasActiveRender}
+                    variant="outline"
+                    disabled={
+                      enqueueing
+                      || pendingShots.length === 0
+                      || hasActiveShot
+                      || missingComfyVoice
+                      || role?.status !== 'ready'
+                    }
+                    onClick={() => void handleEnqueuePending()}
+                  >
+                    {enqueueing
+                      ? <Loader2 data-icon="inline-start" />
+                      : <Play data-icon="inline-start" />}
+                    全部入队生成
+                  </Button>
+                  <Button
+                    disabled={!allShotsReady || hasActiveStitch}
                     onClick={() => void handleStitch()}
                   >
                     生成成片
@@ -494,6 +1012,26 @@ export function TalkingVideoEditor({
           })
         }}
       />
+      <Dialog
+        open={confirmRegenShot}
+        onOpenChange={value => !value && setConfirmRegenShot(false)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>重新生成这一镜？</DialogTitle>
+            <DialogDescription>
+              这一镜已有成片。确认后会按当前口播和提示词重跑，工作台上的预览会被新结果替换。
+            </DialogDescription>
+          </DialogHeader>
+          <Button
+            disabled={!activeShot || thisShotBusy}
+            onClick={() => activeShot && void handleRenderShot(activeShot.id)}
+          >
+            <Play data-icon="inline-start" />
+            确认重新生成
+          </Button>
+        </DialogContent>
+      </Dialog>
       <Dialog
         open={confirmRender}
         onOpenChange={value => !value && setConfirmRender(false)}

@@ -59,8 +59,19 @@ class JobEventRequest(BaseModel):
     dependencies=[Depends(require_worker_token)],
 )
 async def post_worker_reconcile():
+    from runtime_config import get_runtime_settings
+
+    settings = get_runtime_settings()
     async with RedisJobQueue() as queue:
-        return await reconcile_content_jobs(queue)
+        if queue.name == settings.video_worker_queue:
+            return await reconcile_content_jobs(queue, video_queue=queue)
+        async with RedisJobQueue(
+            queue_name=settings.video_worker_queue,
+        ) as video_queue:
+            return await reconcile_content_jobs(
+                queue,
+                video_queue=video_queue,
+            )
 
 
 def _step_payload(step: ContentJobStep) -> dict:
