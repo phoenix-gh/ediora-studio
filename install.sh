@@ -63,7 +63,7 @@ parse_args() {
 }
 
 require_bootstrap_commands() {
-  for command_name in awk basename chmod cp curl dirname grep head id install mkdir mktemp od rm sed sleep stty tr uname wc; do
+  for command_name in awk basename chmod cp curl dirname grep head id install mkdir mktemp mv od rm sed sleep stty tr uname wc; do
     command -v "$command_name" >/dev/null 2>&1 || die "缺少系统命令: $command_name"
   done
 }
@@ -349,6 +349,33 @@ append_env_value() {
   chmod 600 "$ENV_FILE"
 }
 
+env_has_key() {
+  key=$1
+  awk -v target="$key" 'index($0, target "=") == 1 { found = 1 } END { exit found ? 0 : 1 }' "$ENV_FILE"
+}
+
+replace_env_value() {
+  key=$1
+  value=$2
+  encoded_value=$(dotenv_value "$value")
+  temp_env=$(mktemp "$ENV_FILE.XXXXXX")
+  if ! awk -v target="$key" -v replacement="$encoded_value" '
+    index($0, target "=") == 1 && replaced == 0 {
+      print target "=" replacement
+      replaced = 1
+      next
+    }
+    { print }
+    END { if (!replaced) exit 1 }
+  ' "$ENV_FILE" > "$temp_env"; then
+    rm -f "$temp_env"
+    die "无法更新 $key"
+  fi
+  chmod 600 "$temp_env"
+  mv "$temp_env" "$ENV_FILE"
+  chmod 600 "$ENV_FILE"
+}
+
 ensure_value() {
   key=$1
   label=$2
@@ -366,6 +393,37 @@ ensure_value() {
   append_env_value "$key" "$answer"
 }
 
+ensure_derived_value() {
+  key=$1
+  default_value=$2
+  current=$(env_value "$key")
+  if [ -z "$current" ]; then
+    if env_has_key "$key"; then
+      replace_env_value "$key" "$default_value"
+    else
+      append_env_value "$key" "$default_value"
+    fi
+    return 0
+  fi
+
+  case "$key" in
+    NEXT_PUBLIC_API_URL)
+      case "$current" in
+        http://localhost:8000/api|http://127.0.0.1:8000/api)
+          replace_env_value "$key" "$default_value"
+          ;;
+      esac
+      ;;
+    CORS_ORIGINS)
+      case "$current" in
+        http://localhost:3000|http://localhost:3000,http://127.0.0.1:3000|http://127.0.0.1:3000,http://localhost:3000)
+          replace_env_value "$key" "$default_value"
+          ;;
+      esac
+      ;;
+  esac
+}
+
 ensure_fixed_value() {
   append_env_value "$1" "$2"
 }
@@ -380,8 +438,10 @@ collect_env() {
   ensure_value X_SESSION_KEY 'X 会话加密密钥' "$(random_fernet_key)" 1
   ensure_value API_PORT 'API 主机端口' '8000' 0
   ensure_value WEB_PORT 'Web 主机端口' '3000' 0
-  ensure_value NEXT_PUBLIC_API_URL '浏览器访问的 API URL' 'http://localhost:8000/api' 0
-  ensure_value CORS_ORIGINS '允许的浏览器来源' 'http://localhost:3000' 0
+  api_port=$(env_value API_PORT)
+  web_port=$(env_value WEB_PORT)
+  ensure_derived_value NEXT_PUBLIC_API_URL "http://localhost:${api_port}/api"
+  ensure_derived_value CORS_ORIGINS "http://127.0.0.1:${web_port},http://localhost:${web_port}"
   ensure_value APP_IMAGE '应用镜像' 'ghcr.io/phoenix-gh/ediora-studio' 0
   ensure_value IMAGE_TAG '镜像标签' 'latest' 0
   ensure_fixed_value WORKER_QUEUE 'content-jobs'

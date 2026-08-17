@@ -381,6 +381,50 @@ test_existing_env_values_are_preserved_and_missing_values_appended() {
   assert_contains "$CASE_DIR/.env" 'APP_IMAGE=ghcr.io/phoenix-gh/ediora-studio' 'missing APP_IMAGE must be appended'
 }
 
+test_browser_settings_are_derived_from_host_ports_without_prompts() {
+  local output="$CASE_DIR/output.log"
+  touch "$EDIORA_DOCKER_STATE"
+  write_valid_env
+  sed -i '/^NEXT_PUBLIC_API_URL=/d; /^CORS_ORIGINS=/d' "$CASE_DIR/.env"
+  make_blank_input "$CASE_DIR/input"
+  if ! run_installer "$output"; then
+    cat "$output" >&2
+    return 1
+  fi
+  assert_contains "$CASE_DIR/.env" 'NEXT_PUBLIC_API_URL=http://localhost:18000/api' 'API URL must follow API_PORT'
+  assert_contains "$CASE_DIR/.env" 'CORS_ORIGINS=http://127.0.0.1:18001,http://localhost:18001' 'CORS origins must follow WEB_PORT'
+  assert_not_contains "$output" '浏览器访问的 API URL' 'derived API URL must not be prompted'
+  assert_not_contains "$output" '允许的浏览器来源' 'derived CORS origins must not be prompted'
+}
+
+test_browser_settings_refresh_previous_installer_defaults_but_preserve_custom_values() {
+  local output="$CASE_DIR/output.log"
+  touch "$EDIORA_DOCKER_STATE"
+  write_valid_env
+  sed -i \
+    's#^NEXT_PUBLIC_API_URL=.*#NEXT_PUBLIC_API_URL=http://localhost:8000/api#; s#^CORS_ORIGINS=.*#CORS_ORIGINS=http://localhost:3000#' \
+    "$CASE_DIR/.env"
+  make_blank_input "$CASE_DIR/input"
+  if ! run_installer "$output"; then
+    cat "$output" >&2
+    return 1
+  fi
+  assert_contains "$CASE_DIR/.env" 'NEXT_PUBLIC_API_URL=http://localhost:18000/api' 'old generated API URL must follow a changed API_PORT'
+  assert_contains "$CASE_DIR/.env" 'CORS_ORIGINS=http://127.0.0.1:18001,http://localhost:18001' 'old generated CORS origins must follow a changed WEB_PORT'
+
+  write_valid_env
+  sed -i \
+    's#^NEXT_PUBLIC_API_URL=.*#NEXT_PUBLIC_API_URL=https://ediora.example.com/api#; s#^CORS_ORIGINS=.*#CORS_ORIGINS=https://ediora.example.com#' \
+    "$CASE_DIR/.env"
+  : > "$CASE_DIR/input"
+  if ! run_installer "$output"; then
+    cat "$output" >&2
+    return 1
+  fi
+  assert_contains "$CASE_DIR/.env" 'NEXT_PUBLIC_API_URL=https://ediora.example.com/api' 'custom API URL must be preserved'
+  assert_contains "$CASE_DIR/.env" 'CORS_ORIGINS=https://ediora.example.com' 'custom CORS origins must be preserved'
+}
+
 test_generated_secrets_are_not_printed_and_env_mode_is_600() {
   local output="$CASE_DIR/output.log"
   make_blank_input "$CASE_DIR/input"
@@ -756,6 +800,8 @@ run_test 'declining Docker installation stops before apt' test_declining_docker_
 run_test 'confirmed Docker installation runs apt before Compose' test_confirmed_docker_installation_runs_apt_before_compose
 run_test 'Docker installation requires a post-install daemon check' test_docker_installation_requires_post_install_daemon_check
 run_test 'existing environment values are preserved and missing values appended' test_existing_env_values_are_preserved_and_missing_values_appended
+run_test 'browser settings derive from host ports without prompts' test_browser_settings_are_derived_from_host_ports_without_prompts
+run_test 'browser settings refresh defaults and preserve custom values' test_browser_settings_refresh_previous_installer_defaults_but_preserve_custom_values
 run_test 'generated secrets are redacted and .env is mode 600' test_generated_secrets_are_not_printed_and_env_mode_is_600
 run_test 'installer creates the project data directories' test_installer_creates_data_directories
 run_test 'default flow pulls then starts without build' test_default_flow_pulls_then_starts_without_build

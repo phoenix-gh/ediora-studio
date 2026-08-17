@@ -155,7 +155,9 @@ Docker。macOS 需要先安装并启动 Docker Desktop；安装器不会通过 a
 安装 macOS Docker。它不会在宿主机安装 Python、Node.js、
 PostgreSQL 或 Redis。安装器会交互式创建或补全根目录 `.env`，保留已有值，
 并将文件权限设为 `0600`；数据库密码、worker token 和 X 会话密钥可接受
-安全随机默认值，provider API Key 不会写入该文件。
+安全随机默认值，provider API Key 不会写入该文件。`NEXT_PUBLIC_API_URL`
+会按 `API_PORT` 自动生成，`CORS_ORIGINS` 会按 `WEB_PORT` 自动包含
+`127.0.0.1` 和 `localhost`；已有自定义 URL 或来源会保留。
 
 从远程命令或单独下载的脚本运行时，安装器会显示目录选择：
 `1` 当前目录、`2` `$HOME/ediora-studio`、`3` 自定义目录；直接回车默认选择

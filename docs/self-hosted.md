@@ -49,8 +49,9 @@ also the current working directory.
 
 It creates or completes `.env` interactively, preserves existing assignments,
 sets mode `0600`, creates the Compose-local `data/` persistence directories,
-and generates safe defaults for the required internal secrets. Provider API
-keys are not collected or stored in `.env`; configure
+and generates safe defaults for the required internal secrets. It derives
+`NEXT_PUBLIC_API_URL` from `API_PORT` and local `CORS_ORIGINS` from `WEB_PORT`;
+existing custom URL/origin values are preserved. Provider API keys are not collected or stored in `.env`; configure
 LLM, image, speech, and HeyGen credentials from Ediora **Settings** after the
 Web service is ready. Re-running the installer preserves `.env` and the
 Compose-local `data/` directory. It does not migrate or delete existing Docker
