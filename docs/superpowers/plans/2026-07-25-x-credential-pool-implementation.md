@@ -431,8 +431,8 @@ from fastapi.testclient import TestClient
 
 @pytest.fixture
 def client(monkeypatch, tmp_path):
-    monkeypatch.setenv("WMS_DATABASE_URL", f"sqlite+aiosqlite:///{tmp_path / 'x-accounts.db'}")
-    monkeypatch.setenv("WMS_DISABLE_SCHEDULER", "1")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite+aiosqlite:///{tmp_path / 'x-accounts.db'}")
+    monkeypatch.setenv("DISABLE_SCHEDULER", "1")
     monkeypatch.setenv("FEEDGRAB_DATA_DIR", str(tmp_path / "sessions"))
     for name in list(sys.modules):
         if name.startswith((

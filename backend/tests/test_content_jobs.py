@@ -478,7 +478,7 @@ def test_idempotency_migration_rewrites_historical_duplicates_and_keeps_empty(
     monkeypatch,
     postgres_database_url,
 ):
-    monkeypatch.setenv("WMS_DATABASE_URL", postgres_database_url)
+    monkeypatch.setenv("DATABASE_URL", postgres_database_url)
     import sys
     sys.modules.pop("database", None)
     from database import migrate_content_job_idempotency_schema

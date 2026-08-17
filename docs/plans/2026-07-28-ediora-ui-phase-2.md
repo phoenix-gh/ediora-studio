@@ -334,7 +334,7 @@ HTML renderer or API layer.
 pnpm exec vitest run components/features/DraftAssetsDialog.test.tsx app/drafts
 pnpm exec tsc --noEmit --incremental false
 pnpm exec eslint components/features/DraftAssetsDialog.tsx app/drafts
-(cd ../backend && WMS_DISABLE_SCHEDULER=1 conda run -n wems python -m pytest \
+(cd ../backend && DISABLE_SCHEDULER=1 conda run -n wems python -m pytest \
   tests/test_wechat_publish.py tests/test_blog_publish.py \
   -q -p no:cacheprovider)
 ```
@@ -923,13 +923,13 @@ browser verification at the developer database or the normal ports.
 4. The backend `webServer` command first runs
    `docker compose -p ediora-phase2-e2e -f ../docker-compose.phase2-e2e.yml
    up -d --wait`, then runs the guarded seed, then starts the isolated backend
-   on `127.0.0.1:8100` with `WMS_DISABLE_SCHEDULER=1`, the exact dedicated
+   on `127.0.0.1:8100` with `DISABLE_SCHEDULER=1`, the exact dedicated
    Postgres URL, and
-   `WMS_CORS_ORIGINS=http://127.0.0.1:3100,http://localhost:3100` plus
-   `WMS_BASE_URL=http://127.0.0.1:8100`; the backend
+   `CORS_ORIGINS=http://127.0.0.1:3100,http://localhost:3100` plus
+   `BASE_URL=http://127.0.0.1:8100`; the backend
    entry waits for `http://127.0.0.1:8100/health`. A second entry starts Next
    with the explicit command
-   `pnpm dev --hostname 127.0.0.1 --port 3100`, setting both `WMS_API_URL` and
+   `pnpm dev --hostname 127.0.0.1 --port 3100`, setting both `API_URL` and
    `NEXT_PUBLIC_API_URL` to
    `http://127.0.0.1:8100/api`, and uses that port as Playwright `baseURL`.
    Set `workers: 1` and `fullyParallel: false`, and use

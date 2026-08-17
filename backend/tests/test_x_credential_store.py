@@ -11,7 +11,7 @@ def test_session_vault_round_trips_without_exposing_credentials(monkeypatch):
     from cryptography.fernet import Fernet
     from x_credential_store import CredentialSessionVault
 
-    monkeypatch.setenv("WMS_X_SESSION_KEY", Fernet.generate_key().decode())
+    monkeypatch.setenv("X_SESSION_KEY", Fernet.generate_key().decode())
     pair = CredentialPair("auth-token-secret", "csrf-token-secret")
 
     ciphertext = CredentialSessionVault().encrypt(pair)

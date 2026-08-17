@@ -56,7 +56,7 @@ def _header(scope: dict[str, Any], name: bytes) -> bytes | None:
 
 def _worker_token(scope: dict[str, Any]) -> bytes | None:
     try:
-        return _header(scope, b"x-wms-worker-token")
+        return _header(scope, b"x-worker-token")
     except ValueError:
         # Preserve the authentication contract: missing server configuration
         # is 503; once configured, conflicting credentials are a 403.

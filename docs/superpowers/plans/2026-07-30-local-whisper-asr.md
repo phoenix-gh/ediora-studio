@@ -772,7 +772,7 @@ assert service["deploy"]["resources"]["reservations"]["devices"][0][
     "capabilities"
 ] == ["gpu"]
 assert service["volumes"]
-assert config["services"]["api"]["environment"]["WMS_LOCAL_ASR_URL"] == (
+assert config["services"]["api"]["environment"]["LOCAL_ASR_URL"] == (
     "http://local-asr:8000/v1"
 )
 ```

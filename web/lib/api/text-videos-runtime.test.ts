@@ -7,7 +7,7 @@ afterEach(() => {
 })
 
 it('uses the public API origin for browser-facing video downloads', async () => {
-  vi.stubEnv('WMS_API_URL', 'http://api:8000/api')
+  vi.stubEnv('API_URL', 'http://api:8000/api')
   vi.stubEnv('NEXT_PUBLIC_API_URL', 'http://localhost:8000/api')
   vi.resetModules()
 

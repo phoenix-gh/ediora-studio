@@ -26,7 +26,7 @@ from models import (
 _UPLOADS_DIR = os.path.join(os.path.dirname(__file__), "..", "uploads")
 _ALLOWED_MIME = {"image/jpeg", "image/png", "image/gif", "image/webp", "image/svg+xml", "image/avif"}
 _MAX_SIZE = 10 * 1024 * 1024
-_BASE_URL = os.getenv("WMS_BASE_URL", "http://localhost:8000")
+_BASE_URL = os.getenv("BASE_URL", "http://localhost:8000")
 from schemas import ArticleDraftOut, ArticleDraftCreate, ArticleDraftPageOut, ArticleDraftUpdate, ArticleSeriesOut, ArticleSeriesCreate, ArticleSeriesUpdate
 
 

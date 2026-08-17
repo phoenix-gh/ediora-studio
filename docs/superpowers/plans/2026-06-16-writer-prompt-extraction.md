@@ -419,7 +419,7 @@ Expected: all passed。
 
 - [ ] **Step 2: 导入冒烟（确认无断裂引用）**
 
-Run: `WMS_DATABASE_URL="sqlite+aiosqlite:///:memory:" WMS_DISABLE_SCHEDULER=1 conda run -n wems python -c "import pipeline_template, prompt_templates, routers.studio; print('import ok')"`
+Run: `DATABASE_URL="sqlite+aiosqlite:///:memory:" DISABLE_SCHEDULER=1 conda run -n wems python -c "import pipeline_template, prompt_templates, routers.studio; print('import ok')"`
 Expected: `import ok`。
 
 - [ ] **Step 3: 验「改 md 即生效」（手动确认目标达成）**

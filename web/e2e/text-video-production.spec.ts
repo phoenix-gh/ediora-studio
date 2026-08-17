@@ -71,9 +71,9 @@ const SECRET_ENV_NAMES = [
   'OPENAI_API_KEY',
   'OPENROUTER_API_KEY',
   'REPLICATE_API_TOKEN',
-  'WMS_IMAGE_API_KEY',
-  'WMS_LLM_API_KEY',
-  'WMS_SPEECH_API_KEY',
+  'IMAGE_API_KEY',
+  'LLM_API_KEY',
+  'SPEECH_API_KEY',
   'X_AUTH_TOKEN',
   'X_CT0',
   'ZAI_API_KEY',
@@ -337,21 +337,21 @@ class TextVideoHarness {
     this.redisLaunch = input.redisLaunch
     this.ttsLatch = input.ttsLatch
     this.environment = isolatedEnvironment({
-      WMS_DATABASE_URL: `sqlite+aiosqlite:///${join(
+      DATABASE_URL: `sqlite+aiosqlite:///${join(
         this.tempRoot,
         'text-video-e2e.sqlite3',
       )}`,
-      WMS_UPLOADS_DIR: this.uploadsRoot,
-      WMS_REDIS_URL: this.redisUrl,
-      WMS_WORKER_QUEUE: this.queueName,
-      WMS_VIDEO_WORKER_QUEUE: this.queueName,
-      WMS_API_URL: this.apiBase,
+      UPLOADS_DIR: this.uploadsRoot,
+      REDIS_URL: this.redisUrl,
+      WORKER_QUEUE: this.queueName,
+      VIDEO_WORKER_QUEUE: this.queueName,
+      API_URL: this.apiBase,
       NEXT_PUBLIC_API_URL: this.apiBase,
-      WMS_PLAYWRIGHT_BASE_URL: this.webOrigin,
-      WMS_CORS_ORIGINS: this.webOrigin,
-      WMS_DISABLE_SCHEDULER: '1',
+      PLAYWRIGHT_BASE_URL: this.webOrigin,
+      CORS_ORIGINS: this.webOrigin,
+      DISABLE_SCHEDULER: '1',
       FEEDGRAB_DATA_DIR: this.sessionsRoot,
-      WMS_WORKER_TOKEN: this.workerToken,
+      WORKER_TOKEN: this.workerToken,
       NEXT_TELEMETRY_DISABLED: '1',
       PYTHONUNBUFFERED: '1',
     })
@@ -511,8 +511,8 @@ class TextVideoHarness {
     )
 
     const python = resolveE2EPythonLaunch({
-      WMS_E2E_PYTHON: this.environment.WMS_E2E_PYTHON,
-      WMS_CONDA_ENV: this.environment.WMS_CONDA_ENV,
+      E2E_PYTHON: this.environment.E2E_PYTHON,
+      CONDA_ENV: this.environment.CONDA_ENV,
     })
     const api = await this.spawnOwned(
       'api',

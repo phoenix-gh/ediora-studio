@@ -661,8 +661,8 @@ describe('content worker lifecycle', () => {
 
 describe('worker startup contracts', () => {
   it('posts to the protected reconciliation endpoint without a worker-selected queue', async () => {
-    const previousToken = process.env.WMS_WORKER_TOKEN
-    process.env.WMS_WORKER_TOKEN = 'worker-test-token'
+    const previousToken = process.env.WORKER_TOKEN
+    process.env.WORKER_TOKEN = 'worker-test-token'
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
       new Response(JSON.stringify({ enqueued: 0, job_ids: [] }), {
         status: 200,
@@ -676,9 +676,9 @@ describe('worker startup contracts', () => {
       await reconcileContentJobs()
     } finally {
       if (previousToken === undefined) {
-        delete process.env.WMS_WORKER_TOKEN
+        delete process.env.WORKER_TOKEN
       } else {
-        process.env.WMS_WORKER_TOKEN = previousToken
+        process.env.WORKER_TOKEN = previousToken
       }
     }
 
@@ -687,7 +687,7 @@ describe('worker startup contracts', () => {
       expect.objectContaining({
         method: 'POST',
         headers: expect.objectContaining({
-          'X-WMS-Worker-Token': 'worker-test-token',
+          'X-Worker-Token': 'worker-test-token',
         }),
         body: undefined,
       }),

@@ -17,7 +17,7 @@ describe('direct Agent image generation', () => {
   })
 
   it('generates and saves an asset directly without creating a content job', async () => {
-    vi.stubEnv('WMS_WORKER_TOKEN', 'direct-image-worker-token-0123456789012345')
+    vi.stubEnv('WORKER_TOKEN', 'direct-image-worker-token-0123456789012345')
     imageGeneration.mockResolvedValue({
       images: [{ uint8Array: new Uint8Array([1, 2, 3]), mediaType: 'image/png' }],
     })
@@ -30,7 +30,7 @@ describe('direct Agent image generation', () => {
       }
       if (url.includes('/assets/upload')) {
         expect(init?.headers).toMatchObject({
-          'X-WMS-Worker-Token': 'direct-image-worker-token-0123456789012345',
+          'X-Worker-Token': 'direct-image-worker-token-0123456789012345',
           'X-Content-Job-Id': '72',
         })
         return new Response(JSON.stringify({
@@ -67,7 +67,7 @@ describe('direct Agent image generation', () => {
   })
 
   it('passes optional reference images without changing the text-only call shape', async () => {
-    vi.stubEnv('WMS_WORKER_TOKEN', 'direct-image-worker-token-0123456789012345')
+    vi.stubEnv('WORKER_TOKEN', 'direct-image-worker-token-0123456789012345')
     imageGeneration.mockResolvedValue({
       images: [{ uint8Array: new Uint8Array([9, 8, 7]), mediaType: 'image/png' }],
     })

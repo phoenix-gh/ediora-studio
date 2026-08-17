@@ -7,7 +7,7 @@ from pathlib import Path
 
 
 def _resolve_uploads_dir() -> Path:
-    configured = os.getenv("WMS_UPLOADS_DIR", "").strip()
+    configured = os.getenv("UPLOADS_DIR", "").strip()
     root = (
         Path(configured).expanduser()
         if configured

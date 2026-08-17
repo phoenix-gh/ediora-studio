@@ -11,7 +11,7 @@ TOKEN = "agent-execution-worker-token-at-least-32-chars"
 
 @pytest.fixture
 def client(monkeypatch, postgres_env):
-    monkeypatch.setenv("WMS_WORKER_TOKEN", TOKEN)
+    monkeypatch.setenv("WORKER_TOKEN", TOKEN)
     for module_name in list(sys.modules):
         if module_name.startswith((
             "database", "models", "agent_execution_service",
@@ -50,7 +50,7 @@ def client(monkeypatch, postgres_env):
 
 
 def headers():
-    return {"X-WMS-Worker-Token": TOKEN}
+    return {"X-Worker-Token": TOKEN}
 
 
 def test_agent_execution_routes_require_worker_auth(client):

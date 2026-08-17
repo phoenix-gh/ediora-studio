@@ -15,7 +15,7 @@ When the API is stopped during a rule's scheduled time, create the most recent m
 - An occurrence that already has a scheduled run is not created again.
 - A multi-day shutdown therefore creates at most one catch-up run for each recurring rule, rather than one run for every missed day.
 - Manual runs are independent and do not suppress a scheduled occurrence.
-- `WMS_DISABLE_SCHEDULER=1` disables both normal automatic dispatch and startup catch-up.
+- `DISABLE_SCHEDULER=1` disables both normal automatic dispatch and startup catch-up.
 
 Example: a recurring rule runs at 22:00 Asia/Shanghai. If the API stops at 18:00 and starts at 08:00 the next day, startup dispatch creates the previous day's 22:00 occurrence. If it instead starts at 23:00, it creates the current day's 22:00 occurrence. If it starts after three days offline, it still creates only the latest due occurrence.
 

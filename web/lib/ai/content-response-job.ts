@@ -14,6 +14,7 @@ import {
   workerHeaders,
   type JobStep,
 } from './job-client'
+import { textModelConfigFromSettings, type TextModelSettings } from './runtime-config'
 
 
 const dimensionSchema = z.object({
@@ -117,17 +118,11 @@ function succeededOutput(
 }
 
 async function configuredModel() {
-  const runtime = await apiGet<{ api_key: string; model: string; base_url: string }>(
+  const runtime = await apiGet<TextModelSettings>(
     '/settings/ai-runtime',
     workerHeaders(),
   )
-  const apiKey = runtime.api_key || process.env.WMS_LLM_API_KEY
-  if (!apiKey) throw new Error('请先配置 AI 大模型 API Key')
-  return {
-    apiKey,
-    modelName: runtime.model || process.env.WMS_LLM_MODEL || 'gpt-4o-mini',
-    baseURL: runtime.base_url || process.env.WMS_LLM_BASE_URL || undefined,
-  }
+  return textModelConfigFromSettings(runtime)
 }
 
 async function analyze(context: Record<string, unknown>) {

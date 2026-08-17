@@ -134,8 +134,8 @@ test('selects multiple writing targets and starts independent draft jobs', async
   await expect(page.getByRole('button', { name: '开始创作' })).toBeDisabled()
   await page.getByRole('checkbox', { name: 'X 短帖' }).check()
   await page.getByRole('checkbox', { name: '公众号文章' }).check()
-  if (process.env.WMS_PLAYWRIGHT_DIALOG_SCREENSHOT) {
-    await page.screenshot({ path: process.env.WMS_PLAYWRIGHT_DIALOG_SCREENSHOT, fullPage: false })
+  if (process.env.PLAYWRIGHT_DIALOG_SCREENSHOT) {
+    await page.screenshot({ path: process.env.PLAYWRIGHT_DIALOG_SCREENSHOT, fullPage: false })
   }
   await page.getByRole('button', { name: '开始创作' }).click()
   await expect.poll(() => requests.length).toBe(1)
@@ -147,8 +147,8 @@ test('selects multiple writing targets and starts independent draft jobs', async
   await expect(page.getByText('X 短帖写作中…')).toBeVisible()
   await expect(page.getByText('公众号文章写作中…')).toBeVisible()
   await expect(page.getByText('写作完成后会自动创建独立草稿，不会自动发布。')).toHaveCount(2)
-  if (process.env.WMS_PLAYWRIGHT_SCREENSHOT) {
-    await page.screenshot({ path: process.env.WMS_PLAYWRIGHT_SCREENSHOT, fullPage: false })
+  if (process.env.PLAYWRIGHT_SCREENSHOT) {
+    await page.screenshot({ path: process.env.PLAYWRIGHT_SCREENSHOT, fullPage: false })
   }
   expect(consoleProblems).toEqual([])
 })

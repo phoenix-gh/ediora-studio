@@ -742,21 +742,23 @@ Expected: FAIL because the runtime route, adapter, and settings section do not e
 
 - [ ] **Step 3: Add dedicated write-only speech configuration**
 
-Add defaults and environment fallback:
+Add static provider defaults and read persisted values at runtime:
 
 ```python
-"speech_provider": os.getenv("WMS_SPEECH_PROVIDER", "mimo"),
-"speech_model": os.getenv("WMS_SPEECH_MODEL", "mimo-v2.5-tts"),
-"speech_base_url": os.getenv("WMS_SPEECH_BASE_URL", "https://api.xiaomimimo.com/v1"),
-"speech_api_key": os.getenv("WMS_SPEECH_API_KEY", os.getenv("MIMO_API_KEY", "")),
-"speech_default_voice": os.getenv("WMS_SPEECH_DEFAULT_VOICE", "mimo_default"),
+"speech_provider": cfg.get("speech_provider", "mimo"),
+"speech_model": cfg.get("speech_model", "mimo-v2.5-tts"),
+"speech_base_url": cfg.get("speech_base_url", "https://api.xiaomimimo.com/v1"),
+"speech_api_key": cfg.get("speech_api_key", ""),
+"speech_default_voice": cfg.get("speech_default_voice", "mimo_default"),
 ```
 
 Public `SettingsOut` exposes provider/model/base URL/default voice and only `speech_api_key_set` plus the last-four preview. `SettingsUpdate.speech_api_key=""` leaves the current key unchanged; `speech_clear_api_key=true` clears it. Protect `/settings/speech-runtime` with `require_worker_token`.
 
-- [ ] **Step 3a: Wire environment and Compose defaults**
+- [ ] **Step 3a: Wire Settings-only runtime access**
 
-Add the five `WMS_SPEECH_*` variables to `.env.example` and pass them to the API service in `docker-compose.yml`; the Node worker reads the effective values only through the protected runtime route.
+Do not add speech provider credentials to `.env.example` or pass them through
+Compose; the Node worker reads the effective values only through the protected
+runtime route.
 
 - [ ] **Step 4: Implement the provider-neutral MiMo client**
 
@@ -1219,7 +1221,7 @@ Both generation endpoints validate `{revision}` and return:
 }
 ```
 
-The shown project is abbreviated only for readability; the real response uses the complete `TextVideoProject` schema. Confirmation requires `{revision,generation_revision,source_hash}` and permits only `ready -> confirmed`. Worker endpoints require `X-WMS-Worker-Token` and `X-Content-Job-Id`; result/failure validates job ownership, segment ID, generation revision, and source hash. Stale responses use HTTP 409 with `X-WMS-Retryable: false`.
+The shown project is abbreviated only for readability; the real response uses the complete `TextVideoProject` schema. Confirmation requires `{revision,generation_revision,source_hash}` and permits only `ready -> confirmed`. Worker endpoints require `X-Worker-Token` and `X-Content-Job-Id`; result/failure validates job ownership, segment ID, generation revision, and source hash. Stale responses use HTTP 409 with `X-Retryable: false`.
 
 - [ ] **Step 4a: Restore segment state when a speech job is canceled**
 
@@ -2634,7 +2636,7 @@ Extract the worker `if/else` chain into `resolveContentJobRunner(flow)` so this 
 
 - [ ] **Step 3: Make local development start all required services**
 
-Update every existing `start`, `stop`, `status`, and `logs` branch in `dev.sh` to include Redis ownership and the content worker. Validate `WMS_WORKER_TOKEN` length, connect to an already healthy Redis without claiming its PID or start a local `redis-server --port 6379 --save "" --appendonly no` with host URL `redis://127.0.0.1:6379/0`, start FastAPI, start `pnpm jobs:worker` with the same Redis URL/token, and start Next.js. Track only child processes started by the script and terminate all owned children on stop. Keep Docker-only `redis://redis:6379/0` inside Compose.
+Update every existing `start`, `stop`, `status`, and `logs` branch in `dev.sh` to include Redis ownership and the content worker. Validate `WORKER_TOKEN` length, connect to an already healthy Redis without claiming its PID or start a local `redis-server --port 6379 --save "" --appendonly no` with host URL `redis://127.0.0.1:6379/0`, start FastAPI, start `pnpm jobs:worker` with the same Redis URL/token, and start Next.js. Track only child processes started by the script and terminate all owned children on stop. Keep Docker-only `redis://redis:6379/0` inside Compose.
 
 Document:
 
@@ -2686,7 +2688,7 @@ Expected: every command exits 0; Remotion lists `tech-text-v1`; FFmpeg and FFpro
 First check whether the Browser plugin is connected and use it when available. If it is unavailable, record that reason and run:
 
 ```bash
-WMS_WORKER_TOKEN=ediora-e2e-worker-token-0000000001 ./dev.sh restart
+WORKER_TOKEN=ediora-e2e-worker-token-0000000001 ./dev.sh restart
 cd web
 pnpm exec playwright test e2e/text-video-production.spec.ts
 cd ..

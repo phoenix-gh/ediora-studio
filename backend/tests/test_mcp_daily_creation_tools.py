@@ -30,7 +30,7 @@ def run(coroutine):
 def run_context(run_id=None):
     headers = {}
     if run_id is not None:
-        headers["x-wms-daily-creation-run-id"] = str(run_id)
+        headers["x-daily-creation-run-id"] = str(run_id)
     return SimpleNamespace(
         request_context=SimpleNamespace(
             request=SimpleNamespace(headers=headers),

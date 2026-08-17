@@ -18,7 +18,7 @@ The implementation follows the AI SDK Agent Skills model:
 
 1. Discovery exposes only each enabled Skill's name and description.
 2. Activation loads the selected Skill's complete `SKILL.md` instructions.
-3. A Skill may declare a bounded preload set in `WMS_SKILL.json`; only those references load with activation. Other references remain available through a scoped tool.
+3. A Skill may declare a bounded preload set in `SKILL.json`; only those references load with activation. Other references remain available through a scoped tool.
 
 References are never globally concatenated. Skills with large libraries keep progressive disclosure, while small Skills may explicitly preload the rules that must never be skipped.
 
@@ -49,7 +49,7 @@ The tool rejects a second, different Skill activation in the same response. Auto
 
 The initial design used AI SDK `prepareStep` with forced `toolChoice`. Live verification showed that the configured provider's thinking mode rejects forced tool choice with `Thinking mode does not support this tool_choice`. The implementation therefore must not depend on provider-enforced tool choice.
 
-An optional root `WMS_SKILL.json` manifest declares exact preload paths:
+An optional root `SKILL.json` manifest declares exact preload paths:
 
 ```json
 {

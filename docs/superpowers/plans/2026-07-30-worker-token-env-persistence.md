@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 将当前健康 API 容器使用的 `WMS_WORKER_TOKEN` 安全持久化到根目录 `.env`，供后续 Docker Compose 重建自动复用。
+**Goal:** 将当前健康 API 容器使用的 `WORKER_TOKEN` 安全持久化到根目录 `.env`，供后续 Docker Compose 重建自动复用。
 
 **Architecture:** 根目录 `.env` 作为本机 Compose 环境文件，只保存当前 token。先用 `apply_patch` 创建无敏感信息的占位文件，再从 API 容器读取 token、严格验证后进行一次机械替换；所有验证只输出长度和一致性，不输出值。
 
@@ -15,7 +15,7 @@
 - 不重启 API、Worker 或 Web。
 - `.env` 权限必须为 `600`。
 - `.env` 必须继续被 Git 忽略。
-- 只写入 `WMS_WORKER_TOKEN`，不迁移其他密钥。
+- 只写入 `WORKER_TOKEN`，不迁移其他密钥。
 
 ---
 
@@ -25,15 +25,15 @@
 - Create: `.env`（Git 忽略，本机密钥文件）
 
 **Interfaces:**
-- Consumes: `main-runtime-api-1` 容器中的 `WMS_WORKER_TOKEN`
-- Produces: 根目录 `.env` 中同值的 `WMS_WORKER_TOKEN`
+- Consumes: `main-runtime-api-1` 容器中的 `WORKER_TOKEN`
+- Produces: 根目录 `.env` 中同值的 `WORKER_TOKEN`
 
 - [x] **Step 1: 创建不含密钥的占位文件**
 
 使用 `apply_patch` 创建：
 
 ```dotenv
-WMS_WORKER_TOKEN=__WMS_CURRENT_RUNTIME_TOKEN__
+WORKER_TOKEN=__CURRENT_RUNTIME_TOKEN__
 ```
 
 - [x] **Step 2: 验证并机械替换占位值**

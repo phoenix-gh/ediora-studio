@@ -16,8 +16,8 @@ afterEach(() => {
 
 describe('durable Agent execution client', () => {
   it('sends the worker job identity on execution, checkpoint, and tool calls', async () => {
-    vi.stubEnv('WMS_WORKER_TOKEN', 'worker-token-at-least-32-characters')
-    vi.stubEnv('WMS_API_URL', 'http://api.test/api')
+    vi.stubEnv('WORKER_TOKEN', 'worker-token-at-least-32-characters')
+    vi.stubEnv('API_URL', 'http://api.test/api')
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ id: 31, version: 1 }), { status: 201 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ id: 31, version: 2 }), { status: 200 }))
@@ -44,12 +44,12 @@ describe('durable Agent execution client', () => {
     expect(fetchMock).toHaveBeenCalledTimes(4)
     for (const call of fetchMock.mock.calls) {
       expect(new Headers(call[1].headers).get('X-Content-Job-Id')).toBe('17')
-      expect(new Headers(call[1].headers).get('X-WMS-Worker-Token')).toBeTruthy()
+      expect(new Headers(call[1].headers).get('X-Worker-Token')).toBeTruthy()
     }
   })
 
   it('treats checkpoint conflicts as non-retryable', async () => {
-    vi.stubEnv('WMS_WORKER_TOKEN', 'worker-token-at-least-32-characters')
+    vi.stubEnv('WORKER_TOKEN', 'worker-token-at-least-32-characters')
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(
       JSON.stringify({ detail: 'version conflict' }),
       { status: 409, headers: { 'Content-Type': 'application/json' } },
@@ -64,7 +64,7 @@ describe('durable Agent execution client', () => {
   })
 
   it('loads recorded tool calls with the worker job identity', async () => {
-    vi.stubEnv('WMS_WORKER_TOKEN', 'worker-token-at-least-32-characters')
+    vi.stubEnv('WORKER_TOKEN', 'worker-token-at-least-32-characters')
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify([])))
     vi.stubGlobal('fetch', fetchMock)
 

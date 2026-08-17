@@ -41,7 +41,7 @@ conda run -n wems python -c "
 import asyncio, os
 from sqlalchemy.ext.asyncio import create_async_engine
 
-url = os.getenv('WMS_DATABASE_URL', 'postgresql+asyncpg://localhost/ediora')
+url = os.getenv('DATABASE_URL', 'postgresql+asyncpg://localhost/ediora')
 
 async def migrate():
     engine = create_async_engine(url)
@@ -496,8 +496,8 @@ from fastapi.testclient import TestClient
 @pytest.fixture
 def client(monkeypatch, tmp_path):
     db_file = tmp_path / "test.db"
-    monkeypatch.setenv("WMS_DATABASE_URL", f"sqlite+aiosqlite:///{db_file}")
-    monkeypatch.setenv("WMS_DISABLE_SCHEDULER", "1")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite+aiosqlite:///{db_file}")
+    monkeypatch.setenv("DISABLE_SCHEDULER", "1")
 
     for mod in list(sys.modules):
         if mod.startswith(("database", "models", "main", "routers", "config",

@@ -58,7 +58,7 @@ Skill 描述必须明确覆盖以下任务：
 
 Skill 放入 `web/skills/x-article-writing/`，由现有技能注册表自动发现。Skill 采用内置来源，默认启用，可在技能管理页关闭，但不能作为上传 Skill 删除。
 
-`WMS_SKILL.json` 只声明通用执行提示，不预加载全部参考资料，避免每次加载占用不必要上下文；Agent 根据 `SKILL.md` 的可观察条件调用 `readSkillReference`。
+`SKILL.json` 只声明通用执行提示，不预加载全部参考资料，避免每次加载占用不必要上下文；Agent 根据 `SKILL.md` 的可观察条件调用 `readSkillReference`。
 
 ## 验证
 

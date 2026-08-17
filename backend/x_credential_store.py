@@ -56,12 +56,12 @@ class CredentialFileError(RuntimeError):
 def _session_fernet(key: str | bytes | None = None) -> Fernet:
     configured = key
     if configured is None:
-        configured = os.getenv("WMS_X_SESSION_KEY", "").strip()
+        configured = os.getenv("X_SESSION_KEY", "").strip()
     if not configured:
-        worker_token = os.getenv("WMS_WORKER_TOKEN", "").strip()
+        worker_token = os.getenv("WORKER_TOKEN", "").strip()
         if not worker_token:
             raise CredentialFileError(
-                "X session 加密密钥未配置；请设置 WMS_X_SESSION_KEY"
+                "X session 加密密钥未配置；请设置 X_SESSION_KEY"
             )
         configured = base64.urlsafe_b64encode(
             hashlib.sha256(worker_token.encode("utf-8")).digest()

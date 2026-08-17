@@ -171,8 +171,8 @@ it('asks AI for word IDs only and persists the server-validated proposal', async
 })
 
 it('uses prompt JSON without unsupported response_format for compatible providers', async () => {
-  const previousToken = process.env.WMS_WORKER_TOKEN
-  process.env.WMS_WORKER_TOKEN = 'worker-token-at-least-32-characters'
+  const previousToken = process.env.WORKER_TOKEN
+  process.env.WORKER_TOKEN = 'worker-token-at-least-32-characters'
   const json = (value: unknown) => new Response(
     JSON.stringify(value),
     { headers: { 'Content-Type': 'application/json' } },
@@ -239,8 +239,8 @@ it('uses prompt JSON without unsupported response_format for compatible provider
     await expect(runTextVideoSceneJob(41)).resolves.toEqual(readyProject)
   } finally {
     vi.unstubAllGlobals()
-    if (previousToken === undefined) delete process.env.WMS_WORKER_TOKEN
-    else process.env.WMS_WORKER_TOKEN = previousToken
+    if (previousToken === undefined) delete process.env.WORKER_TOKEN
+    else process.env.WORKER_TOKEN = previousToken
   }
 
   const providerCall = fetchMock.mock.calls.find(

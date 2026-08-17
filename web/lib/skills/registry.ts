@@ -84,7 +84,7 @@ export const MAX_SKILL_REFERENCES = 200
 export const MAX_SKILL_REFERENCE_BYTES = 128 * 1024
 export const MAX_SKILL_REFERENCE_CONTEXT_BYTES = 512 * 1024
 const supportedReferenceExtensions = new Set(['.md', '.txt', '.json', '.yaml', '.yml'])
-const preloadManifestName = 'WMS_SKILL.json'
+const preloadManifestName = 'SKILL.json'
 const defaultExecutionHints: SkillExecutionHints = {
   planRequired: true,
   verificationRequired: true,
@@ -93,15 +93,15 @@ const defaultExecutionHints: SkillExecutionHints = {
 let mutationQueue: Promise<void> = Promise.resolve()
 
 function bundledDirectory() {
-  return process.env.WMS_SKILLS_BUNDLED_DIR ?? join(process.cwd(), 'skills')
+  return process.env.SKILLS_BUNDLED_DIR ?? join(process.cwd(), 'skills')
 }
 
 function runtimeSkillsDirectory() {
-  return process.env.WMS_SKILLS_RUNTIME_DIR ?? join(process.cwd(), '.runtime', 'skills')
+  return process.env.SKILLS_RUNTIME_DIR ?? join(process.cwd(), '.runtime', 'skills')
 }
 
 function stateFile() {
-  return process.env.WMS_SKILLS_STATE_FILE ?? join(dirname(runtimeSkillsDirectory()), 'skills-state.json')
+  return process.env.SKILLS_STATE_FILE ?? join(dirname(runtimeSkillsDirectory()), 'skills-state.json')
 }
 
 async function withMutation<T>(operation: () => Promise<T>) {
@@ -334,12 +334,12 @@ async function safeReferenceTarget(skillDirectory: string, referencePath: string
 }
 
 export function skillReferenceContextByteLimit() {
-  return configuredLimit('WMS_SKILLS_MAX_REFERENCE_CONTEXT_BYTES', MAX_SKILL_REFERENCE_CONTEXT_BYTES)
+  return configuredLimit('SKILLS_MAX_REFERENCE_CONTEXT_BYTES', MAX_SKILL_REFERENCE_CONTEXT_BYTES)
 }
 
 export async function listSkillReferences(name: string): Promise<SkillReference[]> {
   const skill = await enabledSkillOrThrow(name)
-  const maxReferences = configuredLimit('WMS_SKILLS_MAX_REFERENCES', MAX_SKILL_REFERENCES)
+  const maxReferences = configuredLimit('SKILLS_MAX_REFERENCES', MAX_SKILL_REFERENCES)
   const references: SkillReference[] = []
 
   async function visit(directory: string, prefix: string) {
@@ -373,7 +373,7 @@ export async function readSkillReference(name: string, referencePath: string): P
   const skill = await enabledSkillOrThrow(name)
   const target = await safeReferenceTarget(skill.directory, referencePath)
   const bytes = await readFile(target)
-  const maxBytes = configuredLimit('WMS_SKILLS_MAX_REFERENCE_BYTES', MAX_SKILL_REFERENCE_BYTES)
+  const maxBytes = configuredLimit('SKILLS_MAX_REFERENCE_BYTES', MAX_SKILL_REFERENCE_BYTES)
   if (bytes.byteLength > maxBytes) {
     throw new SkillRegistryError('too_large', `Skill reference exceeds ${maxBytes} bytes`)
   }
@@ -527,9 +527,9 @@ type ArchiveSkill = {
 }
 
 function parseArchive(buffer: Uint8Array): ArchiveSkill[] {
-  const maxArchiveBytes = configuredLimit('WMS_SKILLS_MAX_ARCHIVE_BYTES', MAX_ARCHIVE_BYTES)
-  const maxUnpackedBytes = configuredLimit('WMS_SKILLS_MAX_UNPACKED_BYTES', MAX_UNPACKED_BYTES)
-  const maxFiles = configuredLimit('WMS_SKILLS_MAX_FILES', MAX_ARCHIVE_FILES)
+  const maxArchiveBytes = configuredLimit('SKILLS_MAX_ARCHIVE_BYTES', MAX_ARCHIVE_BYTES)
+  const maxUnpackedBytes = configuredLimit('SKILLS_MAX_UNPACKED_BYTES', MAX_UNPACKED_BYTES)
+  const maxFiles = configuredLimit('SKILLS_MAX_FILES', MAX_ARCHIVE_FILES)
   if (buffer.byteLength > maxArchiveBytes) {
     throw new SkillRegistryError('too_large', `ZIP exceeds ${maxArchiveBytes} bytes`)
   }

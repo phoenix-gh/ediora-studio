@@ -33,21 +33,21 @@ describe('Skill registry', () => {
     bundledDir = await mkdtemp(join(tmpdir(), 'wms-skill-bundled-'))
     runtimeDir = await mkdtemp(join(tmpdir(), 'wms-skill-runtime-'))
     stateFile = join(runtimeDir, 'skills-state.json')
-    process.env.WMS_SKILLS_BUNDLED_DIR = bundledDir
-    process.env.WMS_SKILLS_RUNTIME_DIR = runtimeDir
-    process.env.WMS_SKILLS_STATE_FILE = stateFile
+    process.env.SKILLS_BUNDLED_DIR = bundledDir
+    process.env.SKILLS_RUNTIME_DIR = runtimeDir
+    process.env.SKILLS_STATE_FILE = stateFile
   })
 
   afterEach(async () => {
-    delete process.env.WMS_SKILLS_BUNDLED_DIR
-    delete process.env.WMS_SKILLS_RUNTIME_DIR
-    delete process.env.WMS_SKILLS_STATE_FILE
-    delete process.env.WMS_SKILLS_MAX_ARCHIVE_BYTES
-    delete process.env.WMS_SKILLS_MAX_UNPACKED_BYTES
-    delete process.env.WMS_SKILLS_MAX_FILES
-    delete process.env.WMS_SKILLS_MAX_REFERENCES
-    delete process.env.WMS_SKILLS_MAX_REFERENCE_BYTES
-    delete process.env.WMS_SKILLS_MAX_REFERENCE_CONTEXT_BYTES
+    delete process.env.SKILLS_BUNDLED_DIR
+    delete process.env.SKILLS_RUNTIME_DIR
+    delete process.env.SKILLS_STATE_FILE
+    delete process.env.SKILLS_MAX_ARCHIVE_BYTES
+    delete process.env.SKILLS_MAX_UNPACKED_BYTES
+    delete process.env.SKILLS_MAX_FILES
+    delete process.env.SKILLS_MAX_REFERENCES
+    delete process.env.SKILLS_MAX_REFERENCE_BYTES
+    delete process.env.SKILLS_MAX_REFERENCE_CONTEXT_BYTES
     await Promise.all([
       rm(bundledDir, { recursive: true, force: true }),
       rm(runtimeDir, { recursive: true, force: true }),
@@ -143,7 +143,7 @@ describe('Skill registry', () => {
   })
 
   it('enforces configured archive limits before writing', async () => {
-    process.env.WMS_SKILLS_MAX_UNPACKED_BYTES = '100'
+    process.env.SKILLS_MAX_UNPACKED_BYTES = '100'
     const archive = zipSync({ 'SKILL.md': strToU8(skillMarkdown('TooBig') + 'x'.repeat(200)) })
     await expect(installSkillArchive(archive)).rejects.toMatchObject({ code: 'too_large' })
     await expect(access(join(runtimeDir, 'TooBig'))).rejects.toMatchObject({ code: 'ENOENT' })
@@ -219,18 +219,18 @@ describe('Skill registry', () => {
     await writeFile(join(skillDir, 'references', 'one.md'), '12345', 'utf8')
     await writeFile(join(skillDir, 'references', 'two.md'), '67890', 'utf8')
 
-    process.env.WMS_SKILLS_MAX_REFERENCES = '1'
+    process.env.SKILLS_MAX_REFERENCES = '1'
     await expect(listSkillReferences('Alpha')).rejects.toMatchObject({ code: 'too_large' })
-    delete process.env.WMS_SKILLS_MAX_REFERENCES
+    delete process.env.SKILLS_MAX_REFERENCES
 
-    process.env.WMS_SKILLS_MAX_REFERENCE_BYTES = '4'
+    process.env.SKILLS_MAX_REFERENCE_BYTES = '4'
     await expect(readSkillReference('Alpha', 'references/one.md')).rejects.toMatchObject({ code: 'too_large' })
-    delete process.env.WMS_SKILLS_MAX_REFERENCE_BYTES
+    delete process.env.SKILLS_MAX_REFERENCE_BYTES
 
-    process.env.WMS_SKILLS_MAX_REFERENCE_CONTEXT_BYTES = '9'
+    process.env.SKILLS_MAX_REFERENCE_CONTEXT_BYTES = '9'
     await expect(loadSkillContext('Alpha', ['references/one.md', 'references/two.md']))
       .rejects.toMatchObject({ code: 'too_large' })
-    delete process.env.WMS_SKILLS_MAX_REFERENCE_CONTEXT_BYTES
+    delete process.env.SKILLS_MAX_REFERENCE_CONTEXT_BYTES
 
     await setSkillEnabled('Alpha', false)
     await expect(listSkillReferences('Alpha')).rejects.toMatchObject({ code: 'not_found' })
@@ -243,7 +243,7 @@ describe('Skill registry', () => {
     await mkdir(join(skillDir, 'references'), { recursive: true })
     await writeFile(join(skillDir, 'references', 'core.md'), 'core rules', 'utf8')
     await writeFile(join(skillDir, 'references', 'optional.md'), 'optional rules', 'utf8')
-    await writeFile(join(skillDir, 'WMS_SKILL.json'), JSON.stringify({
+    await writeFile(join(skillDir, 'SKILL.json'), JSON.stringify({
       preloadReferences: ['references/core.md'],
     }), 'utf8')
 
@@ -259,7 +259,7 @@ describe('Skill registry', () => {
 
   it('normalizes optional generic execution hints without enabling executable fields', async () => {
     await writeSkill(bundledDir, 'alpha', 'Alpha')
-    const manifestPath = join(bundledDir, 'alpha', 'WMS_SKILL.json')
+    const manifestPath = join(bundledDir, 'alpha', 'SKILL.json')
 
     await expect(loadSkillManifest('Alpha')).resolves.toEqual({
       preloadReferences: [],

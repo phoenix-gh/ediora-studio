@@ -80,7 +80,7 @@ def _status(messages: list[dict]) -> int:
 def test_missing_worker_token_is_rejected_without_consuming_request_body(
     monkeypatch,
 ):
-    monkeypatch.setenv("WMS_WORKER_TOKEN", WORKER_TOKEN)
+    monkeypatch.setenv("WORKER_TOKEN", WORKER_TOKEN)
     route_called = False
 
     async def route(_scope, receive, send):
@@ -114,7 +114,7 @@ def test_missing_worker_token_is_rejected_without_consuming_request_body(
 
 
 def test_main_app_installs_upload_boundary_before_body_parsing(monkeypatch):
-    monkeypatch.setenv("WMS_WORKER_TOKEN", WORKER_TOKEN)
+    monkeypatch.setenv("WORKER_TOKEN", WORKER_TOKEN)
     from main import app
 
     sent, receive_calls = asyncio.run(_exchange(
@@ -154,7 +154,7 @@ def test_main_app_authenticates_every_route_shape_before_body_parsing(
     path,
     root_path,
 ):
-    monkeypatch.setenv("WMS_WORKER_TOKEN", WORKER_TOKEN)
+    monkeypatch.setenv("WORKER_TOKEN", WORKER_TOKEN)
     from main import app
 
     sent, receive_calls = asyncio.run(_exchange(
@@ -177,13 +177,13 @@ def test_main_app_authenticates_every_route_shape_before_body_parsing(
 
 
 def test_main_app_applies_body_limit_for_valid_worker_token(monkeypatch):
-    monkeypatch.setenv("WMS_WORKER_TOKEN", WORKER_TOKEN)
+    monkeypatch.setenv("WORKER_TOKEN", WORKER_TOKEN)
     from main import app
 
     sent, receive_calls = asyncio.run(_exchange(
         app,
         headers=[
-            (b"x-wms-worker-token", WORKER_TOKEN.encode()),
+            (b"x-worker-token", WORKER_TOKEN.encode()),
             (b"content-length", str(102 * 1024 * 1024).encode()),
         ],
         messages=[{
@@ -213,7 +213,7 @@ def test_boundary_does_not_intercept_adjacent_route_shapes(
     path,
     method,
 ):
-    monkeypatch.setenv("WMS_WORKER_TOKEN", WORKER_TOKEN)
+    monkeypatch.setenv("WORKER_TOKEN", WORKER_TOKEN)
     route_called = False
 
     async def route(_scope, receive, send):
@@ -242,7 +242,7 @@ def test_boundary_does_not_intercept_adjacent_route_shapes(
 
 
 def test_conflicting_worker_token_headers_are_auth_failure(monkeypatch):
-    monkeypatch.setenv("WMS_WORKER_TOKEN", WORKER_TOKEN)
+    monkeypatch.setenv("WORKER_TOKEN", WORKER_TOKEN)
     app = SpeechWorkerUploadBoundary(
         lambda _scope, _receive, _send: None,
     )
@@ -250,8 +250,8 @@ def test_conflicting_worker_token_headers_are_auth_failure(monkeypatch):
     sent, receive_calls = asyncio.run(_exchange(
         app,
         headers=[
-            (b"x-wms-worker-token", WORKER_TOKEN.encode()),
-            (b"x-wms-worker-token", b"different-worker-token-value"),
+            (b"x-worker-token", WORKER_TOKEN.encode()),
+            (b"x-worker-token", b"different-worker-token-value"),
         ],
         messages=[{
             "type": "http.request",
@@ -265,7 +265,7 @@ def test_conflicting_worker_token_headers_are_auth_failure(monkeypatch):
 
 
 def test_unconfigured_worker_token_precedes_conflicting_headers(monkeypatch):
-    monkeypatch.delenv("WMS_WORKER_TOKEN", raising=False)
+    monkeypatch.delenv("WORKER_TOKEN", raising=False)
     app = SpeechWorkerUploadBoundary(
         lambda _scope, _receive, _send: None,
     )
@@ -273,8 +273,8 @@ def test_unconfigured_worker_token_precedes_conflicting_headers(monkeypatch):
     sent, receive_calls = asyncio.run(_exchange(
         app,
         headers=[
-            (b"x-wms-worker-token", b"first-worker-token-value"),
-            (b"x-wms-worker-token", b"second-worker-token-value"),
+            (b"x-worker-token", b"first-worker-token-value"),
+            (b"x-worker-token", b"second-worker-token-value"),
         ],
         messages=[{
             "type": "http.request",
@@ -290,7 +290,7 @@ def test_unconfigured_worker_token_precedes_conflicting_headers(monkeypatch):
 def test_oversized_content_length_is_rejected_without_consuming_body(
     monkeypatch,
 ):
-    monkeypatch.setenv("WMS_WORKER_TOKEN", WORKER_TOKEN)
+    monkeypatch.setenv("WORKER_TOKEN", WORKER_TOKEN)
     route_called = False
 
     async def route(_scope, receive, send):
@@ -308,7 +308,7 @@ def test_oversized_content_length_is_rejected_without_consuming_body(
     sent, receive_calls = asyncio.run(_exchange(
         app,
         headers=[
-            (b"x-wms-worker-token", WORKER_TOKEN.encode()),
+            (b"x-worker-token", WORKER_TOKEN.encode()),
             (b"content-length", b"13"),
         ],
         messages=[{
@@ -326,7 +326,7 @@ def test_oversized_content_length_is_rejected_without_consuming_body(
 def test_chunked_body_is_stopped_at_bounded_receive_before_route(
     monkeypatch,
 ):
-    monkeypatch.setenv("WMS_WORKER_TOKEN", WORKER_TOKEN)
+    monkeypatch.setenv("WORKER_TOKEN", WORKER_TOKEN)
     route_called = False
 
     async def route(_scope, receive, send):
@@ -346,7 +346,7 @@ def test_chunked_body_is_stopped_at_bounded_receive_before_route(
     )
     sent, receive_calls = asyncio.run(_exchange(
         app,
-        headers=[(b"x-wms-worker-token", WORKER_TOKEN.encode())],
+        headers=[(b"x-worker-token", WORKER_TOKEN.encode())],
         messages=[
             {
                 "type": "http.request",

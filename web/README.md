@@ -3,22 +3,22 @@
 Next.js 前端应用。完整本地运行时应从项目根目录统一启动：
 
 ```bash
-export WMS_WORKER_TOKEN="$(openssl rand -hex 32)"
+export WORKER_TOKEN="$(openssl rand -hex 32)"
 ./dev.sh
 ```
 
 默认 Web 为 `http://localhost:3000`、API 为
 `http://localhost:8000`、worker 使用 `content-jobs` 队列，宿主机 Redis
-为 `redis://127.0.0.1:6379/0`。`WMS_WORKER_TOKEN` 必须至少 32 字符，
+为 `redis://127.0.0.1:6379/0`。`WORKER_TOKEN` 必须至少 32 字符，
 并由 API 与 worker 共享。API、worker 与 Web 会按统一配置指纹整体复用或
 替换；worker 必须完成 Redis 连接与启动协调，并使用脚本传入的
-`WMS_WORKER_READY_FILE` 发布匹配当前进程标记和配置指纹的原子就绪握手，
+`WORKER_READY_FILE` 发布匹配当前进程标记和配置指纹的原子就绪握手，
 仅有进程存活不算就绪。已有健康 Redis 会作为 external 服务复用且不会被
 `./dev.sh stop` 停止；完整状态与日志可用 `./dev.sh status` 和
 `./dev.sh logs` 查看。
 
 前端 API 地址由 `NEXT_PUBLIC_API_URL` 配置；统一脚本会按实际
-`WMS_API_PORT` 自动设置。默认 CORS 同时包含当前 Web 端口的
+`API_PORT` 自动设置。默认 CORS 同时包含当前 Web 端口的
 `127.0.0.1` 与 `localhost` 地址。完整启动、ready 文件格式、端口覆盖和
 进程所有权规则见项目根目录 `README.md`。
 
@@ -36,4 +36,4 @@ MiMo 语音凭据只保留在服务端，官方 base URL 为
 数字人口播由 Python API 保存角色、作品、版本与创作资产，统一脚本启动的
 Node worker 调用 HeyGen。
 
-HeyGen API Key 优先在「设置 → HeyGen」保存，也可在 API 环境中设置 `HEYGEN_API_KEY` 作为回退。角色素材只接受 PNG/JPEG 与 MP3/WAV，且发送给 HeyGen 的单文件上限为 32MB。声音克隆要求 HeyGen 套餐具备相应权限；成片完成后会被下载到后端本地 uploads，而不是长期引用 HeyGen 的临时 URL。
+HeyGen API Key 只在「设置 → HeyGen」保存；API 与 worker 通过受保护的运行时接口读取配置，不从环境变量回退。角色素材只接受 PNG/JPEG 与 MP3/WAV，且发送给 HeyGen 的单文件上限为 32MB。声音克隆要求 HeyGen 套餐具备相应权限；成片完成后会被下载到后端本地 uploads，而不是长期引用 HeyGen 的临时 URL。

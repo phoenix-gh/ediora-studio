@@ -11,7 +11,7 @@ describe('durable job retryability', () => {
   it.each([
     ['false', false],
     ['true', true],
-  ])('preserves X-WMS-Retryable=%s in fail-step payload', async (header, expected) => {
+  ])('preserves X-Retryable=%s in fail-step payload', async (header, expected) => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(
         JSON.stringify({ detail: 'safe Telegram failure' }),
@@ -19,7 +19,7 @@ describe('durable job retryability', () => {
           status: 503,
           headers: {
             'Content-Type': 'application/json',
-            'X-WMS-Retryable': header,
+            'X-Retryable': header,
           },
         },
       ))

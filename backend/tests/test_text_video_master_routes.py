@@ -11,14 +11,14 @@ from tests.test_media_command import sine_wave
 
 
 WORKER_HEADERS = {
-    "X-WMS-Worker-Token": "test-worker-token-at-least-32-chars",
+    "X-Worker-Token": "test-worker-token-at-least-32-chars",
 }
 
 
 @pytest.fixture
 def master_client(monkeypatch, tmp_path, postgres_env):
     monkeypatch.setenv(
-        "WMS_WORKER_TOKEN",
+        "WORKER_TOKEN",
         "test-worker-token-at-least-32-chars",
     )
     for module in list(sys.modules):
@@ -619,7 +619,7 @@ def test_alignment_failure_endpoint_requires_and_validates_current_claim(
 
     assert missing.status_code == 422
     assert stale.status_code == 409
-    assert stale.headers["X-WMS-Retryable"] == "false"
+    assert stale.headers["X-Retryable"] == "false"
     assert acknowledged_unknown.status_code == 200
     assert acknowledged_unknown.json()["failure_applied"] is False
     assert current["master_audio"]["timeline_status"] == "aligning"
@@ -700,7 +700,7 @@ def test_competing_worker_cannot_retry_paid_work_after_owner_domain_failure(
                     session,
                 )
         assert replayed.value.status_code == 422
-        assert replayed.value.headers["X-WMS-Retryable"] == "true"
+        assert replayed.value.headers["X-Retryable"] == "true"
         competitor = master_client["router"].MasterAlignRequest(
             source_hash=assembled["source_hash"],
             step_id=owner["step_id"],
@@ -1173,7 +1173,7 @@ def test_stale_job_id_cannot_persist_a_new_master_asset(master_client):
             return await session.scalar(select(func.count(CreativeAsset.id)))
 
     assert response.status_code == 409
-    assert response.headers["X-WMS-Retryable"] == "false"
+    assert response.headers["X-Retryable"] == "false"
     assert asyncio.run(asset_count()) == before
 
 
@@ -1200,7 +1200,7 @@ def test_failed_job_late_assembly_cannot_mutate_master(master_client):
     ).json()
 
     assert response.status_code == 409
-    assert response.headers["X-WMS-Retryable"] == "false"
+    assert response.headers["X-Retryable"] == "false"
     assert current["master_audio"]["status"] == "building"
     assert current["master_audio"]["asset_id"] is None
 
@@ -1234,7 +1234,7 @@ def test_stale_ordered_asset_snapshot_cannot_complete_assembly(
     response = _assemble(master_client, project["id"], job["id"])
 
     assert response.status_code == 409
-    assert response.headers["X-WMS-Retryable"] == "false"
+    assert response.headers["X-Retryable"] == "false"
 
 
 def test_begin_alignment_rejects_a_second_live_claim(master_client):
@@ -1809,7 +1809,7 @@ def test_failed_alignment_retry_attempt_can_claim_and_complete(
         assembled["source_hash"],
     )
     assert failed.status_code == 422
-    assert failed.headers["X-WMS-Retryable"] == "true"
+    assert failed.headers["X-Retryable"] == "true"
     failed_step = master_client["client"].post(
         f"/api/jobs/{job['id']}/steps/{first_step['id']}/fail",
         json={"error": "provider timeout", "retryable": True},
@@ -1881,4 +1881,4 @@ def test_alignment_failure_report_race_returns_explicit_stale_conflict(
     )
 
     assert response.status_code == 409
-    assert response.headers["X-WMS-Retryable"] == "false"
+    assert response.headers["X-Retryable"] == "false"

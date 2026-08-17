@@ -10,7 +10,7 @@ def test_worker_context_uses_its_job_run_before_a_current_analysis_exists(
     postgres_env,
 ):
     monkeypatch.setenv(
-        "WMS_WORKER_TOKEN",
+        "WORKER_TOKEN",
         "test-worker-token-at-least-32-chars",
     )
     for name in list(sys.modules):
@@ -54,7 +54,7 @@ def test_worker_context_uses_its_job_run_before_a_current_analysis_exists(
     response = client.get(
         f"/api/responses/{item_id}/worker-context",
         headers={
-            "X-WMS-Worker-Token": "test-worker-token-at-least-32-chars",
+            "X-Worker-Token": "test-worker-token-at-least-32-chars",
             "X-Content-Job-Id": str(job_id),
         },
     )

@@ -10,10 +10,10 @@ from fastapi.testclient import TestClient
 @pytest.fixture
 def client(monkeypatch, postgres_env):
     monkeypatch.setenv(
-        "WMS_WORKER_TOKEN",
+        "WORKER_TOKEN",
         "test-worker-token-at-least-32-characters",
     )
-    monkeypatch.setenv("WMS_WORKER_QUEUE", "api-private-content-jobs")
+    monkeypatch.setenv("WORKER_QUEUE", "api-private-content-jobs")
     for module in list(sys.modules):
         if module.startswith(("database", "models", "content_jobs", "routers.jobs")):
             sys.modules.pop(module, None)
@@ -272,7 +272,7 @@ def test_worker_reconcile_requires_worker_auth_takes_no_body_and_closes_queue(
     response = client.post(
         "/api/jobs/worker-reconcile",
         headers={
-            "X-WMS-Worker-Token":
+            "X-Worker-Token":
                 "test-worker-token-at-least-32-characters",
         },
     )

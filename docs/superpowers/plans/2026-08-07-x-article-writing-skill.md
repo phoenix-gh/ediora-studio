@@ -6,7 +6,7 @@
 
 **Architecture:** Add one bundled Skill package under the existing `web/skills` registry root. Keep the main `SKILL.md` concise and route detailed structure, opening/layout, and quality guidance into three on-demand Markdown references; extend the bundled-skill integration test to verify discovery, boundaries, readable references, and lifecycle behavior.
 
-**Tech Stack:** Markdown Agent Skills, `WMS_SKILL.json`, TypeScript, Vitest, existing Ediora Skill registry.
+**Tech Stack:** Markdown Agent Skills, `SKILL.json`, TypeScript, Vitest, existing Ediora Skill registry.
 
 ## Global Constraints
 
@@ -74,7 +74,7 @@ Expected: FAIL because `x-article-writing` is absent from bundled discovery.
 
 **Files:**
 - Create: `web/skills/x-article-writing/SKILL.md`
-- Create: `web/skills/x-article-writing/WMS_SKILL.json`
+- Create: `web/skills/x-article-writing/SKILL.json`
 - Create: `web/skills/x-article-writing/references/article-structure.md`
 - Create: `web/skills/x-article-writing/references/hooks-and-layout.md`
 - Create: `web/skills/x-article-writing/references/quality-check.md`

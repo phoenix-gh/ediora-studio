@@ -307,7 +307,7 @@ async def extract_video_transcript(video_id: str, db: AsyncSession = Depends(get
         video.transcript_error_code = exc.code
         video.transcript_error = str(exc)[:500]
         await db.commit()
-        headers = {"X-WMS-Retryable": "true" if exc.retryable else "false"}
+        headers = {"X-Retryable": "true" if exc.retryable else "false"}
         raise HTTPException(422, str(exc), headers=headers) from exc
     video.transcript_status = "ready"
     video.transcript_source = result["source"]

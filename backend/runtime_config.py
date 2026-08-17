@@ -19,23 +19,23 @@ class RuntimeSettings:
 
 def get_runtime_settings() -> RuntimeSettings:
     return RuntimeSettings(
-        redis_url=os.getenv("WMS_REDIS_URL", "redis://redis:6379/0"),
-        worker_queue=os.getenv("WMS_WORKER_QUEUE", "content-jobs"),
+        redis_url=os.getenv("REDIS_URL", "redis://redis:6379/0"),
+        worker_queue=os.getenv("WORKER_QUEUE", "content-jobs"),
         video_worker_queue=os.getenv(
-            "WMS_VIDEO_WORKER_QUEUE",
+            "VIDEO_WORKER_QUEUE",
             "content-jobs:video",
         ),
         local_asr_url=os.getenv(
-            "WMS_LOCAL_ASR_URL",
+            "LOCAL_ASR_URL",
             "http://127.0.0.1:8001/v1",
         ),
         local_asr_model=os.getenv(
-            "WMS_LOCAL_ASR_MODEL",
+            "LOCAL_ASR_MODEL",
             "Systran/faster-whisper-large-v3",
         ),
-        local_asr_device=os.getenv("WMS_LOCAL_ASR_DEVICE", "cuda"),
+        local_asr_device=os.getenv("LOCAL_ASR_DEVICE", "cuda"),
         local_asr_compute_type=os.getenv(
-            "WMS_LOCAL_ASR_COMPUTE_TYPE",
+            "LOCAL_ASR_COMPUTE_TYPE",
             "float16",
         ),
     )

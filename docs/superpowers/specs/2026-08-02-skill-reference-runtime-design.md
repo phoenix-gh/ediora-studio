@@ -140,9 +140,9 @@ The defaults are constants and may be overridden by positive integer environment
 
 | Limit | Default | Environment variable |
 |---|---:|---|
-| Reference catalog entries | 200 | `WMS_SKILLS_MAX_REFERENCES` |
-| Single reference bytes | 131072 | `WMS_SKILLS_MAX_REFERENCE_BYTES` |
-| Context or Chat request reference bytes | 524288 | `WMS_SKILLS_MAX_REFERENCE_CONTEXT_BYTES` |
+| Reference catalog entries | 200 | `SKILLS_MAX_REFERENCES` |
+| Single reference bytes | 131072 | `SKILLS_MAX_REFERENCE_BYTES` |
+| Context or Chat request reference bytes | 524288 | `SKILLS_MAX_REFERENCE_CONTEXT_BYTES` |
 
 These limits are separate from ZIP archive and unpacked-size limits.
 

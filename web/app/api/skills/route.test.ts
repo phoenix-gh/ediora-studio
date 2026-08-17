@@ -31,17 +31,17 @@ describe('Skill management API', () => {
   beforeEach(async () => {
     bundledDir = await mkdtemp(join(tmpdir(), 'wms-api-skill-bundled-'))
     runtimeDir = await mkdtemp(join(tmpdir(), 'wms-api-skill-runtime-'))
-    process.env.WMS_SKILLS_BUNDLED_DIR = bundledDir
-    process.env.WMS_SKILLS_RUNTIME_DIR = runtimeDir
-    process.env.WMS_SKILLS_STATE_FILE = join(runtimeDir, 'skills-state.json')
+    process.env.SKILLS_BUNDLED_DIR = bundledDir
+    process.env.SKILLS_RUNTIME_DIR = runtimeDir
+    process.env.SKILLS_STATE_FILE = join(runtimeDir, 'skills-state.json')
     await writeSkill(bundledDir, 'alpha', 'Alpha')
   })
 
   afterEach(async () => {
-    delete process.env.WMS_SKILLS_BUNDLED_DIR
-    delete process.env.WMS_SKILLS_RUNTIME_DIR
-    delete process.env.WMS_SKILLS_STATE_FILE
-    delete process.env.WMS_SKILLS_MAX_UNPACKED_BYTES
+    delete process.env.SKILLS_BUNDLED_DIR
+    delete process.env.SKILLS_RUNTIME_DIR
+    delete process.env.SKILLS_STATE_FILE
+    delete process.env.SKILLS_MAX_UNPACKED_BYTES
     await Promise.all([
       rm(bundledDir, { recursive: true, force: true }),
       rm(runtimeDir, { recursive: true, force: true }),
@@ -73,7 +73,7 @@ describe('Skill management API', () => {
     const conflict = await POST(uploadRequest(archive('Alpha')))
     expect(conflict.status).toBe(409)
 
-    process.env.WMS_SKILLS_MAX_UNPACKED_BYTES = '10'
+    process.env.SKILLS_MAX_UNPACKED_BYTES = '10'
     const tooLarge = await POST(uploadRequest(archive('Large')))
     expect(tooLarge.status).toBe(413)
   })

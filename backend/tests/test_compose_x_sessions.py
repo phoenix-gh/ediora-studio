@@ -23,12 +23,7 @@ def _compose_environment() -> dict[str, str]:
     environment = {key: os.environ[key] for key in allowed if key in os.environ}
     environment.update(
         {
-            "WMS_WORKER_TOKEN": VALID_TOKEN,
-            "WMS_LLM_API_KEY": "",
-            "WMS_IMAGE_API_KEY": "",
-            "WMS_SPEECH_API_KEY": "",
-            "MIMO_API_KEY": "",
-            "HEYGEN_API_KEY": "",
+            "WORKER_TOKEN": VALID_TOKEN,
         }
     )
     return environment

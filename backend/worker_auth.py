@@ -9,7 +9,7 @@ from fastapi import Header, HTTPException
 
 
 def validate_worker_token(supplied: str | None) -> None:
-    expected = os.getenv("WMS_WORKER_TOKEN", "")
+    expected = os.getenv("WORKER_TOKEN", "")
     if len(expected) < 32:
         raise HTTPException(503, "后台 worker 令牌未配置")
     if supplied is None or not hmac.compare_digest(supplied, expected):
@@ -17,6 +17,6 @@ def validate_worker_token(supplied: str | None) -> None:
 
 
 def require_worker_token(
-    supplied: str | None = Header(default=None, alias="X-WMS-Worker-Token"),
+    supplied: str | None = Header(default=None, alias="X-Worker-Token"),
 ) -> None:
     validate_worker_token(supplied)

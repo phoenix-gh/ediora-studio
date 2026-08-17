@@ -289,7 +289,7 @@ export async function openGlobalAgentTools({
       type: 'http',
       url: mcpEndpoint,
       ...(dailyCreationRunId === undefined ? {} : {
-        headers: { 'X-WMS-Daily-Creation-Run-Id': String(dailyCreationRunId) },
+        headers: { 'X-Daily-Creation-Run-Id': String(dailyCreationRunId) },
       }),
     },
   })

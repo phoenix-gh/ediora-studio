@@ -658,7 +658,7 @@ async def topic_source_candidates(
 async def save_topic_source_candidates(
     rule_id: int,
     body: TopicSourceAccept,
-    worker_token: str | None = Header(default=None, alias="X-WMS-Worker-Token"),
+    worker_token: str | None = Header(default=None, alias="X-Worker-Token"),
     db: AsyncSession = Depends(get_db),
 ):
     require_worker_token(worker_token)
@@ -739,7 +739,7 @@ async def asset_ingestion_candidates(
 @router.post("/ingestion/accepted")
 async def save_asset_ingestion_decisions(
     body: AssetIngestionAccept,
-    worker_token: str | None = Header(default=None, alias="X-WMS-Worker-Token"),
+    worker_token: str | None = Header(default=None, alias="X-Worker-Token"),
     db: AsyncSession = Depends(get_db),
 ):
     require_worker_token(worker_token)
@@ -1029,7 +1029,7 @@ async def attach_prompt_generation(
 async def succeed_prompt_generation(
     generation_id: int,
     body: PromptGenerationSucceed,
-    worker_token: str | None = Header(default=None, alias="X-WMS-Worker-Token"),
+    worker_token: str | None = Header(default=None, alias="X-Worker-Token"),
     db: AsyncSession = Depends(get_db),
 ):
     require_worker_token(worker_token)
@@ -1067,7 +1067,7 @@ async def succeed_prompt_generation(
 async def fail_prompt_generation(
     generation_id: int,
     body: PromptGenerationFail,
-    worker_token: str | None = Header(default=None, alias="X-WMS-Worker-Token"),
+    worker_token: str | None = Header(default=None, alias="X-Worker-Token"),
     db: AsyncSession = Depends(get_db),
 ):
     require_worker_token(worker_token)
@@ -1252,7 +1252,7 @@ async def upload_asset(
     directory: str = "",
     job_id: int | None = Header(default=None, alias="X-Content-Job-Id"),
     worker_token: str | None = Header(
-        default=None, alias="X-WMS-Worker-Token"
+        default=None, alias="X-Worker-Token"
     ),
     db: AsyncSession = Depends(get_db),
 ):

@@ -2,13 +2,13 @@ import importlib
 
 
 def test_runtime_settings_default_to_self_hosted_services(monkeypatch):
-    monkeypatch.delenv("WMS_REDIS_URL", raising=False)
-    monkeypatch.delenv("WMS_WORKER_QUEUE", raising=False)
-    monkeypatch.delenv("WMS_VIDEO_WORKER_QUEUE", raising=False)
-    monkeypatch.delenv("WMS_LOCAL_ASR_URL", raising=False)
-    monkeypatch.delenv("WMS_LOCAL_ASR_MODEL", raising=False)
-    monkeypatch.delenv("WMS_LOCAL_ASR_DEVICE", raising=False)
-    monkeypatch.delenv("WMS_LOCAL_ASR_COMPUTE_TYPE", raising=False)
+    monkeypatch.delenv("REDIS_URL", raising=False)
+    monkeypatch.delenv("WORKER_QUEUE", raising=False)
+    monkeypatch.delenv("VIDEO_WORKER_QUEUE", raising=False)
+    monkeypatch.delenv("LOCAL_ASR_URL", raising=False)
+    monkeypatch.delenv("LOCAL_ASR_MODEL", raising=False)
+    monkeypatch.delenv("LOCAL_ASR_DEVICE", raising=False)
+    monkeypatch.delenv("LOCAL_ASR_COMPUTE_TYPE", raising=False)
     import runtime_config
 
     importlib.reload(runtime_config)

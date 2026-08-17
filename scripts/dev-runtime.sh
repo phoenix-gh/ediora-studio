@@ -43,7 +43,7 @@ dev_marker_matches() {
   [[ "$pid" =~ ^[0-9]+$ ]] || return 1
   [ -r "/proc/$pid/environ" ] || return 1
   tr '\0' '\n' <"/proc/$pid/environ" 2>/dev/null \
-    | grep -Fqx "WMS_DEV_SERVICE_MARKER=$marker"
+    | grep -Fqx "DEV_SERVICE_MARKER=$marker"
 }
 
 dev_owned_group_member_pids() {
@@ -151,8 +151,8 @@ dev_start_owned_service() {
     config_fingerprint="$5"
     shift 5
 
-    export WMS_DEV_SERVICE_MARKER="$marker"
-    export WMS_DEV_CONFIG_FINGERPRINT="$config_fingerprint"
+    export DEV_SERVICE_MARKER="$marker"
+    export DEV_CONFIG_FINGERPRINT="$config_fingerprint"
     pid="$$"
     pgid="$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d "[:space:]")"
     stat="$(cat "/proc/$pid/stat")"
@@ -178,8 +178,8 @@ dev_start_owned_service() {
   launcher_pid=$!
 
   if ! dev_wait_for \
-    "${WMS_DEV_READY_TIMEOUT_SECONDS:-30}" \
-    "${WMS_DEV_POLL_INTERVAL_SECONDS:-0.1}" \
+    "${DEV_READY_TIMEOUT_SECONDS:-30}" \
+    "${DEV_POLL_INTERVAL_SECONDS:-0.1}" \
     dev_owned_identity_matches "$service" "$metadata_file"; then
     local actual_pgid recorded_marker recorded_service cleanup_failed=0
     recorded_marker="$(dev_meta_value "$metadata_file" marker 2>/dev/null)" \
@@ -197,8 +197,8 @@ dev_start_owned_service() {
         && dev_marker_matches "$launcher_pid" "$marker"; then
         kill -TERM -- "-$actual_pgid" 2>/dev/null || true
         dev_wait_for \
-          "${WMS_DEV_STOP_TIMEOUT_SECONDS:-8}" \
-          "${WMS_DEV_POLL_INTERVAL_SECONDS:-0.1}" \
+          "${DEV_STOP_TIMEOUT_SECONDS:-8}" \
+          "${DEV_POLL_INTERVAL_SECONDS:-0.1}" \
           dev_launcher_stopped "$launcher_pid" || true
         if kill -0 "$launcher_pid" 2>/dev/null; then
           kill -KILL -- "-$actual_pgid" 2>/dev/null || true
@@ -249,13 +249,13 @@ dev_stop_owned_service() {
 
   kill -TERM -- "-$pgid" 2>/dev/null || true
   dev_wait_for \
-    "${WMS_DEV_STOP_TIMEOUT_SECONDS:-8}" \
-    "${WMS_DEV_POLL_INTERVAL_SECONDS:-0.1}" \
+    "${DEV_STOP_TIMEOUT_SECONDS:-8}" \
+    "${DEV_POLL_INTERVAL_SECONDS:-0.1}" \
     dev_owned_group_stopped "$metadata_file" || true
 
   if dev_owned_group_has_members "$metadata_file"; then
     kill -KILL -- "-$pgid" 2>/dev/null || true
-    dev_wait_for 1 "${WMS_DEV_POLL_INTERVAL_SECONDS:-0.1}" \
+    dev_wait_for 1 "${DEV_POLL_INTERVAL_SECONDS:-0.1}" \
       dev_owned_group_stopped "$metadata_file" || true
   fi
   if dev_owned_group_has_members "$metadata_file"; then

@@ -40,7 +40,7 @@
 
 - [ ] **Step 2: Run the focused tests and verify they fail for the missing contract**
 
-  Run: `WMS_DATABASE_URL=sqlite+aiosqlite:///... /home/violet/miniconda3/envs/wems/bin/python -m pytest backend/tests/test_x_router.py -k intelligence -q`
+  Run: `DATABASE_URL=sqlite+aiosqlite:///... /home/violet/miniconda3/envs/wems/bin/python -m pytest backend/tests/test_x_router.py -k intelligence -q`
 
   Expected: failures because the response schema and patch payload still use `notify_new_posts`.
 

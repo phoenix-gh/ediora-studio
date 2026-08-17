@@ -32,13 +32,13 @@ describe('global chat model history', () => {
   })
 
   it('guards the generic Skill runtime with an opt-out switch', () => {
-    const previous = process.env.WMS_GENERIC_SKILL_RUNTIME
-    delete process.env.WMS_GENERIC_SKILL_RUNTIME
+    const previous = process.env.GENERIC_SKILL_RUNTIME
+    delete process.env.GENERIC_SKILL_RUNTIME
     expect(genericSkillRuntimeEnabled()).toBe(true)
-    process.env.WMS_GENERIC_SKILL_RUNTIME = '0'
+    process.env.GENERIC_SKILL_RUNTIME = '0'
     expect(genericSkillRuntimeEnabled()).toBe(false)
-    if (previous === undefined) delete process.env.WMS_GENERIC_SKILL_RUNTIME
-    else process.env.WMS_GENERIC_SKILL_RUNTIME = previous
+    if (previous === undefined) delete process.env.GENERIC_SKILL_RUNTIME
+    else process.env.GENERIC_SKILL_RUNTIME = previous
   })
 
   it('converts a completed shared Agent result into the Chat UI stream', async () => {

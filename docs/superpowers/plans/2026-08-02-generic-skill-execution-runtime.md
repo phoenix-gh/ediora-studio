@@ -4,7 +4,7 @@
 
 **Goal:** Execute every bundled or uploaded Skill through a generic, traceable plan, evidence, validation, and bounded-revision lifecycle.
 
-**Architecture:** Add a provider-independent `SkillRun` domain layer, then an AI SDK adapter that creates structured plans and validations while retaining the existing tool and approval system. Integrate it behind `WMS_GENERIC_SKILL_RUNTIME=1`; legacy non-Skill chat remains unchanged until focused and live compatibility checks pass.
+**Architecture:** Add a provider-independent `SkillRun` domain layer, then an AI SDK adapter that creates structured plans and validations while retaining the existing tool and approval system. Integrate it behind `GENERIC_SKILL_RUNTIME=1`; legacy non-Skill chat remains unchanged until focused and live compatibility checks pass.
 
 **Tech Stack:** Next.js 16 route handlers, AI SDK 7, TypeScript, Zod 4, Vitest, existing filesystem Skill registry and MCP tools.
 
@@ -167,7 +167,7 @@ type ChatSkillRuntime = {
 
 Do not mark declared preloads as read evidence. Keep caching in `createSkillReferenceReader`, and make `readReferences` accept only paths listed for the active Skill.
 
-Extend the existing strict `WMS_SKILL.json` parser with `execution?: SkillExecutionHints`. Return normalized hints from the registered Skill metadata; do not accept scripts, commands, module paths, or validator code from the archive.
+Extend the existing strict `SKILL.json` parser with `execution?: SkillExecutionHints`. Return normalized hints from the registered Skill metadata; do not accept scripts, commands, module paths, or validator code from the archive.
 
 - [ ] **Step 4: Run tests and verify GREEN**
 
@@ -349,7 +349,7 @@ git commit -m "feat: orchestrate verified skill runs"
 - Modify: `web/app/api/chat/route.test.ts`
 
 **Interfaces:**
-- Consumes: `executeSkillRunWithAiSdk`, existing persisted session messages, and `WMS_GENERIC_SKILL_RUNTIME`.
+- Consumes: `executeSkillRunWithAiSdk`, existing persisted session messages, and `GENERIC_SKILL_RUNTIME`.
 - Produces: optional `skill_run` audit metadata on assistant messages and guarded route selection between verified and legacy paths.
 
 - [ ] **Step 1: Write failing backend audit tests**
@@ -387,10 +387,10 @@ Add a nullable JSON column through the existing idempotent migration pattern. Va
 Assert:
 
 ```ts
-process.env.WMS_GENERIC_SKILL_RUNTIME = '1'
+process.env.GENERIC_SKILL_RUNTIME = '1'
 // active Skill uses executeSkillRunWithAiSdk and persists skill_run
 
-delete process.env.WMS_GENERIC_SKILL_RUNTIME
+delete process.env.GENERIC_SKILL_RUNTIME
 // non-Skill and legacy flows retain streamText behavior
 ```
 

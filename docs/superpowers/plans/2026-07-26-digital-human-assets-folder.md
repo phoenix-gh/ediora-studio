@@ -586,7 +586,7 @@ Run:
 ```bash
 docker compose build api web
 shared_worker_token=$(openssl rand -hex 32)
-WMS_WORKER_TOKEN="$shared_worker_token" \
+WORKER_TOKEN="$shared_worker_token" \
   docker compose up -d --no-deps --force-recreate api worker web
 docker compose ps
 ```

@@ -1183,11 +1183,11 @@ First reuse project 2's confirmed master audio without modifying that project, r
 V2 fixture through Remotion, and inspect its streams:
 
 ```bash
-WMS_AUDIT_AUDIO_URL="$(
+AUDIT_AUDIO_URL="$(
   curl -fsS http://localhost:8000/api/text-videos/2 \
     | jq -r '.master_audio.audio_url'
 )"
-jq --arg audio "http://localhost:8000${WMS_AUDIT_AUDIO_URL}" \
+jq --arg audio "http://localhost:8000${AUDIT_AUDIO_URL}" \
   '.audio = $audio' \
   remotion/fixtures/kinetic-punch-v2-audit.json \
   > /tmp/kinetic-v2-audio.json

@@ -152,7 +152,7 @@ async function multipartRequest<T>(
     const error = new Error(
       detail || `配音结果保存失败（HTTP ${response.status}）`,
     ) as Error & { retryable?: boolean; stale?: boolean }
-    error.retryable = response.headers.get('X-WMS-Retryable') !== 'false'
+    error.retryable = response.headers.get('X-Retryable') !== 'false'
     error.stale = response.status === 409 && error.retryable === false
     throw error
   }

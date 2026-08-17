@@ -3,7 +3,7 @@
 ## 目标
 
 将当前 Docker 运行环境中 API、Worker 和 Web 共用的
-`WMS_WORKER_TOKEN` 持久化到项目根目录 `.env`，确保以后直接执行
+`WORKER_TOKEN` 持久化到项目根目录 `.env`，确保以后直接执行
 Docker Compose 重建或重启时仍使用同一个有效 token。
 
 ## 当前状态
@@ -13,7 +13,7 @@ Docker Compose 重建或重启时仍使用同一个有效 token。
 - 项目根目录 `.env` 不存在，因此脱离原启动 shell 后执行
   `docker compose up` 会把 Worker token 解析为空值。
 - 根目录 `.gitignore` 已忽略 `.env`，`.env.example` 已保留空的
-  `WMS_WORKER_TOKEN=` 配置示例。
+  `WORKER_TOKEN=` 配置示例。
 
 ## 设计
 
@@ -22,7 +22,7 @@ Docker Compose 重建或重启时仍使用同一个有效 token。
 3. 在项目根目录创建 `.env`，仅写入：
 
    ```dotenv
-   WMS_WORKER_TOKEN=<current-runtime-token>
+   WORKER_TOKEN=<current-runtime-token>
    ```
 
 4. 文件权限设置为 `600`，只允许当前用户读写。

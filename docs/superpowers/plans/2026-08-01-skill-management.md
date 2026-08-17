@@ -56,7 +56,7 @@
 
 - [ ] **Step 1: Write failing registry tests**
 
-Create temporary bundled/runtime directories in `beforeEach`, set `WMS_SKILLS_BUNDLED_DIR` and `WMS_SKILLS_RUNTIME_DIR`, write fixture `SKILL.md` files, and assert:
+Create temporary bundled/runtime directories in `beforeEach`, set `SKILLS_BUNDLED_DIR` and `SKILLS_RUNTIME_DIR`, write fixture `SKILL.md` files, and assert:
 
 ```ts
 it('lists bundled Skills enabled by default and persists a toggle', async () => {

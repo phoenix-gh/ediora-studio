@@ -101,7 +101,7 @@ When validation fails, the runtime performs at most one revision using the origi
 
 ## Optional Manifest
 
-`WMS_SKILL.json` remains optional. Standard Skills containing only `SKILL.md` continue to work. The manifest may provide machine-readable execution hints:
+`SKILL.json` remains optional. Standard Skills containing only `SKILL.md` continue to work. The manifest may provide machine-readable execution hints:
 
 ```json
 {

@@ -13,7 +13,7 @@
 - Default Compose startup must not require NVIDIA GPU, CUDA, or local-asr.
 - local-asr must remain available with `docker compose --profile local-asr up --build`.
 - `api`, `worker`, and `web` must resolve to one image tag; PostgreSQL, Redis, and local-asr are not bundled.
-- `NEXT_PUBLIC_API_URL` is a build argument with default `http://localhost:8000/api`; `WMS_API_URL` remains `http://api:8000/api`.
+- `NEXT_PUBLIC_API_URL` is a build argument with default `http://localhost:8000/api`; `API_URL` remains `http://api:8000/api`.
 - Preserve `/app` for API files, `/app/web` for Node services, `/app/uploads`, and `/app/sessions`.
 - Do not stage or modify unrelated digital-human/ComfyUI worktree changes.
 - Use `/home/violet/miniconda3/envs/wems/bin/python -m pytest` for backend tests.
@@ -44,10 +44,10 @@
 
 **Files:** Modify `docker-compose.yml`, `docker-compose.dev.yml`, `.env.example`, and `backend/tests/test_local_asr_compose.py` as needed by the new contract.
 
-**Interfaces:** Compose consumes `ediora-studio:local` or `${WMS_APP_IMAGE}:${WMS_IMAGE_TAG}` and produces independent API/worker/Web containers sharing that image.
+**Interfaces:** Compose consumes `ediora-studio:local` or `${APP_IMAGE}:${IMAGE_TAG}` and produces independent API/worker/Web containers sharing that image.
 
-- [ ] **Step 1: Add the shared image anchor.** Add `x-app-image: &app-image` with `image: ${WMS_APP_IMAGE:-ediora-studio}:${WMS_IMAGE_TAG:-local}`, merge it into `api`, `worker`, and `web`, and keep the only build block on API with context `.`, Dockerfile `Dockerfile`, and build arg `${NEXT_PUBLIC_API_URL:-http://localhost:8000/api}`.
-- [ ] **Step 2: Set service directories.** Keep API at `/app`; set worker and Web `working_dir: /app/web`. Keep `WMS_API_URL=http://api:8000/api` for server-side requests and the existing API/worker token guard.
+- [ ] **Step 1: Add the shared image anchor.** Add `x-app-image: &app-image` with `image: ${APP_IMAGE:-ediora-studio}:${IMAGE_TAG:-local}`, merge it into `api`, `worker`, and `web`, and keep the only build block on API with context `.`, Dockerfile `Dockerfile`, and build arg `${NEXT_PUBLIC_API_URL:-http://localhost:8000/api}`.
+- [ ] **Step 2: Set service directories.** Keep API at `/app`; set worker and Web `working_dir: /app/web`. Keep `API_URL=http://api:8000/api` for server-side requests and the existing API/worker token guard.
 - [ ] **Step 3: Gate local-asr.** Add `profiles: [local-asr]` to the existing local-asr service, preserve its CUDA/GPU/cache configuration, and keep it out of `api.depends_on`.
 - [ ] **Step 4: Preserve dev mounts.** Keep `./backend:/app`; change Web and worker mounts to `./web:/app/web` plus `/app/web/node_modules`, with `working_dir: /app/web`.
 - [ ] **Step 5: Add `NEXT_PUBLIC_API_URL=http://localhost:8000/api` to `.env.example` and run GREEN.** Run `/home/violet/miniconda3/envs/wems/bin/python -m pytest backend/tests/test_local_asr_compose.py -q` and `docker compose config --quiet`; expect both to pass.
@@ -59,8 +59,8 @@
 **Interfaces:** The workflow validates Compose, builds one image, verifies Python/Node dependencies without provider secrets or local-asr, and publishes GHCR tags only from `main` or an explicitly enabled manual run.
 
 - [ ] **Step 1: Add the standalone Web build argument.** Before `next build` in `web/Dockerfile`, add `ARG NEXT_PUBLIC_API_URL=http://localhost:8000/api` and `ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}`.
-- [ ] **Step 2: Create the workflow.** Use `push`, `pull_request`, and `workflow_dispatch`; keep the validation job at `permissions: contents: read`; set `WMS_APP_IMAGE=ediora-studio`, `WMS_IMAGE_TAG=ci-${{ github.sha }}`, and `NEXT_PUBLIC_API_URL=http://localhost:8000/api`; run `docker compose config --quiet`, `docker compose build api`, `docker compose run --rm --no-deps api python -c "import main"`, and `docker compose run --rm --no-deps worker node -e "console.log(require.resolve('tsx'))"`. Add a dependent publish job gated to `main` pushes or a manually enabled `publish` input, grant it only `contents: read` and `packages: write`, authenticate to `ghcr.io` with `GITHUB_TOKEN`, and use Docker metadata/build-push actions to publish `latest` and `sha-*` tags.
-- [ ] **Step 3: Update docs.** Explain that API/worker/Web share one built image, changing `NEXT_PUBLIC_API_URL` requires rebuilding, local-asr requires `docker compose --profile local-asr up --build`, and GHCR pulls use `WMS_APP_IMAGE=ghcr.io/phoenix-gh/ediora-studio` with `WMS_IMAGE_TAG=latest`. Do not add provider credentials.
+- [ ] **Step 2: Create the workflow.** Use `push`, `pull_request`, and `workflow_dispatch`; keep the validation job at `permissions: contents: read`; set `APP_IMAGE=ediora-studio`, `IMAGE_TAG=ci-${{ github.sha }}`, and `NEXT_PUBLIC_API_URL=http://localhost:8000/api`; run `docker compose config --quiet`, `docker compose build api`, `docker compose run --rm --no-deps api python -c "import main"`, and `docker compose run --rm --no-deps worker node -e "console.log(require.resolve('tsx'))"`. Add a dependent publish job gated to `main` pushes or a manually enabled `publish` input, grant it only `contents: read` and `packages: write`, authenticate to `ghcr.io` with `GITHUB_TOKEN`, and use Docker metadata/build-push actions to publish `latest` and `sha-*` tags.
+- [ ] **Step 3: Update docs.** Explain that API/worker/Web share one built image, changing `NEXT_PUBLIC_API_URL` requires rebuilding, local-asr requires `docker compose --profile local-asr up --build`, and GHCR pulls use `APP_IMAGE=ghcr.io/phoenix-gh/ediora-studio` with `IMAGE_TAG=latest`. Do not add provider credentials.
 - [ ] **Step 4: Run static checks.** Run `git diff --check` and `docker compose config --quiet`; expect no whitespace errors and valid Compose.
 
 ### Task 5: Build and run the usable local version

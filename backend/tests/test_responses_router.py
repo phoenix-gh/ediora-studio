@@ -27,7 +27,7 @@ def client(monkeypatch, postgres_env):
         return None
 
     monkeypatch.setattr(responses_router, "enqueue_job", no_op_enqueue)
-    monkeypatch.setenv("WMS_WORKER_TOKEN", "test-worker-token-at-least-32-chars")
+    monkeypatch.setenv("WORKER_TOKEN", "test-worker-token-at-least-32-chars")
     return TestClient(app)
 
 
@@ -303,7 +303,7 @@ def test_multi_platform_writing_creates_one_job_per_request_target_and_allows_la
 
 def test_platform_writing_outputs_link_independent_drafts_with_exact_markers(client):
     item_id, run_id = _seed_response()
-    headers = {"X-WMS-Worker-Token": "test-worker-token-at-least-32-chars"}
+    headers = {"X-Worker-Token": "test-worker-token-at-least-32-chars"}
     targets = [
         ("x_short_post", "x"),
         ("x_article", "x_article"),
@@ -367,7 +367,7 @@ def test_platform_writing_output_rejects_the_wrong_draft_marker(client):
 
     response = client.post(
         f"/api/responses/outputs/{output_id}/worker-link",
-        headers={"X-WMS-Worker-Token": "test-worker-token-at-least-32-chars"},
+        headers={"X-Worker-Token": "test-worker-token-at-least-32-chars"},
         json={"article_draft_id": draft.json()["id"]},
     )
 
@@ -382,7 +382,7 @@ def test_worker_result_creates_one_complete_draft_and_links_response_item(client
         json={"analysis_run_id": run_id, "output_types": ["expanded_article"]},
     )
     output_id = queued.json()["outputs"][0]["id"]
-    headers = {"X-WMS-Worker-Token": "test-worker-token-at-least-32-chars"}
+    headers = {"X-Worker-Token": "test-worker-token-at-least-32-chars"}
     article_content = "# 完整文章标题\n\n这是写作 job 生成的完整文章正文。"
     body = {
         "title": "完整文章标题",
@@ -452,7 +452,7 @@ def test_worker_link_reuses_agent_saved_draft_without_creating_another(client):
     })
     assert draft.status_code == 201, draft.text
     draft_id = draft.json()["id"]
-    headers = {"X-WMS-Worker-Token": "test-worker-token-at-least-32-chars"}
+    headers = {"X-Worker-Token": "test-worker-token-at-least-32-chars"}
 
     first = client.post(
         f"/api/responses/outputs/{output_id}/worker-link",
@@ -504,7 +504,7 @@ def test_worker_link_rejects_a_draft_that_does_not_belong_to_the_response(client
 
     response = client.post(
         f"/api/responses/outputs/{output_id}/worker-link",
-        headers={"X-WMS-Worker-Token": "test-worker-token-at-least-32-chars"},
+        headers={"X-Worker-Token": "test-worker-token-at-least-32-chars"},
         json={"article_draft_id": draft.json()["id"]},
     )
 

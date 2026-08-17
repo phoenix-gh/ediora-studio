@@ -6,7 +6,7 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DEV_ENV_FILE="${WMS_DEV_ENV_FILE:-$ROOT/.env}"
+DEV_ENV_FILE="${DEV_ENV_FILE:-$ROOT/.env}"
 
 load_dev_environment() {
   local line name source_status had_allexport=0
@@ -60,21 +60,21 @@ load_dev_environment || exit 1
 
 BACKEND_DIR="$ROOT/backend"
 FRONTEND_DIR="$ROOT/web"
-LOG_DIR="${WMS_DEV_LOG_DIR:-$ROOT/logs}"
-RUN_DIR="${WMS_DEV_RUN_DIR:-$ROOT/.run}"
-CONDA_ENV="${WMS_CONDA_ENV:-wems}"
+LOG_DIR="${DEV_LOG_DIR:-$ROOT/logs}"
+RUN_DIR="${DEV_RUN_DIR:-$ROOT/.run}"
+CONDA_ENV="${CONDA_ENV:-wems}"
 
-REDIS_PORT="${WMS_REDIS_PORT:-6379}"
-API_PORT="${WMS_API_PORT:-8000}"
-WEB_PORT="${WMS_WEB_PORT:-3000}"
-POSTGRES_CONTAINER="${WMS_DEV_POSTGRES_CONTAINER:-wms-dev-postgres-copy}"
-POSTGRES_HOST="${WMS_DEV_POSTGRES_HOST:-127.0.0.1}"
-POSTGRES_PORT="${WMS_DEV_POSTGRES_PORT:-55432}"
+REDIS_PORT="${REDIS_PORT:-6379}"
+API_PORT="${API_PORT:-8000}"
+WEB_PORT="${WEB_PORT:-3000}"
+POSTGRES_CONTAINER="${DEV_POSTGRES_CONTAINER:-wms-dev-postgres-copy}"
+POSTGRES_HOST="${DEV_POSTGRES_HOST:-127.0.0.1}"
+POSTGRES_PORT="${DEV_POSTGRES_PORT:-55432}"
 HOST_REDIS_URL="redis://127.0.0.1:${REDIS_PORT}/0"
 HOST_API_ROOT="http://127.0.0.1:${API_PORT}"
 HOST_API_URL="${HOST_API_ROOT}/api"
 HOST_WEB_URL="http://127.0.0.1:${WEB_PORT}"
-EFFECTIVE_CORS_ORIGINS="${WMS_CORS_ORIGINS:-${HOST_WEB_URL},http://localhost:${WEB_PORT}}"
+EFFECTIVE_CORS_ORIGINS="${CORS_ORIGINS:-${HOST_WEB_URL},http://localhost:${WEB_PORT}}"
 WORKER_READY_FILE="$RUN_DIR/worker.ready"
 
 source "$ROOT/scripts/dev-runtime.sh"
@@ -96,10 +96,10 @@ validate_port() {
 }
 
 validate_runtime_ports() {
-  validate_port WMS_REDIS_PORT "$REDIS_PORT" \
-    && validate_port WMS_API_PORT "$API_PORT" \
-    && validate_port WMS_WEB_PORT "$WEB_PORT" \
-    && validate_port WMS_DEV_POSTGRES_PORT "$POSTGRES_PORT"
+  validate_port REDIS_PORT "$REDIS_PORT" \
+    && validate_port API_PORT "$API_PORT" \
+    && validate_port WEB_PORT "$WEB_PORT" \
+    && validate_port DEV_POSTGRES_PORT "$POSTGRES_PORT"
 }
 
 validate_runtime_tools() {
@@ -185,8 +185,8 @@ ensure_postgres_ready() {
   fi
 
   if ! dev_wait_for \
-    "${WMS_DEV_READY_TIMEOUT_SECONDS:-30}" \
-    "${WMS_DEV_POLL_INTERVAL_SECONDS:-0.1}" \
+    "${DEV_READY_TIMEOUT_SECONDS:-30}" \
+    "${DEV_POLL_INTERVAL_SECONDS:-0.1}" \
     postgres_tcp_ready; then
     printf 'PostgreSQL did not accept TCP connections at %s:%s before the readiness timeout\n' \
       "$POSTGRES_HOST" "$POSTGRES_PORT" >&2
@@ -197,9 +197,9 @@ ensure_postgres_ready() {
 }
 
 validate_worker_token() {
-  local token="${WMS_WORKER_TOKEN:-}"
+  local token="${WORKER_TOKEN:-}"
   if [ "${#token}" -lt 32 ]; then
-    printf 'WMS_WORKER_TOKEN must contain at least 32 characters\n' >&2
+    printf 'WORKER_TOKEN must contain at least 32 characters\n' >&2
     return 1
   fi
 }
@@ -269,8 +269,8 @@ runtime_fingerprint() {
 }
 
 worker_source_fingerprint() {
-  if [ -n "${WMS_DEV_TEST_SOURCE_FINGERPRINT:-}" ]; then
-    printf '%s\n' "$WMS_DEV_TEST_SOURCE_FINGERPRINT"
+  if [ -n "${DEV_TEST_SOURCE_FINGERPRINT:-}" ]; then
+    printf '%s\n' "$DEV_TEST_SOURCE_FINGERPRINT"
     return 0
   fi
   {
@@ -282,12 +282,12 @@ worker_source_fingerprint() {
 application_config_fingerprint() {
   runtime_fingerprint \
     "$HOST_REDIS_URL" \
-    "$WMS_WORKER_QUEUE" \
-    "${WMS_VIDEO_WORKER_QUEUE:-content-jobs:video}" \
-    "${WMS_WORKER_TOKEN:-}" \
+    "$WORKER_QUEUE" \
+    "${VIDEO_WORKER_QUEUE:-content-jobs:video}" \
+    "${WORKER_TOKEN:-}" \
     "$HOST_API_URL" \
     "$HOST_WEB_URL" \
-    "$WMS_CORS_ORIGINS" \
+    "$CORS_ORIGINS" \
     "$(worker_source_fingerprint)"
 }
 
@@ -428,8 +428,8 @@ ensure_redis_ready() {
   record_started_service redis
 
   if ! dev_wait_for \
-    "${WMS_DEV_READY_TIMEOUT_SECONDS:-30}" \
-    "${WMS_DEV_POLL_INTERVAL_SECONDS:-0.1}" \
+    "${DEV_READY_TIMEOUT_SECONDS:-30}" \
+    "${DEV_POLL_INTERVAL_SECONDS:-0.1}" \
     redis_ping; then
     printf 'Redis did not answer PING before the readiness timeout\n' >&2
     return 1
@@ -448,14 +448,14 @@ ensure_api_ready() {
     uvicorn main:app --host 0.0.0.0 --port "$API_PORT" --reload || return 1
   record_started_service api
   if ! dev_wait_for \
-    "${WMS_DEV_READY_TIMEOUT_SECONDS:-30}" \
-    "${WMS_DEV_POLL_INTERVAL_SECONDS:-0.1}" \
+    "${DEV_READY_TIMEOUT_SECONDS:-30}" \
+    "${DEV_POLL_INTERVAL_SECONDS:-0.1}" \
     api_owned_http_ready; then
     printf 'API did not become HTTP-ready before the readiness timeout; see %s\n' \
       "$(log_path api)" >&2
     return 1
   fi
-  sleep "${WMS_DEV_HTTP_SETTLE_SECONDS:-0.2}"
+  sleep "${DEV_HTTP_SETTLE_SECONDS:-0.2}"
   if ! api_owned_http_ready; then
     printf 'API lost process ownership or HTTP readiness during startup; see %s\n' \
       "$(log_path api)" >&2
@@ -475,8 +475,8 @@ ensure_worker_ready() {
     pnpm jobs:worker || return 1
   record_started_service worker
   if ! dev_wait_for \
-    "${WMS_DEV_READY_TIMEOUT_SECONDS:-30}" \
-    "${WMS_DEV_POLL_INTERVAL_SECONDS:-0.1}" \
+    "${DEV_READY_TIMEOUT_SECONDS:-30}" \
+    "${DEV_POLL_INTERVAL_SECONDS:-0.1}" \
     worker_ready; then
     printf 'Worker did not publish its current ready handshake; see %s\n' \
       "$(log_path worker)" >&2
@@ -495,14 +495,14 @@ ensure_web_ready() {
     pnpm exec next dev --hostname 0.0.0.0 --port "$WEB_PORT" || return 1
   record_started_service web
   if ! dev_wait_for \
-    "${WMS_DEV_READY_TIMEOUT_SECONDS:-30}" \
-    "${WMS_DEV_POLL_INTERVAL_SECONDS:-0.1}" \
+    "${DEV_READY_TIMEOUT_SECONDS:-30}" \
+    "${DEV_POLL_INTERVAL_SECONDS:-0.1}" \
     web_owned_http_ready; then
     printf 'Web did not become HTTP-ready before the readiness timeout; see %s\n' \
       "$(log_path web)" >&2
     return 1
   fi
-  sleep "${WMS_DEV_HTTP_SETTLE_SECONDS:-0.2}"
+  sleep "${DEV_HTTP_SETTLE_SECONDS:-0.2}"
   if ! web_owned_http_ready; then
     printf 'Web lost process ownership or HTTP readiness during startup; see %s\n' \
       "$(log_path web)" >&2
@@ -517,13 +517,13 @@ cmd_start() {
   validate_runtime_tools || return 1
   mkdir -p -- "$LOG_DIR" "$RUN_DIR"
 
-  export WMS_REDIS_URL="$HOST_REDIS_URL"
-  export WMS_API_URL="$HOST_API_URL"
+  export REDIS_URL="$HOST_REDIS_URL"
+  export API_URL="$HOST_API_URL"
   export NEXT_PUBLIC_API_URL="$HOST_API_URL"
-  export WMS_WORKER_QUEUE="${WMS_WORKER_QUEUE:-content-jobs}"
-  export WMS_VIDEO_WORKER_QUEUE="${WMS_VIDEO_WORKER_QUEUE:-content-jobs:video}"
-  export WMS_CORS_ORIGINS="$EFFECTIVE_CORS_ORIGINS"
-  export WMS_WORKER_READY_FILE="$WORKER_READY_FILE"
+  export WORKER_QUEUE="${WORKER_QUEUE:-content-jobs}"
+  export VIDEO_WORKER_QUEUE="${VIDEO_WORKER_QUEUE:-content-jobs:video}"
+  export CORS_ORIGINS="$EFFECTIVE_CORS_ORIGINS"
+  export WORKER_READY_FILE="$WORKER_READY_FILE"
   REDIS_CONFIG_FINGERPRINT="$(runtime_fingerprint "$HOST_REDIS_URL")"
   APPLICATION_CONFIG_FINGERPRINT="$(application_config_fingerprint)"
   STARTED_THIS_RUN=()
@@ -553,7 +553,7 @@ print_runtime_summary() {
     "$POSTGRES_CONTAINER" "$POSTGRES_HOST" "$POSTGRES_PORT"
   printf '  Web:    %s\n' "$HOST_WEB_URL"
   printf '  API:    %s (docs: /docs)\n' "$HOST_API_ROOT"
-  printf '  Worker: %s + %s\n' "$WMS_WORKER_QUEUE" "$WMS_VIDEO_WORKER_QUEUE"
+  printf '  Worker: %s + %s\n' "$WORKER_QUEUE" "$VIDEO_WORKER_QUEUE"
   printf '  Redis:  %s\n' "$HOST_REDIS_URL"
   printf '  Logs:   ./dev.sh logs    Stop: ./dev.sh stop\n'
 }
@@ -648,9 +648,9 @@ service_status() {
 cmd_status() {
   local unhealthy=0 redis_metadata
   validate_runtime_ports || return 1
-  WMS_WORKER_QUEUE="${WMS_WORKER_QUEUE:-content-jobs}"
-  WMS_VIDEO_WORKER_QUEUE="${WMS_VIDEO_WORKER_QUEUE:-content-jobs:video}"
-  WMS_CORS_ORIGINS="${WMS_CORS_ORIGINS:-$EFFECTIVE_CORS_ORIGINS}"
+  WORKER_QUEUE="${WORKER_QUEUE:-content-jobs}"
+  VIDEO_WORKER_QUEUE="${VIDEO_WORKER_QUEUE:-content-jobs:video}"
+  CORS_ORIGINS="${CORS_ORIGINS:-$EFFECTIVE_CORS_ORIGINS}"
   APPLICATION_CONFIG_FINGERPRINT="$(application_config_fingerprint)"
   postgres_status || unhealthy=1
   redis_metadata="$(metadata_path redis)"

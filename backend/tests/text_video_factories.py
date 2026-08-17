@@ -98,7 +98,7 @@ def fresh_session_factory(monkeypatch, postgres_database_url):
     from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
     from sqlalchemy.pool import NullPool
 
-    monkeypatch.setenv("WMS_DATABASE_URL", postgres_database_url)
+    monkeypatch.setenv("DATABASE_URL", postgres_database_url)
     for module in list(sys.modules):
         if module.startswith(("database", "models", "routers.text_videos")):
             sys.modules.pop(module, None)

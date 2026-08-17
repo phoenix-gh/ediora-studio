@@ -705,7 +705,7 @@ class JobReconciler:
             interval_seconds
             if interval_seconds is not None
             else _positive_interval(
-                os.getenv("WMS_JOB_RECONCILE_INTERVAL_SECONDS"),
+                os.getenv("JOB_RECONCILE_INTERVAL_SECONDS"),
             )
         )
         self._lease_ttl_ms = lease_ttl_ms

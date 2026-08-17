@@ -16,7 +16,7 @@ def _parse_database_timeout_seconds(value: str) -> float:
         timeout = float(value)
     except (TypeError, ValueError) as error:
         raise ValueError(
-            "WMS_DATABASE_COMMAND_TIMEOUT_SECONDS must be a finite number "
+            "DATABASE_COMMAND_TIMEOUT_SECONDS must be a finite number "
             "between 0 and 300",
         ) from error
     if (
@@ -25,7 +25,7 @@ def _parse_database_timeout_seconds(value: str) -> float:
         or timeout > _MAX_DATABASE_TIMEOUT_SECONDS
     ):
         raise ValueError(
-            "WMS_DATABASE_COMMAND_TIMEOUT_SECONDS must be a finite number "
+            "DATABASE_COMMAND_TIMEOUT_SECONDS must be a finite number "
             "between 0 and 300",
         )
     return timeout
@@ -37,7 +37,7 @@ def _database_engine_kwargs(
 ) -> dict:
     if not database_url.startswith("postgresql+asyncpg://"):
         raise ValueError(
-            "WMS_DATABASE_URL must use PostgreSQL with the asyncpg driver"
+            "DATABASE_URL must use PostgreSQL with the asyncpg driver"
         )
     options: dict = {"echo": False, "pool_pre_ping": True}
     options.update(pool_size=10, max_overflow=20)
@@ -79,11 +79,11 @@ def _track_background_database_task(task: asyncio.Task) -> None:
 
 
 DATABASE_URL = os.getenv(
-    "WMS_DATABASE_URL",
+    "DATABASE_URL",
     "postgresql+asyncpg://postgres:123456@127.0.0.1:5432/wemedia",
 )
 DATABASE_COMMAND_TIMEOUT_SECONDS = _parse_database_timeout_seconds(
-    os.getenv("WMS_DATABASE_COMMAND_TIMEOUT_SECONDS", "30"),
+    os.getenv("DATABASE_COMMAND_TIMEOUT_SECONDS", "30"),
 )
 
 _engine_kwargs = _database_engine_kwargs(

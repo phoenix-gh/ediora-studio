@@ -300,8 +300,8 @@ ACCOUNT_ID = "acc_test_001"
 def _make_client_with_account(monkeypatch, tmp_path):
     """Client fixture that seeds one PublishAccount."""
     db_file = tmp_path / "test_acc.db"
-    monkeypatch.setenv("WMS_DATABASE_URL", f"sqlite+aiosqlite:///{db_file}")
-    monkeypatch.setenv("WMS_DISABLE_SCHEDULER", "1")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite+aiosqlite:///{db_file}")
+    monkeypatch.setenv("DISABLE_SCHEDULER", "1")
 
     for mod in list(sys.modules):
         if mod.startswith(("database", "models", "main", "routers", "config",

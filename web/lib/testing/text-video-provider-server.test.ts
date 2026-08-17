@@ -324,14 +324,14 @@ describe('text-video E2E provider', () => {
 
   it('uses an explicit E2E Python or a non-capturing conda runtime', () => {
     expect(resolveE2EPythonLaunch({
-      WMS_E2E_PYTHON: '/opt/e2e/python',
-      WMS_CONDA_ENV: 'ignored',
+      E2E_PYTHON: '/opt/e2e/python',
+      CONDA_ENV: 'ignored',
     })).toEqual({
       command: '/opt/e2e/python',
       args: [],
     })
     expect(resolveE2EPythonLaunch({
-      WMS_CONDA_ENV: 'wms-test',
+      CONDA_ENV: 'wms-test',
     })).toEqual({
       command: 'conda',
       args: [

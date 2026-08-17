@@ -52,13 +52,13 @@ Ediora/
 
 ```bash
 cp .env.example .env
-# 编辑 .env，设置 WMS_WORKER_TOKEN
+# 编辑 .env，设置 WORKER_TOKEN
 ./dev.sh
 ```
 
 之后日常开发只需执行 `./dev.sh`。脚本会自动加载根 `.env` 并把其中的变量
 导出给所有子进程；命令行显式传入的环境变量优先，例如
-`WMS_WEB_PORT=3001 ./dev.sh` 不会被 `.env` 覆盖。脚本按 PostgreSQL TCP
+`WEB_PORT=3001 ./dev.sh` 不会被 `.env` 覆盖。脚本按 PostgreSQL TCP
 就绪 → Redis PING → API HTTP 就绪 → worker 就绪握手 → Web HTTP 就绪的
 顺序启动完整运行时：
 
@@ -72,8 +72,8 @@ Redis:  redis://127.0.0.1:6379/0
 
 默认情况下，脚本检查 Docker 容器 `wms-dev-postgres-copy`；若容器已停止则
 自动启动，并等待 `127.0.0.1:55432` 可连接。可分别通过
-`WMS_DEV_POSTGRES_CONTAINER`、`WMS_DEV_POSTGRES_HOST` 和
-`WMS_DEV_POSTGRES_PORT` 覆盖容器名和连接地址。PostgreSQL 是持久化外部
+`DEV_POSTGRES_CONTAINER`、`DEV_POSTGRES_HOST` 和
+`DEV_POSTGRES_PORT` 覆盖容器名和连接地址。PostgreSQL 是持久化外部
 依赖，不属于脚本拥有的临时进程；`./dev.sh stop` 和启动失败回滚都不会
 停止该容器。
 
@@ -91,19 +91,19 @@ Redis:  redis://127.0.0.1:6379/0
 若 `127.0.0.1:6379` 已有能响应 PING 的 Redis，脚本只连接并把它标记为
 `external`，`./dev.sh stop` 不会停止它；否则脚本启动并只管理自己创建的
 临时 Redis。API、worker 与 Web 作为一个配置单元，共享同一个宿主机
-Redis URL、队列名、`WMS_WORKER_TOKEN`、API URL 与 CORS 配置。任一配置
+Redis URL、队列名、`WORKER_TOKEN`、API URL 与 CORS 配置。任一配置
 变化都会完整替换这三项服务，避免新旧配置混跑。默认 CORS 同时允许当前
-`WMS_WEB_PORT` 对应的 `127.0.0.1` 和 `localhost` 地址；需要覆盖时设置
-`WMS_CORS_ORIGINS`。端口可分别用 `WMS_REDIS_PORT`、`WMS_API_PORT` 和
-`WMS_WEB_PORT` 覆盖。
+`WEB_PORT` 对应的 `127.0.0.1` 和 `localhost` 地址；需要覆盖时设置
+`CORS_ORIGINS`。端口可分别用 `REDIS_PORT`、`API_PORT` 和
+`WEB_PORT` 覆盖。
 
 worker 启动后只有完成 Redis 连接和启动时的待处理任务协调，才可以向
-`WMS_WORKER_READY_FILE` 原子写入当前进程的
-`WMS_DEV_SERVICE_MARKER` 与 `WMS_DEV_CONFIG_FINGERPRINT`：
+`WORKER_READY_FILE` 原子写入当前进程的
+`DEV_SERVICE_MARKER` 与 `DEV_CONFIG_FINGERPRINT`：
 
 ```text
-marker=<WMS_DEV_SERVICE_MARKER>
-config_fingerprint=<WMS_DEV_CONFIG_FINGERPRINT>
+marker=<DEV_SERVICE_MARKER>
+config_fingerprint=<DEV_CONFIG_FINGERPRINT>
 ```
 
 统一脚本会在每次启动 worker 前删除旧文件，并校验标记、配置指纹和进程
@@ -145,11 +145,11 @@ docker compose --profile local-asr up --build
 修改 `NEXT_PUBLIC_API_URL` 后需要重新构建应用镜像，因为它会在 Next.js 构建阶段写入
 浏览器 bundle。服务会启动 Web（3000）、Python API（8000）、Postgres、Redis 和内容任务 worker。
 `POSTGRES_PASSWORD` 可在 `.env` 中覆盖；首次启动前还需把
-`WMS_WORKER_TOKEN` 改成一个长随机值。API 与 worker 必须使用同一个值，
+`WORKER_TOKEN` 改成一个长随机值。API 与 worker 必须使用同一个值，
 且不得使用 `NEXT_PUBLIC_` 前缀。LLM、图片和 HeyGen 密钥只配置在服务端，
-绝不放入浏览器变量。
-如果宿主机的 8000 或 3000 已被占用，可在 `.env` 中设置 `WMS_API_PORT` 或
-`WMS_WEB_PORT`；这只改变宿主机映射，不改变容器内端口。
+统一在「设置」页面保存，运行时不会从环境变量读取 provider 密钥，绝不放入浏览器变量。
+如果宿主机的 8000 或 3000 已被占用，可在 `.env` 中设置 `API_PORT` 或
+`WEB_PORT`；这只改变宿主机映射，不改变容器内端口。
 
 ### GitHub Actions 与 GHCR
 
@@ -166,8 +166,8 @@ to GHCR`。首次发布后，可在 GitHub Package 设置中调整公开/私有�
 在 `.env` 设置：
 
 ```dotenv
-WMS_APP_IMAGE=ghcr.io/phoenix-gh/ediora-studio
-WMS_IMAGE_TAG=latest
+APP_IMAGE=ghcr.io/phoenix-gh/ediora-studio
+IMAGE_TAG=latest
 ```
 
 然后执行 `docker compose up -d --no-build`；私有镜像需要先执行 `docker login ghcr.io`。
@@ -177,15 +177,8 @@ WMS_IMAGE_TAG=latest
 「创作 → 文字视频」把整篇文稿先生成一条主音频，再依据转写词级时间轴
 驱动 Remotion 动态文字场景。语音与转写凭据都保留在服务端；MiMo 使用
 官方 `https://api.xiaomimimo.com/v1` 地址。可在设置页保存语音配置，
-或通过 `.env` 配置以下服务器变量：
-
-```text
-WMS_SPEECH_PROVIDER=mimo
-WMS_SPEECH_MODEL=mimo-v2.5-tts
-WMS_SPEECH_BASE_URL=https://api.xiaomimimo.com/v1
-WMS_SPEECH_API_KEY=...
-WMS_SPEECH_DEFAULT_VOICE=mimo_default
-```
+所有语音 provider 配置（包括 API Key、模型和 endpoint）都在「设置 → 语音」保存；
+运行时不会从 `.env` 读取语音凭据。
 
 转写 provider 必须返回带 `words` 数组的 `verbose_json`，系统才能把每个
 稳定 word ID 投影到精确秒数。AI 自动分段只产生预览，用户点击“应用分段”
@@ -200,12 +193,12 @@ Remotion 预览，**不包含 MP4 文件渲染，也不包含音色克隆**。
 
 「创作 → 数字人口播」提供可复用数字人角色、项目内脚本编辑、环境图和不可变成片版本：
 
-1. 在「设置 → HeyGen」保存 API Key；也可用服务端 `HEYGEN_API_KEY` 作为回退。界面中已保存的设置优先于环境变量。明文密钥只通过 `WMS_WORKER_TOKEN` 保护的内部接口交给 Node worker，浏览器不会拿到。
+1. 在「设置 → HeyGen」保存 API Key。API 与 Node worker 只通过受保护的运行时接口读取已保存配置，不从环境变量回退读取，浏览器不会拿到明文密钥。
 2. 创建角色时选择一张 PNG/JPEG 正面照、一段 MP3/WAV 录音和一张默认环境图。直接发送给 HeyGen 的单个素材最大 32MB。
 3. 在口播作品内手写脚本，或让 AI 按主题生成、把已有草稿转换为口播、改写当前脚本。AI 候选只有确认后才替换编辑器内容，不会自动生成视频。
 4. 每次生成都会冻结脚本、角色和环境为独立版本。HeyGen 返回的临时下载地址不会作为最终资产；worker 会把 MP4 复制到本地 `uploads` 创作资产后才标记成功。
 
-声音克隆需要 HeyGen 账号具备相应套餐权限；免费或受限套餐可能返回 `plan_upgrade_required`。如果只配置了环境变量，API 与 worker 都必须能读取同一个 `HEYGEN_API_KEY`。
+声音克隆需要 HeyGen 账号具备相应套餐权限；免费或受限套餐可能返回 `plan_upgrade_required`。
 
 真实 HeyGen 冒烟测试是显式可选操作，会产生 API 用量：
 
@@ -266,7 +259,7 @@ Telegram 消息使用 HTML `<pre>` 块承载草稿，便于手机端长按复制
 
 ### 数据库
 
-运行时只支持 PostgreSQL，通过 `WMS_DATABASE_URL` 覆盖：
+运行时只支持 PostgreSQL，通过 `DATABASE_URL` 覆盖：
 
 ```dotenv
 postgresql+asyncpg://postgres:123456@127.0.0.1:5432/wemedia
@@ -274,10 +267,10 @@ postgresql+asyncpg://postgres:123456@127.0.0.1:5432/wemedia
 
 后端测试同样使用 PostgreSQL。测试夹具会为每条数据库测试创建独立的
 `wemedia_test_<随机后缀>` 数据库，并在测试结束后删除，不会复用或清空开发库。
-管理连接默认取自 `WMS_TEST_DATABASE_ADMIN_URL`，未设置时使用：
+管理连接默认取自 `TEST_DATABASE_ADMIN_URL`，未设置时使用：
 
 ```dotenv
-WMS_TEST_DATABASE_ADMIN_URL=postgresql+asyncpg://wemedia:wemedia@127.0.0.1:55432/postgres
+TEST_DATABASE_ADMIN_URL=postgresql+asyncpg://wemedia:wemedia@127.0.0.1:55432/postgres
 ```
 
 该账号需要具备 `CREATEDB` 权限。运行全部后端测试：

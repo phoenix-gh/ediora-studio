@@ -24,7 +24,7 @@ DEFAULT_TEST_DATABASE_ADMIN_URL = (
 @pytest.fixture
 def postgres_database_url():
     admin_url = os.getenv(
-        "WMS_TEST_DATABASE_ADMIN_URL",
+        "TEST_DATABASE_ADMIN_URL",
         DEFAULT_TEST_DATABASE_ADMIN_URL,
     )
     database_name = f"wemedia_test_{uuid.uuid4().hex[:12]}"
@@ -43,8 +43,8 @@ def postgres_database_url():
 
 @pytest.fixture
 def postgres_env(monkeypatch, postgres_database_url):
-    monkeypatch.setenv("WMS_DATABASE_URL", postgres_database_url)
-    monkeypatch.setenv("WMS_DISABLE_SCHEDULER", "1")
+    monkeypatch.setenv("DATABASE_URL", postgres_database_url)
+    monkeypatch.setenv("DISABLE_SCHEDULER", "1")
     original_create_async_engine = sqlalchemy_asyncio.create_async_engine
 
     def create_test_async_engine(url, *args, **kwargs):

@@ -407,7 +407,7 @@ Expected: the existing media upload endpoint tests pass. If the known sandbox/da
 
 - [ ] **Step 3: Verify the real browser workflow**
 
-Start backend, worker only if required by the current project, and frontend with the documented host configuration (`WMS_REDIS_URL=redis://127.0.0.1:6379/0`). In a browser:
+Start backend, worker only if required by the current project, and frontend with the documented host configuration (`REDIS_URL=redis://127.0.0.1:6379/0`). In a browser:
 
 1. Open `/assets` and select “多媒体”.
 2. Select or create a test media directory.

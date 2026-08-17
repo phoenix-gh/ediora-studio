@@ -209,8 +209,8 @@ def test_main_installs_redaction_before_optional_feedgrab_import(
     env = os.environ.copy()
     env.update({
         "PYTHONPATH": os.pathsep.join((str(fake_root), str(backend_dir))),
-        "WMS_DATABASE_URL": postgres_database_url,
-        "WMS_DISABLE_SCHEDULER": "1",
+        "DATABASE_URL": postgres_database_url,
+        "DISABLE_SCHEDULER": "1",
     })
 
     result = subprocess.run(
@@ -263,8 +263,8 @@ def test_main_default_handler_does_not_render_diagnose_locals(
     env = os.environ.copy()
     env.update({
         "PYTHONPATH": str(backend_dir),
-        "WMS_DATABASE_URL": postgres_database_url,
-        "WMS_DISABLE_SCHEDULER": "1",
+        "DATABASE_URL": postgres_database_url,
+        "DISABLE_SCHEDULER": "1",
     })
 
     result = subprocess.run(

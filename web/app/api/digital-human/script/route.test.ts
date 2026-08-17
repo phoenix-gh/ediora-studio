@@ -15,11 +15,11 @@ import { POST } from './route'
 
 describe('POST /api/digital-human/script', () => {
   beforeEach(() => {
-    process.env.WMS_WORKER_TOKEN = 'test-worker-token-at-least-32-chars'
+    process.env.WORKER_TOKEN = 'test-worker-token-at-least-32-chars'
   })
 
   afterEach(() => {
-    delete process.env.WMS_WORKER_TOKEN
+    delete process.env.WORKER_TOKEN
     vi.unstubAllGlobals()
     mocks.generateText.mockReset()
     mocks.chat.mockClear()
@@ -65,7 +65,7 @@ describe('POST /api/digital-human/script', () => {
       expect.stringContaining('/settings/ai-runtime'),
       expect.objectContaining({
         headers: expect.objectContaining({
-          'X-WMS-Worker-Token': 'test-worker-token-at-least-32-chars',
+          'X-Worker-Token': 'test-worker-token-at-least-32-chars',
         }),
       }),
     )

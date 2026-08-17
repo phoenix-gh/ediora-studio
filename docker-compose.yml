@@ -1,5 +1,5 @@
 x-app-image: &app-image
-  image: ${WMS_APP_IMAGE:-ediora-studio}:${WMS_IMAGE_TAG:-local}
+  image: ${APP_IMAGE:-ediora-studio}:${IMAGE_TAG:-local}
 
 services:
   postgres:
@@ -32,8 +32,8 @@ services:
       - local-asr
     restart: unless-stopped
     environment:
-      WHISPER__INFERENCE_DEVICE: ${WMS_LOCAL_ASR_DEVICE:-cuda}
-      WHISPER__COMPUTE_TYPE: ${WMS_LOCAL_ASR_COMPUTE_TYPE:-float16}
+      WHISPER__INFERENCE_DEVICE: ${LOCAL_ASR_DEVICE:-cuda}
+      WHISPER__COMPUTE_TYPE: ${LOCAL_ASR_COMPUTE_TYPE:-float16}
     volumes:
       - whisper-model-cache:/home/ubuntu/.cache/huggingface/hub
     deploy:
@@ -61,34 +61,27 @@ services:
       - sh
       - -ec
       - |
-        python -c 'import os, sys; ok = len(os.environ.get("WMS_WORKER_TOKEN", "")) >= 32; sys.stderr.write("" if ok else "WMS_WORKER_TOKEN must contain at least 32 characters\n"); sys.exit(0 if ok else 1)'
+        python -c 'import os, sys; ok = len(os.environ.get("WORKER_TOKEN", "")) >= 32; sys.stderr.write("" if ok else "WORKER_TOKEN must contain at least 32 characters\n"); sys.exit(0 if ok else 1)'
         exec uvicorn main:app --host 0.0.0.0 --port 8000
     environment:
-      WMS_DATABASE_URL: postgresql+asyncpg://wemedia:${POSTGRES_PASSWORD:-wemedia}@postgres:5432/wemedia
-      WMS_REDIS_URL: redis://redis:6379/0
-      WMS_WORKER_QUEUE: ${WMS_WORKER_QUEUE:-content-jobs}
-      WMS_VIDEO_WORKER_QUEUE: ${WMS_VIDEO_WORKER_QUEUE:-content-jobs:video}
-      WMS_DISABLE_SCHEDULER: "0"
+      DATABASE_URL: postgresql+asyncpg://wemedia:${POSTGRES_PASSWORD:-wemedia}@postgres:5432/wemedia
+      REDIS_URL: redis://redis:6379/0
+      WORKER_QUEUE: ${WORKER_QUEUE:-content-jobs}
+      VIDEO_WORKER_QUEUE: ${VIDEO_WORKER_QUEUE:-content-jobs:video}
+      DISABLE_SCHEDULER: "0"
       FEEDGRAB_DATA_DIR: /app/sessions
-      HEYGEN_API_KEY: ${HEYGEN_API_KEY:-}
-      WMS_SPEECH_PROVIDER: ${WMS_SPEECH_PROVIDER:-mimo}
-      WMS_SPEECH_MODEL: ${WMS_SPEECH_MODEL:-mimo-v2.5-tts}
-      WMS_SPEECH_BASE_URL: ${WMS_SPEECH_BASE_URL:-https://api.xiaomimimo.com/v1}
-      WMS_SPEECH_API_KEY: ${WMS_SPEECH_API_KEY:-}
-      WMS_SPEECH_DEFAULT_VOICE: ${WMS_SPEECH_DEFAULT_VOICE:-mimo_default}
-      MIMO_API_KEY: ${MIMO_API_KEY:-}
-      WMS_LOCAL_ASR_URL: ${WMS_LOCAL_ASR_URL:-http://local-asr:8000/v1}
-      WMS_LOCAL_ASR_MODEL: ${WMS_LOCAL_ASR_MODEL:-Systran/faster-whisper-large-v3}
-      WMS_LOCAL_ASR_DEVICE: ${WMS_LOCAL_ASR_DEVICE:-cuda}
-      WMS_LOCAL_ASR_COMPUTE_TYPE: ${WMS_LOCAL_ASR_COMPUTE_TYPE:-float16}
-      WMS_WORKER_TOKEN: ${WMS_WORKER_TOKEN:-}
-      WMS_X_SESSION_KEY: ${WMS_X_SESSION_KEY:-}
-      WMS_CORS_ORIGINS: ${WMS_CORS_ORIGINS:-http://localhost:3000}
+      LOCAL_ASR_URL: ${LOCAL_ASR_URL:-http://local-asr:8000/v1}
+      LOCAL_ASR_MODEL: ${LOCAL_ASR_MODEL:-Systran/faster-whisper-large-v3}
+      LOCAL_ASR_DEVICE: ${LOCAL_ASR_DEVICE:-cuda}
+      LOCAL_ASR_COMPUTE_TYPE: ${LOCAL_ASR_COMPUTE_TYPE:-float16}
+      WORKER_TOKEN: ${WORKER_TOKEN:-}
+      X_SESSION_KEY: ${X_SESSION_KEY:-}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
     volumes:
       - uploads-data:/app/uploads
       - sessions-data:/app/sessions
     ports:
-      - "${WMS_API_PORT:-8000}:8000"
+      - "${API_PORT:-8000}:8000"
     healthcheck:
       test:
         - CMD
@@ -112,21 +105,14 @@ services:
       - sh
       - -ec
       - |
-        node -e 'const ok = (process.env.WMS_WORKER_TOKEN ?? "").length >= 32; if (!ok) { console.error("WMS_WORKER_TOKEN must contain at least 32 characters"); process.exit(1) }'
+        node -e 'const ok = (process.env.WORKER_TOKEN ?? "").length >= 32; if (!ok) { console.error("WORKER_TOKEN must contain at least 32 characters"); process.exit(1) }'
         exec ./node_modules/.bin/tsx scripts/content-worker.ts
     environment:
-      WMS_REDIS_URL: redis://redis:6379/0
-      WMS_WORKER_QUEUE: ${WMS_WORKER_QUEUE:-content-jobs}
-      WMS_VIDEO_WORKER_QUEUE: ${WMS_VIDEO_WORKER_QUEUE:-content-jobs:video}
-      WMS_API_URL: http://api:8000/api
-      WMS_LLM_API_KEY: ${WMS_LLM_API_KEY:-}
-      WMS_LLM_MODEL: ${WMS_LLM_MODEL:-gpt-4o-mini}
-      WMS_LLM_BASE_URL: ${WMS_LLM_BASE_URL:-}
-      WMS_IMAGE_API_KEY: ${WMS_IMAGE_API_KEY:-}
-      WMS_IMAGE_MODEL: ${WMS_IMAGE_MODEL:-gpt-image-1}
-      WMS_IMAGE_BASE_URL: ${WMS_IMAGE_BASE_URL:-}
-      HEYGEN_API_KEY: ${HEYGEN_API_KEY:-}
-      WMS_WORKER_TOKEN: ${WMS_WORKER_TOKEN:-}
+      REDIS_URL: redis://redis:6379/0
+      WORKER_QUEUE: ${WORKER_QUEUE:-content-jobs}
+      VIDEO_WORKER_QUEUE: ${VIDEO_WORKER_QUEUE:-content-jobs:video}
+      API_URL: http://api:8000/api
+      WORKER_TOKEN: ${WORKER_TOKEN:-}
     depends_on:
       postgres:
         condition: service_healthy
@@ -147,16 +133,10 @@ services:
       - "3000"
     environment:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000/api}
-      WMS_API_URL: http://api:8000/api
-      WMS_LLM_API_KEY: ${WMS_LLM_API_KEY:-}
-      WMS_LLM_MODEL: ${WMS_LLM_MODEL:-gpt-4o-mini}
-      WMS_LLM_BASE_URL: ${WMS_LLM_BASE_URL:-}
-      WMS_IMAGE_API_KEY: ${WMS_IMAGE_API_KEY:-}
-      WMS_IMAGE_MODEL: ${WMS_IMAGE_MODEL:-gpt-image-1}
-      WMS_IMAGE_BASE_URL: ${WMS_IMAGE_BASE_URL:-}
-      WMS_WORKER_TOKEN: ${WMS_WORKER_TOKEN:-}
+      API_URL: http://api:8000/api
+      WORKER_TOKEN: ${WORKER_TOKEN:-}
     ports:
-      - "${WMS_WEB_PORT:-3000}:3000"
+      - "${WEB_PORT:-3000}:3000"
     depends_on:
       api:
         condition: service_healthy

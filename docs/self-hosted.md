@@ -8,7 +8,7 @@ agent.
 
 ```bash
 cp .env.example .env
-# Set POSTGRES_PASSWORD and WMS_LLM_API_KEY in .env.
+# Set POSTGRES_PASSWORD and WORKER_TOKEN in .env; configure provider keys in Settings.
 docker compose up --build
 ```
 
@@ -26,8 +26,8 @@ docker compose --profile local-asr up --build
 `NEXT_PUBLIC_API_URL` is embedded into the Next.js browser bundle at build
 time, so changing it requires rebuilding the application image.
 
-If host ports `8000` or `3000` are already in use, set `WMS_API_PORT` or
-`WMS_WEB_PORT` in `.env`; the container ports remain unchanged.
+If host ports `8000` or `3000` are already in use, set `API_PORT` or
+`WEB_PORT` in `.env`; the container ports remain unchanged.
 
 ## GitHub Actions and GHCR
 
@@ -43,8 +43,8 @@ You can also manually run the workflow on `main` and enable `Publish the image
 to GHCR`. To use the published image locally, set these values in `.env`:
 
 ```dotenv
-WMS_APP_IMAGE=ghcr.io/phoenix-gh/ediora-studio
-WMS_IMAGE_TAG=latest
+APP_IMAGE=ghcr.io/phoenix-gh/ediora-studio
+IMAGE_TAG=latest
 ```
 
 Then run `docker compose up -d --no-build`. Authenticate with
@@ -53,26 +53,16 @@ Then run `docker compose up -d --no-build`. Authenticate with
 ## Services
 
 - `web`: Next.js UI, Jobs page, and Vercel AI SDK orchestration.
-- `worker`: Node worker that consumes content jobs and calls the configured LLM. Long video jobs (`digital_human_shot_render`, `digital_human_stitch`, `digital_human_render`, `text_video_render`) go to `WMS_VIDEO_WORKER_QUEUE` (`content-jobs:video` by default) so they do not block drafts, daily creation, or image jobs. The same worker process listens to both queues.
+- `worker`: Node worker that consumes content jobs and calls the configured LLM. Long video jobs (`digital_human_shot_render`, `digital_human_stitch`, `digital_human_render`, `text_video_render`) go to `VIDEO_WORKER_QUEUE` (`content-jobs:video` by default) so they do not block drafts, daily creation, or image jobs. The same worker process listens to both queues.
 - `api`: Python collection, publishing, assets, and durable job-state service.
 - `postgres`: persistent business and job data.
 - `redis`: work-queue transport only; job state remains in Postgres.
 
 ## Model configuration
 
-Set these server-only values in `.env`:
-
-```dotenv
-WMS_LLM_API_KEY=...
-WMS_LLM_MODEL=gpt-4o-mini
-# Optional OpenAI-compatible endpoint:
-WMS_LLM_BASE_URL=
-# Image jobs can use a separate OpenAI-compatible image provider; otherwise
-# they reuse WMS_LLM_API_KEY and WMS_LLM_BASE_URL.
-WMS_IMAGE_API_KEY=
-WMS_IMAGE_MODEL=gpt-image-1
-WMS_IMAGE_BASE_URL=
-```
+Configure LLM, image, speech, and HeyGen provider credentials from the
+Settings page. They are persisted in PostgreSQL and are not read from `.env`
+or injected into the Compose services.
 
 Do not use `NEXT_PUBLIC_` for credentials. Publishing remains an explicit
 operation from the draft UI; content-job execution never publishes by itself.
@@ -94,7 +84,7 @@ Set the administrative connection when it differs from the local development
 default. The connected role must have `CREATEDB` permission:
 
 ```dotenv
-WMS_TEST_DATABASE_ADMIN_URL=postgresql+asyncpg://wemedia:wemedia@127.0.0.1:55432/postgres
+TEST_DATABASE_ADMIN_URL=postgresql+asyncpg://wemedia:wemedia@127.0.0.1:55432/postgres
 ```
 
 Run the suite from the repository root:

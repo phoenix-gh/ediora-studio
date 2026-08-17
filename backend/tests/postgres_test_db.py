@@ -20,7 +20,7 @@ def replace_database_name(url: str, database_name: str) -> str:
     parsed = make_url(url)
     if parsed.drivername != "postgresql+asyncpg":
         raise ValueError(
-            "WMS_TEST_DATABASE_ADMIN_URL must use postgresql+asyncpg"
+            "TEST_DATABASE_ADMIN_URL must use postgresql+asyncpg"
         )
     return parsed.set(database=database_name).render_as_string(
         hide_password=False,
@@ -31,7 +31,7 @@ def _admin_dsn(admin_url: str, database_name: str) -> str:
     parsed = make_url(admin_url)
     if parsed.drivername != "postgresql+asyncpg":
         raise ValueError(
-            "WMS_TEST_DATABASE_ADMIN_URL must use postgresql+asyncpg"
+            "TEST_DATABASE_ADMIN_URL must use postgresql+asyncpg"
         )
     if parsed.database == database_name:
         raise ValueError("administrative database cannot be the cleanup target")

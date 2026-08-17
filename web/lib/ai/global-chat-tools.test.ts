@@ -116,7 +116,7 @@ describe('global Chat tool policy', () => {
       transport: {
         type: 'http',
         url: 'http://localhost:8000/mcp',
-        headers: { 'X-WMS-Daily-Creation-Run-Id': '83' },
+        headers: { 'X-Daily-Creation-Run-Id': '83' },
       },
     })
     await runtime.close()

@@ -1,14 +1,14 @@
 export const apiBase = () => (
-  process.env.WMS_API_URL
+  process.env.API_URL
   ?? process.env.NEXT_PUBLIC_API_URL
   ?? 'http://localhost:8000/api'
 ).replace(/\/$/, '')
 
 export function workerHeaders(jobId?: number): Record<string, string> {
-  const token = process.env.WMS_WORKER_TOKEN
-  if (!token) throw new Error('WMS_WORKER_TOKEN 未配置')
+  const token = process.env.WORKER_TOKEN
+  if (!token) throw new Error('WORKER_TOKEN 未配置')
   return {
-    'X-WMS-Worker-Token': token,
+    'X-Worker-Token': token,
     ...(jobId === undefined ? {} : { 'X-Content-Job-Id': String(jobId) }),
   }
 }
@@ -76,7 +76,7 @@ async function jsonRequest<T>(path: string, init?: RequestInit): Promise<T> {
         && 'message' in detail
         ? String(detail.message)
         : ''
-    const retryableHeader = response.headers.get('X-WMS-Retryable')
+    const retryableHeader = response.headers.get('X-Retryable')
     const retryable = retryableHeader === null
       ? response.status !== 409
       : retryableHeader.toLowerCase() === 'true'

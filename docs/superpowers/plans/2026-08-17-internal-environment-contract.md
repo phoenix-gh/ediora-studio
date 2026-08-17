@@ -110,7 +110,7 @@ Expected: PASS, with no provider job reading a process environment API key when 
 
 **Interfaces:**
 - Internal names are the prefix-stripped forms: `DATABASE_URL`, `REDIS_URL`, `API_URL`, `WORKER_TOKEN`, `WORKER_QUEUE`, `VIDEO_WORKER_QUEUE`, `CORS_ORIGINS`, `API_PORT`, `WEB_PORT`, `REDIS_PORT`, `X_SESSION_KEY`, `LOCAL_ASR_*`, `UPLOADS_DIR`, `DISABLE_SCHEDULER`, `WORKER_READY_FILE`, `SKILLS_*`, `DEV_*`, and the equivalent names for test/E2E/runtime controls.
-- `NEXT_PUBLIC_API_URL` stays unchanged. The current HTTP header name changes from `X-WMS-Worker-Token` to `X-Worker-Token` consistently in API and worker code/tests.
+- `NEXT_PUBLIC_API_URL` stays unchanged. The worker authentication header is standardized as `X-Worker-Token` across API and worker code/tests.
 
 - [ ] **Step 1: Apply the mechanical prefix removal to tracked text files.** Strip only the legacy application-owned token; do not change external/framework variables or business identifiers.
 - [ ] **Step 2: Update the worker header and error text from the branded name to the unprefixed internal contract.** Keep API authentication behavior identical.

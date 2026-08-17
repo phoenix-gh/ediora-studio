@@ -85,7 +85,7 @@ git commit -m "fix(daily-plan): enqueue supported draft jobs"
 
 - [ ] **Step 1: Restart the local Node worker**
 
-Run the worker with `WMS_REDIS_URL=redis://127.0.0.1:6379/0` and `WMS_API_URL=http://127.0.0.1:8000/api` from `web`.
+Run the worker with `REDIS_URL=redis://127.0.0.1:6379/0` and `API_URL=http://127.0.0.1:8000/api` from `web`.
 
 - [ ] **Step 2: Retry the failed job or enqueue the failed plan item again**
 

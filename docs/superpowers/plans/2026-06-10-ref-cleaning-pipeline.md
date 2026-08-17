@@ -279,7 +279,7 @@ git -C /workspace/projects/WeMediaStudio commit -m "feat(ref): 近重复检测�
 先探测当前数据库（项目无迁移框架，create_all 不改已有表）：
 
 ```bash
-grep -E "WMS_DATABASE_URL|DATABASE" /workspace/projects/WeMediaStudio/backend/.env
+grep -E "DATABASE_URL|DATABASE" /workspace/projects/WeMediaStudio/backend/.env
 ```
 
 - Postgres：`psql <连接串> -c "ALTER TABLE ref_materials ADD COLUMN IF NOT EXISTS parent_source_id VARCHAR;"`
@@ -499,7 +499,7 @@ from sqlalchemy import select
 @pytest.fixture
 def db_session(monkeypatch, tmp_path):
     db_file = tmp_path / "t.db"
-    monkeypatch.setenv("WMS_DATABASE_URL", f"sqlite+aiosqlite:///{db_file}")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite+aiosqlite:///{db_file}")
     for mod in list(sys.modules):
         if mod.startswith(("database", "models", "config")):
             sys.modules.pop(mod, None)
@@ -1084,7 +1084,7 @@ from sqlalchemy import select
 @pytest.fixture
 def db_session(monkeypatch, tmp_path):
     db_file = tmp_path / "t.db"
-    monkeypatch.setenv("WMS_DATABASE_URL", f"sqlite+aiosqlite:///{db_file}")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite+aiosqlite:///{db_file}")
     for mod in list(sys.modules):
         if mod.startswith(("database", "models", "config")):
             sys.modules.pop(mod, None)

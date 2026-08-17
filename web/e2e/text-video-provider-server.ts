@@ -78,10 +78,10 @@ export function resolveE2ERedisLaunch({
 export function resolveE2EPythonLaunch(
   environment: Partial<Pick<
     NodeJS.ProcessEnv,
-    'WMS_E2E_PYTHON' | 'WMS_CONDA_ENV'
+    'E2E_PYTHON' | 'CONDA_ENV'
   >>,
 ) {
-  const explicit = environment.WMS_E2E_PYTHON?.trim()
+  const explicit = environment.E2E_PYTHON?.trim()
   if (explicit) return { command: explicit, args: [] as string[] }
   return {
     command: 'conda',
@@ -89,7 +89,7 @@ export function resolveE2EPythonLaunch(
       'run',
       '--no-capture-output',
       '-n',
-      environment.WMS_CONDA_ENV?.trim() || 'wems',
+      environment.CONDA_ENV?.trim() || 'wems',
       'python',
     ],
   }

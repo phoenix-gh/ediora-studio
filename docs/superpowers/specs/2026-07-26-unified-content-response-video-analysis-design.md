@@ -279,7 +279,7 @@ content_response_analysis
 
 - X 直接读取原帖内容和链接上下文；
 - YouTube 复用已成功字幕；
-- Node durable worker 调用受 `WMS_WORKER_TOKEN` 保护的 Python 领域 API；
+- Node durable worker 调用受 `WORKER_TOKEN` 保护的 Python 领域 API；
 - Python 内容服务执行字幕获取、音频处理和 Whisper 兜底；
 - 保存字幕后返回规范化文本和时间戳分段。
 
@@ -582,7 +582,7 @@ POST /api/responses/outputs/{id}/worker-result
 GET  /api/settings/transcription-runtime
 ```
 
-worker-only 接口必须使用现有 `WMS_WORKER_TOKEN` 保护。
+worker-only 接口必须使用现有 `WORKER_TOKEN` 保护。
 
 ### 9.4 兼容
 

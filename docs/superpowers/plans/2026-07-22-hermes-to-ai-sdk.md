@@ -32,14 +32,14 @@
 - Test: `backend/tests/test_runtime_config.py`
 
 **Interfaces:**
-- Consumes: `WMS_DATABASE_URL`, `WMS_REDIS_URL`, `WMS_API_URL`, and server-only LLM/image provider environment variables.
+- Consumes: `DATABASE_URL`, `REDIS_URL`, `API_URL`, and server-only LLM/image provider environment variables.
 - Produces: a four-service Compose topology: `web`, `api`, `worker`, `postgres`, plus `redis`; a documented `docker compose up --build` route that does not install Hermes.
 
 - [ ] **Step 1: Write the failing runtime configuration test**
 
 ```python
 def test_runtime_settings_default_to_self_hosted_services(monkeypatch):
-    monkeypatch.delenv("WMS_REDIS_URL", raising=False)
+    monkeypatch.delenv("REDIS_URL", raising=False)
     from runtime_config import get_runtime_settings
 
     settings = get_runtime_settings()

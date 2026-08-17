@@ -17,8 +17,8 @@ jobs:
     permissions:
       contents: read
     env:
-      WMS_APP_IMAGE: ediora-studio
-      WMS_IMAGE_TAG: ci-${{ github.sha }}
+      APP_IMAGE: ediora-studio
+      IMAGE_TAG: ci-${{ github.sha }}
       NEXT_PUBLIC_API_URL: http://localhost:8000/api
     steps:
       - name: Check out repository

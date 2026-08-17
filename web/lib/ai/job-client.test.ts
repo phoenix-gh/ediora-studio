@@ -37,7 +37,7 @@ it('keeps structured validation detail and retryability from an HTTP error', asy
       status: 422,
       headers: {
         'Content-Type': 'application/json',
-        'X-WMS-Retryable': 'false',
+        'X-Retryable': 'false',
       },
     },
   )))

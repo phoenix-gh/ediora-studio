@@ -282,7 +282,7 @@ async def render_worker_context(
         raise HTTPException(
             409,
             "该渲染任务已被更新任务替代",
-            headers={"X-WMS-Retryable": "false"},
+            headers={"X-Retryable": "false"},
         )
     environment = await db.get(CreativeAsset, render.environment_asset_id)
     if environment is None:
@@ -336,7 +336,7 @@ async def render_worker_progress(
         raise HTTPException(
             409,
             "该渲染任务已被更新任务替代",
-            headers={"X-WMS-Retryable": "false"},
+            headers={"X-Retryable": "false"},
         )
     if job.status == "cancelled":
         if render.status in {"queued", "running"}:

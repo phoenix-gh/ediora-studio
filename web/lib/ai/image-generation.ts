@@ -4,6 +4,10 @@ import { createOpenAI } from '@ai-sdk/openai'
 import { generateImage } from 'ai'
 
 import { apiBase as defaultApiBase, workerHeaders } from './job-client'
+import {
+  imageModelConfigFromSettings,
+  type ImageModelSettings,
+} from './runtime-config'
 
 export type ImageModelConfig = {
   apiKey: string
@@ -49,23 +53,9 @@ export async function configuredImageModel(apiRoot = normalizedApiBase()): Promi
     cache: 'no-store',
     headers: workerHeaders(),
   })
-  if (response.ok) {
-    const settings = await response.json() as { image?: { api_key: string; model: string; base_url: string } }
-    if (settings.image?.api_key) {
-      return {
-        apiKey: settings.image.api_key,
-        modelName: settings.image.model || 'gpt-image-1',
-        baseURL: settings.image.base_url || undefined,
-      }
-    }
-  }
-  const apiKey = process.env.WMS_IMAGE_API_KEY
-  if (!apiKey) throw new Error('Image model is not configured. Set an image API key in Settings.')
-  return {
-    apiKey,
-    modelName: process.env.WMS_IMAGE_MODEL ?? 'gpt-image-1',
-    baseURL: process.env.WMS_IMAGE_BASE_URL,
-  }
+  if (!response.ok) throw new Error('无法读取设置中的图片模型配置')
+  const settings = await response.json() as { image?: ImageModelSettings }
+  return imageModelConfigFromSettings(settings.image ?? {})
 }
 
 export async function saveCreativeAssetImage(

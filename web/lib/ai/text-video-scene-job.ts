@@ -24,6 +24,7 @@ import {
   type DurableJob,
   type JobStep,
 } from './job-client'
+import { textModelConfigFromSettings, type TextModelSettings } from './runtime-config'
 
 
 const sceneSchema = z.object({
@@ -355,18 +356,10 @@ function repairPrompt(
 }
 
 async function configuredModel(jobId: number) {
-  const runtime = await apiGet<{
-    api_key: string
-    model: string
-    base_url: string
-  }>('/settings/ai-runtime', workerHeaders(jobId))
-  const apiKey = runtime.api_key || process.env.WMS_LLM_API_KEY
-  if (!apiKey) throw new Error('请先配置 AI 大模型 API Key')
-  return {
-    apiKey,
-    modelName: runtime.model || process.env.WMS_LLM_MODEL || 'gpt-4o-mini',
-    baseURL: runtime.base_url || process.env.WMS_LLM_BASE_URL || undefined,
-  }
+  const runtime = await apiGet<TextModelSettings>(
+    '/settings/ai-runtime', workerHeaders(jobId),
+  )
+  return textModelConfigFromSettings(runtime)
 }
 
 async function generateScenesWithAi(

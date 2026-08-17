@@ -17,7 +17,7 @@
 - At most one queued or running render exists per project.
 - A failed or in-flight rerender never removes the previous successful output.
 - Every successful rerender creates a new generated `CreativeAsset`; the project points to the latest one.
-- Worker endpoints require both `X-WMS-Worker-Token` and `X-Content-Job-Id`.
+- Worker endpoints require both `X-Worker-Token` and `X-Content-Job-Id`.
 - Do not stage or commit unrelated dirty-worktree changes.
 
 ---

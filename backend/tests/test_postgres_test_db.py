@@ -101,9 +101,9 @@ def test_postgres_database_fixture_targets_generated_database(
 
 
 def test_postgres_env_points_application_at_isolated_database(postgres_env):
-    assert os.environ["WMS_DATABASE_URL"] == postgres_env
+    assert os.environ["DATABASE_URL"] == postgres_env
     assert make_url(postgres_env).database != "wemedia"
-    assert os.environ["WMS_DISABLE_SCHEDULER"] == "1"
+    assert os.environ["DISABLE_SCHEDULER"] == "1"
 
 
 def test_postgres_env_configures_database_engine_without_cross_loop_pooling(

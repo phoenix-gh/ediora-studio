@@ -56,7 +56,7 @@ def test_worker_link_reuses_agent_saved_draft_without_creating_another(client):
 
     response = client.post(
         f"/api/responses/outputs/{output_id}/worker-link",
-        headers={"X-WMS-Worker-Token": "test-worker-token-at-least-32-chars"},
+        headers={"X-Worker-Token": "test-worker-token-at-least-32-chars"},
         json={"article_draft_id": draft_id},
     )
 

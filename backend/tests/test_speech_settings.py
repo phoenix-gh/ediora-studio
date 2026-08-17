@@ -13,18 +13,18 @@ def worker_token():
 
 @pytest.fixture
 def worker_headers(worker_token):
-    return {"X-WMS-Worker-Token": worker_token}
+    return {"X-Worker-Token": worker_token}
 
 
 @pytest.fixture
 def client(monkeypatch, worker_token, postgres_env):
-    monkeypatch.setenv("WMS_WORKER_TOKEN", worker_token)
+    monkeypatch.setenv("WORKER_TOKEN", worker_token)
     for name in (
-        "WMS_SPEECH_PROVIDER",
-        "WMS_SPEECH_MODEL",
-        "WMS_SPEECH_BASE_URL",
-        "WMS_SPEECH_API_KEY",
-        "WMS_SPEECH_DEFAULT_VOICE",
+        "SPEECH_PROVIDER",
+        "SPEECH_MODEL",
+        "SPEECH_BASE_URL",
+        "SPEECH_API_KEY",
+        "SPEECH_DEFAULT_VOICE",
         "MIMO_API_KEY",
     ):
         monkeypatch.delenv(name, raising=False)
@@ -160,16 +160,16 @@ def test_public_settings_reject_unsupported_or_unsafe_speech_destinations(
     assert "MiMo" in response.json()["detail"]
 
 
-def test_empty_primary_speech_key_falls_back_to_mimo_environment(
+def test_empty_speech_key_does_not_fall_back_to_environment(
     monkeypatch,
 ):
-    monkeypatch.setenv("WMS_SPEECH_API_KEY", "")
+    monkeypatch.setenv("SPEECH_API_KEY", "environment-key")
     monkeypatch.setenv("MIMO_API_KEY", "alias-key")
     sys.modules.pop("config", None)
 
     try:
         import config
 
-        assert config.DEFAULTS["speech_api_key"] == "alias-key"
+        assert config.DEFAULTS["speech_api_key"] == ""
     finally:
         sys.modules.pop("config", None)

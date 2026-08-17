@@ -27,12 +27,12 @@
 - Modify: `dev.sh`
 
 **Interfaces:**
-- Consumes: repository root path computed from `BASH_SOURCE[0]` and optional `WMS_DEV_ENV_FILE` test/config override.
+- Consumes: repository root path computed from `BASH_SOURCE[0]` and optional `DEV_ENV_FILE` test/config override.
 - Produces: `load_dev_environment() -> shell status`, exporting `.env` variables while restoring every variable that was already present in the caller environment.
 
 - [ ] **Step 1: Write failing environment tests**
 
-Add tests that create a temporary `.env`, remove `WMS_WORKER_TOKEN` from the subprocess environment, and assert the token hash observed by the fake API matches the file. Add a second test with a different explicit token and assert it wins. Add a missing-file test asserting the error names `.env.example` and contains no token value.
+Add tests that create a temporary `.env`, remove `WORKER_TOKEN` from the subprocess environment, and assert the token hash observed by the fake API matches the file. Add a second test with a different explicit token and assert it wins. Add a missing-file test asserting the error names `.env.example` and contains no token value.
 
 - [ ] **Step 2: Run the focused tests and verify RED**
 
@@ -42,11 +42,11 @@ Run:
 /home/violet/miniconda3/envs/wems/bin/python -m pytest backend/tests/test_dev_runtime.py -k 'loads_root_env or explicit_environment or missing_env' -v
 ```
 
-Expected: failures because `dev.sh` does not load `WMS_DEV_ENV_FILE` and does not reject a missing environment file.
+Expected: failures because `dev.sh` does not load `DEV_ENV_FILE` and does not reject a missing environment file.
 
 - [ ] **Step 3: Implement environment loading before configuration derivation**
 
-In `dev.sh`, compute `ROOT`, set `DEV_ENV_FILE="${WMS_DEV_ENV_FILE:-$ROOT/.env}"`, collect keys assigned by the file, snapshot only keys already set in the invoking environment, source with `set -a`, then restore the caller values using safely quoted `declare -p` snapshots. Reject a missing file with `Create it from $ROOT/.env.example` and never echo values.
+In `dev.sh`, compute `ROOT`, set `DEV_ENV_FILE="${DEV_ENV_FILE:-$ROOT/.env}"`, collect keys assigned by the file, snapshot only keys already set in the invoking environment, source with `set -a`, then restore the caller values using safely quoted `declare -p` snapshots. Reject a missing file with `Create it from $ROOT/.env.example` and never echo values.
 
 - [ ] **Step 4: Run the focused tests and verify GREEN**
 
@@ -68,7 +68,7 @@ git commit -m "feat: load development environment automatically"
 - Modify: `dev.sh`
 
 **Interfaces:**
-- Consumes: `WMS_DEV_POSTGRES_CONTAINER`, `WMS_DEV_POSTGRES_HOST`, `WMS_DEV_POSTGRES_PORT`, `WMS_DEV_READY_TIMEOUT_SECONDS`, and `WMS_DEV_POLL_INTERVAL_SECONDS`.
+- Consumes: `DEV_POSTGRES_CONTAINER`, `DEV_POSTGRES_HOST`, `DEV_POSTGRES_PORT`, `DEV_READY_TIMEOUT_SECONDS`, and `DEV_POLL_INTERVAL_SECONDS`.
 - Produces: `postgres_tcp_ready() -> shell status`, `postgres_container_state() -> running|stopped|missing|unavailable`, and `ensure_postgres_ready() -> shell status`.
 
 - [ ] **Step 1: Add a fake Docker CLI and failing orchestration tests**
@@ -85,7 +85,7 @@ Expected: failures because PostgreSQL is not inspected, started, or probed.
 
 - [ ] **Step 3: Implement validation, Docker state handling, and TCP readiness**
 
-Add the three default PostgreSQL variables beside existing port configuration. Validate `WMS_DEV_POSTGRES_PORT`; require `docker` and `python3` for startup; use `docker inspect --format '{{.State.Running}}'`, start only a stopped existing container, and use a short Python `socket.create_connection()` probe within `dev_wait_for`. Emit distinct errors for absent CLI, daemon/inspect failure, missing container, start failure, and TCP timeout.
+Add the three default PostgreSQL variables beside existing port configuration. Validate `DEV_POSTGRES_PORT`; require `docker` and `python3` for startup; use `docker inspect --format '{{.State.Running}}'`, start only a stopped existing container, and use a short Python `socket.create_connection()` probe within `dev_wait_for`. Emit distinct errors for absent CLI, daemon/inspect failure, missing container, start failure, and TCP timeout.
 
 - [ ] **Step 4: Ensure PostgreSQL before any mutable runtime action**
 

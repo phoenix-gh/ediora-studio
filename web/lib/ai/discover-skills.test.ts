@@ -25,16 +25,16 @@ describe('discoverSkills', () => {
   })
 
   afterEach(async () => {
-    delete process.env.WMS_SKILLS_RUNTIME_DIR
-    delete process.env.WMS_SKILLS_STATE_FILE
+    delete process.env.SKILLS_RUNTIME_DIR
+    delete process.env.SKILLS_STATE_FILE
     if (runtimeDir) await rm(runtimeDir, { recursive: true, force: true })
     runtimeDir = ''
   })
 
   it('omits a disabled Skill and restores it when enabled again', async () => {
     runtimeDir = await mkdtemp(join(tmpdir(), 'wms-discover-skills-'))
-    process.env.WMS_SKILLS_RUNTIME_DIR = runtimeDir
-    process.env.WMS_SKILLS_STATE_FILE = join(runtimeDir, 'skills-state.json')
+    process.env.SKILLS_RUNTIME_DIR = runtimeDir
+    process.env.SKILLS_STATE_FILE = join(runtimeDir, 'skills-state.json')
 
     await setSkillEnabled('baoyu-cover-image', false)
     expect((await discoverSkills()).some(skill => skill.name === 'baoyu-cover-image')).toBe(false)

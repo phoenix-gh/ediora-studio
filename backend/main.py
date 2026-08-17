@@ -4,7 +4,7 @@ import os
 from dotenv import load_dotenv
 
 # Load backend/.env before any other import so feedgrab + downstream modules
-# see X_BOOKMARKS_ENABLED, WMS_DATABASE_URL, X_AUTH_TOKEN, etc.
+# see X_BOOKMARKS_ENABLED, DATABASE_URL, X_AUTH_TOKEN, etc.
 load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
 from log_redaction import install_log_redaction
@@ -66,7 +66,7 @@ async def lifespan(app: FastAPI):
     app.state.job_reconciliation_task = reconciliation_task
     scheduler_started = False
     try:
-        if os.getenv("WMS_DISABLE_SCHEDULER") != "1":
+        if os.getenv("DISABLE_SCHEDULER") != "1":
             job_registry.register_jobs(scheduler, cfg)
             scheduler.start()
             scheduler_started = True
@@ -103,7 +103,7 @@ app = FastAPI(title="Ediora API", lifespan=lifespan_with_mcp)
 cors_origins = [
     origin.strip()
     for origin in os.getenv(
-        "WMS_CORS_ORIGINS",
+        "CORS_ORIGINS",
         "http://localhost:3000,http://127.0.0.1:3000",
     ).split(",")
     if origin.strip()

@@ -158,7 +158,7 @@ async function responseError(
       && 'message' in detail
       ? String(detail.message)
       : ''
-  const retryableHeader = response.headers.get('X-WMS-Retryable')
+  const retryableHeader = response.headers.get('X-Retryable')
   const retryable = retryableHeader === null
     ? retryableHttpStatus(response.status)
     : retryableHeader.toLowerCase() === 'true'

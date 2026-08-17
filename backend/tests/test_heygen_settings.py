@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 @pytest.fixture
 def client(monkeypatch, postgres_env):
     monkeypatch.setenv(
-        "WMS_WORKER_TOKEN", "test-worker-token-at-least-32-chars"
+        "WORKER_TOKEN", "test-worker-token-at-least-32-chars"
     )
     monkeypatch.delenv("HEYGEN_API_KEY", raising=False)
     for module in list(sys.modules):
@@ -40,17 +40,17 @@ def test_heygen_key_roundtrip_is_redacted(client):
     assert "hg_secret_1234" not in saved.text
 
 
-def test_heygen_runtime_uses_environment_fallback(client, monkeypatch):
+def test_heygen_runtime_does_not_use_environment_fallback(client, monkeypatch):
     monkeypatch.setenv("HEYGEN_API_KEY", "env-key")
 
     response = client.get(
         "/api/settings/heygen-runtime",
-        headers={"X-WMS-Worker-Token": "test-worker-token-at-least-32-chars"},
+        headers={"X-Worker-Token": "test-worker-token-at-least-32-chars"},
     )
 
     assert response.status_code == 200
     assert response.json() == {
-        "api_key": "env-key",
+        "api_key": "",
         "base_url": "https://api.heygen.com",
     }
 
@@ -59,7 +59,7 @@ def test_heygen_runtime_rejects_missing_or_wrong_worker_token(client):
     missing = client.get("/api/settings/heygen-runtime")
     wrong = client.get(
         "/api/settings/heygen-runtime",
-        headers={"X-WMS-Worker-Token": "wrong-token"},
+        headers={"X-Worker-Token": "wrong-token"},
     )
 
     assert missing.status_code == 403
@@ -69,11 +69,11 @@ def test_heygen_runtime_rejects_missing_or_wrong_worker_token(client):
 def test_heygen_runtime_fails_closed_without_server_worker_token(
     client, monkeypatch
 ):
-    monkeypatch.delenv("WMS_WORKER_TOKEN")
+    monkeypatch.delenv("WORKER_TOKEN")
 
     response = client.get(
         "/api/settings/heygen-runtime",
-        headers={"X-WMS-Worker-Token": "test-worker-token-at-least-32-chars"},
+        headers={"X-Worker-Token": "test-worker-token-at-least-32-chars"},
     )
 
     assert response.status_code == 503

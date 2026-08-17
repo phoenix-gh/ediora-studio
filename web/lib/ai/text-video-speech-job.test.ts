@@ -218,8 +218,8 @@ describe('text video speech job', () => {
   })
 
   it('uses the launch-frozen model and voice after global defaults change', async () => {
-    const previousToken = process.env.WMS_WORKER_TOKEN
-    process.env.WMS_WORKER_TOKEN = 'worker-token-at-least-32-characters'
+    const previousToken = process.env.WORKER_TOKEN
+    process.env.WORKER_TOKEN = 'worker-token-at-least-32-characters'
     const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input)
       const json = (value: unknown) => new Response(
@@ -294,8 +294,8 @@ describe('text video speech job', () => {
       await runTextVideoSpeechJob(71)
     } finally {
       vi.unstubAllGlobals()
-      if (previousToken === undefined) delete process.env.WMS_WORKER_TOKEN
-      else process.env.WMS_WORKER_TOKEN = previousToken
+      if (previousToken === undefined) delete process.env.WORKER_TOKEN
+      else process.env.WORKER_TOKEN = previousToken
     }
 
     const providerCall = fetchMock.mock.calls.find(
@@ -307,8 +307,8 @@ describe('text video speech job', () => {
   })
 
   it('uses the injected fetch only for the MiMo provider request', async () => {
-    const previousToken = process.env.WMS_WORKER_TOKEN
-    process.env.WMS_WORKER_TOKEN = 'worker-token-at-least-32-characters'
+    const previousToken = process.env.WORKER_TOKEN
+    process.env.WORKER_TOKEN = 'worker-token-at-least-32-characters'
     const json = (value: unknown) => new Response(
       JSON.stringify(value),
       { headers: { 'Content-Type': 'application/json' } },
@@ -386,8 +386,8 @@ describe('text video speech job', () => {
       })
     } finally {
       vi.unstubAllGlobals()
-      if (previousToken === undefined) delete process.env.WMS_WORKER_TOKEN
-      else process.env.WMS_WORKER_TOKEN = previousToken
+      if (previousToken === undefined) delete process.env.WORKER_TOKEN
+      else process.env.WORKER_TOKEN = previousToken
     }
 
     expect(speechFetch).toHaveBeenCalledOnce()
@@ -400,8 +400,8 @@ describe('text video speech job', () => {
   })
 
   it('refetches durable state after a lost complete-step response', async () => {
-    const previousToken = process.env.WMS_WORKER_TOKEN
-    process.env.WMS_WORKER_TOKEN = 'worker-token-at-least-32-characters'
+    const previousToken = process.env.WORKER_TOKEN
+    process.env.WORKER_TOKEN = 'worker-token-at-least-32-characters'
     const output = {
       asset_id: 31,
       audio_url: '/api/uploads/audio.mp3',
@@ -487,8 +487,8 @@ describe('text video speech job', () => {
       await expect(runTextVideoSpeechJob(71)).resolves.toEqual(output)
     } finally {
       vi.unstubAllGlobals()
-      if (previousToken === undefined) delete process.env.WMS_WORKER_TOKEN
-      else process.env.WMS_WORKER_TOKEN = previousToken
+      if (previousToken === undefined) delete process.env.WORKER_TOKEN
+      else process.env.WORKER_TOKEN = previousToken
     }
 
     expect(jobReads).toBe(2)

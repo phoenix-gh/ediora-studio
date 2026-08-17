@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 @pytest.fixture
 def client(monkeypatch, postgres_env):
     monkeypatch.setenv(
-        "WMS_WORKER_TOKEN", "test-worker-token-at-least-32-chars"
+        "WORKER_TOKEN", "test-worker-token-at-least-32-chars"
     )
     monkeypatch.delenv("MKFLOW_AGENT_API_TOKEN", raising=False)
 
@@ -110,7 +110,7 @@ def test_settings_image_provider_is_separate_from_text_provider(client):
     runtime = client.get(
         "/api/settings/ai-runtime",
         headers={
-            "X-WMS-Worker-Token": "test-worker-token-at-least-32-chars"
+            "X-Worker-Token": "test-worker-token-at-least-32-chars"
         },
     )
     assert runtime.status_code == 200

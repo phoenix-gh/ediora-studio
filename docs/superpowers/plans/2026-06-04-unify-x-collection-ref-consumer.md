@@ -36,7 +36,7 @@ import sys, asyncio, pytest
 @pytest.fixture
 def db_session(monkeypatch, tmp_path):
     db_file = tmp_path / "t.db"
-    monkeypatch.setenv("WMS_DATABASE_URL", f"sqlite+aiosqlite:///{db_file}")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite+aiosqlite:///{db_file}")
     for mod in list(sys.modules):
         if mod.startswith(("database", "models", "config")):
             sys.modules.pop(mod, None)

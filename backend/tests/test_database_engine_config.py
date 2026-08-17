@@ -8,7 +8,7 @@ import pytest
 def test_database_timeout_rejects_invalid_or_excessive_values(value):
     from database import _parse_database_timeout_seconds
 
-    with pytest.raises(ValueError, match="WMS_DATABASE_COMMAND_TIMEOUT_SECONDS"):
+    with pytest.raises(ValueError, match="DATABASE_COMMAND_TIMEOUT_SECONDS"):
         _parse_database_timeout_seconds(value)
 
 

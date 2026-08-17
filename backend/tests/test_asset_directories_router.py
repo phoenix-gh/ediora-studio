@@ -303,7 +303,7 @@ def test_topic_rule_exposes_only_keyword_matched_x_post_snapshots(api):
 
 def test_merged_ingestion_candidates_and_acceptance_choose_one_folder(api, monkeypatch):
     client, session_factory = api
-    monkeypatch.setenv("WMS_WORKER_TOKEN", "merged-ingestion-worker-token-long")
+    monkeypatch.setenv("WORKER_TOKEN", "merged-ingestion-worker-token-long")
 
     async def seed():
         from datetime import datetime, timezone
@@ -384,7 +384,7 @@ def test_merged_ingestion_candidates_and_acceptance_choose_one_folder(api, monke
     )
     accepted = client.post(
         "/api/assets/ingestion/accepted",
-        headers={"X-WMS-Worker-Token": "merged-ingestion-worker-token-long"},
+        headers={"X-Worker-Token": "merged-ingestion-worker-token-long"},
         json={
             "subscription_id": subscription_id,
             "decisions": [
@@ -406,7 +406,7 @@ def test_merged_ingestion_candidates_and_acceptance_choose_one_folder(api, monke
 
 def test_merged_ingestion_extracts_prompt_and_attaches_post_media(api, monkeypatch):
     client, session_factory = api
-    monkeypatch.setenv("WMS_WORKER_TOKEN", "prompt-ingestion-worker-token-long")
+    monkeypatch.setenv("WORKER_TOKEN", "prompt-ingestion-worker-token-long")
 
     async def seed():
         from datetime import datetime, timezone
@@ -469,7 +469,7 @@ def test_merged_ingestion_extracts_prompt_and_attaches_post_media(api, monkeypat
     )
     accepted = client.post(
         "/api/assets/ingestion/accepted",
-        headers={"X-WMS-Worker-Token": "prompt-ingestion-worker-token-long"},
+        headers={"X-Worker-Token": "prompt-ingestion-worker-token-long"},
         json={
             "subscription_id": subscription_id,
             "decisions": [{"tweet_id": "prompt-post", "directory_id": None}],
@@ -485,7 +485,7 @@ def test_merged_ingestion_extracts_prompt_and_attaches_post_media(api, monkeypat
     )
     repeated = client.post(
         "/api/assets/ingestion/accepted",
-        headers={"X-WMS-Worker-Token": "prompt-ingestion-worker-token-long"},
+        headers={"X-Worker-Token": "prompt-ingestion-worker-token-long"},
         json={
             "subscription_id": subscription_id,
             "decisions": [{"tweet_id": "prompt-post", "directory_id": None}],
@@ -693,7 +693,7 @@ def test_daily_candidate_selection_marks_materials_so_they_do_not_repeat(api):
 
 def test_topic_source_persists_accept_and_reject_decisions(api, monkeypatch):
     client, session_factory = api
-    monkeypatch.setenv("WMS_WORKER_TOKEN", "topic-source-worker-token-which-is-long-enough")
+    monkeypatch.setenv("WORKER_TOKEN", "topic-source-worker-token-which-is-long-enough")
 
     async def seed():
         from datetime import datetime, timezone
@@ -720,7 +720,7 @@ def test_topic_source_persists_accept_and_reject_decisions(api, monkeypatch):
             {"tweet_id": "keep", "accepted": True},
             {"tweet_id": "reject", "accepted": False},
         ]},
-        headers={"X-WMS-Worker-Token": "topic-source-worker-token-which-is-long-enough"},
+        headers={"X-Worker-Token": "topic-source-worker-token-which-is-long-enough"},
     )
     remaining = client.get(f"/api/assets/topic-rules/{rule['id']}/candidates")
 

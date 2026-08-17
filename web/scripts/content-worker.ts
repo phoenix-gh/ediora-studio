@@ -449,7 +449,7 @@ export function createWorkerReadyFilePublisher({
 }: WorkerReadyFileOptions) {
   if (readyFile && (!marker || !configFingerprint)) {
     throw new Error(
-      'WMS_WORKER_READY_FILE requires a non-empty marker and fingerprint',
+      'WORKER_READY_FILE requires a non-empty marker and fingerprint',
     )
   }
   const payload = readyFile
@@ -493,15 +493,15 @@ export function createWorkerReadyFilePublisher({
 }
 
 async function runContentWorkerCli() {
-  const redisUrl = process.env.WMS_REDIS_URL ?? 'redis://redis:6379/0'
-  const queueName = process.env.WMS_WORKER_QUEUE ?? 'content-jobs'
-  const videoQueueName = process.env.WMS_VIDEO_WORKER_QUEUE ?? 'content-jobs:video'
-  const listenVideoQueue = process.env.WMS_LISTEN_VIDEO_QUEUE !== '0'
+  const redisUrl = process.env.REDIS_URL ?? 'redis://redis:6379/0'
+  const queueName = process.env.WORKER_QUEUE ?? 'content-jobs'
+  const videoQueueName = process.env.VIDEO_WORKER_QUEUE ?? 'content-jobs:video'
+  const listenVideoQueue = process.env.LISTEN_VIDEO_QUEUE !== '0'
     && videoQueueName !== queueName
   const ready = createWorkerReadyFilePublisher({
-    readyFile: process.env.WMS_WORKER_READY_FILE,
-    marker: process.env.WMS_DEV_SERVICE_MARKER,
-    configFingerprint: process.env.WMS_DEV_CONFIG_FINGERPRINT,
+    readyFile: process.env.WORKER_READY_FILE,
+    marker: process.env.DEV_SERVICE_MARKER,
+    configFingerprint: process.env.DEV_CONFIG_FINGERPRINT,
   })
   const redis = new Redis(redisUrl)
   const videoRedis = listenVideoQueue ? new Redis(redisUrl) : undefined

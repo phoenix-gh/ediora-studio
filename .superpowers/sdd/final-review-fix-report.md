@@ -79,7 +79,7 @@ wave:
    `ADD COLUMN` only when missing, and creates the claim-token index
    idempotently. PostgreSQL retains `ADD COLUMN IF NOT EXISTS`. Tests cover
    both an existing SQLite table and a newly created schema.
-2. Telegram notification failures now expose a safe `X-WMS-Retryable`
+2. Telegram notification failures now expose a safe `X-Retryable`
    response header. The TypeScript API error preserves that flag through
    `failStep`; both immediate and digest workers persist the real retryability
    instead of hardcoding `true`. Permanent 4xx and unknown/partial delivery

@@ -38,13 +38,13 @@ let runtimeDir = ''
 describe('bundled human-social-copy Skill', () => {
   beforeEach(async () => {
     runtimeDir = await mkdtemp(join(tmpdir(), 'wms-human-social-copy-'))
-    process.env.WMS_SKILLS_RUNTIME_DIR = join(runtimeDir, 'skills')
-    process.env.WMS_SKILLS_STATE_FILE = join(runtimeDir, 'skills-state.json')
+    process.env.SKILLS_RUNTIME_DIR = join(runtimeDir, 'skills')
+    process.env.SKILLS_STATE_FILE = join(runtimeDir, 'skills-state.json')
   })
 
   afterEach(async () => {
-    delete process.env.WMS_SKILLS_RUNTIME_DIR
-    delete process.env.WMS_SKILLS_STATE_FILE
+    delete process.env.SKILLS_RUNTIME_DIR
+    delete process.env.SKILLS_STATE_FILE
     await rm(runtimeDir, { recursive: true, force: true })
   })
 

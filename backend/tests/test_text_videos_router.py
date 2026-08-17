@@ -14,7 +14,7 @@ from starlette.datastructures import Headers, UploadFile
 @pytest.fixture
 def client(monkeypatch, tmp_path, postgres_env):
     monkeypatch.setenv(
-        "WMS_WORKER_TOKEN",
+        "WORKER_TOKEN",
         "test-worker-token-at-least-32-chars",
     )
     for module in list(sys.modules):
@@ -267,7 +267,7 @@ def _scene_worker_headers(
     claim="scene-claim-token-1234567890",
 ):
     return {
-        "X-WMS-Worker-Token": "test-worker-token-at-least-32-chars",
+        "X-Worker-Token": "test-worker-token-at-least-32-chars",
         "X-Content-Job-Id": str(job_id),
         "X-Content-Step-Id": str(step_id),
         "X-Content-Step-Attempt": str(attempt),
@@ -391,7 +391,7 @@ def _prepare_speech_worker_result(
         f"/api/text-videos/{project['id']}/speech-segments/"
         f"{segment['id']}/worker-context",
         headers={
-            "X-WMS-Worker-Token": "test-worker-token-at-least-32-chars",
+            "X-Worker-Token": "test-worker-token-at-least-32-chars",
             "X-Content-Job-Id": str(job["id"]),
         },
     ).json()
@@ -614,7 +614,7 @@ def _prepare_text_video_render_job(client, monkeypatch):
 
 def _render_worker_headers(job_id):
     return {
-        "X-WMS-Worker-Token": "test-worker-token-at-least-32-chars",
+        "X-Worker-Token": "test-worker-token-at-least-32-chars",
         "X-Content-Job-Id": str(job_id),
     }
 
@@ -1459,7 +1459,7 @@ def test_speech_split_preview_snapshots_exact_script_and_worker_validation(clien
         f"/api/text-videos/{project['id']}/speech-split-preview/worker-validate",
         json={"script_hash": job["input"]["script_hash"], "boundary_ids": boundary_ids[:1]},
         headers={
-            "X-WMS-Worker-Token": "test-worker-token-at-least-32-chars",
+            "X-Worker-Token": "test-worker-token-at-least-32-chars",
             "X-Content-Job-Id": str(body["jobs"][0]["id"]),
         },
     )
@@ -1606,7 +1606,7 @@ def test_scene_worker_context_claim_and_strict_word_only_validation(
         },
     )
     assert competing.status_code == 409
-    assert competing.headers["X-WMS-Retryable"] == "false"
+    assert competing.headers["X-Retryable"] == "false"
 
     with_timing = client.post(
         f"/api/text-videos/{project['id']}/scene-plan/worker-validate",
@@ -1917,7 +1917,7 @@ def test_scene_worker_validation_rejects_subframe_scene_and_accepts_repair(
         headers=headers,
     )
     assert unsafe.status_code == 422, unsafe.text
-    assert unsafe.headers["X-WMS-Retryable"] == "false"
+    assert unsafe.headers["X-Retryable"] == "false"
     assert "安全帧" in unsafe.json()["detail"]["message"]
 
     repaired_scenes = [
@@ -1993,7 +1993,7 @@ def test_scene_worker_result_rechecks_subframe_safety_with_master_duration(
     )
 
     assert result.status_code == 422, result.text
-    assert result.headers["X-WMS-Retryable"] == "false"
+    assert result.headers["X-Retryable"] == "false"
     assert "安全帧" in result.json()["detail"]["message"]
     after = client.get(f"/api/text-videos/{project['id']}").json()
     assert after["scene_plan"]["status"] == "generating"
@@ -2068,7 +2068,7 @@ def test_selected_scene_validation_returns_frozen_full_canonical_plan(
         headers=headers,
     )
     assert changed_boundary.status_code == 422
-    assert changed_boundary.headers["X-WMS-Retryable"] == "false"
+    assert changed_boundary.headers["X-Retryable"] == "false"
 
 
 def test_scene_worker_result_rejects_changed_timeline_and_preserves_last_plan(
@@ -2146,7 +2146,7 @@ def test_scene_worker_result_rejects_changed_timeline_and_preserves_last_plan(
     )
 
     assert stale.status_code == 409, stale.text
-    assert stale.headers["X-WMS-Retryable"] == "false"
+    assert stale.headers["X-Retryable"] == "false"
     after = client.get(f"/api/text-videos/{project['id']}").json()
     assert after["scene_plan"]["scenes"] == original_scene["scenes"]
     assert after["scene_plan"]["generation_revision"] == (
@@ -2593,7 +2593,7 @@ def test_scene_plan_launch_reuses_same_request_and_rejects_competing_request(
     assert first.status_code == repeated.status_code == 201
     assert first.json()["jobs"][0]["id"] == repeated.json()["jobs"][0]["id"]
     assert competing.status_code == 409
-    assert competing.headers["X-WMS-Retryable"] == "false"
+    assert competing.headers["X-Retryable"] == "false"
     assert queued == [
         first.json()["jobs"][0]["id"],
         first.json()["jobs"][0]["id"],
@@ -2753,7 +2753,7 @@ def test_scene_worker_result_rejects_manifest_drift_for_same_template_pair(
     )
 
     assert stale.status_code == 409, stale.text
-    assert stale.headers["X-WMS-Retryable"] == "false"
+    assert stale.headers["X-Retryable"] == "false"
     after = client.get(f"/api/text-videos/{project['id']}").json()
     assert after["scene_plan"]["status"] == "generating"
     assert after["scene_plan"]["scenes"] == current["scene_plan"]["scenes"]
@@ -2846,7 +2846,7 @@ def test_manual_scene_edit_supersedes_old_validate_result_and_failure(
 
     for response in (old_validate, old_result, old_failure):
         assert response.status_code == 409, response.text
-        assert response.headers["X-WMS-Retryable"] == "false"
+        assert response.headers["X-Retryable"] == "false"
     after = client.get(f"/api/text-videos/{project['id']}").json()
     assert after["scene_plan"] == manual_project["scene_plan"]
     assert after["render_input"] == manual_project["render_input"]
@@ -2908,7 +2908,7 @@ def test_scene_worker_result_rejects_a_different_payload_with_old_token(
     )
 
     assert result.status_code == 409
-    assert result.headers["X-WMS-Retryable"] == "false"
+    assert result.headers["X-Retryable"] == "false"
     after = client.get(f"/api/text-videos/{project['id']}").json()
     assert after["scene_plan"]["status"] == "generating"
     assert after["render_input"] == current["render_input"]
@@ -3048,7 +3048,7 @@ def test_speech_generation_confirmation_and_stale_worker_result(
         f"/api/text-videos/{project['id']}/speech-segments/"
         f"{segment['id']}/worker-context",
         headers={
-            "X-WMS-Worker-Token": "test-worker-token-at-least-32-chars",
+            "X-Worker-Token": "test-worker-token-at-least-32-chars",
             "X-Content-Job-Id": str(job["id"]),
         },
     )
@@ -3075,12 +3075,12 @@ def test_speech_generation_confirmation_and_stale_worker_result(
             "error": "late provider response",
         },
         headers={
-            "X-WMS-Worker-Token": "test-worker-token-at-least-32-chars",
+            "X-Worker-Token": "test-worker-token-at-least-32-chars",
             "X-Content-Job-Id": str(job["id"]),
         },
     )
     assert stale.status_code == 409
-    assert stale.headers["X-WMS-Retryable"] == "false"
+    assert stale.headers["X-Retryable"] == "false"
 
 
 def test_cancelling_speech_job_changes_only_its_segment(client, monkeypatch):
@@ -3153,7 +3153,7 @@ def test_worker_failure_retry_restores_current_job_but_not_after_replacement(
         f"/api/text-videos/{project['id']}/speech-segments/"
         f"{segment['id']}/worker-context",
         headers={
-            "X-WMS-Worker-Token": "test-worker-token-at-least-32-chars",
+            "X-Worker-Token": "test-worker-token-at-least-32-chars",
             "X-Content-Job-Id": str(job["id"]),
         },
     ).json()
@@ -3161,7 +3161,7 @@ def test_worker_failure_retry_restores_current_job_but_not_after_replacement(
         f"/api/jobs/{job['id']}/steps/generate_speech/start",
     ).json()
     worker_headers = {
-        "X-WMS-Worker-Token": "test-worker-token-at-least-32-chars",
+        "X-Worker-Token": "test-worker-token-at-least-32-chars",
         "X-Content-Job-Id": str(job["id"]),
     }
     failure_body = {
@@ -3250,7 +3250,7 @@ def test_old_retry_preserves_confirmed_reusable_asset(client, monkeypatch, tmp_p
         f"/api/text-videos/{project['id']}/speech-segments/"
         f"{segment['id']}/worker-context",
         headers={
-            "X-WMS-Worker-Token": "test-worker-token-at-least-32-chars",
+            "X-Worker-Token": "test-worker-token-at-least-32-chars",
             "X-Content-Job-Id": str(job["id"]),
         },
     ).json()
@@ -3258,7 +3258,7 @@ def test_old_retry_preserves_confirmed_reusable_asset(client, monkeypatch, tmp_p
         f"/api/jobs/{job['id']}/steps/generate_speech/start",
     ).json()
     worker_headers = {
-        "X-WMS-Worker-Token": "test-worker-token-at-least-32-chars",
+        "X-Worker-Token": "test-worker-token-at-least-32-chars",
         "X-Content-Job-Id": str(job["id"]),
     }
     assert client.post(
@@ -3367,7 +3367,7 @@ def test_old_retry_preserves_committed_result_when_reconciliation_was_lost(
         f"/api/text-videos/{project['id']}/speech-segments/"
         f"{segment['id']}/worker-context",
         headers={
-            "X-WMS-Worker-Token": "test-worker-token-at-least-32-chars",
+            "X-Worker-Token": "test-worker-token-at-least-32-chars",
             "X-Content-Job-Id": str(job["id"]),
         },
     ).json()
@@ -3380,7 +3380,7 @@ def test_old_retry_preserves_committed_result_when_reconciliation_was_lost(
         .sine_wave(wav),
     )
     worker_headers = {
-        "X-WMS-Worker-Token": "test-worker-token-at-least-32-chars",
+        "X-Worker-Token": "test-worker-token-at-least-32-chars",
         "X-Content-Job-Id": str(job["id"]),
     }
     persisted = client.post(
@@ -3452,7 +3452,7 @@ def test_worker_result_normalizes_persists_and_replays_after_response_loss(
         f"/api/text-videos/{project['id']}/speech-segments/"
         f"{segment['id']}/worker-context",
         headers={
-            "X-WMS-Worker-Token": "test-worker-token-at-least-32-chars",
+            "X-Worker-Token": "test-worker-token-at-least-32-chars",
             "X-Content-Job-Id": str(job["id"]),
         },
     ).json()
@@ -3471,7 +3471,7 @@ def test_worker_result_normalizes_persists_and_replays_after_response_loss(
         ]),
     }
     headers = {
-        "X-WMS-Worker-Token": "test-worker-token-at-least-32-chars",
+        "X-Worker-Token": "test-worker-token-at-least-32-chars",
         "X-Content-Job-Id": str(job["id"]),
     }
 
@@ -3557,7 +3557,7 @@ def test_worker_result_rejects_stale_audio_without_persisting(
         f"/api/text-videos/{project['id']}/speech-segments/"
         f"{segment['id']}/worker-context",
         headers={
-            "X-WMS-Worker-Token": "test-worker-token-at-least-32-chars",
+            "X-Worker-Token": "test-worker-token-at-least-32-chars",
             "X-Content-Job-Id": str(job["id"]),
         },
     ).json()
@@ -3580,12 +3580,12 @@ def test_worker_result_rejects_stale_audio_without_persisting(
         },
         files={"audio": ("provider.wav", b"not persisted", "audio/wav")},
         headers={
-            "X-WMS-Worker-Token": "test-worker-token-at-least-32-chars",
+            "X-Worker-Token": "test-worker-token-at-least-32-chars",
             "X-Content-Job-Id": str(job["id"]),
         },
     )
     assert stale.status_code == 409
-    assert stale.headers["X-WMS-Retryable"] == "false"
+    assert stale.headers["X-Retryable"] == "false"
     assert not uploads.exists() or list(uploads.rglob("*.mp3")) == []
 
 
@@ -3618,7 +3618,7 @@ def test_worker_result_rejects_empty_corrupt_oversized_and_unsupported_audio(
         f"/api/text-videos/{project['id']}/speech-segments/"
         f"{segment['id']}/worker-context",
         headers={
-            "X-WMS-Worker-Token": "test-worker-token-at-least-32-chars",
+            "X-Worker-Token": "test-worker-token-at-least-32-chars",
             "X-Content-Job-Id": str(job["id"]),
         },
     ).json()
@@ -3627,7 +3627,7 @@ def test_worker_result_rejects_empty_corrupt_oversized_and_unsupported_audio(
         f"{segment['id']}/worker-result"
     )
     headers = {
-        "X-WMS-Worker-Token": "test-worker-token-at-least-32-chars",
+        "X-Worker-Token": "test-worker-token-at-least-32-chars",
         "X-Content-Job-Id": str(job["id"]),
     }
     form = {
@@ -3711,7 +3711,7 @@ def test_worker_result_maps_missing_ffmpeg_to_actionable_503(
         f"/api/text-videos/{project['id']}/speech-segments/"
         f"{segment['id']}/worker-context",
         headers={
-            "X-WMS-Worker-Token": "test-worker-token-at-least-32-chars",
+            "X-Worker-Token": "test-worker-token-at-least-32-chars",
             "X-Content-Job-Id": str(job["id"]),
         },
     ).json()
@@ -3727,7 +3727,7 @@ def test_worker_result_maps_missing_ffmpeg_to_actionable_503(
         },
         files={"audio": ("provider.wav", b"RIFF", "audio/wav")},
         headers={
-            "X-WMS-Worker-Token": "test-worker-token-at-least-32-chars",
+            "X-Worker-Token": "test-worker-token-at-least-32-chars",
             "X-Content-Job-Id": str(job["id"]),
         },
     )
@@ -3767,7 +3767,7 @@ def test_worker_result_second_stale_check_keeps_asset_unreferenced(
         f"/api/text-videos/{project['id']}/speech-segments/"
         f"{segment['id']}/worker-context",
         headers={
-            "X-WMS-Worker-Token": "test-worker-token-at-least-32-chars",
+            "X-Worker-Token": "test-worker-token-at-least-32-chars",
             "X-Content-Job-Id": str(job["id"]),
         },
     ).json()
@@ -3808,12 +3808,12 @@ def test_worker_result_second_stale_check_keeps_asset_unreferenced(
         },
         files={"audio": ("provider.wav", wav.read_bytes(), "audio/wav")},
         headers={
-            "X-WMS-Worker-Token": "test-worker-token-at-least-32-chars",
+            "X-Worker-Token": "test-worker-token-at-least-32-chars",
             "X-Content-Job-Id": str(job["id"]),
         },
     )
     assert response.status_code == 409
-    assert response.headers["X-WMS-Retryable"] == "false"
+    assert response.headers["X-Retryable"] == "false"
     detail = client.get(f"/api/text-videos/{project['id']}").json()
     assert detail["paragraphs"][0]["audio_url"] == ""
     assert detail["paragraphs"][0]["status"] == "generating"
@@ -3858,7 +3858,7 @@ def test_worker_result_second_check_observes_cancellation_after_normalize(
         f"/api/text-videos/{project['id']}/speech-segments/"
         f"{segment['id']}/worker-context",
         headers={
-            "X-WMS-Worker-Token": "test-worker-token-at-least-32-chars",
+            "X-Worker-Token": "test-worker-token-at-least-32-chars",
             "X-Content-Job-Id": str(job["id"]),
         },
     ).json()
@@ -3892,13 +3892,13 @@ def test_worker_result_second_check_observes_cancellation_after_normalize(
         },
         files={"audio": ("provider.wav", wav.read_bytes(), "audio/wav")},
         headers={
-            "X-WMS-Worker-Token": "test-worker-token-at-least-32-chars",
+            "X-Worker-Token": "test-worker-token-at-least-32-chars",
             "X-Content-Job-Id": str(job["id"]),
         },
     )
 
     assert response.status_code == 409
-    assert response.headers["X-WMS-Retryable"] == "false"
+    assert response.headers["X-Retryable"] == "false"
     detail = client.get(f"/api/text-videos/{project['id']}").json()
     assert detail["paragraphs"][0]["audio_url"] == ""
     assert detail["paragraphs"][0]["status"] == "generating"
@@ -3935,7 +3935,7 @@ def test_worker_result_commit_failure_deletes_final_file(
         f"/api/text-videos/{project['id']}/speech-segments/"
         f"{segment['id']}/worker-context",
         headers={
-            "X-WMS-Worker-Token": "test-worker-token-at-least-32-chars",
+            "X-Worker-Token": "test-worker-token-at-least-32-chars",
             "X-Content-Job-Id": str(job["id"]),
         },
     ).json()
@@ -3963,7 +3963,7 @@ def test_worker_result_commit_failure_deletes_final_file(
                 "audio": ("provider.wav", wav.read_bytes(), "audio/wav"),
             },
             headers={
-                "X-WMS-Worker-Token": (
+                "X-Worker-Token": (
                     "test-worker-token-at-least-32-chars"
                 ),
                 "X-Content-Job-Id": str(job["id"]),
@@ -4178,7 +4178,7 @@ def test_worker_result_recovers_normal_commit_when_ack_is_lost(
             ),
         },
         headers={
-            "X-WMS-Worker-Token": "test-worker-token-at-least-32-chars",
+            "X-Worker-Token": "test-worker-token-at-least-32-chars",
             "X-Content-Job-Id": str(case["job"]["id"]),
         },
     )
@@ -4271,13 +4271,13 @@ def test_stale_worker_result_preserves_durable_asset_when_commit_ack_is_lost(
             ),
         },
         headers={
-            "X-WMS-Worker-Token": "test-worker-token-at-least-32-chars",
+            "X-Worker-Token": "test-worker-token-at-least-32-chars",
             "X-Content-Job-Id": str(case["job"]["id"]),
         },
     )
 
     assert response.status_code == 409
-    assert response.headers["X-WMS-Retryable"] == "false"
+    assert response.headers["X-Retryable"] == "false"
 
     async def persisted_asset_count():
         async with SessionLocal() as session:
@@ -4358,7 +4358,7 @@ def test_worker_result_preserves_file_when_durability_check_is_unavailable(
                 ),
             },
             headers={
-                "X-WMS-Worker-Token": (
+                "X-Worker-Token": (
                     "test-worker-token-at-least-32-chars"
                 ),
                 "X-Content-Job-Id": str(case["job"]["id"]),
@@ -5301,7 +5301,7 @@ def test_worker_result_second_lock_failure_deletes_final_file(
         f"/api/text-videos/{project['id']}/speech-segments/"
         f"{segment['id']}/worker-context",
         headers={
-            "X-WMS-Worker-Token": "test-worker-token-at-least-32-chars",
+            "X-Worker-Token": "test-worker-token-at-least-32-chars",
             "X-Content-Job-Id": str(job["id"]),
         },
     ).json()
@@ -5338,7 +5338,7 @@ def test_worker_result_second_lock_failure_deletes_final_file(
             },
             files={"audio": ("provider.wav", wav.read_bytes(), "audio/wav")},
             headers={
-                "X-WMS-Worker-Token": (
+                "X-Worker-Token": (
                     "test-worker-token-at-least-32-chars"
                 ),
                 "X-Content-Job-Id": str(job["id"]),
@@ -5377,7 +5377,7 @@ def test_worker_result_cancelled_during_second_lock_deletes_final_file(
         f"/api/text-videos/{project['id']}/speech-segments/"
         f"{segment['id']}/worker-context",
         headers={
-            "X-WMS-Worker-Token": "test-worker-token-at-least-32-chars",
+            "X-Worker-Token": "test-worker-token-at-least-32-chars",
             "X-Content-Job-Id": str(job["id"]),
         },
     ).json()

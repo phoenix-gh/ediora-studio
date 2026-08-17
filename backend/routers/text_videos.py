@@ -722,7 +722,7 @@ async def update_project(
                         current_plan["generation_revision"]
                     ),
                 },
-                headers={"X-WMS-Retryable": "false"},
+                headers={"X-Retryable": "false"},
             )
         scene_update.pop("generation_revision", None)
     if changes.get("title") is not None:
@@ -826,7 +826,7 @@ def _stale_conflict(error: Exception) -> HTTPException:
     return HTTPException(
         status_code=409,
         detail=str(error),
-        headers={"X-WMS-Retryable": "false"},
+        headers={"X-Retryable": "false"},
     )
 
 
@@ -845,7 +845,7 @@ def _scene_claim_conflict() -> HTTPException:
             "code": "scene_claim_conflict",
             "message": "AI 分镜步骤已被其他 worker 领取",
         },
-        headers={"X-WMS-Retryable": "false"},
+        headers={"X-Retryable": "false"},
     )
 
 
@@ -1317,7 +1317,7 @@ def _scene_validation_error(error: Exception) -> HTTPException:
     return HTTPException(
         status_code=422,
         detail={"message": message, "errors": [message]},
-        headers={"X-WMS-Retryable": "false"},
+        headers={"X-Retryable": "false"},
     )
 
 
@@ -1377,7 +1377,7 @@ async def generate_scene_plan(
             raise HTTPException(
                 409,
                 "已有不同的 AI 分镜任务正在运行，请先等待或取消",
-                headers={"X-WMS-Retryable": "false"},
+                headers={"X-Retryable": "false"},
             )
         job = current_job
     else:
@@ -1906,7 +1906,7 @@ async def build_master_audio(
         raise HTTPException(
             409,
             str(error),
-            headers={"X-WMS-Retryable": "false"},
+            headers={"X-Retryable": "false"},
         ) from error
     return {
         "jobs": [_master_job_payload(job) for job in result.jobs],
@@ -1937,21 +1937,21 @@ async def worker_assemble_master_audio(
         raise HTTPException(
             422,
             str(error),
-            headers={"X-WMS-Retryable": "false"},
+            headers={"X-Retryable": "false"},
         ) from error
     except MediaToolUnavailable as error:
         await db.rollback()
         raise HTTPException(
             503,
             "FFmpeg/FFprobe 不可用，请安装媒体工具后重试",
-            headers={"X-WMS-Retryable": "true"},
+            headers={"X-Retryable": "true"},
         ) from error
     except MediaCommandError as error:
         await db.rollback()
         raise HTTPException(
             422,
             "主音频无法解析或拼接",
-            headers={"X-WMS-Retryable": "false"},
+            headers={"X-Retryable": "false"},
         ) from error
 
 
@@ -2009,7 +2009,7 @@ async def _worker_align_master_audio(
                 422,
                 str(error),
                 headers={
-                    "X-WMS-Retryable": (
+                    "X-Retryable": (
                         "true" if error.retryable else "false"
                     ),
                 },
@@ -2022,14 +2022,14 @@ async def _worker_align_master_audio(
             raise HTTPException(
                 503,
                 "FFmpeg/FFprobe 不可用，请安装媒体工具后重试",
-                headers={"X-WMS-Retryable": "true"},
+                headers={"X-Retryable": "true"},
             ) from error
         except (MediaCommandError, MasterStateError) as error:
             await db.rollback()
             raise HTTPException(
                 422,
                 str(error),
-                headers={"X-WMS-Retryable": "false"},
+                headers={"X-Retryable": "false"},
             ) from error
     if context.already_ready:
         return serialize_project(context.project)
@@ -2116,7 +2116,7 @@ async def _worker_align_master_audio(
             422,
             str(error),
             headers={
-                "X-WMS-Retryable": (
+                "X-Retryable": (
                     "true" if error.retryable else "false"
                 ),
             },
@@ -2141,7 +2141,7 @@ async def _worker_align_master_audio(
         raise HTTPException(
             422,
             str(error),
-            headers={"X-WMS-Retryable": "false"},
+            headers={"X-Retryable": "false"},
         ) from error
     except StaleMasterJob as error:
         await db.rollback()
@@ -2192,7 +2192,7 @@ async def worker_fail_master_audio(
         raise HTTPException(
             422,
             str(error),
-            headers={"X-WMS-Retryable": "false"},
+            headers={"X-Retryable": "false"},
         ) from error
 
 
@@ -3379,7 +3379,7 @@ async def save_text_video_render_worker_result(
         raise HTTPException(
             422,
             str(error),
-            headers={"X-WMS-Retryable": "false"},
+            headers={"X-Retryable": "false"},
         ) from error
     finally:
         if temporary is not None:

@@ -4,7 +4,7 @@
 
 **Goal:** Replace every SQLite-backed backend test with an isolated PostgreSQL test database and remove unsupported SQLite runtime compatibility.
 
-**Architecture:** A test-only utility creates one uniquely named `wemedia_test_<hex>` database per database-backed pytest test, yields its async SQLAlchemy URL, terminates leftover sessions, and drops only safety-validated test databases. Existing module-reload fixtures consume that URL through `WMS_DATABASE_URL`; schema migration tests construct PostgreSQL legacy schemas directly and then invoke the real migration code.
+**Architecture:** A test-only utility creates one uniquely named `wemedia_test_<hex>` database per database-backed pytest test, yields its async SQLAlchemy URL, terminates leftover sessions, and drops only safety-validated test databases. Existing module-reload fixtures consume that URL through `DATABASE_URL`; schema migration tests construct PostgreSQL legacy schemas directly and then invoke the real migration code.
 
 **Tech Stack:** Python 3.11, pytest, SQLAlchemy async, asyncpg, FastAPI TestClient, PostgreSQL 16.
 
@@ -12,7 +12,7 @@
 
 - Never create, truncate, alter, or drop the development database named `wemedia`.
 - A cleanup target must match `^wemedia_test_[0-9a-f]{12}$` before any termination or drop statement is issued.
-- The administrative URL defaults to `postgresql+asyncpg://wemedia:wemedia@127.0.0.1:55432/postgres` and is overridable only through `WMS_TEST_DATABASE_ADMIN_URL`.
+- The administrative URL defaults to `postgresql+asyncpg://wemedia:wemedia@127.0.0.1:55432/postgres` and is overridable only through `TEST_DATABASE_ADMIN_URL`.
 - Every database-backed test gets a unique database; the design must remain safe under pytest-xdist parallel execution.
 - Use `/home/violet/miniconda3/envs/wems/bin/python -m pytest` for backend verification.
 - Preserve unrelated changes in the dirty worktree and stage only files named by the active task.
@@ -33,7 +33,7 @@
 - Produces: `create_test_database(admin_url: str, database_name: str) -> None`
 - Produces: `drop_test_database(admin_url: str, database_name: str, *, missing_ok: bool = False) -> None`
 - Produces fixture: `postgres_database_url: str`
-- Produces fixture: `postgres_env: str`, which sets `WMS_DATABASE_URL` and `WMS_DISABLE_SCHEDULER=1`
+- Produces fixture: `postgres_env: str`, which sets `DATABASE_URL` and `DISABLE_SCHEDULER=1`
 
 - [ ] **Step 1: Write safety tests before the helper exists**
 
@@ -100,7 +100,7 @@ def replace_database_name(url: str, database_name: str) -> str:
     validate_test_database_name(database_name)
     parsed = make_url(url)
     if parsed.drivername != "postgresql+asyncpg":
-        raise ValueError("WMS_TEST_DATABASE_ADMIN_URL must use postgresql+asyncpg")
+        raise ValueError("TEST_DATABASE_ADMIN_URL must use postgresql+asyncpg")
     return parsed.set(database=database_name).render_as_string(hide_password=False)
 ```
 
@@ -201,7 +201,7 @@ git commit -m "test: add isolated PostgreSQL database fixture"
 - [ ] **Step 1: Replace the two SQLite fixtures with `postgres_env` while leaving the old multi-loop setup unchanged**
 
 The test fixtures must stop accepting `tmp_path`; set module state only after
-`postgres_env` has set `WMS_DATABASE_URL`. Keep the first run intentionally on
+`postgres_env` has set `DATABASE_URL`. Keep the first run intentionally on
 the old loop structure to prove the prior SQLite-specific setup is the failure
 boundary.
 
@@ -327,7 +327,7 @@ Change its signature to:
 
 ```python
 def fresh_session_factory(monkeypatch, postgres_database_url):
-    monkeypatch.setenv("WMS_DATABASE_URL", postgres_database_url)
+    monkeypatch.setenv("DATABASE_URL", postgres_database_url)
     # existing module purge/import behavior follows
 ```
 
@@ -540,7 +540,7 @@ git commit -m "refactor: make backend PostgreSQL-only"
 - Modify: `docs/self-hosted.md`
 
 **Interfaces:**
-- Documents `WMS_TEST_DATABASE_ADMIN_URL` and the local test command.
+- Documents `TEST_DATABASE_ADMIN_URL` and the local test command.
 
 - [ ] **Step 1: Document PostgreSQL test prerequisites and command**
 

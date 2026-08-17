@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-CONTAINER_NAME="${WMS_LOCAL_ASR_CONTAINER:-ediora-local-asr}"
-IMAGE="${WMS_LOCAL_ASR_IMAGE:-ghcr.io/speaches-ai/speaches:0.8.3-cuda}"
-PORT="${WMS_LOCAL_ASR_PORT:-8001}"
-MODEL_CACHE_VOLUME="${WMS_LOCAL_ASR_CACHE_VOLUME:-ediora-whisper-model-cache}"
+CONTAINER_NAME="${LOCAL_ASR_CONTAINER:-ediora-local-asr}"
+IMAGE="${LOCAL_ASR_IMAGE:-ghcr.io/speaches-ai/speaches:0.8.3-cuda}"
+PORT="${LOCAL_ASR_PORT:-8001}"
+MODEL_CACHE_VOLUME="${LOCAL_ASR_CACHE_VOLUME:-ediora-whisper-model-cache}"
 
 case "${1:-start}" in
   start)
@@ -16,8 +16,8 @@ case "${1:-start}" in
         --restart unless-stopped \
         --gpus all \
         --publish "127.0.0.1:${PORT}:8000" \
-        --env WHISPER__INFERENCE_DEVICE="${WMS_LOCAL_ASR_DEVICE:-cuda}" \
-        --env WHISPER__COMPUTE_TYPE="${WMS_LOCAL_ASR_COMPUTE_TYPE:-float16}" \
+        --env WHISPER__INFERENCE_DEVICE="${LOCAL_ASR_DEVICE:-cuda}" \
+        --env WHISPER__COMPUTE_TYPE="${LOCAL_ASR_COMPUTE_TYPE:-float16}" \
         --volume "${MODEL_CACHE_VOLUME}:/home/ubuntu/.cache/huggingface/hub" \
         "$IMAGE" >/dev/null
     fi

@@ -1,5 +1,5 @@
 export const API_BASE = (
-  typeof window === 'undefined' ? process.env.WMS_API_URL : undefined
+  typeof window === 'undefined' ? process.env.API_URL : undefined
 ) ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000/api'
 
 export class ApiError extends Error {

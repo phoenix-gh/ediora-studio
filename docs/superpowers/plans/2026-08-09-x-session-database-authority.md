@@ -33,7 +33,7 @@
 **Interfaces:**
 - Produces `XCredentialAccount.session_ciphertext: str`, persisted as a nullable-compatible `TEXT` column with an empty-string default for existing databases.
 - Produces `CredentialSessionVault.encrypt(pair: CredentialPair) -> str` and `CredentialSessionVault.decrypt(ciphertext: str) -> CredentialPair`.
-- `CredentialSessionVault` reads `WMS_X_SESSION_KEY`; if absent it derives a Fernet key from the existing `WMS_WORKER_TOKEN`; it raises `CredentialFileError` when neither source is available or ciphertext is invalid.
+- `CredentialSessionVault` reads `X_SESSION_KEY`; if absent it derives a Fernet key from the existing `WORKER_TOKEN`; it raises `CredentialFileError` when neither source is available or ciphertext is invalid.
 
 - [ ] **Step 1: Write the failing encryption and schema tests**
 
@@ -51,11 +51,11 @@
 
 - [ ] **Step 3: Add the encryption dependency and minimal vault implementation**
 
-  Add `cryptography` to `backend/requirements.txt`. In `backend/x_credential_store.py`, derive a stable Fernet key from `WMS_WORKER_TOKEN` only as the fallback, prefer the explicit `WMS_X_SESSION_KEY`, encrypt a compact JSON payload, and validate decrypted fields as non-empty strings. Do not log key material, ciphertext, or decrypted values.
+  Add `cryptography` to `backend/requirements.txt`. In `backend/x_credential_store.py`, derive a stable Fernet key from `WORKER_TOKEN` only as the fallback, prefer the explicit `X_SESSION_KEY`, encrypt a compact JSON payload, and validate decrypted fields as non-empty strings. Do not log key material, ciphertext, or decrypted values.
 
 - [ ] **Step 4: Add the model field and idempotent migration**
 
-  Add `session_ciphertext` to `XCredentialAccount` and call `_add_columns` from `init_db()` with `TEXT NOT NULL DEFAULT ''`. Add the environment variable comment to `.env.example` and pass `WMS_X_SESSION_KEY` through the Docker API environment.
+  Add `session_ciphertext` to `XCredentialAccount` and call `_add_columns` from `init_db()` with `TEXT NOT NULL DEFAULT ''`. Add the environment variable comment to `.env.example` and pass `X_SESSION_KEY` through the Docker API environment.
 
 - [ ] **Step 5: Run the focused tests and verify green**
 
@@ -179,4 +179,4 @@
 
 - [ ] **Step 4: Hand off with exact limits**
 
-  Report test counts, runtime status, whether any account could not be restored, and the required stable key environment variable if the fallback `WMS_WORKER_TOKEN` was not used.
+  Report test counts, runtime status, whether any account could not be restored, and the required stable key environment variable if the fallback `WORKER_TOKEN` was not used.

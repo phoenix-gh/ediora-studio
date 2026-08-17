@@ -8,9 +8,8 @@ from fastapi.testclient import TestClient
 
 @pytest.fixture
 def api(monkeypatch, postgres_env):
-    monkeypatch.setenv("HEYGEN_API_KEY", "test-heygen-key")
     monkeypatch.setenv(
-        "WMS_WORKER_TOKEN", "test-worker-token-at-least-32-chars"
+        "WORKER_TOKEN", "test-worker-token-at-least-32-chars"
     )
     for module in list(sys.modules):
         if module.startswith(
@@ -19,16 +18,18 @@ def api(monkeypatch, postgres_env):
                 "database",
                 "models",
                 "content_jobs",
-                "digital_human_assets",
-                "digital_human_service",
-                "routers.digital_humans",
-            )
+                    "digital_human_assets",
+                    "digital_human_service",
+                    "routers.digital_humans",
+                    "routers.settings",
+                )
         ):
             sys.modules.pop(module, None)
 
     from database import Base, SessionLocal, engine, get_db
     import models  # noqa: F401
     import routers.digital_humans as router_module
+    import routers.settings as settings_router
 
     async def setup():
         async with engine.begin() as connection:
@@ -37,19 +38,26 @@ def api(monkeypatch, postgres_env):
     asyncio.new_event_loop().run_until_complete(setup())
     app = FastAPI()
     app.include_router(router_module.router, prefix="/api")
+    app.include_router(settings_router.router, prefix="/api")
 
     async def override_db():
         async with SessionLocal() as session:
             yield session
 
     app.dependency_overrides[get_db] = override_db
+    client = TestClient(
+        app,
+        headers={
+            "X-Worker-Token": "test-worker-token-at-least-32-chars"
+        },
+    )
+    configured = client.put(
+        "/api/settings",
+        json={"heygen_api_key": "test-heygen-key"},
+    )
+    assert configured.status_code == 200, configured.text
     return (
-        TestClient(
-            app,
-            headers={
-                "X-WMS-Worker-Token": "test-worker-token-at-least-32-chars"
-            },
-        ),
+        client,
         SessionLocal,
         router_module,
     )
@@ -144,7 +152,6 @@ def test_create_role_enqueues_setup_job(api, monkeypatch):
 def test_create_comfyui_role_does_not_require_heygen(api, monkeypatch):
     client, session_factory, router_module = api
     portrait, voice, environment = _create_media_assets(session_factory)
-    monkeypatch.delenv("HEYGEN_API_KEY")
     queued = []
 
     async def capture_enqueue(job_id: int):
@@ -298,10 +305,11 @@ def test_changing_comfyui_environment_clears_look_and_requeues_setup(
     assert queued == [role["setup_job_id"], body["setup_job_id"]]
 
 
-def test_create_role_rejects_missing_heygen_configuration(api, monkeypatch):
+def test_create_role_rejects_missing_heygen_configuration(api):
     client, session_factory, _ = api
     portrait, voice, environment = _create_media_assets(session_factory)
-    monkeypatch.delenv("HEYGEN_API_KEY")
+    cleared = client.put("/api/settings", json={"heygen_api_key": ""})
+    assert cleared.status_code == 200, cleared.text
 
     response = client.post(
         "/api/digital-humans",
@@ -444,9 +452,9 @@ def test_stale_setup_job_cannot_overwrite_newer_role_state(api, monkeypatch):
     )
 
     assert stale_context.status_code == 409
-    assert stale_context.headers["X-WMS-Retryable"] == "false"
+    assert stale_context.headers["X-Retryable"] == "false"
     assert stale.status_code == 409
-    assert stale.headers["X-WMS-Retryable"] == "false"
+    assert stale.headers["X-Retryable"] == "false"
     current = client.get(f"/api/digital-humans/{role['id']}").json()
     assert current["setup_job_id"] == new_job_id
     assert current["provider_state"] == {"new": True}
@@ -590,7 +598,8 @@ def test_changing_provider_inputs_requires_heygen_configuration(
             "heygen_voice_id": "voice-1",
         },
     )
-    monkeypatch.delenv("HEYGEN_API_KEY")
+    cleared = client.put("/api/settings", json={"heygen_api_key": ""})
+    assert cleared.status_code == 200, cleared.text
 
     response = client.patch(
         f"/api/digital-humans/{role['id']}",
@@ -659,7 +668,8 @@ def test_retry_requires_a_failed_role_and_heygen_configuration(api, monkeypatch)
         headers=_job_headers(role),
         json={"status": "failed", "error": "provider timeout"},
     )
-    monkeypatch.delenv("HEYGEN_API_KEY")
+    cleared = client.put("/api/settings", json={"heygen_api_key": ""})
+    assert cleared.status_code == 200, cleared.text
     missing_config = client.post(
         f"/api/digital-humans/{role['id']}/retry"
     )

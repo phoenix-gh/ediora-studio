@@ -227,10 +227,10 @@ def test_heygen_key_roundtrip_is_redacted(client):
     assert "hg_secret_1234" not in str(saved)
 
 
-def test_heygen_runtime_uses_environment_fallback(client, monkeypatch):
+def test_heygen_runtime_uses_persisted_settings_only(client, monkeypatch):
     monkeypatch.setenv("HEYGEN_API_KEY", "env-key")
     response = client.get("/api/settings/heygen-runtime")
-    assert response.json() == {"api_key": "env-key", "base_url": "https://api.heygen.com"}
+    assert response.json() == {"api_key": "", "base_url": "https://api.heygen.com"}
 
 
 def test_heygen_connection_classifies_plan_and_auth_errors(client, httpx_mock):
@@ -256,7 +256,7 @@ Use:
 
 ```python
 def effective_heygen_api_key(cfg: dict) -> str:
-    return cfg.get("heygen_api_key", "").strip() or os.getenv("HEYGEN_API_KEY", "").strip()
+    return cfg.get("heygen_api_key", "").strip()
 
 @router.get("/heygen-runtime", include_in_schema=False)
 async def heygen_runtime():
@@ -996,7 +996,7 @@ git commit -m "feat(ui): add HeyGen talking-video workbench"
 
 **Interfaces:**
 - Consumes all prior tasks.
-- Produces documented `HEYGEN_API_KEY` fallback, a fake-provider end-to-end test, and an opt-in real HeyGen smoke command.
+- Produces documented Settings-only HeyGen runtime configuration, a fake-provider end-to-end test, and an opt-in real HeyGen smoke command.
 
 - [ ] **Step 1: Write a failing fake-provider end-to-end test**
 
@@ -1062,7 +1062,7 @@ Expected: FAIL until the role/project/render routers, worker progress endpoints,
 
 - [ ] **Step 3: Add deploy configuration and docs**
 
-Add `HEYGEN_API_KEY: ${HEYGEN_API_KEY:-}` to worker and API environments. Document that UI settings override the environment fallback, voice cloning requires an eligible HeyGen plan, direct uploads are 32 MB maximum, and completed videos are copied to local uploads.
+Keep provider credentials out of worker and API environments. Document that the Settings page is the only runtime source, voice cloning requires an eligible HeyGen plan, direct uploads are 32 MB maximum, and completed videos are copied to local uploads.
 
 - [ ] **Step 4: Implement an opt-in real smoke script**
 
@@ -1097,10 +1097,10 @@ Start API, Redis/worker, and frontend with the host Redis URL:
 
 ```bash
 cd backend
-WMS_REDIS_URL=redis://127.0.0.1:6379/0 conda run -n wems uvicorn main:app --host 0.0.0.0 --port 8000
+REDIS_URL=redis://127.0.0.1:6379/0 conda run -n wems uvicorn main:app --host 0.0.0.0 --port 8000
 
 cd web
-WMS_REDIS_URL=redis://127.0.0.1:6379/0 WMS_API_URL=http://127.0.0.1:8000/api pnpm jobs:worker
+REDIS_URL=redis://127.0.0.1:6379/0 API_URL=http://127.0.0.1:8000/api pnpm jobs:worker
 
 cd web
 pnpm dev

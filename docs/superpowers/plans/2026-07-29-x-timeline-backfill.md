@@ -218,7 +218,7 @@ Expected: both suites pass with no test failures.
 
 Run: `docker compose -p main-runtime --env-file /workspace/projects/WeMediaStudio/.worktrees/main-runtime/.env -f docker-compose.yml build api web && docker compose -p main-runtime --env-file /workspace/projects/WeMediaStudio/.worktrees/main-runtime/.env -f docker-compose.yml up -d --force-recreate api web`
 
-Expected: both containers are running; API and worker retain `WMS_WORKER_TOKEN` through the runtime environment file.
+Expected: both containers are running; API and worker retain `WORKER_TOKEN` through the runtime environment file.
 
 - [ ] **Step 3: Validate the rendered subscription flow**
 

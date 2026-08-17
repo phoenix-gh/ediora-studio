@@ -6,7 +6,7 @@
 
 **Architecture:** 后端 SQLAlchemy 双表（`x_subscriptions` / `x_posts`，外键级联），feedgrab Python import 同步 API 由 `asyncio.to_thread` 包裹。FastAPI 路由 + APScheduler 每小时跑一次全量采集。前端 Next.js `/x` 页两 Tab（订阅 / 搜索），设置页保留极简状态指示。
 
-**Tech Stack:** Python 3.11 (wems conda env) · FastAPI · SQLAlchemy 2.0 (async) · asyncpg · APScheduler · feedgrab · Next.js · Ant Design · pytest (with `WMS_DISABLE_SCHEDULER=1`).
+**Tech Stack:** Python 3.11 (wems conda env) · FastAPI · SQLAlchemy 2.0 (async) · asyncpg · APScheduler · feedgrab · Next.js · Ant Design · pytest (with `DISABLE_SCHEDULER=1`).
 
 **Spec:** `docs/superpowers/specs/2026-05-25-x-feedgrab-redesign-design.md`
 
@@ -181,7 +181,7 @@ conda run -n wems python -c "import sys; sys.path.insert(0, 'backend'); from mai
 
 ```bash
 source ~/.zshrc
-cd backend && WMS_DISABLE_SCHEDULER=1 conda run -n wems pytest -x
+cd backend && DISABLE_SCHEDULER=1 conda run -n wems pytest -x
 ```
 
 预期：现有测试全部通过（`test_profile_manager.py`、`test_profiles_router.py`）。
@@ -294,7 +294,7 @@ PY
 
 ```bash
 source ~/.zshrc
-cd backend && WMS_DISABLE_SCHEDULER=1 conda run -n wems pytest -x
+cd backend && DISABLE_SCHEDULER=1 conda run -n wems pytest -x
 ```
 
 预期：全部通过。
@@ -375,7 +375,7 @@ def test_parse_returns_none_for_missing_tweet_id():
 
 ```bash
 source ~/.zshrc
-cd backend && WMS_DISABLE_SCHEDULER=1 conda run -n wems pytest tests/test_feedgrab_client.py -v
+cd backend && DISABLE_SCHEDULER=1 conda run -n wems pytest tests/test_feedgrab_client.py -v
 ```
 
 预期：ImportError（模块不存在）。
@@ -478,7 +478,7 @@ async def search_x(query: str, limit: int = 20) -> list[ParsedPost]:
 
 ```bash
 source ~/.zshrc
-cd backend && WMS_DISABLE_SCHEDULER=1 conda run -n wems pytest tests/test_feedgrab_client.py -v
+cd backend && DISABLE_SCHEDULER=1 conda run -n wems pytest tests/test_feedgrab_client.py -v
 ```
 
 预期：两个测试 PASS。
@@ -573,7 +573,7 @@ cd backend && conda run -n wems python -c "import pytest_asyncio; print(pytest_a
 
 ```bash
 source ~/.zshrc
-cd backend && WMS_DISABLE_SCHEDULER=1 conda run -n wems pytest tests/test_feedgrab_client.py -v
+cd backend && DISABLE_SCHEDULER=1 conda run -n wems pytest tests/test_feedgrab_client.py -v
 ```
 
 预期：3 个新测试 FAIL（NotImplementedError）。
@@ -655,7 +655,7 @@ def auth_status() -> dict:
 
 ```bash
 source ~/.zshrc
-cd backend && WMS_DISABLE_SCHEDULER=1 conda run -n wems pytest tests/test_feedgrab_client.py -v
+cd backend && DISABLE_SCHEDULER=1 conda run -n wems pytest tests/test_feedgrab_client.py -v
 ```
 
 预期：5 个测试全部 PASS。
@@ -696,9 +696,9 @@ from fastapi.testclient import TestClient
 @pytest.fixture
 def client(monkeypatch, tmp_path):
     # Use a per-test sqlite db
-    monkeypatch.setenv("WMS_DATABASE_URL",
+    monkeypatch.setenv("DATABASE_URL",
                        f"sqlite+aiosqlite:///{tmp_path}/test.db")
-    monkeypatch.setenv("WMS_DISABLE_SCHEDULER", "1")
+    monkeypatch.setenv("DISABLE_SCHEDULER", "1")
     # Force re-import so engine picks up new URL
     import sys
     for mod in list(sys.modules):
@@ -1253,7 +1253,7 @@ print('routes ok')
 
 ```bash
 source ~/.zshrc
-cd backend && WMS_DISABLE_SCHEDULER=1 conda run -n wems pytest -x
+cd backend && DISABLE_SCHEDULER=1 conda run -n wems pytest -x
 ```
 
 预期：全部 PASS。
@@ -1324,7 +1324,7 @@ conda run -n wems python -c "import sys; sys.path.insert(0, 'backend'); from mai
 
 ```bash
 source ~/.zshrc
-cd backend && WMS_DISABLE_SCHEDULER=1 conda run -n wems pytest -x
+cd backend && DISABLE_SCHEDULER=1 conda run -n wems pytest -x
 ```
 
 - [ ] **Step 5: Commit**

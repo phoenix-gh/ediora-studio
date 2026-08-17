@@ -11,7 +11,7 @@ TOKEN = "daily-creation-worker-token-at-least-32-chars"
 
 @pytest.fixture
 def client(monkeypatch, postgres_env):
-    monkeypatch.setenv("WMS_WORKER_TOKEN", TOKEN)
+    monkeypatch.setenv("WORKER_TOKEN", TOKEN)
     for module_name in list(sys.modules):
         if module_name.startswith((
             "database", "models", "main", "routers", "config", "schemas",
@@ -565,7 +565,7 @@ def test_worker_context_and_output_require_token(client, monkeypatch):
     base = f"/api/creation-rules/runs/{creation_run['id']}"
     assert client.get(f"{base}/context").status_code == 403
 
-    headers = {"X-WMS-Worker-Token": TOKEN}
+    headers = {"X-Worker-Token": TOKEN}
     context = client.get(f"{base}/context", headers=headers)
     assert context.status_code == 200
     assert context.json()["rule"]["directory"] == "产品实验"

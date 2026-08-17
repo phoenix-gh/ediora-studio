@@ -2,7 +2,7 @@
 
 ## 背景
 
-当前宿主机开发环境需要先手动启动 `wms-dev-postgres-copy`，再手动导出根目录 `.env` 中的 `WMS_WORKER_TOKEN`，最后执行 `./dev.sh`。遗漏任一步都会导致启动失败：Token 未注入时脚本在配置校验阶段退出；PostgreSQL 容器停止时 API 在数据库初始化阶段连接 `127.0.0.1:55432` 失败并触发整体回滚。
+当前宿主机开发环境需要先手动启动 `wms-dev-postgres-copy`，再手动导出根目录 `.env` 中的 `WORKER_TOKEN`，最后执行 `./dev.sh`。遗漏任一步都会导致启动失败：Token 未注入时脚本在配置校验阶段退出；PostgreSQL 容器停止时 API 在数据库初始化阶段连接 `127.0.0.1:55432` 失败并触发整体回滚。
 
 ## 目标
 
@@ -22,13 +22,13 @@
 
 新增 `ensure_postgres_ready()`，在 Redis 和应用进程启动前执行：
 
-- 容器名由 `WMS_DEV_POSTGRES_CONTAINER` 控制，默认 `wms-dev-postgres-copy`；
+- 容器名由 `DEV_POSTGRES_CONTAINER` 控制，默认 `wms-dev-postgres-copy`；
 - 使用 `docker inspect` 判断容器是否存在和是否正在运行；
 - 容器已运行时直接进入端口就绪等待；
 - 容器存在但已停止时执行 `docker start <container>`；
 - 容器不存在、Docker CLI 不可用、Docker daemon 不可访问或启动失败时返回明确错误；
-- 使用配置项 `WMS_DEV_POSTGRES_HOST` 和 `WMS_DEV_POSTGRES_PORT` 等待 TCP 可连接，默认分别为 `127.0.0.1` 和 `55432`；
-- 等待沿用 `WMS_DEV_READY_TIMEOUT_SECONDS` 与 `WMS_DEV_POLL_INTERVAL_SECONDS`；
+- 使用配置项 `DEV_POSTGRES_HOST` 和 `DEV_POSTGRES_PORT` 等待 TCP 可连接，默认分别为 `127.0.0.1` 和 `55432`；
+- 等待沿用 `DEV_READY_TIMEOUT_SECONDS` 与 `DEV_POLL_INTERVAL_SECONDS`；
 - PostgreSQL 是外部持久化依赖，不加入 `dev.sh` 的所有权元数据和启动回滚列表。
 
 `./dev.sh stop` 只停止 API、Worker、Web 和脚本拥有的 Redis，不停止 PostgreSQL 容器。这样既不影响数据库持久化，也能加快下一次启动。

@@ -8,9 +8,11 @@ from fastapi.testclient import TestClient
 
 @pytest.fixture
 def api(monkeypatch, postgres_env):
-    monkeypatch.setenv("WMS_WORKER_TOKEN", "prompt-assets-worker-token-0123456789012345")
+    monkeypatch.setenv("WORKER_TOKEN", "prompt-assets-worker-token-0123456789012345")
     for module in list(sys.modules):
-        if module.startswith(("database", "models", "routers.assets", "content_jobs")):
+        if module.startswith(
+            ("config", "database", "models", "routers.assets", "content_jobs")
+        ):
             sys.modules.pop(module, None)
 
     from database import Base, SessionLocal, engine, get_db
@@ -192,7 +194,7 @@ def test_worker_succeed_records_media_and_runtime_model(api):
 
     succeeded = client.post(
         f"/api/assets/generations/{started.json()['id']}/succeed",
-        headers={"X-WMS-Worker-Token": "prompt-assets-worker-token-0123456789012345"},
+        headers={"X-Worker-Token": "prompt-assets-worker-token-0123456789012345"},
         json={
             "media_asset_id": media["id"],
             "provider": "openai-compatible",
@@ -215,7 +217,7 @@ def test_worker_failure_records_bounded_error(api):
 
     failed = client.post(
         f"/api/assets/generations/{started.json()['id']}/fail",
-        headers={"X-WMS-Worker-Token": "prompt-assets-worker-token-0123456789012345"},
+        headers={"X-Worker-Token": "prompt-assets-worker-token-0123456789012345"},
         json={"error": error},
     )
 

@@ -326,7 +326,7 @@ async def compose_look(
         raise HTTPException(
             409,
             "该数字人任务已被更新任务替代",
-            headers={"X-WMS-Retryable": "false"},
+            headers={"X-Retryable": "false"},
         )
     if role.provider != "comfyui":
         raise HTTPException(409, "只有 ComfyUI 数字人需要合成定妆图")
@@ -359,7 +359,7 @@ async def role_worker_context(
         raise HTTPException(
             409,
             "该数字人任务已被更新任务替代",
-            headers={"X-WMS-Retryable": "false"},
+            headers={"X-Retryable": "false"},
         )
     portrait = await db.get(CreativeAsset, role.portrait_asset_id)
     environment = await db.get(CreativeAsset, role.default_environment_asset_id)
@@ -415,7 +415,7 @@ async def role_worker_progress(
         raise HTTPException(
             409,
             "该数字人任务已被更新任务替代",
-            headers={"X-WMS-Retryable": "false"},
+            headers={"X-Retryable": "false"},
         )
     if job.status == "cancelled":
         if role.status == "processing":

@@ -57,10 +57,10 @@ def test_api_uses_local_asr_without_blocking_api_startup():
     config = _compose_config()
     api = config["services"]["api"]
 
-    assert api["environment"]["WMS_LOCAL_ASR_URL"] == "http://local-asr:8000/v1"
-    assert api["environment"]["WMS_LOCAL_ASR_MODEL"] == "Systran/faster-whisper-large-v3"
-    assert api["environment"]["WMS_LOCAL_ASR_DEVICE"] == "cuda"
-    assert api["environment"]["WMS_LOCAL_ASR_COMPUTE_TYPE"] == "float16"
+    assert api["environment"]["LOCAL_ASR_URL"] == "http://local-asr:8000/v1"
+    assert api["environment"]["LOCAL_ASR_MODEL"] == "Systran/faster-whisper-large-v3"
+    assert api["environment"]["LOCAL_ASR_DEVICE"] == "cuda"
+    assert api["environment"]["LOCAL_ASR_COMPUTE_TYPE"] == "float16"
     assert "local-asr" not in api["depends_on"]
 
 
@@ -93,8 +93,8 @@ def test_app_services_share_one_image_and_api_owns_root_build():
 def test_host_ports_can_be_overridden_without_changing_container_ports():
     config = _compose_config(
         {
-            "WMS_API_PORT": "28000",
-            "WMS_WEB_PORT": "23000",
+            "API_PORT": "28000",
+            "WEB_PORT": "23000",
         }
     )
 

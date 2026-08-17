@@ -24,9 +24,9 @@ vi.mock('ai', async importOriginal => ({
 let runtimeDir = ''
 
 afterEach(async () => {
-  delete process.env.WMS_SKILLS_RUNTIME_DIR
-  delete process.env.WMS_SKILLS_STATE_FILE
-  delete process.env.WMS_SKILLS_MAX_REFERENCE_BYTES
+  delete process.env.SKILLS_RUNTIME_DIR
+  delete process.env.SKILLS_STATE_FILE
+  delete process.env.SKILLS_MAX_REFERENCE_BYTES
   vi.unstubAllEnvs()
   imageGeneration.mockReset()
   if (runtimeDir) await rm(runtimeDir, { recursive: true, force: true })
@@ -90,22 +90,22 @@ it('normalizes an array of unsuitable cases into display text', () => {
 
 it('refuses to load a disabled automatic image Skill', async () => {
   runtimeDir = await mkdtemp(join(tmpdir(), 'wms-content-skill-'))
-  process.env.WMS_SKILLS_RUNTIME_DIR = runtimeDir
-  process.env.WMS_SKILLS_STATE_FILE = join(runtimeDir, 'skills-state.json')
+  process.env.SKILLS_RUNTIME_DIR = runtimeDir
+  process.env.SKILLS_STATE_FILE = join(runtimeDir, 'skills-state.json')
 
   await setSkillEnabled('baoyu-cover-image', false)
   await expect(loadBaoyuSkillRulesForTest('cover')).rejects.toThrow(/unavailable|disabled/i)
 })
 
 it('applies the shared Skill reference byte limit to background cover rules', async () => {
-  process.env.WMS_SKILLS_MAX_REFERENCE_BYTES = '1'
+  process.env.SKILLS_MAX_REFERENCE_BYTES = '1'
 
   await expect(loadBaoyuSkillRulesForTest('cover')).rejects.toMatchObject({ code: 'too_large' })
 })
 
 it('generates a prompt image, uploads it, and records the runtime model', async () => {
-  vi.stubEnv('WMS_API_URL', 'http://localhost:8000/api')
-  vi.stubEnv('WMS_WORKER_TOKEN', 'prompt-assets-worker-token-0123456789012345')
+  vi.stubEnv('API_URL', 'http://localhost:8000/api')
+  vi.stubEnv('WORKER_TOKEN', 'prompt-assets-worker-token-0123456789012345')
   imageGeneration.mockResolvedValue({
     images: [{ uint8Array: new Uint8Array([1, 2, 3]), mediaType: 'image/png' }],
   })
@@ -123,7 +123,7 @@ it('generates a prompt image, uploads it, and records the runtime model', async 
     if (url.includes('/assets/upload')) {
       expect(new URL(url).searchParams.get('media_kind')).toBe('image')
       expect(init?.headers).toMatchObject({
-        'X-WMS-Worker-Token': 'prompt-assets-worker-token-0123456789012345',
+        'X-Worker-Token': 'prompt-assets-worker-token-0123456789012345',
         'X-Content-Job-Id': '72',
       })
       return new Response(JSON.stringify({
@@ -171,8 +171,8 @@ it('generates a prompt image, uploads it, and records the runtime model', async 
 })
 
 it('records a bounded prompt generation failure and does not mark it succeeded', async () => {
-  vi.stubEnv('WMS_API_URL', 'http://localhost:8000/api')
-  vi.stubEnv('WMS_WORKER_TOKEN', 'prompt-assets-worker-token-0123456789012345')
+  vi.stubEnv('API_URL', 'http://localhost:8000/api')
+  vi.stubEnv('WORKER_TOKEN', 'prompt-assets-worker-token-0123456789012345')
   imageGeneration.mockRejectedValue(new Error('provider failed '.repeat(100)))
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)

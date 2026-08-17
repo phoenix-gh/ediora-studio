@@ -28,20 +28,11 @@ DEFAULTS: dict[str, str] = {
     "transcription_api_key": "",
     "transcription_max_duration_seconds": "7200",
     "transcription_max_audio_bytes": "26214400",
-    "speech_provider": os.getenv("WMS_SPEECH_PROVIDER", "mimo"),
-    "speech_model": os.getenv("WMS_SPEECH_MODEL", "mimo-v2.5-tts"),
-    "speech_base_url": os.getenv(
-        "WMS_SPEECH_BASE_URL",
-        "https://api.xiaomimimo.com/v1",
-    ),
-    "speech_api_key": os.getenv(
-        "WMS_SPEECH_API_KEY",
-        "",
-    ).strip() or os.getenv("MIMO_API_KEY", "").strip(),
-    "speech_default_voice": os.getenv(
-        "WMS_SPEECH_DEFAULT_VOICE",
-        "mimo_default",
-    ),
+    "speech_provider": "mimo",
+    "speech_model": "mimo-v2.5-tts",
+    "speech_base_url": "https://api.xiaomimimo.com/v1",
+    "speech_api_key": "",
+    "speech_default_voice": "mimo_default",
     "youtube_cookies": "",
     "rsshub_base": "http://127.0.0.1:1200",
     "collection_proxy_url": "",
@@ -135,10 +126,7 @@ def effective_base_url(cfg: dict[str, str]) -> str:
 
 
 def effective_heygen_api_key(cfg: dict[str, str]) -> str:
-    return (
-        cfg.get("heygen_api_key", "").strip()
-        or os.getenv("HEYGEN_API_KEY", "").strip()
-    )
+    return cfg.get("heygen_api_key", "").strip()
 
 
 def effective_comfyui_base_url(cfg: dict[str, str]) -> str:

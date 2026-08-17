@@ -8,7 +8,7 @@
 
 **Tech Stack:** FastAPI + SQLAlchemy async（conda env `wems`，命令加 `conda run -n wems`）、Pydantic v2、pytest（sqlite+aiosqlite）、Next.js App Router + shadcn/ui。
 
-**约定：** 所有 Bash 先 `source ~/.zshrc`；后端命令在 `backend/` 下加 `WMS_DISABLE_SCHEDULER=1 conda run -n wems`；前端在 `web/` 下 `pnpm`。设计见 `docs/superpowers/specs/2026-06-14-wechat-publish-feedback-loop-design.md`。
+**约定：** 所有 Bash 先 `source ~/.zshrc`；后端命令在 `backend/` 下加 `DISABLE_SCHEDULER=1 conda run -n wems`；前端在 `web/` 下 `pnpm`。设计见 `docs/superpowers/specs/2026-06-14-wechat-publish-feedback-loop-design.md`。
 
 ---
 
@@ -112,7 +112,7 @@ class PublicationOut(BaseModel):
 
 - [ ] **Step 3: 导入冒烟**
 
-Run: `cd backend && WMS_DISABLE_SCHEDULER=1 conda run -n wems python -c "import models, schemas; print(models.Publication.__tablename__, schemas.PublicationOut.__name__)"`
+Run: `cd backend && DISABLE_SCHEDULER=1 conda run -n wems python -c "import models, schemas; print(models.Publication.__tablename__, schemas.PublicationOut.__name__)"`
 Expected: 打印 `publications PublicationOut`
 
 - [ ] **Step 4: Commit**
@@ -145,8 +145,8 @@ from fastapi.testclient import TestClient
 @pytest.fixture
 def client(monkeypatch, tmp_path):
     db_file = tmp_path / "test.db"
-    monkeypatch.setenv("WMS_DATABASE_URL", f"sqlite+aiosqlite:///{db_file}")
-    monkeypatch.setenv("WMS_DISABLE_SCHEDULER", "1")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite+aiosqlite:///{db_file}")
+    monkeypatch.setenv("DISABLE_SCHEDULER", "1")
     for mod in list(sys.modules):
         if mod.startswith(("database", "models", "main", "routers", "config", "scheduler", "logger")):
             sys.modules.pop(mod, None)
@@ -233,7 +233,7 @@ def test_delete(client):
 
 - [ ] **Step 2: 跑测试确认失败**
 
-Run: `cd backend && WMS_DISABLE_SCHEDULER=1 conda run -n wems python -m pytest tests/test_published.py -q -p no:cacheprovider`
+Run: `cd backend && DISABLE_SCHEDULER=1 conda run -n wems python -m pytest tests/test_published.py -q -p no:cacheprovider`
 Expected: FAIL（404 / 路由不存在）
 
 - [ ] **Step 3: 写 published 路由**
@@ -336,7 +336,7 @@ app.include_router(published.router, prefix="/api")
 
 - [ ] **Step 5: 跑测试确认通过**
 
-Run: `cd backend && WMS_DISABLE_SCHEDULER=1 conda run -n wems python -m pytest tests/test_published.py -q -p no:cacheprovider`
+Run: `cd backend && DISABLE_SCHEDULER=1 conda run -n wems python -m pytest tests/test_published.py -q -p no:cacheprovider`
 Expected: 6 passed
 
 - [ ] **Step 6: Commit**
@@ -388,7 +388,7 @@ def test_publish_creates_publication_record(client, uploads_dir, wx_mock):
 
 - [ ] **Step 2: 跑测试确认失败**
 
-Run: `cd backend && WMS_DISABLE_SCHEDULER=1 conda run -n wems python -m pytest tests/test_wechat_publish.py::test_publish_creates_publication_record -q -p no:cacheprovider`
+Run: `cd backend && DISABLE_SCHEDULER=1 conda run -n wems python -m pytest tests/test_wechat_publish.py::test_publish_creates_publication_record -q -p no:cacheprovider`
 Expected: FAIL（`len(pubs) == 1` 断言失败，实际 0）
 
 - [ ] **Step 3: 实现发布钩子**
@@ -429,7 +429,7 @@ from models import ArticleDraft, ArticleSeries, DraftImage, PublishAccount, Publ
 
 - [ ] **Step 4: 跑测试确认通过**
 
-Run: `cd backend && WMS_DISABLE_SCHEDULER=1 conda run -n wems python -m pytest tests/test_wechat_publish.py -q -p no:cacheprovider`
+Run: `cd backend && DISABLE_SCHEDULER=1 conda run -n wems python -m pytest tests/test_wechat_publish.py -q -p no:cacheprovider`
 Expected: 全部 passed（含新测试；单文件跑无污染）
 
 - [ ] **Step 5: Commit**
@@ -482,7 +482,7 @@ def test_recent_performance_window(env):
 
 - [ ] **Step 2: 跑测试确认失败**
 
-Run: `cd backend && WMS_DISABLE_SCHEDULER=1 conda run -n wems python -m pytest tests/test_mcp_daily_plan_tools.py::test_recent_performance_published_only_sorted -q -p no:cacheprovider`
+Run: `cd backend && DISABLE_SCHEDULER=1 conda run -n wems python -m pytest tests/test_mcp_daily_plan_tools.py::test_recent_performance_published_only_sorted -q -p no:cacheprovider`
 Expected: FAIL（`AttributeError: module 'mcp_server' has no attribute 'get_recent_performance'`）
 
 - [ ] **Step 3: 实现工具**
@@ -522,7 +522,7 @@ async def get_recent_performance(days: int = 30, limit: int = 20) -> list[dict]:
 
 - [ ] **Step 4: 跑测试确认通过**
 
-Run: `cd backend && WMS_DISABLE_SCHEDULER=1 conda run -n wems python -m pytest tests/test_mcp_daily_plan_tools.py -q -p no:cacheprovider`
+Run: `cd backend && DISABLE_SCHEDULER=1 conda run -n wems python -m pytest tests/test_mcp_daily_plan_tools.py -q -p no:cacheprovider`
 Expected: 全部 passed
 
 - [ ] **Step 5: Commit**
@@ -565,7 +565,7 @@ git commit -m "feat(publish-feedback): MCP get_recent_performance 工具"
 
 - [ ] **Step 2: 验证文本已接入且模块可导入**
 
-Run: `cd backend && WMS_DISABLE_SCHEDULER=1 conda run -n wems python -c "import pipeline_template as p; body=p.DAILY_PLAN_PIPELINE[0].body({'date_str':'x','plan_id':1,'accounts_md':'','recent_titles_md':''}); assert 'get_recent_performance' in body; print('OK')"`
+Run: `cd backend && DISABLE_SCHEDULER=1 conda run -n wems python -c "import pipeline_template as p; body=p.DAILY_PLAN_PIPELINE[0].body({'date_str':'x','plan_id':1,'accounts_md':'','recent_titles_md':''}); assert 'get_recent_performance' in body; print('OK')"`
 Expected: 打印 `OK`
 
 - [ ] **Step 3: Commit**
@@ -852,7 +852,7 @@ git commit -m "feat(publish-feedback): 侧边栏加「发布」入口"
 
 ## 收尾验证
 
-- [ ] **后端全量**：`cd backend && WMS_DISABLE_SCHEDULER=1 conda run -n wems python -m pytest -q --tb=no -p no:cacheprovider` —— 新增 test_published / 发布钩子 / get_recent_performance 全绿；既存 12 个失败不变（writing_plans/wechat_publish/ref flake，参 [[feedback_preexisting_test_failures]]，多为隔离污染，单文件跑均过）。
+- [ ] **后端全量**：`cd backend && DISABLE_SCHEDULER=1 conda run -n wems python -m pytest -q --tb=no -p no:cacheprovider` —— 新增 test_published / 发布钩子 / get_recent_performance 全绿；既存 12 个失败不变（writing_plans/wechat_publish/ref flake，参 [[feedback_preexisting_test_failures]]，多为隔离污染，单文件跑均过）。
 - [ ] **前端**：`cd web && pnpm exec tsc --noEmit` 零错误。
 - [ ] **手动冒烟**：起后端 + 前端，发布一篇到公众号 → /published 出现一条草稿箱记录 → 标已发布 + 填阅读量 → 保存 → 刷新仍在、按阅读排序。
 

@@ -158,8 +158,8 @@ for (const viewport of viewports) test(`keeps preview actions visible while a lo
   await content.evaluate(element => { element.scrollTop = element.scrollHeight })
   await expect.poll(async () => (await footer.boundingBox())?.y).toBe(footerBoxBefore.y)
   expect(await content.evaluate(element => element.scrollTop)).toBeGreaterThan(0)
-  if (viewport.name === 'wide' && process.env.WMS_EXTENSION_LAYOUT_SCREENSHOT) {
-    await page.screenshot({ path: process.env.WMS_EXTENSION_LAYOUT_SCREENSHOT, fullPage: false })
+  if (viewport.name === 'wide' && process.env.EXTENSION_LAYOUT_SCREENSHOT) {
+    await page.screenshot({ path: process.env.EXTENSION_LAYOUT_SCREENSHOT, fullPage: false })
   }
   expect(consoleProblems).toEqual([])
 })

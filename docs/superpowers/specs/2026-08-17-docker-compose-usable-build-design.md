@@ -21,7 +21,7 @@ Node worker 和 Next.js Web。API、worker、Web 使用同一个应用镜像，�
 - 让 `api`、`worker`、`web` 共用同一个镜像标签；只有 `api` 声明构建上下文，
   `docker compose build` 只生成一个应用镜像。
 - 为统一应用镜像增加 `NEXT_PUBLIC_API_URL` 构建参数，并在 Compose 中从根
-  环境文件传入；运行时环境继续提供服务端使用的 `WMS_API_URL`。
+  环境文件传入；运行时环境继续提供服务端使用的 `API_URL`。
 - 增加 GitHub Actions，在 push/PR 上校验 Compose 并编译这一个应用镜像；推送到
   `main` 或手动选择发布时，使用仓库 `GITHUB_TOKEN` 发布到 GHCR。
 - 更新环境变量示例、自托管文档和 Compose 契约测试。
@@ -81,7 +81,7 @@ API 不在 `depends_on` 中声明 local-asr，因此默认启动不会等待或�
 ```
 
 Compose 的 `api`、`worker`、`web` 服务使用同一个
-`${WMS_APP_IMAGE:-ediora-studio}:${WMS_IMAGE_TAG:-local}` 镜像。API 保持
+`${APP_IMAGE:-ediora-studio}:${IMAGE_TAG:-local}` 镜像。API 保持
 `/app` 工作目录；worker 和 Web 使用 `/app/web` 工作目录并通过不同的
 `command` 启动。这样只有一个镜像需要在 GitHub Actions 中构建和发布，
 但单个进程仍可独立重启、检查和记录日志。
@@ -97,7 +97,7 @@ ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 
 Compose 的唯一构建服务使用根目录构建上下文；Web 构建参数从
 `${NEXT_PUBLIC_API_URL:-http://localhost:8000/api}` 解析。Web 容器运行时仍
-设置相同的公开地址，并通过 `WMS_API_URL=http://api:8000/api` 给 Next.js
+设置相同的公开地址，并通过 `API_URL=http://api:8000/api` 给 Next.js
 服务端路由使用内部网络地址。这样浏览器请求和容器内服务端请求分别使用
 可达的地址。
 
@@ -144,7 +144,7 @@ provider 凭据不可用，单独报告环境阻塞，不把它们归因于镜�
 
 ## 失败处理
 
-- 缺少或过短的 `WMS_WORKER_TOKEN` 继续让 API/worker fail closed；文档和
+- 缺少或过短的 `WORKER_TOKEN` 继续让 API/worker fail closed；文档和
   `.env.example` 保持明确的 token 要求。
 - `NEXT_PUBLIC_API_URL` 未设置时使用 localhost 默认值，保证现有本地访问
   路径不变。

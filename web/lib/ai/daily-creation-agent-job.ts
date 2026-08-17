@@ -40,6 +40,7 @@ import {
   workerHeaders,
   type DurableJob,
 } from './job-client'
+import { textModelConfigFromSettings, type TextModelSettings } from './runtime-config'
 
 export type DailyCreationAgentContext = {
   id: number
@@ -127,15 +128,14 @@ function defaultApiRoot() {
 }
 
 async function configuredModel(jobId: number): Promise<Model> {
-  const settings = await apiGet<{ api_key: string; model: string; base_url: string }>(
+  const settings = await apiGet<TextModelSettings>(
     '/settings/ai-runtime', workerHeaders(jobId),
   )
-  const apiKey = settings.api_key || process.env.WMS_LLM_API_KEY
-  if (!apiKey) throw new Error('No LLM API key is configured')
+  const runtime = textModelConfigFromSettings(settings)
   return createOpenAI({
-    apiKey,
-    baseURL: settings.base_url || process.env.WMS_LLM_BASE_URL || undefined,
-  }).chat(settings.model || process.env.WMS_LLM_MODEL || 'gpt-4o-mini')
+    apiKey: runtime.apiKey,
+    baseURL: runtime.baseURL,
+  }).chat(runtime.modelName)
 }
 
 const defaultDependencies: DailyCreationAgentJobDependencies = {

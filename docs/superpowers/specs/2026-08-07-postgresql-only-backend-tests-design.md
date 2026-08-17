@@ -37,7 +37,7 @@ may remain until an explicit cleanup command removes test-prefixed databases.
 
 ## Configuration
 
-The fixture reads `WMS_TEST_DATABASE_ADMIN_URL`. Its local default is the
+The fixture reads `TEST_DATABASE_ADMIN_URL`. Its local default is the
 existing development PostgreSQL service:
 
 ```text
@@ -47,7 +47,7 @@ postgresql+asyncpg://wemedia:wemedia@127.0.0.1:55432/postgres
 The configured role must have `CREATEDB`; the current local `wemedia` role has
 that capability. CI can provide a different administrative URL without changing
 tests. Application modules receive a URL for the newly created test database
-through `WMS_DATABASE_URL` before those modules are imported or reloaded.
+through `DATABASE_URL` before those modules are imported or reloaded.
 
 The host does not need the `psql` executable for normal test execution. Database
 creation and cleanup use the installed PostgreSQL Python driver. `psql` remains
@@ -60,7 +60,7 @@ PostgreSQL container.
 pytest fixtures. Tests consume a small interface rather than constructing URLs:
 
 - a fixture yielding a unique test database URL;
-- a fixture/helper that sets `WMS_DATABASE_URL` before reloading database-bound
+- a fixture/helper that sets `DATABASE_URL` before reloading database-bound
   modules;
 - a helper for creating model metadata when the behavior under test does not run
   application initialization;

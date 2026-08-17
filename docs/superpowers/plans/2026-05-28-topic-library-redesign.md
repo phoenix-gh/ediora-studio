@@ -78,7 +78,7 @@ class ContentTopicTag(Base):
 ```bash
 source ~/.zshrc && conda run -n wems python -c "
 import sys, os
-os.environ['WMS_DATABASE_URL'] = 'sqlite+aiosqlite:///./tmp_check.db'
+os.environ['DATABASE_URL'] = 'sqlite+aiosqlite:///./tmp_check.db'
 import models
 print('TopicTag:', models.TopicTag.__tablename__)
 print('ContentTopicTag:', models.ContentTopicTag.__tablename__)
@@ -133,7 +133,7 @@ Open `backend/database.py`. After the existing `ALTER TABLE` blocks (before the 
 ```bash
 source ~/.zshrc && conda run -n wems python -c "
 import asyncio, os
-os.environ['WMS_DATABASE_URL'] = 'sqlite+aiosqlite:///./tmp_migrate.db'
+os.environ['DATABASE_URL'] = 'sqlite+aiosqlite:///./tmp_migrate.db'
 import database, models
 asyncio.run(database.init_db())
 print('Migration OK')
@@ -569,7 +569,7 @@ async def quick_save_source(body: TopicSourceCreate, db: AsyncSession = Depends(
 ```bash
 source ~/.zshrc && conda run -n wems python -c "
 import sys, os
-os.environ['WMS_DATABASE_URL'] = 'sqlite+aiosqlite:///./tmp_check.db'
+os.environ['DATABASE_URL'] = 'sqlite+aiosqlite:///./tmp_check.db'
 import models  # ensure models loaded
 from routers.content_topics import router
 print('Router OK, routes:', [r.path for r in router.routes])
@@ -606,8 +606,8 @@ from fastapi.testclient import TestClient
 @pytest.fixture
 def client(monkeypatch, tmp_path):
     db_file = tmp_path / "test.db"
-    monkeypatch.setenv("WMS_DATABASE_URL", f"sqlite+aiosqlite:///{db_file}")
-    monkeypatch.setenv("WMS_DISABLE_SCHEDULER", "1")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite+aiosqlite:///{db_file}")
+    monkeypatch.setenv("DISABLE_SCHEDULER", "1")
 
     for mod in list(sys.modules):
         if mod.startswith(("database", "models", "main", "routers", "config",

@@ -11,7 +11,7 @@ from cryptography.fernet import Fernet
 @pytest.fixture
 def client(monkeypatch, tmp_path, postgres_env):
     monkeypatch.setenv("FEEDGRAB_DATA_DIR", str(tmp_path / "sessions"))
-    monkeypatch.setenv("WMS_X_SESSION_KEY", Fernet.generate_key().decode())
+    monkeypatch.setenv("X_SESSION_KEY", Fernet.generate_key().decode())
 
     for mod in list(sys.modules):
         if mod.startswith(("database", "models", "main", "routers", "config")):

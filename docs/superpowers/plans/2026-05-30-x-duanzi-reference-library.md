@@ -11,7 +11,7 @@
 **关键约定（务必遵守）：**
 - 所有 python/pytest 命令加前缀：`source ~/.zshrc && cd /workspace/projects/WeMediaStudio/backend && conda run -n wems python -m pytest ...`
 - 后端无迁移框架：新表靠 `Base.metadata.create_all`（在 `database.py:init_db`）自动建；金句数据迁移放进 `init_db` 的幂等 raw SQL（沿用现有 `ALTER ... IF NOT EXISTS` / `UPDATE ... WHERE` 风格）。
-- API 前缀 `/api`。测试沿用 `tests/test_x_router.py` 的 inline `client` fixture（sqlite + `WMS_DISABLE_SCHEDULER=1`）。
+- API 前缀 `/api`。测试沿用 `tests/test_x_router.py` 的 inline `client` fixture（sqlite + `DISABLE_SCHEDULER=1`）。
 - spec：`docs/superpowers/specs/2026-05-30-x-hot-duanzi-reference-library-design.md`；spike：`docs/superpowers/spikes/2026-05-30-x-top-search-operator-only.md`。
 - 前端无测试框架 → 前端任务用「跑 dev server 手工验证」代替单测。先读 `web/AGENTS.md`（Next.js 有 breaking changes）。
 
@@ -58,7 +58,7 @@ import sys, asyncio, pytest
 @pytest.fixture
 def db_session(monkeypatch, tmp_path):
     db_file = tmp_path / "t.db"
-    monkeypatch.setenv("WMS_DATABASE_URL", f"sqlite+aiosqlite:///{db_file}")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite+aiosqlite:///{db_file}")
     for mod in list(sys.modules):
         if mod.startswith(("database", "models", "config")):
             sys.modules.pop(mod, None)
@@ -531,7 +531,7 @@ from unittest.mock import patch, AsyncMock
 @pytest.fixture
 def db_session(monkeypatch, tmp_path):
     db_file = tmp_path / "t.db"
-    monkeypatch.setenv("WMS_DATABASE_URL", f"sqlite+aiosqlite:///{db_file}")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite+aiosqlite:///{db_file}")
     for mod in list(sys.modules):
         if mod.startswith(("database", "models", "config")):
             sys.modules.pop(mod, None)
@@ -830,8 +830,8 @@ from fastapi.testclient import TestClient
 @pytest.fixture
 def client(monkeypatch, tmp_path):
     db_file = tmp_path / "test.db"
-    monkeypatch.setenv("WMS_DATABASE_URL", f"sqlite+aiosqlite:///{db_file}")
-    monkeypatch.setenv("WMS_DISABLE_SCHEDULER", "1")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite+aiosqlite:///{db_file}")
+    monkeypatch.setenv("DISABLE_SCHEDULER", "1")
     for mod in list(sys.modules):
         if mod.startswith(("database", "models", "main", "routers", "config")):
             sys.modules.pop(mod, None)
@@ -1165,7 +1165,7 @@ from unittest.mock import patch, AsyncMock
 @pytest.fixture
 def env(monkeypatch, tmp_path):
     db_file = tmp_path / "t.db"
-    monkeypatch.setenv("WMS_DATABASE_URL", f"sqlite+aiosqlite:///{db_file}")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite+aiosqlite:///{db_file}")
     for mod in list(sys.modules):
         if mod.startswith(("database", "models", "config", "scheduler")):
             sys.modules.pop(mod, None)
@@ -1260,7 +1260,7 @@ import sys, asyncio, pytest
 @pytest.fixture
 def env(monkeypatch, tmp_path):
     db_file = tmp_path / "t.db"
-    monkeypatch.setenv("WMS_DATABASE_URL", f"sqlite+aiosqlite:///{db_file}")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite+aiosqlite:///{db_file}")
     for mod in list(sys.modules):
         if mod.startswith(("database", "models", "config", "ref_migrate")):
             sys.modules.pop(mod, None)
@@ -1401,7 +1401,7 @@ import sys, asyncio, pytest
 @pytest.fixture
 def env(monkeypatch, tmp_path):
     db_file = tmp_path / "t.db"
-    monkeypatch.setenv("WMS_DATABASE_URL", f"sqlite+aiosqlite:///{db_file}")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite+aiosqlite:///{db_file}")
     for mod in list(sys.modules):
         if mod.startswith(("database", "models", "config", "mcp_server")):
             sys.modules.pop(mod, None)

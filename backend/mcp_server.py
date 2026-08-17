@@ -23,8 +23,8 @@ _UPLOADS_DIR = Path(__file__).parent / "uploads"
 _UPLOADS_DIR.mkdir(exist_ok=True)
 
 # Base URL for constructing publicly accessible image URLs.
-# Override with WMS_BASE_URL env var when running behind a reverse proxy.
-_BASE_URL = os.getenv("WMS_BASE_URL", "http://localhost:8000")
+# Override with BASE_URL env var when running behind a reverse proxy.
+_BASE_URL = os.getenv("BASE_URL", "http://localhost:8000")
 
 mcp = FastMCP(
     "Ediora",
@@ -501,7 +501,7 @@ async def record_content_usage(
 
     request = getattr(ctx.request_context, "request", None)
     headers = getattr(request, "headers", {})
-    raw_run_id = headers.get("x-wms-daily-creation-run-id")
+    raw_run_id = headers.get("x-daily-creation-run-id")
     try:
         run_id = int(raw_run_id)
     except (TypeError, ValueError) as error:

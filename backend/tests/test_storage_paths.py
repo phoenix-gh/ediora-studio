@@ -13,8 +13,8 @@ def test_text_video_and_static_upload_paths_follow_environment(
     uploads = tmp_path / "isolated uploads"
     environment = {
         **os.environ,
-        "WMS_UPLOADS_DIR": str(uploads),
-        "WMS_DISABLE_SCHEDULER": "1",
+        "UPLOADS_DIR": str(uploads),
+        "DISABLE_SCHEDULER": "1",
     }
     script = """
 import json

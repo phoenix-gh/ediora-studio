@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 @pytest.fixture
 def client(monkeypatch, postgres_env):
     monkeypatch.setenv(
-        "WMS_WORKER_TOKEN", "test-worker-token-at-least-32-chars"
+        "WORKER_TOKEN", "test-worker-token-at-least-32-chars"
     )
     monkeypatch.delenv("COMFYUI_BASE_URL", raising=False)
     monkeypatch.delenv("COMFYUI_AUTH_TOKEN", raising=False)
@@ -57,7 +57,7 @@ def test_comfyui_runtime_uses_environment_fallback(client, monkeypatch):
 
     response = client.get(
         "/api/settings/comfyui-runtime",
-        headers={"X-WMS-Worker-Token": "test-worker-token-at-least-32-chars"},
+        headers={"X-Worker-Token": "test-worker-token-at-least-32-chars"},
     )
 
     assert response.status_code == 200
@@ -73,7 +73,7 @@ def test_comfyui_runtime_rejects_missing_or_wrong_worker_token(client):
     missing = client.get("/api/settings/comfyui-runtime")
     wrong = client.get(
         "/api/settings/comfyui-runtime",
-        headers={"X-WMS-Worker-Token": "wrong-token"},
+        headers={"X-Worker-Token": "wrong-token"},
     )
 
     assert missing.status_code == 403

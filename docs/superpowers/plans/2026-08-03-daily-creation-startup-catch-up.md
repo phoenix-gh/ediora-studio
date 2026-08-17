@@ -15,7 +15,7 @@
 - One-time rules remain due from their configured local date and time onward.
 - Existing `(rule_id, scheduled_for, trigger_kind)` uniqueness remains the idempotency boundary.
 - Manual runs do not suppress scheduled runs.
-- `WMS_DISABLE_SCHEDULER=1` continues to disable both automatic dispatch and catch-up.
+- `DISABLE_SCHEDULER=1` continues to disable both automatic dispatch and catch-up.
 - Do not add a last-shutdown timestamp, a separate startup dispatcher, distributed scheduler locking, or multi-day replay.
 - Preserve unrelated changes in the existing dirty worktree and stage only files named by each task.
 

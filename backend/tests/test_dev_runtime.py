@@ -40,13 +40,13 @@ def _fake_runtime_tools(
         bin_dir / "docker",
         """
         #!/bin/sh
-        state="${WMS_DEV_TEST_POSTGRES_STATE:-running}"
+        state="${DEV_TEST_POSTGRES_STATE:-running}"
         case "${1:-}" in
           info)
             [ "$state" != unavailable ] || exit 1
             ;;
           inspect)
-            printf 'inspect:postgres\n' >>"$WMS_DEV_TEST_STATE/events"
+            printf 'inspect:postgres\n' >>"$DEV_TEST_STATE/events"
             [ "$state" != missing ] || exit 1
             [ "$state" != unavailable ] || exit 1
             if [ "$state" = running ]; then
@@ -56,11 +56,11 @@ def _fake_runtime_tools(
             fi
             ;;
           start)
-            printf 'start:postgres\n' >>"$WMS_DEV_TEST_STATE/events"
-            [ "${WMS_DEV_TEST_POSTGRES_START_FAIL:-0}" != 1 ] || exit 17
+            printf 'start:postgres\n' >>"$DEV_TEST_STATE/events"
+            [ "${DEV_TEST_POSTGRES_START_FAIL:-0}" != 1 ] || exit 17
             ;;
           stop)
-            printf 'stop:postgres\n' >>"$WMS_DEV_TEST_STATE/events"
+            printf 'stop:postgres\n' >>"$DEV_TEST_STATE/events"
             ;;
           *)
             exit 64
@@ -74,8 +74,8 @@ def _fake_runtime_tools(
             bin_dir / "redis-cli",
             """
             #!/bin/sh
-            if [ -f "$WMS_DEV_TEST_STATE/redis.ready" ]; then
-              printf 'ready:redis\n' >>"$WMS_DEV_TEST_STATE/events"
+            if [ -f "$DEV_TEST_STATE/redis.ready" ]; then
+              printf 'ready:redis\n' >>"$DEV_TEST_STATE/events"
               printf 'PONG\n'
               exit 0
             fi
@@ -86,12 +86,12 @@ def _fake_runtime_tools(
             bin_dir / "redis-server",
             """
             #!/bin/sh
-            printf 'start:redis\n' >>"$WMS_DEV_TEST_STATE/events"
-            if [ "${WMS_DEV_TEST_FAIL_STAGE:-}" = redis ]; then
+            printf 'start:redis\n' >>"$DEV_TEST_STATE/events"
+            if [ "${DEV_TEST_FAIL_STAGE:-}" = redis ]; then
               exit 17
             fi
-            : >"$WMS_DEV_TEST_STATE/redis.ready"
-            trap 'printf "stop:redis\\n" >>"$WMS_DEV_TEST_STATE/events"; rm -f "$WMS_DEV_TEST_STATE/redis.ready"; exit 0' TERM INT
+            : >"$DEV_TEST_STATE/redis.ready"
+            trap 'printf "stop:redis\\n" >>"$DEV_TEST_STATE/events"; rm -f "$DEV_TEST_STATE/redis.ready"; exit 0' TERM INT
             while :; do sleep 1; done
             """,
         )
@@ -100,20 +100,20 @@ def _fake_runtime_tools(
         bin_dir / "conda",
         """
         #!/bin/sh
-        printf 'start:api\n' >>"$WMS_DEV_TEST_STATE/events"
-        token_hash="$(printf '%s' "$WMS_WORKER_TOKEN" | sha256sum | awk '{print $1}')"
+        printf 'start:api\n' >>"$DEV_TEST_STATE/events"
+        token_hash="$(printf '%s' "$WORKER_TOKEN" | sha256sum | awk '{print $1}')"
         printf '%s|%s|%s|%s|%s\n' \
-          "$WMS_REDIS_URL" "$WMS_WORKER_QUEUE" "$token_hash" "$WMS_API_URL" \
-          "$WMS_CORS_ORIGINS" \
-          >"$WMS_DEV_TEST_STATE/api.env"
-        if [ "${WMS_DEV_TEST_FAIL_STAGE:-}" = api-bind ]; then
+          "$REDIS_URL" "$WORKER_QUEUE" "$token_hash" "$API_URL" \
+          "$CORS_ORIGINS" \
+          >"$DEV_TEST_STATE/api.env"
+        if [ "${DEV_TEST_FAIL_STAGE:-}" = api-bind ]; then
           sleep 0.15
           exit 17
         fi
-        if [ "${WMS_DEV_TEST_FAIL_STAGE:-}" != api ]; then
-          : >"$WMS_DEV_TEST_STATE/api.ready"
+        if [ "${DEV_TEST_FAIL_STAGE:-}" != api ]; then
+          : >"$DEV_TEST_STATE/api.ready"
         fi
-        trap 'printf "stop:api\\n" >>"$WMS_DEV_TEST_STATE/events"; rm -f "$WMS_DEV_TEST_STATE/api.ready"; exit 0' TERM INT
+        trap 'printf "stop:api\\n" >>"$DEV_TEST_STATE/events"; rm -f "$DEV_TEST_STATE/api.ready"; exit 0' TERM INT
         while :; do sleep 1; done
         """,
     )
@@ -123,39 +123,39 @@ def _fake_runtime_tools(
         #!/bin/sh
         case " $* " in
           *" jobs:worker "*)
-            printf 'start:worker\n' >>"$WMS_DEV_TEST_STATE/events"
-            token_hash="$(printf '%s' "$WMS_WORKER_TOKEN" | sha256sum | awk '{print $1}')"
+            printf 'start:worker\n' >>"$DEV_TEST_STATE/events"
+            token_hash="$(printf '%s' "$WORKER_TOKEN" | sha256sum | awk '{print $1}')"
             printf '%s|%s|%s|%s|%s\n' \
-              "$WMS_REDIS_URL" "$WMS_WORKER_QUEUE" "$token_hash" "$WMS_API_URL" \
-              "$WMS_CORS_ORIGINS" \
-              >"$WMS_DEV_TEST_STATE/worker.env"
-            if [ "${WMS_DEV_TEST_FAIL_STAGE:-}" = worker ]; then
+              "$REDIS_URL" "$WORKER_QUEUE" "$token_hash" "$API_URL" \
+              "$CORS_ORIGINS" \
+              >"$DEV_TEST_STATE/worker.env"
+            if [ "${DEV_TEST_FAIL_STAGE:-}" = worker ]; then
               exit 17
             fi
-            if [ "${WMS_DEV_TEST_FAIL_STAGE:-}" != worker-never-ready ] \
-              && [ -n "${WMS_WORKER_READY_FILE:-}" ]; then
-              ready_tmp="${WMS_WORKER_READY_FILE}.tmp.$$"
+            if [ "${DEV_TEST_FAIL_STAGE:-}" != worker-never-ready ] \
+              && [ -n "${WORKER_READY_FILE:-}" ]; then
+              ready_tmp="${WORKER_READY_FILE}.tmp.$$"
               {
-                printf 'marker=%s\n' "$WMS_DEV_SERVICE_MARKER"
-                printf 'config_fingerprint=%s\n' "$WMS_DEV_CONFIG_FINGERPRINT"
+                printf 'marker=%s\n' "$DEV_SERVICE_MARKER"
+                printf 'config_fingerprint=%s\n' "$DEV_CONFIG_FINGERPRINT"
               } >"$ready_tmp"
-              mv -f -- "$ready_tmp" "$WMS_WORKER_READY_FILE"
-              printf 'ready:worker\n' >>"$WMS_DEV_TEST_STATE/events"
+              mv -f -- "$ready_tmp" "$WORKER_READY_FILE"
+              printf 'ready:worker\n' >>"$DEV_TEST_STATE/events"
             fi
-            trap 'printf "stop:worker\\n" >>"$WMS_DEV_TEST_STATE/events"; exit 0' TERM INT
+            trap 'printf "stop:worker\\n" >>"$DEV_TEST_STATE/events"; exit 0' TERM INT
             while :; do sleep 1; done
             ;;
           *)
-            printf 'start:web\n' >>"$WMS_DEV_TEST_STATE/events"
-            token_hash="$(printf '%s' "$WMS_WORKER_TOKEN" | sha256sum | awk '{print $1}')"
+            printf 'start:web\n' >>"$DEV_TEST_STATE/events"
+            token_hash="$(printf '%s' "$WORKER_TOKEN" | sha256sum | awk '{print $1}')"
             printf '%s|%s|%s|%s|%s\n' \
-              "$WMS_REDIS_URL" "$WMS_WORKER_QUEUE" "$token_hash" "$WMS_API_URL" \
-              "$WMS_CORS_ORIGINS" \
-              >"$WMS_DEV_TEST_STATE/web.env"
-            if [ "${WMS_DEV_TEST_FAIL_STAGE:-}" != web ]; then
-              : >"$WMS_DEV_TEST_STATE/web.ready"
+              "$REDIS_URL" "$WORKER_QUEUE" "$token_hash" "$API_URL" \
+              "$CORS_ORIGINS" \
+              >"$DEV_TEST_STATE/web.env"
+            if [ "${DEV_TEST_FAIL_STAGE:-}" != web ]; then
+              : >"$DEV_TEST_STATE/web.ready"
             fi
-            trap 'printf "stop:web\\n" >>"$WMS_DEV_TEST_STATE/events"; rm -f "$WMS_DEV_TEST_STATE/web.ready"; exit 0' TERM INT
+            trap 'printf "stop:web\\n" >>"$DEV_TEST_STATE/events"; rm -f "$DEV_TEST_STATE/web.ready"; exit 0' TERM INT
             while :; do sleep 1; done
             ;;
         esac
@@ -170,13 +170,13 @@ def _fake_runtime_tools(
             url=
             for argument in "$@"; do url="$argument"; done
             case "$url" in
-              *":$WMS_API_PORT/health")
-                [ -f "$WMS_DEV_TEST_STATE/api.ready" ] || exit 1
-                printf 'ready:api\n' >>"$WMS_DEV_TEST_STATE/events"
+              *":$API_PORT/health")
+                [ -f "$DEV_TEST_STATE/api.ready" ] || exit 1
+                printf 'ready:api\n' >>"$DEV_TEST_STATE/events"
                 ;;
-              *":$WMS_WEB_PORT/"*)
-                [ -f "$WMS_DEV_TEST_STATE/web.ready" ] || exit 1
-                printf 'ready:web\n' >>"$WMS_DEV_TEST_STATE/events"
+              *":$WEB_PORT/"*)
+                [ -f "$DEV_TEST_STATE/web.ready" ] || exit 1
+                printf 'ready:web\n' >>"$DEV_TEST_STATE/events"
                 ;;
               *)
                 exit 1
@@ -194,21 +194,21 @@ def _dev_env(tmp_path: Path, bin_dir: Path) -> dict[str, str]:
     env.update(
         {
             "PATH": f"{bin_dir}{os.pathsep}{env['PATH']}",
-            "WMS_WORKER_TOKEN": VALID_TOKEN,
-            "WMS_DEV_RUN_DIR": str(tmp_path / "run"),
-            "WMS_DEV_LOG_DIR": str(tmp_path / "logs"),
-            "WMS_DEV_TEST_STATE": str(state),
-            "WMS_DEV_READY_TIMEOUT_SECONDS": "0.6",
-            "WMS_DEV_STOP_TIMEOUT_SECONDS": "0.6",
-            "WMS_DEV_POLL_INTERVAL_SECONDS": "0.05",
-            "WMS_DEV_HTTP_SETTLE_SECONDS": "0.2",
-            "WMS_DEV_POSTGRES_PORT": "0",
-            "WMS_DEV_POSTGRES_TEST_AUTO_READY": "1",
+            "WORKER_TOKEN": VALID_TOKEN,
+            "DEV_RUN_DIR": str(tmp_path / "run"),
+            "DEV_LOG_DIR": str(tmp_path / "logs"),
+            "DEV_TEST_STATE": str(state),
+            "DEV_READY_TIMEOUT_SECONDS": "0.6",
+            "DEV_STOP_TIMEOUT_SECONDS": "0.6",
+            "DEV_POLL_INTERVAL_SECONDS": "0.05",
+            "DEV_HTTP_SETTLE_SECONDS": "0.2",
+            "DEV_POSTGRES_PORT": "0",
+            "DEV_POSTGRES_TEST_AUTO_READY": "1",
             # The fake services do not bind. Real socket tests replace these
             # values with ports held by their server processes.
-            "WMS_REDIS_PORT": "46379",
-            "WMS_API_PORT": "48000",
-            "WMS_WEB_PORT": "43000",
+            "REDIS_PORT": "46379",
+            "API_PORT": "48000",
+            "WEB_PORT": "43000",
         }
     )
     return env
@@ -225,7 +225,7 @@ def _run_dev(
     stop_server = threading.Event()
 
     auto_ready = (
-        env.get("WMS_DEV_POSTGRES_TEST_AUTO_READY") == "1"
+        env.get("DEV_POSTGRES_TEST_AUTO_READY") == "1"
         and command in {"start", "restart", "status"}
     )
     if auto_ready:
@@ -233,11 +233,11 @@ def _run_dev(
         listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         listener.bind(
             (
-                env.get("WMS_DEV_POSTGRES_HOST", "127.0.0.1"),
-                int(env["WMS_DEV_POSTGRES_PORT"]),
+                env.get("DEV_POSTGRES_HOST", "127.0.0.1"),
+                int(env["DEV_POSTGRES_PORT"]),
             )
         )
-        env["WMS_DEV_POSTGRES_PORT"] = str(listener.getsockname()[1])
+        env["DEV_POSTGRES_PORT"] = str(listener.getsockname()[1])
         listener.listen()
         listener.settimeout(0.05)
 
@@ -252,10 +252,10 @@ def _run_dev(
 
         server_thread = threading.Thread(target=serve_connections, daemon=True)
         server_thread.start()
-    elif env.get("WMS_DEV_POSTGRES_PORT") == "0":
+    elif env.get("DEV_POSTGRES_PORT") == "0":
         with socket.socket() as port_probe:
             port_probe.bind(("127.0.0.1", 0))
-            env["WMS_DEV_POSTGRES_PORT"] = str(port_probe.getsockname()[1])
+            env["DEV_POSTGRES_PORT"] = str(port_probe.getsockname()[1])
 
     try:
         return subprocess.run(
@@ -313,7 +313,7 @@ def _run_dev_with_unsignallable_group(
 
 
 def _events(env: dict[str, str]) -> list[str]:
-    path = Path(env["WMS_DEV_TEST_STATE"]) / "events"
+    path = Path(env["DEV_TEST_STATE"]) / "events"
     return path.read_text(encoding="utf-8").splitlines() if path.exists() else []
 
 
@@ -445,7 +445,7 @@ else:
     os._exit(0)
 """
     env = os.environ.copy()
-    env["WMS_DEV_SERVICE_MARKER"] = marker
+    env["DEV_SERVICE_MARKER"] = marker
     leader = subprocess.Popen(
         [
             sys.executable,
@@ -498,9 +498,9 @@ os._exit(17)
         fi
       }
     fi
-    export WMS_DEV_READY_TIMEOUT_SECONDS=0.3
-    export WMS_DEV_STOP_TIMEOUT_SECONDS=0.1
-    export WMS_DEV_POLL_INTERVAL_SECONDS=0.02
+    export DEV_READY_TIMEOUT_SECONDS=0.3
+    export DEV_STOP_TIMEOUT_SECONDS=0.1
+    export DEV_POLL_INTERVAL_SECONDS=0.02
     dev_start_owned_service \
       api API "$2" "$3" "$4" failed-start-fingerprint \
       "$5" -c "$6" "$7"
@@ -535,15 +535,15 @@ def test_short_worker_token_fails_before_spawning_any_child_and_stays_secret(
     bin_dir = _fake_runtime_tools(tmp_path)
     env = _dev_env(tmp_path, bin_dir)
     secret = "short-secret"
-    env["WMS_WORKER_TOKEN"] = secret
+    env["WORKER_TOKEN"] = secret
 
     try:
         result = _run_dev(env, "start")
 
         assert result.returncode != 0
         assert not _events(env)
-        assert not Path(env["WMS_DEV_RUN_DIR"]).exists()
-        assert not Path(env["WMS_DEV_LOG_DIR"]).exists()
+        assert not Path(env["DEV_RUN_DIR"]).exists()
+        assert not Path(env["DEV_LOG_DIR"]).exists()
         assert secret not in result.stdout
         assert secret not in result.stderr
     finally:
@@ -557,18 +557,18 @@ def test_start_loads_root_env_without_manually_exported_worker_token(
     env = _dev_env(tmp_path, bin_dir)
     env_file = tmp_path / ".env"
     env_file.write_text(
-        f'WMS_WORKER_TOKEN="{REPLACEMENT_TOKEN}"\n',
+        f'WORKER_TOKEN="{REPLACEMENT_TOKEN}"\n',
         encoding="utf-8",
     )
-    env["WMS_DEV_ENV_FILE"] = str(env_file)
-    env.pop("WMS_WORKER_TOKEN")
+    env["DEV_ENV_FILE"] = str(env_file)
+    env.pop("WORKER_TOKEN")
 
     try:
         result = _run_dev(env, "start")
 
         assert result.returncode == 0, result.stdout + result.stderr
         effective = (
-            Path(env["WMS_DEV_TEST_STATE"]) / "api.env"
+            Path(env["DEV_TEST_STATE"]) / "api.env"
         ).read_text(encoding="utf-8")
         expected_hash = hashlib.sha256(REPLACEMENT_TOKEN.encode()).hexdigest()
         assert f"|{expected_hash}|" in effective
@@ -581,17 +581,17 @@ def test_explicit_environment_overrides_root_env(tmp_path: Path) -> None:
     env = _dev_env(tmp_path, bin_dir)
     env_file = tmp_path / ".env"
     env_file.write_text(
-        f"WMS_WORKER_TOKEN={REPLACEMENT_TOKEN}\n",
+        f"WORKER_TOKEN={REPLACEMENT_TOKEN}\n",
         encoding="utf-8",
     )
-    env["WMS_DEV_ENV_FILE"] = str(env_file)
+    env["DEV_ENV_FILE"] = str(env_file)
 
     try:
         result = _run_dev(env, "start")
 
         assert result.returncode == 0, result.stdout + result.stderr
         effective = (
-            Path(env["WMS_DEV_TEST_STATE"]) / "api.env"
+            Path(env["DEV_TEST_STATE"]) / "api.env"
         ).read_text(encoding="utf-8")
         expected_hash = hashlib.sha256(VALID_TOKEN.encode()).hexdigest()
         assert f"|{expected_hash}|" in effective
@@ -607,7 +607,7 @@ def test_missing_env_fails_before_spawning_children_without_printing_secrets(
     bin_dir = _fake_runtime_tools(tmp_path)
     env = _dev_env(tmp_path, bin_dir)
     secret = VALID_TOKEN
-    env["WMS_DEV_ENV_FILE"] = str(tmp_path / "missing.env")
+    env["DEV_ENV_FILE"] = str(tmp_path / "missing.env")
 
     result = _run_dev(env, "start")
 
@@ -623,7 +623,7 @@ def test_stopped_postgres_starts_before_application_processes(
 ) -> None:
     bin_dir = _fake_runtime_tools(tmp_path)
     env = _dev_env(tmp_path, bin_dir)
-    env["WMS_DEV_TEST_POSTGRES_STATE"] = "stopped"
+    env["DEV_TEST_POSTGRES_STATE"] = "stopped"
 
     try:
         result = _run_dev(env, "start")
@@ -635,7 +635,7 @@ def test_stopped_postgres_starts_before_application_processes(
         assert "Postgres:" in result.stdout
         assert (
             "wms-dev-postgres-copy "
-            f"(127.0.0.1:{env['WMS_DEV_POSTGRES_PORT']})"
+            f"(127.0.0.1:{env['DEV_POSTGRES_PORT']})"
         ) in result.stdout
     finally:
         _run_dev(env, "stop")
@@ -673,9 +673,9 @@ def test_postgres_container_failures_prevent_application_mutation(
 ) -> None:
     bin_dir = _fake_runtime_tools(tmp_path)
     env = _dev_env(tmp_path, bin_dir)
-    env["WMS_DEV_TEST_POSTGRES_STATE"] = state
+    env["DEV_TEST_POSTGRES_STATE"] = state
     if start_fails:
-        env["WMS_DEV_TEST_POSTGRES_START_FAIL"] = "1"
+        env["DEV_TEST_POSTGRES_START_FAIL"] = "1"
 
     try:
         result = _run_dev(env, "start")
@@ -683,7 +683,7 @@ def test_postgres_container_failures_prevent_application_mutation(
         assert result.returncode != 0
         assert expected_error in result.stderr
         assert "start:api" not in _events(env)
-        assert not list(Path(env["WMS_DEV_RUN_DIR"]).glob("*.meta"))
+        assert not list(Path(env["DEV_RUN_DIR"]).glob("*.meta"))
     finally:
         _run_dev(env, "stop")
 
@@ -693,9 +693,9 @@ def test_postgres_tcp_timeout_prevents_application_mutation(
 ) -> None:
     bin_dir = _fake_runtime_tools(tmp_path)
     env = _dev_env(tmp_path, bin_dir)
-    env["WMS_DEV_POSTGRES_TEST_AUTO_READY"] = "0"
-    env["WMS_DEV_POSTGRES_PORT"] = "45432"
-    env["WMS_DEV_READY_TIMEOUT_SECONDS"] = "0.2"
+    env["DEV_POSTGRES_TEST_AUTO_READY"] = "0"
+    env["DEV_POSTGRES_PORT"] = "45432"
+    env["DEV_READY_TIMEOUT_SECONDS"] = "0.2"
 
     try:
         result = _run_dev(env, "start")
@@ -703,7 +703,7 @@ def test_postgres_tcp_timeout_prevents_application_mutation(
         assert result.returncode != 0
         assert "127.0.0.1:45432" in result.stderr
         assert "start:api" not in _events(env)
-        assert not list(Path(env["WMS_DEV_RUN_DIR"]).glob("*.meta"))
+        assert not list(Path(env["DEV_RUN_DIR"]).glob("*.meta"))
     finally:
         _run_dev(env, "stop")
 
@@ -713,7 +713,7 @@ def test_start_waits_for_each_service_and_stop_reverses_owned_processes(
 ) -> None:
     bin_dir = _fake_runtime_tools(tmp_path)
     env = _dev_env(tmp_path, bin_dir)
-    run_dir = Path(env["WMS_DEV_RUN_DIR"])
+    run_dir = Path(env["DEV_RUN_DIR"])
 
     try:
         started = _run_dev(env, "start")
@@ -730,19 +730,19 @@ def test_start_waits_for_each_service_and_stop_reverses_owned_processes(
         assert launch_events.index("ready:worker") < launch_events.index("start:web")
         assert launch_events.index("start:web") < launch_events.index("ready:web")
         expected_cors = (
-            f"http://127.0.0.1:{env['WMS_WEB_PORT']},"
-            f"http://localhost:{env['WMS_WEB_PORT']}"
+            f"http://127.0.0.1:{env['WEB_PORT']},"
+            f"http://localhost:{env['WEB_PORT']}"
         )
         expected_environment = "|".join(
             [
-                f"redis://127.0.0.1:{env['WMS_REDIS_PORT']}/0",
+                f"redis://127.0.0.1:{env['REDIS_PORT']}/0",
                 "content-jobs",
                 hashlib.sha256(VALID_TOKEN.encode()).hexdigest(),
-                f"http://127.0.0.1:{env['WMS_API_PORT']}/api",
+                f"http://127.0.0.1:{env['API_PORT']}/api",
                 expected_cors,
             ]
         )
-        state = Path(env["WMS_DEV_TEST_STATE"])
+        state = Path(env["DEV_TEST_STATE"])
         for service in ("api", "worker", "web"):
             assert (
                 state / f"{service}.env"
@@ -787,8 +787,8 @@ def test_config_drift_replaces_the_entire_api_worker_web_unit(
 ) -> None:
     bin_dir = _fake_runtime_tools(tmp_path)
     env = _dev_env(tmp_path, bin_dir)
-    run_dir = Path(env["WMS_DEV_RUN_DIR"])
-    state = Path(env["WMS_DEV_TEST_STATE"])
+    run_dir = Path(env["DEV_RUN_DIR"])
+    state = Path(env["DEV_TEST_STATE"])
 
     try:
         first = _run_dev(env, "start")
@@ -802,13 +802,13 @@ def test_config_drift_replaces_the_entire_api_worker_web_unit(
         ]
         replacement_env = env.copy()
         if drift == "token":
-            replacement_env["WMS_WORKER_TOKEN"] = REPLACEMENT_TOKEN
+            replacement_env["WORKER_TOKEN"] = REPLACEMENT_TOKEN
         elif drift == "api":
-            replacement_env["WMS_API_PORT"] = "48001"
+            replacement_env["API_PORT"] = "48001"
         elif drift == "cors":
-            replacement_env["WMS_CORS_ORIGINS"] = "https://editor.example.test"
+            replacement_env["CORS_ORIGINS"] = "https://editor.example.test"
         else:
-            replacement_env["WMS_DEV_TEST_SOURCE_FINGERPRINT"] = "changed-worker-source"
+            replacement_env["DEV_TEST_SOURCE_FINGERPRINT"] = "changed-worker-source"
 
         second = _run_dev(replacement_env, "start")
         assert second.returncode == 0, second.stdout + second.stderr
@@ -825,16 +825,16 @@ def test_config_drift_replaces_the_entire_api_worker_web_unit(
         assert old_fingerprint not in fingerprints
 
         expected_hash = hashlib.sha256(
-            replacement_env["WMS_WORKER_TOKEN"].encode()
+            replacement_env["WORKER_TOKEN"].encode()
         ).hexdigest()
         expected_api = (
-            f"http://127.0.0.1:{replacement_env['WMS_API_PORT']}/api"
+            f"http://127.0.0.1:{replacement_env['API_PORT']}/api"
         )
         expected_cors = replacement_env.get(
-            "WMS_CORS_ORIGINS",
+            "CORS_ORIGINS",
             (
-                f"http://127.0.0.1:{replacement_env['WMS_WEB_PORT']},"
-                f"http://localhost:{replacement_env['WMS_WEB_PORT']}"
+                f"http://127.0.0.1:{replacement_env['WEB_PORT']},"
+                f"http://localhost:{replacement_env['WEB_PORT']}"
             ),
         )
         for service in ("api", "worker", "web"):
@@ -853,7 +853,7 @@ def test_failed_config_replacement_leaves_no_mixed_application_unit(
 ) -> None:
     bin_dir = _fake_runtime_tools(tmp_path)
     env = _dev_env(tmp_path, bin_dir)
-    run_dir = Path(env["WMS_DEV_RUN_DIR"])
+    run_dir = Path(env["DEV_RUN_DIR"])
 
     try:
         first = _run_dev(env, "start")
@@ -864,8 +864,8 @@ def test_failed_config_replacement_leaves_no_mixed_application_unit(
         ]
         redis_pid = _metadata_pid(run_dir / "redis.meta")
         replacement_env = env | {
-            "WMS_WORKER_TOKEN": REPLACEMENT_TOKEN,
-            "WMS_DEV_TEST_FAIL_STAGE": failed_stage,
+            "WORKER_TOKEN": REPLACEMENT_TOKEN,
+            "DEV_TEST_FAIL_STAGE": failed_stage,
         }
 
         replaced = _run_dev(replacement_env, "start")
@@ -891,7 +891,7 @@ def test_failed_redis_config_replacement_stops_the_old_application_unit(
 ) -> None:
     bin_dir = _fake_runtime_tools(tmp_path)
     env = _dev_env(tmp_path, bin_dir)
-    run_dir = Path(env["WMS_DEV_RUN_DIR"])
+    run_dir = Path(env["DEV_RUN_DIR"])
 
     try:
         first = _run_dev(env, "start")
@@ -901,8 +901,8 @@ def test_failed_redis_config_replacement_stops_the_old_application_unit(
             for service in ("redis", "api", "worker", "web")
         }
         replacement_env = env | {
-            "WMS_REDIS_PORT": "46380",
-            "WMS_DEV_TEST_FAIL_STAGE": "redis",
+            "REDIS_PORT": "46380",
+            "DEV_TEST_FAIL_STAGE": "redis",
         }
 
         replaced = _run_dev(replacement_env, "start")
@@ -926,8 +926,8 @@ def test_worker_without_current_ready_handshake_times_out_and_rolls_back(
 ) -> None:
     bin_dir = _fake_runtime_tools(tmp_path)
     env = _dev_env(tmp_path, bin_dir)
-    env["WMS_DEV_TEST_FAIL_STAGE"] = "worker-never-ready"
-    run_dir = Path(env["WMS_DEV_RUN_DIR"])
+    env["DEV_TEST_FAIL_STAGE"] = "worker-never-ready"
+    run_dir = Path(env["DEV_RUN_DIR"])
 
     result = _run_dev(env, "start")
 
@@ -945,7 +945,7 @@ def test_invalid_restart_keeps_existing_owned_services_running(
 ) -> None:
     bin_dir = _fake_runtime_tools(tmp_path)
     env = _dev_env(tmp_path, bin_dir)
-    run_dir = Path(env["WMS_DEV_RUN_DIR"])
+    run_dir = Path(env["DEV_RUN_DIR"])
 
     try:
         started = _run_dev(env, "start")
@@ -956,7 +956,7 @@ def test_invalid_restart_keeps_existing_owned_services_running(
         }
         events_before = _events(env)
         secret = "invalid-restart-secret"
-        invalid_env = env | {"WMS_WORKER_TOKEN": secret}
+        invalid_env = env | {"WORKER_TOKEN": secret}
 
         restarted = _run_dev(invalid_env, "restart")
 
@@ -980,8 +980,8 @@ def test_partial_start_rolls_back_only_new_owned_children_in_reverse_order(
 ) -> None:
     bin_dir = _fake_runtime_tools(tmp_path)
     env = _dev_env(tmp_path, bin_dir)
-    env["WMS_DEV_TEST_FAIL_STAGE"] = failed_stage
-    run_dir = Path(env["WMS_DEV_RUN_DIR"])
+    env["DEV_TEST_FAIL_STAGE"] = failed_stage
+    run_dir = Path(env["DEV_RUN_DIR"])
 
     try:
         result = _run_dev(env, "start")
@@ -1007,7 +1007,7 @@ def test_healthy_external_redis_has_no_metadata_and_survives_stop(
     bin_dir = _fake_runtime_tools(tmp_path, fake_redis=False)
     env = _dev_env(tmp_path, bin_dir)
     external, redis_port = _start_redis_ping_server()
-    env["WMS_REDIS_PORT"] = str(redis_port)
+    env["REDIS_PORT"] = str(redis_port)
 
     def redis_ping() -> bool:
         try:
@@ -1021,7 +1021,7 @@ def test_healthy_external_redis_has_no_metadata_and_survives_stop(
         assert _wait_until(redis_ping)
         started = _run_dev(env, "start")
         assert started.returncode == 0, started.stdout + started.stderr
-        assert not (Path(env["WMS_DEV_RUN_DIR"]) / "redis.meta").exists()
+        assert not (Path(env["DEV_RUN_DIR"]) / "redis.meta").exists()
 
         stopped = _run_dev(env, "stop")
         assert stopped.returncode == 0, stopped.stdout + stopped.stderr
@@ -1041,11 +1041,11 @@ def test_stale_metadata_never_signals_a_reused_pid(
 ) -> None:
     bin_dir = _fake_runtime_tools(tmp_path)
     env = _dev_env(tmp_path, bin_dir)
-    run_dir = Path(env["WMS_DEV_RUN_DIR"])
+    run_dir = Path(env["DEV_RUN_DIR"])
     run_dir.mkdir()
     marker = "actual-unrelated-process"
     unrelated_env = os.environ.copy()
-    unrelated_env["WMS_DEV_SERVICE_MARKER"] = marker
+    unrelated_env["DEV_SERVICE_MARKER"] = marker
     unrelated = subprocess.Popen(
         ["sleep", "30"],
         env=unrelated_env,
@@ -1088,7 +1088,7 @@ def test_stop_kills_marker_owned_group_member_after_leader_exits(
 ) -> None:
     bin_dir = _fake_runtime_tools(tmp_path)
     env = _dev_env(tmp_path, bin_dir)
-    run_dir = Path(env["WMS_DEV_RUN_DIR"])
+    run_dir = Path(env["DEV_RUN_DIR"])
     run_dir.mkdir()
     metadata = run_dir / "api.meta"
     marker = "owned-orphan-group-marker"
@@ -1118,7 +1118,7 @@ def test_status_preserves_orphaned_owned_group_for_subsequent_stop(
 ) -> None:
     bin_dir = _fake_runtime_tools(tmp_path)
     env = _dev_env(tmp_path, bin_dir)
-    run_dir = Path(env["WMS_DEV_RUN_DIR"])
+    run_dir = Path(env["DEV_RUN_DIR"])
     run_dir.mkdir()
     metadata = run_dir / "api.meta"
     leader, child_pid = _start_orphaned_owned_group(
@@ -1153,7 +1153,7 @@ def test_status_discards_unsafe_or_empty_orphan_metadata_without_signalling(
 ) -> None:
     bin_dir = _fake_runtime_tools(tmp_path)
     env = _dev_env(tmp_path, bin_dir)
-    run_dir = Path(env["WMS_DEV_RUN_DIR"])
+    run_dir = Path(env["DEV_RUN_DIR"])
     run_dir.mkdir()
     metadata = run_dir / "api.meta"
     leader, child_pid = _start_orphaned_owned_group(
@@ -1231,12 +1231,12 @@ def test_stop_retains_metadata_and_fails_when_owned_group_cannot_be_signalled(
 ) -> None:
     bin_dir = _fake_runtime_tools(tmp_path)
     env = _dev_env(tmp_path, bin_dir)
-    run_dir = Path(env["WMS_DEV_RUN_DIR"])
+    run_dir = Path(env["DEV_RUN_DIR"])
     run_dir.mkdir()
     metadata = run_dir / "api.meta"
     marker = "owned-unkillable-group-marker"
     process_env = os.environ.copy()
-    process_env["WMS_DEV_SERVICE_MARKER"] = marker
+    process_env["DEV_SERVICE_MARKER"] = marker
     process = subprocess.Popen(
         ["sleep", "30"],
         env=process_env,
@@ -1268,8 +1268,8 @@ def test_stop_retains_metadata_and_fails_when_owned_group_cannot_be_signalled(
         return 1
       fi
     }
-    export WMS_DEV_STOP_TIMEOUT_SECONDS=0.1
-    export WMS_DEV_POLL_INTERVAL_SECONDS=0.02
+    export DEV_STOP_TIMEOUT_SECONDS=0.1
+    export DEV_POLL_INTERVAL_SECONDS=0.02
     dev_stop_owned_service api API "$2"
     """
 
@@ -1307,7 +1307,7 @@ def test_stop_best_effort_cleans_the_unit_when_one_group_cannot_be_signalled(
 ) -> None:
     bin_dir = _fake_runtime_tools(tmp_path)
     env = _dev_env(tmp_path, bin_dir)
-    run_dir = Path(env["WMS_DEV_RUN_DIR"])
+    run_dir = Path(env["DEV_RUN_DIR"])
     started = _run_dev(env, "start")
     assert started.returncode == 0, started.stdout + started.stderr
     pids = {
@@ -1349,11 +1349,11 @@ def test_external_http_cannot_masquerade_as_the_owned_api_process(
 ) -> None:
     bin_dir = _fake_runtime_tools(tmp_path, fake_http=False)
     env = _dev_env(tmp_path, bin_dir)
-    env["WMS_DEV_TEST_FAIL_STAGE"] = "api-bind"
+    env["DEV_TEST_FAIL_STAGE"] = "api-bind"
     external_api, api_port = _start_http_server()
     external_web, web_port = _start_http_server()
-    env["WMS_API_PORT"] = str(api_port)
-    env["WMS_WEB_PORT"] = str(web_port)
+    env["API_PORT"] = str(api_port)
+    env["WEB_PORT"] = str(web_port)
 
     try:
         assert external_api.poll() is None
@@ -1363,7 +1363,7 @@ def test_external_http_cannot_masquerade_as_the_owned_api_process(
 
         assert result.returncode != 0
         assert external_api.poll() is None
-        assert not list(Path(env["WMS_DEV_RUN_DIR"]).glob("*.meta"))
+        assert not list(Path(env["DEV_RUN_DIR"]).glob("*.meta"))
     finally:
         _run_dev(env, "stop")
         if external_api.poll() is None:
@@ -1377,7 +1377,7 @@ def test_external_http_cannot_masquerade_as_the_owned_api_process(
 def test_status_and_log_snapshot_cover_all_runtime_services(tmp_path: Path) -> None:
     bin_dir = _fake_runtime_tools(tmp_path)
     env = _dev_env(tmp_path, bin_dir)
-    state = Path(env["WMS_DEV_TEST_STATE"])
+    state = Path(env["DEV_TEST_STATE"])
     (state / "redis.ready").touch()
 
     status = _run_dev(env, "status")
@@ -1389,7 +1389,7 @@ def test_status_and_log_snapshot_cover_all_runtime_services(tmp_path: Path) -> N
         for name in ("Postgres", "Redis", "API", "Worker", "Web")
     )
     assert "wms-dev-postgres-copy" in status.stdout
-    assert f"127.0.0.1:{env['WMS_DEV_POSTGRES_PORT']}" in status.stdout
+    assert f"127.0.0.1:{env['DEV_POSTGRES_PORT']}" in status.stdout
     assert "external" in status.stdout.lower()
     assert logs.returncode == 0
     assert all(name in logs.stdout for name in ("Redis", "API", "Worker", "Web"))
@@ -1412,8 +1412,8 @@ def test_postgres_status_is_read_only_and_reports_unhealthy_states(
 ) -> None:
     bin_dir = _fake_runtime_tools(tmp_path)
     env = _dev_env(tmp_path, bin_dir)
-    env["WMS_DEV_TEST_POSTGRES_STATE"] = state
-    env["WMS_DEV_POSTGRES_TEST_AUTO_READY"] = auto_ready
+    env["DEV_TEST_POSTGRES_STATE"] = state
+    env["DEV_POSTGRES_TEST_AUTO_READY"] = auto_ready
 
     result = _run_dev(env, "status")
 
@@ -1444,15 +1444,11 @@ assert "access-control-allow-origin" not in blocked.headers
     env = {
         "PATH": os.environ["PATH"],
         "PYTHON_DOTENV_DISABLED": "1",
-        "WMS_CORS_ORIGINS": origins,
-        "WMS_DATABASE_URL": postgres_database_url,
-        "WMS_DISABLE_SCHEDULER": "1",
-        "WMS_WORKER_TOKEN": VALID_TOKEN,
+        "CORS_ORIGINS": origins,
+        "DATABASE_URL": postgres_database_url,
+        "DISABLE_SCHEDULER": "1",
+        "WORKER_TOKEN": VALID_TOKEN,
         "FEEDGRAB_DATA_DIR": str(tmp_path / "sessions"),
-        "WMS_LLM_API_KEY": "",
-        "WMS_IMAGE_API_KEY": "",
-        "WMS_SPEECH_API_KEY": "",
-        "HEYGEN_API_KEY": "",
     }
 
     checked = subprocess.run(
@@ -1481,7 +1477,7 @@ def _compose_environment() -> dict[str, str]:
         for key in allowed
         if key in os.environ
     }
-    environment["WMS_WORKER_TOKEN"] = VALID_TOKEN
+    environment["WORKER_TOKEN"] = VALID_TOKEN
     return environment
 
 
@@ -1511,17 +1507,20 @@ def test_compose_uses_real_api_health_and_healthy_dependencies(
 
     api_health = services["api"]["healthcheck"]["test"]
     assert "/health" in " ".join(api_health)
-    assert services["api"]["environment"]["WMS_REDIS_URL"] == "redis://redis:6379/0"
-    assert services["worker"]["environment"]["WMS_REDIS_URL"] == "redis://redis:6379/0"
+    assert services["api"]["environment"]["REDIS_URL"] == "redis://redis:6379/0"
+    assert services["worker"]["environment"]["REDIS_URL"] == "redis://redis:6379/0"
     assert services["worker"]["depends_on"]["redis"]["condition"] == "service_healthy"
     assert services["worker"]["depends_on"]["api"]["condition"] == "service_healthy"
     assert services["web"]["depends_on"]["api"]["condition"] == "service_healthy"
-    assert services["api"]["environment"]["WMS_SPEECH_API_KEY"] == ""
-    assert services["worker"]["environment"]["WMS_LLM_API_KEY"] == ""
+    for service_name in ("api", "worker", "web"):
+        assert not any(
+            key.endswith("_API_KEY")
+            for key in services[service_name]["environment"]
+        )
     for service_name in ("api", "worker"):
         command = services[service_name].get("command")
-        assert command, f"{service_name} must validate WMS_WORKER_TOKEN before startup"
+        assert command, f"{service_name} must validate WORKER_TOKEN before startup"
         command_text = " ".join(command)
-        assert "WMS_WORKER_TOKEN" in command_text
+        assert "WORKER_TOKEN" in command_text
         assert "at least 32" in command_text
         assert VALID_TOKEN not in command_text

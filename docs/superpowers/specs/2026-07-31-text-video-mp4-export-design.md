@@ -140,7 +140,7 @@
 
 ### Worker 接口
 
-以下接口必须校验 `X-WMS-Worker-Token` 和 `X-Content-Job-Id`：
+以下接口必须校验 `X-Worker-Token` 和 `X-Content-Job-Id`：
 
 - `GET /{project_id}/render/worker-context`
   - 返回冻结输入、composition id 和已应用结果。

@@ -6,9 +6,9 @@ from fastapi import FastAPI
 
 def _load_main(monkeypatch, *, scheduler_disabled: bool):
     if scheduler_disabled:
-        monkeypatch.setenv("WMS_DISABLE_SCHEDULER", "1")
+        monkeypatch.setenv("DISABLE_SCHEDULER", "1")
     else:
-        monkeypatch.delenv("WMS_DISABLE_SCHEDULER", raising=False)
+        monkeypatch.delenv("DISABLE_SCHEDULER", raising=False)
     for module_name in ("main", "database", "models", "job_reconciliation"):
         sys.modules.pop(module_name, None)
 

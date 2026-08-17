@@ -7,44 +7,29 @@ import {
   talkingScriptRequestSchema,
 } from '@/lib/ai/talking-script'
 import { workerHeaders } from '@/lib/ai/job-client'
+import { textModelConfigFromSettings, type TextModelSettings } from '@/lib/ai/runtime-config'
 
 
 const apiBase = () => (
-  process.env.WMS_API_URL
+  process.env.API_URL
   ?? process.env.NEXT_PUBLIC_API_URL
   ?? 'http://localhost:8000/api'
 ).replace(/\/$/, '')
 
 
 async function configuredModel() {
-  try {
-    const response = await fetch(`${apiBase()}/settings/ai-runtime`, {
-      cache: 'no-store',
-      headers: workerHeaders(),
-    })
-    if (response.ok) {
-      const settings = await response.json() as {
-        api_key: string
-        model: string
-        base_url: string
-      }
-      if (settings.api_key) {
-        return {
-          apiKey: settings.api_key,
-          model: settings.model || 'gpt-4o-mini',
-          baseURL: settings.base_url || undefined,
-        }
-      }
-    }
-  } catch {
-    // Environment fallback keeps local development usable.
-  }
-  const apiKey = process.env.WMS_LLM_API_KEY
-  if (!apiKey) throw new Error('请先在设置中配置文本模型 API Key')
+  const response = await fetch(`${apiBase()}/settings/ai-runtime`, {
+    cache: 'no-store',
+    headers: workerHeaders(),
+  })
+  if (!response.ok) throw new Error('无法读取设置中的文本模型配置')
+  const settings = textModelConfigFromSettings(
+    await response.json() as TextModelSettings,
+  )
   return {
-    apiKey,
-    model: process.env.WMS_LLM_MODEL ?? 'gpt-4o-mini',
-    baseURL: process.env.WMS_LLM_BASE_URL,
+    apiKey: settings.apiKey,
+    model: settings.modelName,
+    baseURL: settings.baseURL,
   }
 }
 

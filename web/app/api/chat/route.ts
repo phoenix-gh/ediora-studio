@@ -11,6 +11,7 @@ import { agentSkillRunAudit, openAgentRuntime, type AgentRunResult } from '@/lib
 import { createDirectImageGenerator, mcpUrl, type ChatSkillSnapshot } from '@/lib/ai/global-chat-tools'
 import { workerHeaders } from '@/lib/ai/job-client'
 import { getEnabledSkill, listSkillReferences, loadSkillPreloadContext } from '@/lib/skills/registry'
+import { textModelConfigFromSettings, type TextModelSettings } from '@/lib/ai/runtime-config'
 
 const requestSchema = z.object({
   sessionId: z.number().int().positive(),
@@ -25,33 +26,17 @@ const requestSchema = z.object({
   }).optional(),
 })
 
-const apiBase = () => (process.env.WMS_API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000/api').replace(/\/$/, '')
+const apiBase = () => (process.env.API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000/api').replace(/\/$/, '')
 
 type ModelConfig = { apiKey: string; modelName: string; baseURL?: string }
 
 async function configuredTextModel(): Promise<ModelConfig> {
-  try {
-    const response = await fetch(`${apiBase()}/settings/ai-runtime`, {
-      cache: 'no-store',
-      headers: workerHeaders(),
-    })
-    if (response.ok) {
-      const settings = await response.json() as { api_key: string; model: string; base_url: string }
-      if (settings.api_key) {
-        return { apiKey: settings.api_key, modelName: settings.model || 'gpt-4o-mini', baseURL: settings.base_url || undefined }
-      }
-    }
-  } catch {
-    // Environment variables keep local and Docker development usable.
-  }
-
-  const apiKey = process.env.WMS_LLM_API_KEY
-  if (!apiKey) throw new Error('No LLM API key is configured in Settings or WMS_LLM_API_KEY')
-  return {
-    apiKey,
-    modelName: process.env.WMS_LLM_MODEL ?? 'gpt-4o-mini',
-    baseURL: process.env.WMS_LLM_BASE_URL,
-  }
+  const response = await fetch(`${apiBase()}/settings/ai-runtime`, {
+    cache: 'no-store',
+    headers: workerHeaders(),
+  })
+  if (!response.ok) throw new Error('无法读取设置中的文本模型配置')
+  return textModelConfigFromSettings(await response.json() as TextModelSettings)
 }
 
 type PersistedChatSession = {
@@ -186,7 +171,7 @@ async function recoverFinalAnswer({
 }
 
 export function genericSkillRuntimeEnabled() {
-  return process.env.WMS_GENERIC_SKILL_RUNTIME !== '0'
+  return process.env.GENERIC_SKILL_RUNTIME !== '0'
 }
 
 export function executionToolsForSelection(tools: ToolSet, genericRuntime: boolean, selected: boolean): ToolSet {

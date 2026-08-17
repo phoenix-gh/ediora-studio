@@ -15,6 +15,7 @@ import {
   apiGet, apiPost, completeJob, completeStep, failStep, getJob,
   retryableForError, startStep, workerHeaders,
 } from './job-client'
+import { textModelConfigFromSettings, type TextModelSettings } from './runtime-config'
 
 const decisionSchema = z.object({
   accepted_tweet_ids: z.array(z.string()),
@@ -213,16 +214,10 @@ function cleanJsonText(text: string) {
 }
 
 async function configuredModel() {
-  const settings = await apiGet<{ api_key: string; model: string; base_url: string }>(
+  const settings = await apiGet<TextModelSettings>(
     '/settings/ai-runtime', workerHeaders(),
   )
-  const apiKey = settings.api_key || process.env.WMS_LLM_API_KEY
-  if (!apiKey) throw new Error('No LLM API key is configured')
-  return {
-    apiKey,
-    modelName: settings.model || process.env.WMS_LLM_MODEL || 'gpt-4o-mini',
-    baseURL: settings.base_url || process.env.WMS_LLM_BASE_URL || undefined,
-  }
+  return textModelConfigFromSettings(settings)
 }
 
 type TopicSourceTrace = {

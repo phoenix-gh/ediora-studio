@@ -158,7 +158,7 @@ back to automatic selection or no Skill.
 The runtime uses the same Skill registry and limits as Chat:
 
 - full `SKILL.md` instructions;
-- `WMS_SKILL.json` preload references;
+- `SKILL.json` preload references;
 - the visible reference catalog;
 - on-demand `readSkillReference` calls;
 - byte, path, extension, and archive safety checks.

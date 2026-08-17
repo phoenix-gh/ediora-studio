@@ -4,7 +4,7 @@
 
 **Goal:** Deliver a unified `/responses` workbench where every subscribed YouTube video can be manually or automatically transcribed, evaluated, matched against all active publishing accounts, and turned into editable article/commentary/X-share outputs while preserving existing X response and Telegram behavior.
 
-**Architecture:** Keep source records in `x_posts` and `youtube_videos`, and add a source-neutral response domain made of response items, versioned analyses, per-account scores, outputs, notifications, and audit events. The Python API owns durable persistence and media extraction (`yt-dlp`, `ffmpeg`, Whisper-compatible transcription); the Node content worker owns AI SDK orchestration and structured generation. Jobs remain Redis-backed `ContentJob` flows and all worker-only APIs use `WMS_WORKER_TOKEN`.
+**Architecture:** Keep source records in `x_posts` and `youtube_videos`, and add a source-neutral response domain made of response items, versioned analyses, per-account scores, outputs, notifications, and audit events. The Python API owns durable persistence and media extraction (`yt-dlp`, `ffmpeg`, Whisper-compatible transcription); the Node content worker owns AI SDK orchestration and structured generation. Jobs remain Redis-backed `ContentJob` flows and all worker-only APIs use `WORKER_TOKEN`.
 
 **Tech stack:** FastAPI, async SQLAlchemy, PostgreSQL/SQLite test database, Redis jobs, Next.js 16, React 19, TypeScript, AI SDK 7, Zod 4, Vitest, pytest, `yt-dlp`, `ffmpeg`.
 

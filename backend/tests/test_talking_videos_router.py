@@ -9,9 +9,8 @@ from fastapi.testclient import TestClient
 
 @pytest.fixture
 def api(monkeypatch, postgres_env):
-    monkeypatch.setenv("HEYGEN_API_KEY", "test-heygen-key")
     monkeypatch.setenv(
-        "WMS_WORKER_TOKEN", "test-worker-token-at-least-32-chars"
+        "WORKER_TOKEN", "test-worker-token-at-least-32-chars"
     )
     for module in list(sys.modules):
         if module.startswith(
@@ -22,15 +21,17 @@ def api(monkeypatch, postgres_env):
                 "content_jobs",
                 "digital_human_assets",
                 "digital_human_service",
-                "digital_human_shots",
-                "routers.talking_videos",
-            )
+                    "digital_human_shots",
+                    "routers.talking_videos",
+                    "routers.settings",
+                )
         ):
             sys.modules.pop(module, None)
 
     from database import Base, SessionLocal, engine, get_db
     import models  # noqa: F401
     import routers.talking_videos as router_module
+    import routers.settings as settings_router
 
     async def no_op_enqueue(_job_id: int):
         return None
@@ -44,19 +45,26 @@ def api(monkeypatch, postgres_env):
     asyncio.new_event_loop().run_until_complete(setup())
     app = FastAPI()
     app.include_router(router_module.router, prefix="/api")
+    app.include_router(settings_router.router, prefix="/api")
 
     async def override_db():
         async with SessionLocal() as session:
             yield session
 
     app.dependency_overrides[get_db] = override_db
+    client = TestClient(
+        app,
+        headers={
+            "X-Worker-Token": "test-worker-token-at-least-32-chars"
+        },
+    )
+    configured = client.put(
+        "/api/settings",
+        json={"heygen_api_key": "test-heygen-key"},
+    )
+    assert configured.status_code == 200, configured.text
     return (
-        TestClient(
-            app,
-            headers={
-                "X-WMS-Worker-Token": "test-worker-token-at-least-32-chars"
-            },
-        ),
+        client,
         SessionLocal,
         router_module,
     )
@@ -202,7 +210,7 @@ def test_render_endpoint_rejects_non_ready_role(api):
     assert "尚未就绪" in response.json()["detail"]
 
 
-def test_render_endpoint_rejects_missing_heygen_configuration(api, monkeypatch):
+def test_render_endpoint_rejects_missing_heygen_configuration(api):
     client, session_factory, _ = api
     role_id, _ = _seed(session_factory, ready=True)
     project = client.post(
@@ -213,7 +221,8 @@ def test_render_endpoint_rejects_missing_heygen_configuration(api, monkeypatch):
             "script": "准备生成",
         },
     ).json()
-    monkeypatch.delenv("HEYGEN_API_KEY")
+    cleared = client.put("/api/settings", json={"heygen_api_key": ""})
+    assert cleared.status_code == 200, cleared.text
 
     response = client.post(f"/api/talking-videos/{project['id']}/renders")
 
@@ -371,9 +380,9 @@ def test_replaced_render_job_is_not_retryable(api):
     )
 
     assert stale_context.status_code == 409
-    assert stale_context.headers["X-WMS-Retryable"] == "false"
+    assert stale_context.headers["X-Retryable"] == "false"
     assert stale_progress.status_code == 409
-    assert stale_progress.headers["X-WMS-Retryable"] == "false"
+    assert stale_progress.headers["X-Retryable"] == "false"
 
 
 def _seed_comfyui(session_factory):

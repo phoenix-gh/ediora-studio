@@ -354,7 +354,7 @@ def test_speech_asset_migration_adds_sample_metadata(
     monkeypatch,
     postgres_database_url,
 ):
-    monkeypatch.setenv("WMS_DATABASE_URL", postgres_database_url)
+    monkeypatch.setenv("DATABASE_URL", postgres_database_url)
     for module in ("database",):
         sys.modules.pop(module, None)
     from database import migrate_text_video_speech_asset_schema

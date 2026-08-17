@@ -7,9 +7,8 @@ from fastapi.testclient import TestClient
 
 @pytest.fixture
 def client(monkeypatch, tmp_path, postgres_env):
-    monkeypatch.setenv("HEYGEN_API_KEY", "test-heygen-key")
     monkeypatch.setenv(
-        "WMS_WORKER_TOKEN", "test-worker-token-at-least-32-chars"
+        "WORKER_TOKEN", "test-worker-token-at-least-32-chars"
     )
     for module in list(sys.modules):
         if module.startswith(
@@ -48,12 +47,18 @@ def client(monkeypatch, tmp_path, postgres_env):
 
     monkeypatch.setattr(roles_router, "enqueue_job", no_op_enqueue)
     monkeypatch.setattr(videos_router, "enqueue_job", no_op_enqueue)
-    return TestClient(
+    client = TestClient(
         app,
         headers={
-            "X-WMS-Worker-Token": "test-worker-token-at-least-32-chars"
+            "X-Worker-Token": "test-worker-token-at-least-32-chars"
         },
     )
+    configured = client.put(
+        "/api/settings",
+        json={"heygen_api_key": "test-heygen-key"},
+    )
+    assert configured.status_code == 200, configured.text
+    return client
 
 
 def upload_asset(

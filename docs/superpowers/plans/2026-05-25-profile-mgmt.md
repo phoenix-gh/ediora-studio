@@ -394,7 +394,7 @@ def client(tmp_path, monkeypatch):
     (home / "SOUL.md").write_text("\n")
     (home / "config.yaml").write_text("model:\n  default: y\n")
     monkeypatch.setenv("HERMES_HOME_ROOT", str(home))
-    monkeypatch.setenv("WMS_DISABLE_SCHEDULER", "1")
+    monkeypatch.setenv("DISABLE_SCHEDULER", "1")
     from main import app
     return TestClient(app)
 

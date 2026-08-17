@@ -30,8 +30,8 @@ JSON payload：
 {"auth_token":"...","ct0":"..."}
 ```
 
-使用 Fernet 加密。优先使用稳定的 `WMS_X_SESSION_KEY`；未配置时从现有
-`WMS_WORKER_TOKEN` 派生密钥，保证本地开发和 Docker 只要共享同一环境密钥
+使用 Fernet 加密。优先使用稳定的 `X_SESSION_KEY`；未配置时从现有
+`WORKER_TOKEN` 派生密钥，保证本地开发和 Docker 只要共享同一环境密钥
 即可恢复数据库 session。密钥变化时不尝试猜测或降级为明文，恢复失败应给出
 明确的服务端错误。
 

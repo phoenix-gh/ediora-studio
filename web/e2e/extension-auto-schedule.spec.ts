@@ -172,8 +172,8 @@ test('persists the auto-fill switch and fills the next X schedule time', async (
   await expect.poll(async () => dialog.locator('select[name="hour"]').inputValue()).toBe('11')
   await expect.poll(async () => dialog.locator('select[name="minute"]').inputValue()).toBe('7')
   expect(await page.evaluate(() => localStorage.getItem('x_schedule_last_selection_v3'))).toBe(JSON.stringify(previousSelection))
-  if (process.env.WMS_AUTO_SCHEDULE_SCREENSHOT) {
-    await page.screenshot({ path: process.env.WMS_AUTO_SCHEDULE_SCREENSHOT, fullPage: false })
+  if (process.env.AUTO_SCHEDULE_SCREENSHOT) {
+    await page.screenshot({ path: process.env.AUTO_SCHEDULE_SCREENSHOT, fullPage: false })
   }
 
   await dialog.getByRole('button', { name: '确定' }).click()
