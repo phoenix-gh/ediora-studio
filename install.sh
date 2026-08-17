@@ -140,11 +140,19 @@ directory_can_receive_checkout() {
   return 0
 }
 
+reexec_checkout() {
+  checkout_dir=$1
+  shift
+  EDIORA_INSTALL_DIR=$checkout_dir
+  export EDIORA_INSTALL_DIR
+  exec sh "$checkout_dir/install.sh" "$@"
+}
+
 resolve_checkout() {
   SCRIPT_SOURCE=$0
+  working_dir=$(CDPATH= cd -P . && pwd)
   if [ -f "$SCRIPT_SOURCE" ]; then
     script_dir=$(CDPATH= cd -P "$(dirname "$SCRIPT_SOURCE")" && pwd)
-    working_dir=$(CDPATH= cd -P . && pwd)
     SCRIPT_SOURCE="$script_dir/$(basename "$SCRIPT_SOURCE")"
     if [ "$working_dir" = "$script_dir" ] && is_ediora_checkout "$script_dir"; then
       CHECKOUT_DIR=$script_dir
@@ -158,11 +166,7 @@ resolve_checkout() {
     target=$EDIORA_INSTALL_DIR
   else
     [ -n "${HOME-}" ] || die '无法确定安装目录，请设置 EDIORA_INSTALL_DIR'
-    default_target=$HOME/ediora-studio
-    open_input
-    printf 'Ediora 安装目录 [%s]\n' "$default_target" >&2
-    target=$(prompt_value '> ' 0)
-    [ -n "$target" ] || target=$default_target
+    select_install_target
   fi
   case "$target" in
     /*) ;;
@@ -174,7 +178,7 @@ resolve_checkout() {
     if is_ediora_checkout "$target"; then
       CHECKOUT_DIR=$(CDPATH= cd -P "$target" && pwd)
       if [ "$CHECKOUT_DIR/install.sh" != "$SCRIPT_SOURCE" ]; then
-        exec sh "$CHECKOUT_DIR/install.sh" "$@"
+        reexec_checkout "$CHECKOUT_DIR" "$@"
       fi
       return 0
     fi
@@ -205,7 +209,7 @@ resolve_checkout() {
   chmod +x "$target/install.sh"
   rm -rf "$temp_dir"
   CHECKOUT_DIR=$(CDPATH= cd -P "$target" && pwd)
-  exec sh "$CHECKOUT_DIR/install.sh" "$@"
+  reexec_checkout "$CHECKOUT_DIR" "$@"
 }
 
 open_input() {
@@ -248,6 +252,32 @@ prompt_value() {
   printf '%s' "$prompt" >&2
   read_answer "$secret"
   printf '%s' "$ANSWER"
+}
+
+select_install_target() {
+  default_target=$HOME/ediora-studio
+  open_input
+  printf '\n请选择 Ediora 安装目录：\n' >&2
+  printf '  1) 当前目录: %s\n' "$working_dir" >&2
+  printf '  2) Home 目录: %s\n' "$default_target" >&2
+  printf '  3) 自定义目录\n' >&2
+  answer=$(prompt_value '请输入选项 [2]: ' 0)
+  [ -n "$answer" ] || answer=2
+  case "$answer" in
+    1)
+      target=$working_dir
+      ;;
+    2)
+      target=$default_target
+      ;;
+    3)
+      target=$(prompt_value '请输入自定义安装目录: ' 0)
+      [ -n "$target" ] || die '自定义安装目录不能为空'
+      ;;
+    *)
+      die '无效的安装目录选项，请输入 1、2 或 3'
+      ;;
+  esac
 }
 
 confirm_docker_install() {

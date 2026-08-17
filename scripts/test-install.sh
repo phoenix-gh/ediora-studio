@@ -37,6 +37,19 @@ assert_not_contains() {
   fi
 }
 
+assert_occurrences() {
+  local path=$1
+  local pattern=$2
+  local expected=$3
+  local message=$4
+  local actual
+  actual=$(grep -Fc -- "$pattern" "$path" || true)
+  if [[ "$actual" -ne "$expected" ]]; then
+    fail "$message (expected $expected occurrences of '$pattern', got $actual)"
+    return 1
+  fi
+}
+
 assert_file_exists() {
   local path=$1
   local message=$2
@@ -648,7 +661,7 @@ test_remote_piped_install_accepts_custom_install_dir() {
   export EDIORA_FAKE_ARCHIVE="$archive"
   unset EDIORA_INSTALL_DIR
   touch "$EDIORA_DOCKER_STATE"
-  make_input "$CASE_DIR/input" "$target" '' '' '' '' '' '' '' '' '' '' '' ''
+  make_input "$CASE_DIR/input" 3 "$target" '' '' '' '' '' '' '' '' '' '' '' ''
   if ! (
     cd "$CASE_DIR" || exit 99
     cat "$INSTALLER_SOURCE" | sh -s
@@ -658,6 +671,32 @@ test_remote_piped_install_accepts_custom_install_dir() {
   fi
   assert_file_exists "$target/install.sh" 'remote mode must install into the user-selected directory'
   assert_contains "$output" "目录: $target" 'remote mode must report the user-selected directory'
+  assert_contains "$output" '1) 当前目录:' 'remote mode must show the current-directory option'
+  assert_contains "$output" '2) Home 目录:' 'remote mode must show the home-directory option'
+  assert_contains "$output" '3) 自定义目录' 'remote mode must show the custom-directory option'
+  assert_occurrences "$output" '请选择 Ediora 安装目录' 1 'remote mode must not show the directory menu twice'
+}
+
+test_remote_piped_install_accepts_home_dir_option() {
+  local output="$CASE_DIR/output.log"
+  local archive="$CASE_DIR/archive.tar.gz"
+  local target="$HOME/ediora-studio"
+  mkdir -p "$CASE_DIR/archive-root/ediora-studio-main/backend" "$CASE_DIR/archive-root/ediora-studio-main/web"
+  cp "$CASE_DIR/install.sh" "$CASE_DIR/docker-compose.yml" "$CASE_DIR/archive-root/ediora-studio-main/"
+  tar -czf "$archive" -C "$CASE_DIR/archive-root" ediora-studio-main
+  export EDIORA_FAKE_ARCHIVE="$archive"
+  unset EDIORA_INSTALL_DIR
+  touch "$EDIORA_DOCKER_STATE"
+  make_input "$CASE_DIR/input" 2 '' '' '' '' '' '' '' '' '' '' '' '' ''
+  if ! (
+    cd "$CASE_DIR" || exit 99
+    cat "$INSTALLER_SOURCE" | sh -s
+  ) > "$output" 2>&1; then
+    cat "$output" >&2
+    return 1
+  fi
+  assert_file_exists "$target/install.sh" 'home-directory option must install under HOME'
+  assert_contains "$output" "目录: $target" 'home-directory option must report the HOME target'
 }
 
 test_downloaded_standalone_script_prompts_for_install_dir() {
@@ -673,7 +712,7 @@ test_downloaded_standalone_script_prompts_for_install_dir() {
   export EDIORA_FAKE_ARCHIVE="$archive"
   unset EDIORA_INSTALL_DIR
   touch "$EDIORA_DOCKER_STATE"
-  make_input "$CASE_DIR/input" "$target" '' '' '' '' '' '' '' '' '' '' '' ''
+  make_input "$CASE_DIR/input" 1 '' '' '' '' '' '' '' '' '' '' '' '' ''
   if ! (
     cd "$standalone" || exit 99
     ./install.sh
@@ -683,6 +722,7 @@ test_downloaded_standalone_script_prompts_for_install_dir() {
   fi
   assert_file_exists "$target/install.sh" 'a downloaded standalone installer must create the selected checkout'
   assert_contains "$output" "目录: $target" 'a downloaded standalone installer must use the selected directory'
+  assert_occurrences "$output" '请选择 Ediora 安装目录' 1 'standalone installer must not show the directory menu twice'
 }
 
 test_external_checkout_script_uses_selected_working_directory() {
@@ -696,7 +736,7 @@ test_external_checkout_script_uses_selected_working_directory() {
   export EDIORA_FAKE_ARCHIVE="$archive"
   unset EDIORA_INSTALL_DIR
   touch "$EDIORA_DOCKER_STATE"
-  make_input "$CASE_DIR/input" "$runner" '' '' '' '' '' '' '' '' '' '' '' ''
+  make_input "$CASE_DIR/input" 1 '' '' '' '' '' '' '' '' '' '' '' '' ''
   if ! (
     cd "$runner" || exit 99
     sh "$CASE_DIR/install.sh"
@@ -706,6 +746,7 @@ test_external_checkout_script_uses_selected_working_directory() {
   fi
   assert_file_exists "$runner/install.sh" 'an external installer invocation must install into the selected working directory'
   assert_contains "$output" "目录: $runner" 'an external installer invocation must report the selected working directory'
+  assert_occurrences "$output" '请选择 Ediora 安装目录' 1 'external installer must not show the directory menu twice'
 }
 
 test_repository_installation_contract() {
@@ -718,6 +759,8 @@ test_repository_installation_contract() {
   assert_contains "$ROOT_DIR/docs/self-hosted.md" 'EDIORA_INSTALL_DIR=/srv/ediora' 'self-hosted docs must document the install directory override'
   assert_contains "$ROOT_DIR/README.md" 'curl -fsSLo install.sh' 'README must document downloading the standalone installer'
   assert_contains "$ROOT_DIR/docs/self-hosted.md" 'curl -fsSLo install.sh' 'self-hosted docs must document downloading the standalone installer'
+  assert_contains "$ROOT_DIR/README.md" '1` 当前目录' 'README must document the current-directory choice'
+  assert_contains "$ROOT_DIR/docs/self-hosted.md" 'three choices' 'self-hosted docs must document the directory choices'
   assert_not_contains "$INSTALLER_SOURCE" 'INSTALLER_URL' 'installer must not contain a self-download URL variable'
   assert_not_contains "$INSTALLER_SOURCE" 'OPENAI_API_KEY' 'installer must not collect provider API keys'
   assert_not_contains "$INSTALLER_SOURCE" 'HEYGEN_API_KEY' 'installer must not collect HeyGen API keys'
@@ -748,6 +791,7 @@ run_test 'help does not require Docker' test_help_does_not_require_docker
 run_test 'unknown options are rejected' test_unknown_option_is_rejected
 run_test 'remote piped install re-executes from downloaded checkout' test_remote_piped_install_reexecutes_from_downloaded_checkout
 run_test 'remote piped install accepts a custom install directory' test_remote_piped_install_accepts_custom_install_dir
+run_test 'remote piped install accepts the home-directory option' test_remote_piped_install_accepts_home_dir_option
 run_test 'downloaded standalone script prompts for install directory' test_downloaded_standalone_script_prompts_for_install_dir
 run_test 'external checkout script uses the selected working directory' test_external_checkout_script_uses_selected_working_directory
 run_test 'POSIX installer runs from piped stdin' test_posix_installer_runs_from_piped_stdin

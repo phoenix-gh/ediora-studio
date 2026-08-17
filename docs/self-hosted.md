@@ -38,9 +38,11 @@ Desktop. Other Linux distributions must have Docker installed by the operator.
 The installer does not install the application's Python, Node.js, PostgreSQL,
 or Redis dependencies directly on the host.
 
-When run from the remote command, it asks for the project directory. Press Enter
-to accept `$HOME/ediora-studio`, or enter a path such as `/srv/ediora`.
-Automation can set `EDIORA_INSTALL_DIR=/srv/ediora` to skip this prompt.
+When run from the remote command or as a standalone downloaded script, it offers
+three choices: the current directory, `$HOME/ediora-studio`, or a custom path.
+Press Enter to select the Home directory, or choose the custom option and enter a
+path such as `/srv/ediora`. Automation can set
+`EDIORA_INSTALL_DIR=/srv/ediora` to skip this prompt.
 Calling an installer from another directory does not use the installer's source
 checkout as the target; a complete checkout is used in place only when it is
 also the current working directory.

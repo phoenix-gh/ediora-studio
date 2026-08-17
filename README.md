@@ -157,9 +157,9 @@ PostgreSQL 或 Redis。安装器会交互式创建或补全根目录 `.env`，�
 并将文件权限设为 `0600`；数据库密码、worker token 和 X 会话密钥可接受
 安全随机默认值，provider API Key 不会写入该文件。
 
-从远程命令运行时，安装器会询问项目安装目录，直接回车使用
-`$HOME/ediora-studio`；也可以输入例如 `/srv/ediora`。自动化场景可通过
-`EDIORA_INSTALL_DIR=/srv/ediora` 跳过目录询问。
+从远程命令或单独下载的脚本运行时，安装器会显示目录选择：
+`1` 当前目录、`2` `$HOME/ediora-studio`、`3` 自定义目录；直接回车默认选择
+`2`。自动化场景可通过 `EDIORA_INSTALL_DIR=/srv/ediora` 跳过目录询问。
 从其他目录调用某个 checkout 中的 `install.sh` 时，也不会把脚本所在目录
 当作目标；只有当前工作目录本身是完整 Ediora checkout 时才会原地运行。
 
