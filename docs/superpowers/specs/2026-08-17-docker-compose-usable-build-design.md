@@ -22,7 +22,8 @@ Node worker 和 Next.js Web。API、worker、Web 使用同一个应用镜像，�
   `docker compose build` 只生成一个应用镜像。
 - 为统一应用镜像增加 `NEXT_PUBLIC_API_URL` 构建参数，并在 Compose 中从根
   环境文件传入；运行时环境继续提供服务端使用的 `WMS_API_URL`。
-- 增加 GitHub Actions，在 push/PR 上校验 Compose 并编译这一个应用镜像。
+- 增加 GitHub Actions，在 push/PR 上校验 Compose 并编译这一个应用镜像；推送到
+  `main` 或手动选择发布时，使用仓库 `GITHUB_TOKEN` 发布到 GHCR。
 - 更新环境变量示例、自托管文档和 Compose 契约测试。
 - 构建 `api`、`worker`、`web` 镜像，并验证默认服务的健康状态和 API/Web
   可访问性。
@@ -108,9 +109,11 @@ local-asr 默认不启动，只有显式启用 profile 时才需要 NVIDIA runti
 
 新增 `.github/workflows/docker-build.yml`，在 push、pull request 和手动触发
 时执行 `docker compose config --quiet`、`docker compose build api`，并用
-临时容器验证 Python API 和 Node worker 的依赖可导入。workflow 不包含真实
-provider 密钥，也不默认推送 GHCR；后续发布可通过同一个镜像标签增加单独的
-registry 步骤。
+临时容器验证 Python API 和 Node worker 的依赖可导入。推送到 `main` 后，独立
+的发布 job 使用 `docker/login-action`、`docker/metadata-action` 和
+`docker/build-push-action`，通过 `GITHUB_TOKEN` 发布
+`ghcr.io/<owner>/ediora-studio:latest` 与 `sha-<commit>`。PR 和普通分支不发布，
+手动触发只有在 `main` 分支显式勾选发布时才发布。
 
 ## 验证策略
 

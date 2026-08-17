@@ -151,6 +151,27 @@ docker compose --profile local-asr up --build
 如果宿主机的 8000 或 3000 已被占用，可在 `.env` 中设置 `WMS_API_PORT` 或
 `WMS_WEB_PORT`；这只改变宿主机映射，不改变容器内端口。
 
+### GitHub Actions 与 GHCR
+
+`.github/workflows/docker-build.yml` 会在 PR 和普通分支推送时只做构建验证；推送到
+`main` 后，GitHub Actions 会使用仓库 `GITHUB_TOKEN` 自动发布：
+
+```text
+ghcr.io/phoenix-gh/ediora-studio:latest
+ghcr.io/phoenix-gh/ediora-studio:sha-<commit>
+```
+
+也可以在 GitHub Actions 页面手动运行 workflow，在 `main` 分支勾选 `Publish the image
+to GHCR`。首次发布后，可在 GitHub Package 设置中调整公开/私有权限。使用已发布镜像时，
+在 `.env` 设置：
+
+```dotenv
+WMS_APP_IMAGE=ghcr.io/phoenix-gh/ediora-studio
+WMS_IMAGE_TAG=latest
+```
+
+然后执行 `docker compose up -d --no-build`；私有镜像需要先执行 `docker login ghcr.io`。
+
 ## 文字视频（当前里程碑）
 
 「创作 → 文字视频」把整篇文稿先生成一条主音频，再依据转写词级时间轴

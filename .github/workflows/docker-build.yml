@@ -1,16 +1,21 @@
-name: Docker build
+name: Docker build and publish
 
 on:
   push:
   pull_request:
   workflow_dispatch:
-
-permissions:
-  contents: read
+    inputs:
+      publish:
+        description: Publish the image to GHCR
+        required: true
+        default: false
+        type: boolean
 
 jobs:
   docker-build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     env:
       WMS_APP_IMAGE: ediora-studio
       WMS_IMAGE_TAG: ci-${{ github.sha }}
@@ -30,3 +35,53 @@ jobs:
 
       - name: Verify Node worker dependencies
         run: docker compose run --rm --no-deps worker node -e "console.log(require.resolve('tsx'))"
+
+  publish:
+    if: >-
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'workflow_dispatch' &&
+      github.ref == 'refs/heads/main' && inputs.publish)
+    needs: docker-build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      REGISTRY: ghcr.io
+      IMAGE_NAME: ${{ github.repository }}
+      NEXT_PUBLIC_API_URL: http://localhost:8000/api
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            type=sha
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            NEXT_PUBLIC_API_URL=${{ env.NEXT_PUBLIC_API_URL }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: false

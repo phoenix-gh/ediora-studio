@@ -29,6 +29,27 @@ time, so changing it requires rebuilding the application image.
 If host ports `8000` or `3000` are already in use, set `WMS_API_PORT` or
 `WMS_WEB_PORT` in `.env`; the container ports remain unchanged.
 
+## GitHub Actions and GHCR
+
+Pull requests and non-`main` pushes run build verification only. A push to
+`main` publishes the unified image using the repository `GITHUB_TOKEN`:
+
+```text
+ghcr.io/phoenix-gh/ediora-studio:latest
+ghcr.io/phoenix-gh/ediora-studio:sha-<commit>
+```
+
+You can also manually run the workflow on `main` and enable `Publish the image
+to GHCR`. To use the published image locally, set these values in `.env`:
+
+```dotenv
+WMS_APP_IMAGE=ghcr.io/phoenix-gh/ediora-studio
+WMS_IMAGE_TAG=latest
+```
+
+Then run `docker compose up -d --no-build`. Authenticate with
+`docker login ghcr.io` first if the package is private.
+
 ## Services
 
 - `web`: Next.js UI, Jobs page, and Vercel AI SDK orchestration.

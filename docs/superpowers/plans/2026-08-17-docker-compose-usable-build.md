@@ -56,11 +56,11 @@
 
 **Files:** Create `.github/workflows/docker-build.yml`; modify `README.md`, `docs/self-hosted.md`, and `web/Dockerfile`.
 
-**Interfaces:** The workflow validates Compose, builds one image, and verifies Python/Node dependencies without provider secrets or local-asr.
+**Interfaces:** The workflow validates Compose, builds one image, verifies Python/Node dependencies without provider secrets or local-asr, and publishes GHCR tags only from `main` or an explicitly enabled manual run.
 
 - [ ] **Step 1: Add the standalone Web build argument.** Before `next build` in `web/Dockerfile`, add `ARG NEXT_PUBLIC_API_URL=http://localhost:8000/api` and `ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}`.
-- [ ] **Step 2: Create the workflow.** Use `push`, `pull_request`, and `workflow_dispatch`; set `permissions: contents: read`; set `WMS_APP_IMAGE=ediora-studio`, `WMS_IMAGE_TAG=ci-${{ github.sha }}`, and `NEXT_PUBLIC_API_URL=http://localhost:8000/api`; run `docker compose config --quiet`, `docker compose build api`, `docker compose run --rm --no-deps api python -c "import main"`, and `docker compose run --rm --no-deps worker node -e "console.log(require.resolve('tsx'))"`.
-- [ ] **Step 3: Update docs.** Explain that API/worker/Web share one built image, changing `NEXT_PUBLIC_API_URL` requires rebuilding, and local-asr requires `docker compose --profile local-asr up --build`. Do not add provider credentials.
+- [ ] **Step 2: Create the workflow.** Use `push`, `pull_request`, and `workflow_dispatch`; keep the validation job at `permissions: contents: read`; set `WMS_APP_IMAGE=ediora-studio`, `WMS_IMAGE_TAG=ci-${{ github.sha }}`, and `NEXT_PUBLIC_API_URL=http://localhost:8000/api`; run `docker compose config --quiet`, `docker compose build api`, `docker compose run --rm --no-deps api python -c "import main"`, and `docker compose run --rm --no-deps worker node -e "console.log(require.resolve('tsx'))"`. Add a dependent publish job gated to `main` pushes or a manually enabled `publish` input, grant it only `contents: read` and `packages: write`, authenticate to `ghcr.io` with `GITHUB_TOKEN`, and use Docker metadata/build-push actions to publish `latest` and `sha-*` tags.
+- [ ] **Step 3: Update docs.** Explain that API/worker/Web share one built image, changing `NEXT_PUBLIC_API_URL` requires rebuilding, local-asr requires `docker compose --profile local-asr up --build`, and GHCR pulls use `WMS_APP_IMAGE=ghcr.io/phoenix-gh/ediora-studio` with `WMS_IMAGE_TAG=latest`. Do not add provider credentials.
 - [ ] **Step 4: Run static checks.** Run `git diff --check` and `docker compose config --quiet`; expect no whitespace errors and valid Compose.
 
 ### Task 5: Build and run the usable local version
