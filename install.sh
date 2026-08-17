@@ -29,6 +29,8 @@ usage() {
   cat <<'USAGE'
 Usage: ./install.sh [--yes] [--build]
        curl -fsSL https://raw.githubusercontent.com/phoenix-gh/ediora-studio/main/install.sh | sh
+       curl -fsSLo install.sh https://raw.githubusercontent.com/phoenix-gh/ediora-studio/main/install.sh
+       chmod +x install.sh && ./install.sh
 
 Options:
   --yes    Skip the Docker installation confirmation prompt.
@@ -120,12 +122,20 @@ ubuntu_docker_install_supported() {
   esac
 }
 
+is_ediora_checkout() {
+  checkout_dir=$1
+  [ -f "$checkout_dir/install.sh" ] &&
+    [ -f "$checkout_dir/docker-compose.yml" ] &&
+    [ -d "$checkout_dir/backend" ] &&
+    [ -d "$checkout_dir/web" ]
+}
+
 resolve_checkout() {
   SCRIPT_SOURCE=$0
   if [ -f "$SCRIPT_SOURCE" ]; then
     script_dir=$(CDPATH= cd -P "$(dirname "$SCRIPT_SOURCE")" && pwd)
     SCRIPT_SOURCE="$script_dir/$(basename "$SCRIPT_SOURCE")"
-    if [ -f "$script_dir/docker-compose.yml" ]; then
+    if is_ediora_checkout "$script_dir"; then
       CHECKOUT_DIR=$script_dir
       return 0
     fi
@@ -149,7 +159,7 @@ resolve_checkout() {
   esac
 
   if [ -e "$target" ]; then
-    if [ -f "$target/install.sh" ] && [ -f "$target/docker-compose.yml" ]; then
+    if is_ediora_checkout "$target"; then
       CHECKOUT_DIR=$(CDPATH= cd -P "$target" && pwd)
       if [ "$CHECKOUT_DIR/install.sh" != "$SCRIPT_SOURCE" ]; then
         exec sh "$CHECKOUT_DIR/install.sh" "$@"

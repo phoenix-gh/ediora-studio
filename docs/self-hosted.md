@@ -21,6 +21,15 @@ On a new host, run:
 curl -fsSL https://raw.githubusercontent.com/phoenix-gh/ediora-studio/main/install.sh | sh
 ```
 
+You can also download the standalone installer and run it later. Use a directory
+that is not already a complete Ediora checkout:
+
+```bash
+curl -fsSLo install.sh https://raw.githubusercontent.com/phoenix-gh/ediora-studio/main/install.sh
+chmod +x install.sh
+./install.sh
+```
+
 The installer checks Docker Engine and Compose v2 first. On Ubuntu 22.04/24.04,
 if either is not usable, it explains the official Docker apt installation and
 waits for an explicit `y`/`yes` confirmation before using `sudo`. On macOS it

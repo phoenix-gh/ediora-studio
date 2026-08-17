@@ -140,6 +140,14 @@ config_fingerprint=<DEV_CONFIG_FINGERPRINT>
 curl -fsSL https://raw.githubusercontent.com/phoenix-gh/ediora-studio/main/install.sh | sh
 ```
 
+也可以先下载单文件再运行（请放在不含完整 Ediora checkout 的目录中）：
+
+```bash
+curl -fsSLo install.sh https://raw.githubusercontent.com/phoenix-gh/ediora-studio/main/install.sh
+chmod +x install.sh
+./install.sh
+```
+
 Linux 上如果 Docker Engine 或 Compose v2 不可用，Ubuntu 22.04/24.04 安装器会
 先说明将通过 Docker 官方 apt 仓库安装 Docker Engine、Buildx 和 Compose 插件，
 并要求输入 `y`/`yes` 确认后才使用 `sudo`。其他 Linux 发行版需要先自行安装
