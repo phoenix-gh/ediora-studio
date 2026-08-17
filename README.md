@@ -160,6 +160,8 @@ PostgreSQL 或 Redis。安装器会交互式创建或补全根目录 `.env`，�
 从远程命令运行时，安装器会询问项目安装目录，直接回车使用
 `$HOME/ediora-studio`；也可以输入例如 `/srv/ediora`。自动化场景可通过
 `EDIORA_INSTALL_DIR=/srv/ediora` 跳过目录询问。
+从其他目录调用某个 checkout 中的 `install.sh` 时，也不会把脚本所在目录
+当作目标；只有当前工作目录本身是完整 Ediora checkout 时才会原地运行。
 
 默认流程使用 `ghcr.io/phoenix-gh/ediora-studio:latest`，执行镜像拉取后以
 `docker compose up -d --no-build` 启动，不会启动可选的 `local-asr` profile。

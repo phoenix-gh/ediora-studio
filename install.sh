@@ -130,12 +130,23 @@ is_ediora_checkout() {
     [ -d "$checkout_dir/web" ]
 }
 
+directory_can_receive_checkout() {
+  directory=$1
+  for entry in "$directory"/* "$directory"/.[!.]* "$directory"/..?*; do
+    if [ -e "$entry" ] || [ -L "$entry" ]; then
+      [ "$(basename "$entry")" = install.sh ] || return 1
+    fi
+  done
+  return 0
+}
+
 resolve_checkout() {
   SCRIPT_SOURCE=$0
   if [ -f "$SCRIPT_SOURCE" ]; then
     script_dir=$(CDPATH= cd -P "$(dirname "$SCRIPT_SOURCE")" && pwd)
+    working_dir=$(CDPATH= cd -P . && pwd)
     SCRIPT_SOURCE="$script_dir/$(basename "$SCRIPT_SOURCE")"
-    if is_ediora_checkout "$script_dir"; then
+    if [ "$working_dir" = "$script_dir" ] && is_ediora_checkout "$script_dir"; then
       CHECKOUT_DIR=$script_dir
       return 0
     fi
@@ -158,6 +169,7 @@ resolve_checkout() {
     *) target=$(pwd)/$target ;;
   esac
 
+  target_exists=0
   if [ -e "$target" ]; then
     if is_ediora_checkout "$target"; then
       CHECKOUT_DIR=$(CDPATH= cd -P "$target" && pwd)
@@ -166,7 +178,8 @@ resolve_checkout() {
       fi
       return 0
     fi
-    die "安装目录已存在但不是 Ediora checkout: $target"
+    [ -d "$target" ] && directory_can_receive_checkout "$target" || die "安装目录已存在但不是 Ediora checkout 或空目录: $target"
+    target_exists=1
   fi
 
   parent=$(dirname "$target")
@@ -187,7 +200,7 @@ resolve_checkout() {
     fi
   done
   [ -n "$source_dir" ] && [ -f "$source_dir/install.sh" ] && [ -f "$source_dir/docker-compose.yml" ] || die "下载包中缺少 Ediora 安装文件；临时目录保留在 $temp_dir"
-  mkdir "$target"
+  [ "$target_exists" -eq 1 ] || mkdir "$target"
   cp -R "$source_dir"/. "$target"/
   chmod +x "$target/install.sh"
   rm -rf "$temp_dir"

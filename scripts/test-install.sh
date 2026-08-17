@@ -663,10 +663,10 @@ test_remote_piped_install_accepts_custom_install_dir() {
 test_downloaded_standalone_script_prompts_for_install_dir() {
   local output="$CASE_DIR/output.log"
   local archive="$CASE_DIR/archive.tar.gz"
-  local target="$CASE_DIR/downloaded-target"
+  local target="$CASE_DIR/standalone"
   local standalone="$CASE_DIR/standalone"
   mkdir -p "$standalone"
-  cp "$CASE_DIR/install.sh" "$CASE_DIR/docker-compose.yml" "$standalone/"
+  cp "$CASE_DIR/install.sh" "$standalone/"
   mkdir -p "$CASE_DIR/archive-root/ediora-studio-main/backend" "$CASE_DIR/archive-root/ediora-studio-main/web"
   cp "$CASE_DIR/install.sh" "$CASE_DIR/docker-compose.yml" "$CASE_DIR/archive-root/ediora-studio-main/"
   tar -czf "$archive" -C "$CASE_DIR/archive-root" ediora-studio-main
@@ -683,6 +683,29 @@ test_downloaded_standalone_script_prompts_for_install_dir() {
   fi
   assert_file_exists "$target/install.sh" 'a downloaded standalone installer must create the selected checkout'
   assert_contains "$output" "目录: $target" 'a downloaded standalone installer must use the selected directory'
+}
+
+test_external_checkout_script_uses_selected_working_directory() {
+  local output="$CASE_DIR/output.log"
+  local archive="$CASE_DIR/archive.tar.gz"
+  local runner="$CASE_DIR/external-runner"
+  mkdir -p "$runner"
+  mkdir -p "$CASE_DIR/archive-root/ediora-studio-main/backend" "$CASE_DIR/archive-root/ediora-studio-main/web"
+  cp "$CASE_DIR/install.sh" "$CASE_DIR/docker-compose.yml" "$CASE_DIR/archive-root/ediora-studio-main/"
+  tar -czf "$archive" -C "$CASE_DIR/archive-root" ediora-studio-main
+  export EDIORA_FAKE_ARCHIVE="$archive"
+  unset EDIORA_INSTALL_DIR
+  touch "$EDIORA_DOCKER_STATE"
+  make_input "$CASE_DIR/input" "$runner" '' '' '' '' '' '' '' '' '' '' '' ''
+  if ! (
+    cd "$runner" || exit 99
+    sh "$CASE_DIR/install.sh"
+  ) > "$output" 2>&1; then
+    cat "$output" >&2
+    return 1
+  fi
+  assert_file_exists "$runner/install.sh" 'an external installer invocation must install into the selected working directory'
+  assert_contains "$output" "目录: $runner" 'an external installer invocation must report the selected working directory'
 }
 
 test_repository_installation_contract() {
@@ -726,6 +749,7 @@ run_test 'unknown options are rejected' test_unknown_option_is_rejected
 run_test 'remote piped install re-executes from downloaded checkout' test_remote_piped_install_reexecutes_from_downloaded_checkout
 run_test 'remote piped install accepts a custom install directory' test_remote_piped_install_accepts_custom_install_dir
 run_test 'downloaded standalone script prompts for install directory' test_downloaded_standalone_script_prompts_for_install_dir
+run_test 'external checkout script uses the selected working directory' test_external_checkout_script_uses_selected_working_directory
 run_test 'POSIX installer runs from piped stdin' test_posix_installer_runs_from_piped_stdin
 run_test 'POSIX installer parses with sh' test_posix_installer_parses_with_sh
 run_test 'Linux with existing Docker does not require Ubuntu' test_linux_with_existing_docker_does_not_require_ubuntu

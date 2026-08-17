@@ -41,6 +41,9 @@ or Redis dependencies directly on the host.
 When run from the remote command, it asks for the project directory. Press Enter
 to accept `$HOME/ediora-studio`, or enter a path such as `/srv/ediora`.
 Automation can set `EDIORA_INSTALL_DIR=/srv/ediora` to skip this prompt.
+Calling an installer from another directory does not use the installer's source
+checkout as the target; a complete checkout is used in place only when it is
+also the current working directory.
 
 It creates or completes `.env` interactively, preserves existing assignments,
 sets mode `0600`, creates the Compose-local `data/` persistence directories,
