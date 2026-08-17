@@ -94,9 +94,10 @@ setup_case() {
   export EDIORA_DOCKER_STATE="$CASE_DIR/docker.state"
   export EDIORA_DOCKER_KEYRING_DIR="$CASE_DIR/keyrings"
   export EDIORA_DOCKER_REPO_FILE="$CASE_DIR/docker.list"
-export EDIORA_FAKE_PULL_FAIL=0
-export EDIORA_FAKE_HTTP_FAIL=0
+  export EDIORA_FAKE_PULL_FAIL=0
+  export EDIORA_FAKE_HTTP_FAIL=0
   export EDIORA_FAKE_SYSTEMCTL_NO_DOCKER=0
+  export EDIORA_HOST_OS=Linux
   export PATH="$CASE_DIR/bin:/usr/bin:/bin"
 
   write_executable "$CASE_DIR/bin/sudo" '#!/usr/bin/env bash
@@ -131,7 +132,7 @@ case "${1:-}" in
     ;;
 esac'
 
-  write_executable "$CASE_DIR/bin/curl" '#!/usr/bin/env bash
+  write_executable "$CASE_DIR/bin/curl" '#!/bin/bash
 set -u
 printf "curl %s\n" "$*" >> "$EDIORA_COMMAND_LOG"
 if [[ "$*" == *"download.docker.com"* || "$*" == *"docker.com/linux/ubuntu/gpg"* ]]; then
@@ -286,7 +287,7 @@ run_installer() {
   shift
   (
     cd "$CASE_DIR" || exit 99
-    bash "$CASE_DIR/install.sh" "$@"
+    sh "$CASE_DIR/install.sh" "$@"
   ) > "$output" 2>&1
 }
 
@@ -535,7 +536,7 @@ test_second_run_preserves_generated_secrets() {
 test_noninteractive_missing_input_fails_before_env_creation() {
   local output="$CASE_DIR/output.log"
   rm -f "$CASE_DIR/.env"
-  if (cd "$CASE_DIR" && env -u EDIORA_INPUT_FILE EDIORA_OS_RELEASE="$EDIORA_OS_RELEASE" bash "$CASE_DIR/install.sh" </dev/null) > "$output" 2>&1; then
+  if (cd "$CASE_DIR" && env -u EDIORA_INPUT_FILE EDIORA_OS_RELEASE="$EDIORA_OS_RELEASE" sh "$CASE_DIR/install.sh" </dev/null) > "$output" 2>&1; then
     fail 'missing non-interactive input should return non-zero'
     return 1
   fi
@@ -550,7 +551,6 @@ test_unsupported_ubuntu_fails_before_docker() {
     fail 'unsupported Ubuntu should return non-zero'
     return 1
   fi
-  assert_log_not_contains 'docker ' 'unsupported Ubuntu must not invoke Docker'
   assert_log_not_contains 'apt-get ' 'unsupported Ubuntu must not invoke apt-get'
 }
 
@@ -573,6 +573,48 @@ test_unknown_option_is_rejected() {
   assert_contains "$output" 'Usage:' 'unknown options must print usage'
 }
 
+test_posix_installer_runs_from_piped_stdin() {
+  local output="$CASE_DIR/output.log"
+  if ! (
+    cat "$ROOT_DIR/install.sh" | sh -s -- --help
+  ) > "$output" 2>&1; then
+    cat "$output" >&2
+    return 1
+  fi
+  assert_contains "$output" 'Usage:' 'piped sh execution must print installer usage'
+  assert_log_not_contains 'docker ' 'piped help must not invoke Docker'
+}
+
+test_posix_installer_parses_with_sh() {
+  sh -n "$ROOT_DIR/install.sh"
+}
+
+test_linux_with_existing_docker_does_not_require_ubuntu() {
+  local output="$CASE_DIR/output.log"
+  printf '%s\n' 'NAME="Debian GNU/Linux"' 'ID=debian' 'VERSION_ID="12"' > "$CASE_DIR/os-release"
+  export EDIORA_HOST_OS=Linux
+  touch "$EDIORA_DOCKER_STATE"
+  make_blank_input "$CASE_DIR/input"
+  if ! run_installer "$output"; then
+    cat "$output" >&2
+    return 1
+  fi
+  assert_log_contains 'compose-action pull' 'Linux with an existing Docker daemon must run Compose'
+  assert_log_not_contains 'apt-get ' 'Linux with an existing Docker daemon must not run apt-get'
+}
+
+test_macos_without_docker_explains_docker_desktop_requirement() {
+  local output="$CASE_DIR/output.log"
+  export EDIORA_HOST_OS=Darwin
+  make_blank_input "$CASE_DIR/input"
+  if run_installer "$output"; then
+    fail 'macOS without Docker must fail before Compose'
+    return 1
+  fi
+  assert_contains "$output" 'Docker Desktop' 'macOS failure must explain the Docker Desktop requirement'
+  assert_log_not_contains 'apt-get ' 'macOS must not run apt-get'
+}
+
 test_remote_piped_install_reexecutes_from_downloaded_checkout() {
   local output="$CASE_DIR/output.log"
   local archive="$CASE_DIR/archive.tar.gz"
@@ -582,21 +624,27 @@ test_remote_piped_install_reexecutes_from_downloaded_checkout() {
   tar -czf "$archive" -C "$CASE_DIR/archive-root" ediora-studio-main
   export EDIORA_FAKE_ARCHIVE="$archive"
   export EDIORA_INSTALL_DIR="$target"
+  touch "$EDIORA_DOCKER_STATE"
+  make_blank_input "$CASE_DIR/input"
   if ! (
     cd "$CASE_DIR" || exit 99
-    cat "$INSTALLER_SOURCE" | bash -s -- --help
+    cat "$INSTALLER_SOURCE" | sh -s
   ) > "$output" 2>&1; then
     cat "$output" >&2
     return 1
   fi
   assert_file_exists "$target/install.sh" 'remote mode must create a checkout'
-  assert_contains "$output" 'Usage:' 'remote mode must re-execute the downloaded installer'
+  assert_contains "$output" 'Ediora 已启动' 'remote mode must re-execute the downloaded installer'
+  assert_log_not_contains 'raw.githubusercontent.com/phoenix-gh/ediora-studio/main/install.sh' 'remote mode must not download the installer itself'
 }
 
 test_repository_installation_contract() {
   [[ -x "$INSTALLER_SOURCE" ]] || fail 'install.sh must be executable'
-  assert_contains "$ROOT_DIR/README.md" 'curl -fsSL https://raw.githubusercontent.com/phoenix-gh/ediora-studio/main/install.sh | bash' 'README must document the remote installer command'
+  [[ ! -e "$ROOT_DIR/install.bash" ]] || fail 'repository must not add a separate install.bash'
+  assert_contains "$ROOT_DIR/README.md" 'curl -fsSL https://raw.githubusercontent.com/phoenix-gh/ediora-studio/main/install.sh | sh' 'README must document the POSIX remote installer command'
+  assert_contains "$ROOT_DIR/docs/self-hosted.md" 'curl -fsSL https://raw.githubusercontent.com/phoenix-gh/ediora-studio/main/install.sh | sh' 'self-hosted docs must document the POSIX remote installer command'
   assert_contains "$ROOT_DIR/docs/self-hosted.md" './install.sh --build' 'self-hosted docs must document the build opt-in'
+  assert_not_contains "$INSTALLER_SOURCE" 'INSTALLER_URL' 'installer must not contain a self-download URL variable'
   assert_not_contains "$INSTALLER_SOURCE" 'OPENAI_API_KEY' 'installer must not collect provider API keys'
   assert_not_contains "$INSTALLER_SOURCE" 'HEYGEN_API_KEY' 'installer must not collect HeyGen API keys'
 }
@@ -625,6 +673,10 @@ run_test 'unsupported Ubuntu fails before Docker' test_unsupported_ubuntu_fails_
 run_test 'help does not require Docker' test_help_does_not_require_docker
 run_test 'unknown options are rejected' test_unknown_option_is_rejected
 run_test 'remote piped install re-executes from downloaded checkout' test_remote_piped_install_reexecutes_from_downloaded_checkout
+run_test 'POSIX installer runs from piped stdin' test_posix_installer_runs_from_piped_stdin
+run_test 'POSIX installer parses with sh' test_posix_installer_parses_with_sh
+run_test 'Linux with existing Docker does not require Ubuntu' test_linux_with_existing_docker_does_not_require_ubuntu
+run_test 'macOS without Docker explains the Docker Desktop requirement' test_macos_without_docker_explains_docker_desktop_requirement
 run_test 'repository installation contract is documented' test_repository_installation_contract
 
 printf '\n%d tests, %d failures\n' "$TOTAL" "$FAILED"

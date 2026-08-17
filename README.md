@@ -127,7 +127,7 @@ config_fingerprint=<DEV_CONFIG_FINGERPRINT>
 
 ### 自托管（Docker Compose）
 
-开源版不需要 Hermes、Agent profile 或本地任务看板。Ubuntu 22.04/24.04
+开源版不需要 Hermes、Agent profile 或本地任务看板。Linux 和 macOS
 推荐使用仓库根目录的一键安装器：
 
 ```bash
@@ -137,12 +137,14 @@ config_fingerprint=<DEV_CONFIG_FINGERPRINT>
 也可以在新主机上直接执行：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/phoenix-gh/ediora-studio/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/phoenix-gh/ediora-studio/main/install.sh | sh
 ```
 
-如果 Docker Engine 或 Compose v2 不可用，安装器会先说明将通过 Docker
-官方 Ubuntu apt 仓库安装 Docker Engine、Buildx 和 Compose 插件，并要求
-输入 `y`/`yes` 确认后才使用 `sudo`。它不会在宿主机安装 Python、Node.js、
+Linux 上如果 Docker Engine 或 Compose v2 不可用，Ubuntu 22.04/24.04 安装器会
+先说明将通过 Docker 官方 apt 仓库安装 Docker Engine、Buildx 和 Compose 插件，
+并要求输入 `y`/`yes` 确认后才使用 `sudo`。其他 Linux 发行版需要先自行安装
+Docker。macOS 需要先安装并启动 Docker Desktop；安装器不会通过 apt 或 sudo
+安装 macOS Docker。它不会在宿主机安装 Python、Node.js、
 PostgreSQL 或 Redis。安装器会交互式创建或补全根目录 `.env`，保留已有值，
 并将文件权限设为 `0600`；数据库密码、worker token 和 X 会话密钥可接受
 安全随机默认值，provider API Key 不会写入该文件。
@@ -150,7 +152,9 @@ PostgreSQL 或 Redis。安装器会交互式创建或补全根目录 `.env`，�
 默认流程使用 `ghcr.io/phoenix-gh/ediora-studio:latest`，执行镜像拉取后以
 `docker compose up -d --no-build` 启动，不会启动可选的 `local-asr` profile。
 重复运行会保留 `.env` 和 Compose 文件旁的 `data/` 目录；需要本地构建时显式执行 `./install.sh --build`，
-非交互地确认 Docker 安装时可使用 `./install.sh --yes`。模型、图片、语音和
+非交互地确认 Docker 安装时可使用 `./install.sh --yes`，管道命令则使用
+`curl -fsSL https://raw.githubusercontent.com/phoenix-gh/ediora-studio/main/install.sh | sh -s -- --yes`。
+模型、图片、语音和
 HeyGen 凭据在 Web 启动后从 Ediora「Settings」配置，不通过安装器收集。
 
 自托管运行时数据全部位于 `data/`：

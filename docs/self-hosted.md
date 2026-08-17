@@ -6,7 +6,10 @@ agent.
 
 ## One-click install
 
-Supported hosts are Ubuntu 22.04 and 24.04. From an existing checkout run:
+Supported hosts are Linux and macOS. Ubuntu 22.04/24.04 can receive the optional
+Docker package bootstrap; other Linux distributions must already have Docker
+Engine/Compose v2, and macOS must already have Docker Desktop installed and running.
+From an existing checkout run:
 
 ```bash
 ./install.sh
@@ -15,14 +18,16 @@ Supported hosts are Ubuntu 22.04 and 24.04. From an existing checkout run:
 On a new host, run:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/phoenix-gh/ediora-studio/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/phoenix-gh/ediora-studio/main/install.sh | sh
 ```
 
-The installer checks Docker Engine and Compose v2 first. If either is not
-usable, it explains the official Docker apt installation and waits for an
-explicit `y`/`yes` confirmation before using `sudo`. It does not install the
-application's Python, Node.js, PostgreSQL, or Redis dependencies directly on
-the host.
+The installer checks Docker Engine and Compose v2 first. On Ubuntu 22.04/24.04,
+if either is not usable, it explains the official Docker apt installation and
+waits for an explicit `y`/`yes` confirmation before using `sudo`. On macOS it
+reports the Docker Desktop prerequisite; it does not run apt or install Docker
+Desktop. Other Linux distributions must have Docker installed by the operator.
+The installer does not install the application's Python, Node.js, PostgreSQL,
+or Redis dependencies directly on the host.
 
 It creates or completes `.env` interactively, preserves existing assignments,
 sets mode `0600`, creates the Compose-local `data/` persistence directories,
@@ -40,6 +45,7 @@ Useful options and commands:
 ```bash
 ./install.sh --yes       # skip only the Docker installation confirmation
 ./install.sh --build     # build the shared application image locally
+# For a piped command, append: sh -s -- --yes
 docker compose ps
 docker compose logs -f api worker web
 docker compose stop
