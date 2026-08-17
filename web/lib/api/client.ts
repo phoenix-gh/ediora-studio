@@ -1,6 +1,8 @@
-export const API_BASE = (
-  typeof window === 'undefined' ? process.env.API_URL : undefined
-) ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000/api'
+export const BROWSER_API_BASE = '/_ediora-api'
+
+export const API_BASE = typeof window === 'undefined'
+  ? process.env.API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000/api'
+  : BROWSER_API_BASE
 
 export class ApiError extends Error {
   constructor(

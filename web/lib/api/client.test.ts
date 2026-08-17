@@ -21,6 +21,23 @@ describe('API client runtime base URL', () => {
     expect(API_BASE).toBe('http://api:8000/api')
   })
 
+  it('uses a same-origin API proxy in the browser instead of the build-time public URL', async () => {
+    vi.stubGlobal('window', { location: { origin: 'http://localhost:8800' } })
+    process.env.NEXT_PUBLIC_API_URL = 'http://localhost:8000/api'
+    const fetchMock = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+    vi.resetModules()
+
+    const { API_BASE, apiFetch } = await import('./client')
+    await apiFetch('/creation-rules/dashboard?limit=50')
+
+    expect(API_BASE).toBe('/_ediora-api')
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/_ediora-api/creation-rules/dashboard?limit=50',
+      expect.objectContaining({ cache: 'no-store' }),
+    )
+  })
+
   it('preserves HTTP status and structured detail for client recovery', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(
       JSON.stringify({

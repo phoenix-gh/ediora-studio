@@ -1,14 +1,18 @@
-import { apiFetch } from './client'
+import { API_BASE, apiFetch } from './client'
 
 export type CreativeAssetType = 'article' | 'media' | 'prompt'
 export type PromptKind = 'image' | 'video' | 'other'
 export type CreativeAsset = { id: number; asset_type: CreativeAssetType; prompt_kind?: PromptKind | ''; media_kind: '' | 'image' | 'video' | 'audio'; title: string; content: string; url: string; media_type: string; filename: string; directory: string; tags: string[]; source: string; created_at: string; updated_at: string }
 const PUBLIC_API_BASE = process.env.NEXT_PUBLIC_API_URL
   ?? 'http://localhost:8000/api'
-export const creativeAssetUrl = (url: string) => new URL(
-  url,
-  new URL(PUBLIC_API_BASE).origin,
-).toString()
+export const creativeAssetUrl = (url: string) => {
+  if (typeof window !== 'undefined') {
+    if (/^[a-z][a-z\d+.-]*:/i.test(url)) return url
+    const path = url.startsWith('/api/') ? url.slice('/api'.length) : url
+    return new URL(`${API_BASE}${path}`, window.location.origin).toString()
+  }
+  return new URL(url, new URL(PUBLIC_API_BASE).origin).toString()
+}
 export const listCreativeAssets = (assetType?: CreativeAsset['asset_type']) => apiFetch<CreativeAsset[]>(`/assets${assetType ? `?asset_type=${assetType}` : ''}`)
 export type CreativeAssetCreate = { asset_type: CreativeAssetType; prompt_kind?: PromptKind; media_kind: CreativeAsset['media_kind'] | null; title: string; content: string; url: string; media_type: string; filename: string; directory: string; tags: string[] }
 export const createCreativeAsset = (body: CreativeAssetCreate) => apiFetch<CreativeAsset>('/assets', { method: 'POST', body: JSON.stringify(body) })

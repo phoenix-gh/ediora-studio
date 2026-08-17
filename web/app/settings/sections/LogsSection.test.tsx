@@ -40,7 +40,7 @@ describe('LogsSection', () => {
     vi.unstubAllGlobals()
   })
 
-  it('uses the direct logs URL, treats naive timestamps as UTC, and polls every 30 seconds', async () => {
+  it('uses the browser API proxy, treats naive timestamps as UTC, and polls every 30 seconds', async () => {
     const fetchMock = vi.fn().mockResolvedValue(response([{
         id: 1,
         job: 'collect',
@@ -54,7 +54,7 @@ describe('LogsSection', () => {
     render(<LogsSection />)
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
-      'http://localhost:8000/api/settings/logs?limit=100'
+      '/_ediora-api/settings/logs?limit=100'
     ))
     expect(screen.getByRole('heading', { level: 2, name: '运行日志' })).toBeInTheDocument()
     expect(await screen.findByText('采集完成')).toBeInTheDocument()

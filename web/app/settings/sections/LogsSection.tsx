@@ -6,8 +6,7 @@ import { FormSection } from '@/components/layout/FormSection'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
-
-const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000/api'
+import { API_BASE } from '@/lib/api/client'
 
 interface LogEntry {
   id: number
@@ -52,7 +51,7 @@ export function LogsSection() {
     if (!active.current) return
     const requestId = ++requestSequence.current
     try {
-      const res = await fetch(`${API}/settings/logs?limit=100`)
+      const res = await fetch(`${API_BASE}/settings/logs?limit=100`)
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const nextLogs = await res.json()
       if (active.current && requestId === requestSequence.current) {

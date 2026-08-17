@@ -1,13 +1,17 @@
-import { apiFetch } from './client'
+import { API_BASE, apiFetch } from './client'
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000/api'
+const PUBLIC_API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000/api'
+
+function browserApiBase() {
+  return typeof window === 'undefined' ? PUBLIC_API_BASE : API_BASE
+}
 
 /** Rewrite a mmbiz.qpic.cn / weixin image URL to go through the local proxy.
  * Non-WeChat URLs pass through unchanged. */
 export function wechatImg(url: string | null | undefined): string {
   if (!url) return ''
   if (!/(qpic\.cn|weixin)/i.test(url)) return url
-  return `${API_BASE}/wechat/img?url=${encodeURIComponent(url)}`
+  return `${browserApiBase()}/wechat/img?url=${encodeURIComponent(url)}`
 }
 
 export interface WechatArticle {
@@ -34,7 +38,7 @@ export async function getWechatArticle(id: string): Promise<WechatArticle> {
  * against the *frontend* origin (dev server :3000), not the API host, so we
  * rewrite to an absolute URL right before rendering. */
 function rewriteImgPaths(html: string): string {
-  const base = (process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000/api').replace(/\/$/, '')
+  const base = browserApiBase().replace(/\/$/, '')
   return html.replace(/(["'])\/api\/wechat\/img\?url=/g, `$1${base}/wechat/img?url=`)
 }
 

@@ -21,4 +21,16 @@ describe('creative asset URL runtime base', () => {
       'http://localhost:8000/api/uploads/result.mp4',
     )
   })
+
+  it('uses the same-origin API proxy for browser asset URLs', async () => {
+    vi.stubGlobal('window', { location: { origin: 'http://localhost:8800' } })
+    process.env.NEXT_PUBLIC_API_URL = 'http://localhost:8000/api'
+    vi.resetModules()
+
+    const { creativeAssetUrl } = await import('./assets')
+
+    expect(creativeAssetUrl('/api/uploads/result.mp4')).toBe(
+      'http://localhost:8800/_ediora-api/uploads/result.mp4',
+    )
+  })
 })

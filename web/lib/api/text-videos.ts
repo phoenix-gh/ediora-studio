@@ -3,8 +3,9 @@ import type { TextVideoRenderInput } from '@/remotion/contract'
 import { API_BASE } from './client'
 
 const PUBLIC_API_BASE = (
-  process.env.NEXT_PUBLIC_API_URL
-  ?? 'http://localhost:8000/api'
+  typeof window === 'undefined'
+    ? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000/api'
+    : API_BASE
 ).replace(/\/$/, '')
 
 export type TextVideoProjectStatus = 'draft' | 'audio_ready' | 'video_ready' | 'completed' | 'archived'
