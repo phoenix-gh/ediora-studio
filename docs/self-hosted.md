@@ -29,6 +29,10 @@ Desktop. Other Linux distributions must have Docker installed by the operator.
 The installer does not install the application's Python, Node.js, PostgreSQL,
 or Redis dependencies directly on the host.
 
+When run from the remote command, it asks for the project directory. Press Enter
+to accept `$HOME/ediora-studio`, or enter a path such as `/srv/ediora`.
+Automation can set `EDIORA_INSTALL_DIR=/srv/ediora` to skip this prompt.
+
 It creates or completes `.env` interactively, preserves existing assignments,
 sets mode `0600`, creates the Compose-local `data/` persistence directories,
 and generates safe defaults for the required internal secrets. Provider API

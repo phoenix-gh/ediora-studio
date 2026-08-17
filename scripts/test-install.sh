@@ -638,12 +638,36 @@ test_remote_piped_install_reexecutes_from_downloaded_checkout() {
   assert_log_not_contains 'raw.githubusercontent.com/phoenix-gh/ediora-studio/main/install.sh' 'remote mode must not download the installer itself'
 }
 
+test_remote_piped_install_accepts_custom_install_dir() {
+  local output="$CASE_DIR/output.log"
+  local archive="$CASE_DIR/archive.tar.gz"
+  local target="$CASE_DIR/custom/ediora"
+  mkdir -p "$CASE_DIR/archive-root/ediora-studio-main"
+  cp "$CASE_DIR/install.sh" "$CASE_DIR/docker-compose.yml" "$CASE_DIR/archive-root/ediora-studio-main/"
+  tar -czf "$archive" -C "$CASE_DIR/archive-root" ediora-studio-main
+  export EDIORA_FAKE_ARCHIVE="$archive"
+  unset EDIORA_INSTALL_DIR
+  touch "$EDIORA_DOCKER_STATE"
+  make_input "$CASE_DIR/input" "$target" '' '' '' '' '' '' '' '' '' '' '' ''
+  if ! (
+    cd "$CASE_DIR" || exit 99
+    cat "$INSTALLER_SOURCE" | sh -s
+  ) > "$output" 2>&1; then
+    cat "$output" >&2
+    return 1
+  fi
+  assert_file_exists "$target/install.sh" 'remote mode must install into the user-selected directory'
+  assert_contains "$output" "目录: $target" 'remote mode must report the user-selected directory'
+}
+
 test_repository_installation_contract() {
   [[ -x "$INSTALLER_SOURCE" ]] || fail 'install.sh must be executable'
   [[ ! -e "$ROOT_DIR/install.bash" ]] || fail 'repository must not add a separate install.bash'
   assert_contains "$ROOT_DIR/README.md" 'curl -fsSL https://raw.githubusercontent.com/phoenix-gh/ediora-studio/main/install.sh | sh' 'README must document the POSIX remote installer command'
   assert_contains "$ROOT_DIR/docs/self-hosted.md" 'curl -fsSL https://raw.githubusercontent.com/phoenix-gh/ediora-studio/main/install.sh | sh' 'self-hosted docs must document the POSIX remote installer command'
   assert_contains "$ROOT_DIR/docs/self-hosted.md" './install.sh --build' 'self-hosted docs must document the build opt-in'
+  assert_contains "$ROOT_DIR/README.md" 'EDIORA_INSTALL_DIR=/srv/ediora' 'README must document the install directory override'
+  assert_contains "$ROOT_DIR/docs/self-hosted.md" 'EDIORA_INSTALL_DIR=/srv/ediora' 'self-hosted docs must document the install directory override'
   assert_not_contains "$INSTALLER_SOURCE" 'INSTALLER_URL' 'installer must not contain a self-download URL variable'
   assert_not_contains "$INSTALLER_SOURCE" 'OPENAI_API_KEY' 'installer must not collect provider API keys'
   assert_not_contains "$INSTALLER_SOURCE" 'HEYGEN_API_KEY' 'installer must not collect HeyGen API keys'
@@ -673,6 +697,7 @@ run_test 'unsupported Ubuntu fails before Docker' test_unsupported_ubuntu_fails_
 run_test 'help does not require Docker' test_help_does_not_require_docker
 run_test 'unknown options are rejected' test_unknown_option_is_rejected
 run_test 'remote piped install re-executes from downloaded checkout' test_remote_piped_install_reexecutes_from_downloaded_checkout
+run_test 'remote piped install accepts a custom install directory' test_remote_piped_install_accepts_custom_install_dir
 run_test 'POSIX installer runs from piped stdin' test_posix_installer_runs_from_piped_stdin
 run_test 'POSIX installer parses with sh' test_posix_installer_parses_with_sh
 run_test 'Linux with existing Docker does not require Ubuntu' test_linux_with_existing_docker_does_not_require_ubuntu

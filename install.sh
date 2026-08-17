@@ -16,6 +16,7 @@ OS_VERSION=''
 UBUNTU_CODENAME=''
 INPUT_SOURCE=''
 INPUT_IS_TTY=0
+INPUT_OPENED=0
 DOCKER_USE_SUDO=0
 SCRIPT_SOURCE=''
 
@@ -136,7 +137,11 @@ resolve_checkout() {
     target=$EDIORA_INSTALL_DIR
   else
     [ -n "${HOME-}" ] || die '无法确定安装目录，请设置 EDIORA_INSTALL_DIR'
-    target=$HOME/ediora-studio
+    default_target=$HOME/ediora-studio
+    open_input
+    printf 'Ediora 安装目录 [%s]\n' "$default_target" >&2
+    target=$(prompt_value '> ' 0)
+    [ -n "$target" ] || target=$default_target
   fi
   case "$target" in
     /*) ;;
@@ -181,6 +186,7 @@ resolve_checkout() {
 }
 
 open_input() {
+  [ "$INPUT_OPENED" -eq 1 ] && return 0
   if [ -n "${EDIORA_INPUT_FILE-}" ]; then
     INPUT_SOURCE=$EDIORA_INPUT_FILE
     [ -r "$INPUT_SOURCE" ] || die "无法读取 EDIORA_INPUT_FILE"
@@ -193,6 +199,7 @@ open_input() {
     INPUT_SOURCE=/dev/stdin
     exec 3<&0 || die '非交互环境没有可用输入；请通过终端运行安装器'
   fi
+  INPUT_OPENED=1
 }
 
 read_answer() {

@@ -149,6 +149,10 @@ PostgreSQL 或 Redis。安装器会交互式创建或补全根目录 `.env`，�
 并将文件权限设为 `0600`；数据库密码、worker token 和 X 会话密钥可接受
 安全随机默认值，provider API Key 不会写入该文件。
 
+从远程命令运行时，安装器会询问项目安装目录，直接回车使用
+`$HOME/ediora-studio`；也可以输入例如 `/srv/ediora`。自动化场景可通过
+`EDIORA_INSTALL_DIR=/srv/ediora` 跳过目录询问。
+
 默认流程使用 `ghcr.io/phoenix-gh/ediora-studio:latest`，执行镜像拉取后以
 `docker compose up -d --no-build` 启动，不会启动可选的 `local-asr` profile。
 重复运行会保留 `.env` 和 Compose 文件旁的 `data/` 目录；需要本地构建时显式执行 `./install.sh --build`，
