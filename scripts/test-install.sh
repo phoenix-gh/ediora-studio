@@ -37,6 +37,15 @@ assert_not_contains() {
   fi
 }
 
+assert_file_exists() {
+  local path=$1
+  local message=$2
+  if [[ ! -f "$path" ]]; then
+    fail "$message ($path is missing)"
+    return 1
+  fi
+}
+
 assert_log_contains() {
   assert_contains "$EDIORA_COMMAND_LOG" "$1" "$2"
 }
@@ -70,7 +79,7 @@ setup_case() {
   mkdir -p "$CASE_DIR/bin" "$CASE_DIR/home" "$CASE_DIR/keyrings"
   printf '%s\n' 'NAME="Ubuntu"' 'ID=ubuntu' 'VERSION_ID="22.04"' 'VERSION_CODENAME=jammy' > "$CASE_DIR/os-release"
   : > "$CASE_DIR/commands.log"
-  : > "$CASE_DIR/docker.state"
+  rm -f "$CASE_DIR/docker.state"
   cp "$ROOT_DIR/docker-compose.yml" "$CASE_DIR/docker-compose.yml"
   if [[ -f "$INSTALLER_SOURCE" ]]; then
     cp "$INSTALLER_SOURCE" "$CASE_DIR/install.sh"
@@ -129,6 +138,18 @@ if [[ "$*" == *"download.docker.com"* || "$*" == *"docker.com/linux/ubuntu/gpg"*
   exit 0
 fi
 if [[ "$*" == *"main.tar.gz"* ]]; then
+  output=""
+  while (($#)); do
+    if [[ "$1" == "-o" ]]; then
+      output=${2:-}
+      shift 2
+    else
+      shift
+    fi
+  done
+  if [[ -n "$output" && -n "${EDIORA_FAKE_ARCHIVE:-}" ]]; then
+    cp "$EDIORA_FAKE_ARCHIVE" "$output"
+  fi
   exit 0
 fi
 if [[ "$*" == *"http://"* || "$*" == *"https://"* ]]; then
@@ -211,9 +232,16 @@ while (($#)); do
 done
 case "$action" in
   pull)
+    printf "compose-action pull\n" >> "$EDIORA_COMMAND_LOG"
     if [[ "${EDIORA_FAKE_PULL_FAIL:-0}" == 1 ]]; then
       exit 17
     fi
+    ;;
+  build)
+    printf "compose-action build %s\n" "$*" >> "$EDIORA_COMMAND_LOG"
+    ;;
+  up)
+    printf "compose-action up %s\n" "$*" >> "$EDIORA_COMMAND_LOG"
     ;;
   ps)
     service=service
@@ -296,13 +324,14 @@ test_confirmed_docker_installation_runs_apt_before_compose() {
   fi
   assert_log_contains 'apt-get update' 'confirmed installation must update apt metadata'
   assert_log_contains 'apt-get install' 'confirmed installation must install Docker packages'
-  assert_log_contains 'docker compose' 'confirmed installation must invoke Compose'
-  assert_log_order 'apt-get install' 'docker compose' 'Docker packages must be installed before Compose'
+  assert_log_contains 'compose-action' 'confirmed installation must invoke Compose'
+  assert_log_order 'apt-get install' 'compose-action' 'Docker packages must be installed before Compose'
 }
 
 test_existing_env_values_are_preserved_and_missing_values_appended() {
   local output="$CASE_DIR/output.log"
   local original prefix
+  touch "$EDIORA_DOCKER_STATE"
   printf '%s\n' \
     'POSTGRES_PASSWORD=existing-db' \
     'WORKER_TOKEN=existing-worker-token-012345678901234567890123' \
@@ -349,11 +378,11 @@ test_default_flow_pulls_then_starts_without_build() {
     cat "$output" >&2
     return 1
   fi
-  assert_log_contains 'docker compose pull' 'default flow must pull images'
-  assert_log_contains 'docker compose up' 'default flow must start the stack'
-  assert_log_contains 'up -d --no-build' 'default flow must start without building'
-  assert_log_not_contains 'docker compose build' 'default flow must not build locally'
-  assert_log_order 'docker compose pull' 'docker compose up' 'default flow must pull before start'
+  assert_log_contains 'compose-action pull' 'default flow must pull images'
+  assert_log_contains 'compose-action up' 'default flow must start the stack'
+  assert_log_contains 'compose-action up -d --no-build' 'default flow must start without building'
+  assert_log_not_contains 'compose-action build' 'default flow must not build locally'
+  assert_log_order 'compose-action pull' 'compose-action up' 'default flow must pull before start'
 }
 
 test_build_flag_skips_pull_and_builds_explicitly() {
@@ -364,9 +393,9 @@ test_build_flag_skips_pull_and_builds_explicitly() {
     cat "$output" >&2
     return 1
   fi
-  assert_log_contains 'docker compose build api' '--build must build the application image'
-  assert_log_not_contains 'docker compose pull' '--build must not pull before local build'
-  assert_log_contains 'docker compose up' '--build must still start the stack'
+  assert_log_contains 'compose-action build' '--build must build the application image'
+  assert_log_not_contains 'compose-action pull' '--build must not pull before local build'
+  assert_log_contains 'compose-action up' '--build must still start the stack'
 }
 
 test_pull_failure_does_not_run_compose_down() {
@@ -378,7 +407,7 @@ test_pull_failure_does_not_run_compose_down() {
     fail 'pull failure should return non-zero'
     return 1
   fi
-  assert_log_not_contains 'docker compose down' 'pull failure must not run compose down'
+  assert_log_not_contains 'compose-action down' 'pull failure must not run compose down'
 }
 
 test_unsupported_ubuntu_fails_before_docker() {
@@ -393,6 +422,45 @@ test_unsupported_ubuntu_fails_before_docker() {
   assert_log_not_contains 'apt-get ' 'unsupported Ubuntu must not invoke apt-get'
 }
 
+test_help_does_not_require_docker() {
+  local output="$CASE_DIR/output.log"
+  if ! run_installer "$output" --help; then
+    cat "$output" >&2
+    return 1
+  fi
+  assert_contains "$output" 'Usage:' '--help must print usage'
+  assert_log_not_contains 'docker ' '--help must not invoke Docker'
+}
+
+test_unknown_option_is_rejected() {
+  local output="$CASE_DIR/output.log"
+  if run_installer "$output" --not-an-option; then
+    fail 'unknown options should return non-zero'
+    return 1
+  fi
+  assert_contains "$output" 'Usage:' 'unknown options must print usage'
+}
+
+test_remote_piped_install_reexecutes_from_downloaded_checkout() {
+  local output="$CASE_DIR/output.log"
+  local archive="$CASE_DIR/archive.tar.gz"
+  local target="$CASE_DIR/remote"
+  mkdir -p "$CASE_DIR/archive-root/ediora-studio-main"
+  cp "$CASE_DIR/install.sh" "$CASE_DIR/docker-compose.yml" "$CASE_DIR/archive-root/ediora-studio-main/"
+  tar -czf "$archive" -C "$CASE_DIR/archive-root" ediora-studio-main
+  export EDIORA_FAKE_ARCHIVE="$archive"
+  export EDIORA_INSTALL_DIR="$target"
+  if ! (
+    cd "$CASE_DIR" || exit 99
+    cat "$INSTALLER_SOURCE" | bash -s -- --help
+  ) > "$output" 2>&1; then
+    cat "$output" >&2
+    return 1
+  fi
+  assert_file_exists "$target/install.sh" 'remote mode must create a checkout'
+  assert_contains "$output" 'Usage:' 'remote mode must re-execute the downloaded installer'
+}
+
 if [[ ! -f "$INSTALLER_SOURCE" ]]; then
   fail 'install.sh is not present; installer contract cannot pass yet'
   printf 'Installer contract baseline is red until install.sh is implemented.\n' >&2
@@ -402,11 +470,14 @@ fi
 run_test 'declining Docker installation stops before apt' test_declining_docker_installation_stops_before_apt
 run_test 'confirmed Docker installation runs apt before Compose' test_confirmed_docker_installation_runs_apt_before_compose
 run_test 'existing environment values are preserved and missing values appended' test_existing_env_values_are_preserved_and_missing_values_appended
-run_test 'generated secrets are redacted and .env is mode 600' test_generated_secrets_are_not_printed_and_env_is_mode_600
+run_test 'generated secrets are redacted and .env is mode 600' test_generated_secrets_are_not_printed_and_env_mode_is_600
 run_test 'default flow pulls then starts without build' test_default_flow_pulls_then_starts_without_build
 run_test 'build flag skips pull and builds explicitly' test_build_flag_skips_pull_and_builds_explicitly
 run_test 'pull failure does not run compose down' test_pull_failure_does_not_run_compose_down
 run_test 'unsupported Ubuntu fails before Docker' test_unsupported_ubuntu_fails_before_docker
+run_test 'help does not require Docker' test_help_does_not_require_docker
+run_test 'unknown options are rejected' test_unknown_option_is_rejected
+run_test 'remote piped install re-executes from downloaded checkout' test_remote_piped_install_reexecutes_from_downloaded_checkout
 
 printf '\n%d tests, %d failures\n' "$TOTAL" "$FAILED"
 if ((FAILED > 0)); then
