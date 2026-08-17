@@ -102,9 +102,9 @@ def _fake_runtime_tools(
         #!/bin/sh
         printf 'start:api\n' >>"$DEV_TEST_STATE/events"
         token_hash="$(printf '%s' "$WORKER_TOKEN" | sha256sum | awk '{print $1}')"
-        printf '%s|%s|%s|%s|%s\n' \
-          "$REDIS_URL" "$WORKER_QUEUE" "$token_hash" "$API_URL" \
-          "$CORS_ORIGINS" \
+        printf '%s|%s|%s|%s|%s|%s\n' \
+          "$REDIS_URL" "$WORKER_QUEUE" "$token_hash" "$DATABASE_URL" \
+          "$API_URL" "$CORS_ORIGINS" \
           >"$DEV_TEST_STATE/api.env"
         if [ "${DEV_TEST_FAIL_STAGE:-}" = api-bind ]; then
           sleep 0.15
@@ -125,9 +125,9 @@ def _fake_runtime_tools(
           *" jobs:worker "*)
             printf 'start:worker\n' >>"$DEV_TEST_STATE/events"
             token_hash="$(printf '%s' "$WORKER_TOKEN" | sha256sum | awk '{print $1}')"
-            printf '%s|%s|%s|%s|%s\n' \
-              "$REDIS_URL" "$WORKER_QUEUE" "$token_hash" "$API_URL" \
-              "$CORS_ORIGINS" \
+            printf '%s|%s|%s|%s|%s|%s\n' \
+              "$REDIS_URL" "$WORKER_QUEUE" "$token_hash" "$DATABASE_URL" \
+              "$API_URL" "$CORS_ORIGINS" \
               >"$DEV_TEST_STATE/worker.env"
             if [ "${DEV_TEST_FAIL_STAGE:-}" = worker ]; then
               exit 17
@@ -148,9 +148,9 @@ def _fake_runtime_tools(
           *)
             printf 'start:web\n' >>"$DEV_TEST_STATE/events"
             token_hash="$(printf '%s' "$WORKER_TOKEN" | sha256sum | awk '{print $1}')"
-            printf '%s|%s|%s|%s|%s\n' \
-              "$REDIS_URL" "$WORKER_QUEUE" "$token_hash" "$API_URL" \
-              "$CORS_ORIGINS" \
+            printf '%s|%s|%s|%s|%s|%s\n' \
+              "$REDIS_URL" "$WORKER_QUEUE" "$token_hash" "$DATABASE_URL" \
+              "$API_URL" "$CORS_ORIGINS" \
               >"$DEV_TEST_STATE/web.env"
             if [ "${DEV_TEST_FAIL_STAGE:-}" != web ]; then
               : >"$DEV_TEST_STATE/web.ready"
@@ -572,6 +572,11 @@ def test_start_loads_root_env_without_manually_exported_worker_token(
         ).read_text(encoding="utf-8")
         expected_hash = hashlib.sha256(REPLACEMENT_TOKEN.encode()).hexdigest()
         assert f"|{expected_hash}|" in effective
+        expected_database_url = (
+            "postgresql+asyncpg://wemedia:wemedia@127.0.0.1:"
+            f"{env['DEV_POSTGRES_PORT']}/wemedia"
+        )
+        assert expected_database_url in effective
     finally:
         _run_dev(env, "stop")
 
@@ -738,6 +743,10 @@ def test_start_waits_for_each_service_and_stop_reverses_owned_processes(
                 f"redis://127.0.0.1:{env['REDIS_PORT']}/0",
                 "content-jobs",
                 hashlib.sha256(VALID_TOKEN.encode()).hexdigest(),
+                (
+                    "postgresql+asyncpg://wemedia:wemedia@127.0.0.1:"
+                    f"{env['DEV_POSTGRES_PORT']}/wemedia"
+                ),
                 f"http://127.0.0.1:{env['API_PORT']}/api",
                 expected_cors,
             ]
@@ -830,6 +839,10 @@ def test_config_drift_replaces_the_entire_api_worker_web_unit(
         expected_api = (
             f"http://127.0.0.1:{replacement_env['API_PORT']}/api"
         )
+        expected_database_url = (
+            "postgresql+asyncpg://wemedia:wemedia@127.0.0.1:"
+            f"{replacement_env['DEV_POSTGRES_PORT']}/wemedia"
+        )
         expected_cors = replacement_env.get(
             "CORS_ORIGINS",
             (
@@ -841,7 +854,10 @@ def test_config_drift_replaces_the_entire_api_worker_web_unit(
             effective = (state / f"{service}.env").read_text(
                 encoding="utf-8"
             ).strip()
-            assert f"|{expected_hash}|{expected_api}|{expected_cors}" in effective
+            assert (
+                f"|{expected_hash}|{expected_database_url}|"
+                f"{expected_api}|{expected_cors}"
+            ) in effective
     finally:
         _run_dev(env, "stop")
 

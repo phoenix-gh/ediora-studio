@@ -75,7 +75,8 @@ Redis:  redis://127.0.0.1:6379/0
 `DEV_POSTGRES_CONTAINER`、`DEV_POSTGRES_HOST` 和
 `DEV_POSTGRES_PORT` 覆盖容器名和连接地址。PostgreSQL 是持久化外部
 依赖，不属于脚本拥有的临时进程；`./dev.sh stop` 和启动失败回滚都不会
-停止该容器。
+停止该容器。API 默认使用这个开发数据库生成 `DATABASE_URL`；如果数据库
+用户、密码或数据库名不同，可在 `.env` 中显式设置 `DATABASE_URL` 覆盖默认值。
 
 本地语音转写使用独立的 GPU 容器，不依赖整套 Docker Compose。首次运行或
 容器被手动停止后执行：
