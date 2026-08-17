@@ -134,13 +134,33 @@ export async function trimLeadingTrailingSilence(bytes: Uint8Array) {
 }
 
 
-export function lastFrameExtractArgs(input: string, output: string) {
+export function lastFrameExtractArgs(input: string, output: string, seekFromEnd = 0.5) {
   return [
     '-y',
     '-sseof',
-    '-0.04',
+    `-${seekFromEnd}`,
     '-i',
     input,
+    '-update',
+    '1',
+    '-frames:v',
+    '1',
+    '-q:v',
+    '2',
+    output,
+  ]
+}
+
+
+export function lastFrameSeekArgs(input: string, output: string, at: number) {
+  return [
+    '-y',
+    '-i',
+    input,
+    '-ss',
+    Math.max(0, at).toFixed(3),
+    '-update',
+    '1',
     '-frames:v',
     '1',
     '-q:v',
@@ -156,8 +176,15 @@ export async function extractLastFrame(bytes: Uint8Array) {
   const output = join(directory, 'frame.jpg')
   try {
     await writeFile(input, bytes)
-    await runFfmpeg(lastFrameExtractArgs(input, output))
-    return new Uint8Array(await readFile(output))
+    try {
+      await runFfmpeg(lastFrameExtractArgs(input, output))
+      return new Uint8Array(await readFile(output))
+    } catch {
+      const duration = await probeDuration(input)
+      const at = duration > 0.08 ? duration - 0.05 : 0
+      await runFfmpeg(lastFrameSeekArgs(input, output, at))
+      return new Uint8Array(await readFile(output))
+    }
   } finally {
     await rm(directory, { recursive: true, force: true })
   }

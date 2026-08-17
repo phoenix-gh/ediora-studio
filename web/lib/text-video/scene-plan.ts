@@ -5,7 +5,10 @@ import type {
   TextVideoProject,
 } from '@/lib/api/text-videos'
 import { resolveTextVideoTemplate } from '@/remotion/registry'
-import { CONTINUITY_EPSILON_SECONDS } from '@/remotion/types'
+import {
+  CONTINUITY_EPSILON_SECONDS,
+  type TextVideoSegment,
+} from '@/remotion/types'
 
 import { sceneFrameRange } from './scene-range'
 
@@ -496,7 +499,11 @@ export function editSceneVisuals(
   }
   const renderWithoutMotion = {
     ...renderMatch.item,
-  } as Record<string, unknown>
+  } as TextVideoSegment & {
+    transition?: unknown
+    intensity?: unknown
+    chunks?: unknown
+  }
   delete renderWithoutMotion.transition
   delete renderWithoutMotion.intensity
   delete renderWithoutMotion.chunks

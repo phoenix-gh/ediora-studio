@@ -3,16 +3,23 @@ from digital_human_shots import (
     DEFAULT_DELIVERY,
     DEFAULT_PRESENCE,
     apply_planned_segments,
+    apply_shot_performances,
+    assign_shared_seed,
     build_shot_prompt,
     effective_shot_duration_bounds,
+    established_seed,
     estimate_shot_seconds,
     fallback_plan_segments,
+    fallback_shot_performances,
     new_blank_shot,
     normalize_shots,
+    parse_shot_performances,
     parse_shot_plan_document,
     parse_shot_plan_segments,
+    performances_are_distinct,
     script_from_shots,
 )
+import json
 import pytest
 
 
@@ -94,32 +101,22 @@ def test_build_shot_prompt_uses_shot_delivery_over_base():
     assert "calm tutorial host, medium pace" not in prompt
 
 
-def test_build_shot_prompt_uses_previous_last_frame_as_first_frame():
+def test_build_shot_prompt_uses_shot_presence_over_base():
     prompt = build_shot_prompt(
         "medium",
         "下一句",
-        has_first_frame_reference=True,
+        presence="forward lean, brighter eyes, one-hand beat on the hook",
+        base_presence="seated upright, slow nods, palms rest in lap",
     )
-    assert "At 0.00 seconds, <Picture 3> is fully referenced as the first frame." in prompt
-    assert "last frame of the previous clip" in prompt
-    assert "Already talking at the first frame" not in prompt
+    assert "forward lean, brighter eyes, one-hand beat on the hook" in prompt
+    assert "seated upright, slow nods, palms rest in lap" not in prompt
 
 
-def test_previous_succeeded_clip_id_skips_failed_neighbors():
-    from digital_human_shots import (
-        previous_succeeded_clip_id,
-        shot_requires_previous_clip,
-    )
-
-    shots = [
-        {"id": "a", "status": "succeeded", "clip_asset_id": 11},
-        {"id": "b", "status": "failed", "clip_asset_id": None},
-        {"id": "c", "status": "draft", "clip_asset_id": None},
-    ]
-    assert previous_succeeded_clip_id(shots, "c") == 11
-    assert previous_succeeded_clip_id(shots, "a") is None
-    assert shot_requires_previous_clip(shots, "a") is False
-    assert shot_requires_previous_clip(shots, "c") is True
+def test_build_shot_prompt_is_independent_of_previous_clip():
+    prompt = build_shot_prompt("medium", "下一句")
+    assert "Already talking at the first frame" in prompt
+    assert "last frame of the previous clip" not in prompt
+    assert "At 0.00 seconds, <Picture 3>" not in prompt
 
 
 def test_apply_planned_segments_is_lossless_and_clamps_duration():
@@ -139,6 +136,8 @@ def test_apply_planned_segments_is_lossless_and_clamps_duration():
     assert all(4 <= shot["duration_sec"] <= 5 for shot in shots)
     assert all(shot["status"] == "draft" for shot in shots)
     assert all(shot["clip_asset_id"] is None for shot in shots)
+    assert all(shot["seed"] is None for shot in shots)
+    assert all(not (shot.get("provider_state") or {}).get("seed") for shot in shots)
     assert "今天讲本地部署。" in shots[0]["render_prompt"]
     assert "close-up" in shots[0]["render_prompt"]
     assert shots[0]["delivery"] == DEFAULT_DELIVERY
@@ -196,7 +195,7 @@ def test_parse_shot_plan_document_extracts_piece_voice_and_presence():
           "delivery": "calm tutorial host, medium pace",
           "presence": "seated, relaxed, explaining to camera",
           "shots": [
-            {"text": "甲。", "framing": "close", "delivery": "slightly brighter hook"},
+            {"text": "甲。", "framing": "close", "delivery": "slightly brighter hook", "presence": "forward lean, brighter eyes"},
             {"text": "乙。", "framing": "wide"}
           ]
         }
@@ -205,6 +204,8 @@ def test_parse_shot_plan_document_extracts_piece_voice_and_presence():
     assert document["delivery"] == "calm tutorial host, medium pace"
     assert document["presence"] == "seated, relaxed, explaining to camera"
     assert document["shots"][0]["delivery"] == "slightly brighter hook"
+    assert document["shots"][0]["presence"] == "forward lean, brighter eyes"
+    assert document["shots"][1]["presence"] == ""
     assert [item["text"] for item in document["shots"]] == ["甲。", "乙。"]
 
 
@@ -214,8 +215,8 @@ def test_parse_shot_plan_segments_reads_json_array():
         '{"text":"乙。","framing":"wide"}]\n'
     )
     assert segments == [
-        {"text": "甲。", "framing": "close", "delivery": "slightly brighter hook"},
-        {"text": "乙。", "framing": "wide", "delivery": ""},
+        {"text": "甲。", "framing": "close", "delivery": "slightly brighter hook", "presence": ""},
+        {"text": "乙。", "framing": "wide", "delivery": "", "presence": ""},
     ]
 
 
@@ -224,14 +225,111 @@ def test_apply_planned_segments_keeps_per_shot_delivery():
     shots = apply_planned_segments(
         script,
         [
-            {"text": "今天讲本地部署。", "framing": "close", "delivery": "slightly brighter hook"},
-            {"text": "然后看环境准备。", "framing": "wide"},
+            {
+                "text": "今天讲本地部署。",
+                "framing": "close",
+                "delivery": "brighter hook, quicker on-set",
+                "presence": "forward lean, eyes wider, one-hand beat",
+            },
+            {
+                "text": "然后看环境准备。",
+                "framing": "wide",
+                "delivery": "measured tutorial pace, slower on the setup",
+                "presence": "upright, slower nods, hands count the step",
+            },
         ],
         4,
         5,
         base_delivery="calm tutorial host, medium pace",
+        presence="seated upright facing camera, torso still",
     )
-    assert shots[0]["delivery"] == "slightly brighter hook"
-    assert "slightly brighter hook" in shots[0]["render_prompt"]
-    assert shots[1]["delivery"] == "calm tutorial host, medium pace"
-    assert "calm tutorial host, medium pace" in shots[1]["render_prompt"]
+    assert shots[0]["delivery"] == "brighter hook, quicker on-set"
+    assert shots[0]["presence"] == "forward lean, eyes wider, one-hand beat"
+    assert "brighter hook, quicker on-set" in shots[0]["render_prompt"]
+    assert "forward lean, eyes wider, one-hand beat" in shots[0]["render_prompt"]
+    assert shots[1]["delivery"] == "measured tutorial pace, slower on the setup"
+    assert shots[1]["presence"] == "upright, slower nods, hands count the step"
+    assert "measured tutorial pace, slower on the setup" in shots[1]["render_prompt"]
+    assert "upright, slower nods, hands count the step" in shots[1]["render_prompt"]
+    assert shots[0]["render_prompt"] != shots[1]["render_prompt"]
+
+
+def test_shot_plan_prompt_requires_per_shot_emotion_and_pace():
+    from digital_human_service import _shot_plan_prompt, _shot_performance_prompt
+
+    prompt = _shot_plan_prompt("今天讲本地部署。", 4, 5)
+    assert "独立" in prompt
+    assert "节奏弧" in prompt
+    assert '"presence"' in prompt
+    assert "只微调" not in prompt
+    performance_prompt = _shot_performance_prompt(
+        "今天讲本地部署。然后看环境准备。",
+        [{"spoken_text": "今天讲本地部署。"}, {"spoken_text": "然后看环境准备。"}],
+    )
+    assert "镜头表演导演" in performance_prompt
+    assert "[1] 今天讲本地部署。" in performance_prompt
+    assert "[2] 然后看环境准备。" in performance_prompt
+
+
+def test_fallback_shot_performances_varies_hook_and_cta():
+    shots = [
+        {"spoken_text": "Chat GPT刚刚发布了重大更新。"},
+        {"spoken_text": "它内置了浏览器，所以所有内容都集中在一个地方。"},
+        {"spoken_text": "请关注并评论，我会私信你。"},
+    ]
+    performances = fallback_shot_performances(shots)
+    assert performances_are_distinct(performances)
+    assert "hook" in performances[0]["delivery"]
+    assert "close" in performances[2]["delivery"] or "invitation" in performances[2]["delivery"]
+    updated = apply_shot_performances(
+        [
+            {**new_blank_shot(4), "spoken_text": shot["spoken_text"], "framing": "medium"}
+            for shot in shots
+        ],
+        performances,
+    )
+    assert updated[0]["render_prompt"] != updated[1]["render_prompt"]
+    assert updated[1]["render_prompt"] != updated[2]["render_prompt"]
+    assert "talks with this exact emotion and cadence" in updated[0]["render_prompt"]
+
+
+def test_parse_shot_performances_requires_matching_unique_items():
+    raw = json.dumps({
+        "shots": [
+            {"语气": "brighter hook", "状态": "forward lean"},
+            {"delivery": "measured tutorial", "presence": "slower nods"},
+        ]
+    })
+    assert parse_shot_performances(raw, 2) == [
+        {"delivery": "brighter hook", "presence": "forward lean"},
+        {"delivery": "measured tutorial", "presence": "slower nods"},
+    ]
+    with pytest.raises(InvalidTalkingVideo, match="数量不匹配"):
+        parse_shot_performances(raw, 3)
+
+
+def test_assign_shared_seed_reuses_existing_then_rolls_once(monkeypatch):
+    shots = [new_blank_shot(4), new_blank_shot(4)]
+    shots[0]["id"] = "a"
+    shots[1]["id"] = "b"
+    assert established_seed(shots) is None
+
+    monkeypatch.setattr("digital_human_shots.random.randint", lambda _a, _b: 99)
+    stamped, seed = assign_shared_seed(shots)
+    assert seed == 99
+    assert [item["seed"] for item in stamped] == [99, 99]
+    assert all(item["provider_state"]["seed"] == 99 for item in stamped)
+
+    leftover = [
+        {**stamped[0]},
+        {**new_blank_shot(4), "id": "c"},
+    ]
+    reused, reused_seed = assign_shared_seed(leftover)
+    assert reused_seed == 99
+    assert [item["seed"] for item in reused] == [99, 99]
+
+
+def test_established_seed_reads_provider_state():
+    assert established_seed([
+        {"id": "a", "seed": None, "provider_state": {"seed": 7}},
+    ]) == 7

@@ -660,11 +660,13 @@ def test_comfyui_plan_replaces_shots_and_keeps_full_script(api, monkeypatch):
                 "text": "今天讲本地部署。",
                 "framing": "close",
                 "delivery": "slightly brighter hook",
+                "presence": "forward lean, brighter eyes, one-hand beat",
             },
             {
                 "text": "然后看环境准备。",
                 "framing": "wide",
                 "delivery": "measured tutorial pace",
+                "presence": "upright, slower nods, hands count the step",
             },
         ])
 
@@ -687,14 +689,22 @@ def test_comfyui_plan_replaces_shots_and_keeps_full_script(api, monkeypatch):
         "slightly brighter hook",
         "measured tutorial pace",
     ]
+    assert [shot["presence"] for shot in body["shots"]] == [
+        "forward lean, brighter eyes, one-hand beat",
+        "upright, slower nods, hands count the step",
+    ]
     assert body["delivery"] == "calm tutorial host, medium pace"
     assert body["presence"] == "seated, relaxed, explaining to camera"
     assert "slightly brighter hook" in body["shots"][0]["render_prompt"]
-    assert "seated, relaxed, explaining to camera" in body["shots"][0]["render_prompt"]
+    assert "forward lean, brighter eyes, one-hand beat" in body["shots"][0]["render_prompt"]
+    assert "measured tutorial pace" in body["shots"][1]["render_prompt"]
+    assert "upright, slower nods, hands count the step" in body["shots"][1]["render_prompt"]
+    assert "seated, relaxed, explaining to camera" not in body["shots"][0]["render_prompt"]
     assert all(shot["status"] == "draft" for shot in body["shots"])
     assert all(shot["clip_asset_id"] is None for shot in body["shots"])
     assert old_shot_id not in {shot["id"] for shot in body["shots"]}
     assert all(4 <= shot["duration_sec"] <= 5 for shot in body["shots"])
+    assert all(shot["seed"] is None for shot in body["shots"])
     assert body["min_shot_seconds"] == 4
     assert body["max_shot_seconds"] == 5
 
@@ -838,11 +848,63 @@ def test_comfyui_render_pending_enqueues_draft_and_failed_shots(api, monkeypatch
     assert queued.status_code == 201, queued.text
     by_text = {shot["spoken_text"]: shot for shot in queued.json()["shots"]}
     assert by_text["第一镜"]["status"] == "queued"
-    assert by_text["第二镜"]["status"] == "failed"
+    assert by_text["第二镜"]["status"] == "queued"
+    assert by_text["第二镜"]["job_id"] is not None
+    assert not by_text["第二镜"]["provider_state"].get("auto_queue")
     assert by_text["第三镜"]["status"] == "succeeded"
 
 
-def test_comfyui_render_rejects_shot_without_previous_clip(api, monkeypatch):
+def test_comfyui_single_shot_success_does_not_start_following_draft(api, monkeypatch):
+    client, session_factory, _ = api
+    monkeypatch.setenv("COMFYUI_BASE_URL", "http://127.0.0.1:8188")
+    role_id, _ = _seed_comfyui(session_factory)
+    created = client.post(
+        "/api/talking-videos",
+        json={"title": "分镜作品", "digital_human_id": role_id},
+    ).json()
+    first = created["shots"][0]
+    saved = client.put(
+        f"/api/talking-videos/{created['id']}/shots",
+        json={
+            "shots": [
+                {**first, "spoken_text": "第一镜", "status": "draft"},
+                {
+                    "id": "shot-two",
+                    "duration_sec": 4,
+                    "framing": "medium",
+                    "spoken_text": "第二镜",
+                    "motion_prompt": "",
+                    "first_frame_asset_id": None,
+                    "clip_asset_id": None,
+                    "status": "draft",
+                    "job_id": None,
+                    "error": "",
+                    "workflow_version": "",
+                    "seed": None,
+                    "provider_state": {},
+                },
+            ]
+        },
+    )
+    assert saved.status_code == 200, saved.text
+    queued = client.post(
+        f"/api/talking-videos/{created['id']}/shots/{first['id']}/render",
+    )
+    assert queued.status_code == 201, queued.text
+    shot = queued.json()["shots"][0]
+    progressed = client.post(
+        f"/api/talking-videos/{created['id']}/shots/{shot['id']}/worker-progress",
+        json={"status": "succeeded", "clip_asset_id": 99, "provider_state": {}},
+        headers={"X-Content-Job-Id": str(shot["job_id"])},
+    )
+    assert progressed.status_code == 200, progressed.text
+    shots = progressed.json()["shots"]
+    assert shots[0]["status"] == "succeeded"
+    assert shots[1]["status"] == "draft"
+    assert not shots[1]["provider_state"].get("auto_queue")
+
+
+def test_comfyui_render_enqueues_later_shot_without_previous_clip(api, monkeypatch):
     client, session_factory, _ = api
     monkeypatch.setenv("COMFYUI_BASE_URL", "http://127.0.0.1:8188")
     role_id, _ = _seed_comfyui(session_factory)
@@ -876,11 +938,14 @@ def test_comfyui_render_rejects_shot_without_previous_clip(api, monkeypatch):
     )
     assert saved.status_code == 200, saved.text
 
-    blocked = client.post(
+    queued = client.post(
         f"/api/talking-videos/{created['id']}/shots/shot-two/render",
     )
-    assert blocked.status_code == 409
-    assert blocked.json()["detail"] == "上一镜成片不存在，先生成上一镜再继续"
+    assert queued.status_code == 201, queued.text
+    shots = queued.json()["shots"]
+    assert shots[0]["status"] == "draft"
+    assert shots[1]["status"] == "queued"
+    assert shots[1]["job_id"] is not None
 
 
 def test_comfyui_rerender_clears_prompt_id_and_rejects_in_flight(api, monkeypatch):
@@ -915,7 +980,8 @@ def test_comfyui_rerender_clears_prompt_id_and_rejects_in_flight(api, monkeypatc
     assert rerendered.status_code == 201, rerendered.text
     next_shot = rerendered.json()["shots"][0]
     assert next_shot["status"] == "queued"
-    assert next_shot["seed"] is None
+    assert next_shot["seed"] == 42
+    assert next_shot["provider_state"].get("seed") == 42
     assert next_shot["provider_state"].get("prompt_id") is None
     assert next_shot["provider_state"].get("keep") == 1
 
@@ -924,3 +990,147 @@ def test_comfyui_rerender_clears_prompt_id_and_rejects_in_flight(api, monkeypatc
     )
     assert again.status_code == 409
     assert again.json()["detail"] == "该镜头正在生成"
+
+
+def test_comfyui_render_shares_seed_across_shots(api, monkeypatch):
+    client, session_factory, _ = api
+    monkeypatch.setenv("COMFYUI_BASE_URL", "http://127.0.0.1:8188")
+    role_id, _ = _seed_comfyui(session_factory)
+    created = client.post(
+        "/api/talking-videos",
+        json={"title": "分镜作品", "digital_human_id": role_id},
+    ).json()
+    first = created["shots"][0]
+    saved = client.put(
+        f"/api/talking-videos/{created['id']}/shots",
+        json={
+            "shots": [
+                {**first, "spoken_text": "第一镜", "status": "draft"},
+                {
+                    "id": "shot-two",
+                    "duration_sec": 4,
+                    "framing": "medium",
+                    "spoken_text": "第二镜",
+                    "motion_prompt": "",
+                    "first_frame_asset_id": None,
+                    "clip_asset_id": None,
+                    "status": "draft",
+                    "job_id": None,
+                    "error": "",
+                    "workflow_version": "",
+                    "seed": None,
+                    "provider_state": {},
+                },
+            ]
+        },
+    )
+    assert saved.status_code == 200, saved.text
+
+    queued = client.post(
+        f"/api/talking-videos/{created['id']}/shots/{first['id']}/render",
+    )
+    assert queued.status_code == 201, queued.text
+    shots = queued.json()["shots"]
+    assert shots[0]["seed"] is not None
+    assert shots[0]["seed"] == shots[1]["seed"]
+    assert shots[1]["provider_state"].get("seed") == shots[0]["seed"]
+
+
+def test_comfyui_plan_assigns_distinct_performance_when_model_omits_them(api, monkeypatch):
+    client, session_factory, _ = api
+    monkeypatch.setenv("COMFYUI_BASE_URL", "http://127.0.0.1:8188")
+    role_id, _ = _seed_comfyui(session_factory)
+    created = client.post(
+        "/api/talking-videos",
+        json={"title": "分镜作品", "digital_human_id": role_id},
+    ).json()
+    script = "今天讲本地部署。然后看环境准备。"
+
+    async def fake_call(prompt, max_tokens=2048):
+        if "口播语气提炼器" in prompt:
+            return json.dumps({
+                "delivery": "calm tutorial host, medium pace",
+                "presence": "seated, relaxed, explaining to camera",
+            })
+        if "镜头表演导演" in prompt:
+            return json.dumps({
+                "shots": [
+                    {
+                        "delivery": "brighter hook, quicker on-set",
+                        "presence": "forward lean, brighter eyes",
+                    },
+                    {
+                        "delivery": "measured tutorial pace",
+                        "presence": "upright, slower nods",
+                    },
+                ]
+            })
+        return json.dumps({
+            "delivery": "calm tutorial host, medium pace",
+            "presence": "seated, relaxed, explaining to camera",
+            "shots": [
+                {"text": "今天讲本地部署。", "framing": "close"},
+                {"text": "然后看环境准备。", "framing": "wide"},
+            ],
+        })
+
+    monkeypatch.setattr("llm._call", fake_call)
+    planned = client.post(
+        f"/api/talking-videos/{created['id']}/shots/plan",
+        json={"script": script},
+    )
+    assert planned.status_code == 200, planned.text
+    shots = planned.json()["shots"]
+    assert [shot["delivery"] for shot in shots] == [
+        "brighter hook, quicker on-set",
+        "measured tutorial pace",
+    ]
+    assert [shot["presence"] for shot in shots] == [
+        "forward lean, brighter eyes",
+        "upright, slower nods",
+    ]
+    assert shots[0]["render_prompt"] != shots[1]["render_prompt"]
+    assert "talks with this exact emotion and cadence: brighter hook, quicker on-set" in shots[0]["render_prompt"]
+
+
+def test_comfyui_plan_resets_seed(api, monkeypatch):
+    client, session_factory, _ = api
+    monkeypatch.setenv("COMFYUI_BASE_URL", "http://127.0.0.1:8188")
+    role_id, _ = _seed_comfyui(session_factory)
+    created = client.post(
+        "/api/talking-videos",
+        json={"title": "分镜作品", "digital_human_id": role_id},
+    ).json()
+    shot = created["shots"][0]
+    saved = client.put(
+        f"/api/talking-videos/{created['id']}/shots",
+        json={
+            "shots": [{
+                **shot,
+                "spoken_text": "今天讲本地部署。",
+                "seed": 42,
+                "provider_state": {"seed": 42},
+            }]
+        },
+    )
+    assert saved.status_code == 200, saved.text
+
+    async def fake_call(prompt, max_tokens=2048):
+        if "口播语气提炼器" in prompt:
+            return json.dumps({
+                "delivery": "calm tutorial host, medium pace",
+                "presence": "seated, relaxed, explaining to camera",
+            })
+        return json.dumps([{"text": "今天讲本地部署。", "framing": "medium"}])
+
+    monkeypatch.setattr("llm._call", fake_call)
+    planned = client.post(
+        f"/api/talking-videos/{created['id']}/shots/plan",
+        json={"script": "今天讲本地部署。"},
+    )
+    assert planned.status_code == 200, planned.text
+    assert all(item["seed"] is None for item in planned.json()["shots"])
+    assert all(
+        not (item.get("provider_state") or {}).get("seed")
+        for item in planned.json()["shots"]
+    )

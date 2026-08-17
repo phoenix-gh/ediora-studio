@@ -16,6 +16,8 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 COPY --from=deps /app/node_modules ./node_modules
 COPY . ./
+ARG NEXT_PUBLIC_API_URL=http://localhost:8000/api
+ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
 RUN ./node_modules/.bin/next build
 EXPOSE 3000
 CMD ["./node_modules/.bin/next", "start"]

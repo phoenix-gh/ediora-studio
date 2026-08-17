@@ -50,15 +50,25 @@ describe('H3 Ref2VA prompt', () => {
     expect(prompt).not.toContain('calm tutorial host, medium pace')
   })
 
-  it('uses the previous last frame as the next shot first frame', () => {
+  it('prefers the shot presence over the project body language', () => {
     const prompt = buildShotPrompt({
       framing: 'medium',
       spokenText: '下一句',
-      hasFirstFrameReference: true,
+      presence: 'forward lean, brighter eyes, one-hand beat on the hook',
+      basePresence: 'seated upright, slow nods, palms rest in lap',
     })
-    expect(prompt).toContain('At 0.00 seconds, <Picture 3> is fully referenced as the first frame.')
-    expect(prompt).toContain('last frame of the previous clip')
-    expect(prompt).not.toContain('Already talking at the first frame')
+    expect(prompt).toContain('forward lean, brighter eyes, one-hand beat on the hook')
+    expect(prompt).not.toContain('seated upright, slow nods, palms rest in lap')
+  })
+
+  it('uses the same already-speaking opener for every shot', () => {
+    const prompt = buildShotPrompt({
+      framing: 'medium',
+      spokenText: '下一句',
+    })
+    expect(prompt).toContain('Already talking at the first frame')
+    expect(prompt).not.toContain('last frame of the previous clip')
+    expect(prompt).not.toContain('At 0.00 seconds, <Picture 3>')
   })
 
   it('estimates duration at five visible characters per second', () => {

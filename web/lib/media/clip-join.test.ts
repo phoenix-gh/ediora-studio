@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   buildHardCutFilter,
   lastFrameExtractArgs,
+  lastFrameSeekArgs,
   parseSilenceWindows,
   speechBounds,
 } from './clip-join'
@@ -40,13 +41,29 @@ describe('clip join helpers', () => {
     expect(buildHardCutFilter(3)).not.toContain('acrossfade')
   })
 
-  it('seeks the last video frame instead of a mid-speech still', () => {
+  it('seeks the last video frame from half a second before EOF', () => {
     expect(lastFrameExtractArgs('/tmp/in.mp4', '/tmp/frame.jpg')).toEqual([
       '-y',
       '-sseof',
-      '-0.04',
+      '-0.5',
       '-i',
       '/tmp/in.mp4',
+      '-update',
+      '1',
+      '-frames:v',
+      '1',
+      '-q:v',
+      '2',
+      '/tmp/frame.jpg',
+    ])
+    expect(lastFrameSeekArgs('/tmp/in.mp4', '/tmp/frame.jpg', 11.03)).toEqual([
+      '-y',
+      '-i',
+      '/tmp/in.mp4',
+      '-ss',
+      '11.030',
+      '-update',
+      '1',
       '-frames:v',
       '1',
       '-q:v',

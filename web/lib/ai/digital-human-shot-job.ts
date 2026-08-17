@@ -13,12 +13,24 @@ import {
 } from './job-client'
 import { createComfyUIClient, ComfyUIError, type ComfyUIClient } from '../comfyui/client'
 import { buildShotPrompt, H3_REF2VA_META, h3Ref2vaPrompt } from '../comfyui/workflow'
-import { extractLastFrame, safeTrimLeadingTrailingSilence } from '../media/clip-join'
+import { safeTrimLeadingTrailingSilence } from '../media/clip-join'
 
 
 export function resolveWorkerAssetUrl(url: string, base = apiBase()) {
   if (/^https?:\/\//i.test(url)) return url
   return new URL(url, `${base.replace(/\/$/, '')}/`).toString()
+}
+
+
+function resolvedShotSeed(
+  shot: { seed?: number | null },
+  state: Record<string, unknown>,
+): number {
+  for (const value of [shot.seed, state.seed]) {
+    const parsed = typeof value === 'number' ? value : Number(value)
+    if (Number.isSafeInteger(parsed) && parsed >= 0) return parsed
+  }
+  return Math.floor(Math.random() * 1_000_000_000)
 }
 
 
@@ -37,6 +49,7 @@ type ShotContext = {
     spoken_text: string
     motion_prompt: string
     delivery?: string
+    presence?: string
     render_prompt?: string
     provider_state: Record<string, unknown>
     seed?: number | null
@@ -47,8 +60,6 @@ type ShotContext = {
   picture_2: MediaRef
   picture_3?: MediaRef | null
   audio_1: MediaRef
-  previous_clip?: MediaRef | null
-  needs_previous_clip?: boolean
 }
 
 type ShotJobApi = {
@@ -70,8 +81,6 @@ type ShotJobApi = {
     filename: string
   }>
   saveVideoAsset(jobId: number, filename: string, bytes: Uint8Array): Promise<{ id: number; url: string }>
-  extractLastFrame?(bytes: Uint8Array): Promise<Uint8Array>
-  extractTalkingFrame?(bytes: Uint8Array): Promise<Uint8Array>
   trimSilence?(bytes: Uint8Array): Promise<Uint8Array>
 }
 
@@ -86,16 +95,6 @@ class JobCancelledError extends Error {
   constructor() {
     super('任务已取消')
     this.name = 'JobCancelledError'
-  }
-}
-
-
-export class MissingPreviousClipError extends Error {
-  readonly retryable = false
-
-  constructor(message = '上一镜成片不存在，已停止以免画面不连贯') {
-    super(message)
-    this.name = 'MissingPreviousClipError'
   }
 }
 
@@ -126,13 +125,11 @@ async function runStep<T extends Record<string, unknown>>(
     return output
   } catch (error) {
     if (error instanceof JobCancelledError) throw error
-    const retryable = error instanceof MissingPreviousClipError
-      ? false
-      : error instanceof ComfyUIError
-        ? error.retryable
-        : /out of memory|oom|cuda/i.test(String(error))
-          ? false
-          : retryableForError(error)
+    const retryable = error instanceof ComfyUIError
+      ? error.retryable
+      : /out of memory|oom|cuda/i.test(String(error))
+        ? false
+        : retryableForError(error)
     await deps.api.failStep(jobId, step.id, error, retryable)
     throw error
   }
@@ -229,8 +226,6 @@ const defaultApi: ShotJobApi = {
     if (!response.ok) throw new Error(`口播镜头本地保存失败 (${response.status})`)
     return response.json() as Promise<{ id: number; url: string }>
   },
-  extractLastFrame,
-  extractTalkingFrame: extractLastFrame,
   trimSilence: safeTrimLeadingTrailingSilence,
 }
 
@@ -274,7 +269,7 @@ export async function runDigitalHumanShotRenderJob(
       'prepare_shot',
       deps,
       async () => {
-        const seed = context.shot.seed || Number(state.seed) || Math.floor(Math.random() * 1_000_000_000)
+        const seed = resolvedShotSeed(context.shot, state)
         state.seed = seed
         await deps.api.updateShot(projectId, shotId, {
           status: 'running',
@@ -296,48 +291,24 @@ export async function runDigitalHumanShotRenderJob(
             deps.api.fetchLocalAsset(context.picture_2.url, context.picture_2),
             deps.api.fetchLocalAsset(context.audio_1.url, context.audio_1),
           ])
-          const close = context.picture_3
+          const pose = context.picture_3
             ? await deps.api.fetchLocalAsset(context.picture_3.url, context.picture_3)
             : look
-          let firstFrame = close
-          let hasFirstFrameReference = false
-          const extractFrame = deps.api.extractLastFrame ?? deps.api.extractTalkingFrame
-          if (context.needs_previous_clip) {
-            if (!context.previous_clip) {
-              throw new MissingPreviousClipError()
-            }
-            if (!extractFrame) {
-              throw new MissingPreviousClipError('无法抽取上一镜最后一帧，已停止以免画面不连贯')
-            }
-            try {
-              const previous = await deps.api.fetchLocalAsset(
-                context.previous_clip.url,
-                context.previous_clip,
-              )
-              const frame = await extractFrame(previous.bytes)
-              firstFrame = {
-                bytes: frame,
-                mediaType: 'image/jpeg',
-                filename: `first-frame-${context.previous_clip.filename}.jpg`,
-              }
-              hasFirstFrameReference = true
-            } catch {
-              throw new MissingPreviousClipError('上一镜成片无法读取，已停止以免画面不连贯')
-            }
-          }
           const [image1, image2, image3, audio1] = await Promise.all([
             deps.comfyui.uploadImage(look.bytes, `look-${projectId}-${look.filename}`),
             deps.comfyui.uploadImage(environment.bytes, `env-${projectId}-${environment.filename}`),
-            deps.comfyui.uploadImage(firstFrame.bytes, `first-frame-${projectId}-${firstFrame.filename}`),
+            deps.comfyui.uploadImage(pose.bytes, `pose-${projectId}-${pose.filename}`),
             deps.comfyui.uploadAudio(voice.bytes, `voice-${projectId}-${voice.filename}`),
           ])
-          const submittedPrompt = context.shot.render_prompt?.trim()
-            || buildShotPrompt({
+          const storedPrompt = context.shot.render_prompt?.trim() || ''
+          const submittedPrompt = storedPrompt && !/last frame of the previous clip|Picture 3 is fully referenced as the first frame/i.test(storedPrompt)
+            ? storedPrompt
+            : buildShotPrompt({
               framing: context.shot.framing,
               spokenText: context.shot.spoken_text,
               motionPrompt: context.shot.motion_prompt,
               delivery: context.shot.delivery,
-              hasFirstFrameReference,
+              presence: context.shot.presence,
             })
           promptId = await deps.comfyui.queuePrompt(h3Ref2vaPrompt({
             image_1: image1.name,

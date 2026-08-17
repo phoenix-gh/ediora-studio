@@ -1,3 +1,6 @@
+x-app-image: &app-image
+  image: ${WMS_APP_IMAGE:-ediora-studio}:${WMS_IMAGE_TAG:-local}
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -25,6 +28,8 @@ services:
 
   local-asr:
     image: ghcr.io/speaches-ai/speaches:0.8.3-cuda
+    profiles:
+      - local-asr
     restart: unless-stopped
     environment:
       WHISPER__INFERENCE_DEVICE: ${WMS_LOCAL_ASR_DEVICE:-cuda}
@@ -46,7 +51,12 @@ services:
       start_period: 10s
 
   api:
-    build: ./backend
+    <<: *app-image
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000/api}
     command:
       - sh
       - -ec
@@ -78,7 +88,7 @@ services:
       - uploads-data:/app/uploads
       - sessions-data:/app/sessions
     ports:
-      - "8000:8000"
+      - "${WMS_API_PORT:-8000}:8000"
     healthcheck:
       test:
         - CMD
@@ -96,7 +106,8 @@ services:
         condition: service_healthy
 
   worker:
-    build: ./web
+    <<: *app-image
+    working_dir: /app/web
     command:
       - sh
       - -ec
@@ -125,9 +136,17 @@ services:
         condition: service_healthy
 
   web:
-    build: ./web
+    <<: *app-image
+    working_dir: /app/web
+    command:
+      - ./node_modules/.bin/next
+      - start
+      - --hostname
+      - 0.0.0.0
+      - --port
+      - "3000"
     environment:
-      NEXT_PUBLIC_API_URL: http://localhost:8000/api
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000/api}
       WMS_API_URL: http://api:8000/api
       WMS_LLM_API_KEY: ${WMS_LLM_API_KEY:-}
       WMS_LLM_MODEL: ${WMS_LLM_MODEL:-gpt-4o-mini}
@@ -137,7 +156,7 @@ services:
       WMS_IMAGE_BASE_URL: ${WMS_IMAGE_BASE_URL:-}
       WMS_WORKER_TOKEN: ${WMS_WORKER_TOKEN:-}
     ports:
-      - "3000:3000"
+      - "${WMS_WEB_PORT:-3000}:3000"
     depends_on:
       api:
         condition: service_healthy

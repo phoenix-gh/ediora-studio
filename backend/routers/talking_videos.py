@@ -598,11 +598,7 @@ async def shot_worker_context(
     job_id: int = Header(alias="X-Content-Job-Id"),
     db: AsyncSession = Depends(get_db),
 ):
-    from digital_human_shots import (
-        find_shot,
-        previous_succeeded_clip_id,
-        shot_requires_previous_clip,
-    )
+    from digital_human_shots import find_shot
 
     project = await _get_project(db, project_id)
     role = await db.get(DigitalHuman, project.digital_human_id)
@@ -635,11 +631,6 @@ async def shot_worker_context(
     )
     if picture_1 is None or picture_2 is None or audio_1 is None:
         raise HTTPException(409, "镜头缺少参考图或音色样本")
-    previous_clip = None
-    previous_clip_id = previous_succeeded_clip_id(list(project.shots or []), shot_id)
-    if previous_clip_id:
-        previous_asset = await db.get(CreativeAsset, previous_clip_id)
-        previous_clip = _asset_payload(previous_asset)
     return {
         "project_id": project.id,
         "shot": shot,
@@ -647,11 +638,6 @@ async def shot_worker_context(
         "picture_2": _asset_payload(picture_2),
         "picture_3": _asset_payload(picture_3),
         "audio_1": _asset_payload(audio_1),
-        "previous_clip": previous_clip,
-        "needs_previous_clip": shot_requires_previous_clip(
-            list(project.shots or []),
-            shot_id,
-        ),
         "first_frame": _asset_payload(picture_1),
         "role": _role_payload(role),
     }

@@ -1,0 +1,32 @@
+name: Docker build
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  docker-build:
+    runs-on: ubuntu-latest
+    env:
+      WMS_APP_IMAGE: ediora-studio
+      WMS_IMAGE_TAG: ci-${{ github.sha }}
+      NEXT_PUBLIC_API_URL: http://localhost:8000/api
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Validate Compose configuration
+        run: docker compose config --quiet
+
+      - name: Build unified application image
+        run: docker compose build api
+
+      - name: Verify Python API dependencies
+        run: docker compose run --rm --no-deps api python -c "import main"
+
+      - name: Verify Node worker dependencies
+        run: docker compose run --rm --no-deps worker node -e "console.log(require.resolve('tsx'))"

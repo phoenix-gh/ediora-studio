@@ -132,6 +132,30 @@ const project = {
 } satisfies TalkingVideoProject
 
 
+function mediaAsset(
+  id: number,
+  kind: 'image' | 'video' | 'audio',
+  title: string,
+  filename: string,
+) {
+  return {
+    id,
+    asset_type: 'media' as const,
+    media_kind: kind,
+    title,
+    content: '',
+    url: `/api/uploads/${filename}`,
+    media_type: kind === 'image' ? 'image/jpeg' : kind === 'video' ? 'video/mp4' : 'audio/wav',
+    filename,
+    directory: '',
+    tags: [] as string[],
+    source: 'upload',
+    created_at: '',
+    updated_at: '',
+  }
+}
+
+
 afterEach(() => {
   cleanup()
   vi.useRealTimers()
@@ -344,6 +368,87 @@ describe('talking video editor', () => {
     })
   })
 
+  it('shows referenced media next to the H3 prompt', () => {
+    const look = mediaAsset(1013, 'image', 'MK 定妆图', 'look.jpg')
+    const portrait = mediaAsset(1014, 'image', 'MK 正面照', 'portrait.jpg')
+    const voice = mediaAsset(22, 'audio', 'MK 音色', 'voice.wav')
+    const clip = mediaAsset(77, 'video', '分镜成片', 'shot-1.mp4')
+    const comfyRole = {
+      ...readyRole,
+      id: 2,
+      name: 'MK',
+      provider: 'comfyui' as const,
+      look_asset_id: look.id,
+      look,
+      portrait_asset_id: portrait.id,
+      portrait,
+      voice_sample_asset_id: voice.id,
+      voice_sample: voice,
+    }
+    const draftShot = {
+      id: 'shot-1',
+      duration_sec: 5,
+      framing: 'medium' as const,
+      spoken_text: '今天我们来讲一下',
+      motion_prompt: '',
+      first_frame_asset_id: null,
+      clip_asset_id: clip.id,
+      clip_asset: clip,
+      status: 'succeeded' as const,
+      job_id: null,
+      error: '',
+      workflow_version: '',
+      seed: null,
+      provider_state: {},
+    }
+    const nextShot = {
+      ...draftShot,
+      id: 'shot-2',
+      framing: 'close' as const,
+      spoken_text: '下一句',
+      clip_asset_id: null,
+      clip_asset: null,
+      status: 'draft' as const,
+    }
+    render(
+      <TalkingVideoEditor
+        project={{
+          ...project,
+          digital_human_id: comfyRole.id,
+          role: comfyRole,
+          shots: [draftShot, nextShot],
+        }}
+        roles={[comfyRole]}
+        saveProject={mocks.updateTalkingVideo}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('tab', { name: '分镜 2' }))
+    fireEvent.click(screen.getByTestId('talking-shot-shot-1'))
+    fireEvent.click(screen.getByRole('tab', { name: '提示词' }))
+    expect(screen.getByRole('img', { name: '<Picture 1> 定妆图' })).toHaveAttribute(
+      'src',
+      expect.stringContaining('/api/uploads/look.jpg'),
+    )
+    expect(screen.getByRole('img', { name: '<Picture 2> 环境图' })).toHaveAttribute(
+      'src',
+      expect.stringContaining('/api/uploads/studio.jpg'),
+    )
+    expect(screen.getByLabelText('<Audio 1> 音色样本')).toHaveAttribute(
+      'src',
+      expect.stringContaining('/api/uploads/voice.wav'),
+    )
+    expect(screen.queryByLabelText('<Picture 3> 上一镜')).toBeNull()
+    expect(screen.queryByRole('img', { name: '<Picture 3> 正面照' })).toBeNull()
+
+    fireEvent.click(screen.getByTestId('talking-shot-shot-2'))
+    expect(screen.queryByLabelText('<Picture 3> 上一镜')).toBeNull()
+    expect(screen.getByRole('img', { name: '<Picture 3> 正面照' })).toHaveAttribute(
+      'src',
+      expect.stringContaining('/api/uploads/portrait.jpg'),
+    )
+  })
+
   it('plans the full script and enqueues every pending ComfyUI shot', async () => {
     const comfyRole = {
       ...readyRole,
@@ -407,6 +512,8 @@ describe('talking video editor', () => {
       '今天讲本地部署。然后看环境准备。',
     )
     expect(screen.getByLabelText('镜头 1 口播句')).toBeTruthy()
+    expect(screen.getByLabelText('镜头 1 语气')).toBeTruthy()
+    expect(screen.getByLabelText('镜头 1 状态')).toBeTruthy()
     expect(
       (screen.getByLabelText('镜头 1 口播句') as HTMLTextAreaElement).value,
     ).toBe('今天讲本地部署。')

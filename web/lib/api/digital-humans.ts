@@ -50,6 +50,7 @@ export type TalkingVideoShot = {
   spoken_text: string
   motion_prompt: string
   delivery?: string
+  presence?: string
   render_prompt?: string
   first_frame_asset_id: number | null
   clip_asset_id: number | null

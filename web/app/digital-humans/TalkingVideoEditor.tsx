@@ -80,12 +80,46 @@ import { RenderVersionsPanel } from './RenderVersionsPanel'
 import { ScriptAssistantDialog } from './ScriptAssistantDialog'
 
 
-function previousShotHasClip(shots: TalkingVideoShot[], shot: TalkingVideoShot) {
-  const index = shots.findIndex(item => item.id === shot.id)
-  if (index <= 0) return false
-  return shots.slice(0, index).some(item => (
-    item.status === 'succeeded' && Boolean(item.clip_asset_id || item.clip_asset)
-  ))
+function PromptRefPreview({
+  tag,
+  label,
+  kind,
+  url,
+}: {
+  tag: string
+  label: string
+  kind: 'image' | 'video' | 'audio'
+  url: string
+}) {
+  const src = creativeAssetUrl(url)
+  const name = `${tag} ${label}`
+  return (
+    <figure className="min-w-[7.5rem] flex-1">
+      <figcaption className="mb-1 truncate text-[11px] text-muted-foreground">
+        {name}
+      </figcaption>
+      {kind === 'image' ? (
+        <img
+          src={src}
+          alt={name}
+          className="aspect-video w-full rounded-md border object-cover"
+        />
+      ) : null}
+      {kind === 'video' ? (
+        <video
+          src={src}
+          aria-label={name}
+          muted
+          playsInline
+          preload="metadata"
+          className="aspect-video w-full rounded-md border object-cover"
+        />
+      ) : null}
+      {kind === 'audio' ? (
+        <audio src={src} aria-label={name} controls className="w-full" />
+      ) : null}
+    </figure>
+  )
 }
 
 
@@ -93,7 +127,6 @@ function displayShotPrompt(
   shot: TalkingVideoShot,
   baseDelivery = '',
   presence = '',
-  shots: TalkingVideoShot[] = [],
 ) {
   return shot.render_prompt?.trim()
     ? shot.render_prompt
@@ -103,8 +136,8 @@ function displayShotPrompt(
         motionPrompt: shot.motion_prompt,
         delivery: shot.delivery,
         baseDelivery,
-        presence,
-        hasFirstFrameReference: previousShotHasClip(shots, shot),
+        presence: shot.presence,
+        basePresence: presence,
       })
 }
 
@@ -119,6 +152,10 @@ const SHOT_STATUS_LABEL: Record<TalkingVideoShot['status'], string> = {
   running: '生成中',
   succeeded: '完成',
   failed: '失败',
+}
+
+function shotStatusLabel(shot: TalkingVideoShot) {
+  return shot.clip_asset ? '可试看' : SHOT_STATUS_LABEL[shot.status]
 }
 
 const FRAMING_LABEL = {
@@ -591,7 +628,7 @@ export function TalkingVideoEditor({
                               >
                                 <div className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
                                   <span>镜 {index + 1} · {shot.duration_sec}s · {FRAMING_LABEL[shot.framing]}</span>
-                                  <span>{shot.clip_asset ? '可试看' : SHOT_STATUS_LABEL[shot.status]}</span>
+                                  <span>{shotStatusLabel(shot)}</span>
                                 </div>
                                 <p className="mt-1 line-clamp-2 text-sm leading-5">
                                   {shot.spoken_text.trim() || '（空口播）'}
@@ -610,6 +647,7 @@ export function TalkingVideoEditor({
                               spoken_text: '',
                               motion_prompt: '',
                               delivery: '',
+                              presence: '',
                               render_prompt: '',
                               first_frame_asset_id: null,
                               clip_asset_id: null,
@@ -766,8 +804,59 @@ export function TalkingVideoEditor({
                                   placeholder={delivery.trim() || DEFAULT_DELIVERY}
                                 />
                               </Field>
+                              <Field>
+                                <FieldLabel htmlFor={`talking-shot-presence-${activeShot.id}`}>
+                                  本镜状态
+                                </FieldLabel>
+                                <Input
+                                  id={`talking-shot-presence-${activeShot.id}`}
+                                  aria-label={`镜头 ${shots.indexOf(activeShot) + 1} 状态`}
+                                  value={activeShot.presence ?? ''}
+                                  onChange={event => {
+                                    patchShot(activeShot.id, {
+                                      presence: event.target.value,
+                                      render_prompt: '',
+                                    })
+                                  }}
+                                  placeholder={presence.trim() || DEFAULT_PRESENCE}
+                                />
+                              </Field>
                             </TabsContent>
                             <TabsContent value="prompt" className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden">
+                              <div className="flex shrink-0 gap-2 overflow-x-auto pb-1">
+                                {role?.look?.url ? (
+                                  <PromptRefPreview
+                                    tag="<Picture 1>"
+                                    label="定妆图"
+                                    kind="image"
+                                    url={role.look.url}
+                                  />
+                                ) : null}
+                                {environment?.url ? (
+                                  <PromptRefPreview
+                                    tag="<Picture 2>"
+                                    label="环境图"
+                                    kind="image"
+                                    url={environment.url}
+                                  />
+                                ) : null}
+                                {activeShot.framing === 'close' && role?.portrait?.url ? (
+                                  <PromptRefPreview
+                                    tag="<Picture 3>"
+                                    label="正面照"
+                                    kind="image"
+                                    url={role.portrait.url}
+                                  />
+                                ) : null}
+                                {role?.voice_sample?.url ? (
+                                  <PromptRefPreview
+                                    tag="<Audio 1>"
+                                    label="音色样本"
+                                    kind="audio"
+                                    url={role.voice_sample.url}
+                                  />
+                                ) : null}
+                              </div>
                               <Field className="flex min-h-0 flex-1 flex-col">
                                 <FieldLabel htmlFor={`talking-shot-prompt-${activeShot.id}`}>
                                   H3 提示词
@@ -775,7 +864,7 @@ export function TalkingVideoEditor({
                                 <Textarea
                                   id={`talking-shot-prompt-${activeShot.id}`}
                                   aria-label={`镜头 ${shots.indexOf(activeShot) + 1} 提示词`}
-                                  value={displayShotPrompt(activeShot, delivery, presence, shots)}
+                                  value={displayShotPrompt(activeShot, delivery, presence)}
                                   onChange={event => {
                                     patchShot(activeShot.id, { render_prompt: event.target.value })
                                   }}
@@ -799,8 +888,8 @@ export function TalkingVideoEditor({
                                         motionPrompt: activeShot.motion_prompt,
                                         delivery: activeShot.delivery,
                                         baseDelivery: delivery,
-                                        presence,
-                                        hasFirstFrameReference: previousShotHasClip(shots, activeShot),
+                                        presence: activeShot.presence,
+                                        basePresence: presence,
                                       }),
                                     })
                                   }}
@@ -814,7 +903,7 @@ export function TalkingVideoEditor({
                                 ) : null}
                               </div>
                               {lastSubmittedPrompt(activeShot)
-                                && lastSubmittedPrompt(activeShot) !== displayShotPrompt(activeShot, delivery, presence, shots)
+                                && lastSubmittedPrompt(activeShot) !== displayShotPrompt(activeShot, delivery, presence)
                                 ? (
                                   <details className="rounded-md bg-muted/50 p-2 text-xs">
                                     <summary className="cursor-pointer text-muted-foreground">
@@ -882,7 +971,7 @@ export function TalkingVideoEditor({
               <CardDescription>
                 {isComfy && previewPane !== 'final'
                   ? activeShot
-                    ? `镜 ${shots.indexOf(activeShot) + 1} · ${SHOT_STATUS_LABEL[activeShot.status]}`
+                                      ? `镜 ${shots.indexOf(activeShot) + 1} · ${shotStatusLabel(activeShot)}`
                     : '选中镜头后在这里试看'
                   : currentRender
                     ? `版本 ${currentRender.version} · 16:9 · MP4`

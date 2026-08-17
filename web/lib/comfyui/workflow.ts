@@ -83,6 +83,11 @@ export function effectiveDelivery(shotDelivery = '', baseDelivery = '') {
 }
 
 
+export function effectivePresence(shotPresence = '', basePresence = '') {
+  return shotPresence.trim() || basePresence.trim() || DEFAULT_PRESENCE
+}
+
+
 export function dialogueLanguageTag(text: string) {
   return /[\u4e00-\u9fff]/.test(text) ? 'Chinese' : 'English'
 }
@@ -95,14 +100,13 @@ export function buildShotPrompt(input: {
   delivery?: string
   baseDelivery?: string
   presence?: string
-  hasFirstFrameReference?: boolean
-  hasPoseReference?: boolean
+  basePresence?: string
 }) {
   const framingLabel = FRAMING_LABEL[input.framing] || 'medium shot'
   const spoken = input.spokenText.trim()
   const motion = input.motionPrompt?.trim()
   const tone = effectiveDelivery(input.delivery, input.baseDelivery)
-  const performance = input.presence?.trim() || DEFAULT_PRESENCE
+  const performance = effectivePresence(input.presence, input.basePresence)
   const camera = input.framing === 'close'
     ? 'Very slow push-in. Eye-level. No shake.'
     : 'Static locked-off camera. Eye-level. No pan, tilt, or zoom.'
@@ -110,29 +114,12 @@ export function buildShotPrompt(input: {
     ? `${motion} `
     : ''
   const lang = dialogueLanguageTag(spoken)
-  const hasFirstFrame = Boolean(
-    input.hasFirstFrameReference ?? input.hasPoseReference,
-  )
-  const subjects = [
-    '<Subject 1> is the person in <Picture 1>, same face, hair, clothing, and body proportions.',
-  ]
-  if (hasFirstFrame) {
-    subjects.push(
-      '<Picture 3> is the last frame of the previous clip and the first frame of this shot.',
-    )
-  }
-  const opening = hasFirstFrame
-    ? `At 0.00 seconds, <Picture 3> is fully referenced as the first frame. <Subject 1> faces the camera in <Background 1>, matching that opening pose. ${action}<Subject 1> (S1) uses a ${tone} delivery. Emotion, cadence, and speaking rate come from this prompt, not from <Audio 1>.`
-    : `<Subject 1> faces the camera in <Background 1> and is already speaking. ${action}<Subject 1> (S1) uses a ${tone} delivery. Emotion, cadence, and speaking rate come from this prompt, not from <Audio 1>.`
-  const onset = hasFirstFrame
-    ? 'Start speaking from that exact pose; the first syllable begins immediately after the opening frame, with no long still hold.'
-    : 'Already talking at the first frame; no silent intro and no fade-in from a still pose.'
   return [
     'Video Description:',
-    opening,
+    `<Subject 1> faces the camera in <Background 1> and is already speaking. ${action}<Subject 1> (S1) talks with this exact emotion and cadence: ${tone}. Emotion, cadence, and speaking rate come from this prompt, not from <Audio 1>.`,
     `<Subject 1> (S1) says ONLY this quoted line and then stops: <d>[${lang}] ${spoken}</d>`,
-    `Performance: ${performance}. Gestures stay small and speech-synced: a slight head nod or one-hand open-palm beat on stressed words; shoulders stay settled; no standing up, walking, or waving.`,
-    onset,
+    `Performance: ${performance}. Stay seated facing camera; gestures stay small and speech-synced; no standing up, walking, or waving.`,
+    'Already talking at the first frame; no silent intro and no fade-in from a still pose.',
     'No extra words, no filler, no humming, and no invented syllables after the line ends.',
     'Exactly as the last word ends, lips meet, the jaw stops, and the talking pose holds in silence.',
     'Uses <Audio 1> only as voice timbre. Do not copy words, emotion, rhythm, or pace from <Audio 1>. No music. No on-screen text, captions, logos, or subtitles.',
@@ -147,7 +134,7 @@ export function buildShotPrompt(input: {
     'Clean studio presentation. Soft key from camera-left, natural skin texture.',
     '',
     'Subjects:',
-    ...subjects,
+    '<Subject 1> is the person in <Picture 1>, same face, hair, clothing, and body proportions.',
     '',
     'Background:',
     '<Background 1> is the environment in <Picture 2>, unchanged lighting and set dressing.',

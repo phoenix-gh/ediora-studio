@@ -130,7 +130,7 @@ describe('digital-human shot render job', () => {
     expect(api.completeJob).toHaveBeenCalledWith(12)
   })
 
-  it('uses the previous last frame as the next shot first frame', async () => {
+  it('renders a later shot the same way as the first clip', async () => {
     const api = jobApi()
     api.getShotContext.mockResolvedValue({
       project_id: 9,
@@ -153,24 +153,30 @@ describe('digital-human shot render job', () => {
         media_type: 'image/jpeg',
         filename: 'env.jpg',
       },
+      picture_3: {
+        url: '/api/uploads/portrait.jpg',
+        media_type: 'image/jpeg',
+        filename: 'portrait.jpg',
+      },
       audio_1: {
         url: '/api/uploads/voice.wav',
         media_type: 'audio/wav',
         filename: 'voice.wav',
       },
-      previous_clip: {
-        url: '/api/uploads/prev.mp4',
-        media_type: 'video/mp4',
-        filename: 'prev.mp4',
-      },
-      needs_previous_clip: true,
     })
-    api.extractLastFrame = vi.fn().mockResolvedValue(new Uint8Array([9, 8, 7]))
+    api.fetchLocalAsset = vi.fn().mockImplementation(async (
+      _url: string,
+      fallback: { media_type: string; filename: string },
+    ) => ({
+      bytes: new Uint8Array([1, 2, 3]),
+      mediaType: fallback.media_type,
+      filename: fallback.filename,
+    }))
     const comfyui = {
       uploadImage: vi.fn()
         .mockResolvedValueOnce({ name: 'look.jpg', subfolder: '', type: 'input' })
         .mockResolvedValueOnce({ name: 'env.jpg', subfolder: '', type: 'input' })
-        .mockResolvedValueOnce({ name: 'first-frame.jpg', subfolder: '', type: 'input' }),
+        .mockResolvedValueOnce({ name: 'portrait.jpg', subfolder: '', type: 'input' }),
       uploadAudio: vi.fn().mockResolvedValue({ name: 'voice.wav', subfolder: '', type: 'input' }),
       queuePrompt: vi.fn().mockResolvedValue('prompt-2'),
       getHistory: vi.fn().mockResolvedValue({
@@ -189,24 +195,55 @@ describe('digital-human shot render job', () => {
 
     await runDigitalHumanShotRenderJob(13, deps)
 
-    expect(api.extractLastFrame).toHaveBeenCalled()
-    expect(comfyui.uploadImage.mock.calls[2]?.[1]).toContain('first-frame-')
+    expect(comfyui.uploadImage.mock.calls[2]?.[1]).toContain('portrait.jpg')
     const prompt = comfyui.queuePrompt.mock.calls[0]?.[0] as Record<string, { inputs?: Record<string, unknown> }>
-    expect(prompt['138']?.inputs?.value).toContain('<Picture 3>')
-    expect(prompt['138']?.inputs?.value).toContain('first frame')
-    expect(prompt['142']?.inputs?.image).toBe('first-frame.jpg')
+    expect(prompt['138']?.inputs?.value).toContain('Already talking at the first frame')
+    expect(prompt['138']?.inputs?.value).not.toContain('last frame of the previous clip')
+    expect(prompt['142']?.inputs?.image).toBe('portrait.jpg')
   })
 
-  it('stops the job when the previous clip is missing', async () => {
+  it('reuses the existing shot seed', async () => {
     const api = jobApi()
-    api.getJob.mockResolvedValue({
-      id: 14,
-      flow: 'digital_human_shot_render',
-      title: 'job',
-      status: 'queued',
-      input: { project_id: 9, shot_id: 'shot-2' },
-      steps: [],
+    const context = await api.getShotContext(9, 'shot-1', 12)
+    api.getShotContext.mockResolvedValue({
+      ...context,
+      shot: { ...context.shot, seed: 42, provider_state: { seed: 42 } },
     })
+    const comfyui = {
+      uploadImage: vi.fn()
+        .mockResolvedValueOnce({ name: 'look.jpg', subfolder: '', type: 'input' })
+        .mockResolvedValueOnce({ name: 'env.jpg', subfolder: '', type: 'input' })
+        .mockResolvedValueOnce({ name: 'look.jpg', subfolder: '', type: 'input' }),
+      uploadAudio: vi.fn().mockResolvedValue({ name: 'voice.wav', subfolder: '', type: 'input' }),
+      queuePrompt: vi.fn().mockResolvedValue('prompt-1'),
+      getHistory: vi.fn().mockResolvedValue({
+        status: { completed: true },
+        outputs: {
+          '3': { gifs: [{ filename: 'out.mp4', subfolder: '', type: 'output' }] },
+        },
+      }),
+      viewFile: vi.fn().mockResolvedValue(new Uint8Array([9, 9, 9])),
+    }
+    const deps = {
+      api,
+      comfyui,
+      sleep: vi.fn().mockResolvedValue(undefined),
+    } as unknown as ShotJobDeps
+
+    await runDigitalHumanShotRenderJob(12, deps)
+
+    const prompt = comfyui.queuePrompt.mock.calls[0]?.[0] as Record<string, { inputs?: Record<string, unknown> }>
+    expect(prompt['129']?.inputs?.noise_seed).toBe(42)
+    expect(api.updateShot).toHaveBeenCalledWith(
+      9,
+      'shot-1',
+      expect.objectContaining({ seed: 42 }),
+      12,
+    )
+  })
+
+  it('rebuilds a stored prompt that still locks to the previous last frame', async () => {
+    const api = jobApi()
     api.getShotContext.mockResolvedValue({
       project_id: 9,
       shot: {
@@ -215,6 +252,10 @@ describe('digital-human shot render job', () => {
         framing: 'medium',
         spoken_text: '下一句',
         motion_prompt: '',
+        render_prompt:
+          'At 0.00 seconds, <Picture 3> is fully referenced as the first frame.\n'
+          + 'Continue from the last frame of the previous clip.\n'
+          + 'He/she says, "下一句"',
         provider_state: {},
         status: 'queued',
       },
@@ -233,15 +274,21 @@ describe('digital-human shot render job', () => {
         media_type: 'audio/wav',
         filename: 'voice.wav',
       },
-      previous_clip: null,
-      needs_previous_clip: true,
     })
     const comfyui = {
-      uploadImage: vi.fn(),
-      uploadAudio: vi.fn(),
-      queuePrompt: vi.fn(),
-      getHistory: vi.fn(),
-      viewFile: vi.fn(),
+      uploadImage: vi.fn()
+        .mockResolvedValueOnce({ name: 'look.jpg', subfolder: '', type: 'input' })
+        .mockResolvedValueOnce({ name: 'env.jpg', subfolder: '', type: 'input' })
+        .mockResolvedValueOnce({ name: 'look.jpg', subfolder: '', type: 'input' }),
+      uploadAudio: vi.fn().mockResolvedValue({ name: 'voice.wav', subfolder: '', type: 'input' }),
+      queuePrompt: vi.fn().mockResolvedValue('prompt-2'),
+      getHistory: vi.fn().mockResolvedValue({
+        status: { completed: true },
+        outputs: {
+          '3': { gifs: [{ filename: 'out.mp4', subfolder: '', type: 'output' }] },
+        },
+      }),
+      viewFile: vi.fn().mockResolvedValue(new Uint8Array([9, 9, 9])),
     }
     const deps = {
       api,
@@ -249,25 +296,12 @@ describe('digital-human shot render job', () => {
       sleep: vi.fn().mockResolvedValue(undefined),
     } as unknown as ShotJobDeps
 
-    await expect(runDigitalHumanShotRenderJob(14, deps)).rejects.toThrow(
-      '上一镜成片不存在，已停止以免画面不连贯',
-    )
-    expect(comfyui.queuePrompt).not.toHaveBeenCalled()
-    expect(api.failStep).toHaveBeenCalledWith(
-      14,
-      expect.any(Number),
-      expect.objectContaining({ name: 'MissingPreviousClipError' }),
-      false,
-    )
-    expect(api.updateShot).toHaveBeenCalledWith(
-      9,
-      'shot-2',
-      expect.objectContaining({
-        status: 'failed',
-        error: '上一镜成片不存在，已停止以免画面不连贯',
-      }),
-      14,
-    )
+    await runDigitalHumanShotRenderJob(14, deps)
+
+    const prompt = comfyui.queuePrompt.mock.calls[0]?.[0] as Record<string, { inputs?: Record<string, unknown> }>
+    expect(prompt['138']?.inputs?.value).toContain('Already talking at the first frame')
+    expect(prompt['138']?.inputs?.value).toContain('下一句')
+    expect(prompt['138']?.inputs?.value).not.toContain('last frame of the previous clip')
   })
 
   it('queues the shot render_prompt instead of rebuilding a default', async () => {

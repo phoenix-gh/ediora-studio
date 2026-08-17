@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import random
 import re
 import uuid
 from typing import Any
@@ -63,6 +64,14 @@ def effective_delivery(shot_delivery: str = "", base_delivery: str = "") -> str:
     )
 
 
+def effective_presence(shot_presence: str = "", base_presence: str = "") -> str:
+    return (
+        normalize_delivery(shot_presence)
+        or normalize_delivery(base_presence)
+        or DEFAULT_PRESENCE
+    )
+
+
 def dialogue_language_tag(text: str) -> str:
     return "Chinese" if re.search(r"[\u4e00-\u9fff]", text) else "English"
 
@@ -74,14 +83,13 @@ def build_shot_prompt(
     delivery: str = "",
     base_delivery: str = "",
     presence: str = "",
-    has_first_frame_reference: bool = False,
-    has_pose_reference: bool = False,
+    base_presence: str = "",
 ) -> str:
     framing_label = _FRAMING_LABEL.get(framing, "medium shot")
     spoken = spoken_text.strip()
     motion = motion_prompt.strip()
     tone = effective_delivery(delivery, base_delivery)
-    performance = normalize_delivery(presence) or DEFAULT_PRESENCE
+    performance = effective_presence(presence, base_presence)
     camera = (
         "Very slow push-in. Eye-level. No shake."
         if framing == "close"
@@ -89,51 +97,25 @@ def build_shot_prompt(
     )
     action = f"{motion} " if motion else ""
     lang = dialogue_language_tag(spoken)
-    has_first_frame = has_first_frame_reference or has_pose_reference
-    subjects = [
-        "<Subject 1> is the person in <Picture 1>, same face, hair, clothing, and body proportions.",
-    ]
-    if has_first_frame:
-        subjects.append(
-            "<Picture 3> is the last frame of the previous clip and the first frame of this shot."
-        )
-    opening = (
-        (
-            "At 0.00 seconds, <Picture 3> is fully referenced as the first frame. "
-            f"<Subject 1> faces the camera in <Background 1>, matching that opening pose. "
-            f"{action}"
-            f"<Subject 1> (S1) uses a {tone} delivery. "
-            "Emotion, cadence, and speaking rate come from this prompt, not from <Audio 1>."
-        )
-        if has_first_frame
-        else (
-            f"<Subject 1> faces the camera in <Background 1> and is already speaking. "
-            f"{action}"
-            f"<Subject 1> (S1) uses a {tone} delivery. "
-            "Emotion, cadence, and speaking rate come from this prompt, not from <Audio 1>."
-        )
-    )
-    onset = (
-        "Start speaking from that exact pose; the first syllable begins immediately "
-        "after the opening frame, with no long still hold."
-        if has_first_frame
-        else "Already talking at the first frame; no silent intro and no fade-in from a still pose."
-    )
     return "\n".join(
         [
             "Video Description:",
-            opening,
+            (
+                f"<Subject 1> faces the camera in <Background 1> and is already speaking. "
+                f"{action}"
+                f"<Subject 1> (S1) talks with this exact emotion and cadence: {tone}. "
+                "Emotion, cadence, and speaking rate come from this prompt, not from <Audio 1>."
+            ),
             (
                 f'<Subject 1> (S1) says ONLY this quoted line and then stops: '
                 f'<d>[{lang}] {spoken}</d>'
             ),
             (
                 f"Performance: {performance}. "
-                "Gestures stay small and speech-synced: a slight head nod or one-hand "
-                "open-palm beat on stressed words; shoulders stay settled; "
+                "Stay seated facing camera; gestures stay small and speech-synced; "
                 "no standing up, walking, or waving."
             ),
-            onset,
+            "Already talking at the first frame; no silent intro and no fade-in from a still pose.",
             "No extra words, no filler, no humming, and no invented syllables after the line ends.",
             "Exactly as the last word ends, lips meet, the jaw stops, and the talking pose holds in silence.",
             (
@@ -152,7 +134,7 @@ def build_shot_prompt(
             "Clean studio presentation. Soft key from camera-left, natural skin texture.",
             "",
             "Subjects:",
-            *subjects,
+            "<Subject 1> is the person in <Picture 1>, same face, hair, clothing, and body proportions.",
             "",
             "Background:",
             "<Background 1> is the environment in <Picture 2>, unchanged lighting and set dressing.",
@@ -168,6 +150,7 @@ def new_blank_shot(duration_sec: int) -> dict[str, Any]:
         "spoken_text": "",
         "motion_prompt": "",
         "delivery": "",
+        "presence": "",
         "render_prompt": "",
         "first_frame_asset_id": None,
         "clip_asset_id": None,
@@ -180,23 +163,38 @@ def new_blank_shot(duration_sec: int) -> dict[str, Any]:
     }
 
 
-def shot_requires_previous_clip(shots: list[dict[str, Any]], shot_id: str) -> bool:
-    for index, item in enumerate(shots):
-        if item.get("id") == shot_id:
-            return index > 0
-    return False
-
-
-def previous_succeeded_clip_id(shots: list[dict[str, Any]], shot_id: str) -> int | None:
-    for index, item in enumerate(shots):
-        if item.get("id") != shot_id:
-            continue
-        for prior in reversed(shots[:index]):
-            clip_id = prior.get("clip_asset_id")
-            if prior.get("status") == "succeeded" and isinstance(clip_id, int):
-                return clip_id
+def _as_seed(value: Any) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int):
         return None
+    return value
+
+
+def established_seed(shots: list[dict[str, Any]]) -> int | None:
+    for shot in shots:
+        seed = _as_seed(shot.get("seed"))
+        if seed is not None:
+            return seed
+        seed = _as_seed((shot.get("provider_state") or {}).get("seed"))
+        if seed is not None:
+            return seed
     return None
+
+
+def assign_shared_seed(
+    shots: list[dict[str, Any]],
+    seed: int | None = None,
+) -> tuple[list[dict[str, Any]], int]:
+    resolved = _as_seed(seed)
+    if resolved is None:
+        resolved = established_seed(shots)
+    if resolved is None:
+        resolved = random.randint(1, 1_000_000_000)
+    stamped: list[dict[str, Any]] = []
+    for shot in shots:
+        state = dict(shot.get("provider_state") or {})
+        state["seed"] = resolved
+        stamped.append({**shot, "seed": resolved, "provider_state": state})
+    return stamped, resolved
 
 
 def script_from_shots(shots: list[dict[str, Any]]) -> str:
@@ -311,7 +309,18 @@ def parse_shot_plan_segments(raw: str) -> list[dict[str, Any]]:
         segments.append({
             "text": spoken,
             "framing": framing,
-            "delivery": normalize_delivery(item.get("delivery")),
+            "delivery": normalize_delivery(
+                item.get("delivery")
+                or item.get("tone")
+                or item.get("节奏")
+                or item.get("语气")
+            ),
+            "presence": normalize_delivery(
+                item.get("presence")
+                or item.get("state")
+                or item.get("表演")
+                or item.get("状态")
+            ),
         })
     return segments
 
@@ -413,18 +422,151 @@ def apply_planned_segments(
         if framing not in FRAMINGS:
             framing = "medium"
         delivery = effective_delivery(str(item.get("delivery") or ""), base_delivery)
+        shot_presence = effective_presence(str(item.get("presence") or ""), presence)
         for piece in split_overlong_text(str(item.get("text") or ""), max_seconds):
             shot = new_blank_shot(estimate_shot_seconds(piece, min_seconds, max_seconds))
             shot["spoken_text"] = piece
             shot["framing"] = framing
             shot["delivery"] = delivery
+            shot["presence"] = shot_presence
             shot["render_prompt"] = build_shot_prompt(
-                framing, piece, delivery=delivery, presence=presence
+                framing,
+                piece,
+                delivery=delivery,
+                presence=shot_presence,
+                base_delivery=base_delivery,
+                base_presence=presence,
             )
             shots.append(shot)
     if not shots:
         raise InvalidTalkingVideo("至少需要一个镜头")
     return shots
+
+
+_CTA_RE = re.compile(r"关注|评论|私信|点赞|订阅")
+_HOOK_RE = re.compile(r"刚刚|重大|更新|发布|我试过")
+_EMPHASIS_RE = re.compile(r"最喜欢|关键|注意|但是|甚至|更低|更快")
+_MIDDLE_PERFORMANCES = (
+    (
+        "measured tutorial; medium conversational rate; clear teaching",
+        "upright, slower nods, one hand counts the point",
+    ),
+    (
+        "impressed and slightly faster; punchy on the benefit",
+        "small smile, quicker nods, palm lifts on the feature",
+    ),
+    (
+        "firmer emphasis; short pause before the key fact",
+        "still torso, tighter eyes, one beat on the key word",
+    ),
+)
+
+
+def performances_are_distinct(shots: list[dict[str, Any]]) -> bool:
+    if len(shots) <= 1:
+        return True
+    pairs = [
+        (
+            normalize_delivery(shot.get("delivery")),
+            normalize_delivery(shot.get("presence")),
+        )
+        for shot in shots
+    ]
+    return len(set(pairs)) == len(pairs) and all(delivery for delivery, _ in pairs)
+
+
+def fallback_shot_performances(shots: list[dict[str, Any]]) -> list[dict[str, str]]:
+    total = len(shots)
+    used: set[tuple[str, str]] = set()
+    performances: list[dict[str, str]] = []
+    for index, shot in enumerate(shots):
+        text = str(shot.get("spoken_text") or "")
+        if index == 0 or _HOOK_RE.search(text):
+            delivery = "brighter hook; quicker on-set; proud excitement"
+            presence = "forward lean, eyes wider, one-hand beat on the opening claim"
+        elif index == total - 1 or _CTA_RE.search(text):
+            delivery = "warmer close; slower landing; direct invitation"
+            presence = "lean in slightly, softer eyes, palms open toward camera"
+        elif _EMPHASIS_RE.search(text) or re.search(r"\d", text):
+            delivery = "emphatic; pause then punch the number or contrast"
+            presence = "still shoulders, sharper nod, open palm on the number"
+        else:
+            delivery, presence = _MIDDLE_PERFORMANCES[(index - 1) % len(_MIDDLE_PERFORMANCES)]
+        key = (delivery, presence)
+        if key in used:
+            delivery = f"{delivery}; beat {index + 1} of {total}"
+            key = (delivery, presence)
+        used.add(key)
+        performances.append({"delivery": delivery, "presence": presence})
+    return performances
+
+
+def parse_shot_performances(raw: str, expected: int) -> list[dict[str, str]]:
+    text = raw.strip()
+    payload: Any = None
+    object_match = re.search(r"\{[\s\S]*\}", text)
+    if object_match:
+        try:
+            parsed = json.loads(object_match.group(0))
+        except json.JSONDecodeError:
+            parsed = None
+        if isinstance(parsed, dict) and isinstance(parsed.get("shots"), list):
+            payload = parsed["shots"]
+    if payload is None:
+        array_match = re.search(r"\[[\s\S]*\]", text)
+        if array_match:
+            try:
+                parsed = json.loads(array_match.group(0))
+            except json.JSONDecodeError:
+                parsed = None
+            if isinstance(parsed, list):
+                payload = parsed
+    if not isinstance(payload, list) or len(payload) != expected:
+        raise InvalidTalkingVideo("镜头表演数量不匹配")
+    performances: list[dict[str, str]] = []
+    for item in payload:
+        if not isinstance(item, dict):
+            raise InvalidTalkingVideo("镜头表演格式无效")
+        delivery = normalize_delivery(
+            item.get("delivery")
+            or item.get("tone")
+            or item.get("节奏")
+            or item.get("语气")
+        )
+        presence = normalize_delivery(
+            item.get("presence")
+            or item.get("state")
+            or item.get("表演")
+            or item.get("状态")
+        )
+        if not delivery or not presence:
+            raise InvalidTalkingVideo("镜头表演缺少语气或状态")
+        performances.append({"delivery": delivery, "presence": presence})
+    if not performances_are_distinct(performances):
+        raise InvalidTalkingVideo("镜头表演没有拉开差异")
+    return performances
+
+
+def apply_shot_performances(
+    shots: list[dict[str, Any]],
+    performances: list[dict[str, str]],
+) -> list[dict[str, Any]]:
+    if len(shots) != len(performances):
+        raise InvalidTalkingVideo("镜头表演数量不匹配")
+    updated: list[dict[str, Any]] = []
+    for shot, item in zip(shots, performances, strict=True):
+        delivery = normalize_delivery(item.get("delivery"))
+        presence = normalize_delivery(item.get("presence"))
+        next_shot = {**shot, "delivery": delivery, "presence": presence}
+        next_shot["render_prompt"] = build_shot_prompt(
+            str(next_shot.get("framing") or "medium"),
+            str(next_shot.get("spoken_text") or ""),
+            str(next_shot.get("motion_prompt") or ""),
+            delivery=delivery,
+            presence=presence,
+        )
+        updated.append(next_shot)
+    return updated
 
 
 def _normalize_shot(
@@ -461,6 +603,7 @@ def _normalize_shot(
         "spoken_text": str(raw.get("spoken_text") or ""),
         "motion_prompt": str(raw.get("motion_prompt") or ""),
         "delivery": normalize_delivery(raw.get("delivery")),
+        "presence": normalize_delivery(raw.get("presence")),
         "render_prompt": str(raw.get("render_prompt") or ""),
         "first_frame_asset_id": first_frame if isinstance(first_frame, int) else None,
         "clip_asset_id": clip if isinstance(clip, int) else None,

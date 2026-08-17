@@ -134,11 +134,22 @@ cp .env.example .env
 docker compose up --build
 ```
 
-服务会启动 Web（3000）、Python API（8000）、Postgres、Redis 和内容任务 worker。
+API、worker 和 Web 共用一个由根目录 `Dockerfile` 构建的应用镜像，但仍以三个独立
+服务运行；另有 Postgres 和 Redis。默认启动不会拉起 GPU 依赖的 local-asr。
+如需启用本地语音转写，可使用：
+
+```bash
+docker compose --profile local-asr up --build
+```
+
+修改 `NEXT_PUBLIC_API_URL` 后需要重新构建应用镜像，因为它会在 Next.js 构建阶段写入
+浏览器 bundle。服务会启动 Web（3000）、Python API（8000）、Postgres、Redis 和内容任务 worker。
 `POSTGRES_PASSWORD` 可在 `.env` 中覆盖；首次启动前还需把
 `WMS_WORKER_TOKEN` 改成一个长随机值。API 与 worker 必须使用同一个值，
 且不得使用 `NEXT_PUBLIC_` 前缀。LLM、图片和 HeyGen 密钥只配置在服务端，
 绝不放入浏览器变量。
+如果宿主机的 8000 或 3000 已被占用，可在 `.env` 中设置 `WMS_API_PORT` 或
+`WMS_WEB_PORT`；这只改变宿主机映射，不改变容器内端口。
 
 ## 文字视频（当前里程碑）
 

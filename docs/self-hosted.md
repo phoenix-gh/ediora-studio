@@ -15,6 +15,20 @@ docker compose up --build
 Open `http://localhost:3000`. The API health endpoint is
 `http://localhost:8000/health`.
 
+The API, worker, and Web services share one application image built from the
+root `Dockerfile`; Postgres and Redis remain separate services. The optional
+GPU-backed local ASR service is not started by default. Enable it explicitly:
+
+```bash
+docker compose --profile local-asr up --build
+```
+
+`NEXT_PUBLIC_API_URL` is embedded into the Next.js browser bundle at build
+time, so changing it requires rebuilding the application image.
+
+If host ports `8000` or `3000` are already in use, set `WMS_API_PORT` or
+`WMS_WEB_PORT` in `.env`; the container ports remain unchanged.
+
 ## Services
 
 - `web`: Next.js UI, Jobs page, and Vercel AI SDK orchestration.

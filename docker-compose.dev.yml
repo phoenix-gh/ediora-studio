@@ -3,11 +3,18 @@ services:
     volumes:
       - ./backend:/app
 
+  worker:
+    working_dir: /app/web
+    volumes:
+      - ./web:/app/web
+      - /app/web/node_modules
+
   web:
+    working_dir: /app/web
     command: ["./node_modules/.bin/next", "dev", "--hostname", "0.0.0.0"]
     environment:
       NODE_ENV: development
       WATCHPACK_POLLING: "true"
     volumes:
-      - ./web:/app
-      - /app/node_modules
+      - ./web:/app/web
+      - /app/web/node_modules

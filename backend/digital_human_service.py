@@ -352,13 +352,22 @@ def _shot_plan_prompt(
     min_seconds: int,
     max_seconds: int,
     base_delivery: str = "",
+    base_presence: str = "",
 ) -> str:
-    from digital_human_shots import CHARS_PER_SECOND, DEFAULT_DELIVERY, effective_delivery
+    from digital_human_shots import (
+        CHARS_PER_SECOND,
+        DEFAULT_DELIVERY,
+        DEFAULT_PRESENCE,
+        effective_delivery,
+        effective_presence,
+    )
 
     max_chars = max(1, max_seconds * CHARS_PER_SECOND)
     tone = effective_delivery("", base_delivery)
+    body = effective_presence("", base_presence)
     return (
-        "你是口播分镜规划器。先根据全文提炼本篇数字人该怎么说、该是什么状态，"
+        "你是口播分镜规划器。先通读全文，决定本篇数字人的节奏弧："
+        "开场 hook → 主体讲解/举例 → 强调或收束，"
         "再把全文切成镜头。\n"
         "所有镜头的 text 按顺序拼接后必须与全文完全一致，"
         "禁止增删改任何字、标点、空格或换行。\n"
@@ -367,17 +376,21 @@ def _shot_plan_prompt(
         "<<<SCRIPT\n"
         f"{script}\n"
         "SCRIPT>>>\n\n"
-        "delivery：本篇整体说话语气，短英文，必须同时写清情绪和语速，"
+        "delivery：本篇总基调，短英文，必须同时写清整体情绪、语速，"
+        "以及开场到收束如何变化，"
         f"例如 {tone or DEFAULT_DELIVERY}。"
         "不要只写抽象 mood，不要把参考音频里的情绪或语速抄进来。\n"
-        "presence：本篇整体肢体，短英文，写可见动作："
-        "坐姿、头、手、肩、视线，"
-        "例如 seated upright facing camera, torso still, "
-        "slight head nods, one-hand open-palm beat on key words。\n"
-        "每镜 delivery 只微调情绪或语速，例如 "
-        "slightly brighter hook / slower measured caution / "
-        "warmer softer close。"
-        "相邻镜头不要跳太大。不要为了语气改 text。\n"
+        "presence：本篇默认坐姿与可见肢体，短英文，写坐姿、头、手、肩、视线，"
+        f"例如 {body or DEFAULT_PRESENCE}。\n"
+        "每镜必须根据该镜对白在全文中的内容角色，写独立的 delivery 和 presence："
+        "delivery 是这一句的人物情绪 + 讲话节奏/语速；"
+        "presence 是这一句的可见表演。"
+        "禁止所有镜头共用同一套情绪和语速。"
+        "相邻镜头的 delivery 不得完全相同；"
+        "若相邻内容功能不同（提问、定义、举例、警告、总结），"
+        "情绪或语速必须明显变化，而不是只改两三个词。\n"
+        "每镜仍保持坐着对镜头，不要站起、走路或挥手。"
+        "不要为了语气改 text。\n"
         f"每段尽量不超过 {max_chars} 个非空白字"
         f"（约 {max_seconds} 秒，按每秒 {CHARS_PER_SECOND} 字）。"
         f"不要无故短于约 {min_seconds} 秒。"
@@ -385,7 +398,9 @@ def _shot_plan_prompt(
         "framing 只能是 wide、medium、close。\n"
         "输出格式："
         '{"delivery":"...","presence":"...","shots":'
-        '[{"text":"...","framing":"medium","delivery":"measured tutorial pace"}]}'
+        '[{"text":"...","framing":"medium",'
+        '"delivery":"brighter hook, quicker on-set",'
+        '"presence":"forward lean, brighter eyes, one-hand beat"}]}'
     )
 
 
@@ -393,16 +408,39 @@ def _piece_voice_prompt(script: str) -> str:
     from digital_human_shots import DEFAULT_DELIVERY, DEFAULT_PRESENCE
 
     return (
-        "你是口播语气提炼器。根据全文判断数字人本篇该用什么语气、什么状态说话。\n"
+        "你是口播语气提炼器。根据全文判断本篇数字人该用什么节奏说话。\n"
         "只输出 JSON 对象，不要 markdown，不要镜头列表。\n"
         '格式：{"delivery":"短英文语气","presence":"短英文状态"}\n'
         f"delivery 示例：{DEFAULT_DELIVERY}\n"
         f"presence 示例：{DEFAULT_PRESENCE}\n"
-        "delivery 必须同时写清情绪和语速，例如 warm assured; medium conversational speaking rate。\n"
+        "delivery 必须写清整体情绪、语速，以及开场→主体→收束的节奏弧，"
+        "例如 brighter hook then measured tutorial then warmer close。\n"
         "presence 必须写可见肢体：坐姿、头、手、肩、视线，不要只写 relaxed/natural。\n\n"
         "全文口播：\n<<<SCRIPT\n"
         f"{script}\n"
         "SCRIPT>>>"
+    )
+
+
+def _shot_performance_prompt(script: str, shots: list) -> str:
+    lines = [
+        f"[{index + 1}] {shot.get('spoken_text') or ''}"
+        for index, shot in enumerate(shots)
+    ]
+    return (
+        "你是口播镜头表演导演。镜头 text 已经定稿，禁止改字、禁止增删镜头。\n"
+        "只输出 JSON 对象，不要 markdown。\n"
+        f'格式：{{"shots":[{{"delivery":"...","presence":"..."}}]}} ，数组长度必须是 {len(shots)}。\n'
+        "第 n 项对应镜 n。\n"
+        "delivery：这一句的人物情绪 + 讲话节奏/语速，短英文。\n"
+        "presence：这一句可见表演（头、眼、手、肩、坐姿微调），短英文，仍坐着对镜头。\n"
+        "每镜必须根据该句在全文中的角色来写（hook / 讲解 / 举例 / 强调 / 号召），"
+        "相邻镜头的 delivery 和 presence 都必须不同，禁止共用同一套默认语气。\n\n"
+        "全文口播：\n<<<SCRIPT\n"
+        f"{script}\n"
+        "SCRIPT>>>\n\n"
+        "镜头列表：\n"
+        + "\n".join(lines)
     )
 
 
@@ -428,6 +466,7 @@ async def _request_shot_plan_text(
     min_seconds: int,
     max_seconds: int,
     base_delivery: str = "",
+    base_presence: str = "",
 ) -> str:
     import asyncio
 
@@ -436,7 +475,9 @@ async def _request_shot_plan_text(
     try:
         return await asyncio.wait_for(
             _call(
-                _shot_plan_prompt(script, min_seconds, max_seconds, base_delivery),
+                _shot_plan_prompt(
+                    script, min_seconds, max_seconds, base_delivery, base_presence
+                ),
                 max_tokens=8000,
             ),
             timeout=_PLAN_LLM_TIMEOUT_SEC,
@@ -447,6 +488,30 @@ async def _request_shot_plan_text(
         raise InvalidTalkingVideo("模型规划超时") from exc
     except Exception as exc:
         raise InvalidTalkingVideo(f"模型规划失败：{str(exc)[:200]}") from exc
+
+
+async def _assign_distinct_shot_performances(script: str, shots: list) -> list:
+    from digital_human_shots import (
+        apply_shot_performances,
+        fallback_shot_performances,
+        parse_shot_performances,
+        performances_are_distinct,
+    )
+
+    if performances_are_distinct(shots):
+        return shots
+    import asyncio
+
+    from llm import _call
+
+    try:
+        raw = await asyncio.wait_for(
+            _call(_shot_performance_prompt(script, shots), max_tokens=4000),
+            timeout=45,
+        )
+        return apply_shot_performances(shots, parse_shot_performances(raw, len(shots)))
+    except Exception:
+        return apply_shot_performances(shots, fallback_shot_performances(shots))
 
 
 def _shots_from_plan_text(
@@ -529,7 +594,7 @@ async def plan_project_shots(
         extracted_presence = base_presence
     try:
         raw = await _request_shot_plan_text(
-            source, min_seconds, max_seconds, extracted_delivery
+            source, min_seconds, max_seconds, extracted_delivery, extracted_presence
         )
         shots, plan_delivery, plan_presence = _shots_from_plan_text(
             source,
@@ -550,6 +615,8 @@ async def plan_project_shots(
             base_delivery=extracted_delivery,
             presence=extracted_presence,
         )
+
+    shots = await _assign_distinct_shot_performances(source, shots)
 
     project = await session.scalar(
         select(TalkingVideoProject)
@@ -605,10 +672,9 @@ async def enqueue_shot_render(
     shot_id: str,
 ) -> tuple[dict, ContentJob]:
     from digital_human_shots import (
+        assign_shared_seed,
         find_shot,
-        previous_succeeded_clip_id,
         replace_shot,
-        shot_requires_previous_clip,
     )
 
     if not effective_comfyui_base_url(await get_config()):
@@ -631,11 +697,6 @@ async def enqueue_shot_render(
     shot = find_shot(shots, shot_id)
     if shot["status"] in {"queued", "running"}:
         raise InvalidTalkingVideo("该镜头正在生成")
-    if (
-        shot_requires_previous_clip(shots, shot_id)
-        and previous_succeeded_clip_id(shots, shot_id) is None
-    ):
-        raise InvalidTalkingVideo("上一镜成片不存在，先生成上一镜再继续")
     job = await create_job(
         session,
         flow="digital_human_shot_render",
@@ -643,16 +704,19 @@ async def enqueue_shot_render(
         input_data={"project_id": project.id, "shot_id": shot_id},
         commit=False,
     )
-    state = dict(shot.get("provider_state") or {})
+    shots, seed = assign_shared_seed(shots)
+    state = dict(find_shot(shots, shot_id).get("provider_state") or {})
     state.pop("prompt_id", None)
+    state.pop("auto_queue", None)
+    state["seed"] = seed
     project.shots = replace_shot(
-        list(project.shots or []),
+        shots,
         shot_id,
         {
             "status": "queued",
             "job_id": job.id,
             "error": "",
-            "seed": None,
+            "seed": seed,
             "provider_state": state,
         },
     )
@@ -668,30 +732,13 @@ async def enqueue_pending_shot_renders(
     project = await session.get(TalkingVideoProject, project_id)
     if project is None:
         raise InvalidTalkingVideo("口播作品不存在")
-    from digital_human_shots import (
-        previous_succeeded_clip_id,
-        shot_requires_previous_clip,
-    )
 
     jobs: list[ContentJob] = []
-    shots = list(project.shots or [])
-    for shot in shots:
-        shot_id = str(shot["id"])
+    for shot in list(project.shots or []):
         if shot.get("status") not in {"draft", "failed"}:
             continue
-        if (
-            shot_requires_previous_clip(shots, shot_id)
-            and previous_succeeded_clip_id(shots, shot_id) is None
-        ):
-            continue
-        _, job = await enqueue_shot_render(
-            session, project_id, shot_id
-        )
+        _, job = await enqueue_shot_render(session, project_id, str(shot["id"]))
         jobs.append(job)
-        for item in shots:
-            if str(item.get("id")) == shot_id:
-                item["status"] = "queued"
-                break
     return jobs
 
 
