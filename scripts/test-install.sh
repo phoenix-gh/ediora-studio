@@ -94,8 +94,9 @@ setup_case() {
   export EDIORA_DOCKER_STATE="$CASE_DIR/docker.state"
   export EDIORA_DOCKER_KEYRING_DIR="$CASE_DIR/keyrings"
   export EDIORA_DOCKER_REPO_FILE="$CASE_DIR/docker.list"
-  export EDIORA_FAKE_PULL_FAIL=0
-  export EDIORA_FAKE_HTTP_FAIL=0
+export EDIORA_FAKE_PULL_FAIL=0
+export EDIORA_FAKE_HTTP_FAIL=0
+  export EDIORA_FAKE_SYSTEMCTL_NO_DOCKER=0
   export PATH="$CASE_DIR/bin:/usr/bin:/bin"
 
   write_executable "$CASE_DIR/bin/sudo" '#!/usr/bin/env bash
@@ -186,7 +187,9 @@ exit 0'
   write_executable "$CASE_DIR/bin/systemctl" '#!/usr/bin/env bash
 set -u
 printf "systemctl %s\n" "$*" >> "$EDIORA_COMMAND_LOG"
-touch "$EDIORA_DOCKER_STATE"
+if [[ "${EDIORA_FAKE_SYSTEMCTL_NO_DOCKER:-0}" != 1 ]]; then
+  touch "$EDIORA_DOCKER_STATE"
+fi
 exit 0'
 
   write_executable "$CASE_DIR/bin/docker" '#!/usr/bin/env bash
@@ -328,6 +331,18 @@ test_confirmed_docker_installation_runs_apt_before_compose() {
   assert_log_order 'apt-get install' 'compose-action' 'Docker packages must be installed before Compose'
 }
 
+test_docker_installation_requires_post_install_daemon_check() {
+  local output="$CASE_DIR/output.log"
+  export EDIORA_FAKE_SYSTEMCTL_NO_DOCKER=1
+  make_input "$CASE_DIR/input" y '' '' '' '' '' '' '' '' '' '' ''
+  if run_installer "$output"; then
+    fail 'Docker installation without a usable daemon should fail'
+    return 1
+  fi
+  assert_log_contains 'apt-get install' 'post-install check case must install Docker packages'
+  assert_log_not_contains 'compose-action' 'post-install check failure must not start Compose'
+}
+
 test_existing_env_values_are_preserved_and_missing_values_appended() {
   local output="$CASE_DIR/output.log"
   local original prefix
@@ -382,6 +397,7 @@ test_default_flow_pulls_then_starts_without_build() {
   assert_log_contains 'compose-action up' 'default flow must start the stack'
   assert_log_contains 'compose-action up -d --no-build' 'default flow must start without building'
   assert_log_not_contains 'compose-action build' 'default flow must not build locally'
+  assert_log_not_contains 'local-asr' 'default flow must not start local ASR'
   assert_log_order 'compose-action pull' 'compose-action up' 'default flow must pull before start'
 }
 
@@ -408,6 +424,97 @@ test_pull_failure_does_not_run_compose_down() {
     return 1
   fi
   assert_log_not_contains 'compose-action down' 'pull failure must not run compose down'
+}
+
+test_readiness_timeout_returns_nonzero_without_cleanup() {
+  local output="$CASE_DIR/output.log"
+  touch "$EDIORA_DOCKER_STATE"
+  export EDIORA_FAKE_HTTP_FAIL=1
+  export EDIORA_READY_ATTEMPTS=1
+  export EDIORA_READY_INTERVAL=0
+  make_blank_input "$CASE_DIR/input"
+  if run_installer "$output"; then
+    fail 'readiness timeout should return non-zero'
+    return 1
+  fi
+  assert_contains "$output" '仍未就绪' 'readiness timeout must explain the failure'
+  assert_log_not_contains 'compose-action down' 'readiness timeout must not run compose down'
+}
+
+write_valid_env() {
+  printf '%s\n' \
+    'POSTGRES_PASSWORD=valid-db-password' \
+    'WORKER_TOKEN=valid-worker-token-012345678901234567890123' \
+    'X_SESSION_KEY=valid-session-key' \
+    'API_PORT=18000' \
+    'WEB_PORT=18001' \
+    'NEXT_PUBLIC_API_URL=http://localhost:18000/api' \
+    'CORS_ORIGINS=http://localhost:18001' \
+    'APP_IMAGE=ghcr.io/phoenix-gh/ediora-studio' \
+    'IMAGE_TAG=latest' > "$CASE_DIR/.env"
+}
+
+test_invalid_ports_fail_before_compose() {
+  local output="$CASE_DIR/output.log"
+  touch "$EDIORA_DOCKER_STATE"
+  write_valid_env
+  sed -i 's/^WEB_PORT=.*/WEB_PORT=18000/' "$CASE_DIR/.env"
+  make_blank_input "$CASE_DIR/input"
+  if run_installer "$output"; then
+    fail 'duplicate host ports should return non-zero'
+    return 1
+  fi
+  assert_contains "$output" '不能相同' 'duplicate host ports must explain the validation error'
+  assert_log_not_contains 'compose-action' 'invalid ports must fail before Compose'
+}
+
+test_short_worker_token_fails_before_compose() {
+  local output="$CASE_DIR/output.log"
+  touch "$EDIORA_DOCKER_STATE"
+  write_valid_env
+  sed -i 's/^WORKER_TOKEN=.*/WORKER_TOKEN=too-short/' "$CASE_DIR/.env"
+  make_blank_input "$CASE_DIR/input"
+  if run_installer "$output"; then
+    fail 'short worker token should return non-zero'
+    return 1
+  fi
+  assert_contains "$output" '至少需要 32' 'short worker token must explain the validation error'
+  assert_log_not_contains 'compose-action' 'short worker token must fail before Compose'
+}
+
+test_second_run_preserves_generated_secrets() {
+  local first_output="$CASE_DIR/first.log"
+  local second_output="$CASE_DIR/second.log"
+  local first_db first_worker first_session second_db second_worker second_session
+  touch "$EDIORA_DOCKER_STATE"
+  make_blank_input "$CASE_DIR/input"
+  if ! run_installer "$first_output"; then
+    cat "$first_output" >&2
+    return 1
+  fi
+  first_db=$(sed -n 's/^POSTGRES_PASSWORD=//p' "$CASE_DIR/.env")
+  first_worker=$(sed -n 's/^WORKER_TOKEN=//p' "$CASE_DIR/.env")
+  first_session=$(sed -n 's/^X_SESSION_KEY=//p' "$CASE_DIR/.env")
+  : > "$CASE_DIR/second-input"
+  export EDIORA_INPUT_FILE="$CASE_DIR/second-input"
+  if ! run_installer "$second_output"; then
+    cat "$second_output" >&2
+    return 1
+  fi
+  second_db=$(sed -n 's/^POSTGRES_PASSWORD=//p' "$CASE_DIR/.env")
+  second_worker=$(sed -n 's/^WORKER_TOKEN=//p' "$CASE_DIR/.env")
+  second_session=$(sed -n 's/^X_SESSION_KEY=//p' "$CASE_DIR/.env")
+  [[ "$first_db" == "$second_db" && "$first_worker" == "$second_worker" && "$first_session" == "$second_session" ]] || fail 'second run must preserve generated secrets'
+}
+
+test_noninteractive_missing_input_fails_before_env_creation() {
+  local output="$CASE_DIR/output.log"
+  rm -f "$CASE_DIR/.env"
+  if (cd "$CASE_DIR" && env -u EDIORA_INPUT_FILE EDIORA_OS_RELEASE="$EDIORA_OS_RELEASE" bash "$CASE_DIR/install.sh" </dev/null) > "$output" 2>&1; then
+    fail 'missing non-interactive input should return non-zero'
+    return 1
+  fi
+  [[ ! -f "$CASE_DIR/.env" ]] || fail 'non-interactive failure must not create .env'
 }
 
 test_unsupported_ubuntu_fails_before_docker() {
@@ -461,6 +568,14 @@ test_remote_piped_install_reexecutes_from_downloaded_checkout() {
   assert_contains "$output" 'Usage:' 'remote mode must re-execute the downloaded installer'
 }
 
+test_repository_installation_contract() {
+  [[ -x "$INSTALLER_SOURCE" ]] || fail 'install.sh must be executable'
+  assert_contains "$ROOT_DIR/README.md" 'curl -fsSL https://raw.githubusercontent.com/phoenix-gh/ediora-studio/main/install.sh | bash' 'README must document the remote installer command'
+  assert_contains "$ROOT_DIR/docs/self-hosted.md" './install.sh --build' 'self-hosted docs must document the build opt-in'
+  assert_not_contains "$INSTALLER_SOURCE" 'OPENAI_API_KEY' 'installer must not collect provider API keys'
+  assert_not_contains "$INSTALLER_SOURCE" 'HEYGEN_API_KEY' 'installer must not collect HeyGen API keys'
+}
+
 if [[ ! -f "$INSTALLER_SOURCE" ]]; then
   fail 'install.sh is not present; installer contract cannot pass yet'
   printf 'Installer contract baseline is red until install.sh is implemented.\n' >&2
@@ -469,15 +584,22 @@ fi
 
 run_test 'declining Docker installation stops before apt' test_declining_docker_installation_stops_before_apt
 run_test 'confirmed Docker installation runs apt before Compose' test_confirmed_docker_installation_runs_apt_before_compose
+run_test 'Docker installation requires a post-install daemon check' test_docker_installation_requires_post_install_daemon_check
 run_test 'existing environment values are preserved and missing values appended' test_existing_env_values_are_preserved_and_missing_values_appended
 run_test 'generated secrets are redacted and .env is mode 600' test_generated_secrets_are_not_printed_and_env_mode_is_600
 run_test 'default flow pulls then starts without build' test_default_flow_pulls_then_starts_without_build
 run_test 'build flag skips pull and builds explicitly' test_build_flag_skips_pull_and_builds_explicitly
 run_test 'pull failure does not run compose down' test_pull_failure_does_not_run_compose_down
+run_test 'readiness timeout returns non-zero without cleanup' test_readiness_timeout_returns_nonzero_without_cleanup
+run_test 'invalid ports fail before Compose' test_invalid_ports_fail_before_compose
+run_test 'short worker token fails before Compose' test_short_worker_token_fails_before_compose
+run_test 'second run preserves generated secrets' test_second_run_preserves_generated_secrets
+run_test 'non-interactive missing input fails before env creation' test_noninteractive_missing_input_fails_before_env_creation
 run_test 'unsupported Ubuntu fails before Docker' test_unsupported_ubuntu_fails_before_docker
 run_test 'help does not require Docker' test_help_does_not_require_docker
 run_test 'unknown options are rejected' test_unknown_option_is_rejected
 run_test 'remote piped install re-executes from downloaded checkout' test_remote_piped_install_reexecutes_from_downloaded_checkout
+run_test 'repository installation contract is documented' test_repository_installation_contract
 
 printf '\n%d tests, %d failures\n' "$TOTAL" "$FAILED"
 if ((FAILED > 0)); then

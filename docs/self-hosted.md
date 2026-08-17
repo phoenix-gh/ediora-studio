@@ -4,7 +4,53 @@ Ediora runs as a single-user application with no login requirement.
 It does not require Hermes, agent profiles, a Kanban board, or a local terminal
 agent.
 
-## Start
+## One-click install
+
+Supported hosts are Ubuntu 22.04 and 24.04. From an existing checkout run:
+
+```bash
+./install.sh
+```
+
+On a new host, run:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/phoenix-gh/ediora-studio/main/install.sh | bash
+```
+
+The installer checks Docker Engine and Compose v2 first. If either is not
+usable, it explains the official Docker apt installation and waits for an
+explicit `y`/`yes` confirmation before using `sudo`. It does not install the
+application's Python, Node.js, PostgreSQL, or Redis dependencies directly on
+the host.
+
+It creates or completes `.env` interactively, preserves existing assignments,
+sets mode `0600`, and generates safe defaults for the required internal
+secrets. Provider API keys are not collected or stored in `.env`; configure
+LLM, image, speech, and HeyGen credentials from Ediora **Settings** after the
+Web service is ready. Re-running the installer preserves `.env` and named
+volumes. Use `--build` only when a local application-image build is intended;
+the default is the published GHCR image and `docker compose pull` followed by
+`docker compose up -d --no-build`.
+
+Useful options and commands:
+
+```bash
+./install.sh --yes       # skip only the Docker installation confirmation
+./install.sh --build     # build the shared application image locally
+docker compose ps
+docker compose logs -f api worker web
+docker compose stop
+```
+
+If the GHCR package is private, authenticate first with `docker login ghcr.io`.
+The optional GPU-backed local ASR service is not started by the installer:
+
+```bash
+docker compose --profile local-asr up -d
+```
+
+## Manual start
 
 ```bash
 cp .env.example .env

@@ -142,7 +142,7 @@ resolve_checkout() {
 open_input() {
   if [[ -n "${EDIORA_INPUT_FILE-}" ]]; then
     exec {INPUT_FD}<"$EDIORA_INPUT_FILE" || die "无法读取 EDIORA_INPUT_FILE"
-  elif [[ -t 0 ]]; then
+  elif [[ -r /dev/tty && ( -t 0 || -t 1 ) ]]; then
     exec {INPUT_FD}<>/dev/tty || die "无法打开终端输入"
     INPUT_IS_TTY=1
   else
@@ -194,6 +194,10 @@ random_token() {
 random_fernet_key() {
   local value
   if command -v openssl >/dev/null 2>&1 && value=$(openssl rand -base64 32 2>/dev/null | tr '+/' '-_' | tr -d '\n'); then
+    printf '%s' "$value"
+    return
+  fi
+  if command -v base64 >/dev/null 2>&1 && value=$(head -c 32 /dev/urandom | base64 | tr '+/' '-_' | tr -d '\n'); then
     printf '%s' "$value"
     return
   fi
