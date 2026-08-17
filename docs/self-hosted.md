@@ -54,15 +54,15 @@ keys are not collected or stored in `.env`; configure
 LLM, image, speech, and HeyGen credentials from Ediora **Settings** after the
 Web service is ready. Re-running the installer preserves `.env` and the
 Compose-local `data/` directory. It does not migrate or delete existing Docker
-named volumes. Use `--build` only when a local application-image build is intended;
-the default is the published GHCR image and `docker compose pull` followed by
-`docker compose up -d --no-build`.
+named volumes. The installer only downloads the Compose file, pulls the published
+GHCR image, and runs `docker compose up -d --no-build`; it does not download source
+code or build application images. For a local build, use a complete source checkout
+and run `docker compose build api`, followed by `docker compose up -d --no-build`.
 
 Useful options and commands:
 
 ```bash
 ./install.sh --yes       # skip only the Docker installation confirmation
-./install.sh --build     # build the shared application image locally
 # For a piped command, append: sh -s -- --yes
 docker compose ps
 docker compose logs -f api worker web

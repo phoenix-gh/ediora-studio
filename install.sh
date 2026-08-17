@@ -4,9 +4,9 @@ set -eu
 umask 077
 
 AUTO_CONFIRM=0
-DO_BUILD=0
 SHOW_HELP=0
 CHECKOUT_DIR=''
+TARGET_EXISTS=0
 ENV_FILE=''
 COMPOSE_PROJECT_NAME=''
 OS_RELEASE_FILE=${EDIORA_OS_RELEASE-/etc/os-release}
@@ -27,7 +27,7 @@ die() {
 
 usage() {
   cat <<'USAGE'
-Usage: ./install.sh [--yes] [--build]
+Usage: ./install.sh [--yes]
        curl -fsSL https://raw.githubusercontent.com/phoenix-gh/ediora-studio/main/install.sh | sh
        curl -fsSLo install.sh https://raw.githubusercontent.com/phoenix-gh/ediora-studio/main/install.sh
        chmod +x install.sh && ./install.sh
@@ -35,7 +35,6 @@ Usage: ./install.sh [--yes] [--build]
 Options:
   --yes    Skip the Docker installation confirmation prompt.
            With a pipe, pass it as: sh -s -- --yes
-  --build  Build the local application image instead of pulling it from GHCR.
   --help   Show this help.
 USAGE
 }
@@ -45,9 +44,6 @@ parse_args() {
     case "$1" in
       --yes)
         AUTO_CONFIRM=1
-        ;;
-      --build)
-        DO_BUILD=1
         ;;
       --help|-h)
         SHOW_HELP=1
@@ -67,7 +63,7 @@ parse_args() {
 }
 
 require_bootstrap_commands() {
-  for command_name in awk basename chmod cp curl dirname grep head id install mkdir mktemp od sed sleep stty tar tr uname wc; do
+  for command_name in awk basename chmod cp curl dirname grep head id install mkdir mktemp od rm sed sleep stty tr uname wc; do
     command -v "$command_name" >/dev/null 2>&1 || die "缺少系统命令: $command_name"
   done
 }
@@ -122,12 +118,19 @@ ubuntu_docker_install_supported() {
   esac
 }
 
-is_ediora_checkout() {
+is_ediora_source_checkout() {
   checkout_dir=$1
   [ -f "$checkout_dir/install.sh" ] &&
     [ -f "$checkout_dir/docker-compose.yml" ] &&
     [ -d "$checkout_dir/backend" ] &&
     [ -d "$checkout_dir/web" ]
+}
+
+is_ediora_compose_file() {
+  candidate_file=$1
+  [ -f "$candidate_file" ] &&
+    grep -Fq 'x-app-image:' "$candidate_file" &&
+    grep -Fq 'services:' "$candidate_file"
 }
 
 directory_can_receive_checkout() {
@@ -140,21 +143,13 @@ directory_can_receive_checkout() {
   return 0
 }
 
-reexec_checkout() {
-  checkout_dir=$1
-  shift
-  EDIORA_INSTALL_DIR=$checkout_dir
-  export EDIORA_INSTALL_DIR
-  exec sh "$checkout_dir/install.sh" "$@"
-}
-
 resolve_checkout() {
   SCRIPT_SOURCE=$0
   working_dir=$(CDPATH= cd -P . && pwd)
   if [ -f "$SCRIPT_SOURCE" ]; then
     script_dir=$(CDPATH= cd -P "$(dirname "$SCRIPT_SOURCE")" && pwd)
     SCRIPT_SOURCE="$script_dir/$(basename "$SCRIPT_SOURCE")"
-    if [ "$working_dir" = "$script_dir" ] && is_ediora_checkout "$script_dir"; then
+    if [ "$working_dir" = "$script_dir" ] && is_ediora_source_checkout "$script_dir"; then
       CHECKOUT_DIR=$script_dir
       return 0
     fi
@@ -173,43 +168,43 @@ resolve_checkout() {
     *) target=$(pwd)/$target ;;
   esac
 
-  target_exists=0
+  TARGET_EXISTS=0
   if [ -e "$target" ]; then
-    if is_ediora_checkout "$target"; then
+    if is_ediora_compose_file "$target/docker-compose.yml"; then
       CHECKOUT_DIR=$(CDPATH= cd -P "$target" && pwd)
-      if [ "$CHECKOUT_DIR/install.sh" != "$SCRIPT_SOURCE" ]; then
-        reexec_checkout "$CHECKOUT_DIR" "$@"
-      fi
       return 0
     fi
     [ -d "$target" ] && directory_can_receive_checkout "$target" || die "安装目录已存在但不是 Ediora checkout 或空目录: $target"
-    target_exists=1
+    TARGET_EXISTS=1
   fi
 
-  parent=$(dirname "$target")
-  mkdir -p "$parent"
-  temp_dir=$(mktemp -d "${TMPDIR:-/tmp}/ediora-studio.XXXXXX")
-  archive="$temp_dir/ediora-studio.tar.gz"
-  printf '正在下载 Ediora 安装源代码到 %s\n' "$target" >&2
-  if ! curl -fsSL 'https://github.com/phoenix-gh/ediora-studio/archive/refs/heads/main.tar.gz' -o "$archive"; then
-    die "下载 Ediora 源代码失败；临时目录保留在 $temp_dir"
+  if [ "$TARGET_EXISTS" -eq 1 ]; then
+    CHECKOUT_DIR=$(CDPATH= cd -P "$target" && pwd)
+  else
+    CHECKOUT_DIR=$target
   fi
-  [ -s "$archive" ] || die "下载的 Ediora 源代码为空；临时目录保留在 $temp_dir"
-  tar -xzf "$archive" -C "$temp_dir"
-  source_dir=''
-  for candidate in "$temp_dir"/ediora-studio-*; do
-    if [ -d "$candidate" ]; then
-      source_dir=$candidate
-      break
-    fi
-  done
-  [ -n "$source_dir" ] && [ -f "$source_dir/install.sh" ] && [ -f "$source_dir/docker-compose.yml" ] || die "下载包中缺少 Ediora 安装文件；临时目录保留在 $temp_dir"
-  [ "$target_exists" -eq 1 ] || mkdir "$target"
-  cp -R "$source_dir"/. "$target"/
-  chmod +x "$target/install.sh"
-  rm -rf "$temp_dir"
-  CHECKOUT_DIR=$(CDPATH= cd -P "$target" && pwd)
-  reexec_checkout "$CHECKOUT_DIR" "$@"
+}
+
+ensure_compose_file() {
+  compose_file="$CHECKOUT_DIR/docker-compose.yml"
+  if [ -f "$compose_file" ]; then
+    is_ediora_compose_file "$compose_file" || die "安装目录中的 docker-compose.yml 不是 Ediora Compose 配置: $compose_file"
+    return 0
+  fi
+
+  [ "$TARGET_EXISTS" -eq 1 ] || mkdir -p "$CHECKOUT_DIR"
+  temp_file=$(mktemp "${TMPDIR:-/tmp}/ediora-compose.XXXXXX")
+  printf '正在下载 Ediora Compose 配置到 %s\n' "$CHECKOUT_DIR" >&2
+  if ! curl -fsSL 'https://raw.githubusercontent.com/phoenix-gh/ediora-studio/main/docker-compose.yml' -o "$temp_file"; then
+    rm -f "$temp_file"
+    die '下载 Ediora Compose 配置失败'
+  fi
+  if ! is_ediora_compose_file "$temp_file"; then
+    rm -f "$temp_file"
+    die '下载的 docker-compose.yml 不是有效的 Ediora Compose 配置'
+  fi
+  cp "$temp_file" "$compose_file"
+  rm -f "$temp_file"
 }
 
 open_input() {
@@ -536,10 +531,6 @@ pull_images() {
   return "$status"
 }
 
-build_image() {
-  compose build api
-}
-
 start_stack() {
   compose up -d --no-build
 }
@@ -587,7 +578,11 @@ print_success() {
   printf '状态: (cd "%s" && docker compose --env-file .env ps)\n' "$CHECKOUT_DIR"
   printf '日志: (cd "%s" && docker compose --env-file .env logs -f api worker web)\n' "$CHECKOUT_DIR"
   printf '停止: (cd "%s" && docker compose --env-file .env stop)\n' "$CHECKOUT_DIR"
-  printf '重试安装: (cd "%s" && ./install.sh)\n' "$CHECKOUT_DIR"
+  if [ -x "$CHECKOUT_DIR/install.sh" ]; then
+    printf '重试安装: (cd "%s" && ./install.sh)\n' "$CHECKOUT_DIR"
+  else
+    printf '重试安装: curl -fsSL https://raw.githubusercontent.com/phoenix-gh/ediora-studio/main/install.sh | sh\n'
+  fi
   printf '可选本地 ASR: (cd "%s" && docker compose --env-file .env --profile local-asr up -d)\n' "$CHECKOUT_DIR"
   printf '模型及第三方 API 凭据请在 Ediora Settings 中配置。\n'
 }
@@ -601,7 +596,7 @@ main() {
   [ "$(id -u)" -ne 0 ] || die '请使用普通用户运行 install.sh；脚本内部仅对 Docker 包和服务操作使用 sudo'
   require_bootstrap_commands
   detect_platform
-  resolve_checkout "$@"
+  resolve_checkout
   ENV_FILE="$CHECKOUT_DIR/.env"
   compose_project_name
   printf '检测到 %s %s，安装目录: %s\n' "$HOST_OS" "$OS_VERSION" "$CHECKOUT_DIR"
@@ -623,16 +618,13 @@ main() {
     install_docker
   fi
 
+  ensure_compose_file
   collect_env
   validate_env
   prepare_data_directories
   printf '应用镜像: %s:%s；API 端口: %s；Web 端口: %s\n' "$APP_IMAGE_VALUE" "$IMAGE_TAG_VALUE" "$API_PORT_VALUE" "$WEB_PORT_VALUE"
 
-  if [ "$DO_BUILD" -eq 1 ]; then
-    build_image
-  else
-    pull_images
-  fi
+  pull_images
   start_stack
   wait_for_ready
   print_success

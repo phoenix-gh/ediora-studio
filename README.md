@@ -163,10 +163,11 @@ PostgreSQL 或 Redis。安装器会交互式创建或补全根目录 `.env`，�
 从其他目录调用某个 checkout 中的 `install.sh` 时，也不会把脚本所在目录
 当作目标；只有当前工作目录本身是完整 Ediora checkout 时才会原地运行。
 
-默认流程使用 `ghcr.io/phoenix-gh/ediora-studio:latest`，执行镜像拉取后以
-`docker compose up -d --no-build` 启动，不会启动可选的 `local-asr` profile。
-重复运行会保留 `.env` 和 Compose 文件旁的 `data/` 目录；需要本地构建时显式执行 `./install.sh --build`，
-非交互地确认 Docker 安装时可使用 `./install.sh --yes`，管道命令则使用
+默认流程只下载 `docker-compose.yml`，使用 `ghcr.io/phoenix-gh/ediora-studio:latest` 拉取镜像后以
+`docker compose up -d --no-build` 启动，不会下载源码，也不会启动可选的 `local-asr` profile。
+重复运行会保留 `.env` 和 Compose 文件旁的 `data/` 目录。安装器不负责构建镜像；需要本地构建时，
+请在完整源码 checkout 中单独执行 `docker compose build api`，再执行
+`docker compose up -d --no-build`。非交互地确认 Docker 安装时可使用 `./install.sh --yes`，管道命令则使用
 `curl -fsSL https://raw.githubusercontent.com/phoenix-gh/ediora-studio/main/install.sh | sh -s -- --yes`。
 模型、图片、语音和
 HeyGen 凭据在 Web 启动后从 Ediora「Settings」配置，不通过安装器收集。
@@ -210,6 +211,8 @@ docker compose --profile local-asr up -d
 cp .env.example .env
 docker compose up --build
 ```
+
+上面的手动命令才负责本地构建；`install.sh` 只负责 Docker 环境、Compose 配置、环境变量、镜像拉取和启动。
 
 API、worker 和 Web 共用一个由根目录 `Dockerfile` 构建的应用镜像，但仍以三个独立
 服务运行；另有 Postgres 和 Redis。默认启动不会拉起 GPU 依赖的 local-asr。

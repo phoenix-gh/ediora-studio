@@ -107,6 +107,7 @@ setup_case() {
   export EDIORA_DOCKER_STATE="$CASE_DIR/docker.state"
   export EDIORA_DOCKER_KEYRING_DIR="$CASE_DIR/keyrings"
   export EDIORA_DOCKER_REPO_FILE="$CASE_DIR/docker.list"
+  export EDIORA_FAKE_COMPOSE="$ROOT_DIR/docker-compose.yml"
   export EDIORA_FAKE_PULL_FAIL=0
   export EDIORA_FAKE_HTTP_FAIL=0
   export EDIORA_FAKE_SYSTEMCTL_NO_DOCKER=0
@@ -152,7 +153,7 @@ if [[ "$*" == *"download.docker.com"* || "$*" == *"docker.com/linux/ubuntu/gpg"*
   printf "fake-docker-gpg\n"
   exit 0
 fi
-if [[ "$*" == *"main.tar.gz"* ]]; then
+if [[ "$*" == *"raw.githubusercontent.com/phoenix-gh/ediora-studio/main/docker-compose.yml"* ]]; then
   output=""
   while (($#)); do
     if [[ "$1" == "-o" ]]; then
@@ -162,8 +163,8 @@ if [[ "$*" == *"main.tar.gz"* ]]; then
       shift
     fi
   done
-  if [[ -n "$output" && -n "${EDIORA_FAKE_ARCHIVE:-}" ]]; then
-    cp "$EDIORA_FAKE_ARCHIVE" "$output"
+  if [[ -n "$output" && -n "${EDIORA_FAKE_COMPOSE:-}" ]]; then
+    cp "$EDIORA_FAKE_COMPOSE" "$output"
   fi
   exit 0
 fi
@@ -343,6 +344,7 @@ test_confirmed_docker_installation_runs_apt_before_compose() {
   assert_log_contains 'apt-get install' 'confirmed installation must install Docker packages'
   assert_log_contains 'compose-action' 'confirmed installation must invoke Compose'
   assert_log_order 'apt-get install' 'compose-action' 'Docker packages must be installed before Compose'
+  assert_log_order 'apt-get install' 'docker-compose.yml' 'Docker packages must be installed before downloading Compose'
 }
 
 test_docker_installation_requires_post_install_daemon_check() {
@@ -440,17 +442,17 @@ test_default_flow_pulls_then_starts_without_build() {
   assert_log_order 'compose-action pull' 'compose-action up' 'default flow must pull before start'
 }
 
-test_build_flag_skips_pull_and_builds_explicitly() {
+test_build_flag_is_rejected_by_installer() {
   local output="$CASE_DIR/output.log"
   touch "$EDIORA_DOCKER_STATE"
   make_blank_input "$CASE_DIR/input"
-  if ! run_installer "$output" --build; then
-    cat "$output" >&2
+  if run_installer "$output" --build; then
+    fail 'installer must reject the build flag'
     return 1
   fi
-  assert_log_contains 'compose-action build' '--build must build the application image'
-  assert_log_not_contains 'compose-action pull' '--build must not pull before local build'
-  assert_log_contains 'compose-action up' '--build must still start the stack'
+  assert_contains "$output" '未知参数: --build' 'installer must explain that build is not an install option'
+  assert_log_not_contains 'compose-action build' 'rejected build flag must not build'
+  assert_log_not_contains 'compose-action pull' 'rejected build flag must not pull'
 }
 
 test_pull_failure_does_not_run_compose_down() {
@@ -628,14 +630,9 @@ test_macos_without_docker_explains_docker_desktop_requirement() {
   assert_log_not_contains 'apt-get ' 'macOS must not run apt-get'
 }
 
-test_remote_piped_install_reexecutes_from_downloaded_checkout() {
+test_remote_piped_install_downloads_compose_and_deploys() {
   local output="$CASE_DIR/output.log"
-  local archive="$CASE_DIR/archive.tar.gz"
   local target="$CASE_DIR/remote"
-  mkdir -p "$CASE_DIR/archive-root/ediora-studio-main/backend" "$CASE_DIR/archive-root/ediora-studio-main/web"
-  cp "$CASE_DIR/install.sh" "$CASE_DIR/docker-compose.yml" "$CASE_DIR/archive-root/ediora-studio-main/"
-  tar -czf "$archive" -C "$CASE_DIR/archive-root" ediora-studio-main
-  export EDIORA_FAKE_ARCHIVE="$archive"
   export EDIORA_INSTALL_DIR="$target"
   touch "$EDIORA_DOCKER_STATE"
   make_blank_input "$CASE_DIR/input"
@@ -646,19 +643,15 @@ test_remote_piped_install_reexecutes_from_downloaded_checkout() {
     cat "$output" >&2
     return 1
   fi
-  assert_file_exists "$target/install.sh" 'remote mode must create a checkout'
-  assert_contains "$output" 'Ediora 已启动' 'remote mode must re-execute the downloaded installer'
-  assert_log_not_contains 'raw.githubusercontent.com/phoenix-gh/ediora-studio/main/install.sh' 'remote mode must not download the installer itself'
+  assert_file_exists "$target/docker-compose.yml" 'remote mode must download the Compose file'
+  assert_contains "$output" 'Ediora 已启动' 'remote mode must deploy after downloading Compose'
+  assert_log_contains 'docker-compose.yml' 'remote mode must request only the Compose file'
+  assert_log_not_contains 'main.tar.gz' 'remote mode must not download the source archive'
 }
 
 test_remote_piped_install_accepts_custom_install_dir() {
   local output="$CASE_DIR/output.log"
-  local archive="$CASE_DIR/archive.tar.gz"
   local target="$CASE_DIR/custom/ediora"
-  mkdir -p "$CASE_DIR/archive-root/ediora-studio-main/backend" "$CASE_DIR/archive-root/ediora-studio-main/web"
-  cp "$CASE_DIR/install.sh" "$CASE_DIR/docker-compose.yml" "$CASE_DIR/archive-root/ediora-studio-main/"
-  tar -czf "$archive" -C "$CASE_DIR/archive-root" ediora-studio-main
-  export EDIORA_FAKE_ARCHIVE="$archive"
   unset EDIORA_INSTALL_DIR
   touch "$EDIORA_DOCKER_STATE"
   make_input "$CASE_DIR/input" 3 "$target" '' '' '' '' '' '' '' '' '' '' '' ''
@@ -669,7 +662,7 @@ test_remote_piped_install_accepts_custom_install_dir() {
     cat "$output" >&2
     return 1
   fi
-  assert_file_exists "$target/install.sh" 'remote mode must install into the user-selected directory'
+  assert_file_exists "$target/docker-compose.yml" 'remote mode must install Compose into the user-selected directory'
   assert_contains "$output" "目录: $target" 'remote mode must report the user-selected directory'
   assert_contains "$output" '1) 当前目录:' 'remote mode must show the current-directory option'
   assert_contains "$output" '2) Home 目录:' 'remote mode must show the home-directory option'
@@ -679,12 +672,7 @@ test_remote_piped_install_accepts_custom_install_dir() {
 
 test_remote_piped_install_accepts_home_dir_option() {
   local output="$CASE_DIR/output.log"
-  local archive="$CASE_DIR/archive.tar.gz"
   local target="$HOME/ediora-studio"
-  mkdir -p "$CASE_DIR/archive-root/ediora-studio-main/backend" "$CASE_DIR/archive-root/ediora-studio-main/web"
-  cp "$CASE_DIR/install.sh" "$CASE_DIR/docker-compose.yml" "$CASE_DIR/archive-root/ediora-studio-main/"
-  tar -czf "$archive" -C "$CASE_DIR/archive-root" ediora-studio-main
-  export EDIORA_FAKE_ARCHIVE="$archive"
   unset EDIORA_INSTALL_DIR
   touch "$EDIORA_DOCKER_STATE"
   make_input "$CASE_DIR/input" 2 '' '' '' '' '' '' '' '' '' '' '' '' ''
@@ -695,21 +683,16 @@ test_remote_piped_install_accepts_home_dir_option() {
     cat "$output" >&2
     return 1
   fi
-  assert_file_exists "$target/install.sh" 'home-directory option must install under HOME'
+  assert_file_exists "$target/docker-compose.yml" 'home-directory option must install Compose under HOME'
   assert_contains "$output" "目录: $target" 'home-directory option must report the HOME target'
 }
 
 test_downloaded_standalone_script_prompts_for_install_dir() {
   local output="$CASE_DIR/output.log"
-  local archive="$CASE_DIR/archive.tar.gz"
   local target="$CASE_DIR/standalone"
   local standalone="$CASE_DIR/standalone"
   mkdir -p "$standalone"
   cp "$CASE_DIR/install.sh" "$standalone/"
-  mkdir -p "$CASE_DIR/archive-root/ediora-studio-main/backend" "$CASE_DIR/archive-root/ediora-studio-main/web"
-  cp "$CASE_DIR/install.sh" "$CASE_DIR/docker-compose.yml" "$CASE_DIR/archive-root/ediora-studio-main/"
-  tar -czf "$archive" -C "$CASE_DIR/archive-root" ediora-studio-main
-  export EDIORA_FAKE_ARCHIVE="$archive"
   unset EDIORA_INSTALL_DIR
   touch "$EDIORA_DOCKER_STATE"
   make_input "$CASE_DIR/input" 1 '' '' '' '' '' '' '' '' '' '' '' '' ''
@@ -720,20 +703,15 @@ test_downloaded_standalone_script_prompts_for_install_dir() {
     cat "$output" >&2
     return 1
   fi
-  assert_file_exists "$target/install.sh" 'a downloaded standalone installer must create the selected checkout'
+  assert_file_exists "$target/docker-compose.yml" 'a downloaded standalone installer must create the Compose file'
   assert_contains "$output" "目录: $target" 'a downloaded standalone installer must use the selected directory'
   assert_occurrences "$output" '请选择 Ediora 安装目录' 1 'standalone installer must not show the directory menu twice'
 }
 
 test_external_checkout_script_uses_selected_working_directory() {
   local output="$CASE_DIR/output.log"
-  local archive="$CASE_DIR/archive.tar.gz"
   local runner="$CASE_DIR/external-runner"
   mkdir -p "$runner"
-  mkdir -p "$CASE_DIR/archive-root/ediora-studio-main/backend" "$CASE_DIR/archive-root/ediora-studio-main/web"
-  cp "$CASE_DIR/install.sh" "$CASE_DIR/docker-compose.yml" "$CASE_DIR/archive-root/ediora-studio-main/"
-  tar -czf "$archive" -C "$CASE_DIR/archive-root" ediora-studio-main
-  export EDIORA_FAKE_ARCHIVE="$archive"
   unset EDIORA_INSTALL_DIR
   touch "$EDIORA_DOCKER_STATE"
   make_input "$CASE_DIR/input" 1 '' '' '' '' '' '' '' '' '' '' '' '' ''
@@ -744,7 +722,7 @@ test_external_checkout_script_uses_selected_working_directory() {
     cat "$output" >&2
     return 1
   fi
-  assert_file_exists "$runner/install.sh" 'an external installer invocation must install into the selected working directory'
+  assert_file_exists "$runner/docker-compose.yml" 'an external installer invocation must install Compose into the selected working directory'
   assert_contains "$output" "目录: $runner" 'an external installer invocation must report the selected working directory'
   assert_occurrences "$output" '请选择 Ediora 安装目录' 1 'external installer must not show the directory menu twice'
 }
@@ -754,7 +732,8 @@ test_repository_installation_contract() {
   [[ ! -e "$ROOT_DIR/install.bash" ]] || fail 'repository must not add a separate install.bash'
   assert_contains "$ROOT_DIR/README.md" 'curl -fsSL https://raw.githubusercontent.com/phoenix-gh/ediora-studio/main/install.sh | sh' 'README must document the POSIX remote installer command'
   assert_contains "$ROOT_DIR/docs/self-hosted.md" 'curl -fsSL https://raw.githubusercontent.com/phoenix-gh/ediora-studio/main/install.sh | sh' 'self-hosted docs must document the POSIX remote installer command'
-  assert_contains "$ROOT_DIR/docs/self-hosted.md" './install.sh --build' 'self-hosted docs must document the build opt-in'
+  assert_not_contains "$ROOT_DIR/README.md" './install.sh --build' 'README must not assign building to the installer'
+  assert_not_contains "$ROOT_DIR/docs/self-hosted.md" './install.sh --build' 'self-hosted docs must not assign building to the installer'
   assert_contains "$ROOT_DIR/README.md" 'EDIORA_INSTALL_DIR=/srv/ediora' 'README must document the install directory override'
   assert_contains "$ROOT_DIR/docs/self-hosted.md" 'EDIORA_INSTALL_DIR=/srv/ediora' 'self-hosted docs must document the install directory override'
   assert_contains "$ROOT_DIR/README.md" 'curl -fsSLo install.sh' 'README must document downloading the standalone installer'
@@ -762,6 +741,7 @@ test_repository_installation_contract() {
   assert_contains "$ROOT_DIR/README.md" '1` 当前目录' 'README must document the current-directory choice'
   assert_contains "$ROOT_DIR/docs/self-hosted.md" 'three choices' 'self-hosted docs must document the directory choices'
   assert_not_contains "$INSTALLER_SOURCE" 'INSTALLER_URL' 'installer must not contain a self-download URL variable'
+  assert_not_contains "$INSTALLER_SOURCE" 'main.tar.gz' 'installer must not download the source archive'
   assert_not_contains "$INSTALLER_SOURCE" 'OPENAI_API_KEY' 'installer must not collect provider API keys'
   assert_not_contains "$INSTALLER_SOURCE" 'HEYGEN_API_KEY' 'installer must not collect HeyGen API keys'
 }
@@ -779,7 +759,7 @@ run_test 'existing environment values are preserved and missing values appended'
 run_test 'generated secrets are redacted and .env is mode 600' test_generated_secrets_are_not_printed_and_env_mode_is_600
 run_test 'installer creates the project data directories' test_installer_creates_data_directories
 run_test 'default flow pulls then starts without build' test_default_flow_pulls_then_starts_without_build
-run_test 'build flag skips pull and builds explicitly' test_build_flag_skips_pull_and_builds_explicitly
+run_test 'build flag is rejected by installer' test_build_flag_is_rejected_by_installer
 run_test 'pull failure does not run compose down' test_pull_failure_does_not_run_compose_down
 run_test 'readiness timeout returns non-zero without cleanup' test_readiness_timeout_returns_nonzero_without_cleanup
 run_test 'invalid ports fail before Compose' test_invalid_ports_fail_before_compose
@@ -789,7 +769,7 @@ run_test 'non-interactive missing input fails before env creation' test_noninter
 run_test 'unsupported Ubuntu fails before Docker' test_unsupported_ubuntu_fails_before_docker
 run_test 'help does not require Docker' test_help_does_not_require_docker
 run_test 'unknown options are rejected' test_unknown_option_is_rejected
-run_test 'remote piped install re-executes from downloaded checkout' test_remote_piped_install_reexecutes_from_downloaded_checkout
+run_test 'remote piped install downloads Compose and deploys' test_remote_piped_install_downloads_compose_and_deploys
 run_test 'remote piped install accepts a custom install directory' test_remote_piped_install_accepts_custom_install_dir
 run_test 'remote piped install accepts the home-directory option' test_remote_piped_install_accepts_home_dir_option
 run_test 'downloaded standalone script prompts for install directory' test_downloaded_standalone_script_prompts_for_install_dir
