@@ -208,7 +208,7 @@ env_value() {
   local key=$1
   local value
   value=$(awk -v target="$key" 'index($0, target "=") == 1 { value = substr($0, length(target) + 2) } END { printf "%s", value }' "$ENV_FILE")
-  value=$(printf '%s' "$value" | sed -e 's/\\r$//' -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//")
+  value=$(printf '%s' "$value" | sed -e 's/\r$//' -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//")
   printf '%s' "$value"
 }
 
@@ -468,7 +468,7 @@ print_success() {
   printf '模型及第三方 API 凭据请在 Ediora Settings 中配置。\n'
 }
 
- main() {
+main() {
   parse_args "$@"
   if ((EUID == 0 && SHOW_HELP == 0)); then
     die '请使用普通用户运行 install.sh；脚本内部仅对 Docker 包和服务操作使用 sudo'
