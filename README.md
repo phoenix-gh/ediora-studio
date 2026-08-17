@@ -149,9 +149,27 @@ PostgreSQL 或 Redis。安装器会交互式创建或补全根目录 `.env`，�
 
 默认流程使用 `ghcr.io/phoenix-gh/ediora-studio:latest`，执行镜像拉取后以
 `docker compose up -d --no-build` 启动，不会启动可选的 `local-asr` profile。
-重复运行会保留 `.env` 和数据卷；需要本地构建时显式执行 `./install.sh --build`，
+重复运行会保留 `.env` 和 Compose 文件旁的 `data/` 目录；需要本地构建时显式执行 `./install.sh --build`，
 非交互地确认 Docker 安装时可使用 `./install.sh --yes`。模型、图片、语音和
 HeyGen 凭据在 Web 启动后从 Ediora「Settings」配置，不通过安装器收集。
+
+自托管运行时数据全部位于 `data/`：
+
+```text
+data/postgres         PostgreSQL 业务库
+data/redis            Redis 队列数据
+data/uploads          上传和生成的图片、音频、视频
+data/sessions         X/feedgrab session（敏感，权限 700）
+data/web-runtime      上传 Skill 与启用状态
+data/scheduler        调度器节流状态
+data/avatars          头像缓存
+data/wechat-images    微信图片缓存
+data/local-asr-models 可选 local-asr 模型缓存
+```
+
+升级前至少备份 `data/postgres`、`data/uploads`、`data/sessions`、
+`data/web-runtime` 和根目录 `.env`；其中 `.env` 的 `X_SESSION_KEY` 必须与
+`data/sessions` 一起保留。改为 `data/` 后不会自动迁移旧 Docker 命名卷。
 
 安装完成后可使用以下安全运维命令：
 
@@ -283,7 +301,7 @@ pnpm heygen:smoke
   ```
 
   如需继续使用 feedgrab 命令登录，请确保命令与后端使用同一个 `FEEDGRAB_DATA_DIR`。不要把 session 文件、Cookie 或 Token 复制进源码目录或容器镜像。
-- Docker Compose 已将 API 的 `FEEDGRAB_DATA_DIR` 固定为 `/app/sessions`，并通过 `sessions-data` 命名卷持久化；重建 API 容器不会清空账号池。
+- Docker Compose 已将 API 的 `FEEDGRAB_DATA_DIR` 固定为 `/app/sessions`，并映射到 Compose 文件旁的 `data/sessions`；重建 API 容器不会清空账号池。
 - Docker API 镜像会安装固定版本的 feedgrab X 运行时，启动后即可使用持久化 session 采集。若使用宿主机方式启动后端，也需在对应 Python 环境中安装 `backend/requirements.txt`，确保 feedgrab 版本与容器一致。
 
 ### Telegram 配置

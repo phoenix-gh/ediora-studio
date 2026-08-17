@@ -25,11 +25,13 @@ application's Python, Node.js, PostgreSQL, or Redis dependencies directly on
 the host.
 
 It creates or completes `.env` interactively, preserves existing assignments,
-sets mode `0600`, and generates safe defaults for the required internal
-secrets. Provider API keys are not collected or stored in `.env`; configure
+sets mode `0600`, creates the Compose-local `data/` persistence directories,
+and generates safe defaults for the required internal secrets. Provider API
+keys are not collected or stored in `.env`; configure
 LLM, image, speech, and HeyGen credentials from Ediora **Settings** after the
-Web service is ready. Re-running the installer preserves `.env` and named
-volumes. Use `--build` only when a local application-image build is intended;
+Web service is ready. Re-running the installer preserves `.env` and the
+Compose-local `data/` directory. It does not migrate or delete existing Docker
+named volumes. Use `--build` only when a local application-image build is intended;
 the default is the published GHCR image and `docker compose pull` followed by
 `docker compose up -d --no-build`.
 
@@ -42,6 +44,26 @@ docker compose ps
 docker compose logs -f api worker web
 docker compose stop
 ```
+
+All self-hosted runtime data is stored beside `docker-compose.yml`:
+
+```text
+data/postgres         PostgreSQL business and job data
+data/redis            Redis queue data
+data/uploads          uploaded and generated media
+data/sessions         X/feedgrab sessions (mode 700)
+data/web-runtime      uploaded Skills and their enabled state
+data/scheduler        scheduler throttle state
+data/avatars          avatar cache
+data/wechat-images    WeChat image cache
+data/local-asr-models optional local-ASR model cache
+```
+
+Back up at least `data/postgres`, `data/uploads`, `data/sessions`,
+`data/web-runtime`, and `.env` before upgrades. Keep `X_SESSION_KEY` in `.env`
+with `data/sessions`; changing it makes encrypted X session files unreadable.
+The cache directories can be rebuilt, and Redis is queue transport rather than
+the authoritative job store.
 
 If the GHCR package is private, authenticate first with `docker login ghcr.io`.
 The optional GPU-backed local ASR service is not started by the installer:
@@ -101,8 +123,8 @@ Then run `docker compose up -d --no-build`. Authenticate with
 - `web`: Next.js UI, Jobs page, and Vercel AI SDK orchestration.
 - `worker`: Node worker that consumes content jobs and calls the configured LLM. Long video jobs (`digital_human_shot_render`, `digital_human_stitch`, `digital_human_render`, `text_video_render`) go to `VIDEO_WORKER_QUEUE` (`content-jobs:video` by default) so they do not block drafts, daily creation, or image jobs. The same worker process listens to both queues.
 - `api`: Python collection, publishing, assets, and durable job-state service.
-- `postgres`: persistent business and job data.
-- `redis`: work-queue transport only; job state remains in Postgres.
+- `postgres`: persistent business and job data in `data/postgres`.
+- `redis`: work-queue transport in `data/redis`; job state remains in Postgres.
 
 ## Model configuration
 
@@ -117,7 +139,8 @@ operation from the draft UI; content-job execution never publishes by itself.
 
 Failed job steps are visible in **创作任务** and may be retried. The job and
 event records are durable, so restarting the worker does not erase history.
-Back up the `postgres-data` volume before upgrades.
+Back up `data/postgres` before upgrades; do not use `docker compose down -v`
+when the data must be retained.
 
 ## Backend tests
 

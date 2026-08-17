@@ -385,6 +385,31 @@ test_generated_secrets_are_not_printed_and_env_mode_is_600() {
   assert_not_contains "$output" "$session" 'session key must not be printed'
 }
 
+test_installer_creates_data_directories() {
+  local output="$CASE_DIR/output.log"
+  local relative mode
+  touch "$EDIORA_DOCKER_STATE"
+  make_blank_input "$CASE_DIR/input"
+  if ! run_installer "$output"; then
+    cat "$output" >&2
+    return 1
+  fi
+  for relative in \
+    data/postgres \
+    data/redis \
+    data/uploads \
+    data/sessions \
+    data/web-runtime \
+    data/scheduler \
+    data/avatars \
+    data/wechat-images \
+    data/local-asr-models; do
+    [[ -d "$CASE_DIR/$relative" ]] || fail "installer must create $relative"
+  done
+  mode=$(stat -c '%a' "$CASE_DIR/data/sessions")
+  [[ "$mode" == 700 ]] || fail "data/sessions must be mode 700 (got $mode)"
+}
+
 test_default_flow_pulls_then_starts_without_build() {
   local output="$CASE_DIR/output.log"
   touch "$EDIORA_DOCKER_STATE"
@@ -587,6 +612,7 @@ run_test 'confirmed Docker installation runs apt before Compose' test_confirmed_
 run_test 'Docker installation requires a post-install daemon check' test_docker_installation_requires_post_install_daemon_check
 run_test 'existing environment values are preserved and missing values appended' test_existing_env_values_are_preserved_and_missing_values_appended
 run_test 'generated secrets are redacted and .env is mode 600' test_generated_secrets_are_not_printed_and_env_mode_is_600
+run_test 'installer creates the project data directories' test_installer_creates_data_directories
 run_test 'default flow pulls then starts without build' test_default_flow_pulls_then_starts_without_build
 run_test 'build flag skips pull and builds explicitly' test_build_flag_skips_pull_and_builds_explicitly
 run_test 'pull failure does not run compose down' test_pull_failure_does_not_run_compose_down

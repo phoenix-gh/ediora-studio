@@ -91,6 +91,7 @@ Expected: focused tests pass and Compose resolves without named volumes.
 **Files:**
 - Modify: `install.sh`
 - Modify: `.gitignore`
+- Modify: `.dockerignore`
 - Modify: `README.md`
 - Modify: `docs/self-hosted.md`
 - Modify: `scripts/test-install.sh`

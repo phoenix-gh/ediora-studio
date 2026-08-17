@@ -69,7 +69,7 @@ parse_args() {
 
 require_bootstrap_commands() {
   local command_name
-  for command_name in awk basename chmod cp curl dirname find grep head install mktemp sed stat sleep tar tr uname; do
+  for command_name in awk basename chmod cp curl dirname find grep head install mkdir mktemp sed stat sleep tar tr uname; do
     command -v "$command_name" >/dev/null 2>&1 || die "缺少系统命令: $command_name"
   done
 }
@@ -333,6 +333,21 @@ validate_env() {
   [[ "$IMAGE_TAG_VALUE" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || die 'IMAGE_TAG 不是有效标签'
 }
 
+prepare_data_directories() {
+  local data_dir="$CHECKOUT_DIR/data"
+  mkdir -p \
+    "$data_dir/postgres" \
+    "$data_dir/redis" \
+    "$data_dir/uploads" \
+    "$data_dir/sessions" \
+    "$data_dir/web-runtime" \
+    "$data_dir/scheduler" \
+    "$data_dir/avatars" \
+    "$data_dir/wechat-images" \
+    "$data_dir/local-asr-models"
+  chmod 700 "$data_dir/sessions"
+}
+
 docker_ready() {
   local allow_sudo=$1
   if command -v docker >/dev/null 2>&1 && docker version >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
@@ -492,6 +507,7 @@ main() {
 
   collect_env
   validate_env
+  prepare_data_directories
   printf '应用镜像: %s:%s；API 端口: %s；Web 端口: %s\n' "$APP_IMAGE_VALUE" "$IMAGE_TAG_VALUE" "$API_PORT_VALUE" "$WEB_PORT_VALUE"
 
   if ((DO_BUILD == 1)); then

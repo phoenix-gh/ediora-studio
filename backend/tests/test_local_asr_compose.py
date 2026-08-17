@@ -47,7 +47,10 @@ def test_local_asr_is_private_gpu_service_with_persistent_model_cache():
         }
     ]
     assert any(
-        mount["type"] == "volume"
+        mount["type"] == "bind"
+        and mount["source"] == str(
+            (REPOSITORY_ROOT / "data/local-asr-models").resolve()
+        )
         and mount["target"] == "/home/ubuntu/.cache/huggingface/hub"
         for mount in service["volumes"]
     )

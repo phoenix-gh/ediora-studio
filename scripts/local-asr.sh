@@ -4,7 +4,16 @@ set -euo pipefail
 CONTAINER_NAME="${LOCAL_ASR_CONTAINER:-ediora-local-asr}"
 IMAGE="${LOCAL_ASR_IMAGE:-ghcr.io/speaches-ai/speaches:0.8.3-cuda}"
 PORT="${LOCAL_ASR_PORT:-8001}"
-MODEL_CACHE_VOLUME="${LOCAL_ASR_CACHE_VOLUME:-ediora-whisper-model-cache}"
+ROOT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+MODEL_CACHE_VOLUME="${LOCAL_ASR_CACHE_VOLUME:-}"
+MODEL_CACHE_DIR="${LOCAL_ASR_CACHE_DIR:-$ROOT_DIR/data/local-asr-models}"
+
+if [[ -n "$MODEL_CACHE_VOLUME" ]]; then
+  MODEL_CACHE_MOUNT="${MODEL_CACHE_VOLUME}:/home/ubuntu/.cache/huggingface/hub"
+else
+  mkdir -p "$MODEL_CACHE_DIR"
+  MODEL_CACHE_MOUNT="${MODEL_CACHE_DIR}:/home/ubuntu/.cache/huggingface/hub"
+fi
 
 case "${1:-start}" in
   start)
@@ -18,7 +27,7 @@ case "${1:-start}" in
         --publish "127.0.0.1:${PORT}:8000" \
         --env WHISPER__INFERENCE_DEVICE="${LOCAL_ASR_DEVICE:-cuda}" \
         --env WHISPER__COMPUTE_TYPE="${LOCAL_ASR_COMPUTE_TYPE:-float16}" \
-        --volume "${MODEL_CACHE_VOLUME}:/home/ubuntu/.cache/huggingface/hub" \
+        --volume "$MODEL_CACHE_MOUNT" \
         "$IMAGE" >/dev/null
     fi
 

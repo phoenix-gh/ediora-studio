@@ -18,7 +18,10 @@ from typing import Awaitable, Callable
 from database import SessionLocal
 
 
-STATE_FILE = os.path.join(os.path.dirname(__file__), ".scheduler_state.json")
+STATE_FILE = os.getenv(
+    "SCHEDULER_STATE_FILE",
+    os.path.join(os.path.dirname(__file__), ".scheduler_state.json"),
+)
 
 # Wall-clock timestamps (time.time()) keyed by job_key, persisted across restarts.
 _last_ts: dict[str, float] = {}

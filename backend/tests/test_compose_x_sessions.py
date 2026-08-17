@@ -52,22 +52,46 @@ def _run_compose(
 
 def assert_x_session_contract(compose):
     api = compose["services"]["api"]
-    volumes = api["volumes"]
-    assert api["environment"]["FEEDGRAB_DATA_DIR"] == "/app/sessions"
-    assert any(
-        mount.get("type") == "volume"
-        and mount.get("source") == "sessions-data"
-        and mount.get("target") == "/app/sessions"
-        for mount in volumes
+    api_volumes = api["volumes"]
+    assert api.get("environment", {}).get("FEEDGRAB_DATA_DIR") == "/app/sessions"
+    assert api.get("environment", {}).get("SCHEDULER_STATE_FILE") == (
+        "/app/.runtime/scheduler_state.json"
     )
-    assert any(
-        mount.get("type") == "volume"
-        and mount.get("source") == "uploads-data"
-        and mount.get("target") == "/app/uploads"
-        for mount in volumes
+
+    def assert_bind_mount(mounts, relative_source: str, target: str):
+        expected_source = str((ROOT / relative_source).resolve())
+        assert any(
+            mount.get("type") == "bind"
+            and mount.get("source") == expected_source
+            and mount.get("target") == target
+            for mount in mounts
+        )
+
+    for source, target in (
+        ("data/uploads", "/app/uploads"),
+        ("data/sessions", "/app/sessions"),
+        ("data/avatars", "/app/avatars"),
+        ("data/wechat-images", "/app/wechat_imgs"),
+        ("data/scheduler", "/app/.runtime"),
+    ):
+        assert_bind_mount(api_volumes, source, target)
+
+    assert_bind_mount(
+        compose["services"]["web"]["volumes"],
+        "data/web-runtime",
+        "/app/web/.runtime",
     )
-    assert "sessions-data" in compose["volumes"]
-    assert "uploads-data" in compose["volumes"]
+    assert_bind_mount(
+        compose["services"]["postgres"]["volumes"],
+        "data/postgres",
+        "/var/lib/postgresql/data",
+    )
+    assert_bind_mount(
+        compose["services"]["redis"]["volumes"],
+        "data/redis",
+        "/data",
+    )
+    assert not compose.get("volumes")
 
 
 def test_api_uses_persistent_feedgrab_session_directory(tmp_path: Path):

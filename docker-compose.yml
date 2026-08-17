@@ -9,7 +9,7 @@ services:
       POSTGRES_USER: wemedia
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-wemedia}
     volumes:
-      - postgres-data:/var/lib/postgresql/data
+      - ./data/postgres:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U wemedia -d wemedia"]
       interval: 5s
@@ -19,7 +19,7 @@ services:
   redis:
     image: redis:7-alpine
     volumes:
-      - redis-data:/data
+      - ./data/redis:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -35,7 +35,7 @@ services:
       WHISPER__INFERENCE_DEVICE: ${LOCAL_ASR_DEVICE:-cuda}
       WHISPER__COMPUTE_TYPE: ${LOCAL_ASR_COMPUTE_TYPE:-float16}
     volumes:
-      - whisper-model-cache:/home/ubuntu/.cache/huggingface/hub
+      - ./data/local-asr-models:/home/ubuntu/.cache/huggingface/hub
     deploy:
       resources:
         reservations:
@@ -70,6 +70,7 @@ services:
       VIDEO_WORKER_QUEUE: ${VIDEO_WORKER_QUEUE:-content-jobs:video}
       DISABLE_SCHEDULER: "0"
       FEEDGRAB_DATA_DIR: /app/sessions
+      SCHEDULER_STATE_FILE: /app/.runtime/scheduler_state.json
       LOCAL_ASR_URL: ${LOCAL_ASR_URL:-http://local-asr:8000/v1}
       LOCAL_ASR_MODEL: ${LOCAL_ASR_MODEL:-Systran/faster-whisper-large-v3}
       LOCAL_ASR_DEVICE: ${LOCAL_ASR_DEVICE:-cuda}
@@ -78,8 +79,11 @@ services:
       X_SESSION_KEY: ${X_SESSION_KEY:-}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
     volumes:
-      - uploads-data:/app/uploads
-      - sessions-data:/app/sessions
+      - ./data/uploads:/app/uploads
+      - ./data/sessions:/app/sessions
+      - ./data/avatars:/app/avatars
+      - ./data/wechat-images:/app/wechat_imgs
+      - ./data/scheduler:/app/.runtime
     ports:
       - "${API_PORT:-8000}:8000"
     healthcheck:
@@ -137,13 +141,8 @@ services:
       WORKER_TOKEN: ${WORKER_TOKEN:-}
     ports:
       - "${WEB_PORT:-3000}:3000"
+    volumes:
+      - ./data/web-runtime:/app/web/.runtime
     depends_on:
       api:
         condition: service_healthy
-
-volumes:
-  postgres-data:
-  redis-data:
-  uploads-data:
-  sessions-data:
-  whisper-model-cache:

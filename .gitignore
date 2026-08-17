@@ -42,6 +42,7 @@ web/.runtime/
 logs/
 
 # ── Self-hosted runtime ─────────────────────────────────
+/data/
 backend/uploads/
 backend/avatars/
 backend/wechat_imgs/
