@@ -1,11 +1,13 @@
 import { createOpenAI } from '@ai-sdk/openai'
-import { generateImage, generateText, stepCountIs, tool } from 'ai'
+import { generateText, stepCountIs, tool } from 'ai'
 import { z } from 'zod'
 
 import { loadSkillContext, SkillRegistryError } from '../skills/registry'
 import {
   configuredImageModel,
+  generateImageBytes,
   generateAndSaveImage,
+  imageExtensionForMediaType,
   recordJobEvent,
   saveCreativeAssetImage,
 } from './image-generation'
@@ -235,7 +237,6 @@ async function runImageFlow(job: Awaited<ReturnType<typeof getJob>>, step: 'cove
   const draft = await getDraft(draftId)
   const maxImages = step === 'cover' ? 1 : Math.max(1, Math.min(Number(job.input.max_images) || 1, 4))
   const image = await configuredImageModel()
-  const provider = createOpenAI({ apiKey: image.apiKey, baseURL: image.baseURL })
   const text = await configuredTextModel()
   const textProvider = createOpenAI({ apiKey: text.apiKey, baseURL: text.baseURL })
   const assets: Array<{ id: number; url: string; anchor_heading?: string }> = []
@@ -264,9 +265,14 @@ async function runImageFlow(job: Awaited<ReturnType<typeof getJob>>, step: 'cove
           const specPrompt = cover_spec ? `Cover spec:\n- Visual concept: ${cover_spec.visual_concept}\n- Composition: ${cover_spec.composition}\n- Visible text: ${cover_spec.text_elements.join(' | ')}` : ''
           const finalPrompt = step === 'cover' && coverConstraints ? `${coverConstraints}\n\n${specPrompt}\n\n${prompt}` : prompt
           await recordJobEvent(job.id, 'generate_image_called', { tool: 'generateImage', prompt: finalPrompt, filename_hint: filename_hint ?? '', cover_spec: cover_spec ?? {} })
-          const generated = await generateImage({ model: provider.image(image.modelName), prompt: finalPrompt, n: 1 })
-          const output = generated.images[0]
-          const asset = await saveDraftImage(job.id, draftId, `${filename_hint ?? step}-${job.id}-${assets.length + 1}.png`, output.uint8Array, output.mediaType)
+          const generated = await generateImageBytes(image, finalPrompt, { n: 1 })
+          const asset = await saveDraftImage(
+            job.id,
+            draftId,
+            `${filename_hint ?? step}-${job.id}-${assets.length + 1}.${imageExtensionForMediaType(generated.mediaType)}`,
+            generated.bytes,
+            generated.mediaType,
+          )
           assets.push({ ...asset, anchor_heading })
           await recordJobEvent(job.id, 'generate_image_succeeded', { tool: 'generateImage', asset_id: asset.id, asset_url: asset.url, anchor_heading: anchor_heading ?? '' })
           return asset
@@ -348,26 +354,19 @@ export async function runPromptImageGenerationFlow(job: Awaited<ReturnType<typeo
 
   try {
     const image = await configuredImageModel()
-    const provider = createOpenAI({ apiKey: image.apiKey, baseURL: image.baseURL })
     await recordJobEvent(job.id, 'generate_image_called', {
       tool: 'generateImage',
       prompt,
       prompt_asset_id: Number(job.input.prompt_asset_id),
       generation_id: generationId,
     })
-    const generated = await generateImage({
-      model: provider.image(image.modelName),
-      prompt,
-      n: 1,
-    })
-    const output = generated.images[0]
-    if (!output) throw new Error('Image model returned no image')
+    const generated = await generateImageBytes(image, prompt, { n: 1 })
     const asset = await saveCreativeAssetImage(
       job.id,
       title,
-      `prompt-image-${job.id}.png`,
-      output.uint8Array,
-      output.mediaType,
+      `prompt-image-${job.id}.${imageExtensionForMediaType(generated.mediaType)}`,
+      generated.bytes,
+      generated.mediaType,
     )
     await recordJobEvent(job.id, 'generate_image_succeeded', {
       tool: 'generateImage',
