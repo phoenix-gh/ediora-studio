@@ -49,6 +49,57 @@ def test_create_subscription(client):
     assert body["collect_interval_minutes"] == 15
 
 
+def test_subscription_persists_information_filtering_adapter(client):
+    saved = client.put("/api/settings", json={
+        "llm_adapters": [{
+            "id": "filter",
+            "name": "信息筛选",
+            "protocol": "openai",
+            "endpoint": "https://filter.example/v1",
+            "api_key": "filter-key",
+            "model": "filter-model",
+            "supports_text": True,
+        }],
+    })
+    assert saved.status_code == 200, saved.text
+
+    created = client.post(BASE, json={
+        "url": "https://x.com/filter-source",
+        "llm_adapter_id": "filter",
+    })
+    assert created.status_code == 200, created.text
+    assert created.json()["llm_adapter_id"] == "filter"
+
+    cleared = client.patch(
+        f"{BASE}/{created.json()['id']}",
+        json={"llm_adapter_id": None},
+    )
+    assert cleared.status_code == 200, cleared.text
+    assert cleared.json()["llm_adapter_id"] is None
+
+
+def test_subscription_rejects_unknown_or_image_only_filtering_adapter(client):
+    saved = client.put("/api/settings", json={
+        "llm_adapters": [{
+            "id": "image-only",
+            "name": "图片",
+            "protocol": "openai",
+            "endpoint": "https://image.example/v1",
+            "api_key": "image-key",
+            "model": "image-model",
+            "supports_image": True,
+        }],
+    })
+    assert saved.status_code == 200, saved.text
+
+    for adapter_id in ("image-only", "missing"):
+        response = client.post(BASE, json={
+            "url": f"https://x.com/filter-{adapter_id}",
+            "llm_adapter_id": adapter_id,
+        })
+        assert response.status_code == 422, response.text
+
+
 def test_subscription_can_select_and_replace_multiple_ingestion_directories(client):
     folders = []
     for name in ("AI 工具", "副业搞钱"):

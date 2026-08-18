@@ -7,6 +7,8 @@ from sqlalchemy import select, func, desc, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
+from config import get_config
+from llm_adapters import AdapterResolutionError, resolve_adapter
 from models import (
     AppSetting,
     CreativeAssetDirectory,
@@ -39,6 +41,7 @@ class SubscriptionOut(BaseModel):
     collect_interval_minutes: int
     intelligence_enabled: bool = False
     intelligence_enabled_at: Optional[datetime] = None
+    llm_adapter_id: Optional[str] = None
     last_collected_at: Optional[datetime]
     last_error: str
     added_at: datetime
@@ -61,6 +64,7 @@ class SubscriptionCreate(BaseModel):
     max_results: int = 100
     collect_interval_minutes: Optional[int] = Field(default=None, ge=5, le=1440)
     ingestion_directory_ids: list[int] = Field(default_factory=list)
+    llm_adapter_id: Optional[str] = None
 
 
 class SubscriptionPatch(BaseModel):
@@ -71,6 +75,7 @@ class SubscriptionPatch(BaseModel):
     collect_interval_minutes: Optional[int] = Field(default=None, ge=5, le=1440)
     intelligence_enabled: Optional[bool] = None
     ingestion_directory_ids: Optional[list[int]] = None
+    llm_adapter_id: Optional[str] = None
 
 
 class TimelineBackfillRequest(BaseModel):
@@ -98,6 +103,21 @@ async def _default_collect_interval(db: AsyncSession) -> int:
         return max(5, min(1440, int(value))) if value is not None else 15
     except (TypeError, ValueError):
         return 15
+
+
+async def _validate_llm_adapter_id(adapter_id: Optional[str]) -> Optional[str]:
+    normalized = adapter_id.strip() if adapter_id is not None else None
+    if not normalized:
+        return None
+    try:
+        resolve_adapter(
+            await get_config(),
+            adapter_id=normalized,
+            capability="text",
+        )
+    except AdapterResolutionError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return normalized
 
 
 async def _replace_ingestion_directories(
@@ -154,6 +174,7 @@ async def _to_out(db: AsyncSession, sub: XSubscription) -> SubscriptionOut:
         collect_interval_minutes=sub.collect_interval_minutes,
         intelligence_enabled=sub.intelligence_enabled,
         intelligence_enabled_at=sub.intelligence_enabled_at,
+        llm_adapter_id=sub.llm_adapter_id,
         last_collected_at=sub.last_collected_at, last_error=sub.last_error,
         added_at=sub.added_at, post_count=int(cnt),
         ingestion_directory_ids=ingestion_directory_ids,
@@ -174,6 +195,7 @@ async def list_subscriptions(db: AsyncSession = Depends(get_db)):
 async def create_subscription(
     body: SubscriptionCreate, db: AsyncSession = Depends(get_db),
 ):
+    llm_adapter_id = await _validate_llm_adapter_id(body.llm_adapter_id)
     collect_interval_minutes = (
         body.collect_interval_minutes
         if body.collect_interval_minutes is not None
@@ -192,6 +214,7 @@ async def create_subscription(
             min_retweets=body.min_retweets, lang=body.lang, days=body.days,
             extra_terms=body.extra_terms, sort="live", max_results=body.max_results,
             collect_interval_minutes=collect_interval_minutes,
+            llm_adapter_id=llm_adapter_id,
             added_at=datetime.now(timezone.utc),
         )
         db.add(sub)
@@ -225,6 +248,7 @@ async def create_subscription(
     sub = XSubscription(
         kind="timeline", url=url, label=label,
         enabled=True, collect_interval_minutes=collect_interval_minutes,
+        llm_adapter_id=llm_adapter_id,
         added_at=datetime.now(timezone.utc),
     )
     db.add(sub)
@@ -266,6 +290,8 @@ async def patch_subscription(
         sub.intelligence_enabled_at = (
             datetime.now(timezone.utc) if body.intelligence_enabled else None
         )
+    if "llm_adapter_id" in body.model_fields_set:
+        sub.llm_adapter_id = await _validate_llm_adapter_id(body.llm_adapter_id)
     if body.ingestion_directory_ids is not None:
         await _replace_ingestion_directories(
             db, sub.id, body.ingestion_directory_ids,

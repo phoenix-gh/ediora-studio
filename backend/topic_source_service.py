@@ -21,6 +21,7 @@ from models import (
     ContentJob,
     CreativeAssetDirectory,
     XPost,
+    XSubscription,
     XSubscriptionIngestionDirectory,
 )
 
@@ -42,6 +43,9 @@ def _positive_int(value: object) -> bool:
 def is_valid_topic_source_payload(input_data: object) -> bool:
     """Accept only the current merged payload or the supported legacy shape."""
     if not isinstance(input_data, dict):
+        return False
+    adapter_id = input_data.get("llm_adapter_id")
+    if adapter_id is not None and not isinstance(adapter_id, str):
         return False
     directory_ids = input_data.get("directory_ids")
     if (
@@ -80,6 +84,7 @@ async def dispatch_topic_source_posts(
     )).scalars().all()
     if not directories:
         return {"created": 0, "enqueued": 0, "errors": []}
+    subscription = await db.get(XSubscription, subscription_id)
     created = 0
     enqueued = 0
     errors: list[str] = []
@@ -97,6 +102,7 @@ async def dispatch_topic_source_posts(
             "subscription_id": subscription_id,
             "directory_ids": [directory.id for directory in directories],
             "tweet_ids": unique_ids,
+            "llm_adapter_id": subscription.llm_adapter_id if subscription else None,
         },
         idempotency_key=key,
     )
