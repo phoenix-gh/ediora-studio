@@ -38,6 +38,8 @@ export type GeneratedImageAsset = {
   model: string
 }
 
+export const DEFAULT_IMAGE_DIRECTORY = '临时文件'
+
 export function creativeAssetUploadQuery(title: string, directory = '') {
   const query = new URLSearchParams({ media_kind: 'image', title })
   if (directory.trim()) query.set('directory', directory.trim())
@@ -46,6 +48,31 @@ export function creativeAssetUploadQuery(title: string, directory = '') {
 
 function normalizedApiBase(value?: string) {
   return (value ?? defaultApiBase()).replace(/\/$/, '')
+}
+
+export function normalizeImageDirectory(directory?: string) {
+  return directory?.trim() || DEFAULT_IMAGE_DIRECTORY
+}
+
+export async function validateMediaDirectory(
+  directory: string,
+  apiRoot = normalizedApiBase(),
+  jobId?: number,
+) {
+  const response = await fetch(`${normalizedApiBase(apiRoot)}/assets/directories?asset_type=media`, {
+    cache: 'no-store',
+    headers: workerHeaders(jobId),
+  })
+  if (!response.ok) throw new Error('无法读取多媒体资产目录')
+  const directories = await response.json() as unknown
+  const exists = Array.isArray(directories)
+    && directories.some(item => (
+      item
+      && typeof item === 'object'
+      && 'name' in item
+      && item.name === directory
+    ))
+  if (!exists) throw new Error(`多媒体目录不存在：${directory}`)
 }
 
 export async function configuredImageModel(apiRoot = normalizedApiBase()): Promise<ImageModelConfig> {
@@ -64,20 +91,31 @@ export async function saveCreativeAssetImage(
   filename: string,
   bytes: Uint8Array,
   mediaType: string,
-  directory = '',
+  directory = DEFAULT_IMAGE_DIRECTORY,
   apiRoot = normalizedApiBase(),
 ) {
-  const form = new FormData()
-  const data = new Uint8Array(bytes.byteLength)
-  data.set(bytes)
-  form.append('file', new Blob([data], { type: mediaType }), filename)
-  const response = await fetch(`${normalizedApiBase(apiRoot)}/assets/upload?${creativeAssetUploadQuery(title, directory)}`, {
-    method: 'POST',
-    headers: workerHeaders(jobId),
-    body: form,
-  })
-  if (!response.ok) throw new Error(`Creative asset upload failed (${response.status})`)
-  return response.json() as Promise<{ id: number; url: string; title: string }>
+  const uploadUrl = `${normalizedApiBase(apiRoot)}/assets/upload?${creativeAssetUploadQuery(title, directory)}`
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const form = new FormData()
+    const data = new Uint8Array(bytes.byteLength)
+    data.set(bytes)
+    form.append('file', new Blob([data], { type: mediaType }), filename)
+    let response: Response
+    try {
+      response = await fetch(uploadUrl, {
+        method: 'POST',
+        headers: workerHeaders(jobId),
+        body: form,
+      })
+    } catch (error) {
+      if (attempt === 0) continue
+      throw error
+    }
+    if (response.ok) return response.json() as Promise<{ id: number; url: string; title: string }>
+    const retryable = response.status === 429 || response.status >= 500
+    if (!retryable || attempt === 1) throw new Error(`Creative asset upload failed (${response.status})`)
+  }
+  throw new Error('Creative asset upload failed')
 }
 
 export async function recordJobEvent(
@@ -107,7 +145,8 @@ export async function generateAndSaveImage({
   const normalizedPrompt = prompt.trim()
   if (!normalizedPrompt) throw new Error('generateImage requires a prompt')
   const normalizedTitle = title?.trim() || 'Chat 生图'
-  const normalizedDirectory = directory?.trim() || ''
+  const normalizedDirectory = normalizeImageDirectory(directory)
+  await validateMediaDirectory(normalizedDirectory, apiRoot, jobId)
   const image = await configuredImageModel(apiRoot)
   const provider = createOpenAI({ apiKey: image.apiKey, baseURL: image.baseURL })
   const refs = referenceImages?.filter(item => item.bytes.byteLength > 0) ?? []

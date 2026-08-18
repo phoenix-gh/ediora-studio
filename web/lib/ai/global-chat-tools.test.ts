@@ -279,6 +279,10 @@ describe('global Chat tool policy', () => {
       approvalPolicy: 'automatic',
     })
 
+    expect((runtime.tools.generateImage as { description?: string }).description)
+      .toContain('临时文件')
+    expect((runtime.tools.generateImage as { description?: string }).description)
+      .toContain('explicitly requests')
     await expect(executeTool(runtime.tools.generateImage, {
       prompt: 'daily ranking chart',
       title: 'GitHub 日榜',
