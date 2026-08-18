@@ -330,6 +330,12 @@ function shouldRequeue(
   if (phase === 'loading' && !(error instanceof ApiRequestError)) return true
   return error instanceof JobFinalizationError
     || (error instanceof ApiRequestError && error.retryable)
+    || (
+      typeof error === 'object'
+      && error !== null
+      && 'retryable' in error
+      && error.retryable === true
+    )
 }
 
 async function runLeasedJob(

@@ -425,4 +425,53 @@ describe('digital-human shot render job', () => {
       false,
     )
   })
+
+  it('ensures the configured Xiangongyun instance before reading shot context', async () => {
+    const api = jobApi()
+    const events: string[] = []
+    const getShotContext = api.getShotContext
+    api.getShotContext = vi.fn(async (...args) => {
+      events.push('context')
+      return getShotContext(...args)
+    })
+    const comfyui = {
+      uploadImage: vi.fn()
+        .mockResolvedValueOnce({ name: 'look.jpg', subfolder: '', type: 'input' })
+        .mockResolvedValueOnce({ name: 'env.jpg', subfolder: '', type: 'input' })
+        .mockResolvedValueOnce({ name: 'look.jpg', subfolder: '', type: 'input' }),
+      uploadAudio: vi.fn().mockResolvedValue({ name: 'voice.wav', subfolder: '', type: 'input' }),
+      queuePrompt: vi.fn().mockResolvedValue('prompt-1'),
+      getHistory: vi.fn().mockResolvedValue({
+        status: { completed: true },
+        outputs: { '3': { gifs: [{ filename: 'out.mp4', subfolder: '', type: 'output' }] } },
+      }),
+      viewFile: vi.fn().mockResolvedValue(new Uint8Array([9, 9, 9])),
+    }
+    const sleep = vi.fn().mockResolvedValue(undefined)
+    const xiangongyun = {
+      ensureInstanceRunning: vi.fn(async (
+        _instanceId: string,
+        options: { checkCancelled?: () => Promise<void> },
+      ) => {
+        events.push('ensure')
+        await options.checkCancelled?.()
+        return { id: 'instance-1', status: 'running' }
+      }),
+    }
+    const deps = {
+      api,
+      comfyui,
+      sleep,
+      xiangongyun,
+      xiangongyunInstanceId: 'instance-1',
+    } as unknown as ShotJobDeps
+
+    await runDigitalHumanShotRenderJob(15, deps)
+
+    expect(xiangongyun.ensureInstanceRunning).toHaveBeenCalledWith(
+      'instance-1',
+      expect.objectContaining({ sleep, checkCancelled: expect.any(Function) }),
+    )
+    expect(events.indexOf('ensure')).toBeLessThan(events.indexOf('context'))
+  })
 })

@@ -583,6 +583,32 @@ describe('content worker lifecycle', () => {
     },
   )
 
+  it('requeues a runner error that explicitly declares itself retryable', async () => {
+    const controller = new AbortController()
+    const redis = new FakeRedis([
+      ['content-jobs', '42'],
+      stopOnNextPop(controller),
+    ])
+    const retryableProviderError = Object.assign(
+      new Error('仙宫云实例启动超时'),
+      { retryable: true },
+    )
+    const { runContentWorker } = await import('./content-worker')
+
+    await runContentWorker({
+      redis,
+      queueName: 'content-jobs',
+      signal: controller.signal,
+      reconcile: vi.fn().mockResolvedValue({}),
+      getJob: vi.fn().mockResolvedValue(durableJob(42)),
+      resolveRunner: () => async () => {
+        throw retryableProviderError
+      },
+    })
+
+    expect(redis.state.queue).toEqual(['42'])
+  })
+
   it('uses LPOS semantics to avoid adding a duplicate retry', async () => {
     const controller = new AbortController()
     const redis = new FakeRedis([

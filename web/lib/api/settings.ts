@@ -1,4 +1,5 @@
 import { apiFetch } from './client'
+import type { XiangongyunInstance } from '@/lib/xiangongyun/client'
 
 export interface ProviderInfo {
   key: string
@@ -30,6 +31,13 @@ export type TranscriptionProvider =
   | 'local-whisper'
   | 'openai-compatible'
 
+export type ComfyUIRuntimeProvider = 'direct' | 'xiangongyun'
+
+export type XiangongyunInstancesResponse = {
+  list: XiangongyunInstance[]
+  total: number
+}
+
 export interface TranscriptionStatus {
   provider: TranscriptionProvider
   status: 'unavailable' | 'preparing' | 'ready' | 'busy' | 'error'
@@ -56,6 +64,11 @@ export interface AppSettings {
   comfyui_base_url: string
   comfyui_auth_token_set: boolean
   comfyui_auth_token_preview: string
+  comfyui_runtime_provider: ComfyUIRuntimeProvider
+  xiangongyun_base_url: string
+  xiangongyun_api_token_set: boolean
+  xiangongyun_api_token_preview: string
+  xiangongyun_default_instance_id: string
   comfyui_min_shot_seconds: number
   comfyui_max_shot_seconds: number
   transcription_provider: TranscriptionProvider
@@ -141,6 +154,10 @@ export interface SettingsUpdate {
   heygen_api_key?: string
   comfyui_base_url?: string
   comfyui_auth_token?: string
+  comfyui_runtime_provider?: ComfyUIRuntimeProvider
+  xiangongyun_base_url?: string
+  xiangongyun_api_token?: string
+  xiangongyun_default_instance_id?: string
   comfyui_min_shot_seconds?: number
   comfyui_max_shot_seconds?: number
   transcription_provider?: TranscriptionProvider
@@ -253,6 +270,30 @@ export async function testHeyGen(): Promise<{ ok: boolean; error: string }> {
 
 export async function testComfyUI(): Promise<{ ok: boolean; error: string }> {
   return apiFetch('/settings/comfyui/test', { method: 'POST' })
+}
+
+export async function listXiangongyunInstances(): Promise<XiangongyunInstancesResponse> {
+  return apiFetch<XiangongyunInstancesResponse>('/settings/xiangongyun/instances')
+}
+
+export async function getXiangongyunInstance(instanceId: string): Promise<XiangongyunInstance> {
+  return apiFetch<XiangongyunInstance>(
+    `/settings/xiangongyun/instances/${encodeURIComponent(instanceId)}`,
+  )
+}
+
+export async function bootXiangongyunInstance(instanceId: string): Promise<Record<string, unknown>> {
+  return apiFetch<Record<string, unknown>>(
+    `/settings/xiangongyun/instances/${encodeURIComponent(instanceId)}/boot`,
+    { method: 'POST' },
+  )
+}
+
+export async function shutdownXiangongyunInstance(instanceId: string): Promise<Record<string, unknown>> {
+  return apiFetch<Record<string, unknown>>(
+    `/settings/xiangongyun/instances/${encodeURIComponent(instanceId)}/shutdown`,
+    { method: 'POST' },
+  )
 }
 
 export async function testTranscription(): Promise<{ ok: boolean; error: string }> {
