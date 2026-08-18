@@ -1,3 +1,5 @@
+import { apiPermissionPattern, normalizeApiBase } from '../background/draft-api.js'
+
 export const DRAFT_MESSAGE_TYPES = Object.freeze({
   REQUEST: 'SHUCE_DRAFTS_REQUEST',
   IMAGE_REQUEST: 'SHUCE_DRAFT_IMAGE_REQUEST',
@@ -31,6 +33,7 @@ function responseError(response) {
 
 export function createDraftClient({
   runtime = globalThis.chrome?.runtime,
+  permissions = globalThis.chrome?.permissions,
   timeoutMs = 10_000,
   randomUUID = defaultRandomUUID,
 } = {}) {
@@ -85,6 +88,26 @@ export function createDraftClient({
   }
 
   return Object.freeze({
+    async requestApiPermission(apiBase) {
+      const normalized = normalizeApiBase(apiBase)
+      if (!permissions || typeof permissions.request !== 'function') {
+        throw createError('DRAFT_API_PERMISSION_UNAVAILABLE', '当前浏览器不支持 API 域名授权')
+      }
+
+      let granted
+      try {
+        granted = await permissions.request({
+          origins: [apiPermissionPattern(normalized)],
+        })
+      } catch {
+        throw createError('DRAFT_API_PERMISSION_UNAVAILABLE', 'API 域名授权失败，请重试')
+      }
+      if (granted !== true) {
+        throw createError('DRAFT_API_PERMISSION_DENIED', '未授权访问该 API 域名')
+      }
+      return normalized
+    },
+
     async fetchDrafts(apiBase) {
       const response = await sendRequest(DRAFT_MESSAGE_TYPES.REQUEST, { apiBase })
       if (!Array.isArray(response.drafts)) {

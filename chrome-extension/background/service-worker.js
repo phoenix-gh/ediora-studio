@@ -1,9 +1,9 @@
 import {
   API_BASE_STORAGE_KEY,
   DEFAULT_API_BASE,
-  assertAllowedApiBase,
   fetchDraftImage,
   fetchDraftCollection,
+  normalizeApiBase,
   publishDraft,
 } from './draft-api.js'
 import { isXSiteUrl } from './x-site.js'
@@ -22,7 +22,6 @@ const CONFIG_RESET_TYPE = 'SHUCE_DRAFTS_CONFIG_RESET'
 
 const SAFE_ERROR_MESSAGES = Object.freeze({
   DRAFT_API_NOT_CONFIGURED: 'API 地址无效',
-  DRAFT_API_HOST_NOT_ALLOWED: '当前扩展只允许本机 8000 端口 API',
   DRAFT_API_INVALID_REQUEST: '发布请求无效',
   DRAFT_API_UNAVAILABLE: '草稿 API 暂不可用，请检查服务是否运行',
   DRAFT_API_INVALID_RESPONSE: '草稿 API 返回格式无效',
@@ -61,7 +60,7 @@ async function readConfiguredApiBase() {
   if (typeof stored?.[API_BASE_STORAGE_KEY] !== 'string') return DEFAULT_API_BASE
 
   try {
-    return assertAllowedApiBase(stored[API_BASE_STORAGE_KEY])
+    return normalizeApiBase(stored[API_BASE_STORAGE_KEY])
   } catch {
     return DEFAULT_API_BASE
   }
@@ -134,7 +133,7 @@ async function handleDraftMessage(message) {
   }
 
   if (message.type === CONFIG_SET_TYPE) {
-    const apiBase = assertAllowedApiBase(message.apiBase)
+    const apiBase = normalizeApiBase(message.apiBase)
     await chrome.storage.local.set({ [API_BASE_STORAGE_KEY]: apiBase })
     return { type: DRAFTS_RESULT_TYPE, requestId, ok: true, apiBase }
   }
