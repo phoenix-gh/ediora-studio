@@ -39,6 +39,17 @@ from transcription_service import (
     transcribe_audio,
 )
 from database import get_db
+from llm_adapters import (
+    AdapterResolutionError,
+    LLMAdapterInput,
+    LLMAdapterPublic,
+    public_adapters,
+    parse_stored_adapters,
+    resolve_adapter,
+    save_adapter_payloads,
+)
+from models import XSubscription
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from worker_auth import require_worker_token
 from text_video_templates import normalize_text_video_template_default_map
@@ -126,6 +137,9 @@ class SettingsOut(BaseModel):
     llm_effective_base_url: str
     llm_api_key_set: bool
     llm_api_key_preview: str
+    llm_adapters: list[LLMAdapterPublic]
+    llm_default_adapter_id: str
+    llm_information_filtering_adapter_id: str
     image_model: str
     image_base_url: str
     image_api_key_set: bool
@@ -214,6 +228,9 @@ class SettingsUpdate(BaseModel):
     llm_model: Optional[str] = None
     llm_api_key: Optional[str] = None
     llm_base_url: Optional[str] = None
+    llm_adapters: Optional[list[LLMAdapterInput]] = None
+    llm_default_adapter_id: Optional[str] = None
+    llm_information_filtering_adapter_id: Optional[str] = None
     image_model: Optional[str] = None
     image_api_key: Optional[str] = None
     image_base_url: Optional[str] = None
@@ -293,16 +310,22 @@ class FetchModelsRequest(BaseModel):
 
 
 class ImageRuntimeConfig(BaseModel):
+    adapter_id: str
+    protocol: str
     api_key: str
     model: str
     base_url: str
+    image_response_format: Literal["url", "base64"]
 
 
 class AiRuntimeConfig(BaseModel):
     """Server-to-server model credentials for the local AI worker."""
+    adapter_id: str
+    protocol: str
     api_key: str
     model: str
     base_url: str
+    image_response_format: Literal["url", "base64"]
     image: ImageRuntimeConfig
 
 
@@ -394,6 +417,11 @@ def _build_out(cfg: dict) -> SettingsOut:
         llm_effective_base_url=effective_base_url(cfg),
         llm_api_key_set=bool(api_key),
         llm_api_key_preview=f"…{api_key[-4:]}" if len(api_key) >= 4 else "",
+        llm_adapters=public_adapters(cfg.get("llm_adapters", "[]")),
+        llm_default_adapter_id=cfg.get("llm_default_adapter_id", "").strip(),
+        llm_information_filtering_adapter_id=cfg.get(
+            "llm_information_filtering_adapter_id", ""
+        ).strip(),
         image_model=cfg.get("image_model", "gpt-image-1"),
         image_base_url=cfg.get("image_base_url", ""),
         image_api_key_set=bool(image_api_key),
@@ -577,7 +605,11 @@ async def get_settings():
     include_in_schema=False,
     dependencies=[Depends(require_worker_token)],
 )
-async def get_ai_runtime_config():
+async def get_ai_runtime_config(
+    adapter_id: Optional[str] = Query(default=None),
+    capability: Optional[Literal["text", "image"]] = Query(default=None),
+    purpose: Optional[Literal["information_filtering"]] = Query(default=None),
+):
     """Expose the configured provider only to the trusted local job worker.
 
     The open-source edition has no login/tenant boundary; this endpoint keeps
@@ -585,15 +617,53 @@ async def get_ai_runtime_config():
     Node worker to use the same Settings-page configuration.
     """
     cfg = await get_config()
+    stored_adapters = parse_stored_adapters(cfg.get("llm_adapters", "[]"))
+
+    def legacy_text_runtime() -> dict[str, str]:
+        return {
+            "adapter_id": "legacy-text",
+            "protocol": "openai",
+            "api_key": cfg.get("llm_api_key", ""),
+            "model": effective_model(cfg),
+            "base_url": effective_base_url(cfg),
+            "image_response_format": "base64",
+        }
+
+    def legacy_image_runtime() -> dict[str, str]:
+        return {
+            "adapter_id": "legacy-image",
+            "protocol": "openai",
+            "api_key": cfg.get("image_api_key", ""),
+            "model": cfg.get("image_model", "gpt-image-1"),
+            "base_url": cfg.get("image_base_url", ""),
+            "image_response_format": "base64",
+        }
+
+    if not stored_adapters:
+        selected = legacy_image_runtime() if capability == "image" else legacy_text_runtime()
+        image_runtime = legacy_image_runtime()
+    else:
+        try:
+            selected_adapter = resolve_adapter(
+                cfg,
+                adapter_id=adapter_id,
+                capability=capability or "text",
+                purpose=purpose,
+            )
+        except AdapterResolutionError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        selected = selected_adapter.model_dump()
+        selected["image_response_format"] = selected_adapter.image_response_format
+        try:
+            image_adapter = resolve_adapter(cfg, capability="image")
+            image_runtime = image_adapter.model_dump()
+            image_runtime["image_response_format"] = image_adapter.image_response_format
+        except AdapterResolutionError:
+            image_runtime = legacy_image_runtime()
+
     return AiRuntimeConfig(
-        api_key=cfg.get("llm_api_key", ""),
-        model=effective_model(cfg),
-        base_url=effective_base_url(cfg),
-        image=ImageRuntimeConfig(
-            api_key=cfg.get("image_api_key", ""),
-            model=cfg.get("image_model", "gpt-image-1"),
-            base_url=cfg.get("image_base_url", ""),
-        ),
+        **selected,
+        image=ImageRuntimeConfig(**image_runtime),
     )
 
 
@@ -701,6 +771,60 @@ async def update_settings(
 ):
     saved_cfg = await get_config()
     updates: dict = {}
+    stored_adapters = parse_stored_adapters(saved_cfg.get("llm_adapters", "[]"))
+    next_adapters = stored_adapters
+    if body.llm_adapters is not None:
+        try:
+            next_adapters = save_adapter_payloads(body.llm_adapters, stored_adapters)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+        old_ids = {item["id"] for item in stored_adapters}
+        next_ids = {item["id"] for item in next_adapters}
+        removed_ids = old_ids - next_ids
+        subscription_adapter_column = getattr(XSubscription, "llm_adapter_id", None)
+        if removed_ids and subscription_adapter_column is not None:
+            referenced = await db.scalar(
+                select(XSubscription.id)
+                .where(subscription_adapter_column.in_(removed_ids))
+                .limit(1)
+            )
+            if referenced is not None:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Adapter 仍被 X 订阅引用，请先解除订阅配置",
+                )
+        updates["llm_adapters"] = json.dumps(
+            next_adapters,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+
+    valid_adapter_ids = {item["id"] for item in next_adapters}
+    next_default_id = (
+        body.llm_default_adapter_id.strip()
+        if body.llm_default_adapter_id is not None
+        else saved_cfg.get("llm_default_adapter_id", "").strip()
+    )
+    next_filter_id = (
+        body.llm_information_filtering_adapter_id.strip()
+        if body.llm_information_filtering_adapter_id is not None
+        else saved_cfg.get("llm_information_filtering_adapter_id", "").strip()
+    )
+    for field_name, value in (
+        ("llm_default_adapter_id", next_default_id),
+        ("llm_information_filtering_adapter_id", next_filter_id),
+    ):
+        if value and value not in valid_adapter_ids:
+            raise HTTPException(status_code=422, detail=f"{field_name} 引用的 Adapter 不存在")
+    if body.llm_default_adapter_id is not None or body.llm_adapters is not None:
+        updates["llm_default_adapter_id"] = next_default_id
+    if (
+        body.llm_information_filtering_adapter_id is not None
+        or body.llm_adapters is not None
+    ):
+        updates["llm_information_filtering_adapter_id"] = next_filter_id
+
     if body.llm_provider is not None:
         updates["llm_provider"] = body.llm_provider
         updates.setdefault("llm_model", "")

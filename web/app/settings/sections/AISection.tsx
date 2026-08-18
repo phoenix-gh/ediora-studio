@@ -8,13 +8,40 @@ import { FormSection } from '@/components/layout/FormSection'
 import { Button } from '@/components/ui/button'
 import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
+import { NativeSelect } from '@/components/ui/native-select'
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { AppSettings, ProviderInfo, updateSettings, fetchProviderModels, testLLM } from '@/lib/api/settings'
+import {
+  AppSettings,
+  LLMAdapter,
+  LLMAdapterInput,
+  ProviderInfo,
+  updateSettings,
+  fetchProviderModels,
+  testLLM,
+} from '@/lib/api/settings'
+import { LLMAdapterEditor, type LLMAdapterDraft } from './LLMAdapterEditor'
 
 type TestState = 'idle' | 'testing' | 'ok' | 'fail'
 
+function draftFromAdapter(adapter: LLMAdapter): LLMAdapterDraft {
+  return { ...adapter, api_key: '', clear_api_key: false }
+}
+
+function newAdapterId() {
+  return typeof globalThis.crypto?.randomUUID === 'function'
+    ? globalThis.crypto.randomUUID()
+    : `adapter-${Date.now()}`
+}
+
 export function AISection({ settings, onSaved }: { settings: AppSettings | null; onSaved: (s: AppSettings) => void }) {
   const providers: ProviderInfo[] = settings?.providers ?? []
+  const [adapters, setAdapters] = useState<LLMAdapterDraft[]>(
+    () => (settings?.llm_adapters ?? []).map(draftFromAdapter),
+  )
+  const [defaultAdapterId, setDefaultAdapterId] = useState(settings?.llm_default_adapter_id ?? '')
+  const [informationFilteringAdapterId, setInformationFilteringAdapterId] = useState(
+    settings?.llm_information_filtering_adapter_id ?? '',
+  )
 
   const [provider, setProvider] = useState(settings?.llm_provider ?? 'openai')
   const [baseUrl, setBaseUrl]   = useState(
@@ -134,6 +161,68 @@ export function AISection({ settings, onSaved }: { settings: AppSettings | null;
     }
   }
 
+  function updateAdapter(id: string, patch: Partial<LLMAdapterDraft>) {
+    setAdapters(current => current.map(adapter => (
+      adapter.id === id ? { ...adapter, ...patch } : adapter
+    )))
+  }
+
+  function addAdapter() {
+    setAdapters(current => [...current, {
+      id: newAdapterId(),
+      name: '',
+      protocol: 'openai',
+      endpoint: 'https://api.openai.com/v1',
+      model: '',
+      supports_text: true,
+      supports_image: false,
+      image_response_format: 'base64',
+      api_key_set: false,
+      api_key_preview: '',
+      api_key: '',
+      clear_api_key: false,
+    }])
+  }
+
+  function removeAdapter(id: string) {
+    setAdapters(current => current.filter(adapter => adapter.id !== id))
+    if (defaultAdapterId === id) setDefaultAdapterId('')
+    if (informationFilteringAdapterId === id) setInformationFilteringAdapterId('')
+  }
+
+  async function handleSaveAdapters() {
+    setSaving(true)
+    try {
+      const llm_adapters: LLMAdapterInput[] = adapters.map(adapter => ({
+        id: adapter.id,
+        name: adapter.name,
+        protocol: adapter.protocol,
+        endpoint: adapter.endpoint,
+        model: adapter.model,
+        supports_text: adapter.supports_text,
+        supports_image: adapter.supports_image,
+        image_response_format: adapter.image_response_format,
+        ...(adapter.api_key ? { api_key: adapter.api_key } : {}),
+        ...(adapter.clear_api_key ? { clear_api_key: true } : {}),
+      }))
+      const updated = await updateSettings({
+        llm_adapters,
+        llm_default_adapter_id: defaultAdapterId,
+        llm_information_filtering_adapter_id: informationFilteringAdapterId,
+        prompt_generation_history_limit: Number(promptHistoryLimit),
+      })
+      setAdapters((updated.llm_adapters ?? []).map(draftFromAdapter))
+      setDefaultAdapterId(updated.llm_default_adapter_id ?? '')
+      setInformationFilteringAdapterId(updated.llm_information_filtering_adapter_id ?? '')
+      onSaved(updated)
+      toast.success('AI Adapter 配置已保存')
+    } catch {
+      toast.error('保存失败')
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const filteredModels = model
     ? modelList.filter(m => m.toLowerCase().includes(model.toLowerCase()))
     : modelList
@@ -211,6 +300,70 @@ export function AISection({ settings, onSaved }: { settings: AppSettings | null;
 
   return (
     <div className="flex flex-col gap-4">
+      <FormSection
+        title="LLM Adapter 实例"
+        description="可以配置多个 OpenAI-compatible 接口；信息筛选可独立指定使用的 Adapter。"
+      >
+        <div className="space-y-3">
+          {adapters.length === 0 ? (
+            <p className="text-xs text-muted-foreground">
+              尚未配置新 Adapter。添加后，文本、信息筛选和图片任务会按 Adapter 能力选择；旧配置仍可继续使用。
+            </p>
+          ) : (
+            <div className="space-y-3">
+              {adapters.map(adapter => (
+                <LLMAdapterEditor
+                  key={adapter.id}
+                  adapter={adapter}
+                  onChange={patch => updateAdapter(adapter.id, patch)}
+                  onDelete={() => removeAdapter(adapter.id)}
+                />
+              ))}
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="space-y-1.5 text-xs font-medium" htmlFor="default-llm-adapter">
+                  全局默认 Adapter
+                  <NativeSelect
+                    id="default-llm-adapter"
+                    aria-label="默认 Adapter"
+                    value={defaultAdapterId}
+                    onChange={event => setDefaultAdapterId(event.target.value)}
+                  >
+                    <option value="">请选择</option>
+                    {adapters.map(adapter => <option key={adapter.id} value={adapter.id}>{adapter.name || adapter.id}</option>)}
+                  </NativeSelect>
+                </label>
+                <label className="space-y-1.5 text-xs font-medium" htmlFor="information-filtering-adapter">
+                  信息筛选 Adapter
+                  <NativeSelect
+                    id="information-filtering-adapter"
+                    aria-label="信息筛选 Adapter"
+                    value={informationFilteringAdapterId}
+                    onChange={event => setInformationFilteringAdapterId(event.target.value)}
+                  >
+                    <option value="">跟随全局默认</option>
+                    {adapters.filter(adapter => adapter.supports_text).map(adapter => (
+                      <option key={adapter.id} value={adapter.id}>{adapter.name || adapter.id}</option>
+                    ))}
+                  </NativeSelect>
+                </label>
+              </div>
+            </div>
+          )}
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" variant="outline" onClick={addAdapter}>
+              添加 Adapter
+            </Button>
+            {adapters.length > 0 ? (
+              <Button type="button" onClick={handleSaveAdapters} disabled={saving}>
+                {saving ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <Save data-icon="inline-start" />}
+                保存 AI 配置
+              </Button>
+            ) : null}
+          </div>
+        </div>
+      </FormSection>
+
+      {adapters.length === 0 ? <>
       <FormSection
         title="聊天模型"
         description="选择供应商并配置兼容接口。连通性测试始终使用已保存的配置。"
@@ -438,6 +591,7 @@ export function AISection({ settings, onSaved }: { settings: AppSettings | null;
           </Field>
         </FieldGroup>
       </FormSection>
+      </> : null}
     </div>
   )
 }

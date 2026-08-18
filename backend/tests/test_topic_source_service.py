@@ -41,7 +41,11 @@ def test_new_x_posts_dispatch_one_merged_topic_job_per_subscription(service_env)
 
     async def run():
         async with SessionLocal() as db:
-            subscription = XSubscription(url="https://x.com/example", label="Example")
+            subscription = XSubscription(
+                url="https://x.com/example",
+                label="Example",
+                llm_adapter_id="filter",
+            )
             db.add(subscription)
             await db.flush()
             directories = [
@@ -96,6 +100,7 @@ def test_new_x_posts_dispatch_one_merged_topic_job_per_subscription(service_env)
             "subscription_id": 1,
             "directory_ids": [1, 2, 3],
             "tweet_ids": ["tweet-1", "tweet-2"],
+            "llm_adapter_id": "filter",
         },
     ]
     assert enqueued == [job.id for job in jobs]

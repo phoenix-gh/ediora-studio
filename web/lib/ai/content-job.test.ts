@@ -170,6 +170,76 @@ it('generates a prompt image, uploads it, and records the runtime model', async 
   expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith('/assets/generations/17/fail'))).toBe(false)
 })
 
+it('downloads a URL-mode prompt image before uploading the local asset', async () => {
+  vi.stubEnv('API_URL', 'http://localhost:8000/api')
+  vi.stubEnv('WORKER_TOKEN', 'prompt-url-worker-token-0123456789012345')
+  const providerBytes = Uint8Array.from([137, 80, 78, 71, 13, 10])
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    if (url.endsWith('/settings/ai-runtime')) {
+      return new Response(JSON.stringify({
+        image: {
+          api_key: 'sk-image',
+          model: 'dall-e-3',
+          base_url: 'https://images.example/v1',
+          image_response_format: 'url',
+        },
+      }), { status: 200 })
+    }
+    if (url === 'https://images.example/v1/images/generations') {
+      expect(JSON.parse(String(init?.body))).toMatchObject({
+        model: 'dall-e-3',
+        prompt: '一张 URL 模式图片',
+        response_format: 'url',
+      })
+      return new Response(JSON.stringify({ data: [{ url: 'https://cdn.example/prompt.png' }] }), { status: 200 })
+    }
+    if (url === 'https://cdn.example/prompt.png') {
+      expect(new Headers(init?.headers).has('Authorization')).toBe(false)
+      return new Response(providerBytes, { status: 200, headers: { 'content-type': 'image/png' } })
+    }
+    if (url.includes('/assets/upload')) {
+      const form = init?.body as FormData
+      const file = form.get('file') as Blob
+      expect(Array.from(new Uint8Array(await file.arrayBuffer()))).toEqual(Array.from(providerBytes))
+      return new Response(JSON.stringify({
+        id: 89, url: '/api/uploads/prompt-url.png', title: 'URL 模式图片',
+      }), { status: 201 })
+    }
+    if (url.endsWith('/assets/generations/19/succeed')) {
+      expect(JSON.parse(String(init?.body))).toEqual({
+        media_asset_id: 89,
+        provider: 'openai-compatible',
+        model: 'dall-e-3',
+      })
+      return new Response('{}', { status: 200 })
+    }
+    return new Response('{}', { status: 200 })
+  })
+  vi.stubGlobal('fetch', fetchMock)
+
+  const output = await runPromptImageGenerationFlow({
+    id: 74,
+    flow: 'prompt_image_generation',
+    title: '[提示词图片] URL 模式图片',
+    input: {
+      prompt_asset_id: 12,
+      generation_id: 19,
+      prompt_snapshot: '一张 URL 模式图片',
+      title_snapshot: 'URL 模式图片',
+    },
+    steps: [],
+  })
+
+  expect(output).toEqual({
+    generation_id: 19,
+    asset_id: 89,
+    asset_url: '/api/uploads/prompt-url.png',
+    model: 'dall-e-3',
+  })
+  expect(imageGeneration).not.toHaveBeenCalled()
+})
+
 it('records a bounded prompt generation failure and does not mark it succeeded', async () => {
   vi.stubEnv('API_URL', 'http://localhost:8000/api')
   vi.stubEnv('WORKER_TOKEN', 'prompt-assets-worker-token-0123456789012345')

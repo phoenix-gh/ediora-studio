@@ -9,6 +9,8 @@ const api = vi.hoisted(() => ({
   apiGet: vi.fn(),
   apiPost: vi.fn(),
   workerHeaders: vi.fn(),
+  createOpenAI: vi.fn(),
+  generateText: vi.fn(),
 }))
 
 vi.mock('./job-client', () => ({
@@ -30,8 +32,8 @@ vi.mock('./agent-execution-client', () => ({
   failAgentExecution: vi.fn(),
 }))
 
-vi.mock('@ai-sdk/openai', () => ({ createOpenAI: vi.fn() }))
-vi.mock('ai', () => ({ generateText: vi.fn() }))
+vi.mock('@ai-sdk/openai', () => ({ createOpenAI: api.createOpenAI }))
+vi.mock('ai', () => ({ generateText: api.generateText }))
 
 import { runTopicSourceJob } from './topic-source-job'
 
@@ -40,6 +42,9 @@ describe('topic source malformed payload handling', () => {
     vi.clearAllMocks()
     api.startStep.mockResolvedValue({ id: 41 })
     api.failStep.mockResolvedValue({})
+    api.completeStep.mockResolvedValue({})
+    api.completeJob.mockResolvedValue({})
+    api.workerHeaders.mockReturnValue({})
   })
 
   it.each([
@@ -68,5 +73,77 @@ describe('topic source malformed payload handling', () => {
       false,
     )
     expect(api.completeJob).not.toHaveBeenCalled()
+  })
+
+  it('loads the information-filtering runtime with the job adapter override', async () => {
+    api.getJob.mockResolvedValue({
+      id: 72,
+      flow: 'topic_source',
+      title: '按订阅筛选主题素材',
+      status: 'queued',
+      input: {
+        subscription_id: 9,
+        directory_ids: [3],
+        tweet_ids: ['tweet-1'],
+        llm_adapter_id: 'filter',
+      },
+      steps: [],
+    })
+    api.apiGet.mockImplementation(async (url: string) => {
+      if (url.startsWith('/assets/ingestion/candidates')) {
+        return {
+          directories: [{
+            id: 3,
+            name: 'AI 工具',
+            asset_type: 'article',
+            keywords: ['AI'],
+            prompt: '只接受有案例的内容。',
+          }],
+          posts: [{
+            tweet_id: 'tweet-1',
+            content: '一条 AI 工具动态',
+            url: 'https://x.com/example/status/1',
+            media: [],
+          }],
+        }
+      }
+      if (url.startsWith('/settings/ai-runtime')) {
+        return {
+          api_key: 'filter-key',
+          model: 'filter-model',
+          base_url: 'https://filter.example/v1',
+        }
+      }
+      throw new Error(`unexpected GET ${url}`)
+    })
+    api.apiPost.mockResolvedValue({ saved: 1, skipped: 0, decided: 1 })
+    api.createOpenAI.mockReturnValue({ chat: vi.fn(() => ({ id: 'filter-model' })) })
+    api.generateText.mockResolvedValue({
+      text: JSON.stringify({ classifications: [{ tweet_id: 'tweet-1', directory_id: 3 }] }),
+    })
+
+    await expect(runTopicSourceJob(72)).resolves.toEqual(expect.objectContaining({
+      candidate_count: 1,
+      accepted_count: 1,
+    }))
+
+    const settingsCall = api.apiGet.mock.calls.find(([url]) => (
+      typeof url === 'string' && url.startsWith('/settings/ai-runtime')
+    ))
+    expect(settingsCall).toBeDefined()
+    const query = new URLSearchParams(String(settingsCall?.[0]).split('?')[1])
+    expect(query.get('capability')).toBe('text')
+    expect(query.get('purpose')).toBe('information_filtering')
+    expect(query.get('adapter_id')).toBe('filter')
+    expect(api.createOpenAI).toHaveBeenCalledWith({
+      apiKey: 'filter-key',
+      baseURL: 'https://filter.example/v1',
+    })
+    expect(api.generateText).toHaveBeenCalledOnce()
+    expect(api.apiPost).toHaveBeenCalledWith(
+      '/assets/ingestion/accepted',
+      expect.objectContaining({ subscription_id: 9 }),
+      expect.anything(),
+    )
   })
 })

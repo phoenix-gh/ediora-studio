@@ -115,7 +115,12 @@ def test_settings_image_provider_is_separate_from_text_provider(client):
     )
     assert runtime.status_code == 200
     assert runtime.json()["image"] == {
-        "api_key": "image_key", "base_url": "https://api.openai.com/v1", "model": "gpt-image-1",
+        "adapter_id": "legacy-image",
+        "protocol": "openai",
+        "api_key": "image_key",
+        "base_url": "https://api.openai.com/v1",
+        "model": "gpt-image-1",
+        "image_response_format": "base64",
     }
 
 

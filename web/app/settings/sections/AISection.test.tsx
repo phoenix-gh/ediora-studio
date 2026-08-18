@@ -59,6 +59,37 @@ const settings = makeSettings({
   ],
 })
 
+const adapterSettings = makeSettings({
+  llm_adapters: [
+    {
+      id: 'chat-main',
+      name: '主文本',
+      protocol: 'openai',
+      endpoint: 'https://chat.example/v1',
+      model: 'chat-model',
+      supports_text: true,
+      supports_image: false,
+      image_response_format: 'base64',
+      api_key_set: true,
+      api_key_preview: '…1234',
+    },
+    {
+      id: 'filter-image',
+      name: '筛选图片',
+      protocol: 'openai',
+      endpoint: 'https://image.example/v1',
+      model: 'dall-e-3',
+      supports_text: true,
+      supports_image: true,
+      image_response_format: 'url',
+      api_key_set: true,
+      api_key_preview: '…5678',
+    },
+  ],
+  llm_default_adapter_id: 'chat-main',
+  llm_information_filtering_adapter_id: 'filter-image',
+})
+
 async function renderWithModelSuggestions() {
   vi.mocked(fetchProviderModels).mockResolvedValue({
     ok: true,
@@ -289,5 +320,53 @@ describe('AISection', () => {
       image_model: 'gpt-image-2',
       prompt_generation_history_limit: 3,
     }))
+  })
+
+  it('saves multiple adapters and independent information filtering selection', async () => {
+    vi.mocked(updateSettings).mockResolvedValue(adapterSettings)
+    render(<AISection settings={adapterSettings} onSaved={vi.fn()} />)
+
+    expect(screen.getByLabelText('信息筛选 Adapter')).toHaveValue('filter-image')
+    fireEvent.click(screen.getByRole('button', { name: '保存 AI 配置' }))
+
+    await waitFor(() => expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({
+      llm_default_adapter_id: 'chat-main',
+      llm_information_filtering_adapter_id: 'filter-image',
+      llm_adapters: expect.arrayContaining([
+        expect.objectContaining({ id: 'chat-main', supports_text: true }),
+        expect.objectContaining({
+          id: 'filter-image',
+          supports_image: true,
+          image_response_format: 'url',
+        }),
+      ]),
+    })))
+  })
+
+  it('keeps adapter API keys write-only and exposes an explicit clear action', () => {
+    render(<AISection settings={adapterSettings} onSaved={vi.fn()} />)
+
+    expect(screen.queryByDisplayValue('secret')).toBeNull()
+    expect(screen.getByText(/…1234/)).toBeVisible()
+    expect(screen.getAllByRole('button', { name: /清除 API Key/ })).toHaveLength(2)
+  })
+
+  it('preserves the crypto receiver when creating an Adapter id', () => {
+    const cryptoStub = {
+      randomUUID(this: unknown) {
+        if (this !== globalThis.crypto) throw new TypeError('Illegal invocation')
+        return 'adapter-generated'
+      },
+    }
+    vi.stubGlobal('crypto', cryptoStub)
+
+    try {
+      render(<AISection settings={settings} onSaved={vi.fn()} />)
+      fireEvent.click(screen.getByRole('button', { name: '添加 Adapter' }))
+
+      expect(screen.getByTestId('llm-adapter-adapter-generated')).toBeVisible()
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 })

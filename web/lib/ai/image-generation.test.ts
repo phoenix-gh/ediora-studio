@@ -69,6 +69,101 @@ describe('direct Agent image generation', () => {
     expect(fetchMock.mock.calls.filter(([input]) => String(input).includes('/assets/upload'))).toHaveLength(1)
   })
 
+  it('requests a provider image URL and downloads it before uploading the asset', async () => {
+    vi.stubEnv('WORKER_TOKEN', 'url-image-worker-token-0123456789012345')
+    const providerBytes = Uint8Array.from([137, 80, 78, 71, 13, 10])
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.includes('/assets/directories')) {
+        return new Response(JSON.stringify([{ name: '临时文件', asset_type: 'media' }]), { status: 200 })
+      }
+      if (url.endsWith('/settings/ai-runtime')) {
+        return new Response(JSON.stringify({
+          image: {
+            api_key: 'sk-image',
+            model: 'dall-e-3',
+            base_url: 'https://images.example/v1',
+            image_response_format: 'url',
+          },
+        }), { status: 200 })
+      }
+      if (url === 'https://images.example/v1/images/generations') {
+        expect(init?.method).toBe('POST')
+        expect(JSON.parse(String(init?.body))).toMatchObject({
+          model: 'dall-e-3',
+          prompt: '一张湖边日落',
+          n: 1,
+          response_format: 'url',
+        })
+        return new Response(JSON.stringify({ data: [{ url: 'https://cdn.example/lake.png' }] }), { status: 200 })
+      }
+      if (url === 'https://cdn.example/lake.png') {
+        expect(new Headers(init?.headers).has('Authorization')).toBe(false)
+        return new Response(providerBytes, {
+          status: 200,
+          headers: { 'content-type': 'image/png' },
+        })
+      }
+      if (url.includes('/assets/upload')) {
+        const form = init?.body as FormData
+        const file = form.get('file') as Blob
+        expect(Array.from(new Uint8Array(await file.arrayBuffer()))).toEqual(Array.from(providerBytes))
+        expect(init?.headers).toMatchObject({
+          'X-Worker-Token': 'url-image-worker-token-0123456789012345',
+          'X-Content-Job-Id': '74',
+        })
+        return new Response(JSON.stringify({ id: 94, url: '/api/uploads/lake.png', title: '湖边日落' }), { status: 201 })
+      }
+      if (url.endsWith('/jobs/74/events')) return new Response('{}', { status: 201 })
+      throw new Error(`unexpected request: ${url}`)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(generateAndSaveImage({
+      apiBase: 'http://localhost:8000/api',
+      jobId: 74,
+      prompt: '一张湖边日落',
+      title: '湖边日落',
+      directory: '临时文件',
+    })).resolves.toMatchObject({
+      asset_id: 94,
+      asset_url: '/api/uploads/lake.png',
+    })
+
+    expect(imageGeneration).not.toHaveBeenCalled()
+  })
+
+  it('rejects a provider image response without a downloadable URL', async () => {
+    vi.stubEnv('WORKER_TOKEN', 'url-image-worker-token-0123456789012345')
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/assets/directories')) {
+        return new Response(JSON.stringify([{ name: '临时文件', asset_type: 'media' }]), { status: 200 })
+      }
+      if (url.endsWith('/settings/ai-runtime')) {
+        return new Response(JSON.stringify({
+          image: {
+            api_key: 'sk-image',
+            model: 'dall-e-3',
+            base_url: 'https://images.example/v1',
+            image_response_format: 'url',
+          },
+        }), { status: 200 })
+      }
+      if (url === 'https://images.example/v1/images/generations') {
+        return new Response(JSON.stringify({ data: [{}] }), { status: 200 })
+      }
+      throw new Error(`unexpected request: ${url}`)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(generateAndSaveImage({
+      apiBase: 'http://localhost:8000/api',
+      prompt: '一张没有返回地址的图片',
+    })).rejects.toThrow(/URL/i)
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes('/assets/upload'))).toBe(false)
+  })
+
   it('passes optional reference images without changing the text-only call shape', async () => {
     vi.stubEnv('WORKER_TOKEN', 'direct-image-worker-token-0123456789012345')
     imageGeneration.mockResolvedValue({

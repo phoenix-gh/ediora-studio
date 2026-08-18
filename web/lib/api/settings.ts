@@ -8,6 +8,34 @@ export interface ProviderInfo {
   default_model: string
 }
 
+export type ImageResponseFormat = 'url' | 'base64'
+
+export interface LLMAdapter {
+  id: string
+  name: string
+  protocol: 'openai'
+  endpoint: string
+  model: string
+  supports_text: boolean
+  supports_image: boolean
+  image_response_format: ImageResponseFormat
+  api_key_set: boolean
+  api_key_preview: string
+}
+
+export interface LLMAdapterInput {
+  id?: string
+  name: string
+  protocol?: 'openai'
+  endpoint: string
+  model: string
+  supports_text: boolean
+  supports_image: boolean
+  image_response_format: ImageResponseFormat
+  api_key?: string
+  clear_api_key?: boolean
+}
+
 export interface WebSearchProviderConfig {
   key: 'searxng'
   enabled: boolean
@@ -54,6 +82,9 @@ export interface AppSettings {
   llm_effective_base_url: string
   llm_api_key_set: boolean
   llm_api_key_preview: string
+  llm_adapters: LLMAdapter[]
+  llm_default_adapter_id: string
+  llm_information_filtering_adapter_id: string
   image_model: string
   image_base_url: string
   image_api_key_set: boolean
@@ -147,6 +178,9 @@ export interface SettingsUpdate {
   llm_model?: string
   llm_api_key?: string
   llm_base_url?: string
+  llm_adapters?: LLMAdapterInput[]
+  llm_default_adapter_id?: string
+  llm_information_filtering_adapter_id?: string
   image_model?: string
   image_api_key?: string
   image_base_url?: string

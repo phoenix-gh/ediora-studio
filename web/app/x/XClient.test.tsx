@@ -86,6 +86,7 @@ const subscription = {
   collect_interval_minutes: 15,
   intelligence_enabled: true,
   intelligence_enabled_at: '2026-07-30T00:00:00Z',
+  llm_adapter_id: null,
   ingestion_directory_ids: [5] as number[],
   last_collected_at: '2026-07-30T00:01:00Z',
   last_error: '',

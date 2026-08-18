@@ -13,6 +13,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 
+import { getSettings, type LLMAdapter } from '@/lib/api/settings'
 import {
   Dialog,
   DialogContent,
@@ -107,23 +108,35 @@ export function XSubscriptionDialog({
   const [deleteConfirm, setDeleteConfirm] = useState(false)
   const [ingestionDirectories, setIngestionDirectories] = useState<CreativeAssetDirectory[]>([])
   const [selectedDirectoryIds, setSelectedDirectoryIds] = useState<number[]>(subscription?.ingestion_directory_ids ?? [])
+  const [informationFilteringAdapters, setInformationFilteringAdapters] = useState<LLMAdapter[]>([])
+  const [informationFilteringAdapterId, setInformationFilteringAdapterId] = useState(
+    subscription?.llm_adapter_id ?? '',
+  )
 
   useEffect(() => {
     if (!open) return
     let cancelled = false
-    void Promise.all([
-      listCreativeAssetDirectories('article'),
-      listCreativeAssetDirectories('prompt'),
-    ]).then(groups => {
+    const directoriesRequest = Promise.all([
+      Promise.resolve(listCreativeAssetDirectories('article')),
+      Promise.resolve(listCreativeAssetDirectories('prompt')),
+    ]).then(groups => groups.flatMap(group => Array.isArray(group) ? group : []))
+      .catch(() => null)
+    const settingsRequest = Promise.resolve(getSettings()).catch(() => null)
+    void Promise.all([directoriesRequest, settingsRequest]).then(([directories, settings]) => {
       if (cancelled) return
-      const nextDirectories = Array.from(new Map(
-        groups.flat().map(directory => [directory.id, directory]),
-      ).values())
-      setIngestionDirectories(nextDirectories)
-      const readyIds = new Set(nextDirectories.filter(directoryIsReady).map(directory => directory.id))
-      setSelectedDirectoryIds((subscription?.ingestion_directory_ids ?? []).filter(id => readyIds.has(id)))
-    }).catch(() => {
-      if (!cancelled) toast.error('加载订阅素材入库配置失败')
+      if (directories === null) {
+        toast.error('加载订阅素材入库配置失败')
+      } else {
+        const nextDirectories = Array.from(new Map(
+          directories.map(directory => [directory.id, directory]),
+        ).values())
+        setIngestionDirectories(nextDirectories)
+        const readyIds = new Set(nextDirectories.filter(directoryIsReady).map(directory => directory.id))
+        setSelectedDirectoryIds((subscription?.ingestion_directory_ids ?? []).filter(id => readyIds.has(id)))
+      }
+      const textAdapters = (settings?.llm_adapters ?? []).filter(adapter => adapter.supports_text)
+      setInformationFilteringAdapters(textAdapters)
+      setInformationFilteringAdapterId(subscription?.llm_adapter_id ?? '')
     })
     return () => { cancelled = true }
   }, [open, subscription])
@@ -156,6 +169,7 @@ export function XSubscriptionDialog({
             kind: 'timeline',
             url: nextUrl,
             label: name.trim() || undefined,
+            llm_adapter_id: informationFilteringAdapterId || null,
             ingestion_directory_ids: selectedDirectoryIds,
           })
         } else {
@@ -166,6 +180,7 @@ export function XSubscriptionDialog({
             raw_query: query,
             max_results: maxResults,
             label: name.trim() || undefined,
+            llm_adapter_id: informationFilteringAdapterId || null,
             ingestion_directory_ids: selectedDirectoryIds,
           })
         }
@@ -178,6 +193,7 @@ export function XSubscriptionDialog({
         label: name.trim() || subscription.label,
         collect_interval_minutes: collectInterval,
         intelligence_enabled: intelligenceEnabled,
+        llm_adapter_id: informationFilteringAdapterId || null,
         ingestion_directory_ids: selectedDirectoryIds,
       }
       if (kind === 'search') {
@@ -385,6 +401,26 @@ export function XSubscriptionDialog({
               </div>
             )}
             <p className="text-[11px] text-muted-foreground">不选择文件夹则不执行素材入库；文章和提示词各自最多落入一个文件夹，提示词正文必须来自原帖。</p>
+            {informationFilteringAdapters.length > 0 ? (
+              <label className="block space-y-1.5 text-xs" htmlFor="x-subscription-llm-adapter">
+                <span className="font-medium">信息筛选 Adapter</span>
+                <NativeSelect
+                  id="x-subscription-llm-adapter"
+                  aria-label="信息筛选 Adapter"
+                  value={informationFilteringAdapterId}
+                  onChange={event => setInformationFilteringAdapterId(event.target.value)}
+                  className="rounded-md px-2 text-sm"
+                >
+                  <option className={X_DIALOG_OPTION_CLASS} value="">跟随全局设置</option>
+                  {informationFilteringAdapters.map(adapter => (
+                    <option className={X_DIALOG_OPTION_CLASS} key={adapter.id} value={adapter.id}>
+                      {adapter.name} · {adapter.model}
+                    </option>
+                  ))}
+                </NativeSelect>
+                <span className="block text-[11px] text-muted-foreground">不选择时使用全局“信息筛选 Adapter”，再回退到默认 Adapter。</span>
+              </label>
+            ) : null}
           </section>
 
           {editing && subscription ? (

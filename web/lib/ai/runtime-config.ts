@@ -1,10 +1,15 @@
 export type TextModelSettings = {
+  adapter_id?: string
+  protocol?: string
   api_key?: string
   model?: string
   base_url?: string
+  image_response_format?: 'url' | 'base64'
 }
 
 export type ImageModelSettings = TextModelSettings
+
+export type ImageResponseFormat = 'url' | 'base64'
 
 export type TextModelConfig = {
   apiKey: string
@@ -12,7 +17,9 @@ export type TextModelConfig = {
   baseURL?: string
 }
 
-export type ImageModelConfig = TextModelConfig
+export type ImageModelConfig = TextModelConfig & {
+  responseFormat: ImageResponseFormat
+}
 
 export function textModelConfigFromSettings(
   settings: TextModelSettings,
@@ -35,5 +42,6 @@ export function imageModelConfigFromSettings(
     apiKey,
     modelName: settings.model?.trim() || 'gpt-image-1',
     baseURL: settings.base_url?.trim() || undefined,
+    responseFormat: settings.image_response_format === 'url' ? 'url' : 'base64',
   }
 }
