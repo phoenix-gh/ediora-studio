@@ -350,4 +350,23 @@ describe('AISection', () => {
     expect(screen.getByText(/…1234/)).toBeVisible()
     expect(screen.getAllByRole('button', { name: /清除 API Key/ })).toHaveLength(2)
   })
+
+  it('preserves the crypto receiver when creating an Adapter id', () => {
+    const cryptoStub = {
+      randomUUID(this: unknown) {
+        if (this !== globalThis.crypto) throw new TypeError('Illegal invocation')
+        return 'adapter-generated'
+      },
+    }
+    vi.stubGlobal('crypto', cryptoStub)
+
+    try {
+      render(<AISection settings={settings} onSaved={vi.fn()} />)
+      fireEvent.click(screen.getByRole('button', { name: '添加 Adapter' }))
+
+      expect(screen.getByTestId('llm-adapter-adapter-generated')).toBeVisible()
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
 })

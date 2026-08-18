@@ -28,8 +28,9 @@ function draftFromAdapter(adapter: LLMAdapter): LLMAdapterDraft {
 }
 
 function newAdapterId() {
-  const randomUUID = globalThis.crypto?.randomUUID
-  return randomUUID ? randomUUID() : `adapter-${Date.now()}`
+  return typeof globalThis.crypto?.randomUUID === 'function'
+    ? globalThis.crypto.randomUUID()
+    : `adapter-${Date.now()}`
 }
 
 export function AISection({ settings, onSaved }: { settings: AppSettings | null; onSaved: (s: AppSettings) => void }) {
