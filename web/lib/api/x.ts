@@ -19,6 +19,7 @@ export interface XSubscription {
   collect_interval_minutes: number
   intelligence_enabled: boolean
   intelligence_enabled_at: string | null
+  llm_adapter_id: string | null
   ingestion_directory_ids: number[]
   last_collected_at: string | null
   last_error: string
@@ -39,12 +40,13 @@ export interface CreateXSubscriptionInput {
   sort?: string
   max_results?: number
   collect_interval_minutes?: number
+  llm_adapter_id?: string | null
   ingestion_directory_ids?: number[]
 }
 
 export type XSubscriptionPatch = Partial<Pick<
   XSubscription,
-  'enabled' | 'label' | 'raw_query' | 'max_results' | 'collect_interval_minutes' | 'intelligence_enabled' | 'ingestion_directory_ids'
+  'enabled' | 'label' | 'raw_query' | 'max_results' | 'collect_interval_minutes' | 'intelligence_enabled' | 'llm_adapter_id' | 'ingestion_directory_ids'
 >>
 
 export interface XPost {
