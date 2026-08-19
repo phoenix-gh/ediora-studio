@@ -21,6 +21,12 @@ import {
   type AgentRuntime,
   type OpenAgentRuntimeOptions,
 } from './agent-runtime'
+import { RESPONSE_AGENT_TOOL_ALLOWLIST } from './agent-tool-policy'
+import { pinCapabilitySnapshot } from './agent-capabilities'
+import {
+  capabilityPinFromExecution,
+  restoredSkillNameFromExecution,
+} from './agent-capability-pin'
 import { createDirectImageGenerator, mcpUrl } from './global-chat-tools'
 import type {
   AgentCompletionEvidence,
@@ -95,27 +101,7 @@ export function outputInstructions(outputType: string) {
   return `${common} 输出适合 X 分享的中文帖子，只输出正文，突出一个价值点和自己的观点。`
 }
 
-const responseArticleToolAllowlist = [
-  'web_search',
-  'fetch_url',
-  'get_content_directions',
-  'list_drafts',
-  'get_draft',
-  'search_creative_assets',
-  'get_creative_asset',
-  'list_creative_asset_candidates',
-  'get_recent_content_usage',
-  'list_writing_plans',
-  'get_writing_plan',
-  'search_writing_plans',
-  'list_publish_accounts',
-  'get_account_profile',
-  'loadSkill',
-  'readSkillReference',
-  'save_draft',
-] as const
-
-export const RESPONSE_AGENT_TOOL_ALLOWLIST = responseArticleToolAllowlist
+export { RESPONSE_AGENT_TOOL_ALLOWLIST }
 
 type ObjectiveContext = ResponseArticleContext & { executionId?: number }
 
@@ -392,6 +378,18 @@ export async function runContentResponseOutputJob(
         if (!execution) throw new Error('content response Agent execution was not initialized')
         return execution
       }
+      let capabilityPin = capabilityPinFromExecution(currentExecution())
+      const allowSkillBootstrap = capabilityPin === undefined
+      const withCapabilityAudit = (audit: Record<string, unknown>) => {
+        if (!runtime) return audit
+        const capabilities = runtime.capabilitySnapshot()
+        capabilityPin = pinCapabilitySnapshot(
+          capabilityPin,
+          capabilities,
+          { allowSkillBootstrap },
+        )
+        return { ...audit, capabilities, capabilityPin }
+      }
       const objective = buildResponseArticleAgentObjective(context, currentExecution().id)
       const recordedCalls = await deps.listToolCalls(jobId, currentExecution().id)
       const recoveredEvidence = recordedCalls.reduce<ResponseArticleCompletionEvidence | null>(
@@ -418,7 +416,7 @@ export async function runContentResponseOutputJob(
         ) => {
           execution = await deps.checkpointExecution(
             jobId, currentExecution().id, currentExecution().version,
-            { phase, checkpoint: state, audit },
+            { phase, checkpoint: state, audit, capabilityPin },
           )
         }
 
@@ -427,11 +425,28 @@ export async function runContentResponseOutputJob(
           mcpEndpoint: mcpUrl(apiRoot),
           imageGenerator: createDirectImageGenerator(apiRoot, jobId),
           model,
-          approvalPolicy: 'automatic',
+          mode: 'job',
+          policyProfile: 'response-writing',
           automaticSelection: false,
-          skillMode: 'auto',
-          allowedToolNames: RESPONSE_AGENT_TOOL_ALLOWLIST,
+          skillMode: currentExecution().skill_mode,
+          skillName: currentExecution().skill_name ?? undefined,
+          restoredSkillName: restoredSkillNameFromExecution(currentExecution()),
           beforeToolExecute: async event => {
+            const capabilities = runtime?.capabilitySnapshot()
+            if (capabilities) {
+              try {
+                capabilityPin = pinCapabilitySnapshot(
+                  capabilityPin,
+                  capabilities,
+                  { allowSkillBootstrap },
+                )
+              } catch (error) {
+                return {
+                  action: 'uncertain' as const,
+                  error: error instanceof Error ? error.message : String(error),
+                }
+              }
+            }
             const decision = await deps.claimToolCall(jobId, currentExecution().id, event)
             if (event.toolName === 'save_draft' && completionEvidence) {
               return { action: 'uncertain', error: 'save_draft may only be called once' }
@@ -464,9 +479,10 @@ export async function runContentResponseOutputJob(
           },
         })
 
-        await checkpoint('prepared', { objective }, {
-          skill: runtime.snapshot(), toolCalls: audits,
-        })
+        await checkpoint('prepared', { objective }, withCapabilityAudit({
+          skill: runtime.snapshot(),
+          toolCalls: audits,
+        }))
         const result = await runtime.run({
           objective,
           modelMessages: [{
@@ -479,19 +495,19 @@ export async function runContentResponseOutputJob(
           onStep: event => checkpoint(event.phase, {
             objective,
             latestStep: event,
-          }, {
+          }, withCapabilityAudit({
             skill: runtime?.snapshot(),
             toolCalls: audits,
-          }),
+          })),
         })
         await checkpoint('finalizing', {
           objective,
           result: { kind: result.kind, text: result.text, parts: result.parts },
-        }, {
+        }, withCapabilityAudit({
           skill: runtime.snapshot(),
           skillRun: agentSkillRunAudit(result),
           toolCalls: audits,
-        })
+        }))
 
         if (!completionEvidence) throw new Error('missing valid save_draft evidence')
         evidence = completionEvidence
@@ -523,6 +539,7 @@ export async function runContentResponseOutputJob(
     const message = error instanceof Error ? error.message : String(error)
     const deterministic = message.includes('missing valid save_draft evidence')
       || message.includes('Selected skill is unavailable')
+      || message.includes('Agent capability drift detected')
       || message.includes('requires response_output_id')
     try {
       if (execution && !executionCompleted) await deps.failExecution(jobId, execution.id, message)

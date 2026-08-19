@@ -1,6 +1,8 @@
 import { tool } from 'ai'
 import { z } from 'zod'
 
+import type { AgentCapabilitySnapshot } from './agent-capabilities'
+
 export const chatToolNames = [
   'searchInformationSources',
   'readInformationSource',
@@ -28,6 +30,24 @@ type PersistedChatMessage = {
 }
 
 type PersistedChatPart = { type?: unknown; state?: unknown }
+
+export function buildChatMessagePersistencePayload(input: {
+  role: 'user' | 'assistant' | 'tool'
+  parts: unknown[]
+  text?: string
+  skillRun?: Record<string, unknown>
+  capabilitySnapshot?: AgentCapabilitySnapshot
+}) {
+  return {
+    role: input.role,
+    parts: input.parts,
+    ...(input.text === undefined ? {} : { text: input.text }),
+    ...(input.skillRun === undefined ? {} : { skill_run: input.skillRun }),
+    ...(input.capabilitySnapshot === undefined
+      ? {}
+      : { capability_snapshot: input.capabilitySnapshot }),
+  }
+}
 
 export function latestClientTurn(messages: unknown[]) {
   return messages.at(-1)

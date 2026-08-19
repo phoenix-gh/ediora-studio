@@ -43,6 +43,14 @@ const context: DailyCreationAgentContext = {
   },
 }
 
+const jobCapabilitySnapshot = {
+  schemaVersion: 1 as const,
+  mode: 'job' as const,
+  skill: null,
+  tools: [],
+  policy: { approvalPolicy: 'automatic' as const, allowedToolNames: null },
+}
+
 type DependencyOptions = {
   text?: string
   toolAudits?: AgentToolAudit[]
@@ -98,6 +106,7 @@ function dependencies({
       return {
         tools: {}, catalogContext: '', selectedSkill: undefined,
         prepare: vi.fn(), snapshot: () => ({}), activeContext: () => undefined,
+        capabilitySnapshot: () => jobCapabilitySnapshot,
         readReferences: vi.fn(), close: vi.fn(), run: runtimeRun,
       }
     }),
@@ -184,10 +193,44 @@ describe('daily creation Agent job', () => {
     expect(deps.completeJob).toHaveBeenCalledWith(19)
     expect(runtimeRun).toHaveBeenCalledWith(expect.objectContaining({ objective: prompt }))
     expect(deps.openRuntime).toHaveBeenCalledWith(expect.objectContaining({
-      dailyCreationRunId: 83,
+      dailyCreationRunId: 83, mode: 'job', policyProfile: 'scheduled',
     }))
+    expect(deps.checkpointExecution).toHaveBeenCalledWith(
+      19, 41, expect.any(Number), expect.objectContaining({
+        phase: 'prepared',
+        audit: expect.objectContaining({ capabilities: jobCapabilitySnapshot }),
+      }),
+    )
+    expect(deps.checkpointExecution).toHaveBeenLastCalledWith(
+      19, 41, expect.any(Number), expect.objectContaining({
+        phase: 'finalizing',
+        audit: expect.objectContaining({ capabilities: jobCapabilitySnapshot }),
+      }),
+    )
     expect(runtimeRun.mock.calls[0]?.[0]?.requiredTools).toBeUndefined()
     expect(runtimeRun.mock.calls[0]?.[0]?.selectedContext).toBeUndefined()
+  })
+
+  it('rejects a retry before Agent execution when the pinned capabilities drift', async () => {
+    const { deps, runtimeRun } = dependencies()
+    vi.mocked(deps.ensureExecution).mockResolvedValue({
+      id: 41, job_id: 19, status: 'running', objective: prompt,
+      skill_mode: 'auto', skill_name: null, phase: 'finalizing', version: 3,
+      checkpoint: {}, audit: {}, completion_evidence: {},
+      capability_pin: {
+        ...jobCapabilitySnapshot,
+        tools: [{
+          name: 'new_tool', description: '', inputSchemaDigest: null,
+          sideEffecting: false, needsApproval: false, replayPolicy: 'replayable',
+          concurrencyPolicy: 'serialized', idempotencyPolicy: 'unknown',
+        }],
+      },
+    })
+
+    await expect(runDailyCreationAgentJob(19, deps))
+      .rejects.toThrow('Agent capability drift detected: tools')
+    expect(runtimeRun).not.toHaveBeenCalled()
+    expect(deps.failStep).toHaveBeenCalledWith(19, 71, expect.any(Error), false)
   })
 
   it('bounds generic evidence text and persists it in a finalizing checkpoint', async () => {

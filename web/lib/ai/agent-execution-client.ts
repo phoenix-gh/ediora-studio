@@ -5,6 +5,7 @@ import type {
   AgentToolAudit,
   AgentToolDecision,
 } from './agent-runtime-types'
+import type { AgentCapabilitySnapshot } from './agent-capabilities'
 import { apiGet, apiPatch, apiPost, workerHeaders } from './job-client'
 
 export type DurableAgentExecution = {
@@ -15,6 +16,7 @@ export type DurableAgentExecution = {
   skill_mode: AgentSkillMode
   skill_name: string | null
   skill_activation?: string | null
+  capability_pin?: AgentCapabilitySnapshot | null
   phase: string
   checkpoint: Record<string, unknown>
   audit: Record<string, unknown>
@@ -28,6 +30,7 @@ export type AgentExecutionCheckpoint = {
   phase: string
   checkpoint: Record<string, unknown>
   audit: Record<string, unknown>
+  capabilityPin?: AgentCapabilitySnapshot
 }
 
 export type DurableAgentToolCall = {
@@ -87,7 +90,13 @@ export function checkpointAgentExecution(
 ) {
   return apiPatch<DurableAgentExecution>(
     `/agent-executions/${executionId}/checkpoint`,
-    { expected_version: expectedVersion, ...update },
+    {
+      expected_version: expectedVersion,
+      phase: update.phase,
+      checkpoint: update.checkpoint,
+      audit: update.audit,
+      ...(update.capabilityPin === undefined ? {} : { capability_pin: update.capabilityPin }),
+    },
     workerHeaders(jobId),
   )
 }

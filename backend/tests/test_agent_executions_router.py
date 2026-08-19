@@ -91,10 +91,18 @@ def test_agent_execution_route_round_trips_checkpoint_and_tool_replay(client):
             "phase": "execute",
             "checkpoint": {"parts": []},
             "audit": {"loaded_references": []},
+            "capability_pin": {
+                "schemaVersion": 1,
+                "mode": "job",
+                "skill": None,
+                "tools": [],
+                "policy": {"approvalPolicy": "automatic", "allowedToolNames": None},
+            },
         },
     )
     assert checkpoint.status_code == 200, checkpoint.text
     assert checkpoint.json()["version"] == 2
+    assert checkpoint.json()["capability_pin"]["mode"] == "job"
     conflict = test_client.patch(
         f"/api/agent-executions/{execution['id']}/checkpoint",
         headers=headers(),

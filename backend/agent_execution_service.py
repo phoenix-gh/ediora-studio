@@ -17,6 +17,10 @@ class AgentExecutionConflict(RuntimeError):
     pass
 
 
+class AgentCapabilityDrift(RuntimeError):
+    pass
+
+
 @dataclass(frozen=True)
 class ToolCallClaim:
     action: Literal["execute", "replay", "uncertain"]
@@ -26,6 +30,109 @@ class ToolCallClaim:
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _normalized_capability_pin(value: dict) -> dict:
+    normalized = dict(value)
+    skill = normalized.get("skill")
+    if isinstance(skill, dict):
+        normalized["skill"] = {
+            key: nested for key, nested in skill.items() if key != "activation"
+        }
+    return normalized
+
+
+def _capability_pin_drift(expected: dict, candidate: dict) -> bool:
+    expected_normalized = _normalized_capability_pin(expected)
+    candidate_normalized = _normalized_capability_pin(candidate)
+    expected_skill = expected_normalized.get("skill")
+    candidate_skill = candidate_normalized.get("skill")
+    expected_normalized["skill"] = _comparable_skill(expected_skill)
+    candidate_normalized["skill"] = _comparable_skill(candidate_skill)
+    if isinstance(expected_skill, dict) and isinstance(candidate_skill, dict):
+        candidate_reference_items = candidate_skill.get("references", [])
+        expected_reference_items = expected_skill.get("references", [])
+        if not isinstance(candidate_reference_items, list):
+            candidate_reference_items = []
+        if not isinstance(expected_reference_items, list):
+            expected_reference_items = []
+        candidate_references = {
+            item.get("path"): item
+            for item in candidate_reference_items
+            if isinstance(item, dict)
+        }
+        for expected_reference in expected_reference_items:
+            if not isinstance(expected_reference, dict):
+                continue
+            expected_digest = expected_reference.get("contentDigest")
+            current_reference = candidate_references.get(expected_reference.get("path"))
+            current_digest = (
+                current_reference.get("contentDigest")
+                if isinstance(current_reference, dict) else None
+            )
+            if expected_digest and current_digest and expected_digest != current_digest:
+                return True
+    expected_tools = expected_normalized.pop("tools", None)
+    candidate_tools = candidate_normalized.pop("tools", None)
+    if expected_normalized != candidate_normalized:
+        return True
+    if not isinstance(expected_tools, list) or not isinstance(candidate_tools, list):
+        return expected_tools != candidate_tools
+    if len(expected_tools) != len(candidate_tools):
+        return True
+    metadata_keys = {"concurrencyPolicy", "idempotencyPolicy"}
+    for expected_tool, candidate_tool in zip(expected_tools, candidate_tools):
+        if not isinstance(expected_tool, dict) or not isinstance(candidate_tool, dict):
+            if expected_tool != candidate_tool:
+                return True
+            continue
+        expected_base = {
+            key: value for key, value in expected_tool.items() if key not in metadata_keys
+        }
+        candidate_base = {
+            key: value for key, value in candidate_tool.items() if key not in metadata_keys
+        }
+        if expected_base != candidate_base:
+            return True
+        if any(
+            key in expected_tool and key in candidate_tool
+            and expected_tool[key] != candidate_tool[key]
+            for key in metadata_keys
+        ):
+            return True
+    return False
+
+
+def _comparable_skill(skill: object) -> object:
+    if not isinstance(skill, dict):
+        return skill
+    reference_items = skill.get("references", [])
+    if not isinstance(reference_items, list):
+        reference_items = []
+    return {
+        key: value
+        for key, value in skill.items()
+        if key not in {"activation", "references"}
+    } | {
+        "references": [
+            {
+                "path": item.get("path"),
+                "bytes": item.get("bytes"),
+            }
+            for item in reference_items
+            if isinstance(item, dict)
+        ],
+    }
+
+
+def _capability_pin_can_bootstrap_skill(expected: dict, candidate: dict) -> bool:
+    if expected.get("skill") is not None or candidate.get("skill") is None:
+        return False
+    expected_without_skill = dict(expected)
+    candidate_without_skill = dict(candidate)
+    expected_without_skill["skill"] = None
+    candidate_without_skill["skill"] = None
+    return not _capability_pin_drift(expected_without_skill, candidate_without_skill)
 
 
 async def ensure_agent_execution(
@@ -86,7 +193,34 @@ async def update_agent_checkpoint(
     phase: str,
     checkpoint: dict,
     audit: dict,
+    capability_pin: dict | None = None,
 ) -> AgentExecution:
+    execution = await session.scalar(
+        select(AgentExecution)
+        .where(AgentExecution.id == execution_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if execution is None:
+        raise KeyError(f"agent execution {execution_id} not found")
+    if execution.version != expected_version:
+        await session.rollback()
+        if await session.get(AgentExecution, execution_id) is None:
+            raise KeyError(f"agent execution {execution_id} not found")
+        raise AgentExecutionConflict("agent execution checkpoint version conflict")
+    pinned = execution.pinned_capability_snapshot
+    next_pinned = pinned
+    if capability_pin is not None:
+        if pinned is not None and _capability_pin_drift(pinned, capability_pin):
+            if _capability_pin_can_bootstrap_skill(pinned, capability_pin):
+                next_pinned = capability_pin
+            else:
+                await session.rollback()
+                if await session.get(AgentExecution, execution_id) is None:
+                    raise KeyError(f"agent execution {execution_id} not found")
+                raise AgentCapabilityDrift("agent capability pin drift detected")
+        elif pinned is None:
+            next_pinned = capability_pin
     statement = (
         update(AgentExecution)
         .where(
@@ -97,6 +231,7 @@ async def update_agent_checkpoint(
             phase=phase,
             checkpoint_data=checkpoint,
             audit_data=audit,
+            pinned_capability_snapshot=next_pinned,
             version=expected_version + 1,
             updated_at=_now(),
         )

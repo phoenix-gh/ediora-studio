@@ -84,6 +84,40 @@ def test_init_db_twice_creates_postgresql_core_tables(postgres_env):
     assert "media" in tables["x_posts"]
 
 
+def test_init_db_creates_chat_capability_snapshot_column(postgres_env):
+    _reload_database_modules()
+    import models  # noqa: F401
+    from database import engine, init_db
+
+    async def run():
+        await init_db()
+        async with engine.connect() as connection:
+            snapshot = await _table_snapshot(connection)
+        await engine.dispose()
+        return snapshot
+
+    tables = asyncio.run(run())
+
+    assert "capability_snapshot" in tables["chat_messages"]
+
+
+def test_init_db_creates_agent_capability_pin_column(postgres_env):
+    _reload_database_modules()
+    import models  # noqa: F401
+    from database import engine, init_db
+
+    async def run():
+        await init_db()
+        async with engine.connect() as connection:
+            snapshot = await _table_snapshot(connection)
+        await engine.dispose()
+        return snapshot
+
+    tables = asyncio.run(run())
+
+    assert "pinned_capability_snapshot" in tables["agent_executions"]
+
+
 def test_init_db_repairs_missing_x_post_media_column(postgres_env):
     _reload_database_modules()
     import models  # noqa: F401

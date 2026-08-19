@@ -1227,6 +1227,10 @@ async def init_db():
         await migrate_talking_video_delivery_schema(conn)
         await _add_columns(conn, "chat_messages", {
             "skill_run": "JSON",
+            "capability_snapshot": "JSON",
+        })
+        await _add_columns(conn, "agent_executions", {
+            "pinned_capability_snapshot": "JSON",
         })
         await _add_columns(conn, "creative_assets", {
             "media_kind": "VARCHAR NOT NULL DEFAULT ''",

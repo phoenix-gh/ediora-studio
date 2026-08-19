@@ -162,6 +162,7 @@ it('lets a prompt-directed Agent load a Skill and save exactly one X draft', asy
     automaticSelection?: boolean
     skillMode?: string
     dailyCreationRunId?: number
+    mode?: string
   } | undefined
   const deps: DailyCreationAgentJobDependencies = {
     getJob: vi.fn().mockResolvedValue({
@@ -216,10 +217,13 @@ it('lets a prompt-directed Agent load a Skill and save exactly one X draft', asy
   expect(checkpoints.at(-1)?.checkpoint).toEqual(expect.objectContaining({
     evidence: expect.objectContaining({ kind: 'agent_run' }),
   }))
+  expect(checkpoints.at(-1)?.audit).toEqual(expect.objectContaining({
+    capabilities: expect.objectContaining({ schemaVersion: 1, mode: 'job' }),
+  }))
   expect(deps.completeExecution).toHaveBeenCalledWith(19, 41, evidence)
   expect(deps.completeJob).toHaveBeenCalledWith(19)
   expect(runtimeOptions).toMatchObject({
-    automaticSelection: false, skillMode: 'auto', dailyCreationRunId: 83,
+    automaticSelection: false, skillMode: 'auto', dailyCreationRunId: 83, mode: 'job',
   })
   expect(deps.claimToolCall).toHaveBeenCalledWith(19, 41, expect.objectContaining({
     toolName: 'record_content_usage', sideEffecting: true,

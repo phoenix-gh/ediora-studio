@@ -6,6 +6,16 @@ import {
   type GlobalAgentToolOptions,
   type ImageGenerator,
 } from './global-chat-tools'
+import {
+  buildAgentCapabilitySnapshot,
+  type AgentCapabilitySnapshot,
+  type AgentRuntimeMode,
+  type SkillCapabilityInput,
+} from './agent-capabilities'
+import {
+  resolveAgentToolPolicy,
+  type AgentToolPolicyProfile,
+} from './agent-tool-policy'
 import { executeSkillRunWithAiSdk, selectSkillForTurn } from './skill-run-ai-sdk'
 import {
   sanitizeSkillRunPlan,
@@ -44,7 +54,9 @@ export type OpenAgentRuntimeOptions = {
   mcpEndpoint: string
   imageGenerator: ImageGenerator
   model: Parameters<typeof generateText>[0]['model']
-  approvalPolicy: AgentApprovalPolicy
+  approvalPolicy?: AgentApprovalPolicy
+  policyProfile?: AgentToolPolicyProfile
+  mode?: AgentRuntimeMode
   skillMode: AgentSkillMode
   skillName?: string
   restoredSkillName?: string
@@ -52,6 +64,7 @@ export type OpenAgentRuntimeOptions = {
   draftId?: number
   dailyCreationRunId?: number
   allowedToolNames?: readonly string[]
+  blockedToolNames?: readonly string[]
   alwaysAvailableToolNames?: readonly string[]
   beforeToolExecute?: (event: AgentToolAudit) => Promise<AgentToolDecision>
   onToolAudit?: (event: AgentToolAudit) => void | Promise<void>
@@ -87,6 +100,7 @@ export type AgentRuntime = {
   run(request: AgentRunRequest): Promise<AgentRunResult>
   snapshot: ChatSkillRuntime['snapshot']
   activeContext: ChatSkillRuntime['activeContext']
+  capabilitySnapshot(): AgentCapabilitySnapshot
   readReferences: ChatSkillRuntime['readReferences']
   close(): Promise<void>
 }
@@ -151,6 +165,12 @@ export async function openAgentRuntime(
   options: OpenAgentRuntimeOptions,
 ): Promise<AgentRuntime> {
   const deps = options.dependencies ?? defaultDependencies
+  const toolPolicy = resolveAgentToolPolicy(options.policyProfile, {
+    approvalPolicy: options.approvalPolicy,
+    allowedToolNames: options.allowedToolNames,
+    blockedToolNames: options.blockedToolNames,
+    alwaysAvailableToolNames: options.alwaysAvailableToolNames,
+  })
   const automaticSelection = options.automaticSelection ?? true
   let selected: AgentSelectedSkill | undefined
   let prepared = !automaticSelection
@@ -170,7 +190,8 @@ export async function openAgentRuntime(
     dailyCreationRunId: options.dailyCreationRunId,
     skillName,
     restoredSkillName,
-    approvalPolicy: options.approvalPolicy,
+    approvalPolicy: toolPolicy.approvalPolicy,
+    blockedToolNames: toolPolicy.blockedToolNames,
     beforeToolExecute: options.beforeToolExecute,
     onToolAudit: options.onToolAudit,
   })
@@ -180,11 +201,31 @@ export async function openAgentRuntime(
   ))
 
   const visibleTools = () => {
-    if (!options.allowedToolNames) return registry.tools
-    const allowed = new Set(options.allowedToolNames)
+    if (!toolPolicy.allowedToolNames) return registry.tools
+    const allowed = new Set(toolPolicy.allowedToolNames)
     return Object.fromEntries(
       Object.entries(registry.tools).filter(([name]) => allowed.has(name)),
     ) as ToolSet
+  }
+
+  const capabilitySnapshot = () => {
+    const capabilityContext = registry.capabilityContext?.()
+    const activeContext = registry.activeContext()
+    const skill: SkillCapabilityInput | undefined = capabilityContext ?? (activeContext
+      ? {
+          skill: activeContext.skill,
+          references: activeContext.references,
+          activation: activeContext.activation,
+          loadedReferences: [],
+        }
+      : undefined)
+    return buildAgentCapabilitySnapshot({
+      mode: options.mode ?? 'chat',
+      skill,
+      tools: visibleTools(),
+      approvalPolicy: toolPolicy.approvalPolicy,
+      allowedToolNames: toolPolicy.allowedToolNames,
+    })
   }
 
   type GenerateInput = Parameters<typeof generateText>[0]
@@ -282,7 +323,7 @@ export async function openAgentRuntime(
 
   async function run(request: AgentRunRequest): Promise<AgentRunResult> {
     const active = await prepare(request.objective)
-    const alwaysAvailableTools = [...new Set(options.alwaysAvailableToolNames ?? [])]
+    const alwaysAvailableTools = [...new Set(toolPolicy.alwaysAvailableToolNames ?? [])]
     const adapterRequiredTools = [...new Set(request.requiredTools ?? [])]
     const tools = visibleTools()
     const unavailableTool = [...alwaysAvailableTools, ...adapterRequiredTools]
@@ -439,6 +480,7 @@ export async function openAgentRuntime(
     run,
     snapshot: () => registry.snapshot(),
     activeContext: () => registry.activeContext(),
+    capabilitySnapshot,
     readReferences: paths => registry.readReferences(paths),
     close: () => registry.close(),
   }

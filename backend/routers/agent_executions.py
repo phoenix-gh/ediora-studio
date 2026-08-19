@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from agent_execution_service import (
     AgentExecutionConflict,
+    AgentCapabilityDrift,
     append_agent_message,
     claim_agent_tool_call,
     complete_agent_execution,
@@ -43,6 +44,7 @@ class CheckpointUpdate(BaseModel):
     phase: str = Field(min_length=1, max_length=64)
     checkpoint: dict = Field(default_factory=dict)
     audit: dict = Field(default_factory=dict)
+    capability_pin: dict | None = None
 
 
 class ToolCallClaimRequest(BaseModel):
@@ -87,6 +89,7 @@ def _execution_payload(execution: AgentExecution) -> dict:
         "phase": execution.phase,
         "checkpoint": execution.checkpoint_data,
         "audit": execution.audit_data,
+        "capability_pin": execution.pinned_capability_snapshot,
         "completion_evidence": execution.completion_evidence,
         "final_summary": execution.final_summary,
         "version": execution.version,
@@ -200,10 +203,13 @@ async def patch_checkpoint(
             phase=body.phase,
             checkpoint=body.checkpoint,
             audit=body.audit,
+            capability_pin=body.capability_pin,
         )
     except KeyError as error:
         raise HTTPException(404, str(error)) from None
     except AgentExecutionConflict as error:
+        raise HTTPException(409, str(error)) from error
+    except AgentCapabilityDrift as error:
         raise HTTPException(409, str(error)) from error
     return _execution_payload(execution)
 

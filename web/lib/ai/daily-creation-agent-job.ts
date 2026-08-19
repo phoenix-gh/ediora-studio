@@ -21,6 +21,11 @@ import {
   type AgentRuntime,
   type OpenAgentRuntimeOptions,
 } from './agent-runtime'
+import { pinCapabilitySnapshot } from './agent-capabilities'
+import {
+  capabilityPinFromExecution,
+  restoredSkillNameFromExecution,
+} from './agent-capability-pin'
 import { createDirectImageGenerator, mcpUrl } from './global-chat-tools'
 import type {
   AgentCompletionEvidence,
@@ -211,17 +216,37 @@ export async function runDailyCreationAgentJob(
   let execution: DurableAgentExecution | undefined
   let pendingFinalizationEvidence: AgentCompletionEvidence | undefined
   let durableFinalizationConfirmed = false
-  const executionRequest = {
+  const executionRequest: {
+    objective: string
+    skillMode: 'auto' | 'manual'
+    skillName: string | null
+  } = {
     objective: '', skillMode: 'auto' as const, skillName: null,
   }
   try {
     const context = await deps.getContext(runId, jobId)
     const objective = buildDailyCreationAgentObjective(context)
     executionRequest.objective = objective
+    executionRequest.skillMode = context.rule.skill_mode ?? 'auto'
+    executionRequest.skillName = executionRequest.skillMode === 'manual'
+      ? context.rule.skill_name ?? null
+      : null
     execution = await deps.ensureExecution(jobId, executionRequest)
     const currentExecution = () => {
       if (!execution) throw new Error('daily creation Agent execution was not initialized')
       return execution
+    }
+    let capabilityPin = capabilityPinFromExecution(currentExecution())
+    const allowSkillBootstrap = capabilityPin === undefined
+    const withCapabilityAudit = (audit: Record<string, unknown>) => {
+      if (!runtime) return audit
+      const capabilities = runtime.capabilitySnapshot()
+      capabilityPin = pinCapabilitySnapshot(
+        capabilityPin,
+        capabilities,
+        { allowSkillBootstrap },
+      )
+      return { ...audit, capabilities, capabilityPin }
     }
     const finalize = async (evidence: AgentCompletionEvidence) => {
       if (currentExecution().status !== 'succeeded') {
@@ -254,7 +279,7 @@ export async function runDailyCreationAgentJob(
     ) => {
       execution = await deps.checkpointExecution(
         jobId, currentExecution().id, currentExecution().version,
-        { phase, checkpoint: state, audit },
+        { phase, checkpoint: state, audit, capabilityPin },
       )
     }
 
@@ -263,11 +288,29 @@ export async function runDailyCreationAgentJob(
       mcpEndpoint: mcpUrl(apiRoot),
       imageGenerator: createDirectImageGenerator(apiRoot, jobId),
       model,
+      mode: 'job',
       dailyCreationRunId: runId,
-      approvalPolicy: 'automatic',
+      policyProfile: 'scheduled',
       automaticSelection: false,
-      skillMode: 'auto',
+      skillMode: currentExecution().skill_mode,
+      skillName: currentExecution().skill_name ?? undefined,
+      restoredSkillName: restoredSkillNameFromExecution(currentExecution()),
       beforeToolExecute: async event => {
+        const capabilities = runtime?.capabilitySnapshot()
+        if (capabilities) {
+          try {
+            capabilityPin = pinCapabilitySnapshot(
+              capabilityPin,
+              capabilities,
+              { allowSkillBootstrap },
+            )
+          } catch (error) {
+            return {
+              action: 'uncertain' as const,
+              error: error instanceof Error ? error.message : String(error),
+            }
+          }
+        }
         const decision = await deps.claimToolCall(jobId, currentExecution().id, event)
         return decision
       },
@@ -294,9 +337,10 @@ export async function runDailyCreationAgentJob(
       },
     })
 
-    await checkpoint('prepared', { objective }, {
-      skill: runtime.snapshot(), toolCalls: audits,
-    })
+    await checkpoint('prepared', { objective }, withCapabilityAudit({
+      skill: runtime.snapshot(),
+      toolCalls: audits,
+    }))
     const result = await runtime.run({
       objective,
       modelMessages: [{ role: 'user', content: objective }],
@@ -304,10 +348,10 @@ export async function runDailyCreationAgentJob(
       onStep: event => checkpoint(event.phase, {
         objective,
         latestStep: event,
-      }, {
+      }, withCapabilityAudit({
         skill: runtime?.snapshot(),
         toolCalls: audits,
-      }),
+      })),
     })
     const failedAudit = firstBlockingToolAudit(audits)
     if (failedAudit) {
@@ -326,11 +370,11 @@ export async function runDailyCreationAgentJob(
     await checkpoint('finalizing', {
       objective,
       evidence: completionEvidence,
-    }, {
+    }, withCapabilityAudit({
       skill: runtime.snapshot(),
       skillRun: agentSkillRunAudit(result),
       toolCalls: audits,
-    })
+    }))
     durableFinalizationConfirmed = true
     await finalize(completionEvidence)
     return completionEvidence
@@ -356,6 +400,7 @@ export async function runDailyCreationAgentJob(
     const message = failure instanceof Error ? failure.message : String(failure)
     const deterministic = message.includes(interruptedAfterSideEffects)
       || message.includes('Selected skill is unavailable')
+      || message.includes('Agent capability drift detected')
       || message.includes(exhaustedWhileCallingTool)
     if (!durableFinalizationConfirmed) {
       try {
