@@ -294,7 +294,10 @@ export async function openGlobalAgentTools({
     },
   })
   const discovered = await client.tools()
-  const dailyOnlyBlockedTools = new Set(['upload_image_from_url', 'upload_image_from_path'])
+  const dailyOnlyBlockedTools = new Set([
+    'upload_image_from_url',
+    'upload_image_from_path',
+  ])
   const visibleDiscovered = dailyCreationRunId === undefined
     ? discovered
     : Object.fromEntries(
@@ -302,7 +305,7 @@ export async function openGlobalAgentTools({
     )
   const tools = { ...visibleDiscovered } as ToolSet
   tools.generateImage = tool({
-    description: 'Synchronously generate one image and save it as a CreativeAsset before returning asset_id and asset_url. The returned image is already stored locally; never upload it again with upload_image_from_url or upload_image_from_path. Optionally provide a title and an existing media directory.',
+    description: 'Synchronously generate one image and save it as a CreativeAsset before returning asset_id and asset_url. The returned image is already stored locally; never upload it again with upload_image_from_url or upload_image_from_path. The directory parameter is optional: only provide it when the user explicitly requests an existing media directory; otherwise omit it and save the image in the default media directory 临时文件. Do not reuse a prompt or source directory as a media directory.',
     inputSchema: imageGenerationInputSchema,
     execute: async ({ prompt, title, directory }) => {
       return imageGenerator.generate({ prompt, title, directory })

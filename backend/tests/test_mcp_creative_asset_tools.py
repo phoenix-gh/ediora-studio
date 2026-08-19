@@ -86,6 +86,27 @@ def test_ai_can_search_and_read_creative_article_assets(env):
     }
 
 
+def test_ai_can_search_space_separated_keywords_across_asset_metadata(env):
+    target_id = seed_asset(
+        asset_type="media",
+        media_kind="image",
+        title="女主一号",
+        directory="女性街拍素材",
+        tags=[],
+        source="upload",
+    )
+
+    import mcp_server
+
+    results = run(mcp_server.search_creative_assets(
+        query="女主一号 街拍 人物",
+        directory="女性街拍素材",
+        asset_type="media",
+    ))
+
+    assert [item["id"] for item in results] == [target_id]
+
+
 def test_mcp_accepts_the_docker_api_host_used_by_ai_chat(env):
     import mcp_server
 

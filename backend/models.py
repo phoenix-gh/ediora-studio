@@ -191,6 +191,7 @@ class XSubscription(Base):
     # 情报分析：只分析开启时刻之后采集到的新帖。
     intelligence_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     intelligence_enabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    llm_adapter_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
     last_collected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_error: Mapped[str] = mapped_column(String, default="")
     added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, index=True)

@@ -45,6 +45,25 @@ def normalize_creation_directories(
     return normalized
 
 
+def creative_asset_search_score(asset: CreativeAsset, query: str) -> int:
+    """Score an asset for a space-separated, metadata-aware keyword query.
+
+    Each non-empty term is an alternative match. Including the directory is
+    important for media assets whose title is intentionally short, while the
+    score keeps assets matching more terms ahead of weaker matches.
+    """
+    keywords = [part.casefold() for part in query.split() if part.strip()]
+    if not keywords:
+        return 0
+    searchable = " ".join([
+        asset.directory or "",
+        asset.title or "",
+        asset.content or "",
+        " ".join(asset.tags or []),
+    ]).casefold()
+    return sum(keyword in searchable for keyword in keywords)
+
+
 async def list_creative_asset_candidates(
     session: AsyncSession,
     *,
@@ -63,7 +82,6 @@ async def list_creative_asset_candidates(
         directory,
     )
     take = _bounded(limit, name="limit", minimum=1, maximum=50)
-    keywords = [part.lower() for part in query.split() if part.strip()]
 
     statement = (
         select(CreativeAsset)
@@ -76,11 +94,13 @@ async def list_creative_asset_candidates(
     )
     assets = (await session.execute(statement)).scalars().all()
 
-    def matches(asset: CreativeAsset) -> bool:
-        searchable = " ".join(
-            [asset.title or "", asset.content or "", " ".join(asset.tags or [])]
-        ).lower()
-        return all(keyword in searchable for keyword in keywords)
+    scored_assets = [
+        (asset, creative_asset_search_score(asset, query))
+        for asset in assets
+    ]
+    if query.strip():
+        scored_assets = [item for item in scored_assets if item[1] > 0]
+        scored_assets.sort(key=lambda item: item[1], reverse=True)
 
     return [
         {
@@ -92,8 +112,7 @@ async def list_creative_asset_candidates(
             "created_at": _isoformat(asset.created_at),
             "content_length": len(asset.content or ""),
         }
-        for asset in assets
-        if matches(asset)
+        for asset, _score in scored_assets
     ][:take]
 
 

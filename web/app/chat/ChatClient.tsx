@@ -32,7 +32,7 @@ import { cn } from '@/lib/utils'
 import { chatComposerColumn, chatConversationColumn } from './chat-layout'
 import { shouldSubmitChatComposerKey } from './chat-composer'
 import { titleFromFirstMessage } from './chat-title'
-import { chatToolName, generatedImageUrls, isChatToolPart, legacyImageJobId } from './chat-tool-parts'
+import { chatToolName, chatToolStatus, generatedImageUrls, imageGenerationSummary, isChatToolPart, legacyImageJobId } from './chat-tool-parts'
 
 type DisplayMessage = Omit<ChatMessage, 'id'> & { id: string | number }
 
@@ -58,11 +58,11 @@ function displayTime(value: string) {
 function activitySummary(parts: ToolEventPart[]) {
   const searches = parts.filter(part => chatToolName(part) === 'searchInformationSources').length
   const reads = parts.filter(part => chatToolName(part) === 'readInformationSource').length
-  const images = parts.filter(part => chatToolName(part) === 'generateImage').length
+  const images = imageGenerationSummary(parts)
   if (searches && reads) return `已检索本地资料，并阅读 ${reads} 条相关内容`
   if (searches) return '已检索本地资料'
   if (reads) return `已阅读 ${reads} 条资料`
-  if (images) return `已生成 ${images} 张图片`
+  if (images) return images
   return `已调用 ${parts.length} 项工具`
 }
 
@@ -142,7 +142,7 @@ function ToolActivityGroup({ parts, onApproval }: { parts: ToolEventPart[]; onAp
             const name = chatToolName(part)
             const label = toolLabels[name] ?? name
             const pending = part.state === 'approval-requested' && part.toolCallId && part.approval?.id
-            const status = pending ? '等待你确认' : part.state === 'running' ? '进行中' : part.state === 'approval-responded' ? (part.approval?.approved ? '已批准' : '已拒绝') : '已完成'
+            const status = pending ? '等待你确认' : chatToolStatus(part)
             return <li key={part.toolCallId ?? `${part.type}-${index}`} className="flex flex-wrap items-center justify-between gap-3"><span>{label}</span>{pending && onApproval ? <span className="flex items-center gap-1"><Button type="button" size="xs" onClick={() => onApproval(part.toolCallId!, part.approval!.id!, true)}>批准</Button><Button type="button" size="xs" variant="outline" onClick={() => onApproval(part.toolCallId!, part.approval!.id!, false)}>拒绝</Button></span> : <span className="text-indigo-500">{status}</span>}</li>
           })}
         </ul>

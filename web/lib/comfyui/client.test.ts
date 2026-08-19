@@ -66,4 +66,16 @@ describe('ComfyUI client', () => {
       status: 401,
     } satisfies Partial<ComfyUIError>)
   })
+
+  it('waits through transient gateway errors until system_stats is ready', async () => {
+    fetchMock
+      .mockResolvedValueOnce(new Response('starting', { status: 502 }))
+      .mockResolvedValueOnce(jsonResponse({ system: {} }))
+    const sleep = vi.fn().mockResolvedValue(undefined)
+
+    await expect(client.waitUntilReady({ pollIntervalMs: 25, sleep })).resolves.toEqual({ system: {} })
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(sleep).toHaveBeenCalledWith(25)
+  })
 })

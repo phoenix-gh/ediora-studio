@@ -89,6 +89,33 @@ async def test_candidates_are_directory_scoped_compact_and_bounded(db):
 
 
 @pytest.mark.asyncio
+async def test_candidate_search_accepts_space_separated_keywords_in_directory(db):
+    from daily_creation_service import list_creative_asset_candidates
+    from models import CreativeAsset
+
+    asset = CreativeAsset(
+        asset_type="media",
+        directory="女性街拍素材",
+        title="女主一号",
+        content="",
+        tags=[],
+        url="/api/uploads/person.png",
+    )
+    db.add(asset)
+    await db.commit()
+
+    result = await list_creative_asset_candidates(
+        db,
+        asset_type="media",
+        directories=["女性街拍素材"],
+        query="女主一号 街拍 人物",
+        limit=10,
+    )
+
+    assert [item["id"] for item in result] == [asset.id]
+
+
+@pytest.mark.asyncio
 async def test_recent_usage_is_global_by_default_with_optional_filters(db):
     from daily_creation_service import get_recent_content_usage
     from models import ContentUsageLedger

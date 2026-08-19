@@ -15,7 +15,16 @@ import {
 } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import {
   type AppSettings,
+  type ComfyUIRuntimeProvider,
   testComfyUI,
   updateSettings,
 } from '@/lib/api/settings'
@@ -29,6 +38,9 @@ export function ComfyUISection({
   onSaved: (settings: AppSettings) => void
 }) {
   const [baseUrl, setBaseUrl] = useState(settings?.comfyui_base_url ?? '')
+  const [runtimeProvider, setRuntimeProvider] = useState<ComfyUIRuntimeProvider>(
+    settings?.comfyui_runtime_provider ?? 'direct',
+  )
   const [token, setToken] = useState('')
   const [showToken, setShowToken] = useState(false)
   const [minSeconds, setMinSeconds] = useState(
@@ -61,6 +73,7 @@ export function ComfyUISection({
     try {
       const updated = await updateSettings({
         comfyui_base_url: baseUrl.trim(),
+        comfyui_runtime_provider: runtimeProvider,
         comfyui_min_shot_seconds: minShotSeconds,
         comfyui_max_shot_seconds: maxShotSeconds,
         ...(token.trim() ? { comfyui_auth_token: token.trim() } : {}),
@@ -98,6 +111,30 @@ export function ComfyUISection({
       description="用于 MiniMax H3 分镜口播。地址和鉴权只保存在服务端，浏览器不会拿到 token。"
     >
       <FieldGroup>
+        <Field>
+          <FieldLabel htmlFor="comfyui-runtime-provider">运行环境</FieldLabel>
+          <Select
+            value={runtimeProvider}
+            onValueChange={value => {
+              if (value === 'direct' || value === 'xiangongyun') {
+                setRuntimeProvider(value)
+              }
+            }}
+          >
+            <SelectTrigger id="comfyui-runtime-provider" className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                <SelectItem value="direct">直连 ComfyUI</SelectItem>
+                <SelectItem value="xiangongyun">仙宫云</SelectItem>
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+          <FieldDescription>
+            选择仙宫云后，数字人分镜任务开始前会自动检查并启动默认实例；直连模式不会调用仙宫云。
+          </FieldDescription>
+        </Field>
         <Field>
           <FieldLabel htmlFor="comfyui-base-url">服务地址</FieldLabel>
           <Input

@@ -1,12 +1,13 @@
 // @vitest-environment jsdom
 
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
   fetchProviderModels,
   testLLM,
+  testLLMAdapter,
   updateSettings,
 } from '@/lib/api/settings'
 import { makeSettings } from '@/lib/api/settings-test-fixtures'
@@ -29,6 +30,7 @@ vi.mock('@/lib/api/settings', async importOriginal => {
     ...original,
     fetchProviderModels: vi.fn(),
     testLLM: vi.fn(),
+    testLLMAdapter: vi.fn(),
     updateSettings: vi.fn(),
   }
 })
@@ -57,6 +59,38 @@ const settings = makeSettings({
       default_model: 'deepseek-chat',
     },
   ],
+})
+
+const adapterSettings = makeSettings({
+  llm_adapters: [
+    {
+      id: 'chat-main',
+      name: '主文本',
+      protocol: 'openai',
+      endpoint: 'https://chat.example/v1',
+      model: 'chat-model',
+      supports_text: true,
+      supports_image: false,
+      image_response_format: 'base64',
+      api_key_set: true,
+      api_key_preview: '…1234',
+    },
+    {
+      id: 'filter-image',
+      name: '筛选图片',
+      protocol: 'openai',
+      endpoint: 'https://image.example/v1',
+      model: 'dall-e-3',
+      supports_text: true,
+      supports_image: true,
+      image_response_format: 'url',
+      api_key_set: true,
+      api_key_preview: '…5678',
+    },
+  ],
+  llm_text_default_adapter_id: 'chat-main',
+  llm_image_default_adapter_id: 'filter-image',
+  llm_information_filtering_adapter_id: 'filter-image',
 })
 
 async function renderWithModelSuggestions() {
@@ -289,5 +323,129 @@ describe('AISection', () => {
       image_model: 'gpt-image-2',
       prompt_generation_history_limit: 3,
     }))
+  })
+
+  it('saves multiple adapters and independent information filtering selection', async () => {
+    vi.mocked(updateSettings).mockResolvedValue(adapterSettings)
+    render(<AISection settings={adapterSettings} onSaved={vi.fn()} />)
+
+    expect(screen.getByLabelText('文字默认 Adapter')).toHaveValue('chat-main')
+    expect(screen.getByLabelText('图片默认 Adapter')).toHaveValue('filter-image')
+    expect(screen.getByLabelText('信息筛选 Adapter')).toHaveValue('filter-image')
+    fireEvent.click(screen.getByRole('button', { name: '保存 AI 配置' }))
+
+    await waitFor(() => expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({
+      llm_text_default_adapter_id: 'chat-main',
+      llm_image_default_adapter_id: 'filter-image',
+      llm_information_filtering_adapter_id: 'filter-image',
+      llm_adapters: expect.arrayContaining([
+        expect.objectContaining({ id: 'chat-main', supports_text: true }),
+        expect.objectContaining({
+          id: 'filter-image',
+          supports_image: true,
+          image_response_format: 'url',
+        }),
+      ]),
+    })))
+  })
+
+  it('shows compact adapter cards and keeps endpoint details inside the editor dialog', async () => {
+    render(<AISection settings={adapterSettings} onSaved={vi.fn()} />)
+
+    const card = screen.getByTestId('llm-adapter-card-chat-main')
+    expect(card).toHaveTextContent('主文本')
+    expect(card).toHaveTextContent('chat-model')
+    expect(card).toHaveTextContent('文本')
+    expect(card).not.toHaveTextContent('https://chat.example/v1')
+    expect(screen.queryByDisplayValue('https://chat.example/v1')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑 Adapter 主文本' }))
+
+    const dialog = await screen.findByRole('dialog')
+    expect(dialog).toHaveTextContent('编辑 Adapter')
+    expect(within(dialog).getByDisplayValue('https://chat.example/v1')).toBeVisible()
+  })
+
+  it('discards adapter edits when the editor dialog is cancelled', async () => {
+    render(<AISection settings={adapterSettings} onSaved={vi.fn()} />)
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑 Adapter 主文本' }))
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.change(within(dialog).getByLabelText('模型'), { target: { value: 'draft-model' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: '取消' }))
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    expect(screen.getByTestId('llm-adapter-card-chat-main')).toHaveTextContent('chat-model')
+    expect(screen.getByTestId('llm-adapter-card-chat-main')).not.toHaveTextContent('draft-model')
+  })
+
+  it('adds a new adapter to the overview only after the editor dialog is saved', async () => {
+    render(<AISection settings={settings} onSaved={vi.fn()} />)
+
+    fireEvent.click(screen.getByRole('button', { name: '添加 Adapter' }))
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByRole('button', { name: '保存 Adapter' })).toBeVisible()
+    expect(screen.queryByText('新接口')).not.toBeInTheDocument()
+
+    fireEvent.change(within(dialog).getByLabelText('Adapter 名称'), { target: { value: '新接口' } })
+    fireEvent.change(within(dialog).getByLabelText('模型'), { target: { value: 'new-model' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: '保存 Adapter' }))
+
+    await waitFor(() => {
+      const [card] = screen.getAllByTestId(/^llm-adapter-card-/)
+      expect(card).toHaveTextContent('新接口')
+    })
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('tests an individual adapter with its current draft values', async () => {
+    vi.mocked(testLLMAdapter).mockResolvedValue({ ok: true, response: '连接成功' })
+    render(<AISection settings={adapterSettings} onSaved={vi.fn()} />)
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑 Adapter 主文本' }))
+    const dialog = await screen.findByRole('dialog')
+    fireEvent.change(within(dialog).getByLabelText('模型'), { target: { value: 'draft-model' } })
+    fireEvent.change(within(dialog).getByLabelText('API Key'), { target: { value: 'draft-secret' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: '测试连接' }))
+
+    await waitFor(() => expect(testLLMAdapter).toHaveBeenCalledWith({
+      adapter: expect.objectContaining({
+        id: 'chat-main',
+        model: 'draft-model',
+        api_key: 'draft-secret',
+      }),
+    }))
+    expect(within(dialog).getByText(/连接成功/)).toBeVisible()
+  })
+
+  it('keeps adapter API keys write-only and exposes an explicit clear action in the editor', async () => {
+    render(<AISection settings={adapterSettings} onSaved={vi.fn()} />)
+
+    expect(screen.queryByDisplayValue('secret')).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑 Adapter 主文本' }))
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByText(/…1234/)).toBeVisible()
+    expect(within(dialog).queryByDisplayValue('secret')).toBeNull()
+    expect(within(dialog).getByRole('button', { name: /清除 API Key/ })).toBeVisible()
+  })
+
+  it('preserves the crypto receiver when creating an Adapter id', () => {
+    const cryptoStub = {
+      randomUUID(this: unknown) {
+        if (this !== globalThis.crypto) throw new TypeError('Illegal invocation')
+        return 'adapter-generated'
+      },
+    }
+    vi.stubGlobal('crypto', cryptoStub)
+
+    try {
+      render(<AISection settings={settings} onSaved={vi.fn()} />)
+      fireEvent.click(screen.getByRole('button', { name: '添加 Adapter' }))
+
+      expect(screen.getByTestId('llm-adapter-adapter-generated')).toBeVisible()
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 })

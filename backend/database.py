@@ -1274,6 +1274,7 @@ async def init_db():
         await conn.execute(text("ALTER TABLE x_subscriptions ADD COLUMN IF NOT EXISTS extra_terms VARCHAR NOT NULL DEFAULT ''"))
         await conn.execute(text("ALTER TABLE x_subscriptions ADD COLUMN IF NOT EXISTS sort VARCHAR NOT NULL DEFAULT 'top'"))
         await conn.execute(text("ALTER TABLE x_subscriptions ADD COLUMN IF NOT EXISTS max_results INTEGER NOT NULL DEFAULT 100"))
+        await conn.execute(text("ALTER TABLE x_subscriptions ADD COLUMN IF NOT EXISTS llm_adapter_id VARCHAR"))
         await conn.execute(text("ALTER TABLE x_subscriptions ALTER COLUMN url DROP NOT NULL"))
         await conn.execute(text("ALTER TABLE reddit_posts ADD COLUMN IF NOT EXISTS body TEXT NOT NULL DEFAULT ''"))
         await conn.execute(text("ALTER TABLE reddit_posts ADD COLUMN IF NOT EXISTS comments JSON NOT NULL DEFAULT '[]'::json"))

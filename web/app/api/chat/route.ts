@@ -249,6 +249,7 @@ export async function POST(request: NextRequest) {
       restoredSkillName,
       draftId: body.draftId,
       automaticSelection: genericRuntime,
+      alwaysAvailableToolNames: ['generateImage'],
     })
     registry = runtime
     const selected = genericRuntime || body.skillName

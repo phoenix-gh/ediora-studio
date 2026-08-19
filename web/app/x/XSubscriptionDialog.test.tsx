@@ -3,10 +3,12 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import type { AppSettings } from '@/lib/api/settings'
 import type { XSubscription } from '@/lib/api/x'
 
 const mocks = vi.hoisted(() => ({
   listCreativeAssetDirectories: vi.fn(),
+  getSettings: vi.fn(),
 }))
 
 vi.mock('sonner', () => ({
@@ -21,6 +23,14 @@ vi.mock('@/lib/api/assets', async importOriginal => {
   return {
     ...original,
     listCreativeAssetDirectories: mocks.listCreativeAssetDirectories,
+  }
+})
+
+vi.mock('@/lib/api/settings', async importOriginal => {
+  const original = await importOriginal<typeof import('@/lib/api/settings')>()
+  return {
+    ...original,
+    getSettings: mocks.getSettings,
   }
 })
 
@@ -43,6 +53,7 @@ const subscription: XSubscription = {
   collect_interval_minutes: 15,
   intelligence_enabled: true,
   intelligence_enabled_at: '2026-08-01T12:00:00Z',
+  llm_adapter_id: null,
   ingestion_directory_ids: [5],
   last_collected_at: null,
   last_error: '',
@@ -144,6 +155,45 @@ describe('XSubscriptionDialog', () => {
       expect(actions.onSave).toHaveBeenCalledWith(8, expect.objectContaining({
         raw_query: 'agent lang:zh',
         max_results: 80,
+      }))
+    })
+  })
+
+  it('selects an information-filtering Adapter and submits it with the subscription', async () => {
+    mocks.listCreativeAssetDirectories.mockResolvedValue([])
+    mocks.getSettings.mockResolvedValue({
+      llm_adapters: [{
+        id: 'filter',
+        name: '信息筛选专用',
+        protocol: 'openai',
+        endpoint: 'https://filter.example/v1',
+        model: 'filter-model',
+        supports_text: true,
+        supports_image: false,
+        image_response_format: 'base64',
+        api_key_set: true,
+        api_key_preview: '…1234',
+      }],
+    } satisfies Pick<AppSettings, 'llm_adapters'>)
+    const actions = callbacks()
+
+    render(
+      <XSubscriptionDialog
+        open
+        mode="edit"
+        subscription={subscription}
+        {...actions}
+      />,
+    )
+
+    const selector = await screen.findByLabelText('信息筛选 Adapter')
+    expect(selector).toHaveValue('')
+    fireEvent.change(selector, { target: { value: 'filter' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存订阅' }))
+
+    await waitFor(() => {
+      expect(actions.onSave).toHaveBeenCalledWith(7, expect.objectContaining({
+        llm_adapter_id: 'filter',
       }))
     })
   })

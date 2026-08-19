@@ -213,9 +213,14 @@ function cleanJsonText(text: string) {
   return text.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '')
 }
 
-async function configuredModel() {
+async function configuredModel(adapterId?: string) {
+  const query = new URLSearchParams({
+    capability: 'text',
+    purpose: 'information_filtering',
+  })
+  if (adapterId) query.set('adapter_id', adapterId)
   const settings = await apiGet<TextModelSettings>(
-    '/settings/ai-runtime', workerHeaders(),
+    `/settings/ai-runtime?${query.toString()}`, workerHeaders(),
   )
   return textModelConfigFromSettings(settings)
 }
@@ -345,7 +350,11 @@ async function runMergedTopicSourceJob(
       return output
     }
     trace = await startTopicSourceTrace(jobId)
-    const model = await configuredModel()
+    const adapterId = typeof job.input.llm_adapter_id === 'string'
+      && job.input.llm_adapter_id.trim()
+      ? job.input.llm_adapter_id.trim()
+      : undefined
+    const model = await configuredModel(adapterId)
     const provider = createOpenAI({ apiKey: model.apiKey, baseURL: model.baseURL })
     const response = await generateTopicSourceText({
       model: provider.chat(model.modelName),

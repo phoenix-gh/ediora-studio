@@ -1,10 +1,39 @@
 import { apiFetch } from './client'
+import type { XiangongyunInstance } from '@/lib/xiangongyun/client'
 
 export interface ProviderInfo {
   key: string
   label: string
   base_url: string
   default_model: string
+}
+
+export type ImageResponseFormat = 'url' | 'base64'
+
+export interface LLMAdapter {
+  id: string
+  name: string
+  protocol: 'openai'
+  endpoint: string
+  model: string
+  supports_text: boolean
+  supports_image: boolean
+  image_response_format: ImageResponseFormat
+  api_key_set: boolean
+  api_key_preview: string
+}
+
+export interface LLMAdapterInput {
+  id?: string
+  name: string
+  protocol?: 'openai'
+  endpoint: string
+  model: string
+  supports_text: boolean
+  supports_image: boolean
+  image_response_format: ImageResponseFormat
+  api_key?: string
+  clear_api_key?: boolean
 }
 
 export interface WebSearchProviderConfig {
@@ -30,6 +59,13 @@ export type TranscriptionProvider =
   | 'local-whisper'
   | 'openai-compatible'
 
+export type ComfyUIRuntimeProvider = 'direct' | 'xiangongyun'
+
+export type XiangongyunInstancesResponse = {
+  list: XiangongyunInstance[]
+  total: number
+}
+
 export interface TranscriptionStatus {
   provider: TranscriptionProvider
   status: 'unavailable' | 'preparing' | 'ready' | 'busy' | 'error'
@@ -46,6 +82,10 @@ export interface AppSettings {
   llm_effective_base_url: string
   llm_api_key_set: boolean
   llm_api_key_preview: string
+  llm_adapters: LLMAdapter[]
+  llm_text_default_adapter_id: string
+  llm_image_default_adapter_id: string
+  llm_information_filtering_adapter_id: string
   image_model: string
   image_base_url: string
   image_api_key_set: boolean
@@ -56,6 +96,11 @@ export interface AppSettings {
   comfyui_base_url: string
   comfyui_auth_token_set: boolean
   comfyui_auth_token_preview: string
+  comfyui_runtime_provider: ComfyUIRuntimeProvider
+  xiangongyun_base_url: string
+  xiangongyun_api_token_set: boolean
+  xiangongyun_api_token_preview: string
+  xiangongyun_default_instance_id: string
   comfyui_min_shot_seconds: number
   comfyui_max_shot_seconds: number
   transcription_provider: TranscriptionProvider
@@ -134,6 +179,10 @@ export interface SettingsUpdate {
   llm_model?: string
   llm_api_key?: string
   llm_base_url?: string
+  llm_adapters?: LLMAdapterInput[]
+  llm_text_default_adapter_id?: string
+  llm_image_default_adapter_id?: string
+  llm_information_filtering_adapter_id?: string
   image_model?: string
   image_api_key?: string
   image_base_url?: string
@@ -141,6 +190,10 @@ export interface SettingsUpdate {
   heygen_api_key?: string
   comfyui_base_url?: string
   comfyui_auth_token?: string
+  comfyui_runtime_provider?: ComfyUIRuntimeProvider
+  xiangongyun_base_url?: string
+  xiangongyun_api_token?: string
+  xiangongyun_default_instance_id?: string
   comfyui_min_shot_seconds?: number
   comfyui_max_shot_seconds?: number
   transcription_provider?: TranscriptionProvider
@@ -247,12 +300,45 @@ export async function testLLM(): Promise<{ ok: boolean; response?: string; error
   return apiFetch('/settings/test', { method: 'POST' })
 }
 
+export async function testLLMAdapter(body: {
+  adapter: LLMAdapterInput
+}): Promise<{ ok: boolean; response?: string; error?: string }> {
+  return apiFetch('/settings/test-adapter', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+}
+
 export async function testHeyGen(): Promise<{ ok: boolean; error: string }> {
   return apiFetch('/settings/heygen/test', { method: 'POST' })
 }
 
 export async function testComfyUI(): Promise<{ ok: boolean; error: string }> {
   return apiFetch('/settings/comfyui/test', { method: 'POST' })
+}
+
+export async function listXiangongyunInstances(): Promise<XiangongyunInstancesResponse> {
+  return apiFetch<XiangongyunInstancesResponse>('/settings/xiangongyun/instances')
+}
+
+export async function getXiangongyunInstance(instanceId: string): Promise<XiangongyunInstance> {
+  return apiFetch<XiangongyunInstance>(
+    `/settings/xiangongyun/instances/${encodeURIComponent(instanceId)}`,
+  )
+}
+
+export async function bootXiangongyunInstance(instanceId: string): Promise<Record<string, unknown>> {
+  return apiFetch<Record<string, unknown>>(
+    `/settings/xiangongyun/instances/${encodeURIComponent(instanceId)}/boot`,
+    { method: 'POST' },
+  )
+}
+
+export async function shutdownXiangongyunInstance(instanceId: string): Promise<Record<string, unknown>> {
+  return apiFetch<Record<string, unknown>>(
+    `/settings/xiangongyun/instances/${encodeURIComponent(instanceId)}/shutdown`,
+    { method: 'POST' },
+  )
 }
 
 export async function testTranscription(): Promise<{ ok: boolean; error: string }> {

@@ -15,9 +15,13 @@ from config import (
     effective_base_url,
     effective_comfyui_auth_token,
     effective_comfyui_base_url,
+    effective_comfyui_runtime_provider,
     effective_comfyui_shot_seconds,
     effective_heygen_api_key,
     effective_model,
+    effective_xiangongyun_api_token,
+    effective_xiangongyun_base_url,
+    effective_xiangongyun_default_instance_id,
     get_config,
     set_config,
 )
@@ -35,9 +39,23 @@ from transcription_service import (
     transcribe_audio,
 )
 from database import get_db
+from llm_adapters import (
+    AdapterResolutionError,
+    LLMAdapterInput,
+    LLMAdapterPublic,
+    public_adapters,
+    parse_stored_adapters,
+    configured_default_adapter_id,
+    resolve_adapter,
+    resolve_test_adapter,
+    save_adapter_payloads,
+)
+from models import XSubscription
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from worker_auth import require_worker_token
 from text_video_templates import normalize_text_video_template_default_map
+from xiangongyun_client import XiangongyunClient, XiangongyunError
 
 router = APIRouter(prefix="/settings", tags=["settings"])
 logger = logging.getLogger(__name__)
@@ -121,6 +139,10 @@ class SettingsOut(BaseModel):
     llm_effective_base_url: str
     llm_api_key_set: bool
     llm_api_key_preview: str
+    llm_adapters: list[LLMAdapterPublic]
+    llm_text_default_adapter_id: str
+    llm_image_default_adapter_id: str
+    llm_information_filtering_adapter_id: str
     image_model: str
     image_base_url: str
     image_api_key_set: bool
@@ -131,6 +153,11 @@ class SettingsOut(BaseModel):
     comfyui_base_url: str
     comfyui_auth_token_set: bool
     comfyui_auth_token_preview: str
+    comfyui_runtime_provider: Literal["direct", "xiangongyun"]
+    xiangongyun_base_url: str
+    xiangongyun_api_token_set: bool
+    xiangongyun_api_token_preview: str
+    xiangongyun_default_instance_id: str
     comfyui_min_shot_seconds: int
     comfyui_max_shot_seconds: int
     transcription_provider: str
@@ -204,6 +231,10 @@ class SettingsUpdate(BaseModel):
     llm_model: Optional[str] = None
     llm_api_key: Optional[str] = None
     llm_base_url: Optional[str] = None
+    llm_adapters: Optional[list[LLMAdapterInput]] = None
+    llm_text_default_adapter_id: Optional[str] = None
+    llm_image_default_adapter_id: Optional[str] = None
+    llm_information_filtering_adapter_id: Optional[str] = None
     image_model: Optional[str] = None
     image_api_key: Optional[str] = None
     image_base_url: Optional[str] = None
@@ -215,6 +246,10 @@ class SettingsUpdate(BaseModel):
     heygen_api_key: Optional[str] = None
     comfyui_base_url: Optional[str] = None
     comfyui_auth_token: Optional[str] = None
+    comfyui_runtime_provider: Optional[Literal["direct", "xiangongyun"]] = None
+    xiangongyun_base_url: Optional[str] = None
+    xiangongyun_api_token: Optional[str] = None
+    xiangongyun_default_instance_id: Optional[str] = None
     comfyui_min_shot_seconds: Optional[int] = Field(default=None, ge=1, le=15)
     comfyui_max_shot_seconds: Optional[int] = Field(default=None, ge=1, le=15)
     transcription_provider: Optional[str] = None
@@ -278,17 +313,27 @@ class FetchModelsRequest(BaseModel):
     base_url: Optional[str] = None   # if None, derive from provider/stored
 
 
+class TestLLMAdapterRequest(BaseModel):
+    adapter: LLMAdapterInput
+
+
 class ImageRuntimeConfig(BaseModel):
+    adapter_id: str
+    protocol: str
     api_key: str
     model: str
     base_url: str
+    image_response_format: Literal["url", "base64"]
 
 
 class AiRuntimeConfig(BaseModel):
     """Server-to-server model credentials for the local AI worker."""
+    adapter_id: str
+    protocol: str
     api_key: str
     model: str
     base_url: str
+    image_response_format: Literal["url", "base64"]
     image: ImageRuntimeConfig
 
 
@@ -314,6 +359,9 @@ def _build_out(cfg: dict) -> SettingsOut:
     image_api_key = cfg.get("image_api_key", "")
     heygen_api_key = effective_heygen_api_key(cfg)
     comfyui_auth_token = effective_comfyui_auth_token(cfg)
+    comfyui_runtime_provider = effective_comfyui_runtime_provider(cfg)
+    xiangongyun_base_url = effective_xiangongyun_base_url(cfg)
+    xiangongyun_api_token = effective_xiangongyun_api_token(cfg)
     comfyui_min_seconds, comfyui_max_seconds = effective_comfyui_shot_seconds(cfg)
     transcription_api_key = cfg.get("transcription_api_key", "")
     speech_api_key = cfg.get("speech_api_key", "")
@@ -377,6 +425,12 @@ def _build_out(cfg: dict) -> SettingsOut:
         llm_effective_base_url=effective_base_url(cfg),
         llm_api_key_set=bool(api_key),
         llm_api_key_preview=f"…{api_key[-4:]}" if len(api_key) >= 4 else "",
+        llm_adapters=public_adapters(cfg.get("llm_adapters", "[]")),
+        llm_text_default_adapter_id=configured_default_adapter_id(cfg, "text"),
+        llm_image_default_adapter_id=configured_default_adapter_id(cfg, "image"),
+        llm_information_filtering_adapter_id=cfg.get(
+            "llm_information_filtering_adapter_id", ""
+        ).strip(),
         image_model=cfg.get("image_model", "gpt-image-1"),
         image_base_url=cfg.get("image_base_url", ""),
         image_api_key_set=bool(image_api_key),
@@ -388,6 +442,17 @@ def _build_out(cfg: dict) -> SettingsOut:
         comfyui_auth_token_set=bool(comfyui_auth_token),
         comfyui_auth_token_preview=(
             f"…{comfyui_auth_token[-4:]}" if len(comfyui_auth_token) >= 4 else ""
+        ),
+        comfyui_runtime_provider=comfyui_runtime_provider,
+        xiangongyun_base_url=xiangongyun_base_url,
+        xiangongyun_api_token_set=bool(xiangongyun_api_token),
+        xiangongyun_api_token_preview=(
+            f"…{xiangongyun_api_token[-4:]}"
+            if len(xiangongyun_api_token) >= 4
+            else ""
+        ),
+        xiangongyun_default_instance_id=(
+            effective_xiangongyun_default_instance_id(cfg)
         ),
         comfyui_min_shot_seconds=comfyui_min_seconds,
         comfyui_max_shot_seconds=comfyui_max_seconds,
@@ -549,7 +614,11 @@ async def get_settings():
     include_in_schema=False,
     dependencies=[Depends(require_worker_token)],
 )
-async def get_ai_runtime_config():
+async def get_ai_runtime_config(
+    adapter_id: Optional[str] = Query(default=None),
+    capability: Optional[Literal["text", "image"]] = Query(default=None),
+    purpose: Optional[Literal["information_filtering"]] = Query(default=None),
+):
     """Expose the configured provider only to the trusted local job worker.
 
     The open-source edition has no login/tenant boundary; this endpoint keeps
@@ -557,15 +626,61 @@ async def get_ai_runtime_config():
     Node worker to use the same Settings-page configuration.
     """
     cfg = await get_config()
+    stored_adapters = parse_stored_adapters(cfg.get("llm_adapters", "[]"))
+
+    def legacy_text_runtime() -> dict[str, str]:
+        return {
+            "adapter_id": "legacy-text",
+            "protocol": "openai",
+            "api_key": cfg.get("llm_api_key", ""),
+            "model": effective_model(cfg),
+            "base_url": effective_base_url(cfg),
+            "image_response_format": "base64",
+        }
+
+    def legacy_image_runtime() -> dict[str, str]:
+        return {
+            "adapter_id": "legacy-image",
+            "protocol": "openai",
+            "api_key": cfg.get("image_api_key", ""),
+            "model": cfg.get("image_model", "gpt-image-1"),
+            "base_url": cfg.get("image_base_url", ""),
+            "image_response_format": "base64",
+        }
+
+    if not stored_adapters:
+        selected = legacy_image_runtime() if capability == "image" else legacy_text_runtime()
+        image_runtime = legacy_image_runtime()
+    else:
+        try:
+            selected_adapter = resolve_adapter(
+                cfg,
+                adapter_id=adapter_id,
+                capability=capability or "text",
+                purpose=purpose,
+            )
+        except AdapterResolutionError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        selected = selected_adapter.model_dump()
+        selected["image_response_format"] = selected_adapter.image_response_format
+        try:
+            image_adapter = resolve_adapter(cfg, capability="image")
+            image_runtime = image_adapter.model_dump()
+            image_runtime["image_response_format"] = image_adapter.image_response_format
+        except AdapterResolutionError as exc:
+            has_image_adapter = any(
+                item.get("supports_image") for item in stored_adapters
+            )
+            image_default_id = str(
+                cfg.get("llm_image_default_adapter_id", "")
+            ).strip()
+            if has_image_adapter or image_default_id:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+            image_runtime = legacy_image_runtime()
+
     return AiRuntimeConfig(
-        api_key=cfg.get("llm_api_key", ""),
-        model=effective_model(cfg),
-        base_url=effective_base_url(cfg),
-        image=ImageRuntimeConfig(
-            api_key=cfg.get("image_api_key", ""),
-            model=cfg.get("image_model", "gpt-image-1"),
-            base_url=cfg.get("image_base_url", ""),
-        ),
+        **selected,
+        image=ImageRuntimeConfig(**image_runtime),
     )
 
 
@@ -594,6 +709,31 @@ async def get_comfyui_runtime_config():
         "auth_token": effective_comfyui_auth_token(cfg),
         "min_shot_seconds": min_seconds,
         "max_shot_seconds": max_seconds,
+        "runtime_provider": effective_comfyui_runtime_provider(cfg),
+    }
+
+
+@router.get(
+    "/xiangongyun-runtime",
+    include_in_schema=False,
+    dependencies=[Depends(require_worker_token)],
+)
+async def get_xiangongyun_runtime_config():
+    cfg = await get_config()
+    provider = effective_comfyui_runtime_provider(cfg)
+    return {
+        "provider": provider,
+        "base_url": effective_xiangongyun_base_url(cfg),
+        "api_token": (
+            effective_xiangongyun_api_token(cfg)
+            if provider == "xiangongyun"
+            else ""
+        ),
+        "default_instance_id": (
+            effective_xiangongyun_default_instance_id(cfg)
+            if provider == "xiangongyun"
+            else ""
+        ),
     }
 
 
@@ -648,6 +788,94 @@ async def update_settings(
 ):
     saved_cfg = await get_config()
     updates: dict = {}
+    stored_adapters = parse_stored_adapters(saved_cfg.get("llm_adapters", "[]"))
+    next_adapters = stored_adapters
+    if body.llm_adapters is not None:
+        try:
+            next_adapters = save_adapter_payloads(body.llm_adapters, stored_adapters)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+        old_ids = {item["id"] for item in stored_adapters}
+        next_ids = {item["id"] for item in next_adapters}
+        removed_ids = old_ids - next_ids
+        subscription_adapter_column = getattr(XSubscription, "llm_adapter_id", None)
+        if removed_ids and subscription_adapter_column is not None:
+            referenced = await db.scalar(
+                select(XSubscription.id)
+                .where(subscription_adapter_column.in_(removed_ids))
+                .limit(1)
+            )
+            if referenced is not None:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Adapter 仍被 X 订阅引用，请先解除订阅配置",
+                )
+        updates["llm_adapters"] = json.dumps(
+            next_adapters,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+
+    valid_adapter_ids = {item["id"] for item in next_adapters}
+    next_text_default_id = (
+        body.llm_text_default_adapter_id.strip()
+        if body.llm_text_default_adapter_id is not None
+        else configured_default_adapter_id(saved_cfg, "text")
+    )
+    next_image_default_id = (
+        body.llm_image_default_adapter_id.strip()
+        if body.llm_image_default_adapter_id is not None
+        else configured_default_adapter_id(saved_cfg, "image")
+    )
+    next_filter_id = (
+        body.llm_information_filtering_adapter_id.strip()
+        if body.llm_information_filtering_adapter_id is not None
+        else saved_cfg.get("llm_information_filtering_adapter_id", "").strip()
+    )
+    selected_adapters = {item["id"]: item for item in next_adapters}
+    for field_name, value, capability in (
+        ("llm_text_default_adapter_id", next_text_default_id, "text"),
+        ("llm_image_default_adapter_id", next_image_default_id, "image"),
+        ("llm_information_filtering_adapter_id", next_filter_id, "text"),
+    ):
+        if value and value not in valid_adapter_ids:
+            raise HTTPException(status_code=422, detail=f"{field_name} 引用的 Adapter 不存在")
+        if value:
+            adapter = selected_adapters[value]
+            capability_field = f"supports_{capability}"
+            if not adapter.get(capability_field):
+                capability_label = "图片" if capability == "image" else "文本"
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"{field_name} 引用的 Adapter 不支持{capability_label}",
+                )
+    if (
+        body.llm_text_default_adapter_id is not None
+        or body.llm_adapters is not None
+    ):
+        updates["llm_text_default_adapter_id"] = next_text_default_id
+    if (
+        body.llm_image_default_adapter_id is not None
+        or body.llm_adapters is not None
+    ):
+        updates["llm_image_default_adapter_id"] = next_image_default_id
+    if (
+        body.llm_information_filtering_adapter_id is not None
+        or body.llm_adapters is not None
+    ):
+        updates["llm_information_filtering_adapter_id"] = next_filter_id
+    if (
+        body.llm_text_default_adapter_id is not None
+        or body.llm_image_default_adapter_id is not None
+        or body.llm_information_filtering_adapter_id is not None
+        or body.llm_adapters is not None
+    ):
+        # Retire the old single-default setting after the new selectors have
+        # been materialized. Older installations are still read as a
+        # migration fallback by configured_default_adapter_id().
+        updates["llm_default_adapter_id"] = ""
+
     if body.llm_provider is not None:
         updates["llm_provider"] = body.llm_provider
         updates.setdefault("llm_model", "")
@@ -679,6 +907,26 @@ async def update_settings(
         updates["comfyui_base_url"] = comfyui_base_url
     if body.comfyui_auth_token is not None:
         updates["comfyui_auth_token"] = body.comfyui_auth_token.strip()
+    if body.comfyui_runtime_provider is not None:
+        updates["comfyui_runtime_provider"] = body.comfyui_runtime_provider
+    if body.xiangongyun_base_url is not None:
+        xiangongyun_base_url = body.xiangongyun_base_url.strip().rstrip("/")
+        if not xiangongyun_base_url:
+            xiangongyun_base_url = "https://api.xiangongyun.com"
+        parsed = urlsplit(xiangongyun_base_url)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise HTTPException(422, "仙宫云地址必须是 HTTP(S) URL")
+        updates["xiangongyun_base_url"] = xiangongyun_base_url
+    if body.xiangongyun_api_token is not None:
+        # The settings page does not receive the stored token back. An empty
+        # masked input therefore means "keep the existing secret".
+        token = body.xiangongyun_api_token.strip()
+        if token:
+            updates["xiangongyun_api_token"] = token
+    if body.xiangongyun_default_instance_id is not None:
+        updates["xiangongyun_default_instance_id"] = (
+            body.xiangongyun_default_instance_id.strip()
+        )
     if (
         body.comfyui_min_shot_seconds is not None
         or body.comfyui_max_shot_seconds is not None
@@ -867,6 +1115,63 @@ async def update_settings(
             print(f"[settings] reschedule failed: {e}")
 
     return _build_out(await get_config())
+
+
+def _xiangongyun_client_from_config(cfg: dict[str, str]) -> XiangongyunClient:
+    api_token = effective_xiangongyun_api_token(cfg)
+    if not api_token:
+        raise HTTPException(422, "请先填写仙宫云 API Token")
+    return XiangongyunClient(
+        effective_xiangongyun_base_url(cfg),
+        api_token,
+    )
+
+
+def _raise_xiangongyun_http_error(error: XiangongyunError) -> None:
+    status_code = 502 if error.retryable else 400
+    raise HTTPException(status_code=status_code, detail=error.message) from error
+
+
+@router.get("/xiangongyun/instances")
+async def list_xiangongyun_instances():
+    try:
+        client = _xiangongyun_client_from_config(await get_config())
+        return await client.list_instances()
+    except XiangongyunError as error:
+        _raise_xiangongyun_http_error(error)
+
+
+@router.get("/xiangongyun/instances/{instance_id}")
+async def get_xiangongyun_instance(instance_id: str):
+    if not instance_id.strip():
+        raise HTTPException(422, "实例 ID 不能为空")
+    try:
+        client = _xiangongyun_client_from_config(await get_config())
+        return await client.get_instance(instance_id)
+    except XiangongyunError as error:
+        _raise_xiangongyun_http_error(error)
+
+
+@router.post("/xiangongyun/instances/{instance_id}/boot")
+async def boot_xiangongyun_instance(instance_id: str):
+    if not instance_id.strip():
+        raise HTTPException(422, "实例 ID 不能为空")
+    try:
+        client = _xiangongyun_client_from_config(await get_config())
+        return await client.boot_instance(instance_id)
+    except XiangongyunError as error:
+        _raise_xiangongyun_http_error(error)
+
+
+@router.post("/xiangongyun/instances/{instance_id}/shutdown")
+async def shutdown_xiangongyun_instance(instance_id: str):
+    if not instance_id.strip():
+        raise HTTPException(422, "实例 ID 不能为空")
+    try:
+        client = _xiangongyun_client_from_config(await get_config())
+        return await client.shutdown_instance(instance_id)
+    except XiangongyunError as error:
+        _raise_xiangongyun_http_error(error)
 
 
 @router.post("/heygen/test")
@@ -1179,6 +1484,39 @@ async def test_llm():
         return {"ok": True, "response": text.strip()}
     except Exception as e:
         return {"ok": False, "error": str(e)}
+
+
+async def _test_openai_adapter(adapter):
+    """Run a low-cost connectivity check without persisting the draft."""
+    if not adapter.supports_text:
+        await _fetch_models_openai_compat(adapter.base_url, adapter.api_key)
+        return "图片接口连接成功"
+
+    from openai import AsyncOpenAI
+
+    client = AsyncOpenAI(api_key=adapter.api_key, base_url=adapter.base_url)
+    response = await client.chat.completions.create(
+        model=adapter.model,
+        max_tokens=10,
+        messages=[{"role": "user", "content": 'Reply with just "OK".'}],
+    )
+    content = response.choices[0].message.content if response.choices else ""
+    return (content or "连接成功").strip()
+
+
+@router.post("/test-adapter")
+async def test_llm_adapter(body: TestLLMAdapterRequest):
+    """Test one Adapter draft, using its stored key when the draft omits it."""
+    adapter = None
+    try:
+        adapter = resolve_test_adapter(await get_config(), body.adapter)
+        response = await _test_openai_adapter(adapter)
+        return {"ok": True, "response": response}
+    except Exception as exc:
+        error = redact_secret_text(str(exc))
+        if adapter is not None and adapter.api_key:
+            error = error.replace(adapter.api_key, "***")
+        return {"ok": False, "error": error[:500]}
 
 
 # ── Collect Logs ──────────────────────────────────────────────────────────────

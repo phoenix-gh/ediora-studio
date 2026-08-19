@@ -16,10 +16,19 @@ DEFAULTS: dict[str, str] = {
     "image_api_key": "",
     "image_base_url": "",
     "image_model": "gpt-image-1",
+    "llm_adapters": "[]",
+    "llm_text_default_adapter_id": "",
+    "llm_image_default_adapter_id": "",
+    "llm_default_adapter_id": "",
+    "llm_information_filtering_adapter_id": "",
     "prompt_generation_history_limit": "3",
     "heygen_api_key": "",
     "comfyui_base_url": "",
     "comfyui_auth_token": "",
+    "comfyui_runtime_provider": "direct",
+    "xiangongyun_base_url": "https://api.xiangongyun.com",
+    "xiangongyun_api_token": "",
+    "xiangongyun_default_instance_id": "",
     "comfyui_min_shot_seconds": "4",
     "comfyui_max_shot_seconds": "5",
     "transcription_provider": "local-whisper",
@@ -141,6 +150,29 @@ def effective_comfyui_auth_token(cfg: dict[str, str]) -> str:
         cfg.get("comfyui_auth_token", "").strip()
         or os.getenv("COMFYUI_AUTH_TOKEN", "").strip()
     )
+
+
+def effective_comfyui_runtime_provider(cfg: dict[str, str]) -> str:
+    provider = cfg.get("comfyui_runtime_provider", "direct").strip().lower()
+    return provider if provider in {"direct", "xiangongyun"} else "direct"
+
+
+def effective_xiangongyun_base_url(cfg: dict[str, str]) -> str:
+    return (
+        cfg.get(
+            "xiangongyun_base_url",
+            "https://api.xiangongyun.com",
+        ).strip().rstrip("/")
+        or "https://api.xiangongyun.com"
+    )
+
+
+def effective_xiangongyun_api_token(cfg: dict[str, str]) -> str:
+    return cfg.get("xiangongyun_api_token", "").strip()
+
+
+def effective_xiangongyun_default_instance_id(cfg: dict[str, str]) -> str:
+    return cfg.get("xiangongyun_default_instance_id", "").strip()
 
 
 def effective_comfyui_shot_seconds(cfg: dict[str, str]) -> tuple[int, int]:

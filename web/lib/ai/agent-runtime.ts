@@ -52,6 +52,7 @@ export type OpenAgentRuntimeOptions = {
   draftId?: number
   dailyCreationRunId?: number
   allowedToolNames?: readonly string[]
+  alwaysAvailableToolNames?: readonly string[]
   beforeToolExecute?: (event: AgentToolAudit) => Promise<AgentToolDecision>
   onToolAudit?: (event: AgentToolAudit) => void | Promise<void>
   onMessage?: (event: AgentModelMessageEvent) => void | Promise<void>
@@ -281,9 +282,11 @@ export async function openAgentRuntime(
 
   async function run(request: AgentRunRequest): Promise<AgentRunResult> {
     const active = await prepare(request.objective)
+    const alwaysAvailableTools = [...new Set(options.alwaysAvailableToolNames ?? [])]
     const adapterRequiredTools = [...new Set(request.requiredTools ?? [])]
     const tools = visibleTools()
-    const unavailableTool = adapterRequiredTools.find(name => !tools[name])
+    const unavailableTool = [...alwaysAvailableTools, ...adapterRequiredTools]
+      .find(name => !tools[name])
     if (unavailableTool) {
       throw new Error(`Required Agent tool is unavailable: ${unavailableTool}`)
     }
@@ -361,7 +364,11 @@ export async function openAgentRuntime(
         return references
       },
       execute: async ({ prompt, requiredTools }) => {
-        const activeTools = [...new Set([...requiredTools, ...adapterRequiredTools])]
+        const activeTools = [...new Set([
+          ...requiredTools,
+          ...adapterRequiredTools,
+          ...alwaysAvailableTools,
+        ])]
         const generated = await generateWithMessageLog({
           model: options.model,
           instructions: prompt,

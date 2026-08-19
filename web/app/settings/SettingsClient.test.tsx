@@ -21,6 +21,7 @@ vi.mock('./sections/WebSearchSection', () => ({ WebSearchSection: () => <div>Web
 vi.mock('./sections/XSection', () => ({ XSection: () => <div>X settings</div> }))
 vi.mock('./sections/YouTubeSection', () => ({ YouTubeSection: () => <div>YouTube settings</div> }))
 vi.mock('./sections/SkillsSection', () => ({ SkillsSection: () => <div>Skills settings</div> }))
+vi.mock('./sections/XiangongyunSection', () => ({ XiangongyunSection: () => <div>Xiangongyun settings</div> }))
 
 describe('SettingsClient', () => {
   afterEach(cleanup)
@@ -85,5 +86,14 @@ describe('SettingsClient', () => {
 
     expect(screen.getByRole('heading', { level: 1, name: '技能管理' })).toBeInTheDocument()
     expect(screen.getByText('Skills settings')).toBeVisible()
+  })
+
+  it('opens Xiangongyun settings from the settings navigation', () => {
+    render(<SettingsClient initialSettings={null} />)
+
+    fireEvent.click(screen.getByRole('button', { name: /仙宫云/ }))
+
+    expect(screen.getByRole('heading', { level: 1, name: '仙宫云' })).toBeInTheDocument()
+    expect(screen.getByText('Xiangongyun settings')).toBeVisible()
   })
 })

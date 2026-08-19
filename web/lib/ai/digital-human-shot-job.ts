@@ -12,6 +12,7 @@ import {
   type DurableJob,
 } from './job-client'
 import { createComfyUIClient, ComfyUIError, type ComfyUIClient } from '../comfyui/client'
+import { createXiangongyunClient, type XiangongyunClient } from '../xiangongyun/client'
 import { buildShotPrompt, H3_REF2VA_META, h3Ref2vaPrompt } from '../comfyui/workflow'
 import { safeTrimLeadingTrailingSilence } from '../media/clip-join'
 
@@ -88,6 +89,8 @@ export type ShotJobDeps = {
   api: ShotJobApi
   comfyui: ComfyUIClient
   sleep(ms: number): Promise<void>
+  xiangongyun?: XiangongyunClient
+  xiangongyunInstanceId?: string
 }
 
 
@@ -231,17 +234,33 @@ const defaultApi: ShotJobApi = {
 
 
 async function defaultDeps(): Promise<ShotJobDeps> {
-  const response = await fetch(`${apiBase()}/settings/comfyui-runtime`, {
-    cache: 'no-store',
-    headers: workerHeaders(),
-  })
-  if (!response.ok) throw new Error(`无法读取 ComfyUI 设置 (${response.status})`)
-  const config = await response.json() as {
+  const headers = workerHeaders()
+  const [comfyResponse, xiangongyunResponse] = await Promise.all([
+    fetch(`${apiBase()}/settings/comfyui-runtime`, {
+      cache: 'no-store',
+      headers,
+    }),
+    fetch(`${apiBase()}/settings/xiangongyun-runtime`, {
+      cache: 'no-store',
+      headers,
+    }),
+  ])
+  if (!comfyResponse.ok) throw new Error(`无法读取 ComfyUI 设置 (${comfyResponse.status})`)
+  if (!xiangongyunResponse.ok) {
+    throw new Error(`无法读取仙宫云运行环境设置 (${xiangongyunResponse.status})`)
+  }
+  const config = await comfyResponse.json() as {
     base_url: string
     auth_token: string
   }
+  const xiangongyunConfig = await xiangongyunResponse.json() as {
+    provider: 'direct' | 'xiangongyun'
+    base_url: string
+    api_token: string
+    default_instance_id: string
+  }
   if (!config.base_url) throw new Error('请先在设置中填写 ComfyUI 地址')
-  return {
+  const deps: ShotJobDeps = {
     api: defaultApi,
     comfyui: createComfyUIClient({
       baseUrl: config.base_url,
@@ -249,6 +268,20 @@ async function defaultDeps(): Promise<ShotJobDeps> {
     }),
     sleep: (ms: number) => new Promise(resolve => setTimeout(resolve, ms)),
   }
+  if (xiangongyunConfig.provider === 'xiangongyun') {
+    if (!xiangongyunConfig.api_token) {
+      throw new Error('请先在设置中填写仙宫云 API Token')
+    }
+    if (!xiangongyunConfig.default_instance_id) {
+      throw new Error('请先在设置中选择仙宫云默认实例')
+    }
+    deps.xiangongyun = createXiangongyunClient({
+      baseUrl: xiangongyunConfig.base_url,
+      apiToken: xiangongyunConfig.api_token,
+    })
+    deps.xiangongyunInstanceId = xiangongyunConfig.default_instance_id
+  }
+  return deps
 }
 
 
@@ -261,9 +294,24 @@ export async function runDigitalHumanShotRenderJob(
   const projectId = numberInput(job.input.project_id, 'project_id')
   const shotId = String(job.input.shot_id || '')
   if (!shotId) throw new Error('任务缺少有效的 shot_id')
-  const context = await deps.api.getShotContext(projectId, shotId, jobId)
-  const state = { ...context.shot.provider_state }
+  const state: Record<string, unknown> = {}
   try {
+    if (deps.xiangongyun && deps.xiangongyunInstanceId) {
+      const checkCancelled = async () => {
+        const currentJob = await deps.api.getJob(jobId)
+        if (currentJob.status === 'cancelled') throw new JobCancelledError()
+      }
+      await deps.xiangongyun.ensureInstanceRunning(
+        deps.xiangongyunInstanceId,
+        {
+          sleep: deps.sleep,
+          checkCancelled,
+        },
+      )
+      await deps.comfyui.waitUntilReady({ sleep: deps.sleep, checkCancelled })
+    }
+    const context = await deps.api.getShotContext(projectId, shotId, jobId)
+    Object.assign(state, context.shot.provider_state)
     const prepared = await runStep(
       jobId,
       'prepare_shot',

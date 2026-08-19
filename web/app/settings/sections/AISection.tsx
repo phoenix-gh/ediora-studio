@@ -1,20 +1,87 @@
 'use client'
 
 import { useEffect, useId, useRef, useState } from 'react'
-import { Loader2, Eye, EyeOff, RefreshCw, FlaskConical, CheckCircle, XCircle, Save } from 'lucide-react'
+import { CheckCircle, Eye, EyeOff, FlaskConical, Loader2, Pencil, Plus, RefreshCw, Save, XCircle } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 import { FormSection } from '@/components/layout/FormSection'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { Field, FieldDescription, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
+import { NativeSelect } from '@/components/ui/native-select'
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { AppSettings, ProviderInfo, updateSettings, fetchProviderModels, testLLM } from '@/lib/api/settings'
+import {
+  AppSettings,
+  LLMAdapter,
+  LLMAdapterInput,
+  ProviderInfo,
+  updateSettings,
+  fetchProviderModels,
+  testLLM,
+  testLLMAdapter,
+} from '@/lib/api/settings'
+import {
+  LLMAdapterEditor,
+  type LLMAdapterDraft,
+  type LLMAdapterTestState,
+} from './LLMAdapterEditor'
 
-type TestState = 'idle' | 'testing' | 'ok' | 'fail'
+type TestState = LLMAdapterTestState
+
+type AdapterTestResult = {
+  state: TestState
+  message: string
+}
+
+function draftFromAdapter(adapter: LLMAdapter): LLMAdapterDraft {
+  return { ...adapter, api_key: '', clear_api_key: false }
+}
+
+function newAdapterId() {
+  return typeof globalThis.crypto?.randomUUID === 'function'
+    ? globalThis.crypto.randomUUID()
+    : `adapter-${Date.now()}`
+}
+
+function adapterInputFromDraft(adapter: LLMAdapterDraft): LLMAdapterInput {
+  return {
+    id: adapter.id,
+    name: adapter.name,
+    protocol: adapter.protocol,
+    endpoint: adapter.endpoint,
+    model: adapter.model,
+    supports_text: adapter.supports_text,
+    supports_image: adapter.supports_image,
+    image_response_format: adapter.image_response_format,
+    ...(adapter.api_key ? { api_key: adapter.api_key } : {}),
+    ...(adapter.clear_api_key ? { clear_api_key: true } : {}),
+  }
+}
 
 export function AISection({ settings, onSaved }: { settings: AppSettings | null; onSaved: (s: AppSettings) => void }) {
   const providers: ProviderInfo[] = settings?.providers ?? []
+  const [adapters, setAdapters] = useState<LLMAdapterDraft[]>(
+    () => (settings?.llm_adapters ?? []).map(draftFromAdapter),
+  )
+  const [textDefaultAdapterId, setTextDefaultAdapterId] = useState(
+    settings?.llm_text_default_adapter_id ?? '',
+  )
+  const [imageDefaultAdapterId, setImageDefaultAdapterId] = useState(
+    settings?.llm_image_default_adapter_id ?? '',
+  )
+  const [informationFilteringAdapterId, setInformationFilteringAdapterId] = useState(
+    settings?.llm_information_filtering_adapter_id ?? '',
+  )
 
   const [provider, setProvider] = useState(settings?.llm_provider ?? 'openai')
   const [baseUrl, setBaseUrl]   = useState(
@@ -43,6 +110,10 @@ export function AISection({ settings, onSaved }: { settings: AppSettings | null;
 
   const [testState, setTestState] = useState<TestState>('idle')
   const [testMsg, setTestMsg]     = useState('')
+  const [adapterTests, setAdapterTests] = useState<Record<string, AdapterTestResult>>({})
+  const [adapterEditorOpen, setAdapterEditorOpen] = useState(false)
+  const [adapterEditorDraft, setAdapterEditorDraft] = useState<LLMAdapterDraft | null>(null)
+  const [editingAdapterId, setEditingAdapterId] = useState<string | null>(null)
 
   const currentPreset = providers.find(p => p.key === provider)
 
@@ -134,6 +205,139 @@ export function AISection({ settings, onSaved }: { settings: AppSettings | null;
     }
   }
 
+  async function handleTestAdapter(adapter: LLMAdapterDraft) {
+    setAdapterTests(current => ({
+      ...current,
+      [adapter.id]: { state: 'testing', message: '' },
+    }))
+    try {
+      const res = await testLLMAdapter({ adapter: adapterInputFromDraft(adapter) })
+      setAdapterTests(current => ({
+        ...current,
+        [adapter.id]: {
+          state: res.ok ? 'ok' : 'fail',
+          message: res.ok ? (res.response ?? '连接成功') : (res.error ?? '未知错误'),
+        },
+      }))
+    } catch (error) {
+      setAdapterTests(current => ({
+        ...current,
+        [adapter.id]: { state: 'fail', message: String(error) },
+      }))
+    }
+  }
+
+  function createAdapterDraft(): LLMAdapterDraft {
+    return {
+      id: newAdapterId(),
+      name: '',
+      protocol: 'openai',
+      endpoint: 'https://api.openai.com/v1',
+      model: '',
+      supports_text: true,
+      supports_image: false,
+      image_response_format: 'base64',
+      api_key_set: false,
+      api_key_preview: '',
+      api_key: '',
+      clear_api_key: false,
+    }
+  }
+
+  function resetAdapterTest(id: string) {
+    setAdapterTests(current => current[id]
+      ? { ...current, [id]: { state: 'idle', message: '' } }
+      : current)
+  }
+
+  function openAdapterEditor(adapter: LLMAdapterDraft) {
+    setEditingAdapterId(adapter.id)
+    setAdapterEditorDraft({ ...adapter })
+    resetAdapterTest(adapter.id)
+    setAdapterEditorOpen(true)
+  }
+
+  function openNewAdapterEditor() {
+    const draft = createAdapterDraft()
+    setEditingAdapterId(null)
+    setAdapterEditorDraft(draft)
+    setAdapterTests(current => {
+      const next = { ...current }
+      delete next[draft.id]
+      return next
+    })
+    setAdapterEditorOpen(true)
+  }
+
+  function closeAdapterEditor() {
+    setAdapterEditorOpen(false)
+    setAdapterEditorDraft(null)
+    setEditingAdapterId(null)
+  }
+
+  function updateAdapterDraft(patch: Partial<LLMAdapterDraft>) {
+    if (!adapterEditorDraft) return
+    setAdapterEditorDraft(current => current ? { ...current, ...patch } : current)
+    resetAdapterTest(adapterEditorDraft.id)
+  }
+
+  function saveAdapterDraft() {
+    if (!adapterEditorDraft) return
+    const draft = { ...adapterEditorDraft }
+    setAdapters(current => editingAdapterId
+      ? current.map(adapter => adapter.id === editingAdapterId ? draft : adapter)
+      : [...current, draft])
+    closeAdapterEditor()
+  }
+
+  function addAdapter() {
+    openNewAdapterEditor()
+  }
+
+  function removeAdapter(id: string) {
+    setAdapters(current => current.filter(adapter => adapter.id !== id))
+    if (textDefaultAdapterId === id) setTextDefaultAdapterId('')
+    if (imageDefaultAdapterId === id) setImageDefaultAdapterId('')
+    if (informationFilteringAdapterId === id) setInformationFilteringAdapterId('')
+    setAdapterTests(current => {
+      const next = { ...current }
+      delete next[id]
+      return next
+    })
+  }
+
+  function deleteAdapterFromEditor() {
+    if (editingAdapterId) {
+      removeAdapter(editingAdapterId)
+    }
+    closeAdapterEditor()
+  }
+
+  async function handleSaveAdapters() {
+    setSaving(true)
+    try {
+      const llm_adapters: LLMAdapterInput[] = adapters.map(adapterInputFromDraft)
+      const updated = await updateSettings({
+        llm_adapters,
+        llm_text_default_adapter_id: textDefaultAdapterId,
+        llm_image_default_adapter_id: imageDefaultAdapterId,
+        llm_information_filtering_adapter_id: informationFilteringAdapterId,
+        prompt_generation_history_limit: Number(promptHistoryLimit),
+      })
+      setAdapters((updated.llm_adapters ?? []).map(draftFromAdapter))
+      setTextDefaultAdapterId(updated.llm_text_default_adapter_id ?? '')
+      setImageDefaultAdapterId(updated.llm_image_default_adapter_id ?? '')
+      setInformationFilteringAdapterId(updated.llm_information_filtering_adapter_id ?? '')
+      setAdapterTests({})
+      onSaved(updated)
+      toast.success('AI Adapter 配置已保存')
+    } catch {
+      toast.error('保存失败')
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const filteredModels = model
     ? modelList.filter(m => m.toLowerCase().includes(model.toLowerCase()))
     : modelList
@@ -211,6 +415,169 @@ export function AISection({ settings, onSaved }: { settings: AppSettings | null;
 
   return (
     <div className="flex flex-col gap-4">
+      <FormSection
+        title="LLM Adapter 实例"
+        description="可以配置多个 OpenAI-compatible 接口，分别指定文字默认、图片默认和信息筛选 Adapter。"
+      >
+        <div className="space-y-3">
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {adapters.map(adapter => {
+              const roleLabels: string[] = []
+              if (textDefaultAdapterId === adapter.id) roleLabels.push('文字默认')
+              if (imageDefaultAdapterId === adapter.id) roleLabels.push('图片默认')
+              if (informationFilteringAdapterId === adapter.id) roleLabels.push('信息筛选')
+
+              return (
+                <Card key={adapter.id} size="sm" data-testid={`llm-adapter-card-${adapter.id}`}>
+                  <CardHeader className="flex flex-row items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <CardTitle className="truncate">{adapter.name || '未命名 Adapter'}</CardTitle>
+                      <p className="mt-1 truncate font-mono text-xs text-muted-foreground">
+                        {adapter.model || '未设置模型'}
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label={`编辑 Adapter ${adapter.name || adapter.id}`}
+                      onClick={() => openAdapterEditor(adapter)}
+                    >
+                      <Pencil />
+                    </Button>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    <div className="flex flex-wrap gap-1.5">
+                      <Badge variant="outline">OpenAI-compatible</Badge>
+                      {adapter.supports_text ? <Badge variant="info">文本</Badge> : null}
+                      {adapter.supports_image ? <Badge variant="ai">图片</Badge> : null}
+                      {adapter.supports_image ? (
+                        <Badge variant="outline">
+                          图片 {adapter.image_response_format === 'url' ? 'URL' : 'base64'}
+                        </Badge>
+                      ) : null}
+                      {!adapter.supports_text && !adapter.supports_image ? (
+                        <Badge variant="warning">未设置能力</Badge>
+                      ) : null}
+                    </div>
+                    {roleLabels.length > 0 ? (
+                      <div className="flex flex-wrap gap-1.5 border-t border-border/70 pt-2">
+                        {roleLabels.map(label => <Badge key={label} variant="ai">{label}</Badge>)}
+                      </div>
+                    ) : null}
+                  </CardContent>
+                </Card>
+              )
+            })}
+            <Card size="sm" data-testid="llm-adapter-add-card" className="border-dashed bg-transparent">
+              <CardContent className="flex min-h-32 items-center justify-center">
+                <Button type="button" variant="ghost" onClick={addAdapter}>
+                  <Plus data-icon="inline-start" />
+                  添加 Adapter
+                </Button>
+              </CardContent>
+            </Card>
+          </div>
+
+          {adapters.length === 0 ? (
+            <p className="text-xs text-muted-foreground">
+              尚未配置新 Adapter。添加后，文本、信息筛选和图片任务会按 Adapter 能力选择；旧配置仍可继续使用。
+            </p>
+          ) : (
+            <div className="rounded-lg border border-border/70 bg-surface-muted/20 p-3">
+              <div>
+                <p className="text-xs font-semibold text-foreground">用途分配</p>
+                <p className="mt-1 text-xs text-muted-foreground">分别指定文字、图片和信息筛选使用的 Adapter。</p>
+              </div>
+              <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                <label className="space-y-1.5 text-xs font-medium" htmlFor="text-default-llm-adapter">
+                  文字默认 Adapter
+                  <NativeSelect
+                    id="text-default-llm-adapter"
+                    aria-label="文字默认 Adapter"
+                    value={textDefaultAdapterId}
+                    onChange={event => setTextDefaultAdapterId(event.target.value)}
+                  >
+                    <option value="">请选择</option>
+                    {adapters.filter(adapter => adapter.supports_text).map(adapter => (
+                      <option key={adapter.id} value={adapter.id}>{adapter.name || adapter.id}</option>
+                    ))}
+                  </NativeSelect>
+                </label>
+                <label className="space-y-1.5 text-xs font-medium" htmlFor="image-default-llm-adapter">
+                  图片默认 Adapter
+                  <NativeSelect
+                    id="image-default-llm-adapter"
+                    aria-label="图片默认 Adapter"
+                    value={imageDefaultAdapterId}
+                    onChange={event => setImageDefaultAdapterId(event.target.value)}
+                  >
+                    <option value="">请选择</option>
+                    {adapters.filter(adapter => adapter.supports_image).map(adapter => (
+                      <option key={adapter.id} value={adapter.id}>{adapter.name || adapter.id}</option>
+                    ))}
+                  </NativeSelect>
+                </label>
+                <label className="space-y-1.5 text-xs font-medium" htmlFor="information-filtering-adapter">
+                  信息筛选 Adapter
+                  <NativeSelect
+                    id="information-filtering-adapter"
+                    aria-label="信息筛选 Adapter"
+                    value={informationFilteringAdapterId}
+                    onChange={event => setInformationFilteringAdapterId(event.target.value)}
+                  >
+                    <option value="">跟随文字默认</option>
+                    {adapters.filter(adapter => adapter.supports_text).map(adapter => (
+                      <option key={adapter.id} value={adapter.id}>{adapter.name || adapter.id}</option>
+                    ))}
+                  </NativeSelect>
+                </label>
+              </div>
+            </div>
+          )}
+
+          {adapters.length > 0 ? (
+            <div className="flex justify-end border-t border-border/70 pt-3">
+              <Button type="button" onClick={handleSaveAdapters} disabled={saving}>
+                {saving ? <Loader2 data-icon="inline-start" className="animate-spin" /> : <Save data-icon="inline-start" />}
+                保存 AI 配置
+              </Button>
+            </div>
+          ) : null}
+        </div>
+      </FormSection>
+
+      <Dialog
+        open={adapterEditorOpen}
+        onOpenChange={open => {
+          if (!open) closeAdapterEditor()
+        }}
+      >
+        {adapterEditorDraft ? (
+          <DialogContent size="lg" className="max-h-[90vh]">
+            <DialogHeader>
+              <DialogTitle>{editingAdapterId ? '编辑 Adapter' : '添加 Adapter'}</DialogTitle>
+              <DialogDescription>配置接口、模型、密钥和支持的能力；连接测试使用当前编辑中的值。</DialogDescription>
+            </DialogHeader>
+            <div className="min-h-0 overflow-y-auto pr-1">
+              <LLMAdapterEditor
+                adapter={adapterEditorDraft}
+                onChange={updateAdapterDraft}
+                onDelete={editingAdapterId ? deleteAdapterFromEditor : undefined}
+                onTest={() => handleTestAdapter(adapterEditorDraft)}
+                testState={adapterTests[adapterEditorDraft.id]?.state ?? 'idle'}
+                testMessage={adapterTests[adapterEditorDraft.id]?.message ?? ''}
+              />
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={closeAdapterEditor}>取消</Button>
+              <Button type="button" onClick={saveAdapterDraft}>保存 Adapter</Button>
+            </DialogFooter>
+          </DialogContent>
+        ) : null}
+      </Dialog>
+
+      {adapters.length === 0 ? <>
       <FormSection
         title="聊天模型"
         description="选择供应商并配置兼容接口。连通性测试始终使用已保存的配置。"
@@ -438,6 +805,7 @@ export function AISection({ settings, onSaved }: { settings: AppSettings | null;
           </Field>
         </FieldGroup>
       </FormSection>
+      </> : null}
     </div>
   )
 }

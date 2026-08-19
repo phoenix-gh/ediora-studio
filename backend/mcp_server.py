@@ -353,8 +353,10 @@ async def search_creative_assets(
     Search the user's Creative Assets / 素材库. This tool is read-only.
 
     Use it to find raw article material, images, video, or audio stored under
-    创作资产. Query matches an asset's title, body text, and tags. Directory
-    optionally narrows the result to one material folder, such as "搞钱副业".
+    创作资产. Query is a space-separated list of alternative keywords; an
+    asset matching more terms ranks first. It matches the asset's directory,
+    title, body text, and tags. Directory optionally narrows the result to one
+    material folder, such as "搞钱副业".
 
     Args:
         query: Optional keywords to search for.
@@ -371,7 +373,6 @@ async def search_creative_assets(
     if normalized_type and normalized_type not in {"article", "media"}:
         raise ValueError("asset_type must be 'article', 'media', or empty")
     normalized_directory = directory.strip()
-    keywords = [item.lower() for item in query.split() if item]
     take = max(1, min(int(limit), 30))
 
     async with SessionLocal() as db:
@@ -384,11 +385,15 @@ async def search_creative_assets(
             statement = statement.where(CreativeAsset.directory == normalized_directory)
         rows = (await db.execute(statement.limit(500))).scalars().all()
 
-    def matches(asset) -> bool:
-        searchable = " ".join([
-            asset.title or "", asset.content or "", " ".join(asset.tags or []),
-        ]).lower()
-        return all(keyword in searchable for keyword in keywords)
+    from daily_creation_service import creative_asset_search_score
+
+    scored_assets = [
+        (asset, creative_asset_search_score(asset, query))
+        for asset in rows
+    ]
+    if query.strip():
+        scored_assets = [item for item in scored_assets if item[1] > 0]
+        scored_assets.sort(key=lambda item: item[1], reverse=True)
 
     return [
         {
@@ -402,7 +407,7 @@ async def search_creative_assets(
             "tags": asset.tags or [],
             "source": asset.source or "",
         }
-        for asset in rows if matches(asset)
+        for asset, _score in scored_assets
     ][:take]
 
 
@@ -442,7 +447,11 @@ async def list_creative_asset_candidates(
     query: str = "",
     limit: int = 50,
 ) -> list[dict]:
-    """List compact candidates from task-specified creative-asset directories."""
+    """List compact candidates from task-specified creative-asset directories.
+
+    Space-separated query terms are alternatives and candidates are ranked by
+    how many terms match their directory, title, body, or tags.
+    """
     from daily_creation_service import (
         list_creative_asset_candidates as list_candidates,
     )

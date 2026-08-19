@@ -44,6 +44,7 @@ def test_comfyui_token_roundtrip_is_redacted(client):
     assert saved.status_code == 200
     body = saved.json()
     assert body["comfyui_base_url"] == "http://127.0.0.1:8188"
+    assert body["comfyui_runtime_provider"] == "direct"
     assert body["comfyui_auth_token_set"] is True
     assert body["comfyui_auth_token_preview"] == "…1234"
     assert body["comfyui_min_shot_seconds"] == 4
@@ -66,6 +67,7 @@ def test_comfyui_runtime_uses_environment_fallback(client, monkeypatch):
         "auth_token": "env-token",
         "min_shot_seconds": 4,
         "max_shot_seconds": 5,
+        "runtime_provider": "direct",
     }
 
 
