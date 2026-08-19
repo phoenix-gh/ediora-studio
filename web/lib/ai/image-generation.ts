@@ -186,10 +186,6 @@ async function generateImageFromUrl(
   prompt: ImagePrompt,
   options: { n: number; size?: `${number}x${number}` },
 ): Promise<GeneratedImageBytes> {
-  if (/^gpt-image-/i.test(config.modelName.trim())) {
-    throw new Error(`图片模型 ${config.modelName} 不支持 URL 返回格式，请改用 base64`)
-  }
-
   const headers = { Authorization: `Bearer ${config.apiKey}` }
   let response: Response
   if (typeof prompt === 'string') {
