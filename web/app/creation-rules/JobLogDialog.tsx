@@ -2,7 +2,9 @@
 
 import { useEffect, useState } from 'react'
 import { getJobAgentLog, type ContentJob, type ContentJobStep } from '@/lib/api/jobs'
+import { listAllAgentLogEvents, type AgentLogEvent } from '@/lib/ai/agent-log-client'
 import type { DailyCreationAgentLog } from '@/lib/api/creation-rules'
+import { AgentLogTimeline } from '@/components/features/agent/AgentLogTimeline'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { AgentMessageTimeline } from './CreationRunLog'
@@ -33,25 +35,34 @@ function StepRow({ step, onRetry }: { step: ContentJobStep; onRetry: () => void 
 
 export function JobLogDialog({ job, open, onOpenChange, onRetry }: { job: ContentJob | null; open: boolean; onOpenChange: (open: boolean) => void; onRetry: (jobId: number, stepKey: string) => void }) {
   const jobId = job?.id
-  const [agentLogState, setAgentLogState] = useState<{ jobId: number; log: DailyCreationAgentLog | null; error: string }>({
+  const [agentLogState, setAgentLogState] = useState<{ jobId: number; log: DailyCreationAgentLog | null; events: AgentLogEvent[]; error: string }>({
     jobId: -1,
     log: null,
+    events: [],
     error: '',
   })
 
   useEffect(() => {
     if (!open || jobId == null) return
     let active = true
-    void getJobAgentLog(jobId).then(log => {
-      if (active) setAgentLogState({ jobId, log, error: '' })
-    }).catch(error => {
-      if (active) setAgentLogState({ jobId, log: null, error: error instanceof Error ? error.message : '完整消息加载失败' })
+    void Promise.allSettled([
+      getJobAgentLog(jobId),
+      listAllAgentLogEvents({ job_id: jobId, limit: 500 }),
+    ]).then(([legacyResult, unifiedResult]) => {
+      if (!active) return
+      const log = legacyResult.status === 'fulfilled' ? legacyResult.value : null
+      const events = unifiedResult.status === 'fulfilled' ? unifiedResult.value.events : []
+      const error = legacyResult.status === 'rejected' && unifiedResult.status === 'rejected'
+        ? (legacyResult.reason instanceof Error ? legacyResult.reason.message : '完整消息加载失败')
+        : ''
+      setAgentLogState({ jobId, log, events, error })
     })
     return () => { active = false }
   }, [jobId, open])
 
   if (!job) return null
   const hasCurrentAgentLog = agentLogState.jobId === job.id
+  const hasUnifiedEvents = hasCurrentAgentLog && agentLogState.events.length > 0
   return <Dialog open={open} onOpenChange={onOpenChange}>
     <DialogContent size="lg" className="max-h-[85vh] overflow-y-auto">
       <DialogHeader>
@@ -77,11 +88,15 @@ export function JobLogDialog({ job, open, onOpenChange, onRetry }: { job: Conten
             <pre className="mt-2 whitespace-pre-wrap break-words font-mono text-[11px] text-muted-foreground">{JSON.stringify(event.payload, null, 2)}</pre>
           </div>)}
         </section>
-        <AgentMessageTimeline
+        {hasUnifiedEvents ? <AgentLogTimeline
+          events={agentLogState.events}
+          loading={false}
+          error={agentLogState.error}
+        /> : <AgentMessageTimeline
           log={hasCurrentAgentLog ? agentLogState.log : null}
           loading={!hasCurrentAgentLog}
           error={hasCurrentAgentLog ? agentLogState.error : ''}
-        />
+        />}
       </div>
     </DialogContent>
   </Dialog>

@@ -15,13 +15,14 @@ def client(monkeypatch, postgres_env):
     for module_name in list(sys.modules):
         if module_name.startswith((
             "database", "models", "agent_execution_service",
-            "routers.agent_executions",
+            "routers.agent_executions", "agent_log_service", "routers.agent_logs",
         )):
             sys.modules.pop(module_name, None)
 
     from database import Base, SessionLocal, engine, get_db
     import models
     import routers.agent_executions as agent_router
+    import routers.agent_logs as agent_logs_router
 
     async def setup():
         async with engine.begin() as connection:
@@ -38,6 +39,7 @@ def client(monkeypatch, postgres_env):
     job_id = asyncio.run(setup())
     app = FastAPI()
     app.include_router(agent_router.router, prefix="/api")
+    app.include_router(agent_logs_router.router, prefix="/api")
 
     async def override_db():
         async with SessionLocal() as session:
@@ -215,6 +217,62 @@ def test_agent_execution_route_persists_message_log(client):
 
     assert message.status_code == 201, message.text
     assert message.json()["payload"]["messages"][0]["content"] == "create posts"
+
+
+def test_agent_execution_transitions_emit_unified_event_stream(client):
+    test_client, job_id = client
+    created = test_client.post(
+        "/api/agent-executions",
+        headers=headers(),
+        json={
+            "job_id": job_id,
+            "objective": "create posts",
+            "skill_mode": "auto",
+            "skill_name": None,
+        },
+    )
+    assert created.status_code == 201, created.text
+    execution_id = created.json()["id"]
+
+    message = test_client.post(
+        f"/api/agent-executions/{execution_id}/messages",
+        headers=headers(),
+        json={
+            "phase": "execute",
+            "direction": "model_request",
+            "payload": {"messages": [{"role": "user", "content": "create posts"}]},
+        },
+    )
+    assert message.status_code == 201
+    claim = test_client.post(
+        f"/api/agent-executions/{execution_id}/tool-calls/call-1/claim",
+        headers=headers(),
+        json={
+            "tool_name": "save_item",
+            "input_summary": {"value": "x"},
+            "auto_approved": True,
+            "side_effecting": True,
+        },
+    )
+    assert claim.status_code == 200
+    succeeded = test_client.post(
+        f"/api/agent-executions/{execution_id}/tool-calls/call-1/succeed",
+        headers=headers(),
+        json={"output": {"id": 17}},
+    )
+    assert succeeded.status_code == 200
+
+    events = test_client.get(
+        f"/api/agent-logs?execution_id={execution_id}",
+    )
+
+    assert events.status_code == 200, events.text
+    assert [event["event_type"] for event in events.json()["events"]] == [
+        "execution/start",
+        "llm/request",
+        "tool/call",
+        "tool/result",
+    ]
 
 
 def test_agent_execution_failure_route_is_idempotent(client):

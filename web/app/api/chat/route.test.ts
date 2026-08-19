@@ -3,12 +3,57 @@ import { describe, expect, it } from 'vitest'
 
 import { latestClientTurn, modelHistoryCandidates } from '../../../lib/ai/chat-tools'
 import {
+  chatAgentLogEventFromModelMessage,
+  chatAgentLogEventFromToolAudit,
   agentRunUIResponse,
   executionToolsForSelection,
   genericSkillRuntimeEnabled,
   skillAwareStepPolicy,
   selectedSkillContext,
 } from './route'
+
+describe('Chat Agent log event mapping', () => {
+  it('maps model callbacks into replayable LLM events', () => {
+    expect(chatAgentLogEventFromModelMessage(
+      {
+        phase: 'execute',
+        direction: 'model_response',
+        payload: { text: 'answer', usage: { inputTokens: 2 } },
+        occurredAt: '2026-08-19T00:00:00.000Z',
+      },
+      { sessionId: 12, turnId: 'turn-1' },
+    )).toMatchObject({
+      stream_kind: 'chat',
+      stream_key: 'chat:12',
+      session_id: 12,
+      turn_id: 'turn-1',
+      event_type: 'llm/response',
+      phase: 'execute',
+      status: 'completed',
+      payload: { text: 'answer' },
+    })
+  })
+
+  it('maps tool audit callbacks into typed tool events', () => {
+    expect(chatAgentLogEventFromToolAudit(
+      {
+        toolName: 'searchInformationSources',
+        toolCallId: 'call-1',
+        sideEffecting: false,
+        autoApproved: true,
+        status: 'succeeded',
+        inputSummary: { q: 'AI' },
+        output: [{ title: 'source' }],
+        occurredAt: '2026-08-19T00:00:01.000Z',
+      },
+      { sessionId: 12, turnId: 'turn-1' },
+    )).toMatchObject({
+      event_type: 'tool/result',
+      status: 'completed',
+      payload: expect.objectContaining({ toolName: 'searchInformationSources' }),
+    })
+  })
+})
 
 describe('global chat model history', () => {
   it('describes available references without embedding their content', async () => {

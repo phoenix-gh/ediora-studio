@@ -15,6 +15,7 @@ import {
   type DurableAgentToolCall,
   type DurableAgentExecution,
 } from './agent-execution-client'
+import { appendAgentLogEvent, type AgentLogEventInput } from './agent-log-client'
 import {
   agentSkillRunAudit,
   openAgentRuntime,
@@ -227,6 +228,7 @@ export type ContentResponseOutputAgentJobDependencies = {
     update: AgentExecutionCheckpoint,
   ): Promise<DurableAgentExecution>
   appendMessage?(jobId: number, executionId: number, event: AgentModelMessageEvent): Promise<unknown>
+  appendLogEvent?(jobId: number, event: AgentLogEventInput): Promise<unknown>
   claimToolCall(
     jobId: number, executionId: number, event: AgentToolAudit,
   ): Promise<AgentToolDecision>
@@ -268,6 +270,7 @@ const defaultDependencies: ContentResponseOutputAgentJobDependencies = {
   ensureExecution: ensureAgentExecution,
   checkpointExecution: checkpointAgentExecution,
   appendMessage: appendAgentMessage,
+  appendLogEvent: (jobId, event) => appendAgentLogEvent(event, jobId),
   claimToolCall: claimAgentToolCall,
   listToolCalls: listAgentToolCalls,
   completeToolCall: completeAgentToolCall,
@@ -346,6 +349,22 @@ export async function runContentResponseOutputJob(
   let executionCompleted = false
   let runtime: AgentRuntime | undefined
   let evidence: ResponseArticleCompletionEvidence | undefined = completedAgentEvidence(job)
+  const recordExecutionEvent = async (
+    event: Omit<AgentLogEventInput, 'stream_kind' | 'stream_key' | 'job_id' | 'execution_id'>,
+  ) => {
+    if (!execution) return
+    try {
+      await deps.appendLogEvent?.(jobId, {
+        stream_kind: 'job',
+        stream_key: `execution:${execution.id}`,
+        job_id: jobId,
+        execution_id: execution.id,
+        ...event,
+      })
+    } catch {
+      // Event logging is durable when available but never blocks the job boundary.
+    }
+  }
 
   try {
     let context = latestOutput(job, 'prepare_output_context') as ResponseArticleContext | undefined
@@ -373,6 +392,12 @@ export async function runContentResponseOutputJob(
         objective: provisionalObjective,
         skillMode: 'auto',
         skillName: null,
+      })
+      await recordExecutionEvent({
+        event_type: 'session/turn-start',
+        phase: 'agent',
+        status: 'running',
+        payload: { outputId, flow: 'content_response_output' },
       })
       const currentExecution = () => {
         if (!execution) throw new Error('content response Agent execution was not initialized')
@@ -479,6 +504,22 @@ export async function runContentResponseOutputJob(
           },
         })
 
+        await recordExecutionEvent({
+          event_type: 'skill/selected',
+          phase: 'prepare',
+          status: currentExecution().skill_name ? 'completed' : 'skipped',
+          payload: {
+            name: currentExecution().skill_name,
+            activation: currentExecution().skill_activation || null,
+          },
+        })
+        await recordExecutionEvent({
+          event_type: 'session/capabilities',
+          phase: 'prepare',
+          status: 'completed',
+          payload: { capabilitySnapshot: runtime.capabilitySnapshot() },
+        })
+
         await checkpoint('prepared', { objective }, withCapabilityAudit({
           skill: runtime.snapshot(),
           toolCalls: audits,
@@ -511,6 +552,16 @@ export async function runContentResponseOutputJob(
 
         if (!completionEvidence) throw new Error('missing valid save_draft evidence')
         evidence = completionEvidence
+        await recordExecutionEvent({
+          event_type: 'session/turn-end',
+          phase: 'agent',
+          status: 'completed',
+          payload: {
+            kind: result.kind,
+            finishReason: result.finishReason ?? null,
+            stepCount: result.stepCount ?? null,
+          },
+        })
         await deps.completeExecution(jobId, currentExecution().id, completionEvidence)
         executionCompleted = true
         await deps.completeStep(jobId, started.id, completionEvidence)
@@ -537,6 +588,12 @@ export async function runContentResponseOutputJob(
     return linkedDraft
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
+    await recordExecutionEvent({
+      event_type: 'session/error',
+      phase: 'agent',
+      status: 'error',
+      payload: { error: message },
+    })
     const deterministic = message.includes('missing valid save_draft evidence')
       || message.includes('Selected skill is unavailable')
       || message.includes('Agent capability drift detected')

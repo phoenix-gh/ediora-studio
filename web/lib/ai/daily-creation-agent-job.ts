@@ -15,6 +15,7 @@ import {
   type DurableAgentToolCall,
   type DurableAgentExecution,
 } from './agent-execution-client'
+import { appendAgentLogEvent, type AgentLogEventInput } from './agent-log-client'
 import {
   agentSkillRunAudit,
   openAgentRuntime,
@@ -112,6 +113,7 @@ export type DailyCreationAgentJobDependencies = {
     update: AgentExecutionCheckpoint,
   ): Promise<DurableAgentExecution>
   appendMessage?(jobId: number, executionId: number, event: AgentModelMessageEvent): Promise<unknown>
+  appendLogEvent?(jobId: number, event: AgentLogEventInput): Promise<unknown>
   claimToolCall(
     jobId: number, executionId: number, event: AgentToolAudit,
   ): Promise<AgentToolDecision>
@@ -152,6 +154,7 @@ const defaultDependencies: DailyCreationAgentJobDependencies = {
   ensureExecution: ensureAgentExecution,
   checkpointExecution: checkpointAgentExecution,
   appendMessage: appendAgentMessage,
+  appendLogEvent: (jobId, event) => appendAgentLogEvent(event, jobId),
   claimToolCall: claimAgentToolCall,
   listToolCalls: listAgentToolCalls,
   completeToolCall: completeAgentToolCall,
@@ -223,6 +226,22 @@ export async function runDailyCreationAgentJob(
   } = {
     objective: '', skillMode: 'auto' as const, skillName: null,
   }
+  const recordExecutionEvent = async (
+    event: Omit<AgentLogEventInput, 'stream_kind' | 'stream_key' | 'job_id' | 'execution_id'>,
+  ) => {
+    if (!execution) return
+    try {
+      await deps.appendLogEvent?.(jobId, {
+        stream_kind: 'job',
+        stream_key: `execution:${execution.id}`,
+        job_id: jobId,
+        execution_id: execution.id,
+        ...event,
+      })
+    } catch {
+      // Event logging is durable when available but never blocks the job boundary.
+    }
+  }
   try {
     const context = await deps.getContext(runId, jobId)
     const objective = buildDailyCreationAgentObjective(context)
@@ -232,6 +251,12 @@ export async function runDailyCreationAgentJob(
       ? context.rule.skill_name ?? null
       : null
     execution = await deps.ensureExecution(jobId, executionRequest)
+    await recordExecutionEvent({
+      event_type: 'session/turn-start',
+      phase: 'agent',
+      status: 'running',
+      payload: { objective, flow: 'daily_creation' },
+    })
     const currentExecution = () => {
       if (!execution) throw new Error('daily creation Agent execution was not initialized')
       return execution
@@ -337,6 +362,22 @@ export async function runDailyCreationAgentJob(
       },
     })
 
+    await recordExecutionEvent({
+      event_type: 'skill/selected',
+      phase: 'prepare',
+      status: currentExecution().skill_name ? 'completed' : 'skipped',
+      payload: {
+        name: currentExecution().skill_name,
+        activation: currentExecution().skill_activation || null,
+      },
+    })
+    await recordExecutionEvent({
+      event_type: 'session/capabilities',
+      phase: 'prepare',
+      status: 'completed',
+      payload: { capabilitySnapshot: runtime.capabilitySnapshot() },
+    })
+
     await checkpoint('prepared', { objective }, withCapabilityAudit({
       skill: runtime.snapshot(),
       toolCalls: audits,
@@ -376,6 +417,16 @@ export async function runDailyCreationAgentJob(
       toolCalls: audits,
     }))
     durableFinalizationConfirmed = true
+    await recordExecutionEvent({
+      event_type: 'session/turn-end',
+      phase: 'agent',
+      status: 'completed',
+      payload: {
+        kind: result.kind,
+        finishReason: result.finishReason ?? null,
+        stepCount: result.stepCount ?? null,
+      },
+    })
     await finalize(completionEvidence)
     return completionEvidence
   } catch (error) {
@@ -398,6 +449,12 @@ export async function runDailyCreationAgentJob(
       }
     }
     const message = failure instanceof Error ? failure.message : String(failure)
+    await recordExecutionEvent({
+      event_type: 'session/error',
+      phase: 'agent',
+      status: 'error',
+      payload: { error: message },
+    })
     const deterministic = message.includes(interruptedAfterSideEffects)
       || message.includes('Selected skill is unavailable')
       || message.includes('Agent capability drift detected')

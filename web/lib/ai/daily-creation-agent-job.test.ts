@@ -150,6 +150,21 @@ describe('daily creation Agent job', () => {
       .rejects.toThrow('Agent tool audit is failed: generateImage')
   })
 
+  it('records Job session, Skill, capability, and turn events', async () => {
+    const { deps } = dependencies()
+    const events: Array<Record<string, unknown>> = []
+    deps.appendLogEvent = vi.fn(async (_jobId, event) => { events.push(event as Record<string, unknown>) })
+
+    await runDailyCreationAgentJob(19, deps)
+
+    expect(events.map(event => event.event_type)).toEqual([
+      'session/turn-start',
+      'skill/selected',
+      'session/capabilities',
+      'session/turn-end',
+    ])
+  })
+
   it('passes the saved prompt to the Agent without business instructions', () => {
     expect(buildDailyCreationAgentObjective({
       id: 83,

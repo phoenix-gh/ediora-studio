@@ -10,7 +10,19 @@ from loguru import logger
 AUTH_TOKEN = re.compile(r"(?i)(auth_token\s*[:=]\s*)[^;\s,]+")
 CT0 = re.compile(r"(?i)(ct0\s*[:=]\s*)[^;\s,]+")
 TELEGRAM_BOT_URL = re.compile(r"(?i)(api\.telegram\.org/bot)[^/\s]+")
-SECRET_FIELDS = {"auth_token", "ct0"}
+SECRET_FIELDS = {
+    "auth_token",
+    "ct0",
+    "api_key",
+    "api_secret",
+    "access_token",
+    "refresh_token",
+    "password",
+    "secret",
+    "authorization",
+    "cookie",
+    "session_cookie",
+}
 MAX_LOG_VALUE_DEPTH = 12
 
 

@@ -183,6 +183,26 @@ describe('content response Agent writing job', () => {
     )
   })
 
+  it('records the response-writing Agent session lifecycle', async () => {
+    const deps = dependencies({
+      structuredContent: { result: {
+        id: 123, title: '完整文章', status: 'drafting',
+        created_at: '2026-08-07T00:00:00Z',
+      } },
+    })
+    const events: Array<Record<string, unknown>> = []
+    deps.appendLogEvent = vi.fn(async (_jobId, event) => { events.push(event as Record<string, unknown>) })
+
+    await runContentResponseOutputJob(19, deps)
+
+    expect(events.map(event => event.event_type)).toEqual([
+      'session/turn-start',
+      'skill/selected',
+      'session/capabilities',
+      'session/turn-end',
+    ])
+  })
+
   it('rejects a retry before Agent execution when the pinned capabilities drift', async () => {
     const deps = dependencies({
       structuredContent: { result: {

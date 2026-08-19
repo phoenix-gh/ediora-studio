@@ -9,7 +9,8 @@ from typing import Literal
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from log_redaction import redact_secret_text
+from agent_log_service import append_agent_log_event
+from log_redaction import redact_log_value, redact_secret_text
 from models import AgentExecution, AgentMessageLog, AgentToolCall, ContentJob
 
 
@@ -160,6 +161,21 @@ async def ensure_agent_execution(
     session.add(execution)
     await session.commit()
     await session.refresh(execution)
+    await append_agent_log_event(
+        session,
+        stream_kind="job",
+        stream_key=f"execution:{execution.id}",
+        job_id=execution.job_id,
+        execution_id=execution.id,
+        event_type="execution/start",
+        phase=execution.phase,
+        status=execution.status,
+        payload={
+            "objective": execution.objective,
+            "skill_mode": execution.skill_mode,
+            "skill_name": execution.skill_name,
+        },
+    )
     return execution
 
 
@@ -171,17 +187,34 @@ async def append_agent_message(
     direction: str,
     payload: object,
 ) -> AgentMessageLog:
-    if await session.get(AgentExecution, execution_id) is None:
+    execution = await session.get(AgentExecution, execution_id)
+    if execution is None:
         raise KeyError(f"agent execution {execution_id} not found")
     message = AgentMessageLog(
         execution_id=execution_id,
         phase=phase,
         direction=direction,
-        payload_data=payload,
+        payload_data=redact_log_value(payload),
     )
     session.add(message)
     await session.commit()
     await session.refresh(message)
+    event_type = {
+        "model_request": "llm/request",
+        "model_response": "llm/response",
+        "model_error": "llm/error",
+    }.get(direction, "llm/event")
+    await append_agent_log_event(
+        session,
+        stream_kind="job",
+        stream_key=f"execution:{execution.id}",
+        job_id=execution.job_id,
+        execution_id=execution.id,
+        event_type=event_type,
+        phase=phase,
+        status="error" if direction == "model_error" else "completed",
+        payload=payload,
+    )
     return message
 
 
@@ -245,6 +278,22 @@ async def update_agent_checkpoint(
     await session.commit()
     execution = await session.get(AgentExecution, execution_id)
     assert execution is not None
+    await append_agent_log_event(
+        session,
+        stream_kind="job",
+        stream_key=f"execution:{execution.id}",
+        job_id=execution.job_id,
+        execution_id=execution.id,
+        event_type="execution/checkpoint",
+        phase=execution.phase,
+        status="completed",
+        payload={
+            "checkpoint": execution.checkpoint_data,
+            "audit": execution.audit_data,
+            "capability_pin": execution.pinned_capability_snapshot,
+            "version": execution.version,
+        },
+    )
     return execution
 
 
@@ -410,6 +459,17 @@ async def complete_agent_execution(
     execution.updated_at = _now()
     await session.commit()
     await session.refresh(execution)
+    await append_agent_log_event(
+        session,
+        stream_kind="job",
+        stream_key=f"execution:{execution.id}",
+        job_id=execution.job_id,
+        execution_id=execution.id,
+        event_type="execution/complete",
+        phase=execution.phase,
+        status=execution.status,
+        payload={"completion_evidence": completion_evidence},
+    )
     return execution
 
 
@@ -430,4 +490,15 @@ async def fail_agent_execution(
     execution.completed_at = execution.updated_at
     await session.commit()
     await session.refresh(execution)
+    await append_agent_log_event(
+        session,
+        stream_kind="job",
+        stream_key=f"execution:{execution.id}",
+        job_id=execution.job_id,
+        execution_id=execution.id,
+        event_type="execution/error",
+        phase=execution.phase,
+        status=execution.status,
+        payload={"error": execution.error},
+    )
     return execution

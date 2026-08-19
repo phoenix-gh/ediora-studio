@@ -3,6 +3,14 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+const agentLogApi = vi.hoisted(() => ({
+  listAllAgentLogEvents: vi.fn().mockResolvedValue({ events: [], has_more: false, next_sequence: null }),
+}))
+
+vi.mock('@/lib/ai/agent-log-client', () => ({
+  listAllAgentLogEvents: agentLogApi.listAllAgentLogEvents,
+}))
+
 import { LogsSection } from './LogsSection'
 
 function deferred<T>() {
@@ -32,6 +40,8 @@ function response(logs: Array<{
 describe('LogsSection', () => {
   beforeEach(() => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
+    agentLogApi.listAllAgentLogEvents.mockClear()
+    agentLogApi.listAllAgentLogEvents.mockResolvedValue({ events: [], has_more: false, next_sequence: null })
   })
 
   afterEach(() => {

@@ -4,6 +4,8 @@ import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { getCreationRunAgentLog, type CreationDashboardRun, type CreationSchedulerLog, type DailyCreationAgentLog } from '@/lib/api/creation-rules'
+import { listAllAgentLogEvents, type AgentLogEvent } from '@/lib/ai/agent-log-client'
+import { AgentLogTimeline } from '@/components/features/agent/AgentLogTimeline'
 import { summarizeDirectories } from './directory-summary'
 
 function formatTime(value: string | null | undefined) {
@@ -76,7 +78,7 @@ export function AgentMessageTimeline({ log, loading, error }: { log: DailyCreati
   </section>
 }
 
-function RunDetail({ run, schedulerLogs, agentLog, agentLogLoading, agentLogError }: { run: CreationDashboardRun; schedulerLogs: CreationSchedulerLog[]; agentLog: DailyCreationAgentLog | null; agentLogLoading: boolean; agentLogError: string }) {
+function RunDetail({ run, schedulerLogs, agentLog, agentEvents, agentLogLoading, agentLogError }: { run: CreationDashboardRun; schedulerLogs: CreationSchedulerLog[]; agentLog: DailyCreationAgentLog | null; agentEvents: AgentLogEvent[]; agentLogLoading: boolean; agentLogError: string }) {
   const detail = run.detail
   const outputs = Array.isArray(detail.outputs) ? detail.outputs as Array<{ draft_id?: number }> : []
   const job = run.job
@@ -112,7 +114,9 @@ function RunDetail({ run, schedulerLogs, agentLog, agentLogLoading, agentLogErro
       </div>}
       {typeof agent.self_validation.summary === 'string' && agent.self_validation.summary && <p className="mt-2">自检：{agent.self_validation.summary}</p>}
     </div>}
-    {run.content_job_id && <AgentMessageTimeline log={agentLog} loading={agentLogLoading} error={agentLogError} />}
+    {run.content_job_id && (agentEvents.length > 0
+      ? <AgentLogTimeline events={agentEvents} loading={false} error={agentLogError} />
+      : <AgentMessageTimeline log={agentLog} loading={agentLogLoading} error={agentLogError} />)}
     {outputs.length > 0 && <p className="text-success">已记录 {outputs.length} 条产出</p>}
     {run.status === 'failed' && !job && <p className="text-danger">任务失败，但没有找到关联 Job 记录。</p>}
     {schedulerLogs.length > 0 && <section className="space-y-2">
@@ -130,19 +134,27 @@ function RunDetail({ run, schedulerLogs, agentLog, agentLogLoading, agentLogErro
 export function CreationRunLog({ runs, schedulerLogs }: { runs: CreationDashboardRun[]; schedulerLogs: CreationSchedulerLog[] }) {
   const [selectedRun, setSelectedRun] = useState<CreationDashboardRun | null>(null)
   const [agentLog, setAgentLog] = useState<DailyCreationAgentLog | null>(null)
+  const [agentEvents, setAgentEvents] = useState<AgentLogEvent[]>([])
   const [agentLogLoading, setAgentLogLoading] = useState(false)
   const [agentLogError, setAgentLogError] = useState('')
 
   async function openRun(run: CreationDashboardRun) {
     setSelectedRun(run)
     setAgentLog(null)
+    setAgentEvents([])
     setAgentLogError('')
     if (!run.content_job_id) return
     setAgentLogLoading(true)
     try {
-      setAgentLog(await getCreationRunAgentLog(run.id))
-    } catch (error) {
-      setAgentLogError(error instanceof Error ? error.message : '完整消息加载失败')
+      const [legacyResult, unifiedResult] = await Promise.allSettled([
+        getCreationRunAgentLog(run.id),
+        listAllAgentLogEvents({ job_id: run.content_job_id, limit: 500 }),
+      ])
+      if (legacyResult.status === 'fulfilled') setAgentLog(legacyResult.value)
+      if (unifiedResult.status === 'fulfilled') setAgentEvents(unifiedResult.value.events)
+      if (legacyResult.status === 'rejected' && unifiedResult.status === 'rejected') {
+        throw legacyResult.reason
+      }
     } finally {
       setAgentLogLoading(false)
     }
@@ -172,7 +184,7 @@ export function CreationRunLog({ runs, schedulerLogs }: { runs: CreationDashboar
           <DialogTitle>运行日志 · #{selectedRun.id}</DialogTitle>
           <DialogDescription>{String(selectedRun.rule.name ?? `规则 #${selectedRun.rule_id}`)} · Job #{selectedRun.content_job_id ?? '—'} · {statusLabel(selectedRun.status)}</DialogDescription>
         </DialogHeader>
-        <RunDetail run={selectedRun} schedulerLogs={schedulerLogs} agentLog={agentLog} agentLogLoading={agentLogLoading} agentLogError={agentLogError} />
+        <RunDetail run={selectedRun} schedulerLogs={schedulerLogs} agentLog={agentLog} agentEvents={agentEvents} agentLogLoading={agentLogLoading} agentLogError={agentLogError} />
       </DialogContent>}
     </Dialog>
   </section>

@@ -7,6 +7,8 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { API_BASE } from '@/lib/api/client'
+import { AgentLogTimeline } from '@/components/features/agent/AgentLogTimeline'
+import { listAllAgentLogEvents, type AgentLogEvent } from '@/lib/ai/agent-log-client'
 
 interface LogEntry {
   id: number
@@ -44,6 +46,9 @@ export function LogsSection() {
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
   const [expanded, setExpanded] = useState<number | null>(null)
+  const [agentEvents, setAgentEvents] = useState<AgentLogEvent[]>([])
+  const [agentLoading, setAgentLoading] = useState(true)
+  const [agentError, setAgentError] = useState('')
   const requestSequence = useRef(0)
   const active = useRef(true)
 
@@ -69,16 +74,36 @@ export function LogsSection() {
     }
   }, [])
 
+  const fetchAgentLogs = useCallback(async () => {
+    try {
+      const page = await listAllAgentLogEvents({ limit: 200 })
+      if (active.current) {
+        setAgentEvents(page.events)
+        setAgentError('')
+      }
+    } catch (error) {
+      if (active.current) setAgentError(error instanceof Error ? error.message : 'Agent 日志加载失败')
+    } finally {
+      if (active.current) setAgentLoading(false)
+    }
+  }, [])
+
   useEffect(() => {
     active.current = true
-    queueMicrotask(() => void fetchLogs())
-    const t = setInterval(() => void fetchLogs(), 30_000)
+    queueMicrotask(() => {
+      void fetchLogs()
+      void fetchAgentLogs()
+    })
+    const t = setInterval(() => {
+      void fetchLogs()
+      void fetchAgentLogs()
+    }, 30_000)
     return () => {
       active.current = false
       requestSequence.current += 1
       clearInterval(t)
     }
-  }, [fetchLogs])
+  }, [fetchAgentLogs, fetchLogs])
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -169,6 +194,17 @@ export function LogsSection() {
           )}
           </div>
         </div>
+      </FormSection>
+      <FormSection
+        title="Agent 运行日志"
+        description="统一展示 Chat 和 Job 的 session、Skill、LLM、工具和错误事件；payload 默认折叠。"
+        actions={(
+          <Button type="button" variant="outline" size="sm" onClick={() => void fetchAgentLogs()}>
+            <RefreshCw data-icon="inline-start" />刷新 Agent 日志
+          </Button>
+        )}
+      >
+        <AgentLogTimeline events={agentEvents} loading={agentLoading} error={agentError} title="Agent 事件流" />
       </FormSection>
     </div>
   )
