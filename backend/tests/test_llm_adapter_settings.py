@@ -162,6 +162,28 @@ def test_ai_runtime_uses_separate_text_and_image_defaults(client):
     assert image_runtime.json()["image"]["adapter_id"] == "image"
 
 
+def test_ai_runtime_does_not_fall_back_to_legacy_image_adapter(client):
+    response = client.put("/api/settings", json={
+        "llm_adapters": [
+            _adapter("text"),
+            _adapter("image", key="", text=False, image=True),
+        ],
+        "llm_text_default_adapter_id": "text",
+        "llm_image_default_adapter_id": "image",
+        "image_api_key": "legacy-image-secret",
+    })
+    assert response.status_code == 200, response.text
+
+    runtime = client.get(
+        "/api/settings/ai-runtime?capability=text",
+        headers=_runtime_headers(),
+    )
+
+    assert runtime.status_code == 422, runtime.text
+    assert "image" in runtime.text
+    assert "legacy-image-secret" not in runtime.text
+
+
 def test_adapter_connection_test_uses_draft_and_saved_key(client, monkeypatch):
     from routers import settings as settings_router
 

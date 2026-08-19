@@ -667,7 +667,15 @@ async def get_ai_runtime_config(
             image_adapter = resolve_adapter(cfg, capability="image")
             image_runtime = image_adapter.model_dump()
             image_runtime["image_response_format"] = image_adapter.image_response_format
-        except AdapterResolutionError:
+        except AdapterResolutionError as exc:
+            has_image_adapter = any(
+                item.get("supports_image") for item in stored_adapters
+            )
+            image_default_id = str(
+                cfg.get("llm_image_default_adapter_id", "")
+            ).strip()
+            if has_image_adapter or image_default_id:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
             image_runtime = legacy_image_runtime()
 
     return AiRuntimeConfig(
