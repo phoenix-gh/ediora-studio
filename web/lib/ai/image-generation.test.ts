@@ -81,7 +81,7 @@ describe('direct Agent image generation', () => {
         return new Response(JSON.stringify({
           image: {
             api_key: 'sk-image',
-            model: 'dall-e-3',
+            model: 'gpt-image-2',
             base_url: 'https://images.example/v1',
             image_response_format: 'url',
           },
@@ -90,12 +90,17 @@ describe('direct Agent image generation', () => {
       if (url === 'https://images.example/v1/images/generations') {
         expect(init?.method).toBe('POST')
         expect(JSON.parse(String(init?.body))).toMatchObject({
-          model: 'dall-e-3',
+          model: 'gpt-image-2',
           prompt: '一张湖边日落',
           n: 1,
           response_format: 'url',
         })
-        return new Response(JSON.stringify({ data: [{ url: 'https://cdn.example/lake.png' }] }), { status: 200 })
+        return new Response(JSON.stringify({
+          data: [{
+            url: 'https://cdn.example/lake.png',
+            b64_json: 'ignored-because-url-is-configured',
+          }],
+        }), { status: 200 })
       }
       if (url === 'https://cdn.example/lake.png') {
         expect(new Headers(init?.headers).has('Authorization')).toBe(false)

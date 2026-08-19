@@ -1,27 +1,35 @@
 'use client'
 
-import { Trash2 } from 'lucide-react'
+import { CheckCircle, FlaskConical, Loader2, Trash2, XCircle } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Field, FieldDescription, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { NativeSelect } from '@/components/ui/native-select'
+import { cn } from '@/lib/utils'
 import type { LLMAdapter, LLMAdapterInput } from '@/lib/api/settings'
 
 export type LLMAdapterDraft = LLMAdapter & Pick<LLMAdapterInput, 'api_key' | 'clear_api_key'>
+export type LLMAdapterTestState = 'idle' | 'testing' | 'ok' | 'fail'
 
 type LLMAdapterEditorProps = {
   adapter: LLMAdapterDraft
   onChange: (patch: Partial<LLMAdapterDraft>) => void
   onDelete: () => void
+  onTest: () => void
+  testState: LLMAdapterTestState
+  testMessage: string
 }
 
-export function LLMAdapterEditor({ adapter, onChange, onDelete }: LLMAdapterEditorProps) {
-  const isGptImageUrl = adapter.supports_image
-    && adapter.image_response_format === 'url'
-    && /^gpt-image-/i.test(adapter.model.trim())
-
+export function LLMAdapterEditor({
+  adapter,
+  onChange,
+  onDelete,
+  onTest,
+  testState,
+  testMessage,
+}: LLMAdapterEditorProps) {
   return (
     <div className="space-y-3 rounded-lg border border-border bg-surface-muted/30 p-3" data-testid={`llm-adapter-${adapter.id}`}>
       <div className="flex items-start justify-between gap-3">
@@ -126,11 +134,26 @@ export function LLMAdapterEditor({ adapter, onChange, onDelete }: LLMAdapterEdit
           </label>
         ) : null}
       </div>
-      {isGptImageUrl ? (
-        <p role="alert" className="text-[11px] text-amber-600">
-          GPT image 系列通常不支持 URL 返回；运行时可能需要改为 base64 或更换模型。
-        </p>
-      ) : null}
+      <div className="flex flex-wrap items-center gap-2 border-t border-border/70 pt-2">
+        <Button type="button" variant="outline" size="sm" onClick={onTest} disabled={testState === 'testing'}>
+          {testState === 'testing' ? <Loader2 data-icon="inline-start" className="animate-spin" /> : null}
+          {testState === 'ok' ? <CheckCircle data-icon="inline-start" /> : null}
+          {testState === 'fail' ? <XCircle data-icon="inline-start" /> : null}
+          {testState === 'idle' ? <FlaskConical data-icon="inline-start" /> : null}
+          测试连接
+        </Button>
+        {testMessage ? (
+          <span
+            role={testState === 'fail' ? 'alert' : 'status'}
+            className={cn(
+              'max-w-full truncate text-xs',
+              testState === 'fail' ? 'text-destructive' : 'text-muted-foreground',
+            )}
+          >
+            {testState === 'ok' ? `✓ ${testMessage}` : testMessage}
+          </span>
+        ) : null}
+      </div>
     </div>
   )
 }
