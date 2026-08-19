@@ -174,6 +174,83 @@ def test_persists_a_bounded_skill_run_audit_without_reference_or_tool_bodies(cli
         assert rejected.status_code == 422
 
 
+def test_persists_capability_snapshot_without_bodies(client):
+    session = client.post("/api/chat/sessions", json={}).json()
+    snapshot = {
+        "schemaVersion": 1,
+        "mode": "chat",
+        "skill": {
+            "name": "Alpha",
+            "version": "1.0.0",
+            "source": "builtin",
+            "activation": "automatic",
+            "instructionsDigest": "a" * 64,
+            "references": [{
+                "path": "references/rules.md",
+                "bytes": 32,
+                "loaded": True,
+                "contentDigest": "b" * 64,
+            }],
+        },
+        "tools": [{
+            "name": "search_drafts",
+            "description": "Search drafts",
+            "inputSchemaDigest": "c" * 64,
+            "sideEffecting": False,
+            "needsApproval": False,
+            "replayPolicy": "replayable",
+        }],
+        "policy": {"approvalPolicy": "interactive", "allowedToolNames": None},
+    }
+
+    created = client.post(
+        f"/api/chat/sessions/{session['id']}/messages",
+        json={
+            "role": "assistant",
+            "parts": [{"type": "text", "text": "完成"}],
+            "capability_snapshot": snapshot,
+        },
+    )
+
+    assert created.status_code == 201
+    returned_snapshot = created.json()["capability_snapshot"]
+    assert returned_snapshot == {
+        **snapshot,
+        "tools": [{
+            **snapshot["tools"][0],
+            "concurrencyPolicy": "unknown",
+            "idempotencyPolicy": "unknown",
+        }],
+        "policy": {"approvalPolicy": "interactive"},
+    }
+    assert client.get(f"/api/chat/sessions/{session['id']}").json()["messages"][0][
+        "capability_snapshot"
+    ] == returned_snapshot
+
+    for invalid_snapshot in [
+        {
+            **snapshot,
+            "skill": {
+                **snapshot["skill"],
+                "references": [{
+                    **snapshot["skill"]["references"][0],
+                    "content": "secret reference body",
+                }],
+            },
+        },
+        {**snapshot, "tools": snapshot["tools"] * 257},
+        {
+            **snapshot,
+            "policy": {"approvalPolicy": "interactive", "allowedToolNames": ["x" * 201]},
+        },
+    ]:
+        rejected = client.post(
+            f"/api/chat/sessions/{session['id']}/messages",
+            json={"role": "assistant", "capability_snapshot": invalid_snapshot},
+        )
+        assert rejected.status_code == 422
+
+
 def test_source_search_validates_query_and_returns_writing_plan(client):
     plan_id = _add_searchable_sources(client)
 

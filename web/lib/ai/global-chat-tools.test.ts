@@ -193,10 +193,16 @@ describe('global Chat tool policy', () => {
     expect(runtime.catalogContext).toContain('references/rules.md')
     expect(runtime.catalogContext).toContain('Alpha rules')
     expect(runtime.activeContext()).toMatchObject({ skill: { name: 'Alpha' }, activation: 'manual' })
+    expect(runtime.capabilityContext?.().loadedReferences).toEqual([
+      { path: 'references/rules.md', content: 'Alpha rules', bytes: 5 },
+    ])
     await expect(runtime.readReferences(['references/rules.md'])).resolves.toEqual([
       { path: 'references/rules.md', content: 'Alpha rules', bytes: 5 },
     ])
     expect(runtime.snapshot().readReferenceCount).toBe(1)
+    expect(runtime.capabilityContext?.().loadedReferences).toEqual([
+      { path: 'references/rules.md', content: 'Alpha rules', bytes: 5 },
+    ])
   })
 
   it('loads at most one automatic Skill and scopes subsequent reference reads', async () => {

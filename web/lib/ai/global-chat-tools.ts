@@ -3,6 +3,7 @@ import { tool, type ToolSet } from 'ai'
 import { z } from 'zod'
 
 import { applyAgentToolPolicy } from './agent-tool-policy'
+import type { SkillCapabilityInput } from './agent-capabilities'
 import type {
   AgentApprovalPolicy,
   AgentToolAudit,
@@ -52,6 +53,7 @@ export type GlobalAgentToolOptions = {
   skillName?: string
   restoredSkillName?: string
   approvalPolicy?: AgentApprovalPolicy
+  blockedToolNames?: readonly string[]
   beforeToolExecute?: (event: AgentToolAudit) => Promise<AgentToolDecision>
   onToolAudit?: (event: AgentToolAudit) => void | Promise<void>
 }
@@ -106,6 +108,7 @@ export type ChatSkillRuntime = {
   catalogContext: string
   snapshot(): ChatSkillSnapshot
   activeContext(): ActiveSkillContext | undefined
+  capabilityContext?: () => SkillCapabilityInput | undefined
   readReferences(paths: string[]): Promise<SkillReferenceContent[]>
   close(): Promise<void>
 }
@@ -134,6 +137,7 @@ export async function createChatSkillRuntime({
   let references: SkillReference[] = []
   let reader: ReturnType<typeof createSkillReferenceReader> | undefined
   let preloadedReferences: SkillReferenceContent[] = []
+  const loadedReferences = new Map<string, SkillReferenceContent>()
   let execution: SkillExecutionHints | undefined
   const readPaths = new Set<string>()
 
@@ -149,6 +153,7 @@ export async function createChatSkillRuntime({
     references = await listReferences(name)
     execution = (await loadManifest(name)).execution
     preloadedReferences = (await loadPreloadContext(name)).references
+    for (const reference of preloadedReferences) loadedReferences.set(reference.path, reference)
     reader = createSkillReferenceReader({ skillName: name, readReference })
     return skill
   }
@@ -187,6 +192,7 @@ export async function createChatSkillRuntime({
       if (!activeSkill || !reader) throw new SkillRegistryError('not_found', 'No Skill is active')
       const reference = await reader({ path })
       readPaths.add(reference.path)
+      loadedReferences.set(reference.path, reference)
       return reference
     },
   })
@@ -213,6 +219,14 @@ export async function createChatSkillRuntime({
     activeContext: () => activeSkill && source && execution
       ? { skill: activeSkill, references: [...references], activation: source, execution }
       : undefined,
+    capabilityContext: () => activeSkill && source
+      ? {
+          skill: activeSkill,
+          references: [...references],
+          activation: source,
+          loadedReferences: [...loadedReferences.values()],
+        }
+      : undefined,
     readReferences: async paths => {
       if (!activeSkill || !reader) throw new SkillRegistryError('not_found', 'No Skill is active')
       const listedPaths = new Set(references.map(reference => reference.path))
@@ -224,6 +238,7 @@ export async function createChatSkillRuntime({
       for (const path of uniquePaths) {
         const reference = await reader({ path })
         readPaths.add(reference.path)
+        loadedReferences.set(reference.path, reference)
         loaded.push(reference)
       }
       return loaded
@@ -275,6 +290,7 @@ export async function openGlobalAgentTools({
   skillName,
   restoredSkillName,
   approvalPolicy = 'interactive',
+  blockedToolNames,
   beforeToolExecute,
   onToolAudit,
 }: GlobalAgentToolOptions) {
@@ -294,15 +310,14 @@ export async function openGlobalAgentTools({
     },
   })
   const discovered = await client.tools()
-  const dailyOnlyBlockedTools = new Set([
-    'upload_image_from_url',
-    'upload_image_from_path',
-  ])
-  const visibleDiscovered = dailyCreationRunId === undefined
-    ? discovered
-    : Object.fromEntries(
-      Object.entries(discovered).filter(([name]) => !dailyOnlyBlockedTools.has(name)),
-    )
+  const dailyOnlyBlockedTools = new Set(blockedToolNames ?? (
+    dailyCreationRunId === undefined
+      ? []
+      : ['upload_image_from_url', 'upload_image_from_path']
+  ))
+  const visibleDiscovered = Object.fromEntries(
+    Object.entries(discovered).filter(([name]) => !dailyOnlyBlockedTools.has(name)),
+  )
   const tools = { ...visibleDiscovered } as ToolSet
   tools.generateImage = tool({
     description: 'Synchronously generate one image and save it as a CreativeAsset before returning asset_id and asset_url. The returned image is already stored locally; never upload it again with upload_image_from_url or upload_image_from_path. The directory parameter is optional: only provide it when the user explicitly requests an existing media directory; otherwise omit it and save the image in the default media directory 临时文件. Do not reuse a prompt or source directory as a media directory.',

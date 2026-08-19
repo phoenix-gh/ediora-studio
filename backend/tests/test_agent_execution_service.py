@@ -269,6 +269,85 @@ async def test_checkpoint_updates_are_optimistic_and_completion_is_durable(db):
 
 
 @pytest.mark.asyncio
+async def test_capability_pin_is_persisted_once_and_rejects_tool_drift(db):
+    from agent_execution_service import (
+        AgentCapabilityDrift,
+        ensure_agent_execution,
+        update_agent_checkpoint,
+    )
+
+    job = await seed_job(db)
+    execution = await ensure_agent_execution(
+        db, job_id=job.id, objective="create posts",
+        skill_mode="auto", skill_name=None,
+    )
+    snapshot = {
+        "schemaVersion": 1,
+        "mode": "job",
+        "skill": None,
+        "tools": [{
+            "name": "save_draft",
+            "description": "Save",
+            "inputSchemaDigest": None,
+            "sideEffecting": True,
+            "needsApproval": False,
+            "replayPolicy": "uncertain-on-interruption",
+        }],
+        "policy": {"approvalPolicy": "automatic", "allowedToolNames": None},
+    }
+    updated = await update_agent_checkpoint(
+        db, execution_id=execution.id, expected_version=1,
+        phase="prepared", checkpoint={}, audit={"capabilities": snapshot},
+        capability_pin=snapshot,
+    )
+    assert updated.pinned_capability_snapshot == snapshot
+
+    repeated = await update_agent_checkpoint(
+        db, execution_id=execution.id, expected_version=2,
+        phase="execute", checkpoint={}, audit={"capabilities": snapshot},
+        capability_pin=snapshot,
+    )
+    assert repeated.pinned_capability_snapshot == snapshot
+
+    bootstrapped = {
+        **snapshot,
+        "skill": {
+            "name": "Alpha",
+            "version": "1.0.0",
+            "source": "builtin",
+            "activation": "automatic",
+            "instructionsDigest": "a" * 64,
+            "references": [],
+        },
+    }
+    upgraded = await update_agent_checkpoint(
+        db, execution_id=execution.id, expected_version=3,
+        phase="execute", checkpoint={}, audit={"capabilities": bootstrapped},
+        capability_pin=bootstrapped,
+    )
+    assert upgraded.pinned_capability_snapshot == bootstrapped
+
+    restored = {
+        **bootstrapped,
+        "skill": {**bootstrapped["skill"], "activation": "restored"},
+    }
+    restored_checkpoint = await update_agent_checkpoint(
+        db, execution_id=execution.id, expected_version=4,
+        phase="execute", checkpoint={}, audit={"capabilities": restored},
+        capability_pin=restored,
+    )
+    assert restored_checkpoint.pinned_capability_snapshot == bootstrapped
+
+    drifted = {**bootstrapped, "tools": []}
+    with pytest.raises(AgentCapabilityDrift):
+        await update_agent_checkpoint(
+            db, execution_id=execution.id, expected_version=5,
+            phase="execute", checkpoint={}, audit={"capabilities": drifted},
+            capability_pin=drifted,
+        )
+
+
+@pytest.mark.asyncio
 async def test_agent_execution_failure_is_terminal_and_idempotent(db):
     from agent_execution_service import (
         ensure_agent_execution,

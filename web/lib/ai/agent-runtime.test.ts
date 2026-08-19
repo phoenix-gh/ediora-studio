@@ -75,6 +75,26 @@ function openOptions(
 }
 
 describe('shared Agent runtime', () => {
+  it('captures the final visible Tools and current policy for a Job runtime', async () => {
+    const runtime = await openAgentRuntime({
+      ...openOptions('automatic', dependencies()),
+      mode: 'job',
+      automaticSelection: false,
+    })
+
+    expect(runtime.capabilitySnapshot()).toMatchObject({
+      schemaVersion: 1,
+      mode: 'job',
+      skill: null,
+      tools: [
+        expect.objectContaining({ name: 'save_draft' }),
+        expect.objectContaining({ name: 'search_assets' }),
+      ],
+      policy: { approvalPolicy: 'automatic', allowedToolNames: null },
+    })
+    await runtime.close()
+  })
+
   it('exposes the same global tool names to interactive and automatic adapters', async () => {
     const deps = dependencies()
     const chat = await openAgentRuntime(openOptions('interactive', deps))

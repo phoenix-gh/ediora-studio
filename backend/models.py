@@ -165,6 +165,7 @@ class ChatMessage(Base):
     parts: Mapped[list] = mapped_column(JSON, default=list)
     text: Mapped[str] = mapped_column(Text, default="")
     skill_run: Mapped[dict | None] = mapped_column(JSON, nullable=True, default=None)
+    capability_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, index=True)
 
 
@@ -419,6 +420,7 @@ class AgentExecution(Base):
     phase: Mapped[str] = mapped_column(String, nullable=False, default="prepare")
     checkpoint_data: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     audit_data: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    pinned_capability_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True, default=None)
     completion_evidence: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     final_summary: Mapped[str] = mapped_column(Text, nullable=False, default="")
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)

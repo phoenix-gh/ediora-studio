@@ -31,6 +31,14 @@ const context: ResponseArticleContext = {
   },
 }
 
+const jobCapabilitySnapshot = {
+  schemaVersion: 1 as const,
+  mode: 'job' as const,
+  skill: null,
+  tools: [],
+  policy: { approvalPolicy: 'automatic' as const, allowedToolNames: null },
+}
+
 function dependencies(toolOutput?: unknown): ContentResponseOutputAgentJobDependencies {
   const execution = {
     id: 41, job_id: 19, status: 'running', objective: 'pending',
@@ -73,6 +81,7 @@ function dependencies(toolOutput?: unknown): ContentResponseOutputAgentJobDepend
       prepare: vi.fn(),
       snapshot: () => ({ referenceCount: 0, readReferenceCount: 0 }),
       activeContext: () => undefined,
+      capabilitySnapshot: () => jobCapabilitySnapshot,
       readReferences: vi.fn(),
       close: vi.fn(),
       run: vi.fn().mockImplementation(async request => {
@@ -163,6 +172,41 @@ describe('content response Agent writing job', () => {
     expect(deps.completeExecution).toHaveBeenCalledWith(19, 41, expect.objectContaining({
       toolName: 'save_draft', draftId: 123, responseItemId: 27,
     }))
+    expect(deps.openRuntime).toHaveBeenCalledWith(expect.objectContaining({
+      mode: 'job', policyProfile: 'response-writing',
+    }))
+    expect(deps.checkpointExecution).toHaveBeenLastCalledWith(
+      19, 41, expect.any(Number), expect.objectContaining({
+        phase: 'finalizing',
+        audit: expect.objectContaining({ capabilities: jobCapabilitySnapshot }),
+      }),
+    )
+  })
+
+  it('rejects a retry before Agent execution when the pinned capabilities drift', async () => {
+    const deps = dependencies({
+      structuredContent: { result: {
+        id: 123, title: '完整文章', status: 'drafting',
+        created_at: '2026-08-07T00:00:00Z',
+      } },
+    })
+    vi.mocked(deps.ensureExecution).mockResolvedValue({
+      id: 41, job_id: 19, status: 'running', objective: 'pending',
+      skill_mode: 'auto', skill_name: null, phase: 'finalizing', version: 3,
+      checkpoint: {}, audit: {}, completion_evidence: {},
+      capability_pin: {
+        ...jobCapabilitySnapshot,
+        tools: [{
+          name: 'new_tool', description: '', inputSchemaDigest: null,
+          sideEffecting: false, needsApproval: false, replayPolicy: 'replayable',
+          concurrencyPolicy: 'serialized', idempotencyPolicy: 'unknown',
+        }],
+      },
+    })
+
+    await expect(runContentResponseOutputJob(19, deps))
+      .rejects.toThrow('Agent capability drift detected: tools')
+    expect(deps.failStep).toHaveBeenCalledWith(19, 71, expect.any(Error), false)
   })
 
   it('recovers a persisted save_draft call without rerunning the Agent', async () => {

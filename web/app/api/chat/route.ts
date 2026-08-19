@@ -3,11 +3,17 @@ import { convertToModelMessages, createUIMessageStream, createUIMessageStreamRes
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 
-import { latestActivatedSkillName, latestClientTurn, modelHistoryCandidates } from '@/lib/ai/chat-tools'
+import {
+  buildChatMessagePersistencePayload,
+  latestActivatedSkillName,
+  latestClientTurn,
+  modelHistoryCandidates,
+} from '@/lib/ai/chat-tools'
 import { buildChatInstructions } from '@/lib/ai/chat-instructions'
 import { CHAT_MAX_STEPS, chatToolLoopStep, needsFinalAnswerFallback } from '@/lib/ai/chat-loop'
 import { baoyuRuntimeInstructions } from '@/lib/ai/content-job'
 import { agentSkillRunAudit, openAgentRuntime, type AgentRunResult } from '@/lib/ai/agent-runtime'
+import type { AgentCapabilitySnapshot } from '@/lib/ai/agent-capabilities'
 import { createDirectImageGenerator, mcpUrl, type ChatSkillSnapshot } from '@/lib/ai/global-chat-tools'
 import { workerHeaders } from '@/lib/ai/job-client'
 import { getEnabledSkill, listSkillReferences, loadSkillPreloadContext } from '@/lib/skills/registry'
@@ -54,11 +60,18 @@ async function persistMessage(
   sessionId: number,
   message: Pick<UIMessage, 'parts'> & { role: 'user' | 'assistant' },
   skillRun?: Record<string, unknown>,
+  capabilitySnapshot?: AgentCapabilitySnapshot,
 ) {
   const response = await fetch(`${apiBase()}/chat/sessions/${sessionId}/messages`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ role: message.role, parts: message.parts, text: messageText(message), skill_run: skillRun }),
+    body: JSON.stringify(buildChatMessagePersistencePayload({
+      role: message.role,
+      parts: message.parts,
+      text: messageText(message),
+      skillRun,
+      capabilitySnapshot,
+    })),
   })
   if (!response.ok) throw new Error(`Unable to persist chat message (${response.status})`)
 }
@@ -243,13 +256,13 @@ export async function POST(request: NextRequest) {
       mcpEndpoint: mcpUrl(apiBase()),
       imageGenerator: createDirectImageGenerator(apiBase()),
       model,
-      approvalPolicy: 'interactive',
+      mode: 'chat',
+      policyProfile: 'chat',
       skillMode: body.skillName ? 'manual' : 'auto',
       skillName: body.skillName,
       restoredSkillName,
       draftId: body.draftId,
       automaticSelection: genericRuntime,
-      alwaysAvailableToolNames: ['generateImage'],
     })
     registry = runtime
     const selected = genericRuntime || body.skillName
@@ -268,7 +281,12 @@ export async function POST(request: NextRequest) {
         maxSteps: CHAT_MAX_STEPS,
       })
       const parts = result.parts as UIMessage['parts']
-      await persistMessage(body.sessionId, { role: 'assistant', parts }, agentSkillRunAudit(result))
+      await persistMessage(
+        body.sessionId,
+        { role: 'assistant', parts },
+        agentSkillRunAudit(result),
+        runtime.capabilitySnapshot(),
+      )
       await registry.close()
       registry = undefined
       return agentRunUIResponse(result)
@@ -304,7 +322,7 @@ export async function POST(request: NextRequest) {
             await persistMessage(body.sessionId, {
               role: 'assistant',
               parts: finalHasText || pendingApproval ? parts : [{ type: 'text', text: '本次回复没有生成有效内容。请重试；如果问题持续出现，请缩小检索范围。' }],
-            })
+            }, undefined, runtime.capabilitySnapshot())
           }
         } finally {
           await registry?.close()

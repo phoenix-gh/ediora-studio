@@ -1,8 +1,14 @@
 import { tool, type ToolSet } from 'ai'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
 
-import { applyAgentToolPolicy, requiresToolApproval } from './agent-tool-policy'
+import {
+  AGENT_TOOL_POLICY_PROFILES,
+  applyAgentToolPolicy,
+  requiresToolApproval,
+  resolveAgentToolPolicy,
+  toolExecutionMetadata,
+} from './agent-tool-policy'
 import type { AgentToolAudit } from './agent-runtime-types'
 
 type ExecutableTool = {
@@ -26,8 +32,76 @@ function valueTool(onExecute: (value: string) => void = () => undefined) {
 }
 
 describe('Agent tool policy', () => {
+  it('defines explicit chat, scheduled, and response-writing profiles', () => {
+    expect(resolveAgentToolPolicy('chat')).toEqual(AGENT_TOOL_POLICY_PROFILES.chat)
+    expect(resolveAgentToolPolicy('chat')).toMatchObject({
+      approvalPolicy: 'interactive',
+      alwaysAvailableToolNames: ['generateImage'],
+    })
+    expect(resolveAgentToolPolicy('scheduled')).toMatchObject({
+      approvalPolicy: 'automatic',
+      allowedToolNames: undefined,
+      blockedToolNames: ['upload_image_from_url', 'upload_image_from_path'],
+    })
+    expect(resolveAgentToolPolicy('response-writing')).toMatchObject({
+      approvalPolicy: 'automatic',
+      allowedToolNames: expect.arrayContaining(['list_drafts', 'get_draft', 'save_draft']),
+    })
+  })
+
   it('classifies usage-ledger recording as a fenced side effect', () => {
     expect(requiresToolApproval('record_content_usage')).toBe(true)
+  })
+
+  it('declares conservative concurrency and idempotency metadata', () => {
+    expect(toolExecutionMetadata('list_drafts')).toEqual({
+      concurrencyPolicy: 'parallel-safe', idempotencyPolicy: 'replayable',
+    })
+    expect(toolExecutionMetadata('save_draft')).toEqual({
+      concurrencyPolicy: 'serialized', idempotencyPolicy: 'claim-backed',
+    })
+    expect(toolExecutionMetadata('generateImage')).toEqual({
+      concurrencyPolicy: 'serialized', idempotencyPolicy: 'unknown',
+    })
+    expect(toolExecutionMetadata('custom_tool')).toEqual({
+      concurrencyPolicy: 'serialized', idempotencyPolicy: 'unknown',
+    })
+  })
+
+  it('serializes tools marked as serialized while keeping parallel-safe tools concurrent', async () => {
+    let active = 0
+    let maxActive = 0
+    const release: Array<() => void> = []
+    const tools = applyAgentToolPolicy({
+      save_item: tool({
+        inputSchema: z.object({ value: z.string() }),
+        execute: async ({ value }) => new Promise(resolve => {
+          active += 1
+          maxActive = Math.max(maxActive, active)
+          release.push(() => {
+            active -= 1
+            resolve(value)
+          })
+        }),
+      }),
+    }, { policy: 'automatic' })
+
+    const first = executable(tools, 'save_item').execute(
+      { value: 'first' }, { toolCallId: 'first' },
+    )
+    await vi.waitFor(() => expect(release).toHaveLength(1))
+    const second = executable(tools, 'save_item').execute(
+      { value: 'second' }, { toolCallId: 'second' },
+    )
+    await Promise.resolve()
+    expect(release).toHaveLength(1)
+    expect(maxActive).toBe(1)
+
+    release[0]?.()
+    await vi.waitFor(() => expect(release).toHaveLength(2))
+    release[1]?.()
+    await expect(first).resolves.toBe('first')
+    await expect(second).resolves.toBe('second')
   })
 
   it('automatically approves a sensitive tool and audits its real result', async () => {

@@ -68,12 +68,71 @@ class SkillRunAudit(BaseModel):
         return self
 
 
+class CapabilityReferenceSnapshot(BaseModel):
+    path: str = Field(min_length=1, max_length=500)
+    bytes: int = Field(ge=0, le=10 * 1024 * 1024)
+    loaded: bool
+    contentDigest: str | None = Field(default=None, min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$")
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class SkillCapabilitySnapshot(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    version: str = Field(max_length=120)
+    source: Literal["builtin", "uploaded"]
+    activation: Literal["manual", "automatic", "restored"]
+    instructionsDigest: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$")
+    references: list[CapabilityReferenceSnapshot] = Field(default_factory=list, max_length=200)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ToolCapabilityDescriptor(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    description: str = Field(default="", max_length=2_000)
+    inputSchemaDigest: str | None = Field(default=None, min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$")
+    sideEffecting: bool
+    needsApproval: bool
+    replayPolicy: Literal["replayable", "uncertain-on-interruption"]
+    concurrencyPolicy: Literal["parallel-safe", "serialized", "unknown"] = "unknown"
+    idempotencyPolicy: Literal["replayable", "claim-backed", "unknown"] = "unknown"
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class CapabilityPolicySnapshot(BaseModel):
+    approvalPolicy: Literal["interactive", "automatic"]
+    allowedToolNames: list[str] | None = Field(default=None, max_length=256)
+
+    model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="after")
+    def validate_allowed_tool_names(self):
+        if self.allowedToolNames is not None and any(
+            not 0 < len(name) <= 200 for name in self.allowedToolNames
+        ):
+            raise ValueError("Capability tool name is too large or blank")
+        return self
+
+
+class AgentCapabilitySnapshot(BaseModel):
+    schemaVersion: Literal[1]
+    mode: Literal["chat", "job"]
+    skill: SkillCapabilitySnapshot | None = None
+    tools: list[ToolCapabilityDescriptor] = Field(default_factory=list, max_length=256)
+    policy: CapabilityPolicySnapshot
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class ChatMessageOut(BaseModel):
     id: int
     role: Literal["user", "assistant", "tool"]
     parts: list[dict]
     text: str
     skill_run: SkillRunAudit | None = None
+    capability_snapshot: AgentCapabilitySnapshot | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -105,6 +164,7 @@ class ChatMessageCreate(BaseModel):
     parts: list[dict] = Field(default_factory=list)
     text: str = ""
     skill_run: SkillRunAudit | None = None
+    capability_snapshot: AgentCapabilitySnapshot | None = None
 
 
 class ChatMessagePartsUpdate(BaseModel):
