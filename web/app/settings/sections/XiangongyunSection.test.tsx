@@ -108,4 +108,25 @@ describe('XiangongyunSection', () => {
       xiangongyun_default_instance_id: 'instance-1',
     }))
   })
+
+  it('places the save action after the default instance selector', async () => {
+    vi.mocked(listXiangongyunInstances).mockResolvedValue({ list: [], total: 0 })
+
+    render(
+      <XiangongyunSection
+        settings={makeSettings()}
+        onSaved={vi.fn()}
+      />,
+    )
+
+    await waitFor(() => expect(listXiangongyunInstances).toHaveBeenCalledTimes(1))
+
+    const defaultInstance = screen.getByRole('combobox', { name: '默认实例' })
+    const saveButton = screen.getByRole('button', { name: '保存仙宫云配置' })
+
+    expect(
+      defaultInstance.compareDocumentPosition(saveButton)
+      & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+  })
 })

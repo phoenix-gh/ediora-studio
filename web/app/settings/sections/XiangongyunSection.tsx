@@ -222,52 +222,40 @@ export function XiangongyunSection({
                 : '尚未配置 Token。'}
             </FieldDescription>
           </Field>
-          <div className="flex flex-wrap gap-2">
-            <Button onClick={handleSave} disabled={saving} aria-label="保存仙宫云配置">
-              {saving ? <Loader2 data-icon="inline-start" /> : <Save data-icon="inline-start" />}
-              保存配置
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => void refreshInstances()}
-              disabled={loadingInstances}
-            >
-              {loadingInstances
-                ? <Loader2 data-icon="inline-start" />
-                : <RefreshCw data-icon="inline-start" />}
-              刷新实例
-            </Button>
-          </div>
-        </FieldGroup>
-      </FormSection>
-
-      <FormSection
-        title="默认实例"
-        description="数字人分镜任务会在开始前检查这个实例；只有选择 ComfyUI 运行环境为仙宫云时才会自动开机。"
-      >
-        <FieldGroup>
           <Field>
             <FieldLabel htmlFor="xiangongyun-default-instance">默认实例</FieldLabel>
-            <Select
-              value={selectedId}
-              onValueChange={value => {
-                if (value) setSelectedId(value)
-              }}
-            >
-              <SelectTrigger id="xiangongyun-default-instance" className="w-full">
-                <SelectValue placeholder="请选择实例" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectGroup>
-                  {instances.map(instance => (
-                    <SelectItem key={instance.id} value={instance.id}>
-                      {instance.name || instance.id}
-                    </SelectItem>
-                  ))}
-                </SelectGroup>
-              </SelectContent>
-            </Select>
+            <div className="flex gap-2">
+              <Select
+                value={selectedId}
+                onValueChange={value => {
+                  if (value) setSelectedId(value)
+                }}
+              >
+                <SelectTrigger id="xiangongyun-default-instance" className="min-w-0 flex-1">
+                  <SelectValue placeholder="请选择实例" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    {instances.map(instance => (
+                      <SelectItem key={instance.id} value={instance.id}>
+                        {instance.name || instance.id}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => void refreshInstances()}
+                disabled={loadingInstances}
+              >
+                {loadingInstances
+                  ? <Loader2 data-icon="inline-start" />
+                  : <RefreshCw data-icon="inline-start" />}
+                刷新实例
+              </Button>
+            </div>
             {!selectedInList ? (
               <FieldDescription className="text-warning">
                 已保存的默认实例不在当前列表中，请刷新列表后重新选择。
@@ -283,6 +271,20 @@ export function XiangongyunSection({
             </Alert>
           ) : null}
 
+          <div className="flex flex-wrap gap-2">
+            <Button onClick={handleSave} disabled={saving} aria-label="保存仙宫云配置">
+              {saving ? <Loader2 data-icon="inline-start" /> : <Save data-icon="inline-start" />}
+              保存配置
+            </Button>
+          </div>
+        </FieldGroup>
+      </FormSection>
+
+      <FormSection
+        title="实例状态"
+        description="查看默认实例状态并发送开机、关机指令。数字人分镜任务会在开始前检查这个实例。"
+      >
+        <FieldGroup>
           {selectedInstance ? (
             <div className="flex flex-col gap-4 rounded-lg border border-border bg-background p-3">
               <div className="flex flex-wrap items-center justify-between gap-2">

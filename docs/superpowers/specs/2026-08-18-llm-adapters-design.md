@@ -4,15 +4,16 @@
 
 当前设置只保存一组文本 LLM 配置和一组图片配置，调用方直接读取全局字段。这样无法在不同任务之间选择不同的 OpenAI-compatible 接口，也无法统一控制图片接口返回 URL 还是 base64。
 
-本次把接口配置抽象为可复用的 Adapter 实例。第一阶段协议只支持 OpenAI-compatible HTTP API；一个 Adapter 只有一个模型字段，但可以分别声明是否支持文本和图片。X 内容筛选进入资产库时使用独立的“信息筛选 Adapter”设置，并允许单个 X 订阅覆盖该设置。
+本次把接口配置抽象为可复用的 Adapter 实例。第一阶段协议只支持 OpenAI-compatible HTTP API；一个 Adapter 只有一个模型字段，但可以分别声明是否支持文本和图片。运行时分别配置文字默认、图片默认和信息筛选 Adapter；X 内容筛选进入资产库时使用独立的信息筛选设置，并允许单个 X 订阅覆盖该设置。
 
 ## 目标
 
 - 支持创建、编辑、删除多个 OpenAI-compatible Adapter。
 - 每个 Adapter 配置名称、Endpoint、API Key、Model、文本能力、图片能力和图片响应模式。
-- 提供一个全局默认 Adapter。
+- 提供一个文字默认 Adapter。
+- 提供一个图片默认 Adapter。
 - 提供一个独立的“信息筛选 Adapter”设置，专门用于把 X 内容筛选、归类进资产库的 LLM 调用。
-- X 订阅可选填一个 Adapter；未填写时使用“信息筛选 Adapter”，该设置未填写时再回退到全局默认 Adapter。
+- X 订阅可选填一个 Adapter；未填写时使用“信息筛选 Adapter”，该设置未填写时再回退到文字默认 Adapter。
 - 图片生成按所选 Adapter 的配置支持 URL 或 base64；URL 模式由应用下载远程图片后再上传到本地资产存储。
 - 保持现有任务、旧配置和已排队任务的兼容读取能力。
 - API Key 不通过普通设置查询接口明文返回。
@@ -21,7 +22,7 @@
 
 - 不新增 Anthropic、Gemini 等协议；Adapter 的协议字段保留扩展空间，但当前只接受 `openai`。
 - 不为文本和图片分别配置两个模型字段；一个 Adapter 只配置一个 `model`。
-- 不新增单独的图片 Adapter 全局选择项；图片任务按调用方指定的 Adapter 或默认 Adapter 解析，并要求该 Adapter 声明图片能力。
+- 不提供一个同时覆盖文字和图片的全局默认 Adapter；文字和图片必须分别选择默认 Adapter。
 - 不改变 X 内容的关键词初筛、AI 输出契约、去重和资产目录写入规则。
 - 不把远程图片 URL 直接保存为资产 URL；URL 模式仍必须下载并经过现有资产上传流程。
 
@@ -60,8 +61,9 @@ Adapter 是一条可复用的接口配置，字段如下：
 ```text
 调用方明确传入的 adapter_id
   -> X 订阅的 llm_adapter_id（仅 topic_source 信息筛选）
-  -> 全局 information_filtering_adapter_id（仅信息筛选）
-  -> 全局 default_adapter_id
+  -> 信息筛选 Adapter（仅信息筛选）
+  -> 文字默认 Adapter（文本任务及未单独配置的信息筛选）
+  -> 图片默认 Adapter（图片任务）
 ```
 
 如果最终 Adapter 未声明所需能力，任务应直接失败并给出 Adapter 名称、能力类型和修复提示，不应静默切换到另一个不匹配的接口。
@@ -71,7 +73,8 @@ Adapter 是一条可复用的接口配置，字段如下：
 继续使用 `AppSetting` 的 JSON 值，新增逻辑键：
 
 - `llm_adapters`：Adapter 配置数组。API Key 加密/脱敏策略沿用现有设置保存方式；读取到内存后才用于调用。
-- `llm_default_adapter_id`：全局默认 Adapter ID，可为空。
+- `llm_text_default_adapter_id`：文字默认 Adapter ID，可为空。
+- `llm_image_default_adapter_id`：图片默认 Adapter ID，可为空。
 - `llm_information_filtering_adapter_id`：信息筛选 Adapter ID，可为空。
 
 为兼容已有安装：
@@ -82,7 +85,7 @@ Adapter 是一条可复用的接口配置，字段如下：
 4. 新 Adapter 列表一旦保存，运行时优先使用新列表；旧字段仍保留用于旧客户端和回滚读取，不再覆盖新配置。
 5. 已排队的旧任务仍可使用旧的运行时响应结构；新任务使用 Adapter 解析结果。
 
-删除 Adapter 前校验其不是全局默认 Adapter、信息筛选 Adapter 或任何 X 订阅的覆盖值。用户需先改为其他 Adapter 或清空引用。
+删除 Adapter 前校验其不是文字默认、图片默认、信息筛选 Adapter 或任何 X 订阅的覆盖值。用户需先改为其他 Adapter 或清空引用。
 
 ## 后端 API
 
@@ -91,17 +94,18 @@ Adapter 是一条可复用的接口配置，字段如下：
 `GET /api/settings` 返回：
 
 - `llm_adapters`：Adapter 公共字段数组，不包含明文 API Key。
-- `llm_default_adapter_id`。
+- `llm_text_default_adapter_id`。
+- `llm_image_default_adapter_id`。
 - `llm_information_filtering_adapter_id`。
 - 现有兼容字段和 `providers`。
 
-`PUT /api/settings` 接收完整的 Adapter 列表和两个选择项。保存规则：
+`PUT /api/settings` 接收完整的 Adapter 列表和三个用途选择项。保存规则：
 
 - 新建或修改 Adapter 时，非空 `api_key` 才覆盖已保存的 Key；空值表示保留原 Key。
 - 需要清除 Key 时使用明确的 `clear_api_key` 标记，不把普通的空输入误当作清除操作。
 - 校验 ID 唯一、名称非空、协议为 `openai`、model 非空、Endpoint 为合法 HTTP(S) URL、至少声明文本或图片能力。
 - `image_response_format` 只允许 `url` / `base64`。
-- 默认 Adapter 和信息筛选 Adapter 必须引用存在的 Adapter。
+- 文字默认、图片默认和信息筛选 Adapter 必须引用存在且具备对应能力的 Adapter。
 
 ### 运行时解析
 
@@ -132,10 +136,10 @@ Adapter 是一条可复用的接口配置，字段如下：
 
 `XSubscription` 增加可空的 `llm_adapter_id`：
 
-- 前端显示“信息筛选 Adapter”，默认选项为“跟随全局设置”。
+- 前端显示“信息筛选 Adapter”，默认选项为“跟随信息筛选设置”。
 - 可选项只展示声明 `supports_text` 的 Adapter。
 - 保存时校验 Adapter 存在且支持文本。
-- 返回订阅时同时返回 `llm_adapter_id`，空值表示跟随全局选择。
+- 返回订阅时同时返回 `llm_adapter_id`，空值表示跟随信息筛选选择。
 
 ### 任务执行
 
@@ -182,18 +186,19 @@ AI 设置页改为 Adapter 列表管理：
 
 - 列表显示名称、协议、Model、Endpoint、文本/图片能力、图片响应模式和 Key 是否已配置。
 - 支持新增、编辑、删除；编辑 Key 时使用掩码和“清除 Key”操作。
-- 提供“全局默认 Adapter”选择。
-- 提供独立的“信息筛选 Adapter”选择，选项包含“跟随全局默认”和支持文本的 Adapter。
+- 提供“文字默认 Adapter”选择，选项只包含支持文本的 Adapter。
+- 提供“图片默认 Adapter”选择，选项只包含支持图片的 Adapter。
+- 提供独立的“信息筛选 Adapter”选择，选项包含“跟随文字默认”和支持文本的 Adapter。
 - 图片能力开启后显示 URL/base64 选择；选中 URL 且 Model 看起来是 GPT image 系列时显示兼容性提示。
 - 旧单组文本/图片字段继续展示迁移结果或兼容提示，避免升级后用户看不到旧配置。
 
-X 订阅对话框新增“信息筛选 Adapter”下拉框，默认“跟随全局设置”，只列文本能力 Adapter。
+X 订阅对话框新增“信息筛选 Adapter”下拉框，默认“跟随信息筛选设置”，只列文本能力 Adapter。
 
 ## 错误处理
 
 - 无可用 Adapter 或无 API Key：在设置校验或任务启动时给出明确错误。
 - Adapter 不支持请求能力：拒绝调用并提示开启对应能力或更换 Adapter。
-- 信息筛选 Adapter 未配置时：按全局默认 Adapter 解析；全局默认也未配置时沿用旧配置兼容路径。
+- 信息筛选 Adapter 未配置时：按文字默认 Adapter 解析；文字默认也未配置时沿用旧配置兼容路径。
 - URL 图片接口只返回 base64、响应缺少 URL 或下载失败：任务失败，不创建空资产，不保存远程地址。
 - 删除仍被引用的 Adapter：返回冲突，保留引用不变。
 
@@ -202,14 +207,14 @@ X 订阅对话框新增“信息筛选 Adapter”下拉框，默认“跟随全�
 ### 后端
 
 - Adapter 列表保存、读取、Key 脱敏、Key 保留/清除和协议/能力/模式校验。
-- 默认 Adapter、信息筛选 Adapter 和无效引用校验。
+- 文字默认、图片默认、信息筛选 Adapter 和无效引用校验。
 - 旧单组文本/图片配置的兼容解析。
 - X 订阅 `llm_adapter_id` 的新增、PATCH、返回和删除引用约束。
 - `ai-runtime` 按 `adapter_id`、`capability`、`purpose=information_filtering` 的解析优先级。
 
 ### 前端
 
-- AI 设置页 Adapter CRUD、默认/信息筛选选择、Key 掩码和图片模式交互。
+- AI 设置页 Adapter CRUD、文字默认/图片默认/信息筛选选择、单个 Adapter 测试、Key 掩码和图片模式交互。
 - X 订阅选择 Adapter、默认跟随行为和保存回显。
 - 图片 base64 路径保持现有 SDK 调用。
 - 图片 URL 路径发送 `response_format=url`，下载远程字节后上传本地资产，且不把远程 URL 写入资产。

@@ -49,6 +49,42 @@ describe('Xiangongyun client', () => {
     expect(String(fetchMock.mock.calls[0]?.[0])).not.toContain('secret-token')
   })
 
+  it('accepts the provider success code 200 and unwraps data envelopes', async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({
+        code: 200,
+        data: {
+          list: [{ id: 'instance-1', name: 'ComfyUI', status: 'running' }],
+          total: 1,
+        },
+        success: true,
+      }))
+      .mockResolvedValueOnce(jsonResponse({
+        code: 200,
+        data: { id: 'instance-1', status: 'running' },
+        success: true,
+      }))
+      .mockResolvedValueOnce(jsonResponse({ code: 200, success: true }))
+      .mockResolvedValueOnce(jsonResponse({ code: 200, success: true }))
+
+    await expect(client.getInstances()).resolves.toMatchObject({
+      total: 1,
+      list: [{ id: 'instance-1', status: 'running' }],
+    })
+    await expect(client.getInstance('instance-1')).resolves.toMatchObject({
+      id: 'instance-1',
+      status: 'running',
+    })
+    await expect(client.bootInstance('instance-1')).resolves.toMatchObject({
+      code: 200,
+      success: true,
+    })
+    await expect(client.shutdownInstance('instance-1')).resolves.toMatchObject({
+      code: 200,
+      success: true,
+    })
+  })
+
   it('boots and shuts down using the documented JSON body', async () => {
     fetchMock
       .mockResolvedValueOnce(jsonResponse({ code: 0, success: true }))

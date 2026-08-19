@@ -16,26 +16,34 @@ def test_xiangongyun_client_uses_documented_requests_and_parses_payload(monkeypa
                 200,
                 request=request,
                 json={
-                    "list": [
-                        {
-                            "id": "instance-1",
-                            "name": "ComfyUI",
-                            "gpu_model": "RTX 4090",
-                            "gpu_used": 1,
-                            "status": "running",
-                            "progress": 100,
-                            "password": "instance-secret",
-                            "jupyter_token": "jupyter-secret",
-                        },
-                    ],
-                    "total": 1,
+                    "code": 200,
+                    "data": {
+                        "list": [
+                            {
+                                "id": "instance-1",
+                                "name": "ComfyUI",
+                                "gpu_model": "RTX 4090",
+                                "gpu_used": 1,
+                                "status": "running",
+                                "progress": 100,
+                                "password": "instance-secret",
+                                "jupyter_token": "jupyter-secret",
+                            },
+                        ],
+                        "total": 1,
+                    },
+                    "success": True,
                 },
             )
         if request.url.path == "/open/instance/instance-1":
             return httpx.Response(
                 200,
                 request=request,
-                json={"id": "instance-1", "status": "running", "progress": 100},
+                json={
+                    "code": 200,
+                    "data": {"id": "instance-1", "status": "running", "progress": 100},
+                    "success": True,
+                },
             )
         if request.url.path == "/open/instance/boot":
             assert request.method == "POST"
@@ -43,7 +51,7 @@ def test_xiangongyun_client_uses_documented_requests_and_parses_payload(monkeypa
             return httpx.Response(
                 200,
                 request=request,
-                json={"code": 0, "msg": "ok", "success": True},
+                json={"code": 200, "msg": "ok", "success": True},
             )
         if request.url.path == "/open/instance/shutdown":
             assert request.method == "POST"
@@ -51,7 +59,7 @@ def test_xiangongyun_client_uses_documented_requests_and_parses_payload(monkeypa
             return httpx.Response(
                 200,
                 request=request,
-                json={"code": 0, "msg": "ok", "success": True},
+                json={"code": 200, "msg": "ok", "success": True},
             )
         return httpx.Response(404, request=request)
 
@@ -76,6 +84,9 @@ def test_xiangongyun_client_uses_documented_requests_and_parses_payload(monkeypa
 
     assert instances["total"] == 1
     assert instances["list"][0]["status"] == "running"
+    assert "data" not in instances
+    assert "instance-secret" not in json.dumps(instances)
+    assert "jupyter-secret" not in json.dumps(instances)
     assert "password" not in instances["list"][0]
     assert "jupyter_token" not in instances["list"][0]
     assert detail["id"] == "instance-1"

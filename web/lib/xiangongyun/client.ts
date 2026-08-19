@@ -210,7 +210,7 @@ export function createXiangongyunClient(config: XiangongyunConfig) {
         (payload as { success?: unknown }).success === false
         || (
           typeof (payload as { code?: unknown }).code === 'number'
-          && (payload as { code: number }).code !== 0
+          && ![0, 200].includes((payload as { code: number }).code)
         )
       )
     ) {

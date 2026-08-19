@@ -34,13 +34,13 @@ def _adapter(
     }
 
 
-def test_resolve_information_filtering_prefers_global_filter_adapter():
+def test_resolve_information_filtering_prefers_its_adapter_over_text_default():
     cfg = {
         "llm_adapters": json.dumps([
             _adapter("default", endpoint="https://default.example/v1"),
             _adapter("filter", endpoint="https://filter.example/v1", model="filter-model"),
         ]),
-        "llm_default_adapter_id": "default",
+        "llm_text_default_adapter_id": "default",
         "llm_information_filtering_adapter_id": "filter",
     }
 
@@ -58,7 +58,7 @@ def test_resolve_explicit_adapter_precedes_information_filtering_setting():
             _adapter("filter"),
             _adapter("subscription"),
         ]),
-        "llm_default_adapter_id": "default",
+        "llm_text_default_adapter_id": "default",
         "llm_information_filtering_adapter_id": "filter",
     }
 
@@ -70,6 +70,57 @@ def test_resolve_explicit_adapter_precedes_information_filtering_setting():
     )
 
     assert resolved.adapter_id == "subscription"
+
+
+def test_resolve_text_and_image_use_separate_default_adapters():
+    cfg = {
+        "llm_adapters": json.dumps([
+            _adapter("text", endpoint="https://text.example/v1", model="text-model"),
+            _adapter(
+                "image",
+                endpoint="https://image.example/v1",
+                model="image-model",
+                text=False,
+                image=True,
+            ),
+            _adapter(
+                "filter",
+                endpoint="https://filter.example/v1",
+                model="filter-model",
+            ),
+        ]),
+        "llm_text_default_adapter_id": "text",
+        "llm_image_default_adapter_id": "image",
+        "llm_information_filtering_adapter_id": "filter",
+    }
+
+    text = resolve_adapter(cfg, capability="text")
+    image = resolve_adapter(cfg, capability="image")
+    filtering = resolve_adapter(
+        cfg,
+        capability="text",
+        purpose="information_filtering",
+    )
+
+    assert text.adapter_id == "text"
+    assert image.adapter_id == "image"
+    assert filtering.adapter_id == "filter"
+
+
+def test_resolve_information_filtering_falls_back_to_text_default():
+    cfg = {
+        "llm_adapters": json.dumps([_adapter("text")]),
+        "llm_text_default_adapter_id": "text",
+        "llm_information_filtering_adapter_id": "",
+    }
+
+    resolved = resolve_adapter(
+        cfg,
+        capability="text",
+        purpose="information_filtering",
+    )
+
+    assert resolved.adapter_id == "text"
 
 
 def test_resolve_rejects_adapter_without_requested_capability():

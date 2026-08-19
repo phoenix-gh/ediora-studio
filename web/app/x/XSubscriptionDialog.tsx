@@ -411,14 +411,14 @@ export function XSubscriptionDialog({
                   onChange={event => setInformationFilteringAdapterId(event.target.value)}
                   className="rounded-md px-2 text-sm"
                 >
-                  <option className={X_DIALOG_OPTION_CLASS} value="">跟随全局设置</option>
+                  <option className={X_DIALOG_OPTION_CLASS} value="">跟随信息筛选设置</option>
                   {informationFilteringAdapters.map(adapter => (
                     <option className={X_DIALOG_OPTION_CLASS} key={adapter.id} value={adapter.id}>
                       {adapter.name} · {adapter.model}
                     </option>
                   ))}
                 </NativeSelect>
-                <span className="block text-[11px] text-muted-foreground">不选择时使用全局“信息筛选 Adapter”，再回退到默认 Adapter。</span>
+                <span className="block text-[11px] text-muted-foreground">不选择时使用设置中的“信息筛选 Adapter”，未设置时回退到文字默认 Adapter。</span>
               </label>
             ) : null}
           </section>

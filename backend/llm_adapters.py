@@ -169,6 +169,57 @@ def save_adapter_payloads(
     return result
 
 
+def configured_default_adapter_id(
+    cfg: dict[str, str],
+    capability: AdapterCapability,
+) -> str:
+    """Return the configured default for one capability.
+
+    The old single ``llm_default_adapter_id`` is only read as a migration
+    fallback. New settings always use separate text and image defaults.
+    """
+    key = (
+        "llm_image_default_adapter_id"
+        if capability == "image"
+        else "llm_text_default_adapter_id"
+    )
+    configured = str(cfg.get(key, "")).strip()
+    if configured:
+        return configured
+    return str(cfg.get("llm_default_adapter_id", "")).strip()
+
+
+def resolve_test_adapter(
+    cfg: dict[str, str],
+    payload: LLMAdapterInput,
+) -> ResolvedLLMAdapter:
+    """Resolve a draft Adapter for a non-persistent settings test."""
+    stored_by_id = {
+        item["id"]: item
+        for item in parse_stored_adapters(cfg.get("llm_adapters"))
+    }
+    adapter_id = (payload.id or "draft").strip() or "draft"
+    stored = stored_by_id.get(adapter_id, {})
+    api_key = (payload.api_key or "").strip()
+    if payload.clear_api_key:
+        api_key = ""
+    elif not api_key:
+        api_key = str(stored.get("api_key") or "").strip()
+    if not api_key:
+        raise AdapterResolutionError(f"Adapter「{payload.name}」未配置 API Key")
+    return ResolvedLLMAdapter(
+        adapter_id=adapter_id,
+        name=payload.name,
+        protocol=payload.protocol,
+        api_key=api_key,
+        model=payload.model,
+        base_url=payload.endpoint,
+        supports_text=payload.supports_text,
+        supports_image=payload.supports_image,
+        image_response_format=payload.image_response_format,
+    )
+
+
 def _legacy_adapter(cfg: dict[str, str], capability: AdapterCapability) -> ResolvedLLMAdapter:
     from config import effective_base_url, effective_model
 
@@ -218,12 +269,15 @@ def resolve_adapter(
     selected_id = (adapter_id or "").strip()
     if not selected_id and purpose == "information_filtering":
         selected_id = str(cfg.get("llm_information_filtering_adapter_id", "")).strip()
+        if not selected_id:
+            selected_id = configured_default_adapter_id(cfg, "text")
     if not selected_id:
-        selected_id = str(cfg.get("llm_default_adapter_id", "")).strip()
+        selected_id = configured_default_adapter_id(cfg, capability)
     if not selected_id and len(adapters) == 1:
         selected_id = adapters[0]["id"]
     if not selected_id:
-        raise AdapterResolutionError("未配置默认 Adapter")
+        capability_label = "图片" if capability == "image" else "文本"
+        raise AdapterResolutionError(f"未配置{capability_label}默认 Adapter")
 
     selected = next((item for item in adapters if item["id"] == selected_id), None)
     if selected is None:

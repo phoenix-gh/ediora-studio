@@ -126,6 +126,8 @@ describe('global Chat tool policy', () => {
     mcp.tools.mockResolvedValue({
       upload_image_from_url: tool({ inputSchema: z.object({}), execute: async () => ({}) }),
       upload_image_from_path: tool({ inputSchema: z.object({}), execute: async () => ({}) }),
+      list_drafts: tool({ inputSchema: z.object({}), execute: async () => ({}) }),
+      get_draft: tool({ inputSchema: z.object({}), execute: async () => ({}) }),
       attach_creative_asset_to_draft: tool({ inputSchema: z.object({}), execute: async () => ({}) }),
     })
 
@@ -138,6 +140,8 @@ describe('global Chat tool policy', () => {
 
     expect(runtime.tools.upload_image_from_url).toBeUndefined()
     expect(runtime.tools.upload_image_from_path).toBeUndefined()
+    expect(runtime.tools.list_drafts).toBeDefined()
+    expect(runtime.tools.get_draft).toBeDefined()
     expect(runtime.tools.attach_creative_asset_to_draft).toBeDefined()
     await runtime.close()
   })

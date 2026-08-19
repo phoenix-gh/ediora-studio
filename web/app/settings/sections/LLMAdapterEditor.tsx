@@ -16,7 +16,7 @@ export type LLMAdapterTestState = 'idle' | 'testing' | 'ok' | 'fail'
 type LLMAdapterEditorProps = {
   adapter: LLMAdapterDraft
   onChange: (patch: Partial<LLMAdapterDraft>) => void
-  onDelete: () => void
+  onDelete?: () => void
   onTest: () => void
   testState: LLMAdapterTestState
   testMessage: string
@@ -37,10 +37,12 @@ export function LLMAdapterEditor({
           <p className="text-xs font-semibold text-foreground">Adapter 实例</p>
           <p className="mt-0.5 text-[11px] text-muted-foreground">一个实例共用一个模型，可声明文本和图片能力。</p>
         </div>
-        <Button type="button" size="sm" variant="ghost" className="text-destructive" onClick={onDelete} aria-label={`删除 Adapter ${adapter.name || adapter.id}`}>
-          <Trash2 />
-          删除
-        </Button>
+        {onDelete ? (
+          <Button type="button" size="sm" variant="ghost" className="text-destructive" onClick={onDelete} aria-label={`删除 Adapter ${adapter.name || adapter.id}`}>
+            <Trash2 />
+            删除
+          </Button>
+        ) : null}
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2">

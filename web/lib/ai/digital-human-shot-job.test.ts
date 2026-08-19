@@ -446,6 +446,9 @@ describe('digital-human shot render job', () => {
         outputs: { '3': { gifs: [{ filename: 'out.mp4', subfolder: '', type: 'output' }] } },
       }),
       viewFile: vi.fn().mockResolvedValue(new Uint8Array([9, 9, 9])),
+      waitUntilReady: vi.fn(async () => {
+        events.push('comfyui-ready')
+      }),
     }
     const sleep = vi.fn().mockResolvedValue(undefined)
     const xiangongyun = {
@@ -472,6 +475,11 @@ describe('digital-human shot render job', () => {
       'instance-1',
       expect.objectContaining({ sleep, checkCancelled: expect.any(Function) }),
     )
+    expect(comfyui.waitUntilReady).toHaveBeenCalledWith(
+      expect.objectContaining({ sleep, checkCancelled: expect.any(Function) }),
+    )
     expect(events.indexOf('ensure')).toBeLessThan(events.indexOf('context'))
+    expect(events.indexOf('ensure')).toBeLessThan(events.indexOf('comfyui-ready'))
+    expect(events.indexOf('comfyui-ready')).toBeLessThan(events.indexOf('context'))
   })
 })

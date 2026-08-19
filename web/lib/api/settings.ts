@@ -83,7 +83,8 @@ export interface AppSettings {
   llm_api_key_set: boolean
   llm_api_key_preview: string
   llm_adapters: LLMAdapter[]
-  llm_default_adapter_id: string
+  llm_text_default_adapter_id: string
+  llm_image_default_adapter_id: string
   llm_information_filtering_adapter_id: string
   image_model: string
   image_base_url: string
@@ -179,7 +180,8 @@ export interface SettingsUpdate {
   llm_api_key?: string
   llm_base_url?: string
   llm_adapters?: LLMAdapterInput[]
-  llm_default_adapter_id?: string
+  llm_text_default_adapter_id?: string
+  llm_image_default_adapter_id?: string
   llm_information_filtering_adapter_id?: string
   image_model?: string
   image_api_key?: string
@@ -296,6 +298,15 @@ export async function fetchProviderModels(body: FetchModelsRequest): Promise<Fet
 
 export async function testLLM(): Promise<{ ok: boolean; response?: string; error?: string }> {
   return apiFetch('/settings/test', { method: 'POST' })
+}
+
+export async function testLLMAdapter(body: {
+  adapter: LLMAdapterInput
+}): Promise<{ ok: boolean; response?: string; error?: string }> {
+  return apiFetch('/settings/test-adapter', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
 }
 
 export async function testHeyGen(): Promise<{ ok: boolean; error: string }> {

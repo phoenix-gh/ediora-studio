@@ -3,6 +3,14 @@ export type ComfyUIConfig = {
   authToken?: string
 }
 
+export type ComfyUIReadyOptions = {
+  pollIntervalMs?: number
+  timeoutMs?: number
+  sleep?: (ms: number) => Promise<void>
+  checkCancelled?: () => void | Promise<void>
+  now?: () => number
+}
+
 export type ComfyUIHistoryItem = {
   status: { completed?: boolean; status_str?: string }
   outputs: Record<string, { images?: Array<{
@@ -87,11 +95,54 @@ export function createComfyUIClient(config: ComfyUIConfig) {
     return response.json() as Promise<{ name: string; subfolder: string; type: string }>
   }
 
+  async function systemStats() {
+    const response = await request('/system_stats')
+    return response.json() as Promise<Record<string, unknown>>
+  }
+
+  async function waitUntilReady(options: ComfyUIReadyOptions = {}) {
+    const pollIntervalMs = options.pollIntervalMs ?? 2_000
+    const timeoutMs = options.timeoutMs ?? 5 * 60_000
+    const sleep = options.sleep ?? ((ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms)))
+    const checkCancelled = options.checkCancelled ?? (() => undefined)
+    const now = options.now ?? (() => Date.now())
+    const startedAt = now()
+    let interval = pollIntervalMs
+
+    while (true) {
+      await checkCancelled()
+      if (now() - startedAt >= timeoutMs) {
+        throw new ComfyUIError({
+          message: 'ComfyUI 启动超时（5 分钟）',
+          retryable: true,
+          code: 'readiness_timeout',
+          status: 408,
+        })
+      }
+
+      try {
+        return await systemStats()
+      } catch (error) {
+        if (error instanceof ComfyUIError && !error.retryable) throw error
+      }
+
+      await checkCancelled()
+      if (now() - startedAt >= timeoutMs) {
+        throw new ComfyUIError({
+          message: 'ComfyUI 启动超时（5 分钟）',
+          retryable: true,
+          code: 'readiness_timeout',
+          status: 408,
+        })
+      }
+      await sleep(interval)
+      interval = Math.min(Math.round(interval * 1.5), 15_000)
+    }
+  }
+
   return {
-    async systemStats() {
-      const response = await request('/system_stats')
-      return response.json() as Promise<Record<string, unknown>>
-    },
+    systemStats,
+    waitUntilReady,
 
     async uploadImage(
       bytes: Uint8Array,

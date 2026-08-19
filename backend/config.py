@@ -17,6 +17,8 @@ DEFAULTS: dict[str, str] = {
     "image_base_url": "",
     "image_model": "gpt-image-1",
     "llm_adapters": "[]",
+    "llm_text_default_adapter_id": "",
+    "llm_image_default_adapter_id": "",
     "llm_default_adapter_id": "",
     "llm_information_filtering_adapter_id": "",
     "prompt_generation_history_limit": "3",

@@ -45,7 +45,9 @@ from llm_adapters import (
     LLMAdapterPublic,
     public_adapters,
     parse_stored_adapters,
+    configured_default_adapter_id,
     resolve_adapter,
+    resolve_test_adapter,
     save_adapter_payloads,
 )
 from models import XSubscription
@@ -138,7 +140,8 @@ class SettingsOut(BaseModel):
     llm_api_key_set: bool
     llm_api_key_preview: str
     llm_adapters: list[LLMAdapterPublic]
-    llm_default_adapter_id: str
+    llm_text_default_adapter_id: str
+    llm_image_default_adapter_id: str
     llm_information_filtering_adapter_id: str
     image_model: str
     image_base_url: str
@@ -229,7 +232,8 @@ class SettingsUpdate(BaseModel):
     llm_api_key: Optional[str] = None
     llm_base_url: Optional[str] = None
     llm_adapters: Optional[list[LLMAdapterInput]] = None
-    llm_default_adapter_id: Optional[str] = None
+    llm_text_default_adapter_id: Optional[str] = None
+    llm_image_default_adapter_id: Optional[str] = None
     llm_information_filtering_adapter_id: Optional[str] = None
     image_model: Optional[str] = None
     image_api_key: Optional[str] = None
@@ -307,6 +311,10 @@ class FetchModelsRequest(BaseModel):
     provider: Optional[str] = None   # if None, use stored config
     api_key: Optional[str] = None    # if None, use stored config
     base_url: Optional[str] = None   # if None, derive from provider/stored
+
+
+class TestLLMAdapterRequest(BaseModel):
+    adapter: LLMAdapterInput
 
 
 class ImageRuntimeConfig(BaseModel):
@@ -418,7 +426,8 @@ def _build_out(cfg: dict) -> SettingsOut:
         llm_api_key_set=bool(api_key),
         llm_api_key_preview=f"…{api_key[-4:]}" if len(api_key) >= 4 else "",
         llm_adapters=public_adapters(cfg.get("llm_adapters", "[]")),
-        llm_default_adapter_id=cfg.get("llm_default_adapter_id", "").strip(),
+        llm_text_default_adapter_id=configured_default_adapter_id(cfg, "text"),
+        llm_image_default_adapter_id=configured_default_adapter_id(cfg, "image"),
         llm_information_filtering_adapter_id=cfg.get(
             "llm_information_filtering_adapter_id", ""
         ).strip(),
@@ -801,29 +810,63 @@ async def update_settings(
         )
 
     valid_adapter_ids = {item["id"] for item in next_adapters}
-    next_default_id = (
-        body.llm_default_adapter_id.strip()
-        if body.llm_default_adapter_id is not None
-        else saved_cfg.get("llm_default_adapter_id", "").strip()
+    next_text_default_id = (
+        body.llm_text_default_adapter_id.strip()
+        if body.llm_text_default_adapter_id is not None
+        else configured_default_adapter_id(saved_cfg, "text")
+    )
+    next_image_default_id = (
+        body.llm_image_default_adapter_id.strip()
+        if body.llm_image_default_adapter_id is not None
+        else configured_default_adapter_id(saved_cfg, "image")
     )
     next_filter_id = (
         body.llm_information_filtering_adapter_id.strip()
         if body.llm_information_filtering_adapter_id is not None
         else saved_cfg.get("llm_information_filtering_adapter_id", "").strip()
     )
-    for field_name, value in (
-        ("llm_default_adapter_id", next_default_id),
-        ("llm_information_filtering_adapter_id", next_filter_id),
+    selected_adapters = {item["id"]: item for item in next_adapters}
+    for field_name, value, capability in (
+        ("llm_text_default_adapter_id", next_text_default_id, "text"),
+        ("llm_image_default_adapter_id", next_image_default_id, "image"),
+        ("llm_information_filtering_adapter_id", next_filter_id, "text"),
     ):
         if value and value not in valid_adapter_ids:
             raise HTTPException(status_code=422, detail=f"{field_name} 引用的 Adapter 不存在")
-    if body.llm_default_adapter_id is not None or body.llm_adapters is not None:
-        updates["llm_default_adapter_id"] = next_default_id
+        if value:
+            adapter = selected_adapters[value]
+            capability_field = f"supports_{capability}"
+            if not adapter.get(capability_field):
+                capability_label = "图片" if capability == "image" else "文本"
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"{field_name} 引用的 Adapter 不支持{capability_label}",
+                )
+    if (
+        body.llm_text_default_adapter_id is not None
+        or body.llm_adapters is not None
+    ):
+        updates["llm_text_default_adapter_id"] = next_text_default_id
+    if (
+        body.llm_image_default_adapter_id is not None
+        or body.llm_adapters is not None
+    ):
+        updates["llm_image_default_adapter_id"] = next_image_default_id
     if (
         body.llm_information_filtering_adapter_id is not None
         or body.llm_adapters is not None
     ):
         updates["llm_information_filtering_adapter_id"] = next_filter_id
+    if (
+        body.llm_text_default_adapter_id is not None
+        or body.llm_image_default_adapter_id is not None
+        or body.llm_information_filtering_adapter_id is not None
+        or body.llm_adapters is not None
+    ):
+        # Retire the old single-default setting after the new selectors have
+        # been materialized. Older installations are still read as a
+        # migration fallback by configured_default_adapter_id().
+        updates["llm_default_adapter_id"] = ""
 
     if body.llm_provider is not None:
         updates["llm_provider"] = body.llm_provider
@@ -1433,6 +1476,39 @@ async def test_llm():
         return {"ok": True, "response": text.strip()}
     except Exception as e:
         return {"ok": False, "error": str(e)}
+
+
+async def _test_openai_adapter(adapter):
+    """Run a low-cost connectivity check without persisting the draft."""
+    if not adapter.supports_text:
+        await _fetch_models_openai_compat(adapter.base_url, adapter.api_key)
+        return "图片接口连接成功"
+
+    from openai import AsyncOpenAI
+
+    client = AsyncOpenAI(api_key=adapter.api_key, base_url=adapter.base_url)
+    response = await client.chat.completions.create(
+        model=adapter.model,
+        max_tokens=10,
+        messages=[{"role": "user", "content": 'Reply with just "OK".'}],
+    )
+    content = response.choices[0].message.content if response.choices else ""
+    return (content or "连接成功").strip()
+
+
+@router.post("/test-adapter")
+async def test_llm_adapter(body: TestLLMAdapterRequest):
+    """Test one Adapter draft, using its stored key when the draft omits it."""
+    adapter = None
+    try:
+        adapter = resolve_test_adapter(await get_config(), body.adapter)
+        response = await _test_openai_adapter(adapter)
+        return {"ok": True, "response": response}
+    except Exception as exc:
+        error = redact_secret_text(str(exc))
+        if adapter is not None and adapter.api_key:
+            error = error.replace(adapter.api_key, "***")
+        return {"ok": False, "error": error[:500]}
 
 
 # ── Collect Logs ──────────────────────────────────────────────────────────────

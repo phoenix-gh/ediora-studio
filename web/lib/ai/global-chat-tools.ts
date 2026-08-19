@@ -294,7 +294,10 @@ export async function openGlobalAgentTools({
     },
   })
   const discovered = await client.tools()
-  const dailyOnlyBlockedTools = new Set(['upload_image_from_url', 'upload_image_from_path'])
+  const dailyOnlyBlockedTools = new Set([
+    'upload_image_from_url',
+    'upload_image_from_path',
+  ])
   const visibleDiscovered = dailyCreationRunId === undefined
     ? discovered
     : Object.fromEntries(

@@ -367,6 +367,57 @@ describe('shared Agent runtime', () => {
     expect(activeTools).toEqual(['search_assets', 'save_draft'])
   })
 
+  it('keeps Chat core tools active even when the Skill plan omits them', async () => {
+    const deps = dependencies()
+    let activeTools: unknown
+    const openTools = deps.openTools
+    deps.openTools = async options => {
+      const runtime = await openTools(options)
+      return {
+        ...runtime,
+        tools: {
+          ...runtime.tools,
+          generateImage: tool({
+            inputSchema: z.object({ prompt: z.string() }),
+            execute: async () => ({ asset_id: 1 }),
+          }),
+        },
+      }
+    }
+    deps.generate = vi.fn(async (input: Record<string, unknown>) => {
+      const prompt = typeof input.prompt === 'string' ? input.prompt : ''
+      if (prompt.startsWith('Create a bounded execution plan')) {
+        return {
+          output: {
+            goal: '完成任务',
+            steps: [{
+              id: 'research', instruction: '检索', requiredReferences: [],
+              requiredTools: ['search_assets'],
+            }],
+            outputRequirements: [], verificationCriteria: [],
+          },
+        }
+      }
+      if (prompt.startsWith('Return valid JSON only in exactly this shape')) {
+        return { output: { passed: true, violations: [] } }
+      }
+      activeTools = input.activeTools
+      return { text: 'done', toolResults: [], content: [] }
+    }) as unknown as AgentRuntimeDependencies['generate']
+    const runtime = await openAgentRuntime({
+      ...openOptions('automatic', deps),
+      skillMode: 'manual',
+      skillName: 'Alpha',
+      alwaysAvailableToolNames: ['generateImage'],
+    })
+
+    await runtime.run({
+      objective: '生成一张图', modelMessages: [], maxSteps: 5,
+    })
+
+    expect(activeTools).toEqual(['search_assets', 'generateImage'])
+  })
+
   it('reports the final finish reason and executed step count without an active Skill', async () => {
     const deps = dependencies()
     deps.generate = vi.fn(async () => ({

@@ -125,7 +125,7 @@ class XiangongyunClient:
         if success is False or (
             isinstance(code, (int, float))
             and not isinstance(code, bool)
-            and code != 0
+            and code not in {0, 200}
         ):
             raise self._error(
                 f"仙宫云操作失败：{payload.get('msg') or payload.get('message') or '未知错误'}",
@@ -136,9 +136,11 @@ class XiangongyunClient:
 
     async def list_instances(self) -> dict[str, Any]:
         payload = await self._request("GET", "/open/instances")
-        instances = payload.get("list")
+        data = payload.get("data")
+        source = data if isinstance(data, dict) else payload
+        instances = source.get("list")
         if isinstance(instances, list):
-            payload["list"] = [
+            sanitized_instances = [
                 {
                     key: value
                     for key, value in item.items()
@@ -148,14 +150,28 @@ class XiangongyunClient:
                 else item
                 for item in instances
             ]
+            if isinstance(data, dict):
+                payload = {
+                    key: value
+                    for key, value in payload.items()
+                    if key != "data"
+                }
+                payload["list"] = sanitized_instances
+                if "total" in data:
+                    payload["total"] = data["total"]
+            else:
+                payload["list"] = sanitized_instances
         return payload
 
     async def get_instance(self, instance_id: str) -> dict[str, Any]:
         encoded_id = quote(instance_id.strip(), safe="")
         payload = await self._request("GET", f"/open/instance/{encoded_id}")
+        instance = payload.get("data")
+        if not isinstance(instance, dict):
+            instance = payload
         return {
             key: value
-            for key, value in payload.items()
+            for key, value in instance.items()
             if key not in _SENSITIVE_INSTANCE_FIELDS
         }
 

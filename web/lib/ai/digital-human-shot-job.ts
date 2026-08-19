@@ -297,16 +297,18 @@ export async function runDigitalHumanShotRenderJob(
   const state: Record<string, unknown> = {}
   try {
     if (deps.xiangongyun && deps.xiangongyunInstanceId) {
+      const checkCancelled = async () => {
+        const currentJob = await deps.api.getJob(jobId)
+        if (currentJob.status === 'cancelled') throw new JobCancelledError()
+      }
       await deps.xiangongyun.ensureInstanceRunning(
         deps.xiangongyunInstanceId,
         {
           sleep: deps.sleep,
-          checkCancelled: async () => {
-            const currentJob = await deps.api.getJob(jobId)
-            if (currentJob.status === 'cancelled') throw new JobCancelledError()
-          },
+          checkCancelled,
         },
       )
+      await deps.comfyui.waitUntilReady({ sleep: deps.sleep, checkCancelled })
     }
     const context = await deps.api.getShotContext(projectId, shotId, jobId)
     Object.assign(state, context.shot.provider_state)
