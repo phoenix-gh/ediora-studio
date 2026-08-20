@@ -1,28 +1,28 @@
-# Ediora 使用文档
+# 使用文档
 
 这套文档面向使用 Ediora 采集内容、创建稿件和制作多媒体作品的普通使用者。第一次使用时，建议先走通快速上手，再按需要查看对应主题。
 
 ## 第一次使用
 
-- [快速上手：从 GitHub 发布记录到可发布草稿](quick-start.md)：用一条完整路线认识设置、采集、创作任务和草稿箱。
-- [完成首次创作前的准备](setup.md)：配置 AI 模型、发布账号、写作模板和 GitHub 信息源。
+- [快速上手](quick-start.md)：用一条完整路线认识设置、采集、创作任务和草稿箱。
+- [首次设置](setup.md)：配置 AI 模型、发布账号、写作模板和 GitHub 信息源。
 
 ## 核心创作流程
 
-- [采集可用于创作的内容](collect-content.md)：添加 GitHub 仓库并获取发布记录。
-- [选择值得创作的内容](select-content.md)：判断内容价值，直接创建稿件或保留写作线索。
-- [创建并找到一篇草稿](create-draft.md)：提交创作任务、等待完成并在草稿箱找到结果。
-- [编辑草稿并完成发布前准备](edit-and-prepare.md)：检查正文、图片、账号和目标平台格式。
+- [内容采集](collect-content.md)：添加 GitHub 仓库并获取发布记录。
+- [内容筛选](select-content.md)：判断内容价值，直接创建稿件或保留写作线索。
+- [创建草稿](create-draft.md)：提交创作任务、等待完成并在草稿箱找到结果。
+- [编辑草稿](edit-and-prepare.md)：检查正文、图片、账号和目标平台格式。
 
 ## 管理任务与排查问题
 
-- [查看和管理创作任务](task-management.md)：理解任务状态、查看详情、取消或安全重试。
-- [常见问题排查](troubleshooting.md)：按模型、采集、任务、草稿、素材和账号问题逐项处理。
+- [任务管理](task-management.md)：理解任务状态、查看详情、取消或安全重试。
+- [问题排查](troubleshooting.md)：按模型、采集、任务、草稿、素材和账号问题逐项处理。
 
 ## 进阶创作
 
-- [制作文字视频](text-video.md)：从口播稿、分段配音和画面场景生成并下载 MP4。
-- [制作数字人口播](digital-human.md)：使用 HeyGen 或 ComfyUI / MiniMax H3 制作真人形象口播视频。
+- [文字视频](text-video.md)：从口播稿、分段配音和画面场景生成并下载 MP4。
+- [数字人口播](digital-human.md)：使用 HeyGen 或 ComfyUI / MiniMax H3 制作真人形象口播视频。
 
 ## 文档范围
 
