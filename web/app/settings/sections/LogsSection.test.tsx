@@ -47,7 +47,26 @@ describe('LogsSection', () => {
   afterEach(() => {
     cleanup()
     vi.useRealTimers()
+    vi.unstubAllEnvs()
     vi.unstubAllGlobals()
+  })
+
+  it('does not expose or fetch Agent logs when developer mode is off', async () => {
+    vi.stubEnv('NEXT_PUBLIC_DEVELOPER_MODE', '0')
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response([{
+      id: 1,
+      job: 'collect',
+      status: 'ok',
+      message: '采集完成',
+      detail: '',
+      created_at: '2026-07-28T00:00:00Z',
+    }])))
+
+    render(<LogsSection />)
+
+    expect(await screen.findByText('采集完成')).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Agent 运行日志' })).not.toBeInTheDocument()
+    expect(agentLogApi.listAllAgentLogEvents).not.toHaveBeenCalled()
   })
 
   it('uses the browser API proxy, treats naive timestamps as UTC, and polls every 30 seconds', async () => {

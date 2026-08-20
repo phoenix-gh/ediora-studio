@@ -29,6 +29,7 @@ import {
 } from '@/lib/api/chat'
 import { getJob, imageUrlsForJob, type JobStatus } from '@/lib/api/jobs'
 import { listAllAgentLogEvents, type AgentLogEvent } from '@/lib/ai/agent-log-client'
+import { isDeveloperModeEnabled } from '@/lib/developer-mode'
 import { cn } from '@/lib/utils'
 
 import { chatComposerColumn, chatConversationColumn } from './chat-layout'
@@ -208,6 +209,7 @@ function makeLocalMessage(role: Exclude<ChatRole, 'tool'>, parts: ChatPart[]): D
 }
 
 export function ChatClient() {
+  const developerModeEnabled = isDeveloperModeEnabled()
   const [sessions, setSessions] = useState<ChatSession[]>([])
   const [skills, setSkills] = useState<ChatSkill[]>([])
   const [drafts, setDrafts] = useState<ChatDraft[]>([])
@@ -233,9 +235,11 @@ export function ChatClient() {
   }, [])
 
   const openSession = useCallback(async (sessionId: number) => {
-    setAgentLogEvents([])
-    setAgentLogError('')
-    setAgentLogLoading(true)
+    if (developerModeEnabled) {
+      setAgentLogEvents([])
+      setAgentLogError('')
+      setAgentLogLoading(true)
+    }
     setActiveSessionId(sessionId)
     try {
       const session = await getChatSession(sessionId)
@@ -243,9 +247,10 @@ export function ChatClient() {
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '加载会话失败')
     }
-  }, [])
+  }, [developerModeEnabled])
 
   const refreshAgentLog = useCallback(async (sessionId: number) => {
+    if (!developerModeEnabled) return
     setAgentLogLoading(true)
     try {
       const page = await listAllAgentLogEvents({ session_id: sessionId, limit: 500 })
@@ -256,7 +261,7 @@ export function ChatClient() {
     } finally {
       setAgentLogLoading(false)
     }
-  }, [])
+  }, [developerModeEnabled])
 
   useEffect(() => {
     void (async () => {
@@ -278,14 +283,14 @@ export function ChatClient() {
   }, [])
 
   useEffect(() => {
-    if (activeSessionId === null) return
+    if (!developerModeEnabled || activeSessionId === null) return
     const initialRefresh = window.setTimeout(() => void refreshAgentLog(activeSessionId), 0)
     const timer = setInterval(() => void refreshAgentLog(activeSessionId), sending ? 2_000 : 15_000)
     return () => {
       window.clearTimeout(initialRefresh)
       clearInterval(timer)
     }
-  }, [activeSessionId, refreshAgentLog, sending])
+  }, [activeSessionId, developerModeEnabled, refreshAgentLog, sending])
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: sending ? 'smooth' : 'auto' })
@@ -475,22 +480,24 @@ export function ChatClient() {
               <FileSearch className="h-5 w-5 shrink-0 text-indigo-600" />
               <div><h2 className="font-medium text-foreground">全局研究助手</h2><p className="text-xs text-muted-foreground">可检索写作方案；所有工具调用均会记录。</p></div>
             </div>
-            <Button
-              type="button"
-              variant={showTrace ? 'secondary' : 'outline'}
-              size="sm"
-              disabled={activeSessionId === null}
-              onClick={() => setShowTrace(value => !value)}
-              title="查看本会话的 LLM、Skill 和工具运行轨迹"
-            >
-              <Activity data-icon="inline-start" />运行轨迹
-            </Button>
+            {developerModeEnabled && (
+              <Button
+                type="button"
+                variant={showTrace ? 'secondary' : 'outline'}
+                size="sm"
+                disabled={activeSessionId === null}
+                onClick={() => setShowTrace(value => !value)}
+                title="查看本会话的 LLM、Skill 和工具运行轨迹"
+              >
+                <Activity data-icon="inline-start" />运行轨迹
+              </Button>
+            )}
           </div>
         </header>
 
         <div className="min-h-0 flex-1 overflow-y-auto py-6">
           <div className={cn(chatConversationColumn, 'flex flex-col gap-5')}>
-            {showTrace && activeSessionId !== null && <AgentLogTimeline
+            {developerModeEnabled && showTrace && activeSessionId !== null && <AgentLogTimeline
               events={agentLogEvents}
               loading={agentLogLoading}
               error={agentLogError}
