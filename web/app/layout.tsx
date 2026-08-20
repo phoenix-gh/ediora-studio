@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from 'next/font/google'
 import './globals.css'
 import { Sidebar } from '@/components/features/Sidebar'
 import { AppShell } from '@/components/layout/AppShell'
+import { DeveloperModeProvider } from '@/components/providers/DeveloperModeProvider'
 import { ThemeProvider } from '@/components/providers/ThemeProvider'
 import { Toaster } from '@/components/ui/sonner'
 import { BROWSER_TITLE } from '@/lib/branding'
@@ -32,10 +33,12 @@ export default function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full bg-background text-foreground">
-        <ThemeProvider>
-          <AppShell sidebar={<Sidebar />}>{children}</AppShell>
-          <Toaster position="bottom-right" />
-        </ThemeProvider>
+        <DeveloperModeProvider>
+          <ThemeProvider>
+            <AppShell sidebar={<Sidebar />}>{children}</AppShell>
+            <Toaster position="bottom-right" />
+          </ThemeProvider>
+        </DeveloperModeProvider>
       </body>
     </html>
   )

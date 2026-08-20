@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { ChatContextPicker } from '@/components/features/chat/ChatContextPicker'
 import { ChatMarkdown } from '@/components/features/chat/ChatMarkdown'
 import { AgentLogTimeline } from '@/components/features/agent/AgentLogTimeline'
+import { useDeveloperMode } from '@/components/providers/DeveloperModeProvider'
 import {
   type ChatMessage,
   type ChatPart,
@@ -29,7 +30,6 @@ import {
 } from '@/lib/api/chat'
 import { getJob, imageUrlsForJob, type JobStatus } from '@/lib/api/jobs'
 import { listAllAgentLogEvents, type AgentLogEvent } from '@/lib/ai/agent-log-client'
-import { isDeveloperModeEnabled } from '@/lib/developer-mode'
 import { cn } from '@/lib/utils'
 
 import { chatComposerColumn, chatConversationColumn } from './chat-layout'
@@ -209,7 +209,7 @@ function makeLocalMessage(role: Exclude<ChatRole, 'tool'>, parts: ChatPart[]): D
 }
 
 export function ChatClient() {
-  const developerModeEnabled = isDeveloperModeEnabled()
+  const developerModeEnabled = useDeveloperMode()
   const [sessions, setSessions] = useState<ChatSession[]>([])
   const [skills, setSkills] = useState<ChatSkill[]>([])
   const [drafts, setDrafts] = useState<ChatDraft[]>([])
@@ -235,11 +235,9 @@ export function ChatClient() {
   }, [])
 
   const openSession = useCallback(async (sessionId: number) => {
-    if (developerModeEnabled) {
-      setAgentLogEvents([])
-      setAgentLogError('')
-      setAgentLogLoading(true)
-    }
+    setAgentLogEvents([])
+    setAgentLogError('')
+    setAgentLogLoading(false)
     setActiveSessionId(sessionId)
     try {
       const session = await getChatSession(sessionId)
@@ -247,7 +245,7 @@ export function ChatClient() {
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '加载会话失败')
     }
-  }, [developerModeEnabled])
+  }, [])
 
   const refreshAgentLog = useCallback(async (sessionId: number) => {
     if (!developerModeEnabled) return

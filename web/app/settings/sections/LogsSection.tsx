@@ -8,8 +8,8 @@ import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { API_BASE } from '@/lib/api/client'
 import { AgentLogTimeline } from '@/components/features/agent/AgentLogTimeline'
+import { useDeveloperMode } from '@/components/providers/DeveloperModeProvider'
 import { listAllAgentLogEvents, type AgentLogEvent } from '@/lib/ai/agent-log-client'
-import { isDeveloperModeEnabled } from '@/lib/developer-mode'
 
 interface LogEntry {
   id: number
@@ -43,7 +43,7 @@ function formatTime(iso: string) {
 }
 
 export function LogsSection() {
-  const developerModeEnabled = isDeveloperModeEnabled()
+  const developerModeEnabled = useDeveloperMode()
   const [logs, setLogs]       = useState<LogEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')

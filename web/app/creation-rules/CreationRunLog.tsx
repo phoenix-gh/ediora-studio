@@ -6,7 +6,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { getCreationRunAgentLog, type CreationDashboardRun, type CreationSchedulerLog, type DailyCreationAgentLog } from '@/lib/api/creation-rules'
 import { listAllAgentLogEvents, type AgentLogEvent } from '@/lib/ai/agent-log-client'
 import { AgentLogTimeline } from '@/components/features/agent/AgentLogTimeline'
-import { isDeveloperModeEnabled } from '@/lib/developer-mode'
+import { useDeveloperMode } from '@/components/providers/DeveloperModeProvider'
 import { summarizeDirectories } from './directory-summary'
 
 function formatTime(value: string | null | undefined) {
@@ -133,7 +133,7 @@ function RunDetail({ run, schedulerLogs, agentLog, agentEvents, agentLogLoading,
 }
 
 export function CreationRunLog({ runs, schedulerLogs }: { runs: CreationDashboardRun[]; schedulerLogs: CreationSchedulerLog[] }) {
-  const developerModeEnabled = isDeveloperModeEnabled()
+  const developerModeEnabled = useDeveloperMode()
   const [selectedRun, setSelectedRun] = useState<CreationDashboardRun | null>(null)
   const [agentLog, setAgentLog] = useState<DailyCreationAgentLog | null>(null)
   const [agentEvents, setAgentEvents] = useState<AgentLogEvent[]>([])
