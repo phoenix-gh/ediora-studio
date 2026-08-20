@@ -2,6 +2,10 @@
 
 AI 内容工作台：集信息采集、价值甄选、AI 创作与发布辅助于一体。
 
+## 使用文档
+
+如果你要使用 Ediora 完成内容采集、稿件创作、文字视频或数字人口播，请从[使用文档](docs/user-guide/README.md)开始。文档按首次设置和核心创作流程组织，部署与开发说明仍保留在本页。
+
 ## 技术栈
 
 - **后端**：FastAPI + PostgreSQL（SQLAlchemy async）+ APScheduler，Python 3.11（conda env: wems）
@@ -258,7 +262,7 @@ IMAGE_TAG=latest
 
 然后执行 `docker compose up -d --no-build`；私有镜像需要先执行 `docker login ghcr.io`。
 
-## 文字视频（当前里程碑）
+## 文字视频
 
 「创作 → 文字视频」把整篇文稿先生成一条主音频，再依据转写词级时间轴
 驱动 Remotion 动态文字场景。语音与转写凭据都保留在服务端；MiMo 使用
@@ -272,12 +276,16 @@ IMAGE_TAG=latest
 生成主音频。分镜 AI 只操作稳定的词范围，最终起止秒数由 Python 后端投影。
 
 若付费 provider 调用在响应是否送达不明确时中断，系统不会自动重复扣费
-调用，需要用户明确重试，并可能再次计费。当前里程碑提供带真实音频时间轴的
-Remotion 预览，**不包含 MP4 文件渲染，也不包含音色克隆**。
+调用，需要用户明确重试，并可能再次计费。当前功能提供带真实音频时间轴的
+Remotion 预览和 MP4 文件生成、播放与下载，**不包含音色克隆**。完整操作见
+[制作文字视频](docs/user-guide/text-video.md)。
 
-## 数字人口播（HeyGen）
+## 数字人口播（HeyGen / ComfyUI）
 
-「创作 → 数字人口播」提供可复用数字人角色、项目内脚本编辑、环境图和不可变成片版本：
+「创作 → 数字人口播」提供可复用数字人角色、项目内脚本编辑、环境图和成片版本。
+角色可在创建时选择 HeyGen 或 ComfyUI / MiniMax H3，创建后不能切换。HeyGen 按完整
+脚本生成版本；ComfyUI 可逐镜调整和生成，再拼接成片。以下是 HeyGen 路径的补充说明，
+完整的双后端操作见[制作数字人口播](docs/user-guide/digital-human.md)：
 
 1. 在「设置 → HeyGen」保存 API Key。API 与 Node worker 只通过受保护的运行时接口读取已保存配置，不从环境变量回退读取，浏览器不会拿到明文密钥。
 2. 创建角色时选择一张 PNG/JPEG 正面照、一段 MP3/WAV 录音和一张默认环境图。直接发送给 HeyGen 的单个素材最大 32MB。
