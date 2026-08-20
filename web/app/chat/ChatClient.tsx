@@ -1,7 +1,7 @@
 'use client'
 
 import { FormEvent, useCallback, useEffect, useRef, useState } from 'react'
-import { Bot, ChevronDown, FileSearch, Loader2, MessageSquarePlus, Pencil, Plus, Send, Trash2, Wrench } from 'lucide-react'
+import { Activity, Bot, ChevronDown, FileSearch, Loader2, MessageSquarePlus, Pencil, Plus, Send, Trash2, Wrench } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { ChatContextPicker } from '@/components/features/chat/ChatContextPicker'
 import { ChatMarkdown } from '@/components/features/chat/ChatMarkdown'
+import { AgentLogTimeline } from '@/components/features/agent/AgentLogTimeline'
 import {
   type ChatMessage,
   type ChatPart,
@@ -27,6 +28,8 @@ import {
   streamChatReply,
 } from '@/lib/api/chat'
 import { getJob, imageUrlsForJob, type JobStatus } from '@/lib/api/jobs'
+import { listAllAgentLogEvents, type AgentLogEvent } from '@/lib/ai/agent-log-client'
+import { isDeveloperModeEnabled } from '@/lib/developer-mode'
 import { cn } from '@/lib/utils'
 
 import { chatComposerColumn, chatConversationColumn } from './chat-layout'
@@ -206,6 +209,7 @@ function makeLocalMessage(role: Exclude<ChatRole, 'tool'>, parts: ChatPart[]): D
 }
 
 export function ChatClient() {
+  const developerModeEnabled = isDeveloperModeEnabled()
   const [sessions, setSessions] = useState<ChatSession[]>([])
   const [skills, setSkills] = useState<ChatSkill[]>([])
   const [drafts, setDrafts] = useState<ChatDraft[]>([])
@@ -218,6 +222,10 @@ export function ChatClient() {
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(true)
   const [sending, setSending] = useState(false)
+  const [showTrace, setShowTrace] = useState(false)
+  const [agentLogEvents, setAgentLogEvents] = useState<AgentLogEvent[]>([])
+  const [agentLogLoading, setAgentLogLoading] = useState(false)
+  const [agentLogError, setAgentLogError] = useState('')
   const bottomRef = useRef<HTMLDivElement>(null)
 
   const refreshSessions = useCallback(async () => {
@@ -227,6 +235,11 @@ export function ChatClient() {
   }, [])
 
   const openSession = useCallback(async (sessionId: number) => {
+    if (developerModeEnabled) {
+      setAgentLogEvents([])
+      setAgentLogError('')
+      setAgentLogLoading(true)
+    }
     setActiveSessionId(sessionId)
     try {
       const session = await getChatSession(sessionId)
@@ -234,7 +247,21 @@ export function ChatClient() {
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '加载会话失败')
     }
-  }, [])
+  }, [developerModeEnabled])
+
+  const refreshAgentLog = useCallback(async (sessionId: number) => {
+    if (!developerModeEnabled) return
+    setAgentLogLoading(true)
+    try {
+      const page = await listAllAgentLogEvents({ session_id: sessionId, limit: 500 })
+      setAgentLogEvents(page.events)
+      setAgentLogError('')
+    } catch (error) {
+      setAgentLogError(error instanceof Error ? error.message : '运行轨迹加载失败')
+    } finally {
+      setAgentLogLoading(false)
+    }
+  }, [developerModeEnabled])
 
   useEffect(() => {
     void (async () => {
@@ -256,6 +283,16 @@ export function ChatClient() {
   }, [])
 
   useEffect(() => {
+    if (!developerModeEnabled || activeSessionId === null) return
+    const initialRefresh = window.setTimeout(() => void refreshAgentLog(activeSessionId), 0)
+    const timer = setInterval(() => void refreshAgentLog(activeSessionId), sending ? 2_000 : 15_000)
+    return () => {
+      window.clearTimeout(initialRefresh)
+      clearInterval(timer)
+    }
+  }, [activeSessionId, developerModeEnabled, refreshAgentLog, sending])
+
+  useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: sending ? 'smooth' : 'auto' })
   }, [messages, sending])
 
@@ -265,6 +302,8 @@ export function ChatClient() {
     setInput('')
     setSkillName('')
     setDraftId('')
+    setAgentLogEvents([])
+    setAgentLogError('')
   }
 
   async function removeSession(session: ChatSession) {
@@ -436,14 +475,33 @@ export function ChatClient() {
 
       <section className="flex min-w-0 flex-1 flex-col">
         <header data-slot="page-header" className="flex h-[var(--app-header-height)] min-h-[var(--app-header-height)] items-center py-4">
-          <div className={cn(chatConversationColumn, 'flex items-center gap-3')}>
-            <FileSearch className="h-5 w-5 text-indigo-600" />
-            <div><h2 className="font-medium text-foreground">全局研究助手</h2><p className="text-xs text-muted-foreground">可检索写作方案；所有工具调用均会记录。</p></div>
+          <div className={cn(chatConversationColumn, 'flex items-center justify-between gap-3')}>
+            <div className="flex min-w-0 items-center gap-3">
+              <FileSearch className="h-5 w-5 shrink-0 text-indigo-600" />
+              <div><h2 className="font-medium text-foreground">全局研究助手</h2><p className="text-xs text-muted-foreground">可检索写作方案；所有工具调用均会记录。</p></div>
+            </div>
+            {developerModeEnabled && (
+              <Button
+                type="button"
+                variant={showTrace ? 'secondary' : 'outline'}
+                size="sm"
+                disabled={activeSessionId === null}
+                onClick={() => setShowTrace(value => !value)}
+                title="查看本会话的 LLM、Skill 和工具运行轨迹"
+              >
+                <Activity data-icon="inline-start" />运行轨迹
+              </Button>
+            )}
           </div>
         </header>
 
         <div className="min-h-0 flex-1 overflow-y-auto py-6">
           <div className={cn(chatConversationColumn, 'flex flex-col gap-5')}>
+            {developerModeEnabled && showTrace && activeSessionId !== null && <AgentLogTimeline
+              events={agentLogEvents}
+              loading={agentLogLoading}
+              error={agentLogError}
+            />}
             {messages.length === 0 && !loading && (
               <div className="rounded-2xl border border-dashed border-border bg-surface px-6 py-10 text-center">
                 <Bot className="mx-auto h-8 w-8 text-indigo-500" />

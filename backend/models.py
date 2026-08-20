@@ -472,6 +472,41 @@ class AgentMessageLog(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, index=True)
 
 
+class AgentLogEvent(Base):
+    """Append-only, redacted event stream shared by Chat and Job Agents."""
+    __tablename__ = "agent_log_events"
+    __table_args__ = (
+        Index("ix_agent_log_events_stream_id", "stream_key", "id"),
+        Index("ix_agent_log_events_session_id_id", "session_id", "id"),
+        Index("ix_agent_log_events_job_id_id", "job_id", "id"),
+        Index("ix_agent_log_events_execution_id_id", "execution_id", "id"),
+        Index("ix_agent_log_events_type_created", "event_type", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    stream_kind: Mapped[str] = mapped_column(String, nullable=False, index=True)  # chat | job
+    stream_key: Mapped[str] = mapped_column(String, nullable=False)
+    session_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    job_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    execution_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    turn_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    step_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    event_type: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    phase: Mapped[str] = mapped_column(String, nullable=False, default="")
+    status: Mapped[str] = mapped_column(String, nullable=False, default="info", index=True)
+    payload_data: Mapped[dict | list | str | int | float | bool | None] = mapped_column(
+        JSON, nullable=True, default=dict
+    )
+    usage_data: Mapped[dict | None] = mapped_column(JSON, nullable=True, default=None)
+    duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, index=True)
+
+    @property
+    def sequence(self) -> int:
+        """Expose the durable global insertion order as a replay cursor."""
+        return self.id
+
+
 class ContentJobStep(Base):
     __tablename__ = "content_job_steps"
     __table_args__ = (UniqueConstraint("job_id", "step_key", "attempt", name="uq_content_job_step_attempt"),)

@@ -73,6 +73,7 @@ def test_init_db_twice_creates_postgresql_core_tables(postgres_env):
         "agent_executions",
         "agent_tool_calls",
         "agent_message_logs",
+        "agent_log_events",
     } <= tables.keys()
     assert {
         "script",

@@ -1,5 +1,6 @@
 import { createOpenAI } from '@ai-sdk/openai'
 import { convertToModelMessages, createUIMessageStream, createUIMessageStreamResponse, generateText, safeValidateUIMessages, stepCountIs, streamText, type ToolSet, type UIMessage } from 'ai'
+import { randomUUID } from 'node:crypto'
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 
@@ -14,6 +15,8 @@ import { CHAT_MAX_STEPS, chatToolLoopStep, needsFinalAnswerFallback } from '@/li
 import { baoyuRuntimeInstructions } from '@/lib/ai/content-job'
 import { agentSkillRunAudit, openAgentRuntime, type AgentRunResult } from '@/lib/ai/agent-runtime'
 import type { AgentCapabilitySnapshot } from '@/lib/ai/agent-capabilities'
+import { appendAgentLogEvent, type AgentLogEventInput } from '@/lib/ai/agent-log-client'
+import type { AgentModelMessageEvent, AgentToolAudit } from '@/lib/ai/agent-runtime-types'
 import { createDirectImageGenerator, mcpUrl, type ChatSkillSnapshot } from '@/lib/ai/global-chat-tools'
 import { workerHeaders } from '@/lib/ai/job-client'
 import { getEnabledSkill, listSkillReferences, loadSkillPreloadContext } from '@/lib/skills/registry'
@@ -192,6 +195,89 @@ export function executionToolsForSelection(tools: ToolSet, genericRuntime: boole
   return Object.fromEntries(Object.entries(tools).filter(([name]) => name !== 'loadSkill')) as ToolSet
 }
 
+type ChatAgentLogContext = { sessionId: number; turnId: string }
+
+function usageFromPayload(payload: Record<string, unknown>) {
+  const usage = payload.usage
+  return usage && typeof usage === 'object' && !Array.isArray(usage)
+    ? usage as Record<string, unknown>
+    : undefined
+}
+
+export function chatAgentLogEventFromModelMessage(
+  event: AgentModelMessageEvent,
+  context: ChatAgentLogContext,
+): AgentLogEventInput {
+  const eventType = {
+    model_request: 'llm/request',
+    model_response: 'llm/response',
+    model_error: 'llm/error',
+  }[event.direction]
+  return {
+    stream_kind: 'chat',
+    stream_key: `chat:${context.sessionId}`,
+    session_id: context.sessionId,
+    turn_id: context.turnId,
+    event_type: eventType,
+    phase: event.phase,
+    status: event.direction === 'model_error' ? 'error' : 'completed',
+    payload: event.payload,
+    usage: usageFromPayload(event.payload),
+  }
+}
+
+export function chatAgentLogEventFromToolAudit(
+  event: AgentToolAudit,
+  context: ChatAgentLogContext,
+): AgentLogEventInput {
+  const isStarted = event.status === 'started'
+  return {
+    stream_kind: 'chat',
+    stream_key: `chat:${context.sessionId}`,
+    session_id: context.sessionId,
+    turn_id: context.turnId,
+    event_type: isStarted ? 'tool/call' : 'tool/result',
+    phase: 'execute',
+    status: isStarted
+      ? 'running'
+      : event.status === 'succeeded'
+        ? 'completed'
+        : 'error',
+    payload: {
+      toolName: event.toolName,
+      toolCallId: event.toolCallId,
+      sideEffecting: event.sideEffecting,
+      autoApproved: event.autoApproved,
+      status: event.status,
+      inputSummary: event.inputSummary,
+      output: event.output,
+      error: event.error,
+      occurredAt: event.occurredAt,
+    },
+  }
+}
+
+async function persistChatAgentLogEvent(event: AgentLogEventInput) {
+  try {
+    await appendAgentLogEvent(event)
+  } catch {
+    // Observability must not turn a user-facing Chat failure into a second failure.
+  }
+}
+
+function chatSessionEvent(
+  context: ChatAgentLogContext,
+  event: Omit<AgentLogEventInput, 'stream_kind' | 'stream_key' | 'session_id' | 'turn_id'>,
+): AgentLogEventInput {
+  return {
+    stream_kind: 'chat',
+    stream_key: `chat:${context.sessionId}`,
+    session_id: context.sessionId,
+    turn_id: context.turnId,
+    ...event,
+  }
+}
+
 export function agentRunUIResponse(result: AgentRunResult) {
   const stream = createUIMessageStream({
     execute: ({ writer }) => {
@@ -239,10 +325,40 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  const logContext: ChatAgentLogContext = {
+    sessionId: body.sessionId,
+    turnId: randomUUID(),
+  }
+  await persistChatAgentLogEvent(chatSessionEvent(logContext, {
+    event_type: 'session/turn-start',
+    phase: 'chat',
+    status: 'running',
+    payload: {
+      kind: body.approval ? 'tool-approval' : 'user-message',
+      skillName: body.skillName ?? null,
+      draftId: body.draftId ?? null,
+    },
+  }))
+
   let registry: Awaited<ReturnType<typeof openAgentRuntime>> | undefined
   try {
-    if (body.approval) await persistApproval(body.sessionId, body.approval)
-    else if (latestMessage) await persistMessage(body.sessionId, { role: 'user', parts: latestMessage.parts })
+    if (body.approval) {
+      await persistApproval(body.sessionId, body.approval)
+      await persistChatAgentLogEvent(chatSessionEvent(logContext, {
+        event_type: 'tool/approval',
+        phase: 'execute',
+        status: body.approval.approved ? 'approved' : 'rejected',
+        payload: body.approval,
+      }))
+    } else if (latestMessage) {
+      await persistMessage(body.sessionId, { role: 'user', parts: latestMessage.parts })
+      await persistChatAgentLogEvent(chatSessionEvent(logContext, {
+        event_type: 'session/user-message',
+        phase: 'chat',
+        status: 'completed',
+        payload: { parts: latestMessage.parts, text: messageText(latestMessage) },
+      }))
+    }
     const session = await persistedChatSession(body.sessionId)
     const restoredSkillName = body.skillName ? undefined : latestActivatedSkillName(session.messages)
     const messages = await persistedModelHistory(session, Boolean(body.approval))
@@ -263,14 +379,38 @@ export async function POST(request: NextRequest) {
       restoredSkillName,
       draftId: body.draftId,
       automaticSelection: genericRuntime,
+      onMessage: event => persistChatAgentLogEvent(
+        chatAgentLogEventFromModelMessage(event, logContext),
+      ),
+      onToolAudit: event => persistChatAgentLogEvent(
+        chatAgentLogEventFromToolAudit(event, logContext),
+      ),
     })
     registry = runtime
     const selected = genericRuntime || body.skillName
       ? await runtime.prepare(currentRequestText)
       : runtime.selectedSkill
+    await persistChatAgentLogEvent(chatSessionEvent(logContext, {
+      event_type: 'skill/selected',
+      phase: 'prepare',
+      status: selected ? 'completed' : 'skipped',
+      payload: selected
+        ? { name: selected.skill.name, activation: selected.activation }
+        : { name: null, activation: null },
+    }))
     const context = await selectedContext(selected?.skill.name ?? body.skillName, body.draftId, runtime.catalogContext)
     const instructions = buildChatInstructions(context)
     const executionTools = executionToolsForSelection(runtime.tools, genericRuntime, Boolean(selected))
+    await persistChatAgentLogEvent(chatSessionEvent(logContext, {
+      event_type: 'session/capabilities',
+      phase: 'prepare',
+      status: 'completed',
+      payload: {
+        capabilitySnapshot: runtime.capabilitySnapshot(),
+        messageCount: messages.length,
+        toolNames: Object.keys(executionTools),
+      },
+    }))
 
     if (genericRuntime && selected) {
       const modelMessages = await convertToModelMessages(messages, { tools: runtime.tools, ignoreIncompleteToolCalls: true })
@@ -287,28 +427,74 @@ export async function POST(request: NextRequest) {
         agentSkillRunAudit(result),
         runtime.capabilitySnapshot(),
       )
+      await persistChatAgentLogEvent(chatSessionEvent(logContext, {
+        event_type: 'session/assistant-message',
+        phase: 'execute',
+        status: result.kind === 'completed' ? 'completed' : 'waiting_approval',
+        payload: { parts, text: result.text, kind: result.kind },
+      }))
+      await persistChatAgentLogEvent(chatSessionEvent(logContext, {
+        event_type: 'session/turn-end',
+        phase: 'chat',
+        status: result.kind === 'completed' ? 'completed' : 'waiting_approval',
+        payload: {
+          kind: result.kind,
+          finishReason: result.finishReason ?? null,
+          stepCount: result.stepCount ?? null,
+        },
+      }))
       await registry.close()
       registry = undefined
       return agentRunUIResponse(result)
     }
 
+    const modelMessages = await convertToModelMessages(messages, { tools: executionTools, ignoreIncompleteToolCalls: true })
     const result = streamText({
       model,
       instructions,
-      messages: await convertToModelMessages(messages, { tools: executionTools, ignoreIncompleteToolCalls: true }),
+      messages: modelMessages,
       tools: executionTools,
       stopWhen: stepCountIs(CHAT_MAX_STEPS),
-      prepareStep: ({ stepNumber }) => {
+      prepareStep: async ({ stepNumber }) => {
+        await persistChatAgentLogEvent(chatSessionEvent(logContext, {
+          event_type: 'llm/request',
+          phase: 'execute',
+          status: 'running',
+          payload: {
+            stepNumber,
+            instructions,
+            messages: modelMessages,
+            toolNames: Object.keys(executionTools),
+          },
+        }))
         return skillAwareStepPolicy(stepNumber, runtime.snapshot(), instructions)
+      },
+      onStepFinish: async ({ text, toolCalls, toolResults, finishReason, usage }) => {
+        await persistChatAgentLogEvent(chatSessionEvent(logContext, {
+          event_type: 'llm/response',
+          phase: 'execute',
+          status: 'completed',
+          payload: { text, toolCalls, toolResults, finishReason },
+          usage: usage as unknown as Record<string, unknown>,
+        }))
+      },
+      onError: async error => {
+        await persistChatAgentLogEvent(chatSessionEvent(logContext, {
+          event_type: 'llm/error',
+          phase: 'execute',
+          status: 'error',
+          payload: { error: error instanceof Error ? error.message : String(error) },
+        }))
       },
     })
 
     return result.toUIMessageStreamResponse({
       originalMessages: messages,
       onFinish: async ({ responseMessage, isAborted }) => {
+        let pendingApproval = false
         try {
           if (!isAborted) {
-            const pendingApproval = responseMessage.parts.some(part => part.type === 'dynamic-tool' && part.state === 'approval-requested')
+            pendingApproval = responseMessage.parts.some(part => part.type === 'dynamic-tool' && part.state === 'approval-requested')
             let parts = responseMessage.parts
             if (!pendingApproval && needsFinalAnswerFallback(messageText(responseMessage))) {
               try {
@@ -323,15 +509,42 @@ export async function POST(request: NextRequest) {
               role: 'assistant',
               parts: finalHasText || pendingApproval ? parts : [{ type: 'text', text: '本次回复没有生成有效内容。请重试；如果问题持续出现，请缩小检索范围。' }],
             }, undefined, runtime.capabilitySnapshot())
+            await persistChatAgentLogEvent(chatSessionEvent(logContext, {
+              event_type: 'session/assistant-message',
+              phase: 'execute',
+              status: pendingApproval ? 'waiting_approval' : 'completed',
+              payload: { parts, text: messageText({ parts }), pendingApproval },
+            }))
           }
         } finally {
+          await persistChatAgentLogEvent(chatSessionEvent(logContext, {
+            event_type: 'session/turn-end',
+            phase: 'chat',
+            status: isAborted ? 'aborted' : pendingApproval ? 'waiting_approval' : 'completed',
+            payload: { isAborted, pendingApproval },
+          }))
           await registry?.close()
         }
+      },
+      onError: error => {
+        void persistChatAgentLogEvent(chatSessionEvent(logContext, {
+          event_type: 'session/error',
+          phase: 'chat',
+          status: 'error',
+          payload: { error: String(error) },
+        }))
+        return 'Chat response failed'
       },
     })
   } catch (error) {
     await registry?.close()
     const message = error instanceof Error ? error.message : 'Chat request failed'
+    await persistChatAgentLogEvent(chatSessionEvent(logContext, {
+      event_type: 'session/error',
+      phase: 'chat',
+      status: 'error',
+      payload: { error: message },
+    }))
     return NextResponse.json({ error: message }, { status: 500 })
   }
 }

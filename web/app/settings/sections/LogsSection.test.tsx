@@ -3,6 +3,14 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+const agentLogApi = vi.hoisted(() => ({
+  listAllAgentLogEvents: vi.fn().mockResolvedValue({ events: [], has_more: false, next_sequence: null }),
+}))
+
+vi.mock('@/lib/ai/agent-log-client', () => ({
+  listAllAgentLogEvents: agentLogApi.listAllAgentLogEvents,
+}))
+
 import { LogsSection } from './LogsSection'
 
 function deferred<T>() {
@@ -32,12 +40,33 @@ function response(logs: Array<{
 describe('LogsSection', () => {
   beforeEach(() => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
+    agentLogApi.listAllAgentLogEvents.mockClear()
+    agentLogApi.listAllAgentLogEvents.mockResolvedValue({ events: [], has_more: false, next_sequence: null })
   })
 
   afterEach(() => {
     cleanup()
     vi.useRealTimers()
+    vi.unstubAllEnvs()
     vi.unstubAllGlobals()
+  })
+
+  it('does not expose or fetch Agent logs when developer mode is off', async () => {
+    vi.stubEnv('NEXT_PUBLIC_DEVELOPER_MODE', '0')
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response([{
+      id: 1,
+      job: 'collect',
+      status: 'ok',
+      message: '采集完成',
+      detail: '',
+      created_at: '2026-07-28T00:00:00Z',
+    }])))
+
+    render(<LogsSection />)
+
+    expect(await screen.findByText('采集完成')).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Agent 运行日志' })).not.toBeInTheDocument()
+    expect(agentLogApi.listAllAgentLogEvents).not.toHaveBeenCalled()
   })
 
   it('uses the browser API proxy, treats naive timestamps as UTC, and polls every 30 seconds', async () => {

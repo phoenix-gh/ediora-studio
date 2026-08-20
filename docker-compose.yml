@@ -57,6 +57,7 @@ services:
       dockerfile: Dockerfile
       args:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000/api}
+        NEXT_PUBLIC_DEVELOPER_MODE: ${NEXT_PUBLIC_DEVELOPER_MODE:-0}
     command:
       - sh
       - -ec
@@ -137,6 +138,7 @@ services:
       - "3000"
     environment:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000/api}
+      NEXT_PUBLIC_DEVELOPER_MODE: ${NEXT_PUBLIC_DEVELOPER_MODE:-0}
       API_URL: http://api:8000/api
       WORKER_TOKEN: ${WORKER_TOKEN:-}
     ports:

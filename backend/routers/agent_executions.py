@@ -20,6 +20,7 @@ from agent_execution_service import (
     fail_agent_tool_call,
     update_agent_checkpoint,
 )
+from agent_log_service import append_agent_log_event
 from database import get_db
 from models import AgentExecution, AgentToolCall
 from worker_auth import require_worker_token
@@ -233,6 +234,27 @@ async def post_tool_call_claim(
         )
     except KeyError as error:
         raise HTTPException(404, str(error)) from None
+    execution = await db.get(AgentExecution, execution_id)
+    if execution is not None:
+        await append_agent_log_event(
+            db,
+            stream_kind="job",
+            stream_key=f"execution:{execution.id}",
+            job_id=execution.job_id,
+            execution_id=execution.id,
+            event_type="tool/call",
+            phase=execution.phase,
+            status={"execute": "running", "replay": "completed", "uncertain": "error"}[claim.action],
+            payload={
+                "tool_call_id": tool_call_id,
+                "tool_name": body.tool_name,
+                "input_summary": body.input_summary,
+                "auto_approved": body.auto_approved,
+                "side_effecting": body.side_effecting,
+                "claim_action": claim.action,
+                "error": claim.error,
+            },
+        )
     return {
         "action": claim.action,
         "output": claim.output,
@@ -253,6 +275,25 @@ async def post_tool_call_success(
         )
     except KeyError as error:
         raise HTTPException(404, str(error)) from None
+    execution = await db.get(AgentExecution, execution_id)
+    if execution is not None:
+        await append_agent_log_event(
+            db,
+            stream_kind="job",
+            stream_key=f"execution:{execution.id}",
+            job_id=execution.job_id,
+            execution_id=execution.id,
+            event_type="tool/result",
+            phase=execution.phase,
+            status=call.status,
+            payload={
+                "tool_call_id": call.tool_call_id,
+                "tool_name": call.tool_name,
+                "input_summary": call.input_summary,
+                "output": call.output_data,
+                "error": call.error,
+            },
+        )
     return _tool_call_payload(call)
 
 
@@ -269,6 +310,26 @@ async def post_tool_call_failure(
         )
     except KeyError as error:
         raise HTTPException(404, str(error)) from None
+    execution = await db.get(AgentExecution, execution_id)
+    if execution is not None:
+        await append_agent_log_event(
+            db,
+            stream_kind="job",
+            stream_key=f"execution:{execution.id}",
+            job_id=execution.job_id,
+            execution_id=execution.id,
+            event_type="tool/result",
+            phase=execution.phase,
+            status=call.status,
+            payload={
+                "tool_call_id": call.tool_call_id,
+                "tool_name": call.tool_name,
+                "input_summary": call.input_summary,
+                "output": call.output_data,
+                "error": call.error,
+                "uncertain": body.uncertain,
+            },
+        )
     return _tool_call_payload(call)
 
 

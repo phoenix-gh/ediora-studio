@@ -1,14 +1,25 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { getJobAgentLog, type ContentJob, type ContentJobStep } from '@/lib/api/jobs'
-import type { DailyCreationAgentLog } from '@/lib/api/creation-rules'
+import { type ContentJob, type ContentJobStep } from '@/lib/api/jobs'
+import { listAllAgentLogEvents, type AgentLogEvent } from '@/lib/ai/agent-log-client'
+import { AgentLogTimeline } from '@/components/features/agent/AgentLogTimeline'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { AgentMessageTimeline } from './CreationRunLog'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { isDeveloperModeEnabled } from '@/lib/developer-mode'
 
 const statusText: Record<string, string> = {
   queued: '排队中', running: '执行中', succeeded: '已完成', failed: '失败', cancelled: '已取消',
+}
+
+type JobLogTab = 'overview' | 'events' | 'agent'
+
+type AgentEventState = {
+  jobId: number
+  events: AgentLogEvent[]
+  loading: boolean
+  error: string
 }
 
 function formatTime(value: string | null | undefined) {
@@ -16,6 +27,14 @@ function formatTime(value: string | null | undefined) {
   return new Intl.DateTimeFormat('zh-CN', {
     dateStyle: 'medium', timeStyle: 'short', timeZone: 'Asia/Shanghai',
   }).format(new Date(value))
+}
+
+function jsonText(value: unknown) {
+  try { return JSON.stringify(value, null, 2) ?? String(value) } catch { return String(value) }
+}
+
+function errorText(reason: unknown, fallback: string) {
+  return reason instanceof Error ? reason.message : fallback
 }
 
 function StepRow({ step, onRetry }: { step: ContentJobStep; onRetry: () => void }) {
@@ -31,57 +50,117 @@ function StepRow({ step, onRetry }: { step: ContentJobStep; onRetry: () => void 
   </div>
 }
 
+function ExecutionEvents({ events }: { events: ContentJob['events'] }) {
+  return <section className="flex flex-col gap-2">
+    <div>
+      <h3 className="font-medium">执行时间线</h3>
+      <p className="text-xs text-muted-foreground">Job 状态事件默认折叠；需要排查调度和步骤细节时再展开 payload。</p>
+    </div>
+    {events.length === 0 && <p className="text-sm text-muted-foreground">暂无事件记录</p>}
+    {events.length > 0 && <div className="flex flex-col gap-2">
+      {events.slice().reverse().map(event => <details key={event.id} className="rounded-lg border bg-muted/20 p-3">
+        <summary className="flex cursor-pointer flex-wrap items-center gap-2 text-xs">
+          <code>{event.kind}</code>
+          <span className="flex-1 text-muted-foreground">{formatTime(event.created_at)}</span>
+          <span className="text-muted-foreground">展开 payload</span>
+        </summary>
+        <pre className="mt-2 max-h-[30rem] overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] text-muted-foreground">{jsonText(event.payload)}</pre>
+      </details>)}
+    </div>}
+  </section>
+}
+
 export function JobLogDialog({ job, open, onOpenChange, onRetry }: { job: ContentJob | null; open: boolean; onOpenChange: (open: boolean) => void; onRetry: (jobId: number, stepKey: string) => void }) {
+  const developerModeEnabled = isDeveloperModeEnabled()
   const jobId = job?.id
-  const [agentLogState, setAgentLogState] = useState<{ jobId: number; log: DailyCreationAgentLog | null; error: string }>({
+  const defaultTab: JobLogTab = 'overview'
+  const [agentEventState, setAgentEventState] = useState<AgentEventState>({
     jobId: -1,
-    log: null,
+    events: [],
+    loading: false,
     error: '',
   })
-
   useEffect(() => {
-    if (!open || jobId == null) return
+    if (!open || jobId == null || !developerModeEnabled) return
     let active = true
-    void getJobAgentLog(jobId).then(log => {
-      if (active) setAgentLogState({ jobId, log, error: '' })
-    }).catch(error => {
-      if (active) setAgentLogState({ jobId, log: null, error: error instanceof Error ? error.message : '完整消息加载失败' })
-    })
+    void (async () => {
+      await Promise.resolve()
+      if (!active) return
+      setAgentEventState({ jobId, events: [], loading: true, error: '' })
+      try {
+        const page = await listAllAgentLogEvents({ job_id: jobId, limit: 500 })
+        if (active) setAgentEventState({ jobId, events: page.events, loading: false, error: '' })
+      } catch (reason) {
+        if (active) setAgentEventState({ jobId, events: [], loading: false, error: errorText(reason, '运行轨迹加载失败') })
+      }
+    })()
     return () => { active = false }
-  }, [jobId, open])
+  }, [developerModeEnabled, jobId, open])
 
   if (!job) return null
-  const hasCurrentAgentLog = agentLogState.jobId === job.id
-  return <Dialog open={open} onOpenChange={onOpenChange}>
-    <DialogContent size="lg" className="max-h-[85vh] overflow-y-auto">
-      <DialogHeader>
+
+  const hasCurrentEvents = agentEventState.jobId === job.id
+
+  function handleOpenChange(nextOpen: boolean) {
+    onOpenChange(nextOpen)
+  }
+
+  return <Dialog open={open} onOpenChange={handleOpenChange}>
+    <DialogContent
+      size="lg"
+      className="flex h-[min(720px,calc(100dvh-2rem))] min-h-[min(520px,calc(100dvh-2rem))] max-h-[calc(100dvh-2rem)] flex-col overflow-hidden"
+    >
+      <DialogHeader className="shrink-0">
         <DialogTitle>任务日志 · #{job.id}</DialogTitle>
         <DialogDescription>{job.title} · {job.flow} · {statusText[job.status] ?? job.status}</DialogDescription>
       </DialogHeader>
-      <div className="space-y-4">
-        <div className="grid gap-2 rounded-lg bg-muted/40 p-3 text-xs sm:grid-cols-3">
-          <span>创建：{formatTime(job.created_at)}</span>
-          <span>开始：{formatTime(job.started_at)}</span>
-          <span>结束：{formatTime(job.completed_at)}</span>
+      <div data-testid="job-log-dialog-body" className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        <div className="flex min-h-0 flex-1 flex-col gap-3">
+          <div className="flex shrink-0 flex-wrap items-center gap-2 rounded-lg border bg-muted/30 p-3 text-xs">
+            <span className="font-medium">Job #{job.id}</span>
+            <span className="rounded-full bg-muted px-2 py-0.5">{statusText[job.status] ?? job.status}</span>
+            <span className="text-muted-foreground">步骤 {job.steps.length}</span>
+            {developerModeEnabled && <span className="text-muted-foreground">Agent 事件 {hasCurrentEvents ? agentEventState.events.length : '—'}</span>}
+          </div>
+          <Tabs
+            key={`${job.id}-${open ? 'open' : 'closed'}-${developerModeEnabled}`}
+            defaultValue={defaultTab}
+            className="min-h-0 flex-1"
+          >
+            <TabsList className="w-full shrink-0 justify-start overflow-x-auto" variant="line">
+              <TabsTrigger value="overview">任务概览</TabsTrigger>
+              {developerModeEnabled && <TabsTrigger value="events">执行时间线</TabsTrigger>}
+              {developerModeEnabled && <TabsTrigger value="agent">Agent 运行轨迹</TabsTrigger>}
+            </TabsList>
+            <TabsContent data-testid="job-log-overview-panel" value="overview" className="min-h-0 flex-1 overflow-y-auto pr-1">
+              <section className="flex flex-col gap-3">
+                <div className="grid gap-2 rounded-lg bg-muted/40 p-3 text-xs sm:grid-cols-3">
+                  <span>创建：{formatTime(job.created_at)}</span>
+                  <span>开始：{formatTime(job.started_at)}</span>
+                  <span>结束：{formatTime(job.completed_at)}</span>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <h3 className="font-medium">执行步骤</h3>
+                  <span className="text-xs text-muted-foreground">{job.steps.length} 个步骤</span>
+                </div>
+                {job.steps.length === 0 && <p className="text-sm text-muted-foreground">暂无步骤记录</p>}
+                {job.steps.length > 0 && <div className="flex flex-col gap-2">
+                  {job.steps.map(step => <StepRow key={step.id} step={step} onRetry={() => onRetry(job.id, step.key)} />)}
+                </div>}
+              </section>
+            </TabsContent>
+            {developerModeEnabled && <TabsContent value="events" className="min-h-0 flex-1 overflow-y-auto pr-1">
+              <ExecutionEvents events={job.events} />
+            </TabsContent>}
+            {developerModeEnabled && <TabsContent data-testid="job-log-agent-panel" value="agent" className="min-h-0 flex-1 overflow-y-auto pr-1">
+              <AgentLogTimeline
+                events={hasCurrentEvents ? agentEventState.events : []}
+                loading={!hasCurrentEvents || agentEventState.loading}
+                error={hasCurrentEvents ? agentEventState.error : ''}
+              />
+            </TabsContent>}
+          </Tabs>
         </div>
-        <section className="space-y-2">
-          <h3 className="font-medium">执行步骤</h3>
-          {job.steps.length === 0 && <p className="text-sm text-muted-foreground">暂无步骤记录</p>}
-          {job.steps.map(step => <StepRow key={step.id} step={step} onRetry={() => onRetry(job.id, step.key)} />)}
-        </section>
-        <section className="space-y-2">
-          <h3 className="font-medium">执行事件</h3>
-          {job.events.length === 0 && <p className="text-sm text-muted-foreground">暂无事件记录</p>}
-          {job.events.slice().reverse().map(event => <div key={event.id} className="rounded-lg bg-muted/40 p-3 text-xs">
-            <div className="flex flex-wrap items-center gap-2"><code>{event.kind}</code><span className="text-muted-foreground">{formatTime(event.created_at)}</span></div>
-            <pre className="mt-2 whitespace-pre-wrap break-words font-mono text-[11px] text-muted-foreground">{JSON.stringify(event.payload, null, 2)}</pre>
-          </div>)}
-        </section>
-        <AgentMessageTimeline
-          log={hasCurrentAgentLog ? agentLogState.log : null}
-          loading={!hasCurrentAgentLog}
-          error={hasCurrentAgentLog ? agentLogState.error : ''}
-        />
       </div>
     </DialogContent>
   </Dialog>
