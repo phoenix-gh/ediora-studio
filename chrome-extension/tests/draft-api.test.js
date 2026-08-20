@@ -10,15 +10,15 @@ import {
   publishDraft,
 } from '../background/draft-api.js'
 
-test('normalizes and restricts local API bases', () => {
+test('normalizes HTTP API bases without restricting the host or port', () => {
   assert.equal(normalizeApiBase('http://localhost:8000/api/'), DEFAULT_API_BASE)
   assert.equal(
     assertAllowedApiBase('http://127.0.0.1:8000/api'),
     'http://127.0.0.1:8000/api',
   )
-  assert.throws(
-    () => assertAllowedApiBase('https://example.com/api'),
-    { code: 'DRAFT_API_HOST_NOT_ALLOWED' },
+  assert.equal(
+    assertAllowedApiBase('https://api.example.com:9443/ediora/api/'),
+    'https://api.example.com:9443/ediora/api',
   )
   assert.throws(
     () => normalizeApiBase('not a url'),
@@ -76,11 +76,11 @@ test('fetches a local upload and returns a CSP-compatible data URL', async () =>
   assert.deepEqual(result, { dataUrl: 'data:image/png;base64,iVBORw==' })
 })
 
-test('rewrites a sibling local upload host onto the configured API origin', async () => {
+test('fetches an upload from a configured remote API origin', async () => {
   const calls = []
   const result = await fetchDraftImage(
-    'http://127.0.0.1:8000/api',
-    'http://localhost:8000/api/uploads/cover.png',
+    'https://api.example.com:9443/ediora/api',
+    'https://api.example.com:9443/ediora/api/uploads/cover.png',
     {
       fetchImpl: async (url, init) => {
         calls.push({ url, init })
@@ -92,8 +92,19 @@ test('rewrites a sibling local upload host onto the configured API origin', asyn
     },
   )
 
-  assert.equal(calls[0].url, 'http://127.0.0.1:8000/api/uploads/cover.png')
+  assert.equal(calls[0].url, 'https://api.example.com:9443/ediora/api/uploads/cover.png')
   assert.deepEqual(result, { dataUrl: 'data:image/png;base64,iVBORw==' })
+})
+
+test('rejects an upload from a sibling origin', async () => {
+  await assert.rejects(
+    fetchDraftImage(
+      'http://127.0.0.1:8000/api',
+      'http://localhost:8000/api/uploads/cover.png',
+      { fetchImpl: async () => new Response('not used') },
+    ),
+    { code: 'DRAFT_API_INVALID_REQUEST' },
+  )
 })
 
 test('does not proxy an image outside the configured local upload path', async () => {

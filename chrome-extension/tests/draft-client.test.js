@@ -118,6 +118,40 @@ test('reads, saves, and resets API configuration', async () => {
   assert.equal((await client.resetConfig()).apiBase, 'http://localhost:8000/api')
 })
 
+test('requests permission for the configured API origin before using it', async () => {
+  const runtime = fakeRuntime({})
+  const requests = []
+  const client = createDraftClient({
+    runtime,
+    permissions: {
+      contains: async () => false,
+      request: async details => {
+        requests.push(details)
+        return true
+      },
+    },
+  })
+
+  assert.equal(typeof client.requestApiPermission, 'function')
+  assert.equal(
+    await client.requestApiPermission('https://api.example.com:9443/ediora/api'),
+    'https://api.example.com:9443/ediora/api',
+  )
+  assert.deepEqual(requests, [{ origins: ['https://api.example.com:9443/*'] }])
+})
+
+test('does not save an API configuration when origin permission is denied', async () => {
+  const client = createDraftClient({
+    runtime: fakeRuntime({}),
+    permissions: { request: async () => false },
+  })
+
+  await assert.rejects(
+    client.requestApiPermission('https://api.example.com/api'),
+    { code: 'DRAFT_API_PERMISSION_DENIED' },
+  )
+})
+
 test('publishes a draft through the service worker message channel', async () => {
   const runtime = fakeRuntime({
     SHUCE_DRAFT_PUBLISH: {
