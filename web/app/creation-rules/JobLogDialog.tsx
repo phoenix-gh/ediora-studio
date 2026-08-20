@@ -1,32 +1,23 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { getJobAgentLog, type ContentJob, type ContentJobStep } from '@/lib/api/jobs'
+import { type ContentJob, type ContentJobStep } from '@/lib/api/jobs'
 import { listAllAgentLogEvents, type AgentLogEvent } from '@/lib/ai/agent-log-client'
-import type { DailyCreationAgentLog } from '@/lib/api/creation-rules'
 import { AgentLogTimeline } from '@/components/features/agent/AgentLogTimeline'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { isDeveloperModeEnabled } from '@/lib/developer-mode'
-import { AgentMessageTimeline } from './CreationRunLog'
 
 const statusText: Record<string, string> = {
   queued: '排队中', running: '执行中', succeeded: '已完成', failed: '失败', cancelled: '已取消',
 }
 
-type JobLogTab = 'agent' | 'overview' | 'messages' | 'events'
+type JobLogTab = 'overview' | 'events' | 'agent'
 
 type AgentEventState = {
   jobId: number
   events: AgentLogEvent[]
-  loading: boolean
-  error: string
-}
-
-type LegacyLogState = {
-  jobId: number
-  log: DailyCreationAgentLog | null
   loading: boolean
   error: string
 }
@@ -62,7 +53,7 @@ function StepRow({ step, onRetry }: { step: ContentJobStep; onRetry: () => void 
 function ExecutionEvents({ events }: { events: ContentJob['events'] }) {
   return <section className="flex flex-col gap-2">
     <div>
-      <h3 className="font-medium">执行事件</h3>
+      <h3 className="font-medium">执行时间线</h3>
       <p className="text-xs text-muted-foreground">Job 状态事件默认折叠；需要排查调度和步骤细节时再展开 payload。</p>
     </div>
     {events.length === 0 && <p className="text-sm text-muted-foreground">暂无事件记录</p>}
@@ -82,21 +73,13 @@ function ExecutionEvents({ events }: { events: ContentJob['events'] }) {
 export function JobLogDialog({ job, open, onOpenChange, onRetry }: { job: ContentJob | null; open: boolean; onOpenChange: (open: boolean) => void; onRetry: (jobId: number, stepKey: string) => void }) {
   const developerModeEnabled = isDeveloperModeEnabled()
   const jobId = job?.id
-  const defaultTab: JobLogTab = developerModeEnabled ? 'agent' : 'overview'
-  const [activeTab, setActiveTab] = useState<JobLogTab>(defaultTab)
+  const defaultTab: JobLogTab = 'overview'
   const [agentEventState, setAgentEventState] = useState<AgentEventState>({
     jobId: -1,
     events: [],
     loading: false,
     error: '',
   })
-  const [legacyLogState, setLegacyLogState] = useState<LegacyLogState>({
-    jobId: -1,
-    log: null,
-    loading: false,
-    error: '',
-  })
-
   useEffect(() => {
     if (!open || jobId == null || !developerModeEnabled) return
     let active = true
@@ -114,42 +97,26 @@ export function JobLogDialog({ job, open, onOpenChange, onRetry }: { job: Conten
     return () => { active = false }
   }, [developerModeEnabled, jobId, open])
 
-  useEffect(() => {
-    if (!open || jobId == null || !developerModeEnabled || activeTab !== 'messages') return
-    let active = true
-    void (async () => {
-      await Promise.resolve()
-      if (!active) return
-      setLegacyLogState({ jobId, log: null, loading: true, error: '' })
-      try {
-        const log = await getJobAgentLog(jobId)
-        if (active) setLegacyLogState({ jobId, log, loading: false, error: '' })
-      } catch (reason) {
-        if (active) setLegacyLogState({ jobId, log: null, loading: false, error: errorText(reason, '完整消息加载失败') })
-      }
-    })()
-    return () => { active = false }
-  }, [activeTab, developerModeEnabled, jobId, open])
-
   if (!job) return null
 
   const hasCurrentEvents = agentEventState.jobId === job.id
-  const hasCurrentLegacyLog = legacyLogState.jobId === job.id
 
   function handleOpenChange(nextOpen: boolean) {
-    if (!nextOpen) setActiveTab(defaultTab)
     onOpenChange(nextOpen)
   }
 
   return <Dialog open={open} onOpenChange={handleOpenChange}>
-    <DialogContent size="lg" className="max-h-[90vh] overflow-hidden">
-      <DialogHeader>
+    <DialogContent
+      size="lg"
+      className="flex h-[min(720px,calc(100dvh-2rem))] min-h-[min(520px,calc(100dvh-2rem))] max-h-[calc(100dvh-2rem)] flex-col overflow-hidden"
+    >
+      <DialogHeader className="shrink-0">
         <DialogTitle>任务日志 · #{job.id}</DialogTitle>
         <DialogDescription>{job.title} · {job.flow} · {statusText[job.status] ?? job.status}</DialogDescription>
       </DialogHeader>
-      <div className="min-h-0 overflow-y-auto pr-1">
-        <div className="flex flex-col gap-3">
-          <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/30 p-3 text-xs">
+      <div data-testid="job-log-dialog-body" className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        <div className="flex min-h-0 flex-1 flex-col gap-3">
+          <div className="flex shrink-0 flex-wrap items-center gap-2 rounded-lg border bg-muted/30 p-3 text-xs">
             <span className="font-medium">Job #{job.id}</span>
             <span className="rounded-full bg-muted px-2 py-0.5">{statusText[job.status] ?? job.status}</span>
             <span className="text-muted-foreground">步骤 {job.steps.length}</span>
@@ -158,23 +125,14 @@ export function JobLogDialog({ job, open, onOpenChange, onRetry }: { job: Conten
           <Tabs
             key={`${job.id}-${open ? 'open' : 'closed'}-${developerModeEnabled}`}
             defaultValue={defaultTab}
-            onValueChange={value => setActiveTab(value as JobLogTab)}
-            className="min-h-0"
+            className="min-h-0 flex-1"
           >
-            <TabsList className="w-full justify-start overflow-x-auto" variant="line">
-              {developerModeEnabled && <TabsTrigger value="agent">Agent 运行轨迹</TabsTrigger>}
+            <TabsList className="w-full shrink-0 justify-start overflow-x-auto" variant="line">
               <TabsTrigger value="overview">任务概览</TabsTrigger>
-              {developerModeEnabled && <TabsTrigger value="messages">AI 完整消息</TabsTrigger>}
-              {developerModeEnabled && <TabsTrigger value="events">执行事件</TabsTrigger>}
+              {developerModeEnabled && <TabsTrigger value="events">执行时间线</TabsTrigger>}
+              {developerModeEnabled && <TabsTrigger value="agent">Agent 运行轨迹</TabsTrigger>}
             </TabsList>
-            {developerModeEnabled && <TabsContent value="agent" className="min-h-0">
-              <AgentLogTimeline
-                events={hasCurrentEvents ? agentEventState.events : []}
-                loading={!hasCurrentEvents || agentEventState.loading}
-                error={hasCurrentEvents ? agentEventState.error : ''}
-              />
-            </TabsContent>}
-            <TabsContent value="overview" className="min-h-0">
+            <TabsContent data-testid="job-log-overview-panel" value="overview" className="min-h-0 flex-1 overflow-y-auto pr-1">
               <section className="flex flex-col gap-3">
                 <div className="grid gap-2 rounded-lg bg-muted/40 p-3 text-xs sm:grid-cols-3">
                   <span>创建：{formatTime(job.created_at)}</span>
@@ -191,15 +149,15 @@ export function JobLogDialog({ job, open, onOpenChange, onRetry }: { job: Conten
                 </div>}
               </section>
             </TabsContent>
-            {developerModeEnabled && <TabsContent value="messages" className="min-h-0">
-              <AgentMessageTimeline
-                log={hasCurrentLegacyLog ? legacyLogState.log : null}
-                loading={!hasCurrentLegacyLog || legacyLogState.loading}
-                error={hasCurrentLegacyLog ? legacyLogState.error : ''}
-              />
-            </TabsContent>}
-            {developerModeEnabled && <TabsContent value="events" className="min-h-0">
+            {developerModeEnabled && <TabsContent value="events" className="min-h-0 flex-1 overflow-y-auto pr-1">
               <ExecutionEvents events={job.events} />
+            </TabsContent>}
+            {developerModeEnabled && <TabsContent data-testid="job-log-agent-panel" value="agent" className="min-h-0 flex-1 overflow-y-auto pr-1">
+              <AgentLogTimeline
+                events={hasCurrentEvents ? agentEventState.events : []}
+                loading={!hasCurrentEvents || agentEventState.loading}
+                error={hasCurrentEvents ? agentEventState.error : ''}
+              />
             </TabsContent>}
           </Tabs>
         </div>
