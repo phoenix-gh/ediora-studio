@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { CreationDashboardRun, CreationSchedulerLog } from '@/lib/api/creation-rules'
 import { CreationRunLog } from './CreationRunLog'
 
@@ -52,6 +52,14 @@ const logs: CreationSchedulerLog[] = [{
 }]
 
 describe('CreationRunLog', () => {
+  beforeEach(() => {
+    vi.stubEnv('NEXT_PUBLIC_DEVELOPER_MODE', '1')
+  })
+
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+
   it('labels a cancelled creation run in Chinese', () => {
     render(<CreationRunLog runs={[{
       ...run,
@@ -60,6 +68,17 @@ describe('CreationRunLog', () => {
     }]} schedulerLogs={[]} />)
 
     expect(screen.getByText('已取消')).toBeInTheDocument()
+  })
+
+  it('hides Agent details and skips the debug log request when developer mode is off', () => {
+    vi.stubEnv('NEXT_PUBLIC_DEVELOPER_MODE', '0')
+
+    render(<CreationRunLog runs={[run]} schedulerLogs={logs} />)
+    fireEvent.click(screen.getByRole('button', { name: '查看日志' }))
+
+    expect(screen.getByRole('dialog')).not.toHaveTextContent('save_daily_creation_outputs')
+    expect(screen.getByRole('dialog')).not.toHaveTextContent('AI 完整消息')
+    expect(api.getCreationRunAgentLog).not.toHaveBeenCalled()
   })
 
   it('expands a failed run with job steps, agent tools and scheduler logs', async () => {
@@ -73,6 +92,6 @@ describe('CreationRunLog', () => {
     expect(screen.getByRole('dialog')).toHaveTextContent('save_daily_creation_outputs')
     expect(screen.getByRole('dialog')).toHaveTextContent('每日创作失败')
     expect(await screen.findByText('AI 完整消息')).toBeInTheDocument()
-    expect(screen.getByRole('dialog')).toHaveTextContent('create posts')
+    await waitFor(() => expect(screen.getByRole('dialog')).toHaveTextContent('create posts'))
   })
 })

@@ -34,7 +34,6 @@ describe('CreationJobPanel', () => {
     expect(screen.getByRole('heading', { name: '全部任务' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '查看日志' }))
     expect(screen.getByRole('dialog')).toHaveTextContent('模型暂时不可用')
-    expect(screen.getByRole('dialog')).toHaveTextContent('step_failed')
     fireEvent.click(screen.getByRole('button', { name: '重试' }))
     expect(onRetry).toHaveBeenCalledWith(job.id, 'generate')
   })

@@ -6,6 +6,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { getCreationRunAgentLog, type CreationDashboardRun, type CreationSchedulerLog, type DailyCreationAgentLog } from '@/lib/api/creation-rules'
 import { listAllAgentLogEvents, type AgentLogEvent } from '@/lib/ai/agent-log-client'
 import { AgentLogTimeline } from '@/components/features/agent/AgentLogTimeline'
+import { isDeveloperModeEnabled } from '@/lib/developer-mode'
 import { summarizeDirectories } from './directory-summary'
 
 function formatTime(value: string | null | undefined) {
@@ -78,7 +79,7 @@ export function AgentMessageTimeline({ log, loading, error }: { log: DailyCreati
   </section>
 }
 
-function RunDetail({ run, schedulerLogs, agentLog, agentEvents, agentLogLoading, agentLogError }: { run: CreationDashboardRun; schedulerLogs: CreationSchedulerLog[]; agentLog: DailyCreationAgentLog | null; agentEvents: AgentLogEvent[]; agentLogLoading: boolean; agentLogError: string }) {
+function RunDetail({ run, schedulerLogs, agentLog, agentEvents, agentLogLoading, agentLogError, developerModeEnabled }: { run: CreationDashboardRun; schedulerLogs: CreationSchedulerLog[]; agentLog: DailyCreationAgentLog | null; agentEvents: AgentLogEvent[]; agentLogLoading: boolean; agentLogError: string; developerModeEnabled: boolean }) {
   const detail = run.detail
   const outputs = Array.isArray(detail.outputs) ? detail.outputs as Array<{ draft_id?: number }> : []
   const job = run.job
@@ -95,12 +96,12 @@ function RunDetail({ run, schedulerLogs, agentLog, agentEvents, agentLogLoading,
           {step.error && <p className="mt-1 text-danger">{step.error}</p>}
         </div>)}
       </div>
-      {job.events.length > 0 && <div className="mt-3 space-y-1">
+      {developerModeEnabled && job.events.length > 0 && <div className="mt-3 space-y-1">
         <p className="font-medium">Job 事件</p>
         {job.events.slice(0, 5).map((event, index) => <p key={`${event.kind}-${event.created_at}-${index}`} className="text-muted-foreground"><code>{event.kind}</code> · {formatTime(event.created_at)} · {JSON.stringify(event.payload)}</p>)}
       </div>}
     </div>}
-    {agent && <div className="rounded-lg bg-muted/40 p-3">
+    {developerModeEnabled && agent && <div className="rounded-lg bg-muted/40 p-3">
       <div className="flex flex-wrap items-center gap-2">
         <span className="font-medium">Agent · {statusLabel(agent.status)} · {agent.phase}</span>
         {agent.skill_name && <span className="rounded-md border bg-background px-2 py-1">{agent.skill_name}</span>}
@@ -114,7 +115,7 @@ function RunDetail({ run, schedulerLogs, agentLog, agentEvents, agentLogLoading,
       </div>}
       {typeof agent.self_validation.summary === 'string' && agent.self_validation.summary && <p className="mt-2">自检：{agent.self_validation.summary}</p>}
     </div>}
-    {run.content_job_id && (agentEvents.length > 0
+    {developerModeEnabled && run.content_job_id && (agentEvents.length > 0
       ? <AgentLogTimeline events={agentEvents} loading={false} error={agentLogError} />
       : <AgentMessageTimeline log={agentLog} loading={agentLogLoading} error={agentLogError} />)}
     {outputs.length > 0 && <p className="text-success">已记录 {outputs.length} 条产出</p>}
@@ -132,6 +133,7 @@ function RunDetail({ run, schedulerLogs, agentLog, agentEvents, agentLogLoading,
 }
 
 export function CreationRunLog({ runs, schedulerLogs }: { runs: CreationDashboardRun[]; schedulerLogs: CreationSchedulerLog[] }) {
+  const developerModeEnabled = isDeveloperModeEnabled()
   const [selectedRun, setSelectedRun] = useState<CreationDashboardRun | null>(null)
   const [agentLog, setAgentLog] = useState<DailyCreationAgentLog | null>(null)
   const [agentEvents, setAgentEvents] = useState<AgentLogEvent[]>([])
@@ -143,7 +145,7 @@ export function CreationRunLog({ runs, schedulerLogs }: { runs: CreationDashboar
     setAgentLog(null)
     setAgentEvents([])
     setAgentLogError('')
-    if (!run.content_job_id) return
+    if (!developerModeEnabled || !run.content_job_id) return
     setAgentLogLoading(true)
     try {
       const [legacyResult, unifiedResult] = await Promise.allSettled([
@@ -163,7 +165,7 @@ export function CreationRunLog({ runs, schedulerLogs }: { runs: CreationDashboar
   return <section className="space-y-3">
     <div>
       <h2 className="font-semibold">运行日志</h2>
-      <p className="text-xs text-muted-foreground">查看定时 Job、失败步骤和 AI 工具调用摘要。</p>
+      <p className="text-xs text-muted-foreground">查看定时 Job 和失败步骤{developerModeEnabled ? '，以及 AI 工具调用摘要' : ''}。</p>
     </div>
     <div className="space-y-2">
       {runs.length === 0 && <div className="rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground">今天还没有规则任务</div>}
@@ -184,7 +186,7 @@ export function CreationRunLog({ runs, schedulerLogs }: { runs: CreationDashboar
           <DialogTitle>运行日志 · #{selectedRun.id}</DialogTitle>
           <DialogDescription>{String(selectedRun.rule.name ?? `规则 #${selectedRun.rule_id}`)} · Job #{selectedRun.content_job_id ?? '—'} · {statusLabel(selectedRun.status)}</DialogDescription>
         </DialogHeader>
-        <RunDetail run={selectedRun} schedulerLogs={schedulerLogs} agentLog={agentLog} agentEvents={agentEvents} agentLogLoading={agentLogLoading} agentLogError={agentLogError} />
+        <RunDetail run={selectedRun} schedulerLogs={schedulerLogs} agentLog={agentLog} agentEvents={agentEvents} agentLogLoading={agentLogLoading} agentLogError={agentLogError} developerModeEnabled={developerModeEnabled} />
       </DialogContent>}
     </Dialog>
   </section>

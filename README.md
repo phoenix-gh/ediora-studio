@@ -225,8 +225,11 @@ API、worker 和 Web 共用一个由根目录 `Dockerfile` 构建的应用镜像
 docker compose --profile local-asr up --build
 ```
 
-修改 `NEXT_PUBLIC_API_URL` 后需要重新构建应用镜像，因为它会在 Next.js 构建阶段写入
-浏览器 bundle。服务会启动 Web（3000）、Python API（8000）、Postgres、Redis 和内容任务 worker。
+修改 `NEXT_PUBLIC_API_URL` 或 `NEXT_PUBLIC_DEVELOPER_MODE` 后需要重新构建应用镜像，
+因为它们会在 Next.js 构建阶段写入浏览器 bundle。将
+`NEXT_PUBLIC_DEVELOPER_MODE=1`（也支持 `true`、`yes`、`on`）写入 `.env` 后，
+Job/Chat/设置中的 Agent 运行轨迹、AI 完整消息和执行事件才会显示。服务会启动
+Web（3000）、Python API（8000）、Postgres、Redis 和内容任务 worker。
 `POSTGRES_PASSWORD` 可在 `.env` 中覆盖；首次启动前还需把
 `WORKER_TOKEN` 改成一个长随机值。API 与 worker 必须使用同一个值，
 且不得使用 `NEXT_PUBLIC_` 前缀。LLM、图片和 HeyGen 密钥只配置在服务端，
@@ -368,6 +371,7 @@ web/.env.local：
 
 ```
 NEXT_PUBLIC_API_URL=http://localhost:8000/api
+NEXT_PUBLIC_DEVELOPER_MODE=0
 ```
 
 ## 数据通道速览
