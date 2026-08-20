@@ -441,6 +441,63 @@ async def get_creative_asset(asset_id: int) -> dict:
 
 
 @mcp.tool()
+async def list_source_subscriptions(
+    source_type: str = "",
+    include_muted: bool = True,
+    limit: int = 50,
+) -> list[dict]:
+    """List configured X/公众号 and other source subscriptions (read-only).
+
+    ``source_type`` may be ``x``, ``wechat``, ``reddit``, ``youtube``, or
+    ``v2ex``. Leave it empty to list all supported source types. This tool
+    only reads subscriptions and their stored item counts; it never starts a
+    collection job.
+    """
+    from source_tools import list_source_subscriptions as _list_source_subscriptions
+
+    return await _list_source_subscriptions(
+        source_type=source_type,
+        include_muted=include_muted,
+        limit=limit,
+    )
+
+
+@mcp.tool()
+async def search_source_items(
+    source_type: str = "",
+    query: str = "",
+    subscription_id: Optional[str] = None,
+    days: int = 30,
+    limit: int = 20,
+) -> list[dict]:
+    """Search already-collected source items (read-only).
+
+    Search covers X posts, 公众号 articles, Reddit posts, YouTube videos,
+    and V2EX topics. ``source_type`` can be left empty for a cross-source
+    search. The result contains compact content; call ``get_source_item``
+    with its source type and ID to read the complete stored body. No collector
+    or background job is triggered.
+    """
+    from source_tools import search_source_items as _search_source_items
+
+    return await _search_source_items(
+        source_type=source_type,
+        query=query,
+        subscription_id=subscription_id,
+        days=days,
+        limit=limit,
+    )
+
+
+@mcp.tool()
+async def get_source_item(source_type: str, item_id: str) -> dict:
+    """Read one complete already-collected information-source item."""
+    from source_tools import get_source_item as _get_source_item
+
+    return await _get_source_item(source_type=source_type, item_id=item_id)
+
+
+@mcp.tool()
 async def list_creative_asset_candidates(
     asset_type: str,
     directories: list[str],
