@@ -147,6 +147,7 @@ def _fake_runtime_tools(
             ;;
           *)
             printf 'start:web\n' >>"$DEV_TEST_STATE/events"
+            printf '%s\n' "$DEVELOPER_MODE" >"$DEV_TEST_STATE/developer-mode.env"
             token_hash="$(printf '%s' "$WORKER_TOKEN" | sha256sum | awk '{print $1}')"
             printf '%s|%s|%s|%s|%s|%s\n' \
               "$REDIS_URL" "$WORKER_QUEUE" "$token_hash" "$DATABASE_URL" \
@@ -602,6 +603,70 @@ def test_explicit_environment_overrides_root_env(tmp_path: Path) -> None:
         assert f"|{expected_hash}|" in effective
         assert REPLACEMENT_TOKEN not in result.stdout
         assert REPLACEMENT_TOKEN not in result.stderr
+    finally:
+        _run_dev(env, "stop")
+
+
+def test_start_maps_legacy_public_developer_mode_to_web_runtime(
+    tmp_path: Path,
+) -> None:
+    bin_dir = _fake_runtime_tools(tmp_path)
+    env = _dev_env(tmp_path, bin_dir)
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        f"WORKER_TOKEN={VALID_TOKEN}\nNEXT_PUBLIC_DEVELOPER_MODE=1\n",
+        encoding="utf-8",
+    )
+    env["DEV_ENV_FILE"] = str(env_file)
+
+    try:
+        result = _run_dev(env, "start")
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        effective = Path(env["DEV_TEST_STATE"]) / "developer-mode.env"
+        assert effective.read_text(encoding="utf-8").strip() == "1"
+    finally:
+        _run_dev(env, "stop")
+
+
+def test_developer_mode_drift_restarts_the_application_unit(
+    tmp_path: Path,
+) -> None:
+    bin_dir = _fake_runtime_tools(tmp_path)
+    env = _dev_env(tmp_path, bin_dir)
+    env_file = tmp_path / ".env"
+    env_file.write_text("NEXT_PUBLIC_DEVELOPER_MODE=0\n", encoding="utf-8")
+    env["DEV_ENV_FILE"] = str(env_file)
+    run_dir = Path(env["DEV_RUN_DIR"])
+
+    try:
+        first = _run_dev(env, "start")
+        assert first.returncode == 0, first.stdout + first.stderr
+        old_pids = {
+            service: _metadata_pid(run_dir / f"{service}.meta")
+            for service in ("redis", "api", "worker", "web")
+        }
+        old_fingerprint = _metadata_fields(run_dir / "api.meta")[
+            "config_fingerprint"
+        ]
+
+        env_file.write_text("NEXT_PUBLIC_DEVELOPER_MODE=1\n", encoding="utf-8")
+        second = _run_dev(env, "start")
+
+        assert second.returncode == 0, second.stdout + second.stderr
+        assert _metadata_pid(run_dir / "redis.meta") == old_pids["redis"]
+        assert all(
+            _metadata_pid(run_dir / f"{service}.meta") != old_pids[service]
+            for service in ("api", "worker", "web")
+        )
+        fingerprints = {
+            _metadata_fields(run_dir / f"{service}.meta")["config_fingerprint"]
+            for service in ("api", "worker", "web")
+        }
+        assert len(fingerprints) == 1
+        assert old_fingerprint not in fingerprints
+        effective = Path(env["DEV_TEST_STATE"]) / "developer-mode.env"
+        assert effective.read_text(encoding="utf-8").strip() == "1"
     finally:
         _run_dev(env, "stop")
 

@@ -1,17 +1,20 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ContentJob } from '@/lib/api/jobs'
 import { JobLogDialog } from './JobLogDialog'
 
 const api = vi.hoisted(() => ({
-  getJobAgentLog: vi.fn(),
   listAllAgentLogEvents: vi.fn(),
 }))
+const developerMode = vi.hoisted(() => ({ enabled: true }))
 
-vi.mock('@/lib/api/jobs', () => ({ getJobAgentLog: api.getJobAgentLog }))
+vi.mock('@/lib/api/jobs', () => ({}))
 vi.mock('@/lib/ai/agent-log-client', () => ({ listAllAgentLogEvents: api.listAllAgentLogEvents }))
+vi.mock('@/components/providers/DeveloperModeProvider', () => ({
+  useDeveloperMode: () => developerMode.enabled,
+}))
 
 const job: ContentJob = {
   id: 123,
@@ -60,66 +63,56 @@ const agentEvents = [{
   created_at: '2026-08-20T08:00:10Z',
 }]
 
-const legacyLog = {
-  execution: null,
-  messages: [{
-    id: 1,
-    execution_id: 55,
-    phase: 'execute',
-    direction: 'model_response' as const,
-    payload: { text: '完整模型消息' },
-    created_at: '2026-08-20T08:00:10Z',
-  }],
-  tools: [],
-}
-
 describe('JobLogDialog', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    vi.stubEnv('NEXT_PUBLIC_DEVELOPER_MODE', '1')
-    api.getJobAgentLog.mockResolvedValue(legacyLog)
+    developerMode.enabled = true
     api.listAllAgentLogEvents.mockResolvedValue({ events: agentEvents, has_more: false, next_sequence: null })
   })
 
   it('hides developer tabs and does not fetch agent logs when developer mode is off', () => {
-    vi.stubEnv('NEXT_PUBLIC_DEVELOPER_MODE', '0')
+    developerMode.enabled = false
 
     render(<JobLogDialog job={job} open onOpenChange={vi.fn()} onRetry={vi.fn()} />)
 
     expect(screen.getByRole('tab', { name: '任务概览' })).toBeInTheDocument()
+    expect(screen.queryByRole('tab', { name: '执行时间线' })).not.toBeInTheDocument()
     expect(screen.queryByRole('tab', { name: 'Agent 运行轨迹' })).not.toBeInTheDocument()
     expect(screen.queryByRole('tab', { name: 'AI 完整消息' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('tab', { name: '执行事件' })).not.toBeInTheDocument()
     expect(api.listAllAgentLogEvents).not.toHaveBeenCalled()
-    expect(api.getJobAgentLog).not.toHaveBeenCalled()
   })
 
-  it('opens on the agent trajectory and keeps execution events behind a collapsed tab', async () => {
+  it('uses the overview timeline trace order and opens on the overview', async () => {
     render(<JobLogDialog job={job} open onOpenChange={vi.fn()} onRetry={vi.fn()} />)
 
-    expect(await screen.findByText('LLM 响应')).toBeInTheDocument()
-    expect(screen.getByRole('tab', { name: 'Agent 运行轨迹' })).toHaveAttribute('aria-selected', 'true')
-    expect(screen.getByRole('tabpanel')).not.toHaveTextContent('step_failed')
-    expect(api.listAllAgentLogEvents).toHaveBeenCalledWith({ job_id: job.id, limit: 500 })
-    expect(api.getJobAgentLog).not.toHaveBeenCalled()
+    expect(screen.getAllByRole('tab').map(tab => tab.textContent)).toEqual(['任务概览', '执行时间线', 'Agent 运行轨迹'])
+    expect(screen.getByRole('tab', { name: '任务概览' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('dialog')).toHaveClass(
+      'h-[min(720px,calc(100dvh-2rem))]',
+      'min-h-[min(520px,calc(100dvh-2rem))]',
+      'max-h-[calc(100dvh-2rem)]',
+    )
+    await waitFor(() => expect(api.listAllAgentLogEvents).toHaveBeenCalledWith({ job_id: job.id, limit: 500 }))
 
-    fireEvent.click(screen.getByRole('tab', { name: '执行事件' }))
+    fireEvent.click(screen.getByRole('tab', { name: 'Agent 运行轨迹' }))
+    expect(await screen.findByText('LLM 响应')).toBeInTheDocument()
+    expect(screen.getByRole('tabpanel')).not.toHaveTextContent('step_failed')
+
+    fireEvent.click(screen.getByRole('tab', { name: '执行时间线' }))
 
     const event = await screen.findByText('step_failed')
     expect(event.closest('details')).not.toHaveAttribute('open')
   })
 
-  it('loads legacy full messages only after opening the AI message tab', async () => {
+  it('keeps the overview panel out of the shared vertical scroll container', async () => {
     render(<JobLogDialog job={job} open onOpenChange={vi.fn()} onRetry={vi.fn()} />)
 
-    expect(await screen.findByText('LLM 响应')).toBeInTheDocument()
-    expect(api.getJobAgentLog).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('tab', { name: 'Agent 运行轨迹' }))
+    expect(screen.getByTestId('job-log-agent-panel')).toHaveClass('overflow-y-auto')
 
-    fireEvent.click(screen.getByRole('tab', { name: 'AI 完整消息' }))
+    fireEvent.click(screen.getByRole('tab', { name: '任务概览' }))
 
-    expect(await screen.findByRole('heading', { name: 'AI 完整消息' })).toBeInTheDocument()
-    expect(api.getJobAgentLog).toHaveBeenCalledWith(job.id)
-    fireEvent.click(await screen.findByText('模型 → AI'))
-    expect(await screen.findByText(/完整模型消息/)).toBeInTheDocument()
+    expect(screen.getByTestId('job-log-dialog-body')).not.toHaveClass('overflow-y-auto')
+    expect(screen.getByTestId('job-log-overview-panel')).toHaveClass('flex-1', 'overflow-y-auto')
   })
 })

@@ -385,13 +385,14 @@ test_browser_settings_are_derived_from_host_ports_without_prompts() {
   local output="$CASE_DIR/output.log"
   touch "$EDIORA_DOCKER_STATE"
   write_valid_env
-  sed -i '/^NEXT_PUBLIC_API_URL=/d; /^CORS_ORIGINS=/d' "$CASE_DIR/.env"
+  sed -i '/^NEXT_PUBLIC_API_URL=/d; /^NEXT_PUBLIC_DEVELOPER_MODE=/d; /^CORS_ORIGINS=/d' "$CASE_DIR/.env"
   make_blank_input "$CASE_DIR/input"
   if ! run_installer "$output"; then
     cat "$output" >&2
     return 1
   fi
   assert_contains "$CASE_DIR/.env" 'NEXT_PUBLIC_API_URL=http://localhost:18000/api' 'API URL must follow API_PORT'
+  assert_contains "$CASE_DIR/.env" 'NEXT_PUBLIC_DEVELOPER_MODE=0' 'developer mode must have a runtime default'
   assert_contains "$CASE_DIR/.env" 'CORS_ORIGINS=http://127.0.0.1:18001,http://localhost:18001' 'CORS origins must follow WEB_PORT'
   assert_not_contains "$output" '浏览器访问的 API URL' 'derived API URL must not be prompted'
   assert_not_contains "$output" '允许的浏览器来源' 'derived CORS origins must not be prompted'

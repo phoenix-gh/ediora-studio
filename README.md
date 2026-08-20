@@ -160,7 +160,8 @@ Docker。macOS 需要先安装并启动 Docker Desktop；安装器不会通过 a
 安装 macOS Docker。它不会在宿主机安装 Python、Node.js、
 PostgreSQL 或 Redis。安装器会交互式创建或补全根目录 `.env`，保留已有值，
 并将文件权限设为 `0600`；数据库密码、worker token 和 X 会话密钥可接受
-安全随机默认值，provider API Key 不会写入该文件。`NEXT_PUBLIC_API_URL`
+安全随机默认值，provider API Key 不会写入该文件。`NEXT_PUBLIC_DEVELOPER_MODE`
+默认写为 `0`。`NEXT_PUBLIC_API_URL`
 会按 `API_PORT` 自动生成，`CORS_ORIGINS` 会按 `WEB_PORT` 自动包含
 `127.0.0.1` 和 `localhost`；已有自定义 URL 或来源会保留。
 
@@ -229,10 +230,16 @@ API、worker 和 Web 共用一个由根目录 `Dockerfile` 构建的应用镜像
 docker compose --profile local-asr up --build
 ```
 
-修改 `NEXT_PUBLIC_API_URL` 或 `NEXT_PUBLIC_DEVELOPER_MODE` 后需要重新构建应用镜像，
-因为它们会在 Next.js 构建阶段写入浏览器 bundle。将
-`NEXT_PUBLIC_DEVELOPER_MODE=1`（也支持 `true`、`yes`、`on`）写入 `.env` 后，
-Job/Chat/设置中的 Agent 运行轨迹、AI 完整消息和执行事件才会显示。服务会启动
+`NEXT_PUBLIC_API_URL` 会在 Next.js 构建阶段写入浏览器 bundle，修改它仍需重新构建
+应用镜像。`NEXT_PUBLIC_DEVELOPER_MODE` 则由 Web 服务在运行时读取；将它设为 `1`
+（也支持 `true`、`yes`、`on`）后，无需重新构建镜像，只需重新创建 Web 容器：
+
+```bash
+docker compose up -d --no-build --force-recreate web
+```
+
+使用 `./dev.sh` 时改为执行 `./dev.sh restart`。开发者模式开启后，Job/Chat/设置中的
+Agent 运行轨迹、AI 完整消息和执行事件才会显示。服务会启动
 Web（3000）、Python API（8000）、Postgres、Redis 和内容任务 worker。
 `POSTGRES_PASSWORD` 可在 `.env` 中覆盖；首次启动前还需把
 `WORKER_TOKEN` 改成一个长随机值。API 与 worker 必须使用同一个值，
@@ -379,7 +386,7 @@ web/.env.local：
 
 ```
 NEXT_PUBLIC_API_URL=http://localhost:8000/api
-NEXT_PUBLIC_DEVELOPER_MODE=0
+DEVELOPER_MODE=0
 ```
 
 ## 数据通道速览
