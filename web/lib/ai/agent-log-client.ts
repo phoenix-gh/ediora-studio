@@ -1,4 +1,5 @@
-import { apiGet, apiPost, workerHeaders } from './job-client'
+import { apiPost, workerHeaders } from './job-client'
+import { apiFetch } from '../api/client'
 
 export type AgentLogStreamKind = 'chat' | 'job'
 
@@ -62,7 +63,7 @@ export function listAgentLogEvents(filters: AgentLogEventFilters = {}) {
     if (value !== undefined) params.set(key, String(value))
   }
   const query = params.toString()
-  return apiGet<AgentLogEventPage>(`/agent-logs${query ? `?${query}` : ''}`)
+  return apiFetch<AgentLogEventPage>(`/agent-logs${query ? `?${query}` : ''}`)
 }
 
 export async function listAllAgentLogEvents(
