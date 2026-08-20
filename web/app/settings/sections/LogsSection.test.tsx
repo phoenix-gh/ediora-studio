@@ -6,9 +6,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const agentLogApi = vi.hoisted(() => ({
   listAllAgentLogEvents: vi.fn().mockResolvedValue({ events: [], has_more: false, next_sequence: null }),
 }))
+const developerMode = vi.hoisted(() => ({ enabled: true }))
 
 vi.mock('@/lib/ai/agent-log-client', () => ({
   listAllAgentLogEvents: agentLogApi.listAllAgentLogEvents,
+}))
+vi.mock('@/components/providers/DeveloperModeProvider', () => ({
+  useDeveloperMode: () => developerMode.enabled,
 }))
 
 import { LogsSection } from './LogsSection'
@@ -40,6 +44,7 @@ function response(logs: Array<{
 describe('LogsSection', () => {
   beforeEach(() => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
+    developerMode.enabled = true
     agentLogApi.listAllAgentLogEvents.mockClear()
     agentLogApi.listAllAgentLogEvents.mockResolvedValue({ events: [], has_more: false, next_sequence: null })
   })
@@ -47,12 +52,11 @@ describe('LogsSection', () => {
   afterEach(() => {
     cleanup()
     vi.useRealTimers()
-    vi.unstubAllEnvs()
     vi.unstubAllGlobals()
   })
 
   it('does not expose or fetch Agent logs when developer mode is off', async () => {
-    vi.stubEnv('NEXT_PUBLIC_DEVELOPER_MODE', '0')
+    developerMode.enabled = false
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response([{
       id: 1,
       job: 'collect',

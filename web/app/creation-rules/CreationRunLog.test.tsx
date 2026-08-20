@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { CreationDashboardRun, CreationSchedulerLog } from '@/lib/api/creation-rules'
 import { CreationRunLog } from './CreationRunLog'
 
@@ -12,8 +12,12 @@ const api = vi.hoisted(() => ({
     tools: [],
   }),
 }))
+const developerMode = vi.hoisted(() => ({ enabled: true }))
 
 vi.mock('@/lib/api/creation-rules', () => ({ getCreationRunAgentLog: api.getCreationRunAgentLog }))
+vi.mock('@/components/providers/DeveloperModeProvider', () => ({
+  useDeveloperMode: () => developerMode.enabled,
+}))
 
 const run: CreationDashboardRun = {
   id: 7,
@@ -53,11 +57,7 @@ const logs: CreationSchedulerLog[] = [{
 
 describe('CreationRunLog', () => {
   beforeEach(() => {
-    vi.stubEnv('NEXT_PUBLIC_DEVELOPER_MODE', '1')
-  })
-
-  afterEach(() => {
-    vi.unstubAllEnvs()
+    developerMode.enabled = true
   })
 
   it('labels a cancelled creation run in Chinese', () => {
@@ -71,7 +71,7 @@ describe('CreationRunLog', () => {
   })
 
   it('hides Agent details and skips the debug log request when developer mode is off', () => {
-    vi.stubEnv('NEXT_PUBLIC_DEVELOPER_MODE', '0')
+    developerMode.enabled = false
 
     render(<CreationRunLog runs={[run]} schedulerLogs={logs} />)
     fireEvent.click(screen.getByRole('button', { name: '查看日志' }))

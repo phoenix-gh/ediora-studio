@@ -68,7 +68,7 @@ def test_api_uses_local_asr_without_blocking_api_startup():
 
 
 def test_app_services_share_one_image_and_api_owns_root_build():
-    config = _compose_config()
+    config = _compose_config({"NEXT_PUBLIC_DEVELOPER_MODE": "1"})
     api = config["services"]["api"]
     worker = config["services"]["worker"]
     web = config["services"]["web"]
@@ -79,10 +79,13 @@ def test_app_services_share_one_image_and_api_owns_root_build():
     assert api["build"]["args"]["NEXT_PUBLIC_API_URL"] == (
         "http://localhost:8000/api"
     )
+    assert "NEXT_PUBLIC_DEVELOPER_MODE" not in api["build"]["args"]
     assert "build" not in worker
     assert "build" not in web
     assert worker["working_dir"] == "/app/web"
     assert web["working_dir"] == "/app/web"
+    assert web["environment"]["DEVELOPER_MODE"] == "1"
+    assert "NEXT_PUBLIC_DEVELOPER_MODE" not in web["environment"]
     assert web["command"] == [
         "./node_modules/.bin/next",
         "start",

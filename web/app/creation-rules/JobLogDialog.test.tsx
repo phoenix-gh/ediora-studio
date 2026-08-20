@@ -8,9 +8,13 @@ import { JobLogDialog } from './JobLogDialog'
 const api = vi.hoisted(() => ({
   listAllAgentLogEvents: vi.fn(),
 }))
+const developerMode = vi.hoisted(() => ({ enabled: true }))
 
 vi.mock('@/lib/api/jobs', () => ({}))
 vi.mock('@/lib/ai/agent-log-client', () => ({ listAllAgentLogEvents: api.listAllAgentLogEvents }))
+vi.mock('@/components/providers/DeveloperModeProvider', () => ({
+  useDeveloperMode: () => developerMode.enabled,
+}))
 
 const job: ContentJob = {
   id: 123,
@@ -62,12 +66,12 @@ const agentEvents = [{
 describe('JobLogDialog', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    vi.stubEnv('NEXT_PUBLIC_DEVELOPER_MODE', '1')
+    developerMode.enabled = true
     api.listAllAgentLogEvents.mockResolvedValue({ events: agentEvents, has_more: false, next_sequence: null })
   })
 
   it('hides developer tabs and does not fetch agent logs when developer mode is off', () => {
-    vi.stubEnv('NEXT_PUBLIC_DEVELOPER_MODE', '0')
+    developerMode.enabled = false
 
     render(<JobLogDialog job={job} open onOpenChange={vi.fn()} onRetry={vi.fn()} />)
 

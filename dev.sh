@@ -76,6 +76,7 @@ HOST_API_URL="${HOST_API_ROOT}/api"
 HOST_WEB_URL="http://127.0.0.1:${WEB_PORT}"
 EFFECTIVE_CORS_ORIGINS="${CORS_ORIGINS:-${HOST_WEB_URL},http://localhost:${WEB_PORT}}"
 DATABASE_URL="${DATABASE_URL:-postgresql+asyncpg://wemedia:wemedia@${POSTGRES_HOST}:${POSTGRES_PORT}/wemedia}"
+DEVELOPER_MODE="${NEXT_PUBLIC_DEVELOPER_MODE:-0}"
 WORKER_READY_FILE="$RUN_DIR/worker.ready"
 
 source "$ROOT/scripts/dev-runtime.sh"
@@ -290,6 +291,7 @@ application_config_fingerprint() {
     "$HOST_API_URL" \
     "$HOST_WEB_URL" \
     "$CORS_ORIGINS" \
+    "$DEVELOPER_MODE" \
     "$(worker_source_fingerprint)"
 }
 
@@ -523,6 +525,7 @@ cmd_start() {
   export DATABASE_URL
   export API_URL="$HOST_API_URL"
   export NEXT_PUBLIC_API_URL="$HOST_API_URL"
+  export DEVELOPER_MODE
   export WORKER_QUEUE="${WORKER_QUEUE:-content-jobs}"
   export VIDEO_WORKER_QUEUE="${VIDEO_WORKER_QUEUE:-content-jobs:video}"
   export CORS_ORIGINS="$EFFECTIVE_CORS_ORIGINS"

@@ -18,10 +18,12 @@ export WORKER_TOKEN="$(openssl rand -hex 32)"
 `./dev.sh logs` 查看。
 
 前端 API 地址由 `NEXT_PUBLIC_API_URL` 配置；统一脚本会按实际
-`API_PORT` 自动设置。`NEXT_PUBLIC_DEVELOPER_MODE` 默认关闭，只有设置为
+`API_PORT` 自动设置。`NEXT_PUBLIC_DEVELOPER_MODE` 默认关闭，Compose 和
+`dev.sh` 会在启动 Web 服务时将它映射为服务端运行时配置。只有设置为
 `1`、`true`、`yes` 或 `on` 时，Job、Chat 和设置页才显示 Agent 运行轨迹、AI
-完整消息和执行事件。由于 `NEXT_PUBLIC_*` 在 Next.js 构建时注入，修改后需要
-重新构建 Web 镜像。默认 CORS 同时包含当前 Web 端口的
+完整消息和执行事件。修改开发者模式无需重新构建镜像，只需重新创建 Web 容器
+或执行 `./dev.sh restart`；直接运行 Next.js 时使用服务端环境变量
+`DEVELOPER_MODE`。`NEXT_PUBLIC_API_URL` 仍是构建时配置。默认 CORS 同时包含当前 Web 端口的
 `127.0.0.1` 与 `localhost` 地址。完整启动、ready 文件格式、端口覆盖和
 进程所有权规则见项目根目录 `README.md`。
 

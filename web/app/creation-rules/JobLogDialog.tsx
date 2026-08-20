@@ -4,10 +4,10 @@ import { useEffect, useState } from 'react'
 import { type ContentJob, type ContentJobStep } from '@/lib/api/jobs'
 import { listAllAgentLogEvents, type AgentLogEvent } from '@/lib/ai/agent-log-client'
 import { AgentLogTimeline } from '@/components/features/agent/AgentLogTimeline'
+import { useDeveloperMode } from '@/components/providers/DeveloperModeProvider'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { isDeveloperModeEnabled } from '@/lib/developer-mode'
 
 const statusText: Record<string, string> = {
   queued: '排队中', running: '执行中', succeeded: '已完成', failed: '失败', cancelled: '已取消',
@@ -71,7 +71,7 @@ function ExecutionEvents({ events }: { events: ContentJob['events'] }) {
 }
 
 export function JobLogDialog({ job, open, onOpenChange, onRetry }: { job: ContentJob | null; open: boolean; onOpenChange: (open: boolean) => void; onRetry: (jobId: number, stepKey: string) => void }) {
-  const developerModeEnabled = isDeveloperModeEnabled()
+  const developerModeEnabled = useDeveloperMode()
   const jobId = job?.id
   const defaultTab: JobLogTab = 'overview'
   const [agentEventState, setAgentEventState] = useState<AgentEventState>({

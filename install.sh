@@ -441,6 +441,7 @@ collect_env() {
   api_port=$(env_value API_PORT)
   web_port=$(env_value WEB_PORT)
   ensure_derived_value NEXT_PUBLIC_API_URL "http://localhost:${api_port}/api"
+  ensure_derived_value NEXT_PUBLIC_DEVELOPER_MODE "0"
   ensure_derived_value CORS_ORIGINS "http://127.0.0.1:${web_port},http://localhost:${web_port}"
   ensure_value APP_IMAGE '应用镜像' 'ghcr.io/phoenix-gh/ediora-studio' 0
   ensure_value IMAGE_TAG '镜像标签' 'latest' 0
