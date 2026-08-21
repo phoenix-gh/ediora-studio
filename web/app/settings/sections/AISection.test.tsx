@@ -369,6 +369,7 @@ describe('AISection', () => {
   })
 
   it('allows selecting the OpenAI Responses protocol for an adapter', async () => {
+    vi.mocked(updateSettings).mockResolvedValue(adapterSettings)
     render(<AISection settings={adapterSettings} onSaved={vi.fn()} />)
 
     fireEvent.click(screen.getByRole('button', { name: '编辑 Adapter 主文本' }))
@@ -379,6 +380,13 @@ describe('AISection', () => {
     expect(protocol).toHaveValue('openai-responses')
     fireEvent.click(within(dialog).getByRole('button', { name: '保存 Adapter' }))
     expect(screen.getByTestId('llm-adapter-card-chat-main')).toHaveTextContent('OpenAI Responses')
+    fireEvent.click(screen.getByRole('button', { name: '保存 AI 配置' }))
+
+    await waitFor(() => expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({
+      llm_adapters: expect.arrayContaining([
+        expect.objectContaining({ id: 'chat-main', protocol: 'openai-responses' }),
+      ]),
+    })))
   })
 
   it('discards adapter edits when the editor dialog is cancelled', async () => {
