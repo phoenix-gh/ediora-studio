@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { render, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ChatClient } from './ChatClient'
@@ -63,15 +63,16 @@ describe('ChatClient', () => {
     })
   })
 
-  it('does not reopen the first session when runtime developer mode resolves', async () => {
+  it('does not load agent logs until the runtime trace dialog opens', async () => {
+    developerMode.enabled = true
     const view = render(<ChatClient />)
 
     await waitFor(() => expect(chatApi.getChatSession).toHaveBeenCalledWith(7))
     expect(chatApi.listChatSessions).toHaveBeenCalledTimes(1)
     expect(chatApi.getChatSession).toHaveBeenCalledTimes(1)
+    expect(agentLogApi.listAllAgentLogEvents).not.toHaveBeenCalled()
 
-    developerMode.enabled = true
-    view.rerender(<ChatClient />)
+    fireEvent.click(screen.getByRole('button', { name: '运行轨迹' }))
 
     await waitFor(() => {
       expect(agentLogApi.listAllAgentLogEvents).toHaveBeenCalledWith({
@@ -81,5 +82,59 @@ describe('ChatClient', () => {
     })
     expect(chatApi.listChatSessions).toHaveBeenCalledTimes(1)
     expect(chatApi.getChatSession).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+
+    view.unmount()
+  })
+
+  it('restores the thinking state and final message after reopening an active session', async () => {
+    vi.useFakeTimers()
+    chatApi.getChatSession
+      .mockResolvedValueOnce({
+        id: 7,
+        title: '现有会话',
+        created_at: '2026-08-20T08:00:00Z',
+        updated_at: '2026-08-20T08:00:00Z',
+        is_running: true,
+        messages: [],
+      })
+      .mockResolvedValueOnce({
+        id: 7,
+        title: '现有会话',
+        created_at: '2026-08-20T08:00:00Z',
+        updated_at: '2026-08-20T08:00:00Z',
+        is_running: false,
+        messages: [{
+          id: 1,
+          role: 'assistant',
+          parts: [{ type: 'text', text: '完成回复' }],
+          text: '完成回复',
+          created_at: '2026-08-20T08:01:00Z',
+        }],
+      })
+
+    try {
+      const view = render(<ChatClient />)
+
+      await act(async () => {
+        await Promise.resolve()
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+      expect(screen.getByText('正在思考并检索资料…')).toBeInTheDocument()
+      expect(chatApi.getChatSession).toHaveBeenCalledWith(7)
+
+      await act(async () => {
+        vi.advanceTimersByTime(2_000)
+        await Promise.resolve()
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+      expect(screen.getByText('完成回复')).toBeInTheDocument()
+
+      view.unmount()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

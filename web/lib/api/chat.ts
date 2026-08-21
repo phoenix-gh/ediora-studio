@@ -24,6 +24,7 @@ export type ChatSession = {
 
 export type ChatSessionDetail = ChatSession & {
   messages: ChatMessage[]
+  is_running: boolean
 }
 
 export type ChatSkill = { name: string; description: string; version: string }
