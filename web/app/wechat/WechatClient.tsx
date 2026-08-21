@@ -492,11 +492,12 @@ function ArticleCard({
 // ── Account filter (searchable dropdown) ────────────────────────────────────────
 
 function AccountFilter({
-  accounts, selected, onSelect,
+  accounts, selected, onSelect, compact = false,
 }: {
   accounts: string[]
   selected: string | null
   onSelect: (a: string | null) => void
+  compact?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const [q, setQ] = useState('')
@@ -519,7 +520,12 @@ function AccountFilter({
         render={
           <button
             type="button"
-            className="flex items-center gap-1.5 h-8 px-2.5 rounded-md border border-border text-xs text-muted-foreground hover:bg-surface-muted transition-colors max-w-[180px]"
+            className={cn(
+              'flex items-center gap-1.5 rounded-md border border-border text-xs text-muted-foreground hover:bg-surface-muted transition-colors',
+              compact
+                ? 'h-8 min-w-0 flex-1 max-w-[120px] px-2'
+                : 'h-8 max-w-[180px] px-2.5',
+            )}
           />
         }
       >
@@ -566,6 +572,123 @@ function AccountFilter({
         </div>
       </PopoverContent>
     </Popover>
+  )
+}
+
+interface WechatToolbarProps {
+  useSidePanel: boolean
+  filteredCount: number
+  auth: WechatAuthState | null
+  collecting: boolean
+  collect: WechatCollectStatus | null
+  accounts: string[]
+  selectedAccount: string | null
+  search: string
+  onLogin: () => void
+  onLogout: () => void
+  onManage: () => void
+  onCollect: () => void
+  onSelectAccount: (account: string | null) => void
+  onSearch: (value: string) => void
+}
+
+export function WechatToolbar({
+  useSidePanel,
+  filteredCount,
+  auth,
+  collecting,
+  collect,
+  accounts,
+  selectedAccount,
+  search,
+  onLogin,
+  onLogout,
+  onManage,
+  onCollect,
+  onSelectAccount,
+  onSearch,
+}: WechatToolbarProps) {
+  const iconButtonClass = useSidePanel
+    ? 'h-8 w-8 p-0'
+    : 'h-8 text-xs gap-1.5'
+
+  return (
+    <div data-slot="page-header" className={cn(
+      'flex px-6',
+      useSidePanel
+        ? 'min-h-[var(--app-header-height)] flex-col items-stretch justify-center gap-2 py-2'
+        : 'h-[var(--app-header-height)] min-h-[var(--app-header-height)] items-center justify-between gap-4',
+    )}>
+      <div
+        data-testid="wechat-toolbar-title-row"
+        className={cn(
+          'flex min-w-0 items-center gap-2',
+          useSidePanel && 'justify-between',
+        )}
+      >
+        <MessageSquare className="w-4 h-4 flex-shrink-0 text-green-500" />
+        <span className="min-w-0 truncate whitespace-nowrap text-sm font-medium text-foreground">公众号文章</span>
+        <span className="flex-shrink-0 rounded-full bg-muted px-2 py-0.5 text-xs text-foreground-subtle">
+          {filteredCount} 篇
+        </span>
+        {useSidePanel && <AuthPill state={auth} onLogin={onLogin} onLogout={onLogout} />}
+      </div>
+      <div
+        data-testid="wechat-toolbar-actions"
+        className={cn(
+          'flex items-center gap-2',
+          useSidePanel ? 'w-full min-w-0' : 'flex-wrap',
+        )}
+      >
+        {!useSidePanel && <AuthPill state={auth} onLogin={onLogin} onLogout={onLogout} />}
+        <Button
+          size="sm"
+          variant="outline"
+          className={iconButtonClass}
+          onClick={onManage}
+          aria-label={useSidePanel ? '订阅管理' : undefined}
+          title={useSidePanel ? '订阅管理' : undefined}
+        >
+          <Settings className="w-3.5 h-3.5" />
+          {!useSidePanel && '订阅管理'}
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          className={iconButtonClass}
+          onClick={onCollect}
+          disabled={collecting}
+          aria-label={useSidePanel
+            ? (collecting ? `采集中 ${collect?.done ?? 0}/${collect?.total ?? 0}` : '一键采集')
+            : undefined}
+          title={useSidePanel ? '一键采集' : undefined}
+        >
+          {collecting ? (
+            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+          ) : (
+            <DownloadCloud className="w-3.5 h-3.5" />
+          )}
+          {!useSidePanel && (collecting
+            ? `采集中 ${collect?.done ?? 0}/${collect?.total ?? 0}`
+            : '一键采集')}
+        </Button>
+        <AccountFilter
+          accounts={accounts}
+          selected={selectedAccount}
+          onSelect={onSelectAccount}
+          compact={useSidePanel}
+        />
+        <div className={cn('relative', useSidePanel ? 'min-w-0 flex-1' : '')}>
+          <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-foreground-subtle" />
+          <Input
+            value={search}
+            onChange={e => onSearch(e.target.value)}
+            placeholder="搜索标题/公众号"
+            className={cn('h-8 pl-8 text-xs', useSidePanel ? 'w-full' : 'w-40')}
+          />
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -773,51 +896,22 @@ export function WechatClient({ initialArticles }: { initialArticles: WechatArtic
       )}>
         {/* Toolbar */}
         <div className="flex-shrink-0 border-b border-border bg-surface">
-          <div data-slot="page-header" className="flex h-[var(--app-header-height)] min-h-[var(--app-header-height)] items-center justify-between gap-4 px-6">
-            <div className="flex items-center gap-2">
-              <MessageSquare className="w-4 h-4 text-green-500" />
-              <span className="text-sm font-medium text-foreground">公众号文章</span>
-              <span className="text-xs text-foreground-subtle bg-muted px-2 py-0.5 rounded-full">
-                {filtered.length} 篇
-              </span>
-            </div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <AuthPill state={auth} onLogin={() => setLoginOpen(true)} onLogout={handleLogout} />
-              <Button size="sm" variant="outline" className="h-8 text-xs gap-1.5"
-                onClick={handleManageClick}>
-                <Settings className="w-3.5 h-3.5" />
-                订阅管理
-              </Button>
-              <Button size="sm" variant="outline" className="h-8 text-xs gap-1.5"
-                onClick={handleCollectAll} disabled={collecting}>
-                {collecting ? (
-                  <>
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    采集中 {collect?.done ?? 0}/{collect?.total ?? 0}
-                  </>
-                ) : (
-                  <>
-                    <DownloadCloud className="w-3.5 h-3.5" />
-                    一键采集
-                  </>
-                )}
-              </Button>
-              <AccountFilter
-                accounts={accounts}
-                selected={selectedAccount}
-                onSelect={a => { setSelectedAccount(a); resetScroll() }}
-              />
-              <div className="relative">
-                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-foreground-subtle" />
-                <Input
-                  value={search}
-                  onChange={e => { setSearch(e.target.value); resetScroll() }}
-                  placeholder="搜索标题/公众号"
-                  className="h-8 text-xs pl-8 w-40"
-                />
-              </div>
-            </div>
-          </div>
+          <WechatToolbar
+            useSidePanel={useSidePanel}
+            filteredCount={filtered.length}
+            auth={auth}
+            collecting={collecting}
+            collect={collect}
+            accounts={accounts}
+            selectedAccount={selectedAccount}
+            search={search}
+            onLogin={() => setLoginOpen(true)}
+            onLogout={handleLogout}
+            onManage={handleManageClick}
+            onCollect={handleCollectAll}
+            onSelectAccount={a => { setSelectedAccount(a); resetScroll() }}
+            onSearch={value => { setSearch(value); resetScroll() }}
+          />
 
           {collecting && collect && (
             <div className="px-6 pb-3">
