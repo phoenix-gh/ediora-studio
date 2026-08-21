@@ -19,7 +19,12 @@ import {
 
 const apiBase = () => (process.env.API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000/api').replace(/\/$/, '')
 
-type ModelConfig = { apiKey: string; modelName: string; baseURL?: string }
+type ModelConfig = {
+  apiKey: string
+  modelName: string
+  baseURL?: string
+  headers: Record<string, string>
+}
 type CoverStyle = Record<string, unknown>
 
 export type ContentStep = 'brief' | 'draft' | 'cover' | 'illustrations' | 'standalone_image' | 'prompt_image_generation' | 'template_extraction'
@@ -238,7 +243,11 @@ async function runImageFlow(job: Awaited<ReturnType<typeof getJob>>, step: 'cove
   const maxImages = step === 'cover' ? 1 : Math.max(1, Math.min(Number(job.input.max_images) || 1, 4))
   const image = await configuredImageModel()
   const text = await configuredTextModel()
-  const textProvider = createOpenAI({ apiKey: text.apiKey, baseURL: text.baseURL })
+  const textProvider = createOpenAI({
+    apiKey: text.apiKey,
+    baseURL: text.baseURL,
+    headers: text.headers,
+  })
   const assets: Array<{ id: number; url: string; anchor_heading?: string }> = []
   const rawStyle = job.input[step === 'cover' ? 'cover_style' : 'image_style'] ?? job.input.note ?? ''
   const style = typeof rawStyle === 'string' ? rawStyle : JSON.stringify(rawStyle)
@@ -430,7 +439,11 @@ export async function runContentJob(jobId: number) {
       job.flow === 'template_extraction' ? 'template_extraction' : 'brief',
     )
     const text = await configuredTextModel()
-    const openai = createOpenAI({ apiKey: text.apiKey, baseURL: text.baseURL })
+    const openai = createOpenAI({
+      apiKey: text.apiKey,
+      baseURL: text.baseURL,
+      headers: text.headers,
+    })
     const modelName = text.modelName
     if (job.flow === 'template_extraction') {
       const output = await runTemplateExtractionFlow(job, openai, modelName)

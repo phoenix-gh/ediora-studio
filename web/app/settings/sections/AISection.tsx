@@ -33,6 +33,7 @@ import {
 import {
   LLMAdapterEditor,
   type LLMAdapterDraft,
+  type LLMAdapterHeaderDraft,
   type LLMAdapterTestState,
 } from './LLMAdapterEditor'
 
@@ -44,7 +45,9 @@ type AdapterTestResult = {
 }
 
 function draftFromAdapter(adapter: LLMAdapter): LLMAdapterDraft {
-  return { ...adapter, api_key: '', clear_api_key: false }
+  const headerRows: LLMAdapterHeaderDraft[] = Object.entries(adapter.headers ?? {})
+    .map(([name, value]) => ({ name, value }))
+  return { ...adapter, api_key: '', clear_api_key: false, headerRows }
 }
 
 function newAdapterId() {
@@ -54,6 +57,11 @@ function newAdapterId() {
 }
 
 function adapterInputFromDraft(adapter: LLMAdapterDraft): LLMAdapterInput {
+  const headers = Object.fromEntries(
+    adapter.headerRows
+      .map(header => [header.name.trim(), header.value] as const)
+      .filter(([name]) => name),
+  )
   return {
     id: adapter.id,
     name: adapter.name,
@@ -63,6 +71,7 @@ function adapterInputFromDraft(adapter: LLMAdapterDraft): LLMAdapterInput {
     supports_text: adapter.supports_text,
     supports_image: adapter.supports_image,
     image_response_format: adapter.image_response_format,
+    headers,
     ...(adapter.api_key ? { api_key: adapter.api_key } : {}),
     ...(adapter.clear_api_key ? { clear_api_key: true } : {}),
   }
@@ -241,6 +250,8 @@ export function AISection({ settings, onSaved }: { settings: AppSettings | null;
       api_key_preview: '',
       api_key: '',
       clear_api_key: false,
+      headers: {},
+      headerRows: [],
     }
   }
 

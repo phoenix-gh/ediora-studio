@@ -30,6 +30,7 @@ async function configuredModel() {
     apiKey: settings.apiKey,
     model: settings.modelName,
     baseURL: settings.baseURL,
+    headers: settings.headers,
   }
 }
 
@@ -61,6 +62,7 @@ export async function POST(request: Request) {
     const provider = createOpenAI({
       apiKey: modelConfig.apiKey,
       baseURL: modelConfig.baseURL,
+      headers: modelConfig.headers,
     })
     const result = await generateText({
       model: provider.chat(modelConfig.model),

@@ -21,6 +21,7 @@ export interface LLMAdapter {
   image_response_format: ImageResponseFormat
   api_key_set: boolean
   api_key_preview: string
+  headers?: Record<string, string>
 }
 
 export interface LLMAdapterInput {
@@ -34,6 +35,7 @@ export interface LLMAdapterInput {
   image_response_format: ImageResponseFormat
   api_key?: string
   clear_api_key?: boolean
+  headers?: Record<string, string>
 }
 
 export interface WebSearchProviderConfig {

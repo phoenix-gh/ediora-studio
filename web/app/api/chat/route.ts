@@ -37,7 +37,12 @@ const requestSchema = z.object({
 
 const apiBase = () => (process.env.API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000/api').replace(/\/$/, '')
 
-type ModelConfig = { apiKey: string; modelName: string; baseURL?: string }
+type ModelConfig = {
+  apiKey: string
+  modelName: string
+  baseURL?: string
+  headers: Record<string, string>
+}
 
 async function configuredTextModel(): Promise<ModelConfig> {
   const response = await fetch(`${apiBase()}/settings/ai-runtime`, {
@@ -363,7 +368,11 @@ export async function POST(request: NextRequest) {
     const restoredSkillName = body.skillName ? undefined : latestActivatedSkillName(session.messages)
     const messages = await persistedModelHistory(session, Boolean(body.approval))
     const modelConfig = await configuredTextModel()
-    const provider = createOpenAI({ apiKey: modelConfig.apiKey, baseURL: modelConfig.baseURL })
+    const provider = createOpenAI({
+      apiKey: modelConfig.apiKey,
+      baseURL: modelConfig.baseURL,
+      headers: modelConfig.headers,
+    })
     const model = provider.chat(modelConfig.modelName)
     const currentRequest = [...messages].reverse().find(message => message.role === 'user')
     const currentRequestText = currentRequest ? messageText(currentRequest) : ''

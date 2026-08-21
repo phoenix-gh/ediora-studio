@@ -370,6 +370,7 @@ async function generateScenesWithAi(
   const provider = createOpenAI({
     apiKey: config.apiKey,
     baseURL: config.baseURL,
+    headers: config.headers,
   })
   const result = await generateText({
     model: provider.chat(config.modelName),

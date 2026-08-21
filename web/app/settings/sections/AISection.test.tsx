@@ -72,6 +72,7 @@ const adapterSettings = makeSettings({
       supports_text: true,
       supports_image: false,
       image_response_format: 'base64',
+      headers: { 'X-Tenant': 'tenant-a' },
       api_key_set: true,
       api_key_preview: '…1234',
     },
@@ -84,6 +85,7 @@ const adapterSettings = makeSettings({
       supports_text: true,
       supports_image: true,
       image_response_format: 'url',
+      headers: {},
       api_key_set: true,
       api_key_preview: '…5678',
     },
@@ -413,6 +415,7 @@ describe('AISection', () => {
         id: 'chat-main',
         model: 'draft-model',
         api_key: 'draft-secret',
+        headers: { 'X-Tenant': 'tenant-a' },
       }),
     }))
     expect(within(dialog).getByText(/连接成功/)).toBeVisible()
@@ -428,6 +431,41 @@ describe('AISection', () => {
     expect(within(dialog).getByText(/…1234/)).toBeVisible()
     expect(within(dialog).queryByDisplayValue('secret')).toBeNull()
     expect(within(dialog).getByRole('button', { name: /清除 API Key/ })).toBeVisible()
+  })
+
+  it('edits custom headers and includes them in the saved adapter payload', async () => {
+    vi.mocked(updateSettings).mockResolvedValue(adapterSettings)
+    render(<AISection settings={adapterSettings} onSaved={vi.fn()} />)
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑 Adapter 主文本' }))
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByLabelText('Header 名称 1')).toHaveValue('X-Tenant')
+    expect(within(dialog).getByLabelText('Header 值 1')).toHaveValue('tenant-a')
+
+    fireEvent.change(within(dialog).getByLabelText('Header 值 1'), {
+      target: { value: 'tenant-b' },
+    })
+    fireEvent.click(within(dialog).getByRole('button', { name: '添加自定义 Header' }))
+    fireEvent.change(within(dialog).getByLabelText('Header 名称 2'), {
+      target: { value: 'X-Region' },
+    })
+    fireEvent.change(within(dialog).getByLabelText('Header 值 2'), {
+      target: { value: 'us-east' },
+    })
+    fireEvent.click(within(dialog).getByRole('button', { name: '保存 Adapter' }))
+
+    fireEvent.click(screen.getByRole('button', { name: '保存 AI 配置' }))
+    await waitFor(() => expect(updateSettings).toHaveBeenCalledWith(expect.objectContaining({
+      llm_adapters: expect.arrayContaining([
+        expect.objectContaining({
+          id: 'chat-main',
+          headers: {
+            'X-Tenant': 'tenant-b',
+            'X-Region': 'us-east',
+          },
+        }),
+      ]),
+    })))
   })
 
   it('preserves the crypto receiver when creating an Adapter id', () => {

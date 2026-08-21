@@ -134,7 +134,11 @@ async function generateBoundariesWithAi(
   jobId: number,
 ) {
   const config = await configuredModel(jobId)
-  const provider = createOpenAI({ apiKey: config.apiKey, baseURL: config.baseURL })
+  const provider = createOpenAI({
+    apiKey: config.apiKey,
+    baseURL: config.baseURL,
+    headers: config.headers,
+  })
   const result = await generateObject({
     model: provider.chat(config.modelName),
     schema: splitSchema,

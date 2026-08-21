@@ -45,6 +45,7 @@ def _adapter(
     text: bool = True,
     image: bool = False,
     response_format: str = "base64",
+    headers: dict[str, str] | None = None,
 ) -> dict:
     return {
         "id": adapter_id,
@@ -56,6 +57,7 @@ def _adapter(
         "supports_text": text,
         "supports_image": image,
         "image_response_format": response_format,
+        **({"headers": headers} if headers is not None else {}),
     }
 
 
@@ -128,6 +130,30 @@ def test_ai_runtime_uses_information_filtering_adapter(client):
     assert runtime.status_code == 200, runtime.text
     assert runtime.json()["adapter_id"] == "filter"
     assert runtime.json()["model"] == "filter-model"
+
+
+def test_settings_persist_adapter_headers_and_expose_them_to_worker(client):
+    headers = {
+        "X-Tenant": "tenant-a",
+        "X-Trace": "trace-123",
+    }
+    response = client.put("/api/settings", json={
+        "llm_adapters": [_adapter("one", headers=headers)],
+        "llm_text_default_adapter_id": "one",
+    })
+
+    assert response.status_code == 200, response.text
+    assert response.json()["llm_adapters"][0]["headers"] == headers
+    fetched = client.get("/api/settings")
+    assert fetched.json()["llm_adapters"][0]["headers"] == headers
+
+    runtime = client.get(
+        "/api/settings/ai-runtime?adapter_id=one&capability=text",
+        headers=_runtime_headers(),
+    )
+    assert runtime.status_code == 200, runtime.text
+    assert runtime.json()["headers"] == headers
+    assert runtime.json()["image"]["headers"] == {}
 
 
 def test_ai_runtime_uses_separate_text_and_image_defaults(client):
@@ -205,6 +231,23 @@ def test_adapter_connection_test_uses_draft_and_saved_key(client, monkeypatch):
     assert response.json() == {"ok": True, "response": "连接成功"}
     assert seen[0].api_key == "saved-secret"
     assert seen[0].model == "draft-model"
+
+
+def test_adapter_connection_test_uses_draft_headers(client, monkeypatch):
+    from routers import settings as settings_router
+
+    seen = []
+
+    async def fake_test(adapter):
+        seen.append(adapter)
+        return "连接成功"
+
+    monkeypatch.setattr(settings_router, "_test_openai_adapter", fake_test, raising=False)
+    draft = _adapter("one", headers={"X-Tenant": "tenant-a"})
+    response = client.post("/api/settings/test-adapter", json={"adapter": draft})
+
+    assert response.status_code == 200, response.text
+    assert seen[0].headers == {"X-Tenant": "tenant-a"}
 
 
 def test_settings_reject_invalid_adapter_protocol_endpoint_and_capabilities(client):
