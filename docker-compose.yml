@@ -4,6 +4,7 @@ x-app-image: &app-image
 services:
   postgres:
     image: postgres:16-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_DB: wemedia
       POSTGRES_USER: wemedia
@@ -18,6 +19,7 @@ services:
 
   redis:
     image: redis:7-alpine
+    restart: unless-stopped
     volumes:
       - ./data/redis:/data
     healthcheck:
@@ -52,6 +54,7 @@ services:
 
   api:
     <<: *app-image
+    restart: unless-stopped
     build:
       context: .
       dockerfile: Dockerfile
@@ -104,6 +107,7 @@ services:
 
   worker:
     <<: *app-image
+    restart: unless-stopped
     working_dir: /app/web
     command:
       - sh
@@ -127,6 +131,7 @@ services:
 
   web:
     <<: *app-image
+    restart: unless-stopped
     working_dir: /app/web
     command:
       - ./node_modules/.bin/next
