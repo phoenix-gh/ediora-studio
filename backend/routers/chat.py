@@ -7,7 +7,7 @@ from sqlalchemy import delete, desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
-from models import ChatMessage, ChatSession, WritingPlan, now_utc
+from models import AgentLogEvent, ChatMessage, ChatSession, WritingPlan, now_utc
 
 
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -149,6 +149,7 @@ class ChatSessionOut(BaseModel):
 
 class ChatSessionDetail(ChatSessionOut):
     messages: list[ChatMessageOut]
+    is_running: bool
 
 
 class ChatSessionCreate(BaseModel):
@@ -216,6 +217,31 @@ def _writing_plan_result(plan: WritingPlan) -> SourceSearchResult:
     )
 
 
+async def _chat_session_is_running(db: AsyncSession, session_id: int) -> bool:
+    latest_start = await db.scalar(
+        select(AgentLogEvent.id)
+        .where(
+            AgentLogEvent.session_id == session_id,
+            AgentLogEvent.event_type == "session/turn-start",
+        )
+        .order_by(desc(AgentLogEvent.id))
+        .limit(1)
+    )
+    if latest_start is None:
+        return False
+
+    latest_end = await db.scalar(
+        select(AgentLogEvent.id)
+        .where(
+            AgentLogEvent.session_id == session_id,
+            AgentLogEvent.event_type.in_(("session/turn-end", "session/error")),
+        )
+        .order_by(desc(AgentLogEvent.id))
+        .limit(1)
+    )
+    return latest_end is None or latest_start > latest_end
+
+
 @router.get("/sessions", response_model=list[ChatSessionOut])
 async def list_sessions(db: AsyncSession = Depends(get_db)):
     return (await db.execute(
@@ -248,6 +274,7 @@ async def get_session(session_id: int, db: AsyncSession = Depends(get_db)):
         created_at=session.created_at,
         updated_at=session.updated_at,
         messages=messages,
+        is_running=await _chat_session_is_running(db, session.id),
     )
 
 

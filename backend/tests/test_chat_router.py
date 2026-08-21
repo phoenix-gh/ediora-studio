@@ -63,6 +63,7 @@ def test_create_session_append_message_and_get_messages_in_chronological_order(c
     detail = client.get(f"/api/chat/sessions/{session_id}")
 
     assert detail.status_code == 200
+    assert detail.json()["is_running"] is False
     assert detail.json()["title"] == "研究助手"
     assert detail.json()["messages"] == [{
         "id": appended.json()["id"],
@@ -71,6 +72,43 @@ def test_create_session_append_message_and_get_messages_in_chronological_order(c
         "text": "今天有什么新信息？",
         "created_at": appended.json()["created_at"],
     }]
+
+
+def test_session_detail_reports_an_active_chat_turn(client):
+    session_id = client.post("/api/chat/sessions", json={"title": "运行中的会话"}).json()["id"]
+    from models import AgentLogEvent
+
+    async def append_event(event_type, status):
+        async with client.app.state.session_local() as db:
+            db.add(AgentLogEvent(
+                stream_kind="chat",
+                stream_key=f"chat:{session_id}",
+                session_id=session_id,
+                event_type=event_type,
+                phase="chat",
+                status=status,
+            ))
+            await db.commit()
+
+    asyncio.new_event_loop().run_until_complete(append_event("session/turn-start", "running"))
+
+    active = client.get(f"/api/chat/sessions/{session_id}")
+
+    assert active.status_code == 200
+    assert active.json()["is_running"] is True
+
+    asyncio.new_event_loop().run_until_complete(append_event("session/turn-end", "completed"))
+
+    completed = client.get(f"/api/chat/sessions/{session_id}")
+
+    assert completed.json()["is_running"] is False
+
+    asyncio.new_event_loop().run_until_complete(append_event("session/turn-start", "running"))
+    asyncio.new_event_loop().run_until_complete(append_event("session/error", "error"))
+
+    failed = client.get(f"/api/chat/sessions/{session_id}")
+
+    assert failed.json()["is_running"] is False
 
 
 def test_delete_session_removes_its_messages(client):
