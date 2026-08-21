@@ -78,6 +78,19 @@ dev_owned_group_matches_service() {
     && dev_owned_group_has_members "$metadata_file"
 }
 
+dev_owned_runtime_matches() {
+  local service="$1" metadata_file="$2" pid
+
+  dev_owned_identity_matches "$service" "$metadata_file" && return 0
+
+  # Reload supervisors may hand the long-lived service to a child and exit.
+  # Only trust the marker-owned process group after the recorded leader is
+  # gone; a live mismatched leader can be PID reuse and must not be adopted.
+  pid="$(dev_meta_value "$metadata_file" pid 2>/dev/null)" || return 1
+  dev_process_is_non_zombie "$pid" && return 1
+  dev_owned_group_matches_service "$service" "$metadata_file"
+}
+
 dev_owned_identity_matches() {
   local service="$1" metadata_file="$2"
   local recorded_service pid pgid start_ticks marker
