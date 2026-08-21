@@ -67,6 +67,15 @@ def test_api_uses_local_asr_without_blocking_api_startup():
     assert "local-asr" not in api["depends_on"]
 
 
+def test_all_compose_services_restart_after_docker_daemon_restart():
+    config = _compose_config()
+
+    for service_name, service in config["services"].items():
+        assert service.get("restart") == "unless-stopped", (
+            f"{service_name} must restart automatically after a Docker daemon restart"
+        )
+
+
 def test_app_services_share_one_image_and_api_owns_root_build():
     config = _compose_config({"NEXT_PUBLIC_DEVELOPER_MODE": "1"})
     api = config["services"]["api"]
