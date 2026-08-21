@@ -683,6 +683,44 @@ describe('content worker lifecycle', () => {
     expect(redis.state.leases.size).toBe(0)
     expect(vi.getTimerCount()).toBe(0)
   })
+
+  it('fails a still-running Agent step after an LLM runner error', async () => {
+    const controller = new AbortController()
+    const redis = new FakeRedis([
+      ['content-jobs', '48'],
+      stopOnNextPop(controller),
+    ])
+    const llmError = new Error('LLM interface failed')
+    const getJob = vi.fn()
+      .mockResolvedValueOnce(durableJob(48))
+      .mockResolvedValueOnce({
+        ...durableJob(48, 'daily_creation', 'running'),
+        steps: [{
+          id: 81,
+          key: 'agent',
+          attempt: 1,
+          status: 'running',
+          output: {},
+        }],
+      })
+    const markStepFailed = vi.fn().mockResolvedValue({})
+    const { runContentWorker } = await import('./content-worker')
+
+    await runContentWorker({
+      redis,
+      queueName: 'content-jobs',
+      signal: controller.signal,
+      reconcile: vi.fn().mockResolvedValue({}),
+      getJob,
+      failStep: markStepFailed,
+      resolveRunner: () => async () => {
+        throw llmError
+      },
+    })
+
+    expect(markStepFailed).toHaveBeenCalledWith(48, 81, llmError, true)
+    expect(redis.state.queue).toEqual([])
+  })
 })
 
 describe('worker startup contracts', () => {

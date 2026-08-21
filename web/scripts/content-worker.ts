@@ -24,6 +24,7 @@ import {
   ApiRequestError,
   failStep,
   getJob,
+  retryableForError,
   startStep,
   workerHeaders,
   type DurableJob,
@@ -202,6 +203,7 @@ export type RunContentWorkerOptions = {
   onReady?: () => void | Promise<void>
   reconcile?: ReconcileContentJobs
   getJob?: (jobId: number) => Promise<DurableJob>
+  failStep?: typeof failStep
   resolveRunner?: ResolveContentJobRunner
   leaseTtlMs?: number
   leaseRefreshIntervalMs?: number
@@ -335,7 +337,47 @@ function shouldRequeue(
       && error !== null
       && 'retryable' in error
       && error.retryable === true
+  )
+}
+
+function latestRunningStep(job: DurableJob) {
+  return [...job.steps]
+    .filter(step => step.id !== undefined && step.status === 'running')
+    .sort((left, right) => right.attempt - left.attempt)[0]
+}
+
+function retryableStepFailure(error: unknown) {
+  if (
+    typeof error === 'object'
+    && error !== null
+    && 'retryable' in error
+    && typeof error.retryable === 'boolean'
+  ) {
+    return error.retryable
+  }
+  return retryableForError(error, true)
+}
+
+async function failRunningStepAfterRunnerError(
+  jobId: number,
+  error: unknown,
+  getCurrentJob: (jobId: number) => Promise<DurableJob>,
+  markStepFailed: typeof failStep,
+) {
+  try {
+    const currentJob = await getCurrentJob(jobId)
+    if (TERMINAL_JOB_STATUSES.has(currentJob.status)) return
+    const step = latestRunningStep(currentJob)
+    if (!step?.id) return
+    await markStepFailed(
+      jobId,
+      step.id,
+      error,
+      retryableStepFailure(error),
     )
+  } catch (failureStateError) {
+    console.error(`content job ${jobId} failure state persistence failed`, failureStateError)
+  }
 }
 
 async function runLeasedJob(
@@ -345,6 +387,7 @@ async function runLeasedJob(
     | 'redis'
     | 'queueName'
     | 'getJob'
+    | 'failStep'
     | 'resolveRunner'
     | 'leaseTtlMs'
     | 'leaseRefreshIntervalMs'
@@ -388,7 +431,16 @@ async function runLeasedJob(
       speechFetch: options.speechFetch,
     })(jobId)
   } catch (error) {
-    retryError = shouldRequeue(error, phase) ? error : undefined
+    const requeue = shouldRequeue(error, phase)
+    retryError = requeue ? error : undefined
+    if (!requeue && phase === 'running') {
+      await failRunningStepAfterRunnerError(
+        jobId,
+        error,
+        options.getJob,
+        options.failStep,
+      )
+    }
     console.error(`content job ${jobId} failed`, error)
   } finally {
     await stopRefresh()
@@ -412,6 +464,7 @@ export async function runContentWorker({
   reconcile = reconcileContentJobs,
   getJob: loadJob = getJob,
   resolveRunner = resolveContentJobRunner,
+  failStep: markStepFailed = failStep,
   leaseTtlMs = DEFAULT_LEASE_TTL_MS,
   leaseRefreshIntervalMs = DEFAULT_LEASE_REFRESH_INTERVAL_MS,
   blockTimeoutSeconds = DEFAULT_BLOCK_TIMEOUT_SECONDS,
@@ -432,6 +485,7 @@ export async function runContentWorker({
       redis,
       queueName,
       getJob: loadJob,
+      failStep: markStepFailed,
       resolveRunner,
       leaseTtlMs,
       leaseRefreshIntervalMs,
