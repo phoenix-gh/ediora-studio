@@ -1,7 +1,8 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import {
   imageModelConfigFromSettings,
+  textModelForProvider,
   textModelConfigFromSettings,
 } from './runtime-config'
 
@@ -17,7 +18,31 @@ describe('runtime provider configuration', () => {
       modelName: 'settings-model',
       baseURL: 'https://provider.example/v1',
       headers: { 'X-Tenant': 'tenant-a' },
+      protocol: 'openai',
     })
+  })
+
+  it('preserves the OpenAI Responses protocol and selects its provider model', () => {
+    const provider = {
+      chat: vi.fn(() => 'chat-model'),
+      responses: vi.fn(() => 'responses-model'),
+    }
+
+    expect(textModelConfigFromSettings({
+      api_key: 'settings-text-key',
+      protocol: 'openai-responses',
+      model: 'settings-model',
+    })).toEqual({
+      apiKey: 'settings-text-key',
+      modelName: 'settings-model',
+      baseURL: undefined,
+      headers: {},
+      protocol: 'openai-responses',
+    })
+    expect(textModelForProvider(provider, 'settings-model', 'openai-responses'))
+      .toBe('responses-model')
+    expect(provider.responses).toHaveBeenCalledWith('settings-model')
+    expect(provider.chat).not.toHaveBeenCalled()
   })
 
   it('rejects an empty text Settings key instead of reading the environment', () => {
@@ -49,6 +74,7 @@ describe('runtime provider configuration', () => {
       modelName: 'dall-e-3',
       baseURL: 'https://images.example/v1',
       headers: { 'X-Tenant': 'tenant-a' },
+      protocol: 'openai',
       responseFormat: 'url',
     })
   })
@@ -62,6 +88,7 @@ describe('runtime provider configuration', () => {
       modelName: 'gpt-image-1',
       baseURL: undefined,
       headers: {},
+      protocol: 'openai',
       responseFormat: 'base64',
     })
   })

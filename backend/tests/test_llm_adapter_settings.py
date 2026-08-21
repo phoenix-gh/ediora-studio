@@ -40,6 +40,7 @@ def client(monkeypatch, postgres_env):
 def _adapter(
     adapter_id: str,
     *,
+    protocol: str = "openai",
     key: str = "secret",
     endpoint: str = "https://example.com/v1",
     text: bool = True,
@@ -50,7 +51,7 @@ def _adapter(
     return {
         "id": adapter_id,
         "name": adapter_id,
-        "protocol": "openai",
+        "protocol": protocol,
         "endpoint": endpoint,
         "api_key": key,
         "model": f"{adapter_id}-model",
@@ -154,6 +155,23 @@ def test_settings_persist_adapter_headers_and_expose_them_to_worker(client):
     assert runtime.status_code == 200, runtime.text
     assert runtime.json()["headers"] == headers
     assert runtime.json()["image"]["headers"] == {}
+
+
+def test_settings_persist_openai_responses_protocol_and_expose_it_to_worker(client):
+    response = client.put("/api/settings", json={
+        "llm_adapters": [_adapter("responses", protocol="openai-responses")],
+        "llm_text_default_adapter_id": "responses",
+    })
+
+    assert response.status_code == 200, response.text
+    assert response.json()["llm_adapters"][0]["protocol"] == "openai-responses"
+
+    runtime = client.get(
+        "/api/settings/ai-runtime?capability=text",
+        headers=_runtime_headers(),
+    )
+    assert runtime.status_code == 200, runtime.text
+    assert runtime.json()["protocol"] == "openai-responses"
 
 
 def test_ai_runtime_uses_separate_text_and_image_defaults(client):

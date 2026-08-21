@@ -8,7 +8,7 @@ import { Field, FieldDescription, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { NativeSelect } from '@/components/ui/native-select'
 import { cn } from '@/lib/utils'
-import type { LLMAdapter, LLMAdapterInput } from '@/lib/api/settings'
+import type { LLMAdapter, LLMAdapterInput, LLMAdapterProtocol } from '@/lib/api/settings'
 
 export type LLMAdapterHeaderDraft = {
   name: string
@@ -78,8 +78,13 @@ export function LLMAdapterEditor({
         </Field>
         <Field>
           <FieldLabel htmlFor={`adapter-protocol-${adapter.id}`}>协议</FieldLabel>
-          <NativeSelect id={`adapter-protocol-${adapter.id}`} value="openai" disabled>
+          <NativeSelect
+            id={`adapter-protocol-${adapter.id}`}
+            value={adapter.protocol}
+            onChange={event => onChange({ protocol: event.target.value as LLMAdapterProtocol })}
+          >
             <option value="openai">OpenAI-compatible</option>
+            <option value="openai-responses">OpenAI Responses</option>
           </NativeSelect>
         </Field>
         <Field>

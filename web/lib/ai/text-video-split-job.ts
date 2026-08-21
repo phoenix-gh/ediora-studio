@@ -1,4 +1,3 @@
-import { createOpenAI } from '@ai-sdk/openai'
 import { generateObject } from 'ai'
 import { z } from 'zod'
 
@@ -18,7 +17,12 @@ import {
   type DurableJob,
   type JobStep,
 } from './job-client'
-import { textModelConfigFromSettings, type TextModelSettings } from './runtime-config'
+import {
+  openaiProviderFromConfig,
+  textModelConfigFromSettings,
+  textModelForProvider,
+  type TextModelSettings,
+} from './runtime-config'
 
 
 export const splitSchema = z.object({
@@ -134,13 +138,9 @@ async function generateBoundariesWithAi(
   jobId: number,
 ) {
   const config = await configuredModel(jobId)
-  const provider = createOpenAI({
-    apiKey: config.apiKey,
-    baseURL: config.baseURL,
-    headers: config.headers,
-  })
+  const provider = openaiProviderFromConfig(config)
   const result = await generateObject({
-    model: provider.chat(config.modelName),
+    model: textModelForProvider(provider, config.modelName, config.protocol),
     schema: splitSchema,
     prompt: [
       '你是中文口播分段助手。不得改写、删减、补充或重排稿件文本。',

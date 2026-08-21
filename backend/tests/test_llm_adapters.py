@@ -15,6 +15,7 @@ from llm_adapters import (
 def _adapter(
     adapter_id: str,
     *,
+    protocol: str = "openai",
     text: bool = True,
     image: bool = False,
     response_format: str = "base64",
@@ -26,7 +27,7 @@ def _adapter(
     return {
         "id": adapter_id,
         "name": adapter_id,
-        "protocol": "openai",
+        "protocol": protocol,
         "endpoint": endpoint,
         "api_key": key,
         "model": model,
@@ -213,6 +214,28 @@ def test_adapter_headers_are_normalized_persisted_and_resolved():
     assert resolved.headers == saved[0]["headers"]
 
 
+def test_openai_responses_protocol_is_persisted_and_resolved():
+    payload = LLMAdapterInput(
+        id="responses",
+        name="Responses Adapter",
+        protocol="openai-responses",
+        endpoint="https://example.com/v1",
+        model="gpt-4.1",
+        supports_text=True,
+        api_key="secret",
+    )
+
+    saved = save_adapter_payloads([payload])
+    assert saved[0]["protocol"] == "openai-responses"
+
+    resolved = resolve_adapter(
+        {"llm_adapters": json.dumps(saved)},
+        adapter_id="responses",
+        capability="text",
+    )
+    assert resolved.protocol == "openai-responses"
+
+
 @pytest.mark.asyncio
 async def test_adapter_connection_passes_custom_headers_to_openai_client(monkeypatch):
     from routers import settings as settings_router
@@ -251,6 +274,50 @@ async def test_adapter_connection_passes_custom_headers_to_openai_client(monkeyp
         "api_key": "secret",
         "base_url": "https://example.com/v1",
         "default_headers": {"X-Tenant": "tenant-a"},
+    }
+
+
+@pytest.mark.asyncio
+async def test_adapter_connection_uses_openai_responses_protocol(monkeypatch):
+    from routers import settings as settings_router
+    from llm_adapters import ResolvedLLMAdapter
+
+    seen: dict[str, object] = {}
+
+    class FakeResponses:
+        async def create(self, **kwargs):
+            seen["request"] = kwargs
+            return SimpleNamespace(output_text="OK")
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            seen["client"] = kwargs
+            self.responses = FakeResponses()
+
+    monkeypatch.setattr("openai.AsyncOpenAI", FakeClient)
+    adapter = ResolvedLLMAdapter(
+        adapter_id="responses",
+        name="Responses",
+        protocol="openai-responses",
+        api_key="secret",
+        model="gpt-4.1",
+        base_url="https://example.com/v1",
+        supports_text=True,
+        supports_image=False,
+        image_response_format="base64",
+        headers={"X-Tenant": "tenant-a"},
+    )
+
+    assert await settings_router._test_openai_adapter(adapter) == "OK"
+    assert seen["client"] == {
+        "api_key": "secret",
+        "base_url": "https://example.com/v1",
+        "default_headers": {"X-Tenant": "tenant-a"},
+    }
+    assert seen["request"] == {
+        "model": "gpt-4.1",
+        "max_output_tokens": 10,
+        "input": 'Reply with just "OK".',
     }
 
 

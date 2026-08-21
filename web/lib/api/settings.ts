@@ -9,11 +9,12 @@ export interface ProviderInfo {
 }
 
 export type ImageResponseFormat = 'url' | 'base64'
+export type LLMAdapterProtocol = 'openai' | 'openai-responses'
 
 export interface LLMAdapter {
   id: string
   name: string
-  protocol: 'openai'
+  protocol: LLMAdapterProtocol
   endpoint: string
   model: string
   supports_text: boolean
@@ -27,7 +28,7 @@ export interface LLMAdapter {
 export interface LLMAdapterInput {
   id?: string
   name: string
-  protocol?: 'openai'
+  protocol?: LLMAdapterProtocol
   endpoint: string
   model: string
   supports_text: boolean

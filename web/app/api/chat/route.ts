@@ -1,4 +1,3 @@
-import { createOpenAI } from '@ai-sdk/openai'
 import { convertToModelMessages, createUIMessageStream, createUIMessageStreamResponse, generateText, safeValidateUIMessages, stepCountIs, streamText, type ToolSet, type UIMessage } from 'ai'
 import { randomUUID } from 'node:crypto'
 import { NextRequest, NextResponse } from 'next/server'
@@ -20,7 +19,13 @@ import type { AgentModelMessageEvent, AgentToolAudit } from '@/lib/ai/agent-runt
 import { createDirectImageGenerator, mcpUrl, type ChatSkillSnapshot } from '@/lib/ai/global-chat-tools'
 import { workerHeaders } from '@/lib/ai/job-client'
 import { getEnabledSkill, listSkillReferences, loadSkillPreloadContext } from '@/lib/skills/registry'
-import { textModelConfigFromSettings, type TextModelSettings } from '@/lib/ai/runtime-config'
+import {
+  openaiProviderFromConfig,
+  textModelConfigFromSettings,
+  textModelForProvider,
+  type TextModelConfig,
+  type TextModelSettings,
+} from '@/lib/ai/runtime-config'
 
 const requestSchema = z.object({
   sessionId: z.number().int().positive(),
@@ -37,14 +42,7 @@ const requestSchema = z.object({
 
 const apiBase = () => (process.env.API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000/api').replace(/\/$/, '')
 
-type ModelConfig = {
-  apiKey: string
-  modelName: string
-  baseURL?: string
-  headers: Record<string, string>
-}
-
-async function configuredTextModel(): Promise<ModelConfig> {
+async function configuredTextModel(): Promise<TextModelConfig> {
   const response = await fetch(`${apiBase()}/settings/ai-runtime`, {
     cache: 'no-store',
     headers: workerHeaders(),
@@ -175,16 +173,18 @@ function conversationForRecovery(messages: UIMessage[]) {
 async function recoverFinalAnswer({
   provider,
   modelName,
+  protocol,
   messages,
   instructions,
 }: {
-  provider: ReturnType<typeof createOpenAI>
+  provider: ReturnType<typeof openaiProviderFromConfig>
   modelName: string
+  protocol: TextModelConfig['protocol']
   messages: UIMessage[]
   instructions: string
 }) {
   const recovery = await generateText({
-    model: provider.chat(modelName),
+    model: textModelForProvider(provider, modelName, protocol),
     instructions: `${instructions}\n\nYou are in the final-answer recovery phase. Do not call tools, do not emit tool-call markup, and reply directly to the user in their language. Use only the conversation context below; be transparent if it lacks evidence.`,
     prompt: conversationForRecovery(messages),
   })
@@ -368,12 +368,8 @@ export async function POST(request: NextRequest) {
     const restoredSkillName = body.skillName ? undefined : latestActivatedSkillName(session.messages)
     const messages = await persistedModelHistory(session, Boolean(body.approval))
     const modelConfig = await configuredTextModel()
-    const provider = createOpenAI({
-      apiKey: modelConfig.apiKey,
-      baseURL: modelConfig.baseURL,
-      headers: modelConfig.headers,
-    })
-    const model = provider.chat(modelConfig.modelName)
+    const provider = openaiProviderFromConfig(modelConfig)
+    const model = textModelForProvider(provider, modelConfig.modelName, modelConfig.protocol)
     const currentRequest = [...messages].reverse().find(message => message.role === 'user')
     const currentRequestText = currentRequest ? messageText(currentRequest) : ''
     const genericRuntime = genericSkillRuntimeEnabled()
@@ -507,7 +503,13 @@ export async function POST(request: NextRequest) {
             let parts = responseMessage.parts
             if (!pendingApproval && needsFinalAnswerFallback(messageText(responseMessage))) {
               try {
-                const recoveredText = await recoverFinalAnswer({ provider, modelName: modelConfig.modelName, messages, instructions })
+                const recoveredText = await recoverFinalAnswer({
+                  provider,
+                  modelName: modelConfig.modelName,
+                  protocol: modelConfig.protocol,
+                  messages,
+                  instructions,
+                })
                 if (!needsFinalAnswerFallback(recoveredText)) parts = [{ type: 'text', text: recoveredText }]
               } catch {
                 // Persist the clear fallback below if the recovery call itself fails.
