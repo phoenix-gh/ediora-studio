@@ -247,7 +247,7 @@ PY
 worker_ready() {
   local metadata marker fingerprint ready_marker ready_fingerprint
   metadata="$(metadata_path worker)"
-  dev_owned_identity_matches worker "$metadata" || return 1
+  dev_owned_runtime_matches worker "$metadata" || return 1
   marker="$(dev_meta_value "$metadata" marker 2>/dev/null)" || return 1
   fingerprint="$(
     dev_meta_value "$metadata" config_fingerprint 2>/dev/null
@@ -296,12 +296,12 @@ application_config_fingerprint() {
 }
 
 api_owned_http_ready() {
-  dev_owned_identity_matches api "$(metadata_path api)" \
+  dev_owned_runtime_matches api "$(metadata_path api)" \
     && http_ready "${HOST_API_ROOT}/health"
 }
 
 web_owned_http_ready() {
-  dev_owned_identity_matches web "$(metadata_path web)" \
+  dev_owned_runtime_matches web "$(metadata_path web)" \
     && http_ready "${HOST_WEB_URL}/"
 }
 
@@ -347,7 +347,7 @@ application_unit_ready() {
   local service metadata
   for service in api worker web; do
     metadata="$(metadata_path "$service")"
-    dev_owned_identity_matches "$service" "$metadata" || return 1
+    dev_owned_runtime_matches "$service" "$metadata" || return 1
     dev_config_fingerprint_matches \
       "$metadata" "$APPLICATION_CONFIG_FINGERPRINT" || return 1
   done

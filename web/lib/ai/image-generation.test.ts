@@ -83,12 +83,17 @@ describe('direct Agent image generation', () => {
             api_key: 'sk-image',
             model: 'gpt-image-2',
             base_url: 'https://images.example/v1',
+            headers: { 'X-Tenant': 'tenant-a' },
             image_response_format: 'url',
           },
         }), { status: 200 })
       }
       if (url === 'https://images.example/v1/images/generations') {
         expect(init?.method).toBe('POST')
+        expect(init?.headers).toMatchObject({
+          Authorization: 'Bearer sk-image',
+          'X-Tenant': 'tenant-a',
+        })
         expect(JSON.parse(String(init?.body))).toMatchObject({
           model: 'gpt-image-2',
           prompt: '一张湖边日落',

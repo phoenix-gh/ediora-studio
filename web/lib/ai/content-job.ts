@@ -1,4 +1,3 @@
-import { createOpenAI } from '@ai-sdk/openai'
 import { generateText, stepCountIs, tool } from 'ai'
 import { z } from 'zod'
 
@@ -13,13 +12,15 @@ import {
 } from './image-generation'
 import { workerHeaders } from './job-client'
 import {
+  openaiProviderFromConfig,
   textModelConfigFromSettings,
+  textModelForProvider,
+  type TextModelConfig,
   type TextModelSettings,
 } from './runtime-config'
 
 const apiBase = () => (process.env.API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000/api').replace(/\/$/, '')
 
-type ModelConfig = { apiKey: string; modelName: string; baseURL?: string }
 type CoverStyle = Record<string, unknown>
 
 export type ContentStep = 'brief' | 'draft' | 'cover' | 'illustrations' | 'standalone_image' | 'prompt_image_generation' | 'template_extraction'
@@ -60,11 +61,6 @@ export function insertInlineImage(content: string, imageUrl: string, anchorHeadi
     placement: 'anchor' as const,
   }
 }
-
-export function textModelForProvider<T>(provider: { chat: (modelName: string) => T }, modelName: string): T {
-  return provider.chat(modelName)
-}
-
 
 const templateCandidateSchema = z.object({
   recommendation: z.enum(['create', 'merge', 'skip']),
@@ -173,7 +169,7 @@ async function completeJob(jobId: number) {
   if (!response.ok) throw new Error('Unable to complete content job')
 }
 
-async function configuredTextModel(): Promise<ModelConfig> {
+async function configuredTextModel(): Promise<TextModelConfig> {
   const response = await fetch(`${apiBase()}/settings/ai-runtime`, {
     cache: 'no-store',
     headers: workerHeaders(),
@@ -238,7 +234,7 @@ async function runImageFlow(job: Awaited<ReturnType<typeof getJob>>, step: 'cove
   const maxImages = step === 'cover' ? 1 : Math.max(1, Math.min(Number(job.input.max_images) || 1, 4))
   const image = await configuredImageModel()
   const text = await configuredTextModel()
-  const textProvider = createOpenAI({ apiKey: text.apiKey, baseURL: text.baseURL })
+  const textProvider = openaiProviderFromConfig(text)
   const assets: Array<{ id: number; url: string; anchor_heading?: string }> = []
   const rawStyle = job.input[step === 'cover' ? 'cover_style' : 'image_style'] ?? job.input.note ?? ''
   const style = typeof rawStyle === 'string' ? rawStyle : JSON.stringify(rawStyle)
@@ -248,7 +244,7 @@ async function runImageFlow(job: Awaited<ReturnType<typeof getJob>>, step: 'cove
   await recordJobEvent(job.id, 'skill_loaded', { skill: skill.skillName, rule_sources: skill.ruleSources })
   if (coverConstraints) await recordJobEvent(job.id, 'cover_constraints', { constraints: coverConstraints })
   await generateText({
-    model: textModelForProvider(textProvider, text.modelName),
+    model: textModelForProvider(textProvider, text.modelName, text.protocol),
     instructions: `${baoyuRuntimeInstructions(step, maxImages)}\n\nHard cover constraints:\n${coverConstraints || 'No account-specific constraints.'}\n\nBundled Baoyu skill rules:\n${skill.rules}`,
     prompt: JSON.stringify({ task: step, title: draft.title, article: draft.content.slice(0, 4000), style, max_images: maxImages }),
     stopWhen: stepCountIs(maxImages + 1),
@@ -396,11 +392,16 @@ export async function runPromptImageGenerationFlow(job: Awaited<ReturnType<typeo
 }
 
 
-async function runTemplateExtractionFlow(job: Awaited<ReturnType<typeof getJob>>, model: ReturnType<typeof createOpenAI>, modelName: string) {
+async function runTemplateExtractionFlow(
+  job: Awaited<ReturnType<typeof getJob>>,
+  model: ReturnType<typeof openaiProviderFromConfig>,
+  modelName: string,
+  protocol: TextModelConfig['protocol'],
+) {
   const customPrompt = String(job.input.prompt ?? '')
   const override = job.input.template_extraction_override === true
   const result = await generateText({
-    model: textModelForProvider(model, modelName),
+    model: textModelForProvider(model, modelName, protocol),
     instructions: override ? customPrompt : `你是写作模板提炼助手。请从原文中提炼一个可复用的写作模板，只返回合法 JSON，不要调用工具，不要创建或更新模板。所有面向用户的字段必须跟随原文语言输出。去除人名、品牌名、产品名、日期、数字、受众假设和平台排版规则；如果无法识别稳定且可迁移的写作结构，recommendation 必须为 skip。\n\n${customPrompt}`,
     prompt: `请只返回 JSON：recommendation(create|merge|skip)、title、genre(tutorial|commentary|story|review)、writing_guide、title_formula、unsuitable_for、genericity_check、可选 merge_target_id、reason。JSON 字段名和枚举值保持英文；title、writing_guide、title_formula、unsuitable_for、genericity_check、reason 必须使用原文语言。原文输入：${JSON.stringify(job.input)}`,
   })
@@ -430,10 +431,10 @@ export async function runContentJob(jobId: number) {
       job.flow === 'template_extraction' ? 'template_extraction' : 'brief',
     )
     const text = await configuredTextModel()
-    const openai = createOpenAI({ apiKey: text.apiKey, baseURL: text.baseURL })
+    const openai = openaiProviderFromConfig(text)
     const modelName = text.modelName
     if (job.flow === 'template_extraction') {
-      const output = await runTemplateExtractionFlow(job, openai, modelName)
+      const output = await runTemplateExtractionFlow(job, openai, modelName, text.protocol)
       await completeStep(job.id, activeStep.id, output)
       activeStep = undefined
       await completeJob(job.id)
@@ -441,7 +442,7 @@ export async function runContentJob(jobId: number) {
     }
     if (job.flow !== 'draft') throw new Error(`Unsupported content flow: ${job.flow}`)
     const briefResult = await generateText({
-      model: textModelForProvider(openai, modelName),
+      model: textModelForProvider(openai, modelName, text.protocol),
       instructions: '根据用户提供的素材和账号约束，生成简洁、可执行的中文写作 brief。不得调用外部工具。',
       prompt: JSON.stringify({ title: job.title, input: job.input }),
     })
@@ -449,7 +450,7 @@ export async function runContentJob(jobId: number) {
     activeStep = await startStep(job.id, 'draft')
     let savedDraft: { draftId: number } | undefined
     const result = await generateText({
-      model: textModelForProvider(openai, modelName),
+      model: textModelForProvider(openai, modelName, text.protocol),
       instructions: '你是内容写作助手。只能使用提供的工具保存完整 Markdown 草稿；不得发布内容。',
       prompt: `为以下任务写作：${JSON.stringify({ title: job.title, input: job.input })}`,
       stopWhen: stepCountIs(4),

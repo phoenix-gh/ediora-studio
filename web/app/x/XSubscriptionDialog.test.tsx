@@ -171,6 +171,7 @@ describe('XSubscriptionDialog', () => {
         supports_text: true,
         supports_image: false,
         image_response_format: 'base64',
+        headers: {},
         api_key_set: true,
         api_key_preview: '…1234',
       }],

@@ -1,4 +1,3 @@
-import { createOpenAI } from '@ai-sdk/openai'
 import { generateText } from 'ai'
 import { z } from 'zod'
 
@@ -15,7 +14,12 @@ import {
   apiGet, apiPost, completeJob, completeStep, failStep, getJob,
   retryableForError, startStep, workerHeaders,
 } from './job-client'
-import { textModelConfigFromSettings, type TextModelSettings } from './runtime-config'
+import {
+  openaiProviderFromConfig,
+  textModelConfigFromSettings,
+  textModelForProvider,
+  type TextModelSettings,
+} from './runtime-config'
 
 const decisionSchema = z.object({
   accepted_tweet_ids: z.array(z.string()),
@@ -355,9 +359,9 @@ async function runMergedTopicSourceJob(
       ? job.input.llm_adapter_id.trim()
       : undefined
     const model = await configuredModel(adapterId)
-    const provider = createOpenAI({ apiKey: model.apiKey, baseURL: model.baseURL })
+    const provider = openaiProviderFromConfig(model)
     const response = await generateTopicSourceText({
-      model: provider.chat(model.modelName),
+      model: textModelForProvider(provider, model.modelName, model.protocol),
       instructions: buildTopicSourceInstructions(context.directories),
       prompt: JSON.stringify(context),
     }, {
@@ -462,9 +466,9 @@ async function runLegacyTopicSourceJob(
     }
     trace = await startTopicSourceTrace(jobId)
     const model = await configuredModel()
-    const provider = createOpenAI({ apiKey: model.apiKey, baseURL: model.baseURL })
+    const provider = openaiProviderFromConfig(model)
     const response = await generateTopicSourceText({
-      model: provider.chat(model.modelName),
+      model: textModelForProvider(provider, model.modelName, model.protocol),
       instructions: `${buildTopicSourceInstructions(context.rule.screening_prompt)} 主题关键词只是初筛线索，最终以内容的核心观点是否有助于该主题的二次创作判断。`,
       prompt: JSON.stringify(context),
     }, {

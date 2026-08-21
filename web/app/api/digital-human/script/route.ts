@@ -1,4 +1,3 @@
-import { createOpenAI } from '@ai-sdk/openai'
 import { generateText } from 'ai'
 
 import {
@@ -7,7 +6,12 @@ import {
   talkingScriptRequestSchema,
 } from '@/lib/ai/talking-script'
 import { workerHeaders } from '@/lib/ai/job-client'
-import { textModelConfigFromSettings, type TextModelSettings } from '@/lib/ai/runtime-config'
+import {
+  textModelConfigFromSettings,
+  textModelFromConfig,
+  type TextModelConfig,
+  type TextModelSettings,
+} from '@/lib/ai/runtime-config'
 
 
 const apiBase = () => (
@@ -17,7 +21,7 @@ const apiBase = () => (
 ).replace(/\/$/, '')
 
 
-async function configuredModel() {
+async function configuredModel(): Promise<TextModelConfig> {
   const response = await fetch(`${apiBase()}/settings/ai-runtime`, {
     cache: 'no-store',
     headers: workerHeaders(),
@@ -26,11 +30,7 @@ async function configuredModel() {
   const settings = textModelConfigFromSettings(
     await response.json() as TextModelSettings,
   )
-  return {
-    apiKey: settings.apiKey,
-    model: settings.modelName,
-    baseURL: settings.baseURL,
-  }
+  return settings
 }
 
 
@@ -58,12 +58,8 @@ export async function POST(request: Request) {
         )
       }
     }
-    const provider = createOpenAI({
-      apiKey: modelConfig.apiKey,
-      baseURL: modelConfig.baseURL,
-    })
     const result = await generateText({
-      model: provider.chat(modelConfig.model),
+      model: textModelFromConfig(modelConfig),
       prompt: buildTalkingScriptPrompt(parsed.data, draft),
     })
     const script = cleanTalkingScript(result.text)

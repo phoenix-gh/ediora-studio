@@ -1,4 +1,5 @@
 import json
+from types import SimpleNamespace
 
 import pytest
 
@@ -14,23 +15,26 @@ from llm_adapters import (
 def _adapter(
     adapter_id: str,
     *,
+    protocol: str = "openai",
     text: bool = True,
     image: bool = False,
     response_format: str = "base64",
     key: str = "secret",
     model: str = "model",
     endpoint: str = "https://example.com/v1",
+    headers: dict[str, str] | None = None,
 ) -> dict:
     return {
         "id": adapter_id,
         "name": adapter_id,
-        "protocol": "openai",
+        "protocol": protocol,
         "endpoint": endpoint,
         "api_key": key,
         "model": model,
         "supports_text": text,
         "supports_image": image,
         "image_response_format": response_format,
+        **({"headers": headers} if headers is not None else {}),
     }
 
 
@@ -136,6 +140,7 @@ def test_public_adapters_mask_api_keys_and_preserve_capabilities():
         image=True,
         response_format="url",
         key="secret-1234",
+        headers={"X-Gateway": "tenant-a"},
     )]))
 
     assert item.api_key_set is True
@@ -143,6 +148,7 @@ def test_public_adapters_mask_api_keys_and_preserve_capabilities():
     assert not hasattr(item, "api_key")
     assert item.image_response_format == "url"
     assert item.supports_image is True
+    assert item.headers == {"X-Gateway": "tenant-a"}
 
 
 def test_resolve_legacy_text_configuration_when_no_adapters_are_saved():
@@ -181,3 +187,187 @@ def test_save_adapter_payloads_preserves_blank_key_and_supports_explicit_clear()
         clear_api_key=True,
     )], preserved)
     assert cleared[0]["api_key"] == ""
+
+
+def test_adapter_headers_are_normalized_persisted_and_resolved():
+    payload = LLMAdapterInput(
+        id="one",
+        name="带 Header 的 Adapter",
+        endpoint="https://example.com/v1",
+        model="updated-model",
+        supports_text=True,
+        api_key="secret",
+        headers={" X-Tenant ": " tenant-a ", "X-Trace": "trace-123"},
+    )
+
+    saved = save_adapter_payloads([payload])
+    assert saved[0]["headers"] == {
+        "X-Tenant": "tenant-a",
+        "X-Trace": "trace-123",
+    }
+
+    resolved = resolve_adapter(
+        {"llm_adapters": json.dumps(saved)},
+        adapter_id="one",
+        capability="text",
+    )
+    assert resolved.headers == saved[0]["headers"]
+
+
+def test_openai_responses_protocol_is_persisted_and_resolved():
+    payload = LLMAdapterInput(
+        id="responses",
+        name="Responses Adapter",
+        protocol="openai-responses",
+        endpoint="https://example.com/v1",
+        model="gpt-4.1",
+        supports_text=True,
+        api_key="secret",
+    )
+
+    saved = save_adapter_payloads([payload])
+    assert saved[0]["protocol"] == "openai-responses"
+
+    resolved = resolve_adapter(
+        {"llm_adapters": json.dumps(saved)},
+        adapter_id="responses",
+        capability="text",
+    )
+    assert resolved.protocol == "openai-responses"
+
+
+@pytest.mark.asyncio
+async def test_adapter_connection_passes_custom_headers_to_openai_client(monkeypatch):
+    from routers import settings as settings_router
+    from llm_adapters import ResolvedLLMAdapter
+
+    seen: dict[str, object] = {}
+
+    class FakeCompletions:
+        async def create(self, **kwargs):
+            seen["request"] = kwargs
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content="OK"))],
+            )
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            seen["client"] = kwargs
+            self.chat = SimpleNamespace(completions=FakeCompletions())
+
+    monkeypatch.setattr("openai.AsyncOpenAI", FakeClient)
+    adapter = ResolvedLLMAdapter(
+        adapter_id="one",
+        name="one",
+        protocol="openai",
+        api_key="secret",
+        model="model",
+        base_url="https://example.com/v1",
+        supports_text=True,
+        supports_image=False,
+        image_response_format="base64",
+        headers={"X-Tenant": "tenant-a"},
+    )
+
+    assert await settings_router._test_openai_adapter(adapter) == "OK"
+    assert seen["client"] == {
+        "api_key": "secret",
+        "base_url": "https://example.com/v1",
+        "default_headers": {"X-Tenant": "tenant-a"},
+    }
+
+
+@pytest.mark.asyncio
+async def test_adapter_connection_uses_openai_responses_protocol(monkeypatch):
+    from routers import settings as settings_router
+    from llm_adapters import ResolvedLLMAdapter
+
+    seen: dict[str, object] = {}
+
+    class FakeResponses:
+        async def create(self, **kwargs):
+            seen["request"] = kwargs
+            return SimpleNamespace(output_text="OK")
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            seen["client"] = kwargs
+            self.responses = FakeResponses()
+
+    monkeypatch.setattr("openai.AsyncOpenAI", FakeClient)
+    adapter = ResolvedLLMAdapter(
+        adapter_id="responses",
+        name="Responses",
+        protocol="openai-responses",
+        api_key="secret",
+        model="gpt-4.1",
+        base_url="https://example.com/v1",
+        supports_text=True,
+        supports_image=False,
+        image_response_format="base64",
+        headers={"X-Tenant": "tenant-a"},
+    )
+
+    assert await settings_router._test_openai_adapter(adapter) == "OK"
+    assert seen["client"] == {
+        "api_key": "secret",
+        "base_url": "https://example.com/v1",
+        "default_headers": {"X-Tenant": "tenant-a"},
+    }
+    assert seen["request"] == {
+        "model": "gpt-4.1",
+        "max_output_tokens": 10,
+        "input": 'Reply with just "OK".',
+    }
+
+
+@pytest.mark.asyncio
+async def test_image_adapter_connection_passes_custom_headers_to_model_listing(monkeypatch):
+    from routers import settings as settings_router
+    from llm_adapters import ResolvedLLMAdapter
+
+    seen: dict[str, object] = {}
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"data": [{"id": "image-model"}]}
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            seen["client"] = kwargs
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return None
+
+        async def get(self, url, *, headers):
+            seen["request"] = {"url": url, "headers": headers}
+            return FakeResponse()
+
+    monkeypatch.setattr(settings_router.httpx, "AsyncClient", FakeClient)
+    adapter = ResolvedLLMAdapter(
+        adapter_id="images",
+        name="images",
+        protocol="openai",
+        api_key="secret",
+        model="image-model",
+        base_url="https://example.com/v1",
+        supports_text=False,
+        supports_image=True,
+        image_response_format="base64",
+        headers={"X-Tenant": "tenant-a"},
+    )
+
+    assert await settings_router._test_openai_adapter(adapter) == "图片接口连接成功"
+    assert seen["request"] == {
+        "url": "https://example.com/v1/models",
+        "headers": {
+            "Authorization": "Bearer secret",
+            "X-Tenant": "tenant-a",
+        },
+    }

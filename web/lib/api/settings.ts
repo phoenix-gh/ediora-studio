@@ -9,11 +9,12 @@ export interface ProviderInfo {
 }
 
 export type ImageResponseFormat = 'url' | 'base64'
+export type LLMAdapterProtocol = 'openai' | 'openai-responses'
 
 export interface LLMAdapter {
   id: string
   name: string
-  protocol: 'openai'
+  protocol: LLMAdapterProtocol
   endpoint: string
   model: string
   supports_text: boolean
@@ -21,12 +22,13 @@ export interface LLMAdapter {
   image_response_format: ImageResponseFormat
   api_key_set: boolean
   api_key_preview: string
+  headers?: Record<string, string>
 }
 
 export interface LLMAdapterInput {
   id?: string
   name: string
-  protocol?: 'openai'
+  protocol?: LLMAdapterProtocol
   endpoint: string
   model: string
   supports_text: boolean
@@ -34,6 +36,7 @@ export interface LLMAdapterInput {
   image_response_format: ImageResponseFormat
   api_key?: string
   clear_api_key?: boolean
+  headers?: Record<string, string>
 }
 
 export interface WebSearchProviderConfig {

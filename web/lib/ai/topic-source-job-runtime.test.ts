@@ -110,14 +110,18 @@ describe('topic source malformed payload handling', () => {
       if (url.startsWith('/settings/ai-runtime')) {
         return {
           api_key: 'filter-key',
+          protocol: 'openai-responses',
           model: 'filter-model',
           base_url: 'https://filter.example/v1',
+          headers: { 'X-Tenant': 'tenant-a' },
         }
       }
       throw new Error(`unexpected GET ${url}`)
     })
     api.apiPost.mockResolvedValue({ saved: 1, skipped: 0, decided: 1 })
-    api.createOpenAI.mockReturnValue({ chat: vi.fn(() => ({ id: 'filter-model' })) })
+    const chat = vi.fn(() => ({ id: 'filter-chat-model' }))
+    const responses = vi.fn(() => ({ id: 'filter-responses-model' }))
+    api.createOpenAI.mockReturnValue({ chat, responses })
     api.generateText.mockResolvedValue({
       text: JSON.stringify({ classifications: [{ tweet_id: 'tweet-1', directory_id: 3 }] }),
     })
@@ -138,7 +142,13 @@ describe('topic source malformed payload handling', () => {
     expect(api.createOpenAI).toHaveBeenCalledWith({
       apiKey: 'filter-key',
       baseURL: 'https://filter.example/v1',
+      headers: { 'X-Tenant': 'tenant-a' },
     })
+    expect(responses).toHaveBeenCalledWith('filter-model')
+    expect(chat).not.toHaveBeenCalled()
+    expect(api.generateText).toHaveBeenCalledWith(expect.objectContaining({
+      model: { id: 'filter-responses-model' },
+    }))
     expect(api.generateText).toHaveBeenCalledOnce()
     expect(api.apiPost).toHaveBeenCalledWith(
       '/assets/ingestion/accepted',

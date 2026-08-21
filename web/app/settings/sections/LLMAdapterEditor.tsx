@@ -1,6 +1,6 @@
 'use client'
 
-import { CheckCircle, FlaskConical, Loader2, Trash2, XCircle } from 'lucide-react'
+import { CheckCircle, FlaskConical, Loader2, Plus, Trash2, XCircle } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -8,9 +8,16 @@ import { Field, FieldDescription, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { NativeSelect } from '@/components/ui/native-select'
 import { cn } from '@/lib/utils'
-import type { LLMAdapter, LLMAdapterInput } from '@/lib/api/settings'
+import type { LLMAdapter, LLMAdapterInput, LLMAdapterProtocol } from '@/lib/api/settings'
 
-export type LLMAdapterDraft = LLMAdapter & Pick<LLMAdapterInput, 'api_key' | 'clear_api_key'>
+export type LLMAdapterHeaderDraft = {
+  name: string
+  value: string
+}
+
+export type LLMAdapterDraft = LLMAdapter
+  & Pick<LLMAdapterInput, 'api_key' | 'clear_api_key'>
+  & { headerRows: LLMAdapterHeaderDraft[] }
 export type LLMAdapterTestState = 'idle' | 'testing' | 'ok' | 'fail'
 
 type LLMAdapterEditorProps = {
@@ -30,6 +37,20 @@ export function LLMAdapterEditor({
   testState,
   testMessage,
 }: LLMAdapterEditorProps) {
+  const headerRows = adapter.headerRows ?? []
+
+  function updateHeaderRow(index: number, patch: Partial<LLMAdapterHeaderDraft>) {
+    onChange({
+      headerRows: headerRows.map((header, currentIndex) => (
+        currentIndex === index ? { ...header, ...patch } : header
+      )),
+    })
+  }
+
+  function removeHeaderRow(index: number) {
+    onChange({ headerRows: headerRows.filter((_, currentIndex) => currentIndex !== index) })
+  }
+
   return (
     <div className="space-y-3 rounded-lg border border-border bg-surface-muted/30 p-3" data-testid={`llm-adapter-${adapter.id}`}>
       <div className="flex items-start justify-between gap-3">
@@ -57,8 +78,13 @@ export function LLMAdapterEditor({
         </Field>
         <Field>
           <FieldLabel htmlFor={`adapter-protocol-${adapter.id}`}>协议</FieldLabel>
-          <NativeSelect id={`adapter-protocol-${adapter.id}`} value="openai" disabled>
+          <NativeSelect
+            id={`adapter-protocol-${adapter.id}`}
+            value={adapter.protocol}
+            onChange={event => onChange({ protocol: event.target.value as LLMAdapterProtocol })}
+          >
             <option value="openai">OpenAI-compatible</option>
+            <option value="openai-responses">OpenAI Responses</option>
           </NativeSelect>
         </Field>
         <Field>
@@ -101,6 +127,66 @@ export function LLMAdapterEditor({
               清除 API Key
             </Button>
           </FieldDescription>
+        ) : null}
+      </Field>
+
+      <Field>
+        <div className="flex items-center justify-between gap-3">
+          <FieldLabel>自定义 Header</FieldLabel>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => onChange({ headerRows: [...headerRows, { name: '', value: '' }] })}
+          >
+            <Plus data-icon="inline-start" />
+            添加自定义 Header
+          </Button>
+        </div>
+        <FieldDescription>请求 Adapter 时会附加这些键值对，名称区分大小写。</FieldDescription>
+        {headerRows.length > 0 ? (
+          <div className="space-y-2">
+            {headerRows.map((header, index) => (
+              <div key={`${index}-${header.name}`} className="flex items-end gap-2">
+                <Field className="min-w-0 flex-1">
+                  <FieldLabel className="sr-only" htmlFor={`adapter-header-name-${adapter.id}-${index}`}>
+                    Header 名称 {index + 1}
+                  </FieldLabel>
+                  <Input
+                    id={`adapter-header-name-${adapter.id}-${index}`}
+                    aria-label={`Header 名称 ${index + 1}`}
+                    value={header.name}
+                    onChange={event => updateHeaderRow(index, { name: event.target.value })}
+                    placeholder="Header 名称"
+                    className="font-mono"
+                  />
+                </Field>
+                <Field className="min-w-0 flex-1">
+                  <FieldLabel className="sr-only" htmlFor={`adapter-header-value-${adapter.id}-${index}`}>
+                    Header 值 {index + 1}
+                  </FieldLabel>
+                  <Input
+                    id={`adapter-header-value-${adapter.id}-${index}`}
+                    aria-label={`Header 值 ${index + 1}`}
+                    value={header.value}
+                    onChange={event => updateHeaderRow(index, { value: event.target.value })}
+                    placeholder="Header 值"
+                    className="font-mono"
+                  />
+                </Field>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  className="text-destructive"
+                  aria-label={`删除 Header ${index + 1}`}
+                  onClick={() => removeHeaderRow(index)}
+                >
+                  <Trash2 />
+                </Button>
+              </div>
+            ))}
+          </div>
         ) : null}
       </Field>
 
