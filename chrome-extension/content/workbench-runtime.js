@@ -25,7 +25,8 @@ import { formatScheduleSelection } from './schedule-memory.js'
 
 const SAFE_UI_MESSAGES = Object.freeze({
   DRAFT_API_NOT_CONFIGURED: 'API 地址无效，请在设置中检查',
-  DRAFT_API_HOST_NOT_ALLOWED: '当前扩展只允许本机 8000 端口 API',
+  DRAFT_API_PERMISSION_UNAVAILABLE: '当前浏览器不支持 API 域名授权',
+  DRAFT_API_PERMISSION_DENIED: '未授权访问该 API 域名',
   DRAFT_API_INVALID_REQUEST: '发布请求无效',
   DRAFT_API_UNAVAILABLE: '草稿 API 暂不可用，请检查服务是否运行',
   DRAFT_API_INVALID_RESPONSE: '草稿 API 返回格式无效',
@@ -162,7 +163,7 @@ const STATIC_UI = [
   '</div>',
   '<div class="sw-settings" data-role="settings" hidden>',
   '<div class="sw-settings-title">连接 Ediora</div>',
-  '<div class="sw-settings-hint">只允许本机 8000 端口；修改后保存并重新读取草稿。</div>',
+  '<div class="sw-settings-hint">支持任意 HTTP/HTTPS API；首次连接某个域名时需要授权。</div>',
   '<input class="sw-settings-input" data-role="api-input" type="url" spellcheck="false" aria-label="API 地址">',
   '<div class="sw-settings-status" data-role="settings-status"></div>',
   '<div class="sw-settings-actions"><button class="sw-ghost-button" type="button" data-action="reset-config">恢复默认</button><button class="sw-primary-button" type="button" data-action="save-config">保存并刷新</button></div>',
@@ -234,7 +235,10 @@ export function mountWorkbench({ document, window, chromeApi = globalThis.chrome
   const settingsStatus = query('[data-role="settings-status"]')
   const toast = query('[data-role="toast"]')
 
-  const client = createDraftClient({ runtime: chromeApi.runtime })
+  const client = createDraftClient({
+    runtime: chromeApi.runtime,
+    permissions: chromeApi.permissions,
+  })
   const scheduleClient = createScheduleClient({ runtime: chromeApi.runtime })
   let scheduleSnapshot = emptyScheduleSnapshot()
   let state = createWorkbenchState()
@@ -437,7 +441,8 @@ export function mountWorkbench({ document, window, chromeApi = globalThis.chrome
   async function saveConfig() {
     settingsStatus.textContent = ''
     try {
-      const config = await client.saveConfig(settingsDraft)
+      const apiBase = await client.requestApiPermission(settingsDraft)
+      const config = await client.saveConfig(apiBase)
       state = { ...state, apiBase: config.apiBase, settingsOpen: false, error: null }
       settingsDraft = config.apiBase
       render()

@@ -257,6 +257,15 @@ test('uses the markdown renderer and rich markdown copy in the preview', async (
   assert.match(source, /复制 Markdown/)
 })
 
+test('requests API host permission before saving a custom API address', async () => {
+  const source = await readFile(new URL('../content/workbench-runtime.js', import.meta.url), 'utf8')
+
+  assert.match(source, /permissions: chromeApi\.permissions/)
+  assert.match(source, /client\.requestApiPermission\(settingsDraft\)/)
+  assert.match(source, /支持任意 HTTP\/HTTPS API/)
+  assert.doesNotMatch(source, /只允许本机 8000 端口/)
+})
+
 test('only remounts preview markdown when the selected draft body or API base changes', () => {
   const draft = { id: 9, content: '![封面](/api/uploads/cover.png)' }
   const apiBase = 'http://localhost:8000/api'

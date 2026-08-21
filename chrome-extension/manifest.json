@@ -13,6 +13,10 @@
     "http://localhost:8000/*",
     "http://127.0.0.1:8000/*"
   ],
+  "optional_host_permissions": [
+    "http://*/*",
+    "https://*/*"
+  ],
   "action": {
     "default_title": "述策发布指挥台",
     "default_icon": {

@@ -32,7 +32,7 @@ async function readRuntimeSources() {
   })))
 }
 
-test('declares the MV3 Shuce extension with X-only host permissions', async () => {
+test('declares the MV3 Shuce extension with static and optional host permissions', async () => {
   const manifest = await loadManifest()
 
   assert.equal(manifest.manifest_version, 3)
@@ -42,6 +42,10 @@ test('declares the MV3 Shuce extension with X-only host permissions', async () =
     'http://localhost:8000/*',
     'https://twitter.com/*',
     'https://x.com/*',
+  ])
+  assert.deepEqual(manifest.optional_host_permissions.sort(), [
+    'http://*/*',
+    'https://*/*',
   ])
   assert.equal(manifest.background.type, 'module')
   assert.deepEqual(manifest.content_scripts[0].js, ['content/workbench.js'])
@@ -93,7 +97,7 @@ test('ships complete PNG toolbar icons at the declared sizes', async () => {
   }
 })
 
-test('keeps runtime access X-only and free of browser credentials', async () => {
+test('keeps runtime hosts explicit and free of browser credentials', async () => {
   const sources = await readRuntimeSources()
   for (const { relativePath, source } of sources) {
     assert.equal(/https?:\/\/(?!x\.com|twitter\.com|localhost:8000|127\.0\.0\.1:8000)/i.test(source), false, relativePath)

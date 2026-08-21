@@ -1,9 +1,5 @@
 export const DEFAULT_API_BASE = 'http://localhost:8000/api'
 export const API_BASE_STORAGE_KEY = 'shuceDraftApiBase'
-export const ALLOWED_API_BASES = Object.freeze([
-  'http://localhost:8000',
-  'http://127.0.0.1:8000',
-])
 
 const SAFE_FIELDS = Object.freeze(['id', 'title', 'content', 'status', 'draft_type', 'updated_at'])
 const IMAGE_MEDIA_TYPES = new Set([
@@ -53,16 +49,18 @@ export function normalizeApiBase(value) {
   return url.origin + path
 }
 
-export function assertAllowedApiBase(value) {
+export function apiPermissionPattern(value) {
   const normalized = normalizeApiBase(value)
-  const origin = new URL(normalized).origin
-  const allowed = ALLOWED_API_BASES.some(base => new URL(base).origin === origin)
-  if (!allowed) throw createError('DRAFT_API_HOST_NOT_ALLOWED', '当前扩展只允许本机 8000 端口 API')
-  return normalized
+  const url = new URL(normalized)
+  return `${url.protocol}//${url.host}/*`
+}
+
+export function assertAllowedApiBase(value) {
+  return normalizeApiBase(value)
 }
 
 function localUploadUrl(apiBase, source) {
-  const normalized = assertAllowedApiBase(apiBase)
+  const normalized = normalizeApiBase(apiBase)
   let url
   try {
     url = new URL(source, normalized + '/')
@@ -72,8 +70,7 @@ function localUploadUrl(apiBase, source) {
 
   const base = new URL(normalized)
   const basePath = base.pathname.replace(/\/+$/, '')
-  const allowedOrigins = new Set(ALLOWED_API_BASES.map(item => new URL(item).origin))
-  if (!allowedOrigins.has(url.origin) || !url.pathname.startsWith(`${basePath}/uploads/`)) {
+  if (url.origin !== base.origin || !url.pathname.startsWith(`${basePath}/uploads/`)) {
     throw invalidRequest()
   }
   return new URL(`${url.pathname}${url.search}${url.hash}`, base.origin).href
@@ -116,7 +113,7 @@ export async function fetchDraftCollection(apiBase, {
   fetchImpl = globalThis.fetch,
   timeoutMs = 10_000,
 } = {}) {
-  const normalized = assertAllowedApiBase(apiBase)
+  const normalized = normalizeApiBase(apiBase)
   if (typeof fetchImpl !== 'function') throw createError('DRAFT_API_UNAVAILABLE', '当前环境不支持网络请求')
 
   const controller = typeof AbortController === 'function' ? new AbortController() : null
@@ -197,7 +194,7 @@ export async function publishDraft(apiBase, draftId, {
   fetchImpl = globalThis.fetch,
   timeoutMs = 10_000,
 } = {}) {
-  const normalized = assertAllowedApiBase(apiBase)
+  const normalized = normalizeApiBase(apiBase)
   if (!Number.isInteger(draftId) || draftId <= 0) {
     throw createError('DRAFT_API_INVALID_REQUEST', '草稿编号无效')
   }
