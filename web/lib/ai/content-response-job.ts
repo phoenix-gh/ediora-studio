@@ -127,7 +127,11 @@ async function configuredModel() {
 
 async function analyze(context: Record<string, unknown>) {
   const config = await configuredModel()
-  const provider = createOpenAI({ apiKey: config.apiKey, baseURL: config.baseURL })
+  const provider = createOpenAI({
+    apiKey: config.apiKey,
+    baseURL: config.baseURL,
+    headers: config.headers,
+  })
   const instructions = `你是中文内容研究与创作编辑。分析原始内容，判断它是否值得进入内容系统，不发布任何内容。
 必须区分事实(fact)、来源观点(source_claim)和模型推断(model_inference)，证据必须标注类型。
 即使内容价值低，也要如实输出完整分析。推荐去向只能是 worth_writing、creative_asset、not_processed。

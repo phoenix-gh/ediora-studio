@@ -5,6 +5,7 @@ export type TextModelSettings = {
   model?: string
   base_url?: string
   image_response_format?: 'url' | 'base64'
+  headers?: Record<string, string>
 }
 
 export type ImageModelSettings = TextModelSettings
@@ -15,6 +16,7 @@ export type TextModelConfig = {
   apiKey: string
   modelName: string
   baseURL?: string
+  headers: Record<string, string>
 }
 
 export type ImageModelConfig = TextModelConfig & {
@@ -30,6 +32,7 @@ export function textModelConfigFromSettings(
     apiKey,
     modelName: settings.model?.trim() || 'gpt-4o-mini',
     baseURL: settings.base_url?.trim() || undefined,
+    headers: settings.headers ?? {},
   }
 }
 
@@ -42,6 +45,7 @@ export function imageModelConfigFromSettings(
     apiKey,
     modelName: settings.model?.trim() || 'gpt-image-1',
     baseURL: settings.base_url?.trim() || undefined,
+    headers: settings.headers ?? {},
     responseFormat: settings.image_response_format === 'url' ? 'url' : 'base64',
   }
 }

@@ -7,7 +7,7 @@ from typing import Any, Literal
 from urllib.parse import urlsplit
 from uuid import uuid4
 
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 
 ImageResponseFormat = Literal["url", "base64"]
@@ -16,6 +16,26 @@ AdapterCapability = Literal["text", "image"]
 
 class AdapterResolutionError(ValueError):
     """Raised when an adapter cannot satisfy a runtime request."""
+
+
+def _normalize_headers(headers: dict[str, str] | None) -> dict[str, str]:
+    normalized: dict[str, str] = {}
+    seen_names: set[str] = set()
+    for raw_name, raw_value in (headers or {}).items():
+        name = raw_name.strip()
+        if not name:
+            raise ValueError("自定义 Header 名称不能为空")
+        name_key = name.casefold()
+        if name_key in seen_names:
+            raise ValueError(f"自定义 Header 名称重复：{name}")
+        if any(char in name for char in "\r\n"):
+            raise ValueError("自定义 Header 名称不能包含换行")
+        value = raw_value.strip()
+        if any(char in value for char in "\r\n"):
+            raise ValueError(f"自定义 Header「{name}」值不能包含换行")
+        seen_names.add(name_key)
+        normalized[name] = value
+    return normalized
 
 
 class LLMAdapterInput(BaseModel):
@@ -29,6 +49,7 @@ class LLMAdapterInput(BaseModel):
     image_response_format: ImageResponseFormat = "base64"
     api_key: str | None = None
     clear_api_key: bool = False
+    headers: dict[str, str] | None = None
 
     @model_validator(mode="after")
     def validate_adapter(self) -> "LLMAdapterInput":
@@ -47,6 +68,8 @@ class LLMAdapterInput(BaseModel):
         self.model = self.model.strip()
         if self.id is not None:
             self.id = self.id.strip() or None
+        if self.headers is not None:
+            self.headers = _normalize_headers(self.headers)
         return self
 
 
@@ -61,6 +84,7 @@ class LLMAdapterPublic(BaseModel):
     image_response_format: ImageResponseFormat
     api_key_set: bool
     api_key_preview: str
+    headers: dict[str, str] = Field(default_factory=dict)
 
 
 class ResolvedLLMAdapter(BaseModel):
@@ -73,6 +97,7 @@ class ResolvedLLMAdapter(BaseModel):
     supports_text: bool
     supports_image: bool
     image_response_format: ImageResponseFormat
+    headers: dict[str, str] = Field(default_factory=dict)
 
 
 def _as_list(raw: str | list[dict[str, Any]] | None) -> list[dict[str, Any]]:
@@ -110,6 +135,7 @@ def parse_stored_adapters(raw: str | list[dict[str, Any]] | None) -> list[dict[s
             "supports_text": parsed.supports_text,
             "supports_image": parsed.supports_image,
             "image_response_format": parsed.image_response_format,
+            "headers": parsed.headers or {},
         })
     return result
 
@@ -130,6 +156,7 @@ def public_adapters(raw: str | list[dict[str, Any]] | None) -> list[LLMAdapterPu
         image_response_format=item["image_response_format"],
         api_key_set=bool(item.get("api_key")),
         api_key_preview=_preview(item.get("api_key", "")),
+        headers=dict(item.get("headers") or {}),
     ) for item in parse_stored_adapters(raw)]
 
 
@@ -155,6 +182,11 @@ def save_adapter_payloads(
             key = ""
         elif not key:
             key = str(old.get("api_key") or "").strip()
+        headers = (
+            dict(old.get("headers") or {})
+            if parsed.headers is None
+            else dict(parsed.headers)
+        )
         result.append({
             "id": adapter_id,
             "name": parsed.name,
@@ -165,6 +197,7 @@ def save_adapter_payloads(
             "supports_text": parsed.supports_text,
             "supports_image": parsed.supports_image,
             "image_response_format": parsed.image_response_format,
+            "headers": headers,
         })
     return result
 
@@ -205,6 +238,11 @@ def resolve_test_adapter(
         api_key = ""
     elif not api_key:
         api_key = str(stored.get("api_key") or "").strip()
+    headers = (
+        dict(stored.get("headers") or {})
+        if payload.headers is None
+        else dict(payload.headers)
+    )
     if not api_key:
         raise AdapterResolutionError(f"Adapter「{payload.name}」未配置 API Key")
     return ResolvedLLMAdapter(
@@ -217,6 +255,7 @@ def resolve_test_adapter(
         supports_text=payload.supports_text,
         supports_image=payload.supports_image,
         image_response_format=payload.image_response_format,
+        headers=headers,
     )
 
 
@@ -252,6 +291,7 @@ def _legacy_adapter(cfg: dict[str, str], capability: AdapterCapability) -> Resol
         supports_text=capability == "text",
         supports_image=capability == "image",
         image_response_format="base64",
+        headers={},
     )
 
 
@@ -298,4 +338,5 @@ def resolve_adapter(
         supports_text=selected["supports_text"],
         supports_image=selected["supports_image"],
         image_response_format=selected["image_response_format"],
+        headers=dict(selected.get("headers") or {}),
     )

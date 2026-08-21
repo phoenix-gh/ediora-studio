@@ -355,7 +355,11 @@ async function runMergedTopicSourceJob(
       ? job.input.llm_adapter_id.trim()
       : undefined
     const model = await configuredModel(adapterId)
-    const provider = createOpenAI({ apiKey: model.apiKey, baseURL: model.baseURL })
+    const provider = createOpenAI({
+      apiKey: model.apiKey,
+      baseURL: model.baseURL,
+      headers: model.headers,
+    })
     const response = await generateTopicSourceText({
       model: provider.chat(model.modelName),
       instructions: buildTopicSourceInstructions(context.directories),
@@ -462,7 +466,11 @@ async function runLegacyTopicSourceJob(
     }
     trace = await startTopicSourceTrace(jobId)
     const model = await configuredModel()
-    const provider = createOpenAI({ apiKey: model.apiKey, baseURL: model.baseURL })
+    const provider = createOpenAI({
+      apiKey: model.apiKey,
+      baseURL: model.baseURL,
+      headers: model.headers,
+    })
     const response = await generateTopicSourceText({
       model: provider.chat(model.modelName),
       instructions: `${buildTopicSourceInstructions(context.rule.screening_prompt)} 主题关键词只是初筛线索，最终以内容的核心观点是否有助于该主题的二次创作判断。`,

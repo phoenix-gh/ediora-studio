@@ -324,6 +324,7 @@ class ImageRuntimeConfig(BaseModel):
     model: str
     base_url: str
     image_response_format: Literal["url", "base64"]
+    headers: dict[str, str] = Field(default_factory=dict)
 
 
 class AiRuntimeConfig(BaseModel):
@@ -334,6 +335,7 @@ class AiRuntimeConfig(BaseModel):
     model: str
     base_url: str
     image_response_format: Literal["url", "base64"]
+    headers: dict[str, str] = Field(default_factory=dict)
     image: ImageRuntimeConfig
 
 
@@ -577,11 +579,19 @@ def _normalize_speech_base_url(value: str) -> str:
     return normalized
 
 
-async def _fetch_models_openai_compat(base_url: str, api_key: str) -> list[str]:
+async def _fetch_models_openai_compat(
+    base_url: str,
+    api_key: str,
+    headers: dict[str, str] | None = None,
+) -> list[str]:
     """GET {base_url}/models with Bearer auth, return sorted model id list."""
     url = base_url.rstrip("/") + "/models"
     async with httpx.AsyncClient(timeout=15) as client:
-        resp = await client.get(url, headers={"Authorization": f"Bearer {api_key}"})
+        request_headers = {
+            "Authorization": f"Bearer {api_key}",
+            **(headers or {}),
+        }
+        resp = await client.get(url, headers=request_headers)
         resp.raise_for_status()
     data = resp.json()
     models = [m["id"] for m in data.get("data", []) if isinstance(m, dict) and "id" in m]
@@ -628,7 +638,7 @@ async def get_ai_runtime_config(
     cfg = await get_config()
     stored_adapters = parse_stored_adapters(cfg.get("llm_adapters", "[]"))
 
-    def legacy_text_runtime() -> dict[str, str]:
+    def legacy_text_runtime() -> dict[str, object]:
         return {
             "adapter_id": "legacy-text",
             "protocol": "openai",
@@ -636,9 +646,10 @@ async def get_ai_runtime_config(
             "model": effective_model(cfg),
             "base_url": effective_base_url(cfg),
             "image_response_format": "base64",
+            "headers": {},
         }
 
-    def legacy_image_runtime() -> dict[str, str]:
+    def legacy_image_runtime() -> dict[str, object]:
         return {
             "adapter_id": "legacy-image",
             "protocol": "openai",
@@ -646,6 +657,7 @@ async def get_ai_runtime_config(
             "model": cfg.get("image_model", "gpt-image-1"),
             "base_url": cfg.get("image_base_url", ""),
             "image_response_format": "base64",
+            "headers": {},
         }
 
     if not stored_adapters:
@@ -1489,12 +1501,20 @@ async def test_llm():
 async def _test_openai_adapter(adapter):
     """Run a low-cost connectivity check without persisting the draft."""
     if not adapter.supports_text:
-        await _fetch_models_openai_compat(adapter.base_url, adapter.api_key)
+        await _fetch_models_openai_compat(
+            adapter.base_url,
+            adapter.api_key,
+            adapter.headers,
+        )
         return "图片接口连接成功"
 
     from openai import AsyncOpenAI
 
-    client = AsyncOpenAI(api_key=adapter.api_key, base_url=adapter.base_url)
+    client = AsyncOpenAI(
+        api_key=adapter.api_key,
+        base_url=adapter.base_url,
+        default_headers=adapter.headers,
+    )
     response = await client.chat.completions.create(
         model=adapter.model,
         max_tokens=10,

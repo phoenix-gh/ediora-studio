@@ -258,6 +258,7 @@ async function configuredModel(jobId: number): Promise<Model> {
   return createOpenAI({
     apiKey: runtime.apiKey,
     baseURL: runtime.baseURL,
+    headers: runtime.headers,
   }).chat(runtime.modelName)
 }
 

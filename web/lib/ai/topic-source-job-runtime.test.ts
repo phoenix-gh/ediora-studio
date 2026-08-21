@@ -112,6 +112,7 @@ describe('topic source malformed payload handling', () => {
           api_key: 'filter-key',
           model: 'filter-model',
           base_url: 'https://filter.example/v1',
+          headers: { 'X-Tenant': 'tenant-a' },
         }
       }
       throw new Error(`unexpected GET ${url}`)
@@ -138,6 +139,7 @@ describe('topic source malformed payload handling', () => {
     expect(api.createOpenAI).toHaveBeenCalledWith({
       apiKey: 'filter-key',
       baseURL: 'https://filter.example/v1',
+      headers: { 'X-Tenant': 'tenant-a' },
     })
     expect(api.generateText).toHaveBeenCalledOnce()
     expect(api.apiPost).toHaveBeenCalledWith(

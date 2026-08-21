@@ -13,6 +13,7 @@ export type ImageModelConfig = {
   apiKey: string
   modelName: string
   baseURL?: string
+  headers: Record<string, string>
   responseFormat?: 'url' | 'base64'
 }
 
@@ -186,7 +187,10 @@ async function generateImageFromUrl(
   prompt: ImagePrompt,
   options: { n: number; size?: `${number}x${number}` },
 ): Promise<GeneratedImageBytes> {
-  const headers = { Authorization: `Bearer ${config.apiKey}` }
+  const headers = {
+    Authorization: `Bearer ${config.apiKey}`,
+    ...config.headers,
+  }
   let response: Response
   if (typeof prompt === 'string') {
     response = await fetch(`${imageApiBase(config)}/images/generations`, {
@@ -265,7 +269,11 @@ export async function generateImageBytes(
   if (config.responseFormat === 'url') {
     return generateImageFromUrl(config, prompt, { n, size: options.size })
   }
-  const provider = createOpenAI({ apiKey: config.apiKey, baseURL: config.baseURL })
+  const provider = createOpenAI({
+    apiKey: config.apiKey,
+    baseURL: config.baseURL,
+    headers: config.headers,
+  })
   const generated = await generateImage({
     model: provider.image(config.modelName),
     prompt: typeof prompt === 'string'
