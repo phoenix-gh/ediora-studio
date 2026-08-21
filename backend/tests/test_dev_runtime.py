@@ -110,6 +110,19 @@ def _fake_runtime_tools(
           sleep 0.15
           exit 17
         fi
+        if [ "${DEV_TEST_API_RELOADER:-0}" = 1 ]; then
+          (
+            trap 'printf "stop:api\n" >>"$DEV_TEST_STATE/events"; rm -f "$DEV_TEST_STATE/api.ready"; exit 0' TERM INT
+            while :; do sleep 1; done
+          ) &
+          printf '%s\n' "$!" >"$DEV_TEST_STATE/api.reload.pid"
+          : >"$DEV_TEST_STATE/api.ready"
+          while [ ! -f "$DEV_TEST_STATE/api.health-checked" ]; do
+            sleep 0.01
+          done
+          sleep 0.05
+          exit 0
+        fi
         if [ "${DEV_TEST_FAIL_STAGE:-}" != api ]; then
           : >"$DEV_TEST_STATE/api.ready"
         fi
@@ -173,6 +186,9 @@ def _fake_runtime_tools(
             case "$url" in
               *":$API_PORT/health")
                 [ -f "$DEV_TEST_STATE/api.ready" ] || exit 1
+                if [ "${DEV_TEST_API_RELOADER:-0}" = 1 ]; then
+                  : >"$DEV_TEST_STATE/api.health-checked"
+                fi
                 printf 'ready:api\n' >>"$DEV_TEST_STATE/events"
                 ;;
               *":$WEB_PORT/"*)
@@ -850,6 +866,39 @@ def test_start_waits_for_each_service_and_stop_reverses_owned_processes(
         assert stopped_events.index("stop:web") < stopped_events.index("stop:worker")
         assert stopped_events.index("stop:worker") < stopped_events.index("stop:api")
         assert stopped_events.index("stop:api") < stopped_events.index("stop:redis")
+    finally:
+        _run_dev(env, "stop")
+
+
+def test_api_reload_child_group_remains_owned_after_launcher_exits(
+    tmp_path: Path,
+) -> None:
+    bin_dir = _fake_runtime_tools(tmp_path)
+    env = _dev_env(tmp_path, bin_dir)
+    env["DEV_TEST_API_RELOADER"] = "1"
+    env_file = tmp_path / ".env"
+    env_file.write_text(f"WORKER_TOKEN={VALID_TOKEN}\n", encoding="utf-8")
+    env["DEV_ENV_FILE"] = str(env_file)
+    run_dir = Path(env["DEV_RUN_DIR"])
+    state = Path(env["DEV_TEST_STATE"])
+
+    try:
+        started = _run_dev(env, "start")
+
+        assert started.returncode == 0, started.stdout + started.stderr
+        api_pid = _metadata_pid(run_dir / "api.meta")
+        reload_pid = int(
+            (state / "api.reload.pid").read_text(encoding="utf-8").strip()
+        )
+        assert not _process_is_running(api_pid)
+        assert _process_is_running(reload_pid)
+        assert "API HTTP ready" in started.stdout
+
+        stopped = _run_dev(env, "stop")
+
+        assert stopped.returncode == 0, stopped.stdout + stopped.stderr
+        assert not _process_is_running(reload_pid)
+        assert not (run_dir / "api.meta").exists()
     finally:
         _run_dev(env, "stop")
 
