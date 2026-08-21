@@ -428,7 +428,7 @@ export function AISection({ settings, onSaved }: { settings: AppSettings | null;
     <div className="flex flex-col gap-4">
       <FormSection
         title="LLM Adapter 实例"
-        description="可以配置多个 OpenAI-compatible 接口，分别指定文字默认、图片默认和信息筛选 Adapter。"
+        description="可以配置多个 OpenAI-compatible 或 OpenAI Responses 接口，分别指定文字默认、图片默认和信息筛选 Adapter。"
       >
         <div className="space-y-3">
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
@@ -459,7 +459,9 @@ export function AISection({ settings, onSaved }: { settings: AppSettings | null;
                   </CardHeader>
                   <CardContent className="space-y-3">
                     <div className="flex flex-wrap gap-1.5">
-                      <Badge variant="outline">OpenAI-compatible</Badge>
+                      <Badge variant="outline">
+                        {adapter.protocol === 'openai-responses' ? 'OpenAI Responses' : 'OpenAI-compatible'}
+                      </Badge>
                       {adapter.supports_text ? <Badge variant="info">文本</Badge> : null}
                       {adapter.supports_image ? <Badge variant="ai">图片</Badge> : null}
                       {adapter.supports_image ? (

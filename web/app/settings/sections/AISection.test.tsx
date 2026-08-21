@@ -368,6 +368,19 @@ describe('AISection', () => {
     expect(within(dialog).getByDisplayValue('https://chat.example/v1')).toBeVisible()
   })
 
+  it('allows selecting the OpenAI Responses protocol for an adapter', async () => {
+    render(<AISection settings={adapterSettings} onSaved={vi.fn()} />)
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑 Adapter 主文本' }))
+    const dialog = await screen.findByRole('dialog')
+    const protocol = within(dialog).getByLabelText('协议')
+    fireEvent.change(protocol, { target: { value: 'openai-responses' } })
+
+    expect(protocol).toHaveValue('openai-responses')
+    fireEvent.click(within(dialog).getByRole('button', { name: '保存 Adapter' }))
+    expect(screen.getByTestId('llm-adapter-card-chat-main')).toHaveTextContent('OpenAI Responses')
+  })
+
   it('discards adapter edits when the editor dialog is cancelled', async () => {
     render(<AISection settings={adapterSettings} onSaved={vi.fn()} />)
 

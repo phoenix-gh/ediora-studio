@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field, model_validator
 
 ImageResponseFormat = Literal["url", "base64"]
 AdapterCapability = Literal["text", "image"]
+AdapterProtocol = Literal["openai", "openai-responses"]
 
 
 class AdapterResolutionError(ValueError):
@@ -41,7 +42,7 @@ def _normalize_headers(headers: dict[str, str] | None) -> dict[str, str]:
 class LLMAdapterInput(BaseModel):
     id: str | None = None
     name: str
-    protocol: Literal["openai"] = "openai"
+    protocol: AdapterProtocol = "openai"
     endpoint: str
     model: str
     supports_text: bool = False
@@ -76,7 +77,7 @@ class LLMAdapterInput(BaseModel):
 class LLMAdapterPublic(BaseModel):
     id: str
     name: str
-    protocol: Literal["openai"]
+    protocol: AdapterProtocol
     endpoint: str
     model: str
     supports_text: bool
@@ -90,7 +91,7 @@ class LLMAdapterPublic(BaseModel):
 class ResolvedLLMAdapter(BaseModel):
     adapter_id: str
     name: str
-    protocol: Literal["openai"]
+    protocol: AdapterProtocol
     api_key: str
     model: str
     base_url: str

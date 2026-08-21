@@ -1515,6 +1515,14 @@ async def _test_openai_adapter(adapter):
         base_url=adapter.base_url,
         default_headers=adapter.headers,
     )
+    if adapter.protocol == "openai-responses":
+        response = await client.responses.create(
+            model=adapter.model,
+            max_output_tokens=10,
+            input='Reply with just "OK".',
+        )
+        content = getattr(response, "output_text", "")
+        return (content or "连接成功").strip()
     response = await client.chat.completions.create(
         model=adapter.model,
         max_tokens=10,

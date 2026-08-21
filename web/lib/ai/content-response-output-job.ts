@@ -1,4 +1,3 @@
-import { createOpenAI } from '@ai-sdk/openai'
 import { z } from 'zod'
 
 import {
@@ -48,7 +47,7 @@ import {
   workerHeaders,
   type DurableJob,
 } from './job-client'
-import { textModelConfigFromSettings, type TextModelSettings } from './runtime-config'
+import { textModelConfigFromSettings, textModelFromConfig, type TextModelSettings } from './runtime-config'
 
 export type ResponseArticleContext = {
   output: {
@@ -255,11 +254,7 @@ async function configuredModel(jobId: number): Promise<Model> {
     '/settings/ai-runtime', workerHeaders(jobId),
   )
   const runtime = textModelConfigFromSettings(settings)
-  return createOpenAI({
-    apiKey: runtime.apiKey,
-    baseURL: runtime.baseURL,
-    headers: runtime.headers,
-  }).chat(runtime.modelName)
+  return textModelFromConfig(runtime)
 }
 
 const defaultDependencies: ContentResponseOutputAgentJobDependencies = {
