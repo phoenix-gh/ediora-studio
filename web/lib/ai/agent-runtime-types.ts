@@ -17,10 +17,12 @@ export type AgentToolAudit = {
   output?: unknown
   error?: string
   occurredAt: string
+  step?: number
 }
 
 export type AgentModelMessageEvent = {
   phase: string
+  step?: number
   direction: 'model_request' | 'model_response' | 'model_error'
   payload: Record<string, unknown>
   occurredAt: string

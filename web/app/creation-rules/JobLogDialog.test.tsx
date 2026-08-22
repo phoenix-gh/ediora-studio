@@ -6,12 +6,16 @@ import type { ContentJob } from '@/lib/api/jobs'
 import { JobLogDialog } from './JobLogDialog'
 
 const api = vi.hoisted(() => ({
+  listAgentTrajectory: vi.fn(),
   listAllAgentLogEvents: vi.fn(),
 }))
 const developerMode = vi.hoisted(() => ({ enabled: true }))
 
 vi.mock('@/lib/api/jobs', () => ({}))
-vi.mock('@/lib/ai/agent-log-client', () => ({ listAllAgentLogEvents: api.listAllAgentLogEvents }))
+vi.mock('@/lib/ai/agent-log-client', () => ({
+  listAgentTrajectory: api.listAgentTrajectory,
+  listAllAgentLogEvents: api.listAllAgentLogEvents,
+}))
 vi.mock('@/components/providers/DeveloperModeProvider', () => ({
   useDeveloperMode: () => developerMode.enabled,
 }))
@@ -67,6 +71,7 @@ describe('JobLogDialog', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     developerMode.enabled = true
+    api.listAgentTrajectory.mockRejectedValue(new Error('canonical endpoint unavailable in fixture'))
     api.listAllAgentLogEvents.mockResolvedValue({ events: agentEvents, has_more: false, next_sequence: null })
   })
 
@@ -95,7 +100,7 @@ describe('JobLogDialog', () => {
     await waitFor(() => expect(api.listAllAgentLogEvents).toHaveBeenCalledWith({ job_id: job.id, limit: 500 }))
 
     fireEvent.click(screen.getByRole('tab', { name: 'Agent 运行轨迹' }))
-    expect(await screen.findByText('LLM 响应')).toBeInTheDocument()
+    expect(await screen.findByText('模型回复内容')).toBeInTheDocument()
     expect(screen.getByRole('tabpanel')).not.toHaveTextContent('step_failed')
 
     fireEvent.click(screen.getByRole('tab', { name: '执行时间线' }))

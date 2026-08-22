@@ -14,11 +14,17 @@ import {
   type DurableAgentToolCall,
   type DurableAgentExecution,
 } from './agent-execution-client'
-import { appendAgentLogEvent, type AgentLogEventInput } from './agent-log-client'
+import {
+  appendAgentLogEvent,
+  appendAgentSessionEvent,
+  type AgentLogEventInput,
+  type AgentSessionEventInput,
+} from './agent-log-client'
 import {
   agentSkillRunAudit,
   openAgentRuntime,
   type AgentRuntime,
+  type AgentSessionEventDraft,
   type OpenAgentRuntimeOptions,
 } from './agent-runtime'
 import { pinCapabilitySnapshot } from './agent-capabilities'
@@ -113,6 +119,7 @@ export type DailyCreationAgentJobDependencies = {
   ): Promise<DurableAgentExecution>
   appendMessage?(jobId: number, executionId: number, event: AgentModelMessageEvent): Promise<unknown>
   appendLogEvent?(jobId: number, event: AgentLogEventInput): Promise<unknown>
+  appendSessionEvent?(jobId: number, executionId: number, event: AgentSessionEventInput): Promise<unknown>
   claimToolCall(
     jobId: number, executionId: number, event: AgentToolAudit,
   ): Promise<AgentToolDecision>
@@ -151,6 +158,7 @@ const defaultDependencies: DailyCreationAgentJobDependencies = {
   checkpointExecution: checkpointAgentExecution,
   appendMessage: appendAgentMessage,
   appendLogEvent: (jobId, event) => appendAgentLogEvent(event, jobId),
+  appendSessionEvent: (jobId, executionId, event) => appendAgentSessionEvent(event, jobId),
   claimToolCall: claimAgentToolCall,
   listToolCalls: listAgentToolCalls,
   completeToolCall: completeAgentToolCall,
@@ -215,6 +223,9 @@ export async function runDailyCreationAgentJob(
   let execution: DurableAgentExecution | undefined
   let pendingFinalizationEvidence: AgentCompletionEvidence | undefined
   let durableFinalizationConfirmed = false
+  let canonicalTurnStarted = false
+  let canonicalTurnEnded = false
+  const canonicalTurn = step.attempt
   const executionRequest: {
     objective: string
     skillMode: 'auto' | 'manual'
@@ -238,6 +249,29 @@ export async function runDailyCreationAgentJob(
       // Event logging is durable when available but never blocks the job boundary.
     }
   }
+  const recordSessionEvent = async (event: AgentSessionEventDraft) => {
+    if (!execution) return
+    await deps.appendSessionEvent?.(jobId, execution.id, {
+      stream_kind: 'job',
+      stream_key: `execution:${execution.id}`,
+      job_id: jobId,
+      execution_id: execution.id,
+      turn_id: `execution:${execution.id}:turn:${event.turn ?? 1}`,
+      step_id: event.step === null ? null : String(event.step),
+      type: event.type,
+      data: event.data,
+    })
+  }
+  const finishCanonicalTurn = async (reason: Record<string, unknown>) => {
+    if (!canonicalTurnStarted || canonicalTurnEnded || !execution) return
+    await recordSessionEvent({
+      type: 'turn/end',
+      turn: canonicalTurn,
+      step: null,
+      data: { reason },
+    })
+    canonicalTurnEnded = true
+  }
   try {
     const context = await deps.getContext(runId, jobId)
     const objective = buildDailyCreationAgentObjective(context)
@@ -247,6 +281,22 @@ export async function runDailyCreationAgentJob(
       ? context.rule.skill_name ?? null
       : null
     execution = await deps.ensureExecution(jobId, executionRequest)
+    await recordSessionEvent({
+      type: 'turn/start',
+      turn: canonicalTurn,
+      step: null,
+      data: { turn: canonicalTurn },
+    })
+    canonicalTurnStarted = true
+    await recordSessionEvent({
+      type: 'user/message',
+      turn: canonicalTurn,
+      step: null,
+      data: {
+        content: [{ kind: 'text', text: objective }],
+        source: { kind: 'job' },
+      },
+    })
     await recordExecutionEvent({
       event_type: 'session/turn-start',
       phase: 'agent',
@@ -280,6 +330,7 @@ export async function runDailyCreationAgentJob(
     if (checkpointEvidence) {
       pendingFinalizationEvidence = checkpointEvidence
       durableFinalizationConfirmed = true
+      await finishCanonicalTurn({ kind: 'completed' })
       await finalize(checkpointEvidence)
       return checkpointEvidence
     }
@@ -311,11 +362,13 @@ export async function runDailyCreationAgentJob(
       model,
       mode: 'job',
       dailyCreationRunId: runId,
+      turn: canonicalTurn,
       policyProfile: 'scheduled',
       automaticSelection: false,
       skillMode: currentExecution().skill_mode,
       skillName: currentExecution().skill_name ?? undefined,
       restoredSkillName: restoredSkillNameFromExecution(currentExecution()),
+      onSessionEvent: recordSessionEvent,
       beforeToolExecute: async event => {
         const capabilities = runtime?.capabilitySnapshot()
         if (capabilities) {
@@ -367,6 +420,16 @@ export async function runDailyCreationAgentJob(
         activation: currentExecution().skill_activation || null,
       },
     })
+    await recordSessionEvent({
+      type: 'agent/skill',
+      turn: canonicalTurn,
+      step: null,
+      data: {
+        name: currentExecution().skill_name ?? 'none',
+        activation: currentExecution().skill_activation ?? 'automatic',
+        metadata: { selected: Boolean(currentExecution().skill_name) },
+      },
+    })
     await recordExecutionEvent({
       event_type: 'session/capabilities',
       phase: 'prepare',
@@ -413,6 +476,7 @@ export async function runDailyCreationAgentJob(
       toolCalls: audits,
     }))
     durableFinalizationConfirmed = true
+    await finishCanonicalTurn({ kind: 'completed' })
     await recordExecutionEvent({
       event_type: 'session/turn-end',
       phase: 'agent',
@@ -445,24 +509,31 @@ export async function runDailyCreationAgentJob(
       }
     }
     const message = failure instanceof Error ? failure.message : String(failure)
+    let failureMessage = message
+    try {
+      await finishCanonicalTurn({ kind: 'error', error: message })
+    } catch (trajectoryError) {
+      const trajectoryMessage = trajectoryError instanceof Error ? trajectoryError.message : String(trajectoryError)
+      failureMessage = `${message}; Agent trajectory finalization failed: ${trajectoryMessage}`
+    }
     await recordExecutionEvent({
       event_type: 'session/error',
       phase: 'agent',
       status: 'error',
-      payload: { error: message },
+      payload: { error: failureMessage },
     })
-    const deterministic = message.includes(interruptedAfterSideEffects)
-      || message.includes('Selected skill is unavailable')
-      || message.includes('Agent capability drift detected')
-      || message.includes(exhaustedWhileCallingTool)
+    const deterministic = failureMessage.includes(interruptedAfterSideEffects)
+      || failureMessage.includes('Selected skill is unavailable')
+      || failureMessage.includes('Agent capability drift detected')
+      || failureMessage.includes(exhaustedWhileCallingTool)
     if (!durableFinalizationConfirmed) {
       try {
-        if (execution) await deps.failExecution(jobId, execution.id, message)
+        if (execution) await deps.failExecution(jobId, execution.id, failureMessage)
       } catch {
         // Preserve the original job failure if the auxiliary status update fails.
       }
       await deps.failStep(
-        jobId, step.id, failure,
+        jobId, step.id, new Error(failureMessage),
         deterministic ? false : retryableForError(failure, true),
       )
     }

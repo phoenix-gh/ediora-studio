@@ -5,6 +5,8 @@ import { latestClientTurn, modelHistoryCandidates } from '../../../lib/ai/chat-t
 import {
   chatAgentLogEventFromModelMessage,
   chatAgentLogEventFromToolAudit,
+  chatAgentSessionEventFromDraft,
+  chatTrajectoryChunk,
   agentRunUIResponse,
   executionToolsForSelection,
   genericSkillRuntimeEnabled,
@@ -51,6 +53,29 @@ describe('Chat Agent log event mapping', () => {
       event_type: 'tool/result',
       status: 'completed',
       payload: expect.objectContaining({ toolName: 'searchInformationSources' }),
+    })
+  })
+
+  it('maps AI SDK stream chunks into canonical assistant chunk events', () => {
+    expect(chatTrajectoryChunk({ type: 'reasoning-delta', id: 'r-1', text: '思考' })).toEqual({
+      kind: 'reasoning', id: 'r-1', text: '思考',
+    })
+    expect(chatTrajectoryChunk({ type: 'tool-input-delta', id: 'call-1', delta: '{"q":"AI"}' })).toEqual({
+      kind: 'tool-input', callId: 'call-1', text: '{"q":"AI"}',
+    })
+  })
+
+  it('maps runtime drafts into the scoped canonical Chat event input', () => {
+    expect(chatAgentSessionEventFromDraft({
+      type: 'step/start', turn: 2, step: 1, data: { turn: 2, step: 1 },
+    }, { sessionId: 12, turnId: 'turn-2', turn: 2 })).toEqual({
+      stream_kind: 'chat',
+      stream_key: 'chat:12',
+      session_id: 12,
+      turn_id: 'turn-2',
+      step_id: '1',
+      type: 'step/start',
+      data: { turn: 2, step: 1 },
     })
   })
 })
