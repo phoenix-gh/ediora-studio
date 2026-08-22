@@ -114,7 +114,7 @@ export function JobLogDialog({ job, open, onOpenChange, onRetry }: { job: Conten
             {developerModeEnabled && <TabsContent value="events" className="min-h-0 flex-1 overflow-y-auto pr-1">
               <ExecutionEvents events={job.events} />
             </TabsContent>}
-            {developerModeEnabled && <TabsContent keepMounted data-testid="job-log-agent-panel" value="agent" className="min-h-0 flex-1 overflow-y-auto pr-1">
+            {developerModeEnabled && <TabsContent keepMounted data-testid="job-log-agent-panel" value="agent" className="min-h-0 flex-1 overflow-hidden pr-1">
               <AgentTrajectoryPanel scope={{ job_id: job.id }} open={open} developerModeEnabled />
             </TabsContent>}
           </Tabs>

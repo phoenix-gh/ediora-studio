@@ -100,7 +100,7 @@ def test_agent_log_event_ingest_and_query_return_typed_stream(client):
 
 
 def test_agent_log_global_query_can_filter_job_errors(client):
-    for event_type, status in (("tool/call", "completed"), ("llm/error", "error")):
+    for event_type, status in (("llm/request", "completed"), ("llm/error", "error")):
         response = client.post(
             "/api/agent-logs/events",
             headers={"X-Worker-Token": TOKEN},
@@ -121,3 +121,46 @@ def test_agent_log_global_query_can_filter_job_errors(client):
 
     assert response.status_code == 200
     assert [event["event_type"] for event in response.json()["events"]] == ["llm/error"]
+
+
+def test_agent_log_event_ingest_rejects_legacy_tool_payload(client):
+    response = client.post(
+        "/api/agent-logs/events",
+        headers={"X-Worker-Token": TOKEN},
+        json={
+            "stream_kind": "job",
+            "stream_key": "execution:9",
+            "job_id": 5,
+            "execution_id": 9,
+            "event_type": "tool/call",
+            "phase": "execute",
+            "status": "completed",
+            "payload": {"tool_call_id": "legacy-call"},
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_agent_trajectory_reports_unsupported_legacy_rows(client):
+    created = client.post(
+        "/api/agent-logs/events",
+        headers={"X-Worker-Token": TOKEN},
+        json={
+            "stream_kind": "chat",
+            "stream_key": "chat:13",
+            "session_id": 13,
+            "event_type": "llm/response",
+            "phase": "execute",
+            "status": "completed",
+            "payload": {"text": "旧格式响应"},
+        },
+    )
+    assert created.status_code == 201, created.text
+
+    response = client.get("/api/agent-logs/trajectory?session_id=13")
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["unsupported_format"] is True
+    assert body["events"] == []

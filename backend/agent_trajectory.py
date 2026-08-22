@@ -1,8 +1,8 @@
-"""Canonical Agent session events and compatibility projection helpers.
+"""Canonical Agent session events and trajectory projection helpers.
 
 The physical event store is still ``agent_log_events``.  This module keeps the
-typed Agent contract at the write boundary and adapts historical generic rows
-when they are read by the trajectory API.
+typed Agent contract at the write boundary and only projects canonical rows
+for the trajectory API.
 """
 
 from __future__ import annotations
@@ -154,7 +154,7 @@ def validate_agent_session_event(event_type: str, data: object) -> dict[str, Any
     """Validate and normalize one canonical event payload.
 
     Historical generic event names deliberately do not pass through this
-    function; they remain accepted by the compatibility ingestion endpoint.
+    function or the trajectory projection.
     """
 
     model_type = _EVENT_MODELS.get(event_type)
@@ -213,125 +213,6 @@ def _payload(event: AgentLogEvent | dict[str, Any]) -> dict[str, Any]:
     return _record(_value(event, "payload", _value(event, "payload_data", {})))
 
 
-def _text(value: object) -> str:
-    if isinstance(value, str):
-        return value
-    if isinstance(value, list):
-        return "".join(_text(item) for item in value)
-    if isinstance(value, dict):
-        for key in ("text", "content", "output", "value"):
-            if key in value:
-                return _text(value[key])
-    return ""
-
-
-def _legacy_reason(event_type: str, status: str, payload: dict[str, Any]) -> dict[str, Any]:
-    if event_type in {"session/error", "llm/error", "execution/error"} or status in {"error", "failed"}:
-        return {
-            "kind": "error",
-            "error": str(payload.get("error") or payload.get("message") or "Agent 运行失败"),
-        }
-    return {"kind": "completed"}
-
-
-def adapt_legacy_agent_log_event(event: AgentLogEvent | dict[str, Any]) -> dict[str, Any] | None:
-    """Map a known historical generic row into the canonical envelope."""
-
-    event_type = str(_value(event, "event_type", ""))
-    payload = _payload(event)
-    sequence = _int_value(_value(event, "sequence")) or _int_value(_value(event, "id")) or 0
-    turn = _event_turn(event, payload)
-    step = _event_step(event, payload)
-    status = str(_value(event, "status", "info"))
-    duration_ms = _value(event, "duration_ms")
-    usage = _value(event, "usage", _value(event, "usage_data"))
-    created_at = _value(event, "created_at")
-
-    mapped_type: str | None = None
-    data: dict[str, Any] = {}
-    if event_type in {"session/turn-start", "execution/start"}:
-        mapped_type = "turn/start"
-        data = {"turn": turn}
-    elif event_type in {"session/turn-end", "execution/complete", "session/error", "execution/error", "llm/error"}:
-        mapped_type = "turn/end"
-        data = {"reason": _legacy_reason(event_type, status, payload)}
-    elif event_type in {"session/user-message", "user/message"}:
-        mapped_type = "user/message"
-        data = {
-            "content": [{"kind": "text", "text": _text(payload.get("text") or payload.get("content"))}],
-            "source": {"kind": "user"},
-        }
-    elif event_type in {"session/assistant-message", "llm/response", "assistant/message"}:
-        mapped_type = "assistant/message"
-        blocks: list[dict[str, Any]] = []
-        reasoning = _text(payload.get("reasoning") or payload.get("thinking"))
-        text = _text(payload.get("text") or payload.get("content"))
-        if reasoning:
-            blocks.append({"kind": "reasoning", "text": reasoning})
-        if text:
-            blocks.append({"kind": "text", "text": text})
-        for tool_call in payload.get("toolCalls") or payload.get("tool_calls") or []:
-            if isinstance(tool_call, dict):
-                blocks.append({
-                    "kind": "tool-call",
-                    "callId": tool_call.get("callId") or tool_call.get("toolCallId") or tool_call.get("id"),
-                    "name": tool_call.get("name") or tool_call.get("toolName") or "Tool",
-                    "arguments": tool_call.get("arguments") or tool_call.get("input") or {},
-                })
-        data = {"blocks": blocks}
-        if isinstance(usage, dict):
-            data["usage"] = usage
-        if isinstance(duration_ms, int):
-            data["timing"] = {"durationMs": duration_ms}
-        data["legacyEventType"] = event_type
-    elif event_type in {"tool/call", "tool/approval"}:
-        call_id = payload.get("callId") or payload.get("toolCallId") or payload.get("tool_call_id")
-        if not isinstance(call_id, str) or not call_id:
-            return None
-        mapped_type = "tool/call"
-        data = {
-            "callId": call_id,
-            "name": payload.get("name") or payload.get("toolName") or payload.get("tool_name") or "Tool",
-            "arguments": payload.get("arguments") or payload.get("input") or payload.get("inputSummary") or {},
-        }
-    elif event_type == "tool/result":
-        call_id = payload.get("callId") or payload.get("toolCallId") or payload.get("tool_call_id")
-        if not isinstance(call_id, str) or not call_id:
-            return None
-        mapped_type = "tool/result"
-        data = {
-            "callId": call_id,
-            "content": payload.get("content") if isinstance(payload.get("content"), list) else [{"kind": "text", "text": _text(payload.get("output") or payload.get("result"))}],
-            "isError": status in {"error", "failed", "uncertain"} or payload.get("isError") is True,
-        }
-        if payload.get("error"):
-            data["error"] = str(payload["error"])
-    elif event_type in {"llm/request", "request/header"}:
-        mapped_type = "request/header"
-        data = {"turn": turn, **payload}
-        data.pop("turn_id", None)
-        if step is not None:
-            data["step"] = step
-    elif event_type in {"skill/selected", "skill/reference", "session/capabilities", "execution/checkpoint"}:
-        mapped_type = "agent/skill"
-        data = {
-            "name": str(payload.get("skillName") or payload.get("name") or event_type),
-            "metadata": payload,
-        }
-    else:
-        return None
-
-    return {
-        "seq": sequence,
-        "time": _event_time_ms(created_at),
-        "type": mapped_type,
-        "turn": turn,
-        "step": step,
-        "data": data,
-        "legacy": True,
-    }
-
-
 def agent_session_event_payload(event: AgentLogEvent | dict[str, Any]) -> dict[str, Any]:
     """Serialize a canonical database row using the frontend event envelope."""
 
@@ -349,32 +230,16 @@ def agent_session_event_payload(event: AgentLogEvent | dict[str, Any]) -> dict[s
 def trajectory_event_payloads(
     events: list[AgentLogEvent | dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    """Prefer canonical rows when a stream contains them to avoid duplicates."""
+    """Project canonical rows only; historical generic rows are unsupported."""
 
     canonical = [
         event for event in events
         if str(_value(event, "event_type", "")) in CANONICAL_EVENT_TYPES
     ]
-    source = canonical or events
-    if canonical and not any(
-        str(_value(event, "event_type", "")) == "turn/end" for event in canonical
-    ):
-        source = canonical + [
-            event for event in events
-            if str(_value(event, "event_type", "")) in {
-                "session/turn-end", "session/error", "execution/complete", "execution/error", "llm/error",
-            }
-        ]
-    projected = []
-    for event in source:
-        event_type = str(_value(event, "event_type", ""))
-        if event_type in CANONICAL_EVENT_TYPES:
-            projected.append(agent_session_event_payload(event))
-        else:
-            adapted = adapt_legacy_agent_log_event(event)
-            if adapted is not None:
-                projected.append(adapted)
-    return sorted(projected, key=lambda item: item["seq"])
+    return sorted(
+        (agent_session_event_payload(event) for event in canonical),
+        key=lambda item: item["seq"],
+    )
 
 
 def _state_turn(data: dict[str, Any], envelope: dict[str, Any]) -> int:

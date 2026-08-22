@@ -3,53 +3,31 @@
 import { act, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { AgentLogEvent } from '@/lib/ai/agent-log-client'
 import { ChatAgentLogDialog } from './ChatAgentLogDialog'
 
 const api = vi.hoisted(() => ({
-  listAllAgentLogEvents: vi.fn(),
+  listAgentTrajectory: vi.fn(),
 }))
 
 vi.mock('@/lib/ai/agent-log-client', () => ({
-  listAllAgentLogEvents: api.listAllAgentLogEvents,
+  listAgentTrajectory: api.listAgentTrajectory,
 }))
 
-const firstEvent: AgentLogEvent = {
-  id: 1,
-  sequence: 1,
-  stream_kind: 'chat',
-  stream_key: 'chat:7',
-  session_id: 7,
-  job_id: null,
-  execution_id: null,
-  turn_id: 'turn-1',
-  step_id: null,
-  event_type: 'session/turn-start',
-  phase: 'chat',
-  status: 'running',
-  payload: { kind: 'user-message' },
-  usage: null,
-  duration_ms: null,
-  created_at: '2026-08-20T08:00:00Z',
-}
-
-const secondEvent: AgentLogEvent = {
-  ...firstEvent,
-  id: 2,
-  sequence: 2,
-  event_type: 'llm/response',
-  status: 'completed',
-  payload: { text: '完成' },
-}
+const firstEvent = { seq: 1, time: 1_000, type: 'turn/start' as const, turn: 1, step: null, data: { turn: 1 } }
+const secondEvent = { seq: 2, time: 2_000, type: 'assistant/message' as const, turn: 1, step: 1, data: { turn: 1, step: 1, blocks: [{ kind: 'text', text: '完成' }] } }
 
 describe('ChatAgentLogDialog', () => {
   beforeEach(() => {
     vi.useFakeTimers()
     vi.clearAllMocks()
-    api.listAllAgentLogEvents.mockResolvedValue({
+    api.listAgentTrajectory.mockResolvedValue({
+      session_key: 'chat:7',
       events: [firstEvent],
+      next_sequence: 1,
       has_more: false,
-      next_sequence: null,
+      is_running: true,
+      last_error: null,
+      unsupported_format: false,
     })
   })
 
@@ -57,7 +35,7 @@ describe('ChatAgentLogDialog', () => {
     vi.useRealTimers()
   })
 
-  it('only loads and polls the trace while the dialog is open', async () => {
+  it('only loads and polls the canonical trace while the dialog is open', async () => {
     const { rerender } = render(
       <ChatAgentLogDialog
         sessionId={7}
@@ -68,7 +46,7 @@ describe('ChatAgentLogDialog', () => {
     )
 
     await act(async () => { await Promise.resolve() })
-    expect(api.listAllAgentLogEvents).not.toHaveBeenCalled()
+    expect(api.listAgentTrajectory).not.toHaveBeenCalled()
 
     rerender(
       <ChatAgentLogDialog
@@ -83,13 +61,13 @@ describe('ChatAgentLogDialog', () => {
       await Promise.resolve()
       await Promise.resolve()
     })
-    expect(api.listAllAgentLogEvents).toHaveBeenCalledTimes(1)
+    expect(api.listAgentTrajectory).toHaveBeenCalledTimes(1)
 
     await act(async () => {
       vi.advanceTimersByTime(2_000)
       await Promise.resolve()
     })
-    expect(api.listAllAgentLogEvents).toHaveBeenCalledTimes(2)
+    expect(api.listAgentTrajectory).toHaveBeenCalledTimes(2)
 
     rerender(
       <ChatAgentLogDialog
@@ -103,13 +81,13 @@ describe('ChatAgentLogDialog', () => {
       vi.advanceTimersByTime(2_000)
       await Promise.resolve()
     })
-    expect(api.listAllAgentLogEvents).toHaveBeenCalledTimes(2)
+    expect(api.listAgentTrajectory).toHaveBeenCalledTimes(2)
   })
 
   it('keeps existing event nodes when a refresh appends new events', async () => {
-    api.listAllAgentLogEvents
-      .mockResolvedValueOnce({ events: [firstEvent], has_more: false, next_sequence: null })
-      .mockResolvedValueOnce({ events: [firstEvent, secondEvent], has_more: false, next_sequence: null })
+    api.listAgentTrajectory
+      .mockResolvedValueOnce({ session_key: 'chat:7', events: [firstEvent], next_sequence: 1, has_more: false, is_running: true, last_error: null, unsupported_format: false })
+      .mockResolvedValueOnce({ session_key: 'chat:7', events: [firstEvent, secondEvent], next_sequence: 2, has_more: false, is_running: false, last_error: null, unsupported_format: false })
 
     render(
       <ChatAgentLogDialog

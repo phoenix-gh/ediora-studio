@@ -126,6 +126,10 @@ async def get_agent_trajectory(
         db,
         **{scope_name: scope_value},
     )
+    canonical_rows = [
+        row for row in rows
+        if row.event_type in CANONICAL_EVENT_TYPES
+    ]
     replay = trajectory_event_payloads(rows)
     visible = [item for item in replay if after_sequence is None or item["seq"] > after_sequence]
     page = visible[: limit + 1]
@@ -145,6 +149,7 @@ async def get_agent_trajectory(
         "has_more": has_more,
         "is_running": state["is_running"],
         "last_error": state["last_error"],
+        "unsupported_format": bool(rows) and not canonical_rows,
     }
 
 

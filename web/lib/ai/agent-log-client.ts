@@ -54,6 +54,7 @@ export type AgentTrajectoryPage = {
   has_more: boolean
   is_running: boolean
   last_error: { kind: 'error'; message: string; turn?: number } | null
+  unsupported_format: boolean
 }
 
 export type AgentSessionEventInput = {

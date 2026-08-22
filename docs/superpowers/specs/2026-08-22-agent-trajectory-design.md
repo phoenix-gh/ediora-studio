@@ -69,8 +69,8 @@ request metadata, usage, timing, interruption, and typed terminal reasons.
 - A frontend projection from canonical events to turn/group/cell records,
   including partial assistant output and running tool calls.
 - A shared Trajectory component used by Chat and Job dialogs.
-- A compatibility projection for existing generic events so historical traces
-  remain inspectable after the new path is introduced.
+- An explicit unsupported-format result for historical generic events; they
+  are not converted into canonical trajectory records.
 - Focused tests for the event contract, projection, incremental merge, and
   Chat/Job integration boundaries.
 
@@ -115,10 +115,10 @@ session uses the existing Chat session identity as its Agent session boundary.
 Version 1 reuses the existing `agent_log_events` table as the one physical
 append-only store for Agent session events. It is not a second parallel log.
 The Chat and Job writers will use a strict canonical write adapter, and the
-read API will expose the canonical envelope below. Existing generic rows stay
-readable through the legacy adapter. The generic `phase`/`status` columns are
-not the trace model; they remain optional legacy metadata and are not required
-by the Trajectory projection.
+read API will expose the canonical envelope below. Existing generic rows are
+not converted into the trace model and are reported as unsupported. The
+generic `phase`/`status` columns are not the trace model; they remain optional
+audit metadata and are not required by the Trajectory projection.
 
 The table's scoped insertion id supplies `seq`, its persisted creation time
 supplies `time`, `event_type` supplies `type`, and `payload_data` supplies the
@@ -237,7 +237,8 @@ Add a scoped Agent Trajectory read API that supports:
 - Chat session or Job execution scope, never an unrestricted mixed stream.
 - `after_seq` cursor for append-only incremental reads.
 - Initial tail load for the currently active session.
-- Canonical event validation and legacy-event adaptation on the server.
+- Canonical event validation on the server; historical generic rows are
+  reported as unsupported by the trajectory endpoint.
 - Explicit `is_running`, `lastError`, and open turn/step state derived from
   canonical events rather than “latest generic start vs latest generic end”.
 
@@ -258,8 +259,8 @@ selection state needed for reopening the same session.
 - Tool failures remain paired `tool/result` records with `isError` and error
   details. A side-effecting tool with unknown outcome stays visibly uncertain
   instead of being silently marked failed or succeeded.
-- Legacy generic events are rendered through a compatibility adapter with
-  reduced fidelity and an explicit legacy indicator.
+- Historical generic events are not rendered through a compatibility adapter;
+  the UI shows that the old format is unsupported.
 
 ## Security and data exposure
 
@@ -273,7 +274,7 @@ selection state needed for reopening the same session.
 
 - Backend: canonical event validation, sequence-scoped pagination, turn/step
   open-state derivation, tool pairing, interruption/error projection, and
-  legacy adaptation.
+  unsupported historical-format detection.
 - Frontend: event merge by cursor, stable identities for partial-to-complete
   transitions, turn/step grouping, call/result/subtool projection, inspector
   selection persistence, and closed-dialog polling behavior.
@@ -295,5 +296,5 @@ selection state needed for reopening the same session.
   status is not left running.
 - Polling while a Dialog is open adds/updates keyed records without rebuilding
   the entire trace DOM or losing selection/folding.
-- Existing historical generic logs remain readable through the compatibility
-  adapter.
+- Historical generic logs show an explicit unsupported-format message instead
+  of being converted into a canonical trace.

@@ -8,12 +8,10 @@ import { AgentTrajectoryPanel } from './AgentTrajectoryPanel'
 
 const api = vi.hoisted(() => ({
   listAgentTrajectory: vi.fn(),
-  listAllAgentLogEvents: vi.fn(),
 }))
 
 vi.mock('@/lib/ai/agent-log-client', () => ({
   listAgentTrajectory: api.listAgentTrajectory,
-  listAllAgentLogEvents: api.listAllAgentLogEvents,
 }))
 
 function event(
@@ -45,6 +43,7 @@ describe('AgentTrajectoryPanel', () => {
       has_more: false,
       is_running: false,
       last_error: null,
+      unsupported_format: false,
     })
   })
 
@@ -52,7 +51,7 @@ describe('AgentTrajectoryPanel', () => {
     vi.useRealTimers()
   })
 
-  it('only loads while open and keeps keyed ledger nodes across polling', async () => {
+  it('only loads while open and stops polling after a completed trace', async () => {
     const { rerender } = render(
       <AgentTrajectoryPanel scope={{ session_id: 7 }} open={false} developerModeEnabled={false} />,
     )
@@ -81,7 +80,7 @@ describe('AgentTrajectoryPanel', () => {
       await Promise.resolve()
       await Promise.resolve()
     })
-    expect(api.listAgentTrajectory).toHaveBeenCalledTimes(2)
+    expect(api.listAgentTrajectory).toHaveBeenCalledTimes(1)
     expect(screen.getByTestId('trajectory-cell-user:2')).toBe(userCell)
 
     rerender(<AgentTrajectoryPanel scope={{ session_id: 7 }} open={false} developerModeEnabled={false} />)
@@ -89,6 +88,61 @@ describe('AgentTrajectoryPanel', () => {
       vi.advanceTimersByTime(2_000)
       await Promise.resolve()
     })
+    expect(api.listAgentTrajectory).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps polling while the trace is running and uses independent scroll regions', async () => {
+    api.listAgentTrajectory.mockResolvedValue({
+      session_key: 'chat:7',
+      events: [
+        event(1, 'turn/start', { turn: 1 }),
+        event(2, 'assistant/message', { turn: 1, step: 1, blocks: [{ kind: 'text', text: '进行中' }] }, 1, 1),
+      ],
+      next_sequence: 2,
+      has_more: false,
+      is_running: true,
+      last_error: null,
+      unsupported_format: false,
+    })
+
+    render(<AgentTrajectoryPanel scope={{ session_id: 7 }} open developerModeEnabled={false} />)
+    await act(async () => {
+      vi.advanceTimersByTime(0)
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(screen.getByTestId('trajectory-list')).toHaveClass('min-h-0', 'overflow-y-auto')
+    expect(screen.getByTestId('trajectory-inspector')).toHaveClass('min-h-0', 'overflow-y-auto')
+    expect(screen.getByTestId('trajectory-status-slot')).toHaveClass('min-h-5')
+
+    await act(async () => {
+      vi.advanceTimersByTime(2_000)
+      await Promise.resolve()
+      await Promise.resolve()
+    })
     expect(api.listAgentTrajectory).toHaveBeenCalledTimes(2)
+  })
+
+  it('shows unsupported format without loading the legacy event endpoint', async () => {
+    api.listAgentTrajectory.mockResolvedValue({
+      session_key: 'chat:7',
+      events: [],
+      next_sequence: null,
+      has_more: false,
+      is_running: false,
+      last_error: null,
+      unsupported_format: true,
+    })
+
+    render(<AgentTrajectoryPanel scope={{ session_id: 7 }} open developerModeEnabled={false} />)
+    await act(async () => {
+      vi.advanceTimersByTime(0)
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(screen.getByRole('alert')).toHaveTextContent('暂不支持旧格式数据')
+    expect(screen.queryByText('暂无 Agent 轨迹记录')).not.toBeInTheDocument()
   })
 })
