@@ -33,7 +33,6 @@ import {
 } from './chat-workspace-state'
 import type {
   ChatApprovalArgs,
-  ChatComposerSelection,
   ChatWorkspaceState,
   DisplayMessage,
 } from './chat-workspace-types'

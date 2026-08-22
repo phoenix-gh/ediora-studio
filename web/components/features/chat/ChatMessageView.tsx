@@ -97,8 +97,6 @@ function ImageJobPreview({ jobId }: { jobId: number }) {
 
   useEffect(() => {
     let cancelled = false
-    let timer: number | undefined
-
     const refresh = async () => {
       try {
         const job = await getJob(jobId)
@@ -106,18 +104,18 @@ function ImageJobPreview({ jobId }: { jobId: number }) {
         setStatus(job.status)
         setUrls(imageUrlsForJob(job))
         if (job.status === 'succeeded' || job.status === 'failed' || job.status === 'cancelled') {
-          if (timer !== undefined) window.clearInterval(timer)
+          window.clearInterval(timer)
         }
       } catch {
         if (!cancelled) setStatus('failed')
       }
     }
 
+    const timer = window.setInterval(() => void refresh(), 2_000)
     void refresh()
-    timer = window.setInterval(() => void refresh(), 2_000)
     return () => {
       cancelled = true
-      if (timer !== undefined) window.clearInterval(timer)
+      window.clearInterval(timer)
     }
   }, [jobId])
 

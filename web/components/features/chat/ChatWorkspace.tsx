@@ -55,15 +55,13 @@ export function ChatWorkspace({ variant, onClose, onOpenFullChat }: ChatWorkspac
   const [showSessions, setShowSessions] = useState(true)
   const bottomRef = useRef<HTMLDivElement>(null)
   const initializedRef = useRef(false)
-  const activeSessionIdRef = useRef(activeSessionId)
-  activeSessionIdRef.current = activeSessionId
+  const initialActiveSessionIdRef = useRef(activeSessionId)
 
   useEffect(() => {
     let cancelled = false
-    setListLoading(true)
     void refreshSessions()
       .then(nextSessions => {
-        if (cancelled || initializedRef.current || activeSessionIdRef.current !== null) return
+        if (cancelled || initializedRef.current || initialActiveSessionIdRef.current !== null) return
         initializedRef.current = true
         if (nextSessions[0]) {
           void openSession(nextSessions[0].id).catch(error => {
