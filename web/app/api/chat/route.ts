@@ -351,6 +351,48 @@ export function chatTrajectoryChunk(chunk: unknown): Record<string, unknown> | n
   }
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function toolResultError(value: unknown) {
+  if (value === undefined || value === null) return undefined
+  return value instanceof Error ? value.message : typeof value === 'string' ? value : String(value)
+}
+
+function toolResultText(value: unknown) {
+  if (typeof value === 'string') return value
+  try { return JSON.stringify(value) ?? String(value) } catch { return String(value) }
+}
+
+export function chatAgentSessionEventFromToolResult(
+  result: unknown,
+  context: { turn: number; step: number },
+): AgentSessionEventDraft | null {
+  if (!isRecord(result) || typeof result.toolCallId !== 'string' || !result.toolCallId) return null
+  const output = result.output
+  const outputRecord = isRecord(output) ? output : null
+  const error = toolResultError(result.error)
+  const content = Array.isArray(outputRecord?.content)
+    ? outputRecord.content.filter(item => typeof item === 'string' || isRecord(item))
+    : undefined
+  const isError = result.type === 'tool-error' || outputRecord?.isError === true || Boolean(error)
+  return {
+    type: 'tool/result',
+    turn: context.turn,
+    step: context.step,
+    data: {
+      turn: context.turn,
+      step: context.step,
+      callId: result.toolCallId,
+      ...(content ? { content } : { content: [{ kind: 'text', text: error ?? toolResultText(output) }] }),
+      ...(output === undefined ? {} : { output }),
+      ...(error ? { error } : {}),
+      isError,
+    },
+  }
+}
+
 function chatSessionEvent(
   context: ChatAgentLogContext,
   event: Omit<AgentLogEventInput, 'stream_kind' | 'stream_key' | 'session_id' | 'turn_id'>,
@@ -428,6 +470,8 @@ export async function POST(request: NextRequest) {
   }))
 
   let registry: Awaited<ReturnType<typeof openAgentRuntime>> | undefined
+  const auditedToolResultKeys = new Set<string>()
+  const toolResultKey = (turn: number, step: number, callId: string) => `${turn}:${step}:${callId}`
   let canonicalTurnStarted = false
   let canonicalTurnEnded = false
   const finishCanonicalTurn = async (reason: Record<string, unknown>) => {
@@ -501,9 +545,12 @@ export async function POST(request: NextRequest) {
       onMessage: event => persistChatAgentLogEvent(
         chatAgentLogEventFromModelMessage(event, logContext),
       ),
-      onToolAudit: event => persistChatAgentLogEvent(
-        chatAgentLogEventFromToolAudit(event, logContext),
-      ),
+      onToolAudit: event => {
+        if (event.status !== 'started' && event.step !== undefined) {
+          auditedToolResultKeys.add(toolResultKey(logContext.turn ?? 1, event.step, event.toolCallId))
+        }
+        return persistChatAgentLogEvent(chatAgentLogEventFromToolAudit(event, logContext))
+      },
       onSessionEvent: event => persistChatAgentSessionEvent(event, logContext),
     })
     registry = runtime
@@ -677,6 +724,13 @@ export async function POST(request: NextRequest) {
         }
       },
       onStepFinish: async ({ text, toolCalls, toolResults, finishReason, usage }) => {
+        const turn = logContext.turn ?? 1
+        const step = lastStreamStep || 1
+        for (const result of toolResults) {
+          const event = chatAgentSessionEventFromToolResult(result, { turn, step })
+          if (!event || auditedToolResultKeys.has(toolResultKey(turn, step, event.data.callId as string))) continue
+          await persistChatAgentSessionEvent(event, logContext)
+        }
         await persistChatAgentLogEvent(chatSessionEvent(logContext, {
           event_type: 'llm/response',
           phase: 'execute',
