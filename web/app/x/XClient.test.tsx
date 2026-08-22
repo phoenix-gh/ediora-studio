@@ -69,6 +69,12 @@ const newerPost = {
   url: 'https://x.com/openai/status/post-2',
 } satisfies XPost
 
+const imagePost = {
+  ...post,
+  tweet_id: 'post-with-image',
+  cover_image: 'https://pbs.twimg.com/media/example.jpg',
+} satisfies XPost
+
 const subscription = {
   id: 1,
   url: 'https://x.com/openai',
@@ -267,5 +273,17 @@ describe('XClient initial feed recovery', () => {
     const frequencySelect = await screen.findByLabelText('采集频率')
     expect(frequencySelect).toHaveClass('text-foreground', 'bg-control')
     expect(frequencySelect.querySelector('option')).toHaveClass('bg-surface', 'text-foreground')
+  })
+})
+
+describe('XClient post images', () => {
+  it('keeps cover images fully visible instead of cropping them', () => {
+    render(<XClient initialSubs={[]} initialPosts={[imagePost]} />)
+
+    const image = document.querySelector(`img[src="${imagePost.cover_image}"]`)
+
+    expect(image).not.toBeNull()
+    expect(image).toHaveClass('h-auto', 'max-h-[420px]', 'max-w-full', 'object-contain', 'w-auto')
+    expect(image).not.toHaveClass('object-cover', 'w-full')
   })
 })
