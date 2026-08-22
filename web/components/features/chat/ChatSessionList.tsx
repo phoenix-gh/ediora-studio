@@ -73,14 +73,14 @@ function FloatingSessionPicker({
             type="button"
             data-testid="floating-chat-session-picker"
             aria-label={activeSession ? `选择会话，当前为：${activeSession.title || '新对话'}` : '选择会话，当前为：新对话'}
-            className="flex min-w-0 max-w-[min(14rem,40vw)] items-center gap-1.5 rounded-md border border-border bg-control px-2 py-1.5 text-left text-xs text-foreground transition-colors hover:border-indigo-300 hover:bg-muted"
+            className="flex min-w-0 max-w-[min(14rem,40vw)] items-center gap-1.5 overflow-hidden rounded-md border border-border bg-control px-2 py-1.5 text-left text-xs text-foreground transition-colors hover:border-indigo-300 hover:bg-muted"
           />
         )}
       >
         <MessageSquare aria-hidden="true" className="size-3.5 shrink-0 text-indigo-600" />
         <span className="shrink-0 font-medium text-foreground-subtle">会话</span>
         <span aria-hidden="true" className="text-foreground-subtle">:</span>
-        <span className="truncate">{activeSession?.title || '新对话'}</span>
+        <span className="min-w-0 truncate">{activeSession?.title || '新对话'}</span>
         <ChevronDown aria-hidden="true" className="size-3.5 shrink-0" />
       </PopoverTrigger>
       <PopoverContent align="start" positionerClassName="z-[60]" className="w-[min(22rem,calc(100vw-2rem))] p-2">
