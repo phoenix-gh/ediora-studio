@@ -91,6 +91,44 @@ describe('AgentTrajectoryPanel', () => {
     expect(api.listAgentTrajectory).toHaveBeenCalledTimes(1)
   })
 
+  it('selects only the matching tool row when call IDs repeat across turns', async () => {
+    api.listAgentTrajectory.mockResolvedValueOnce({
+      session_key: 'chat:7',
+      events: [
+        event(1, 'turn/start', { turn: 1 }, 1),
+        event(2, 'step/start', { turn: 1, step: 1 }, 1, 1),
+        event(3, 'tool/call', { turn: 1, step: 1, callId: 'loadSkill', name: 'loadSkill', arguments: { name: 'Alpha' } }, 1, 1),
+        event(4, 'tool/result', { turn: 1, step: 1, callId: 'loadSkill', content: [{ kind: 'text', text: 'Alpha loaded' }], isError: false }, 1, 1),
+        event(5, 'turn/end', { reason: { kind: 'completed' } }, 1),
+        event(6, 'turn/start', { turn: 2 }, 2),
+        event(7, 'step/start', { turn: 2, step: 1 }, 2, 1),
+        event(8, 'tool/call', { turn: 2, step: 1, callId: 'loadSkill', name: 'loadSkill', arguments: { name: 'Beta' } }, 2, 1),
+        event(9, 'tool/result', { turn: 2, step: 1, callId: 'loadSkill', content: [{ kind: 'text', text: 'Beta loaded' }], isError: false }, 2, 1),
+        event(10, 'turn/end', { reason: { kind: 'completed' } }, 2),
+      ],
+      next_sequence: 10,
+      has_more: false,
+      is_running: false,
+      last_error: null,
+      unsupported_format: false,
+    })
+
+    render(<AgentTrajectoryPanel scope={{ session_id: 7 }} open developerModeEnabled={false} />)
+    await act(async () => {
+      vi.advanceTimersByTime(0)
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    const toolRows = screen.getAllByRole('button', { name: /loadSkill/ })
+    expect(toolRows).toHaveLength(2)
+
+    fireEvent.click(toolRows[0]!)
+
+    expect(toolRows[0]).toHaveAttribute('aria-pressed', 'true')
+    expect(toolRows[1]).toHaveAttribute('aria-pressed', 'false')
+  })
+
   it('keeps polling while the trace is running and uses independent scroll regions', async () => {
     api.listAgentTrajectory.mockResolvedValue({
       session_key: 'chat:7',
