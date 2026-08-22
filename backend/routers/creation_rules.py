@@ -133,6 +133,7 @@ def _rule_out(rule: DailyCreationRule) -> dict:
         "prompt": rule.prompt,
         "skill_mode": rule.skill_mode or "auto", "skill_name": rule.skill_name,
         "enabled": rule.enabled,
+        "deleted_at": rule.deleted_at.isoformat() if rule.deleted_at else None,
         "created_at": rule.created_at.isoformat() if rule.created_at else "",
         "updated_at": rule.updated_at.isoformat() if rule.updated_at else "",
     }

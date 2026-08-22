@@ -55,3 +55,32 @@ def test_run_now_is_available_for_a_paused_rule(client, monkeypatch):
     assert response.status_code == 202, response.text
     assert response.json()["trigger_kind"] == "explicit"
     assert len(enqueued) == 1
+
+
+def test_dashboard_marks_deleted_historical_rules_as_deleted(client, monkeypatch):
+    async def fake_enqueue(_job_id):
+        return None
+
+    import job_queue
+    monkeypatch.setattr(job_queue, "enqueue_job", fake_enqueue)
+
+    rule = client.post(
+        "/api/creation-rules",
+        json={
+            "name": "待删除规则",
+            "prompt": "保留历史运行记录。",
+            "execution_mode": "recurring",
+            "scheduled_time": "09:00",
+            "timezone": "Asia/Shanghai",
+            "enabled": True,
+        },
+    ).json()
+    run = client.post(f"/api/creation-rules/{rule['id']}/run")
+    assert run.status_code == 202, run.text
+    assert client.delete(f"/api/creation-rules/{rule['id']}").status_code == 204
+
+    dashboard = client.get("/api/creation-rules/dashboard")
+
+    assert dashboard.status_code == 200, dashboard.text
+    historical = next(item for item in dashboard.json()["rules"] if item["id"] == rule["id"])
+    assert historical["deleted_at"] is not None
