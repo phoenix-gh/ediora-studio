@@ -138,7 +138,7 @@ export function ChatWorkspace({ variant, onClose, onOpenFullChat, onResetSize, o
   const showEmptyState = messages.length === 0 && !isActiveLoading
 
   return (
-    <div className="flex h-full min-h-0 bg-surface">
+    <div className="flex h-full min-h-0 min-w-0 bg-surface">
       {!isFloating && (
         <ChatSessionList
           sessions={sessions}
@@ -159,17 +159,27 @@ export function ChatWorkspace({ variant, onClose, onOpenFullChat, onResetSize, o
           data-testid={isFloating ? 'floating-chat-drag-handle' : undefined}
           onPointerDown={isFloating ? onHeaderPointerDown : undefined}
           className={cn(
-            'flex items-center justify-between gap-3 border-border py-4',
-            isFloating ? 'min-h-14 cursor-move select-none border-b px-3' : 'h-[var(--app-header-height)] min-h-[var(--app-header-height)]',
+            'flex items-center justify-between gap-3 border-border',
+            isFloating
+              ? 'min-h-14 cursor-move select-none border-b px-3 py-2'
+              : 'h-[var(--app-header-height)] min-h-[var(--app-header-height)] py-4',
           )}
         >
-          <div className={cn(chatConversationColumn, 'flex min-w-0 items-center justify-between gap-3', isFloating && 'mx-0 max-w-none px-0')}>
-            <div className="flex min-w-0 items-center gap-3">
-              <FileSearch className="h-5 w-5 shrink-0 text-indigo-600" />
-              <div className="min-w-0">
-                <h2 className="truncate font-medium text-foreground">{isFloating ? 'AI 助手' : '全局研究助手'}</h2>
-                <p className="truncate text-xs text-muted-foreground">可检索写作方案；所有工具调用均会记录。</p>
-              </div>
+          <div className={cn(
+            chatConversationColumn,
+            'flex min-w-0 items-center gap-2',
+            isFloating ? 'mx-0 max-w-none px-0' : 'justify-between gap-3',
+          )}>
+            <div className={cn('flex min-w-0 items-center gap-2', isFloating && 'flex-1')}>
+              <FileSearch className="h-4 w-4 shrink-0 text-indigo-600" />
+              {isFloating ? (
+                <h2 className="shrink-0 truncate font-medium text-foreground">AI 助手</h2>
+              ) : (
+                <div className="min-w-0">
+                  <h2 className="truncate font-medium text-foreground">全局研究助手</h2>
+                  <p className="truncate text-xs text-muted-foreground">可检索写作方案；所有工具调用均会记录。</p>
+                </div>
+              )}
               {isFloating && (
                 <ChatSessionList
                   sessions={sessions}

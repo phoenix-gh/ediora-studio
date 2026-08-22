@@ -100,6 +100,22 @@ describe('ChatWorkspace', () => {
     expect(header.querySelectorAll('button').item(header.querySelectorAll('button').length - 1)).toBe(closeButton)
   })
 
+  it('hides the page subtitle in the floating header', async () => {
+    renderWorkspace('floating')
+
+    await screen.findByTestId('floating-chat-drag-handle')
+
+    expect(screen.queryByText('可检索写作方案；所有工具调用均会记录。')).not.toBeInTheDocument()
+  })
+
+  it('labels the floating session picker as a session control', async () => {
+    renderWorkspace('floating')
+
+    const picker = await screen.findByTestId('floating-chat-session-picker')
+
+    expect(picker).toHaveTextContent('会话')
+  })
+
   it('keeps cached messages isolated when switching sessions', async () => {
     const user = userEvent.setup()
     renderWorkspace('floating')

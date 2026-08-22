@@ -29,6 +29,12 @@ it('uses the shared column in both conversation and composer regions', () => {
   expect(composer).toContain('chatComposerColumn')
 })
 
+it('allows the floating workspace to shrink with its dialog', () => {
+  const workspace = readFeatureSource('ChatWorkspace.tsx')
+
+  expect(workspace).toContain('flex h-full min-h-0 min-w-0 bg-surface')
+})
+
 it('does not render message avatars', () => {
   const source = readFeatureSource('ChatMessageView.tsx')
 
@@ -47,7 +53,7 @@ it('uses the shared workspace surface and borderless assistant replies', () => {
   const sessions = readFeatureSource('ChatSessionList.tsx')
   const message = readFeatureSource('ChatMessageView.tsx')
 
-  expect(workspace).toContain('flex h-full min-h-0 bg-surface')
+  expect(workspace).toContain('flex h-full min-h-0 min-w-0 bg-surface')
   expect(workspace).toContain('h-[var(--app-header-height)] min-h-[var(--app-header-height)]')
   expect(message).toContain("isUser ? 'rounded-tr-sm bg-primary text-primary-foreground' : 'text-foreground'")
   expect(sessions).toContain('border-r border-border')
