@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { ChevronDown, Loader2, Pencil, Plus, Trash2 } from 'lucide-react'
+import { ChevronDown, Loader2, MessageSquare, Pencil, Plus, Trash2 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -73,10 +73,13 @@ function FloatingSessionPicker({
             type="button"
             data-testid="floating-chat-session-picker"
             aria-label={activeSession ? `选择会话，当前为：${activeSession.title || '新对话'}` : '选择会话，当前为：新对话'}
-            className="flex min-w-0 max-w-56 items-center gap-1 rounded-md px-1.5 py-1 text-left text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            className="flex min-w-0 max-w-[min(14rem,40vw)] items-center gap-1.5 rounded-md border border-border bg-control px-2 py-1.5 text-left text-xs text-foreground transition-colors hover:border-indigo-300 hover:bg-muted"
           />
         )}
       >
+        <MessageSquare aria-hidden="true" className="size-3.5 shrink-0 text-indigo-600" />
+        <span className="shrink-0 font-medium text-foreground-subtle">会话</span>
+        <span aria-hidden="true" className="text-foreground-subtle">:</span>
         <span className="truncate">{activeSession?.title || '新对话'}</span>
         <ChevronDown aria-hidden="true" className="size-3.5 shrink-0" />
       </PopoverTrigger>
