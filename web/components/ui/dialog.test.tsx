@@ -24,6 +24,16 @@ import {
 } from './dialog'
 
 describe('DialogContent', () => {
+  it('does not render an overlay when showOverlay is false', () => {
+    render(
+      <Dialog open>
+        <DialogContent showOverlay={false}>content</DialogContent>
+      </Dialog>,
+    )
+
+    expect(document.querySelector('[data-slot="dialog-overlay"]')).not.toBeInTheDocument()
+  })
+
   it.each(['sm', 'md', 'lg'] as const)(
     'opens %s dialogs, closes with Escape, and returns focus to its trigger',
     async size => {
