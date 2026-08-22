@@ -1,12 +1,12 @@
 'use client'
 
 import { useState } from 'react'
+
+import { AgentTrajectoryPanel } from '@/components/features/agent/AgentTrajectoryPanel'
+import { useDeveloperMode } from '@/components/providers/DeveloperModeProvider'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { getCreationRunAgentLog, type CreationDashboardRun, type CreationSchedulerLog, type DailyCreationAgentLog } from '@/lib/api/creation-rules'
-import { listAllAgentLogEvents, type AgentLogEvent } from '@/lib/ai/agent-log-client'
-import { AgentLogTimeline } from '@/components/features/agent/AgentLogTimeline'
-import { useDeveloperMode } from '@/components/providers/DeveloperModeProvider'
+import { type CreationDashboardRun, type CreationSchedulerLog } from '@/lib/api/creation-rules'
 import { summarizeDirectories } from './directory-summary'
 
 function formatTime(value: string | null | undefined) {
@@ -15,7 +15,6 @@ function formatTime(value: string | null | undefined) {
     dateStyle: 'short', timeStyle: 'short', timeZone: 'Asia/Shanghai',
   }).format(new Date(value))
 }
-
 function statusLabel(status: string) {
   return ({ queued: '排队中', running: '执行中', succeeded: '成功', partial: '部分完成', failed: '失败', cancelled: '已取消' } as Record<string, string>)[status] ?? status
 }
@@ -28,58 +27,17 @@ function statusClass(status: string) {
   return 'bg-muted text-muted-foreground'
 }
 
-function jsonText(value: unknown) {
-  try { return JSON.stringify(value, null, 2) ?? String(value) } catch { return String(value) }
-}
-
-function messageLabel(direction: string) {
-  return ({
-    model_request: 'AI → 模型',
-    model_response: '模型 → AI',
-    model_error: '模型错误',
-  } as Record<string, string>)[direction] ?? direction
-}
-
-export function AgentMessageTimeline({ log, loading, error }: { log: DailyCreationAgentLog | null; loading: boolean; error: string }) {
-  return <section className="space-y-2 rounded-lg border bg-background p-3">
-    <div>
-      <h3 className="font-medium">AI 完整消息</h3>
-      <p className="text-muted-foreground">包含模型请求、模型响应、Skill 阶段和错误；敏感字段已脱敏。</p>
-    </div>
-    {loading && <p className="text-muted-foreground">完整消息加载中…</p>}
-    {error && <p className="text-danger">{error}</p>}
-    {!loading && !error && log && <>
-      {log.execution?.objective && <details className="rounded border bg-muted/30 p-2">
-        <summary className="cursor-pointer font-medium">任务目标</summary>
-        <pre className="mt-2 whitespace-pre-wrap break-words text-[11px] text-muted-foreground">{log.execution.objective}</pre>
-      </details>}
-      {log.messages.length === 0 && <p className="text-muted-foreground">暂无模型消息记录（可能是旧任务）。</p>}
-      <div className="space-y-2">
-        {log.messages.map(message => <details key={message.id} className="rounded border bg-muted/30 p-2">
-          <summary className="flex cursor-pointer flex-wrap items-center gap-2">
-            <span className="font-medium">{messageLabel(message.direction)}</span>
-            <code>{message.phase}</code>
-            <span className="text-muted-foreground">{formatTime(message.created_at)}</span>
-          </summary>
-          <pre className="mt-2 max-h-[30rem] overflow-auto whitespace-pre-wrap break-words text-[11px] text-muted-foreground">{jsonText(message.payload)}</pre>
-        </details>)}
-      </div>
-      {log.tools.length > 0 && <details className="rounded border bg-muted/30 p-2">
-        <summary className="cursor-pointer font-medium">工具完整记录（{log.tools.length}）</summary>
-        <div className="mt-2 space-y-2">
-          {log.tools.map(tool => <details key={tool.id} className="rounded border bg-background p-2">
-            <summary className="flex cursor-pointer flex-wrap items-center gap-2">
-              <code>{tool.tool_name}</code><span>{tool.status}</span><span className="text-muted-foreground">{formatTime(tool.started_at)}</span>
-            </summary>
-            <pre className="mt-2 max-h-[30rem] overflow-auto whitespace-pre-wrap break-words text-[11px] text-muted-foreground">{jsonText({ input: tool.input_summary, output: tool.output, error: tool.error })}</pre>
-          </details>)}
-        </div>
-      </details>}
-    </>}
-  </section>
-}
-
-function RunDetail({ run, schedulerLogs, agentLog, agentEvents, agentLogLoading, agentLogError, developerModeEnabled }: { run: CreationDashboardRun; schedulerLogs: CreationSchedulerLog[]; agentLog: DailyCreationAgentLog | null; agentEvents: AgentLogEvent[]; agentLogLoading: boolean; agentLogError: string; developerModeEnabled: boolean }) {
+function RunDetail({
+  run,
+  schedulerLogs,
+  developerModeEnabled,
+  open,
+}: {
+  run: CreationDashboardRun
+  schedulerLogs: CreationSchedulerLog[]
+  developerModeEnabled: boolean
+  open: boolean
+}) {
   const detail = run.detail
   const outputs = Array.isArray(detail.outputs) ? detail.outputs as Array<{ draft_id?: number }> : []
   const job = run.job
@@ -115,9 +73,7 @@ function RunDetail({ run, schedulerLogs, agentLog, agentEvents, agentLogLoading,
       </div>}
       {typeof agent.self_validation.summary === 'string' && agent.self_validation.summary && <p className="mt-2">自检：{agent.self_validation.summary}</p>}
     </div>}
-    {developerModeEnabled && run.content_job_id && (agentEvents.length > 0
-      ? <AgentLogTimeline events={agentEvents} loading={false} error={agentLogError} />
-      : <AgentMessageTimeline log={agentLog} loading={agentLogLoading} error={agentLogError} />)}
+    {developerModeEnabled && run.content_job_id && <AgentTrajectoryPanel scope={{ job_id: run.content_job_id }} open={open} developerModeEnabled />}
     {outputs.length > 0 && <p className="text-success">已记录 {outputs.length} 条产出</p>}
     {run.status === 'failed' && !job && <p className="text-danger">任务失败，但没有找到关联 Job 记录。</p>}
     {schedulerLogs.length > 0 && <section className="space-y-2">
@@ -135,37 +91,11 @@ function RunDetail({ run, schedulerLogs, agentLog, agentEvents, agentLogLoading,
 export function CreationRunLog({ runs, schedulerLogs }: { runs: CreationDashboardRun[]; schedulerLogs: CreationSchedulerLog[] }) {
   const developerModeEnabled = useDeveloperMode()
   const [selectedRun, setSelectedRun] = useState<CreationDashboardRun | null>(null)
-  const [agentLog, setAgentLog] = useState<DailyCreationAgentLog | null>(null)
-  const [agentEvents, setAgentEvents] = useState<AgentLogEvent[]>([])
-  const [agentLogLoading, setAgentLogLoading] = useState(false)
-  const [agentLogError, setAgentLogError] = useState('')
-
-  async function openRun(run: CreationDashboardRun) {
-    setSelectedRun(run)
-    setAgentLog(null)
-    setAgentEvents([])
-    setAgentLogError('')
-    if (!developerModeEnabled || !run.content_job_id) return
-    setAgentLogLoading(true)
-    try {
-      const [legacyResult, unifiedResult] = await Promise.allSettled([
-        getCreationRunAgentLog(run.id),
-        listAllAgentLogEvents({ job_id: run.content_job_id, limit: 500 }),
-      ])
-      if (legacyResult.status === 'fulfilled') setAgentLog(legacyResult.value)
-      if (unifiedResult.status === 'fulfilled') setAgentEvents(unifiedResult.value.events)
-      if (legacyResult.status === 'rejected' && unifiedResult.status === 'rejected') {
-        throw legacyResult.reason
-      }
-    } finally {
-      setAgentLogLoading(false)
-    }
-  }
 
   return <section className="space-y-3">
     <div>
       <h2 className="font-semibold">运行日志</h2>
-      <p className="text-xs text-muted-foreground">查看定时 Job 和失败步骤{developerModeEnabled ? '，以及 AI 工具调用摘要' : ''}。</p>
+      <p className="text-xs text-muted-foreground">查看定时 Job 和失败步骤{developerModeEnabled ? '，以及 Agent Turn 轨迹' : ''}。</p>
     </div>
     <div className="space-y-2">
       {runs.length === 0 && <div className="rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground">今天还没有规则任务</div>}
@@ -175,9 +105,7 @@ export function CreationRunLog({ runs, schedulerLogs }: { runs: CreationDashboar
           <span className="text-sm font-medium">{run.created_count} / {run.requested_count}</span>
           <span className={`rounded-full px-2 py-1 text-xs ${statusClass(run.status)}`}>{statusLabel(run.status)}</span>
         </div>
-        <div className="mt-3">
-          <Button variant="outline" size="sm" onClick={() => { void openRun(run) }}>查看日志</Button>
-        </div>
+        <div className="mt-3"><Button variant="outline" size="sm" onClick={() => setSelectedRun(run)}>查看日志</Button></div>
       </article>)}
     </div>
     <Dialog open={selectedRun !== null} onOpenChange={open => { if (!open) setSelectedRun(null) }}>
@@ -186,7 +114,7 @@ export function CreationRunLog({ runs, schedulerLogs }: { runs: CreationDashboar
           <DialogTitle>运行日志 · #{selectedRun.id}</DialogTitle>
           <DialogDescription>{String(selectedRun.rule.name ?? `规则 #${selectedRun.rule_id}`)} · Job #{selectedRun.content_job_id ?? '—'} · {statusLabel(selectedRun.status)}</DialogDescription>
         </DialogHeader>
-        <RunDetail run={selectedRun} schedulerLogs={schedulerLogs} agentLog={agentLog} agentEvents={agentEvents} agentLogLoading={agentLogLoading} agentLogError={agentLogError} developerModeEnabled={developerModeEnabled} />
+        <RunDetail run={selectedRun} schedulerLogs={schedulerLogs} developerModeEnabled={developerModeEnabled} open />
       </DialogContent>}
     </Dialog>
   </section>

@@ -1,5 +1,6 @@
 'use client'
 
+import { memo } from 'react'
 import { ChevronDown, CircleAlert, CircleCheck, CircleDot, Clock3, Cpu, Wrench } from 'lucide-react'
 
 import type { AgentLogEvent } from '@/lib/ai/agent-log-client'
@@ -103,27 +104,29 @@ export function AgentLogTimeline({
     {error && <p role="alert" className="text-sm text-danger">{error}</p>}
     {!loading && !error && events.length === 0 && <p className="text-sm text-muted-foreground">暂无 Agent 事件记录</p>}
     {!loading && !error && events.length > 0 && <div className="space-y-1.5">
-      {events.map(event => {
-        const summary = eventSummary(event)
-        const usage = usageSummary(event)
-        return <details key={`${event.sequence}-${event.id}`} className="rounded border bg-muted/20 p-2">
-          <summary className="flex cursor-pointer list-none items-center gap-2 text-xs [&::-webkit-details-marker]:hidden">
-            <span className={cn('shrink-0', statusClass(event.status))}><EventIcon event={event} /></span>
-            <span className="font-medium">{eventLabels[event.event_type] ?? event.event_type}</span>
-            <code className="text-[10px] text-muted-foreground">{event.phase || '—'}</code>
-            {summary && <span className="min-w-0 flex-1 truncate text-muted-foreground">{summary}</span>}
-            {!summary && <span className="flex-1" />}
-            <span className={cn('shrink-0', statusClass(event.status))}>{statusLabel(event.status)}</span>
-            <span className="shrink-0 text-muted-foreground">{formatTime(event.created_at)}</span>
-            <ChevronDown className="h-3.5 w-3.5 shrink-0 transition-transform [[open]_&]:rotate-180" />
-          </summary>
-          <div className="mt-2 space-y-1.5 border-t pt-2 text-[11px] text-muted-foreground">
-            {event.duration_ms !== null && <p>耗时 {event.duration_ms} ms</p>}
-            {usage && <p>{usage}</p>}
-            <pre className="max-h-[30rem] overflow-auto whitespace-pre-wrap break-words font-mono">{jsonText(event.payload)}</pre>
-          </div>
-        </details>
-      })}
+      {events.map(event => <AgentLogEventRow key={`${event.sequence}-${event.id}`} event={event} />)}
     </div>}
   </section>
 }
+
+const AgentLogEventRow = memo(function AgentLogEventRow({ event }: { event: AgentLogEvent }) {
+  const summary = eventSummary(event)
+  const usage = usageSummary(event)
+  return <details className="rounded border bg-muted/20 p-2">
+    <summary className="flex cursor-pointer list-none items-center gap-2 text-xs [&::-webkit-details-marker]:hidden">
+      <span className={cn('shrink-0', statusClass(event.status))}><EventIcon event={event} /></span>
+      <span className="font-medium">{eventLabels[event.event_type] ?? event.event_type}</span>
+      <code className="text-[10px] text-muted-foreground">{event.phase || '—'}</code>
+      {summary && <span className="min-w-0 flex-1 truncate text-muted-foreground">{summary}</span>}
+      {!summary && <span className="flex-1" />}
+      <span className={cn('shrink-0', statusClass(event.status))}>{statusLabel(event.status)}</span>
+      <span className="shrink-0 text-muted-foreground">{formatTime(event.created_at)}</span>
+      <ChevronDown className="h-3.5 w-3.5 shrink-0 transition-transform [[open]_&]:rotate-180" />
+    </summary>
+    <div className="mt-2 space-y-1.5 border-t pt-2 text-[11px] text-muted-foreground">
+      {event.duration_ms !== null && <p>耗时 {event.duration_ms} ms</p>}
+      {usage && <p>{usage}</p>}
+      <pre className="max-h-[30rem] overflow-auto whitespace-pre-wrap break-words font-mono">{jsonText(event.payload)}</pre>
+    </div>
+  </details>
+})

@@ -150,10 +150,28 @@ describe('daily creation Agent job', () => {
       .rejects.toThrow('Agent tool audit is failed: generateImage')
   })
 
+  it('finalizes the canonical turn and fails the Job when the model errors', async () => {
+    const { deps, runtimeRun } = dependencies()
+    const sessionEvents: Array<Record<string, unknown>> = []
+    runtimeRun.mockRejectedValue(new Error('LLM 接口失败'))
+    deps.appendSessionEvent = vi.fn(async (_jobId, _executionId, event) => { sessionEvents.push(event as Record<string, unknown>) })
+
+    await expect(runDailyCreationAgentJob(19, deps)).rejects.toThrow('LLM 接口失败')
+
+    expect(deps.failExecution).toHaveBeenCalledWith(19, 41, expect.stringContaining('LLM 接口失败'))
+    expect(deps.failStep).toHaveBeenCalledWith(19, 71, expect.any(Error), true)
+    expect(sessionEvents.at(-1)).toMatchObject({
+      type: 'turn/end',
+      data: { reason: { kind: 'error', error: 'LLM 接口失败' } },
+    })
+  })
+
   it('records Job session, Skill, capability, and turn events', async () => {
     const { deps } = dependencies()
     const events: Array<Record<string, unknown>> = []
+    const sessionEvents: Array<Record<string, unknown>> = []
     deps.appendLogEvent = vi.fn(async (_jobId, event) => { events.push(event as Record<string, unknown>) })
+    deps.appendSessionEvent = vi.fn(async (_jobId, _executionId, event) => { sessionEvents.push(event as Record<string, unknown>) })
 
     await runDailyCreationAgentJob(19, deps)
 
@@ -162,6 +180,9 @@ describe('daily creation Agent job', () => {
       'skill/selected',
       'session/capabilities',
       'session/turn-end',
+    ])
+    expect(sessionEvents.map(event => event.type)).toEqual([
+      'turn/start', 'user/message', 'agent/skill', 'turn/end',
     ])
   })
 

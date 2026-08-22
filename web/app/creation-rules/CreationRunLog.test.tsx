@@ -11,10 +11,23 @@ const api = vi.hoisted(() => ({
     messages: [{ id: 1, execution_id: 17, phase: 'execute', direction: 'model_request', payload: { messages: [{ role: 'user', content: 'create posts' }] }, created_at: '2026-08-05T12:00:30Z' }],
     tools: [],
   }),
+  listAgentTrajectory: vi.fn().mockResolvedValue({
+    session_key: 'execution:17',
+    events: [
+      { seq: 1, time: 1_000, type: 'turn/start', turn: 1, step: null, data: { turn: 1 } },
+      { seq: 2, time: 2_000, type: 'user/message', turn: 1, step: null, data: { content: [{ kind: 'text', text: 'create posts' }], source: { kind: 'job' } } },
+      { seq: 3, time: 3_000, type: 'turn/end', turn: 1, step: null, data: { reason: { kind: 'error', error: '字段不匹配' } } },
+    ],
+    next_sequence: 3,
+    has_more: false,
+    is_running: false,
+    last_error: { kind: 'error', message: '字段不匹配', turn: 1 },
+  }),
 }))
 const developerMode = vi.hoisted(() => ({ enabled: true }))
 
 vi.mock('@/lib/api/creation-rules', () => ({ getCreationRunAgentLog: api.getCreationRunAgentLog }))
+vi.mock('@/lib/ai/agent-log-client', () => ({ listAgentTrajectory: api.listAgentTrajectory }))
 vi.mock('@/components/providers/DeveloperModeProvider', () => ({
   useDeveloperMode: () => developerMode.enabled,
 }))
@@ -91,7 +104,7 @@ describe('CreationRunLog', () => {
     expect(screen.getByRole('dialog')).toHaveTextContent('字段不匹配')
     expect(screen.getByRole('dialog')).toHaveTextContent('save_daily_creation_outputs')
     expect(screen.getByRole('dialog')).toHaveTextContent('每日创作失败')
-    expect(await screen.findByText('AI 完整消息')).toBeInTheDocument()
+    expect(await screen.findByText('Agent 运行轨迹')).toBeInTheDocument()
     await waitFor(() => expect(screen.getByRole('dialog')).toHaveTextContent('create posts'))
   })
 })

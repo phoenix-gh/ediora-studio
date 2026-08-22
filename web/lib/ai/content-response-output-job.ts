@@ -14,11 +14,17 @@ import {
   type DurableAgentToolCall,
   type DurableAgentExecution,
 } from './agent-execution-client'
-import { appendAgentLogEvent, type AgentLogEventInput } from './agent-log-client'
+import {
+  appendAgentLogEvent,
+  appendAgentSessionEvent,
+  type AgentLogEventInput,
+  type AgentSessionEventInput,
+} from './agent-log-client'
 import {
   agentSkillRunAudit,
   openAgentRuntime,
   type AgentRuntime,
+  type AgentSessionEventDraft,
   type OpenAgentRuntimeOptions,
 } from './agent-runtime'
 import { RESPONSE_AGENT_TOOL_ALLOWLIST } from './agent-tool-policy'
@@ -228,6 +234,7 @@ export type ContentResponseOutputAgentJobDependencies = {
   ): Promise<DurableAgentExecution>
   appendMessage?(jobId: number, executionId: number, event: AgentModelMessageEvent): Promise<unknown>
   appendLogEvent?(jobId: number, event: AgentLogEventInput): Promise<unknown>
+  appendSessionEvent?(jobId: number, executionId: number, event: AgentSessionEventInput): Promise<unknown>
   claimToolCall(
     jobId: number, executionId: number, event: AgentToolAudit,
   ): Promise<AgentToolDecision>
@@ -267,6 +274,7 @@ const defaultDependencies: ContentResponseOutputAgentJobDependencies = {
   checkpointExecution: checkpointAgentExecution,
   appendMessage: appendAgentMessage,
   appendLogEvent: (jobId, event) => appendAgentLogEvent(event, jobId),
+  appendSessionEvent: (jobId, executionId, event) => appendAgentSessionEvent(event, jobId),
   claimToolCall: claimAgentToolCall,
   listToolCalls: listAgentToolCalls,
   completeToolCall: completeAgentToolCall,
@@ -345,6 +353,9 @@ export async function runContentResponseOutputJob(
   let executionCompleted = false
   let runtime: AgentRuntime | undefined
   let evidence: ResponseArticleCompletionEvidence | undefined = completedAgentEvidence(job)
+  let canonicalTurnStarted = false
+  let canonicalTurnEnded = false
+  let canonicalTurn = 1
   const recordExecutionEvent = async (
     event: Omit<AgentLogEventInput, 'stream_kind' | 'stream_key' | 'job_id' | 'execution_id'>,
   ) => {
@@ -360,6 +371,29 @@ export async function runContentResponseOutputJob(
     } catch {
       // Event logging is durable when available but never blocks the job boundary.
     }
+  }
+  const recordSessionEvent = async (event: AgentSessionEventDraft) => {
+    if (!execution) return
+    await deps.appendSessionEvent?.(jobId, execution.id, {
+      stream_kind: 'job',
+      stream_key: `execution:${execution.id}`,
+      job_id: jobId,
+      execution_id: execution.id,
+      turn_id: `execution:${execution.id}:turn:${event.turn ?? 1}`,
+      step_id: event.step === null ? null : String(event.step),
+      type: event.type,
+      data: event.data,
+    })
+  }
+  const finishCanonicalTurn = async (reason: Record<string, unknown>) => {
+    if (!canonicalTurnStarted || canonicalTurnEnded || !execution) return
+    await recordSessionEvent({
+      type: 'turn/end',
+      turn: canonicalTurn,
+      step: null,
+      data: { reason },
+    })
+    canonicalTurnEnded = true
   }
 
   try {
@@ -388,6 +422,23 @@ export async function runContentResponseOutputJob(
         objective: provisionalObjective,
         skillMode: 'auto',
         skillName: null,
+      })
+      canonicalTurn = started.attempt
+      await recordSessionEvent({
+        type: 'turn/start',
+        turn: canonicalTurn,
+        step: null,
+        data: { turn: canonicalTurn },
+      })
+      canonicalTurnStarted = true
+      await recordSessionEvent({
+        type: 'user/message',
+        turn: canonicalTurn,
+        step: null,
+        data: {
+          content: [{ kind: 'text', text: provisionalObjective }],
+          source: { kind: 'job' },
+        },
       })
       await recordExecutionEvent({
         event_type: 'session/turn-start',
@@ -422,6 +473,7 @@ export async function runContentResponseOutputJob(
       )
       if (recoveredEvidence) {
         evidence = recoveredEvidence
+        await finishCanonicalTurn({ kind: 'completed' })
         await deps.completeExecution(jobId, currentExecution().id, recoveredEvidence)
         executionCompleted = true
         await deps.completeStep(jobId, started.id, recoveredEvidence)
@@ -447,11 +499,13 @@ export async function runContentResponseOutputJob(
           imageGenerator: createDirectImageGenerator(apiRoot, jobId),
           model,
           mode: 'job',
+          turn: canonicalTurn,
           policyProfile: 'response-writing',
           automaticSelection: false,
           skillMode: currentExecution().skill_mode,
           skillName: currentExecution().skill_name ?? undefined,
           restoredSkillName: restoredSkillNameFromExecution(currentExecution()),
+          onSessionEvent: recordSessionEvent,
           beforeToolExecute: async event => {
             const capabilities = runtime?.capabilitySnapshot()
             if (capabilities) {
@@ -509,6 +563,16 @@ export async function runContentResponseOutputJob(
             activation: currentExecution().skill_activation || null,
           },
         })
+        await recordSessionEvent({
+          type: 'agent/skill',
+          turn: canonicalTurn,
+          step: null,
+          data: {
+            name: currentExecution().skill_name ?? 'none',
+            activation: currentExecution().skill_activation ?? 'automatic',
+            metadata: { selected: Boolean(currentExecution().skill_name) },
+          },
+        })
         await recordExecutionEvent({
           event_type: 'session/capabilities',
           phase: 'prepare',
@@ -548,6 +612,7 @@ export async function runContentResponseOutputJob(
 
         if (!completionEvidence) throw new Error('missing valid save_draft evidence')
         evidence = completionEvidence
+        await finishCanonicalTurn({ kind: result.kind === 'completed' ? 'completed' : 'waiting_approval' })
         await recordExecutionEvent({
           event_type: 'session/turn-end',
           phase: 'agent',
@@ -584,18 +649,25 @@ export async function runContentResponseOutputJob(
     return linkedDraft
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
+    let failureMessage = message
+    try {
+      await finishCanonicalTurn({ kind: 'error', error: message })
+    } catch (trajectoryError) {
+      const trajectoryMessage = trajectoryError instanceof Error ? trajectoryError.message : String(trajectoryError)
+      failureMessage = `${message}; Agent trajectory finalization failed: ${trajectoryMessage}`
+    }
     await recordExecutionEvent({
       event_type: 'session/error',
       phase: 'agent',
       status: 'error',
-      payload: { error: message },
+      payload: { error: failureMessage },
     })
-    const deterministic = message.includes('missing valid save_draft evidence')
-      || message.includes('Selected skill is unavailable')
-      || message.includes('Agent capability drift detected')
-      || message.includes('requires response_output_id')
+    const deterministic = failureMessage.includes('missing valid save_draft evidence')
+      || failureMessage.includes('Selected skill is unavailable')
+      || failureMessage.includes('Agent capability drift detected')
+      || failureMessage.includes('requires response_output_id')
     try {
-      if (execution && !executionCompleted) await deps.failExecution(jobId, execution.id, message)
+      if (execution && !executionCompleted) await deps.failExecution(jobId, execution.id, failureMessage)
     } catch {
       // Preserve the original job failure if the auxiliary status update fails.
     }
@@ -603,7 +675,7 @@ export async function runContentResponseOutputJob(
       await deps.failStep(
         jobId,
         activeStep.id,
-        error,
+        new Error(failureMessage),
         deterministic ? false : retryableForError(error, true),
       )
     }

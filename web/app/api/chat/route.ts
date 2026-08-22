@@ -14,7 +14,14 @@ import { CHAT_MAX_STEPS, chatToolLoopStep, needsFinalAnswerFallback } from '@/li
 import { baoyuRuntimeInstructions } from '@/lib/ai/content-job'
 import { agentSkillRunAudit, openAgentRuntime, type AgentRunResult } from '@/lib/ai/agent-runtime'
 import type { AgentCapabilitySnapshot } from '@/lib/ai/agent-capabilities'
-import { appendAgentLogEvent, type AgentLogEventInput } from '@/lib/ai/agent-log-client'
+import {
+  appendAgentLogEvent,
+  appendAgentSessionEvent,
+  type AgentLogEventInput,
+  type AgentSessionEventInput,
+} from '@/lib/ai/agent-log-client'
+import type { AgentSessionEventDraft } from '@/lib/ai/agent-runtime'
+import type { AgentSessionEventType } from '@/lib/ai/agent-trajectory'
 import type { AgentModelMessageEvent, AgentToolAudit } from '@/lib/ai/agent-runtime-types'
 import { createDirectImageGenerator, mcpUrl, type ChatSkillSnapshot } from '@/lib/ai/global-chat-tools'
 import { workerHeaders } from '@/lib/ai/job-client'
@@ -200,7 +207,7 @@ export function executionToolsForSelection(tools: ToolSet, genericRuntime: boole
   return Object.fromEntries(Object.entries(tools).filter(([name]) => name !== 'loadSkill')) as ToolSet
 }
 
-type ChatAgentLogContext = { sessionId: number; turnId: string }
+type ChatAgentLogContext = { sessionId: number; turnId: string; turn?: number }
 
 function usageFromPayload(payload: Record<string, unknown>) {
   const usage = payload.usage
@@ -223,6 +230,7 @@ export function chatAgentLogEventFromModelMessage(
     stream_key: `chat:${context.sessionId}`,
     session_id: context.sessionId,
     turn_id: context.turnId,
+    step_id: event.step === undefined ? undefined : String(event.step),
     event_type: eventType,
     phase: event.phase,
     status: event.direction === 'model_error' ? 'error' : 'completed',
@@ -241,6 +249,7 @@ export function chatAgentLogEventFromToolAudit(
     stream_key: `chat:${context.sessionId}`,
     session_id: context.sessionId,
     turn_id: context.turnId,
+    step_id: event.step === undefined ? undefined : String(event.step),
     event_type: isStarted ? 'tool/call' : 'tool/result',
     phase: 'execute',
     status: isStarted
@@ -267,6 +276,120 @@ async function persistChatAgentLogEvent(event: AgentLogEventInput) {
     await appendAgentLogEvent(event)
   } catch {
     // Observability must not turn a user-facing Chat failure into a second failure.
+  }
+}
+
+export function chatAgentSessionEventFromDraft(
+  event: AgentSessionEventDraft,
+  context: ChatAgentLogContext,
+): AgentSessionEventInput {
+  return {
+    stream_kind: 'chat',
+    stream_key: `chat:${context.sessionId}`,
+    session_id: context.sessionId,
+    turn_id: context.turnId,
+    step_id: event.step === null ? null : String(event.step),
+    type: event.type,
+    data: event.data,
+  }
+}
+
+async function persistChatAgentSessionEvent(
+  event: AgentSessionEventDraft | { type: AgentSessionEventType; turn: number; step: number | null; data: Record<string, unknown> },
+  context: ChatAgentLogContext,
+) {
+  await appendAgentSessionEvent(chatAgentSessionEventFromDraft(event, context))
+}
+
+function canonicalAssistantBlocks(parts: unknown[]): Record<string, unknown>[] {
+  const blocks: Record<string, unknown>[] = []
+  for (const part of parts) {
+    if (!part || typeof part !== 'object') continue
+    const item = part as Record<string, unknown>
+    if (item.type === 'text' && typeof item.text === 'string') {
+      blocks.push({ kind: 'text', text: item.text })
+    } else if (item.type === 'reasoning' && typeof item.text === 'string') {
+      blocks.push({ kind: 'reasoning', text: item.text })
+    } else if (item.type === 'dynamic-tool' && typeof item.toolCallId === 'string') {
+      blocks.push({
+        kind: 'tool-call',
+        callId: item.toolCallId,
+        name: typeof item.toolName === 'string' ? item.toolName : 'Tool',
+        arguments: item.input ?? {},
+      })
+    }
+  }
+  return blocks
+}
+
+export function chatTrajectoryChunk(chunk: unknown): Record<string, unknown> | null {
+  if (!chunk || typeof chunk !== 'object') return null
+  const item = chunk as Record<string, unknown>
+  switch (item.type) {
+    case 'text-delta':
+      return { kind: 'text', id: item.id, text: item.text }
+    case 'reasoning-delta':
+      return { kind: 'reasoning', id: item.id, text: item.text }
+    case 'tool-input-start':
+      return { kind: 'tool-input-start', callId: item.id, name: item.toolName }
+    case 'tool-input-delta':
+      return { kind: 'tool-input', callId: item.id, text: item.delta }
+    case 'tool-input-end':
+      return { kind: 'tool-input-end', callId: item.id }
+    case 'tool-call':
+      return { kind: 'tool-call', callId: item.toolCallId, name: item.toolName, arguments: item.input }
+    case 'tool-result':
+      return { kind: 'tool-result', callId: item.toolCallId, name: item.toolName, output: item.output }
+    case 'tool-error':
+      return { kind: 'tool-error', callId: item.toolCallId, name: item.toolName, error: item.error }
+    case 'error':
+      return { kind: 'error', text: item.error instanceof Error ? item.error.message : String(item.error) }
+    case 'abort':
+      return { kind: 'abort', reason: item.reason }
+    default:
+      return null
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function toolResultError(value: unknown) {
+  if (value === undefined || value === null) return undefined
+  return value instanceof Error ? value.message : typeof value === 'string' ? value : String(value)
+}
+
+function toolResultText(value: unknown) {
+  if (typeof value === 'string') return value
+  try { return JSON.stringify(value) ?? String(value) } catch { return String(value) }
+}
+
+export function chatAgentSessionEventFromToolResult(
+  result: unknown,
+  context: { turn: number; step: number },
+): AgentSessionEventDraft | null {
+  if (!isRecord(result) || typeof result.toolCallId !== 'string' || !result.toolCallId) return null
+  const output = result.output
+  const outputRecord = isRecord(output) ? output : null
+  const error = toolResultError(result.error)
+  const content = Array.isArray(outputRecord?.content)
+    ? outputRecord.content.filter(item => typeof item === 'string' || isRecord(item))
+    : undefined
+  const isError = result.type === 'tool-error' || outputRecord?.isError === true || Boolean(error)
+  return {
+    type: 'tool/result',
+    turn: context.turn,
+    step: context.step,
+    data: {
+      turn: context.turn,
+      step: context.step,
+      callId: result.toolCallId,
+      ...(content ? { content } : { content: [{ kind: 'text', text: error ?? toolResultText(output) }] }),
+      ...(output === undefined ? {} : { output }),
+      ...(error ? { error } : {}),
+      isError,
+    },
   }
 }
 
@@ -333,6 +456,7 @@ export async function POST(request: NextRequest) {
   const logContext: ChatAgentLogContext = {
     sessionId: body.sessionId,
     turnId: randomUUID(),
+    turn: 1,
   }
   await persistChatAgentLogEvent(chatSessionEvent(logContext, {
     event_type: 'session/turn-start',
@@ -346,6 +470,20 @@ export async function POST(request: NextRequest) {
   }))
 
   let registry: Awaited<ReturnType<typeof openAgentRuntime>> | undefined
+  const auditedToolResultKeys = new Set<string>()
+  const toolResultKey = (turn: number, step: number, callId: string) => `${turn}:${step}:${callId}`
+  let canonicalTurnStarted = false
+  let canonicalTurnEnded = false
+  const finishCanonicalTurn = async (reason: Record<string, unknown>) => {
+    if (!canonicalTurnStarted || canonicalTurnEnded) return
+    await persistChatAgentSessionEvent({
+      type: 'turn/end',
+      turn: logContext.turn ?? 1,
+      step: null,
+      data: { reason },
+    }, logContext)
+    canonicalTurnEnded = true
+  }
   try {
     if (body.approval) {
       await persistApproval(body.sessionId, body.approval)
@@ -367,6 +505,25 @@ export async function POST(request: NextRequest) {
     const session = await persistedChatSession(body.sessionId)
     const restoredSkillName = body.skillName ? undefined : latestActivatedSkillName(session.messages)
     const messages = await persistedModelHistory(session, Boolean(body.approval))
+    logContext.turn = Math.max(1, session.messages.filter(message => message.role === 'user').length)
+    await persistChatAgentSessionEvent({
+      type: 'turn/start',
+      turn: logContext.turn ?? 1,
+      step: null,
+      data: { turn: logContext.turn ?? 1 },
+    }, logContext)
+    canonicalTurnStarted = true
+    if (latestMessage) {
+      await persistChatAgentSessionEvent({
+        type: 'user/message',
+        turn: logContext.turn ?? 1,
+        step: null,
+        data: {
+          content: latestMessage.parts as unknown as Record<string, unknown>[],
+          source: { kind: 'user' },
+        },
+      }, logContext)
+    }
     const modelConfig = await configuredTextModel()
     const provider = openaiProviderFromConfig(modelConfig)
     const model = textModelForProvider(provider, modelConfig.modelName, modelConfig.protocol)
@@ -383,13 +540,18 @@ export async function POST(request: NextRequest) {
       skillName: body.skillName,
       restoredSkillName,
       draftId: body.draftId,
+      turn: logContext.turn ?? 1,
       automaticSelection: genericRuntime,
       onMessage: event => persistChatAgentLogEvent(
         chatAgentLogEventFromModelMessage(event, logContext),
       ),
-      onToolAudit: event => persistChatAgentLogEvent(
-        chatAgentLogEventFromToolAudit(event, logContext),
-      ),
+      onToolAudit: event => {
+        if (event.status !== 'started' && event.step !== undefined) {
+          auditedToolResultKeys.add(toolResultKey(logContext.turn ?? 1, event.step, event.toolCallId))
+        }
+        return persistChatAgentLogEvent(chatAgentLogEventFromToolAudit(event, logContext))
+      },
+      onSessionEvent: event => persistChatAgentSessionEvent(event, logContext),
     })
     registry = runtime
     const selected = genericRuntime || body.skillName
@@ -403,6 +565,16 @@ export async function POST(request: NextRequest) {
         ? { name: selected.skill.name, activation: selected.activation }
         : { name: null, activation: null },
     }))
+    await persistChatAgentSessionEvent({
+      type: 'agent/skill',
+      turn: logContext.turn,
+      step: null,
+      data: {
+        name: selected?.skill.name ?? 'none',
+        activation: selected?.activation ?? 'automatic',
+        metadata: selected ? { selected: true } : { selected: false },
+      },
+    }, logContext)
     const context = await selectedContext(selected?.skill.name ?? body.skillName, body.draftId, runtime.catalogContext)
     const instructions = buildChatInstructions(context)
     const executionTools = executionToolsForSelection(runtime.tools, genericRuntime, Boolean(selected))
@@ -438,6 +610,9 @@ export async function POST(request: NextRequest) {
         status: result.kind === 'completed' ? 'completed' : 'waiting_approval',
         payload: { parts, text: result.text, kind: result.kind },
       }))
+      await finishCanonicalTurn({
+        kind: result.kind === 'completed' ? 'completed' : 'waiting_approval',
+      })
       await persistChatAgentLogEvent(chatSessionEvent(logContext, {
         event_type: 'session/turn-end',
         phase: 'chat',
@@ -454,6 +629,9 @@ export async function POST(request: NextRequest) {
     }
 
     const modelMessages = await convertToModelMessages(messages, { tools: executionTools, ignoreIncompleteToolCalls: true })
+    const streamBlocks = new Map<number, Record<string, unknown>[]>()
+    const finishedStreamSteps = new Set<number>()
+    let lastStreamStep = 0
     const result = streamText({
       model,
       instructions,
@@ -461,6 +639,29 @@ export async function POST(request: NextRequest) {
       tools: executionTools,
       stopWhen: stepCountIs(CHAT_MAX_STEPS),
       prepareStep: async ({ stepNumber }) => {
+        const trajectoryStep = stepNumber + 1
+        lastStreamStep = trajectoryStep
+        streamBlocks.set(trajectoryStep, [])
+        await persistChatAgentSessionEvent({
+          type: 'step/start',
+          turn: logContext.turn ?? 1,
+          step: trajectoryStep,
+          data: { turn: logContext.turn ?? 1, step: trajectoryStep },
+        }, logContext)
+        await persistChatAgentSessionEvent({
+          type: 'request/header',
+          turn: logContext.turn ?? 1,
+          step: trajectoryStep,
+          data: {
+            turn: logContext.turn ?? 1,
+            step: trajectoryStep,
+            request: {
+              instructions,
+              messages: modelMessages,
+              toolNames: Object.keys(executionTools),
+            },
+          },
+        }, logContext)
         await persistChatAgentLogEvent(chatSessionEvent(logContext, {
           event_type: 'llm/request',
           phase: 'execute',
@@ -474,7 +675,62 @@ export async function POST(request: NextRequest) {
         }))
         return skillAwareStepPolicy(stepNumber, runtime.snapshot(), instructions)
       },
+      onChunk: async ({ chunk }) => {
+        const mapped = chatTrajectoryChunk(chunk)
+        const step = lastStreamStep || 1
+        if (mapped) {
+          await persistChatAgentSessionEvent({
+            type: 'assistant/chunk',
+            turn: logContext.turn ?? 1,
+            step,
+            data: { turn: logContext.turn ?? 1, step, chunk: mapped },
+          }, logContext)
+          const blocks = streamBlocks.get(step) ?? []
+          if (mapped.kind === 'text' && typeof mapped.text === 'string') {
+            const previous = blocks.at(-1)
+            if (previous?.kind === 'text') previous.text = `${String(previous.text ?? '')}${mapped.text}`
+            else blocks.push({ kind: 'text', text: mapped.text })
+          } else if (mapped.kind === 'reasoning' && typeof mapped.text === 'string') {
+            const previous = blocks.at(-1)
+            if (previous?.kind === 'reasoning') previous.text = `${String(previous.text ?? '')}${mapped.text}`
+            else blocks.push({ kind: 'reasoning', text: mapped.text })
+          } else if (mapped.kind === 'tool-call') {
+            blocks.push(mapped)
+          }
+          streamBlocks.set(step, blocks)
+        }
+        if (chunk.type === 'finish-step') {
+          const blocks = streamBlocks.get(step) ?? []
+          await persistChatAgentSessionEvent({
+            type: 'assistant/message',
+            turn: logContext.turn ?? 1,
+            step,
+            data: {
+              turn: logContext.turn ?? 1,
+              step,
+              blocks,
+              usage: chunk.usage,
+              timing: chunk.performance,
+              interrupted: false,
+            },
+          }, logContext)
+          await persistChatAgentSessionEvent({
+            type: 'step/end',
+            turn: logContext.turn ?? 1,
+            step,
+            data: { turn: logContext.turn ?? 1, step },
+          }, logContext)
+          finishedStreamSteps.add(step)
+        }
+      },
       onStepFinish: async ({ text, toolCalls, toolResults, finishReason, usage }) => {
+        const turn = logContext.turn ?? 1
+        const step = lastStreamStep || 1
+        for (const result of toolResults) {
+          const event = chatAgentSessionEventFromToolResult(result, { turn, step })
+          if (!event || auditedToolResultKeys.has(toolResultKey(turn, step, event.data.callId as string))) continue
+          await persistChatAgentSessionEvent(event, logContext)
+        }
         await persistChatAgentLogEvent(chatSessionEvent(logContext, {
           event_type: 'llm/response',
           phase: 'execute',
@@ -490,6 +746,10 @@ export async function POST(request: NextRequest) {
           status: 'error',
           payload: { error: error instanceof Error ? error.message : String(error) },
         }))
+        await finishCanonicalTurn({
+          kind: 'error',
+          error: error instanceof Error ? error.message : String(error),
+        })
       },
     })
 
@@ -497,6 +757,9 @@ export async function POST(request: NextRequest) {
       originalMessages: messages,
       onFinish: async ({ responseMessage, isAborted }) => {
         let pendingApproval = false
+        let terminalReason: Record<string, unknown> = {
+          kind: isAborted ? 'aborted' : 'completed',
+        }
         try {
           if (!isAborted) {
             pendingApproval = responseMessage.parts.some(part => part.type === 'dynamic-tool' && part.state === 'approval-requested')
@@ -526,8 +789,30 @@ export async function POST(request: NextRequest) {
               status: pendingApproval ? 'waiting_approval' : 'completed',
               payload: { parts, text: messageText({ parts }), pendingApproval },
             }))
+            if (finishedStreamSteps.size === 0) {
+              const step = lastStreamStep || 1
+              await persistChatAgentSessionEvent({
+                type: 'assistant/message',
+                turn: logContext.turn ?? 1,
+                step,
+                data: {
+                  turn: logContext.turn ?? 1,
+                  step,
+                  blocks: canonicalAssistantBlocks(parts),
+                  interrupted: false,
+                },
+              }, logContext)
+            }
+            terminalReason = { kind: pendingApproval ? 'waiting_approval' : 'completed' }
           }
+        } catch (error) {
+          terminalReason = {
+            kind: 'error',
+            error: error instanceof Error ? error.message : String(error),
+          }
+          throw error
         } finally {
+          await finishCanonicalTurn(terminalReason)
           await persistChatAgentLogEvent(chatSessionEvent(logContext, {
             event_type: 'session/turn-end',
             phase: 'chat',
@@ -544,12 +829,14 @@ export async function POST(request: NextRequest) {
           status: 'error',
           payload: { error: String(error) },
         }))
+        void finishCanonicalTurn({ kind: 'error', error: String(error) })
         return 'Chat response failed'
       },
     })
   } catch (error) {
     await registry?.close()
     const message = error instanceof Error ? error.message : 'Chat request failed'
+    await finishCanonicalTurn({ kind: 'error', error: message })
     await persistChatAgentLogEvent(chatSessionEvent(logContext, {
       event_type: 'session/error',
       phase: 'chat',

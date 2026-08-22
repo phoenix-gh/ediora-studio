@@ -9,7 +9,7 @@ import { Input } from '@/components/ui/input'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { ChatContextPicker } from '@/components/features/chat/ChatContextPicker'
 import { ChatMarkdown } from '@/components/features/chat/ChatMarkdown'
-import { AgentLogTimeline } from '@/components/features/agent/AgentLogTimeline'
+import { ChatAgentLogDialog } from './ChatAgentLogDialog'
 import { useDeveloperMode } from '@/components/providers/DeveloperModeProvider'
 import {
   type ChatMessage,
@@ -29,7 +29,6 @@ import {
   streamChatReply,
 } from '@/lib/api/chat'
 import { getJob, imageUrlsForJob, type JobStatus } from '@/lib/api/jobs'
-import { listAllAgentLogEvents, type AgentLogEvent } from '@/lib/ai/agent-log-client'
 import { cn } from '@/lib/utils'
 
 import { chatComposerColumn, chatConversationColumn } from './chat-layout'
@@ -223,9 +222,7 @@ export function ChatClient() {
   const [loading, setLoading] = useState(true)
   const [sending, setSending] = useState(false)
   const [showTrace, setShowTrace] = useState(false)
-  const [agentLogEvents, setAgentLogEvents] = useState<AgentLogEvent[]>([])
-  const [agentLogLoading, setAgentLogLoading] = useState(false)
-  const [agentLogError, setAgentLogError] = useState('')
+  const [recoveringRun, setRecoveringRun] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
 
   const refreshSessions = useCallback(async () => {
@@ -235,31 +232,19 @@ export function ChatClient() {
   }, [])
 
   const openSession = useCallback(async (sessionId: number) => {
-    setAgentLogEvents([])
-    setAgentLogError('')
-    setAgentLogLoading(false)
+    setShowTrace(false)
+    setSending(false)
+    setRecoveringRun(false)
     setActiveSessionId(sessionId)
     try {
       const session = await getChatSession(sessionId)
       setMessages(session.messages)
+      setSending(session.is_running)
+      setRecoveringRun(session.is_running)
     } catch (error) {
       toast.error(error instanceof Error ? error.message : '加载会话失败')
     }
   }, [])
-
-  const refreshAgentLog = useCallback(async (sessionId: number) => {
-    if (!developerModeEnabled) return
-    setAgentLogLoading(true)
-    try {
-      const page = await listAllAgentLogEvents({ session_id: sessionId, limit: 500 })
-      setAgentLogEvents(page.events)
-      setAgentLogError('')
-    } catch (error) {
-      setAgentLogError(error instanceof Error ? error.message : '运行轨迹加载失败')
-    } finally {
-      setAgentLogLoading(false)
-    }
-  }, [developerModeEnabled])
 
   useEffect(() => {
     void (async () => {
@@ -281,14 +266,25 @@ export function ChatClient() {
   }, [])
 
   useEffect(() => {
-    if (!developerModeEnabled || activeSessionId === null) return
-    const initialRefresh = window.setTimeout(() => void refreshAgentLog(activeSessionId), 0)
-    const timer = setInterval(() => void refreshAgentLog(activeSessionId), sending ? 2_000 : 15_000)
-    return () => {
-      window.clearTimeout(initialRefresh)
-      clearInterval(timer)
+    if (!recoveringRun || activeSessionId === null) return
+    let active = true
+    const refreshRecoveredSession = async () => {
+      try {
+        const session = await getChatSession(activeSessionId)
+        if (!active || session.is_running) return
+        setMessages(session.messages)
+        setSending(false)
+        setRecoveringRun(false)
+      } catch {
+        // Keep the thinking state until the session status can be checked again.
+      }
     }
-  }, [activeSessionId, developerModeEnabled, refreshAgentLog, sending])
+    const timer = window.setInterval(() => void refreshRecoveredSession(), 2_000)
+    return () => {
+      active = false
+      window.clearInterval(timer)
+    }
+  }, [activeSessionId, recoveringRun])
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: sending ? 'smooth' : 'auto' })
@@ -300,8 +296,9 @@ export function ChatClient() {
     setInput('')
     setSkillName('')
     setDraftId('')
-    setAgentLogEvents([])
-    setAgentLogError('')
+    setSending(false)
+    setRecoveringRun(false)
+    setShowTrace(false)
   }
 
   async function removeSession(session: ChatSession) {
@@ -493,13 +490,16 @@ export function ChatClient() {
           </div>
         </header>
 
+        {developerModeEnabled && <ChatAgentLogDialog
+          key={activeSessionId ?? 'none'}
+          sessionId={activeSessionId}
+          open={showTrace}
+          developerModeEnabled={developerModeEnabled}
+          onOpenChange={setShowTrace}
+        />}
+
         <div className="min-h-0 flex-1 overflow-y-auto py-6">
           <div className={cn(chatConversationColumn, 'flex flex-col gap-5')}>
-            {developerModeEnabled && showTrace && activeSessionId !== null && <AgentLogTimeline
-              events={agentLogEvents}
-              loading={agentLogLoading}
-              error={agentLogError}
-            />}
             {messages.length === 0 && !loading && (
               <div className="rounded-2xl border border-dashed border-border bg-surface px-6 py-10 text-center">
                 <Bot className="mx-auto h-8 w-8 text-indigo-500" />
