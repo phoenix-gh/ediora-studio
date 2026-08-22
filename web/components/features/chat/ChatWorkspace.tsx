@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
-import { Activity, Bot, FileSearch, Loader2, Maximize2, X } from 'lucide-react'
+import { Activity, Bot, FileSearch, Loader2, Maximize2, RotateCcw, X } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { ChatAgentLogDialog } from '@/components/features/chat/ChatAgentLogDialog'
@@ -206,13 +206,13 @@ export function ChatWorkspace({ variant, onClose, onOpenFullChat, onResetSize, o
                     <Button
                       type="button"
                       variant="ghost"
-                      size="xs"
+                      size="icon-sm"
                       data-testid="floating-chat-reset-size"
                       aria-label="恢复聊天窗口默认大小"
                       title="恢复默认大小"
                       onClick={onResetSize}
                     >
-                      默认大小
+                      <RotateCcw aria-hidden="true" />
                     </Button>
                   )}
                 </>
@@ -221,12 +221,13 @@ export function ChatWorkspace({ variant, onClose, onOpenFullChat, onResetSize, o
                 <Button
                   type="button"
                   variant={showTrace ? 'secondary' : 'outline'}
-                  size="sm"
+                  size={isFloating ? 'icon-sm' : 'sm'}
+                  aria-label={isFloating ? '运行轨迹' : undefined}
                   disabled={activeSessionId === null}
                   onClick={() => setShowTrace(value => !value)}
                   title="查看本会话的 LLM、Skill 和工具运行轨迹"
                 >
-                  <Activity data-icon="inline-start" />运行轨迹
+                  <Activity />{!isFloating && '运行轨迹'}
                 </Button>
               )}
               {isFloating && onClose && (

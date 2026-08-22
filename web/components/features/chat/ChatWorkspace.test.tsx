@@ -116,6 +116,15 @@ describe('ChatWorkspace', () => {
     expect(picker).toHaveTextContent('会话')
   })
 
+  it('keeps floating header actions compact while preserving accessible names', async () => {
+    renderWorkspace('floating')
+
+    await screen.findByTestId('floating-chat-drag-handle')
+
+    expect(screen.getByTestId('floating-chat-reset-size')).not.toHaveTextContent('默认大小')
+    expect(screen.getByRole('button', { name: '运行轨迹' })).not.toHaveTextContent('运行轨迹')
+  })
+
   it('keeps cached messages isolated when switching sessions', async () => {
     const user = userEvent.setup()
     renderWorkspace('floating')
