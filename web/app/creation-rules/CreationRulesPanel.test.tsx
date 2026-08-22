@@ -25,6 +25,7 @@ const pausedRule: DailyCreationRule = {
   skill_mode: 'auto',
   skill_name: null,
   enabled: false,
+  deleted_at: null,
   last_run_at: null,
   next_run_at: null,
   created_at: '2026-08-22T00:00:00Z',
@@ -53,5 +54,30 @@ describe('CreationRulesPanel', () => {
 
     fireEvent.click(runButton)
     expect(onRun).toHaveBeenCalledWith(pausedRule)
+  })
+
+  it('disables actions for a deleted historical rule', () => {
+    const deletedRule = {
+      ...pausedRule,
+      deleted_at: '2026-08-22T01:00:00Z',
+    }
+
+    render(
+      <CreationRulesPanel
+        rules={[deletedRule]}
+        runs={[]}
+        activeRuleIds={new Set()}
+        onCreate={vi.fn()}
+        onRun={vi.fn()}
+        onToggle={vi.fn()}
+        onEdit={vi.fn()}
+        onDelete={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByRole('button', { name: '立即执行' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '编辑' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '开启' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '删除' })).toBeDisabled()
   })
 })
