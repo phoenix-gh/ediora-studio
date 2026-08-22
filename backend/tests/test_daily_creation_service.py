@@ -288,3 +288,37 @@ async def test_new_daily_creation_jobs_use_the_agent_runtime_without_a_version(d
     job = await db.get(ContentJob, creation_run.content_job_id)
     assert created is True
     assert job.input_data == {"run_id": creation_run.id}
+
+
+@pytest.mark.asyncio
+async def test_explicit_run_can_start_when_rule_is_paused(db):
+    from daily_creation_service import create_daily_creation_run
+    from models import ContentJob, DailyCreationRule
+
+    rule = DailyCreationRule(
+        name="暂停后手动执行",
+        asset_type="article",
+        directory="增长实验",
+        output_type="x_short_post",
+        target_count=1,
+        execution_mode="recurring",
+        scheduled_time="08:00",
+        timezone="Asia/Shanghai",
+        lookback_days=7,
+        delivery_mode="drafts",
+        enabled=False,
+    )
+    db.add(rule)
+    await db.flush()
+
+    creation_run, created = await create_daily_creation_run(
+        db,
+        rule=rule,
+        scheduled_for=datetime(2026, 8, 22, 0, tzinfo=timezone.utc),
+        trigger_kind="explicit",
+    )
+    job = await db.get(ContentJob, creation_run.content_job_id)
+
+    assert created is True
+    assert job is not None
+    assert job.input_data == {"run_id": creation_run.id}
