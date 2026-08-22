@@ -1,6 +1,7 @@
 'use client'
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Loader2 } from 'lucide-react'
 
 import { ApiError } from '@/lib/api/client'
 import {
@@ -142,11 +143,15 @@ export function AgentTrajectoryPanel({
   open,
   developerModeEnabled,
   title = 'Agent 运行轨迹',
+  showHeader = true,
+  onRunningChange,
 }: {
   scope: AgentTrajectoryScope
   open: boolean
   developerModeEnabled: boolean
   title?: string
+  showHeader?: boolean
+  onRunningChange?: (isRunning: boolean) => void
 }) {
   const [scopeName, scopeValue] = Object.entries(scope)[0] as [string, number]
   const key = `${scopeName}:${scopeValue}`
@@ -167,6 +172,12 @@ export function AgentTrajectoryPanel({
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [eventsScopeKey, setEventsScopeKey] = useState(key)
 
+  const setTraceRunning = useCallback((next: boolean) => {
+    runningRef.current = next
+    setRunningState(next)
+    onRunningChange?.(next)
+  }, [onRunningChange])
+
   const refresh = useCallback(async (active: () => boolean, reset = false) => {
     if (inFlightRef.current) return
     inFlightRef.current = true
@@ -181,14 +192,12 @@ export function AgentTrajectoryPanel({
       setEventsScopeKey(key)
       setSessionKey(page.session_key)
       cursorRef.current = page.next_sequence ?? page.events.at(-1)?.seq ?? cursor
-      runningRef.current = page.unsupported_format ? false : page.is_running
-      setRunningState(runningRef.current)
+      setTraceRunning(page.unsupported_format ? false : page.is_running)
       setUnsupportedFormat(page.unsupported_format)
       setError('')
     } catch (reason) {
       if (!active()) return
-      runningRef.current = false
-      setRunningState(false)
+      setTraceRunning(false)
       if (reason instanceof ApiError && reason.status === 404) {
         setUnsupportedFormat(true)
       } else {
@@ -198,15 +207,20 @@ export function AgentTrajectoryPanel({
       inFlightRef.current = false
       if (active()) setLoading(false)
     }
-  }, [key, stableScope])
+  }, [key, setTraceRunning, stableScope])
 
   useEffect(() => {
-    if (!open) return
+    if (!open) {
+      runningRef.current = false
+      onRunningChange?.(false)
+      return
+    }
     let active = true
     cursorRef.current = null
     inFlightRef.current = false
     refreshTimerRef.current = null
     runningRef.current = null
+    onRunningChange?.(false)
     const scheduleRefresh = () => {
       if (!active || runningRef.current === false) return
       refreshTimerRef.current = window.setTimeout(async () => {
@@ -227,7 +241,7 @@ export function AgentTrajectoryPanel({
       if (refreshTimerRef.current !== null) window.clearTimeout(refreshTimerRef.current)
       refreshTimerRef.current = null
     }
-  }, [key, open, refresh])
+  }, [key, onRunningChange, open, refresh])
 
   const snapshot = useMemo(() => deriveAgentTrajectory(
     eventsScopeKey === key ? events : [],
@@ -236,21 +250,20 @@ export function AgentTrajectoryPanel({
   const selectedCell = findCell(snapshot, selectedId)
   const selectedPartial = snapshot.partial?.recordId === selectedId ? snapshot.partial : null
   const selectRecord = useCallback((recordId: string) => setSelectedId(recordId), [])
-  const isRunning = runningState ?? snapshot.isRunning
+  const isRunning = open && runningState === true
 
   return <section data-testid="agent-trajectory-panel" className="flex h-full min-h-0 flex-col gap-3 rounded-lg border bg-background p-3">
-    <div className="flex shrink-0 flex-wrap items-start justify-between gap-2">
+    {showHeader && <div className="flex shrink-0 flex-wrap items-start justify-between gap-2">
       <div><h3 className="font-medium">{title}</h3><p className="text-xs text-muted-foreground">按 Turn、Message、Step 和 Tool 展开；选择记录查看本地检查器。</p></div>
       <div className="flex items-center gap-2 text-xs">
-        <span className={cn('rounded-full bg-muted px-2 py-0.5', statusClass(isRunning ? 'running' : snapshot.lastError ? 'error' : 'completed'))}>{isRunning ? '运行中' : snapshot.lastError ? '失败' : '已结束'}</span>
+        {isRunning && <Loader2 data-testid="trajectory-running-indicator" role="status" aria-label="运行中" className="size-4 animate-spin text-info" />}
       </div>
-    </div>
-    <div data-testid="trajectory-status-slot" className="flex min-h-5 shrink-0 items-center">
+    </div>}
+    {(unsupportedFormat || error) && <div data-testid="trajectory-status-slot" className="shrink-0">
       {unsupportedFormat && <p role="alert" className="text-sm text-danger">暂不支持旧格式数据</p>}
       {!unsupportedFormat && error && <p role="alert" className="text-sm text-danger">{error}</p>}
-      {!unsupportedFormat && !error && loading && <p className="text-sm text-muted-foreground">运行轨迹加载中…</p>}
-      {!unsupportedFormat && !error && !loading && snapshot.turns.length === 0 && !snapshot.partial && <p className="text-sm text-muted-foreground">暂无 Agent 轨迹记录</p>}
-    </div>
+    </div>}
+    {!error && !unsupportedFormat && !loading && snapshot.turns.length === 0 && !snapshot.partial && <div className="flex min-h-0 flex-1 items-center justify-center text-sm text-muted-foreground">暂无 Agent 轨迹记录</div>}
     {!error && !unsupportedFormat && snapshot.turns.length > 0 && <div className="grid min-h-0 min-w-0 flex-1 grid-cols-1 grid-rows-[minmax(0,1fr)_minmax(0,1fr)] gap-3 overflow-hidden lg:grid-cols-[minmax(0,1fr)_minmax(16rem,22rem)] lg:grid-rows-1">
       <div data-testid="trajectory-list" className="min-h-0 min-w-0 space-y-2 overflow-y-auto pr-1">
         {snapshot.turns.map(turn => <TurnView key={turn.recordId} turn={turn} selectedId={selectedId} onSelect={selectRecord} />)}

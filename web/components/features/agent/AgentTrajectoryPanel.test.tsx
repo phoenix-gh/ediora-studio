@@ -114,7 +114,9 @@ describe('AgentTrajectoryPanel', () => {
 
     expect(screen.getByTestId('trajectory-list')).toHaveClass('min-h-0', 'overflow-y-auto')
     expect(screen.getByTestId('trajectory-inspector')).toHaveClass('min-h-0', 'overflow-y-auto')
-    expect(screen.getByTestId('trajectory-status-slot')).toHaveClass('min-h-5')
+    expect(screen.getByTestId('trajectory-running-indicator')).toHaveClass('animate-spin')
+    expect(screen.queryByText('运行轨迹加载中…')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('trajectory-status-slot')).not.toBeInTheDocument()
 
     await act(async () => {
       vi.advanceTimersByTime(2_000)

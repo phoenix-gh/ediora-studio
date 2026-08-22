@@ -62,6 +62,10 @@ describe('ChatAgentLogDialog', () => {
       await Promise.resolve()
     })
     expect(api.listAgentTrajectory).toHaveBeenCalledTimes(1)
+    expect(screen.getByTestId('trajectory-running-indicator')).toHaveClass('animate-spin')
+    expect(screen.getByTestId('trajectory-running-indicator')).toHaveAttribute('aria-label', '运行中')
+    expect(screen.queryByRole('heading', { name: 'Agent 运行轨迹' })).not.toBeInTheDocument()
+    expect(screen.queryByText('运行轨迹加载中…')).not.toBeInTheDocument()
 
     await act(async () => {
       vi.advanceTimersByTime(2_000)
