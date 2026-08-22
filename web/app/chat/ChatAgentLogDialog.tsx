@@ -24,7 +24,7 @@ export function ChatAgentLogDialog({
         <DialogTitle>运行轨迹</DialogTitle>
         <DialogDescription>按 Turn、Message、Step 和 Tool 查看本会话 Agent 运行轨迹。</DialogDescription>
       </DialogHeader>
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="min-h-0 flex-1 overflow-hidden">
         {sessionId !== null && <AgentTrajectoryPanel scope={{ session_id: sessionId }} open={open} developerModeEnabled={developerModeEnabled} />}
       </div>
     </DialogContent>

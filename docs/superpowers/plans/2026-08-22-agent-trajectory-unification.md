@@ -4,7 +4,7 @@
 
 **Goal:** Make Chat and Job Agent traces use one typed session-event source and one turn/step/tool trajectory projection with incremental Dialog updates.
 
-**Architecture:** Reuse `agent_log_events` as the durable append-only store, but validate new Agent events against a canonical event contract and expose a scoped trajectory read API. The frontend folds canonical events into stable Turn/Message/Step/Tool cells; Chat and Job retain their separate business lifecycle views and only provide the trajectory scope. Existing generic events remain readable through a legacy adapter.
+**Architecture:** Reuse `agent_log_events` as the durable append-only store, but validate new Agent events against a canonical event contract and expose a scoped trajectory read API. The frontend folds canonical events into stable Turn/Message/Step/Tool cells; Chat and Job retain their separate business lifecycle views and only provide the trajectory scope. Existing generic events are reported as unsupported by the trajectory view.
 
 **Tech Stack:** FastAPI, SQLAlchemy async, Pydantic v2, Next.js 16, React 19, AI SDK 7 `streamText.onChunk`, Vitest, pytest.
 
@@ -23,11 +23,11 @@
 
 - Create `web/lib/ai/agent-trajectory.ts`: canonical TypeScript event types, event normalization, incremental event merge, and pure Turn/Step/Message/Tool projection.
 - Create `web/lib/ai/agent-trajectory.test.ts`: pure projection and stable-identity tests.
-- Create `backend/agent_trajectory.py`: Pydantic validation, canonical event construction, legacy adaptation, and scoped running/error derivation.
-- Modify `backend/agent_log_service.py`: canonical append/list/payload helpers while preserving legacy helpers.
+- Create `backend/agent_trajectory.py`: Pydantic validation, canonical event construction, unsupported-format detection, and scoped running/error derivation.
+- Modify `backend/agent_log_service.py`: canonical append/list/payload helpers while preserving generic audit helpers.
 - Modify `backend/routers/agent_logs.py`: canonical event validation on ingestion and scoped `/trajectory` read endpoint.
-- Modify `backend/routers/chat.py`: derive `is_running` from canonical trajectory state with legacy fallback.
-- Create `backend/tests/test_agent_trajectory.py`: canonical validation, adapter, cursor, pairing, and running-state tests.
+- Modify `backend/routers/chat.py`: derive `is_running` from canonical trajectory state without changing the human transcript API.
+- Create `backend/tests/test_agent_trajectory.py`: canonical validation, unsupported-format, cursor, pairing, and running-state tests.
 - Modify `web/lib/ai/agent-log-client.ts`: canonical event input and scoped trajectory client types/functions.
 - Modify `web/lib/ai/agent-runtime-types.ts` and `web/lib/ai/agent-runtime.ts`: attach model step identity and tool audit step identity.
 - Modify `web/app/api/chat/route.ts`: emit canonical turn/step/user/assistant/chunk/tool events and typed terminal reasons.
@@ -45,7 +45,7 @@
 - Test: `web/lib/ai/agent-trajectory.test.ts`
 
 **Interfaces:**
-- `AgentSessionEvent`: `{ seq, time, type, turn, step, data, legacy? }`.
+- `AgentSessionEvent`: `{ seq, time, type, turn, step, data }`.
 - `mergeAgentSessionEvents(previous, incoming): AgentSessionEvent[]`.
 - `deriveAgentTrajectory(events): AgentTrajectorySnapshot`.
 - `trajectoryRecordId(cell): string`.
@@ -76,12 +76,12 @@
 - `agent_session_event_payload(event) -> dict`.
 - `GET /api/agent-logs/trajectory?session_id=...|job_id=...|execution_id=...` returning `{session_key, events, next_sequence, has_more, is_running, last_error}`.
 
-- [ ] **Step 1: Write failing backend tests** for strict canonical payload validation, session/job/execution scope exclusivity, cursor pagination, tool call/result pairing state, open-turn state, typed error state, and legacy-row adaptation.
+- [ ] **Step 1: Write failing backend tests** for strict canonical payload validation, session/job/execution scope exclusivity, cursor pagination, tool call/result pairing state, open-turn state, typed error state, and unsupported historical rows.
 - [ ] **Step 2: Run only `test_agent_trajectory.py` and the focused agent-log router tests** and confirm failure from missing validator/API.
-- [ ] **Step 3: Implement Pydantic event payload models** for `turn/start`, `turn/end`, `step/start`, `step/end`, `user/message`, `assistant/chunk`, `assistant/message`, `tool/call`, `tool/result`, `request/header`, and `agent/skill`; reject malformed required canonical data while leaving non-canonical historical rows readable.
+- [ ] **Step 3: Implement Pydantic event payload models** for `turn/start`, `turn/end`, `step/start`, `step/end`, `user/message`, `assistant/chunk`, `assistant/message`, `tool/call`, `tool/result`, `request/header`, and `agent/skill`; reject malformed required canonical data and do not project non-canonical historical rows.
 - [ ] **Step 4: Implement canonical append and response mapping** over `agent_log_events`, preserving redaction and scoped insertion order; make `turn/start` assign the next numeric turn when the caller omits it.
-- [ ] **Step 5: Add the scoped trajectory read endpoint** with `after_sequence`, tail pagination, canonical conversion, open-state/error derivation, and legacy fallback.
-- [ ] **Step 6: Update Chat session `is_running`** to use the canonical trajectory state first and legacy generic events only for old sessions.
+- [ ] **Step 5: Add the scoped trajectory read endpoint** with `after_sequence`, tail pagination, canonical conversion, open-state/error derivation, and unsupported-format signaling.
+- [ ] **Step 6: Update Chat session `is_running`** to use the canonical trajectory state while retaining the business transcript API separately.
 - [ ] **Step 7: Run the focused backend tests and confirm green.**
 
 ### Task 3: Emit canonical events from Chat and Job runtimes
@@ -121,7 +121,7 @@
 
 - [ ] **Step 1: Write failing component tests** for initial load only when open, polling only while open, incremental cursor calls, rendering Turn/Message/Step/Tool hierarchy, inspector selection, partial/running state, and stable row DOM nodes after an append-only refresh.
 - [ ] **Step 2: Run the exact component test and confirm failure because the panel does not exist.**
-- [ ] **Step 3: Implement the shared panel** with a polling hook, `useMemo` projection, stable `recordId` keys, memoized rows, separate ledger/inspector regions, and explicit legacy event fallback.
+- [ ] **Step 3: Implement the shared panel** with a polling hook, `useMemo` projection, stable `recordId` keys, memoized rows, separate ledger/inspector regions, and an explicit unsupported-format state.
 - [ ] **Step 4: Replace Chat’s generic event timeline** with the shared panel and preserve the existing open-only Dialog behavior.
 - [ ] **Step 5: Replace Job’s Agent tab and creation-run Agent section** with the shared panel while retaining Job overview and business execution timeline tabs.
 - [ ] **Step 6: Run focused Chat/Job/dialog/component tests and fix any regressions.**
@@ -131,5 +131,5 @@
 - [ ] **Step 1: Run focused backend pytest files** covering `test_agent_trajectory.py`, `test_agent_logs_router.py`, `test_chat_router.py`, and `test_agent_executions_router.py` with `/home/violet/miniconda3/envs/wems/bin/python -m pytest`.
 - [ ] **Step 2: Run focused frontend Vitest files** for the new projection/panel and directly changed Chat/Job/runtime tests with `pnpm exec vitest run <exact files>` from `web`.
 - [ ] **Step 3: Run changed-file lint/type checks** using the repository’s existing frontend lint command scoped to changed TypeScript files; do not run the full suite.
-- [ ] **Step 4: Audit the final diff** for canonical event writes, no swallowed canonical persistence errors, open-only polling, stable keys, legacy compatibility, and untouched `develop`.
+- [ ] **Step 4: Audit the final diff** for canonical event writes, no swallowed canonical persistence errors, open-only polling, stable keys, unsupported-format handling, and untouched `develop`.
 - [ ] **Step 5: Commit the implementation in logical commits and report exact test evidence.**

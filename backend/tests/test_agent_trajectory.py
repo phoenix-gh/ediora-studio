@@ -1,7 +1,6 @@
 import pytest
 
 from agent_trajectory import (
-    adapt_legacy_agent_log_event,
     derive_agent_trajectory_state,
     trajectory_event_payloads,
     validate_agent_session_event,
@@ -93,8 +92,8 @@ def test_trajectory_state_exposes_typed_turn_error():
     }
 
 
-def test_legacy_generic_rows_are_adapted_with_reduced_fidelity():
-    adapted = adapt_legacy_agent_log_event({
+def test_legacy_generic_rows_are_not_adapted():
+    projected = trajectory_event_payloads([{
         "sequence": 8,
         "created_at": "2026-08-22T00:00:00+00:00",
         "event_type": "llm/response",
@@ -102,22 +101,9 @@ def test_legacy_generic_rows_are_adapted_with_reduced_fidelity():
         "payload": {"text": "旧响应"},
         "usage": {"inputTokens": 2},
         "duration_ms": 120,
-    })
+    }])
 
-    assert adapted == {
-        "seq": 8,
-        "time": 1787356800000,
-        "type": "assistant/message",
-        "turn": 1,
-        "step": None,
-        "data": {
-            "blocks": [{"kind": "text", "text": "旧响应"}],
-            "usage": {"inputTokens": 2},
-            "timing": {"durationMs": 120},
-            "legacyEventType": "llm/response",
-        },
-        "legacy": True,
-    }
+    assert projected == []
 
 
 def test_canonical_rows_are_preferred_over_compatibility_audit_rows():
@@ -142,7 +128,7 @@ def test_canonical_rows_are_preferred_over_compatibility_audit_rows():
     assert "legacy" not in projected[0]
 
 
-def test_legacy_terminal_error_closes_a_partially_persisted_canonical_turn():
+def test_legacy_terminal_error_does_not_close_a_canonical_turn():
     projected = trajectory_event_payloads([
         {
             "sequence": 1,
@@ -160,5 +146,4 @@ def test_legacy_terminal_error_closes_a_partially_persisted_canonical_turn():
         },
     ])
 
-    assert [event["type"] for event in projected] == ["turn/start", "turn/end"]
-    assert projected[-1]["data"] == {"reason": {"kind": "error", "error": "canonical append failed"}}
+    assert [event["type"] for event in projected] == ["turn/start"]

@@ -2,10 +2,9 @@
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
+import { ApiError } from '@/lib/api/client'
 import {
   listAgentTrajectory,
-  listAllAgentLogEvents,
-  type AgentLogEvent,
   type AgentTrajectoryScope,
 } from '@/lib/ai/agent-log-client'
 import {
@@ -20,118 +19,6 @@ import {
 import { cn } from '@/lib/utils'
 
 const TRACE_REFRESH_INTERVAL_MS = 2_000
-
-function asRecord(value: unknown): Record<string, unknown> {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : {}
-}
-
-function legacyTurn(event: AgentLogEvent) {
-  const payload = asRecord(event.payload)
-  return typeof payload.turn === 'number' && payload.turn > 0 ? payload.turn : 1
-}
-
-function legacyStep(event: AgentLogEvent) {
-  const payload = asRecord(event.payload)
-  if (typeof payload.step === 'number' && payload.step > 0) return payload.step
-  if (event.step_id && /^\d+$/.test(event.step_id)) return Number(event.step_id)
-  return null
-}
-
-function legacyText(value: unknown): string {
-  if (typeof value === 'string') return value
-  if (Array.isArray(value)) return value.map(legacyText).join('')
-  if (value && typeof value === 'object') {
-    const item = value as Record<string, unknown>
-    return legacyText(item.text ?? item.content ?? item.output ?? item.value)
-  }
-  return ''
-}
-
-function adaptLegacyEvents(events: AgentLogEvent[]): AgentSessionEvent[] {
-  return events.flatMap((event): AgentSessionEvent[] => {
-    const payload = asRecord(event.payload)
-    const turn = legacyTurn(event)
-    const step = legacyStep(event)
-    const time = Date.parse(event.created_at)
-    const envelope = {
-      seq: event.sequence,
-      time: Number.isFinite(time) ? time : event.sequence,
-      turn,
-      step,
-      legacy: true,
-    }
-    switch (event.event_type) {
-      case 'session/turn-start':
-      case 'execution/start':
-        return [{ ...envelope, type: 'turn/start' as const, step: null, data: { turn } }]
-      case 'session/turn-end':
-      case 'execution/complete':
-        return [{ ...envelope, type: 'turn/end' as const, step: null, data: { reason: { kind: 'completed' } } }]
-      case 'session/error':
-      case 'execution/error':
-      case 'llm/error':
-        return [{ ...envelope, type: 'turn/end' as const, step: null, data: { reason: { kind: 'error', error: legacyText(payload.error ?? payload.message) || 'Agent 运行失败' } } }]
-      case 'session/user-message':
-        return [{
-          ...envelope,
-          type: 'user/message' as const,
-          step: null,
-          data: {
-            content: Array.isArray(payload.parts) ? payload.parts : [{ kind: 'text', text: legacyText(payload.text ?? payload.content) }],
-            source: { kind: 'user' },
-          },
-        }]
-      case 'llm/response':
-      case 'session/assistant-message':
-        return [{
-          ...envelope,
-          type: 'assistant/message' as const,
-          data: {
-            turn,
-            step: step ?? 1,
-            blocks: [{ kind: 'text', text: legacyText(payload.text ?? payload.content) }],
-            ...(event.usage ? { usage: event.usage } : {}),
-            ...(event.duration_ms !== null ? { timing: { durationMs: event.duration_ms } } : {}),
-          },
-        }]
-      case 'tool/call': {
-        const callId = payload.toolCallId ?? payload.callId ?? payload.tool_call_id
-        if (typeof callId !== 'string' || !callId) return []
-        return [{
-          ...envelope,
-          type: 'tool/call' as const,
-          data: {
-            turn,
-            step: step ?? 1,
-            callId,
-            name: String(payload.toolName ?? payload.name ?? 'Tool'),
-            arguments: payload.inputSummary ?? payload.arguments ?? payload.input ?? {},
-          },
-        }]
-      }
-      case 'tool/result': {
-        const callId = payload.toolCallId ?? payload.callId ?? payload.tool_call_id
-        if (typeof callId !== 'string' || !callId) return []
-        return [{
-          ...envelope,
-          type: 'tool/result' as const,
-          data: {
-            turn,
-            step: step ?? 1,
-            callId,
-            content: [{ kind: 'text', text: legacyText(payload.output ?? payload.result ?? payload.content) }],
-            ...(payload.error ? { error: String(payload.error) } : {}),
-            isError: event.status === 'error' || event.status === 'failed',
-          },
-        }]
-      }
-      default:
-        return []
-    }
-  })
-}
 
 function formatValue(value: unknown) {
   if (typeof value === 'string') return value
@@ -233,11 +120,11 @@ function Inspector({
   developerModeEnabled: boolean
 }) {
   if (!cell && !partial) {
-    return <aside data-testid="trajectory-inspector" className="rounded-xl border bg-muted/20 p-3 text-sm text-muted-foreground">选择一条消息、思考或工具调用查看详情。</aside>
+    return <aside data-testid="trajectory-inspector" className="min-h-0 overflow-y-auto rounded-xl border bg-muted/20 p-3 text-sm text-muted-foreground">选择一条消息、思考或工具调用查看详情。</aside>
   }
   const item = cell ?? partial
   if (!item) return null
-  return <aside data-testid="trajectory-inspector" className="space-y-3 rounded-xl border bg-muted/20 p-3 text-sm">
+  return <aside data-testid="trajectory-inspector" className="min-h-0 overflow-y-auto space-y-3 rounded-xl border bg-muted/20 p-3 text-sm">
     <div className="flex items-center justify-between gap-2"><h3 className="font-medium">检查器</h3><span className={cn('text-xs', statusClass(item.status))}>{statusLabel(item.status)}</span></div>
     {'thinkingDetail' in item && item.thinkingDetail && <div><p className="text-xs font-medium text-muted-foreground">思考</p><p className="mt-1 whitespace-pre-wrap break-words">{item.thinkingDetail}</p></div>}
     {'text' in item && item.text && <div><p className="text-xs font-medium text-muted-foreground">文本</p><p className="mt-1 whitespace-pre-wrap break-words">{item.text}</p></div>}
@@ -269,11 +156,14 @@ export function AgentTrajectoryPanel({
   )
   const cursorRef = useRef<number | null>(null)
   const inFlightRef = useRef(false)
+  const refreshTimerRef = useRef<number | null>(null)
+  const runningRef = useRef<boolean | null>(null)
   const [events, setEvents] = useState<AgentSessionEvent[]>([])
   const [sessionKey, setSessionKey] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const [legacyMode, setLegacyMode] = useState(false)
+  const [unsupportedFormat, setUnsupportedFormat] = useState(false)
+  const [runningState, setRunningState] = useState<boolean | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [eventsScopeKey, setEventsScopeKey] = useState(key)
 
@@ -282,7 +172,7 @@ export function AgentTrajectoryPanel({
     inFlightRef.current = true
     setLoading(true)
     setError('')
-    setLegacyMode(false)
+    setUnsupportedFormat(false)
     try {
       const cursor = reset ? null : cursorRef.current
       const page = await listAgentTrajectory(stableScope, cursor, 500)
@@ -291,21 +181,18 @@ export function AgentTrajectoryPanel({
       setEventsScopeKey(key)
       setSessionKey(page.session_key)
       cursorRef.current = page.next_sequence ?? page.events.at(-1)?.seq ?? cursor
-      setLegacyMode(false)
+      runningRef.current = page.unsupported_format ? false : page.is_running
+      setRunningState(runningRef.current)
+      setUnsupportedFormat(page.unsupported_format)
       setError('')
     } catch (reason) {
       if (!active()) return
-      try {
-        const page = await listAllAgentLogEvents({ ...stableScope, limit: 500 })
-        if (!active()) return
-        const adapted = adaptLegacyEvents(page.events)
-        setEvents(current => mergeAgentSessionEvents(reset ? [] : current, adapted))
-        setEventsScopeKey(key)
-        cursorRef.current = adapted.at(-1)?.seq ?? cursorRef.current
-        setLegacyMode(true)
-        setError('')
-      } catch (fallbackReason) {
-        if (active()) setError(fallbackReason instanceof Error ? fallbackReason.message : reason instanceof Error ? reason.message : '运行轨迹加载失败')
+      runningRef.current = false
+      setRunningState(false)
+      if (reason instanceof ApiError && reason.status === 404) {
+        setUnsupportedFormat(true)
+      } else {
+        setError(reason instanceof Error ? reason.message : '运行轨迹加载失败')
       }
     } finally {
       inFlightRef.current = false
@@ -318,12 +205,27 @@ export function AgentTrajectoryPanel({
     let active = true
     cursorRef.current = null
     inFlightRef.current = false
-    const initialRefresh = window.setTimeout(() => { if (active) void refresh(() => active, true) }, 0)
-    const timer = window.setInterval(() => { if (active) void refresh(() => active) }, TRACE_REFRESH_INTERVAL_MS)
+    refreshTimerRef.current = null
+    runningRef.current = null
+    const scheduleRefresh = () => {
+      if (!active || runningRef.current === false) return
+      refreshTimerRef.current = window.setTimeout(async () => {
+        refreshTimerRef.current = null
+        if (!active) return
+        await refresh(() => active)
+        scheduleRefresh()
+      }, TRACE_REFRESH_INTERVAL_MS)
+    }
+    const initialRefresh = window.setTimeout(async () => {
+      if (!active) return
+      await refresh(() => active, true)
+      scheduleRefresh()
+    }, 0)
     return () => {
       active = false
       window.clearTimeout(initialRefresh)
-      window.clearInterval(timer)
+      if (refreshTimerRef.current !== null) window.clearTimeout(refreshTimerRef.current)
+      refreshTimerRef.current = null
     }
   }, [key, open, refresh])
 
@@ -334,20 +236,23 @@ export function AgentTrajectoryPanel({
   const selectedCell = findCell(snapshot, selectedId)
   const selectedPartial = snapshot.partial?.recordId === selectedId ? snapshot.partial : null
   const selectRecord = useCallback((recordId: string) => setSelectedId(recordId), [])
+  const isRunning = runningState ?? snapshot.isRunning
 
-  return <section data-testid="agent-trajectory-panel" className="space-y-3 rounded-lg border bg-background p-3">
-    <div className="flex flex-wrap items-start justify-between gap-2">
+  return <section data-testid="agent-trajectory-panel" className="flex h-full min-h-0 flex-col gap-3 rounded-lg border bg-background p-3">
+    <div className="flex shrink-0 flex-wrap items-start justify-between gap-2">
       <div><h3 className="font-medium">{title}</h3><p className="text-xs text-muted-foreground">按 Turn、Message、Step 和 Tool 展开；选择记录查看本地检查器。</p></div>
       <div className="flex items-center gap-2 text-xs">
-        {legacyMode && <span className="rounded-full bg-warning/10 px-2 py-0.5 text-warning">兼容日志</span>}
-        <span className={cn('rounded-full bg-muted px-2 py-0.5', statusClass(snapshot.isRunning ? 'running' : snapshot.lastError ? 'error' : 'completed'))}>{snapshot.isRunning ? '运行中' : snapshot.lastError ? '失败' : '已结束'}</span>
+        <span className={cn('rounded-full bg-muted px-2 py-0.5', statusClass(isRunning ? 'running' : snapshot.lastError ? 'error' : 'completed'))}>{isRunning ? '运行中' : snapshot.lastError ? '失败' : '已结束'}</span>
       </div>
     </div>
-    {loading && <p className="text-sm text-muted-foreground">运行轨迹加载中…</p>}
-    {error && <p role="alert" className="text-sm text-danger">{error}</p>}
-    {!loading && !error && snapshot.turns.length === 0 && !snapshot.partial && <p className="text-sm text-muted-foreground">暂无 Agent 轨迹记录</p>}
-    {!error && snapshot.turns.length > 0 && <div className="grid min-h-0 gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(16rem,22rem)]">
-      <div className="min-w-0 space-y-2">
+    <div data-testid="trajectory-status-slot" className="flex min-h-5 shrink-0 items-center">
+      {unsupportedFormat && <p role="alert" className="text-sm text-danger">暂不支持旧格式数据</p>}
+      {!unsupportedFormat && error && <p role="alert" className="text-sm text-danger">{error}</p>}
+      {!unsupportedFormat && !error && loading && <p className="text-sm text-muted-foreground">运行轨迹加载中…</p>}
+      {!unsupportedFormat && !error && !loading && snapshot.turns.length === 0 && !snapshot.partial && <p className="text-sm text-muted-foreground">暂无 Agent 轨迹记录</p>}
+    </div>
+    {!error && !unsupportedFormat && snapshot.turns.length > 0 && <div className="grid min-h-0 min-w-0 flex-1 grid-cols-1 grid-rows-[minmax(0,1fr)_minmax(0,1fr)] gap-3 overflow-hidden lg:grid-cols-[minmax(0,1fr)_minmax(16rem,22rem)] lg:grid-rows-1">
+      <div data-testid="trajectory-list" className="min-h-0 min-w-0 space-y-2 overflow-y-auto pr-1">
         {snapshot.turns.map(turn => <TurnView key={turn.recordId} turn={turn} selectedId={selectedId} onSelect={selectRecord} />)}
         {snapshot.runningCalls.length > 0 && <div className="space-y-1.5 rounded-xl border border-info/30 bg-info/5 p-3"><h4 className="text-xs font-semibold text-info">等待工具结果</h4>{snapshot.runningCalls.map(call => <TrajectoryCellRow key={call.recordId} cell={call} selected={selectedId === call.recordId} onSelect={selectRecord} />)}</div>}
       </div>

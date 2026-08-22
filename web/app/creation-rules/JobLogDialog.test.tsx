@@ -7,14 +7,12 @@ import { JobLogDialog } from './JobLogDialog'
 
 const api = vi.hoisted(() => ({
   listAgentTrajectory: vi.fn(),
-  listAllAgentLogEvents: vi.fn(),
 }))
 const developerMode = vi.hoisted(() => ({ enabled: true }))
 
 vi.mock('@/lib/api/jobs', () => ({}))
 vi.mock('@/lib/ai/agent-log-client', () => ({
   listAgentTrajectory: api.listAgentTrajectory,
-  listAllAgentLogEvents: api.listAllAgentLogEvents,
 }))
 vi.mock('@/components/providers/DeveloperModeProvider', () => ({
   useDeveloperMode: () => developerMode.enabled,
@@ -48,31 +46,25 @@ const job: ContentJob = {
   }],
 }
 
-const agentEvents = [{
-  id: 1,
-  sequence: 1,
-  stream_kind: 'job' as const,
-  stream_key: 'execution:123',
-  session_id: null,
-  job_id: 123,
-  execution_id: 55,
-  turn_id: null,
-  step_id: null,
-  event_type: 'llm/response',
-  phase: 'execute',
-  status: 'completed',
-  payload: { text: '模型回复内容' },
-  usage: { inputTokens: 10, outputTokens: 4 },
-  duration_ms: 320,
-  created_at: '2026-08-20T08:00:10Z',
-}]
+const agentEvents = [
+  { seq: 1, time: 1_000, type: 'turn/start' as const, turn: 1, step: null, data: { turn: 1 } },
+  { seq: 2, time: 2_000, type: 'assistant/message' as const, turn: 1, step: 1, data: { turn: 1, step: 1, blocks: [{ kind: 'text', text: '模型回复内容' }] } },
+  { seq: 3, time: 3_000, type: 'turn/end' as const, turn: 1, step: null, data: { reason: { kind: 'completed' } } },
+]
 
 describe('JobLogDialog', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     developerMode.enabled = true
-    api.listAgentTrajectory.mockRejectedValue(new Error('canonical endpoint unavailable in fixture'))
-    api.listAllAgentLogEvents.mockResolvedValue({ events: agentEvents, has_more: false, next_sequence: null })
+    api.listAgentTrajectory.mockResolvedValue({
+      session_key: 'execution:55',
+      events: agentEvents,
+      next_sequence: 3,
+      has_more: false,
+      is_running: false,
+      last_error: null,
+      unsupported_format: false,
+    })
   })
 
   it('hides developer tabs and does not fetch agent logs when developer mode is off', () => {
@@ -84,7 +76,7 @@ describe('JobLogDialog', () => {
     expect(screen.queryByRole('tab', { name: '执行时间线' })).not.toBeInTheDocument()
     expect(screen.queryByRole('tab', { name: 'Agent 运行轨迹' })).not.toBeInTheDocument()
     expect(screen.queryByRole('tab', { name: 'AI 完整消息' })).not.toBeInTheDocument()
-    expect(api.listAllAgentLogEvents).not.toHaveBeenCalled()
+    expect(api.listAgentTrajectory).not.toHaveBeenCalled()
   })
 
   it('uses the overview timeline trace order and opens on the overview', async () => {
@@ -97,7 +89,7 @@ describe('JobLogDialog', () => {
       'min-h-[min(520px,calc(100dvh-2rem))]',
       'max-h-[calc(100dvh-2rem)]',
     )
-    await waitFor(() => expect(api.listAllAgentLogEvents).toHaveBeenCalledWith({ job_id: job.id, limit: 500 }))
+    await waitFor(() => expect(api.listAgentTrajectory).toHaveBeenCalledWith({ job_id: job.id }, null, 500))
 
     fireEvent.click(screen.getByRole('tab', { name: 'Agent 运行轨迹' }))
     expect(await screen.findByText('模型回复内容')).toBeInTheDocument()
@@ -113,7 +105,7 @@ describe('JobLogDialog', () => {
     render(<JobLogDialog job={job} open onOpenChange={vi.fn()} onRetry={vi.fn()} />)
 
     fireEvent.click(screen.getByRole('tab', { name: 'Agent 运行轨迹' }))
-    expect(screen.getByTestId('job-log-agent-panel')).toHaveClass('overflow-y-auto')
+    expect(screen.getByTestId('job-log-agent-panel')).toHaveClass('overflow-hidden')
 
     fireEvent.click(screen.getByRole('tab', { name: '任务概览' }))
 

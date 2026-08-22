@@ -22,7 +22,6 @@ export type AgentSessionEvent = {
   step: number | null
   data: Record<string, unknown>
   sourceEventSeqs?: number[]
-  legacy?: boolean
 }
 
 export type TrajectoryStatus = 'running' | 'completed' | 'error' | 'aborted' | 'interrupted' | 'waiting_approval'
