@@ -4,6 +4,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ChatClient } from './ChatClient'
+import { ChatWorkspaceProvider } from '@/components/features/chat/ChatWorkspaceProvider'
 
 const developerMode = vi.hoisted(() => ({ enabled: false }))
 const chatApi = vi.hoisted(() => ({
@@ -75,7 +76,11 @@ describe('ChatClient', () => {
 
   it('does not load agent logs until the runtime trace dialog opens', async () => {
     developerMode.enabled = true
-    const view = render(<ChatClient />)
+    const view = render(
+      <ChatWorkspaceProvider>
+        <ChatClient />
+      </ChatWorkspaceProvider>,
+    )
 
     await waitFor(() => expect(chatApi.getChatSession).toHaveBeenCalledWith(7))
     expect(chatApi.listChatSessions).toHaveBeenCalledTimes(1)
@@ -121,7 +126,11 @@ describe('ChatClient', () => {
       })
 
     try {
-      const view = render(<ChatClient />)
+      const view = render(
+        <ChatWorkspaceProvider>
+          <ChatClient />
+        </ChatWorkspaceProvider>,
+      )
 
       await act(async () => {
         await Promise.resolve()
