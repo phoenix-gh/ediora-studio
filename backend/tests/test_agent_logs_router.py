@@ -142,6 +142,76 @@ def test_agent_log_event_ingest_rejects_legacy_tool_payload(client):
     assert response.status_code == 422
 
 
+def test_canonical_context_events_accept_derived_turn_and_step(client):
+    start = client.post(
+        "/api/agent-logs/events",
+        headers={"X-Worker-Token": TOKEN},
+        json={
+            "stream_kind": "chat",
+            "stream_key": "chat:14",
+            "session_id": 14,
+            "turn_id": "turn-2",
+            "event_type": "turn/start",
+            "payload": {"turn": 2},
+        },
+    )
+    assert start.status_code == 201, start.text
+
+    user = client.post(
+        "/api/agent-logs/events",
+        headers={"X-Worker-Token": TOKEN},
+        json={
+            "stream_kind": "chat",
+            "stream_key": "chat:14",
+            "session_id": 14,
+            "turn_id": "turn-2",
+            "event_type": "user/message",
+            "payload": {
+                "content": [{"kind": "text", "text": "继续"}],
+                "source": {"kind": "user"},
+            },
+        },
+    )
+    assert user.status_code == 201, user.text
+    assert user.json()["data"]["turn"] == 2
+
+    step_start = client.post(
+        "/api/agent-logs/events",
+        headers={"X-Worker-Token": TOKEN},
+        json={
+            "stream_kind": "chat",
+            "stream_key": "chat:14",
+            "session_id": 14,
+            "turn_id": "turn-2",
+            "step_id": "1",
+            "event_type": "step/start",
+            "payload": {"turn": 2, "step": 1},
+        },
+    )
+    assert step_start.status_code == 201, step_start.text
+
+    skill = client.post(
+        "/api/agent-logs/events",
+        headers={"X-Worker-Token": TOKEN},
+        json={
+            "stream_kind": "chat",
+            "stream_key": "chat:14",
+            "session_id": 14,
+            "turn_id": "turn-2",
+            "step_id": "1",
+            "event_type": "agent/skill",
+            "payload": {"name": "research"},
+        },
+    )
+    assert skill.status_code == 201, skill.text
+    assert skill.json()["data"] == {
+        "name": "research",
+        "references": [],
+        "turn": 2,
+        "step": 1,
+    }
+
+
 def test_agent_trajectory_reports_unsupported_legacy_rows(client):
     created = client.post(
         "/api/agent-logs/events",
