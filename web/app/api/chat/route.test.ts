@@ -6,6 +6,7 @@ import {
   chatAgentLogEventFromModelMessage,
   chatAgentLogEventFromToolAudit,
   chatAgentSessionEventFromDraft,
+  chatAgentSessionEventFromToolResult,
   chatTrajectoryChunk,
   agentRunUIResponse,
   executionToolsForSelection,
@@ -76,6 +77,32 @@ describe('Chat Agent log event mapping', () => {
       step_id: '1',
       type: 'step/start',
       data: { turn: 2, step: 1 },
+    })
+  })
+
+  it('maps completed AI SDK tool results into canonical trajectory events', () => {
+    const output = {
+      content: [{ type: 'text', text: 'asset loaded' }],
+      isError: false,
+    }
+
+    expect(chatAgentSessionEventFromToolResult({
+      type: 'tool-result',
+      toolCallId: 'call-1',
+      toolName: 'get_creative_asset',
+      output,
+    }, { turn: 6, step: 1 })).toEqual({
+      type: 'tool/result',
+      turn: 6,
+      step: 1,
+      data: {
+        turn: 6,
+        step: 1,
+        callId: 'call-1',
+        content: output.content,
+        output,
+        isError: false,
+      },
     })
   })
 })
