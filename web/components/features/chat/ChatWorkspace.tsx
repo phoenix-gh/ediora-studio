@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
-import { Activity, Bot, ChevronLeft, FileSearch, List, Loader2, Maximize2 } from 'lucide-react'
+import { Activity, Bot, ChevronLeft, FileSearch, Loader2, Maximize2 } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { ChatAgentLogDialog } from '@/components/features/chat/ChatAgentLogDialog'
@@ -53,7 +53,6 @@ export function ChatWorkspace({ variant, onClose, onOpenFullChat, onHeaderPointe
   const [listLoading, setListLoading] = useState(true)
   const [input, setInput] = useState('')
   const [showTrace, setShowTrace] = useState(false)
-  const [showSessions, setShowSessions] = useState(true)
   const bottomRef = useRef<HTMLDivElement>(null)
   const initializedRef = useRef(false)
   const initialActiveSessionIdRef = useRef(activeSessionId)
@@ -154,20 +153,6 @@ export function ChatWorkspace({ variant, onClose, onOpenFullChat, onHeaderPointe
       )}
 
       <section className="flex min-h-0 min-w-0 flex-1 flex-col">
-        {isFloating && showSessions && (
-          <ChatSessionList
-            sessions={sessions}
-            activeSessionId={activeSessionId}
-            runningBySession={state.runningBySession}
-            loading={listLoading}
-            variant="floating"
-            onOpenSession={handleOpenSession}
-            onNewConversation={handleNewConversation}
-            onRenameSession={handleRenameSession}
-            onDeleteSession={handleDeleteSession}
-          />
-        )}
-
         <header
           data-slot="page-header"
           data-testid={isFloating ? 'floating-chat-drag-handle' : undefined}
@@ -184,20 +169,23 @@ export function ChatWorkspace({ variant, onClose, onOpenFullChat, onHeaderPointe
                 <h2 className="truncate font-medium text-foreground">{isFloating ? 'AI 助手' : '全局研究助手'}</h2>
                 <p className="truncate text-xs text-muted-foreground">可检索写作方案；所有工具调用均会记录。</p>
               </div>
+              {isFloating && (
+                <ChatSessionList
+                  sessions={sessions}
+                  activeSessionId={activeSessionId}
+                  runningBySession={state.runningBySession}
+                  loading={listLoading}
+                  variant="floating"
+                  onOpenSession={handleOpenSession}
+                  onNewConversation={handleNewConversation}
+                  onRenameSession={handleRenameSession}
+                  onDeleteSession={handleDeleteSession}
+                />
+              )}
             </div>
             <div className="flex shrink-0 items-center gap-1">
               {isFloating && (
                 <>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-sm"
-                    aria-label={showSessions ? '隐藏会话列表' : '显示会话列表'}
-                    title={showSessions ? '隐藏会话列表' : '显示会话列表'}
-                    onClick={() => setShowSessions(value => !value)}
-                  >
-                    <List />
-                  </Button>
                   {onOpenFullChat && (
                     <Button type="button" variant="ghost" size="icon-sm" aria-label="打开完整聊天" title="打开完整聊天" onClick={onOpenFullChat}>
                       <Maximize2 />

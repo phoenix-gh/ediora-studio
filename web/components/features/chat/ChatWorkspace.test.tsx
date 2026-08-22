@@ -89,11 +89,13 @@ describe('ChatWorkspace', () => {
     const user = userEvent.setup()
     renderWorkspace('floating')
 
-    const firstSession = await screen.findByRole('button', { name: '已有会话' })
+    await user.click(await screen.findByTestId('floating-chat-session-picker'))
+    const firstSession = await screen.findByRole('button', { name: '切换到会话：已有会话' })
     await user.click(firstSession)
     expect(await screen.findByText('已有会话的消息')).toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: '另一个会话' }))
+    await user.click(screen.getByTestId('floating-chat-session-picker'))
+    await user.click(screen.getByRole('button', { name: '切换到会话：另一个会话' }))
     expect(await screen.findByText('另一个会话的消息')).toBeInTheDocument()
     expect(screen.queryByText('已有会话的消息')).not.toBeInTheDocument()
   })

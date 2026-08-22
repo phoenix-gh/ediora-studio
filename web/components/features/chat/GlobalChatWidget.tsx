@@ -74,7 +74,13 @@ export function GlobalChatWidget() {
   const [position, setPosition] = useState<FloatingChatPosition | null>(null)
   const sizeRef = useRef<FloatingChatSize>(size)
   const positionRef = useRef<FloatingChatPosition | null>(position)
-  const resizeRef = useRef<{ startX: number; startY: number; startSize: FloatingChatSize; pointerId: number } | null>(null)
+  const resizeRef = useRef<{
+    startX: number
+    startY: number
+    startSize: FloatingChatSize
+    startPosition: FloatingChatPosition
+    pointerId: number
+  } | null>(null)
   const dragRef = useRef<{ startX: number; startY: number; startPosition: FloatingChatPosition; pointerId: number } | null>(null)
 
   function updateSize(nextSize: FloatingChatSize) {
@@ -114,10 +120,12 @@ export function GlobalChatWidget() {
     if (event.button !== 0 && event.pointerType !== 'touch') return
     event.preventDefault()
     event.currentTarget.setPointerCapture?.(event.pointerId)
+    const viewport = currentViewport()
     resizeRef.current = {
       startX: event.clientX,
       startY: event.clientY,
       startSize: sizeRef.current,
+      startPosition: positionRef.current ?? defaultPosition(sizeRef.current, viewport),
       pointerId: event.pointerId,
     }
 
@@ -125,12 +133,17 @@ export function GlobalChatWidget() {
       const resize = resizeRef.current
       if (!resize || moveEvent.pointerId !== resize.pointerId) return
       const viewport = currentViewport()
+      const deltaX = moveEvent.clientX - resize.startX
+      const deltaY = moveEvent.clientY - resize.startY
       const nextSize = clampFloatingChatSize({
-        width: resize.startSize.width + moveEvent.clientX - resize.startX,
-        height: resize.startSize.height + moveEvent.clientY - resize.startY,
+        width: resize.startSize.width - deltaX,
+        height: resize.startSize.height - deltaY,
       }, viewport)
       updateSize(nextSize)
-      if (positionRef.current) updatePosition(clampPosition(positionRef.current, nextSize, viewport))
+      updatePosition(clampPosition({
+        left: resize.startPosition.left + deltaX,
+        top: resize.startPosition.top + deltaY,
+      }, nextSize, viewport))
     }
 
     const handlePointerEnd = (endEvent: PointerEvent) => {
@@ -196,7 +209,7 @@ export function GlobalChatWidget() {
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen} modal={false}>
+    <Dialog open={open} onOpenChange={setOpen} modal={false} disablePointerDismissal>
       <DialogTrigger
         render={(
           <button
@@ -237,12 +250,12 @@ export function GlobalChatWidget() {
         <button
           type="button"
           data-testid="floating-chat-resize-handle"
-          aria-label="拖动调整窗口大小"
-          title="拖动调整窗口大小"
+          aria-label="拖动调整聊天窗口大小"
+          title="拖动调整聊天窗口大小"
           onPointerDown={handleResizeStart}
-          className="absolute right-1 bottom-1 z-10 flex size-8 cursor-se-resize touch-none select-none items-center justify-center rounded-md bg-background/80 text-foreground-subtle shadow-sm transition-colors hover:bg-muted hover:text-foreground"
+          className="absolute top-1 left-1 z-10 flex size-5 cursor-nwse-resize touch-none select-none items-center justify-center rounded-md text-foreground-subtle transition-colors hover:bg-muted hover:text-foreground"
         >
-          <Grip aria-hidden="true" className="size-4 rotate-45" />
+          <Grip aria-hidden="true" className="size-3.5 rotate-45" />
         </button>
       </DialogContent>
     </Dialog>

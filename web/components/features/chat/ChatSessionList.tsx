@@ -1,10 +1,11 @@
 'use client'
 
 import { useState } from 'react'
-import { Loader2, Pencil, Plus, Trash2 } from 'lucide-react'
+import { ChevronDown, Loader2, Pencil, Plus, Trash2 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import type { ChatSession } from '@/lib/api/chat'
 import { cn } from '@/lib/utils'
 
@@ -27,6 +28,155 @@ function displayTime(value: string) {
   }).format(new Date(value))
 }
 
+function FloatingSessionPicker({
+  sessions,
+  activeSessionId,
+  runningBySession,
+  loading,
+  onOpenSession,
+  onNewConversation,
+  onRenameSession,
+  onDeleteSession,
+}: Omit<ChatSessionListProps, 'variant'>) {
+  const [popoverOpen, setPopoverOpen] = useState(false)
+  const [editingSessionId, setEditingSessionId] = useState<number | null>(null)
+  const [editingTitle, setEditingTitle] = useState('')
+  const activeSession = sessions.find(session => session.id === activeSessionId)
+
+  async function saveSessionTitle(session: ChatSession) {
+    if (editingSessionId !== session.id) return
+    await onRenameSession(session.id, editingTitle.trim() || '新对话')
+    setEditingSessionId(null)
+    setEditingTitle('')
+  }
+
+  async function removeSession(session: ChatSession) {
+    if (typeof window !== 'undefined' && !window.confirm(`删除会话“${session.title || '新对话'}”？此操作不可恢复。`)) return
+    await onDeleteSession(session.id)
+  }
+
+  function openSession(sessionId: number) {
+    onOpenSession(sessionId)
+    setPopoverOpen(false)
+  }
+
+  function startNewConversation() {
+    onNewConversation()
+    setPopoverOpen(false)
+  }
+
+  return (
+    <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
+      <PopoverTrigger
+        render={(
+          <button
+            type="button"
+            data-testid="floating-chat-session-picker"
+            aria-label={activeSession ? `选择会话，当前为：${activeSession.title || '新对话'}` : '选择会话，当前为：新对话'}
+            className="flex min-w-0 max-w-56 items-center gap-1 rounded-md px-1.5 py-1 text-left text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          />
+        )}
+      >
+        <span className="truncate">{activeSession?.title || '新对话'}</span>
+        <ChevronDown aria-hidden="true" className="size-3.5 shrink-0" />
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-[min(22rem,calc(100vw-2rem))] p-2">
+        <div className="flex items-center justify-between gap-2 px-1 pb-2">
+          <div>
+            <p className="text-xs font-medium text-foreground">会话</p>
+            <p className="mt-0.5 text-[11px] text-muted-foreground">切换或管理聊天记录</p>
+          </div>
+          <Button type="button" size="icon-sm" title="新建对话" aria-label="新建对话" onClick={startNewConversation}>
+            <Plus />
+          </Button>
+        </div>
+        <div className="max-h-64 overflow-y-auto">
+          {loading ? (
+            <div className="flex items-center gap-2 px-2 py-4 text-xs text-muted-foreground">
+              <Loader2 className="size-3.5 animate-spin" />加载会话…
+            </div>
+          ) : sessions.length === 0 ? (
+            <div className="px-2 py-5 text-center text-xs text-muted-foreground">还没有已保存的会话</div>
+          ) : sessions.map(session => {
+            const title = session.title || '新对话'
+            const isRunning = Boolean(runningBySession[String(session.id)])
+            return (
+              <div key={session.id} className="group flex items-center gap-1 rounded-md hover:bg-muted">
+                {editingSessionId === session.id ? (
+                  <Input
+                    autoFocus
+                    value={editingTitle}
+                    onChange={event => setEditingTitle(event.target.value)}
+                    onBlur={() => void saveSessionTitle(session)}
+                    onKeyDown={event => {
+                      if (event.key === 'Enter') {
+                        event.preventDefault()
+                        void saveSessionTitle(session)
+                      }
+                      if (event.key === 'Escape') {
+                        setEditingSessionId(null)
+                        setEditingTitle('')
+                      }
+                    }}
+                    aria-label="会话名称"
+                    className="h-8 min-w-0 flex-1 text-xs"
+                  />
+                ) : (
+                  <button
+                    type="button"
+                    data-testid={`floating-chat-session-${session.id}`}
+                    aria-label={`切换到会话：${title}`}
+                    onClick={() => openSession(session.id)}
+                    className={cn(
+                      'min-w-0 flex-1 rounded-md px-2 py-1.5 text-left transition-colors',
+                      activeSessionId === session.id ? 'text-indigo-700 dark:text-indigo-300' : 'text-muted-foreground',
+                    )}
+                  >
+                    <span className="flex min-w-0 items-center gap-2">
+                      <span className="min-w-0 flex-1 truncate text-xs font-medium">{title}</span>
+                      {isRunning && <Loader2 aria-label="运行中" className="size-3.5 shrink-0 animate-spin text-indigo-500" />}
+                    </span>
+                    <span className="mt-0.5 block text-[10px] text-foreground-subtle">{displayTime(session.updated_at)}</span>
+                  </button>
+                )}
+                {editingSessionId !== session.id && (
+                  <>
+                    <button
+                      type="button"
+                      title="重命名会话"
+                      aria-label={`重命名会话：${title}`}
+                      onClick={event => {
+                        event.stopPropagation()
+                        setEditingSessionId(session.id)
+                        setEditingTitle(session.title || '')
+                      }}
+                      className="rounded p-1 text-foreground-subtle opacity-0 transition hover:bg-background hover:text-indigo-600 group-hover:opacity-100 focus:opacity-100"
+                    >
+                      <Pencil className="size-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      title="删除会话"
+                      aria-label={`删除会话：${title}`}
+                      onClick={event => {
+                        event.stopPropagation()
+                        void removeSession(session)
+                      }}
+                      className="mr-1 rounded p-1 text-foreground-subtle opacity-0 transition hover:bg-background hover:text-red-600 group-hover:opacity-100 focus:opacity-100"
+                    >
+                      <Trash2 className="size-3.5" />
+                    </button>
+                  </>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      </PopoverContent>
+    </Popover>
+  )
+}
+
 export function ChatSessionList({
   sessions,
   activeSessionId,
@@ -40,7 +190,21 @@ export function ChatSessionList({
 }: ChatSessionListProps) {
   const [editingSessionId, setEditingSessionId] = useState<number | null>(null)
   const [editingTitle, setEditingTitle] = useState('')
-  const isFloating = variant === 'floating'
+
+  if (variant === 'floating') {
+    return (
+      <FloatingSessionPicker
+        sessions={sessions}
+        activeSessionId={activeSessionId}
+        runningBySession={runningBySession}
+        loading={loading}
+        onOpenSession={onOpenSession}
+        onNewConversation={onNewConversation}
+        onRenameSession={onRenameSession}
+        onDeleteSession={onDeleteSession}
+      />
+    )
+  }
 
   async function saveSessionTitle(session: ChatSession) {
     if (editingSessionId !== session.id) return
@@ -59,12 +223,12 @@ export function ChatSessionList({
       data-slot="chat-session-list"
       className={cn(
         'flex min-h-0 shrink-0 flex-col bg-surface',
-        isFloating ? 'max-h-56 border-b border-border' : 'w-72 border-r border-border',
+        'w-72 border-r border-border',
       )}
     >
       <div className={cn(
         'flex items-center justify-between gap-3 border-border px-4 py-3',
-        isFloating ? 'min-h-14' : 'h-[var(--app-header-height)] min-h-[var(--app-header-height)] border-b',
+        'h-[var(--app-header-height)] min-h-[var(--app-header-height)] border-b',
       )}>
         <div className="min-w-0">
           <h1 className="font-semibold text-foreground">AI 助手</h1>

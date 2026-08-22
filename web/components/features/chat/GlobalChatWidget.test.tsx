@@ -6,7 +6,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ChatWorkspaceProvider } from './ChatWorkspaceProvider'
 import {
-  DEFAULT_FLOATING_CHAT_SIZE,
   FLOATING_CHAT_SIZE_STORAGE_KEY,
 } from './floating-chat-size'
 import { GlobalChatWidget } from './GlobalChatWidget'
@@ -88,8 +87,8 @@ describe('GlobalChatWidget', () => {
 
     await user.click(screen.getByTestId('global-chat-trigger'))
 
-    expect(screen.getByTestId('global-chat-panel')).toHaveStyle({ width: '560px', height: '720px' })
-    expect(screen.getByRole('button', { name: '拖动调整窗口大小' })).toBeInTheDocument()
+    expect(screen.getByTestId('global-chat-panel')).toHaveStyle({ width: '640px', height: '736px' })
+    expect(screen.getByRole('button', { name: '拖动调整聊天窗口大小' })).toHaveClass('left-1', 'top-1')
   })
 
   it('restores and resets the persisted panel size', async () => {
@@ -106,8 +105,8 @@ describe('GlobalChatWidget', () => {
     expect(screen.getByTestId('global-chat-panel')).toHaveStyle({ width: '500px', height: '640px' })
     await user.click(screen.getByTestId('floating-chat-reset-size'))
     expect(screen.getByTestId('global-chat-panel')).toHaveStyle({
-      width: `${DEFAULT_FLOATING_CHAT_SIZE.width}px`,
-      height: `${DEFAULT_FLOATING_CHAT_SIZE.height}px`,
+      width: '640px',
+      height: '736px',
     })
   })
 
@@ -119,14 +118,31 @@ describe('GlobalChatWidget', () => {
     const handle = await screen.findByTestId('floating-chat-resize-handle')
 
     fireEvent.pointerDown(handle, { button: 0, clientX: 100, clientY: 100, pointerId: 1 })
-    fireEvent.pointerMove(window, { clientX: 2_000, clientY: 2_000, pointerId: 1 })
-    fireEvent.pointerUp(window, { clientX: 2_000, clientY: 2_000, pointerId: 1 })
+    fireEvent.pointerMove(window, { clientX: -2_000, clientY: -2_000, pointerId: 1 })
+    fireEvent.pointerUp(window, { clientX: -2_000, clientY: -2_000, pointerId: 1 })
 
-    expect(screen.getByTestId('global-chat-panel')).toHaveStyle({ width: '720px', height: '736px' })
+    expect(screen.getByTestId('global-chat-panel')).toHaveStyle({ width: '960px', height: '736px' })
     expect(JSON.parse(window.localStorage.getItem(FLOATING_CHAT_SIZE_STORAGE_KEY) ?? '{}')).toEqual({
-      width: 720,
+      width: 960,
       height: 736,
     })
+  })
+
+  it('stays open when a user clicks outside to navigate', async () => {
+    const user = userEvent.setup()
+    render(
+      <>
+        <ChatWorkspaceProvider>
+          <GlobalChatWidget />
+        </ChatWorkspaceProvider>
+        <button type="button" data-testid="outside-navigation">打开 GitHub</button>
+      </>,
+    )
+
+    await user.click(screen.getByTestId('global-chat-trigger'))
+    await user.click(screen.getByTestId('outside-navigation'))
+
+    expect(screen.getByTestId('global-chat-panel')).toBeInTheDocument()
   })
 
   it('moves the floating panel when its header is dragged', async () => {
@@ -144,7 +160,7 @@ describe('GlobalChatWidget', () => {
     fireEvent.pointerMove(window, { clientX: 20, clientY: 60, pointerId: 2 })
     fireEvent.pointerUp(window, { clientX: 20, clientY: 60, pointerId: 2 })
 
-    expect(panel).toHaveStyle({ left: '784px', top: '124px' })
+    expect(panel).toHaveStyle({ left: '704px', top: '24px' })
 
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: originalViewport.width })
     Object.defineProperty(window, 'innerHeight', { configurable: true, value: originalViewport.height })

@@ -28,8 +28,9 @@ function createStorage(): Storage {
 
 describe('floating chat size', () => {
   it('uses the default size and clamps to a narrow viewport', () => {
-    expect(DEFAULT_FLOATING_CHAT_SIZE).toEqual({ width: 560, height: 720 })
-    expect(clampFloatingChatSize(DEFAULT_FLOATING_CHAT_SIZE, viewport)).toEqual({ width: 560, height: 720 })
+    expect(DEFAULT_FLOATING_CHAT_SIZE).toEqual({ width: 640, height: 820 })
+    expect(clampFloatingChatSize(DEFAULT_FLOATING_CHAT_SIZE, viewport)).toEqual({ width: 640, height: 820 })
+    expect(clampFloatingChatSize({ width: 2_000, height: 2_000 }, viewport)).toEqual({ width: 960, height: 868 })
     expect(clampFloatingChatSize({ width: 1000, height: 1000 }, { width: 360, height: 450 })).toEqual({
       width: 328,
       height: 418,
