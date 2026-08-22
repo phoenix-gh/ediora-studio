@@ -218,7 +218,9 @@ async def create_daily_creation_run(
     """Create the run and durable job once; the caller dispatches after commit."""
     from content_jobs import create_job
 
-    if rule.deleted_at is not None or not rule.enabled:
+    if rule.deleted_at is not None or (
+        not rule.enabled and trigger_kind != "explicit"
+    ):
         raise ValueError("Daily creation rule is disabled or deleted")
     if trigger_kind == "explicit":
         existing = await session.scalar(
