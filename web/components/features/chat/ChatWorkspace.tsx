@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { Activity, Bot, ChevronLeft, FileSearch, List, Loader2, Maximize2 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -20,13 +20,14 @@ export type ChatWorkspaceProps = {
   variant: 'page' | 'floating'
   onClose?: () => void
   onOpenFullChat?: () => void
+  onHeaderPointerDown?: (event: ReactPointerEvent<HTMLElement>) => void
 }
 
 function errorText(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback
 }
 
-export function ChatWorkspace({ variant, onClose, onOpenFullChat }: ChatWorkspaceProps) {
+export function ChatWorkspace({ variant, onClose, onOpenFullChat, onHeaderPointerDown }: ChatWorkspaceProps) {
   const developerModeEnabled = useDeveloperMode()
   const {
     state,
@@ -169,9 +170,11 @@ export function ChatWorkspace({ variant, onClose, onOpenFullChat }: ChatWorkspac
 
         <header
           data-slot="page-header"
+          data-testid={isFloating ? 'floating-chat-drag-handle' : undefined}
+          onPointerDown={isFloating ? onHeaderPointerDown : undefined}
           className={cn(
             'flex items-center justify-between gap-3 border-border py-4',
-            isFloating ? 'min-h-14 border-b px-3' : 'h-[var(--app-header-height)] min-h-[var(--app-header-height)]',
+            isFloating ? 'min-h-14 cursor-move select-none border-b px-3' : 'h-[var(--app-header-height)] min-h-[var(--app-header-height)]',
           )}
         >
           <div className={cn(chatConversationColumn, 'flex min-w-0 items-center justify-between gap-3', isFloating && 'mx-0 max-w-none px-0')}>

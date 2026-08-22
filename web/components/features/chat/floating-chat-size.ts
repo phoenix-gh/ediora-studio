@@ -1,5 +1,5 @@
-export const DEFAULT_FLOATING_CHAT_SIZE = { width: 380, height: 560 } as const
-export const FLOATING_CHAT_SIZE_STORAGE_KEY = 'ediora.global-chat.panel-size.v1'
+export const DEFAULT_FLOATING_CHAT_SIZE = { width: 560, height: 720 } as const
+export const FLOATING_CHAT_SIZE_STORAGE_KEY = 'ediora.global-chat.panel-size.v2'
 
 export type FloatingChatSize = {
   width: number

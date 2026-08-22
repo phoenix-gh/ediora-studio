@@ -82,6 +82,16 @@ describe('GlobalChatWidget', () => {
     expect(document.querySelector('[data-slot="dialog-overlay"]')).not.toBeInTheDocument()
   })
 
+  it('opens with a readable default panel size and exposes a visible resize affordance', async () => {
+    const user = userEvent.setup()
+    renderWithProvider()
+
+    await user.click(screen.getByTestId('global-chat-trigger'))
+
+    expect(screen.getByTestId('global-chat-panel')).toHaveStyle({ width: '560px', height: '720px' })
+    expect(screen.getByRole('button', { name: '拖动调整窗口大小' })).toBeInTheDocument()
+  })
+
   it('restores and resets the persisted panel size', async () => {
     const storage = window.localStorage
     storage.setItem(
@@ -117,5 +127,26 @@ describe('GlobalChatWidget', () => {
       width: 720,
       height: 736,
     })
+  })
+
+  it('moves the floating panel when its header is dragged', async () => {
+    const originalViewport = { width: window.innerWidth, height: window.innerHeight }
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1440 })
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 900 })
+    const user = userEvent.setup()
+    renderWithProvider()
+
+    await user.click(screen.getByTestId('global-chat-trigger'))
+    const header = await screen.findByTestId('floating-chat-drag-handle')
+    const panel = screen.getByTestId('global-chat-panel')
+
+    fireEvent.pointerDown(header, { button: 0, clientX: 100, clientY: 100, pointerId: 2 })
+    fireEvent.pointerMove(window, { clientX: 20, clientY: 60, pointerId: 2 })
+    fireEvent.pointerUp(window, { clientX: 20, clientY: 60, pointerId: 2 })
+
+    expect(panel).toHaveStyle({ left: '784px', top: '124px' })
+
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: originalViewport.width })
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: originalViewport.height })
   })
 })

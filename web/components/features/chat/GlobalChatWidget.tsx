@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { Grip } from 'lucide-react'
 
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 
@@ -18,11 +19,40 @@ type Viewport = {
   height: number
 }
 
+type FloatingChatPosition = {
+  left: number
+  top: number
+}
+
 function currentViewport(): Viewport {
   return {
     width: window.innerWidth,
     height: window.innerHeight,
   }
+}
+
+function renderViewport(): Viewport {
+  return typeof window === 'undefined' ? { width: 1440, height: 900 } : currentViewport()
+}
+
+function defaultPosition(size: FloatingChatSize, viewport: Viewport): FloatingChatPosition {
+  return {
+    left: Math.max(16, viewport.width - size.width - 16),
+    top: Math.max(16, viewport.height - size.height - 16),
+  }
+}
+
+function clampPosition(position: FloatingChatPosition, size: FloatingChatSize, viewport: Viewport): FloatingChatPosition {
+  const maxLeft = Math.max(16, viewport.width - size.width - 16)
+  const maxTop = Math.max(16, viewport.height - size.height - 16)
+  return {
+    left: Math.min(maxLeft, Math.max(16, position.left)),
+    top: Math.min(maxTop, Math.max(16, position.top)),
+  }
+}
+
+function isInteractiveTarget(target: EventTarget | null) {
+  return target instanceof HTMLElement && Boolean(target.closest('button, a, input, textarea, select, [role="button"]'))
 }
 
 function browserStorage(): Storage | null {
@@ -41,12 +71,20 @@ function initialPanelSize() {
 export function GlobalChatWidget() {
   const [open, setOpen] = useState(false)
   const [size, setSize] = useState<FloatingChatSize>(initialPanelSize)
+  const [position, setPosition] = useState<FloatingChatPosition | null>(null)
   const sizeRef = useRef<FloatingChatSize>(size)
+  const positionRef = useRef<FloatingChatPosition | null>(position)
   const resizeRef = useRef<{ startX: number; startY: number; startSize: FloatingChatSize; pointerId: number } | null>(null)
+  const dragRef = useRef<{ startX: number; startY: number; startPosition: FloatingChatPosition; pointerId: number } | null>(null)
 
   function updateSize(nextSize: FloatingChatSize) {
     sizeRef.current = nextSize
     setSize(nextSize)
+  }
+
+  function updatePosition(nextPosition: FloatingChatPosition | null) {
+    positionRef.current = nextPosition
+    setPosition(nextPosition)
   }
 
   useEffect(() => {
@@ -55,20 +93,25 @@ export function GlobalChatWidget() {
 
   useEffect(() => {
     const handleViewportResize = () => {
-      updateSize(clampFloatingChatSize(sizeRef.current, currentViewport()))
+      const viewport = currentViewport()
+      const nextSize = clampFloatingChatSize(sizeRef.current, viewport)
+      updateSize(nextSize)
+      if (positionRef.current) updatePosition(clampPosition(positionRef.current, nextSize, viewport))
     }
     window.addEventListener('resize', handleViewportResize)
     return () => window.removeEventListener('resize', handleViewportResize)
   }, [])
 
   function resetSize() {
-    const nextSize = clampFloatingChatSize(DEFAULT_FLOATING_CHAT_SIZE, currentViewport())
+    const viewport = currentViewport()
+    const nextSize = clampFloatingChatSize(DEFAULT_FLOATING_CHAT_SIZE, viewport)
     updateSize(nextSize)
+    if (positionRef.current) updatePosition(clampPosition(positionRef.current, nextSize, viewport))
     writeFloatingChatSize(browserStorage(), nextSize)
   }
 
   function handleResizeStart(event: ReactPointerEvent<HTMLButtonElement>) {
-    if (event.button !== 0) return
+    if (event.button !== 0 && event.pointerType !== 'touch') return
     event.preventDefault()
     event.currentTarget.setPointerCapture?.(event.pointerId)
     resizeRef.current = {
@@ -81,10 +124,13 @@ export function GlobalChatWidget() {
     const handlePointerMove = (moveEvent: PointerEvent) => {
       const resize = resizeRef.current
       if (!resize || moveEvent.pointerId !== resize.pointerId) return
-      updateSize(clampFloatingChatSize({
+      const viewport = currentViewport()
+      const nextSize = clampFloatingChatSize({
         width: resize.startSize.width + moveEvent.clientX - resize.startX,
         height: resize.startSize.height + moveEvent.clientY - resize.startY,
-      }, currentViewport()))
+      }, viewport)
+      updateSize(nextSize)
+      if (positionRef.current) updatePosition(clampPosition(positionRef.current, nextSize, viewport))
     }
 
     const handlePointerEnd = (endEvent: PointerEvent) => {
@@ -102,9 +148,49 @@ export function GlobalChatWidget() {
     window.addEventListener('pointercancel', handlePointerEnd)
   }
 
+  function handleDragStart(event: ReactPointerEvent<HTMLElement>) {
+    if ((event.button !== 0 && event.pointerType !== 'touch') || isInteractiveTarget(event.target)) return
+    event.preventDefault()
+    event.currentTarget.setPointerCapture?.(event.pointerId)
+    const viewport = currentViewport()
+    dragRef.current = {
+      startX: event.clientX,
+      startY: event.clientY,
+      startPosition: positionRef.current ?? defaultPosition(sizeRef.current, viewport),
+      pointerId: event.pointerId,
+    }
+
+    const handlePointerMove = (moveEvent: PointerEvent) => {
+      const drag = dragRef.current
+      if (!drag || moveEvent.pointerId !== drag.pointerId) return
+      const nextPosition = clampPosition({
+        left: drag.startPosition.left + moveEvent.clientX - drag.startX,
+        top: drag.startPosition.top + moveEvent.clientY - drag.startY,
+      }, sizeRef.current, currentViewport())
+      updatePosition(nextPosition)
+    }
+
+    const handlePointerEnd = (endEvent: PointerEvent) => {
+      const drag = dragRef.current
+      if (!drag || endEvent.pointerId !== drag.pointerId) return
+      dragRef.current = null
+      window.removeEventListener('pointermove', handlePointerMove)
+      window.removeEventListener('pointerup', handlePointerEnd)
+      window.removeEventListener('pointercancel', handlePointerEnd)
+    }
+
+    window.addEventListener('pointermove', handlePointerMove)
+    window.addEventListener('pointerup', handlePointerEnd)
+    window.addEventListener('pointercancel', handlePointerEnd)
+  }
+
+  const viewport = renderViewport()
+  const panelPosition = position ?? defaultPosition(size, viewport)
   const panelStyle = {
     width: `${size.width}px`,
     height: `${size.height}px`,
+    left: `${panelPosition.left}px`,
+    top: `${panelPosition.top}px`,
     maxWidth: 'calc(100vw - 2rem)',
     maxHeight: 'calc(100dvh - 2rem)',
   }
@@ -131,13 +217,13 @@ export function GlobalChatWidget() {
         showOverlay={false}
         showCloseButton={false}
         style={panelStyle}
-        className="!top-auto !right-4 !bottom-4 !left-auto !m-0 !translate-x-0 !translate-y-0 !grid-rows-[auto_minmax(0,1fr)] !gap-0 !overflow-hidden !p-0"
+        className="!m-0 !translate-x-0 !translate-y-0 !grid-rows-[auto_minmax(0,1fr)] !gap-0 !overflow-hidden !p-0"
       >
         <DialogHeader className="sr-only">
           <DialogTitle>AI 助手</DialogTitle>
           <DialogDescription>全局浮动聊天助手</DialogDescription>
         </DialogHeader>
-        <ChatWorkspace variant="floating" onClose={() => setOpen(false)} />
+        <ChatWorkspace variant="floating" onClose={() => setOpen(false)} onHeaderPointerDown={handleDragStart} />
         <button
           type="button"
           data-testid="floating-chat-reset-size"
@@ -151,11 +237,13 @@ export function GlobalChatWidget() {
         <button
           type="button"
           data-testid="floating-chat-resize-handle"
-          aria-label="调整聊天窗口大小"
-          title="调整窗口大小"
+          aria-label="拖动调整窗口大小"
+          title="拖动调整窗口大小"
           onPointerDown={handleResizeStart}
-          className="absolute right-1 bottom-1 z-10 size-4 cursor-se-resize rounded-sm text-foreground-subtle after:absolute after:right-0 after:bottom-0 after:size-2 after:border-r-2 after:border-b-2 after:border-current"
-        />
+          className="absolute right-1 bottom-1 z-10 flex size-8 cursor-se-resize touch-none select-none items-center justify-center rounded-md bg-background/80 text-foreground-subtle shadow-sm transition-colors hover:bg-muted hover:text-foreground"
+        >
+          <Grip aria-hidden="true" className="size-4 rotate-45" />
+        </button>
       </DialogContent>
     </Dialog>
   )
