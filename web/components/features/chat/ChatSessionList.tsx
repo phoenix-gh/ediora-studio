@@ -80,7 +80,7 @@ function FloatingSessionPicker({
         <span className="truncate">{activeSession?.title || '新对话'}</span>
         <ChevronDown aria-hidden="true" className="size-3.5 shrink-0" />
       </PopoverTrigger>
-      <PopoverContent align="start" className="w-[min(22rem,calc(100vw-2rem))] p-2">
+      <PopoverContent align="start" positionerClassName="z-[60]" className="w-[min(22rem,calc(100vw-2rem))] p-2">
         <div className="flex items-center justify-between gap-2 px-1 pb-2">
           <div>
             <p className="text-xs font-medium text-foreground">会话</p>

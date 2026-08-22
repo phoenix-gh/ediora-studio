@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
-import { Activity, Bot, ChevronLeft, FileSearch, Loader2, Maximize2 } from 'lucide-react'
+import { Activity, Bot, FileSearch, Loader2, Maximize2, X } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { ChatAgentLogDialog } from '@/components/features/chat/ChatAgentLogDialog'
@@ -20,6 +20,7 @@ export type ChatWorkspaceProps = {
   variant: 'page' | 'floating'
   onClose?: () => void
   onOpenFullChat?: () => void
+  onResetSize?: () => void
   onHeaderPointerDown?: (event: ReactPointerEvent<HTMLElement>) => void
 }
 
@@ -27,7 +28,7 @@ function errorText(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback
 }
 
-export function ChatWorkspace({ variant, onClose, onOpenFullChat, onHeaderPointerDown }: ChatWorkspaceProps) {
+export function ChatWorkspace({ variant, onClose, onOpenFullChat, onResetSize, onHeaderPointerDown }: ChatWorkspaceProps) {
   const developerModeEnabled = useDeveloperMode()
   const {
     state,
@@ -191,9 +192,17 @@ export function ChatWorkspace({ variant, onClose, onOpenFullChat, onHeaderPointe
                       <Maximize2 />
                     </Button>
                   )}
-                  {onClose && (
-                    <Button type="button" variant="ghost" size="icon-sm" aria-label="关闭聊天助手" title="关闭聊天助手" onClick={onClose}>
-                      <ChevronLeft className="rotate-90" />
+                  {onResetSize && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="xs"
+                      data-testid="floating-chat-reset-size"
+                      aria-label="恢复聊天窗口默认大小"
+                      title="恢复默认大小"
+                      onClick={onResetSize}
+                    >
+                      默认大小
                     </Button>
                   )}
                 </>
@@ -208,6 +217,11 @@ export function ChatWorkspace({ variant, onClose, onOpenFullChat, onHeaderPointe
                   title="查看本会话的 LLM、Skill 和工具运行轨迹"
                 >
                   <Activity data-icon="inline-start" />运行轨迹
+                </Button>
+              )}
+              {isFloating && onClose && (
+                <Button type="button" variant="ghost" size="icon-sm" aria-label="关闭聊天助手" title="关闭聊天助手" onClick={onClose}>
+                  <X />
                 </Button>
               )}
             </div>

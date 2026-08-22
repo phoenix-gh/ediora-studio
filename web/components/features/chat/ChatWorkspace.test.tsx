@@ -62,7 +62,11 @@ function detail(session: ChatSession) {
 function renderWorkspace(variant: 'page' | 'floating') {
   return render(
     <ChatWorkspaceProvider>
-      <ChatWorkspace variant={variant} />
+      <ChatWorkspace
+        variant={variant}
+        onClose={variant === 'floating' ? () => undefined : undefined}
+        onResetSize={variant === 'floating' ? () => undefined : undefined}
+      />
     </ChatWorkspaceProvider>,
   )
 }
@@ -83,6 +87,17 @@ describe('ChatWorkspace', () => {
     expect(await screen.findByRole('heading', { name: 'AI 助手' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '新建对话' })).toBeInTheDocument()
     expect(await screen.findByRole('button', { name: '运行轨迹' })).toBeInTheDocument()
+  })
+
+  it('keeps floating controls in the header and puts the close control last', async () => {
+    renderWorkspace('floating')
+
+    const header = await screen.findByTestId('floating-chat-drag-handle')
+    expect(screen.getByTestId('floating-chat-reset-size').closest('header')).toBe(header)
+
+    const closeButton = screen.getByRole('button', { name: '关闭聊天助手' })
+    expect(closeButton.querySelector('svg')).toHaveClass('lucide-x')
+    expect(header.querySelectorAll('button').item(header.querySelectorAll('button').length - 1)).toBe(closeButton)
   })
 
   it('keeps cached messages isolated when switching sessions', async () => {

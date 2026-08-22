@@ -79,6 +79,7 @@ export function GlobalChatWidget() {
     startY: number
     startSize: FloatingChatSize
     startPosition: FloatingChatPosition
+    startWasPositioned: boolean
     pointerId: number
   } | null>(null)
   const dragRef = useRef<{ startX: number; startY: number; startPosition: FloatingChatPosition; pointerId: number } | null>(null)
@@ -126,6 +127,7 @@ export function GlobalChatWidget() {
       startY: event.clientY,
       startSize: sizeRef.current,
       startPosition: positionRef.current ?? defaultPosition(sizeRef.current, viewport),
+      startWasPositioned: positionRef.current !== null,
       pointerId: event.pointerId,
     }
 
@@ -136,14 +138,15 @@ export function GlobalChatWidget() {
       const deltaX = moveEvent.clientX - resize.startX
       const deltaY = moveEvent.clientY - resize.startY
       const nextSize = clampFloatingChatSize({
-        width: resize.startSize.width - deltaX,
-        height: resize.startSize.height - deltaY,
+        width: resize.startSize.width + deltaX,
+        height: resize.startSize.height + deltaY,
       }, viewport)
       updateSize(nextSize)
-      updatePosition(clampPosition({
-        left: resize.startPosition.left + deltaX,
-        top: resize.startPosition.top + deltaY,
-      }, nextSize, viewport))
+      if (resize.startWasPositioned) {
+        updatePosition(clampPosition(resize.startPosition, nextSize, viewport))
+      } else {
+        updatePosition(null)
+      }
     }
 
     const handlePointerEnd = (endEvent: PointerEvent) => {
@@ -236,24 +239,19 @@ export function GlobalChatWidget() {
           <DialogTitle>AI 助手</DialogTitle>
           <DialogDescription>全局浮动聊天助手</DialogDescription>
         </DialogHeader>
-        <ChatWorkspace variant="floating" onClose={() => setOpen(false)} onHeaderPointerDown={handleDragStart} />
-        <button
-          type="button"
-          data-testid="floating-chat-reset-size"
-          aria-label="恢复聊天窗口默认大小"
-          title="恢复默认大小"
-          onClick={resetSize}
-          className="absolute top-2 right-10 z-10 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-        >
-          默认大小
-        </button>
+        <ChatWorkspace
+          variant="floating"
+          onClose={() => setOpen(false)}
+          onResetSize={resetSize}
+          onHeaderPointerDown={handleDragStart}
+        />
         <button
           type="button"
           data-testid="floating-chat-resize-handle"
           aria-label="拖动调整聊天窗口大小"
           title="拖动调整聊天窗口大小"
           onPointerDown={handleResizeStart}
-          className="absolute top-1 left-1 z-10 flex size-5 cursor-nwse-resize touch-none select-none items-center justify-center rounded-md text-foreground-subtle transition-colors hover:bg-muted hover:text-foreground"
+          className="absolute right-1 bottom-1 z-10 flex size-5 cursor-se-resize touch-none select-none items-center justify-center rounded-md text-foreground-subtle transition-colors hover:bg-muted hover:text-foreground"
         >
           <Grip aria-hidden="true" className="size-3.5 rotate-45" />
         </button>

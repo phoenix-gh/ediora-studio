@@ -88,7 +88,7 @@ describe('GlobalChatWidget', () => {
     await user.click(screen.getByTestId('global-chat-trigger'))
 
     expect(screen.getByTestId('global-chat-panel')).toHaveStyle({ width: '640px', height: '736px' })
-    expect(screen.getByRole('button', { name: '拖动调整聊天窗口大小' })).toHaveClass('left-1', 'top-1')
+    expect(screen.getByRole('button', { name: '拖动调整聊天窗口大小' })).toHaveClass('right-1', 'bottom-1')
   })
 
   it('restores and resets the persisted panel size', async () => {
@@ -118,8 +118,8 @@ describe('GlobalChatWidget', () => {
     const handle = await screen.findByTestId('floating-chat-resize-handle')
 
     fireEvent.pointerDown(handle, { button: 0, clientX: 100, clientY: 100, pointerId: 1 })
-    fireEvent.pointerMove(window, { clientX: -2_000, clientY: -2_000, pointerId: 1 })
-    fireEvent.pointerUp(window, { clientX: -2_000, clientY: -2_000, pointerId: 1 })
+    fireEvent.pointerMove(window, { clientX: 2_000, clientY: 2_000, pointerId: 1 })
+    fireEvent.pointerUp(window, { clientX: 2_000, clientY: 2_000, pointerId: 1 })
 
     expect(screen.getByTestId('global-chat-panel')).toHaveStyle({ width: '960px', height: '736px' })
     expect(JSON.parse(window.localStorage.getItem(FLOATING_CHAT_SIZE_STORAGE_KEY) ?? '{}')).toEqual({
