@@ -91,6 +91,8 @@
   --border-strong: #d9deea;
   --input: #d9deea;
   --ring: #5b5fe8;
+  --scrollbar-thumb: color-mix(in srgb, var(--foreground-subtle) 55%, var(--border-strong));
+  --scrollbar-thumb-hover: color-mix(in srgb, var(--primary) 60%, var(--foreground-subtle));
   --data: #22c3de;
   --data-foreground: #078ca5;
   --data-subtle: #e8fbff;
@@ -211,6 +213,38 @@
   }
   html {
     @apply font-sans;
+  }
+
+  *,
+  *::before,
+  *::after {
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar-thumb) transparent;
+  }
+
+  *::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  *::-webkit-scrollbar-thumb {
+    border: 1px solid transparent;
+    border-radius: 999px;
+    background: var(--scrollbar-thumb);
+    background-clip: padding-box;
+  }
+
+  *::-webkit-scrollbar-thumb:hover {
+    background: var(--scrollbar-thumb-hover);
+    background-clip: padding-box;
+  }
+
+  *::-webkit-scrollbar-corner {
+    background: transparent;
   }
 
   [data-slot='native-select'] option {
