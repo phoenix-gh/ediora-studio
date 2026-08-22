@@ -281,9 +281,13 @@ describe('XClient post images', () => {
     render(<XClient initialSubs={[]} initialPosts={[imagePost]} />)
 
     const image = document.querySelector(`img[src="${imagePost.cover_image}"]`)
+    const frame = image?.parentElement
 
     expect(image).not.toBeNull()
+    expect(frame).not.toBeNull()
     expect(image).toHaveClass('h-auto', 'max-h-[420px]', 'max-w-full', 'object-contain', 'w-auto')
     expect(image).not.toHaveClass('object-cover', 'w-full')
+    expect(frame).toHaveClass('inline-block', 'max-w-full')
+    expect(frame).not.toHaveClass('block', 'w-full')
   })
 })
