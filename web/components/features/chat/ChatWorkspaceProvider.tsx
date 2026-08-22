@@ -1,0 +1,454 @@
+'use client'
+
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react'
+
+import {
+  createChatSession,
+  deleteChatSession,
+  getChatSession,
+  listChatDrafts,
+  listChatSkills,
+  listChatSessions,
+  renameChatSession,
+  streamChatReply,
+  type ChatDraft,
+  type ChatSession,
+  type ChatSkill,
+} from '@/lib/api/chat'
+import { titleFromFirstMessage } from '@/app/chat/chat-title'
+
+import {
+  applyChatStreamEvent,
+  makeLocalMessage,
+  toModelMessages,
+} from './chat-workspace-state'
+import type {
+  ChatApprovalArgs,
+  ChatComposerSelection,
+  ChatWorkspaceState,
+  DisplayMessage,
+} from './chat-workspace-types'
+
+export type ChatWorkspaceContextValue = {
+  state: ChatWorkspaceState
+  sessions: ChatSession[]
+  activeSessionId: number | null
+  messages: DisplayMessage[]
+  isActiveLoading: boolean
+  isActiveRunning: boolean
+  activeError: string | null
+  skills: ChatSkill[]
+  drafts: ChatDraft[]
+  refreshSessions: () => Promise<ChatSession[]>
+  openSession: (sessionId: number) => Promise<void>
+  startNewConversation: () => void
+  renameSession: (sessionId: number, title: string) => Promise<void>
+  removeSession: (sessionId: number) => Promise<void>
+  submit: (text: string) => Promise<void>
+  respondToApproval: (args: ChatApprovalArgs) => Promise<void>
+  setSkillName: (skillName: string) => void
+  setDraftId: (draftId: number | null) => void
+  retrySession: (sessionId: number) => Promise<void>
+}
+
+const ChatWorkspaceContext = createContext<ChatWorkspaceContextValue | null>(null)
+
+function sessionKey(sessionId: number) {
+  return String(sessionId)
+}
+
+function initialState(): ChatWorkspaceState {
+  return {
+    sessions: [],
+    activeSessionId: null,
+    messagesBySession: {},
+    loadingBySession: {},
+    runningBySession: {},
+    errorsBySession: {},
+    composer: {
+      skillName: '',
+      draftId: null,
+    },
+  }
+}
+
+function errorMessage(error: unknown, fallback: string) {
+  return error instanceof Error ? error.message : fallback
+}
+
+export function ChatWorkspaceProvider({ children }: { children: ReactNode }) {
+  const [state, setState] = useState<ChatWorkspaceState>(initialState)
+  const [skills, setSkills] = useState<ChatSkill[]>([])
+  const [drafts, setDrafts] = useState<ChatDraft[]>([])
+  const loadedSessionsRef = useRef(new Set<number>())
+  const sessionRequestsRef = useRef(new Map<number, Promise<void>>())
+  const sessionsRequestRef = useRef<Promise<ChatSession[]> | null>(null)
+  const resourcesRequestRef = useRef<Promise<void> | null>(null)
+
+  const updateSession = useCallback((
+    sessionId: number,
+    update: (messages: DisplayMessage[]) => DisplayMessage[],
+  ) => {
+    const key = sessionKey(sessionId)
+    setState(current => ({
+      ...current,
+      messagesBySession: {
+        ...current.messagesBySession,
+        [key]: update(current.messagesBySession[key] ?? []),
+      },
+    }))
+  }, [])
+
+  const setSessionDetail = useCallback((session: Awaited<ReturnType<typeof getChatSession>>) => {
+    const key = sessionKey(session.id)
+    loadedSessionsRef.current.add(session.id)
+    setState(current => ({
+      ...current,
+      messagesBySession: {
+        ...current.messagesBySession,
+        [key]: session.messages,
+      },
+      loadingBySession: {
+        ...current.loadingBySession,
+        [key]: false,
+      },
+      runningBySession: {
+        ...current.runningBySession,
+        [key]: session.is_running,
+      },
+      errorsBySession: {
+        ...current.errorsBySession,
+        [key]: null,
+      },
+    }))
+  }, [])
+
+  const setSessionError = useCallback((sessionId: number, error: string | null) => {
+    const key = sessionKey(sessionId)
+    setState(current => ({
+      ...current,
+      loadingBySession: {
+        ...current.loadingBySession,
+        [key]: false,
+      },
+      errorsBySession: {
+        ...current.errorsBySession,
+        [key]: error,
+      },
+    }))
+  }, [])
+
+  const setSessionRunning = useCallback((sessionId: number, running: boolean) => {
+    const key = sessionKey(sessionId)
+    setState(current => ({
+      ...current,
+      runningBySession: {
+        ...current.runningBySession,
+        [key]: running,
+      },
+    }))
+  }, [])
+
+  const loadResources = useCallback(() => {
+    if (resourcesRequestRef.current) return resourcesRequestRef.current
+    const request = Promise.all([listChatSkills(), listChatDrafts()])
+      .then(([nextSkills, nextDrafts]) => {
+        setSkills(nextSkills)
+        setDrafts(nextDrafts)
+      })
+      .finally(() => {
+        resourcesRequestRef.current = null
+      })
+    resourcesRequestRef.current = request
+    return request
+  }, [])
+
+  const refreshSessions = useCallback(() => {
+    if (sessionsRequestRef.current) return sessionsRequestRef.current
+    const request = Promise.all([listChatSessions(), loadResources()])
+      .then(([sessions]) => {
+        setState(current => ({ ...current, sessions }))
+        return sessions
+      })
+      .finally(() => {
+        sessionsRequestRef.current = null
+      })
+    sessionsRequestRef.current = request
+    return request
+  }, [loadResources])
+
+  const loadSession = useCallback(async (sessionId: number, force = false) => {
+    if (!force && loadedSessionsRef.current.has(sessionId)) return
+    const activeRequest = sessionRequestsRef.current.get(sessionId)
+    if (activeRequest) return activeRequest
+
+    const key = sessionKey(sessionId)
+    setState(current => ({
+      ...current,
+      loadingBySession: {
+        ...current.loadingBySession,
+        [key]: true,
+      },
+      errorsBySession: {
+        ...current.errorsBySession,
+        [key]: null,
+      },
+    }))
+
+    const request = getChatSession(sessionId)
+      .then(session => {
+        setSessionDetail(session)
+      })
+      .catch(error => {
+        setSessionError(sessionId, errorMessage(error, '加载会话失败'))
+        throw error
+      })
+      .finally(() => {
+        sessionRequestsRef.current.delete(sessionId)
+      })
+    sessionRequestsRef.current.set(sessionId, request)
+    return request
+  }, [setSessionDetail, setSessionError])
+
+  const openSession = useCallback(async (sessionId: number) => {
+    setState(current => ({ ...current, activeSessionId: sessionId }))
+    await loadSession(sessionId)
+  }, [loadSession])
+
+  const startNewConversation = useCallback(() => {
+    setState(current => ({
+      ...current,
+      activeSessionId: null,
+      composer: { skillName: '', draftId: null },
+    }))
+  }, [])
+
+  const renameSession = useCallback(async (sessionId: number, title: string) => {
+    const updated = await renameChatSession(sessionId, title.trim() || '新对话')
+    setState(current => ({
+      ...current,
+      sessions: current.sessions.map(session => session.id === updated.id ? updated : session),
+    }))
+  }, [])
+
+  const removeSession = useCallback(async (sessionId: number) => {
+    await deleteChatSession(sessionId)
+    loadedSessionsRef.current.delete(sessionId)
+    const key = sessionKey(sessionId)
+    setState(current => {
+      const remaining = current.sessions.filter(session => session.id !== sessionId)
+      const nextActive = current.activeSessionId === sessionId
+        ? (remaining[0]?.id ?? null)
+        : current.activeSessionId
+      const messagesBySession = { ...current.messagesBySession }
+      const loadingBySession = { ...current.loadingBySession }
+      const runningBySession = { ...current.runningBySession }
+      const errorsBySession = { ...current.errorsBySession }
+      delete messagesBySession[key]
+      delete loadingBySession[key]
+      delete runningBySession[key]
+      delete errorsBySession[key]
+      return {
+        ...current,
+        sessions: remaining,
+        activeSessionId: nextActive,
+        messagesBySession,
+        loadingBySession,
+        runningBySession,
+        errorsBySession,
+      }
+    })
+    const nextSession = state.sessions.find(session => session.id !== sessionId)
+    if (state.activeSessionId === sessionId && nextSession) {
+      await loadSession(nextSession.id)
+    }
+  }, [loadSession, state.activeSessionId, state.sessions])
+
+  const ensureActiveSession = useCallback(async (text: string) => {
+    if (state.activeSessionId !== null) return state.activeSessionId
+    const session = await createChatSession(titleFromFirstMessage(text))
+    loadedSessionsRef.current.add(session.id)
+    setState(current => ({
+      ...current,
+      sessions: [session, ...current.sessions.filter(item => item.id !== session.id)],
+      activeSessionId: session.id,
+      messagesBySession: {
+        ...current.messagesBySession,
+        [sessionKey(session.id)]: [],
+      },
+      loadingBySession: {
+        ...current.loadingBySession,
+        [sessionKey(session.id)]: false,
+      },
+      errorsBySession: {
+        ...current.errorsBySession,
+        [sessionKey(session.id)]: null,
+      },
+    }))
+    return session.id
+  }, [state.activeSessionId])
+
+  const submit = useCallback(async (text: string) => {
+    const trimmed = text.trim()
+    if (!trimmed) return
+    const sessionId = await ensureActiveSession(trimmed)
+    const key = sessionKey(sessionId)
+    if (state.runningBySession[key]) return
+    const currentMessages = state.messagesBySession[key] ?? []
+    const userMessage = makeLocalMessage('user', [{ type: 'text', text: trimmed }])
+    const assistantMessage = makeLocalMessage('assistant', [])
+    const requestMessages = toModelMessages([...currentMessages, userMessage])
+    updateSession(sessionId, messages => [...messages, userMessage, assistantMessage])
+    setSessionRunning(sessionId, true)
+    setSessionError(sessionId, null)
+
+    try {
+      await streamChatReply({
+        sessionId,
+        messages: requestMessages,
+        skillName: state.composer.skillName || undefined,
+        draftId: state.composer.draftId ?? undefined,
+        onEvent: event => updateSession(
+          sessionId,
+          messages => applyChatStreamEvent(messages, String(assistantMessage.id), event),
+        ),
+      })
+      await loadSession(sessionId, true)
+      await refreshSessions()
+    } catch (error) {
+      setSessionError(sessionId, errorMessage(error, '发送消息失败'))
+    } finally {
+      setSessionRunning(sessionId, false)
+    }
+  }, [
+    ensureActiveSession,
+    loadSession,
+    refreshSessions,
+    setSessionError,
+    setSessionRunning,
+    state.composer,
+    state.messagesBySession,
+    state.runningBySession,
+    updateSession,
+  ])
+
+  const respondToApproval = useCallback(async (args: ChatApprovalArgs) => {
+    const key = sessionKey(args.sessionId)
+    if (state.runningBySession[key]) return
+    setSessionRunning(args.sessionId, true)
+    setSessionError(args.sessionId, null)
+    try {
+      await streamChatReply({
+        sessionId: args.sessionId,
+        messages: [],
+        skillName: state.composer.skillName || undefined,
+        draftId: state.composer.draftId ?? undefined,
+        approval: {
+          messageId: args.messageId,
+          toolCallId: args.toolCallId,
+          approvalId: args.approvalId,
+          approved: args.approved,
+        },
+        onEvent: () => undefined,
+      })
+      await loadSession(args.sessionId, true)
+      await refreshSessions()
+    } catch (error) {
+      setSessionError(args.sessionId, errorMessage(error, '处理工具确认失败'))
+    } finally {
+      setSessionRunning(args.sessionId, false)
+    }
+  }, [
+    loadSession,
+    refreshSessions,
+    setSessionError,
+    setSessionRunning,
+    state.composer,
+    state.runningBySession,
+  ])
+
+  const retrySession = useCallback(async (sessionId: number) => {
+    setSessionError(sessionId, null)
+    await loadSession(sessionId, true)
+  }, [loadSession, setSessionError])
+
+  useEffect(() => {
+    const runningIds = Object.entries(state.runningBySession)
+      .filter(([, running]) => running)
+      .map(([id]) => Number(id))
+    if (runningIds.length === 0) return
+
+    const refreshRunningSessions = async () => {
+      await Promise.all(runningIds.map(async sessionId => {
+        try {
+          const session = await getChatSession(sessionId)
+          setSessionDetail(session)
+        } catch {
+          // Keep the running indicator until the next recovery attempt succeeds.
+        }
+      }))
+    }
+
+    const timer = window.setInterval(() => void refreshRunningSessions(), 2_000)
+    return () => window.clearInterval(timer)
+  }, [setSessionDetail, state.runningBySession])
+
+  const activeKey = state.activeSessionId === null ? null : sessionKey(state.activeSessionId)
+  const context = useMemo<ChatWorkspaceContextValue>(() => ({
+    state,
+    sessions: state.sessions,
+    activeSessionId: state.activeSessionId,
+    messages: activeKey ? state.messagesBySession[activeKey] ?? [] : [],
+    isActiveLoading: activeKey ? Boolean(state.loadingBySession[activeKey]) : false,
+    isActiveRunning: activeKey ? Boolean(state.runningBySession[activeKey]) : false,
+    activeError: activeKey ? state.errorsBySession[activeKey] ?? null : null,
+    skills,
+    drafts,
+    refreshSessions,
+    openSession,
+    startNewConversation,
+    renameSession,
+    removeSession,
+    submit,
+    respondToApproval,
+    setSkillName: skillName => setState(current => ({
+      ...current,
+      composer: { ...current.composer, skillName },
+    })),
+    setDraftId: draftId => setState(current => ({
+      ...current,
+      composer: { ...current.composer, draftId },
+    })),
+    retrySession,
+  }), [
+    activeKey,
+    drafts,
+    openSession,
+    refreshSessions,
+    removeSession,
+    renameSession,
+    respondToApproval,
+    retrySession,
+    skills,
+    startNewConversation,
+    state,
+    submit,
+  ])
+
+  return <ChatWorkspaceContext.Provider value={context}>{children}</ChatWorkspaceContext.Provider>
+}
+
+export function useChatWorkspace() {
+  const context = useContext(ChatWorkspaceContext)
+  if (!context) throw new Error('useChatWorkspace must be used within ChatWorkspaceProvider')
+  return context
+}
