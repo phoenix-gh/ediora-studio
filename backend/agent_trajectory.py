@@ -63,6 +63,8 @@ class _StepData(_StrictModel):
 
 
 class _UserMessageData(_StrictModel):
+    turn: int | None = Field(default=None, gt=0)
+    step: int | None = Field(default=None, gt=0)
     content: list[dict | str] = Field(min_length=1, max_length=4_096)
     source: dict[str, Any]
 
@@ -129,6 +131,8 @@ class _RequestHeaderData(_StrictModel):
 
 
 class _AgentSkillData(_StrictModel):
+    turn: int | None = Field(default=None, gt=0)
+    step: int | None = Field(default=None, gt=0)
     name: str = Field(min_length=1, max_length=200)
     activation: str | None = Field(default=None, max_length=40)
     references: list[str] = Field(default_factory=list, max_length=256)
