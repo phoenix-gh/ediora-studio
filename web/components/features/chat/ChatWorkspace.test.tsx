@@ -114,6 +114,8 @@ describe('ChatWorkspace', () => {
     const picker = await screen.findByTestId('floating-chat-session-picker')
 
     expect(picker).toHaveTextContent('会话')
+    expect(picker).toHaveClass('overflow-hidden')
+    expect(picker.querySelector('span.truncate')).toHaveClass('min-w-0')
   })
 
   it('keeps floating header actions compact while preserving accessible names', async () => {
