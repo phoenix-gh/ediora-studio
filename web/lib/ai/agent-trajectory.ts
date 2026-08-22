@@ -280,6 +280,10 @@ function findCell(group: MutableGroup, callId: string): MutableTool | undefined 
   return group.cells.find(cell => cell.callId === callId) as MutableTool | undefined
 }
 
+function toolKey(turn: number, step: number | null, callId: string): string {
+  return `${turn}:${step ?? 0}:${callId}`
+}
+
 function publicCell(cell: MutableTool): TrajectoryCell {
   const materialized = { ...cell }
   delete (materialized as Partial<MutableTool>).startedAt
@@ -318,7 +322,7 @@ function addOrUpdateTool(
     return existing
   }
   const created: MutableTool = {
-    recordId: `tool:${callId}`,
+    recordId: `tool:${toolKey(group.turn, group.step, callId)}`,
     kind: 'tool',
     turn: eventTurn(event),
     step: eventStep(event),
@@ -514,7 +518,7 @@ export function deriveAgentTrajectory(
         if (!callId) continue
         const toolName = stringValue(block.name) ?? stringValue(block.toolName) ?? 'Tool'
         const call = addOrUpdateTool(group, event, callId, toolName, block.argsRaw ?? block.arguments ?? block.input, timestamp(record(event.data.timing).stepStartTime))
-        tools.set(callId, call as MutableTool)
+        tools.set(toolKey(group.turn, group.step, callId), call as MutableTool)
       }
       continue
     }
@@ -524,7 +528,7 @@ export function deriveAgentTrajectory(
       if (!callData.callId) continue
       const group = ensureGroup(turn, step)
       const call = addOrUpdateTool(group, event, callData.callId, callData.name ?? 'Tool', callData.input, event.time)
-      tools.set(callData.callId, call as MutableTool)
+      tools.set(toolKey(group.turn, group.step, callData.callId), call as MutableTool)
       continue
     }
 
@@ -532,8 +536,9 @@ export function deriveAgentTrajectory(
       const callId = stringValue(event.data.callId) ?? stringValue(event.data.toolCallId) ?? stringValue(event.data.tool_call_id)
       if (!callId) continue
       const group = ensureGroup(turn, step)
-      const existing = tools.get(callId) ?? addOrUpdateTool(group, event, callId, stringValue(event.data.name) ?? 'Tool', undefined, null)
-      tools.set(callId, existing)
+      const key = toolKey(group.turn, group.step, callId)
+      const existing = tools.get(key) ?? addOrUpdateTool(group, event, callId, stringValue(event.data.name) ?? 'Tool', undefined, null)
+      tools.set(key, existing)
       existing.sourceEventSeqs = Array.from(new Set([...existing.sourceEventSeqs, event.seq]))
       existing.endedAt = event.time
       const output = event.data.output ?? event.data.content ?? event.data.result
