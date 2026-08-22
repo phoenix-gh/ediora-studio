@@ -192,6 +192,8 @@ describe('content response Agent writing job', () => {
     })
     const events: Array<Record<string, unknown>> = []
     deps.appendLogEvent = vi.fn(async (_jobId, event) => { events.push(event as Record<string, unknown>) })
+    const sessionEvents: Array<Record<string, unknown>> = []
+    deps.appendSessionEvent = vi.fn(async (_jobId, _executionId, event) => { sessionEvents.push(event as Record<string, unknown>) })
 
     await runContentResponseOutputJob(19, deps)
 
@@ -200,6 +202,9 @@ describe('content response Agent writing job', () => {
       'skill/selected',
       'session/capabilities',
       'session/turn-end',
+    ])
+    expect(sessionEvents.map(event => event.type)).toEqual([
+      'turn/start', 'user/message', 'agent/skill', 'turn/end',
     ])
   })
 

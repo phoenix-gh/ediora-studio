@@ -32,6 +32,7 @@ import type {
   AgentToolAudit,
   AgentToolDecision,
 } from './agent-runtime-types'
+import type { AgentSessionEventType } from './agent-trajectory'
 import {
   getEnabledSkill,
   listEnabledSkills,
@@ -57,6 +58,7 @@ export type OpenAgentRuntimeOptions = {
   approvalPolicy?: AgentApprovalPolicy
   policyProfile?: AgentToolPolicyProfile
   mode?: AgentRuntimeMode
+  turn?: number
   skillMode: AgentSkillMode
   skillName?: string
   restoredSkillName?: string
@@ -69,7 +71,15 @@ export type OpenAgentRuntimeOptions = {
   beforeToolExecute?: (event: AgentToolAudit) => Promise<AgentToolDecision>
   onToolAudit?: (event: AgentToolAudit) => void | Promise<void>
   onMessage?: (event: AgentModelMessageEvent) => void | Promise<void>
+  onSessionEvent?: (event: AgentSessionEventDraft) => void | Promise<void>
   dependencies?: AgentRuntimeDependencies
+}
+
+export type AgentSessionEventDraft = {
+  type: AgentSessionEventType
+  turn: number | null
+  step: number | null
+  data: Record<string, unknown>
 }
 
 export type AgentRunRequest = {
@@ -174,6 +184,22 @@ export async function openAgentRuntime(
   const automaticSelection = options.automaticSelection ?? true
   let selected: AgentSelectedSkill | undefined
   let prepared = !automaticSelection
+  const turnNumber = options.turn ?? 1
+  let nextStep = 0
+  let activeStep: number | null = null
+
+  const emitSessionEvent = async (
+    type: AgentSessionEventType,
+    step: number | null,
+    data: Record<string, unknown>,
+  ) => {
+    await options.onSessionEvent?.({
+      type,
+      turn: turnNumber,
+      step,
+      data,
+    })
+  }
 
   if (options.skillMode === 'manual') {
     const name = options.skillName?.trim()
@@ -193,7 +219,35 @@ export async function openAgentRuntime(
     approvalPolicy: toolPolicy.approvalPolicy,
     blockedToolNames: toolPolicy.blockedToolNames,
     beforeToolExecute: options.beforeToolExecute,
-    onToolAudit: options.onToolAudit,
+    onToolAudit: async event => {
+      await options.onToolAudit?.({ ...event, step: activeStep ?? undefined })
+      if (activeStep === null) return
+      const input = event.inputSummary
+      if (event.status === 'started') {
+        await emitSessionEvent('tool/call', activeStep, {
+          turn: turnNumber,
+          step: activeStep,
+          callId: event.toolCallId,
+          name: event.toolName,
+          arguments: input ?? {},
+        })
+        return
+      }
+      const outputText = event.output === undefined
+        ? event.error ?? ''
+        : (() => {
+            try { return JSON.stringify(event.output) ?? String(event.output) } catch { return String(event.output) }
+          })()
+      await emitSessionEvent('tool/result', activeStep, {
+        turn: turnNumber,
+        step: activeStep,
+        callId: event.toolCallId,
+        content: [{ kind: 'text', text: outputText }],
+        ...(event.output === undefined ? {} : { output: event.output }),
+        ...(event.error ? { error: event.error } : {}),
+        isError: event.status === 'failed' || event.status === 'uncertain',
+      })
+    },
   })
   let registry = await deps.openTools(toolOptions(
     selected?.skill.name,
@@ -267,6 +321,38 @@ export async function openAgentRuntime(
     }
   }
 
+  const assistantBlocksFromResult = (result: unknown): Record<string, unknown>[] => {
+    const record = result as Record<string, unknown>
+    const blocks: Record<string, unknown>[] = []
+    const reasoning = record.reasoning
+    if (typeof reasoning === 'string' && reasoning) {
+      blocks.push({ kind: 'reasoning', text: reasoning })
+    } else if (Array.isArray(reasoning)) {
+      for (const item of reasoning) {
+        if (typeof item === 'string' && item) blocks.push({ kind: 'reasoning', text: item })
+        else if (item && typeof item === 'object') blocks.push({ kind: 'reasoning', ...item as Record<string, unknown> })
+      }
+    }
+    if (typeof record.text === 'string' && record.text) {
+      blocks.push({ kind: 'text', text: record.text })
+    }
+    const toolCalls = Array.isArray(record.toolCalls) ? record.toolCalls : []
+    for (const item of toolCalls) {
+      if (!item || typeof item !== 'object') continue
+      const call = item as Record<string, unknown>
+      const callId = call.toolCallId ?? call.callId
+      const name = call.toolName ?? call.name
+      if (typeof callId !== 'string' || typeof name !== 'string') continue
+      blocks.push({
+        kind: 'tool-call',
+        callId,
+        name,
+        arguments: call.input ?? call.args ?? call.arguments ?? {},
+      })
+    }
+    return blocks
+  }
+
   const emitMessage = async (
     phase: string,
     direction: AgentModelMessageEvent['direction'],
@@ -274,7 +360,7 @@ export async function openAgentRuntime(
   ) => {
     try {
       await options.onMessage?.({
-        phase, direction, payload, occurredAt: new Date().toISOString(),
+        phase, step: activeStep ?? undefined, direction, payload, occurredAt: new Date().toISOString(),
       })
     } catch {
       // Observability must not turn a successful Agent operation into a failed job.
@@ -282,16 +368,47 @@ export async function openAgentRuntime(
   }
 
   const generateWithMessageLog = async (input: GenerateInput, phase: string) => {
+    const step = ++nextStep
+    activeStep = step
+    await emitSessionEvent('step/start', step, {
+      turn: turnNumber,
+      step,
+    })
+    await emitSessionEvent('request/header', step, {
+      turn: turnNumber,
+      step,
+      request: modelRequestPayload(input),
+    })
     await emitMessage(phase, 'model_request', modelRequestPayload(input))
     try {
       const result = await deps.generate(input)
       await emitMessage(phase, 'model_response', modelResponsePayload(result))
+      const response = result as unknown as Record<string, unknown>
+      await emitSessionEvent('assistant/message', step, {
+        turn: turnNumber,
+        step,
+        blocks: assistantBlocksFromResult(result),
+        usage: jsonSafe(response.usage),
+        provider: undefined,
+        model: undefined,
+        interrupted: false,
+      })
+      await emitSessionEvent('step/end', step, {
+        turn: turnNumber,
+        step,
+      })
       return result
     } catch (error) {
       await emitMessage(phase, 'model_error', {
         error: error instanceof Error ? error.message : String(error),
       })
+      await emitSessionEvent('step/end', step, {
+        turn: turnNumber,
+        step,
+      })
       throw error
+    } finally {
+      activeStep = null
     }
   }
 

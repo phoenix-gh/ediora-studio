@@ -125,7 +125,7 @@ describe('ChatAgentLogDialog', () => {
       await Promise.resolve()
     })
 
-    const firstNode = screen.getByText('开始会话').closest('details')
+    const firstNode = screen.getByTestId('trajectory-turn-1')
     expect(firstNode).not.toBeNull()
 
     await act(async () => {
@@ -134,7 +134,7 @@ describe('ChatAgentLogDialog', () => {
       await Promise.resolve()
     })
 
-    expect(screen.getByText('LLM 响应')).toBeInTheDocument()
-    expect(screen.getByText('开始会话').closest('details')).toBe(firstNode)
+    expect(screen.getByTestId('trajectory-cell-message:2')).toHaveTextContent('完成')
+    expect(screen.getByTestId('trajectory-turn-1')).toBe(firstNode)
   })
 })

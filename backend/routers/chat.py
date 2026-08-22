@@ -6,6 +6,11 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import delete, desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from agent_trajectory import (
+    derive_agent_trajectory_state,
+    trajectory_event_payloads,
+)
+from agent_log_service import list_all_agent_log_events
 from database import get_db
 from models import AgentLogEvent, ChatMessage, ChatSession, WritingPlan, now_utc
 
@@ -218,6 +223,11 @@ def _writing_plan_result(plan: WritingPlan) -> SourceSearchResult:
 
 
 async def _chat_session_is_running(db: AsyncSession, session_id: int) -> bool:
+    trajectory_rows = await list_all_agent_log_events(db, session_id=session_id)
+    trajectory_events = trajectory_event_payloads(trajectory_rows)
+    if trajectory_events and not trajectory_events[0].get("legacy"):
+        return derive_agent_trajectory_state(trajectory_events)["is_running"]
+
     latest_start = await db.scalar(
         select(AgentLogEvent.id)
         .where(

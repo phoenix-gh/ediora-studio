@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
 
 import { applyAgentToolPolicy } from './agent-tool-policy'
-import { agentSkillRunAudit, openAgentRuntime, type AgentRuntimeDependencies } from './agent-runtime'
+import { agentSkillRunAudit, openAgentRuntime, type AgentRuntimeDependencies, type AgentSessionEventDraft } from './agent-runtime'
 import type { GlobalAgentToolOptions } from './global-chat-tools'
 import type { RegisteredSkill } from '../skills/registry'
 
@@ -288,6 +288,44 @@ describe('shared Agent runtime', () => {
       text: 'done', output: { decision: 'continue' },
     })
     await runtime.close()
+  })
+
+  it('emits typed step, request, assistant, and terminal step events without swallowing trace failures', async () => {
+    const deps = dependencies()
+    deps.generate = vi.fn(async () => ({
+      text: 'done',
+      reasoning: '先确认',
+      content: [],
+      toolResults: [],
+      usage: { inputTokens: 2, outputTokens: 3 },
+    })) as unknown as AgentRuntimeDependencies['generate']
+    const events: AgentSessionEventDraft[] = []
+    const runtime = await openAgentRuntime({
+      ...openOptions('automatic', deps),
+      automaticSelection: false,
+      turn: 3,
+      onSessionEvent: event => { events.push(event) },
+    })
+
+    await runtime.run({ objective: '记录 canonical 轨迹', modelMessages: [], maxSteps: 1 })
+
+    expect(events.map(event => event.type)).toEqual([
+      'step/start', 'request/header', 'assistant/message', 'step/end',
+    ])
+    expect(events[0]).toMatchObject({ turn: 3, step: 1, data: { turn: 3, step: 1 } })
+    expect(events[2]).toMatchObject({
+      type: 'assistant/message',
+      data: { blocks: [{ kind: 'reasoning', text: '先确认' }, { kind: 'text', text: 'done' }] },
+    })
+    await runtime.close()
+
+    const failing = await openAgentRuntime({
+      ...openOptions('automatic', deps),
+      automaticSelection: false,
+      onSessionEvent: async () => { throw new Error('trajectory store unavailable') },
+    })
+    await expect(failing.run({ objective: 'trace failure', modelMessages: [], maxSteps: 1 })).rejects.toThrow('trajectory store unavailable')
+    await failing.close()
   })
 
   it('runs an activated Skill through plan, execution, validation, and shared audit', async () => {

@@ -1,9 +1,7 @@
 'use client'
 
-import { useEffect, useState } from 'react'
 import { type ContentJob, type ContentJobStep } from '@/lib/api/jobs'
-import { listAllAgentLogEvents, type AgentLogEvent } from '@/lib/ai/agent-log-client'
-import { AgentLogTimeline } from '@/components/features/agent/AgentLogTimeline'
+import { AgentTrajectoryPanel } from '@/components/features/agent/AgentTrajectoryPanel'
 import { useDeveloperMode } from '@/components/providers/DeveloperModeProvider'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -15,13 +13,6 @@ const statusText: Record<string, string> = {
 
 type JobLogTab = 'overview' | 'events' | 'agent'
 
-type AgentEventState = {
-  jobId: number
-  events: AgentLogEvent[]
-  loading: boolean
-  error: string
-}
-
 function formatTime(value: string | null | undefined) {
   if (!value) return '—'
   return new Intl.DateTimeFormat('zh-CN', {
@@ -31,10 +22,6 @@ function formatTime(value: string | null | undefined) {
 
 function jsonText(value: unknown) {
   try { return JSON.stringify(value, null, 2) ?? String(value) } catch { return String(value) }
-}
-
-function errorText(reason: unknown, fallback: string) {
-  return reason instanceof Error ? reason.message : fallback
 }
 
 function StepRow({ step, onRetry }: { step: ContentJobStep; onRetry: () => void }) {
@@ -72,34 +59,9 @@ function ExecutionEvents({ events }: { events: ContentJob['events'] }) {
 
 export function JobLogDialog({ job, open, onOpenChange, onRetry }: { job: ContentJob | null; open: boolean; onOpenChange: (open: boolean) => void; onRetry: (jobId: number, stepKey: string) => void }) {
   const developerModeEnabled = useDeveloperMode()
-  const jobId = job?.id
   const defaultTab: JobLogTab = 'overview'
-  const [agentEventState, setAgentEventState] = useState<AgentEventState>({
-    jobId: -1,
-    events: [],
-    loading: false,
-    error: '',
-  })
-  useEffect(() => {
-    if (!open || jobId == null || !developerModeEnabled) return
-    let active = true
-    void (async () => {
-      await Promise.resolve()
-      if (!active) return
-      setAgentEventState({ jobId, events: [], loading: true, error: '' })
-      try {
-        const page = await listAllAgentLogEvents({ job_id: jobId, limit: 500 })
-        if (active) setAgentEventState({ jobId, events: page.events, loading: false, error: '' })
-      } catch (reason) {
-        if (active) setAgentEventState({ jobId, events: [], loading: false, error: errorText(reason, '运行轨迹加载失败') })
-      }
-    })()
-    return () => { active = false }
-  }, [developerModeEnabled, jobId, open])
 
   if (!job) return null
-
-  const hasCurrentEvents = agentEventState.jobId === job.id
 
   function handleOpenChange(nextOpen: boolean) {
     onOpenChange(nextOpen)
@@ -120,7 +82,7 @@ export function JobLogDialog({ job, open, onOpenChange, onRetry }: { job: Conten
             <span className="font-medium">Job #{job.id}</span>
             <span className="rounded-full bg-muted px-2 py-0.5">{statusText[job.status] ?? job.status}</span>
             <span className="text-muted-foreground">步骤 {job.steps.length}</span>
-            {developerModeEnabled && <span className="text-muted-foreground">Agent 事件 {hasCurrentEvents ? agentEventState.events.length : '—'}</span>}
+            {developerModeEnabled && <span className="text-muted-foreground">Agent 轨迹</span>}
           </div>
           <Tabs
             key={`${job.id}-${open ? 'open' : 'closed'}-${developerModeEnabled}`}
@@ -152,12 +114,8 @@ export function JobLogDialog({ job, open, onOpenChange, onRetry }: { job: Conten
             {developerModeEnabled && <TabsContent value="events" className="min-h-0 flex-1 overflow-y-auto pr-1">
               <ExecutionEvents events={job.events} />
             </TabsContent>}
-            {developerModeEnabled && <TabsContent data-testid="job-log-agent-panel" value="agent" className="min-h-0 flex-1 overflow-y-auto pr-1">
-              <AgentLogTimeline
-                events={hasCurrentEvents ? agentEventState.events : []}
-                loading={!hasCurrentEvents || agentEventState.loading}
-                error={hasCurrentEvents ? agentEventState.error : ''}
-              />
+            {developerModeEnabled && <TabsContent keepMounted data-testid="job-log-agent-panel" value="agent" className="min-h-0 flex-1 overflow-y-auto pr-1">
+              <AgentTrajectoryPanel scope={{ job_id: job.id }} open={open} developerModeEnabled />
             </TabsContent>}
           </Tabs>
         </div>
