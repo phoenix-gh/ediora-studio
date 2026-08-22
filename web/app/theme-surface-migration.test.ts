@@ -22,10 +22,16 @@ const PAGE_HEADER_FILES = [
   'app/youtube/YoutubeClient.tsx',
 ] as const
 
+function readPageSource(path: (typeof PAGE_HEADER_FILES)[number]) {
+  return path === 'app/chat/ChatClient.tsx'
+    ? readFileSync('components/features/chat/ChatWorkspace.tsx', 'utf8')
+    : readFileSync(path, 'utf8')
+}
+
 describe('page theme migration', () => {
   it('gives every primary client page an explicit page-header contract', () => {
     const missing = PAGE_HEADER_FILES.filter(path => {
-      const source = readFileSync(path, 'utf8')
+      const source = readPageSource(path)
       const marker = path === 'app/assets/AssetsClient.tsx'
         ? '<WorkspaceToolbar'
         : 'data-slot="page-header"'
@@ -38,7 +44,7 @@ describe('page theme migration', () => {
   it('keeps primary page headers on the shared app height token', () => {
     const missingHeight = PAGE_HEADER_FILES.filter(path => {
       if (path === 'app/assets/AssetsClient.tsx') return false
-      return !readFileSync(path, 'utf8').includes('h-[var(--app-header-height)]')
+      return !readPageSource(path).includes('h-[var(--app-header-height)]')
     })
 
     expect(missingHeight).toEqual([])
@@ -46,7 +52,7 @@ describe('page theme migration', () => {
 
   it('removes legacy white top-level surfaces from migrated client pages', () => {
     const violations = PAGE_HEADER_FILES.filter(path => {
-      const source = readFileSync(path, 'utf8')
+      const source = readPageSource(path)
       return source.includes('bg-white dark:bg-zinc-950') || source.includes('bg-white dark:bg-zinc-900')
     })
 
