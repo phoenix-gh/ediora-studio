@@ -73,6 +73,7 @@ describe('CreationRuleDialog prompt editor', () => {
     account_id: null, instructions: '',
     skill_mode: 'auto' as const, skill_name: null,
     enabled: true,
+    deleted_at: null,
     last_run_at: null, next_run_at: '2026-08-12T01:00:00Z',
     created_at: '2026-08-09T00:00:00Z', updated_at: '2026-08-09T00:00:00Z',
   }
