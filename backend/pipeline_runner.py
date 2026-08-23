@@ -31,6 +31,7 @@ from job_queue import enqueue_job
 from log_redaction import redact_secret_text
 from models import (
     AgentExecution,
+    ChatMessage,
     ContentJob,
     ContentJobEvent,
     ContentJobStep,
@@ -73,6 +74,118 @@ class PipelineStageResult:
     primary_text: str | None = None
     primary_structured: object | None = None
     auxiliary: tuple[PipelineAuxiliaryResult, ...] = ()
+
+
+async def project_chat_pipeline_final(
+    session: AsyncSession,
+    job_id: int,
+) -> bool:
+    """Append the active final primary artifact to Chat history exactly once per run."""
+    job = await lock_content_job_row(session, job_id)
+    if job is None or job.flow != "skill_pipeline" or job.status != "succeeded":
+        return False
+
+    pipeline = (job.input_data or {}).get("pipeline")
+    plan = pipeline.get("plan") if isinstance(pipeline, dict) else None
+    plan_stages = plan.get("stages") if isinstance(plan, dict) else None
+    if not isinstance(plan_stages, list) or not plan_stages:
+        return False
+    final_plan_stage = plan_stages[-1]
+    final_key = final_plan_stage.get("step_key") if isinstance(final_plan_stage, dict) else None
+    if not isinstance(final_key, str) or not final_key:
+        return False
+
+    steps = list((await session.execute(
+        select(ContentJobStep)
+        .where(ContentJobStep.job_id == job.id, ContentJobStep.step_key == final_key)
+        .order_by(ContentJobStep.id.desc())
+    )).scalars().all())
+    final_step = next((step for step in steps if step.status == "succeeded"), None)
+    if final_step is None:
+        return False
+    output = final_step.output_data if isinstance(final_step.output_data, dict) else {}
+    primary_artifact_id = output.get("primary_artifact_id")
+    if not isinstance(primary_artifact_id, int) or isinstance(primary_artifact_id, bool):
+        return False
+    artifact = await session.scalar(
+        select(ExecutionArtifact)
+        .where(
+            ExecutionArtifact.id == primary_artifact_id,
+            ExecutionArtifact.job_id == job.id,
+            ExecutionArtifact.step_id == final_step.id,
+            ExecutionArtifact.attempt == final_step.attempt,
+            ExecutionArtifact.role == "primary",
+            ExecutionArtifact.status == "active",
+        )
+    )
+    if artifact is None:
+        return False
+
+    created_event = await session.scalar(
+        select(ContentJobEvent)
+        .where(
+            ContentJobEvent.job_id == job.id,
+            ContentJobEvent.kind == "chat_pipeline_created",
+        )
+        .order_by(ContentJobEvent.id.asc())
+    )
+    created_payload = created_event.payload if created_event is not None else {}
+    session_id = created_payload.get("session_id") if isinstance(created_payload, dict) else None
+    if not isinstance(session_id, int) or isinstance(session_id, bool) or session_id <= 0:
+        return False
+
+    projection_events = list((await session.execute(
+        select(ContentJobEvent)
+        .where(
+            ContentJobEvent.job_id == job.id,
+            ContentJobEvent.kind == "chat_pipeline_final_projected",
+        )
+        .order_by(ContentJobEvent.id.asc())
+    )).scalars().all())
+    for event in projection_events:
+        payload = event.payload if isinstance(event.payload, dict) else {}
+        if (
+            payload.get("run_epoch") == job.run_epoch
+            and payload.get("primary_artifact_id") == artifact.id
+        ):
+            return False
+
+    text_content = (artifact.text_content or "").strip()
+    if not text_content:
+        try:
+            text_content = json.dumps(
+                artifact.structured_content,
+                ensure_ascii=False,
+                indent=2,
+            )
+        except (TypeError, ValueError, OverflowError):
+            return False
+    if not text_content.strip():
+        return False
+    text_content = redact_secret_text(text_content)
+    session.add(ChatMessage(
+        session_id=session_id,
+        role="assistant",
+        text=text_content,
+        parts=[{
+            "type": "text",
+            "text": text_content,
+            "pipelineJobId": job.id,
+            "pipelineRunEpoch": job.run_epoch,
+            "pipelinePrimaryArtifactId": artifact.id,
+        }],
+    ))
+    session.add(ContentJobEvent(
+        job_id=job.id,
+        kind="chat_pipeline_final_projected",
+        payload={
+            "session_id": session_id,
+            "run_epoch": job.run_epoch,
+            "primary_artifact_id": artifact.id,
+        },
+    ))
+    await session.commit()
+    return True
 
 
 class PipelineStageExecutor(Protocol):
@@ -557,6 +670,12 @@ async def _persist_success(
         )
     if is_last:
         await succeed_job(session, job_id)
+        try:
+            await project_chat_pipeline_final(session, job_id)
+        except Exception:
+            # Job completion is durable even if Chat projection is temporarily unavailable;
+            # reconciliation repairs the projection without rerunning the Stage.
+            await session.rollback()
     else:
         try:
             await enqueue_job(job_id, flow="skill_pipeline")
@@ -601,6 +720,10 @@ async def run_skill_pipeline_job(
                 if stage_index == len(stage_keys) and job.status == "running":
                     await session.commit()
                     await succeed_job(session, job.id)
+                    try:
+                        await project_chat_pipeline_final(session, job.id)
+                    except Exception:
+                        await session.rollback()
                 else:
                     await session.rollback()
                 return

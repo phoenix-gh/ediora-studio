@@ -15,7 +15,7 @@ from typing import Any
 from uuid import uuid4
 
 from loguru import logger
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from content_jobs import (
@@ -401,6 +401,11 @@ async def _decide_skill_pipeline_locked(
     job: ContentJob,
 ) -> _Decision:
     """Resume a pipeline without confirming it or creating another attempt."""
+    if job.status == "succeeded":
+        from pipeline_runner import project_chat_pipeline_final
+
+        await project_chat_pipeline_final(db, job.id)
+        return _Decision()
     if job.status not in {"queued", "running"}:
         return _Decision()
     rows = list((await db.execute(
@@ -510,10 +515,10 @@ async def _decide_locked(
     job: ContentJob,
     ensure_fence,
 ) -> _Decision:
-    if job.status in TERMINAL_STATUSES:
-        return _Decision()
     if job.flow == "skill_pipeline":
         return await _decide_skill_pipeline_locked(db, job)
+    if job.status in TERMINAL_STATUSES:
+        return _Decision()
     if await _superseded_digital_human_job(db, job):
         return await _cancel_superseded_job(
             db,
@@ -709,7 +714,13 @@ async def reconcile_content_jobs(
             (
                 await db.execute(
                     select(ContentJob.id, ContentJob.flow)
-                    .where(ContentJob.status.in_(RECONCILABLE_STATUSES))
+                    .where(or_(
+                        ContentJob.status.in_(RECONCILABLE_STATUSES),
+                        and_(
+                            ContentJob.flow == "skill_pipeline",
+                            ContentJob.status == "succeeded",
+                        ),
+                    ))
                     .order_by(ContentJob.id),
                 )
             ).all(),

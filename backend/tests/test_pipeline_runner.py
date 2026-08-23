@@ -169,6 +169,123 @@ async def test_runner_executes_one_ordered_stage_per_invocation_and_hands_off_pr
 
 
 @pytest.mark.asyncio
+async def test_runner_projects_chat_pipeline_final_primary_once(
+    pipeline_db,
+    monkeypatch,
+):
+    from models import ChatMessage, ChatSession, ContentJobEvent, ContentJobStep
+    from pipeline_runner import run_skill_pipeline_job
+    from pipeline_service import create_pipeline_job
+
+    async def fake_enqueue(_job_id, *, flow=None):
+        return None
+
+    monkeypatch.setattr("pipeline_runner.enqueue_job", fake_enqueue)
+    async with pipeline_db() as session:
+        job = await create_pipeline_job(session, _request("runner-chat-projection", count=1))
+        chat_session = ChatSession(title="研究对话")
+        session.add(chat_session)
+        await session.flush()
+        placeholder = ChatMessage(
+            session_id=chat_session.id,
+            role="assistant",
+            text="等待确认",
+            parts=[{"type": "skill-pipeline-ref", "jobId": job.id}],
+        )
+        session.add(placeholder)
+        await session.flush()
+        session.add(ContentJobEvent(
+            job_id=job.id,
+            kind="chat_pipeline_created",
+            payload={
+                "session_id": chat_session.id,
+                "assistant_message_id": placeholder.id,
+            },
+        ))
+        await session.commit()
+        job_id = job.id
+
+    await run_skill_pipeline_job(
+        job_id,
+        session_factory=pipeline_db,
+        executor=RecordingExecutor(),
+    )
+
+    async with pipeline_db() as session:
+        messages = list((await session.execute(
+            select(ChatMessage)
+            .where(ChatMessage.session_id == chat_session.id)
+            .order_by(ChatMessage.id.asc())
+        )).scalars().all())
+        projection_events = list((await session.execute(
+            select(ContentJobEvent)
+            .where(ContentJobEvent.job_id == job_id, ContentJobEvent.kind == "chat_pipeline_final_projected")
+        )).scalars().all())
+        final_step = (await session.execute(
+            select(ContentJobStep)
+            .where(ContentJobStep.job_id == job_id, ContentJobStep.step_key != "pipeline_plan")
+        )).scalar_one()
+        first_final_text = messages[-1].text
+
+    assert len(messages) == 2
+    assert first_final_text == "output for skill:01:source-research"
+    assert messages[-1].parts[0]["pipelineJobId"] == job_id
+    assert messages[-1].parts[0]["pipelineRunEpoch"] == 1
+    assert messages[-1].parts[0]["pipelinePrimaryArtifactId"] == final_step.output_data["primary_artifact_id"]
+    assert len(projection_events) == 1
+
+    await run_skill_pipeline_job(
+        job_id,
+        session_factory=pipeline_db,
+        executor=RecordingExecutor(),
+    )
+
+    async with pipeline_db() as session:
+        assert await session.scalar(
+            select(func.count(ChatMessage.id)).where(ChatMessage.session_id == chat_session.id)
+        ) == 2
+        assert await session.scalar(
+            select(func.count(ContentJobEvent.id)).where(
+                ContentJobEvent.job_id == job_id,
+                ContentJobEvent.kind == "chat_pipeline_final_projected",
+            )
+        ) == 1
+
+        from pipeline_service import rerun_pipeline_stage
+
+        await rerun_pipeline_stage(
+            session,
+            job_id=job_id,
+            stage_key="skill:01:source-research",
+            request_id="rerun-chat-projection-1",
+        )
+
+    await run_skill_pipeline_job(
+        job_id,
+        session_factory=pipeline_db,
+        executor=RecordingExecutor(),
+    )
+
+    async with pipeline_db() as session:
+        messages = list((await session.scalars(
+            select(ChatMessage)
+            .where(ChatMessage.session_id == chat_session.id)
+            .order_by(ChatMessage.id.asc())
+        )).all())
+        projection_events = list((await session.scalars(
+            select(ContentJobEvent)
+            .where(ContentJobEvent.job_id == job_id, ContentJobEvent.kind == "chat_pipeline_final_projected")
+        )).all())
+
+    assert len(messages) == 3
+    assert [message.text for message in messages[1:]] == [
+        "output for skill:01:source-research",
+        "output for skill:01:source-research",
+    ]
+    assert len(projection_events) == 2
+
+
+@pytest.mark.asyncio
 async def test_runner_reuses_active_upstream_after_retry_increments_run_epoch(
     pipeline_db,
     monkeypatch,
