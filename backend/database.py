@@ -470,6 +470,150 @@ async def migrate_content_job_idempotency_schema(conn) -> None:
     ))
 
 
+async def migrate_skill_pipeline_schema(conn, *, assert_complete: bool = True) -> None:
+    """Bring the additive Skill-pipeline schema to the current version."""
+    from sqlalchemy import inspect, text
+
+    table_names = set(await conn.run_sync(
+        lambda sync_connection: inspect(sync_connection).get_table_names()
+    ))
+    target_tables = {"content_jobs", "agent_executions"}
+    if not table_names.intersection(target_tables):
+        if assert_complete:
+            raise RuntimeError("skill pipeline schema is incomplete: target tables are absent")
+        return
+
+    if "content_jobs" in table_names:
+        await _add_columns(conn, "content_jobs", {
+            "plan_version": "INTEGER NOT NULL DEFAULT 1",
+            "run_epoch": "INTEGER NOT NULL DEFAULT 1",
+        })
+        columns = await conn.run_sync(
+            lambda sync_connection: {
+                column["name"]
+                for column in inspect(sync_connection).get_columns("content_jobs")
+            }
+        )
+        if "updated_at" not in columns:
+            await conn.execute(text(
+                'ALTER TABLE "content_jobs" ADD COLUMN "updated_at" TIMESTAMP WITH TIME ZONE'
+            ))
+        if "created_at" in columns:
+            await conn.execute(text(
+                'UPDATE "content_jobs" SET "updated_at" = "created_at" '
+                'WHERE "updated_at" IS NULL'
+            ))
+        else:
+            await conn.execute(text(
+                'UPDATE "content_jobs" SET "updated_at" = CURRENT_TIMESTAMP '
+                'WHERE "updated_at" IS NULL'
+            ))
+        await conn.execute(text(
+            'ALTER TABLE "content_jobs" ALTER COLUMN "updated_at" '
+            'SET DEFAULT CURRENT_TIMESTAMP'
+        ))
+        await conn.execute(text(
+            'ALTER TABLE "content_jobs" ALTER COLUMN "updated_at" SET NOT NULL'
+        ))
+
+    if "agent_executions" in table_names:
+        await _add_columns(conn, "agent_executions", {
+            "step_id": "INTEGER",
+            "attempt": "INTEGER NOT NULL DEFAULT 1",
+        })
+
+        def inspect_agent_schema(sync_connection):
+            inspector = inspect(sync_connection)
+            return (
+                inspector.get_unique_constraints("agent_executions"),
+                inspector.get_indexes("agent_executions"),
+                inspector.get_foreign_keys("agent_executions"),
+            )
+
+        unique_constraints, indexes, foreign_keys = await conn.run_sync(inspect_agent_schema)
+        quote = conn.dialect.identifier_preparer.quote
+        target_index_names = {
+            "uq_agent_executions_legacy_job",
+            "uq_agent_executions_stage_attempt",
+        }
+        dropped_constraint_names: set[str] = set()
+        for constraint in unique_constraints:
+            if (
+                constraint.get("name")
+                and constraint.get("column_names") == ["job_id"]
+                and constraint["name"] not in target_index_names
+            ):
+                dropped_constraint_names.add(constraint["name"])
+                await conn.execute(text(
+                    f'ALTER TABLE "agent_executions" DROP CONSTRAINT {quote(constraint["name"])}'
+                ))
+        for index in indexes:
+            if (
+                index.get("name")
+                and index.get("unique")
+                and index.get("column_names") == ["job_id"]
+                and index["name"] not in target_index_names
+                and index["name"] not in dropped_constraint_names
+            ):
+                await conn.execute(text(f'DROP INDEX {quote(index["name"])}'))
+
+        if "content_job_steps" in table_names and not any(
+            foreign_key.get("constrained_columns") == ["step_id"]
+            and foreign_key.get("referred_table") == "content_job_steps"
+            for foreign_key in foreign_keys
+        ):
+            await conn.execute(text(
+                'ALTER TABLE "agent_executions" '
+                'ADD CONSTRAINT "fk_agent_executions_step_id" '
+                'FOREIGN KEY ("step_id") REFERENCES "content_job_steps" ("id")'
+            ))
+
+        await conn.execute(text(
+            'CREATE UNIQUE INDEX IF NOT EXISTS "uq_agent_executions_legacy_job" '
+            'ON "agent_executions" ("job_id") WHERE "step_id" IS NULL'
+        ))
+        await conn.execute(text(
+            'CREATE UNIQUE INDEX IF NOT EXISTS "uq_agent_executions_stage_attempt" '
+            'ON "agent_executions" ("job_id", "step_id", "attempt") '
+            'WHERE "step_id" IS NOT NULL'
+        ))
+
+    if not assert_complete:
+        return
+
+    final_tables = set(await conn.run_sync(
+        lambda sync_connection: inspect(sync_connection).get_table_names()
+    ))
+    if "execution_artifacts" not in final_tables:
+        raise RuntimeError(
+            "skill pipeline schema is incomplete: execution_artifacts is absent"
+        )
+    final_content_columns = {
+        column["name"]
+        for column in await conn.run_sync(
+            lambda sync_connection: inspect(sync_connection).get_columns("content_jobs")
+        )
+    }
+    final_execution_columns = {
+        column["name"]
+        for column in await conn.run_sync(
+            lambda sync_connection: inspect(sync_connection).get_columns("agent_executions")
+        )
+    }
+    if not {"plan_version", "run_epoch", "updated_at"} <= final_content_columns:
+        raise RuntimeError("skill pipeline schema is incomplete: content_jobs columns are absent")
+    if not {"step_id", "attempt"} <= final_execution_columns:
+        raise RuntimeError("skill pipeline schema is incomplete: Agent execution columns are absent")
+    final_indexes = {
+        index["name"]
+        for index in await conn.run_sync(
+            lambda sync_connection: inspect(sync_connection).get_indexes("agent_executions")
+        )
+    }
+    if not target_index_names <= final_indexes:
+        raise RuntimeError("skill pipeline schema is incomplete: Agent execution indexes are absent")
+
+
 async def migrate_digital_human_comfyui_schema(conn) -> None:
     """Add ComfyUI role fields and allow roles without a cloned voice sample."""
     from sqlalchemy import text
@@ -1212,8 +1356,10 @@ async def init_db():
         # Existing databases may contain duplicate keys, so repair them before
         # metadata.create_all attempts to create the unique partial index.
         await migrate_content_job_idempotency_schema(conn)
+        await migrate_skill_pipeline_schema(conn, assert_complete=False)
         await _drop_tables(conn, ("daily_plan_items", "daily_plans"))
         await conn.run_sync(Base.metadata.create_all)
+        await migrate_skill_pipeline_schema(conn, assert_complete=True)
         await _drop_columns(conn, "publish_accounts", ("daily_quota",))
         await migrate_topic_source_rule_single_directory(conn)
         await migrate_x_subscription_collection_schema(conn)
