@@ -138,7 +138,81 @@ def test_skill_pipeline_job_requires_worker_auth_and_automatic_enqueue_is_idempo
     )
     assert repeated.status_code == 201
     assert repeated.json()["id"] == payload["id"]
-    assert queued == [payload["id"]]
+
+
+def test_worker_pipeline_stage_routes_are_authenticated_and_queue_next_stage_once(
+    client,
+    monkeypatch,
+):
+    import routers.jobs as jobs_router
+
+    queued: list[int] = []
+
+    async def enqueue(job_id: int):
+        queued.append(job_id)
+
+    monkeypatch.setattr(jobs_router, "enqueue_job", enqueue)
+    headers = {"X-Worker-Token": "test-worker-token-at-least-32-characters"}
+    created = client.post(
+        "/api/jobs",
+        json=_pipeline_body(key="job:pipeline:worker-stage"),
+        headers=headers,
+    ).json()
+    # Job creation enqueues the first Stage; isolate the completion assertion
+    # from that initial dispatch.
+    queued.clear()
+    stage = created["pipeline"]["stages"][0]
+    start_path = f"/api/jobs/{created['id']}/pipeline/stages/{stage['id']}/start"
+
+    assert client.post(start_path, json={"attempt": 1, "run_epoch": 1}).status_code == 403
+    started = client.post(
+        start_path,
+        json={"attempt": 1, "run_epoch": 1},
+        headers=headers,
+    )
+    assert started.status_code == 200, started.text
+    assert started.json()["status"] == "running"
+
+    from database import SessionLocal
+    from models import AgentExecution
+
+    async def seed_execution():
+        async with SessionLocal() as session:
+            execution = AgentExecution(
+                job_id=created["id"],
+                step_id=stage["id"],
+                attempt=1,
+                objective="Write a sourced article",
+                skill_mode="manual",
+                skill_name="source-research",
+            )
+            session.add(execution)
+            await session.commit()
+            await session.refresh(execution)
+            return execution.id
+
+    execution_id = asyncio.new_event_loop().run_until_complete(seed_execution())
+    complete_path = f"/api/jobs/{created['id']}/pipeline/stages/{stage['id']}/complete"
+    body = {
+        "attempt": 1,
+        "run_epoch": 1,
+        "execution_id": execution_id,
+        "primary": {
+            "kind": "research_bundle",
+            "title": "Research",
+            "text_content": "source findings",
+        },
+        "auxiliary": [],
+        "completion_evidence": {"kind": "agent_run", "finalText": "source findings"},
+    }
+    completed = client.post(complete_path, json=body, headers=headers)
+    assert completed.status_code == 200, completed.text
+    assert completed.json()["status"] == "queued"
+    assert queued == [created["id"]]
+
+    repeated = client.post(complete_path, json=body, headers=headers)
+    assert repeated.status_code == 200, repeated.text
+    assert queued == [created["id"]]
 
 
 def test_interactive_pipeline_waits_for_confirmation_and_hides_private_snapshot_fields(

@@ -10,13 +10,18 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from content_jobs import create_or_get_job
+from content_jobs import (
+    create_or_get_job,
+    fail_locked_step,
+    lock_content_job_row,
+    succeed_locked_step,
+)
 from execution_artifacts import (
     list_execution_artifacts,
     supersede_execution_artifacts,
 )
-from log_redaction import redact_secret_text
-from models import ContentJob, ContentJobEvent, ContentJobStep
+from log_redaction import redact_log_value, redact_secret_text
+from models import AgentExecution, AgentLogEvent, ContentJob, ContentJobEvent, ContentJobStep
 from pipeline_contracts import (
     PipelineCreateInput,
     build_macro_plan,
@@ -37,6 +42,10 @@ class PipelineCommandConflict(RuntimeError):
 
 
 class PipelineInvalidState(RuntimeError):
+    pass
+
+
+class PipelineArtifactError(ValueError):
     pass
 
 
@@ -267,8 +276,6 @@ async def _locked_pipeline_job(
     session: AsyncSession,
     job_id: int,
 ) -> ContentJob:
-    from content_jobs import lock_content_job_row
-
     job = await lock_content_job_row(session, job_id)
     if job is None:
         raise PipelineJobNotFound(f"job {job_id} not found")
@@ -362,6 +369,306 @@ def _plan_for(job: ContentJob) -> dict[str, Any]:
     if not isinstance(plan, dict) or not isinstance(plan.get("stages"), list):
         raise PipelineInvalidState("pipeline plan is invalid")
     return deepcopy(plan)
+
+
+def _pipeline_stage_keys(job: ContentJob) -> list[str]:
+    plan = _plan_for(job)
+    keys = [stage.get("step_key") for stage in plan["stages"]]
+    if not keys or any(not isinstance(key, str) or not key for key in keys):
+        raise PipelineInvalidState("pipeline plan contains invalid Stage keys")
+    return keys
+
+
+async def _locked_pipeline_stage(
+    session: AsyncSession,
+    job: ContentJob,
+    step_id: int,
+) -> ContentJobStep:
+    step = await session.scalar(
+        select(ContentJobStep)
+        .where(ContentJobStep.id == step_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if step is None or step.job_id != job.id or step.step_key == "pipeline_plan":
+        raise PipelineJobNotFound(f"pipeline Stage {step_id} not found")
+    return step
+
+
+def _assert_worker_artifact_safe(value: object, *, path: str = "artifact") -> None:
+    secret_keys = {
+        "apikey", "apisecret", "authorization", "cookie", "password",
+        "secret", "token", "accesstoken", "refreshtoken", "appid", "appsecret",
+    }
+    if isinstance(value, dict):
+        for key, nested in value.items():
+            normalized = "".join(character for character in str(key).casefold() if character.isalnum())
+            if normalized in secret_keys or normalized.endswith("token"):
+                raise PipelineArtifactError(f"credential-looking field is not allowed in {path}.{key}")
+            _assert_worker_artifact_safe(nested, path=f"{path}.{key}")
+        return
+    if isinstance(value, (list, tuple, set, frozenset)):
+        for index, nested in enumerate(value):
+            _assert_worker_artifact_safe(nested, path=f"{path}[{index}]")
+        return
+    if isinstance(value, str) and redact_secret_text(value) != value:
+        raise PipelineArtifactError(f"secret pattern is not allowed in {path}")
+
+
+def _validate_worker_artifact(value: dict, *, role: str) -> dict:
+    if role not in {"primary", "auxiliary"}:
+        raise PipelineArtifactError("artifact role is invalid")
+    allowed = {"kind", "title", "text_content", "structured_content"}
+    unknown = set(value) - allowed
+    if unknown:
+        raise PipelineArtifactError(
+            f"artifact contains unknown fields: {', '.join(sorted(unknown))}"
+        )
+    kind = value.get("kind")
+    title = value.get("title")
+    text_content = value.get("text_content")
+    structured_content = value.get("structured_content")
+    if not isinstance(kind, str) or not kind.strip() or len(kind) > 120:
+        raise PipelineArtifactError("artifact kind is invalid")
+    if not isinstance(title, str) or not title.strip() or len(title) > 500:
+        raise PipelineArtifactError("artifact title is invalid")
+    if text_content is not None and (
+        not isinstance(text_content, str) or len(text_content) > 1_000_000
+    ):
+        raise PipelineArtifactError("artifact text is invalid or too large")
+    if not (isinstance(text_content, str) and text_content.strip()) and structured_content is None:
+        raise PipelineArtifactError("artifact must contain text_content or structured_content")
+    _assert_worker_artifact_safe(text_content, path="artifact.text_content")
+    _assert_worker_artifact_safe(structured_content, path="artifact.structured_content")
+    return {
+        "kind": kind.strip(),
+        "title": title.strip(),
+        "text_content": text_content,
+        "structured_content": structured_content,
+    }
+
+
+async def start_pipeline_stage(
+    session: AsyncSession,
+    *,
+    job_id: int,
+    step_id: int,
+    attempt: int,
+    run_epoch: int,
+) -> ContentJobStep:
+    job = await _locked_pipeline_job(session, job_id)
+    if job.run_epoch != run_epoch:
+        raise PipelineInvalidState(
+            f"pipeline run epoch {run_epoch} is stale; current epoch is {job.run_epoch}"
+        )
+    step = await _locked_pipeline_stage(session, job, step_id)
+    if step.attempt != attempt:
+        raise PipelineInvalidState(
+            f"Stage attempt {attempt} is stale; current attempt is {step.attempt}"
+        )
+    if step.status == "running":
+        await session.commit()
+        await session.refresh(step)
+        return step
+    if step.status != "queued":
+        raise PipelineInvalidState(f"cannot start a {step.status} Stage")
+    if job.status not in {"queued", "running"}:
+        raise PipelineInvalidState(f"cannot start a Stage for a {job.status} pipeline")
+    keys = _pipeline_stage_keys(job)
+    try:
+        index = keys.index(step.step_key)
+    except ValueError as error:
+        raise PipelineInvalidState("Stage is not present in the current plan") from error
+    if index > 0:
+        previous = await _latest_stage(session, job.id, keys[index - 1])
+        if previous is None or previous.status != "succeeded":
+            raise PipelineInvalidState("previous Stage has not succeeded")
+    now = _now()
+    step.status = "running"
+    step.started_at = step.started_at or now
+    job.status = "running"
+    job.started_at = job.started_at or now
+    session.add(ContentJobEvent(
+        job_id=job.id,
+        step_id=step.id,
+        kind="pipeline_stage_started",
+        payload={"step_key": step.step_key, "attempt": step.attempt, "run_epoch": job.run_epoch},
+    ))
+    await session.commit()
+    await session.refresh(step)
+    return step
+
+
+async def complete_pipeline_stage(
+    session: AsyncSession,
+    *,
+    job_id: int,
+    step_id: int,
+    attempt: int,
+    run_epoch: int,
+    execution_id: int,
+    primary: dict,
+    auxiliary: list[dict],
+    completion_evidence: dict,
+) -> ContentJob:
+    job = await _locked_pipeline_job(session, job_id)
+    if job.run_epoch != run_epoch:
+        raise PipelineInvalidState(
+            f"pipeline run epoch {run_epoch} is stale; current epoch is {job.run_epoch}"
+        )
+    step = await _locked_pipeline_stage(session, job, step_id)
+    if step.attempt != attempt:
+        raise PipelineInvalidState(
+            f"Stage attempt {attempt} is stale; current attempt is {step.attempt}"
+        )
+    if step.status == "succeeded":
+        await session.commit()
+        await session.refresh(job)
+        return job
+    if step.status != "running":
+        raise PipelineInvalidState(f"cannot complete a {step.status} Stage")
+    execution = await session.scalar(
+        select(AgentExecution)
+        .where(AgentExecution.id == execution_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if (
+        execution is None
+        or execution.job_id != job.id
+        or execution.step_id != step.id
+        or execution.attempt != step.attempt
+    ):
+        raise PipelineInvalidState("Agent execution does not belong to this Stage attempt")
+    if execution.status not in {"running", "succeeded"}:
+        raise PipelineInvalidState(
+            f"cannot complete Stage with Agent execution {execution.status}"
+        )
+    if not isinstance(completion_evidence, dict):
+        raise PipelineArtifactError("completion evidence must be an object")
+    if len(auxiliary) > 24:
+        raise PipelineArtifactError("too many auxiliary artifacts")
+
+    normalized_primary = _validate_worker_artifact(primary, role="primary")
+    normalized_auxiliary = [
+        _validate_worker_artifact(item, role="auxiliary")
+        for item in auxiliary
+    ]
+    from execution_artifacts import append_execution_artifact
+
+    auxiliary_ids: list[int] = []
+    for artifact in normalized_auxiliary:
+        saved = await append_execution_artifact(
+            session,
+            job_id=job.id,
+            step_id=step.id,
+            attempt=step.attempt,
+            kind=artifact["kind"],
+            role="auxiliary",
+            title=artifact["title"],
+            text_content=artifact["text_content"],
+            structured_content=artifact["structured_content"],
+        )
+        auxiliary_ids.append(saved.id)
+    saved_primary = await append_execution_artifact(
+        session,
+        job_id=job.id,
+        step_id=step.id,
+        attempt=step.attempt,
+        kind=normalized_primary["kind"],
+        role="primary",
+        title=normalized_primary["title"],
+        text_content=normalized_primary["text_content"],
+        structured_content=normalized_primary["structured_content"],
+    )
+    output_data = {
+        "run_epoch": job.run_epoch,
+        "attempt": step.attempt,
+        "primary_artifact_id": saved_primary.id,
+        "auxiliary_artifact_ids": auxiliary_ids,
+    }
+    await succeed_locked_step(session, job, step, output_data)
+    execution.status = "succeeded"
+    execution.phase = "complete"
+    execution.completion_evidence = redact_log_value(completion_evidence)
+    execution.error = ""
+    execution.completed_at = _now()
+    execution.updated_at = execution.completed_at
+    session.add(AgentLogEvent(
+        stream_kind="job",
+        stream_key=f"execution:{execution.id}",
+        job_id=job.id,
+        execution_id=execution.id,
+        event_type="execution/complete",
+        phase="complete",
+        status="completed",
+        payload_data=redact_log_value(completion_evidence),
+    ))
+    keys = _pipeline_stage_keys(job)
+    is_final = step.step_key == keys[-1]
+    if is_final:
+        job.status = "succeeded"
+        job.completed_at = _now()
+        session.add(ContentJobEvent(
+            job_id=job.id,
+            kind="job_succeeded",
+            payload={"run_epoch": job.run_epoch},
+        ))
+    else:
+        job.status = "queued"
+        job.completed_at = None
+    session.add(ContentJobEvent(
+        job_id=job.id,
+        step_id=step.id,
+        kind="pipeline_stage_succeeded",
+        payload={
+            "step_key": step.step_key,
+            "attempt": step.attempt,
+            "run_epoch": job.run_epoch,
+            "primary_artifact_id": saved_primary.id,
+        },
+    ))
+    await session.commit()
+    await session.refresh(job)
+    return job
+
+
+async def fail_pipeline_stage(
+    session: AsyncSession,
+    *,
+    job_id: int,
+    step_id: int,
+    attempt: int,
+    run_epoch: int,
+    error: str,
+    retryable: bool,
+) -> ContentJob:
+    job = await _locked_pipeline_job(session, job_id)
+    if job.run_epoch != run_epoch:
+        raise PipelineInvalidState(
+            f"pipeline run epoch {run_epoch} is stale; current epoch is {job.run_epoch}"
+        )
+    step = await _locked_pipeline_stage(session, job, step_id)
+    if step.attempt != attempt:
+        raise PipelineInvalidState(
+            f"Stage attempt {attempt} is stale; current attempt is {step.attempt}"
+        )
+    if step.status == "failed":
+        await session.commit()
+        await session.refresh(job)
+        return job
+    if step.status != "running":
+        raise PipelineInvalidState(f"cannot fail a {step.status} Stage")
+    await fail_locked_step(
+        session,
+        job,
+        step,
+        redact_secret_text(error)[:500],
+        retryable=retryable,
+    )
+    await session.commit()
+    await session.refresh(job)
+    return job
 
 
 async def confirm_pipeline(

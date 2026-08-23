@@ -21,17 +21,21 @@ from log_redaction import redact_log_value, redact_secret_text
 from models import AgentExecution, AgentMessageLog, AgentToolCall, ContentJob, ContentJobEvent, ContentJobStep, DailyCreationRun
 from pipeline_contracts import PipelineContractError, PipelineCreateInput, ResolvedSkillInvocation
 from pipeline_service import (
+    PipelineArtifactError,
     PipelineCommandConflict,
     PipelineInvalidState,
     PipelineJobNotFound,
     PipelinePlanConflict,
     cancel_pipeline,
+    complete_pipeline_stage,
     confirm_pipeline,
     create_pipeline_job,
+    fail_pipeline_stage,
     pipeline_job_payload,
     rerun_pipeline_stage,
     revise_pipeline_plan,
     retry_pipeline_stage,
+    start_pipeline_stage,
 )
 from worker_auth import require_worker_token, validate_worker_token
 
@@ -84,6 +88,42 @@ class StepFailureRequest(BaseModel):
 class JobEventRequest(BaseModel):
     kind: str = Field(min_length=1, max_length=64)
     payload: dict = Field(default_factory=dict)
+
+
+class PipelineStageStartRequest(BaseModel):
+    attempt: int = Field(ge=1)
+    run_epoch: int = Field(ge=1)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class PipelineArtifactRequest(BaseModel):
+    kind: str = Field(min_length=1, max_length=120)
+    title: str = Field(min_length=1, max_length=500)
+    text_content: str | None = Field(default=None, max_length=1_000_000)
+    structured_content: object | None = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class PipelineStageCompleteRequest(BaseModel):
+    attempt: int = Field(ge=1)
+    run_epoch: int = Field(ge=1)
+    execution_id: int = Field(gt=0)
+    primary: PipelineArtifactRequest
+    auxiliary: list[PipelineArtifactRequest] = Field(default_factory=list, max_length=24)
+    completion_evidence: dict = Field(default_factory=dict)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class PipelineStageFailRequest(BaseModel):
+    attempt: int = Field(ge=1)
+    run_epoch: int = Field(ge=1)
+    error: str = Field(min_length=1, max_length=500)
+    retryable: bool = False
+
+    model_config = ConfigDict(extra="forbid")
 
 
 @router.post(
@@ -298,7 +338,99 @@ def _pipeline_command_error(exc: Exception) -> HTTPException:
         return HTTPException(404, str(exc))
     if isinstance(exc, (PipelinePlanConflict, PipelineCommandConflict, PipelineInvalidState)):
         return HTTPException(409, str(exc))
+    if isinstance(exc, PipelineArtifactError):
+        return HTTPException(422, str(exc))
     return HTTPException(422, str(exc))
+
+
+@router.post(
+    "/{job_id}/pipeline/stages/{step_id}/start",
+    dependencies=[Depends(require_worker_token)],
+)
+async def post_start_pipeline_stage(
+    job_id: int,
+    step_id: int,
+    body: PipelineStageStartRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        step = await start_pipeline_stage(
+            db,
+            job_id=job_id,
+            step_id=step_id,
+            attempt=body.attempt,
+            run_epoch=body.run_epoch,
+        )
+    except (PipelineJobNotFound, PipelinePlanConflict, PipelineCommandConflict, PipelineInvalidState, PipelineArtifactError) as exc:
+        raise _pipeline_command_error(exc) from exc
+    return _step_payload(step)
+
+
+@router.post(
+    "/{job_id}/pipeline/stages/{step_id}/complete",
+    dependencies=[Depends(require_worker_token)],
+)
+async def post_complete_pipeline_stage(
+    job_id: int,
+    step_id: int,
+    body: PipelineStageCompleteRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    existing_step = await db.get(ContentJobStep, step_id)
+    was_already_succeeded = bool(
+        existing_step is not None
+        and existing_step.job_id == job_id
+        and existing_step.status == "succeeded"
+    )
+    try:
+        job = await complete_pipeline_stage(
+            db,
+            job_id=job_id,
+            step_id=step_id,
+            attempt=body.attempt,
+            run_epoch=body.run_epoch,
+            execution_id=body.execution_id,
+            primary=body.primary.model_dump(mode="json"),
+            auxiliary=[item.model_dump(mode="json") for item in body.auxiliary],
+            completion_evidence=body.completion_evidence,
+        )
+    except (PipelineJobNotFound, PipelinePlanConflict, PipelineCommandConflict, PipelineInvalidState, PipelineArtifactError) as exc:
+        raise _pipeline_command_error(exc) from exc
+    if job.status == "queued" and not was_already_succeeded:
+        await enqueue_job(job_id)
+    else:
+        try:
+            from pipeline_runner import project_chat_pipeline_final
+
+            await project_chat_pipeline_final(db, job_id)
+        except Exception:
+            await db.rollback()
+    return await pipeline_job_payload(db, job_id)
+
+
+@router.post(
+    "/{job_id}/pipeline/stages/{step_id}/fail",
+    dependencies=[Depends(require_worker_token)],
+)
+async def post_fail_pipeline_stage(
+    job_id: int,
+    step_id: int,
+    body: PipelineStageFailRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        job = await fail_pipeline_stage(
+            db,
+            job_id=job_id,
+            step_id=step_id,
+            attempt=body.attempt,
+            run_epoch=body.run_epoch,
+            error=body.error,
+            retryable=body.retryable,
+        )
+    except (PipelineJobNotFound, PipelinePlanConflict, PipelineCommandConflict, PipelineInvalidState, PipelineArtifactError) as exc:
+        raise _pipeline_command_error(exc) from exc
+    return await pipeline_job_payload(db, job.id)
 
 
 @router.get("/{job_id}/events")

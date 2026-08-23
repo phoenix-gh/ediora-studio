@@ -515,3 +515,171 @@ async def test_retry_and_rerun_preserve_history_and_supersede_downstream_artifac
         (rerun_steps[1].step_key, 2, "queued"),
     ]
     assert [artifact.status for artifact in artifacts] == ["superseded", "superseded"]
+
+
+@pytest.mark.asyncio
+async def test_worker_stage_transitions_are_epoch_checked_and_completion_is_idempotent(pipeline_db):
+    from agent_execution_service import ensure_agent_execution
+    from models import ContentJobStep, ExecutionArtifact
+    from pipeline_service import (
+        PipelineInvalidState,
+        complete_pipeline_stage,
+        create_pipeline_job,
+        start_pipeline_stage,
+    )
+
+    job = await create_pipeline_job(pipeline_db, _pipeline_request(
+        key="worker-stage",
+        confirmation="automatic",
+        count=2,
+    ))
+    steps = list((await pipeline_db.execute(
+        select(ContentJobStep)
+        .where(ContentJobStep.job_id == job.id, ContentJobStep.step_key != "pipeline_plan")
+        .order_by(ContentJobStep.id)
+    )).scalars().all())
+    first = steps[0]
+
+    with pytest.raises(PipelineInvalidState, match="epoch"):
+        await start_pipeline_stage(
+            pipeline_db,
+            job_id=job.id,
+            step_id=first.id,
+            attempt=first.attempt,
+            run_epoch=9,
+        )
+
+    started = await start_pipeline_stage(
+        pipeline_db,
+        job_id=job.id,
+        step_id=first.id,
+        attempt=first.attempt,
+        run_epoch=job.run_epoch,
+    )
+    repeated_start = await start_pipeline_stage(
+        pipeline_db,
+        job_id=job.id,
+        step_id=first.id,
+        attempt=first.attempt,
+        run_epoch=job.run_epoch,
+    )
+    assert started.id == repeated_start.id == first.id
+    assert started.status == repeated_start.status == "running"
+
+    execution = await ensure_agent_execution(
+        pipeline_db,
+        job_id=job.id,
+        step_id=first.id,
+        attempt=first.attempt,
+        objective="Write an article",
+        skill_mode="manual",
+        skill_name="source-research",
+    )
+    completed = await complete_pipeline_stage(
+        pipeline_db,
+        job_id=job.id,
+        step_id=first.id,
+        attempt=first.attempt,
+        run_epoch=job.run_epoch,
+        execution_id=execution.id,
+        primary={
+            "kind": "research_bundle",
+            "title": "Research bundle",
+            "text_content": "Source findings",
+            "structured_content": {"sources": ["https://example.com"]},
+        },
+        auxiliary=[{
+            "kind": "skill_run_audit",
+            "title": "Validation",
+            "structured_content": {"passed": True, "loadedReferences": []},
+        }],
+        completion_evidence={"kind": "agent_run", "finalText": "Source findings"},
+    )
+    assert completed.status == "queued"
+    artifacts = list((await pipeline_db.execute(
+        select(ExecutionArtifact)
+        .where(ExecutionArtifact.job_id == job.id, ExecutionArtifact.step_id == first.id)
+        .order_by(ExecutionArtifact.id)
+    )).scalars().all())
+    assert len(artifacts) == 2
+    assert first.output_data["primary_artifact_id"] == next(
+        artifact.id for artifact in artifacts if artifact.role == "primary"
+    )
+
+    repeated = await complete_pipeline_stage(
+        pipeline_db,
+        job_id=job.id,
+        step_id=first.id,
+        attempt=first.attempt,
+        run_epoch=job.run_epoch,
+        execution_id=execution.id,
+        primary={
+            "kind": "research_bundle",
+            "title": "Different duplicate",
+            "text_content": "must not be appended",
+        },
+        auxiliary=[],
+        completion_evidence={"kind": "agent_run"},
+    )
+    assert repeated.id == completed.id
+    assert await pipeline_db.scalar(
+        select(func.count(ExecutionArtifact.id)).where(
+            ExecutionArtifact.job_id == job.id,
+            ExecutionArtifact.step_id == first.id,
+        )
+    ) == 2
+
+
+@pytest.mark.asyncio
+async def test_worker_stage_rejects_credential_artifacts(pipeline_db):
+    from agent_execution_service import ensure_agent_execution
+    from models import ContentJobStep, ExecutionArtifact
+    from pipeline_service import complete_pipeline_stage, create_pipeline_job, start_pipeline_stage
+
+    job = await create_pipeline_job(pipeline_db, _pipeline_request(
+        key="worker-secret",
+        confirmation="automatic",
+        count=1,
+    ))
+    step = (await pipeline_db.execute(
+        select(ContentJobStep).where(
+            ContentJobStep.job_id == job.id,
+            ContentJobStep.step_key != "pipeline_plan",
+        )
+    )).scalar_one()
+    await start_pipeline_stage(
+        pipeline_db,
+        job_id=job.id,
+        step_id=step.id,
+        attempt=step.attempt,
+        run_epoch=job.run_epoch,
+    )
+    execution = await ensure_agent_execution(
+        pipeline_db,
+        job_id=job.id,
+        step_id=step.id,
+        attempt=step.attempt,
+        objective="Write an article",
+        skill_mode="manual",
+        skill_name="source-research",
+    )
+
+    with pytest.raises(ValueError, match="credential|secret"):
+        await complete_pipeline_stage(
+            pipeline_db,
+            job_id=job.id,
+            step_id=step.id,
+            attempt=step.attempt,
+            run_epoch=job.run_epoch,
+            execution_id=execution.id,
+            primary={
+                "kind": "research_bundle",
+                "title": "Unsafe",
+                "structured_content": {"api_key": "do-not-persist"},
+            },
+            auxiliary=[],
+            completion_evidence={},
+        )
+    assert await pipeline_db.scalar(
+        select(func.count(ExecutionArtifact.id)).where(ExecutionArtifact.job_id == job.id)
+    ) == 0
