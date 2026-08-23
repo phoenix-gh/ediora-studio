@@ -272,4 +272,17 @@ describe('Skill Pipeline production worker', () => {
     job.pipeline!.stages[0].status = 'succeeded'
     expect(currentPipelineStage(job)?.key).toBe('skill:02:writing-plan')
   })
+
+  it('does not invoke a terminal or awaiting-confirmation Job', async () => {
+    for (const status of ['succeeded', 'cancelled', 'awaiting_confirmation']) {
+      const job = pipelineJob()
+      job.status = status
+      const { deps } = dependencies(job)
+
+      await runSkillPipelineJob(job.id, deps)
+
+      expect(deps.startStage).not.toHaveBeenCalled()
+      expect(deps.ensureExecution).not.toHaveBeenCalled()
+    }
+  })
 })

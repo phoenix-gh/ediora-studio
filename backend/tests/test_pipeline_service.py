@@ -762,3 +762,56 @@ async def test_worker_stage_recovers_succeeded_execution_without_duplicate_artif
         )
     ) == 1
     assert step.output_data["primary_artifact_id"] == artifact.id
+
+
+@pytest.mark.asyncio
+async def test_worker_stage_failure_is_durable_and_idempotent(pipeline_db):
+    from pipeline_service import (
+        create_pipeline_job,
+        fail_pipeline_stage,
+        start_pipeline_stage,
+    )
+    from models import ContentJobStep
+
+    job = await create_pipeline_job(pipeline_db, _pipeline_request(
+        key="worker-failure",
+        confirmation="automatic",
+        count=1,
+    ))
+    step = (await pipeline_db.execute(
+        select(ContentJobStep).where(
+            ContentJobStep.job_id == job.id,
+            ContentJobStep.step_key != "pipeline_plan",
+        )
+    )).scalar_one()
+    await start_pipeline_stage(
+        pipeline_db,
+        job_id=job.id,
+        step_id=step.id,
+        attempt=step.attempt,
+        run_epoch=job.run_epoch,
+    )
+
+    failed = await fail_pipeline_stage(
+        pipeline_db,
+        job_id=job.id,
+        step_id=step.id,
+        attempt=step.attempt,
+        run_epoch=job.run_epoch,
+        error="validation failed",
+        retryable=False,
+    )
+    repeated = await fail_pipeline_stage(
+        pipeline_db,
+        job_id=job.id,
+        step_id=step.id,
+        attempt=step.attempt,
+        run_epoch=job.run_epoch,
+        error="different error",
+        retryable=True,
+    )
+
+    assert failed.status == repeated.status == "failed"
+    assert step.status == "failed"
+    assert step.error == "validation failed"
+    assert step.retryable is False
