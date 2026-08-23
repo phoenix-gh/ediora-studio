@@ -1,7 +1,28 @@
 from __future__ import annotations
 
+import sys
+
 import pytest
 from pydantic import ValidationError
+from sqlalchemy import func, select
+
+
+@pytest.fixture
+async def pipeline_db(postgres_database_url):
+    for module in list(sys.modules):
+        if module in {"database", "models", "pipeline_contracts", "pipeline_service"}:
+            sys.modules.pop(module, None)
+    from database import Base
+    import models  # noqa: F401
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    engine = create_async_engine(postgres_database_url)
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    async with sessions() as session:
+        yield session
+    await engine.dispose()
 
 
 def _invocation(
@@ -178,3 +199,89 @@ def test_macro_plan_is_deterministic_and_preserves_duplicate_order():
             },
         ],
     }
+
+
+@pytest.mark.asyncio
+async def test_create_pipeline_job_persists_ordered_frozen_stage_snapshots(pipeline_db):
+    from pipeline_contracts import PipelineCreateInput
+    from pipeline_service import create_pipeline_job, pipeline_job_payload
+    from models import ContentJobEvent, ContentJobStep
+
+    request = PipelineCreateInput(
+        objective="Write an article",
+        title="Local-first AI",
+        confirmation="interactive",
+        idempotency_key="chat:1:message-1",
+        invocations=[
+            _model(_invocation("one", "source-research")),
+            _model(_invocation(
+                "two",
+                "writing-plan",
+                parameter_kind="writing_plan",
+                parameter_id="7",
+                parameter_display_name="深度技术文章",
+                parameter_snapshot={"plan_id": 7, "title": "深度技术文章"},
+            )),
+            _model(_invocation("three", "humanize-writing")),
+        ],
+    )
+
+    job = await create_pipeline_job(pipeline_db, request)
+    stages = list((await pipeline_db.execute(
+        select(ContentJobStep)
+        .where(ContentJobStep.job_id == job.id)
+        .order_by(ContentJobStep.id)
+    )).scalars().all())
+
+    assert job.flow == "skill_pipeline"
+    assert job.status == "awaiting_confirmation"
+    assert (job.plan_version, job.run_epoch) == (1, 1)
+    assert job.input_data["objective"] == "Write an article"
+    assert [stage.step_key for stage in stages] == [
+        "pipeline_plan",
+        "skill:01:source-research",
+        "skill:02:writing-plan",
+        "skill:03:humanize-writing",
+    ]
+    assert stages[0].status == "succeeded"
+    assert [stage.status for stage in stages[1:]] == ["queued", "queued", "queued"]
+    assert stages[1].input_data["previous_primary_artifact_id"] is None
+    assert stages[2].input_data["parameter_snapshot"]["plan_id"] == 7
+    assert stages[3].input_data["invocation"]["skill_name"] == "humanize-writing"
+    assert stages[0].output_data["stages"][0]["step_key"] == "skill:01:source-research"
+
+    payload = await pipeline_job_payload(pipeline_db, job.id)
+    assert payload["pipeline"]["plan"]["stages"][1]["skill_name"] == "writing-plan"
+    assert payload["pipeline"]["stages"][0]["input"]["invocation"]["skill_name"] == "source-research"
+    assert "instructions" not in payload["pipeline"]["stages"][0]["input"]["invocation"]
+    assert "api_key" not in repr(payload)
+
+    event_count = await pipeline_db.scalar(
+        select(func.count(ContentJobEvent.id)).where(ContentJobEvent.job_id == job.id)
+    )
+    assert event_count == 2
+
+
+@pytest.mark.asyncio
+async def test_create_pipeline_job_idempotency_does_not_duplicate_rows(pipeline_db):
+    from pipeline_contracts import PipelineCreateInput
+    from pipeline_service import create_pipeline_job
+    from models import ContentJobEvent, ContentJobStep
+
+    request = PipelineCreateInput(
+        objective="Write twice",
+        title="Idempotent",
+        idempotency_key="job:duplicate",
+        invocations=[_model(_invocation("one", "source-research"))],
+    )
+
+    first = await create_pipeline_job(pipeline_db, request)
+    second = await create_pipeline_job(pipeline_db, request)
+
+    assert second.id == first.id
+    assert await pipeline_db.scalar(
+        select(func.count(ContentJobStep.id)).where(ContentJobStep.job_id == first.id)
+    ) == 2
+    assert await pipeline_db.scalar(
+        select(func.count(ContentJobEvent.id)).where(ContentJobEvent.job_id == first.id)
+    ) == 2
