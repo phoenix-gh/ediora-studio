@@ -356,6 +356,50 @@ async def test_confirm_is_versioned_and_idempotent(pipeline_db):
 
 
 @pytest.mark.asyncio
+async def test_cancel_is_idempotent_and_request_ids_cannot_cross_commands(pipeline_db):
+    from pipeline_service import (
+        PipelineCommandConflict,
+        cancel_pipeline,
+        confirm_pipeline,
+        create_pipeline_job,
+    )
+
+    cancelled = await create_pipeline_job(
+        pipeline_db,
+        _pipeline_request(key="cancel", count=1),
+    )
+    cancelled = await cancel_pipeline(
+        pipeline_db,
+        job_id=cancelled.id,
+        request_id="cancel-1",
+    )
+    repeated = await cancel_pipeline(
+        pipeline_db,
+        job_id=cancelled.id,
+        request_id="cancel-1",
+    )
+    assert cancelled.status == "cancelled"
+    assert repeated.id == cancelled.id
+
+    cross_command = await create_pipeline_job(
+        pipeline_db,
+        _pipeline_request(key="cross-command"),
+    )
+    await confirm_pipeline(
+        pipeline_db,
+        job_id=cross_command.id,
+        plan_version=1,
+        request_id="same-request-id",
+    )
+    with pytest.raises(PipelineCommandConflict, match="belongs to command confirm"):
+        await cancel_pipeline(
+            pipeline_db,
+            job_id=cross_command.id,
+            request_id="same-request-id",
+        )
+
+
+@pytest.mark.asyncio
 async def test_revise_changes_only_stage_instructions_and_increments_plan_version(pipeline_db):
     from pipeline_service import create_pipeline_job, revise_pipeline_plan
     from models import ContentJobStep
