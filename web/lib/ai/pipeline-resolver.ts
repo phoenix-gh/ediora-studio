@@ -252,6 +252,7 @@ function allowedToolsForBinding(
 async function skillRuntimeSnapshot(
   skill: RegisteredSkill,
   binding: ReturnType<typeof resolveSkillBinding>,
+  mode: 'job' | 'chat',
 ) {
   const [references, preload] = await Promise.all([
     listSkillReferences(skill.name),
@@ -259,7 +260,7 @@ async function skillRuntimeSnapshot(
   ])
   const allowedToolNames = allowedToolsForBinding(skill, binding)
   return buildAgentCapabilitySnapshot({
-    mode: 'job',
+    mode,
     skill: {
       skill,
       activation: 'manual',
@@ -267,12 +268,15 @@ async function skillRuntimeSnapshot(
       loadedReferences: preload.references,
     },
     tools: staticToolSet(allowedToolNames),
-    approvalPolicy: 'automatic',
+    approvalPolicy: mode === 'job' ? 'automatic' : 'interactive',
     allowedToolNames,
   }) as unknown as Record<string, unknown>
 }
 
-async function resolveOne(invocation: SubmittedSkillInvocation): Promise<ResolvedSkillInvocationPayload> {
+async function resolveOne(
+  invocation: SubmittedSkillInvocation,
+  mode: 'job' | 'chat',
+): Promise<ResolvedSkillInvocationPayload> {
   const skill = await getEnabledSkill(invocation.skillName)
   if (!skill) throw new PipelineResolutionError(404, `Skill 不可用：${invocation.skillName}`)
 
@@ -293,7 +297,7 @@ async function resolveOne(invocation: SubmittedSkillInvocation): Promise<Resolve
   }
 
   const [capabilitySnapshot, parameter] = await Promise.all([
-    skillRuntimeSnapshot(skill, binding),
+    skillRuntimeSnapshot(skill, binding, mode),
     binding.parameter && invocation.parameterId
       ? binding.parameter.kind === 'writing_plan'
         ? loadWritingPlan(invocation.parameterId)
@@ -344,6 +348,7 @@ async function resolveOne(invocation: SubmittedSkillInvocation): Promise<Resolve
 
 export async function resolvePipelineInvocations(
   invocations: SubmittedSkillInvocation[],
+  { mode = 'job' }: { mode?: 'job' | 'chat' } = {},
 ): Promise<ResolvedSkillInvocationPayload[]> {
   if (!Array.isArray(invocations) || invocations.length === 0 || invocations.length > 24) {
     throw new PipelineResolutionError(400, '至少需要选择一个 Skill，最多选择 24 个')
@@ -355,5 +360,5 @@ export async function resolvePipelineInvocations(
     }
     seen.add(invocation.invocationId)
   }
-  return Promise.all(invocations.map(resolveOne))
+  return Promise.all(invocations.map(invocation => resolveOne(invocation, mode)))
 }

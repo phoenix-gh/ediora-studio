@@ -13,6 +13,7 @@ const chatApi = vi.hoisted(() => ({
   listChatDrafts: vi.fn(),
   listChatSessions: vi.fn(),
   listChatSkills: vi.fn(),
+  streamChatReply: vi.fn(),
 }))
 const agentLogApi = vi.hoisted(() => ({
   listAgentTrajectory: vi.fn(),
@@ -40,7 +41,7 @@ vi.mock('@/lib/api/chat', () => ({
   listChatSessions: chatApi.listChatSessions,
   listChatSkills: chatApi.listChatSkills,
   renameChatSession: vi.fn(),
-  streamChatReply: vi.fn(),
+  streamChatReply: chatApi.streamChatReply,
 }))
 vi.mock('@/lib/api/jobs', () => ({
   cancelPipeline: jobsApi.cancelPipeline,
@@ -75,6 +76,7 @@ describe('ChatClient', () => {
       messages: [],
     })
     chatApi.listChatSkills.mockResolvedValue([])
+    chatApi.streamChatReply.mockResolvedValue(undefined)
     chatApi.listChatDrafts.mockResolvedValue([])
     jobsApi.getJobEvents.mockResolvedValue({ events: [], next_after: 0 })
     agentLogApi.listAgentTrajectory.mockResolvedValue({
@@ -172,18 +174,13 @@ describe('ChatClient', () => {
     }
   })
 
-  it('opens the @Skill picker and submits structured pipeline invocations', async () => {
+  it('opens the @Skill picker and streams one structured invocation through Chat', async () => {
     chatApi.listChatSkills.mockResolvedValue([{
       name: 'article-drafting',
       displayName: '文章写作',
       description: '按资料写文章',
       version: '1.0.0',
     }])
-    chatApi.createChatPipeline.mockResolvedValue({
-      job: { id: 81 },
-      user_message_id: 101,
-      assistant_message_id: 102,
-    })
     const view = render(
       <ChatWorkspaceProvider>
         <ChatClient />
@@ -206,28 +203,31 @@ describe('ChatClient', () => {
     fireEvent.input(editor)
     fireEvent.submit(editor.closest('form')!)
 
-    await waitFor(() => expect(chatApi.createChatPipeline).toHaveBeenCalledWith(7, expect.objectContaining({
-      objective: '请用()写一篇文章',
-      invocations: [expect.objectContaining({ skillName: 'article-drafting', skillDisplayName: '文章写作' })],
+    await waitFor(() => expect(chatApi.streamChatReply).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: 7,
+      skillInvocation: expect.objectContaining({
+        skillName: 'article-drafting', skillDisplayName: '文章写作',
+      }),
       messageParts: [
         { type: 'text', text: '请用(' },
         expect.objectContaining({ type: 'skill-invocation', skillName: 'article-drafting', skillDisplayName: '文章写作' }),
         { type: 'text', text: ')写一篇文章' },
       ],
     })))
+    expect(chatApi.createChatPipeline).not.toHaveBeenCalled()
     view.unmount()
   })
 
-  it('keeps inline Skill content retryable when Pipeline creation fails', async () => {
+  it('keeps inline Skill content retryable when direct Chat streaming fails', async () => {
     chatApi.listChatSkills.mockResolvedValue([{
       name: 'article-drafting',
       displayName: '文章写作',
       description: '按资料写文章',
       version: '1.0.0',
     }])
-    chatApi.createChatPipeline
+    chatApi.streamChatReply
       .mockRejectedValueOnce(new Error('Pipeline 暂时不可用'))
-      .mockResolvedValueOnce({ job: { id: 82 }, user_message_id: 103, assistant_message_id: 104 })
+      .mockResolvedValueOnce(undefined)
     const view = render(
       <ChatWorkspaceProvider>
         <ChatClient />
@@ -251,7 +251,7 @@ describe('ChatClient', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Pipeline 暂时不可用')
     expect(screen.getByRole('button', { name: '发送消息' })).toBeEnabled()
     fireEvent.submit(editor.closest('form')!)
-    await waitFor(() => expect(chatApi.createChatPipeline).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(chatApi.streamChatReply).toHaveBeenCalledTimes(2))
     view.unmount()
   })
 

@@ -248,23 +248,71 @@ describe('ChatWorkspaceProvider', () => {
     }
   })
 
-  it('reuses the pipeline idempotency key when retrying an unchanged composer', async () => {
+  it('streams exactly one inline Skill through ordinary Chat with structured parts', async () => {
+    renderProvider()
+    const invocation = {
+      invocationId: 'invocation-1',
+      skillName: 'article-drafting',
+      skillDisplayName: '文章写作',
+      parameterKind: 'writing_plan' as const,
+      parameterId: '12',
+      parameterDisplayName: 'AI 方案',
+    }
+    const messageParts = [
+      { type: 'text' as const, text: '请用' },
+      { type: 'skill-invocation' as const, ...invocation },
+      { type: 'text' as const, text: '写一篇文章' },
+    ]
+    await act(async () => {
+      current.setPipelineInvocations([invocation])
+    })
+
+    await act(async () => {
+      expect(await current.submit('请用写一篇文章', messageParts)).toBe(true)
+    })
+
+    expect(api.createChatPipeline).not.toHaveBeenCalled()
+    expect(api.streamChatReply).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: 7,
+      skillInvocation: invocation,
+      messageParts,
+      messages: [expect.objectContaining({
+        role: 'user',
+        parts: [{ type: 'text', text: '请用' }, { type: 'text', text: '写一篇文章' }],
+      })],
+    }))
+  })
+
+  it('reuses the pipeline idempotency key when retrying an unchanged multi-Skill composer', async () => {
     api.createChatPipeline
       .mockRejectedValueOnce(new Error('response lost'))
       .mockResolvedValueOnce({ job: { id: 81 } })
     renderProvider()
     await act(async () => {
-      current.setPipelineInvocations([{
-        invocationId: 'invocation-1',
-        skillName: 'article-drafting',
-        skillDisplayName: '文章写作',
-      }])
+      current.setPipelineInvocations([
+        {
+          invocationId: 'invocation-1',
+          skillName: 'source-research',
+          skillDisplayName: '资料研究',
+        },
+        {
+          invocationId: 'invocation-2',
+          skillName: 'article-drafting',
+          skillDisplayName: '文章写作',
+        },
+      ])
     })
     const messageParts = [
       { type: 'text' as const, text: '请写文章' },
       {
         type: 'skill-invocation' as const,
         invocationId: 'invocation-1',
+        skillName: 'source-research',
+        skillDisplayName: '资料研究',
+      },
+      {
+        type: 'skill-invocation' as const,
+        invocationId: 'invocation-2',
         skillName: 'article-drafting',
         skillDisplayName: '文章写作',
       },

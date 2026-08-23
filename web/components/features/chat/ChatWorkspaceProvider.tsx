@@ -358,7 +358,7 @@ export function ChatWorkspaceProvider({ children }: { children: ReactNode }) {
     if (state.runningBySession[key]) return false
 
     const pipelineInvocations = state.composer.pipelineInvocations
-    if (pipelineInvocations.length > 0) {
+    if (pipelineInvocations.length >= 2) {
       const signature = JSON.stringify({ sessionId, objective: trimmed, pipelineInvocations, messageParts })
       const clientMessageId = pendingPipelineSubmissionRef.current?.signature === signature
         ? pendingPipelineSubmissionRef.current.clientMessageId
@@ -391,7 +391,10 @@ export function ChatWorkspaceProvider({ children }: { children: ReactNode }) {
     }
 
     const currentMessages = state.messagesBySession[key] ?? []
-    const userMessage = makeLocalMessage('user', [{ type: 'text', text: trimmed }])
+    const directInvocation = pipelineInvocations.length === 1
+      ? pipelineInvocations[0]
+      : undefined
+    const userMessage = makeLocalMessage('user', messageParts)
     const assistantMessage = makeLocalMessage('assistant', [])
     const requestMessages = toModelMessages([...currentMessages, userMessage])
     updateSession(sessionId, messages => [...messages, userMessage, assistantMessage])
@@ -404,6 +407,8 @@ export function ChatWorkspaceProvider({ children }: { children: ReactNode }) {
         messages: requestMessages,
         skillName: state.composer.skillName || undefined,
         draftId: state.composer.draftId ?? undefined,
+        skillInvocation: directInvocation,
+        messageParts: directInvocation ? messageParts : undefined,
         onEvent: event => updateSession(
           sessionId,
           messages => applyChatStreamEvent(messages, String(assistantMessage.id), event),
@@ -411,6 +416,12 @@ export function ChatWorkspaceProvider({ children }: { children: ReactNode }) {
       })
       await loadSession(sessionId, true)
       await refreshSessions()
+      if (directInvocation) {
+        setState(current => ({
+          ...current,
+          composer: { ...current.composer, pipelineInvocations: [] },
+        }))
+      }
       return true
     } catch (error) {
       setSessionError(sessionId, errorMessage(error, '发送消息失败'))

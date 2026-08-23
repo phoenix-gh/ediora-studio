@@ -36,8 +36,9 @@ export function toModelMessages(messages: DisplayMessage[]): UIChatMessage[] {
     .map(message => ({
       id: String(message.id),
       role: message.role,
-      parts: message.parts,
+      parts: message.parts.filter(part => part.type === 'text'),
     }))
+    .filter(message => message.parts.length > 0)
 }
 
 function updateAssistantMessage(

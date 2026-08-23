@@ -95,6 +95,22 @@ describe('pipeline resolver', () => {
     expect(api.apiGet).toHaveBeenCalledWith('/writing-plans/12', { 'X-Worker-Token': 'server-worker-token' })
   })
 
+  it('builds a direct Chat capability snapshot without trusting client labels', async () => {
+    await resolvePipelineInvocations([{
+      invocationId: 'one',
+      skillName: 'article-drafting',
+      skillDisplayName: '客户端伪造名称',
+      parameterKind: 'writing_plan',
+      parameterId: '12',
+      parameterDisplayName: '客户端伪造方案',
+    }], { mode: 'chat' })
+
+    expect(capabilities.buildAgentCapabilitySnapshot).toHaveBeenCalledWith(expect.objectContaining({
+      mode: 'chat',
+      approvalPolicy: 'interactive',
+    }))
+  })
+
   it('fails atomically when a required parameter is missing', async () => {
     await expect(resolvePipelineInvocations([{
       invocationId: 'one',
