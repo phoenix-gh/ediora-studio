@@ -1,6 +1,7 @@
 import { apiGet, type ApiRequestError, workerHeaders } from './job-client'
 import { buildAgentCapabilitySnapshot } from './agent-capabilities'
 import { resolveSkillBinding } from '../skills/bindings'
+import { z } from 'zod'
 import {
   getEnabledSkill,
   listSkillReferences,
@@ -234,7 +235,7 @@ function publishAccountSnapshot(account: PublishAccountRecord): Record<string, u
 function staticToolSet(names: readonly string[]) {
   return Object.fromEntries(names.map(name => [name, {
     description: '',
-    inputSchema: {},
+    inputSchema: z.object({}).strict(),
   }]))
 }
 
@@ -326,7 +327,7 @@ async function resolveOne(invocation: SubmittedSkillInvocation): Promise<Resolve
       digest: skill.digest,
       source: skill.source,
       instructions: skill.instructions,
-      requestedAllowedTools: [],
+      requestedAllowedTools: [...skill.requestedAllowedTools],
     },
     binding_snapshot: {
       skillName: skill.name,

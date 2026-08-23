@@ -31,6 +31,7 @@ import {
 } from '../lib/ai/job-client'
 import { runContentResponseAnalysisJob } from '../lib/ai/content-response-job'
 import { runContentResponseOutputJob } from '../lib/ai/content-response-output-job'
+import { runSkillPipelineJob } from '../lib/ai/skill-pipeline-job'
 import { runTopicSourceJob } from '../lib/ai/topic-source-job'
 import { runTextVideoSplitJob } from '../lib/ai/text-video-split-job'
 import { runTextVideoMasterJob } from '../lib/ai/text-video-master-job'
@@ -136,6 +137,7 @@ export function resolveContentJobRunner(
   flow: string,
   dependencies: ContentJobRunnerDependencies = {},
 ): ContentJobRunner {
+  if (flow === 'skill_pipeline') return runSkillPipelineJob
   if (flow === 'daily_creation') return runDailyCreationAgentJob
   if (flow === 'digital_human_setup') return runDigitalHumanSetupJob
   if (flow === 'digital_human_render') return runDigitalHumanRenderJob
