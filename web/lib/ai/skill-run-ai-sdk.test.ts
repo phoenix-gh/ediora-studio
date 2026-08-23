@@ -77,8 +77,10 @@ describe('generic SkillRun AI SDK adapter', () => {
 
   it('runs plan, progressive load, execution, and validation without forcing tool choice', async () => {
     const calls: string[] = []
+    let executionPrompt = ''
     const execute = vi.fn(async (input: Record<string, unknown>) => {
       calls.push('execute')
+      executionPrompt = String(input.prompt)
       expect(input).not.toHaveProperty('toolChoice')
       return {
         text: 'grounded draft',
@@ -102,6 +104,8 @@ describe('generic SkillRun AI SDK adapter', () => {
 
     expect(calls).toEqual(['plan', 'references', 'execute', 'validate'])
     expect(result).toMatchObject({ kind: 'completed', completed: { delivery: 'ready', text: 'grounded draft' } })
+    expect(executionPrompt).toContain('deliver: 交付结果')
+    expect(executionPrompt).toContain('required tools: search_assets')
   })
 
   it('performs one revision and a second validation', async () => {
@@ -124,6 +128,38 @@ describe('generic SkillRun AI SDK adapter', () => {
 
     expect(result).toMatchObject({ kind: 'completed', completed: { text: 'revised draft', revisionCount: 1 } })
     expect(validate).toHaveBeenCalledTimes(2)
+  })
+
+  it('retries execution once when required tool evidence is missing', async () => {
+    const prompts: string[] = []
+    let attempts = 0
+    const execute = vi.fn(async (input: Record<string, unknown>) => {
+      prompts.push(String(input.prompt))
+      attempts += 1
+      if (attempts === 1) return { text: '', parts: [] }
+      return {
+        text: 'grounded after retry',
+        parts: [{ type: 'dynamic-tool', toolName: 'search_assets', state: 'output-available', toolCallId: 'retry-call', output: {} }],
+      }
+    })
+
+    const result = await executeSkillRunWithAiSdk({
+      skill: alpha,
+      activation: 'automatic',
+      userRequest: '完成任务',
+      selectedContext: '',
+      references,
+      tools: [{ name: 'search_assets', description: 'Search assets' }],
+      plan: async () => plan,
+      readReferences: async paths => paths.map(path => ({ path, content: 'rules', bytes: 5 })),
+      execute,
+      validate: async () => ({ passed: true, violations: [] }),
+      revise: vi.fn(),
+    })
+
+    expect(execute).toHaveBeenCalledTimes(2)
+    expect(prompts[1]).toContain('Missing required plan steps')
+    expect(result).toMatchObject({ kind: 'completed', completed: { delivery: 'ready', text: 'grounded after retry' } })
   })
 
   it('returns a pending approval before validation and revision', async () => {

@@ -22,8 +22,11 @@ function cloneRun(run: SkillRun): SkillRun {
   }
 }
 
-function successfulToolEvidence(run: SkillRun, toolName: string) {
-  return run.toolEvidence.find(item => item.toolName === toolName && item.state === 'succeeded')
+function successfulToolEvidence(run: SkillRun, toolName: string, stepId: string) {
+  const hasMultipleSteps = run.steps.filter(step => step.requiredTools.includes(toolName)).length > 1
+  return run.toolEvidence.find(item => item.toolName === toolName
+    && item.state === 'succeeded'
+    && (item.stepId === stepId || (!item.stepId && !hasMultipleSteps)))
 }
 
 function refreshStep(run: SkillRun, step: SkillRunStep): SkillRunStep {
@@ -31,7 +34,7 @@ function refreshStep(run: SkillRun, step: SkillRunStep): SkillRunStep {
     .filter(path => run.loadedReferences.includes(path))
     .map(path => `reference:${path}`)
   const toolEvidence = step.requiredTools.flatMap(toolName => {
-    const evidence = successfulToolEvidence(run, toolName)
+    const evidence = successfulToolEvidence(run, toolName, step.id)
     return evidence ? [`tool:${toolName}:${evidence.toolCallId}`] : []
   })
   const hasDependencies = step.requiredReferences.length > 0 || step.requiredTools.length > 0
@@ -75,10 +78,30 @@ function toolPartState(state: unknown): SkillToolEvidence['state'] | undefined {
   return undefined
 }
 
+function stepForTool(
+  run: SkillRun,
+  toolName: string,
+  requestedStepId: string | undefined,
+  completedStepIds: Set<string>,
+) {
+  if (requestedStepId) {
+    const requested = run.steps.find(step => step.id === requestedStepId)
+    if (requested?.requiredTools.includes(toolName)) return requested
+  }
+  return run.steps.find(step => (
+    step.requiredTools.includes(toolName)
+    && !completedStepIds.has(step.id)
+    && !successfulToolEvidence(run, toolName, step.id)
+  ))
+}
+
 export function applyToolEvidence(run: SkillRun, parts: unknown[]) {
   const updated = cloneRun(run)
   const requiredTools = new Set(updated.requiredTools)
-  const evidence = new Map(updated.toolEvidence.map(item => [`${item.toolName}:${item.toolCallId}`, item]))
+  const evidence = new Map(updated.toolEvidence.map(item => [`${item.stepId}:${item.toolName}:${item.toolCallId}`, item]))
+  const completedStepIds = new Set(updated.steps
+    .filter(step => step.status === 'completed')
+    .map(step => step.id))
 
   for (const part of parts) {
     if (!part || typeof part !== 'object') continue
@@ -86,8 +109,16 @@ export function applyToolEvidence(run: SkillRun, parts: unknown[]) {
     const toolName = toolPartName(record)
     const state = toolPartState(record.state)
     if (!toolName || !requiredTools.has(toolName) || !state || typeof record.toolCallId !== 'string') continue
-    const item = { toolName, toolCallId: record.toolCallId, state }
-    evidence.set(`${toolName}:${record.toolCallId}`, item)
+    const step = stepForTool(
+      updated,
+      toolName,
+      typeof record.stepId === 'string' ? record.stepId : undefined,
+      completedStepIds,
+    )
+    if (!step) continue
+    const item = { stepId: step.id, toolName, toolCallId: record.toolCallId, state }
+    evidence.set(`${step.id}:${toolName}:${record.toolCallId}`, item)
+    if (state === 'succeeded') completedStepIds.add(step.id)
   }
 
   updated.toolEvidence = [...evidence.values()]

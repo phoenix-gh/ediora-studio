@@ -3,7 +3,7 @@ import { createUIMessageStream, createUIMessageStreamResponse } from 'ai'
 
 import type { RegisteredSkill, SkillReference, SkillReferenceContent } from '../skills/registry'
 import { createSkillRun, sanitizeSkillRunPlan, type SkillRunActivation, type SkillRunValidation } from './skill-run'
-import { applyReferenceEvidence, applyToolEvidence } from './skill-run-evidence'
+import { applyReferenceEvidence, applyToolEvidence, incompleteRequiredSteps } from './skill-run-evidence'
 import { completeSkillRun } from './skill-run-orchestrator'
 import { buildSkillPlanPrompt, loadPlannedReferences } from './skill-run-planner'
 
@@ -128,16 +128,34 @@ function executionPrompt({
   userRequest,
   selectedContext,
   skill,
+  steps,
   requirements,
   verification,
 }: {
   userRequest: string
   selectedContext: string
   skill: RegisteredSkill
+  steps: ReturnType<typeof createSkillRun>['steps']
   requirements: string[]
   verification: string[]
 }) {
-  return `Execute the validated Skill plan. Use collected tool and reference evidence; do not claim a tool, action, or reference succeeded without evidence.\n\nUser request:\n${userRequest}\n\nSelected context:\n${selectedContext || '(none)'}\n\nSkill instructions:\n${skill.instructions}\n\nOutput requirements:\n${requirements.map(item => `- ${item}`).join('\n')}\n\nVerification criteria:\n${verification.map(item => `- ${item}`).join('\n')}`
+  const plan = steps.map(step => [
+    `- ${step.id}: ${step.instruction}`,
+    `  required references: ${step.requiredReferences.join(', ') || 'none'}`,
+    `  required tools: ${step.requiredTools.join(', ') || 'none'}`,
+  ].join('\n')).join('\n')
+  return `Execute the validated Skill plan. Use collected tool and reference evidence; do not claim a tool, action, or reference succeeded without evidence.\n\nUser request:\n${userRequest}\n\nSelected context:\n${selectedContext || '(none)'}\n\nSkill instructions:\n${skill.instructions}\n\nValidated execution plan (execute steps in order):\n${plan}\n\nExecution rules:\n- For every required tool, call the exact named tool and wait for its result before continuing.\n- Do not produce the final deliverable while any dependency-backed step is incomplete.\n- Use the returned tool evidence when completing later steps.\n\nOutput requirements:\n${requirements.map(item => `- ${item}`).join('\n')}\n\nVerification criteria:\n${verification.map(item => `- ${item}`).join('\n')}`
+}
+
+function retryExecutionPrompt(
+  basePrompt: string,
+  steps: ReturnType<typeof createSkillRun>['steps'],
+) {
+  const missing = steps.map(step => [
+    `- ${step.id}: ${step.instruction}`,
+    `  required tools: ${step.requiredTools.join(', ') || 'none'}`,
+  ].join('\n')).join('\n')
+  return `${basePrompt}\n\nMissing required plan steps (retry now):\n${missing}\n\nThe previous execution stopped before producing evidence for these steps. Call the required tools now, wait for their results, and only then return the final deliverable.`
 }
 
 export async function executeSkillRunWithAiSdk(options: ExecuteSkillRunOptions) {
@@ -158,14 +176,16 @@ export async function executeSkillRunWithAiSdk(options: ExecuteSkillRunOptions) 
   const loadedReferences = await loadPlannedReferences(plan, options.readReferences)
   run = applyReferenceEvidence(run, loadedReferences.map(reference => reference.path))
 
+  const baseExecutionPrompt = executionPrompt({
+    userRequest: options.userRequest,
+    selectedContext: options.selectedContext,
+    skill: options.skill,
+    steps: plan.steps,
+    requirements: plan.outputRequirements,
+    verification: plan.verificationCriteria,
+  })
   const execution = await options.execute({
-    prompt: executionPrompt({
-      userRequest: options.userRequest,
-      selectedContext: options.selectedContext,
-      skill: options.skill,
-      requirements: plan.outputRequirements,
-      verification: plan.verificationCriteria,
-    }),
+    prompt: baseExecutionPrompt,
     loadedReferences,
     requiredTools: run.requiredTools,
   })
@@ -174,20 +194,43 @@ export async function executeSkillRunWithAiSdk(options: ExecuteSkillRunOptions) 
   }
   run = applyToolEvidence(run, execution.parts)
 
+  let executionParts = [...execution.parts]
+  let executionToolResults = [...(execution.toolResults ?? [])]
+  let executionText = execution.text
+  const missingSteps = incompleteRequiredSteps(run).filter(step => (
+    step.requiredReferences.length > 0 || step.requiredTools.length > 0
+  ))
+  if (missingSteps.length > 0) {
+    const retry = await options.execute({
+      prompt: retryExecutionPrompt(baseExecutionPrompt, missingSteps),
+      loadedReferences,
+      requiredTools: [...new Set(missingSteps.flatMap(step => step.requiredTools))],
+    })
+    executionParts = [...executionParts, ...retry.parts]
+    executionToolResults = [...executionToolResults, ...(retry.toolResults ?? [])]
+    if (retry.text.trim()) executionText = retry.text
+    if (hasPendingApproval(retry.parts)) {
+      return { kind: 'approval' as const, parts: executionParts, run }
+    }
+    run = applyToolEvidence(run, retry.parts)
+  }
+
+  const evidenceForValidation = executionToolResults.length > 0 ? executionToolResults : executionParts
+
   const completed = await completeSkillRun({
     run,
-    draft: async () => execution.text,
-    validate: async ({ run: currentRun, text, toolResults }) => options.validate({
+    draft: async () => executionText,
+    validate: async ({ run: currentRun, text, toolResults: currentToolResults }) => options.validate({
       text,
       run: currentRun,
       loadedReferences,
-      toolResults: toolResults ?? execution.toolResults ?? execution.parts,
+      toolResults: currentToolResults ?? evidenceForValidation,
     }),
     revise: async ({ run: currentRun, text, violations }) => options.revise({
       text,
       run: currentRun,
       loadedReferences,
-      toolResults: execution.toolResults ?? execution.parts,
+      toolResults: evidenceForValidation,
       violations,
     }),
   })

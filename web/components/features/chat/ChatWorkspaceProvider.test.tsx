@@ -8,6 +8,7 @@ import type {
   ChatSessionDetail,
   UIMessageStreamEvent,
 } from '@/lib/api/chat'
+import { ApiError } from '@/lib/api/client'
 import {
   ChatWorkspaceProvider,
   type ChatWorkspaceContextValue,
@@ -211,6 +212,35 @@ describe('ChatWorkspaceProvider', () => {
 
       expect(current.isActiveRunning).toBe(false)
       expect(current.messages).toEqual([expect.objectContaining({ text: '恢复完成' })])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('clears the running state when a polled session no longer exists', async () => {
+    vi.useFakeTimers()
+    try {
+      api.listChatSessions.mockResolvedValue([session7])
+      api.getChatSession
+        .mockResolvedValueOnce(detail(session7, true))
+        .mockRejectedValueOnce(new ApiError('session missing', 404, { detail: 'Not found' }))
+      renderProvider()
+
+      await act(async () => {
+        await current.refreshSessions()
+        await current.openSession(7)
+      })
+      expect(current.isActiveRunning).toBe(true)
+
+      await act(async () => {
+        vi.advanceTimersByTime(2_000)
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+
+      expect(current.isActiveRunning).toBe(false)
+      expect(current.activeSessionId).toBe(null)
+      expect(current.sessions).toEqual([])
     } finally {
       vi.useRealTimers()
     }

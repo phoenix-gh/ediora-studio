@@ -108,3 +108,61 @@ def test_list_agent_log_events_supports_cursor_and_filters(log_db):
 
     assert [event.payload_data["index"] for event in first_page] == [0, 1]
     assert [event.payload_data["index"] for event in second_page] == [2]
+
+
+def test_append_canonical_turn_end_resolves_current_turn_after_long_stream(log_db):
+    from agent_log_service import append_agent_log_event, append_agent_session_event
+    from models import ChatSession
+
+    async def exercise():
+        async with log_db() as session:
+            chat_session = ChatSession(title="长会话 turn 推断")
+            session.add(chat_session)
+            await session.commit()
+            await session.refresh(chat_session)
+
+            stream_key = f"chat:{chat_session.id}"
+            await append_agent_session_event(
+                session,
+                stream_kind="chat",
+                stream_key=stream_key,
+                session_id=chat_session.id,
+                turn_id="old-turn",
+                event_type="turn/start",
+                data={"turn": 1},
+            )
+            for index in range(501):
+                await append_agent_log_event(
+                    session,
+                    stream_kind="chat",
+                    stream_key=stream_key,
+                    session_id=chat_session.id,
+                    turn_id="old-turn",
+                    event_type="llm/response",
+                    phase="execute",
+                    payload={"turn": 1, "index": index},
+                )
+
+            await append_agent_session_event(
+                session,
+                stream_kind="chat",
+                stream_key=stream_key,
+                session_id=chat_session.id,
+                turn_id="current-turn",
+                event_type="turn/start",
+                data={"turn": 3},
+            )
+            ended = await append_agent_session_event(
+                session,
+                stream_kind="chat",
+                stream_key=stream_key,
+                session_id=chat_session.id,
+                turn_id="current-turn",
+                event_type="turn/end",
+                data={"reason": {"kind": "completed"}},
+            )
+            return ended
+
+    ended = asyncio.run(exercise())
+
+    assert ended.payload_data["turn"] == 3

@@ -26,6 +26,7 @@ import {
   type ChatSkill,
   type SubmittedSkillInvocation,
 } from '@/lib/api/chat'
+import { ApiError } from '@/lib/api/client'
 import { titleFromFirstMessage } from '@/app/chat/chat-title'
 
 import {
@@ -86,6 +87,10 @@ function initialState(): ChatWorkspaceState {
 
 function errorMessage(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback
+}
+
+function isMissingSession(error: unknown): error is ApiError {
+  return error instanceof ApiError && error.status === 404
 }
 
 function newClientMessageId() {
@@ -166,6 +171,33 @@ export function ChatWorkspaceProvider({ children }: { children: ReactNode }) {
     }))
   }, [])
 
+  const forgetSession = useCallback((sessionId: number) => {
+    loadedSessionsRef.current.delete(sessionId)
+    const key = sessionKey(sessionId)
+    setState(current => {
+      const sessions = current.sessions.filter(session => session.id !== sessionId)
+      const messagesBySession = { ...current.messagesBySession }
+      const loadingBySession = { ...current.loadingBySession }
+      const runningBySession = { ...current.runningBySession }
+      const errorsBySession = { ...current.errorsBySession }
+      delete messagesBySession[key]
+      delete loadingBySession[key]
+      delete runningBySession[key]
+      delete errorsBySession[key]
+      return {
+        ...current,
+        sessions,
+        activeSessionId: current.activeSessionId === sessionId
+          ? (sessions[0]?.id ?? null)
+          : current.activeSessionId,
+        messagesBySession,
+        loadingBySession,
+        runningBySession,
+        errorsBySession,
+      }
+    })
+  }, [])
+
   const loadResources = useCallback(() => {
     if (resourcesRequestRef.current) return resourcesRequestRef.current
     const request = Promise.all([listChatSkills(), listChatDrafts()])
@@ -217,6 +249,10 @@ export function ChatWorkspaceProvider({ children }: { children: ReactNode }) {
         setSessionDetail(session)
       })
       .catch(error => {
+        if (isMissingSession(error)) {
+          forgetSession(sessionId)
+          throw error
+        }
         setSessionError(sessionId, errorMessage(error, '加载会话失败'))
         throw error
       })
@@ -225,7 +261,7 @@ export function ChatWorkspaceProvider({ children }: { children: ReactNode }) {
       })
     sessionRequestsRef.current.set(sessionId, request)
     return request
-  }, [setSessionDetail, setSessionError])
+  }, [forgetSession, setSessionDetail, setSessionError])
 
   const openSession = useCallback(async (sessionId: number) => {
     setState(current => ({
@@ -430,15 +466,23 @@ export function ChatWorkspaceProvider({ children }: { children: ReactNode }) {
         try {
           const session = await getChatSession(sessionId)
           setSessionDetail(session)
-        } catch {
-          // Keep the running indicator until the next recovery attempt succeeds.
+        } catch (error) {
+          if (isMissingSession(error)) {
+            const nextSession = state.activeSessionId === sessionId
+              ? state.sessions.find(session => session.id !== sessionId)
+              : undefined
+            forgetSession(sessionId)
+            if (nextSession) void loadSession(nextSession.id, true)
+            return
+          }
+          // Keep transient failures retryable without hiding the running state.
         }
       }))
     }
 
     const timer = window.setInterval(() => void refreshRunningSessions(), 2_000)
     return () => window.clearInterval(timer)
-  }, [setSessionDetail, state.runningBySession])
+  }, [forgetSession, loadSession, setSessionDetail, state.activeSessionId, state.runningBySession, state.sessions])
 
   const activeKey = state.activeSessionId === null ? null : sessionKey(state.activeSessionId)
   const context = useMemo<ChatWorkspaceContextValue>(() => ({
