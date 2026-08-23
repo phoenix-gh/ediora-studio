@@ -12,7 +12,10 @@ from agent_trajectory import (
 )
 from agent_log_service import list_all_agent_log_events
 from database import get_db
-from models import AgentLogEvent, ChatMessage, ChatSession, WritingPlan, now_utc
+from models import AgentLogEvent, ChatMessage, ChatSession, ContentJobEvent, WritingPlan, now_utc
+from pipeline_contracts import PipelineContractError, PipelineCreateInput, ResolvedSkillInvocation
+from pipeline_service import create_pipeline_job, pipeline_job_payload
+from worker_auth import require_worker_token
 
 
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -177,6 +180,15 @@ class ChatMessagePartsUpdate(BaseModel):
     parts: list[dict] = Field(default_factory=list)
 
 
+class ChatPipelineCreate(BaseModel):
+    client_message_id: str = Field(min_length=1, max_length=200)
+    objective: str = Field(min_length=1, max_length=20_000)
+    title: str = Field(default="Skill Pipeline", min_length=1, max_length=500)
+    invocations: list[ResolvedSkillInvocation] = Field(min_length=1, max_length=24)
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class SourceSearchResult(BaseModel):
     source: Literal["writing_plan"]
     id: int
@@ -266,6 +278,131 @@ async def create_session(body: ChatSessionCreate, db: AsyncSession = Depends(get
     await db.commit()
     await db.refresh(session)
     return session
+
+
+async def _existing_pipeline_chat_messages(
+    db: AsyncSession,
+    session_id: int,
+    client_message_id: str,
+) -> tuple[int, int, int] | None:
+    messages = list((await db.execute(
+        select(ChatMessage)
+        .where(ChatMessage.session_id == session_id)
+        .order_by(ChatMessage.id.asc())
+    )).scalars().all())
+    for message in messages:
+        for part in message.parts or []:
+            if not isinstance(part, dict) or part.get("type") != "skill-pipeline-ref":
+                continue
+            if part.get("clientMessageId") != client_message_id:
+                continue
+            job_id = part.get("jobId")
+            user_message_id = part.get("userMessageId")
+            if isinstance(job_id, int) and isinstance(user_message_id, int):
+                return job_id, user_message_id, message.id
+    return None
+
+
+@router.post(
+    "/sessions/{session_id}/pipelines",
+    status_code=201,
+    dependencies=[Depends(require_worker_token)],
+)
+async def create_chat_pipeline(
+    session_id: int,
+    body: ChatPipelineCreate,
+    db: AsyncSession = Depends(get_db),
+):
+    session = await db.scalar(
+        select(ChatSession)
+        .where(ChatSession.id == session_id)
+        .with_for_update()
+    )
+    if session is None:
+        raise HTTPException(404, "会话不存在")
+
+    existing = await _existing_pipeline_chat_messages(
+        db,
+        session_id,
+        body.client_message_id,
+    )
+    if existing is not None:
+        job_id, user_message_id, assistant_message_id = existing
+        try:
+            job_payload = await pipeline_job_payload(db, job_id)
+        except Exception as exc:
+            raise HTTPException(409, "幂等 Chat 消息关联的 Pipeline 不可读取") from exc
+        return {
+            "job": job_payload,
+            "user_message_id": user_message_id,
+            "assistant_message_id": assistant_message_id,
+        }
+
+    try:
+        request = PipelineCreateInput(
+            objective=body.objective,
+            title=body.title,
+            confirmation="interactive",
+            idempotency_key=f"chat:{session_id}:{body.client_message_id}",
+            invocations=body.invocations,
+        )
+        job = await create_pipeline_job(db, request, commit=False)
+    except (PipelineContractError, ValueError) as exc:
+        await db.rollback()
+        raise HTTPException(422, str(exc)) from exc
+
+    user_message = ChatMessage(
+        session_id=session_id,
+        role="user",
+        text=body.objective,
+        parts=[{
+            "type": "skill-pipeline-request",
+            "clientMessageId": body.client_message_id,
+            "objective": body.objective,
+            "skills": [{
+                "invocationId": invocation.invocation_id,
+                "skillName": invocation.skill_name,
+                "displayName": invocation.skill_display_name,
+                "parameterDisplayName": invocation.parameter_display_name,
+            } for invocation in body.invocations],
+        }],
+    )
+    db.add(user_message)
+    await db.flush()
+    assistant_message = ChatMessage(
+        session_id=session_id,
+        role="assistant",
+        text="已生成 Skill Pipeline，等待确认后开始执行。",
+        parts=[{
+            "type": "skill-pipeline-ref",
+            "clientMessageId": body.client_message_id,
+            "jobId": job.id,
+            "planVersion": job.plan_version,
+            "status": job.status,
+            "userMessageId": user_message.id,
+    }],
+    )
+    db.add(assistant_message)
+    await db.flush()
+    db.add(ContentJobEvent(
+        job_id=job.id,
+        kind="chat_pipeline_created",
+        payload={
+            "session_id": session_id,
+            "client_message_id": body.client_message_id,
+            "user_message_id": user_message.id,
+            "assistant_message_id": assistant_message.id,
+        },
+    ))
+    session.updated_at = now_utc()
+    await db.commit()
+    await db.refresh(user_message)
+    await db.refresh(assistant_message)
+    return {
+        "job": await pipeline_job_payload(db, job.id),
+        "user_message_id": user_message.id,
+        "assistant_message_id": assistant_message.id,
+    }
 
 
 @router.get("/sessions/{session_id}", response_model=ChatSessionDetail, response_model_exclude_none=True)

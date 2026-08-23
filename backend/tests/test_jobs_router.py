@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 
 
 @pytest.fixture
@@ -51,6 +52,253 @@ def test_create_job_returns_queued_job(client):
     assert response.status_code == 201
     assert response.json()["status"] == "queued"
     assert response.json()["id"] > 0
+
+
+def _pipeline_invocation(name="source-research", invocation_id="one"):
+    return {
+        "invocation_id": invocation_id,
+        "skill_name": name,
+        "skill_display_name": name,
+        "skill_snapshot": {
+            "name": name,
+            "version": "1.0.0",
+            "digest": "a" * 64,
+            "source": "builtin",
+        },
+        "binding_snapshot": {
+            "primaryOutput": "article",
+            "capabilityProfile": "writing",
+            "requestedAllowedTools": ["read_context"],
+            "profileAllowedTools": ["read_context"],
+        },
+        "capability_snapshot": {
+            "schemaVersion": 1,
+            "mode": "job",
+            "skill": {"name": name},
+            "tools": [],
+            "policy": {
+                "approvalPolicy": "automatic",
+                "allowedToolNames": ["read_context"],
+            },
+        },
+    }
+
+
+def _pipeline_body(*, key="job:pipeline:1", confirmation="automatic"):
+    return {
+        "flow": "skill_pipeline",
+        "title": "Pipeline API",
+        "objective": "Write a sourced article",
+        "confirmation": confirmation,
+        "invocations": [
+            _pipeline_invocation("source-research", "one"),
+            _pipeline_invocation("humanize-writing", "two"),
+        ],
+        "idempotency_key": key,
+    }
+
+
+def test_skill_pipeline_job_requires_worker_auth_and_automatic_enqueue_is_idempotent(
+    client,
+    monkeypatch,
+):
+    import routers.jobs as jobs_router
+
+    queued: list[int] = []
+
+    async def enqueue(job_id: int):
+        queued.append(job_id)
+
+    monkeypatch.setattr(jobs_router, "enqueue_job", enqueue)
+    body = _pipeline_body()
+
+    denied = client.post("/api/jobs", json=body)
+    assert denied.status_code == 403
+
+    created = client.post(
+        "/api/jobs",
+        json=body,
+        headers={"X-Worker-Token": "test-worker-token-at-least-32-characters"},
+    )
+    assert created.status_code == 201, created.text
+    payload = created.json()
+    assert payload["flow"] == "skill_pipeline"
+    assert payload["status"] == "queued"
+    assert payload["plan_version"] == 1
+    assert [stage["key"] for stage in payload["pipeline"]["stages"]] == [
+        "skill:01:source-research",
+        "skill:02:humanize-writing",
+    ]
+    assert queued == [payload["id"]]
+
+    repeated = client.post(
+        "/api/jobs",
+        json=body,
+        headers={"X-Worker-Token": "test-worker-token-at-least-32-characters"},
+    )
+    assert repeated.status_code == 201
+    assert repeated.json()["id"] == payload["id"]
+    assert queued == [payload["id"]]
+
+
+def test_interactive_pipeline_waits_for_confirmation_and_hides_private_snapshot_fields(
+    client,
+    monkeypatch,
+):
+    import routers.jobs as jobs_router
+
+    queued: list[int] = []
+
+    async def enqueue(job_id: int):
+        queued.append(job_id)
+
+    monkeypatch.setattr(jobs_router, "enqueue_job", enqueue)
+    body = _pipeline_body(key="job:pipeline:interactive", confirmation="interactive")
+    body["invocations"][0]["skill_snapshot"]["instructions"] = "private"
+    response = client.post(
+        "/api/jobs",
+        json=body,
+        headers={"X-Worker-Token": "test-worker-token-at-least-32-characters"},
+    )
+
+    assert response.status_code == 201, response.text
+    payload = response.json()
+    assert payload["status"] == "awaiting_confirmation"
+    assert queued == []
+    assert "instructions" not in repr(payload)
+
+
+def test_pipeline_commands_are_versioned_and_events_have_an_ascending_cursor(client):
+    headers = {"X-Worker-Token": "test-worker-token-at-least-32-characters"}
+    created = client.post(
+        "/api/jobs",
+        json=_pipeline_body(key="job:pipeline:commands", confirmation="interactive"),
+        headers=headers,
+    ).json()
+
+    revised = client.post(
+        f"/api/jobs/{created['id']}/plan/revise",
+        json={
+            "plan_version": 1,
+            "request_id": "revise-api-1",
+            "stage_instructions": {
+                "skill:01:source-research": "Prefer primary sources.",
+            },
+        },
+    )
+    assert revised.status_code == 200, revised.text
+    assert revised.json()["plan_version"] == 2
+
+    stale = client.post(
+        f"/api/jobs/{created['id']}/confirm",
+        json={"plan_version": 1, "request_id": "confirm-stale"},
+    )
+    assert stale.status_code == 409
+
+    confirmed = client.post(
+        f"/api/jobs/{created['id']}/confirm",
+        json={"plan_version": 2, "request_id": "confirm-api-1"},
+    )
+    assert confirmed.status_code == 200, confirmed.text
+    assert confirmed.json()["status"] == "queued"
+
+    events = client.get(f"/api/jobs/{created['id']}/events?after=0")
+    assert events.status_code == 200
+    event_ids = [event["id"] for event in events.json()["events"]]
+    assert event_ids == sorted(event_ids)
+    assert any(event["kind"] == "pipeline_command" for event in events.json()["events"])
+
+
+def test_pipeline_stage_retry_and_rerun_routes_preserve_attempt_history(client, monkeypatch):
+    import routers.jobs as jobs_router
+
+    queued: list[int] = []
+
+    async def enqueue(job_id: int):
+        queued.append(job_id)
+
+    monkeypatch.setattr(jobs_router, "enqueue_job", enqueue)
+    headers = {"X-Worker-Token": "test-worker-token-at-least-32-characters"}
+    retry_job = client.post(
+        "/api/jobs",
+        json=_pipeline_body(key="job:pipeline:retry-route", confirmation="automatic"),
+        headers=headers,
+    ).json()
+
+    from database import SessionLocal
+    from execution_artifacts import append_execution_artifact
+    from models import ContentJob, ContentJobStep
+
+    async def seed_retry_and_rerun():
+        async with SessionLocal() as session:
+            retry_record = await session.get(ContentJob, retry_job["id"])
+            retry_steps = list((await session.execute(
+                select(ContentJobStep)
+                .where(
+                    ContentJobStep.job_id == retry_record.id,
+                    ContentJobStep.step_key != "pipeline_plan",
+                )
+                .order_by(ContentJobStep.id)
+            )).scalars().all())
+            retry_steps[0].status = "failed"
+            retry_steps[0].retryable = True
+            retry_record.status = "failed"
+            await session.commit()
+
+            return retry_steps[0].step_key
+
+    retry_key = asyncio.new_event_loop().run_until_complete(seed_retry_and_rerun())
+    retried = client.post(
+        f"/api/jobs/{retry_job['id']}/stages/{retry_key}/retry",
+        json={"request_id": "retry-route-1"},
+    )
+    assert retried.status_code == 200, retried.text
+    assert any(
+        stage["key"] == retry_key and stage["attempt"] == 2 and stage["status"] == "queued"
+        for stage in retried.json()["pipeline"]["stages"]
+    )
+
+    rerun_job = client.post(
+        "/api/jobs",
+        json=_pipeline_body(key="job:pipeline:rerun-route", confirmation="automatic"),
+        headers=headers,
+    ).json()
+
+    async def seed_rerun():
+        async with SessionLocal() as session:
+            record = await session.get(ContentJob, rerun_job["id"])
+            steps = list((await session.execute(
+                select(ContentJobStep)
+                .where(
+                    ContentJobStep.job_id == record.id,
+                    ContentJobStep.step_key != "pipeline_plan",
+                )
+                .order_by(ContentJobStep.id)
+            )).scalars().all())
+            for step in steps:
+                step.status = "succeeded"
+                await append_execution_artifact(
+                    session,
+                    job_id=record.id,
+                    step_id=step.id,
+                    attempt=step.attempt,
+                    kind="article",
+                    role="primary",
+                    title=step.step_key,
+                    text_content=f"{step.step_key} output",
+                )
+            record.status = "succeeded"
+            await session.commit()
+            return steps[0].step_key
+
+    rerun_key = asyncio.new_event_loop().run_until_complete(seed_rerun())
+    rerun = client.post(
+        f"/api/jobs/{rerun_job['id']}/stages/{rerun_key}/rerun",
+        json={"request_id": "rerun-route-1"},
+    )
+    assert rerun.status_code == 200, rerun.text
+    assert rerun.json()["status"] == "queued"
+    assert any(stage["status"] == "superseded" for stage in rerun.json()["pipeline"]["stages"])
 
 
 def test_list_jobs_returns_stable_cursor_pages(client):

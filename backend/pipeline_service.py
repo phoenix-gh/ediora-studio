@@ -40,27 +40,6 @@ class PipelineInvalidState(RuntimeError):
     pass
 
 
-_PRIVATE_KEYS = {
-    "api_key",
-    "apikey",
-    "token",
-    "secret",
-    "app_id",
-    "appid",
-    "app_secret",
-    "appsecret",
-    "access_token",
-    "accesstoken",
-    "refresh_token",
-    "refreshtoken",
-    "instructions",
-    "content",
-    "directory",
-    "requestedallowedtools",
-    "requested_allowed_tools",
-}
-
-
 def _now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -69,14 +48,18 @@ def _private_key(key: object) -> bool:
     normalized = str(key).lower().replace("-", "").replace("_", "")
     return normalized in {
         "apikey",
+        "apisecret",
         "token",
         "secret",
+        "password",
+        "authorization",
+        "cookie",
+        "sessioncookie",
         "appid",
         "appsecret",
         "accesstoken",
         "refreshtoken",
         "instructions",
-        "content",
         "directory",
         "requestedallowedtools",
     }
