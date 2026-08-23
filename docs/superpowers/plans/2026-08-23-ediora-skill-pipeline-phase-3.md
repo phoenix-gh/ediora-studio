@@ -236,3 +236,13 @@ The handoff must distinguish:
 - final Chat projection verified or explicitly blocked;
 - rendered browser evidence and any unavailable Browser/plugin fallback;
 - fail-closed runtime and missing first-party `source-research`/`writing-plan`/`humanize-writing`/`account-voice` packages, which remain Phase 4 work.
+
+## Verification record
+
+- Focused frontend suite: `8 passed`, `29 passed` with the Chat client, ordered Skill picker, pipeline card, Job hook, API clients, and both pipeline routes.
+- Focused backend suite: `36 passed` for `tests/test_pipeline_runner.py tests/test_job_reconciliation.py` using `/home/violet/miniconda3/envs/wems/bin/python`.
+- Changed-file ESLint: passed for every changed `web` TypeScript/TSX file.
+- `web/pnpm exec tsc --noEmit`: the repository baseline still reports errors in `e2e/extension-auto-schedule.spec.ts`, `lib/ai/daily-creation-agent-job.test.ts`, `lib/ai/global-chat-tools.test.ts`, `lib/text-video/scene-plan.test.ts`, and `remotion/contract.test.ts`; no Phase 3 changed file was reported.
+- `web/pnpm build`: passed on Next.js 16.2.4. The existing dynamic file-tracing warning from `next.config.ts`/`lib/skills/registry.ts` remains, but did not fail the build.
+- Rendered fallback flow: Browser connector was unavailable, so Playwright 1.62 was used. With mocked BFF responses, `/chat` rendered the ordered duplicate/parameterized Skill flow, submitted the expected invocation order, displayed the awaiting-confirmation card, and had no bad responses or console errors. The current real latest session was already running, so its composer was correctly disabled; this is an environment state, not a real-model success claim. The narrow viewport also retains the existing fixed navigation shell behavior.
+- Phase 3 remains fail-closed at runtime. First-party `source-research`, `writing-plan`, `humanize-writing`, and `account-voice` runtime packages are intentionally deferred to Phase 4.
