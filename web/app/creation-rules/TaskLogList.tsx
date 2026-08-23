@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { NativeSelect } from '@/components/ui/native-select'
-import { listJobs, type ContentJob, type JobKind, type JobStatus } from '@/lib/api/jobs'
+import { listJobs, type ContentJob, type JobStatus } from '@/lib/api/jobs'
 import { JobLogDialog } from './JobLogDialog'
 
 const PAGE_SIZE = 30
@@ -12,14 +12,8 @@ const statusText: Record<string, string> = {
   queued: '排队中', running: '执行中', succeeded: '已完成', failed: '失败', cancelled: '已取消',
 }
 
-const kindText: Record<JobKind, string> = {
-  scheduled: '定时任务',
-  manual: '手动任务',
-}
-
-type FilterKind = 'all' | JobKind
 type FilterStatus = 'all' | JobStatus
-type Filters = { kind: FilterKind; status: FilterStatus }
+type Filters = { status: FilterStatus }
 type LoadMode = 'initial' | 'refresh' | 'append'
 
 function statusClass(status: string) {
@@ -48,13 +42,12 @@ function mergeJobs(existing: ContentJob[], incoming: ContentJob[]) {
 
 function TaskRow({ job, onOpen, onCancel }: { job: ContentJob; onOpen: () => void; onCancel: () => void }) {
   const latestStep = job.steps[job.steps.length - 1]
-  const kind: JobKind = job.schedule ? 'scheduled' : 'manual'
   return <article className="border-b p-4 last:border-b-0">
     <div className="flex flex-wrap items-start gap-3">
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
           <h3 className="font-medium">{job.title}</h3>
-          <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">{kindText[kind]}</span>
+          <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">固定任务</span>
           {job.schedule && <span className="rounded-full bg-ai-subtle px-2 py-0.5 text-[11px] text-ai-foreground">{job.schedule.rule_name}</span>}
         </div>
         <p className="mt-1 text-xs text-muted-foreground">
@@ -82,7 +75,7 @@ export function TaskLogList({ refreshToken, onRetry, onCancel }: {
   onRetry: (jobId: number, stepKey: string) => void
   onCancel: (jobId: number) => void
 }) {
-  const [filters, setFilters] = useState<Filters>({ kind: 'all', status: 'all' })
+  const [filters, setFilters] = useState<Filters>({ status: 'all' })
   const [jobs, setJobs] = useState<ContentJob[]>([])
   const [nextCursor, setNextCursor] = useState<string | null>(null)
   const [hasMore, setHasMore] = useState(true)
@@ -101,9 +94,11 @@ export function TaskLogList({ refreshToken, onRetry, onCancel }: {
     const requestId = ++requestIdRef.current
     if (mode === 'append') setAppendLoading(true)
     try {
-      const options: { limit: number; cursor?: string; kind?: JobKind; status?: JobStatus } = { limit: PAGE_SIZE }
+      const options: { limit: number; cursor?: string; kind: 'scheduled'; status?: JobStatus } = {
+        limit: PAGE_SIZE,
+        kind: 'scheduled',
+      }
       if (cursor) options.cursor = cursor
-      if (currentFilters.kind !== 'all') options.kind = currentFilters.kind
       if (currentFilters.status !== 'all') options.status = currentFilters.status
       const page = await listJobs(options)
       if (requestId !== requestIdRef.current) return
@@ -184,15 +179,9 @@ export function TaskLogList({ refreshToken, onRetry, onCancel }: {
     <div className="flex flex-wrap items-end justify-between gap-3">
       <div>
         <h2 className="font-semibold">任务日志</h2>
-        <p className="text-xs text-muted-foreground">统一查看定时任务、手动任务和后台 Job；滚动列表加载更多历史记录。</p>
+        <p className="text-xs text-muted-foreground">查看定时与手动执行的固定创作规则；滚动列表加载更多历史记录。</p>
       </div>
       <div className="flex flex-wrap gap-2">
-        <label className="sr-only" htmlFor="task-log-kind">任务类型</label>
-        <NativeSelect id="task-log-kind" aria-label="任务类型" className="w-auto rounded-md px-2" value={filters.kind} onChange={event => changeFilters({ ...filters, kind: event.target.value as FilterKind })}>
-          <option value="all">全部类型</option>
-          <option value="scheduled">定时任务</option>
-          <option value="manual">手动任务</option>
-        </NativeSelect>
         <label className="sr-only" htmlFor="task-log-status">任务状态</label>
         <NativeSelect id="task-log-status" aria-label="任务状态" className="w-auto rounded-md px-2" value={filters.status} onChange={event => changeFilters({ ...filters, status: event.target.value as FilterStatus })}>
           <option value="all">全部状态</option>

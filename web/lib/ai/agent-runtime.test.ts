@@ -540,6 +540,56 @@ describe('shared Agent runtime', () => {
     expect(deps.generate).toHaveBeenCalledTimes(2)
   })
 
+  it('recovers once when a provider reports an empty stop before any tool call', async () => {
+    const deps = dependencies()
+    deps.generate = vi.fn()
+      .mockResolvedValueOnce({
+        text: '', finishReason: 'stop', steps: [{}],
+        toolCalls: [], toolResults: [], content: [], responseMessages: [],
+      })
+      .mockImplementationOnce(async (input: Record<string, unknown>) => {
+        expect(input.messages).toEqual([
+          { role: 'user', content: '创建并保存草稿' },
+          expect.objectContaining({ role: 'user' }),
+        ])
+        return {
+          text: '草稿已保存', finishReason: 'stop', steps: [{}],
+          toolCalls: [], toolResults: [], content: [{ type: 'text', text: '草稿已保存' }],
+          responseMessages: [{ role: 'assistant', content: [{ type: 'text', text: '草稿已保存' }] }],
+        }
+      }) as unknown as AgentRuntimeDependencies['generate']
+    const runtime = await openAgentRuntime({
+      ...openOptions('automatic', deps), automaticSelection: false,
+    })
+
+    await expect(runtime.run({
+      objective: '创建并保存草稿',
+      modelMessages: [{ role: 'user', content: '创建并保存草稿' }],
+      maxSteps: 5,
+    })).resolves.toMatchObject({
+      kind: 'completed', text: '草稿已保存', finishReason: 'stop', stepCount: 2,
+    })
+    expect(deps.generate).toHaveBeenCalledTimes(2)
+  })
+
+  it('stops after one recovery when the provider keeps returning empty stops', async () => {
+    const deps = dependencies()
+    deps.generate = vi.fn(async () => ({
+      text: '', finishReason: 'stop', steps: [{}],
+      toolCalls: [], toolResults: [], content: [], responseMessages: [],
+    })) as unknown as AgentRuntimeDependencies['generate']
+    const runtime = await openAgentRuntime({
+      ...openOptions('automatic', deps), automaticSelection: false,
+    })
+
+    await expect(runtime.run({
+      objective: '创建并保存草稿', modelMessages: [], maxSteps: 5,
+    })).resolves.toMatchObject({
+      kind: 'completed', text: '', finishReason: 'stop', stepCount: 2,
+    })
+    expect(deps.generate).toHaveBeenCalledTimes(2)
+  })
+
   it('passes run identity only to the tool transport, not to the model request', async () => {
     const deps = dependencies()
     const openTools = vi.fn(deps.openTools)

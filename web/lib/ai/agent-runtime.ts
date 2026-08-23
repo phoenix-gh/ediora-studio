@@ -453,6 +453,7 @@ export async function openAgentRuntime(
       let messages = request.modelMessages
       let generated: Awaited<ReturnType<typeof generateText>>
       let stepCount = 0
+      let emptyStopRecoveryUsed = false
       const parts: Record<string, unknown>[] = []
       do {
         generated = await generateWithMessageLog({
@@ -483,11 +484,27 @@ export async function openAgentRuntime(
           && responseMessages.length > 0
           && stepCount < request.maxSteps
         )
-        if (!completedToolOnlyStep) break
-        messages = [
-          ...messages,
-          ...responseMessages as ModelMessage[],
-        ]
+        if (completedToolOnlyStep) {
+          messages = [
+            ...messages,
+            ...responseMessages as ModelMessage[],
+          ]
+          continue
+        }
+        const emptyStoppedStep = (
+          generated.finishReason === 'stop'
+          && !generated.text.trim()
+          && generatedToolCalls.length === 0
+          && generatedToolResults.length === 0
+          && !emptyStopRecoveryUsed
+          && stepCount < request.maxSteps
+        )
+        if (!emptyStoppedStep) break
+        emptyStopRecoveryUsed = true
+        messages = [...messages, {
+          role: 'user',
+          content: 'The previous response was empty and called no tools. Continue the original task now. Use the available tools required to complete it, and do not stop before producing the required side effects or a visible final answer.',
+        }]
       } while (stepCount < request.maxSteps)
       const selectedAfterExecution = registry.activeContext()
       return {
