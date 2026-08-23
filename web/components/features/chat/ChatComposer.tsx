@@ -166,7 +166,7 @@ export type ChatComposerProps = {
   onSkillNameChange: (skillName: string | undefined) => void
   onDraftIdChange: (draftId: number | undefined) => void
   onPipelineInvocationsChange: (invocations: SubmittedSkillInvocation[]) => void
-  onSubmit: (value: string, messageParts: ChatComposerMessagePart[]) => void | Promise<void>
+  onSubmit: (value: string, messageParts: ChatComposerMessagePart[]) => boolean | Promise<boolean>
 }
 
 export function ChatComposer({
@@ -208,12 +208,35 @@ export function ChatComposer({
     setEditorEmptyState(editor)
   }, [pipelineInvocations, value])
 
-  function submit(event: FormEvent<HTMLFormElement>) {
+  async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (disabled || !value.trim()) return
     const editor = editorRef.current
     if (!editor) return
-    void onSubmit(value, composerMessageParts(editor, pipelineInvocations))
+    const messageParts = composerMessageParts(editor, pipelineInvocations)
+    const submittedNodes = Array.from(editor.childNodes, node => node.cloneNode(true))
+    editor.replaceChildren()
+    insertionRangeRef.current = null
+    setEditorEmptyState(editor)
+    onChange('')
+
+    const submitted = await onSubmit(value, messageParts)
+    if (submitted) {
+      onPipelineInvocationsChange([])
+      return
+    }
+
+    editor.replaceChildren(...submittedNodes)
+    setEditorEmptyState(editor)
+    onChange(value)
+    editor.focus()
+    const range = document.createRange()
+    range.selectNodeContents(editor)
+    range.collapse(false)
+    const selection = window.getSelection()
+    selection?.removeAllRanges()
+    selection?.addRange(range)
+    insertionRangeRef.current = range.cloneRange()
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {

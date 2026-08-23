@@ -119,10 +119,14 @@ export function ChatWorkspace({ variant, onClose, onOpenFullChat, onResetSize, o
   }
 
   async function handleSubmit(value: string, messageParts: ChatComposerMessagePart[]) {
-    if (!value.trim() || isActiveRunning) return
+    if (!value.trim() || isActiveRunning) return false
     initializedRef.current = true
-    const submitted = await submit(value, messageParts)
-    if (submitted) setInput('')
+    try {
+      return await submit(value, messageParts)
+    } catch (error) {
+      toast.error(errorText(error, '发送消息失败'))
+      return false
+    }
   }
 
   function handleApproval(messageId: number, toolCallId: string, approvalId: string, approved: boolean) {

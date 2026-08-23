@@ -219,6 +219,7 @@ describe('ChatClient', () => {
   })
 
   it('keeps inline Skill content retryable when direct Chat streaming fails', async () => {
+    let failReply: (() => void) | undefined
     chatApi.listChatSkills.mockResolvedValue([{
       name: 'article-drafting',
       displayName: '文章写作',
@@ -226,7 +227,9 @@ describe('ChatClient', () => {
       version: '1.0.0',
     }])
     chatApi.streamChatReply
-      .mockRejectedValueOnce(new Error('Pipeline 暂时不可用'))
+      .mockImplementationOnce(() => new Promise<void>((_resolve, reject) => {
+        failReply = () => reject(new Error('Pipeline 暂时不可用'))
+      }))
       .mockResolvedValueOnce(undefined)
     const view = render(
       <ChatWorkspaceProvider>
@@ -248,7 +251,10 @@ describe('ChatClient', () => {
     fireEvent.click(screen.getByRole('button', { name: /文章写作/ }))
     fireEvent.submit(editor.closest('form')!)
 
+    await waitFor(() => expect(editor.textContent).toBe(''))
+    await act(async () => failReply?.())
     expect(await screen.findByRole('alert')).toHaveTextContent('Pipeline 暂时不可用')
+    expect(editor.querySelector('[data-skill-invocation-id]')).toHaveTextContent('@文章写作')
     expect(screen.getByRole('button', { name: '发送消息' })).toBeEnabled()
     fireEvent.submit(editor.closest('form')!)
     await waitFor(() => expect(chatApi.streamChatReply).toHaveBeenCalledTimes(2))

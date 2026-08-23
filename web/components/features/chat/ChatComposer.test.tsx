@@ -27,7 +27,7 @@ function placeCaretAtEnd(editor: HTMLElement) {
   selection?.addRange(range)
 }
 
-function Harness({ onSubmit = () => undefined }: { onSubmit?: ChatComposerProps['onSubmit'] }) {
+function Harness({ onSubmit = () => true }: { onSubmit?: ChatComposerProps['onSubmit'] }) {
   const [value, setValue] = useState('帮我用(')
   const [invocations, setInvocations] = useState<SubmittedSkillInvocation[]>([])
 
@@ -193,7 +193,7 @@ describe('ChatComposer', () => {
   })
 
   it('submits ordered message parts while keeping Skill tokens out of the objective', () => {
-    const onSubmit = vi.fn()
+    const onSubmit = vi.fn(() => true)
     render(<Harness onSubmit={onSubmit} />)
 
     const editor = screen.getByRole('textbox', { name: '消息内容' })
@@ -307,7 +307,7 @@ describe('ChatComposer', () => {
   })
 
   it('preserves contenteditable block breaks as message newlines', () => {
-    const onSubmit = vi.fn()
+    const onSubmit = vi.fn(() => true)
     render(<Harness onSubmit={onSubmit} />)
 
     const editor = screen.getByRole('textbox', { name: '消息内容' })
@@ -317,7 +317,7 @@ describe('ChatComposer', () => {
     fireEvent.input(editor)
     fireEvent.submit(editor.closest('form')!)
 
-    expect(screen.getByTestId('objective').textContent).toBe('第一行\n第二行')
+    expect(screen.getByTestId('objective').textContent).toBe('')
     expect(onSubmit).toHaveBeenCalledWith('第一行\n第二行', [{ type: 'text', text: '第一行\n第二行' }])
   })
 })
