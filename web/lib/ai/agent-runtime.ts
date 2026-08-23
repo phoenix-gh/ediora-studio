@@ -365,15 +365,22 @@ export async function openAgentRuntime(
 
   const modelResponsePayload = (result: unknown): Record<string, unknown> => {
     const record = result as Record<string, unknown>
+    const readField = (key: string) => {
+      try {
+        return jsonSafe(record[key])
+      } catch {
+        return undefined
+      }
+    }
     return {
-      text: jsonSafe(record.text),
-      output: jsonSafe(record.output),
-      content: jsonSafe(record.content),
-      reasoning: jsonSafe(record.reasoning),
-      toolCalls: jsonSafe(record.toolCalls),
-      toolResults: jsonSafe(record.toolResults),
-      finishReason: jsonSafe(record.finishReason),
-      usage: jsonSafe(record.usage),
+      text: readField('text'),
+      output: readField('output'),
+      content: readField('content'),
+      reasoning: readField('reasoning'),
+      toolCalls: readField('toolCalls'),
+      toolResults: readField('toolResults'),
+      finishReason: readField('finishReason'),
+      usage: readField('usage'),
     }
   }
 

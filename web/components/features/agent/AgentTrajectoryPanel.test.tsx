@@ -27,7 +27,7 @@ function event(
 describe('AgentTrajectoryPanel', () => {
   beforeEach(() => {
     vi.useFakeTimers()
-    vi.clearAllMocks()
+    vi.resetAllMocks()
     api.listAgentTrajectory.mockResolvedValue({
       session_key: 'chat:7',
       events: [
@@ -89,6 +89,54 @@ describe('AgentTrajectoryPanel', () => {
       await Promise.resolve()
     })
     expect(api.listAgentTrajectory).toHaveBeenCalledTimes(1)
+  })
+
+  it('loads every historical page even when the completed first page is not running', async () => {
+    api.listAgentTrajectory
+      .mockResolvedValueOnce({
+        session_key: 'chat:7',
+        events: [
+          event(1, 'turn/start', { turn: 1 }, 1),
+          event(2, 'user/message', { content: [{ kind: 'text', text: '第一轮' }] }, 1),
+          event(3, 'turn/end', { reason: { kind: 'completed' } }, 1),
+        ],
+        next_sequence: 3,
+        has_more: true,
+        is_running: false,
+        last_error: null,
+        unsupported_format: false,
+      })
+      .mockResolvedValueOnce({
+        session_key: 'chat:7',
+        events: [
+          event(4, 'turn/start', { turn: 2 }, 2),
+          event(5, 'user/message', { content: [{ kind: 'text', text: '第二轮' }] }, 2),
+          event(6, 'turn/end', { reason: { kind: 'completed' } }, 2),
+        ],
+        next_sequence: 6,
+        has_more: false,
+        is_running: false,
+        last_error: null,
+        unsupported_format: false,
+      })
+
+    render(<AgentTrajectoryPanel scope={{ session_id: 7 }} open developerModeEnabled={false} />)
+    await act(async () => {
+      vi.advanceTimersByTime(0)
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(screen.getByText('Turn 1')).toBeInTheDocument()
+
+    await act(async () => {
+      vi.advanceTimersByTime(2_000)
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(api.listAgentTrajectory).toHaveBeenCalledTimes(2)
+    expect(api.listAgentTrajectory).toHaveBeenNthCalledWith(2, { session_id: 7 }, 3, 500)
+    expect(screen.getByText('Turn 2')).toBeInTheDocument()
   })
 
   it('selects only the matching tool row when call IDs repeat across turns', async () => {

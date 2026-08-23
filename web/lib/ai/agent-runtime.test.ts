@@ -134,6 +134,47 @@ describe('shared Agent runtime', () => {
     await runtime.close()
   })
 
+  it('keeps an accepted completion successful when the model output getter is unavailable', async () => {
+    const deps = dependencies()
+    const declaration = {
+      status: 'completed' as const, summary: '既定目标已经完成', evidence: [],
+    }
+    deps.generate = vi.fn(async (input: Record<string, unknown>) => {
+      const completeGoal = (input.tools as Record<string, Executable>).complete_goal
+      const output = await completeGoal.execute(declaration, { toolCallId: 'goal-without-output' })
+      const response = {
+        text: '', finishReason: 'tool-calls', steps: [{}],
+        toolCalls: [{ type: 'tool-call', toolCallId: 'goal-without-output', toolName: 'complete_goal', input: declaration }],
+        toolResults: [{ type: 'tool-result', toolCallId: 'goal-without-output', toolName: 'complete_goal', output }],
+        content: [], responseMessages: [],
+      }
+      Object.defineProperty(response, 'output', {
+        get() { throw new Error('No output generated') },
+      })
+      return response
+    }) as unknown as AgentRuntimeDependencies['generate']
+    const messages: AgentSessionEventDraft[] = []
+    const modelDirections: string[] = []
+    const runtime = await openAgentRuntime({
+      ...openOptions('automatic', deps),
+      mode: 'job',
+      automaticSelection: false,
+      onMessage: event => { modelDirections.push(event.direction) },
+      onSessionEvent: event => { messages.push(event) },
+    })
+
+    await expect(runtime.run({
+      objective: '完成任务', modelMessages: [], maxSteps: 2,
+      requireGoalCompletion: true,
+    })).resolves.toMatchObject({
+      goalCompletion: declaration,
+    })
+    expect(messages.some(event => event.type === 'assistant/message')).toBe(true)
+    expect(modelDirections).toContain('model_response')
+    expect(modelDirections).not.toContain('model_error')
+    await runtime.close()
+  })
+
   it('keeps the Harness completion tool out of Skill capabilities and plans', async () => {
     const runtime = await openAgentRuntime({
       ...openOptions('automatic', dependencies()), mode: 'job', automaticSelection: false,

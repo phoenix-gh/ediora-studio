@@ -10,7 +10,9 @@ export const completeGoalInputSchema = z.object({
   summary: z.string().trim().min(1).max(50_000),
   evidence: z.array(z.object({
     kind: z.enum(['tool_call', 'artifact']),
-    id: z.string().trim().min(1).max(300),
+    id: z.string().trim().min(1).max(300).describe(
+      'For tool_call, one exact provider-generated toolCallId from the tool history (normally call_...). Never use a tool name, business or artifact ID, comma-separated IDs, or the complete_goal call ID. For artifact, use the persisted artifact ID.',
+    ),
     claim: z.string().trim().min(1).max(1_000),
   }).strict()).max(100),
   remainingWork: z.array(z.string().trim().min(1).max(1_000)).max(100).optional(),
@@ -21,6 +23,7 @@ export const COMPLETE_GOAL_DESCRIPTION = [
   'Call this only after auditing the original objective and actual tool results.',
   'Use completed only when the entire objective is complete; otherwise use blocked and list the remaining work.',
   'Cite successful tool calls or persisted artifacts that support the declaration.',
+  'For each tool_call evidence item, id must be one exact provider-generated toolCallId from the tool history (normally call_...), never a tool name, business ID, artifact ID, or multiple IDs.',
 ].join(' ')
 
 export function createCompleteGoalTool(
@@ -37,7 +40,7 @@ export function createCompleteGoalTool(
 }
 
 export function goalCompletionInstructions(objective: string) {
-  return `\n\nDurable task completion protocol:\n- The original objective is: ${objective}\n- You own the judgment of whether that entire objective is complete. Audit the original objective and the actual tool results.\n- Do not stop after describing progress. When the objective is fully complete, call complete_goal with status completed, a concise final summary, and evidence references.\n- If the objective cannot be completed in this run, call complete_goal with status blocked, explain the blocker, and list remaining work.\n- Call complete_goal only once, as the final action of the run.`
+  return `\n\nDurable task completion protocol:\n- The original objective is: ${objective}\n- You own the judgment of whether that entire objective is complete. Audit the original objective and the actual tool results.\n- Do not stop after describing progress. When the objective is fully complete, call complete_goal with status completed, a concise final summary, and evidence references.\n- For tool_call evidence, use one exact provider-generated toolCallId from the tool history per item (normally call_...). Never use a tool name, business ID, artifact ID, comma-separated IDs, or the complete_goal call ID.\n- Use kind artifact for persisted artifact IDs.\n- If the objective cannot be completed in this run, call complete_goal with status blocked, explain the blocker, and list remaining work.\n- Call complete_goal only once, as the final action of the run.`
 }
 
 export function goalCompletionSelfAuditMessage(objective: string) {
@@ -65,12 +68,18 @@ export function validateGoalCompletionEvidence(
   declaration: AgentGoalCompletionDeclaration,
   calls: GoalEvidenceToolCall[],
 ) {
-  const successfulCallIds = new Set(calls
-    .filter(call => call.status === 'succeeded' && call.toolName !== COMPLETE_GOAL_TOOL_NAME)
-    .map(call => call.toolCallId))
+  const successfulCalls = calls.filter(
+    call => call.status === 'succeeded' && call.toolName !== COMPLETE_GOAL_TOOL_NAME,
+  )
+  const successfulCallIds = new Set(successfulCalls.map(call => call.toolCallId))
+  const availableCalls = successfulCalls.length > 0
+    ? successfulCalls.map(call => `${call.toolCallId} (${call.toolName})`).join(', ')
+    : 'none'
   for (const reference of declaration.evidence) {
     if (reference.kind === 'tool_call' && !successfulCallIds.has(reference.id)) {
-      throw new Error(`Goal completion cites an unavailable tool call: ${reference.id}`)
+      throw new Error(
+        `Goal completion cites an unavailable tool call: ${reference.id}. Available successful tool calls: ${availableCalls}`,
+      )
     }
   }
 }
