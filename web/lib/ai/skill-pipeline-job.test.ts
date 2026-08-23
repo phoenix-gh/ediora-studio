@@ -72,8 +72,17 @@ function pipelineJob(): DurableJob {
       invocation: {
         skill_name: name,
         capability_snapshot: capability(name),
+        parameter_snapshot: index === 1
+          ? { id: 7, title: '深度技术文章', strategy: '证据优先' }
+          : index === 3
+            ? { id: 'account-a', name: '账号 A', tone: '克制具体' }
+            : null,
       },
-      parameter_snapshot: index === 1 ? { id: 7, title: '方案' } : null,
+      parameter_snapshot: index === 1
+        ? { id: 7, title: '深度技术文章', strategy: '证据优先' }
+        : index === 3
+          ? { id: 'account-a', name: '账号 A', tone: '克制具体' }
+          : null,
     },
     output: {},
     artifacts: [],
@@ -222,8 +231,15 @@ describe('Skill Pipeline production worker', () => {
       'source-research', 'writing-plan', 'humanize-writing', 'account-voice',
     ])
     expect(opened[1].selectedContext).toContain('source-research output')
+    expect(opened[1].selectedContext).toContain('深度技术文章')
+    expect(opened[3].selectedContext).toContain('账号 A')
     expect(job.status).toBe('succeeded')
     expect(deps.completeStage).toHaveBeenCalledTimes(4)
+    expect(vi.mocked(deps.ensureExecution).mock.calls.map(call => call[1].stepId)).toEqual([10, 11, 12, 13])
+    expect(job.pipeline?.artifacts.map(artifact => artifact.kind)).toEqual([
+      'research_bundle', 'article', 'article', 'article',
+    ])
+    expect(JSON.stringify(job.pipeline)).not.toMatch(/api[_-]?key|access[_-]?token|app[_-]?secret/i)
     expect(deps.failStage).not.toHaveBeenCalled()
   })
 

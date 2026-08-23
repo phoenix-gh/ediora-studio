@@ -215,6 +215,100 @@ def test_worker_pipeline_stage_routes_are_authenticated_and_queue_next_stage_onc
     assert queued == [created["id"]]
 
 
+def test_worker_pipeline_final_stage_projects_one_normal_chat_message(
+    client,
+    monkeypatch,
+):
+    import routers.jobs as jobs_router
+
+    queued: list[int] = []
+
+    async def enqueue(job_id: int):
+        queued.append(job_id)
+
+    monkeypatch.setattr(jobs_router, "enqueue_job", enqueue)
+    headers = {"X-Worker-Token": "test-worker-token-at-least-32-characters"}
+    body = _pipeline_body(key="job:pipeline:worker-final")
+    body["invocations"] = [_pipeline_invocation("source-research", "one")]
+    created = client.post("/api/jobs", json=body, headers=headers).json()
+    queued.clear()
+    stage = created["pipeline"]["stages"][0]
+    start_path = f"/api/jobs/{created['id']}/pipeline/stages/{stage['id']}/start"
+    complete_path = f"/api/jobs/{created['id']}/pipeline/stages/{stage['id']}/complete"
+
+    from database import SessionLocal
+    from models import AgentExecution, ChatMessage, ChatSession, ContentJobEvent
+
+    async def seed_chat_and_execution():
+        async with SessionLocal() as session:
+            chat_session = ChatSession(title="Pipeline Chat")
+            session.add(chat_session)
+            await session.flush()
+            placeholder = ChatMessage(
+                session_id=chat_session.id,
+                role="assistant",
+                text="等待确认",
+                parts=[{"type": "skill-pipeline-ref", "jobId": created["id"]}],
+            )
+            session.add(placeholder)
+            await session.flush()
+            session.add(ContentJobEvent(
+                job_id=created["id"],
+                kind="chat_pipeline_created",
+                payload={"session_id": chat_session.id, "assistant_message_id": placeholder.id},
+            ))
+            execution = AgentExecution(
+                job_id=created["id"],
+                step_id=stage["id"],
+                attempt=1,
+                objective="Write a sourced article",
+                skill_mode="manual",
+                skill_name="source-research",
+            )
+            session.add(execution)
+            await session.commit()
+            await session.refresh(execution)
+            return chat_session.id, execution.id
+
+    assert client.post(start_path, json={"attempt": 1, "run_epoch": 1}, headers=headers).status_code == 200
+    session_id, execution_id = asyncio.new_event_loop().run_until_complete(seed_chat_and_execution())
+    payload = {
+        "attempt": 1,
+        "run_epoch": 1,
+        "execution_id": execution_id,
+        "primary": {
+            "kind": "research_bundle",
+            "title": "Research",
+            "text_content": "Final research output",
+        },
+        "auxiliary": [],
+        "completion_evidence": {"kind": "agent_run", "finalText": "Final research output"},
+    }
+
+    completed = client.post(complete_path, json=payload, headers=headers)
+    assert completed.status_code == 200, completed.text
+    assert completed.json()["status"] == "succeeded"
+    assert queued == []
+
+    async def chat_messages():
+        async with SessionLocal() as session:
+            return list((await session.execute(
+                select(ChatMessage)
+                .where(ChatMessage.session_id == session_id)
+                .order_by(ChatMessage.id.asc())
+            )).scalars().all())
+
+    messages = asyncio.new_event_loop().run_until_complete(chat_messages())
+    assert len(messages) == 2
+    assert messages[-1].text == "Final research output"
+    assert messages[-1].parts[0]["pipelineJobId"] == created["id"]
+
+    repeated = client.post(complete_path, json=payload, headers=headers)
+    assert repeated.status_code == 200, repeated.text
+    messages = asyncio.new_event_loop().run_until_complete(chat_messages())
+    assert len(messages) == 2
+
+
 def test_interactive_pipeline_waits_for_confirmation_and_hides_private_snapshot_fields(
     client,
     monkeypatch,
