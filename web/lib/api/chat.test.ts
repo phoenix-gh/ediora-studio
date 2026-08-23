@@ -137,6 +137,11 @@ describe('chat API client', () => {
         { invocationId: 'one', skillName: 'article-drafting', skillDisplayName: '文章写作' },
         { invocationId: 'two', skillName: 'article-drafting', skillDisplayName: '文章写作', parameterKind: 'writing_plan', parameterId: '12', parameterDisplayName: 'AI 方案' },
       ],
+      messageParts: [
+        { type: 'text', text: '写一篇文章' },
+        { type: 'skill-invocation', invocationId: 'one', skillName: 'article-drafting', skillDisplayName: '文章写作' },
+        { type: 'skill-invocation', invocationId: 'two', skillName: 'article-drafting', skillDisplayName: '文章写作', parameterKind: 'writing_plan', parameterId: '12', parameterDisplayName: 'AI 方案' },
+      ],
     })
 
     expect(fetchMock).toHaveBeenCalledWith('/api/chat/sessions/7/pipelines', expect.objectContaining({
@@ -148,6 +153,11 @@ describe('chat API client', () => {
         invocations: [
           { invocationId: 'one', skillName: 'article-drafting', skillDisplayName: '文章写作' },
           { invocationId: 'two', skillName: 'article-drafting', skillDisplayName: '文章写作', parameterKind: 'writing_plan', parameterId: '12', parameterDisplayName: 'AI 方案' },
+        ],
+        messageParts: [
+          { type: 'text', text: '写一篇文章' },
+          { type: 'skill-invocation', invocationId: 'one', skillName: 'article-drafting', skillDisplayName: '文章写作' },
+          { type: 'skill-invocation', invocationId: 'two', skillName: 'article-drafting', skillDisplayName: '文章写作', parameterKind: 'writing_plan', parameterId: '12', parameterDisplayName: 'AI 方案' },
         ],
       }),
     }))

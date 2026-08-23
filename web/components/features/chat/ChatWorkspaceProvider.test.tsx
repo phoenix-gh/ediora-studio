@@ -23,6 +23,7 @@ const api = vi.hoisted(() => ({
   renameChatSession: vi.fn(),
   listChatSkills: vi.fn(),
   listChatDrafts: vi.fn(),
+  createChatPipeline: vi.fn(),
   streamChatReply: vi.fn(),
 }))
 
@@ -80,6 +81,7 @@ describe('ChatWorkspaceProvider', () => {
       title,
     }))
     api.streamChatReply.mockResolvedValue(undefined)
+    api.createChatPipeline.mockResolvedValue({ job: { id: 81 } })
   })
 
   it('deduplicates simultaneous session-list requests and shares the active session', async () => {
@@ -131,7 +133,7 @@ describe('ChatWorkspaceProvider', () => {
       current.setDraftId(42)
     })
     await act(async () => {
-      await current.submit('研究这个主题')
+      await current.submit('研究这个主题', [{ type: 'text', text: '研究这个主题' }])
     })
 
     expect(api.createChatSession).toHaveBeenCalledWith('研究这个主题')
@@ -160,9 +162,9 @@ describe('ChatWorkspaceProvider', () => {
     await act(async () => {
       await current.openSession(7)
     })
-    let sending!: Promise<void>
+    let sending!: Promise<boolean>
     await act(async () => {
-      sending = current.submit('开始运行')
+      sending = current.submit('开始运行', [{ type: 'text', text: '开始运行' }])
       await waitFor(() => expect(api.streamChatReply).toHaveBeenCalled())
     })
     await act(async () => {
@@ -244,5 +246,36 @@ describe('ChatWorkspaceProvider', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('reuses the pipeline idempotency key when retrying an unchanged composer', async () => {
+    api.createChatPipeline
+      .mockRejectedValueOnce(new Error('response lost'))
+      .mockResolvedValueOnce({ job: { id: 81 } })
+    renderProvider()
+    await act(async () => {
+      current.setPipelineInvocations([{
+        invocationId: 'invocation-1',
+        skillName: 'article-drafting',
+        skillDisplayName: '文章写作',
+      }])
+    })
+    const messageParts = [
+      { type: 'text' as const, text: '请写文章' },
+      {
+        type: 'skill-invocation' as const,
+        invocationId: 'invocation-1',
+        skillName: 'article-drafting',
+        skillDisplayName: '文章写作',
+      },
+    ]
+
+    await act(async () => {
+      expect(await current.submit('请写文章', messageParts)).toBe(false)
+      expect(await current.submit('请写文章', messageParts)).toBe(true)
+    })
+
+    const firstId = api.createChatPipeline.mock.calls[0][1].clientMessageId
+    expect(api.createChatPipeline.mock.calls[1][1].clientMessageId).toBe(firstId)
   })
 })

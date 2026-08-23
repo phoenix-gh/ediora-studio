@@ -54,6 +54,9 @@ export type SubmittedSkillInvocation = {
   parameterId?: string
   parameterDisplayName?: string
 }
+export type ChatComposerMessagePart =
+  | { type: 'text'; text: string }
+  | ({ type: 'skill-invocation' } & SubmittedSkillInvocation)
 export type ChatToolApproval = { messageId: number; toolCallId: string; approvalId: string; approved: boolean }
 
 export type UIChatMessage = {
@@ -123,6 +126,7 @@ export async function createChatPipeline(
     objective: string
     title: string
     invocations: SubmittedSkillInvocation[]
+    messageParts: ChatComposerMessagePart[]
   },
 ) {
   const response = await fetch(`/api/chat/sessions/${sessionId}/pipelines`, {

@@ -8,6 +8,7 @@ import { ChatAgentLogDialog } from '@/components/features/chat/ChatAgentLogDialo
 import { useDeveloperMode } from '@/components/providers/DeveloperModeProvider'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
+import type { ChatComposerMessagePart } from '@/lib/api/chat'
 
 import { chatConversationColumn } from '@/app/chat/chat-layout'
 
@@ -117,11 +118,11 @@ export function ChatWorkspace({ variant, onClose, onOpenFullChat, onResetSize, o
     }
   }
 
-  async function handleSubmit(value: string) {
+  async function handleSubmit(value: string, messageParts: ChatComposerMessagePart[]) {
     if (!value.trim() || isActiveRunning) return
     initializedRef.current = true
-    setInput('')
-    await submit(value)
+    const submitted = await submit(value, messageParts)
+    if (submitted) setInput('')
   }
 
   function handleApproval(messageId: number, toolCallId: string, approvalId: string, approved: boolean) {

@@ -17,12 +17,35 @@ const submittedInvocation = z.object({
   parameterDisplayName: z.string().trim().min(1).max(200).optional(),
 }).strict()
 
+const messagePart = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('text'), text: z.string().max(20_000) }).strict(),
+  submittedInvocation.extend({ type: z.literal('skill-invocation') }).strict(),
+])
+
 const bodySchema = z.object({
   clientMessageId: z.string().trim().min(1).max(200),
   objective: z.string().trim().min(1).max(20_000),
   title: z.string().trim().min(1).max(500).default('Skill Pipeline'),
   invocations: z.array(submittedInvocation).min(1).max(24),
-}).strict()
+  messageParts: z.array(messagePart).min(1).max(200),
+}).strict().superRefine((body, context) => {
+  const messageInvocationIds = body.messageParts
+    .filter(part => part.type === 'skill-invocation')
+    .map(part => part.invocationId)
+  const invocationIds = body.invocations.map(invocation => invocation.invocationId)
+  if (messageInvocationIds.length !== invocationIds.length
+    || messageInvocationIds.some((id, index) => id !== invocationIds[index])) {
+    context.addIssue({ code: 'custom', path: ['messageParts'], message: '消息中的 Skill 顺序与 Pipeline 不一致' })
+  }
+  const visibleObjective = body.messageParts
+    .filter(part => part.type === 'text')
+    .map(part => part.text)
+    .join('')
+    .trim()
+  if (visibleObjective !== body.objective) {
+    context.addIssue({ code: 'custom', path: ['objective'], message: '消息正文与执行目标不一致' })
+  }
+})
 
 type RouteContext = { params: Promise<{ sessionId: string }> }
 
@@ -61,6 +84,9 @@ export async function POST(request: Request, context: RouteContext) {
         objective: parsed.data.objective,
         title: parsed.data.title,
         invocations,
+        message_parts: parsed.data.messageParts.map(part => part.type === 'text'
+          ? part
+          : { type: part.type, invocation_id: part.invocationId }),
       }),
       cache: 'no-store',
     })
