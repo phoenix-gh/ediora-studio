@@ -6,8 +6,12 @@ export type ManagedSkill = {
   name: string
   description: string
   version: string
+  digest: string
   source: SkillSource
   enabled: boolean
+  reviewState: 'approved' | 'pending'
+  standardCompatible: boolean
+  diagnostics: readonly string[]
 }
 
 async function skillFetch<T>(path: string, init?: RequestInit): Promise<T> {

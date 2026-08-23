@@ -14,6 +14,7 @@ export function SkillsSection() {
   const [busyName, setBusyName] = useState<string | null>(null)
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
   async function refresh() {
@@ -49,6 +50,7 @@ export function SkillsSection() {
     const previous = skills
     setBusyName(skill.name)
     setError(null)
+    setNotice(null)
     setSkills(current => current.map(item => item.name === skill.name ? { ...item, enabled } : item))
     try {
       const updated = await updateSkillEnabled(skill.name, enabled)
@@ -65,9 +67,11 @@ export function SkillsSection() {
     if (!file) return
     setUploading(true)
     setError(null)
+    setNotice(null)
     try {
       await uploadSkillArchive(file)
       await refresh()
+      setNotice('上传成功：Skill 需要审核并启用后才能使用。')
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '上传 Skill 失败')
     } finally {
@@ -80,6 +84,7 @@ export function SkillsSection() {
     if (!window.confirm(`确定删除已上传的 Skill「${skill.name}」吗？`)) return
     setBusyName(skill.name)
     setError(null)
+    setNotice(null)
     try {
       await deleteSkill(skill.name)
       await refresh()
@@ -113,6 +118,7 @@ export function SkillsSection() {
       )}
     >
       {error ? <p role="alert" className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p> : null}
+      {notice ? <p role="status" className="rounded-md bg-muted px-3 py-2 text-sm text-muted-foreground">{notice}</p> : null}
       {loading ? <p className="text-sm text-muted-foreground">正在加载 Skill…</p> : null}
       {!loading && skills.length === 0 ? (
         <div className="rounded-lg border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
@@ -128,11 +134,17 @@ export function SkillsSection() {
                 <div className="flex flex-wrap items-center gap-2">
                   <h3 className="text-sm font-medium">{skill.name}</h3>
                   <span className="rounded-full bg-surface-muted px-2 py-0.5 text-xs text-muted-foreground">
-                    {skill.source === 'builtin' ? '预制' : '已上传'}
+                    {skill.source === 'builtin' ? '内置' : '已上传'}
+                  </span>
+                  <span className="rounded-full bg-surface-muted px-2 py-0.5 text-xs text-muted-foreground">
+                    {skill.reviewState === 'pending' ? '待审核' : '已审核'}
                   </span>
                   {skill.version ? <span className="text-xs text-muted-foreground">v{skill.version}</span> : null}
                 </div>
                 <p className="mt-1 text-sm text-muted-foreground">{skill.description || '未提供描述'}</p>
+                {!skill.standardCompatible && skill.diagnostics.length ? (
+                  <p className="mt-1 text-xs text-muted-foreground">兼容性提示：{skill.diagnostics.join('、')}</p>
+                ) : null}
               </div>
               <div className="flex shrink-0 items-center gap-3">
                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
