@@ -339,31 +339,25 @@ function isStageSucceeded(job: DurableJob, stageId: number, attempt: number) {
 
 function recoveredCompletionEvidence(
   execution: DurableAgentExecution,
-  primary: PipelineArtifact,
 ): AgentCompletionEvidence {
   const candidate = record(execution.completion_evidence)
+  const goalCompletion = completeGoalInputSchema.safeParse(candidate.goalCompletion)
   if (
     candidate.kind === 'agent_run'
     && typeof candidate.executionId === 'number'
     && typeof candidate.finalText === 'string'
     && typeof candidate.toolCallCount === 'number'
+    && goalCompletion.success
   ) {
-    const goalCompletion = completeGoalInputSchema.safeParse(candidate.goalCompletion)
     return {
       kind: 'agent_run',
       executionId: candidate.executionId,
       finalText: candidate.finalText.slice(0, 2_000),
       toolCallCount: candidate.toolCallCount,
-      ...(goalCompletion.success ? { goalCompletion: goalCompletion.data } : {}),
+      goalCompletion: goalCompletion.data,
     }
   }
-  const finalText = text(primary.text_content) || json(primary.structured_content)
-  return {
-    kind: 'agent_run',
-    executionId: execution.id,
-    finalText: finalText.slice(0, 2_000),
-    toolCallCount: 0,
-  }
+  throw new Error('Agent execution completion evidence has no valid goal declaration')
 }
 
 function deterministicFailure(error: unknown) {
@@ -371,7 +365,7 @@ function deterministicFailure(error: unknown) {
     return error.status === 409 || error.status === 422 || !error.retryable
   }
   const message = error instanceof Error ? error.message : String(error)
-  return /Selected skill is unavailable|capability drift|Invalid Skill plan|Required Agent tool|automatic Skill Pipeline|Agent tool audit|Agent ended without declaring goal completion|Goal completion cites an unavailable tool call|Agent blocked:|snapshot is missing|Stage is failed|Agent execution is (?:failed|uncertain|cancelled)|interrupted after a side effect/.test(message)
+  return /Selected skill is unavailable|capability drift|Invalid Skill plan|Required Agent tool|automatic Skill Pipeline|Agent tool audit|Agent ended without declaring goal completion|Agent execution completion evidence has no valid goal declaration|Goal completion cites an unavailable tool call|Agent blocked:|snapshot is missing|Stage is failed|Agent execution is (?:failed|uncertain|cancelled)|interrupted after a side effect/.test(message)
 }
 
 export async function runSkillPipelineJob(
@@ -468,7 +462,7 @@ export async function runSkillPipelineJob(
       if (!primary) {
         throw new Error('Agent execution succeeded before a primary artifact was persisted')
       }
-      const evidence = recoveredCompletionEvidence(execution, primary)
+      const evidence = recoveredCompletionEvidence(execution)
       pendingEvidence = evidence
       await deps.completeStage(jobId, stage.id, {
         attempt: stage.attempt,

@@ -212,6 +212,10 @@ const result = await runtime.run({
 
 Reject missing or `blocked` declarations. For `completed`, verify every cited `tool_call` ID belongs to a successful, non-uncertain audit in the current execution. Persist the declaration in the finalizing checkpoint and completion evidence. Pipeline Stage text artifacts use the accepted declaration summary as the final deliverable when the completion turn supplies it; Skill validation remains recorded feedback but cannot mark success by itself.
 
+Do not retain compatibility for legacy `agent_run` completion evidence that
+lacks `goalCompletion`. A succeeded execution or persisted primary artifact
+without the declaration must not complete a durable Job or Stage.
+
 - [ ] **Step 4: Run durable-runner tests and verify GREEN**
 
 Run:

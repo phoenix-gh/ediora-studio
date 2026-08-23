@@ -422,8 +422,8 @@ describe('daily creation Agent job', () => {
     expect(deps.failToolCall).toHaveBeenCalledWith(19, 41, 'tool-1', 'connection lost', true)
   })
 
-  it('recovers finalizing generic evidence without opening the runtime', async () => {
-    const { deps } = dependencies()
+  it('does not accept legacy finalizing evidence without a goal declaration', async () => {
+    const { deps } = dependencies({ goalCompletion: null })
     vi.mocked(deps.ensureExecution).mockResolvedValue({
       id: 41, job_id: 19, status: 'running', objective: prompt,
       skill_mode: 'auto', skill_name: null, phase: 'finalizing', version: 3,
@@ -433,14 +433,32 @@ describe('daily creation Agent job', () => {
       audit: {}, completion_evidence: {},
     })
 
-    await expect(runDailyCreationAgentJob(19, deps)).resolves.toMatchObject({
-      kind: 'agent_run', executionId: 41, finalText: '已保存', toolCallCount: 1,
+    await expect(runDailyCreationAgentJob(19, deps)).rejects.toThrow(
+      'Agent ended without declaring goal completion',
+    )
+    expect(deps.openRuntime).toHaveBeenCalledTimes(1)
+    expect(deps.completeExecution).not.toHaveBeenCalled()
+    expect(deps.completeJob).not.toHaveBeenCalled()
+  })
+
+  it('does not accept legacy completed Step evidence without a goal declaration', async () => {
+    const { deps } = dependencies({ goalCompletion: null })
+    vi.mocked(deps.getJob).mockResolvedValue({
+      id: 19, flow: 'daily_creation', title: 'daily', status: 'queued',
+      input: { run_id: 83 },
+      steps: [{
+        id: 71, key: 'agent', attempt: 1, status: 'succeeded',
+        output: {
+          kind: 'agent_run', executionId: 41, finalText: '旧完成结果', toolCallCount: 1,
+        },
+      }],
     })
-    expect(deps.openRuntime).not.toHaveBeenCalled()
-    expect(deps.completeExecution).toHaveBeenCalledWith(19, 41, expect.objectContaining({
-      kind: 'agent_run',
-    }))
-    expect(deps.completeJob).toHaveBeenCalledWith(19)
+
+    await expect(runDailyCreationAgentJob(19, deps)).rejects.toThrow(
+      'Agent ended without declaring goal completion',
+    )
+    expect(deps.openRuntime).toHaveBeenCalledTimes(1)
+    expect(deps.completeJob).not.toHaveBeenCalled()
   })
 
   it('recovers an accepted goal declaration from durable tool calls after a worker restart', async () => {
@@ -495,6 +513,7 @@ describe('daily creation Agent job', () => {
     const { deps } = dependencies({ text: '已保存' })
     const evidence = {
       kind: 'agent_run' as const, executionId: 41, finalText: '已保存', toolCallCount: 0,
+      goalCompletion: { status: 'completed' as const, summary: '已保存', evidence: [] },
     }
     vi.mocked(deps.ensureExecution)
       .mockResolvedValueOnce({
@@ -529,6 +548,7 @@ describe('daily creation Agent job', () => {
     const { deps } = dependencies({ text: '已保存' })
     const evidence = {
       kind: 'agent_run' as const, executionId: 41, finalText: '已保存', toolCallCount: 0,
+      goalCompletion: { status: 'completed' as const, summary: '已保存', evidence: [] },
     }
     vi.mocked(deps.ensureExecution)
       .mockResolvedValueOnce({
@@ -557,6 +577,7 @@ describe('daily creation Agent job', () => {
     const { deps } = dependencies({ text: '已保存' })
     const evidence = {
       kind: 'agent_run' as const, executionId: 41, finalText: '已保存', toolCallCount: 0,
+      goalCompletion: { status: 'completed' as const, summary: '已保存', evidence: [] },
     }
     vi.mocked(deps.ensureExecution)
       .mockResolvedValueOnce({
@@ -584,6 +605,7 @@ describe('daily creation Agent job', () => {
     const { deps } = dependencies({ text: '已保存' })
     const evidence = {
       kind: 'agent_run' as const, executionId: 41, finalText: '已保存', toolCallCount: 0,
+      goalCompletion: { status: 'completed' as const, summary: '已保存', evidence: [] },
     }
     vi.mocked(deps.ensureExecution)
       .mockResolvedValueOnce({

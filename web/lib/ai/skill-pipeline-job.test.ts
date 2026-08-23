@@ -313,6 +313,49 @@ describe('Skill Pipeline production worker', () => {
     expect(failedStages).toHaveLength(0)
   })
 
+  it('does not accept a succeeded execution with legacy completion evidence', async () => {
+    const job = pipelineJob()
+    const stage = job.pipeline!.stages[0]
+    const primary = {
+      id: 1010,
+      step_id: stage.id,
+      attempt: stage.attempt,
+      role: 'primary' as const,
+      status: 'active' as const,
+      kind: 'research_bundle',
+      title: 'source-research',
+      text_content: '旧的研究产物',
+    }
+    stage.status = 'running'
+    stage.artifacts = [primary]
+    job.pipeline!.artifacts = [primary]
+    job.status = 'running'
+    const { deps, failedStages } = dependencies(job)
+    vi.mocked(deps.ensureExecution).mockResolvedValue({
+      id: 500,
+      job_id: job.id,
+      step_id: stage.id,
+      attempt: stage.attempt,
+      status: 'succeeded',
+      objective: 'Write a sourced article',
+      skill_mode: 'manual',
+      skill_name: 'source-research',
+      phase: 'complete',
+      checkpoint: {},
+      audit: {},
+      completion_evidence: {
+        kind: 'agent_run', executionId: 500, finalText: '旧完成结果', toolCallCount: 1,
+      },
+      version: 3,
+    })
+
+    await expect(runSkillPipelineJob(job.id, deps)).rejects.toThrow(
+      'Agent execution completion evidence has no valid goal declaration',
+    )
+    expect(deps.completeStage).not.toHaveBeenCalled()
+    expect(failedStages).toHaveLength(1)
+  })
+
   it('selects only the first queued or running Stage', () => {
     const job = pipelineJob()
     expect(currentPipelineStage(job)?.key).toBe('skill:01:source-research')

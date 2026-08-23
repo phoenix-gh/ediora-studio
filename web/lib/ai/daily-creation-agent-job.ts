@@ -106,7 +106,7 @@ const agentRunEvidenceSchema = z.object({
   executionId: z.number().int().positive(),
   finalText: z.string().max(2_000),
   toolCallCount: z.number().int().nonnegative(),
-  goalCompletion: completeGoalInputSchema.optional(),
+  goalCompletion: completeGoalInputSchema,
 })
 
 function firstBlockingRecordedCall(calls: DurableAgentToolCall[]) {

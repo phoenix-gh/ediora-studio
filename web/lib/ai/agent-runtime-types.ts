@@ -47,7 +47,7 @@ export type AgentCompletionEvidence =
       executionId: number
       finalText: string
       toolCallCount: number
-      goalCompletion?: AgentGoalCompletionDeclaration
+      goalCompletion: AgentGoalCompletionDeclaration
     }
   | {
       kind: 'model_evaluation'
