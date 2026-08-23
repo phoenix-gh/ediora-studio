@@ -2,8 +2,8 @@
 
 ## Status
 
-Proposed design for review. This document defines product and architecture
-decisions; it does not authorize implementation until the design is approved.
+Approved for implementation planning on 2026-08-23. Implementation remains
+split into independently reviewed phases with their own verification gates.
 
 The design is based on `main` commit `ef245e3`. That baseline contains the
 current `ChatClient`, file-backed Skill registry, durable content-job runtime,
@@ -836,6 +836,8 @@ adequate; any unrun coverage is stated in the implementation handoff.
 ## Delivery phases and gates
 
 ### Phase 1: standard compatibility and durable core
+
+Detailed plan: [Phase 1 implementation plan](../plans/2026-08-23-ediora-skill-pipeline-phase-1.md).
 
 Deliver the standard package loader without mandatory `SKILL.json`, external
 SkillBinding registry, uploaded-Skill disabled state, new domain aliases,
