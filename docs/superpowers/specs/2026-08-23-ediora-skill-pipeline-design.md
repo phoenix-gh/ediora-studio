@@ -2,14 +2,15 @@
 
 ## Status
 
-Approved for implementation planning on 2026-08-23. Implementation remains
-split into independently reviewed phases with their own verification gates.
+Approved for implementation planning on 2026-08-23. The original four phases
+have since landed on the local integration branch. This document was amended
+on 2026-08-23 against local `develop` commit `bb4e9ef` to correct Chat dispatch,
+streaming reasoning, and Agent-owned goal completion semantics.
 
-The design is based on `main` commit `ef245e3`. That baseline contains the
-current `ChatClient`, file-backed Skill registry, durable content-job runtime,
-and unified Agent Trajectory. The global floating Chat/`ChatWorkspace` refactor
-is not yet on `main`; it is treated as a parallel dependency, not as an assumed
-prerequisite.
+The current baseline contains the shared `ChatWorkspace`, file-backed Skill
+registry, durable execution-job runtime, ordered Skill Pipeline, and unified
+Agent Trajectory. The amendment is part of the same Agent Harness feature and
+does not create a second execution system.
 
 ## Goal
 
@@ -20,13 +21,16 @@ Let a user compose an ordered writing workflow directly in Chat:
 写一篇关于本地优先 AI 工具的公众号文章
 ```
 
-Every confirmed inline `@` token invokes one Skill. Ediora resolves the Skills and
-their parameters, shows a plan for a complex Chat task, runs each Skill as an
-independent durable stage in written order, exposes foldable intermediate
-results, and returns the final artifact as a normal assistant message.
+Every confirmed inline `@` token invokes one Skill. A single token remains a
+normal streaming Chat turn with one explicitly selected Skill. Two or more
+tokens create an ordered durable Pipeline: Ediora resolves their parameters,
+shows a plan for a complex Chat task, runs each Skill as an independent durable
+stage in written order, exposes foldable intermediate results, and returns the
+final artifact as a normal assistant message.
 
-The same pipeline engine also powers background Jobs. Chat waits for explicit
-plan confirmation; a Job creates its plan and begins automatically.
+The same pipeline engine also powers background Jobs. Multi-Skill Chat waits
+for explicit plan confirmation; a Job creates its plan and begins
+automatically. Zero-Skill and single-Skill Chat remain conversational turns.
 
 ## Design principles
 
@@ -46,12 +50,16 @@ plan confirmation; a Job creates its plan and begins automatically.
    accepted.
 8. Existing Chat, single-Skill, scheduled-job, and historical data remain
    readable during rollout.
+9. The Agent, not prompt-parsing business code, decides whether its objective
+   is complete. Durable work succeeds only after an explicit Agent completion
+   declaration backed by real runtime evidence.
 
 ## Scope
 
 ### In scope
 
 - Ordered, duplicate-preserving Skill invocation from structured inline Chat tokens.
+- Direct streaming Chat execution for exactly one structured Skill invocation.
 - Searchable parameter selection for Skills that declare one parameter kind.
 - A shared persistent `SkillPipeline` for Chat and background Jobs.
 - Macro pipeline plans and per-stage micro plans.
@@ -62,6 +70,8 @@ plan confirmation; a Job creates its plan and begins automatically.
 - Four first-party Skills: research, writing-plan execution, humanization, and
   account-voice transformation.
 - An additive startup migration using the existing `init_db()` mechanism.
+- A Pi-compatible Agent-owned completion declaration for durable Jobs and
+  Pipeline Stage attempts.
 
 ### Out of scope for the first release
 
@@ -186,16 +196,27 @@ the wrong kind.
 A normal Chat message with no Skill token continues through `/api/chat` and the
 existing Chat path.
 
-A Chat message with one or more Skill tokens creates a pipeline. A complex
-pipeline is planned and shown in `awaiting_confirmation`; execution starts
-after the user confirms the current plan version. The same confirmation path
-is used for a single explicit Skill when its plan or tool profile requires
-review.
+A Chat message with exactly one Skill token also uses `/api/chat`. The client
+passes the structured invocation, and the server resolves the Skill and its
+optional parameter with the same authoritative resolver used by Pipeline
+creation. The persisted user message keeps the atomic highlighted token, while
+the resolved parameter snapshot is supplied as untrusted turn context. The
+response streams text, reasoning, and tool events as they happen; no durable
+Pipeline Job or plan-confirmation card is created.
+
+A Chat message with two or more Skill tokens creates a pipeline. The pipeline
+is planned and shown in `awaiting_confirmation`; execution starts after the
+user confirms the current plan version. Invocation order and duplicate Skills
+remain significant.
 
 A background Job with `flow = "skill_pipeline"` uses
 `confirmation = "automatic"`: it persists the plan and starts immediately.
 Automatic mode changes only the plan-confirmation step. It does not expand the
 Skill's tool permissions.
+
+This dispatch rule is based only on the number of confirmed structured tokens:
+plain `@text` does not count, and a parameter such as `@写作方案:深度技术文章`
+remains one invocation.
 
 ## Standard Skill compatibility
 
@@ -274,6 +295,91 @@ It does not receive all selected Skills in one context window.
 A Skill package's `scripts/` directory is retained for portability but is not
 an implicit shell-execution capability. A trusted script must first be exposed
 as a schema-validated, auditable Ediora tool.
+
+## Agent-owned goal completion
+
+### Pi-compatible loop semantics
+
+Ediora separates an Agent run ending from a durable objective succeeding. The
+execution loop follows Pi's core semantics: tool results return to the model,
+the model continues while it has more tool work, and an ordinary assistant
+`stop` with no queued steering or follow-up ends the current run. A run ending
+is only a lifecycle boundary; it is not sufficient evidence that a scheduled
+Job or Pipeline Stage achieved its business objective.
+
+Chat turns without a durable Job may finish on a normal non-empty assistant
+response. Durable Jobs and Pipeline Stage attempts additionally require the
+Agent to call a Harness-owned `complete_goal` tool after auditing the original
+objective and actual runtime results.
+
+### Completion declaration
+
+`complete_goal` is always available to durable Agent runs and is not shipped
+inside any Skill package:
+
+```ts
+type CompleteGoalInput = {
+  status: "completed" | "blocked"
+  summary: string
+  evidence: Array<{
+    kind: "tool_call" | "artifact"
+    id: string
+    claim: string
+  }>
+  remainingWork?: string[]
+}
+```
+
+The Agent must call it alone in its final tool turn. `completed` means the
+Agent has compared the original objective with the real tool results and
+believes every material requirement is satisfied. `blocked` means it has
+exhausted safe in-scope progress and records the unmet work and reason.
+
+The Harness validates only generic integrity:
+
+- referenced tool calls and artifacts exist in the current execution scope;
+- referenced side-effecting tool calls completed successfully and are not
+  uncertain;
+- the declaration is well formed and belongs to the active run epoch;
+- no model, tool, cancellation, lease, or persistence error remains open.
+
+Evidence may be empty only when the declaration summary itself is the complete
+requested deliverable and the objective required no durable artifact or tool
+side effect. The Harness persists that summary as the final assistant output.
+
+The Harness does not parse the prompt for quantities, compare a rule's
+`target_count` with saved drafts, infer required artifact types from business
+phrasing, or replace the Agent's completion judgment with hidden structured
+fields. Skill requirements and the editable objective remain the business
+source of truth.
+
+A valid `completed` declaration persists its evidence and terminates the run
+without an unnecessary additional model turn, equivalent to Pi's terminating
+tool-result hint. A `blocked` declaration closes the attempt as failed with
+structured remaining work; it never becomes `succeeded`.
+
+Planning, Skill verification criteria, and an optional review/revision pass
+may give the Agent additional feedback before this declaration. They are not a
+second authority: a hidden validator cannot mark the Job successful, and a
+passing validation response without `complete_goal` is still incomplete. The
+Agent receives any violations in its own execution context, decides whether to
+continue, and makes the final declaration itself.
+
+### Premature stop and limits
+
+If a durable Agent returns a normal `stop` without a completion declaration,
+the Harness injects one generic follow-up that contains the unchanged original
+objective and asks the Agent to audit it against the actual trace. The Agent
+then either continues using tools, declares `completed`, or declares
+`blocked`. This follow-up never mentions an expected draft count or another
+business-specific interpretation.
+
+The shared turn, token, time, and cancellation limits remain safety boundaries,
+not completion criteria. Reaching a limit without a valid declaration closes
+the attempt as incomplete/failed and preserves the trace; it must never mark
+the Job successful. A process restart resumes from durable messages, tool
+results, run epoch, and any accepted completion declaration rather than
+replaying proven side effects.
 
 ## Pipeline model
 
@@ -386,10 +492,13 @@ Every Stage receives:
 4. The Stage's declared output and validation contract.
 
 A successful Stage must produce exactly one active primary artifact of the
-declared kind. It may also produce auxiliary artifacts such as source lists,
-outlines, validation reports, or discarded alternatives. If the declared
-primary output is missing or fails validation, the Stage fails and later
-stages do not start.
+declared kind and a valid Agent completion declaration that cites it. It may
+also produce auxiliary artifacts such as source lists, outlines, validation
+reports, or discarded alternatives. The persistence boundary may reject a
+missing artifact, malformed artifact schema, invalid reference, or failed tool
+call, but it does not reinterpret the natural-language objective to decide
+whether the artifact is substantively sufficient. Without both the artifact
+and Agent declaration, later stages do not start.
 
 ## Lifecycle and state transitions
 
@@ -417,7 +526,7 @@ through an idempotent command. It never edits the closed attempt.
 ### Stage states
 
 ```text
-pending -> preparing -> running -> validating -> succeeded
+pending -> preparing -> running -> declaring -> succeeded
               |           |           |
               +-----------+-----------+-> failed
                           |
@@ -492,7 +601,7 @@ transaction.
 Each attempt records durable checkpoints for:
 
 ```text
-prepared -> plan_saved -> tools_completed -> primary_saved -> validated
+prepared -> plan_saved -> tools_completed -> primary_saved -> goal_declared
 ```
 
 The Agent Trajectory remains the detailed model/tool trace. Execution Job
@@ -562,12 +671,29 @@ The Job database remains authoritative for the pipeline card. Event streaming
 only tells the client to refetch records after a cursor. Reload and reconnect
 rebuild the card from `GET /api/jobs/{id}`.
 
-When the final active artifact is ready, Ediora activates it, marks the Job
-successful, and appends the final normal assistant message transactionally.
+When the final active artifact and its `complete_goal(status="completed")`
+declaration are ready, Ediora activates it, marks the Job successful, and
+appends the final normal assistant message transactionally. Artifact presence
+or a natural model stop alone cannot make the Job successful.
 If a process crash splits an unavoidable compatibility write, a reconciler
 repairs the missing final Chat projection idempotently.
 
 ## Chat presentation
+
+### Direct Chat streaming
+
+Zero-Skill and exactly-one-Skill Chat turns use the same live UI-message
+stream. The client consumes `reasoning-start`, `reasoning-delta`, and
+`reasoning-end` in addition to text and tool events. Reasoning deltas update a
+foldable “思考过程” block while the response is running; the block collapses
+by default when reasoning ends and remains available for inspection according
+to the configured reasoning-visibility policy.
+
+The selected Skill path must not replace this live response with a completed
+`generateText` result wrapped in a synthetic stream. Planning or validation
+that is useful for a direct single-Skill turn occurs inside the same streaming
+Agent loop. Persisted assistant parts and the live display use the same part
+types so a reload does not erase or duplicate reasoning and tool activity.
 
 ### Plan card
 
@@ -596,10 +722,10 @@ cards:
 - Research material, outline, draft, and validation report are visible as
   named foldable artifacts.
 
-Detailed prompts, raw provider payloads, model reasoning visibility policy,
-and tool request/result data remain in the developer Agent Trajectory. The
-pipeline card presents product-level progress rather than duplicating that
-debugger.
+Detailed prompts, raw provider payloads, full reasoning provenance, and tool
+request/result data remain in the developer Agent Trajectory. Direct Chat may
+show its configured foldable reasoning stream, while the pipeline card
+presents product-level progress rather than duplicating the debugger.
 
 The final article or other final primary artifact appears as a normal
 assistant message after the card. It is never hidden only inside a collapsed
@@ -614,11 +740,11 @@ attempts remain viewable under the Stage.
 
 ### Floating Chat integration
 
-On the current `main` base, the first implementation targets `ChatClient` and
-extracts reusable composer/pipeline components as needed. If the shared
-`ChatWorkspace` refactor lands first, the feature branch rebases and mounts
-those components in the shared workspace. It must not introduce a second
-global Chat shell.
+The shared `ChatWorkspace` is the single integration point for the full-page
+and floating Chat surfaces. Dispatch, structured invocation persistence,
+stream consumption, reasoning folding, and Pipeline projection live in shared
+workspace components; this amendment must not reintroduce behavior that exists
+only in `ChatClient` or create a second global Chat shell.
 
 ## Reliability and recovery
 
@@ -640,10 +766,12 @@ therefore resolved against persisted checkpoints and command IDs.
 - Pure model work may be rerun from the last safe checkpoint.
 - An idempotent internal draft/artifact write uses its request ID and may be
   retried.
+- An accepted goal declaration is replayed from the durable checkpoint and is
+  not regenerated after a worker restart.
 - An external side effect without a proven idempotency/result record becomes
   `uncertain`; it is never automatically replayed.
-- Validation is deterministic where possible and rerunnable from the saved
-  primary artifact.
+- Generic evidence-integrity validation is deterministic and rerunnable from
+  the saved trace. Business sufficiency remains the Agent's judgment.
 
 ### Reconciliation
 
@@ -655,6 +783,16 @@ The existing reconciliation loop additionally repairs:
 - Superseded downstream stages that were accidentally left runnable.
 
 Every repair is append-only and idempotent.
+
+### Trajectory projection
+
+Durable tool-audit events and canonical runtime events may describe the same
+tool call. Raw append-only events remain untouched, but the read projection
+coalesces records by run scope, turn, and `callId`. When one copy has no Step
+and another has an explicit Step, the explicit-Step record owns the displayed
+cell and receives any missing timing, arguments, result, and source sequence
+metadata from the other copy. One real tool execution therefore appears once
+in the user-visible trajectory without weakening the audit trail.
 
 ## Security model
 
@@ -681,6 +819,11 @@ A Stage's tools are the intersection of:
 ```text
 Skill request ∩ Ediora capability profile ∩ system policy
 ```
+
+`complete_goal` is a Harness control tool outside this business capability
+intersection. It cannot read external data or mutate content; it can only
+record the active Agent's completion declaration after generic evidence checks.
+Skills neither request nor bundle it, preserving standard package portability.
 
 The first release defines:
 
@@ -806,7 +949,11 @@ requirements, not a substitute for data-preserving migration behavior.
 
 ### Pipeline tests
 
-- Chat plan waits for confirmation; Job plan starts automatically.
+- Exactly one structured Skill invocation uses direct Chat and never creates a
+  Pipeline Job; two or more create a Pipeline in exact token order.
+- A parameterized direct Skill is authoritatively resolved and its highlighted
+  token survives persistence and reload.
+- Multi-Skill Chat plan waits for confirmation; Job plan starts automatically.
 - Each Stage creates an independent Agent execution and attempt.
 - The active primary artifact is the next Stage's input.
 - Missing or invalid primary output stops later stages.
@@ -814,6 +961,13 @@ requirements, not a substitute for data-preserving migration behavior.
 - Rerun supersedes downstream active artifacts while preserving history.
 - Create, confirm, revise, cancel, retry, and rerun commands are idempotent.
 - Stale `plan_version` confirmation is rejected.
+- A natural model stop without `complete_goal` cannot succeed and receives a
+  generic self-audit continuation.
+- A valid `completed` declaration with real evidence succeeds; `blocked`, an
+  invalid evidence reference, or exhausted limits without a declaration does
+  not.
+- Scheduled execution does not parse prompt quantities or compare
+  `target_count` with saved artifact counts.
 
 ### Reliability and security tests
 
@@ -824,6 +978,8 @@ requirements, not a substitute for data-preserving migration behavior.
 - Prompt injection in fetched material cannot change capability policy.
 - Effective tools equal the declared three-way permission intersection.
 - Automatic Jobs cannot publish, delete, or upload externally.
+- Duplicate durable/canonical events for one `callId` render as one trajectory
+  cell under the explicit Step while both raw events remain queryable.
 
 ### UI tests
 
@@ -834,6 +990,8 @@ requirements, not a substitute for data-preserving migration behavior.
 - Intermediate artifacts and historical attempts remain inspectable.
 - Reload/reconnect restores the card from the Job API.
 - The final artifact renders as a normal assistant message.
+- Direct Chat reasoning deltas render incrementally in one foldable block and
+  remain available, collapsed by default, after completion.
 
 ### Migration and regression tests
 
@@ -888,6 +1046,16 @@ Gate: the example four-Stage workflow completes from both Chat and Job modes,
 with attributable research, visible intermediate artifacts, preserved account
 privacy, and a normal final assistant response.
 
+### Post-phase Harness correction
+
+Apply the 2026-08-23 amendment as one focused Harness correction after the
+original phases: direct single-Skill Chat dispatch and parameter resolution,
+live reasoning consumption, Agent-owned durable completion, and trajectory
+projection coalescing. Remove the later quantity-parsing completion checks
+rather than preserving them as a fallback. The correction requires focused
+Chat, runtime, scheduled-job, Pipeline, and trajectory regressions before it is
+merged back to the integration branch.
+
 ## Alternatives considered
 
 ### Put all selected Skills into one Agent run
@@ -914,15 +1082,34 @@ Physical renaming adds migration and rollback risk without changing user
 behavior. New domain names plus transitional aliases achieve the architecture
 goal while preserving production data. Physical table renaming is deferred.
 
+### Parse prompt quantities or reuse rule target counts
+
+This makes the Harness a second source of business truth, breaks arbitrary
+Agent prompts, and can mark valid non-draft work incomplete or silently change
+an edited objective. It contradicts the prompt-first scheduled-Agent contract
+and is rejected. Quantity requirements remain ordinary objective text for the
+Agent to satisfy and audit.
+
+### Treat every normal model stop as durable success
+
+This matches the smallest possible conversational loop but conflates “the
+provider stopped producing tokens” with “the business objective is complete.”
+It can reproduce the observed partial-work success state. Direct Chat may end
+on a normal response; durable Jobs and Stage attempts require the explicit
+Agent completion declaration.
+
 ## Acceptance criteria
 
 The feature is releasable when all of the following are true:
 
-1. A user can select multiple parameterized or unparameterized Skill tokens and
-   the server preserves their exact order, identity, and duplicates.
-2. Chat presents and confirms the plan; Job mode begins automatically under
-   the same persisted pipeline contract.
-3. Every invocation is an independently traceable and retriable Stage attempt.
+1. A user can select parameterized or unparameterized Skill tokens and the
+   server preserves their exact order, identity, parameters, and duplicates.
+2. Exactly one Skill runs as a normal streaming Chat turn; two or more create
+   a confirmed durable Pipeline. Job mode begins automatically under the same
+   persisted multi-Stage contract.
+3. Every Pipeline invocation is an independently traceable and retriable Stage
+   attempt; a direct single-Skill Chat turn remains traceable in the Chat Agent
+   Trajectory without pretending to be a Pipeline Stage.
 4. Intermediate outputs are visible and foldable, and the active primary
    output is passed deterministically between stages.
 5. Failure, retry, rerun, cancellation, reconnect, and worker recovery preserve
@@ -938,6 +1125,11 @@ The feature is releasable when all of the following are true:
 10. The four first-party Skills complete the reference workflow in Chat and
     automatic Job modes, and the final artifact appears as a normal assistant
     message.
+11. Durable Jobs and Stage attempts succeed only after the Agent explicitly
+    declares completion with real evidence; no prompt-count parser or hidden
+    rule count decides business completion.
+12. Direct Chat streams foldable reasoning again, and duplicate raw tool audit
+    events project to one correctly stepped trajectory cell.
 
 ## References
 
@@ -945,4 +1137,7 @@ The feature is releasable when all of the following are true:
 - [Pi Skills documentation at audited commit](https://github.com/earendil-works/pi/blob/a1f955e9f47fd3379b44f4aace65ab916c80519a/packages/coding-agent/docs/skills.md)
 - [Pi Skill invocation formatter at audited commit](https://github.com/earendil-works/pi/blob/a1f955e9f47fd3379b44f4aace65ab916c80519a/packages/agent/src/harness/skills.ts#L38)
 - [Pi AgentHarness source at audited commit](https://github.com/earendil-works/pi/blob/a1f955e9f47fd3379b44f4aace65ab916c80519a/packages/agent/src/harness/agent-harness.ts#L363)
+- [Pi Agent loop](https://github.com/earendil-works/pi/blob/main/packages/agent/src/agent-loop.ts)
+- [Pi Agent core README](https://github.com/earendil-works/pi/blob/main/packages/agent/README.md)
+- [Pi run-boundary versus settled-state discussion](https://github.com/earendil-works/pi/issues/2110)
 - [Agent Trajectory unification design](./2026-08-22-agent-trajectory-design.md)
