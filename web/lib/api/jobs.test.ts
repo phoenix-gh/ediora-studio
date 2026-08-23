@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
-import { imageUrlsForJob } from './jobs'
+import { cancelPipeline, confirmPipeline, getJobEvents, imageUrlsForJob, rerunPipelineStage, revisePipeline, retryPipelineStage } from './jobs'
 
 describe('image job results', () => {
   it('returns absolute asset URLs from succeeded image job steps', () => {
@@ -51,5 +51,39 @@ describe('image job results', () => {
         completed_at: '2026-07-25T01:00:02Z',
       }],
     })).toEqual(['http://localhost:8000/api/uploads/chat-image.png'])
+  })
+})
+
+describe('Skill Pipeline job commands', () => {
+  it('uses versioned idempotent command endpoints and exposes the event cursor', async () => {
+    const calls: Array<[string, RequestInit | undefined]> = []
+    const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
+      calls.push([input, init])
+      return new Response(JSON.stringify({ id: 81, plan_version: 2, events: [], next_after: 4 }), { status: 200 })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    await confirmPipeline(81, 1, 'confirm-1')
+    await revisePipeline(81, 1, 'revise-1', { 'skill:01:article-drafting': '先列提纲' })
+    await cancelPipeline(81, 'cancel-1')
+    await retryPipelineStage(81, 'skill:01:article-drafting', 'retry-1')
+    await rerunPipelineStage(81, 'skill:01:article-drafting', 'rerun-1')
+    await getJobEvents(81, 3)
+
+    expect(calls.map(([url]) => url)).toEqual([
+      'http://localhost:8000/api/jobs/81/confirm',
+      'http://localhost:8000/api/jobs/81/plan/revise',
+      'http://localhost:8000/api/jobs/81/cancel',
+      'http://localhost:8000/api/jobs/81/stages/skill%3A01%3Aarticle-drafting/retry',
+      'http://localhost:8000/api/jobs/81/stages/skill%3A01%3Aarticle-drafting/rerun',
+      'http://localhost:8000/api/jobs/81/events?after=3',
+    ])
+    expect(JSON.parse(calls[0][1]?.body as string)).toEqual({ plan_version: 1, request_id: 'confirm-1' })
+    expect(JSON.parse(calls[1][1]?.body as string)).toEqual({
+      plan_version: 1,
+      request_id: 'revise-1',
+      stage_instructions: { 'skill:01:article-drafting': '先列提纲' },
+    })
+    expect(JSON.parse(calls[2][1]?.body as string)).toEqual({ request_id: 'cancel-1' })
   })
 })
