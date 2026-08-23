@@ -103,4 +103,52 @@ describe('pipeline resolver', () => {
     }])).rejects.toThrow('需要选择写作方案')
     expect(api.apiGet).not.toHaveBeenCalled()
   })
+
+  it('freezes a job capability snapshot with the first-party research allowlist', async () => {
+    registry.getEnabledSkill.mockResolvedValueOnce({
+      name: 'source-research',
+      description: 'research',
+      version: '1.0.0',
+      digest: 'b'.repeat(64),
+      source: 'builtin',
+      instructions: 'research instructions',
+      directory: '/private/source-research',
+      packageFiles: [],
+      requestedAllowedTools: [],
+    })
+    binding.resolveSkillBinding.mockReturnValueOnce({
+      skillName: 'source-research',
+      displayName: '资料研究',
+      primaryOutput: 'research_bundle',
+      capabilityProfile: 'research',
+      requestedAllowedTools: ['web_search', 'fetch_url'],
+      profileAllowedTools: ['web_search', 'fetch_url'],
+    })
+    capabilities.buildAgentCapabilitySnapshot.mockImplementationOnce(input => ({
+      schemaVersion: 1,
+      mode: input.mode,
+      skill: { name: input.skill?.skill.name },
+      tools: Object.keys(input.tools).map(name => ({ name })),
+      policy: {
+        approvalPolicy: input.approvalPolicy,
+        allowedToolNames: input.allowedToolNames ? [...input.allowedToolNames] : null,
+      },
+    }))
+
+    const [resolved] = await resolvePipelineInvocations([{
+      invocationId: 'research',
+      skillName: 'source-research',
+      skillDisplayName: '资料研究',
+    }])
+
+    expect(resolved.capability_snapshot).toMatchObject({
+      mode: 'job',
+      policy: { approvalPolicy: 'automatic', allowedToolNames: ['web_search', 'fetch_url'] },
+    })
+    expect(capabilities.buildAgentCapabilitySnapshot).toHaveBeenCalledWith(expect.objectContaining({
+      mode: 'job',
+      approvalPolicy: 'automatic',
+      allowedToolNames: ['web_search', 'fetch_url'],
+    }))
+  })
 })

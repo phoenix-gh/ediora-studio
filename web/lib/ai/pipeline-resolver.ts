@@ -231,22 +231,43 @@ function publishAccountSnapshot(account: PublishAccountRecord): Record<string, u
   }
 }
 
-async function skillRuntimeSnapshot(skill: RegisteredSkill) {
+function staticToolSet(names: readonly string[]) {
+  return Object.fromEntries(names.map(name => [name, {
+    description: '',
+    inputSchema: {},
+  }]))
+}
+
+function allowedToolsForBinding(
+  skill: RegisteredSkill,
+  binding: ReturnType<typeof resolveSkillBinding>,
+) {
+  const requested = binding.requestedAllowedTools ?? skill.requestedAllowedTools
+  const profile = binding.profileAllowedTools ?? requested
+  const profileNames = new Set(profile)
+  return [...new Set(requested)].filter(name => profileNames.has(name))
+}
+
+async function skillRuntimeSnapshot(
+  skill: RegisteredSkill,
+  binding: ReturnType<typeof resolveSkillBinding>,
+) {
   const [references, preload] = await Promise.all([
     listSkillReferences(skill.name),
     loadSkillPreloadContext(skill.name),
   ])
+  const allowedToolNames = allowedToolsForBinding(skill, binding)
   return buildAgentCapabilitySnapshot({
-    mode: 'chat',
+    mode: 'job',
     skill: {
       skill,
       activation: 'manual',
       references,
       loadedReferences: preload.references,
     },
-    tools: {},
-    approvalPolicy: 'interactive',
-    allowedToolNames: [],
+    tools: staticToolSet(allowedToolNames),
+    approvalPolicy: 'automatic',
+    allowedToolNames,
   }) as unknown as Record<string, unknown>
 }
 
@@ -271,7 +292,7 @@ async function resolveOne(invocation: SubmittedSkillInvocation): Promise<Resolve
   }
 
   const [capabilitySnapshot, parameter] = await Promise.all([
-    skillRuntimeSnapshot(skill),
+    skillRuntimeSnapshot(skill, binding),
     binding.parameter && invocation.parameterId
       ? binding.parameter.kind === 'writing_plan'
         ? loadWritingPlan(invocation.parameterId)
@@ -312,8 +333,8 @@ async function resolveOne(invocation: SubmittedSkillInvocation): Promise<Resolve
       displayName: binding.displayName,
       primaryOutput: binding.primaryOutput,
       capabilityProfile: binding.capabilityProfile,
-      requestedAllowedTools: [],
-      profileAllowedTools: [],
+      requestedAllowedTools: [...(binding.requestedAllowedTools ?? skill.requestedAllowedTools)],
+      profileAllowedTools: [...(binding.profileAllowedTools ?? binding.requestedAllowedTools ?? skill.requestedAllowedTools)],
     },
     parameter_snapshot: parameterSnapshot,
     capability_snapshot: capabilitySnapshot,

@@ -20,10 +20,54 @@ export type SkillBinding = {
   }
   primaryOutput: SkillPrimaryOutput
   capabilityProfile: SkillCapabilityProfile
+  requestedAllowedTools?: readonly string[]
+  profileAllowedTools?: readonly string[]
   defaultEnabled: boolean
 }
 
 const builtinBindings: readonly SkillBinding[] = Object.freeze([
+  {
+    skillName: 'source-research',
+    displayName: '资料研究',
+    description: '检索、核验并整理可追溯的资料，作为后续写作的研究底稿。',
+    primaryOutput: 'research_bundle',
+    capabilityProfile: 'research',
+    requestedAllowedTools: ['web_search', 'fetch_url'],
+    profileAllowedTools: ['web_search', 'fetch_url'],
+    defaultEnabled: true,
+  },
+  {
+    skillName: 'writing-plan',
+    displayName: '写作方案',
+    description: '按选定的写作方案把研究材料组织成完整文章。',
+    parameter: { kind: 'writing_plan', required: true },
+    primaryOutput: 'article',
+    capabilityProfile: 'writing',
+    requestedAllowedTools: ['web_search', 'fetch_url'],
+    profileAllowedTools: ['web_search', 'fetch_url'],
+    defaultEnabled: true,
+  },
+  {
+    skillName: 'humanize-writing',
+    displayName: '去 AI 味',
+    description: '在不改变事实和结构的前提下，去除模板化和机械化表达。',
+    primaryOutput: 'article',
+    capabilityProfile: 'transform',
+    requestedAllowedTools: [],
+    profileAllowedTools: [],
+    defaultEnabled: true,
+  },
+  {
+    skillName: 'account-voice',
+    displayName: '账号文风',
+    description: '根据已选择账号的风格画像改写文章，不执行发布或账号操作。',
+    parameter: { kind: 'publish_account', required: true },
+    primaryOutput: 'article',
+    capabilityProfile: 'transform',
+    requestedAllowedTools: [],
+    profileAllowedTools: [],
+    defaultEnabled: true,
+  },
   {
     skillName: 'human-social-copy',
     displayName: 'Human social copy',
@@ -50,6 +94,12 @@ const builtinBindings: readonly SkillBinding[] = Object.freeze([
 function frozenBinding(binding: SkillBinding): Readonly<SkillBinding> {
   return Object.freeze({
     ...binding,
+    ...(binding.requestedAllowedTools === undefined ? {} : {
+      requestedAllowedTools: Object.freeze([...binding.requestedAllowedTools]),
+    }),
+    ...(binding.profileAllowedTools === undefined ? {} : {
+      profileAllowedTools: Object.freeze([...binding.profileAllowedTools]),
+    }),
     ...(binding.parameter === undefined
       ? {}
       : { parameter: Object.freeze({ ...binding.parameter }) }),
