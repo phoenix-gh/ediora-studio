@@ -1,6 +1,6 @@
 ---
 name: source-research
-description: "检索、核验并整理与用户主题直接相关的可追溯资料，供后续写作阶段使用。"
+description: "仅在用户明确需要研究底稿、系统资料核验或为后续写作整理可追溯来源时使用；不适用于普通数据库查询、信息源浏览或单次选题检索。"
 version: 1.0.0-ediora.1
 allowed-tools: web_search fetch_url
 ---
