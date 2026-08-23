@@ -590,6 +590,268 @@ describe('shared Agent runtime', () => {
     expect(deps.generate).toHaveBeenCalledTimes(2)
   })
 
+  it('processes queued follow-up work before marking the Agent run complete', async () => {
+    const deps = dependencies()
+    let taskComplete = false
+    deps.generate = vi.fn()
+      .mockResolvedValueOnce({
+        text: '素材已经读取，接下来保存草稿', finishReason: 'stop', steps: [{}],
+        toolCalls: [], toolResults: [], content: [{
+          type: 'text', text: '素材已经读取，接下来保存草稿',
+        }],
+        responseMessages: [{
+          role: 'assistant', content: [{ type: 'text', text: '素材已经读取，接下来保存草稿' }],
+        }],
+      })
+      .mockImplementationOnce(async (input: Record<string, unknown>) => {
+        expect(input.messages).toEqual([
+          { role: 'user', content: '读取素材并保存草稿' },
+          expect.objectContaining({ role: 'assistant' }),
+          expect.objectContaining({ role: 'user' }),
+        ])
+        taskComplete = true
+        return {
+          text: '草稿已经保存', finishReason: 'stop', steps: [{}],
+          toolCalls: [], toolResults: [], content: [{ type: 'text', text: '草稿已经保存' }],
+          responseMessages: [{ role: 'assistant', content: [{ type: 'text', text: '草稿已经保存' }] }],
+        }
+      }) as unknown as AgentRuntimeDependencies['generate']
+    const runtime = await openAgentRuntime({
+      ...openOptions('automatic', deps), automaticSelection: false,
+    })
+
+    await expect(runtime.run({
+      objective: '读取素材并保存草稿',
+      modelMessages: [{ role: 'user', content: '读取素材并保存草稿' }],
+      maxSteps: 5,
+      getFollowUpMessages: async () => taskComplete ? [] : [{
+        role: 'user', content: '任务尚未完成，请继续保存草稿',
+      }],
+    })).resolves.toMatchObject({
+      kind: 'completed', text: '草稿已经保存', finishReason: 'stop', stepCount: 2,
+    })
+    expect(deps.generate).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps follow-up work bounded by the Agent step limit', async () => {
+    const deps = dependencies()
+    deps.generate = vi.fn(async () => ({
+      text: '仍在处理中', finishReason: 'stop', steps: [{}],
+      toolCalls: [], toolResults: [], content: [{ type: 'text', text: '仍在处理中' }],
+      responseMessages: [{ role: 'assistant', content: [{ type: 'text', text: '仍在处理中' }] }],
+    })) as unknown as AgentRuntimeDependencies['generate']
+    const runtime = await openAgentRuntime({
+      ...openOptions('automatic', deps), automaticSelection: false,
+    })
+
+    await expect(runtime.run({
+      objective: '完成任务', modelMessages: [], maxSteps: 2,
+      getFollowUpMessages: async () => [{ role: 'user', content: '继续' }],
+    })).resolves.toMatchObject({
+      kind: 'completed', finishReason: 'stop', stepCount: 2,
+    })
+    expect(deps.generate).toHaveBeenCalledTimes(2)
+  })
+
+  it('lets an authoritative follow-up provider stop without fallback recovery', async () => {
+    const deps = dependencies()
+    deps.generate = vi.fn(async () => ({
+      text: '', finishReason: 'stop', steps: [{}],
+      toolCalls: [{ type: 'tool-call', toolCallId: 'save-1', toolName: 'save_draft', input: {} }],
+      toolResults: [{ type: 'tool-result', toolCallId: 'save-1', toolName: 'save_draft', output: {} }],
+      content: [],
+      responseMessages: [{ role: 'assistant', content: [] }],
+    })) as unknown as AgentRuntimeDependencies['generate']
+    const runtime = await openAgentRuntime({
+      ...openOptions('automatic', deps), automaticSelection: false,
+    })
+
+    await runtime.run({
+      objective: '保存草稿', modelMessages: [], maxSteps: 5,
+      getFollowUpMessages: async () => [],
+    })
+
+    expect(deps.generate).toHaveBeenCalledTimes(1)
+  })
+
+  it('processes queued follow-up work while executing a manually selected Skill', async () => {
+    const deps = dependencies()
+    let taskComplete = false
+    let executionCalls = 0
+    deps.generate = vi.fn(async (input: Record<string, unknown>) => {
+      const prompt = typeof input.prompt === 'string' ? input.prompt : ''
+      if (prompt.startsWith('Create a bounded execution plan')) {
+        return {
+          output: {
+            goal: '读取素材并保存草稿',
+            steps: [{
+              id: 'deliver', instruction: '保存草稿', requiredReferences: [], requiredTools: [],
+            }],
+            outputRequirements: ['草稿已保存'],
+            verificationCriteria: ['确认任务完成'],
+          },
+        }
+      }
+      if (prompt.startsWith('Return valid JSON only in exactly this shape')) {
+        return { output: { passed: true, violations: [] } }
+      }
+
+      executionCalls += 1
+      if (executionCalls === 1) {
+        expect(input.activeTools).toContain('save_draft')
+        return {
+          text: '素材已经读取，接下来保存草稿', finishReason: 'stop', steps: [{}],
+          toolCalls: [], toolResults: [], content: [{
+            type: 'text', text: '素材已经读取，接下来保存草稿',
+          }],
+          responseMessages: [{
+            role: 'assistant', content: [{ type: 'text', text: '素材已经读取，接下来保存草稿' }],
+          }],
+        }
+      }
+
+      expect(input.messages).toEqual([
+        { role: 'user', content: '读取素材并保存草稿' },
+        expect.objectContaining({ role: 'assistant' }),
+        expect.objectContaining({ role: 'user' }),
+      ])
+      taskComplete = true
+      return {
+        text: '草稿已经保存', finishReason: 'stop', steps: [{}],
+        toolCalls: [], toolResults: [], content: [{ type: 'text', text: '草稿已经保存' }],
+        responseMessages: [{ role: 'assistant', content: [{ type: 'text', text: '草稿已经保存' }] }],
+      }
+    }) as unknown as AgentRuntimeDependencies['generate']
+    const runtime = await openAgentRuntime({
+      ...openOptions('automatic', deps), skillMode: 'manual', skillName: 'Alpha',
+    })
+
+    await expect(runtime.run({
+      objective: '读取素材并保存草稿',
+      modelMessages: [{ role: 'user', content: '读取素材并保存草稿' }],
+      maxSteps: 5,
+      requiredTools: ['save_draft'],
+      getFollowUpMessages: async () => taskComplete ? [] : [{
+        role: 'user', content: '任务尚未完成，请继续保存草稿',
+      }],
+    })).resolves.toMatchObject({
+      kind: 'completed', text: '草稿已经保存', finishReason: 'stop', stepCount: 2,
+      selectedSkill: { name: 'Alpha' },
+    })
+    expect(executionCalls).toBe(2)
+  })
+
+  it('does not add stop recovery turns to an ordinary manually selected Skill run', async () => {
+    const deps = dependencies()
+    let executionCalls = 0
+    deps.generate = vi.fn(async (input: Record<string, unknown>) => {
+      const prompt = typeof input.prompt === 'string' ? input.prompt : ''
+      if (prompt.startsWith('Create a bounded execution plan')) {
+        return {
+          output: {
+            goal: '完成任务',
+            steps: [{ id: 'deliver', instruction: '交付', requiredReferences: [], requiredTools: [] }],
+            outputRequirements: [], verificationCriteria: [],
+          },
+        }
+      }
+      if (prompt.startsWith('Return valid JSON only in exactly this shape')) {
+        return { output: { passed: true, violations: [] } }
+      }
+      executionCalls += 1
+      return {
+        text: '', finishReason: 'stop', steps: [{}],
+        toolCalls: [], toolResults: [], content: [], responseMessages: [],
+      }
+    }) as unknown as AgentRuntimeDependencies['generate']
+    const runtime = await openAgentRuntime({
+      ...openOptions('automatic', deps), skillMode: 'manual', skillName: 'Alpha',
+    })
+
+    await runtime.run({ objective: '完成任务', modelMessages: [], maxSteps: 5 })
+
+    expect(executionCalls).toBe(1)
+  })
+
+  it('shares one max-step budget across Skill execution retries', async () => {
+    const deps = dependencies()
+    let executionCalls = 0
+    deps.generate = vi.fn(async (input: Record<string, unknown>) => {
+      const prompt = typeof input.prompt === 'string' ? input.prompt : ''
+      if (prompt.startsWith('Create a bounded execution plan')) {
+        return {
+          output: {
+            goal: '检索并完成任务',
+            steps: [{
+              id: 'research', instruction: '检索', requiredReferences: [],
+              requiredTools: ['search_assets'],
+            }],
+            outputRequirements: [], verificationCriteria: [],
+          },
+        }
+      }
+      executionCalls += 1
+      return {
+        text: '未检索', finishReason: 'stop', steps: [{}, {}],
+        toolCalls: [], toolResults: [], content: [], responseMessages: [],
+      }
+    }) as unknown as AgentRuntimeDependencies['generate']
+    const runtime = await openAgentRuntime({
+      ...openOptions('automatic', deps), skillMode: 'manual', skillName: 'Alpha',
+    })
+
+    await expect(runtime.run({
+      objective: '检索并完成任务', modelMessages: [], maxSteps: 2,
+      getFollowUpMessages: async () => [],
+    })).rejects.toThrow('Agent execution step limit reached (2)')
+    expect(executionCalls).toBe(1)
+  })
+
+  it('preserves the existing per-execution Skill retry budget without a follow-up provider', async () => {
+    const deps = dependencies()
+    let executionCalls = 0
+    deps.generate = vi.fn(async (input: Record<string, unknown>) => {
+      const prompt = typeof input.prompt === 'string' ? input.prompt : ''
+      if (prompt.startsWith('Create a bounded execution plan')) {
+        return {
+          output: {
+            goal: '检索并完成任务',
+            steps: [{
+              id: 'research', instruction: '检索', requiredReferences: [],
+              requiredTools: ['search_assets'],
+            }],
+            outputRequirements: [], verificationCriteria: [],
+          },
+        }
+      }
+      if (prompt.startsWith('Return valid JSON only in exactly this shape')) {
+        return { output: { passed: true, violations: [] } }
+      }
+      executionCalls += 1
+      return executionCalls === 1 ? {
+        text: '尚未检索', finishReason: 'stop', steps: [{}],
+        toolCalls: [], toolResults: [], content: [], responseMessages: [],
+      } : {
+        text: '检索完成', finishReason: 'stop', steps: [{}],
+        toolCalls: [{
+          type: 'tool-call', toolCallId: 'search-1', toolName: 'search_assets', input: {},
+        }],
+        toolResults: [{
+          type: 'tool-result', toolCallId: 'search-1', toolName: 'search_assets', output: [],
+        }],
+        content: [], responseMessages: [],
+      }
+    }) as unknown as AgentRuntimeDependencies['generate']
+    const runtime = await openAgentRuntime({
+      ...openOptions('automatic', deps), skillMode: 'manual', skillName: 'Alpha',
+    })
+
+    await expect(runtime.run({
+      objective: '检索并完成任务', modelMessages: [], maxSteps: 1,
+    })).resolves.toMatchObject({ kind: 'completed', text: '检索完成', stepCount: 2 })
+    expect(executionCalls).toBe(2)
+  })
+
   it('passes run identity only to the tool transport, not to the model request', async () => {
     const deps = dependencies()
     const openTools = vi.fn(deps.openTools)

@@ -88,6 +88,7 @@ export type AgentRunRequest = {
   selectedContext?: string
   maxSteps: number
   requiredTools?: string[]
+  getFollowUpMessages?: () => ModelMessage[] | Promise<ModelMessage[]>
   onStep?: (checkpoint: AgentStepCheckpoint) => void | Promise<void>
 }
 
@@ -448,41 +449,83 @@ export async function openAgentRuntime(
     if (unavailableTool) {
       throw new Error(`Required Agent tool is unavailable: ${unavailableTool}`)
     }
-    if (!active) {
-      const instructions = `The enabled Skill catalog is available below. Decide yourself whether a Skill is relevant to the task. Call loadSkill only when it helps; otherwise continue without activating a Skill. Skill selection is not a prerequisite for completing the task.\n\n${registry.catalogContext}`
-      let messages = request.modelMessages
-      let generated: Awaited<ReturnType<typeof generateText>>
-      let stepCount = 0
+    let executionStepCount = 0
+
+    const executeModelTurns = async ({
+      instructions,
+      messages: initialMessages,
+      activeTools,
+      recoverProviderStops,
+    }: {
+      instructions: string
+      messages: ModelMessage[]
+      activeTools?: string[]
+      recoverProviderStops: boolean
+    }) => {
+      const hasFollowUpProvider = Boolean(request.getFollowUpMessages)
+      if (hasFollowUpProvider && executionStepCount >= request.maxSteps) {
+        throw new Error(`Agent execution step limit reached (${request.maxSteps})`)
+      }
+      let messages = initialMessages
+      let generated!: Awaited<ReturnType<typeof generateText>>
+      let localStepCount = 0
       let emptyStopRecoveryUsed = false
       const parts: Record<string, unknown>[] = []
+      const toolResults: unknown[] = []
       do {
         generated = await generateWithMessageLog({
           model: options.model,
           instructions,
           messages,
           tools,
-          stopWhen: stepCountIs(Math.max(1, request.maxSteps - stepCount)),
+          ...(activeTools ? { activeTools } : {}),
+          stopWhen: stepCountIs(Math.max(
+            1,
+            request.maxSteps - (hasFollowUpProvider ? executionStepCount : localStepCount),
+          )),
         }, 'execute')
+        const currentToolResults = Array.isArray(generated.toolResults)
+          ? generated.toolResults as Array<Record<string, unknown>>
+          : []
         const generatedParts = executionParts({
-          toolResults: generated.toolResults as Array<Record<string, unknown>>,
+          toolResults: currentToolResults,
           content: generated.content as Array<Record<string, unknown>>,
         })
         parts.push(...generatedParts)
+        toolResults.push(...currentToolResults)
         await request.onStep?.({ phase: 'execute', parts: generatedParts })
         const generatedSteps = Array.isArray(generated.steps) ? generated.steps.length : 1
         const generatedToolCalls = Array.isArray(generated.toolCalls) ? generated.toolCalls : []
-        const generatedToolResults = Array.isArray(generated.toolResults) ? generated.toolResults : []
         const responseMessages = Array.isArray(generated.responseMessages)
           ? generated.responseMessages
           : []
-        stepCount += Math.max(1, generatedSteps)
-        const completedToolOnlyStep = (
+        const completedSteps = Math.max(1, generatedSteps)
+        localStepCount += completedSteps
+        executionStepCount += completedSteps
+        const boundedStepCount = hasFollowUpProvider ? executionStepCount : localStepCount
+        if (
           generated.finishReason === 'stop'
+          && boundedStepCount < request.maxSteps
+          && request.getFollowUpMessages
+        ) {
+          const followUpMessages = await request.getFollowUpMessages()
+          if (followUpMessages.length > 0) {
+            messages = [
+              ...messages,
+              ...responseMessages as ModelMessage[],
+              ...followUpMessages,
+            ]
+            continue
+          }
+          break
+        }
+        const completedToolOnlyStep = (
+          recoverProviderStops && generated.finishReason === 'stop'
           && !generated.text.trim()
           && generatedToolCalls.length > 0
-          && generatedToolResults.length >= generatedToolCalls.length
+          && currentToolResults.length >= generatedToolCalls.length
           && responseMessages.length > 0
-          && stepCount < request.maxSteps
+          && boundedStepCount < request.maxSteps
         )
         if (completedToolOnlyStep) {
           messages = [
@@ -492,12 +535,12 @@ export async function openAgentRuntime(
           continue
         }
         const emptyStoppedStep = (
-          generated.finishReason === 'stop'
+          recoverProviderStops && generated.finishReason === 'stop'
           && !generated.text.trim()
           && generatedToolCalls.length === 0
-          && generatedToolResults.length === 0
+          && currentToolResults.length === 0
           && !emptyStopRecoveryUsed
-          && stepCount < request.maxSteps
+          && boundedStepCount < request.maxSteps
         )
         if (!emptyStoppedStep) break
         emptyStopRecoveryUsed = true
@@ -505,7 +548,17 @@ export async function openAgentRuntime(
           role: 'user',
           content: 'The previous response was empty and called no tools. Continue the original task now. Use the available tools required to complete it, and do not stop before producing the required side effects or a visible final answer.',
         }]
-      } while (stepCount < request.maxSteps)
+      } while ((hasFollowUpProvider ? executionStepCount : localStepCount) < request.maxSteps)
+      return { generated, parts, stepCount: executionStepCount, toolResults }
+    }
+
+    if (!active) {
+      const instructions = `The enabled Skill catalog is available below. Decide yourself whether a Skill is relevant to the task. Call loadSkill only when it helps; otherwise continue without activating a Skill. Skill selection is not a prerequisite for completing the task.\n\n${registry.catalogContext}`
+      const { generated, parts, stepCount } = await executeModelTurns({
+        instructions,
+        messages: request.modelMessages,
+        recoverProviderStops: true,
+      })
       const selectedAfterExecution = registry.activeContext()
       return {
         kind: 'completed', text: generated.text, parts, revisionCount: 0,
@@ -533,6 +586,8 @@ export async function openAgentRuntime(
         return undefined
       }
     }
+
+    let executionFinishReason: string | undefined
 
     const result = await executeSkillRunWithAiSdk({
       skill: active.skill,
@@ -572,23 +627,17 @@ export async function openAgentRuntime(
           ...adapterRequiredTools,
           ...alwaysAvailableTools,
         ])]
-        const generated = await generateWithMessageLog({
-          model: options.model,
+        const execution = await executeModelTurns({
           instructions: prompt,
           messages: request.modelMessages,
-          tools,
           activeTools,
-          stopWhen: stepCountIs(request.maxSteps),
-        }, 'execute')
-        const parts = executionParts({
-          toolResults: generated.toolResults as Array<Record<string, unknown>>,
-          content: generated.content as Array<Record<string, unknown>>,
+          recoverProviderStops: false,
         })
-        await request.onStep?.({ phase: 'execute', parts })
+        executionFinishReason = execution.generated.finishReason
         return {
-          text: generated.text,
-          parts,
-          toolResults: generated.toolResults as unknown[],
+          text: execution.generated.text,
+          parts: execution.parts,
+          toolResults: execution.toolResults,
         }
       },
       validate: async ({ text, run, loadedReferences, toolResults }) => {
@@ -630,6 +679,8 @@ export async function openAgentRuntime(
       parts,
       skillRun,
       revisionCount,
+      finishReason: executionFinishReason,
+      stepCount: executionStepCount,
       selectedSkill: { name: active.skill.name, activation: active.activation },
     }
   }

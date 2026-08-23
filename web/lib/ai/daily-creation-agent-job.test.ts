@@ -279,7 +279,7 @@ describe('daily creation Agent job', () => {
         audit: expect.objectContaining({ capabilities: jobCapabilitySnapshot }),
       }),
     )
-    expect(runtimeRun.mock.calls[0]?.[0]?.requiredTools).toBeUndefined()
+    expect(runtimeRun.mock.calls[0]?.[0]?.requiredTools).toEqual(['save_draft'])
     expect(runtimeRun.mock.calls[0]?.[0]?.selectedContext).toBeUndefined()
   })
 

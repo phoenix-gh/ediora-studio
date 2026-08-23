@@ -592,6 +592,20 @@ export async function runDailyCreationAgentJob(
       objective,
       modelMessages: [{ role: 'user', content: objective }],
       maxSteps: 30,
+      requiredTools: ['save_draft'],
+      getFollowUpMessages: () => {
+        if (firstBlockingToolAudit(audits)) return []
+        const completions = audits.map(audit => ({
+          toolName: audit.toolName, status: audit.status, output: audit.output,
+        }))
+        if (hasInvalidSavedDraftEvidence(completions)) return []
+        const draftIds = persistedDraftIds(completions)
+        if (draftIds.length >= expectedDraftCount) return []
+        return [{
+          role: 'user',
+          content: `The scheduled task is not complete. ${draftIds.length} of ${expectedDraftCount} required drafts have been persisted. Continue the original task now and use save_draft until all required drafts exist. Do not recreate drafts that were already saved.`,
+        }]
+      },
       onStep: event => checkpoint(event.phase, {
         objective,
         latestStep: event,

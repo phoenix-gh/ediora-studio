@@ -40,6 +40,7 @@ it('lets a prompt-directed Agent load a Skill and save exactly one X draft', asy
   const completedCalls: Array<{ toolCallId: string; output: unknown }> = []
   const checkpoints: Array<{ phase: string; checkpoint: Record<string, unknown>; audit: Record<string, unknown> }> = []
   let activeSkill = false
+  let modelCalls = 0
   let saveDraftCalls = 0
   let recordUsageCalls = 0
 
@@ -136,11 +137,30 @@ it('lets a prompt-directed Agent load a Skill and save exactly one X draft', asy
       }
     },
     generate: vi.fn(async (input: Record<string, unknown>) => {
+      modelCalls += 1
       const tools = input.tools as Record<string, Executable>
-      const skill = await tools.loadSkill.execute({ name: fixtureSkill.name }, { toolCallId: 'skill-1' })
-      const reference = await tools.readSkillReference.execute({
-        path: 'references/finance-writing.md',
-      }, { toolCallId: 'reference-1' })
+      if (modelCalls === 1) {
+        const skill = await tools.loadSkill.execute({ name: fixtureSkill.name }, { toolCallId: 'skill-1' })
+        const reference = await tools.readSkillReference.execute({
+          path: 'references/finance-writing.md',
+        }, { toolCallId: 'reference-1' })
+        return {
+          text: '素材已经读取，接下来保存草稿。',
+          content: [{ type: 'text', text: '素材已经读取，接下来保存草稿。' }],
+          finishReason: 'stop', steps: [{}],
+          toolCalls: [
+            { type: 'tool-call', toolCallId: 'skill-1', toolName: 'loadSkill', input: { name: fixtureSkill.name } },
+            { type: 'tool-call', toolCallId: 'reference-1', toolName: 'readSkillReference', input: { path: 'references/finance-writing.md' } },
+          ],
+          toolResults: [
+            { type: 'tool-result', toolName: 'loadSkill', toolCallId: 'skill-1', output: skill },
+            { type: 'tool-result', toolName: 'readSkillReference', toolCallId: 'reference-1', output: reference },
+          ],
+          responseMessages: [{
+            role: 'assistant', content: [{ type: 'text', text: '素材已经读取，接下来保存草稿。' }],
+          }],
+        }
+      }
       const saved = await tools.save_draft.execute({
         draft_type: 'x', title: 'GitHub 日榜观察', content: '今天值得关注的开源项目。',
       }, { toolCallId: 'save-1' })
@@ -151,13 +171,19 @@ it('lets a prompt-directed Agent load a Skill and save exactly one X draft', asy
       }, { toolCallId: 'usage-1' })
       return {
         text: '一条 X 草稿已保存。',
-        content: [],
-        toolResults: [
-          { toolName: 'loadSkill', toolCallId: 'skill-1', output: skill },
-          { toolName: 'readSkillReference', toolCallId: 'reference-1', output: reference },
-          { toolName: 'save_draft', toolCallId: 'save-1', output: saved },
-          { toolName: 'record_content_usage', toolCallId: 'usage-1', output: usage },
+        content: [{ type: 'text', text: '一条 X 草稿已保存。' }],
+        finishReason: 'stop', steps: [{}],
+        toolCalls: [
+          { type: 'tool-call', toolCallId: 'save-1', toolName: 'save_draft', input: {} },
+          { type: 'tool-call', toolCallId: 'usage-1', toolName: 'record_content_usage', input: {} },
         ],
+        toolResults: [
+          { type: 'tool-result', toolName: 'save_draft', toolCallId: 'save-1', output: saved },
+          { type: 'tool-result', toolName: 'record_content_usage', toolCallId: 'usage-1', output: usage },
+        ],
+        responseMessages: [{
+          role: 'assistant', content: [{ type: 'text', text: '一条 X 草稿已保存。' }],
+        }],
       }
     }) as unknown as AgentRuntimeDependencies['generate'],
   }
@@ -218,6 +244,7 @@ it('lets a prompt-directed Agent load a Skill and save exactly one X draft', asy
     kind: 'agent_run', executionId: 41, finalText: '一条 X 草稿已保存。', toolCallCount: 4,
   })
   expect(readReferences).toEqual(['references/finance-writing.md'])
+  expect(modelCalls).toBe(2)
   expect(saveDraftCalls).toBe(1)
   expect(recordUsageCalls).toBe(1)
   expect(completedCalls.map(call => call.toolCallId)).toEqual([
