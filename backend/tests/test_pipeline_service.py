@@ -285,3 +285,189 @@ async def test_create_pipeline_job_idempotency_does_not_duplicate_rows(pipeline_
     assert await pipeline_db.scalar(
         select(func.count(ContentJobEvent.id)).where(ContentJobEvent.job_id == first.id)
     ) == 2
+
+
+def _pipeline_request(*, key: str, confirmation: str = "interactive", count: int = 2):
+    from pipeline_contracts import PipelineCreateInput
+
+    names = ["source-research", "writing-plan", "humanize-writing"][:count]
+    invocations = []
+    for index, name in enumerate(names, start=1):
+        if name == "writing-plan":
+            invocations.append(_model(_invocation(
+                str(index),
+                name,
+                parameter_kind="writing_plan",
+                parameter_id="7",
+                parameter_display_name="深度技术文章",
+                parameter_snapshot={"plan_id": 7, "title": "深度技术文章"},
+            )))
+        else:
+            invocations.append(_model(_invocation(str(index), name)))
+    return PipelineCreateInput(
+        objective="Write an article",
+        title="Command test",
+        confirmation=confirmation,
+        idempotency_key=key,
+        invocations=invocations,
+    )
+
+
+@pytest.mark.asyncio
+async def test_confirm_is_versioned_and_idempotent(pipeline_db):
+    from pipeline_service import (
+        PipelinePlanConflict,
+        confirm_pipeline,
+        create_pipeline_job,
+    )
+    from models import ContentJobEvent
+
+    job = await create_pipeline_job(pipeline_db, _pipeline_request(key="confirm"))
+    confirmed = await confirm_pipeline(
+        pipeline_db,
+        job_id=job.id,
+        plan_version=1,
+        request_id="confirm-1",
+    )
+    event_count = await pipeline_db.scalar(
+        select(func.count(ContentJobEvent.id)).where(ContentJobEvent.job_id == job.id)
+    )
+    repeated = await confirm_pipeline(
+        pipeline_db,
+        job_id=job.id,
+        plan_version=1,
+        request_id="confirm-1",
+    )
+
+    assert confirmed.status == "queued"
+    assert repeated.id == confirmed.id
+    assert await pipeline_db.scalar(
+        select(func.count(ContentJobEvent.id)).where(ContentJobEvent.job_id == job.id)
+    ) == event_count
+
+    stale = await create_pipeline_job(pipeline_db, _pipeline_request(key="stale"))
+    with pytest.raises(PipelinePlanConflict):
+        await confirm_pipeline(
+            pipeline_db,
+            job_id=stale.id,
+            plan_version=9,
+            request_id="stale-1",
+        )
+
+
+@pytest.mark.asyncio
+async def test_revise_changes_only_stage_instructions_and_increments_plan_version(pipeline_db):
+    from pipeline_service import create_pipeline_job, revise_pipeline_plan
+    from models import ContentJobStep
+
+    job = await create_pipeline_job(pipeline_db, _pipeline_request(key="revise"))
+    revised = await revise_pipeline_plan(
+        pipeline_db,
+        job_id=job.id,
+        plan_version=1,
+        request_id="revise-1",
+        stage_instructions={
+            "skill:01:source-research": "Use primary sources first.",
+        },
+    )
+
+    assert revised.plan_version == 2
+    assert revised.input_data["pipeline"]["invocations"][0]["skill_name"] == "source-research"
+    assert revised.input_data["pipeline"]["plan"]["stages"][0]["instruction"] == "Use primary sources first."
+    stages = list((await pipeline_db.execute(
+        select(ContentJobStep)
+        .where(ContentJobStep.job_id == job.id)
+        .order_by(ContentJobStep.id)
+    )).scalars().all())
+    assert stages[1].input_data["plan_stage"]["instruction"] == "Use primary sources first."
+
+
+@pytest.mark.asyncio
+async def test_retry_and_rerun_preserve_history_and_supersede_downstream_artifacts(pipeline_db):
+    from execution_artifacts import append_execution_artifact
+    from pipeline_service import (
+        create_pipeline_job,
+        rerun_pipeline_stage,
+        retry_pipeline_stage,
+    )
+    from models import ContentJobStep, ExecutionArtifact
+
+    retry_job = await create_pipeline_job(
+        pipeline_db,
+        _pipeline_request(key="retry", count=1),
+    )
+    failed_step = (await pipeline_db.execute(
+        select(ContentJobStep).where(ContentJobStep.job_id == retry_job.id).where(
+            ContentJobStep.step_key != "pipeline_plan"
+        )
+    )).scalar_one()
+    failed_step.status = "failed"
+    failed_step.retryable = True
+    failed_step.error = "temporary"
+    retry_job.status = "failed"
+    await pipeline_db.commit()
+
+    retried = await retry_pipeline_stage(
+        pipeline_db,
+        job_id=retry_job.id,
+        stage_key=failed_step.step_key,
+        request_id="retry-1",
+    )
+    retry_steps = list((await pipeline_db.execute(
+        select(ContentJobStep).where(ContentJobStep.job_id == retry_job.id)
+        .where(ContentJobStep.step_key == failed_step.step_key)
+        .order_by(ContentJobStep.attempt)
+    )).scalars().all())
+    assert retried.status == "queued"
+    assert [(step.attempt, step.status) for step in retry_steps] == [
+        (1, "failed"), (2, "queued"),
+    ]
+
+    rerun_job = await create_pipeline_job(
+        pipeline_db,
+        _pipeline_request(key="rerun", count=2),
+    )
+    rerun_steps = list((await pipeline_db.execute(
+        select(ContentJobStep).where(ContentJobStep.job_id == rerun_job.id)
+        .where(ContentJobStep.step_key != "pipeline_plan")
+        .order_by(ContentJobStep.id)
+    )).scalars().all())
+    for step in rerun_steps:
+        step.status = "succeeded"
+        await append_execution_artifact(
+            pipeline_db,
+            job_id=rerun_job.id,
+            step_id=step.id,
+            attempt=step.attempt,
+            kind="article",
+            role="primary",
+            title=step.step_key,
+            text_content=f"{step.step_key} output",
+        )
+    rerun_job.status = "succeeded"
+    await pipeline_db.commit()
+
+    rerun = await rerun_pipeline_stage(
+        pipeline_db,
+        job_id=rerun_job.id,
+        stage_key=rerun_steps[0].step_key,
+        request_id="rerun-1",
+    )
+    new_steps = list((await pipeline_db.execute(
+        select(ContentJobStep).where(ContentJobStep.job_id == rerun_job.id)
+        .where(ContentJobStep.step_key != "pipeline_plan")
+        .order_by(ContentJobStep.id)
+    )).scalars().all())
+    artifacts = list((await pipeline_db.execute(
+        select(ExecutionArtifact).where(ExecutionArtifact.job_id == rerun_job.id)
+    )).scalars().all())
+
+    assert rerun.status == "queued"
+    assert rerun.run_epoch == 2
+    assert [(step.step_key, step.attempt, step.status) for step in new_steps] == [
+        (rerun_steps[0].step_key, 1, "superseded"),
+        (rerun_steps[1].step_key, 1, "superseded"),
+        (rerun_steps[0].step_key, 2, "queued"),
+        (rerun_steps[1].step_key, 2, "queued"),
+    ]
+    assert [artifact.status for artifact in artifacts] == ["superseded", "superseded"]
