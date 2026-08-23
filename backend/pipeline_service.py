@@ -21,7 +21,14 @@ from execution_artifacts import (
     supersede_execution_artifacts,
 )
 from log_redaction import redact_log_value, redact_secret_text
-from models import AgentExecution, AgentLogEvent, ContentJob, ContentJobEvent, ContentJobStep
+from models import (
+    AgentExecution,
+    AgentLogEvent,
+    ContentJob,
+    ContentJobEvent,
+    ContentJobStep,
+    ExecutionArtifact,
+)
 from pipeline_contracts import (
     PipelineCreateInput,
     build_macro_plan,
@@ -544,6 +551,67 @@ async def complete_pipeline_stage(
         raise PipelineInvalidState(
             f"cannot complete Stage with Agent execution {execution.status}"
         )
+    if execution.status == "succeeded":
+        # A legacy/runtime recovery may have committed the Agent completion
+        # before the Stage acknowledgement. Reuse its already-safe artifacts;
+        # never run the Skill or append a second copy.
+        existing_artifacts = list((await session.execute(
+            select(ExecutionArtifact)
+            .where(
+                ExecutionArtifact.job_id == job.id,
+                ExecutionArtifact.step_id == step.id,
+                ExecutionArtifact.attempt == step.attempt,
+                ExecutionArtifact.status == "active",
+            )
+            .order_by(ExecutionArtifact.id.asc())
+        )).scalars().all())
+        existing_primary = next(
+            (artifact for artifact in existing_artifacts if artifact.role == "primary"),
+            None,
+        )
+        if existing_primary is None:
+            raise PipelineInvalidState(
+                "Agent execution succeeded before a primary artifact was persisted"
+            )
+        auxiliary_ids = [
+            artifact.id
+            for artifact in existing_artifacts
+            if artifact.role == "auxiliary"
+        ]
+        await succeed_locked_step(session, job, step, {
+            "run_epoch": job.run_epoch,
+            "attempt": step.attempt,
+            "primary_artifact_id": existing_primary.id,
+            "auxiliary_artifact_ids": auxiliary_ids,
+        })
+        keys = _pipeline_stage_keys(job)
+        is_final = step.step_key == keys[-1]
+        if is_final:
+            job.status = "succeeded"
+            job.completed_at = _now()
+            session.add(ContentJobEvent(
+                job_id=job.id,
+                kind="job_succeeded",
+                payload={"run_epoch": job.run_epoch, "recovered": True},
+            ))
+        else:
+            job.status = "queued"
+            job.completed_at = None
+        session.add(ContentJobEvent(
+            job_id=job.id,
+            step_id=step.id,
+            kind="pipeline_stage_succeeded",
+            payload={
+                "step_key": step.step_key,
+                "attempt": step.attempt,
+                "run_epoch": job.run_epoch,
+                "primary_artifact_id": existing_primary.id,
+                "recovered": True,
+            },
+        ))
+        await session.commit()
+        await session.refresh(job)
+        return job
     if not isinstance(completion_evidence, dict):
         raise PipelineArtifactError("completion evidence must be an object")
     if len(auxiliary) > 24:

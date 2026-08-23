@@ -332,6 +332,33 @@ function isStageSucceeded(job: DurableJob, stageId: number, attempt: number) {
   ))
 }
 
+function recoveredCompletionEvidence(
+  execution: DurableAgentExecution,
+  primary: PipelineArtifact,
+): AgentCompletionEvidence {
+  const candidate = record(execution.completion_evidence)
+  if (
+    candidate.kind === 'agent_run'
+    && typeof candidate.executionId === 'number'
+    && typeof candidate.finalText === 'string'
+    && typeof candidate.toolCallCount === 'number'
+  ) {
+    return {
+      kind: 'agent_run',
+      executionId: candidate.executionId,
+      finalText: candidate.finalText.slice(0, 2_000),
+      toolCallCount: candidate.toolCallCount,
+    }
+  }
+  const finalText = text(primary.text_content) || json(primary.structured_content)
+  return {
+    kind: 'agent_run',
+    executionId: execution.id,
+    finalText: finalText.slice(0, 2_000),
+    toolCallCount: 0,
+  }
+}
+
 function deterministicFailure(error: unknown) {
   if (error instanceof ApiRequestError) {
     return error.status === 409 || error.status === 422 || !error.retryable
@@ -424,6 +451,30 @@ export async function runSkillPipelineJob(
     execution = await deps.ensureExecution(jobId, executionRequest)
     if (execution.status === 'failed' || execution.status === 'cancelled' || execution.status === 'uncertain') {
       throw new Error(`Agent execution is ${execution.status}`)
+    }
+    if (execution.status === 'succeeded') {
+      job = await deps.getJob(jobId, workerHeaders(jobId))
+      const recoveredStage = latestStage(job, stage.key) ?? stage
+      const primary = recoveredStage.artifacts
+        .filter(artifact => artifact.role === 'primary' && artifact.status !== 'superseded')
+        .sort((left, right) => (right.id ?? 0) - (left.id ?? 0))[0]
+      if (!primary) {
+        throw new Error('Agent execution succeeded before a primary artifact was persisted')
+      }
+      const evidence = recoveredCompletionEvidence(execution, primary)
+      pendingEvidence = evidence
+      await deps.completeStage(jobId, stage.id, {
+        attempt: stage.attempt,
+        runEpoch,
+        executionId: execution.id,
+        primary,
+        auxiliary: recoveredStage.artifacts.filter(artifact => (
+          artifact.role === 'auxiliary' && artifact.status !== 'superseded'
+        )),
+        completionEvidence: record(execution.completion_evidence),
+      })
+      finalizationConfirmed = true
+      return evidence
     }
     capabilityPin = capabilityPinFromExecution(execution)
     const recordedCalls = await deps.listToolCalls(jobId, execution.id)

@@ -683,3 +683,82 @@ async def test_worker_stage_rejects_credential_artifacts(pipeline_db):
     assert await pipeline_db.scalar(
         select(func.count(ExecutionArtifact.id)).where(ExecutionArtifact.job_id == job.id)
     ) == 0
+
+
+@pytest.mark.asyncio
+async def test_worker_stage_recovers_succeeded_execution_without_duplicate_artifacts(pipeline_db):
+    from agent_execution_service import ensure_agent_execution
+    from execution_artifacts import append_execution_artifact
+    from models import ContentJobStep, ExecutionArtifact
+    from pipeline_service import complete_pipeline_stage, create_pipeline_job, start_pipeline_stage
+
+    job = await create_pipeline_job(pipeline_db, _pipeline_request(
+        key="worker-recovery",
+        confirmation="automatic",
+        count=1,
+    ))
+    step = (await pipeline_db.execute(
+        select(ContentJobStep).where(
+            ContentJobStep.job_id == job.id,
+            ContentJobStep.step_key != "pipeline_plan",
+        )
+    )).scalar_one()
+    await start_pipeline_stage(
+        pipeline_db,
+        job_id=job.id,
+        step_id=step.id,
+        attempt=step.attempt,
+        run_epoch=job.run_epoch,
+    )
+    execution = await ensure_agent_execution(
+        pipeline_db,
+        job_id=job.id,
+        step_id=step.id,
+        attempt=step.attempt,
+        objective="Write an article",
+        skill_mode="manual",
+        skill_name="source-research",
+    )
+    artifact = await append_execution_artifact(
+        pipeline_db,
+        job_id=job.id,
+        step_id=step.id,
+        attempt=step.attempt,
+        kind="article",
+        role="primary",
+        title="Recovered",
+        text_content="already persisted",
+    )
+    execution.status = "succeeded"
+    execution.completion_evidence = {
+        "kind": "agent_run",
+        "executionId": execution.id,
+        "finalText": "already persisted",
+        "toolCallCount": 0,
+    }
+    await pipeline_db.commit()
+
+    recovered = await complete_pipeline_stage(
+        pipeline_db,
+        job_id=job.id,
+        step_id=step.id,
+        attempt=step.attempt,
+        run_epoch=job.run_epoch,
+        execution_id=execution.id,
+        primary={
+            "kind": "article",
+            "title": "must not duplicate",
+            "text_content": "must not duplicate",
+        },
+        auxiliary=[],
+        completion_evidence={},
+    )
+
+    assert recovered.status == "succeeded"
+    assert await pipeline_db.scalar(
+        select(func.count(ExecutionArtifact.id)).where(
+            ExecutionArtifact.job_id == job.id,
+            ExecutionArtifact.step_id == step.id,
+        )
+    ) == 1
+    assert step.output_data["primary_artifact_id"] == artifact.id
