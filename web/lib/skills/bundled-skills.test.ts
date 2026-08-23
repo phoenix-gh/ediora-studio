@@ -194,4 +194,11 @@ describe('bundled human-social-copy Skill', () => {
       expect(registered?.instructions).toMatch(/必须|不得|输出/)
     }
   })
+
+  it('limits source research activation to requests for a research deliverable', async () => {
+    const skill = await getEnabledSkill('source-research')
+
+    expect(skill?.description).toContain('研究底稿')
+    expect(skill?.description).toContain('不适用于普通数据库查询、信息源浏览或单次选题检索')
+  })
 })

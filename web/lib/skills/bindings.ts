@@ -29,7 +29,7 @@ const builtinBindings: readonly SkillBinding[] = Object.freeze([
   {
     skillName: 'source-research',
     displayName: '资料研究',
-    description: '检索、核验并整理可追溯的资料，作为后续写作的研究底稿。',
+    description: '为明确的研究任务检索、核验并整理可追溯资料；普通数据查询或单次选题检索不需要使用。',
     primaryOutput: 'research_bundle',
     capabilityProfile: 'research',
     requestedAllowedTools: ['web_search', 'fetch_url'],

@@ -64,7 +64,7 @@ export async function selectSkillForTurn({
   decide(input: { prompt: string }): Promise<unknown>
 }): Promise<{ skillName: string; activation: SkillRunActivation } | undefined> {
   const catalog = enabledSkills.map(skill => `- ${skill.name}: ${skill.description}`).join('\n') || '- None'
-  const prompt = `Return valid JSON only. Select at most one enabled Skill for the current request. Return exactly this shape: {"skillName": string|null, "continueRestored": boolean}. Return no skillName when none clearly matches. Continue a restored Skill only when the current request is a related follow-up. Do not return a tool-call envelope such as {"tool":"loadSkill","arguments":{...}} and do not call tools during Skill selection.\n\nRequest:\n${userRequest}\n\nRestored Skill:\n${restoredSkillName ?? '(none)'}\n\nEnabled Skills:\n${catalog}`
+  const prompt = `Return valid JSON only. Select at most one enabled Skill for the current request. Return exactly this shape: {"skillName": string|null, "continueRestored": boolean}. Return no skillName when none clearly matches. Ordinary stored-data lookup, browsing application records, simple question answering, direct tool use, and one-off topic retrieval must continue without a Skill even when a broadly related research Skill exists. Continue a restored Skill only when the current request is a related follow-up. Do not return a tool-call envelope such as {"tool":"loadSkill","arguments":{...}} and do not call tools during Skill selection.\n\nRequest:\n${userRequest}\n\nRestored Skill:\n${restoredSkillName ?? '(none)'}\n\nEnabled Skills:\n${catalog}`
   const initial = await decide({ prompt })
   let decision = parseSkillSelection(initial)
   if (!decision) {

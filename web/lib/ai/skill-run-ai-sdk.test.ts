@@ -48,6 +48,25 @@ describe('generic SkillRun AI SDK adapter', () => {
     })).resolves.toBeUndefined()
   })
 
+  it('keeps ordinary stored-source lookup in normal Chat instead of a research Skill run', async () => {
+    const sourceResearch = {
+      ...alpha,
+      name: 'source-research',
+      description: '检索、核验并整理与用户主题直接相关的可追溯资料，供后续写作阶段使用。',
+    }
+
+    await expect(selectSkillForTurn({
+      enabledSkills: [sourceResearch],
+      userRequest: '帮我从 X 的信息源的 Github 订阅源中获取一个今天可以写的题材',
+      decide: async ({ prompt }) => ({
+        skillName: prompt.toLowerCase().includes('ordinary stored-data lookup')
+          ? null
+          : 'source-research',
+        continueRestored: false,
+      }),
+    })).resolves.toBeUndefined()
+  })
+
   it('rejects selector output that is not in the enabled catalog', async () => {
     await expect(selectSkillForTurn({
       enabledSkills: [alpha], userRequest: 'task',
