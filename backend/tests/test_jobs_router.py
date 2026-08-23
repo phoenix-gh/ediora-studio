@@ -230,6 +230,46 @@ def test_job_agent_log_returns_full_message_timeline(client):
     assert response.json()["messages"][0]["payload"]["text"] == "cover ready"
 
 
+def test_job_agent_log_uses_newest_stage_execution(client):
+    created = client.post(
+        "/api/jobs", json={"flow": "skill_pipeline", "title": "Latest", "input": {}}
+    ).json()
+
+    from database import SessionLocal
+    from models import AgentExecution, ContentJobStep
+
+    async def seed_executions():
+        async with SessionLocal() as session:
+            steps = [
+                ContentJobStep(job_id=created["id"], step_key="research", attempt=1),
+                ContentJobStep(job_id=created["id"], step_key="write", attempt=1),
+            ]
+            session.add_all(steps)
+            await session.flush()
+            executions = [
+                AgentExecution(
+                    job_id=created["id"], step_id=steps[0].id, attempt=1,
+                    objective="old", status="succeeded",
+                ),
+                AgentExecution(
+                    job_id=created["id"], step_id=steps[1].id, attempt=1,
+                    objective="new", status="running",
+                ),
+            ]
+            session.add_all(executions)
+            await session.commit()
+            return executions[1].id, steps[1].id
+
+    newest_id, newest_step_id = asyncio.new_event_loop().run_until_complete(
+        seed_executions()
+    )
+    response = client.get(f"/api/jobs/{created['id']}/agent-log")
+
+    assert response.status_code == 200, response.text
+    assert response.json()["execution"]["id"] == newest_id
+    assert response.json()["execution"]["step_id"] == newest_step_id
+
+
 def test_worker_reconcile_requires_worker_auth_takes_no_body_and_closes_queue(
     client,
     monkeypatch,

@@ -68,6 +68,64 @@ def test_agent_execution_routes_require_worker_auth(client):
     assert response.status_code == 403
 
 
+def test_agent_execution_route_supports_stage_identity_and_latest_by_job(client):
+    test_client, job_id = client
+
+    from database import SessionLocal
+    from models import ContentJobStep
+
+    async def seed_steps():
+        async with SessionLocal() as session:
+            steps = [
+                ContentJobStep(job_id=job_id, step_key="research", attempt=1),
+                ContentJobStep(job_id=job_id, step_key="write", attempt=1),
+            ]
+            session.add_all(steps)
+            await session.commit()
+            for step in steps:
+                await session.refresh(step)
+            return [step.id for step in steps]
+
+    research_id, write_id = asyncio.run(seed_steps())
+    first = test_client.post(
+        "/api/agent-executions",
+        headers=headers(),
+        json={
+            "job_id": job_id,
+            "step_id": research_id,
+            "attempt": 1,
+            "objective": "research",
+            "skill_mode": "auto",
+            "skill_name": None,
+        },
+    )
+    second = test_client.post(
+        "/api/agent-executions",
+        headers=headers(),
+        json={
+            "job_id": job_id,
+            "step_id": write_id,
+            "attempt": 1,
+            "objective": "write",
+            "skill_mode": "manual",
+            "skill_name": "human-social-copy",
+        },
+    )
+
+    assert first.status_code == 201, first.text
+    assert second.status_code == 201, second.text
+    assert first.json()["step_id"] == research_id
+    assert first.json()["attempt"] == 1
+    assert second.json()["step_id"] == write_id
+
+    latest = test_client.get(
+        f"/api/agent-executions/by-job/{job_id}", headers=headers(),
+    )
+    assert latest.status_code == 200, latest.text
+    assert latest.json()["id"] == second.json()["id"]
+    assert latest.json()["step_id"] == write_id
+
+
 def test_agent_execution_route_round_trips_checkpoint_and_tool_replay(client):
     test_client, job_id = client
     created = test_client.post(

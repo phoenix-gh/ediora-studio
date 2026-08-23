@@ -13,6 +13,7 @@ from sqlalchemy import and_, desc, exists, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from content_jobs import InvalidJobTransition, cancel_job, create_job, fail_step, record_event, retry_step, start_step, succeed_job, succeed_step
+from agent_execution_service import latest_agent_execution_for_job
 from database import get_db
 from job_queue import RedisJobQueue, enqueue_job
 from job_reconciliation import reconcile_content_jobs
@@ -225,9 +226,7 @@ async def get_job_agent_log(job_id: int, db: AsyncSession = Depends(get_db)):
     job = await db.get(ContentJob, job_id)
     if job is None:
         raise HTTPException(404, "job not found")
-    execution = await db.scalar(select(AgentExecution).where(
-        AgentExecution.job_id == job_id
-    ))
+    execution = await latest_agent_execution_for_job(db, job_id)
     if execution is None:
         return {"execution": None, "messages": [], "tools": []}
     messages = list((await db.execute(
@@ -244,6 +243,8 @@ async def get_job_agent_log(job_id: int, db: AsyncSession = Depends(get_db)):
         "execution": {
             "id": execution.id,
             "job_id": execution.job_id,
+            "step_id": execution.step_id,
+            "attempt": execution.attempt,
             "status": execution.status,
             "objective": execution.objective,
             "phase": execution.phase,

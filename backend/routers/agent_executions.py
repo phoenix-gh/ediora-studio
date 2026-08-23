@@ -18,6 +18,7 @@ from agent_execution_service import (
     ensure_agent_execution,
     fail_agent_execution,
     fail_agent_tool_call,
+    latest_agent_execution_for_job,
     update_agent_checkpoint,
 )
 from agent_log_service import append_agent_log_event
@@ -35,6 +36,8 @@ router = APIRouter(
 
 class ExecutionCreate(BaseModel):
     job_id: int = Field(gt=0)
+    step_id: int | None = Field(default=None, gt=0)
+    attempt: int = Field(default=1, gt=0)
     objective: str = Field(min_length=1, max_length=20_000)
     skill_mode: str = Field(pattern="^(auto|manual)$")
     skill_name: str | None = Field(default=None, max_length=200)
@@ -82,6 +85,8 @@ def _execution_payload(execution: AgentExecution) -> dict:
     return {
         "id": execution.id,
         "job_id": execution.job_id,
+        "step_id": execution.step_id,
+        "attempt": execution.attempt,
         "status": execution.status,
         "objective": execution.objective,
         "skill_mode": execution.skill_mode,
@@ -127,12 +132,16 @@ async def post_execution(
         execution = await ensure_agent_execution(
             db,
             job_id=body.job_id,
+            step_id=body.step_id,
+            attempt=body.attempt,
             objective=body.objective,
             skill_mode=body.skill_mode,
             skill_name=body.skill_name,
         )
     except KeyError as error:
         raise HTTPException(404, str(error)) from None
+    except ValueError as error:
+        raise HTTPException(409, str(error)) from error
     return _execution_payload(execution)
 
 
@@ -141,9 +150,7 @@ async def get_execution_by_job(
     job_id: int,
     db: AsyncSession = Depends(get_db),
 ):
-    execution = await db.scalar(
-        select(AgentExecution).where(AgentExecution.job_id == job_id)
-    )
+    execution = await latest_agent_execution_for_job(db, job_id)
     if execution is None:
         raise HTTPException(404, "agent execution not found")
     return _execution_payload(execution)
