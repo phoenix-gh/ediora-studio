@@ -582,6 +582,21 @@ export async function openAgentRuntime(
         executionStepCount += completedSteps
         const boundedStepCount = sharesExecutionBudget ? executionStepCount : localStepCount
         if (requireCompletion && goalRun?.declaration) break
+        const completedToolStep = (
+          requireCompletion
+          && recoverProviderStops && generated.finishReason === 'stop'
+          && generatedToolCalls.length > 0
+          && currentToolResults.length >= generatedToolCalls.length
+          && responseMessages.length > 0
+          && boundedStepCount < request.maxSteps
+        )
+        if (completedToolStep) {
+          messages = [
+            ...messages,
+            ...responseMessages as ModelMessage[],
+          ]
+          continue
+        }
         if (
           requireCompletion
           && generated.finishReason === 'stop'

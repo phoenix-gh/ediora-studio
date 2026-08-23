@@ -24,6 +24,11 @@ import {
   type OpenAgentRuntimeOptions,
 } from './agent-runtime'
 import {
+  blockedGoalError,
+  completeGoalInputSchema,
+  validateGoalCompletionEvidence,
+} from './agent-goal-completion'
+import {
   isAgentCapabilitySnapshot,
   pinCapabilitySnapshot,
   type AgentCapabilitySnapshot,
@@ -343,11 +348,13 @@ function recoveredCompletionEvidence(
     && typeof candidate.finalText === 'string'
     && typeof candidate.toolCallCount === 'number'
   ) {
+    const goalCompletion = completeGoalInputSchema.safeParse(candidate.goalCompletion)
     return {
       kind: 'agent_run',
       executionId: candidate.executionId,
       finalText: candidate.finalText.slice(0, 2_000),
       toolCallCount: candidate.toolCallCount,
+      ...(goalCompletion.success ? { goalCompletion: goalCompletion.data } : {}),
     }
   }
   const finalText = text(primary.text_content) || json(primary.structured_content)
@@ -364,7 +371,7 @@ function deterministicFailure(error: unknown) {
     return error.status === 409 || error.status === 422 || !error.retryable
   }
   const message = error instanceof Error ? error.message : String(error)
-  return /Selected skill is unavailable|capability drift|Invalid Skill plan|Required Agent tool|automatic Skill Pipeline|Agent tool audit|validation failed|exhausted|empty deliverable|snapshot is missing|Stage is failed|Agent execution is (?:failed|uncertain|cancelled)|interrupted after a side effect/.test(message)
+  return /Selected skill is unavailable|capability drift|Invalid Skill plan|Required Agent tool|automatic Skill Pipeline|Agent tool audit|Agent ended without declaring goal completion|Goal completion cites an unavailable tool call|Agent blocked:|snapshot is missing|Stage is failed|Agent execution is (?:failed|uncertain|cancelled)|interrupted after a side effect/.test(message)
 }
 
 export async function runSkillPipelineJob(
@@ -608,6 +615,15 @@ export async function runSkillPipelineJob(
       modelMessages: [{ role: 'user', content: objective }],
       selectedContext: stageContext(job, stage),
       maxSteps: MAX_STEPS,
+      requireGoalCompletion: true,
+      validateGoalCompletion: declaration => validateGoalCompletionEvidence(
+        declaration,
+        audits.map(audit => ({
+          toolCallId: audit.toolCallId,
+          toolName: audit.toolName,
+          status: audit.status,
+        })),
+      ),
       onStep: event => checkpoint(
         event.phase,
         { objective, stage: stage.key, latestStep: event },
@@ -621,25 +637,30 @@ export async function runSkillPipelineJob(
     if (result.kind === 'approval') {
       throw new Error('automatic Skill Pipeline cannot pause for approval')
     }
-    if (result.finishReason === 'tool-calls' && (result.stepCount ?? 0) >= MAX_STEPS) {
-      throw new Error(`Skill Pipeline exhausted ${MAX_STEPS} steps while requesting another tool call`)
-    }
-    if (!result.skillRun?.validation.passed) {
-      throw new Error('Skill Pipeline validation failed')
-    }
-    if (!result.text.trim()) throw new Error('Skill Pipeline returned an empty deliverable')
+    const declaration = result.goalCompletion
+    if (!declaration) throw new Error('Agent ended without declaring goal completion')
+    validateGoalCompletionEvidence(declaration, audits.map(audit => ({
+      toolCallId: audit.toolCallId,
+      toolName: audit.toolName,
+      status: audit.status,
+    })))
+    if (declaration.status === 'blocked') throw blockedGoalError(declaration)
 
     const evidence: AgentCompletionEvidence = {
       kind: 'agent_run',
       executionId: execution.id,
-      finalText: result.text.slice(0, 2_000),
-      toolCallCount: audits.filter(audit => audit.status === 'succeeded').length,
+      finalText: declaration.summary.slice(0, 2_000),
+      toolCallCount: audits.filter(audit => (
+        audit.status === 'succeeded' && audit.toolName !== 'complete_goal'
+      )).length,
+      goalCompletion: declaration,
     }
     pendingEvidence = evidence
     await checkpoint('finalizing', {
       objective,
       stage: stage.key,
       evidence,
+      goalCompletion: declaration,
     }, withCapabilityAudit({
       skill: runtime.snapshot(),
       skillRun: agentSkillRunAudit(result),
@@ -662,7 +683,7 @@ export async function runSkillPipelineJob(
       primary: {
         kind: text(planned.expected_output) || 'generic',
         title: text(planned.display_name) || skillName,
-        text_content: result.text,
+        text_content: declaration.summary,
       },
       auxiliary: agentSkillRunAudit(result)
         ? [{

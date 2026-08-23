@@ -37,6 +37,11 @@ function runResult(text: string) {
     revisionCount: 0 as const,
     finishReason: 'stop',
     stepCount: 1,
+    goalCompletion: {
+      status: 'completed' as const,
+      summary: text,
+      evidence: [],
+    },
     skillRun: {
       skillName: 'test',
       activation: 'manual' as const,
@@ -109,9 +114,15 @@ function pipelineJob(): DurableJob {
 
 function dependencies(job: DurableJob, options: {
   failValidation?: boolean
+  missingGoal?: boolean
+  blockedGoal?: boolean
   loseCompletionResponse?: boolean
 } = {}) {
-  const opened: Array<{ skillName?: string; selectedContext?: string }> = []
+  const opened: Array<{
+    skillName?: string
+    selectedContext?: string
+    requireGoalCompletion?: boolean
+  }> = []
   const failedStages: unknown[] = []
   const failedExecutions: unknown[] = []
   const executions = new Map<number, { id: number; version: number; status: string }>()
@@ -205,10 +216,22 @@ function dependencies(job: DurableJob, options: {
         close: vi.fn(),
         run: vi.fn(async request => {
           opened.at(-1)!.selectedContext = request.selectedContext
+          opened.at(-1)!.requireGoalCompletion = request.requireGoalCompletion
           await request.onStep?.({ phase: 'execute', parts: [] })
-          return options.failValidation
+          const result = options.failValidation
             ? { ...runResult('draft'), skillRun: { ...runResult('draft').skillRun, validation: { passed: false, violations: [] } } }
             : { ...runResult(`${optionsForRuntime.skillName} output`), skillRun: { ...runResult('draft').skillRun, skillName: optionsForRuntime.skillName ?? '' } }
+          if (options.missingGoal) return { ...result, goalCompletion: undefined }
+          if (options.blockedGoal) return {
+            ...result,
+            goalCompletion: {
+              status: 'blocked' as const,
+              summary: '上游资料不足',
+              evidence: [],
+              remainingWork: ['补充可信来源'],
+            },
+          }
+          return result
         }),
       }
     }),
@@ -230,6 +253,7 @@ describe('Skill Pipeline production worker', () => {
     expect(opened.map(item => item.skillName)).toEqual([
       'source-research', 'writing-plan', 'humanize-writing', 'account-voice',
     ])
+    expect(opened.every(item => item.requireGoalCompletion)).toBe(true)
     expect(opened[1].selectedContext).toContain('source-research output')
     expect(opened[1].selectedContext).toContain('深度技术文章')
     expect(opened[3].selectedContext).toContain('账号 A')
@@ -243,16 +267,39 @@ describe('Skill Pipeline production worker', () => {
     expect(deps.failStage).not.toHaveBeenCalled()
   })
 
-  it('fails an automatic Stage when Skill validation does not pass', async () => {
+  it('treats Skill validation as advisory when the Agent declares completion', async () => {
     const job = pipelineJob()
     const { deps, failedStages, failedExecutions } = dependencies(job, { failValidation: true })
 
-    await expect(runSkillPipelineJob(job.id, deps)).rejects.toThrow('validation failed')
+    await expect(runSkillPipelineJob(job.id, deps)).resolves.toMatchObject({
+      kind: 'agent_run', finalText: 'draft',
+    })
 
-    expect(failedExecutions).toHaveLength(1)
+    expect(failedExecutions).toHaveLength(0)
+    expect(failedStages).toHaveLength(0)
+    expect(job.pipeline?.stages[0].status).toBe('succeeded')
+  })
+
+  it('does not persist a Stage after an ordinary stop without a goal declaration', async () => {
+    const job = pipelineJob()
+    const { deps, failedStages } = dependencies(job, { missingGoal: true })
+
+    await expect(runSkillPipelineJob(job.id, deps)).rejects.toThrow(
+      'Agent ended without declaring goal completion',
+    )
+    expect(deps.completeStage).not.toHaveBeenCalled()
     expect(failedStages).toHaveLength(1)
-    expect(failedStages[0]).toMatchObject({ input: { retryable: false } })
-    expect(job.status).toBe('failed')
+  })
+
+  it('does not start the next Stage after the Agent declares the current Stage blocked', async () => {
+    const job = pipelineJob()
+    const { deps, opened } = dependencies(job, { blockedGoal: true })
+
+    await expect(runSkillPipelineJob(job.id, deps)).rejects.toThrow(
+      'Agent blocked: 上游资料不足; remaining work: 补充可信来源',
+    )
+    expect(opened).toHaveLength(1)
+    expect(job.pipeline?.stages[1].status).toBe('queued')
   })
 
   it('recovers when the durable completion succeeded but the response was lost', async () => {

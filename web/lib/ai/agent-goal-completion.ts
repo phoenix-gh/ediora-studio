@@ -54,3 +54,30 @@ export function goalCompletionFromToolOutput(value: unknown) {
   const parsed = completeGoalInputSchema.safeParse(candidate)
   return parsed.success ? parsed.data : undefined
 }
+
+export type GoalEvidenceToolCall = {
+  toolCallId: string
+  toolName: string
+  status: string
+}
+
+export function validateGoalCompletionEvidence(
+  declaration: AgentGoalCompletionDeclaration,
+  calls: GoalEvidenceToolCall[],
+) {
+  const successfulCallIds = new Set(calls
+    .filter(call => call.status === 'succeeded' && call.toolName !== COMPLETE_GOAL_TOOL_NAME)
+    .map(call => call.toolCallId))
+  for (const reference of declaration.evidence) {
+    if (reference.kind === 'tool_call' && !successfulCallIds.has(reference.id)) {
+      throw new Error(`Goal completion cites an unavailable tool call: ${reference.id}`)
+    }
+  }
+}
+
+export function blockedGoalError(declaration: AgentGoalCompletionDeclaration) {
+  const remaining = declaration.remainingWork?.length
+    ? `; remaining work: ${declaration.remainingWork.join('; ')}`
+    : ''
+  return new Error(`Agent blocked: ${declaration.summary}${remaining}`)
+}
