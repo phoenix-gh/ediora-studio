@@ -289,6 +289,38 @@ def test_persists_a_bounded_skill_run_audit_without_reference_or_tool_bodies(cli
         assert rejected.status_code == 422
 
 
+def test_persists_step_scoped_tool_evidence_in_skill_run_audit(client):
+    session = client.post("/api/chat/sessions", json={}).json()
+    audit = {
+        "skillName": "source-research",
+        "activation": "automatic",
+        "steps": [{
+            "id": "step-1",
+            "status": "completed",
+            "evidence": ["tool:get_github_daily_trending:call-1"],
+        }],
+        "loadedReferences": [],
+        "toolEvidence": [{
+            "stepId": "step-1",
+            "toolName": "get_github_daily_trending",
+            "toolCallId": "call-1",
+            "state": "succeeded",
+        }],
+        "validation": {"passed": True, "violations": []},
+        "revisionCount": 0,
+    }
+
+    created = client.post(
+        f"/api/chat/sessions/{session['id']}/messages",
+        json={"role": "assistant", "parts": [], "text": "", "skill_run": audit},
+    )
+
+    assert created.status_code == 201, created.text
+    assert created.json()["skill_run"] == audit
+    detail = client.get(f"/api/chat/sessions/{session['id']}")
+    assert detail.json()["messages"][0]["skill_run"] == audit
+
+
 def test_persists_capability_snapshot_without_bodies(client):
     session = client.post("/api/chat/sessions", json={}).json()
     snapshot = {

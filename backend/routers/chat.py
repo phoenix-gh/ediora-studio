@@ -36,6 +36,7 @@ class SkillRunStepAudit(BaseModel):
 
 
 class SkillToolEvidenceAudit(BaseModel):
+    stepId: str | None = Field(default=None, min_length=1, max_length=120)
     toolName: str = Field(min_length=1, max_length=200)
     toolCallId: str = Field(min_length=1, max_length=200)
     state: Literal["succeeded", "failed", "approval-pending"]
