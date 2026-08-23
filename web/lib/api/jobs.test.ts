@@ -1,6 +1,44 @@
 import { describe, expect, it, vi } from 'vitest'
 
-import { cancelPipeline, confirmPipeline, getJobEvents, imageUrlsForJob, rerunPipelineStage, revisePipeline, retryPipelineStage } from './jobs'
+import { cancelPipeline, confirmPipeline, getJobEvents, imageUrlsForJob, listJobs, rerunPipelineStage, revisePipeline, retryPipelineStage } from './jobs'
+
+describe('job list compatibility', () => {
+  it('normalizes legacy Skill Pipeline list items without top-level steps', async () => {
+    const pipelineStage = {
+      id: 811,
+      key: 'skill:01:source-research',
+      attempt: 1,
+      status: 'running',
+      input: {},
+      output: {},
+      error: '',
+      retryable: false,
+      artifacts: [],
+      created_at: '2026-08-23T10:00:00Z',
+      started_at: '2026-08-23T10:00:01Z',
+      completed_at: null,
+    }
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      jobs: [{
+        id: 81,
+        flow: 'skill_pipeline',
+        title: 'Pipeline',
+        status: 'running',
+        created_at: '2026-08-23T10:00:00Z',
+        started_at: '2026-08-23T10:00:01Z',
+        completed_at: null,
+        pipeline: { plan: { version: 1, objective: '写文章', stages: [] }, stages: [pipelineStage], artifacts: [] },
+        events: [],
+      }],
+      next_cursor: null,
+      has_more: false,
+    }), { status: 200 })))
+
+    const page = await listJobs()
+
+    expect(page.jobs[0].steps).toEqual([pipelineStage])
+  })
+})
 
 describe('image job results', () => {
   it('returns absolute asset URLs from succeeded image job steps', () => {

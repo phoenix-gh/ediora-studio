@@ -113,6 +113,21 @@ def _artifact_payload(artifact) -> dict[str, Any]:
     }
 
 
+def _step_payload(step: ContentJobStep) -> dict[str, Any]:
+    return {
+        "id": step.id,
+        "key": step.step_key,
+        "attempt": step.attempt,
+        "status": step.status,
+        "output": _public_value(step.output_data),
+        "error": redact_secret_text(step.error or ""),
+        "retryable": step.retryable,
+        "created_at": step.created_at,
+        "started_at": step.started_at,
+        "completed_at": step.completed_at,
+    }
+
+
 async def _pipeline_steps(session: AsyncSession, job_id: int) -> list[ContentJobStep]:
     return list((await session.execute(
         select(ContentJobStep)
@@ -258,6 +273,7 @@ async def pipeline_job_payload(session: AsyncSession, job_id: int) -> dict[str, 
         "created_at": job.created_at,
         "started_at": job.started_at,
         "completed_at": job.completed_at,
+        "steps": [_step_payload(step) for step in steps],
         "pipeline": {
             "plan": _public_value(plan_step.output_data if plan_step else job.input_data.get("pipeline", {}).get("plan", {})),
             "stages": stages,

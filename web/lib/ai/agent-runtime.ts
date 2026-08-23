@@ -449,23 +449,51 @@ export async function openAgentRuntime(
       throw new Error(`Required Agent tool is unavailable: ${unavailableTool}`)
     }
     if (!active) {
-      const generated = await generateWithMessageLog({
-        model: options.model,
-        instructions: `The enabled Skill catalog is available below. Decide yourself whether a Skill is relevant to the task. Call loadSkill only when it helps; otherwise continue without activating a Skill. Skill selection is not a prerequisite for completing the task.\n\n${registry.catalogContext}`,
-        messages: request.modelMessages,
-        tools,
-        stopWhen: stepCountIs(request.maxSteps),
-      }, 'execute')
-      const parts = executionParts({
-        toolResults: generated.toolResults as Array<Record<string, unknown>>,
-        content: generated.content as Array<Record<string, unknown>>,
-      })
-      await request.onStep?.({ phase: 'execute', parts })
+      const instructions = `The enabled Skill catalog is available below. Decide yourself whether a Skill is relevant to the task. Call loadSkill only when it helps; otherwise continue without activating a Skill. Skill selection is not a prerequisite for completing the task.\n\n${registry.catalogContext}`
+      let messages = request.modelMessages
+      let generated: Awaited<ReturnType<typeof generateText>>
+      let stepCount = 0
+      const parts: Record<string, unknown>[] = []
+      do {
+        generated = await generateWithMessageLog({
+          model: options.model,
+          instructions,
+          messages,
+          tools,
+          stopWhen: stepCountIs(Math.max(1, request.maxSteps - stepCount)),
+        }, 'execute')
+        const generatedParts = executionParts({
+          toolResults: generated.toolResults as Array<Record<string, unknown>>,
+          content: generated.content as Array<Record<string, unknown>>,
+        })
+        parts.push(...generatedParts)
+        await request.onStep?.({ phase: 'execute', parts: generatedParts })
+        const generatedSteps = Array.isArray(generated.steps) ? generated.steps.length : 1
+        const generatedToolCalls = Array.isArray(generated.toolCalls) ? generated.toolCalls : []
+        const generatedToolResults = Array.isArray(generated.toolResults) ? generated.toolResults : []
+        const responseMessages = Array.isArray(generated.responseMessages)
+          ? generated.responseMessages
+          : []
+        stepCount += Math.max(1, generatedSteps)
+        const completedToolOnlyStep = (
+          generated.finishReason === 'stop'
+          && !generated.text.trim()
+          && generatedToolCalls.length > 0
+          && generatedToolResults.length >= generatedToolCalls.length
+          && responseMessages.length > 0
+          && stepCount < request.maxSteps
+        )
+        if (!completedToolOnlyStep) break
+        messages = [
+          ...messages,
+          ...responseMessages as ModelMessage[],
+        ]
+      } while (stepCount < request.maxSteps)
       const selectedAfterExecution = registry.activeContext()
       return {
         kind: 'completed', text: generated.text, parts, revisionCount: 0,
         finishReason: generated.finishReason,
-        stepCount: Array.isArray(generated.steps) ? generated.steps.length : 0,
+        stepCount,
         selectedSkill: selectedAfterExecution
           ? { name: selectedAfterExecution.skill.name, activation: selectedAfterExecution.activation }
           : undefined,

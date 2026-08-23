@@ -108,6 +108,19 @@ export interface JobListPage {
   has_more: boolean
 }
 
+type ContentJobResponse = Omit<ContentJob, 'steps' | 'events'> & {
+  steps?: ContentJobStep[]
+  events?: ContentJobEvent[]
+}
+
+function normalizeContentJob(job: ContentJobResponse): ContentJob {
+  return {
+    ...job,
+    steps: Array.isArray(job.steps) ? job.steps : (job.pipeline?.stages ?? []),
+    events: Array.isArray(job.events) ? job.events : [],
+  }
+}
+
 export function imageUrlsForJob(job: ContentJob) {
   const apiOrigin = new URL(API_BASE).origin
   return job.steps.flatMap(step => {
@@ -117,12 +130,13 @@ export function imageUrlsForJob(job: ContentJob) {
   }).map(url => new URL(url, apiOrigin).toString())
 }
 
-export function listJobs(options: JobListOptions = {}) {
+export async function listJobs(options: JobListOptions = {}) {
   const params = new URLSearchParams({ limit: String(options.limit ?? 30) })
   if (options.cursor) params.set('cursor', options.cursor)
   if (options.kind) params.set('kind', options.kind)
   if (options.status) params.set('status', options.status)
-  return apiFetch<JobListPage>(`/jobs?${params.toString()}`)
+  const page = await apiFetch<Omit<JobListPage, 'jobs'> & { jobs: ContentJobResponse[] }>(`/jobs?${params.toString()}`)
+  return { ...page, jobs: page.jobs.map(normalizeContentJob) }
 }
 export function createJob(body: { flow: string; title: string; input: Record<string, unknown>; idempotency_key?: string }) {
   return apiFetch<ContentJob>('/jobs', { method: 'POST', body: JSON.stringify(body) })

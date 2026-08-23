@@ -495,6 +495,51 @@ describe('shared Agent runtime', () => {
     })
   })
 
+  it('continues after a provider reports stop for a completed tool-only step', async () => {
+    const deps = dependencies()
+    deps.generate = vi.fn()
+      .mockResolvedValueOnce({
+        text: '', finishReason: 'stop', steps: [{}],
+        toolCalls: [{
+          type: 'tool-call', toolCallId: 'skill-1', toolName: 'loadSkill',
+          input: { name: 'Alpha' },
+        }],
+        toolResults: [{
+          type: 'tool-result', toolCallId: 'skill-1', toolName: 'loadSkill',
+          output: { name: 'Alpha', instructions: '# Alpha workflow' },
+        }],
+        content: [],
+        responseMessages: [
+          { role: 'assistant', content: [{
+            type: 'tool-call', toolCallId: 'skill-1', toolName: 'loadSkill',
+            input: { name: 'Alpha' },
+          }] },
+          { role: 'tool', content: [{
+            type: 'tool-result', toolCallId: 'skill-1', toolName: 'loadSkill',
+            output: { type: 'json', value: { name: 'Alpha' } },
+          }] },
+        ],
+      })
+      .mockImplementationOnce(async (input: Record<string, unknown>) => {
+        expect(input.messages).toHaveLength(2)
+        return {
+          text: '任务继续执行并完成', finishReason: 'stop', steps: [{}],
+          toolCalls: [], toolResults: [], content: [{ type: 'text', text: '任务继续执行并完成' }],
+          responseMessages: [{ role: 'assistant', content: [{ type: 'text', text: '任务继续执行并完成' }] }],
+        }
+      }) as unknown as AgentRuntimeDependencies['generate']
+    const runtime = await openAgentRuntime({
+      ...openOptions('automatic', deps), automaticSelection: false,
+    })
+
+    await expect(runtime.run({
+      objective: '加载 Skill 后继续完成任务', modelMessages: [], maxSteps: 5,
+    })).resolves.toMatchObject({
+      kind: 'completed', text: '任务继续执行并完成', finishReason: 'stop', stepCount: 2,
+    })
+    expect(deps.generate).toHaveBeenCalledTimes(2)
+  })
+
   it('passes run identity only to the tool transport, not to the model request', async () => {
     const deps = dependencies()
     const openTools = vi.fn(deps.openTools)

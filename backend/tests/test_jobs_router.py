@@ -140,6 +140,31 @@ def test_skill_pipeline_job_requires_worker_auth_and_automatic_enqueue_is_idempo
     assert repeated.json()["id"] == payload["id"]
 
 
+def test_list_jobs_returns_complete_top_level_steps_for_skill_pipeline(client):
+    headers = {"X-Worker-Token": "test-worker-token-at-least-32-characters"}
+    created = client.post(
+        "/api/jobs",
+        json=_pipeline_body(key="job:pipeline:list-contract"),
+        headers=headers,
+    ).json()
+
+    response = client.get("/api/jobs?limit=30")
+
+    assert response.status_code == 200, response.text
+    listed = next(
+        job for job in response.json()["jobs"] if job["id"] == created["id"]
+    )
+    assert [step["key"] for step in listed["steps"]] == [
+        "pipeline_plan",
+        "skill:01:source-research",
+        "skill:02:humanize-writing",
+    ]
+    assert set(listed["steps"][0]) >= {
+        "id", "key", "attempt", "status", "output", "error",
+        "retryable", "created_at", "started_at", "completed_at",
+    }
+
+
 def test_worker_pipeline_stage_routes_are_authenticated_and_queue_next_stage_once(
     client,
     monkeypatch,

@@ -251,6 +251,12 @@ async def test_create_pipeline_job_persists_ordered_frozen_stage_snapshots(pipel
     assert stages[0].output_data["stages"][0]["step_key"] == "skill:01:source-research"
 
     payload = await pipeline_job_payload(pipeline_db, job.id)
+    assert [step["key"] for step in payload["steps"]] == [
+        "pipeline_plan",
+        "skill:01:source-research",
+        "skill:02:writing-plan",
+        "skill:03:humanize-writing",
+    ]
     assert payload["pipeline"]["plan"]["stages"][1]["skill_name"] == "writing-plan"
     assert payload["pipeline"]["stages"][0]["input"]["invocation"]["skill_name"] == "source-research"
     assert "instructions" not in payload["pipeline"]["stages"][0]["input"]["invocation"]

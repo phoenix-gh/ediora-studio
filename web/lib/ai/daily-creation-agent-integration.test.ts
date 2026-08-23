@@ -80,7 +80,9 @@ it('lets a prompt-directed Agent load a Skill and save exactly one X draft', asy
               content: z.string().min(1),
             }).parse(input)
             saveDraftCalls += 1
-            return { id: 101, title: saved.title, status: 'drafting' }
+            return {
+              id: 101, title: saved.title, status: 'drafting', draft_type: 'x',
+            }
           },
         }),
         record_content_usage: tool({
