@@ -20,7 +20,7 @@ Let a user compose an ordered writing workflow directly in Chat:
 写一篇关于本地优先 AI 工具的公众号文章
 ```
 
-Every confirmed `@` chip invokes one Skill. Ediora resolves the Skills and
+Every confirmed inline `@` token invokes one Skill. Ediora resolves the Skills and
 their parameters, shows a plan for a complex Chat task, runs each Skill as an
 independent durable stage in written order, exposes foldable intermediate
 results, and returns the final artifact as a normal assistant message.
@@ -51,7 +51,7 @@ plan confirmation; a Job creates its plan and begins automatically.
 
 ### In scope
 
-- Ordered, duplicate-preserving Skill invocation from structured Chat chips.
+- Ordered, duplicate-preserving Skill invocation from structured inline Chat tokens.
 - Searchable parameter selection for Skills that declare one parameter kind.
 - A shared persistent `SkillPipeline` for Chat and background Jobs.
 - Macro pipeline plans and per-stage micro plans.
@@ -87,10 +87,10 @@ The display form is:
 
 The first release supports zero or one structured parameter per invocation.
 The text form is a visual representation; execution is triggered only by a
-confirmed structured chip. Plain text containing an email address or an
+confirmed structured token. Plain text containing an email address or an
 unconfirmed `@word` never invokes a Skill.
 
-Each chip stores stable identity independent of its mutable display label:
+Each token stores stable identity independent of its mutable display label:
 
 ```ts
 type SubmittedSkillInvocationPart = {
@@ -120,26 +120,39 @@ instructions, parameter content, and capability fields are server-owned values
 added during transactional resolution; client-supplied snapshot values are
 ignored.
 
-Ordering is the chip occurrence order in the submitted message. Duplicate
+Ordering is the token occurrence order in the submitted message. Duplicate
 Skills are valid and remain separate invocations; Ediora does not merge or
 deduplicate them.
 
 ### Composer interaction
 
 1. Typing `@` opens the enabled Skill list and focuses search.
-2. Choosing a Skill without a parameter inserts its chip immediately.
+2. Choosing a Skill without a parameter inserts an atomic highlighted token at
+   the current caret position inside the message body.
 3. Choosing a parameterized Skill transitions the same popover to a searchable
    entity list.
-4. Choosing the entity inserts one chip displaying
+4. Choosing the entity inserts one inline token displaying
    `@Skill:parameter`.
-5. Backspace selects and then removes a complete chip; arrow keys navigate
-   suggestions; Escape closes the current level.
+5. Backspace immediately after a token or Delete immediately before it removes
+   the complete token. Browser selection deletion is synchronized back to the
+   structured invocation list; a token is never partially editable.
 6. On mobile, the same flow uses a bottom Sheet. A “view all” action may open
    a larger dialog without changing the selection contract.
 
-The UI may serialize chips back to readable text for copying, but API requests
-must submit the structured parts. The server never reconstructs authoritative
-IDs by parsing display text.
+The composer is a lightweight rich-text surface containing ordinary text nodes
+and non-editable Skill nodes. Copying serializes a token to readable
+`@Skill:parameter` text; pasted content is always plain text and never creates a
+Skill invocation. API requests submit the ordered message parts and the
+structured invocations separately. The execution objective contains only the
+ordinary text nodes. The server validates that token IDs occur in the same order
+as the invocation list and never reconstructs authoritative IDs by parsing
+display text.
+
+Persisted user messages retain the ordered text and Skill parts, so sent
+messages render the same highlighted tokens as the composer. The parts reuse the
+existing JSON message column; no database schema migration is required, and
+historical plain-text Pipeline messages remain readable through their fallback
+text.
 
 ### Parameter resolvers and snapshots
 
@@ -170,10 +183,10 @@ the wrong kind.
 
 ### Chat and Job behavior
 
-A normal Chat message with no Skill chip continues through `/api/chat` and the
+A normal Chat message with no Skill token continues through `/api/chat` and the
 existing Chat path.
 
-A Chat message with one or more Skill chips creates a pipeline. A complex
+A Chat message with one or more Skill tokens creates a pipeline. A complex
 pipeline is planned and shown in `awaiting_confirmation`; execution starts
 after the user confirms the current plan version. The same confirmation path
 is used for a single explicit Skill when its plan or tool profile requires
@@ -568,7 +581,7 @@ While planning, the assistant pipeline message shows progress. In
 - `Start`, `Adjust plan`, and `Cancel` actions.
 
 `Adjust plan` edits descriptive execution instructions and regenerates a new
-`plan_version`. It does not mutate the submitted chip sequence.
+`plan_version`. It does not mutate the submitted token sequence.
 
 ### Running pipeline card
 
@@ -723,7 +736,7 @@ account voice.
 Publish Account style snapshot. It must preserve factual claims and required
 structure unless the account rules explicitly request a compatible change.
 
-This separation makes every user-visible chip correspond to one durable Stage
+This separation makes every user-visible token correspond to one durable Stage
 and allows either transform to be omitted, repeated, or reordered explicitly.
 
 ## Schema migration and compatibility
@@ -814,7 +827,7 @@ requirements, not a substitute for data-preserving migration behavior.
 
 ### UI tests
 
-- Keyboard and mobile Skill/parameter selection create structured chips.
+- Keyboard and mobile Skill/parameter selection create structured inline tokens.
 - Email addresses and plain unconfirmed `@` text do not invoke Skills.
 - Plan actions and optimistic version conflict handling are accessible.
 - Current, completed, failed, and pending Stage folding follows the contract.
@@ -827,7 +840,7 @@ requirements, not a substitute for data-preserving migration behavior.
 - Upgrade the populated legacy PostgreSQL fixture twice with no data loss.
 - Verify old single-Skill Chat, old jobs, schedules, logs, and draft creation.
 - Run focused backend and frontend regressions for each implementation phase.
-- Complete one real-model vertical smoke test from Chat chips through final
+- Complete one real-model vertical smoke test from Chat tokens through final
   assistant output before release.
 
 The full repository suite is not required by default when focused coverage is
@@ -905,7 +918,7 @@ goal while preserving production data. Physical table renaming is deferred.
 
 The feature is releasable when all of the following are true:
 
-1. A user can select multiple parameterized or unparameterized Skill chips and
+1. A user can select multiple parameterized or unparameterized Skill tokens and
    the server preserves their exact order, identity, and duplicates.
 2. Chat presents and confirms the plan; Job mode begins automatically under
    the same persisted pipeline contract.

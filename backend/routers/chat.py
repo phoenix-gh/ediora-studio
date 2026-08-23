@@ -181,13 +181,52 @@ class ChatMessagePartsUpdate(BaseModel):
     parts: list[dict] = Field(default_factory=list)
 
 
+class ChatPipelineTextPart(BaseModel):
+    type: Literal["text"]
+    text: str = Field(max_length=20_000)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ChatPipelineInvocationPart(BaseModel):
+    type: Literal["skill-invocation"]
+    invocation_id: str = Field(min_length=1, max_length=120)
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class ChatPipelineCreate(BaseModel):
     client_message_id: str = Field(min_length=1, max_length=200)
     objective: str = Field(min_length=1, max_length=20_000)
     title: str = Field(default="Skill Pipeline", min_length=1, max_length=500)
     invocations: list[ResolvedSkillInvocation] = Field(min_length=1, max_length=24)
+    message_parts: list[ChatPipelineTextPart | ChatPipelineInvocationPart] = Field(
+        default_factory=list,
+        max_length=200,
+    )
 
     model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="after")
+    def validate_message_invocation_order(self):
+        if not self.message_parts:
+            return self
+        message_ids = [
+            part.invocation_id
+            for part in self.message_parts
+            if isinstance(part, ChatPipelineInvocationPart)
+        ]
+        invocation_ids = [invocation.invocation_id for invocation in self.invocations]
+        if message_ids != invocation_ids:
+            raise ValueError("消息中的 Skill 顺序与 Pipeline 不一致")
+        visible_objective = "".join(
+            part.text
+            for part in self.message_parts
+            if isinstance(part, ChatPipelineTextPart)
+        ).strip()
+        if visible_objective != self.objective.strip():
+            raise ValueError("消息正文与执行目标不一致")
+        return self
 
 
 class SourceSearchResult(BaseModel):
@@ -352,11 +391,29 @@ async def create_chat_pipeline(
         await db.rollback()
         raise HTTPException(422, str(exc)) from exc
 
+    invocation_by_id = {
+        invocation.invocation_id: invocation
+        for invocation in body.invocations
+    }
+    display_parts = []
+    for part in body.message_parts:
+        if isinstance(part, ChatPipelineTextPart):
+            display_parts.append({"type": "text", "text": part.text})
+            continue
+        invocation = invocation_by_id[part.invocation_id]
+        display_parts.append({
+            "type": "skill-invocation",
+            "invocationId": invocation.invocation_id,
+            "skillName": invocation.skill_name,
+            "displayName": invocation.skill_display_name,
+            "parameterDisplayName": invocation.parameter_display_name,
+        })
+
     user_message = ChatMessage(
         session_id=session_id,
         role="user",
         text=body.objective,
-        parts=[{
+        parts=[*display_parts, {
             "type": "skill-pipeline-request",
             "clientMessageId": body.client_message_id,
             "objective": body.objective,

@@ -41,6 +41,33 @@ describe('ChatMessageView', () => {
     expect(screen.getByText('助手回答')).toBeInTheDocument()
   })
 
+  it('renders persisted Skill invocations inline with surrounding user text', () => {
+    const userMessage: DisplayMessage = {
+      id: 3,
+      role: 'user',
+      parts: [
+        { type: 'text', text: '帮我用(' },
+        {
+          type: 'skill-invocation',
+          invocationId: 'one',
+          skillName: 'writing-plan',
+          displayName: '写作方案',
+          parameterDisplayName: 'AI 产品观察',
+        },
+        { type: 'text', text: ')来写一篇文章' },
+        { type: 'skill-pipeline-request', clientMessageId: 'message-1' },
+      ],
+      text: '帮我用()来写一篇文章',
+      created_at: '2026-08-22T00:00:00Z',
+    }
+
+    render(<ChatMessageView message={userMessage} />)
+
+    const token = screen.getByText('@写作方案:AI 产品观察')
+    expect(token).toHaveAttribute('data-skill-token', 'true')
+    expect(token.parentElement).toHaveTextContent('帮我用(@写作方案:AI 产品观察)来写一篇文章')
+  })
+
   it('renders tool approval actions with the persisted message identity', async () => {
     const user = userEvent.setup()
     const onApproval = vi.fn()

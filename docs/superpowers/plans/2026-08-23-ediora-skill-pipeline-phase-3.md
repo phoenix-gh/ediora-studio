@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox syntax for tracking.
 
-**Goal:** Add the Ediora Chat experience for ordered `@技能` pipelines: structured multi-Skill chips, server-resolved parameters, confirmation, foldable durable progress, recovery controls, reconnect, and final assistant output.
+**Goal:** Add the Ediora Chat experience for ordered `@技能` pipelines: structured inline Skill tokens, server-resolved parameters, confirmation, foldable durable progress, recovery controls, reconnect, and final assistant output.
 
 **Architecture:** The browser stores only submitted Skill identities and parameter IDs. Next.js server routes resolve enabled Skill packages and authorized Writing Plans/Publish Accounts, sanitize parameter snapshots, and call the existing trusted FastAPI Chat Pipeline endpoint with the worker token. Chat renders the durable Job projection from `GET /api/jobs/{id}`; polling/refetch is only a transport concern, while PostgreSQL Job state remains authoritative.
 
@@ -13,7 +13,7 @@
 ## Global Constraints
 
 - Work only on `feat/skill-pipeline-design` in `/tmp/WeMediaStudio-skill-pipeline-design`; do not edit `develop` or `main` directly.
-- Keep the existing plain `/api/chat` flow and legacy single-Skill context selector working when no pipeline chip is submitted.
+- Keep the existing plain `/api/chat` flow and legacy single-Skill context selector working when no pipeline token is submitted.
 - Chip order is the submitted order; duplicate Skill selections are valid and must remain separate invocations.
 - The browser must never receive or submit `SKILL.md` instructions, Skill directories, worker tokens, Publish Account credentials, or raw provider payloads.
 - Parameter selection must use active server data; the server resolves and snapshots the entity in the same transaction as Chat Pipeline creation.
@@ -135,10 +135,10 @@ rerunPipelineStage(jobId: number, stageKey: string, requestId: string): Promise<
 />
 ```
 
-- [ ] **Step 1: Write failing component tests.** Cover typing `@` opens the Skill picker, selecting a no-parameter Skill appends one chip, selecting a parameterized Skill opens a searchable “选择写作方案” dialog, removing a chip preserves the remaining order, and selecting the same Skill twice creates two invocation IDs rather than deduplicating.
+- [ ] **Step 1: Write failing component tests.** Cover typing `@` opens the Skill picker, selection inserts an atomic highlighted token at the caret, selecting a parameterized Skill opens a searchable “选择写作方案” dialog, Backspace removes one complete token, plain-text paste does not create a Skill, and selecting the same Skill twice creates two invocation IDs rather than deduplicating.
 - [ ] **Step 2: Run the component tests and verify the missing picker/behavior failure.**
-- [ ] **Step 3: Implement the picker.** Use the existing Popover/Dialog primitives; show chips as `@显示名` or `@显示名:参数名`; keep the popover focused for keyboard navigation; fetch parameter options on dialog open/query; use a mobile-safe Dialog layout; expose a single `onChange` array with immutable ordered entries.
-- [ ] **Step 4: Integrate ChatClient.** Intercept an unmodified `@` in the textarea to open the picker, intercept Backspace on an empty input to remove the last chip, clear chips on new conversation, and preserve the current plain Chat/draft flow when the array is empty. Submit pipeline chips through `createChatPipeline` instead of `/api/chat`.
+- [ ] **Step 3: Implement the picker and rich composer.** Use the existing Popover/Dialog primitives; render `@显示名` or `@显示名:参数名` as non-editable inline nodes; keep text and invocation IDs in document order; fetch parameter options on dialog open/query; force pasted content to plain text; use a mobile-safe Dialog layout.
+- [ ] **Step 4: Integrate ChatClient.** Insert an unmodified `@` as ordinary text while opening the picker at the saved caret, replace it only after Skill confirmation, remove adjacent tokens atomically, clear the document only after a successful send, and preserve the current plain Chat/draft flow when no token exists. Submit ordered display parts plus structured invocations through `createChatPipeline`; persist and render those parts in message history. Keep the same client message ID when retrying an unchanged Pipeline submission.
 - [ ] **Step 5: Run picker and ChatClient tests, then commit.**
 
   ```bash

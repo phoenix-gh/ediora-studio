@@ -191,17 +191,67 @@ describe('ChatClient', () => {
     )
 
     await waitFor(() => expect(chatApi.getChatSession).toHaveBeenCalledWith(7))
-    const textarea = screen.getByPlaceholderText('问问本地信息源里的内容…')
-    fireEvent.keyDown(textarea, { key: '@', shiftKey: false, isComposing: false })
-    expect(screen.getByRole('button', { name: '@ 添加技能' })).toBeInTheDocument()
+    const editor = screen.getByRole('textbox', { name: '消息内容' })
+    editor.textContent = '请用('
+    fireEvent.input(editor)
+    const range = document.createRange()
+    range.selectNodeContents(editor)
+    range.collapse(false)
+    const selection = window.getSelection()
+    selection?.removeAllRanges()
+    selection?.addRange(range)
+    fireEvent.keyDown(editor, { key: '@', shiftKey: false, isComposing: false })
     fireEvent.click(screen.getByRole('button', { name: /文章写作/ }))
-    fireEvent.change(textarea, { target: { value: '请写一篇文章' } })
-    fireEvent.submit(textarea.closest('form')!)
+    editor.append(document.createTextNode(')写一篇文章'))
+    fireEvent.input(editor)
+    fireEvent.submit(editor.closest('form')!)
 
     await waitFor(() => expect(chatApi.createChatPipeline).toHaveBeenCalledWith(7, expect.objectContaining({
-      objective: '请写一篇文章',
+      objective: '请用()写一篇文章',
       invocations: [expect.objectContaining({ skillName: 'article-drafting', skillDisplayName: '文章写作' })],
+      messageParts: [
+        { type: 'text', text: '请用(' },
+        expect.objectContaining({ type: 'skill-invocation', skillName: 'article-drafting', skillDisplayName: '文章写作' }),
+        { type: 'text', text: ')写一篇文章' },
+      ],
     })))
+    view.unmount()
+  })
+
+  it('keeps inline Skill content retryable when Pipeline creation fails', async () => {
+    chatApi.listChatSkills.mockResolvedValue([{
+      name: 'article-drafting',
+      displayName: '文章写作',
+      description: '按资料写文章',
+      version: '1.0.0',
+    }])
+    chatApi.createChatPipeline
+      .mockRejectedValueOnce(new Error('Pipeline 暂时不可用'))
+      .mockResolvedValueOnce({ job: { id: 82 }, user_message_id: 103, assistant_message_id: 104 })
+    const view = render(
+      <ChatWorkspaceProvider>
+        <ChatClient />
+      </ChatWorkspaceProvider>,
+    )
+
+    await waitFor(() => expect(chatApi.getChatSession).toHaveBeenCalledWith(7))
+    const editor = screen.getByRole('textbox', { name: '消息内容' })
+    editor.textContent = '重试这篇文章'
+    fireEvent.input(editor)
+    const range = document.createRange()
+    range.selectNodeContents(editor)
+    range.collapse(false)
+    const selection = window.getSelection()
+    selection?.removeAllRanges()
+    selection?.addRange(range)
+    fireEvent.keyDown(editor, { key: '@', shiftKey: false, isComposing: false })
+    fireEvent.click(screen.getByRole('button', { name: /文章写作/ }))
+    fireEvent.submit(editor.closest('form')!)
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Pipeline 暂时不可用')
+    expect(screen.getByRole('button', { name: '发送消息' })).toBeEnabled()
+    fireEvent.submit(editor.closest('form')!)
+    await waitFor(() => expect(chatApi.createChatPipeline).toHaveBeenCalledTimes(2))
     view.unmount()
   })
 

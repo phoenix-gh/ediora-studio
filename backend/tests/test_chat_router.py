@@ -69,9 +69,14 @@ def test_chat_pipeline_creation_is_interactive_atomic_and_idempotent(client):
     session_id = client.post("/api/chat/sessions", json={}).json()["id"]
     body = {
         "client_message_id": "chat-message-1",
-        "objective": "Write a sourced article",
+        "objective": "Please use to write an article",
         "title": "Chat pipeline",
         "invocations": [_chat_pipeline_invocation()],
+        "message_parts": [
+            {"type": "text", "text": "Please use"},
+            {"type": "skill-invocation", "invocation_id": "one"},
+            {"type": "text", "text": " to write an article"},
+        ],
     }
 
     denied = client.post(f"/api/chat/sessions/{session_id}/pipelines", json=body)
@@ -104,8 +109,65 @@ def test_chat_pipeline_creation_is_interactive_atomic_and_idempotent(client):
     assert detail.status_code == 200
     messages = detail.json()["messages"]
     assert len(messages) == 2
+    assert messages[0]["parts"][:3] == [
+        {"type": "text", "text": "Please use"},
+        {
+            "type": "skill-invocation",
+            "invocationId": "one",
+            "skillName": "source-research",
+            "displayName": "source-research",
+            "parameterDisplayName": None,
+        },
+        {"type": "text", "text": " to write an article"},
+    ]
     assert messages[1]["parts"][0]["type"] == "skill-pipeline-ref"
     assert messages[1]["parts"][0]["jobId"] == payload["job"]["id"]
+
+
+def test_chat_pipeline_rejects_message_parts_with_a_different_skill_order(client):
+    session_id = client.post("/api/chat/sessions", json={}).json()["id"]
+    response = client.post(
+        f"/api/chat/sessions/{session_id}/pipelines",
+        headers={"X-Worker-Token": "test-worker-token-at-least-32-characters"},
+        json={
+            "client_message_id": "chat-message-order",
+            "objective": "Write an article",
+            "title": "Chat pipeline",
+            "invocations": [
+                _chat_pipeline_invocation(invocation_id="one"),
+                _chat_pipeline_invocation(invocation_id="two"),
+            ],
+            "message_parts": [
+                {"type": "skill-invocation", "invocation_id": "two"},
+                {"type": "text", "text": " then "},
+                {"type": "skill-invocation", "invocation_id": "one"},
+            ],
+        },
+    )
+
+    assert response.status_code == 422
+    assert "消息中的 Skill 顺序与 Pipeline 不一致" in response.text
+
+
+def test_chat_pipeline_rejects_objective_that_differs_from_message_text_parts(client):
+    session_id = client.post("/api/chat/sessions", json={}).json()["id"]
+    response = client.post(
+        f"/api/chat/sessions/{session_id}/pipelines",
+        headers={"X-Worker-Token": "test-worker-token-at-least-32-characters"},
+        json={
+            "client_message_id": "chat-message-objective",
+            "objective": "Hidden stale objective",
+            "title": "Chat pipeline",
+            "invocations": [_chat_pipeline_invocation()],
+            "message_parts": [
+                {"type": "skill-invocation", "invocation_id": "one"},
+                {"type": "text", "text": "Visible objective"},
+            ],
+        },
+    )
+
+    assert response.status_code == 422
+    assert "消息正文与执行目标不一致" in response.text
 
 
 def _add_searchable_sources(client):

@@ -22,6 +22,7 @@ import {
   renameChatSession,
   streamChatReply,
   type ChatDraft,
+  type ChatComposerMessagePart,
   type ChatSession,
   type ChatSkill,
   type SubmittedSkillInvocation,
@@ -55,7 +56,7 @@ export type ChatWorkspaceContextValue = {
   startNewConversation: () => void
   renameSession: (sessionId: number, title: string) => Promise<void>
   removeSession: (sessionId: number) => Promise<void>
-  submit: (text: string) => Promise<void>
+  submit: (text: string, messageParts: ChatComposerMessagePart[]) => Promise<boolean>
   respondToApproval: (args: ChatApprovalArgs) => Promise<void>
   setSkillName: (skillName: string) => void
   setDraftId: (draftId: number | null) => void
@@ -106,6 +107,10 @@ export function ChatWorkspaceProvider({ children }: { children: ReactNode }) {
   const sessionRequestsRef = useRef(new Map<number, Promise<void>>())
   const sessionsRequestRef = useRef<Promise<ChatSession[]> | null>(null)
   const resourcesRequestRef = useRef<Promise<void> | null>(null)
+  const pendingPipelineSubmissionRef = useRef<{
+    signature: string
+    clientMessageId: string
+  } | null>(null)
 
   const updateSession = useCallback((
     sessionId: number,
@@ -345,23 +350,29 @@ export function ChatWorkspaceProvider({ children }: { children: ReactNode }) {
     return session.id
   }, [state.activeSessionId])
 
-  const submit = useCallback(async (text: string) => {
+  const submit = useCallback(async (text: string, messageParts: ChatComposerMessagePart[]) => {
     const trimmed = text.trim()
-    if (!trimmed) return
+    if (!trimmed) return false
     const sessionId = await ensureActiveSession(trimmed)
     const key = sessionKey(sessionId)
-    if (state.runningBySession[key]) return
+    if (state.runningBySession[key]) return false
 
     const pipelineInvocations = state.composer.pipelineInvocations
     if (pipelineInvocations.length > 0) {
+      const signature = JSON.stringify({ sessionId, objective: trimmed, pipelineInvocations, messageParts })
+      const clientMessageId = pendingPipelineSubmissionRef.current?.signature === signature
+        ? pendingPipelineSubmissionRef.current.clientMessageId
+        : newClientMessageId()
+      pendingPipelineSubmissionRef.current = { signature, clientMessageId }
       setSessionRunning(sessionId, true)
       setSessionError(sessionId, null)
       try {
         await createChatPipeline(sessionId, {
-          clientMessageId: newClientMessageId(),
+          clientMessageId,
           objective: trimmed,
           title: titleFromFirstMessage(trimmed),
           invocations: pipelineInvocations,
+          messageParts,
         })
         await loadSession(sessionId, true)
         await refreshSessions()
@@ -369,12 +380,14 @@ export function ChatWorkspaceProvider({ children }: { children: ReactNode }) {
           ...current,
           composer: { ...current.composer, pipelineInvocations: [] },
         }))
+        pendingPipelineSubmissionRef.current = null
+        return true
       } catch (error) {
         setSessionError(sessionId, errorMessage(error, '创建 Skill Pipeline 失败'))
+        return false
       } finally {
         setSessionRunning(sessionId, false)
       }
-      return
     }
 
     const currentMessages = state.messagesBySession[key] ?? []
@@ -398,8 +411,10 @@ export function ChatWorkspaceProvider({ children }: { children: ReactNode }) {
       })
       await loadSession(sessionId, true)
       await refreshSessions()
+      return true
     } catch (error) {
       setSessionError(sessionId, errorMessage(error, '发送消息失败'))
+      return false
     } finally {
       setSessionRunning(sessionId, false)
     }

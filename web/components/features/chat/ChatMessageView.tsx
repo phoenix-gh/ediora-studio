@@ -205,6 +205,18 @@ function pipelineJobId(part: ChatPart) {
   return id && id > 0 ? id : null
 }
 
+function isSkillInvocationPart(part: ChatPart) {
+  return part.type === 'skill-invocation'
+}
+
+function skillInvocationLabel(part: ChatPart) {
+  const displayName = String(part.displayName ?? part.skillDisplayName ?? part.skillName ?? 'Skill')
+  const parameterDisplayName = part.parameterDisplayName
+  return parameterDisplayName
+    ? `@${displayName}:${String(parameterDisplayName)}`
+    : `@${displayName}`
+}
+
 function PipelineJobMessage({ jobId, onTerminal }: { jobId: number; onTerminal?: () => void }) {
   const pipeline = usePipelineJob(jobId)
   const lastStatus = useRef<ContentJob['status'] | null>(null)
@@ -237,6 +249,7 @@ export function ChatMessageView({
 }) {
   const isUser = message.role === 'user'
   const textParts = message.parts.filter(part => part.type === 'text')
+  const userContentParts = message.parts.filter(part => part.type === 'text' || isSkillInvocationPart(part))
   const toolParts = message.parts.filter(isChatToolPart) as ToolEventPart[]
   const pipelineId = message.parts.map(pipelineJobId).find((id): id is number => id !== null)
   const fallbackText = textParts.length === 0 && message.text ? message.text : ''
@@ -247,7 +260,7 @@ export function ChatMessageView({
   return (
     <article className={cn('flex', isUser && 'justify-end')}>
       <div className={isUser ? 'min-w-0 max-w-3xl space-y-2' : 'w-full min-w-0 space-y-2'}>
-        {(textParts.length > 0 || fallbackText) && (
+        {((isUser ? userContentParts.length : textParts.length) > 0 || fallbackText) && (
           <div
             className={cn(
               'break-words rounded-2xl px-3 py-2 text-sm leading-6',
@@ -256,10 +269,18 @@ export function ChatMessageView({
             )}
           >
             {isUser
-              ? (textParts.length > 0
-                ? textParts.map((part, index) => (
-                  <span key={String(message.id) + '-text-' + index}>{String(part.text ?? '')}</span>
-                ))
+              ? (userContentParts.length > 0
+                ? userContentParts.map((part, index) => part.type === 'text'
+                  ? <span key={String(message.id) + '-text-' + index}>{String(part.text ?? '')}</span>
+                  : (
+                    <span
+                      key={String(part.invocationId ?? message.id) + '-skill-' + index}
+                      data-skill-token="true"
+                      className="mx-0.5 inline-flex max-w-full items-center rounded-md bg-background/20 px-1.5 py-0.5 font-medium text-primary-foreground ring-1 ring-primary-foreground/30"
+                    >
+                      {skillInvocationLabel(part)}
+                    </span>
+                  ))
                 : fallbackText)
               : (textParts.length > 0
                 ? textParts.map((part, index) => (
