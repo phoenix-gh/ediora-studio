@@ -59,6 +59,19 @@ function updateTextPart(parts: ChatPart[], partId: string, delta: string) {
     : part)
 }
 
+function updateReasoningPart(
+  parts: ChatPart[],
+  partId: string,
+  update: (current: ChatPart | undefined) => ChatPart,
+) {
+  const index = parts.findIndex(part => part.type === 'reasoning' && part.id === partId)
+  const current = index < 0 ? undefined : parts[index]
+  const next = update(current)
+  return index < 0
+    ? [...parts, next]
+    : parts.map((part, currentIndex) => currentIndex === index ? next : part)
+}
+
 function updateToolPart(parts: ChatPart[], event: UIMessageStreamEvent) {
   const toolCallId = typeof event.toolCallId === 'string'
     ? event.toolCallId
@@ -83,6 +96,37 @@ export function applyChatStreamEvent(
   assistantMessageId: string,
   event: UIMessageStreamEvent,
 ): DisplayMessage[] {
+  if (event.type === 'reasoning-start') {
+    const partId = typeof event.id === 'string' ? event.id : 'reasoning'
+    return updateAssistantMessage(messages, assistantMessageId, parts => (
+      updateReasoningPart(parts, partId, current => ({
+        type: 'reasoning', id: partId,
+        text: String(current?.text ?? ''), state: 'streaming',
+      }))
+    ))
+  }
+
+  if (event.type === 'reasoning-delta') {
+    const partId = typeof event.id === 'string' ? event.id : 'reasoning'
+    const delta = typeof event.delta === 'string' ? event.delta : ''
+    return updateAssistantMessage(messages, assistantMessageId, parts => (
+      updateReasoningPart(parts, partId, current => ({
+        type: 'reasoning', id: partId,
+        text: String(current?.text ?? '') + delta, state: 'streaming',
+      }))
+    ))
+  }
+
+  if (event.type === 'reasoning-end') {
+    const partId = typeof event.id === 'string' ? event.id : 'reasoning'
+    return updateAssistantMessage(messages, assistantMessageId, parts => (
+      updateReasoningPart(parts, partId, current => ({
+        type: 'reasoning', id: partId,
+        text: String(current?.text ?? ''), state: 'complete',
+      }))
+    ))
+  }
+
   if (event.type === 'text-delta') {
     const partId = typeof event.id === 'string' ? event.id : 'text'
     const delta = typeof event.delta === 'string' ? event.delta : ''

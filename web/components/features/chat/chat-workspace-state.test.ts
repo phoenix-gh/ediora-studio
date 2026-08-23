@@ -24,6 +24,23 @@ function message(
 }
 
 describe('chat workspace state helpers', () => {
+  it('accumulates reasoning deltas and marks the part complete', () => {
+    const assistant = message('assistant-1', 'assistant', [])
+    const started = applyChatStreamEvent([assistant], 'assistant-1', {
+      type: 'reasoning-start', id: 'r-1',
+    })
+    const updated = applyChatStreamEvent(started, 'assistant-1', {
+      type: 'reasoning-delta', id: 'r-1', delta: '先查资料',
+    })
+    const ended = applyChatStreamEvent(updated, 'assistant-1', {
+      type: 'reasoning-end', id: 'r-1',
+    })
+
+    expect(ended[0].parts).toContainEqual({
+      type: 'reasoning', id: 'r-1', text: '先查资料', state: 'complete',
+    })
+  })
+
   it('only appends a text delta to the targeted assistant message', () => {
     const userMessage = message(1, 'user', [{ type: 'text', text: '问题' }], '问题')
     const assistantMessage = message('assistant-1', 'assistant', [])

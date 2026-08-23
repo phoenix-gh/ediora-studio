@@ -19,6 +19,24 @@ function assistantMessage(parts: ChatPart[], id: number | string = 12): DisplayM
 }
 
 describe('ChatMessageView', () => {
+  it('shows live reasoning expanded and keeps completed reasoning collapsed', () => {
+    const view = render(<ChatMessageView message={assistantMessage([{
+      type: 'reasoning', id: 'r-1', text: '先查资料', state: 'streaming',
+    }])} />)
+
+    const live = screen.getByText('思考中').closest('details')
+    expect(live).toHaveAttribute('open')
+    expect(screen.getByText('先查资料')).toBeVisible()
+
+    view.rerender(<ChatMessageView message={assistantMessage([{
+      type: 'reasoning', id: 'r-1', text: '先查资料', state: 'complete',
+    }])} />)
+
+    const complete = screen.getByText('思考过程').closest('details')
+    expect(complete).not.toHaveAttribute('open')
+    expect(complete).toHaveTextContent('先查资料')
+  })
+
   it('renders user and assistant Markdown messages', () => {
     const userMessage: DisplayMessage = {
       id: 1,
