@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 
 @pytest.fixture
@@ -224,6 +224,93 @@ async def test_runner_reuses_active_upstream_after_retry_increments_run_epoch(
         "skill:02:writing-plan",
     ]
     assert executor.calls[1][1] is not None
+
+
+@pytest.mark.asyncio
+async def test_runner_reuses_existing_succeeded_execution_and_primary_artifact(
+    pipeline_db,
+):
+    from agent_execution_service import ensure_agent_execution
+    from execution_artifacts import append_execution_artifact
+    from models import AgentExecution, ContentJob, ContentJobStep, ExecutionArtifact
+    from pipeline_runner import run_skill_pipeline_job
+    from pipeline_service import create_pipeline_job
+
+    async with pipeline_db() as session:
+        job = await create_pipeline_job(session, _request("runner-resume-window", count=1))
+        step = (await session.execute(
+            select(ContentJobStep)
+            .where(ContentJobStep.job_id == job.id, ContentJobStep.step_key != "pipeline_plan")
+        )).scalar_one()
+        step.status = "running"
+        job.status = "running"
+        await session.commit()
+        execution = await ensure_agent_execution(
+            session,
+            job_id=job.id,
+            step_id=step.id,
+            attempt=step.attempt,
+            objective="resume",
+            skill_mode="job",
+            skill_name="source-research",
+        )
+        execution.status = "succeeded"
+        await append_execution_artifact(
+            session,
+            job_id=job.id,
+            step_id=step.id,
+            attempt=step.attempt,
+            kind="article",
+            role="primary",
+            title="existing",
+            text_content="already persisted",
+        )
+        await session.commit()
+        job_id = job.id
+
+    executor = RecordingExecutor()
+    await run_skill_pipeline_job(
+        job_id,
+        session_factory=pipeline_db,
+        executor=executor,
+    )
+
+    async with pipeline_db() as session:
+        job = await session.get(ContentJob, job_id)
+        step = (await session.execute(
+            select(ContentJobStep)
+            .where(ContentJobStep.job_id == job_id, ContentJobStep.step_key != "pipeline_plan")
+        )).scalar_one()
+        artifact_count = await session.scalar(
+            select(func.count(ExecutionArtifact.id)).where(ExecutionArtifact.job_id == job_id)
+        )
+    assert executor.calls == []
+    assert job is not None and job.status == "succeeded"
+    assert step.status == "succeeded"
+    assert artifact_count == 1
+
+
+@pytest.mark.asyncio
+async def test_runner_does_not_execute_cancelled_pipeline(pipeline_db):
+    from pipeline_runner import run_skill_pipeline_job
+    from pipeline_service import cancel_pipeline, create_pipeline_job
+    from models import ContentJob
+
+    async with pipeline_db() as session:
+        job = await create_pipeline_job(session, _request("runner-cancelled", count=1))
+        await cancel_pipeline(session, job_id=job.id, request_id="cancelled-1")
+        job_id = job.id
+
+    executor = RecordingExecutor()
+    await run_skill_pipeline_job(
+        job_id,
+        session_factory=pipeline_db,
+        executor=executor,
+    )
+    async with pipeline_db() as session:
+        job = await session.get(ContentJob, job_id)
+    assert executor.calls == []
+    assert job is not None and job.status == "cancelled"
 
 
 @pytest.mark.asyncio

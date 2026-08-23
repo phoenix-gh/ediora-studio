@@ -481,6 +481,8 @@ async def _persist_success(
     stage_index: int,
     stage_count: int,
     result: PipelineStageResult,
+    existing_artifact_ids: tuple[int, list[int]] | None = None,
+    complete_execution: bool = True,
 ) -> None:
     job = await lock_content_job_row(session, job_id)
     if job is None:
@@ -500,35 +502,39 @@ async def _persist_success(
     if step.status != "running":
         raise PipelineRunnerState(f"cannot complete {step.status} Stage")
 
-    auxiliary_ids: list[int] = []
-    for auxiliary in result.auxiliary:
-        artifact = await append_execution_artifact(
+    if existing_artifact_ids is None:
+        auxiliary_ids: list[int] = []
+        for auxiliary in result.auxiliary:
+            artifact = await append_execution_artifact(
+                session,
+                job_id=job_id,
+                step_id=step.id,
+                attempt=step.attempt,
+                kind=auxiliary.kind,
+                role="auxiliary",
+                title=auxiliary.title,
+                text_content=auxiliary.text_content,
+                structured_content=auxiliary.structured_content,
+            )
+            auxiliary_ids.append(artifact.id)
+        primary = await append_execution_artifact(
             session,
             job_id=job_id,
             step_id=step.id,
             attempt=step.attempt,
-            kind=auxiliary.kind,
-            role="auxiliary",
-            title=auxiliary.title,
-            text_content=auxiliary.text_content,
-            structured_content=auxiliary.structured_content,
+            kind=result.primary_kind,
+            role="primary",
+            title=result.primary_title,
+            text_content=result.primary_text,
+            structured_content=result.primary_structured,
         )
-        auxiliary_ids.append(artifact.id)
-    primary = await append_execution_artifact(
-        session,
-        job_id=job_id,
-        step_id=step.id,
-        attempt=step.attempt,
-        kind=result.primary_kind,
-        role="primary",
-        title=result.primary_title,
-        text_content=result.primary_text,
-        structured_content=result.primary_structured,
-    )
+        primary_id = primary.id
+    else:
+        primary_id, auxiliary_ids = existing_artifact_ids
     output_data = {
         "run_epoch": job.run_epoch,
         "attempt": step.attempt,
-        "primary_artifact_id": primary.id,
+        "primary_artifact_id": primary_id,
         "auxiliary_artifact_ids": auxiliary_ids,
     }
     await succeed_locked_step(session, job, step, output_data)
@@ -538,16 +544,17 @@ async def _persist_success(
         job.completed_at = None
     await session.commit()
 
-    await complete_agent_execution(
-        session,
-        execution_id,
-        {
-            "primary_artifact_id": primary.id,
-            "auxiliary_artifact_ids": auxiliary_ids,
-            "stage_key": step.step_key,
-            "attempt": step.attempt,
-        },
-    )
+    if complete_execution:
+        await complete_agent_execution(
+            session,
+            execution_id,
+            {
+                "primary_artifact_id": primary_id,
+                "auxiliary_artifact_ids": auxiliary_ids,
+                "stage_key": step.step_key,
+                "attempt": step.attempt,
+            },
+        )
     if is_last:
         await succeed_job(session, job_id)
     else:
@@ -622,6 +629,17 @@ async def run_skill_pipeline_job(
                         raise PipelineUncertainError(
                             "completed AgentExecution has no active primary artifact"
                         )
+                    auxiliary = list((await session.execute(
+                        select(ExecutionArtifact.id)
+                        .where(
+                            ExecutionArtifact.job_id == job.id,
+                            ExecutionArtifact.step_id == step.id,
+                            ExecutionArtifact.attempt == step.attempt,
+                            ExecutionArtifact.role == "auxiliary",
+                            ExecutionArtifact.status == "active",
+                        )
+                        .order_by(ExecutionArtifact.id.asc())
+                    )).scalars().all())
                     await _persist_success(
                         session,
                         job_id=job.id,
@@ -635,6 +653,8 @@ async def run_skill_pipeline_job(
                             primary_text=primary.text_content,
                             primary_structured=primary.structured_content,
                         ),
+                        existing_artifact_ids=(primary.id, auxiliary),
+                        complete_execution=False,
                     )
                 else:
                     result = await stage_executor.execute(session, job, step, execution)

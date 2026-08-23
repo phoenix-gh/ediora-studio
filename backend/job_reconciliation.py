@@ -29,6 +29,7 @@ from database import SessionLocal
 from job_queue import RedisJobQueue, is_long_video_flow
 from log_redaction import redact_secret_text
 from models import (
+    AgentExecution,
     ContentJob,
     ContentJobStep,
     DigitalHuman,
@@ -395,6 +396,55 @@ async def _recover_failed_assembly(
     )
 
 
+async def _decide_skill_pipeline_locked(
+    db: AsyncSession,
+    job: ContentJob,
+) -> _Decision:
+    """Resume a pipeline without confirming it or creating another attempt."""
+    if job.status not in {"queued", "running"}:
+        return _Decision()
+    rows = list((await db.execute(
+        select(ContentJobStep)
+        .where(
+            ContentJobStep.job_id == job.id,
+            ContentJobStep.step_key != "pipeline_plan",
+        )
+        .order_by(ContentJobStep.id.asc())
+        .with_for_update()
+    )).scalars().all())
+    latest: dict[str, ContentJobStep] = {}
+    for step in rows:
+        if step.status == "superseded":
+            continue
+        latest[step.step_key] = step
+    if not latest:
+        return _Decision()
+
+    for step in latest.values():
+        if step.status not in {"queued", "running", "succeeded"}:
+            return _Decision()
+        if step.status != "running":
+            continue
+        execution = await db.scalar(
+            select(AgentExecution)
+            .where(
+                AgentExecution.job_id == job.id,
+                AgentExecution.step_id == step.id,
+                AgentExecution.attempt == step.attempt,
+            )
+            .order_by(AgentExecution.id.desc())
+            .limit(1)
+        )
+        if execution is not None and execution.status in {"uncertain", "failed", "cancelled"}:
+            return _Decision()
+
+    if any(step.status in {"queued", "running"} for step in latest.values()):
+        return _Decision(enqueue=True, reason="skill_pipeline_resume")
+    if all(step.status == "succeeded" for step in latest.values()):
+        return _Decision(enqueue=True, reason="skill_pipeline_finalize")
+    return _Decision()
+
+
 async def _superseded_digital_human_job(
     db: AsyncSession,
     job: ContentJob,
@@ -462,6 +512,8 @@ async def _decide_locked(
 ) -> _Decision:
     if job.status in TERMINAL_STATUSES:
         return _Decision()
+    if job.flow == "skill_pipeline":
+        return await _decide_skill_pipeline_locked(db, job)
     if await _superseded_digital_human_job(db, job):
         return await _cancel_superseded_job(
             db,

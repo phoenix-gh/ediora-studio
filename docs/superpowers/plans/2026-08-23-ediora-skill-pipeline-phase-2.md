@@ -10,6 +10,12 @@
 
 **Spec:** docs/superpowers/specs/2026-08-23-ediora-skill-pipeline-design.md
 
+**Implementation status (2026-08-23):** Phase 2 backend is complete on
+`feat/skill-pipeline-design`. Contracts, durable pipeline snapshots,
+idempotent commands, one-Stage Runner, fail-closed runtime boundary,
+Job/Chat APIs, and safe reconciliation are implemented. The real Skill/model
+runtime adapter and the Phase 3 Chat UI remain intentionally out of scope.
+
 ## Global Constraints
 
 - Work only on feat/skill-pipeline-design or a successor isolated feature branch; do not edit develop or main directly.
