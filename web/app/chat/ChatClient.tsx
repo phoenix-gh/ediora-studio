@@ -19,6 +19,8 @@ import {
   type ChatSkill,
   type ChatDraft,
   type UIChatMessage,
+  type SubmittedSkillInvocation,
+  createChatPipeline,
   createChatSession,
   deleteChatSession,
   getChatSession,
@@ -30,6 +32,7 @@ import {
 } from '@/lib/api/chat'
 import { getJob, imageUrlsForJob, type JobStatus } from '@/lib/api/jobs'
 import { cn } from '@/lib/utils'
+import { ChatSkillPipelinePicker } from '@/components/features/chat/ChatSkillPipelinePicker'
 
 import { chatComposerColumn, chatConversationColumn } from './chat-layout'
 import { shouldSubmitChatComposerKey } from './chat-composer'
@@ -219,6 +222,8 @@ export function ChatClient() {
   const [editingTitle, setEditingTitle] = useState('')
   const [messages, setMessages] = useState<DisplayMessage[]>([])
   const [input, setInput] = useState('')
+  const [pipelineInvocations, setPipelineInvocations] = useState<SubmittedSkillInvocation[]>([])
+  const [skillPickerOpen, setSkillPickerOpen] = useState(false)
   const [loading, setLoading] = useState(true)
   const [sending, setSending] = useState(false)
   const [showTrace, setShowTrace] = useState(false)
@@ -233,6 +238,8 @@ export function ChatClient() {
 
   const openSession = useCallback(async (sessionId: number) => {
     setShowTrace(false)
+    setPipelineInvocations([])
+    setSkillPickerOpen(false)
     setSending(false)
     setRecoveringRun(false)
     setActiveSessionId(sessionId)
@@ -294,6 +301,8 @@ export function ChatClient() {
     setActiveSessionId(null)
     setMessages([])
     setInput('')
+    setPipelineInvocations([])
+    setSkillPickerOpen(false)
     setSkillName('')
     setDraftId('')
     setSending(false)
@@ -361,6 +370,29 @@ export function ChatClient() {
         toast.error(error instanceof Error ? error.message : '创建会话失败')
         return
       }
+    }
+
+    if (pipelineInvocations.length > 0) {
+      setSending(true)
+      try {
+        await createChatPipeline(sessionId, {
+          clientMessageId: crypto.randomUUID(),
+          objective: text,
+          title: titleFromFirstMessage(text),
+          invocations: pipelineInvocations,
+        })
+        const session = await getChatSession(sessionId)
+        setMessages(session.messages)
+        setInput('')
+        setPipelineInvocations([])
+        setSkillPickerOpen(false)
+        await refreshSessions()
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : '创建 Skill Pipeline 失败')
+      } finally {
+        setSending(false)
+      }
+      return
     }
 
     const userMessage = makeLocalMessage('user', [{ type: 'text', text }])
@@ -519,6 +551,16 @@ export function ChatClient() {
               <div className="flex">
                 <textarea value={input} onChange={event => setInput(event.target.value)} disabled={sending} rows={2}
                   onKeyDown={event => {
+                    if (event.key === '@' && !event.shiftKey && !event.nativeEvent.isComposing) {
+                      event.preventDefault()
+                      setSkillPickerOpen(true)
+                      return
+                    }
+                    if (event.key === 'Backspace' && !input && pipelineInvocations.length > 0) {
+                      event.preventDefault()
+                      setPipelineInvocations(current => current.slice(0, -1))
+                      return
+                    }
                     if (!shouldSubmitChatComposerKey({ key: event.key, shiftKey: event.shiftKey, isComposing: event.nativeEvent.isComposing })) return
                     event.preventDefault()
                     event.currentTarget.form?.requestSubmit()
@@ -526,18 +568,29 @@ export function ChatClient() {
                   placeholder="问问本地信息源里的内容…"
                   className="max-h-40 min-h-12 flex-1 resize-none bg-transparent py-1 text-sm leading-6 outline-none placeholder:text-foreground-subtle disabled:cursor-not-allowed" />
               </div>
-              <ChatContextPicker
-                skills={skills}
-                drafts={drafts}
-                skillName={skillName || undefined}
-                draftId={draftId ? Number(draftId) : undefined}
-                disabled={sending}
-                footerAction={<Button type="submit" size="icon" disabled={!input.trim() || sending} title="发送消息">
-                  {sending ? <Loader2 className="animate-spin" /> : <Send />}
-                </Button>}
-                onSkillNameChange={skill => setSkillName(skill ?? '')}
-                onDraftIdChange={draft => setDraftId(draft ? String(draft) : '')}
-              />
+              <div className="flex flex-wrap items-center gap-2">
+                <ChatSkillPipelinePicker
+                  skills={skills}
+                  invocations={pipelineInvocations}
+                  open={skillPickerOpen}
+                  disabled={sending}
+                  onOpenChange={setSkillPickerOpen}
+                  onChange={setPipelineInvocations}
+                />
+                <ChatContextPicker
+                  skills={[]}
+                  drafts={drafts}
+                  showSkills={false}
+                  skillName={skillName || undefined}
+                  draftId={draftId ? Number(draftId) : undefined}
+                  disabled={sending}
+                  footerAction={<Button type="submit" size="icon" disabled={!input.trim() || sending} title="发送消息">
+                    {sending ? <Loader2 className="animate-spin" /> : <Send />}
+                  </Button>}
+                  onSkillNameChange={skill => setSkillName(skill ?? '')}
+                  onDraftIdChange={draft => setDraftId(draft ? String(draft) : '')}
+                />
+              </div>
             </div>
             <p className="mt-2 flex items-center gap-1.5 text-[11px] text-foreground-subtle"><MessageSquarePlus className="h-3 w-3" />新对话会在发送第一条消息时创建。</p>
           </div>

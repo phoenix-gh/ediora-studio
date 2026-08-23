@@ -50,7 +50,7 @@ describe('pipeline parameter options route', () => {
       }],
     })
     expect(JSON.stringify(body)).not.toContain('source body')
-    expect(api.apiGet).toHaveBeenCalledWith('/writing-plans', { headers: { 'X-Worker-Token': 'server-worker-token' } })
+    expect(api.apiGet).toHaveBeenCalledWith('/writing-plans', { 'X-Worker-Token': 'server-worker-token' })
   })
 
   it('sanitizes publish account options before returning them to the browser', async () => {

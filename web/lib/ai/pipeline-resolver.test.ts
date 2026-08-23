@@ -92,7 +92,7 @@ describe('pipeline resolver', () => {
       },
     })
     expect(resolved.capability_snapshot).toEqual(expect.objectContaining({ schemaVersion: 1 }))
-    expect(api.apiGet).toHaveBeenCalledWith('/writing-plans/12', { headers: { 'X-Worker-Token': 'server-worker-token' } })
+    expect(api.apiGet).toHaveBeenCalledWith('/writing-plans/12', { 'X-Worker-Token': 'server-worker-token' })
   })
 
   it('fails atomically when a required parameter is missing', async () => {

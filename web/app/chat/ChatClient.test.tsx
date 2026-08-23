@@ -7,6 +7,7 @@ import { ChatClient } from './ChatClient'
 
 const developerMode = vi.hoisted(() => ({ enabled: false }))
 const chatApi = vi.hoisted(() => ({
+  createChatPipeline: vi.fn(),
   getChatSession: vi.fn(),
   listChatDrafts: vi.fn(),
   listChatSessions: vi.fn(),
@@ -21,6 +22,7 @@ vi.mock('@/components/providers/DeveloperModeProvider', () => ({
   useDeveloperMode: () => developerMode.enabled,
 }))
 vi.mock('@/lib/api/chat', () => ({
+  createChatPipeline: chatApi.createChatPipeline,
   createChatSession: vi.fn(),
   deleteChatSession: vi.fn(),
   getChatSession: chatApi.getChatSession,
@@ -143,5 +145,34 @@ describe('ChatClient', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('opens the @Skill picker and submits structured pipeline invocations', async () => {
+    chatApi.listChatSkills.mockResolvedValue([{
+      name: 'article-drafting',
+      displayName: '文章写作',
+      description: '按资料写文章',
+      version: '1.0.0',
+    }])
+    chatApi.createChatPipeline.mockResolvedValue({
+      job: { id: 81 },
+      user_message_id: 101,
+      assistant_message_id: 102,
+    })
+    const view = render(<ChatClient />)
+
+    await waitFor(() => expect(chatApi.getChatSession).toHaveBeenCalledWith(7))
+    const textarea = screen.getByPlaceholderText('问问本地信息源里的内容…')
+    fireEvent.keyDown(textarea, { key: '@', shiftKey: false, isComposing: false })
+    expect(screen.getByRole('button', { name: '@ 添加技能' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /文章写作/ }))
+    fireEvent.change(textarea, { target: { value: '请写一篇文章' } })
+    fireEvent.submit(textarea.closest('form')!)
+
+    await waitFor(() => expect(chatApi.createChatPipeline).toHaveBeenCalledWith(7, expect.objectContaining({
+      objective: '请写一篇文章',
+      invocations: [expect.objectContaining({ skillName: 'article-drafting', skillDisplayName: '文章写作' })],
+    })))
+    view.unmount()
   })
 })

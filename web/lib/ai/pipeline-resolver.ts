@@ -140,7 +140,7 @@ export async function listPipelineParameterOptions(
 ): Promise<PipelineParameterOption[]> {
   const headers = workerHeaders()
   if (kind === 'writing_plan') {
-    const plans = await apiGet<WritingPlanRecord[]>('/writing-plans', { headers })
+    const plans = await apiGet<WritingPlanRecord[]>('/writing-plans', headers)
     return plans
       .filter(plan => plan.status === undefined || plan.status === 'active')
       .filter(plan => matchesQuery([plan.title, plan.strategy, plan.description, ...(plan.tags ?? []).map(tag => tag.name)], query))
@@ -148,7 +148,7 @@ export async function listPipelineParameterOptions(
       .map(writingPlanOption)
   }
 
-  const accounts = await apiGet<PublishAccountRecord[]>('/publish-accounts', { headers })
+  const accounts = await apiGet<PublishAccountRecord[]>('/publish-accounts', headers)
   return accounts
     .filter(account => account.is_active !== false)
     .filter(account => matchesQuery([account.name, account.platform, account.positioning, account.audience, account.tone], query))
@@ -162,7 +162,7 @@ async function loadWritingPlan(id: string): Promise<WritingPlanRecord> {
     throw new PipelineResolutionError(422, '写作方案 ID 无效')
   }
   try {
-    const plan = await apiGet<WritingPlanRecord>(`/writing-plans/${planId}`, { headers: workerHeaders() })
+    const plan = await apiGet<WritingPlanRecord>(`/writing-plans/${planId}`, workerHeaders())
     if (plan.status !== undefined && plan.status !== 'active') {
       throw new PipelineResolutionError(409, '写作方案已停用，不能用于新 Pipeline')
     }
@@ -178,7 +178,7 @@ async function loadWritingPlan(id: string): Promise<WritingPlanRecord> {
 async function loadPublishAccount(id: string): Promise<PublishAccountRecord> {
   if (!id.trim()) throw new PipelineResolutionError(422, '发布账号 ID 无效')
   try {
-    const account = await apiGet<PublishAccountRecord>(`/publish-accounts/${encodeURIComponent(id)}`, { headers: workerHeaders() })
+    const account = await apiGet<PublishAccountRecord>(`/publish-accounts/${encodeURIComponent(id)}`, workerHeaders())
     if (account.is_active === false) {
       throw new PipelineResolutionError(409, '发布账号已停用，不能用于新 Pipeline')
     }
