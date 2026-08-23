@@ -8,7 +8,9 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { ChatContextPicker } from '@/components/features/chat/ChatContextPicker'
+import { ChatPipelineCard } from '@/components/features/chat/ChatPipelineCard'
 import { ChatMarkdown } from '@/components/features/chat/ChatMarkdown'
+import { usePipelineJob } from '@/components/features/chat/usePipelineJob'
 import { ChatAgentLogDialog } from './ChatAgentLogDialog'
 import { useDeveloperMode } from '@/components/providers/DeveloperModeProvider'
 import {
@@ -30,7 +32,7 @@ import {
   renameChatSession,
   streamChatReply,
 } from '@/lib/api/chat'
-import { getJob, imageUrlsForJob, type JobStatus } from '@/lib/api/jobs'
+import { getJob, imageUrlsForJob, type ContentJob, type JobStatus } from '@/lib/api/jobs'
 import { cn } from '@/lib/utils'
 import { ChatSkillPipelinePicker } from '@/components/features/chat/ChatSkillPipelinePicker'
 
@@ -158,10 +160,11 @@ function ToolActivityGroup({ parts, onApproval }: { parts: ToolEventPart[]; onAp
   )
 }
 
-function MessageBubble({ message, onApproval }: { message: DisplayMessage; onApproval?: (messageId: number, toolCallId: string, approvalId: string, approved: boolean) => void }) {
+function MessageBubble({ message, onApproval, onPipelineTerminal }: { message: DisplayMessage; onApproval?: (messageId: number, toolCallId: string, approvalId: string, approved: boolean) => void; onPipelineTerminal?: () => void }) {
   const isUser = message.role === 'user'
   const textParts = message.parts.filter(part => part.type === 'text')
   const toolParts = message.parts.filter(isChatToolPart) as ToolEventPart[]
+  const pipelineId = message.parts.map(pipelineJobId).find((id): id is number => id !== null)
   const fallbackText = textParts.length === 0 && message.text ? message.text : ''
   const persistedMessageId = typeof message.id === 'number' ? message.id : undefined
 
@@ -188,6 +191,7 @@ function MessageBubble({ message, onApproval }: { message: DisplayMessage; onApp
           </div>
         )}
         {toolParts.length > 0 && <ToolActivityGroup parts={toolParts} onApproval={persistedMessageId ? (toolCallId, approvalId, approved) => onApproval?.(persistedMessageId, toolCallId, approvalId, approved) : undefined} />}
+        {pipelineId !== undefined && <PipelineJobMessage jobId={pipelineId} onTerminal={onPipelineTerminal} />}
         <time className={cn('block px-1 text-[11px] text-foreground-subtle', isUser && 'text-right')}>{displayTime(message.created_at)}</time>
       </div>
     </article>
@@ -208,6 +212,30 @@ function makeLocalMessage(role: Exclude<ChatRole, 'tool'>, parts: ChatPart[]): D
     text: parts.filter(part => part.type === 'text').map(part => String(part.text ?? '')).join(''),
     created_at: new Date().toISOString(),
   }
+}
+
+function pipelineJobId(part: ChatPart) {
+  if (part.type !== 'skill-pipeline-ref' && part.type !== 'pipeline-ref') return null
+  const value = part.jobId ?? part.job_id ?? part.pipelineJobId ?? part.pipeline_job_id
+  const id = typeof value === 'number' ? value : typeof value === 'string' && /^\d+$/.test(value) ? Number(value) : null
+  return id && id > 0 ? id : null
+}
+
+function PipelineJobMessage({ jobId, onTerminal }: { jobId: number; onTerminal?: () => void }) {
+  const pipeline = usePipelineJob(jobId)
+  const lastStatus = useRef<ContentJob['status'] | null>(null)
+
+  useEffect(() => {
+    const status = pipeline.job?.status
+    if (status && ['succeeded', 'failed', 'cancelled', 'superseded'].includes(status) && lastStatus.current !== status) {
+      onTerminal?.()
+    }
+    if (status) lastStatus.current = status
+  }, [onTerminal, pipeline.job?.status])
+
+  if (pipeline.loading && !pipeline.job) return <p className="rounded-lg bg-indigo-50/60 px-3 py-2 text-xs text-indigo-700 dark:bg-indigo-950/30 dark:text-indigo-200">正在恢复 Pipeline 状态…</p>
+  if (!pipeline.job) return <p className="rounded-lg bg-red-50/70 px-3 py-2 text-xs text-red-700 dark:bg-red-950/30 dark:text-red-200">{pipeline.error || 'Pipeline 状态暂时不可用'} <button type="button" className="ml-1 underline underline-offset-2" onClick={() => void pipeline.refresh()}>重试</button></p>
+  return <ChatPipelineCard initialJob={pipeline.job} onJobChange={nextJob => pipeline.setJob(nextJob)} onTerminal={onTerminal} />
 }
 
 export function ChatClient() {
@@ -235,6 +263,17 @@ export function ChatClient() {
     setSessions(nextSessions)
     return nextSessions
   }, [])
+
+  const refreshActiveSession = useCallback(async () => {
+    if (activeSessionId === null) return
+    try {
+      const session = await getChatSession(activeSessionId)
+      setMessages(session.messages)
+      await refreshSessions()
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '刷新会话失败')
+    }
+  }, [activeSessionId, refreshSessions])
 
   const openSession = useCallback(async (sessionId: number) => {
     setShowTrace(false)
@@ -539,7 +578,7 @@ export function ChatClient() {
                 <p className="mx-auto mt-1 max-w-md text-sm leading-6 text-muted-foreground">例如：“有哪些适合 AI 编程主题的写作方案？” 或 “帮我画一张封面”。需要时会检索资料或生成图片。</p>
               </div>
             )}
-            {messages.map(message => <MessageBubble key={String(message.id)} message={message} onApproval={respondToApproval} />)}
+            {messages.map(message => <MessageBubble key={String(message.id)} message={message} onApproval={respondToApproval} onPipelineTerminal={() => void refreshActiveSession()} />)}
             {sending && <div className="flex items-center gap-2 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />正在思考并检索资料…</div>}
             <div ref={bottomRef} />
           </div>
