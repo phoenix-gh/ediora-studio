@@ -132,7 +132,7 @@ describe('bundled human-social-copy Skill', () => {
     }))
     expect((await discoverSkills()).map(skill => skill.name)).toContain(wechatArticleSkillName)
     expect((await listSkillReferences(wechatArticleSkillName)).map(reference => reference.path))
-      .toEqual(['agents/openai.yaml'])
+      .toEqual([])
 
     const skill = await getEnabledSkill(wechatArticleSkillName)
     expect(skill?.description).toContain('微信公众号文章')

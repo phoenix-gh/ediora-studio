@@ -14,10 +14,17 @@ const uploadedSkill: RegisteredSkill = {
   name: 'Alpha',
   description: 'Alpha workflow',
   version: '1.2.3',
+  digest: 'a'.repeat(64),
   source: 'uploaded',
   enabled: true,
+  reviewState: 'approved',
+  standardCompatible: true,
+  diagnostics: [],
   instructions: '# Alpha rules\nUse evidence.',
+  content: '# Alpha rules\nUse evidence.',
   directory: '/skills/alpha',
+  packageFiles: [],
+  requestedAllowedTools: [],
 }
 
 const baseSnapshot = {

@@ -15,10 +15,17 @@ function syntheticSkill(name: string, instructions: string): RegisteredSkill {
     name,
     description: `${name} handles a synthetic workflow`,
     version: '1.0.0',
+    digest: 'a'.repeat(64),
     source: 'uploaded',
     enabled: true,
+    reviewState: 'approved',
+    standardCompatible: true,
+    diagnostics: [],
     instructions,
+    content: instructions,
     directory: `/skills/${name}`,
+    packageFiles: [],
+    requestedAllowedTools: [],
   }
 }
 

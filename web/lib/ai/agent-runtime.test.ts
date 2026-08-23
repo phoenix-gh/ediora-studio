@@ -9,7 +9,9 @@ import type { RegisteredSkill } from '../skills/registry'
 
 const alpha: RegisteredSkill = {
   name: 'Alpha', description: 'Handles alpha work', version: '1.0.0', source: 'uploaded',
-  enabled: true, instructions: '# Alpha workflow', directory: '/skills/alpha',
+  digest: 'a'.repeat(64), enabled: true, reviewState: 'approved', standardCompatible: true, diagnostics: [],
+  instructions: '# Alpha workflow', content: '# Alpha workflow', directory: '/skills/alpha',
+  packageFiles: [], requestedAllowedTools: [],
 }
 
 type Executable = {

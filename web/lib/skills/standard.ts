@@ -8,6 +8,10 @@ const legacyNamePattern = /^[A-Za-z0-9._-]{1,80}$/
 const MAX_DESCRIPTION = 1024
 const MAX_COMPATIBILITY = 500
 
+export function isStandardSkillName(value: string) {
+  return standardNamePattern.test(value)
+}
+
 export type SkillDiagnosticCode =
   | 'legacy_name'
   | 'legacy_directory'
@@ -183,17 +187,25 @@ function classifyFile(path: string): SkillPackageFile['kind'] {
   return 'other'
 }
 
-async function inspectDirectory(directory: string, prefix: string, files: InspectedFile[]) {
+async function inspectDirectory(
+  directory: string,
+  prefix: string,
+  files: InspectedFile[],
+  skipSymlinks: boolean,
+) {
   const entries = await readdir(directory, { withFileTypes: true })
   entries.sort((left, right) => left.name < right.name ? -1 : left.name > right.name ? 1 : 0)
 
   for (const entry of entries) {
     const absolutePath = join(directory, entry.name)
     const stat = await lstat(absolutePath)
-    if (stat.isSymbolicLink()) throw new Error(`Skill package contains a symlink: ${prefix}${entry.name}`)
+    if (stat.isSymbolicLink()) {
+      if (skipSymlinks) continue
+      throw new Error(`Skill package contains a symlink: ${prefix}${entry.name}`)
+    }
     const path = prefix ? `${prefix}${entry.name}` : entry.name
     if (stat.isDirectory()) {
-      await inspectDirectory(absolutePath, `${path}/`, files)
+      await inspectDirectory(absolutePath, `${path}/`, files, skipSymlinks)
       continue
     }
     if (!stat.isFile()) throw new Error(`Skill package contains unsupported entry: ${path}`)
@@ -204,6 +216,7 @@ async function inspectDirectory(directory: string, prefix: string, files: Inspec
 
 export async function inspectSkillPackage(
   directory: string,
+  options: { skipSymlinks?: boolean } = {},
 ): Promise<{ digest: string; files: readonly SkillPackageFile[] }> {
   const rootStat = await lstat(directory)
   if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) {
@@ -211,7 +224,7 @@ export async function inspectSkillPackage(
   }
 
   const inspected: InspectedFile[] = []
-  await inspectDirectory(directory, '', inspected)
+  await inspectDirectory(directory, '', inspected, options.skipSymlinks ?? false)
   inspected.sort((left, right) => left.path < right.path ? -1 : left.path > right.path ? 1 : 0)
 
   const hash = createHash('sha256')

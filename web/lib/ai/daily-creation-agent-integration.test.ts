@@ -18,10 +18,17 @@ const fixtureSkill: RegisteredSkill = {
   name: 'fixture-x-writing',
   description: 'Writes evidence-based Chinese X posts.',
   version: '1.0.0',
+  digest: 'a'.repeat(64),
   source: 'uploaded',
   enabled: true,
+  reviewState: 'approved',
+  standardCompatible: true,
+  diagnostics: [],
   instructions: 'Read the finance reference and save one X draft.',
+  content: 'Read the finance reference and save one X draft.',
   directory: '/fixture/fixture-x-writing',
+  packageFiles: [],
+  requestedAllowedTools: [],
 }
 
 type Executable = {

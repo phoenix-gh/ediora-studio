@@ -23,7 +23,10 @@ import type { AgentToolAudit } from './agent-runtime-types'
 
 const alpha = {
   name: 'Alpha', description: 'Alpha description', version: '1.0.0', source: 'builtin' as const,
-  enabled: true, instructions: '# Alpha rules', directory: '/skills/alpha',
+  digest: 'a'.repeat(64), enabled: true, reviewState: 'approved' as const,
+  standardCompatible: true, diagnostics: [] as const,
+  instructions: '# Alpha rules', content: '# Alpha rules', directory: '/skills/alpha',
+  packageFiles: [], requestedAllowedTools: [],
 }
 
 function runtimeDependencies() {
