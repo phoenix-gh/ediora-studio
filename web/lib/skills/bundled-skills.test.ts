@@ -32,6 +32,12 @@ const expectedXArticleReferences = [
   'references/quality-check.md',
 ]
 const githubTrendingSkillName = 'github-trending-chart'
+const firstPartyPipelineSkills = [
+  'source-research',
+  'writing-plan',
+  'humanize-writing',
+  'account-voice',
+]
 
 let runtimeDir = ''
 
@@ -132,7 +138,7 @@ describe('bundled human-social-copy Skill', () => {
     }))
     expect((await discoverSkills()).map(skill => skill.name)).toContain(wechatArticleSkillName)
     expect((await listSkillReferences(wechatArticleSkillName)).map(reference => reference.path))
-      .toEqual(['agents/openai.yaml'])
+      .toEqual([])
 
     const skill = await getEnabledSkill(wechatArticleSkillName)
     expect(skill?.description).toContain('微信公众号文章')
@@ -171,5 +177,21 @@ describe('bundled human-social-copy Skill', () => {
     expect(skill?.instructions).toContain('recommendation')
     expect(skill?.instructions).toContain('generateImage')
     expect(skill?.instructions).toContain('临时文件')
+  })
+
+  it('discovers the first-party pipeline Skills as standard packages without executable files', async () => {
+    const skills = await listSkills()
+    for (const name of firstPartyPipelineSkills) {
+      const skill = skills.find(candidate => candidate.name === name)
+      expect(skill).toEqual(expect.objectContaining({
+        name,
+        source: 'builtin',
+        enabled: true,
+        standardCompatible: true,
+      }))
+      const registered = await getEnabledSkill(name)
+      expect(registered?.packageFiles.some(file => file.kind === 'script')).toBe(false)
+      expect(registered?.instructions).toMatch(/必须|不得|输出/)
+    }
   })
 })

@@ -12,6 +12,7 @@ import {
 } from 'react'
 
 import {
+  createChatPipeline,
   createChatSession,
   deleteChatSession,
   getChatSession,
@@ -23,6 +24,7 @@ import {
   type ChatDraft,
   type ChatSession,
   type ChatSkill,
+  type SubmittedSkillInvocation,
 } from '@/lib/api/chat'
 import { titleFromFirstMessage } from '@/app/chat/chat-title'
 
@@ -56,6 +58,7 @@ export type ChatWorkspaceContextValue = {
   respondToApproval: (args: ChatApprovalArgs) => Promise<void>
   setSkillName: (skillName: string) => void
   setDraftId: (draftId: number | null) => void
+  setPipelineInvocations: (invocations: SubmittedSkillInvocation[]) => void
   retrySession: (sessionId: number) => Promise<void>
 }
 
@@ -76,12 +79,18 @@ function initialState(): ChatWorkspaceState {
     composer: {
       skillName: '',
       draftId: null,
+      pipelineInvocations: [],
     },
   }
 }
 
 function errorMessage(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback
+}
+
+function newClientMessageId() {
+  return globalThis.crypto?.randomUUID?.()
+    ?? `chat-pipeline-${Date.now()}-${Math.random().toString(36).slice(2)}`
 }
 
 export function ChatWorkspaceProvider({ children }: { children: ReactNode }) {
@@ -219,7 +228,11 @@ export function ChatWorkspaceProvider({ children }: { children: ReactNode }) {
   }, [setSessionDetail, setSessionError])
 
   const openSession = useCallback(async (sessionId: number) => {
-    setState(current => ({ ...current, activeSessionId: sessionId }))
+    setState(current => ({
+      ...current,
+      activeSessionId: sessionId,
+      composer: { ...current.composer, pipelineInvocations: [] },
+    }))
     await loadSession(sessionId)
   }, [loadSession])
 
@@ -227,7 +240,7 @@ export function ChatWorkspaceProvider({ children }: { children: ReactNode }) {
     setState(current => ({
       ...current,
       activeSessionId: null,
-      composer: { skillName: '', draftId: null },
+      composer: { skillName: '', draftId: null, pipelineInvocations: [] },
     }))
   }, [])
 
@@ -302,6 +315,32 @@ export function ChatWorkspaceProvider({ children }: { children: ReactNode }) {
     const sessionId = await ensureActiveSession(trimmed)
     const key = sessionKey(sessionId)
     if (state.runningBySession[key]) return
+
+    const pipelineInvocations = state.composer.pipelineInvocations
+    if (pipelineInvocations.length > 0) {
+      setSessionRunning(sessionId, true)
+      setSessionError(sessionId, null)
+      try {
+        await createChatPipeline(sessionId, {
+          clientMessageId: newClientMessageId(),
+          objective: trimmed,
+          title: titleFromFirstMessage(trimmed),
+          invocations: pipelineInvocations,
+        })
+        await loadSession(sessionId, true)
+        await refreshSessions()
+        setState(current => ({
+          ...current,
+          composer: { ...current.composer, pipelineInvocations: [] },
+        }))
+      } catch (error) {
+        setSessionError(sessionId, errorMessage(error, '创建 Skill Pipeline 失败'))
+      } finally {
+        setSessionRunning(sessionId, false)
+      }
+      return
+    }
+
     const currentMessages = state.messagesBySession[key] ?? []
     const userMessage = makeLocalMessage('user', [{ type: 'text', text: trimmed }])
     const assistantMessage = makeLocalMessage('assistant', [])
@@ -426,6 +465,10 @@ export function ChatWorkspaceProvider({ children }: { children: ReactNode }) {
     setDraftId: draftId => setState(current => ({
       ...current,
       composer: { ...current.composer, draftId },
+    })),
+    setPipelineInvocations: pipelineInvocations => setState(current => ({
+      ...current,
+      composer: { ...current.composer, pipelineInvocations },
     })),
     retrySession,
   }), [

@@ -67,7 +67,7 @@ describe('Skill registry', () => {
     expect(await listEnabledSkills()).toHaveLength(0)
 
     const state = JSON.parse(await readFile(join(runtimeDir, 'skills-state.json'), 'utf8'))
-    expect(state).toEqual({ Alpha: { source: 'builtin', enabled: false } })
+    expect(state).toEqual({ Alpha: { source: 'builtin', enabled: false, reviewState: 'approved' } })
   })
 
   it('returns complete instructions only for enabled Skills', async () => {
@@ -96,30 +96,86 @@ describe('Skill registry', () => {
 
   it('installs a root Skill and a wrapped multi-Skill archive as enabled uploads', async () => {
     const archive = zipSync({
-      'SKILL.md': strToU8(skillMarkdown('Root')),
+      'SKILL.md': strToU8(skillMarkdown('root')),
       'references/notes.md': strToU8('root notes'),
-      'package/one/SKILL.md': strToU8(skillMarkdown('One')),
+      'package/one/SKILL.md': strToU8(skillMarkdown('one')),
       'package/one/references/rules.md': strToU8('one rules'),
-      'package/two/SKILL.md': strToU8(skillMarkdown('Two')),
+      'package/two/SKILL.md': strToU8(skillMarkdown('two')),
     })
 
     await expect(installSkillArchive(archive)).resolves.toEqual(expect.arrayContaining([
-      expect.objectContaining({ name: 'Root', source: 'uploaded', enabled: true }),
-      expect.objectContaining({ name: 'One', source: 'uploaded', enabled: true }),
-      expect.objectContaining({ name: 'Two', source: 'uploaded', enabled: true }),
+      expect.objectContaining({ name: 'root', source: 'uploaded', enabled: false, reviewState: 'pending' }),
+      expect.objectContaining({ name: 'one', source: 'uploaded', enabled: false, reviewState: 'pending' }),
+      expect.objectContaining({ name: 'two', source: 'uploaded', enabled: false, reviewState: 'pending' }),
     ]))
-    await expect(access(join(runtimeDir, 'Root', 'references', 'notes.md'))).resolves.toBeUndefined()
-    await expect(readSkillReference('Root', 'references/notes.md')).resolves.toEqual({
+    await expect(access(join(runtimeDir, 'root', 'references', 'notes.md'))).resolves.toBeUndefined()
+    await setSkillEnabled('root', true)
+    await setSkillEnabled('one', true)
+    await setSkillEnabled('two', true)
+    await expect(readSkillReference('root', 'references/notes.md')).resolves.toEqual({
       path: 'references/notes.md', content: 'root notes', bytes: 10,
     })
-    expect((await listEnabledSkills()).map(skill => skill.name)).toEqual(expect.arrayContaining(['Root', 'One', 'Two']))
+    expect((await listEnabledSkills()).map(skill => skill.name)).toEqual(expect.arrayContaining(['root', 'one', 'two']))
+  })
+
+  it('installs uploaded standard Skills disabled and pending review', async () => {
+    const installed = await installSkillArchive(zipSync({
+      'custom-skill/SKILL.md': strToU8(skillMarkdown('custom-skill')),
+      'custom-skill/scripts/run.sh': strToU8('exit 0'),
+    }))
+
+    expect(installed).toEqual([
+      expect.objectContaining({
+        name: 'custom-skill',
+        enabled: false,
+        reviewState: 'pending',
+        standardCompatible: true,
+      }),
+    ])
+    expect(await getEnabledSkill('custom-skill')).toBeNull()
+
+    const approved = await setSkillEnabled('custom-skill', true)
+    expect(approved).toMatchObject({
+      enabled: true,
+      reviewState: 'approved',
+    })
+    expect(await getEnabledSkill('custom-skill')).not.toBeNull()
+  })
+
+  it('never exposes package scripts through the reference reader', async () => {
+    await installSkillArchive(zipSync({
+      'scripted/SKILL.md': strToU8(skillMarkdown('scripted')),
+      'scripted/references/rules.md': strToU8('rules'),
+      'scripted/scripts/readme.md': strToU8('do not load'),
+    }))
+    await setSkillEnabled('scripted', true)
+
+    await expect(listSkillReferences('scripted')).resolves.toEqual([
+      { path: 'references/rules.md', bytes: 5 },
+    ])
+    await expect(readSkillReference(
+      'scripted',
+      'scripts/readme.md',
+    )).rejects.toMatchObject({ code: 'invalid_reference' })
+  })
+
+  it('uses default execution hints for a SKILL.md-only upload', async () => {
+    await installSkillArchive(zipSync({
+      'portable-skill/SKILL.md': strToU8(skillMarkdown('portable-skill')),
+    }))
+    await setSkillEnabled('portable-skill', true)
+
+    await expect(loadSkillManifest('portable-skill')).resolves.toEqual({
+      preloadReferences: [],
+      execution: { planRequired: true, verificationRequired: true, maxRevisions: 1 },
+    })
   })
 
   it('rejects conflicts, unsafe paths, duplicate names, and rolls back the whole archive', async () => {
-    await writeSkill(runtimeDir, 'existing', 'Existing')
+    await writeSkill(runtimeDir, 'existing', 'existing')
     const before = await readFile(join(runtimeDir, 'existing', 'SKILL.md'), 'utf8')
 
-    await expect(installSkillArchive(zipSync({ 'new/SKILL.md': strToU8(skillMarkdown('Existing')) })))
+    await expect(installSkillArchive(zipSync({ 'existing/SKILL.md': strToU8(skillMarkdown('existing')) })))
       .rejects.toMatchObject({ code: 'conflict' })
     await expect(installSkillArchive(zipSync({ '../escape.txt': strToU8('nope'), 'SKILL.md': strToU8(skillMarkdown('Escape')) })))
       .rejects.toMatchObject({ code: 'invalid_archive' })
@@ -150,14 +206,14 @@ describe('Skill registry', () => {
   })
 
   it('keeps uploaded content and disabled state available to later registry reads', async () => {
-    await installSkillArchive(zipSync({ 'SKILL.md': strToU8(skillMarkdown('Persistent')) }))
-    await setSkillEnabled('Persistent', false)
+    await installSkillArchive(zipSync({ 'SKILL.md': strToU8(skillMarkdown('persistent')) }))
+    await setSkillEnabled('persistent', false)
 
     expect(await listSkills()).toEqual(expect.arrayContaining([
-      expect.objectContaining({ name: 'Persistent', source: 'uploaded', enabled: false }),
+      expect.objectContaining({ name: 'persistent', source: 'uploaded', enabled: false }),
     ]))
-    expect(await getEnabledSkill('Persistent')).toBeNull()
-    expect(await readFile(join(runtimeDir, 'skills-state.json'), 'utf8')).toContain('Persistent')
+    expect(await getEnabledSkill('persistent')).toBeNull()
+    expect(await readFile(join(runtimeDir, 'skills-state.json'), 'utf8')).toContain('persistent')
   })
 
   it('discovers supported nested references and loads explicit context once per path', async () => {

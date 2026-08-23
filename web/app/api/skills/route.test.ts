@@ -34,7 +34,7 @@ describe('Skill management API', () => {
     process.env.SKILLS_BUNDLED_DIR = bundledDir
     process.env.SKILLS_RUNTIME_DIR = runtimeDir
     process.env.SKILLS_STATE_FILE = join(runtimeDir, 'skills-state.json')
-    await writeSkill(bundledDir, 'alpha', 'Alpha')
+    await writeSkill(bundledDir, 'alpha', 'alpha')
   })
 
   afterEach(async () => {
@@ -51,42 +51,62 @@ describe('Skill management API', () => {
   it('lists metadata without exposing instructions and toggles a Skill', async () => {
     const listed = await GET()
     expect(listed.status).toBe(200)
-    expect(await listed.json()).toEqual([
-      { name: 'Alpha', description: 'Alpha description', version: '1.0.0', source: 'builtin', enabled: true },
-    ])
+    const listedSkills = await listed.json()
+    expect(listedSkills).toEqual([expect.objectContaining({
+      name: 'alpha',
+      description: 'alpha description',
+      version: '1.0.0',
+      source: 'builtin',
+      enabled: true,
+      reviewState: 'approved',
+      standardCompatible: true,
+      diagnostics: [],
+      digest: expect.stringMatching(/^[a-f0-9]{64}$/),
+    })])
+    expect(Object.keys(listedSkills[0])).not.toEqual(expect.arrayContaining([
+      'instructions',
+      'content',
+      'directory',
+      'requestedAllowedTools',
+    ]))
 
     const updated = await PATCH(
-      new Request('http://localhost/api/skills/Alpha', { method: 'PATCH', body: JSON.stringify({ enabled: false }) }),
-      { params: Promise.resolve({ name: 'Alpha' }) },
+      new Request('http://localhost/api/skills/alpha', { method: 'PATCH', body: JSON.stringify({ enabled: false }) }),
+      { params: Promise.resolve({ name: 'alpha' }) },
     )
     expect(updated.status).toBe(200)
-    expect(await updated.json()).toMatchObject({ name: 'Alpha', enabled: false })
+    expect(await updated.json()).toMatchObject({ name: 'alpha', enabled: false })
   })
 
   it('uploads a Skill, rejects a conflict, and maps invalid limits', async () => {
-    const uploaded = await POST(uploadRequest(archive('Custom')))
+    const uploaded = await POST(uploadRequest(archive('custom')))
     expect(uploaded.status).toBe(201)
-    expect(await uploaded.json()).toEqual([
-      { name: 'Custom', description: 'uploaded', version: '1.0.0', source: 'uploaded', enabled: true },
-    ])
+    expect(await uploaded.json()).toEqual([expect.objectContaining({
+      name: 'custom',
+      source: 'uploaded',
+      enabled: false,
+      reviewState: 'pending',
+      standardCompatible: true,
+      digest: expect.stringMatching(/^[a-f0-9]{64}$/),
+    })])
 
-    const conflict = await POST(uploadRequest(archive('Alpha')))
+    const conflict = await POST(uploadRequest(archive('alpha')))
     expect(conflict.status).toBe(409)
 
     process.env.SKILLS_MAX_UNPACKED_BYTES = '10'
-    const tooLarge = await POST(uploadRequest(archive('Large')))
+    const tooLarge = await POST(uploadRequest(archive('large')))
     expect(tooLarge.status).toBe(413)
   })
 
   it('protects bundled deletion and deletes uploaded Skills', async () => {
-    const forbidden = await DELETE(new Request('http://localhost/api/skills/Alpha', { method: 'DELETE' }), {
-      params: Promise.resolve({ name: 'Alpha' }),
+    const forbidden = await DELETE(new Request('http://localhost/api/skills/alpha', { method: 'DELETE' }), {
+      params: Promise.resolve({ name: 'alpha' }),
     })
     expect(forbidden.status).toBe(409)
 
-    await POST(uploadRequest(archive('Custom')))
-    const deleted = await DELETE(new Request('http://localhost/api/skills/Custom', { method: 'DELETE' }), {
-      params: Promise.resolve({ name: 'Custom' }),
+    await POST(uploadRequest(archive('custom')))
+    const deleted = await DELETE(new Request('http://localhost/api/skills/custom', { method: 'DELETE' }), {
+      params: Promise.resolve({ name: 'custom' }),
     })
     expect(deleted.status).toBe(204)
   })

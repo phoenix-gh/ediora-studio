@@ -1,9 +1,11 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { ChevronDown, Wrench } from 'lucide-react'
 
 import { ChatMarkdown } from '@/components/features/chat/ChatMarkdown'
+import { ChatPipelineCard } from '@/components/features/chat/ChatPipelineCard'
+import { usePipelineJob } from '@/components/features/chat/usePipelineJob'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -12,7 +14,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { getJob, imageUrlsForJob, type JobStatus } from '@/lib/api/jobs'
+import { getJob, imageUrlsForJob, type ContentJob, type JobStatus } from '@/lib/api/jobs'
 import {
   chatToolName,
   chatToolStatus,
@@ -23,7 +25,7 @@ import {
 } from '@/app/chat/chat-tool-parts'
 import { cn } from '@/lib/utils'
 
-import type { DisplayMessage, ToolEventPart } from './chat-workspace-types'
+import type { ChatPart, DisplayMessage, ToolEventPart } from './chat-workspace-types'
 
 const toolLabels: Record<string, string> = {
   searchInformationSources: '检索信息源',
@@ -192,16 +194,51 @@ function ToolActivityGroup({
   )
 }
 
+function pipelineJobId(part: ChatPart) {
+  if (part.type !== 'skill-pipeline-ref' && part.type !== 'pipeline-ref') return null
+  const value = part.jobId ?? part.job_id ?? part.pipelineJobId ?? part.pipeline_job_id
+  const id = typeof value === 'number'
+    ? value
+    : typeof value === 'string' && /^\d+$/.test(value)
+      ? Number(value)
+      : null
+  return id && id > 0 ? id : null
+}
+
+function PipelineJobMessage({ jobId, onTerminal }: { jobId: number; onTerminal?: () => void }) {
+  const pipeline = usePipelineJob(jobId)
+  const lastStatus = useRef<ContentJob['status'] | null>(null)
+
+  useEffect(() => {
+    const status = pipeline.job?.status
+    if (status && ['succeeded', 'failed', 'cancelled', 'superseded'].includes(status) && lastStatus.current !== status) {
+      onTerminal?.()
+    }
+    if (status) lastStatus.current = status
+  }, [onTerminal, pipeline.job?.status])
+
+  if (pipeline.loading && !pipeline.job) {
+    return <p className="rounded-lg bg-indigo-50/60 px-3 py-2 text-xs text-indigo-700 dark:bg-indigo-950/30 dark:text-indigo-200">正在恢复 Pipeline 状态…</p>
+  }
+  if (!pipeline.job) {
+    return <p className="rounded-lg bg-red-50/70 px-3 py-2 text-xs text-red-700 dark:bg-red-950/30 dark:text-red-200">{pipeline.error || 'Pipeline 状态暂时不可用'} <button type="button" className="ml-1 underline underline-offset-2" onClick={() => void pipeline.refresh()}>重试</button></p>
+  }
+  return <ChatPipelineCard initialJob={pipeline.job} onJobChange={nextJob => pipeline.setJob(nextJob)} onTerminal={onTerminal} />
+}
+
 export function ChatMessageView({
   message,
   onApproval,
+  onPipelineTerminal,
 }: {
   message: DisplayMessage
   onApproval?: ChatApprovalHandler
+  onPipelineTerminal?: () => void
 }) {
   const isUser = message.role === 'user'
   const textParts = message.parts.filter(part => part.type === 'text')
   const toolParts = message.parts.filter(isChatToolPart) as ToolEventPart[]
+  const pipelineId = message.parts.map(pipelineJobId).find((id): id is number => id !== null)
   const fallbackText = textParts.length === 0 && message.text ? message.text : ''
   const persistedMessageId = typeof message.id === 'number' ? message.id : undefined
 
@@ -242,6 +279,7 @@ export function ChatMessageView({
               : undefined}
           />
         )}
+        {pipelineId !== undefined && <PipelineJobMessage jobId={pipelineId} onTerminal={onPipelineTerminal} />}
         <time className={cn('block px-1 text-[11px] text-foreground-subtle', isUser && 'text-right')}>
           {displayTime(message.created_at)}
         </time>

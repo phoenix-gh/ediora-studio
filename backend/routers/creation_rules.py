@@ -10,6 +10,10 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from agent_execution_service import (
+    latest_agent_execution_for_job,
+    latest_agent_executions_for_jobs,
+)
 from database import get_db
 from log_redaction import redact_log_value, redact_secret_text
 from models import (
@@ -314,9 +318,9 @@ async def _agent_execution_summary(
 ) -> dict | None:
     if creation_run.content_job_id is None:
         return None
-    execution = await db.scalar(select(AgentExecution).where(
-        AgentExecution.job_id == creation_run.content_job_id
-    ))
+    execution = await latest_agent_execution_for_job(
+        db, creation_run.content_job_id
+    )
     if execution is None:
         return None
     calls = list((await db.execute(
@@ -597,11 +601,10 @@ async def get_creation_dashboard(
         )).scalars().all())
         for event in events:
             events_by_job.setdefault(event.job_id, []).append(event)
-        executions = list((await db.execute(
-            select(AgentExecution).where(AgentExecution.job_id.in_(job_ids))
-        )).scalars().all())
-        executions_by_job = {execution.job_id: execution for execution in executions}
-        execution_ids = {execution.id for execution in executions}
+        executions_by_job = await latest_agent_executions_for_jobs(db, job_ids)
+        execution_ids = {
+            execution.id for execution in executions_by_job.values()
+        }
         if execution_ids:
             calls = list((await db.execute(
                 select(AgentToolCall)
@@ -686,9 +689,9 @@ async def get_creation_run_agent_log(run_id: int, db: AsyncSession = Depends(get
         raise HTTPException(404, "creation run not found")
     if creation_run.content_job_id is None:
         return {"execution": None, "messages": [], "tools": []}
-    execution = await db.scalar(select(AgentExecution).where(
-        AgentExecution.job_id == creation_run.content_job_id
-    ))
+    execution = await latest_agent_execution_for_job(
+        db, creation_run.content_job_id
+    )
     if execution is None:
         return {"execution": None, "messages": [], "tools": []}
     messages = list((await db.execute(
@@ -705,6 +708,8 @@ async def get_creation_run_agent_log(run_id: int, db: AsyncSession = Depends(get
         "execution": {
             "id": execution.id,
             "job_id": execution.job_id,
+            "step_id": execution.step_id,
+            "attempt": execution.attempt,
             "status": execution.status,
             "objective": execution.objective,
             "phase": execution.phase,

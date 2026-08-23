@@ -49,6 +49,7 @@ export function ChatWorkspace({ variant, onClose, onOpenFullChat, onResetSize, o
     respondToApproval,
     setSkillName,
     setDraftId,
+    setPipelineInvocations,
     retrySession,
   } = useChatWorkspace()
   const [listLoading, setListLoading] = useState(true)
@@ -264,7 +265,12 @@ export function ChatWorkspace({ variant, onClose, onOpenFullChat, onResetSize, o
               </div>
             )}
             {messages.map(message => (
-              <ChatMessageView key={String(message.id)} message={message} onApproval={handleApproval} />
+              <ChatMessageView
+                key={String(message.id)}
+                message={message}
+                onApproval={handleApproval}
+                onPipelineTerminal={activeSessionId === null ? undefined : () => void retrySession(activeSessionId)}
+              />
             ))}
             {isActiveRunning && (
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -291,11 +297,13 @@ export function ChatWorkspace({ variant, onClose, onOpenFullChat, onResetSize, o
           drafts={drafts}
           skillName={state.composer.skillName}
           draftId={state.composer.draftId}
+          pipelineInvocations={state.composer.pipelineInvocations}
           disabled={isActiveRunning}
           variant={variant}
           onChange={setInput}
           onSkillNameChange={skillName => setSkillName(skillName ?? '')}
           onDraftIdChange={draftId => setDraftId(draftId ?? null)}
+          onPipelineInvocationsChange={setPipelineInvocations}
           onSubmit={handleSubmit}
         />
       </section>

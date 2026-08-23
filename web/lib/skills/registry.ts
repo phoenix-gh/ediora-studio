@@ -1,7 +1,16 @@
 import { randomUUID } from 'node:crypto'
 import { lstat, mkdir, readdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises'
-import { dirname, extname, isAbsolute, join, relative } from 'node:path'
+import { basename, dirname, extname, isAbsolute, join, relative } from 'node:path'
 import { strFromU8, unzipSync } from 'fflate'
+
+import {
+  inspectSkillPackage,
+  isStandardSkillName,
+  parseSkillDocument,
+  type SkillDiagnosticCode,
+  type SkillDocument,
+  type SkillPackageFile,
+} from './standard'
 
 export type SkillSource = 'builtin' | 'uploaded'
 
@@ -9,13 +18,22 @@ export type ManagedSkill = {
   name: string
   description: string
   version: string
+  digest: string
   source: SkillSource
   enabled: boolean
+  reviewState: SkillReviewState
+  standardCompatible: boolean
+  diagnostics: readonly SkillDiagnosticCode[]
 }
+
+export type SkillReviewState = 'approved' | 'pending'
 
 export type RegisteredSkill = ManagedSkill & {
   instructions: string
+  content: string
   directory: string
+  packageFiles: readonly SkillPackageFile[]
+  requestedAllowedTools: readonly string[]
   execution?: SkillExecutionHints
 }
 
@@ -67,16 +85,16 @@ export class SkillRegistryError extends Error {
 type PersistedSkillState = {
   source: SkillSource
   enabled: boolean
+  reviewState: SkillReviewState
 }
 
 type PersistedState = Record<string, PersistedSkillState>
 
-type SkillRecord = ManagedSkill & {
+type SkillRecord = RegisteredSkill
+  & {
   directory: string
-  instructions: string
 }
 
-const skillNamePattern = /^[A-Za-z0-9._-]{1,80}$/
 export const MAX_ARCHIVE_BYTES = 10 * 1024 * 1024
 export const MAX_UNPACKED_BYTES = 50 * 1024 * 1024
 export const MAX_ARCHIVE_FILES = 500
@@ -110,31 +128,37 @@ async function withMutation<T>(operation: () => Promise<T>) {
   return result
 }
 
-function readFrontmatterValue(frontmatter: string, key: string) {
-  const line = frontmatter
-    .split(/\r?\n/)
-    .find(candidate => candidate.trimStart().startsWith(`${key}:`))
-  if (!line) return ''
-  return line.slice(line.indexOf(':') + 1).trim().replace(/^['"]|['"]$/g, '')
-}
-
-function parseSkillMetadata(instructions: string) {
-  const frontmatter = instructions.match(/^---\s*\n([\s\S]*?)\n---(?:\s|$)/)?.[1] ?? ''
-  const name = readFrontmatterValue(frontmatter, 'name')
-  if (!name || !skillNamePattern.test(name)) return null
-  return {
-    name,
-    description: readFrontmatterValue(frontmatter, 'description'),
-    version: readFrontmatterValue(frontmatter, 'version'),
-  }
+function defaultState(source: SkillSource): PersistedSkillState {
+  return source === 'builtin'
+    ? { source, enabled: true, reviewState: 'approved' }
+    : { source, enabled: false, reviewState: 'pending' }
 }
 
 async function readSkill(directory: string, source: SkillSource): Promise<SkillRecord | null> {
   try {
     const instructions = await readFile(join(directory, 'SKILL.md'), 'utf8')
-    const metadata = parseSkillMetadata(instructions)
-    if (!metadata) return null
-    return { ...metadata, source, enabled: true, directory, instructions }
+    const document = parseSkillDocument(instructions, {
+      expectedDirectoryName: basename(directory),
+      allowLegacy: true,
+    })
+    const packageInfo = await inspectSkillPackage(directory, { skipSymlinks: true })
+    const state = defaultState(source)
+    return {
+      name: document.name,
+      description: document.description,
+      version: document.version,
+      digest: packageInfo.digest,
+      source,
+      enabled: state.enabled,
+      reviewState: state.reviewState,
+      standardCompatible: document.standardCompatible,
+      diagnostics: document.diagnostics,
+      instructions,
+      content: document.body,
+      directory,
+      packageFiles: packageInfo.files,
+      requestedAllowedTools: document.requestedAllowedTools,
+    }
   } catch {
     return null
   }
@@ -177,6 +201,7 @@ async function readManifestFromDirectory(directory: string): Promise<SkillManife
   if (uniquePaths.length > MAX_SKILL_REFERENCES) {
     throw new SkillRegistryError('too_large', `Skill contains more than ${MAX_SKILL_REFERENCES} preload references`)
   }
+  if (uniquePaths.some(path => !path.startsWith('references/'))) invalidManifest()
 
   const executionValue = record.execution
   if (executionValue !== undefined && (!executionValue || typeof executionValue !== 'object' || Array.isArray(executionValue))) invalidManifest()
@@ -213,7 +238,13 @@ async function readState(): Promise<PersistedState> {
       if (!value || typeof value !== 'object' || Array.isArray(value)) continue
       const candidate = value as Partial<PersistedSkillState>
       if ((candidate.source === 'builtin' || candidate.source === 'uploaded') && typeof candidate.enabled === 'boolean') {
-        state[name] = { source: candidate.source, enabled: candidate.enabled }
+        state[name] = {
+          source: candidate.source,
+          enabled: candidate.enabled,
+          reviewState: candidate.reviewState === 'pending'
+            ? 'pending'
+            : 'approved',
+        }
       }
     }
     return state
@@ -246,9 +277,11 @@ async function allRecords() {
     // Bundled content owns a name if a manually-created runtime directory is inconsistent.
     if (records.has(record.name)) continue
     const saved = state[record.name]
+    const savedState = saved?.source === record.source ? saved : defaultState(record.source)
     records.set(record.name, {
       ...record,
-      enabled: saved?.source === record.source ? saved.enabled : true,
+      enabled: savedState.enabled,
+      reviewState: savedState.reviewState,
     })
   }
   return [...records.values()].sort((left, right) => left.name.localeCompare(right.name))
@@ -259,8 +292,12 @@ function toManagedSkill(record: SkillRecord): ManagedSkill {
     name: record.name,
     description: record.description,
     version: record.version,
+    digest: record.digest,
     source: record.source,
     enabled: record.enabled,
+    reviewState: record.reviewState,
+    standardCompatible: record.standardCompatible,
+    diagnostics: record.diagnostics,
   }
 }
 
@@ -291,7 +328,12 @@ async function enabledSkillOrThrow(name: string) {
 }
 
 function validatedReferenceParts(referencePath: string) {
-  if (!referencePath || referencePath.includes('\0') || referencePath.includes('\\') || isAbsolute(referencePath)) {
+  if (
+    !referencePath.startsWith('references/')
+    || referencePath.includes('\0')
+    || referencePath.includes('\\')
+    || isAbsolute(referencePath)
+  ) {
     referenceError('invalid_reference', 'Invalid Skill reference path')
   }
   const parts = referencePath.split('/')
@@ -341,6 +383,17 @@ export async function listSkillReferences(name: string): Promise<SkillReference[
   const skill = await enabledSkillOrThrow(name)
   const maxReferences = configuredLimit('SKILLS_MAX_REFERENCES', MAX_SKILL_REFERENCES)
   const references: SkillReference[] = []
+  const referencesRoot = join(skill.directory, 'references')
+
+  let rootMetadata
+  try {
+    rootMetadata = await lstat(referencesRoot)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []
+    throw error
+  }
+  if (rootMetadata.isSymbolicLink()) referenceError('invalid_reference', 'Skill reference symlinks are not allowed')
+  if (!rootMetadata.isDirectory()) return []
 
   async function visit(directory: string, prefix: string) {
     const entries = await readdir(directory, { withFileTypes: true })
@@ -365,7 +418,7 @@ export async function listSkillReferences(name: string): Promise<SkillReference[
     }
   }
 
-  await visit(skill.directory, '')
+  await visit(referencesRoot, 'references')
   return references.sort((left, right) => left.path.localeCompare(right.path))
 }
 
@@ -419,9 +472,13 @@ export async function setSkillEnabled(name: string, enabled: boolean): Promise<M
     const record = (await allRecords()).find(candidate => candidate.name === name)
     if (!record) throw new SkillRegistryError('not_found', `Skill not found: ${name}`)
     const state = await readState()
-    state[name] = { source: record.source, enabled }
+    state[name] = {
+      source: record.source,
+      enabled,
+      reviewState: enabled ? 'approved' : record.reviewState,
+    }
     await writeState(state)
-    return { ...toManagedSkill(record), enabled }
+    return { ...toManagedSkill(record), enabled, reviewState: state[name].reviewState }
   })
 }
 
@@ -519,9 +576,7 @@ function readCentralEntries(buffer: Uint8Array): CentralEntry[] {
 }
 
 type ArchiveSkill = {
-  name: string
-  description: string
-  version: string
+  document: SkillDocument
   root: string
   files: Array<{ relativePath: string; content: Uint8Array }>
 }
@@ -573,16 +628,23 @@ function parseArchive(buffer: Uint8Array): ArchiveSkill[] {
     const skillPath = root ? `${root}/SKILL.md` : 'SKILL.md'
     const skillFile = files[skillPath]
     if (!skillFile) invalidArchive(`Missing Skill file: ${skillPath}`)
-    const metadata = parseSkillMetadata(strFromU8(skillFile))
-    if (!metadata) invalidArchive(`Invalid Skill frontmatter: ${skillPath}`)
-    if (names.has(metadata.name)) invalidArchive(`Duplicate Skill name: ${metadata.name}`)
-    names.add(metadata.name)
+    let document: SkillDocument
+    try {
+      document = parseSkillDocument(strFromU8(skillFile), {
+        expectedDirectoryName: root ? basename(root) : undefined,
+        allowLegacy: false,
+      })
+    } catch (error) {
+      invalidArchive(`Invalid Skill frontmatter: ${skillPath}: ${error instanceof Error ? error.message : 'parse error'}`)
+    }
+    if (names.has(document.name)) invalidArchive(`Duplicate Skill name: ${document.name}`)
+    names.add(document.name)
 
     const rootPrefix = root ? `${root}/` : ''
     const matching = entries.filter(([path]) => !path.endsWith('/') && rootForPath(path) === root)
     if (!matching.length) invalidArchive(`Skill directory is empty: ${root || '/'}`)
     skills.push({
-      ...metadata,
+      document,
       root,
       files: matching.filter(([path]) => !path.endsWith('/')).map(([path, content]) => ({
         relativePath: path.slice(rootPrefix.length),
@@ -606,8 +668,8 @@ export async function installSkillArchive(buffer: Uint8Array): Promise<ManagedSk
     const existing = await allRecords()
     const existingNames = new Set(existing.map(skill => skill.name))
     for (const skill of parsed) {
-      if (existingNames.has(skill.name)) {
-        throw new SkillRegistryError('conflict', `Skill already exists: ${skill.name}`)
+      if (existingNames.has(skill.document.name)) {
+        throw new SkillRegistryError('conflict', `Skill already exists: ${skill.document.name}`)
       }
     }
 
@@ -618,7 +680,7 @@ export async function installSkillArchive(buffer: Uint8Array): Promise<ManagedSk
     await mkdir(stagingRoot, { recursive: true })
     try {
       for (const skill of parsed) {
-        const destination = join(stagingRoot, skill.name)
+        const destination = join(stagingRoot, skill.document.name)
         await mkdir(destination, { recursive: true })
         for (const file of skill.files) {
           if (!file.relativePath || file.relativePath.includes('/') && file.relativePath.split('/').some(part => !part || part === '.' || part === '..')) {
@@ -632,27 +694,26 @@ export async function installSkillArchive(buffer: Uint8Array): Promise<ManagedSk
 
       const state = await readState()
       for (const skill of parsed) {
-        const target = join(runtimeRoot, skill.name)
+        const target = join(runtimeRoot, skill.document.name)
         try {
           await readdir(target)
-          throw new SkillRegistryError('conflict', `Skill directory already exists: ${skill.name}`)
+          throw new SkillRegistryError('conflict', `Skill directory already exists: ${skill.document.name}`)
         } catch (error) {
           if (error instanceof SkillRegistryError) throw error
           if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
         }
-        await rename(join(stagingRoot, skill.name), target)
+        await rename(join(stagingRoot, skill.document.name), target)
         movedDirectories.push(target)
-        state[skill.name] = { source: 'uploaded', enabled: true }
+        state[skill.document.name] = defaultState('uploaded')
       }
       await writeState(state)
       await rm(stagingRoot, { recursive: true, force: true })
-      return parsed.map(skill => ({
-        name: skill.name,
-        description: skill.description,
-        version: skill.version,
-        source: 'uploaded' as const,
-        enabled: true,
-      }))
+      const records = await allRecords()
+      return parsed.map(skill => {
+        const record = records.find(candidate => candidate.name === skill.document.name)
+        if (!record) throw new SkillRegistryError('invalid_archive', `Installed Skill disappeared: ${skill.document.name}`)
+        return toManagedSkill(record)
+      })
     } catch (error) {
       for (const directory of movedDirectories) await rm(directory, { recursive: true, force: true })
       await rm(stagingRoot, { recursive: true, force: true })
@@ -663,5 +724,5 @@ export async function installSkillArchive(buffer: Uint8Array): Promise<ManagedSk
 }
 
 export function isSkillName(value: string) {
-  return skillNamePattern.test(value)
+  return isStandardSkillName(value)
 }

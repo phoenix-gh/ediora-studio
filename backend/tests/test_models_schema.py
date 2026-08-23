@@ -34,3 +34,40 @@ def test_new_columns_exist_with_defaults(db_session):
             assert post.possibly_sensitive is True
 
     asyncio.new_event_loop().run_until_complete(_run())
+
+
+def test_execution_job_aliases_keep_physical_tables():
+    from models import (
+        ContentJob,
+        ContentJobEvent,
+        ContentJobStep,
+        ExecutionJob,
+        ExecutionJobEvent,
+        ExecutionJobStep,
+    )
+
+    assert ExecutionJob is ContentJob
+    assert ExecutionJobStep is ContentJobStep
+    assert ExecutionJobEvent is ContentJobEvent
+    assert ExecutionJob.__table__.name == "content_jobs"
+
+
+def test_agent_execution_and_artifact_constraints():
+    from models import AgentExecution, ExecutionArtifact
+
+    assert {"step_id", "attempt"} <= set(AgentExecution.__table__.c.keys())
+    index_names = {index.name for index in AgentExecution.__table__.indexes}
+    assert {
+        "uq_agent_executions_legacy_job",
+        "uq_agent_executions_stage_attempt",
+    } <= index_names
+    assert ExecutionArtifact.__table__.name == "execution_artifacts"
+    assert {
+        "job_id",
+        "step_id",
+        "attempt",
+        "kind",
+        "role",
+        "digest",
+        "status",
+    } <= set(ExecutionArtifact.__table__.c.keys())

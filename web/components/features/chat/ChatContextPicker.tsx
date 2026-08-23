@@ -12,6 +12,7 @@ import { cn } from '@/lib/utils'
 type Props = {
   skills: ChatSkill[]
   drafts: ChatDraft[]
+  showSkills?: boolean
   skillName?: string
   draftId?: number
   disabled: boolean
@@ -23,6 +24,7 @@ type Props = {
 export function ChatContextPicker({
   skills,
   drafts,
+  showSkills = true,
   skillName,
   draftId,
   disabled,
@@ -87,21 +89,23 @@ export function ChatContextPicker({
             <Plus className="h-3.5 w-3.5" />添加上下文
           </PopoverTrigger>
           <PopoverContent align="start" className="w-80 p-2">
-            <div className="px-1 pb-2 pt-1 text-xs font-medium text-muted-foreground">技能</div>
-            <div className="relative mb-1.5">
-              <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-foreground-subtle" />
-              <Input value={skillQuery} onChange={event => setSkillQuery(event.target.value)} placeholder="搜索技能…" className="h-8 pl-7 text-xs" />
-            </div>
-            <div className="max-h-40 overflow-y-auto">
-              {visibleSkills.map(skill => (
-                <button key={skill.name} type="button" onClick={() => chooseSkill(skill.name)} className={cn('flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-muted', selectedSkill?.name === skill.name && 'bg-violet-50 text-violet-800 dark:bg-violet-950/50 dark:text-violet-200')}>
-                  <Check className={cn('mt-0.5 h-3.5 w-3.5 shrink-0', selectedSkill?.name === skill.name ? 'opacity-100' : 'opacity-0')} />
-                  <span className="min-w-0"><span className="block truncate font-medium">{skill.name}</span>{skill.description && <span className="mt-0.5 block line-clamp-2 text-muted-foreground">{skill.description}</span>}</span>
-                </button>
-              ))}
-              {visibleSkills.length === 0 && <div className="px-2 py-3 text-center text-xs text-foreground-subtle">没有匹配的技能</div>}
-            </div>
-            <div className="my-2 border-t border-border" />
+            {showSkills && <>
+              <div className="px-1 pb-2 pt-1 text-xs font-medium text-muted-foreground">技能</div>
+              <div className="relative mb-1.5">
+                <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-foreground-subtle" />
+                <Input value={skillQuery} onChange={event => setSkillQuery(event.target.value)} placeholder="搜索技能…" className="h-8 pl-7 text-xs" />
+              </div>
+              <div className="max-h-40 overflow-y-auto">
+                {visibleSkills.map(skill => (
+                  <button key={skill.name} type="button" onClick={() => chooseSkill(skill.name)} className={cn('flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-muted', selectedSkill?.name === skill.name && 'bg-violet-50 text-violet-800 dark:bg-violet-950/50 dark:text-violet-200')}>
+                    <Check className={cn('mt-0.5 h-3.5 w-3.5 shrink-0', selectedSkill?.name === skill.name ? 'opacity-100' : 'opacity-0')} />
+                    <span className="min-w-0"><span className="block truncate font-medium">{skill.name}</span>{skill.description && <span className="mt-0.5 block line-clamp-2 text-muted-foreground">{skill.description}</span>}</span>
+                  </button>
+                ))}
+                {visibleSkills.length === 0 && <div className="px-2 py-3 text-center text-xs text-foreground-subtle">没有匹配的技能</div>}
+              </div>
+              <div className="my-2 border-t border-border" />
+            </>}
             <button type="button" onClick={openDraftDialog} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-xs font-medium text-foreground hover:bg-muted">
               <FileText className="h-3.5 w-3.5 text-sky-600" />选择草稿…
             </button>

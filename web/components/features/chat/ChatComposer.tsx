@@ -1,11 +1,12 @@
 'use client'
 
-import type { ChangeEvent, FormEvent, KeyboardEvent } from 'react'
+import { useState, type ChangeEvent, type FormEvent, type KeyboardEvent } from 'react'
 import { Loader2, MessageSquarePlus, Send } from 'lucide-react'
 
 import { ChatContextPicker } from '@/components/features/chat/ChatContextPicker'
+import { ChatSkillPipelinePicker } from '@/components/features/chat/ChatSkillPipelinePicker'
 import { Button } from '@/components/ui/button'
-import type { ChatDraft, ChatSkill } from '@/lib/api/chat'
+import type { ChatDraft, ChatSkill, SubmittedSkillInvocation } from '@/lib/api/chat'
 import { cn } from '@/lib/utils'
 
 import { shouldSubmitChatComposerKey } from '@/app/chat/chat-composer'
@@ -17,11 +18,13 @@ export type ChatComposerProps = {
   drafts: ChatDraft[]
   skillName: string
   draftId: number | null
+  pipelineInvocations: SubmittedSkillInvocation[]
   disabled: boolean
   variant: 'page' | 'floating'
   onChange: (value: string) => void
   onSkillNameChange: (skillName: string | undefined) => void
   onDraftIdChange: (draftId: number | undefined) => void
+  onPipelineInvocationsChange: (invocations: SubmittedSkillInvocation[]) => void
   onSubmit: (value: string) => void | Promise<void>
 }
 
@@ -31,14 +34,17 @@ export function ChatComposer({
   drafts,
   skillName,
   draftId,
+  pipelineInvocations,
   disabled,
   variant,
   onChange,
   onSkillNameChange,
   onDraftIdChange,
+  onPipelineInvocationsChange,
   onSubmit,
 }: ChatComposerProps) {
   const isFloating = variant === 'floating'
+  const [skillPickerOpen, setSkillPickerOpen] = useState(false)
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -47,6 +53,11 @@ export function ChatComposer({
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key === '@' && !event.shiftKey && !event.nativeEvent.isComposing) {
+      event.preventDefault()
+      setSkillPickerOpen(true)
+      return
+    }
     if (!shouldSubmitChatComposerKey({
       key: event.key,
       shiftKey: event.shiftKey,
@@ -75,20 +86,31 @@ export function ChatComposer({
               className="max-h-40 min-h-12 flex-1 resize-none bg-transparent py-1 text-sm leading-6 outline-none placeholder:text-foreground-subtle disabled:cursor-not-allowed"
             />
           </div>
-          <ChatContextPicker
-            skills={skills}
-            drafts={drafts}
-            skillName={skillName || undefined}
-            draftId={draftId ?? undefined}
-            disabled={disabled}
-            footerAction={(
-              <Button type="submit" size="icon" disabled={!value.trim() || disabled} title="发送消息" aria-label="发送消息">
-                {disabled ? <Loader2 className="animate-spin" /> : <Send />}
-              </Button>
-            )}
-            onSkillNameChange={onSkillNameChange}
-            onDraftIdChange={onDraftIdChange}
-          />
+          <div className="flex flex-wrap items-center gap-2">
+            <ChatSkillPipelinePicker
+              skills={skills}
+              invocations={pipelineInvocations}
+              open={skillPickerOpen}
+              disabled={disabled}
+              onOpenChange={setSkillPickerOpen}
+              onChange={onPipelineInvocationsChange}
+            />
+            <ChatContextPicker
+              skills={[]}
+              drafts={drafts}
+              showSkills={false}
+              skillName={skillName || undefined}
+              draftId={draftId ?? undefined}
+              disabled={disabled}
+              footerAction={(
+                <Button type="submit" size="icon" disabled={!value.trim() || disabled} title="发送消息" aria-label="发送消息">
+                  {disabled ? <Loader2 className="animate-spin" /> : <Send />}
+                </Button>
+              )}
+              onSkillNameChange={onSkillNameChange}
+              onDraftIdChange={onDraftIdChange}
+            />
+          </div>
         </div>
         <p className="mt-2 flex items-center gap-1.5 text-[11px] text-foreground-subtle">
           <MessageSquarePlus className="h-3 w-3" />新对话会在发送第一条消息时创建。

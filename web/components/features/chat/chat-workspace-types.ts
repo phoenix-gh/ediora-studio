@@ -5,6 +5,7 @@ import type {
   ChatRole,
   ChatSession,
   ChatSkill,
+  SubmittedSkillInvocation,
   UIMessageStreamEvent,
 } from '@/lib/api/chat'
 
@@ -35,6 +36,7 @@ export type ChatApprovalArgs = {
 export type ChatComposerSelection = {
   skillName: string
   draftId: number | null
+  pipelineInvocations: SubmittedSkillInvocation[]
 }
 
 export type ChatWorkspaceState = {
@@ -53,5 +55,6 @@ export type {
   ChatRole,
   ChatSession,
   ChatSkill,
+  SubmittedSkillInvocation,
   UIMessageStreamEvent,
 }

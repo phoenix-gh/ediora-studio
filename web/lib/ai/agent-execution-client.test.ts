@@ -63,6 +63,30 @@ describe('durable Agent execution client', () => {
     expect(error).toMatchObject({ status: 409, retryable: false })
   })
 
+  it('pins a stage attempt when creating a Job Agent execution', async () => {
+    vi.stubEnv('WORKER_TOKEN', 'worker-token-at-least-32-characters')
+    const fetchMock = vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ id: 32, step_id: 71, attempt: 2, version: 1 }),
+      { status: 201 },
+    ))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await ensureAgentExecution(17, {
+      objective: 'write',
+      skillMode: 'manual',
+      skillName: 'writing-plan',
+      stepId: 71,
+      attempt: 2,
+    })
+
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1].body))).toMatchObject({
+      job_id: 17,
+      step_id: 71,
+      attempt: 2,
+      skill_name: 'writing-plan',
+    })
+  })
+
   it('loads recorded tool calls with the worker job identity', async () => {
     vi.stubEnv('WORKER_TOKEN', 'worker-token-at-least-32-characters')
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify([])))

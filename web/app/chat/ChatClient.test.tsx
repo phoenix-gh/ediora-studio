@@ -8,6 +8,7 @@ import { ChatWorkspaceProvider } from '@/components/features/chat/ChatWorkspaceP
 
 const developerMode = vi.hoisted(() => ({ enabled: false }))
 const chatApi = vi.hoisted(() => ({
+  createChatPipeline: vi.fn(),
   getChatSession: vi.fn(),
   listChatDrafts: vi.fn(),
   listChatSessions: vi.fn(),
@@ -17,11 +18,21 @@ const agentLogApi = vi.hoisted(() => ({
   listAgentTrajectory: vi.fn(),
   listAllAgentLogEvents: vi.fn(),
 }))
+const jobsApi = vi.hoisted(() => ({
+  cancelPipeline: vi.fn(),
+  confirmPipeline: vi.fn(),
+  getJob: vi.fn(),
+  getJobEvents: vi.fn(),
+  rerunPipelineStage: vi.fn(),
+  revisePipeline: vi.fn(),
+  retryPipelineStage: vi.fn(),
+}))
 
 vi.mock('@/components/providers/DeveloperModeProvider', () => ({
   useDeveloperMode: () => developerMode.enabled,
 }))
 vi.mock('@/lib/api/chat', () => ({
+  createChatPipeline: chatApi.createChatPipeline,
   createChatSession: vi.fn(),
   deleteChatSession: vi.fn(),
   getChatSession: chatApi.getChatSession,
@@ -32,8 +43,14 @@ vi.mock('@/lib/api/chat', () => ({
   streamChatReply: vi.fn(),
 }))
 vi.mock('@/lib/api/jobs', () => ({
-  getJob: vi.fn(),
+  cancelPipeline: jobsApi.cancelPipeline,
+  confirmPipeline: jobsApi.confirmPipeline,
+  getJob: jobsApi.getJob,
+  getJobEvents: jobsApi.getJobEvents,
   imageUrlsForJob: vi.fn(() => []),
+  rerunPipelineStage: jobsApi.rerunPipelineStage,
+  revisePipeline: jobsApi.revisePipeline,
+  retryPipelineStage: jobsApi.retryPipelineStage,
 }))
 vi.mock('@/lib/ai/agent-log-client', () => ({
   listAgentTrajectory: agentLogApi.listAgentTrajectory,
@@ -59,6 +76,7 @@ describe('ChatClient', () => {
     })
     chatApi.listChatSkills.mockResolvedValue([])
     chatApi.listChatDrafts.mockResolvedValue([])
+    jobsApi.getJobEvents.mockResolvedValue({ events: [], next_after: 0 })
     agentLogApi.listAgentTrajectory.mockResolvedValue({
       session_key: 'chat:7',
       events: [],
@@ -152,5 +170,107 @@ describe('ChatClient', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('opens the @Skill picker and submits structured pipeline invocations', async () => {
+    chatApi.listChatSkills.mockResolvedValue([{
+      name: 'article-drafting',
+      displayName: '文章写作',
+      description: '按资料写文章',
+      version: '1.0.0',
+    }])
+    chatApi.createChatPipeline.mockResolvedValue({
+      job: { id: 81 },
+      user_message_id: 101,
+      assistant_message_id: 102,
+    })
+    const view = render(
+      <ChatWorkspaceProvider>
+        <ChatClient />
+      </ChatWorkspaceProvider>,
+    )
+
+    await waitFor(() => expect(chatApi.getChatSession).toHaveBeenCalledWith(7))
+    const textarea = screen.getByPlaceholderText('问问本地信息源里的内容…')
+    fireEvent.keyDown(textarea, { key: '@', shiftKey: false, isComposing: false })
+    expect(screen.getByRole('button', { name: '@ 添加技能' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /文章写作/ }))
+    fireEvent.change(textarea, { target: { value: '请写一篇文章' } })
+    fireEvent.submit(textarea.closest('form')!)
+
+    await waitFor(() => expect(chatApi.createChatPipeline).toHaveBeenCalledWith(7, expect.objectContaining({
+      objective: '请写一篇文章',
+      invocations: [expect.objectContaining({ skillName: 'article-drafting', skillDisplayName: '文章写作' })],
+    })))
+    view.unmount()
+  })
+
+  it('reconstructs a foldable Pipeline card from both persisted ref aliases', async () => {
+    const pipelineJob = {
+      id: 81,
+      flow: 'skill_pipeline',
+      title: '写作 Pipeline',
+      status: 'awaiting_confirmation',
+      plan_version: 1,
+      run_epoch: 1,
+      created_at: '2026-08-23T08:00:00Z',
+      started_at: null,
+      completed_at: null,
+      steps: [],
+      events: [],
+      pipeline: {
+        plan: { version: 1, objective: '请按方案写一篇文章', stages: [{
+          position: 1,
+          step_key: 'skill:01:article-drafting',
+          invocation_id: 'one',
+          skill_name: 'article-drafting',
+          display_name: '文章写作',
+          expected_output: '文章正文',
+          capability_profile: 'writing',
+          parameter_display_name: 'AI 产品观察',
+          instruction: '内部指令不应进入消息卡片',
+        }] },
+        stages: [{
+          id: 1,
+          key: 'skill:01:article-drafting',
+          attempt: 1,
+          status: 'queued',
+          input: {},
+          output: {},
+          error: '',
+          retryable: false,
+          artifacts: [],
+          created_at: '2026-08-23T08:00:00Z',
+          started_at: null,
+          completed_at: null,
+        }],
+        artifacts: [],
+      },
+    }
+    jobsApi.getJob.mockResolvedValue(pipelineJob)
+    chatApi.getChatSession.mockResolvedValue({
+      id: 7,
+      title: '现有会话',
+      created_at: '2026-08-20T08:00:00Z',
+      updated_at: '2026-08-20T08:00:00Z',
+      messages: [{
+        id: 201,
+        role: 'assistant',
+        text: '已生成 Skill Pipeline，等待确认后开始执行。',
+        parts: [{ type: 'pipeline-ref', jobId: 81 }],
+        created_at: '2026-08-23T08:00:00Z',
+      }],
+    })
+    const view = render(
+      <ChatWorkspaceProvider>
+        <ChatClient />
+      </ChatWorkspaceProvider>,
+    )
+
+    await waitFor(() => expect(screen.getByRole('region', { name: 'Skill Pipeline' })).toBeInTheDocument())
+    expect(jobsApi.getJob).toHaveBeenCalledWith(81)
+    expect(screen.getByText(/AI 产品观察/)).toBeInTheDocument()
+    expect(screen.queryByText('内部指令不应进入消息卡片')).not.toBeInTheDocument()
+    view.unmount()
   })
 })

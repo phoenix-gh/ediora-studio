@@ -379,6 +379,64 @@ def test_creation_run_projects_bounded_agent_audit_without_tool_payloads(
     assert "not exposed" not in response.text
 
 
+def test_creation_run_uses_newest_stage_execution(client, monkeypatch):
+    seed_source()
+
+    async def fake_enqueue(_job_id):
+        return None
+
+    import job_queue
+    monkeypatch.setattr(job_queue, "enqueue_job", fake_enqueue)
+    rule = client.post("/api/creation-rules", json=recurring_payload()).json()
+    creation_run = client.post(
+        f"/api/creation-rules/{rule['id']}/run"
+    ).json()
+
+    from database import SessionLocal
+    from models import AgentExecution, ContentJobStep, DailyCreationRun
+
+    async def seed_executions():
+        async with SessionLocal() as session:
+            run = await session.get(DailyCreationRun, creation_run["id"])
+            steps = [
+                ContentJobStep(
+                    job_id=run.content_job_id, step_key="research", attempt=1,
+                ),
+                ContentJobStep(
+                    job_id=run.content_job_id, step_key="write", attempt=1,
+                ),
+            ]
+            session.add_all(steps)
+            await session.flush()
+            executions = [
+                AgentExecution(
+                    job_id=run.content_job_id, step_id=steps[0].id, attempt=1,
+                    objective="old", status="succeeded",
+                ),
+                AgentExecution(
+                    job_id=run.content_job_id, step_id=steps[1].id, attempt=1,
+                    objective="new", status="running",
+                ),
+            ]
+            session.add_all(executions)
+            await session.commit()
+            return executions[1].id, steps[1].id
+
+    newest_id, newest_step_id = asyncio.run(seed_executions())
+    response = client.get(f"/api/creation-rules/runs/{creation_run['id']}")
+
+    assert response.status_code == 200, response.text
+    audit = response.json()["agent_execution"]
+    assert audit["status"] == "running"
+
+    log = client.get(
+        f"/api/creation-rules/runs/{creation_run['id']}/agent-log"
+    )
+    assert log.status_code == 200, log.text
+    assert log.json()["execution"]["id"] == newest_id
+    assert log.json()["execution"]["step_id"] == newest_step_id
+
+
 def test_bounded_completion_keeps_legacy_daily_batch_evidence():
     from routers.creation_rules import _bounded_completion
 

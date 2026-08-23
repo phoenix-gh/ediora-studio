@@ -5,7 +5,10 @@ import { executeSkillRunWithAiSdk, selectSkillForTurn, skillRunUIResponse } from
 
 const alpha: RegisteredSkill = {
   name: 'Alpha', description: 'Handles alpha tasks', version: '1.0.0', source: 'uploaded', enabled: true,
-  instructions: '# Procedure\nRead applicable rules and complete the task.\n# Verification\nCheck the output.', directory: '/skills/alpha',
+  digest: 'a'.repeat(64), reviewState: 'approved', standardCompatible: true, diagnostics: [],
+  instructions: '# Procedure\nRead applicable rules and complete the task.\n# Verification\nCheck the output.',
+  content: '# Procedure\nRead applicable rules and complete the task.\n# Verification\nCheck the output.',
+  directory: '/skills/alpha', packageFiles: [], requestedAllowedTools: [],
 }
 const beta = { ...alpha, name: 'Beta', description: 'Handles beta tasks' }
 const references: SkillReference[] = [{ path: 'references/rules.md', bytes: 5 }]

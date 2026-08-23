@@ -13,6 +13,7 @@ import { runTextVideoRenderJob } from '../lib/ai/text-video-render-job'
 import { runTextVideoSceneJob } from '../lib/ai/text-video-scene-job'
 import { runTextVideoSpeechJob } from '../lib/ai/text-video-speech-job'
 import { runTextVideoSplitJob } from '../lib/ai/text-video-split-job'
+import { runSkillPipelineJob } from '../lib/ai/skill-pipeline-job'
 
 
 const redisConstructor = vi.hoisted(() => vi.fn())
@@ -191,6 +192,8 @@ describe('content worker dispatch', () => {
     expect(resolveContentJobRunner('prompt_image_generation')).toBe(runContentJob)
     expect(resolveContentJobRunner('daily_creation'))
       .toBe(runDailyCreationAgentJob)
+    expect(resolveContentJobRunner('skill_pipeline'))
+      .toBe(runSkillPipelineJob)
   })
 
   it('routes long video flows onto the dedicated video queue', async () => {
