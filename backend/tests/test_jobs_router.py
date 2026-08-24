@@ -626,12 +626,30 @@ def test_step_lifecycle_api_records_success(client):
 def test_job_event_api_persists_auditable_generation_trace(client):
     created = client.post("/api/jobs", json={"flow": "cover", "title": "Trace", "input": {}}).json()
 
+    from database import SessionLocal
+    from models import ContentJob
+
+    async def backdate_job():
+        async with SessionLocal() as session:
+            job = await session.get(ContentJob, created["id"])
+            job.updated_at = datetime(2020, 1, 1, tzinfo=timezone.utc)
+            await session.commit()
+
+    asyncio.new_event_loop().run_until_complete(backdate_job())
+
     response = client.post(
         f"/api/jobs/{created['id']}/events",
         json={"kind": "skill_loaded", "payload": {"skill": "baoyu-cover-image"}},
     )
 
     assert response.status_code == 201
+    async def read_updated_at():
+        async with SessionLocal() as session:
+            job = await session.get(ContentJob, created["id"])
+            return job.updated_at
+
+    updated_at = asyncio.new_event_loop().run_until_complete(read_updated_at())
+    assert updated_at > datetime(2020, 1, 1, tzinfo=timezone.utc)
     job = client.get(f"/api/jobs/{created['id']}").json()
     assert job["events"][0]["kind"] == "skill_loaded"
     assert job["events"][0]["payload"] == {"skill": "baoyu-cover-image"}

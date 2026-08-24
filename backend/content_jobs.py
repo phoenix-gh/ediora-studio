@@ -78,6 +78,7 @@ async def record_event(session: AsyncSession, job_id: int, kind: str, payload: d
     if job is None:
         raise KeyError(f"job {job_id} not found")
     event = ContentJobEvent(job_id=job_id, kind=kind, payload=payload or {})
+    job.updated_at = _now()
     session.add(event)
     await session.commit()
     await session.refresh(event)
