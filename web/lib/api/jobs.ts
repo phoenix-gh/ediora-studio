@@ -31,6 +31,15 @@ export interface ContentJobEvent {
   created_at: string
 }
 
+export interface TokenUsageSummary {
+  input_tokens?: number
+  output_tokens?: number
+  total_tokens?: number
+  reasoning_tokens?: number
+  cached_input_tokens?: number
+  request_count: number
+}
+
 export interface PipelineArtifact {
   id: number
   step_id: number
@@ -90,6 +99,7 @@ export interface ContentJob {
   completed_at: string | null
   plan_version?: number
   run_epoch?: number
+  token_usage?: TokenUsageSummary | null
   pipeline?: PipelineProjection
   steps: ContentJobStep[]
   events: ContentJobEvent[]
