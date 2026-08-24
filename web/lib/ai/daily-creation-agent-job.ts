@@ -39,6 +39,7 @@ import {
   restoredSkillNameFromExecution,
 } from './agent-capability-pin'
 import { createDirectImageGenerator, mcpUrl } from './global-chat-tools'
+import { recordJobEvent } from './image-generation'
 import type {
   AgentCompletionEvidence,
   AgentModelMessageEvent,
@@ -90,15 +91,37 @@ export function buildDailyCreationAgentObjective(context: ObjectiveContext) {
   return prompt
 }
 
-export function firstBlockingToolAudit(audits: AgentToolAudit[]) {
+type BlockingAuditOptions = {
+  allowReadOnlyFailures?: boolean
+}
+
+export function firstBlockingToolAudit(
+  audits: AgentToolAudit[],
+  options: BlockingAuditOptions = {},
+) {
   return audits.find((audit, index) => {
     if (audit.status === 'uncertain') return true
     if (audit.status !== 'failed') return false
     if (audit.sideEffecting) return true
+    if (options.allowReadOnlyFailures) return false
     return !audits.slice(index + 1).some(later => (
       later.toolName === audit.toolName && later.status === 'succeeded'
     ))
   })
+}
+
+export function startAgentActivityHeartbeat(
+  onHeartbeat: () => void | Promise<void>,
+  intervalMs = 15_000,
+) {
+  const timer = setInterval(() => {
+    void Promise.resolve()
+      .then(onHeartbeat)
+      .catch(() => {
+        // Activity reporting is best effort and must never keep a worker alive.
+      })
+  }, intervalMs)
+  return () => clearInterval(timer)
 }
 
 const agentRunEvidenceSchema = z.object({
@@ -109,11 +132,15 @@ const agentRunEvidenceSchema = z.object({
   goalCompletion: completeGoalInputSchema,
 })
 
-function firstBlockingRecordedCall(calls: DurableAgentToolCall[]) {
+function firstBlockingRecordedCall(
+  calls: DurableAgentToolCall[],
+  options: BlockingAuditOptions = {},
+) {
   return calls.find((call, index) => {
     if (call.status === 'uncertain') return true
     if (call.status !== 'failed') return false
     if (call.side_effecting) return true
+    if (options.allowReadOnlyFailures) return false
     return !calls.slice(index + 1).some(later => (
       later.tool_name === call.tool_name && later.status === 'succeeded'
     ))
@@ -147,6 +174,7 @@ export type DailyCreationAgentJobDependencies = {
   appendMessage?(jobId: number, executionId: number, event: AgentModelMessageEvent): Promise<unknown>
   appendLogEvent?(jobId: number, event: AgentLogEventInput): Promise<unknown>
   appendSessionEvent?(jobId: number, executionId: number, event: AgentSessionEventInput): Promise<unknown>
+  recordJobEvent?(jobId: number, kind: string, payload: Record<string, unknown>): Promise<unknown>
   claimToolCall(
     jobId: number, executionId: number, event: AgentToolAudit,
   ): Promise<AgentToolDecision>
@@ -186,6 +214,7 @@ const defaultDependencies: DailyCreationAgentJobDependencies = {
   appendMessage: appendAgentMessage,
   appendLogEvent: (jobId, event) => appendAgentLogEvent(event, jobId),
   appendSessionEvent: (jobId, executionId, event) => appendAgentSessionEvent(event, jobId),
+  recordJobEvent,
   claimToolCall: claimAgentToolCall,
   listToolCalls: listAgentToolCalls,
   completeToolCall: completeAgentToolCall,
@@ -275,6 +304,23 @@ export async function runDailyCreationAgentJob(
       // Event logging is durable when available but never blocks the job boundary.
     }
   }
+  const recordJobActivity = (
+    activity: string,
+    payload: Record<string, unknown> = {},
+  ) => {
+    try {
+      const pending = deps.recordJobEvent?.(jobId, 'agent_activity', {
+        ...payload,
+        activity,
+        execution_id: execution?.id ?? null,
+      })
+      void pending?.catch(() => {
+        // Job activity is observability only and must never fail the Agent run.
+      })
+    } catch {
+      // Job activity is observability only and must never fail the Agent run.
+    }
+  }
   const recordSessionEvent = async (event: AgentSessionEventDraft) => {
     if (!execution) return
     await deps.appendSessionEvent?.(jobId, execution.id, {
@@ -361,7 +407,20 @@ export async function runDailyCreationAgentJob(
       return checkpointEvidence
     }
     const recordedCalls = await deps.listToolCalls(jobId, currentExecution().id)
-    const failedRecordedCall = firstBlockingRecordedCall(recordedCalls)
+    const recordedEvidenceCalls = recordedCalls.map(call => ({
+      toolCallId: call.tool_call_id,
+      toolName: call.tool_name,
+      status: call.status,
+    }))
+    const recordedGoalCall = [...recordedCalls].reverse().find(call => (
+      call.status === 'succeeded' && call.tool_name === 'complete_goal'
+    ))
+    const recordedGoalDeclaration = recordedGoalCall
+      ? goalCompletionFromToolOutput(recordedGoalCall.output)
+      : undefined
+    const failedRecordedCall = firstBlockingRecordedCall(recordedCalls, {
+      allowReadOnlyFailures: recordedGoalDeclaration?.status === 'completed',
+    })
     if (failedRecordedCall) {
       if (failedRecordedCall.side_effecting) {
         throw new Error(interruptedAfterSideEffects)
@@ -376,16 +435,8 @@ export async function runDailyCreationAgentJob(
     ))) {
       throw new Error(interruptedAfterSideEffects)
     }
-    const recordedEvidenceCalls = recordedCalls.map(call => ({
-      toolCallId: call.tool_call_id,
-      toolName: call.tool_name,
-      status: call.status,
-    }))
-    const recordedGoalCall = [...recordedCalls].reverse().find(call => (
-      call.status === 'succeeded' && call.tool_name === 'complete_goal'
-    ))
     if (recordedGoalCall) {
-      const declaration = goalCompletionFromToolOutput(recordedGoalCall.output)
+      const declaration = recordedGoalDeclaration
       if (!declaration) throw new Error('Recorded complete_goal result has no valid declaration')
       validateGoalCompletionEvidence(declaration, recordedEvidenceCalls)
       if (declaration.status === 'blocked') throw blockedGoalError(declaration)
@@ -457,9 +508,19 @@ export async function runDailyCreationAgentJob(
         } catch {
           // Message logging is best effort and must not fail the content task.
         }
+        recordJobActivity('model', {
+          direction: event.direction,
+          phase: event.phase,
+          step: event.step ?? null,
+        })
       },
       onToolAudit: async event => {
         audits.push(event)
+        recordJobActivity('tool', {
+          tool: event.toolName,
+          status: event.status,
+          step: event.step ?? null,
+        })
         if (event.status === 'succeeded') {
           await deps.completeToolCall(
             jobId, currentExecution().id, event.toolCallId, event.output,
@@ -504,32 +565,44 @@ export async function runDailyCreationAgentJob(
       skill: runtime.snapshot(),
       toolCalls: audits,
     }))
-    const result = await runtime.run({
-      objective,
-      modelMessages: [{ role: 'user', content: objective }],
-      maxSteps: 30,
-      requireGoalCompletion: true,
-      validateGoalCompletion: declaration => validateGoalCompletionEvidence(
-        declaration,
-        audits.map(audit => ({
-          toolCallId: audit.toolCallId,
-          toolName: audit.toolName,
-          status: audit.status,
-        })),
-      ),
-      onStep: event => checkpoint(event.phase, {
+    const stopAgentActivityHeartbeat = startAgentActivityHeartbeat(
+      () => recordJobActivity('heartbeat', {
+        phase: currentExecution().phase,
+      }),
+    )
+    let result: Awaited<ReturnType<AgentRuntime['run']>>
+    try {
+      result = await runtime.run({
         objective,
-        latestStep: event,
-      }, withCapabilityAudit({
-        skill: runtime?.snapshot(),
-        toolCalls: audits,
-      })),
+        modelMessages: [{ role: 'user', content: objective }],
+        maxSteps: 30,
+        requireGoalCompletion: true,
+        validateGoalCompletion: declaration => validateGoalCompletionEvidence(
+          declaration,
+          audits.map(audit => ({
+            toolCallId: audit.toolCallId,
+            toolName: audit.toolName,
+            status: audit.status,
+          })),
+        ),
+        onStep: event => checkpoint(event.phase, {
+          objective,
+          latestStep: event,
+        }, withCapabilityAudit({
+          skill: runtime?.snapshot(),
+          toolCalls: audits,
+        })),
+      })
+    } finally {
+      stopAgentActivityHeartbeat()
+    }
+    const declaration = result.goalCompletion
+    const failedAudit = firstBlockingToolAudit(audits, {
+      allowReadOnlyFailures: declaration?.status === 'completed',
     })
-    const failedAudit = firstBlockingToolAudit(audits)
     if (failedAudit) {
       throw new Error(`Agent tool audit is ${failedAudit.status}: ${failedAudit.toolName}`)
     }
-    const declaration = result.goalCompletion
     if (!declaration) throw new Error('Agent ended without declaring goal completion')
     const auditCalls = audits.map(audit => ({
       toolCallId: audit.toolCallId,
