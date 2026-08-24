@@ -326,6 +326,25 @@ describe('shared Agent runtime', () => {
     await runtime.close()
   })
 
+  it('uses a text-compatible selector when provider JSON parsing would fail', async () => {
+    const deps = dependencies()
+    deps.generate = vi.fn(async (input: Record<string, unknown>) => {
+      if (Object.prototype.hasOwnProperty.call(input, 'output')) {
+        throw new Error('No object generated: could not parse the response.')
+      }
+      return {
+        text: '{"skillName":"Alpha","continueRestored":false}',
+        toolResults: [], content: [],
+      }
+    }) as unknown as AgentRuntimeDependencies['generate']
+    const runtime = await openAgentRuntime(openOptions('automatic', deps))
+
+    await expect(runtime.prepare('Do the alpha task')).resolves.toMatchObject({
+      skill: { name: 'Alpha' }, activation: 'automatic',
+    })
+    await runtime.close()
+  })
+
   it('continues without a Skill when automatic selection has no clear match', async () => {
     const runtime = await openAgentRuntime(openOptions('automatic', dependencies()))
 

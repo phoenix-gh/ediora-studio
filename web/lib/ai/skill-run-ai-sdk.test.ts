@@ -82,6 +82,14 @@ describe('generic SkillRun AI SDK adapter', () => {
     })).resolves.toEqual({ skillName: 'Alpha', activation: 'automatic' })
   })
 
+  it('accepts a JSON string returned by a text-only selector', async () => {
+    await expect(selectSkillForTurn({
+      enabledSkills: [alpha],
+      userRequest: 'alpha task',
+      decide: async () => '{"skillName":"Alpha","continueRestored":false}',
+    })).resolves.toEqual({ skillName: 'Alpha', activation: 'automatic' })
+  })
+
   it('repairs one malformed selector response before failing', async () => {
     const decide = vi.fn()
       .mockResolvedValueOnce({ tool: 'unknown', arguments: { name: 'Alpha' } })

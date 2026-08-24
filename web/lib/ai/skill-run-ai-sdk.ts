@@ -32,11 +32,28 @@ const skillSelectionToolEnvelopeSchema = z.object({
 
 type SkillSelection = z.infer<typeof skillSelectionSchema>
 
+function parseJsonText(value: string): unknown {
+  const trimmed = value.trim()
+  if (!trimmed) return undefined
+  try {
+    return JSON.parse(trimmed) as unknown
+  } catch {
+    const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i)
+    if (!fenced) return undefined
+    try {
+      return JSON.parse(fenced[1]) as unknown
+    } catch {
+      return undefined
+    }
+  }
+}
+
 function parseSkillSelection(value: unknown): SkillSelection | undefined {
-  const direct = skillSelectionSchema.safeParse(value)
+  const candidate = typeof value === 'string' ? parseJsonText(value) : value
+  const direct = skillSelectionSchema.safeParse(candidate)
   if (direct.success) return direct.data
 
-  const toolEnvelope = skillSelectionToolEnvelopeSchema.safeParse(value)
+  const toolEnvelope = skillSelectionToolEnvelopeSchema.safeParse(candidate)
   if (!toolEnvelope.success) return undefined
   return skillSelectionSchema.parse({
     skillName: toolEnvelope.data.arguments.skillName ?? toolEnvelope.data.arguments.name,
