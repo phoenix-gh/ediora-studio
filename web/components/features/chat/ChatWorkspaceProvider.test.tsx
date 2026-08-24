@@ -187,6 +187,57 @@ describe('ChatWorkspaceProvider', () => {
     })
   })
 
+  it('does not let recovery polling overwrite an active inline stream', async () => {
+    vi.useFakeTimers()
+    try {
+      let emit!: (event: UIMessageStreamEvent) => void
+      let resolveStream!: () => void
+      api.streamChatReply.mockImplementation(async ({ onEvent }: { onEvent: (event: UIMessageStreamEvent) => void }) => {
+        emit = onEvent
+        await new Promise<void>(resolve => {
+          resolveStream = resolve
+        })
+      })
+      api.getChatSession.mockResolvedValue(detail(session7, true, [{
+        id: 70,
+        role: 'user',
+        parts: [{ type: 'text', text: '流式测试' }],
+        text: '流式测试',
+        created_at: '2026-08-22T00:00:00Z',
+      }]))
+      renderProvider()
+
+      let sending!: Promise<boolean>
+      await act(async () => {
+        sending = current.submit('流式测试', [{ type: 'text', text: '流式测试' }])
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+      await act(async () => {
+        emit({ type: 'text-delta', id: 'text-1', delta: '先显示' })
+      })
+
+      await act(async () => {
+        vi.advanceTimersByTime(2_000)
+        await Promise.resolve()
+        await Promise.resolve()
+      })
+
+      expect(current.messages).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          parts: [{ type: 'text', id: 'text-1', text: '先显示' }],
+        }),
+      ]))
+
+      await act(async () => {
+        resolveStream()
+        await sending
+      })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('recovers a running session when its persisted state becomes complete', async () => {
     vi.useFakeTimers()
     try {

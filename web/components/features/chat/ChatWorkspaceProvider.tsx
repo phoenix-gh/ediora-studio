@@ -107,6 +107,7 @@ export function ChatWorkspaceProvider({ children }: { children: ReactNode }) {
   const sessionRequestsRef = useRef(new Map<number, Promise<void>>())
   const sessionsRequestRef = useRef<Promise<ChatSession[]> | null>(null)
   const resourcesRequestRef = useRef<Promise<void> | null>(null)
+  const inlineStreamSessionIdsRef = useRef(new Set<number>())
   const pendingPipelineSubmissionRef = useRef<{
     signature: string
     clientMessageId: string
@@ -398,6 +399,7 @@ export function ChatWorkspaceProvider({ children }: { children: ReactNode }) {
     const assistantMessage = makeLocalMessage('assistant', [])
     const requestMessages = toModelMessages([...currentMessages, userMessage])
     updateSession(sessionId, messages => [...messages, userMessage, assistantMessage])
+    inlineStreamSessionIdsRef.current.add(sessionId)
     setSessionRunning(sessionId, true)
     setSessionError(sessionId, null)
 
@@ -427,6 +429,7 @@ export function ChatWorkspaceProvider({ children }: { children: ReactNode }) {
       setSessionError(sessionId, errorMessage(error, '发送消息失败'))
       return false
     } finally {
+      inlineStreamSessionIdsRef.current.delete(sessionId)
       setSessionRunning(sessionId, false)
     }
   }, [
@@ -489,6 +492,7 @@ export function ChatWorkspaceProvider({ children }: { children: ReactNode }) {
 
     const refreshRunningSessions = async () => {
       await Promise.all(runningIds.map(async sessionId => {
+        if (inlineStreamSessionIdsRef.current.has(sessionId)) return
         try {
           const session = await getChatSession(sessionId)
           setSessionDetail(session)
