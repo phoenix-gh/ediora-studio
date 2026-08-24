@@ -18,6 +18,36 @@ function event(
 }
 
 describe('Agent trajectory projection', () => {
+  it('coalesces durable and canonical copies of one tool call into the explicit Step', () => {
+    const snapshot = deriveAgentTrajectory([
+      event(1, 'turn/start'),
+      event(2, 'tool/call', {
+        callId: 'image-1', name: 'generateImage', arguments: { prompt: 'cover' },
+      }),
+      event(3, 'tool/result', {
+        callId: 'image-1', output: { asset_id: 1396 }, isError: false,
+      }),
+      event(4, 'step/start', { step: 4 }, 1, 4),
+      event(5, 'tool/call', {
+        callId: 'image-1', name: 'generateImage', arguments: { prompt: 'cover' },
+      }, 1, 4),
+      event(6, 'tool/result', {
+        callId: 'image-1', output: { asset_id: 1396 }, isError: false,
+      }, 1, 4),
+    ])
+
+    const tools = snapshot.turns
+      .flatMap(turn => turn.groups.flatMap(group => group.cells))
+      .filter(cell => cell.callId === 'image-1')
+    expect(tools).toHaveLength(1)
+    expect(tools[0]).toMatchObject({
+      step: 4,
+      status: 'completed',
+      sourceEventSeqs: [2, 3, 5, 6],
+      outputDetail: JSON.stringify({ asset_id: 1396 }, null, 2),
+    })
+  })
+
   it('folds user, assistant blocks, and paired tool result into turn and step groups', () => {
     const snapshot = deriveAgentTrajectory([
       event(1, 'turn/start', { turn: 1 }),

@@ -125,11 +125,38 @@ def test_skill_pipeline_job_requires_worker_auth_and_automatic_enqueue_is_idempo
     assert payload["flow"] == "skill_pipeline"
     assert payload["status"] == "queued"
     assert payload["plan_version"] == 1
+    assert payload["token_usage"] is None
     assert [stage["key"] for stage in payload["pipeline"]["stages"]] == [
         "skill:01:source-research",
         "skill:02:humanize-writing",
     ]
     assert queued == [payload["id"]]
+
+    from database import SessionLocal
+    from models import AgentExecution, AgentLogEvent
+
+    async def seed_usage():
+        async with SessionLocal() as session:
+            execution = AgentExecution(
+                job_id=payload["id"],
+                status="running",
+                objective="Write a sourced article",
+                skill_mode="manual",
+            )
+            session.add(execution)
+            await session.flush()
+            session.add(AgentLogEvent(
+                stream_kind="job",
+                stream_key=f"execution:{execution.id}",
+                execution_id=execution.id,
+                event_type="assistant/message",
+                phase="execute",
+                status="completed",
+                payload_data={"usage": {"inputTokens": 9, "outputTokens": 3}},
+            ))
+            await session.commit()
+
+    asyncio.new_event_loop().run_until_complete(seed_usage())
 
     repeated = client.post(
         "/api/jobs",
@@ -138,6 +165,12 @@ def test_skill_pipeline_job_requires_worker_auth_and_automatic_enqueue_is_idempo
     )
     assert repeated.status_code == 201
     assert repeated.json()["id"] == payload["id"]
+    assert repeated.json()["token_usage"] == {
+        "input_tokens": 9,
+        "output_tokens": 3,
+        "total_tokens": 12,
+        "request_count": 1,
+    }
 
 
 def test_list_jobs_returns_complete_top_level_steps_for_skill_pipeline(client):
@@ -626,15 +659,84 @@ def test_step_lifecycle_api_records_success(client):
 def test_job_event_api_persists_auditable_generation_trace(client):
     created = client.post("/api/jobs", json={"flow": "cover", "title": "Trace", "input": {}}).json()
 
+    from database import SessionLocal
+    from models import ContentJob
+
+    async def backdate_job():
+        async with SessionLocal() as session:
+            job = await session.get(ContentJob, created["id"])
+            job.updated_at = datetime(2020, 1, 1, tzinfo=timezone.utc)
+            await session.commit()
+
+    asyncio.new_event_loop().run_until_complete(backdate_job())
+
     response = client.post(
         f"/api/jobs/{created['id']}/events",
         json={"kind": "skill_loaded", "payload": {"skill": "baoyu-cover-image"}},
     )
 
     assert response.status_code == 201
+    async def read_updated_at():
+        async with SessionLocal() as session:
+            job = await session.get(ContentJob, created["id"])
+            return job.updated_at
+
+    updated_at = asyncio.new_event_loop().run_until_complete(read_updated_at())
+    assert updated_at > datetime(2020, 1, 1, tzinfo=timezone.utc)
     job = client.get(f"/api/jobs/{created['id']}").json()
     assert job["events"][0]["kind"] == "skill_loaded"
     assert job["events"][0]["payload"] == {"skill": "baoyu-cover-image"}
+
+
+def test_job_payload_includes_aggregated_token_usage(client):
+    created = client.post(
+        "/api/jobs", json={"flow": "cover", "title": "Token usage", "input": {}}
+    ).json()
+
+    from database import SessionLocal
+    from models import AgentLogEvent
+
+    async def seed_usage():
+        async with SessionLocal() as session:
+            session.add_all([
+                AgentLogEvent(
+                    stream_kind="job",
+                    stream_key="execution:1",
+                    job_id=created["id"],
+                    execution_id=1,
+                    event_type="assistant/message",
+                    phase="execute",
+                    status="completed",
+                    payload_data={
+                        "usage": {"inputTokens": 12, "outputTokens": 4},
+                    },
+                ),
+                AgentLogEvent(
+                    stream_kind="job",
+                    stream_key="execution:2",
+                    job_id=created["id"],
+                    execution_id=2,
+                    event_type="assistant/message",
+                    phase="validate",
+                    status="completed",
+                    payload_data={
+                        "usage": {"inputTokens": 8, "outputTokens": 6},
+                    },
+                ),
+            ])
+            await session.commit()
+
+    asyncio.new_event_loop().run_until_complete(seed_usage())
+
+    response = client.get(f"/api/jobs/{created['id']}")
+
+    assert response.status_code == 200, response.text
+    assert response.json()["token_usage"] == {
+        "input_tokens": 20,
+        "output_tokens": 10,
+        "total_tokens": 30,
+        "request_count": 2,
+    }
 
 
 def test_job_agent_log_returns_full_message_timeline(client):

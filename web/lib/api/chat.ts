@@ -207,6 +207,8 @@ export async function streamChatReply({
   messages,
   skillName,
   draftId,
+  skillInvocation,
+  messageParts,
   approval,
   signal,
   onEvent,
@@ -215,6 +217,8 @@ export async function streamChatReply({
   messages: UIChatMessage[]
   skillName?: string
   draftId?: number
+  skillInvocation?: SubmittedSkillInvocation
+  messageParts?: ChatComposerMessagePart[]
   approval?: ChatToolApproval
   signal?: AbortSignal
   onEvent: (event: UIMessageStreamEvent) => void
@@ -222,7 +226,15 @@ export async function streamChatReply({
   const response = await fetch('/api/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sessionId, messages, skillName, draftId, approval }),
+    body: JSON.stringify({
+      sessionId,
+      messages,
+      skillName,
+      draftId,
+      skillInvocation,
+      messageParts,
+      approval,
+    }),
     signal,
   })
   if (!response.ok) {

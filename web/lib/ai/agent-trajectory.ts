@@ -276,12 +276,12 @@ function ensureGroup(turn: MutableTurn, step: number | null): MutableGroup {
   return created
 }
 
-function findCell(group: MutableGroup, callId: string): MutableTool | undefined {
-  return group.cells.find(cell => cell.callId === callId) as MutableTool | undefined
+function toolKey(turn: number, callId: string): string {
+  return `${turn}:${callId}`
 }
 
-function toolKey(turn: number, step: number | null, callId: string): string {
-  return `${turn}:${step ?? 0}:${callId}`
+function toolRecordId(turn: number, step: number | null, callId: string) {
+  return `tool:${turn}:${step ?? 0}:${callId}`
 }
 
 function publicCell(cell: MutableTool): TrajectoryCell {
@@ -306,23 +306,48 @@ function toolCallData(data: Record<string, unknown>): { callId?: string; name?: 
 }
 
 function addOrUpdateTool(
+  turn: MutableTurn,
   group: MutableGroup,
+  tools: Map<string, MutableTool>,
   event: AgentSessionEvent,
   callId: string,
   toolName: string,
   input: unknown,
   startedAt: number | null,
 ) {
-  const existing = findCell(group, callId)
+  const key = toolKey(group.turn, callId)
+  const existing = tools.get(key)
   if (existing) {
-    existing.toolName = toolName || existing.toolName
+    if (group.step !== null && existing.step === null) {
+      const previousGroupKey = groupKey(existing.step)
+      const previousGroup = turn.groups.get(previousGroupKey)
+      if (previousGroup) {
+        previousGroup.cells = previousGroup.cells.filter(cell => cell !== existing)
+        if (previousGroup.cells.length === 0) {
+          turn.groups.delete(previousGroupKey)
+          turn.groupOrder = turn.groupOrder.filter(item => item !== previousGroupKey)
+        }
+      }
+      existing.step = group.step
+      existing.recordId = toolRecordId(group.turn, group.step, callId)
+      if (!group.cells.includes(existing)) group.cells.push(existing)
+      if (startedAt !== null) existing.startedAt = startedAt
+    } else if (group.step === null && existing.step !== null && group.cells.length === 0) {
+      const emptyGroupKey = groupKey(group.step)
+      turn.groups.delete(emptyGroupKey)
+      turn.groupOrder = turn.groupOrder.filter(item => item !== emptyGroupKey)
+    }
+    if (toolName && (toolName !== 'Tool' || existing.toolName === 'Tool')) {
+      existing.toolName = toolName
+    }
+    existing.title = existing.toolName
     if (input !== undefined) existing.inputDetail = detailText(input)
     existing.sourceEventSeqs = Array.from(new Set([...existing.sourceEventSeqs, event.seq]))
     if (startedAt !== null && existing.startedAt === null) existing.startedAt = startedAt
     return existing
   }
   const created: MutableTool = {
-    recordId: `tool:${toolKey(group.turn, group.step, callId)}`,
+    recordId: toolRecordId(group.turn, group.step, callId),
     kind: 'tool',
     turn: eventTurn(event),
     step: eventStep(event),
@@ -337,6 +362,7 @@ function addOrUpdateTool(
     endedAt: null,
   }
   group.cells.push(created)
+  tools.set(key, created)
   return created
 }
 
@@ -517,8 +543,11 @@ export function deriveAgentTrajectory(
         const callId = stringValue(block.callId) ?? stringValue(block.toolCallId) ?? stringValue(block.id)
         if (!callId) continue
         const toolName = stringValue(block.name) ?? stringValue(block.toolName) ?? 'Tool'
-        const call = addOrUpdateTool(group, event, callId, toolName, block.argsRaw ?? block.arguments ?? block.input, timestamp(record(event.data.timing).stepStartTime))
-        tools.set(toolKey(group.turn, group.step, callId), call as MutableTool)
+        addOrUpdateTool(
+          turn, group, tools, event, callId, toolName,
+          block.argsRaw ?? block.arguments ?? block.input,
+          timestamp(record(event.data.timing).stepStartTime),
+        )
       }
       continue
     }
@@ -527,8 +556,10 @@ export function deriveAgentTrajectory(
       const callData = toolCallData(event.data)
       if (!callData.callId) continue
       const group = ensureGroup(turn, step)
-      const call = addOrUpdateTool(group, event, callData.callId, callData.name ?? 'Tool', callData.input, event.time)
-      tools.set(toolKey(group.turn, group.step, callData.callId), call as MutableTool)
+      addOrUpdateTool(
+        turn, group, tools, event, callData.callId,
+        callData.name ?? 'Tool', callData.input, event.time,
+      )
       continue
     }
 
@@ -536,9 +567,10 @@ export function deriveAgentTrajectory(
       const callId = stringValue(event.data.callId) ?? stringValue(event.data.toolCallId) ?? stringValue(event.data.tool_call_id)
       if (!callId) continue
       const group = ensureGroup(turn, step)
-      const key = toolKey(group.turn, group.step, callId)
-      const existing = tools.get(key) ?? addOrUpdateTool(group, event, callId, stringValue(event.data.name) ?? 'Tool', undefined, null)
-      tools.set(key, existing)
+      const existing = addOrUpdateTool(
+        turn, group, tools, event, callId,
+        stringValue(event.data.name) ?? 'Tool', undefined, null,
+      )
       existing.sourceEventSeqs = Array.from(new Set([...existing.sourceEventSeqs, event.seq]))
       existing.endedAt = event.time
       const output = event.data.output ?? event.data.content ?? event.data.result

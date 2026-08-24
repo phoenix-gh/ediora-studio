@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -151,5 +151,27 @@ describe('ChatWorkspace', () => {
 
     await waitFor(() => expect(screen.getByText(/还没有对话/)).toBeInTheDocument())
     expect(api.createChatSession).not.toHaveBeenCalled()
+  })
+
+  it('clears the composer as soon as Enter starts a streaming reply', async () => {
+    let finishReply: (() => void) | undefined
+    api.streamChatReply.mockImplementation(() => new Promise<void>(resolve => {
+      finishReply = resolve
+    }))
+    renderWorkspace('page')
+
+    await screen.findByText('已有会话的消息')
+    const editor = screen.getByRole('textbox', { name: '消息内容' })
+    editor.textContent = '发送后立即清空'
+    fireEvent.input(editor)
+    fireEvent.keyDown(editor, { key: 'Enter', shiftKey: false, isComposing: false })
+
+    await waitFor(() => expect(api.streamChatReply).toHaveBeenCalledTimes(1))
+    try {
+      expect(editor.textContent).toBe('')
+      expect(editor).toHaveAttribute('data-empty', 'true')
+    } finally {
+      await act(async () => finishReply?.())
+    }
   })
 })

@@ -1,6 +1,6 @@
 'use client'
 
-import { type ContentJob, type ContentJobStep } from '@/lib/api/jobs'
+import { type ContentJob, type ContentJobStep, type TokenUsageSummary } from '@/lib/api/jobs'
 import { AgentTrajectoryPanel } from '@/components/features/agent/AgentTrajectoryPanel'
 import { useDeveloperMode } from '@/components/providers/DeveloperModeProvider'
 import { Button } from '@/components/ui/button'
@@ -22,6 +22,30 @@ function formatTime(value: string | null | undefined) {
 
 function jsonText(value: unknown) {
   try { return JSON.stringify(value, null, 2) ?? String(value) } catch { return String(value) }
+}
+
+function formatTokenCount(value: number | undefined) {
+  return value === undefined ? '—' : new Intl.NumberFormat('zh-CN').format(value)
+}
+
+function TokenUsageSummaryCard({ usage }: { usage: TokenUsageSummary | null | undefined }) {
+  if (!usage) return null
+  return <section data-testid="job-token-usage" className="rounded-lg border bg-muted/30 p-3 text-xs">
+    <div className="flex flex-wrap items-center justify-between gap-2">
+      <h3 className="font-medium">Token 消耗</h3>
+      <span className="text-muted-foreground">{usage.request_count} 次模型请求</span>
+    </div>
+    <div className="mt-2 grid gap-2 sm:grid-cols-3">
+      <span>输入 {formatTokenCount(usage.input_tokens)}</span>
+      <span>输出 {formatTokenCount(usage.output_tokens)}</span>
+      <span>总计 {formatTokenCount(usage.total_tokens)}</span>
+    </div>
+    {(usage.reasoning_tokens !== undefined || usage.cached_input_tokens !== undefined) && <p className="mt-2 text-muted-foreground">
+      {usage.reasoning_tokens !== undefined && `推理 ${formatTokenCount(usage.reasoning_tokens)}`}
+      {usage.reasoning_tokens !== undefined && usage.cached_input_tokens !== undefined && ' · '}
+      {usage.cached_input_tokens !== undefined && `缓存输入 ${formatTokenCount(usage.cached_input_tokens)}`}
+    </p>}
+  </section>
 }
 
 function StepRow({ step, onRetry }: { step: ContentJobStep; onRetry: () => void }) {
@@ -101,6 +125,7 @@ export function JobLogDialog({ job, open, onOpenChange, onRetry }: { job: Conten
                   <span>开始：{formatTime(job.started_at)}</span>
                   <span>结束：{formatTime(job.completed_at)}</span>
                 </div>
+                <TokenUsageSummaryCard usage={job.token_usage} />
                 <div className="flex items-center justify-between gap-3">
                   <h3 className="font-medium">执行步骤</h3>
                   <span className="text-xs text-muted-foreground">{job.steps.length} 个步骤</span>

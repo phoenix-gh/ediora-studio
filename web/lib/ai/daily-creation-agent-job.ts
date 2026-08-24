@@ -27,12 +27,19 @@ import {
   type AgentSessionEventDraft,
   type OpenAgentRuntimeOptions,
 } from './agent-runtime'
+import {
+  blockedGoalError,
+  completeGoalInputSchema,
+  goalCompletionFromToolOutput,
+  validateGoalCompletionEvidence,
+} from './agent-goal-completion'
 import { pinCapabilitySnapshot } from './agent-capabilities'
 import {
   capabilityPinFromExecution,
   restoredSkillNameFromExecution,
 } from './agent-capability-pin'
 import { createDirectImageGenerator, mcpUrl } from './global-chat-tools'
+import { recordJobEvent } from './image-generation'
 import type {
   AgentCompletionEvidence,
   AgentModelMessageEvent,
@@ -84,15 +91,37 @@ export function buildDailyCreationAgentObjective(context: ObjectiveContext) {
   return prompt
 }
 
-export function firstBlockingToolAudit(audits: AgentToolAudit[]) {
+type BlockingAuditOptions = {
+  allowReadOnlyFailures?: boolean
+}
+
+export function firstBlockingToolAudit(
+  audits: AgentToolAudit[],
+  options: BlockingAuditOptions = {},
+) {
   return audits.find((audit, index) => {
     if (audit.status === 'uncertain') return true
     if (audit.status !== 'failed') return false
     if (audit.sideEffecting) return true
+    if (options.allowReadOnlyFailures) return false
     return !audits.slice(index + 1).some(later => (
       later.toolName === audit.toolName && later.status === 'succeeded'
     ))
   })
+}
+
+export function startAgentActivityHeartbeat(
+  onHeartbeat: () => void | Promise<void>,
+  intervalMs = 15_000,
+) {
+  const timer = setInterval(() => {
+    void Promise.resolve()
+      .then(onHeartbeat)
+      .catch(() => {
+        // Activity reporting is best effort and must never keep a worker alive.
+      })
+  }, intervalMs)
+  return () => clearInterval(timer)
 }
 
 const agentRunEvidenceSchema = z.object({
@@ -100,111 +129,31 @@ const agentRunEvidenceSchema = z.object({
   executionId: z.number().int().positive(),
   finalText: z.string().max(2_000),
   toolCallCount: z.number().int().nonnegative(),
+  goalCompletion: completeGoalInputSchema,
 })
 
-const savedDraftSchema = z.object({
-  id: z.number().int().positive(),
-}).passthrough()
-
-function parseJsonText(value: unknown) {
-  if (!Array.isArray(value)) return undefined
-  const item = value.find(candidate => (
-    candidate && typeof candidate === 'object'
-    && (candidate as Record<string, unknown>).type === 'text'
-    && typeof (candidate as Record<string, unknown>).text === 'string'
-  )) as { text?: string } | undefined
-  if (!item?.text) return undefined
-  try { return JSON.parse(item.text) as unknown } catch { return undefined }
-}
-
-function unwrapMcpOutput(value: unknown): unknown {
-  if (!value || typeof value !== 'object') return value
-  const record = value as Record<string, unknown>
-  if (record.structuredContent !== undefined) {
-    const structured = record.structuredContent
-    if (structured && typeof structured === 'object' && 'result' in structured) {
-      return (structured as Record<string, unknown>).result
-    }
-    return structured
-  }
-  const fromText = parseJsonText(record.content)
-  if (fromText !== undefined) return unwrapMcpOutput(fromText)
-  if ('result' in record) return unwrapMcpOutput(record.result)
-  return value
-}
-
-type ToolCompletionRecord = {
-  toolName: string
-  status: string
-  output?: unknown
-}
-
-function persistedDraftIds(records: ToolCompletionRecord[]) {
-  return [...new Set(records.flatMap(record => {
-    if (record.status !== 'succeeded' || record.toolName !== 'save_draft') return []
-    const parsed = savedDraftSchema.safeParse(unwrapMcpOutput(record.output))
-    return parsed.success ? [parsed.data.id] : []
-  }))]
-}
-
-function hasInvalidSavedDraftEvidence(records: ToolCompletionRecord[]) {
-  return records.some(record => (
-    record.status === 'succeeded'
-    && record.toolName === 'save_draft'
-    && !savedDraftSchema.safeParse(unwrapMcpOutput(record.output)).success
-  ))
-}
-
-function firstBlockingRecordedCall(calls: DurableAgentToolCall[]) {
+function firstBlockingRecordedCall(
+  calls: DurableAgentToolCall[],
+  options: BlockingAuditOptions = {},
+) {
   return calls.find((call, index) => {
     if (call.status === 'uncertain') return true
     if (call.status !== 'failed') return false
     if (call.side_effecting) return true
+    if (options.allowReadOnlyFailures) return false
     return !calls.slice(index + 1).some(later => (
       later.tool_name === call.tool_name && later.status === 'succeeded'
     ))
   })
 }
 
-const chineseDigits: Record<string, number> = {
-  一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5,
-  六: 6, 七: 7, 八: 8, 九: 9,
-}
-
-function parsedCountToken(token: string) {
-  if (/^[1-9]\d?$/.test(token)) return Number(token)
-  if (token === '十') return 10
-  if (!token.includes('十')) return chineseDigits[token]
-  const [tens, ones] = token.split('十')
-  const tensValue = tens ? chineseDigits[tens] : 1
-  const onesValue = ones ? chineseDigits[ones] : 0
-  if (tensValue === undefined || onesValue === undefined) return undefined
-  const value = tensValue * 10 + onesValue
-  return Number.isSafeInteger(value) ? value : undefined
-}
-
-export function draftCountFromPrompt(prompt: string) {
-  const match = prompt.match(
-    /(?:创作|撰写|写作|写|生成|产出|保存|制作|整理)\s*([1-9]\d?|[一二两三四五六七八九十]{1,3})\s*(?:条|个|篇|份)\s*(?:中文\s*)?(?:(?:X|Twitter|推特)\s*)?(?:短帖|帖子|推文|草稿|内容|文章)/i,
-  )
-  const parsed = match ? parsedCountToken(match[1]) : undefined
-  return parsed && parsed <= 50 ? parsed : undefined
-}
-
-function requiredDraftCount(context: DailyCreationAgentContext) {
-  const promptCount = draftCountFromPrompt(context.rule.prompt)
-  if (promptCount) return promptCount
-  if (Number.isSafeInteger(context.requested_count) && context.requested_count > 0) {
-    return Math.min(context.requested_count, 50)
-  }
-  return 1
-}
-
-function draftCompletionSummary(draftIds: number[]) {
-  return [
-    `已保存 ${draftIds.length} 条草稿：`,
-    ...draftIds.map(id => `- [草稿 ${id}](ediora://draft/${id})`),
-  ].join('\n')
+function successfulBusinessToolCallCount(calls: Array<{
+  toolName: string
+  status: string
+}>) {
+  return calls.filter(call => (
+    call.status === 'succeeded' && call.toolName !== 'complete_goal'
+  )).length
 }
 
 type Model = OpenAgentRuntimeOptions['model']
@@ -225,6 +174,7 @@ export type DailyCreationAgentJobDependencies = {
   appendMessage?(jobId: number, executionId: number, event: AgentModelMessageEvent): Promise<unknown>
   appendLogEvent?(jobId: number, event: AgentLogEventInput): Promise<unknown>
   appendSessionEvent?(jobId: number, executionId: number, event: AgentSessionEventInput): Promise<unknown>
+  recordJobEvent?(jobId: number, kind: string, payload: Record<string, unknown>): Promise<unknown>
   claimToolCall(
     jobId: number, executionId: number, event: AgentToolAudit,
   ): Promise<AgentToolDecision>
@@ -264,6 +214,7 @@ const defaultDependencies: DailyCreationAgentJobDependencies = {
   appendMessage: appendAgentMessage,
   appendLogEvent: (jobId, event) => appendAgentLogEvent(event, jobId),
   appendSessionEvent: (jobId, executionId, event) => appendAgentSessionEvent(event, jobId),
+  recordJobEvent,
   claimToolCall: claimAgentToolCall,
   listToolCalls: listAgentToolCalls,
   completeToolCall: completeAgentToolCall,
@@ -298,9 +249,6 @@ function durableExecutionEvidence(execution: DurableAgentExecution) {
 }
 
 const interruptedAfterSideEffects = 'scheduled Agent interrupted after side effects; review logs before retry'
-const exhaustedWhileCallingTool = 'scheduled Agent exhausted 30 steps while requesting another tool call'
-const partialDraftCompletion = 'scheduled Agent persisted'
-const invalidDraftCompletion = 'scheduled Agent save_draft completion evidence is invalid'
 
 export async function runDailyCreationAgentJob(
   jobId: number,
@@ -356,6 +304,23 @@ export async function runDailyCreationAgentJob(
       // Event logging is durable when available but never blocks the job boundary.
     }
   }
+  const recordJobActivity = (
+    activity: string,
+    payload: Record<string, unknown> = {},
+  ) => {
+    try {
+      const pending = deps.recordJobEvent?.(jobId, 'agent_activity', {
+        ...payload,
+        activity,
+        execution_id: execution?.id ?? null,
+      })
+      void pending?.catch(() => {
+        // Job activity is observability only and must never fail the Agent run.
+      })
+    } catch {
+      // Job activity is observability only and must never fail the Agent run.
+    }
+  }
   const recordSessionEvent = async (event: AgentSessionEventDraft) => {
     if (!execution) return
     await deps.appendSessionEvent?.(jobId, execution.id, {
@@ -382,7 +347,6 @@ export async function runDailyCreationAgentJob(
   try {
     const context = await deps.getContext(runId, jobId)
     const objective = buildDailyCreationAgentObjective(context)
-    const expectedDraftCount = requiredDraftCount(context)
     executionRequest.objective = objective
     executionRequest.skillMode = context.rule.skill_mode ?? 'auto'
     executionRequest.skillName = executionRequest.skillMode === 'manual'
@@ -443,7 +407,20 @@ export async function runDailyCreationAgentJob(
       return checkpointEvidence
     }
     const recordedCalls = await deps.listToolCalls(jobId, currentExecution().id)
-    const failedRecordedCall = firstBlockingRecordedCall(recordedCalls)
+    const recordedEvidenceCalls = recordedCalls.map(call => ({
+      toolCallId: call.tool_call_id,
+      toolName: call.tool_name,
+      status: call.status,
+    }))
+    const recordedGoalCall = [...recordedCalls].reverse().find(call => (
+      call.status === 'succeeded' && call.tool_name === 'complete_goal'
+    ))
+    const recordedGoalDeclaration = recordedGoalCall
+      ? goalCompletionFromToolOutput(recordedGoalCall.output)
+      : undefined
+    const failedRecordedCall = firstBlockingRecordedCall(recordedCalls, {
+      allowReadOnlyFailures: recordedGoalDeclaration?.status === 'completed',
+    })
     if (failedRecordedCall) {
       if (failedRecordedCall.side_effecting) {
         throw new Error(interruptedAfterSideEffects)
@@ -458,27 +435,17 @@ export async function runDailyCreationAgentJob(
     ))) {
       throw new Error(interruptedAfterSideEffects)
     }
-    const recordedSaveCalls = recordedCalls.filter(call => (
-      call.status === 'succeeded' && call.tool_name === 'save_draft'
-    ))
-    if (recordedSaveCalls.length > 0) {
-      const recordedCompletions = recordedCalls.map(call => ({
-        toolName: call.tool_name, status: call.status, output: call.output,
-      }))
-      if (hasInvalidSavedDraftEvidence(recordedCompletions)) {
-        throw new Error(invalidDraftCompletion)
-      }
-      const recordedDraftIds = persistedDraftIds(recordedCompletions)
-      if (recordedDraftIds.length < expectedDraftCount) {
-        throw new Error(
-          `${partialDraftCompletion} ${recordedDraftIds.length} of ${expectedDraftCount} required drafts`,
-        )
-      }
+    if (recordedGoalCall) {
+      const declaration = recordedGoalDeclaration
+      if (!declaration) throw new Error('Recorded complete_goal result has no valid declaration')
+      validateGoalCompletionEvidence(declaration, recordedEvidenceCalls)
+      if (declaration.status === 'blocked') throw blockedGoalError(declaration)
       const recoveredEvidence: AgentCompletionEvidence = {
         kind: 'agent_run',
         executionId: currentExecution().id,
-        finalText: draftCompletionSummary(recordedDraftIds).slice(0, 2_000),
-        toolCallCount: recordedCalls.filter(call => call.status === 'succeeded').length,
+        finalText: declaration.summary.slice(0, 2_000),
+        toolCallCount: successfulBusinessToolCallCount(recordedEvidenceCalls),
+        goalCompletion: declaration,
       }
       pendingFinalizationEvidence = recoveredEvidence
       await finishCanonicalTurn({ kind: 'completed', recovered: true })
@@ -541,9 +508,19 @@ export async function runDailyCreationAgentJob(
         } catch {
           // Message logging is best effort and must not fail the content task.
         }
+        recordJobActivity('model', {
+          direction: event.direction,
+          phase: event.phase,
+          step: event.step ?? null,
+        })
       },
       onToolAudit: async event => {
         audits.push(event)
+        recordJobActivity('tool', {
+          tool: event.toolName,
+          status: event.status,
+          step: event.step ?? null,
+        })
         if (event.status === 'succeeded') {
           await deps.completeToolCall(
             jobId, currentExecution().id, event.toolCallId, event.output,
@@ -588,73 +565,64 @@ export async function runDailyCreationAgentJob(
       skill: runtime.snapshot(),
       toolCalls: audits,
     }))
-    const result = await runtime.run({
-      objective,
-      modelMessages: [{ role: 'user', content: objective }],
-      maxSteps: 30,
-      requiredTools: ['save_draft'],
-      getFollowUpMessages: () => {
-        if (firstBlockingToolAudit(audits)) return []
-        const completions = audits.map(audit => ({
-          toolName: audit.toolName, status: audit.status, output: audit.output,
-        }))
-        if (hasInvalidSavedDraftEvidence(completions)) return []
-        const draftIds = persistedDraftIds(completions)
-        if (draftIds.length >= expectedDraftCount) return []
-        return [{
-          role: 'user',
-          content: `The scheduled task is not complete. ${draftIds.length} of ${expectedDraftCount} required drafts have been persisted. Continue the original task now and use save_draft until all required drafts exist. Do not recreate drafts that were already saved.`,
-        }]
-      },
-      onStep: event => checkpoint(event.phase, {
+    const stopAgentActivityHeartbeat = startAgentActivityHeartbeat(
+      () => recordJobActivity('heartbeat', {
+        phase: currentExecution().phase,
+      }),
+    )
+    let result: Awaited<ReturnType<AgentRuntime['run']>>
+    try {
+      result = await runtime.run({
         objective,
-        latestStep: event,
-      }, withCapabilityAudit({
-        skill: runtime?.snapshot(),
-        toolCalls: audits,
-      })),
+        modelMessages: [{ role: 'user', content: objective }],
+        maxSteps: 30,
+        requireGoalCompletion: true,
+        validateGoalCompletion: declaration => validateGoalCompletionEvidence(
+          declaration,
+          audits.map(audit => ({
+            toolCallId: audit.toolCallId,
+            toolName: audit.toolName,
+            status: audit.status,
+          })),
+        ),
+        onStep: event => checkpoint(event.phase, {
+          objective,
+          latestStep: event,
+        }, withCapabilityAudit({
+          skill: runtime?.snapshot(),
+          toolCalls: audits,
+        })),
+      })
+    } finally {
+      stopAgentActivityHeartbeat()
+    }
+    const declaration = result.goalCompletion
+    const failedAudit = firstBlockingToolAudit(audits, {
+      allowReadOnlyFailures: declaration?.status === 'completed',
     })
-    const failedAudit = firstBlockingToolAudit(audits)
     if (failedAudit) {
       throw new Error(`Agent tool audit is ${failedAudit.status}: ${failedAudit.toolName}`)
     }
-    if (result.finishReason === 'tool-calls' && (result.stepCount ?? 0) >= 30) {
-      throw new Error(exhaustedWhileCallingTool)
-    }
-    const auditCompletions = audits.map(audit => ({
-      toolName: audit.toolName, status: audit.status, output: audit.output,
+    if (!declaration) throw new Error('Agent ended without declaring goal completion')
+    const auditCalls = audits.map(audit => ({
+      toolCallId: audit.toolCallId,
+      toolName: audit.toolName,
+      status: audit.status,
     }))
-    const draftIds = persistedDraftIds(auditCompletions)
-    const succeededSaveCalls = audits.filter(audit => (
-      audit.status === 'succeeded' && audit.toolName === 'save_draft'
-    ))
-    if (draftIds.length === 0) {
-      if (succeededSaveCalls.length > 0) {
-        throw new Error(invalidDraftCompletion)
-      }
-      throw new Error(
-        `scheduled Agent produced no persisted drafts (required ${expectedDraftCount})`,
-      )
-    }
-    if (hasInvalidSavedDraftEvidence(auditCompletions)) {
-      throw new Error(invalidDraftCompletion)
-    }
-    if (draftIds.length < expectedDraftCount) {
-      throw new Error(
-        `${partialDraftCompletion} ${draftIds.length} of ${expectedDraftCount} required drafts`,
-      )
-    }
-    const finalText = result.text.trim() || draftCompletionSummary(draftIds)
+    validateGoalCompletionEvidence(declaration, auditCalls)
+    if (declaration.status === 'blocked') throw blockedGoalError(declaration)
     const completionEvidence: AgentCompletionEvidence = {
       kind: 'agent_run',
       executionId: currentExecution().id,
-      finalText: finalText.slice(0, 2_000),
-      toolCallCount: audits.filter(audit => audit.status === 'succeeded').length,
+      finalText: declaration.summary.slice(0, 2_000),
+      toolCallCount: successfulBusinessToolCallCount(auditCalls),
+      goalCompletion: declaration,
     }
     pendingFinalizationEvidence = completionEvidence
     await checkpoint('finalizing', {
       objective,
       evidence: completionEvidence,
+      goalCompletion: declaration,
     }, withCapabilityAudit({
       skill: runtime.snapshot(),
       skillRun: agentSkillRunAudit(result),
@@ -710,9 +678,8 @@ export async function runDailyCreationAgentJob(
     const deterministic = failureMessage.includes(interruptedAfterSideEffects)
       || failureMessage.includes('Selected skill is unavailable')
       || failureMessage.includes('Agent capability drift detected')
-      || failureMessage.includes(exhaustedWhileCallingTool)
-      || failureMessage.includes(partialDraftCompletion)
-      || failureMessage.includes(invalidDraftCompletion)
+      || failureMessage.includes('Goal completion cites an unavailable tool call')
+      || failureMessage.includes('Agent blocked:')
     if (!durableFinalizationConfirmed) {
       try {
         if (execution) await deps.failExecution(jobId, execution.id, failureMessage)

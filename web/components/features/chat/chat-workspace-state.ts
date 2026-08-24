@@ -36,8 +36,9 @@ export function toModelMessages(messages: DisplayMessage[]): UIChatMessage[] {
     .map(message => ({
       id: String(message.id),
       role: message.role,
-      parts: message.parts,
+      parts: message.parts.filter(part => part.type === 'text'),
     }))
+    .filter(message => message.parts.length > 0)
 }
 
 function updateAssistantMessage(
@@ -56,6 +57,19 @@ function updateTextPart(parts: ChatPart[], partId: string, delta: string) {
   return parts.map((part, currentIndex) => currentIndex === index
     ? { ...part, text: String(part.text ?? '') + delta }
     : part)
+}
+
+function updateReasoningPart(
+  parts: ChatPart[],
+  partId: string,
+  update: (current: ChatPart | undefined) => ChatPart,
+) {
+  const index = parts.findIndex(part => part.type === 'reasoning' && part.id === partId)
+  const current = index < 0 ? undefined : parts[index]
+  const next = update(current)
+  return index < 0
+    ? [...parts, next]
+    : parts.map((part, currentIndex) => currentIndex === index ? next : part)
 }
 
 function updateToolPart(parts: ChatPart[], event: UIMessageStreamEvent) {
@@ -82,6 +96,37 @@ export function applyChatStreamEvent(
   assistantMessageId: string,
   event: UIMessageStreamEvent,
 ): DisplayMessage[] {
+  if (event.type === 'reasoning-start') {
+    const partId = typeof event.id === 'string' ? event.id : 'reasoning'
+    return updateAssistantMessage(messages, assistantMessageId, parts => (
+      updateReasoningPart(parts, partId, current => ({
+        type: 'reasoning', id: partId,
+        text: String(current?.text ?? ''), state: 'streaming',
+      }))
+    ))
+  }
+
+  if (event.type === 'reasoning-delta') {
+    const partId = typeof event.id === 'string' ? event.id : 'reasoning'
+    const delta = typeof event.delta === 'string' ? event.delta : ''
+    return updateAssistantMessage(messages, assistantMessageId, parts => (
+      updateReasoningPart(parts, partId, current => ({
+        type: 'reasoning', id: partId,
+        text: String(current?.text ?? '') + delta, state: 'streaming',
+      }))
+    ))
+  }
+
+  if (event.type === 'reasoning-end') {
+    const partId = typeof event.id === 'string' ? event.id : 'reasoning'
+    return updateAssistantMessage(messages, assistantMessageId, parts => (
+      updateReasoningPart(parts, partId, current => ({
+        type: 'reasoning', id: partId,
+        text: String(current?.text ?? ''), state: 'complete',
+      }))
+    ))
+  }
+
   if (event.type === 'text-delta') {
     const partId = typeof event.id === 'string' ? event.id : 'text'
     const delta = typeof event.delta === 'string' ? event.delta : ''

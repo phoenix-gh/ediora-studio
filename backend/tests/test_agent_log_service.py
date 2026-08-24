@@ -166,3 +166,86 @@ def test_append_canonical_turn_end_resolves_current_turn_after_long_stream(log_d
     ended = asyncio.run(exercise())
 
     assert ended.payload_data["turn"] == 3
+
+
+def test_get_agent_token_usage_aggregates_a_job_across_execution_streams(log_db):
+    from agent_log_service import (
+        append_agent_log_event,
+        append_agent_session_event,
+        get_agent_token_usage,
+    )
+
+    async def exercise():
+        async with log_db() as session:
+            from models import AgentExecution
+
+            execution = AgentExecution(
+                job_id=7,
+                status="running",
+                objective="Write an article",
+                skill_mode="auto",
+            )
+            session.add(execution)
+            await session.flush()
+            await append_agent_session_event(
+                session,
+                stream_kind="job",
+                stream_key=f"execution:{execution.id}",
+                execution_id=execution.id,
+                turn_id=f"execution:{execution.id}:turn:1",
+                event_type="assistant/message",
+                data={
+                    "turn": 1,
+                    "step": 1,
+                    "blocks": [{"kind": "text", "text": "execution-only"}],
+                    "usage": {"inputTokens": 25, "outputTokens": 5},
+                },
+            )
+            await append_agent_session_event(
+                session,
+                stream_kind="job",
+                stream_key="execution:1",
+                job_id=7,
+                execution_id=1,
+                turn_id="execution:1:turn:1",
+                event_type="assistant/message",
+                data={
+                    "turn": 1,
+                    "step": 1,
+                    "blocks": [{"kind": "text", "text": "one"}],
+                    "usage": {"inputTokens": 100, "outputTokens": 20},
+                },
+            )
+            await append_agent_session_event(
+                session,
+                stream_kind="job",
+                stream_key="execution:2",
+                job_id=7,
+                execution_id=2,
+                turn_id="execution:2:turn:1",
+                event_type="assistant/message",
+                data={
+                    "turn": 1,
+                    "step": 1,
+                    "blocks": [{"kind": "text", "text": "two"}],
+                    "usage": {"inputTokens": 40, "outputTokens": 10},
+                },
+            )
+            await append_agent_log_event(
+                session,
+                stream_kind="job",
+                stream_key="execution:2",
+                job_id=7,
+                execution_id=2,
+                event_type="llm/response",
+                phase="execute",
+                payload={"usage": {"inputTokens": 40, "outputTokens": 10}},
+            )
+            return await get_agent_token_usage(session, job_id=7)
+
+    assert asyncio.run(exercise()) == {
+        "input_tokens": 165,
+        "output_tokens": 35,
+        "total_tokens": 200,
+        "request_count": 3,
+    }

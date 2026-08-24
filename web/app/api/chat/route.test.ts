@@ -9,10 +9,12 @@ import {
   chatAgentSessionEventFromToolResult,
   chatTrajectoryChunk,
   agentRunUIResponse,
+  directSkillParameterContext,
   executionToolsForSelection,
   genericSkillRuntimeEnabled,
   skillAwareStepPolicy,
   selectedSkillContext,
+  shouldUseSharedAgentRun,
 } from './route'
 
 describe('Chat Agent log event mapping', () => {
@@ -157,6 +159,33 @@ describe('global chat model history', () => {
     expect(executionToolsForSelection(tools, true, false)).toEqual({ search })
     expect(executionToolsForSelection(tools, true, true)).toEqual({ loadSkill, search })
     expect(executionToolsForSelection(tools, false, false)).toEqual({ loadSkill, search })
+  })
+
+  it('keeps a structured single-Skill invocation on the streaming branch', () => {
+    expect(shouldUseSharedAgentRun({
+      genericRuntime: true,
+      selected: true,
+      directInvocation: true,
+    })).toBe(false)
+    expect(shouldUseSharedAgentRun({
+      genericRuntime: true,
+      selected: true,
+      directInvocation: false,
+    })).toBe(true)
+  })
+
+  it('injects only the server-resolved parameter snapshot as untrusted context', () => {
+    const context = directSkillParameterContext({
+      parameter_kind: 'writing_plan',
+      parameter_id: '12',
+      parameter_display_name: '真实写作方案',
+      parameter_snapshot: { id: 12, title: '真实写作方案', strategy: '证据优先' },
+    } as never)
+
+    expect(context).toContain('真实写作方案')
+    expect(context).toContain('证据优先')
+    expect(context).toContain('untrusted data')
+    expect(context).toContain('<ediora_skill_parameter>')
   })
 
   it('reserves a tool-free final step for the user-facing answer', () => {

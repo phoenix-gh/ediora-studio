@@ -85,6 +85,23 @@ describe('chat API client', () => {
       messages: [{ id: 'user-1', role: 'user', parts: [{ type: 'text', text: '请参考草稿' }] }],
       skillName: 'baoyu-cover-image',
       draftId: 12,
+      skillInvocation: {
+        invocationId: 'one',
+        skillName: 'article-drafting',
+        skillDisplayName: '客户端文章写作',
+        parameterKind: 'writing_plan',
+        parameterId: '12',
+        parameterDisplayName: '客户端方案名',
+      },
+      messageParts: [
+        { type: 'text', text: '请参考草稿' },
+        {
+          type: 'skill-invocation', invocationId: 'one',
+          skillName: 'article-drafting', skillDisplayName: '客户端文章写作',
+          parameterKind: 'writing_plan', parameterId: '12',
+          parameterDisplayName: '客户端方案名',
+        },
+      ],
       onEvent: () => undefined,
     })
 
@@ -95,6 +112,23 @@ describe('chat API client', () => {
         messages: [{ id: 'user-1', role: 'user', parts: [{ type: 'text', text: '请参考草稿' }] }],
         skillName: 'baoyu-cover-image',
         draftId: 12,
+        skillInvocation: {
+          invocationId: 'one',
+          skillName: 'article-drafting',
+          skillDisplayName: '客户端文章写作',
+          parameterKind: 'writing_plan',
+          parameterId: '12',
+          parameterDisplayName: '客户端方案名',
+        },
+        messageParts: [
+          { type: 'text', text: '请参考草稿' },
+          {
+            type: 'skill-invocation', invocationId: 'one',
+            skillName: 'article-drafting', skillDisplayName: '客户端文章写作',
+            parameterKind: 'writing_plan', parameterId: '12',
+            parameterDisplayName: '客户端方案名',
+          },
+        ],
       }),
     }))
   })

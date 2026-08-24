@@ -209,6 +209,24 @@ function isSkillInvocationPart(part: ChatPart) {
   return part.type === 'skill-invocation'
 }
 
+function ReasoningBlock({ part }: { part: ChatPart }) {
+  const streaming = part.state === 'streaming'
+  const content = String(part.text ?? '')
+  if (!content) return null
+  return (
+    <details
+      open={streaming}
+      className="rounded-lg bg-muted/50 px-3 py-2 text-xs text-foreground-subtle"
+    >
+      <summary className="flex cursor-pointer list-none items-center gap-2 font-medium [&::-webkit-details-marker]:hidden">
+        <span>{streaming ? '思考中' : '思考过程'}</span>
+        <ChevronDown className="ml-auto h-3.5 w-3.5 transition-transform [[open]_&]:rotate-180" />
+      </summary>
+      <div className="mt-2 whitespace-pre-wrap leading-5">{content}</div>
+    </details>
+  )
+}
+
 function skillInvocationLabel(part: ChatPart) {
   const displayName = String(part.displayName ?? part.skillDisplayName ?? part.skillName ?? 'Skill')
   const parameterDisplayName = part.parameterDisplayName
@@ -249,6 +267,7 @@ export function ChatMessageView({
 }) {
   const isUser = message.role === 'user'
   const textParts = message.parts.filter(part => part.type === 'text')
+  const reasoningParts = message.parts.filter(part => part.type === 'reasoning')
   const userContentParts = message.parts.filter(part => part.type === 'text' || isSkillInvocationPart(part))
   const toolParts = message.parts.filter(isChatToolPart) as ToolEventPart[]
   const pipelineId = message.parts.map(pipelineJobId).find((id): id is number => id !== null)
@@ -260,6 +279,9 @@ export function ChatMessageView({
   return (
     <article className={cn('flex', isUser && 'justify-end')}>
       <div className={isUser ? 'min-w-0 max-w-3xl space-y-2' : 'w-full min-w-0 space-y-2'}>
+        {!isUser && reasoningParts.map((part, index) => (
+          <ReasoningBlock key={String(part.id ?? index)} part={part} />
+        ))}
         {((isUser ? userContentParts.length : textParts.length) > 0 || fallbackText) && (
           <div
             className={cn(

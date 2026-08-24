@@ -358,6 +358,10 @@ without an unnecessary additional model turn, equivalent to Pi's terminating
 tool-result hint. A `blocked` declaration closes the attempt as failed with
 structured remaining work; it never becomes `succeeded`.
 
+Persisted `agent_run` completion evidence is valid only when it contains this
+well-formed declaration. The Harness does not infer completion from legacy
+evidence fields, a succeeded execution status, or an already persisted primary
+artifact; those records cannot complete a Job or Pipeline Stage.
 Planning, Skill verification criteria, and an optional review/revision pass
 may give the Agent additional feedback before this declaration. They are not a
 second authority: a hidden validator cannot mark the Job successful, and a

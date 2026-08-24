@@ -2,13 +2,13 @@ import { describe, expect, it, vi } from 'vitest'
 
 import {
   buildDailyCreationAgentObjective,
-  draftCountFromPrompt,
   firstBlockingToolAudit,
   runDailyCreationAgentJob,
+  startAgentActivityHeartbeat,
   type DailyCreationAgentContext,
   type DailyCreationAgentJobDependencies,
 } from './daily-creation-agent-job'
-import type { AgentToolAudit } from './agent-runtime-types'
+import type { AgentGoalCompletionDeclaration, AgentToolAudit } from './agent-runtime-types'
 
 const prompt = '检查今天的 GitHub 日榜，并把结论保存到临时文件。'
 
@@ -53,6 +53,28 @@ function savedDraftCall(id: number) {
   }
 }
 
+function completedGoalCall(
+  summary: string,
+  evidenceIds: string[],
+) {
+  return {
+    tool_call_id: 'goal-complete-1',
+    tool_name: 'complete_goal',
+    status: 'succeeded',
+    output: {
+      accepted: true,
+      declaration: {
+        status: 'completed',
+        summary,
+        evidence: evidenceIds.map(id => ({
+          kind: 'tool_call', id, claim: '本次执行已成功持久化',
+        })),
+      },
+    },
+    side_effecting: false,
+  }
+}
+
 const context: DailyCreationAgentContext = {
   id: 83,
   status: 'queued',
@@ -82,6 +104,7 @@ type DependencyOptions = {
   toolAudits?: AgentToolAudit[]
   finishReason?: string
   stepCount?: number
+  goalCompletion?: AgentGoalCompletionDeclaration | null
 }
 
 function dependencies({
@@ -89,6 +112,7 @@ function dependencies({
   toolAudits = [savedDraftAudit(3)],
   finishReason = 'stop',
   stepCount = 1,
+  goalCompletion,
 }: DependencyOptions = {}) {
   const execution = {
     id: 41, job_id: 19, status: 'running', objective: prompt,
@@ -101,6 +125,15 @@ function dependencies({
     return {
       kind: 'completed' as const, text, parts: [], revisionCount: 0,
       finishReason, stepCount,
+      goalCompletion: goalCompletion === null ? undefined : goalCompletion ?? {
+        status: 'completed' as const,
+        summary: text.trim() || '既定目标已经完成',
+        evidence: toolAudits.filter(item => item.status === 'succeeded').map(item => ({
+          kind: 'tool_call' as const,
+          id: item.toolCallId,
+          claim: `${item.toolName} 已成功`,
+        })),
+      },
     }
   })
   let runtimeOptions: Parameters<DailyCreationAgentJobDependencies['openRuntime']>[0] | undefined
@@ -126,6 +159,7 @@ function dependencies({
     completeStep: vi.fn().mockResolvedValue({}),
     failStep: vi.fn().mockResolvedValue({}),
     completeJob: vi.fn().mockResolvedValue({}),
+    recordJobEvent: vi.fn().mockResolvedValue({}),
     apiRoot: () => 'http://api.test',
     openRuntime: vi.fn().mockImplementation(async options => {
       runtimeOptions = options
@@ -144,7 +178,7 @@ describe('daily creation Agent job', () => {
   it('reports the unresolved failure after a recovered read-only failure', () => {
     const failed = audit('list_creative_asset_candidates', 'failed', false)
     const recovered = audit('list_creative_asset_candidates', 'succeeded', false)
-    const unresolved = audit('generateImage', 'failed', false)
+    const unresolved = audit('generateImage', 'failed', true)
 
     expect(firstBlockingToolAudit([failed, recovered, unresolved])).toBe(unresolved)
   })
@@ -169,11 +203,92 @@ describe('daily creation Agent job', () => {
     const { deps } = dependencies({ toolAudits: [
       audit('list_creative_asset_candidates', 'failed', false),
       audit('list_creative_asset_candidates', 'succeeded', false),
-      audit('generateImage', 'failed', false),
+      audit('generateImage', 'failed', true),
     ] })
 
     await expect(runDailyCreationAgentJob(19, deps))
       .rejects.toThrow('Agent tool audit is failed: generateImage')
+  })
+
+  it('lets a completed goal declaration outrank an unrelated read-only failure', async () => {
+    const saved = savedDraftAudit(3)
+    const { deps } = dependencies({
+      toolAudits: [
+        audit('list_creative_asset_candidates', 'failed', false),
+        saved,
+      ],
+      goalCompletion: {
+        status: 'completed',
+        summary: '草稿已经保存',
+        evidence: [{ kind: 'tool_call', id: saved.toolCallId, claim: '草稿已经保存' }],
+      },
+    })
+
+    await expect(runDailyCreationAgentJob(19, deps)).resolves.toMatchObject({
+      finalText: '草稿已经保存',
+      toolCallCount: 1,
+    })
+    expect(deps.completeJob).toHaveBeenCalledWith(19)
+  })
+
+  it('recovers a completed durable goal despite an unrelated read-only failure', async () => {
+    const { deps } = dependencies()
+    const saved = [savedDraftCall(101), savedDraftCall(102), savedDraftCall(103)]
+    vi.mocked(deps.listToolCalls).mockResolvedValue([
+      {
+        tool_call_id: 'read-1', tool_name: 'list_creative_asset_candidates',
+        status: 'failed', error: 'invalid asset type', side_effecting: false,
+      },
+      ...saved,
+      completedGoalCall('既定目标已经完成', saved.map(call => call.tool_call_id)),
+    ])
+
+    await expect(runDailyCreationAgentJob(19, deps)).resolves.toMatchObject({
+      finalText: '既定目标已经完成',
+      toolCallCount: 3,
+    })
+    expect(deps.openRuntime).not.toHaveBeenCalled()
+    expect(deps.completeJob).toHaveBeenCalledWith(19)
+  })
+
+  it('records Agent tool activity in the Job event stream', async () => {
+    const { deps } = dependencies({ toolAudits: [savedDraftAudit(3)] })
+
+    await runDailyCreationAgentJob(19, deps)
+
+    expect(deps.recordJobEvent).toHaveBeenCalledWith(
+      19,
+      'agent_activity',
+      expect.objectContaining({
+        activity: 'tool', tool: 'save_draft', status: 'succeeded',
+      }),
+    )
+  })
+
+  it('does not fail the Agent when the Job activity sink is unavailable', async () => {
+    const { deps } = dependencies({ toolAudits: [savedDraftAudit(3)] })
+    deps.recordJobEvent = vi.fn().mockRejectedValue(new Error('event sink unavailable'))
+
+    await expect(runDailyCreationAgentJob(19, deps)).resolves.toMatchObject({
+      finalText: '研究完成',
+    })
+  })
+
+  it('stops the Agent activity heartbeat without leaking timer callbacks', async () => {
+    vi.useFakeTimers()
+    try {
+      const heartbeat = vi.fn().mockResolvedValue(undefined)
+      const stop = startAgentActivityHeartbeat(heartbeat, 100)
+
+      await vi.advanceTimersByTimeAsync(250)
+      expect(heartbeat).toHaveBeenCalledTimes(2)
+
+      stop()
+      await vi.advanceTimersByTimeAsync(250)
+      expect(heartbeat).toHaveBeenCalledTimes(2)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('finalizes the canonical turn and fails the Job when the model errors', async () => {
@@ -224,18 +339,6 @@ describe('daily creation Agent job', () => {
     })).toThrow('scheduled Agent prompt is blank')
   })
 
-  it.each([
-    ['从目录中创作 3 条中文 X 短帖', 3],
-    ['保存3个草稿', 3],
-    ['写三条短帖', 3],
-    ['生成两篇文章', 2],
-    ['产出十二条推文', 12],
-    ['整理二十份内容', 20],
-    ['只整理一份可发布内容', undefined],
-  ])('extracts the frozen draft count from prompt wording: %s', (value, expected) => {
-    expect(draftCountFromPrompt(value)).toBe(expected)
-  })
-
   it('rejects a blank worker context before opening an execution or runtime', async () => {
     const { deps } = dependencies()
     vi.mocked(deps.getContext).mockResolvedValue({
@@ -279,14 +382,46 @@ describe('daily creation Agent job', () => {
         audit: expect.objectContaining({ capabilities: jobCapabilitySnapshot }),
       }),
     )
-    expect(runtimeRun.mock.calls[0]?.[0]?.requiredTools).toEqual(['save_draft'])
+    expect(runtimeRun.mock.calls[0]?.[0]?.requireGoalCompletion).toBe(true)
+    expect(runtimeRun.mock.calls[0]?.[0]?.requiredTools).toBeUndefined()
     expect(runtimeRun.mock.calls[0]?.[0]?.selectedContext).toBeUndefined()
   })
 
-  it('does not succeed when a daily creation Agent produces no persisted draft', async () => {
-    const { deps } = dependencies({ text: '', toolAudits: [
+  it('does not succeed after a normal stop without a goal declaration', async () => {
+    const { deps } = dependencies({ text: '', goalCompletion: null, toolAudits: [
       audit('loadSkill', 'succeeded', false),
     ] })
+
+    await expect(runDailyCreationAgentJob(19, deps)).rejects.toThrow(
+      'Agent ended without declaring goal completion',
+    )
+    expect(deps.completeExecution).not.toHaveBeenCalled()
+    expect(deps.completeJob).not.toHaveBeenCalled()
+    expect(deps.failStep).toHaveBeenCalledWith(19, 71, expect.any(Error), true)
+  })
+
+  it('keeps an unresolved read-only failure blocking without a goal declaration', async () => {
+    const { deps } = dependencies({
+      goalCompletion: null,
+      toolAudits: [audit('read_context', 'failed', false)],
+    })
+
+    await expect(runDailyCreationAgentJob(19, deps)).rejects.toThrow(
+      'Agent tool audit is failed: read_context',
+    )
+    expect(deps.completeJob).not.toHaveBeenCalled()
+  })
+
+  it('does not reinterpret prompt or rule counts when the Agent declares completion', async () => {
+    const saved = savedDraftAudit(101)
+    const { deps, runtimeRun } = dependencies({
+      text: '旧的候选文本',
+      toolAudits: [saved],
+      goalCompletion: {
+        status: 'completed', summary: '既定目标已经完成',
+        evidence: [{ kind: 'tool_call', id: saved.toolCallId, claim: '草稿已经保存' }],
+      },
+    })
     vi.mocked(deps.getContext).mockResolvedValue({
       ...context,
       requested_count: 12,
@@ -296,96 +431,41 @@ describe('daily creation Agent job', () => {
       },
     })
 
-    await expect(runDailyCreationAgentJob(19, deps)).rejects.toThrow(
-      'scheduled Agent produced no persisted drafts (required 3)',
-    )
-    expect(deps.completeExecution).not.toHaveBeenCalled()
-    expect(deps.completeJob).not.toHaveBeenCalled()
-    expect(deps.failStep).toHaveBeenCalledWith(19, 71, expect.any(Error), true)
-  })
-
-  it('fails non-retryably when only part of the required drafts were persisted', async () => {
-    const { deps } = dependencies({ text: '只保存了一条', toolAudits: [
-      savedDraftAudit(101),
-    ] })
-    vi.mocked(deps.getContext).mockResolvedValue({
-      ...context,
-      requested_count: 3,
-      rule: { ...context.rule, prompt: '创作 3 条中文 X 短帖并保存。' },
+    await expect(runDailyCreationAgentJob(19, deps)).resolves.toMatchObject({
+      kind: 'agent_run', finalText: '既定目标已经完成', toolCallCount: 1,
     })
-
-    await expect(runDailyCreationAgentJob(19, deps)).rejects.toThrow(
-      'scheduled Agent persisted 1 of 3 required drafts',
-    )
-    expect(deps.completeJob).not.toHaveBeenCalled()
-    expect(deps.failStep).toHaveBeenCalledWith(19, 71, expect.any(Error), false)
+    expect(runtimeRun).toHaveBeenCalledWith(expect.objectContaining({
+      requireGoalCompletion: true,
+    }))
+    expect(deps.completeJob).toHaveBeenCalledWith(19)
   })
 
-  it('fails non-retryably when save_draft succeeded without valid draft evidence', async () => {
-    const invalid = {
-      ...savedDraftAudit(101),
-      output: { content: [{ type: 'text', text: JSON.stringify({ title: '缺少 ID' }) }] },
-    }
-    const { deps } = dependencies({ text: '已保存', toolAudits: [invalid] })
-
-    await expect(runDailyCreationAgentJob(19, deps)).rejects.toThrow(
-      'scheduled Agent save_draft completion evidence is invalid',
-    )
-    expect(deps.completeJob).not.toHaveBeenCalled()
-    expect(deps.failStep).toHaveBeenCalledWith(19, 71, expect.any(Error), false)
-  })
-
-  it('does not ignore invalid save_draft evidence after enough valid drafts', async () => {
-    const invalid = {
-      ...savedDraftAudit(102),
-      output: { content: [{ type: 'text', text: JSON.stringify({ title: '缺少 ID' }) }] },
-    }
+  it('fails a blocked declaration and preserves the remaining work', async () => {
     const { deps } = dependencies({
-      text: '已保存', toolAudits: [savedDraftAudit(101), invalid],
+      goalCompletion: {
+        status: 'blocked', summary: '缺少发布授权', evidence: [],
+        remainingWork: ['等待账号授权'],
+      },
     })
 
     await expect(runDailyCreationAgentJob(19, deps)).rejects.toThrow(
-      'scheduled Agent save_draft completion evidence is invalid',
+      'Agent blocked: 缺少发布授权; remaining work: 等待账号授权',
     )
     expect(deps.completeJob).not.toHaveBeenCalled()
-    expect(deps.failStep).toHaveBeenCalledWith(19, 71, expect.any(Error), false)
   })
 
-  it('accepts a real draft ID when the editable prompt chooses another draft shape', async () => {
-    const custom = {
-      ...savedDraftAudit(101),
-      output: {
-        content: [{
-          type: 'text',
-          text: JSON.stringify({
-            id: 101, title: '公众号草稿', status: 'review', draft_type: 'mp',
-          }),
-        }],
+  it('rejects a completion declaration that cites no successful current tool call', async () => {
+    const { deps } = dependencies({
+      goalCompletion: {
+        status: 'completed', summary: '已完成',
+        evidence: [{ kind: 'tool_call', id: 'missing-call', claim: '不存在的调用' }],
       },
-    }
-    const { deps } = dependencies({ text: '已保存公众号草稿', toolAudits: [custom] })
-
-    await expect(runDailyCreationAgentJob(19, deps)).resolves.toMatchObject({
-      finalText: '已保存公众号草稿', toolCallCount: 1,
-    })
-    expect(deps.completeJob).toHaveBeenCalledWith(19)
-  })
-
-  it('builds a visible completion summary when all drafts exist but final text is blank', async () => {
-    const { deps } = dependencies({ text: '', toolAudits: [
-      savedDraftAudit(101), savedDraftAudit(102), savedDraftAudit(103),
-    ] })
-    vi.mocked(deps.getContext).mockResolvedValue({
-      ...context,
-      requested_count: 3,
-      rule: { ...context.rule, prompt: '创作 3 条中文 X 短帖并保存。' },
     })
 
-    await expect(runDailyCreationAgentJob(19, deps)).resolves.toMatchObject({
-      finalText: expect.stringMatching(/101[\s\S]*102[\s\S]*103/),
-      toolCallCount: 3,
-    })
-    expect(deps.completeJob).toHaveBeenCalledWith(19)
+    await expect(runDailyCreationAgentJob(19, deps)).rejects.toThrow(
+      'Goal completion cites an unavailable tool call: missing-call',
+    )
+    expect(deps.completeJob).not.toHaveBeenCalled()
   })
 
   it('rejects a retry before Agent execution when the pinned capabilities drift', async () => {
@@ -437,8 +517,8 @@ describe('daily creation Agent job', () => {
     expect(deps.failToolCall).toHaveBeenCalledWith(19, 41, 'tool-1', 'connection lost', true)
   })
 
-  it('recovers finalizing generic evidence without opening the runtime', async () => {
-    const { deps } = dependencies()
+  it('does not accept legacy finalizing evidence without a goal declaration', async () => {
+    const { deps } = dependencies({ goalCompletion: null })
     vi.mocked(deps.ensureExecution).mockResolvedValue({
       id: 41, job_id: 19, status: 'running', objective: prompt,
       skill_mode: 'auto', skill_name: null, phase: 'finalizing', version: 3,
@@ -448,28 +528,44 @@ describe('daily creation Agent job', () => {
       audit: {}, completion_evidence: {},
     })
 
-    await expect(runDailyCreationAgentJob(19, deps)).resolves.toMatchObject({
-      kind: 'agent_run', executionId: 41, finalText: '已保存', toolCallCount: 1,
-    })
-    expect(deps.openRuntime).not.toHaveBeenCalled()
-    expect(deps.completeExecution).toHaveBeenCalledWith(19, 41, expect.objectContaining({
-      kind: 'agent_run',
-    }))
-    expect(deps.completeJob).toHaveBeenCalledWith(19)
+    await expect(runDailyCreationAgentJob(19, deps)).rejects.toThrow(
+      'Agent ended without declaring goal completion',
+    )
+    expect(deps.openRuntime).toHaveBeenCalledTimes(1)
+    expect(deps.completeExecution).not.toHaveBeenCalled()
+    expect(deps.completeJob).not.toHaveBeenCalled()
   })
 
-  it('recovers completed drafts from durable tool calls after a worker restart', async () => {
-    const { deps } = dependencies()
-    vi.mocked(deps.getContext).mockResolvedValue({
-      ...context,
-      rule: { ...context.rule, prompt: '创作三条短帖并保存。' },
+  it('does not accept legacy completed Step evidence without a goal declaration', async () => {
+    const { deps } = dependencies({ goalCompletion: null })
+    vi.mocked(deps.getJob).mockResolvedValue({
+      id: 19, flow: 'daily_creation', title: 'daily', status: 'queued',
+      input: { run_id: 83 },
+      steps: [{
+        id: 71, key: 'agent', attempt: 1, status: 'succeeded',
+        output: {
+          kind: 'agent_run', executionId: 41, finalText: '旧完成结果', toolCallCount: 1,
+        },
+      }],
     })
+
+    await expect(runDailyCreationAgentJob(19, deps)).rejects.toThrow(
+      'Agent ended without declaring goal completion',
+    )
+    expect(deps.openRuntime).toHaveBeenCalledTimes(1)
+    expect(deps.completeJob).not.toHaveBeenCalled()
+  })
+
+  it('recovers an accepted goal declaration from durable tool calls after a worker restart', async () => {
+    const { deps } = dependencies()
+    const saved = [savedDraftCall(101), savedDraftCall(102), savedDraftCall(103)]
     vi.mocked(deps.listToolCalls).mockResolvedValue([
-      savedDraftCall(101), savedDraftCall(102), savedDraftCall(103),
+      ...saved,
+      completedGoalCall('既定目标已经完成', saved.map(call => call.tool_call_id)),
     ])
 
     await expect(runDailyCreationAgentJob(19, deps)).resolves.toMatchObject({
-      finalText: expect.stringMatching(/101[\s\S]*102[\s\S]*103/),
+      finalText: '既定目标已经完成',
       toolCallCount: 3,
     })
     expect(deps.openRuntime).not.toHaveBeenCalled()
@@ -479,16 +575,12 @@ describe('daily creation Agent job', () => {
     expect(deps.completeJob).toHaveBeenCalledWith(19)
   })
 
-  it('does not rerun after recovering only part of the required durable drafts', async () => {
+  it('does not infer completion from a durable side effect without a goal declaration', async () => {
     const { deps } = dependencies()
-    vi.mocked(deps.getContext).mockResolvedValue({
-      ...context,
-      rule: { ...context.rule, prompt: '保存三个草稿。' },
-    })
     vi.mocked(deps.listToolCalls).mockResolvedValue([savedDraftCall(101)])
 
     await expect(runDailyCreationAgentJob(19, deps)).rejects.toThrow(
-      'scheduled Agent persisted 1 of 3 required drafts',
+      'scheduled Agent interrupted after side effects; review logs before retry',
     )
     expect(deps.openRuntime).not.toHaveBeenCalled()
     expect(deps.failStep).toHaveBeenCalledWith(19, 71, expect.any(Error), false)
@@ -516,6 +608,7 @@ describe('daily creation Agent job', () => {
     const { deps } = dependencies({ text: '已保存' })
     const evidence = {
       kind: 'agent_run' as const, executionId: 41, finalText: '已保存', toolCallCount: 0,
+      goalCompletion: { status: 'completed' as const, summary: '已保存', evidence: [] },
     }
     vi.mocked(deps.ensureExecution)
       .mockResolvedValueOnce({
@@ -550,6 +643,7 @@ describe('daily creation Agent job', () => {
     const { deps } = dependencies({ text: '已保存' })
     const evidence = {
       kind: 'agent_run' as const, executionId: 41, finalText: '已保存', toolCallCount: 0,
+      goalCompletion: { status: 'completed' as const, summary: '已保存', evidence: [] },
     }
     vi.mocked(deps.ensureExecution)
       .mockResolvedValueOnce({
@@ -578,6 +672,7 @@ describe('daily creation Agent job', () => {
     const { deps } = dependencies({ text: '已保存' })
     const evidence = {
       kind: 'agent_run' as const, executionId: 41, finalText: '已保存', toolCallCount: 0,
+      goalCompletion: { status: 'completed' as const, summary: '已保存', evidence: [] },
     }
     vi.mocked(deps.ensureExecution)
       .mockResolvedValueOnce({
@@ -605,6 +700,7 @@ describe('daily creation Agent job', () => {
     const { deps } = dependencies({ text: '已保存' })
     const evidence = {
       kind: 'agent_run' as const, executionId: 41, finalText: '已保存', toolCallCount: 0,
+      goalCompletion: { status: 'completed' as const, summary: '已保存', evidence: [] },
     }
     vi.mocked(deps.ensureExecution)
       .mockResolvedValueOnce({
@@ -628,16 +724,15 @@ describe('daily creation Agent job', () => {
     expect(deps.failStep).not.toHaveBeenCalled()
   })
 
-  it('rejects max-step exhaustion that ends with another tool call', async () => {
+  it('accepts an Agent completion declaration at the final execution step', async () => {
     const { deps } = dependencies({
       text: '', finishReason: 'tool-calls', stepCount: 30,
     })
 
-    await expect(runDailyCreationAgentJob(19, deps)).rejects.toThrow(
-      'scheduled Agent exhausted 30 steps while requesting another tool call',
-    )
-    expect(deps.completeExecution).not.toHaveBeenCalled()
-    expect(deps.completeJob).not.toHaveBeenCalled()
+    await expect(runDailyCreationAgentJob(19, deps)).resolves.toMatchObject({
+      kind: 'agent_run', finalText: '既定目标已经完成',
+    })
+    expect(deps.completeJob).toHaveBeenCalledWith(19)
   })
 
   it('fails non-retryably after a recorded side effect without final evidence', async () => {

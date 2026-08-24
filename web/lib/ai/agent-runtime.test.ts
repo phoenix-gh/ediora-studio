@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
 
 import { applyAgentToolPolicy } from './agent-tool-policy'
-import { agentSkillRunAudit, openAgentRuntime, type AgentRuntimeDependencies, type AgentSessionEventDraft } from './agent-runtime'
+import { agentSkillRunAudit, openAgentRuntime, planningTools, type AgentRuntimeDependencies, type AgentSessionEventDraft } from './agent-runtime'
 import type { GlobalAgentToolOptions } from './global-chat-tools'
 import type { RegisteredSkill } from '../skills/registry'
 
@@ -77,6 +77,166 @@ function openOptions(
 }
 
 describe('shared Agent runtime', () => {
+  it('requires an accepted complete_goal declaration and follows up without business-count instructions', async () => {
+    const deps = dependencies()
+    deps.generate = vi.fn()
+      .mockResolvedValueOnce({
+        text: '我先到这里', finishReason: 'stop', steps: [{}],
+        toolCalls: [], toolResults: [], content: [],
+        responseMessages: [{ role: 'assistant', content: [{ type: 'text', text: '我先到这里' }] }],
+      })
+      .mockImplementationOnce(async (input: Record<string, unknown>) => {
+        expect(input.messages).toEqual([
+          { role: 'user', content: '完成保存的自然语言目标' },
+          expect.objectContaining({ role: 'assistant' }),
+          expect.objectContaining({
+            role: 'user',
+            content: expect.stringContaining('完成保存的自然语言目标'),
+          }),
+        ])
+        expect(JSON.stringify(input.messages)).not.toContain('required drafts')
+        expect(JSON.stringify(input.messages)).not.toContain('target_count')
+        const completeGoal = (input.tools as Record<string, Executable>).complete_goal
+        const declaration = {
+          status: 'completed', summary: '既定目标已经完成',
+          evidence: [{ kind: 'tool_call', id: 'save-1', claim: '草稿已经保存' }],
+        }
+        const output = await completeGoal.execute(declaration, { toolCallId: 'goal-1' })
+        return {
+          text: '', finishReason: 'tool-calls', steps: [{}],
+          toolCalls: [{ type: 'tool-call', toolCallId: 'goal-1', toolName: 'complete_goal', input: declaration }],
+          toolResults: [{ type: 'tool-result', toolCallId: 'goal-1', toolName: 'complete_goal', output }],
+          content: [], responseMessages: [],
+        }
+      }) as unknown as AgentRuntimeDependencies['generate']
+    const runtime = await openAgentRuntime({
+      ...openOptions('automatic', deps), mode: 'job', automaticSelection: false,
+    })
+
+    const result = await runtime.run({
+      objective: '完成保存的自然语言目标',
+      modelMessages: [{ role: 'user', content: '完成保存的自然语言目标' }],
+      maxSteps: 5,
+      requireGoalCompletion: true,
+      validateGoalCompletion: declaration => {
+        expect(declaration.evidence).toEqual([
+          { kind: 'tool_call', id: 'save-1', claim: '草稿已经保存' },
+        ])
+      },
+    })
+
+    expect(result.goalCompletion).toEqual({
+      status: 'completed', summary: '既定目标已经完成',
+      evidence: [{ kind: 'tool_call', id: 'save-1', claim: '草稿已经保存' }],
+    })
+    expect(result.text).toBe('既定目标已经完成')
+    expect(deps.generate).toHaveBeenCalledTimes(2)
+    await runtime.close()
+  })
+
+  it('keeps an accepted completion successful when the model output getter is unavailable', async () => {
+    const deps = dependencies()
+    const declaration = {
+      status: 'completed' as const, summary: '既定目标已经完成', evidence: [],
+    }
+    deps.generate = vi.fn(async (input: Record<string, unknown>) => {
+      const completeGoal = (input.tools as Record<string, Executable>).complete_goal
+      const output = await completeGoal.execute(declaration, { toolCallId: 'goal-without-output' })
+      const response = {
+        text: '', finishReason: 'tool-calls', steps: [{}],
+        toolCalls: [{ type: 'tool-call', toolCallId: 'goal-without-output', toolName: 'complete_goal', input: declaration }],
+        toolResults: [{ type: 'tool-result', toolCallId: 'goal-without-output', toolName: 'complete_goal', output }],
+        content: [], responseMessages: [],
+      }
+      Object.defineProperty(response, 'output', {
+        get() { throw new Error('No output generated') },
+      })
+      return response
+    }) as unknown as AgentRuntimeDependencies['generate']
+    const messages: AgentSessionEventDraft[] = []
+    const modelDirections: string[] = []
+    const runtime = await openAgentRuntime({
+      ...openOptions('automatic', deps),
+      mode: 'job',
+      automaticSelection: false,
+      onMessage: event => { modelDirections.push(event.direction) },
+      onSessionEvent: event => { messages.push(event) },
+    })
+
+    await expect(runtime.run({
+      objective: '完成任务', modelMessages: [], maxSteps: 2,
+      requireGoalCompletion: true,
+    })).resolves.toMatchObject({
+      goalCompletion: declaration,
+    })
+    expect(messages.some(event => event.type === 'assistant/message')).toBe(true)
+    expect(modelDirections).toContain('model_response')
+    expect(modelDirections).not.toContain('model_error')
+    await runtime.close()
+  })
+
+  it('keeps the Harness completion tool out of Skill capabilities and plans', async () => {
+    const runtime = await openAgentRuntime({
+      ...openOptions('automatic', dependencies()), mode: 'job', automaticSelection: false,
+    })
+
+    expect(Object.keys(runtime.tools)).toContain('complete_goal')
+    expect(runtime.capabilitySnapshot().tools.map(tool => tool.name)).not.toContain('complete_goal')
+    expect(planningTools(runtime.tools).map(tool => tool.name)).not.toContain('complete_goal')
+    await runtime.close()
+  })
+
+  it('returns an Agent-owned blocked declaration without treating it as completed', async () => {
+    const deps = dependencies()
+    deps.generate = vi.fn(async (input: Record<string, unknown>) => {
+      const completeGoal = (input.tools as Record<string, Executable>).complete_goal
+      const declaration = {
+        status: 'blocked', summary: '缺少必要授权', evidence: [],
+        remainingWork: ['等待用户授权'],
+      }
+      const output = await completeGoal.execute(declaration, { toolCallId: 'goal-blocked' })
+      return {
+        text: '', finishReason: 'tool-calls', steps: [{}],
+        toolCalls: [{ type: 'tool-call', toolCallId: 'goal-blocked', toolName: 'complete_goal', input: declaration }],
+        toolResults: [{ type: 'tool-result', toolCallId: 'goal-blocked', toolName: 'complete_goal', output }],
+        content: [], responseMessages: [],
+      }
+    }) as unknown as AgentRuntimeDependencies['generate']
+    const runtime = await openAgentRuntime({
+      ...openOptions('automatic', deps), mode: 'job', automaticSelection: false,
+    })
+
+    const result = await runtime.run({
+      objective: '需要授权的任务', modelMessages: [], maxSteps: 3,
+      requireGoalCompletion: true,
+    })
+
+    expect(result.goalCompletion).toEqual({
+      status: 'blocked', summary: '缺少必要授权', evidence: [],
+      remainingWork: ['等待用户授权'],
+    })
+    await runtime.close()
+  })
+
+  it('fails when the durable step budget ends without a completion declaration', async () => {
+    const deps = dependencies()
+    deps.generate = vi.fn(async () => ({
+      text: '尚未声明完成', finishReason: 'stop', steps: [{}],
+      toolCalls: [], toolResults: [], content: [],
+      responseMessages: [{ role: 'assistant', content: [{ type: 'text', text: '尚未声明完成' }] }],
+    })) as unknown as AgentRuntimeDependencies['generate']
+    const runtime = await openAgentRuntime({
+      ...openOptions('automatic', deps), mode: 'job', automaticSelection: false,
+    })
+
+    await expect(runtime.run({
+      objective: '必须完成的任务', modelMessages: [], maxSteps: 2,
+      requireGoalCompletion: true,
+    })).rejects.toThrow('Agent ended without declaring goal completion')
+    expect(deps.generate).toHaveBeenCalledTimes(2)
+    await runtime.close()
+  })
+
   it('captures the final visible Tools and current policy for a Job runtime', async () => {
     const runtime = await openAgentRuntime({
       ...openOptions('automatic', dependencies()),
