@@ -362,29 +362,6 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
 
   return (
     <div className="asset-visual-markdown-editor relative flex h-full min-h-[420px] flex-col">
-      <div className="flex shrink-0 items-center justify-end border-b border-border/60 pb-2">
-        <div
-          aria-label="Markdown 编辑模式"
-          className="inline-flex items-center rounded-md border border-border bg-muted/30 p-0.5"
-          role="tablist"
-        >
-          {(['visual', 'source'] as const).map(option => {
-            const selected = mode === option
-            return (
-              <button
-                aria-selected={selected}
-                className={`rounded px-2.5 py-1 text-xs transition-colors ${selected ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
-                key={option}
-                onClick={() => changeMode(option)}
-                role="tab"
-                type="button"
-              >
-                {option === 'visual' ? '可视' : '源码'}
-              </button>
-            )
-          })}
-        </div>
-      </div>
       <div className="relative min-h-0 flex-1 pt-2">
         <div
           aria-busy={status === 'loading'}
@@ -430,6 +407,29 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
             </button>
           </div>
         ) : null}
+      </div>
+      <div className="mt-2 flex shrink-0 items-center justify-end border-t border-border/60 pt-2">
+        <div
+          aria-label="Markdown 编辑模式"
+          className="inline-flex items-center rounded-md border border-border bg-muted/30 p-0.5"
+          role="tablist"
+        >
+          {(['visual', 'source'] as const).map(option => {
+            const selected = mode === option
+            return (
+              <button
+                aria-selected={selected}
+                className={`rounded px-2.5 py-1 text-xs transition-colors ${selected ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+                key={option}
+                onClick={() => changeMode(option)}
+                role="tab"
+                type="button"
+              >
+                {option === 'visual' ? '可视' : '源码'}
+              </button>
+            )
+          })}
+        </div>
       </div>
     </div>
   )

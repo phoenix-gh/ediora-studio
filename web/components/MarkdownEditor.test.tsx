@@ -127,6 +127,17 @@ beforeEach(() => {
 })
 
 describe('MarkdownEditor', () => {
+  it('places the visual/source switch below the editor surface', async () => {
+    render(<MarkdownEditor documentKey={7} onChange={vi.fn()} value="# 初始标题" />)
+
+    await waitFor(() => expect(mocks.create).toHaveBeenCalledTimes(1))
+
+    const editor = screen.getByRole('textbox', { name: '可视化 Markdown 编辑器' })
+    const modeTabs = screen.getByRole('tablist', { name: 'Markdown 编辑模式' })
+    expect(editor.compareDocumentPosition(modeTabs) & Node.DOCUMENT_POSITION_FOLLOWING)
+      .toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+  })
+
   it('switches between visual and source modes without losing Markdown', async () => {
     const onChange = vi.fn()
     mocks.getMarkdown.mockReturnValue('# 当前标题\n\n保留 **Markdown**')
