@@ -7,11 +7,18 @@ from datetime import datetime, timezone
 from typing import Literal
 
 from sqlalchemy import select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agent_log_service import append_agent_log_event
 from log_redaction import redact_log_value, redact_secret_text
-from models import AgentExecution, AgentMessageLog, AgentToolCall, ContentJob
+from models import (
+    AgentExecution,
+    AgentMessageLog,
+    AgentToolCall,
+    ContentJob,
+    ContentJobStep,
+)
 
 
 class AgentExecutionConflict(RuntimeError):
@@ -140,25 +147,62 @@ async def ensure_agent_execution(
     session: AsyncSession,
     *,
     job_id: int,
+    step_id: int | None = None,
+    attempt: int = 1,
     objective: str,
     skill_mode: str,
     skill_name: str | None,
 ) -> AgentExecution:
-    existing = await session.scalar(
-        select(AgentExecution).where(AgentExecution.job_id == job_id)
-    )
-    if existing is not None:
-        return existing
+    if attempt <= 0:
+        raise ValueError("attempt must be positive")
     if await session.get(ContentJob, job_id) is None:
         raise KeyError(f"job {job_id} not found")
+    if step_id is not None:
+        step = await session.scalar(
+            select(ContentJobStep)
+            .where(ContentJobStep.id == step_id)
+            .with_for_update()
+        )
+        if step is None:
+            raise KeyError(f"job step {step_id} not found")
+        if step.job_id != job_id:
+            raise ValueError(f"step {step_id} belongs to job {step.job_id}")
+        if step.attempt != attempt:
+            raise ValueError(
+                f"step {step_id} belongs to attempt {step.attempt}, not {attempt}"
+            )
+
+    identity = [AgentExecution.job_id == job_id]
+    if step_id is None:
+        identity.append(AgentExecution.step_id.is_(None))
+    else:
+        identity.extend([
+            AgentExecution.step_id == step_id,
+            AgentExecution.attempt == attempt,
+        ])
+    existing = await session.scalar(select(AgentExecution).where(*identity))
+    if existing is not None:
+        return existing
     execution = AgentExecution(
         job_id=job_id,
+        step_id=step_id,
+        attempt=attempt,
         status="running",
         objective=objective,
         skill_mode=skill_mode,
         skill_name=skill_name,
     )
-    session.add(execution)
+
+    try:
+        async with session.begin_nested():
+            session.add(execution)
+            await session.flush()
+    except IntegrityError:
+        winner = await session.scalar(select(AgentExecution).where(*identity))
+        if winner is None:
+            raise
+        return winner
+
     await session.commit()
     await session.refresh(execution)
     await append_agent_log_event(
@@ -170,13 +214,52 @@ async def ensure_agent_execution(
         event_type="execution/start",
         phase=execution.phase,
         status=execution.status,
+        step_id=str(execution.step_id) if execution.step_id is not None else None,
         payload={
             "objective": execution.objective,
             "skill_mode": execution.skill_mode,
             "skill_name": execution.skill_name,
+            "step_id": execution.step_id,
+            "attempt": execution.attempt,
         },
     )
     return execution
+
+
+def _newest_execution_order(statement):
+    return statement.order_by(
+        AgentExecution.updated_at.desc().nullslast(),
+        AgentExecution.created_at.desc().nullslast(),
+        AgentExecution.id.desc(),
+    )
+
+
+async def latest_agent_execution_for_job(
+    session: AsyncSession,
+    job_id: int,
+) -> AgentExecution | None:
+    return await session.scalar(_newest_execution_order(
+        select(AgentExecution)
+        .where(AgentExecution.job_id == job_id)
+    ).limit(1))
+
+
+async def latest_agent_executions_for_jobs(
+    session: AsyncSession,
+    job_ids: list[int] | set[int] | tuple[int, ...],
+) -> dict[int, AgentExecution]:
+    normalized_ids = sorted({job_id for job_id in job_ids if job_id > 0})
+    if not normalized_ids:
+        return {}
+    rows = (await session.execute(
+        _newest_execution_order(
+            select(AgentExecution).where(AgentExecution.job_id.in_(normalized_ids))
+        )
+    )).scalars().all()
+    latest: dict[int, AgentExecution] = {}
+    for execution in rows:
+        latest.setdefault(execution.job_id, execution)
+    return latest
 
 
 async def append_agent_message(

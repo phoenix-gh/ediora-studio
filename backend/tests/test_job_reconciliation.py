@@ -230,6 +230,248 @@ def test_superseded_digital_human_jobs_are_cancelled_not_requeued(
     asyncio.run(run())
 
 
+def test_skill_pipeline_recovery_only_requeues_safe_queued_or_running_jobs(
+    reconciliation_env,
+):
+    from job_reconciliation import reconcile_content_jobs
+
+    plan_input = {
+        "objective": "recover",
+        "pipeline": {
+            "plan": {
+                "stages": [{"step_key": "skill:01:source-research"}],
+            },
+        },
+    }
+
+    async def run():
+        queued_id, _ = await _seed_job(
+            reconciliation_env,
+            flow="skill_pipeline",
+            status="queued",
+            input_data=plan_input,
+            step_key="skill:01:source-research",
+            step_status="queued",
+        )
+        running_id, _ = await _seed_job(
+            reconciliation_env,
+            flow="skill_pipeline",
+            status="running",
+            input_data=plan_input,
+            step_key="skill:01:source-research",
+            step_status="running",
+        )
+        awaiting_id, _ = await _seed_job(
+            reconciliation_env,
+            flow="skill_pipeline",
+            status="awaiting_confirmation",
+            input_data=plan_input,
+            step_key="skill:01:source-research",
+            step_status="queued",
+        )
+        failed_id, _ = await _seed_job(
+            reconciliation_env,
+            flow="skill_pipeline",
+            status="failed",
+            input_data=plan_input,
+            step_key="skill:01:source-research",
+            step_status="failed",
+            retryable=True,
+        )
+        queue = FakeFencedQueue()
+        result = await reconcile_content_jobs(
+            queue,
+            session_factory=reconciliation_env.SessionLocal,
+        )
+
+        assert result == {
+            "enqueued": 2,
+            "job_ids": [queued_id, running_id],
+        }
+        assert queue.items == [queued_id, running_id]
+        async with reconciliation_env.SessionLocal() as db:
+            from sqlalchemy import func, select
+
+            for job_id in (awaiting_id, failed_id):
+                assert await db.scalar(
+                    select(func.count(reconciliation_env.models.ContentJobEvent.id))
+                    .where(reconciliation_env.models.ContentJobEvent.job_id == job_id)
+                ) == 0
+            assert await db.scalar(
+                select(func.count(reconciliation_env.models.ContentJobStep.id))
+                .where(reconciliation_env.models.ContentJobStep.job_id.in_((queued_id, running_id)))
+            ) == 2
+
+    asyncio.run(run())
+
+
+def test_skill_pipeline_uncertain_execution_is_not_auto_requeued(
+    reconciliation_env,
+):
+    from job_reconciliation import reconcile_content_jobs
+
+    async def run():
+        async with reconciliation_env.SessionLocal() as db:
+            job = reconciliation_env.models.ContentJob(
+                flow="skill_pipeline",
+                title="uncertain",
+                status="running",
+                input_data={"pipeline": {"plan": {"stages": [{"step_key": "skill:01:test"}]}}},
+            )
+            db.add(job)
+            await db.flush()
+            step = reconciliation_env.models.ContentJobStep(
+                job_id=job.id,
+                step_key="skill:01:test",
+                status="running",
+                input_data={"run_epoch": 1},
+            )
+            db.add(step)
+            await db.flush()
+            db.add(reconciliation_env.models.AgentExecution(
+                job_id=job.id,
+                step_id=step.id,
+                attempt=step.attempt,
+                status="uncertain",
+                objective="unknown side effect",
+            ))
+            await db.commit()
+            job_id = job.id
+
+        queue = FakeFencedQueue()
+        result = await reconcile_content_jobs(
+            queue,
+            session_factory=reconciliation_env.SessionLocal,
+        )
+        assert result == {"enqueued": 0, "job_ids": []}
+        assert queue.items == []
+        async with reconciliation_env.SessionLocal() as db:
+            from sqlalchemy import func, select
+
+            assert await db.scalar(
+                select(func.count(reconciliation_env.models.ContentJobStep.id))
+                .where(reconciliation_env.models.ContentJobStep.job_id == job_id)
+            ) == 1
+
+    asyncio.run(run())
+
+
+def test_skill_pipeline_reconciliation_repairs_missing_chat_projection_without_new_attempt(
+    reconciliation_env,
+):
+    from sqlalchemy import func, select
+
+    from job_reconciliation import reconcile_content_jobs
+
+    async def run():
+        async with reconciliation_env.SessionLocal() as db:
+            models = reconciliation_env.models
+            job = models.ContentJob(
+                flow="skill_pipeline",
+                title="completed chat pipeline",
+                status="succeeded",
+                input_data={
+                    "objective": "完成一篇文章",
+                    "pipeline": {"plan": {"stages": [{"step_key": "skill:01:article"}]}},
+                },
+            )
+            db.add(job)
+            await db.flush()
+            step = models.ContentJobStep(
+                job_id=job.id,
+                step_key="skill:01:article",
+                attempt=1,
+                status="succeeded",
+                output_data={"primary_artifact_id": 0},
+            )
+            db.add(step)
+            await db.flush()
+            artifact = models.ExecutionArtifact(
+                job_id=job.id,
+                step_id=step.id,
+                attempt=1,
+                kind="article",
+                role="primary",
+                title="最终文章",
+                text_content="最终文章正文",
+                digest="digest-1",
+            )
+            db.add(artifact)
+            await db.flush()
+            step.output_data = {"primary_artifact_id": artifact.id}
+            chat_session = models.ChatSession(title="研究对话")
+            db.add(chat_session)
+            await db.flush()
+            placeholder = models.ChatMessage(
+                session_id=chat_session.id,
+                role="assistant",
+                text="等待确认",
+                parts=[{"type": "skill-pipeline-ref", "jobId": job.id}],
+            )
+            db.add(placeholder)
+            await db.flush()
+            db.add(models.ContentJobEvent(
+                job_id=job.id,
+                kind="chat_pipeline_created",
+                payload={
+                    "session_id": chat_session.id,
+                    "assistant_message_id": placeholder.id,
+                },
+            ))
+            await db.commit()
+            job_id = job.id
+            session_id = chat_session.id
+
+        queue = FakeFencedQueue()
+        first = await reconcile_content_jobs(
+            queue,
+            session_factory=reconciliation_env.SessionLocal,
+        )
+        assert first == {"enqueued": 0, "job_ids": []}
+
+        async with reconciliation_env.SessionLocal() as db:
+            messages = (await db.scalars(
+                select(models.ChatMessage)
+                .where(models.ChatMessage.session_id == session_id)
+                .order_by(models.ChatMessage.id),
+            )).all()
+            steps = (await db.scalars(
+                select(models.ContentJobStep)
+                .where(models.ContentJobStep.job_id == job_id),
+            )).all()
+            projections = (await db.scalars(
+                select(models.ContentJobEvent)
+                .where(
+                    models.ContentJobEvent.job_id == job_id,
+                    models.ContentJobEvent.kind == "chat_pipeline_final_projected",
+                ),
+            )).all()
+
+        assert len(messages) == 2
+        assert messages[-1].text == "最终文章正文"
+        assert len(steps) == 1
+        assert steps[0].attempt == 1
+        assert len(projections) == 1
+
+        second = await reconcile_content_jobs(
+            queue,
+            session_factory=reconciliation_env.SessionLocal,
+        )
+        assert second == {"enqueued": 0, "job_ids": []}
+        async with reconciliation_env.SessionLocal() as db:
+            assert await db.scalar(
+                select(func.count(models.ChatMessage.id)).where(models.ChatMessage.session_id == session_id)
+            ) == 2
+            assert await db.scalar(
+                select(func.count(models.ContentJobEvent.id)).where(
+                    models.ContentJobEvent.job_id == job_id,
+                    models.ContentJobEvent.kind == "chat_pipeline_final_projected",
+                )
+            ) == 1
+
+    asyncio.run(run())
+
+
 def test_long_video_jobs_are_requeued_onto_the_video_queue(
     reconciliation_env,
 ):

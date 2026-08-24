@@ -1,7 +1,7 @@
 import { API_BASE, apiFetch } from './client'
 import type { DailyCreationAgentLog } from './creation-rules'
 
-export type JobStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'
+export type JobStatus = 'awaiting_confirmation' | 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled' | 'superseded'
 export type JobKind = 'scheduled' | 'manual'
 
 export interface JobScheduleSummary {
@@ -31,6 +31,62 @@ export interface ContentJobEvent {
   created_at: string
 }
 
+export interface TokenUsageSummary {
+  input_tokens?: number
+  output_tokens?: number
+  total_tokens?: number
+  reasoning_tokens?: number
+  cached_input_tokens?: number
+  request_count: number
+}
+
+export interface PipelineArtifact {
+  id: number
+  step_id: number
+  attempt: number
+  kind: string
+  role: 'primary' | 'auxiliary'
+  title: string
+  text_content: string
+  structured_content: Record<string, unknown> | null
+  digest: string
+  status: string
+  created_at: string
+}
+
+export interface PipelinePlanStage {
+  position: number
+  step_key: string
+  invocation_id: string
+  skill_name: string
+  display_name: string
+  expected_output: string
+  capability_profile: string
+  parameter_display_name: string | null
+  instruction: string
+}
+
+export interface PipelineStage {
+  id: number
+  key: string
+  attempt: number
+  status: JobStatus
+  input: Record<string, unknown>
+  output: Record<string, unknown>
+  error: string
+  retryable: boolean
+  artifacts: PipelineArtifact[]
+  created_at: string
+  started_at: string | null
+  completed_at: string | null
+}
+
+export interface PipelineProjection {
+  plan: { version: number; objective: string; stages: PipelinePlanStage[] }
+  stages: PipelineStage[]
+  artifacts: PipelineArtifact[]
+}
+
 export interface ContentJob {
   id: number
   flow: string
@@ -41,6 +97,10 @@ export interface ContentJob {
   created_at: string
   started_at: string | null
   completed_at: string | null
+  plan_version?: number
+  run_epoch?: number
+  token_usage?: TokenUsageSummary | null
+  pipeline?: PipelineProjection
   steps: ContentJobStep[]
   events: ContentJobEvent[]
 }
@@ -58,6 +118,19 @@ export interface JobListPage {
   has_more: boolean
 }
 
+type ContentJobResponse = Omit<ContentJob, 'steps' | 'events'> & {
+  steps?: ContentJobStep[]
+  events?: ContentJobEvent[]
+}
+
+function normalizeContentJob(job: ContentJobResponse): ContentJob {
+  return {
+    ...job,
+    steps: Array.isArray(job.steps) ? job.steps : (job.pipeline?.stages ?? []),
+    events: Array.isArray(job.events) ? job.events : [],
+  }
+}
+
 export function imageUrlsForJob(job: ContentJob) {
   const apiOrigin = new URL(API_BASE).origin
   return job.steps.flatMap(step => {
@@ -67,12 +140,13 @@ export function imageUrlsForJob(job: ContentJob) {
   }).map(url => new URL(url, apiOrigin).toString())
 }
 
-export function listJobs(options: JobListOptions = {}) {
+export async function listJobs(options: JobListOptions = {}) {
   const params = new URLSearchParams({ limit: String(options.limit ?? 30) })
   if (options.cursor) params.set('cursor', options.cursor)
   if (options.kind) params.set('kind', options.kind)
   if (options.status) params.set('status', options.status)
-  return apiFetch<JobListPage>(`/jobs?${params.toString()}`)
+  const page = await apiFetch<Omit<JobListPage, 'jobs'> & { jobs: ContentJobResponse[] }>(`/jobs?${params.toString()}`)
+  return { ...page, jobs: page.jobs.map(normalizeContentJob) }
 }
 export function createJob(body: { flow: string; title: string; input: Record<string, unknown>; idempotency_key?: string }) {
   return apiFetch<ContentJob>('/jobs', { method: 'POST', body: JSON.stringify(body) })
@@ -80,6 +154,24 @@ export function createJob(body: { flow: string; title: string; input: Record<str
 export function getJob(id: number) { return apiFetch<ContentJob>(`/jobs/${id}`) }
 export function getJobAgentLog(id: number) { return apiFetch<DailyCreationAgentLog>(`/jobs/${id}/agent-log`) }
 export function cancelJob(id: number) { return apiFetch<ContentJob>(`/jobs/${id}/cancel`, { method: 'POST' }) }
+export function confirmPipeline(id: number, planVersion: number, requestId: string) {
+  return apiFetch<ContentJob>(`/jobs/${id}/confirm`, { method: 'POST', body: JSON.stringify({ plan_version: planVersion, request_id: requestId }) })
+}
+export function revisePipeline(id: number, planVersion: number, requestId: string, stageInstructions: Record<string, string>) {
+  return apiFetch<ContentJob>(`/jobs/${id}/plan/revise`, { method: 'POST', body: JSON.stringify({ plan_version: planVersion, request_id: requestId, stage_instructions: stageInstructions }) })
+}
+export function cancelPipeline(id: number, requestId: string) {
+  return apiFetch<ContentJob>(`/jobs/${id}/cancel`, { method: 'POST', body: JSON.stringify({ request_id: requestId }) })
+}
+export function retryPipelineStage(id: number, stageKey: string, requestId: string) {
+  return apiFetch<ContentJob>(`/jobs/${id}/stages/${encodeURIComponent(stageKey)}/retry`, { method: 'POST', body: JSON.stringify({ request_id: requestId }) })
+}
+export function rerunPipelineStage(id: number, stageKey: string, requestId: string) {
+  return apiFetch<ContentJob>(`/jobs/${id}/stages/${encodeURIComponent(stageKey)}/rerun`, { method: 'POST', body: JSON.stringify({ request_id: requestId }) })
+}
+export function getJobEvents(id: number, after = 0) {
+  return apiFetch<{ events: ContentJobEvent[]; next_after: number }>(`/jobs/${id}/events?after=${after}`)
+}
 export function retryJobStep(id: number, stepKey: string) {
   return apiFetch<ContentJob>(`/jobs/${id}/retry`, { method: 'POST', body: JSON.stringify({ step_key: stepKey }) })
 }

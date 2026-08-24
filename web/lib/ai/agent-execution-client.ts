@@ -11,6 +11,8 @@ import { apiGet, apiPatch, apiPost, workerHeaders } from './job-client'
 export type DurableAgentExecution = {
   id: number
   job_id: number
+  step_id?: number | null
+  attempt?: number
   status: string
   objective: string
   skill_mode: AgentSkillMode
@@ -59,9 +61,15 @@ export function ensureAgentExecution(jobId: number, request: {
   objective: string
   skillMode: AgentSkillMode
   skillName?: string | null
+  stepId?: number
+  attempt?: number
 }) {
   return apiPost<DurableAgentExecution>('/agent-executions', {
     job_id: jobId,
+    ...(request.stepId === undefined ? {} : {
+      step_id: request.stepId,
+      attempt: request.attempt ?? 1,
+    }),
     objective: request.objective,
     skill_mode: request.skillMode,
     skill_name: request.skillName ?? null,

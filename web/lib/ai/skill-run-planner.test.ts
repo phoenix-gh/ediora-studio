@@ -15,10 +15,17 @@ function syntheticSkill(name: string, instructions: string): RegisteredSkill {
     name,
     description: `${name} handles a synthetic workflow`,
     version: '1.0.0',
+    digest: 'a'.repeat(64),
     source: 'uploaded',
     enabled: true,
+    reviewState: 'approved',
+    standardCompatible: true,
+    diagnostics: [],
     instructions,
+    content: instructions,
     directory: `/skills/${name}`,
+    packageFiles: [],
+    requestedAllowedTools: [],
   }
 }
 
@@ -40,6 +47,20 @@ describe('generic Skill run planning', () => {
     expect(prompt).toContain('Use only exact reference paths and tool names from the catalogs')
     expect(prompt).toContain('outputRequirements')
     expect(prompt).toContain('verificationCriteria')
+  })
+
+  it('includes the previous assistant deliverable when planning a follow-up rewrite', () => {
+    const prompt = buildSkillPlanPrompt({
+      skill: syntheticSkill('Rewrite', '# Procedure\nRewrite the supplied material.'),
+      userRequest: '我只要写一个短帖',
+      conversationContext: '<previous_assistant_deliverable>这是上一轮文章。</previous_assistant_deliverable>',
+      selectedContext: '',
+      references,
+      tools: [],
+    })
+
+    expect(prompt).toContain('这是上一轮文章。')
+    expect(prompt).toContain('将上一轮交付物改写为短帖')
   })
 
   it('contains no bundled Skill identifier or domain branch', () => {

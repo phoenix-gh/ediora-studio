@@ -160,6 +160,7 @@ export function AgentTrajectoryPanel({
     [scopeName, scopeValue],
   )
   const cursorRef = useRef<number | null>(null)
+  const hasMoreRef = useRef(false)
   const inFlightRef = useRef(false)
   const refreshTimerRef = useRef<number | null>(null)
   const runningRef = useRef<boolean | null>(null)
@@ -192,11 +193,13 @@ export function AgentTrajectoryPanel({
       setEventsScopeKey(key)
       setSessionKey(page.session_key)
       cursorRef.current = page.next_sequence ?? page.events.at(-1)?.seq ?? cursor
+      hasMoreRef.current = page.has_more
       setTraceRunning(page.unsupported_format ? false : page.is_running)
       setUnsupportedFormat(page.unsupported_format)
       setError('')
     } catch (reason) {
       if (!active()) return
+      hasMoreRef.current = false
       setTraceRunning(false)
       if (reason instanceof ApiError && reason.status === 404) {
         setUnsupportedFormat(true)
@@ -217,12 +220,13 @@ export function AgentTrajectoryPanel({
     }
     let active = true
     cursorRef.current = null
+    hasMoreRef.current = false
     inFlightRef.current = false
     refreshTimerRef.current = null
     runningRef.current = null
     onRunningChange?.(false)
     const scheduleRefresh = () => {
-      if (!active || runningRef.current === false) return
+      if (!active || (!hasMoreRef.current && runningRef.current === false)) return
       refreshTimerRef.current = window.setTimeout(async () => {
         refreshTimerRef.current = null
         if (!active) return

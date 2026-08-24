@@ -8,6 +8,8 @@ from sqlalchemy import (
     JSON,
     Index,
     UniqueConstraint,
+    CheckConstraint,
+    ForeignKey,
     text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
@@ -401,7 +403,12 @@ class ContentJob(Base):
     status: Mapped[str] = mapped_column(String, default="queued", index=True)
     input_data: Mapped[dict] = mapped_column(JSON, default=dict)
     idempotency_key: Mapped[str] = mapped_column(String, default="", index=True)
+    plan_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default=text("1"))
+    run_epoch: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default=text("1"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=now_utc, onupdate=now_utc, server_default=text("CURRENT_TIMESTAMP")
+    )
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -409,9 +416,31 @@ class ContentJob(Base):
 class AgentExecution(Base):
     """Durable checkpoint for one AI-owned content job."""
     __tablename__ = "agent_executions"
+    __table_args__ = (
+        Index(
+            "uq_agent_executions_legacy_job",
+            "job_id",
+            unique=True,
+            postgresql_where=text("step_id IS NULL"),
+            sqlite_where=text("step_id IS NULL"),
+        ),
+        Index(
+            "uq_agent_executions_stage_attempt",
+            "job_id",
+            "step_id",
+            "attempt",
+            unique=True,
+            postgresql_where=text("step_id IS NOT NULL"),
+            sqlite_where=text("step_id IS NOT NULL"),
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    job_id: Mapped[int] = mapped_column(Integer, nullable=False, unique=True, index=True)
+    job_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    step_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("content_job_steps.id"), nullable=True, index=True
+    )
+    attempt: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default=text("1"))
     status: Mapped[str] = mapped_column(String, nullable=False, default="running", index=True)
     objective: Mapped[str] = mapped_column(Text, nullable=False)
     skill_mode: Mapped[str] = mapped_column(String, nullable=False, default="auto")
@@ -533,6 +562,49 @@ class ContentJobEvent(Base):
     step_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     kind: Mapped[str] = mapped_column(String, nullable=False, index=True)
     payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+
+ExecutionJob = ContentJob
+ExecutionJobStep = ContentJobStep
+ExecutionJobEvent = ContentJobEvent
+
+
+class ExecutionArtifact(Base):
+    """Append-only output or auxiliary evidence produced by a Job Step."""
+    __tablename__ = "execution_artifacts"
+    __table_args__ = (
+        CheckConstraint(
+            "role IN ('primary', 'auxiliary')",
+            name="ck_execution_artifacts_role",
+        ),
+        CheckConstraint(
+            "status IN ('active', 'superseded')",
+            name="ck_execution_artifacts_status",
+        ),
+        Index("ix_execution_artifacts_job_id", "job_id"),
+        Index("ix_execution_artifacts_step_id", "step_id"),
+        Index(
+            "uq_execution_artifacts_primary_attempt",
+            "step_id",
+            "attempt",
+            unique=True,
+            postgresql_where=text("role = 'primary'"),
+            sqlite_where=text("role = 'primary'"),
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    job_id: Mapped[int] = mapped_column(Integer, ForeignKey("content_jobs.id"), nullable=False)
+    step_id: Mapped[int] = mapped_column(Integer, ForeignKey("content_job_steps.id"), nullable=False)
+    attempt: Mapped[int] = mapped_column(Integer, nullable=False)
+    kind: Mapped[str] = mapped_column(String, nullable=False)
+    role: Mapped[str] = mapped_column(String, nullable=False)
+    title: Mapped[str] = mapped_column(String, nullable=False)
+    text_content: Mapped[str | None] = mapped_column(Text, nullable=True)
+    structured_content: Mapped[object | None] = mapped_column(JSON, nullable=True)
+    digest: Mapped[str] = mapped_column(String, nullable=False)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="active", server_default=text("'active'"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
 
 

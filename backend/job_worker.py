@@ -10,12 +10,19 @@ from content_jobs import fail_step, start_step, succeed_job, succeed_step
 from database import SessionLocal
 from job_queue import RedisJobQueue
 from models import ContentJob
+from pipeline_runner import run_skill_pipeline_job
 
 
 async def run_job(job_id: int, *, session_factory: Callable = SessionLocal) -> None:
     async with session_factory() as session:
         job = await session.get(ContentJob, job_id)
         if job is None or job.status == "cancelled":
+            return
+        if job.flow == "skill_pipeline":
+            await run_skill_pipeline_job(
+                job_id,
+                session_factory=session_factory,
+            )
             return
         for step_key in content_flows.steps_for_flow(job.flow):
             step = await start_step(session, job.id, step_key)

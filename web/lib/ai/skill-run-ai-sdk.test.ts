@@ -5,7 +5,10 @@ import { executeSkillRunWithAiSdk, selectSkillForTurn, skillRunUIResponse } from
 
 const alpha: RegisteredSkill = {
   name: 'Alpha', description: 'Handles alpha tasks', version: '1.0.0', source: 'uploaded', enabled: true,
-  instructions: '# Procedure\nRead applicable rules and complete the task.\n# Verification\nCheck the output.', directory: '/skills/alpha',
+  digest: 'a'.repeat(64), reviewState: 'approved', standardCompatible: true, diagnostics: [],
+  instructions: '# Procedure\nRead applicable rules and complete the task.\n# Verification\nCheck the output.',
+  content: '# Procedure\nRead applicable rules and complete the task.\n# Verification\nCheck the output.',
+  directory: '/skills/alpha', packageFiles: [], requestedAllowedTools: [],
 }
 const beta = { ...alpha, name: 'Beta', description: 'Handles beta tasks' }
 const references: SkillReference[] = [{ path: 'references/rules.md', bytes: 5 }]
@@ -45,6 +48,25 @@ describe('generic SkillRun AI SDK adapter', () => {
     })).resolves.toBeUndefined()
   })
 
+  it('keeps ordinary stored-source lookup in normal Chat instead of a research Skill run', async () => {
+    const sourceResearch = {
+      ...alpha,
+      name: 'source-research',
+      description: '检索、核验并整理与用户主题直接相关的可追溯资料，供后续写作阶段使用。',
+    }
+
+    await expect(selectSkillForTurn({
+      enabledSkills: [sourceResearch],
+      userRequest: '帮我从 X 的信息源的 Github 订阅源中获取一个今天可以写的题材',
+      decide: async ({ prompt }) => ({
+        skillName: prompt.toLowerCase().includes('ordinary stored-data lookup')
+          ? null
+          : 'source-research',
+        continueRestored: false,
+      }),
+    })).resolves.toBeUndefined()
+  })
+
   it('rejects selector output that is not in the enabled catalog', async () => {
     await expect(selectSkillForTurn({
       enabledSkills: [alpha], userRequest: 'task',
@@ -57,6 +79,14 @@ describe('generic SkillRun AI SDK adapter', () => {
       enabledSkills: [alpha],
       userRequest: 'alpha task',
       decide: async () => ({ tool: 'loadSkill', arguments: { name: 'Alpha' } }),
+    })).resolves.toEqual({ skillName: 'Alpha', activation: 'automatic' })
+  })
+
+  it('accepts a JSON string returned by a text-only selector', async () => {
+    await expect(selectSkillForTurn({
+      enabledSkills: [alpha],
+      userRequest: 'alpha task',
+      decide: async () => '{"skillName":"Alpha","continueRestored":false}',
     })).resolves.toEqual({ skillName: 'Alpha', activation: 'automatic' })
   })
 
@@ -74,8 +104,11 @@ describe('generic SkillRun AI SDK adapter', () => {
 
   it('runs plan, progressive load, execution, and validation without forcing tool choice', async () => {
     const calls: string[] = []
+    let planningPrompt = ''
+    let executionPrompt = ''
     const execute = vi.fn(async (input: Record<string, unknown>) => {
       calls.push('execute')
+      executionPrompt = String(input.prompt)
       expect(input).not.toHaveProperty('toolChoice')
       return {
         text: 'grounded draft',
@@ -87,10 +120,11 @@ describe('generic SkillRun AI SDK adapter', () => {
       skill: alpha,
       activation: 'automatic',
       userRequest: '完成任务',
+      conversationContext: '<previous_assistant_deliverable>这是上一轮交付物。</previous_assistant_deliverable>',
       selectedContext: '',
       references,
       tools: [{ name: 'search_assets', description: 'Search assets' }],
-      plan: async () => { calls.push('plan'); return plan },
+      plan: async ({ prompt }) => { calls.push('plan'); planningPrompt = prompt; return plan },
       readReferences: async paths => { calls.push('references'); return paths.map(path => ({ path, content: 'rules', bytes: 5 })) },
       execute,
       validate: async () => { calls.push('validate'); return { passed: true, violations: [] } },
@@ -99,6 +133,10 @@ describe('generic SkillRun AI SDK adapter', () => {
 
     expect(calls).toEqual(['plan', 'references', 'execute', 'validate'])
     expect(result).toMatchObject({ kind: 'completed', completed: { delivery: 'ready', text: 'grounded draft' } })
+    expect(planningPrompt).toContain('这是上一轮交付物。')
+    expect(executionPrompt).toContain('deliver: 交付结果')
+    expect(executionPrompt).toContain('这是上一轮交付物。')
+    expect(executionPrompt).toContain('required tools: search_assets')
   })
 
   it('performs one revision and a second validation', async () => {
@@ -121,6 +159,38 @@ describe('generic SkillRun AI SDK adapter', () => {
 
     expect(result).toMatchObject({ kind: 'completed', completed: { text: 'revised draft', revisionCount: 1 } })
     expect(validate).toHaveBeenCalledTimes(2)
+  })
+
+  it('retries execution once when required tool evidence is missing', async () => {
+    const prompts: string[] = []
+    let attempts = 0
+    const execute = vi.fn(async (input: Record<string, unknown>) => {
+      prompts.push(String(input.prompt))
+      attempts += 1
+      if (attempts === 1) return { text: '', parts: [] }
+      return {
+        text: 'grounded after retry',
+        parts: [{ type: 'dynamic-tool', toolName: 'search_assets', state: 'output-available', toolCallId: 'retry-call', output: {} }],
+      }
+    })
+
+    const result = await executeSkillRunWithAiSdk({
+      skill: alpha,
+      activation: 'automatic',
+      userRequest: '完成任务',
+      selectedContext: '',
+      references,
+      tools: [{ name: 'search_assets', description: 'Search assets' }],
+      plan: async () => plan,
+      readReferences: async paths => paths.map(path => ({ path, content: 'rules', bytes: 5 })),
+      execute,
+      validate: async () => ({ passed: true, violations: [] }),
+      revise: vi.fn(),
+    })
+
+    expect(execute).toHaveBeenCalledTimes(2)
+    expect(prompts[1]).toContain('Missing required plan steps')
+    expect(result).toMatchObject({ kind: 'completed', completed: { delivery: 'ready', text: 'grounded after retry' } })
   })
 
   it('returns a pending approval before validation and revision', async () => {

@@ -20,6 +20,31 @@ export type AgentToolAudit = {
   step?: number
 }
 
+export type AgentGoalOutputReference = {
+  kind: 'artifact'
+  id: string
+  claim: string
+}
+
+export type AgentGoalCompletionDeclaration = {
+  status: 'completed' | 'blocked'
+  summary: string
+  outputs?: AgentGoalOutputReference[]
+  remainingWork?: string[]
+}
+
+export type AgentRuntimeToolEvidence = {
+  toolCallId: string
+  toolName: string
+  status: string
+  sideEffecting: boolean
+}
+
+export type AgentRuntimeGoalEvidence = {
+  toolCalls: AgentRuntimeToolEvidence[]
+  outputs: AgentGoalOutputReference[]
+}
+
 export type AgentModelMessageEvent = {
   phase: string
   step?: number
@@ -34,6 +59,8 @@ export type AgentCompletionEvidence =
       executionId: number
       finalText: string
       toolCallCount: number
+      goalCompletion: AgentGoalCompletionDeclaration
+      runtimeEvidence?: AgentRuntimeGoalEvidence
     }
   | {
       kind: 'model_evaluation'

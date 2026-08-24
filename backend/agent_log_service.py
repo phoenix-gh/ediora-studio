@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agent_trajectory import (
     canonical_event_status,
     validate_agent_session_event,
 )
+from agent_token_usage import aggregate_token_usage
 from log_redaction import redact_log_value
-from models import AgentLogEvent
+from models import AgentExecution, AgentLogEvent
 
 
 async def append_agent_log_event(
@@ -75,33 +76,40 @@ async def append_agent_session_event(
 
     payload = dict(data)
     existing = []
-    if turn is None and turn_id:
-        existing = await list_agent_log_events(
-            session,
-            stream_key=stream_key,
-            limit=500,
-        )
-        for prior in reversed(existing):
-            if prior.turn_id != turn_id or not isinstance(prior.payload_data, dict):
-                continue
-            candidate = prior.payload_data.get("turn")
-            if isinstance(candidate, int) and candidate > 0:
-                turn = candidate
-                break
-    if step is None and step_id:
-        if not existing:
-            existing = await list_agent_log_events(
+    if turn is None:
+        candidate = payload.get("turn")
+        if isinstance(candidate, int) and candidate > 0:
+            turn = candidate
+        elif turn_id:
+            scoped = await _recent_scoped_events(
                 session,
                 stream_key=stream_key,
-                limit=500,
+                turn_id=turn_id,
             )
-        for prior in reversed(existing):
-            if prior.step_id != step_id or not isinstance(prior.payload_data, dict):
-                continue
-            candidate = prior.payload_data.get("step")
-            if isinstance(candidate, int) and candidate > 0:
-                step = candidate
-                break
+            for prior in scoped:
+                if not isinstance(prior.payload_data, dict):
+                    continue
+                candidate = prior.payload_data.get("turn")
+                if isinstance(candidate, int) and candidate > 0:
+                    turn = candidate
+                    break
+    if step is None:
+        candidate = payload.get("step")
+        if isinstance(candidate, int) and candidate > 0:
+            step = candidate
+        elif step_id:
+            scoped = await _recent_scoped_events(
+                session,
+                stream_key=stream_key,
+                step_id=step_id,
+            )
+            for prior in scoped:
+                if not isinstance(prior.payload_data, dict):
+                    continue
+                candidate = prior.payload_data.get("step")
+                if isinstance(candidate, int) and candidate > 0:
+                    step = candidate
+                    break
     if event_type == "turn/start" and payload.get("turn") is None:
         if not existing:
             existing = await list_agent_log_events(
@@ -147,6 +155,24 @@ async def append_agent_session_event(
         status=canonical_event_status(event_type, normalized),
         payload=normalized,
     )
+
+
+async def _recent_scoped_events(
+    session: AsyncSession,
+    *,
+    stream_key: str,
+    turn_id: str | None = None,
+    step_id: str | None = None,
+) -> list[AgentLogEvent]:
+    """Read recent events for the current turn/step, not the stream's first page."""
+
+    statement = select(AgentLogEvent).where(AgentLogEvent.stream_key == stream_key)
+    if turn_id is not None:
+        statement = statement.where(AgentLogEvent.turn_id == turn_id)
+    if step_id is not None:
+        statement = statement.where(AgentLogEvent.step_id == step_id)
+    statement = statement.order_by(AgentLogEvent.id.desc()).limit(500)
+    return list((await session.execute(statement)).scalars().all())
 
 
 async def list_agent_log_events(
@@ -212,6 +238,30 @@ async def list_all_agent_log_events(
         if after_sequence == next_sequence:
             return events
         after_sequence = next_sequence
+
+
+async def get_agent_token_usage(
+    session: AsyncSession,
+    *,
+    job_id: int,
+) -> dict[str, int] | None:
+    """Aggregate model usage for one durable ContentJob."""
+
+    statement = (
+        select(AgentLogEvent)
+        .where(
+            AgentLogEvent.event_type.in_(("assistant/message", "llm/response")),
+            or_(
+                AgentLogEvent.job_id == job_id,
+                AgentLogEvent.execution_id.in_(
+                    select(AgentExecution.id).where(AgentExecution.job_id == job_id)
+                ),
+            ),
+        )
+        .order_by(AgentLogEvent.id.asc())
+    )
+    events = list((await session.execute(statement)).scalars().all())
+    return aggregate_token_usage(events)
 
 
 def agent_log_event_payload(event: AgentLogEvent) -> dict:

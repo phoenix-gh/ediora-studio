@@ -7,6 +7,10 @@ from fastapi.testclient import TestClient
 
 @pytest.fixture
 def client(monkeypatch, postgres_env):
+    monkeypatch.setenv(
+        "WORKER_TOKEN",
+        "test-worker-token-at-least-32-characters",
+    )
     for module in list(sys.modules):
         if module.startswith(("database", "models", "routers.chat")):
             sys.modules.pop(module, None)
@@ -29,6 +33,141 @@ def client(monkeypatch, postgres_env):
     app.dependency_overrides[get_db] = override_db
     app.state.session_local = SessionLocal
     return TestClient(app)
+
+
+def _chat_pipeline_invocation(name="source-research", invocation_id="one"):
+    return {
+        "invocation_id": invocation_id,
+        "skill_name": name,
+        "skill_display_name": name,
+        "skill_snapshot": {
+            "name": name,
+            "version": "1.0.0",
+            "digest": "a" * 64,
+            "source": "builtin",
+        },
+        "binding_snapshot": {
+            "primaryOutput": "article",
+            "capabilityProfile": "writing",
+            "requestedAllowedTools": ["read_context"],
+            "profileAllowedTools": ["read_context"],
+        },
+        "capability_snapshot": {
+            "schemaVersion": 1,
+            "mode": "job",
+            "skill": {"name": name},
+            "tools": [],
+            "policy": {
+                "approvalPolicy": "automatic",
+                "allowedToolNames": ["read_context"],
+            },
+        },
+    }
+
+
+def test_chat_pipeline_creation_is_interactive_atomic_and_idempotent(client):
+    session_id = client.post("/api/chat/sessions", json={}).json()["id"]
+    body = {
+        "client_message_id": "chat-message-1",
+        "objective": "Please use to write an article",
+        "title": "Chat pipeline",
+        "invocations": [_chat_pipeline_invocation()],
+        "message_parts": [
+            {"type": "text", "text": "Please use"},
+            {"type": "skill-invocation", "invocation_id": "one"},
+            {"type": "text", "text": " to write an article"},
+        ],
+    }
+
+    denied = client.post(f"/api/chat/sessions/{session_id}/pipelines", json=body)
+    assert denied.status_code == 403
+
+    headers = {"X-Worker-Token": "test-worker-token-at-least-32-characters"}
+    created = client.post(
+        f"/api/chat/sessions/{session_id}/pipelines",
+        json=body,
+        headers=headers,
+    )
+    assert created.status_code == 201, created.text
+    payload = created.json()
+    assert payload["job"]["status"] == "awaiting_confirmation"
+    assert payload["job"]["flow"] == "skill_pipeline"
+    assert payload["user_message_id"] > 0
+    assert payload["assistant_message_id"] > 0
+
+    repeated = client.post(
+        f"/api/chat/sessions/{session_id}/pipelines",
+        json=body,
+        headers=headers,
+    )
+    assert repeated.status_code == 201
+    assert repeated.json()["job"]["id"] == payload["job"]["id"]
+    assert repeated.json()["user_message_id"] == payload["user_message_id"]
+    assert repeated.json()["assistant_message_id"] == payload["assistant_message_id"]
+
+    detail = client.get(f"/api/chat/sessions/{session_id}")
+    assert detail.status_code == 200
+    messages = detail.json()["messages"]
+    assert len(messages) == 2
+    assert messages[0]["parts"][:3] == [
+        {"type": "text", "text": "Please use"},
+        {
+            "type": "skill-invocation",
+            "invocationId": "one",
+            "skillName": "source-research",
+            "displayName": "source-research",
+            "parameterDisplayName": None,
+        },
+        {"type": "text", "text": " to write an article"},
+    ]
+    assert messages[1]["parts"][0]["type"] == "skill-pipeline-ref"
+    assert messages[1]["parts"][0]["jobId"] == payload["job"]["id"]
+
+
+def test_chat_pipeline_rejects_message_parts_with_a_different_skill_order(client):
+    session_id = client.post("/api/chat/sessions", json={}).json()["id"]
+    response = client.post(
+        f"/api/chat/sessions/{session_id}/pipelines",
+        headers={"X-Worker-Token": "test-worker-token-at-least-32-characters"},
+        json={
+            "client_message_id": "chat-message-order",
+            "objective": "Write an article",
+            "title": "Chat pipeline",
+            "invocations": [
+                _chat_pipeline_invocation(invocation_id="one"),
+                _chat_pipeline_invocation(invocation_id="two"),
+            ],
+            "message_parts": [
+                {"type": "skill-invocation", "invocation_id": "two"},
+                {"type": "text", "text": " then "},
+                {"type": "skill-invocation", "invocation_id": "one"},
+            ],
+        },
+    )
+
+    assert response.status_code == 422
+    assert "消息中的 Skill 顺序与 Pipeline 不一致" in response.text
+
+
+def test_chat_pipeline_rejects_objective_that_differs_from_message_text_parts(client):
+    session_id = client.post("/api/chat/sessions", json={}).json()["id"]
+    response = client.post(
+        f"/api/chat/sessions/{session_id}/pipelines",
+        headers={"X-Worker-Token": "test-worker-token-at-least-32-characters"},
+        json={
+            "client_message_id": "chat-message-objective",
+            "objective": "Hidden stale objective",
+            "title": "Chat pipeline",
+            "invocations": [_chat_pipeline_invocation()],
+            "message_parts": [
+                {"type": "skill-invocation", "invocation_id": "one"},
+                {"type": "text", "text": "Visible objective"},
+            ],
+        },
+    )
+
+    assert response.status_code == 422
+    assert "消息正文与执行目标不一致" in response.text
 
 
 def _add_searchable_sources(client):
@@ -210,6 +349,38 @@ def test_persists_a_bounded_skill_run_audit_without_reference_or_tool_bodies(cli
             json={"role": "assistant", "skill_run": invalid_audit},
         )
         assert rejected.status_code == 422
+
+
+def test_persists_step_scoped_tool_evidence_in_skill_run_audit(client):
+    session = client.post("/api/chat/sessions", json={}).json()
+    audit = {
+        "skillName": "source-research",
+        "activation": "automatic",
+        "steps": [{
+            "id": "step-1",
+            "status": "completed",
+            "evidence": ["tool:get_github_daily_trending:call-1"],
+        }],
+        "loadedReferences": [],
+        "toolEvidence": [{
+            "stepId": "step-1",
+            "toolName": "get_github_daily_trending",
+            "toolCallId": "call-1",
+            "state": "succeeded",
+        }],
+        "validation": {"passed": True, "violations": []},
+        "revisionCount": 0,
+    }
+
+    created = client.post(
+        f"/api/chat/sessions/{session['id']}/messages",
+        json={"role": "assistant", "parts": [], "text": "", "skill_run": audit},
+    )
+
+    assert created.status_code == 201, created.text
+    assert created.json()["skill_run"] == audit
+    detail = client.get(f"/api/chat/sessions/{session['id']}")
+    assert detail.json()["messages"][0]["skill_run"] == audit
 
 
 def test_persists_capability_snapshot_without_bodies(client):

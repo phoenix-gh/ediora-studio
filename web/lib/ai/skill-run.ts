@@ -47,6 +47,7 @@ export type SkillRunPlan = Omit<z.infer<typeof skillRunPlanInputSchema>, 'steps'
 }
 
 export type SkillToolEvidence = {
+  stepId: string
   toolName: string
   toolCallId: string
   state: 'succeeded' | 'failed' | 'approval-pending'

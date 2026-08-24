@@ -27,8 +27,36 @@ export type ChatSessionDetail = ChatSession & {
   is_running: boolean
 }
 
-export type ChatSkill = { name: string; description: string; version: string }
 export type ChatDraft = { id: number; title: string; status: string; updated_at: string }
+export type ChatSkillParameterKind = 'writing_plan' | 'publish_account'
+export type ChatSkill = {
+  name: string
+  description: string
+  version: string
+  displayName?: string
+  parameterKind?: ChatSkillParameterKind | null
+  parameterRequired?: boolean
+  primaryOutput?: string
+  capabilityProfile?: string
+}
+export type PipelineParameterOption = {
+  id: string
+  displayName: string
+  kind: ChatSkillParameterKind
+  summary: string
+  metadata: Record<string, unknown>
+}
+export type SubmittedSkillInvocation = {
+  invocationId: string
+  skillName: string
+  skillDisplayName: string
+  parameterKind?: ChatSkillParameterKind
+  parameterId?: string
+  parameterDisplayName?: string
+}
+export type ChatComposerMessagePart =
+  | { type: 'text'; text: string }
+  | ({ type: 'skill-invocation' } & SubmittedSkillInvocation)
 export type ChatToolApproval = { messageId: number; toolCallId: string; approvalId: string; approved: boolean }
 
 export type UIChatMessage = {
@@ -39,6 +67,15 @@ export type UIChatMessage = {
 
 export type UIMessageStreamEvent = Record<string, unknown> & {
   type: string
+}
+
+export type ChatStreamStatus = {
+  phase: 'thinking' | 'skill' | 'answer'
+  state: 'streaming' | 'complete' | 'error'
+  label: string
+  detail?: string
+  skillName?: string
+  skillDisplayName?: string
 }
 
 export async function listChatSessions(): Promise<ChatSession[]> {
@@ -75,6 +112,43 @@ export async function listChatSkills(): Promise<ChatSkill[]> {
 
 export async function listChatDrafts(): Promise<ChatDraft[]> {
   return apiFetch<ChatDraft[]>('/write/drafts')
+}
+
+export async function listPipelineParameterOptions(
+  kind: ChatSkillParameterKind,
+  query = '',
+): Promise<{ options: PipelineParameterOption[] }> {
+  const params = new URLSearchParams({ kind, query })
+  const response = await fetch(`/api/chat/pipeline-options?${params.toString()}`, { cache: 'no-store' })
+  if (!response.ok) {
+    let detail = ''
+    try { detail = (await response.json() as { detail?: string }).detail ?? '' } catch { /* ignore */ }
+    throw new Error(detail || `Pipeline parameter request failed (${response.status})`)
+  }
+  return response.json() as Promise<{ options: PipelineParameterOption[] }>
+}
+
+export async function createChatPipeline(
+  sessionId: number,
+  input: {
+    clientMessageId: string
+    objective: string
+    title: string
+    invocations: SubmittedSkillInvocation[]
+    messageParts: ChatComposerMessagePart[]
+  },
+) {
+  const response = await fetch(`/api/chat/sessions/${sessionId}/pipelines`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  })
+  if (!response.ok) {
+    let detail = ''
+    try { detail = (await response.json() as { detail?: string }).detail ?? '' } catch { /* ignore */ }
+    throw new Error(detail || `Pipeline creation failed (${response.status})`)
+  }
+  return response.json() as Promise<{ job: import('./jobs').ContentJob; user_message_id: number; assistant_message_id: number }>
 }
 
 export function toUIChatMessages(messages: ChatMessage[]): UIChatMessage[] {
@@ -142,6 +216,8 @@ export async function streamChatReply({
   messages,
   skillName,
   draftId,
+  skillInvocation,
+  messageParts,
   approval,
   signal,
   onEvent,
@@ -150,6 +226,8 @@ export async function streamChatReply({
   messages: UIChatMessage[]
   skillName?: string
   draftId?: number
+  skillInvocation?: SubmittedSkillInvocation
+  messageParts?: ChatComposerMessagePart[]
   approval?: ChatToolApproval
   signal?: AbortSignal
   onEvent: (event: UIMessageStreamEvent) => void
@@ -157,7 +235,15 @@ export async function streamChatReply({
   const response = await fetch('/api/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ sessionId, messages, skillName, draftId, approval }),
+    body: JSON.stringify({
+      sessionId,
+      messages,
+      skillName,
+      draftId,
+      skillInvocation,
+      messageParts,
+      approval,
+    }),
     signal,
   })
   if (!response.ok) {

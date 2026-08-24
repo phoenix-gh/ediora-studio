@@ -3,6 +3,8 @@ import { Geist, Geist_Mono } from 'next/font/google'
 import './globals.css'
 import { Sidebar } from '@/components/features/Sidebar'
 import { AppShell } from '@/components/layout/AppShell'
+import { ChatWorkspaceProvider } from '@/components/features/chat/ChatWorkspaceProvider'
+import { GlobalChatWidget } from '@/components/features/chat/GlobalChatWidget'
 import { DeveloperModeProvider } from '@/components/providers/DeveloperModeProvider'
 import { ThemeProvider } from '@/components/providers/ThemeProvider'
 import { Toaster } from '@/components/ui/sonner'
@@ -35,8 +37,11 @@ export default function RootLayout({
       <body className="min-h-full bg-background text-foreground">
         <DeveloperModeProvider>
           <ThemeProvider>
-            <AppShell sidebar={<Sidebar />}>{children}</AppShell>
-            <Toaster position="bottom-right" />
+            <ChatWorkspaceProvider>
+              <AppShell sidebar={<Sidebar />}>{children}</AppShell>
+              <GlobalChatWidget />
+              <Toaster position="bottom-right" />
+            </ChatWorkspaceProvider>
           </ThemeProvider>
         </DeveloperModeProvider>
       </body>

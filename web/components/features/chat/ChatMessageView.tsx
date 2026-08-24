@@ -1,0 +1,371 @@
+'use client'
+
+import { useEffect, useRef, useState } from 'react'
+import { ChevronDown, Loader2, Wrench } from 'lucide-react'
+
+import { ChatMarkdown } from '@/components/features/chat/ChatMarkdown'
+import { ChatPipelineCard } from '@/components/features/chat/ChatPipelineCard'
+import { usePipelineJob } from '@/components/features/chat/usePipelineJob'
+import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { getJob, imageUrlsForJob, type ContentJob, type JobStatus } from '@/lib/api/jobs'
+import {
+  chatToolName,
+  chatToolStatus,
+  generatedImageUrls,
+  imageGenerationSummary,
+  isChatToolPart,
+  legacyImageJobId,
+} from '@/app/chat/chat-tool-parts'
+import { cn } from '@/lib/utils'
+
+import type { ChatPart, ChatStatusPart, DisplayMessage, ToolEventPart } from './chat-workspace-types'
+
+const toolLabels: Record<string, string> = {
+  searchInformationSources: '检索信息源',
+  readInformationSource: '读取信息源',
+  search_creative_assets: '搜索创作资产',
+  get_creative_asset: '读取创作资产',
+  generateImage: '生成图片',
+}
+
+export type ChatApprovalHandler = (
+  messageId: number,
+  toolCallId: string,
+  approvalId: string,
+  approved: boolean,
+) => void
+
+function displayTime(value: string) {
+  return new Intl.DateTimeFormat('zh-CN', {
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(value))
+}
+
+function activitySummary(parts: ToolEventPart[]) {
+  const active = parts.find(part => part.state === 'running' || part.state === 'input-available')
+  if (active) return '正在调用工具：' + (toolLabels[chatToolName(active)] ?? chatToolName(active))
+  const searches = parts.filter(part => chatToolName(part) === 'searchInformationSources').length
+  const reads = parts.filter(part => chatToolName(part) === 'readInformationSource').length
+  const images = imageGenerationSummary(parts)
+  if (searches && reads) return '已检索本地资料，并阅读 ' + reads + ' 条相关内容'
+  if (searches) return '已检索本地资料'
+  if (reads) return '已阅读 ' + reads + ' 条资料'
+  if (images) return images
+  return '已调用 ' + parts.length + ' 项工具'
+}
+
+function ChatStatusBlock({ parts }: { parts: ChatStatusPart[] }) {
+  const active = parts.some(part => part.state === 'streaming')
+  const current = [...parts].reverse().find(part => part.state === 'streaming') ?? parts.at(-1)
+  if (!current) return null
+
+  return (
+    <details
+      open={active}
+      className="rounded-lg bg-muted/50 px-3 py-2 text-xs text-foreground-subtle"
+    >
+      <summary className="flex cursor-pointer list-none items-center gap-2 font-medium [&::-webkit-details-marker]:hidden">
+        {active && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+        <span>{current.label}</span>
+        <ChevronDown className="ml-auto h-3.5 w-3.5 transition-transform [[open]_&]:rotate-180" />
+      </summary>
+      <ul className="mt-2 space-y-1 leading-5">
+        {parts.map(part => (
+          <li key={part.id} className="flex flex-wrap items-baseline gap-x-2">
+            <span>{part.detail ?? part.label}</span>
+          </li>
+        ))}
+      </ul>
+    </details>
+  )
+}
+
+function GeneratedImagePreview({ urls }: { urls: string[] }) {
+  const [selectedImage, setSelectedImage] = useState<string | null>(null)
+  if (urls.length === 0) return null
+
+  return <>
+    <div className="mt-3 grid gap-2 sm:grid-cols-2">
+      {urls.map(url => (
+        <button
+          type="button"
+          onClick={() => setSelectedImage(url)}
+          key={url}
+          className="block overflow-hidden rounded-lg border border-indigo-100 bg-surface text-left dark:border-indigo-900"
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={url} alt="AI 生成图片" className="aspect-video w-full object-cover" />
+        </button>
+      ))}
+    </div>
+    <Dialog open={selectedImage !== null} onOpenChange={open => !open && setSelectedImage(null)}>
+      <DialogContent className="max-w-5xl p-3">
+        <DialogHeader className="sr-only">
+          <DialogTitle>AI 生成图片预览</DialogTitle>
+          <DialogDescription>点击遮罩或关闭按钮返回聊天。</DialogDescription>
+        </DialogHeader>
+        {selectedImage && (
+          <>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={selectedImage} alt="AI 生成图片预览" className="max-h-[80vh] w-full object-contain" />
+          </>
+        )}
+      </DialogContent>
+    </Dialog>
+  </>
+}
+
+function ImageJobPreview({ jobId }: { jobId: number }) {
+  const [status, setStatus] = useState<JobStatus | 'loading'>('loading')
+  const [urls, setUrls] = useState<string[]>([])
+
+  useEffect(() => {
+    let cancelled = false
+    const refresh = async () => {
+      try {
+        const job = await getJob(jobId)
+        if (cancelled) return
+        setStatus(job.status)
+        setUrls(imageUrlsForJob(job))
+        if (job.status === 'succeeded' || job.status === 'failed' || job.status === 'cancelled') {
+          window.clearInterval(timer)
+        }
+      } catch {
+        if (!cancelled) setStatus('failed')
+      }
+    }
+
+    const timer = window.setInterval(() => void refresh(), 2_000)
+    void refresh()
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [jobId])
+
+  if (urls.length > 0) return <GeneratedImagePreview urls={urls} />
+  if (status === 'failed' || status === 'cancelled') {
+    return <p className="mt-2 text-xs text-red-600">图片生成失败</p>
+  }
+  return <p className="mt-2 text-xs text-indigo-600">图片生成中…</p>
+}
+
+function ToolActivityGroup({
+  parts,
+  onApproval,
+}: {
+  parts: ToolEventPart[]
+  onApproval?: (toolCallId: string, approvalId: string, approved: boolean) => void
+}) {
+  const imageUrls = [...new Set(parts.flatMap(generatedImageUrls))]
+  const imageJobIds = [...new Set(parts.map(legacyImageJobId).filter((jobId): jobId is number => jobId !== null))]
+  const hasPendingApproval = parts.some(part => part.state === 'approval-requested' && part.toolCallId && part.approval?.id)
+  const hasActiveTool = parts.some(part => part.state === 'running' || part.state === 'input-available')
+
+  return (
+    <div>
+      <details
+        open={hasPendingApproval || hasActiveTool}
+        className="rounded-lg bg-indigo-50/60 px-3 py-2 text-xs text-indigo-950 dark:bg-indigo-950/30 dark:text-indigo-100"
+      >
+        <summary className="flex cursor-pointer list-none items-center gap-2 font-medium [&::-webkit-details-marker]:hidden">
+          <Wrench className="h-3.5 w-3.5 text-indigo-500" />
+          <span>{activitySummary(parts)}</span>
+          <ChevronDown className="ml-auto h-3.5 w-3.5 transition-transform [[open]_&]:rotate-180" />
+        </summary>
+        <ul className="mt-2 space-y-1 text-indigo-700 dark:text-indigo-200">
+          {parts.map((part, index) => {
+            const name = chatToolName(part)
+            const label = toolLabels[name] ?? name
+            const pending = part.state === 'approval-requested' && part.toolCallId && part.approval?.id
+            const status = pending ? '等待你确认' : chatToolStatus(part)
+            return (
+              <li
+                key={part.toolCallId ?? part.type + '-' + index}
+                className="flex flex-wrap items-center justify-between gap-3"
+              >
+                <span>{label}</span>
+                {pending && onApproval ? (
+                  <span className="flex items-center gap-1">
+                    <Button
+                      type="button"
+                      size="xs"
+                      onClick={() => onApproval(part.toolCallId!, part.approval!.id!, true)}
+                    >
+                      批准
+                    </Button>
+                    <Button
+                      type="button"
+                      size="xs"
+                      variant="outline"
+                      onClick={() => onApproval(part.toolCallId!, part.approval!.id!, false)}
+                    >
+                      拒绝
+                    </Button>
+                  </span>
+                ) : (
+                  <span className="text-indigo-500">{status}</span>
+                )}
+              </li>
+            )
+          })}
+        </ul>
+      </details>
+      {imageUrls.length > 0 ? <GeneratedImagePreview urls={imageUrls} /> : null}
+      {imageJobIds.map(jobId => <ImageJobPreview key={jobId} jobId={jobId} />)}
+    </div>
+  )
+}
+
+function pipelineJobId(part: ChatPart) {
+  if (part.type !== 'skill-pipeline-ref' && part.type !== 'pipeline-ref') return null
+  const value = part.jobId ?? part.job_id ?? part.pipelineJobId ?? part.pipeline_job_id
+  const id = typeof value === 'number'
+    ? value
+    : typeof value === 'string' && /^\d+$/.test(value)
+      ? Number(value)
+      : null
+  return id && id > 0 ? id : null
+}
+
+function isSkillInvocationPart(part: ChatPart) {
+  return part.type === 'skill-invocation'
+}
+
+function ReasoningBlock({ part }: { part: ChatPart }) {
+  const streaming = part.state === 'streaming'
+  const content = String(part.text ?? '')
+  if (!content) return null
+  return (
+    <details
+      open={streaming}
+      className="rounded-lg bg-muted/50 px-3 py-2 text-xs text-foreground-subtle"
+    >
+      <summary className="flex cursor-pointer list-none items-center gap-2 font-medium [&::-webkit-details-marker]:hidden">
+        <span>{streaming ? '思考中' : '思考过程'}</span>
+        <ChevronDown className="ml-auto h-3.5 w-3.5 transition-transform [[open]_&]:rotate-180" />
+      </summary>
+      <div className="mt-2 whitespace-pre-wrap leading-5">{content}</div>
+    </details>
+  )
+}
+
+function skillInvocationLabel(part: ChatPart) {
+  const displayName = String(part.displayName ?? part.skillDisplayName ?? part.skillName ?? 'Skill')
+  const parameterDisplayName = part.parameterDisplayName
+  return parameterDisplayName
+    ? `@${displayName}:${String(parameterDisplayName)}`
+    : `@${displayName}`
+}
+
+function PipelineJobMessage({ jobId, onTerminal }: { jobId: number; onTerminal?: () => void }) {
+  const pipeline = usePipelineJob(jobId)
+  const lastStatus = useRef<ContentJob['status'] | null>(null)
+
+  useEffect(() => {
+    const status = pipeline.job?.status
+    if (status && ['succeeded', 'failed', 'cancelled', 'superseded'].includes(status) && lastStatus.current !== status) {
+      onTerminal?.()
+    }
+    if (status) lastStatus.current = status
+  }, [onTerminal, pipeline.job?.status])
+
+  if (pipeline.loading && !pipeline.job) {
+    return <p className="rounded-lg bg-indigo-50/60 px-3 py-2 text-xs text-indigo-700 dark:bg-indigo-950/30 dark:text-indigo-200">正在恢复 Pipeline 状态…</p>
+  }
+  if (!pipeline.job) {
+    return <p className="rounded-lg bg-red-50/70 px-3 py-2 text-xs text-red-700 dark:bg-red-950/30 dark:text-red-200">{pipeline.error || 'Pipeline 状态暂时不可用'} <button type="button" className="ml-1 underline underline-offset-2" onClick={() => void pipeline.refresh()}>重试</button></p>
+  }
+  return <ChatPipelineCard initialJob={pipeline.job} onJobChange={nextJob => pipeline.setJob(nextJob)} onTerminal={onTerminal} />
+}
+
+export function ChatMessageView({
+  message,
+  onApproval,
+  onPipelineTerminal,
+}: {
+  message: DisplayMessage
+  onApproval?: ChatApprovalHandler
+  onPipelineTerminal?: () => void
+}) {
+  const isUser = message.role === 'user'
+  const textParts = message.parts.filter(part => part.type === 'text')
+  const reasoningParts = message.parts.filter(part => part.type === 'reasoning')
+  const statusParts = message.parts.filter(part => part.type === 'chat-status') as ChatStatusPart[]
+  const userContentParts = message.parts.filter(part => part.type === 'text' || isSkillInvocationPart(part))
+  const toolParts = message.parts.filter(isChatToolPart) as ToolEventPart[]
+  const pipelineId = message.parts.map(pipelineJobId).find((id): id is number => id !== null)
+  const fallbackText = textParts.length === 0 && message.text ? message.text : ''
+  const persistedMessageId = typeof message.id === 'number' ? message.id : undefined
+
+  if (message.role === 'tool') return null
+
+  return (
+    <article className={cn('flex', isUser && 'justify-end')}>
+      <div className={isUser ? 'min-w-0 max-w-3xl space-y-2' : 'w-full min-w-0 space-y-2'}>
+        {statusParts.length > 0 && (
+          <ChatStatusBlock
+            parts={reasoningParts.length > 0
+              ? statusParts.filter(part => part.phase === 'skill')
+              : statusParts}
+          />
+        )}
+        {!isUser && reasoningParts.map((part, index) => (
+          <ReasoningBlock key={String(part.id ?? index)} part={part} />
+        ))}
+        {((isUser ? userContentParts.length : textParts.length) > 0 || fallbackText) && (
+          <div
+            className={cn(
+              'break-words rounded-2xl px-3 py-2 text-sm leading-6',
+              isUser && 'whitespace-pre-wrap',
+              isUser ? 'rounded-tr-sm bg-primary text-primary-foreground' : 'text-foreground',
+            )}
+          >
+            {isUser
+              ? (userContentParts.length > 0
+                ? userContentParts.map((part, index) => part.type === 'text'
+                  ? <span key={String(message.id) + '-text-' + index}>{String(part.text ?? '')}</span>
+                  : (
+                    <span
+                      key={String(part.invocationId ?? message.id) + '-skill-' + index}
+                      data-skill-token="true"
+                      className="mx-0.5 inline-flex max-w-full items-center rounded-md bg-background/20 px-1.5 py-0.5 font-medium text-primary-foreground ring-1 ring-primary-foreground/30"
+                    >
+                      {skillInvocationLabel(part)}
+                    </span>
+                  ))
+                : fallbackText)
+              : (textParts.length > 0
+                ? textParts.map((part, index) => (
+                  <ChatMarkdown
+                    key={String(message.id) + '-text-' + index}
+                    content={String(part.text ?? '')}
+                  />
+                ))
+                : <ChatMarkdown content={fallbackText} />)}
+          </div>
+        )}
+        {toolParts.length > 0 && (
+          <ToolActivityGroup
+            parts={toolParts}
+            onApproval={persistedMessageId
+              ? (toolCallId, approvalId, approved) => onApproval?.(persistedMessageId, toolCallId, approvalId, approved)
+              : undefined}
+          />
+        )}
+        {pipelineId !== undefined && <PipelineJobMessage jobId={pipelineId} onTerminal={onPipelineTerminal} />}
+        <time className={cn('block px-1 text-[11px] text-foreground-subtle', isUser && 'text-right')}>
+          {displayTime(message.created_at)}
+        </time>
+      </div>
+    </article>
+  )
+}

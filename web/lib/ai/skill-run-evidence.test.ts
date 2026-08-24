@@ -23,6 +23,21 @@ function run() {
   }), 'automatic')
 }
 
+function duplicateToolRun() {
+  return createSkillRun('Alpha', sanitizeSkillRunPlan({
+    goal: '完成请求',
+    steps: [
+      { id: 'first-search', instruction: '第一次检索', requiredReferences: [], requiredTools: ['search_assets'] },
+      { id: 'second-search', instruction: '第二次检索', requiredReferences: [], requiredTools: ['search_assets'] },
+    ],
+    outputRequirements: [],
+    verificationCriteria: [],
+  }, {
+    referencePaths: [],
+    toolNames: ['search_assets'],
+  }), 'automatic')
+}
+
 describe('SkillRun evidence ledger', () => {
   it('completes a dependency step only after reference and successful tool evidence exist', () => {
     const withReference = applyReferenceEvidence(run(), ['references/rules.md'])
@@ -37,7 +52,7 @@ describe('SkillRun evidence ledger', () => {
     }])
 
     expect(updated.toolEvidence).toEqual([
-      { toolName: 'search_assets', toolCallId: 'call-1', state: 'succeeded' },
+      { stepId: 'research', toolName: 'search_assets', toolCallId: 'call-1', state: 'succeeded' },
     ])
     expect(updated.steps[0]).toMatchObject({
       status: 'completed',
@@ -64,11 +79,43 @@ describe('SkillRun evidence ledger', () => {
     ])
 
     expect(updated.toolEvidence).toEqual([
-      { toolName: 'search_assets', toolCallId: 'failed', state: 'failed' },
-      { toolName: 'search_assets', toolCallId: 'pending', state: 'approval-pending' },
+      { stepId: 'research', toolName: 'search_assets', toolCallId: 'failed', state: 'failed' },
+      { stepId: 'research', toolName: 'search_assets', toolCallId: 'pending', state: 'approval-pending' },
     ])
     expect(JSON.stringify(updated)).not.toContain('private output')
     expect(JSON.stringify(updated)).not.toContain('secret')
+  })
+
+  it('keeps repeated tool requirements attached to separate plan steps', () => {
+    const first = applyToolEvidence(duplicateToolRun(), [{
+      type: 'dynamic-tool',
+      toolName: 'search_assets',
+      state: 'output-available',
+      toolCallId: 'first-call',
+      output: {},
+    }])
+
+    expect(first.toolEvidence).toEqual([{
+      stepId: 'first-search',
+      toolName: 'search_assets',
+      toolCallId: 'first-call',
+      state: 'succeeded',
+    }])
+    expect(first.steps.map(step => step.status)).toEqual(['completed', 'pending'])
+
+    const second = applyToolEvidence(first, [{
+      type: 'dynamic-tool',
+      toolName: 'search_assets',
+      state: 'output-available',
+      toolCallId: 'second-call',
+      output: {},
+    }])
+
+    expect(second.toolEvidence).toEqual([
+      { stepId: 'first-search', toolName: 'search_assets', toolCallId: 'first-call', state: 'succeeded' },
+      { stepId: 'second-search', toolName: 'search_assets', toolCallId: 'second-call', state: 'succeeded' },
+    ])
+    expect(second.steps.map(step => step.status)).toEqual(['completed', 'completed'])
   })
 
   it('accepts only listed required reference evidence', () => {

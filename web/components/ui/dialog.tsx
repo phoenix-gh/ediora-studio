@@ -49,15 +49,17 @@ function DialogContent({
   className,
   children,
   showCloseButton = true,
+  showOverlay = true,
   size = "sm",
   ...props
 }: DialogPrimitive.Popup.Props & {
   showCloseButton?: boolean
+  showOverlay?: boolean
   size?: keyof typeof dialogSizeClass
 }) {
   return (
     <DialogPortal>
-      <DialogOverlay />
+      {showOverlay && <DialogOverlay />}
       <DialogPrimitive.Popup
         data-slot="dialog-content"
         data-size={size}

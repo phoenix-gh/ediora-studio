@@ -50,6 +50,31 @@ def test_worker_executes_brief_then_draft(session_factory, monkeypatch):
     asyncio.new_event_loop().run_until_complete(run())
 
 
+def test_worker_dispatches_skill_pipeline_to_pipeline_runner(session_factory, monkeypatch):
+    from content_jobs import create_job
+    import job_worker
+
+    calls: list[tuple[int, object]] = []
+
+    async def fake_pipeline_runner(job_id, *, session_factory):
+        calls.append((job_id, session_factory))
+
+    monkeypatch.setattr(job_worker, "run_skill_pipeline_job", fake_pipeline_runner)
+
+    async def run():
+        async with session_factory() as session:
+            job = await create_job(
+                session,
+                flow="skill_pipeline",
+                title="Pipeline",
+                input_data={},
+            )
+            await job_worker.run_job(job.id, session_factory=session_factory)
+        assert calls == [(job.id, session_factory)]
+
+    asyncio.new_event_loop().run_until_complete(run())
+
+
 def test_memory_queue_delivers_enqueued_job_once():
     from job_queue import InMemoryJobQueue
 
