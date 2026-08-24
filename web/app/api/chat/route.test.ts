@@ -1,7 +1,13 @@
 import type { ToolSet } from 'ai'
 import { describe, expect, it } from 'vitest'
 
-import { latestClientTurn, modelHistoryCandidates } from '../../../lib/ai/chat-tools'
+import {
+  buildChatTurnContext,
+  formatChatTurnContext,
+  isRetriedUserMessage,
+  latestClientTurn,
+  modelHistoryCandidates,
+} from '../../../lib/ai/chat-tools'
 import {
   chatAgentLogEventFromModelMessage,
   chatAgentLogEventFromToolAudit,
@@ -140,6 +146,34 @@ describe('Chat Agent log event mapping', () => {
 })
 
 describe('global chat model history', () => {
+  it('exposes the immediately preceding assistant deliverable for follow-up turns', () => {
+    const context = buildChatTurnContext([
+      { role: 'user', parts: [{ type: 'text', text: '帮我写一篇文章' }] },
+      { role: 'assistant', parts: [{ type: 'text', text: '这是上一轮生成的文章。' }] },
+      { role: 'user', parts: [{ type: 'text', text: '我只要写一个短帖' }] },
+    ])
+
+    expect(context).toEqual({
+      previousUserRequest: '帮我写一篇文章',
+      previousAssistantResponse: '这是上一轮生成的文章。',
+    })
+    expect(formatChatTurnContext(context)).toContain('这是上一轮生成的文章。')
+    expect(formatChatTurnContext(context)).toContain('将上一轮交付物改写为短帖')
+  })
+
+  it('detects a failed-turn retry without deduplicating an intentional repeated message', () => {
+    const failedTurn = [
+      { id: 1, role: 'user' as const, parts: [{ type: 'text', text: '我只要写一个短帖' }] },
+    ]
+    const incomingParts = [{ type: 'text', text: '我只要写一个短帖' }]
+
+    expect(isRetriedUserMessage(failedTurn, incomingParts)).toBe(true)
+    expect(isRetriedUserMessage([
+      ...failedTurn,
+      { id: 2, role: 'assistant' as const, parts: [{ type: 'text', text: '好的。' }] },
+    ], incomingParts)).toBe(false)
+  })
+
   it('describes available references without embedding their content', async () => {
     const context = await selectedSkillContext('baoyu-cover-image')
 

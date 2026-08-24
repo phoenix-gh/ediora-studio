@@ -4,7 +4,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 
 import {
+  buildChatTurnContext,
   buildChatMessagePersistencePayload,
+  formatChatTurnContext,
+  isRetriedUserMessage,
   latestActivatedSkillName,
   latestClientTurn,
   modelHistoryCandidates,
@@ -632,6 +635,8 @@ export async function POST(request: NextRequest) {
     },
   }))
 
+  let sessionBeforeWrite: PersistedChatSession | undefined
+  let retriedUserMessage = false
   let registry: Awaited<ReturnType<typeof openAgentRuntime>> | undefined
   let writeSharedToolActivity: ((event: AgentToolAudit) => void) | undefined
   let writeSharedModelActivity: ((event: AgentModelMessageEvent) => void) | undefined
@@ -650,6 +655,14 @@ export async function POST(request: NextRequest) {
     canonicalTurnEnded = true
   }
   try {
+    sessionBeforeWrite = latestMessage
+      ? await persistedChatSession(body.sessionId)
+      : undefined
+    retriedUserMessage = Boolean(
+      latestMessage
+      && sessionBeforeWrite
+      && isRetriedUserMessage(sessionBeforeWrite.messages, persistedUserParts),
+    )
     if (body.approval) {
       await persistApproval(body.sessionId, body.approval)
       await persistChatAgentLogEvent(chatSessionEvent(logContext, {
@@ -658,16 +671,25 @@ export async function POST(request: NextRequest) {
         status: body.approval.approved ? 'approved' : 'rejected',
         payload: body.approval,
       }))
-    } else if (latestMessage) {
+    } else if (latestMessage && !retriedUserMessage) {
       await persistMessage(body.sessionId, { role: 'user', parts: persistedUserParts })
       await persistChatAgentLogEvent(chatSessionEvent(logContext, {
         event_type: 'session/user-message',
         phase: 'chat',
         status: 'completed',
-        payload: { parts: persistedUserParts, text: messageText({ parts: persistedUserParts }) },
+        payload: { parts: persistedUserParts, text: messageText({ parts: persistedUserParts }), retried: false },
+      }))
+    } else if (latestMessage && retriedUserMessage) {
+      await persistChatAgentLogEvent(chatSessionEvent(logContext, {
+        event_type: 'session/user-message',
+        phase: 'chat',
+        status: 'completed',
+        payload: { parts: persistedUserParts, text: messageText({ parts: persistedUserParts }), retried: true },
       }))
     }
-    const session = await persistedChatSession(body.sessionId)
+    const session = retriedUserMessage && sessionBeforeWrite
+      ? sessionBeforeWrite
+      : await persistedChatSession(body.sessionId)
     const manualSkillName = resolvedDirectInvocation?.skill_name ?? body.skillName
     const restoredSkillName = manualSkillName ? undefined : latestActivatedSkillName(session.messages)
     const messages = await persistedModelHistory(session, Boolean(body.approval))
@@ -695,6 +717,7 @@ export async function POST(request: NextRequest) {
     const model = textModelForProvider(provider, modelConfig.modelName, modelConfig.protocol)
     const currentRequest = [...messages].reverse().find(message => message.role === 'user')
     const currentRequestText = currentRequest ? messageText(currentRequest) : ''
+    const conversationContext = formatChatTurnContext(buildChatTurnContext(session.messages))
     const genericRuntime = genericSkillRuntimeEnabled()
     const runtime = await openAgentRuntime({
       mcpEndpoint: mcpUrl(apiBase()),
@@ -746,7 +769,7 @@ export async function POST(request: NextRequest) {
 
         try {
           const selected = genericRuntime || manualSkillName
-            ? await runtime.prepare(currentRequestText)
+            ? await runtime.prepare(currentRequestText, conversationContext)
             : runtime.selectedSkill
           await persistChatAgentLogEvent(chatSessionEvent(logContext, {
             event_type: 'skill/selected',
@@ -855,6 +878,7 @@ export async function POST(request: NextRequest) {
             const result = await runtime.run({
               objective: currentRequestText,
               modelMessages,
+              conversationContext,
               selectedContext: body.draftId ? context : '',
               maxSteps: CHAT_MAX_STEPS,
               onStep: checkpoint => {
