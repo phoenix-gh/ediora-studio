@@ -31,6 +31,7 @@ import { ApiError } from '@/lib/api/client'
 import { titleFromFirstMessage } from '@/app/chat/chat-title'
 
 import {
+  approvalResumeMessage,
   applyChatStreamEvent,
   initialChatStatusPart,
   makeLocalMessage,
@@ -448,6 +449,9 @@ export function ChatWorkspaceProvider({ children }: { children: ReactNode }) {
   const respondToApproval = useCallback(async (args: ChatApprovalArgs) => {
     const key = sessionKey(args.sessionId)
     if (state.runningBySession[key]) return
+    const assistantMessage = approvalResumeMessage()
+    updateSession(args.sessionId, messages => [...messages, assistantMessage])
+    inlineStreamSessionIdsRef.current.add(args.sessionId)
     setSessionRunning(args.sessionId, true)
     setSessionError(args.sessionId, null)
     try {
@@ -462,13 +466,17 @@ export function ChatWorkspaceProvider({ children }: { children: ReactNode }) {
           approvalId: args.approvalId,
           approved: args.approved,
         },
-        onEvent: () => undefined,
+        onEvent: event => updateSession(
+          args.sessionId,
+          messages => applyChatStreamEvent(messages, String(assistantMessage.id), event),
+        ),
       })
       await loadSession(args.sessionId, true)
       await refreshSessions()
     } catch (error) {
       setSessionError(args.sessionId, errorMessage(error, '处理工具确认失败'))
     } finally {
+      inlineStreamSessionIdsRef.current.delete(args.sessionId)
       setSessionRunning(args.sessionId, false)
     }
   }, [
@@ -478,6 +486,7 @@ export function ChatWorkspaceProvider({ children }: { children: ReactNode }) {
     setSessionRunning,
     state.composer,
     state.runningBySession,
+    updateSession,
   ])
 
   const retrySession = useCallback(async (sessionId: number) => {

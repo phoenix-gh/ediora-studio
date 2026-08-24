@@ -31,7 +31,11 @@ function dependencies(selection: { skillName?: string; continueRestored?: boolea
         search_assets: tool({ inputSchema: z.object({}), execute: async () => [] }),
         save_draft: tool({ inputSchema: z.object({}), execute: async () => ({ id: 3 }) }),
       } satisfies ToolSet
-      const tools = applyAgentToolPolicy(base, { policy: options.approvalPolicy ?? 'interactive' })
+      const tools = applyAgentToolPolicy(base, {
+        policy: options.approvalPolicy ?? 'interactive',
+        beforeToolExecute: options.beforeToolExecute,
+        onAudit: options.onToolAudit,
+      })
       return {
         tools,
         catalogContext: 'Enabled Skills available for automatic activation:\n- Alpha: Handles alpha work',
@@ -900,6 +904,48 @@ describe('shared Agent runtime', () => {
       selectedSkill: { name: 'Alpha' },
     })
     expect(executionCalls).toBe(2)
+  })
+
+  it('counts a replayed approved side effect as Skill evidence without executing it twice', async () => {
+    const deps = dependencies()
+    let saveCalls = 0
+    const plan = {
+      goal: '完成并保存文章',
+      steps: [{
+        id: 'save', instruction: '保存最终文章', requiredReferences: [], requiredTools: ['save_draft'],
+      }],
+      outputRequirements: ['文章已保存'],
+      verificationCriteria: ['保存工具返回真实 ID'],
+    }
+    deps.generate = vi.fn(async (input: Record<string, unknown>) => {
+      const prompt = typeof input.prompt === 'string' ? input.prompt : ''
+      if (prompt.startsWith('Create a bounded execution plan')) return { output: plan }
+      if (prompt.startsWith('Return valid JSON only in exactly this shape')) {
+        return { output: { passed: true, violations: [] } }
+      }
+
+      const saveDraft = (input.tools as Record<string, Executable>).save_draft
+      await saveDraft.execute({}, { toolCallId: 'save-resumed' })
+      saveCalls += 1
+      return {
+        text: '文章已经保存', finishReason: 'stop', steps: [{}],
+        toolCalls: [], toolResults: [], content: [], responseMessages: [],
+      }
+    }) as unknown as AgentRuntimeDependencies['generate']
+
+    const runtime = await openAgentRuntime({
+      ...openOptions('automatic', deps), skillMode: 'manual', skillName: 'Alpha',
+    })
+    const result = await runtime.run({
+      objective: '完成并保存文章', modelMessages: [], maxSteps: 5,
+    })
+
+    expect(saveCalls).toBe(1)
+    expect(result.text).toBe('文章已经保存')
+    expect(result.skillRun?.steps).toEqual([
+      expect.objectContaining({ id: 'save', status: 'completed' }),
+    ])
+    await runtime.close()
   })
 
   it('does not add stop recovery turns to an ordinary manually selected Skill run', async () => {

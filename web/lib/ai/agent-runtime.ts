@@ -210,6 +210,7 @@ export async function openAgentRuntime(
     declaration?: AgentGoalCompletionDeclaration
     verify?: AgentRunRequest['verifyGoalCompletion']
   } | undefined
+  const observedToolAudits: AgentToolAudit[] = []
 
   const emitSessionEvent = async (
     type: AgentSessionEventType,
@@ -231,6 +232,7 @@ export async function openAgentRuntime(
   }
 
   const handleToolAudit = async (event: AgentToolAudit) => {
+    if (event.status !== 'started') observedToolAudits.push({ ...event })
     if (
       event.toolName === COMPLETE_GOAL_TOOL_NAME
       && event.status === 'succeeded'
@@ -515,6 +517,7 @@ export async function openAgentRuntime(
       throw new Error('This Agent runtime is already executing a durable goal')
     }
     if (goalRun) activeGoalRun = goalRun
+    observedToolAudits.length = 0
     try {
     const active = await prepare(request.objective)
     const alwaysAvailableTools = [...new Set(toolPolicy.alwaysAvailableToolNames ?? [])]
@@ -555,6 +558,7 @@ export async function openAgentRuntime(
       const parts: Record<string, unknown>[] = []
       const toolResults: unknown[] = []
       do {
+        const auditOffset = observedToolAudits.length
         generated = await generateWithMessageLog({
           model: options.model,
           instructions,
@@ -576,7 +580,23 @@ export async function openAgentRuntime(
           toolResults: currentToolResults,
           content: generated.content as Array<Record<string, unknown>>,
         })
-        parts.push(...generatedParts)
+        const generatedToolCallIds = new Set(generatedParts.map(part => (
+          typeof part.toolCallId === 'string' ? part.toolCallId : undefined
+        )).filter((value): value is string => Boolean(value)))
+        const replayedToolParts = observedToolAudits
+          .slice(auditOffset)
+          .filter(event => event.status !== 'started')
+          .filter(event => !generatedToolCallIds.has(event.toolCallId))
+          .map(event => ({
+            type: 'dynamic-tool',
+            toolName: event.toolName,
+            toolCallId: event.toolCallId,
+            state: event.status === 'succeeded' ? 'output-available' : 'output-error',
+            ...(event.inputSummary === undefined ? {} : { input: event.inputSummary }),
+            ...(event.output === undefined ? {} : { output: event.output }),
+            ...(event.error ? { error: event.error } : {}),
+          }))
+        parts.push(...generatedParts, ...replayedToolParts)
         toolResults.push(...currentToolResults)
         await request.onStep?.({ phase: 'execute', parts: generatedParts })
         const generatedSteps = Array.isArray(generated.steps) ? generated.steps.length : 1

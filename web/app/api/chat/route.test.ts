@@ -9,6 +9,7 @@ import {
   chatAgentSessionEventFromToolResult,
   chatTrajectoryChunk,
   chatStatusForSkill,
+  chatStatusForAgentStep,
   agentRunUIResponse,
   directSkillParameterContext,
   executionToolsForSelection,
@@ -80,6 +81,20 @@ describe('Chat Agent log event mapping', () => {
       detail: 'humanize-writing',
       skillName: 'humanize-writing',
       skillDisplayName: '去 AI 味',
+    })
+  })
+
+  it('describes shared Agent Skill phases for the live Chat stream', () => {
+    expect(chatStatusForAgentStep(
+      { phase: 'validate' },
+      { name: 'wechat-article-writing', displayName: '公众号文章写作' },
+    )).toEqual({
+      phase: 'skill',
+      state: 'streaming',
+      label: '正在校验 Skill 输出',
+      detail: '正在检查文章是否满足工作流要求',
+      skillName: 'wechat-article-writing',
+      skillDisplayName: '公众号文章写作',
     })
   })
 
