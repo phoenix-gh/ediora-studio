@@ -1,6 +1,6 @@
 'use client'
 
-import type { ClipboardEvent as ReactClipboardEvent } from 'react'
+import type { ClipboardEvent as ReactClipboardEvent, CSSProperties } from 'react'
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import type { EditorView } from '@milkdown/kit/prose/view'
 import { toast } from 'sonner'
@@ -21,6 +21,12 @@ import {
   stripImageImportMarkers,
 } from '@/app/assets/asset-paste'
 import type { ClipboardRemoteImage } from '@/app/assets/asset-paste'
+import {
+  type MarkdownEditorContentAlign,
+  type MarkdownEditorContentWidth,
+  type MarkdownEditorMode,
+  useMarkdownEditorPreferences,
+} from '@/components/markdown-editor-preferences'
 
 type CrepeInstance = InstanceType<typeof import('@milkdown/crepe').Crepe>
 type InsertAction = typeof import('@milkdown/kit/utils').insert
@@ -34,20 +40,30 @@ type MarkdownEditorProps = {
   value: string
   onChange: (markdown: string) => void
   documentKey: string | number
-  mode?: MarkdownEditorMode
-  onModeChange?: (mode: MarkdownEditorMode) => void
 }
 
-export type MarkdownEditorMode = 'visual' | 'source'
+const CONTENT_WIDTHS = [30, 50, 100] as const satisfies readonly MarkdownEditorContentWidth[]
+const CONTENT_ALIGNMENTS = [
+  ['left', '靠左'],
+  ['center', '居中'],
+  ['right', '靠右'],
+] as const satisfies readonly (readonly [MarkdownEditorContentAlign, string])[]
+
+type MarkdownEditorStyle = CSSProperties & {
+  '--markdown-content-width': string
+}
+
+function preferenceButtonClass(selected: boolean) {
+  return `rounded-[5px] px-2 py-1 text-xs font-medium transition-[background-color,color,box-shadow] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 ${selected ? 'bg-surface text-foreground shadow-sm' : 'text-muted-foreground hover:bg-surface/60 hover:text-foreground'}`
+}
 
 export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(function MarkdownEditor({
   value,
   onChange,
   documentKey,
-  mode: controlledMode,
-  onModeChange,
 }, ref) {
-  const initialMode = controlledMode ?? 'visual'
+  const [preferences, setPreferences] = useMarkdownEditorPreferences()
+  const mode = preferences.mode
   const rootRef = useRef<HTMLDivElement>(null)
   const crepeRef = useRef<CrepeInstance | null>(null)
   const insertRef = useRef<InsertAction | null>(null)
@@ -59,7 +75,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
   const latestMarkdownRef = useRef(value)
   const sourceValueRef = useRef(value)
   const previousDocumentKeyRef = useRef(documentKey)
-  const modeRef = useRef<MarkdownEditorMode>(initialMode)
+  const modeRef = useRef<MarkdownEditorMode>(mode)
   const sessionRef = useRef(0)
   const documentChangeCountRef = useRef(0)
   const initializedDocumentChangeCountRef = useRef<number | null>(null)
@@ -69,9 +85,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
   const retryRef = useRef<(id: string) => void>(() => undefined)
   const [loadAttempt, setLoadAttempt] = useState(0)
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
-  const [uncontrolledMode, setUncontrolledMode] = useState<MarkdownEditorMode>(initialMode)
   const [sourceValue, setSourceValue] = useState(value)
-  const mode = controlledMode ?? uncontrolledMode
 
   useEffect(() => {
     onChangeRef.current = onChange
@@ -96,9 +110,8 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
 
   const setEditorMode = useCallback((nextMode: MarkdownEditorMode) => {
     modeRef.current = nextMode
-    if (controlledMode === undefined) setUncontrolledMode(nextMode)
-    onModeChange?.(nextMode)
-  }, [controlledMode, onModeChange])
+    setPreferences(current => ({ ...current, mode: nextMode }))
+  }, [setPreferences])
 
   const publishMarkdown = useCallback((markdown: string) => {
     const cleaned = stripImageImportMarkers(markdown)
@@ -375,7 +388,11 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
   }, [insertMarkdown, registerAndImport, status])
 
   return (
-    <div className="asset-visual-markdown-editor relative flex h-full min-h-[420px] flex-col overflow-hidden bg-surface">
+    <div
+      className="asset-visual-markdown-editor relative flex h-full min-h-[420px] flex-col overflow-hidden bg-surface"
+      data-content-align={preferences.alignment}
+      style={{ '--markdown-content-width': `${preferences.width}%` } as MarkdownEditorStyle}
+    >
       <div className="relative min-h-0 flex-1 overflow-hidden bg-surface">
         <div
           aria-busy={status === 'loading'}
@@ -390,7 +407,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
         {mode === 'source' ? (
           <textarea
             aria-label="Markdown 源码编辑器"
-            className="h-full min-h-[420px] w-full resize-none overflow-auto rounded-none border-0 bg-surface px-8 py-6 font-mono text-[13px] leading-6 text-foreground outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/40"
+            className="markdown-editor-source block h-full min-h-[420px] resize-none overflow-auto rounded-none border-0 bg-surface px-8 py-6 font-mono text-[13px] leading-6 text-foreground outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/40"
             onChange={event => {
               const next = event.currentTarget.value
               sourceValueRef.current = next
@@ -422,7 +439,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
           </div>
         ) : null}
       </div>
-      <div className="flex min-h-10 shrink-0 items-center justify-start border-t border-border/70 bg-muted/30 px-2 py-1.5">
+      <div className="flex min-h-10 shrink-0 flex-wrap items-center justify-start gap-2 border-t border-border/70 bg-muted/30 px-2 py-1.5">
         <div
           aria-label="Markdown 编辑模式"
           className="inline-flex items-center rounded-md bg-muted p-0.5 ring-1 ring-inset ring-border/70"
@@ -433,7 +450,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
             return (
               <button
                 aria-selected={selected}
-                className={`min-w-12 rounded-[5px] px-2.5 py-1 text-xs font-medium transition-[background-color,color,box-shadow] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 ${selected ? 'bg-surface text-foreground shadow-sm' : 'text-muted-foreground hover:bg-surface/60 hover:text-foreground'}`}
+                className={`min-w-12 ${preferenceButtonClass(selected)}`}
                 key={option}
                 onClick={() => changeMode(option)}
                 role="tab"
@@ -443,6 +460,40 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
               </button>
             )
           })}
+        </div>
+        <span aria-hidden="true" className="h-4 w-px bg-border" />
+        <div className="flex items-center gap-1.5">
+          <span className="text-[11px] text-muted-foreground">宽度</span>
+          <div aria-label="编辑区域宽度" className="inline-flex items-center rounded-md bg-muted p-0.5 ring-1 ring-inset ring-border/70" role="group">
+            {CONTENT_WIDTHS.map(width => (
+              <button
+                aria-pressed={preferences.width === width}
+                className={preferenceButtonClass(preferences.width === width)}
+                key={width}
+                onClick={() => setPreferences(current => ({ ...current, width }))}
+                type="button"
+              >
+                {width}%
+              </button>
+            ))}
+          </div>
+        </div>
+        <span aria-hidden="true" className="h-4 w-px bg-border" />
+        <div className="flex items-center gap-1.5">
+          <span className="text-[11px] text-muted-foreground">对齐</span>
+          <div aria-label="编辑区域对齐" className="inline-flex items-center rounded-md bg-muted p-0.5 ring-1 ring-inset ring-border/70" role="group">
+            {CONTENT_ALIGNMENTS.map(([alignment, label]) => (
+              <button
+                aria-pressed={preferences.alignment === alignment}
+                className={preferenceButtonClass(preferences.alignment === alignment)}
+                key={alignment}
+                onClick={() => setPreferences(current => ({ ...current, alignment }))}
+                type="button"
+              >
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
     </div>

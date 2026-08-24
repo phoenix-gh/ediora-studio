@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import { Trash2 } from 'lucide-react'
 
 import { AsyncState } from '@/components/layout/AsyncState'
@@ -8,7 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { cn } from '@/lib/utils'
 import type { CreativeAsset, CreativeAssetDirectory } from '@/lib/api/assets'
-import { MarkdownEditor, type MarkdownEditorMode } from '@/components/MarkdownEditor'
+import { MarkdownEditor } from '@/components/MarkdownEditor'
 
 const UNCATEGORIZED_DIRECTORY = '__uncategorized__'
 
@@ -39,8 +38,6 @@ type ArticleAssetWorkspaceProps = {
 }
 
 export function ArticleAssetWorkspace({ assets, directories, selected, isSaving = false, onSelect, onChange, onSave, onDelete }: ArticleAssetWorkspaceProps) {
-  const [editorMode, setEditorMode] = useState<MarkdownEditorMode>('visual')
-
   return (
     <SplitWorkspace
       editorLabel="素材编辑器"
@@ -74,9 +71,7 @@ export function ArticleAssetWorkspace({ assets, directories, selected, isSaving 
           <MarkdownEditor
             documentKey={selected.id}
             key={selected.id}
-            mode={editorMode}
             onChange={content => onChange({ ...selected, content })}
-            onModeChange={setEditorMode}
             value={selected.content}
           />
         </div>

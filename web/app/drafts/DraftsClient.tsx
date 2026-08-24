@@ -22,7 +22,7 @@ import {
 } from '@/lib/api/drafts'
 import { WritingPlan, getWritingPlans, flattenTopicsWithDepth } from '@/lib/api/writing-plans'
 import { illustrateBody, regenerateCover } from '@/lib/api/studio'
-import { MarkdownEditor, type MarkdownEditorHandle, type MarkdownEditorMode } from '@/components/MarkdownEditor'
+import { MarkdownEditor, type MarkdownEditorHandle } from '@/components/MarkdownEditor'
 import { NativeSelect } from '@/components/ui/native-select'
 import { PublishDialog } from './PublishDialog'
 import { DraftAssetsDialog } from '@/components/features/DraftAssetsDialog'
@@ -182,7 +182,6 @@ export function DraftsClient({
   })
   const chatEndRef = useRef<HTMLDivElement>(null)
   const editorRef = useRef<MarkdownEditorHandle>(null)
-  const [editorMode, setEditorMode] = useState<MarkdownEditorMode>('visual')
 
   // Image library state
   const [images, setImages] = useState<DraftImage[]>([])
@@ -1076,11 +1075,9 @@ export function DraftsClient({
             <div className="flex-1 overflow-hidden">
               <MarkdownEditor
                 documentKey={selected.id}
-                mode={editorMode}
                 ref={editorRef}
                 value={editContent}
                 onChange={v => { setEditContent(v); setDirty(true) }}
-                onModeChange={setEditorMode}
               />
             </div>
           </div>
