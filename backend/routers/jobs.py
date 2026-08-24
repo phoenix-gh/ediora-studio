@@ -184,11 +184,9 @@ async def _schedule_payload(db: AsyncSession, job_id: int) -> dict | None:
 
 
 async def _job_payload(db: AsyncSession, job: ContentJob, *, schedule: dict | None = None) -> dict:
-    token_usage = await get_agent_token_usage(db, job_id=job.id)
     if job.flow == "skill_pipeline" and isinstance((job.input_data or {}).get("pipeline"), dict):
-        payload = await pipeline_job_payload(db, job.id)
-        payload["token_usage"] = token_usage
-        return payload
+        return await pipeline_job_payload(db, job.id)
+    token_usage = await get_agent_token_usage(db, job_id=job.id)
     steps = (await db.execute(
         select(ContentJobStep).where(ContentJobStep.job_id == job.id)
         .order_by(ContentJobStep.created_at, ContentJobStep.attempt)

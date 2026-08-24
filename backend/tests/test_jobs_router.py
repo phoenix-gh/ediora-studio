@@ -125,11 +125,38 @@ def test_skill_pipeline_job_requires_worker_auth_and_automatic_enqueue_is_idempo
     assert payload["flow"] == "skill_pipeline"
     assert payload["status"] == "queued"
     assert payload["plan_version"] == 1
+    assert payload["token_usage"] is None
     assert [stage["key"] for stage in payload["pipeline"]["stages"]] == [
         "skill:01:source-research",
         "skill:02:humanize-writing",
     ]
     assert queued == [payload["id"]]
+
+    from database import SessionLocal
+    from models import AgentExecution, AgentLogEvent
+
+    async def seed_usage():
+        async with SessionLocal() as session:
+            execution = AgentExecution(
+                job_id=payload["id"],
+                status="running",
+                objective="Write a sourced article",
+                skill_mode="manual",
+            )
+            session.add(execution)
+            await session.flush()
+            session.add(AgentLogEvent(
+                stream_kind="job",
+                stream_key=f"execution:{execution.id}",
+                execution_id=execution.id,
+                event_type="assistant/message",
+                phase="execute",
+                status="completed",
+                payload_data={"usage": {"inputTokens": 9, "outputTokens": 3}},
+            ))
+            await session.commit()
+
+    asyncio.new_event_loop().run_until_complete(seed_usage())
 
     repeated = client.post(
         "/api/jobs",
@@ -138,6 +165,12 @@ def test_skill_pipeline_job_requires_worker_auth_and_automatic_enqueue_is_idempo
     )
     assert repeated.status_code == 201
     assert repeated.json()["id"] == payload["id"]
+    assert repeated.json()["token_usage"] == {
+        "input_tokens": 9,
+        "output_tokens": 3,
+        "total_tokens": 12,
+        "request_count": 1,
+    }
 
 
 def test_list_jobs_returns_complete_top_level_steps_for_skill_pipeline(client):

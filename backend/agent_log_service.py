@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agent_trajectory import (
@@ -11,7 +11,7 @@ from agent_trajectory import (
 )
 from agent_token_usage import aggregate_token_usage
 from log_redaction import redact_log_value
-from models import AgentLogEvent
+from models import AgentExecution, AgentLogEvent
 
 
 async def append_agent_log_event(
@@ -250,8 +250,13 @@ async def get_agent_token_usage(
     statement = (
         select(AgentLogEvent)
         .where(
-            AgentLogEvent.job_id == job_id,
             AgentLogEvent.event_type.in_(("assistant/message", "llm/response")),
+            or_(
+                AgentLogEvent.job_id == job_id,
+                AgentLogEvent.execution_id.in_(
+                    select(AgentExecution.id).where(AgentExecution.job_id == job_id)
+                ),
+            ),
         )
         .order_by(AgentLogEvent.id.asc())
     )

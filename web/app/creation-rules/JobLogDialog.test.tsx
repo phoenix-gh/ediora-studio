@@ -84,6 +84,7 @@ describe('JobLogDialog', () => {
 
     expect(screen.getAllByRole('tab').map(tab => tab.textContent)).toEqual(['任务概览', '执行时间线', 'Agent 运行轨迹'])
     expect(screen.getByRole('tab', { name: '任务概览' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.queryByTestId('job-token-usage')).not.toBeInTheDocument()
     expect(screen.getByRole('dialog')).toHaveClass(
       'h-[min(720px,calc(100dvh-2rem))]',
       'min-h-[min(520px,calc(100dvh-2rem))]',

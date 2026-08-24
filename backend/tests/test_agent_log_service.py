@@ -177,6 +177,30 @@ def test_get_agent_token_usage_aggregates_a_job_across_execution_streams(log_db)
 
     async def exercise():
         async with log_db() as session:
+            from models import AgentExecution
+
+            execution = AgentExecution(
+                job_id=7,
+                status="running",
+                objective="Write an article",
+                skill_mode="auto",
+            )
+            session.add(execution)
+            await session.flush()
+            await append_agent_session_event(
+                session,
+                stream_kind="job",
+                stream_key=f"execution:{execution.id}",
+                execution_id=execution.id,
+                turn_id=f"execution:{execution.id}:turn:1",
+                event_type="assistant/message",
+                data={
+                    "turn": 1,
+                    "step": 1,
+                    "blocks": [{"kind": "text", "text": "execution-only"}],
+                    "usage": {"inputTokens": 25, "outputTokens": 5},
+                },
+            )
             await append_agent_session_event(
                 session,
                 stream_kind="job",
@@ -220,8 +244,8 @@ def test_get_agent_token_usage_aggregates_a_job_across_execution_streams(log_db)
             return await get_agent_token_usage(session, job_id=7)
 
     assert asyncio.run(exercise()) == {
-        "input_tokens": 140,
-        "output_tokens": 30,
-        "total_tokens": 170,
-        "request_count": 2,
+        "input_tokens": 165,
+        "output_tokens": 35,
+        "total_tokens": 200,
+        "request_count": 3,
     }
