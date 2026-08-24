@@ -488,9 +488,8 @@ export async function openAgentRuntime(
         const decision = await generateWithMessageLog({
           model: options.model,
           prompt,
-          output: Output.json(),
         }, 'skill_selection')
-        return decision.output
+        return decision.output ?? decision.text
       },
     })
     prepared = true
