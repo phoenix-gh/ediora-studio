@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, createRef } from 'react'
+import { act, createRef, useState } from 'react'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -127,7 +127,7 @@ beforeEach(() => {
 })
 
 describe('MarkdownEditor', () => {
-  it('places the visual/source switch below the editor surface', async () => {
+  it('places the visual/source switch below the editor surface on the left', async () => {
     render(<MarkdownEditor documentKey={7} onChange={vi.fn()} value="# 初始标题" />)
 
     await waitFor(() => expect(mocks.create).toHaveBeenCalledTimes(1))
@@ -136,6 +136,51 @@ describe('MarkdownEditor', () => {
     const modeTabs = screen.getByRole('tablist', { name: 'Markdown 编辑模式' })
     expect(editor.compareDocumentPosition(modeTabs) & Node.DOCUMENT_POSITION_FOLLOWING)
       .toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+    expect(modeTabs.parentElement).toHaveClass('justify-start')
+  })
+
+  it('keeps both editor modes flush with the shared frame', async () => {
+    render(<MarkdownEditor documentKey={7} onChange={vi.fn()} value="# 初始标题" />)
+
+    await waitFor(() => expect(mocks.create).toHaveBeenCalledTimes(1))
+
+    const visualEditor = screen.getByRole('textbox', { name: '可视化 Markdown 编辑器' })
+    const modeTabs = screen.getByRole('tablist', { name: 'Markdown 编辑模式' })
+    expect(visualEditor.parentElement).not.toHaveClass('pt-2')
+    expect(modeTabs.parentElement).not.toHaveClass('mt-2', 'pt-2')
+
+    fireEvent.click(screen.getByRole('tab', { name: '源码' }))
+    expect(screen.getByRole('textbox', { name: 'Markdown 源码编辑器' }))
+      .toHaveClass('border-0', 'rounded-none')
+  })
+
+  it('keeps the page mode when switching to another document', async () => {
+    function PageEditor() {
+      const [documentKey, setDocumentKey] = useState(7)
+      const [mode, setMode] = useState<'visual' | 'source'>('visual')
+      return <>
+        <button onClick={() => setDocumentKey(8)} type="button">切换文章</button>
+        <MarkdownEditor
+          documentKey={documentKey}
+          key={documentKey}
+          mode={mode}
+          onChange={vi.fn()}
+          onModeChange={setMode}
+          value={documentKey === 7 ? '# 第一篇' : '# 第二篇'}
+        />
+      </>
+    }
+
+    render(<PageEditor />)
+    await waitFor(() => expect(mocks.create).toHaveBeenCalledTimes(1))
+
+    fireEvent.click(screen.getByRole('tab', { name: '源码' }))
+    fireEvent.click(screen.getByRole('button', { name: '切换文章' }))
+
+    await waitFor(() => expect(mocks.create).toHaveBeenCalledTimes(2))
+    expect(screen.getByRole('tab', { name: '源码' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('textbox', { name: 'Markdown 源码编辑器' }))
+      .toHaveValue('# 第二篇')
   })
 
   it('switches between visual and source modes without losing Markdown', async () => {

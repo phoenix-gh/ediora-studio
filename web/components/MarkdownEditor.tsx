@@ -34,15 +34,20 @@ type MarkdownEditorProps = {
   value: string
   onChange: (markdown: string) => void
   documentKey: string | number
+  mode?: MarkdownEditorMode
+  onModeChange?: (mode: MarkdownEditorMode) => void
 }
 
-type EditorMode = 'visual' | 'source'
+export type MarkdownEditorMode = 'visual' | 'source'
 
 export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(function MarkdownEditor({
   value,
   onChange,
   documentKey,
+  mode: controlledMode,
+  onModeChange,
 }, ref) {
+  const initialMode = controlledMode ?? 'visual'
   const rootRef = useRef<HTMLDivElement>(null)
   const crepeRef = useRef<CrepeInstance | null>(null)
   const insertRef = useRef<InsertAction | null>(null)
@@ -54,7 +59,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
   const latestMarkdownRef = useRef(value)
   const sourceValueRef = useRef(value)
   const previousDocumentKeyRef = useRef(documentKey)
-  const modeRef = useRef<EditorMode>('visual')
+  const modeRef = useRef<MarkdownEditorMode>(initialMode)
   const sessionRef = useRef(0)
   const documentChangeCountRef = useRef(0)
   const initializedDocumentChangeCountRef = useRef<number | null>(null)
@@ -64,12 +69,17 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
   const retryRef = useRef<(id: string) => void>(() => undefined)
   const [loadAttempt, setLoadAttempt] = useState(0)
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
-  const [mode, setMode] = useState<EditorMode>('visual')
+  const [uncontrolledMode, setUncontrolledMode] = useState<MarkdownEditorMode>(initialMode)
   const [sourceValue, setSourceValue] = useState(value)
+  const mode = controlledMode ?? uncontrolledMode
 
   useEffect(() => {
     onChangeRef.current = onChange
   }, [onChange])
+
+  useEffect(() => {
+    modeRef.current = mode
+  }, [mode])
 
   useEffect(() => {
     initialValueRef.current = value
@@ -79,12 +89,16 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
   useEffect(() => {
     if (previousDocumentKeyRef.current === documentKey) return
     previousDocumentKeyRef.current = documentKey
-    modeRef.current = 'visual'
     sourceValueRef.current = value
     latestMarkdownRef.current = value
-    setMode('visual')
     setSourceValue(value)
   }, [documentKey, value])
+
+  const setEditorMode = useCallback((nextMode: MarkdownEditorMode) => {
+    modeRef.current = nextMode
+    if (controlledMode === undefined) setUncontrolledMode(nextMode)
+    onModeChange?.(nextMode)
+  }, [controlledMode, onModeChange])
 
   const publishMarkdown = useCallback((markdown: string) => {
     const cleaned = stripImageImportMarkers(markdown)
@@ -126,7 +140,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
 
   useImperativeHandle(ref, () => ({ insert: insertMarkdown }), [insertMarkdown])
 
-  const changeMode = useCallback((nextMode: EditorMode) => {
+  const changeMode = useCallback((nextMode: MarkdownEditorMode) => {
     if (nextMode === modeRef.current) return
     if (nextMode === 'source') {
       let current = latestMarkdownRef.current
@@ -140,7 +154,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
       modeRef.current = 'source'
       sourceValueRef.current = current
       setSourceValue(current)
-      setMode('source')
+      setEditorMode('source')
       return
     }
 
@@ -151,14 +165,14 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
     const replaceAll = replaceAllRef.current
     if (crepe && replaceAll) {
       crepe.editor.action(replaceAll(current))
-      setMode('visual')
+      setEditorMode('visual')
       return
     }
     initialValueRef.current = current
     setStatus('loading')
     setLoadAttempt(attempt => attempt + 1)
-    setMode('visual')
-  }, [])
+    setEditorMode('visual')
+  }, [setEditorMode])
 
   const runRemoteImport = useCallback(async (
     images: ClipboardRemoteImage[],
@@ -361,12 +375,12 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
   }, [insertMarkdown, registerAndImport, status])
 
   return (
-    <div className="asset-visual-markdown-editor relative flex h-full min-h-[420px] flex-col">
-      <div className="relative min-h-0 flex-1 pt-2">
+    <div className="asset-visual-markdown-editor relative flex h-full min-h-[420px] flex-col overflow-hidden bg-surface">
+      <div className="relative min-h-0 flex-1 overflow-hidden bg-surface">
         <div
           aria-busy={status === 'loading'}
           aria-label="可视化 Markdown 编辑器"
-          className="h-full min-h-[420px] overflow-auto"
+          className="h-full min-h-[420px] overflow-auto bg-surface"
           hidden={mode === 'source'}
           onPasteCapture={handlePaste}
           ref={rootRef}
@@ -376,7 +390,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
         {mode === 'source' ? (
           <textarea
             aria-label="Markdown 源码编辑器"
-            className="h-full min-h-[420px] w-full resize-none overflow-auto rounded-md border border-border bg-background px-4 py-3 font-mono text-sm leading-6 outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+            className="h-full min-h-[420px] w-full resize-none overflow-auto rounded-none border-0 bg-surface px-8 py-6 font-mono text-[13px] leading-6 text-foreground outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/40"
             onChange={event => {
               const next = event.currentTarget.value
               sourceValueRef.current = next
@@ -408,10 +422,10 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
           </div>
         ) : null}
       </div>
-      <div className="mt-2 flex shrink-0 items-center justify-end border-t border-border/60 pt-2">
+      <div className="flex min-h-10 shrink-0 items-center justify-start border-t border-border/70 bg-muted/30 px-2 py-1.5">
         <div
           aria-label="Markdown 编辑模式"
-          className="inline-flex items-center rounded-md border border-border bg-muted/30 p-0.5"
+          className="inline-flex items-center rounded-md bg-muted p-0.5 ring-1 ring-inset ring-border/70"
           role="tablist"
         >
           {(['visual', 'source'] as const).map(option => {
@@ -419,7 +433,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
             return (
               <button
                 aria-selected={selected}
-                className={`rounded px-2.5 py-1 text-xs transition-colors ${selected ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+                className={`min-w-12 rounded-[5px] px-2.5 py-1 text-xs font-medium transition-[background-color,color,box-shadow] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 ${selected ? 'bg-surface text-foreground shadow-sm' : 'text-muted-foreground hover:bg-surface/60 hover:text-foreground'}`}
                 key={option}
                 onClick={() => changeMode(option)}
                 role="tab"
