@@ -522,6 +522,25 @@ async def test_retry_and_rerun_preserve_history_and_supersede_downstream_artifac
     ]
     assert [artifact.status for artifact in artifacts] == ["superseded", "superseded"]
 
+    current_steps = list((await pipeline_db.execute(
+        select(ContentJobStep).where(
+            ContentJobStep.job_id == rerun_job.id,
+            ContentJobStep.status == "queued",
+        )
+    )).scalars().all())
+    for step in current_steps:
+        step.status = "succeeded"
+    rerun_job.status = "succeeded"
+    await pipeline_db.commit()
+
+    second_rerun = await rerun_pipeline_stage(
+        pipeline_db,
+        job_id=rerun_job.id,
+        stage_key=rerun_steps[0].step_key,
+        request_id="rerun-2",
+    )
+    assert second_rerun.status == "queued"
+
 
 @pytest.mark.asyncio
 async def test_worker_stage_transitions_are_epoch_checked_and_completion_is_idempotent(pipeline_db):
