@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { ChevronDown, Wrench } from 'lucide-react'
+import { ChevronDown, Loader2, Wrench } from 'lucide-react'
 
 import { ChatMarkdown } from '@/components/features/chat/ChatMarkdown'
 import { ChatPipelineCard } from '@/components/features/chat/ChatPipelineCard'
@@ -25,11 +25,13 @@ import {
 } from '@/app/chat/chat-tool-parts'
 import { cn } from '@/lib/utils'
 
-import type { ChatPart, DisplayMessage, ToolEventPart } from './chat-workspace-types'
+import type { ChatPart, ChatStatusPart, DisplayMessage, ToolEventPart } from './chat-workspace-types'
 
 const toolLabels: Record<string, string> = {
   searchInformationSources: '检索信息源',
   readInformationSource: '读取信息源',
+  search_creative_assets: '搜索创作资产',
+  get_creative_asset: '读取创作资产',
   generateImage: '生成图片',
 }
 
@@ -48,6 +50,8 @@ function displayTime(value: string) {
 }
 
 function activitySummary(parts: ToolEventPart[]) {
+  const active = parts.find(part => part.state === 'running' || part.state === 'input-available')
+  if (active) return '正在调用工具：' + (toolLabels[chatToolName(active)] ?? chatToolName(active))
   const searches = parts.filter(part => chatToolName(part) === 'searchInformationSources').length
   const reads = parts.filter(part => chatToolName(part) === 'readInformationSource').length
   const images = imageGenerationSummary(parts)
@@ -56,6 +60,32 @@ function activitySummary(parts: ToolEventPart[]) {
   if (reads) return '已阅读 ' + reads + ' 条资料'
   if (images) return images
   return '已调用 ' + parts.length + ' 项工具'
+}
+
+function ChatStatusBlock({ parts }: { parts: ChatStatusPart[] }) {
+  const active = parts.some(part => part.state === 'streaming')
+  const current = [...parts].reverse().find(part => part.state === 'streaming') ?? parts.at(-1)
+  if (!current) return null
+
+  return (
+    <details
+      open={active}
+      className="rounded-lg bg-muted/50 px-3 py-2 text-xs text-foreground-subtle"
+    >
+      <summary className="flex cursor-pointer list-none items-center gap-2 font-medium [&::-webkit-details-marker]:hidden">
+        {active && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+        <span>{current.label}</span>
+        <ChevronDown className="ml-auto h-3.5 w-3.5 transition-transform [[open]_&]:rotate-180" />
+      </summary>
+      <ul className="mt-2 space-y-1 leading-5">
+        {parts.map(part => (
+          <li key={part.id} className="flex flex-wrap items-baseline gap-x-2">
+            <span>{part.detail ?? part.label}</span>
+          </li>
+        ))}
+      </ul>
+    </details>
+  )
 }
 
 function GeneratedImagePreview({ urls }: { urls: string[] }) {
@@ -138,11 +168,12 @@ function ToolActivityGroup({
   const imageUrls = [...new Set(parts.flatMap(generatedImageUrls))]
   const imageJobIds = [...new Set(parts.map(legacyImageJobId).filter((jobId): jobId is number => jobId !== null))]
   const hasPendingApproval = parts.some(part => part.state === 'approval-requested' && part.toolCallId && part.approval?.id)
+  const hasActiveTool = parts.some(part => part.state === 'running' || part.state === 'input-available')
 
   return (
     <div>
       <details
-        open={hasPendingApproval}
+        open={hasPendingApproval || hasActiveTool}
         className="rounded-lg bg-indigo-50/60 px-3 py-2 text-xs text-indigo-950 dark:bg-indigo-950/30 dark:text-indigo-100"
       >
         <summary className="flex cursor-pointer list-none items-center gap-2 font-medium [&::-webkit-details-marker]:hidden">
@@ -268,6 +299,7 @@ export function ChatMessageView({
   const isUser = message.role === 'user'
   const textParts = message.parts.filter(part => part.type === 'text')
   const reasoningParts = message.parts.filter(part => part.type === 'reasoning')
+  const statusParts = message.parts.filter(part => part.type === 'chat-status') as ChatStatusPart[]
   const userContentParts = message.parts.filter(part => part.type === 'text' || isSkillInvocationPart(part))
   const toolParts = message.parts.filter(isChatToolPart) as ToolEventPart[]
   const pipelineId = message.parts.map(pipelineJobId).find((id): id is number => id !== null)
@@ -279,6 +311,13 @@ export function ChatMessageView({
   return (
     <article className={cn('flex', isUser && 'justify-end')}>
       <div className={isUser ? 'min-w-0 max-w-3xl space-y-2' : 'w-full min-w-0 space-y-2'}>
+        {statusParts.length > 0 && (
+          <ChatStatusBlock
+            parts={reasoningParts.length > 0
+              ? statusParts.filter(part => part.phase === 'skill')
+              : statusParts}
+          />
+        )}
         {!isUser && reasoningParts.map((part, index) => (
           <ReasoningBlock key={String(part.id ?? index)} part={part} />
         ))}

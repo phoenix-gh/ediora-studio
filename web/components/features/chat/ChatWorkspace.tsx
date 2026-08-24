@@ -142,6 +142,9 @@ export function ChatWorkspace({ variant, onClose, onOpenFullChat, onResetSize, o
 
   const isFloating = variant === 'floating'
   const showEmptyState = messages.length === 0 && !isActiveLoading
+  const latestMessage = messages.at(-1)
+  const hasInlineAssistantActivity = latestMessage?.role === 'assistant'
+    && latestMessage.parts.length > 0
 
   return (
     <div className="flex h-full min-h-0 min-w-0 bg-surface">
@@ -277,7 +280,7 @@ export function ChatWorkspace({ variant, onClose, onOpenFullChat, onResetSize, o
                 onPipelineTerminal={activeSessionId === null ? undefined : () => void retrySession(activeSessionId)}
               />
             ))}
-            {isActiveRunning && (
+            {isActiveRunning && !hasInlineAssistantActivity && (
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <Loader2 className="h-4 w-4 animate-spin" />正在思考并检索资料…
               </div>

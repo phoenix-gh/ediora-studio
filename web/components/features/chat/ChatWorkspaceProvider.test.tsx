@@ -176,7 +176,9 @@ describe('ChatWorkspaceProvider', () => {
     expect(current.state.messagesBySession['7']).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          parts: [{ type: 'text', id: 'text-7', text: '后台结果' }],
+          parts: expect.arrayContaining([
+            { type: 'text', id: 'text-7', text: '后台结果' },
+          ]),
         }),
       ]),
     )
@@ -225,7 +227,9 @@ describe('ChatWorkspaceProvider', () => {
 
       expect(current.messages).toEqual(expect.arrayContaining([
         expect.objectContaining({
-          parts: [{ type: 'text', id: 'text-1', text: '先显示' }],
+          parts: expect.arrayContaining([
+            { type: 'text', id: 'text-1', text: '先显示' },
+          ]),
         }),
       ]))
 

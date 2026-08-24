@@ -37,6 +37,34 @@ describe('ChatMessageView', () => {
     expect(complete).toHaveTextContent('先查资料')
   })
 
+  it('shows the active Skill in an expanded execution status block', () => {
+    render(<ChatMessageView message={assistantMessage([{
+      type: 'chat-status',
+      id: 'chat-activity',
+      phase: 'skill',
+      state: 'streaming',
+      label: '正在使用 Skill：去 AI 味',
+      detail: 'humanize-writing',
+    }])} />)
+
+    const status = screen.getByText('正在使用 Skill：去 AI 味').closest('details')
+    expect(status).toHaveAttribute('open')
+    expect(status).toHaveTextContent('humanize-writing')
+  })
+
+  it('opens the active tool status and names the tool being called', () => {
+    render(<ChatMessageView message={assistantMessage([{
+      type: 'tool-event',
+      toolCallId: 'call-image',
+      toolName: 'generateImage',
+      state: 'running',
+    }])} />)
+
+    const status = screen.getByText('正在调用工具：生成图片').closest('details')
+    expect(status).toHaveAttribute('open')
+    expect(status).toHaveTextContent('进行中')
+  })
+
   it('renders user and assistant Markdown messages', () => {
     const userMessage: DisplayMessage = {
       id: 1,

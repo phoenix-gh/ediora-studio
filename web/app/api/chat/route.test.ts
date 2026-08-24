@@ -8,6 +8,7 @@ import {
   chatAgentSessionEventFromDraft,
   chatAgentSessionEventFromToolResult,
   chatTrajectoryChunk,
+  chatStatusForSkill,
   agentRunUIResponse,
   directSkillParameterContext,
   executionToolsForSelection,
@@ -65,6 +66,20 @@ describe('Chat Agent log event mapping', () => {
     })
     expect(chatTrajectoryChunk({ type: 'tool-input-delta', id: 'call-1', delta: '{"q":"AI"}' })).toEqual({
       kind: 'tool-input', callId: 'call-1', text: '{"q":"AI"}',
+    })
+  })
+
+  it('creates a transient user-facing status for the selected Skill', () => {
+    expect(chatStatusForSkill({
+      name: 'humanize-writing',
+      displayName: '去 AI 味',
+    })).toEqual({
+      phase: 'skill',
+      state: 'streaming',
+      label: '正在使用 Skill：去 AI 味',
+      detail: 'humanize-writing',
+      skillName: 'humanize-writing',
+      skillDisplayName: '去 AI 味',
     })
   })
 

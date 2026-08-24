@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import type { ChatPart, ChatRole, UIMessageStreamEvent } from '@/lib/api/chat'
 import {
   applyChatStreamEvent,
+  initialChatStatusPart,
   makeLocalMessage,
   toModelMessages,
 } from './chat-workspace-state'
@@ -24,6 +25,16 @@ function message(
 }
 
 describe('chat workspace state helpers', () => {
+  it('starts a local assistant with a visible thinking status', () => {
+    expect(initialChatStatusPart()).toMatchObject({
+      type: 'chat-status',
+      id: 'chat-activity',
+      phase: 'thinking',
+      state: 'streaming',
+      label: '正在思考',
+    })
+  })
+
   it('accumulates reasoning deltas and marks the part complete', () => {
     const assistant = message('assistant-1', 'assistant', [])
     const started = applyChatStreamEvent([assistant], 'assistant-1', {
@@ -59,7 +70,10 @@ describe('chat workspace state helpers', () => {
       event,
     )
 
-    expect(next[1].parts).toEqual([{ type: 'text', id: 'text-1', text: '你好' }])
+    expect(next[1].parts).toEqual(expect.arrayContaining([
+      { type: 'text', id: 'text-1', text: '你好' },
+      expect.objectContaining({ type: 'chat-status', label: '正在生成回答' }),
+    ]))
     expect(next[2]).toEqual(otherSessionMessage)
   })
 
@@ -88,6 +102,53 @@ describe('chat workspace state helpers', () => {
       input: { query: 'AI' },
       output: { items: [] },
     })
+  })
+
+  it('renders transient Skill status and switches to answer status when text starts', () => {
+    const assistantMessage = message('assistant-1', 'assistant', [])
+    const withSkill = applyChatStreamEvent([assistantMessage], 'assistant-1', {
+      type: 'data-chat-status',
+      id: 'chat-activity',
+      data: {
+        phase: 'skill',
+        state: 'streaming',
+        label: '正在使用 Skill：去 AI 味',
+        skillName: 'humanize-writing',
+      },
+    })
+
+    expect(withSkill[0].parts).toContainEqual(expect.objectContaining({
+      type: 'chat-status',
+      phase: 'skill',
+      state: 'streaming',
+      label: '正在使用 Skill：去 AI 味',
+    }))
+
+    const withText = applyChatStreamEvent(withSkill, 'assistant-1', {
+      type: 'text-delta',
+      id: 'text-1',
+      delta: '答案',
+    })
+
+    expect(withText[0].parts).toContainEqual(expect.objectContaining({
+      type: 'chat-status',
+      phase: 'answer',
+      state: 'streaming',
+      label: '正在生成回答',
+    }))
+  })
+
+  it('marks the transient status complete when the UI stream finishes', () => {
+    const assistantMessage = message('assistant-1', 'assistant', [initialChatStatusPart()])
+    const finished = applyChatStreamEvent([assistantMessage], 'assistant-1', {
+      type: 'finish',
+    })
+
+    expect(finished[0].parts).toContainEqual(expect.objectContaining({
+      type: 'chat-status',
+      state: 'complete',
+      label: '已完成',
+    }))
   })
 
   it('creates a local message and excludes tool-role records from model history', () => {
@@ -120,11 +181,13 @@ describe('chat workspace state helpers', () => {
       errorText: 'LLM 请求失败',
     })
 
-    expect(next[0].parts[0]).toMatchObject({
+    expect(next[0].parts).toEqual(expect.arrayContaining([
+      expect.objectContaining({
       type: 'tool-event',
       toolCallId: 'call-1',
       state: 'completed',
-    })
+      }),
+    ]))
     expect(next[0].parts.at(-1)).toMatchObject({
       type: 'text',
       text: '\nLLM 请求失败',

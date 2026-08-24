@@ -5,6 +5,7 @@ import type {
   ChatRole,
   ChatSession,
   ChatSkill,
+  ChatStreamStatus,
   SubmittedSkillInvocation,
   UIMessageStreamEvent,
 } from '@/lib/api/chat'
@@ -23,6 +24,11 @@ export type ToolEventPart = ChatPart & {
     id?: string
     approved?: boolean
   }
+}
+
+export type ChatStatusPart = ChatPart & ChatStreamStatus & {
+  type: 'chat-status'
+  id: string
 }
 
 export type ChatApprovalArgs = {

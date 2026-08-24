@@ -1,11 +1,14 @@
 import type {
   ChatPart,
   ChatRole,
+  ChatStreamStatus,
   UIChatMessage,
   UIMessageStreamEvent,
 } from '@/lib/api/chat'
 
-import type { DisplayMessage, ToolEventPart } from './chat-workspace-types'
+import type { ChatStatusPart, DisplayMessage, ToolEventPart } from './chat-workspace-types'
+
+export const CHAT_STATUS_PART_ID = 'chat-activity'
 
 function localId(prefix: string) {
   const uuid = globalThis.crypto?.randomUUID?.()
@@ -91,29 +94,100 @@ function updateToolPart(parts: ChatPart[], event: UIMessageStreamEvent) {
     : [...parts, next]
 }
 
+function updateStatusPart(parts: ChatPart[], status: ChatStreamStatus) {
+  const index = parts.findIndex(part => part.type === 'chat-status' && part.id === CHAT_STATUS_PART_ID)
+  const current = index < 0 ? undefined : parts[index]
+  const next: ChatStatusPart = {
+    ...(current ?? {}),
+    ...status,
+    type: 'chat-status',
+    id: CHAT_STATUS_PART_ID,
+  }
+  return index < 0
+    ? [next, ...parts]
+    : parts.map((part, currentIndex) => currentIndex === index ? next : part)
+}
+
+function statusFromEvent(event: UIMessageStreamEvent): ChatStreamStatus | null {
+  if (!event.data || typeof event.data !== 'object' || Array.isArray(event.data)) return null
+  const data = event.data as Record<string, unknown>
+  if (
+    (data.phase !== 'thinking' && data.phase !== 'skill' && data.phase !== 'answer')
+    || (data.state !== 'streaming' && data.state !== 'complete' && data.state !== 'error')
+    || typeof data.label !== 'string'
+  ) return null
+  return {
+    phase: data.phase,
+    state: data.state,
+    label: data.label,
+    ...(typeof data.detail === 'string' ? { detail: data.detail } : {}),
+    ...(typeof data.skillName === 'string' ? { skillName: data.skillName } : {}),
+    ...(typeof data.skillDisplayName === 'string' ? { skillDisplayName: data.skillDisplayName } : {}),
+  }
+}
+
+export function initialChatStatusPart(): ChatStatusPart {
+  return {
+    type: 'chat-status',
+    id: CHAT_STATUS_PART_ID,
+    phase: 'thinking',
+    state: 'streaming',
+    label: '正在思考',
+    detail: '正在分析你的请求',
+  }
+}
+
 export function applyChatStreamEvent(
   messages: DisplayMessage[],
   assistantMessageId: string,
   event: UIMessageStreamEvent,
 ): DisplayMessage[] {
+  if (event.type === 'data-chat-status') {
+    const status = statusFromEvent(event)
+    return status
+      ? updateAssistantMessage(messages, assistantMessageId, parts => updateStatusPart(parts, status))
+      : messages
+  }
+
+  if (event.type === 'start-step') {
+    return updateAssistantMessage(messages, assistantMessageId, parts => updateStatusPart(parts, {
+      phase: 'thinking',
+      state: 'streaming',
+      label: '正在思考',
+      detail: '正在处理下一步',
+    }))
+  }
+
   if (event.type === 'reasoning-start') {
     const partId = typeof event.id === 'string' ? event.id : 'reasoning'
-    return updateAssistantMessage(messages, assistantMessageId, parts => (
+    return updateAssistantMessage(messages, assistantMessageId, parts => updateStatusPart(
       updateReasoningPart(parts, partId, current => ({
         type: 'reasoning', id: partId,
         text: String(current?.text ?? ''), state: 'streaming',
-      }))
+      })),
+      {
+        phase: 'thinking',
+        state: 'streaming',
+        label: '正在思考',
+        detail: '模型正在整理思路',
+      },
     ))
   }
 
   if (event.type === 'reasoning-delta') {
     const partId = typeof event.id === 'string' ? event.id : 'reasoning'
     const delta = typeof event.delta === 'string' ? event.delta : ''
-    return updateAssistantMessage(messages, assistantMessageId, parts => (
+    return updateAssistantMessage(messages, assistantMessageId, parts => updateStatusPart(
       updateReasoningPart(parts, partId, current => ({
         type: 'reasoning', id: partId,
         text: String(current?.text ?? '') + delta, state: 'streaming',
-      }))
+      })),
+      {
+        phase: 'thinking',
+        state: 'streaming',
+        label: '正在思考',
+        detail: '模型正在整理思路',
+      },
     ))
   }
 
@@ -130,7 +204,15 @@ export function applyChatStreamEvent(
   if (event.type === 'text-delta') {
     const partId = typeof event.id === 'string' ? event.id : 'text'
     const delta = typeof event.delta === 'string' ? event.delta : ''
-    return updateAssistantMessage(messages, assistantMessageId, parts => updateTextPart(parts, partId, delta))
+    return updateAssistantMessage(messages, assistantMessageId, parts => updateStatusPart(
+      updateTextPart(parts, partId, delta),
+      {
+        phase: 'answer',
+        state: 'streaming',
+        label: '正在生成回答',
+        detail: '回答正在实时生成',
+      },
+    ))
   }
 
   if (
@@ -141,12 +223,26 @@ export function applyChatStreamEvent(
     return updateAssistantMessage(messages, assistantMessageId, parts => updateToolPart(parts, event))
   }
 
+  if (event.type === 'finish') {
+    return updateAssistantMessage(messages, assistantMessageId, parts => updateStatusPart(parts, {
+      phase: 'answer',
+      state: 'complete',
+      label: '已完成',
+      detail: '回答生成完成',
+    }))
+  }
+
   if (event.type === 'error') {
     const detail = typeof event.errorText === 'string' ? event.errorText : '聊天响应失败'
-    return updateAssistantMessage(messages, assistantMessageId, parts => [
+    return updateAssistantMessage(messages, assistantMessageId, parts => updateStatusPart([
       ...parts,
       { type: 'text', text: '\n' + detail },
-    ])
+    ], {
+      phase: 'thinking',
+      state: 'error',
+      label: '处理失败',
+      detail,
+    }))
   }
 
   return messages

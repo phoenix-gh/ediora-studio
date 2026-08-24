@@ -26,6 +26,7 @@ import type { AgentModelMessageEvent, AgentToolAudit } from '@/lib/ai/agent-runt
 import { createDirectImageGenerator, mcpUrl, type ChatSkillSnapshot } from '@/lib/ai/global-chat-tools'
 import { workerHeaders } from '@/lib/ai/job-client'
 import { getEnabledSkill, listSkillReferences, loadSkillPreloadContext } from '@/lib/skills/registry'
+import { resolveSkillBinding } from '@/lib/skills/bindings'
 import {
   PipelineResolutionError,
   resolvePipelineInvocations,
@@ -38,6 +39,7 @@ import {
   type TextModelConfig,
   type TextModelSettings,
 } from '@/lib/ai/runtime-config'
+import type { ChatStreamStatus } from '@/lib/api/chat'
 
 const submittedSkillInvocationSchema = z.object({
   invocationId: z.string().trim().min(1).max(120),
@@ -426,6 +428,18 @@ export function chatTrajectoryChunk(chunk: unknown): Record<string, unknown> | n
       return { kind: 'abort', reason: item.reason }
     default:
       return null
+  }
+}
+
+export function chatStatusForSkill(skill: { name: string; displayName?: string }): ChatStreamStatus {
+  const displayName = skill.displayName?.trim() || skill.name
+  return {
+    phase: 'skill',
+    state: 'streaming',
+    label: `正在使用 Skill：${displayName}`,
+    detail: skill.name,
+    skillName: skill.name,
+    skillDisplayName: displayName,
   }
 }
 
@@ -878,86 +892,108 @@ export async function POST(request: NextRequest) {
       },
     })
 
-    return result.toUIMessageStreamResponse({
-      originalMessages: messages,
-      onFinish: async ({ responseMessage, isAborted }) => {
-        let pendingApproval = false
-        let terminalReason: Record<string, unknown> = {
-          kind: isAborted ? 'aborted' : 'completed',
+    const initialStatus: ChatStreamStatus = selected
+      ? chatStatusForSkill({
+          name: selected.skill.name,
+          displayName: resolveSkillBinding(selected.skill).displayName,
+        })
+      : {
+          phase: 'thinking',
+          state: 'streaming',
+          label: '正在思考',
+          detail: '正在分析你的请求',
         }
-        try {
-          if (!isAborted) {
-            pendingApproval = responseMessage.parts.some(part => part.type === 'dynamic-tool' && part.state === 'approval-requested')
-            let parts = responseMessage.parts
-            if (!pendingApproval && needsFinalAnswerFallback(messageText(responseMessage))) {
-              try {
-                const recoveredText = await recoverFinalAnswer({
-                  provider,
-                  modelName: modelConfig.modelName,
-                  protocol: modelConfig.protocol,
-                  messages,
-                  instructions,
-                })
-                if (!needsFinalAnswerFallback(recoveredText)) parts = [{ type: 'text', text: recoveredText }]
-              } catch {
-                // Persist the clear fallback below if the recovery call itself fails.
+    const stream = createUIMessageStream({
+      execute: ({ writer }) => {
+        writer.write({
+          type: 'data-chat-status',
+          id: 'chat-activity',
+          data: initialStatus,
+          transient: true,
+        })
+        writer.merge(result.toUIMessageStream({
+          originalMessages: messages,
+          onFinish: async ({ responseMessage, isAborted }) => {
+            let pendingApproval = false
+            let terminalReason: Record<string, unknown> = {
+              kind: isAborted ? 'aborted' : 'completed',
+            }
+            try {
+              if (!isAborted) {
+                pendingApproval = responseMessage.parts.some(part => part.type === 'dynamic-tool' && part.state === 'approval-requested')
+                let parts = responseMessage.parts
+                if (!pendingApproval && needsFinalAnswerFallback(messageText(responseMessage))) {
+                  try {
+                    const recoveredText = await recoverFinalAnswer({
+                      provider,
+                      modelName: modelConfig.modelName,
+                      protocol: modelConfig.protocol,
+                      messages,
+                      instructions,
+                    })
+                    if (!needsFinalAnswerFallback(recoveredText)) parts = [{ type: 'text', text: recoveredText }]
+                  } catch {
+                    // Persist the clear fallback below if the recovery call itself fails.
+                  }
+                }
+                const finalHasText = messageText({ parts }).trim().length > 0
+                await persistMessage(body.sessionId, {
+                  role: 'assistant',
+                  parts: finalHasText || pendingApproval ? parts : [{ type: 'text', text: '本次回复没有生成有效内容。请重试；如果问题持续出现，请缩小检索范围。' }],
+                }, undefined, runtime.capabilitySnapshot())
+                await persistChatAgentLogEvent(chatSessionEvent(logContext, {
+                  event_type: 'session/assistant-message',
+                  phase: 'execute',
+                  status: pendingApproval ? 'waiting_approval' : 'completed',
+                  payload: { parts, text: messageText({ parts }), pendingApproval },
+                }))
+                if (finishedStreamSteps.size === 0) {
+                  const step = lastStreamStep || 1
+                  await persistChatAgentSessionEvent({
+                    type: 'assistant/message',
+                    turn: logContext.turn ?? 1,
+                    step,
+                    data: {
+                      turn: logContext.turn ?? 1,
+                      step,
+                      blocks: canonicalAssistantBlocks(parts),
+                      interrupted: false,
+                    },
+                  }, logContext)
+                }
+                terminalReason = { kind: pendingApproval ? 'waiting_approval' : 'completed' }
               }
+            } catch (error) {
+              terminalReason = {
+                kind: 'error',
+                error: error instanceof Error ? error.message : String(error),
+              }
+              throw error
+            } finally {
+              await finishCanonicalTurn(terminalReason)
+              await persistChatAgentLogEvent(chatSessionEvent(logContext, {
+                event_type: 'session/turn-end',
+                phase: 'chat',
+                status: isAborted ? 'aborted' : pendingApproval ? 'waiting_approval' : 'completed',
+                payload: { isAborted, pendingApproval },
+              }))
+              await registry?.close()
             }
-            const finalHasText = messageText({ parts }).trim().length > 0
-            await persistMessage(body.sessionId, {
-              role: 'assistant',
-              parts: finalHasText || pendingApproval ? parts : [{ type: 'text', text: '本次回复没有生成有效内容。请重试；如果问题持续出现，请缩小检索范围。' }],
-            }, undefined, runtime.capabilitySnapshot())
-            await persistChatAgentLogEvent(chatSessionEvent(logContext, {
-              event_type: 'session/assistant-message',
-              phase: 'execute',
-              status: pendingApproval ? 'waiting_approval' : 'completed',
-              payload: { parts, text: messageText({ parts }), pendingApproval },
+          },
+          onError: error => {
+            void persistChatAgentLogEvent(chatSessionEvent(logContext, {
+              event_type: 'session/error',
+              phase: 'chat',
+              status: 'error',
+              payload: { error: String(error) },
             }))
-            if (finishedStreamSteps.size === 0) {
-              const step = lastStreamStep || 1
-              await persistChatAgentSessionEvent({
-                type: 'assistant/message',
-                turn: logContext.turn ?? 1,
-                step,
-                data: {
-                  turn: logContext.turn ?? 1,
-                  step,
-                  blocks: canonicalAssistantBlocks(parts),
-                  interrupted: false,
-                },
-              }, logContext)
-            }
-            terminalReason = { kind: pendingApproval ? 'waiting_approval' : 'completed' }
-          }
-        } catch (error) {
-          terminalReason = {
-            kind: 'error',
-            error: error instanceof Error ? error.message : String(error),
-          }
-          throw error
-        } finally {
-          await finishCanonicalTurn(terminalReason)
-          await persistChatAgentLogEvent(chatSessionEvent(logContext, {
-            event_type: 'session/turn-end',
-            phase: 'chat',
-            status: isAborted ? 'aborted' : pendingApproval ? 'waiting_approval' : 'completed',
-            payload: { isAborted, pendingApproval },
-          }))
-          await registry?.close()
-        }
-      },
-      onError: error => {
-        void persistChatAgentLogEvent(chatSessionEvent(logContext, {
-          event_type: 'session/error',
-          phase: 'chat',
-          status: 'error',
-          payload: { error: String(error) },
+            void finishCanonicalTurn({ kind: 'error', error: String(error) })
+            return 'Chat response failed'
+          },
         }))
-        void finishCanonicalTurn({ kind: 'error', error: String(error) })
-        return 'Chat response failed'
       },
     })
+    return createUIMessageStreamResponse({ stream })
   } catch (error) {
     await registry?.close()
     const message = error instanceof Error ? error.message : 'Chat request failed'

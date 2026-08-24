@@ -32,6 +32,7 @@ import { titleFromFirstMessage } from '@/app/chat/chat-title'
 
 import {
   applyChatStreamEvent,
+  initialChatStatusPart,
   makeLocalMessage,
   toModelMessages,
 } from './chat-workspace-state'
@@ -396,7 +397,7 @@ export function ChatWorkspaceProvider({ children }: { children: ReactNode }) {
       ? pipelineInvocations[0]
       : undefined
     const userMessage = makeLocalMessage('user', messageParts)
-    const assistantMessage = makeLocalMessage('assistant', [])
+    const assistantMessage = makeLocalMessage('assistant', [initialChatStatusPart()])
     const requestMessages = toModelMessages([...currentMessages, userMessage])
     updateSession(sessionId, messages => [...messages, userMessage, assistantMessage])
     inlineStreamSessionIdsRef.current.add(sessionId)

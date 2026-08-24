@@ -211,8 +211,8 @@ describe('chat API client', () => {
     const encoder = new TextEncoder()
     const stream = new ReadableStream<Uint8Array>({
       start(controller) {
-        controller.enqueue(encoder.encode('data: {"type":"text-delta","id":"part-1","delta":"你"}\n'))
-        controller.enqueue(encoder.encode('\ndata: {"type":"tool-input-available","toolCallId":"call-1","toolName":"searchInformationSources","input":{"q":"AI"}}\n\ndata: [DONE]\n\n'))
+        controller.enqueue(encoder.encode('data: {"type":"data-chat-status","id":"chat-activity","data":{"phase":"skill","state":"streaming","label":"正在使用 Skill：去 AI 味"},"transient":true}\n'))
+        controller.enqueue(encoder.encode('\ndata: {"type":"text-delta","id":"part-1","delta":"你"}\n\ndata: {"type":"tool-input-available","toolCallId":"call-1","toolName":"searchInformationSources","input":{"q":"AI"}}\n\ndata: [DONE]\n\n'))
         controller.close()
       },
     })
@@ -221,6 +221,12 @@ describe('chat API client', () => {
     await consumeUIMessageStream(stream, event => events.push(event))
 
     expect(events).toEqual([
+      {
+        type: 'data-chat-status',
+        id: 'chat-activity',
+        data: { phase: 'skill', state: 'streaming', label: '正在使用 Skill：去 AI 味' },
+        transient: true,
+      },
       { type: 'text-delta', id: 'part-1', delta: '你' },
       { type: 'tool-input-available', toolCallId: 'call-1', toolName: 'searchInformationSources', input: { q: 'AI' } },
     ])

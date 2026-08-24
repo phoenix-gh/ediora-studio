@@ -69,6 +69,15 @@ export type UIMessageStreamEvent = Record<string, unknown> & {
   type: string
 }
 
+export type ChatStreamStatus = {
+  phase: 'thinking' | 'skill' | 'answer'
+  state: 'streaming' | 'complete' | 'error'
+  label: string
+  detail?: string
+  skillName?: string
+  skillDisplayName?: string
+}
+
 export async function listChatSessions(): Promise<ChatSession[]> {
   return apiFetch<ChatSession[]>('/chat/sessions')
 }
