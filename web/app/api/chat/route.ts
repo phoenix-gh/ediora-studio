@@ -1,4 +1,4 @@
-import { convertToModelMessages, createUIMessageStream, createUIMessageStreamResponse, generateText, safeValidateUIMessages, stepCountIs, streamText, type ToolSet, type UIMessage } from 'ai'
+import { convertToModelMessages, createUIMessageStream, createUIMessageStreamResponse, generateText, safeValidateUIMessages, stepCountIs, streamText, type ToolSet, type UIMessage, type UIMessageStreamWriter } from 'ai'
 import { randomUUID } from 'node:crypto'
 import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
@@ -22,7 +22,7 @@ import {
 } from '@/lib/ai/agent-log-client'
 import type { AgentSessionEventDraft } from '@/lib/ai/agent-runtime'
 import type { AgentSessionEventType } from '@/lib/ai/agent-trajectory'
-import type { AgentModelMessageEvent, AgentToolAudit } from '@/lib/ai/agent-runtime-types'
+import type { AgentModelMessageEvent, AgentStepCheckpoint, AgentToolAudit } from '@/lib/ai/agent-runtime-types'
 import { createDirectImageGenerator, mcpUrl, type ChatSkillSnapshot } from '@/lib/ai/global-chat-tools'
 import { workerHeaders } from '@/lib/ai/job-client'
 import { getEnabledSkill, listSkillReferences, loadSkillPreloadContext } from '@/lib/skills/registry'
@@ -443,6 +443,28 @@ export function chatStatusForSkill(skill: { name: string; displayName?: string }
   }
 }
 
+export function chatStatusForAgentStep(
+  checkpoint: Pick<AgentStepCheckpoint, 'phase'>,
+  skill?: { name: string; displayName?: string },
+): ChatStreamStatus {
+  const displayName = skill?.displayName?.trim() || skill?.name
+  const details: Record<AgentStepCheckpoint['phase'], { label: string; detail: string }> = {
+    plan: { label: '正在制定 Skill 执行计划', detail: '正在拆解任务和验证要求' },
+    references: { label: '正在读取 Skill 参考资料', detail: '正在补充工作所需的参考内容' },
+    execute: { label: '正在执行 Skill 工作流', detail: '正在调用工具并生成内容' },
+    validate: { label: '正在校验 Skill 输出', detail: '正在检查文章是否满足工作流要求' },
+    revise: { label: '正在修订 Skill 输出', detail: '正在根据校验结果完善内容' },
+  }
+  const current = details[checkpoint.phase]
+  return {
+    phase: skill ? 'skill' : 'thinking',
+    state: 'streaming',
+    label: current.label,
+    detail: current.detail,
+    ...(skill ? { skillName: skill.name, skillDisplayName: displayName } : {}),
+  }
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
@@ -498,28 +520,40 @@ function chatSessionEvent(
   }
 }
 
+async function writeAgentRunResult(writer: UIMessageStreamWriter, result: AgentRunResult) {
+  if (result.kind === 'completed') {
+    const id = 'agent-run-final'
+    writer.write({ type: 'text-start', id })
+    const text = result.text || '本次回复没有生成有效内容。'
+    for (let offset = 0; offset < text.length; offset += 320) {
+      writer.write({ type: 'text-delta', id, delta: text.slice(offset, offset + 320) })
+      await new Promise<void>(resolve => setTimeout(resolve, 0))
+    }
+    writer.write({ type: 'text-end', id })
+    writer.write({
+      type: 'data-chat-status',
+      id: 'chat-activity',
+      data: { phase: 'answer', state: 'complete', label: '已完成', detail: '回答生成完成' },
+      transient: true,
+    })
+    return
+  }
+  for (const part of result.parts) {
+    const toolName = typeof part.toolName === 'string' ? part.toolName : undefined
+    const toolCallId = typeof part.toolCallId === 'string' ? part.toolCallId : undefined
+    if (!toolName || !toolCallId) continue
+    writer.write({ type: 'tool-input-available', toolName, toolCallId, input: part.input, dynamic: true })
+    const approval = part.approval
+    const approvalId = approval && typeof approval === 'object'
+      ? (approval as Record<string, unknown>).id
+      : part.approvalId
+    if (typeof approvalId === 'string') writer.write({ type: 'tool-approval-request', toolCallId, approvalId })
+  }
+}
+
 export function agentRunUIResponse(result: AgentRunResult) {
   const stream = createUIMessageStream({
-    execute: ({ writer }) => {
-      if (result.kind === 'completed') {
-        const id = 'agent-run-final'
-        writer.write({ type: 'text-start', id })
-        writer.write({ type: 'text-delta', id, delta: result.text })
-        writer.write({ type: 'text-end', id })
-        return
-      }
-      for (const part of result.parts) {
-        const toolName = typeof part.toolName === 'string' ? part.toolName : undefined
-        const toolCallId = typeof part.toolCallId === 'string' ? part.toolCallId : undefined
-        if (!toolName || !toolCallId) continue
-        writer.write({ type: 'tool-input-available', toolName, toolCallId, input: part.input, dynamic: true })
-        const approval = part.approval
-        const approvalId = approval && typeof approval === 'object'
-          ? (approval as Record<string, unknown>).id
-          : part.approvalId
-        if (typeof approvalId === 'string') writer.write({ type: 'tool-approval-request', toolCallId, approvalId })
-      }
-    },
+    execute: ({ writer }) => writeAgentRunResult(writer, result),
   })
   return createUIMessageStreamResponse({ stream })
 }
@@ -599,6 +633,8 @@ export async function POST(request: NextRequest) {
   }))
 
   let registry: Awaited<ReturnType<typeof openAgentRuntime>> | undefined
+  let writeSharedToolActivity: ((event: AgentToolAudit) => void) | undefined
+  let writeSharedModelActivity: ((event: AgentModelMessageEvent) => void) | undefined
   const auditedToolResultKeys = new Set<string>()
   const toolResultKey = (turn: number, step: number, callId: string) => `${turn}:${step}:${callId}`
   let canonicalTurnStarted = false
@@ -672,10 +708,14 @@ export async function POST(request: NextRequest) {
       draftId: body.draftId,
       turn: logContext.turn ?? 1,
       automaticSelection: genericRuntime,
-      onMessage: event => persistChatAgentLogEvent(
-        chatAgentLogEventFromModelMessage(event, logContext),
-      ),
+      onMessage: event => {
+        writeSharedModelActivity?.(event)
+        return persistChatAgentLogEvent(
+          chatAgentLogEventFromModelMessage(event, logContext),
+        )
+      },
       onToolAudit: event => {
+        writeSharedToolActivity?.(event)
         if (event.status !== 'started' && event.step !== undefined) {
           auditedToolResultKeys.add(toolResultKey(logContext.turn ?? 1, event.step, event.toolCallId))
         }
@@ -684,88 +724,187 @@ export async function POST(request: NextRequest) {
       onSessionEvent: event => persistChatAgentSessionEvent(event, logContext),
     })
     registry = runtime
-    const selected = genericRuntime || manualSkillName
-      ? await runtime.prepare(currentRequestText)
-      : runtime.selectedSkill
-    await persistChatAgentLogEvent(chatSessionEvent(logContext, {
-      event_type: 'skill/selected',
-      phase: 'prepare',
-      status: selected ? 'completed' : 'skipped',
-      payload: selected
-        ? { name: selected.skill.name, activation: selected.activation }
-        : { name: null, activation: null },
-    }))
-    await persistChatAgentSessionEvent({
-      type: 'agent/skill',
-      turn: logContext.turn,
-      step: null,
-      data: {
-        name: selected?.skill.name ?? 'none',
-        activation: selected?.activation ?? 'automatic',
-        metadata: selected ? { selected: true } : { selected: false },
-      },
-    }, logContext)
-    const context = await selectedContext(selected?.skill.name ?? manualSkillName, body.draftId, runtime.catalogContext)
-    const parameterContext = resolvedDirectInvocation
-      ? directSkillParameterContext(resolvedDirectInvocation)
-      : ''
-    const instructions = buildChatInstructions(
-      [context, parameterContext].filter(Boolean).join('\n\n---\n\n'),
-    )
-    const executionTools = executionToolsForSelection(runtime.tools, genericRuntime, Boolean(selected))
-    await persistChatAgentLogEvent(chatSessionEvent(logContext, {
-      event_type: 'session/capabilities',
-      phase: 'prepare',
-      status: 'completed',
-      payload: {
-        capabilitySnapshot: runtime.capabilitySnapshot(),
-        messageCount: messages.length,
-        toolNames: Object.keys(executionTools),
-      },
-    }))
+    const stream = createUIMessageStream({
+      execute: async ({ writer }) => {
+        const writeStatus = (status: ChatStreamStatus) => {
+          writer.write({
+            type: 'data-chat-status',
+            id: 'chat-activity',
+            data: status,
+            transient: true,
+          })
+        }
+        const initialRequestStatus: ChatStreamStatus = manualSkillName
+          ? chatStatusForSkill({ name: manualSkillName, displayName: manualSkillName })
+          : {
+              phase: 'thinking',
+              state: 'streaming',
+              label: '正在思考',
+              detail: '正在分析你的请求',
+            }
+        writeStatus(initialRequestStatus)
 
-    if (shouldUseSharedAgentRun({
-      genericRuntime,
-      selected: Boolean(selected),
-      directInvocation: Boolean(resolvedDirectInvocation),
-    })) {
-      const modelMessages = await convertToModelMessages(messages, { tools: runtime.tools, ignoreIncompleteToolCalls: true })
-      const result = await runtime.run({
-        objective: currentRequestText,
-        modelMessages,
-        selectedContext: body.draftId ? context : '',
-        maxSteps: CHAT_MAX_STEPS,
-      })
-      const parts = result.parts as UIMessage['parts']
-      await persistMessage(
-        body.sessionId,
-        { role: 'assistant', parts },
-        agentSkillRunAudit(result),
-        runtime.capabilitySnapshot(),
-      )
-      await persistChatAgentLogEvent(chatSessionEvent(logContext, {
-        event_type: 'session/assistant-message',
-        phase: 'execute',
-        status: result.kind === 'completed' ? 'completed' : 'waiting_approval',
-        payload: { parts, text: result.text, kind: result.kind },
-      }))
-      await finishCanonicalTurn({
-        kind: result.kind === 'completed' ? 'completed' : 'waiting_approval',
-      })
-      await persistChatAgentLogEvent(chatSessionEvent(logContext, {
-        event_type: 'session/turn-end',
-        phase: 'chat',
-        status: result.kind === 'completed' ? 'completed' : 'waiting_approval',
-        payload: {
-          kind: result.kind,
-          finishReason: result.finishReason ?? null,
-          stepCount: result.stepCount ?? null,
-        },
-      }))
-      await registry.close()
-      registry = undefined
-      return agentRunUIResponse(result)
-    }
+        try {
+          const selected = genericRuntime || manualSkillName
+            ? await runtime.prepare(currentRequestText)
+            : runtime.selectedSkill
+          await persistChatAgentLogEvent(chatSessionEvent(logContext, {
+            event_type: 'skill/selected',
+            phase: 'prepare',
+            status: selected ? 'completed' : 'skipped',
+            payload: selected
+              ? { name: selected.skill.name, activation: selected.activation }
+              : { name: null, activation: null },
+          }))
+          await persistChatAgentSessionEvent({
+            type: 'agent/skill',
+            turn: logContext.turn ?? 1,
+            step: null,
+            data: {
+              name: selected?.skill.name ?? 'none',
+              activation: selected?.activation ?? 'automatic',
+              metadata: selected ? { selected: true } : { selected: false },
+            },
+          }, logContext)
+          const context = await selectedContext(selected?.skill.name ?? manualSkillName, body.draftId, runtime.catalogContext)
+          const parameterContext = resolvedDirectInvocation
+            ? directSkillParameterContext(resolvedDirectInvocation)
+            : ''
+          const instructions = buildChatInstructions(
+            [context, parameterContext].filter(Boolean).join('\n\n---\n\n'),
+          )
+          const executionTools = executionToolsForSelection(runtime.tools, genericRuntime, Boolean(selected))
+          await persistChatAgentLogEvent(chatSessionEvent(logContext, {
+            event_type: 'session/capabilities',
+            phase: 'prepare',
+            status: 'completed',
+            payload: {
+              capabilitySnapshot: runtime.capabilitySnapshot(),
+              messageCount: messages.length,
+              toolNames: Object.keys(executionTools),
+            },
+          }))
+
+          if (shouldUseSharedAgentRun({
+            genericRuntime,
+            selected: Boolean(selected),
+            directInvocation: Boolean(resolvedDirectInvocation),
+          })) {
+            const modelMessages = await convertToModelMessages(messages, { tools: runtime.tools, ignoreIncompleteToolCalls: true })
+            const selectedStatusSkill = selected
+              ? {
+                  name: selected.skill.name,
+                  displayName: resolveSkillBinding(selected.skill).displayName,
+                }
+              : undefined
+            writeStatus(selectedStatusSkill
+              ? chatStatusForSkill(selectedStatusSkill)
+              : {
+                  phase: 'thinking',
+                  state: 'streaming',
+                  label: '正在思考',
+                  detail: '未启用 Skill，正在直接生成回答',
+                })
+            writeSharedToolActivity = event => {
+              if (event.status === 'started') {
+                writer.write({
+                  type: 'tool-input-available',
+                  toolName: event.toolName,
+                  toolCallId: event.toolCallId,
+                  input: event.inputSummary,
+                  dynamic: true,
+                })
+                writeStatus({
+                  phase: selectedStatusSkill ? 'skill' : 'thinking',
+                  state: 'streaming',
+                  label: `正在调用工具：${event.toolName}`,
+                  detail: '正在等待工具返回结果',
+                  ...(selectedStatusSkill
+                    ? { skillName: selectedStatusSkill.name, skillDisplayName: selectedStatusSkill.displayName }
+                    : {}),
+                })
+                return
+              }
+              if (event.status === 'succeeded') {
+                writer.write({
+                  type: 'tool-output-available',
+                  toolCallId: event.toolCallId,
+                  output: event.output,
+                })
+              }
+            }
+            writeSharedModelActivity = event => {
+              if (event.direction !== 'model_response') return
+              const reasoning = event.payload.reasoning
+              const chunks = typeof reasoning === 'string'
+                ? [reasoning]
+                : Array.isArray(reasoning)
+                  ? reasoning.flatMap(item => {
+                      if (typeof item === 'string') return [item]
+                      if (!item || typeof item !== 'object') return []
+                      const text = (item as Record<string, unknown>).text
+                      return typeof text === 'string' ? [text] : []
+                    })
+                  : []
+              if (chunks.length === 0) return
+              const id = `agent-reasoning-${event.step ?? 'latest'}`
+              writer.write({ type: 'reasoning-start', id })
+              for (const chunk of chunks) writer.write({ type: 'reasoning-delta', id, delta: chunk })
+              writer.write({ type: 'reasoning-end', id })
+            }
+            const result = await runtime.run({
+              objective: currentRequestText,
+              modelMessages,
+              selectedContext: body.draftId ? context : '',
+              maxSteps: CHAT_MAX_STEPS,
+              onStep: checkpoint => {
+                writeStatus(chatStatusForAgentStep(checkpoint, selectedStatusSkill))
+              },
+            })
+            const parts = result.parts as UIMessage['parts']
+            await persistMessage(
+              body.sessionId,
+              { role: 'assistant', parts },
+              agentSkillRunAudit(result),
+              runtime.capabilitySnapshot(),
+            )
+            await persistChatAgentLogEvent(chatSessionEvent(logContext, {
+              event_type: 'session/assistant-message',
+              phase: 'execute',
+              status: result.kind === 'completed' ? 'completed' : 'waiting_approval',
+              payload: { parts, text: result.text, kind: result.kind },
+            }))
+            await finishCanonicalTurn({
+              kind: result.kind === 'completed' ? 'completed' : 'waiting_approval',
+            })
+            await persistChatAgentLogEvent(chatSessionEvent(logContext, {
+              event_type: 'session/turn-end',
+              phase: 'chat',
+              status: result.kind === 'completed' ? 'completed' : 'waiting_approval',
+              payload: {
+                kind: result.kind,
+                finishReason: result.finishReason ?? null,
+                stepCount: result.stepCount ?? null,
+              },
+            }))
+            if (result.kind === 'approval') {
+              writeStatus({
+                phase: selectedStatusSkill ? 'skill' : 'thinking',
+                state: 'streaming',
+                label: '等待你的确认',
+                detail: '确认后将继续执行当前任务',
+                ...(selectedStatusSkill
+                  ? { skillName: selectedStatusSkill.name, skillDisplayName: selectedStatusSkill.displayName }
+                  : {}),
+              })
+            }
+            await writeAgentRunResult(writer, result)
+            writeSharedToolActivity = undefined
+            writeSharedModelActivity = undefined
+            await registry?.close()
+            registry = undefined
+            return
+          }
 
     const modelMessages = await convertToModelMessages(messages, { tools: executionTools, ignoreIncompleteToolCalls: true })
     const streamBlocks = new Map<number, Record<string, unknown>[]>()
@@ -892,26 +1031,18 @@ export async function POST(request: NextRequest) {
       },
     })
 
-    const initialStatus: ChatStreamStatus = selected
-      ? chatStatusForSkill({
-          name: selected.skill.name,
-          displayName: resolveSkillBinding(selected.skill).displayName,
-        })
-      : {
-          phase: 'thinking',
-          state: 'streaming',
-          label: '正在思考',
-          detail: '正在分析你的请求',
-        }
-    const stream = createUIMessageStream({
-      execute: ({ writer }) => {
-        writer.write({
-          type: 'data-chat-status',
-          id: 'chat-activity',
-          data: initialStatus,
-          transient: true,
-        })
-        writer.merge(result.toUIMessageStream({
+          writeStatus(selected
+            ? chatStatusForSkill({
+                name: selected.skill.name,
+                displayName: resolveSkillBinding(selected.skill).displayName,
+              })
+            : {
+                phase: 'thinking',
+                state: 'streaming',
+                label: '正在思考',
+                detail: '未启用 Skill，正在直接生成回答',
+              })
+          writer.merge(result.toUIMessageStream({
           originalMessages: messages,
           onFinish: async ({ responseMessage, isAborted }) => {
             let pendingApproval = false
@@ -978,6 +1109,7 @@ export async function POST(request: NextRequest) {
                 payload: { isAborted, pendingApproval },
               }))
               await registry?.close()
+              registry = undefined
             }
           },
           onError: error => {
@@ -990,8 +1122,30 @@ export async function POST(request: NextRequest) {
             void finishCanonicalTurn({ kind: 'error', error: String(error) })
             return 'Chat response failed'
           },
-        }))
+          }))
+        } catch (error) {
+          const message = error instanceof Error ? error.message : 'Chat response failed'
+          writeSharedToolActivity = undefined
+          writeSharedModelActivity = undefined
+          writeStatus({
+            phase: 'thinking',
+            state: 'error',
+            label: '处理失败',
+            detail: message,
+          })
+          await registry?.close()
+          registry = undefined
+          await finishCanonicalTurn({ kind: 'error', error: message })
+          await persistChatAgentLogEvent(chatSessionEvent(logContext, {
+            event_type: 'session/error',
+            phase: 'chat',
+            status: 'error',
+            payload: { error: message },
+          }))
+          throw error
+        }
       },
+      onError: () => 'Chat response failed',
     })
     return createUIMessageStreamResponse({ stream })
   } catch (error) {

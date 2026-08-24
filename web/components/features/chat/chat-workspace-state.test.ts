@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import type { ChatPart, ChatRole, UIMessageStreamEvent } from '@/lib/api/chat'
 import {
   applyChatStreamEvent,
+  approvalResumeMessage,
   initialChatStatusPart,
   makeLocalMessage,
   toModelMessages,
@@ -32,6 +33,17 @@ describe('chat workspace state helpers', () => {
       phase: 'thinking',
       state: 'streaming',
       label: '正在思考',
+    })
+  })
+
+  it('creates a local assistant placeholder for approval resume streaming', () => {
+    expect(approvalResumeMessage()).toMatchObject({
+      role: 'assistant',
+      parts: [expect.objectContaining({
+        type: 'chat-status',
+        state: 'streaming',
+        label: '正在思考',
+      })],
     })
   })
 

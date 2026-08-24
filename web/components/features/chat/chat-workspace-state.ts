@@ -137,6 +137,10 @@ export function initialChatStatusPart(): ChatStatusPart {
   }
 }
 
+export function approvalResumeMessage() {
+  return makeLocalMessage('assistant', [initialChatStatusPart()])
+}
+
 export function applyChatStreamEvent(
   messages: DisplayMessage[],
   assistantMessageId: string,
