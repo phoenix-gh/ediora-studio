@@ -24,6 +24,7 @@ import type { ClipboardRemoteImage } from '@/app/assets/asset-paste'
 
 type CrepeInstance = InstanceType<typeof import('@milkdown/crepe').Crepe>
 type InsertAction = typeof import('@milkdown/kit/utils').insert
+type ReplaceAllAction = typeof import('@milkdown/kit/utils').replaceAll
 
 export interface MarkdownEditorHandle {
   insert(markdown: string): void
@@ -35,6 +36,8 @@ type MarkdownEditorProps = {
   documentKey: string | number
 }
 
+type EditorMode = 'visual' | 'source'
+
 export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(function MarkdownEditor({
   value,
   onChange,
@@ -43,9 +46,15 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
   const rootRef = useRef<HTMLDivElement>(null)
   const crepeRef = useRef<CrepeInstance | null>(null)
   const insertRef = useRef<InsertAction | null>(null)
+  const replaceAllRef = useRef<ReplaceAllAction | null>(null)
   const viewRef = useRef<EditorView | null>(null)
+  const sourceRef = useRef<HTMLTextAreaElement>(null)
   const onChangeRef = useRef(onChange)
   const initialValueRef = useRef(value)
+  const latestMarkdownRef = useRef(value)
+  const sourceValueRef = useRef(value)
+  const previousDocumentKeyRef = useRef(documentKey)
+  const modeRef = useRef<EditorMode>('visual')
   const sessionRef = useRef(0)
   const documentChangeCountRef = useRef(0)
   const initializedDocumentChangeCountRef = useRef<number | null>(null)
@@ -55,6 +64,8 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
   const retryRef = useRef<(id: string) => void>(() => undefined)
   const [loadAttempt, setLoadAttempt] = useState(0)
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
+  const [mode, setMode] = useState<EditorMode>('visual')
+  const [sourceValue, setSourceValue] = useState(value)
 
   useEffect(() => {
     onChangeRef.current = onChange
@@ -62,9 +73,48 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
 
   useEffect(() => {
     initialValueRef.current = value
+    latestMarkdownRef.current = value
   }, [documentKey, value])
 
+  useEffect(() => {
+    if (previousDocumentKeyRef.current === documentKey) return
+    previousDocumentKeyRef.current = documentKey
+    modeRef.current = 'visual'
+    sourceValueRef.current = value
+    latestMarkdownRef.current = value
+    setMode('visual')
+    setSourceValue(value)
+  }, [documentKey, value])
+
+  const publishMarkdown = useCallback((markdown: string) => {
+    const cleaned = stripImageImportMarkers(markdown)
+    latestMarkdownRef.current = cleaned
+    onChangeRef.current(cleaned)
+  }, [])
+
+  const insertIntoSource = useCallback((markdown: string) => {
+    const textarea = sourceRef.current
+    const current = sourceValueRef.current
+    const start = textarea?.selectionStart ?? current.length
+    const end = textarea?.selectionEnd ?? start
+    const next = current.slice(0, start) + markdown + current.slice(end)
+    sourceValueRef.current = next
+    setSourceValue(next)
+    publishMarkdown(next)
+    if (textarea) {
+      requestAnimationFrame(() => {
+        textarea.focus()
+        const cursor = start + markdown.length
+        textarea.setSelectionRange(cursor, cursor)
+      })
+    }
+  }, [publishMarkdown])
+
   const insertMarkdown = useCallback((markdown: string) => {
+    if (modeRef.current === 'source') {
+      insertIntoSource(markdown)
+      return
+    }
     const crepe = crepeRef.current
     const insert = insertRef.current
     if (!crepe || !insert) {
@@ -72,9 +122,43 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
       return
     }
     crepe.editor.action(insert(markdown))
-  }, [])
+  }, [insertIntoSource])
 
   useImperativeHandle(ref, () => ({ insert: insertMarkdown }), [insertMarkdown])
+
+  const changeMode = useCallback((nextMode: EditorMode) => {
+    if (nextMode === modeRef.current) return
+    if (nextMode === 'source') {
+      let current = latestMarkdownRef.current
+      if (crepeRef.current) {
+        try {
+          current = stripImageImportMarkers(crepeRef.current.getMarkdown())
+        } catch {
+          // Keep the last persisted Markdown if the editor is mid-transition.
+        }
+      }
+      modeRef.current = 'source'
+      sourceValueRef.current = current
+      setSourceValue(current)
+      setMode('source')
+      return
+    }
+
+    const current = sourceValueRef.current
+    modeRef.current = 'visual'
+    latestMarkdownRef.current = current
+    const crepe = crepeRef.current
+    const replaceAll = replaceAllRef.current
+    if (crepe && replaceAll) {
+      crepe.editor.action(replaceAll(current))
+      setMode('visual')
+      return
+    }
+    initialValueRef.current = current
+    setStatus('loading')
+    setLoadAttempt(attempt => attempt + 1)
+    setMode('visual')
+  }, [])
 
   const runRemoteImport = useCallback(async (
     images: ClipboardRemoteImage[],
@@ -142,7 +226,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
 
     async function createEditor() {
       try {
-        const [{ Crepe }, { editorViewCtx }, { $prose, insert }] = await Promise.all([
+        const [{ Crepe }, { editorViewCtx }, { $prose, insert, replaceAll }] = await Promise.all([
           import('@milkdown/crepe'),
           import('@milkdown/kit/core'),
           import('@milkdown/kit/utils'),
@@ -182,7 +266,8 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
               if (documentChangeCountRef.current <= initializedDocumentChangeCount) return
               suppressInitialChangeRef.current = false
             }
-            onChangeRef.current(stripImageImportMarkers(markdown))
+            if (modeRef.current === 'source') return
+            publishMarkdown(markdown)
           })
         })
         await crepe.create()
@@ -194,6 +279,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
         suppressInitialChangeRef.current = documentChangeCountRef.current > 0
         crepeRef.current = crepe
         insertRef.current = insert
+        replaceAllRef.current = replaceAll
         viewRef.current = crepe.editor.action(ctx => ctx.get(editorViewCtx))
         for (const markdown of pendingInsertionsRef.current.splice(0)) {
           crepe.editor.action(insert(markdown))
@@ -213,10 +299,11 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
       remoteImages.clear()
       viewRef.current = null
       insertRef.current = null
+      replaceAllRef.current = null
       crepeRef.current = null
       if (ownedCrepe) void ownedCrepe.destroy()
     }
-  }, [documentKey, loadAttempt, runRemoteImport])
+  }, [documentKey, loadAttempt, publishMarkdown, runRemoteImport])
 
   const registerAndImport = useCallback((images: ClipboardRemoteImage[]) => {
     const view = viewRef.current
@@ -274,35 +361,76 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
   }, [insertMarkdown, registerAndImport, status])
 
   return (
-    <div className="asset-visual-markdown-editor relative h-full min-h-[420px]">
-      <div
-        aria-busy={status === 'loading'}
-        aria-label="可视化 Markdown 编辑器"
-        className="h-full min-h-[420px] overflow-auto"
-        onPasteCapture={handlePaste}
-        ref={rootRef}
-        role="textbox"
-        tabIndex={0}
-      />
-      {status === 'loading' ? (
-        <div className="pointer-events-none absolute inset-0 grid place-items-center bg-background/70 text-sm text-muted-foreground">
-          加载编辑器…
+    <div className="asset-visual-markdown-editor relative flex h-full min-h-[420px] flex-col">
+      <div className="flex shrink-0 items-center justify-end border-b border-border/60 pb-2">
+        <div
+          aria-label="Markdown 编辑模式"
+          className="inline-flex items-center rounded-md border border-border bg-muted/30 p-0.5"
+          role="tablist"
+        >
+          {(['visual', 'source'] as const).map(option => {
+            const selected = mode === option
+            return (
+              <button
+                aria-selected={selected}
+                className={`rounded px-2.5 py-1 text-xs transition-colors ${selected ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+                key={option}
+                onClick={() => changeMode(option)}
+                role="tab"
+                type="button"
+              >
+                {option === 'visual' ? '可视' : '源码'}
+              </button>
+            )
+          })}
         </div>
-      ) : null}
-      {status === 'error' ? (
-        <div className="absolute inset-0 grid place-items-center bg-background/90">
-          <button
-            className="rounded-md border border-border px-3 py-2 text-sm"
-            onClick={() => {
-              setStatus('loading')
-              setLoadAttempt(attempt => attempt + 1)
+      </div>
+      <div className="relative min-h-0 flex-1 pt-2">
+        <div
+          aria-busy={status === 'loading'}
+          aria-label="可视化 Markdown 编辑器"
+          className="h-full min-h-[420px] overflow-auto"
+          hidden={mode === 'source'}
+          onPasteCapture={handlePaste}
+          ref={rootRef}
+          role="textbox"
+          tabIndex={mode === 'visual' ? 0 : -1}
+        />
+        {mode === 'source' ? (
+          <textarea
+            aria-label="Markdown 源码编辑器"
+            className="h-full min-h-[420px] w-full resize-none overflow-auto rounded-md border border-border bg-background px-4 py-3 font-mono text-sm leading-6 outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+            onChange={event => {
+              const next = event.currentTarget.value
+              sourceValueRef.current = next
+              publishMarkdown(next)
+              setSourceValue(next)
             }}
-            type="button"
-          >
-            重试加载编辑器
-          </button>
-        </div>
-      ) : null}
+            ref={sourceRef}
+            spellCheck={false}
+            value={sourceValue}
+          />
+        ) : null}
+        {mode === 'visual' && status === 'loading' ? (
+          <div className="pointer-events-none absolute inset-0 grid place-items-center bg-background/70 text-sm text-muted-foreground">
+            加载编辑器…
+          </div>
+        ) : null}
+        {mode === 'visual' && status === 'error' ? (
+          <div className="absolute inset-0 grid place-items-center bg-background/90">
+            <button
+              className="rounded-md border border-border px-3 py-2 text-sm"
+              onClick={() => {
+                setStatus('loading')
+                setLoadAttempt(attempt => attempt + 1)
+              }}
+              type="button"
+            >
+              重试加载编辑器
+            </button>
+          </div>
+        ) : null}
+      </div>
     </div>
   )
 })

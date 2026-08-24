@@ -8,8 +8,10 @@ const mocks = vi.hoisted(() => ({
   actions: [] as Array<Record<string, unknown>>,
   create: vi.fn(),
   destroy: vi.fn(),
+  getMarkdown: vi.fn(() => ''),
   importCreativeAssetImages: vi.fn(),
   insertions: [] as string[],
+  replacements: [] as string[],
   documentChangeListener: undefined as undefined | (() => void),
   markdownListener: undefined as undefined | ((ctx: unknown, markdown: string) => void),
   toastWarning: vi.fn(),
@@ -37,7 +39,7 @@ vi.mock('@milkdown/crepe', () => ({
 
     create = mocks.create
     destroy = mocks.destroy
-    getMarkdown = vi.fn(() => '')
+    getMarkdown = mocks.getMarkdown
 
     on(callback: (listener: { markdownUpdated: (handler: typeof mocks.markdownListener) => void }) => void) {
       callback({
@@ -54,6 +56,9 @@ vi.mock('@milkdown/kit/utils', () => ({
   $prose: vi.fn((factory: () => unknown) => factory()),
   insert: vi.fn((markdown: string) => () => {
     mocks.insertions.push(markdown)
+  }),
+  replaceAll: vi.fn((markdown: string) => () => {
+    mocks.replacements.push(markdown)
   }),
 }))
 
@@ -113,13 +118,33 @@ beforeEach(() => {
   vi.clearAllMocks()
   mocks.actions.length = 0
   mocks.insertions.length = 0
+  mocks.replacements.length = 0
   mocks.documentChangeListener = undefined
   mocks.markdownListener = undefined
   mocks.create.mockResolvedValue(undefined)
   mocks.destroy.mockResolvedValue(undefined)
+  mocks.getMarkdown.mockReturnValue('')
 })
 
 describe('MarkdownEditor', () => {
+  it('switches between visual and source modes without losing Markdown', async () => {
+    const onChange = vi.fn()
+    mocks.getMarkdown.mockReturnValue('# 当前标题\n\n保留 **Markdown**')
+    render(<MarkdownEditor documentKey={7} onChange={onChange} value="# 初始标题" />)
+
+    await waitFor(() => expect(mocks.create).toHaveBeenCalledTimes(1))
+    fireEvent.click(screen.getByRole('tab', { name: '源码' }))
+
+    const sourceEditor = screen.getByRole('textbox', { name: 'Markdown 源码编辑器' }) as HTMLTextAreaElement
+    expect(sourceEditor.value).toBe('# 当前标题\n\n保留 **Markdown**')
+
+    fireEvent.change(sourceEditor, { target: { value: '# 修改后的源码\n\n- 保留列表' } })
+    expect(onChange).toHaveBeenLastCalledWith('# 修改后的源码\n\n- 保留列表')
+
+    fireEvent.click(screen.getByRole('tab', { name: '可视' }))
+    expect(mocks.replacements).toContain('# 修改后的源码\n\n- 保留列表')
+  })
+
   it('inserts Markdown through its imperative handle', async () => {
     const ref = createRef<MarkdownEditorHandle>()
     render(<MarkdownEditor ref={ref} documentKey={7} onChange={vi.fn()} value="正文" />)
