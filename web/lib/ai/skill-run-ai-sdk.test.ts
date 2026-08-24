@@ -104,6 +104,7 @@ describe('generic SkillRun AI SDK adapter', () => {
 
   it('runs plan, progressive load, execution, and validation without forcing tool choice', async () => {
     const calls: string[] = []
+    let planningPrompt = ''
     let executionPrompt = ''
     const execute = vi.fn(async (input: Record<string, unknown>) => {
       calls.push('execute')
@@ -119,10 +120,11 @@ describe('generic SkillRun AI SDK adapter', () => {
       skill: alpha,
       activation: 'automatic',
       userRequest: '完成任务',
+      conversationContext: '<previous_assistant_deliverable>这是上一轮交付物。</previous_assistant_deliverable>',
       selectedContext: '',
       references,
       tools: [{ name: 'search_assets', description: 'Search assets' }],
-      plan: async () => { calls.push('plan'); return plan },
+      plan: async ({ prompt }) => { calls.push('plan'); planningPrompt = prompt; return plan },
       readReferences: async paths => { calls.push('references'); return paths.map(path => ({ path, content: 'rules', bytes: 5 })) },
       execute,
       validate: async () => { calls.push('validate'); return { passed: true, violations: [] } },
@@ -131,7 +133,9 @@ describe('generic SkillRun AI SDK adapter', () => {
 
     expect(calls).toEqual(['plan', 'references', 'execute', 'validate'])
     expect(result).toMatchObject({ kind: 'completed', completed: { delivery: 'ready', text: 'grounded draft' } })
+    expect(planningPrompt).toContain('这是上一轮交付物。')
     expect(executionPrompt).toContain('deliver: 交付结果')
+    expect(executionPrompt).toContain('这是上一轮交付物。')
     expect(executionPrompt).toContain('required tools: search_assets')
   })
 

@@ -49,6 +49,20 @@ describe('generic Skill run planning', () => {
     expect(prompt).toContain('verificationCriteria')
   })
 
+  it('includes the previous assistant deliverable when planning a follow-up rewrite', () => {
+    const prompt = buildSkillPlanPrompt({
+      skill: syntheticSkill('Rewrite', '# Procedure\nRewrite the supplied material.'),
+      userRequest: '我只要写一个短帖',
+      conversationContext: '<previous_assistant_deliverable>这是上一轮文章。</previous_assistant_deliverable>',
+      selectedContext: '',
+      references,
+      tools: [],
+    })
+
+    expect(prompt).toContain('这是上一轮文章。')
+    expect(prompt).toContain('将上一轮交付物改写为短帖')
+  })
+
   it('contains no bundled Skill identifier or domain branch', () => {
     const source = readFileSync(new URL('./skill-run-planner.ts', import.meta.url), 'utf8')
 
