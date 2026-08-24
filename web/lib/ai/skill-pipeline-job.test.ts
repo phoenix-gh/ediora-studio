@@ -40,7 +40,6 @@ function runResult(text: string) {
     goalCompletion: {
       status: 'completed' as const,
       summary: text,
-      evidence: [],
     },
     skillRun: {
       skillName: 'test',
@@ -227,7 +226,6 @@ function dependencies(job: DurableJob, options: {
             goalCompletion: {
               status: 'blocked' as const,
               summary: '上游资料不足',
-              evidence: [],
               remainingWork: ['补充可信来源'],
             },
           }

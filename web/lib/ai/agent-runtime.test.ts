@@ -99,7 +99,7 @@ describe('shared Agent runtime', () => {
         const completeGoal = (input.tools as Record<string, Executable>).complete_goal
         const declaration = {
           status: 'completed', summary: '既定目标已经完成',
-          evidence: [{ kind: 'tool_call', id: 'save-1', claim: '草稿已经保存' }],
+          evidence: [{ kind: 'tool_call', id: 'save_draft', claim: '草稿已经保存' }],
         }
         const output = await completeGoal.execute(declaration, { toolCallId: 'goal-1' })
         return {
@@ -118,16 +118,15 @@ describe('shared Agent runtime', () => {
       modelMessages: [{ role: 'user', content: '完成保存的自然语言目标' }],
       maxSteps: 5,
       requireGoalCompletion: true,
-      validateGoalCompletion: declaration => {
-        expect(declaration.evidence).toEqual([
-          { kind: 'tool_call', id: 'save-1', claim: '草稿已经保存' },
-        ])
+      verifyGoalCompletion: declaration => {
+        expect(declaration).toEqual({
+          status: 'completed', summary: '既定目标已经完成',
+        })
       },
     })
 
     expect(result.goalCompletion).toEqual({
       status: 'completed', summary: '既定目标已经完成',
-      evidence: [{ kind: 'tool_call', id: 'save-1', claim: '草稿已经保存' }],
     })
     expect(result.text).toBe('既定目标已经完成')
     expect(deps.generate).toHaveBeenCalledTimes(2)
@@ -167,7 +166,9 @@ describe('shared Agent runtime', () => {
       objective: '完成任务', modelMessages: [], maxSteps: 2,
       requireGoalCompletion: true,
     })).resolves.toMatchObject({
-      goalCompletion: declaration,
+      goalCompletion: {
+        status: 'completed', summary: '既定目标已经完成',
+      },
     })
     expect(messages.some(event => event.type === 'assistant/message')).toBe(true)
     expect(modelDirections).toContain('model_response')
@@ -212,7 +213,7 @@ describe('shared Agent runtime', () => {
     })
 
     expect(result.goalCompletion).toEqual({
-      status: 'blocked', summary: '缺少必要授权', evidence: [],
+      status: 'blocked', summary: '缺少必要授权',
       remainingWork: ['等待用户授权'],
     })
     await runtime.close()

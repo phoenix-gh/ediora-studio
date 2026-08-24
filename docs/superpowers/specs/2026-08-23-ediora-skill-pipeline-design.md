@@ -321,8 +321,8 @@ inside any Skill package:
 type CompleteGoalInput = {
   status: "completed" | "blocked"
   summary: string
-  evidence: Array<{
-    kind: "tool_call" | "artifact"
+  outputs?: Array<{
+    kind: "artifact"
     id: string
     claim: string
   }>
@@ -333,19 +333,27 @@ type CompleteGoalInput = {
 The Agent must call it alone in its final tool turn. `completed` means the
 Agent has compared the original objective with the real tool results and
 believes every material requirement is satisfied. `blocked` means it has
-exhausted safe in-scope progress and records the unmet work and reason.
+exhausted safe in-scope progress and records the unmet work and reason. A
+stable artifact ID may be listed in `outputs`; provider-generated tool-call
+IDs are never part of the Agent declaration.
 
-The Harness validates only generic integrity:
+Completion has three separate gates:
 
-- referenced tool calls and artifacts exist in the current execution scope;
-- referenced side-effecting tool calls completed successfully and are not
-  uncertain;
-- the declaration is well formed and belongs to the active run epoch;
-- no model, tool, cancellation, lease, or persistence error remains open.
+1. **Runtime settled:** all tool calls are resolved, no approval or pending
+   follow-up remains, and no model, tool, cancellation, lease, or persistence
+   error remains open. The Harness owns this gate and the tool-call identity.
+2. **Agent declared:** the Agent calls `complete_goal` with `completed` or
+   `blocked` after auditing the unchanged objective and actual results.
+3. **Business verified:** the Job boundary checks the durable output contract
+   for that flow or Stage. It checks persisted records and declared artifact
+   types, not a model-supplied call ID or a hidden prompt interpretation.
 
-Evidence may be empty only when the declaration summary itself is the complete
-requested deliverable and the objective required no durable artifact or tool
-side effect. The Harness persists that summary as the final assistant output.
+The Harness records runtime evidence from its own audit stream, including the
+actual provider tool-call IDs, tool names, statuses, side-effect flags, and
+stable output references. This evidence is persisted separately from the
+Agent declaration. A legacy `evidence` field may be read during rollout so
+old completion JSON is not lost, but it is normalized away and never decides
+whether the current run completed.
 
 The Harness does not parse the prompt for quantities, compare a rule's
 `target_count` with saved drafts, infer required artifact types from business
@@ -353,15 +361,17 @@ phrasing, or replace the Agent's completion judgment with hidden structured
 fields. Skill requirements and the editable objective remain the business
 source of truth.
 
-A valid `completed` declaration persists its evidence and terminates the run
-without an unnecessary additional model turn, equivalent to Pi's terminating
-tool-result hint. A `blocked` declaration closes the attempt as failed with
-structured remaining work; it never becomes `succeeded`.
+A valid `completed` declaration persists the normalized declaration and
+Harness-owned runtime evidence, then terminates the run without an
+unnecessary additional model turn, equivalent to Pi's terminating tool-result
+hint. A `blocked` declaration closes the attempt as failed with structured
+remaining work; it never becomes `succeeded`.
 
 Persisted `agent_run` completion evidence is valid only when it contains this
-well-formed declaration. The Harness does not infer completion from legacy
-evidence fields, a succeeded execution status, or an already persisted primary
-artifact; those records cannot complete a Job or Pipeline Stage.
+well-formed declaration and, for new records, the corresponding runtime audit
+snapshot. The Harness does not infer completion from legacy evidence fields, a
+succeeded execution status, or an already persisted primary artifact; those
+records cannot complete a Job or Pipeline Stage.
 Planning, Skill verification criteria, and an optional review/revision pass
 may give the Agent additional feedback before this declaration. They are not a
 second authority: a hidden validator cannot mark the Job successful, and a
@@ -496,13 +506,15 @@ Every Stage receives:
 4. The Stage's declared output and validation contract.
 
 A successful Stage must produce exactly one active primary artifact of the
-declared kind and a valid Agent completion declaration that cites it. It may
-also produce auxiliary artifacts such as source lists, outlines, validation
-reports, or discarded alternatives. The persistence boundary may reject a
-missing artifact, malformed artifact schema, invalid reference, or failed tool
-call, but it does not reinterpret the natural-language objective to decide
-whether the artifact is substantively sufficient. Without both the artifact
-and Agent declaration, later stages do not start.
+declared kind and a valid Agent completion declaration. The Agent may include
+that artifact's stable ID in `outputs`, but the Harness obtains tool evidence
+from the actual runtime trace. A Stage may also produce auxiliary artifacts
+such as source lists, outlines, validation reports, or discarded alternatives.
+The persistence boundary may reject a missing artifact, malformed artifact
+schema, invalid reference, or failed tool call, but it does not reinterpret
+the natural-language objective to decide whether the artifact is substantively
+sufficient. Without both the artifact and Agent declaration, later stages do
+not start.
 
 ## Lifecycle and state transitions
 
@@ -675,8 +687,9 @@ The Job database remains authoritative for the pipeline card. Event streaming
 only tells the client to refetch records after a cursor. Reload and reconnect
 rebuild the card from `GET /api/jobs/{id}`.
 
-When the final active artifact and its `complete_goal(status="completed")`
-declaration are ready, Ediora activates it, marks the Job successful, and
+When the final active artifact, the `complete_goal(status="completed")`
+declaration, and all three completion gates are ready, Ediora activates it,
+marks the Job successful, and
 appends the final normal assistant message transactionally. Artifact presence
 or a natural model stop alone cannot make the Job successful.
 If a process crash splits an unavoidable compatibility write, a reconciler
@@ -774,8 +787,9 @@ therefore resolved against persisted checkpoints and command IDs.
   not regenerated after a worker restart.
 - An external side effect without a proven idempotency/result record becomes
   `uncertain`; it is never automatically replayed.
-- Generic evidence-integrity validation is deterministic and rerunnable from
-  the saved trace. Business sufficiency remains the Agent's judgment.
+- Runtime evidence is reconstructed deterministically from the saved tool
+  audit and normalized declaration. Legacy model evidence is retained as raw
+  JSON for data preservation but is not treated as live execution proof.
 
 ### Reconciliation
 

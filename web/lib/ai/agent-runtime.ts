@@ -98,7 +98,7 @@ export type AgentRunRequest = {
   maxSteps: number
   requiredTools?: string[]
   requireGoalCompletion?: boolean
-  validateGoalCompletion?: (
+  verifyGoalCompletion?: (
     declaration: AgentGoalCompletionDeclaration,
   ) => void | Promise<void>
   getFollowUpMessages?: () => ModelMessage[] | Promise<ModelMessage[]>
@@ -208,7 +208,7 @@ export async function openAgentRuntime(
   let activeStep: number | null = null
   let activeGoalRun: {
     declaration?: AgentGoalCompletionDeclaration
-    validate?: AgentRunRequest['validateGoalCompletion']
+    verify?: AgentRunRequest['verifyGoalCompletion']
   } | undefined
 
   const emitSessionEvent = async (
@@ -226,7 +226,7 @@ export async function openAgentRuntime(
 
   const acceptGoalCompletion = async (declaration: AgentGoalCompletionDeclaration) => {
     if (!activeGoalRun) throw new Error('No durable Agent run is awaiting goal completion')
-    await activeGoalRun.validate?.(declaration)
+    await activeGoalRun.verify?.(declaration)
     activeGoalRun.declaration = declaration
   }
 
@@ -503,9 +503,9 @@ export async function openAgentRuntime(
 
   async function run(request: AgentRunRequest): Promise<AgentRunResult> {
     const goalRun = request.requireGoalCompletion
-      ? { validate: request.validateGoalCompletion } as {
+      ? { verify: request.verifyGoalCompletion } as {
           declaration?: AgentGoalCompletionDeclaration
-          validate?: AgentRunRequest['validateGoalCompletion']
+          verify?: AgentRunRequest['verifyGoalCompletion']
         }
       : undefined
     if (goalRun && !goalControlTools[COMPLETE_GOAL_TOOL_NAME]) {

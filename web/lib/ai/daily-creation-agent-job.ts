@@ -29,9 +29,11 @@ import {
 } from './agent-runtime'
 import {
   blockedGoalError,
+  buildRuntimeGoalEvidence,
   completeGoalInputSchema,
   goalCompletionFromToolOutput,
-  validateGoalCompletionEvidence,
+  normalizeGoalCompletionDeclaration,
+  runtimeGoalEvidenceSchema,
 } from './agent-goal-completion'
 import { pinCapabilitySnapshot } from './agent-capabilities'
 import {
@@ -130,6 +132,7 @@ const agentRunEvidenceSchema = z.object({
   finalText: z.string().max(2_000),
   toolCallCount: z.number().int().nonnegative(),
   goalCompletion: completeGoalInputSchema,
+  runtimeEvidence: runtimeGoalEvidenceSchema.optional(),
 })
 
 function firstBlockingRecordedCall(
@@ -229,12 +232,22 @@ const defaultDependencies: DailyCreationAgentJobDependencies = {
   apiRoot: defaultApiRoot,
 }
 
+function parseAgentRunEvidence(value: unknown): AgentCompletionEvidence | undefined {
+  const parsed = agentRunEvidenceSchema.safeParse(value)
+  if (!parsed.success) return undefined
+  const goalCompletion = normalizeGoalCompletionDeclaration(parsed.data.goalCompletion)
+  if (!goalCompletion) return undefined
+  return {
+    ...parsed.data,
+    goalCompletion,
+  }
+}
+
 function completedStepEvidence(job: DurableJob) {
   const output = [...job.steps]
     .filter(step => step.key === 'agent' && step.status === 'succeeded')
     .sort((left, right) => right.attempt - left.attempt)[0]?.output
-  const parsed = agentRunEvidenceSchema.safeParse(output)
-  return parsed.success ? parsed.data : undefined
+  return parseAgentRunEvidence(output)
 }
 
 function durableExecutionEvidence(execution: DurableAgentExecution) {
@@ -242,8 +255,10 @@ function durableExecutionEvidence(execution: DurableAgentExecution) {
     execution.completion_evidence,
     execution.checkpoint.evidence,
   ]) {
-    const parsed = agentRunEvidenceSchema.safeParse(candidate)
-    if (parsed.success && parsed.data.executionId === execution.id) return parsed.data
+    const parsed = parseAgentRunEvidence(candidate)
+    if (parsed && 'kind' in parsed && parsed.kind === 'agent_run' && parsed.executionId === execution.id) {
+      return parsed
+    }
   }
   return undefined
 }
@@ -411,6 +426,7 @@ export async function runDailyCreationAgentJob(
       toolCallId: call.tool_call_id,
       toolName: call.tool_name,
       status: call.status,
+      sideEffecting: call.side_effecting ?? false,
     }))
     const recordedGoalCall = [...recordedCalls].reverse().find(call => (
       call.status === 'succeeded' && call.tool_name === 'complete_goal'
@@ -438,7 +454,6 @@ export async function runDailyCreationAgentJob(
     if (recordedGoalCall) {
       const declaration = recordedGoalDeclaration
       if (!declaration) throw new Error('Recorded complete_goal result has no valid declaration')
-      validateGoalCompletionEvidence(declaration, recordedEvidenceCalls)
       if (declaration.status === 'blocked') throw blockedGoalError(declaration)
       const recoveredEvidence: AgentCompletionEvidence = {
         kind: 'agent_run',
@@ -446,6 +461,7 @@ export async function runDailyCreationAgentJob(
         finalText: declaration.summary.slice(0, 2_000),
         toolCallCount: successfulBusinessToolCallCount(recordedEvidenceCalls),
         goalCompletion: declaration,
+        runtimeEvidence: buildRuntimeGoalEvidence(recordedEvidenceCalls, declaration.outputs),
       }
       pendingFinalizationEvidence = recoveredEvidence
       await finishCanonicalTurn({ kind: 'completed', recovered: true })
@@ -577,14 +593,6 @@ export async function runDailyCreationAgentJob(
         modelMessages: [{ role: 'user', content: objective }],
         maxSteps: 30,
         requireGoalCompletion: true,
-        validateGoalCompletion: declaration => validateGoalCompletionEvidence(
-          declaration,
-          audits.map(audit => ({
-            toolCallId: audit.toolCallId,
-            toolName: audit.toolName,
-            status: audit.status,
-          })),
-        ),
         onStep: event => checkpoint(event.phase, {
           objective,
           latestStep: event,
@@ -608,8 +616,8 @@ export async function runDailyCreationAgentJob(
       toolCallId: audit.toolCallId,
       toolName: audit.toolName,
       status: audit.status,
+      sideEffecting: audit.sideEffecting,
     }))
-    validateGoalCompletionEvidence(declaration, auditCalls)
     if (declaration.status === 'blocked') throw blockedGoalError(declaration)
     const completionEvidence: AgentCompletionEvidence = {
       kind: 'agent_run',
@@ -617,6 +625,7 @@ export async function runDailyCreationAgentJob(
       finalText: declaration.summary.slice(0, 2_000),
       toolCallCount: successfulBusinessToolCallCount(auditCalls),
       goalCompletion: declaration,
+      runtimeEvidence: buildRuntimeGoalEvidence(auditCalls, declaration.outputs),
     }
     pendingFinalizationEvidence = completionEvidence
     await checkpoint('finalizing', {
@@ -678,7 +687,6 @@ export async function runDailyCreationAgentJob(
     const deterministic = failureMessage.includes(interruptedAfterSideEffects)
       || failureMessage.includes('Selected skill is unavailable')
       || failureMessage.includes('Agent capability drift detected')
-      || failureMessage.includes('Goal completion cites an unavailable tool call')
       || failureMessage.includes('Agent blocked:')
     if (!durableFinalizationConfirmed) {
       try {

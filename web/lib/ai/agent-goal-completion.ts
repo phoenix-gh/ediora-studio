@@ -1,29 +1,47 @@
 import { tool } from 'ai'
 import { z } from 'zod'
 
-import type { AgentGoalCompletionDeclaration } from './agent-runtime-types'
+import type {
+  AgentGoalCompletionDeclaration,
+  AgentGoalOutputReference,
+  AgentRuntimeGoalEvidence,
+} from './agent-runtime-types'
 
 export const COMPLETE_GOAL_TOOL_NAME = 'complete_goal'
 
 export const completeGoalInputSchema = z.object({
   status: z.enum(['completed', 'blocked']),
   summary: z.string().trim().min(1).max(50_000),
-  evidence: z.array(z.object({
-    kind: z.enum(['tool_call', 'artifact']),
+  outputs: z.array(z.object({
+    kind: z.literal('artifact'),
     id: z.string().trim().min(1).max(300).describe(
-      'For tool_call, one exact provider-generated toolCallId from the tool history (normally call_...). Never use a tool name, business or artifact ID, comma-separated IDs, or the complete_goal call ID. For artifact, use the persisted artifact ID.',
+      'Use a stable persisted artifact ID, never a transient provider tool-call ID.',
     ),
     claim: z.string().trim().min(1).max(1_000),
-  }).strict()).max(100),
+  }).strict()).max(100).optional(),
   remainingWork: z.array(z.string().trim().min(1).max(1_000)).max(100).optional(),
+}).passthrough()
+
+export const runtimeGoalEvidenceSchema = z.object({
+  toolCalls: z.array(z.object({
+    toolCallId: z.string().min(1),
+    toolName: z.string().min(1),
+    status: z.string().min(1),
+    sideEffecting: z.boolean(),
+  }).strict()),
+  outputs: z.array(z.object({
+    kind: z.literal('artifact'),
+    id: z.string().min(1),
+    claim: z.string().min(1),
+  }).strict()),
 }).strict()
 
 export const COMPLETE_GOAL_DESCRIPTION = [
   'Declare the final business status of the current durable task.',
   'Call this only after auditing the original objective and actual tool results.',
   'Use completed only when the entire objective is complete; otherwise use blocked and list the remaining work.',
-  'Cite successful tool calls or persisted artifacts that support the declaration.',
-  'For each tool_call evidence item, id must be one exact provider-generated toolCallId from the tool history (normally call_...), never a tool name, business ID, artifact ID, or multiple IDs.',
+  'The Harness records the actual tool audit automatically; never cite provider tool-call IDs in this declaration.',
+  'If a durable output needs to be identified, use outputs with stable persisted artifact IDs.',
 ].join(' ')
 
 export function createCompleteGoalTool(
@@ -33,14 +51,16 @@ export function createCompleteGoalTool(
     description: COMPLETE_GOAL_DESCRIPTION,
     inputSchema: completeGoalInputSchema,
     execute: async input => {
-      await accept(input)
-      return { accepted: true as const, declaration: input }
+      const declaration = normalizeGoalCompletionDeclaration(input)
+      if (!declaration) throw new Error('complete_goal input has no valid declaration')
+      await accept(declaration)
+      return { accepted: true as const, declaration }
     },
   })
 }
 
 export function goalCompletionInstructions(objective: string) {
-  return `\n\nDurable task completion protocol:\n- The original objective is: ${objective}\n- You own the judgment of whether that entire objective is complete. Audit the original objective and the actual tool results.\n- Do not stop after describing progress. When the objective is fully complete, call complete_goal with status completed, a concise final summary, and evidence references.\n- For tool_call evidence, use one exact provider-generated toolCallId from the tool history per item (normally call_...). Never use a tool name, business ID, artifact ID, comma-separated IDs, or the complete_goal call ID.\n- Use kind artifact for persisted artifact IDs.\n- If the objective cannot be completed in this run, call complete_goal with status blocked, explain the blocker, and list remaining work.\n- Call complete_goal only once, as the final action of the run.`
+  return `\n\nDurable task completion protocol:\n- The original objective is: ${objective}\n- You own the judgment of whether that entire objective is complete. Audit the original objective and the actual tool results.\n- Do not stop after describing progress. When the objective is fully complete, call complete_goal with status completed and a concise final summary.\n- The Harness records actual tool audits automatically; never cite provider tool-call IDs. If a durable output needs identification, use outputs with stable persisted artifact IDs.\n- If the objective cannot be completed in this run, call complete_goal with status blocked, explain the blocker, and list remaining work.\n- Call complete_goal only once, as the final action of the run.`
 }
 
 export function goalCompletionSelfAuditMessage(objective: string) {
@@ -54,33 +74,42 @@ export function goalCompletionFromToolOutput(value: unknown) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
   const record = value as Record<string, unknown>
   const candidate = record.accepted === true ? record.declaration : value
-  const parsed = completeGoalInputSchema.safeParse(candidate)
-  return parsed.success ? parsed.data : undefined
+  return normalizeGoalCompletionDeclaration(candidate)
+}
+
+export function normalizeGoalCompletionDeclaration(value: unknown) {
+  const parsed = completeGoalInputSchema.safeParse(value)
+  if (!parsed.success) return undefined
+  const normalized: AgentGoalCompletionDeclaration = {
+    status: parsed.data.status,
+    summary: parsed.data.summary,
+  }
+  if (parsed.data.outputs !== undefined) normalized.outputs = parsed.data.outputs
+  if (parsed.data.remainingWork !== undefined) normalized.remainingWork = parsed.data.remainingWork
+  return normalized
 }
 
 export type GoalEvidenceToolCall = {
   toolCallId: string
   toolName: string
   status: string
+  sideEffecting?: boolean
 }
 
-export function validateGoalCompletionEvidence(
-  declaration: AgentGoalCompletionDeclaration,
+export function buildRuntimeGoalEvidence(
   calls: GoalEvidenceToolCall[],
-) {
-  const successfulCalls = calls.filter(
-    call => call.status === 'succeeded' && call.toolName !== COMPLETE_GOAL_TOOL_NAME,
-  )
-  const successfulCallIds = new Set(successfulCalls.map(call => call.toolCallId))
-  const availableCalls = successfulCalls.length > 0
-    ? successfulCalls.map(call => `${call.toolCallId} (${call.toolName})`).join(', ')
-    : 'none'
-  for (const reference of declaration.evidence) {
-    if (reference.kind === 'tool_call' && !successfulCallIds.has(reference.id)) {
-      throw new Error(
-        `Goal completion cites an unavailable tool call: ${reference.id}. Available successful tool calls: ${availableCalls}`,
-      )
-    }
+  outputs: AgentGoalOutputReference[] = [],
+): AgentRuntimeGoalEvidence {
+  return {
+    toolCalls: calls
+      .filter(call => call.toolName !== COMPLETE_GOAL_TOOL_NAME)
+      .map(call => ({
+        toolCallId: call.toolCallId,
+        toolName: call.toolName,
+        status: call.status,
+        sideEffecting: call.sideEffecting ?? false,
+      })),
+    outputs: outputs.map(output => ({ ...output })),
   }
 }
 

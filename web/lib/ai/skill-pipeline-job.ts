@@ -25,8 +25,9 @@ import {
 } from './agent-runtime'
 import {
   blockedGoalError,
-  completeGoalInputSchema,
-  validateGoalCompletionEvidence,
+  buildRuntimeGoalEvidence,
+  normalizeGoalCompletionDeclaration,
+  runtimeGoalEvidenceSchema,
 } from './agent-goal-completion'
 import {
   isAgentCapabilitySnapshot,
@@ -341,20 +342,22 @@ function recoveredCompletionEvidence(
   execution: DurableAgentExecution,
 ): AgentCompletionEvidence {
   const candidate = record(execution.completion_evidence)
-  const goalCompletion = completeGoalInputSchema.safeParse(candidate.goalCompletion)
+  const goalCompletion = normalizeGoalCompletionDeclaration(candidate.goalCompletion)
+  const runtimeEvidence = runtimeGoalEvidenceSchema.safeParse(candidate.runtimeEvidence)
   if (
     candidate.kind === 'agent_run'
     && typeof candidate.executionId === 'number'
     && typeof candidate.finalText === 'string'
     && typeof candidate.toolCallCount === 'number'
-    && goalCompletion.success
+    && goalCompletion
   ) {
     return {
       kind: 'agent_run',
       executionId: candidate.executionId,
       finalText: candidate.finalText.slice(0, 2_000),
       toolCallCount: candidate.toolCallCount,
-      goalCompletion: goalCompletion.data,
+      goalCompletion,
+      ...(runtimeEvidence.success ? { runtimeEvidence: runtimeEvidence.data } : {}),
     }
   }
   throw new Error('Agent execution completion evidence has no valid goal declaration')
@@ -365,7 +368,7 @@ function deterministicFailure(error: unknown) {
     return error.status === 409 || error.status === 422 || !error.retryable
   }
   const message = error instanceof Error ? error.message : String(error)
-  return /Selected skill is unavailable|capability drift|Invalid Skill plan|Required Agent tool|automatic Skill Pipeline|Agent tool audit|Agent ended without declaring goal completion|Agent execution completion evidence has no valid goal declaration|Goal completion cites an unavailable tool call|Agent blocked:|snapshot is missing|Stage is failed|Agent execution is (?:failed|uncertain|cancelled)|interrupted after a side effect/.test(message)
+  return /Selected skill is unavailable|capability drift|Invalid Skill plan|Required Agent tool|automatic Skill Pipeline|Agent tool audit|Agent ended without declaring goal completion|Agent execution completion evidence has no valid goal declaration|Agent blocked:|snapshot is missing|Stage is failed|Agent execution is (?:failed|uncertain|cancelled)|interrupted after a side effect/.test(message)
 }
 
 export async function runSkillPipelineJob(
@@ -472,7 +475,7 @@ export async function runSkillPipelineJob(
         auxiliary: recoveredStage.artifacts.filter(artifact => (
           artifact.role === 'auxiliary' && artifact.status !== 'superseded'
         )),
-        completionEvidence: record(execution.completion_evidence),
+        completionEvidence: evidence,
       })
       finalizationConfirmed = true
       return evidence
@@ -610,14 +613,6 @@ export async function runSkillPipelineJob(
       selectedContext: stageContext(job, stage),
       maxSteps: MAX_STEPS,
       requireGoalCompletion: true,
-      validateGoalCompletion: declaration => validateGoalCompletionEvidence(
-        declaration,
-        audits.map(audit => ({
-          toolCallId: audit.toolCallId,
-          toolName: audit.toolName,
-          status: audit.status,
-        })),
-      ),
       onStep: event => checkpoint(
         event.phase,
         { objective, stage: stage.key, latestStep: event },
@@ -633,11 +628,12 @@ export async function runSkillPipelineJob(
     }
     const declaration = result.goalCompletion
     if (!declaration) throw new Error('Agent ended without declaring goal completion')
-    validateGoalCompletionEvidence(declaration, audits.map(audit => ({
+    const auditCalls = audits.map(audit => ({
       toolCallId: audit.toolCallId,
       toolName: audit.toolName,
       status: audit.status,
-    })))
+      sideEffecting: audit.sideEffecting,
+    }))
     if (declaration.status === 'blocked') throw blockedGoalError(declaration)
 
     const evidence: AgentCompletionEvidence = {
@@ -648,6 +644,7 @@ export async function runSkillPipelineJob(
         audit.status === 'succeeded' && audit.toolName !== 'complete_goal'
       )).length,
       goalCompletion: declaration,
+      runtimeEvidence: buildRuntimeGoalEvidence(auditCalls, declaration.outputs),
     }
     pendingEvidence = evidence
     await checkpoint('finalizing', {
