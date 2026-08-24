@@ -206,6 +206,48 @@ describe('MarkdownEditor', () => {
       .toHaveValue('# 第二篇')
   })
 
+  it('does not live-switch editor modes after another tab changes the stored preference', async () => {
+    mocks.getMarkdown.mockReturnValue('# 当前内容')
+    render(<MarkdownEditor documentKey={7} onChange={vi.fn()} value="# 当前内容" />)
+    await waitFor(() => expect(mocks.create).toHaveBeenCalledTimes(1))
+
+    fireEvent.click(screen.getByRole('tab', { name: '源码' }))
+    expect(screen.getByRole('textbox', { name: 'Markdown 源码编辑器' }))
+      .toHaveValue('# 当前内容')
+
+    window.localStorage.setItem(
+      'ediora:markdown-editor-preferences:v1',
+      JSON.stringify({ mode: 'visual', width: 50, alignment: 'center' }),
+    )
+    await act(async () => {
+      window.dispatchEvent(new StorageEvent('storage', {
+        key: 'ediora:markdown-editor-preferences:v1',
+        newValue: JSON.stringify({ mode: 'visual', width: 50, alignment: 'center' }),
+      }))
+      await Promise.resolve()
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: '30%' }))
+    expect(screen.getByRole('tab', { name: '源码' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('textbox', { name: 'Markdown 源码编辑器' }))
+      .toHaveValue('# 当前内容')
+  })
+
+  it('keeps preference changes for the session when localStorage writes fail', async () => {
+    mocks.getMarkdown.mockReturnValue('# 当前内容')
+    vi.spyOn(window.localStorage, 'setItem').mockImplementation(() => {
+      throw new DOMException('Storage is read-only', 'QuotaExceededError')
+    })
+    render(<MarkdownEditor documentKey={7} onChange={vi.fn()} value="# 当前内容" />)
+    await waitFor(() => expect(mocks.create).toHaveBeenCalledTimes(1))
+
+    fireEvent.click(screen.getByRole('tab', { name: '源码' }))
+
+    expect(screen.getByRole('tab', { name: '源码' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('textbox', { name: 'Markdown 源码编辑器' }))
+      .toHaveValue('# 当前内容')
+  })
+
   it('applies percentage width and alignment to both editor modes', async () => {
     render(<MarkdownEditor documentKey={7} onChange={vi.fn()} value="# 初始标题" />)
     await waitFor(() => expect(mocks.create).toHaveBeenCalledTimes(1))

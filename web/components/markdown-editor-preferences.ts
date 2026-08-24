@@ -19,8 +19,11 @@ const DEFAULT_PREFERENCES: MarkdownEditorPreferences = {
   alignment: 'left',
 }
 const listeners = new Set<() => void>()
+let cachedStorage: Storage | undefined
 let cachedRaw: string | null | undefined
 let cachedPreferences = DEFAULT_PREFERENCES
+let volatileBackingRaw: string | null | undefined
+let volatilePreferences: MarkdownEditorPreferences | undefined
 
 function parsePreferences(raw: string | null): MarkdownEditorPreferences {
   if (!raw) return DEFAULT_PREFERENCES
@@ -45,10 +48,21 @@ function readStoredPreferences() {
   if (typeof window === 'undefined') return DEFAULT_PREFERENCES
   let raw: string | null = null
   try {
-    raw = window.localStorage.getItem(STORAGE_KEY)
+    const storage = window.localStorage
+    if (storage !== cachedStorage) {
+      cachedStorage = storage
+      cachedRaw = undefined
+      cachedPreferences = DEFAULT_PREFERENCES
+      volatileBackingRaw = undefined
+      volatilePreferences = undefined
+    }
+    raw = storage.getItem(STORAGE_KEY)
   } catch {
     return cachedPreferences
   }
+  if (volatilePreferences && raw === volatileBackingRaw) return volatilePreferences
+  volatileBackingRaw = undefined
+  volatilePreferences = undefined
   if (raw === cachedRaw) return cachedPreferences
   cachedRaw = raw
   cachedPreferences = parsePreferences(raw)
@@ -57,31 +71,29 @@ function readStoredPreferences() {
 
 function subscribe(listener: () => void) {
   listeners.add(listener)
-  const handleStorage = (event: StorageEvent) => {
-    if (event.key !== STORAGE_KEY) return
-    cachedRaw = undefined
-    listener()
-  }
-  window.addEventListener('storage', handleStorage)
   return () => {
     listeners.delete(listener)
-    window.removeEventListener('storage', handleStorage)
   }
 }
 
 function updatePreferences(
   update: MarkdownEditorPreferences | ((current: MarkdownEditorPreferences) => MarkdownEditorPreferences),
 ) {
-  const current = readStoredPreferences()
+  const current = cachedPreferences
   const next = typeof update === 'function' ? update(current) : update
   const raw = JSON.stringify(next)
-  if (raw === cachedRaw) return
+  if (raw === JSON.stringify(current)) return
   try {
-    window.localStorage.setItem(STORAGE_KEY, raw)
+    const storage = window.localStorage
+    storage.setItem(STORAGE_KEY, raw)
+    cachedStorage = storage
+    cachedRaw = raw
+    volatileBackingRaw = undefined
+    volatilePreferences = undefined
   } catch {
-    // Keep the preference for this session when storage is unavailable.
+    volatileBackingRaw = cachedRaw ?? null
+    volatilePreferences = next
   }
-  cachedRaw = raw
   cachedPreferences = next
   listeners.forEach(listener => listener())
 }
