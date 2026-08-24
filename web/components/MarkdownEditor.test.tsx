@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, createRef } from 'react'
+import { act, createRef, useState } from 'react'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -8,8 +8,10 @@ const mocks = vi.hoisted(() => ({
   actions: [] as Array<Record<string, unknown>>,
   create: vi.fn(),
   destroy: vi.fn(),
+  getMarkdown: vi.fn(() => ''),
   importCreativeAssetImages: vi.fn(),
   insertions: [] as string[],
+  replacements: [] as string[],
   documentChangeListener: undefined as undefined | (() => void),
   markdownListener: undefined as undefined | ((ctx: unknown, markdown: string) => void),
   toastWarning: vi.fn(),
@@ -37,7 +39,7 @@ vi.mock('@milkdown/crepe', () => ({
 
     create = mocks.create
     destroy = mocks.destroy
-    getMarkdown = vi.fn(() => '')
+    getMarkdown = mocks.getMarkdown
 
     on(callback: (listener: { markdownUpdated: (handler: typeof mocks.markdownListener) => void }) => void) {
       callback({
@@ -54,6 +56,9 @@ vi.mock('@milkdown/kit/utils', () => ({
   $prose: vi.fn((factory: () => unknown) => factory()),
   insert: vi.fn((markdown: string) => () => {
     mocks.insertions.push(markdown)
+  }),
+  replaceAll: vi.fn((markdown: string) => () => {
+    mocks.replacements.push(markdown)
   }),
 }))
 
@@ -109,17 +114,175 @@ function deferred<T>() {
   return { promise, resolve }
 }
 
+function createStorage(): Storage {
+  const values = new Map<string, string>()
+  return {
+    clear: () => values.clear(),
+    getItem: key => values.get(key) ?? null,
+    key: index => [...values.keys()][index] ?? null,
+    get length() { return values.size },
+    removeItem: key => { values.delete(key) },
+    setItem: (key, value) => { values.set(key, value) },
+  }
+}
+
 beforeEach(() => {
+  Object.defineProperty(window, 'localStorage', {
+    configurable: true,
+    value: createStorage(),
+  })
+  window.localStorage.clear()
   vi.clearAllMocks()
   mocks.actions.length = 0
   mocks.insertions.length = 0
+  mocks.replacements.length = 0
   mocks.documentChangeListener = undefined
   mocks.markdownListener = undefined
   mocks.create.mockResolvedValue(undefined)
   mocks.destroy.mockResolvedValue(undefined)
+  mocks.getMarkdown.mockReturnValue('')
 })
 
 describe('MarkdownEditor', () => {
+  it('places the visual/source switch below the editor surface on the left', async () => {
+    render(<MarkdownEditor documentKey={7} onChange={vi.fn()} value="# 初始标题" />)
+
+    await waitFor(() => expect(mocks.create).toHaveBeenCalledTimes(1))
+
+    const editor = screen.getByRole('textbox', { name: '可视化 Markdown 编辑器' })
+    const modeTabs = screen.getByRole('tablist', { name: 'Markdown 编辑模式' })
+    expect(editor.compareDocumentPosition(modeTabs) & Node.DOCUMENT_POSITION_FOLLOWING)
+      .toBe(Node.DOCUMENT_POSITION_FOLLOWING)
+    expect(modeTabs.parentElement).toHaveClass('justify-start')
+  })
+
+  it('keeps both editor modes flush with the shared frame', async () => {
+    render(<MarkdownEditor documentKey={7} onChange={vi.fn()} value="# 初始标题" />)
+
+    await waitFor(() => expect(mocks.create).toHaveBeenCalledTimes(1))
+
+    const visualEditor = screen.getByRole('textbox', { name: '可视化 Markdown 编辑器' })
+    const modeTabs = screen.getByRole('tablist', { name: 'Markdown 编辑模式' })
+    expect(visualEditor.parentElement).not.toHaveClass('pt-2')
+    expect(modeTabs.parentElement).not.toHaveClass('mt-2', 'pt-2')
+
+    fireEvent.click(screen.getByRole('tab', { name: '源码' }))
+    expect(screen.getByRole('textbox', { name: 'Markdown 源码编辑器' }))
+      .toHaveClass('border-0', 'rounded-none')
+  })
+
+  it('restores the editor preferences when switching to another document', async () => {
+    function PageEditor() {
+      const [documentKey, setDocumentKey] = useState(7)
+      return <>
+        <button onClick={() => setDocumentKey(8)} type="button">切换文章</button>
+        <MarkdownEditor
+          documentKey={documentKey}
+          key={documentKey}
+          onChange={vi.fn()}
+          value={documentKey === 7 ? '# 第一篇' : '# 第二篇'}
+        />
+      </>
+    }
+
+    render(<PageEditor />)
+    await waitFor(() => expect(mocks.create).toHaveBeenCalledTimes(1))
+
+    fireEvent.click(screen.getByRole('tab', { name: '源码' }))
+    fireEvent.click(screen.getByRole('button', { name: '50%' }))
+    fireEvent.click(screen.getByRole('button', { name: '居中' }))
+    expect(window.localStorage.getItem('ediora:markdown-editor-preferences:v1')).toBe(
+      JSON.stringify({ mode: 'source', width: 50, alignment: 'center' }),
+    )
+    fireEvent.click(screen.getByRole('button', { name: '切换文章' }))
+
+    await waitFor(() => expect(mocks.create).toHaveBeenCalledTimes(2))
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: '源码' })).toHaveAttribute('aria-selected', 'true')
+      expect(screen.getByRole('button', { name: '50%' })).toHaveAttribute('aria-pressed', 'true')
+      expect(screen.getByRole('button', { name: '居中' })).toHaveAttribute('aria-pressed', 'true')
+    })
+    expect(screen.getByRole('textbox', { name: 'Markdown 源码编辑器' }))
+      .toHaveValue('# 第二篇')
+  })
+
+  it('does not live-switch editor modes after another tab changes the stored preference', async () => {
+    mocks.getMarkdown.mockReturnValue('# 当前内容')
+    render(<MarkdownEditor documentKey={7} onChange={vi.fn()} value="# 当前内容" />)
+    await waitFor(() => expect(mocks.create).toHaveBeenCalledTimes(1))
+
+    fireEvent.click(screen.getByRole('tab', { name: '源码' }))
+    expect(screen.getByRole('textbox', { name: 'Markdown 源码编辑器' }))
+      .toHaveValue('# 当前内容')
+
+    window.localStorage.setItem(
+      'ediora:markdown-editor-preferences:v1',
+      JSON.stringify({ mode: 'visual', width: 50, alignment: 'center' }),
+    )
+    await act(async () => {
+      window.dispatchEvent(new StorageEvent('storage', {
+        key: 'ediora:markdown-editor-preferences:v1',
+        newValue: JSON.stringify({ mode: 'visual', width: 50, alignment: 'center' }),
+      }))
+      await Promise.resolve()
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: '30%' }))
+    expect(screen.getByRole('tab', { name: '源码' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('textbox', { name: 'Markdown 源码编辑器' }))
+      .toHaveValue('# 当前内容')
+  })
+
+  it('keeps preference changes for the session when localStorage writes fail', async () => {
+    mocks.getMarkdown.mockReturnValue('# 当前内容')
+    vi.spyOn(window.localStorage, 'setItem').mockImplementation(() => {
+      throw new DOMException('Storage is read-only', 'QuotaExceededError')
+    })
+    render(<MarkdownEditor documentKey={7} onChange={vi.fn()} value="# 当前内容" />)
+    await waitFor(() => expect(mocks.create).toHaveBeenCalledTimes(1))
+
+    fireEvent.click(screen.getByRole('tab', { name: '源码' }))
+
+    expect(screen.getByRole('tab', { name: '源码' })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('textbox', { name: 'Markdown 源码编辑器' }))
+      .toHaveValue('# 当前内容')
+  })
+
+  it('applies percentage width and alignment to both editor modes', async () => {
+    render(<MarkdownEditor documentKey={7} onChange={vi.fn()} value="# 初始标题" />)
+    await waitFor(() => expect(mocks.create).toHaveBeenCalledTimes(1))
+
+    fireEvent.click(screen.getByRole('button', { name: '30%' }))
+    fireEvent.click(screen.getByRole('button', { name: '靠右' }))
+
+    const visualEditor = screen.getByRole('textbox', { name: '可视化 Markdown 编辑器' })
+    const frame = visualEditor.closest('.asset-visual-markdown-editor')
+    expect(frame).toHaveStyle({ '--markdown-content-width': '30%' })
+    expect(frame).toHaveAttribute('data-content-align', 'right')
+
+    fireEvent.click(screen.getByRole('tab', { name: '源码' }))
+    expect(screen.getByRole('textbox', { name: 'Markdown 源码编辑器' }))
+      .toHaveClass('markdown-editor-source')
+  })
+
+  it('switches between visual and source modes without losing Markdown', async () => {
+    const onChange = vi.fn()
+    mocks.getMarkdown.mockReturnValue('# 当前标题\n\n保留 **Markdown**')
+    render(<MarkdownEditor documentKey={7} onChange={onChange} value="# 初始标题" />)
+
+    await waitFor(() => expect(mocks.create).toHaveBeenCalledTimes(1))
+    fireEvent.click(screen.getByRole('tab', { name: '源码' }))
+
+    const sourceEditor = screen.getByRole('textbox', { name: 'Markdown 源码编辑器' }) as HTMLTextAreaElement
+    expect(sourceEditor.value).toBe('# 当前标题\n\n保留 **Markdown**')
+
+    fireEvent.change(sourceEditor, { target: { value: '# 修改后的源码\n\n- 保留列表' } })
+    expect(onChange).toHaveBeenLastCalledWith('# 修改后的源码\n\n- 保留列表')
+
+    fireEvent.click(screen.getByRole('tab', { name: '可视' }))
+    expect(mocks.replacements).toContain('# 修改后的源码\n\n- 保留列表')
+  })
+
   it('inserts Markdown through its imperative handle', async () => {
     const ref = createRef<MarkdownEditorHandle>()
     render(<MarkdownEditor ref={ref} documentKey={7} onChange={vi.fn()} value="正文" />)
