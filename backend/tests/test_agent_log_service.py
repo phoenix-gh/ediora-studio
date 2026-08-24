@@ -166,3 +166,62 @@ def test_append_canonical_turn_end_resolves_current_turn_after_long_stream(log_d
     ended = asyncio.run(exercise())
 
     assert ended.payload_data["turn"] == 3
+
+
+def test_get_agent_token_usage_aggregates_a_job_across_execution_streams(log_db):
+    from agent_log_service import (
+        append_agent_log_event,
+        append_agent_session_event,
+        get_agent_token_usage,
+    )
+
+    async def exercise():
+        async with log_db() as session:
+            await append_agent_session_event(
+                session,
+                stream_kind="job",
+                stream_key="execution:1",
+                job_id=7,
+                execution_id=1,
+                turn_id="execution:1:turn:1",
+                event_type="assistant/message",
+                data={
+                    "turn": 1,
+                    "step": 1,
+                    "blocks": [{"kind": "text", "text": "one"}],
+                    "usage": {"inputTokens": 100, "outputTokens": 20},
+                },
+            )
+            await append_agent_session_event(
+                session,
+                stream_kind="job",
+                stream_key="execution:2",
+                job_id=7,
+                execution_id=2,
+                turn_id="execution:2:turn:1",
+                event_type="assistant/message",
+                data={
+                    "turn": 1,
+                    "step": 1,
+                    "blocks": [{"kind": "text", "text": "two"}],
+                    "usage": {"inputTokens": 40, "outputTokens": 10},
+                },
+            )
+            await append_agent_log_event(
+                session,
+                stream_kind="job",
+                stream_key="execution:2",
+                job_id=7,
+                execution_id=2,
+                event_type="llm/response",
+                phase="execute",
+                payload={"usage": {"inputTokens": 40, "outputTokens": 10}},
+            )
+            return await get_agent_token_usage(session, job_id=7)
+
+    assert asyncio.run(exercise()) == {
+        "input_tokens": 140,
+        "output_tokens": 30,
+        "total_tokens": 170,
+        "request_count": 2,
+    }

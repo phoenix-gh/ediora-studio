@@ -112,4 +112,25 @@ describe('JobLogDialog', () => {
     expect(screen.getByTestId('job-log-dialog-body')).not.toHaveClass('overflow-y-auto')
     expect(screen.getByTestId('job-log-overview-panel')).toHaveClass('flex-1', 'overflow-y-auto')
   })
+
+  it('shows completed task token usage in the overview', () => {
+    const tokenUsageJob = {
+      ...job,
+      status: 'succeeded' as const,
+      token_usage: {
+        input_tokens: 12_345,
+        output_tokens: 678,
+        total_tokens: 13_023,
+        request_count: 4,
+      },
+    } as ContentJob
+
+    render(<JobLogDialog job={tokenUsageJob} open onOpenChange={vi.fn()} onRetry={vi.fn()} />)
+
+    expect(screen.getByText('Token 消耗')).toBeInTheDocument()
+    expect(screen.getByText(/输入 12,345/)).toBeInTheDocument()
+    expect(screen.getByText(/输出 678/)).toBeInTheDocument()
+    expect(screen.getByText(/总计 13,023/)).toBeInTheDocument()
+    expect(screen.getByText(/4 次模型请求/)).toBeInTheDocument()
+  })
 })

@@ -655,6 +655,57 @@ def test_job_event_api_persists_auditable_generation_trace(client):
     assert job["events"][0]["payload"] == {"skill": "baoyu-cover-image"}
 
 
+def test_job_payload_includes_aggregated_token_usage(client):
+    created = client.post(
+        "/api/jobs", json={"flow": "cover", "title": "Token usage", "input": {}}
+    ).json()
+
+    from database import SessionLocal
+    from models import AgentLogEvent
+
+    async def seed_usage():
+        async with SessionLocal() as session:
+            session.add_all([
+                AgentLogEvent(
+                    stream_kind="job",
+                    stream_key="execution:1",
+                    job_id=created["id"],
+                    execution_id=1,
+                    event_type="assistant/message",
+                    phase="execute",
+                    status="completed",
+                    payload_data={
+                        "usage": {"inputTokens": 12, "outputTokens": 4},
+                    },
+                ),
+                AgentLogEvent(
+                    stream_kind="job",
+                    stream_key="execution:2",
+                    job_id=created["id"],
+                    execution_id=2,
+                    event_type="assistant/message",
+                    phase="validate",
+                    status="completed",
+                    payload_data={
+                        "usage": {"inputTokens": 8, "outputTokens": 6},
+                    },
+                ),
+            ])
+            await session.commit()
+
+    asyncio.new_event_loop().run_until_complete(seed_usage())
+
+    response = client.get(f"/api/jobs/{created['id']}")
+
+    assert response.status_code == 200, response.text
+    assert response.json()["token_usage"] == {
+        "input_tokens": 20,
+        "output_tokens": 10,
+        "total_tokens": 30,
+        "request_count": 2,
+    }
+
+
 def test_job_agent_log_returns_full_message_timeline(client):
     created = client.post("/api/jobs", json={"flow": "cover", "title": "Agent log", "input": {}}).json()
 

@@ -9,6 +9,7 @@ from agent_trajectory import (
     canonical_event_status,
     validate_agent_session_event,
 )
+from agent_token_usage import aggregate_token_usage
 from log_redaction import redact_log_value
 from models import AgentLogEvent
 
@@ -237,6 +238,25 @@ async def list_all_agent_log_events(
         if after_sequence == next_sequence:
             return events
         after_sequence = next_sequence
+
+
+async def get_agent_token_usage(
+    session: AsyncSession,
+    *,
+    job_id: int,
+) -> dict[str, int] | None:
+    """Aggregate model usage for one durable ContentJob."""
+
+    statement = (
+        select(AgentLogEvent)
+        .where(
+            AgentLogEvent.job_id == job_id,
+            AgentLogEvent.event_type.in_(("assistant/message", "llm/response")),
+        )
+        .order_by(AgentLogEvent.id.asc())
+    )
+    events = list((await session.execute(statement)).scalars().all())
+    return aggregate_token_usage(events)
 
 
 def agent_log_event_payload(event: AgentLogEvent) -> dict:
