@@ -693,7 +693,17 @@ async def get_recent_content_usage(
         )
 
 
-@mcp.tool()
+@ediora_tool(
+    mcp,
+    namespace="creative_assets",
+    read_only=False,
+    destructive=False,
+    idempotent=True,
+    open_world=False,
+    approval="writes",
+    concurrency="serialized",
+    retry="claim-backed",
+)
 async def record_content_usage(
     asset_id: int,
     output_kind: Literal["draft"],
@@ -706,10 +716,12 @@ async def record_content_usage(
     reuse_explanation: str = "",
     account_id: str | None = None,
 ) -> dict:
-    """Record persisted draft usage.
+    """Record one persisted draft-usage claim for deduplication evidence.
 
     ``output_kind`` must be ``draft`` and ``reuse_decision`` must be either
-    ``fresh`` or ``reuse_allowed``.
+    ``fresh`` or ``reuse_allowed``. The scheduled run identity is required;
+    repeated claims are resolved by the persistence layer. Returns the stored
+    usage ID and creation timestamp.
     """
     from daily_creation_service import record_content_usage as record_usage
 
@@ -741,7 +753,17 @@ async def record_content_usage(
         return {"id": usage.id, "created_at": _fmt_dt(usage.created_at)}
 
 
-@mcp.tool()
+@ediora_tool(
+    mcp,
+    namespace="drafts",
+    read_only=False,
+    destructive=True,
+    idempotent=False,
+    open_world=False,
+    approval="writes",
+    concurrency="serialized",
+    retry="claim-backed",
+)
 async def update_draft(
     draft_id: int,
     title: Optional[str] = None,
@@ -749,7 +771,10 @@ async def update_draft(
     status: Optional[str] = None,
 ) -> dict:
     """
-    Update an existing draft in Ediora's draft box.
+    Overwrite selected fields of an existing draft identified by known ID.
+
+    Title, full Markdown content, and status can be replaced. Omitted fields
+    remain unchanged; callers should not assume replay is harmless.
 
     Args:
         draft_id: The integer ID of the draft to update (from list_drafts).
@@ -940,7 +965,17 @@ async def get_writing_plan(plan_id: int) -> dict:
     }
 
 
-@mcp.tool()
+@ediora_tool(
+    mcp,
+    namespace="writing_plans",
+    read_only=False,
+    destructive=False,
+    idempotent=False,
+    open_world=False,
+    approval="writes",
+    concurrency="serialized",
+    retry="claim-backed",
+)
 async def create_writing_plan(
     title: str,
     strategy: str = "",
@@ -948,7 +983,10 @@ async def create_writing_plan(
     priority: int = 3,
 ) -> dict:
     """
-    Create a new writing plan (写作方案) in the plan library.
+    Create one new persistent writing plan (写作方案) in the plan library.
+
+    Repeating this call may create another plan. Returns the created plan ID,
+    normalized priority, resolved tags, status, and creation timestamp.
 
     Args:
         title: Plan name — describes the *type* of content / repeatable writing
@@ -1016,7 +1054,17 @@ async def create_writing_plan(
     }
 
 
-@mcp.tool()
+@ediora_tool(
+    mcp,
+    namespace="writing_plans",
+    read_only=False,
+    destructive=False,
+    idempotent=False,
+    open_world=False,
+    approval="writes",
+    concurrency="serialized",
+    retry="claim-backed",
+)
 async def add_plan_source(
     plan_id: int,
     url: str = "",
@@ -1026,10 +1074,12 @@ async def add_plan_source(
     platform: str = "manual",
 ) -> dict:
     """
-    Add a reference source (线索) to a writing plan (写作方案).
+    Add one persistent reference source (线索) to a known writing-plan ID.
 
     Use this to attach a useful link, article, or X post to a plan
     as research material. At least one of url or note must be provided.
+    Repeating the call may create another source row; the returned source ID
+    is the completion evidence.
 
     Args:
         plan_id: ID of the target plan (from list_writing_plans).
@@ -1145,7 +1195,17 @@ async def search_writing_plans(keywords: list[str]) -> list[dict]:
     ]
 
 
-@mcp.tool()
+@ediora_tool(
+    mcp,
+    namespace="writing_plans",
+    read_only=False,
+    destructive=True,
+    idempotent=False,
+    open_world=False,
+    approval="writes",
+    concurrency="serialized",
+    retry="claim-backed",
+)
 async def update_writing_plan(
     plan_id: int,
     title: Optional[str] = None,
@@ -1154,7 +1214,7 @@ async def update_writing_plan(
     priority: Optional[int] = None,
 ) -> dict:
     """
-    Update an existing writing plan (写作方案) — strategy / title / tags / priority.
+    Overwrite selected fields of a known writing plan: strategy, title, tags, or priority.
 
     ⚠️  SCOUT-ONLY — Only call this during a content-to-writing-plan analysis task
     (task body contains "## 任务类型\\ncontent-to-writing-plan").  The editor, writer,
@@ -1231,14 +1291,24 @@ async def update_writing_plan(
     }
 
 
-@mcp.tool()
+@ediora_tool(
+    mcp,
+    namespace="writing_plans",
+    read_only=False,
+    destructive=False,
+    idempotent=False,
+    open_world=False,
+    approval="writes",
+    concurrency="serialized",
+    retry="claim-backed",
+)
 async def add_plan_update(
     plan_id: int,
     description: str,
     source_url: str = "",
 ) -> dict:
     """
-    Record a changelog entry for a writing plan (写作方案).
+    Create one persistent changelog entry for a known writing-plan ID.
 
     ⚠️  SCOUT-ONLY — Only call this during a content-to-writing-plan analysis task
     (task body contains "## 任务类型\\ncontent-to-writing-plan").  The editor, writer,
@@ -1255,7 +1325,8 @@ async def add_plan_update(
                      "无新增角度，已有方案覆盖相同切入点，跳过".
         source_url: URL of the source article (optional).
 
-    Returns: id, plan_id, description, source_url, created_at.
+    Repeating the call may create another entry. Returns its ID, plan ID,
+    description, source URL, and creation timestamp.
     """
     from models import WritingPlan, PlanUpdate
 
@@ -1282,14 +1353,24 @@ async def add_plan_update(
     }
 
 
-@mcp.tool()
+@ediora_tool(
+    mcp,
+    namespace="creative_assets",
+    read_only=False,
+    destructive=False,
+    idempotent=False,
+    open_world=True,
+    approval="writes",
+    concurrency="serialized",
+    retry="unsafe",
+)
 async def upload_image_from_url(
     url: str,
     filename_hint: str = "",
     draft_id: Optional[int] = None,
 ) -> dict:
     """
-    Fetch an image from a remote URL and host it on Ediora's server.
+    Fetch an image from a remote URL and create a locally hosted Ediora file.
 
     Use this when you want to embed an externally hosted image in an article
     but need a stable, locally served URL (e.g. the original host may block
@@ -1303,6 +1384,8 @@ async def upload_image_from_url(
                   that draft's image library and will appear in the editor's
                   image panel. All variants in the same group (X, 公众号, etc.)
                   share the library — any member ID works.
+
+    Each successful call can create a new file, so do not retry blindly.
 
     Returns:
         hosted_url: Absolute URL to serve the image from Ediora,
@@ -1384,14 +1467,24 @@ async def upload_image_from_url(
     return result
 
 
-@mcp.tool()
+@ediora_tool(
+    mcp,
+    namespace="creative_assets",
+    read_only=False,
+    destructive=False,
+    idempotent=False,
+    open_world=False,
+    approval="writes",
+    concurrency="serialized",
+    retry="unsafe",
+)
 async def upload_image_from_path(
     path: str,
     filename_hint: str = "",
     draft_id: Optional[int] = None,
 ) -> dict:
     """
-    Read a local image file from disk and host it on Ediora's server.
+    Read a local image path and create a hosted file on Ediora's server.
 
     Use this (NOT upload_image_from_base64) when you have a locally generated
     image file — for example after running the codex_imagegen skill. Reading
@@ -1404,6 +1497,8 @@ async def upload_image_from_path(
         draft_id: Optional draft ID. When provided, the image is registered in
                   that draft's image library and will appear in the editor's
                   image panel.
+
+    Each successful call can create a new file, so do not retry blindly.
 
     Returns:
         hosted_url: Absolute URL to serve the image from Ediora.
@@ -1459,17 +1554,27 @@ async def upload_image_from_path(
     return result
 
 
-@mcp.tool()
+@ediora_tool(
+    mcp,
+    namespace="creative_assets",
+    read_only=False,
+    destructive=False,
+    idempotent=True,
+    open_world=False,
+    approval="writes",
+    concurrency="serialized",
+    retry="claim-backed",
+)
 async def attach_creative_asset_to_draft(
     draft_id: int,
     asset_id: int,
 ) -> dict:
     """Attach an already stored local image asset to a draft without copying it.
 
-    ``generateImage`` already persists its output as a CreativeAsset. Use this
-    tool after ``save_draft`` when the image should appear in that draft's image
-    library. It is intentionally idempotent and never downloads or enqueues a
-    second image job.
+    Use only after both the draft ID and asset ID are known. Repeating the same
+    pair returns the existing DraftImage, so no duplicate is created. This does
+    not download, generate, or copy an image. Returns persistent attachment and
+    file evidence.
     """
     from models import ArticleDraft, CreativeAsset, DraftImage
 
@@ -1535,7 +1640,17 @@ async def attach_creative_asset_to_draft(
         }
 
 
-@mcp.tool()
+@ediora_tool(
+    mcp,
+    namespace="drafts",
+    read_only=False,
+    destructive=False,
+    idempotent=False,
+    open_world=False,
+    approval="writes",
+    concurrency="serialized",
+    retry="claim-backed",
+)
 async def save_draft(
     title: str,
     content: str,
@@ -1545,7 +1660,10 @@ async def save_draft(
     draft_type: Literal["article", "script", "x", "x_article", "mp"] = "article",
 ) -> dict:
     """
-    Save a new article draft to Ediora's draft box.
+    Create a new persistent article draft in Ediora's draft box.
+
+    Repeating this call may create another draft. Returns its ID, title, status,
+    type, and creation timestamp as completion evidence.
 
     Args:
         title: Article title.

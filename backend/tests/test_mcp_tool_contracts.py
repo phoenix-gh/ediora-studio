@@ -26,6 +26,25 @@ READ_TOOL_CONTRACTS = {
     "get_account_profile": ("accounts", False),
 }
 
+WRITE_TOOL_CONTRACTS = {
+    "record_content_usage": ("creative_assets", False, True, False, "claim-backed"),
+    "update_draft": ("drafts", True, False, False, "claim-backed"),
+    "create_writing_plan": ("writing_plans", False, False, False, "claim-backed"),
+    "add_plan_source": ("writing_plans", False, False, False, "claim-backed"),
+    "update_writing_plan": ("writing_plans", True, False, False, "claim-backed"),
+    "add_plan_update": ("writing_plans", False, False, False, "claim-backed"),
+    "upload_image_from_url": ("creative_assets", False, False, True, "unsafe"),
+    "upload_image_from_path": ("creative_assets", False, False, False, "unsafe"),
+    "attach_creative_asset_to_draft": (
+        "creative_assets",
+        False,
+        True,
+        False,
+        "claim-backed",
+    ),
+    "save_draft": ("drafts", False, False, False, "claim-backed"),
+}
+
 
 def run(coroutine):
     return asyncio.run(coroutine)
@@ -154,3 +173,32 @@ def test_read_tool_descriptions_define_selection_boundaries(mcp_module):
     assert "not stored ediora" in descriptions["web_search"]
     assert "not x subscription" in descriptions["get_github_daily_trending"]
     assert "not user-managed writing plans" in descriptions["get_content_directions"]
+
+
+def test_all_write_tools_emit_explicit_contracts(mcp_module):
+    from tool_contracts import EDIORA_TOOL_META_KEY
+
+    definitions = {tool.name: tool for tool in run(mcp_module.mcp.list_tools())}
+
+    assert set(definitions) == set(READ_TOOL_CONTRACTS) | set(WRITE_TOOL_CONTRACTS)
+    for name, contract in WRITE_TOOL_CONTRACTS.items():
+        namespace, destructive, idempotent, open_world, retry = contract
+        definition = definitions[name]
+        assert definition.annotations.model_dump(exclude_none=True) == {
+            "readOnlyHint": False,
+            "destructiveHint": destructive,
+            "idempotentHint": idempotent,
+            "openWorldHint": open_world,
+        }
+        assert definition.meta[EDIORA_TOOL_META_KEY] == {
+            "namespace": namespace,
+            "version": "1",
+            "approval": "writes",
+            "concurrency": "serialized",
+            "retry": retry,
+        }
+
+    assert definitions["attach_creative_asset_to_draft"].annotations.idempotentHint is True
+    assert definitions["update_draft"].annotations.destructiveHint is True
+    assert definitions["upload_image_from_url"].annotations.openWorldHint is True
+    assert definitions["save_draft"].meta[EDIORA_TOOL_META_KEY]["approval"] == "writes"
