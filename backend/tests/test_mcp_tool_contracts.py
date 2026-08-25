@@ -1,11 +1,49 @@
 import asyncio
+import sys
 
 import pytest
 from mcp.server.fastmcp import FastMCP
 
 
+READ_TOOL_CONTRACTS = {
+    "web_search": ("web_research", True),
+    "fetch_url": ("web_research", True),
+    "get_content_directions": ("writing_plans", False),
+    "get_github_daily_trending": ("information_sources", False),
+    "list_drafts": ("drafts", False),
+    "get_draft": ("drafts", False),
+    "search_creative_assets": ("creative_assets", False),
+    "get_creative_asset": ("creative_assets", False),
+    "list_source_subscriptions": ("information_sources", False),
+    "search_source_items": ("information_sources", False),
+    "get_source_item": ("information_sources", False),
+    "list_creative_asset_candidates": ("creative_assets", False),
+    "get_recent_content_usage": ("creative_assets", False),
+    "list_writing_plans": ("writing_plans", False),
+    "get_writing_plan": ("writing_plans", False),
+    "search_writing_plans": ("writing_plans", False),
+    "list_publish_accounts": ("accounts", False),
+    "get_account_profile": ("accounts", False),
+}
+
+
 def run(coroutine):
     return asyncio.run(coroutine)
+
+
+@pytest.fixture
+def mcp_module(monkeypatch, postgres_env):
+    for module_name in list(sys.modules):
+        if module_name.startswith(("config", "database", "mcp_server")):
+            sys.modules.pop(module_name, None)
+
+    import mcp_server
+
+    yield mcp_server
+
+    from database import engine
+
+    run(engine.dispose())
 
 
 def test_ediora_tool_emits_standard_annotations_and_namespaced_metadata():
@@ -82,3 +120,37 @@ def test_ediora_tool_rejects_inconsistent_contracts(overrides, message):
 
     with pytest.raises(ValueError, match=message):
         ediora_tool(server, **contract)
+
+
+def test_all_read_tools_emit_explicit_contracts(mcp_module):
+    from tool_contracts import EDIORA_TOOL_META_KEY
+
+    definitions = {tool.name: tool for tool in run(mcp_module.mcp.list_tools())}
+
+    assert READ_TOOL_CONTRACTS.keys() <= definitions.keys()
+    for name, (namespace, open_world) in READ_TOOL_CONTRACTS.items():
+        definition = definitions[name]
+        assert definition.annotations.model_dump(exclude_none=True) == {
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": open_world,
+        }
+        assert definition.meta[EDIORA_TOOL_META_KEY] == {
+            "namespace": namespace,
+            "version": "1",
+            "approval": "never",
+            "concurrency": "parallel-safe",
+            "retry": "safe",
+        }
+
+
+def test_read_tool_descriptions_define_selection_boundaries(mcp_module):
+    definitions = run(mcp_module.mcp.list_tools())
+    descriptions = {tool.name: tool.description.lower() for tool in definitions}
+
+    assert "not random" in descriptions["search_source_items"]
+    assert "known id" in descriptions["get_source_item"]
+    assert "not stored ediora" in descriptions["web_search"]
+    assert "not x subscription" in descriptions["get_github_daily_trending"]
+    assert "not user-managed writing plans" in descriptions["get_content_directions"]
