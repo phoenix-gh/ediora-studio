@@ -242,6 +242,28 @@ describe('ChatWorkspaceProvider', () => {
     }
   })
 
+  it('preserves streamed output when the stream ends with a persistence error', async () => {
+    api.streamChatReply.mockImplementation(async ({ onEvent }: { onEvent: (event: UIMessageStreamEvent) => void }) => {
+      onEvent({ type: 'text-delta', id: 'text-1', delta: '已经生成的回答' })
+      onEvent({ type: 'error', errorText: 'Unable to persist chat message (422)' })
+      throw new Error('Unable to persist chat message (422)')
+    })
+    renderProvider()
+
+    await act(async () => {
+      expect(await current.submit('请回答', [{ type: 'text', text: '请回答' }])).toBe(false)
+    })
+
+    expect(api.getChatSession).not.toHaveBeenCalled()
+    expect(current.activeError).toBe('Unable to persist chat message (422)')
+    expect(current.messages).toEqual(expect.arrayContaining([
+      expect.objectContaining({ role: 'assistant', parts: expect.arrayContaining([
+        { type: 'text', id: 'text-1', text: '已经生成的回答' },
+        { type: 'text', text: '\nUnable to persist chat message (422)' },
+      ]) }),
+    ]))
+  })
+
   it('recovers a running session when its persisted state becomes complete', async () => {
     vi.useFakeTimers()
     try {
