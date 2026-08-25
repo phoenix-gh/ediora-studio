@@ -4,6 +4,8 @@ import { z } from 'zod'
 
 import { applyAgentToolPolicy } from './agent-tool-policy'
 import type { SkillCapabilityInput } from './agent-capabilities'
+import type { ToolContractMetadata } from './tool-contract'
+import { buildToolRegistry, type ToolRegistry } from './tool-registry'
 import type {
   AgentApprovalPolicy,
   AgentToolAudit,
@@ -86,7 +88,8 @@ export type ChatSkillSnapshot = {
 type ChatSkillRuntimeOptions = {
   selectedSkillName?: string
   restoredSkillName?: string
-  baseTools: ToolSet
+  baseTools?: ToolSet
+  baseToolRegistry?: ToolRegistry
   close?: () => void | Promise<void>
   listEnabled?: () => Promise<RegisteredSkill[]>
   getEnabled?: (name: string) => Promise<RegisteredSkill | null>
@@ -109,8 +112,68 @@ export type ChatSkillRuntime = {
   snapshot(): ChatSkillSnapshot
   activeContext(): ActiveSkillContext | undefined
   capabilityContext?: () => SkillCapabilityInput | undefined
+  toolRegistry(): ToolRegistry
   readReferences(paths: string[]): Promise<SkillReferenceContent[]>
   close(): Promise<void>
+}
+
+const NATIVE_TOOL_CONTRACTS = {
+  generateImage: {
+    namespace: 'image_generation',
+    version: '1',
+    readOnly: false,
+    destructive: false,
+    idempotent: false,
+    openWorld: true,
+    approval: 'never',
+    concurrency: 'serialized',
+    retry: 'unsafe',
+  },
+  loadSkill: {
+    namespace: 'skills',
+    version: '1',
+    readOnly: true,
+    destructive: false,
+    idempotent: true,
+    openWorld: false,
+    approval: 'never',
+    concurrency: 'serialized',
+    retry: 'safe',
+  },
+  readSkillReference: {
+    namespace: 'skills',
+    version: '1',
+    readOnly: true,
+    destructive: false,
+    idempotent: true,
+    openWorld: false,
+    approval: 'never',
+    concurrency: 'parallel-safe',
+    retry: 'safe',
+  },
+} satisfies Record<string, ToolContractMetadata>
+
+function combineToolRegistries(
+  tools: ToolSet,
+  base: ToolRegistry,
+  extension: ToolRegistry,
+): ToolRegistry {
+  const contracts = new Map(
+    [...base.contracts, ...extension.contracts]
+      .sort(([left], [right]) => left.localeCompare(right)),
+  )
+  const diagnostics = [...base.diagnostics, ...extension.diagnostics]
+    .sort((left, right) => left.toolName.localeCompare(right.toolName))
+  return {
+    tools,
+    contracts,
+    diagnostics,
+    get(name) {
+      const value = tools[name]
+      const contract = contracts.get(name)
+      return value && contract ? { tool: value, contract } : undefined
+    },
+  }
 }
 
 function referenceCatalog(references: SkillReference[]) {
@@ -123,6 +186,7 @@ export async function createChatSkillRuntime({
   selectedSkillName,
   restoredSkillName,
   baseTools,
+  baseToolRegistry,
   close = () => undefined,
   listEnabled = listEnabledSkills,
   getEnabled = getEnabledSkill,
@@ -131,6 +195,10 @@ export async function createChatSkillRuntime({
   loadPreloadContext = loadSkillPreloadContext,
   loadManifest = loadSkillManifest,
 }: ChatSkillRuntimeOptions): Promise<ChatSkillRuntime> {
+  const resolvedBaseRegistry = baseToolRegistry ?? buildToolRegistry({
+    tools: baseTools ?? {},
+    compatibilityMode: true,
+  })
   const enabledSkills = await listEnabled()
   let activeSkill: RegisteredSkill | undefined
   let source: ChatSkillActivationSource | undefined
@@ -167,7 +235,7 @@ export async function createChatSkillRuntime({
     }
   }
 
-  const tools = { ...baseTools } as ToolSet
+  const tools = { ...resolvedBaseRegistry.tools } as ToolSet
   if (!activeSkill) {
     tools.loadSkill = tool({
       description: 'Load the one best matching enabled Skill before performing a task that needs its specialized workflow. Activate at most one Skill.',
@@ -196,6 +264,18 @@ export async function createChatSkillRuntime({
       return reference
     },
   })
+
+  const addedNativeTools = Object.fromEntries(
+    Object.entries(tools).filter(([name]) => !resolvedBaseRegistry.contracts.has(name)),
+  ) as ToolSet
+  const addedNativeContracts = Object.fromEntries(
+    Object.entries(NATIVE_TOOL_CONTRACTS).filter(([name]) => name in addedNativeTools),
+  )
+  const extensionRegistry = buildToolRegistry({
+    tools: addedNativeTools,
+    nativeContracts: addedNativeContracts,
+  })
+  const registry = combineToolRegistries(tools, resolvedBaseRegistry, extensionRegistry)
 
   const automaticCatalog = enabledSkills.length
     ? enabledSkills.map(skill => `- ${skill.name}: ${skill.description}`).join('\n')
@@ -227,6 +307,7 @@ export async function createChatSkillRuntime({
           loadedReferences: [...loadedReferences.values()],
         }
       : undefined,
+    toolRegistry: () => registry,
     readReferences: async paths => {
       if (!activeSkill || !reader) throw new SkillRegistryError('not_found', 'No Skill is active')
       const listedPaths = new Set(references.map(reference => reference.path))
@@ -309,7 +390,8 @@ export async function openGlobalAgentTools({
       }),
     },
   })
-  const discovered = await client.tools()
+  const definitions = await client.listTools()
+  const discovered = client.toolsFromDefinitions(definitions)
   const dailyOnlyBlockedTools = new Set(blockedToolNames ?? (
     dailyCreationRunId === undefined
       ? []
@@ -317,6 +399,9 @@ export async function openGlobalAgentTools({
   ))
   const visibleDiscovered = Object.fromEntries(
     Object.entries(discovered).filter(([name]) => !dailyOnlyBlockedTools.has(name)),
+  )
+  const visibleDefinitions = definitions.tools.filter(
+    definition => !dailyOnlyBlockedTools.has(definition.name),
   )
   const tools = { ...visibleDiscovered } as ToolSet
   tools.generateImage = tool({
@@ -326,16 +411,22 @@ export async function openGlobalAgentTools({
       return imageGenerator.generate({ prompt, title, directory })
     },
   })
+  const baseToolRegistry = buildToolRegistry({
+    tools,
+    mcpDefinitions: visibleDefinitions,
+    nativeContracts: { generateImage: NATIVE_TOOL_CONTRACTS.generateImage },
+  })
   const runtime = await createChatSkillRuntime({
     selectedSkillName: skillName,
     restoredSkillName,
-    baseTools: tools,
+    baseToolRegistry,
     close: () => client.close(),
   })
   return {
     ...runtime,
     tools: applyAgentToolPolicy(runtime.tools, {
       policy: approvalPolicy,
+      contracts: runtime.toolRegistry().contracts,
       beforeToolExecute,
       onAudit: onToolAudit,
     }),

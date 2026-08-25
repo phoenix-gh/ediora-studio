@@ -365,6 +365,7 @@ async def _latest_stage(
         .where(
             ContentJobStep.job_id == job_id,
             ContentJobStep.step_key == stage_key,
+            ContentJobStep.status != "superseded",
         )
         .order_by(ContentJobStep.attempt.desc(), ContentJobStep.id.desc())
         .limit(1)
@@ -938,18 +939,23 @@ async def rerun_pipeline_stage(
         return job
     if job.status != "succeeded":
         raise PipelineInvalidState("only a succeeded pipeline can rerun a Stage")
-    stages = await _stage_rows(session, job.id)
-    selected_index = next(
-        (index for index, step in enumerate(stages) if step.step_key == stage_key),
-        None,
-    )
-    if selected_index is None:
+    stage_keys = _pipeline_stage_keys(job)
+    try:
+        selected_index = stage_keys.index(stage_key)
+    except ValueError:
         raise PipelineJobNotFound(f"pipeline Stage {stage_key} not found")
-    selected = stages[selected_index]
+    stages = {
+        step.step_key: step
+        for step in await _stage_rows(session, job.id)
+        if step.status != "superseded"
+    }
+    selected = stages.get(stage_key)
+    if selected is None:
+        raise PipelineJobNotFound(f"pipeline Stage {stage_key} not found")
     if selected.status != "succeeded":
         raise PipelineInvalidState("only a succeeded Stage can be rerun")
 
-    downstream = stages[selected_index:]
+    downstream = [stages[key] for key in stage_keys[selected_index:]]
     await supersede_execution_artifacts(
         session,
         job_id=job.id,

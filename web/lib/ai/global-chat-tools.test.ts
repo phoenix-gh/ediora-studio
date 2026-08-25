@@ -4,12 +4,17 @@ import { z } from 'zod'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 const mcp = vi.hoisted(() => ({
-  tools: vi.fn(),
+  listTools: vi.fn(),
+  toolsFromDefinitions: vi.fn(),
   close: vi.fn(),
 }))
 
 vi.mock('@ai-sdk/mcp', () => ({
-  createMCPClient: vi.fn(async () => ({ tools: mcp.tools, close: mcp.close })),
+  createMCPClient: vi.fn(async () => ({
+    listTools: mcp.listTools,
+    toolsFromDefinitions: mcp.toolsFromDefinitions,
+    close: mcp.close,
+  })),
 }))
 
 import {
@@ -51,10 +56,40 @@ async function executeTool(tool: unknown, input: unknown) {
   return (tool as { execute: (input: unknown, options: never) => Promise<unknown> }).execute(input, {} as never)
 }
 
+function mcpContract(name: string) {
+  const readOnly = /^(list|get|search|read|fetch|find)_/.test(name)
+  return {
+    name,
+    description: readOnly ? `Read ${name} from Ediora.` : `Write with ${name} in Ediora.`,
+    inputSchema: { type: 'object' as const, properties: {} },
+    annotations: {
+      readOnlyHint: readOnly,
+      destructiveHint: false,
+      idempotentHint: readOnly,
+      openWorldHint: name === 'upload_image_from_url',
+    },
+    _meta: {
+      'dev.ediora/tool': {
+        namespace: name.includes('draft') ? 'drafts' : 'information_sources',
+        version: '1',
+        approval: readOnly ? 'never' : 'writes',
+        concurrency: readOnly ? 'parallel-safe' : 'serialized',
+        retry: readOnly ? 'safe' : 'claim-backed',
+      },
+    },
+  }
+}
+
+function setMcpTools(tools: ToolSet) {
+  mcp.listTools.mockResolvedValue({ tools: Object.keys(tools).map(mcpContract) })
+  mcp.toolsFromDefinitions.mockReturnValue(tools)
+}
+
 describe('global Chat tool policy', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
-    mcp.tools.mockReset()
+    mcp.listTools.mockReset()
+    mcp.toolsFromDefinitions.mockReset()
     mcp.close.mockReset()
   })
 
@@ -73,7 +108,7 @@ describe('global Chat tool policy', () => {
 
   it('opens one automatic global catalog with sensitive tools auto-approved and audited', async () => {
     const audits: AgentToolAudit[] = []
-    mcp.tools.mockResolvedValue({
+    setMcpTools({
       save_item: tool({
         inputSchema: z.object({ value: z.string() }),
         execute: async ({ value }) => ({ id: 9, value }),
@@ -95,6 +130,14 @@ describe('global Chat tool policy', () => {
       execute(input: unknown, options: { toolCallId: string }): Promise<unknown>
     }
 
+    expect(runtime.toolRegistry().contracts.get('list_items')).toMatchObject({
+      namespace: 'information_sources',
+      source: 'mcp',
+      annotations: { readOnly: true, approval: 'never' },
+    })
+    expect(Object.keys(runtime.tools)).toEqual(expect.arrayContaining([
+      'list_items', 'generateImage', 'loadSkill', 'readSkillReference',
+    ]))
     expect(save.needsApproval).toBe(false)
     await expect(save.execute({ value: 'shared' }, { toolCallId: 'call-global' }))
       .resolves.toEqual({ id: 9, value: 'shared' })
@@ -106,7 +149,7 @@ describe('global Chat tool policy', () => {
   })
 
   it('sends scheduled-run identity as an MCP transport header only', async () => {
-    mcp.tools.mockResolvedValue({})
+    setMcpTools({})
 
     const runtime = await openGlobalAgentTools({
       mcpEndpoint: 'http://localhost:8000/mcp',
@@ -126,7 +169,7 @@ describe('global Chat tool policy', () => {
   })
 
   it('hides remote image upload tools from scheduled Agents', async () => {
-    mcp.tools.mockResolvedValue({
+    setMcpTools({
       upload_image_from_url: tool({ inputSchema: z.object({}), execute: async () => ({}) }),
       upload_image_from_path: tool({ inputSchema: z.object({}), execute: async () => ({}) }),
       list_drafts: tool({ inputSchema: z.object({}), execute: async () => ({}) }),
@@ -146,6 +189,8 @@ describe('global Chat tool policy', () => {
     expect(runtime.tools.list_drafts).toBeDefined()
     expect(runtime.tools.get_draft).toBeDefined()
     expect(runtime.tools.attach_creative_asset_to_draft).toBeDefined()
+    expect(runtime.toolRegistry().contracts.has('upload_image_from_url')).toBe(false)
+    expect(runtime.toolRegistry().contracts.has('upload_image_from_path')).toBe(false)
     await runtime.close()
   })
 
@@ -196,14 +241,14 @@ describe('global Chat tool policy', () => {
     expect(runtime.catalogContext).toContain('references/rules.md')
     expect(runtime.catalogContext).toContain('Alpha rules')
     expect(runtime.activeContext()).toMatchObject({ skill: { name: 'Alpha' }, activation: 'manual' })
-    expect(runtime.capabilityContext?.().loadedReferences).toEqual([
+    expect(runtime.capabilityContext?.()?.loadedReferences).toEqual([
       { path: 'references/rules.md', content: 'Alpha rules', bytes: 5 },
     ])
     await expect(runtime.readReferences(['references/rules.md'])).resolves.toEqual([
       { path: 'references/rules.md', content: 'Alpha rules', bytes: 5 },
     ])
     expect(runtime.snapshot().readReferenceCount).toBe(1)
-    expect(runtime.capabilityContext?.().loadedReferences).toEqual([
+    expect(runtime.capabilityContext?.()?.loadedReferences).toEqual([
       { path: 'references/rules.md', content: 'Alpha rules', bytes: 5 },
     ])
   })
@@ -273,7 +318,7 @@ describe('global Chat tool policy', () => {
   })
 
   it('delegates generateImage to the direct host generator instead of creating a job', async () => {
-    mcp.tools.mockResolvedValue({})
+    setMcpTools({})
     const imageGenerator = {
       generate: vi.fn().mockResolvedValue({
         asset_id: 100,

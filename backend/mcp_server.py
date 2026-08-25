@@ -18,6 +18,7 @@ from sqlalchemy import select, desc, delete as sa_delete, func
 from database import SessionLocal
 from web_search import WebSearchProviderError, search_web as run_web_search
 from web_fetch import WebFetchProviderError, fetch_web_url as run_web_fetch
+from tool_contracts import ediora_tool
 
 _UPLOADS_DIR = Path(__file__).parent / "uploads"
 _UPLOADS_DIR.mkdir(exist_ok=True)
@@ -77,9 +78,24 @@ async def _register_draft_image(
 
 # ── tools ─────────────────────────────────────────────────────────────────────
 
-@mcp.tool()
+@ediora_tool(
+    mcp,
+    namespace="web_research",
+    read_only=True,
+    destructive=False,
+    idempotent=True,
+    open_world=True,
+    approval="never",
+    concurrency="parallel-safe",
+    retry="safe",
+)
 async def web_search(query: str, max_results: int = 5, language: str = "zh-CN") -> dict:
-    """Search the public web. Cite returned URLs and do not claim results beyond this output."""
+    """Search the public web, not stored Ediora information sources.
+
+    Use when the user needs public-web discovery rather than already-collected
+    subscription content. Cite returned URLs and do not claim results beyond
+    this output.
+    """
     try:
         results, provider = await run_web_search(
             query.strip(), max(1, min(max_results, 10)), language.strip() or "zh-CN",
@@ -92,9 +108,22 @@ async def web_search(query: str, max_results: int = 5, language: str = "zh-CN") 
     return {"provider": provider, "results": [asdict(result) for result in results]}
 
 
-@mcp.tool()
+@ediora_tool(
+    mcp,
+    namespace="web_research",
+    read_only=True,
+    destructive=False,
+    idempotent=True,
+    open_world=True,
+    approval="never",
+    concurrency="parallel-safe",
+    retry="safe",
+)
 async def fetch_url(url: str, max_chars: int = 12_000) -> dict:
-    """Fetch a public webpage and return its readable text. Cite the returned URL when using its content."""
+    """Fetch readable text from one known public URL; this is not web search.
+
+    Use after a URL is known. Cite the returned URL when using its content.
+    """
     try:
         result, provider = await run_web_fetch(url.strip(), max(1, min(max_chars, 12_000)))
     except WebFetchProviderError as exc:
@@ -105,11 +134,22 @@ async def fetch_url(url: str, max_chars: int = 12_000) -> dict:
         }
     return {"provider": provider, "url": result.url, "title": result.title, "content": result.content, "content_type": result.content_type}
 
-@mcp.tool()
+@ediora_tool(
+    mcp,
+    namespace="writing_plans",
+    read_only=True,
+    destructive=False,
+    idempotent=True,
+    open_world=False,
+    approval="never",
+    concurrency="parallel-safe",
+    retry="safe",
+)
 async def get_content_directions() -> list[dict]:
     """
-    Return all content directions configured in Ediora, along with
-    their child strategies.
+    Return Ediora editorial directions and their child topic strategies.
+
+    These are system-configured editorial directions, not user-managed writing plans.
 
     A direction is a broad content domain (e.g. "AI 工具评测").
     A strategy defines how to mine topics within that direction (filters,
@@ -156,13 +196,23 @@ async def get_content_directions() -> list[dict]:
     return result
 
 
-@mcp.tool()
+@ediora_tool(
+    mcp,
+    namespace="information_sources",
+    read_only=True,
+    destructive=False,
+    idempotent=True,
+    open_world=False,
+    approval="never",
+    concurrency="parallel-safe",
+    retry="safe",
+)
 async def get_github_daily_trending() -> dict:
     """Return the latest GitHub daily Trending snapshot and rank changes.
 
     This tool is intentionally argument-free: the Agent must use the daily
     snapshot already collected by Ediora and cannot switch to weekly
-    data or invent a different source.
+    data or invent a different source. This is not X subscription content.
     """
     from models import GithubTrendingRepo
 
@@ -265,13 +315,25 @@ async def get_github_daily_trending() -> dict:
     }
 
 
-@mcp.tool()
+@ediora_tool(
+    mcp,
+    namespace="drafts",
+    read_only=True,
+    destructive=False,
+    idempotent=True,
+    open_world=False,
+    approval="never",
+    concurrency="parallel-safe",
+    retry="safe",
+)
 async def list_drafts(
     limit: int = 20,
     status: Optional[str] = None,
 ) -> list[dict]:
     """
-    List article drafts stored in Ediora.
+    List compact metadata for article drafts stored in Ediora.
+
+    Use for draft discovery and filtering; full content is not included.
 
     Args:
         limit: Maximum number of drafts to return (max 50).
@@ -310,10 +372,20 @@ async def list_drafts(
     ]
 
 
-@mcp.tool()
+@ediora_tool(
+    mcp,
+    namespace="drafts",
+    read_only=True,
+    destructive=False,
+    idempotent=True,
+    open_world=False,
+    approval="never",
+    concurrency="parallel-safe",
+    retry="safe",
+)
 async def get_draft(draft_id: int) -> dict:
     """
-    Fetch the full content of a specific draft by its ID.
+    Fetch the full content of a specific draft by known ID; this is not search.
 
     Args:
         draft_id: The integer ID of the draft (obtained from list_drafts).
@@ -342,7 +414,17 @@ async def get_draft(draft_id: int) -> dict:
     }
 
 
-@mcp.tool()
+@ediora_tool(
+    mcp,
+    namespace="creative_assets",
+    read_only=True,
+    destructive=False,
+    idempotent=True,
+    open_world=False,
+    approval="never",
+    concurrency="parallel-safe",
+    retry="safe",
+)
 async def search_creative_assets(
     query: str = "",
     directory: str = "",
@@ -356,7 +438,8 @@ async def search_creative_assets(
     创作资产. Query is a space-separated list of alternative keywords; an
     asset matching more terms ranks first. It matches the asset's directory,
     title, body text, and tags. Directory optionally narrows the result to one
-    material folder, such as "搞钱副业".
+    material folder, such as "搞钱副业". This is general asset search, not
+    scheduled-directory candidate selection.
 
     Args:
         query: Optional keywords to search for.
@@ -411,12 +494,22 @@ async def search_creative_assets(
     ][:take]
 
 
-@mcp.tool()
+@ediora_tool(
+    mcp,
+    namespace="creative_assets",
+    read_only=True,
+    destructive=False,
+    idempotent=True,
+    open_world=False,
+    approval="never",
+    concurrency="parallel-safe",
+    retry="safe",
+)
 async def get_creative_asset(asset_id: int) -> dict:
     """
     Read one complete Creative Asset / 素材库 item by ID. This tool is read-only.
 
-    Use search_creative_assets first to locate an ID, then call this tool to
+    Use search_creative_assets first to locate a known ID, then call this tool to
     retrieve the full raw content before analyzing or repurposing it.
     """
     from models import CreativeAsset
@@ -440,7 +533,17 @@ async def get_creative_asset(asset_id: int) -> dict:
     }
 
 
-@mcp.tool()
+@ediora_tool(
+    mcp,
+    namespace="information_sources",
+    read_only=True,
+    destructive=False,
+    idempotent=True,
+    open_world=False,
+    approval="never",
+    concurrency="parallel-safe",
+    retry="safe",
+)
 async def list_source_subscriptions(
     source_type: str = "",
     include_muted: bool = True,
@@ -450,8 +553,8 @@ async def list_source_subscriptions(
 
     ``source_type`` may be ``x``, ``wechat``, ``reddit``, ``youtube``, or
     ``v2ex``. Leave it empty to list all supported source types. This tool
-    only reads subscriptions and their stored item counts; it never starts a
-    collection job.
+    resolves subscription IDs and names and reads stored item counts; it never
+    retrieves items or starts a collection job.
     """
     from source_tools import list_source_subscriptions as _list_source_subscriptions
 
@@ -462,7 +565,17 @@ async def list_source_subscriptions(
     )
 
 
-@mcp.tool()
+@ediora_tool(
+    mcp,
+    namespace="information_sources",
+    read_only=True,
+    destructive=False,
+    idempotent=True,
+    open_world=False,
+    approval="never",
+    concurrency="parallel-safe",
+    retry="safe",
+)
 async def search_source_items(
     source_type: str = "",
     query: str = "",
@@ -470,13 +583,14 @@ async def search_source_items(
     days: int = 30,
     limit: int = 20,
 ) -> list[dict]:
-    """Search already-collected source items (read-only).
+    """Search already-collected source items by relevance and filters.
 
     Search covers X posts, 公众号 articles, Reddit posts, YouTube videos,
     and V2EX topics. ``source_type`` can be left empty for a cross-source
-    search. The result contains compact content; call ``get_source_item``
-    with its source type and ID to read the complete stored body. No collector
-    or background job is triggered.
+    search. This is not random sampling and does not access the public web.
+    The result contains compact content; call ``get_source_item`` with its
+    source type and ID to read the complete stored body. No collector or
+    background job is triggered.
     """
     from source_tools import search_source_items as _search_source_items
 
@@ -489,25 +603,49 @@ async def search_source_items(
     )
 
 
-@mcp.tool()
+@ediora_tool(
+    mcp,
+    namespace="information_sources",
+    read_only=True,
+    destructive=False,
+    idempotent=True,
+    open_world=False,
+    approval="never",
+    concurrency="parallel-safe",
+    retry="safe",
+)
 async def get_source_item(source_type: str, item_id: str) -> dict:
-    """Read one complete already-collected information-source item."""
+    """Read one complete stored source item by source type and known ID.
+
+    This is direct retrieval, not search, random sampling, or collection.
+    """
     from source_tools import get_source_item as _get_source_item
 
     return await _get_source_item(source_type=source_type, item_id=item_id)
 
 
-@mcp.tool()
+@ediora_tool(
+    mcp,
+    namespace="creative_assets",
+    read_only=True,
+    destructive=False,
+    idempotent=True,
+    open_world=False,
+    approval="never",
+    concurrency="parallel-safe",
+    retry="safe",
+)
 async def list_creative_asset_candidates(
     asset_type: str,
     directories: list[str],
     query: str = "",
     limit: int = 50,
 ) -> list[dict]:
-    """List compact candidates from task-specified creative-asset directories.
+    """List compact scheduled-creation candidates from explicit asset directories.
 
     Space-separated query terms are alternatives and candidates are ranked by
-    how many terms match their directory, title, body, or tags.
+    how many terms match their directory, title, body, or tags. Use general
+    search_creative_assets when no task-specific directory set is required.
     """
     from daily_creation_service import (
         list_creative_asset_candidates as list_candidates,
@@ -523,7 +661,17 @@ async def list_creative_asset_candidates(
         )
 
 
-@mcp.tool()
+@ediora_tool(
+    mcp,
+    namespace="creative_assets",
+    read_only=True,
+    destructive=False,
+    idempotent=True,
+    open_world=False,
+    approval="never",
+    concurrency="parallel-safe",
+    retry="safe",
+)
 async def get_recent_content_usage(
     lookback_days: int,
     output_type: str,
@@ -531,7 +679,7 @@ async def get_recent_content_usage(
     account_id: str | None = None,
     limit: int = 100,
 ) -> list[dict]:
-    """Read bounded global semantic-deduplication history for AI comparison."""
+    """Read prior-use evidence for semantic deduplication; this is not asset search."""
     from daily_creation_service import get_recent_content_usage as get_usage
 
     async with SessionLocal() as db:
@@ -545,7 +693,17 @@ async def get_recent_content_usage(
         )
 
 
-@mcp.tool()
+@ediora_tool(
+    mcp,
+    namespace="creative_assets",
+    read_only=False,
+    destructive=False,
+    idempotent=True,
+    open_world=False,
+    approval="writes",
+    concurrency="serialized",
+    retry="claim-backed",
+)
 async def record_content_usage(
     asset_id: int,
     output_kind: Literal["draft"],
@@ -558,10 +716,12 @@ async def record_content_usage(
     reuse_explanation: str = "",
     account_id: str | None = None,
 ) -> dict:
-    """Record persisted draft usage.
+    """Record one persisted draft-usage claim for deduplication evidence.
 
     ``output_kind`` must be ``draft`` and ``reuse_decision`` must be either
-    ``fresh`` or ``reuse_allowed``.
+    ``fresh`` or ``reuse_allowed``. The scheduled run identity is required;
+    repeated claims are resolved by the persistence layer. Returns the stored
+    usage ID and creation timestamp.
     """
     from daily_creation_service import record_content_usage as record_usage
 
@@ -593,7 +753,17 @@ async def record_content_usage(
         return {"id": usage.id, "created_at": _fmt_dt(usage.created_at)}
 
 
-@mcp.tool()
+@ediora_tool(
+    mcp,
+    namespace="drafts",
+    read_only=False,
+    destructive=True,
+    idempotent=False,
+    open_world=False,
+    approval="writes",
+    concurrency="serialized",
+    retry="claim-backed",
+)
 async def update_draft(
     draft_id: int,
     title: Optional[str] = None,
@@ -601,7 +771,10 @@ async def update_draft(
     status: Optional[str] = None,
 ) -> dict:
     """
-    Update an existing draft in Ediora's draft box.
+    Overwrite selected fields of an existing draft identified by known ID.
+
+    Title, full Markdown content, and status can be replaced. Omitted fields
+    remain unchanged; callers should not assume replay is harmless.
 
     Args:
         draft_id: The integer ID of the draft to update (from list_drafts).
@@ -637,12 +810,22 @@ async def update_draft(
     }
 
 
-@mcp.tool()
+@ediora_tool(
+    mcp,
+    namespace="writing_plans",
+    read_only=True,
+    destructive=False,
+    idempotent=True,
+    open_world=False,
+    approval="never",
+    concurrency="parallel-safe",
+    retry="safe",
+)
 async def list_writing_plans(
     include_archived: bool = False,
 ) -> list[dict]:
     """
-    List all user-managed writing plans (写作方案) as a flat list.
+    List compact user-managed writing plans (写作方案) for discovery.
 
     Plans are sorted by priority then created_at.
 
@@ -703,10 +886,20 @@ async def list_writing_plans(
     ]
 
 
-@mcp.tool()
+@ediora_tool(
+    mcp,
+    namespace="writing_plans",
+    read_only=True,
+    destructive=False,
+    idempotent=True,
+    open_world=False,
+    approval="never",
+    concurrency="parallel-safe",
+    retry="safe",
+)
 async def get_writing_plan(plan_id: int) -> dict:
     """
-    Get a specific writing plan (写作方案) with its sources, tags, and update history.
+    Get a full writing plan by known ID with sources, tags, and update history.
 
     Args:
         plan_id: Integer ID of the plan (from list_writing_plans or search_writing_plans).
@@ -772,7 +965,17 @@ async def get_writing_plan(plan_id: int) -> dict:
     }
 
 
-@mcp.tool()
+@ediora_tool(
+    mcp,
+    namespace="writing_plans",
+    read_only=False,
+    destructive=False,
+    idempotent=False,
+    open_world=False,
+    approval="writes",
+    concurrency="serialized",
+    retry="claim-backed",
+)
 async def create_writing_plan(
     title: str,
     strategy: str = "",
@@ -780,7 +983,10 @@ async def create_writing_plan(
     priority: int = 3,
 ) -> dict:
     """
-    Create a new writing plan (写作方案) in the plan library.
+    Create one new persistent writing plan (写作方案) in the plan library.
+
+    Repeating this call may create another plan. Returns the created plan ID,
+    normalized priority, resolved tags, status, and creation timestamp.
 
     Args:
         title: Plan name — describes the *type* of content / repeatable writing
@@ -848,7 +1054,17 @@ async def create_writing_plan(
     }
 
 
-@mcp.tool()
+@ediora_tool(
+    mcp,
+    namespace="writing_plans",
+    read_only=False,
+    destructive=False,
+    idempotent=False,
+    open_world=False,
+    approval="writes",
+    concurrency="serialized",
+    retry="claim-backed",
+)
 async def add_plan_source(
     plan_id: int,
     url: str = "",
@@ -858,10 +1074,12 @@ async def add_plan_source(
     platform: str = "manual",
 ) -> dict:
     """
-    Add a reference source (线索) to a writing plan (写作方案).
+    Add one persistent reference source (线索) to a known writing-plan ID.
 
     Use this to attach a useful link, article, or X post to a plan
     as research material. At least one of url or note must be provided.
+    Repeating the call may create another source row; the returned source ID
+    is the completion evidence.
 
     Args:
         plan_id: ID of the target plan (from list_writing_plans).
@@ -909,10 +1127,20 @@ async def add_plan_source(
     }
 
 
-@mcp.tool()
+@ediora_tool(
+    mcp,
+    namespace="writing_plans",
+    read_only=True,
+    destructive=False,
+    idempotent=True,
+    open_world=False,
+    approval="never",
+    concurrency="parallel-safe",
+    retry="safe",
+)
 async def search_writing_plans(keywords: list[str]) -> list[dict]:
     """
-    Search existing writing plans (写作方案) by keywords (full-text match on title + strategy).
+    Search writing plans by keyword; this is not information-source item search.
 
     Use this as the first step in content-to-writing-plan analysis to find candidate
     plans before asking the LLM to judge similarity.
@@ -967,7 +1195,17 @@ async def search_writing_plans(keywords: list[str]) -> list[dict]:
     ]
 
 
-@mcp.tool()
+@ediora_tool(
+    mcp,
+    namespace="writing_plans",
+    read_only=False,
+    destructive=True,
+    idempotent=False,
+    open_world=False,
+    approval="writes",
+    concurrency="serialized",
+    retry="claim-backed",
+)
 async def update_writing_plan(
     plan_id: int,
     title: Optional[str] = None,
@@ -976,7 +1214,7 @@ async def update_writing_plan(
     priority: Optional[int] = None,
 ) -> dict:
     """
-    Update an existing writing plan (写作方案) — strategy / title / tags / priority.
+    Overwrite selected fields of a known writing plan: strategy, title, tags, or priority.
 
     ⚠️  SCOUT-ONLY — Only call this during a content-to-writing-plan analysis task
     (task body contains "## 任务类型\\ncontent-to-writing-plan").  The editor, writer,
@@ -1053,14 +1291,24 @@ async def update_writing_plan(
     }
 
 
-@mcp.tool()
+@ediora_tool(
+    mcp,
+    namespace="writing_plans",
+    read_only=False,
+    destructive=False,
+    idempotent=False,
+    open_world=False,
+    approval="writes",
+    concurrency="serialized",
+    retry="claim-backed",
+)
 async def add_plan_update(
     plan_id: int,
     description: str,
     source_url: str = "",
 ) -> dict:
     """
-    Record a changelog entry for a writing plan (写作方案).
+    Create one persistent changelog entry for a known writing-plan ID.
 
     ⚠️  SCOUT-ONLY — Only call this during a content-to-writing-plan analysis task
     (task body contains "## 任务类型\\ncontent-to-writing-plan").  The editor, writer,
@@ -1077,7 +1325,8 @@ async def add_plan_update(
                      "无新增角度，已有方案覆盖相同切入点，跳过".
         source_url: URL of the source article (optional).
 
-    Returns: id, plan_id, description, source_url, created_at.
+    Repeating the call may create another entry. Returns its ID, plan ID,
+    description, source URL, and creation timestamp.
     """
     from models import WritingPlan, PlanUpdate
 
@@ -1104,14 +1353,24 @@ async def add_plan_update(
     }
 
 
-@mcp.tool()
+@ediora_tool(
+    mcp,
+    namespace="creative_assets",
+    read_only=False,
+    destructive=False,
+    idempotent=False,
+    open_world=True,
+    approval="writes",
+    concurrency="serialized",
+    retry="unsafe",
+)
 async def upload_image_from_url(
     url: str,
     filename_hint: str = "",
     draft_id: Optional[int] = None,
 ) -> dict:
     """
-    Fetch an image from a remote URL and host it on Ediora's server.
+    Fetch an image from a remote URL and create a locally hosted Ediora file.
 
     Use this when you want to embed an externally hosted image in an article
     but need a stable, locally served URL (e.g. the original host may block
@@ -1125,6 +1384,8 @@ async def upload_image_from_url(
                   that draft's image library and will appear in the editor's
                   image panel. All variants in the same group (X, 公众号, etc.)
                   share the library — any member ID works.
+
+    Each successful call can create a new file, so do not retry blindly.
 
     Returns:
         hosted_url: Absolute URL to serve the image from Ediora,
@@ -1206,14 +1467,24 @@ async def upload_image_from_url(
     return result
 
 
-@mcp.tool()
+@ediora_tool(
+    mcp,
+    namespace="creative_assets",
+    read_only=False,
+    destructive=False,
+    idempotent=False,
+    open_world=False,
+    approval="writes",
+    concurrency="serialized",
+    retry="unsafe",
+)
 async def upload_image_from_path(
     path: str,
     filename_hint: str = "",
     draft_id: Optional[int] = None,
 ) -> dict:
     """
-    Read a local image file from disk and host it on Ediora's server.
+    Read a local image path and create a hosted file on Ediora's server.
 
     Use this (NOT upload_image_from_base64) when you have a locally generated
     image file — for example after running the codex_imagegen skill. Reading
@@ -1226,6 +1497,8 @@ async def upload_image_from_path(
         draft_id: Optional draft ID. When provided, the image is registered in
                   that draft's image library and will appear in the editor's
                   image panel.
+
+    Each successful call can create a new file, so do not retry blindly.
 
     Returns:
         hosted_url: Absolute URL to serve the image from Ediora.
@@ -1281,17 +1554,27 @@ async def upload_image_from_path(
     return result
 
 
-@mcp.tool()
+@ediora_tool(
+    mcp,
+    namespace="creative_assets",
+    read_only=False,
+    destructive=False,
+    idempotent=True,
+    open_world=False,
+    approval="writes",
+    concurrency="serialized",
+    retry="claim-backed",
+)
 async def attach_creative_asset_to_draft(
     draft_id: int,
     asset_id: int,
 ) -> dict:
     """Attach an already stored local image asset to a draft without copying it.
 
-    ``generateImage`` already persists its output as a CreativeAsset. Use this
-    tool after ``save_draft`` when the image should appear in that draft's image
-    library. It is intentionally idempotent and never downloads or enqueues a
-    second image job.
+    Use only after both the draft ID and asset ID are known. Repeating the same
+    pair returns the existing DraftImage, so no duplicate is created. This does
+    not download, generate, or copy an image. Returns persistent attachment and
+    file evidence.
     """
     from models import ArticleDraft, CreativeAsset, DraftImage
 
@@ -1357,7 +1640,17 @@ async def attach_creative_asset_to_draft(
         }
 
 
-@mcp.tool()
+@ediora_tool(
+    mcp,
+    namespace="drafts",
+    read_only=False,
+    destructive=False,
+    idempotent=False,
+    open_world=False,
+    approval="writes",
+    concurrency="serialized",
+    retry="claim-backed",
+)
 async def save_draft(
     title: str,
     content: str,
@@ -1367,7 +1660,10 @@ async def save_draft(
     draft_type: Literal["article", "script", "x", "x_article", "mp"] = "article",
 ) -> dict:
     """
-    Save a new article draft to Ediora's draft box.
+    Create a new persistent article draft in Ediora's draft box.
+
+    Repeating this call may create another draft. Returns its ID, title, status,
+    type, and creation timestamp as completion evidence.
 
     Args:
         title: Article title.
@@ -1416,10 +1712,20 @@ async def save_draft(
 
 # ── publish account profile ───────────────────────────────────────────────────
 
-@mcp.tool()
+@ediora_tool(
+    mcp,
+    namespace="accounts",
+    read_only=True,
+    destructive=False,
+    idempotent=True,
+    open_world=False,
+    approval="never",
+    concurrency="parallel-safe",
+    retry="safe",
+)
 async def list_publish_accounts() -> list[dict]:
     """
-    Return all publish accounts (the user-operated outlets: 公众号 / X / 视频号 等).
+    Return compact publish-account metadata for account discovery.
 
     Use this to discover which account_id values are available. To inspect a
     specific account's full positioning profile, call get_account_profile(pub_id).
@@ -1445,10 +1751,20 @@ async def list_publish_accounts() -> list[dict]:
         ]
 
 
-@mcp.tool()
+@ediora_tool(
+    mcp,
+    namespace="accounts",
+    read_only=True,
+    destructive=False,
+    idempotent=True,
+    open_world=False,
+    approval="never",
+    concurrency="parallel-safe",
+    retry="safe",
+)
 async def get_account_profile(pub_id: str) -> dict:
     """
-    Return the full positioning profile of a publish account.
+    Return the full positioning profile of a known publish-account ID.
 
     Every agent in the scout → editor → writer → illustrator pipeline MUST
     call this as its first step, using the `account_id` carried in the kanban
