@@ -3,6 +3,7 @@ import { expect, it, vi } from 'vitest'
 import { z } from 'zod'
 
 import { applyAgentToolPolicy } from './agent-tool-policy'
+import { buildToolRegistry } from './tool-registry'
 import {
   openAgentRuntime,
   type AgentRuntimeDependencies,
@@ -103,8 +104,13 @@ it('lets a prompt-directed Agent load a Skill and save exactly one X draft', asy
           },
         }),
       } satisfies ToolSet
+      const toolRegistry = buildToolRegistry({
+        tools: baseTools,
+        compatibilityMode: true,
+      })
       const tools = applyAgentToolPolicy(baseTools, {
         policy: options.approvalPolicy ?? 'interactive',
+        contracts: toolRegistry.contracts,
         beforeToolExecute: options.beforeToolExecute,
         onAudit: options.onToolAudit,
       })
@@ -127,6 +133,7 @@ it('lets a prompt-directed Agent load a Skill and save exactly one X draft', asy
             maxRevisions: 1 as const,
           },
         } : undefined,
+        toolRegistry: () => toolRegistry,
         readReferences: async (paths: string[]) => {
           readReferences.push(...paths)
           return paths.map(path => ({
