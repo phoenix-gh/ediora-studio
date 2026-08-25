@@ -1,7 +1,12 @@
 import type { ToolSet } from 'ai'
 
 import { requiresToolApproval, toolExecutionMetadata } from './agent-tool-policy'
-import { sha256Text, stableJson } from './tool-contract'
+import {
+  sha256Text,
+  stableJson,
+  type ToolContract,
+  type ToolNamespace,
+} from './tool-contract'
 import type { AgentApprovalPolicy } from './agent-runtime-types'
 import type {
   RegisteredSkill,
@@ -36,6 +41,11 @@ export type ToolCapabilityDescriptor = {
   name: string
   description: string
   inputSchemaDigest: string | null
+  outputSchemaDigest?: string | null
+  namespace?: ToolNamespace
+  version?: string
+  contractDigest?: string
+  availability?: 'available' | 'unavailable'
   sideEffecting: boolean
   needsApproval: boolean
   replayPolicy: 'replayable' | 'uncertain-on-interruption'
@@ -98,23 +108,40 @@ function skillSnapshot(input: SkillCapabilityInput): SkillCapabilitySnapshot {
 type ToolWithCapabilityFields = {
   description?: unknown
   inputSchema?: unknown
+  outputSchema?: unknown
   needsApproval?: unknown
 }
 
-export function buildToolCapabilityDescriptors(tools: ToolSet): ToolCapabilityDescriptor[] {
+export function buildToolCapabilityDescriptors(
+  tools: ToolSet,
+  contracts?: ReadonlyMap<string, ToolContract>,
+): ToolCapabilityDescriptor[] {
   return Object.entries(tools)
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([name, value]) => {
       const source = value as ToolWithCapabilityFields
-      const sideEffecting = requiresToolApproval(name)
-      const metadata = toolExecutionMetadata(name)
+      const contract = contracts?.get(name)
+      const sideEffecting = contract ? !contract.annotations.readOnly : requiresToolApproval(name)
+      const metadata = toolExecutionMetadata(name, contract)
       return {
         name,
-        description: typeof source.description === 'string' ? source.description : '',
-        inputSchemaDigest: digestJson(source.inputSchema),
+        description: contract?.description
+          ?? (typeof source.description === 'string' ? source.description : ''),
+        inputSchemaDigest: digestJson(contract?.inputSchema ?? source.inputSchema),
+        ...(contract ? {
+          outputSchemaDigest: digestJson(contract.outputSchema),
+          namespace: contract.namespace,
+          version: contract.version,
+          contractDigest: contract.contractDigest,
+          availability: contract.availability,
+        } : {}),
         sideEffecting,
         needsApproval: source.needsApproval === true,
-        replayPolicy: sideEffecting ? 'uncertain-on-interruption' : 'replayable',
+        replayPolicy: contract
+          ? contract.execution.retry === 'safe'
+            ? 'replayable'
+            : 'uncertain-on-interruption'
+          : sideEffecting ? 'uncertain-on-interruption' : 'replayable',
         ...metadata,
       }
     })
@@ -124,6 +151,7 @@ export function buildAgentCapabilitySnapshot(input: {
   mode: AgentRuntimeMode
   skill?: SkillCapabilityInput
   tools: ToolSet
+  contracts?: ReadonlyMap<string, ToolContract>
   approvalPolicy: AgentApprovalPolicy
   allowedToolNames?: readonly string[]
 }): AgentCapabilitySnapshot {
@@ -131,7 +159,7 @@ export function buildAgentCapabilitySnapshot(input: {
     schemaVersion: 1,
     mode: input.mode,
     skill: input.skill ? skillSnapshot(input.skill) : null,
-    tools: buildToolCapabilityDescriptors(input.tools),
+    tools: buildToolCapabilityDescriptors(input.tools, input.contracts),
     policy: {
       approvalPolicy: input.approvalPolicy,
       allowedToolNames: input.allowedToolNames
@@ -143,7 +171,15 @@ export function buildAgentCapabilitySnapshot(input: {
 
 export type AgentCapabilityDriftField = 'schemaVersion' | 'mode' | 'tools' | 'policy' | 'skill'
 
-const toolMetadataKeys = ['concurrencyPolicy', 'idempotencyPolicy'] as const
+const toolMetadataKeys = [
+  'concurrencyPolicy',
+  'idempotencyPolicy',
+  'outputSchemaDigest',
+  'namespace',
+  'version',
+  'contractDigest',
+  'availability',
+] as const
 
 function comparableTools(
   tools: ToolCapabilityDescriptor[],

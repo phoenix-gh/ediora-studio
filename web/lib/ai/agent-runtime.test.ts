@@ -5,6 +5,7 @@ import { z } from 'zod'
 import { applyAgentToolPolicy } from './agent-tool-policy'
 import { agentSkillRunAudit, openAgentRuntime, planningTools, type AgentRuntimeDependencies, type AgentSessionEventDraft } from './agent-runtime'
 import type { GlobalAgentToolOptions } from './global-chat-tools'
+import { buildToolRegistry } from './tool-registry'
 import type { RegisteredSkill } from '../skills/registry'
 
 const alpha: RegisteredSkill = {
@@ -28,11 +29,35 @@ function dependencies(selection: { skillName?: string; continueRestored?: boolea
     })) as unknown as AgentRuntimeDependencies['generate'],
     openTools: async (options: GlobalAgentToolOptions) => {
       const base = {
-        search_assets: tool({ inputSchema: z.object({}), execute: async () => [] }),
-        save_draft: tool({ inputSchema: z.object({}), execute: async () => ({ id: 3 }) }),
+        search_assets: tool({
+          description: 'Search stored creative assets.',
+          inputSchema: z.object({}),
+          execute: async () => [],
+        }),
+        save_draft: tool({
+          description: 'Create one persistent draft.',
+          inputSchema: z.object({}),
+          execute: async () => ({ id: 3 }),
+        }),
       } satisfies ToolSet
+      const toolRegistry = buildToolRegistry({
+        tools: base,
+        nativeContracts: {
+          search_assets: {
+            namespace: 'creative_assets', version: '1',
+            readOnly: true, destructive: false, idempotent: true, openWorld: false,
+            approval: 'never', concurrency: 'parallel-safe', retry: 'safe',
+          },
+          save_draft: {
+            namespace: 'drafts', version: '1',
+            readOnly: false, destructive: false, idempotent: false, openWorld: false,
+            approval: 'writes', concurrency: 'serialized', retry: 'claim-backed',
+          },
+        },
+      })
       const tools = applyAgentToolPolicy(base, {
         policy: options.approvalPolicy ?? 'interactive',
+        contracts: toolRegistry.contracts,
         beforeToolExecute: options.beforeToolExecute,
         onAudit: options.onToolAudit,
       })
@@ -51,6 +76,7 @@ function dependencies(selection: { skillName?: string; continueRestored?: boolea
           activation: 'manual' as const,
           execution: { planRequired: true, verificationRequired: true, maxRevisions: 1 as const },
         } : undefined,
+        toolRegistry: () => toolRegistry,
         readReferences: async () => [],
         close: async () => undefined,
       }
@@ -296,6 +322,10 @@ describe('shared Agent runtime', () => {
     })
 
     expect(Object.keys(runtime.tools).sort()).toEqual(['save_draft', 'search_assets'])
+    expect(runtime.capabilitySnapshot().tools).toEqual([
+      expect.objectContaining({ name: 'save_draft', namespace: 'drafts' }),
+      expect.objectContaining({ name: 'search_assets', namespace: 'creative_assets' }),
+    ])
     await expect(runtime.run({
       objective: '只允许读取素材并保存草稿', modelMessages: [], maxSteps: 1,
       requiredTools: ['update_draft'],
@@ -358,17 +388,18 @@ describe('shared Agent runtime', () => {
     let active = false
     let executionInstructions = ''
     const deps = dependencies()
+    const delegatedTools = {
+      loadSkill: tool({
+        description: 'Load an enabled Skill.',
+        inputSchema: z.object({ name: z.string() }),
+        execute: async ({ name }) => {
+          active = name === alpha.name
+          return { name, instructions: alpha.instructions }
+        },
+      }),
+    } satisfies ToolSet
     deps.openTools = async () => ({
-      tools: {
-        loadSkill: tool({
-          description: 'Load an enabled Skill.',
-          inputSchema: z.object({ name: z.string() }),
-          execute: async ({ name }) => {
-            active = name === alpha.name
-            return { name, instructions: alpha.instructions }
-          },
-        }),
-      } satisfies ToolSet,
+      tools: delegatedTools,
       catalogContext: 'Enabled Skills available for automatic activation:\n- Alpha: Handles alpha work',
       snapshot: () => ({
         source: active ? 'automatic' as const : undefined,
@@ -382,6 +413,10 @@ describe('shared Agent runtime', () => {
         activation: 'automatic' as const,
         execution: { planRequired: true, verificationRequired: true, maxRevisions: 1 as const },
       } : undefined,
+      toolRegistry: () => buildToolRegistry({
+        tools: delegatedTools,
+        compatibilityMode: true,
+      }),
       readReferences: async () => [],
       close: async () => undefined,
     })

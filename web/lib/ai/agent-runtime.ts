@@ -18,6 +18,11 @@ import {
   type AgentToolPolicyProfile,
 } from './agent-tool-policy'
 import {
+  normalizeNativeToolContract,
+  type ToolContractMetadata,
+} from './tool-contract'
+import { buildToolRegistry, contractsForTools } from './tool-registry'
+import {
   COMPLETE_GOAL_TOOL_NAME,
   createCompleteGoalTool,
   goalCompletionFromToolOutput,
@@ -52,6 +57,18 @@ export type AgentSelectedSkill = {
   skill: RegisteredSkill
   activation: SkillRunActivation
 }
+
+const COMPLETE_GOAL_TOOL_CONTRACT = {
+  namespace: 'system',
+  version: '1',
+  readOnly: false,
+  destructive: false,
+  idempotent: true,
+  openWorld: false,
+  approval: 'never',
+  concurrency: 'serialized',
+  retry: 'claim-backed',
+} satisfies ToolContractMetadata
 
 export type AgentRuntimeDependencies = {
   openTools(options: GlobalAgentToolOptions): Promise<ChatSkillRuntime>
@@ -298,15 +315,33 @@ export async function openAgentRuntime(
     selected?.skill.name,
     !automaticSelection && !selected ? options.restoredSkillName : undefined,
   ))
+  const completeGoalTool = createCompleteGoalTool(acceptGoalCompletion)
+  const completeGoalNormalization = normalizeNativeToolContract(
+    COMPLETE_GOAL_TOOL_NAME,
+    completeGoalTool,
+    COMPLETE_GOAL_TOOL_CONTRACT,
+  )
+  if (!completeGoalNormalization.contract) {
+    throw new Error(completeGoalNormalization.diagnostics[0]?.message ?? 'Invalid complete_goal contract')
+  }
   const goalControlTools = options.mode === 'job'
     ? applyAgentToolPolicy({
-        [COMPLETE_GOAL_TOOL_NAME]: createCompleteGoalTool(acceptGoalCompletion),
+        [COMPLETE_GOAL_TOOL_NAME]: completeGoalTool,
       }, {
         policy: toolPolicy.approvalPolicy,
+        contracts: new Map([[
+          COMPLETE_GOAL_TOOL_NAME,
+          completeGoalNormalization.contract,
+        ]]),
         beforeToolExecute: options.beforeToolExecute,
         onAudit: handleToolAudit,
       })
     : {} as ToolSet
+
+  const currentToolRegistry = () => registry.toolRegistry?.() ?? buildToolRegistry({
+    tools: registry.tools,
+    compatibilityMode: true,
+  })
 
   const visibleTools = () => {
     if (!toolPolicy.allowedToolNames) return registry.tools
@@ -332,10 +367,13 @@ export async function openAgentRuntime(
           loadedReferences: [],
         }
       : undefined)
+    const tools = visibleTools()
+    const contracts = contractsForTools(currentToolRegistry(), Object.keys(tools))
     return buildAgentCapabilitySnapshot({
       mode: options.mode ?? 'chat',
       skill,
-      tools: visibleTools(),
+      tools,
+      contracts,
       approvalPolicy: toolPolicy.approvalPolicy,
       allowedToolNames: toolPolicy.allowedToolNames,
     })
