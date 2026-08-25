@@ -1,7 +1,7 @@
-import { createHash } from 'node:crypto'
 import type { ToolSet } from 'ai'
 
 import { requiresToolApproval, toolExecutionMetadata } from './agent-tool-policy'
+import { sha256Text, stableJson } from './tool-contract'
 import type { AgentApprovalPolicy } from './agent-runtime-types'
 import type {
   RegisteredSkill,
@@ -66,42 +66,7 @@ export function isAgentCapabilitySnapshot(value: unknown): value is AgentCapabil
     && Boolean(candidate.policy && typeof candidate.policy === 'object')
 }
 
-type JsonObject = { [key: string]: JsonValue }
-type JsonValue = null | boolean | number | string | JsonValue[] | JsonObject
-
-function normalizeJson(value: unknown, seen: Set<object>): JsonValue {
-  if (value === null) return null
-  if (typeof value === 'string' || typeof value === 'boolean') return value
-  if (typeof value === 'number') {
-    if (!Number.isFinite(value)) throw new Error('non-finite JSON number')
-    return value
-  }
-  if (typeof value !== 'object') throw new Error('unsupported JSON value')
-  if (seen.has(value)) throw new Error('circular JSON value')
-  seen.add(value)
-  try {
-    if (Array.isArray(value)) return value.map(item => normalizeJson(item, seen))
-    const result: JsonObject = {}
-    for (const key of Object.keys(value).sort()) {
-      result[key] = normalizeJson((value as Record<string, unknown>)[key], seen)
-    }
-    return result
-  } finally {
-    seen.delete(value)
-  }
-}
-
-export function stableJson(value: unknown): string | null {
-  try {
-    return JSON.stringify(normalizeJson(value, new Set()))
-  } catch {
-    return null
-  }
-}
-
-export function sha256Text(value: string) {
-  return createHash('sha256').update(value, 'utf8').digest('hex')
-}
+export { sha256Text, stableJson } from './tool-contract'
 
 function digestJson(value: unknown) {
   const serialized = stableJson(value)
