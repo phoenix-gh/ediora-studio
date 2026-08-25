@@ -295,7 +295,8 @@ export function legacyToolContract(
     && name !== 'readSkillReference'
     && !recognizedRead
     && legacySensitiveVerb.test(name)
-  const readOnly = !recognizedWrite
+  const generatedSideEffect = name === 'generateImage'
+  const readOnly = !recognizedWrite && !generatedSideEffect
   const result = buildContract({
     name,
     namespace: 'system',
@@ -306,13 +307,13 @@ export function legacyToolContract(
     annotations: {
       readOnly,
       destructive: false,
-      idempotent: readOnly,
-      openWorld: name === 'generateImage',
+      idempotent: recognizedRead,
+      openWorld: generatedSideEffect,
       approval: recognizedWrite ? 'writes' : 'never',
     },
     execution: {
-      concurrency: readOnly ? 'parallel-safe' : 'serialized',
-      retry: readOnly ? 'safe' : 'claim-backed',
+      concurrency: recognizedRead ? 'parallel-safe' : 'serialized',
+      retry: recognizedRead ? 'safe' : recognizedWrite ? 'claim-backed' : 'unsafe',
     },
     availability: 'available',
     source: 'legacy',

@@ -426,6 +426,7 @@ export async function openGlobalAgentTools({
     ...runtime,
     tools: applyAgentToolPolicy(runtime.tools, {
       policy: approvalPolicy,
+      contracts: runtime.toolRegistry().contracts,
       beforeToolExecute,
       onAudit: onToolAudit,
     }),
