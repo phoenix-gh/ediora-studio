@@ -262,7 +262,7 @@ The initial stable namespace catalog is:
 |---|---|
 | `information_sources` | Subscriptions, collected items, search, sampling, and item retrieval |
 | `web_research` | Public web search and page retrieval |
-| `writing_plans` | Writing-plan lookup, creation, updates, sources, and progress |
+| `writing_plans` | Content directions, topic strategies, and writing-plan operations |
 | `drafts` | Draft lookup, creation, and editing |
 | `creative_assets` | Asset search, retrieval, upload, and draft association |
 | `image_generation` | Image generation and generated-image persistence |
