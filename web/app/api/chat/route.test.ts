@@ -104,6 +104,20 @@ describe('Chat Agent log event mapping', () => {
     })
   })
 
+  it('shows final answer synthesis as a distinct Agent phase', () => {
+    expect(chatStatusForAgentStep(
+      { phase: 'finalize' },
+      { name: 'source-research', displayName: '信息源研究' },
+    )).toEqual({
+      phase: 'skill',
+      state: 'streaming',
+      label: '正在整理最终回答',
+      detail: '正在根据已有工具结果生成最终交付内容',
+      skillName: 'source-research',
+      skillDisplayName: '信息源研究',
+    })
+  })
+
   it('maps runtime drafts into the scoped canonical Chat event input', () => {
     expect(chatAgentSessionEventFromDraft({
       type: 'step/start', turn: 2, step: 1, data: { turn: 2, step: 1 },

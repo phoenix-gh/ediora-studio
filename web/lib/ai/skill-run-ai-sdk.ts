@@ -4,7 +4,7 @@ import { createUIMessageStream, createUIMessageStreamResponse } from 'ai'
 import type { RegisteredSkill, SkillReference, SkillReferenceContent } from '../skills/registry'
 import { createSkillRun, sanitizeSkillRunPlan, type SkillRunActivation, type SkillRunValidation } from './skill-run'
 import { applyReferenceEvidence, applyToolEvidence, incompleteRequiredSteps } from './skill-run-evidence'
-import { completeSkillRun } from './skill-run-orchestrator'
+import { completeSkillRun, SkillRunIncompleteError } from './skill-run-orchestrator'
 import { buildSkillPlanPrompt, loadPlannedReferences } from './skill-run-planner'
 
 const skillSelectionSchema = z.object({
@@ -123,6 +123,7 @@ type ExecuteSkillRunOptions = {
     loadedReferences: SkillReferenceContent[]
     requiredTools: string[]
   }): Promise<ExecutionResult>
+  finalize?(input: { prompt: string }): Promise<string>
   validate(input: {
     text: string
     run: ReturnType<typeof createSkillRun>
@@ -178,6 +179,14 @@ function retryExecutionPrompt(
     `  required tools: ${step.requiredTools.join(', ') || 'none'}`,
   ].join('\n')).join('\n')
   return `${basePrompt}\n\nMissing required plan steps (retry now):\n${missing}\n\nThe previous execution stopped before producing evidence for these steps. Call the required tools now, wait for their results, and only then return the final deliverable.`
+}
+
+function finalizationPrompt(
+  basePrompt: string,
+  parts: unknown[],
+  toolResults: unknown[],
+) {
+  return `Produce the final deliverable now. The tool phase is complete: do not call tools or start new research. Use only the collected evidence below, satisfy the original output requirements, and state any material limitation when the evidence is insufficient. Return only the visible final answer for the user.\n\nOriginal execution brief:\n${basePrompt}\n\nCollected tool parts:\n${JSON.stringify(parts)}\n\nCollected tool results:\n${JSON.stringify(toolResults)}`
 }
 
 export async function executeSkillRunWithAiSdk(options: ExecuteSkillRunOptions) {
@@ -237,6 +246,21 @@ export async function executeSkillRunWithAiSdk(options: ExecuteSkillRunOptions) 
       return { kind: 'approval' as const, parts: executionParts, run }
     }
     run = applyToolEvidence(run, retry.parts)
+  }
+
+  if (!executionText.trim()) {
+    const finalizedText = options.finalize
+      ? (await options.finalize({
+          prompt: finalizationPrompt(baseExecutionPrompt, executionParts, executionToolResults),
+        })).trim()
+      : ''
+    if (!finalizedText) {
+      throw new SkillRunIncompleteError(
+        'final_answer_missing',
+        '执行未完成：未能生成最终回答，请重试。',
+      )
+    }
+    executionText = finalizedText
   }
 
   const evidenceForValidation = executionToolResults.length > 0 ? executionToolResults : executionParts

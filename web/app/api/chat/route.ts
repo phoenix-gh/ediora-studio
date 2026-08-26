@@ -455,6 +455,7 @@ export function chatStatusForAgentStep(
     plan: { label: '正在制定 Skill 执行计划', detail: '正在拆解任务和验证要求' },
     references: { label: '正在读取 Skill 参考资料', detail: '正在补充工作所需的参考内容' },
     execute: { label: '正在执行 Skill 工作流', detail: '正在调用工具并生成内容' },
+    finalize: { label: '正在整理最终回答', detail: '正在根据已有工具结果生成最终交付内容' },
     validate: { label: '正在校验 Skill 输出', detail: '正在检查文章是否满足工作流要求' },
     revise: { label: '正在修订 Skill 输出', detail: '正在根据校验结果完善内容' },
   }
