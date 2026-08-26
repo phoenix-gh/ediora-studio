@@ -24,6 +24,17 @@ export type CompletedSkillRun = {
   run: SkillRun
 }
 
+export class SkillRunIncompleteError extends Error {
+  readonly name = 'SkillRunIncompleteError'
+
+  constructor(
+    readonly code: 'final_answer_missing' | 'final_revision_missing',
+    message: string,
+  ) {
+    super(message)
+  }
+}
+
 function blockedText(validation: SkillRunValidation) {
   if (validation.violations.length === 0) return '本次 Skill 执行未通过验证，未交付未经验证的结果。'
   return `本次 Skill 执行未满足以下要求：\n${validation.violations
@@ -84,7 +95,10 @@ export async function completeSkillRun({
     text = ''
   }
   if (!text) {
-    return blockedResult(run, runtimeViolation('生成有效结果', '初稿为空', '重新生成非空结果'), 0)
+    throw new SkillRunIncompleteError(
+      'final_answer_missing',
+      '执行未完成：未能生成最终回答，请重试。',
+    )
   }
 
   const firstResult = await safeValidation(validate, { run, text })
@@ -102,7 +116,10 @@ export async function completeSkillRun({
     revisedText = ''
   }
   if (!revisedText) {
-    return blockedResult(run, runtimeViolation('生成有效修订结果', '修订结果为空', '根据违规清单重新修订'), 1)
+    throw new SkillRunIncompleteError(
+      'final_revision_missing',
+      '执行未完成：未能生成修订后的最终回答，请重试。',
+    )
   }
 
   const secondValidation = (await safeValidation(validate, { run, text: revisedText })).validation

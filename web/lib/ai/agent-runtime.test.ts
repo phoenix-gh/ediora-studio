@@ -611,6 +611,62 @@ describe('shared Agent runtime', () => {
     await runtime.close()
   })
 
+  it('uses one tool-free finalization call after a Skill execution returns only tool results', async () => {
+    const deps = dependencies()
+    const phases: string[] = []
+    deps.generate = vi.fn(async (input: Record<string, unknown>) => {
+      const prompt = typeof input.prompt === 'string' ? input.prompt : ''
+      const instructions = typeof input.instructions === 'string' ? input.instructions : ''
+      if (prompt.startsWith('Create a bounded execution plan')) {
+        return {
+          output: {
+            goal: '完成 Alpha 任务',
+            steps: [{
+              id: 'deliver', instruction: '检索并交付', requiredReferences: [],
+              requiredTools: ['search_assets'],
+            }],
+            outputRequirements: ['基于工具证据'],
+            verificationCriteria: ['确认检索已完成'],
+          },
+        }
+      }
+      if (prompt.startsWith('Produce the final deliverable now')) {
+        expect(input).not.toHaveProperty('tools')
+        expect(input).not.toHaveProperty('activeTools')
+        expect(prompt).toContain('来自工具的证据')
+        return { text: '根据工具证据形成的最终回答', finishReason: 'stop', steps: [{}] }
+      }
+      if (prompt.startsWith('Return valid JSON only in exactly this shape')) {
+        return { output: { passed: true, violations: [] } }
+      }
+      expect(instructions).toContain('Execute the validated Skill plan')
+      return {
+        text: '', finishReason: 'tool-calls', steps: Array.from({ length: 5 }, () => ({})),
+        toolCalls: [{ type: 'tool-call', toolCallId: 'call-search', toolName: 'search_assets', input: {} }],
+        toolResults: [{
+          type: 'tool-result', toolName: 'search_assets', toolCallId: 'call-search',
+          input: {}, output: { title: '来自工具的证据' },
+        }],
+        content: [], responseMessages: [],
+      }
+    }) as unknown as AgentRuntimeDependencies['generate']
+    const runtime = await openAgentRuntime({
+      ...openOptions('automatic', deps), skillMode: 'manual', skillName: 'Alpha',
+    })
+
+    const result = await runtime.run({
+      objective: 'Do the alpha task', modelMessages: [], maxSteps: 5,
+      onStep: checkpoint => { phases.push(checkpoint.phase) },
+    })
+
+    expect(result).toMatchObject({
+      kind: 'completed', text: '根据工具证据形成的最终回答', finishReason: 'stop',
+    })
+    expect(phases).toEqual(['plan', 'execute', 'finalize', 'validate'])
+    expect(deps.generate).toHaveBeenCalledTimes(4)
+    await runtime.close()
+  })
+
   it('keeps adapter-required tools active even when the Skill plan omits one', async () => {
     const deps = dependencies()
     let activeTools: unknown
@@ -697,12 +753,24 @@ describe('shared Agent runtime', () => {
     expect(activeTools).toEqual(['search_assets', 'generateImage'])
   })
 
-  it('reports the final finish reason and executed step count without an active Skill', async () => {
+  it('finalizes a tool-only run outside Skill execution without spending more tool steps', async () => {
     const deps = dependencies()
-    deps.generate = vi.fn(async () => ({
-      text: '', toolResults: [], content: [], finishReason: 'tool-calls',
-      steps: Array.from({ length: 5 }, () => ({})),
-    })) as unknown as AgentRuntimeDependencies['generate']
+    deps.generate = vi.fn()
+      .mockResolvedValueOnce({
+        text: '', finishReason: 'tool-calls', steps: Array.from({ length: 5 }, () => ({})),
+        toolCalls: [{ type: 'tool-call', toolCallId: 'search-1', toolName: 'search_assets', input: {} }],
+        toolResults: [{
+          type: 'tool-result', toolCallId: 'search-1', toolName: 'search_assets',
+          output: { title: '研究证据' },
+        }],
+        content: [], responseMessages: [],
+      })
+      .mockImplementationOnce(async (input: Record<string, unknown>) => {
+        expect(input).not.toHaveProperty('tools')
+        expect(input).not.toHaveProperty('activeTools')
+        expect(String(input.prompt)).toContain('研究证据')
+        return { text: '基于研究证据的最终回答', finishReason: 'stop', steps: [{}] }
+      }) as unknown as AgentRuntimeDependencies['generate']
     const runtime = await openAgentRuntime({
       ...openOptions('automatic', deps), automaticSelection: false,
     })
@@ -710,8 +778,13 @@ describe('shared Agent runtime', () => {
     await expect(runtime.run({
       objective: 'Keep researching', modelMessages: [], maxSteps: 5,
     })).resolves.toMatchObject({
-      kind: 'completed', finishReason: 'tool-calls', stepCount: 5,
+      kind: 'completed', text: '基于研究证据的最终回答', finishReason: 'stop', stepCount: 5,
+      parts: [
+        expect.objectContaining({ type: 'dynamic-tool', toolName: 'search_assets' }),
+        { type: 'text', text: '基于研究证据的最终回答' },
+      ],
     })
+    expect(deps.generate).toHaveBeenCalledTimes(2)
   })
 
   it('continues after a provider reports stop for a completed tool-only step', async () => {
@@ -791,7 +864,7 @@ describe('shared Agent runtime', () => {
     expect(deps.generate).toHaveBeenCalledTimes(2)
   })
 
-  it('stops after one recovery when the provider keeps returning empty stops', async () => {
+  it('reports runtime incompletion when stop recovery and finalization are both empty', async () => {
     const deps = dependencies()
     deps.generate = vi.fn(async () => ({
       text: '', finishReason: 'stop', steps: [{}],
@@ -803,10 +876,8 @@ describe('shared Agent runtime', () => {
 
     await expect(runtime.run({
       objective: '创建并保存草稿', modelMessages: [], maxSteps: 5,
-    })).resolves.toMatchObject({
-      kind: 'completed', text: '', finishReason: 'stop', stepCount: 2,
-    })
-    expect(deps.generate).toHaveBeenCalledTimes(2)
+    })).rejects.toMatchObject({ code: 'final_answer_missing' })
+    expect(deps.generate).toHaveBeenCalledTimes(3)
   })
 
   it('processes queued follow-up work before marking the Agent run complete', async () => {
@@ -872,15 +943,17 @@ describe('shared Agent runtime', () => {
     expect(deps.generate).toHaveBeenCalledTimes(2)
   })
 
-  it('lets an authoritative follow-up provider stop without fallback recovery', async () => {
+  it('does not add fallback recovery before finalizing an authoritative tool-only stop', async () => {
     const deps = dependencies()
-    deps.generate = vi.fn(async () => ({
-      text: '', finishReason: 'stop', steps: [{}],
-      toolCalls: [{ type: 'tool-call', toolCallId: 'save-1', toolName: 'save_draft', input: {} }],
-      toolResults: [{ type: 'tool-result', toolCallId: 'save-1', toolName: 'save_draft', output: {} }],
-      content: [],
-      responseMessages: [{ role: 'assistant', content: [] }],
-    })) as unknown as AgentRuntimeDependencies['generate']
+    deps.generate = vi.fn()
+      .mockResolvedValueOnce({
+        text: '', finishReason: 'stop', steps: [{}],
+        toolCalls: [{ type: 'tool-call', toolCallId: 'save-1', toolName: 'save_draft', input: {} }],
+        toolResults: [{ type: 'tool-result', toolCallId: 'save-1', toolName: 'save_draft', output: {} }],
+        content: [],
+        responseMessages: [{ role: 'assistant', content: [] }],
+      })
+      .mockResolvedValueOnce({ text: '草稿已保存', finishReason: 'stop', steps: [{}] }) as unknown as AgentRuntimeDependencies['generate']
     const runtime = await openAgentRuntime({
       ...openOptions('automatic', deps), automaticSelection: false,
     })
@@ -890,7 +963,7 @@ describe('shared Agent runtime', () => {
       getFollowUpMessages: async () => [],
     })
 
-    expect(deps.generate).toHaveBeenCalledTimes(1)
+    expect(deps.generate).toHaveBeenCalledTimes(2)
   })
 
   it('processes queued follow-up work while executing a manually selected Skill', async () => {
@@ -1002,9 +1075,10 @@ describe('shared Agent runtime', () => {
     await runtime.close()
   })
 
-  it('does not add stop recovery turns to an ordinary manually selected Skill run', async () => {
+  it('uses finalization instead of an open-ended stop recovery loop for a manual Skill run', async () => {
     const deps = dependencies()
     let executionCalls = 0
+    let finalizationCalls = 0
     deps.generate = vi.fn(async (input: Record<string, unknown>) => {
       const prompt = typeof input.prompt === 'string' ? input.prompt : ''
       if (prompt.startsWith('Create a bounded execution plan')) {
@@ -1019,6 +1093,10 @@ describe('shared Agent runtime', () => {
       if (prompt.startsWith('Return valid JSON only in exactly this shape')) {
         return { output: { passed: true, violations: [] } }
       }
+      if (prompt.startsWith('Produce the final deliverable now')) {
+        finalizationCalls += 1
+        return { text: '最终回答', finishReason: 'stop', steps: [{}] }
+      }
       executionCalls += 1
       return {
         text: '', finishReason: 'stop', steps: [{}],
@@ -1029,9 +1107,11 @@ describe('shared Agent runtime', () => {
       ...openOptions('automatic', deps), skillMode: 'manual', skillName: 'Alpha',
     })
 
-    await runtime.run({ objective: '完成任务', modelMessages: [], maxSteps: 5 })
+    const result = await runtime.run({ objective: '完成任务', modelMessages: [], maxSteps: 5 })
 
     expect(executionCalls).toBe(1)
+    expect(finalizationCalls).toBe(1)
+    expect(result.text).toBe('最终回答')
   })
 
   it('shares one max-step budget across Skill execution retries', async () => {

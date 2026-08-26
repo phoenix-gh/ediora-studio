@@ -193,6 +193,73 @@ describe('generic SkillRun AI SDK adapter', () => {
     expect(result).toMatchObject({ kind: 'completed', completed: { delivery: 'ready', text: 'grounded after retry' } })
   })
 
+  it('finalizes a tool-only execution before validating the Skill result', async () => {
+    let finalizationPrompt = ''
+    const validate = vi.fn(async ({ text }: { text: string }) => {
+      expect(text).toBe('final deliverable')
+      return { passed: true, violations: [] }
+    })
+
+    const result = await executeSkillRunWithAiSdk({
+      skill: alpha,
+      activation: 'automatic',
+      userRequest: '完成任务',
+      selectedContext: '',
+      references,
+      tools: [{ name: 'search_assets', description: 'Search assets' }],
+      plan: async () => plan,
+      readReferences: async paths => paths.map(path => ({ path, content: 'rules', bytes: 5 })),
+      execute: async () => ({
+        text: '',
+        parts: [{
+          type: 'dynamic-tool', toolName: 'search_assets', state: 'output-available',
+          toolCallId: 'call-1', output: { id: 11, title: 'evidence' },
+        }],
+        toolResults: [{ toolName: 'search_assets', output: { id: 11, title: 'evidence' } }],
+      }),
+      finalize: async ({ prompt }) => {
+        finalizationPrompt = prompt
+        return 'final deliverable'
+      },
+      validate,
+      revise: vi.fn(),
+    })
+
+    expect(result).toMatchObject({
+      kind: 'completed',
+      completed: { delivery: 'ready', text: 'final deliverable' },
+    })
+    expect(finalizationPrompt).toContain('Produce the final deliverable now')
+    expect(finalizationPrompt).toContain('evidence')
+    expect(validate).toHaveBeenCalledOnce()
+  })
+
+  it('reports a runtime incompletion when finalization still returns no answer', async () => {
+    const validate = vi.fn()
+
+    await expect(executeSkillRunWithAiSdk({
+      skill: alpha,
+      activation: 'automatic',
+      userRequest: '完成任务',
+      selectedContext: '',
+      references,
+      tools: [{ name: 'search_assets', description: 'Search assets' }],
+      plan: async () => plan,
+      readReferences: async paths => paths.map(path => ({ path, content: 'rules', bytes: 5 })),
+      execute: async () => ({
+        text: '',
+        parts: [{
+          type: 'dynamic-tool', toolName: 'search_assets', state: 'output-available',
+          toolCallId: 'call-1', output: { id: 11 },
+        }],
+      }),
+      finalize: async () => '   ',
+      validate,
+      revise: vi.fn(),
+    })).rejects.toMatchObject({ code: 'final_answer_missing' })
+    expect(validate).not.toHaveBeenCalled()
+  })
+
   it('returns a pending approval before validation and revision', async () => {
     const validate = vi.fn()
     const revise = vi.fn()
