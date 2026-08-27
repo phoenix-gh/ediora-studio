@@ -350,10 +350,14 @@ function sanitizeFallbackQuery(value: string): string {
 }
 
 function decodeQueryName(name: string): string {
+  const queryName = name.replace(/\+/g, ' ')
   try {
-    return decodeURIComponent(name.replace(/\+/g, ' '))
+    return decodeURIComponent(queryName)
   } catch {
-    return name
+    return queryName.replace(/%([\da-f]{2})/gi, (encoded, hex: string) => {
+      const code = Number.parseInt(hex, 16)
+      return code < 0x80 ? String.fromCharCode(code) : encoded
+    })
   }
 }
 

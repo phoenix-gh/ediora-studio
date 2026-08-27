@@ -236,6 +236,28 @@ describe('model HTTP audit', () => {
     expect(url).toContain('%E0%A4%A=malformed')
   })
 
+  it('redacts tolerant percent-encoded sensitive aliases in malformed fallback queries', async () => {
+    const events: ModelHttpAuditEvent[] = []
+    const auditedFetch = createModelHttpAuditFetch({
+      fetch: async () => new Response('ok'),
+      onEvent: event => {
+        events.push(event)
+      },
+    })
+
+    await withModelHttpAuditContext({ callId: 'call-invalid-mixed-percent-query', phase: 'plan', step: 4 }, () => auditedFetch(
+      'https://[invalid-host/v1?private%5Fkey%=private-secret&client%5Fcredentials%=client-secret&credential%73%=credentials-secret&unrelated%ZZ=keep',
+    ))
+
+    await vi.waitFor(() => expect(events).toHaveLength(2))
+    const url = String(events[0].payload.url)
+    expect(url).not.toContain('private-secret')
+    expect(url).not.toContain('client-secret')
+    expect(url).not.toContain('credentials-secret')
+    expect(url).toContain('private%5Fkey%=[REDACTED]')
+    expect(url).toContain('unrelated%ZZ=keep')
+  })
+
   it('omits a truncated nested structured response body instead of persisting a partial prefix', async () => {
     const events: ModelHttpAuditEvent[] = []
     const nestedSecret = 'nested-secret-value'
