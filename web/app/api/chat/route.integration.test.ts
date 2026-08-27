@@ -9,6 +9,8 @@ const api = vi.hoisted(() => ({
   openAgentRuntime: vi.fn(),
   pending: [] as Promise<unknown>[],
   providerFails: false,
+  providerFailureAfter: undefined as number | undefined,
+  providerRequestCount: 0,
   responseText: '',
   streamText: vi.fn(),
 }))
@@ -187,6 +189,8 @@ describe('POST /api/chat model HTTP audit integration', () => {
     api.openAgentRuntime.mockImplementation(runtimeFor({ shared: false }))
     api.pending = []
     api.providerFails = false
+    api.providerFailureAfter = undefined
+    api.providerRequestCount = 0
     api.responseText = ''
     api.streamText.mockImplementation((options: Record<string, unknown>) => {
       const work = (async () => {
@@ -217,7 +221,10 @@ describe('POST /api/chat model HTTP audit integration', () => {
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)
       if (url.includes('provider.example')) {
-        if (api.providerFails) throw new Error('token=provider-secret network failure')
+        api.providerRequestCount += 1
+        if (api.providerFails || api.providerFailureAfter === api.providerRequestCount) {
+          throw new Error('token=provider-secret network failure')
+        }
         return new Response(JSON.stringify({ api_key: 'provider-secret', ok: true }), { status: 200 })
       }
       if (url.includes('/settings/ai-runtime')) return new Response(JSON.stringify({}), { status: 200 })
@@ -303,6 +310,22 @@ describe('POST /api/chat model HTTP audit integration', () => {
     expect(httpError.step_id).toBe('1')
     expect(modelError.payload?.callId).toBe(request.payload?.callId)
     expect(httpError.payload?.callId).toBe(request.payload?.callId)
+    expect(JSON.stringify(modelError.payload)).not.toContain('provider-secret')
+    expect(JSON.stringify(modelError.payload)).toContain('[REDACTED]')
     expect(JSON.stringify(httpError.payload)).not.toContain('provider-secret')
+  })
+
+  it('sanitizes normalized final-answer recovery errors', async () => {
+    process.env.GENERIC_SKILL_RUNTIME = '0'
+    api.providerFailureAfter = 2
+
+    expect((await postChat()).status).toBe(200)
+
+    const recoveryError = modelEvents().find(event => (
+      event.event_type === 'llm/error' && event.phase === 'finalize'
+    ))!
+    expect(recoveryError.payload?.callId).toBeTruthy()
+    expect(JSON.stringify(recoveryError.payload)).not.toContain('provider-secret')
+    expect(JSON.stringify(recoveryError.payload)).toContain('[REDACTED]')
   })
 })

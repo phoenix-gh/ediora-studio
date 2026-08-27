@@ -28,6 +28,7 @@ import type { AgentSessionEventType } from '@/lib/ai/agent-trajectory'
 import type { AgentModelMessageEvent, AgentStepCheckpoint, AgentToolAudit } from '@/lib/ai/agent-runtime-types'
 import {
   createModelHttpAuditFetch,
+  sanitizeModelHttpAuditText,
   type ModelHttpAuditContext,
   type ModelHttpAuditEvent,
   withModelHttpAuditContext,
@@ -333,7 +334,9 @@ async function recoverFinalAnswer({
     return recovery.text.trim()
   } catch (error) {
     await onMessage(chatModelMessageEvent(audit, 'model_error', {
-      error: error instanceof Error ? error.message : String(error),
+      error: sanitizeModelHttpAuditText(
+        error instanceof Error ? error.message : String(error),
+      ).text,
     }))
     throw error
   }
@@ -1152,7 +1155,9 @@ export async function POST(request: NextRequest) {
         const audit = legacyAuditByStep.get(step) ?? newChatModelAuditCall('execute', step)
         await persistChatAgentLogEvent(chatAgentLogEventFromModelMessage(
           chatModelMessageEvent(audit, 'model_error', {
-            error: error instanceof Error ? error.message : String(error),
+            error: sanitizeModelHttpAuditText(
+              error instanceof Error ? error.message : String(error),
+            ).text,
           }),
           logContext,
         ))
