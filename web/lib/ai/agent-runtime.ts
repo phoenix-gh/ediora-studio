@@ -597,12 +597,14 @@ export async function openAgentRuntime(
       messages: initialMessages,
       activeTools,
       recoverProviderStops,
+      recoverEmptyStops = recoverProviderStops,
       requireCompletion = false,
     }: {
       instructions: string
       messages: ModelMessage[]
       activeTools?: string[]
       recoverProviderStops: boolean
+      recoverEmptyStops?: boolean
       requireCompletion?: boolean
     }) => {
       const hasFollowUpProvider = Boolean(request.getFollowUpMessages) && !requireCompletion
@@ -730,7 +732,7 @@ export async function openAgentRuntime(
           continue
         }
         const emptyStoppedStep = (
-          recoverProviderStops && generated.finishReason === 'stop'
+          recoverEmptyStops && generated.finishReason === 'stop'
           && !generated.text.trim()
           && generatedToolCalls.length === 0
           && currentToolResults.length === 0
@@ -858,7 +860,8 @@ export async function openAgentRuntime(
           instructions: prompt,
           messages: request.modelMessages,
           activeTools,
-          recoverProviderStops: false,
+          recoverProviderStops: true,
+          recoverEmptyStops: false,
         })
         executionFinishReason = execution.generated.finishReason
         return {

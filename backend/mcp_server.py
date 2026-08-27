@@ -10,10 +10,11 @@ import uuid
 from dataclasses import asdict
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Annotated, Literal, Optional
 from urllib.parse import unquote, urlparse
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
+from pydantic import Field
 from sqlalchemy import select, desc, delete as sa_delete, func
 from database import SessionLocal
 from web_search import WebSearchProviderError, search_web as run_web_search
@@ -36,6 +37,10 @@ mcp = FastMCP(
         allowed_hosts=["api:8000", "localhost:8000", "127.0.0.1:8000"],
     ),
 )
+
+SourceType = Literal["x", "wechat", "reddit", "youtube", "v2ex"]
+OptionalSourceType = Literal["", "x", "wechat", "reddit", "youtube", "v2ex"]
+SourceSearchDays = Annotated[int, Field(ge=1, le=365)]
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -545,7 +550,7 @@ async def get_creative_asset(asset_id: int) -> dict:
     retry="safe",
 )
 async def list_source_subscriptions(
-    source_type: str = "",
+    source_type: OptionalSourceType = "",
     include_muted: bool = True,
     limit: int = 50,
 ) -> list[dict]:
@@ -577,10 +582,10 @@ async def list_source_subscriptions(
     retry="safe",
 )
 async def search_source_items(
-    source_type: str = "",
+    source_type: OptionalSourceType = "",
     query: str = "",
     subscription_id: Optional[str] = None,
-    days: int = 30,
+    days: SourceSearchDays = 30,
     limit: int = 20,
 ) -> list[dict]:
     """Search already-collected source items by relevance and filters.
@@ -614,7 +619,7 @@ async def search_source_items(
     concurrency="parallel-safe",
     retry="safe",
 )
-async def get_source_item(source_type: str, item_id: str) -> dict:
+async def get_source_item(source_type: SourceType, item_id: str) -> dict:
     """Read one complete stored source item by source type and known ID.
 
     This is direct retrieval, not search, random sampling, or collection.
