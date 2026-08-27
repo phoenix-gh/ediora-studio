@@ -570,7 +570,7 @@ describe('shared Agent runtime', () => {
 
     expect(messages.at(-1)?.payload).toMatchObject({
       name: 'AI_NoObjectGeneratedError',
-      text: expect.stringContaining('{"broken"'),
+      text: '[omitted unsafe structured text]',
       finishReason: 'length',
       usage: { inputTokens: 10, outputTokens: 20 },
       response: { id: 'response-1' },
@@ -649,18 +649,12 @@ describe('shared Agent runtime', () => {
         api_key: '[REDACTED]',
         inputTokens: 10,
         outputTokens: 20,
-        credentials: {
-          accessToken: '[REDACTED]',
-          clientSecret: '[REDACTED]',
-        },
+        credentials: '[REDACTED]',
       },
       response: {
         headers: { authorization: '[REDACTED]' },
         url: expect.stringContaining('[REDACTED]'),
-        credentials: {
-          refreshToken: '[REDACTED]',
-          authorizationHeader: '[REDACTED]',
-        },
+        credentials: '[REDACTED]',
       },
     })
     await runtime.close()
