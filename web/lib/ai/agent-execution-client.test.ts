@@ -37,6 +37,7 @@ describe('durable Agent execution client', () => {
       inputSummary: { directories: ['搞钱副业'] }, occurredAt: '2026-08-04T00:00:00Z',
     })
     await appendAgentMessage(17, 31, {
+      callId: 'model-call-1',
       phase: 'execute', direction: 'model_response',
       payload: { text: 'done' }, occurredAt: '2026-08-04T00:00:00Z',
     })

@@ -9,6 +9,7 @@ import {
   modelHistoryCandidates,
 } from '../../../lib/ai/chat-tools'
 import {
+  chatAgentLogEventFromHttpAudit,
   chatAgentLogEventFromModelMessage,
   chatAgentLogEventFromToolAudit,
   chatAgentSessionEventFromDraft,
@@ -26,9 +27,44 @@ import {
 } from './route'
 
 describe('Chat Agent log event mapping', () => {
+  it('maps model HTTP audit responses into correlated Chat LLM events', () => {
+    expect(chatAgentLogEventFromHttpAudit({
+      callId: 'call-1',
+      phase: 'plan',
+      step: 2,
+      direction: 'http_response',
+      occurredAt: '2026-08-27T00:00:00.000Z',
+      payload: { status: 200, body: '{"ok":true}' },
+    }, { sessionId: 12, turnId: 'turn-1' })).toMatchObject({
+      stream_key: 'chat:12',
+      step_id: '2',
+      event_type: 'llm/http-response',
+      phase: 'plan',
+      payload: { callId: 'call-1', status: 200, body: '{"ok":true}' },
+    })
+  })
+
+  it('keeps the HTTP audit correlation identity when payload data collides', () => {
+    expect(chatAgentLogEventFromHttpAudit({
+      callId: 'trusted-http-call-id',
+      phase: 'execute',
+      step: 1,
+      direction: 'http_error',
+      occurredAt: '2026-08-27T00:00:00.000Z',
+      payload: { callId: 'untrusted-payload-id', error: 'sanitized error' },
+    }, { sessionId: 12, turnId: 'turn-1' })).toMatchObject({
+      event_type: 'llm/http-error',
+      payload: {
+        callId: 'trusted-http-call-id',
+        occurredAt: '2026-08-27T00:00:00.000Z',
+      },
+    })
+  })
+
   it('maps model callbacks into replayable LLM events', () => {
     expect(chatAgentLogEventFromModelMessage(
       {
+        callId: 'model-call-1',
         phase: 'execute',
         direction: 'model_response',
         payload: { text: 'answer', usage: { inputTokens: 2 } },
@@ -43,7 +79,31 @@ describe('Chat Agent log event mapping', () => {
       event_type: 'llm/response',
       phase: 'execute',
       status: 'completed',
-      payload: { text: 'answer' },
+      payload: {
+        text: 'answer',
+        callId: 'model-call-1',
+        occurredAt: '2026-08-19T00:00:00.000Z',
+      },
+    })
+  })
+
+  it('keeps the model callback correlation identity when payload data collides', () => {
+    expect(chatAgentLogEventFromModelMessage(
+      {
+        callId: 'trusted-call-id',
+        phase: 'execute',
+        direction: 'model_error',
+        payload: { callId: 'untrusted-payload-id', error: 'provider failed' },
+        occurredAt: '2026-08-27T00:00:00.000Z',
+      },
+      { sessionId: 12, turnId: 'turn-1' },
+    )).toMatchObject({
+      event_type: 'llm/error',
+      status: 'error',
+      payload: {
+        callId: 'trusted-call-id',
+        occurredAt: '2026-08-27T00:00:00.000Z',
+      },
     })
   })
 

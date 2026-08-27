@@ -3,8 +3,17 @@ import { describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
 
 import { applyAgentToolPolicy } from './agent-tool-policy'
-import { agentSkillRunAudit, openAgentRuntime, planningTools, type AgentRuntimeDependencies, type AgentSessionEventDraft } from './agent-runtime'
+import {
+  MODEL_ERROR_DIAGNOSTIC_PAYLOAD_LIMIT,
+  agentSkillRunAudit,
+  openAgentRuntime,
+  planningTools,
+  type AgentRuntimeDependencies,
+  type AgentSessionEventDraft,
+} from './agent-runtime'
+import type { AgentModelMessageEvent } from './agent-runtime-types'
 import type { GlobalAgentToolOptions } from './global-chat-tools'
+import { currentModelHttpAuditContext, type ModelHttpAuditContext } from './model-http-audit'
 import { buildToolRegistry } from './tool-registry'
 import type { RegisteredSkill } from '../skills/registry'
 
@@ -508,6 +517,174 @@ describe('shared Agent runtime', () => {
     expect(messages[1].payload).toMatchObject({
       text: 'done', output: { decision: 'continue' },
     })
+    await runtime.close()
+  })
+
+  it('correlates each model message with the active HTTP audit context', async () => {
+    const messages: AgentModelMessageEvent[] = []
+    const contexts: Array<ModelHttpAuditContext | undefined> = []
+    const deps = dependencies()
+    deps.generate = vi.fn(async () => {
+      contexts.push(currentModelHttpAuditContext())
+      return { text: 'done', content: [], toolResults: [] }
+    }) as unknown as AgentRuntimeDependencies['generate']
+    const runtime = await openAgentRuntime({
+      ...openOptions('automatic', deps),
+      automaticSelection: false,
+      onMessage: event => { messages.push(event) },
+    })
+
+    await runtime.run({ objective: '记录调用身份', modelMessages: [], maxSteps: 1 })
+
+    expect(messages).toHaveLength(2)
+    expect(messages[0].callId).toEqual(expect.any(String))
+    expect(messages[0].callId).toBe(messages[1].callId)
+    expect(contexts[0]).toMatchObject({
+      callId: messages[0].callId,
+      phase: 'execute',
+      step: 1,
+    })
+    await runtime.close()
+  })
+
+  it('retains bounded JSON-safe parse-error evidence without replacing the thrown error', async () => {
+    const messages: AgentModelMessageEvent[] = []
+    const parseError = Object.assign(new Error('No object generated: could not parse the response.'), {
+      name: 'AI_NoObjectGeneratedError',
+      text: '```json\n{"broken":\n```',
+      finishReason: 'length',
+      usage: { inputTokens: 10, outputTokens: 20 },
+      response: { id: 'response-1' },
+      cause: new Error('JSON parse failed'),
+    })
+    const deps = dependencies()
+    deps.generate = vi.fn(async () => { throw parseError }) as unknown as AgentRuntimeDependencies['generate']
+    const runtime = await openAgentRuntime({
+      ...openOptions('automatic', deps),
+      automaticSelection: false,
+      onMessage: event => { messages.push(event) },
+    })
+
+    await expect(runtime.run({ objective: '记录解析失败', modelMessages: [], maxSteps: 1 }))
+      .rejects.toThrow(parseError.message)
+
+    expect(messages.at(-1)?.payload).toMatchObject({
+      name: 'AI_NoObjectGeneratedError',
+      text: '[omitted unsafe structured text]',
+      finishReason: 'length',
+      usage: { inputTokens: 10, outputTokens: 20 },
+      response: { id: 'response-1' },
+      cause: { name: 'Error', message: 'JSON parse failed' },
+    })
+    await runtime.close()
+  })
+
+  it('redacts secrets from every supported model-error diagnostic field without replacing the error', async () => {
+    const messages: AgentModelMessageEvent[] = []
+    const secrets = {
+      name: 'name-secret',
+      message: 'message-secret',
+      causeName: 'cause-name-secret',
+      causeMessage: 'cause-message-secret',
+      text: 'text-secret',
+      finishReason: 'finish-secret',
+      usage: 'usage-secret',
+      response: 'response-secret',
+      accessToken: 'access-token-secret',
+      refreshToken: 'refresh-token-secret',
+      clientSecret: 'client-secret-secret',
+      authorizationHeader: 'authorization-header-secret',
+    }
+    const parseError = Object.assign(new Error(`Bearer ${secrets.message}`), {
+      name: `ProviderError secret=${secrets.name}`,
+      text: `token=${secrets.text}`,
+      finishReason: `api_key=${secrets.finishReason}`,
+      usage: {
+        api_key: secrets.usage,
+        inputTokens: 10,
+        outputTokens: 20,
+        credentials: {
+          accessToken: secrets.accessToken,
+          clientSecret: secrets.clientSecret,
+        },
+      },
+      response: {
+        headers: { authorization: `Bearer ${secrets.response}` },
+        url: `https://provider.test/v1/responses?token=${secrets.response}`,
+        credentials: {
+          refreshToken: secrets.refreshToken,
+          authorizationHeader: secrets.authorizationHeader,
+        },
+      },
+      cause: Object.assign(new Error(`password=${secrets.causeMessage}`), {
+        name: `CauseError secret=${secrets.causeName}`,
+      }),
+    })
+    const deps = dependencies()
+    deps.generate = vi.fn(async () => { throw parseError }) as unknown as AgentRuntimeDependencies['generate']
+    const runtime = await openAgentRuntime({
+      ...openOptions('automatic', deps),
+      automaticSelection: false,
+      onMessage: event => { messages.push(event) },
+    })
+
+    await expect(runtime.run({ objective: '记录敏感解析失败', modelMessages: [], maxSteps: 1 }))
+      .rejects.toBe(parseError)
+
+    const payload = messages.at(-1)?.payload
+    const serialized = JSON.stringify(payload)
+    for (const secret of Object.values(secrets)) {
+      expect(serialized).not.toContain(secret)
+    }
+    expect(payload).toMatchObject({
+      name: expect.stringContaining('[REDACTED]'),
+      message: expect.stringContaining('[REDACTED]'),
+      cause: {
+        name: expect.stringContaining('[REDACTED]'),
+        message: expect.stringContaining('[REDACTED]'),
+      },
+      text: expect.stringContaining('[REDACTED]'),
+      finishReason: expect.stringContaining('[REDACTED]'),
+      usage: {
+        api_key: '[REDACTED]',
+        inputTokens: 10,
+        outputTokens: 20,
+        credentials: '[REDACTED]',
+      },
+      response: {
+        headers: { authorization: '[REDACTED]' },
+        url: expect.stringContaining('[REDACTED]'),
+        credentials: '[REDACTED]',
+      },
+    })
+    await runtime.close()
+  })
+
+  it('caps broad model-error evidence within one total diagnostic payload budget', async () => {
+    const messages: AgentModelMessageEvent[] = []
+    const broadResponse = Object.fromEntries(Array.from({ length: 500 }, (_, index) => [
+      `branch_${index}`,
+      { detail: 'x'.repeat(8 * 1024) },
+    ]))
+    const parseError = Object.assign(new Error('No object generated'), {
+      name: 'AI_NoObjectGeneratedError',
+      response: broadResponse,
+      usage: broadResponse,
+    })
+    const deps = dependencies()
+    deps.generate = vi.fn(async () => { throw parseError }) as unknown as AgentRuntimeDependencies['generate']
+    const runtime = await openAgentRuntime({
+      ...openOptions('automatic', deps),
+      automaticSelection: false,
+      onMessage: event => { messages.push(event) },
+    })
+
+    await expect(runtime.run({ objective: '限制宽分支错误证据', modelMessages: [], maxSteps: 1 }))
+      .rejects.toBe(parseError)
+
+    const serialized = JSON.stringify(messages.at(-1)?.payload)
+    expect(new TextEncoder().encode(serialized).byteLength)
+      .toBeLessThanOrEqual(MODEL_ERROR_DIAGNOSTIC_PAYLOAD_LIMIT)
     await runtime.close()
   })
 

@@ -1,4 +1,5 @@
 import { generateText, Output, stepCountIs, type ModelMessage, type ToolSet } from 'ai'
+import { randomUUID } from 'node:crypto'
 
 import {
   openGlobalAgentTools,
@@ -30,6 +31,8 @@ import {
   goalCompletionSelfAuditMessage,
 } from './agent-goal-completion'
 import { executeSkillRunWithAiSdk, selectSkillForTurn } from './skill-run-ai-sdk'
+import { modelErrorEvidenceFromUnknown } from './model-error-evidence'
+import { withModelHttpAuditContext } from './model-http-audit'
 import {
   sanitizeSkillRunPlan,
   skillRunPlanInputSchema,
@@ -69,6 +72,8 @@ const COMPLETE_GOAL_TOOL_CONTRACT = {
   concurrency: 'serialized',
   retry: 'claim-backed',
 } satisfies ToolContractMetadata
+
+export { MODEL_ERROR_DIAGNOSTIC_PAYLOAD_LIMIT } from './model-error-evidence'
 
 export type AgentRuntimeDependencies = {
   openTools(options: GlobalAgentToolOptions): Promise<ChatSkillRuntime>
@@ -469,13 +474,14 @@ export async function openAgentRuntime(
   }
 
   const emitMessage = async (
+    callId: string,
     phase: string,
     direction: AgentModelMessageEvent['direction'],
     payload: Record<string, unknown>,
   ) => {
     try {
       await options.onMessage?.({
-        phase, step: activeStep ?? undefined, direction, payload, occurredAt: new Date().toISOString(),
+        callId, phase, step: activeStep ?? undefined, direction, payload, occurredAt: new Date().toISOString(),
       })
     } catch {
       // Observability must not turn a successful Agent operation into a failed job.
@@ -484,6 +490,7 @@ export async function openAgentRuntime(
 
   const generateWithMessageLog = async (input: GenerateInput, phase: string) => {
     const step = ++nextStep
+    const callId = randomUUID()
     activeStep = step
     await emitSessionEvent('step/start', step, {
       turn: turnNumber,
@@ -496,10 +503,13 @@ export async function openAgentRuntime(
       phase,
       request: modelRequestPayload(input),
     })
-    await emitMessage(phase, 'model_request', modelRequestPayload(input))
+    await emitMessage(callId, phase, 'model_request', modelRequestPayload(input))
     try {
-      const result = await deps.generate(input)
-      await emitMessage(phase, 'model_response', modelResponsePayload(result))
+      const result = await withModelHttpAuditContext(
+        { callId, phase, step },
+        () => deps.generate(input),
+      )
+      await emitMessage(callId, phase, 'model_response', modelResponsePayload(result))
       const response = result as unknown as Record<string, unknown>
       await emitSessionEvent('assistant/message', step, {
         turn: turnNumber,
@@ -516,9 +526,7 @@ export async function openAgentRuntime(
       })
       return result
     } catch (error) {
-      await emitMessage(phase, 'model_error', {
-        error: error instanceof Error ? error.message : String(error),
-      })
+      await emitMessage(callId, phase, 'model_error', modelErrorEvidenceFromUnknown(error))
       await emitSessionEvent('step/end', step, {
         turn: turnNumber,
         step,
