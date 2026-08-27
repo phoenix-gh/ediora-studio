@@ -247,6 +247,186 @@ describe('model HTTP audit', () => {
     expect(result.text).not.toContain('diagnostic-secret')
   })
 
+  it('redacts credential and private-key aliases without redacting benign metrics', () => {
+    const secret = 'credential-secret'
+    const result = sanitizeModelHttpAuditText(JSON.stringify({
+      credentials: secret,
+      client_credentials: secret,
+      privateKey: secret,
+      private_key: secret,
+      passphrase: secret,
+      credential_count: 3,
+    }))
+
+    expect(result.text).not.toContain(secret)
+    expect(JSON.parse(result.text)).toMatchObject({
+      credentials: '[REDACTED]',
+      client_credentials: '[REDACTED]',
+      privateKey: '[REDACTED]',
+      private_key: '[REDACTED]',
+      passphrase: '[REDACTED]',
+      credential_count: 3,
+    })
+  })
+
+  it('structurally sanitizes valid fenced JSON and omits invalid nested fenced JSON', () => {
+    const validSecret = 'valid-fenced-secret'
+    const valid = sanitizeModelHttpAuditText(`\`\`\`json\n${JSON.stringify({ privateKey: validSecret })}\n\`\`\``)
+    const invalidSecret = 'invalid-fenced-secret'
+    const invalid = sanitizeModelHttpAuditText(`\`\`\`json\n{"credentials":{"nested":"${invalidSecret}"}\n\`\`\``)
+
+    expect(valid.text).not.toContain(validSecret)
+    expect(valid.text).toContain('[REDACTED]')
+    expect(invalid.text).toBe('[omitted unsafe structured text]')
+    expect(invalid.text).not.toContain(invalidSecret)
+  })
+
+  it('bounds oversized structured request bodies before sanitization work', async () => {
+    const events: ModelHttpAuditEvent[] = []
+    const secret = 'large-request-secret'
+    const body = JSON.stringify({ credentials: { nested: secret }, padding: 'x'.repeat(MODEL_HTTP_AUDIT_BODY_LIMIT) })
+    let providerCalled = false
+    const auditedFetch = createModelHttpAuditFetch({
+      fetch: async () => {
+        providerCalled = true
+        return new Response('ok')
+      },
+      onEvent: event => {
+        events.push(event)
+      },
+    })
+
+    await withModelHttpAuditContext({ callId: 'call-large-request', phase: 'answer', step: 10 }, () => auditedFetch(
+      'https://provider.test/v1/responses',
+      { method: 'POST', body },
+    ))
+
+    expect(providerCalled).toBe(true)
+    await vi.waitFor(() => expect(events).toHaveLength(2))
+    const request = events.find(event => event.direction === 'http_request')
+    expect(request?.payload).toMatchObject({
+      body: '[omitted unsafe structured body]',
+      bodyTruncated: true,
+    })
+    expect(JSON.stringify(request)).not.toContain(secret)
+  })
+
+  it('bounds URLSearchParams request bodies incrementally without leaking credentials', async () => {
+    const events: ModelHttpAuditEvent[] = []
+    const params = new URLSearchParams()
+    params.set('client_credentials', 'params-secret')
+    params.set('padding', 'x'.repeat(MODEL_HTTP_AUDIT_BODY_LIMIT))
+    const auditedFetch = createModelHttpAuditFetch({
+      fetch: async () => new Response('ok'),
+      onEvent: event => {
+        events.push(event)
+      },
+    })
+
+    await withModelHttpAuditContext({ callId: 'call-large-params', phase: 'answer', step: 10 }, () => auditedFetch(
+      'https://provider.test/v1/responses',
+      { method: 'POST', body: params },
+    ))
+
+    await vi.waitFor(() => expect(events).toHaveLength(2))
+    const request = events.find(event => event.direction === 'http_request')
+    const auditBody = request?.payload.body as string
+    expect(request?.payload.bodyTruncated).toBe(true)
+    expect(new TextEncoder().encode(auditBody).byteLength).toBeLessThanOrEqual(MODEL_HTTP_AUDIT_BODY_LIMIT)
+    expect(auditBody).not.toContain('params-secret')
+  })
+
+  it('uses the Request stream marker when init.body is explicitly undefined', async () => {
+    const events: ModelHttpAuditEvent[] = []
+    const request = new Request('https://provider.test/v1/responses', {
+      method: 'POST',
+      body: new ReadableStream<Uint8Array>({ start: () => {} }),
+      duplex: 'half',
+    } as RequestInit)
+    const auditedFetch = createModelHttpAuditFetch({
+      fetch: async () => new Response('ok'),
+      onEvent: event => {
+        events.push(event)
+      },
+    })
+
+    await withModelHttpAuditContext(
+      { callId: 'call-undefined-init-body', phase: 'answer', step: 11 },
+      () => auditedFetch(request, { body: undefined }),
+    )
+
+    await vi.waitFor(() => expect(events).toHaveLength(2))
+    expect(events.find(event => event.direction === 'http_request')?.payload.body).toBe('[unsupported streaming request body]')
+  })
+
+  it('emits a response audit event when cloning the response fails', async () => {
+    const events: ModelHttpAuditEvent[] = []
+    const response = {
+      url: 'https://provider.test/v1/responses',
+      status: 502,
+      statusText: 'Bad Gateway',
+      headers: new Headers({ 'content-type': 'application/json' }),
+      body: new ReadableStream<Uint8Array>(),
+      clone: () => {
+        throw new Error('clone failure private_key=clone-secret')
+      },
+    } as unknown as Response
+    const auditedFetch = createModelHttpAuditFetch({
+      fetch: async () => response,
+      onEvent: event => {
+        events.push(event)
+      },
+    })
+
+    expect(await withModelHttpAuditContext(
+      { callId: 'call-clone-failure', phase: 'answer', step: 12 },
+      () => auditedFetch('https://provider.test/v1/responses'),
+    )).toBe(response)
+
+    await vi.waitFor(() => expect(events).toHaveLength(2))
+    expect(events.find(event => event.direction === 'http_response')?.payload).toMatchObject({
+      status: 502,
+      body: '[unavailable response body]',
+      bodyError: expect.any(String),
+    })
+    expect(JSON.stringify(events)).not.toContain('clone-secret')
+  })
+
+  it('emits a response audit event when the cloned response stream errors', async () => {
+    const events: ModelHttpAuditEvent[] = []
+    const response = {
+      url: 'https://provider.test/v1/responses',
+      status: 503,
+      statusText: 'Service Unavailable',
+      headers: new Headers(),
+      body: new ReadableStream<Uint8Array>(),
+      clone: () => ({
+        body: new ReadableStream<Uint8Array>({
+          start: controller => controller.error(new Error('response credentials=stream-secret')),
+        }),
+      }),
+    } as unknown as Response
+    const auditedFetch = createModelHttpAuditFetch({
+      fetch: async () => response,
+      onEvent: event => {
+        events.push(event)
+      },
+    })
+
+    await withModelHttpAuditContext(
+      { callId: 'call-cloned-stream-error', phase: 'answer', step: 13 },
+      () => auditedFetch('https://provider.test/v1/responses'),
+    )
+
+    await vi.waitFor(() => expect(events).toHaveLength(2))
+    expect(events.find(event => event.direction === 'http_response')?.payload).toMatchObject({
+      status: 503,
+      body: '[unavailable response body]',
+      bodyError: expect.any(String),
+    })
+    expect(JSON.stringify(events)).not.toContain('stream-secret')
+  })
+
   it('does not wait for a stalled audit callback before returning the provider response', async () => {
     let providerCalled = false
     const auditedFetch = createModelHttpAuditFetch({

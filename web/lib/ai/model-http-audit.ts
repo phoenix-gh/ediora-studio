@@ -25,7 +25,15 @@ export type ModelHttpAuditSanitizedText = {
 }
 
 const auditContext = new AsyncLocalStorage<ModelHttpAuditContext>()
-const sensitiveNamePattern = /(?:^|[_-])(authorization|api[_-]?key|cookie|password|secret|token)(?:$|[_-])/i
+const sensitiveNamePattern = /(?:^|_)(authorization|api_?key|cookie|password|secret|token)(?:$|_)/i
+const sensitiveAliases = new Set([
+  'credential',
+  'credentials',
+  'client_credential',
+  'client_credentials',
+  'private_key',
+  'passphrase',
+])
 const redactedValue = '[REDACTED]'
 const omittedStructuredBody = '[omitted unsafe structured body]'
 const omittedStructuredText = '[omitted unsafe structured text]'
@@ -125,28 +133,30 @@ async function captureResponse(
   context: ModelHttpAuditContext,
   response: Response,
 ): Promise<void> {
+  const payload: Record<string, unknown> = {
+    url: sanitizeUrl(response.url),
+    status: response.status,
+    statusText: sanitizeModelHttpAuditText(response.statusText).text,
+    headers: sanitizeHeaders(response.headers),
+  }
+
   try {
-    const payload: Record<string, unknown> = {
-      url: sanitizeUrl(response.url),
-      status: response.status,
-      statusText: sanitizeModelHttpAuditText(response.statusText).text,
-      headers: sanitizeHeaders(response.headers),
-    }
     const body = await responseBody(response)
 
     if (body) {
       payload.body = body.text
       payload.bodyTruncated = body.truncated
     }
-
-    await emitEvent(onEvent, context, 'http_response', payload)
-  } catch {
-    // Auditing must never consume or delay the provider response.
+  } catch (error) {
+    payload.body = '[unavailable response body]'
+    payload.bodyError = sanitizeModelHttpAuditText(error instanceof Error ? error.message : String(error)).text
   }
+
+  await emitEvent(onEvent, context, 'http_response', payload)
 }
 
 function requestBody(request: Request | undefined, init?: RequestInit): BoundedBody | undefined {
-  if (init && Object.prototype.hasOwnProperty.call(init, 'body')) {
+  if (init && Object.prototype.hasOwnProperty.call(init, 'body') && init.body !== undefined) {
     return bodyFromInit(init.body)
   }
 
@@ -163,11 +173,11 @@ function bodyFromInit(body: BodyInit | null | undefined): BoundedBody | undefine
   }
 
   if (typeof body === 'string') {
-    return sanitizeBoundedBody({ text: body, truncated: false })
+    return sanitizeBoundedBody(truncateText(body))
   }
 
   if (body instanceof URLSearchParams) {
-    return sanitizeBoundedBody({ text: body.toString(), truncated: false })
+    return sanitizeBoundedBody(boundedUrlSearchParams(body))
   }
 
   return { text: '[unsupported request body]', truncated: false }
@@ -233,16 +243,56 @@ function concatBytes(chunks: Uint8Array[], length: number): Uint8Array {
   return result
 }
 
+function boundedUrlSearchParams(params: URLSearchParams): BoundedBody {
+  let text = ''
+
+  for (const [key, value] of params) {
+    const separator = text ? '&' : ''
+    const boundedKey = truncateText(key).text
+    const boundedValue = truncateText(value).text
+    const entry = `${separator}${new URLSearchParams([[boundedKey, boundedValue]]).toString()}`
+    const combined = `${text}${entry}`
+    const bounded = truncateText(combined)
+    if (bounded.truncated) {
+      return bounded
+    }
+    text = combined
+  }
+
+  return { text, truncated: false }
+}
+
 function truncateText(text: string, maxBytes = MODEL_HTTP_AUDIT_BODY_LIMIT): BoundedBody {
   const limit = Number.isFinite(maxBytes) ? Math.max(0, Math.floor(maxBytes)) : MODEL_HTTP_AUDIT_BODY_LIMIT
-  const bytes = new TextEncoder().encode(text)
-  if (bytes.byteLength <= limit) {
-    return { text, truncated: false }
+  if (limit === 0) {
+    return { text: '', truncated: text.length > 0 }
+  }
+
+  const encoder = new TextEncoder()
+  const maxChars = Math.min(text.length, limit)
+  let end = maxChars
+  let bytes = encoder.encode(text.slice(0, end))
+
+  if (bytes.byteLength > limit) {
+    let low = 0
+    let high = end
+    bytes = encoder.encode('')
+    while (low < high) {
+      const middle = Math.ceil((low + high) / 2)
+      const middleBytes = encoder.encode(text.slice(0, middle))
+      if (middleBytes.byteLength <= limit) {
+        low = middle
+        bytes = middleBytes
+      } else {
+        high = middle - 1
+      }
+    }
+    end = low
   }
 
   return {
-    text: new TextDecoder().decode(bytes.subarray(0, limit)),
-    truncated: true,
+    text: new TextDecoder().decode(bytes),
+    truncated: end < text.length,
   }
 }
 
@@ -262,7 +312,9 @@ export function sanitizeModelHttpAuditText(
   text: string,
   maxBytes = MODEL_HTTP_AUDIT_BODY_LIMIT,
 ): ModelHttpAuditSanitizedText {
-  return truncateText(sanitizeText(text), maxBytes)
+  const input = truncateText(text, maxBytes)
+  const output = truncateText(sanitizeText(input.text), maxBytes)
+  return { text: output.text, truncated: input.truncated || output.truncated }
 }
 
 /** Sanitizes nested diagnostic values before they are persisted as model evidence. */
@@ -315,6 +367,11 @@ function sanitizeHeaders(headers: Headers): Record<string, string> {
 }
 
 function sanitizeText(text: string): string {
+  const fenced = sanitizeFencedJson(text)
+  if (fenced !== undefined) {
+    return fenced
+  }
+
   try {
     return JSON.stringify(sanitizeValue(JSON.parse(text)))
   } catch {
@@ -325,15 +382,33 @@ function sanitizeText(text: string): string {
   }
 }
 
+function sanitizeFencedJson(text: string): string | undefined {
+  const fencedStart = /^\s*```json\b/i
+  if (!fencedStart.test(text)) {
+    return undefined
+  }
+
+  const match = text.match(/^(\s*```json[^\S\r\n]*\r?\n)([\s\S]*?)(\r?\n```\s*)$/i)
+  if (!match) {
+    return omittedStructuredText
+  }
+
+  try {
+    return `${match[1]}${JSON.stringify(sanitizeValue(JSON.parse(match[2])))}${match[3]}`
+  } catch {
+    return omittedStructuredText
+  }
+}
+
 function sanitizePlainText(text: string): string {
   return text
     .replace(/(bearer\s+)[^\s,;]+/gi, `$1${redactedValue}`)
     .replace(
-      /([?&][^=]*?(?:authorization|api[_-]?key|cookie|password|secret|token)[^=]*=)[^&#\s]*/gi,
+      /([?&][^=]*?(?:authorization|api[_-]?key|cookie|password|secret|token|credentials?|client[_-]?credentials?|private[_-]?key|passphrase)[^=]*=)[^&#\s]*/gi,
       `$1${redactedValue}`,
     )
     .replace(
-      /((?:"?(?:authorization|api[_-]?key|cookie|password|secret|token)"?)\s*[=:]\s*)(?:"(?:\\.|[^"])*"|'(?:\\.|[^'])*'|[^\s,&;]+)/gi,
+      /((?:"?(?:authorization|api[_-]?key|cookie|password|secret|token|credentials?|client[_-]?credentials?|private[_-]?key|passphrase)"?)\s*[=:]\s*)(?:"(?:\\.|[^"])*"|'(?:\\.|[^'])*'|[^\s,&;]+)/gi,
       `$1${redactedValue}`,
     )
 }
@@ -375,8 +450,12 @@ function sanitizeValue(value: unknown): unknown {
 }
 
 function isSensitiveName(name: string): boolean {
-  const normalized = name.replace(/([a-z\d])([A-Z])/g, '$1_$2')
-  return sensitiveNamePattern.test(normalized)
+  const normalized = name
+    .replace(/([a-z\d])([A-Z])/g, '$1_$2')
+    .replace(/[^a-z\d]+/gi, '_')
+    .replace(/^_+|_+$/g, '')
+    .toLowerCase()
+  return sensitiveAliases.has(normalized) || sensitiveNamePattern.test(normalized)
 }
 
 async function emitEvent(
