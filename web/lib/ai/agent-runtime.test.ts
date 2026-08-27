@@ -590,15 +590,31 @@ describe('shared Agent runtime', () => {
       finishReason: 'finish-secret',
       usage: 'usage-secret',
       response: 'response-secret',
+      accessToken: 'access-token-secret',
+      refreshToken: 'refresh-token-secret',
+      clientSecret: 'client-secret-secret',
+      authorizationHeader: 'authorization-header-secret',
     }
     const parseError = Object.assign(new Error(`Bearer ${secrets.message}`), {
       name: `ProviderError secret=${secrets.name}`,
       text: `token=${secrets.text}`,
       finishReason: `api_key=${secrets.finishReason}`,
-      usage: { api_key: secrets.usage },
+      usage: {
+        api_key: secrets.usage,
+        inputTokens: 10,
+        outputTokens: 20,
+        credentials: {
+          accessToken: secrets.accessToken,
+          clientSecret: secrets.clientSecret,
+        },
+      },
       response: {
         headers: { authorization: `Bearer ${secrets.response}` },
         url: `https://provider.test/v1/responses?token=${secrets.response}`,
+        credentials: {
+          refreshToken: secrets.refreshToken,
+          authorizationHeader: secrets.authorizationHeader,
+        },
       },
       cause: Object.assign(new Error(`password=${secrets.causeMessage}`), {
         name: `CauseError secret=${secrets.causeName}`,
@@ -629,10 +645,22 @@ describe('shared Agent runtime', () => {
       },
       text: expect.stringContaining('[REDACTED]'),
       finishReason: expect.stringContaining('[REDACTED]'),
-      usage: { api_key: '[REDACTED]' },
+      usage: {
+        api_key: '[REDACTED]',
+        inputTokens: 10,
+        outputTokens: 20,
+        credentials: {
+          accessToken: '[REDACTED]',
+          clientSecret: '[REDACTED]',
+        },
+      },
       response: {
         headers: { authorization: '[REDACTED]' },
         url: expect.stringContaining('[REDACTED]'),
+        credentials: {
+          refreshToken: '[REDACTED]',
+          authorizationHeader: '[REDACTED]',
+        },
       },
     })
     await runtime.close()

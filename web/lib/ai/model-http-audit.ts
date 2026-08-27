@@ -375,7 +375,8 @@ function sanitizeValue(value: unknown): unknown {
 }
 
 function isSensitiveName(name: string): boolean {
-  return sensitiveNamePattern.test(name)
+  const normalized = name.replace(/([a-z\d])([A-Z])/g, '$1_$2')
+  return sensitiveNamePattern.test(normalized)
 }
 
 async function emitEvent(
