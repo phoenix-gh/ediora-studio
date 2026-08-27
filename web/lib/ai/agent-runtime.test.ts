@@ -533,7 +533,16 @@ describe('shared Agent runtime', () => {
     expect(events.map(event => event.type)).toEqual([
       'step/start', 'request/header', 'assistant/message', 'step/end',
     ])
-    expect(events[0]).toMatchObject({ turn: 3, step: 1, data: { turn: 3, step: 1 } })
+    expect(events[0]).toMatchObject({
+      turn: 3,
+      step: 1,
+      data: { turn: 3, step: 1, phase: 'execute' },
+    })
+    expect(events[1]).toMatchObject({
+      turn: 3,
+      step: 1,
+      data: { turn: 3, step: 1, phase: 'execute' },
+    })
     expect(events[2]).toMatchObject({
       type: 'assistant/message',
       data: { blocks: [{ kind: 'reasoning', text: '先确认' }, { kind: 'text', text: 'done' }] },

@@ -33,7 +33,7 @@ describe('AgentTrajectoryPanel', () => {
       events: [
         event(1, 'turn/start', { turn: 1 }),
         event(2, 'user/message', { content: [{ kind: 'text', text: '查资料' }], source: { kind: 'user' } }),
-        event(3, 'step/start', { turn: 1, step: 1 }, 1, 1),
+        event(3, 'step/start', { turn: 1, step: 1, phase: 'execute' }, 1, 1),
         event(4, 'assistant/message', { turn: 1, step: 1, blocks: [{ kind: 'text', text: '先查一下' }] }, 1, 1),
         event(5, 'tool/call', { turn: 1, step: 1, callId: 'call-1', name: 'search', arguments: { q: 'AI' } }, 1, 1),
         event(6, 'tool/result', { turn: 1, step: 1, callId: 'call-1', content: [{ kind: 'text', text: '找到资料' }], isError: false }, 1, 1),
@@ -67,7 +67,8 @@ describe('AgentTrajectoryPanel', () => {
     expect(api.listAgentTrajectory).toHaveBeenCalledTimes(1)
     expect(screen.getByText('Turn 1')).toBeInTheDocument()
     expect(screen.getByText('Message')).toBeInTheDocument()
-    expect(screen.getByText('Step 1')).toBeInTheDocument()
+    expect(screen.getByText('执行 · 模型调用 1')).toBeInTheDocument()
+    expect(screen.getByText('按轮次、消息、模型调用和工具展开；选择记录查看本地检查器。')).toBeInTheDocument()
     expect(screen.getByText('search')).toBeInTheDocument()
     const userCell = screen.getByTestId('trajectory-cell-user:2')
 

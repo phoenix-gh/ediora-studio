@@ -258,7 +258,7 @@ export function AgentTrajectoryPanel({
 
   return <section data-testid="agent-trajectory-panel" className="flex h-full min-h-0 flex-col gap-3 rounded-lg border bg-background p-3">
     {showHeader && <div className="flex shrink-0 flex-wrap items-start justify-between gap-2">
-      <div><h3 className="font-medium">{title}</h3><p className="text-xs text-muted-foreground">按 Turn、Message、Step 和 Tool 展开；选择记录查看本地检查器。</p></div>
+      <div><h3 className="font-medium">{title}</h3><p className="text-xs text-muted-foreground">按轮次、消息、模型调用和工具展开；选择记录查看本地检查器。</p></div>
       <div className="flex items-center gap-2 text-xs">
         {isRunning && <Loader2 data-testid="trajectory-running-indicator" role="status" aria-label="运行中" className="size-4 animate-spin text-info" />}
       </div>

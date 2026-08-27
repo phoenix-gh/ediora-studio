@@ -949,7 +949,7 @@ export async function POST(request: NextRequest) {
           type: 'step/start',
           turn: logContext.turn ?? 1,
           step: trajectoryStep,
-          data: { turn: logContext.turn ?? 1, step: trajectoryStep },
+          data: { turn: logContext.turn ?? 1, step: trajectoryStep, phase: 'execute' },
         }, logContext)
         await persistChatAgentSessionEvent({
           type: 'request/header',
@@ -958,6 +958,7 @@ export async function POST(request: NextRequest) {
           data: {
             turn: logContext.turn ?? 1,
             step: trajectoryStep,
+            phase: 'execute',
             request: {
               instructions,
               messages: modelMessages,
