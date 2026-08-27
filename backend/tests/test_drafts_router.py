@@ -28,6 +28,7 @@ def client(monkeypatch, tmp_path, postgres_env):
                     models.DailyCreationRun.__table__,
                     models.DailyCreationOutputBatch.__table__,
                     models.ContentUsageLedger.__table__,
+                    models.AgentTopicClaim.__table__,
                 ],
             )
 
@@ -246,3 +247,50 @@ def test_delete_normal_draft_preserves_unrelated_daily_creation_usage(client):
     draft, usage = _run(inspect())
     assert draft is None
     assert usage is not None
+
+
+def test_delete_agent_draft_releases_topic_claim_for_future_novelty(client):
+    from models import AgentTopicClaim, ArticleDraft
+
+    async def seed():
+        async with client.app.state.session_local() as session:
+            draft = ArticleDraft(
+                topic_id="agent",
+                title="Agent 主题",
+                content="原始正文",
+            )
+            session.add(draft)
+            await session.flush()
+            claim = AgentTopicClaim(
+                draft_id=draft.id,
+                topic="Agent 工具选择",
+                core_claim="严格契约减少错误参数",
+                decision="novel",
+                reason="seed",
+                window_days=14,
+                agent_mode="chat",
+            )
+            session.add(claim)
+            await session.commit()
+            return draft.id, claim.id, claim.topic, claim.core_claim
+
+    draft_id, claim_id, topic, core_claim = _run(seed())
+
+    edited = client.patch(
+        f"/api/write/drafts/{draft_id}",
+        json={"title": "人工修改后的标题", "content": "人工修改后的正文"},
+    )
+    deleted = client.delete(f"/api/write/drafts/{draft_id}")
+
+    assert edited.status_code == 200
+    assert deleted.status_code == 204
+
+    async def inspect():
+        async with client.app.state.session_local() as session:
+            return await session.get(AgentTopicClaim, claim_id)
+
+    claim = _run(inspect())
+    assert claim is not None
+    assert claim.topic == topic
+    assert claim.core_claim == core_claim
+    assert claim.released_at is not None
