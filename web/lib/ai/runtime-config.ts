@@ -60,11 +60,12 @@ export function imageModelConfigFromSettings(
 export function openaiProviderFromConfig(config: Pick<
   TextModelConfig,
   'apiKey' | 'baseURL' | 'headers'
->) {
+>, options: { fetch?: typeof globalThis.fetch } = {}) {
   return createOpenAI({
     apiKey: config.apiKey,
     baseURL: config.baseURL,
     headers: config.headers,
+    ...(options.fetch ? { fetch: options.fetch } : {}),
   })
 }
 

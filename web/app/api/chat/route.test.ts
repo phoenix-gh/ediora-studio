@@ -9,6 +9,7 @@ import {
   modelHistoryCandidates,
 } from '../../../lib/ai/chat-tools'
 import {
+  chatAgentLogEventFromHttpAudit,
   chatAgentLogEventFromModelMessage,
   chatAgentLogEventFromToolAudit,
   chatAgentSessionEventFromDraft,
@@ -26,6 +27,23 @@ import {
 } from './route'
 
 describe('Chat Agent log event mapping', () => {
+  it('maps model HTTP audit responses into correlated Chat LLM events', () => {
+    expect(chatAgentLogEventFromHttpAudit({
+      callId: 'call-1',
+      phase: 'plan',
+      step: 2,
+      direction: 'http_response',
+      occurredAt: '2026-08-27T00:00:00.000Z',
+      payload: { status: 200, body: '{"ok":true}' },
+    }, { sessionId: 12, turnId: 'turn-1' })).toMatchObject({
+      stream_key: 'chat:12',
+      step_id: '2',
+      event_type: 'llm/http-response',
+      phase: 'plan',
+      payload: { callId: 'call-1', status: 200, body: '{"ok":true}' },
+    })
+  })
+
   it('maps model callbacks into replayable LLM events', () => {
     expect(chatAgentLogEventFromModelMessage(
       {

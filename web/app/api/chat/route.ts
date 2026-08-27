@@ -26,6 +26,7 @@ import {
 import type { AgentSessionEventDraft } from '@/lib/ai/agent-runtime'
 import type { AgentSessionEventType } from '@/lib/ai/agent-trajectory'
 import type { AgentModelMessageEvent, AgentStepCheckpoint, AgentToolAudit } from '@/lib/ai/agent-runtime-types'
+import { createModelHttpAuditFetch, type ModelHttpAuditEvent } from '@/lib/ai/model-http-audit'
 import { createDirectImageGenerator, mcpUrl, type ChatSkillSnapshot } from '@/lib/ai/global-chat-tools'
 import { workerHeaders } from '@/lib/ai/job-client'
 import { getEnabledSkill, listSkillReferences, loadSkillPreloadContext } from '@/lib/skills/registry'
@@ -319,6 +320,32 @@ export function chatAgentLogEventFromModelMessage(
     status: event.direction === 'model_error' ? 'error' : 'completed',
     payload: event.payload,
     usage: usageFromPayload(event.payload),
+  }
+}
+
+export function chatAgentLogEventFromHttpAudit(
+  event: ModelHttpAuditEvent,
+  context: ChatAgentLogContext,
+): AgentLogEventInput {
+  const eventType = {
+    http_request: 'llm/http-request',
+    http_response: 'llm/http-response',
+    http_error: 'llm/http-error',
+  }[event.direction]
+  return {
+    stream_kind: 'chat',
+    stream_key: `chat:${context.sessionId}`,
+    session_id: context.sessionId,
+    turn_id: context.turnId,
+    step_id: String(event.step),
+    event_type: eventType,
+    phase: event.phase,
+    status: event.direction === 'http_error'
+      ? 'error'
+      : event.direction === 'http_request'
+        ? 'running'
+        : 'completed',
+    payload: { callId: event.callId, occurredAt: event.occurredAt, ...event.payload },
   }
 }
 
@@ -714,7 +741,12 @@ export async function POST(request: NextRequest) {
       }, logContext)
     }
     const modelConfig = await configuredTextModel()
-    const provider = openaiProviderFromConfig(modelConfig)
+    const auditedFetch = createModelHttpAuditFetch({
+      onEvent: event => persistChatAgentLogEvent(
+        chatAgentLogEventFromHttpAudit(event, logContext),
+      ),
+    })
+    const provider = openaiProviderFromConfig(modelConfig, { fetch: auditedFetch })
     const model = textModelForProvider(provider, modelConfig.modelName, modelConfig.protocol)
     const currentRequest = [...messages].reverse().find(message => message.role === 'user')
     const currentRequestText = currentRequest ? messageText(currentRequest) : ''
