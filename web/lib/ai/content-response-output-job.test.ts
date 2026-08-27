@@ -259,7 +259,8 @@ describe('content response Agent writing job', () => {
     vi.mocked(deps.listToolCalls).mockResolvedValue([{
       tool_call_id: 'save-before-restart', tool_name: 'save_draft', status: 'succeeded',
       output: { structuredContent: { result: {
-        saved: true, id: 123, title: '完整文章', status: 'drafting',
+        // Historical save_draft results predate the explicit saved flag.
+        id: 123, title: '完整文章', status: 'drafting',
       } } },
     }])
 

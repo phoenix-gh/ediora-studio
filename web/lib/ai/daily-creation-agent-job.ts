@@ -116,6 +116,14 @@ function structuredToolOutput(value: unknown): Record<string, unknown> | undefin
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
   const direct = value as Record<string, unknown>
   if ('saved' in direct) return direct
+  if (direct.structuredContent !== undefined) {
+    const structured = direct.structuredContent
+    if (structured && typeof structured === 'object' && !Array.isArray(structured)) {
+      const record = structured as Record<string, unknown>
+      return structuredToolOutput(record.result ?? record)
+    }
+  }
+  if (direct.result !== undefined) return structuredToolOutput(direct.result)
   const content = Array.isArray(direct.content) ? direct.content : []
   const textPart = content.find(item => (
     item && typeof item === 'object'
@@ -133,14 +141,20 @@ function structuredToolOutput(value: unknown): Record<string, unknown> | undefin
   }
 }
 
-export function isNoveltySaveConflict(audit: AgentToolAudit) {
-  if (audit.toolName !== 'save_draft' || audit.status !== 'succeeded') return false
-  const output = structuredToolOutput(audit.output)
+function isNoveltySaveConflictResult(
+  toolName: string, status: string, rawOutput: unknown,
+) {
+  if (toolName !== 'save_draft' || status !== 'succeeded') return false
+  const output = structuredToolOutput(rawOutput)
   const novelty = output?.novelty
   const decision = novelty && typeof novelty === 'object' && !Array.isArray(novelty)
     ? String((novelty as Record<string, unknown>).decision ?? '')
     : ''
   return output?.saved === false && ['duplicate', 'uncertain'].includes(decision)
+}
+
+export function isNoveltySaveConflict(audit: AgentToolAudit) {
+  return isNoveltySaveConflictResult(audit.toolName, audit.status, audit.output)
 }
 
 export function startAgentActivityHeartbeat(
@@ -453,6 +467,14 @@ export async function runDailyCreationAgentJob(
       return checkpointEvidence
     }
     const recordedCalls = await deps.listToolCalls(jobId, currentExecution().id)
+    const recordedNoveltyConflictCount = recordedCalls.filter(call => (
+      isNoveltySaveConflictResult(call.tool_name, call.status, call.output)
+    )).length
+    if (recordedNoveltyConflictCount >= 3) {
+      throw new Error(
+        'no sufficiently novel topic was available in the configured time window',
+      )
+    }
     const recordedEvidenceCalls = recordedCalls.map(call => ({
       toolCallId: call.tool_call_id,
       toolName: call.tool_name,
@@ -499,7 +521,10 @@ export async function runDailyCreationAgentJob(
       await finalize(recoveredEvidence)
       return recoveredEvidence
     }
-    if (recordedCalls.some(call => call.side_effecting && call.status === 'succeeded')) {
+    if (recordedCalls.some(call => (
+      call.side_effecting && call.status === 'succeeded'
+      && !isNoveltySaveConflictResult(call.tool_name, call.status, call.output)
+    ))) {
       throw new Error(interruptedAfterSideEffects)
     }
     const model = await deps.loadModel(jobId)
@@ -636,7 +661,7 @@ export async function runDailyCreationAgentJob(
       stopAgentActivityHeartbeat()
     }
     const declaration = result.goalCompletion
-    if (audits.filter(isNoveltySaveConflict).length >= 3) {
+    if (recordedNoveltyConflictCount + audits.filter(isNoveltySaveConflict).length >= 3) {
       throw new Error(
         'no sufficiently novel topic was available in the configured time window',
       )

@@ -71,6 +71,19 @@ function savedDraftCall(id: number) {
   }
 }
 
+function noveltyConflictCall(id: number, decision: 'duplicate' | 'uncertain') {
+  const conflict = noveltyConflictAudit(id, decision)
+  return {
+    tool_call_id: conflict.toolCallId,
+    tool_name: conflict.toolName,
+    status: conflict.status,
+    output: { structuredContent: { result: JSON.parse(
+      String((conflict.output as { content: Array<{ text: string }> }).content[0].text),
+    ) } },
+    side_effecting: true,
+  }
+}
+
 function completedGoalCall(
   summary: string,
   evidenceIds: string[],
@@ -209,6 +222,34 @@ describe('daily creation Agent job', () => {
     )
     expect(deps.completeExecution).not.toHaveBeenCalled()
     expect(deps.completeJob).not.toHaveBeenCalled()
+    expect(deps.failStep).toHaveBeenCalledWith(19, 71, expect.any(Error), false)
+  })
+
+  it('resumes after a persisted save conflict because no draft was written', async () => {
+    const { deps } = dependencies({ toolAudits: [savedDraftAudit(3)] })
+    vi.mocked(deps.listToolCalls).mockResolvedValue([
+      noveltyConflictCall(1, 'duplicate'),
+    ])
+
+    await expect(runDailyCreationAgentJob(19, deps)).resolves.toMatchObject({
+      finalText: '研究完成',
+    })
+    expect(deps.openRuntime).toHaveBeenCalledTimes(1)
+    expect(deps.completeJob).toHaveBeenCalledWith(19)
+  })
+
+  it('counts persisted save conflicts toward the three-conflict limit', async () => {
+    const { deps } = dependencies({
+      toolAudits: [noveltyConflictAudit(3, 'duplicate')],
+    })
+    vi.mocked(deps.listToolCalls).mockResolvedValue([
+      noveltyConflictCall(1, 'duplicate'),
+      noveltyConflictCall(2, 'uncertain'),
+    ])
+
+    await expect(runDailyCreationAgentJob(19, deps)).rejects.toThrow(
+      'no sufficiently novel topic was available in the configured time window',
+    )
     expect(deps.failStep).toHaveBeenCalledWith(19, 71, expect.any(Error), false)
   })
 

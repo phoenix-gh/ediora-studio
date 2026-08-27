@@ -255,6 +255,46 @@ async def test_model_judge_parses_fenced_json_and_rejects_missing_new_basis(monk
         )
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("field", "invalid_value"),
+    [
+        ("key_facts", "not-an-array"),
+        ("key_facts", ["valid", 7]),
+        ("source_item_ids", "123"),
+        ("source_item_ids", [True]),
+        ("source_item_ids", [1.5]),
+        ("source_item_ids", ["123"]),
+        ("topic", ["not", "text"]),
+        ("core_claim", {"not": "text"}),
+        ("event_time", 123),
+    ],
+)
+async def test_model_candidate_extraction_rejects_non_array_fields(
+    monkeypatch, field, invalid_value
+):
+    from agent_topic_novelty import extract_candidate_with_model
+    import json
+    import llm
+
+    payload = {
+        "topic": "Agent 工具选择",
+        "core_claim": "严格契约减少错误",
+        "key_facts": ["契约必须稳定"],
+        "event_time": None,
+        "source_item_ids": [123],
+    }
+    payload[field] = invalid_value
+
+    async def invalid_call(prompt, max_tokens):
+        return json.dumps(payload, ensure_ascii=False)
+
+    monkeypatch.setattr(llm, "_call", invalid_call)
+
+    with pytest.raises(ValueError, match=field):
+        await extract_candidate_with_model("工具契约", "正文")
+
+
 def candidate_extractor(topic: str, core_claim: str):
     async def extract(title: str, content: str):
         from agent_topic_novelty import NoveltyCandidate
@@ -387,6 +427,49 @@ async def test_duplicate_chat_save_requires_one_time_bound_override(db):
     )
     assert replayed["saved"] is False
     assert replayed["override_error"] == "novelty override is invalid or expired"
+
+
+@pytest.mark.asyncio
+async def test_chat_override_is_stable_when_model_extraction_varies(db):
+    from agent_topic_novelty import (
+        AgentIdentity,
+        NoveltyCandidate,
+        save_agent_draft_with_novelty_check,
+    )
+
+    await seed_topic_claim(db)
+    extraction_count = 0
+
+    async def varying_extractor(title, content):
+        nonlocal extraction_count
+        extraction_count += 1
+        return NoveltyCandidate(
+            topic="Agent 工具选择",
+            core_claim="严格契约能够减少错误参数",
+            key_facts=[f"模型表达 {extraction_count}"],
+        )
+
+    arguments = {
+        "title": "工具契约续写",
+        "content": "严格工具契约能够减少错误参数。",
+        "topic_id": "agent",
+        "status": "drafting",
+        "pipeline_task_id": None,
+        "draft_type": "article",
+        "identity": AgentIdentity(mode="chat", session_id=92),
+        "window_days": 14,
+        "extract_candidate": varying_extractor,
+        "judge": verdict_judge("duplicate"),
+    }
+
+    blocked = await save_agent_draft_with_novelty_check(db, **arguments)
+    saved = await save_agent_draft_with_novelty_check(
+        db,
+        **arguments,
+        override_token=blocked["novelty_override_token"],
+    )
+
+    assert saved["saved"] is True
 
 
 @pytest.mark.asyncio

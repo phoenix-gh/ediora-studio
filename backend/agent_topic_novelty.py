@@ -288,38 +288,56 @@ async def extract_candidate_with_model(title: str, content: str) -> NoveltyCandi
         max_tokens=1_200,
     )
     value = _first_json_object(raw)
+    topic = value.get("topic")
+    if not isinstance(topic, str):
+        raise ValueError("topic must be text")
+    core_claim = value.get("core_claim")
+    if not isinstance(core_claim, str):
+        raise ValueError("core_claim must be text")
+    raw_key_facts = value.get("key_facts")
+    key_facts = [] if raw_key_facts is None else raw_key_facts
+    if (
+        not isinstance(key_facts, list)
+        or any(not isinstance(item, str) for item in key_facts)
+    ):
+        raise ValueError("key_facts must be an array of text")
+    raw_source_item_ids = value.get("source_item_ids")
+    source_item_ids = (
+        [] if raw_source_item_ids is None else raw_source_item_ids
+    )
+    if (
+        not isinstance(source_item_ids, list)
+        or any(
+            not isinstance(item, int) or isinstance(item, bool)
+            for item in source_item_ids
+        )
+    ):
+        raise ValueError("source_item_ids must be an array of integers")
     event_time = value.get("event_time")
+    if event_time is not None and not isinstance(event_time, str):
+        raise ValueError("event_time must be ISO timestamp text or null")
     parsed_event_time: datetime | None = None
     if event_time:
         parsed_event_time = datetime.fromisoformat(
             str(event_time).replace("Z", "+00:00")
         )
     return normalize_candidate(NoveltyCandidate(
-        topic=value.get("topic", ""),
-        core_claim=value.get("core_claim", ""),
-        key_facts=tuple(value.get("key_facts") or ()),
+        topic=topic,
+        core_claim=core_claim,
+        key_facts=tuple(key_facts),
         event_time=parsed_event_time,
-        source_item_ids=tuple(value.get("source_item_ids") or ()),
+        source_item_ids=tuple(source_item_ids),
     ))
-
-
-def _candidate_payload(candidate: NoveltyCandidate) -> dict:
-    return {
-        "topic": candidate.topic,
-        "core_claim": candidate.core_claim,
-        "key_facts": list(candidate.key_facts),
-        "event_time": _iso(candidate.event_time),
-        "source_item_ids": list(candidate.source_item_ids),
-    }
 
 
 def _sha256(value: str) -> str:
     return hashlib.sha256(value.encode()).hexdigest()
 
 
-def _candidate_digest(candidate: NoveltyCandidate) -> str:
+def _candidate_digest(title: str, content: str) -> str:
+    """Bind approval to deterministic user content, not model phrasing."""
     return _sha256(json.dumps(
-        _candidate_payload(candidate), ensure_ascii=False, sort_keys=True
+        {"title": title, "content": content}, ensure_ascii=False, sort_keys=True
     ))
 
 
@@ -413,7 +431,9 @@ async def save_agent_draft_with_novelty_check(
             topic=normalized_title,
             core_claim=normalized_content[:1_000],
         )
-    candidate_digest = _candidate_digest(candidate)
+    candidate_digest = _candidate_digest(
+        normalized_title, normalized_content
+    )
     reference = now or datetime.now(timezone.utc)
     if reference.tzinfo is None:
         reference = reference.replace(tzinfo=timezone.utc)
