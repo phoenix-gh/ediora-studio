@@ -1409,3 +1409,64 @@ class ContentUsageLedger(Base):
     reuse_decision: Mapped[str] = mapped_column(String, default="fresh")
     reuse_explanation: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+
+class AgentTopicClaim(Base):
+    """Active or released topic claim created only by the Agent draft tool."""
+    __tablename__ = "agent_topic_claims"
+    __table_args__ = (
+        UniqueConstraint("draft_id", name="uq_agent_topic_claim_draft"),
+        Index("ix_agent_topic_claim_active", "released_at", "claimed_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    draft_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    topic: Mapped[str] = mapped_column(Text, nullable=False)
+    core_claim: Mapped[str] = mapped_column(Text, nullable=False)
+    key_facts: Mapped[list] = mapped_column(JSON, default=list)
+    event_time: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    novelty_basis: Mapped[str] = mapped_column(Text, default="")
+    source_item_ids: Mapped[list] = mapped_column(JSON, default=list)
+    decision: Mapped[str] = mapped_column(String, nullable=False)
+    conflict_claim_ids: Mapped[list] = mapped_column(JSON, default=list)
+    reason: Mapped[str] = mapped_column(Text, default="")
+    window_days: Mapped[int] = mapped_column(Integer, nullable=False, default=14)
+    agent_mode: Mapped[str] = mapped_column(String, nullable=False)
+    agent_session_id: Mapped[int | None] = mapped_column(
+        Integer, nullable=True, index=True
+    )
+    daily_creation_run_id: Mapped[int | None] = mapped_column(
+        Integer, nullable=True, index=True
+    )
+    override_token_digest: Mapped[str | None] = mapped_column(
+        String, nullable=True, unique=True
+    )
+    claimed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=now_utc
+    )
+    released_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
+class AgentNoveltyOverride(Base):
+    """Short-lived, one-time Chat override bound to one novelty decision."""
+    __tablename__ = "agent_novelty_overrides"
+    __table_args__ = (
+        Index("ix_agent_novelty_override_expiry", "expires_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    token_digest: Mapped[str] = mapped_column(String, nullable=False, unique=True)
+    candidate_digest: Mapped[str] = mapped_column(String, nullable=False)
+    conflict_claim_ids: Mapped[list] = mapped_column(JSON, default=list)
+    agent_session_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    consumed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=now_utc
+    )
