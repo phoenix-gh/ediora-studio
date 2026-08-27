@@ -853,6 +853,71 @@ describe('shared Agent runtime', () => {
     await runtime.close()
   })
 
+  it('continues an active Skill after a provider stops on a completed tool-only turn', async () => {
+    const deps = dependencies()
+    let executionCalls = 0
+    deps.generate = vi.fn(async (input: Record<string, unknown>) => {
+      const prompt = typeof input.prompt === 'string' ? input.prompt : ''
+      if (prompt.startsWith('Create a bounded execution plan')) {
+        return {
+          output: {
+            goal: '检索并读取当前条目',
+            steps: [{
+              id: 'research', instruction: '先检索再继续', requiredReferences: [],
+              requiredTools: ['search_assets'],
+            }],
+            outputRequirements: ['使用当前检索结果'],
+            verificationCriteria: ['读取当前条目 ID'],
+          },
+        }
+      }
+      if (prompt.startsWith('Return valid JSON only in exactly this shape')) {
+        return { output: { passed: true, violations: [] } }
+      }
+      if (prompt.startsWith('Produce the final deliverable now')) {
+        throw new Error('tool-only provider stop lost its continuation context')
+      }
+
+      executionCalls += 1
+      if (executionCalls === 1) {
+        return {
+          text: '', finishReason: 'stop', steps: [{}],
+          toolCalls: [{
+            type: 'tool-call', toolCallId: 'search-current',
+            toolName: 'search_assets', input: { query: 'github' },
+          }],
+          toolResults: [{
+            type: 'tool-result', toolCallId: 'search-current',
+            toolName: 'search_assets', input: { query: 'github' },
+            output: [{ id: 'current-item-2092621092644848065' }],
+          }],
+          content: [],
+          responseMessages: [{
+            role: 'tool',
+            content: [{
+              type: 'tool-result', toolCallId: 'search-current',
+              toolName: 'search_assets', output: [{ id: 'current-item-2092621092644848065' }],
+            }],
+          }],
+        }
+      }
+
+      expect(JSON.stringify(input.messages)).toContain('current-item-2092621092644848065')
+      return { text: '已基于当前条目继续研究', finishReason: 'stop', content: [], toolResults: [] }
+    }) as unknown as AgentRuntimeDependencies['generate']
+    const runtime = await openAgentRuntime({
+      ...openOptions('automatic', deps), skillMode: 'manual', skillName: 'Alpha',
+    })
+
+    const result = await runtime.run({
+      objective: '从系统信息源研究 GitHub 帖子', modelMessages: [], maxSteps: 5,
+    })
+
+    expect(executionCalls).toBe(2)
+    expect(result.text).toBe('已基于当前条目继续研究')
+    await runtime.close()
+  })
+
   it('keeps adapter-required tools active even when the Skill plan omits one', async () => {
     const deps = dependencies()
     let activeTools: unknown

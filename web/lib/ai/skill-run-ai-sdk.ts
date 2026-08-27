@@ -173,12 +173,14 @@ function executionPrompt({
 function retryExecutionPrompt(
   basePrompt: string,
   steps: ReturnType<typeof createSkillRun>['steps'],
+  parts: unknown[],
+  toolResults: unknown[],
 ) {
   const missing = steps.map(step => [
     `- ${step.id}: ${step.instruction}`,
     `  required tools: ${step.requiredTools.join(', ') || 'none'}`,
   ].join('\n')).join('\n')
-  return `${basePrompt}\n\nMissing required plan steps (retry now):\n${missing}\n\nThe previous execution stopped before producing evidence for these steps. Call the required tools now, wait for their results, and only then return the final deliverable.`
+  return `${basePrompt}\n\nCollected tool parts from the previous execution:\n${JSON.stringify(parts)}\n\nCollected tool results from the previous execution:\n${JSON.stringify(toolResults)}\n\nMissing required plan steps (retry now):\n${missing}\n\nContinue from the collected evidence above. Call the required tools now, wait for their results, and only then return the final deliverable.`
 }
 
 function finalizationPrompt(
@@ -235,7 +237,12 @@ export async function executeSkillRunWithAiSdk(options: ExecuteSkillRunOptions) 
   ))
   if (missingSteps.length > 0) {
     const retry = await options.execute({
-      prompt: retryExecutionPrompt(baseExecutionPrompt, missingSteps),
+      prompt: retryExecutionPrompt(
+        baseExecutionPrompt,
+        missingSteps,
+        executionParts,
+        executionToolResults,
+      ),
       loadedReferences,
       requiredTools: [...new Set(missingSteps.flatMap(step => step.requiredTools))],
     })
