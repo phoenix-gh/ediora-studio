@@ -488,10 +488,12 @@ export async function openAgentRuntime(
     await emitSessionEvent('step/start', step, {
       turn: turnNumber,
       step,
+      phase,
     })
     await emitSessionEvent('request/header', step, {
       turn: turnNumber,
       step,
+      phase,
       request: modelRequestPayload(input),
     })
     await emitMessage(phase, 'model_request', modelRequestPayload(input))
