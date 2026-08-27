@@ -98,6 +98,37 @@ import { POST } from './route'
 
 type LoggedEvent = { event_type: string; phase?: string; step_id?: string; payload?: Record<string, unknown> }
 
+function aiSdkError(cause: unknown) {
+  return Object.assign(new Error('token=provider-secret model message'), {
+    name: 'AI_NoObjectGeneratedError',
+    cause,
+    text: 'token=provider-secret model text',
+    finishReason: 'length',
+    usage: { api_key: 'provider-secret', inputTokens: 10, outputTokens: 20 },
+    response: {
+      credentials: { accessToken: 'provider-secret' },
+      url: 'https://provider.example/v1/responses?token=provider-secret',
+    },
+  })
+}
+
+function expectSanitizedModelErrorEvidence(payload: Record<string, unknown> | undefined) {
+  expect(payload).toMatchObject({
+    name: 'AI_NoObjectGeneratedError',
+    message: expect.stringContaining('[REDACTED]'),
+    error: expect.stringContaining('[REDACTED]'),
+    cause: { name: 'Error', message: expect.stringContaining('[REDACTED]') },
+    text: expect.stringContaining('[REDACTED]'),
+    finishReason: 'length',
+    usage: { api_key: '[REDACTED]', inputTokens: 10, outputTokens: 20 },
+    response: {
+      credentials: '[REDACTED]',
+      url: expect.stringContaining('[REDACTED]'),
+    },
+  })
+  expect(JSON.stringify(payload)).not.toContain('provider-secret')
+}
+
 function runtimeFor({ shared }: { shared: boolean }) {
   return async (options: Record<string, unknown>) => ({
     capabilitySnapshot: () => ({}),
@@ -183,7 +214,11 @@ describe('POST /api/chat model HTTP audit integration', () => {
     api.appendAgentSessionEvent.mockResolvedValue({})
     api.capturedFetch = undefined
     api.generateText.mockImplementation(async ({ model }) => {
-      await model.doGenerate()
+      try {
+        await model.doGenerate()
+      } catch (error) {
+        throw aiSdkError(error)
+      }
       return { text: 'recovered answer' }
     })
     api.openAgentRuntime.mockImplementation(runtimeFor({ shared: false }))
@@ -201,7 +236,9 @@ describe('POST /api/chat model HTTP audit integration', () => {
             text: api.responseText, toolCalls: [], toolResults: [], finishReason: 'stop', usage: {},
           })
         } catch (error) {
-          await (options.onError as (error: unknown) => Promise<void>)(error)
+          await (options.onError as (event: { error: unknown }) => Promise<void>)({
+            error: aiSdkError(error),
+          })
         }
       })()
       return {
@@ -306,12 +343,19 @@ describe('POST /api/chat model HTTP audit integration', () => {
     const request = events.find(event => event.event_type === 'llm/request' && event.phase === 'execute')!
     const modelError = events.find(event => event.event_type === 'llm/error' && event.phase === 'execute')!
     const httpError = events.find(event => event.event_type === 'llm/http-error' && event.phase === 'execute')!
+    const canonicalTurnEnd = api.appendAgentSessionEvent.mock.calls
+      .map(([event]) => event as { type: string; data: { reason?: Record<string, unknown> } })
+      .find(event => event.type === 'turn/end' && event.data.reason?.kind === 'error')!
     expect(modelError.step_id).toBe('1')
     expect(httpError.step_id).toBe('1')
     expect(modelError.payload?.callId).toBe(request.payload?.callId)
     expect(httpError.payload?.callId).toBe(request.payload?.callId)
-    expect(JSON.stringify(modelError.payload)).not.toContain('provider-secret')
-    expect(JSON.stringify(modelError.payload)).toContain('[REDACTED]')
+    expectSanitizedModelErrorEvidence(modelError.payload)
+    expect(canonicalTurnEnd.data.reason).toMatchObject({
+      kind: 'error',
+      error: expect.stringContaining('[REDACTED]'),
+    })
+    expectSanitizedModelErrorEvidence(canonicalTurnEnd.data.reason?.modelError as Record<string, unknown>)
     expect(JSON.stringify(httpError.payload)).not.toContain('provider-secret')
   })
 
@@ -325,7 +369,6 @@ describe('POST /api/chat model HTTP audit integration', () => {
       event.event_type === 'llm/error' && event.phase === 'finalize'
     ))!
     expect(recoveryError.payload?.callId).toBeTruthy()
-    expect(JSON.stringify(recoveryError.payload)).not.toContain('provider-secret')
-    expect(JSON.stringify(recoveryError.payload)).toContain('[REDACTED]')
+    expectSanitizedModelErrorEvidence(recoveryError.payload)
   })
 })

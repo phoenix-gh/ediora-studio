@@ -26,9 +26,9 @@ import {
 import type { AgentSessionEventDraft } from '@/lib/ai/agent-runtime'
 import type { AgentSessionEventType } from '@/lib/ai/agent-trajectory'
 import type { AgentModelMessageEvent, AgentStepCheckpoint, AgentToolAudit } from '@/lib/ai/agent-runtime-types'
+import { modelErrorEvidenceFromUnknown } from '@/lib/ai/model-error-evidence'
 import {
   createModelHttpAuditFetch,
-  sanitizeModelHttpAuditText,
   type ModelHttpAuditContext,
   type ModelHttpAuditEvent,
   withModelHttpAuditContext,
@@ -333,11 +333,11 @@ async function recoverFinalAnswer({
     await onMessage(chatModelMessageEvent(audit, 'model_response', { text: recovery.text }))
     return recovery.text.trim()
   } catch (error) {
-    await onMessage(chatModelMessageEvent(audit, 'model_error', {
-      error: sanitizeModelHttpAuditText(
-        error instanceof Error ? error.message : String(error),
-      ).text,
-    }))
+    await onMessage(chatModelMessageEvent(
+      audit,
+      'model_error',
+      modelErrorEvidenceFromUnknown(error),
+    ))
     throw error
   }
 }
@@ -1150,20 +1150,20 @@ export async function POST(request: NextRequest) {
         event.usage = usage as unknown as Record<string, unknown>
         await persistChatAgentLogEvent(event)
       },
-      onError: async error => {
+      onError: async ({ error }) => {
         const step = lastStreamStep || 1
         const audit = legacyAuditByStep.get(step) ?? newChatModelAuditCall('execute', step)
+        const errorEvidence = modelErrorEvidenceFromUnknown(error)
         await persistChatAgentLogEvent(chatAgentLogEventFromModelMessage(
-          chatModelMessageEvent(audit, 'model_error', {
-            error: sanitizeModelHttpAuditText(
-              error instanceof Error ? error.message : String(error),
-            ).text,
-          }),
+          chatModelMessageEvent(audit, 'model_error', errorEvidence),
           logContext,
         ))
         await finishCanonicalTurn({
           kind: 'error',
-          error: error instanceof Error ? error.message : String(error),
+          error: typeof errorEvidence.message === 'string'
+            ? errorEvidence.message
+            : '[unavailable model error evidence]',
+          modelError: errorEvidence,
         })
       },
     })
