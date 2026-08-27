@@ -4,13 +4,20 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+import hashlib
 import json
+import secrets
 from typing import Awaitable, Callable, Literal, Sequence
 
-from sqlalchemy import desc, select
+from sqlalchemy import desc, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from models import AgentTopicClaim
+from models import (
+    AgentNoveltyOverride,
+    AgentTopicClaim,
+    ArticleDraft,
+    PipelineTask,
+)
 from text_dedupe import PreparedText, similarity
 
 
@@ -21,11 +28,14 @@ SuggestedAction = Literal["continue", "change_topic", "ask_user"]
 NoveltyJudge = Callable[
     ["NoveltyCandidate", list[dict]], Awaitable[dict]
 ]
+CandidateExtractor = Callable[[str, str], Awaitable["NoveltyCandidate"]]
+
+AGENT_TOPIC_NOVELTY_LOCK_KEY = 6_947_221_401
 
 
 @dataclass(frozen=True)
 class AgentIdentity:
-    mode: Literal["chat", "scheduled"]
+    mode: Literal["chat", "scheduled", "job"]
     session_id: int | None = None
     daily_creation_run_id: int | None = None
 
@@ -264,3 +274,245 @@ async def judge_novelty_with_model(
     value = _first_json_object(raw)
     _normalize_verdict(value, conflicts)
     return value
+
+
+async def extract_candidate_with_model(title: str, content: str) -> NoveltyCandidate:
+    import llm
+
+    payload = {"title": title, "content": content[:20_000]}
+    raw = await llm._call(
+        "Extract the topic and principal claim of this draft. Return one JSON "
+        "object with topic, core_claim, key_facts (array), event_time (ISO "
+        "timestamp or null), and source_item_ids (positive integer array).\n"
+        + json.dumps(payload, ensure_ascii=False),
+        max_tokens=1_200,
+    )
+    value = _first_json_object(raw)
+    event_time = value.get("event_time")
+    parsed_event_time: datetime | None = None
+    if event_time:
+        parsed_event_time = datetime.fromisoformat(
+            str(event_time).replace("Z", "+00:00")
+        )
+    return normalize_candidate(NoveltyCandidate(
+        topic=value.get("topic", ""),
+        core_claim=value.get("core_claim", ""),
+        key_facts=tuple(value.get("key_facts") or ()),
+        event_time=parsed_event_time,
+        source_item_ids=tuple(value.get("source_item_ids") or ()),
+    ))
+
+
+def _candidate_payload(candidate: NoveltyCandidate) -> dict:
+    return {
+        "topic": candidate.topic,
+        "core_claim": candidate.core_claim,
+        "key_facts": list(candidate.key_facts),
+        "event_time": _iso(candidate.event_time),
+        "source_item_ids": list(candidate.source_item_ids),
+    }
+
+
+def _sha256(value: str) -> str:
+    return hashlib.sha256(value.encode()).hexdigest()
+
+
+def _candidate_digest(candidate: NoveltyCandidate) -> str:
+    return _sha256(json.dumps(
+        _candidate_payload(candidate), ensure_ascii=False, sort_keys=True
+    ))
+
+
+async def _lock_agent_topic_history(session: AsyncSession) -> None:
+    bind = session.get_bind()
+    if bind.dialect.name == "postgresql":
+        await session.execute(
+            text("SELECT pg_advisory_xact_lock(:key)"),
+            {"key": AGENT_TOPIC_NOVELTY_LOCK_KEY},
+        )
+
+
+def _decision_dict(decision: NoveltyDecision) -> dict:
+    return {
+        "decision": decision.decision,
+        "conflicts": list(decision.conflicts),
+        "reason": decision.reason,
+        "novelty_basis": decision.novelty_basis,
+        "suggested_action": decision.suggested_action,
+    }
+
+
+async def _valid_override(
+    session: AsyncSession,
+    *,
+    token: str,
+    identity: AgentIdentity,
+    candidate_digest: str,
+    conflict_ids: list[int],
+    now: datetime,
+) -> AgentNoveltyOverride | None:
+    if identity.mode != "chat" or identity.session_id is None:
+        return None
+    challenge = await session.scalar(
+        select(AgentNoveltyOverride).where(
+            AgentNoveltyOverride.token_digest == _sha256(token),
+            AgentNoveltyOverride.agent_session_id == identity.session_id,
+            AgentNoveltyOverride.candidate_digest == candidate_digest,
+            AgentNoveltyOverride.expires_at > now,
+            AgentNoveltyOverride.consumed_at.is_(None),
+        )
+    )
+    if challenge is None:
+        return None
+    if sorted(challenge.conflict_claim_ids or []) != sorted(conflict_ids):
+        return None
+    return challenge
+
+
+async def save_agent_draft_with_novelty_check(
+    session: AsyncSession,
+    *,
+    title: str,
+    content: str,
+    topic_id: str,
+    status: str,
+    pipeline_task_id: int | None,
+    draft_type: str,
+    identity: AgentIdentity,
+    window_days: int,
+    override_token: str | None = None,
+    extract_candidate: CandidateExtractor = extract_candidate_with_model,
+    judge: NoveltyJudge = judge_novelty_with_model,
+    now: datetime | None = None,
+) -> dict:
+    """Authoritatively check novelty and persist one Agent draft and claim."""
+    if identity.mode == "chat":
+        if identity.session_id is None or identity.session_id <= 0:
+            raise ValueError("Chat Agent session identity is required")
+    elif identity.mode == "scheduled":
+        if (
+            identity.daily_creation_run_id is None
+            or identity.daily_creation_run_id <= 0
+        ):
+            raise ValueError("scheduled Agent run identity is required")
+    elif identity.mode != "job":
+        raise ValueError("Agent mode is invalid")
+
+    normalized_title = _bounded_text(title, name="title", limit=500)
+    normalized_content = str(content or "").strip()
+    if not normalized_content:
+        raise ValueError("content is required")
+    candidate = normalize_candidate(
+        await extract_candidate(normalized_title, normalized_content)
+    )
+    candidate_digest = _candidate_digest(candidate)
+    reference = now or datetime.now(timezone.utc)
+    if reference.tzinfo is None:
+        reference = reference.replace(tzinfo=timezone.utc)
+    reference = reference.astimezone(timezone.utc)
+    transaction = (
+        session.begin_nested() if session.in_transaction() else session.begin()
+    )
+    async with transaction:
+        await _lock_agent_topic_history(session)
+        decision = await check_content_novelty(
+            session,
+            candidate=candidate,
+            window_days=window_days,
+            judge=judge,
+            now=reference,
+        )
+        conflict_ids = [
+            int(item["id"]) for item in decision.conflicts
+            if isinstance(item.get("id"), int)
+        ]
+        blocked = decision.decision in {"duplicate", "uncertain"}
+        consumed_override: AgentNoveltyOverride | None = None
+        override_error = ""
+        if override_token:
+            if identity.mode != "chat":
+                override_error = (
+                    "scheduled Agent cannot override novelty"
+                    if identity.mode == "scheduled"
+                    else "background Agent cannot override novelty"
+                )
+            elif blocked:
+                consumed_override = await _valid_override(
+                    session,
+                    token=override_token,
+                    identity=identity,
+                    candidate_digest=candidate_digest,
+                    conflict_ids=conflict_ids,
+                    now=reference,
+                )
+                if consumed_override is None:
+                    override_error = "novelty override is invalid or expired"
+        if blocked and consumed_override is None:
+            result = {"saved": False, "novelty": _decision_dict(decision)}
+            if override_error:
+                result["override_error"] = override_error
+            elif identity.mode == "chat":
+                plain_token = secrets.token_urlsafe(32)
+                session.add(AgentNoveltyOverride(
+                    token_digest=_sha256(plain_token),
+                    candidate_digest=candidate_digest,
+                    conflict_claim_ids=conflict_ids,
+                    agent_session_id=identity.session_id,
+                    expires_at=reference + timedelta(minutes=10),
+                ))
+                await session.flush()
+                result["novelty_override_token"] = plain_token
+            return result
+
+        obj = ArticleDraft(
+            topic_id=topic_id,
+            title=normalized_title,
+            content=normalized_content,
+            status=status,
+            draft_type=draft_type,
+        )
+        session.add(obj)
+        await session.flush()
+        if pipeline_task_id is not None:
+            pipeline_task = await session.get(PipelineTask, pipeline_task_id)
+            if pipeline_task is not None:
+                pipeline_task.draft_id = obj.id
+                if (
+                    pipeline_task.writing_plan_id is not None
+                    and obj.writing_plan_id is None
+                ):
+                    obj.writing_plan_id = pipeline_task.writing_plan_id
+        token_digest = None
+        if consumed_override is not None:
+            consumed_override.consumed_at = reference
+            token_digest = consumed_override.token_digest
+        claim = AgentTopicClaim(
+            draft_id=obj.id,
+            topic=candidate.topic,
+            core_claim=candidate.core_claim,
+            key_facts=list(candidate.key_facts),
+            event_time=candidate.event_time,
+            novelty_basis=decision.novelty_basis,
+            source_item_ids=list(candidate.source_item_ids),
+            decision="override" if consumed_override else decision.decision,
+            conflict_claim_ids=conflict_ids,
+            reason=decision.reason,
+            window_days=_bounded_days(window_days),
+            agent_mode=identity.mode,
+            agent_session_id=identity.session_id,
+            daily_creation_run_id=identity.daily_creation_run_id,
+            override_token_digest=token_digest,
+            claimed_at=reference,
+        )
+        session.add(claim)
+        await session.flush()
+
+    return {
+        "saved": True,
+        "id": obj.id,
+        "title": obj.title,
+        "status": obj.status,
+        "draft_type": obj.draft_type,
+        "created_at": _iso(obj.created_at),
+        "novelty": _decision_dict(decision),
+    }

@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -252,3 +253,217 @@ async def test_model_judge_parses_fenced_json_and_rejects_missing_new_basis(monk
             NoveltyCandidate("Agent 工具选择", "出现更新"),
             [{"id": 1, "topic": "Agent 工具选择", "core_claim": "旧内容"}],
         )
+
+
+def candidate_extractor(topic: str, core_claim: str):
+    async def extract(title: str, content: str):
+        from agent_topic_novelty import NoveltyCandidate
+
+        assert title.strip()
+        assert content.strip()
+        return NoveltyCandidate(topic=topic, core_claim=core_claim)
+
+    return extract
+
+
+def verdict_judge(decision: str):
+    async def judge(candidate, conflicts):
+        return {
+            "decision": decision,
+            "reason": "test verdict",
+            "novelty_basis": (
+                "new fact" if decision == "new_development" else ""
+            ),
+            "suggested_action": {
+                "novel": "continue",
+                "duplicate": "change_topic",
+                "new_development": "continue",
+                "uncertain": "ask_user",
+            }[decision],
+        }
+
+    return judge
+
+
+async def seed_topic_claim(db, *, draft_id: int = 100):
+    from models import AgentTopicClaim
+
+    claim = AgentTopicClaim(
+        draft_id=draft_id,
+        topic="Agent 工具选择",
+        core_claim="严格契约能够减少错误参数",
+        decision="novel",
+        reason="seed",
+        window_days=14,
+        agent_mode="chat",
+    )
+    db.add(claim)
+    await db.commit()
+    return claim
+
+
+@pytest.mark.asyncio
+async def test_agent_save_persists_draft_and_topic_claim_atomically(db):
+    from agent_topic_novelty import (
+        AgentIdentity,
+        save_agent_draft_with_novelty_check,
+    )
+    from models import AgentTopicClaim, ArticleDraft
+
+    result = await save_agent_draft_with_novelty_check(
+        db,
+        title="工具契约",
+        content="工具契约决定 Agent 能否稳定选择工具。",
+        topic_id="agent",
+        status="drafting",
+        pipeline_task_id=None,
+        draft_type="article",
+        identity=AgentIdentity(mode="chat", session_id=92),
+        window_days=14,
+        extract_candidate=candidate_extractor("Agent 工具选择", "契约决定稳定性"),
+        judge=verdict_judge("novel"),
+    )
+
+    assert result["saved"] is True
+    assert result["id"] > 0
+    draft = await db.get(ArticleDraft, result["id"])
+    claim = await db.scalar(select(AgentTopicClaim).where(
+        AgentTopicClaim.draft_id == result["id"]
+    ))
+    assert draft is not None
+    assert claim is not None
+    assert claim.agent_session_id == 92
+    assert claim.topic == "Agent 工具选择"
+
+
+@pytest.mark.asyncio
+async def test_duplicate_chat_save_requires_one_time_bound_override(db):
+    from agent_topic_novelty import (
+        AgentIdentity,
+        save_agent_draft_with_novelty_check,
+    )
+    from models import AgentNoveltyOverride, AgentTopicClaim
+
+    conflict = await seed_topic_claim(db)
+    arguments = {
+        "title": "工具契约续写",
+        "content": "严格工具契约能够减少错误参数。",
+        "topic_id": "agent",
+        "status": "drafting",
+        "pipeline_task_id": None,
+        "draft_type": "article",
+        "identity": AgentIdentity(mode="chat", session_id=92),
+        "window_days": 14,
+        "extract_candidate": candidate_extractor(
+            "Agent 工具选择", "严格契约能够减少错误参数"
+        ),
+        "judge": verdict_judge("duplicate"),
+    }
+
+    blocked = await save_agent_draft_with_novelty_check(db, **arguments)
+    assert blocked["saved"] is False
+    assert "id" not in blocked
+    assert blocked["novelty"]["decision"] == "duplicate"
+    token = blocked["novelty_override_token"]
+    assert isinstance(token, str) and len(token) >= 32
+
+    saved = await save_agent_draft_with_novelty_check(
+        db, **arguments, override_token=token
+    )
+    assert saved["saved"] is True
+    claim = await db.scalar(select(AgentTopicClaim).where(
+        AgentTopicClaim.draft_id == saved["id"]
+    ))
+    challenge = await db.scalar(select(AgentNoveltyOverride).where(
+        AgentNoveltyOverride.agent_session_id == 92
+    ))
+    assert claim is not None
+    assert claim.conflict_claim_ids == [conflict.id]
+    assert claim.override_token_digest
+    assert challenge is not None and challenge.consumed_at is not None
+
+    replayed = await save_agent_draft_with_novelty_check(
+        db, **arguments, override_token=token
+    )
+    assert replayed["saved"] is False
+    assert replayed["override_error"] == "novelty override is invalid or expired"
+
+
+@pytest.mark.asyncio
+async def test_scheduled_duplicate_cannot_request_or_use_override(db):
+    from agent_topic_novelty import (
+        AgentIdentity,
+        save_agent_draft_with_novelty_check,
+    )
+
+    await seed_topic_claim(db)
+    result = await save_agent_draft_with_novelty_check(
+        db,
+        title="重复主题",
+        content="严格工具契约能够减少错误参数。",
+        topic_id="daily-creation:1",
+        status="drafting",
+        pipeline_task_id=None,
+        draft_type="x",
+        identity=AgentIdentity(mode="scheduled", daily_creation_run_id=1),
+        window_days=14,
+        override_token="forged",
+        extract_candidate=candidate_extractor(
+            "Agent 工具选择", "严格契约能够减少错误参数"
+        ),
+        judge=verdict_judge("duplicate"),
+    )
+
+    assert result["saved"] is False
+    assert result["novelty"]["decision"] == "duplicate"
+    assert "novelty_override_token" not in result
+    assert result["override_error"] == "scheduled Agent cannot override novelty"
+
+
+@pytest.mark.asyncio
+async def test_postgresql_lock_prevents_two_concurrent_duplicate_saves(
+    postgres_database_url,
+):
+    from agent_topic_novelty import (
+        AgentIdentity,
+        save_agent_draft_with_novelty_check,
+    )
+    from database import Base
+    import models  # noqa: F401
+
+    engine = create_async_engine(postgres_database_url)
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    ready = 0
+    both_ready = asyncio.Event()
+
+    async def extract(title, content):
+        nonlocal ready
+        ready += 1
+        if ready == 2:
+            both_ready.set()
+        await both_ready.wait()
+        from agent_topic_novelty import NoveltyCandidate
+        return NoveltyCandidate("Agent 工具选择", "严格契约减少错误参数")
+
+    async def save(session_number):
+        async with sessions() as session:
+            return await save_agent_draft_with_novelty_check(
+                session,
+                title=f"并发草稿 {session_number}",
+                content="严格契约减少错误参数。",
+                topic_id="agent",
+                status="drafting",
+                pipeline_task_id=None,
+                draft_type="article",
+                identity=AgentIdentity(mode="job"),
+                window_days=14,
+                extract_candidate=extract,
+                judge=verdict_judge("duplicate"),
+            )
+
+    results = await asyncio.gather(save(1), save(2))
+    await engine.dispose()
+
+    assert sorted(result["saved"] for result in results) == [False, True]

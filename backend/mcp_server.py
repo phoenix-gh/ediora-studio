@@ -1708,18 +1708,21 @@ async def attach_creative_asset_to_draft(
     retry="claim-backed",
 )
 async def save_draft(
+    ctx: Context,
     title: str,
     content: str,
     topic_id: str = "agent",
     status: str = "drafting",
     pipeline_task_id: Optional[int] = None,
     draft_type: Literal["article", "script", "x", "x_article", "mp"] = "article",
+    novelty_override_token: str | None = None,
 ) -> dict:
     """
-    Create a new persistent article draft in Ediora's draft box.
+    Create a new Agent draft after a global, time-bounded topic novelty check.
 
-    Repeating this call may create another draft. Returns its ID, title, status,
-    type, and creation timestamp as completion evidence.
+    Use only for Agent-created drafts. Manual and backend draft routes do not
+    use this policy. A changed title or structure does not make the same topic
+    and core claim novel. A conflict returns saved=false and no draft ID.
 
     Args:
         title: Article title.
@@ -1730,40 +1733,71 @@ async def save_draft(
         pipeline_task_id: Optional pipeline_task_id from the task body (links this
                           draft to its pipeline run record for timeline tracking).
         draft_type: "article"（默认）、"script"、"x"、"x_article" 或 "mp"。
+        novelty_override_token: One-time token returned after a Chat conflict;
+                                scheduled/background Agents must not use it.
 
-    Returns: id, title, status, created_at of the newly created draft.
+    Returns saved, novelty evidence, and only on success id/title/status/type/created_at.
     """
-    from models import ArticleDraft, PipelineTask
+    from agent_topic_novelty import (
+        AgentIdentity,
+        extract_candidate_with_model,
+        judge_novelty_with_model,
+        save_agent_draft_with_novelty_check,
+    )
+    from models import DailyCreationRun
+
+    request = getattr(ctx.request_context, "request", None)
+    headers = getattr(request, "headers", {})
+    mode = str(headers.get("x-agent-mode") or "").strip().lower()
+    session_id: int | None = None
+    daily_run_id: int | None = None
+    window_days = 14
+    if mode == "chat":
+        try:
+            session_id = int(headers.get("x-agent-session-id"))
+        except (TypeError, ValueError) as error:
+            raise ValueError("Chat Agent session identity is missing") from error
+        if session_id <= 0:
+            raise ValueError("Chat Agent session identity is invalid")
+    elif mode == "scheduled":
+        try:
+            daily_run_id = int(headers.get("x-daily-creation-run-id"))
+        except (TypeError, ValueError) as error:
+            raise ValueError("scheduled Agent run identity is missing") from error
+        if daily_run_id <= 0:
+            raise ValueError("scheduled Agent run identity is invalid")
+    elif mode != "job":
+        raise ValueError("trusted Agent execution identity is missing")
 
     async with SessionLocal() as db:
-        obj = ArticleDraft(
-            topic_id=topic_id,
+        if daily_run_id is not None:
+            creation_run = await db.get(DailyCreationRun, daily_run_id)
+            if creation_run is None:
+                raise ValueError(f"Daily creation run {daily_run_id} not found")
+            window_days = int(
+                (creation_run.rule_snapshot or {}).get("lookback_days") or 14
+            )
+            # End the snapshot read transaction so the dedicated save service
+            # owns the complete check + draft + claim commit boundary.
+            await db.commit()
+        return await save_agent_draft_with_novelty_check(
+            db,
             title=title,
             content=content,
+            topic_id=topic_id,
             status=status,
+            pipeline_task_id=pipeline_task_id,
             draft_type=draft_type,
+            identity=AgentIdentity(
+                mode=mode,
+                session_id=session_id,
+                daily_creation_run_id=daily_run_id,
+            ),
+            window_days=window_days,
+            override_token=novelty_override_token,
+            extract_candidate=extract_candidate_with_model,
+            judge=judge_novelty_with_model,
         )
-        db.add(obj)
-        await db.commit()
-        await db.refresh(obj)
-
-        if pipeline_task_id is not None:
-            pt = await db.get(PipelineTask, pipeline_task_id)
-            if pt is not None:
-                pt.draft_id = obj.id
-                # Link the draft back to its writing plan (so it shows in the plan's
-                # drafts tab). The pipeline run carries the plan id from dispatch.
-                if pt.writing_plan_id is not None and obj.writing_plan_id is None:
-                    obj.writing_plan_id = pt.writing_plan_id
-                await db.commit()
-
-    return {
-        "id": obj.id,
-        "title": obj.title,
-        "status": obj.status,
-        "draft_type": obj.draft_type,
-        "created_at": _fmt_dt(obj.created_at),
-    }
 
 
 # ── publish account profile ───────────────────────────────────────────────────

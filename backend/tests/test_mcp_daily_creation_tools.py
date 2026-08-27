@@ -27,10 +27,14 @@ def run(coroutine):
     return asyncio.run(coroutine)
 
 
-def run_context(run_id=None):
+def run_context(run_id=None, session_id=None):
     headers = {}
     if run_id is not None:
+        headers["x-agent-mode"] = "scheduled"
         headers["x-daily-creation-run-id"] = str(run_id)
+    if session_id is not None:
+        headers["x-agent-mode"] = "chat"
+        headers["x-agent-session-id"] = str(session_id)
     return SimpleNamespace(
         request_context=SimpleNamespace(
             request=SimpleNamespace(headers=headers),
@@ -75,7 +79,7 @@ def seed_context():
                 rule_snapshot={
                     "name": rule.name, "asset_type": "article",
                     "directory": "产品实验", "output_type": "x_short_post",
-                    "delivery_mode": "drafts",
+                    "delivery_mode": "drafts", "lookback_days": 5,
                 },
             )
             session.add(creation_run)
@@ -177,6 +181,42 @@ def test_content_novelty_tool_is_strict_read_only_and_returns_global_result(env)
     assert result["suggested_action"] == "continue"
 
 
+def test_agent_save_draft_creates_topic_claim_without_changing_rest_drafts(
+    env, monkeypatch,
+):
+    import llm
+    import mcp_server
+    from database import SessionLocal
+    from models import AgentTopicClaim
+    from sqlalchemy import select
+
+    async def extract(prompt, max_tokens):
+        return (
+            '{"topic":"Agent 工具选择","core_claim":"严格契约减少错误参数",'
+            '"key_facts":[],"event_time":null,"source_item_ids":[]}'
+        )
+
+    monkeypatch.setattr(llm, "_call", extract)
+    result = run(mcp_server.save_draft(
+        ctx=run_context(session_id=92),
+        title="工具契约",
+        content="严格契约减少错误参数。",
+    ))
+
+    async def read_claim():
+        async with SessionLocal() as session:
+            return await session.scalar(select(AgentTopicClaim).where(
+                AgentTopicClaim.draft_id == result["id"]
+            ))
+
+    claim = run(read_claim())
+    assert result["saved"] is True
+    assert claim is not None
+    assert claim.agent_mode == "chat"
+    assert claim.agent_session_id == 92
+    assert claim.window_days == 14
+
+
 def test_record_usage_schema_lists_only_agent_accepted_values(env):
     import mcp_server
 
@@ -214,14 +254,25 @@ def test_record_usage_requires_transport_run_identity(env):
         ))
 
 
-def test_record_usage_is_idempotent_and_not_limited_by_legacy_rule_scope(env):
+def test_record_usage_is_idempotent_and_not_limited_by_legacy_rule_scope(
+    env, monkeypatch,
+):
     _, outside_legacy_directory_id, run_id = seed_context()
     import mcp_server
     from database import SessionLocal
     from models import ContentUsageLedger
     from sqlalchemy import select
 
+    async def extract(prompt, max_tokens):
+        return (
+            '{"topic":"增长复盘","core_claim":"跨目录证据",'
+            '"key_facts":[],"event_time":null,"source_item_ids":[]}'
+        )
+
+    monkeypatch.setattr("llm._call", extract)
+
     saved = run(mcp_server.save_draft(
+        ctx=run_context(run_id),
         title="增长复盘", content="从另一目录补充增长经验。", draft_type="x",
     ))
     input_data = {
