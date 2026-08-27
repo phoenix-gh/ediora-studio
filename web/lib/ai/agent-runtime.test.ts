@@ -1472,6 +1472,35 @@ describe('shared Agent runtime', () => {
     expect(modelInput).not.toHaveProperty('dailyCreationRunId')
   })
 
+  it('passes Chat session identity to tools without exposing it to the model', async () => {
+    const deps = dependencies()
+    const baseOpenTools = deps.openTools
+    const openTools = vi.fn(baseOpenTools)
+    deps.openTools = openTools
+    deps.generate = vi.fn(async () => ({
+      text: 'done', toolResults: [], content: [], finishReason: 'stop', steps: [{}],
+    })) as unknown as AgentRuntimeDependencies['generate']
+    const runtime = await openAgentRuntime({
+      ...openOptions('interactive', deps),
+      mode: 'chat',
+      sessionId: 92,
+      automaticSelection: false,
+    })
+
+    await runtime.run({
+      objective: '检查主题',
+      modelMessages: [{ role: 'user', content: '检查主题' }],
+      maxSteps: 2,
+    })
+
+    expect(openTools).toHaveBeenCalledWith(expect.objectContaining({
+      agentMode: 'chat',
+      sessionId: 92,
+    }))
+    const modelInput = vi.mocked(deps.generate).mock.calls[0]?.[0]
+    expect(modelInput).not.toHaveProperty('sessionId')
+  })
+
   it('repairs a structurally valid Skill plan that uses names outside the active catalogs', async () => {
     const deps = dependencies()
     const openTools = deps.openTools

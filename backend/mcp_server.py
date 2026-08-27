@@ -41,6 +41,9 @@ mcp = FastMCP(
 SourceType = Literal["x", "wechat", "reddit", "youtube", "v2ex"]
 OptionalSourceType = Literal["", "x", "wechat", "reddit", "youtube", "v2ex"]
 SourceSearchDays = Annotated[int, Field(ge=1, le=365)]
+NoveltyWindowDays = Annotated[int, Field(ge=1, le=90)]
+NoveltyKeyFacts = Annotated[list[str], Field(max_length=20)]
+NoveltySourceItemIds = Annotated[list[int], Field(max_length=100)]
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -696,6 +699,54 @@ async def get_recent_content_usage(
             account_id=account_id,
             limit=limit,
         )
+
+
+@ediora_tool(
+    mcp,
+    namespace="drafts",
+    read_only=True,
+    destructive=False,
+    idempotent=True,
+    open_world=False,
+    approval="never",
+    concurrency="parallel-safe",
+    retry="safe",
+)
+async def check_content_novelty(
+    topic: str,
+    core_claim: str,
+    key_facts: NoveltyKeyFacts | None = None,
+    event_time: datetime | None = None,
+    source_item_ids: NoveltySourceItemIds | None = None,
+    window_days: NoveltyWindowDays = 14,
+) -> dict:
+    """Check whether an Agent topic and core claim repeat recent Agent drafts.
+
+    Use before writing to avoid spending work on a recent global duplicate.
+    This is advisory only: save_draft performs the authoritative check again.
+    A different title, structure, or tone does not make the same claim novel.
+    """
+    from agent_topic_novelty import (
+        NoveltyCandidate,
+        check_content_novelty as check_novelty,
+        judge_novelty_with_model,
+    )
+
+    candidate = NoveltyCandidate(
+        topic=topic,
+        core_claim=core_claim,
+        key_facts=tuple(key_facts or ()),
+        event_time=event_time,
+        source_item_ids=tuple(source_item_ids or ()),
+    )
+    async with SessionLocal() as db:
+        decision = await check_novelty(
+            db,
+            candidate=candidate,
+            window_days=window_days,
+            judge=judge_novelty_with_model,
+        )
+    return asdict(decision)
 
 
 @ediora_tool(

@@ -829,6 +829,7 @@ export async function POST(request: NextRequest) {
       skillName: manualSkillName,
       restoredSkillName,
       draftId: body.draftId,
+      sessionId: body.sessionId,
       turn: logContext.turn ?? 1,
       automaticSelection: genericRuntime,
       onMessage: event => {

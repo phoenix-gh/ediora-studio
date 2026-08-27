@@ -49,6 +49,7 @@ export type ImageGenerator = {
 export type GlobalAgentToolOptions = {
   mcpEndpoint: string
   imageGenerator: ImageGenerator
+  agentMode?: 'chat' | 'job'
   sessionId?: number
   draftId?: number
   dailyCreationRunId?: number
@@ -367,6 +368,8 @@ export function createDirectImageGenerator(apiBase: string, jobId?: number): Ima
 export async function openGlobalAgentTools({
   mcpEndpoint,
   imageGenerator,
+  agentMode,
+  sessionId,
   dailyCreationRunId,
   skillName,
   restoredSkillName,
@@ -381,13 +384,25 @@ export async function openGlobalAgentTools({
   ) {
     throw new Error('daily creation run identity must be a positive integer')
   }
+  if (sessionId !== undefined && (!Number.isSafeInteger(sessionId) || sessionId <= 0)) {
+    throw new Error('Chat session identity must be a positive integer')
+  }
+  const transportHeaders: Record<string, string> = {}
+  if (dailyCreationRunId !== undefined) {
+    transportHeaders['X-Agent-Mode'] = 'scheduled'
+    transportHeaders['X-Daily-Creation-Run-Id'] = String(dailyCreationRunId)
+  } else if (agentMode) {
+    transportHeaders['X-Agent-Mode'] = agentMode
+    if (agentMode === 'chat') {
+      if (sessionId === undefined) throw new Error('Chat Agent requires a session identity')
+      transportHeaders['X-Agent-Session-Id'] = String(sessionId)
+    }
+  }
   const client = await createMCPClient({
     transport: {
       type: 'http',
       url: mcpEndpoint,
-      ...(dailyCreationRunId === undefined ? {} : {
-        headers: { 'X-Daily-Creation-Run-Id': String(dailyCreationRunId) },
-      }),
+      ...(Object.keys(transportHeaders).length ? { headers: transportHeaders } : {}),
     },
   })
   const definitions = await client.listTools()

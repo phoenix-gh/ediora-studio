@@ -152,6 +152,31 @@ def test_real_save_draft_contract_accepts_x_drafts(env):
     ]
 
 
+def test_content_novelty_tool_is_strict_read_only_and_returns_global_result(env):
+    import mcp_server
+    from tool_contracts import EDIORA_TOOL_META_KEY
+
+    tools = {tool.name: tool for tool in run(mcp_server.mcp.list_tools())}
+    schema = tools["check_content_novelty"].inputSchema
+    metadata = mcp_server.mcp._tool_manager._tools[
+        "check_content_novelty"
+    ].meta[EDIORA_TOOL_META_KEY]
+
+    assert schema["properties"]["window_days"]["minimum"] == 1
+    assert schema["properties"]["window_days"]["maximum"] == 90
+    assert schema["properties"]["key_facts"]["anyOf"][0]["maxItems"] == 20
+    assert schema["properties"]["source_item_ids"]["anyOf"][0]["maxItems"] == 100
+    assert tools["check_content_novelty"].annotations.readOnlyHint is True
+    assert metadata["approval"] == "never"
+    result = run(mcp_server.check_content_novelty(
+        topic="Agent 工具选择",
+        core_claim="严格契约减少错误参数",
+        window_days=14,
+    ))
+    assert result["decision"] == "novel"
+    assert result["suggested_action"] == "continue"
+
+
 def test_record_usage_schema_lists_only_agent_accepted_values(env):
     import mcp_server
 
