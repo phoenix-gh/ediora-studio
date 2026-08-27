@@ -46,6 +46,7 @@ export type AgentRuntimeGoalEvidence = {
 }
 
 export type AgentModelMessageEvent = {
+  callId: string
   phase: string
   step?: number
   direction: 'model_request' | 'model_response' | 'model_error'

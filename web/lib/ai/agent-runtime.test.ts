@@ -4,7 +4,9 @@ import { z } from 'zod'
 
 import { applyAgentToolPolicy } from './agent-tool-policy'
 import { agentSkillRunAudit, openAgentRuntime, planningTools, type AgentRuntimeDependencies, type AgentSessionEventDraft } from './agent-runtime'
+import type { AgentModelMessageEvent } from './agent-runtime-types'
 import type { GlobalAgentToolOptions } from './global-chat-tools'
+import { currentModelHttpAuditContext, type ModelHttpAuditContext } from './model-http-audit'
 import { buildToolRegistry } from './tool-registry'
 import type { RegisteredSkill } from '../skills/registry'
 
@@ -507,6 +509,65 @@ describe('shared Agent runtime', () => {
     })
     expect(messages[1].payload).toMatchObject({
       text: 'done', output: { decision: 'continue' },
+    })
+    await runtime.close()
+  })
+
+  it('correlates each model message with the active HTTP audit context', async () => {
+    const messages: AgentModelMessageEvent[] = []
+    const contexts: Array<ModelHttpAuditContext | undefined> = []
+    const deps = dependencies()
+    deps.generate = vi.fn(async () => {
+      contexts.push(currentModelHttpAuditContext())
+      return { text: 'done', content: [], toolResults: [] }
+    }) as unknown as AgentRuntimeDependencies['generate']
+    const runtime = await openAgentRuntime({
+      ...openOptions('automatic', deps),
+      automaticSelection: false,
+      onMessage: event => { messages.push(event) },
+    })
+
+    await runtime.run({ objective: '记录调用身份', modelMessages: [], maxSteps: 1 })
+
+    expect(messages).toHaveLength(2)
+    expect(messages[0].callId).toEqual(expect.any(String))
+    expect(messages[0].callId).toBe(messages[1].callId)
+    expect(contexts[0]).toMatchObject({
+      callId: messages[0].callId,
+      phase: 'execute',
+      step: 1,
+    })
+    await runtime.close()
+  })
+
+  it('retains bounded JSON-safe parse-error evidence without replacing the thrown error', async () => {
+    const messages: AgentModelMessageEvent[] = []
+    const parseError = Object.assign(new Error('No object generated: could not parse the response.'), {
+      name: 'AI_NoObjectGeneratedError',
+      text: '```json\n{"broken":\n```',
+      finishReason: 'length',
+      usage: { inputTokens: 10, outputTokens: 20 },
+      response: { id: 'response-1' },
+      cause: new Error('JSON parse failed'),
+    })
+    const deps = dependencies()
+    deps.generate = vi.fn(async () => { throw parseError }) as unknown as AgentRuntimeDependencies['generate']
+    const runtime = await openAgentRuntime({
+      ...openOptions('automatic', deps),
+      automaticSelection: false,
+      onMessage: event => { messages.push(event) },
+    })
+
+    await expect(runtime.run({ objective: '记录解析失败', modelMessages: [], maxSteps: 1 }))
+      .rejects.toThrow(parseError.message)
+
+    expect(messages.at(-1)?.payload).toMatchObject({
+      name: 'AI_NoObjectGeneratedError',
+      text: expect.stringContaining('{"broken"'),
+      finishReason: 'length',
+      usage: { inputTokens: 10, outputTokens: 20 },
+      response: { id: 'response-1' },
+      cause: { name: 'Error', message: 'JSON parse failed' },
     })
     await runtime.close()
   })

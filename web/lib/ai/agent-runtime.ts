@@ -1,4 +1,5 @@
 import { generateText, Output, stepCountIs, type ModelMessage, type ToolSet } from 'ai'
+import { randomUUID } from 'node:crypto'
 
 import {
   openGlobalAgentTools,
@@ -30,6 +31,7 @@ import {
   goalCompletionSelfAuditMessage,
 } from './agent-goal-completion'
 import { executeSkillRunWithAiSdk, selectSkillForTurn } from './skill-run-ai-sdk'
+import { withModelHttpAuditContext } from './model-http-audit'
 import {
   sanitizeSkillRunPlan,
   skillRunPlanInputSchema,
@@ -392,12 +394,102 @@ export async function openAgentRuntime(
 
   type GenerateInput = Parameters<typeof generateText>[0]
 
+  const MODEL_ERROR_VALUE_LIMIT = 16 * 1024
+  const MODEL_ERROR_MAX_DEPTH = 4
+  const MODEL_ERROR_MAX_ITEMS = 50
+
   const jsonSafe = (value: unknown): unknown => {
     if (value === undefined) return undefined
     try {
       return JSON.parse(JSON.stringify(value))
     } catch {
       return String(value)
+    }
+  }
+
+  const boundedString = (value: string) => value.length > MODEL_ERROR_VALUE_LIMIT
+    ? `${value.slice(0, MODEL_ERROR_VALUE_LIMIT)}…[truncated]`
+    : value
+
+  const boundedJsonSafe = (
+    value: unknown,
+    depth = 0,
+    seen = new WeakSet<object>(),
+  ): unknown => {
+    if (value === null || typeof value === 'boolean') return value
+    if (typeof value === 'number') return Number.isFinite(value) ? value : String(value)
+    if (typeof value === 'string') return boundedString(value)
+    if (typeof value === 'bigint') return value.toString()
+    if (value === undefined || typeof value === 'function' || typeof value === 'symbol') return undefined
+    if (depth >= MODEL_ERROR_MAX_DEPTH) return '[truncated]'
+    if (typeof value !== 'object') return boundedString(String(value))
+    if (seen.has(value)) return '[circular]'
+    seen.add(value)
+    if (Array.isArray(value)) {
+      return value.slice(0, MODEL_ERROR_MAX_ITEMS)
+        .map(item => boundedJsonSafe(item, depth + 1, seen))
+        .filter(item => item !== undefined)
+    }
+    const result: Record<string, unknown> = Object.create(null)
+    for (const key of Object.keys(value).slice(0, MODEL_ERROR_MAX_ITEMS)) {
+      try {
+        const item = boundedJsonSafe(value[key as keyof typeof value], depth + 1, seen)
+        if (item !== undefined) result[key] = item
+      } catch {
+        result[key] = '[unavailable]'
+      }
+    }
+    return result
+  }
+
+  const errorField = (error: unknown, key: string): unknown => {
+    if (!error || (typeof error !== 'object' && typeof error !== 'function')) return undefined
+    try {
+      return (error as Record<string, unknown>)[key]
+    } catch {
+      return undefined
+    }
+  }
+
+  const modelErrorPayload = (error: unknown): Record<string, unknown> => {
+    try {
+      const message = error instanceof Error
+        ? error.message
+        : typeof errorField(error, 'message') === 'string'
+          ? errorField(error, 'message') as string
+          : String(error)
+      const name = typeof errorField(error, 'name') === 'string'
+        ? errorField(error, 'name') as string
+        : error instanceof Error ? error.name : 'Error'
+      const payload: Record<string, unknown> = {
+        name: boundedString(name),
+        message: boundedString(message),
+        error: boundedString(message),
+      }
+      const cause = errorField(error, 'cause')
+      if (cause !== undefined) {
+        const causeName = typeof errorField(cause, 'name') === 'string'
+          ? errorField(cause, 'name') as string
+          : cause instanceof Error ? cause.name : 'Error'
+        const causeMessage = cause instanceof Error
+          ? cause.message
+          : typeof errorField(cause, 'message') === 'string'
+            ? errorField(cause, 'message') as string
+            : String(cause)
+        payload.cause = { name: boundedString(causeName), message: boundedString(causeMessage) }
+      }
+      for (const key of ['text', 'finishReason', 'usage', 'response'] as const) {
+        const value = errorField(error, key)
+        const safeValue = boundedJsonSafe(value)
+        if (safeValue !== undefined) payload[key] = safeValue
+      }
+      return payload
+    } catch {
+      return {
+        name: 'Error',
+        message: '[unavailable model error evidence]',
+        error: '[unavailable model error evidence]',
+      }
     }
   }
 
@@ -469,13 +561,14 @@ export async function openAgentRuntime(
   }
 
   const emitMessage = async (
+    callId: string,
     phase: string,
     direction: AgentModelMessageEvent['direction'],
     payload: Record<string, unknown>,
   ) => {
     try {
       await options.onMessage?.({
-        phase, step: activeStep ?? undefined, direction, payload, occurredAt: new Date().toISOString(),
+        callId, phase, step: activeStep ?? undefined, direction, payload, occurredAt: new Date().toISOString(),
       })
     } catch {
       // Observability must not turn a successful Agent operation into a failed job.
@@ -484,6 +577,7 @@ export async function openAgentRuntime(
 
   const generateWithMessageLog = async (input: GenerateInput, phase: string) => {
     const step = ++nextStep
+    const callId = randomUUID()
     activeStep = step
     await emitSessionEvent('step/start', step, {
       turn: turnNumber,
@@ -496,10 +590,13 @@ export async function openAgentRuntime(
       phase,
       request: modelRequestPayload(input),
     })
-    await emitMessage(phase, 'model_request', modelRequestPayload(input))
+    await emitMessage(callId, phase, 'model_request', modelRequestPayload(input))
     try {
-      const result = await deps.generate(input)
-      await emitMessage(phase, 'model_response', modelResponsePayload(result))
+      const result = await withModelHttpAuditContext(
+        { callId, phase, step },
+        () => deps.generate(input),
+      )
+      await emitMessage(callId, phase, 'model_response', modelResponsePayload(result))
       const response = result as unknown as Record<string, unknown>
       await emitSessionEvent('assistant/message', step, {
         turn: turnNumber,
@@ -516,9 +613,7 @@ export async function openAgentRuntime(
       })
       return result
     } catch (error) {
-      await emitMessage(phase, 'model_error', {
-        error: error instanceof Error ? error.message : String(error),
-      })
+      await emitMessage(callId, phase, 'model_error', modelErrorPayload(error))
       await emitSessionEvent('step/end', step, {
         turn: turnNumber,
         step,
