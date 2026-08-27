@@ -36,7 +36,7 @@ function savedDraftAudit(id: number): AgentToolAudit {
     output: {
       content: [{
         type: 'text',
-        text: JSON.stringify({ id, title: `草稿 ${id}`, status: 'drafting', draft_type: 'x' }),
+        text: JSON.stringify({ saved: true, id, title: `草稿 ${id}`, status: 'drafting', draft_type: 'x' }),
       }],
       isError: false,
     },

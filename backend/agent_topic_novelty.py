@@ -402,9 +402,17 @@ async def save_agent_draft_with_novelty_check(
     normalized_content = str(content or "").strip()
     if not normalized_content:
         raise ValueError("content is required")
-    candidate = normalize_candidate(
-        await extract_candidate(normalized_title, normalized_content)
-    )
+    extraction_failed = False
+    try:
+        candidate = normalize_candidate(
+            await extract_candidate(normalized_title, normalized_content)
+        )
+    except Exception:
+        extraction_failed = True
+        candidate = NoveltyCandidate(
+            topic=normalized_title,
+            core_claim=normalized_content[:1_000],
+        )
     candidate_digest = _candidate_digest(candidate)
     reference = now or datetime.now(timezone.utc)
     if reference.tzinfo is None:
@@ -415,12 +423,14 @@ async def save_agent_draft_with_novelty_check(
     )
     async with transaction:
         await _lock_agent_topic_history(session)
-        decision = await check_content_novelty(
-            session,
-            candidate=candidate,
-            window_days=window_days,
-            judge=judge,
-            now=reference,
+        decision = _uncertain([]) if extraction_failed else (
+            await check_content_novelty(
+                session,
+                candidate=candidate,
+                window_days=window_days,
+                judge=judge,
+                now=reference,
+            )
         )
         conflict_ids = [
             int(item["id"]) for item in decision.conflicts
@@ -447,7 +457,7 @@ async def save_agent_draft_with_novelty_check(
                 )
                 if consumed_override is None:
                     override_error = "novelty override is invalid or expired"
-        if blocked and consumed_override is None:
+        if (blocked or override_error) and consumed_override is None:
             result = {"saved": False, "novelty": _decision_dict(decision)}
             if override_error:
                 result["override_error"] = override_error

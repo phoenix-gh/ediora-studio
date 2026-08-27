@@ -4,6 +4,7 @@ import type { AgentToolAudit } from './agent-runtime-types'
 import {
   buildResponseArticleAgentObjective,
   outputInstructions,
+  responseArticleCompletionEvidenceFromAudit,
   runContentResponseOutputJob,
   type ContentResponseOutputAgentJobDependencies,
   type ResponseArticleContext,
@@ -115,6 +116,25 @@ describe('content response output instructions', () => {
 })
 
 describe('content response Agent writing job', () => {
+  it('does not treat a novelty conflict with an id-shaped payload as saved', () => {
+    expect(responseArticleCompletionEvidenceFromAudit({
+      toolName: 'save_draft',
+      toolCallId: 'save-conflict',
+      sideEffecting: true,
+      autoApproved: true,
+      status: 'succeeded',
+      inputSummary: {},
+      occurredAt: '2026-08-27T00:00:00Z',
+      output: {
+        saved: false,
+        id: 999,
+        title: '不应采用',
+        status: 'drafting',
+        novelty: { decision: 'duplicate' },
+      },
+    }, { responseItemId: 27 })).toBeNull()
+  })
+
   it.each([
     ['x_short_post', 'X 短帖', 'x'],
     ['x_article', 'X Article', 'x_article'],
@@ -159,7 +179,7 @@ describe('content response Agent writing job', () => {
   it('links the real draft returned by save_draft after Agent execution', async () => {
     const deps = dependencies({
       structuredContent: { result: {
-        id: 123, title: '完整文章', status: 'drafting',
+        saved: true, id: 123, title: '完整文章', status: 'drafting',
         created_at: '2026-08-07T00:00:00Z',
       } },
     })
@@ -186,7 +206,7 @@ describe('content response Agent writing job', () => {
   it('records the response-writing Agent session lifecycle', async () => {
     const deps = dependencies({
       structuredContent: { result: {
-        id: 123, title: '完整文章', status: 'drafting',
+        saved: true, id: 123, title: '完整文章', status: 'drafting',
         created_at: '2026-08-07T00:00:00Z',
       } },
     })
@@ -211,7 +231,7 @@ describe('content response Agent writing job', () => {
   it('rejects a retry before Agent execution when the pinned capabilities drift', async () => {
     const deps = dependencies({
       structuredContent: { result: {
-        id: 123, title: '完整文章', status: 'drafting',
+        saved: true, id: 123, title: '完整文章', status: 'drafting',
         created_at: '2026-08-07T00:00:00Z',
       } },
     })
@@ -239,7 +259,7 @@ describe('content response Agent writing job', () => {
     vi.mocked(deps.listToolCalls).mockResolvedValue([{
       tool_call_id: 'save-before-restart', tool_name: 'save_draft', status: 'succeeded',
       output: { structuredContent: { result: {
-        id: 123, title: '完整文章', status: 'drafting',
+        saved: true, id: 123, title: '完整文章', status: 'drafting',
       } } },
     }])
 

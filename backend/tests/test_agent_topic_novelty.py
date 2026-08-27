@@ -421,6 +421,64 @@ async def test_scheduled_duplicate_cannot_request_or_use_override(db):
 
 
 @pytest.mark.asyncio
+async def test_candidate_extraction_failure_is_uncertain_instead_of_saving(db):
+    from agent_topic_novelty import (
+        AgentIdentity,
+        save_agent_draft_with_novelty_check,
+    )
+    from models import ArticleDraft
+    from sqlalchemy import func
+
+    async def failed_extractor(title, content):
+        raise ValueError("invalid model output")
+
+    result = await save_agent_draft_with_novelty_check(
+        db,
+        title="无法提取的主题",
+        content="模型返回了不合法结构。",
+        topic_id="agent",
+        status="drafting",
+        pipeline_task_id=None,
+        draft_type="article",
+        identity=AgentIdentity(mode="chat", session_id=92),
+        window_days=14,
+        extract_candidate=failed_extractor,
+        judge=verdict_judge("novel"),
+    )
+
+    assert result["saved"] is False
+    assert result["novelty"]["decision"] == "uncertain"
+    assert result["novelty_override_token"]
+    assert await db.scalar(select(func.count(ArticleDraft.id))) == 0
+
+
+@pytest.mark.asyncio
+async def test_scheduled_agent_override_is_rejected_even_for_novel_topic(db):
+    from agent_topic_novelty import (
+        AgentIdentity,
+        save_agent_draft_with_novelty_check,
+    )
+
+    result = await save_agent_draft_with_novelty_check(
+        db,
+        title="全新主题",
+        content="这是一个没有历史冲突的主题。",
+        topic_id="daily-creation:1",
+        status="drafting",
+        pipeline_task_id=None,
+        draft_type="x",
+        identity=AgentIdentity(mode="scheduled", daily_creation_run_id=1),
+        window_days=14,
+        override_token="forged",
+        extract_candidate=candidate_extractor("全新主题", "没有历史冲突"),
+        judge=verdict_judge("novel"),
+    )
+
+    assert result["saved"] is False
+    assert result["override_error"] == "scheduled Agent cannot override novelty"
+
+
+@pytest.mark.asyncio
 async def test_postgresql_lock_prevents_two_concurrent_duplicate_saves(
     postgres_database_url,
 ):

@@ -155,6 +155,7 @@ ${JSON.stringify({
 
 const positiveId = z.number().int().positive()
 const savedDraftSchema = z.object({
+  saved: z.literal(true),
   id: positiveId,
   title: z.string().trim().min(1),
   status: z.literal('drafting'),
