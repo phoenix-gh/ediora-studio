@@ -280,7 +280,7 @@ function sanitizeUrl(value: string): string {
     return url.origin === relativeBase ? `${url.pathname}${url.search}${url.hash}` : url.toString()
   } catch {
     const withoutFragment = value.split('#', 1)[0]
-    const withoutUserInfo = withoutFragment.replace(/^([a-z][a-z\d+.-]*:\/\/)[^/?#@]*@/i, '$1')
+    const withoutUserInfo = withoutFragment.replace(/^((?:[a-z][a-z\d+.-]*:)?\/\/)[^/?#@]*@/i, '$1')
     return withoutUserInfo.replace(
       /([?&][^=]*?(?:authorization|api[_-]?key|cookie|password|secret|token)[^=]*=)[^&]*/gi,
       `$1${redactedValue}`,

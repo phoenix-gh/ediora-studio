@@ -191,6 +191,27 @@ describe('model HTTP audit', () => {
     expect(JSON.stringify(events[0])).not.toContain('fragment-secret')
   })
 
+  it('drops userinfo from an invalid protocol-relative URL in the sanitization fallback', async () => {
+    const events: ModelHttpAuditEvent[] = []
+    const auditedFetch = createModelHttpAuditFetch({
+      fetch: async () => new Response('ok'),
+      onEvent: event => {
+        events.push(event)
+      },
+    })
+
+    await withModelHttpAuditContext({ callId: 'call-invalid-protocol-relative', phase: 'plan', step: 4 }, () => auditedFetch(
+      '//username:password@[invalid-host/v1/responses?api_key=query-secret#fragment-secret',
+    ))
+
+    await vi.waitFor(() => expect(events).toHaveLength(2))
+    expect(events[0].payload.url).toBe('//[invalid-host/v1/responses?api_key=[REDACTED]')
+    expect(JSON.stringify(events[0])).not.toContain('username')
+    expect(JSON.stringify(events[0])).not.toContain('password')
+    expect(JSON.stringify(events[0])).not.toContain('query-secret')
+    expect(JSON.stringify(events[0])).not.toContain('fragment-secret')
+  })
+
   it('omits a truncated nested structured response body instead of persisting a partial prefix', async () => {
     const events: ModelHttpAuditEvent[] = []
     const nestedSecret = 'nested-secret-value'
