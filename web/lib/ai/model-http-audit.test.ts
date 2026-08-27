@@ -212,6 +212,30 @@ describe('model HTTP audit', () => {
     expect(JSON.stringify(events[0])).not.toContain('fragment-secret')
   })
 
+  it('redacts every sensitive alias in malformed URL fallback query pairs', async () => {
+    const events: ModelHttpAuditEvent[] = []
+    const values = ['credentials-secret', 'client-credentials-secret', 'private-key-secret', 'private-key-camel-secret', 'passphrase-secret', 'api-key-secret']
+    const auditedFetch = createModelHttpAuditFetch({
+      fetch: async () => new Response('ok'),
+      onEvent: event => {
+        events.push(event)
+      },
+    })
+
+    await withModelHttpAuditContext({ callId: 'call-invalid-query-aliases', phase: 'plan', step: 4 }, () => auditedFetch(
+      'https://username:password@[invalid-host/v1?credentials=credentials-secret&client_credentials=client-credentials-secret&private_key=private-key-secret&privateKey=private-key-camel-secret&passphrase=passphrase-secret&api_key=api-key-secret&%E0%A4%A=malformed',
+    ))
+
+    await vi.waitFor(() => expect(events).toHaveLength(2))
+    const url = String(events[0].payload.url)
+    for (const value of values) {
+      expect(url).not.toContain(value)
+    }
+    expect(url).toContain('credentials=[REDACTED]')
+    expect(url).toContain('privateKey=[REDACTED]')
+    expect(url).toContain('%E0%A4%A=malformed')
+  })
+
   it('omits a truncated nested structured response body instead of persisting a partial prefix', async () => {
     const events: ModelHttpAuditEvent[] = []
     const nestedSecret = 'nested-secret-value'

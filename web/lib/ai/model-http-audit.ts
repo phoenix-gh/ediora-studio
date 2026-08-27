@@ -338,10 +338,22 @@ function sanitizeUrl(value: string): string {
   } catch {
     const withoutFragment = value.split('#', 1)[0]
     const withoutUserInfo = withoutFragment.replace(/^((?:[a-z][a-z\d+.-]*:)?\/\/)[^/?#@]*@/i, '$1')
-    return withoutUserInfo.replace(
-      /([?&][^=]*?(?:authorization|api[_-]?key|cookie|password|secret|token)[^=]*=)[^&]*/gi,
-      `$1${redactedValue}`,
-    )
+    return sanitizeFallbackQuery(withoutUserInfo)
+  }
+}
+
+function sanitizeFallbackQuery(value: string): string {
+  return value.replace(/([?&])([^=&]*)(=)([^&]*)/g, (pair, prefix: string, name: string, equals: string) => {
+    const decodedName = decodeQueryName(name)
+    return isSensitiveName(decodedName) ? `${prefix}${name}${equals}${redactedValue}` : pair
+  })
+}
+
+function decodeQueryName(name: string): string {
+  try {
+    return decodeURIComponent(name.replace(/\+/g, ' '))
+  } catch {
+    return name
   }
 }
 
