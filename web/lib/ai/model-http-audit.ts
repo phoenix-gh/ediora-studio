@@ -46,32 +46,47 @@ export function createModelHttpAuditFetch(options: {
       return providerFetch(input, init)
     }
 
-    const request = await createRequestPayload(input, init)
-    await emitEvent(options.onEvent, context, 'http_request', request)
+    let providerResponse: Promise<Response>
 
     try {
-      const response = await providerFetch(input, init)
-      void captureResponse(options.onEvent, context, response)
+      providerResponse = providerFetch(input, init)
+    } catch (error) {
+      void captureRequest(options.onEvent, context, input, init).catch(() => undefined)
+      void captureError(options.onEvent, context, input, init, error).catch(() => undefined)
+      throw error
+    }
+
+    void captureRequest(options.onEvent, context, input, init).catch(() => undefined)
+
+    try {
+      const response = await providerResponse
+      void captureResponse(options.onEvent, context, response).catch(() => undefined)
       return response
     } catch (error) {
-      await emitEvent(options.onEvent, context, 'http_error', {
-        url: request.url,
-        method: request.method,
-        error: sanitizeText(error instanceof Error ? error.message : String(error)),
-      })
+      void captureError(options.onEvent, context, input, init, error).catch(() => undefined)
       throw error
     }
   }
 }
 
-async function createRequestPayload(input: RequestInfo | URL, init?: RequestInit): Promise<Record<string, unknown>> {
+function createRequestPayload(input: RequestInfo | URL, init?: RequestInit): Record<string, unknown> {
   const inputRequest = input instanceof Request ? input : undefined
   const headers = mergeHeaders(inputRequest?.headers, init?.headers)
-  const payload: Record<string, unknown> = {
+  return {
     url: sanitizeUrl(inputRequest?.url ?? String(input)),
     method: init?.method ?? inputRequest?.method ?? 'GET',
     headers: sanitizeHeaders(headers),
   }
+}
+
+async function captureRequest(
+  onEvent: (event: ModelHttpAuditEvent) => void | Promise<void>,
+  context: ModelHttpAuditContext,
+  input: RequestInfo | URL,
+  init?: RequestInit,
+): Promise<void> {
+  const payload = createRequestPayload(input, init)
+  const inputRequest = input instanceof Request ? input : undefined
   const body = await requestBody(inputRequest, init)
 
   if (body) {
@@ -79,7 +94,22 @@ async function createRequestPayload(input: RequestInfo | URL, init?: RequestInit
     payload.bodyTruncated = body.truncated
   }
 
-  return payload
+  await emitEvent(onEvent, context, 'http_request', payload)
+}
+
+async function captureError(
+  onEvent: (event: ModelHttpAuditEvent) => void | Promise<void>,
+  context: ModelHttpAuditContext,
+  input: RequestInfo | URL,
+  init: RequestInit | undefined,
+  error: unknown,
+): Promise<void> {
+  const request = createRequestPayload(input, init)
+  await emitEvent(onEvent, context, 'http_error', {
+    url: request.url,
+    method: request.method,
+    error: sanitizeText(error instanceof Error ? error.message : String(error)),
+  })
 }
 
 async function captureResponse(
@@ -91,7 +121,7 @@ async function captureResponse(
     const payload: Record<string, unknown> = {
       url: sanitizeUrl(response.url),
       status: response.status,
-      statusText: response.statusText,
+      statusText: sanitizeText(response.statusText),
       headers: sanitizeHeaders(response.headers),
     }
     const body = await responseBody(response)
@@ -129,11 +159,11 @@ function bodyFromInit(body: BodyInit | null | undefined): BoundedBody | undefine
   }
 
   if (typeof body === 'string') {
-    return sanitizeBoundedBody(truncateText(body))
+    return sanitizeBoundedBody({ text: body, truncated: false })
   }
 
   if (body instanceof URLSearchParams) {
-    return sanitizeBoundedBody(truncateText(body.toString()))
+    return sanitizeBoundedBody({ text: body.toString(), truncated: false })
   }
 
   return { text: '[unsupported request body]', truncated: false }
@@ -221,15 +251,19 @@ function sanitizeBoundedBody(body: BoundedBody): BoundedBody {
 
 function sanitizeUrl(value: string): string {
   try {
-    const url = new URL(value)
-    for (const key of url.searchParams.keys()) {
+    const relativeBase = 'https://model-http-audit.invalid'
+    const url = new URL(value, relativeBase)
+    for (const [key] of Array.from(url.searchParams)) {
       if (isSensitiveName(key)) {
         url.searchParams.set(key, redactedValue)
       }
     }
-    return url.toString()
+    return url.origin === relativeBase ? `${url.pathname}${url.search}${url.hash}` : url.toString()
   } catch {
-    return value.replace(/([?&][^=]*?(?:api[_-]?key|password|secret|token)[^=]*=)[^&]*/gi, `$1${redactedValue}`)
+    return value.replace(
+      /([?&][^=]*?(?:authorization|api[_-]?key|cookie|password|secret|token)[^=]*=)[^&]*/gi,
+      `$1${redactedValue}`,
+    )
   }
 }
 
@@ -260,7 +294,10 @@ function sanitizeText(text: string): string {
   } catch {
     return text
       .replace(/(bearer\s+)[^\s,;]+/gi, `$1${redactedValue}`)
-      .replace(/((?:api[_-]?key|password|secret|token)\s*[=:]\s*["']?)[^\s,"'&;]+/gi, `$1${redactedValue}`)
+      .replace(
+        /((?:"?(?:authorization|api[_-]?key|cookie|password|secret|token)"?)\s*[=:]\s*)(?:"(?:\\.|[^"])*"|'(?:\\.|[^'])*'|[^\s,&;]+)/gi,
+        `$1${redactedValue}`,
+      )
   }
 }
 

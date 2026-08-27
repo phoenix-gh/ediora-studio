@@ -13,6 +13,7 @@ describe('model HTTP audit', () => {
     const auditedFetch = createModelHttpAuditFetch({
       fetch: async () => new Response(JSON.stringify({ choices: [{ message: { content: 'ok' } }] }), {
         status: 200,
+        statusText: 'Bearer secret',
         headers: {
           'content-type': 'application/json',
           'set-cookie': 'secret',
@@ -61,7 +62,7 @@ describe('model HTTP audit', () => {
       direction: 'http_response',
       payload: {
         status: 200,
-        statusText: '',
+        statusText: 'Bearer [REDACTED]',
         headers: { 'content-type': 'application/json' },
       },
     })
@@ -103,6 +104,113 @@ describe('model HTTP audit', () => {
       }),
     ]))
     expect(events.every(event => (event.payload.body as string | undefined)?.length === MODEL_HTTP_AUDIT_BODY_LIMIT)).toBe(true)
+  })
+
+  it('redacts sensitive JSON fields before recording a truncated body', async () => {
+    const events: ModelHttpAuditEvent[] = []
+    const secret = 'secret-before-the-truncation-boundary'
+    const oversizedJson = JSON.stringify({
+      api_key: secret,
+      padding: 'x'.repeat(MODEL_HTTP_AUDIT_BODY_LIMIT),
+    })
+    const auditedFetch = createModelHttpAuditFetch({
+      fetch: async () => new Response(oversizedJson),
+      onEvent: event => {
+        events.push(event)
+      },
+    })
+
+    await withModelHttpAuditContext({ callId: 'call-2b', phase: 'answer', step: 3 }, () => auditedFetch(
+      'https://provider.test/v1/responses',
+      { method: 'POST', body: oversizedJson },
+    ))
+
+    await vi.waitFor(() => expect(events).toHaveLength(2))
+    expect(events.map(event => event.payload)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ bodyTruncated: true }),
+    ]))
+    expect(JSON.stringify(events)).not.toContain(secret)
+  })
+
+  it('redacts sensitive query values in relative URLs', async () => {
+    const events: ModelHttpAuditEvent[] = []
+    const auditedFetch = createModelHttpAuditFetch({
+      fetch: async () => new Response('ok'),
+      onEvent: event => {
+        events.push(event)
+      },
+    })
+
+    await withModelHttpAuditContext({ callId: 'call-relative', phase: 'plan', step: 3 }, () => auditedFetch(
+      '/v1/responses?authorization=authorization-secret&cookie=cookie-secret&api_key=api-key-secret',
+    ))
+
+    await vi.waitFor(() => expect(events).toHaveLength(2))
+    expect(JSON.stringify(events[0])).not.toContain('authorization-secret')
+    expect(JSON.stringify(events[0])).not.toContain('cookie-secret')
+    expect(JSON.stringify(events[0])).not.toContain('api-key-secret')
+  })
+
+  it('does not wait for a stalled audit callback before returning the provider response', async () => {
+    let providerCalled = false
+    const auditedFetch = createModelHttpAuditFetch({
+      fetch: async () => {
+        providerCalled = true
+        return new Response('ok')
+      },
+      onEvent: () => new Promise<void>(() => {}),
+    })
+
+    const response = await withModelHttpAuditContext(
+      { callId: 'call-stalled-audit', phase: 'answer', step: 5 },
+      () => auditedFetch('https://provider.test/v1/responses'),
+    )
+
+    expect(providerCalled).toBe(true)
+    expect(await response.text()).toBe('ok')
+  })
+
+  it('does not wait for a stalled Request body capture before returning the provider response', async () => {
+    let providerCalled = false
+    const stalledRequest = new Request('https://provider.test/v1/responses', {
+      method: 'POST',
+      body: new ReadableStream<Uint8Array>({
+        start: () => {},
+      }),
+      duplex: 'half',
+    } as RequestInit)
+    const auditedFetch = createModelHttpAuditFetch({
+      fetch: async () => {
+        providerCalled = true
+        return new Response('ok')
+      },
+      onEvent: () => {},
+    })
+
+    const response = await withModelHttpAuditContext(
+      { callId: 'call-stalled-request', phase: 'answer', step: 6 },
+      () => auditedFetch(stalledRequest),
+    )
+
+    expect(providerCalled).toBe(true)
+    expect(await response.text()).toBe('ok')
+  })
+
+  it('does not change a provider response when an audit callback rejects', async () => {
+    const auditError = new Error('audit unavailable')
+    const auditedFetch = createModelHttpAuditFetch({
+      fetch: async () => new Response('ok'),
+      onEvent: async () => {
+        throw auditError
+      },
+    })
+
+    const response = await withModelHttpAuditContext(
+      { callId: 'call-rejected-audit', phase: 'answer', step: 6 },
+      () => auditedFetch('https://provider.test/v1/responses'),
+    )
+
+    expect(await response.text()).toBe('ok')
   })
 
   it('records network errors without changing the provider failure', async () => {
