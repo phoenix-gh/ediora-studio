@@ -19,9 +19,16 @@ type BoundedBody = {
   truncated: boolean
 }
 
+export type ModelHttpAuditSanitizedText = {
+  text: string
+  truncated: boolean
+}
+
 const auditContext = new AsyncLocalStorage<ModelHttpAuditContext>()
 const sensitiveNamePattern = /(authorization|api[_-]?key|cookie|password|secret|token)/i
 const redactedValue = '[REDACTED]'
+const omittedStructuredBody = '[omitted unsafe structured body]'
+const omittedStructuredText = '[omitted unsafe structured text]'
 
 export function withModelHttpAuditContext<T>(
   context: ModelHttpAuditContext,
@@ -37,6 +44,7 @@ export function currentModelHttpAuditContext(): ModelHttpAuditContext | undefine
 export function createModelHttpAuditFetch(options: {
   fetch?: typeof globalThis.fetch
   onEvent: (event: ModelHttpAuditEvent) => void | Promise<void>
+  registerTask?: (task: Promise<void>) => void
 }): typeof globalThis.fetch {
   const providerFetch = options.fetch ?? globalThis.fetch
 
@@ -51,19 +59,19 @@ export function createModelHttpAuditFetch(options: {
     try {
       providerResponse = providerFetch(input, init)
     } catch (error) {
-      void captureRequest(options.onEvent, context, input, init).catch(() => undefined)
-      void captureError(options.onEvent, context, input, init, error).catch(() => undefined)
+      registerAuditTask(options.registerTask, captureRequest(options.onEvent, context, input, init))
+      registerAuditTask(options.registerTask, captureError(options.onEvent, context, input, init, error))
       throw error
     }
 
-    void captureRequest(options.onEvent, context, input, init).catch(() => undefined)
+    registerAuditTask(options.registerTask, captureRequest(options.onEvent, context, input, init))
 
     try {
       const response = await providerResponse
-      void captureResponse(options.onEvent, context, response).catch(() => undefined)
+      registerAuditTask(options.registerTask, captureResponse(options.onEvent, context, response))
       return response
     } catch (error) {
-      void captureError(options.onEvent, context, input, init, error).catch(() => undefined)
+      registerAuditTask(options.registerTask, captureError(options.onEvent, context, input, init, error))
       throw error
     }
   }
@@ -108,7 +116,7 @@ async function captureError(
   await emitEvent(onEvent, context, 'http_error', {
     url: request.url,
     method: request.method,
-    error: sanitizeText(error instanceof Error ? error.message : String(error)),
+    error: sanitizeModelHttpAuditText(error instanceof Error ? error.message : String(error)).text,
   })
 }
 
@@ -121,7 +129,7 @@ async function captureResponse(
     const payload: Record<string, unknown> = {
       url: sanitizeUrl(response.url),
       status: response.status,
-      statusText: sanitizeText(response.statusText),
+      statusText: sanitizeModelHttpAuditText(response.statusText).text,
       headers: sanitizeHeaders(response.headers),
     }
     const body = await responseBody(response)
@@ -137,20 +145,16 @@ async function captureResponse(
   }
 }
 
-async function requestBody(request: Request | undefined, init?: RequestInit): Promise<BoundedBody | undefined> {
+function requestBody(request: Request | undefined, init?: RequestInit): BoundedBody | undefined {
   if (init && Object.prototype.hasOwnProperty.call(init, 'body')) {
     return bodyFromInit(init.body)
   }
 
-  if (!request?.body) {
-    return undefined
+  if (request?.body) {
+    return { text: '[unsupported streaming request body]', truncated: false }
   }
 
-  try {
-    return sanitizeBoundedBody(await readBoundedText(request.clone().body))
-  } catch {
-    return { text: '[unavailable request body]', truncated: false }
-  }
+  return undefined
 }
 
 function bodyFromInit(body: BodyInit | null | undefined): BoundedBody | undefined {
@@ -229,24 +233,36 @@ function concatBytes(chunks: Uint8Array[], length: number): Uint8Array {
   return result
 }
 
-function truncateText(text: string): BoundedBody {
+function truncateText(text: string, maxBytes = MODEL_HTTP_AUDIT_BODY_LIMIT): BoundedBody {
+  const limit = Number.isFinite(maxBytes) ? Math.max(0, Math.floor(maxBytes)) : MODEL_HTTP_AUDIT_BODY_LIMIT
   const bytes = new TextEncoder().encode(text)
-  if (bytes.byteLength <= MODEL_HTTP_AUDIT_BODY_LIMIT) {
+  if (bytes.byteLength <= limit) {
     return { text, truncated: false }
   }
 
   return {
-    text: new TextDecoder().decode(bytes.subarray(0, MODEL_HTTP_AUDIT_BODY_LIMIT)),
+    text: new TextDecoder().decode(bytes.subarray(0, limit)),
     truncated: true,
   }
 }
 
 function sanitizeBoundedBody(body: BoundedBody): BoundedBody {
-  const sanitized = truncateText(sanitizeText(body.text))
+  const sanitized = sanitizeModelHttpAuditText(body.text)
   return {
-    text: sanitized.text,
+    text: isUnsafeStructuredText(body.text) ? omittedStructuredBody : sanitized.text,
     truncated: body.truncated || sanitized.truncated,
   }
+}
+
+/**
+ * Sanitizes model-provider text and guarantees UTF-8 output is at most maxBytes.
+ * The default budget is MODEL_HTTP_AUDIT_BODY_LIMIT (256 KiB).
+ */
+export function sanitizeModelHttpAuditText(
+  text: string,
+  maxBytes = MODEL_HTTP_AUDIT_BODY_LIMIT,
+): ModelHttpAuditSanitizedText {
+  return truncateText(sanitizeText(text), maxBytes)
 }
 
 function sanitizeUrl(value: string): string {
@@ -258,9 +274,14 @@ function sanitizeUrl(value: string): string {
         url.searchParams.set(key, redactedValue)
       }
     }
+    url.username = ''
+    url.password = ''
+    url.hash = ''
     return url.origin === relativeBase ? `${url.pathname}${url.search}${url.hash}` : url.toString()
   } catch {
-    return value.replace(
+    const withoutFragment = value.split('#', 1)[0]
+    const withoutUserInfo = withoutFragment.replace(/^([a-z][a-z\d+.-]*:\/\/)[^/?#@]*@/i, '$1')
+    return withoutUserInfo.replace(
       /([?&][^=]*?(?:authorization|api[_-]?key|cookie|password|secret|token)[^=]*=)[^&]*/gi,
       `$1${redactedValue}`,
     )
@@ -283,7 +304,7 @@ function sanitizeHeaders(headers: Headers): Record<string, string> {
     if (/cookie/i.test(name)) {
       continue
     }
-    sanitized[name] = isSensitiveName(name) ? redactedValue : sanitizeText(value)
+    sanitized[name] = isSensitiveName(name) ? redactedValue : sanitizeModelHttpAuditText(value).text
   }
   return sanitized
 }
@@ -292,12 +313,32 @@ function sanitizeText(text: string): string {
   try {
     return JSON.stringify(sanitizeValue(JSON.parse(text)))
   } catch {
+    if (isStructuredJson(text)) {
+      return omittedStructuredText
+    }
     return text
       .replace(/(bearer\s+)[^\s,;]+/gi, `$1${redactedValue}`)
       .replace(
         /((?:"?(?:authorization|api[_-]?key|cookie|password|secret|token)"?)\s*[=:]\s*)(?:"(?:\\.|[^"])*"|'(?:\\.|[^'])*'|[^\s,&;]+)/gi,
         `$1${redactedValue}`,
       )
+  }
+}
+
+function isUnsafeStructuredText(text: string): boolean {
+  return isStructuredJson(text) && !isValidJson(text)
+}
+
+function isStructuredJson(text: string): boolean {
+  return /^[\s]*[\[{]/.test(text)
+}
+
+function isValidJson(text: string): boolean {
+  try {
+    JSON.parse(text)
+    return true
+  } catch {
+    return false
   }
 }
 
@@ -335,5 +376,17 @@ async function emitEvent(
     })
   } catch {
     // Audit callback failures must not alter provider behavior.
+  }
+}
+
+function registerAuditTask(
+  registerTask: ((task: Promise<void>) => void) | undefined,
+  task: Promise<void>,
+): void {
+  const isolatedTask = task.catch(() => undefined)
+  try {
+    registerTask?.(isolatedTask)
+  } catch {
+    // Lifecycle registration must not alter provider behavior.
   }
 }

@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   MODEL_HTTP_AUDIT_BODY_LIMIT,
   createModelHttpAuditFetch,
+  sanitizeModelHttpAuditText,
   type ModelHttpAuditEvent,
   withModelHttpAuditContext,
 } from './model-http-audit'
@@ -151,6 +152,80 @@ describe('model HTTP audit', () => {
     expect(JSON.stringify(events[0])).not.toContain('api-key-secret')
   })
 
+  it('removes URL credentials and fragments before auditing an absolute URL', async () => {
+    const events: ModelHttpAuditEvent[] = []
+    const auditedFetch = createModelHttpAuditFetch({
+      fetch: async () => new Response('ok'),
+      onEvent: event => {
+        events.push(event)
+      },
+    })
+
+    await withModelHttpAuditContext({ callId: 'call-url-credentials', phase: 'plan', step: 4 }, () => auditedFetch(
+      'https://username:password@provider.test/v1/responses?api_key=query-secret#access_token=fragment-secret',
+    ))
+
+    await vi.waitFor(() => expect(events).toHaveLength(2))
+    expect(events[0].payload.url).toBe('https://provider.test/v1/responses?api_key=%5BREDACTED%5D')
+    expect(JSON.stringify(events[0])).not.toContain('username')
+    expect(JSON.stringify(events[0])).not.toContain('password')
+    expect(JSON.stringify(events[0])).not.toContain('fragment-secret')
+  })
+
+  it('drops userinfo and fragments when an invalid URL uses the sanitization fallback', async () => {
+    const events: ModelHttpAuditEvent[] = []
+    const auditedFetch = createModelHttpAuditFetch({
+      fetch: async () => new Response('ok'),
+      onEvent: event => {
+        events.push(event)
+      },
+    })
+
+    await withModelHttpAuditContext({ callId: 'call-invalid-url', phase: 'plan', step: 4 }, () => auditedFetch(
+      'https://username:password@[invalid-host/v1/responses#fragment-secret',
+    ))
+
+    await vi.waitFor(() => expect(events).toHaveLength(2))
+    expect(JSON.stringify(events[0])).not.toContain('username')
+    expect(JSON.stringify(events[0])).not.toContain('password')
+    expect(JSON.stringify(events[0])).not.toContain('fragment-secret')
+  })
+
+  it('omits a truncated nested structured response body instead of persisting a partial prefix', async () => {
+    const events: ModelHttpAuditEvent[] = []
+    const nestedSecret = 'nested-secret-value'
+    const oversizedJson = JSON.stringify({
+      credentials: { nested: nestedSecret },
+      padding: 'x'.repeat(MODEL_HTTP_AUDIT_BODY_LIMIT),
+    })
+    const auditedFetch = createModelHttpAuditFetch({
+      fetch: async () => new Response(oversizedJson),
+      onEvent: event => {
+        events.push(event)
+      },
+    })
+
+    await withModelHttpAuditContext({ callId: 'call-nested-structured', phase: 'answer', step: 4 }, () => auditedFetch(
+      'https://provider.test/v1/responses',
+    ))
+
+    await vi.waitFor(() => expect(events).toHaveLength(2))
+    const response = events.find(event => event.direction === 'http_response')
+    expect(response?.payload).toMatchObject({
+      body: '[omitted unsafe structured body]',
+      bodyTruncated: true,
+    })
+    expect(JSON.stringify(response)).not.toContain(nestedSecret)
+  })
+
+  it('exports a bounded secret sanitizer for later model diagnostics', () => {
+    const result = sanitizeModelHttpAuditText(JSON.stringify({ api_key: 'diagnostic-secret' }), 18)
+
+    expect(result.truncated).toBe(true)
+    expect(new TextEncoder().encode(result.text).byteLength).toBeLessThanOrEqual(18)
+    expect(result.text).not.toContain('diagnostic-secret')
+  })
+
   it('does not wait for a stalled audit callback before returning the provider response', async () => {
     let providerCalled = false
     const auditedFetch = createModelHttpAuditFetch({
@@ -172,6 +247,7 @@ describe('model HTTP audit', () => {
 
   it('does not wait for a stalled Request body capture before returning the provider response', async () => {
     let providerCalled = false
+    const events: ModelHttpAuditEvent[] = []
     const stalledRequest = new Request('https://provider.test/v1/responses', {
       method: 'POST',
       body: new ReadableStream<Uint8Array>({
@@ -184,7 +260,9 @@ describe('model HTTP audit', () => {
         providerCalled = true
         return new Response('ok')
       },
-      onEvent: () => {},
+      onEvent: event => {
+        events.push(event)
+      },
     })
 
     const response = await withModelHttpAuditContext(
@@ -194,6 +272,80 @@ describe('model HTTP audit', () => {
 
     expect(providerCalled).toBe(true)
     expect(await response.text()).toBe('ok')
+    await vi.waitFor(() => expect(events).toHaveLength(2))
+    expect(events.find(event => event.direction === 'http_request')).toMatchObject({
+      callId: 'call-stalled-request',
+      payload: { body: '[unsupported streaming request body]' },
+    })
+  })
+
+  it('registers each detached audit task with the lifecycle registrar', async () => {
+    const events: ModelHttpAuditEvent[] = []
+    const registeredTasks: Promise<void>[] = []
+    const auditedFetch = createModelHttpAuditFetch({
+      fetch: async () => new Response('ok'),
+      onEvent: event => {
+        events.push(event)
+      },
+      registerTask: task => {
+        registeredTasks.push(task)
+      },
+    })
+
+    await withModelHttpAuditContext(
+      { callId: 'call-registered-tasks', phase: 'answer', step: 7 },
+      () => auditedFetch('https://provider.test/v1/responses'),
+    )
+
+    await vi.waitFor(() => expect(events).toHaveLength(2))
+    expect(registeredTasks).toHaveLength(2)
+    await expect(Promise.all(registeredTasks)).resolves.toEqual([undefined, undefined])
+  })
+
+  it('isolates lifecycle registrar failures from the provider result', async () => {
+    let registrationAttempts = 0
+    const auditedFetch = createModelHttpAuditFetch({
+      fetch: async () => new Response('ok'),
+      onEvent: () => {},
+      registerTask: () => {
+        registrationAttempts += 1
+        throw new Error('lifecycle unavailable')
+      },
+    })
+
+    const response = await withModelHttpAuditContext(
+      { callId: 'call-throwing-registrar', phase: 'answer', step: 8 },
+      () => auditedFetch('https://provider.test/v1/responses'),
+    )
+
+    expect(await response.text()).toBe('ok')
+    await vi.waitFor(() => expect(registrationAttempts).toBe(2))
+  })
+
+  it('registers request and error audit tasks when the provider fails', async () => {
+    const events: ModelHttpAuditEvent[] = []
+    const registeredTasks: Promise<void>[] = []
+    const providerError = new Error('provider unavailable')
+    const auditedFetch = createModelHttpAuditFetch({
+      fetch: async () => {
+        throw providerError
+      },
+      onEvent: event => {
+        events.push(event)
+      },
+      registerTask: task => {
+        registeredTasks.push(task)
+      },
+    })
+
+    await expect(withModelHttpAuditContext(
+      { callId: 'call-registered-error', phase: 'answer', step: 9 },
+      () => auditedFetch('https://provider.test/v1/responses'),
+    )).rejects.toBe(providerError)
+
+    await vi.waitFor(() => expect(events).toHaveLength(2))
+    expect(registeredTasks).toHaveLength(2)
+    await expect(Promise.all(registeredTasks)).resolves.toEqual([undefined, undefined])
   })
 
   it('does not change a provider response when an audit callback rejects', async () => {
