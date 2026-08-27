@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   buildDailyCreationAgentObjective,
   firstBlockingToolAudit,
+  isNoveltySaveConflict,
   runDailyCreationAgentJob,
   startAgentActivityHeartbeat,
   type DailyCreationAgentContext,
@@ -36,6 +37,23 @@ function savedDraftAudit(id: number): AgentToolAudit {
       content: [{
         type: 'text',
         text: JSON.stringify({ id, title: `草稿 ${id}`, status: 'drafting', draft_type: 'x' }),
+      }],
+      isError: false,
+    },
+  }
+}
+
+function noveltyConflictAudit(id: number, decision: 'duplicate' | 'uncertain'): AgentToolAudit {
+  return {
+    ...audit('save_draft', 'succeeded', true),
+    toolCallId: `save-conflict-${id}`,
+    output: {
+      content: [{
+        type: 'text',
+        text: JSON.stringify({
+          saved: false,
+          novelty: { decision, suggested_action: 'change_topic' },
+        }),
       }],
       isError: false,
     },
@@ -170,6 +188,30 @@ function dependencies({
 }
 
 describe('daily creation Agent job', () => {
+  it('recognizes structured save conflicts without counting ordinary saves', () => {
+    expect(isNoveltySaveConflict(noveltyConflictAudit(1, 'duplicate'))).toBe(true)
+    expect(isNoveltySaveConflict(noveltyConflictAudit(2, 'uncertain'))).toBe(true)
+    expect(isNoveltySaveConflict(savedDraftAudit(3))).toBe(false)
+    expect(isNoveltySaveConflict(audit('check_content_novelty', 'succeeded', false))).toBe(false)
+  })
+
+  it('fails non-retryably after three save-time novelty conflicts', async () => {
+    const { deps } = dependencies({
+      toolAudits: [
+        noveltyConflictAudit(1, 'duplicate'),
+        noveltyConflictAudit(2, 'uncertain'),
+        noveltyConflictAudit(3, 'duplicate'),
+      ],
+    })
+
+    await expect(runDailyCreationAgentJob(19, deps)).rejects.toThrow(
+      'no sufficiently novel topic was available in the configured time window',
+    )
+    expect(deps.completeExecution).not.toHaveBeenCalled()
+    expect(deps.completeJob).not.toHaveBeenCalled()
+    expect(deps.failStep).toHaveBeenCalledWith(19, 71, expect.any(Error), false)
+  })
+
   it('reports the unresolved failure after a recovered read-only failure', () => {
     const failed = audit('list_creative_asset_candidates', 'failed', false)
     const recovered = audit('list_creative_asset_candidates', 'succeeded', false)

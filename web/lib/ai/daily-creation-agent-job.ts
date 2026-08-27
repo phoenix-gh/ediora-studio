@@ -112,6 +112,37 @@ export function firstBlockingToolAudit(
   })
 }
 
+function structuredToolOutput(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const direct = value as Record<string, unknown>
+  if ('saved' in direct) return direct
+  const content = Array.isArray(direct.content) ? direct.content : []
+  const textPart = content.find(item => (
+    item && typeof item === 'object'
+    && (item as Record<string, unknown>).type === 'text'
+    && typeof (item as Record<string, unknown>).text === 'string'
+  )) as Record<string, unknown> | undefined
+  if (!textPart) return undefined
+  try {
+    const parsed = JSON.parse(String(textPart.text))
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : undefined
+  } catch {
+    return undefined
+  }
+}
+
+export function isNoveltySaveConflict(audit: AgentToolAudit) {
+  if (audit.toolName !== 'save_draft' || audit.status !== 'succeeded') return false
+  const output = structuredToolOutput(audit.output)
+  const novelty = output?.novelty
+  const decision = novelty && typeof novelty === 'object' && !Array.isArray(novelty)
+    ? String((novelty as Record<string, unknown>).decision ?? '')
+    : ''
+  return output?.saved === false && ['duplicate', 'uncertain'].includes(decision)
+}
+
 export function startAgentActivityHeartbeat(
   onHeartbeat: () => void | Promise<void>,
   intervalMs = 15_000,
@@ -605,6 +636,11 @@ export async function runDailyCreationAgentJob(
       stopAgentActivityHeartbeat()
     }
     const declaration = result.goalCompletion
+    if (audits.filter(isNoveltySaveConflict).length >= 3) {
+      throw new Error(
+        'no sufficiently novel topic was available in the configured time window',
+      )
+    }
     const failedAudit = firstBlockingToolAudit(audits, {
       allowReadOnlyFailures: declaration?.status === 'completed',
     })
@@ -688,6 +724,9 @@ export async function runDailyCreationAgentJob(
       || failureMessage.includes('Selected skill is unavailable')
       || failureMessage.includes('Agent capability drift detected')
       || failureMessage.includes('Agent blocked:')
+      || failureMessage.includes(
+        'no sufficiently novel topic was available in the configured time window',
+      )
     if (!durableFinalizationConfirmed) {
       try {
         if (execution) await deps.failExecution(jobId, execution.id, failureMessage)
