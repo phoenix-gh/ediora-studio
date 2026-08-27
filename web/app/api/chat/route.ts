@@ -27,6 +27,7 @@ import type { AgentSessionEventDraft } from '@/lib/ai/agent-runtime'
 import type { AgentSessionEventType } from '@/lib/ai/agent-trajectory'
 import type { AgentModelMessageEvent, AgentStepCheckpoint, AgentToolAudit } from '@/lib/ai/agent-runtime-types'
 import { modelErrorEvidenceFromUnknown } from '@/lib/ai/model-error-evidence'
+import { chatReasoningModel } from '@/lib/ai/chat-reasoning-model'
 import {
   createModelHttpAuditFetch,
   type ModelHttpAuditContext,
@@ -324,7 +325,7 @@ async function recoverFinalAnswer({
   try {
     const recovery = await generateText({
       model: modelWithChatHttpAuditContext(
-        textModelForProvider(provider, modelName, protocol),
+        chatReasoningModel(textModelForProvider(provider, modelName, protocol)),
         () => audit,
       ),
       instructions: recoveryInstructions,
@@ -814,7 +815,9 @@ export async function POST(request: NextRequest) {
       },
     })
     const provider = openaiProviderFromConfig(modelConfig, { fetch: auditedFetch })
-    const model = textModelForProvider(provider, modelConfig.modelName, modelConfig.protocol)
+    const model = chatReasoningModel(
+      textModelForProvider(provider, modelConfig.modelName, modelConfig.protocol),
+    )
     const currentRequest = [...messages].reverse().find(message => message.role === 'user')
     const currentRequestText = currentRequest ? messageText(currentRequest) : ''
     const conversationContext = formatChatTurnContext(buildChatTurnContext(session.messages))

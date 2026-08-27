@@ -90,6 +90,17 @@ describe('generic SkillRun AI SDK adapter', () => {
     })).resolves.toEqual({ skillName: 'Alpha', activation: 'automatic' })
   })
 
+  it('accepts selector JSON accompanied by provider reasoning tags', async () => {
+    await expect(selectSkillForTurn({
+      enabledSkills: [alpha],
+      userRequest: 'alpha task',
+      decide: async () => (
+        '<think>Selecting the matching skill</think>\n\n'
+        + '{"skillName":"Alpha","continueRestored":false}'
+      ),
+    })).resolves.toEqual({ skillName: 'Alpha', activation: 'automatic' })
+  })
+
   it('repairs one malformed selector response before failing', async () => {
     const decide = vi.fn()
       .mockResolvedValueOnce({ tool: 'unknown', arguments: { name: 'Alpha' } })

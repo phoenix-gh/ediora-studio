@@ -49,6 +49,10 @@ vi.mock('@/lib/ai/agent-runtime', () => ({
   openAgentRuntime: api.openAgentRuntime,
 }))
 
+vi.mock('@/lib/ai/chat-reasoning-model', () => ({
+  chatReasoningModel: <T,>(model: T) => model,
+}))
+
 vi.mock('@/lib/ai/global-chat-tools', () => ({
   createDirectImageGenerator: vi.fn(() => vi.fn()),
   mcpUrl: vi.fn(() => 'http://mcp.example'),

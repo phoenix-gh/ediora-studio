@@ -33,7 +33,9 @@ const skillSelectionToolEnvelopeSchema = z.object({
 type SkillSelection = z.infer<typeof skillSelectionSchema>
 
 function parseJsonText(value: string): unknown {
-  const trimmed = value.trim()
+  const trimmed = value
+    .replace(/<think\b[^>]*>[\s\S]*?<\/think>/gi, '')
+    .trim()
   if (!trimmed) return undefined
   try {
     return JSON.parse(trimmed) as unknown
