@@ -25,7 +25,7 @@ export type ModelHttpAuditSanitizedText = {
 }
 
 const auditContext = new AsyncLocalStorage<ModelHttpAuditContext>()
-const sensitiveNamePattern = /(authorization|api[_-]?key|cookie|password|secret|token)/i
+const sensitiveNamePattern = /(?:^|[_-])(authorization|api[_-]?key|cookie|password|secret|token)(?:$|[_-])/i
 const redactedValue = '[REDACTED]'
 const omittedStructuredBody = '[omitted unsafe structured body]'
 const omittedStructuredText = '[omitted unsafe structured text]'
@@ -265,6 +265,11 @@ export function sanitizeModelHttpAuditText(
   return truncateText(sanitizeText(text), maxBytes)
 }
 
+/** Sanitizes nested diagnostic values before they are persisted as model evidence. */
+export function sanitizeModelHttpAuditValue(value: unknown): unknown {
+  return sanitizeValue(value)
+}
+
 function sanitizeUrl(value: string): string {
   try {
     const relativeBase = 'https://model-http-audit.invalid'
@@ -316,13 +321,21 @@ function sanitizeText(text: string): string {
     if (isStructuredJson(text)) {
       return omittedStructuredText
     }
-    return text
-      .replace(/(bearer\s+)[^\s,;]+/gi, `$1${redactedValue}`)
-      .replace(
-        /((?:"?(?:authorization|api[_-]?key|cookie|password|secret|token)"?)\s*[=:]\s*)(?:"(?:\\.|[^"])*"|'(?:\\.|[^'])*'|[^\s,&;]+)/gi,
-        `$1${redactedValue}`,
-      )
+    return sanitizePlainText(text)
   }
+}
+
+function sanitizePlainText(text: string): string {
+  return text
+    .replace(/(bearer\s+)[^\s,;]+/gi, `$1${redactedValue}`)
+    .replace(
+      /([?&][^=]*?(?:authorization|api[_-]?key|cookie|password|secret|token)[^=]*=)[^&#\s]*/gi,
+      `$1${redactedValue}`,
+    )
+    .replace(
+      /((?:"?(?:authorization|api[_-]?key|cookie|password|secret|token)"?)\s*[=:]\s*)(?:"(?:\\.|[^"])*"|'(?:\\.|[^'])*'|[^\s,&;]+)/gi,
+      `$1${redactedValue}`,
+    )
 }
 
 function isUnsafeStructuredText(text: string): boolean {
@@ -343,6 +356,10 @@ function isValidJson(text: string): boolean {
 }
 
 function sanitizeValue(value: unknown): unknown {
+  if (typeof value === 'string') {
+    return sanitizePlainText(value)
+  }
+
   if (Array.isArray(value)) {
     return value.map(sanitizeValue)
   }
