@@ -254,6 +254,66 @@ describe('generic SkillRun AI SDK adapter', () => {
     })
   })
 
+  it('safely bounds non-serializable tool evidence in retry prompts', async () => {
+    const currentItemId = '2092621092644848065'
+    const output: Record<string, unknown> = {
+      source_type: 'x',
+      id: currentItemId,
+      content: 'x'.repeat(200_000),
+      sequence: 1n,
+    }
+    output.self = output
+    let attempts = 0
+    const result = await executeSkillRunWithAiSdk({
+      skill: alpha,
+      activation: 'automatic',
+      userRequest: '检索后读取条目',
+      selectedContext: '',
+      references: [],
+      tools: [
+        { name: 'search_source_items', description: 'Search stored source items' },
+        { name: 'get_source_item', description: 'Read one stored source item' },
+      ],
+      plan: async () => ({
+        goal: '检索后读取条目',
+        steps: [
+          { id: 'search', instruction: '检索', requiredReferences: [], requiredTools: ['search_source_items'] },
+          { id: 'read', instruction: '读取', requiredReferences: [], requiredTools: ['get_source_item'] },
+        ],
+        outputRequirements: [], verificationCriteria: [],
+      }),
+      readReferences: async () => [],
+      execute: async ({ prompt }) => {
+        attempts += 1
+        if (attempts === 1) {
+          return {
+            text: '',
+            parts: [{
+              type: 'dynamic-tool', toolName: 'search_source_items',
+              state: 'output-available', toolCallId: 'search-call', output,
+            }],
+            toolResults: [{ toolName: 'search_source_items', toolCallId: 'search-call', output }],
+          }
+        }
+        expect(prompt).toContain('search_source_items')
+        expect(prompt).toContain(currentItemId)
+        expect(prompt).toContain('[Circular]')
+        expect(new TextEncoder().encode(prompt).byteLength).toBeLessThan(80 * 1024)
+        return {
+          text: '完成',
+          parts: [{
+            type: 'dynamic-tool', toolName: 'get_source_item',
+            state: 'output-available', toolCallId: 'read-call', output: { id: currentItemId },
+          }],
+        }
+      },
+      validate: async () => ({ passed: true, violations: [] }),
+      revise: vi.fn(),
+    })
+
+    expect(result).toMatchObject({ kind: 'completed', completed: { text: '完成' } })
+  })
+
   it('finalizes a tool-only execution before validating the Skill result', async () => {
     let finalizationPrompt = ''
     const validate = vi.fn(async ({ text }: { text: string }) => {

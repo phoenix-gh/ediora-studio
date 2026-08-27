@@ -108,6 +108,45 @@ export async function selectSkillForTurn({
 type PlanningTool = { name: string; description: string }
 type ExecutionResult = { text: string; parts: unknown[]; toolResults?: unknown[] }
 
+const TOOL_EVIDENCE_PROMPT_LIMIT = 64 * 1024
+const TOOL_EVIDENCE_STRING_LIMIT = 4 * 1024
+const TOOL_EVIDENCE_NODE_LIMIT = 1_000
+const TOOL_EVIDENCE_DEPTH_LIMIT = 8
+const TOOL_EVIDENCE_CONTAINER_LIMIT = 50
+
+function serializedToolEvidence(parts: unknown[], toolResults: unknown[]) {
+  const seen = new WeakSet<object>()
+  let nodes = 0
+  const safeValue = (value: unknown, depth: number): unknown => {
+    if (value === null || typeof value === 'boolean' || typeof value === 'number') return value
+    if (typeof value === 'bigint') return String(value)
+    if (typeof value === 'string') {
+      return value.length <= TOOL_EVIDENCE_STRING_LIMIT
+        ? value
+        : `${value.slice(0, TOOL_EVIDENCE_STRING_LIMIT)}…[truncated]`
+    }
+    if (typeof value !== 'object') return String(value)
+    if (seen.has(value)) return '[Circular]'
+    if (depth >= TOOL_EVIDENCE_DEPTH_LIMIT || nodes >= TOOL_EVIDENCE_NODE_LIMIT) {
+      return '[truncated]'
+    }
+    seen.add(value)
+    nodes += 1
+    if (Array.isArray(value)) {
+      return value.slice(0, TOOL_EVIDENCE_CONTAINER_LIMIT)
+        .map(item => safeValue(item, depth + 1))
+    }
+    const entries = Object.entries(value as Record<string, unknown>)
+      .slice(0, TOOL_EVIDENCE_CONTAINER_LIMIT)
+      .map(([key, item]) => [key, safeValue(item, depth + 1)])
+    return Object.fromEntries(entries)
+  }
+  const serialized = JSON.stringify(safeValue({ parts, toolResults }, 0))
+  const bytes = new TextEncoder().encode(serialized)
+  if (bytes.byteLength <= TOOL_EVIDENCE_PROMPT_LIMIT) return serialized
+  return `${new TextDecoder().decode(bytes.slice(0, TOOL_EVIDENCE_PROMPT_LIMIT))}…[truncated]`
+}
+
 type ExecuteSkillRunOptions = {
   skill: RegisteredSkill
   activation: SkillRunActivation
@@ -180,7 +219,7 @@ function retryExecutionPrompt(
     `- ${step.id}: ${step.instruction}`,
     `  required tools: ${step.requiredTools.join(', ') || 'none'}`,
   ].join('\n')).join('\n')
-  return `${basePrompt}\n\nCollected tool parts from the previous execution:\n${JSON.stringify(parts)}\n\nCollected tool results from the previous execution:\n${JSON.stringify(toolResults)}\n\nMissing required plan steps (retry now):\n${missing}\n\nContinue from the collected evidence above. Call the required tools now, wait for their results, and only then return the final deliverable.`
+  return `${basePrompt}\n\nCollected tool evidence from the previous execution:\n${serializedToolEvidence(parts, toolResults)}\n\nMissing required plan steps (retry now):\n${missing}\n\nContinue from the collected evidence above. Call the required tools now, wait for their results, and only then return the final deliverable.`
 }
 
 function finalizationPrompt(
@@ -188,7 +227,7 @@ function finalizationPrompt(
   parts: unknown[],
   toolResults: unknown[],
 ) {
-  return `Produce the final deliverable now. The tool phase is complete: do not call tools or start new research. Use only the collected evidence below, satisfy the original output requirements, and state any material limitation when the evidence is insufficient. Return only the visible final answer for the user.\n\nOriginal execution brief:\n${basePrompt}\n\nCollected tool parts:\n${JSON.stringify(parts)}\n\nCollected tool results:\n${JSON.stringify(toolResults)}`
+  return `Produce the final deliverable now. The tool phase is complete: do not call tools or start new research. Use only the collected evidence below, satisfy the original output requirements, and state any material limitation when the evidence is insufficient. Return only the visible final answer for the user.\n\nOriginal execution brief:\n${basePrompt}\n\nCollected tool evidence:\n${serializedToolEvidence(parts, toolResults)}`
 }
 
 export async function executeSkillRunWithAiSdk(options: ExecuteSkillRunOptions) {
