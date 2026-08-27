@@ -2,7 +2,7 @@
 
 ## Status
 
-Approved architecture, awaiting user review before implementation planning.
+Approved architecture and implementation boundary.
 
 ## Summary
 
@@ -103,7 +103,6 @@ Each topic record contains at least:
 
 - `id`
 - `draft_id`
-- optional `publication_id` when a publication association exists
 - normalized `topic`
 - `core_claim`
 - structured `key_facts`
@@ -251,9 +250,9 @@ Draft deletion remains available through existing backend behavior. As a
 small lifecycle hook, deletion releases a topic record when one exists for the
 draft. A normal draft has no record, so the hook is a no-op.
 
-Publishing an Agent-created draft retains its topic claim. If publication
-identifiers are available, they are attached to the existing claim for audit.
-The claim remains eligible until the request's time window excludes it.
+Publishing an Agent-created draft retains the draft and its topic claim, so no
+separate publication linkage is required in version one. The claim remains
+eligible until the request's time window excludes it.
 
 ## Observability
 
