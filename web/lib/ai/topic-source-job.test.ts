@@ -112,6 +112,8 @@ describe('topic source AI decision contract', () => {
       ['select', 'model_request'],
       ['select', 'model_response'],
     ])
+    expect(events[0].callId).toEqual(expect.any(String))
+    expect(events[0].callId).toBe(events[1].callId)
     expect(events[0].payload).toMatchObject({
       instructions: '只判断是否入库。',
       prompt: '{"posts":[{"tweet_id":"a"}]}',

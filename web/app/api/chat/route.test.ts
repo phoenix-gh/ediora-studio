@@ -29,6 +29,7 @@ describe('Chat Agent log event mapping', () => {
   it('maps model callbacks into replayable LLM events', () => {
     expect(chatAgentLogEventFromModelMessage(
       {
+        callId: 'model-call-1',
         phase: 'execute',
         direction: 'model_response',
         payload: { text: 'answer', usage: { inputTokens: 2 } },

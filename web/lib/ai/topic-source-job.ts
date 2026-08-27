@@ -1,4 +1,5 @@
 import { generateText } from 'ai'
+import { randomUUID } from 'node:crypto'
 import { z } from 'zod'
 
 import {
@@ -109,12 +110,14 @@ export async function generateTopicSourceText(
 ) {
   const generate: TopicSourceGenerate = options.generate
     ?? (value => generateText(value) as Promise<TopicSourceGenerateResult>)
+  const callId = randomUUID()
   const emit = async (
     direction: AgentModelMessageEvent['direction'],
     payload: Record<string, unknown>,
   ) => {
     try {
       await options.onMessage?.({
+        callId,
         phase: 'select',
         direction,
         payload,
