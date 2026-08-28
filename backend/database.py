@@ -677,6 +677,21 @@ async def _add_columns(conn, table_name: str, definitions: dict[str, str]) -> No
             ))
 
 
+async def migrate_chat_run_checkpoint_schema(conn) -> None:
+    """Repair Chat Run projection fields and partial indexes idempotently."""
+    from sqlalchemy import text
+
+    await _add_columns(conn, "chat_messages", {"run_id": "VARCHAR(36)"})
+    await conn.execute(text(
+        "CREATE INDEX IF NOT EXISTS ix_chat_messages_run_id "
+        "ON chat_messages (run_id)"
+    ))
+    await conn.execute(text(
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_chat_run_tool_calls_approval_id "
+        "ON chat_run_tool_calls (approval_id) WHERE approval_id IS NOT NULL"
+    ))
+
+
 async def migrate_prompt_asset_schema(conn) -> None:
     """Add prompt metadata and the prompt-to-media generation history table."""
     await _add_columns(conn, "creative_assets", {
@@ -1359,6 +1374,7 @@ async def init_db():
         await migrate_skill_pipeline_schema(conn, assert_complete=False)
         await _drop_tables(conn, ("daily_plan_items", "daily_plans"))
         await conn.run_sync(Base.metadata.create_all)
+        await migrate_chat_run_checkpoint_schema(conn)
         await migrate_skill_pipeline_schema(conn, assert_complete=True)
         await _drop_columns(conn, "publish_accounts", ("daily_quota",))
         await migrate_topic_source_rule_single_directory(conn)
@@ -1374,6 +1390,7 @@ async def init_db():
         await _add_columns(conn, "chat_messages", {
             "skill_run": "JSON",
             "capability_snapshot": "JSON",
+            "run_id": "VARCHAR(36)",
         })
         await _add_columns(conn, "agent_executions", {
             "pinned_capability_snapshot": "JSON",
