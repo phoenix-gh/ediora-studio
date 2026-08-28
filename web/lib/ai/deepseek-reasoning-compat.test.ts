@@ -138,4 +138,65 @@ describe('DeepSeek reasoning compatibility over the OpenAI adapter', () => {
     const assistant = secondMessages.find(message => message.role === 'assistant')
     expect(assistant?.reasoning_content).toBe('private reasoning')
   })
+
+  it('keeps reasoning_content on earlier assistant tool calls across later steps', async () => {
+    const requests: Record<string, unknown>[] = []
+    const toolCallResponse = (id: string, reasoning: string, value: string) => eventStream([
+      {
+        id, object: 'chat.completion.chunk', created: 1, model: 'deepseek-v4-flash',
+        choices: [{ index: 0, delta: { role: 'assistant', reasoning_content: reasoning }, finish_reason: null }],
+      },
+      {
+        id, object: 'chat.completion.chunk', created: 1, model: 'deepseek-v4-flash',
+        choices: [{ index: 0, delta: { tool_calls: [{ index: 0, id: `call-${id}`, type: 'function', function: { name: 'lookup', arguments: JSON.stringify({ value }) } }] }, finish_reason: null }],
+      },
+      {
+        id, object: 'chat.completion.chunk', created: 1, model: 'deepseek-v4-flash',
+        choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }],
+        usage: { prompt_tokens: 1, completion_tokens: 2, total_tokens: 3 },
+      },
+    ])
+    const fakeFetch: typeof fetch = async (_input, init) => {
+      requests.push(JSON.parse(String(init?.body)) as Record<string, unknown>)
+      if (requests.length === 1) return toolCallResponse('first', 'first reasoning', 'x')
+      if (requests.length === 2) return toolCallResponse('second', 'second reasoning', 'y')
+      return eventStream([
+        {
+          id: 'third', object: 'chat.completion.chunk', created: 3, model: 'deepseek-v4-flash',
+          choices: [{ index: 0, delta: { role: 'assistant', content: 'done' }, finish_reason: null }],
+        },
+        {
+          id: 'third', object: 'chat.completion.chunk', created: 3, model: 'deepseek-v4-flash',
+          choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+          usage: { prompt_tokens: 3, completion_tokens: 1, total_tokens: 4 },
+        },
+      ])
+    }
+    const model = textModelFromConfig({
+      apiKey: 'test-key',
+      baseURL: 'https://provider.example/v1',
+      headers: {},
+      modelName: 'deepseek-v4-flash',
+      protocol: 'openai',
+    }, { fetch: fakeFetch })
+    const result = streamText({
+      model,
+      prompt: 'Use the lookup tool twice.',
+      tools: {
+        lookup: tool({
+          inputSchema: z.object({ value: z.string() }),
+          execute: async ({ value }) => ({ value }),
+        }),
+      },
+      stopWhen: stepCountIs(3),
+    })
+
+    await result.text
+
+    const thirdMessages = requests[2]?.messages as Record<string, unknown>[]
+    const assistantReasoning = thirdMessages
+      .filter(message => message.role === 'assistant' && Array.isArray(message.tool_calls))
+      .map(message => message.reasoning_content)
+    expect(assistantReasoning).toEqual(['first reasoning', 'second reasoning'])
+  })
 })

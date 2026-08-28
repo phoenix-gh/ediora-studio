@@ -110,7 +110,6 @@ export function createDeepSeekReasoningFetch(baseFetch: typeof fetch): typeof fe
           const reasoning = ids.map(id => reasoningByToolCall.get(id)).find(Boolean)
           if (!reasoning) continue
           message.reasoning_content = reasoning
-          ids.forEach(id => reasoningByToolCall.delete(id))
           changed = true
         }
         if (changed) requestInit = { ...init, body: JSON.stringify(payload) }
