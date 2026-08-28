@@ -1,4 +1,4 @@
-import type { ToolSet } from 'ai'
+import { convertToModelMessages, safeValidateUIMessages, type ToolSet } from 'ai'
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -404,5 +404,64 @@ describe('global chat model history', () => {
     ])).toEqual([
       { id: '4', role: 'assistant', parts: [{ type: 'text', text: '我已查到资料。' }] },
     ])
+  })
+
+  it('keeps the matching reasoning step when resuming an approved tool call', async () => {
+    const candidates = modelHistoryCandidates([
+      {
+        id: 5,
+        role: 'assistant',
+        parts: [
+          { type: 'step-start' },
+          { type: 'reasoning', text: '先检查内容是否重复。' },
+          {
+            type: 'dynamic-tool',
+            toolName: 'check_content_novelty',
+            toolCallId: 'call-check',
+            state: 'output-available',
+            input: { content: 'draft' },
+            output: { novel: true },
+          },
+          { type: 'text', text: '内容未重复。' },
+          { type: 'step-start' },
+          { type: 'reasoning', text: '检查通过，现在保存草稿。' },
+          {
+            type: 'dynamic-tool',
+            toolName: 'save_draft',
+            toolCallId: 'call-save',
+            state: 'approval-responded',
+            input: { title: '测试草稿', content: 'draft' },
+            approval: { id: 'approval-save', approved: true },
+          },
+        ],
+      },
+    ], { includeToolApprovals: true })
+
+    const validated = await safeValidateUIMessages({ messages: candidates })
+    expect(validated.success).toBe(true)
+    if (!validated.success) throw validated.error
+
+    const modelMessages = await convertToModelMessages(validated.data)
+    expect(modelMessages).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        content: expect.arrayContaining([
+          expect.objectContaining({ toolCallId: 'call-check' }),
+        ]),
+      }),
+    ]))
+    const saveDraftMessage = modelMessages.find(message => (
+      message.role === 'assistant'
+      && Array.isArray(message.content)
+      && message.content.some(part => part.type === 'tool-call' && part.toolCallId === 'call-save')
+    ))
+
+    expect(saveDraftMessage).toMatchObject({
+      role: 'assistant',
+      content: [
+        { type: 'reasoning', text: '检查通过，现在保存草稿。' },
+        { type: 'tool-call', toolCallId: 'call-save', toolName: 'save_draft' },
+        { type: 'tool-approval-request', approvalId: 'approval-save', toolCallId: 'call-save' },
+      ],
+    })
   })
 })

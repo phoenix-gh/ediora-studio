@@ -193,20 +193,31 @@ function isPendingApprovalPart(part: unknown): part is Record<string, unknown> {
     && (record.state === 'approval-requested' || record.state === 'approval-responded')
 }
 
+function isApprovalStepContextPart(part: unknown) {
+  if (!part || typeof part !== 'object') return false
+  const type = (part as PersistedChatPart).type
+  return type === 'step-start' || type === 'reasoning'
+}
+
 export function modelHistoryCandidates(
   messages: PersistedChatMessage[],
   { includeToolApprovals = false }: { includeToolApprovals?: boolean } = {},
 ) {
   return messages
     .filter((message): message is PersistedChatMessage & { role: 'user' | 'assistant' } => message.role !== 'tool')
-    .map(message => ({
-      id: String(message.id),
-      role: message.role,
-      parts: [
-        ...message.parts.filter(isTextPart),
-        ...(includeToolApprovals && message.role === 'assistant' ? message.parts.filter(isPendingApprovalPart) : []),
-      ],
-    }))
+    .map(message => {
+      const resumeApproval = includeToolApprovals
+        && message.role === 'assistant'
+        && message.parts.some(isPendingApprovalPart)
+      return {
+        id: String(message.id),
+        role: message.role,
+        parts: message.parts.filter(part => (
+          isTextPart(part)
+          || (resumeApproval && (isPendingApprovalPart(part) || isApprovalStepContextPart(part)))
+        )),
+      }
+    })
     .filter(message => message.parts.length > 0)
 }
 
