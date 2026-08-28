@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -12,11 +12,12 @@ from agent_trajectory import (
 )
 from agent_log_service import list_all_agent_log_events
 from database import get_db
-from models import AgentLogEvent, ChatMessage, ChatSession, ContentJobEvent, WritingPlan, now_utc
+from models import AgentLogEvent, ChatMessage, ChatRun, ChatSession, ContentJobEvent, WritingPlan, now_utc
 from pipeline_contracts import PipelineContractError, PipelineCreateInput, ResolvedSkillInvocation
 from pipeline_service import create_pipeline_job, pipeline_job_payload
 from tool_contracts import ToolNamespace
 from worker_auth import require_worker_token
+from services import chat_runs
 
 
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -148,6 +149,7 @@ class ChatMessageOut(BaseModel):
     text: str
     skill_run: SkillRunAudit | None = None
     capability_snapshot: AgentCapabilitySnapshot | None = None
+    run_id: str | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -185,6 +187,126 @@ class ChatMessageCreate(BaseModel):
 
 class ChatMessagePartsUpdate(BaseModel):
     parts: list[dict] = Field(default_factory=list)
+    run_id: str | None = Field(default=None, max_length=36)
+
+
+class ChatRunCreate(BaseModel):
+    user_message_id: int = Field(gt=0)
+    objective: str = Field(min_length=1, max_length=20_000)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ChatRunPreparation(BaseModel):
+    expected_version: int = Field(ge=0)
+    skill_invocation: dict | None = None
+    validated_plan: dict | None = None
+    capability_snapshot: dict
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ChatRunToolCallCreate(BaseModel):
+    tool_call_id: str = Field(min_length=1, max_length=200)
+    tool_name: str = Field(min_length=1, max_length=200)
+    input_data: dict = Field(default_factory=dict)
+    approval_id: str | None = Field(default=None, min_length=1, max_length=200)
+    side_effecting: bool = False
+    replay_policy: str = Field(default="never", max_length=32)
+    concurrency_policy: str = Field(default="serial", max_length=32)
+    idempotency_key: str | None = Field(default=None, max_length=500)
+    tool_version: str = Field(default="", max_length=120)
+    contract_digest: str = Field(default="", max_length=64)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ChatRunStepCreate(BaseModel):
+    expected_version: int = Field(ge=0)
+    assistant_content: list[dict] = Field(default_factory=list, max_length=500)
+    tool_calls: list[ChatRunToolCallCreate] = Field(default_factory=list, max_length=64)
+    finish_reason: str | None = Field(default=None, max_length=120)
+    usage_data: dict | None = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ChatRunApprovalDecision(BaseModel):
+    tool_call_id: str = Field(min_length=1, max_length=200)
+    approved: bool
+    reason: str | None = Field(default=None, max_length=500)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ChatRunToolResult(BaseModel):
+    status: Literal["succeeded", "failed", "outcome_unknown"]
+    output_data: Any = None
+    error_data: dict | None = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ChatRunStatusUpdate(BaseModel):
+    status: Literal["completed", "failed", "needs_reconciliation"]
+    expected_version: int = Field(ge=0)
+    error_data: dict | None = None
+
+    model_config = ConfigDict(extra="forbid")
+
+
+def _run_payload(run: ChatRun) -> dict:
+    return {
+        "id": run.id,
+        "session_id": run.session_id,
+        "user_message_id": run.user_message_id,
+        "assistant_message_id": run.assistant_message_id,
+        "status": run.status,
+        "objective": run.objective,
+        "skill_invocation": run.skill_invocation,
+        "validated_plan": run.validated_plan,
+        "capability_snapshot": run.capability_snapshot,
+        "current_step": run.current_step,
+        "checkpoint_version": run.checkpoint_version,
+        "error_data": run.error_data,
+        "created_at": run.created_at,
+        "updated_at": run.updated_at,
+        "completed_at": run.completed_at,
+    }
+
+
+def _step_payload(step) -> dict:
+    return {
+        "id": step.id, "run_id": step.run_id, "ordinal": step.ordinal,
+        "status": step.status, "assistant_content": step.assistant_content,
+        "finish_reason": step.finish_reason, "usage_data": step.usage_data,
+    }
+
+
+def _tool_call_payload(call) -> dict:
+    return {
+        "id": call.id, "run_id": call.run_id, "step_id": call.step_id,
+        "tool_call_id": call.tool_call_id, "tool_name": call.tool_name,
+        "input_data": call.input_data, "status": call.status,
+        "approval_id": call.approval_id, "approval_decision": call.approval_decision,
+        "output_data": call.output_data, "error_data": call.error_data,
+        "side_effecting": call.side_effecting, "replay_policy": call.replay_policy,
+        "concurrency_policy": call.concurrency_policy,
+        "idempotency_key": call.idempotency_key, "tool_version": call.tool_version,
+        "contract_digest": call.contract_digest,
+    }
+
+
+def _chat_run_http_error(exc: Exception, *, missing_status: int = 404) -> HTTPException:
+    if isinstance(exc, chat_runs.ChatRunNotFound):
+        return HTTPException(missing_status, "Chat Run 不存在或不属于当前会话")
+    if isinstance(exc, chat_runs.ChatRunNeedsReconciliation):
+        return HTTPException(409, "Chat Run 需要人工核对，不能自动重放")
+    if isinstance(exc, chat_runs.ChatRunConflict):
+        return HTTPException(409, str(exc))
+    if isinstance(exc, chat_runs.ChatRunInvalidState):
+        return HTTPException(422, str(exc))
+    raise exc
 
 
 class ChatPipelineTextPart(BaseModel):
@@ -542,10 +664,199 @@ async def replace_message_parts(
     if not message or message.session_id != session_id:
         raise HTTPException(404, "会话消息不存在")
     message.parts = body.parts
+    if body.run_id is not None:
+        run = await db.get(ChatRun, body.run_id)
+        if run is None or run.session_id != session_id:
+            raise HTTPException(409, "Chat Run 不存在或不属于当前会话")
+        if run.assistant_message_id not in (None, message.id):
+            raise HTTPException(409, "Chat Run 已关联其他助手消息")
+        message.run_id = run.id
+        run.assistant_message_id = message.id
     session.updated_at = now_utc()
     await db.commit()
     await db.refresh(message)
     return message
+
+
+@router.post(
+    "/sessions/{session_id}/runs",
+    status_code=201,
+    dependencies=[Depends(require_worker_token)],
+)
+async def create_chat_run(
+    session_id: int,
+    body: ChatRunCreate,
+    db: AsyncSession = Depends(get_db),
+):
+    session = await db.get(ChatSession, session_id)
+    message = await db.get(ChatMessage, body.user_message_id)
+    if session is None or message is None or message.session_id != session_id or message.role != "user":
+        raise HTTPException(404, "会话或原始用户消息不存在")
+    run = await chat_runs.create_run(
+        db,
+        session_id=session_id,
+        user_message_id=body.user_message_id,
+        objective=body.objective,
+    )
+    await db.commit()
+    await db.refresh(run)
+    return _run_payload(run)
+
+
+@router.put(
+    "/sessions/{session_id}/runs/{run_id}/preparation",
+    dependencies=[Depends(require_worker_token)],
+)
+async def freeze_chat_run_preparation(
+    session_id: int,
+    run_id: str,
+    body: ChatRunPreparation,
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        checkpoint = await chat_runs.load_checkpoint(db, run_id, session_id=session_id)
+        run = await chat_runs.freeze_preparation(
+            db, run_id,
+            skill_invocation=body.skill_invocation,
+            validated_plan=body.validated_plan,
+            capability_snapshot=body.capability_snapshot,
+            expected_version=body.expected_version,
+        )
+        del checkpoint
+        await db.commit()
+        await db.refresh(run)
+        return _run_payload(run)
+    except Exception as exc:
+        await db.rollback()
+        raise _chat_run_http_error(exc) from exc
+
+
+@router.post(
+    "/sessions/{session_id}/runs/{run_id}/steps",
+    status_code=201,
+    dependencies=[Depends(require_worker_token)],
+)
+async def append_chat_run_step(
+    session_id: int,
+    run_id: str,
+    body: ChatRunStepCreate,
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        await chat_runs.load_checkpoint(db, run_id, session_id=session_id)
+        step = await chat_runs.append_step(
+            db, run_id,
+            assistant_content=body.assistant_content,
+            tool_calls=[item.model_dump() for item in body.tool_calls],
+            expected_version=body.expected_version,
+            finish_reason=body.finish_reason,
+            usage_data=body.usage_data,
+        )
+        await db.commit()
+        await db.refresh(step)
+        return _step_payload(step)
+    except Exception as exc:
+        await db.rollback()
+        raise _chat_run_http_error(exc) from exc
+
+
+@router.get(
+    "/sessions/{session_id}/runs/{run_id}",
+    dependencies=[Depends(require_worker_token)],
+)
+async def get_chat_run_checkpoint(
+    session_id: int,
+    run_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        checkpoint = await chat_runs.load_checkpoint(db, run_id, session_id=session_id)
+    except Exception as exc:
+        raise _chat_run_http_error(exc) from exc
+    return {
+        "run": _run_payload(checkpoint.run),
+        "steps": [_step_payload(step) for step in checkpoint.steps],
+        "tool_calls": [_tool_call_payload(call) for call in checkpoint.tool_calls],
+    }
+
+
+@router.post(
+    "/sessions/{session_id}/runs/{run_id}/approvals/{approval_id}",
+    dependencies=[Depends(require_worker_token)],
+)
+async def decide_chat_run_approval(
+    session_id: int,
+    run_id: str,
+    approval_id: str,
+    body: ChatRunApprovalDecision,
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        decision = await chat_runs.decide_approval(
+            db, run_id, session_id=session_id, approval_id=approval_id,
+            tool_call_id=body.tool_call_id, approved=body.approved, reason=body.reason,
+        )
+        await db.commit()
+        return {
+            "run_id": decision.run_id,
+            "tool_call_id": decision.tool_call_id,
+            "decision": decision.decision,
+            "duplicate": decision.duplicate,
+            "run_status": decision.run_status,
+            "checkpoint_version": decision.checkpoint_version,
+        }
+    except Exception as exc:
+        await db.rollback()
+        raise _chat_run_http_error(exc, missing_status=409) from exc
+
+
+@router.put(
+    "/sessions/{session_id}/runs/{run_id}/tool-calls/{tool_call_id}/result",
+    dependencies=[Depends(require_worker_token)],
+)
+async def complete_chat_run_tool_call(
+    session_id: int,
+    run_id: str,
+    tool_call_id: str,
+    body: ChatRunToolResult,
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        await chat_runs.load_checkpoint(db, run_id, session_id=session_id)
+        call = await chat_runs.complete_tool_call(
+            db, run_id, tool_call_id=tool_call_id, status=body.status,
+            output_data=body.output_data, error_data=body.error_data,
+        )
+        await db.commit()
+        await db.refresh(call)
+        return _tool_call_payload(call)
+    except Exception as exc:
+        await db.rollback()
+        raise _chat_run_http_error(exc) from exc
+
+
+@router.patch(
+    "/sessions/{session_id}/runs/{run_id}/status",
+    dependencies=[Depends(require_worker_token)],
+)
+async def update_chat_run_status(
+    session_id: int,
+    run_id: str,
+    body: ChatRunStatusUpdate,
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        await chat_runs.load_checkpoint(db, run_id, session_id=session_id)
+        run = await chat_runs.transition_run(
+            db, run_id, status=body.status, expected_version=body.expected_version,
+            error_data=body.error_data,
+        )
+        await db.commit()
+        await db.refresh(run)
+        return _run_payload(run)
+    except Exception as exc:
+        await db.rollback()
+        raise _chat_run_http_error(exc) from exc
 
 
 @router.get("/sources/search", response_model=list[SourceSearchResult])
