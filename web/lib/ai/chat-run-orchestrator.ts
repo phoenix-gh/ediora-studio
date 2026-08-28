@@ -130,9 +130,15 @@ async function persistAgentResult(
   const approvals = approvalParts(result)
   if (result.kind === 'approval') {
     if (approvals.length !== 1) throw new Error('Approval result must contain exactly one pending tool call')
+    const canonical = (result.assistantContent ?? []).filter(part => (
+      part.type === 'reasoning' || part.type === 'text' || part.type === 'tool-call'
+    ))
+    const assistantContent = canonical.some(part => part.type === 'tool-call')
+      ? canonical
+      : approvals.map(item => item.assistant)
     await persistence.appendStep(sessionId, runId, {
       expected_version: expectedVersion,
-      assistant_content: approvals.map(item => item.assistant),
+      assistant_content: assistantContent,
       tool_calls: approvals.map(item => item.call),
       finish_reason: result.finishReason ?? 'tool-calls',
     })

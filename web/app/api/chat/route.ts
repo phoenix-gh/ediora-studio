@@ -16,7 +16,13 @@ import { buildChatInstructions } from '@/lib/ai/chat-instructions'
 import { CHAT_MAX_STEPS, chatToolLoopStep, needsFinalAnswerFallback } from '@/lib/ai/chat-loop'
 import { baoyuRuntimeInstructions } from '@/lib/ai/content-job'
 import { agentSkillRunAudit, openAgentRuntime, type AgentRunResult } from '@/lib/ai/agent-runtime'
-import type { AgentCapabilitySnapshot } from '@/lib/ai/agent-capabilities'
+import {
+  capabilitySnapshotDrift,
+  isAgentCapabilitySnapshot,
+  type AgentCapabilitySnapshot,
+} from '@/lib/ai/agent-capabilities'
+import { createChatRunOrchestrator } from '@/lib/ai/chat-run-orchestrator'
+import type { ChatRunProjection } from '@/lib/ai/chat-run-projector'
 import {
   appendAgentLogEvent,
   appendAgentSessionEvent,
@@ -51,6 +57,15 @@ import {
   type TextModelSettings,
 } from '@/lib/ai/runtime-config'
 import type { ChatStreamStatus } from '@/lib/api/chat'
+import {
+  appendChatRunStep,
+  completeChatRunToolCall,
+  createChatRun,
+  decideChatRunApproval,
+  freezeChatRunPreparation,
+  loadChatRunCheckpoint,
+  transitionChatRun,
+} from '@/lib/api/chat-runs'
 
 const submittedSkillInvocationSchema = z.object({
   invocationId: z.string().trim().min(1).max(120),
@@ -74,10 +89,11 @@ const requestSchema = z.object({
   skillInvocation: submittedSkillInvocationSchema.optional(),
   messageParts: z.array(composerMessagePartSchema).min(1).max(200).optional(),
   approval: z.object({
-    messageId: z.number().int().positive(),
+    runId: z.string().uuid(),
     toolCallId: z.string().min(1).max(200),
     approvalId: z.string().min(1).max(200),
     approved: z.boolean(),
+    reason: z.string().max(500).optional(),
   }).optional(),
 }).strict().superRefine((body, context) => {
   const invocationParts = body.messageParts?.filter(part => part.type === 'skill-invocation') ?? []
@@ -121,7 +137,12 @@ async function configuredTextModel(): Promise<TextModelConfig> {
 }
 
 type PersistedChatSession = {
-  messages: Array<{ id: number; role: 'user' | 'assistant' | 'tool'; parts: unknown[] }>
+  messages: Array<{
+    id: number
+    role: 'user' | 'assistant' | 'tool'
+    parts: unknown[]
+    run_id?: string | null
+  }>
 }
 
 function messageText(message: { parts: readonly unknown[] }) {
@@ -154,6 +175,7 @@ async function persistMessage(
     })),
   })
   if (!response.ok) throw new Error(`Unable to persist chat message (${response.status})`)
+  return response.json() as Promise<{ id: number }>
 }
 
 export function shouldUseSharedAgentRun({
@@ -186,34 +208,98 @@ async function persistedChatSession(sessionId: number) {
   return response.json() as Promise<PersistedChatSession>
 }
 
-async function persistedModelHistory(session: PersistedChatSession, includeToolApprovals = false) {
-  const validated = await safeValidateUIMessages({ messages: modelHistoryCandidates(session.messages, { includeToolApprovals }) })
+async function persistedModelHistory(session: PersistedChatSession) {
+  const validated = await safeValidateUIMessages({ messages: modelHistoryCandidates(session.messages) })
   if (!validated.success) throw new Error('Persisted chat history is invalid')
   return validated.data
 }
 
-async function persistApproval(sessionId: number, approval: NonNullable<z.infer<typeof requestSchema>['approval']>) {
-  const response = await fetch(`${apiBase()}/chat/sessions/${sessionId}`, { cache: 'no-store' })
-  if (!response.ok) throw new Error(`Unable to load chat session (${response.status})`)
-  const session = await response.json() as PersistedChatSession
-  const message = session.messages.find(item => item.id === approval.messageId && item.role === 'assistant')
-  if (!message) throw new Error('The pending tool approval message is unavailable')
-  let matched = false
-  const parts = message.parts.map(part => {
-    if (!part || typeof part !== 'object') return part
-    const record = part as Record<string, unknown>
-    const pendingApproval = record.approval
-    if (record.toolCallId !== approval.toolCallId || !pendingApproval || typeof pendingApproval !== 'object' || (pendingApproval as Record<string, unknown>).id !== approval.approvalId) return part
-    matched = true
-    return { ...record, state: 'approval-responded', approval: { ...(pendingApproval as Record<string, unknown>), approved: approval.approved } }
-  })
-  if (!matched) throw new Error('The pending tool approval no longer matches this session')
-  const updated = await fetch(`${apiBase()}/chat/sessions/${sessionId}/messages/${message.id}`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ parts }),
-  })
-  if (!updated.ok) throw new Error(`Unable to persist tool approval (${updated.status})`)
+export function durableChatRunsEnabled() {
+  return process.env.DURABLE_CHAT_RUNS !== '0'
+}
+
+export function durableApprovalPayload(approval: {
+  runId: string
+  approvalId: string
+  toolCallId: string
+  approved: boolean
+  reason?: string
+}) {
+  return {
+    runId: approval.runId,
+    approvalId: approval.approvalId,
+    toolCallId: approval.toolCallId,
+    approved: approval.approved,
+    ...(approval.reason ? { reason: approval.reason } : {}),
+  }
+}
+
+async function persistChatRunProjection(
+  sessionId: number,
+  projection: ChatRunProjection,
+) {
+  const checkpoint = await loadChatRunCheckpoint(sessionId, projection.runId)
+  let messageId = checkpoint.run.assistant_message_id
+  if (messageId == null) {
+    const created = await persistMessage(sessionId, {
+      role: 'assistant', parts: projection.parts,
+    })
+    messageId = created.id
+  }
+  const updated = await fetch(
+    `${apiBase()}/chat/sessions/${sessionId}/messages/${messageId}`,
+    {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ parts: projection.parts, run_id: projection.runId }),
+    },
+  )
+  if (!updated.ok) throw new Error(`Unable to persist Chat Run projection (${updated.status})`)
+  return messageId
+}
+
+async function writeChatRunProjection(
+  writer: UIMessageStreamWriter,
+  projection: ChatRunProjection,
+) {
+  for (const part of projection.parts) {
+    if (part.type === 'text' && typeof part.text === 'string') {
+      const id = `chat-run-text-${projection.runId}`
+      writer.write({ type: 'text-start', id })
+      writer.write({ type: 'text-delta', id, delta: part.text })
+      writer.write({ type: 'text-end', id })
+      continue
+    }
+    if (part.type === 'reasoning' && typeof part.text === 'string') {
+      const id = `chat-run-reasoning-${projection.runId}`
+      writer.write({ type: 'reasoning-start', id })
+      writer.write({ type: 'reasoning-delta', id, delta: part.text })
+      writer.write({ type: 'reasoning-end', id })
+      continue
+    }
+    if (part.type === 'dynamic-tool'
+      && typeof part.toolCallId === 'string'
+      && typeof part.toolName === 'string') {
+      writer.write({
+        type: 'tool-input-available', toolCallId: part.toolCallId,
+        toolName: part.toolName, input: part.input, dynamic: true,
+      })
+      if (part.state === 'approval-requested') {
+        const approval = isRecord(part.approval) ? part.approval : undefined
+        if (typeof approval?.id === 'string') {
+          writer.write({ type: 'tool-approval-request', toolCallId: part.toolCallId, approvalId: approval.id })
+        }
+      } else if (part.state === 'output-available') {
+        writer.write({ type: 'tool-output-available', toolCallId: part.toolCallId, output: part.output })
+      } else if (part.state === 'output-error') {
+        writer.write({ type: 'tool-output-error', toolCallId: part.toolCallId, errorText: String(part.output ?? '工具执行失败') })
+      }
+      continue
+    }
+    if (typeof part.type === 'string' && part.type.startsWith('data-')) {
+      writer.write(part as never)
+    }
+  }
 }
 
 export async function selectedSkillContext(skillName: string) {
@@ -753,7 +839,6 @@ export async function POST(request: NextRequest) {
       && isRetriedUserMessage(sessionBeforeWrite.messages, persistedUserParts),
     )
     if (body.approval) {
-      await persistApproval(body.sessionId, body.approval)
       await persistChatAgentLogEvent(chatSessionEvent(logContext, {
         event_type: 'tool/approval',
         phase: 'execute',
@@ -781,7 +866,8 @@ export async function POST(request: NextRequest) {
       : await persistedChatSession(body.sessionId)
     const manualSkillName = resolvedDirectInvocation?.skill_name ?? body.skillName
     const restoredSkillName = manualSkillName ? undefined : latestActivatedSkillName(session.messages)
-    const messages = await persistedModelHistory(session, Boolean(body.approval))
+    // Approval resumes never derive executable history from display messages.
+    const messages = body.approval ? [] : await persistedModelHistory(session)
     logContext.turn = Math.max(1, session.messages.filter(message => message.role === 'user').length)
     await persistChatAgentSessionEvent({
       type: 'turn/start',
@@ -822,6 +908,116 @@ export async function POST(request: NextRequest) {
     const currentRequestText = currentRequest ? messageText(currentRequest) : ''
     const conversationContext = formatChatTurnContext(buildChatTurnContext(session.messages))
     const genericRuntime = genericSkillRuntimeEnabled()
+    if (body.approval || durableChatRunsEnabled()) {
+      const openRunRuntime = ({ skillName }: { skillName?: string }) => openAgentRuntime({
+        mcpEndpoint: mcpUrl(apiBase()),
+        imageGenerator: createDirectImageGenerator(apiBase()),
+        model,
+        mode: 'chat',
+        policyProfile: 'chat',
+        skillMode: skillName ? 'manual' : 'auto',
+        skillName,
+        sessionId: body.sessionId,
+        turn: logContext.turn ?? 1,
+        automaticSelection: !skillName,
+        onMessage: event => persistChatAgentLogEvent(
+          chatAgentLogEventFromModelMessage(event, logContext),
+        ),
+        onToolAudit: event => persistChatAgentLogEvent(
+          chatAgentLogEventFromToolAudit(event, logContext),
+        ),
+        onSessionEvent: event => persistChatAgentSessionEvent(event, logContext),
+      })
+      const persistence = {
+        createRun: createChatRun,
+        freezePreparation: freezeChatRunPreparation as never,
+        appendStep: appendChatRunStep as never,
+        loadCheckpoint: loadChatRunCheckpoint,
+        decideApproval: decideChatRunApproval,
+        completeToolCall: completeChatRunToolCall,
+        transitionRun: transitionChatRun as never,
+      }
+      const orchestrator = createChatRunOrchestrator({
+        persistence,
+        openRuntime: openRunRuntime,
+        executeApprovedTool: async ({ checkpoint, toolCall }) => {
+          const skillName = typeof checkpoint.run.skill_invocation?.name === 'string'
+            ? checkpoint.run.skill_invocation.name
+            : undefined
+          const toolRuntime = await openRunRuntime({ skillName })
+          try {
+            await toolRuntime.prepare(checkpoint.run.objective)
+            const expected = checkpoint.run.capability_snapshot
+            const actual = toolRuntime.capabilitySnapshot()
+            if (!isAgentCapabilitySnapshot(expected)) {
+              throw new Error('Chat Run capability checkpoint is invalid')
+            }
+            const drift = capabilitySnapshotDrift(expected, actual)
+            if (drift) throw new Error(`Agent capability drift detected: ${drift}`)
+            const selectedTool = toolRuntime.tools[toolCall.tool_name] as {
+              execute?: (input: unknown, options: { toolCallId: string }) => Promise<unknown>
+            } | undefined
+            if (!selectedTool?.execute) {
+              throw new Error(`Prepared Agent tool is unavailable: ${toolCall.tool_name}`)
+            }
+            return await selectedTool.execute(toolCall.input_data, {
+              toolCallId: toolCall.tool_call_id,
+            })
+          } finally {
+            await toolRuntime.close()
+          }
+        },
+      })
+      const stream = createUIMessageStream({
+        execute: async ({ writer }) => {
+          writer.write({
+            type: 'data-chat-status', id: 'chat-activity', transient: true,
+            data: {
+              phase: 'thinking', state: 'streaming',
+              label: body.approval ? '正在继续已批准的任务' : '正在准备可恢复的任务',
+              detail: body.approval ? '正在从持久化检查点继续执行' : '正在保存 Skill、计划和工具能力快照',
+            },
+          })
+          const projection = body.approval
+            ? await orchestrator.resumeRun({
+                sessionId: body.sessionId,
+                ...durableApprovalPayload(body.approval),
+                maxSteps: CHAT_MAX_STEPS,
+              })
+            : await orchestrator.startRun({
+                sessionId: body.sessionId,
+                userMessageId: session.messages.filter(message => message.role === 'user').at(-1)!.id,
+                objective: currentRequestText,
+                modelMessages: await convertToModelMessages(messages),
+                conversationContext,
+                selectedContext: [
+                  body.draftId ? await selectedContext(undefined, body.draftId, '') : '',
+                  resolvedDirectInvocation ? directSkillParameterContext(resolvedDirectInvocation) : '',
+                ].filter(Boolean).join('\n\n---\n\n'),
+                maxSteps: CHAT_MAX_STEPS,
+                skillName: manualSkillName,
+              })
+          await persistChatRunProjection(body.sessionId, projection)
+          await writeChatRunProjection(writer, projection)
+          writer.write({
+            type: 'data-chat-status', id: 'chat-activity', transient: true,
+            data: projection.status === 'waiting_approval'
+              ? { phase: 'thinking', state: 'streaming', label: '等待你的确认', detail: '确认后将继续同一个任务' }
+              : projection.status === 'completed'
+                ? { phase: 'answer', state: 'complete', label: '已完成', detail: '任务已完成' }
+                : { phase: 'thinking', state: 'error', label: '处理失败', detail: '任务状态已持久化，可查看错误详情' },
+          })
+          await finishCanonicalTurn({ kind: projection.status, runId: projection.runId })
+          await persistChatAgentLogEvent(chatSessionEvent(logContext, {
+            event_type: 'session/turn-end', phase: 'chat',
+            status: projection.status,
+            payload: { kind: projection.status, runId: projection.runId },
+          }))
+        },
+        onError: error => error instanceof Error ? error.message : 'Chat response failed',
+      })
+      return createUIMessageStreamResponse({ stream })
+    }
     const runtime = await openAgentRuntime({
       mcpEndpoint: mcpUrl(apiBase()),
       imageGenerator: createDirectImageGenerator(apiBase()),

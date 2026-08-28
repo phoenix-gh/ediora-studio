@@ -48,6 +48,10 @@ describe('durable Chat Run orchestrator', () => {
       prepareRun: vi.fn().mockResolvedValue(prepared),
       executePrepared: vi.fn().mockResolvedValue({
         kind: 'approval', text: '', revisionCount: 0,
+        assistantContent: [
+          { type: 'reasoning', text: 'thinking before save' },
+          { type: 'tool-call', toolCallId: 'call-1', toolName: 'save_draft', input: { title: 'one' } },
+        ],
         parts: [{
           type: 'dynamic-tool', toolName: 'save_draft', toolCallId: 'call-1',
           state: 'approval-requested', input: { title: 'one' }, approval: { id: 'approval-1' },
@@ -79,6 +83,10 @@ describe('durable Chat Run orchestrator', () => {
     }))
     expect(persistence.appendStep).toHaveBeenCalledWith(7, 'run-1', expect.objectContaining({
       expected_version: 1,
+      assistant_content: [
+        { type: 'reasoning', text: 'thinking before save' },
+        { type: 'tool-call', toolCallId: 'call-1', toolName: 'save_draft', input: { title: 'one' } },
+      ],
       tool_calls: [expect.objectContaining({
         tool_call_id: 'call-1', approval_id: 'approval-1', tool_name: 'save_draft',
       })],

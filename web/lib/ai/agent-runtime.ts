@@ -161,6 +161,7 @@ export type AgentRunResult = {
   kind: 'completed' | 'approval'
   text: string
   parts: Record<string, unknown>[]
+  assistantContent?: Record<string, unknown>[]
   finishReason?: string
   stepCount?: number
   skillRun?: SkillRun
@@ -920,6 +921,33 @@ export async function openAgentRuntime(
 
     let executionFinishReason: string | undefined
 
+    const canonicalAssistantContent = (generated: Record<string, unknown>) => {
+      const responseMessages = Array.isArray(generated.responseMessages)
+        ? generated.responseMessages as Array<Record<string, unknown>>
+        : []
+      const assistant = [...responseMessages].reverse().find(message => message.role === 'assistant')
+      if (assistant && Array.isArray(assistant.content)) {
+        return (assistant.content as Array<Record<string, unknown>>).filter(part => (
+          part.type === 'reasoning' || part.type === 'text' || part.type === 'tool-call'
+        ))
+      }
+      const content: Record<string, unknown>[] = []
+      if (typeof generated.reasoning === 'string' && generated.reasoning) {
+        content.push({ type: 'reasoning', text: generated.reasoning })
+      }
+      const calls = Array.isArray(generated.toolCalls)
+        ? generated.toolCalls as Array<Record<string, unknown>>
+        : []
+      for (const call of calls) {
+        if (typeof call.toolCallId !== 'string' || typeof call.toolName !== 'string') continue
+        content.push({
+          type: 'tool-call', toolCallId: call.toolCallId,
+          toolName: call.toolName, input: call.input ?? {},
+        })
+      }
+      return content
+    }
+
     const result = await executeSkillRunWithAiSdk({
       prepared: preparedSkillRun,
       skill: active.skill,
@@ -972,6 +1000,9 @@ export async function openAgentRuntime(
           text: execution.generated.text,
           parts: execution.parts,
           toolResults: execution.toolResults,
+          assistantContent: canonicalAssistantContent(
+            execution.generated as unknown as Record<string, unknown>,
+          ),
         }
       },
       finalize: async ({ prompt }) => {
@@ -1048,6 +1079,9 @@ export async function openAgentRuntime(
       kind: result.kind,
       text: finalText,
       parts,
+      ...(result.kind === 'approval'
+        ? { assistantContent: result.assistantContent }
+        : {}),
       skillRun,
       revisionCount,
       finishReason: executionFinishReason,

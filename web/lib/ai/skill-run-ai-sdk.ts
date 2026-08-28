@@ -108,7 +108,12 @@ export async function selectSkillForTurn({
 }
 
 export type PlanningTool = { name: string; description: string }
-export type ExecutionResult = { text: string; parts: unknown[]; toolResults?: unknown[] }
+export type ExecutionResult = {
+  text: string
+  parts: unknown[]
+  toolResults?: unknown[]
+  assistantContent?: Array<Record<string, unknown>>
+}
 
 const TOOL_EVIDENCE_PROMPT_LIMIT = 64 * 1024
 const TOOL_EVIDENCE_STRING_LIMIT = 4 * 1024
@@ -311,7 +316,12 @@ export async function executePreparedSkillRunWithAiSdk(
     requiredTools: run.requiredTools,
   })
   if (hasPendingApproval(execution.parts)) {
-    return { kind: 'approval' as const, parts: execution.parts, run }
+    return {
+      kind: 'approval' as const,
+      parts: execution.parts,
+      assistantContent: execution.assistantContent ?? [],
+      run,
+    }
   }
   run = applyToolEvidence(run, execution.parts)
 
@@ -336,7 +346,15 @@ export async function executePreparedSkillRunWithAiSdk(
     executionToolResults = [...executionToolResults, ...(retry.toolResults ?? [])]
     if (retry.text.trim()) executionText = retry.text
     if (hasPendingApproval(retry.parts)) {
-      return { kind: 'approval' as const, parts: executionParts, run }
+      return {
+        kind: 'approval' as const,
+        parts: executionParts,
+        assistantContent: [
+          ...(execution.assistantContent ?? []),
+          ...(retry.assistantContent ?? []),
+        ],
+        run,
+      }
     }
     run = applyToolEvidence(run, retry.parts)
   }

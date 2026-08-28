@@ -213,6 +213,7 @@ function modelEvents() {
 describe('POST /api/chat model HTTP audit integration', () => {
   beforeEach(() => {
     process.env.WORKER_TOKEN = 'test-worker-token-at-least-32-characters'
+    process.env.DURABLE_CHAT_RUNS = '0'
     api.after.mockImplementation(callback => callback())
     api.appendAgentLogEvent.mockResolvedValue({})
     api.appendAgentSessionEvent.mockResolvedValue({})
