@@ -146,7 +146,7 @@ describe('chat API client', () => {
     await streamChatReply({
       sessionId: 7,
       messages: [],
-      approval: { messageId: 15, toolCallId: 'call-1', approvalId: 'approval-1', approved: true },
+      approval: { runId: 'run-1', toolCallId: 'call-1', approvalId: 'approval-1', approved: true },
       onEvent: () => undefined,
     })
 
@@ -154,7 +154,7 @@ describe('chat API client', () => {
       body: JSON.stringify({
         sessionId: 7,
         messages: [],
-        approval: { messageId: 15, toolCallId: 'call-1', approvalId: 'approval-1', approved: true },
+        approval: { runId: 'run-1', toolCallId: 'call-1', approvalId: 'approval-1', approved: true },
       }),
     }))
   })
