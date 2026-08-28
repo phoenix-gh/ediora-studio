@@ -32,6 +32,7 @@ import { titleFromFirstMessage } from '@/app/chat/chat-title'
 
 import {
   approvalResumeMessage,
+  applyApprovalDecision,
   applyChatStreamEvent,
   initialChatStatusPart,
   makeLocalMessage,
@@ -450,7 +451,10 @@ export function ChatWorkspaceProvider({ children }: { children: ReactNode }) {
     const key = sessionKey(args.sessionId)
     if (state.runningBySession[key]) return
     const assistantMessage = approvalResumeMessage()
-    updateSession(args.sessionId, messages => [...messages, assistantMessage])
+    updateSession(args.sessionId, messages => [
+      ...applyApprovalDecision(messages, args),
+      assistantMessage,
+    ])
     inlineStreamSessionIdsRef.current.add(args.sessionId)
     setSessionRunning(args.sessionId, true)
     setSessionError(args.sessionId, null)
@@ -474,6 +478,11 @@ export function ChatWorkspaceProvider({ children }: { children: ReactNode }) {
       await loadSession(args.sessionId, true)
       await refreshSessions()
     } catch (error) {
+      try {
+        await loadSession(args.sessionId, true)
+      } catch {
+        // Keep the optimistic decision if the authoritative session is temporarily unavailable.
+      }
       setSessionError(args.sessionId, errorMessage(error, '处理工具确认失败'))
     } finally {
       inlineStreamSessionIdsRef.current.delete(args.sessionId)
