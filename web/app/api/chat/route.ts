@@ -26,11 +26,14 @@ import type { ChatRunProjection } from '@/lib/ai/chat-run-projector'
 import {
   appendAgentLogEvent,
   appendAgentSessionEvent,
+  listAllAgentLogEvents,
+  type AgentLogEvent,
   type AgentLogEventInput,
   type AgentSessionEventInput,
 } from '@/lib/ai/agent-log-client'
 import type { AgentSessionEventDraft } from '@/lib/ai/agent-runtime'
 import type { AgentSessionEventType } from '@/lib/ai/agent-trajectory'
+import type { ChatRunCheckpoint } from '@/lib/ai/chat-run-types'
 import type { AgentModelMessageEvent, AgentStepCheckpoint, AgentToolAudit } from '@/lib/ai/agent-runtime-types'
 import { modelErrorEvidenceFromUnknown } from '@/lib/ai/model-error-evidence'
 import { chatReasoningModel } from '@/lib/ai/chat-reasoning-model'
@@ -247,6 +250,7 @@ export function durableApprovalPayload(approval: {
 async function persistChatRunProjection(
   sessionId: number,
   projection: ChatRunProjection,
+  logContext: ChatAgentLogContext,
 ) {
   const checkpoint = await loadChatRunCheckpoint(sessionId, projection.runId)
   let messageId = checkpoint.run.assistant_message_id
@@ -265,6 +269,23 @@ async function persistChatRunProjection(
     },
   )
   if (!updated.ok) throw new Error(`Unable to persist Chat Run projection (${updated.status})`)
+  try {
+    const existing = await listAllAgentLogEvents({
+      session_id: sessionId,
+      event_type: 'tool/result',
+      limit: 500,
+    })
+    const existingCallIds = existingTerminalToolCallIds(existing.events, logContext.turn ?? 1)
+    for (const event of chatRunTerminalToolResultEvents(checkpoint, {
+      turn: logContext.turn ?? 1,
+      existingCallIds,
+    })) {
+      await persistChatAgentSessionEvent(event, logContext)
+      existingCallIds.add(String(event.data.callId))
+    }
+  } catch {
+    // A trajectory backfill must not turn a successfully checkpointed Chat Run into a failed response.
+  }
   return messageId
 }
 
@@ -695,6 +716,47 @@ export function chatAgentSessionEventFromToolResult(
   }
 }
 
+function terminalToolError(call: ChatRunCheckpoint['tool_calls'][number]) {
+  const message = call.error_data?.message ?? call.error_data?.detail
+  if (typeof message === 'string' && message) return message
+  if (call.status === 'rejected') return '工具调用已被用户拒绝'
+  if (call.status === 'outcome_unknown') return '工具执行结果未知'
+  return call.status === 'failed' ? '工具执行失败' : undefined
+}
+
+function existingTerminalToolCallIds(events: AgentLogEvent[], turn: number) {
+  return new Set(events.flatMap(event => {
+    if (event.event_type !== 'tool/result' || !isRecord(event.payload)) return []
+    const eventTurn = event.payload.turn
+    const callId = event.payload.callId
+    return eventTurn === turn && typeof callId === 'string' ? [callId] : []
+  }))
+}
+
+export function chatRunTerminalToolResultEvents(
+  checkpoint: ChatRunCheckpoint,
+  context: { turn: number; existingCallIds?: ReadonlySet<string> },
+): AgentSessionEventDraft[] {
+  const terminalStatuses = new Set(['succeeded', 'failed', 'rejected', 'outcome_unknown'])
+  const stepOrdinals = new Map(checkpoint.steps.map(step => [step.id, step.ordinal]))
+  const events: AgentSessionEventDraft[] = []
+  for (const call of checkpoint.tool_calls) {
+    if (!terminalStatuses.has(call.status) || context.existingCallIds?.has(call.tool_call_id)) continue
+    const step = stepOrdinals.get(call.step_id)
+    if (!step) continue
+    const error = terminalToolError(call)
+    const event = chatAgentSessionEventFromToolResult({
+      type: error ? 'tool-error' : 'tool-result',
+      toolCallId: call.tool_call_id,
+      toolName: call.tool_name,
+      output: call.output_data,
+      ...(error ? { error } : {}),
+    }, { turn: context.turn, step })
+    if (event) events.push(event)
+  }
+  return events
+}
+
 function chatSessionEvent(
   context: ChatAgentLogContext,
   event: Omit<AgentLogEventInput, 'stream_kind' | 'stream_key' | 'session_id' | 'turn_id'>,
@@ -1007,7 +1069,7 @@ export async function POST(request: NextRequest) {
                 maxSteps: CHAT_MAX_STEPS,
                 skillName: manualSkillName,
               })
-          await persistChatRunProjection(body.sessionId, projection)
+          await persistChatRunProjection(body.sessionId, projection, logContext)
           await writeChatRunProjection(writer, projection)
           writer.write({
             type: 'data-chat-status', id: 'chat-activity', transient: true,

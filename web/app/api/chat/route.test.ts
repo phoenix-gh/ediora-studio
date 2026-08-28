@@ -14,6 +14,7 @@ import {
   chatAgentLogEventFromToolAudit,
   chatAgentSessionEventFromDraft,
   chatAgentSessionEventFromToolResult,
+  chatRunTerminalToolResultEvents,
   chatTrajectoryChunk,
   chatStatusForSkill,
   chatStatusForAgentStep,
@@ -245,6 +246,67 @@ describe('Chat Agent log event mapping', () => {
         isError: false,
       },
     })
+  })
+
+  it('maps terminal durable tool checkpoints once using the owning step ordinal', () => {
+    const checkpoint = {
+      run: { id: 'run-1' },
+      steps: [
+        { id: 41, ordinal: 2 },
+        { id: 42, ordinal: 3 },
+      ],
+      tool_calls: [
+        {
+          step_id: 41, tool_call_id: 'call-saved', tool_name: 'save_draft',
+          status: 'succeeded', output_data: { saved: true, id: 865 }, error_data: null,
+        },
+        {
+          step_id: 41, tool_call_id: 'call-new-result', tool_name: 'save_draft',
+          status: 'succeeded', output_data: { saved: true, id: 866 }, error_data: null,
+        },
+        {
+          step_id: 42, tool_call_id: 'call-failed', tool_name: 'add_plan_source',
+          status: 'failed', output_data: null, error_data: { message: 'source failed' },
+        },
+        {
+          step_id: 42, tool_call_id: 'call-running', tool_name: 'search_source_items',
+          status: 'executing', output_data: null, error_data: null,
+        },
+      ],
+    }
+
+    expect(chatRunTerminalToolResultEvents(
+      checkpoint as never,
+      { turn: 4, existingCallIds: new Set(['call-saved']) },
+    )).toEqual([
+      {
+        type: 'tool/result',
+        turn: 4,
+        step: 2,
+        data: {
+          turn: 4,
+          step: 2,
+          callId: 'call-new-result',
+          content: [{ kind: 'text', text: JSON.stringify({ saved: true, id: 866 }) }],
+          output: { saved: true, id: 866 },
+          isError: false,
+        },
+      },
+      {
+        type: 'tool/result',
+        turn: 4,
+        step: 3,
+        data: {
+          turn: 4,
+          step: 3,
+          callId: 'call-failed',
+          content: [{ kind: 'text', text: 'source failed' }],
+          output: null,
+          error: 'source failed',
+          isError: true,
+        },
+      },
+    ])
   })
 })
 

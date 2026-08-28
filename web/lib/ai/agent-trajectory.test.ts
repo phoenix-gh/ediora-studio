@@ -151,6 +151,50 @@ describe('Agent trajectory projection', () => {
     expect(snapshot.runningCalls[0]?.inputDetail).toBe('{"q":"AI"}')
   })
 
+  it('interrupts an unmatched tool call when its owning turn has ended', () => {
+    const snapshot = deriveAgentTrajectory([
+      event(1, 'turn/start', { turn: 1 }),
+      event(2, 'step/start', { turn: 1, step: 1 }, 1, 1),
+      event(3, 'assistant/message', {
+        turn: 1,
+        step: 1,
+        blocks: [{
+          kind: 'tool-call', callId: 'call-orphaned', name: 'save_draft',
+          arguments: { title: 'draft' },
+        }],
+      }, 1, 1),
+      event(4, 'turn/end', { turn: 1, reason: { kind: 'completed' } }),
+    ])
+
+    const tool = snapshot.turns[0]?.groups
+      .flatMap(group => group.cells)
+      .find(cell => cell.callId === 'call-orphaned')
+    expect(tool).toMatchObject({ callId: 'call-orphaned', status: 'interrupted' })
+    expect(snapshot.runningCalls).toHaveLength(0)
+    expect(snapshot.isRunning).toBe(false)
+  })
+
+  it('keeps an unmatched approval tool waiting when the turn pauses for approval', () => {
+    const snapshot = deriveAgentTrajectory([
+      event(1, 'turn/start', { turn: 1 }),
+      event(2, 'tool/call', {
+        turn: 1,
+        step: 1,
+        callId: 'call-approval',
+        name: 'save_draft',
+        arguments: { title: 'draft' },
+      }, 1, 1),
+      event(3, 'turn/end', { turn: 1, reason: { kind: 'waiting_approval' } }),
+    ])
+
+    const tool = snapshot.turns[0]?.groups
+      .flatMap(group => group.cells)
+      .find(cell => cell.callId === 'call-approval')
+    expect(tool).toMatchObject({ callId: 'call-approval', status: 'waiting_approval' })
+    expect(snapshot.runningCalls).toHaveLength(0)
+    expect(snapshot.isRunning).toBe(false)
+  })
+
   it('folds raw assistant chunks into a stable partial and removes it after completion', () => {
     const partial = deriveAgentTrajectory([
       event(1, 'turn/start', { turn: 1 }),
