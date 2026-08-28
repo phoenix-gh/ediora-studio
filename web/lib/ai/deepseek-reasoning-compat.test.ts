@@ -2,6 +2,7 @@ import { generateText, stepCountIs, streamText, tool } from 'ai'
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
 
+import { chatReasoningModel } from './chat-reasoning-model'
 import { textModelFromConfig } from './runtime-config'
 
 function eventStream(chunks: unknown[]) {
@@ -12,6 +13,118 @@ function eventStream(chunks: unknown[]) {
 }
 
 describe('DeepSeek reasoning compatibility over the OpenAI adapter', () => {
+  it('exposes non-stream reasoning_content as standard AI SDK reasoning', async () => {
+    const fakeFetch: typeof fetch = async () => new Response(JSON.stringify({
+      id: 'reasoning',
+      object: 'chat.completion',
+      created: 1,
+      model: 'deepseek-v4-flash',
+      choices: [{
+        index: 0,
+        message: {
+          role: 'assistant',
+          content: 'Visible answer',
+          reasoning_content: 'persist me',
+        },
+        finish_reason: 'stop',
+      }],
+      usage: { prompt_tokens: 1, completion_tokens: 2, total_tokens: 3 },
+    }), { status: 200, headers: { 'content-type': 'application/json' } })
+    const model = chatReasoningModel(textModelFromConfig({
+      apiKey: 'test-key',
+      baseURL: 'https://provider.example/v1',
+      headers: {},
+      modelName: 'deepseek-v4-flash',
+      protocol: 'openai',
+    }, { fetch: fakeFetch }))
+
+    const result = await generateText({ model, prompt: 'Answer.' })
+
+    expect(result.reasoningText).toBe('persist me')
+    expect(result.text).toBe('Visible answer')
+  })
+
+  it('exposes streamed reasoning_content as standard AI SDK reasoning', async () => {
+    const fakeFetch: typeof fetch = async () => eventStream([
+      {
+        id: 'reasoning', object: 'chat.completion.chunk', created: 1, model: 'deepseek-v4-flash',
+        choices: [{ index: 0, delta: { role: 'assistant', reasoning_content: 'persist me' }, finish_reason: null }],
+      },
+      {
+        id: 'reasoning', object: 'chat.completion.chunk', created: 1, model: 'deepseek-v4-flash',
+        choices: [{ index: 0, delta: { content: 'Visible answer' }, finish_reason: null }],
+      },
+      {
+        id: 'reasoning', object: 'chat.completion.chunk', created: 1, model: 'deepseek-v4-flash',
+        choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+        usage: { prompt_tokens: 1, completion_tokens: 2, total_tokens: 3 },
+      },
+    ])
+    const model = chatReasoningModel(textModelFromConfig({
+      apiKey: 'test-key',
+      baseURL: 'https://provider.example/v1',
+      headers: {},
+      modelName: 'deepseek-v4-flash',
+      protocol: 'openai',
+    }, { fetch: fakeFetch }))
+    const result = streamText({ model, prompt: 'Answer.' })
+
+    expect(await result.reasoningText).toBe('persist me')
+    expect(await result.text).toBe('Visible answer')
+  })
+
+  it('restores persisted reasoning through a new provider instance', async () => {
+    let request: Record<string, unknown> | undefined
+    const fakeFetch: typeof fetch = async (_input, init) => {
+      request = JSON.parse(String(init?.body)) as Record<string, unknown>
+      return new Response(JSON.stringify({
+        id: 'resumed',
+        object: 'chat.completion',
+        created: 2,
+        model: 'deepseek-v4-flash',
+        choices: [{
+          index: 0,
+          message: { role: 'assistant', content: 'continued' },
+          finish_reason: 'stop',
+        }],
+        usage: { prompt_tokens: 2, completion_tokens: 1, total_tokens: 3 },
+      }), { status: 200, headers: { 'content-type': 'application/json' } })
+    }
+    const model = chatReasoningModel(textModelFromConfig({
+      apiKey: 'test-key',
+      baseURL: 'https://provider.example/v1',
+      headers: {},
+      modelName: 'deepseek-v4-flash',
+      protocol: 'openai',
+    }, { fetch: fakeFetch }))
+
+    await model.doGenerate({
+      prompt: [
+        {
+          role: 'assistant',
+          content: [
+            { type: 'reasoning', text: 'persisted reasoning' },
+            { type: 'tool-call', toolCallId: 'call-approval', toolName: 'save_draft', input: {} },
+          ],
+        },
+        {
+          role: 'tool',
+          content: [{
+            type: 'tool-result',
+            toolCallId: 'call-approval',
+            toolName: 'save_draft',
+            output: { type: 'execution-denied', reason: 'Tool call execution denied.' },
+          }],
+        },
+      ],
+    } as never)
+
+    const messages = request?.messages as Record<string, unknown>[]
+    const assistant = messages.find(message => message.role === 'assistant')
+    expect(assistant?.reasoning_content).toBe('persisted reasoning')
+    expect(assistant?.content).toBeNull()
+  })
+
   it('passes reasoning_content back after a DeepSeek tool call', async () => {
     const requests: Record<string, unknown>[] = []
     const fakeFetch: typeof fetch = async (_input, init) => {
