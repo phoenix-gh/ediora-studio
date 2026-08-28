@@ -723,14 +723,20 @@ async def check_content_novelty(
     """Check whether an Agent topic and core claim repeat recent Agent drafts.
 
     Use before writing to avoid spending work on a recent global duplicate.
-    This is advisory only: save_draft performs the authoritative check again.
+    This is advisory only: save_draft performs the authoritative check again
+    when novelty checking is enabled.
     A different title, structure, or tone does not make the same claim novel.
     """
     from agent_topic_novelty import (
         NoveltyCandidate,
         check_content_novelty as check_novelty,
+        disabled_novelty_decision,
+        agent_topic_novelty_enabled,
         judge_novelty_with_model,
     )
+
+    if not agent_topic_novelty_enabled():
+        return asdict(disabled_novelty_decision())
 
     candidate = NoveltyCandidate(
         topic=topic,
@@ -1718,11 +1724,15 @@ async def save_draft(
     novelty_override_token: str | None = None,
 ) -> dict:
     """
-    Create a new Agent draft after a global, time-bounded topic novelty check.
+    Create a new Agent draft after a global, time-bounded topic novelty check
+    when AGENT_TOPIC_NOVELTY_ENABLED is enabled. The check is disabled by
+    default while its failure modes are being repaired; in that mode the
+    draft is saved and the novelty evidence is marked as disabled.
 
     Use only for Agent-created drafts. Manual and backend draft routes do not
     use this policy. A changed title or structure does not make the same topic
-    and core claim novel. A conflict returns saved=false and no draft ID.
+    and core claim novel. When novelty checking is enabled, a conflict returns
+    saved=false and no draft ID.
 
     Args:
         title: Article title.

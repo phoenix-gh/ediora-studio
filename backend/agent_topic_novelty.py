@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
+import os
 import secrets
 from typing import Awaitable, Callable, Literal, Sequence
 
@@ -22,7 +23,7 @@ from text_dedupe import PreparedText, similarity
 
 
 NoveltyDecisionName = Literal[
-    "novel", "duplicate", "new_development", "uncertain"
+    "novel", "duplicate", "new_development", "uncertain", "disabled"
 ]
 SuggestedAction = Literal["continue", "change_topic", "ask_user"]
 NoveltyJudge = Callable[
@@ -31,6 +32,19 @@ NoveltyJudge = Callable[
 CandidateExtractor = Callable[[str, str], Awaitable["NoveltyCandidate"]]
 
 AGENT_TOPIC_NOVELTY_LOCK_KEY = 6_947_221_401
+AGENT_TOPIC_NOVELTY_ENABLED_ENV = "AGENT_TOPIC_NOVELTY_ENABLED"
+
+
+def agent_topic_novelty_enabled() -> bool:
+    """Return whether Agent save-time novelty checking is enabled.
+
+    The implementation stays available for inspection and re-enablement, but
+    the feature is deliberately off by default until its failure modes are
+    resolved.
+    """
+    return os.getenv(AGENT_TOPIC_NOVELTY_ENABLED_ENV, "0").strip().lower() in {
+        "1", "true", "yes", "on",
+    }
 
 
 @dataclass(frozen=True)
@@ -132,6 +146,16 @@ def _uncertain(conflicts: list[dict]) -> NoveltyDecision:
         reason="Unable to determine topic novelty reliably",
         novelty_basis="",
         suggested_action="ask_user",
+    )
+
+
+def disabled_novelty_decision() -> NoveltyDecision:
+    return NoveltyDecision(
+        decision="disabled",
+        conflicts=(),
+        reason="Agent topic novelty checking is disabled",
+        novelty_basis="",
+        suggested_action="continue",
     )
 
 
@@ -403,7 +427,7 @@ async def save_agent_draft_with_novelty_check(
     judge: NoveltyJudge = judge_novelty_with_model,
     now: datetime | None = None,
 ) -> dict:
-    """Authoritatively check novelty and persist one Agent draft and claim."""
+    """Check novelty when enabled and persist one Agent draft and claim."""
     if identity.mode == "chat":
         if identity.session_id is None or identity.session_id <= 0:
             raise ValueError("Chat Agent session identity is required")
@@ -420,13 +444,20 @@ async def save_agent_draft_with_novelty_check(
     normalized_content = str(content or "").strip()
     if not normalized_content:
         raise ValueError("content is required")
+    novelty_enabled = agent_topic_novelty_enabled()
     extraction_failed = False
-    try:
-        candidate = normalize_candidate(
-            await extract_candidate(normalized_title, normalized_content)
-        )
-    except Exception:
-        extraction_failed = True
+    if novelty_enabled:
+        try:
+            candidate = normalize_candidate(
+                await extract_candidate(normalized_title, normalized_content)
+            )
+        except Exception:
+            extraction_failed = True
+            candidate = NoveltyCandidate(
+                topic=normalized_title,
+                core_claim=normalized_content[:1_000],
+            )
+    else:
         candidate = NoveltyCandidate(
             topic=normalized_title,
             core_claim=normalized_content[:1_000],
@@ -442,16 +473,19 @@ async def save_agent_draft_with_novelty_check(
         session.begin_nested() if session.in_transaction() else session.begin()
     )
     async with transaction:
-        await _lock_agent_topic_history(session)
-        decision = _uncertain([]) if extraction_failed else (
-            await check_content_novelty(
-                session,
-                candidate=candidate,
-                window_days=window_days,
-                judge=judge,
-                now=reference,
+        if novelty_enabled:
+            await _lock_agent_topic_history(session)
+            decision = _uncertain([]) if extraction_failed else (
+                await check_content_novelty(
+                    session,
+                    candidate=candidate,
+                    window_days=window_days,
+                    judge=judge,
+                    now=reference,
+                )
             )
-        )
+        else:
+            decision = disabled_novelty_decision()
         conflict_ids = [
             int(item["id"]) for item in decision.conflicts
             if isinstance(item.get("id"), int)
@@ -459,7 +493,7 @@ async def save_agent_draft_with_novelty_check(
         blocked = decision.decision in {"duplicate", "uncertain"}
         consumed_override: AgentNoveltyOverride | None = None
         override_error = ""
-        if override_token:
+        if novelty_enabled and override_token:
             if identity.mode != "chat":
                 override_error = (
                     "scheduled Agent cannot override novelty"
@@ -477,7 +511,7 @@ async def save_agent_draft_with_novelty_check(
                 )
                 if consumed_override is None:
                     override_error = "novelty override is invalid or expired"
-        if (blocked or override_error) and consumed_override is None:
+        if novelty_enabled and (blocked or override_error) and consumed_override is None:
             result = {"saved": False, "novelty": _decision_dict(decision)}
             if override_error:
                 result["override_error"] = override_error

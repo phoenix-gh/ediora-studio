@@ -39,7 +39,7 @@ def build_legacy_creation_prompt(rule: Mapping[str, object]) -> str:
         )
         lines.append(
             "先提出多个候选主题，并用 check_content_novelty 检查主题和核心观点；"
-            "duplicate 或 uncertain 必须换题。"
+            "启用新颖性检查时，duplicate 或 uncertain 必须换题。"
         )
     lines.append(
         '每条完成后调用 save_draft 保存到草稿箱，参数必须使用 '
