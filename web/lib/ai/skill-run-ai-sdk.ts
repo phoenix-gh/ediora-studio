@@ -107,8 +107,8 @@ export async function selectSkillForTurn({
   return { skillName: decision.skillName, activation: 'automatic' }
 }
 
-type PlanningTool = { name: string; description: string }
-type ExecutionResult = { text: string; parts: unknown[]; toolResults?: unknown[] }
+export type PlanningTool = { name: string; description: string }
+export type ExecutionResult = { text: string; parts: unknown[]; toolResults?: unknown[] }
 
 const TOOL_EVIDENCE_PROMPT_LIMIT = 64 * 1024
 const TOOL_EVIDENCE_STRING_LIMIT = 4 * 1024
@@ -149,7 +149,7 @@ function serializedToolEvidence(parts: unknown[], toolResults: unknown[]) {
   return `${new TextDecoder().decode(bytes.slice(0, TOOL_EVIDENCE_PROMPT_LIMIT))}…[truncated]`
 }
 
-type ExecuteSkillRunOptions = {
+export type PrepareSkillRunOptions = {
   skill: RegisteredSkill
   activation: SkillRunActivation
   userRequest: string
@@ -159,6 +159,22 @@ type ExecuteSkillRunOptions = {
   tools: PlanningTool[]
   plan(input: { prompt: string }): Promise<unknown>
   readReferences(paths: string[]): Promise<SkillReferenceContent[]>
+}
+
+export type PreparedSkillRun = {
+  skill: RegisteredSkill
+  activation: SkillRunActivation
+  userRequest: string
+  conversationContext: string
+  selectedContext: string
+  plan: ReturnType<typeof sanitizeSkillRunPlan>
+  run: ReturnType<typeof createSkillRun>
+  loadedReferences: SkillReferenceContent[]
+  baseExecutionPrompt: string
+}
+
+export type ExecutePreparedSkillRunOptions = {
+  prepared: PreparedSkillRun
   execute(input: {
     prompt: string
     loadedReferences: SkillReferenceContent[]
@@ -179,6 +195,11 @@ type ExecuteSkillRunOptions = {
     violations: SkillRunValidation['violations']
   }): Promise<string>
 }
+
+type ExecuteSkillRunOptions = PrepareSkillRunOptions & Omit<
+  ExecutePreparedSkillRunOptions,
+  'prepared'
+> & { prepared?: PreparedSkillRun }
 
 function hasPendingApproval(parts: unknown[]) {
   return parts.some(part => Boolean(
@@ -232,7 +253,9 @@ function finalizationPrompt(
   return `Produce the final deliverable now. The tool phase is complete: do not call tools or start new research. Use only the collected evidence below, satisfy the original output requirements, and state any material limitation when the evidence is insufficient. Return only the visible final answer for the user.\n\nOriginal execution brief:\n${basePrompt}\n\nCollected tool evidence:\n${serializedToolEvidence(parts, toolResults)}`
 }
 
-export async function executeSkillRunWithAiSdk(options: ExecuteSkillRunOptions) {
+export async function prepareSkillRunWithAiSdk(
+  options: PrepareSkillRunOptions,
+): Promise<PreparedSkillRun> {
   const rawPlan = await options.plan({
     prompt: buildSkillPlanPrompt({
       skill: options.skill,
@@ -260,6 +283,28 @@ export async function executeSkillRunWithAiSdk(options: ExecuteSkillRunOptions) 
     requirements: plan.outputRequirements,
     verification: plan.verificationCriteria,
   })
+  return {
+    skill: options.skill,
+    activation: options.activation,
+    userRequest: options.userRequest,
+    conversationContext: options.conversationContext ?? '',
+    selectedContext: options.selectedContext,
+    plan,
+    run,
+    loadedReferences,
+    baseExecutionPrompt,
+  }
+}
+
+export async function executePreparedSkillRunWithAiSdk(
+  options: ExecutePreparedSkillRunOptions,
+) {
+  const {
+    baseExecutionPrompt,
+    loadedReferences,
+    plan,
+  } = options.prepared
+  let run = options.prepared.run
   const execution = await options.execute({
     prompt: baseExecutionPrompt,
     loadedReferences,
@@ -331,6 +376,17 @@ export async function executeSkillRunWithAiSdk(options: ExecuteSkillRunOptions) 
     }),
   })
   return { kind: 'completed' as const, completed }
+}
+
+export async function executeSkillRunWithAiSdk(options: ExecuteSkillRunOptions) {
+  const prepared = options.prepared ?? await prepareSkillRunWithAiSdk(options)
+  return executePreparedSkillRunWithAiSdk({
+    prepared,
+    execute: options.execute,
+    finalize: options.finalize,
+    validate: options.validate,
+    revise: options.revise,
+  })
 }
 
 type SkillRunExecutionResult = Awaited<ReturnType<typeof executeSkillRunWithAiSdk>>

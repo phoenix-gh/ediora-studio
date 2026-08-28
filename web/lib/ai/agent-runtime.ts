@@ -9,6 +9,7 @@ import {
 } from './global-chat-tools'
 import {
   buildAgentCapabilitySnapshot,
+  capabilitySnapshotDrift,
   type AgentCapabilitySnapshot,
   type AgentRuntimeMode,
   type SkillCapabilityInput,
@@ -30,7 +31,12 @@ import {
   goalCompletionInstructions,
   goalCompletionSelfAuditMessage,
 } from './agent-goal-completion'
-import { executeSkillRunWithAiSdk, selectSkillForTurn } from './skill-run-ai-sdk'
+import {
+  executeSkillRunWithAiSdk,
+  prepareSkillRunWithAiSdk,
+  selectSkillForTurn,
+  type PreparedSkillRun,
+} from './skill-run-ai-sdk'
 import { modelErrorEvidenceFromUnknown } from './model-error-evidence'
 import { withModelHttpAuditContext } from './model-http-audit'
 import {
@@ -129,6 +135,28 @@ export type AgentRunRequest = {
   onStep?: (checkpoint: AgentStepCheckpoint) => void | Promise<void>
 }
 
+export type AgentPrepareRequest = {
+  objective: string
+  conversationContext?: string
+  selectedContext?: string
+  onStep?: AgentRunRequest['onStep']
+}
+
+export type AgentPreparedRun = {
+  selectedSkill?: {
+    name: string
+    version: string
+    digest: string
+    activation: SkillRunActivation
+  }
+  skillRun?: PreparedSkillRun
+  capabilitySnapshot: AgentCapabilitySnapshot
+}
+
+export type AgentExecutePreparedRequest = AgentRunRequest & {
+  prepared: AgentPreparedRun
+}
+
 export type AgentRunResult = {
   kind: 'completed' | 'approval'
   text: string
@@ -157,6 +185,8 @@ export type AgentRuntime = {
   readonly catalogContext: string
   readonly selectedSkill: AgentSelectedSkill | undefined
   prepare(objective: string, conversationContext?: string): Promise<AgentSelectedSkill | undefined>
+  prepareRun(request: AgentPrepareRequest): Promise<AgentPreparedRun>
+  executePrepared(request: AgentExecutePreparedRequest): Promise<AgentRunResult>
   run(request: AgentRunRequest): Promise<AgentRunResult>
   snapshot: ChatSkillRuntime['snapshot']
   activeContext: ChatSkillRuntime['activeContext']
@@ -566,7 +596,77 @@ export async function openAgentRuntime(
     return selected
   }
 
-  async function run(request: AgentRunRequest): Promise<AgentRunResult> {
+  async function prepareRun(request: AgentPrepareRequest): Promise<AgentPreparedRun> {
+    const active = await prepare(request.objective, request.conversationContext)
+    if (!active) {
+      return { capabilitySnapshot: capabilitySnapshot() }
+    }
+    const activeReferences = registry.activeContext()?.references ?? []
+    const availablePlanningTools = planningTools(runtimeTools())
+    const planCatalogs = {
+      referencePaths: activeReferences.map(reference => reference.path),
+      toolNames: availablePlanningTools.map(tool => tool.name),
+    }
+    const validPlan = (input: unknown) => {
+      const parsed = skillRunPlanInputSchema.safeParse(input)
+      if (!parsed.success) return undefined
+      try {
+        sanitizeSkillRunPlan(parsed.data, planCatalogs)
+        return parsed.data
+      } catch {
+        return undefined
+      }
+    }
+    const skillRun = await prepareSkillRunWithAiSdk({
+      skill: active.skill,
+      activation: active.activation,
+      userRequest: request.objective,
+      conversationContext: request.conversationContext ?? '',
+      selectedContext: request.selectedContext ?? '',
+      references: activeReferences,
+      tools: availablePlanningTools,
+      plan: async ({ prompt }) => {
+        const planned = await generateWithMessageLog(
+          { model: options.model, prompt, output: Output.json() }, 'plan',
+        )
+        let plan = validPlan(planned.output)
+        if (!plan) {
+          const repaired = await generateWithMessageLog({
+            model: options.model,
+            prompt: `${prompt}\n\nRepair the previous Skill plan. Its JSON shape or catalog usage was invalid. Every step id must be a string. requiredReferences may contain only these exact paths: ${JSON.stringify(planCatalogs.referencePaths)}. requiredTools may contain only these exact tool names: ${JSON.stringify(planCatalogs.toolNames)}. Reference loading is represented by requiredReferences, never by inventing a reference-loader tool. Remove unknown fields and return the complete repaired plan.\n\nPrevious JSON:\n${JSON.stringify(planned.output)}`,
+            output: Output.json(),
+          }, 'plan')
+          plan = validPlan(repaired.output)
+          if (!plan) throw new Error('Invalid Skill plan after repair')
+        }
+        await request.onStep?.({ phase: 'plan', detail: plan })
+        return plan
+      },
+      readReferences: async paths => {
+        const references = await registry.readReferences(paths)
+        if (paths.length > 0) await request.onStep?.({
+          phase: 'references',
+          detail: references.map(reference => ({ path: reference.path, bytes: reference.bytes })),
+        })
+        return references
+      },
+    })
+    return {
+      selectedSkill: {
+        name: active.skill.name,
+        version: active.skill.version,
+        digest: active.skill.digest,
+        activation: active.activation,
+      },
+      skillRun,
+      capabilitySnapshot: capabilitySnapshot(),
+    }
+  }
+
+  async function executeRun(
+    request: AgentRunRequest,
+    preparedSkillRun?: PreparedSkillRun,
+  ): Promise<AgentRunResult> {
     const goalRun = request.requireGoalCompletion
       ? { verify: request.verifyGoalCompletion } as {
           declaration?: AgentGoalCompletionDeclaration
@@ -821,6 +921,7 @@ export async function openAgentRuntime(
     let executionFinishReason: string | undefined
 
     const result = await executeSkillRunWithAiSdk({
+      prepared: preparedSkillRun,
       skill: active.skill,
       activation: active.activation,
       userRequest: request.objective,
@@ -959,12 +1060,43 @@ export async function openAgentRuntime(
     }
   }
 
+  async function executePrepared(
+    request: AgentExecutePreparedRequest,
+  ): Promise<AgentRunResult> {
+    const frozen = request.prepared
+    if (frozen.skillRun) {
+      const identity = frozen.selectedSkill
+      if (!identity || identity.name !== frozen.skillRun.skill.name) {
+        throw new Error('Prepared Agent Skill identity is invalid')
+      }
+      const skill = await deps.getEnabledSkill(identity.name)
+      if (!skill || skill.version !== identity.version || skill.digest !== identity.digest) {
+        throw new Error('Prepared Agent Skill contract drift detected')
+      }
+      selected = { skill, activation: identity.activation }
+      prepared = true
+      await registry.close()
+      registry = await deps.openTools(toolOptions(skill.name))
+    } else {
+      selected = undefined
+      prepared = true
+    }
+    const drift = capabilitySnapshotDrift(
+      frozen.capabilitySnapshot,
+      capabilitySnapshot(),
+    )
+    if (drift) throw new Error(`Agent capability drift detected: ${drift}`)
+    return executeRun(request, frozen.skillRun)
+  }
+
   return {
     get tools() { return runtimeTools() },
     get catalogContext() { return registry.catalogContext },
     get selectedSkill() { return selected },
     prepare,
-    run,
+    prepareRun,
+    executePrepared,
+    run: request => executeRun(request),
     snapshot: () => registry.snapshot(),
     activeContext: () => registry.activeContext(),
     capabilitySnapshot,
