@@ -12,7 +12,6 @@
     "heygen:smoke": "tsx lib/ai/digital-human-live-smoke.ts"
   },
   "dependencies": {
-    "@ai-sdk/deepseek": "^3.0.35",
     "@ai-sdk/mcp": "^2.0.16",
     "@ai-sdk/openai": "^4.0.17",
     "@base-ui/react": "^1.4.1",

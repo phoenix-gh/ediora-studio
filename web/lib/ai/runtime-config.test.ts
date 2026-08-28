@@ -1,47 +1,19 @@
 import { describe, expect, it, vi } from 'vitest'
 
 const api = vi.hoisted(() => ({
-  createDeepSeek: vi.fn(),
   createOpenAI: vi.fn(),
 }))
 
-vi.mock('@ai-sdk/deepseek', () => ({ createDeepSeek: api.createDeepSeek }))
 vi.mock('@ai-sdk/openai', () => ({ createOpenAI: api.createOpenAI }))
 
 import {
   imageModelConfigFromSettings,
   openaiProviderFromConfig,
-  textModelFromConfig,
   textModelForProvider,
   textModelConfigFromSettings,
 } from './runtime-config'
 
 describe('runtime provider configuration', () => {
-  it('routes DeepSeek chat-completion model names through the configured DeepSeek provider', () => {
-    const auditedFetch = vi.fn() as unknown as typeof fetch
-    api.createOpenAI.mockReturnValue({
-      chat: vi.fn(() => 'openai-chat-model'),
-      responses: vi.fn(() => 'openai-responses-model'),
-    })
-    api.createDeepSeek.mockReturnValue({
-      chat: vi.fn(() => 'deepseek-chat-model'),
-    })
-
-    expect(textModelFromConfig({
-      apiKey: 'settings-text-key',
-      baseURL: 'https://provider.example/v1',
-      headers: { 'X-Tenant': 'tenant-a' },
-      modelName: 'deepseek-v4-flash',
-      protocol: 'openai',
-    }, { fetch: auditedFetch })).toBe('deepseek-chat-model')
-    expect(api.createDeepSeek).toHaveBeenCalledWith({
-      apiKey: 'settings-text-key',
-      baseURL: 'https://provider.example/v1',
-      headers: { 'X-Tenant': 'tenant-a' },
-      fetch: auditedFetch,
-    })
-  })
-
   it('passes an optional audited fetch to the configured OpenAI provider', () => {
     const auditedFetch = vi.fn()
 
