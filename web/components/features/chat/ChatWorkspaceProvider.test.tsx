@@ -57,6 +57,7 @@ function approvalMessage(approved?: boolean): ChatSessionDetail['messages'][numb
   return {
     id: 70,
     role: 'assistant',
+    run_id: '00000000-0000-4000-8000-000000000001',
     parts: [{
       type: 'dynamic-tool',
       toolCallId: 'call-approval',
@@ -94,10 +95,10 @@ describe('ChatWorkspaceProvider', () => {
       <ChatMessageView
         key={message.id}
         message={message}
-        onApproval={(messageId, toolCallId, approvalId, approved) => {
+        onApproval={(runId, toolCallId, approvalId, approved) => {
           void current.respondToApproval({
             sessionId: 7,
-            messageId,
+            runId,
             toolCallId,
             approvalId,
             approved,
@@ -215,9 +216,47 @@ describe('ChatWorkspaceProvider', () => {
     expect(screen.queryByRole('button', { name: '批准' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '拒绝' })).not.toBeInTheDocument()
     expect(screen.getByText(status)).toBeInTheDocument()
+    expect(current.messages).toHaveLength(1)
+    expect(api.streamChatReply).toHaveBeenCalledWith(expect.objectContaining({
+      messages: [],
+      approval: {
+        runId: '00000000-0000-4000-8000-000000000001',
+        toolCallId: 'call-approval',
+        approvalId: 'approval-1',
+        approved,
+      },
+    }))
+    expect(api.streamChatReply.mock.calls[0][0]).not.toHaveProperty('skillName')
+    expect(api.streamChatReply.mock.calls[0][0]).not.toHaveProperty('draftId')
 
     act(() => resolveStream())
     await waitFor(() => expect(current.isActiveRunning).toBe(false))
+  })
+
+  it('patches approval continuation events onto the same assistant projection', async () => {
+    const user = userEvent.setup()
+    api.getChatSession
+      .mockResolvedValueOnce(detail(session7, false, [approvalMessage()]))
+      .mockResolvedValueOnce(detail(session7, false, [{
+        ...approvalMessage(true),
+        parts: [{ type: 'text', text: '已保存' }],
+        text: '已保存',
+      }]))
+    api.streamChatReply.mockImplementation(async ({ onEvent }: { onEvent: (event: UIMessageStreamEvent) => void }) => {
+      onEvent({
+        type: 'data-chat-run',
+        data: { runId: '00000000-0000-4000-8000-000000000001', status: 'resuming' },
+      })
+      onEvent({ type: 'text-delta', id: 'run-text', delta: '继续执行' })
+    })
+    render(<ChatWorkspaceProvider><ApprovalProbe /></ChatWorkspaceProvider>)
+    await act(async () => { await current.openSession(7) })
+
+    await user.click(screen.getByRole('button', { name: '批准' }))
+
+    await waitFor(() => expect(api.streamChatReply).toHaveBeenCalledTimes(1))
+    expect(current.messages).toHaveLength(1)
+    await waitFor(() => expect(current.messages[0].text).toBe('已保存'))
   })
 
   it('reloads the authoritative approval state when approval continuation fails', async () => {

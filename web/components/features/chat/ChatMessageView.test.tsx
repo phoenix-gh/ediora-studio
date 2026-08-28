@@ -18,6 +18,10 @@ function assistantMessage(parts: ChatPart[], id: number | string = 12): DisplayM
   }
 }
 
+function durableAssistantMessage(parts: ChatPart[], id: number | string = 12): DisplayMessage {
+  return { ...assistantMessage(parts, id), run_id: '00000000-0000-4000-8000-000000000001' }
+}
+
 describe('ChatMessageView', () => {
   it('shows live reasoning expanded and keeps completed reasoning collapsed', () => {
     const view = render(<ChatMessageView message={assistantMessage([{
@@ -120,7 +124,7 @@ describe('ChatMessageView', () => {
 
     render(
       <ChatMessageView
-        message={assistantMessage([{
+        message={durableAssistantMessage([{
           type: 'tool-event',
           toolCallId: 'call-1',
           toolName: 'searchInformationSources',
@@ -132,7 +136,9 @@ describe('ChatMessageView', () => {
     )
 
     await user.click(screen.getByRole('button', { name: '批准' }))
-    expect(onApproval).toHaveBeenCalledWith(12, 'call-1', 'approval-1', true)
+    expect(onApproval).toHaveBeenCalledWith(
+      '00000000-0000-4000-8000-000000000001', 'call-1', 'approval-1', true,
+    )
   })
 
   it('keeps same-named tools independent when their call ids differ', async () => {
@@ -141,7 +147,7 @@ describe('ChatMessageView', () => {
 
     render(
       <ChatMessageView
-        message={assistantMessage([
+        message={durableAssistantMessage([
           {
             type: 'tool-event',
             toolCallId: 'call-1',
@@ -165,6 +171,28 @@ describe('ChatMessageView', () => {
     expect(approvals).toHaveLength(2)
     await user.click(approvals[1])
 
-    expect(onApproval).toHaveBeenCalledWith(12, 'call-2', 'approval-2', true)
+    expect(onApproval).toHaveBeenCalledWith(
+      '00000000-0000-4000-8000-000000000001', 'call-2', 'approval-2', true,
+    )
+  })
+
+  it('disables legacy approvals that have no durable run', () => {
+    render(<ChatMessageView message={assistantMessage([{
+      type: 'tool-event', toolCallId: 'legacy-call', toolName: 'save_draft',
+      state: 'approval-requested', approval: { id: 'legacy-approval' },
+    }])} onApproval={vi.fn()} />)
+
+    expect(screen.queryByRole('button', { name: '批准' })).not.toBeInTheDocument()
+    expect(screen.getByText('该任务需要重新开始')).toBeInTheDocument()
+  })
+
+  it('links a persisted draft artifact from the assistant projection', () => {
+    render(<ChatMessageView message={durableAssistantMessage([{
+      type: 'data-artifact', data: {
+        kind: 'draft', id: 862, title: '已保存草稿', url: '/drafts?draft=862',
+      },
+    }])} />)
+
+    expect(screen.getByRole('link', { name: /已保存草稿/ })).toHaveAttribute('href', '/drafts?draft=862')
   })
 })

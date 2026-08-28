@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { ChevronDown, Loader2, Wrench } from 'lucide-react'
+import { ChevronDown, FileText, Loader2, Wrench } from 'lucide-react'
 
 import { ChatMarkdown } from '@/components/features/chat/ChatMarkdown'
 import { ChatPipelineCard } from '@/components/features/chat/ChatPipelineCard'
@@ -36,7 +36,7 @@ const toolLabels: Record<string, string> = {
 }
 
 export type ChatApprovalHandler = (
-  messageId: number,
+  runId: string,
   toolCallId: string,
   approvalId: string,
   approved: boolean,
@@ -160,9 +160,11 @@ function ImageJobPreview({ jobId }: { jobId: number }) {
 
 function ToolActivityGroup({
   parts,
+  runId,
   onApproval,
 }: {
   parts: ToolEventPart[]
+  runId?: string
   onApproval?: (toolCallId: string, approvalId: string, approved: boolean) => void
 }) {
   const imageUrls = [...new Set(parts.flatMap(generatedImageUrls))]
@@ -193,7 +195,7 @@ function ToolActivityGroup({
                 className="flex flex-wrap items-center justify-between gap-3"
               >
                 <span>{label}</span>
-                {pending && onApproval ? (
+                {pending && onApproval && runId ? (
                   <span className="flex items-center gap-1">
                     <Button
                       type="button"
@@ -211,6 +213,8 @@ function ToolActivityGroup({
                       拒绝
                     </Button>
                   </span>
+                ) : pending && !runId ? (
+                  <span className="text-amber-700 dark:text-amber-300">该任务需要重新开始</span>
                 ) : (
                   <span className="text-indigo-500">{status}</span>
                 )}
@@ -222,6 +226,21 @@ function ToolActivityGroup({
       {imageUrls.length > 0 ? <GeneratedImagePreview urls={imageUrls} /> : null}
       {imageJobIds.map(jobId => <ImageJobPreview key={jobId} jobId={jobId} />)}
     </div>
+  )
+}
+
+function DraftArtifactCard({ part }: { part: ChatPart }) {
+  const data = part.data && typeof part.data === 'object' && !Array.isArray(part.data)
+    ? part.data as Record<string, unknown>
+    : undefined
+  if (data?.kind !== 'draft' || typeof data.id !== 'number') return null
+  const href = typeof data.url === 'string' ? data.url : `/drafts?draft=${data.id}`
+  const title = typeof data.title === 'string' && data.title ? data.title : `草稿 #${data.id}`
+  return (
+    <a href={href} className="flex items-center gap-3 rounded-lg border border-emerald-200 bg-emerald-50/70 px-3 py-3 text-sm text-emerald-950 hover:bg-emerald-50 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-100">
+      <FileText className="h-4 w-4 shrink-0" />
+      <span className="min-w-0 flex-1"><span className="block font-medium">{title}</span><span className="text-xs opacity-70">草稿已保存，点击查看</span></span>
+    </a>
   )
 }
 
@@ -302,9 +321,12 @@ export function ChatMessageView({
   const statusParts = message.parts.filter(part => part.type === 'chat-status') as ChatStatusPart[]
   const userContentParts = message.parts.filter(part => part.type === 'text' || isSkillInvocationPart(part))
   const toolParts = message.parts.filter(isChatToolPart) as ToolEventPart[]
+  const artifactParts = message.parts.filter(part => part.type === 'data-artifact')
   const pipelineId = message.parts.map(pipelineJobId).find((id): id is number => id !== null)
   const fallbackText = textParts.length === 0 && message.text ? message.text : ''
-  const persistedMessageId = typeof message.id === 'number' ? message.id : undefined
+  const runId = message.run_id
+    ?? toolParts.map(part => part.runId).find((value): value is string => typeof value === 'string')
+    ?? undefined
 
   if (message.role === 'tool') return null
 
@@ -356,11 +378,15 @@ export function ChatMessageView({
         {toolParts.length > 0 && (
           <ToolActivityGroup
             parts={toolParts}
-            onApproval={persistedMessageId
-              ? (toolCallId, approvalId, approved) => onApproval?.(persistedMessageId, toolCallId, approvalId, approved)
+            runId={runId}
+            onApproval={onApproval
+              ? (toolCallId, approvalId, approved) => runId && onApproval(runId, toolCallId, approvalId, approved)
               : undefined}
           />
         )}
+        {!isUser && artifactParts.map((part, index) => (
+          <DraftArtifactCard key={String((part.data as Record<string, unknown> | undefined)?.id ?? index)} part={part} />
+        ))}
         {pipelineId !== undefined && <PipelineJobMessage jobId={pipelineId} onTerminal={onPipelineTerminal} />}
         <time className={cn('block px-1 text-[11px] text-foreground-subtle', isUser && 'text-right')}>
           {displayTime(message.created_at)}

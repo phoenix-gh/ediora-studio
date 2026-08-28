@@ -65,16 +65,7 @@ export type DurableChatToolApproval = {
   approved: boolean
   reason?: string
 }
-
-/** @deprecated Display-only compatibility until legacy approval controls are disabled. */
-export type LegacyChatToolApproval = {
-  messageId: number
-  toolCallId: string
-  approvalId: string
-  approved: boolean
-}
-
-export type ChatToolApproval = DurableChatToolApproval | LegacyChatToolApproval
+export type ChatToolApproval = DurableChatToolApproval
 
 export type UIChatMessage = {
   id: string

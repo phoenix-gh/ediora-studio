@@ -129,11 +129,11 @@ export function ChatWorkspace({ variant, onClose, onOpenFullChat, onResetSize, o
     }
   }
 
-  function handleApproval(messageId: number, toolCallId: string, approvalId: string, approved: boolean) {
+  function handleApproval(runId: string, toolCallId: string, approvalId: string, approved: boolean) {
     if (activeSessionId === null) return
     void respondToApproval({
       sessionId: activeSessionId,
-      messageId,
+      runId,
       toolCallId,
       approvalId,
       approved,
