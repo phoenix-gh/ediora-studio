@@ -60,4 +60,26 @@ describe('Chat Run projection', () => {
       type: 'data-chat-run-error', data: { message: 'summary failed' },
     }))
   })
+
+  it('projects a saved draft artifact from an MCP text envelope', () => {
+    const completed: ChatRunCheckpoint = {
+      run: { ...checkpoint.run, status: 'completed' },
+      steps: [{ ...checkpoint.steps[0], status: 'completed' }],
+      tool_calls: [{
+        ...checkpoint.tool_calls[0], status: 'succeeded',
+        output_data: {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({ saved: true, id: 863, title: 'durable draft' }),
+          }],
+          isError: false,
+        },
+      }],
+    }
+
+    expect(projectChatRun(completed).parts).toContainEqual({
+      type: 'data-artifact',
+      data: { kind: 'draft', id: 863, title: 'durable draft', url: '/drafts?draft=863' },
+    })
+  })
 })

@@ -26,6 +26,7 @@ import {
   type ChatSession,
   type ChatSkill,
   type SubmittedSkillInvocation,
+  type UIMessageStreamEvent,
 } from '@/lib/api/chat'
 import { ApiError } from '@/lib/api/client'
 import { publishDraftArtifact } from '@/lib/events/draft-artifacts'

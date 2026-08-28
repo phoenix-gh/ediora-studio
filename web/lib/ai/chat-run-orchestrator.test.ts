@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 
 import { createChatRunOrchestrator } from './chat-run-orchestrator'
+import type { AgentPreparedRun } from './agent-runtime'
 import type { ChatRunCheckpoint, ChatRunRecord } from './chat-run-types'
 
 const run = (status: ChatRunRecord['status'], version: number): ChatRunRecord => ({
@@ -29,7 +30,7 @@ const pendingCheckpoint = (status: ChatRunRecord['status'] = 'waiting_approval')
   }],
 })
 
-function preparedRun() {
+function preparedRun(): AgentPreparedRun {
   return {
     selectedSkill: { name: 'writing-plan', version: '1', digest: 'b'.repeat(64), activation: 'manual' as const },
     skillRun: {
@@ -38,7 +39,7 @@ function preparedRun() {
       loadedReferences: [], baseExecutionPrompt: 'execute frozen plan',
     },
     capabilitySnapshot: { schemaVersion: 1, mode: 'chat', skill: null, tools: [], policy: { approvalPolicy: 'interactive', allowedToolNames: null } },
-  }
+  } as unknown as AgentPreparedRun
 }
 
 describe('durable Chat Run orchestrator', () => {
@@ -49,13 +50,20 @@ describe('durable Chat Run orchestrator', () => {
       executePrepared: vi.fn().mockResolvedValue({
         kind: 'approval', text: '', revisionCount: 0,
         assistantContent: [
-          { type: 'reasoning', text: 'thinking before save' },
+          { type: 'reasoning', text: 'research before save' },
+          { type: 'tool-call', toolCallId: 'call-read', toolName: 'fetch_url', input: { url: 'https://example.com' } },
           { type: 'tool-call', toolCallId: 'call-1', toolName: 'save_draft', input: { title: 'one' } },
         ],
-        parts: [{
-          type: 'dynamic-tool', toolName: 'save_draft', toolCallId: 'call-1',
-          state: 'approval-requested', input: { title: 'one' }, approval: { id: 'approval-1' },
-        }],
+        parts: [
+          {
+            type: 'dynamic-tool', toolName: 'fetch_url', toolCallId: 'call-read',
+            state: 'output-available', input: { url: 'https://example.com' }, output: { content: 'evidence' },
+          },
+          {
+            type: 'dynamic-tool', toolName: 'save_draft', toolCallId: 'call-1',
+            state: 'approval-requested', input: { title: 'one' }, approval: { id: 'approval-1' },
+          },
+        ],
       }),
       close: vi.fn(),
     }
@@ -84,14 +92,72 @@ describe('durable Chat Run orchestrator', () => {
     expect(persistence.appendStep).toHaveBeenCalledWith(7, 'run-1', expect.objectContaining({
       expected_version: 1,
       assistant_content: [
-        { type: 'reasoning', text: 'thinking before save' },
+        { type: 'reasoning', text: 'research before save' },
+        { type: 'tool-call', toolCallId: 'call-read', toolName: 'fetch_url', input: { url: 'https://example.com' } },
         { type: 'tool-call', toolCallId: 'call-1', toolName: 'save_draft', input: { title: 'one' } },
       ],
-      tool_calls: [expect.objectContaining({
-        tool_call_id: 'call-1', approval_id: 'approval-1', tool_name: 'save_draft',
-      })],
+      tool_calls: expect.arrayContaining([
+        expect.objectContaining({
+          tool_call_id: 'call-read', tool_name: 'fetch_url', status: 'succeeded',
+          output_data: { content: 'evidence' },
+        }),
+        expect.objectContaining({
+          tool_call_id: 'call-1', approval_id: 'approval-1', tool_name: 'save_draft',
+        }),
+      ]),
     }))
     expect(projection).toMatchObject({ runId: 'run-1', status: 'waiting_approval' })
+  })
+
+  it('checkpoints completed read calls even when runtime assistant content only contains the pending write', async () => {
+    const prepared = preparedRun()
+    const runtime = {
+      prepareRun: vi.fn().mockResolvedValue(prepared),
+      executePrepared: vi.fn().mockResolvedValue({
+        kind: 'approval', text: '', revisionCount: 0,
+        assistantContent: [
+          { type: 'tool-call', toolCallId: 'call-1', toolName: 'save_draft', input: { title: 'one' } },
+        ],
+        parts: [
+          {
+            type: 'dynamic-tool', toolName: 'check_content_novelty', toolCallId: 'call-read',
+            state: 'output-available', input: { topic: 'one' }, output: { decision: 'allow' },
+          },
+          {
+            type: 'dynamic-tool', toolName: 'save_draft', toolCallId: 'call-1',
+            state: 'approval-requested', input: { title: 'one' }, approval: { id: 'approval-1' },
+          },
+        ],
+      }),
+      close: vi.fn(),
+    }
+    const persistence = {
+      createRun: vi.fn().mockResolvedValue(run('preparing', 0)),
+      freezePreparation: vi.fn().mockResolvedValue(run('running', 1)),
+      appendStep: vi.fn().mockResolvedValue({}),
+      loadCheckpoint: vi.fn().mockResolvedValue(pendingCheckpoint()),
+      decideApproval: vi.fn(), completeToolCall: vi.fn(), transitionRun: vi.fn(),
+    }
+    const orchestrator = createChatRunOrchestrator({
+      persistence, openRuntime: vi.fn().mockResolvedValue(runtime), executeApprovedTool: vi.fn(),
+    })
+
+    await orchestrator.startRun({
+      sessionId: 7, userMessageId: 11, objective: 'write',
+      modelMessages: [{ role: 'user', content: 'write' }], maxSteps: 5,
+    })
+
+    expect(persistence.appendStep).toHaveBeenCalledWith(7, 'run-1', expect.objectContaining({
+      assistant_content: expect.arrayContaining([
+        expect.objectContaining({ type: 'tool-call', toolCallId: 'call-read' }),
+      ]),
+      tool_calls: expect.arrayContaining([
+        expect.objectContaining({
+          tool_call_id: 'call-read', tool_name: 'check_content_novelty',
+          status: 'succeeded', output_data: { decision: 'allow' },
+        }),
+      ]),
+    }))
   })
 
   it('persists the approved write result before continuing the frozen run', async () => {
@@ -147,6 +213,64 @@ describe('durable Chat Run orchestrator', () => {
     }))
   })
 
+  it('rehydrates completed checkpoint tools into the frozen Skill run before resuming', async () => {
+    const prepared = preparedRun()
+    prepared.skillRun!.run = {
+      skillName: 'writing-plan', activation: 'manual', goal: 'write',
+      steps: [{
+        id: 'save', instruction: 'save', requiredReferences: [],
+        requiredTools: ['save_draft'], status: 'pending', evidence: [],
+      }],
+      requiredReferences: [], loadedReferences: [], requiredTools: ['save_draft'],
+      toolEvidence: [], outputRequirements: [], verificationCriteria: [],
+      validation: { passed: false, violations: [] },
+    }
+    const afterResult = pendingCheckpoint('running')
+    afterResult.run.validated_plan = { agent_prepared_run: prepared } as never
+    afterResult.tool_calls[0] = {
+      ...afterResult.tool_calls[0], status: 'succeeded', output_data: { saved: true, id: 862 },
+    }
+    const completed = structuredClone(afterResult)
+    completed.run = { ...completed.run, status: 'completed', checkpoint_version: 5 }
+    const runtime = {
+      prepareRun: vi.fn(),
+      executePrepared: vi.fn().mockResolvedValue({
+        kind: 'completed', text: 'saved', parts: [{ type: 'text', text: 'saved' }], revisionCount: 0,
+      }),
+      close: vi.fn(),
+    }
+    const persistence = {
+      createRun: vi.fn(), freezePreparation: vi.fn(), appendStep: vi.fn().mockResolvedValue({}),
+      loadCheckpoint: vi.fn()
+        .mockResolvedValueOnce({
+          ...pendingCheckpoint('resuming'),
+          run: { ...pendingCheckpoint('resuming').run, validated_plan: { agent_prepared_run: prepared } },
+        })
+        .mockResolvedValueOnce(afterResult)
+        .mockResolvedValueOnce(completed)
+        .mockResolvedValueOnce(completed),
+      decideApproval: vi.fn().mockResolvedValue({ duplicate: false, decision: 'approved', run_status: 'resuming' }),
+      completeToolCall: vi.fn(), transitionRun: vi.fn().mockResolvedValue(completed.run),
+    }
+    const orchestrator = createChatRunOrchestrator({
+      persistence, openRuntime: vi.fn().mockResolvedValue(runtime),
+      executeApprovedTool: vi.fn().mockResolvedValue({ saved: true, id: 862 }),
+    })
+
+    await orchestrator.resumeRun({
+      sessionId: 7, runId: 'run-1', approvalId: 'approval-1',
+      toolCallId: 'call-1', approved: true, maxSteps: 5,
+    })
+
+    const resumedPrepared = runtime.executePrepared.mock.calls[0]?.[0]?.prepared
+    expect(resumedPrepared.skillRun.run).toMatchObject({
+      steps: [{ id: 'save', status: 'completed' }],
+      toolEvidence: [expect.objectContaining({
+        stepId: 'save', toolName: 'save_draft', toolCallId: 'call-1', state: 'succeeded',
+      })],
+    })
+  })
+
   it('terminates a rejected approval without opening a runtime or executing a tool', async () => {
     const rejected = pendingCheckpoint('completed')
     rejected.tool_calls[0] = {
@@ -171,5 +295,50 @@ describe('durable Chat Run orchestrator', () => {
     expect(openRuntime).not.toHaveBeenCalled()
     expect(executeApprovedTool).not.toHaveBeenCalled()
     expect(projection.status).toBe('completed')
+  })
+
+  it('transitions the run to failed when canonical recovery history is invalid', async () => {
+    const prepared = preparedRun()
+    const afterResult = pendingCheckpoint('running')
+    afterResult.run.validated_plan = { agent_prepared_run: prepared } as never
+    afterResult.tool_calls[0] = {
+      ...afterResult.tool_calls[0], status: 'succeeded', output_data: { saved: false },
+    }
+    afterResult.steps[0].assistant_content.push({
+      type: 'tool-call', toolCallId: 'orphan-read', toolName: 'fetch_url', input: {},
+    })
+    const failed = structuredClone(afterResult)
+    failed.run = { ...failed.run, status: 'failed', checkpoint_version: 4, error_data: { message: 'invalid history' } }
+    const persistence = {
+      createRun: vi.fn(), freezePreparation: vi.fn(), appendStep: vi.fn(),
+      loadCheckpoint: vi.fn()
+        .mockResolvedValueOnce({
+          ...pendingCheckpoint('resuming'),
+          run: { ...pendingCheckpoint('resuming').run, validated_plan: { agent_prepared_run: prepared } },
+        })
+        .mockResolvedValueOnce(afterResult)
+        .mockResolvedValueOnce(afterResult)
+        .mockResolvedValueOnce(failed),
+      decideApproval: vi.fn().mockResolvedValue({ duplicate: false, decision: 'approved' }),
+      completeToolCall: vi.fn(),
+      transitionRun: vi.fn().mockResolvedValue(failed.run),
+    }
+    const openRuntime = vi.fn()
+    const orchestrator = createChatRunOrchestrator({
+      persistence,
+      openRuntime,
+      executeApprovedTool: vi.fn().mockResolvedValue({ saved: false }),
+    })
+
+    const projection = await orchestrator.resumeRun({
+      sessionId: 7, runId: 'run-1', approvalId: 'approval-1',
+      toolCallId: 'call-1', approved: true, maxSteps: 5,
+    })
+
+    expect(openRuntime).not.toHaveBeenCalled()
+    expect(persistence.transitionRun).toHaveBeenCalledWith(7, 'run-1', expect.objectContaining({
+      status: 'failed', error_data: expect.objectContaining({ message: expect.stringContaining('orphan-read') }),
+    }))
+    expect(projection.status).toBe('failed')
   })
 })

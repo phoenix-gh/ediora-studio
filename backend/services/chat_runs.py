@@ -143,6 +143,7 @@ async def append_step(
     await db.flush()
     for call in tool_calls:
         approval_id = call.get("approval_id")
+        terminal_status = call.get("status")
         tool_call_id = str(call["tool_call_id"])
         db.add(ChatRunToolCall(
             run_id=run_id,
@@ -150,8 +151,10 @@ async def append_step(
             tool_call_id=tool_call_id,
             tool_name=str(call["tool_name"]),
             input_data=call.get("input_data") or {},
-            status="pending_approval" if approval_id else "executing",
+            status="pending_approval" if approval_id else (terminal_status or "executing"),
             approval_id=approval_id,
+            output_data=call.get("output_data") if terminal_status else None,
+            error_data=call.get("error_data") if terminal_status else None,
             side_effecting=bool(call.get("side_effecting", False)),
             replay_policy=str(call.get("replay_policy") or "never"),
             concurrency_policy=str(call.get("concurrency_policy") or "serial"),
@@ -160,6 +163,7 @@ async def append_step(
             ),
             tool_version=str(call.get("tool_version") or ""),
             contract_digest=str(call.get("contract_digest") or ""),
+            completed_at=_now() if terminal_status else None,
         ))
     run.current_step = ordinal
     run.status = "waiting_approval" if pending else "running"

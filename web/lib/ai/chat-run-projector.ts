@@ -13,9 +13,8 @@ export type ChatRunProjection = {
 
 function draftArtifact(call: ChatRunToolCallCheckpoint): PersistedArtifact | undefined {
   if (call.status !== 'succeeded' || call.tool_name !== 'save_draft') return undefined
-  const output = call.output_data
-  if (!output || typeof output !== 'object') return undefined
-  const record = output as Record<string, unknown>
+  const record = draftOutputRecord(call.output_data)
+  if (!record) return undefined
   if (record.saved !== true || typeof record.id !== 'number') return undefined
   return {
     kind: 'draft',
@@ -23,6 +22,29 @@ function draftArtifact(call: ChatRunToolCallCheckpoint): PersistedArtifact | und
     ...(typeof record.title === 'string' && record.title ? { title: record.title } : {}),
     url: `/drafts?draft=${record.id}`,
   }
+}
+
+function draftOutputRecord(output: unknown): Record<string, unknown> | undefined {
+  if (!output || typeof output !== 'object') return undefined
+  const direct = output as Record<string, unknown>
+  if (direct.saved !== undefined) return direct
+  if (direct.structuredContent && typeof direct.structuredContent === 'object') {
+    const structured = direct.structuredContent as Record<string, unknown>
+    if (structured.saved !== undefined) return structured
+  }
+  if (!Array.isArray(direct.content)) return undefined
+  for (const item of direct.content) {
+    if (!item || typeof item !== 'object') continue
+    const content = item as Record<string, unknown>
+    if (content.type !== 'text' || typeof content.text !== 'string') continue
+    try {
+      const parsed = JSON.parse(content.text) as unknown
+      if (parsed && typeof parsed === 'object') return parsed as Record<string, unknown>
+    } catch {
+      // Non-JSON MCP text is not artifact evidence.
+    }
+  }
+  return undefined
 }
 
 function errorMessage(errorData: Record<string, unknown> | null) {

@@ -3,7 +3,7 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-from sqlalchemy import delete, desc, select
+from sqlalchemy import delete, desc, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from agent_trajectory import (
@@ -211,6 +211,9 @@ class ChatRunToolCallCreate(BaseModel):
     tool_name: str = Field(min_length=1, max_length=200)
     input_data: dict = Field(default_factory=dict)
     approval_id: str | None = Field(default=None, min_length=1, max_length=200)
+    status: Literal["succeeded", "failed"] | None = None
+    output_data: Any | None = None
+    error_data: dict | None = None
     side_effecting: bool = False
     replay_policy: str = Field(default="never", max_length=32)
     concurrency_policy: str = Field(default="serial", max_length=32)
@@ -219,6 +222,14 @@ class ChatRunToolCallCreate(BaseModel):
     contract_digest: str = Field(default="", max_length=64)
 
     model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="after")
+    def validate_terminal_or_pending(self):
+        if self.approval_id is not None and self.status is not None:
+            raise ValueError("an approval call cannot already have a terminal result")
+        if self.status == "failed" and self.error_data is None and self.output_data is None:
+            raise ValueError("a failed tool call requires error_data or output_data")
+        return self
 
 
 class ChatRunStepCreate(BaseModel):
@@ -628,6 +639,12 @@ async def delete_session(session_id: int, db: AsyncSession = Depends(get_db)):
     session = await db.get(ChatSession, session_id)
     if not session:
         raise HTTPException(404, "会话不存在")
+    await db.execute(
+        update(ChatMessage)
+        .where(ChatMessage.session_id == session_id)
+        .values(run_id=None)
+    )
+    await db.execute(delete(ChatRun).where(ChatRun.session_id == session_id))
     await db.execute(delete(ChatMessage).where(ChatMessage.session_id == session_id))
     await db.delete(session)
     await db.commit()

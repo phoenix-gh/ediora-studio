@@ -254,8 +254,18 @@ def test_internal_chat_run_api_persists_checkpoint_and_approval(client):
         headers=headers,
         json={
             "expected_version": 1,
-            "assistant_content": [{"type": "reasoning", "text": "save"}],
+            "assistant_content": [
+                {"type": "reasoning", "text": "research then save"},
+                {"type": "tool-call", "toolCallId": "call-read", "toolName": "fetch_url", "input": {"url": "https://example.com"}},
+                {"type": "tool-call", "toolCallId": "call-1", "toolName": "save_draft", "input": {"title": "draft"}},
+            ],
             "tool_calls": [{
+                "tool_call_id": "call-read",
+                "tool_name": "fetch_url",
+                "input_data": {"url": "https://example.com"},
+                "status": "succeeded",
+                "output_data": {"content": "evidence"},
+            }, {
                 "tool_call_id": "call-1",
                 "tool_name": "save_draft",
                 "input_data": {"title": "draft"},
@@ -272,7 +282,10 @@ def test_internal_chat_run_api_persists_checkpoint_and_approval(client):
     )
     assert checkpoint.status_code == 200
     assert checkpoint.json()["run"]["skill_invocation"]["name"] == "writing-plan"
-    assert checkpoint.json()["tool_calls"][0]["input_data"] == {"title": "draft"}
+    calls = {call["tool_call_id"]: call for call in checkpoint.json()["tool_calls"]}
+    assert calls["call-read"]["status"] == "succeeded"
+    assert calls["call-read"]["output_data"] == {"content": "evidence"}
+    assert calls["call-1"]["input_data"] == {"title": "draft"}
 
     approved = client.post(
         f"/api/chat/sessions/{session_id}/runs/{run_id}/approvals/approval-1",
@@ -404,6 +417,26 @@ def test_delete_session_removes_its_messages(client):
     assert deleted.status_code == 204
     assert client.get(f"/api/chat/sessions/{session_id}").status_code == 404
     assert client.get("/api/chat/sessions").json() == []
+
+
+def test_delete_session_removes_durable_chat_runs_before_their_messages(client):
+    session_id = client.post("/api/chat/sessions", json={"title": "checkpoint"}).json()["id"]
+    user_message_id = client.post(
+        f"/api/chat/sessions/{session_id}/messages",
+        json={"role": "user", "parts": [{"type": "text", "text": "write"}], "text": "write"},
+    ).json()["id"]
+    headers = {"X-Worker-Token": "test-worker-token-at-least-32-characters"}
+    created_run = client.post(
+        f"/api/chat/sessions/{session_id}/runs",
+        json={"user_message_id": user_message_id, "objective": "write"},
+        headers=headers,
+    )
+    assert created_run.status_code == 201
+
+    deleted = client.delete(f"/api/chat/sessions/{session_id}")
+
+    assert deleted.status_code == 204
+    assert client.get(f"/api/chat/sessions/{session_id}").status_code == 404
 
 
 def test_delete_missing_session_returns_404(client):

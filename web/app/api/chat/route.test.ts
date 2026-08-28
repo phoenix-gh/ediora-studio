@@ -21,6 +21,7 @@ import {
   directSkillParameterContext,
   durableApprovalPayload,
   durableChatRunsEnabled,
+  canonicalTurnEndReasonForChatRun,
   executionToolsForSelection,
   genericSkillRuntimeEnabled,
   skillAwareStepPolicy,
@@ -29,6 +30,13 @@ import {
 } from './route'
 
 describe('Chat Agent log event mapping', () => {
+  it('maps durable run statuses to the strict canonical turn/end reason', () => {
+    expect(canonicalTurnEndReasonForChatRun('waiting_approval')).toEqual({ kind: 'waiting_approval' })
+    expect(canonicalTurnEndReasonForChatRun('completed')).toEqual({ kind: 'completed' })
+    expect(canonicalTurnEndReasonForChatRun('failed')).toEqual({ kind: 'error' })
+    expect(canonicalTurnEndReasonForChatRun('needs_reconciliation')).toEqual({ kind: 'error' })
+  })
+
   it('uses durable Chat Runs by default and keeps approval input identity-only', () => {
     const previous = process.env.DURABLE_CHAT_RUNS
     delete process.env.DURABLE_CHAT_RUNS

@@ -218,6 +218,16 @@ export function durableChatRunsEnabled() {
   return process.env.DURABLE_CHAT_RUNS !== '0'
 }
 
+export function canonicalTurnEndReasonForChatRun(status: ChatRunProjection['status']) {
+  return {
+    kind: status === 'waiting_approval'
+      ? 'waiting_approval'
+      : status === 'completed'
+        ? 'completed'
+        : 'error',
+  }
+}
+
 export function durableApprovalPayload(approval: {
   runId: string
   approvalId: string
@@ -1007,7 +1017,7 @@ export async function POST(request: NextRequest) {
                 ? { phase: 'answer', state: 'complete', label: '已完成', detail: '任务已完成' }
                 : { phase: 'thinking', state: 'error', label: '处理失败', detail: '任务状态已持久化，可查看错误详情' },
           })
-          await finishCanonicalTurn({ kind: projection.status, runId: projection.runId })
+          await finishCanonicalTurn(canonicalTurnEndReasonForChatRun(projection.status))
           await persistChatAgentLogEvent(chatSessionEvent(logContext, {
             event_type: 'session/turn-end', phase: 'chat',
             status: projection.status,

@@ -1,4 +1,4 @@
-import type { ModelMessage } from 'ai'
+import type { JSONValue, ModelMessage, ToolResultPart } from 'ai'
 
 import type {
   ChatRunCheckpoint,
@@ -28,11 +28,23 @@ function assistantToolCalls(content: Array<Record<string, unknown>>) {
   })
 }
 
-function resultOutput(call: ChatRunToolCallCheckpoint) {
-  if (call.status === 'failed' && call.output_data == null) {
-    return { error: call.error_data ?? { code: 'tool_execution_failed' } }
+function resultOutput(call: ChatRunToolCallCheckpoint): ToolResultPart['output'] {
+  if (call.status === 'rejected') {
+    const denied = call.output_data && typeof call.output_data === 'object' && !Array.isArray(call.output_data)
+      ? call.output_data as Record<string, unknown>
+      : undefined
+    return {
+      type: 'execution-denied',
+      ...(typeof denied?.reason === 'string' ? { reason: denied.reason } : {}),
+    }
   }
-  return call.output_data
+  if (call.status === 'failed') {
+    return {
+      type: 'error-json',
+      value: (call.output_data ?? call.error_data ?? { code: 'tool_execution_failed' }) as JSONValue,
+    }
+  }
+  return { type: 'json', value: call.output_data as JSONValue }
 }
 
 export function validateCanonicalToolHistory(checkpoint: ChatRunCheckpoint): void {

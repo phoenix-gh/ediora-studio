@@ -1,3 +1,4 @@
+import { modelMessageSchema } from 'ai'
 import { describe, expect, it } from 'vitest'
 
 import { buildCanonicalModelMessages, ChatRunHistoryError } from './chat-run-history'
@@ -33,16 +34,19 @@ function checkpoint(overrides: Partial<ChatRunCheckpoint> = {}): ChatRunCheckpoi
 
 describe('canonical Chat Run model history', () => {
   it('keeps reasoning with its assistant tool call and emits the matching result next', () => {
-    expect(buildCanonicalModelMessages(checkpoint())).toEqual([
+    const messages = buildCanonicalModelMessages(checkpoint())
+    expect(messages).toEqual([
       { role: 'user', content: 'write' },
       { role: 'assistant', content: [
         { type: 'reasoning', text: 'need to save' },
         { type: 'tool-call', toolCallId: 'call-1', toolName: 'save_draft', input: { title: 'one' } },
       ] },
       { role: 'tool', content: [{
-        type: 'tool-result', toolCallId: 'call-1', toolName: 'save_draft', output: { saved: true, id: 862 },
+        type: 'tool-result', toolCallId: 'call-1', toolName: 'save_draft',
+        output: { type: 'json', value: { saved: true, id: 862 } },
       }] },
     ])
+    expect(messages.every(message => modelMessageSchema.safeParse(message).success)).toBe(true)
   })
 
   it('reconstructs both save attempts from the session 107 sequence', () => {
@@ -69,8 +73,9 @@ describe('canonical Chat Run model history', () => {
     const messages = buildCanonicalModelMessages(value)
 
     expect(messages).toHaveLength(5)
-    expect(messages[2]).toMatchObject({ role: 'tool', content: [{ toolCallId: 'call-first', output: { saved: false } }] })
-    expect(messages[4]).toMatchObject({ role: 'tool', content: [{ toolCallId: 'call-second', output: { saved: true, id: 862 } }] })
+    expect(messages[2]).toMatchObject({ role: 'tool', content: [{ toolCallId: 'call-first', output: { type: 'json', value: { saved: false } } }] })
+    expect(messages[4]).toMatchObject({ role: 'tool', content: [{ toolCallId: 'call-second', output: { type: 'json', value: { saved: true, id: 862 } } }] })
+    expect(messages.every(message => modelMessageSchema.safeParse(message).success)).toBe(true)
   })
 
   it('rejects a completed tool call without a result before provider execution', () => {
@@ -121,7 +126,8 @@ describe('canonical Chat Run model history', () => {
 
     expect(buildCanonicalModelMessages(value)[2]).toEqual({
       role: 'tool', content: [{
-        type: 'tool-result', toolCallId: 'call-1', toolName: 'save_draft', output: denied,
+        type: 'tool-result', toolCallId: 'call-1', toolName: 'save_draft',
+        output: { type: 'execution-denied', reason: 'not now' },
       }],
     })
   })
