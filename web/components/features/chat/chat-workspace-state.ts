@@ -141,6 +141,31 @@ export function approvalResumeMessage() {
   return makeLocalMessage('assistant', [initialChatStatusPart()])
 }
 
+export function applyApprovalDecision(
+  messages: DisplayMessage[],
+  decision: { messageId: number; toolCallId: string; approvalId: string; approved: boolean },
+) {
+  return messages.map(message => message.id !== decision.messageId
+    ? message
+    : {
+        ...message,
+        parts: message.parts.map(part => {
+          const approval = part.approval && typeof part.approval === 'object'
+            ? part.approval as Record<string, unknown>
+            : undefined
+          if (
+            part.toolCallId !== decision.toolCallId
+            || approval?.id !== decision.approvalId
+          ) return part
+          return {
+            ...part,
+            state: 'approval-responded',
+            approval: { ...approval, approved: decision.approved },
+          }
+        }),
+      })
+}
+
 export function applyChatStreamEvent(
   messages: DisplayMessage[],
   assistantMessageId: string,
