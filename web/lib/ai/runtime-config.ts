@@ -1,3 +1,4 @@
+import { createDeepSeek } from '@ai-sdk/deepseek'
 import { createOpenAI } from '@ai-sdk/openai'
 
 import type { LLMAdapterProtocol } from '@/lib/api/settings'
@@ -60,13 +61,26 @@ export function imageModelConfigFromSettings(
 export function openaiProviderFromConfig(config: Pick<
   TextModelConfig,
   'apiKey' | 'baseURL' | 'headers'
->, options: { fetch?: typeof globalThis.fetch } = {}) {
-  return createOpenAI({
+> & Partial<Pick<TextModelConfig, 'modelName' | 'protocol'>>,
+options: { fetch?: typeof globalThis.fetch } = {},
+) {
+  const providerOptions = {
     apiKey: config.apiKey,
     baseURL: config.baseURL,
     headers: config.headers,
     ...(options.fetch ? { fetch: options.fetch } : {}),
-  })
+  }
+  if (
+    config.protocol !== 'openai-responses'
+    && /^deepseek(?:[-/]|$)/i.test(config.modelName ?? '')
+  ) {
+    const deepseek = createDeepSeek(providerOptions)
+    return {
+      chat: (modelName: string) => deepseek.chat(modelName),
+      responses: (modelName: string) => createOpenAI(providerOptions).responses(modelName),
+    }
+  }
+  return createOpenAI(providerOptions)
 }
 
 export function textModelForProvider<T>(
@@ -82,9 +96,12 @@ export function textModelForProvider<T>(
     : provider.chat(modelName)
 }
 
-export function textModelFromConfig(config: TextModelConfig) {
+export function textModelFromConfig(
+  config: TextModelConfig,
+  options: { fetch?: typeof globalThis.fetch } = {},
+) {
   return textModelForProvider(
-    openaiProviderFromConfig(config),
+    openaiProviderFromConfig(config, options),
     config.modelName,
     config.protocol,
   )
