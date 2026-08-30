@@ -1,4 +1,9 @@
+import type { LanguageModelMiddleware } from 'ai'
+
 type JsonRecord = Record<string, unknown>
+
+const reasoningOpeningTag = '<think>'
+const reasoningClosingTag = '</think>'
 
 function record(value: unknown): JsonRecord | undefined {
   return value && typeof value === 'object' && !Array.isArray(value)
@@ -28,8 +33,49 @@ function observeJsonResponse(
   payload: JsonRecord | undefined,
   remember: (id: string, reasoning: string) => void,
 ) {
+  let changed = false
   const choices = payload && Array.isArray(payload.choices) ? payload.choices : []
-  for (const value of choices) observeMessage(record(record(value)?.message), remember)
+  for (const value of choices) {
+    const message = record(record(value)?.message)
+    observeMessage(message, remember)
+    if (typeof message?.reasoning_content !== 'string') continue
+    message.content = `${reasoningOpeningTag}${message.reasoning_content}${reasoningClosingTag}${typeof message.content === 'string' ? message.content : ''}`
+    delete message.reasoning_content
+    changed = true
+  }
+  return changed
+}
+
+function taggedReasoning(content: string) {
+  const regexp = /<think>([\s\S]*?)<\/think>/g
+  const matches = Array.from(content.matchAll(regexp))
+  if (!matches.length) return undefined
+  return {
+    reasoning: matches.map(match => match[1]).join('\n'),
+    content: content.replace(regexp, ''),
+  }
+}
+
+/** Keep persisted AI SDK reasoning parts available to the DeepSeek HTTP adapter. */
+export function deepSeekReasoningPersistenceMiddleware(): LanguageModelMiddleware {
+  return {
+    specificationVersion: 'v4',
+    transformParams: async ({ params }) => ({
+      ...params,
+      prompt: params.prompt.map(message => message.role !== 'assistant'
+        ? message
+        : {
+            ...message,
+            content: message.content.flatMap(part => part.type === 'reasoning'
+              ? [{
+                  type: 'text' as const,
+                  text: `${reasoningOpeningTag}${part.text}${reasoningClosingTag}`,
+                  providerOptions: part.providerOptions,
+                }]
+              : [part]),
+          }),
+    }),
+  }
 }
 
 function observedEventStream(
@@ -38,29 +84,49 @@ function observedEventStream(
 ): Response {
   if (!response.body) return response
   const decoder = new TextDecoder()
+  const encoder = new TextEncoder()
   let buffer = ''
   let reasoning = ''
   const toolCallIdsByIndex = new Map<number, string>()
+  const reasoningOpenByChoice = new Set<number>()
 
-  const observeLine = (line: string) => {
-    if (!line.startsWith('data:')) return
+  const transformLine = (line: string) => {
+    if (!line.startsWith('data:')) return line
     const data = line.slice(5).trim()
-    if (!data || data === '[DONE]') return
+    if (!data || data === '[DONE]') return line
     try {
       const payload = record(JSON.parse(data))
       const choices = payload && Array.isArray(payload.choices) ? payload.choices : []
       for (const value of choices) {
-        const delta = record(record(value)?.delta)
-        if (typeof delta?.reasoning_content === 'string') reasoning += delta.reasoning_content
-        if (!Array.isArray(delta?.tool_calls)) continue
+        const choice = record(value)
+        const delta = record(choice?.delta)
+        if (!delta) continue
+        const choiceIndex = typeof choice?.index === 'number' ? choice.index : 0
+        const nativeReasoning = delta.reasoning_content
+        if (typeof nativeReasoning === 'string') {
+          reasoning += nativeReasoning
+          delta.content = `${reasoningOpenByChoice.has(choiceIndex) ? '' : reasoningOpeningTag}${nativeReasoning}${typeof delta.content === 'string' ? delta.content : ''}`
+          delete delta.reasoning_content
+          reasoningOpenByChoice.add(choiceIndex)
+        } else if (reasoningOpenByChoice.has(choiceIndex) && (
+          typeof delta.content === 'string'
+          || Array.isArray(delta.tool_calls)
+          || choice?.finish_reason != null
+        )) {
+          delta.content = `${reasoningClosingTag}${typeof delta.content === 'string' ? delta.content : ''}`
+          reasoningOpenByChoice.delete(choiceIndex)
+        }
+        if (!Array.isArray(delta.tool_calls)) continue
         for (const callValue of delta.tool_calls) {
           const call = record(callValue)
           if (typeof call?.index !== 'number' || typeof call.id !== 'string') continue
           toolCallIdsByIndex.set(call.index, `${toolCallIdsByIndex.get(call.index) ?? ''}${call.id}`)
         }
       }
+      return `data: ${JSON.stringify(payload)}`
     } catch {
       // The provider owns validation of malformed SSE data.
+      return line
     }
   }
 
@@ -69,15 +135,15 @@ function observedEventStream(
       buffer += decoder.decode(chunk, { stream: true })
       let newline = buffer.indexOf('\n')
       while (newline >= 0) {
-        observeLine(buffer.slice(0, newline).replace(/\r$/, ''))
+        const line = buffer.slice(0, newline).replace(/\r$/, '')
+        controller.enqueue(encoder.encode(`${transformLine(line)}\n`))
         buffer = buffer.slice(newline + 1)
         newline = buffer.indexOf('\n')
       }
-      controller.enqueue(chunk)
     },
-    flush() {
+    flush(controller) {
       buffer += decoder.decode()
-      if (buffer) observeLine(buffer.replace(/\r$/, ''))
+      if (buffer) controller.enqueue(encoder.encode(transformLine(buffer.replace(/\r$/, ''))))
       if (reasoning) {
         toolCallIdsByIndex.forEach(id => {
           if (id) remember(id, reasoning)
@@ -85,10 +151,12 @@ function observedEventStream(
       }
     },
   }))
+  const headers = new Headers(response.headers)
+  headers.delete('content-length')
   return new Response(stream, {
     status: response.status,
     statusText: response.statusText,
-    headers: response.headers,
+    headers,
   })
 }
 
@@ -105,8 +173,18 @@ export function createDeepSeekReasoningFetch(baseFetch: typeof fetch): typeof fe
         let changed = false
         for (const value of messages) {
           const message = record(value)
-          if (message?.role !== 'assistant' || typeof message.reasoning_content === 'string') continue
+          if (message?.role !== 'assistant') continue
           const ids = toolCallIds(message)
+          if (typeof message.content === 'string') {
+            const tagged = taggedReasoning(message.content)
+            if (tagged) {
+              message.reasoning_content = tagged.reasoning
+              message.content = tagged.content || (ids.length ? null : '')
+              changed = true
+              continue
+            }
+          }
+          if (typeof message.reasoning_content === 'string') continue
           const reasoning = ids.map(id => reasoningByToolCall.get(id)).find(Boolean)
           if (!reasoning) continue
           message.reasoning_content = reasoning
@@ -123,13 +201,19 @@ export function createDeepSeekReasoningFetch(baseFetch: typeof fetch): typeof fe
     if (contentType.includes('text/event-stream')) {
       return observedEventStream(response, (id, reasoning) => reasoningByToolCall.set(id, reasoning))
     }
-    {
-      try {
-        const payload = record(await response.clone().json())
-        observeJsonResponse(payload, (id, reasoning) => reasoningByToolCall.set(id, reasoning))
-      } catch {
-        // The provider owns validation of malformed successful responses.
+    try {
+      const payload = record(await response.clone().json())
+      if (observeJsonResponse(payload, (id, reasoning) => reasoningByToolCall.set(id, reasoning))) {
+        const headers = new Headers(response.headers)
+        headers.delete('content-length')
+        return new Response(JSON.stringify(payload), {
+          status: response.status,
+          statusText: response.statusText,
+          headers,
+        })
       }
+    } catch {
+      // The provider owns validation of malformed successful responses.
     }
     return response
   }
