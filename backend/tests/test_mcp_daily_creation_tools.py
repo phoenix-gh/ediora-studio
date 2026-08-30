@@ -156,9 +156,13 @@ def test_real_save_draft_contract_accepts_x_drafts(env):
     ]
 
 
-def test_content_novelty_tool_is_strict_read_only_and_returns_global_result(env):
+def test_content_novelty_tool_is_strict_read_only_and_returns_global_result(
+    env, monkeypatch,
+):
     import mcp_server
     from tool_contracts import EDIORA_TOOL_META_KEY
+
+    monkeypatch.setenv("AGENT_TOPIC_NOVELTY_ENABLED", "1")
 
     tools = {tool.name: tool for tool in run(mcp_server.mcp.list_tools())}
     schema = tools["check_content_novelty"].inputSchema
@@ -179,6 +183,28 @@ def test_content_novelty_tool_is_strict_read_only_and_returns_global_result(env)
     ))
     assert result["decision"] == "novel"
     assert result["suggested_action"] == "continue"
+
+
+def test_content_novelty_tool_returns_disabled_without_feature_flag(
+    env, monkeypatch,
+):
+    import mcp_server
+
+    monkeypatch.setenv("AGENT_TOPIC_NOVELTY_ENABLED", "0")
+
+    result = run(mcp_server.check_content_novelty(
+        topic="暂时跳过",
+        core_claim="关闭时不应调用新颖性模型",
+        window_days=14,
+    ))
+
+    assert result == {
+        "decision": "disabled",
+        "conflicts": (),
+        "reason": "Agent topic novelty checking is disabled",
+        "novelty_basis": "",
+        "suggested_action": "continue",
+    }
 
 
 def test_agent_save_draft_creates_topic_claim_without_changing_rest_drafts(

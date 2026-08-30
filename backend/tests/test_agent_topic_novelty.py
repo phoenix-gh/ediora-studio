@@ -21,6 +21,27 @@ async def db(postgres_database_url):
     await engine.dispose()
 
 
+@pytest.fixture(autouse=True)
+def novelty_enabled_by_default(monkeypatch):
+    """Keep the existing policy tests explicit while testing the off switch."""
+    monkeypatch.setenv("AGENT_TOPIC_NOVELTY_ENABLED", "1")
+
+
+def test_agent_topic_novelty_is_disabled_without_explicit_enable(monkeypatch):
+    from agent_topic_novelty import agent_topic_novelty_enabled
+
+    monkeypatch.delenv("AGENT_TOPIC_NOVELTY_ENABLED", raising=False)
+    assert agent_topic_novelty_enabled() is False
+
+    for value in ("0", "false", "off", " "):
+        monkeypatch.setenv("AGENT_TOPIC_NOVELTY_ENABLED", value)
+        assert agent_topic_novelty_enabled() is False
+
+    for value in ("1", "true", "on", " YES "):
+        monkeypatch.setenv("AGENT_TOPIC_NOVELTY_ENABLED", value)
+        assert agent_topic_novelty_enabled() is True
+
+
 @pytest.mark.asyncio
 async def test_agent_topic_claim_and_override_persist_auditable_defaults(db):
     from models import AgentNoveltyOverride, AgentTopicClaim, ArticleDraft
@@ -374,6 +395,48 @@ async def test_agent_save_persists_draft_and_topic_claim_atomically(db):
     assert claim is not None
     assert claim.agent_session_id == 92
     assert claim.topic == "Agent 工具选择"
+
+
+@pytest.mark.asyncio
+async def test_agent_save_skips_novelty_when_disabled(db, monkeypatch):
+    from agent_topic_novelty import (
+        AgentIdentity,
+        save_agent_draft_with_novelty_check,
+    )
+    from models import AgentTopicClaim, ArticleDraft
+
+    monkeypatch.setenv("AGENT_TOPIC_NOVELTY_ENABLED", "0")
+
+    async def should_not_extract(title, content):
+        raise AssertionError("novelty extraction must be skipped when disabled")
+
+    async def should_not_judge(candidate, conflicts):
+        raise AssertionError("novelty judgment must be skipped when disabled")
+
+    result = await save_agent_draft_with_novelty_check(
+        db,
+        title="重复也要保存",
+        content="临时关闭新颖性检查期间，这篇草稿仍然应当进入草稿箱。",
+        topic_id="agent",
+        status="drafting",
+        pipeline_task_id=None,
+        draft_type="article",
+        identity=AgentIdentity(mode="scheduled", daily_creation_run_id=2127),
+        window_days=14,
+        override_token="ignored-while-disabled",
+        extract_candidate=should_not_extract,
+        judge=should_not_judge,
+    )
+
+    assert result["saved"] is True
+    assert result["novelty"]["decision"] == "disabled"
+    draft = await db.get(ArticleDraft, result["id"])
+    claim = await db.scalar(select(AgentTopicClaim).where(
+        AgentTopicClaim.draft_id == result["id"]
+    ))
+    assert draft is not None
+    assert claim is not None
+    assert claim.decision == "disabled"
 
 
 @pytest.mark.asyncio
