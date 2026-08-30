@@ -78,7 +78,7 @@ describe('Agent trajectory projection', () => {
     ])
 
     expect(snapshot.turns).toHaveLength(1)
-    expect(snapshot.turns[0]?.groups.map(group => group.title)).toEqual(['Message', 'Step 1'])
+    expect(snapshot.turns[0]?.groups.map(group => group.title)).toEqual(['Message', '模型调用 1'])
     const cells = snapshot.turns[0]?.groups.flatMap(group => group.cells) ?? []
     expect(cells.map(cell => cell.kind)).toEqual(['user', 'message', 'tool'])
     expect(cells.find(cell => cell.kind === 'message')).toMatchObject({
@@ -94,6 +94,42 @@ describe('Agent trajectory projection', () => {
       timeSeconds: 2,
     })
     expect(snapshot.isRunning).toBe(false)
+  })
+
+  it('labels model calls with their persisted runtime phase', () => {
+    const snapshot = deriveAgentTrajectory([
+      event(1, 'turn/start', { turn: 1 }),
+      event(2, 'step/start', { turn: 1, step: 1, phase: 'plan' }, 1, 1),
+      event(3, 'assistant/message', {
+        turn: 1,
+        step: 1,
+        blocks: [{ kind: 'text', text: '计划完成' }],
+      }, 1, 1),
+      event(4, 'step/start', { turn: 1, step: 2, phase: 'execute' }, 1, 2),
+      event(5, 'assistant/message', {
+        turn: 1,
+        step: 2,
+        blocks: [{ kind: 'text', text: '执行完成' }],
+      }, 1, 2),
+    ])
+
+    expect(snapshot.turns[0]?.groups).toEqual([
+      expect.objectContaining({ step: 1, phase: 'plan', title: '规划 · 模型调用 1' }),
+      expect.objectContaining({ step: 2, phase: 'execute', title: '执行 · 模型调用 2' }),
+    ])
+  })
+
+  it('uses a readable model-call label for legacy steps without phase metadata', () => {
+    const snapshot = deriveAgentTrajectory([
+      event(1, 'turn/start', { turn: 1 }),
+      event(2, 'step/start', { turn: 1, step: 3 }, 1, 3),
+    ])
+
+    expect(snapshot.turns[0]?.groups[0]).toMatchObject({
+      step: 3,
+      phase: null,
+      title: '模型调用 3',
+    })
   })
 
   it('keeps an unmatched tool call as a running record without fabricating duration', () => {

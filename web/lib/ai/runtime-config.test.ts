@@ -1,12 +1,36 @@
 import { describe, expect, it, vi } from 'vitest'
 
+const api = vi.hoisted(() => ({
+  createOpenAI: vi.fn(),
+}))
+
+vi.mock('@ai-sdk/openai', () => ({ createOpenAI: api.createOpenAI }))
+
 import {
   imageModelConfigFromSettings,
+  openaiProviderFromConfig,
   textModelForProvider,
   textModelConfigFromSettings,
 } from './runtime-config'
 
 describe('runtime provider configuration', () => {
+  it('passes an optional audited fetch to the configured OpenAI provider', () => {
+    const auditedFetch = vi.fn()
+
+    openaiProviderFromConfig({
+      apiKey: 'settings-text-key',
+      baseURL: 'https://provider.example/v1',
+      headers: { 'X-Tenant': 'tenant-a' },
+    }, { fetch: auditedFetch as typeof fetch })
+
+    expect(api.createOpenAI).toHaveBeenCalledWith(expect.objectContaining({
+      apiKey: 'settings-text-key',
+      baseURL: 'https://provider.example/v1',
+      headers: { 'X-Tenant': 'tenant-a' },
+      fetch: auditedFetch,
+    }))
+  })
+
   it('builds a text model from persisted Settings', () => {
     expect(textModelConfigFromSettings({
       api_key: 'settings-text-key',

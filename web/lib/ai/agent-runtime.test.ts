@@ -3,8 +3,18 @@ import { describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
 
 import { applyAgentToolPolicy } from './agent-tool-policy'
-import { agentSkillRunAudit, openAgentRuntime, planningTools, type AgentRuntimeDependencies, type AgentSessionEventDraft } from './agent-runtime'
+import {
+  MODEL_ERROR_DIAGNOSTIC_PAYLOAD_LIMIT,
+  agentSkillRunAudit,
+  openAgentRuntime,
+  planningTools,
+  type AgentRuntimeDependencies,
+  type AgentSessionEventDraft,
+} from './agent-runtime'
+import type { AgentModelMessageEvent } from './agent-runtime-types'
 import type { GlobalAgentToolOptions } from './global-chat-tools'
+import { currentModelHttpAuditContext, type ModelHttpAuditContext } from './model-http-audit'
+import { buildToolRegistry } from './tool-registry'
 import type { RegisteredSkill } from '../skills/registry'
 
 const alpha: RegisteredSkill = {
@@ -28,11 +38,35 @@ function dependencies(selection: { skillName?: string; continueRestored?: boolea
     })) as unknown as AgentRuntimeDependencies['generate'],
     openTools: async (options: GlobalAgentToolOptions) => {
       const base = {
-        search_assets: tool({ inputSchema: z.object({}), execute: async () => [] }),
-        save_draft: tool({ inputSchema: z.object({}), execute: async () => ({ id: 3 }) }),
+        search_assets: tool({
+          description: 'Search stored creative assets.',
+          inputSchema: z.object({}),
+          execute: async () => [],
+        }),
+        save_draft: tool({
+          description: 'Create one persistent draft.',
+          inputSchema: z.object({}),
+          execute: async () => ({ id: 3 }),
+        }),
       } satisfies ToolSet
+      const toolRegistry = buildToolRegistry({
+        tools: base,
+        nativeContracts: {
+          search_assets: {
+            namespace: 'creative_assets', version: '1',
+            readOnly: true, destructive: false, idempotent: true, openWorld: false,
+            approval: 'never', concurrency: 'parallel-safe', retry: 'safe',
+          },
+          save_draft: {
+            namespace: 'drafts', version: '1',
+            readOnly: false, destructive: false, idempotent: false, openWorld: false,
+            approval: 'writes', concurrency: 'serialized', retry: 'claim-backed',
+          },
+        },
+      })
       const tools = applyAgentToolPolicy(base, {
         policy: options.approvalPolicy ?? 'interactive',
+        contracts: toolRegistry.contracts,
         beforeToolExecute: options.beforeToolExecute,
         onAudit: options.onToolAudit,
       })
@@ -51,6 +85,7 @@ function dependencies(selection: { skillName?: string; continueRestored?: boolea
           activation: 'manual' as const,
           execution: { planRequired: true, verificationRequired: true, maxRevisions: 1 as const },
         } : undefined,
+        toolRegistry: () => toolRegistry,
         readReferences: async () => [],
         close: async () => undefined,
       }
@@ -296,6 +331,10 @@ describe('shared Agent runtime', () => {
     })
 
     expect(Object.keys(runtime.tools).sort()).toEqual(['save_draft', 'search_assets'])
+    expect(runtime.capabilitySnapshot().tools).toEqual([
+      expect.objectContaining({ name: 'save_draft', namespace: 'drafts' }),
+      expect.objectContaining({ name: 'search_assets', namespace: 'creative_assets' }),
+    ])
     await expect(runtime.run({
       objective: '只允许读取素材并保存草稿', modelMessages: [], maxSteps: 1,
       requiredTools: ['update_draft'],
@@ -358,17 +397,18 @@ describe('shared Agent runtime', () => {
     let active = false
     let executionInstructions = ''
     const deps = dependencies()
+    const delegatedTools = {
+      loadSkill: tool({
+        description: 'Load an enabled Skill.',
+        inputSchema: z.object({ name: z.string() }),
+        execute: async ({ name }) => {
+          active = name === alpha.name
+          return { name, instructions: alpha.instructions }
+        },
+      }),
+    } satisfies ToolSet
     deps.openTools = async () => ({
-      tools: {
-        loadSkill: tool({
-          description: 'Load an enabled Skill.',
-          inputSchema: z.object({ name: z.string() }),
-          execute: async ({ name }) => {
-            active = name === alpha.name
-            return { name, instructions: alpha.instructions }
-          },
-        }),
-      } satisfies ToolSet,
+      tools: delegatedTools,
       catalogContext: 'Enabled Skills available for automatic activation:\n- Alpha: Handles alpha work',
       snapshot: () => ({
         source: active ? 'automatic' as const : undefined,
@@ -382,6 +422,10 @@ describe('shared Agent runtime', () => {
         activation: 'automatic' as const,
         execution: { planRequired: true, verificationRequired: true, maxRevisions: 1 as const },
       } : undefined,
+      toolRegistry: () => buildToolRegistry({
+        tools: delegatedTools,
+        compatibilityMode: true,
+      }),
       readReferences: async () => [],
       close: async () => undefined,
     })
@@ -476,6 +520,174 @@ describe('shared Agent runtime', () => {
     await runtime.close()
   })
 
+  it('correlates each model message with the active HTTP audit context', async () => {
+    const messages: AgentModelMessageEvent[] = []
+    const contexts: Array<ModelHttpAuditContext | undefined> = []
+    const deps = dependencies()
+    deps.generate = vi.fn(async () => {
+      contexts.push(currentModelHttpAuditContext())
+      return { text: 'done', content: [], toolResults: [] }
+    }) as unknown as AgentRuntimeDependencies['generate']
+    const runtime = await openAgentRuntime({
+      ...openOptions('automatic', deps),
+      automaticSelection: false,
+      onMessage: event => { messages.push(event) },
+    })
+
+    await runtime.run({ objective: '记录调用身份', modelMessages: [], maxSteps: 1 })
+
+    expect(messages).toHaveLength(2)
+    expect(messages[0].callId).toEqual(expect.any(String))
+    expect(messages[0].callId).toBe(messages[1].callId)
+    expect(contexts[0]).toMatchObject({
+      callId: messages[0].callId,
+      phase: 'execute',
+      step: 1,
+    })
+    await runtime.close()
+  })
+
+  it('retains bounded JSON-safe parse-error evidence without replacing the thrown error', async () => {
+    const messages: AgentModelMessageEvent[] = []
+    const parseError = Object.assign(new Error('No object generated: could not parse the response.'), {
+      name: 'AI_NoObjectGeneratedError',
+      text: '```json\n{"broken":\n```',
+      finishReason: 'length',
+      usage: { inputTokens: 10, outputTokens: 20 },
+      response: { id: 'response-1' },
+      cause: new Error('JSON parse failed'),
+    })
+    const deps = dependencies()
+    deps.generate = vi.fn(async () => { throw parseError }) as unknown as AgentRuntimeDependencies['generate']
+    const runtime = await openAgentRuntime({
+      ...openOptions('automatic', deps),
+      automaticSelection: false,
+      onMessage: event => { messages.push(event) },
+    })
+
+    await expect(runtime.run({ objective: '记录解析失败', modelMessages: [], maxSteps: 1 }))
+      .rejects.toThrow(parseError.message)
+
+    expect(messages.at(-1)?.payload).toMatchObject({
+      name: 'AI_NoObjectGeneratedError',
+      text: '[omitted unsafe structured text]',
+      finishReason: 'length',
+      usage: { inputTokens: 10, outputTokens: 20 },
+      response: { id: 'response-1' },
+      cause: { name: 'Error', message: 'JSON parse failed' },
+    })
+    await runtime.close()
+  })
+
+  it('redacts secrets from every supported model-error diagnostic field without replacing the error', async () => {
+    const messages: AgentModelMessageEvent[] = []
+    const secrets = {
+      name: 'name-secret',
+      message: 'message-secret',
+      causeName: 'cause-name-secret',
+      causeMessage: 'cause-message-secret',
+      text: 'text-secret',
+      finishReason: 'finish-secret',
+      usage: 'usage-secret',
+      response: 'response-secret',
+      accessToken: 'access-token-secret',
+      refreshToken: 'refresh-token-secret',
+      clientSecret: 'client-secret-secret',
+      authorizationHeader: 'authorization-header-secret',
+    }
+    const parseError = Object.assign(new Error(`Bearer ${secrets.message}`), {
+      name: `ProviderError secret=${secrets.name}`,
+      text: `token=${secrets.text}`,
+      finishReason: `api_key=${secrets.finishReason}`,
+      usage: {
+        api_key: secrets.usage,
+        inputTokens: 10,
+        outputTokens: 20,
+        credentials: {
+          accessToken: secrets.accessToken,
+          clientSecret: secrets.clientSecret,
+        },
+      },
+      response: {
+        headers: { authorization: `Bearer ${secrets.response}` },
+        url: `https://provider.test/v1/responses?token=${secrets.response}`,
+        credentials: {
+          refreshToken: secrets.refreshToken,
+          authorizationHeader: secrets.authorizationHeader,
+        },
+      },
+      cause: Object.assign(new Error(`password=${secrets.causeMessage}`), {
+        name: `CauseError secret=${secrets.causeName}`,
+      }),
+    })
+    const deps = dependencies()
+    deps.generate = vi.fn(async () => { throw parseError }) as unknown as AgentRuntimeDependencies['generate']
+    const runtime = await openAgentRuntime({
+      ...openOptions('automatic', deps),
+      automaticSelection: false,
+      onMessage: event => { messages.push(event) },
+    })
+
+    await expect(runtime.run({ objective: '记录敏感解析失败', modelMessages: [], maxSteps: 1 }))
+      .rejects.toBe(parseError)
+
+    const payload = messages.at(-1)?.payload
+    const serialized = JSON.stringify(payload)
+    for (const secret of Object.values(secrets)) {
+      expect(serialized).not.toContain(secret)
+    }
+    expect(payload).toMatchObject({
+      name: expect.stringContaining('[REDACTED]'),
+      message: expect.stringContaining('[REDACTED]'),
+      cause: {
+        name: expect.stringContaining('[REDACTED]'),
+        message: expect.stringContaining('[REDACTED]'),
+      },
+      text: expect.stringContaining('[REDACTED]'),
+      finishReason: expect.stringContaining('[REDACTED]'),
+      usage: {
+        api_key: '[REDACTED]',
+        inputTokens: 10,
+        outputTokens: 20,
+        credentials: '[REDACTED]',
+      },
+      response: {
+        headers: { authorization: '[REDACTED]' },
+        url: expect.stringContaining('[REDACTED]'),
+        credentials: '[REDACTED]',
+      },
+    })
+    await runtime.close()
+  })
+
+  it('caps broad model-error evidence within one total diagnostic payload budget', async () => {
+    const messages: AgentModelMessageEvent[] = []
+    const broadResponse = Object.fromEntries(Array.from({ length: 500 }, (_, index) => [
+      `branch_${index}`,
+      { detail: 'x'.repeat(8 * 1024) },
+    ]))
+    const parseError = Object.assign(new Error('No object generated'), {
+      name: 'AI_NoObjectGeneratedError',
+      response: broadResponse,
+      usage: broadResponse,
+    })
+    const deps = dependencies()
+    deps.generate = vi.fn(async () => { throw parseError }) as unknown as AgentRuntimeDependencies['generate']
+    const runtime = await openAgentRuntime({
+      ...openOptions('automatic', deps),
+      automaticSelection: false,
+      onMessage: event => { messages.push(event) },
+    })
+
+    await expect(runtime.run({ objective: '限制宽分支错误证据', modelMessages: [], maxSteps: 1 }))
+      .rejects.toBe(parseError)
+
+    const serialized = JSON.stringify(messages.at(-1)?.payload)
+    expect(new TextEncoder().encode(serialized).byteLength)
+      .toBeLessThanOrEqual(MODEL_ERROR_DIAGNOSTIC_PAYLOAD_LIMIT)
+    await runtime.close()
+  })
+
   it('emits typed step, request, assistant, and terminal step events without swallowing trace failures', async () => {
     const deps = dependencies()
     deps.generate = vi.fn(async () => ({
@@ -498,7 +710,16 @@ describe('shared Agent runtime', () => {
     expect(events.map(event => event.type)).toEqual([
       'step/start', 'request/header', 'assistant/message', 'step/end',
     ])
-    expect(events[0]).toMatchObject({ turn: 3, step: 1, data: { turn: 3, step: 1 } })
+    expect(events[0]).toMatchObject({
+      turn: 3,
+      step: 1,
+      data: { turn: 3, step: 1, phase: 'execute' },
+    })
+    expect(events[1]).toMatchObject({
+      turn: 3,
+      step: 1,
+      data: { turn: 3, step: 1, phase: 'execute' },
+    })
     expect(events[2]).toMatchObject({
       type: 'assistant/message',
       data: { blocks: [{ kind: 'reasoning', text: '先确认' }, { kind: 'text', text: 'done' }] },
@@ -573,6 +794,127 @@ describe('shared Agent runtime', () => {
     })
     expect(validationPrompt).toContain('来自工具的真实字段')
     expect(validationPrompt).toContain('来自工具的真实输入')
+    await runtime.close()
+  })
+
+  it('uses one tool-free finalization call after a Skill execution returns only tool results', async () => {
+    const deps = dependencies()
+    const phases: string[] = []
+    deps.generate = vi.fn(async (input: Record<string, unknown>) => {
+      const prompt = typeof input.prompt === 'string' ? input.prompt : ''
+      const instructions = typeof input.instructions === 'string' ? input.instructions : ''
+      if (prompt.startsWith('Create a bounded execution plan')) {
+        return {
+          output: {
+            goal: '完成 Alpha 任务',
+            steps: [{
+              id: 'deliver', instruction: '检索并交付', requiredReferences: [],
+              requiredTools: ['search_assets'],
+            }],
+            outputRequirements: ['基于工具证据'],
+            verificationCriteria: ['确认检索已完成'],
+          },
+        }
+      }
+      if (prompt.startsWith('Produce the final deliverable now')) {
+        expect(input).not.toHaveProperty('tools')
+        expect(input).not.toHaveProperty('activeTools')
+        expect(prompt).toContain('来自工具的证据')
+        return { text: '根据工具证据形成的最终回答', finishReason: 'stop', steps: [{}] }
+      }
+      if (prompt.startsWith('Return valid JSON only in exactly this shape')) {
+        return { output: { passed: true, violations: [] } }
+      }
+      expect(instructions).toContain('Execute the validated Skill plan')
+      return {
+        text: '', finishReason: 'tool-calls', steps: Array.from({ length: 5 }, () => ({})),
+        toolCalls: [{ type: 'tool-call', toolCallId: 'call-search', toolName: 'search_assets', input: {} }],
+        toolResults: [{
+          type: 'tool-result', toolName: 'search_assets', toolCallId: 'call-search',
+          input: {}, output: { title: '来自工具的证据' },
+        }],
+        content: [], responseMessages: [],
+      }
+    }) as unknown as AgentRuntimeDependencies['generate']
+    const runtime = await openAgentRuntime({
+      ...openOptions('automatic', deps), skillMode: 'manual', skillName: 'Alpha',
+    })
+
+    const result = await runtime.run({
+      objective: 'Do the alpha task', modelMessages: [], maxSteps: 5,
+      onStep: checkpoint => { phases.push(checkpoint.phase) },
+    })
+
+    expect(result).toMatchObject({
+      kind: 'completed', text: '根据工具证据形成的最终回答', finishReason: 'stop',
+    })
+    expect(phases).toEqual(['plan', 'execute', 'finalize', 'validate'])
+    expect(deps.generate).toHaveBeenCalledTimes(4)
+    await runtime.close()
+  })
+
+  it('continues an active Skill after a provider stops on a completed tool-only turn', async () => {
+    const deps = dependencies()
+    let executionCalls = 0
+    deps.generate = vi.fn(async (input: Record<string, unknown>) => {
+      const prompt = typeof input.prompt === 'string' ? input.prompt : ''
+      if (prompt.startsWith('Create a bounded execution plan')) {
+        return {
+          output: {
+            goal: '检索并读取当前条目',
+            steps: [{
+              id: 'research', instruction: '先检索再继续', requiredReferences: [],
+              requiredTools: ['search_assets'],
+            }],
+            outputRequirements: ['使用当前检索结果'],
+            verificationCriteria: ['读取当前条目 ID'],
+          },
+        }
+      }
+      if (prompt.startsWith('Return valid JSON only in exactly this shape')) {
+        return { output: { passed: true, violations: [] } }
+      }
+      if (prompt.startsWith('Produce the final deliverable now')) {
+        throw new Error('tool-only provider stop lost its continuation context')
+      }
+
+      executionCalls += 1
+      if (executionCalls === 1) {
+        return {
+          text: '', finishReason: 'stop', steps: [{}],
+          toolCalls: [{
+            type: 'tool-call', toolCallId: 'search-current',
+            toolName: 'search_assets', input: { query: 'github' },
+          }],
+          toolResults: [{
+            type: 'tool-result', toolCallId: 'search-current',
+            toolName: 'search_assets', input: { query: 'github' },
+            output: [{ id: 'current-item-2092621092644848065' }],
+          }],
+          content: [],
+          responseMessages: [{
+            role: 'tool',
+            content: [{
+              type: 'tool-result', toolCallId: 'search-current',
+              toolName: 'search_assets', output: [{ id: 'current-item-2092621092644848065' }],
+            }],
+          }],
+        }
+      }
+
+      expect(JSON.stringify(input.messages)).toContain('current-item-2092621092644848065')
+      return { text: '已基于当前条目继续研究', finishReason: 'stop', content: [], toolResults: [] }
+    }) as unknown as AgentRuntimeDependencies['generate']
+    const runtime = await openAgentRuntime({
+      ...openOptions('automatic', deps), skillMode: 'manual', skillName: 'Alpha',
+    })
+
+    const result = await runtime.run({
+      objective: '从系统信息源研究 GitHub 帖子', modelMessages: [], maxSteps: 5,
+    })
+
+    expect(executionCalls).toBe(2)
+    expect(result.text).toBe('已基于当前条目继续研究')
     await runtime.close()
   })
 
@@ -662,12 +1004,24 @@ describe('shared Agent runtime', () => {
     expect(activeTools).toEqual(['search_assets', 'generateImage'])
   })
 
-  it('reports the final finish reason and executed step count without an active Skill', async () => {
+  it('finalizes a tool-only run outside Skill execution without spending more tool steps', async () => {
     const deps = dependencies()
-    deps.generate = vi.fn(async () => ({
-      text: '', toolResults: [], content: [], finishReason: 'tool-calls',
-      steps: Array.from({ length: 5 }, () => ({})),
-    })) as unknown as AgentRuntimeDependencies['generate']
+    deps.generate = vi.fn()
+      .mockResolvedValueOnce({
+        text: '', finishReason: 'tool-calls', steps: Array.from({ length: 5 }, () => ({})),
+        toolCalls: [{ type: 'tool-call', toolCallId: 'search-1', toolName: 'search_assets', input: {} }],
+        toolResults: [{
+          type: 'tool-result', toolCallId: 'search-1', toolName: 'search_assets',
+          output: { title: '研究证据' },
+        }],
+        content: [], responseMessages: [],
+      })
+      .mockImplementationOnce(async (input: Record<string, unknown>) => {
+        expect(input).not.toHaveProperty('tools')
+        expect(input).not.toHaveProperty('activeTools')
+        expect(String(input.prompt)).toContain('研究证据')
+        return { text: '基于研究证据的最终回答', finishReason: 'stop', steps: [{}] }
+      }) as unknown as AgentRuntimeDependencies['generate']
     const runtime = await openAgentRuntime({
       ...openOptions('automatic', deps), automaticSelection: false,
     })
@@ -675,8 +1029,13 @@ describe('shared Agent runtime', () => {
     await expect(runtime.run({
       objective: 'Keep researching', modelMessages: [], maxSteps: 5,
     })).resolves.toMatchObject({
-      kind: 'completed', finishReason: 'tool-calls', stepCount: 5,
+      kind: 'completed', text: '基于研究证据的最终回答', finishReason: 'stop', stepCount: 5,
+      parts: [
+        expect.objectContaining({ type: 'dynamic-tool', toolName: 'search_assets' }),
+        { type: 'text', text: '基于研究证据的最终回答' },
+      ],
     })
+    expect(deps.generate).toHaveBeenCalledTimes(2)
   })
 
   it('continues after a provider reports stop for a completed tool-only step', async () => {
@@ -756,7 +1115,7 @@ describe('shared Agent runtime', () => {
     expect(deps.generate).toHaveBeenCalledTimes(2)
   })
 
-  it('stops after one recovery when the provider keeps returning empty stops', async () => {
+  it('reports runtime incompletion when stop recovery and finalization are both empty', async () => {
     const deps = dependencies()
     deps.generate = vi.fn(async () => ({
       text: '', finishReason: 'stop', steps: [{}],
@@ -768,10 +1127,8 @@ describe('shared Agent runtime', () => {
 
     await expect(runtime.run({
       objective: '创建并保存草稿', modelMessages: [], maxSteps: 5,
-    })).resolves.toMatchObject({
-      kind: 'completed', text: '', finishReason: 'stop', stepCount: 2,
-    })
-    expect(deps.generate).toHaveBeenCalledTimes(2)
+    })).rejects.toMatchObject({ code: 'final_answer_missing' })
+    expect(deps.generate).toHaveBeenCalledTimes(3)
   })
 
   it('processes queued follow-up work before marking the Agent run complete', async () => {
@@ -837,15 +1194,17 @@ describe('shared Agent runtime', () => {
     expect(deps.generate).toHaveBeenCalledTimes(2)
   })
 
-  it('lets an authoritative follow-up provider stop without fallback recovery', async () => {
+  it('does not add fallback recovery before finalizing an authoritative tool-only stop', async () => {
     const deps = dependencies()
-    deps.generate = vi.fn(async () => ({
-      text: '', finishReason: 'stop', steps: [{}],
-      toolCalls: [{ type: 'tool-call', toolCallId: 'save-1', toolName: 'save_draft', input: {} }],
-      toolResults: [{ type: 'tool-result', toolCallId: 'save-1', toolName: 'save_draft', output: {} }],
-      content: [],
-      responseMessages: [{ role: 'assistant', content: [] }],
-    })) as unknown as AgentRuntimeDependencies['generate']
+    deps.generate = vi.fn()
+      .mockResolvedValueOnce({
+        text: '', finishReason: 'stop', steps: [{}],
+        toolCalls: [{ type: 'tool-call', toolCallId: 'save-1', toolName: 'save_draft', input: {} }],
+        toolResults: [{ type: 'tool-result', toolCallId: 'save-1', toolName: 'save_draft', output: {} }],
+        content: [],
+        responseMessages: [{ role: 'assistant', content: [] }],
+      })
+      .mockResolvedValueOnce({ text: '草稿已保存', finishReason: 'stop', steps: [{}] }) as unknown as AgentRuntimeDependencies['generate']
     const runtime = await openAgentRuntime({
       ...openOptions('automatic', deps), automaticSelection: false,
     })
@@ -855,7 +1214,7 @@ describe('shared Agent runtime', () => {
       getFollowUpMessages: async () => [],
     })
 
-    expect(deps.generate).toHaveBeenCalledTimes(1)
+    expect(deps.generate).toHaveBeenCalledTimes(2)
   })
 
   it('processes queued follow-up work while executing a manually selected Skill', async () => {
@@ -967,9 +1326,10 @@ describe('shared Agent runtime', () => {
     await runtime.close()
   })
 
-  it('does not add stop recovery turns to an ordinary manually selected Skill run', async () => {
+  it('uses finalization instead of an open-ended stop recovery loop for a manual Skill run', async () => {
     const deps = dependencies()
     let executionCalls = 0
+    let finalizationCalls = 0
     deps.generate = vi.fn(async (input: Record<string, unknown>) => {
       const prompt = typeof input.prompt === 'string' ? input.prompt : ''
       if (prompt.startsWith('Create a bounded execution plan')) {
@@ -984,6 +1344,10 @@ describe('shared Agent runtime', () => {
       if (prompt.startsWith('Return valid JSON only in exactly this shape')) {
         return { output: { passed: true, violations: [] } }
       }
+      if (prompt.startsWith('Produce the final deliverable now')) {
+        finalizationCalls += 1
+        return { text: '最终回答', finishReason: 'stop', steps: [{}] }
+      }
       executionCalls += 1
       return {
         text: '', finishReason: 'stop', steps: [{}],
@@ -994,9 +1358,11 @@ describe('shared Agent runtime', () => {
       ...openOptions('automatic', deps), skillMode: 'manual', skillName: 'Alpha',
     })
 
-    await runtime.run({ objective: '完成任务', modelMessages: [], maxSteps: 5 })
+    const result = await runtime.run({ objective: '完成任务', modelMessages: [], maxSteps: 5 })
 
     expect(executionCalls).toBe(1)
+    expect(finalizationCalls).toBe(1)
+    expect(result.text).toBe('最终回答')
   })
 
   it('shares one max-step budget across Skill execution retries', async () => {

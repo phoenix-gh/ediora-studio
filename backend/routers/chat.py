@@ -15,6 +15,7 @@ from database import get_db
 from models import AgentLogEvent, ChatMessage, ChatSession, ContentJobEvent, WritingPlan, now_utc
 from pipeline_contracts import PipelineContractError, PipelineCreateInput, ResolvedSkillInvocation
 from pipeline_service import create_pipeline_job, pipeline_job_payload
+from tool_contracts import ToolNamespace
 from worker_auth import require_worker_token
 
 
@@ -101,6 +102,11 @@ class ToolCapabilityDescriptor(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     description: str = Field(default="", max_length=2_000)
     inputSchemaDigest: str | None = Field(default=None, min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$")
+    outputSchemaDigest: str | None = Field(default=None, min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$")
+    namespace: ToolNamespace | None = None
+    version: str | None = Field(default=None, min_length=1, max_length=120)
+    contractDigest: str | None = Field(default=None, min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$")
+    availability: Literal["available", "unavailable"] | None = None
     sideEffecting: bool
     needsApproval: bool
     replayPolicy: Literal["replayable", "uncertain-on-interruption"]

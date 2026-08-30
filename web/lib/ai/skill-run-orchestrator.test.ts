@@ -126,19 +126,21 @@ describe('generic SkillRun completion lifecycle', () => {
     expect(result.text).not.toContain('unvalidated draft')
   })
 
-  it('rejects empty drafts and revisions', async () => {
+  it('reports empty drafts as runtime incompletion instead of a Skill violation', async () => {
     await expect(completeSkillRun({
       run: baseRun(),
       draft: async () => '   ',
       validate: vi.fn(),
       revise: vi.fn(),
-    })).resolves.toMatchObject({ delivery: 'blocked' })
+    })).rejects.toMatchObject({ code: 'final_answer_missing' })
+  })
 
+  it('reports empty revisions as runtime incompletion instead of a Skill violation', async () => {
     await expect(completeSkillRun({
       run: baseRun(),
       draft: async () => 'bad',
       validate: async () => ({ passed: false, violations: [violation] }),
       revise: async () => '',
-    })).resolves.toMatchObject({ delivery: 'blocked', revisionCount: 1 })
+    })).rejects.toMatchObject({ code: 'final_revision_missing' })
   })
 })

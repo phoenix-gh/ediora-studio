@@ -191,7 +191,14 @@ export async function consumeUIMessageStream(
     buffer = flush ? '' : (chunks.pop() ?? '')
     for (const block of flush ? chunks : chunks) {
       const event = parseSseBlock(block)
-      if (event) onEvent(event)
+      if (event) {
+        onEvent(event)
+        if (event.type === 'error') {
+          throw new Error(
+            typeof event.errorText === 'string' ? event.errorText : '聊天响应失败',
+          )
+        }
+      }
     }
   }
 

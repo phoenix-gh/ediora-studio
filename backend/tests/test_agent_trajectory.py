@@ -42,6 +42,25 @@ def test_canonical_event_validation_is_strict_and_keeps_typed_payloads():
         )
 
 
+@pytest.mark.parametrize(
+    ("event_type", "payload"),
+    [
+        ("step/start", {"turn": 1, "step": 1, "phase": "skill_selection"}),
+        (
+            "request/header",
+            {
+                "turn": 1,
+                "step": 1,
+                "phase": "execute",
+                "request": {"toolNames": ["search_source_items"]},
+            },
+        ),
+    ],
+)
+def test_model_call_events_keep_runtime_phase(event_type, payload):
+    assert validate_agent_session_event(event_type, payload) == payload
+
+
 def test_trajectory_state_pairs_tools_and_reports_open_turns():
     state = derive_agent_trajectory_state([
         {"seq": 1, "type": "turn/start", "turn": 1, "step": None, "data": {"turn": 1}},

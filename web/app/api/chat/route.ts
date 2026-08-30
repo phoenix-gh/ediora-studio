@@ -1,6 +1,6 @@
 import { convertToModelMessages, createUIMessageStream, createUIMessageStreamResponse, generateText, safeValidateUIMessages, stepCountIs, streamText, type ToolSet, type UIMessage, type UIMessageStreamWriter } from 'ai'
 import { randomUUID } from 'node:crypto'
-import { NextRequest, NextResponse } from 'next/server'
+import { after, NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 
 import {
@@ -26,6 +26,13 @@ import {
 import type { AgentSessionEventDraft } from '@/lib/ai/agent-runtime'
 import type { AgentSessionEventType } from '@/lib/ai/agent-trajectory'
 import type { AgentModelMessageEvent, AgentStepCheckpoint, AgentToolAudit } from '@/lib/ai/agent-runtime-types'
+import { modelErrorEvidenceFromUnknown } from '@/lib/ai/model-error-evidence'
+import {
+  createModelHttpAuditFetch,
+  type ModelHttpAuditContext,
+  type ModelHttpAuditEvent,
+  withModelHttpAuditContext,
+} from '@/lib/ai/model-http-audit'
 import { createDirectImageGenerator, mcpUrl, type ChatSkillSnapshot } from '@/lib/ai/global-chat-tools'
 import { workerHeaders } from '@/lib/ai/job-client'
 import { getEnabledSkill, listSkillReferences, loadSkillPreloadContext } from '@/lib/skills/registry'
@@ -260,25 +267,79 @@ function conversationForRecovery(messages: UIMessage[]) {
     .slice(-16_000)
 }
 
+function newChatModelAuditCall(phase: string, step: number): ModelHttpAuditContext {
+  return { callId: randomUUID(), phase, step }
+}
+
+function chatModelMessageEvent(
+  audit: ModelHttpAuditContext,
+  direction: AgentModelMessageEvent['direction'],
+  payload: Record<string, unknown>,
+): AgentModelMessageEvent {
+  return { ...audit, direction, payload, occurredAt: new Date().toISOString() }
+}
+
+function modelWithChatHttpAuditContext<T>(
+  model: T,
+  currentContext: () => ModelHttpAuditContext,
+): T {
+  if (!model || typeof model !== 'object') return model
+  return new Proxy(model as object, {
+    get(target, property, receiver) {
+      const value = Reflect.get(target, property, receiver)
+      if ((property !== 'doGenerate' && property !== 'doStream') || typeof value !== 'function') {
+        return value
+      }
+      return (...args: unknown[]) => withModelHttpAuditContext(
+        currentContext(),
+        () => value.apply(target, args),
+      )
+    },
+  }) as T
+}
+
 async function recoverFinalAnswer({
   provider,
   modelName,
   protocol,
   messages,
   instructions,
+  audit,
+  onMessage,
 }: {
   provider: ReturnType<typeof openaiProviderFromConfig>
   modelName: string
   protocol: TextModelConfig['protocol']
   messages: UIMessage[]
   instructions: string
+  audit: ModelHttpAuditContext
+  onMessage: (event: AgentModelMessageEvent) => void | Promise<void>
 }) {
-  const recovery = await generateText({
-    model: textModelForProvider(provider, modelName, protocol),
-    instructions: `${instructions}\n\nYou are in the final-answer recovery phase. Do not call tools, do not emit tool-call markup, and reply directly to the user in their language. Use only the conversation context below; be transparent if it lacks evidence.`,
-    prompt: conversationForRecovery(messages),
-  })
-  return recovery.text.trim()
+  const prompt = conversationForRecovery(messages)
+  const recoveryInstructions = `${instructions}\n\nYou are in the final-answer recovery phase. Do not call tools, do not emit tool-call markup, and reply directly to the user in their language. Use only the conversation context below; be transparent if it lacks evidence.`
+  await onMessage(chatModelMessageEvent(audit, 'model_request', {
+    instructions: recoveryInstructions,
+    prompt,
+  }))
+  try {
+    const recovery = await generateText({
+      model: modelWithChatHttpAuditContext(
+        textModelForProvider(provider, modelName, protocol),
+        () => audit,
+      ),
+      instructions: recoveryInstructions,
+      prompt,
+    })
+    await onMessage(chatModelMessageEvent(audit, 'model_response', { text: recovery.text }))
+    return recovery.text.trim()
+  } catch (error) {
+    await onMessage(chatModelMessageEvent(
+      audit,
+      'model_error',
+      modelErrorEvidenceFromUnknown(error),
+    ))
+    throw error
+  }
 }
 
 export function genericSkillRuntimeEnabled() {
@@ -317,8 +378,34 @@ export function chatAgentLogEventFromModelMessage(
     event_type: eventType,
     phase: event.phase,
     status: event.direction === 'model_error' ? 'error' : 'completed',
-    payload: event.payload,
+    payload: { ...event.payload, callId: event.callId, occurredAt: event.occurredAt },
     usage: usageFromPayload(event.payload),
+  }
+}
+
+export function chatAgentLogEventFromHttpAudit(
+  event: ModelHttpAuditEvent,
+  context: ChatAgentLogContext,
+): AgentLogEventInput {
+  const eventType = {
+    http_request: 'llm/http-request',
+    http_response: 'llm/http-response',
+    http_error: 'llm/http-error',
+  }[event.direction]
+  return {
+    stream_kind: 'chat',
+    stream_key: `chat:${context.sessionId}`,
+    session_id: context.sessionId,
+    turn_id: context.turnId,
+    step_id: String(event.step),
+    event_type: eventType,
+    phase: event.phase,
+    status: event.direction === 'http_error'
+      ? 'error'
+      : event.direction === 'http_request'
+        ? 'running'
+        : 'completed',
+    payload: { ...event.payload, callId: event.callId, occurredAt: event.occurredAt },
   }
 }
 
@@ -455,6 +542,7 @@ export function chatStatusForAgentStep(
     plan: { label: '正在制定 Skill 执行计划', detail: '正在拆解任务和验证要求' },
     references: { label: '正在读取 Skill 参考资料', detail: '正在补充工作所需的参考内容' },
     execute: { label: '正在执行 Skill 工作流', detail: '正在调用工具并生成内容' },
+    finalize: { label: '正在整理最终回答', detail: '正在根据已有工具结果生成最终交付内容' },
     validate: { label: '正在校验 Skill 输出', detail: '正在检查文章是否满足工作流要求' },
     revise: { label: '正在修订 Skill 输出', detail: '正在根据校验结果完善内容' },
   }
@@ -713,7 +801,19 @@ export async function POST(request: NextRequest) {
       }, logContext)
     }
     const modelConfig = await configuredTextModel()
-    const provider = openaiProviderFromConfig(modelConfig)
+    const auditedFetch = createModelHttpAuditFetch({
+      onEvent: event => persistChatAgentLogEvent(
+        chatAgentLogEventFromHttpAudit(event, logContext),
+      ),
+      registerTask: task => {
+        try {
+          after(() => task)
+        } catch {
+          // Lifecycle registration must not change Chat model behavior.
+        }
+      },
+    })
+    const provider = openaiProviderFromConfig(modelConfig, { fetch: auditedFetch })
     const model = textModelForProvider(provider, modelConfig.modelName, modelConfig.protocol)
     const currentRequest = [...messages].reverse().find(message => message.role === 'user')
     const currentRequestText = currentRequest ? messageText(currentRequest) : ''
@@ -934,8 +1034,13 @@ export async function POST(request: NextRequest) {
     const streamBlocks = new Map<number, Record<string, unknown>[]>()
     const finishedStreamSteps = new Set<number>()
     let lastStreamStep = 0
+    const legacyAuditByStep = new Map<number, ModelHttpAuditContext>()
+    let activeLegacyAudit: ModelHttpAuditContext | undefined
+    const legacyModel = modelWithChatHttpAuditContext(model, () => (
+      activeLegacyAudit ?? newChatModelAuditCall('execute', Math.max(1, lastStreamStep))
+    ))
     const result = streamText({
-      model,
+      model: legacyModel,
       instructions,
       messages: modelMessages,
       tools: executionTools,
@@ -943,12 +1048,15 @@ export async function POST(request: NextRequest) {
       prepareStep: async ({ stepNumber }) => {
         const trajectoryStep = stepNumber + 1
         lastStreamStep = trajectoryStep
+        const audit = newChatModelAuditCall('execute', trajectoryStep)
+        activeLegacyAudit = audit
+        legacyAuditByStep.set(trajectoryStep, audit)
         streamBlocks.set(trajectoryStep, [])
         await persistChatAgentSessionEvent({
           type: 'step/start',
           turn: logContext.turn ?? 1,
           step: trajectoryStep,
-          data: { turn: logContext.turn ?? 1, step: trajectoryStep },
+          data: { turn: logContext.turn ?? 1, step: trajectoryStep, phase: 'execute' },
         }, logContext)
         await persistChatAgentSessionEvent({
           type: 'request/header',
@@ -957,6 +1065,7 @@ export async function POST(request: NextRequest) {
           data: {
             turn: logContext.turn ?? 1,
             step: trajectoryStep,
+            phase: 'execute',
             request: {
               instructions,
               messages: modelMessages,
@@ -964,17 +1073,15 @@ export async function POST(request: NextRequest) {
             },
           },
         }, logContext)
-        await persistChatAgentLogEvent(chatSessionEvent(logContext, {
-          event_type: 'llm/request',
-          phase: 'execute',
-          status: 'running',
-          payload: {
+        await persistChatAgentLogEvent(chatAgentLogEventFromModelMessage(
+          chatModelMessageEvent(audit, 'model_request', {
             stepNumber,
             instructions,
             messages: modelMessages,
             toolNames: Object.keys(executionTools),
-          },
-        }))
+          }),
+          logContext,
+        ))
         return skillAwareStepPolicy(stepNumber, runtime.snapshot(), instructions)
       },
       onChunk: async ({ chunk }) => {
@@ -1028,29 +1135,35 @@ export async function POST(request: NextRequest) {
       onStepFinish: async ({ text, toolCalls, toolResults, finishReason, usage }) => {
         const turn = logContext.turn ?? 1
         const step = lastStreamStep || 1
+        const audit = legacyAuditByStep.get(step) ?? newChatModelAuditCall('execute', step)
         for (const result of toolResults) {
           const event = chatAgentSessionEventFromToolResult(result, { turn, step })
           if (!event || auditedToolResultKeys.has(toolResultKey(turn, step, event.data.callId as string))) continue
           await persistChatAgentSessionEvent(event, logContext)
         }
-        await persistChatAgentLogEvent(chatSessionEvent(logContext, {
-          event_type: 'llm/response',
-          phase: 'execute',
-          status: 'completed',
-          payload: { text, toolCalls, toolResults, finishReason },
-          usage: usage as unknown as Record<string, unknown>,
-        }))
+        const event = chatAgentLogEventFromModelMessage(
+          chatModelMessageEvent(audit, 'model_response', {
+            text, toolCalls, toolResults, finishReason, usage,
+          }),
+          logContext,
+        )
+        event.usage = usage as unknown as Record<string, unknown>
+        await persistChatAgentLogEvent(event)
       },
-      onError: async error => {
-        await persistChatAgentLogEvent(chatSessionEvent(logContext, {
-          event_type: 'llm/error',
-          phase: 'execute',
-          status: 'error',
-          payload: { error: error instanceof Error ? error.message : String(error) },
-        }))
+      onError: async ({ error }) => {
+        const step = lastStreamStep || 1
+        const audit = legacyAuditByStep.get(step) ?? newChatModelAuditCall('execute', step)
+        const errorEvidence = modelErrorEvidenceFromUnknown(error)
+        await persistChatAgentLogEvent(chatAgentLogEventFromModelMessage(
+          chatModelMessageEvent(audit, 'model_error', errorEvidence),
+          logContext,
+        ))
         await finishCanonicalTurn({
           kind: 'error',
-          error: error instanceof Error ? error.message : String(error),
+          error: typeof errorEvidence.message === 'string'
+            ? errorEvidence.message
+            : '[unavailable model error evidence]',
+          modelError: errorEvidence,
         })
       },
     })
@@ -1079,12 +1192,17 @@ export async function POST(request: NextRequest) {
                 let parts = responseMessage.parts
                 if (!pendingApproval && needsFinalAnswerFallback(messageText(responseMessage))) {
                   try {
+                    const recoveryAudit = newChatModelAuditCall('finalize', (lastStreamStep || 1) + 1)
                     const recoveredText = await recoverFinalAnswer({
                       provider,
                       modelName: modelConfig.modelName,
                       protocol: modelConfig.protocol,
                       messages,
                       instructions,
+                      audit: recoveryAudit,
+                      onMessage: event => persistChatAgentLogEvent(
+                        chatAgentLogEventFromModelMessage(event, logContext),
+                      ),
                     })
                     if (!needsFinalAnswerFallback(recoveredText)) parts = [{ type: 'text', text: recoveredText }]
                   } catch {

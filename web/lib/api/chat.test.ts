@@ -231,4 +231,23 @@ describe('chat API client', () => {
       { type: 'tool-input-available', toolCallId: 'call-1', toolName: 'searchInformationSources', input: { q: 'AI' } },
     ])
   })
+
+  it('delivers a stream error event and then rejects the consumer', async () => {
+    const encoder = new TextEncoder()
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode('data: {"type":"text-delta","id":"part-1","delta":"已生成的回答"}\n\ndata: {"type":"error","errorText":"Unable to persist chat message (422)"}\n\n'))
+        controller.close()
+      },
+    })
+    const events: Array<Record<string, unknown>> = []
+
+    await expect(consumeUIMessageStream(stream, event => events.push(event)))
+      .rejects.toThrow('Unable to persist chat message (422)')
+
+    expect(events).toEqual([
+      { type: 'text-delta', id: 'part-1', delta: '已生成的回答' },
+      { type: 'error', errorText: 'Unable to persist chat message (422)' },
+    ])
+  })
 })

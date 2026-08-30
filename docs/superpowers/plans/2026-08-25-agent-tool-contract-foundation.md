@@ -51,6 +51,7 @@ This plan implements Phase 1, the Tool Contract foundation. It deliberately does
 - `web/lib/ai/agent-capabilities.test.ts` — verify new snapshots, old-snapshot compatibility, and contract drift.
 - `web/lib/ai/agent-runtime.ts` — pass visible Tool Contracts to policy and snapshot builders, including the native `complete_goal` control tool.
 - `web/lib/ai/agent-runtime.test.ts` — verify visible contracts follow allowlists and control tools stay scoped.
+- `web/lib/ai/daily-creation-agent-integration.test.ts` — keep the scheduled Agent integration fixture aligned with the required `toolRegistry()` runtime interface.
 
 ---
 
@@ -64,7 +65,7 @@ This plan implements Phase 1, the Tool Contract foundation. It deliberately does
 - Consumes: `mcp.server.fastmcp.FastMCP`, `mcp.types.ToolAnnotations`.
 - Produces: `EDIORA_TOOL_META_KEY`, `ToolNamespace`, `ApprovalMode`, `ConcurrencyMode`, `RetryMode`, and `ediora_tool(mcp, *, namespace, read_only, destructive, idempotent, open_world, approval, concurrency, retry, version="1")`.
 
-- [ ] **Step 1: Write a failing decorator contract test**
+- [x] **Step 1: Write a failing decorator contract test**
 
 Create an isolated FastMCP instance in `backend/tests/test_mcp_tool_contracts.py` and assert the emitted MCP definition:
 
@@ -116,7 +117,7 @@ def test_ediora_tool_emits_standard_annotations_and_namespaced_metadata():
 
 Also add parametrized rejection cases for unknown namespace, `read_only=True` with `approval="writes"`, and `concurrency="parallel-safe"` on a write.
 
-- [ ] **Step 2: Run the test and verify it fails**
+- [x] **Step 2: Run the test and verify it fails**
 
 Run from the repository root:
 
@@ -127,7 +128,7 @@ Run from the repository root:
 
 Expected: FAIL because `backend/tool_contracts.py` does not exist.
 
-- [ ] **Step 3: Implement the decorator and validation**
+- [x] **Step 3: Implement the decorator and validation**
 
 Create `backend/tool_contracts.py` with literal types and fail-fast validation:
 
@@ -199,11 +200,11 @@ def ediora_tool(
     )
 ```
 
-- [ ] **Step 4: Run the test and verify it passes**
+- [x] **Step 4: Run the test and verify it passes**
 
 Run the same pytest command. Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/tool_contracts.py backend/tests/test_mcp_tool_contracts.py
@@ -247,7 +248,7 @@ Use this exact contract matrix:
 
 All rows use `read_only=True`, `destructive=False`, `idempotent=True`, `approval="never"`, `concurrency="parallel-safe"`, and `retry="safe"`.
 
-- [ ] **Step 1: Add a failing exhaustive read-contract test**
+- [x] **Step 1: Add a failing exhaustive read-contract test**
 
 In `backend/tests/test_mcp_tool_contracts.py`, import `mcp_server`, read `await mcp.list_tools()`, and assert every row above has the exact namespace and standard annotations. Assert the set contains all 18 names in the matrix so a forgotten decorator fails loudly.
 
@@ -261,7 +262,7 @@ assert "not x subscription" in descriptions["get_github_daily_trending"].lower()
 assert "not user-managed writing plans" in descriptions["get_content_directions"].lower()
 ```
 
-- [ ] **Step 2: Run the focused backend test and verify it fails**
+- [x] **Step 2: Run the focused backend test and verify it fails**
 
 ```bash
 /home/violet/miniconda3/envs/wems/bin/python -m pytest \
@@ -270,7 +271,7 @@ assert "not user-managed writing plans" in descriptions["get_content_directions"
 
 Expected: FAIL because current definitions have no annotations or Ediora metadata.
 
-- [ ] **Step 3: Replace the 18 read decorators and edit their docstrings**
+- [x] **Step 3: Replace the 18 read decorators and edit their docstrings**
 
 Import `ediora_tool` next to the MCP imports. Replace each `@mcp.tool()` with the matrix-backed decorator. Use this pattern:
 
@@ -304,7 +305,7 @@ async def search_source_items(
 
 Apply the exact boundary text from the table to each tool without changing its parameters or implementation.
 
-- [ ] **Step 4: Run related MCP contract regressions**
+- [x] **Step 4: Run related MCP contract regressions**
 
 ```bash
 /home/violet/miniconda3/envs/wems/bin/python -m pytest \
@@ -315,7 +316,7 @@ Apply the exact boundary text from the table to each tool without changing its p
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/mcp_server.py backend/tests/test_mcp_tool_contracts.py
@@ -351,7 +352,7 @@ Use this exact write matrix:
 
 All rows use `read_only=False`, `approval="writes"`, and `concurrency="serialized"`.
 
-- [ ] **Step 1: Add a failing exhaustive write-contract test**
+- [x] **Step 1: Add a failing exhaustive write-contract test**
 
 Assert every matrix row has the exact standard annotations and Ediora metadata. Add these behavioral alignment assertions:
 
@@ -364,11 +365,11 @@ assert contracts["save_draft"].meta[EDIORA_TOOL_META_KEY]["approval"] == "writes
 
 Assert the union of the read and write inventories equals the complete set returned by `mcp.list_tools()` so every first-party MCP tool is covered.
 
-- [ ] **Step 2: Run the test and verify it fails**
+- [x] **Step 2: Run the test and verify it fails**
 
 Run `backend/tests/test_mcp_tool_contracts.py`. Expected: FAIL on the first unannotated write tool.
 
-- [ ] **Step 3: Replace write decorators without changing handlers**
+- [x] **Step 3: Replace write decorators without changing handlers**
 
 Apply the exact matrix. Improve each write description to name the created or overwritten artifact, required IDs, idempotency behavior, and returned evidence. Do not fix unrelated handler behavior, database logic, or the existing public API in this task.
 
@@ -399,7 +400,7 @@ async def attach_creative_asset_to_draft(
     """
 ```
 
-- [ ] **Step 4: Run write-tool regressions**
+- [x] **Step 4: Run write-tool regressions**
 
 ```bash
 /home/violet/miniconda3/envs/wems/bin/python -m pytest \
@@ -410,7 +411,7 @@ async def attach_creative_asset_to_draft(
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add backend/mcp_server.py backend/tests/test_mcp_tool_contracts.py
@@ -430,7 +431,7 @@ git commit -m "feat: annotate MCP write tools"
 - Consumes: `ListToolsResult` from `@ai-sdk/mcp`, AI SDK `ToolSet`, existing `stableJson`/`sha256Text` behavior.
 - Produces: `TOOL_NAMESPACES`, `ToolNamespace`, `ToolContract`, `ToolContractMetadata`, `ToolContractDiagnostic`, `normalizeMcpToolContract`, `normalizeNativeToolContract`, `legacyToolContract`, and `contractDigest`.
 
-- [ ] **Step 1: Write failing normalization tests**
+- [x] **Step 1: Write failing normalization tests**
 
 Create `web/lib/ai/tool-contract.test.ts` with a realistic MCP definition:
 
@@ -462,7 +463,7 @@ Assert normalization preserves the input schema, yields `availability: "availabl
 
 Add a legacy fallback test asserting `save_legacy_record` becomes a serialized, claim-backed write with a `legacy-contract` warning rather than read-only.
 
-- [ ] **Step 2: Run the focused Vitest file and verify it fails**
+- [x] **Step 2: Run the focused Vitest file and verify it fails**
 
 From `web`:
 
@@ -472,7 +473,7 @@ pnpm exec vitest run lib/ai/tool-contract.test.ts
 
 Expected: FAIL because `tool-contract.ts` does not exist.
 
-- [ ] **Step 3: Implement canonical types and normalization**
+- [x] **Step 3: Implement canonical types and normalization**
 
 Move `stableJson` and `sha256Text` from `agent-capabilities.ts` into `tool-contract.ts` and re-export them so existing imports remain explicit. Define:
 
@@ -554,7 +555,7 @@ export function legacyToolContract(
 
 For native contracts, require the metadata fields explicitly and read description/input/output schemas from the actual AI SDK tool. For legacy fallback, preserve the current conservative name predicate in this module and return a `legacy-contract` diagnostic.
 
-- [ ] **Step 4: Update capability utility imports and run tests**
+- [x] **Step 4: Update capability utility imports and run tests**
 
 Change `agent-capabilities.ts` to import `stableJson` and `sha256Text` from `./tool-contract`. Run:
 
@@ -566,7 +567,7 @@ pnpm exec vitest run \
 
 Expected: PASS with no behavior change in existing capability tests.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add web/lib/ai/tool-contract.ts web/lib/ai/tool-contract.test.ts \
@@ -586,7 +587,7 @@ git commit -m "feat: normalize agent tool contracts"
 - Consumes: `ToolContract` normalization from Task 4, MCP `ListToolsResult`, and AI SDK `ToolSet`.
 - Produces: `ToolRegistry`, `buildToolRegistry`, `contractsForTools`, `registryContractRecord`, and deterministic diagnostics.
 
-- [ ] **Step 1: Write failing Registry tests**
+- [x] **Step 1: Write failing Registry tests**
 
 Test these cases with small fake definitions and executable tools:
 
@@ -609,7 +610,7 @@ export type ToolRegistry = {
 }
 ```
 
-- [ ] **Step 2: Run and verify the test fails**
+- [x] **Step 2: Run and verify the test fails**
 
 ```bash
 pnpm exec vitest run lib/ai/tool-registry.test.ts
@@ -617,7 +618,7 @@ pnpm exec vitest run lib/ai/tool-registry.test.ts
 
 Expected: FAIL because the Registry module does not exist.
 
-- [ ] **Step 3: Implement deterministic pairing**
+- [x] **Step 3: Implement deterministic pairing**
 
 Implement:
 
@@ -634,7 +635,7 @@ Pair by exact tool name. Reject duplicate definitions. For an MCP definition, no
 
 Implement `contractsForTools(registry, names)` so later allowlist code gets a filtered `ReadonlyMap` without changing contracts.
 
-- [ ] **Step 4: Run contract and Registry tests**
+- [x] **Step 4: Run contract and Registry tests**
 
 ```bash
 pnpm exec vitest run \
@@ -644,7 +645,7 @@ pnpm exec vitest run \
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add web/lib/ai/tool-registry.ts web/lib/ai/tool-registry.test.ts
@@ -663,7 +664,7 @@ git commit -m "feat: add agent tool registry"
 - Consumes: `buildToolRegistry`, `ToolRegistry`, `client.listTools()`, and `client.toolsFromDefinitions()`.
 - Produces: `ChatSkillRuntime.toolRegistry()`, explicit native contracts for `generateImage`, `loadSkill`, and `readSkillReference`, and unchanged callable tools.
 
-- [ ] **Step 1: Change the MCP mock and add failing integration assertions**
+- [x] **Step 1: Change the MCP mock and add failing integration assertions**
 
 Replace the current `mcp.tools` mock with:
 
@@ -690,7 +691,7 @@ expect(Object.keys(runtime.tools)).toEqual(expect.arrayContaining([
 
 Add a scheduled-mode assertion that blocked upload tools are absent from both `runtime.tools` and `runtime.toolRegistry().contracts`.
 
-- [ ] **Step 2: Run the integration test and verify it fails**
+- [x] **Step 2: Run the integration test and verify it fails**
 
 ```bash
 pnpm exec vitest run lib/ai/global-chat-tools.test.ts
@@ -698,7 +699,7 @@ pnpm exec vitest run lib/ai/global-chat-tools.test.ts
 
 Expected: FAIL because production still calls `client.tools()` and exposes no Registry.
 
-- [ ] **Step 3: Add explicit native contract constants**
+- [x] **Step 3: Add explicit native contract constants**
 
 Define native metadata next to the native tool schemas:
 
@@ -724,7 +725,7 @@ const NATIVE_TOOL_CONTRACTS = {
 
 Only pass entries for native tools actually present in `runtime.tools`; `loadSkill` is absent when a Skill is already active.
 
-- [ ] **Step 4: Discover once and build the Registry**
+- [x] **Step 4: Discover once and build the Registry**
 
 Replace `client.tools()` with one raw discovery call:
 
@@ -735,7 +736,7 @@ const discovered = client.toolsFromDefinitions(definitions)
 
 Filter blocked names from both `definitions.tools` and `discovered`. First build a base Registry from the filtered MCP tools plus `generateImage`. Pass that Registry to `createChatSkillRuntime` as `baseToolRegistry`; after it adds the conditional `loadSkill` and the always-present `readSkillReference`, rebuild the Registry with only the native contracts that correspond to present tools. Extend `ChatSkillRuntime` with `toolRegistry(): ToolRegistry`. When `createChatSkillRuntime` is called directly without a base Registry, build a compatibility-mode Registry from `baseTools` so existing callers and tests remain valid. Preserve the current tool objects and policy wrapping so Phase 1 changes metadata, not user-visible availability.
 
-- [ ] **Step 5: Run global tool and Skill regressions**
+- [x] **Step 5: Run global tool and Skill regressions**
 
 ```bash
 pnpm exec vitest run \
@@ -746,7 +747,7 @@ pnpm exec vitest run \
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add web/lib/ai/global-chat-tools.ts web/lib/ai/global-chat-tools.test.ts
@@ -766,7 +767,7 @@ git commit -m "feat: register global agent tool contracts"
 - Consumes: `ReadonlyMap<string, ToolContract>` from the Registry.
 - Produces: `requiresToolApproval(name, contract?)`, `toolExecutionMetadata(name, contract?)`, and contract-aware `applyAgentToolPolicy` options.
 
-- [ ] **Step 1: Add failing explicit-policy tests**
+- [x] **Step 1: Add failing explicit-policy tests**
 
 Add a `contract()` fixture and prove semantics override misleading names:
 
@@ -811,7 +812,7 @@ expect(requiresToolApproval(
 
 Assert a contract marked `parallel-safe` actually runs concurrently even when its name lacks a read prefix, and a `serialized` contract remains serialized. Keep an existing test proving an unknown legacy `save_item` is conservatively gated.
 
-- [ ] **Step 2: Run and verify failures**
+- [x] **Step 2: Run and verify failures**
 
 ```bash
 pnpm exec vitest run lib/ai/agent-tool-policy.test.ts
@@ -819,7 +820,7 @@ pnpm exec vitest run lib/ai/agent-tool-policy.test.ts
 
 Expected: FAIL because current policy accepts only names.
 
-- [ ] **Step 3: Implement contract-first policy**
+- [x] **Step 3: Implement contract-first policy**
 
 Extend `AgentToolPolicyOptions`:
 
@@ -836,7 +837,7 @@ Use contract annotations when present. Compute `sideEffecting` from `readOnly`, 
 
 Pass `runtime.toolRegistry().contracts` from `openGlobalAgentTools` into `applyAgentToolPolicy`.
 
-- [ ] **Step 4: Run policy and global-tool regressions**
+- [x] **Step 4: Run policy and global-tool regressions**
 
 ```bash
 pnpm exec vitest run \
@@ -846,7 +847,7 @@ pnpm exec vitest run \
 
 Expected: PASS and existing automatic/interative behavior remains unchanged for current tools.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add web/lib/ai/agent-tool-policy.ts web/lib/ai/agent-tool-policy.test.ts \
@@ -868,7 +869,7 @@ git commit -m "feat: enforce explicit agent tool policy"
 - Consumes: Registry contract maps and existing schema-version-1 snapshots.
 - Produces: optional `namespace`, `version`, `outputSchemaDigest`, `contractDigest`, and `availability` fields in `ToolCapabilityDescriptor`; contract-aware snapshot construction and backward-compatible drift detection.
 
-- [ ] **Step 1: Add failing snapshot tests**
+- [x] **Step 1: Add failing snapshot tests**
 
 Add tests asserting a new snapshot contains:
 
@@ -892,7 +893,7 @@ Add three compatibility cases:
 
 Add an Agent runtime test showing a profile allowlist filters both visible tools and the contracts used in its capability snapshot.
 
-- [ ] **Step 2: Run and verify failures**
+- [x] **Step 2: Run and verify failures**
 
 ```bash
 pnpm exec vitest run \
@@ -902,7 +903,7 @@ pnpm exec vitest run \
 
 Expected: FAIL because snapshots do not accept Registry contracts.
 
-- [ ] **Step 3: Extend descriptors compatibly**
+- [x] **Step 3: Extend descriptors compatibly**
 
 Keep `schemaVersion: 1` during Phase 1. Add the new fields as optional so persisted snapshots remain readable:
 
@@ -928,11 +929,11 @@ Extend `buildAgentCapabilitySnapshot` with `contracts?: ReadonlyMap<string, Tool
 
 In drift comparison, compare each new field only when both expected and actual descriptors define it. This lets old running jobs continue while ensuring new jobs detect contract changes.
 
-- [ ] **Step 4: Pass filtered contracts through Agent runtime**
+- [x] **Step 4: Pass filtered contracts through Agent runtime**
 
 Use `registry.toolRegistry()` to obtain contracts, filter them with the same `allowedToolNames` used by `visibleTools()`, and pass them to the snapshot builder. Define an explicit `complete_goal` native contract in `agent-runtime.ts` under namespace `system`; pass it to its policy wrapper while keeping it excluded from the ordinary visible-tool snapshot as existing tests require.
 
-- [ ] **Step 5: Run capability and runtime regressions**
+- [x] **Step 5: Run capability and runtime regressions**
 
 ```bash
 pnpm exec vitest run \
@@ -947,7 +948,7 @@ pnpm exec vitest run \
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add web/lib/ai/agent-capabilities.ts web/lib/ai/agent-capabilities.test.ts \
@@ -967,7 +968,7 @@ git commit -m "feat: snapshot agent tool contracts"
 - Consumes: complete backend and frontend contract foundation.
 - Produces: evidence that all first-party tools are covered, current runtime behavior remains intact, and documentation matches the implementation boundary.
 
-- [ ] **Step 1: Run the exhaustive backend contract and MCP tests**
+- [x] **Step 1: Run the exhaustive backend contract and MCP tests**
 
 ```bash
 /home/violet/miniconda3/envs/wems/bin/python -m pytest \
@@ -980,7 +981,7 @@ git commit -m "feat: snapshot agent tool contracts"
 
 Expected: all selected tests PASS with zero failures.
 
-- [ ] **Step 2: Run the focused frontend Tool Registry and Agent regressions**
+- [x] **Step 2: Run the focused frontend Tool Registry and Agent regressions**
 
 From `web`:
 
@@ -998,7 +999,7 @@ pnpm exec vitest run \
 
 Expected: all selected tests PASS with zero failures.
 
-- [ ] **Step 3: Run changed-file lint and TypeScript validation**
+- [x] **Step 3: Run changed-file lint and TypeScript validation**
 
 From `web`:
 
@@ -1015,7 +1016,7 @@ pnpm exec tsc --noEmit --incremental false
 
 Expected: changed-file ESLint passes. TypeScript passes; if unrelated pre-existing errors remain, record their exact paths and confirm none originates in a changed file before proceeding.
 
-- [ ] **Step 4: Inspect the live MCP contract catalog**
+- [x] **Step 4: Inspect the live MCP contract catalog**
 
 From the repository root:
 
@@ -1042,7 +1043,7 @@ PY
 
 Expected: 28 tool/namespace lines and exit code 0.
 
-- [ ] **Step 5: Check the final diff and commit verification-only fixes if any**
+- [x] **Step 5: Check the final diff and commit verification-only fixes if any**
 
 ```bash
 git diff --check
@@ -1060,7 +1061,8 @@ git add backend/tool_contracts.py backend/mcp_server.py \
   web/lib/ai/global-chat-tools.ts web/lib/ai/global-chat-tools.test.ts \
   web/lib/ai/agent-tool-policy.ts web/lib/ai/agent-tool-policy.test.ts \
   web/lib/ai/agent-capabilities.ts web/lib/ai/agent-capabilities.test.ts \
-  web/lib/ai/agent-runtime.ts web/lib/ai/agent-runtime.test.ts
+  web/lib/ai/agent-runtime.ts web/lib/ai/agent-runtime.test.ts \
+  web/lib/ai/daily-creation-agent-integration.test.ts
 git commit -m "fix: complete agent tool contract verification"
 ```
 

@@ -405,6 +405,11 @@ def test_persists_capability_snapshot_without_bodies(client):
             "name": "search_drafts",
             "description": "Search drafts",
             "inputSchemaDigest": "c" * 64,
+            "outputSchemaDigest": "d" * 64,
+            "namespace": "drafts",
+            "version": "1",
+            "contractDigest": "e" * 64,
+            "availability": "available",
             "sideEffecting": False,
             "needsApproval": False,
             "replayPolicy": "replayable",
@@ -448,6 +453,14 @@ def test_persists_capability_snapshot_without_bodies(client):
             },
         },
         {**snapshot, "tools": snapshot["tools"] * 257},
+        {
+            **snapshot,
+            "tools": [{**snapshot["tools"][0], "namespace": "unknown"}],
+        },
+        {
+            **snapshot,
+            "tools": [{**snapshot["tools"][0], "contractDigest": "not-a-digest"}],
+        },
         {
             **snapshot,
             "policy": {"approvalPolicy": "interactive", "allowedToolNames": ["x" * 201]},

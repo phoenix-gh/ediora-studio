@@ -46,6 +46,7 @@ export type AgentRuntimeGoalEvidence = {
 }
 
 export type AgentModelMessageEvent = {
+  callId: string
   phase: string
   step?: number
   direction: 'model_request' | 'model_response' | 'model_error'
@@ -76,7 +77,7 @@ export type AgentCompletionEvidence =
     }
 
 export type AgentStepCheckpoint = {
-  phase: 'plan' | 'references' | 'execute' | 'validate' | 'revise'
+  phase: 'plan' | 'references' | 'execute' | 'finalize' | 'validate' | 'revise'
   parts?: Record<string, unknown>[]
   detail?: unknown
 }

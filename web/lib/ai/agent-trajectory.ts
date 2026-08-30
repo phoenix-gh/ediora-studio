@@ -55,6 +55,7 @@ export type TrajectoryGroup = {
   kind: 'message' | 'step'
   turn: number
   step: number | null
+  phase: string | null
   cells: TrajectoryCell[]
 }
 
@@ -166,6 +167,10 @@ function eventStep(event: AgentSessionEvent): number | null {
   return event.step ?? numberValue(event.data.step) ?? null
 }
 
+function eventPhase(event: AgentSessionEvent): string | null {
+  return stringValue(event.data.phase) ?? null
+}
+
 function timestamp(value: unknown): number | null {
   if (typeof value === 'number' && Number.isFinite(value)) return value
   if (typeof value === 'string') {
@@ -241,8 +246,21 @@ function groupKey(step: number | null): string {
   return step === null ? 'message' : `step:${step}`
 }
 
-function groupTitle(step: number | null): string {
-  return step === null ? 'Message' : `Step ${step}`
+const phaseLabels: Readonly<Record<string, string>> = {
+  skill_selection: '技能选择',
+  plan: '规划',
+  references: '读取参考资料',
+  execute: '执行',
+  finalize: '收尾',
+  validate: '校验',
+  revise: '修订',
+}
+
+function groupTitle(step: number | null, phase: string | null): string {
+  if (step === null) return 'Message'
+  const callTitle = `模型调用 ${step}`
+  const phaseLabel = phase ? phaseLabels[phase] : undefined
+  return phaseLabel ? `${phaseLabel} · ${callTitle}` : callTitle
 }
 
 function ensureTurn(turns: Map<number, MutableTurn>, turnNumber: number): MutableTurn {
@@ -259,16 +277,23 @@ function ensureTurn(turns: Map<number, MutableTurn>, turnNumber: number): Mutabl
   return created
 }
 
-function ensureGroup(turn: MutableTurn, step: number | null): MutableGroup {
+function ensureGroup(turn: MutableTurn, step: number | null, phase: string | null = null): MutableGroup {
   const key = groupKey(step)
   const existing = turn.groups.get(key)
-  if (existing) return existing
+  if (existing) {
+    if (phase && existing.phase !== phase) {
+      existing.phase = phase
+      existing.title = groupTitle(step, phase)
+    }
+    return existing
+  }
   const created: MutableGroup = {
     recordId: `group:${turn.turn}:${key}`,
-    title: groupTitle(step),
+    title: groupTitle(step, phase),
     kind: step === null ? 'message' : 'step',
     turn: turn.turn,
     step,
+    phase,
     cells: [],
   }
   turn.groups.set(key, created)
@@ -469,7 +494,7 @@ export function deriveAgentTrajectory(
     }
 
     if (event.type === 'step/start') {
-      ensureGroup(turn, step)
+      ensureGroup(turn, step, eventPhase(event))
       continue
     }
 
@@ -621,6 +646,7 @@ export function deriveAgentTrajectory(
       kind: group.kind,
       turn: group.turn,
       step: group.step,
+      phase: group.phase,
       cells: group.cells.map(cell => publicCell(cell as MutableTool)),
     })),
   }))

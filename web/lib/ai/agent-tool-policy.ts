@@ -1,5 +1,6 @@
 import type { ToolSet } from 'ai'
 
+import { legacyToolContract, type ToolContract } from './tool-contract'
 import type {
   AgentApprovalPolicy,
   AgentToolAudit,
@@ -12,7 +13,8 @@ const auditValueLimit = 8_000
 const auditErrorLimit = 2_000
 const auditEvidenceIdLimit = 500
 
-export function requiresToolApproval(name: string) {
+export function requiresToolApproval(name: string, contract?: ToolContract) {
+  if (contract) return contract.annotations.approval !== 'never'
   return name !== 'generateImage'
     && name !== 'readSkillReference'
     && !readOnlyToolPrefix.test(name)
@@ -27,7 +29,21 @@ export type AgentToolExecutionMetadata = {
   idempotencyPolicy: AgentIdempotencyPolicy
 }
 
-export function toolExecutionMetadata(name: string): AgentToolExecutionMetadata {
+export function toolExecutionMetadata(
+  name: string,
+  contract?: ToolContract,
+): AgentToolExecutionMetadata {
+  if (contract) {
+    const idempotencyPolicy = contract.execution.retry === 'safe'
+      ? 'replayable'
+      : contract.execution.retry === 'claim-backed'
+        ? 'claim-backed'
+        : 'unknown'
+    return {
+      concurrencyPolicy: contract.execution.concurrency,
+      idempotencyPolicy,
+    }
+  }
   if (name === 'generateImage') {
     return { concurrencyPolicy: 'serialized', idempotencyPolicy: 'unknown' }
   }
@@ -115,6 +131,7 @@ export function resolveAgentToolPolicy(
 
 export type AgentToolPolicyOptions = {
   policy: AgentApprovalPolicy
+  contracts?: ReadonlyMap<string, ToolContract>
   beforeToolExecute?: (event: AgentToolAudit) => Promise<AgentToolDecision>
   onAudit?: (event: AgentToolAudit) => void | Promise<void>
 }
@@ -205,17 +222,22 @@ function completedAudit(started: AgentToolAudit, output: unknown): AgentToolAudi
 
 export function applyAgentToolPolicy(
   tools: ToolSet,
-  { policy, beforeToolExecute, onAudit }: AgentToolPolicyOptions,
+  { policy, contracts, beforeToolExecute, onAudit }: AgentToolPolicyOptions,
 ): ToolSet {
   const queues = new Map<string, Promise<void>>()
   return Object.fromEntries(Object.entries(tools).map(([toolName, original]) => {
     const source = original as ToolWithExecution
-    const sideEffecting = requiresToolApproval(toolName)
-    const metadata = toolExecutionMetadata(toolName)
-    const autoApproved = sideEffecting && policy === 'automatic'
+    const contract = contracts?.get(toolName)
+      ?? legacyToolContract(toolName, original).contract
+    const sideEffecting = contract ? !contract.annotations.readOnly : requiresToolApproval(toolName)
+    const metadata = toolExecutionMetadata(toolName, contract)
+    const approval = contract?.annotations.approval
+    const needsApproval = approval === 'always'
+      || (approval === 'writes' && policy === 'interactive')
+    const autoApproved = sideEffecting && approval === 'writes' && policy === 'automatic'
     const wrapped: ToolWithExecution = {
       ...source,
-      needsApproval: sideEffecting && policy === 'interactive',
+      needsApproval,
     }
     if (!source.execute) return [toolName, wrapped]
 

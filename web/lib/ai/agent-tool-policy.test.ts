@@ -10,6 +10,7 @@ import {
   toolExecutionMetadata,
 } from './agent-tool-policy'
 import type { AgentToolAudit } from './agent-runtime-types'
+import type { ToolContract } from './tool-contract'
 
 type ExecutableTool = {
   needsApproval?: boolean
@@ -29,6 +30,34 @@ function valueTool(onExecute: (value: string) => void = () => undefined) {
       return { id: 7, value }
     },
   })
+}
+
+function contract(
+  annotations: Partial<ToolContract['annotations']> = {},
+  execution?: ToolContract['execution'],
+): ToolContract {
+  const resolvedAnnotations = {
+    readOnly: true,
+    destructive: false,
+    idempotent: true,
+    openWorld: false,
+    approval: 'never' as const,
+    ...annotations,
+  }
+  return {
+    name: 'test_tool',
+    namespace: 'system',
+    version: '1',
+    description: 'Test one explicit policy contract.',
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    annotations: resolvedAnnotations,
+    execution: execution ?? (resolvedAnnotations.readOnly
+      ? { concurrency: 'parallel-safe', retry: 'safe' }
+      : { concurrency: 'serialized', retry: 'claim-backed' }),
+    availability: 'available',
+    contractDigest: 'a'.repeat(64),
+    source: 'native',
+  }
 }
 
 describe('Agent tool policy', () => {
@@ -56,6 +85,18 @@ describe('Agent tool policy', () => {
     expect(requiresToolApproval('record_content_usage')).toBe(true)
   })
 
+  it('uses explicit annotations instead of misleading tool names', () => {
+    expect(requiresToolApproval(
+      'get_but_actually_writes',
+      contract({ readOnly: false, idempotent: false, approval: 'writes' }),
+    )).toBe(true)
+    expect(requiresToolApproval(
+      'save_but_read_only',
+      contract({ readOnly: true, approval: 'never' }),
+    )).toBe(false)
+    expect(requiresToolApproval('save_item')).toBe(true)
+  })
+
   it('declares conservative concurrency and idempotency metadata', () => {
     expect(toolExecutionMetadata('list_drafts')).toEqual({
       concurrencyPolicy: 'parallel-safe', idempotencyPolicy: 'replayable',
@@ -67,6 +108,12 @@ describe('Agent tool policy', () => {
       concurrencyPolicy: 'serialized', idempotencyPolicy: 'unknown',
     })
     expect(toolExecutionMetadata('custom_tool')).toEqual({
+      concurrencyPolicy: 'serialized', idempotencyPolicy: 'unknown',
+    })
+    expect(toolExecutionMetadata(
+      'opaque_action',
+      contract({ readOnly: false }, { concurrency: 'serialized', retry: 'unsafe' }),
+    )).toEqual({
       concurrencyPolicy: 'serialized', idempotencyPolicy: 'unknown',
     })
   })
@@ -105,6 +152,78 @@ describe('Agent tool policy', () => {
     release[1]?.()
     await expect(first).resolves.toBe('first')
     await expect(second).resolves.toBe('second')
+  })
+
+  it('runs an explicitly parallel-safe tool concurrently despite an opaque name', async () => {
+    let active = 0
+    let maxActive = 0
+    const release: Array<() => void> = []
+    const explicit = contract({}, { concurrency: 'parallel-safe', retry: 'safe' })
+    const tools = applyAgentToolPolicy({
+      opaque_action: tool({
+        inputSchema: z.object({ value: z.string() }),
+        execute: async ({ value }) => new Promise(resolve => {
+          active += 1
+          maxActive = Math.max(maxActive, active)
+          release.push(() => {
+            active -= 1
+            resolve(value)
+          })
+        }),
+      }),
+    }, {
+      policy: 'automatic',
+      contracts: new Map([['opaque_action', explicit]]),
+    })
+
+    const first = executable(tools, 'opaque_action').execute(
+      { value: 'first' }, { toolCallId: 'first' },
+    )
+    const second = executable(tools, 'opaque_action').execute(
+      { value: 'second' }, { toolCallId: 'second' },
+    )
+    await vi.waitFor(() => expect(release).toHaveLength(2))
+    expect(maxActive).toBe(2)
+    release.forEach(resolve => resolve())
+    await expect(Promise.all([first, second])).resolves.toEqual(['first', 'second'])
+  })
+
+  it('keeps approval=always gated in automatic mode', () => {
+    const explicit = contract({
+      readOnly: false,
+      idempotent: false,
+      approval: 'always',
+    })
+    const tools = applyAgentToolPolicy({ opaque_action: valueTool() }, {
+      policy: 'automatic',
+      contracts: new Map([['opaque_action', explicit]]),
+    })
+
+    expect(executable(tools, 'opaque_action').needsApproval).toBe(true)
+  })
+
+  it('audits approval=never writes as side effects without prompting', async () => {
+    const audits: AgentToolAudit[] = []
+    const explicit = contract({
+      readOnly: false,
+      idempotent: false,
+      approval: 'never',
+    }, { concurrency: 'serialized', retry: 'unsafe' })
+    const tools = applyAgentToolPolicy({ generateImage: valueTool() }, {
+      policy: 'interactive',
+      contracts: new Map([['generateImage', explicit]]),
+      onAudit: event => { audits.push(event) },
+    })
+
+    expect(executable(tools, 'generateImage').needsApproval).toBe(false)
+    await executable(tools, 'generateImage').execute(
+      { value: 'prompt' }, { toolCallId: 'image-call' },
+    )
+    expect(audits[0]).toMatchObject({
+      sideEffecting: true,
+      autoApproved: false,
+      status: 'started',
+    })
   })
 
   it('automatically approves a sensitive tool and audits its real result', async () => {

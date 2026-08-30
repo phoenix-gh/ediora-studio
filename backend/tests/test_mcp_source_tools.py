@@ -157,6 +157,24 @@ def test_mcp_registers_only_read_only_source_queries(env):
     }.issubset(tools)
 
 
+def test_source_tool_schemas_constrain_types_and_search_window(env):
+    import mcp_server
+
+    tools = {tool.name: tool for tool in run(mcp_server.mcp.list_tools())}
+    supported = ["x", "wechat", "reddit", "youtube", "v2ex"]
+
+    get_source_type = tools["get_source_item"].inputSchema["properties"]["source_type"]
+    assert get_source_type["enum"] == supported
+
+    search_properties = tools["search_source_items"].inputSchema["properties"]
+    assert search_properties["source_type"]["enum"] == ["", *supported]
+    assert search_properties["days"]["minimum"] == 1
+    assert search_properties["days"]["maximum"] == 365
+
+    list_source_type = tools["list_source_subscriptions"].inputSchema["properties"]["source_type"]
+    assert list_source_type["enum"] == ["", *supported]
+
+
 def test_cross_source_search_uses_the_same_normalized_contract(env):
     seed_sources()
     import mcp_server

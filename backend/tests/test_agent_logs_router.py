@@ -185,10 +185,32 @@ def test_canonical_context_events_accept_derived_turn_and_step(client):
             "turn_id": "turn-2",
             "step_id": "1",
             "event_type": "step/start",
-            "payload": {"turn": 2, "step": 1},
+            "payload": {"turn": 2, "step": 1, "phase": "skill_selection"},
         },
     )
     assert step_start.status_code == 201, step_start.text
+    assert step_start.json()["data"]["phase"] == "skill_selection"
+
+    request_header = client.post(
+        "/api/agent-logs/events",
+        headers={"X-Worker-Token": TOKEN},
+        json={
+            "stream_kind": "chat",
+            "stream_key": "chat:14",
+            "session_id": 14,
+            "turn_id": "turn-2",
+            "step_id": "1",
+            "event_type": "request/header",
+            "payload": {
+                "turn": 2,
+                "step": 1,
+                "phase": "skill_selection",
+                "request": {"toolNames": ["search_source_items"]},
+            },
+        },
+    )
+    assert request_header.status_code == 201, request_header.text
+    assert request_header.json()["data"]["phase"] == "skill_selection"
 
     skill = client.post(
         "/api/agent-logs/events",

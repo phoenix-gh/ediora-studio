@@ -37,6 +37,15 @@ TurnEndKind = Literal[
     "max_tokens",
     "waiting_approval",
 ]
+ModelCallPhase = Literal[
+    "skill_selection",
+    "plan",
+    "references",
+    "execute",
+    "finalize",
+    "validate",
+    "revise",
+]
 
 
 class _StrictModel(BaseModel):
@@ -60,6 +69,7 @@ class _TurnEndData(_StrictModel):
 class _StepData(_StrictModel):
     turn: int = Field(gt=0)
     step: int = Field(gt=0)
+    phase: ModelCallPhase | None = None
 
 
 class _UserMessageData(_StrictModel):
@@ -123,6 +133,7 @@ class _ToolResultData(_StrictModel):
 class _RequestHeaderData(_StrictModel):
     turn: int = Field(gt=0)
     step: int | None = Field(default=None, gt=0)
+    phase: ModelCallPhase | None = None
     provider: str | None = Field(default=None, max_length=200)
     model: str | None = Field(default=None, max_length=200)
     headers: dict[str, str] | None = None

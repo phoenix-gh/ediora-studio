@@ -9,6 +9,7 @@ import {
   sha256Text,
 } from './agent-capabilities'
 import type { RegisteredSkill } from '../skills/registry'
+import type { ToolContract } from './tool-contract'
 
 const uploadedSkill: RegisteredSkill = {
   name: 'Alpha',
@@ -48,6 +49,26 @@ const baseSnapshot = {
     idempotencyPolicy: 'claim-backed' as const,
   }],
   policy: { approvalPolicy: 'automatic' as const, allowedToolNames: null },
+}
+
+const getDraftContract: ToolContract = {
+  name: 'get_draft',
+  namespace: 'drafts',
+  version: '1',
+  description: 'Read one full draft by known ID.',
+  inputSchema: { type: 'object', properties: { draft_id: { type: 'integer' } } },
+  outputSchema: { type: 'object', properties: { id: { type: 'integer' } } },
+  annotations: {
+    readOnly: true,
+    destructive: false,
+    idempotent: true,
+    openWorld: false,
+    approval: 'never',
+  },
+  execution: { concurrency: 'parallel-safe', retry: 'safe' },
+  availability: 'available',
+  contractDigest: 'c'.repeat(64),
+  source: 'mcp',
 }
 
 describe('Agent capability snapshots', () => {
@@ -128,6 +149,33 @@ describe('Agent capability snapshots', () => {
     ])
   })
 
+  it('records normalized Tool Contract identity and schema evidence', () => {
+    const snapshot = buildAgentCapabilitySnapshot({
+      mode: 'chat',
+      tools: {
+        get_draft: {
+          description: getDraftContract.description,
+          inputSchema: getDraftContract.inputSchema,
+          outputSchema: getDraftContract.outputSchema,
+          needsApproval: false,
+        },
+      } as unknown as ToolSet,
+      contracts: new Map([['get_draft', getDraftContract]]),
+      approvalPolicy: 'interactive',
+    })
+
+    expect(snapshot.tools[0]).toMatchObject({
+      name: 'get_draft',
+      namespace: 'drafts',
+      version: '1',
+      contractDigest: 'c'.repeat(64),
+      availability: 'available',
+      outputSchemaDigest: expect.stringMatching(/^[a-f0-9]{64}$/),
+      sideEffecting: false,
+      replayPolicy: 'replayable',
+    })
+  })
+
   it('records null when a Tool schema cannot be serialized stably', () => {
     const descriptors = buildToolCapabilityDescriptors({
       opaque: {
@@ -174,6 +222,28 @@ describe('Agent capability snapshots', () => {
         ...baseSnapshot.tools[0], idempotencyPolicy: 'unknown' as const,
       }],
     })).toBe('tools')
+  })
+
+  it('keeps old schema-version-1 snapshots compatible while detecting new contract drift', () => {
+    const oldSnapshot = baseSnapshot
+    const newTool = {
+      ...baseSnapshot.tools[0],
+      namespace: 'drafts' as const,
+      version: '1',
+      outputSchemaDigest: 'd'.repeat(64),
+      contractDigest: 'e'.repeat(64),
+      availability: 'available' as const,
+    }
+    const current = { ...baseSnapshot, tools: [newTool] }
+
+    expect(capabilitySnapshotDrift(oldSnapshot, current)).toBeUndefined()
+    expect(pinCapabilitySnapshot(oldSnapshot, current)).toBe(oldSnapshot)
+    expect(capabilitySnapshotDrift(current, {
+      ...current,
+      tools: [{ ...newTool, contractDigest: 'f'.repeat(64) }],
+    })).toBe('tools')
+    expect(capabilitySnapshotDrift(current, { ...current, tools: [{ ...newTool }] }))
+      .toBeUndefined()
   })
 
   it('allows the first run to pin a Skill after the prepared baseline', () => {
