@@ -203,6 +203,8 @@ function dependencies(job: DurableJob, options: {
         catalogContext: '',
         selectedSkill: undefined,
         prepare: vi.fn(),
+        prepareRun: vi.fn(),
+        executePrepared: vi.fn(),
         snapshot: () => ({
           source: 'manual' as const,
           activeSkillName: optionsForRuntime.skillName,

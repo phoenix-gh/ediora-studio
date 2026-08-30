@@ -1,7 +1,13 @@
 import { describe, expect, it, vi } from 'vitest'
 
 import type { RegisteredSkill, SkillReference } from '../skills/registry'
-import { executeSkillRunWithAiSdk, selectSkillForTurn, skillRunUIResponse } from './skill-run-ai-sdk'
+import {
+  executePreparedSkillRunWithAiSdk,
+  executeSkillRunWithAiSdk,
+  prepareSkillRunWithAiSdk,
+  selectSkillForTurn,
+  skillRunUIResponse,
+} from './skill-run-ai-sdk'
 
 const alpha: RegisteredSkill = {
   name: 'Alpha', description: 'Handles alpha tasks', version: '1.0.0', source: 'uploaded', enabled: true,
@@ -148,6 +154,47 @@ describe('generic SkillRun AI SDK adapter', () => {
     expect(executionPrompt).toContain('deliver: 交付结果')
     expect(executionPrompt).toContain('这是上一轮交付物。')
     expect(executionPrompt).toContain('required tools: search_assets')
+  })
+
+  it('prepares a serializable plan once and executes it without planning or loading again', async () => {
+    const planOnce = vi.fn(async () => plan)
+    const readOnce = vi.fn(async (paths: string[]) => (
+      paths.map(path => ({ path, content: 'rules', bytes: 5 }))
+    ))
+    const prepared = await prepareSkillRunWithAiSdk({
+      skill: alpha,
+      activation: 'manual',
+      userRequest: '完成任务',
+      selectedContext: '',
+      references,
+      tools: [{ name: 'search_assets', description: 'Search assets' }],
+      plan: planOnce,
+      readReferences: readOnce,
+    })
+
+    const result = await executePreparedSkillRunWithAiSdk({
+      prepared: JSON.parse(JSON.stringify(prepared)),
+      execute: async () => ({
+        text: 'grounded draft',
+        parts: [{
+          type: 'dynamic-tool', toolName: 'search_assets', state: 'output-available',
+          toolCallId: 'call-1', output: { id: 1 },
+        }],
+      }),
+      validate: async () => ({ passed: true, violations: [] }),
+      revise: vi.fn(),
+    })
+
+    expect(planOnce).toHaveBeenCalledTimes(1)
+    expect(readOnce).toHaveBeenCalledTimes(1)
+    expect(prepared).toMatchObject({
+      skill: { name: 'Alpha', version: '1.0.0', digest: 'a'.repeat(64) },
+      activation: 'manual',
+      run: { skillName: 'Alpha', requiredTools: ['search_assets'] },
+    })
+    expect(result).toMatchObject({
+      kind: 'completed', completed: { text: 'grounded draft' },
+    })
   })
 
   it('performs one revision and a second validation', async () => {

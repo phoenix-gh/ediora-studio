@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest'
 
 import type { ChatPart, ChatRole, UIMessageStreamEvent } from '@/lib/api/chat'
 import {
+  applyApprovalDecision,
   applyChatStreamEvent,
-  approvalResumeMessage,
   initialChatStatusPart,
   makeLocalMessage,
   toModelMessages,
@@ -36,15 +36,58 @@ describe('chat workspace state helpers', () => {
     })
   })
 
-  it('creates a local assistant placeholder for approval resume streaming', () => {
-    expect(approvalResumeMessage()).toMatchObject({
-      role: 'assistant',
-      parts: [expect.objectContaining({
-        type: 'chat-status',
-        state: 'streaming',
-        label: '正在思考',
-      })],
+  it('marks a durable approval on the existing run projection', () => {
+    const assistant = {
+      ...message(70, 'assistant', [{
+        type: 'dynamic-tool', runId: 'run-1', toolCallId: 'call-1',
+        state: 'approval-requested', approval: { id: 'approval-1' },
+      }]),
+      run_id: 'run-1',
+    }
+
+    const decided = applyApprovalDecision([assistant], {
+      runId: 'run-1', toolCallId: 'call-1', approvalId: 'approval-1', approved: true,
     })
+
+    expect(decided).toHaveLength(1)
+    expect(decided[0].parts[0]).toMatchObject({
+      state: 'approval-responded', approval: { id: 'approval-1', approved: true },
+    })
+  })
+
+  it('replaces the same assistant projection when a durable run stream starts', () => {
+    const assistant = {
+      ...message(70, 'assistant', [{ type: 'text', text: '旧投影' }]),
+      run_id: 'run-1',
+    }
+    const next = applyChatStreamEvent([assistant], '70', {
+      type: 'data-chat-run', data: { runId: 'run-1', status: 'resuming' },
+    })
+
+    expect(next).toHaveLength(1)
+    expect(next[0]).toMatchObject({ id: 70, run_id: 'run-1' })
+    expect(next[0].parts).toEqual([expect.objectContaining({ type: 'data-chat-run' })])
+  })
+
+  it('projects an approval request and artifact into the targeted assistant', () => {
+    const assistant = message(70, 'assistant', [])
+    const withInput = applyChatStreamEvent([assistant], '70', {
+      type: 'tool-input-available', toolCallId: 'call-1', toolName: 'save_draft', input: {},
+    })
+    const withApproval = applyChatStreamEvent(withInput, '70', {
+      type: 'tool-approval-request', toolCallId: 'call-1', approvalId: 'approval-1',
+    })
+    const withArtifact = applyChatStreamEvent(withApproval, '70', {
+      type: 'data-artifact', data: { kind: 'draft', id: 862, url: '/drafts?draft=862' },
+    })
+
+    expect(withArtifact[0].parts).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: 'tool-event', toolCallId: 'call-1', state: 'approval-requested',
+        approval: { id: 'approval-1' },
+      }),
+      expect.objectContaining({ type: 'data-artifact', data: expect.objectContaining({ id: 862 }) }),
+    ]))
   })
 
   it('accumulates reasoning deltas and marks the part complete', () => {

@@ -49,7 +49,7 @@ function updateAssistantMessage(
   assistantMessageId: string,
   update: (parts: ChatPart[]) => ChatPart[],
 ) {
-  return messages.map(message => message.id === assistantMessageId
+  return messages.map(message => String(message.id) === assistantMessageId
     ? { ...message, parts: update(message.parts) }
     : message)
 }
@@ -92,6 +92,17 @@ function updateToolPart(parts: ChatPart[], event: UIMessageStreamEvent) {
   return current
     ? parts.map(part => part === current ? next : part)
     : [...parts, next]
+}
+
+function updateToolApprovalPart(parts: ChatPart[], event: UIMessageStreamEvent) {
+  if (typeof event.toolCallId !== 'string' || typeof event.approvalId !== 'string') return parts
+  return parts.map(part => part.toolCallId === event.toolCallId
+    ? {
+        ...part,
+        state: 'approval-requested',
+        approval: { id: event.approvalId },
+      }
+    : part)
 }
 
 function updateStatusPart(parts: ChatPart[], status: ChatStreamStatus) {
@@ -137,15 +148,14 @@ export function initialChatStatusPart(): ChatStatusPart {
   }
 }
 
-export function approvalResumeMessage() {
-  return makeLocalMessage('assistant', [initialChatStatusPart()])
-}
-
 export function applyApprovalDecision(
   messages: DisplayMessage[],
-  decision: { messageId: number; toolCallId: string; approvalId: string; approved: boolean },
+  decision: { runId: string; toolCallId: string; approvalId: string; approved: boolean },
 ) {
-  return messages.map(message => message.id !== decision.messageId
+  return messages.map(message => (
+    message.run_id !== decision.runId
+    && !message.parts.some(part => part.runId === decision.runId)
+  )
     ? message
     : {
         ...message,
@@ -171,6 +181,38 @@ export function applyChatStreamEvent(
   assistantMessageId: string,
   event: UIMessageStreamEvent,
 ): DisplayMessage[] {
+  if (event.type === 'data-chat-run') {
+    const data = event.data && typeof event.data === 'object' && !Array.isArray(event.data)
+      ? event.data as Record<string, unknown>
+      : undefined
+    const runId = typeof data?.runId === 'string' ? data.runId : undefined
+    return messages.map(message => String(message.id) === assistantMessageId
+      ? {
+          ...message,
+          ...(runId ? { run_id: runId } : {}),
+          parts: [{ ...event }],
+          text: '',
+        }
+      : message)
+  }
+
+  if (event.type === 'data-artifact' || event.type === 'data-chat-run-error') {
+    return updateAssistantMessage(messages, assistantMessageId, parts => {
+      const data = event.data && typeof event.data === 'object' && !Array.isArray(event.data)
+        ? event.data as Record<string, unknown>
+        : undefined
+      const key = `${String(data?.kind ?? event.type)}:${String(data?.id ?? data?.message ?? '')}`
+      const exists = parts.some(part => {
+        if (part.type !== event.type) return false
+        const partData = part.data && typeof part.data === 'object' && !Array.isArray(part.data)
+          ? part.data as Record<string, unknown>
+          : undefined
+        return `${String(partData?.kind ?? part.type)}:${String(partData?.id ?? partData?.message ?? '')}` === key
+      })
+      return exists ? parts : [...parts, { ...event }]
+    })
+  }
+
   if (event.type === 'data-chat-status') {
     const status = statusFromEvent(event)
     return status
@@ -250,6 +292,18 @@ export function applyChatStreamEvent(
     || event.type === 'tool-output-available'
   ) {
     return updateAssistantMessage(messages, assistantMessageId, parts => updateToolPart(parts, event))
+  }
+
+  if (event.type === 'tool-approval-request') {
+    return updateAssistantMessage(messages, assistantMessageId, parts => updateToolApprovalPart(parts, event))
+  }
+
+  if (event.type === 'tool-output-error') {
+    return updateAssistantMessage(messages, assistantMessageId, parts => updateToolPart(parts, {
+      ...event,
+      type: 'tool-output-available',
+      output: { error: event.errorText },
+    }).map(part => part.toolCallId === event.toolCallId ? { ...part, state: 'output-error' } : part))
   }
 
   if (event.type === 'finish') {

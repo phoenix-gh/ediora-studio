@@ -12,6 +12,7 @@ export type ChatMessage = {
   role: ChatRole
   parts: ChatPart[]
   text: string
+  run_id?: string | null
   created_at: string
 }
 
@@ -57,7 +58,14 @@ export type SubmittedSkillInvocation = {
 export type ChatComposerMessagePart =
   | { type: 'text'; text: string }
   | ({ type: 'skill-invocation' } & SubmittedSkillInvocation)
-export type ChatToolApproval = { messageId: number; toolCallId: string; approvalId: string; approved: boolean }
+export type DurableChatToolApproval = {
+  runId: string
+  toolCallId: string
+  approvalId: string
+  approved: boolean
+  reason?: string
+}
+export type ChatToolApproval = DurableChatToolApproval
 
 export type UIChatMessage = {
   id: string

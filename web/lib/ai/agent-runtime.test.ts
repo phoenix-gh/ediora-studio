@@ -116,6 +116,62 @@ function openOptions(
 }
 
 describe('shared Agent runtime', () => {
+  it('resumes a frozen prepared Skill run without selecting or planning again', async () => {
+    const firstDeps = dependencies()
+    firstDeps.generate = vi.fn(async (input: Record<string, unknown>) => {
+      const prompt = String(input.prompt ?? '')
+      if (prompt.startsWith('Create a bounded execution plan')) {
+        return { output: {
+          goal: 'save one draft',
+          steps: [{ id: 'deliver', instruction: 'save', requiredReferences: [], requiredTools: [] }],
+          outputRequirements: ['saved'], verificationCriteria: ['visible result'],
+        } }
+      }
+      throw new Error(`unexpected preparation call: ${prompt}`)
+    }) as unknown as AgentRuntimeDependencies['generate']
+    const firstRuntime = await openAgentRuntime({
+      ...openOptions('automatic', firstDeps), skillMode: 'manual', skillName: 'Alpha',
+    })
+    const prepared = await firstRuntime.prepareRun({
+      objective: 'save one draft', selectedContext: '',
+    })
+    await firstRuntime.close()
+
+    const secondDeps = dependencies()
+    const secondGenerate = vi.fn(async (input: Record<string, unknown>) => {
+      const prompt = String(input.prompt ?? '')
+      if (prompt.startsWith('Create a bounded execution plan')) {
+        throw new Error('planner must not run while resuming')
+      }
+      if (prompt.startsWith('Return valid JSON only in exactly this shape')) {
+        return { output: { passed: true, violations: [] } }
+      }
+      return {
+        text: 'saved', finishReason: 'stop', steps: [{}],
+        toolCalls: [], toolResults: [], content: [{ type: 'text', text: 'saved' }],
+        responseMessages: [{ role: 'assistant', content: [{ type: 'text', text: 'saved' }] }],
+      }
+    })
+    secondDeps.generate = secondGenerate as unknown as AgentRuntimeDependencies['generate']
+    const secondRuntime = await openAgentRuntime({
+      ...openOptions('automatic', secondDeps), automaticSelection: true,
+    })
+
+    const result = await secondRuntime.executePrepared({
+      prepared: JSON.parse(JSON.stringify(prepared)),
+      objective: 'save one draft', modelMessages: [{ role: 'user', content: 'save one draft' }],
+      maxSteps: 3,
+    })
+
+    expect(result).toMatchObject({
+      kind: 'completed', text: 'saved', selectedSkill: { name: 'Alpha', activation: 'manual' },
+    })
+    expect(secondGenerate.mock.calls.some(([input]) => (
+      String((input as Record<string, unknown>).prompt ?? '').startsWith('Create a bounded execution plan')
+    ))).toBe(false)
+    await secondRuntime.close()
+  })
+
   it('requires an accepted complete_goal declaration and follows up without business-count instructions', async () => {
     const deps = dependencies()
     deps.generate = vi.fn()

@@ -1,4 +1,4 @@
-import { convertToModelMessages, safeValidateUIMessages, type ToolSet } from 'ai'
+import { type ToolSet } from 'ai'
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -19,6 +19,9 @@ import {
   chatStatusForAgentStep,
   agentRunUIResponse,
   directSkillParameterContext,
+  durableApprovalPayload,
+  durableChatRunsEnabled,
+  canonicalTurnEndReasonForChatRun,
   executionToolsForSelection,
   genericSkillRuntimeEnabled,
   skillAwareStepPolicy,
@@ -27,6 +30,32 @@ import {
 } from './route'
 
 describe('Chat Agent log event mapping', () => {
+  it('maps durable run statuses to the strict canonical turn/end reason', () => {
+    expect(canonicalTurnEndReasonForChatRun('waiting_approval')).toEqual({ kind: 'waiting_approval' })
+    expect(canonicalTurnEndReasonForChatRun('completed')).toEqual({ kind: 'completed' })
+    expect(canonicalTurnEndReasonForChatRun('failed')).toEqual({ kind: 'error' })
+    expect(canonicalTurnEndReasonForChatRun('needs_reconciliation')).toEqual({ kind: 'error' })
+  })
+
+  it('uses durable Chat Runs by default and keeps approval input identity-only', () => {
+    const previous = process.env.DURABLE_CHAT_RUNS
+    delete process.env.DURABLE_CHAT_RUNS
+    expect(durableChatRunsEnabled()).toBe(true)
+    if (previous === undefined) delete process.env.DURABLE_CHAT_RUNS
+    else process.env.DURABLE_CHAT_RUNS = previous
+
+    expect(durableApprovalPayload({
+      runId: '5abf312a-ed54-451c-9628-5b5e7fbe7d8c',
+      approvalId: 'approval-1', toolCallId: 'call-1', approved: true,
+      reason: 'approved',
+      skillName: 'forged', toolInput: { title: 'forged' },
+    } as never)).toEqual({
+      runId: '5abf312a-ed54-451c-9628-5b5e7fbe7d8c',
+      approvalId: 'approval-1', toolCallId: 'call-1', approved: true,
+      reason: 'approved',
+    })
+  })
+
   it('maps model HTTP audit responses into correlated Chat LLM events', () => {
     expect(chatAgentLogEventFromHttpAudit({
       callId: 'call-1',
@@ -406,7 +435,7 @@ describe('global chat model history', () => {
     ])
   })
 
-  it('keeps the matching reasoning step when resuming an approved tool call', async () => {
+  it('never reconstructs approval execution history from display message parts', () => {
     const candidates = modelHistoryCandidates([
       {
         id: 5,
@@ -435,33 +464,11 @@ describe('global chat model history', () => {
           },
         ],
       },
-    ], { includeToolApprovals: true })
+    ])
 
-    const validated = await safeValidateUIMessages({ messages: candidates })
-    expect(validated.success).toBe(true)
-    if (!validated.success) throw validated.error
-
-    const modelMessages = await convertToModelMessages(validated.data)
-    expect(modelMessages).not.toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        content: expect.arrayContaining([
-          expect.objectContaining({ toolCallId: 'call-check' }),
-        ]),
-      }),
-    ]))
-    const saveDraftMessage = modelMessages.find(message => (
-      message.role === 'assistant'
-      && Array.isArray(message.content)
-      && message.content.some(part => part.type === 'tool-call' && part.toolCallId === 'call-save')
-    ))
-
-    expect(saveDraftMessage).toMatchObject({
-      role: 'assistant',
-      content: [
-        { type: 'reasoning', text: '检查通过，现在保存草稿。' },
-        { type: 'tool-call', toolCallId: 'call-save', toolName: 'save_draft' },
-        { type: 'tool-approval-request', approvalId: 'approval-save', toolCallId: 'call-save' },
-      ],
-    })
+    expect(candidates).toEqual([{
+      id: '5', role: 'assistant',
+      parts: [{ type: 'text', text: '内容未重复。' }],
+    }])
   })
 })
