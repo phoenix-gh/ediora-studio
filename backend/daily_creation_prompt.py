@@ -37,6 +37,10 @@ def build_legacy_creation_prompt(rule: Mapping[str, object]) -> str:
         lines.append(
             f"检查最近 {lookback} 天的内容使用记录，不要复用仍在去重期内的创作资产。"
         )
+        lines.append(
+            "先提出多个候选主题，并用 check_content_novelty 检查主题和核心观点；"
+            "duplicate 或 uncertain 必须换题。"
+        )
     lines.append(
         '每条完成后调用 save_draft 保存到草稿箱，参数必须使用 '
         'status="drafting"、draft_type="x"。'
@@ -44,6 +48,10 @@ def build_legacy_creation_prompt(rule: Mapping[str, object]) -> str:
     lines.append(
         "仅在 save_draft 成功并返回真实草稿 id 后，调用 "
         "record_content_usage 记录该草稿实际使用的素材。"
+    )
+    lines.append(
+        "save_draft 返回 saved=false 时根据冲突证据换题后重写；"
+        "定时任务不得使用 novelty_override_token。"
     )
     extra = str(rule.get("instructions") or "").strip()
     if extra:

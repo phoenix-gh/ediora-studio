@@ -75,7 +75,7 @@ describe('Agent tool policy', () => {
     expect(resolveAgentToolPolicy('response-writing')).toMatchObject({
       approvalPolicy: 'automatic',
       allowedToolNames: expect.arrayContaining([
-        'list_drafts', 'get_draft', 'save_draft',
+        'list_drafts', 'get_draft', 'check_content_novelty', 'save_draft',
         'list_source_subscriptions', 'search_source_items', 'get_source_item',
       ]),
     })

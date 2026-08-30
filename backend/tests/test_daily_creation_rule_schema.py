@@ -43,6 +43,10 @@ def test_legacy_creation_rule_builds_self_contained_agent_prompt():
     assert "save_draft" in prompt
     assert "文章素材" in prompt
     assert "record_content_usage" in prompt
+    assert "check_content_novelty" in prompt
+    assert "主题和核心观点" in prompt
+    assert "duplicate 或 uncertain" in prompt
+    assert "novelty_override_token" in prompt
     assert 'draft_type="x"' in prompt
     assert "每句话单独成段" in prompt
     assert "save_daily_creation_outputs" not in prompt

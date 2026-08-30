@@ -1,5 +1,5 @@
 import base64
-from datetime import datetime
+from datetime import datetime, timezone
 import mimetypes
 import os
 import uuid
@@ -7,7 +7,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
 from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import and_, delete, desc, or_, select
+from sqlalchemy import and_, delete, desc, or_, select, update
 from pydantic import BaseModel
 from typing import Optional
 
@@ -18,6 +18,7 @@ from database import get_db
 from models import (
     ArticleDraft,
     ArticleSeries,
+    AgentTopicClaim,
     ContentUsageLedger,
     DraftImage,
     PublishAccount,
@@ -520,6 +521,14 @@ async def delete_draft(draft_id: int, db: AsyncSession = Depends(get_db)):
             ContentUsageLedger.output_kind == "draft",
             ContentUsageLedger.draft_id == draft_id,
         )
+    )
+    await db.execute(
+        update(AgentTopicClaim)
+        .where(
+            AgentTopicClaim.draft_id == draft_id,
+            AgentTopicClaim.released_at.is_(None),
+        )
+        .values(released_at=datetime.now(timezone.utc))
     )
     await db.delete(obj)
     await db.commit()

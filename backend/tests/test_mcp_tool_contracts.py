@@ -19,6 +19,7 @@ READ_TOOL_CONTRACTS = {
     "get_source_item": ("information_sources", False),
     "list_creative_asset_candidates": ("creative_assets", False),
     "get_recent_content_usage": ("creative_assets", False),
+    "check_content_novelty": ("drafts", False),
     "list_writing_plans": ("writing_plans", False),
     "get_writing_plan": ("writing_plans", False),
     "search_writing_plans": ("writing_plans", False),

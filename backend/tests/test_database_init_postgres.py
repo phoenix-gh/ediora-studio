@@ -70,6 +70,8 @@ def test_init_db_twice_creates_postgresql_core_tables(postgres_env):
         "daily_creation_runs",
         "daily_creation_output_batches",
         "content_usage_ledger",
+        "agent_topic_claims",
+        "agent_novelty_overrides",
         "agent_executions",
         "agent_tool_calls",
         "agent_message_logs",

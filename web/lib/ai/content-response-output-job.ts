@@ -155,6 +155,10 @@ ${JSON.stringify({
 
 const positiveId = z.number().int().positive()
 const savedDraftSchema = z.object({
+  // save_draft added this explicit success marker with novelty enforcement.
+  // Keep it optional so persisted pre-upgrade successes remain recoverable;
+  // z.literal(true) still rejects every explicit saved: false result.
+  saved: z.literal(true).optional(),
   id: positiveId,
   title: z.string().trim().min(1),
   status: z.literal('drafting'),

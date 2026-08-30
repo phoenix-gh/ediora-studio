@@ -162,7 +162,33 @@ describe('global Chat tool policy', () => {
       transport: {
         type: 'http',
         url: 'http://localhost:8000/mcp',
-        headers: { 'X-Daily-Creation-Run-Id': '83' },
+        headers: {
+          'X-Agent-Mode': 'scheduled',
+          'X-Daily-Creation-Run-Id': '83',
+        },
+      },
+    })
+    await runtime.close()
+  })
+
+  it('sends Chat session identity as MCP transport headers only', async () => {
+    setMcpTools({})
+
+    const runtime = await openGlobalAgentTools({
+      mcpEndpoint: 'http://localhost:8000/mcp',
+      imageGenerator: { generate: vi.fn() },
+      sessionId: 92,
+      agentMode: 'chat',
+    })
+
+    expect(vi.mocked(createMCPClient)).toHaveBeenLastCalledWith({
+      transport: {
+        type: 'http',
+        url: 'http://localhost:8000/mcp',
+        headers: {
+          'X-Agent-Mode': 'chat',
+          'X-Agent-Session-Id': '92',
+        },
       },
     })
     await runtime.close()

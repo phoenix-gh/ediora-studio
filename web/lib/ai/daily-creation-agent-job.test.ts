@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   buildDailyCreationAgentObjective,
   firstBlockingToolAudit,
+  isNoveltySaveConflict,
   runDailyCreationAgentJob,
   startAgentActivityHeartbeat,
   type DailyCreationAgentContext,
@@ -35,7 +36,24 @@ function savedDraftAudit(id: number): AgentToolAudit {
     output: {
       content: [{
         type: 'text',
-        text: JSON.stringify({ id, title: `草稿 ${id}`, status: 'drafting', draft_type: 'x' }),
+        text: JSON.stringify({ saved: true, id, title: `草稿 ${id}`, status: 'drafting', draft_type: 'x' }),
+      }],
+      isError: false,
+    },
+  }
+}
+
+function noveltyConflictAudit(id: number, decision: 'duplicate' | 'uncertain'): AgentToolAudit {
+  return {
+    ...audit('save_draft', 'succeeded', true),
+    toolCallId: `save-conflict-${id}`,
+    output: {
+      content: [{
+        type: 'text',
+        text: JSON.stringify({
+          saved: false,
+          novelty: { decision, suggested_action: 'change_topic' },
+        }),
       }],
       isError: false,
     },
@@ -49,6 +67,19 @@ function savedDraftCall(id: number) {
     tool_name: saved.toolName,
     status: saved.status,
     output: saved.output,
+    side_effecting: true,
+  }
+}
+
+function noveltyConflictCall(id: number, decision: 'duplicate' | 'uncertain') {
+  const conflict = noveltyConflictAudit(id, decision)
+  return {
+    tool_call_id: conflict.toolCallId,
+    tool_name: conflict.toolName,
+    status: conflict.status,
+    output: { structuredContent: { result: JSON.parse(
+      String((conflict.output as { content: Array<{ text: string }> }).content[0].text),
+    ) } },
     side_effecting: true,
   }
 }
@@ -170,6 +201,58 @@ function dependencies({
 }
 
 describe('daily creation Agent job', () => {
+  it('recognizes structured save conflicts without counting ordinary saves', () => {
+    expect(isNoveltySaveConflict(noveltyConflictAudit(1, 'duplicate'))).toBe(true)
+    expect(isNoveltySaveConflict(noveltyConflictAudit(2, 'uncertain'))).toBe(true)
+    expect(isNoveltySaveConflict(savedDraftAudit(3))).toBe(false)
+    expect(isNoveltySaveConflict(audit('check_content_novelty', 'succeeded', false))).toBe(false)
+  })
+
+  it('fails non-retryably after three save-time novelty conflicts', async () => {
+    const { deps } = dependencies({
+      toolAudits: [
+        noveltyConflictAudit(1, 'duplicate'),
+        noveltyConflictAudit(2, 'uncertain'),
+        noveltyConflictAudit(3, 'duplicate'),
+      ],
+    })
+
+    await expect(runDailyCreationAgentJob(19, deps)).rejects.toThrow(
+      'no sufficiently novel topic was available in the configured time window',
+    )
+    expect(deps.completeExecution).not.toHaveBeenCalled()
+    expect(deps.completeJob).not.toHaveBeenCalled()
+    expect(deps.failStep).toHaveBeenCalledWith(19, 71, expect.any(Error), false)
+  })
+
+  it('resumes after a persisted save conflict because no draft was written', async () => {
+    const { deps } = dependencies({ toolAudits: [savedDraftAudit(3)] })
+    vi.mocked(deps.listToolCalls).mockResolvedValue([
+      noveltyConflictCall(1, 'duplicate'),
+    ])
+
+    await expect(runDailyCreationAgentJob(19, deps)).resolves.toMatchObject({
+      finalText: '研究完成',
+    })
+    expect(deps.openRuntime).toHaveBeenCalledTimes(1)
+    expect(deps.completeJob).toHaveBeenCalledWith(19)
+  })
+
+  it('counts persisted save conflicts toward the three-conflict limit', async () => {
+    const { deps } = dependencies({
+      toolAudits: [noveltyConflictAudit(3, 'duplicate')],
+    })
+    vi.mocked(deps.listToolCalls).mockResolvedValue([
+      noveltyConflictCall(1, 'duplicate'),
+      noveltyConflictCall(2, 'uncertain'),
+    ])
+
+    await expect(runDailyCreationAgentJob(19, deps)).rejects.toThrow(
+      'no sufficiently novel topic was available in the configured time window',
+    )
+    expect(deps.failStep).toHaveBeenCalledWith(19, 71, expect.any(Error), false)
+  })
+
   it('reports the unresolved failure after a recovered read-only failure', () => {
     const failed = audit('list_creative_asset_candidates', 'failed', false)
     const recovered = audit('list_creative_asset_candidates', 'succeeded', false)

@@ -285,8 +285,29 @@
 .asset-visual-markdown-editor .milkdown .ProseMirror {
   box-sizing: border-box;
   min-height: 420px;
+  width: var(--markdown-content-width, 100%);
   padding: 1.5rem 2rem 5rem;
   caret-color: var(--foreground);
+}
+
+.asset-visual-markdown-editor .markdown-editor-source {
+  box-sizing: border-box;
+  width: var(--markdown-content-width, 100%);
+}
+
+.asset-visual-markdown-editor[data-content-align='left'] :is(.ProseMirror, .markdown-editor-source) {
+  margin-right: auto;
+  margin-left: 0;
+}
+
+.asset-visual-markdown-editor[data-content-align='center'] :is(.ProseMirror, .markdown-editor-source) {
+  margin-right: auto;
+  margin-left: auto;
+}
+
+.asset-visual-markdown-editor[data-content-align='right'] :is(.ProseMirror, .markdown-editor-source) {
+  margin-right: 0;
+  margin-left: auto;
 }
 
 .asset-visual-markdown-editor .milkdown .ProseMirror:focus-visible {

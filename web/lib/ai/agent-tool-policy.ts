@@ -85,6 +85,7 @@ export const RESPONSE_AGENT_TOOL_ALLOWLIST = [
   'get_account_profile',
   'loadSkill',
   'readSkillReference',
+  'check_content_novelty',
   'save_draft',
 ] as const
 

@@ -95,6 +95,7 @@ export type OpenAgentRuntimeOptions = {
   restoredSkillName?: string
   automaticSelection?: boolean
   draftId?: number
+  sessionId?: number
   dailyCreationRunId?: number
   allowedToolNames?: readonly string[]
   blockedToolNames?: readonly string[]
@@ -318,6 +319,8 @@ export async function openAgentRuntime(
   const toolOptions = (skillName?: string, restoredSkillName?: string): GlobalAgentToolOptions => ({
     mcpEndpoint: options.mcpEndpoint,
     imageGenerator: options.imageGenerator,
+    agentMode: options.mode,
+    sessionId: options.sessionId,
     draftId: options.draftId,
     dailyCreationRunId: options.dailyCreationRunId,
     skillName,
