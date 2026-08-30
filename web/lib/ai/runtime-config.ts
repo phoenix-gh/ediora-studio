@@ -1,7 +1,7 @@
-import { createDeepSeek } from '@ai-sdk/deepseek'
 import { createOpenAI } from '@ai-sdk/openai'
 
 import type { LLMAdapterProtocol } from '@/lib/api/settings'
+import { createDeepSeekReasoningFetch } from '@/lib/ai/deepseek-reasoning-compat'
 
 export type TextModelSettings = {
   adapter_id?: string
@@ -68,17 +68,10 @@ options: { fetch?: typeof globalThis.fetch } = {},
     apiKey: config.apiKey,
     baseURL: config.baseURL,
     headers: config.headers,
-    ...(options.fetch ? { fetch: options.fetch } : {}),
-  }
-  if (
-    config.protocol !== 'openai-responses'
-    && /^deepseek(?:[-/]|$)/i.test(config.modelName ?? '')
-  ) {
-    const deepseek = createDeepSeek(providerOptions)
-    return {
-      chat: (modelName: string) => deepseek.chat(modelName),
-      responses: (modelName: string) => createOpenAI(providerOptions).responses(modelName),
-    }
+    ...(/^deepseek(?:[-/]|$)/i.test(config.modelName ?? '')
+      && config.protocol !== 'openai-responses'
+      ? { fetch: createDeepSeekReasoningFetch(options.fetch ?? globalThis.fetch) }
+      : options.fetch ? { fetch: options.fetch } : {}),
   }
   return createOpenAI(providerOptions)
 }
