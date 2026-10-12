@@ -81,8 +81,8 @@ describe('Agent tool policy', () => {
     })
   })
 
-  it('classifies usage-ledger recording as a fenced side effect', () => {
-    expect(requiresToolApproval('record_content_usage')).toBe(true)
+  it('classifies record tools as fenced side effects', () => {
+    expect(requiresToolApproval('record_publish_attempt')).toBe(true)
   })
 
   it('uses explicit annotations instead of misleading tool names', () => {

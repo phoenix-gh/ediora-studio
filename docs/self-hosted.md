@@ -82,7 +82,13 @@ data/scheduler        scheduler throttle state
 data/avatars          avatar cache
 data/wechat-images    WeChat image cache
 data/local-asr-models optional local-ASR model cache
+data/codex-home       default Codex home when CODEX_HOME_HOST is unset
 ```
+
+`CODEX_HOME_HOST` bind-mounts a host directory onto the container Codex home
+`/home/violet/.mk-video-codex` for the worker and web services. Set it to an
+absolute path to reuse an existing Codex home. The default `./data/codex-home`
+is created with mode `700`.
 
 Back up at least `data/postgres`, `data/uploads`, `data/sessions`,
 `data/web-runtime`, and `.env` before upgrades. Keep `X_SESSION_KEY` in `.env`

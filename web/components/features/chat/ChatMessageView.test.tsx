@@ -69,6 +69,23 @@ describe('ChatMessageView', () => {
     expect(status).toHaveTextContent('进行中')
   })
 
+  it('shows a completed generateImage result in the message', () => {
+    render(<ChatMessageView message={assistantMessage([
+      { type: 'text', text: '图片已生成。' },
+      {
+        type: 'tool-event',
+        toolCallId: 'portrait.png',
+        toolName: 'generateImage',
+        state: 'output-available',
+        output: { asset_url: '/api/uploads/portrait.png' },
+      },
+    ])} />)
+
+    const image = screen.getByRole('img', { name: 'AI 生成图片' })
+    expect(image).toHaveAttribute('src', expect.stringContaining('/uploads/portrait.png'))
+    expect(image.className).toContain('object-contain')
+  })
+
   it('renders user and assistant Markdown messages', () => {
     const userMessage: DisplayMessage = {
       id: 1,

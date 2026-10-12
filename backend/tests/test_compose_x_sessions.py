@@ -32,9 +32,10 @@ def _compose_environment() -> dict[str, str]:
 def _run_compose(
     tmp_path: Path,
     *arguments: str,
+    env_text: str = "",
 ) -> subprocess.CompletedProcess[str]:
     empty_env = tmp_path / "compose.env"
-    empty_env.write_text("", encoding="utf-8")
+    empty_env.write_text(env_text, encoding="utf-8")
     return subprocess.run(
         [
             "docker",
@@ -92,6 +93,47 @@ def assert_x_session_contract(compose):
         "/data",
     )
     assert not compose.get("volumes")
+
+
+def _assert_codex_home_mount(mounts, source: str):
+    assert any(
+        mount.get("type") == "bind"
+        and mount.get("source") == source
+        and mount.get("target") == "/home/violet/.mk-video-codex"
+        and mount.get("read_only") is not True
+        for mount in mounts
+    )
+
+
+def test_default_codex_home_host_mounts_for_worker_and_web(tmp_path: Path):
+    resolved = _run_compose(tmp_path, "config", "--format", "json")
+    assert resolved.returncode == 0, resolved.stderr
+    compose = json.loads(resolved.stdout)
+    source = str((ROOT / "data/codex-home").resolve())
+    for service_name in ("worker", "web"):
+        service = compose["services"][service_name]
+        assert service["environment"]["CODEX_HOME"] == "/home/violet/.mk-video-codex"
+        _assert_codex_home_mount(service["volumes"], source)
+    assert "CODEX_HOME" not in compose["services"]["api"].get("environment", {})
+
+
+def test_custom_codex_home_host_is_the_bind_source(tmp_path: Path):
+    custom = tmp_path / "my-codex-home"
+    custom.mkdir()
+    resolved = _run_compose(
+        tmp_path,
+        "config",
+        "--format",
+        "json",
+        env_text=f"CODEX_HOME_HOST={custom}\n",
+    )
+    assert resolved.returncode == 0, resolved.stderr
+    compose = json.loads(resolved.stdout)
+    for service_name in ("worker", "web"):
+        _assert_codex_home_mount(
+            compose["services"][service_name]["volumes"],
+            str(custom),
+        )
 
 
 def test_api_uses_persistent_feedgrab_session_directory(tmp_path: Path):

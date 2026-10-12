@@ -21,6 +21,7 @@ describe('ThemeProvider', () => {
       defaultTheme: 'system',
       enableSystem: true,
       disableTransitionOnChange: true,
+      scriptProps: { type: 'application/json' },
     }), undefined)
   })
 })

@@ -40,6 +40,7 @@ import {
   makeLocalMessage,
   toModelMessages,
 } from './chat-workspace-state'
+import type { ChatModelSelection } from '@/lib/ai/chat-model-catalog'
 import type {
   ChatApprovalArgs,
   ChatWorkspaceState,
@@ -61,7 +62,11 @@ export type ChatWorkspaceContextValue = {
   startNewConversation: () => void
   renameSession: (sessionId: number, title: string) => Promise<void>
   removeSession: (sessionId: number) => Promise<void>
-  submit: (text: string, messageParts: ChatComposerMessagePart[]) => Promise<boolean>
+  submit: (
+    text: string,
+    messageParts: ChatComposerMessagePart[],
+    modelSelection?: ChatModelSelection,
+  ) => Promise<boolean>
   respondToApproval: (args: ChatApprovalArgs) => Promise<void>
   setSkillName: (skillName: string) => void
   setDraftId: (draftId: number | null) => void
@@ -367,7 +372,14 @@ export function ChatWorkspaceProvider({ children }: { children: ReactNode }) {
     return session.id
   }, [state.activeSessionId])
 
-  const submit = useCallback(async (text: string, messageParts: ChatComposerMessagePart[]) => {
+  const modelSelectionRef = useRef<ChatModelSelection | undefined>(undefined)
+
+  const submit = useCallback(async (
+    text: string,
+    messageParts: ChatComposerMessagePart[],
+    modelSelection?: ChatModelSelection,
+  ) => {
+    if (modelSelection) modelSelectionRef.current = modelSelection
     const trimmed = text.trim()
     if (!trimmed) return false
     const sessionId = await ensureActiveSession(trimmed)
@@ -427,6 +439,8 @@ export function ChatWorkspaceProvider({ children }: { children: ReactNode }) {
         draftId: state.composer.draftId ?? undefined,
         skillInvocation: directInvocation,
         messageParts: directInvocation ? messageParts : undefined,
+        model: modelSelection?.model,
+        reasoningEffort: modelSelection?.reasoningEffort,
         onEvent: event => {
           publishArtifactEvent(event)
           updateSession(
@@ -492,6 +506,8 @@ export function ChatWorkspaceProvider({ children }: { children: ReactNode }) {
           approved: args.approved,
           ...(args.reason ? { reason: args.reason } : {}),
         },
+        model: modelSelectionRef.current?.model,
+        reasoningEffort: modelSelectionRef.current?.reasoningEffort,
         onEvent: event => {
           publishArtifactEvent(event)
           updateSession(

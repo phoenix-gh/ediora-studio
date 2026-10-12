@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { runContentJob } from '../lib/ai/content-job'
+import { currentCodexTurnSignal } from '../lib/ai/codex-turn-abort'
 import { runDailyCreationAgentJob } from '../lib/ai/daily-creation-agent-job'
 import { JobFinalizationError } from '../lib/ai/digital-human-job'
 import { ApiRequestError } from '../lib/ai/job-client'
@@ -723,6 +724,52 @@ describe('content worker lifecycle', () => {
 
     expect(markStepFailed).toHaveBeenCalledWith(48, 81, llmError, true)
     expect(redis.state.queue).toEqual([])
+  })
+
+  it('aborts the in-flight turn when the job is cancelled and does not requeue it', async () => {
+    vi.useFakeTimers()
+    const controller = new AbortController()
+    const redis = new FakeRedis([
+      ['content-jobs', '51'],
+      stopOnNextPop(controller),
+    ])
+    let reads = 0
+    const getJob = vi.fn(async () => {
+      reads += 1
+      return durableJob(51, 'daily_creation', reads === 1 ? 'running' : 'cancelled')
+    })
+    let sawSignal = false
+    const runner = vi.fn(() => new Promise<void>((_resolve, reject) => {
+      const signal = currentCodexTurnSignal()
+      sawSignal = Boolean(signal)
+      signal?.addEventListener('abort', () => {
+        reject(new Error('Codex turn cancelled'))
+      })
+    }))
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const { runContentWorker } = await import('./content-worker')
+
+    const worker = runContentWorker({
+      redis,
+      queueName: 'content-jobs',
+      signal: controller.signal,
+      reconcile: vi.fn().mockResolvedValue({}),
+      getJob,
+      resolveRunner: () => runner,
+      cancelPollIntervalMs: 20,
+      leaseTtlMs: 5_000,
+      leaseRefreshIntervalMs: 5_000,
+    })
+    await vi.advanceTimersByTimeAsync(25)
+    await worker
+
+    expect(sawSignal).toBe(true)
+    expect(runner).toHaveBeenCalledTimes(1)
+    expect(redis.state.leases.size).toBe(0)
+    expect(redis.state.queue).toEqual([])
+    expect(errorSpy).toHaveBeenCalledWith(
+      'content job 51 is cancelled; aborting the in-flight turn',
+    )
   })
 })
 

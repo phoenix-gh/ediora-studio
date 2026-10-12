@@ -11,6 +11,7 @@ import { dirname, resolve } from 'node:path'
 import Redis from 'ioredis'
 
 import { runContentJob } from '../lib/ai/content-job'
+import { runWithCodexTurnSignal } from '../lib/ai/codex-turn-abort'
 import { runDailyCreationAgentJob } from '../lib/ai/daily-creation-agent-job'
 import {
   JobFinalizationError,
@@ -61,6 +62,7 @@ export function workerQueueForFlow(
 }
 const DEFAULT_LEASE_TTL_MS = 30_000
 const DEFAULT_LEASE_REFRESH_INTERVAL_MS = 10_000
+const DEFAULT_CANCEL_POLL_INTERVAL_MS = 2_000
 const DEFAULT_BLOCK_TIMEOUT_SECONDS = 1
 
 const COMPARE_PEXPIRE_SCRIPT = `
@@ -209,6 +211,7 @@ export type RunContentWorkerOptions = {
   resolveRunner?: ResolveContentJobRunner
   leaseTtlMs?: number
   leaseRefreshIntervalMs?: number
+  cancelPollIntervalMs?: number
   blockTimeoutSeconds?: number
   videoQueueName?: string
   defaultQueueName?: string
@@ -382,6 +385,43 @@ async function failRunningStepAfterRunnerError(
   }
 }
 
+function watchUntilTerminal(
+  jobId: number,
+  getJob: (jobId: number) => Promise<DurableJob>,
+  intervalMs: number,
+  abort: () => void,
+) {
+  let stopped = false
+  let timer: ReturnType<typeof setTimeout> | undefined
+
+  const schedule = () => {
+    timer = setTimeout(() => {
+      timer = undefined
+      void getJob(jobId)
+        .then(job => {
+          if (stopped) return
+          if (TERMINAL_JOB_STATUSES.has(job.status)) {
+            console.error(`content job ${jobId} is ${job.status}; aborting the in-flight turn`)
+            abort()
+            return
+          }
+          schedule()
+        })
+        .catch(error => {
+          if (stopped) return
+          console.error(`content job ${jobId} cancellation check failed`, error)
+          schedule()
+        })
+    }, intervalMs)
+  }
+
+  schedule()
+  return () => {
+    stopped = true
+    if (timer !== undefined) clearTimeout(timer)
+  }
+}
+
 async function runLeasedJob(
   jobId: number,
   options: Required<Pick<
@@ -393,6 +433,7 @@ async function runLeasedJob(
     | 'resolveRunner'
     | 'leaseTtlMs'
     | 'leaseRefreshIntervalMs'
+    | 'cancelPollIntervalMs'
   >> & Pick<
     RunContentWorkerOptions,
     'speechFetch' | 'videoQueueName' | 'defaultQueueName'
@@ -429,9 +470,21 @@ async function runLeasedJob(
       return
     }
     phase = 'running'
-    await options.resolveRunner(job.flow, {
-      speechFetch: options.speechFetch,
-    })(jobId)
+    // Cancel only updates the job row. Abort the turn so the lease is released.
+    const turnAbort = new AbortController()
+    const stopCancellationWatch = watchUntilTerminal(
+      jobId,
+      options.getJob,
+      options.cancelPollIntervalMs,
+      () => turnAbort.abort(),
+    )
+    try {
+      await runWithCodexTurnSignal(turnAbort.signal, () => options.resolveRunner(job.flow, {
+        speechFetch: options.speechFetch,
+      })(jobId))
+    } finally {
+      stopCancellationWatch()
+    }
   } catch (error) {
     const requeue = shouldRequeue(error, phase)
     retryError = requeue ? error : undefined
@@ -469,6 +522,7 @@ export async function runContentWorker({
   failStep: markStepFailed = failStep,
   leaseTtlMs = DEFAULT_LEASE_TTL_MS,
   leaseRefreshIntervalMs = DEFAULT_LEASE_REFRESH_INTERVAL_MS,
+  cancelPollIntervalMs = DEFAULT_CANCEL_POLL_INTERVAL_MS,
   blockTimeoutSeconds = DEFAULT_BLOCK_TIMEOUT_SECONDS,
   videoQueueName,
   defaultQueueName,
@@ -491,6 +545,7 @@ export async function runContentWorker({
       resolveRunner,
       leaseTtlMs,
       leaseRefreshIntervalMs,
+      cancelPollIntervalMs,
       speechFetch,
       videoQueueName,
       defaultQueueName,

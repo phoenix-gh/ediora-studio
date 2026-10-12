@@ -1,6 +1,6 @@
-import { convertToModelMessages, createUIMessageStream, createUIMessageStreamResponse, generateText, safeValidateUIMessages, stepCountIs, streamText, type ToolSet, type UIMessage, type UIMessageStreamWriter } from 'ai'
+import { createUIMessageStream, createUIMessageStreamResponse, safeValidateUIMessages, type ToolSet, type UIMessage, type UIMessageStreamWriter } from 'ai'
 import { randomUUID } from 'node:crypto'
-import { after, NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 
 import {
@@ -8,20 +8,23 @@ import {
   buildChatMessagePersistencePayload,
   formatChatTurnContext,
   isRetriedUserMessage,
-  latestActivatedSkillName,
   latestClientTurn,
   modelHistoryCandidates,
 } from '@/lib/ai/chat-tools'
-import { buildChatInstructions } from '@/lib/ai/chat-instructions'
-import { CHAT_MAX_STEPS, chatToolLoopStep, needsFinalAnswerFallback } from '@/lib/ai/chat-loop'
+import { chatToolLoopStep } from '@/lib/ai/chat-loop'
 import { baoyuRuntimeInstructions } from '@/lib/ai/content-job'
-import { agentSkillRunAudit, openAgentRuntime, type AgentRunResult } from '@/lib/ai/agent-runtime'
+import { type AgentRunResult, type AgentSessionEventDraft } from '@/lib/ai/agent-runtime'
+import { CODEX_THREAD_CWD } from '@/lib/ai/codex-app-server'
+import { runCodexAgentTurn } from '@/lib/ai/codex-app-server-client'
+import { codexImageMessageParts, publishCodexGeneratedImages } from '@/lib/ai/codex-generated-images'
 import {
-  capabilitySnapshotDrift,
-  isAgentCapabilitySnapshot,
+  chatEdioraMcpServers,
+  deploymentApiBase,
+  mcpUrlFromApiBase,
+} from '@/lib/ai/ediora-mcp'
+import {
   type AgentCapabilitySnapshot,
 } from '@/lib/ai/agent-capabilities'
-import { createChatRunOrchestrator } from '@/lib/ai/chat-run-orchestrator'
 import type { ChatRunProjection } from '@/lib/ai/chat-run-projector'
 import {
   appendAgentLogEvent,
@@ -31,43 +34,23 @@ import {
   type AgentLogEventInput,
   type AgentSessionEventInput,
 } from '@/lib/ai/agent-log-client'
-import type { AgentSessionEventDraft } from '@/lib/ai/agent-runtime'
 import type { AgentSessionEventType } from '@/lib/ai/agent-trajectory'
 import type { ChatRunCheckpoint } from '@/lib/ai/chat-run-types'
 import type { AgentModelMessageEvent, AgentStepCheckpoint, AgentToolAudit } from '@/lib/ai/agent-runtime-types'
-import { modelErrorEvidenceFromUnknown } from '@/lib/ai/model-error-evidence'
-import { chatReasoningModel } from '@/lib/ai/chat-reasoning-model'
 import {
-  createModelHttpAuditFetch,
   type ModelHttpAuditContext,
   type ModelHttpAuditEvent,
-  withModelHttpAuditContext,
 } from '@/lib/ai/model-http-audit'
-import { createDirectImageGenerator, mcpUrl, type ChatSkillSnapshot } from '@/lib/ai/global-chat-tools'
-import { workerHeaders } from '@/lib/ai/job-client'
+import { type ChatSkillSnapshot } from '@/lib/ai/global-chat-tools'
 import { getEnabledSkill, listSkillReferences, loadSkillPreloadContext } from '@/lib/skills/registry'
-import { resolveSkillBinding } from '@/lib/skills/bindings'
 import {
   PipelineResolutionError,
   resolvePipelineInvocations,
   type ResolvedSkillInvocationPayload,
 } from '@/lib/ai/pipeline-resolver'
-import {
-  openaiProviderFromConfig,
-  textModelConfigFromSettings,
-  textModelForProvider,
-  type TextModelConfig,
-  type TextModelSettings,
-} from '@/lib/ai/runtime-config'
 import type { ChatStreamStatus } from '@/lib/api/chat'
 import {
-  appendChatRunStep,
-  completeChatRunToolCall,
-  createChatRun,
-  decideChatRunApproval,
-  freezeChatRunPreparation,
   loadChatRunCheckpoint,
-  transitionChatRun,
 } from '@/lib/api/chat-runs'
 
 const submittedSkillInvocationSchema = z.object({
@@ -89,6 +72,8 @@ const requestSchema = z.object({
   messages: z.array(z.unknown()).max(50).default([]),
   skillName: z.string().min(1).max(200).optional(),
   draftId: z.number().int().positive().optional(),
+  model: z.string().trim().min(1).max(200).optional(),
+  reasoningEffort: z.string().trim().min(1).max(64).optional(),
   skillInvocation: submittedSkillInvocationSchema.optional(),
   messageParts: z.array(composerMessagePartSchema).min(1).max(200).optional(),
   approval: z.object({
@@ -128,16 +113,9 @@ const requestSchema = z.object({
   }
 })
 
-const apiBase = () => (process.env.API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000/api').replace(/\/$/, '')
+const apiBase = deploymentApiBase
 
-async function configuredTextModel(): Promise<TextModelConfig> {
-  const response = await fetch(`${apiBase()}/settings/ai-runtime`, {
-    cache: 'no-store',
-    headers: workerHeaders(),
-  })
-  if (!response.ok) throw new Error('无法读取设置中的文本模型配置')
-  return textModelConfigFromSettings(await response.json() as TextModelSettings)
-}
+export { chatEdioraMcpServers, mcpUrlFromApiBase }
 
 type PersistedChatSession = {
   messages: Array<{
@@ -377,87 +355,12 @@ export function skillAwareStepPolicy(stepNumber: number, skill: ChatSkillSnapsho
   }
 }
 
-function conversationForRecovery(messages: UIMessage[]) {
-  return messages
-    .map(message => `${message.role === 'user' ? '用户' : '助手'}：${messageText(message)}`)
-    .filter(line => line.trim().length > 3)
-    .join('\n\n')
-    .slice(-16_000)
-}
-
-function newChatModelAuditCall(phase: string, step: number): ModelHttpAuditContext {
-  return { callId: randomUUID(), phase, step }
-}
-
 function chatModelMessageEvent(
   audit: ModelHttpAuditContext,
   direction: AgentModelMessageEvent['direction'],
   payload: Record<string, unknown>,
 ): AgentModelMessageEvent {
   return { ...audit, direction, payload, occurredAt: new Date().toISOString() }
-}
-
-function modelWithChatHttpAuditContext<T>(
-  model: T,
-  currentContext: () => ModelHttpAuditContext,
-): T {
-  if (!model || typeof model !== 'object') return model
-  return new Proxy(model as object, {
-    get(target, property, receiver) {
-      const value = Reflect.get(target, property, receiver)
-      if ((property !== 'doGenerate' && property !== 'doStream') || typeof value !== 'function') {
-        return value
-      }
-      return (...args: unknown[]) => withModelHttpAuditContext(
-        currentContext(),
-        () => value.apply(target, args),
-      )
-    },
-  }) as T
-}
-
-async function recoverFinalAnswer({
-  provider,
-  modelName,
-  protocol,
-  messages,
-  instructions,
-  audit,
-  onMessage,
-}: {
-  provider: ReturnType<typeof openaiProviderFromConfig>
-  modelName: string
-  protocol: TextModelConfig['protocol']
-  messages: UIMessage[]
-  instructions: string
-  audit: ModelHttpAuditContext
-  onMessage: (event: AgentModelMessageEvent) => void | Promise<void>
-}) {
-  const prompt = conversationForRecovery(messages)
-  const recoveryInstructions = `${instructions}\n\nYou are in the final-answer recovery phase. Do not call tools, do not emit tool-call markup, and reply directly to the user in their language. Use only the conversation context below; be transparent if it lacks evidence.`
-  await onMessage(chatModelMessageEvent(audit, 'model_request', {
-    instructions: recoveryInstructions,
-    prompt,
-  }))
-  try {
-    const recovery = await generateText({
-      model: modelWithChatHttpAuditContext(
-        chatReasoningModel(textModelForProvider(provider, modelName, protocol)),
-        () => audit,
-      ),
-      instructions: recoveryInstructions,
-      prompt,
-    })
-    await onMessage(chatModelMessageEvent(audit, 'model_response', { text: recovery.text }))
-    return recovery.text.trim()
-  } catch (error) {
-    await onMessage(chatModelMessageEvent(
-      audit,
-      'model_error',
-      modelErrorEvidenceFromUnknown(error),
-    ))
-    throw error
-  }
 }
 
 export function genericSkillRuntimeEnabled() {
@@ -884,11 +787,6 @@ export async function POST(request: NextRequest) {
 
   let sessionBeforeWrite: PersistedChatSession | undefined
   let retriedUserMessage = false
-  let registry: Awaited<ReturnType<typeof openAgentRuntime>> | undefined
-  let writeSharedToolActivity: ((event: AgentToolAudit) => void) | undefined
-  let writeSharedModelActivity: ((event: AgentModelMessageEvent) => void) | undefined
-  const auditedToolResultKeys = new Set<string>()
-  const toolResultKey = (turn: number, step: number, callId: string) => `${turn}:${step}:${callId}`
   let canonicalTurnStarted = false
   let canonicalTurnEnded = false
   const finishCanonicalTurn = async (reason: Record<string, unknown>) => {
@@ -937,7 +835,6 @@ export async function POST(request: NextRequest) {
       ? sessionBeforeWrite
       : await persistedChatSession(body.sessionId)
     const manualSkillName = resolvedDirectInvocation?.skill_name ?? body.skillName
-    const restoredSkillName = manualSkillName ? undefined : latestActivatedSkillName(session.messages)
     // Approval resumes never derive executable history from display messages.
     const messages = body.approval ? [] : await persistedModelHistory(session)
     logContext.turn = Math.max(1, session.messages.filter(message => message.role === 'user').length)
@@ -959,166 +856,22 @@ export async function POST(request: NextRequest) {
         },
       }, logContext)
     }
-    const modelConfig = await configuredTextModel()
-    const auditedFetch = createModelHttpAuditFetch({
-      onEvent: event => persistChatAgentLogEvent(
-        chatAgentLogEventFromHttpAudit(event, logContext),
-      ),
-      registerTask: task => {
-        try {
-          after(() => task)
-        } catch {
-          // Lifecycle registration must not change Chat model behavior.
-        }
-      },
-    })
-    const provider = openaiProviderFromConfig(modelConfig, { fetch: auditedFetch })
-    const model = chatReasoningModel(
-      textModelForProvider(provider, modelConfig.modelName, modelConfig.protocol),
-    )
     const currentRequest = [...messages].reverse().find(message => message.role === 'user')
-    const currentRequestText = currentRequest ? messageText(currentRequest) : ''
+    const currentRequestText = currentRequest ? messageText(currentRequest) : (
+      body.approval ? 'Continue the previously approved task.' : ''
+    )
     const conversationContext = formatChatTurnContext(buildChatTurnContext(session.messages))
-    const genericRuntime = genericSkillRuntimeEnabled()
-    if (body.approval || durableChatRunsEnabled()) {
-      const openRunRuntime = ({ skillName }: { skillName?: string }) => openAgentRuntime({
-        mcpEndpoint: mcpUrl(apiBase()),
-        imageGenerator: createDirectImageGenerator(apiBase()),
-        model,
-        mode: 'chat',
-        policyProfile: 'chat',
-        skillMode: skillName ? 'manual' : 'auto',
-        skillName,
-        sessionId: body.sessionId,
-        turn: logContext.turn ?? 1,
-        automaticSelection: !skillName,
-        onMessage: event => persistChatAgentLogEvent(
-          chatAgentLogEventFromModelMessage(event, logContext),
-        ),
-        onToolAudit: event => persistChatAgentLogEvent(
-          chatAgentLogEventFromToolAudit(event, logContext),
-        ),
-        onSessionEvent: event => persistChatAgentSessionEvent(event, logContext),
-      })
-      const persistence = {
-        createRun: createChatRun,
-        freezePreparation: freezeChatRunPreparation as never,
-        appendStep: appendChatRunStep as never,
-        loadCheckpoint: loadChatRunCheckpoint,
-        decideApproval: decideChatRunApproval,
-        completeToolCall: completeChatRunToolCall,
-        transitionRun: transitionChatRun as never,
-      }
-      const orchestrator = createChatRunOrchestrator({
-        persistence,
-        openRuntime: openRunRuntime,
-        executeApprovedTool: async ({ checkpoint, toolCall }) => {
-          const skillName = typeof checkpoint.run.skill_invocation?.name === 'string'
-            ? checkpoint.run.skill_invocation.name
-            : undefined
-          const toolRuntime = await openRunRuntime({ skillName })
-          try {
-            await toolRuntime.prepare(checkpoint.run.objective)
-            const expected = checkpoint.run.capability_snapshot
-            const actual = toolRuntime.capabilitySnapshot()
-            if (!isAgentCapabilitySnapshot(expected)) {
-              throw new Error('Chat Run capability checkpoint is invalid')
-            }
-            const drift = capabilitySnapshotDrift(expected, actual)
-            if (drift) throw new Error(`Agent capability drift detected: ${drift}`)
-            const selectedTool = toolRuntime.tools[toolCall.tool_name] as {
-              execute?: (input: unknown, options: { toolCallId: string }) => Promise<unknown>
-            } | undefined
-            if (!selectedTool?.execute) {
-              throw new Error(`Prepared Agent tool is unavailable: ${toolCall.tool_name}`)
-            }
-            return await selectedTool.execute(toolCall.input_data, {
-              toolCallId: toolCall.tool_call_id,
-            })
-          } finally {
-            await toolRuntime.close()
-          }
-        },
-      })
-      const stream = createUIMessageStream({
-        execute: async ({ writer }) => {
-          writer.write({
-            type: 'data-chat-status', id: 'chat-activity', transient: true,
-            data: {
-              phase: 'thinking', state: 'streaming',
-              label: body.approval ? '正在继续已批准的任务' : '正在准备可恢复的任务',
-              detail: body.approval ? '正在从持久化检查点继续执行' : '正在保存 Skill、计划和工具能力快照',
-            },
-          })
-          const projection = body.approval
-            ? await orchestrator.resumeRun({
-                sessionId: body.sessionId,
-                ...durableApprovalPayload(body.approval),
-                maxSteps: CHAT_MAX_STEPS,
-              })
-            : await orchestrator.startRun({
-                sessionId: body.sessionId,
-                userMessageId: session.messages.filter(message => message.role === 'user').at(-1)!.id,
-                objective: currentRequestText,
-                modelMessages: await convertToModelMessages(messages),
-                conversationContext,
-                selectedContext: [
-                  body.draftId ? await selectedContext(undefined, body.draftId, '') : '',
-                  resolvedDirectInvocation ? directSkillParameterContext(resolvedDirectInvocation) : '',
-                ].filter(Boolean).join('\n\n---\n\n'),
-                maxSteps: CHAT_MAX_STEPS,
-                skillName: manualSkillName,
-              })
-          await persistChatRunProjection(body.sessionId, projection, logContext)
-          await writeChatRunProjection(writer, projection)
-          writer.write({
-            type: 'data-chat-status', id: 'chat-activity', transient: true,
-            data: projection.status === 'waiting_approval'
-              ? { phase: 'thinking', state: 'streaming', label: '等待你的确认', detail: '确认后将继续同一个任务' }
-              : projection.status === 'completed'
-                ? { phase: 'answer', state: 'complete', label: '已完成', detail: '任务已完成' }
-                : { phase: 'thinking', state: 'error', label: '处理失败', detail: '任务状态已持久化，可查看错误详情' },
-          })
-          await finishCanonicalTurn(canonicalTurnEndReasonForChatRun(projection.status))
-          await persistChatAgentLogEvent(chatSessionEvent(logContext, {
-            event_type: 'session/turn-end', phase: 'chat',
-            status: projection.status,
-            payload: { kind: projection.status, runId: projection.runId },
-          }))
-        },
-        onError: error => error instanceof Error ? error.message : 'Chat response failed',
-      })
-      return createUIMessageStreamResponse({ stream })
-    }
-    const runtime = await openAgentRuntime({
-      mcpEndpoint: mcpUrl(apiBase()),
-      imageGenerator: createDirectImageGenerator(apiBase()),
-      model,
-      mode: 'chat',
-      policyProfile: 'chat',
-      skillMode: manualSkillName ? 'manual' : 'auto',
-      skillName: manualSkillName,
-      restoredSkillName,
-      draftId: body.draftId,
-      sessionId: body.sessionId,
-      turn: logContext.turn ?? 1,
-      automaticSelection: genericRuntime,
-      onMessage: event => {
-        writeSharedModelActivity?.(event)
-        return persistChatAgentLogEvent(
-          chatAgentLogEventFromModelMessage(event, logContext),
-        )
-      },
-      onToolAudit: event => {
-        writeSharedToolActivity?.(event)
-        if (event.status !== 'started' && event.step !== undefined) {
-          auditedToolResultKeys.add(toolResultKey(logContext.turn ?? 1, event.step, event.toolCallId))
-        }
-        return persistChatAgentLogEvent(chatAgentLogEventFromToolAudit(event, logContext))
-      },
-      onSessionEvent: event => persistChatAgentSessionEvent(event, logContext),
-    })
-    registry = runtime
+    const extraContext = [
+      manualSkillName || body.draftId
+        ? await selectedContext(manualSkillName, body.draftId, '')
+        : '',
+      resolvedDirectInvocation ? directSkillParameterContext(resolvedDirectInvocation) : '',
+      conversationContext,
+    ].filter(Boolean).join('\n\n---\n\n')
+    const agentInput = extraContext
+      ? `${currentRequestText}\n\n${extraContext}`
+      : currentRequestText
+
     const stream = createUIMessageStream({
       execute: async ({ writer }) => {
         const writeStatus = (status: ChatStreamStatus) => {
@@ -1129,426 +882,68 @@ export async function POST(request: NextRequest) {
             transient: true,
           })
         }
-        const initialRequestStatus: ChatStreamStatus = manualSkillName
-          ? chatStatusForSkill({ name: manualSkillName, displayName: manualSkillName })
-          : {
-              phase: 'thinking',
-              state: 'streaming',
-              label: '正在思考',
-              detail: '正在分析你的请求',
-            }
-        writeStatus(initialRequestStatus)
-
-        try {
-          const selected = genericRuntime || manualSkillName
-            ? await runtime.prepare(currentRequestText, conversationContext)
-            : runtime.selectedSkill
-          await persistChatAgentLogEvent(chatSessionEvent(logContext, {
-            event_type: 'skill/selected',
-            phase: 'prepare',
-            status: selected ? 'completed' : 'skipped',
-            payload: selected
-              ? { name: selected.skill.name, activation: selected.activation }
-              : { name: null, activation: null },
-          }))
-          await persistChatAgentSessionEvent({
-            type: 'agent/skill',
-            turn: logContext.turn ?? 1,
-            step: null,
-            data: {
-              name: selected?.skill.name ?? 'none',
-              activation: selected?.activation ?? 'automatic',
-              metadata: selected ? { selected: true } : { selected: false },
-            },
-          }, logContext)
-          const context = await selectedContext(selected?.skill.name ?? manualSkillName, body.draftId, runtime.catalogContext)
-          const parameterContext = resolvedDirectInvocation
-            ? directSkillParameterContext(resolvedDirectInvocation)
-            : ''
-          const instructions = buildChatInstructions(
-            [context, parameterContext].filter(Boolean).join('\n\n---\n\n'),
-          )
-          const executionTools = executionToolsForSelection(runtime.tools, genericRuntime, Boolean(selected))
-          await persistChatAgentLogEvent(chatSessionEvent(logContext, {
-            event_type: 'session/capabilities',
-            phase: 'prepare',
-            status: 'completed',
-            payload: {
-              capabilitySnapshot: runtime.capabilitySnapshot(),
-              messageCount: messages.length,
-              toolNames: Object.keys(executionTools),
-            },
-          }))
-
-          if (shouldUseSharedAgentRun({
-            genericRuntime,
-            selected: Boolean(selected),
-            directInvocation: Boolean(resolvedDirectInvocation),
-          })) {
-            const modelMessages = await convertToModelMessages(messages, { tools: runtime.tools, ignoreIncompleteToolCalls: true })
-            const selectedStatusSkill = selected
-              ? {
-                  name: selected.skill.name,
-                  displayName: resolveSkillBinding(selected.skill).displayName,
-                }
-              : undefined
-            writeStatus(selectedStatusSkill
-              ? chatStatusForSkill(selectedStatusSkill)
-              : {
-                  phase: 'thinking',
-                  state: 'streaming',
-                  label: '正在思考',
-                  detail: '未启用 Skill，正在直接生成回答',
-                })
-            writeSharedToolActivity = event => {
-              if (event.status === 'started') {
-                writer.write({
-                  type: 'tool-input-available',
-                  toolName: event.toolName,
-                  toolCallId: event.toolCallId,
-                  input: event.inputSummary,
-                  dynamic: true,
-                })
-                writeStatus({
-                  phase: selectedStatusSkill ? 'skill' : 'thinking',
-                  state: 'streaming',
-                  label: `正在调用工具：${event.toolName}`,
-                  detail: '正在等待工具返回结果',
-                  ...(selectedStatusSkill
-                    ? { skillName: selectedStatusSkill.name, skillDisplayName: selectedStatusSkill.displayName }
-                    : {}),
-                })
-                return
-              }
-              if (event.status === 'succeeded') {
-                writer.write({
-                  type: 'tool-output-available',
-                  toolCallId: event.toolCallId,
-                  output: event.output,
-                })
-              }
-            }
-            writeSharedModelActivity = event => {
-              if (event.direction !== 'model_response') return
-              const reasoning = event.payload.reasoning
-              const chunks = typeof reasoning === 'string'
-                ? [reasoning]
-                : Array.isArray(reasoning)
-                  ? reasoning.flatMap(item => {
-                      if (typeof item === 'string') return [item]
-                      if (!item || typeof item !== 'object') return []
-                      const text = (item as Record<string, unknown>).text
-                      return typeof text === 'string' ? [text] : []
-                    })
-                  : []
-              if (chunks.length === 0) return
-              const id = `agent-reasoning-${event.step ?? 'latest'}`
-              writer.write({ type: 'reasoning-start', id })
-              for (const chunk of chunks) writer.write({ type: 'reasoning-delta', id, delta: chunk })
-              writer.write({ type: 'reasoning-end', id })
-            }
-            const result = await runtime.run({
-              objective: currentRequestText,
-              modelMessages,
-              conversationContext,
-              selectedContext: body.draftId ? context : '',
-              maxSteps: CHAT_MAX_STEPS,
-              onStep: checkpoint => {
-                writeStatus(chatStatusForAgentStep(checkpoint, selectedStatusSkill))
-              },
-            })
-            const parts = result.parts as UIMessage['parts']
-            await persistMessage(
-              body.sessionId,
-              { role: 'assistant', parts },
-              agentSkillRunAudit(result),
-              runtime.capabilitySnapshot(),
-            )
-            await persistChatAgentLogEvent(chatSessionEvent(logContext, {
-              event_type: 'session/assistant-message',
-              phase: 'execute',
-              status: result.kind === 'completed' ? 'completed' : 'waiting_approval',
-              payload: { parts, text: result.text, kind: result.kind },
-            }))
-            await finishCanonicalTurn({
-              kind: result.kind === 'completed' ? 'completed' : 'waiting_approval',
-            })
-            await persistChatAgentLogEvent(chatSessionEvent(logContext, {
-              event_type: 'session/turn-end',
-              phase: 'chat',
-              status: result.kind === 'completed' ? 'completed' : 'waiting_approval',
-              payload: {
-                kind: result.kind,
-                finishReason: result.finishReason ?? null,
-                stepCount: result.stepCount ?? null,
-              },
-            }))
-            if (result.kind === 'approval') {
-              writeStatus({
-                phase: selectedStatusSkill ? 'skill' : 'thinking',
-                state: 'streaming',
-                label: '等待你的确认',
-                detail: '确认后将继续执行当前任务',
-                ...(selectedStatusSkill
-                  ? { skillName: selectedStatusSkill.name, skillDisplayName: selectedStatusSkill.displayName }
-                  : {}),
-              })
-            }
-            await writeAgentRunResult(writer, result)
-            writeSharedToolActivity = undefined
-            writeSharedModelActivity = undefined
-            await registry?.close()
-            registry = undefined
-            return
-          }
-
-    const modelMessages = await convertToModelMessages(messages, { tools: executionTools, ignoreIncompleteToolCalls: true })
-    const streamBlocks = new Map<number, Record<string, unknown>[]>()
-    const finishedStreamSteps = new Set<number>()
-    let lastStreamStep = 0
-    const legacyAuditByStep = new Map<number, ModelHttpAuditContext>()
-    let activeLegacyAudit: ModelHttpAuditContext | undefined
-    const legacyModel = modelWithChatHttpAuditContext(model, () => (
-      activeLegacyAudit ?? newChatModelAuditCall('execute', Math.max(1, lastStreamStep))
-    ))
-    const result = streamText({
-      model: legacyModel,
-      instructions,
-      messages: modelMessages,
-      tools: executionTools,
-      stopWhen: stepCountIs(CHAT_MAX_STEPS),
-      prepareStep: async ({ stepNumber }) => {
-        const trajectoryStep = stepNumber + 1
-        lastStreamStep = trajectoryStep
-        const audit = newChatModelAuditCall('execute', trajectoryStep)
-        activeLegacyAudit = audit
-        legacyAuditByStep.set(trajectoryStep, audit)
-        streamBlocks.set(trajectoryStep, [])
-        await persistChatAgentSessionEvent({
-          type: 'step/start',
-          turn: logContext.turn ?? 1,
-          step: trajectoryStep,
-          data: { turn: logContext.turn ?? 1, step: trajectoryStep, phase: 'execute' },
-        }, logContext)
-        await persistChatAgentSessionEvent({
-          type: 'request/header',
-          turn: logContext.turn ?? 1,
-          step: trajectoryStep,
-          data: {
-            turn: logContext.turn ?? 1,
-            step: trajectoryStep,
-            phase: 'execute',
-            request: {
-              instructions,
-              messages: modelMessages,
-              toolNames: Object.keys(executionTools),
-            },
-          },
-        }, logContext)
-        await persistChatAgentLogEvent(chatAgentLogEventFromModelMessage(
-          chatModelMessageEvent(audit, 'model_request', {
-            stepNumber,
-            instructions,
-            messages: modelMessages,
-            toolNames: Object.keys(executionTools),
-          }),
-          logContext,
-        ))
-        return skillAwareStepPolicy(stepNumber, runtime.snapshot(), instructions)
-      },
-      onChunk: async ({ chunk }) => {
-        const mapped = chatTrajectoryChunk(chunk)
-        const step = lastStreamStep || 1
-        if (mapped) {
-          await persistChatAgentSessionEvent({
-            type: 'assistant/chunk',
-            turn: logContext.turn ?? 1,
-            step,
-            data: { turn: logContext.turn ?? 1, step, chunk: mapped },
-          }, logContext)
-          const blocks = streamBlocks.get(step) ?? []
-          if (mapped.kind === 'text' && typeof mapped.text === 'string') {
-            const previous = blocks.at(-1)
-            if (previous?.kind === 'text') previous.text = `${String(previous.text ?? '')}${mapped.text}`
-            else blocks.push({ kind: 'text', text: mapped.text })
-          } else if (mapped.kind === 'reasoning' && typeof mapped.text === 'string') {
-            const previous = blocks.at(-1)
-            if (previous?.kind === 'reasoning') previous.text = `${String(previous.text ?? '')}${mapped.text}`
-            else blocks.push({ kind: 'reasoning', text: mapped.text })
-          } else if (mapped.kind === 'tool-call') {
-            blocks.push(mapped)
-          }
-          streamBlocks.set(step, blocks)
-        }
-        if (chunk.type === 'finish-step') {
-          const blocks = streamBlocks.get(step) ?? []
-          await persistChatAgentSessionEvent({
-            type: 'assistant/message',
-            turn: logContext.turn ?? 1,
-            step,
-            data: {
-              turn: logContext.turn ?? 1,
-              step,
-              blocks,
-              usage: chunk.usage,
-              timing: chunk.performance,
-              interrupted: false,
-            },
-          }, logContext)
-          await persistChatAgentSessionEvent({
-            type: 'step/end',
-            turn: logContext.turn ?? 1,
-            step,
-            data: { turn: logContext.turn ?? 1, step },
-          }, logContext)
-          finishedStreamSteps.add(step)
-        }
-      },
-      onStepFinish: async ({ text, toolCalls, toolResults, finishReason, usage }) => {
-        const turn = logContext.turn ?? 1
-        const step = lastStreamStep || 1
-        const audit = legacyAuditByStep.get(step) ?? newChatModelAuditCall('execute', step)
-        for (const result of toolResults) {
-          const event = chatAgentSessionEventFromToolResult(result, { turn, step })
-          if (!event || auditedToolResultKeys.has(toolResultKey(turn, step, event.data.callId as string))) continue
-          await persistChatAgentSessionEvent(event, logContext)
-        }
-        const event = chatAgentLogEventFromModelMessage(
-          chatModelMessageEvent(audit, 'model_response', {
-            text, toolCalls, toolResults, finishReason, usage,
-          }),
-          logContext,
-        )
-        event.usage = usage as unknown as Record<string, unknown>
-        await persistChatAgentLogEvent(event)
-      },
-      onError: async ({ error }) => {
-        const step = lastStreamStep || 1
-        const audit = legacyAuditByStep.get(step) ?? newChatModelAuditCall('execute', step)
-        const errorEvidence = modelErrorEvidenceFromUnknown(error)
-        await persistChatAgentLogEvent(chatAgentLogEventFromModelMessage(
-          chatModelMessageEvent(audit, 'model_error', errorEvidence),
-          logContext,
-        ))
-        await finishCanonicalTurn({
-          kind: 'error',
-          error: typeof errorEvidence.message === 'string'
-            ? errorEvidence.message
-            : '[unavailable model error evidence]',
-          modelError: errorEvidence,
+        writeStatus({
+          phase: 'thinking',
+          state: 'streaming',
+          label: '正在思考',
+          detail: '正在通过 Codex 处理你的请求',
         })
-      },
-    })
-
-          writeStatus(selected
-            ? chatStatusForSkill({
-                name: selected.skill.name,
-                displayName: resolveSkillBinding(selected.skill).displayName,
-              })
-            : {
-                phase: 'thinking',
-                state: 'streaming',
-                label: '正在思考',
-                detail: '未启用 Skill，正在直接生成回答',
-              })
-          writer.merge(result.toUIMessageStream({
-          originalMessages: messages,
-          onFinish: async ({ responseMessage, isAborted }) => {
-            let pendingApproval = false
-            let terminalReason: Record<string, unknown> = {
-              kind: isAborted ? 'aborted' : 'completed',
-            }
-            try {
-              if (!isAborted) {
-                pendingApproval = responseMessage.parts.some(part => part.type === 'dynamic-tool' && part.state === 'approval-requested')
-                let parts = responseMessage.parts
-                if (!pendingApproval && needsFinalAnswerFallback(messageText(responseMessage))) {
-                  try {
-                    const recoveryAudit = newChatModelAuditCall('finalize', (lastStreamStep || 1) + 1)
-                    const recoveredText = await recoverFinalAnswer({
-                      provider,
-                      modelName: modelConfig.modelName,
-                      protocol: modelConfig.protocol,
-                      messages,
-                      instructions,
-                      audit: recoveryAudit,
-                      onMessage: event => persistChatAgentLogEvent(
-                        chatAgentLogEventFromModelMessage(event, logContext),
-                      ),
-                    })
-                    if (!needsFinalAnswerFallback(recoveredText)) parts = [{ type: 'text', text: recoveredText }]
-                  } catch {
-                    // Persist the clear fallback below if the recovery call itself fails.
-                  }
-                }
-                const finalHasText = messageText({ parts }).trim().length > 0
-                await persistMessage(body.sessionId, {
-                  role: 'assistant',
-                  parts: finalHasText || pendingApproval ? parts : [{ type: 'text', text: '本次回复没有生成有效内容。请重试；如果问题持续出现，请缩小检索范围。' }],
-                }, undefined, runtime.capabilitySnapshot())
-                await persistChatAgentLogEvent(chatSessionEvent(logContext, {
-                  event_type: 'session/assistant-message',
-                  phase: 'execute',
-                  status: pendingApproval ? 'waiting_approval' : 'completed',
-                  payload: { parts, text: messageText({ parts }), pendingApproval },
-                }))
-                if (finishedStreamSteps.size === 0) {
-                  const step = lastStreamStep || 1
-                  await persistChatAgentSessionEvent({
-                    type: 'assistant/message',
-                    turn: logContext.turn ?? 1,
-                    step,
-                    data: {
-                      turn: logContext.turn ?? 1,
-                      step,
-                      blocks: canonicalAssistantBlocks(parts),
-                      interrupted: false,
-                    },
-                  }, logContext)
-                }
-                terminalReason = { kind: pendingApproval ? 'waiting_approval' : 'completed' }
-              }
-            } catch (error) {
-              terminalReason = {
-                kind: 'error',
-                error: error instanceof Error ? error.message : String(error),
-              }
-              throw error
-            } finally {
-              await finishCanonicalTurn(terminalReason)
-              await persistChatAgentLogEvent(chatSessionEvent(logContext, {
-                event_type: 'session/turn-end',
-                phase: 'chat',
-                status: isAborted ? 'aborted' : pendingApproval ? 'waiting_approval' : 'completed',
-                payload: { isAborted, pendingApproval },
-              }))
-              await registry?.close()
-              registry = undefined
-            }
-          },
-          onError: error => {
-            void persistChatAgentLogEvent(chatSessionEvent(logContext, {
-              event_type: 'session/error',
-              phase: 'chat',
-              status: 'error',
-              payload: { error: String(error) },
-            }))
-            void finishCanonicalTurn({ kind: 'error', error: String(error) })
-            return 'Chat response failed'
-          },
+        const textId = `codex-text-${logContext.turnId}`
+        writer.write({ type: 'text-start', id: textId })
+        try {
+          const result = await runCodexAgentTurn({
+            input: agentInput,
+            model: body.model,
+            reasoningEffort: body.reasoningEffort,
+            cwd: CODEX_THREAD_CWD,
+            approvalPolicy: 'never',
+            sandbox: 'workspace-write',
+            mcpServers: chatEdioraMcpServers(body.sessionId),
+            onTextDelta: delta => {
+              writer.write({ type: 'text-delta', id: textId, delta })
+            },
+          })
+          writer.write({ type: 'text-end', id: textId })
+          const images = await publishCodexGeneratedImages({
+            threadId: result.threadId,
+            items: result.items,
+          }).catch(error => {
+            console.error('Failed to publish Codex generated images', error)
+            return []
+          })
+          const parts = [
+            { type: 'text' as const, text: result.text },
+            ...codexImageMessageParts(images),
+          ]
+          await persistMessage(body.sessionId, { role: 'assistant', parts })
+          await persistChatAgentLogEvent(chatSessionEvent(logContext, {
+            event_type: 'session/assistant-message',
+            phase: 'execute',
+            status: 'completed',
+            payload: { parts, text: result.text, threadId: result.threadId, turnId: result.turnId },
           }))
+          await finishCanonicalTurn({ kind: 'completed' })
+          await persistChatAgentLogEvent(chatSessionEvent(logContext, {
+            event_type: 'session/turn-end',
+            phase: 'chat',
+            status: 'completed',
+            payload: { kind: 'completed', threadId: result.threadId, turnId: result.turnId },
+          }))
+          writeStatus({
+            phase: 'answer',
+            state: 'complete',
+            label: '已完成',
+            detail: '任务已完成',
+          })
         } catch (error) {
+          writer.write({ type: 'text-end', id: textId })
           const message = error instanceof Error ? error.message : 'Chat response failed'
-          writeSharedToolActivity = undefined
-          writeSharedModelActivity = undefined
           writeStatus({
             phase: 'thinking',
             state: 'error',
             label: '处理失败',
             detail: message,
           })
-          await registry?.close()
-          registry = undefined
           await finishCanonicalTurn({ kind: 'error', error: message })
           await persistChatAgentLogEvent(chatSessionEvent(logContext, {
             event_type: 'session/error',
@@ -1559,11 +954,10 @@ export async function POST(request: NextRequest) {
           throw error
         }
       },
-      onError: () => 'Chat response failed',
+      onError: error => error instanceof Error ? error.message : 'Chat response failed',
     })
     return createUIMessageStreamResponse({ stream })
   } catch (error) {
-    await registry?.close()
     const message = error instanceof Error ? error.message : 'Chat request failed'
     await finishCanonicalTurn({ kind: 'error', error: message })
     await persistChatAgentLogEvent(chatSessionEvent(logContext, {

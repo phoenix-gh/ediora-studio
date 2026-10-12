@@ -1152,6 +1152,9 @@ class CreativeAsset(Base):
     last_selected_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, index=True
     )
+    last_adopted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
 
@@ -1416,6 +1419,8 @@ class DailyCreationRule(Base):
     prompt: Mapped[str] = mapped_column(Text, nullable=False, default="")
     skill_mode: Mapped[str] = mapped_column(String, nullable=False, default="auto")
     skill_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    codex_model: Mapped[str | None] = mapped_column(String, nullable=True)
+    codex_reasoning_effort: Mapped[str | None] = mapped_column(String, nullable=True)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)

@@ -18,7 +18,6 @@ READ_TOOL_CONTRACTS = {
     "search_source_items": ("information_sources", False),
     "get_source_item": ("information_sources", False),
     "list_creative_asset_candidates": ("creative_assets", False),
-    "get_recent_content_usage": ("creative_assets", False),
     "check_content_novelty": ("drafts", False),
     "list_writing_plans": ("writing_plans", False),
     "get_writing_plan": ("writing_plans", False),
@@ -28,12 +27,12 @@ READ_TOOL_CONTRACTS = {
 }
 
 WRITE_TOOL_CONTRACTS = {
-    "record_content_usage": ("creative_assets", False, True, False, "claim-backed"),
     "update_draft": ("drafts", True, False, False, "claim-backed"),
     "create_writing_plan": ("writing_plans", False, False, False, "claim-backed"),
     "add_plan_source": ("writing_plans", False, False, False, "claim-backed"),
     "update_writing_plan": ("writing_plans", True, False, False, "claim-backed"),
     "add_plan_update": ("writing_plans", False, False, False, "claim-backed"),
+    "generateImage": ("image_generation", False, False, True, "unsafe"),
     "upload_image_from_url": ("creative_assets", False, False, True, "unsafe"),
     "upload_image_from_path": ("creative_assets", False, False, False, "unsafe"),
     "attach_creative_asset_to_draft": (

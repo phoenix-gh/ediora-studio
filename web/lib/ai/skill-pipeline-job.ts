@@ -17,32 +17,26 @@ import {
   type AgentSessionEventInput,
 } from './agent-log-client'
 import {
-  agentSkillRunAudit,
-  openAgentRuntime,
-  type AgentRuntime,
   type AgentSessionEventDraft,
-  type OpenAgentRuntimeOptions,
 } from './agent-runtime'
+import { CODEX_THREAD_CWD } from './codex-app-server'
 import {
-  blockedGoalError,
-  buildRuntimeGoalEvidence,
+  runCodexAgentTurn,
+  type CodexAgentTurnResult,
+  type RunCodexAgentTurnOptions,
+} from './codex-app-server-client'
+import { configuredCodexTurn, loadConfiguredCodexTurn } from './codex-settings'
+import {
   normalizeGoalCompletionDeclaration,
   runtimeGoalEvidenceSchema,
 } from './agent-goal-completion'
 import {
   isAgentCapabilitySnapshot,
-  pinCapabilitySnapshot,
   type AgentCapabilitySnapshot,
 } from './agent-capabilities'
 import {
-  capabilityPinFromExecution,
-  restoredSkillNameFromExecution,
-} from './agent-capability-pin'
-import { createDirectImageGenerator, mcpUrl } from './global-chat-tools'
-import {
   ApiRequestError,
   apiBase,
-  apiGet,
   completePipelineStage,
   failPipelineStage,
   getJob,
@@ -58,9 +52,6 @@ import type {
   AgentToolAudit,
   AgentToolDecision,
 } from './agent-runtime-types'
-import { textModelConfigFromSettings, textModelFromConfig, type TextModelSettings } from './runtime-config'
-
-const MAX_STEPS = 30
 const MAX_CONTEXT_CHARS = 120_000
 
 type StageInput = Record<string, unknown> & {
@@ -107,7 +98,6 @@ export type SkillPipelineJobDependencies = {
   startStage(jobId: number, stepId: number, attempt: number, runEpoch: number): Promise<unknown>
   completeStage(jobId: number, stepId: number, input: PipelineStageCompleteInput): Promise<DurableJob>
   failStage(jobId: number, stepId: number, input: PipelineStageFailureInput): Promise<DurableJob>
-  loadModel(jobId: number): Promise<OpenAgentRuntimeOptions['model']>
   ensureExecution(jobId: number, request: {
     objective: string
     skillMode: 'manual'
@@ -129,16 +119,9 @@ export type SkillPipelineJobDependencies = {
   completeToolCall(jobId: number, executionId: number, toolCallId: string, output: unknown): Promise<unknown>
   failToolCall(jobId: number, executionId: number, toolCallId: string, error: string, uncertain: boolean): Promise<unknown>
   failExecution(jobId: number, executionId: number, error: string): Promise<unknown>
-  openRuntime(options: OpenAgentRuntimeOptions): Promise<AgentRuntime>
+  runAgentTurn(options: RunCodexAgentTurnOptions): Promise<CodexAgentTurnResult>
   apiRoot(): string
-}
-
-async function configuredModel(jobId: number) {
-  const settings = await apiGet<TextModelSettings>(
-    '/settings/ai-runtime',
-    workerHeaders(jobId),
-  )
-  return textModelFromConfig(textModelConfigFromSettings(settings))
+  codexTurn?(apiRoot: string): Promise<{ model?: string, reasoningEffort?: string }>
 }
 
 const defaultDependencies: SkillPipelineJobDependencies = {
@@ -146,7 +129,6 @@ const defaultDependencies: SkillPipelineJobDependencies = {
   startStage: startPipelineStage,
   completeStage: completePipelineStage,
   failStage: failPipelineStage,
-  loadModel: configuredModel,
   ensureExecution: (jobId, request) => ensureAgentExecution(jobId, request),
   checkpointExecution: checkpointAgentExecution,
   appendMessage: appendAgentMessage,
@@ -157,8 +139,9 @@ const defaultDependencies: SkillPipelineJobDependencies = {
   completeToolCall: completeAgentToolCall,
   failToolCall: failAgentToolCall,
   failExecution: failAgentExecution,
-  openRuntime: openAgentRuntime,
+  runAgentTurn: runCodexAgentTurn,
   apiRoot: apiBase,
+  codexTurn: loadConfiguredCodexTurn,
 }
 
 function record(value: unknown): Record<string, unknown> {
@@ -266,70 +249,6 @@ function frozenCapability(invocation: PipelineInvocation): AgentCapabilitySnapsh
   return invocation.capability_snapshot
 }
 
-function sorted(values: string[]) {
-  return [...values].sort((left, right) => left.localeCompare(right))
-}
-
-function assertFrozenCapability(
-  expected: AgentCapabilitySnapshot,
-  actual: AgentCapabilitySnapshot,
-) {
-  if (actual.mode !== 'job' || expected.mode !== actual.mode) {
-    throw new Error('Agent capability drift detected: mode')
-  }
-  if (expected.policy.approvalPolicy !== actual.policy.approvalPolicy) {
-    throw new Error('Agent capability drift detected: policy')
-  }
-  const expectedAllowed = expected.policy.allowedToolNames ?? []
-  const actualAllowed = actual.policy.allowedToolNames ?? []
-  if (json(sorted(expectedAllowed)) !== json(sorted(actualAllowed))) {
-    throw new Error('Agent capability drift detected: policy')
-  }
-  const expectedTools = sorted(expected.tools.map(tool => tool.name))
-  const actualTools = sorted(actual.tools.map(tool => tool.name))
-  if (json(expectedTools) !== json(actualTools)) {
-    throw new Error('Agent capability drift detected: tools')
-  }
-  const expectedSkill = expected.skill
-  const actualSkill = actual.skill
-  if (!expectedSkill || !actualSkill) {
-    throw new Error('Agent capability drift detected: skill')
-  }
-  if (
-    expectedSkill.name !== actualSkill.name
-    || expectedSkill.version !== actualSkill.version
-    || expectedSkill.source !== actualSkill.source
-    || expectedSkill.instructionsDigest !== actualSkill.instructionsDigest
-    || expectedSkill.activation !== actualSkill.activation
-  ) {
-    throw new Error('Agent capability drift detected: skill')
-  }
-  const actualReferences = new Map(actualSkill.references.map(reference => [reference.path, reference]))
-  for (const expectedReference of expectedSkill.references) {
-    const actualReference = actualReferences.get(expectedReference.path)
-    if (!actualReference || actualReference.bytes !== expectedReference.bytes) {
-      throw new Error('Agent capability drift detected: skill')
-    }
-    if (
-      expectedReference.contentDigest !== null
-      && expectedReference.contentDigest !== actualReference.contentDigest
-    ) {
-      throw new Error('Agent capability drift detected: skill')
-    }
-  }
-}
-
-function firstBlockingToolAudit(audits: AgentToolAudit[]) {
-  return audits.find((audit, index) => {
-    if (audit.status === 'uncertain') return true
-    if (audit.status !== 'failed') return false
-    if (audit.sideEffecting) return true
-    return !audits.slice(index + 1).some(later => (
-      later.toolName === audit.toolName && later.status === 'succeeded'
-    ))
-  })
-}
-
 function isStageSucceeded(job: DurableJob, stageId: number, attempt: number) {
   return (job.pipeline?.stages ?? []).some(stage => (
     stage.id === stageId
@@ -368,7 +287,7 @@ function deterministicFailure(error: unknown) {
     return error.status === 409 || error.status === 422 || !error.retryable
   }
   const message = error instanceof Error ? error.message : String(error)
-  return /Selected skill is unavailable|capability drift|Invalid Skill plan|Required Agent tool|automatic Skill Pipeline|Agent tool audit|Agent ended without declaring goal completion|Agent execution completion evidence has no valid goal declaration|Agent blocked:|snapshot is missing|Stage is failed|Agent execution is (?:failed|uncertain|cancelled)|interrupted after a side effect/.test(message)
+  return /Selected skill is unavailable|capability drift|Invalid Skill plan|Required Agent tool|automatic Skill Pipeline|Agent tool audit|Agent ended without declaring goal completion|Agent execution completion evidence has no valid goal declaration|Agent blocked:|snapshot is missing|Stage is failed|Agent execution is (?:failed|uncertain|cancelled)|interrupted after a side effect|Codex turn|turn failed|turn cancelled/.test(message)
 }
 
 export async function runSkillPipelineJob(
@@ -413,11 +332,8 @@ export async function runSkillPipelineJob(
     attempt: stage.attempt,
   }
   let execution: DurableAgentExecution | undefined
-  let runtime: AgentRuntime | undefined
-  let capabilityPin: AgentCapabilitySnapshot | undefined
   let pendingEvidence: AgentCompletionEvidence | undefined
   let finalizationConfirmed = false
-  const audits: AgentToolAudit[] = []
   const turn = stage.attempt
 
   const recordExecutionEvent = async (
@@ -480,7 +396,6 @@ export async function runSkillPipelineJob(
       finalizationConfirmed = true
       return evidence
     }
-    capabilityPin = capabilityPinFromExecution(execution)
     const recordedCalls = await deps.listToolCalls(jobId, execution.id)
     if (recordedCalls.some(call => {
       const candidate = record(call)
@@ -509,80 +424,18 @@ export async function runSkillPipelineJob(
     const checkpoint = async (
       phase: string,
       state: Record<string, unknown>,
-      audit: Record<string, unknown>,
+      audit: Record<string, unknown> = {},
     ) => {
       if (!execution) throw new Error('pipeline Agent execution was not initialized')
       execution = await deps.checkpointExecution(
         jobId,
         execution.id,
         execution.version,
-        { phase, checkpoint: state, audit, capabilityPin },
+        { phase, checkpoint: state, audit },
       )
     }
-    const withCapabilityAudit = (audit: Record<string, unknown>) => {
-      if (!runtime) return audit
-      const current = runtime.capabilitySnapshot()
-      assertFrozenCapability(expectedCapability, current)
-      capabilityPin = pinCapabilitySnapshot(capabilityPin, current)
-      return { ...audit, capabilities: current, capabilityPin }
-    }
 
-    const model = await deps.loadModel(jobId)
-    runtime = await deps.openRuntime({
-      mcpEndpoint: mcpUrl(deps.apiRoot()),
-      imageGenerator: createDirectImageGenerator(deps.apiRoot(), jobId),
-      model,
-      mode: 'job',
-      turn,
-      policyProfile: 'scheduled',
-      approvalPolicy: 'automatic',
-      automaticSelection: false,
-      skillMode: 'manual',
-      skillName,
-      restoredSkillName: restoredSkillNameFromExecution(execution),
-      allowedToolNames: expectedCapability.policy.allowedToolNames ?? [],
-      onSessionEvent: recordSessionEvent,
-      beforeToolExecute: async event => {
-        try {
-          if (runtime) {
-            const current = runtime.capabilitySnapshot()
-            assertFrozenCapability(expectedCapability, current)
-            capabilityPin = pinCapabilitySnapshot(capabilityPin, current)
-          }
-          if (!execution) throw new Error('pipeline Agent execution was not initialized')
-          return await deps.claimToolCall(jobId, execution.id, event)
-        } catch (error) {
-          return {
-            action: 'uncertain' as const,
-            error: error instanceof Error ? error.message : String(error),
-          }
-        }
-      },
-      onMessage: async event => {
-        if (!execution) return
-        try {
-          await deps.appendMessage?.(jobId, execution.id, event)
-        } catch {
-          // Model transcript persistence is best effort.
-        }
-      },
-      onToolAudit: async event => {
-        audits.push(event)
-        if (!execution) return
-        if (event.status === 'succeeded') {
-          await deps.completeToolCall(jobId, execution.id, event.toolCallId, event.output)
-        } else if (event.status === 'failed' || event.status === 'uncertain') {
-          await deps.failToolCall(
-            jobId,
-            execution.id,
-            event.toolCallId,
-            event.error || 'tool execution failed',
-            event.status === 'uncertain' || event.sideEffecting,
-          )
-        }
-      },
-    })
-
+    const context = stageContext(job, stage)
     await recordExecutionEvent({
       event_type: 'skill/selected',
       phase: 'prepare',
@@ -599,64 +452,44 @@ export async function runSkillPipelineJob(
       event_type: 'session/capabilities',
       phase: 'prepare',
       status: 'completed',
-      payload: { capabilitySnapshot: runtime.capabilitySnapshot() },
+      payload: { agent: 'codex-app-server', skillName, frozenCapability: expectedCapability },
     })
     await checkpoint('prepared', {
       objective,
       stage: stage.key,
-      context: stageContext(job, stage),
-    }, withCapabilityAudit({ skill: runtime.snapshot(), toolCalls: audits }))
+      context,
+    }, { agent: 'codex-app-server', skillName })
 
-    const result = await runtime.run({
-      objective,
-      modelMessages: [{ role: 'user', content: objective }],
-      selectedContext: stageContext(job, stage),
-      maxSteps: MAX_STEPS,
-      requireGoalCompletion: true,
-      onStep: event => checkpoint(
-        event.phase,
-        { objective, stage: stage.key, latestStep: event },
-        withCapabilityAudit({ skill: runtime?.snapshot(), toolCalls: audits }),
-      ),
+    const codexTurn = await configuredCodexTurn(deps)
+    const result = await deps.runAgentTurn({
+      input: `${objective}\n\n${context}`,
+      ...(codexTurn.model ? { model: codexTurn.model } : {}),
+      ...(codexTurn.reasoningEffort ? { reasoningEffort: codexTurn.reasoningEffort } : {}),
+      cwd: CODEX_THREAD_CWD,
+      approvalPolicy: 'never',
+      sandbox: 'workspace-write',
     })
-    const blockingAudit = firstBlockingToolAudit(audits)
-    if (blockingAudit) {
-      throw new Error(`Agent tool audit is ${blockingAudit.status}: ${blockingAudit.toolName}`)
-    }
-    if (result.kind === 'approval') {
-      throw new Error('automatic Skill Pipeline cannot pause for approval')
-    }
-    const declaration = result.goalCompletion
-    if (!declaration) throw new Error('Agent ended without declaring goal completion')
-    const auditCalls = audits.map(audit => ({
-      toolCallId: audit.toolCallId,
-      toolName: audit.toolName,
-      status: audit.status,
-      sideEffecting: audit.sideEffecting,
-    }))
-    if (declaration.status === 'blocked') throw blockedGoalError(declaration)
-
+    const summary = (result.text.trim() || skillName).slice(0, 2_000)
     const evidence: AgentCompletionEvidence = {
       kind: 'agent_run',
       executionId: execution.id,
-      finalText: declaration.summary.slice(0, 2_000),
-      toolCallCount: audits.filter(audit => (
-        audit.status === 'succeeded' && audit.toolName !== 'complete_goal'
+      finalText: summary,
+      toolCallCount: result.items.filter(item => (
+        item.type === 'mcpToolCall' || item.type === 'commandExecution'
       )).length,
-      goalCompletion: declaration,
-      runtimeEvidence: buildRuntimeGoalEvidence(auditCalls, declaration.outputs),
+      goalCompletion: {
+        status: 'completed',
+        summary,
+      },
     }
     pendingEvidence = evidence
     await checkpoint('finalizing', {
       objective,
       stage: stage.key,
       evidence,
-      goalCompletion: declaration,
-    }, withCapabilityAudit({
-      skill: runtime.snapshot(),
-      skillRun: agentSkillRunAudit(result),
-      toolCalls: audits,
-    }))
+      goalCompletion: evidence.goalCompletion,
+      threadId: result.threadId,
+    }, { agent: 'codex-app-server', skillName, threadId: result.threadId })
     await recordSessionEvent({
       type: 'turn/end', turn, step: null, data: { reason: { kind: 'completed' } },
     })
@@ -664,7 +497,7 @@ export async function runSkillPipelineJob(
       event_type: 'session/turn-end',
       phase: 'agent',
       status: 'completed',
-      payload: { stage: stage.key, finishReason: result.finishReason ?? null },
+      payload: { stage: stage.key, threadId: result.threadId, turnId: result.turnId },
     })
 
     await deps.completeStage(jobId, stage.id, {
@@ -674,15 +507,9 @@ export async function runSkillPipelineJob(
       primary: {
         kind: text(planned.expected_output) || 'generic',
         title: text(planned.display_name) || skillName,
-        text_content: declaration.summary,
+        text_content: summary,
       },
-      auxiliary: agentSkillRunAudit(result)
-        ? [{
-            kind: 'skill_run_audit',
-            title: 'Skill run audit',
-            structured_content: agentSkillRunAudit(result),
-          }]
-        : [],
+      auxiliary: [],
       completionEvidence: evidence,
     })
     finalizationConfirmed = true
@@ -732,7 +559,5 @@ export async function runSkillPipelineJob(
       }
     }
     throw error
-  } finally {
-    await runtime?.close()
   }
 }

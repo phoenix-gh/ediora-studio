@@ -93,7 +93,7 @@ function GeneratedImagePreview({ urls }: { urls: string[] }) {
   if (urls.length === 0) return null
 
   return <>
-    <div className="mt-3 grid gap-2 sm:grid-cols-2">
+    <div className={cn('mt-3 grid gap-2', urls.length > 1 && 'sm:grid-cols-2')}>
       {urls.map(url => (
         <button
           type="button"
@@ -102,7 +102,7 @@ function GeneratedImagePreview({ urls }: { urls: string[] }) {
           className="block overflow-hidden rounded-lg border border-indigo-100 bg-surface text-left dark:border-indigo-900"
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={url} alt="AI 生成图片" className="aspect-video w-full object-cover" />
+          <img src={url} alt="AI 生成图片" className="max-h-[32rem] w-full bg-muted/40 object-contain" />
         </button>
       ))}
     </div>

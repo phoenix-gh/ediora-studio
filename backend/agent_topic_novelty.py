@@ -426,6 +426,7 @@ async def save_agent_draft_with_novelty_check(
     extract_candidate: CandidateExtractor = extract_candidate_with_model,
     judge: NoveltyJudge = judge_novelty_with_model,
     now: datetime | None = None,
+    asset_ids: list[int] | None = None,
 ) -> dict:
     """Check novelty when enabled and persist one Agent draft and claim."""
     if identity.mode == "chat":
@@ -570,6 +571,10 @@ async def save_agent_draft_with_novelty_check(
         )
         session.add(claim)
         await session.flush()
+        if asset_ids:
+            from daily_creation_service import mark_assets_adopted
+
+            await mark_assets_adopted(session, asset_ids, now=reference)
 
     return {
         "saved": True,

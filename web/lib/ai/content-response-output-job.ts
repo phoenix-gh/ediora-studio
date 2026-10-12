@@ -21,19 +21,16 @@ import {
   type AgentSessionEventInput,
 } from './agent-log-client'
 import {
-  agentSkillRunAudit,
-  openAgentRuntime,
-  type AgentRuntime,
   type AgentSessionEventDraft,
-  type OpenAgentRuntimeOptions,
 } from './agent-runtime'
-import { RESPONSE_AGENT_TOOL_ALLOWLIST } from './agent-tool-policy'
-import { pinCapabilitySnapshot } from './agent-capabilities'
+import { CODEX_THREAD_CWD } from './codex-app-server'
 import {
-  capabilityPinFromExecution,
-  restoredSkillNameFromExecution,
-} from './agent-capability-pin'
-import { createDirectImageGenerator, mcpUrl } from './global-chat-tools'
+  runCodexAgentTurn,
+  type CodexAgentTurnResult,
+  type RunCodexAgentTurnOptions,
+} from './codex-app-server-client'
+import { configuredCodexTurn, loadConfiguredCodexTurn } from './codex-settings'
+import { RESPONSE_AGENT_TOOL_ALLOWLIST } from './agent-tool-policy'
 import type {
   AgentCompletionEvidence,
   AgentModelMessageEvent,
@@ -53,7 +50,7 @@ import {
   workerHeaders,
   type DurableJob,
 } from './job-client'
-import { textModelConfigFromSettings, textModelFromConfig, type TextModelSettings } from './runtime-config'
+
 
 export type ResponseArticleContext = {
   output: {
@@ -221,12 +218,30 @@ export function responseArticleCompletionEvidenceFromAudit(
 
 export const completionEvidenceFromAudit = responseArticleCompletionEvidenceFromAudit
 
-type Model = OpenAgentRuntimeOptions['model']
+function saveDraftEvidenceFromCodexItems(
+  items: Record<string, unknown>[],
+  expected: { responseItemId: number },
+) {
+  for (const item of items) {
+    if (item.type !== 'mcpToolCall' || item.tool !== 'save_draft') continue
+    const evidence = responseArticleCompletionEvidenceFromAudit({
+      toolName: 'save_draft',
+      toolCallId: typeof item.id === 'string' ? item.id : 'save_draft',
+      sideEffecting: true,
+      autoApproved: true,
+      status: item.status === 'failed' ? 'failed' : 'succeeded',
+      inputSummary: item.arguments ?? {},
+      output: item.result ?? item,
+      occurredAt: new Date().toISOString(),
+    }, expected)
+    if (evidence) return evidence
+  }
+  return null
+}
 
 export type ContentResponseOutputAgentJobDependencies = {
   getJob(jobId: number): Promise<DurableJob>
   getContext(outputId: number, jobId: number): Promise<ResponseArticleContext>
-  loadModel(jobId: number): Promise<Model>
   ensureExecution(jobId: number, request: {
     objective: string
     skillMode: 'auto' | 'manual'
@@ -252,20 +267,13 @@ export type ContentResponseOutputAgentJobDependencies = {
   failStep(jobId: number, stepId: number, error: unknown, retryable: boolean): Promise<unknown>
   completeJob(jobId: number): Promise<unknown>
   linkDraft(jobId: number, outputId: number, draftId: number): Promise<Record<string, unknown>>
-  openRuntime(options: OpenAgentRuntimeOptions): Promise<AgentRuntime>
+  runAgentTurn(options: RunCodexAgentTurnOptions): Promise<CodexAgentTurnResult>
   apiRoot(): string
+  codexTurn?(apiRoot: string): Promise<{ model?: string, reasoningEffort?: string }>
 }
 
 function defaultApiRoot() {
   return apiBase()
-}
-
-async function configuredModel(jobId: number): Promise<Model> {
-  const settings = await apiGet<TextModelSettings>(
-    '/settings/ai-runtime', workerHeaders(jobId),
-  )
-  const runtime = textModelConfigFromSettings(settings)
-  return textModelFromConfig(runtime)
 }
 
 const defaultDependencies: ContentResponseOutputAgentJobDependencies = {
@@ -273,7 +281,6 @@ const defaultDependencies: ContentResponseOutputAgentJobDependencies = {
   getContext: (outputId, jobId) => apiGet(
     `/responses/outputs/${outputId}/worker-context`, workerHeaders(jobId),
   ),
-  loadModel: configuredModel,
   ensureExecution: ensureAgentExecution,
   checkpointExecution: checkpointAgentExecution,
   appendMessage: appendAgentMessage,
@@ -294,8 +301,9 @@ const defaultDependencies: ContentResponseOutputAgentJobDependencies = {
     { article_draft_id: draftId },
     workerHeaders(jobId),
   ),
-  openRuntime: openAgentRuntime,
+  runAgentTurn: runCodexAgentTurn,
   apiRoot: defaultApiRoot,
+  codexTurn: loadConfiguredCodexTurn,
 }
 
 function latestOutput(job: DurableJob, key: string) {
@@ -355,7 +363,6 @@ export async function runContentResponseOutputJob(
   let activeStep: { id: number; key: string } | undefined
   let execution: DurableAgentExecution | undefined
   let executionCompleted = false
-  let runtime: AgentRuntime | undefined
   let evidence: ResponseArticleCompletionEvidence | undefined = completedAgentEvidence(job)
   let canonicalTurnStarted = false
   let canonicalTurnEnded = false
@@ -454,18 +461,6 @@ export async function runContentResponseOutputJob(
         if (!execution) throw new Error('content response Agent execution was not initialized')
         return execution
       }
-      let capabilityPin = capabilityPinFromExecution(currentExecution())
-      const allowSkillBootstrap = capabilityPin === undefined
-      const withCapabilityAudit = (audit: Record<string, unknown>) => {
-        if (!runtime) return audit
-        const capabilities = runtime.capabilitySnapshot()
-        capabilityPin = pinCapabilitySnapshot(
-          capabilityPin,
-          capabilities,
-          { allowSkillBootstrap },
-        )
-        return { ...audit, capabilities, capabilityPin }
-      }
       const objective = buildResponseArticleAgentObjective(context, currentExecution().id)
       const recordedCalls = await deps.listToolCalls(jobId, currentExecution().id)
       const recoveredEvidence = recordedCalls.reduce<ResponseArticleCompletionEvidence | null>(
@@ -483,80 +478,16 @@ export async function runContentResponseOutputJob(
         await deps.completeStep(jobId, started.id, recoveredEvidence)
         activeStep = undefined
       } else {
-        const model = await deps.loadModel(jobId)
-        const audits: AgentToolAudit[] = []
-        let completionEvidence: ResponseArticleCompletionEvidence | null = null
         const checkpoint = async (
           phase: string,
           state: Record<string, unknown>,
-          audit: Record<string, unknown>,
+          audit: Record<string, unknown> = {},
         ) => {
           execution = await deps.checkpointExecution(
             jobId, currentExecution().id, currentExecution().version,
-            { phase, checkpoint: state, audit, capabilityPin },
+            { phase, checkpoint: state, audit },
           )
         }
-
-        const apiRoot = deps.apiRoot()
-        runtime = await deps.openRuntime({
-          mcpEndpoint: mcpUrl(apiRoot),
-          imageGenerator: createDirectImageGenerator(apiRoot, jobId),
-          model,
-          mode: 'job',
-          turn: canonicalTurn,
-          policyProfile: 'response-writing',
-          automaticSelection: false,
-          skillMode: currentExecution().skill_mode,
-          skillName: currentExecution().skill_name ?? undefined,
-          restoredSkillName: restoredSkillNameFromExecution(currentExecution()),
-          onSessionEvent: recordSessionEvent,
-          beforeToolExecute: async event => {
-            const capabilities = runtime?.capabilitySnapshot()
-            if (capabilities) {
-              try {
-                capabilityPin = pinCapabilitySnapshot(
-                  capabilityPin,
-                  capabilities,
-                  { allowSkillBootstrap },
-                )
-              } catch (error) {
-                return {
-                  action: 'uncertain' as const,
-                  error: error instanceof Error ? error.message : String(error),
-                }
-              }
-            }
-            const decision = await deps.claimToolCall(jobId, currentExecution().id, event)
-            if (event.toolName === 'save_draft' && completionEvidence) {
-              return { action: 'uncertain', error: 'save_draft may only be called once' }
-            }
-            return decision
-          },
-          onMessage: async event => {
-            try {
-              await deps.appendMessage?.(jobId, currentExecution().id, event)
-            } catch {
-              // Message logging is best effort and must not fail the content task.
-            }
-          },
-          onToolAudit: async event => {
-            audits.push(event)
-            if (event.status === 'succeeded') {
-              await deps.completeToolCall(
-                jobId, currentExecution().id, event.toolCallId, event.output,
-              )
-              completionEvidence = responseArticleCompletionEvidenceFromAudit(event, {
-                responseItemId: context.item.id,
-              }) ?? completionEvidence
-            } else if (event.status === 'failed' || event.status === 'uncertain') {
-              await deps.failToolCall(
-                jobId, currentExecution().id, event.toolCallId,
-                event.error || 'tool execution failed',
-                event.status === 'uncertain' || event.sideEffecting,
-              )
-            }
-          },
-        })
 
         await recordExecutionEvent({
           event_type: 'skill/selected',
@@ -581,50 +512,38 @@ export async function runContentResponseOutputJob(
           event_type: 'session/capabilities',
           phase: 'prepare',
           status: 'completed',
-          payload: { capabilitySnapshot: runtime.capabilitySnapshot() },
+          payload: { agent: 'codex-app-server' },
         })
 
-        await checkpoint('prepared', { objective }, withCapabilityAudit({
-          skill: runtime.snapshot(),
-          toolCalls: audits,
-        }))
-        const result = await runtime.run({
-          objective,
-          modelMessages: [{
-            role: 'user',
-            content: `${objective}\n\n完整工作上下文：\n${JSON.stringify(context, null, 2)}`,
-          }],
-          selectedContext: JSON.stringify(context),
-          maxSteps: 30,
-          requiredTools: ['save_draft'],
-          onStep: event => checkpoint(event.phase, {
-            objective,
-            latestStep: event,
-          }, withCapabilityAudit({
-            skill: runtime?.snapshot(),
-            toolCalls: audits,
-          })),
+        await checkpoint('prepared', { objective }, { agent: 'codex-app-server' })
+        const codexTurn = await configuredCodexTurn(deps)
+        const result = await deps.runAgentTurn({
+          input: `${objective}\n\n完整工作上下文：\n${JSON.stringify(context, null, 2)}`,
+          ...(codexTurn.model ? { model: codexTurn.model } : {}),
+          ...(codexTurn.reasoningEffort ? { reasoningEffort: codexTurn.reasoningEffort } : {}),
+          cwd: CODEX_THREAD_CWD,
+          approvalPolicy: 'never',
+          sandbox: 'workspace-write',
+        })
+        const completionEvidence = saveDraftEvidenceFromCodexItems(result.items, {
+          responseItemId: context.item.id,
         })
         await checkpoint('finalizing', {
           objective,
-          result: { kind: result.kind, text: result.text, parts: result.parts },
-        }, withCapabilityAudit({
-          skill: runtime.snapshot(),
-          skillRun: agentSkillRunAudit(result),
-          toolCalls: audits,
-        }))
+          result: { text: result.text, threadId: result.threadId, turnId: result.turnId },
+        }, { agent: 'codex-app-server', threadId: result.threadId })
 
         if (!completionEvidence) throw new Error('missing valid save_draft evidence')
         evidence = completionEvidence
-        await finishCanonicalTurn({ kind: result.kind === 'completed' ? 'completed' : 'waiting_approval' })
+        await finishCanonicalTurn({ kind: 'completed' })
         await recordExecutionEvent({
           event_type: 'session/turn-end',
           phase: 'agent',
           status: 'completed',
           payload: {
-            kind: result.kind,
-            finishReason: result.finishReason ?? null,
-            stepCount: result.stepCount ?? null,
+            kind: 'completed',
+            threadId: result.threadId,
+            turnId: result.turnId,
           },
         })
         await deps.completeExecution(jobId, currentExecution().id, completionEvidence)
@@ -684,7 +603,5 @@ export async function runContentResponseOutputJob(
       )
     }
     throw error
-  } finally {
-    await runtime?.close()
   }
 }

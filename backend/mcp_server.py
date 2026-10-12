@@ -28,13 +28,37 @@ _UPLOADS_DIR.mkdir(exist_ok=True)
 # Override with BASE_URL env var when running behind a reverse proxy.
 _BASE_URL = os.getenv("BASE_URL", "http://localhost:8000")
 
+
+def mcp_allowed_hosts() -> list[str]:
+    """Hosts Codex may use when it calls this deployment's MCP endpoint."""
+    hosts = ["api:8000", "localhost:8000", "127.0.0.1:8000"]
+    for raw in (
+        os.getenv("BASE_URL", ""),
+        os.getenv("API_URL", ""),
+        os.getenv("NEXT_PUBLIC_API_URL", ""),
+    ):
+        value = raw.strip()
+        if not value:
+            continue
+        parsed = urlparse(value if "://" in value else f"http://{value}")
+        if not parsed.hostname:
+            continue
+        hosts.append(parsed.hostname)
+        if parsed.port:
+            hosts.append(f"{parsed.hostname}:{parsed.port}")
+    unique: list[str] = []
+    for host in hosts:
+        if host not in unique:
+            unique.append(host)
+    return unique
+
+
 mcp = FastMCP(
     "Ediora",
     transport_security=TransportSecuritySettings(
-        # The Next.js AI route calls this service through Docker Compose's
-        # internal DNS name. Keep DNS-rebinding protection on, but allow that
-        # explicit backend-to-backend host alongside local development hosts.
-        allowed_hosts=["api:8000", "localhost:8000", "127.0.0.1:8000"],
+        # DNS-rebinding protection stays on. The allowlist follows this
+        # process's configured API address, plus the local and Compose hosts.
+        allowed_hosts=mcp_allowed_hosts(),
     ),
 )
 
@@ -44,8 +68,40 @@ SourceSearchDays = Annotated[int, Field(ge=1, le=365)]
 NoveltyWindowDays = Annotated[int, Field(ge=1, le=90)]
 NoveltyKeyFacts = Annotated[list[str], Field(max_length=20)]
 NoveltySourceItemIds = Annotated[list[int], Field(max_length=100)]
+AdoptedAssetIds = Annotated[list[int], Field(max_length=50)]
+ExcludeAdoptedWithinDays = Annotated[int, Field(ge=0, le=90)]
 
 # ── helpers ───────────────────────────────────────────────────────────────────
+
+def _request_headers(ctx: Context | None) -> dict:
+    if ctx is None:
+        return {}
+    request = getattr(getattr(ctx, "request_context", None), "request", None)
+    headers = getattr(request, "headers", None)
+    return headers or {}
+
+
+async def _scheduled_lookback_days(ctx: Context | None) -> int:
+    """Use the scheduled run window. Other callers do not exclude assets."""
+    raw = _request_headers(ctx).get("x-daily-creation-run-id")
+    try:
+        run_id = int(raw)
+    except (TypeError, ValueError):
+        return 0
+    if run_id <= 0:
+        return 0
+    from models import DailyCreationRun
+
+    async with SessionLocal() as db:
+        creation_run = await db.get(DailyCreationRun, run_id)
+    if creation_run is None:
+        return 0
+    try:
+        days = int((creation_run.rule_snapshot or {}).get("lookback_days") or 0)
+    except (TypeError, ValueError):
+        return 0
+    return max(0, min(days, 90))
+
 
 def _fmt_dt(dt: Optional[datetime]) -> str:
     if dt is None:
@@ -82,6 +138,241 @@ async def _register_draft_image(
         await db.commit()
         await db.refresh(img)
         return img.id
+
+
+_MAX_GENERATED_IMAGE_BYTES = 100 * 1024 * 1024
+_DEFAULT_GENERATED_IMAGE_TITLE = "Chat 生图"
+
+
+def _image_http_client(**kwargs):
+    import httpx
+
+    return httpx.AsyncClient(**kwargs)
+
+
+def _clean_generate_prompt(prompt: str) -> str:
+    cleaned = prompt.strip()
+    if not cleaned:
+        raise ValueError("generateImage requires a prompt")
+    if len(cleaned) > 4000:
+        raise ValueError("prompt is too long")
+    return cleaned
+
+
+def _clean_generate_title(title: str | None) -> str:
+    if title is None:
+        return _DEFAULT_GENERATED_IMAGE_TITLE
+    cleaned = title.strip()
+    if not cleaned or len(cleaned) > 200:
+        raise ValueError("title is invalid")
+    return cleaned
+
+
+def _clean_generate_directory(directory: str | None) -> str:
+    if directory is None:
+        return ""
+    cleaned = directory.strip()
+    if not cleaned or len(cleaned) > 80:
+        raise ValueError("directory is invalid")
+    return cleaned
+
+
+def _sniff_image_media_type(data: bytes) -> str:
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if data.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if data.startswith((b"GIF87a", b"GIF89a")):
+        return "image/gif"
+    if len(data) >= 12 and data.startswith(b"RIFF") and data[8:12] == b"WEBP":
+        return "image/webp"
+    raise ValueError("Image provider returned an unsupported image")
+
+
+def _decode_image_b64(value: str) -> bytes:
+    import base64
+
+    raw = value.strip()
+    if raw.startswith("data:"):
+        raw = raw.split(",", 1)[-1]
+    raw = "".join(raw.split())
+    raw += "=" * (-len(raw) % 4)
+    try:
+        data = base64.b64decode(raw, validate=False)
+    except Exception as exc:
+        raise ValueError("Image provider returned invalid image data") from exc
+    if not data:
+        raise ValueError("Image provider returned an empty image")
+    return data
+
+
+def _provider_error(response) -> ValueError:
+    detail = " ".join((response.text or "").split())[:240]
+    suffix = f": {detail}" if detail else ""
+    return ValueError(f"Image provider request failed ({response.status_code}){suffix}")
+
+
+async def _configured_image_adapter():
+    from config import get_config
+    from llm_adapters import AdapterResolutionError, resolve_adapter
+
+    try:
+        return resolve_adapter(await get_config(), capability="image")
+    except AdapterResolutionError as exc:
+        raise ValueError(str(exc)) from exc
+
+
+async def _image_output_directory(requested: str | None) -> str:
+    from models import CreativeAssetDirectory
+    from temporary_asset_directory import ensure_temporary_asset_directory
+
+    cleaned = _clean_generate_directory(requested)
+    async with SessionLocal() as db:
+        if not cleaned:
+            directory = await ensure_temporary_asset_directory(db)
+            await db.commit()
+            return directory.name
+        found = await db.scalar(
+            select(CreativeAssetDirectory).where(
+                CreativeAssetDirectory.asset_type == "media",
+                CreativeAssetDirectory.name == cleaned,
+            )
+        )
+        if found is None:
+            raise ValueError(f"多媒体目录不存在：{cleaned}")
+        return found.name
+
+
+async def _post_image_generation(adapter, prompt: str) -> dict:
+    import httpx
+
+    base = (adapter.base_url or "").strip().rstrip("/") or "https://api.openai.com/v1"
+    headers = {
+        "Authorization": f"Bearer {adapter.api_key}",
+        **dict(adapter.headers or {}),
+        "Content-Type": "application/json",
+    }
+    body = {"model": adapter.model, "prompt": prompt, "n": 1}
+    # gpt-image rejects response_format and returns b64_json. Other models use the configured format.
+    if not adapter.model.lower().startswith("gpt-image"):
+        body["response_format"] = "url" if adapter.image_response_format == "url" else "b64_json"
+    timeout = httpx.Timeout(180.0, connect=10.0)
+    try:
+        async with _image_http_client(
+            timeout=timeout,
+            follow_redirects=False,
+            trust_env=True,
+        ) as client:
+            response = await client.post(f"{base}/images/generations", headers=headers, json=body)
+            if (
+                response.status_code == 400
+                and "response_format" in body
+                and "response_format" in response.text
+            ):
+                body = {key: value for key, value in body.items() if key != "response_format"}
+                response = await client.post(
+                    f"{base}/images/generations",
+                    headers=headers,
+                    json=body,
+                )
+    except httpx.TimeoutException as exc:
+        raise ValueError("Image provider request timed out") from exc
+    except httpx.HTTPError as exc:
+        raise ValueError("Image provider request failed") from exc
+    if response.status_code != 200:
+        raise _provider_error(response)
+    try:
+        payload = response.json()
+    except Exception as exc:
+        raise ValueError("Image provider returned invalid JSON") from exc
+    if not isinstance(payload, dict):
+        raise ValueError("Image provider returned invalid JSON")
+    return payload
+
+
+async def _download_provider_image(url: str) -> tuple[bytes, str]:
+    import httpx
+    from remote_image_import import RemoteImageImportError, _download_image
+
+    try:
+        return await _download_image(url, _image_http_client)
+    except RemoteImageImportError as exc:
+        raise ValueError(exc.message) from exc
+    except httpx.TimeoutException as exc:
+        raise ValueError("图片下载超时") from exc
+    except httpx.HTTPError as exc:
+        raise ValueError("图片地址不可访问") from exc
+
+
+async def _image_from_provider_payload(payload: dict, *, prefer_url: bool) -> tuple[bytes, str]:
+    data = payload.get("data")
+    item = data[0] if isinstance(data, list) and data and isinstance(data[0], dict) else None
+    if item is None:
+        raise ValueError("Image provider response did not include an image")
+    url = item.get("url") if isinstance(item.get("url"), str) else ""
+    b64 = item.get("b64_json") if isinstance(item.get("b64_json"), str) else ""
+    url = url.strip()
+    b64 = b64.strip()
+    if prefer_url and url:
+        return await _download_provider_image(url)
+    if b64:
+        raw = _decode_image_b64(b64)
+        return raw, _sniff_image_media_type(raw)
+    if url:
+        return await _download_provider_image(url)
+    raise ValueError("Image provider response did not include an image")
+
+
+def _verified_image_extension(data: bytes, media_type: str) -> str:
+    from remote_image_import import RemoteImageImportError, _verified_extension
+
+    try:
+        return _verified_extension(data, media_type)
+    except RemoteImageImportError as exc:
+        raise ValueError(exc.message) from exc
+
+
+async def _persist_generated_image(
+    data: bytes,
+    media_type: str,
+    title: str,
+    directory: str,
+) -> dict:
+    from models import CreativeAsset
+
+    if not data:
+        raise ValueError("Image provider returned an empty image")
+    if len(data) > _MAX_GENERATED_IMAGE_BYTES:
+        raise ValueError("图片超过100MB限制")
+    extension = _verified_image_extension(data, media_type)
+    _UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+    filename = f"{uuid.uuid4().hex}{extension}"
+    destination = _UPLOADS_DIR / filename
+    destination.write_bytes(data)
+    try:
+        async with SessionLocal() as db:
+            asset = CreativeAsset(
+                asset_type="media",
+                media_kind="image",
+                title=title,
+                url=f"/api/uploads/{filename}",
+                media_type=media_type,
+                filename=filename,
+                directory=directory,
+                source="upload",
+            )
+            db.add(asset)
+            await db.commit()
+            await db.refresh(asset)
+            return {
+                "asset_id": asset.id,
+                "asset_url": asset.url,
+                "title": asset.title,
+                "directory": directory,
+            }
+    except Exception:
+        destination.unlink(missing_ok=True)
+        raise
 
 
 # ── tools ─────────────────────────────────────────────────────────────────────
@@ -422,6 +713,26 @@ async def get_draft(draft_id: int) -> dict:
     }
 
 
+def _search_asset_payload(asset) -> dict:
+    """Prompt rows keep their original text. Other rows stay as a short summary."""
+    content = asset.content or ""
+    payload = {
+        "id": asset.id,
+        "asset_type": asset.asset_type,
+        "prompt_kind": asset.prompt_kind or "",
+        "media_kind": asset.media_kind or "",
+        "title": asset.title or "",
+        "summary": " ".join(content.split())[:500],
+        "url": asset.url or "",
+        "directory": asset.directory or "",
+        "tags": asset.tags or [],
+        "source": asset.source or "",
+    }
+    if asset.asset_type == "prompt":
+        payload["content"] = content
+    return payload
+
+
 @ediora_tool(
     mcp,
     namespace="creative_assets",
@@ -438,6 +749,8 @@ async def search_creative_assets(
     directory: str = "",
     asset_type: str = "",
     limit: int = 10,
+    exclude_adopted_within_days: ExcludeAdoptedWithinDays = 0,
+    ctx: Context | None = None,
 ) -> list[dict]:
     """
     Search the user's Creative Assets / 素材库. This tool is read-only.
@@ -449,34 +762,55 @@ async def search_creative_assets(
     material folder, such as "搞钱副业". This is general asset search, not
     scheduled-directory candidate selection.
 
+    exclude_adopted_within_days omits assets whose last adopted time is inside
+    that many days. Assets that have never been adopted stay in the results.
+    0 uses a scheduled run's lookback when that call belongs to one, and
+    otherwise returns every match. get_creative_asset still reads one asset by id.
+
+    Prompt assets include their full text in content, with the original line
+    breaks. Article and media rows still return a short summary.
+
     Args:
         query: Optional keywords to search for.
         directory: Optional exact material-folder name.
-        asset_type: Optional "article" or "media" filter.
+        asset_type: Optional "article", "media", or "prompt" filter.
         limit: Maximum assets to return (default 10, max 30).
+        exclude_adopted_within_days: Days of recent adoption to omit (0–90).
 
-    Returns compact metadata and a content summary. Call get_creative_asset(id)
-    to read the complete article material or inspect all asset fields.
+    Returns compact metadata. Prompt rows also include content. Call
+    get_creative_asset(id) to read a complete article body.
     """
     from models import CreativeAsset
+    from daily_creation_service import (
+        creative_asset_search_score,
+        not_recently_adopted,
+    )
 
     normalized_type = asset_type.strip().lower()
-    if normalized_type and normalized_type not in {"article", "media"}:
-        raise ValueError("asset_type must be 'article', 'media', or empty")
+    if normalized_type and normalized_type not in {"article", "media", "prompt"}:
+        raise ValueError("asset_type must be 'article', 'media', 'prompt', or empty")
     normalized_directory = directory.strip()
     take = max(1, min(int(limit), 30))
+    lookback_days = int(exclude_adopted_within_days or 0)
+    if lookback_days <= 0:
+        lookback_days = await _scheduled_lookback_days(ctx)
 
     async with SessionLocal() as db:
-        statement = select(CreativeAsset).order_by(
-            desc(CreativeAsset.updated_at), desc(CreativeAsset.id)
-        )
+        statement = select(CreativeAsset)
         if normalized_type:
             statement = statement.where(CreativeAsset.asset_type == normalized_type)
         if normalized_directory:
             statement = statement.where(CreativeAsset.directory == normalized_directory)
-        rows = (await db.execute(statement.limit(500))).scalars().all()
-
-    from daily_creation_service import creative_asset_search_score
+        available = not_recently_adopted(lookback_days, asset=CreativeAsset)
+        if available is not None:
+            statement = statement.where(available)
+        rows = (
+            await db.execute(
+                statement.order_by(
+                    desc(CreativeAsset.updated_at), desc(CreativeAsset.id)
+                ).limit(500)
+            )
+        ).scalars().all()
 
     scored_assets = [
         (asset, creative_asset_search_score(asset, query))
@@ -486,20 +820,7 @@ async def search_creative_assets(
         scored_assets = [item for item in scored_assets if item[1] > 0]
         scored_assets.sort(key=lambda item: item[1], reverse=True)
 
-    return [
-        {
-            "id": asset.id,
-            "asset_type": asset.asset_type,
-            "media_kind": asset.media_kind or "",
-            "title": asset.title or "",
-            "summary": " ".join((asset.content or "").split())[:500],
-            "url": asset.url or "",
-            "directory": asset.directory or "",
-            "tags": asset.tags or [],
-            "source": asset.source or "",
-        }
-        for asset, _score in scored_assets
-    ][:take]
+    return [_search_asset_payload(asset) for asset, _score in scored_assets][:take]
 
 
 @ediora_tool(
@@ -529,6 +850,7 @@ async def get_creative_asset(asset_id: int) -> dict:
     return {
         "id": asset.id,
         "asset_type": asset.asset_type,
+        "prompt_kind": asset.prompt_kind or "",
         "media_kind": asset.media_kind or "",
         "title": asset.title or "",
         "content": asset.content or "",
@@ -648,17 +970,21 @@ async def list_creative_asset_candidates(
     directories: list[str],
     query: str = "",
     limit: int = 50,
+    ctx: Context | None = None,
 ) -> list[dict]:
     """List compact scheduled-creation candidates from explicit asset directories.
 
     Space-separated query terms are alternatives and candidates are ranked by
     how many terms match their directory, title, body, or tags. Use general
     search_creative_assets when no task-specific directory set is required.
+    A scheduled creation run omits assets adopted inside that task's lookback
+    window. Calls without a scheduled run return every match.
     """
     from daily_creation_service import (
         list_creative_asset_candidates as list_candidates,
     )
 
+    lookback_days = await _scheduled_lookback_days(ctx)
     async with SessionLocal() as db:
         return await list_candidates(
             db,
@@ -666,38 +992,7 @@ async def list_creative_asset_candidates(
             directories=directories,
             query=query,
             limit=limit,
-        )
-
-
-@ediora_tool(
-    mcp,
-    namespace="creative_assets",
-    read_only=True,
-    destructive=False,
-    idempotent=True,
-    open_world=False,
-    approval="never",
-    concurrency="parallel-safe",
-    retry="safe",
-)
-async def get_recent_content_usage(
-    lookback_days: int,
-    output_type: str,
-    rule_id: int | None = None,
-    account_id: str | None = None,
-    limit: int = 100,
-) -> list[dict]:
-    """Read prior-use evidence for semantic deduplication; this is not asset search."""
-    from daily_creation_service import get_recent_content_usage as get_usage
-
-    async with SessionLocal() as db:
-        return await get_usage(
-            db,
             lookback_days=lookback_days,
-            output_type=output_type,
-            rule_id=rule_id,
-            account_id=account_id,
-            limit=limit,
         )
 
 
@@ -753,66 +1048,6 @@ async def check_content_novelty(
             judge=judge_novelty_with_model,
         )
     return asdict(decision)
-
-
-@ediora_tool(
-    mcp,
-    namespace="creative_assets",
-    read_only=False,
-    destructive=False,
-    idempotent=True,
-    open_world=False,
-    approval="writes",
-    concurrency="serialized",
-    retry="claim-backed",
-)
-async def record_content_usage(
-    asset_id: int,
-    output_kind: Literal["draft"],
-    output_id: int,
-    topic: str,
-    angle: str,
-    excerpt: str,
-    reuse_decision: Literal["fresh", "reuse_allowed"],
-    ctx: Context,
-    reuse_explanation: str = "",
-    account_id: str | None = None,
-) -> dict:
-    """Record one persisted draft-usage claim for deduplication evidence.
-
-    ``output_kind`` must be ``draft`` and ``reuse_decision`` must be either
-    ``fresh`` or ``reuse_allowed``. The scheduled run identity is required;
-    repeated claims are resolved by the persistence layer. Returns the stored
-    usage ID and creation timestamp.
-    """
-    from daily_creation_service import record_content_usage as record_usage
-
-    request = getattr(ctx.request_context, "request", None)
-    headers = getattr(request, "headers", {})
-    raw_run_id = headers.get("x-daily-creation-run-id")
-    try:
-        run_id = int(raw_run_id)
-    except (TypeError, ValueError) as error:
-        raise ValueError("scheduled Agent run identity is missing") from error
-    if run_id <= 0:
-        raise ValueError("scheduled Agent run identity is invalid")
-
-    async with SessionLocal() as db:
-        async with db.begin():
-            usage = await record_usage(
-                db,
-                run_id=run_id,
-                asset_id=asset_id,
-                output_kind=output_kind,
-                output_id=output_id,
-                topic=topic,
-                angle=angle,
-                excerpt=excerpt,
-                reuse_decision=reuse_decision,
-                reuse_explanation=reuse_explanation,
-                account_id=account_id,
-            )
-        return {"id": usage.id, "created_at": _fmt_dt(usage.created_at)}
 
 
 @ediora_tool(
@@ -1417,6 +1652,53 @@ async def add_plan_update(
 
 @ediora_tool(
     mcp,
+    namespace="image_generation",
+    read_only=False,
+    destructive=False,
+    idempotent=False,
+    open_world=True,
+    approval="writes",
+    concurrency="serialized",
+    retry="unsafe",
+)
+async def generateImage(
+    prompt: Annotated[str, Field(min_length=1, max_length=4000)],
+    title: Annotated[Optional[str], Field(min_length=1, max_length=200)] = None,
+    directory: Annotated[Optional[str], Field(min_length=1, max_length=80)] = None,
+) -> dict:
+    """Synchronously generate one image and save it as a CreativeAsset before returning asset_id and asset_url. The returned image is already stored locally; never upload it again with upload_image_from_url or upload_image_from_path. The directory parameter is optional: only provide it when the user explicitly requests an existing media directory; otherwise omit it and save the image in the default media directory 临时文件. Do not reuse a prompt or source directory as a media directory.
+
+    Each successful call creates a new image file, so do not retry blindly.
+
+    Args:
+        prompt: Image prompt, from 1 to 4000 characters.
+        title: Optional asset title, from 1 to 200 characters. Defaults to "Chat 生图".
+        directory: Optional existing media directory name. Omit it unless the user named one.
+
+    Returns:
+        asset_id, asset_url, title, directory, and model.
+        asset_url is a local path such as "/api/uploads/abc.png".
+    """
+    cleaned_prompt = _clean_generate_prompt(prompt)
+    cleaned_title = _clean_generate_title(title)
+    output_directory = await _image_output_directory(directory)
+    adapter = await _configured_image_adapter()
+    payload = await _post_image_generation(adapter, cleaned_prompt)
+    data, media_type = await _image_from_provider_payload(
+        payload,
+        prefer_url=adapter.image_response_format == "url",
+    )
+    saved = await _persist_generated_image(
+        data,
+        media_type,
+        cleaned_title,
+        output_directory,
+    )
+    return {**saved, "model": adapter.model}
+
+
+@ediora_tool(
+    mcp,
     namespace="creative_assets",
     read_only=False,
     destructive=False,
@@ -1722,6 +2004,7 @@ async def save_draft(
     pipeline_task_id: Optional[int] = None,
     draft_type: Literal["article", "script", "x", "x_article", "mp"] = "article",
     novelty_override_token: str | None = None,
+    asset_ids: AdoptedAssetIds | None = None,
 ) -> dict:
     """
     Create a new Agent draft after a global, time-bounded topic novelty check
@@ -1734,6 +2017,10 @@ async def save_draft(
     and core claim novel. When novelty checking is enabled, a conflict returns
     saved=false and no draft ID.
 
+    Pass asset_ids for the creative assets this draft actually adopted. A
+    successful save stamps their last adopted time. A missing id rolls the
+    draft back. Assets are not stamped when saved is false.
+
     Args:
         title: Article title.
         content: Full article body in Markdown.
@@ -1745,6 +2032,7 @@ async def save_draft(
         draft_type: "article"（默认）、"script"、"x"、"x_article" 或 "mp"。
         novelty_override_token: One-time token returned after a Chat conflict;
                                 scheduled/background Agents must not use it.
+        asset_ids: Creative asset ids this draft adopted. Omit when none.
 
     Returns saved, novelty evidence, and only on success id/title/status/type/created_at.
     """
@@ -1807,6 +2095,7 @@ async def save_draft(
             override_token=novelty_override_token,
             extract_candidate=extract_candidate_with_model,
             judge=judge_novelty_with_model,
+            asset_ids=asset_ids,
         )
 
 

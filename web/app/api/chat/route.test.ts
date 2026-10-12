@@ -9,6 +9,8 @@ import {
   modelHistoryCandidates,
 } from '../../../lib/ai/chat-tools'
 import {
+  chatEdioraMcpServers,
+  mcpUrlFromApiBase,
   chatAgentLogEventFromHttpAudit,
   chatAgentLogEventFromModelMessage,
   chatAgentLogEventFromToolAudit,
@@ -29,6 +31,48 @@ import {
   selectedSkillContext,
   shouldUseSharedAgentRun,
 } from './route'
+
+describe('Chat Ediora MCP address', () => {
+  const previous = {
+    API_URL: process.env.API_URL,
+    NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL,
+  }
+
+  function restoreApiEnv() {
+    for (const key of ['API_URL', 'NEXT_PUBLIC_API_URL'] as const) {
+      const value = previous[key]
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+  }
+
+  it('uses the server API address for this deployment', () => {
+    process.env.API_URL = 'http://api:8000/api'
+    process.env.NEXT_PUBLIC_API_URL = 'https://ediora.example.com/api'
+    try {
+      expect(mcpUrlFromApiBase(process.env.API_URL)).toBe('http://api:8000/mcp')
+      expect(chatEdioraMcpServers(12).ediora.url).toBe('http://api:8000/mcp')
+    } finally {
+      restoreApiEnv()
+    }
+  })
+
+  it('uses the public API address when the server address is unset', () => {
+    delete process.env.API_URL
+    process.env.NEXT_PUBLIC_API_URL = 'https://ediora.example.com/api/'
+    try {
+      expect(chatEdioraMcpServers(12).ediora).toEqual({
+        url: 'https://ediora.example.com/mcp',
+        http_headers: {
+          'X-Agent-Mode': 'chat',
+          'X-Agent-Session-Id': '12',
+        },
+      })
+    } finally {
+      restoreApiEnv()
+    }
+  })
+})
 
 describe('Chat Agent log event mapping', () => {
   it('maps durable run statuses to the strict canonical turn/end reason', () => {

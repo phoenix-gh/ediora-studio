@@ -10,6 +10,12 @@ import {
 } from './floating-chat-size'
 import { GlobalChatWidget } from './GlobalChatWidget'
 
+const navigation = vi.hoisted(() => ({ pathname: '/' }))
+
+vi.mock('next/navigation', () => ({
+  usePathname: () => navigation.pathname,
+}))
+
 const api = vi.hoisted(() => ({
   listChatSessions: vi.fn(),
   createChatSession: vi.fn(),
@@ -54,6 +60,7 @@ function renderWithProvider() {
 
 describe('GlobalChatWidget', () => {
   beforeEach(() => {
+    navigation.pathname = '/'
     vi.clearAllMocks()
     api.listChatSessions.mockResolvedValue([])
     api.listChatSkills.mockResolvedValue([])
@@ -69,6 +76,13 @@ describe('GlobalChatWidget', () => {
     render(<GlobalChatWidget />)
 
     expect(screen.getByTestId('global-chat-trigger')).toBeInTheDocument()
+  })
+
+  it('stays out of the full chat page so it does not cover the composer', () => {
+    navigation.pathname = '/chat'
+    render(<GlobalChatWidget />)
+
+    expect(screen.queryByTestId('global-chat-trigger')).not.toBeInTheDocument()
   })
 
   it('opens a non-modal floating panel without an overlay', async () => {

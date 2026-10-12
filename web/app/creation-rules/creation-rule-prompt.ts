@@ -31,13 +31,13 @@ export function buildCreationRulePrompt(input: CreationRulePromptBuilder) {
   }
 
   if (input.lookbackDays > 0) {
-    lines.push(`检查最近 ${input.lookbackDays} 天的内容使用记录，不要复用仍在去重期内的创作资产。`)
+    lines.push(`搜索素材时把 exclude_adopted_within_days 设为 ${input.lookbackDays}，排除最近 ${input.lookbackDays} 天内被采用过的素材。`)
   }
 
   lines.push('每条完成后调用 save_draft 保存到草稿箱，参数必须使用 status="drafting"、draft_type="x"。')
   lines.push('generateImage 会同步生成并保存 CreativeAsset；生成结果已经是本地图片，不要再调用 upload_image_from_url 或 upload_image_from_path 重复上传。')
   lines.push('save_draft 返回草稿 id 后，如正文包含生成图片，使用对应的 asset_id 调用 attach_creative_asset_to_draft 关联到草稿图片库。')
-  lines.push('仅在 save_draft 成功并返回真实草稿 id 后，调用 record_content_usage 记录该草稿实际使用的素材。')
+  lines.push('save_draft 时把本条实际采用的素材 id 放进 asset_ids，服务端会更新这些素材的最近采用时间。')
 
   const instructions = input.instructions.trim()
   if (instructions) lines.push('', '附加要求：', instructions)

@@ -63,6 +63,7 @@ def test_ai_can_search_and_read_creative_article_assets(env):
     assert results == [{
         "id": target_id,
         "asset_type": "article",
+        "prompt_kind": "",
         "media_kind": "",
         "title": "AI 自动化副业路径",
         "summary": "用工作流帮助小商家处理客户咨询，并按月收费。",
@@ -74,6 +75,7 @@ def test_ai_can_search_and_read_creative_article_assets(env):
     assert run(mcp_server.get_creative_asset(target_id)) == {
         "id": target_id,
         "asset_type": "article",
+        "prompt_kind": "",
         "media_kind": "",
         "title": "AI 自动化副业路径",
         "content": "用工作流帮助小商家处理客户咨询，并按月收费。",
@@ -105,6 +107,92 @@ def test_ai_can_search_space_separated_keywords_across_asset_metadata(env):
     ))
 
     assert [item["id"] for item in results] == [target_id]
+
+
+def test_search_returns_the_full_prompt_text(env):
+    body = "人物锁定：\n" + ("绝美东亚女生，窗边逆光。" * 50)
+    asset_id = seed_asset(
+        asset_type="prompt",
+        prompt_kind="image",
+        title="窗边逆光",
+        content=body,
+        directory="人像摄影",
+        source="x_topic",
+    )
+
+    import mcp_server
+
+    results = run(mcp_server.search_creative_assets(
+        query="窗边",
+        directory="人像摄影",
+        asset_type="prompt",
+    ))
+
+    assert len(body) > 500
+    assert results[0]["id"] == asset_id
+    assert results[0]["prompt_kind"] == "image"
+    assert results[0]["content"] == body
+    assert "\n" in results[0]["content"]
+
+
+def test_search_can_exclude_assets_adopted_within_the_requested_days(env):
+    from datetime import datetime, timedelta, timezone
+
+    now = datetime.now(timezone.utc)
+    recent_id = seed_asset(
+        asset_type="article",
+        title="刚用过的街拍",
+        content="里斯本晨光。",
+        directory="女性街拍素材",
+        source="manual",
+        last_adopted_at=now - timedelta(days=2),
+    )
+    older_id = seed_asset(
+        asset_type="article",
+        title="可以再用的街拍",
+        content="里斯本夜色。",
+        directory="女性街拍素材",
+        source="manual",
+        last_adopted_at=now - timedelta(days=10),
+    )
+    fresh_id = seed_asset(
+        asset_type="article",
+        title="还没用过的街拍",
+        content="里斯本雨天。",
+        directory="女性街拍素材",
+        source="manual",
+    )
+
+    import mcp_server
+
+    excluded = run(mcp_server.search_creative_assets(
+        query="街拍",
+        directory="女性街拍素材",
+        exclude_adopted_within_days=7,
+    ))
+    included = run(mcp_server.search_creative_assets(
+        query="街拍",
+        directory="女性街拍素材",
+        exclude_adopted_within_days=0,
+    ))
+
+    assert {item["id"] for item in excluded} == {older_id, fresh_id}
+    assert recent_id not in {item["id"] for item in excluded}
+    assert {item["id"] for item in included} == {recent_id, older_id, fresh_id}
+    assert run(mcp_server.get_creative_asset(recent_id))["id"] == recent_id
+
+
+def test_mcp_allowed_hosts_follow_the_deployment_address(env, monkeypatch):
+    monkeypatch.setenv("BASE_URL", "https://ediora.example.com")
+    monkeypatch.setenv("API_URL", "http://10.0.0.8:18000/api")
+    import mcp_server
+
+    hosts = mcp_server.mcp_allowed_hosts()
+
+    assert "ediora.example.com" in hosts
+    assert "10.0.0.8:18000" in hosts
+    assert "api:8000" in hosts
+    assert "127.0.0.1:8000" in hosts
 
 
 def test_mcp_accepts_the_docker_api_host_used_by_ai_chat(env):

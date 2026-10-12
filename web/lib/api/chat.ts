@@ -234,6 +234,8 @@ export async function streamChatReply({
   skillInvocation,
   messageParts,
   approval,
+  model,
+  reasoningEffort,
   signal,
   onEvent,
 }: {
@@ -244,6 +246,8 @@ export async function streamChatReply({
   skillInvocation?: SubmittedSkillInvocation
   messageParts?: ChatComposerMessagePart[]
   approval?: ChatToolApproval
+  model?: string
+  reasoningEffort?: string
   signal?: AbortSignal
   onEvent: (event: UIMessageStreamEvent) => void
 }) {
@@ -258,6 +262,8 @@ export async function streamChatReply({
       skillInvocation,
       messageParts,
       approval,
+      ...(model ? { model } : {}),
+      ...(reasoningEffort ? { reasoningEffort } : {}),
     }),
     signal,
   })

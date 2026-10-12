@@ -159,6 +159,34 @@ describe('chat API client', () => {
     }))
   })
 
+  it('sends the selected model and reasoning effort', async () => {
+    const encoder = new TextEncoder()
+    const fetchMock = vi.fn().mockResolvedValue(new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode('data: [DONE]\n\n'))
+        controller.close()
+      },
+    }), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await streamChatReply({
+      sessionId: 7,
+      messages: [{ id: 'user-1', role: 'user', parts: [{ type: 'text', text: '你好' }] }],
+      model: 'gpt-deep',
+      reasoningEffort: 'high',
+      onEvent: () => undefined,
+    })
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/chat', expect.objectContaining({
+      body: JSON.stringify({
+        sessionId: 7,
+        messages: [{ id: 'user-1', role: 'user', parts: [{ type: 'text', text: '你好' }] }],
+        model: 'gpt-deep',
+        reasoningEffort: 'high',
+      }),
+    }))
+  })
+
   it('submits ordered structured Skill invocations through the same-origin pipeline route', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ job: { id: 81 } }), { status: 201 }))
     vi.stubGlobal('fetch', fetchMock)

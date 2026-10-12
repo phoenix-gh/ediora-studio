@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { createScriptedCodexPeer } from '../../test/codex-jsonl-peer'
+import { CODEX_THREAD_CWD } from './codex-app-server'
+import { runCodexAgentTurn } from './codex-app-server-client'
 import {
   currentPipelineStage,
   runSkillPipelineJob,
@@ -26,34 +29,6 @@ function capability(skillName: string): AgentCapabilitySnapshot {
     },
     tools: [],
     policy: { approvalPolicy: 'automatic', allowedToolNames: [] },
-  }
-}
-
-function runResult(text: string) {
-  return {
-    kind: 'completed' as const,
-    text,
-    parts: [],
-    revisionCount: 0 as const,
-    finishReason: 'stop',
-    stepCount: 1,
-    goalCompletion: {
-      status: 'completed' as const,
-      summary: text,
-    },
-    skillRun: {
-      skillName: 'test',
-      activation: 'manual' as const,
-      goal: 'test',
-      steps: [],
-      requiredReferences: [],
-      loadedReferences: [],
-      requiredTools: [],
-      toolEvidence: [],
-      outputRequirements: [],
-      verificationCriteria: [],
-      validation: { passed: true, violations: [] },
-    },
   }
 }
 
@@ -112,16 +87,9 @@ function pipelineJob(): DurableJob {
 }
 
 function dependencies(job: DurableJob, options: {
-  failValidation?: boolean
-  missingGoal?: boolean
-  blockedGoal?: boolean
   loseCompletionResponse?: boolean
 } = {}) {
-  const opened: Array<{
-    skillName?: string
-    selectedContext?: string
-    requireGoalCompletion?: boolean
-  }> = []
+  const opened: Array<{ input: string }> = []
   const failedStages: unknown[] = []
   const failedExecutions: unknown[] = []
   const executions = new Map<number, { id: number; version: number; status: string }>()
@@ -165,7 +133,6 @@ function dependencies(job: DurableJob, options: {
       job.status = 'failed'
       return job
     }),
-    loadModel: vi.fn().mockResolvedValue({}),
     ensureExecution: vi.fn(async (_jobId, request) => {
       const existing = executions.get(request.stepId)
       if (existing) return existing as never
@@ -195,45 +162,11 @@ function dependencies(job: DurableJob, options: {
     failExecution: vi.fn(async (_jobId, executionId, error) => {
       failedExecutions.push({ executionId, error })
     }),
-    openRuntime: vi.fn(async optionsForRuntime => {
-      opened.push({ skillName: optionsForRuntime.skillName })
-      const expected = capability(optionsForRuntime.skillName ?? '')
-      return {
-        tools: {},
-        catalogContext: '',
-        selectedSkill: undefined,
-        prepare: vi.fn(),
-        prepareRun: vi.fn(),
-        executePrepared: vi.fn(),
-        snapshot: () => ({
-          source: 'manual' as const,
-          activeSkillName: optionsForRuntime.skillName,
-          referenceCount: 0,
-          readReferenceCount: 0,
-        }),
-        activeContext: () => undefined,
-        capabilitySnapshot: () => expected,
-        readReferences: vi.fn(),
-        close: vi.fn(),
-        run: vi.fn(async request => {
-          opened.at(-1)!.selectedContext = request.selectedContext
-          opened.at(-1)!.requireGoalCompletion = request.requireGoalCompletion
-          await request.onStep?.({ phase: 'execute', parts: [] })
-          const result = options.failValidation
-            ? { ...runResult('draft'), skillRun: { ...runResult('draft').skillRun, validation: { passed: false, violations: [] } } }
-            : { ...runResult(`${optionsForRuntime.skillName} output`), skillRun: { ...runResult('draft').skillRun, skillName: optionsForRuntime.skillName ?? '' } }
-          if (options.missingGoal) return { ...result, goalCompletion: undefined }
-          if (options.blockedGoal) return {
-            ...result,
-            goalCompletion: {
-              status: 'blocked' as const,
-              summary: '上游资料不足',
-              remainingWork: ['补充可信来源'],
-            },
-          }
-          return result
-        }),
-      }
+    runAgentTurn: vi.fn(async options => {
+      opened.push({ input: options.input })
+      const skillName = String(vi.mocked(deps.ensureExecution).mock.calls.at(-1)?.[1].skillName ?? 'stage')
+      const peer = createScriptedCodexPeer({ agentText: `${skillName} output` })
+      return runCodexAgentTurn({ ...options, transport: peer.transport })
     }),
     apiRoot: () => 'http://api.test/api',
   }
@@ -250,13 +183,13 @@ describe('Skill Pipeline production worker', () => {
       await runSkillPipelineJob(job.id, deps)
     }
 
-    expect(opened.map(item => item.skillName)).toEqual([
+    expect(vi.mocked(deps.ensureExecution).mock.calls.map(call => call[1].skillName)).toEqual([
       'source-research', 'writing-plan', 'humanize-writing', 'account-voice',
     ])
-    expect(opened.every(item => item.requireGoalCompletion)).toBe(true)
-    expect(opened[1].selectedContext).toContain('source-research output')
-    expect(opened[1].selectedContext).toContain('深度技术文章')
-    expect(opened[3].selectedContext).toContain('账号 A')
+    expect(deps.runAgentTurn).toHaveBeenCalledTimes(4)
+    expect(opened[1].input).toContain('source-research output')
+    expect(opened[1].input).toContain('深度技术文章')
+    expect(opened[3].input).toContain('账号 A')
     expect(job.status).toBe('succeeded')
     expect(deps.completeStage).toHaveBeenCalledTimes(4)
     expect(vi.mocked(deps.ensureExecution).mock.calls.map(call => call[1].stepId)).toEqual([10, 11, 12, 13])
@@ -267,39 +200,38 @@ describe('Skill Pipeline production worker', () => {
     expect(deps.failStage).not.toHaveBeenCalled()
   })
 
-  it('treats Skill validation as advisory when the Agent declares completion', async () => {
+  it('completes a Stage when Codex finishes the turn', async () => {
     const job = pipelineJob()
-    const { deps, failedStages, failedExecutions } = dependencies(job, { failValidation: true })
+    const { deps, failedStages, failedExecutions } = dependencies(job)
 
     await expect(runSkillPipelineJob(job.id, deps)).resolves.toMatchObject({
-      kind: 'agent_run', finalText: 'draft',
+      kind: 'agent_run',
     })
 
     expect(failedExecutions).toHaveLength(0)
     expect(failedStages).toHaveLength(0)
     expect(job.pipeline?.stages[0].status).toBe('succeeded')
+    expect(deps.runAgentTurn).toHaveBeenCalledWith(expect.objectContaining({
+      approvalPolicy: 'never',
+      cwd: CODEX_THREAD_CWD,
+    }))
   })
 
-  it('does not persist a Stage after an ordinary stop without a goal declaration', async () => {
+  it('does not persist a Stage after Codex reports turn/failed', async () => {
     const job = pipelineJob()
-    const { deps, failedStages } = dependencies(job, { missingGoal: true })
+    const { deps, failedStages } = dependencies(job)
+    vi.mocked(deps.runAgentTurn).mockImplementation(async options => {
+      const peer = createScriptedCodexPeer({
+        agentText: '',
+        terminal: 'failed',
+        terminalMethod: 'turn/failed',
+      })
+      return runCodexAgentTurn({ ...options, transport: peer.transport })
+    })
 
-    await expect(runSkillPipelineJob(job.id, deps)).rejects.toThrow(
-      'Agent ended without declaring goal completion',
-    )
+    await expect(runSkillPipelineJob(job.id, deps)).rejects.toThrow(/failed/i)
     expect(deps.completeStage).not.toHaveBeenCalled()
     expect(failedStages).toHaveLength(1)
-  })
-
-  it('does not start the next Stage after the Agent declares the current Stage blocked', async () => {
-    const job = pipelineJob()
-    const { deps, opened } = dependencies(job, { blockedGoal: true })
-
-    await expect(runSkillPipelineJob(job.id, deps)).rejects.toThrow(
-      'Agent blocked: 上游资料不足; remaining work: 补充可信来源',
-    )
-    expect(opened).toHaveLength(1)
-    expect(job.pipeline?.stages[1].status).toBe('queued')
   })
 
   it('recovers when the durable completion succeeded but the response was lost', async () => {

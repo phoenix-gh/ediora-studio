@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { SettingsClient } from './SettingsClient'
 
 vi.mock('./sections/AISection', () => ({ AISection: () => <div>AI settings</div> }))
+vi.mock('./sections/CodexSection', () => ({ CodexSection: () => <div>Codex settings</div> }))
 vi.mock('./sections/ArxivSection', () => ({ ArxivSection: () => <div>arXiv settings</div> }))
 vi.mock('./sections/BlogSection', () => ({ BlogSection: () => <div>Blog settings</div> }))
 vi.mock('./sections/CollectSection', () => ({ CollectSection: () => <div>Collect settings</div> }))
@@ -57,6 +58,16 @@ describe('SettingsClient', () => {
 
     expect(screen.getByTestId('settings-content')).toHaveClass('w-full')
     expect(screen.getByTestId('settings-content')).not.toHaveClass('max-w-[760px]')
+  })
+
+  it('opens Codex model settings next to the AI provider settings', () => {
+    render(<SettingsClient initialSettings={null} />)
+
+    fireEvent.click(screen.getByRole('button', { name: /Codex/ }))
+
+    expect(screen.getByRole('heading', { level: 1, name: 'Codex' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /模型 · 推理强度/ })).toHaveAttribute('aria-current', 'page')
+    expect(screen.getByText('Codex settings')).toBeVisible()
   })
 
   it('opens speech synthesis next to transcription settings', () => {

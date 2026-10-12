@@ -81,6 +81,8 @@ export interface TranscriptionStatus {
 export interface AppSettings {
   llm_provider: string
   llm_model: string
+  codex_model: string
+  codex_reasoning_effort: string
   llm_base_url: string
   llm_effective_base_url: string
   llm_api_key_set: boolean
@@ -180,6 +182,8 @@ export interface AppSettings {
 export interface SettingsUpdate {
   llm_provider?: string
   llm_model?: string
+  codex_model?: string
+  codex_reasoning_effort?: string
   llm_api_key?: string
   llm_base_url?: string
   llm_adapters?: LLMAdapterInput[]

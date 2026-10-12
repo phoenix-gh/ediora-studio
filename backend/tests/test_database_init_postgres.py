@@ -1,5 +1,7 @@
 import asyncio
+import json
 import sys
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 from sqlalchemy import inspect, text
@@ -79,6 +81,7 @@ def test_init_db_twice_creates_postgresql_core_tables(postgres_env):
         "execution_artifacts",
     } <= tables.keys()
     assert {"plan_version", "run_epoch", "updated_at"} <= tables["content_jobs"]
+    assert "last_adopted_at" in tables["creative_assets"]
     assert {"step_id", "attempt"} <= tables["agent_executions"]
     assert {
         "script",
@@ -235,13 +238,83 @@ def test_init_db_removes_daily_plan_tables_and_backfills_rule_directories(
     assert "媒体素材" in rows[0][4]
     assert "x-account-42" in rows[0][4]
     assert "x-article-writing" in rows[0][4]
-    assert "record_content_usage" in rows[0][4]
+    assert "asset_ids" in rows[0][4]
+    assert "record_content_usage" not in rows[0][4]
     assert 'draft_type="x"' in rows[0][4]
     assert rows[0][5] is True
     assert rows[1] == (2, ["异常目录"], "auto", None, "", False)
     warning = "\n".join(record.getMessage() for record in caplog.records)
     assert "daily creation rule 2" in warning
     assert "invalid" not in warning
+
+
+def test_init_db_rewrites_stored_usage_instructions(postgres_env):
+    _reload_database_modules()
+    import models  # noqa: F401
+    from database import SessionLocal, engine, init_db
+    from models import DailyCreationRule, DailyCreationRun
+
+    async def run():
+        await init_db()
+        async with SessionLocal() as session:
+            rule = DailyCreationRule(
+                name="旧使用记录",
+                asset_type="article",
+                directory="增长实验",
+                output_type="x_short_post",
+                target_count=1,
+                execution_mode="recurring",
+                scheduled_time="09:00",
+                timezone="Asia/Shanghai",
+                lookback_days=14,
+                delivery_mode="drafts",
+                prompt=(
+                    "检查最近 14 天的内容使用记录，不要复用仍在去重期内的创作资产。\n"
+                    "仅在 save_draft 成功并返回真实草稿 id 后，调用 "
+                    "record_content_usage 记录该草稿实际使用的素材。\n"
+                    "附加要求：保持原有语气"
+                ),
+            )
+            session.add(rule)
+            await session.flush()
+            creation_run = DailyCreationRun(
+                rule_id=rule.id,
+                scheduled_for=datetime.now(timezone.utc),
+                trigger_kind="explicit",
+                status="queued",
+                requested_count=1,
+                rule_snapshot={"prompt": rule.prompt, "lookback_days": 14},
+            )
+            session.add(creation_run)
+            await session.commit()
+            rule_id = rule.id
+            run_id = creation_run.id
+        await init_db()
+        async with engine.connect() as connection:
+            prompt = (
+                await connection.execute(text(
+                    "SELECT prompt FROM daily_creation_rules WHERE id = :id"
+                ), {"id": rule_id})
+            ).scalar_one()
+            snapshot = (
+                await connection.execute(text(
+                    "SELECT rule_snapshot FROM daily_creation_runs WHERE id = :id"
+                ), {"id": run_id})
+            ).scalar_one()
+        await engine.dispose()
+        return prompt, snapshot
+
+    prompt, snapshot = asyncio.run(run())
+    if isinstance(snapshot, str):
+        snapshot = json.loads(snapshot)
+    assert "record_content_usage" not in prompt
+    assert "内容使用记录" not in prompt
+    assert "最近 14 天内被采用过的素材" in prompt
+    assert "asset_ids" in prompt
+    assert "保持原有语气" in prompt
+    assert "record_content_usage" not in snapshot["prompt"]
+    assert "asset_ids" in snapshot["prompt"]
+    assert "保持原有语气" in snapshot["prompt"]
 
 
 def test_intelligence_subscription_migration_removes_legacy_runtime_columns(

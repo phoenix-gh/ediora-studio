@@ -45,7 +45,6 @@ def run_context(run_id=None, session_id=None):
 def seed_context():
     from database import SessionLocal
     from models import (
-        ContentUsageLedger,
         CreativeAsset,
         DailyCreationRule,
         DailyCreationRun,
@@ -83,29 +82,18 @@ def seed_context():
                 },
             )
             session.add(creation_run)
-            await session.flush()
-            session.add(ContentUsageLedger(
-                run_id=creation_run.id, rule_id=rule.id,
-                creative_asset_id=asset.id, output_type="x_short_post",
-                output_kind="draft", output_id=88, draft_id=88,
-                rule_name=rule.name, topic="验证", angle="先卖再做",
-                excerpt="旧内容", reuse_decision="fresh",
-            ))
             await session.commit()
             return asset.id, second_asset.id, creation_run.id
 
     return run(seed())
 
 
-def test_mcp_exposes_compact_candidates_and_global_history(env):
+def test_mcp_exposes_compact_candidates(env):
     asset_id, _, _ = seed_context()
     import mcp_server
 
     candidates = run(mcp_server.list_creative_asset_candidates(
         asset_type="article", directories=["产品实验"], query="验证", limit=10,
-    ))
-    history = run(mcp_server.get_recent_content_usage(
-        lookback_days=5, output_type="x_short_post",
     ))
 
     assert candidates == [{
@@ -117,8 +105,6 @@ def test_mcp_exposes_compact_candidates_and_global_history(env):
         "created_at": candidates[0]["created_at"],
         "content_length": 13,
     }]
-    assert history[0]["asset_id"] == asset_id
-    assert history[0]["angle"] == "先卖再做"
 
 
 def test_candidate_tool_requires_directories(env):
@@ -128,6 +114,12 @@ def test_candidate_tool_requires_directories(env):
     schema = tools["list_creative_asset_candidates"].inputSchema
 
     assert "directories" in schema["required"]
+    assert "ctx" not in schema["properties"]
+    search_schema = tools["search_creative_assets"].inputSchema
+    assert "ctx" not in search_schema["properties"]
+    window = search_schema["properties"]["exclude_adopted_within_days"]
+    assert window["minimum"] == 0
+    assert window["maximum"] == 90
 
 
 def test_daily_batch_save_tool_is_not_registered(env):
@@ -138,12 +130,11 @@ def test_daily_batch_save_tool_is_not_registered(env):
     assert "save_daily_creation_outputs" not in names
     assert "save_draft" in names
     assert "attach_creative_asset_to_draft" in names
-    assert "record_content_usage" in names
-    usage_schema = mcp_server.mcp._tool_manager._tools[
-        "record_content_usage"
-    ].parameters
-    assert "run_id" not in usage_schema["properties"]
-    assert "ctx" not in usage_schema["properties"]
+    assert "record_content_usage" not in names
+    assert "get_recent_content_usage" not in names
+    save_schema = mcp_server.mcp._tool_manager._tools["save_draft"].parameters
+    assert "asset_ids" in save_schema["properties"]
+    assert "ctx" not in save_schema["properties"]
 
 
 def test_real_save_draft_contract_accepts_x_drafts(env):
@@ -243,94 +234,80 @@ def test_agent_save_draft_creates_topic_claim_without_changing_rest_drafts(
     assert claim.window_days == 14
 
 
-def test_record_usage_schema_lists_only_agent_accepted_values(env):
-    import mcp_server
-
-    schema = mcp_server.mcp._tool_manager._tools["record_content_usage"].parameters
-
-    assert schema["properties"]["output_kind"]["const"] == "draft"
-    assert schema["properties"]["reuse_decision"]["enum"] == [
-        "fresh", "reuse_allowed",
-    ]
-
-
-def test_record_usage_rejects_a_missing_persisted_output(env):
-    asset_id, _, run_id = seed_context()
-    import mcp_server
-
-    with pytest.raises(ValueError, match="not found"):
-        run(mcp_server.record_content_usage(
-            ctx=run_context(run_id), asset_id=asset_id,
-            output_kind="draft", output_id=999,
-            topic="验证", angle="新角度", excerpt="不会写入",
-            reuse_decision="fresh",
-        ))
-
-
-def test_record_usage_requires_transport_run_identity(env):
-    asset_id, _, _ = seed_context()
-    import mcp_server
-
-    with pytest.raises(ValueError, match="run identity"):
-        run(mcp_server.record_content_usage(
-            ctx=run_context(), asset_id=asset_id,
-            output_kind="draft", output_id=999,
-            topic="验证", angle="新角度", excerpt="不会写入",
-            reuse_decision="fresh",
-        ))
-
-
-def test_record_usage_is_idempotent_and_not_limited_by_legacy_rule_scope(
+def test_save_draft_stamps_adopted_assets_and_rolls_back_a_missing_id(
     env, monkeypatch,
 ):
-    _, outside_legacy_directory_id, run_id = seed_context()
+    asset_id, outside_id, run_id = seed_context()
     import mcp_server
     from database import SessionLocal
-    from models import ContentUsageLedger
-    from sqlalchemy import select
+    from models import ArticleDraft, CreativeAsset
+    from sqlalchemy import func, select
 
-    async def extract(prompt, max_tokens):
-        return (
-            '{"topic":"增长复盘","core_claim":"跨目录证据",'
-            '"key_facts":[],"event_time":null,"source_item_ids":[]}'
-        )
-
-    monkeypatch.setattr("llm._call", extract)
+    monkeypatch.setenv("AGENT_TOPIC_NOVELTY_ENABLED", "0")
 
     saved = run(mcp_server.save_draft(
         ctx=run_context(run_id),
-        title="增长复盘", content="从另一目录补充增长经验。", draft_type="x",
+        title="增长复盘",
+        content="从另一目录补充增长经验。",
+        draft_type="x",
+        asset_ids=[asset_id, outside_id, asset_id],
     ))
-    input_data = {
-        "ctx": run_context(run_id),
-        "asset_id": outside_legacy_directory_id,
-        "output_kind": "draft",
-        "output_id": saved["id"],
-        "topic": "增长复盘",
-        "angle": "跨目录证据",
-        "excerpt": "从另一目录补充增长经验。",
-        "reuse_decision": "fresh",
-    }
 
-    first = run(mcp_server.record_content_usage(**input_data))
-    second = run(mcp_server.record_content_usage(**input_data))
-
-    async def read_usage():
+    async def adopted_at(target_id):
         async with SessionLocal() as session:
-            rows = (await session.execute(
-                select(ContentUsageLedger).where(
-                    ContentUsageLedger.run_id == run_id,
-                    ContentUsageLedger.output_id == saved["id"],
-                )
-            )).scalars().all()
-            return rows
+            asset = await session.get(CreativeAsset, target_id)
+            return asset.last_adopted_at
 
-    rows = run(read_usage())
-    assert first["id"] == second["id"]
-    assert len(rows) == 1
-    assert rows[0].creative_asset_id == outside_legacy_directory_id
-    assert rows[0].output_type == "x_short_post"
-    assert rows[0].topic == "增长复盘"
+    assert saved["saved"] is True
+    assert run(adopted_at(asset_id)) is not None
+    assert run(adopted_at(outside_id)) is not None
+
+    with pytest.raises(ValueError, match="not found"):
+        run(mcp_server.save_draft(
+            ctx=run_context(run_id),
+            title="缺失素材",
+            content="这个草稿不应该留下。",
+            draft_type="x",
+            asset_ids=[999999],
+        ))
+
+    async def draft_count():
+        async with SessionLocal() as session:
+            return await session.scalar(select(func.count(ArticleDraft.id)))
+
+    assert run(draft_count()) == 1
+
+
+def test_scheduled_fetch_excludes_recently_adopted_assets(env):
+    asset_id, second_id, run_id = seed_context()
+    import mcp_server
+    from database import SessionLocal
+    from models import CreativeAsset
+    from datetime import datetime, timezone
+
+    async def adopt():
+        async with SessionLocal() as session:
+            asset = await session.get(CreativeAsset, asset_id)
+            asset.last_adopted_at = datetime.now(timezone.utc)
+            await session.commit()
+
+    run(adopt())
+    ctx = run_context(run_id)
+
+    listed = run(mcp_server.list_creative_asset_candidates(
+        asset_type="article", directories=["产品实验"], ctx=ctx,
+    ))
+    searched = run(mcp_server.search_creative_assets(
+        query="验证", directory="产品实验", ctx=ctx,
+    ))
+    unfiltered = run(mcp_server.list_creative_asset_candidates(
+        asset_type="article", directories=["产品实验", "增长资料"],
+    ))
+
+    assert asset_id not in {item["id"] for item in listed}
+    assert asset_id not in {item["id"] for item in searched}
+    assert {item["id"] for item in unfiltered} == {asset_id, second_id}
+    assert run(mcp_server.get_creative_asset(asset_id))["id"] == asset_id
 
 
 def test_mcp_combines_multiple_directories(env):

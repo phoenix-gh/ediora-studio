@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 
 import { Button } from '@/components/ui/button'
 import {
@@ -17,7 +17,19 @@ import { NativeSelect } from '@/components/ui/native-select'
 import { Textarea } from '@/components/ui/textarea'
 import type { ChatSkill } from '@/lib/api/chat'
 import type { DailyCreationRule, DailyCreationRuleInput } from '@/lib/api/creation-rules'
+import {
+  ensureAssistantModel,
+  FALLBACK_CHAT_MODELS,
+  fetchChatModelCatalog,
+  reasoningEffortLabel,
+  type ChatModelChoice,
+  type ChatReasoningEffortOption,
+} from '@/lib/ai/chat-model-catalog'
+import { codexModelRejection, usableCodexModel } from '@/lib/ai/codex-model'
 import { buildCreationRulePrompt } from './creation-rule-prompt'
+
+const FOLLOW_SYSTEM = '__system__'
+const CUSTOM_MODEL = '__custom__'
 
 type Directory = { id: number; name: string; asset_type: 'article' | 'media' }
 
@@ -39,6 +51,8 @@ const defaults: DailyCreationRuleInput = {
   instructions: '',
   skill_mode: 'auto',
   skill_name: null,
+  codex_model: null,
+  codex_reasoning_effort: null,
   enabled: true,
 }
 
@@ -65,8 +79,39 @@ function ruleInput(initial: DailyCreationRule | null | undefined): DailyCreation
     instructions: initial.instructions,
     skill_mode: initial.skill_mode ?? 'auto',
     skill_name: initial.skill_name ?? null,
+    codex_model: initial.codex_model ?? null,
+    codex_reasoning_effort: initial.codex_reasoning_effort ?? null,
     enabled: initial.enabled,
   }
+}
+
+function effortChoices(
+  catalog: ChatModelChoice[],
+  model: string,
+  effort: string,
+): ChatReasoningEffortOption[] {
+  const known = catalog.find(item => item.model === model)
+  const base = known?.supportedReasoningEfforts.length
+    ? known.supportedReasoningEfforts
+    : FALLBACK_CHAT_MODELS[0].supportedReasoningEfforts
+  if (!known && effort && !base.some(item => item.reasoningEffort === effort)) {
+    return [{ reasoningEffort: effort, description: '' }, ...base]
+  }
+  return base
+}
+
+function selectedEffort(
+  catalog: ChatModelChoice[],
+  model: string,
+  effort: string,
+  choices: ChatReasoningEffortOption[],
+) {
+  if (choices.some(item => item.reasoningEffort === effort)) return effort
+  const known = catalog.find(item => item.model === model)
+  return known?.defaultReasoningEffort
+    || choices.find(item => item.reasoningEffort === 'medium')?.reasoningEffort
+    || choices[0]?.reasoningEffort
+    || 'medium'
 }
 
 function isValidTimeZone(value: string) {
@@ -97,6 +142,23 @@ export function CreationRuleDialog({
 }) {
   const [value, setValue] = useState<DailyCreationRuleInput>(() => ruleInput(initial))
   const [error, setError] = useState('')
+  const [catalog, setCatalog] = useState<ChatModelChoice[]>(FALLBACK_CHAT_MODELS)
+  const modelText = value.codex_model ?? ''
+  const knownModel = catalog.some(item => item.model === modelText)
+  const choices = modelText ? effortChoices(catalog, modelText, value.codex_reasoning_effort ?? '') : []
+  const effortValue = modelText
+    ? selectedEffort(catalog, modelText, value.codex_reasoning_effort ?? '', choices)
+    : ''
+
+  useEffect(() => {
+    let cancelled = false
+    void fetchChatModelCatalog().then(models => {
+      if (!cancelled) setCatalog(ensureAssistantModel(models))
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   const set = <K extends keyof DailyCreationRuleInput>(key: K, next: DailyCreationRuleInput[K]) => {
     setValue(previous => ({ ...previous, [key]: next }))
@@ -124,6 +186,11 @@ export function CreationRuleDialog({
       return setError('请选择执行日期')
     }
     if (!isValidTimeZone(value.timezone)) return setError('请输入有效时区')
+    const model = value.codex_model == null ? null : value.codex_model.trim()
+    if (model != null) {
+      const rejection = codexModelRejection(model)
+      if (rejection || !usableCodexModel(model)) return setError(rejection ?? '请填写模型')
+    }
     setError('')
     void onSubmit({
       ...value,
@@ -136,6 +203,8 @@ export function CreationRuleDialog({
       directory: value.directories[0] ?? '',
       delivery_mode: 'drafts',
       skill_name: value.skill_mode === 'manual' ? value.skill_name : null,
+      codex_model: model,
+      codex_reasoning_effort: model ? effortValue : null,
     })
   }
 
@@ -183,6 +252,84 @@ export function CreationRuleDialog({
                 <FieldLabel htmlFor="creation-rule-timezone">时区</FieldLabel>
                 <Input id="creation-rule-timezone" aria-label="时区" value={value.timezone} onChange={event => set('timezone', event.target.value)} aria-invalid={error === '请输入有效时区' || undefined} />
               </Field>
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <Field>
+                <FieldLabel htmlFor="creation-rule-codex-model">Codex 模型</FieldLabel>
+                <NativeSelect
+                  id="creation-rule-codex-model"
+                  aria-label="Codex 模型"
+                  data-testid="creation-rule-codex-model"
+                  value={value.codex_model == null ? FOLLOW_SYSTEM : knownModel ? modelText : CUSTOM_MODEL}
+                  onChange={event => {
+                    const next = event.target.value
+                    if (next === FOLLOW_SYSTEM) {
+                      setValue(previous => ({
+                        ...previous,
+                        codex_model: null,
+                        codex_reasoning_effort: null,
+                      }))
+                      return
+                    }
+                    if (next === CUSTOM_MODEL) {
+                      setValue(previous => ({
+                        ...previous,
+                        codex_model: knownModel ? '' : (previous.codex_model ?? ''),
+                      }))
+                      return
+                    }
+                    const nextChoices = effortChoices(catalog, next, value.codex_reasoning_effort ?? '')
+                    setValue(previous => ({
+                      ...previous,
+                      codex_model: next,
+                      codex_reasoning_effort: selectedEffort(
+                        catalog,
+                        next,
+                        previous.codex_reasoning_effort ?? '',
+                        nextChoices,
+                      ),
+                    }))
+                  }}
+                >
+                  <option value={FOLLOW_SYSTEM}>跟随系统设置</option>
+                  {catalog.map(item => (
+                    <option key={item.id} value={item.model} title={item.description}>
+                      {item.displayName}
+                    </option>
+                  ))}
+                  <option value={CUSTOM_MODEL}>自定义</option>
+                </NativeSelect>
+                <FieldDescription>不选模型时，这个任务使用系统设置里的模型和推理强度。</FieldDescription>
+              </Field>
+              {value.codex_model != null ? <Field>
+                <FieldLabel htmlFor="creation-rule-codex-model-input">自定义模型</FieldLabel>
+                <Input
+                  id="creation-rule-codex-model-input"
+                  aria-label="自定义模型"
+                  data-testid="creation-rule-codex-model-input"
+                  value={modelText}
+                  onChange={event => set('codex_model', event.target.value)}
+                  autoComplete="off"
+                  spellCheck={false}
+                />
+              </Field> : null}
+              {value.codex_model != null ? <Field>
+                <FieldLabel htmlFor="creation-rule-codex-effort">推理强度</FieldLabel>
+                <NativeSelect
+                  id="creation-rule-codex-effort"
+                  aria-label="推理强度"
+                  data-testid="creation-rule-codex-effort"
+                  value={effortValue}
+                  onChange={event => set('codex_reasoning_effort', event.target.value)}
+                >
+                  {choices.map(item => (
+                    <option key={item.reasoningEffort} value={item.reasoningEffort} title={item.description}>
+                      {reasoningEffortLabel(item.reasoningEffort)}
+                    </option>
+                  ))}
+                </NativeSelect>
+                <FieldDescription>这个任务单独使用这里的强度。目录中的模型只显示它支持的强度。</FieldDescription>
+              </Field> : null}
             </div>
             <Field data-invalid={Boolean(error && !value.prompt.trim()) || undefined}>
               <FieldLabel htmlFor="creation-rule-prompt">Agent 提示词</FieldLabel>

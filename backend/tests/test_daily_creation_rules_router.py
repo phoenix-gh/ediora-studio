@@ -117,6 +117,88 @@ def test_prompt_first_rule_accepts_explicit_empty_directory(client):
     assert updated.json()["directories"] == []
 
 
+def test_creation_rule_stores_codex_model_and_effort(client, monkeypatch):
+    async def fake_enqueue(_job_id):
+        return None
+
+    import job_queue
+    monkeypatch.setattr(job_queue, "enqueue_job", fake_enqueue)
+
+    created = client.post(
+        "/api/creation-rules",
+        json=prompt_rule_payload(
+            codex_model="  proxy/task-model ",
+            codex_reasoning_effort=" low ",
+        ),
+    )
+    assert created.status_code == 201, created.text
+    rule = created.json()
+    assert rule["codex_model"] == "proxy/task-model"
+    assert rule["codex_reasoning_effort"] == "low"
+
+    listed = client.get("/api/creation-rules")
+    assert listed.status_code == 200
+    assert listed.json()[0]["codex_model"] == "proxy/task-model"
+    assert listed.json()[0]["codex_reasoning_effort"] == "low"
+
+    paused = client.patch(
+        f"/api/creation-rules/{rule['id']}",
+        json={"enabled": False},
+    )
+    assert paused.status_code == 200, paused.text
+    assert paused.json()["enabled"] is False
+    assert paused.json()["codex_model"] == "proxy/task-model"
+    assert paused.json()["codex_reasoning_effort"] == "low"
+
+    started = client.post(f"/api/creation-rules/{rule['id']}/run")
+    assert started.status_code == 202, started.text
+    assert started.json()["rule"]["codex_model"] == "proxy/task-model"
+    assert started.json()["rule"]["codex_reasoning_effort"] == "low"
+
+    context = client.get(
+        f"/api/creation-rules/runs/{started.json()['id']}/context",
+        headers={"X-Worker-Token": TOKEN},
+    )
+    assert context.status_code == 200, context.text
+    assert context.json()["rule"]["codex_model"] == "proxy/task-model"
+    assert context.json()["rule"]["codex_reasoning_effort"] == "low"
+
+    changed = client.patch(
+        f"/api/creation-rules/{rule['id']}",
+        json={"codex_model": "gpt-other", "codex_reasoning_effort": "high"},
+    )
+    assert changed.status_code == 200, changed.text
+    preserved = client.get(f"/api/creation-rules/runs/{started.json()['id']}")
+    assert preserved.json()["rule"]["codex_model"] == "proxy/task-model"
+    assert preserved.json()["rule"]["codex_reasoning_effort"] == "low"
+
+    cleared = client.patch(
+        f"/api/creation-rules/{rule['id']}",
+        json={"codex_model": " ", "codex_reasoning_effort": ""},
+    )
+    assert cleared.status_code == 200, cleared.text
+    assert cleared.json()["codex_model"] is None
+    assert cleared.json()["codex_reasoning_effort"] is None
+
+    inherited = client.post("/api/creation-rules", json=prompt_rule_payload())
+    assert inherited.status_code == 201, inherited.text
+    assert inherited.json()["codex_model"] is None
+    assert inherited.json()["codex_reasoning_effort"] is None
+
+    rejected_model = client.post(
+        "/api/creation-rules",
+        json=prompt_rule_payload(codex_model="proxy/deepseek-flash"),
+    )
+    assert rejected_model.status_code == 422
+    assert "deepseek-flash" in rejected_model.text
+    rejected_effort = client.post(
+        "/api/creation-rules",
+        json=prompt_rule_payload(codex_reasoning_effort="high effort"),
+    )
+    assert rejected_effort.status_code == 422
+    assert "推理强度" in rejected_effort.text
+
+
 def test_creation_rule_rejects_blank_prompt(client):
     response = client.post(
         "/api/creation-rules", json=prompt_rule_payload(prompt="   "),

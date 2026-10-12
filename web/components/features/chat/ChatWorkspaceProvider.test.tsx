@@ -187,6 +187,24 @@ describe('ChatWorkspaceProvider', () => {
     expect(current.messages).toEqual([expect.objectContaining({ text: '回答' })])
   })
 
+  it('forwards the selected model and reasoning effort', async () => {
+    api.createChatSession.mockResolvedValue(session8)
+    api.getChatSession.mockResolvedValue(detail(session8))
+    renderProvider()
+
+    await act(async () => {
+      await current.submit('用深入模式', [{ type: 'text', text: '用深入模式' }], {
+        model: 'gpt-deep',
+        reasoningEffort: 'high',
+      })
+    })
+
+    expect(api.streamChatReply).toHaveBeenCalledWith(expect.objectContaining({
+      model: 'gpt-deep',
+      reasoningEffort: 'high',
+    }))
+  })
+
   it.each([
     { button: '批准', approved: true, status: '已批准' },
     { button: '拒绝', approved: false, status: '已拒绝' },

@@ -43,13 +43,26 @@ const job: ContentJob = {
     kind: 'step_failed',
     payload: { reason: 'timeout-secret' },
     created_at: '2026-08-20T08:01:00Z',
+  }, {
+    id: 10,
+    kind: 'agent_activity',
+    payload: { activity: 'codex', method: 'turn/completed' },
+    created_at: '2026-08-20T08:00:30Z',
+  }, {
+    id: 11,
+    kind: 'agent_activity',
+    payload: { activity: 'tool', method: 'item/completed', tool: 'generateImage' },
+    created_at: '2026-08-20T08:00:40Z',
   }],
 }
 
 const agentEvents = [
   { seq: 1, time: 1_000, type: 'turn/start' as const, turn: 1, step: null, data: { turn: 1 } },
-  { seq: 2, time: 2_000, type: 'assistant/message' as const, turn: 1, step: 1, data: { turn: 1, step: 1, blocks: [{ kind: 'text', text: '模型回复内容' }] } },
-  { seq: 3, time: 3_000, type: 'turn/end' as const, turn: 1, step: null, data: { reason: { kind: 'completed' } } },
+  { seq: 2, time: 1_500, type: 'user/message' as const, turn: 1, step: null, data: { content: [{ kind: 'text', text: '从人像摄影里取三条提示词' }], source: { kind: 'job' } } },
+  { seq: 3, time: 2_000, type: 'assistant/message' as const, turn: 1, step: 1, data: { turn: 1, step: 1, blocks: [{ kind: 'text', text: '模型回复内容' }] } },
+  { seq: 4, time: 2_500, type: 'tool/call' as const, turn: 1, step: 1, data: { turn: 1, step: 1, callId: 'call-1', name: 'ediora/generateImage', arguments: { prompt: 'red apple' } } },
+  { seq: 5, time: 2_600, type: 'tool/result' as const, turn: 1, step: 1, data: { turn: 1, step: 1, callId: 'call-1', isError: true, error: 'MCP tool call requires approval, but approval policy is never' } },
+  { seq: 6, time: 3_000, type: 'turn/end' as const, turn: 1, step: null, data: { reason: { kind: 'completed' } } },
 ]
 
 describe('JobLogDialog', () => {
@@ -67,51 +80,32 @@ describe('JobLogDialog', () => {
     })
   })
 
-  it('hides developer tabs and does not fetch agent logs when developer mode is off', () => {
+  it('shows the session instead of the timeline and trajectory', async () => {
     developerMode.enabled = false
+    const view = render(<JobLogDialog job={job} open={false} onOpenChange={vi.fn()} onRetry={vi.fn()} />)
 
-    render(<JobLogDialog job={job} open onOpenChange={vi.fn()} onRetry={vi.fn()} />)
+    expect(api.listAgentTrajectory).not.toHaveBeenCalled()
+    view.rerender(<JobLogDialog job={job} open onOpenChange={vi.fn()} onRetry={vi.fn()} />)
 
-    expect(screen.getByRole('tab', { name: '任务概览' })).toBeInTheDocument()
     expect(screen.queryByRole('tab', { name: '执行时间线' })).not.toBeInTheDocument()
     expect(screen.queryByRole('tab', { name: 'Agent 运行轨迹' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('tab', { name: 'AI 完整消息' })).not.toBeInTheDocument()
-    expect(api.listAgentTrajectory).not.toHaveBeenCalled()
-  })
-
-  it('uses the overview timeline trace order and opens on the overview', async () => {
-    render(<JobLogDialog job={job} open onOpenChange={vi.fn()} onRetry={vi.fn()} />)
-
-    expect(screen.getAllByRole('tab').map(tab => tab.textContent)).toEqual(['任务概览', '执行时间线', 'Agent 运行轨迹'])
-    expect(screen.getByRole('tab', { name: '任务概览' })).toHaveAttribute('aria-selected', 'true')
-    expect(screen.queryByTestId('job-token-usage')).not.toBeInTheDocument()
     expect(screen.getByRole('dialog')).toHaveClass(
       'h-[min(720px,calc(100dvh-2rem))]',
       'min-h-[min(520px,calc(100dvh-2rem))]',
       'max-h-[calc(100dvh-2rem)]',
     )
     await waitFor(() => expect(api.listAgentTrajectory).toHaveBeenCalledWith({ job_id: job.id }, null, 500))
-
-    fireEvent.click(screen.getByRole('tab', { name: 'Agent 运行轨迹' }))
     expect(await screen.findByText('模型回复内容')).toBeInTheDocument()
-    expect(screen.getByRole('tabpanel')).not.toHaveTextContent('step_failed')
-
-    fireEvent.click(screen.getByRole('tab', { name: '执行时间线' }))
-
-    const event = await screen.findByText('step_failed')
-    expect(event.closest('details')).not.toHaveAttribute('open')
-  })
-
-  it('keeps the overview panel out of the shared vertical scroll container', async () => {
-    render(<JobLogDialog job={job} open onOpenChange={vi.fn()} onRetry={vi.fn()} />)
-
-    fireEvent.click(screen.getByRole('tab', { name: 'Agent 运行轨迹' }))
-    expect(screen.getByTestId('job-log-agent-panel')).toHaveClass('overflow-hidden')
-
-    fireEvent.click(screen.getByRole('tab', { name: '任务概览' }))
-
+    expect(screen.getByText('从人像摄影里取三条提示词')).toBeInTheDocument()
+    expect(screen.getByText(/red apple/)).toBeInTheDocument()
+    expect(screen.getByText('参数')).toBeInTheDocument()
+    expect(screen.getByText('ediora/generateImage')).toBeInTheDocument()
+    expect(screen.getByText('MCP tool call requires approval, but approval policy is never')).toBeInTheDocument()
+    expect(screen.getByText('模型失败')).toBeInTheDocument()
+    expect(screen.queryByText('step_failed')).not.toBeInTheDocument()
+    expect(screen.queryByText('agent_activity')).not.toBeInTheDocument()
     expect(screen.getByTestId('job-log-dialog-body')).not.toHaveClass('overflow-y-auto')
-    expect(screen.getByTestId('job-log-overview-panel')).toHaveClass('flex-1', 'overflow-y-auto')
+    expect(screen.getByTestId('job-session-panel')).toHaveClass('overflow-y-auto')
   })
 
   it('shows completed task token usage in the overview', () => {

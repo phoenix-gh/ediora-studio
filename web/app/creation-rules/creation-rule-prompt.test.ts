@@ -1,11 +1,21 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { createElement } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { fetchChatModelCatalog, type ChatModelChoice } from '@/lib/ai/chat-model-catalog'
+
 import { CreationRuleDialog } from './CreationRuleDialog'
 import { buildCreationRulePrompt } from './creation-rule-prompt'
+
+vi.mock('@/lib/ai/chat-model-catalog', async importOriginal => {
+  const original = await importOriginal<typeof import('@/lib/ai/chat-model-catalog')>()
+  return {
+    ...original,
+    fetchChatModelCatalog: vi.fn(async () => []),
+  }
+})
 
 describe('buildCreationRulePrompt', () => {
   it('generates an editable X draft prompt with exact tool arguments', () => {
@@ -23,10 +33,12 @@ describe('buildCreationRulePrompt', () => {
     expect(prompt).toContain('搞钱副业、AI 产品')
     expect(prompt).toContain('创作 3 条中文 X 短帖')
     expect(prompt).toContain('最近 14 天')
+    expect(prompt).toContain('被采用过的素材')
     expect(prompt).toContain('save_draft')
     expect(prompt).toContain('draft_type="x"')
-    expect(prompt).toContain('record_content_usage')
-    expect(prompt).toContain('save_draft 成功')
+    expect(prompt).toContain('asset_ids')
+    expect(prompt).not.toContain('record_content_usage')
+    expect(prompt).not.toContain('内容使用记录')
     expect(prompt).toContain('每句话单独成段')
     expect(prompt).not.toContain('save_daily_creation_outputs')
   })
@@ -47,13 +59,16 @@ describe('buildCreationRulePrompt', () => {
     expect(prompt).toContain('x-account-42')
     expect(prompt).toContain('x-article-writing')
     expect(prompt).toContain('自行判断')
-    expect(prompt).toContain('record_content_usage')
+    expect(prompt).toContain('asset_ids')
+    expect(prompt).not.toContain('record_content_usage')
   })
 })
 
 describe('CreationRuleDialog prompt editor', () => {
   afterEach(() => {
     vi.restoreAllMocks()
+    vi.mocked(fetchChatModelCatalog).mockReset()
+    vi.mocked(fetchChatModelCatalog).mockResolvedValue([])
   })
 
   const onceRule = {
@@ -72,6 +87,7 @@ describe('CreationRuleDialog prompt editor', () => {
     delivery_mode: 'drafts' as const,
     account_id: null, instructions: '',
     skill_mode: 'auto' as const, skill_name: null,
+    codex_model: null, codex_reasoning_effort: null,
     enabled: true,
     deleted_at: null,
     last_run_at: null, next_run_at: '2026-08-12T01:00:00Z',
@@ -173,5 +189,77 @@ describe('CreationRuleDialog prompt editor', () => {
 
     expect(screen.getByRole('alert')).toHaveTextContent('请输入有效时区')
     expect(onSubmit).not.toHaveBeenCalled()
+  })
+
+  it('follows system Codex settings until a task model and effort are chosen', async () => {
+    const catalogModel: ChatModelChoice = {
+      id: 'gpt-fast',
+      model: 'gpt-fast',
+      displayName: '快速模型',
+      description: '',
+      isDefault: true,
+      defaultReasoningEffort: 'low',
+      supportedReasoningEfforts: [
+        { reasoningEffort: 'low', description: '' },
+        { reasoningEffort: 'medium', description: '' },
+      ],
+    }
+    vi.mocked(fetchChatModelCatalog).mockResolvedValue([catalogModel])
+    const onSubmit = renderDialog()
+
+    expect(screen.getByRole('combobox', { name: 'Codex 模型' })).toHaveValue('__system__')
+    expect(screen.queryByRole('combobox', { name: '推理强度' })).not.toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText('任务名称'), { target: { value: '手工任务' } })
+    fireEvent.change(screen.getByLabelText('Agent 提示词'), { target: { value: '跟随系统。' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存规则' }))
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+      codex_model: null,
+      codex_reasoning_effort: null,
+    }))
+
+    await waitFor(() => expect(screen.getByRole('option', { name: '快速模型' })).toBeInTheDocument())
+    fireEvent.change(screen.getByRole('combobox', { name: 'Codex 模型' }), {
+      target: { value: 'gpt-fast' },
+    })
+    expect(screen.getByRole('textbox', { name: '自定义模型' })).toHaveValue('gpt-fast')
+    expect(screen.getByRole('combobox', { name: '推理强度' })).toHaveValue('low')
+    expect(screen.queryByRole('option', { name: '很深入' })).not.toBeInTheDocument()
+    fireEvent.change(screen.getByRole('combobox', { name: '推理强度' }), {
+      target: { value: 'medium' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '保存规则' }))
+    expect(onSubmit).toHaveBeenLastCalledWith(expect.objectContaining({
+      codex_model: 'gpt-fast',
+      codex_reasoning_effort: 'medium',
+    }))
+  })
+
+  it('saves a custom task model and shows it as 自定义', () => {
+    const onSubmit = renderDialog({
+      ...onceRule,
+      codex_model: 'proxy/task-model',
+      codex_reasoning_effort: 'xhigh',
+    })
+
+    expect(screen.getByRole('combobox', { name: 'Codex 模型' })).toHaveValue('__custom__')
+    expect(screen.getByRole('textbox', { name: '自定义模型' })).toHaveValue('proxy/task-model')
+    expect(screen.getByRole('combobox', { name: '推理强度' })).toHaveValue('xhigh')
+
+    fireEvent.change(screen.getByRole('textbox', { name: '自定义模型' }), {
+      target: { value: 'proxy/deepseek-flash' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '保存规则' }))
+    expect(screen.getByRole('alert')).toHaveTextContent('deepseek-flash')
+    expect(onSubmit).not.toHaveBeenCalled()
+
+    fireEvent.change(screen.getByRole('combobox', { name: 'Codex 模型' }), {
+      target: { value: '__system__' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: '保存规则' }))
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+      codex_model: null,
+      codex_reasoning_effort: null,
+    }))
   })
 })

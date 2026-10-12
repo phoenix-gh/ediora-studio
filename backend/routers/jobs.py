@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import and_, desc, exists, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from content_jobs import InvalidJobTransition, cancel_job, create_job, fail_step, record_event, retry_step, start_step, succeed_job, succeed_step
+from content_jobs import InvalidJobTransition, cancel_job, create_job, fail_step, record_event, retry_step, start_step, succeed_job, succeed_step, visible_timeline_event
 from agent_execution_service import latest_agent_execution_for_job
 from agent_log_service import get_agent_token_usage
 from database import get_db
@@ -192,7 +192,8 @@ async def _job_payload(db: AsyncSession, job: ContentJob, *, schedule: dict | No
         .order_by(ContentJobStep.created_at, ContentJobStep.attempt)
     )).scalars().all()
     events = (await db.execute(
-        select(ContentJobEvent).where(ContentJobEvent.job_id == job.id)
+        select(ContentJobEvent)
+        .where(ContentJobEvent.job_id == job.id, visible_timeline_event())
         .order_by(ContentJobEvent.created_at.desc()).limit(100)
     )).scalars().all()
     return {
@@ -448,7 +449,11 @@ async def get_job_events(
         raise HTTPException(404, "job not found")
     events = list((await db.execute(
         select(ContentJobEvent)
-        .where(ContentJobEvent.job_id == job_id, ContentJobEvent.id > after)
+        .where(
+            ContentJobEvent.job_id == job_id,
+            ContentJobEvent.id > after,
+            visible_timeline_event(),
+        )
         .order_by(ContentJobEvent.id.asc())
         .limit(limit)
     )).scalars().all())

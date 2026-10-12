@@ -21,12 +21,18 @@ import {
   type AgentSessionEventInput,
 } from './agent-log-client'
 import {
-  agentSkillRunAudit,
-  openAgentRuntime,
-  type AgentRuntime,
   type AgentSessionEventDraft,
-  type OpenAgentRuntimeOptions,
 } from './agent-runtime'
+import { CODEX_THREAD_CWD } from './codex-app-server'
+import {
+  runCodexAgentTurn,
+  type RunCodexAgentTurnOptions,
+  type CodexAgentTurnResult,
+} from './codex-app-server-client'
+import { createCodexSessionRecorder } from './codex-session-log'
+import { usableCodexModel, usableCodexReasoningEffort } from './codex-model'
+import { configuredCodexTurn, loadConfiguredCodexTurn } from './codex-settings'
+import { scheduledEdioraMcpServers } from './ediora-mcp'
 import {
   blockedGoalError,
   buildRuntimeGoalEvidence,
@@ -35,12 +41,6 @@ import {
   normalizeGoalCompletionDeclaration,
   runtimeGoalEvidenceSchema,
 } from './agent-goal-completion'
-import { pinCapabilitySnapshot } from './agent-capabilities'
-import {
-  capabilityPinFromExecution,
-  restoredSkillNameFromExecution,
-} from './agent-capability-pin'
-import { createDirectImageGenerator, mcpUrl } from './global-chat-tools'
 import { recordJobEvent } from './image-generation'
 import type {
   AgentCompletionEvidence,
@@ -60,7 +60,7 @@ import {
   workerHeaders,
   type DurableJob,
 } from './job-client'
-import { textModelConfigFromSettings, textModelFromConfig, type TextModelSettings } from './runtime-config'
+
 
 export type DailyCreationAgentContext = {
   id: number
@@ -80,6 +80,8 @@ export type DailyCreationAgentContext = {
     instructions?: string
     skill_mode?: 'auto' | 'manual'
     skill_name?: string | null
+    codex_model?: string | null
+    codex_reasoning_effort?: string | null
   }
 }
 
@@ -157,6 +159,54 @@ export function isNoveltySaveConflict(audit: AgentToolAudit) {
   return isNoveltySaveConflictResult(audit.toolName, audit.status, audit.output)
 }
 
+const TIMELINE_CODEX_METHODS = new Set([
+  'thread/started',
+  'turn/started',
+  'turn/completed',
+  'turn/failed',
+  'turn/cancelled',
+  'warning',
+  'error',
+])
+
+const TIMELINE_TOOL_ITEM_TYPES = new Set([
+  'mcpToolCall',
+  'McpToolCall',
+  'commandExecution',
+  'CommandExecution',
+])
+
+function timelineText(value: unknown) {
+  return typeof value === 'string' && value.trim() ? value : ''
+}
+
+export function jobTimelineActivity(
+  notification: { method: string; params?: Record<string, unknown> },
+): { activity: string; payload: Record<string, unknown> } | null {
+  if (TIMELINE_CODEX_METHODS.has(notification.method)) {
+    return { activity: 'codex', payload: { method: notification.method } }
+  }
+  if (notification.method !== 'item/completed') return null
+  const item = notification.params?.item
+  if (!item || typeof item !== 'object' || Array.isArray(item)) return null
+  const record = item as Record<string, unknown>
+  const itemType = timelineText(record.type)
+  if (!TIMELINE_TOOL_ITEM_TYPES.has(itemType)) return null
+  const tool = timelineText(record.tool) || timelineText(record.command)
+  const server = timelineText(record.server)
+  const status = timelineText(record.status)
+  return {
+    activity: 'tool',
+    payload: {
+      method: 'item/completed',
+      itemType,
+      ...(tool ? { tool } : {}),
+      ...(server ? { server } : {}),
+      ...(status ? { status } : {}),
+    },
+  }
+}
+
 export function startAgentActivityHeartbeat(
   onHeartbeat: () => void | Promise<void>,
   intervalMs = 15_000,
@@ -204,12 +254,9 @@ function successfulBusinessToolCallCount(calls: Array<{
   )).length
 }
 
-type Model = OpenAgentRuntimeOptions['model']
-
 export type DailyCreationAgentJobDependencies = {
   getJob(jobId: number): Promise<DurableJob>
   getContext(runId: number, jobId: number): Promise<DailyCreationAgentContext>
-  loadModel(jobId: number): Promise<Model>
   ensureExecution(jobId: number, request: {
     objective: string
     skillMode: 'auto' | 'manual'
@@ -235,20 +282,13 @@ export type DailyCreationAgentJobDependencies = {
   completeStep(jobId: number, stepId: number, output: Record<string, unknown>): Promise<unknown>
   failStep(jobId: number, stepId: number, error: unknown, retryable: boolean): Promise<unknown>
   completeJob(jobId: number): Promise<unknown>
-  openRuntime(options: OpenAgentRuntimeOptions): Promise<AgentRuntime>
+  runAgentTurn(options: RunCodexAgentTurnOptions): Promise<CodexAgentTurnResult>
   apiRoot(): string
+  codexTurn?(apiRoot: string): Promise<{ model?: string, reasoningEffort?: string }>
 }
 
 function defaultApiRoot() {
   return apiBase()
-}
-
-async function configuredModel(jobId: number): Promise<Model> {
-  const settings = await apiGet<TextModelSettings>(
-    '/settings/ai-runtime', workerHeaders(jobId),
-  )
-  const runtime = textModelConfigFromSettings(settings)
-  return textModelFromConfig(runtime)
 }
 
 const defaultDependencies: DailyCreationAgentJobDependencies = {
@@ -256,7 +296,6 @@ const defaultDependencies: DailyCreationAgentJobDependencies = {
   getContext: (runId, jobId) => apiGet(
     `/creation-rules/runs/${runId}/context`, workerHeaders(jobId),
   ),
-  loadModel: configuredModel,
   ensureExecution: ensureAgentExecution,
   checkpointExecution: checkpointAgentExecution,
   appendMessage: appendAgentMessage,
@@ -273,8 +312,9 @@ const defaultDependencies: DailyCreationAgentJobDependencies = {
   completeStep,
   failStep,
   completeJob,
-  openRuntime: openAgentRuntime,
+  runAgentTurn: runCodexAgentTurn,
   apiRoot: defaultApiRoot,
+  codexTurn: loadConfiguredCodexTurn,
 }
 
 function parseAgentRunEvidence(value: unknown): AgentCompletionEvidence | undefined {
@@ -334,7 +374,6 @@ export async function runDailyCreationAgentJob(
   const step = runningStep?.id
     ? { id: runningStep.id, attempt: runningStep.attempt }
     : await deps.startStep(jobId, 'agent')
-  let runtime: AgentRuntime | undefined
   let execution: DurableAgentExecution | undefined
   let pendingFinalizationEvidence: AgentCompletionEvidence | undefined
   let durableFinalizationConfirmed = false
@@ -439,18 +478,6 @@ export async function runDailyCreationAgentJob(
       if (!execution) throw new Error('daily creation Agent execution was not initialized')
       return execution
     }
-    let capabilityPin = capabilityPinFromExecution(currentExecution())
-    const allowSkillBootstrap = capabilityPin === undefined
-    const withCapabilityAudit = (audit: Record<string, unknown>) => {
-      if (!runtime) return audit
-      const capabilities = runtime.capabilitySnapshot()
-      capabilityPin = pinCapabilitySnapshot(
-        capabilityPin,
-        capabilities,
-        { allowSkillBootstrap },
-      )
-      return { ...audit, capabilities, capabilityPin }
-    }
     const finalize = async (evidence: AgentCompletionEvidence) => {
       if (currentExecution().status !== 'succeeded') {
         await deps.completeExecution(jobId, currentExecution().id, evidence)
@@ -527,85 +554,16 @@ export async function runDailyCreationAgentJob(
     ))) {
       throw new Error(interruptedAfterSideEffects)
     }
-    const model = await deps.loadModel(jobId)
-    const audits: AgentToolAudit[] = []
-
     const checkpoint = async (
       phase: string,
       state: Record<string, unknown>,
-      audit: Record<string, unknown>,
+      audit: Record<string, unknown> = {},
     ) => {
       execution = await deps.checkpointExecution(
         jobId, currentExecution().id, currentExecution().version,
-        { phase, checkpoint: state, audit, capabilityPin },
+        { phase, checkpoint: state, audit },
       )
     }
-
-    const apiRoot = deps.apiRoot()
-    runtime = await deps.openRuntime({
-      mcpEndpoint: mcpUrl(apiRoot),
-      imageGenerator: createDirectImageGenerator(apiRoot, jobId),
-      model,
-      mode: 'job',
-      dailyCreationRunId: runId,
-      turn: canonicalTurn,
-      policyProfile: 'scheduled',
-      automaticSelection: false,
-      skillMode: currentExecution().skill_mode,
-      skillName: currentExecution().skill_name ?? undefined,
-      restoredSkillName: restoredSkillNameFromExecution(currentExecution()),
-      onSessionEvent: recordSessionEvent,
-      beforeToolExecute: async event => {
-        const capabilities = runtime?.capabilitySnapshot()
-        if (capabilities) {
-          try {
-            capabilityPin = pinCapabilitySnapshot(
-              capabilityPin,
-              capabilities,
-              { allowSkillBootstrap },
-            )
-          } catch (error) {
-            return {
-              action: 'uncertain' as const,
-              error: error instanceof Error ? error.message : String(error),
-            }
-          }
-        }
-        const decision = await deps.claimToolCall(jobId, currentExecution().id, event)
-        return decision
-      },
-      onMessage: async event => {
-        try {
-          await deps.appendMessage?.(jobId, currentExecution().id, event)
-        } catch {
-          // Message logging is best effort and must not fail the content task.
-        }
-        recordJobActivity('model', {
-          direction: event.direction,
-          phase: event.phase,
-          step: event.step ?? null,
-        })
-      },
-      onToolAudit: async event => {
-        audits.push(event)
-        recordJobActivity('tool', {
-          tool: event.toolName,
-          status: event.status,
-          step: event.step ?? null,
-        })
-        if (event.status === 'succeeded') {
-          await deps.completeToolCall(
-            jobId, currentExecution().id, event.toolCallId, event.output,
-          )
-        } else if (event.status === 'failed' || event.status === 'uncertain') {
-          await deps.failToolCall(
-            jobId, currentExecution().id, event.toolCallId,
-            event.error || 'tool execution failed',
-            event.status === 'uncertain' || event.sideEffecting,
-          )
-        }
-      },
-    })
 
     await recordExecutionEvent({
       event_type: 'skill/selected',
@@ -630,74 +588,61 @@ export async function runDailyCreationAgentJob(
       event_type: 'session/capabilities',
       phase: 'prepare',
       status: 'completed',
-      payload: { capabilitySnapshot: runtime.capabilitySnapshot() },
+      payload: { agent: 'codex-app-server' },
     })
 
-    await checkpoint('prepared', { objective }, withCapabilityAudit({
-      skill: runtime.snapshot(),
-      toolCalls: audits,
-    }))
-    const stopAgentActivityHeartbeat = startAgentActivityHeartbeat(
-      () => recordJobActivity('heartbeat', {
-        phase: currentExecution().phase,
-      }),
-    )
-    let result: Awaited<ReturnType<AgentRuntime['run']>>
-    try {
-      result = await runtime.run({
-        objective,
-        modelMessages: [{ role: 'user', content: objective }],
-        maxSteps: 30,
-        requireGoalCompletion: true,
-        onStep: event => checkpoint(event.phase, {
-          objective,
-          latestStep: event,
-        }, withCapabilityAudit({
-          skill: runtime?.snapshot(),
-          toolCalls: audits,
-        })),
-      })
-    } finally {
-      stopAgentActivityHeartbeat()
+    await checkpoint('prepared', { objective }, { agent: 'codex-app-server' })
+    let sessionWrites = Promise.resolve()
+    const sessionEvents = createCodexSessionRecorder()
+    const recordCodexSession = (notification: { method: string; params?: Record<string, unknown> }) => {
+      sessionWrites = sessionWrites.then(async () => {
+        for (const event of sessionEvents(notification, { turn: canonicalTurn, step: 1 })) {
+          await recordSessionEvent(event)
+        }
+      }).catch(() => undefined)
     }
-    const declaration = result.goalCompletion
-    if (recordedNoveltyConflictCount + audits.filter(isNoveltySaveConflict).length >= 3) {
-      throw new Error(
-        'no sufficiently novel topic was available in the configured time window',
-      )
-    }
-    const failedAudit = firstBlockingToolAudit(audits, {
-      allowReadOnlyFailures: declaration?.status === 'completed',
+    const ruleModel = usableCodexModel(context.rule.codex_model)
+    const ruleEffort = usableCodexReasoningEffort(context.rule.codex_reasoning_effort)
+    const settings: { model?: string, reasoningEffort?: string } = ruleModel && ruleEffort
+      ? {}
+      : await configuredCodexTurn(deps)
+    const model = ruleModel ?? settings.model
+    const reasoningEffort = ruleEffort ?? settings.reasoningEffort
+    const result: CodexAgentTurnResult = await deps.runAgentTurn({
+      input: objective,
+      ...(model ? { model } : {}),
+      ...(reasoningEffort ? { reasoningEffort } : {}),
+      cwd: CODEX_THREAD_CWD,
+      approvalPolicy: 'never',
+      sandbox: 'workspace-write',
+      mcpServers: scheduledEdioraMcpServers(runId),
+      onNotification: notification => {
+        const activity = jobTimelineActivity(notification)
+        if (activity) recordJobActivity(activity.activity, activity.payload)
+        recordCodexSession(notification)
+      },
     })
-    if (failedAudit) {
-      throw new Error(`Agent tool audit is ${failedAudit.status}: ${failedAudit.toolName}`)
-    }
-    if (!declaration) throw new Error('Agent ended without declaring goal completion')
-    const auditCalls = audits.map(audit => ({
-      toolCallId: audit.toolCallId,
-      toolName: audit.toolName,
-      status: audit.status,
-      sideEffecting: audit.sideEffecting,
-    }))
-    if (declaration.status === 'blocked') throw blockedGoalError(declaration)
+    await sessionWrites
+    const summary = (result.text.trim() || '既定目标已经完成').slice(0, 2_000)
     const completionEvidence: AgentCompletionEvidence = {
       kind: 'agent_run',
       executionId: currentExecution().id,
-      finalText: declaration.summary.slice(0, 2_000),
-      toolCallCount: successfulBusinessToolCallCount(auditCalls),
-      goalCompletion: declaration,
-      runtimeEvidence: buildRuntimeGoalEvidence(auditCalls, declaration.outputs),
+      finalText: summary,
+      toolCallCount: result.items.filter(item => (
+        item.type === 'mcpToolCall' || item.type === 'commandExecution'
+      )).length,
+      goalCompletion: {
+        status: 'completed',
+        summary,
+      },
     }
     pendingFinalizationEvidence = completionEvidence
     await checkpoint('finalizing', {
       objective,
       evidence: completionEvidence,
-      goalCompletion: declaration,
-    }, withCapabilityAudit({
-      skill: runtime.snapshot(),
-      skillRun: agentSkillRunAudit(result),
-      toolCalls: audits,
-    }))
+      goalCompletion: completionEvidence.goalCompletion,
+      threadId: result.threadId,
+    }, { agent: 'codex-app-server', threadId: result.threadId })
     durableFinalizationConfirmed = true
     await finishCanonicalTurn({ kind: 'completed' })
     await recordExecutionEvent({
@@ -705,9 +650,9 @@ export async function runDailyCreationAgentJob(
       phase: 'agent',
       status: 'completed',
       payload: {
-        kind: result.kind,
-        finishReason: result.finishReason ?? null,
-        stepCount: result.stepCount ?? null,
+        kind: 'completed',
+        threadId: result.threadId,
+        turnId: result.turnId,
       },
     })
     await finalize(completionEvidence)
@@ -764,7 +709,5 @@ export async function runDailyCreationAgentJob(
       )
     }
     throw failure
-  } finally {
-    await runtime?.close()
   }
 }

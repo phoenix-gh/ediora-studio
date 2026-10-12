@@ -3,6 +3,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import Literal, Optional
 from datetime import datetime, timezone
 import json
+import re
 import httpx
 from pathlib import Path
 import tempfile
@@ -11,6 +12,7 @@ import wave
 import logging
 
 from config import (
+    DEFAULTS,
     PROVIDERS,
     effective_base_url,
     effective_comfyui_auth_token,
@@ -135,6 +137,8 @@ class WebFetchProviderConfig(BaseModel):
 class SettingsOut(BaseModel):
     llm_provider: str
     llm_model: str
+    codex_model: str
+    codex_reasoning_effort: str
     llm_base_url: str
     llm_effective_base_url: str
     llm_api_key_set: bool
@@ -229,6 +233,8 @@ class TranscriptionStatusOut(BaseModel):
 class SettingsUpdate(BaseModel):
     llm_provider: Optional[str] = None
     llm_model: Optional[str] = None
+    codex_model: Optional[str] = None
+    codex_reasoning_effort: Optional[str] = None
     llm_api_key: Optional[str] = None
     llm_base_url: Optional[str] = None
     llm_adapters: Optional[list[LLMAdapterInput]] = None
@@ -423,6 +429,8 @@ def _build_out(cfg: dict) -> SettingsOut:
     return SettingsOut(
         llm_provider=cfg.get("llm_provider", "openai"),
         llm_model=cfg.get("llm_model", ""),
+        codex_model=_effective_codex_model(cfg),
+        codex_reasoning_effort=_effective_codex_reasoning_effort(cfg),
         llm_base_url=cfg.get("llm_base_url", ""),
         llm_effective_base_url=effective_base_url(cfg),
         llm_api_key_set=bool(api_key),
@@ -609,6 +617,53 @@ async def _fetch_models_anthropic(api_key: str) -> list[str]:
     data = resp.json()
     models = [m["id"] for m in data.get("data", []) if isinstance(m, dict) and "id" in m]
     return sorted(models)
+
+
+_CODEX_MODEL_RE = re.compile(
+    r"^[A-Za-z0-9](?:[A-Za-z0-9._/-]{0,198}[A-Za-z0-9])?$"
+)
+_UNSUPPORTED_CODEX_MODELS = {"deepseek-flash", "proxy/deepseek-flash"}
+
+
+def _effective_codex_model(cfg: dict) -> str:
+    fallback = DEFAULTS["codex_model"]
+    model = str(cfg.get("codex_model", "") or "").strip()
+    if model in _UNSUPPORTED_CODEX_MODELS or not _CODEX_MODEL_RE.fullmatch(model):
+        return fallback
+    return model
+
+
+_CODEX_EFFORT_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
+
+def _effective_codex_reasoning_effort(cfg: dict) -> str:
+    fallback = DEFAULTS["codex_reasoning_effort"]
+    effort = str(cfg.get("codex_reasoning_effort", "") or "").strip()
+    if not _CODEX_EFFORT_RE.fullmatch(effort):
+        return fallback
+    return effort
+
+
+def _normalize_codex_reasoning_effort(value: str) -> str:
+    effort = value.strip()
+    if not _CODEX_EFFORT_RE.fullmatch(effort):
+        raise HTTPException(422, "推理强度只能包含字母、数字、下划线和短横线")
+    return effort
+
+
+def _normalize_codex_model(value: str) -> str:
+    model = value.strip()
+    if model in _UNSUPPORTED_CODEX_MODELS:
+        raise HTTPException(
+            422,
+            "deepseek-flash 没有可用通道，请改用 proxy/deepseek-v4-flash",
+        )
+    if not _CODEX_MODEL_RE.fullmatch(model):
+        raise HTTPException(
+            422,
+            "Codex 模型只能包含字母、数字、点、下划线、短横线和斜线，且不能以斜线开头或结尾",
+        )
+    return model
 
 
 # ── Routes ────────────────────────────────────────────────────────────────────
@@ -894,6 +949,12 @@ async def update_settings(
         updates.setdefault("llm_base_url", "")
     if body.llm_model is not None:
         updates["llm_model"] = body.llm_model
+    if body.codex_model is not None:
+        updates["codex_model"] = _normalize_codex_model(body.codex_model)
+    if body.codex_reasoning_effort is not None:
+        updates["codex_reasoning_effort"] = _normalize_codex_reasoning_effort(
+            body.codex_reasoning_effort
+        )
     if body.llm_api_key is not None:
         updates["llm_api_key"] = body.llm_api_key
     if body.llm_base_url is not None:

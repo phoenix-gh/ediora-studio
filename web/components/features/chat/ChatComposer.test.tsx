@@ -4,6 +4,7 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import { useState } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 
+import { FALLBACK_CHAT_MODELS } from '@/lib/ai/chat-model-catalog'
 import type { SubmittedSkillInvocation } from '@/lib/api/chat'
 import { ChatComposer, type ChatComposerProps } from './ChatComposer'
 
@@ -216,6 +217,10 @@ describe('ChatComposer', () => {
         }),
         { type: 'text', text: ')来写一篇文章' },
       ],
+      {
+        model: FALLBACK_CHAT_MODELS[0].model,
+        reasoningEffort: 'medium',
+      },
     )
   })
 
@@ -318,6 +323,13 @@ describe('ChatComposer', () => {
     fireEvent.submit(editor.closest('form')!)
 
     expect(screen.getByTestId('objective').textContent).toBe('')
-    expect(onSubmit).toHaveBeenCalledWith('第一行\n第二行', [{ type: 'text', text: '第一行\n第二行' }])
+    expect(onSubmit).toHaveBeenCalledWith(
+      '第一行\n第二行',
+      [{ type: 'text', text: '第一行\n第二行' }],
+      {
+        model: FALLBACK_CHAT_MODELS[0].model,
+        reasoningEffort: 'medium',
+      },
+    )
   })
 })
