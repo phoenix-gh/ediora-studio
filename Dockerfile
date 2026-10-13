@@ -35,6 +35,8 @@ RUN apt-get update \
       python3 python3-venv ffmpeg chromium \
       ca-certificates fonts-noto-cjk fonts-noto-color-emoji \
     && rm -rf /var/lib/apt/lists/*
+# `codex app-server` is spawned from PATH. Keep the CLI that this app's protocol uses.
+RUN npm install -g @openai/codex@0.162.1
 COPY --from=backend-deps /opt/venv /opt/venv
 COPY backend ./
 COPY web ./web

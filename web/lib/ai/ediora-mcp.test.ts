@@ -25,6 +25,7 @@ describe('Ediora MCP address', () => {
         'X-Agent-Mode': 'scheduled',
         'X-Daily-Creation-Run-Id': '83',
       },
+      default_tools_approval_mode: 'approve',
     })
     expect(chatEdioraMcpServers(12).ediora.url).toBe('http://api:8000/mcp')
   })

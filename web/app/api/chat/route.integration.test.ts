@@ -157,6 +157,7 @@ describe('POST /api/chat Codex app-server agent', () => {
               'X-Agent-Mode': 'chat',
               'X-Agent-Session-Id': '12',
             },
+            default_tools_approval_mode: 'approve',
           },
         },
       },

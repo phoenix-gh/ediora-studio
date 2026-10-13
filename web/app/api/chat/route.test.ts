@@ -67,6 +67,7 @@ describe('Chat Ediora MCP address', () => {
           'X-Agent-Mode': 'chat',
           'X-Agent-Session-Id': '12',
         },
+        default_tools_approval_mode: 'approve',
       })
     } finally {
       restoreApiEnv()
