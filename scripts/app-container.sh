@@ -44,6 +44,23 @@ else
 fi
 pids+=("$!")
 
+api_ready=0
+for _ in $(seq 1 150); do
+  if python -c 'import urllib.request; urllib.request.urlopen("http://127.0.0.1:8000/health", timeout=0.2).read()' >/dev/null 2>&1; then
+    api_ready=1
+    break
+  fi
+  if ! kill -0 "${pids[1]}" 2>/dev/null; then
+    echo "API exited before http://127.0.0.1:8000/health was ready" >&2
+    exit 1
+  fi
+  sleep 0.2
+done
+if [[ "$api_ready" -ne 1 ]]; then
+  echo "API did not accept http://127.0.0.1:8000/health" >&2
+  exit 1
+fi
+
 cd /app/web
 ./node_modules/.bin/tsx scripts/content-worker.ts &
 pids+=("$!")

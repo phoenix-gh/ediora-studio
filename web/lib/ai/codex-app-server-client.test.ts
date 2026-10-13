@@ -22,7 +22,7 @@ import {
   spawnCodexAppServerTransport,
   type CodexJsonlTransport,
 } from './codex-app-server'
-import { listCodexModels, runCodexAgentTurn } from './codex-app-server-client'
+import { deleteCodexThread, listCodexModels, runCodexAgentTurn } from './codex-app-server-client'
 import { runWithCodexTurnSignal } from './codex-turn-abort'
 import { codexThreadModel } from './codex-model'
 
@@ -245,6 +245,44 @@ describe('Codex app-server client', () => {
       limit: 100,
       includeHidden: false,
     })
+  })
+
+  it('permanently deletes a persisted thread after the handshake', async () => {
+    const peer = createScriptedCodexPeer()
+    let closed = false
+    const close = peer.transport.close?.bind(peer.transport)
+    peer.transport.close = () => {
+      closed = true
+      close?.()
+    }
+
+    await deleteCodexThread('thr_chat', { transport: peer.transport })
+
+    expect(sentMethods(peer).slice(0, 3)).toEqual([
+      'initialize',
+      'initialized',
+      'thread/delete',
+    ])
+    expect(requestByMethod(peer, 'thread/delete')?.params).toEqual({ threadId: 'thr_chat' })
+    expect(closed).toBe(true)
+  })
+
+  it('treats an ephemeral thread as already gone', async () => {
+    const peer = createScriptedCodexPeer({
+      deleteError: 'thread is not persisted and cannot be deleted: thr_side',
+    })
+
+    await expect(deleteCodexThread('thr_side', { transport: peer.transport })).resolves.toBeUndefined()
+  })
+
+  it('reports a thread delete failure from app-server', async () => {
+    const peer = createScriptedCodexPeer({
+      deleteError: 'cannot delete thread thr_parent: forked history still references it',
+    })
+
+    await expect(deleteCodexThread('thr_parent', { transport: peer.transport })).rejects.toThrow(
+      'forked history still references it',
+    )
   })
 
   it('fails the turn when the server emits turn/failed', async () => {

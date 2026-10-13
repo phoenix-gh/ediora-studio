@@ -344,6 +344,88 @@ export async function runCodexAgentTurn(
 }
 
 const MODEL_LIST_TIMEOUT_MS = 15_000
+const THREAD_DELETE_TIMEOUT_MS = 20_000
+
+function codexThreadHasNoRollout(error: Error) {
+  return error.message.includes('is not persisted and cannot be deleted')
+}
+
+export async function deleteCodexThread(
+  threadId: string,
+  options: {
+    transport?: CodexJsonlTransport
+    createTransport?: () => CodexJsonlTransport | Promise<CodexJsonlTransport>
+  } = {},
+): Promise<void> {
+  const transport = options.transport
+    ?? await (options.createTransport ?? spawnCodexAppServerTransport)()
+  const pending = new Map<number, PendingRequest>()
+  let nextId = 0
+  let closed = false
+
+  const fail = (error: Error) => {
+    for (const waiter of pending.values()) waiter.reject(error)
+    pending.clear()
+  }
+
+  const reading = (async () => {
+    try {
+      for await (const line of transport.lines) {
+        const trimmed = line.trim()
+        if (!trimmed) continue
+        const message = JSON.parse(trimmed) as JsonRpcMessage
+        if (message.id === undefined || !pending.has(Number(message.id))) continue
+        const waiter = pending.get(Number(message.id))
+        pending.delete(Number(message.id))
+        if (message.error) waiter?.reject(new Error(message.error.message || 'Codex thread delete failed'))
+        else waiter?.resolve(message.result)
+      }
+    } catch (error) {
+      if (!closed) fail(error instanceof Error ? error : new Error(String(error)))
+    }
+  })()
+
+  const request = async (method: string, params: Record<string, unknown>) => {
+    const id = nextId
+    nextId += 1
+    const result = new Promise<unknown>((resolve, reject) => {
+      pending.set(id, { resolve, reject })
+    })
+    await transport.write(encodeLine({ method, id, params }))
+    return result
+  }
+
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error('Codex thread delete timed out')), THREAD_DELETE_TIMEOUT_MS)
+    timer.unref?.()
+  })
+
+  try {
+    await Promise.race([
+      (async () => {
+        await request('initialize', {
+          clientInfo: DEFAULT_CLIENT_INFO,
+          capabilities: null,
+        })
+        await transport.write(encodeLine({ method: 'initialized' }))
+        try {
+          await request('thread/delete', { threadId })
+        } catch (error) {
+          if (error instanceof Error && codexThreadHasNoRollout(error)) return
+          throw error
+        }
+      })(),
+      timeout,
+    ])
+  } finally {
+    if (timer) clearTimeout(timer)
+    closed = true
+    await transport.close?.()
+    await reading.catch(() => undefined)
+  }
+}
+
 
 export async function listCodexModels(options: {
   transport?: CodexJsonlTransport

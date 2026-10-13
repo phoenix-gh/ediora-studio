@@ -74,6 +74,107 @@ def test_job_codex_thread_is_stored_once(client):
     assert detail.json()["codex_thread_id"] == "thr_job"
 
 
+def test_cancel_job_deletes_its_codex_thread(client, monkeypatch):
+    import routers.jobs as jobs_module
+
+    deleted: list[str] = []
+
+    async def delete_thread(thread_id: str) -> None:
+        deleted.append(thread_id)
+
+    monkeypatch.setattr(jobs_module, "delete_codex_thread", delete_thread)
+    created = client.post("/api/jobs", json={
+        "flow": "daily_creation", "title": "取消并删除会话", "input": {}, "idempotency_key": "cancel-thread",
+    })
+    job_id = created.json()["id"]
+    headers = {"X-Worker-Token": "test-worker-token-at-least-32-characters"}
+    stored = client.post(
+        f"/api/jobs/{job_id}/codex-thread",
+        headers=headers,
+        json={"thread_id": "thr_job"},
+    )
+    assert stored.status_code == 200
+
+    cancelled = client.post(f"/api/jobs/{job_id}/cancel")
+
+    assert cancelled.status_code == 200
+    assert cancelled.json()["status"] == "cancelled"
+    assert cancelled.json()["codex_thread_id"] is None
+    assert deleted == ["thr_job"]
+
+
+def test_cancel_retries_codex_thread_delete_after_the_job_is_cancelled(client, monkeypatch):
+    import routers.jobs as jobs_module
+    from codex_threads import CodexThreadDeleteError
+
+    calls = {"count": 0}
+
+    async def delete_thread(thread_id: str) -> None:
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise CodexThreadDeleteError("down")
+        assert thread_id == "thr_retry"
+
+    monkeypatch.setattr(jobs_module, "delete_codex_thread", delete_thread)
+    created = client.post("/api/jobs", json={
+        "flow": "draft", "title": "重试删除会话", "input": {}, "idempotency_key": "retry-thread",
+    })
+    job_id = created.json()["id"]
+    headers = {"X-Worker-Token": "test-worker-token-at-least-32-characters"}
+    client.post(
+        f"/api/jobs/{job_id}/codex-thread",
+        headers=headers,
+        json={"thread_id": "thr_retry"},
+    )
+
+    failed = client.post(f"/api/jobs/{job_id}/cancel")
+
+    assert failed.status_code == 502
+    assert failed.json()["detail"] == "任务已取消，Codex 会话删除失败，可再次取消以重试"
+    assert client.get(f"/api/jobs/{job_id}").json()["codex_thread_id"] == "thr_retry"
+
+    retried = client.post(f"/api/jobs/{job_id}/cancel")
+
+    assert retried.status_code == 200
+    assert retried.json()["codex_thread_id"] is None
+    assert calls["count"] == 2
+
+
+def test_cancel_pipeline_deletes_its_codex_thread(client, monkeypatch):
+    import routers.jobs as jobs_module
+
+    deleted: list[str] = []
+
+    async def delete_thread(thread_id: str) -> None:
+        deleted.append(thread_id)
+
+    monkeypatch.setattr(jobs_module, "delete_codex_thread", delete_thread)
+    headers = {"X-Worker-Token": "test-worker-token-at-least-32-characters"}
+    created = client.post(
+        "/api/jobs",
+        json=_pipeline_body(key="pipeline-cancel-thread"),
+        headers=headers,
+    )
+    assert created.status_code == 201, created.text
+    job_id = created.json()["id"]
+    stored = client.post(
+        f"/api/jobs/{job_id}/codex-thread",
+        headers=headers,
+        json={"thread_id": "thr_pipe"},
+    )
+    assert stored.status_code == 200
+
+    cancelled = client.post(
+        f"/api/jobs/{job_id}/cancel",
+        json={"request_id": "cancel-thread"},
+    )
+
+    assert cancelled.status_code == 200, cancelled.text
+    assert cancelled.json()["status"] == "cancelled"
+    assert cancelled.json()["codex_thread_id"] is None
+    assert deleted == ["thr_pipe"]
+
+
 def test_create_job_returns_queued_job(client):
     response = client.post("/api/jobs", json={
         "flow": "draft", "title": "Test", "input": {}, "idempotency_key": "one",

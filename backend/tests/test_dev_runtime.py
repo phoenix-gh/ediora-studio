@@ -1648,5 +1648,6 @@ def test_compose_uses_real_api_health_and_healthy_dependencies(
     assert VALID_TOKEN not in script
     assert "codex app-server --listen" in script
     assert 'codex_listen="ws://127.0.0.1:4500"' in script
+    assert script.index("http://127.0.0.1:8000/health") < script.index("content-worker.ts")
     assert "CODEX_APP_SERVER_SOCKET" not in script
     assert "unix://" not in script
