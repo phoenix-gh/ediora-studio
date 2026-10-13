@@ -1,3 +1,6 @@
+import { homedir } from 'node:os'
+import { join } from 'node:path'
+
 import type { CodexJsonlTransport } from '../lib/ai/codex-app-server'
 
 export type JsonRpcMessage = {
@@ -54,7 +57,7 @@ export function createScriptedCodexPeer(script: ScriptedCodexPeerOptions = {}) {
   const agentText = script.agentText ?? 'streamed agent reply'
   const threadId = script.threadId ?? 'thr_test'
   const turnId = script.turnId ?? 'turn_test'
-  const codexHome = script.codexHome ?? '/home/violet/.mk-video-codex'
+  const codexHome = script.codexHome ?? join(homedir(), '.mk-video-codex')
   const terminal = script.terminal ?? 'completed'
   const terminalMethod = script.terminalMethod ?? (
     terminal === 'cancelled' ? 'turn/cancelled' : terminal === 'failed' ? 'turn/failed' : 'turn/completed'

@@ -11,6 +11,7 @@ import {
 import {
   CODEX_HOME,
   CODEX_SANDBOX_MODES,
+  resolveCodexHome,
   CODEX_THREAD_CWD,
   DEFAULT_CODEX_MODEL,
   DEFAULT_CODEX_SANDBOX,
@@ -74,7 +75,7 @@ describe('Codex app-server client', () => {
     expect(result.text).toBe('Hello from Codex')
     expect(result.threadId).toBe('thr_test')
     expect(result.status).toBe('completed')
-    expect(result.initialize.codexHome).toBe('/home/violet/.mk-video-codex')
+    expect(result.initialize.codexHome).toBe(join(homedir(), '.mk-video-codex'))
   })
 
   it('resumes an existing thread instead of starting a new one', async () => {
@@ -322,11 +323,13 @@ describe('Codex app-server spawn', () => {
       env: { ...process.env, PATH: '/usr/bin', HOME: '/home/violet' },
     })
 
-    expect(CODEX_HOME).toBe('/home/violet/.mk-video-codex')
+    expect(CODEX_HOME).toBe(resolveCodexHome())
+    expect(resolveCodexHome({}, '/home/someone')).toBe('/home/someone/.mk-video-codex')
+    expect(resolveCodexHome({ CODEX_HOME: '  /root/.codex  ' }, '/home/someone')).toBe('/root/.codex')
     expect(DEFAULT_CODEX_MODEL).toBe('proxy/deepseek-v4-flash')
     expect(spawn.command).toBe('codex')
     expect(spawn.args).toEqual(['app-server'])
-    expect(spawn.env.CODEX_HOME).toBe('/home/violet/.mk-video-codex')
+    expect(spawn.env.CODEX_HOME).toBe(resolveCodexHome())
     expect(spawn.env.PATH).toBe('/usr/bin')
   })
 })
