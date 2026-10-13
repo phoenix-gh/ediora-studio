@@ -33,6 +33,7 @@ WRITE_TOOL_CONTRACTS = {
     "update_writing_plan": ("writing_plans", True, False, False, "claim-backed"),
     "add_plan_update": ("writing_plans", False, False, False, "claim-backed"),
     "generateImage": ("image_generation", False, False, True, "unsafe"),
+    "comfyui_text_to_image": ("image_generation", False, False, True, "unsafe"),
     "upload_image_from_url": ("creative_assets", False, False, True, "unsafe"),
     "upload_image_from_path": ("creative_assets", False, False, False, "unsafe"),
     "attach_creative_asset_to_draft": (

@@ -34,11 +34,14 @@ export type CodexAgentTurnResult = {
   }
 }
 
+export type CodexMcpToolApprovalMode = 'auto' | 'prompt' | 'writes' | 'approve'
+
 export type CodexMcpHttpServer = {
   url: string
   http_headers?: Record<string, string>
   enabled?: boolean
   startup_timeout_sec?: number
+  default_tools_approval_mode?: CodexMcpToolApprovalMode
 }
 
 export type RunCodexAgentTurnOptions = {

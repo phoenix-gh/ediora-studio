@@ -64,6 +64,33 @@ export type TranscriptionProvider =
 
 export type ComfyUIRuntimeProvider = 'direct' | 'xiangongyun'
 
+export type ComfyUIWorkflowType = 'text_to_image'
+
+export type ComfyUIWorkflowInputs = {
+  prompt: string
+  width: string
+  height: string
+}
+
+export type ComfyUIWorkflow = {
+  id: string
+  name: string
+  type: ComfyUIWorkflowType
+  workflow: Record<string, unknown>
+  inputs: ComfyUIWorkflowInputs
+}
+
+export type ComfyUIWorkflowList = {
+  workflows: ComfyUIWorkflow[]
+}
+
+export type ComfyUIWorkflowInput = {
+  name: string
+  type: ComfyUIWorkflowType
+  workflow: Record<string, unknown>
+  inputs: ComfyUIWorkflowInputs
+}
+
 export type XiangongyunInstancesResponse = {
   list: XiangongyunInstance[]
   total: number
@@ -318,6 +345,31 @@ export async function testLLMAdapter(body: {
 
 export async function testHeyGen(): Promise<{ ok: boolean; error: string }> {
   return apiFetch('/settings/heygen/test', { method: 'POST' })
+}
+
+export function listComfyUIWorkflows() {
+  return apiFetch<ComfyUIWorkflowList>('/settings/comfyui-workflows')
+}
+
+export function addComfyUIWorkflow(body: ComfyUIWorkflowInput) {
+  return apiFetch<ComfyUIWorkflowList & { workflow: ComfyUIWorkflow }>(
+    '/settings/comfyui-workflows',
+    { method: 'POST', body: JSON.stringify(body) },
+  )
+}
+
+export function updateComfyUIWorkflow(id: string, body: ComfyUIWorkflowInput) {
+  return apiFetch<ComfyUIWorkflowList & { workflow: ComfyUIWorkflow }>(
+    `/settings/comfyui-workflows/${encodeURIComponent(id)}`,
+    { method: 'PUT', body: JSON.stringify(body) },
+  )
+}
+
+export function deleteComfyUIWorkflow(id: string) {
+  return apiFetch<ComfyUIWorkflowList>(
+    `/settings/comfyui-workflows/${encodeURIComponent(id)}`,
+    { method: 'DELETE' },
+  )
 }
 
 export async function testComfyUI(): Promise<{ ok: boolean; error: string }> {

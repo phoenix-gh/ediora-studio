@@ -35,7 +35,7 @@ const NAV: { id: SectionId; label: string; icon: React.ElementType; desc: string
   { id: 'speech', label: '语音合成', icon: AudioLines, desc: 'MiMo · 音色 · TTS 密钥' },
   { id: 'youtube',  label: 'YouTube',     icon: Video, desc: 'Cookie · 字幕下载稳定性' },
   { id: 'heygen',   label: 'HeyGen',      icon: Video,     desc: '数字人 · 声音克隆 · 视频生成' },
-  { id: 'comfyui',  label: 'ComfyUI',     icon: Clapperboard, desc: 'H3 分镜 · 本机出片 · 单镜上限' },
+  { id: 'comfyui',  label: 'ComfyUI',     icon: Clapperboard, desc: '文生图 · H3 分镜 · 本机出片' },
   { id: 'xiangongyun', label: '仙宫云', icon: Cloud, desc: 'API · 默认实例 · 自动开机' },
   { id: 'text-video', label: '文字视频', icon: Clapperboard, desc: '模板 · 品牌 · 默认视觉' },
   { id: 'skills', label: '技能管理', icon: Puzzle, desc: '启用 · 上传 · 删除自定义 Skill' },

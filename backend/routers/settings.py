@@ -11,6 +11,13 @@ from urllib.parse import urlsplit
 import wave
 import logging
 
+from comfyui_workflows import (
+    SETTING_KEY as COMFYUI_WORKFLOWS_KEY,
+    add_workflow,
+    delete_workflow,
+    load_workflows,
+    update_workflow,
+)
 from config import (
     DEFAULTS,
     PROVIDERS,
@@ -1274,6 +1281,60 @@ async def test_heygen():
         error = str(exc)
     safe_error = redact_secret_text(error).replace(api_key, "***")[:500]
     return {"ok": False, "error": safe_error}
+
+
+async def _workflow_list() -> list[dict]:
+    cfg = await get_config()
+    try:
+        return load_workflows(cfg.get(COMFYUI_WORKFLOWS_KEY, ""))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+async def _store_workflows(workflows: list[dict]) -> None:
+    await set_config({
+        COMFYUI_WORKFLOWS_KEY: json.dumps(workflows, ensure_ascii=False),
+    })
+
+
+@router.get("/comfyui-workflows")
+async def list_comfyui_workflows():
+    return {"workflows": await _workflow_list()}
+
+
+@router.post("/comfyui-workflows")
+async def create_comfyui_workflow(body: dict):
+    workflows = await _workflow_list()
+    try:
+        workflows, created = add_workflow(workflows, body)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    await _store_workflows(workflows)
+    return {"workflow": created, "workflows": workflows}
+
+
+@router.put("/comfyui-workflows/{workflow_id}")
+async def edit_comfyui_workflow(workflow_id: str, body: dict):
+    workflows = await _workflow_list()
+    try:
+        workflows, updated = update_workflow(workflows, workflow_id, body)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="工作流不存在") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    await _store_workflows(workflows)
+    return {"workflow": updated, "workflows": workflows}
+
+
+@router.delete("/comfyui-workflows/{workflow_id}")
+async def remove_comfyui_workflow(workflow_id: str):
+    workflows = await _workflow_list()
+    try:
+        workflows = delete_workflow(workflows, workflow_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="工作流不存在") from exc
+    await _store_workflows(workflows)
+    return {"workflows": workflows}
 
 
 @router.post("/comfyui/test")

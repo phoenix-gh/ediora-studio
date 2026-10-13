@@ -1697,6 +1697,98 @@ async def generateImage(
     return {**saved, "model": adapter.model}
 
 
+def _comfyui_image_title(prompt: str) -> str:
+    title = " ".join(prompt.split())
+    if len(title) > 80:
+        title = title[:80].rstrip()
+    return title or "ComfyUI 文生图"
+
+
+@ediora_tool(
+    mcp,
+    namespace="image_generation",
+    read_only=False,
+    destructive=False,
+    idempotent=False,
+    open_world=True,
+    approval="writes",
+    concurrency="serialized",
+    retry="unsafe",
+)
+async def comfyui_text_to_image(
+    prompt: Annotated[str, Field(min_length=1, max_length=8000)],
+    size: Annotated[str, Field(min_length=3, max_length=32)],
+) -> dict:
+    """Generate one image with the latest saved ComfyUI text-to-image workflow and save it as a media CreativeAsset.
+
+    The saved workflow keeps a valid ComfyUI API graph. This tool writes the prompt into the configured prompt node and the size into the configured width and height nodes, queues that graph on the configured ComfyUI server, and stores the returned image in the 多媒体 category, in the 临时文件 directory. The returned image is already stored locally; never upload it again with upload_image_from_url or upload_image_from_path. When several text-to-image workflows are saved, the most recently added one is used.
+
+    Each successful call creates a new image file, so do not retry blindly.
+
+    Args:
+        prompt: Image prompt, from 1 to 8000 characters.
+        size: Image size, for example 1024x1024.
+
+    Returns:
+        asset_id, asset_url, title, directory, workflow_name, and size.
+        asset_url is a local path such as "/api/uploads/abc.png".
+    """
+    from comfyui_client import download_comfyui_image
+    from comfyui_workflows import (
+        SETTING_KEY,
+        TEXT_TO_IMAGE_TYPE,
+        apply_text_to_image,
+        load_workflows,
+        parse_image_size,
+    )
+    from config import (
+        effective_comfyui_auth_token,
+        effective_comfyui_base_url,
+        get_config,
+    )
+
+    cleaned_prompt = prompt.strip()
+    if not cleaned_prompt:
+        raise ValueError("提示词不能为空")
+    if len(cleaned_prompt) > 8000:
+        raise ValueError("提示词过长")
+    width, height = parse_image_size(size)
+    cfg = await get_config()
+    workflows = [
+        item
+        for item in load_workflows(cfg.get(SETTING_KEY, ""))
+        if item["type"] == TEXT_TO_IMAGE_TYPE
+    ]
+    if not workflows:
+        raise ValueError("还没有文生图工作流")
+    workflow = workflows[-1]
+    graph = apply_text_to_image(workflow, prompt=cleaned_prompt, size=size)
+    base_url = effective_comfyui_base_url(cfg)
+    if not base_url:
+        raise ValueError("请先在设置里填写 ComfyUI 地址")
+    data = await download_comfyui_image(
+        base_url=base_url,
+        auth_token=effective_comfyui_auth_token(cfg),
+        graph=graph,
+    )
+    try:
+        media_type = _sniff_image_media_type(data)
+    except ValueError as exc:
+        raise ValueError("ComfyUI 返回的不是图片") from exc
+    directory = await _image_output_directory(None)
+    saved = await _persist_generated_image(
+        data,
+        media_type,
+        _comfyui_image_title(cleaned_prompt),
+        directory,
+    )
+    return {
+        **saved,
+        "workflow_name": workflow["name"],
+        "size": f"{width}x{height}",
+    }
+
+
 @ediora_tool(
     mcp,
     namespace="creative_assets",

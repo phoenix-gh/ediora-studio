@@ -18,6 +18,9 @@ export function edioraMcpServers(headers: Record<string, string>): Record<string
     ediora: {
       url: mcpUrlFromApiBase(deploymentApiBase()),
       http_headers: headers,
+      // Codex approvalPolicy "never" rejects tools that still require approval.
+      // "approve" runs this server's tools without stopping for a prompt.
+      default_tools_approval_mode: 'approve',
     },
   }
 }
