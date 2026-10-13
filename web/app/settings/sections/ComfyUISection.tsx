@@ -29,6 +29,8 @@ import {
   updateSettings,
 } from '@/lib/api/settings'
 
+import { ComfyUIWorkflows } from './ComfyUIWorkflows'
+
 
 export function ComfyUISection({
   settings,
@@ -106,6 +108,7 @@ export function ComfyUISection({
   }
 
   return (
+    <div className="flex flex-col gap-4">
     <FormSection
       title="ComfyUI"
       description="用于 MiniMax H3 分镜口播。地址和鉴权只保存在服务端，浏览器不会拿到 token。"
@@ -239,5 +242,7 @@ export function ComfyUISection({
         </div>
       </FieldGroup>
     </FormSection>
+    <ComfyUIWorkflows />
+    </div>
   )
 }
