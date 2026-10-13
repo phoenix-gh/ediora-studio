@@ -51,7 +51,7 @@ function FloatingSessionPicker({
   }
 
   async function removeSession(session: ChatSession) {
-    if (typeof window !== 'undefined' && !window.confirm(`删除会话“${session.title || '新对话'}”？此操作不可恢复。`)) return
+    setPopoverOpen(false)
     await onDeleteSession(session.id)
   }
 
@@ -217,7 +217,6 @@ export function ChatSessionList({
   }
 
   async function removeSession(session: ChatSession) {
-    if (typeof window !== 'undefined' && !window.confirm(`删除会话“${session.title || '新对话'}”？此操作不可恢复。`)) return
     await onDeleteSession(session.id)
   }
 
@@ -289,17 +288,17 @@ export function ChatSessionList({
                   onClick={() => onOpenSession(session.id)}
                   aria-label={title}
                   className={cn(
-                    'w-full rounded-lg px-3 py-2.5 pr-16 text-left transition-colors',
+                    'flex w-full min-w-0 items-center gap-2 rounded-lg px-3 py-2 pr-16 text-left transition-colors',
                     activeSessionId === session.id
                       ? 'bg-indigo-50 text-indigo-950 dark:bg-indigo-950/40 dark:text-indigo-100'
                       : 'text-muted-foreground hover:bg-muted',
                   )}
                 >
-                  <span className="flex min-w-0 items-center gap-2">
-                    <span className="block min-w-0 flex-1 truncate text-sm font-medium">{title}</span>
-                    {isRunning && <Loader2 aria-label="运行中" className="h-3.5 w-3.5 shrink-0 animate-spin text-indigo-500" />}
-                  </span>
-                  <span className="mt-1 block text-[11px] text-foreground-subtle">{displayTime(session.updated_at)}</span>
+                  <span className="min-w-0 flex-1 truncate text-sm font-medium">{title}</span>
+                  {isRunning && <Loader2 aria-label="运行中" className="h-3.5 w-3.5 shrink-0 animate-spin text-indigo-500" />}
+                  <time dateTime={session.updated_at} className="shrink-0 text-[11px] tabular-nums text-foreground-subtle">
+                    {displayTime(session.updated_at)}
+                  </time>
                 </button>
               )}
               {editingSessionId !== session.id && (

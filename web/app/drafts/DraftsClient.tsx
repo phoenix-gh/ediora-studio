@@ -1,11 +1,10 @@
 'use client'
 
-import { useState, useEffect, useEffectEvent, useRef, useMemo, useSyncExternalStore, useCallback, type MouseEvent } from 'react'
+import { useState, useEffect, useEffectEvent, useRef, useMemo, useCallback, type MouseEvent } from 'react'
 import {
   BookMarked, Trash2, Save, RefreshCw, FileText, Clock,
   ChevronRight, Loader2, Plus,
-  Link2, MessageSquare, Send, CheckCheck,
-  Images, GitBranch,
+  Send, Images,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
@@ -15,9 +14,9 @@ import {
   DialogDescription, DialogFooter,
 } from '@/components/ui/dialog'
 import {
-  Draft, DraftSource, DraftUpdate, ChatMessage, DraftImage,
+  Draft, DraftSource, DraftUpdate, DraftImage,
   DRAFT_STATUSES, draftTypeInfo,
-  getDraftPage, updateDraft, deleteDraft, createDraft, chatWithDraft,
+  getDraftPage, updateDraft, deleteDraft, createDraft,
   getDraftImages, uploadDraftImage, deleteDraftImage,
 } from '@/lib/api/drafts'
 import { WritingPlan, getWritingPlans, flattenTopicsWithDepth } from '@/lib/api/writing-plans'
@@ -70,60 +69,16 @@ function formatDate(iso: string) {
 
 // ── Main Component ─────────────────────────────────────────────────────────────
 
-const subscribeToHydration = () => () => {}
-const getHydratedClientSnapshot = () => true
-const getHydratedServerSnapshot = () => false
-const emptyStoredChat = {
-  history: [] as ChatMessage[],
-  sessionName: null as string | null,
-  pending: null as string | null,
-}
-
-function chatStorageKey(draftId: number) {
-  return `wms-chat-${draftId}`
-}
-
-function saveChatToStorage(
-  draftId: number,
-  history: ChatMessage[],
-  sessionName: string | null,
-  pending: string | null,
-) {
-  try {
-    localStorage.setItem(
-      chatStorageKey(draftId),
-      JSON.stringify({ history, sessionName, pending }),
-    )
-  } catch {}
-}
-
-function loadChatFromStorage(draftId: number): {
-  history: ChatMessage[]
-  sessionName: string | null
-  pending: string | null
-} {
-  if (typeof localStorage === 'undefined') {
-    return { history: [], sessionName: null, pending: null }
-  }
-  try {
-    const raw = localStorage.getItem(chatStorageKey(draftId))
-    if (raw) return JSON.parse(raw)
-  } catch {}
-  return { history: [], sessionName: null, pending: null }
-}
-
 export function DraftsClient({
   initialDrafts,
   initialNextCursor = null,
   initialTopics,
   initialDraftId,
-  initialChatOpen = false,
 }: {
   initialDrafts: Draft[]
   initialNextCursor?: string | null
   initialTopics: WritingPlan[]
   initialDraftId?: number
-  initialChatOpen?: boolean
 }) {
   const [drafts, setDrafts] = useState<Draft[]>(initialDrafts)
   const [nextCursor, setNextCursor] = useState<string | null>(initialNextCursor)
@@ -154,34 +109,19 @@ export function DraftsClient({
   const [editStatus, setEditStatus] = useState(selected?.status ?? 'drafting')
   const [editWritingPlanId, setEditWritingPlanId] = useState<number | null>(selected?.writing_plan_id ?? null)
   const [editSources, setEditSources] = useState<DraftSource[]>(selected?.sources ?? [])
-  const [dirty, setDirty] = useState(false)
+  const dirty = selected !== null && (
+    editTitle !== selected.title
+    || editContent !== selected.content
+    || editStatus !== selected.status
+    || editWritingPlanId !== (selected.writing_plan_id ?? null)
+    || JSON.stringify(editSources) !== JSON.stringify(selected.sources ?? [])
+  )
   const [saving, setSaving] = useState(false)
 
-  // Chat state
-  const [chatOpen, setChatOpen] = useState(initialChatOpen)
+  // Dialog state
   const [publishOpen, setPublishOpen] = useState(false)
   const [assetsOpen, setAssetsOpen] = useState(false)
   const [assetsTab, setAssetsTab] = useState<'sources' | 'images'>('sources')
-  const hydrated = useSyncExternalStore(
-    subscribeToHydration,
-    getHydratedClientSnapshot,
-    getHydratedServerSnapshot,
-  )
-  const storedInitialChat = hydrated && initialDraft
-    ? loadChatFromStorage(initialDraft.id)
-    : emptyStoredChat
-  const [chatState, setChatState] = useState<typeof emptyStoredChat | null>(null)
-  const chatHistory = chatState ? chatState.history : storedInitialChat.history
-  const chatSessionName = chatState ? chatState.sessionName : storedInitialChat.sessionName
-  const [chatInput, setChatInput] = useState('')
-  const [chatLoading, setChatLoading] = useState(false)
-  const pendingContent = chatState ? chatState.pending : storedInitialChat.pending
-  const chatSnapshotRef = useRef({
-    history: chatHistory,
-    sessionName: chatSessionName,
-    pending: pendingContent,
-  })
-  const chatEndRef = useRef<HTMLDivElement>(null)
   const editorRef = useRef<MarkdownEditorHandle>(null)
 
   // Image library state
@@ -197,29 +137,6 @@ export function DraftsClient({
   const draftListRef = useRef<HTMLDivElement>(null)
   const loadMoreSentinelRef = useRef<HTMLDivElement>(null)
   const pageRequestRef = useRef(0)
-
-  function setChatHistory(history: ChatMessage[]) {
-    chatSnapshotRef.current = { ...chatSnapshotRef.current, history }
-    setChatState(current => ({ ...(current ?? storedInitialChat), history }))
-  }
-
-  function setChatSessionName(sessionName: string | null) {
-    chatSnapshotRef.current = { ...chatSnapshotRef.current, sessionName }
-    setChatState(current => ({ ...(current ?? storedInitialChat), sessionName }))
-  }
-
-  function setPendingContent(pending: string | null) {
-    chatSnapshotRef.current = { ...chatSnapshotRef.current, pending }
-    setChatState(current => ({ ...(current ?? storedInitialChat), pending }))
-  }
-
-  useEffect(() => {
-    chatSnapshotRef.current = {
-      history: chatHistory,
-      sessionName: chatSessionName,
-      pending: pendingContent,
-    }
-  }, [chatHistory, chatSessionName, pendingContent])
 
   // Confirm dialog
   const [confirmDialog, setConfirmDialog] = useState<{
@@ -339,16 +256,6 @@ export function DraftsClient({
   }
 
   function activateDraft(next: Draft | null) {
-    const outgoingDraftId = selectedDraftIdRef.current
-    if (outgoingDraftId !== null) {
-      const latestChat = chatSnapshotRef.current
-      saveChatToStorage(
-        outgoingDraftId,
-        latestChat.history,
-        latestChat.sessionName,
-        latestChat.pending,
-      )
-    }
     const selectionIdentity = selectionIdentityRef.current + 1
     selectionIdentityRef.current = selectionIdentity
     selectedDraftIdRef.current = next?.id ?? null
@@ -365,11 +272,6 @@ export function DraftsClient({
     setEditStatus(next.status)
     setEditWritingPlanId(next.writing_plan_id ?? null)
     setEditSources(next.sources ?? [])
-    const saved = loadChatFromStorage(next.id)
-    setChatHistory(saved.history)
-    setChatSessionName(saved.sessionName)
-    setPendingContent(saved.pending)
-    setDirty(false)
     setImages([])
     setImagesLoading(true)
     void getDraftImages(next.id)
@@ -697,35 +599,6 @@ export function DraftsClient({
     }
   }
 
-  async function handleChatSend() {
-    if (!selected || !chatInput.trim() || chatLoading) return
-    const userMsg: ChatMessage = { role: 'user', content: chatInput.trim() }
-    const nextHistory = [...chatHistory, userMsg]
-    setChatHistory(nextHistory)
-    setChatInput('')
-    setChatLoading(true)
-    setPendingContent(null)
-    try {
-      const res = await chatWithDraft(selected.id, userMsg.content, {
-        sessionName: chatSessionName ?? undefined,
-        history: chatHistory,
-      })
-      const sessionName = res.session_name && !chatSessionName ? res.session_name : chatSessionName
-      if (res.session_name && !chatSessionName) setChatSessionName(res.session_name)
-      const assistantMsg: ChatMessage = { role: 'assistant', content: res.reply }
-      const finalHistory = [...nextHistory, assistantMsg]
-      setChatHistory(finalHistory)
-      const pending = res.updated_content ?? null
-      if (pending) setPendingContent(pending)
-      saveChatToStorage(selected.id, finalHistory, sessionName, pending)
-      setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50)
-    } catch {
-      toast.error('AI 回复失败')
-    } finally {
-      setChatLoading(false)
-    }
-  }
-
   async function handleImageUpload(files: FileList | null) {
     if (!selected || !files || files.length === 0) return
     setUploadingImage(true)
@@ -762,17 +635,7 @@ export function DraftsClient({
       editorRef.current.insert(markdown)
     } else {
       setEditContent(v => v + '\n' + markdown)
-      setDirty(true)
     }
-  }
-
-  function handleNewChatSession(event: React.MouseEvent<HTMLButtonElement>) {
-    const newSession = `wms-draft-${selected?.id}-${event.timeStamp.toString(36)}`
-    setChatHistory([])
-    setPendingContent(null)
-    setChatSessionName(newSession)
-    if (selected) saveChatToStorage(selected.id, [], newSession, null)
-    toast.success('已开启新对话')
   }
 
   return (
@@ -974,7 +837,7 @@ export function DraftsClient({
         </div>
       </aside>
 
-      {/* ── Right: Editor + Chat ──────────────────────────── */}
+      {/* ── Right: Editor ──────────────────────────── */}
       {selected ? (
         <div className="flex-1 flex overflow-hidden bg-surface">
           {/* Editor column */}
@@ -984,7 +847,7 @@ export function DraftsClient({
             <div data-slot="page-header" className="flex h-[var(--app-header-height)] min-h-[var(--app-header-height)] items-center gap-3 px-6 py-3 border-b border-border flex-shrink-0">
               <NativeSelect
                 value={editStatus}
-                onChange={e => { setEditStatus(e.target.value); setDirty(true) }}
+                onChange={e => { setEditStatus(e.target.value) }}
                 className={cn('h-7 w-auto cursor-pointer rounded-full border-0 px-2 py-1 text-xs font-medium focus:outline-none focus:ring-1 focus:ring-indigo-400', STATUS_STYLES[editStatus])}
               >
                 {DRAFT_STATUSES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
@@ -992,7 +855,7 @@ export function DraftsClient({
 
               <NativeSelect
                 value={editWritingPlanId ?? ''}
-                onChange={e => { setEditWritingPlanId(e.target.value ? Number(e.target.value) : null); setDirty(true) }}
+                onChange={e => { setEditWritingPlanId(e.target.value ? Number(e.target.value) : null) }}
                 className="h-7 w-auto max-w-[160px] cursor-pointer truncate rounded-full px-2 py-1 text-xs"
                 title="关联写作模板"
               >
@@ -1010,20 +873,6 @@ export function DraftsClient({
                 {dirty && <span className="text-[11px] text-amber-500">有未保存修改</span>}
                 <Button
                   variant="outline" size="sm"
-                  onClick={() => { setAssetsTab('sources'); setAssetsOpen(true) }}
-                  className="gap-1.5"
-                  title="灵感来源 · 链接和备注"
-                >
-                  <Link2 className="w-3.5 h-3.5" />
-                  灵感
-                  {editSources.length > 0 && (
-                    <span className="text-[10px] bg-indigo-100 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400 px-1.5 py-0.5 rounded-full font-medium leading-none">
-                      {editSources.length}
-                    </span>
-                  )}
-                </Button>
-                <Button
-                  variant="outline" size="sm"
                   onClick={() => { setAssetsTab('images'); setAssetsOpen(true) }}
                   className="gap-1.5"
                   title="图片素材 · 封面在这里管理"
@@ -1038,29 +887,12 @@ export function DraftsClient({
                 </Button>
                 <Button
                   variant="outline" size="sm"
-                  onClick={() => { window.location.href = '/creation-rules' }}
-                  className="gap-1.5"
-                  title="查看 scout→editor→writer→illustrator 每棒的任务详情"
-                >
-                  <GitBranch className="w-3.5 h-3.5" />
-                  工作流
-                </Button>
-                <Button
-                  variant="outline" size="sm"
                   onClick={() => setPublishOpen(true)}
                   className="gap-1.5"
                   title="发布到公众号 / 复制 X 长文"
                 >
                   <Send className="w-3.5 h-3.5" />
                   发布
-                </Button>
-                <Button
-                  variant="outline" size="sm"
-                  onClick={() => setChatOpen(v => !v)}
-                  className={cn('gap-1.5', chatOpen && 'bg-violet-50 border-violet-300 text-violet-600 dark:bg-violet-950/30 dark:border-violet-700 dark:text-violet-400')}
-                >
-                  <MessageSquare className="w-3.5 h-3.5" />
-                  AI 写作
                 </Button>
                 <Button
                   variant="outline" size="sm"
@@ -1082,7 +914,7 @@ export function DraftsClient({
             <div className="px-6 pt-4 pb-2 flex-shrink-0 border-b border-border">
               <input
                 value={editTitle}
-                onChange={e => { setEditTitle(e.target.value); setDirty(true) }}
+                onChange={e => { setEditTitle(e.target.value) }}
                 placeholder="标题…"
                 className="w-full text-xl font-bold text-foreground bg-transparent border-0 outline-none placeholder:text-foreground-subtle"
               />
@@ -1095,94 +927,11 @@ export function DraftsClient({
                 documentKey={selected.id}
                 ref={editorRef}
                 value={editContent}
-                onChange={v => { setEditContent(v); setDirty(true) }}
+                onChange={v => { setEditContent(v) }}
               />
             </div>
           </div>
 
-          {/* ── Chat panel ──────────────────────────────────── */}
-          {chatOpen && (
-            <div className="w-80 flex-shrink-0 border-l border-border flex flex-col bg-surface">
-              <div className="flex items-center justify-between px-4 py-3 border-b border-border flex-shrink-0">
-                <div className="flex items-center gap-2 min-w-0">
-                  <MessageSquare className="w-3.5 h-3.5 text-violet-500 flex-shrink-0" />
-                  <span className="text-xs font-semibold text-foreground">AI 写作助手</span>
-                  <span className={cn('text-[10px] px-1.5 py-0.5 rounded-full font-medium', draftTypeInfo(selected.draft_type).badge)}>
-                    {draftTypeInfo(selected.draft_type).label}
-                  </span>
-                </div>
-                <button onClick={handleNewChatSession} className="text-[10px] text-foreground-subtle hover:text-violet-500 dark:hover:text-violet-400 flex-shrink-0 transition-colors">
-                  新对话
-                </button>
-              </div>
-
-              <div className="flex-1 overflow-y-auto px-3 py-3 space-y-3">
-                {chatHistory.length === 0 && (
-                  <div className="text-center text-foreground-subtle text-xs py-6 space-y-2">
-                    <MessageSquare className="w-7 h-7 mx-auto opacity-30" />
-                    <p>可以说：</p>
-                    <div className="space-y-1">
-                      {['帮我润色开头', '把语气改得更有力', '压缩到 500 字', '帮我补充一个结尾'].map(s => (
-                        <button key={s} onClick={() => setChatInput(s)} className="block w-full text-left px-2 py-1 rounded hover:bg-surface-muted transition-colors">{s}</button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-                {chatHistory.map((m, i) => (
-                  <div key={i} className={cn('flex flex-col', m.role === 'user' ? 'items-end' : 'items-start')}>
-                    <div className={cn('max-w-[90%] rounded-xl px-3 py-2 text-xs leading-relaxed whitespace-pre-wrap',
-                      m.role === 'user' ? 'bg-violet-500 text-white rounded-br-sm' : 'bg-muted text-foreground rounded-bl-sm')}>
-                      {m.content}
-                    </div>
-                    {m.role === 'assistant' && (
-                      <button
-                        onClick={() => { setEditContent(m.content); setDirty(true); toast.success('已应用到草稿，记得保存') }}
-                        className="mt-1 text-[10px] text-foreground-subtle hover:text-violet-500 dark:hover:text-violet-400 transition-colors px-1"
-                      >
-                        用作草稿
-                      </button>
-                    )}
-                  </div>
-                ))}
-                {chatLoading && (
-                  <div className="flex justify-start">
-                    <div className="bg-muted rounded-xl rounded-bl-sm px-3 py-2">
-                      <Loader2 className="w-3.5 h-3.5 animate-spin text-foreground-subtle" />
-                    </div>
-                  </div>
-                )}
-                {pendingContent && (
-                  <div className="rounded-lg border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/30 p-2.5 space-y-2">
-                    <p className="text-[11px] text-emerald-700 dark:text-emerald-400 font-medium">AI 已生成修改版本</p>
-                    <Button size="sm" className="w-full gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs h-7"
-                      onClick={() => { setEditContent(pendingContent); setDirty(true); setPendingContent(null); toast.success('已应用修改，记得保存') }}>
-                      <CheckCheck className="w-3.5 h-3.5" />应用到草稿
-                    </Button>
-                    <button onClick={() => setPendingContent(null)} className="text-[10px] text-foreground-subtle hover:text-foreground w-full text-center">忽略</button>
-                  </div>
-                )}
-                <div ref={chatEndRef} />
-              </div>
-
-              <div className="flex-shrink-0 border-t border-border p-3">
-                <div className="flex gap-2">
-                  <textarea
-                    value={chatInput}
-                    onChange={e => setChatInput(e.target.value)}
-                    onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleChatSend() } }}
-                    placeholder="输入修改需求… (Enter 发送)"
-                    rows={2}
-                    className="flex-1 text-xs px-2 py-1.5 border border-input rounded-lg bg-control outline-none focus:border-violet-400 resize-none text-foreground placeholder:text-foreground-subtle"
-                  />
-                  <button onClick={handleChatSend} disabled={!chatInput.trim() || chatLoading}
-                    className="self-end p-2 rounded-lg bg-violet-500 hover:bg-violet-600 disabled:opacity-40 disabled:cursor-not-allowed text-white transition-colors">
-                    <Send className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-                <p className="text-[10px] text-foreground-subtle mt-1.5">Shift+Enter 换行</p>
-              </div>
-            </div>
-          )}
         </div>
       ) : (
         <div className="flex-1 flex flex-col items-center justify-center text-foreground-subtle gap-3">
@@ -1266,7 +1015,7 @@ export function DraftsClient({
               initialTab={assetsTab}
               draftId={selected.id}
               sources={editSources}
-              onSourcesChange={next => { setEditSources(next); setDirty(true) }}
+              onSourcesChange={next => { setEditSources(next) }}
               images={images}
               imagesLoading={imagesLoading}
               uploading={uploadingImage}

@@ -7,7 +7,7 @@ export const dynamic = 'force-dynamic'
 export default async function DraftsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ draft?: string; chat?: string }>
+  searchParams: Promise<{ draft?: string }>
 }) {
   const [draftPage, plans, params] = await Promise.all([getDraftPage(), getWritingPlans(), searchParams])
   return (
@@ -16,7 +16,6 @@ export default async function DraftsPage({
       initialNextCursor={draftPage.next_cursor}
       initialTopics={plans}
       initialDraftId={params.draft ? parseInt(params.draft) : undefined}
-      initialChatOpen={params.chat === '1'}
     />
   )
 }
