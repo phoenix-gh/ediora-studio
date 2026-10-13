@@ -643,7 +643,7 @@ export function WritingPlansClient({ initialPlans, initialTags }: {
         writing_plan_id: selected?.id ?? null,
         sources: source.url ? [{ url: source.url, title: source.title, note: source.note }] : [],
       })
-      router.push(`/drafts?draft=${draft.id}&chat=1`)
+      router.push(`/drafts?draft=${draft.id}`)
     } catch { toast.error('创建草稿失败') }
     finally { setCreatingDraft(null) }
   }

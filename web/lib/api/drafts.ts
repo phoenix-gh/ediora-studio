@@ -188,32 +188,6 @@ export async function deleteDraftImage(draftId: number, imageId: number): Promis
   await apiFetch(`/write/drafts/${draftId}/images/${imageId}`, { method: 'DELETE' })
 }
 
-export interface ChatMessage {
-  role: 'user' | 'assistant'
-  content: string
-}
-
-export interface ChatResponse {
-  reply: string
-  updated_content: string | null
-  session_name: string
-}
-
-export async function chatWithDraft(
-  id: number,
-  message: string,
-  opts?: { sessionName?: string; history?: ChatMessage[] }
-): Promise<ChatResponse> {
-  return apiFetch<ChatResponse>(`/write/drafts/${id}/chat`, {
-    method: 'POST',
-    body: JSON.stringify({
-      message,
-      session_name: opts?.sessionName ?? null,
-      history: opts?.history ?? [],
-    }),
-  })
-}
-
 export interface WechatPublishRequest {
   account_id: string
   title: string

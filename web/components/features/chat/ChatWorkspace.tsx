@@ -1,12 +1,14 @@
 'use client'
 
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
-import { Activity, Bot, FileSearch, Loader2, Maximize2, RotateCcw, X } from 'lucide-react'
+import { Bot, FileSearch, Loader2, Maximize2, RotateCcw, X } from 'lucide-react'
 import { toast } from 'sonner'
 
-import { ChatAgentLogDialog } from '@/components/features/chat/ChatAgentLogDialog'
-import { useDeveloperMode } from '@/components/providers/DeveloperModeProvider'
 import { Button } from '@/components/ui/button'
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { cn } from '@/lib/utils'
 import type { ChatModelSelection } from '@/lib/ai/chat-model-catalog'
 import type { ChatComposerMessagePart } from '@/lib/api/chat'
@@ -31,7 +33,6 @@ function errorText(error: unknown, fallback: string) {
 }
 
 export function ChatWorkspace({ variant, onClose, onOpenFullChat, onResetSize, onHeaderPointerDown }: ChatWorkspaceProps) {
-  const developerModeEnabled = useDeveloperMode()
   const {
     state,
     sessions,
@@ -56,7 +57,8 @@ export function ChatWorkspace({ variant, onClose, onOpenFullChat, onResetSize, o
   } = useChatWorkspace()
   const [listLoading, setListLoading] = useState(true)
   const [input, setInput] = useState('')
-  const [showTrace, setShowTrace] = useState(false)
+  const [pendingDelete, setPendingDelete] = useState<{ id: number; title: string } | null>(null)
+  const [deleting, setDeleting] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
   const initializedRef = useRef(false)
   const initialActiveSessionIdRef = useRef(activeSessionId)
@@ -91,7 +93,6 @@ export function ChatWorkspace({ variant, onClose, onOpenFullChat, onResetSize, o
 
   function handleOpenSession(sessionId: number) {
     initializedRef.current = true
-    setShowTrace(false)
     void openSession(sessionId).catch(error => toast.error(errorText(error, '加载会话失败')))
   }
 
@@ -99,7 +100,6 @@ export function ChatWorkspace({ variant, onClose, onOpenFullChat, onResetSize, o
     initializedRef.current = true
     startNewConversation()
     setInput('')
-    setShowTrace(false)
   }
 
   async function handleRenameSession(sessionId: number, title: string) {
@@ -112,10 +112,20 @@ export function ChatWorkspace({ variant, onClose, onOpenFullChat, onResetSize, o
   }
 
   async function handleDeleteSession(sessionId: number) {
+    const session = sessions.find(item => item.id === sessionId)
+    if (session) setPendingDelete({ id: session.id, title: session.title || '新对话' })
+  }
+
+  async function confirmDeleteSession() {
+    if (!pendingDelete || deleting) return
+    setDeleting(true)
     try {
-      await removeSession(sessionId)
+      await removeSession(pendingDelete.id)
+      setPendingDelete(null)
     } catch (error) {
       toast.error(errorText(error, '删除会话失败'))
+    } finally {
+      setDeleting(false)
     }
   }
 
@@ -231,19 +241,6 @@ export function ChatWorkspace({ variant, onClose, onOpenFullChat, onResetSize, o
                   )}
                 </>
               )}
-              {developerModeEnabled && (
-                <Button
-                  type="button"
-                  variant={showTrace ? 'secondary' : 'outline'}
-                  size={isFloating ? 'icon-sm' : 'sm'}
-                  aria-label={isFloating ? '运行轨迹' : undefined}
-                  disabled={activeSessionId === null}
-                  onClick={() => setShowTrace(value => !value)}
-                  title="查看本会话的 LLM、Skill 和工具运行轨迹"
-                >
-                  <Activity />{!isFloating && '运行轨迹'}
-                </Button>
-              )}
               {isFloating && onClose && (
                 <Button type="button" variant="ghost" size="icon-sm" aria-label="关闭聊天助手" title="关闭聊天助手" onClick={onClose}>
                   <X />
@@ -252,16 +249,6 @@ export function ChatWorkspace({ variant, onClose, onOpenFullChat, onResetSize, o
             </div>
           </div>
         </header>
-
-        {developerModeEnabled && (
-          <ChatAgentLogDialog
-            key={activeSessionId ?? 'none'}
-            sessionId={activeSessionId}
-            open={showTrace}
-            developerModeEnabled={developerModeEnabled}
-            onOpenChange={setShowTrace}
-          />
-        )}
 
         <div className={cn('min-h-0 flex-1 overflow-y-auto', isFloating ? 'py-4' : 'py-6')}>
           <div className={cn(chatConversationColumn, 'flex flex-col gap-5', isFloating && 'px-3 sm:px-3')}>
@@ -320,6 +307,24 @@ export function ChatWorkspace({ variant, onClose, onOpenFullChat, onResetSize, o
           onSubmit={handleSubmit}
         />
       </section>
+      <AlertDialog open={pendingDelete !== null} onOpenChange={open => {
+        if (!open && !deleting) setPendingDelete(null)
+      }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>删除会话？</AlertDialogTitle>
+            <AlertDialogDescription>
+              确定删除会话“{pendingDelete?.title}”？此操作不可恢复。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>取消</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" disabled={deleting} onClick={() => void confirmDeleteSession()}>
+              {deleting ? '删除中…' : '删除'}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

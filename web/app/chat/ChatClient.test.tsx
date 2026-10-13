@@ -6,7 +6,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ChatClient } from './ChatClient'
 import { ChatWorkspaceProvider } from '@/components/features/chat/ChatWorkspaceProvider'
 
-const developerMode = vi.hoisted(() => ({ enabled: false }))
 const chatApi = vi.hoisted(() => ({
   createChatPipeline: vi.fn(),
   getChatSession: vi.fn(),
@@ -14,10 +13,6 @@ const chatApi = vi.hoisted(() => ({
   listChatSessions: vi.fn(),
   listChatSkills: vi.fn(),
   streamChatReply: vi.fn(),
-}))
-const agentLogApi = vi.hoisted(() => ({
-  listAgentTrajectory: vi.fn(),
-  listAllAgentLogEvents: vi.fn(),
 }))
 const jobsApi = vi.hoisted(() => ({
   cancelPipeline: vi.fn(),
@@ -29,9 +24,6 @@ const jobsApi = vi.hoisted(() => ({
   retryPipelineStage: vi.fn(),
 }))
 
-vi.mock('@/components/providers/DeveloperModeProvider', () => ({
-  useDeveloperMode: () => developerMode.enabled,
-}))
 vi.mock('@/lib/api/chat', () => ({
   createChatPipeline: chatApi.createChatPipeline,
   createChatSession: vi.fn(),
@@ -53,15 +45,10 @@ vi.mock('@/lib/api/jobs', () => ({
   revisePipeline: jobsApi.revisePipeline,
   retryPipelineStage: jobsApi.retryPipelineStage,
 }))
-vi.mock('@/lib/ai/agent-log-client', () => ({
-  listAgentTrajectory: agentLogApi.listAgentTrajectory,
-  listAllAgentLogEvents: agentLogApi.listAllAgentLogEvents,
-}))
 
 describe('ChatClient', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    developerMode.enabled = false
     chatApi.listChatSessions.mockResolvedValue([{
       id: 7,
       title: '现有会话',
@@ -79,44 +66,18 @@ describe('ChatClient', () => {
     chatApi.streamChatReply.mockResolvedValue(undefined)
     chatApi.listChatDrafts.mockResolvedValue([])
     jobsApi.getJobEvents.mockResolvedValue({ events: [], next_after: 0 })
-    agentLogApi.listAgentTrajectory.mockResolvedValue({
-      session_key: 'chat:7',
-      events: [],
-      next_sequence: null,
-      has_more: false,
-      is_running: false,
-      last_error: null,
-    })
-    agentLogApi.listAllAgentLogEvents.mockResolvedValue({
-      events: [],
-      has_more: false,
-      next_sequence: null,
-    })
   })
 
-  it('does not load agent logs until the runtime trace dialog opens', async () => {
-    developerMode.enabled = true
-    const view = render(
+  it('does not offer a run trajectory in the assistant', async () => {
+    render(
       <ChatWorkspaceProvider>
         <ChatClient />
       </ChatWorkspaceProvider>,
     )
 
     await waitFor(() => expect(chatApi.getChatSession).toHaveBeenCalledWith(7))
-    expect(chatApi.listChatSessions).toHaveBeenCalledTimes(1)
-    expect(chatApi.getChatSession).toHaveBeenCalledTimes(1)
-    expect(agentLogApi.listAllAgentLogEvents).not.toHaveBeenCalled()
-
-    fireEvent.click(screen.getByRole('button', { name: '运行轨迹' }))
-
-    await waitFor(() => {
-      expect(agentLogApi.listAgentTrajectory).toHaveBeenCalledWith({ session_id: 7 }, null, 500)
-    })
-    expect(chatApi.listChatSessions).toHaveBeenCalledTimes(1)
-    expect(chatApi.getChatSession).toHaveBeenCalledTimes(1)
-    expect(screen.getByRole('dialog')).toBeInTheDocument()
-
-    view.unmount()
+    expect(screen.queryByRole('button', { name: '运行轨迹' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('dialog', { name: '运行轨迹' })).not.toBeInTheDocument()
   })
 
   it('restores the thinking state and final message after reopening an active session', async () => {

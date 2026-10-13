@@ -92,6 +92,14 @@ it('uses lazy new conversations and delegates session deletion', () => {
   expect(sessions).toContain('onDeleteSession(session.id)')
 })
 
+it('renders each sidebar session on a single row', () => {
+  const sessions = readFeatureSource('ChatSessionList.tsx')
+
+  expect(sessions).toContain('flex w-full min-w-0 items-center gap-2 rounded-lg px-3 py-2 pr-16 text-left')
+  expect(sessions).toContain('min-w-0 flex-1 truncate text-sm font-medium')
+  expect(sessions).not.toContain('mt-1 block text-[11px]')
+})
+
 it('opens the most recently used persisted session when the assistant loads', () => {
   const source = readFeatureSource('ChatWorkspace.tsx')
 
@@ -129,5 +137,5 @@ it('submits on Enter while preserving Shift+Enter newlines', () => {
 
   expect(source).toContain("import { shouldSubmitChatComposerKey } from '@/app/chat/chat-composer'")
   expect(source).toContain('shouldSubmitChatComposerKey({')
-  expect(source).toContain('event.currentTarget.form?.requestSubmit()')
+  expect(source).toContain("event.currentTarget.closest('form')?.requestSubmit()")
 })

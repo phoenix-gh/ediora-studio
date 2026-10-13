@@ -20,12 +20,6 @@ const api = vi.hoisted(() => ({
 }))
 
 vi.mock('@/lib/api/chat', () => api)
-vi.mock('@/components/providers/DeveloperModeProvider', () => ({
-  useDeveloperMode: () => true,
-}))
-vi.mock('@/components/features/agent/AgentTrajectoryPanel', () => ({
-  AgentTrajectoryPanel: () => <div data-testid="mock-trajectory-panel" />,
-}))
 vi.mock('@/lib/api/jobs', () => ({
   getJob: vi.fn(),
   imageUrlsForJob: vi.fn(() => []),
@@ -81,12 +75,31 @@ describe('ChatWorkspace', () => {
     api.streamChatReply.mockResolvedValue(undefined)
   })
 
+  it.each(['page', 'floating'] as const)('confirms session deletion with a framework dialog in %s', async variant => {
+    const user = userEvent.setup()
+    renderWorkspace(variant)
+    await screen.findByText('已有会话的消息')
+    if (variant === 'floating') await user.click(screen.getByTestId('floating-chat-session-picker'))
+    await user.click(screen.getByRole('button', { name: '删除会话：已有会话' }))
+    expect(await screen.findByRole('alertdialog')).toHaveTextContent('已有会话')
+    expect(api.deleteChatSession).not.toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: '取消', exact: true }))
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument())
+    expect(api.deleteChatSession).not.toHaveBeenCalled()
+    if (variant === 'floating') await user.click(screen.getByTestId('floating-chat-session-picker'))
+    await user.click(screen.getByRole('button', { name: '删除会话：已有会话' }))
+    await user.click(await screen.findByRole('button', { name: '删除', exact: true }))
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument())
+    expect(api.deleteChatSession).toHaveBeenCalledExactlyOnceWith(7)
+    expect(await screen.findByText('另一个会话的消息')).toBeInTheDocument()
+  })
+
   it('renders the page variant with shared session management', async () => {
     renderWorkspace('page')
 
     expect(await screen.findByRole('heading', { name: 'AI 助手' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '新建对话' })).toBeInTheDocument()
-    expect(await screen.findByRole('button', { name: '运行轨迹' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '运行轨迹' })).not.toBeInTheDocument()
   })
 
   it('keeps floating controls in the header and puts the close control last', async () => {
@@ -124,7 +137,7 @@ describe('ChatWorkspace', () => {
     await screen.findByTestId('floating-chat-drag-handle')
 
     expect(screen.getByTestId('floating-chat-reset-size')).not.toHaveTextContent('默认大小')
-    expect(screen.getByRole('button', { name: '运行轨迹' })).not.toHaveTextContent('运行轨迹')
+    expect(screen.queryByRole('button', { name: '运行轨迹' })).not.toBeInTheDocument()
   })
 
   it('keeps cached messages isolated when switching sessions', async () => {

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -28,9 +28,6 @@ const api = vi.hoisted(() => ({
 }))
 
 vi.mock('@/lib/api/chat', () => api)
-vi.mock('@/components/features/agent/AgentTrajectoryPanel', () => ({
-  AgentTrajectoryPanel: () => <div data-testid="mock-trajectory-panel" />,
-}))
 vi.mock('@/lib/api/jobs', () => ({
   getJob: vi.fn(),
   imageUrlsForJob: vi.fn(() => []),
@@ -157,6 +154,46 @@ describe('GlobalChatWidget', () => {
     await user.click(screen.getByTestId('outside-navigation'))
 
     expect(screen.getByTestId('global-chat-panel')).toBeInTheDocument()
+  })
+
+  it('keeps a click on a session delete icon from starting a header drag', async () => {
+    api.listChatSessions.mockResolvedValue([{
+      id: 7,
+      title: '已有会话',
+      created_at: '2026-08-22T00:00:00Z',
+      updated_at: '2026-08-22T00:00:00Z',
+    }])
+    api.getChatSession.mockResolvedValue({
+      id: 7,
+      title: '已有会话',
+      created_at: '2026-08-22T00:00:00Z',
+      updated_at: '2026-08-22T00:00:00Z',
+      is_running: false,
+      messages: [],
+    })
+    api.deleteChatSession.mockResolvedValue(undefined)
+    const user = userEvent.setup()
+    renderWithProvider()
+
+    await user.click(screen.getByTestId('global-chat-trigger'))
+    await user.click(await screen.findByTestId('floating-chat-session-picker'))
+    const icon = screen.getByRole('button', { name: '删除会话：已有会话' }).querySelector('svg')
+    expect(icon).not.toBeNull()
+
+    const event = new PointerEvent('pointerdown', { bubbles: true, cancelable: true, button: 0, pointerId: 4 })
+    icon?.dispatchEvent(event)
+
+    expect(event.defaultPrevented).toBe(false)
+    await user.click(icon!)
+
+    expect(await screen.findByRole('alertdialog')).toHaveTextContent('已有会话')
+    expect(api.deleteChatSession).not.toHaveBeenCalled()
+    await user.click(screen.getByRole('button', { name: '删除', exact: true }))
+    expect(api.deleteChatSession).toHaveBeenCalledWith(7)
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: '删除会话：已有会话' })).not.toBeInTheDocument()
+    })
+    expect(screen.getByTestId('floating-chat-session-picker')).toHaveTextContent('新对话')
   })
 
   it('moves the floating panel when its header is dragged', async () => {
