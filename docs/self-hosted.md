@@ -85,10 +85,12 @@ data/local-asr-models optional local-ASR model cache
 data/codex-home       default Codex home when CODEX_HOME_HOST is unset
 ```
 
-`CODEX_HOME_HOST` bind-mounts a host directory onto the container Codex home
-`/home/violet/.mk-video-codex` for the worker and web services. Set it to an
-absolute path to reuse an existing Codex home. The default `./data/codex-home`
-is created with mode `700`.
+`CODEX_HOME_HOST` bind-mounts a host directory onto `/root/.codex` for the worker
+and web services. The image runs as root, so that path is the container's default
+`~/.codex`. A direct development process keeps using the current user's
+`~/.mk-video-codex` unless `CODEX_HOME` is set. Set the host path to an absolute
+path to reuse an existing Codex home. The default `./data/codex-home` is created
+with mode `700`.
 
 Back up at least `data/postgres`, `data/uploads`, `data/sessions`,
 `data/web-runtime`, and `.env` before upgrades. Keep `X_SESSION_KEY` in `.env`

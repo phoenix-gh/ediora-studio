@@ -12,7 +12,12 @@ export type CodexJsonlTransport = {
   close?: () => void | Promise<void>
 }
 
-export const CODEX_HOME = '/home/violet/.mk-video-codex'
+export function resolveCodexHome(env: NodeJS.ProcessEnv = process.env, home = homedir()) {
+  const configured = env.CODEX_HOME?.trim()
+  return configured || join(home, '.mk-video-codex')
+}
+
+export const CODEX_HOME = resolveCodexHome()
 export const CODEX_THREAD_CWD = join(homedir(), '.ediora', 'codex_work')
 
 export function ensureCodexThreadCwd() {

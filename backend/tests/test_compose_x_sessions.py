@@ -99,7 +99,7 @@ def _assert_codex_home_mount(mounts, source: str):
     assert any(
         mount.get("type") == "bind"
         and mount.get("source") == source
-        and mount.get("target") == "/home/violet/.mk-video-codex"
+        and mount.get("target") == "/root/.codex"
         and mount.get("read_only") is not True
         for mount in mounts
     )
@@ -112,7 +112,7 @@ def test_default_codex_home_host_mounts_for_worker_and_web(tmp_path: Path):
     source = str((ROOT / "data/codex-home").resolve())
     for service_name in ("worker", "web"):
         service = compose["services"][service_name]
-        assert service["environment"]["CODEX_HOME"] == "/home/violet/.mk-video-codex"
+        assert service["environment"]["CODEX_HOME"] == "/root/.codex"
         _assert_codex_home_mount(service["volumes"], source)
     assert "CODEX_HOME" not in compose["services"]["api"].get("environment", {})
 
