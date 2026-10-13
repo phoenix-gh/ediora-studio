@@ -201,4 +201,39 @@ describe('POST /api/chat Codex app-server agent', () => {
     expect((await postChat('Summarize this repo.')).status).toBe(200)
     expect(sentMethods(api.peer!).includes('turn/start')).toBe(true)
   })
+
+  it('resumes the stored chat thread instead of pasting the previous deliverable', async () => {
+    const requests: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      requests.push(`${init?.method ?? 'GET'} ${url}`)
+      if (url.endsWith('/chat/sessions/12')) {
+        return new Response(JSON.stringify({
+          codex_thread_id: 'thr_chat',
+          messages: [
+            { id: 1, role: 'user', parts: [{ type: 'text', text: '上一问' }] },
+            { id: 2, role: 'assistant', parts: [{ type: 'text', text: '上一答' }] },
+            { id: 3, role: 'user', parts: [{ type: 'text', text: '接着写' }] },
+          ],
+        }), { status: 200 })
+      }
+      return new Response(JSON.stringify({ id: 3 }), { status: 200 })
+    }))
+
+    await postChat('接着写')
+
+    expect(sentMethods(api.peer!).slice(0, 4)).toEqual([
+      'initialize',
+      'initialized',
+      'thread/resume',
+      'turn/start',
+    ])
+    expect(requestByMethod(api.peer!, 'thread/resume')?.params).toEqual(expect.objectContaining({
+      threadId: 'thr_chat',
+    }))
+    const turnInput = JSON.stringify(requestByMethod(api.peer!, 'turn/start')?.params?.input)
+    expect(turnInput).toContain('接着写')
+    expect(turnInput).not.toContain('previous_assistant_deliverable')
+    expect(requests.some(item => item.includes('/codex-thread'))).toBe(false)
+  })
 })

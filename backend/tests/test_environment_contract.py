@@ -62,10 +62,12 @@ def test_compose_uses_internal_names_without_provider_credentials(tmp_path: Path
     compose = _compose_config(tmp_path)
     services = compose["services"]
 
-    assert services["api"]["environment"]["WORKER_TOKEN"]
-    assert services["worker"]["environment"]["WORKER_TOKEN"]
-    assert services["worker"]["environment"]["API_URL"] == "http://api:8000/api"
-    assert services["web"]["environment"]["API_URL"] == "http://api:8000/api"
+    app = services["app"]
+    assert app["environment"]["WORKER_TOKEN"]
+    assert app["environment"]["API_URL"] == "http://127.0.0.1:8000/api"
+    assert "api" not in services
+    assert "worker" not in services
+    assert "web" not in services
 
     provider_keys = {
         "LLM_API_KEY",
@@ -74,5 +76,4 @@ def test_compose_uses_internal_names_without_provider_credentials(tmp_path: Path
         "HEYGEN_API_KEY",
         "MIMO_API_KEY",
     }
-    for service_name in ("api", "worker", "web"):
-        assert provider_keys.isdisjoint(services[service_name]["environment"])
+    assert provider_keys.isdisjoint(app["environment"])

@@ -16,6 +16,7 @@ import { baoyuRuntimeInstructions } from '@/lib/ai/content-job'
 import { type AgentRunResult, type AgentSessionEventDraft } from '@/lib/ai/agent-runtime'
 import { CODEX_THREAD_CWD } from '@/lib/ai/codex-app-server'
 import { runCodexAgentTurn } from '@/lib/ai/codex-app-server-client'
+import { codexThreadId, codexThreadTurnOptions } from '@/lib/ai/codex-thread'
 import { codexImageMessageParts, publishCodexGeneratedImages } from '@/lib/ai/codex-generated-images'
 import {
   chatEdioraMcpServers,
@@ -118,6 +119,7 @@ const apiBase = deploymentApiBase
 export { chatEdioraMcpServers, mcpUrlFromApiBase }
 
 type PersistedChatSession = {
+  codex_thread_id?: string | null
   messages: Array<{
     id: number
     role: 'user' | 'assistant' | 'tool'
@@ -187,6 +189,15 @@ async function persistedChatSession(sessionId: number) {
   const response = await fetch(`${apiBase()}/chat/sessions/${sessionId}`, { cache: 'no-store' })
   if (!response.ok) throw new Error(`Unable to load chat session (${response.status})`)
   return response.json() as Promise<PersistedChatSession>
+}
+
+async function rememberChatCodexThread(sessionId: number, threadId: string) {
+  const response = await fetch(`${apiBase()}/chat/sessions/${sessionId}/codex-thread`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ thread_id: threadId }),
+  })
+  if (!response.ok) throw new Error(`Unable to store Codex thread (${response.status})`)
 }
 
 async function persistedModelHistory(session: PersistedChatSession) {
@@ -834,6 +845,7 @@ export async function POST(request: NextRequest) {
     const session = retriedUserMessage && sessionBeforeWrite
       ? sessionBeforeWrite
       : await persistedChatSession(body.sessionId)
+    const storedThreadId = codexThreadId(session.codex_thread_id)
     const manualSkillName = resolvedDirectInvocation?.skill_name ?? body.skillName
     // Approval resumes never derive executable history from display messages.
     const messages = body.approval ? [] : await persistedModelHistory(session)
@@ -860,7 +872,9 @@ export async function POST(request: NextRequest) {
     const currentRequestText = currentRequest ? messageText(currentRequest) : (
       body.approval ? 'Continue the previously approved task.' : ''
     )
-    const conversationContext = formatChatTurnContext(buildChatTurnContext(session.messages))
+    const conversationContext = storedThreadId
+      ? ''
+      : formatChatTurnContext(buildChatTurnContext(session.messages))
     const extraContext = [
       manualSkillName || body.draftId
         ? await selectedContext(manualSkillName, body.draftId, '')
@@ -893,6 +907,10 @@ export async function POST(request: NextRequest) {
         try {
           const result = await runCodexAgentTurn({
             input: agentInput,
+            ...codexThreadTurnOptions(
+              storedThreadId,
+              threadId => rememberChatCodexThread(body.sessionId, threadId),
+            ),
             model: body.model,
             reasoningEffort: body.reasoningEffort,
             cwd: CODEX_THREAD_CWD,

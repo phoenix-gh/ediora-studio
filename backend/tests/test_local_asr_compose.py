@@ -58,13 +58,13 @@ def test_local_asr_is_private_gpu_service_with_persistent_model_cache():
 
 def test_api_uses_local_asr_without_blocking_api_startup():
     config = _compose_config()
-    api = config["services"]["api"]
+    app = config["services"]["app"]
 
-    assert api["environment"]["LOCAL_ASR_URL"] == "http://local-asr:8000/v1"
-    assert api["environment"]["LOCAL_ASR_MODEL"] == "Systran/faster-whisper-large-v3"
-    assert api["environment"]["LOCAL_ASR_DEVICE"] == "cuda"
-    assert api["environment"]["LOCAL_ASR_COMPUTE_TYPE"] == "float16"
-    assert "local-asr" not in api["depends_on"]
+    assert app["environment"]["LOCAL_ASR_URL"] == "http://local-asr:8000/v1"
+    assert app["environment"]["LOCAL_ASR_MODEL"] == "Systran/faster-whisper-large-v3"
+    assert app["environment"]["LOCAL_ASR_DEVICE"] == "cuda"
+    assert app["environment"]["LOCAL_ASR_COMPUTE_TYPE"] == "float16"
+    assert "local-asr" not in app["depends_on"]
 
 
 def test_all_compose_services_restart_after_docker_daemon_restart():
@@ -76,33 +76,31 @@ def test_all_compose_services_restart_after_docker_daemon_restart():
         )
 
 
-def test_app_services_share_one_image_and_api_owns_root_build():
+def test_app_service_runs_api_worker_web_and_one_codex_server():
     config = _compose_config({"NEXT_PUBLIC_DEVELOPER_MODE": "1"})
-    api = config["services"]["api"]
-    worker = config["services"]["worker"]
-    web = config["services"]["web"]
+    app = config["services"]["app"]
 
-    assert api["image"] == worker["image"] == web["image"]
-    assert api["build"]["context"] == str(REPOSITORY_ROOT)
-    assert api["build"]["dockerfile"] == "Dockerfile"
-    assert api["build"]["args"]["NEXT_PUBLIC_API_URL"] == (
+    assert app["build"]["context"] == str(REPOSITORY_ROOT)
+    assert app["build"]["dockerfile"] == "Dockerfile"
+    assert app["build"]["args"]["NEXT_PUBLIC_API_URL"] == (
         "http://localhost:8000/api"
     )
-    assert "NEXT_PUBLIC_DEVELOPER_MODE" not in api["build"]["args"]
-    assert "build" not in worker
-    assert "build" not in web
-    assert worker["working_dir"] == "/app/web"
-    assert web["working_dir"] == "/app/web"
-    assert web["environment"]["DEVELOPER_MODE"] == "1"
-    assert "NEXT_PUBLIC_DEVELOPER_MODE" not in web["environment"]
-    assert web["command"] == [
-        "./node_modules/.bin/next",
-        "start",
-        "--hostname",
-        "0.0.0.0",
-        "--port",
-        "3000",
-    ]
+    assert "NEXT_PUBLIC_DEVELOPER_MODE" not in app["build"]["args"]
+    assert app["environment"]["DEVELOPER_MODE"] == "1"
+    assert "NEXT_PUBLIC_DEVELOPER_MODE" not in app["environment"]
+    assert app["user"] == (
+        f"{os.environ.get('HOST_UID', '1000')}:{os.environ.get('HOST_GID', '1000')}"
+    )
+    assert app["environment"]["HOME"] == "/tmp"
+    assert app["environment"]["CODEX_HOME"] == "/codex-home"
+    assert "CODEX_APP_SERVER_SOCKET" not in app["environment"]
+    assert app["command"] == ["bash", "/app/scripts/app-container.sh"]
+    script = (REPOSITORY_ROOT / "scripts" / "app-container.sh").read_text(
+        encoding="utf-8"
+    )
+    assert 'codex_listen="ws://127.0.0.1:4500"' in script
+    assert "CODEX_APP_SERVER_SOCKET" not in script
+    assert "unix://" not in script
 
 
 def test_host_ports_can_be_overridden_without_changing_container_ports():
@@ -113,19 +111,8 @@ def test_host_ports_can_be_overridden_without_changing_container_ports():
         }
     )
 
-    assert config["services"]["api"]["ports"] == [
-        {
-            "mode": "ingress",
-            "target": 8000,
-            "published": "28000",
-            "protocol": "tcp",
-        }
-    ]
-    assert config["services"]["web"]["ports"] == [
-        {
-            "mode": "ingress",
-            "target": 3000,
-            "published": "23000",
-            "protocol": "tcp",
-        }
-    ]
+    published = {
+        (item["target"], item["published"])
+        for item in config["services"]["app"]["ports"]
+    }
+    assert published == {(8000, "28000"), (3000, "23000")}

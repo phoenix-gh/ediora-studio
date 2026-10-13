@@ -215,7 +215,7 @@ EDIORA_INSTALL_DIR=/srv/ediora ./install.sh --yes
 安装器只负责 Docker 环境检查、Compose 文件、运行时数据目录、镜像拉取和启动，不负责构建应用镜像。需要本地构建时，请在完整源码 checkout 中执行：
 
 ```bash
-docker compose build api
+docker compose build app
 docker compose up -d --no-build
 ```
 

@@ -24,6 +24,7 @@ import {
   type AgentSessionEventDraft,
 } from './agent-runtime'
 import { CODEX_THREAD_CWD } from './codex-app-server'
+import { codexThreadTurnOptions } from './codex-thread'
 import {
   runCodexAgentTurn,
   type CodexAgentTurnResult,
@@ -45,6 +46,7 @@ import {
   completeStep,
   failStep,
   getJob,
+  rememberJobCodexThread,
   retryableForError,
   startStep,
   workerHeaders,
@@ -268,6 +270,7 @@ export type ContentResponseOutputAgentJobDependencies = {
   completeJob(jobId: number): Promise<unknown>
   linkDraft(jobId: number, outputId: number, draftId: number): Promise<Record<string, unknown>>
   runAgentTurn(options: RunCodexAgentTurnOptions): Promise<CodexAgentTurnResult>
+  rememberCodexThread?(jobId: number, threadId: string): Promise<unknown>
   apiRoot(): string
   codexTurn?(apiRoot: string): Promise<{ model?: string, reasoningEffort?: string }>
 }
@@ -302,6 +305,7 @@ const defaultDependencies: ContentResponseOutputAgentJobDependencies = {
     workerHeaders(jobId),
   ),
   runAgentTurn: runCodexAgentTurn,
+  rememberCodexThread: rememberJobCodexThread,
   apiRoot: defaultApiRoot,
   codexTurn: loadConfiguredCodexTurn,
 }
@@ -519,6 +523,10 @@ export async function runContentResponseOutputJob(
         const codexTurn = await configuredCodexTurn(deps)
         const result = await deps.runAgentTurn({
           input: `${objective}\n\n完整工作上下文：\n${JSON.stringify(context, null, 2)}`,
+          ...codexThreadTurnOptions(
+            job.codex_thread_id,
+            threadId => deps.rememberCodexThread?.(jobId, threadId) ?? Promise.resolve(),
+          ),
           ...(codexTurn.model ? { model: codexTurn.model } : {}),
           ...(codexTurn.reasoningEffort ? { reasoningEffort: codexTurn.reasoningEffort } : {}),
           cwd: CODEX_THREAD_CWD,

@@ -677,6 +677,16 @@ async def _add_columns(conn, table_name: str, definitions: dict[str, str]) -> No
             ))
 
 
+async def migrate_codex_thread_schema(conn) -> None:
+    """Store the Codex thread id for an existing chat session or content job."""
+    await _add_columns(conn, "chat_sessions", {
+        "codex_thread_id": "VARCHAR(200)",
+    })
+    await _add_columns(conn, "content_jobs", {
+        "codex_thread_id": "VARCHAR(200)",
+    })
+
+
 async def migrate_chat_run_checkpoint_schema(conn) -> None:
     """Repair Chat Run projection fields and partial indexes idempotently."""
     from sqlalchemy import text
@@ -1431,6 +1441,7 @@ async def init_db():
         await _drop_tables(conn, ("daily_plan_items", "daily_plans"))
         await conn.run_sync(Base.metadata.create_all)
         await migrate_chat_run_checkpoint_schema(conn)
+        await migrate_codex_thread_schema(conn)
         await migrate_skill_pipeline_schema(conn, assert_complete=True)
         await _drop_columns(conn, "publish_accounts", ("daily_quota",))
         await migrate_topic_source_rule_single_directory(conn)

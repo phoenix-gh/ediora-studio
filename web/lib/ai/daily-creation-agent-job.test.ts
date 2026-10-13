@@ -622,6 +622,28 @@ describe('daily creation Agent job', () => {
     }))
   })
 
+  it('resumes the stored job thread on a later turn', async () => {
+    const harness = dependencies({ text: '研究完成' })
+    vi.mocked(harness.deps.getJob).mockResolvedValue({
+      id: 19,
+      flow: 'daily_creation',
+      title: 'daily',
+      status: 'queued',
+      codex_thread_id: 'thr_existing',
+      input: { run_id: 83 },
+      steps: [],
+    })
+
+    await runDailyCreationAgentJob(19, harness.deps)
+
+    expect(sentMethods(harness.lastPeer!).slice(0, 4)).toEqual([
+      'initialize', 'initialized', 'thread/resume', 'turn/start',
+    ])
+    expect(requestByMethod(harness.lastPeer!, 'thread/resume')?.params).toEqual(expect.objectContaining({
+      threadId: 'thr_existing',
+    }))
+  })
+
   it('fails the Job when Codex reports turn/failed', async () => {
     const { deps } = dependencies({
       text: '',

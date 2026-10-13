@@ -187,6 +187,30 @@ def _add_searchable_sources(client):
     return asyncio.new_event_loop().run_until_complete(insert())
 
 
+def test_session_codex_thread_is_stored_once(client):
+    session_id = client.post("/api/chat/sessions", json={"title": "研究助手"}).json()["id"]
+
+    stored = client.post(
+        f"/api/chat/sessions/{session_id}/codex-thread",
+        json={"thread_id": "thr_chat"},
+    )
+    again = client.post(
+        f"/api/chat/sessions/{session_id}/codex-thread",
+        json={"thread_id": "thr_chat"},
+    )
+    conflict = client.post(
+        f"/api/chat/sessions/{session_id}/codex-thread",
+        json={"thread_id": "thr_other"},
+    )
+    detail = client.get(f"/api/chat/sessions/{session_id}")
+
+    assert stored.status_code == 200
+    assert again.status_code == 200
+    assert stored.json()["codex_thread_id"] == "thr_chat"
+    assert conflict.status_code == 409
+    assert detail.json()["codex_thread_id"] == "thr_chat"
+
+
 def test_create_session_append_message_and_get_messages_in_chronological_order(client):
     created = client.post("/api/chat/sessions", json={"title": "研究助手"})
 

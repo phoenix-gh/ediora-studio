@@ -1,20 +1,11 @@
 services:
-  api:
-    volumes:
-      - ./backend:/app
-
-  worker:
-    working_dir: /app/web
-    volumes:
-      - ./web:/app/web
-      - /app/web/node_modules
-
-  web:
-    working_dir: /app/web
-    command: ["./node_modules/.bin/next", "dev", "--hostname", "0.0.0.0"]
+  app:
     environment:
       NODE_ENV: development
       WATCHPACK_POLLING: "true"
+      EDIORA_PROCESS_MODE: development
     volumes:
+      - ./backend:/app
       - ./web:/app/web
       - /app/web/node_modules
+      - ./scripts/app-container.sh:/app/scripts/app-container.sh:ro

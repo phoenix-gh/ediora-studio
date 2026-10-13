@@ -58,7 +58,7 @@ Compose-local `data/` directory. It does not migrate or delete existing Docker
 named volumes. The installer only downloads the Compose file, pulls the published
 GHCR image, and runs `docker compose up -d --no-build`; it does not download source
 code or build application images. For a local build, use a complete source checkout
-and run `docker compose build api`, followed by `docker compose up -d --no-build`.
+and run `docker compose build app`, followed by `docker compose up -d --no-build`.
 
 Useful options and commands:
 
@@ -66,7 +66,7 @@ Useful options and commands:
 ./install.sh --yes       # skip only the Docker installation confirmation
 # For a piped command, append: sh -s -- --yes
 docker compose ps
-docker compose logs -f api worker web
+docker compose logs -f app
 docker compose stop
 ```
 
@@ -85,12 +85,20 @@ data/local-asr-models optional local-ASR model cache
 data/codex-home       default Codex home when CODEX_HOME_HOST is unset
 ```
 
-`CODEX_HOME_HOST` bind-mounts a host directory onto `/root/.codex` for the worker
-and web services. The image runs as root, so that path is the container's default
-`~/.codex`. A direct development process keeps using the current user's
-`~/.mk-video-codex` unless `CODEX_HOME` is set. Set the host path to an absolute
-path to reuse an existing Codex home. The default `./data/codex-home` is created
-with mode `700`.
+`CODEX_HOME_HOST` bind-mounts a host directory onto `/codex-home` in the app
+container. The container runs as `HOST_UID:HOST_GID`, which defaults to
+`1000:1000`. Set those two values to the host account that owns the Codex
+directory. Codex creates mode `600` files, and the same uid can read and write
+them on the host and in the container. The same container runs the API, the
+worker, and the web server, and starts one `codex app-server` at
+`ws://127.0.0.1:4500`. That address is fixed and stays on the container
+loopback, so it is not a published port and there is no socket path to
+configure. Chat and worker turns open a WebSocket to it. A direct development
+process keeps using the current user's `~/.mk-video-codex` unless `CODEX_HOME`
+is set. When `127.0.0.1:4500` is not accepting connections, that development
+turn starts its own short-lived Codex process. Set the host path to an absolute
+path to reuse an existing Codex home. The default `./data/codex-home` is
+created with mode `700`.
 
 Back up at least `data/postgres`, `data/uploads`, `data/sessions`,
 `data/web-runtime`, and `.env` before upgrades. Keep `X_SESSION_KEY` in `.env`
@@ -116,8 +124,9 @@ docker compose up --build
 Open `http://localhost:3000`. The API health endpoint is
 `http://localhost:8000/health`.
 
-The API, worker, and Web services share one application image built from the
-root `Dockerfile`; Postgres and Redis remain separate services. The optional
+The API, worker, and web server run in one application container built from the
+root `Dockerfile`. That container starts one Codex app-server. Postgres and
+Redis remain separate services. The optional
 GPU-backed local ASR service is not started by default. Enable it explicitly:
 
 ```bash

@@ -47,6 +47,10 @@ JobKind = Literal["scheduled", "manual"]
 _JOB_STATUSES = {"awaiting_confirmation", "queued", "running", "succeeded", "failed", "cancelled"}
 
 
+class CodexThreadUpdate(BaseModel):
+    thread_id: str = Field(min_length=1, max_length=200, pattern=r"^[A-Za-z0-9_-]+$")
+
+
 class JobCreate(BaseModel):
     flow: str = Field(min_length=1, max_length=64)
     title: str = Field(min_length=1, max_length=500)
@@ -201,6 +205,7 @@ async def _job_payload(db: AsyncSession, job: ContentJob, *, schedule: dict | No
         "flow": job.flow,
         "title": job.title,
         "status": job.status,
+        "codex_thread_id": job.codex_thread_id,
         "input": job.input_data,
         "created_at": job.created_at,
         "started_at": job.started_at,
@@ -327,6 +332,26 @@ async def list_jobs(
         "next_cursor": _encode_cursor(page[-1]) if has_more and page else None,
         "has_more": has_more,
     }
+
+
+@router.post(
+    "/{job_id}/codex-thread",
+    dependencies=[Depends(require_worker_token)],
+)
+async def store_job_codex_thread(
+    job_id: int,
+    body: CodexThreadUpdate,
+    db: AsyncSession = Depends(get_db),
+):
+    job = await db.get(ContentJob, job_id)
+    if job is None:
+        raise HTTPException(404, "job not found")
+    if job.codex_thread_id and job.codex_thread_id != body.thread_id:
+        raise HTTPException(409, "Codex thread already exists")
+    if not job.codex_thread_id:
+        job.codex_thread_id = body.thread_id
+        await db.commit()
+    return {"codex_thread_id": job.codex_thread_id}
 
 
 @router.get("/{job_id}")

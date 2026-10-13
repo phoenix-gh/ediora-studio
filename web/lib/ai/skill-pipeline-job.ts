@@ -20,6 +20,7 @@ import {
   type AgentSessionEventDraft,
 } from './agent-runtime'
 import { CODEX_THREAD_CWD } from './codex-app-server'
+import { codexThreadTurnOptions } from './codex-thread'
 import {
   runCodexAgentTurn,
   type CodexAgentTurnResult,
@@ -40,6 +41,7 @@ import {
   completePipelineStage,
   failPipelineStage,
   getJob,
+  rememberJobCodexThread,
   startPipelineStage,
   workerHeaders,
   type DurableJob,
@@ -120,6 +122,7 @@ export type SkillPipelineJobDependencies = {
   failToolCall(jobId: number, executionId: number, toolCallId: string, error: string, uncertain: boolean): Promise<unknown>
   failExecution(jobId: number, executionId: number, error: string): Promise<unknown>
   runAgentTurn(options: RunCodexAgentTurnOptions): Promise<CodexAgentTurnResult>
+  rememberCodexThread?(jobId: number, threadId: string): Promise<unknown>
   apiRoot(): string
   codexTurn?(apiRoot: string): Promise<{ model?: string, reasoningEffort?: string }>
 }
@@ -140,6 +143,7 @@ const defaultDependencies: SkillPipelineJobDependencies = {
   failToolCall: failAgentToolCall,
   failExecution: failAgentExecution,
   runAgentTurn: runCodexAgentTurn,
+  rememberCodexThread: rememberJobCodexThread,
   apiRoot: apiBase,
   codexTurn: loadConfiguredCodexTurn,
 }
@@ -463,6 +467,10 @@ export async function runSkillPipelineJob(
     const codexTurn = await configuredCodexTurn(deps)
     const result = await deps.runAgentTurn({
       input: `${objective}\n\n${context}`,
+      ...codexThreadTurnOptions(
+        job.codex_thread_id,
+        threadId => deps.rememberCodexThread?.(jobId, threadId) ?? Promise.resolve(),
+      ),
       ...(codexTurn.model ? { model: codexTurn.model } : {}),
       ...(codexTurn.reasoningEffort ? { reasoningEffort: codexTurn.reasoningEffort } : {}),
       cwd: CODEX_THREAD_CWD,

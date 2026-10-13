@@ -1,6 +1,7 @@
 import { statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { PassThrough } from 'node:stream'
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -9,6 +10,7 @@ import {
   sentMethods,
 } from '../../test/codex-jsonl-peer'
 import {
+  CODEX_APP_SERVER_URL,
   CODEX_HOME,
   CODEX_SANDBOX_MODES,
   resolveCodexHome,
@@ -16,6 +18,9 @@ import {
   DEFAULT_CODEX_MODEL,
   DEFAULT_CODEX_SANDBOX,
   codexAppServerSpawnOptions,
+  connectCodexAppServer,
+  spawnCodexAppServerTransport,
+  type CodexJsonlTransport,
 } from './codex-app-server'
 import { listCodexModels, runCodexAgentTurn } from './codex-app-server-client'
 import { runWithCodexTurnSignal } from './codex-turn-abort'
@@ -331,5 +336,138 @@ describe('Codex app-server spawn', () => {
     expect(spawn.args).toEqual(['app-server'])
     expect(spawn.env.CODEX_HOME).toBe(resolveCodexHome())
     expect(spawn.env.PATH).toBe('/usr/bin')
+  })
+
+  it('uses the fixed loopback websocket and falls back to one process when it is down', async () => {
+    expect(CODEX_APP_SERVER_URL).toBe('ws://127.0.0.1:4500')
+
+    const shared: CodexJsonlTransport = {
+      write() {},
+      lines: (async function* lines() {})(),
+    }
+    let spawnCount = 0
+    const spawnProcess = () => {
+      spawnCount += 1
+      return fakeCodexChild()
+    }
+
+    await expect(spawnCodexAppServerTransport({}, {
+      connect: async () => shared,
+      spawnProcess,
+    })).resolves.toBe(shared)
+    expect(spawnCount).toBe(0)
+
+    const fallback = await spawnCodexAppServerTransport({}, {
+      connect: () => new Promise((_, reject) => {
+        setImmediate(() => reject(new Error('Codex app-server refused ws://127.0.0.1:4500')))
+      }),
+      spawnProcess,
+    })
+    expect(spawnCount).toBe(1)
+    await fallback.close?.()
+
+    await spawnCodexAppServerTransport({
+      command: 'codex',
+      args: ['app-server'],
+    }, {
+      connect: async () => {
+        throw new Error('shared server should not be dialed for an explicit command')
+      },
+      spawnProcess,
+    }).then(transport => transport.close?.())
+    expect(spawnCount).toBe(2)
+  })
+})
+
+function fakeCodexChild() {
+  const stdout = new PassThrough()
+  const stdin = new PassThrough()
+  return {
+    stdout,
+    stdin,
+    stderr: new PassThrough(),
+    exitCode: null,
+    signalCode: null,
+    killed: false,
+    kill() {
+      this.killed = true
+      stdout.end()
+      stdin.end()
+      return true
+    },
+    once() {
+      return this
+    },
+  } as never
+}
+
+class FakeCodexSocket {
+  readyState = 0
+  sent: string[] = []
+  closed = false
+  private listeners = new Map<string, Array<(event: { data?: unknown }) => void>>()
+
+  addEventListener(type: string, listener: (event: { data?: unknown }) => void) {
+    const current = this.listeners.get(type) ?? []
+    current.push(listener)
+    this.listeners.set(type, current)
+  }
+
+  emit(type: string, event: { data?: unknown } = {}) {
+    for (const listener of this.listeners.get(type) ?? []) listener(event)
+  }
+
+  send(data: string) {
+    this.sent.push(data)
+  }
+
+  close() {
+    this.closed = true
+    this.readyState = 3
+    this.emit('close')
+  }
+}
+
+describe('Codex app-server websocket', () => {
+  it('sends one JSON-RPC message per text frame and closes only the client', async () => {
+    const socket = new FakeCodexSocket()
+    const connecting = connectCodexAppServer(CODEX_APP_SERVER_URL, () => socket, 1_000)
+    socket.readyState = 1
+    socket.emit('open')
+    const transport = await connecting
+
+    const received: string[] = []
+    const reading = (async () => {
+      for await (const line of transport.lines) received.push(line)
+    })()
+    await transport.write('{"method":"initialize","id":0}\n')
+    expect(socket.sent).toEqual(['{"method":"initialize","id":0}'])
+    socket.emit('message', { data: '{"id":0,"result":{"ok":true}}' })
+    socket.emit('message', { data: '{"method":"initialized"}\n' })
+    await new Promise(resolve => setImmediate(resolve))
+    await transport.close?.()
+    await reading
+
+    expect(received).toEqual([
+      '{"id":0,"result":{"ok":true}}\n',
+      '{"method":"initialized"}\n',
+    ])
+    expect(socket.closed).toBe(true)
+  })
+
+  it('rejects and closes the socket when the shared port refuses the connection', async () => {
+    const socket = new FakeCodexSocket()
+    const connecting = connectCodexAppServer(CODEX_APP_SERVER_URL, () => socket, 1_000)
+    socket.emit('error')
+    await expect(connecting).rejects.toThrow('ws://127.0.0.1:4500')
+    expect(socket.closed).toBe(true)
+  })
+
+  it('stops waiting when the shared port does not answer', async () => {
+    const socket = new FakeCodexSocket()
+    await expect(connectCodexAppServer(CODEX_APP_SERVER_URL, () => socket, 20)).rejects.toThrow(
+      'ws://127.0.0.1:4500',
+    )
+    expect(socket.closed).toBe(true)
   })
 })

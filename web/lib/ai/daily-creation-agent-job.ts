@@ -24,6 +24,7 @@ import {
   type AgentSessionEventDraft,
 } from './agent-runtime'
 import { CODEX_THREAD_CWD } from './codex-app-server'
+import { codexThreadTurnOptions } from './codex-thread'
 import {
   runCodexAgentTurn,
   type RunCodexAgentTurnOptions,
@@ -55,6 +56,7 @@ import {
   completeStep,
   failStep,
   getJob,
+  rememberJobCodexThread,
   retryableForError,
   startStep,
   workerHeaders,
@@ -283,6 +285,7 @@ export type DailyCreationAgentJobDependencies = {
   failStep(jobId: number, stepId: number, error: unknown, retryable: boolean): Promise<unknown>
   completeJob(jobId: number): Promise<unknown>
   runAgentTurn(options: RunCodexAgentTurnOptions): Promise<CodexAgentTurnResult>
+  rememberCodexThread?(jobId: number, threadId: string): Promise<unknown>
   apiRoot(): string
   codexTurn?(apiRoot: string): Promise<{ model?: string, reasoningEffort?: string }>
 }
@@ -313,6 +316,7 @@ const defaultDependencies: DailyCreationAgentJobDependencies = {
   failStep,
   completeJob,
   runAgentTurn: runCodexAgentTurn,
+  rememberCodexThread: rememberJobCodexThread,
   apiRoot: defaultApiRoot,
   codexTurn: loadConfiguredCodexTurn,
 }
@@ -608,8 +612,13 @@ export async function runDailyCreationAgentJob(
       : await configuredCodexTurn(deps)
     const model = ruleModel ?? settings.model
     const reasoningEffort = ruleEffort ?? settings.reasoningEffort
+    const threadJob = await deps.getJob(jobId)
     const result: CodexAgentTurnResult = await deps.runAgentTurn({
       input: objective,
+      ...codexThreadTurnOptions(
+        threadJob.codex_thread_id,
+        threadId => deps.rememberCodexThread?.(jobId, threadId) ?? Promise.resolve(),
+      ),
       ...(model ? { model } : {}),
       ...(reasoningEffort ? { reasoningEffort } : {}),
       cwd: CODEX_THREAD_CWD,
