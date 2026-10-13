@@ -28,13 +28,13 @@ jobs:
         run: docker compose config --quiet
 
       - name: Build unified application image
-        run: docker compose build api
+        run: docker compose build app
 
       - name: Verify Python API dependencies
-        run: docker compose run --rm --no-deps api python -c "import main"
+        run: docker compose run --rm --no-deps app python -c "import main"
 
       - name: Verify Node worker dependencies
-        run: docker compose run --rm --no-deps worker node -e "console.log(require.resolve('tsx'))"
+        run: docker compose run --rm --no-deps --workdir /app/web app node -e "console.log(require.resolve('tsx'))"
 
   publish:
     if: >-

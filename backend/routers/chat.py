@@ -167,6 +167,11 @@ class ChatSessionOut(BaseModel):
 class ChatSessionDetail(ChatSessionOut):
     messages: list[ChatMessageOut]
     is_running: bool
+    codex_thread_id: str | None = None
+
+
+class CodexThreadUpdate(BaseModel):
+    thread_id: str = Field(min_length=1, max_length=200, pattern=r"^[A-Za-z0-9_-]+$")
 
 
 class ChatSessionCreate(BaseModel):
@@ -619,7 +624,26 @@ async def get_session(session_id: int, db: AsyncSession = Depends(get_db)):
         updated_at=session.updated_at,
         messages=messages,
         is_running=await _chat_session_is_running(db, session.id),
+        codex_thread_id=session.codex_thread_id,
     )
+
+
+@router.post("/sessions/{session_id}/codex-thread")
+async def store_session_codex_thread(
+    session_id: int,
+    body: CodexThreadUpdate,
+    db: AsyncSession = Depends(get_db),
+):
+    session = await db.get(ChatSession, session_id)
+    if not session:
+        raise HTTPException(404, "会话不存在")
+    if session.codex_thread_id and session.codex_thread_id != body.thread_id:
+        raise HTTPException(409, "Codex thread already exists")
+    if not session.codex_thread_id:
+        session.codex_thread_id = body.thread_id
+        session.updated_at = now_utc()
+        await db.commit()
+    return {"codex_thread_id": session.codex_thread_id}
 
 
 @router.patch("/sessions/{session_id}", response_model=ChatSessionOut)

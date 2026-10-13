@@ -62,6 +62,7 @@ export type RunCodexAgentTurnOptions = {
   createTransport?: () => CodexJsonlTransport | Promise<CodexJsonlTransport>
   onNotification?: (notification: CodexNotification) => void
   onTextDelta?: (delta: string) => void
+  onThreadId?: (threadId: string) => void | Promise<void>
   keepAlive?: boolean
   signal?: AbortSignal
 }
@@ -298,6 +299,7 @@ export async function runCodexAgentTurn(
       threadId = textField(record(started.thread).id)
       if (!threadId) throw new Error('Codex thread/start did not return a thread id')
     }
+    await options.onThreadId?.(threadId)
 
     const turnParams: Record<string, unknown> = {
       threadId,

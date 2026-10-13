@@ -153,6 +153,7 @@ class ChatSession(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     title: Mapped[str] = mapped_column(String, default="新对话")
+    codex_thread_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
 
@@ -500,6 +501,7 @@ class ContentJob(Base):
     status: Mapped[str] = mapped_column(String, default="queued", index=True)
     input_data: Mapped[dict] = mapped_column(JSON, default=dict)
     idempotency_key: Mapped[str] = mapped_column(String, default="", index=True)
+    codex_thread_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
     plan_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default=text("1"))
     run_epoch: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default=text("1"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)

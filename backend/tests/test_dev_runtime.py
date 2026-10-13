@@ -1635,22 +1635,18 @@ def test_compose_uses_real_api_health_and_healthy_dependencies(
     compose = json.loads(resolved.stdout)
     services = compose["services"]
 
-    api_health = services["api"]["healthcheck"]["test"]
-    assert "/health" in " ".join(api_health)
-    assert services["api"]["environment"]["REDIS_URL"] == "redis://redis:6379/0"
-    assert services["worker"]["environment"]["REDIS_URL"] == "redis://redis:6379/0"
-    assert services["worker"]["depends_on"]["redis"]["condition"] == "service_healthy"
-    assert services["worker"]["depends_on"]["api"]["condition"] == "service_healthy"
-    assert services["web"]["depends_on"]["api"]["condition"] == "service_healthy"
-    for service_name in ("api", "worker", "web"):
-        assert not any(
-            key.endswith("_API_KEY")
-            for key in services[service_name]["environment"]
-        )
-    for service_name in ("api", "worker"):
-        command = services[service_name].get("command")
-        assert command, f"{service_name} must validate WORKER_TOKEN before startup"
-        command_text = " ".join(command)
-        assert "WORKER_TOKEN" in command_text
-        assert "at least 32" in command_text
-        assert VALID_TOKEN not in command_text
+    app = services["app"]
+    assert "/health" in " ".join(app["healthcheck"]["test"])
+    assert app["environment"]["REDIS_URL"] == "redis://redis:6379/0"
+    assert app["depends_on"]["redis"]["condition"] == "service_healthy"
+    assert app["depends_on"]["postgres"]["condition"] == "service_healthy"
+    assert not any(key.endswith("_API_KEY") for key in app["environment"])
+    assert app["command"] == ["bash", "/app/scripts/app-container.sh"]
+    script = (ROOT / "scripts" / "app-container.sh").read_text(encoding="utf-8")
+    assert "WORKER_TOKEN" in script
+    assert "at least 32" in script
+    assert VALID_TOKEN not in script
+    assert "codex app-server --listen" in script
+    assert 'codex_listen="ws://127.0.0.1:4500"' in script
+    assert "CODEX_APP_SERVER_SOCKET" not in script
+    assert "unix://" not in script

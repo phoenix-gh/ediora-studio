@@ -52,10 +52,10 @@ def _run_compose(
 
 
 def assert_x_session_contract(compose):
-    api = compose["services"]["api"]
-    api_volumes = api["volumes"]
-    assert api.get("environment", {}).get("FEEDGRAB_DATA_DIR") == "/app/sessions"
-    assert api.get("environment", {}).get("SCHEDULER_STATE_FILE") == (
+    app = compose["services"]["app"]
+    api_volumes = app["volumes"]
+    assert app.get("environment", {}).get("FEEDGRAB_DATA_DIR") == "/app/sessions"
+    assert app.get("environment", {}).get("SCHEDULER_STATE_FILE") == (
         "/app/.runtime/scheduler_state.json"
     )
 
@@ -78,7 +78,7 @@ def assert_x_session_contract(compose):
         assert_bind_mount(api_volumes, source, target)
 
     assert_bind_mount(
-        compose["services"]["web"]["volumes"],
+        api_volumes,
         "data/web-runtime",
         "/app/web/.runtime",
     )
@@ -99,22 +99,23 @@ def _assert_codex_home_mount(mounts, source: str):
     assert any(
         mount.get("type") == "bind"
         and mount.get("source") == source
-        and mount.get("target") == "/root/.codex"
+        and mount.get("target") == "/codex-home"
         and mount.get("read_only") is not True
         for mount in mounts
     )
 
 
-def test_default_codex_home_host_mounts_for_worker_and_web(tmp_path: Path):
+def test_default_codex_home_host_mounts_for_the_app_container(tmp_path: Path):
     resolved = _run_compose(tmp_path, "config", "--format", "json")
     assert resolved.returncode == 0, resolved.stderr
     compose = json.loads(resolved.stdout)
     source = str((ROOT / "data/codex-home").resolve())
-    for service_name in ("worker", "web"):
-        service = compose["services"][service_name]
-        assert service["environment"]["CODEX_HOME"] == "/root/.codex"
-        _assert_codex_home_mount(service["volumes"], source)
-    assert "CODEX_HOME" not in compose["services"]["api"].get("environment", {})
+    service = compose["services"]["app"]
+    assert service["user"] == "1000:1000"
+    assert service["environment"]["HOME"] == "/tmp"
+    assert service["environment"]["CODEX_HOME"] == "/codex-home"
+    assert "CODEX_APP_SERVER_SOCKET" not in service["environment"]
+    _assert_codex_home_mount(service["volumes"], source)
 
 
 def test_custom_codex_home_host_is_the_bind_source(tmp_path: Path):
@@ -129,11 +130,10 @@ def test_custom_codex_home_host_is_the_bind_source(tmp_path: Path):
     )
     assert resolved.returncode == 0, resolved.stderr
     compose = json.loads(resolved.stdout)
-    for service_name in ("worker", "web"):
-        _assert_codex_home_mount(
-            compose["services"][service_name]["volumes"],
-            str(custom),
-        )
+    _assert_codex_home_mount(
+        compose["services"]["app"]["volumes"],
+        str(custom),
+    )
 
 
 def test_api_uses_persistent_feedgrab_session_directory(tmp_path: Path):
@@ -154,7 +154,7 @@ def test_built_api_image_can_import_application(tmp_path: Path):
         "run",
         "--rm",
         "--no-deps",
-        "api",
+        "app",
         "python",
         "-c",
         "import main",
@@ -169,7 +169,7 @@ def test_built_api_image_can_import_feedgrab_x_runtime(tmp_path: Path):
         "run",
         "--rm",
         "--no-deps",
-        "api",
+        "app",
         "python",
         "-c",
         (
@@ -205,7 +205,7 @@ def test_built_api_image_can_import_feedgrab_x_runtime(tmp_path: Path):
 def test_x_session_contract_rejects_wrong_named_volume_wiring(volumes):
     compose = {
         "services": {
-            "api": {
+            "app": {
                 "environment": {"FEEDGRAB_DATA_DIR": "/app/sessions"},
                 "volumes": volumes,
             },

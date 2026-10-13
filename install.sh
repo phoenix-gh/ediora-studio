@@ -448,6 +448,8 @@ collect_env() {
   ensure_fixed_value WORKER_QUEUE 'content-jobs'
   ensure_fixed_value VIDEO_WORKER_QUEUE 'content-jobs:video'
   ensure_derived_value CODEX_HOME_HOST './data/codex-home'
+  ensure_derived_value HOST_UID "$(id -u)"
+  ensure_derived_value HOST_GID "$(id -g)"
 }
 
 validate_no_control() {
@@ -469,8 +471,10 @@ validate_env() {
   APP_IMAGE_VALUE=$(env_value APP_IMAGE)
   IMAGE_TAG_VALUE=$(env_value IMAGE_TAG)
   CODEX_HOME_HOST_VALUE=$(env_value CODEX_HOME_HOST)
+  HOST_UID_VALUE=$(env_value HOST_UID)
+  HOST_GID_VALUE=$(env_value HOST_GID)
 
-  for key in POSTGRES_PASSWORD WORKER_TOKEN X_SESSION_KEY API_PORT WEB_PORT NEXT_PUBLIC_API_URL CORS_ORIGINS APP_IMAGE IMAGE_TAG CODEX_HOME_HOST; do
+  for key in POSTGRES_PASSWORD WORKER_TOKEN X_SESSION_KEY API_PORT WEB_PORT NEXT_PUBLIC_API_URL CORS_ORIGINS APP_IMAGE IMAGE_TAG CODEX_HOME_HOST HOST_UID HOST_GID; do
     case "$key" in
       POSTGRES_PASSWORD) value=$POSTGRES_PASSWORD_VALUE ;;
       WORKER_TOKEN) value=$WORKER_TOKEN_VALUE ;;
@@ -482,6 +486,8 @@ validate_env() {
       APP_IMAGE) value=$APP_IMAGE_VALUE ;;
       IMAGE_TAG) value=$IMAGE_TAG_VALUE ;;
       CODEX_HOME_HOST) value=$CODEX_HOME_HOST_VALUE ;;
+      HOST_UID) value=$HOST_UID_VALUE ;;
+      HOST_GID) value=$HOST_GID_VALUE ;;
     esac
     validate_no_control "$key" "$value"
   done
@@ -505,6 +511,8 @@ validate_env() {
   case "$CODEX_HOME_HOST_VALUE" in
     *[!A-Za-z0-9._/-]*|..|../*|*/..|*/../*) die 'CODEX_HOME_HOST 只能包含字母、数字、点、下划线、短横线和斜线' ;;
   esac
+  case "$HOST_UID_VALUE" in ''|*[!0-9]*) die 'HOST_UID 必须是数字用户 id' ;; esac
+  case "$HOST_GID_VALUE" in ''|*[!0-9]*) die 'HOST_GID 必须是数字组 id' ;; esac
 }
 
 prepare_data_directories() {
@@ -597,7 +605,7 @@ compose() {
 }
 
 pull_images() {
-  if compose pull api worker web postgres redis; then
+  if compose pull app postgres redis; then
     return 0
   else
     status=$?
@@ -617,14 +625,12 @@ container_id() {
 check_ready_once() {
   postgres_id=$(container_id postgres)
   redis_id=$(container_id redis)
-  api_id=$(container_id api)
-  web_id=$(container_id web)
-  worker_id=$(container_id worker)
-  [ -n "$postgres_id" ] && [ -n "$redis_id" ] && [ -n "$api_id" ] && [ -n "$web_id" ] && [ -n "$worker_id" ] || return 1
+  app_id=$(container_id app)
+  [ -n "$postgres_id" ] && [ -n "$redis_id" ] && [ -n "$app_id" ] || return 1
   postgres_health=$(docker_cmd inspect -f '{{.State.Health.Status}}' "$postgres_id" 2>/dev/null) || return 1
   redis_health=$(docker_cmd inspect -f '{{.State.Health.Status}}' "$redis_id" 2>/dev/null) || return 1
-  worker_status=$(docker_cmd inspect -f '{{.State.Status}}' "$worker_id" 2>/dev/null) || return 1
-  [ "$postgres_health" = healthy ] && [ "$redis_health" = healthy ] && [ "$worker_status" = running ] || return 1
+  app_health=$(docker_cmd inspect -f '{{.State.Health.Status}}' "$app_id" 2>/dev/null) || return 1
+  [ "$postgres_health" = healthy ] && [ "$redis_health" = healthy ] && [ "$app_health" = healthy ] || return 1
   curl --fail --silent --show-error --max-time 5 "http://127.0.0.1:$API_PORT_VALUE/health" >/dev/null || return 1
   curl --fail --silent --show-error --max-time 5 "http://127.0.0.1:$WEB_PORT_VALUE/" >/dev/null || return 1
 }
@@ -633,7 +639,7 @@ wait_for_ready() {
   max_attempts=${EDIORA_READY_ATTEMPTS-60}
   interval=${EDIORA_READY_INTERVAL-2}
   attempt=1
-  printf '等待 PostgreSQL、Redis、API、Worker 和 Web 就绪...\n' >&2
+  printf '等待 PostgreSQL、Redis 和应用容器就绪...\n' >&2
   while [ "$attempt" -le "$max_attempts" ]; do
     if check_ready_once; then
       printf '服务已就绪。\n' >&2
@@ -651,7 +657,7 @@ print_success() {
   printf 'API 健康检查: http://localhost:%s/health\n' "$API_PORT_VALUE"
   printf '目录: %s\n' "$CHECKOUT_DIR"
   printf '状态: (cd "%s" && docker compose --env-file .env ps)\n' "$CHECKOUT_DIR"
-  printf '日志: (cd "%s" && docker compose --env-file .env logs -f api worker web)\n' "$CHECKOUT_DIR"
+  printf '日志: (cd "%s" && docker compose --env-file .env logs -f app)\n' "$CHECKOUT_DIR"
   printf '停止: (cd "%s" && docker compose --env-file .env stop)\n' "$CHECKOUT_DIR"
   if [ -x "$CHECKOUT_DIR/install.sh" ]; then
     printf '重试安装: (cd "%s" && ./install.sh)\n' "$CHECKOUT_DIR"

@@ -52,20 +52,16 @@ services:
       retries: 20
       start_period: 10s
 
-  api:
+  app:
     <<: *app-image
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
     restart: unless-stopped
     build:
       context: .
       dockerfile: Dockerfile
       args:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000/api}
-    command:
-      - sh
-      - -ec
-      - |
-        python -c 'import os, sys; ok = len(os.environ.get("WORKER_TOKEN", "")) >= 32; sys.stderr.write("" if ok else "WORKER_TOKEN must contain at least 32 characters\n"); sys.exit(0 if ok else 1)'
-        exec uvicorn main:app --host 0.0.0.0 --port 8000
+    command: ["bash", "/app/scripts/app-container.sh"]
     environment:
       DATABASE_URL: postgresql+asyncpg://wemedia:${POSTGRES_PASSWORD:-wemedia}@postgres:5432/wemedia
       REDIS_URL: redis://redis:6379/0
@@ -82,14 +78,24 @@ services:
       AGENT_TOPIC_NOVELTY_ENABLED: ${AGENT_TOPIC_NOVELTY_ENABLED:-0}
       X_SESSION_KEY: ${X_SESSION_KEY:-}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000/api}
+      DEVELOPER_MODE: ${NEXT_PUBLIC_DEVELOPER_MODE:-0}
+      HOME: /tmp
+      API_URL: http://127.0.0.1:8000/api
+      CODEX_HOME: /codex-home
     volumes:
       - ./data/uploads:/app/uploads
       - ./data/sessions:/app/sessions
       - ./data/avatars:/app/avatars
       - ./data/wechat-images:/app/wechat_imgs
       - ./data/scheduler:/app/.runtime
+      - ./data/web-runtime:/app/web/.runtime
+      - type: bind
+        source: ${CODEX_HOME_HOST:-./data/codex-home}
+        target: /codex-home
     ports:
       - "${API_PORT:-8000}:8000"
+      - "${WEB_PORT:-3000}:3000"
     healthcheck:
       test:
         - CMD
@@ -99,66 +105,9 @@ services:
       interval: 5s
       timeout: 5s
       retries: 20
-      start_period: 10s
+      start_period: 20s
     depends_on:
       postgres:
         condition: service_healthy
       redis:
-        condition: service_healthy
-
-  worker:
-    <<: *app-image
-    restart: unless-stopped
-    working_dir: /app/web
-    command:
-      - sh
-      - -ec
-      - |
-        node -e 'const ok = (process.env.WORKER_TOKEN ?? "").length >= 32; if (!ok) { console.error("WORKER_TOKEN must contain at least 32 characters"); process.exit(1) }'
-        exec ./node_modules/.bin/tsx scripts/content-worker.ts
-    environment:
-      REDIS_URL: redis://redis:6379/0
-      WORKER_QUEUE: ${WORKER_QUEUE:-content-jobs}
-      VIDEO_WORKER_QUEUE: ${VIDEO_WORKER_QUEUE:-content-jobs:video}
-      API_URL: http://api:8000/api
-      WORKER_TOKEN: ${WORKER_TOKEN:-}
-      CODEX_HOME: /root/.codex
-    volumes:
-      - type: bind
-        source: ${CODEX_HOME_HOST:-./data/codex-home}
-        target: /root/.codex
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      api:
-        condition: service_healthy
-
-  web:
-    <<: *app-image
-    restart: unless-stopped
-    working_dir: /app/web
-    command:
-      - ./node_modules/.bin/next
-      - start
-      - --hostname
-      - 0.0.0.0
-      - --port
-      - "3000"
-    environment:
-      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000/api}
-      DEVELOPER_MODE: ${NEXT_PUBLIC_DEVELOPER_MODE:-0}
-      API_URL: http://api:8000/api
-      WORKER_TOKEN: ${WORKER_TOKEN:-}
-      CODEX_HOME: /root/.codex
-    ports:
-      - "${WEB_PORT:-3000}:3000"
-    volumes:
-      - ./data/web-runtime:/app/web/.runtime
-      - type: bind
-        source: ${CODEX_HOME_HOST:-./data/codex-home}
-        target: /root/.codex
-    depends_on:
-      api:
         condition: service_healthy

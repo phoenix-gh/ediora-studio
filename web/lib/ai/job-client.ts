@@ -51,6 +51,7 @@ export type DurableJob = {
   flow: string
   title: string
   status: string
+  codex_thread_id?: string | null
   input: Record<string, unknown>
   steps: JobStep[]
   plan_version?: number
@@ -237,6 +238,14 @@ export function failPipelineStage(
 
 export function completeJob(jobId: number) {
   return jsonRequest(`/jobs/${jobId}/succeed`, { method: 'POST' })
+}
+
+export function rememberJobCodexThread(jobId: number, threadId: string) {
+  return jsonRequest<{ codex_thread_id: string }>(`/jobs/${jobId}/codex-thread`, {
+    method: 'POST',
+    headers: workerHeaders(jobId),
+    body: JSON.stringify({ thread_id: threadId }),
+  })
 }
 
 export function apiGet<T>(path: string, headers?: HeadersInit) {

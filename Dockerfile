@@ -40,7 +40,9 @@ RUN npm install -g @openai/codex@0.162.1
 COPY --from=backend-deps /opt/venv /opt/venv
 COPY backend ./
 COPY web ./web
+COPY scripts/app-container.sh /app/scripts/app-container.sh
+RUN chmod +x /app/scripts/app-container.sh
 COPY --from=web-deps /build/web/node_modules ./web/node_modules
 COPY --from=web-build /build/web/.next ./web/.next
 EXPOSE 8000 3000
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["bash", "/app/scripts/app-container.sh"]

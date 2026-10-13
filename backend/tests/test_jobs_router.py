@@ -44,6 +44,36 @@ def client(monkeypatch, postgres_env):
     return TestClient(app)
 
 
+def test_job_codex_thread_is_stored_once(client):
+    created = client.post("/api/jobs", json={
+        "flow": "draft", "title": "Test", "input": {}, "idempotency_key": "thread",
+    })
+    job_id = created.json()["id"]
+    headers = {"X-Worker-Token": "test-worker-token-at-least-32-characters"}
+
+    stored = client.post(
+        f"/api/jobs/{job_id}/codex-thread",
+        headers=headers,
+        json={"thread_id": "thr_job"},
+    )
+    again = client.post(
+        f"/api/jobs/{job_id}/codex-thread",
+        headers=headers,
+        json={"thread_id": "thr_job"},
+    )
+    conflict = client.post(
+        f"/api/jobs/{job_id}/codex-thread",
+        headers=headers,
+        json={"thread_id": "thr_other"},
+    )
+    detail = client.get(f"/api/jobs/{job_id}")
+
+    assert stored.status_code == 200
+    assert again.status_code == 200
+    assert conflict.status_code == 409
+    assert detail.json()["codex_thread_id"] == "thr_job"
+
+
 def test_create_job_returns_queued_job(client):
     response = client.post("/api/jobs", json={
         "flow": "draft", "title": "Test", "input": {}, "idempotency_key": "one",
