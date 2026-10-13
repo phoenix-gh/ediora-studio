@@ -11,6 +11,7 @@ from agent_trajectory import (
     trajectory_event_payloads,
 )
 from agent_log_service import list_all_agent_log_events
+from codex_threads import CodexThreadDeleteError, delete_codex_thread
 from database import get_db
 from models import AgentLogEvent, ChatMessage, ChatRun, ChatSession, ContentJobEvent, WritingPlan, now_utc
 from pipeline_contracts import PipelineContractError, PipelineCreateInput, ResolvedSkillInvocation
@@ -663,6 +664,16 @@ async def delete_session(session_id: int, db: AsyncSession = Depends(get_db)):
     session = await db.get(ChatSession, session_id)
     if not session:
         raise HTTPException(404, "会话不存在")
+    thread_id = session.codex_thread_id
+    if thread_id:
+        await db.rollback()
+        try:
+            await delete_codex_thread(thread_id)
+        except CodexThreadDeleteError as exc:
+            raise HTTPException(502, "Codex 会话删除失败，对话仍保留") from exc
+        session = await db.get(ChatSession, session_id)
+        if session is None:
+            return
     await db.execute(
         update(ChatMessage)
         .where(ChatMessage.session_id == session_id)

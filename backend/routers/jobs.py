@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import and_, desc, exists, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from codex_threads import CodexThreadDeleteError, delete_codex_thread
 from content_jobs import InvalidJobTransition, cancel_job, create_job, fail_step, record_event, retry_step, start_step, succeed_job, succeed_step, visible_timeline_event
 from agent_execution_service import latest_agent_execution_for_job
 from agent_log_service import get_agent_token_usage
@@ -362,6 +363,32 @@ async def get_job(job_id: int, db: AsyncSession = Depends(get_db)):
     return await _job_payload(db, job)
 
 
+def _cancelled_with_codex_thread(exc: Exception, thread_id: str | None) -> bool:
+    if not thread_id:
+        return False
+    return str(exc) in {
+        "cannot cancel cancelled job",
+        "cannot cancel a cancelled pipeline",
+    }
+
+
+async def _release_job_codex_thread(
+    db: AsyncSession,
+    job_id: int,
+    thread_id: str | None,
+) -> None:
+    if not thread_id:
+        return
+    try:
+        await delete_codex_thread(thread_id)
+    except CodexThreadDeleteError as exc:
+        raise HTTPException(502, "任务已取消，Codex 会话删除失败，可再次取消以重试") from exc
+    current = await db.get(ContentJob, job_id)
+    if current is not None and current.codex_thread_id == thread_id:
+        current.codex_thread_id = None
+        await db.commit()
+
+
 def _pipeline_command_error(exc: Exception) -> HTTPException:
     if isinstance(exc, PipelineJobNotFound):
         return HTTPException(404, str(exc))
@@ -662,6 +689,7 @@ async def post_cancel(
     existing = await db.get(ContentJob, job_id)
     if existing is None:
         raise HTTPException(404, "job not found")
+    thread_id = existing.codex_thread_id
     if existing.flow == "skill_pipeline":
         if body is None:
             raise HTTPException(422, "request_id is required for a Skill Pipeline")
@@ -672,15 +700,29 @@ async def post_cancel(
                 request_id=body.request_id,
             )
         except (PipelineJobNotFound, PipelinePlanConflict, PipelineCommandConflict, PipelineInvalidState) as exc:
+            if _cancelled_with_codex_thread(exc, thread_id):
+                await _release_job_codex_thread(db, job_id, thread_id)
+                return await pipeline_job_payload(db, job_id)
             raise _pipeline_command_error(exc) from exc
+        await _release_job_codex_thread(db, job_id, thread_id)
         return await pipeline_job_payload(db, job_id)
     try:
-        job = await cancel_job(db, job_id)
+        await cancel_job(db, job_id)
     except KeyError:
         raise HTTPException(404, "job not found") from None
     except InvalidJobTransition as exc:
+        if _cancelled_with_codex_thread(exc, thread_id):
+            await _release_job_codex_thread(db, job_id, thread_id)
+            current = await db.get(ContentJob, job_id)
+            if current is None:
+                raise HTTPException(404, "job not found") from exc
+            return await _job_payload(db, current)
         raise HTTPException(409, str(exc)) from exc
-    return await _job_payload(db, job)
+    await _release_job_codex_thread(db, job_id, thread_id)
+    current = await db.get(ContentJob, job_id)
+    if current is None:
+        raise HTTPException(404, "job not found")
+    return await _job_payload(db, current)
 
 
 @router.post("/{job_id}/retry")

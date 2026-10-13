@@ -22,6 +22,7 @@ export type ScriptedCodexPeerOptions = {
   holdTurn?: boolean
   completedItems?: Record<string, unknown>[]
   models?: unknown[]
+  deleteError?: string
 }
 
 function createLineQueue() {
@@ -129,6 +130,18 @@ export function createScriptedCodexPeer(script: ScriptedCodexPeerOptions = {}) {
         id: message.id,
         result: { thread: { id: script.resumeThreadId ?? threadId } },
       })
+      return
+    }
+    if (message.method === 'thread/delete' && message.id !== undefined) {
+      if (script.deleteError) {
+        reply({ id: message.id, error: { message: script.deleteError } })
+        return
+      }
+      const deletedThreadId = typeof message.params?.threadId === 'string'
+        ? message.params.threadId
+        : threadId
+      reply({ id: message.id, result: {} })
+      reply({ method: 'thread/deleted', params: { threadId: deletedThreadId } })
       return
     }
     if (message.method === 'model/list' && message.id !== undefined) {

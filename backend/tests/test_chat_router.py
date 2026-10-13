@@ -463,6 +463,51 @@ def test_delete_session_removes_durable_chat_runs_before_their_messages(client):
     assert client.get(f"/api/chat/sessions/{session_id}").status_code == 404
 
 
+def test_delete_session_deletes_its_codex_thread_first(client, monkeypatch):
+    import routers.chat as chat_module
+
+    deleted: list[str] = []
+
+    async def delete_thread(thread_id: str) -> None:
+        deleted.append(thread_id)
+
+    monkeypatch.setattr(chat_module, "delete_codex_thread", delete_thread)
+    created = client.post("/api/chat/sessions", json={"title": "带 Codex 会话"})
+    session_id = created.json()["id"]
+    stored = client.post(
+        f"/api/chat/sessions/{session_id}/codex-thread",
+        json={"thread_id": "thr_chat"},
+    )
+    assert stored.status_code == 200
+
+    deleted_response = client.delete(f"/api/chat/sessions/{session_id}")
+
+    assert deleted_response.status_code == 204
+    assert deleted == ["thr_chat"]
+    assert client.get(f"/api/chat/sessions/{session_id}").status_code == 404
+
+
+def test_delete_session_keeps_the_chat_when_codex_delete_fails(client, monkeypatch):
+    import routers.chat as chat_module
+    from codex_threads import CodexThreadDeleteError
+
+    async def delete_thread(_thread_id: str) -> None:
+        raise CodexThreadDeleteError("down")
+
+    monkeypatch.setattr(chat_module, "delete_codex_thread", delete_thread)
+    session_id = client.post("/api/chat/sessions", json={"title": "保留"}).json()["id"]
+    client.post(
+        f"/api/chat/sessions/{session_id}/codex-thread",
+        json={"thread_id": "thr_keep"},
+    )
+
+    failed = client.delete(f"/api/chat/sessions/{session_id}")
+
+    assert failed.status_code == 502
+    assert failed.json()["detail"] == "Codex 会话删除失败，对话仍保留"
+    assert client.get(f"/api/chat/sessions/{session_id}").json()["codex_thread_id"] == "thr_keep"
+
+
 def test_delete_missing_session_returns_404(client):
     assert client.delete("/api/chat/sessions/999999").status_code == 404
 
