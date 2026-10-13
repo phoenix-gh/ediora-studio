@@ -75,14 +75,14 @@ describe('Agent tool policy', () => {
     expect(resolveAgentToolPolicy('response-writing')).toMatchObject({
       approvalPolicy: 'automatic',
       allowedToolNames: expect.arrayContaining([
-        'list_drafts', 'get_draft', 'save_draft',
+        'list_drafts', 'get_draft', 'check_content_novelty', 'save_draft',
         'list_source_subscriptions', 'search_source_items', 'get_source_item',
       ]),
     })
   })
 
-  it('classifies usage-ledger recording as a fenced side effect', () => {
-    expect(requiresToolApproval('record_content_usage')).toBe(true)
+  it('classifies record tools as fenced side effects', () => {
+    expect(requiresToolApproval('record_publish_attempt')).toBe(true)
   })
 
   it('uses explicit annotations instead of misleading tool names', () => {

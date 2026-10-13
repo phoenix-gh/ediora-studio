@@ -8,6 +8,7 @@ import { ChatAgentLogDialog } from '@/components/features/chat/ChatAgentLogDialo
 import { useDeveloperMode } from '@/components/providers/DeveloperModeProvider'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
+import type { ChatModelSelection } from '@/lib/ai/chat-model-catalog'
 import type { ChatComposerMessagePart } from '@/lib/api/chat'
 
 import { chatConversationColumn } from '@/app/chat/chat-layout'
@@ -118,22 +119,26 @@ export function ChatWorkspace({ variant, onClose, onOpenFullChat, onResetSize, o
     }
   }
 
-  async function handleSubmit(value: string, messageParts: ChatComposerMessagePart[]) {
+  async function handleSubmit(
+    value: string,
+    messageParts: ChatComposerMessagePart[],
+    modelSelection: ChatModelSelection,
+  ) {
     if (!value.trim() || isActiveRunning) return false
     initializedRef.current = true
     try {
-      return await submit(value, messageParts)
+      return await submit(value, messageParts, modelSelection)
     } catch (error) {
       toast.error(errorText(error, '发送消息失败'))
       return false
     }
   }
 
-  function handleApproval(messageId: number, toolCallId: string, approvalId: string, approved: boolean) {
+  function handleApproval(runId: string, toolCallId: string, approvalId: string, approved: boolean) {
     if (activeSessionId === null) return
     void respondToApproval({
       sessionId: activeSessionId,
-      messageId,
+      runId,
       toolCallId,
       approvalId,
       approved,

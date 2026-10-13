@@ -40,9 +40,16 @@ def test_legacy_creation_rule_builds_self_contained_agent_prompt():
     assert "创作 12 条中文 X 短帖" in prompt
     assert "搞钱副业" in prompt
     assert "最近 14 天" in prompt
+    assert "被采用过的素材" in prompt
     assert "save_draft" in prompt
     assert "文章素材" in prompt
-    assert "record_content_usage" in prompt
+    assert "asset_ids" in prompt
+    assert "record_content_usage" not in prompt
+    assert "内容使用记录" not in prompt
+    assert "check_content_novelty" in prompt
+    assert "主题和核心观点" in prompt
+    assert "duplicate 或 uncertain" in prompt
+    assert "novelty_override_token" in prompt
     assert 'draft_type="x"' in prompt
     assert "每句话单独成段" in prompt
     assert "save_daily_creation_outputs" not in prompt
@@ -66,7 +73,27 @@ def test_legacy_creation_prompt_preserves_media_account_and_manual_skill():
     assert "x-account-42" in prompt
     assert "x-article-writing" in prompt
     assert "自行判断" in prompt
-    assert "record_content_usage" in prompt
+    assert "asset_ids" in prompt
+    assert "被采用过的素材" not in prompt
+    assert "record_content_usage" not in prompt
+
+
+def test_legacy_usage_prompt_rewrites_the_old_ledger_instructions():
+    from daily_creation_prompt import rewrite_legacy_usage_prompt
+
+    prompt = rewrite_legacy_usage_prompt(
+        "检查最近 14 天的内容使用记录，不要复用仍在去重期内的创作资产。\n"
+        "仅在 save_draft 成功并返回真实草稿 id 后，调用 "
+        "record_content_usage 记录该草稿实际使用的素材。\n"
+        "附加要求：保持原有语气"
+    )
+
+    assert "record_content_usage" not in prompt
+    assert "内容使用记录" not in prompt
+    assert "最近 14 天内被采用过的素材" in prompt
+    assert "asset_ids" in prompt
+    assert "保持原有语气" in prompt
+    assert rewrite_legacy_usage_prompt(prompt) == prompt
 
 
 def test_manual_skill_requires_a_name_and_auto_clears_it():
@@ -127,6 +154,48 @@ def test_snapshot_keeps_manual_skill_selection():
     assert snapshot["skill_mode"] == "manual"
     assert snapshot["skill_name"] == "human-social-copy"
     assert snapshot["prompt"] == creation_rule_payload()["prompt"]
+    assert snapshot["codex_model"] is None
+    assert snapshot["codex_reasoning_effort"] is None
+
+
+def test_snapshot_keeps_task_codex_selection():
+    from daily_creation_service import snapshot_creation_rule
+    from models import DailyCreationRule
+
+    rule = DailyCreationRule(
+        **creation_rule_payload(),
+        codex_model=" proxy/task-model ",
+        codex_reasoning_effort=" low ",
+    )
+
+    snapshot = snapshot_creation_rule(rule)
+
+    assert snapshot["codex_model"] == "proxy/task-model"
+    assert snapshot["codex_reasoning_effort"] == "low"
+
+
+def test_creation_rule_codex_fields_are_optional_and_validated():
+    from pydantic import ValidationError
+    from routers.creation_rules import CreationRuleIn
+
+    inherited = CreationRuleIn(**creation_rule_payload(
+        codex_model="  ",
+        codex_reasoning_effort="",
+    ))
+    assert inherited.codex_model is None
+    assert inherited.codex_reasoning_effort is None
+
+    selected = CreationRuleIn(**creation_rule_payload(
+        codex_model=" proxy/task-model ",
+        codex_reasoning_effort=" xhigh ",
+    ))
+    assert selected.codex_model == "proxy/task-model"
+    assert selected.codex_reasoning_effort == "xhigh"
+
+    with pytest.raises(ValidationError, match="deepseek-flash"):
+        CreationRuleIn(**creation_rule_payload(codex_model="proxy/deepseek-flash"))
+    with pytest.raises(ValidationError, match="推理强度"):
+        CreationRuleIn(**creation_rule_payload(codex_reasoning_effort="high effort"))
 
 
 @pytest.fixture

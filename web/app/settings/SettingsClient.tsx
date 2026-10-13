@@ -1,11 +1,12 @@
 'use client'
 
 import { useState } from 'react'
-import { AudioLines, Brain, Rss, GitFork, AtSign, ScrollText, FileText, Megaphone, Globe, Search, Download, Video, Captions, Palette, Clapperboard, Puzzle, Cloud } from 'lucide-react'
+import { AudioLines, Bot, Brain, Rss, GitFork, AtSign, ScrollText, FileText, Megaphone, Globe, Search, Download, Video, Captions, Palette, Clapperboard, Puzzle, Cloud } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { AppSettings } from '@/lib/api/settings'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { AISection }       from './sections/AISection'
+import { CodexSection }    from './sections/CodexSection'
 import { CollectSection }  from './sections/CollectSection'
 import { GitHubSection }   from './sections/GitHubSection'
 import { XSection }        from './sections/XSection'
@@ -25,10 +26,11 @@ import { AppearanceSection } from './sections/AppearanceSection'
 import { TextVideoSection } from './sections/TextVideoSection'
 import { SkillsSection } from './sections/SkillsSection'
 
-type SectionId = 'ai' | 'transcription' | 'speech' | 'youtube' | 'heygen' | 'comfyui' | 'xiangongyun' | 'text-video' | 'skills' | 'collect' | 'github' | 'x' | 'arxiv' | 'publish' | 'blog' | 'web-search' | 'web-fetch' | 'appearance' | 'logs'
+type SectionId = 'ai' | 'codex' | 'transcription' | 'speech' | 'youtube' | 'heygen' | 'comfyui' | 'xiangongyun' | 'text-video' | 'skills' | 'collect' | 'github' | 'x' | 'arxiv' | 'publish' | 'blog' | 'web-search' | 'web-fetch' | 'appearance' | 'logs'
 
 const NAV: { id: SectionId; label: string; icon: React.ElementType; desc: string }[] = [
   { id: 'ai',       label: 'AI 大模型',   icon: Brain,     desc: '供应商 · API Key · 模型' },
+  { id: 'codex',    label: 'Codex',       icon: Bot,       desc: '模型 · 推理强度' },
   { id: 'transcription', label: '语音转写', icon: Captions, desc: 'Whisper · 字幕兜底 · 音频限制' },
   { id: 'speech', label: '语音合成', icon: AudioLines, desc: 'MiMo · 音色 · TTS 密钥' },
   { id: 'youtube',  label: 'YouTube',     icon: Video, desc: 'Cookie · 字幕下载稳定性' },
@@ -51,6 +53,7 @@ const NAV: { id: SectionId; label: string; icon: React.ElementType; desc: string
 
 const SECTION_TITLE: Record<SectionId, string> = {
   ai:       'AI 大模型',
+  codex:    'Codex',
   transcription: '语音转写',
   speech: '语音合成',
   youtube:  'YouTube',
@@ -123,6 +126,7 @@ export function SettingsClient({ initialSettings }: { initialSettings: AppSettin
 
           <div className={cn('px-7 pb-7', isLogs && 'flex min-h-0 flex-1 flex-col')}>
             {active === 'ai'       && <AISection      settings={settings} onSaved={setSettings} />}
+            {active === 'codex'    && <CodexSection   settings={settings} onSaved={setSettings} />}
             {active === 'transcription' && <TranscriptionSection settings={settings} onSaved={setSettings} />}
             {active === 'speech' && <SpeechSection settings={settings} onSaved={setSettings} />}
             {active === 'youtube'  && <YouTubeSection settings={settings} onSaved={setSettings} />}

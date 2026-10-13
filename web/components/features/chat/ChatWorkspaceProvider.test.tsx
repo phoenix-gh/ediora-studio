@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
-import { act, render, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type {
@@ -14,6 +15,7 @@ import {
   type ChatWorkspaceContextValue,
   useChatWorkspace,
 } from './ChatWorkspaceProvider'
+import { ChatMessageView } from './ChatMessageView'
 
 const api = vi.hoisted(() => ({
   listChatSessions: vi.fn(),
@@ -51,6 +53,26 @@ function detail(session: ChatSession, isRunning = false, messages: ChatSessionDe
   }
 }
 
+function approvalMessage(approved?: boolean): ChatSessionDetail['messages'][number] {
+  return {
+    id: 70,
+    role: 'assistant',
+    run_id: '00000000-0000-4000-8000-000000000001',
+    parts: [{
+      type: 'dynamic-tool',
+      toolCallId: 'call-approval',
+      toolName: 'save_draft',
+      state: approved === undefined ? 'approval-requested' : 'approval-responded',
+      approval: {
+        id: 'approval-1',
+        ...(approved === undefined ? {} : { approved }),
+      },
+    }],
+    text: '',
+    created_at: '2026-08-22T00:00:00Z',
+  }
+}
+
 describe('ChatWorkspaceProvider', () => {
   let current: ChatWorkspaceContextValue
 
@@ -65,6 +87,25 @@ describe('ChatWorkspaceProvider', () => {
         <Probe />
       </ChatWorkspaceProvider>,
     )
+  }
+
+  function ApprovalProbe() {
+    current = useChatWorkspace()
+    return <>{current.messages.map(message => (
+      <ChatMessageView
+        key={message.id}
+        message={message}
+        onApproval={(runId, toolCallId, approvalId, approved) => {
+          void current.respondToApproval({
+            sessionId: 7,
+            runId,
+            toolCallId,
+            approvalId,
+            approved,
+          })
+        }}
+      />
+    ))}</>
   }
 
   beforeEach(() => {
@@ -144,6 +185,119 @@ describe('ChatWorkspaceProvider', () => {
     }))
     expect(current.activeSessionId).toBe(8)
     expect(current.messages).toEqual([expect.objectContaining({ text: '回答' })])
+  })
+
+  it('forwards the selected model and reasoning effort', async () => {
+    api.createChatSession.mockResolvedValue(session8)
+    api.getChatSession.mockResolvedValue(detail(session8))
+    renderProvider()
+
+    await act(async () => {
+      await current.submit('用深入模式', [{ type: 'text', text: '用深入模式' }], {
+        model: 'gpt-deep',
+        reasoningEffort: 'high',
+      })
+    })
+
+    expect(api.streamChatReply).toHaveBeenCalledWith(expect.objectContaining({
+      model: 'gpt-deep',
+      reasoningEffort: 'high',
+    }))
+  })
+
+  it.each([
+    { button: '批准', approved: true, status: '已批准' },
+    { button: '拒绝', approved: false, status: '已拒绝' },
+  ])('replaces approval buttons with $status while the agent continues', async ({ button, approved, status }) => {
+    const user = userEvent.setup()
+    let resolveStream!: () => void
+    api.getChatSession
+      .mockResolvedValueOnce(detail(session7, false, [approvalMessage()]))
+      .mockResolvedValueOnce(detail(session7, false, [approvalMessage(approved)]))
+    api.streamChatReply.mockImplementation(async () => {
+      await new Promise<void>(resolve => {
+        resolveStream = resolve
+      })
+    })
+    render(
+      <ChatWorkspaceProvider>
+        <ApprovalProbe />
+      </ChatWorkspaceProvider>,
+    )
+    await act(async () => {
+      await current.openSession(7)
+    })
+
+    await user.click(screen.getByRole('button', { name: button }))
+    await waitFor(() => expect(api.streamChatReply).toHaveBeenCalled())
+
+    expect(screen.queryByRole('button', { name: '批准' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '拒绝' })).not.toBeInTheDocument()
+    expect(screen.getByText(status)).toBeInTheDocument()
+    expect(current.messages).toHaveLength(1)
+    expect(api.streamChatReply).toHaveBeenCalledWith(expect.objectContaining({
+      messages: [],
+      approval: {
+        runId: '00000000-0000-4000-8000-000000000001',
+        toolCallId: 'call-approval',
+        approvalId: 'approval-1',
+        approved,
+      },
+    }))
+    expect(api.streamChatReply.mock.calls[0][0]).not.toHaveProperty('skillName')
+    expect(api.streamChatReply.mock.calls[0][0]).not.toHaveProperty('draftId')
+
+    act(() => resolveStream())
+    await waitFor(() => expect(current.isActiveRunning).toBe(false))
+  })
+
+  it('patches approval continuation events onto the same assistant projection', async () => {
+    const user = userEvent.setup()
+    api.getChatSession
+      .mockResolvedValueOnce(detail(session7, false, [approvalMessage()]))
+      .mockResolvedValueOnce(detail(session7, false, [{
+        ...approvalMessage(true),
+        parts: [{ type: 'text', text: '已保存' }],
+        text: '已保存',
+      }]))
+    api.streamChatReply.mockImplementation(async ({ onEvent }: { onEvent: (event: UIMessageStreamEvent) => void }) => {
+      onEvent({
+        type: 'data-chat-run',
+        data: { runId: '00000000-0000-4000-8000-000000000001', status: 'resuming' },
+      })
+      onEvent({ type: 'text-delta', id: 'run-text', delta: '继续执行' })
+    })
+    render(<ChatWorkspaceProvider><ApprovalProbe /></ChatWorkspaceProvider>)
+    await act(async () => { await current.openSession(7) })
+
+    await user.click(screen.getByRole('button', { name: '批准' }))
+
+    await waitFor(() => expect(api.streamChatReply).toHaveBeenCalledTimes(1))
+    expect(current.messages).toHaveLength(1)
+    await waitFor(() => expect(current.messages[0].text).toBe('已保存'))
+  })
+
+  it('reloads the authoritative approval state when approval continuation fails', async () => {
+    const user = userEvent.setup()
+    api.getChatSession
+      .mockResolvedValueOnce(detail(session7, false, [approvalMessage()]))
+      .mockResolvedValueOnce(detail(session7, false, [approvalMessage()]))
+    api.streamChatReply.mockRejectedValue(new Error('approval request failed'))
+    render(
+      <ChatWorkspaceProvider>
+        <ApprovalProbe />
+      </ChatWorkspaceProvider>,
+    )
+    await act(async () => {
+      await current.openSession(7)
+    })
+
+    await user.click(screen.getByRole('button', { name: '批准' }))
+
+    await waitFor(() => expect(current.activeError).toBe('approval request failed'))
+    expect(api.getChatSession).toHaveBeenCalledTimes(2)
+    expect(screen.getByRole('button', { name: '批准' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '拒绝' })).toBeInTheDocument()
   })
 
   it('keeps a running session updating after switching to another session', async () => {

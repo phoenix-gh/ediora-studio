@@ -15,6 +15,7 @@ export type DisplayMessage = Omit<ChatMessage, 'id'> & {
 }
 
 export type ToolEventPart = ChatPart & {
+  runId?: string
   toolCallId?: string
   toolName?: string
   input?: unknown
@@ -33,10 +34,11 @@ export type ChatStatusPart = ChatPart & ChatStreamStatus & {
 
 export type ChatApprovalArgs = {
   sessionId: number
-  messageId: number
+  runId: string
   toolCallId: string
   approvalId: string
   approved: boolean
+  reason?: string
 }
 
 export type ChatComposerSelection = {

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from sqlalchemy import select, update
+from sqlalchemy import and_, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,6 +27,30 @@ from text_video_domain import empty_scene_plan
 
 class InvalidJobTransition(ValueError):
     pass
+
+
+# Codex emits one notification per reasoning or message token. Those rows
+# crowded the 100-event job timeline, so only turn boundaries and tool
+# results stay visible.
+TIMELINE_CODEX_METHODS = (
+    "thread/started",
+    "turn/started",
+    "turn/completed",
+    "turn/failed",
+    "turn/cancelled",
+    "warning",
+    "error",
+)
+
+
+def visible_timeline_event():
+    activity = ContentJobEvent.payload["activity"].as_string()
+    method = ContentJobEvent.payload["method"].as_string()
+    return or_(
+        ContentJobEvent.kind != "agent_activity",
+        activity == "tool",
+        and_(activity == "codex", method.in_(TIMELINE_CODEX_METHODS)),
+    )
 
 
 def _now() -> datetime:

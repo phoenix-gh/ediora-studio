@@ -168,7 +168,104 @@ class ChatMessage(Base):
     text: Mapped[str] = mapped_column(Text, default="")
     skill_run: Mapped[dict | None] = mapped_column(JSON, nullable=True, default=None)
     capability_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True, default=None)
+    run_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("chat_runs.id"), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, index=True)
+
+
+class ChatRun(Base):
+    """Authoritative durable state for one interactive Agent objective."""
+    __tablename__ = "chat_runs"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('preparing', 'running', 'waiting_approval', 'resuming', "
+            "'completed', 'failed', 'needs_reconciliation')",
+            name="ck_chat_runs_status",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    session_id: Mapped[int] = mapped_column(Integer, ForeignKey("chat_sessions.id"), nullable=False, index=True)
+    user_message_id: Mapped[int] = mapped_column(Integer, ForeignKey("chat_messages.id"), nullable=False)
+    assistant_message_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("chat_messages.id"), nullable=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="preparing", index=True)
+    objective: Mapped[str] = mapped_column(Text, nullable=False)
+    skill_invocation: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    validated_plan: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    capability_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    current_step: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    checkpoint_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    error_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    lease_token: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class ChatRunStep(Base):
+    """One ordered provider-neutral assistant step in a Chat Run."""
+    __tablename__ = "chat_run_steps"
+    __table_args__ = (
+        UniqueConstraint("run_id", "ordinal", name="uq_chat_run_steps_ordinal"),
+        CheckConstraint(
+            "status IN ('running', 'waiting_approval', 'completed', 'failed')",
+            name="ck_chat_run_steps_status",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[str] = mapped_column(String(36), ForeignKey("chat_runs.id", ondelete="CASCADE"), nullable=False, index=True)
+    ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="running")
+    assistant_content: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    finish_reason: Mapped[str | None] = mapped_column(String, nullable=True)
+    usage_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class ChatRunToolCall(Base):
+    """One immutable invocation and its approval/result lifecycle."""
+    __tablename__ = "chat_run_tool_calls"
+    __table_args__ = (
+        UniqueConstraint("run_id", "tool_call_id", name="uq_chat_run_tool_calls_identity"),
+        Index(
+            "uq_chat_run_tool_calls_approval_id", "approval_id", unique=True,
+            postgresql_where=text("approval_id IS NOT NULL"),
+            sqlite_where=text("approval_id IS NOT NULL"),
+        ),
+        CheckConstraint(
+            "status IN ('pending_approval', 'approved', 'rejected', 'executing', "
+            "'succeeded', 'failed', 'outcome_unknown')",
+            name="ck_chat_run_tool_calls_status",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[str] = mapped_column(String(36), ForeignKey("chat_runs.id", ondelete="CASCADE"), nullable=False, index=True)
+    step_id: Mapped[int] = mapped_column(Integer, ForeignKey("chat_run_steps.id", ondelete="CASCADE"), nullable=False, index=True)
+    tool_call_id: Mapped[str] = mapped_column(String, nullable=False)
+    tool_name: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    input_data: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    approval_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    approval_decision: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    output_data: Mapped[dict | list | str | int | float | bool | None] = mapped_column(JSON, nullable=True)
+    error_data: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    side_effecting: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    replay_policy: Mapped[str] = mapped_column(String(32), nullable=False, default="never")
+    concurrency_policy: Mapped[str] = mapped_column(String(32), nullable=False, default="serial")
+    idempotency_key: Mapped[str] = mapped_column(String, nullable=False)
+    tool_version: Mapped[str] = mapped_column(String, nullable=False, default="")
+    contract_digest: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
 
 
 
@@ -1055,6 +1152,9 @@ class CreativeAsset(Base):
     last_selected_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True, index=True
     )
+    last_adopted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, index=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
 
@@ -1319,6 +1419,8 @@ class DailyCreationRule(Base):
     prompt: Mapped[str] = mapped_column(Text, nullable=False, default="")
     skill_mode: Mapped[str] = mapped_column(String, nullable=False, default="auto")
     skill_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    codex_model: Mapped[str | None] = mapped_column(String, nullable=True)
+    codex_reasoning_effort: Mapped[str | None] = mapped_column(String, nullable=True)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
@@ -1409,3 +1511,64 @@ class ContentUsageLedger(Base):
     reuse_decision: Mapped[str] = mapped_column(String, default="fresh")
     reuse_explanation: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+
+class AgentTopicClaim(Base):
+    """Active or released topic claim created only by the Agent draft tool."""
+    __tablename__ = "agent_topic_claims"
+    __table_args__ = (
+        UniqueConstraint("draft_id", name="uq_agent_topic_claim_draft"),
+        Index("ix_agent_topic_claim_active", "released_at", "claimed_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    draft_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    topic: Mapped[str] = mapped_column(Text, nullable=False)
+    core_claim: Mapped[str] = mapped_column(Text, nullable=False)
+    key_facts: Mapped[list] = mapped_column(JSON, default=list)
+    event_time: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    novelty_basis: Mapped[str] = mapped_column(Text, default="")
+    source_item_ids: Mapped[list] = mapped_column(JSON, default=list)
+    decision: Mapped[str] = mapped_column(String, nullable=False)
+    conflict_claim_ids: Mapped[list] = mapped_column(JSON, default=list)
+    reason: Mapped[str] = mapped_column(Text, default="")
+    window_days: Mapped[int] = mapped_column(Integer, nullable=False, default=14)
+    agent_mode: Mapped[str] = mapped_column(String, nullable=False)
+    agent_session_id: Mapped[int | None] = mapped_column(
+        Integer, nullable=True, index=True
+    )
+    daily_creation_run_id: Mapped[int | None] = mapped_column(
+        Integer, nullable=True, index=True
+    )
+    override_token_digest: Mapped[str | None] = mapped_column(
+        String, nullable=True, unique=True
+    )
+    claimed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=now_utc
+    )
+    released_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
+class AgentNoveltyOverride(Base):
+    """Short-lived, one-time Chat override bound to one novelty decision."""
+    __tablename__ = "agent_novelty_overrides"
+    __table_args__ = (
+        Index("ix_agent_novelty_override_expiry", "expires_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    token_digest: Mapped[str] = mapped_column(String, nullable=False, unique=True)
+    candidate_digest: Mapped[str] = mapped_column(String, nullable=False)
+    conflict_claim_ids: Mapped[list] = mapped_column(JSON, default=list)
+    agent_session_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    consumed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=now_utc
+    )

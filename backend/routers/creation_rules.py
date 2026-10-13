@@ -1,6 +1,7 @@
 """Scheduled and one-time creation rules and their execution history."""
 from __future__ import annotations
 
+import re
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -14,6 +15,7 @@ from agent_execution_service import (
     latest_agent_execution_for_job,
     latest_agent_executions_for_jobs,
 )
+from content_jobs import visible_timeline_event
 from database import get_db
 from log_redaction import redact_log_value, redact_secret_text
 from models import (
@@ -35,6 +37,38 @@ from worker_auth import require_worker_token
 router = APIRouter(prefix="/creation-rules", tags=["creation-rules"])
 
 CN_TZ = timezone(timedelta(hours=8))
+_CODEX_MODEL_RE = re.compile(
+    r"^[A-Za-z0-9](?:[A-Za-z0-9._/-]{0,198}[A-Za-z0-9])?$"
+)
+_UNSUPPORTED_CODEX_MODELS = {"deepseek-flash", "proxy/deepseek-flash"}
+_CODEX_EFFORT_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
+
+def _stored_codex_value(value: str | None) -> str | None:
+    text = str(value or "").strip()
+    return text or None
+
+
+def _optional_codex_model(value: str | None) -> str | None:
+    model = _stored_codex_value(value)
+    if model is None:
+        return None
+    if model in _UNSUPPORTED_CODEX_MODELS:
+        raise ValueError("deepseek-flash 没有可用通道，请改用 proxy/deepseek-v4-flash")
+    if not _CODEX_MODEL_RE.fullmatch(model):
+        raise ValueError(
+            "Codex 模型只能包含字母、数字、点、下划线、短横线和斜线，且不能以斜线开头或结尾"
+        )
+    return model
+
+
+def _optional_codex_effort(value: str | None) -> str | None:
+    effort = _stored_codex_value(value)
+    if effort is None:
+        return None
+    if not _CODEX_EFFORT_RE.fullmatch(effort):
+        raise ValueError("推理强度只能包含字母、数字、下划线和短横线")
+    return effort
 
 
 class CreationRuleIn(BaseModel):
@@ -55,7 +89,19 @@ class CreationRuleIn(BaseModel):
     instructions: str = Field(default="", max_length=4000)
     skill_mode: Literal["auto", "manual"] = "auto"
     skill_name: str | None = Field(default=None, max_length=200)
+    codex_model: str | None = None
+    codex_reasoning_effort: str | None = None
     enabled: bool = True
+
+    @field_validator("codex_model")
+    @classmethod
+    def normalize_codex_model(cls, value: str | None) -> str | None:
+        return _optional_codex_model(value)
+
+    @field_validator("codex_reasoning_effort")
+    @classmethod
+    def normalize_codex_effort(cls, value: str | None) -> str | None:
+        return _optional_codex_effort(value)
 
     @field_validator("prompt")
     @classmethod
@@ -114,7 +160,19 @@ class CreationRulePatch(BaseModel):
     instructions: str | None = Field(default=None, max_length=4000)
     skill_mode: Literal["auto", "manual"] | None = None
     skill_name: str | None = Field(default=None, max_length=200)
+    codex_model: str | None = None
+    codex_reasoning_effort: str | None = None
     enabled: bool | None = None
+
+    @field_validator("codex_model")
+    @classmethod
+    def normalize_codex_model(cls, value: str | None) -> str | None:
+        return _optional_codex_model(value)
+
+    @field_validator("codex_reasoning_effort")
+    @classmethod
+    def normalize_codex_effort(cls, value: str | None) -> str | None:
+        return _optional_codex_effort(value)
 
 
 def _rule_out(rule: DailyCreationRule) -> dict:
@@ -136,6 +194,8 @@ def _rule_out(rule: DailyCreationRule) -> dict:
         "account_id": rule.account_id, "instructions": rule.instructions or "",
         "prompt": rule.prompt,
         "skill_mode": rule.skill_mode or "auto", "skill_name": rule.skill_name,
+        "codex_model": _stored_codex_value(rule.codex_model),
+        "codex_reasoning_effort": _stored_codex_value(rule.codex_reasoning_effort),
         "enabled": rule.enabled,
         "deleted_at": rule.deleted_at.isoformat() if rule.deleted_at else None,
         "created_at": rule.created_at.isoformat() if rule.created_at else "",
@@ -596,7 +656,7 @@ async def get_creation_dashboard(
             steps_by_job.setdefault(step.job_id, []).append(step)
         events = list((await db.execute(
             select(ContentJobEvent)
-            .where(ContentJobEvent.job_id.in_(job_ids))
+            .where(ContentJobEvent.job_id.in_(job_ids), visible_timeline_event())
             .order_by(ContentJobEvent.created_at.desc())
         )).scalars().all())
         for event in events:

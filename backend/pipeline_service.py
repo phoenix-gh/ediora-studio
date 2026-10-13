@@ -15,6 +15,7 @@ from content_jobs import (
     fail_locked_step,
     lock_content_job_row,
     succeed_locked_step,
+    visible_timeline_event,
 )
 from agent_log_service import get_agent_token_usage
 from execution_artifacts import (
@@ -260,7 +261,7 @@ async def pipeline_job_payload(session: AsyncSession, job_id: int) -> dict[str, 
 
     events = list((await session.execute(
         select(ContentJobEvent)
-        .where(ContentJobEvent.job_id == job.id)
+        .where(ContentJobEvent.job_id == job.id, visible_timeline_event())
         .order_by(ContentJobEvent.id.asc())
     )).scalars().all())
     token_usage = await get_agent_token_usage(session, job_id=job.id)

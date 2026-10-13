@@ -447,6 +447,7 @@ collect_env() {
   ensure_value IMAGE_TAG '镜像标签' 'latest' 0
   ensure_fixed_value WORKER_QUEUE 'content-jobs'
   ensure_fixed_value VIDEO_WORKER_QUEUE 'content-jobs:video'
+  ensure_derived_value CODEX_HOME_HOST './data/codex-home'
 }
 
 validate_no_control() {
@@ -467,8 +468,9 @@ validate_env() {
   CORS_ORIGINS_VALUE=$(env_value CORS_ORIGINS)
   APP_IMAGE_VALUE=$(env_value APP_IMAGE)
   IMAGE_TAG_VALUE=$(env_value IMAGE_TAG)
+  CODEX_HOME_HOST_VALUE=$(env_value CODEX_HOME_HOST)
 
-  for key in POSTGRES_PASSWORD WORKER_TOKEN X_SESSION_KEY API_PORT WEB_PORT NEXT_PUBLIC_API_URL CORS_ORIGINS APP_IMAGE IMAGE_TAG; do
+  for key in POSTGRES_PASSWORD WORKER_TOKEN X_SESSION_KEY API_PORT WEB_PORT NEXT_PUBLIC_API_URL CORS_ORIGINS APP_IMAGE IMAGE_TAG CODEX_HOME_HOST; do
     case "$key" in
       POSTGRES_PASSWORD) value=$POSTGRES_PASSWORD_VALUE ;;
       WORKER_TOKEN) value=$WORKER_TOKEN_VALUE ;;
@@ -479,6 +481,7 @@ validate_env() {
       CORS_ORIGINS) value=$CORS_ORIGINS_VALUE ;;
       APP_IMAGE) value=$APP_IMAGE_VALUE ;;
       IMAGE_TAG) value=$IMAGE_TAG_VALUE ;;
+      CODEX_HOME_HOST) value=$CODEX_HOME_HOST_VALUE ;;
     esac
     validate_no_control "$key" "$value"
   done
@@ -495,6 +498,13 @@ validate_env() {
   [ -n "$CORS_ORIGINS_VALUE" ] || die 'CORS_ORIGINS 不能为空'
   case "$APP_IMAGE_VALUE" in ''|[!A-Za-z0-9]*|*[!A-Za-z0-9._:/-]*) die 'APP_IMAGE 不是有效镜像引用' ;; esac
   case "$IMAGE_TAG_VALUE" in ''|[!A-Za-z0-9]*|*[!A-Za-z0-9._-]*) die 'IMAGE_TAG 不是有效标签' ;; esac
+  case "$CODEX_HOME_HOST_VALUE" in
+    /*|./*) ;;
+    *) die 'CODEX_HOME_HOST 必须是绝对路径或以 ./ 开头的相对路径' ;;
+  esac
+  case "$CODEX_HOME_HOST_VALUE" in
+    *[!A-Za-z0-9._/-]*|..|../*|*/..|*/../*) die 'CODEX_HOME_HOST 只能包含字母、数字、点、下划线、短横线和斜线' ;;
+  esac
 }
 
 prepare_data_directories() {
@@ -510,6 +520,10 @@ prepare_data_directories() {
     "$data_dir/wechat-images" \
     "$data_dir/local-asr-models"
   chmod 700 "$data_dir/sessions"
+  if [ "$(env_value CODEX_HOME_HOST)" = "./data/codex-home" ]; then
+    mkdir -p "$data_dir/codex-home"
+    chmod 700 "$data_dir/codex-home"
+  fi
 }
 
 docker_cmd() {

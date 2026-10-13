@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import { Grip } from 'lucide-react'
+import { usePathname } from 'next/navigation'
 
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 
@@ -69,6 +70,7 @@ function initialPanelSize() {
 }
 
 export function GlobalChatWidget() {
+  const pathname = usePathname()
   const [open, setOpen] = useState(false)
   const [size, setSize] = useState<FloatingChatSize>(initialPanelSize)
   const [position, setPosition] = useState<FloatingChatPosition | null>(null)
@@ -210,6 +212,8 @@ export function GlobalChatWidget() {
     maxWidth: 'calc(100vw - 2rem)',
     maxHeight: 'calc(100dvh - 2rem)',
   }
+
+  if (pathname === '/chat') return null
 
   return (
     <Dialog open={open} onOpenChange={setOpen} modal={false} disablePointerDismissal>

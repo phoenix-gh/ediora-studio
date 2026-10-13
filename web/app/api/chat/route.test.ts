@@ -1,4 +1,4 @@
-import type { ToolSet } from 'ai'
+import { type ToolSet } from 'ai'
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -9,16 +9,22 @@ import {
   modelHistoryCandidates,
 } from '../../../lib/ai/chat-tools'
 import {
+  chatEdioraMcpServers,
+  mcpUrlFromApiBase,
   chatAgentLogEventFromHttpAudit,
   chatAgentLogEventFromModelMessage,
   chatAgentLogEventFromToolAudit,
   chatAgentSessionEventFromDraft,
   chatAgentSessionEventFromToolResult,
+  chatRunTerminalToolResultEvents,
   chatTrajectoryChunk,
   chatStatusForSkill,
   chatStatusForAgentStep,
   agentRunUIResponse,
   directSkillParameterContext,
+  durableApprovalPayload,
+  durableChatRunsEnabled,
+  canonicalTurnEndReasonForChatRun,
   executionToolsForSelection,
   genericSkillRuntimeEnabled,
   skillAwareStepPolicy,
@@ -26,7 +32,75 @@ import {
   shouldUseSharedAgentRun,
 } from './route'
 
+describe('Chat Ediora MCP address', () => {
+  const previous = {
+    API_URL: process.env.API_URL,
+    NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL,
+  }
+
+  function restoreApiEnv() {
+    for (const key of ['API_URL', 'NEXT_PUBLIC_API_URL'] as const) {
+      const value = previous[key]
+      if (value === undefined) delete process.env[key]
+      else process.env[key] = value
+    }
+  }
+
+  it('uses the server API address for this deployment', () => {
+    process.env.API_URL = 'http://api:8000/api'
+    process.env.NEXT_PUBLIC_API_URL = 'https://ediora.example.com/api'
+    try {
+      expect(mcpUrlFromApiBase(process.env.API_URL)).toBe('http://api:8000/mcp')
+      expect(chatEdioraMcpServers(12).ediora.url).toBe('http://api:8000/mcp')
+    } finally {
+      restoreApiEnv()
+    }
+  })
+
+  it('uses the public API address when the server address is unset', () => {
+    delete process.env.API_URL
+    process.env.NEXT_PUBLIC_API_URL = 'https://ediora.example.com/api/'
+    try {
+      expect(chatEdioraMcpServers(12).ediora).toEqual({
+        url: 'https://ediora.example.com/mcp',
+        http_headers: {
+          'X-Agent-Mode': 'chat',
+          'X-Agent-Session-Id': '12',
+        },
+      })
+    } finally {
+      restoreApiEnv()
+    }
+  })
+})
+
 describe('Chat Agent log event mapping', () => {
+  it('maps durable run statuses to the strict canonical turn/end reason', () => {
+    expect(canonicalTurnEndReasonForChatRun('waiting_approval')).toEqual({ kind: 'waiting_approval' })
+    expect(canonicalTurnEndReasonForChatRun('completed')).toEqual({ kind: 'completed' })
+    expect(canonicalTurnEndReasonForChatRun('failed')).toEqual({ kind: 'error' })
+    expect(canonicalTurnEndReasonForChatRun('needs_reconciliation')).toEqual({ kind: 'error' })
+  })
+
+  it('uses durable Chat Runs by default and keeps approval input identity-only', () => {
+    const previous = process.env.DURABLE_CHAT_RUNS
+    delete process.env.DURABLE_CHAT_RUNS
+    expect(durableChatRunsEnabled()).toBe(true)
+    if (previous === undefined) delete process.env.DURABLE_CHAT_RUNS
+    else process.env.DURABLE_CHAT_RUNS = previous
+
+    expect(durableApprovalPayload({
+      runId: '5abf312a-ed54-451c-9628-5b5e7fbe7d8c',
+      approvalId: 'approval-1', toolCallId: 'call-1', approved: true,
+      reason: 'approved',
+      skillName: 'forged', toolInput: { title: 'forged' },
+    } as never)).toEqual({
+      runId: '5abf312a-ed54-451c-9628-5b5e7fbe7d8c',
+      approvalId: 'approval-1', toolCallId: 'call-1', approved: true,
+      reason: 'approved',
+    })
+  })
+
   it('maps model HTTP audit responses into correlated Chat LLM events', () => {
     expect(chatAgentLogEventFromHttpAudit({
       callId: 'call-1',
@@ -217,6 +291,67 @@ describe('Chat Agent log event mapping', () => {
       },
     })
   })
+
+  it('maps terminal durable tool checkpoints once using the owning step ordinal', () => {
+    const checkpoint = {
+      run: { id: 'run-1' },
+      steps: [
+        { id: 41, ordinal: 2 },
+        { id: 42, ordinal: 3 },
+      ],
+      tool_calls: [
+        {
+          step_id: 41, tool_call_id: 'call-saved', tool_name: 'save_draft',
+          status: 'succeeded', output_data: { saved: true, id: 865 }, error_data: null,
+        },
+        {
+          step_id: 41, tool_call_id: 'call-new-result', tool_name: 'save_draft',
+          status: 'succeeded', output_data: { saved: true, id: 866 }, error_data: null,
+        },
+        {
+          step_id: 42, tool_call_id: 'call-failed', tool_name: 'add_plan_source',
+          status: 'failed', output_data: null, error_data: { message: 'source failed' },
+        },
+        {
+          step_id: 42, tool_call_id: 'call-running', tool_name: 'search_source_items',
+          status: 'executing', output_data: null, error_data: null,
+        },
+      ],
+    }
+
+    expect(chatRunTerminalToolResultEvents(
+      checkpoint as never,
+      { turn: 4, existingCallIds: new Set(['call-saved']) },
+    )).toEqual([
+      {
+        type: 'tool/result',
+        turn: 4,
+        step: 2,
+        data: {
+          turn: 4,
+          step: 2,
+          callId: 'call-new-result',
+          content: [{ kind: 'text', text: JSON.stringify({ saved: true, id: 866 }) }],
+          output: { saved: true, id: 866 },
+          isError: false,
+        },
+      },
+      {
+        type: 'tool/result',
+        turn: 4,
+        step: 3,
+        data: {
+          turn: 4,
+          step: 3,
+          callId: 'call-failed',
+          content: [{ kind: 'text', text: 'source failed' }],
+          output: null,
+          error: 'source failed',
+          isError: true,
+        },
+      },
+    ])
+  })
 })
 
 describe('global chat model history', () => {
@@ -404,5 +539,42 @@ describe('global chat model history', () => {
     ])).toEqual([
       { id: '4', role: 'assistant', parts: [{ type: 'text', text: '我已查到资料。' }] },
     ])
+  })
+
+  it('never reconstructs approval execution history from display message parts', () => {
+    const candidates = modelHistoryCandidates([
+      {
+        id: 5,
+        role: 'assistant',
+        parts: [
+          { type: 'step-start' },
+          { type: 'reasoning', text: '先检查内容是否重复。' },
+          {
+            type: 'dynamic-tool',
+            toolName: 'check_content_novelty',
+            toolCallId: 'call-check',
+            state: 'output-available',
+            input: { content: 'draft' },
+            output: { novel: true },
+          },
+          { type: 'text', text: '内容未重复。' },
+          { type: 'step-start' },
+          { type: 'reasoning', text: '检查通过，现在保存草稿。' },
+          {
+            type: 'dynamic-tool',
+            toolName: 'save_draft',
+            toolCallId: 'call-save',
+            state: 'approval-responded',
+            input: { title: '测试草稿', content: 'draft' },
+            approval: { id: 'approval-save', approved: true },
+          },
+        ],
+      },
+    ])
+
+    expect(candidates).toEqual([{
+      id: '5', role: 'assistant',
+      parts: [{ type: 'text', text: '内容未重复。' }],
+    }])
   })
 })

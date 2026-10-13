@@ -79,6 +79,7 @@ services:
       LOCAL_ASR_DEVICE: ${LOCAL_ASR_DEVICE:-cuda}
       LOCAL_ASR_COMPUTE_TYPE: ${LOCAL_ASR_COMPUTE_TYPE:-float16}
       WORKER_TOKEN: ${WORKER_TOKEN:-}
+      AGENT_TOPIC_NOVELTY_ENABLED: ${AGENT_TOPIC_NOVELTY_ENABLED:-0}
       X_SESSION_KEY: ${X_SESSION_KEY:-}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
     volumes:
@@ -121,6 +122,11 @@ services:
       VIDEO_WORKER_QUEUE: ${VIDEO_WORKER_QUEUE:-content-jobs:video}
       API_URL: http://api:8000/api
       WORKER_TOKEN: ${WORKER_TOKEN:-}
+      CODEX_HOME: /home/violet/.mk-video-codex
+    volumes:
+      - type: bind
+        source: ${CODEX_HOME_HOST:-./data/codex-home}
+        target: /home/violet/.mk-video-codex
     depends_on:
       postgres:
         condition: service_healthy
@@ -145,10 +151,14 @@ services:
       DEVELOPER_MODE: ${NEXT_PUBLIC_DEVELOPER_MODE:-0}
       API_URL: http://api:8000/api
       WORKER_TOKEN: ${WORKER_TOKEN:-}
+      CODEX_HOME: /home/violet/.mk-video-codex
     ports:
       - "${WEB_PORT:-3000}:3000"
     volumes:
       - ./data/web-runtime:/app/web/.runtime
+      - type: bind
+        source: ${CODEX_HOME_HOST:-./data/codex-home}
+        target: /home/violet/.mk-video-codex
     depends_on:
       api:
         condition: service_healthy

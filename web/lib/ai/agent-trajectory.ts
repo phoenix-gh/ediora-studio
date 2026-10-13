@@ -635,6 +635,13 @@ export function deriveAgentTrajectory(
     else group.cells.push(partialCell)
   }
 
+  for (const tool of tools.values()) {
+    if (tool.status !== 'running') continue
+    const turn = turns.get(tool.turn)
+    if (!turn?.ended) continue
+    tool.status = turn.status === 'waiting_approval' ? 'waiting_approval' : 'interrupted'
+  }
+
   const materializedTurns = Array.from(turns.values()).sort((left, right) => left.turn - right.turn).map(turn => ({
     recordId: `turn:${turn.turn}`,
     turn: turn.turn,

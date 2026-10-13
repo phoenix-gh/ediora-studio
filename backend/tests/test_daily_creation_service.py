@@ -116,49 +116,40 @@ async def test_candidate_search_accepts_space_separated_keywords_in_directory(db
 
 
 @pytest.mark.asyncio
-async def test_recent_usage_is_global_by_default_with_optional_filters(db):
-    from daily_creation_service import get_recent_content_usage
-    from models import ContentUsageLedger
+async def test_candidates_skip_assets_adopted_inside_the_lookback(db):
+    from daily_creation_service import list_creative_asset_candidates
+    from models import CreativeAsset
 
-    now = datetime.now(timezone.utc)
+    now = datetime(2026, 10, 12, tzinfo=timezone.utc)
     db.add_all([
-        ContentUsageLedger(
-            run_id=1, rule_id=11, creative_asset_id=1,
-            output_type="x_short_post", output_kind="draft", output_id=1,
-            draft_id=1, account_id="x-a", rule_name="规则甲", topic="增长",
-            angle="成本", excerpt="近期内容", reuse_decision="fresh",
-            created_at=now - timedelta(hours=23),
+        CreativeAsset(
+            asset_type="article", directory="增长实验", title="近期采用",
+            content="仍在窗口内", last_adopted_at=now - timedelta(days=1),
         ),
-        ContentUsageLedger(
-            run_id=2, rule_id=22, creative_asset_id=2,
-            output_type="x_short_post", output_kind="draft", output_id=2,
-            draft_id=2, account_id="x-b", rule_name="规则乙", topic="增长",
-            angle="效率", excerpt="另一规则", reuse_decision="fresh",
-            created_at=now - timedelta(hours=12),
+        CreativeAsset(
+            asset_type="article", directory="增长实验", title="窗口之外",
+            content="已经可以再用", last_adopted_at=now - timedelta(days=8),
         ),
-        ContentUsageLedger(
-            run_id=3, rule_id=11, creative_asset_id=3,
-            output_type="x_short_post", output_kind="draft", output_id=3,
-            draft_id=3, account_id="x-a", rule_name="规则甲", topic="过期",
-            angle="旧角度", excerpt="旧内容", reuse_decision="fresh",
-            created_at=now - timedelta(days=2),
+        CreativeAsset(
+            asset_type="article", directory="增长实验", title="从未采用",
+            content="没有采用时间",
         ),
     ])
     await db.commit()
 
-    global_rows = await get_recent_content_usage(
-        db, lookback_days=1, output_type="x_short_post", now=now,
+    filtered = await list_creative_asset_candidates(
+        db, asset_type="article", directory="增长实验",
+        lookback_days=7, now=now, limit=10,
     )
-    assert [row["rule_name"] for row in global_rows] == ["规则乙", "规则甲"]
-    filtered = await get_recent_content_usage(
-        db, lookback_days=1, output_type="x_short_post",
-        rule_id=11, account_id="x-a", now=now,
+    assert {item["title"] for item in filtered} == {"窗口之外", "从未采用"}
+
+    unfiltered = await list_creative_asset_candidates(
+        db, asset_type="article", directory="增长实验",
+        lookback_days=0, now=now, limit=10,
     )
-    assert [row["rule_name"] for row in filtered] == ["规则甲"]
-    with pytest.raises(ValueError, match="lookback_days"):
-        await get_recent_content_usage(
-            db, lookback_days=0, output_type="x_short_post", now=now,
-        )
+    assert {item["title"] for item in unfiltered} == {
+        "近期采用", "窗口之外", "从未采用",
+    }
 
 
 def test_current_daily_creation_service_has_no_batch_writer():
@@ -224,6 +215,8 @@ async def test_x_draft_and_usage_are_persisted_atomically(db):
     assert draft.content == "真正省下的是等待时间。"
     assert usage.draft_id == draft.id
     assert usage.output_id == draft.id
+    await db.refresh(asset)
+    assert asset.last_adopted_at is not None
     assert await db.scalar(select(func.count(ArticleDraft.id))) == 1
     assert await db.scalar(select(func.count(ContentUsageLedger.id))) == 1
 
@@ -242,6 +235,8 @@ async def test_persistence_rejects_out_of_scope_asset_without_partial_draft(db):
         )
     assert await db.scalar(select(func.count(ArticleDraft.id))) == 0
     assert await db.scalar(select(func.count(ContentUsageLedger.id))) == 0
+    await db.refresh(other)
+    assert other.last_adopted_at is None
 
 
 @pytest.mark.asyncio
@@ -274,6 +269,8 @@ async def test_duplicate_usage_rolls_back_the_second_draft(db):
     with pytest.raises(IntegrityError):
         await persist_x_draft_with_usage(db, run_id=creation_run.id, asset_id=asset.id, title="待回滚", text="不应留下", topic="增长", angle="效率", reuse_decision="fresh", reuse_explanation="")
     assert await db.scalar(select(func.count(ArticleDraft.id))) == 0
+    await db.refresh(asset)
+    assert asset.last_adopted_at is None
 
 
 @pytest.mark.asyncio

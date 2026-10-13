@@ -186,26 +186,16 @@ export function isRetriedUserMessage(
     && userPartsFingerprint(retryUserMessage.parts) === userPartsFingerprint(incomingParts)
 }
 
-function isPendingApprovalPart(part: unknown): part is Record<string, unknown> {
-  if (!part || typeof part !== 'object') return false
-  const record = part as PersistedChatPart
-  return record.type === 'dynamic-tool'
-    && (record.state === 'approval-requested' || record.state === 'approval-responded')
-}
-
 export function modelHistoryCandidates(
   messages: PersistedChatMessage[],
-  { includeToolApprovals = false }: { includeToolApprovals?: boolean } = {},
 ) {
   return messages
     .filter((message): message is PersistedChatMessage & { role: 'user' | 'assistant' } => message.role !== 'tool')
     .map(message => ({
       id: String(message.id),
       role: message.role,
-      parts: [
-        ...message.parts.filter(isTextPart),
-        ...(includeToolApprovals && message.role === 'assistant' ? message.parts.filter(isPendingApprovalPart) : []),
-      ],
+      // Display tool parts are never authoritative execution history.
+      parts: message.parts.filter(isTextPart),
     }))
     .filter(message => message.parts.length > 0)
 }

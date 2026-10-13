@@ -688,6 +688,57 @@ def test_job_event_api_persists_auditable_generation_trace(client):
     assert job["events"][0]["payload"] == {"skill": "baoyu-cover-image"}
 
 
+def test_job_timeline_hides_agent_token_stream(client):
+    created = client.post("/api/jobs", json={"flow": "daily_creation", "title": "Timeline", "input": {}}).json()
+
+    from database import SessionLocal
+    from models import ContentJobEvent
+
+    async def seed_noise():
+        async with SessionLocal() as session:
+            session.add_all([
+                ContentJobEvent(
+                    job_id=created["id"], kind="agent_activity",
+                    payload={"activity": "codex", "method": "item/reasoning/textDelta"},
+                ),
+                ContentJobEvent(
+                    job_id=created["id"], kind="agent_activity",
+                    payload={"activity": "model", "direction": "model_response"},
+                ),
+                ContentJobEvent(
+                    job_id=created["id"], kind="agent_activity",
+                    payload={"activity": "heartbeat", "phase": "prepared"},
+                ),
+                ContentJobEvent(
+                    job_id=created["id"], kind="agent_activity",
+                    payload={"activity": "codex", "method": "item/completed"},
+                ),
+                ContentJobEvent(
+                    job_id=created["id"], kind="agent_activity",
+                    payload={"activity": "codex", "method": "turn/completed"},
+                ),
+                ContentJobEvent(
+                    job_id=created["id"], kind="agent_activity",
+                    payload={"activity": "tool", "method": "item/completed", "tool": "generateImage"},
+                ),
+            ])
+            await session.commit()
+
+    asyncio.new_event_loop().run_until_complete(seed_noise())
+    events = client.get(f"/api/jobs/{created['id']}").json()["events"]
+    visible = [
+        (event["kind"], event["payload"].get("activity"), event["payload"].get("method"), event["payload"].get("tool"))
+        for event in events
+    ]
+    assert ("agent_activity", "codex", "item/reasoning/textDelta", None) not in visible
+    assert ("agent_activity", "model", None, None) not in visible
+    assert ("agent_activity", "heartbeat", None, None) not in visible
+    assert ("agent_activity", "codex", "item/completed", None) not in visible
+    assert ("agent_activity", "codex", "turn/completed", None) in visible
+    assert ("agent_activity", "tool", "item/completed", "generateImage") in visible
+    assert any(event["kind"] == "job_queued" for event in events)
+
+
 def test_job_payload_includes_aggregated_token_usage(client):
     created = client.post(
         "/api/jobs", json={"flow": "cover", "title": "Token usage", "input": {}}

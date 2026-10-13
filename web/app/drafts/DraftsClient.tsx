@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef, useMemo, useSyncExternalStore, useCallback, type MouseEvent } from 'react'
+import { useState, useEffect, useEffectEvent, useRef, useMemo, useSyncExternalStore, useCallback, type MouseEvent } from 'react'
 import {
   BookMarked, Trash2, Save, RefreshCw, FileText, Clock,
   ChevronRight, Loader2, Plus,
@@ -32,6 +32,7 @@ import {
   type BulkImageOptions,
 } from './BulkImageActionDialog'
 import { runBulkOperations } from './draft-bulk-operations'
+import { subscribeToDraftArtifacts } from '@/lib/events/draft-artifacts'
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -380,6 +381,23 @@ export function DraftsClient({
         if (selectionIdentityRef.current === selectionIdentity) setImagesLoading(false)
       })
   }
+
+  const handleDraftArtifact = useEffectEvent((draftId: number) => {
+    void (async () => {
+      try {
+        const fresh = await loadFirstPage()
+        const created = fresh.find(draft => draft.id === draftId)
+        if (!created || dirty) return
+        activateDraft(created)
+      } catch {
+        toast.error('新草稿已保存，但草稿列表刷新失败')
+      }
+    })()
+  })
+
+  useEffect(() => subscribeToDraftArtifacts(artifact => {
+    handleDraftArtifact(artifact.id)
+  }), [])
 
   function toggleDraftSelection(draftId: number) {
     setSelectedDraftIds(current => {

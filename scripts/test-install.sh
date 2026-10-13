@@ -464,11 +464,15 @@ test_installer_creates_data_directories() {
     data/scheduler \
     data/avatars \
     data/wechat-images \
-    data/local-asr-models; do
+    data/local-asr-models \
+    data/codex-home; do
     [[ -d "$CASE_DIR/$relative" ]] || fail "installer must create $relative"
   done
   mode=$(stat -c '%a' "$CASE_DIR/data/sessions")
   [[ "$mode" == 700 ]] || fail "data/sessions must be mode 700 (got $mode)"
+  mode=$(stat -c '%a' "$CASE_DIR/data/codex-home")
+  [[ "$mode" == 700 ]] || fail "data/codex-home must be mode 700 (got $mode)"
+  assert_contains "$CASE_DIR/.env" 'CODEX_HOME_HOST=./data/codex-home' 'default Codex home host must be recorded'
 }
 
 test_default_flow_pulls_then_starts_without_build() {
@@ -552,6 +556,34 @@ test_invalid_ports_fail_before_compose() {
   fi
   assert_contains "$output" '不能相同' 'duplicate host ports must explain the validation error'
   assert_log_not_contains 'compose-action' 'invalid ports must fail before Compose'
+}
+
+test_custom_codex_home_host_is_preserved() {
+  local output="$CASE_DIR/output.log"
+  touch "$EDIORA_DOCKER_STATE"
+  write_valid_env
+  printf '\nCODEX_HOME_HOST=/srv/ediora/codex-home\n' >> "$CASE_DIR/.env"
+  make_blank_input "$CASE_DIR/input"
+  if ! run_installer "$output"; then
+    cat "$output" >&2
+    return 1
+  fi
+  assert_contains "$CASE_DIR/.env" 'CODEX_HOME_HOST=/srv/ediora/codex-home' 'custom Codex home host must be preserved'
+  [[ ! -d "$CASE_DIR/data/codex-home" ]] || fail 'custom Codex home host must not create the default data directory'
+}
+
+test_invalid_codex_home_host_fails_before_compose() {
+  local output="$CASE_DIR/output.log"
+  touch "$EDIORA_DOCKER_STATE"
+  write_valid_env
+  printf '\nCODEX_HOME_HOST=../outside\n' >> "$CASE_DIR/.env"
+  make_blank_input "$CASE_DIR/input"
+  if run_installer "$output"; then
+    fail 'relative Codex home outside the checkout should return non-zero'
+    return 1
+  fi
+  assert_contains "$output" 'CODEX_HOME_HOST' 'invalid Codex home host must name the setting'
+  assert_log_not_contains 'compose-action' 'invalid Codex home host must fail before Compose'
 }
 
 test_short_worker_token_fails_before_compose() {
@@ -811,6 +843,8 @@ run_test 'pull failure does not run compose down' test_pull_failure_does_not_run
 run_test 'readiness timeout returns non-zero without cleanup' test_readiness_timeout_returns_nonzero_without_cleanup
 run_test 'invalid ports fail before Compose' test_invalid_ports_fail_before_compose
 run_test 'short worker token fails before Compose' test_short_worker_token_fails_before_compose
+run_test 'custom Codex home host is preserved' test_custom_codex_home_host_is_preserved
+run_test 'invalid Codex home host fails before Compose' test_invalid_codex_home_host_fails_before_compose
 run_test 'second run preserves generated secrets' test_second_run_preserves_generated_secrets
 run_test 'non-interactive missing input fails before env creation' test_noninteractive_missing_input_fails_before_env_creation
 run_test 'unsupported Ubuntu fails before Docker' test_unsupported_ubuntu_fails_before_docker

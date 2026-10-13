@@ -4,8 +4,10 @@ import { useLayoutEffect, useRef, useState, type ClipboardEvent, type FormEvent,
 import { Loader2, MessageSquarePlus, Send } from 'lucide-react'
 
 import { ChatContextPicker } from '@/components/features/chat/ChatContextPicker'
+import { ChatModelControls, useChatModelSelection } from '@/components/features/chat/ChatModelControls'
 import { ChatSkillPipelinePicker } from '@/components/features/chat/ChatSkillPipelinePicker'
 import { Button } from '@/components/ui/button'
+import type { ChatModelSelection } from '@/lib/ai/chat-model-catalog'
 import type { ChatComposerMessagePart, ChatDraft, ChatSkill, SubmittedSkillInvocation } from '@/lib/api/chat'
 import { cn } from '@/lib/utils'
 
@@ -166,7 +168,11 @@ export type ChatComposerProps = {
   onSkillNameChange: (skillName: string | undefined) => void
   onDraftIdChange: (draftId: number | undefined) => void
   onPipelineInvocationsChange: (invocations: SubmittedSkillInvocation[]) => void
-  onSubmit: (value: string, messageParts: ChatComposerMessagePart[]) => boolean | Promise<boolean>
+  onSubmit: (
+    value: string,
+    messageParts: ChatComposerMessagePart[],
+    modelSelection: ChatModelSelection,
+  ) => boolean | Promise<boolean>
 }
 
 export function ChatComposer({
@@ -186,6 +192,12 @@ export function ChatComposer({
 }: ChatComposerProps) {
   const isFloating = variant === 'floating'
   const [skillPickerOpen, setSkillPickerOpen] = useState(false)
+  const {
+    models,
+    selection: modelSelection,
+    setModel,
+    setReasoningEffort,
+  } = useChatModelSelection()
   const editorRef = useRef<HTMLDivElement>(null)
   const insertionRangeRef = useRef<Range | null>(null)
 
@@ -220,7 +232,7 @@ export function ChatComposer({
     setEditorEmptyState(editor)
     onChange('')
 
-    const submitted = await onSubmit(value, messageParts)
+    const submitted = await onSubmit(value, messageParts, modelSelection)
     if (submitted) {
       onPipelineInvocationsChange([])
       return
@@ -404,6 +416,13 @@ export function ChatComposer({
               onOpenChange={handleSkillPickerOpenChange}
               onChange={onPipelineInvocationsChange}
               onInvocationAdded={handleInvocationAdded}
+            />
+            <ChatModelControls
+              models={models}
+              selection={modelSelection}
+              disabled={disabled}
+              onModelChange={setModel}
+              onReasoningEffortChange={setReasoningEffort}
             />
             <ChatContextPicker
               skills={[]}

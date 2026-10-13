@@ -24,6 +24,8 @@ const pausedRule: DailyCreationRule = {
   instructions: '',
   skill_mode: 'auto',
   skill_name: null,
+  codex_model: null,
+  codex_reasoning_effort: null,
   enabled: false,
   deleted_at: null,
   last_run_at: null,

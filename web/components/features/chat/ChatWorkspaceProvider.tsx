@@ -26,17 +26,21 @@ import {
   type ChatSession,
   type ChatSkill,
   type SubmittedSkillInvocation,
+  type UIMessageStreamEvent,
 } from '@/lib/api/chat'
 import { ApiError } from '@/lib/api/client'
+import { publishDraftArtifact } from '@/lib/events/draft-artifacts'
+import type { PersistedArtifact } from '@/lib/ai/chat-run-types'
 import { titleFromFirstMessage } from '@/app/chat/chat-title'
 
 import {
-  approvalResumeMessage,
+  applyApprovalDecision,
   applyChatStreamEvent,
   initialChatStatusPart,
   makeLocalMessage,
   toModelMessages,
 } from './chat-workspace-state'
+import type { ChatModelSelection } from '@/lib/ai/chat-model-catalog'
 import type {
   ChatApprovalArgs,
   ChatWorkspaceState,
@@ -58,7 +62,11 @@ export type ChatWorkspaceContextValue = {
   startNewConversation: () => void
   renameSession: (sessionId: number, title: string) => Promise<void>
   removeSession: (sessionId: number) => Promise<void>
-  submit: (text: string, messageParts: ChatComposerMessagePart[]) => Promise<boolean>
+  submit: (
+    text: string,
+    messageParts: ChatComposerMessagePart[],
+    modelSelection?: ChatModelSelection,
+  ) => Promise<boolean>
   respondToApproval: (args: ChatApprovalArgs) => Promise<void>
   setSkillName: (skillName: string) => void
   setDraftId: (draftId: number | null) => void
@@ -114,6 +122,17 @@ export function ChatWorkspaceProvider({ children }: { children: ReactNode }) {
     signature: string
     clientMessageId: string
   } | null>(null)
+  const approvalRequestsRef = useRef(new Set<string>())
+  const publishedArtifactsRef = useRef(new Set<string>())
+
+  const publishArtifactEvent = useCallback((event: UIMessageStreamEvent) => {
+    if (event.type !== 'data-artifact' || !event.data || typeof event.data !== 'object') return
+    const artifact = event.data as PersistedArtifact
+    const artifactKey = `${artifact.kind}:${artifact.id}`
+    if (publishedArtifactsRef.current.has(artifactKey)) return
+    publishedArtifactsRef.current.add(artifactKey)
+    publishDraftArtifact(artifact)
+  }, [])
 
   const updateSession = useCallback((
     sessionId: number,
@@ -353,7 +372,14 @@ export function ChatWorkspaceProvider({ children }: { children: ReactNode }) {
     return session.id
   }, [state.activeSessionId])
 
-  const submit = useCallback(async (text: string, messageParts: ChatComposerMessagePart[]) => {
+  const modelSelectionRef = useRef<ChatModelSelection | undefined>(undefined)
+
+  const submit = useCallback(async (
+    text: string,
+    messageParts: ChatComposerMessagePart[],
+    modelSelection?: ChatModelSelection,
+  ) => {
+    if (modelSelection) modelSelectionRef.current = modelSelection
     const trimmed = text.trim()
     if (!trimmed) return false
     const sessionId = await ensureActiveSession(trimmed)
@@ -413,10 +439,15 @@ export function ChatWorkspaceProvider({ children }: { children: ReactNode }) {
         draftId: state.composer.draftId ?? undefined,
         skillInvocation: directInvocation,
         messageParts: directInvocation ? messageParts : undefined,
-        onEvent: event => updateSession(
-          sessionId,
-          messages => applyChatStreamEvent(messages, String(assistantMessage.id), event),
-        ),
+        model: modelSelection?.model,
+        reasoningEffort: modelSelection?.reasoningEffort,
+        onEvent: event => {
+          publishArtifactEvent(event)
+          updateSession(
+            sessionId,
+            messages => applyChatStreamEvent(messages, String(assistantMessage.id), event),
+          )
+        },
       })
       await loadSession(sessionId, true)
       await refreshSessions()
@@ -437,6 +468,7 @@ export function ChatWorkspaceProvider({ children }: { children: ReactNode }) {
   }, [
     ensureActiveSession,
     loadSession,
+    publishArtifactEvent,
     refreshSessions,
     setSessionError,
     setSessionRunning,
@@ -448,9 +480,18 @@ export function ChatWorkspaceProvider({ children }: { children: ReactNode }) {
 
   const respondToApproval = useCallback(async (args: ChatApprovalArgs) => {
     const key = sessionKey(args.sessionId)
-    if (state.runningBySession[key]) return
-    const assistantMessage = approvalResumeMessage()
-    updateSession(args.sessionId, messages => [...messages, assistantMessage])
+    const requestKey = `${args.runId}:${args.toolCallId}:${args.approvalId}`
+    if (state.runningBySession[key] || approvalRequestsRef.current.has(requestKey)) return
+    const assistantMessage = (state.messagesBySession[key] ?? []).find(message => (
+      message.run_id === args.runId
+      || message.parts.some(part => part.runId === args.runId)
+    ))
+    if (!assistantMessage) {
+      setSessionError(args.sessionId, '该任务的运行状态不可用，请重新开始')
+      return
+    }
+    approvalRequestsRef.current.add(requestKey)
+    updateSession(args.sessionId, messages => applyApprovalDecision(messages, args))
     inlineStreamSessionIdsRef.current.add(args.sessionId)
     setSessionRunning(args.sessionId, true)
     setSessionError(args.sessionId, null)
@@ -458,33 +499,44 @@ export function ChatWorkspaceProvider({ children }: { children: ReactNode }) {
       await streamChatReply({
         sessionId: args.sessionId,
         messages: [],
-        skillName: state.composer.skillName || undefined,
-        draftId: state.composer.draftId ?? undefined,
         approval: {
-          messageId: args.messageId,
+          runId: args.runId,
           toolCallId: args.toolCallId,
           approvalId: args.approvalId,
           approved: args.approved,
+          ...(args.reason ? { reason: args.reason } : {}),
         },
-        onEvent: event => updateSession(
-          args.sessionId,
-          messages => applyChatStreamEvent(messages, String(assistantMessage.id), event),
-        ),
+        model: modelSelectionRef.current?.model,
+        reasoningEffort: modelSelectionRef.current?.reasoningEffort,
+        onEvent: event => {
+          publishArtifactEvent(event)
+          updateSession(
+            args.sessionId,
+            messages => applyChatStreamEvent(messages, String(assistantMessage.id), event),
+          )
+        },
       })
       await loadSession(args.sessionId, true)
       await refreshSessions()
     } catch (error) {
+      try {
+        await loadSession(args.sessionId, true)
+      } catch {
+        // Keep the optimistic decision if the authoritative session is temporarily unavailable.
+      }
       setSessionError(args.sessionId, errorMessage(error, '处理工具确认失败'))
     } finally {
+      approvalRequestsRef.current.delete(requestKey)
       inlineStreamSessionIdsRef.current.delete(args.sessionId)
       setSessionRunning(args.sessionId, false)
     }
   }, [
     loadSession,
+    publishArtifactEvent,
     refreshSessions,
     setSessionError,
     setSessionRunning,
-    state.composer,
+    state.messagesBySession,
     state.runningBySession,
     updateSession,
   ])

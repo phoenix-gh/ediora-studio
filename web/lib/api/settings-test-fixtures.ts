@@ -5,6 +5,8 @@ export function makeSettings(overrides: Partial<AppSettings> = {}): AppSettings 
   const settings = {
     llm_provider: 'openai',
     llm_model: 'gpt-4o-mini',
+    codex_model: 'proxy/deepseek-v4-flash',
+    codex_reasoning_effort: 'medium',
     llm_base_url: '',
     llm_effective_base_url: 'https://api.openai.com/v1',
     llm_api_key_set: false,

@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { Draft, DraftImage } from '@/lib/api/drafts'
 import type { PublishAccount } from '@/lib/api/publish-accounts'
+import { DRAFT_ARTIFACT_EVENT } from '@/lib/events/draft-artifacts'
 
 const mocks = vi.hoisted(() => ({
   updateDraft: vi.fn(),
@@ -158,6 +159,7 @@ const refreshedImage = {
 } satisfies DraftImage
 
 beforeEach(() => {
+  vi.stubGlobal('localStorage', localStorageStub)
   mocks.getDrafts.mockResolvedValue([draftA, draftB])
   mocks.getDraftPage.mockResolvedValue({ items: [draftA, draftB], next_cursor: null })
   mocks.getDraftImages.mockResolvedValue([])
@@ -172,9 +174,57 @@ afterEach(() => {
   cleanup()
   localStorageStub.clear()
   vi.clearAllMocks()
+  vi.unstubAllGlobals()
 })
 
 describe('DraftsClient async response identity', () => {
+  it('reloads a created artifact without replacing dirty editor fields or selection', async () => {
+    const created = makeDraft(3, 'Agent 新草稿', 'Agent 正文', 1)
+    mocks.getDraftPage.mockResolvedValue({ items: [created, draftA, draftB], next_cursor: null })
+    render(
+      <DraftsClient
+        initialDrafts={[draftA, draftB]}
+        initialTopics={[]}
+        initialDraftId={draftA.id}
+      />,
+    )
+    fireEvent.change(screen.getByPlaceholderText('标题…'), { target: { value: 'A 本地标题' } })
+    fireEvent.change(screen.getByLabelText('草稿正文'), { target: { value: 'A 本地正文' } })
+
+    window.dispatchEvent(new CustomEvent(DRAFT_ARTIFACT_EVENT, {
+      detail: { kind: 'draft', id: created.id, title: created.title, url: `/drafts?draft=${created.id}` },
+    }))
+
+    expect(await screen.findByText('Agent 新草稿')).toBeInTheDocument()
+    expect((screen.getByPlaceholderText('标题…') as HTMLInputElement).value).toBe('A 本地标题')
+    expect((screen.getByLabelText('草稿正文') as HTMLTextAreaElement).value).toBe('A 本地正文')
+    expect(screen.getByText('有未保存修改')).toBeInTheDocument()
+  })
+
+  it('selects a created artifact received from BroadcastChannel when the editor is clean', async () => {
+    const channels: BroadcastChannelStub[] = []
+    class BroadcastChannelStub {
+      onmessage: ((event: MessageEvent) => void) | null = null
+      constructor(public name: string) { channels.push(this) }
+      postMessage(data: unknown) {
+        for (const channel of channels) {
+          if (channel !== this && channel.name === this.name) channel.onmessage?.({ data } as MessageEvent)
+        }
+      }
+      close() {}
+    }
+    vi.stubGlobal('BroadcastChannel', BroadcastChannelStub)
+    const created = makeDraft(3, '跨窗口草稿', '跨窗口正文', 1)
+    mocks.getDraftPage.mockResolvedValue({ items: [created, draftA, draftB], next_cursor: null })
+    render(<DraftsClient initialDrafts={[draftA, draftB]} initialTopics={[]} initialDraftId={draftA.id} />)
+
+    const sender = new BroadcastChannelStub('ediora:draft-artifacts')
+    sender.postMessage({ kind: 'draft', id: created.id, title: created.title, url: `/drafts?draft=${created.id}` })
+
+    await waitFor(() => expect((screen.getByPlaceholderText('标题…') as HTMLInputElement).value).toBe('跨窗口草稿'))
+    expect((screen.getByLabelText('草稿正文') as HTMLTextAreaElement).value).toBe('跨窗口正文')
+  })
+
   it('passes the active draft id to the shared Markdown editor', () => {
     render(
       <DraftsClient

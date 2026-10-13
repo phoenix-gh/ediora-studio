@@ -1,6 +1,7 @@
 import { createOpenAI } from '@ai-sdk/openai'
 
 import type { LLMAdapterProtocol } from '@/lib/api/settings'
+import { createDeepSeekReasoningFetch } from '@/lib/ai/deepseek-reasoning-compat'
 
 export type TextModelSettings = {
   adapter_id?: string
@@ -60,13 +61,19 @@ export function imageModelConfigFromSettings(
 export function openaiProviderFromConfig(config: Pick<
   TextModelConfig,
   'apiKey' | 'baseURL' | 'headers'
->, options: { fetch?: typeof globalThis.fetch } = {}) {
-  return createOpenAI({
+> & Partial<Pick<TextModelConfig, 'modelName' | 'protocol'>>,
+options: { fetch?: typeof globalThis.fetch } = {},
+) {
+  const providerOptions = {
     apiKey: config.apiKey,
     baseURL: config.baseURL,
     headers: config.headers,
-    ...(options.fetch ? { fetch: options.fetch } : {}),
-  })
+    ...(/^deepseek(?:[-/]|$)/i.test(config.modelName ?? '')
+      && config.protocol !== 'openai-responses'
+      ? { fetch: createDeepSeekReasoningFetch(options.fetch ?? globalThis.fetch) }
+      : options.fetch ? { fetch: options.fetch } : {}),
+  }
+  return createOpenAI(providerOptions)
 }
 
 export function textModelForProvider<T>(
@@ -82,9 +89,12 @@ export function textModelForProvider<T>(
     : provider.chat(modelName)
 }
 
-export function textModelFromConfig(config: TextModelConfig) {
+export function textModelFromConfig(
+  config: TextModelConfig,
+  options: { fetch?: typeof globalThis.fetch } = {},
+) {
   return textModelForProvider(
-    openaiProviderFromConfig(config),
+    openaiProviderFromConfig(config, options),
     config.modelName,
     config.protocol,
   )

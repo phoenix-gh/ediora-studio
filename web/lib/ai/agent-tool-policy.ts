@@ -74,7 +74,6 @@ export const RESPONSE_AGENT_TOOL_ALLOWLIST = [
   'search_creative_assets',
   'get_creative_asset',
   'list_creative_asset_candidates',
-  'get_recent_content_usage',
   'list_source_subscriptions',
   'search_source_items',
   'get_source_item',
@@ -85,6 +84,7 @@ export const RESPONSE_AGENT_TOOL_ALLOWLIST = [
   'get_account_profile',
   'loadSkill',
   'readSkillReference',
+  'check_content_novelty',
   'save_draft',
 ] as const
 

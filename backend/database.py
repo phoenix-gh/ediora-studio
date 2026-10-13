@@ -677,6 +677,21 @@ async def _add_columns(conn, table_name: str, definitions: dict[str, str]) -> No
             ))
 
 
+async def migrate_chat_run_checkpoint_schema(conn) -> None:
+    """Repair Chat Run projection fields and partial indexes idempotently."""
+    from sqlalchemy import text
+
+    await _add_columns(conn, "chat_messages", {"run_id": "VARCHAR(36)"})
+    await conn.execute(text(
+        "CREATE INDEX IF NOT EXISTS ix_chat_messages_run_id "
+        "ON chat_messages (run_id)"
+    ))
+    await conn.execute(text(
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_chat_run_tool_calls_approval_id "
+        "ON chat_run_tool_calls (approval_id) WHERE approval_id IS NOT NULL"
+    ))
+
+
 async def migrate_prompt_asset_schema(conn) -> None:
     """Add prompt metadata and the prompt-to-media generation history table."""
     await _add_columns(conn, "creative_assets", {
@@ -725,6 +740,62 @@ async def migrate_daily_creation_prompt_schema(conn) -> None:
         await conn.execute(text(
             "UPDATE daily_creation_rules SET prompt = :prompt WHERE id = :rule_id"
         ), {"prompt": prompt, "rule_id": row["id"]})
+    await _rewrite_stored_usage_prompts(conn)
+
+
+async def _rewrite_stored_usage_prompts(conn) -> None:
+    """Point stored task prompts at asset adoption time instead of the ledger."""
+    import json
+
+    from sqlalchemy import text
+
+    from daily_creation_prompt import rewrite_legacy_usage_prompt
+
+    rule_rows = (
+        await conn.execute(text(
+            "SELECT id, prompt FROM daily_creation_rules "
+            "WHERE prompt LIKE '%record_content_usage%' "
+            "OR prompt LIKE '%内容使用记录%'"
+        ))
+    ).mappings().all()
+    for row in rule_rows:
+        updated = rewrite_legacy_usage_prompt(row["prompt"] or "")
+        if updated == (row["prompt"] or ""):
+            continue
+        await conn.execute(text(
+            "UPDATE daily_creation_rules SET prompt = :prompt WHERE id = :rule_id"
+        ), {"prompt": updated, "rule_id": row["id"]})
+
+    run_rows = (
+        await conn.execute(text(
+            "SELECT id, rule_snapshot FROM daily_creation_runs "
+            "WHERE status IN ('queued', 'running') "
+            "AND ("
+            "rule_snapshot::text LIKE '%record_content_usage%' "
+            "OR rule_snapshot::text LIKE '%内容使用记录%'"
+            ")"
+        ))
+    ).mappings().all()
+    for row in run_rows:
+        raw = row["rule_snapshot"]
+        if isinstance(raw, str):
+            snapshot = json.loads(raw)
+        elif isinstance(raw, dict):
+            snapshot = dict(raw)
+        else:
+            continue
+        prompt = str(snapshot.get("prompt") or "")
+        updated = rewrite_legacy_usage_prompt(prompt)
+        if updated == prompt:
+            continue
+        snapshot["prompt"] = updated
+        await conn.execute(text(
+            "UPDATE daily_creation_runs "
+            "SET rule_snapshot = CAST(:snapshot AS json) WHERE id = :run_id"
+        ), {
+            "snapshot": json.dumps(snapshot, ensure_ascii=False),
+            "run_id": row["id"],
+        })
 
 
 async def _drop_tables(conn, table_names: tuple[str, ...]) -> None:
@@ -1359,6 +1430,7 @@ async def init_db():
         await migrate_skill_pipeline_schema(conn, assert_complete=False)
         await _drop_tables(conn, ("daily_plan_items", "daily_plans"))
         await conn.run_sync(Base.metadata.create_all)
+        await migrate_chat_run_checkpoint_schema(conn)
         await migrate_skill_pipeline_schema(conn, assert_complete=True)
         await _drop_columns(conn, "publish_accounts", ("daily_quota",))
         await migrate_topic_source_rule_single_directory(conn)
@@ -1374,6 +1446,7 @@ async def init_db():
         await _add_columns(conn, "chat_messages", {
             "skill_run": "JSON",
             "capability_snapshot": "JSON",
+            "run_id": "VARCHAR(36)",
         })
         await _add_columns(conn, "agent_executions", {
             "pinned_capability_snapshot": "JSON",
@@ -1382,7 +1455,12 @@ async def init_db():
             "media_kind": "VARCHAR NOT NULL DEFAULT ''",
             "directory": "VARCHAR NOT NULL DEFAULT ''",
             "last_selected_at": "TIMESTAMP",
+            "last_adopted_at": "TIMESTAMPTZ",
         })
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_creative_assets_last_adopted_at "
+            "ON creative_assets (last_adopted_at)"
+        ))
         await migrate_prompt_asset_schema(conn)
         await _add_columns(conn, "creative_asset_directories", {
             "asset_type": "VARCHAR NOT NULL DEFAULT 'article'",
@@ -1437,6 +1515,8 @@ async def init_db():
             "directories": f"JSON NOT NULL DEFAULT {json_array_default}",
             "skill_mode": "VARCHAR NOT NULL DEFAULT 'auto'",
             "skill_name": "VARCHAR",
+            "codex_model": "VARCHAR",
+            "codex_reasoning_effort": "VARCHAR",
         })
         await conn.execute(text(
             "UPDATE daily_creation_rules SET delivery_mode = 'drafts' "

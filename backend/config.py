@@ -11,6 +11,8 @@ from models import AppSetting
 DEFAULTS: dict[str, str] = {
     "llm_provider": "openai",
     "llm_model": "",
+    "codex_model": "proxy/deepseek-v4-flash",
+    "codex_reasoning_effort": "medium",
     "llm_api_key": "",
     "llm_base_url": "",
     "image_api_key": "",

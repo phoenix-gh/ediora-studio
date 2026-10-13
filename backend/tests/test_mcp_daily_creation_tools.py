@@ -27,10 +27,14 @@ def run(coroutine):
     return asyncio.run(coroutine)
 
 
-def run_context(run_id=None):
+def run_context(run_id=None, session_id=None):
     headers = {}
     if run_id is not None:
+        headers["x-agent-mode"] = "scheduled"
         headers["x-daily-creation-run-id"] = str(run_id)
+    if session_id is not None:
+        headers["x-agent-mode"] = "chat"
+        headers["x-agent-session-id"] = str(session_id)
     return SimpleNamespace(
         request_context=SimpleNamespace(
             request=SimpleNamespace(headers=headers),
@@ -41,7 +45,6 @@ def run_context(run_id=None):
 def seed_context():
     from database import SessionLocal
     from models import (
-        ContentUsageLedger,
         CreativeAsset,
         DailyCreationRule,
         DailyCreationRun,
@@ -75,33 +78,22 @@ def seed_context():
                 rule_snapshot={
                     "name": rule.name, "asset_type": "article",
                     "directory": "产品实验", "output_type": "x_short_post",
-                    "delivery_mode": "drafts",
+                    "delivery_mode": "drafts", "lookback_days": 5,
                 },
             )
             session.add(creation_run)
-            await session.flush()
-            session.add(ContentUsageLedger(
-                run_id=creation_run.id, rule_id=rule.id,
-                creative_asset_id=asset.id, output_type="x_short_post",
-                output_kind="draft", output_id=88, draft_id=88,
-                rule_name=rule.name, topic="验证", angle="先卖再做",
-                excerpt="旧内容", reuse_decision="fresh",
-            ))
             await session.commit()
             return asset.id, second_asset.id, creation_run.id
 
     return run(seed())
 
 
-def test_mcp_exposes_compact_candidates_and_global_history(env):
+def test_mcp_exposes_compact_candidates(env):
     asset_id, _, _ = seed_context()
     import mcp_server
 
     candidates = run(mcp_server.list_creative_asset_candidates(
         asset_type="article", directories=["产品实验"], query="验证", limit=10,
-    ))
-    history = run(mcp_server.get_recent_content_usage(
-        lookback_days=5, output_type="x_short_post",
     ))
 
     assert candidates == [{
@@ -113,8 +105,6 @@ def test_mcp_exposes_compact_candidates_and_global_history(env):
         "created_at": candidates[0]["created_at"],
         "content_length": 13,
     }]
-    assert history[0]["asset_id"] == asset_id
-    assert history[0]["angle"] == "先卖再做"
 
 
 def test_candidate_tool_requires_directories(env):
@@ -124,6 +114,12 @@ def test_candidate_tool_requires_directories(env):
     schema = tools["list_creative_asset_candidates"].inputSchema
 
     assert "directories" in schema["required"]
+    assert "ctx" not in schema["properties"]
+    search_schema = tools["search_creative_assets"].inputSchema
+    assert "ctx" not in search_schema["properties"]
+    window = search_schema["properties"]["exclude_adopted_within_days"]
+    assert window["minimum"] == 0
+    assert window["maximum"] == 90
 
 
 def test_daily_batch_save_tool_is_not_registered(env):
@@ -134,12 +130,11 @@ def test_daily_batch_save_tool_is_not_registered(env):
     assert "save_daily_creation_outputs" not in names
     assert "save_draft" in names
     assert "attach_creative_asset_to_draft" in names
-    assert "record_content_usage" in names
-    usage_schema = mcp_server.mcp._tool_manager._tools[
-        "record_content_usage"
-    ].parameters
-    assert "run_id" not in usage_schema["properties"]
-    assert "ctx" not in usage_schema["properties"]
+    assert "record_content_usage" not in names
+    assert "get_recent_content_usage" not in names
+    save_schema = mcp_server.mcp._tool_manager._tools["save_draft"].parameters
+    assert "asset_ids" in save_schema["properties"]
+    assert "ctx" not in save_schema["properties"]
 
 
 def test_real_save_draft_contract_accepts_x_drafts(env):
@@ -152,83 +147,167 @@ def test_real_save_draft_contract_accepts_x_drafts(env):
     ]
 
 
-def test_record_usage_schema_lists_only_agent_accepted_values(env):
+def test_content_novelty_tool_is_strict_read_only_and_returns_global_result(
+    env, monkeypatch,
+):
     import mcp_server
+    from tool_contracts import EDIORA_TOOL_META_KEY
 
-    schema = mcp_server.mcp._tool_manager._tools["record_content_usage"].parameters
+    monkeypatch.setenv("AGENT_TOPIC_NOVELTY_ENABLED", "1")
 
-    assert schema["properties"]["output_kind"]["const"] == "draft"
-    assert schema["properties"]["reuse_decision"]["enum"] == [
-        "fresh", "reuse_allowed",
-    ]
+    tools = {tool.name: tool for tool in run(mcp_server.mcp.list_tools())}
+    schema = tools["check_content_novelty"].inputSchema
+    metadata = mcp_server.mcp._tool_manager._tools[
+        "check_content_novelty"
+    ].meta[EDIORA_TOOL_META_KEY]
 
-
-def test_record_usage_rejects_a_missing_persisted_output(env):
-    asset_id, _, run_id = seed_context()
-    import mcp_server
-
-    with pytest.raises(ValueError, match="not found"):
-        run(mcp_server.record_content_usage(
-            ctx=run_context(run_id), asset_id=asset_id,
-            output_kind="draft", output_id=999,
-            topic="验证", angle="新角度", excerpt="不会写入",
-            reuse_decision="fresh",
-        ))
-
-
-def test_record_usage_requires_transport_run_identity(env):
-    asset_id, _, _ = seed_context()
-    import mcp_server
-
-    with pytest.raises(ValueError, match="run identity"):
-        run(mcp_server.record_content_usage(
-            ctx=run_context(), asset_id=asset_id,
-            output_kind="draft", output_id=999,
-            topic="验证", angle="新角度", excerpt="不会写入",
-            reuse_decision="fresh",
-        ))
-
-
-def test_record_usage_is_idempotent_and_not_limited_by_legacy_rule_scope(env):
-    _, outside_legacy_directory_id, run_id = seed_context()
-    import mcp_server
-    from database import SessionLocal
-    from models import ContentUsageLedger
-    from sqlalchemy import select
-
-    saved = run(mcp_server.save_draft(
-        title="增长复盘", content="从另一目录补充增长经验。", draft_type="x",
+    assert schema["properties"]["window_days"]["minimum"] == 1
+    assert schema["properties"]["window_days"]["maximum"] == 90
+    assert schema["properties"]["key_facts"]["anyOf"][0]["maxItems"] == 20
+    assert schema["properties"]["source_item_ids"]["anyOf"][0]["maxItems"] == 100
+    assert tools["check_content_novelty"].annotations.readOnlyHint is True
+    assert metadata["approval"] == "never"
+    result = run(mcp_server.check_content_novelty(
+        topic="Agent 工具选择",
+        core_claim="严格契约减少错误参数",
+        window_days=14,
     ))
-    input_data = {
-        "ctx": run_context(run_id),
-        "asset_id": outside_legacy_directory_id,
-        "output_kind": "draft",
-        "output_id": saved["id"],
-        "topic": "增长复盘",
-        "angle": "跨目录证据",
-        "excerpt": "从另一目录补充增长经验。",
-        "reuse_decision": "fresh",
+    assert result["decision"] == "novel"
+    assert result["suggested_action"] == "continue"
+
+
+def test_content_novelty_tool_returns_disabled_without_feature_flag(
+    env, monkeypatch,
+):
+    import mcp_server
+
+    monkeypatch.setenv("AGENT_TOPIC_NOVELTY_ENABLED", "0")
+
+    result = run(mcp_server.check_content_novelty(
+        topic="暂时跳过",
+        core_claim="关闭时不应调用新颖性模型",
+        window_days=14,
+    ))
+
+    assert result == {
+        "decision": "disabled",
+        "conflicts": (),
+        "reason": "Agent topic novelty checking is disabled",
+        "novelty_basis": "",
+        "suggested_action": "continue",
     }
 
-    first = run(mcp_server.record_content_usage(**input_data))
-    second = run(mcp_server.record_content_usage(**input_data))
 
-    async def read_usage():
+def test_agent_save_draft_creates_topic_claim_without_changing_rest_drafts(
+    env, monkeypatch,
+):
+    import llm
+    import mcp_server
+    from database import SessionLocal
+    from models import AgentTopicClaim
+    from sqlalchemy import select
+
+    async def extract(prompt, max_tokens):
+        return (
+            '{"topic":"Agent 工具选择","core_claim":"严格契约减少错误参数",'
+            '"key_facts":[],"event_time":null,"source_item_ids":[]}'
+        )
+
+    monkeypatch.setattr(llm, "_call", extract)
+    result = run(mcp_server.save_draft(
+        ctx=run_context(session_id=92),
+        title="工具契约",
+        content="严格契约减少错误参数。",
+    ))
+
+    async def read_claim():
         async with SessionLocal() as session:
-            rows = (await session.execute(
-                select(ContentUsageLedger).where(
-                    ContentUsageLedger.run_id == run_id,
-                    ContentUsageLedger.output_id == saved["id"],
-                )
-            )).scalars().all()
-            return rows
+            return await session.scalar(select(AgentTopicClaim).where(
+                AgentTopicClaim.draft_id == result["id"]
+            ))
 
-    rows = run(read_usage())
-    assert first["id"] == second["id"]
-    assert len(rows) == 1
-    assert rows[0].creative_asset_id == outside_legacy_directory_id
-    assert rows[0].output_type == "x_short_post"
-    assert rows[0].topic == "增长复盘"
+    claim = run(read_claim())
+    assert result["saved"] is True
+    assert claim is not None
+    assert claim.agent_mode == "chat"
+    assert claim.agent_session_id == 92
+    assert claim.window_days == 14
+
+
+def test_save_draft_stamps_adopted_assets_and_rolls_back_a_missing_id(
+    env, monkeypatch,
+):
+    asset_id, outside_id, run_id = seed_context()
+    import mcp_server
+    from database import SessionLocal
+    from models import ArticleDraft, CreativeAsset
+    from sqlalchemy import func, select
+
+    monkeypatch.setenv("AGENT_TOPIC_NOVELTY_ENABLED", "0")
+
+    saved = run(mcp_server.save_draft(
+        ctx=run_context(run_id),
+        title="增长复盘",
+        content="从另一目录补充增长经验。",
+        draft_type="x",
+        asset_ids=[asset_id, outside_id, asset_id],
+    ))
+
+    async def adopted_at(target_id):
+        async with SessionLocal() as session:
+            asset = await session.get(CreativeAsset, target_id)
+            return asset.last_adopted_at
+
+    assert saved["saved"] is True
+    assert run(adopted_at(asset_id)) is not None
+    assert run(adopted_at(outside_id)) is not None
+
+    with pytest.raises(ValueError, match="not found"):
+        run(mcp_server.save_draft(
+            ctx=run_context(run_id),
+            title="缺失素材",
+            content="这个草稿不应该留下。",
+            draft_type="x",
+            asset_ids=[999999],
+        ))
+
+    async def draft_count():
+        async with SessionLocal() as session:
+            return await session.scalar(select(func.count(ArticleDraft.id)))
+
+    assert run(draft_count()) == 1
+
+
+def test_scheduled_fetch_excludes_recently_adopted_assets(env):
+    asset_id, second_id, run_id = seed_context()
+    import mcp_server
+    from database import SessionLocal
+    from models import CreativeAsset
+    from datetime import datetime, timezone
+
+    async def adopt():
+        async with SessionLocal() as session:
+            asset = await session.get(CreativeAsset, asset_id)
+            asset.last_adopted_at = datetime.now(timezone.utc)
+            await session.commit()
+
+    run(adopt())
+    ctx = run_context(run_id)
+
+    listed = run(mcp_server.list_creative_asset_candidates(
+        asset_type="article", directories=["产品实验"], ctx=ctx,
+    ))
+    searched = run(mcp_server.search_creative_assets(
+        query="验证", directory="产品实验", ctx=ctx,
+    ))
+    unfiltered = run(mcp_server.list_creative_asset_candidates(
+        asset_type="article", directories=["产品实验", "增长资料"],
+    ))
+
+    assert asset_id not in {item["id"] for item in listed}
+    assert asset_id not in {item["id"] for item in searched}
+    assert {item["id"] for item in unfiltered} == {asset_id, second_id}
+    assert run(mcp_server.get_creative_asset(asset_id))["id"] == asset_id
 
 
 def test_mcp_combines_multiple_directories(env):

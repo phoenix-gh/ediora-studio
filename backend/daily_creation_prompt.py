@@ -1,4 +1,35 @@
+import re
 from collections.abc import Mapping
+
+ADOPTED_ASSET_INSTRUCTION = (
+    "save_draft 时把本条实际采用的素材 id 放进 asset_ids，"
+    "服务端会更新这些素材的最近采用时间。"
+)
+
+_LEGACY_USAGE_CHECK = re.compile(
+    r"检查最近 (\d+) 天的内容使用记录，不要复用仍在去重期内的创作资产。"
+)
+_LEGACY_USAGE_RECORD = (
+    "仅在 save_draft 成功并返回真实草稿 id 后，调用 "
+    "record_content_usage 记录该草稿实际使用的素材。"
+)
+
+
+def rewrite_legacy_usage_prompt(prompt: str) -> str:
+    """Replace ledger lookup instructions with adoption-time exclusion."""
+    text = prompt or ""
+    updated = _LEGACY_USAGE_CHECK.sub(
+        r"获取创作资产时已经排除最近 \1 天内被采用过的素材。",
+        text,
+    )
+    updated = updated.replace(_LEGACY_USAGE_RECORD, ADOPTED_ASSET_INSTRUCTION)
+    if (
+        updated != text
+        and ADOPTED_ASSET_INSTRUCTION not in updated
+        and "save_draft" in updated
+    ):
+        updated = updated.rstrip() + "\n" + ADOPTED_ASSET_INSTRUCTION
+    return updated
 
 
 def build_legacy_creation_prompt(rule: Mapping[str, object]) -> str:
@@ -35,15 +66,21 @@ def build_legacy_creation_prompt(rule: Mapping[str, object]) -> str:
         )
     if lookback > 0:
         lines.append(
-            f"检查最近 {lookback} 天的内容使用记录，不要复用仍在去重期内的创作资产。"
+            f"搜索素材时把 exclude_adopted_within_days 设为 {lookback}，"
+            f"排除最近 {lookback} 天内被采用过的素材。"
+        )
+        lines.append(
+            "先提出多个候选主题，并用 check_content_novelty 检查主题和核心观点；"
+            "启用新颖性检查时，duplicate 或 uncertain 必须换题。"
         )
     lines.append(
         '每条完成后调用 save_draft 保存到草稿箱，参数必须使用 '
         'status="drafting"、draft_type="x"。'
     )
+    lines.append(ADOPTED_ASSET_INSTRUCTION)
     lines.append(
-        "仅在 save_draft 成功并返回真实草稿 id 后，调用 "
-        "record_content_usage 记录该草稿实际使用的素材。"
+        "save_draft 返回 saved=false 时根据冲突证据换题后重写；"
+        "定时任务不得使用 novelty_override_token。"
     )
     extra = str(rule.get("instructions") or "").strip()
     if extra:

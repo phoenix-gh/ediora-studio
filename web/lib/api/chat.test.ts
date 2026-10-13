@@ -146,7 +146,7 @@ describe('chat API client', () => {
     await streamChatReply({
       sessionId: 7,
       messages: [],
-      approval: { messageId: 15, toolCallId: 'call-1', approvalId: 'approval-1', approved: true },
+      approval: { runId: 'run-1', toolCallId: 'call-1', approvalId: 'approval-1', approved: true },
       onEvent: () => undefined,
     })
 
@@ -154,7 +154,35 @@ describe('chat API client', () => {
       body: JSON.stringify({
         sessionId: 7,
         messages: [],
-        approval: { messageId: 15, toolCallId: 'call-1', approvalId: 'approval-1', approved: true },
+        approval: { runId: 'run-1', toolCallId: 'call-1', approvalId: 'approval-1', approved: true },
+      }),
+    }))
+  })
+
+  it('sends the selected model and reasoning effort', async () => {
+    const encoder = new TextEncoder()
+    const fetchMock = vi.fn().mockResolvedValue(new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode('data: [DONE]\n\n'))
+        controller.close()
+      },
+    }), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await streamChatReply({
+      sessionId: 7,
+      messages: [{ id: 'user-1', role: 'user', parts: [{ type: 'text', text: '你好' }] }],
+      model: 'gpt-deep',
+      reasoningEffort: 'high',
+      onEvent: () => undefined,
+    })
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/chat', expect.objectContaining({
+      body: JSON.stringify({
+        sessionId: 7,
+        messages: [{ id: 'user-1', role: 'user', parts: [{ type: 'text', text: '你好' }] }],
+        model: 'gpt-deep',
+        reasoningEffort: 'high',
       }),
     }))
   })

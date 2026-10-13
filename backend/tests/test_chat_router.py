@@ -213,6 +213,160 @@ def test_create_session_append_message_and_get_messages_in_chronological_order(c
     }]
 
 
+def test_internal_chat_run_api_persists_checkpoint_and_approval(client):
+    headers = {"X-Worker-Token": "test-worker-token-at-least-32-characters"}
+    session_id = client.post("/api/chat/sessions", json={}).json()["id"]
+    user_message = client.post(
+        f"/api/chat/sessions/{session_id}/messages",
+        json={"role": "user", "text": "write", "parts": [{"type": "text", "text": "write"}]},
+    ).json()
+
+    denied = client.post(
+        f"/api/chat/sessions/{session_id}/runs",
+        json={"user_message_id": user_message["id"], "objective": "write"},
+    )
+    assert denied.status_code == 403
+
+    created = client.post(
+        f"/api/chat/sessions/{session_id}/runs",
+        headers=headers,
+        json={"user_message_id": user_message["id"], "objective": "write"},
+    )
+    assert created.status_code == 201, created.text
+    run_id = created.json()["id"]
+    assert created.json()["status"] == "preparing"
+
+    frozen = client.put(
+        f"/api/chat/sessions/{session_id}/runs/{run_id}/preparation",
+        headers=headers,
+        json={
+            "expected_version": 0,
+            "skill_invocation": {"name": "writing-plan", "activation": "manual"},
+            "validated_plan": {"steps": [{"id": "step-1"}]},
+            "capability_snapshot": {"tools": [{"name": "save_draft"}]},
+        },
+    )
+    assert frozen.status_code == 200, frozen.text
+    assert frozen.json()["checkpoint_version"] == 1
+
+    appended = client.post(
+        f"/api/chat/sessions/{session_id}/runs/{run_id}/steps",
+        headers=headers,
+        json={
+            "expected_version": 1,
+            "assistant_content": [
+                {"type": "reasoning", "text": "research then save"},
+                {"type": "tool-call", "toolCallId": "call-read", "toolName": "fetch_url", "input": {"url": "https://example.com"}},
+                {"type": "tool-call", "toolCallId": "call-1", "toolName": "save_draft", "input": {"title": "draft"}},
+            ],
+            "tool_calls": [{
+                "tool_call_id": "call-read",
+                "tool_name": "fetch_url",
+                "input_data": {"url": "https://example.com"},
+                "status": "succeeded",
+                "output_data": {"content": "evidence"},
+            }, {
+                "tool_call_id": "call-1",
+                "tool_name": "save_draft",
+                "input_data": {"title": "draft"},
+                "approval_id": "approval-1",
+                "side_effecting": True,
+            }],
+        },
+    )
+    assert appended.status_code == 201, appended.text
+    assert appended.json()["status"] == "waiting_approval"
+
+    checkpoint = client.get(
+        f"/api/chat/sessions/{session_id}/runs/{run_id}", headers=headers
+    )
+    assert checkpoint.status_code == 200
+    assert checkpoint.json()["run"]["skill_invocation"]["name"] == "writing-plan"
+    calls = {call["tool_call_id"]: call for call in checkpoint.json()["tool_calls"]}
+    assert calls["call-read"]["status"] == "succeeded"
+    assert calls["call-read"]["output_data"] == {"content": "evidence"}
+    assert calls["call-1"]["input_data"] == {"title": "draft"}
+
+    approved = client.post(
+        f"/api/chat/sessions/{session_id}/runs/{run_id}/approvals/approval-1",
+        headers=headers,
+        json={"tool_call_id": "call-1", "approved": True},
+    )
+    assert approved.status_code == 200, approved.text
+    assert approved.json()["run_status"] == "resuming"
+
+    completed = client.put(
+        f"/api/chat/sessions/{session_id}/runs/{run_id}/tool-calls/call-1/result",
+        headers=headers,
+        json={"status": "succeeded", "output_data": {"saved": True, "id": 862}},
+    )
+    assert completed.status_code == 200, completed.text
+    assert completed.json()["output_data"] == {"saved": True, "id": 862}
+
+
+def test_chat_run_api_rejects_stale_cross_session_and_legacy_approval(client):
+    headers = {"X-Worker-Token": "test-worker-token-at-least-32-characters"}
+    session_id = client.post("/api/chat/sessions", json={}).json()["id"]
+    other_session_id = client.post("/api/chat/sessions", json={}).json()["id"]
+    user_message_id = client.post(
+        f"/api/chat/sessions/{session_id}/messages",
+        json={"role": "user", "text": "write", "parts": []},
+    ).json()["id"]
+    run_id = client.post(
+        f"/api/chat/sessions/{session_id}/runs", headers=headers,
+        json={"user_message_id": user_message_id, "objective": "write"},
+    ).json()["id"]
+
+    stale = client.put(
+        f"/api/chat/sessions/{session_id}/runs/{run_id}/preparation",
+        headers=headers,
+        json={
+            "expected_version": 99,
+            "skill_invocation": None,
+            "validated_plan": {},
+            "capability_snapshot": {},
+        },
+    )
+    assert stale.status_code == 409
+
+    cross_session = client.get(
+        f"/api/chat/sessions/{other_session_id}/runs/{run_id}", headers=headers
+    )
+    assert cross_session.status_code == 404
+
+    legacy = client.post(
+        f"/api/chat/sessions/{session_id}/runs/missing/approvals/legacy",
+        headers=headers,
+        json={"tool_call_id": "old-call", "approved": True},
+    )
+    assert legacy.status_code == 409
+
+
+def test_assistant_message_projection_exposes_chat_run_id(client):
+    headers = {"X-Worker-Token": "test-worker-token-at-least-32-characters"}
+    session_id = client.post("/api/chat/sessions", json={}).json()["id"]
+    user_message_id = client.post(
+        f"/api/chat/sessions/{session_id}/messages",
+        json={"role": "user", "text": "write", "parts": []},
+    ).json()["id"]
+    run_id = client.post(
+        f"/api/chat/sessions/{session_id}/runs", headers=headers,
+        json={"user_message_id": user_message_id, "objective": "write"},
+    ).json()["id"]
+    assistant = client.post(
+        f"/api/chat/sessions/{session_id}/messages",
+        json={"role": "assistant", "text": "pending", "parts": []},
+    ).json()
+
+    patched = client.patch(
+        f"/api/chat/sessions/{session_id}/messages/{assistant['id']}",
+        json={"parts": [{"type": "data-chat-run", "status": "waiting_approval"}], "run_id": run_id},
+    )
+
+    assert patched.status_code == 200, patched.text
+    assert patched.json()["run_id"] == run_id
+
+
 def test_session_detail_reports_an_active_chat_turn(client):
     session_id = client.post("/api/chat/sessions", json={"title": "运行中的会话"}).json()["id"]
     from models import AgentLogEvent
@@ -263,6 +417,26 @@ def test_delete_session_removes_its_messages(client):
     assert deleted.status_code == 204
     assert client.get(f"/api/chat/sessions/{session_id}").status_code == 404
     assert client.get("/api/chat/sessions").json() == []
+
+
+def test_delete_session_removes_durable_chat_runs_before_their_messages(client):
+    session_id = client.post("/api/chat/sessions", json={"title": "checkpoint"}).json()["id"]
+    user_message_id = client.post(
+        f"/api/chat/sessions/{session_id}/messages",
+        json={"role": "user", "parts": [{"type": "text", "text": "write"}], "text": "write"},
+    ).json()["id"]
+    headers = {"X-Worker-Token": "test-worker-token-at-least-32-characters"}
+    created_run = client.post(
+        f"/api/chat/sessions/{session_id}/runs",
+        json={"user_message_id": user_message_id, "objective": "write"},
+        headers=headers,
+    )
+    assert created_run.status_code == 201
+
+    deleted = client.delete(f"/api/chat/sessions/{session_id}")
+
+    assert deleted.status_code == 204
+    assert client.get(f"/api/chat/sessions/{session_id}").status_code == 404
 
 
 def test_delete_missing_session_returns_404(client):

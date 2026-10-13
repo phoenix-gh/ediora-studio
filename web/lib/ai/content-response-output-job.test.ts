@@ -1,9 +1,13 @@
 import { describe, expect, it, vi } from 'vitest'
 
+import { createScriptedCodexPeer } from '../../test/codex-jsonl-peer'
+import { CODEX_THREAD_CWD } from './codex-app-server'
+import { runCodexAgentTurn } from './codex-app-server-client'
 import type { AgentToolAudit } from './agent-runtime-types'
 import {
   buildResponseArticleAgentObjective,
   outputInstructions,
+  responseArticleCompletionEvidenceFromAudit,
   runContentResponseOutputJob,
   type ContentResponseOutputAgentJobDependencies,
   type ResponseArticleContext,
@@ -31,12 +35,18 @@ const context: ResponseArticleContext = {
   },
 }
 
-const jobCapabilitySnapshot = {
-  schemaVersion: 1 as const,
-  mode: 'job' as const,
-  skill: null,
-  tools: [],
-  policy: { approvalPolicy: 'automatic' as const, allowedToolNames: null },
+function saveDraftItem(output: unknown) {
+  return {
+    type: 'mcpToolCall',
+    id: 'save-1',
+    server: 'ediora',
+    tool: 'save_draft',
+    status: 'completed',
+    arguments: {
+      topic_id: 'response:27', status: 'drafting', draft_type: 'article',
+    },
+    result: output,
+  }
 }
 
 function dependencies(toolOutput?: unknown): ContentResponseOutputAgentJobDependencies {
@@ -51,7 +61,6 @@ function dependencies(toolOutput?: unknown): ContentResponseOutputAgentJobDepend
       input: { response_output_id: 55 }, steps: [],
     }),
     getContext: vi.fn().mockResolvedValue(context),
-    loadModel: vi.fn().mockResolvedValue({}),
     ensureExecution: vi.fn().mockResolvedValue(execution),
     checkpointExecution: vi.fn().mockImplementation(async (_jobId, _id, version, update) => ({
       ...execution, version: version + 1, phase: update.phase,
@@ -74,33 +83,13 @@ function dependencies(toolOutput?: unknown): ContentResponseOutputAgentJobDepend
       id: 55, status: 'draft_ready', article_draft_id: 123,
     }),
     apiRoot: () => 'http://api.test',
-    openRuntime: vi.fn().mockImplementation(async options => ({
-      tools: {},
-      catalogContext: 'Enabled Skills available for automatic activation:',
-      selectedSkill: undefined,
-      prepare: vi.fn(),
-      snapshot: () => ({ referenceCount: 0, readReferenceCount: 0 }),
-      activeContext: () => undefined,
-      capabilitySnapshot: () => jobCapabilitySnapshot,
-      readReferences: vi.fn(),
-      close: vi.fn(),
-      run: vi.fn().mockImplementation(async request => {
-        await request.onStep?.({ phase: 'execute', parts: [] })
-        if (toolOutput !== undefined) {
-          const started: AgentToolAudit = {
-            toolName: 'save_draft', toolCallId: 'save-1',
-            sideEffecting: true, autoApproved: true, status: 'started',
-            inputSummary: {
-              topic_id: 'response:27', status: 'drafting', draft_type: 'article',
-            }, occurredAt: '2026-08-07T00:00:00Z',
-          }
-          const decision = await options.beforeToolExecute?.(started)
-          if (decision && decision.action !== 'execute') throw new Error(decision.error)
-          await options.onToolAudit?.({ ...started, status: 'succeeded', output: toolOutput })
-        }
-        return { kind: 'completed', text: '普通模型文本', parts: [], revisionCount: 0 }
-      }),
-    })),
+    runAgentTurn: vi.fn(async options => {
+      const peer = createScriptedCodexPeer({
+        agentText: '普通模型文本',
+        completedItems: toolOutput === undefined ? [] : [saveDraftItem(toolOutput)],
+      })
+      return runCodexAgentTurn({ ...options, transport: peer.transport })
+    }),
   }
 }
 
@@ -115,6 +104,25 @@ describe('content response output instructions', () => {
 })
 
 describe('content response Agent writing job', () => {
+  it('does not treat a novelty conflict with an id-shaped payload as saved', () => {
+    expect(responseArticleCompletionEvidenceFromAudit({
+      toolName: 'save_draft',
+      toolCallId: 'save-conflict',
+      sideEffecting: true,
+      autoApproved: true,
+      status: 'succeeded',
+      inputSummary: {},
+      occurredAt: '2026-08-27T00:00:00Z',
+      output: {
+        saved: false,
+        id: 999,
+        title: '不应采用',
+        status: 'drafting',
+        novelty: { decision: 'duplicate' },
+      },
+    }, { responseItemId: 27 })).toBeNull()
+  })
+
   it.each([
     ['x_short_post', 'X 短帖', 'x'],
     ['x_article', 'X Article', 'x_article'],
@@ -159,7 +167,7 @@ describe('content response Agent writing job', () => {
   it('links the real draft returned by save_draft after Agent execution', async () => {
     const deps = dependencies({
       structuredContent: { result: {
-        id: 123, title: '完整文章', status: 'drafting',
+        saved: true, id: 123, title: '完整文章', status: 'drafting',
         created_at: '2026-08-07T00:00:00Z',
       } },
     })
@@ -172,13 +180,13 @@ describe('content response Agent writing job', () => {
     expect(deps.completeExecution).toHaveBeenCalledWith(19, 41, expect.objectContaining({
       toolName: 'save_draft', draftId: 123, responseItemId: 27,
     }))
-    expect(deps.openRuntime).toHaveBeenCalledWith(expect.objectContaining({
-      mode: 'job', policyProfile: 'response-writing',
+    expect(deps.runAgentTurn).toHaveBeenCalledWith(expect.objectContaining({
+      approvalPolicy: 'never',
+      cwd: CODEX_THREAD_CWD,
     }))
     expect(deps.checkpointExecution).toHaveBeenLastCalledWith(
       19, 41, expect.any(Number), expect.objectContaining({
         phase: 'finalizing',
-        audit: expect.objectContaining({ capabilities: jobCapabilitySnapshot }),
       }),
     )
   })
@@ -186,7 +194,7 @@ describe('content response Agent writing job', () => {
   it('records the response-writing Agent session lifecycle', async () => {
     const deps = dependencies({
       structuredContent: { result: {
-        id: 123, title: '完整文章', status: 'drafting',
+        saved: true, id: 123, title: '完整文章', status: 'drafting',
         created_at: '2026-08-07T00:00:00Z',
       } },
     })
@@ -208,45 +216,19 @@ describe('content response Agent writing job', () => {
     ])
   })
 
-  it('rejects a retry before Agent execution when the pinned capabilities drift', async () => {
-    const deps = dependencies({
-      structuredContent: { result: {
-        id: 123, title: '完整文章', status: 'drafting',
-        created_at: '2026-08-07T00:00:00Z',
-      } },
-    })
-    vi.mocked(deps.ensureExecution).mockResolvedValue({
-      id: 41, job_id: 19, status: 'running', objective: 'pending',
-      skill_mode: 'auto', skill_name: null, phase: 'finalizing', version: 3,
-      checkpoint: {}, audit: {}, completion_evidence: {},
-      capability_pin: {
-        ...jobCapabilitySnapshot,
-        tools: [{
-          name: 'new_tool', description: '', inputSchemaDigest: null,
-          sideEffecting: false, needsApproval: false, replayPolicy: 'replayable',
-          concurrencyPolicy: 'serialized', idempotencyPolicy: 'unknown',
-        }],
-      },
-    })
-
-    await expect(runContentResponseOutputJob(19, deps))
-      .rejects.toThrow('Agent capability drift detected: tools')
-    expect(deps.failStep).toHaveBeenCalledWith(19, 71, expect.any(Error), false)
-  })
-
   it('recovers a persisted save_draft call without rerunning the Agent', async () => {
     const deps = dependencies()
     vi.mocked(deps.listToolCalls).mockResolvedValue([{
       tool_call_id: 'save-before-restart', tool_name: 'save_draft', status: 'succeeded',
       output: { structuredContent: { result: {
+        // Historical save_draft results predate the explicit saved flag.
         id: 123, title: '完整文章', status: 'drafting',
       } } },
     }])
 
     await runContentResponseOutputJob(19, deps)
 
-    expect(deps.loadModel).not.toHaveBeenCalled()
-    expect(deps.openRuntime).not.toHaveBeenCalled()
+    expect(deps.runAgentTurn).not.toHaveBeenCalled()
     expect(deps.linkDraft).toHaveBeenCalledWith(19, 55, 123)
     expect(deps.completeJob).toHaveBeenCalledWith(19)
   })
@@ -268,8 +250,7 @@ describe('content response Agent writing job', () => {
     await runContentResponseOutputJob(19, deps)
 
     expect(deps.getContext).not.toHaveBeenCalled()
-    expect(deps.loadModel).not.toHaveBeenCalled()
-    expect(deps.openRuntime).not.toHaveBeenCalled()
+    expect(deps.runAgentTurn).not.toHaveBeenCalled()
     expect(deps.startStep).toHaveBeenCalledWith(19, 'link_draft')
     expect(deps.linkDraft).toHaveBeenCalledWith(19, 55, 123)
   })

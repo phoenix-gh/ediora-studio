@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import desc, select
+from sqlalchemy import desc, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models import (
@@ -64,6 +64,82 @@ def creative_asset_search_score(asset: CreativeAsset, query: str) -> int:
     return sum(keyword in searchable for keyword in keywords)
 
 
+def adoption_cutoff(
+    lookback_days: int,
+    now: datetime | None = None,
+) -> datetime | None:
+    """Assets adopted at or after this instant are still inside the window."""
+    try:
+        days = int(lookback_days)
+    except (TypeError, ValueError):
+        return None
+    if days <= 0:
+        return None
+    days = min(days, 90)
+    reference = now or datetime.now(timezone.utc)
+    if reference.tzinfo is None:
+        reference = reference.replace(tzinfo=timezone.utc)
+    return reference.astimezone(timezone.utc) - timedelta(days=days)
+
+
+def not_recently_adopted(
+    lookback_days: int,
+    now: datetime | None = None,
+    *,
+    asset: type[CreativeAsset] = CreativeAsset,
+):
+    """SQL clause that keeps assets outside the adoption window.
+
+    Pass the same mapped class the SELECT uses. A reloaded model registry
+    has another table object with the same name, and mixing them makes
+    PostgreSQL reject the statement as a duplicate alias.
+    """
+    cutoff = adoption_cutoff(lookback_days, now)
+    if cutoff is None:
+        return None
+    adopted_at = asset.last_adopted_at
+    return or_(adopted_at.is_(None), adopted_at < cutoff)
+
+
+async def mark_assets_adopted(
+    session: AsyncSession,
+    asset_ids: list[int] | None,
+    *,
+    now: datetime | None = None,
+) -> None:
+    """Stamp last_adopted_at. A missing id raises so the draft can roll back."""
+    ids: list[int] = []
+    for raw in asset_ids or []:
+        try:
+            asset_id = int(raw)
+        except (TypeError, ValueError) as error:
+            raise ValueError("Creative asset id is invalid") from error
+        if asset_id <= 0:
+            raise ValueError(f"Creative asset {asset_id} not found")
+        if asset_id not in ids:
+            ids.append(asset_id)
+    if not ids:
+        return
+    if len(ids) > 50:
+        raise ValueError("asset_ids must contain at most 50 items")
+    reference = now or datetime.now(timezone.utc)
+    if reference.tzinfo is None:
+        reference = reference.replace(tzinfo=timezone.utc)
+    reference = reference.astimezone(timezone.utc)
+    assets = (
+        await session.execute(
+            select(CreativeAsset).where(CreativeAsset.id.in_(ids))
+        )
+    ).scalars().all()
+    found = {asset.id for asset in assets}
+    missing = next((asset_id for asset_id in ids if asset_id not in found), None)
+    if missing is not None:
+        raise ValueError(f"Creative asset {missing} not found")
+    for asset in assets:
+        asset.last_adopted_at = reference
+    await session.flush()
+
+
 async def list_creative_asset_candidates(
     session: AsyncSession,
     *,
@@ -72,8 +148,13 @@ async def list_creative_asset_candidates(
     directory: str = "",
     query: str = "",
     limit: int = 50,
+    lookback_days: int = 0,
+    now: datetime | None = None,
 ) -> list[dict]:
-    """Return compact candidate evidence without leaking full asset bodies."""
+    """Return compact candidate evidence without leaking full asset bodies.
+
+    lookback_days above zero omits assets adopted inside that window.
+    """
     normalized_type = asset_type.strip().lower()
     if normalized_type not in {"article", "media"}:
         raise ValueError("asset_type must be 'article' or 'media'")
@@ -89,9 +170,13 @@ async def list_creative_asset_candidates(
             CreativeAsset.asset_type == normalized_type,
             CreativeAsset.directory.in_(normalized_directories),
         )
-        .order_by(desc(CreativeAsset.updated_at), desc(CreativeAsset.id))
-        .limit(500)
     )
+    available = not_recently_adopted(lookback_days, now)
+    if available is not None:
+        statement = statement.where(available)
+    statement = statement.order_by(
+        desc(CreativeAsset.updated_at), desc(CreativeAsset.id)
+    ).limit(500)
     assets = (await session.execute(statement)).scalars().all()
 
     scored_assets = [
@@ -114,61 +199,6 @@ async def list_creative_asset_candidates(
         }
         for asset, _score in scored_assets
     ][:take]
-
-
-async def get_recent_content_usage(
-    session: AsyncSession,
-    *,
-    lookback_days: int,
-    output_type: str,
-    rule_id: int | None = None,
-    account_id: str | None = None,
-    limit: int = 100,
-    now: datetime | None = None,
-) -> list[dict]:
-    """Return global usage history unless the caller explicitly narrows it."""
-    days = _bounded(
-        lookback_days, name="lookback_days", minimum=1, maximum=90
-    )
-    take = _bounded(limit, name="limit", minimum=1, maximum=100)
-    normalized_output_type = output_type.strip()
-    if not normalized_output_type:
-        raise ValueError("output_type is required")
-    reference = now or datetime.now(timezone.utc)
-    if reference.tzinfo is None:
-        reference = reference.replace(tzinfo=timezone.utc)
-    since = reference.astimezone(timezone.utc) - timedelta(days=days)
-
-    statement = select(ContentUsageLedger).where(
-        ContentUsageLedger.output_type == normalized_output_type,
-        ContentUsageLedger.created_at >= since,
-    )
-    if rule_id is not None:
-        statement = statement.where(ContentUsageLedger.rule_id == rule_id)
-    if account_id is not None:
-        statement = statement.where(ContentUsageLedger.account_id == account_id)
-    rows = (
-        await session.execute(
-            statement.order_by(
-                desc(ContentUsageLedger.created_at),
-                desc(ContentUsageLedger.id),
-            ).limit(take)
-        )
-    ).scalars().all()
-    return [
-        {
-            "id": row.id,
-            "asset_id": row.creative_asset_id,
-            "rule_name": row.rule_name or "",
-            "topic": row.topic or "",
-            "angle": row.angle or "",
-            "excerpt": row.excerpt or "",
-            "reuse_decision": row.reuse_decision or "fresh",
-            "reuse_explanation": row.reuse_explanation or "",
-            "created_at": _isoformat(row.created_at),
-        }
-        for row in rows
-    ]
 
 
 def _isoformat(value: datetime | None) -> str:
@@ -205,7 +235,15 @@ def snapshot_creation_rule(rule: DailyCreationRule) -> dict:
         "prompt": rule.prompt,
         "skill_mode": rule.skill_mode or "auto",
         "skill_name": rule.skill_name,
+        "codex_model": _stored_codex_value(rule.codex_model),
+        "codex_reasoning_effort": _stored_codex_value(rule.codex_reasoning_effort),
     }
+
+
+def _stored_codex_value(value: str | None) -> str | None:
+    """Blank task settings follow the system Codex model and effort."""
+    text = str(value or "").strip()
+    return text or None
 
 
 async def create_daily_creation_run(
@@ -364,51 +402,5 @@ async def persist_x_draft_with_usage(
         ))
         session.add(usage)
         await session.flush()
+        await mark_assets_adopted(session, [asset.id])
     return draft, usage
-
-
-async def record_content_usage(
-    session: AsyncSession, *, run_id: int, asset_id: int, output_kind: str,
-    output_id: int, topic: str, angle: str, excerpt: str,
-    reuse_decision: str, reuse_explanation: str = "", account_id: str | None = None,
-) -> ContentUsageLedger:
-    if output_kind != "draft":
-        raise ValueError("output_kind must be 'draft'")
-    existing = await session.scalar(
-        select(ContentUsageLedger).where(
-            ContentUsageLedger.run_id == run_id,
-            ContentUsageLedger.output_kind == output_kind,
-            ContentUsageLedger.output_id == output_id,
-        ).limit(1)
-    )
-    if existing is not None:
-        if existing.creative_asset_id != asset_id:
-            raise ValueError("Persisted output usage was already recorded for another asset")
-        return existing
-    creation_run = await session.get(DailyCreationRun, run_id)
-    if creation_run is None:
-        raise ValueError(f"Daily creation run {run_id} not found")
-    asset = await session.get(CreativeAsset, asset_id)
-    if asset is None:
-        raise ValueError(f"Creative asset {asset_id} not found")
-    output = await session.get(ArticleDraft, output_id)
-    if output is None:
-        raise ValueError(f"Persisted draft {output_id} not found")
-    snapshot = creation_run.rule_snapshot or {}
-    usage_snapshot = {
-        "name": snapshot.get("name", ""),
-        "output_type": (
-            "x_short_post" if output.draft_type == "x"
-            else output.draft_type or "article"
-        ),
-    }
-    usage = ContentUsageLedger(**_usage_values(
-        creation_run=creation_run, asset=asset, snapshot=usage_snapshot,
-        output_kind="draft", output_id=output_id, draft_id=output_id,
-        account_id=account_id,
-        topic=topic, angle=angle, excerpt=excerpt, reuse_decision=reuse_decision,
-        reuse_explanation=reuse_explanation,
-    ))
-    session.add(usage)
-    await session.flush()
-    return usage
