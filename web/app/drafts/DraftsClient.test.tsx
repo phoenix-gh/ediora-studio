@@ -102,6 +102,37 @@ vi.mock('sonner', () => ({
 
 import { DraftsClient } from './DraftsClient'
 
+describe('DraftsClient toolbar', () => {
+  it('marks a draft dirty only while its current content differs from the saved content', async () => {
+    render(<DraftsClient initialDrafts={[draftA, draftB]} initialTopics={[]} />)
+    const editor = screen.getByLabelText('草稿正文')
+    fireEvent.change(editor, { target: { value: draftA.content } })
+    expect(screen.getByRole('button', { name: '保存' })).toBeDisabled()
+    expect(screen.queryByText('有未保存修改')).toBeNull()
+    fireEvent.change(editor, { target: { value: '实际修改的正文' } })
+    expect(screen.getByRole('button', { name: '保存' })).toBeEnabled()
+    expect(screen.getByText('有未保存修改')).toBeTruthy()
+    fireEvent.change(editor, { target: { value: draftA.content } })
+    expect(screen.getByRole('button', { name: '保存' })).toBeDisabled()
+    expect(screen.queryByText('有未保存修改')).toBeNull()
+    fireEvent.click(screen.getByText('草稿 B').closest('button')!)
+    expect(screen.queryByText('有未保存的修改')).toBeNull()
+    expect(screen.getByPlaceholderText('标题…')).toHaveValue('草稿 B')
+  })
+
+  it('omits AI writing, inspiration, and workflow actions while keeping editing actions', () => {
+    render(<DraftsClient initialDrafts={[draftA]} initialTopics={[]} />)
+    expect(screen.queryByRole('button', { name: 'AI 写作' })).toBeNull()
+    expect(screen.queryByRole('button', { name: /灵感/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: '工作流' })).toBeNull()
+    expect(screen.queryByText('AI 写作助手')).toBeNull()
+    expect(screen.getByRole('button', { name: '素材' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '发布' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: '保存' })).toBeTruthy()
+    expect(screen.getByLabelText('草稿正文')).toBeTruthy()
+  })
+})
+
 function makeDraft(id: number, title: string, content: string, version: number): Draft {
   return {
     id,
@@ -303,24 +334,14 @@ describe('DraftsClient async response identity', () => {
     mocks.getDraftImages
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([refreshedImage])
-    localStorageStub.setItem(
-      `wms-chat-${draftA.id}`,
-      JSON.stringify({
-        history: [{ role: 'assistant', content: '保留的会话' }],
-        sessionName: '测试会话',
-        pending: null,
-      }),
-    )
     render(
       <DraftsClient
         initialDrafts={[draftA]}
         initialTopics={[]}
         initialDraftId={draftA.id}
-        initialChatOpen
       />,
     )
 
-    expect(screen.getByText('保留的会话')).toBeTruthy()
     fireEvent.change(screen.getByLabelText('草稿正文'), {
       target: { value: 'A 本地修改' },
     })
@@ -333,7 +354,6 @@ describe('DraftsClient async response identity', () => {
 
     expect((screen.getByPlaceholderText('标题…') as HTMLInputElement).value).toBe('草稿 A 已保存')
     expect((screen.getByLabelText('草稿正文') as HTMLTextAreaElement).value).toBe('A 服务端正文')
-    expect(screen.getByText('保留的会话')).toBeTruthy()
     expect(mocks.getDraftImages).toHaveBeenCalledTimes(2)
     expect(mocks.getDraftImages).toHaveBeenNthCalledWith(2, draftA.id)
     expect(await screen.findByRole('button', { name: /素材\s*1/ })).toBeTruthy()
@@ -342,41 +362,7 @@ describe('DraftsClient async response identity', () => {
     expect((screen.getByLabelText('草稿正文') as HTMLTextAreaElement).value).toBe('A 服务端正文')
   })
 
-  it('does not restore stale chat state when the active save response arrives', async () => {
-    const pendingSave = deferred<Draft>()
-    mocks.updateDraft.mockReturnValue(pendingSave.promise)
-    localStorageStub.setItem(
-      `wms-chat-${draftA.id}`,
-      JSON.stringify({
-        history: [{ role: 'assistant', content: '旧会话消息' }],
-        sessionName: '旧会话',
-        pending: null,
-      }),
-    )
-    render(
-      <DraftsClient
-        initialDrafts={[draftA]}
-        initialTopics={[]}
-        initialDraftId={draftA.id}
-        initialChatOpen
-      />,
-    )
 
-    fireEvent.change(screen.getByLabelText('草稿正文'), {
-      target: { value: 'A 本地修改' },
-    })
-    fireEvent.click(screen.getByRole('button', { name: '保存' }))
-    fireEvent.click(screen.getByRole('button', { name: '新对话' }))
-    expect(screen.queryByText('旧会话消息')).toBeNull()
-
-    await act(async () => {
-      pendingSave.resolve({ ...draftA, title: '草稿 A 已保存', content: 'A 服务端正文' })
-      await pendingSave.promise
-    })
-
-    expect(screen.queryByText('旧会话消息')).toBeNull()
-    expect(screen.getByText('可以说：')).toBeTruthy()
-  })
 })
 
 describe('DraftsClient independent draft selection', () => {

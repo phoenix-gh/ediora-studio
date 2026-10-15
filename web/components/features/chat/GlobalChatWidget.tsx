@@ -53,7 +53,8 @@ function clampPosition(position: FloatingChatPosition, size: FloatingChatSize, v
 }
 
 function isInteractiveTarget(target: EventTarget | null) {
-  return target instanceof HTMLElement && Boolean(target.closest('button, a, input, textarea, select, [role="button"]'))
+  if (!(target instanceof Element)) return false
+  return Boolean(target.closest('button, a, input, textarea, select, [role="button"], [data-slot="popover-content"]'))
 }
 
 function browserStorage(): Storage | null {

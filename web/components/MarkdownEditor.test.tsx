@@ -320,6 +320,7 @@ describe('MarkdownEditor', () => {
     const config = (globalThis as typeof globalThis & { __lastCrepeConfig: Record<string, unknown> }).__lastCrepeConfig
     expect(config.defaultValue).toBe('# 原文')
 
+    mocks.documentChangeListener?.()
     mocks.markdownListener?.(
       {},
       '正文\n\n![图](https://img.example/a.png "wms-import:pending")',
@@ -337,6 +338,35 @@ describe('MarkdownEditor', () => {
     await waitFor(() => expect(mocks.create).toHaveBeenCalled())
     mocks.markdownListener?.({}, '# 原文')
     expect(onChange).not.toHaveBeenCalled()
+  })
+
+  it('ignores serialized Markdown updates from focus or selection without a document change', async () => {
+    const onChange = vi.fn()
+    render(<MarkdownEditor documentKey={7} onChange={onChange} value="原文" />)
+    await waitFor(() => expect(mocks.create).toHaveBeenCalled())
+    mocks.markdownListener?.({}, '原文\n')
+    expect(onChange).not.toHaveBeenCalled()
+    mocks.documentChangeListener?.()
+    mocks.markdownListener?.({}, '真正修改')
+    expect(onChange).toHaveBeenCalledExactlyOnceWith('真正修改')
+    mocks.markdownListener?.({}, '真正修改\n')
+    expect(onChange).toHaveBeenCalledTimes(1)
+  })
+
+  it('ignores an automatically appended empty paragraph and restores original Markdown on undo', async () => {
+    const onChange = vi.fn()
+    mocks.getMarkdown.mockReturnValueOnce('\\[原文]\\\n第二行\n')
+    render(<MarkdownEditor documentKey={7} onChange={onChange} value={'[原文]  \n第二行'} />)
+    await waitFor(() => expect(mocks.create).toHaveBeenCalled())
+    mocks.documentChangeListener?.()
+    mocks.markdownListener?.({}, '\\[原文]\\\n第二行\n\n')
+    expect(onChange).not.toHaveBeenCalled()
+    mocks.documentChangeListener?.()
+    mocks.markdownListener?.({}, '\\[原文]\\\n第二行修改\n')
+    expect(onChange).toHaveBeenLastCalledWith('\\[原文]\\\n第二行修改\n')
+    mocks.documentChangeListener?.()
+    mocks.markdownListener?.({}, '\\[原文]\\\n第二行\n\n')
+    expect(onChange).toHaveBeenLastCalledWith('[原文]  \n第二行')
   })
 
   it('emits a document change after initialization has settled', async () => {

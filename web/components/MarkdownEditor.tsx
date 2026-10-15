@@ -79,7 +79,9 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
   const sessionRef = useRef(0)
   const documentChangeCountRef = useRef(0)
   const initializedDocumentChangeCountRef = useRef<number | null>(null)
-  const suppressInitialChangeRef = useRef(false)
+  const initialSerializedMarkdownRef = useRef('')
+  const lastSerializedMarkdownRef = useRef('')
+  const originalMarkdownRef = useRef(value)
   const pendingInsertionsRef = useRef<string[]>([])
   const remoteImagesRef = useRef(new Map<string, ClipboardRemoteImage>())
   const retryRef = useRef<(id: string) => void>(() => undefined)
@@ -115,6 +117,7 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
 
   const publishMarkdown = useCallback((markdown: string) => {
     const cleaned = stripImageImportMarkers(markdown)
+    if (cleaned === latestMarkdownRef.current) return
     latestMarkdownRef.current = cleaned
     onChangeRef.current(cleaned)
   }, [])
@@ -233,7 +236,6 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
     sessionRef.current = session
     documentChangeCountRef.current = 0
     initializedDocumentChangeCountRef.current = null
-    suppressInitialChangeRef.current = false
     let active = true
     let ownedCrepe: CrepeInstance | null = null
     const remoteImages = remoteImagesRef.current
@@ -289,12 +291,18 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
             if (!active || sessionRef.current !== session) return
             const initializedDocumentChangeCount = initializedDocumentChangeCountRef.current
             if (initializedDocumentChangeCount === null) return
-            if (suppressInitialChangeRef.current) {
-              if (documentChangeCountRef.current <= initializedDocumentChangeCount) return
-              suppressInitialChangeRef.current = false
-            }
+            if (documentChangeCountRef.current <= initializedDocumentChangeCount) return
+            initializedDocumentChangeCountRef.current = documentChangeCountRef.current
             if (modeRef.current === 'source') return
-            publishMarkdown(markdown)
+            // Crepe can append an empty paragraph on focus. Compare its own
+            // serialization so escaping and trailing editor scaffolding do not
+            // turn the original Markdown into an unsaved edit.
+            const serialized = stripImageImportMarkers(markdown).trimEnd()
+            if (serialized === lastSerializedMarkdownRef.current) return
+            lastSerializedMarkdownRef.current = serialized
+            publishMarkdown(serialized === initialSerializedMarkdownRef.current
+              ? originalMarkdownRef.current
+              : markdown)
           })
         })
         await crepe.create()
@@ -303,7 +311,10 @@ export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorPro
           return
         }
         initializedDocumentChangeCountRef.current = documentChangeCountRef.current
-        suppressInitialChangeRef.current = documentChangeCountRef.current > 0
+        originalMarkdownRef.current = initialValueRef.current
+        const serialized = stripImageImportMarkers(crepe.getMarkdown()).trimEnd()
+        initialSerializedMarkdownRef.current = serialized
+        lastSerializedMarkdownRef.current = serialized
         crepeRef.current = crepe
         insertRef.current = insert
         replaceAllRef.current = replaceAll
